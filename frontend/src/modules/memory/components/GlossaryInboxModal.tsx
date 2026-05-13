@@ -245,48 +245,6 @@ const GlossaryGroupCards = ({
   </div>
 );
 
-const getActionModeLabel = (mode: GlossaryInboxActionMode, conflictWord: string) => {
-  if (mode === "reject") {
-    return "放弃该词";
-  }
-  if (mode === "merge") {
-    return `先合并若干个词，然后将${conflictWord}作为别名加入`;
-  }
-  if (mode === "create") {
-    return "新建一个专有名词";
-  }
-  return `选择1到多个词，将${conflictWord}作为别名加入`;
-};
-
-const GlossaryTermBubble = ({
-  asset,
-  term,
-}: {
-  asset: GlossaryAsset;
-  term?: string;
-}) => {
-  const displayTerm = term || asset.term;
-
-  return (
-    <Tooltip
-      title={
-        <div className="memory-glossary-term-tooltip">
-          <div>
-            <span>词</span>
-            <strong>{displayTerm || "-"}</strong>
-          </div>
-          <div>
-            <span>描述</span>
-            <strong>{asset.content || "-"}</strong>
-          </div>
-        </div>
-      }
-    >
-      <span className="memory-glossary-term-chip">{displayTerm || "-"}</span>
-    </Tooltip>
-  );
-};
-
 export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
   const {
     t,
@@ -536,112 +494,22 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
         />
       ) : null}
 
-      {glossaryInboxLoading ? (
-        <div className="memory-glossary-inbox-loading" aria-live="polite">
-          <Spin />
-          <span>{t("common.loading")}</span>
-        </div>
-      ) : glossaryChangeProposals.length ? (
-        <div className="memory-glossary-inbox">
-          <div className="memory-glossary-inbox-list">
-            {glossaryChangeProposals.map((proposal, index) => {
-              const isMergeProposal = Boolean(proposal.mergeFrom?.length);
-              const conflictWord = getConflictWord(proposal);
-              const targetGroups = proposal.backendConflictGroups || [];
-              const proposalTypeText = isMergeProposal
-                ? t("admin.memoryGlossaryInboxTypeMerge")
-                : proposal.before
-                  ? t("admin.memoryGlossaryInboxTypeUpdate")
-                  : t("admin.memoryGlossaryInboxTypeAdd");
-              const actionMode = actionModeMap[proposal.id] || getDefaultResolution(proposal).mode;
-              const mergeStage = mergeStageMap[proposal.id] || "select";
-              const createStage = createStageMap[proposal.id] || "edit";
-              const activeResolution =
-                resolutionMap[proposal.id] || getDefaultResolution(proposal);
-              const mergeGroupIds = activeResolution.mergeGroupIds?.length
-                ? activeResolution.mergeGroupIds
-                : activeResolution.selectedGroupIds;
-              const mergeGroups =
-                activeResolution.mergeGroups?.filter((groupIds) => groupIds.length >= 2) ||
-                (mergeGroupIds.length >= 2 ? [mergeGroupIds] : []);
-              const mergeDrafts = syncMergeDraftsWithGroups(
-                proposal,
-                targetGroups,
-                activeResolution.mergeDrafts,
-                mergeGroups,
-              );
-              const mergeEditPageRaw = mergeEditPageMap[proposal.id] || 1;
-              const mergeEditPage = Math.min(
-                Math.max(mergeEditPageRaw, 1),
-                Math.max(mergeDrafts.length, 1),
-              );
-              const currentMergeDraft = mergeDrafts[mergeEditPage - 1];
-              const selectedMergeGroups = targetGroups.filter((group) =>
-                mergeGroupIds.includes(group.id),
-              );
-              const unmergedGroups = targetGroups.filter(
-                (group) => !mergeGroupIds.includes(group.id),
-              );
-              const isFullMerge =
-                selectedMergeGroups.length >= 2 && unmergedGroups.length === 0;
-              const canDirectConfirmMerge = isFullMerge && mergeDrafts.length === 1;
-              const mergedTargetGroups: GlossaryAsset[] = mergeDrafts.map((draft, draftIndex) => ({
-                ...proposal.after,
-                id: `${MERGED_GROUP_OPTION_ID_PREFIX}${draft.groupIds[0] || `group-${draftIndex}`}`,
-                term: draft.term || proposal.after.term,
-                aliases: draft.aliases,
-                content: draft.content,
-              }));
-              const mergedOptionIds = mergedTargetGroups.map((group) => group.id);
-              const validFinalGroupIds = new Set([
-                ...mergedOptionIds,
-                ...unmergedGroups.map((group) => group.id),
-              ]);
-              const finalWriteGroupIds = activeResolution.writeGroupIds?.length
-                ? activeResolution.writeGroupIds.filter((groupId) => validFinalGroupIds.has(groupId))
-                : mergedOptionIds;
-              const finalTargetGroups: GlossaryAsset[] = [
-                ...mergedTargetGroups,
-                ...unmergedGroups,
-              ];
-              const createDraft = {
-                term: (activeResolution.newGroupTerm || "").trim(),
-                aliases: activeResolution.newGroupAliases?.length
-                  ? activeResolution.newGroupAliases
-                  : proposal.after.aliases,
-                content: (activeResolution.newGroupContent ?? proposal.after.content).trim(),
-              };
-              const isCreateGroupInAliases = createDraft.aliases
-                .map((alias) => alias.trim())
-                .some((alias) => alias && alias === createDraft.term);
-              const isCreateContentSameAsTerm =
-                Boolean(createDraft.term) &&
-                Boolean(createDraft.content) &&
-                createDraft.term === createDraft.content;
-              const createWriteGroupIds = Array.from(
-                new Set([NEW_GROUP_OPTION_ID, ...(activeResolution.writeGroupIds || [])]),
-              );
-              const createTargetGroups: GlossaryAsset[] = [
-                {
-                  ...proposal.after,
-                  id: NEW_GROUP_OPTION_ID,
-                  term: createDraft.term || proposal.after.term,
-                  aliases: createDraft.aliases,
-                  content: createDraft.content,
-                },
-                ...targetGroups,
-              ];
-              const getMergeGroupIdsByColor = (nextColors: Record<string, string>) => {
-                const groupsByColor = new Map<string, string[]>();
-                targetGroups.forEach((group) => {
-                  const color = nextColors[group.id];
-                  if (!color) {
-                    return;
-                  }
-                  const current = groupsByColor.get(color) || [];
-                  current.push(group.id);
-                  groupsByColor.set(color, current);
-                });
+        {glossaryInboxLoading ? (
+          <div className="memory-glossary-inbox-loading">
+            <Spin />
+            <span>{t("common.loading")}</span>
+          </div>
+        ) : glossaryChangeProposals.length ? (
+          <div className="memory-glossary-inbox">
+            <div className="memory-glossary-inbox-list">
+              {glossaryChangeProposals.map((proposal) => {
+                const isMergeProposal = Boolean(proposal.mergeFrom?.length);
+                const targetGroups = proposal.backendConflictGroups || [];
+                const proposalTypeText = isMergeProposal
+                  ? t("admin.memoryGlossaryInboxTypeMerge")
+                  : proposal.before
+                    ? t("admin.memoryGlossaryInboxTypeUpdate")
+                    : t("admin.memoryGlossaryInboxTypeAdd");
 
                 return Array.from(
                   new Set(
@@ -722,486 +590,50 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                           )}
                         </div>
                       </div>
-                      <div className="memory-glossary-inbox-card-line">
-                        <strong>{t("admin.memoryContent")}</strong>
-                        <span>{proposal.after.content || "-"}</span>
-                      </div>
-                      <div className="memory-glossary-action-options">
-                        {(["reject", "separate", "merge", "create"] as GlossaryInboxActionMode[]).map(
-                          (mode) => {
-                            const disabled =
-                              isSubmitting ||
-                              (mode === "separate" && !targetGroups.length) ||
-                              (mode === "merge" && targetGroups.length < 2);
-                            return (
-                              <Checkbox
-                                key={mode}
-                                checked={actionMode === mode}
-                                disabled={disabled}
-                                onChange={() => setActionMode(proposal, mode)}
-                              >
-                                <span className="memory-glossary-action-option-copy">
-                                  <strong>{getActionModeLabel(mode, conflictWord)}</strong>
-                                </span>
-                              </Checkbox>
-                            );
-                          },
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="memory-glossary-action-detail">
-                      {actionMode === "reject" ? (
-                        <div className="memory-glossary-action-empty">
-                          {t("admin.memoryGlossaryInboxActionRejectDesc")}
+                      {targetGroups.length ? (
+                        <div className="memory-glossary-inbox-card-line">
+                          <strong>{t("admin.memoryGlossaryInboxTargetGroups")}</strong>
+                          <div className="memory-glossary-conflict-summary">
+                            {targetGroups.map((group) => (
+                              <Tag key={`${proposal.id}-${group.id}`}>
+                                {group.term || group.id}
+                              </Tag>
+                            ))}
+                          </div>
                         </div>
                       ) : null}
-                      {actionMode === "separate" ? (
-                        <GlossaryGroupCards
-                          groups={targetGroups}
-                          selectedGroupIds={activeResolution.selectedGroupIds}
-                          disabled={isSubmitting}
-                          t={t}
-                          stacked
-                          onChange={(selectedGroupIds) =>
-                            updateResolution(proposal, { selectedGroupIds })
-                          }
-                        />
-                      ) : null}
-                      {actionMode === "merge" ? (
-                        mergeStage === "confirm" ? (
-                          <div className="memory-glossary-merge-final-stage">
-                            <div className="memory-glossary-merge-stage-title">
-                              <strong>阶段3：选择一个到多个词组，把{conflictWord}加入</strong>
-                              <span>可选择新合并词组，也可选择未合并词组继续写入。</span>
-                            </div>
-                            <GlossaryGroupCards
-                              groups={finalTargetGroups}
-                              selectedGroupIds={finalWriteGroupIds}
-                              disabled={isSubmitting}
-                              t={t}
-                              stacked
-                              onChange={(writeGroupIds) =>
-                                updateResolution(proposal, { writeGroupIds })
-                              }
-                            />
-                            <Button
-                              className="memory-glossary-merge-request"
-                              disabled={!isActionValid || isSubmitting}
-                              loading={glossaryInboxSubmitting === "accept"}
-                              onClick={() => submitProposalAction(proposal)}
-                            >
-                              确认
-                            </Button>
-                          </div>
-                        ) : mergeStage === "edit" ? (
-                          <Form layout="vertical" className="memory-glossary-create-form">
-                            <div className="memory-glossary-merge-stage-title">
-                              <strong>阶段2：编辑合并结果</strong>
-                              <span>确认合并后的专有名词、别名和描述，再进入写入阶段。</span>
-                            </div>
-                            {mergeDrafts.length > 1 ? (
-                              <div className="memory-glossary-merge-edit-meta">
-                                <span>
-                                  当前第 {mergeEditPage} 组 / 共 {mergeDrafts.length} 组
-                                </span>
-                                <span>
-                                  {currentMergeDraft?.groupIds
-                                    .map(
-                                      (groupId) =>
-                                        targetGroups.find((group) => group.id === groupId)?.term ||
-                                        groupId,
-                                    )
-                                    .join(" + ")}
-                                </span>
-                              </div>
-                            ) : null}
-                            <Form.Item
-                              label={t("admin.memoryGlossaryTerm")}
-                              required
-                              validateStatus={!currentMergeDraft?.term ? "error" : ""}
-                              help={
-                                !currentMergeDraft?.term
-                                  ? t("admin.memoryGlossaryGroupRequired")
-                                  : undefined
-                              }
-                            >
-                              <Input
-                                value={currentMergeDraft?.term}
-                                disabled={isSubmitting}
-                                maxLength={50}
-                                showCount
-                                onChange={(event) =>
-                                  updateResolution(proposal, {
-                                    mergeDrafts: mergeDrafts.map((draft, draftIndex) =>
-                                      draftIndex === mergeEditPage - 1
-                                        ? { ...draft, term: event.target.value }
-                                        : draft,
-                                    ),
-                                  })
-                                }
-                              />
-                            </Form.Item>
-                            <Form.Item label={t("admin.memoryGlossaryAliases")}>
-                              <Select
-                                mode="tags"
-                                value={currentMergeDraft?.aliases}
-                                disabled={isSubmitting}
-                                placeholder={t("admin.memoryGlossaryAliasesPlaceholder")}
-                                onChange={(values) =>
-                                  updateResolution(proposal, {
-                                    mergeDrafts: mergeDrafts.map((draft, draftIndex) =>
-                                      draftIndex === mergeEditPage - 1
-                                        ? { ...draft, aliases: getUniqueTexts(values) }
-                                        : draft,
-                                    ),
-                                  })
-                                }
-                              />
-                            </Form.Item>
-                            <Form.Item label={t("admin.memoryContent")}>
-                              <Input.TextArea
-                                autoSize={{ minRows: 3, maxRows: 5 }}
-                                maxLength={300}
-                                showCount
-                                value={currentMergeDraft?.content}
-                                disabled={isSubmitting}
-                                onChange={(event) =>
-                                  updateResolution(proposal, {
-                                    mergeDrafts: mergeDrafts.map((draft, draftIndex) =>
-                                      draftIndex === mergeEditPage - 1
-                                        ? { ...draft, content: event.target.value }
-                                        : draft,
-                                    ),
-                                  })
-                                }
-                              />
-                            </Form.Item>
-                            {mergeDrafts.length > 1 ? (
-                              <Pagination
-                                className="memory-glossary-merge-edit-pagination"
-                                size="small"
-                                current={mergeEditPage}
-                                pageSize={1}
-                                total={mergeDrafts.length}
-                                showSizeChanger={false}
-                                onChange={(page) =>
-                                  setMergeEditPageMap((previous) => ({
-                                    ...previous,
-                                    [proposal.id]: page,
-                                  }))
-                                }
-                              />
-                            ) : null}
-                            <Button
-                              className="memory-glossary-merge-request"
-                              disabled={!mergeDrafts.every((draft) => draft.term.trim()) || isSubmitting}
-                              onClick={() => {
-                                if (canDirectConfirmMerge) {
-                                  const primaryDraft = mergeDrafts[0];
-                                  submitProposalAction(proposal, {
-                                    ...activeResolution,
-                                    mode: "merge",
-                                    mergeGroups,
-                                    mergeDrafts,
-                                    mergedGroupTerm: primaryDraft?.term || "",
-                                    mergedGroupAliases: primaryDraft?.aliases || [],
-                                    mergedGroupContent: primaryDraft?.content || "",
-                                    writeGroupIds: undefined,
-                                  });
-                                  return;
-                                }
-                                const validWriteGroupIds = new Set([
-                                  ...mergedOptionIds,
-                                  ...unmergedGroups.map((group) => group.id),
-                                ]);
-                                const currentWriteGroupIds =
-                                  activeResolution.writeGroupIds?.filter((groupId) =>
-                                    validWriteGroupIds.has(groupId),
-                                  ) || [];
-                                updateResolution(proposal, {
-                                  mergeGroups,
-                                  mergeDrafts,
-                                  mergedGroupTerm: mergeDrafts[0]?.term || "",
-                                  mergedGroupAliases: mergeDrafts[0]?.aliases || [],
-                                  mergedGroupContent: mergeDrafts[0]?.content || "",
-                                  writeGroupIds: currentWriteGroupIds.length
-                                    ? currentWriteGroupIds
-                                    : mergedOptionIds,
-                                });
-                                setMergeStageMap((previous) => ({
-                                  ...previous,
-                                  [proposal.id]: "confirm",
-                                }));
-                              }}
-                            >
-                              {canDirectConfirmMerge ? "确认" : "下一步"}
-                            </Button>
-                          </Form>
-                        ) : (
-                          <div className="memory-glossary-merge-stage">
-                            <div className="memory-glossary-merge-stage-title">
-                              <strong>阶段1：合并阶段</strong>
-                              <span>请为词组选色块，相同颜色视为合并</span>
-                            </div>
-                            <div className="memory-glossary-merge-stage-list">
-                              {targetGroups.map((group) => {
-                                const colorValue = mergeColorMap[proposal.id]?.[group.id];
-                                return (
-                                  <label
-                                    className="memory-glossary-target-card memory-glossary-merge-stage-row"
-                                    key={group.id}
-                                  >
-                                    <span className="memory-glossary-merge-color-control">
-                                      <Select
-                                        value={colorValue}
-                                        allowClear
-                                        disabled={isSubmitting}
-                                        className="memory-glossary-color-select"
-                                        labelRender={({ value }) => {
-                                          const selectedColor = mergeColorOptions.find(
-                                            (item) => item.value === value,
-                                          );
-                                          return selectedColor ? (
-                                            <span className="memory-glossary-color-selected">
-                                              <span
-                                                style={{ backgroundColor: selectedColor.color }}
-                                                aria-hidden
-                                              />
-                                              {selectedColor.label}
-                                            </span>
-                                          ) : null;
-                                        }}
-                                        optionRender={(option) => {
-                                          const colorMeta = mergeColorOptions.find(
-                                            (item) => item.value === option.value,
-                                          );
-                                          return (
-                                            <span className="memory-glossary-color-option">
-                                              <span
-                                                style={{ backgroundColor: colorMeta?.color }}
-                                                aria-hidden
-                                              />
-                                              {colorMeta?.label}
-                                            </span>
-                                          );
-                                        }}
-                                        onChange={(value) => {
-                                          const currentColors = mergeColorMap[proposal.id] || {};
-                                          const nextColors = Object.fromEntries(
-                                            Object.entries({
-                                              ...currentColors,
-                                              ...(value ? { [group.id]: value } : {}),
-                                            }).filter(([groupId]) => value || groupId !== group.id),
-                                          );
-                                          const nextMergeGroupIds = getMergeGroupIdsByColor(
-                                            nextColors,
-                                          );
-                                          setMergeColorMap((previous) => ({
-                                            ...previous,
-                                            [proposal.id]: nextColors,
-                                          }));
-                                          const mergeGroups =
-                                            buildMergeGroupsFromColors(targetGroups, nextColors);
-                                          updateResolution(proposal, {
-                                            selectedGroupIds: nextMergeGroupIds,
-                                            mergeGroupIds: nextMergeGroupIds,
-                                            mergeGroups,
-                                            mergeDrafts: syncMergeDraftsWithGroups(
-                                              proposal,
-                                              targetGroups,
-                                              activeResolution.mergeDrafts,
-                                              mergeGroups,
-                                            ),
-                                            writeGroupIds: undefined,
-                                          });
-                                        }}
-                                        options={mergeColorOptions.map((item) => ({
-                                          value: item.value,
-                                          label: item.label,
-                                        }))}
-                                      />
-                                    </span>
-                                    <span className="memory-glossary-target-main">
-                                      <strong>{group.term}</strong>
-                                      <span className="memory-tag-group memory-tag-group-scroll">
-                                        {group.aliases.length
-                                          ? group.aliases.map((alias) => (
-                                              <Tag key={`${group.id}-${alias}`}>{alias}</Tag>
-                                            ))
-                                          : "-"}
-                                      </span>
-                                    </span>
-                                  </label>
-                                );
-                              })}
-                            </div>
-                            <div className="memory-glossary-merge-stage-summary">
-                              将合并{" "}
-                              <span className="memory-glossary-merge-stage-summary-terms">
-                                {targetGroups
-                                  .filter((group) => mergeGroupIds.includes(group.id))
-                                  .map((group, index) => {
-                                    const colorValue = mergeColorMap[proposal.id]?.[group.id];
-                                    const colorMeta = getMergeColorMeta(colorValue);
-                                    return (
-                                      <span
-                                        key={group.id}
-                                        className="memory-glossary-merge-stage-summary-term"
-                                        style={{ color: colorMeta?.textColor || colorMeta?.color }}
-                                      >
-                                        {index > 0 ? "、" : ""}
-                                        {group.term}
-                                      </span>
-                                    );
-                                  })}
-                              </span>
-                            </div>
-                            <Button
-                              className="memory-glossary-merge-request"
-                              disabled={isSubmitting || mergeGroupIds.length < 2}
-                              onClick={() =>
-                                setMergeStageMap((previous) => ({
-                                  ...previous,
-                                  [proposal.id]: "edit",
-                                }))
-                              }
-                            >
-                              请求合并
-                            </Button>
-                          </div>
-                        )
-                      ) : null}
-                      {actionMode === "create" ? (
-                        createStage === "confirm" ? (
-                          <div className="memory-glossary-merge-final-stage">
-                            <div className="memory-glossary-merge-stage-title">
-                              <strong>阶段2：选择一个到多个词组，把{conflictWord}加入</strong>
-                              <span>可选择新建词组，也可选择已有冲突词组继续写入。</span>
-                            </div>
-                            <GlossaryGroupCards
-                              groups={createTargetGroups}
-                              selectedGroupIds={createWriteGroupIds}
-                              lockedGroupIds={[NEW_GROUP_OPTION_ID]}
-                              disabled={isSubmitting}
-                              t={t}
-                              stacked
-                              onChange={(writeGroupIds) =>
-                                updateResolution(proposal, {
-                                  writeGroupIds: Array.from(
-                                    new Set([NEW_GROUP_OPTION_ID, ...writeGroupIds]),
-                                  ),
-                                })
-                              }
-                            />
-                            <Button
-                              className="memory-glossary-merge-request"
-                              disabled={!isActionValid || isSubmitting}
-                              loading={glossaryInboxSubmitting === "accept"}
-                              onClick={() => submitProposalAction(proposal)}
-                            >
-                              确认
-                            </Button>
-                          </div>
-                        ) : (
-                          <Form layout="vertical" className="memory-glossary-create-form">
-                            <div className="memory-glossary-merge-stage-title">
-                              <strong>阶段1：新建一个词</strong>
-                              <span>填写新词组的词、别名和描述。</span>
-                            </div>
-                            <Form.Item
-                              label={t("admin.memoryGlossaryGroup")}
-                              required
-                              validateStatus={!createDraft.term ? "error" : ""}
-                              help={
-                                !createDraft.term
-                                  ? t("admin.memoryGlossaryInboxNewGroupRequired")
-                                  : undefined
-                              }
-                            >
-                              <Input
-                                value={activeResolution.newGroupTerm}
-                                disabled={isSubmitting}
-                                placeholder={t("admin.memoryGlossaryInboxNewGroupPlaceholder")}
-                                onChange={(event) =>
-                                  updateResolution(proposal, {
-                                    newGroupTerm: event.target.value,
-                                  })
-                                }
-                              />
-                            </Form.Item>
-                            <Form.Item
-                              label={t("admin.memoryGlossaryAliases")}
-                              validateStatus={isCreateGroupInAliases ? "error" : ""}
-                              help={
-                                isCreateGroupInAliases ? "词组归属不允许和其中一个词相同" : undefined
-                              }
-                            >
-                              <Select
-                                mode="tags"
-                                value={activeResolution.newGroupAliases || []}
-                                disabled={isSubmitting}
-                                placeholder={t("admin.memoryGlossaryAliasesPlaceholder")}
-                                onChange={(values) =>
-                                  updateResolution(proposal, {
-                                    newGroupAliases: getUniqueTexts(values),
-                                  })
-                                }
-                              />
-                            </Form.Item>
-                            <Form.Item
-                              label={t("admin.memoryContent")}
-                              validateStatus={isCreateContentSameAsTerm ? "error" : ""}
-                              help={
-                                isCreateContentSameAsTerm ? "内容不可以和词相同" : undefined
-                              }
-                            >
-                              <Input.TextArea
-                                autoSize={{ minRows: 3, maxRows: 5 }}
-                                value={
-                                  activeResolution.newGroupContent ?? proposal.after.content
-                                }
-                                disabled={isSubmitting}
-                                onChange={(event) =>
-                                  updateResolution(proposal, {
-                                    newGroupContent: event.target.value,
-                                  })
-                                }
-                              />
-                            </Form.Item>
-                            <Button
-                              className="memory-glossary-merge-request"
-                              disabled={
-                                !createDraft.term ||
-                                isCreateGroupInAliases ||
-                                isCreateContentSameAsTerm ||
-                                isSubmitting
-                              }
-                              onClick={() => {
-                                const validWriteGroupIds = new Set([
-                                  NEW_GROUP_OPTION_ID,
-                                  ...targetGroups.map((group) => group.id),
-                                ]);
-                                const currentWriteGroupIds =
-                                  activeResolution.writeGroupIds?.filter((groupId) =>
-                                    validWriteGroupIds.has(groupId),
-                                  ) || [];
-                                updateResolution(proposal, {
-                                  writeGroupIds: currentWriteGroupIds.length
-                                    ? currentWriteGroupIds
-                                    : [NEW_GROUP_OPTION_ID],
-                                });
-                                setCreateStageMap((previous) => ({
-                                  ...previous,
-                                  [proposal.id]: "confirm",
-                                }));
-                              }}
-                            >
-                              确认新建
-                            </Button>
-                          </Form>
-                        )
-                      ) : null}
+                    </div>
+                    <div className="memory-glossary-inbox-card-actions">
+                      <Button
+                        size="small"
+                        disabled={isSubmitting}
+                        loading={glossaryInboxSubmitting === "reject"}
+                        onClick={() => rejectGlossaryProposals([proposal])}
+                      >
+                        {t("admin.memoryGlossaryInboxReject")}
+                      </Button>
+                      <Button
+                        size="small"
+                        type="primary"
+                        disabled={isSubmitting || !targetGroups.length}
+                        onClick={() => openAction(proposal, "separate")}
+                      >
+                        {t("admin.memoryGlossaryInboxWriteSeparately")}
+                      </Button>
+                      <Button
+                        size="small"
+                        disabled={isSubmitting || targetGroups.length < 2}
+                        onClick={() => openAction(proposal, "merge")}
+                      >
+                        {t("admin.memoryGlossaryInboxMergeAndWrite")}
+                      </Button>
+                      <Button
+                        size="small"
+                        disabled={isSubmitting}
+                        onClick={() => openAction(proposal, "create")}
+                      >
+                        {t("admin.memoryGlossaryInboxCreateAndWrite")}
+                      </Button>
                     </div>
                   </div>
 
