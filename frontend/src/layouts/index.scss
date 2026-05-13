@@ -37,29 +37,24 @@
   z-index: 20;
   width: 28px;
   height: 28px;
-  border: 1px solid rgba(22, 119, 255, 0.18);
+  border: 0;
   border-radius: 6px;
-  background: #ffffff;
-  color: #1677ff;
+  background: transparent;
+  color: #1f2937;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   cursor: pointer;
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
   animation: main-menu-restore-enter 0.18s ease both;
   transition:
     background 0.2s ease,
-    border-color 0.2s ease,
-    box-shadow 0.2s ease,
     color 0.2s ease;
 
   &:hover,
   &:focus-visible {
-    background: #eaf3ff;
-    border-color: rgba(22, 119, 255, 0.36);
-    color: #0958d9;
-    box-shadow: 0 8px 18px rgba(22, 119, 255, 0.14);
+    background: rgba(15, 23, 42, 0.06);
+    color: #111827;
     outline: none;
   }
 
@@ -335,10 +330,10 @@
   height: 34px;
   flex: 0 0 auto;
   margin-left: auto;
-  border: 1px solid rgba(22, 119, 255, 0.16);
+  border: 0;
   border-radius: 10px;
-  background: #ffffff;
-  color: #1677ff;
+  background: transparent;
+  color: #374151;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -352,10 +347,9 @@
     box-shadow 0.2s ease;
 
   &:hover {
-    color: #0958d9;
-    background: #eaf3ff;
-    border-color: rgba(22, 119, 255, 0.34);
-    box-shadow: 0 4px 12px rgba(22, 119, 255, 0.12);
+    color: #111827;
+    background: rgba(15, 23, 42, 0.06);
+    box-shadow: none;
   }
 
   &:focus-visible {
@@ -525,41 +519,11 @@
 }
 
 .sub-app-container {
-  box-sizing: border-box;
   width: 100%;
   min-width: 0;
   height: 100%;
   min-height: 0;
   overflow: auto;
-}
-
-.main-layout-content.is-sidebar-collapsed {
-  .knowledge-list-page .knowledge-title,
-  .data-source-page .data-source-page-toolbar-left {
-    padding-left: 48px;
-  }
-
-  .data-source-page .data-source-page-toolbar-left {
-    box-sizing: border-box;
-  }
-
-  .data-source-detail-page .data-source-detail-back.ant-btn {
-    margin-left: 48px;
-  }
-}
-
-.main-layout-content.is-sidebar-collapsed.is-restore-safe-area-page {
-  .model-provider-shell {
-    padding-left: 72px;
-  }
-
-  .memory-page-header {
-    padding-left: 48px;
-  }
-
-  .self-evolution-chatlike-top {
-    padding-left: 48px;
-  }
 }
 
 .sider-bar-bottom {
