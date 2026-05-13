@@ -113,7 +113,6 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const [pageToken, setPageToken] = useState("");
     const [checkedList, setCheckedList] = useState<string[]>([]);
     const [showBatchExport, setShowBatchExport] = useState(false);
-    const [isHistoryLoading, setIsHistoryLoading] = useState(true);
     const scrollableTargetId = compact
       ? "sidebarConversationScrollableDiv"
       : "scrollableDiv";
@@ -181,7 +180,6 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       searchText?: string;
     }) {
       const { isMore = false, isFirst = false, searchText } = params ?? {};
-      setIsHistoryLoading(true);
       ChatServiceApi()
         .conversationServiceListConversations({
           keyword: searchText ?? keyword,
@@ -196,9 +194,6 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               : conversations,
           );
           setPageToken(res.data.next_page_token || "");
-        })
-        .finally(() => {
-          setIsHistoryLoading(false);
         });
     }
 
@@ -437,31 +432,25 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           </div>
         )}
         <div className="record-list" id={scrollableTargetId}>
-          {!isHistoryLoading && !historyList?.length ? (
-            <div className="record-empty" role="status">
-              {t("chat.noConversations")}
-            </div>
-          ) : (
-            <InfiniteScroll
-              dataLength={historyList?.length || 0}
-              next={() => getHistory({ isMore: true })}
-              hasMore={!!pageToken}
-              loader={<Spin />}
-              scrollableTarget={scrollableTargetId}
-            >
-              {showBatchExport ? (
-                <Checkbox.Group
-                  className="export-checkbox-group"
-                  onChange={(list) => setCheckedList(list)}
-                  value={checkedList}
-                >
-                  {renderItem()}
-                </Checkbox.Group>
-              ) : (
-                renderItem()
-              )}
-            </InfiniteScroll>
-          )}
+          <InfiniteScroll
+            dataLength={historyList?.length || 0}
+            next={() => getHistory({ isMore: true })}
+            hasMore={!!pageToken}
+            loader={<Spin />}
+            scrollableTarget={scrollableTargetId}
+          >
+            {showBatchExport ? (
+              <Checkbox.Group
+                className="export-checkbox-group"
+                onChange={(list) => setCheckedList(list)}
+                value={checkedList}
+              >
+                {renderItem()}
+              </Checkbox.Group>
+            ) : (
+              renderItem()
+            )}
+          </InfiniteScroll>
         </div>
       </div>
     );
