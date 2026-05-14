@@ -362,6 +362,8 @@
 }
 
 .memory-glossary-table {
+  --memory-glossary-row-height: 112px;
+
   padding-bottom: 8px;
   flex: 1;
   min-height: 0;
@@ -477,6 +479,20 @@
   text-overflow: ellipsis;
 }
 
+.memory-text-popover {
+  max-width: min(560px, calc(100vw - 32px));
+}
+
+.memory-text-popover-content {
+  max-height: 20vh;
+  overflow-y: auto;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .memory-tool-name {
   color: #101828;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
@@ -574,13 +590,22 @@
   grid-column: 1 / -1;
 }
 
+.memory-glossary-content-field {
+  margin-bottom: 28px;
+}
+
+.memory-glossary-content-field .ant-input-data-count {
+  line-height: 18px;
+}
+
 .memory-form-hint {
   color: #98a2b3;
   font-size: 12px;
 }
 
 .memory-readonly-modal {
-  .ant-input[readonly] {
+  .ant-input[readonly],
+  .memory-experience-title-readonly.ant-input {
     background: #f5f7fa;
     border-color: #d9e0ea;
     color: rgba(0, 0, 0, 0.88);
@@ -589,6 +614,20 @@
 
   .ant-input[readonly]:hover,
   .ant-input[readonly]:focus {
+    background: #f5f7fa;
+    border-color: #d9e0ea;
+    box-shadow: none;
+  }
+}
+
+.memory-experience-title-readonly.ant-input {
+  background: #f5f7fa;
+  border-color: #d9e0ea;
+  color: rgba(0, 0, 0, 0.88);
+  cursor: default;
+
+  &:hover,
+  &:focus {
     background: #f5f7fa;
     border-color: #d9e0ea;
     box-shadow: none;
@@ -1442,10 +1481,10 @@
 
 .memory-glossary-target-preview-card {
   min-width: 0;
-  border: 1px solid #b2ddff;
-  border-radius: 4px;
-  background: #f5fbff;
-  padding: 8px 10px;
+  border: 1px solid #91caff;
+  border-radius: 8px;
+  background: #f0f7ff;
+  padding: 12px 14px;
   display: flex;
   align-items: flex-start;
   cursor: default;
@@ -1618,8 +1657,38 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  flex-wrap: wrap;
   align-items: center;
+}
+
+.memory-glossary-action-trigger.ant-btn {
+  border-radius: 8px;
+  min-width: 92px;
+  color: #175cd3;
+  border-color: #b2ddff;
+  background: #f5fbff;
+}
+
+.memory-glossary-action-menu-item {
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+
+  strong {
+    color: #101828;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  span {
+    color: #667085;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+}
+
+.ant-dropdown-menu-item-danger .memory-glossary-action-menu-item strong {
+  color: #b42318;
 }
 
 .memory-glossary-detail-page {
@@ -2656,6 +2725,10 @@
     grid-template-columns: 1fr;
   }
 
+  .memory-glossary-inbox-card-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .memory-glossary-resolution-word {
     align-items: flex-start;
     flex-direction: column;
@@ -2686,6 +2759,12 @@
     visibility: visible;
     opacity: 1;
     pointer-events: auto;
+  }
+}
+
+@media (max-width: 560px) {
+  .memory-glossary-inbox-card-actions {
+    grid-template-columns: 1fr;
   }
 }
 

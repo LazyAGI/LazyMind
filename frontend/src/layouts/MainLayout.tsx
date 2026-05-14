@@ -11,7 +11,8 @@ import {
   UserOutlined,
   TeamOutlined,
   GlobalOutlined,
-  LeftOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
   PlusOutlined,
   RightOutlined,
   FolderOpenOutlined,
@@ -171,6 +172,17 @@ export default function MainLayout() {
   const logoSrc =
     (import.meta.env as ImportMetaEnv & { VITE_APP_LOGO?: string })
       .VITE_APP_LOGO || "";
+  const needsRestoreButtonSafeArea =
+    pathname.startsWith("/model-providers") ||
+    pathname.startsWith("/memory-management") ||
+    pathname.startsWith("/self-evolution");
+  const contentClassName = [
+    "main-layout-content",
+    isMenuCollapsed ? "is-sidebar-collapsed" : "",
+    isMenuCollapsed && needsRestoreButtonSafeArea ? "is-restore-safe-area-page" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   useEffect(() => {
     setDeveloperActive(isDeveloperModeActive());
@@ -613,7 +625,7 @@ export default function MainLayout() {
               aria-label={isMenuCollapsed ? "展开菜单" : "收起菜单"}
               title={isMenuCollapsed ? "展开菜单" : "收起菜单"}
             >
-              {isMenuCollapsed ? <RightOutlined /> : <LeftOutlined />}
+              {isMenuCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
             </button>
           </div>
           {shouldRenderMenuContent ? (
@@ -776,7 +788,7 @@ export default function MainLayout() {
           </div>
         </div>
       </Sider>
-      <Layout className={`main-layout-content${isMenuCollapsed ? " is-sidebar-collapsed" : ""}`}>
+      <Layout className={contentClassName}>
         <Content className="main-layout-body">
           {isMenuCollapsed ? (
             <button
@@ -786,7 +798,7 @@ export default function MainLayout() {
               aria-label="展开菜单"
               title="展开菜单"
             >
-              <RightOutlined />
+              <MenuUnfoldOutlined />
             </button>
           ) : null}
           <div className="sub-app-container">

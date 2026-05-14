@@ -66,6 +66,7 @@ interface DataSourceWizardModalProps {
   wizardOpen: boolean;
   wizardStep: number;
   form: FormInstance<SourceFormValues>;
+  existingKnowledgeBaseNames: string[];
   selectedType: SourceType | null;
   isFeishuSetupReady: boolean;
   oauthState: OAuthState;
@@ -92,6 +93,7 @@ export default function DataSourceWizardModal({
   wizardOpen,
   wizardStep,
   form,
+  existingKnowledgeBaseNames,
   selectedType,
   isFeishuSetupReady,
   oauthState,
@@ -112,6 +114,21 @@ export default function DataSourceWizardModal({
   onInvalidateConnection,
 }: DataSourceWizardModalProps) {
   const isEditMode = wizardMode === "edit";
+  const existingKnowledgeBaseNameSet = new Set(
+    existingKnowledgeBaseNames.map((name) => name.trim().toLowerCase()).filter(Boolean),
+  );
+
+  const validateKnowledgeBaseName = (_: unknown, value?: string) => {
+    const normalizedValue = `${value || ""}`.trim().toLowerCase();
+    if (!normalizedValue || isEditMode) {
+      return Promise.resolve();
+    }
+    if (existingKnowledgeBaseNameSet.has(normalizedValue)) {
+      return Promise.reject(new Error(t("admin.dataSourceKnowledgeBaseNameDuplicated")));
+    }
+    return Promise.resolve();
+  };
+
   const renderConnectionSection = () => {
     if (!selectedType) {
       return null;
@@ -370,10 +387,19 @@ export default function DataSourceWizardModal({
                     <Form.Item
                       label={t("admin.dataSourceKnowledgeBaseName")}
                       name="knowledgeBase"
+                      extra={
+                        selectedType === "local"
+                          ? t("admin.dataSourceKnowledgeBaseNameLocalHint")
+                          : t("admin.dataSourceKnowledgeBaseNameHint")
+                      }
                       rules={[
                         {
                           required: true,
+                          whitespace: true,
                           message: t("admin.dataSourceKnowledgeBaseNameRequired"),
+                        },
+                        {
+                          validator: validateKnowledgeBaseName,
                         },
                       ]}
                     >
