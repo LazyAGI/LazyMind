@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
 import { Alert, Button, Empty, Space, Table } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
@@ -59,7 +58,6 @@ export default function GlossaryListSection(props: GlossaryListSectionProps) {
   const sectionRef = useRef<HTMLDivElement>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(defaultGlossaryPageSize);
-  const [rowFillHeight, setRowFillHeight] = useState<number>();
   const [tableBodyHeight, setTableBodyHeight] = useState<number>();
 
   useEffect(() => {
@@ -72,11 +70,6 @@ export default function GlossaryListSection(props: GlossaryListSectionProps) {
       setCurrentPage(maxPage);
     }
   }, [currentPage, filteredItems.length, pageSize]);
-  const visibleGlossaryRowCount = Math.max(
-    1,
-    Math.min(pageSize, Math.max(filteredItems.length - (currentPage - 1) * pageSize, 0)),
-  );
-
   useEffect(() => {
     const sectionElement = sectionRef.current;
     if (!sectionElement) {
@@ -100,11 +93,9 @@ export default function GlossaryListSection(props: GlossaryListSectionProps) {
         rowGap -
         8;
       const nextBodyHeight = Math.max(240, Math.floor(availableHeight));
-      const nextRowHeight = Math.max(72, Math.floor(nextBodyHeight / visibleGlossaryRowCount));
       setTableBodyHeight((previous) =>
         previous === nextBodyHeight ? previous : nextBodyHeight,
       );
-      setRowFillHeight((previous) => (previous === nextRowHeight ? previous : nextRowHeight));
     };
 
     updateRowHeight();
@@ -116,11 +107,8 @@ export default function GlossaryListSection(props: GlossaryListSectionProps) {
       resizeObserver.disconnect();
       window.removeEventListener("resize", updateRowHeight);
     };
-  }, [visibleGlossaryRowCount]);
+  }, []);
 
-  const glossaryTableStyle = rowFillHeight
-    ? ({ "--memory-glossary-row-height": `${rowFillHeight}px` } as CSSProperties)
-    : undefined;
   const glossaryTableScroll = tableBodyHeight
     ? { x: 1120, y: tableBodyHeight }
     : { x: 1120 };
@@ -179,7 +167,6 @@ export default function GlossaryListSection(props: GlossaryListSectionProps) {
 
       <Table<GlossaryAsset>
         className="admin-page-table memory-table memory-glossary-table"
-        style={glossaryTableStyle}
         rowKey="id"
         loading={glossaryLoading}
         dataSource={filteredItems}
