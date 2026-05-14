@@ -562,22 +562,112 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
         />
       ) : null}
 
-        {glossaryInboxLoading ? (
-          <div className="memory-glossary-inbox-loading">
-            <Spin />
-            <span>{t("common.loading")}</span>
-          </div>
-        ) : glossaryChangeProposals.length ? (
-          <div className="memory-glossary-inbox">
-            <div className="memory-glossary-inbox-list">
-              {glossaryChangeProposals.map((proposal) => {
-                const isMergeProposal = Boolean(proposal.mergeFrom?.length);
-                const targetGroups = proposal.backendConflictGroups || [];
-                const proposalTypeText = isMergeProposal
-                  ? t("admin.memoryGlossaryInboxTypeMerge")
-                  : proposal.before
-                    ? t("admin.memoryGlossaryInboxTypeUpdate")
-                    : t("admin.memoryGlossaryInboxTypeAdd");
+      {glossaryInboxLoading ? (
+        <div className="memory-glossary-inbox-loading" aria-live="polite">
+          <Spin />
+          <span>{t("common.loading")}</span>
+        </div>
+      ) : glossaryChangeProposals.length ? (
+        <div className="memory-glossary-inbox">
+          <div className="memory-glossary-inbox-list">
+            {glossaryChangeProposals.map((proposal, index) => {
+              const isMergeProposal = Boolean(proposal.mergeFrom?.length);
+              const conflictWord = getConflictWord(proposal);
+              const targetGroups = proposal.backendConflictGroups || [];
+              const proposalTypeText = isMergeProposal
+                ? t("admin.memoryGlossaryInboxTypeMerge")
+                : proposal.before
+                  ? t("admin.memoryGlossaryInboxTypeUpdate")
+                  : t("admin.memoryGlossaryInboxTypeAdd");
+              const actionMode = actionModeMap[proposal.id] || getDefaultResolution(proposal).mode;
+              const mergeStage = mergeStageMap[proposal.id] || "select";
+              const createStage = createStageMap[proposal.id] || "edit";
+              const activeResolution =
+                resolutionMap[proposal.id] || getDefaultResolution(proposal);
+              const mergeGroupIds = activeResolution.mergeGroupIds?.length
+                ? activeResolution.mergeGroupIds
+                : activeResolution.selectedGroupIds;
+              const mergeGroups =
+                activeResolution.mergeGroups?.filter((groupIds) => groupIds.length >= 2) ||
+                (mergeGroupIds.length >= 2 ? [mergeGroupIds] : []);
+              const mergeDrafts = syncMergeDraftsWithGroups(
+                proposal,
+                targetGroups,
+                activeResolution.mergeDrafts,
+                mergeGroups,
+              );
+              const mergeEditPageRaw = mergeEditPageMap[proposal.id] || 1;
+              const mergeEditPage = Math.min(
+                Math.max(mergeEditPageRaw, 1),
+                Math.max(mergeDrafts.length, 1),
+              );
+              const currentMergeDraft = mergeDrafts[mergeEditPage - 1];
+              const selectedMergeGroups = targetGroups.filter((group) =>
+                mergeGroupIds.includes(group.id),
+              );
+              const unmergedGroups = targetGroups.filter(
+                (group) => !mergeGroupIds.includes(group.id),
+              );
+              const isFullMerge =
+                selectedMergeGroups.length >= 2 && unmergedGroups.length === 0;
+              const canDirectConfirmMerge = isFullMerge && mergeDrafts.length === 1;
+              const mergedTargetGroups: GlossaryAsset[] = mergeDrafts.map((draft, draftIndex) => ({
+                ...proposal.after,
+                id: `${MERGED_GROUP_OPTION_ID_PREFIX}${draft.groupIds[0] || `group-${draftIndex}`}`,
+                term: draft.term || proposal.after.term,
+                aliases: draft.aliases,
+                content: draft.content,
+              }));
+              const mergedOptionIds = mergedTargetGroups.map((group) => group.id);
+              const validFinalGroupIds = new Set([
+                ...mergedOptionIds,
+                ...unmergedGroups.map((group) => group.id),
+              ]);
+              const finalWriteGroupIds = activeResolution.writeGroupIds?.length
+                ? activeResolution.writeGroupIds.filter((groupId) => validFinalGroupIds.has(groupId))
+                : mergedOptionIds;
+              const finalTargetGroups: GlossaryAsset[] = [
+                ...mergedTargetGroups,
+                ...unmergedGroups,
+              ];
+              const createDraft = {
+                term: (activeResolution.newGroupTerm || "").trim(),
+                aliases: activeResolution.newGroupAliases?.length
+                  ? activeResolution.newGroupAliases
+                  : proposal.after.aliases,
+                content: (activeResolution.newGroupContent ?? proposal.after.content).trim(),
+              };
+              const isCreateGroupInAliases = createDraft.aliases
+                .map((alias) => alias.trim())
+                .some((alias) => alias && alias === createDraft.term);
+              const isCreateContentSameAsTerm =
+                Boolean(createDraft.term) &&
+                Boolean(createDraft.content) &&
+                createDraft.term === createDraft.content;
+              const createWriteGroupIds = Array.from(
+                new Set([NEW_GROUP_OPTION_ID, ...(activeResolution.writeGroupIds || [])]),
+              );
+              const createTargetGroups: GlossaryAsset[] = [
+                {
+                  ...proposal.after,
+                  id: NEW_GROUP_OPTION_ID,
+                  term: createDraft.term || proposal.after.term,
+                  aliases: createDraft.aliases,
+                  content: createDraft.content,
+                },
+                ...targetGroups,
+              ];
+              const getMergeGroupIdsByColor = (nextColors: Record<string, string>) => {
+                const groupsByColor = new Map<string, string[]>();
+                targetGroups.forEach((group) => {
+                  const color = nextColors[group.id];
+                  if (!color) {
+                    return;
+                  }
+                  const current = groupsByColor.get(color) || [];
+                  current.push(group.id);
+                  groupsByColor.set(color, current);
+                });
 
                 return Array.from(
                   new Set(
