@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Empty, Input, Space, Tag, message } from "antd";
+import { HistoryOutlined } from "@ant-design/icons";
 import { useParams } from "react-router-dom";
 import MarkdownViewer from "@/modules/knowledge/components/MarkdownViewer";
 import { DetailPageHeader } from "@/components/ui";
 import { getLocalizedErrorMessage } from "@/components/request";
+import ResourceVersionDrawer from "../../components/ResourceVersionDrawer";
 import RouteLoading from "../../components/RouteLoading";
 import { useMemoryManagementOutletContext } from "../../context";
 import { getSkillAssetDetail, patchSkillAsset } from "../../skillApi";
@@ -50,6 +52,7 @@ export default function MemorySkillDetailPage() {
   const [isDescriptionEditing, setIsDescriptionEditing] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState("");
   const [descriptionSaving, setDescriptionSaving] = useState(false);
+  const [versionDrawerOpen, setVersionDrawerOpen] = useState(false);
 
   const cachedSkill = useMemo(
     () => skillAssets.find((item: StructuredAsset) => item.id === itemId) || null,
@@ -451,6 +454,16 @@ export default function MemorySkillDetailPage() {
         className="memory-skill-detail-page-header"
         title={t("admin.memorySkillDetailTitle")}
         description={skillHeaderContent}
+        settingsMenu={
+          skill ? (
+            <Button
+              icon={<HistoryOutlined />}
+              onClick={() => setVersionDrawerOpen(true)}
+            >
+              {t("admin.memoryVersionHistoryButton")}
+            </Button>
+          ) : null
+        }
         onBack={() => navigateToMemoryList("skills")}
       />
 
@@ -518,6 +531,17 @@ export default function MemorySkillDetailPage() {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {skill ? (
+        <ResourceVersionDrawer
+          open={versionDrawerOpen}
+          resourceId={skill.id}
+          resourceName={skill.name}
+          resourceType="skill"
+          t={t}
+          onClose={() => setVersionDrawerOpen(false)}
+        />
       ) : null}
     </div>
   );
