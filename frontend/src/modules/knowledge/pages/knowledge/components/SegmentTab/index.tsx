@@ -5,7 +5,7 @@ import { useImmer } from "use-immer";
 import SegmentList, { SegmentListImperativeProps } from "../SegmentList";
 import { Segment } from "@/api/generated/knowledge-client";
 import { from, expand, EMPTY, scan, takeWhile, map } from "rxjs";
-import { message, Modal, Switch } from "antd";
+import { message, Modal, Switch, Tabs } from "antd";
 import { SegmentServiceApi } from "@/modules/knowledge/utils/request";
 import { CARD_PAGE_SIZE } from "@/modules/knowledge/constants/common";
 
@@ -333,14 +333,28 @@ const SegmentTab = (props: SegmentTabProps) => {
         style={{
           display: "flex",
           alignItems: "center",
-          justifyContent: "flex-end",
+          justifyContent: "space-between",
           gap: 8,
           marginBottom: 8,
         }}
       >
+        {splitTypes.length > 1 ? (
+          <Tabs
+            size="small"
+            activeKey={currentType}
+            onChange={onSplitTypeChanged}
+            items={splitTypes.map((splitType) => ({
+              key: splitType,
+              label: splitType,
+            }))}
+            style={{ marginBottom: 0, flex: 1, minWidth: 0 }}
+          />
+        ) : (
+          <div />
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           <span style={{ color: "var(--color-text-description)" }}>
-            {t("knowledge.sequence")}
+            {t("admin.sequence")}
           </span>
           <Switch
             size="small"
