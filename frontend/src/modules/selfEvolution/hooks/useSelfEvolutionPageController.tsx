@@ -1362,6 +1362,22 @@ export function SelfEvolutionPageController({
 
     try {
       const encodedThreadId = encodeURIComponent(threadId);
+      const threadResult = await axiosInstance.get(`${AGENT_API_BASE}/threads/${encodedThreadId}`, { signal });
+
+      if (signal?.aborted || restoreRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      const threadPayload = threadResult.data as ThreadRestorePayload;
+      const detailTitle = getThreadTitleFromPayload(threadPayload);
+      const knowledgeBaseId = getThreadKnowledgeBaseId(threadPayload);
+      if (knowledgeBaseId) {
+        setSelectedKb(knowledgeBaseId);
+      }
+      const restoredMode = getThreadModeFromPayload(threadPayload);
+      if (restoredMode) {
+        setMode(restoredMode);
+      }
       let historyTitle: string | undefined;
       let historyMessages: ChatMessage[] = [];
       try {
@@ -1382,6 +1398,12 @@ export function SelfEvolutionPageController({
       if (signal?.aborted || restoreRequestIdRef.current !== requestId) {
         return;
       }
+      const nowLabel = getTimeLabel();
+      const title =
+        historyTitle ||
+        remoteThreadHistory.find((item) => item.threadId === threadId)?.title ||
+        detailTitle ||
+        `自进化详情 ${threadId.slice(0, 8)}`;
 
       const applySessionRestore = (title?: string, forceUseHistoryMessages = false) => {
         const nowLabel = getTimeLabel();
