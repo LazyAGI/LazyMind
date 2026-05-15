@@ -81,8 +81,6 @@ export interface GlossaryConflictResolution {
   mode: GlossaryConflictResolveMode;
   selectedGroupIds: string[];
   mergeGroupIds?: string[];
-  mergeGroups?: string[][];
-  mergeDrafts?: GlossaryMergeDraft[];
   writeGroupIds?: string[];
   newGroupTerm: string;
   newGroupAliases?: string[];

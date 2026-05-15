@@ -166,10 +166,8 @@ import "./index.scss";
 
 const backendSuggestionPageSize = 20;
 const defaultSkillListPageSize = 6;
-const defaultGlossaryListPageSize = 4;
 const showGlossaryInboxUi = true;
 const MERGED_GLOSSARY_GROUP_OPTION_ID = "__merged_glossary_group__";
-const MERGED_GLOSSARY_GROUP_OPTION_ID_PREFIX = `${MERGED_GLOSSARY_GROUP_OPTION_ID}:`;
 const NEW_GLOSSARY_GROUP_OPTION_ID = "__new_glossary_group__";
 const isReviewableSuggestionStatus = (status?: string) => {
   const normalized = String(status || "").trim().toLowerCase();
@@ -4225,93 +4223,52 @@ export default function MemoryManagement() {
                 throw new Error(t("admin.memoryGlossaryInboxMergeSelectAtLeastTwo"));
               }
 
-              const targetGroups = proposal.backendConflictGroups || [];
-              const mergeGroupsFromResolution =
-                resolution?.mergeGroups?.filter((item) => item.length >= 2) || [];
-              const mergeGroups = mergeGroupsFromResolution.length
-                ? mergeGroupsFromResolution
-                : [selectedGroupIds];
-              const fallbackMergedTerm =
-                targetGroups.find((group) => mergeGroups[0]?.includes(group.id))?.term ||
-                proposal.after.term;
-              const fallbackMergedAliases = Array.from(
-                new Set(
-                  targetGroups
-                    .filter((group) => selectedGroupIds.includes(group.id))
-                    .flatMap((group) => [group.term, ...group.aliases]),
-                ),
-              );
-              const fallbackMergedContent = targetGroups
-                .filter((group) => selectedGroupIds.includes(group.id))
-                .map((group) => group.content)
-                .filter(Boolean)
-                .join("\n\n");
-              const mergePayloads = mergeGroups.map((groupIds) => {
-                const draft = resolution?.mergeDrafts?.find(
-                  (item) =>
-                    item.groupIds.length === groupIds.length &&
-                    item.groupIds.every((id) => groupIds.includes(id)),
-                );
-                const term = (
-                  draft?.term ||
-                  resolution?.mergedGroupTerm ||
-                  fallbackMergedTerm
-                ).trim();
-                const aliasesSource = draft?.aliases?.length
-                  ? draft.aliases
-                  : resolution?.mergedGroupAliases?.length
-                    ? resolution.mergedGroupAliases
-                    : fallbackMergedAliases;
-                const description = (
-                  draft?.content ??
-                  resolution?.mergedGroupContent ??
-                  fallbackMergedContent ??
-                  proposal.after.content
-                ).trim();
-                return {
-                  group_ids: groupIds,
-                  term,
-                  aliases: Array.from(
-                    new Set(
-                      aliasesSource
-                        .map((item) => item.trim())
-                        .filter(Boolean),
-                    ),
-                  ),
-                  description,
-                };
-              });
-              const firstMergedGroupIds = mergeGroups
-                .map((groupIds) => groupIds[0])
-                .filter(Boolean);
-              if (!firstMergedGroupIds.length) {
-                throw new Error(t("admin.memoryGlossaryInboxSelectTargetFirst"));
-              }
-              const writeGroupIds = resolution?.writeGroupIds || [];
-              const shouldWriteToMergedGroup =
-                !writeGroupIds.length ||
-                writeGroupIds.some((groupId) => groupId.startsWith(MERGED_GLOSSARY_GROUP_OPTION_ID));
-              const extraWriteGroupIds = writeGroupIds.filter(
-                (groupId) =>
-                  !groupId.startsWith(MERGED_GLOSSARY_GROUP_OPTION_ID_PREFIX) &&
-                  groupId !== MERGED_GLOSSARY_GROUP_OPTION_ID &&
-                  !selectedGroupIds.includes(groupId),
-              );
-              const targetGroupIds = Array.from(
-                new Set([
-                  ...(shouldWriteToMergedGroup ? firstMergedGroupIds : []),
-                  ...extraWriteGroupIds,
-                ]),
-              );
-              if (!targetGroupIds.length) {
-                throw new Error(t("admin.memoryGlossaryInboxSelectTargetFirst"));
-              }
+              const shouldWriteConflictWordToMergedGroup =
+                !(resolution?.writeGroupIds) ||
+                resolution.writeGroupIds.includes(MERGED_GLOSSARY_GROUP_OPTION_ID);
+              const mergeGlossaryGroups = shouldWriteConflictWordToMergedGroup
+                ? mergeGlossaryAssetsAndAddConflictWord({
+                    id: conflictId,
+                    word: conflictWord,
+                    groupIds: selectedGroupIds,
+                  })
+                : mergeGlossaryAssets(selectedGroupIds);
 
-              return mergeGlossaryConflictAndAddWord({
-                id: conflictId,
-                word: conflictWord,
-                merges: mergePayloads,
-                group_ids: targetGroupIds,
+              return mergeGlossaryGroups.then((merged) => {
+                const updateMergedAsset =
+                  merged && resolution?.mergedGroupTerm?.trim()
+                    ? updateGlossaryAsset({
+                        ...merged,
+                        term: resolution.mergedGroupTerm.trim(),
+                        aliases: [
+                          ...new Set(
+                            (resolution.mergedGroupAliases?.length
+                              ? resolution.mergedGroupAliases
+                              : merged.aliases
+                            )
+                              .map((item) => item.trim())
+                              .filter(Boolean),
+                          ),
+                        ],
+                        content: (resolution.mergedGroupContent ?? merged.content).trim(),
+                      })
+                    : Promise.resolve(merged);
+                const extraWriteGroupIds = (resolution?.writeGroupIds || []).filter(
+                  (groupId) =>
+                    groupId !== MERGED_GLOSSARY_GROUP_OPTION_ID &&
+                    !selectedGroupIds.includes(groupId),
+                );
+
+                return updateMergedAsset.then((updatedMerged) => {
+                  if (!extraWriteGroupIds.length) {
+                    return updatedMerged;
+                  }
+                  return addGlossaryConflictToGroups({
+                    id: conflictId,
+                    word: conflictWord,
+                    groupIds: extraWriteGroupIds,
+                  }).then(() => updatedMerged);
+                });
               });
             }
 
@@ -4345,10 +4302,9 @@ export default function MemoryManagement() {
               throw new Error("内容不可以和词相同");
             }
 
-            const writeGroupIds = resolution?.writeGroupIds || [];
             const shouldWriteConflictWordToNewGroup =
-              !writeGroupIds.length ||
-              writeGroupIds.includes(NEW_GLOSSARY_GROUP_OPTION_ID);
+              !(resolution?.writeGroupIds) ||
+              resolution.writeGroupIds.includes(NEW_GLOSSARY_GROUP_OPTION_ID);
             const aliases = [
               ...(shouldWriteConflictWordToNewGroup ? [conflictWord] : []),
               ...(resolution?.newGroupAliases?.length
@@ -4356,18 +4312,29 @@ export default function MemoryManagement() {
                 : proposal.after.aliases),
             ]
               .map((item) => item.trim())
-              .filter((item) => Boolean(item) && item !== newGroupTerm);
-            const extraWriteGroupIds = writeGroupIds.filter(
+              .filter(Boolean);
+
+            const extraWriteGroupIds = (resolution?.writeGroupIds || []).filter(
               (groupId) => groupId !== NEW_GLOSSARY_GROUP_OPTION_ID,
             );
 
-            return createGlossaryGroupFromConflict({
-              id: conflictId,
-              word: conflictWord,
-              term: newGroupTerm,
-              aliases: [...new Set(aliases)],
-              description: newGroupContent,
-              group_ids: extraWriteGroupIds.length ? extraWriteGroupIds : undefined,
+            return createGlossaryAsset(
+              {
+                ...proposal.after,
+                term: newGroupTerm,
+                aliases: [...new Set(aliases)],
+                content: (resolution?.newGroupContent ?? proposal.after.content).trim(),
+              },
+              { conflictId },
+            ).then((created) => {
+              if (!extraWriteGroupIds.length) {
+                return created;
+              }
+              return addGlossaryConflictToGroups({
+                id: conflictId,
+                word: conflictWord,
+                groupIds: extraWriteGroupIds,
+              }).then(() => created);
             });
           }),
         );

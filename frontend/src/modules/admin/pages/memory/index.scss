@@ -1481,10 +1481,10 @@
 
 .memory-glossary-target-preview-card {
   min-width: 0;
-  border: 1px solid #91caff;
-  border-radius: 8px;
-  background: #f0f7ff;
-  padding: 12px 14px;
+  border: 1px solid #b2ddff;
+  border-radius: 4px;
+  background: #f5fbff;
+  padding: 8px 10px;
   display: flex;
   align-items: flex-start;
   cursor: default;
@@ -1661,11 +1661,20 @@
 }
 
 .memory-glossary-action-trigger.ant-btn {
-  border-radius: 8px;
-  min-width: 92px;
+  border-radius: 6px;
+  min-width: 104px;
+  height: 34px;
   color: #175cd3;
-  border-color: #b2ddff;
-  background: #f5fbff;
+  border-color: #bfdbfe;
+  background: #f8fbff;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.memory-glossary-action-trigger.ant-btn:hover {
+  color: #1d4ed8;
+  border-color: #93c5fd;
+  background: #eff6ff;
 }
 
 .memory-glossary-action-menu-item {
@@ -2723,6 +2732,18 @@
 
   .memory-glossary-inbox-card-line {
     grid-template-columns: 1fr;
+  }
+
+  .memory-glossary-inbox-card-grid,
+  .memory-glossary-action-options {
+    grid-template-columns: 1fr;
+  }
+
+  .memory-glossary-action-detail {
+    border-left: 0;
+    border-top: 1px solid #d0d5dd;
+    padding-left: 0;
+    padding-top: 12px;
   }
 
   .memory-glossary-inbox-card-actions {
