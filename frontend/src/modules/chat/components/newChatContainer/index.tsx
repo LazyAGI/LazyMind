@@ -1187,12 +1187,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
     }
 
     function handleStartEditUserMessage(item: any, index: number) {
-      if (!canChat) {
-        if (disabledReason) {
-          message.warning(disabledReason);
-        }
-        return;
-      }
       if (loading || activeStreamRef.current) {
         return;
       }
@@ -1206,12 +1200,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
     }
 
     function handleResendEditedUserMessage(index: number, value: string) {
-      if (!canChat) {
-        if (disabledReason) {
-          message.warning(disabledReason);
-        }
-        return;
-      }
       if (loading || activeStreamRef.current) {
         return;
       }
