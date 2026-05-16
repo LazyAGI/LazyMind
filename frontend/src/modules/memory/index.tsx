@@ -167,6 +167,7 @@ const backendSuggestionPageSize = 20;
 const defaultSkillListPageSize = 6;
 const showGlossaryInboxUi = true;
 const MERGED_GLOSSARY_GROUP_OPTION_ID = "__merged_glossary_group__";
+const MERGED_GLOSSARY_GROUP_OPTION_ID_PREFIX = `${MERGED_GLOSSARY_GROUP_OPTION_ID}:`;
 const NEW_GLOSSARY_GROUP_OPTION_ID = "__new_glossary_group__";
 const isReviewableSuggestionStatus = (status?: string) => {
   const normalized = String(status || "").trim().toLowerCase();
@@ -4278,21 +4279,37 @@ export default function MemoryManagement() {
                   description,
                 };
               });
+              const firstMergedGroupIds = mergeGroups
+                .map((groupIds) => groupIds[0])
+                .filter(Boolean);
+              if (!firstMergedGroupIds.length) {
+                throw new Error(t("admin.memoryGlossaryInboxSelectTargetFirst"));
+              }
               const writeGroupIds = resolution?.writeGroupIds || [];
+              const shouldWriteToMergedGroup =
+                !writeGroupIds.length ||
+                writeGroupIds.some((groupId) => groupId.startsWith(MERGED_GLOSSARY_GROUP_OPTION_ID));
               const extraWriteGroupIds = writeGroupIds.filter(
                 (groupId) =>
+                  !groupId.startsWith(MERGED_GLOSSARY_GROUP_OPTION_ID_PREFIX) &&
                   groupId !== MERGED_GLOSSARY_GROUP_OPTION_ID &&
                   !selectedGroupIds.includes(groupId),
               );
-              const shouldWriteToMergedGroup =
-                !writeGroupIds.length ||
-                writeGroupIds.includes(MERGED_GLOSSARY_GROUP_OPTION_ID);
+              const targetGroupIds = Array.from(
+                new Set([
+                  ...(shouldWriteToMergedGroup ? firstMergedGroupIds : []),
+                  ...extraWriteGroupIds,
+                ]),
+              );
+              if (!targetGroupIds.length) {
+                throw new Error(t("admin.memoryGlossaryInboxSelectTargetFirst"));
+              }
 
               return mergeGlossaryConflictAndAddWord({
                 id: conflictId,
                 word: conflictWord,
                 merges: mergePayloads,
-                group_ids: shouldWriteToMergedGroup ? undefined : extraWriteGroupIds,
+                group_ids: targetGroupIds,
               });
             }
 
