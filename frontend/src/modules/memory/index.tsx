@@ -90,7 +90,6 @@ import {
   createGlossaryAsset,
   getGlossaryAssetDetail,
   listGlossaryConflicts,
-  listGlossaryAssetsPage,
   mergeGlossaryAssets,
   mergeGlossaryConflictAndAddWord,
   removeGlossaryConflict,
