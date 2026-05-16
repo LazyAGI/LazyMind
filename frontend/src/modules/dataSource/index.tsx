@@ -261,25 +261,6 @@ function parseFeishuScheduleExpr(expr?: string) {
   if (!parsed) {
     return null;
   }
-
-  const trimmed = expr.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const normalized = trimmed.toLowerCase();
-  if (normalized === "manual" || normalized === "manual_only") {
-    return null;
-  }
-
-  const dailyMatch = trimmed.match(/^daily@(([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?)$/i);
-  if (dailyMatch) {
-    return {
-      syncMode: "scheduled" as const,
-      scheduleCycle: "daily",
-      scheduleTime: normalizeScheduleTime(dailyMatch[1]),
-    };
-  }
-
   return {
     syncMode: "scheduled" as const,
     scheduleCycle: parsed.scheduleCycle,
@@ -293,6 +274,47 @@ function buildFeishuScheduleExpr(scheduleCycle?: string, scheduleTime?: string) 
 
 function buildFeishuManualScheduleExpr() {
   return "manual";
+}
+
+// Shared schedule expression helpers (used by both local reconcile_schedule and
+// cloud schedule_expr). Format follows backend: `daily@HH:MM:SS`,
+// `every2d@HH:MM:SS`, `every7d@HH:MM:SS`, or `manual`.
+function parseReconcileSchedule(expr?: string): {
+  scheduleCycle: "daily" | "twoDays" | "weekly";
+  scheduleTime: string;
+} | null {
+  if (!expr) return null;
+  const trimmed = expr.trim();
+  if (!trimmed) return null;
+  const lower = trimmed.toLowerCase();
+  if (lower === "manual" || lower === "manual_only") return null;
+
+  const dailyMatch = trimmed.match(/^daily@(([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?)$/i);
+  if (dailyMatch) {
+    return { scheduleCycle: "daily", scheduleTime: normalizeScheduleTime(dailyMatch[1]) };
+  }
+  const everyMatch = trimmed.match(/^every(\d+)d@(([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?)$/i);
+  if (everyMatch) {
+    const days = Number(everyMatch[1]);
+    const time = normalizeScheduleTime(everyMatch[2]);
+    if (days === 2) return { scheduleCycle: "twoDays", scheduleTime: time };
+    if (days === 7) return { scheduleCycle: "weekly", scheduleTime: time };
+    return { scheduleCycle: "daily", scheduleTime: time };
+  }
+  return null;
+}
+
+function buildReconcileSchedule(scheduleCycle?: string, scheduleTime?: string): string {
+  const time = normalizeScheduleTime(scheduleTime);
+  if (scheduleCycle === "twoDays") return `every2d@${time}`;
+  if (scheduleCycle === "weekly") return `every7d@${time}`;
+  return `daily@${time}`;
+}
+
+function getScheduleCycleLabel(scheduleCycle: string, t: TFunction): string {
+  if (scheduleCycle === "twoDays") return t("admin.dataSourceCycleTwoDays");
+  if (scheduleCycle === "weekly") return t("admin.dataSourceCycleWeekly");
+  return t("admin.dataSourceCycleDaily");
 }
 
 function buildFeishuScheduleLabel(binding: CloudSourceBinding | null, t: TFunction) {
