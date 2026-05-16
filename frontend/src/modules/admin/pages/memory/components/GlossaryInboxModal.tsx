@@ -60,6 +60,7 @@ const mergeColorOptions = [
   { value: "yellow", label: "黄色", color: "#f4d06f", textColor: "#b54708" },
 ];
 const MERGED_GROUP_OPTION_ID = "__merged_glossary_group__";
+const MERGED_GROUP_OPTION_ID_PREFIX = `${MERGED_GROUP_OPTION_ID}:`;
 const NEW_GROUP_OPTION_ID = "__new_glossary_group__";
 
 const getDefaultResolution = (proposal: GlossaryChangeProposal): GlossaryConflictResolution => {
@@ -472,6 +473,10 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
       const mergeGroups =
         activeResolution.mergeGroups?.filter((groupIds) => groupIds.length >= 2) ||
         (activeResolution.mergeGroupIds?.length ? [activeResolution.mergeGroupIds] : []);
+      const mergedWriteGroupIds = mergeGroups.map(
+        (groupIds, groupIndex) =>
+          `${MERGED_GROUP_OPTION_ID_PREFIX}${groupIds[0] || `group-${groupIndex}`}`,
+      );
       applyGlossaryProposals([proposal], {
         [proposal.id]: {
           ...activeResolution,
@@ -481,7 +486,7 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
           mergeGroups,
           writeGroupIds: isFullMerge
             ? undefined
-            : activeResolution.writeGroupIds ?? [MERGED_GROUP_OPTION_ID],
+            : activeResolution.writeGroupIds ?? mergedWriteGroupIds,
           mergedGroupTerm: mergedDraft.term,
           mergedGroupAliases: mergedDraft.aliases,
           mergedGroupContent: mergedDraft.content,
@@ -588,24 +593,25 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
               const isFullMerge =
                 selectedMergeGroups.length >= 2 && unmergedGroups.length === 0;
               const canDirectConfirmMerge = isFullMerge && mergeDrafts.length === 1;
-              const finalWriteGroupIds =
-                activeResolution.writeGroupIds ?? [MERGED_GROUP_OPTION_ID];
-              const mergedDraft =
-                actionMode === "merge"
-                  ? buildMergedDraft(proposal, selectedMergeGroups, activeResolution)
-                  : null;
-              const finalTargetGroups: GlossaryAsset[] = mergedDraft
-                ? [
-                    {
-                      ...proposal.after,
-                      id: MERGED_GROUP_OPTION_ID,
-                      term: mergedDraft.term,
-                      aliases: mergedDraft.aliases,
-                      content: mergedDraft.content,
-                    },
-                    ...unmergedGroups,
-                  ]
-                : unmergedGroups;
+              const mergedTargetGroups: GlossaryAsset[] = mergeDrafts.map((draft, draftIndex) => ({
+                ...proposal.after,
+                id: `${MERGED_GROUP_OPTION_ID_PREFIX}${draft.groupIds[0] || `group-${draftIndex}`}`,
+                term: draft.term || proposal.after.term,
+                aliases: draft.aliases,
+                content: draft.content,
+              }));
+              const mergedOptionIds = mergedTargetGroups.map((group) => group.id);
+              const validFinalGroupIds = new Set([
+                ...mergedOptionIds,
+                ...unmergedGroups.map((group) => group.id),
+              ]);
+              const finalWriteGroupIds = activeResolution.writeGroupIds?.length
+                ? activeResolution.writeGroupIds.filter((groupId) => validFinalGroupIds.has(groupId))
+                : mergedOptionIds;
+              const finalTargetGroups: GlossaryAsset[] = [
+                ...mergedTargetGroups,
+                ...unmergedGroups,
+              ];
               const createDraft = {
                 term: (activeResolution.newGroupTerm || "").trim(),
                 aliases: activeResolution.newGroupAliases?.length
@@ -914,7 +920,7 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                                   return;
                                 }
                                 const validWriteGroupIds = new Set([
-                                  MERGED_GROUP_OPTION_ID,
+                                  ...mergedOptionIds,
                                   ...unmergedGroups.map((group) => group.id),
                                 ]);
                                 const currentWriteGroupIds =
@@ -929,7 +935,7 @@ export default function GlossaryInboxModal(props: GlossaryInboxModalProps) {
                                   mergedGroupContent: mergeDrafts[0]?.content || "",
                                   writeGroupIds: currentWriteGroupIds.length
                                     ? currentWriteGroupIds
-                                    : [MERGED_GROUP_OPTION_ID],
+                                    : mergedOptionIds,
                                 });
                                 setMergeStageMap((previous) => ({
                                   ...previous,
