@@ -1732,25 +1732,6 @@ export default function DataSourceManagement() {
     } finally {
       setWizardSaving(false);
     }
-
-    const values = form.getFieldsValue(true);
-
-    if (
-      wizardMode !== "edit" &&
-      !(await ensureKnowledgeBaseNameUnique(values.knowledgeBase))
-    ) {
-      return;
-    }
-
-    if (wizardMode !== "edit" && !validateConnectionBeforeSave()) {
-      return;
-    }
-
-    if (selectedType === "local") {
-      await handleSaveLocalSource(values);
-      return;
-    }
-    await handleSaveFeishuSource(values);
   };
 
   const columns: ColumnsType<DataSourceItem> = [
