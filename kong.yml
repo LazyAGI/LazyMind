@@ -41,6 +41,9 @@ services:
   # core 统一通过 /api/core 访问，Kong  strip 前缀后转发（如 /api/core/conversations → /conversations）
   - name: core-service
     url: http://core:8000
+    connect_timeout: 180000
+    read_timeout: 600000
+    write_timeout: 600000
     routes:
       - name: core-route
         paths:
