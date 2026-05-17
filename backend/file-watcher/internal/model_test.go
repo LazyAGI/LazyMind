@@ -51,4 +51,3 @@ func TestReportEventsRequestJSONUsesSnakeCase(t *testing.T) {
 		t.Fatalf("expected no PascalCase event fields, got %s", s)
 	}
 }
-
