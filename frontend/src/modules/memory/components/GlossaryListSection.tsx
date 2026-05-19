@@ -56,20 +56,8 @@ export default function GlossaryListSection(props: GlossaryListSectionProps) {
     setSelectedGlossaryAssetIds,
   } = props;
   const sectionRef = useRef<HTMLDivElement>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(defaultGlossaryPageSize);
   const [tableBodyHeight, setTableBodyHeight] = useState<number>();
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [glossarySource, query]);
-
-  useEffect(() => {
-    const maxPage = Math.max(1, Math.ceil(filteredItems.length / pageSize));
-    if (currentPage > maxPage) {
-      setCurrentPage(maxPage);
-    }
-  }, [currentPage, filteredItems.length, pageSize]);
   useEffect(() => {
     const sectionElement = sectionRef.current;
     if (!sectionElement) {
