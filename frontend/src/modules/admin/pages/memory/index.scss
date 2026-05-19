@@ -2254,12 +2254,12 @@
 
 .memory-diff-raw-card {
   border: 1px solid #e4e7ec;
-  border-radius: 12px;
+  border-radius: 8px;
   background: #fcfcfd;
   padding: 10px 12px;
 
   h4 {
-    margin: 0 0 8px;
+    margin: 0;
     color: #1d2939;
     font-size: 13px;
     font-weight: 700;
@@ -2275,6 +2275,94 @@
     line-height: 1.6;
     color: #475467;
   }
+}
+
+.memory-diff-raw-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.memory-diff-skill-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e8eef7;
+}
+
+.memory-diff-skill-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.memory-diff-skill-label,
+.memory-diff-skill-meta-label {
+  flex: 0 0 auto;
+  color: #667085;
+  font-size: 12px;
+}
+
+.memory-diff-skill-name {
+  min-width: 0;
+  color: #101828;
+  font-size: 15px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.memory-diff-skill-description {
+  margin: 0;
+  color: #475467;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.memory-diff-skill-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.memory-diff-skill-meta-item {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.memory-diff-skill-meta-value {
+  min-width: 0;
+  color: #344054;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.memory-diff-skill-tag-list {
+  min-width: 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.memory-diff-skill-tag {
+  color: #344054;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.memory-diff-source-title {
+  margin: 2px 0 6px;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .memory-diff-source-lines {

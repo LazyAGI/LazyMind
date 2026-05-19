@@ -14,6 +14,7 @@ import {
 import SendIcon from "@/modules/chat/assets/icons/send_icon.svg?react";
 import RouteLoading from "../../components/RouteLoading";
 import { useMemoryManagementOutletContext } from "../../context";
+import { getSkillBodyContentForDisplay } from "../../shared";
 
 export default function MemoryReviewPage() {
   const {
@@ -111,6 +112,102 @@ export default function MemoryReviewPage() {
     maybeLoadMoreBackendSuggestions();
   }, [activeBackendSuggestions.length, maybeLoadMoreBackendSuggestions]);
 
+  const originalSkill = activeProposal?.tab === "skills" ? activeProposal.before : null;
+  const originalExperience =
+    activeProposal?.tab === "experience" ? activeProposal.before : null;
+  const originalSkillTags = Array.isArray(originalSkill?.tags)
+    ? originalSkill.tags.filter(Boolean)
+    : [];
+  const originalSkillBodyText =
+    originalSkill && typeof originalSkill.content === "string"
+      ? getSkillBodyContentForDisplay(originalSkill.content)
+      : "";
+  const originalSourceBodyText = originalSkill
+    ? originalSkillBodyText
+    : originalExperience
+      ? originalExperience.content
+      : activeProposalDiff?.beforeText || activeBackendSuggestionSourceText;
+  const sourceBodyTitle = originalSkill
+    ? t("admin.memoryMarkdown")
+    : originalExperience
+      ? t("admin.memoryContent")
+      : "";
+  const renderOriginalSkillSummary = () => {
+    if (!originalSkill) {
+      return null;
+    }
+
+    return (
+      <div className="memory-diff-skill-summary">
+        <div className="memory-diff-skill-title-row">
+          <span className="memory-diff-skill-label">{t("admin.memoryName")}</span>
+          <strong className="memory-diff-skill-name">{originalSkill.name || "-"}</strong>
+        </div>
+        {originalSkill.description ? (
+          <p className="memory-diff-skill-description">{originalSkill.description}</p>
+        ) : null}
+        <div className="memory-diff-skill-meta">
+          {originalSkill.category ? (
+            <div className="memory-diff-skill-meta-item">
+              <span className="memory-diff-skill-meta-label">
+                {t("admin.memoryCategory")}
+              </span>
+              <span className="memory-diff-skill-meta-value">{originalSkill.category}</span>
+            </div>
+          ) : null}
+          <div className="memory-diff-skill-meta-item">
+            <span className="memory-diff-skill-meta-label">{t("admin.memoryTagSet")}</span>
+            {originalSkillTags.length ? (
+              <span className="memory-diff-skill-tag-list">
+                {originalSkillTags.map((tag: string) => (
+                  <span key={tag} className="memory-diff-skill-tag">
+                    {tag}
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <span className="memory-diff-skill-meta-value">-</span>
+            )}
+          </div>
+          <div className="memory-diff-skill-meta-item">
+            <span className="memory-diff-skill-meta-label">
+              {t("admin.memoryAutoUpdate")}
+            </span>
+            <span className="memory-diff-skill-meta-value">
+              {originalSkill.autoEvo ? t("admin.memoryDiffBoolYes") : t("admin.memoryDiffBoolNo")}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+  const renderOriginalExperienceSummary = () => {
+    if (!originalExperience) {
+      return null;
+    }
+
+    return (
+      <div className="memory-diff-skill-summary">
+        <div className="memory-diff-skill-title-row">
+          <span className="memory-diff-skill-label">{t("admin.memoryTitle")}</span>
+          <strong className="memory-diff-skill-name">{originalExperience.title || "-"}</strong>
+        </div>
+        <div className="memory-diff-skill-meta">
+          <div className="memory-diff-skill-meta-item">
+            <span className="memory-diff-skill-meta-label">
+              {t("admin.memoryAutoUpdate")}
+            </span>
+            <span className="memory-diff-skill-meta-value">
+              {originalExperience.autoEvo
+                ? t("admin.memoryDiffBoolYes")
+                : t("admin.memoryDiffBoolNo")}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (isReviewRouteRequested && !activeProposal) {
     return <RouteLoading title={t("admin.memoryDiffDialogTitle")} />;
   }
@@ -197,9 +294,16 @@ export default function MemoryReviewPage() {
             <div className="memory-review-grid memory-review-grid-step-choose">
               <div className="memory-review-column">
                 <div className="memory-diff-raw-card">
-                  <h4>{t("admin.memoryDiffBefore")}</h4>
+                  <div className="memory-diff-raw-card-head">
+                    <h4>{t("admin.memoryDiffBefore")}</h4>
+                  </div>
+                  {renderOriginalSkillSummary()}
+                  {renderOriginalExperienceSummary()}
+                  {sourceBodyTitle ? (
+                    <div className="memory-diff-source-title">{sourceBodyTitle}</div>
+                  ) : null}
                   <div className="memory-diff-source-lines">
-                    {activeBackendSuggestionSourceText
+                    {originalSourceBodyText
                       .split("\n")
                       .map((line: string, index: number) => (
                         <div key={`backend-before-${index}`} className="memory-diff-source-line">
@@ -491,13 +595,22 @@ export default function MemoryReviewPage() {
           <div className="memory-review-grid memory-review-grid-step-choose">
             <div className="memory-review-column">
               <div className="memory-diff-raw-card">
-                <h4>{t("admin.memoryDiffBefore")}</h4>
+                <div className="memory-diff-raw-card-head">
+                  <h4>{t("admin.memoryDiffBefore")}</h4>
+                </div>
+                {renderOriginalSkillSummary()}
+                {renderOriginalExperienceSummary()}
+                {sourceBodyTitle ? (
+                  <div className="memory-diff-source-title">{sourceBodyTitle}</div>
+                ) : null}
                 <div className="memory-diff-source-lines">
-                  {activeProposalDiff.beforeText.split("\n").map((line: string, index: number) => (
-                    <div key={`source-${index}`} className="memory-diff-source-line">
-                      {line || " "}
-                    </div>
-                  ))}
+                  {originalSourceBodyText
+                    .split("\n")
+                    .map((line: string, index: number) => (
+                      <div key={`source-${index}`} className="memory-diff-source-line">
+                        {line || " "}
+                      </div>
+                    ))}
                 </div>
               </div>
             </div>

@@ -1368,6 +1368,7 @@ const zhCN = {
     memoryShareSkillHint: "技能适合分发给协作团队，便于统一执行 SOP 与标准流程。",
     memoryShareExperienceHint: "经验记忆适合分享给指定协作者，便于同步偏好、风格与沉淀经验。",
     memoryAutoEvo: "自动进化",
+    memoryAutoUpdate: "自动更新",
     memoryAutoEvoToggleFailed: "自动进化切换失败",
     memorySkillPendingRemoveTag: "有删除建议",
     memorySkillAutoEvoDisabledByRemove: "该技能有删除建议，不能开启自动进化",

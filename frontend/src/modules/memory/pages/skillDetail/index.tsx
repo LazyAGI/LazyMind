@@ -7,7 +7,7 @@ import { getLocalizedErrorMessage } from "@/components/request";
 import RouteLoading from "../../components/RouteLoading";
 import { useMemoryManagementOutletContext } from "../../context";
 import { getSkillAssetDetail, patchSkillAsset } from "../../skillApi";
-import type { StructuredAsset } from "../../shared";
+import { getSkillBodyContentForDisplay, type StructuredAsset } from "../../shared";
 
 const markdownExtensions = new Set(["md", "markdown"]);
 
@@ -24,18 +24,8 @@ const isMarkdownSkill = (asset: StructuredAsset) => {
   return markdownExtensions.has(ext) || hasMarkdownShape(asset.content || "");
 };
 
-const META_LINE_REGEX = /^\s*(?:\*\*)?\s*(name|description)\s*(?:\*\*)?\s*[:：][^\n]*$/gim;
-
 const stripLeadingMetaLines = (content: string) => {
-  if (!content) {
-    return "";
-  }
-  return content
-    .replace(/^\s*---\s*[\r\n]+/, "")
-    .replace(META_LINE_REGEX, "")
-    .replace(/^(?:\s*---\s*[\r\n]+)+/, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/^\s+/, "");
+  return getSkillBodyContentForDisplay(content);
 };
 
 const composeContentWithMeta = (params: {

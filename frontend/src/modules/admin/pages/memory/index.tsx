@@ -133,6 +133,7 @@ import {
   getBaseName,
   getPreferenceSuggestionResourceParam,
   getSkillSuggestionResourceParam,
+  getSkillBodyContentForDisplay,
   inferSkillFileExt,
   initialChangeProposals,
   initialSkills,
@@ -1180,28 +1181,12 @@ export default function MemoryManagement() {
       return "";
     }
 
-    const commonLabels = {
-      autoEvo: t("admin.memoryAutoEvo"),
-      content: t("admin.memoryContent"),
-      yes: t("admin.memoryDiffBoolYes"),
-      no: t("admin.memoryDiffBoolNo"),
-    };
-
     if (activeProposal.tab === "skills") {
-      return serializeStructuredAsset(activeProposal.before, {
-        name: t("admin.memoryName"),
-        description: t("admin.memoryDescription"),
-        category: t("admin.memoryCategory"),
-        tags: t("admin.memoryTagSet"),
-        ...commonLabels,
-      });
+      return getSkillBodyContentForDisplay(activeProposal.before.content);
     }
 
-    return serializeExperienceAsset(activeProposal.before, {
-      title: t("admin.memoryTitle"),
-      ...commonLabels,
-    });
-  }, [activeProposal, t]);
+    return activeProposal.before.content;
+  }, [activeProposal]);
   const backendDraftDiffLines = useMemo(
     () => buildUnifiedDiffLines(backendDraftPreview?.diff || ""),
     [backendDraftPreview?.diff],
@@ -4304,6 +4289,7 @@ export default function MemoryManagement() {
       width: 250,
       fixed: "right",
       render: (_value, record) => {
+        const isChildSkill = activeTab === "skills" && Boolean(record.parentId);
         const pendingProposal =
           activeTab === "skills" ? getPendingProposal("skills", record.id) : undefined;
         const hasBackendPendingReview =
@@ -4333,19 +4319,21 @@ export default function MemoryManagement() {
             </Tooltip>
             {activeTab !== "tools" ? (
               <>
-                <Tooltip title={reviewTooltip}>
-                  <Button
-                    type="text"
-                    icon={<HistoryOutlined />}
-                    loading={reviewSuggestionLoadingId === record.id}
-                    disabled={!canReviewChange}
-                    onClick={() =>
-                      void openChangeReview("skills", record.id, record.updateStatus, {
-                        forceReload: true,
-                      })
-                    }
-                  />
-                </Tooltip>
+                {!isChildSkill ? (
+                  <Tooltip title={reviewTooltip}>
+                    <Button
+                      type="text"
+                      icon={<HistoryOutlined />}
+                      loading={reviewSuggestionLoadingId === record.id}
+                      disabled={!canReviewChange}
+                      onClick={() =>
+                        void openChangeReview("skills", record.id, record.updateStatus, {
+                          forceReload: true,
+                        })
+                      }
+                    />
+                  </Tooltip>
+                ) : null}
                 <Tooltip title={t("admin.memoryEditItem")}>
                   <Button
                     type="text"
@@ -4380,34 +4368,40 @@ export default function MemoryManagement() {
       title: t("admin.memoryAutoEvo"),
       key: "autoEvo",
       width: 90,
-      render: (_value, record) => (
-        <Switch
-          checked={record.autoEvo}
-          loading={skillAutoEvoLoading.has(record.id)}
-          onChange={(checked) => {
-            void (async () => {
-              setSkillAutoEvoLoading((prev) => new Set(prev).add(record.id));
-              try {
-                await patchSkillAsset(record.id, { auto_evo: checked });
-                await refreshSkillAssets({ preserveChangeProposals: true });
-              } catch (error) {
-                console.error("Toggle auto_evo failed:", error);
-                await refreshSkillAssets({ preserveChangeProposals: true });
-                message.error(
-                  getLocalizedErrorMessage(error, t("admin.memoryAutoEvoToggleFailed")) ||
-                    t("admin.memoryAutoEvoToggleFailed"),
-                );
-              } finally {
-                setSkillAutoEvoLoading((prev) => {
-                  const next = new Set(prev);
-                  next.delete(record.id);
-                  return next;
-                });
-              }
-            })();
-          }}
-        />
-      ),
+      render: (_value, record) => {
+        if (activeTab === "skills" && record.parentId) {
+          return "-";
+        }
+
+        return (
+          <Switch
+            checked={record.autoEvo}
+            loading={skillAutoEvoLoading.has(record.id)}
+            onChange={(checked) => {
+              void (async () => {
+                setSkillAutoEvoLoading((prev) => new Set(prev).add(record.id));
+                try {
+                  await patchSkillAsset(record.id, { auto_evo: checked });
+                  await refreshSkillAssets({ preserveChangeProposals: true });
+                } catch (error) {
+                  console.error("Toggle auto_evo failed:", error);
+                  await refreshSkillAssets({ preserveChangeProposals: true });
+                  message.error(
+                    getLocalizedErrorMessage(error, t("admin.memoryAutoEvoToggleFailed")) ||
+                      t("admin.memoryAutoEvoToggleFailed"),
+                  );
+                } finally {
+                  setSkillAutoEvoLoading((prev) => {
+                    const next = new Set(prev);
+                    next.delete(record.id);
+                    return next;
+                  });
+                }
+              })();
+            }}
+          />
+        );
+      },
     },
   ];
 
