@@ -99,6 +99,7 @@ import {
   getGlossaryAssetDetail,
   listGlossaryAssetsPage,
   listGlossaryConflicts,
+  listGlossaryAssetsPage,
   mergeGlossaryAssets,
   mergeGlossaryConflictAndAddWord,
   removeGlossaryConflict,
@@ -327,7 +328,8 @@ export default function MemoryManagement() {
   const reviewRouteItemId = reviewRouteMatch?.params.itemId;
   const isReviewRouteRequested = Boolean(reviewRouteTab && reviewRouteItemId);
   const routeListTab = parseMemoryTab(tabRouteMatch?.params.tab);
-  const initialRouteTab =
+  const queryRouteTab = parseMemoryTab(searchParams.get("tab"));
+  const routeMemoryTab =
     (skillRouteItemId
       ? "skills"
       : experienceRouteItemId
@@ -375,6 +377,11 @@ export default function MemoryManagement() {
   const skillListRequestIdRef = useRef(0);
   const skillListRouteLocationKeyRef = useRef("");
   const skillListRefreshKeyRef = useRef("");
+  const experienceSectionRefreshKeyRef = useRef("");
+  const glossaryAssetsRefreshKeyRef = useRef("");
+  const glossaryAssetsFilterKeyRef = useRef("");
+  const glossaryAssetsRouteLocationKeyRef = useRef("");
+  const glossaryConflictsRefreshKeyRef = useRef("");
   const [skillListPage, setSkillListPage] = useState(1);
   const [skillListPageSize, setSkillListPageSize] = useState(defaultSkillListPageSize);
   const [skillListTotal, setSkillListTotal] = useState(initialSkills.length);
@@ -1417,19 +1424,10 @@ export default function MemoryManagement() {
   );
 
   useEffect(() => {
-    const queryTab = parseMemoryTab(searchParams.get("tab"));
-    const routeTab =
-      skillRouteItemId
-        ? "skills"
-        : experienceRouteItemId
-        ? "experience"
-        : glossaryRouteItemId
-        ? "glossary"
-        : reviewRouteTab || routeListTab || queryTab || "skills";
     const shouldRefreshSkillAssets =
       Boolean(skillRouteItemId) ||
       reviewRouteTab === "skills" ||
-      (!experienceRouteItemId && !glossaryRouteItemId && routeTab === "skills");
+      routeMemoryTab === "skills";
 
     if (!shouldRefreshSkillAssets) {
       return;
@@ -1460,15 +1458,12 @@ export default function MemoryManagement() {
     void refreshSkillAssets({ page: requestPage });
   }, [
     category,
-    experienceRouteItemId,
-    glossaryRouteItemId,
     location.key,
     location.pathname,
     location.search,
     refreshSkillAssets,
     reviewRouteTab,
-    routeListTab,
-    searchParams,
+    routeMemoryTab,
     skillKeyword,
     skillListPage,
     skillListPageSize,
