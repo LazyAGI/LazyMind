@@ -100,7 +100,6 @@ import {
   getGlossaryAssetDetail,
   listGlossaryAssetsPage,
   listGlossaryConflicts,
-  listGlossaryAssetsPage,
   mergeGlossaryAssets,
   mergeGlossaryConflictAndAddWord,
   removeGlossaryConflict,
