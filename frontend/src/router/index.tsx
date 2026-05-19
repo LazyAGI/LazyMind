@@ -27,6 +27,9 @@ import MemoryGlossaryDetailPage from "@/modules/memory/pages/glossaryDetail";
 import MemorySkillDetailPage from "@/modules/memory/pages/skillDetail";
 import MemoryExperienceDetailPage from "@/modules/memory/pages/experienceDetail";
 import ModelProviderPage from "@/modules/admin/pages/modelProvider";
+import ModelProvidersPage from "@/modules/admin/pages/modelProvider/pages/ModelProvidersPage";
+import ExternalServicesPage from "@/modules/admin/pages/modelProvider/pages/ExternalServicesPage";
+import DefaultServicesPage from "@/modules/admin/pages/modelProvider/pages/DefaultServicesPage";
 import { SelfEvolutionHomePage, SelfEvolutionDetailPage } from "@/modules/selfEvolution";
 import { getAntdLocale } from "@/i18n/antdLocale";
 
@@ -65,7 +68,12 @@ export default function AppRouter() {
           </Route>
           <Route path="data-sources" element={<DataSourceManagement />} />
           <Route path="data-sources/:id" element={<DataSourceDetail />} />
-          <Route path="model-providers" element={<ModelProviderPage />} />
+          <Route path="model-providers" element={<ModelProviderPage />}>
+            <Route index element={<Navigate to="models" replace />} />
+            <Route path="models" element={<ModelProvidersPage />} />
+            <Route path="external-services" element={<ExternalServicesPage />} />
+            <Route path="default-services" element={<DefaultServicesPage />} />
+          </Route>
           <Route path="memory-management" element={<MemoryManagement />}>
             <Route index element={<MemoryManagementListPage />} />
             <Route path="tools" element={<MemoryManagementListPage />} />
