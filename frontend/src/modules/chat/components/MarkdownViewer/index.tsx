@@ -8,13 +8,15 @@ import { Popover } from "antd";
 import rehypeSanitize from "rehype-sanitize";
 import "./markdown.scss";
 import "./index.scss";
-import { useEffect, useState } from "react";
+import { isValidElement, useEffect, useMemo, useState } from "react";
 import { customSchema } from "./config";
 import rehypeRaw from "rehype-raw";
 import {
   resolveCoreAssetUrl,
   resolveMarkdownImageUrlAsync,
 } from "@/modules/knowledge/utils/imageUrl";
+import MermaidBlock from "./MermaidBlock";
+import { getLanguageFromClassName, highlightCode } from "./syntaxHighlight";
 
 const SOURCE_PREFIXES = ["#source-", "#user-content-source-"];
 
@@ -67,6 +69,53 @@ const ImageComponent = (props: any) => {
       onLoad={() => setImageLoadError(false)}
     />
   );
+};
+
+const CodeComponent = (props: any) => {
+  const { children, className, inline, ...rest } = props;
+  const code = String(children ?? "").replace(/\n$/, "");
+  const language = getLanguageFromClassName(className);
+  const highlighted = useMemo(
+    () => (!inline ? highlightCode(code, language) : ""),
+    [code, inline, language],
+  );
+
+  if (inline || !highlighted) {
+    return (
+      <code {...rest} className={className}>
+        {children}
+      </code>
+    );
+  }
+
+  return (
+    <code
+      {...rest}
+      className={classnames(className, `language-${language}`)}
+      data-language={language}
+      dangerouslySetInnerHTML={{ __html: highlighted }}
+    />
+  );
+};
+
+const PreComponent = (props: any) => {
+  const child = Array.isArray(props.children) ? props.children[0] : props.children;
+
+  if (isValidElement(child)) {
+    const childProps = child.props as {
+      children?: unknown;
+      className?: string;
+    };
+    const language = getLanguageFromClassName(childProps.className);
+
+    if (language === "mermaid") {
+      return (
+        <MermaidBlock code={String(childProps.children ?? "").replace(/\n$/, "")} />
+      );
+    }
+  }
+
+  return <pre {...props} />;
 };
 
 const MarkdownViewer = (props: any) => {
@@ -148,6 +197,8 @@ const MarkdownViewer = (props: any) => {
             return <li>{children}</li>;
           },
           img: ImageComponent,
+          pre: PreComponent,
+          code: CodeComponent,
           ...props.components,
         }}
       >
