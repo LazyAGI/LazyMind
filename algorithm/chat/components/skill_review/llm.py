@@ -11,14 +11,21 @@ class LLMJsonError(RuntimeError):
 class SkillReviewLLM:
     def __init__(self) -> None:
         self._llm = None
+        self._load_error: Exception | None = None
 
     @property
     def llm(self):
+        if self._load_error is not None:
+            raise self._load_error
         if self._llm is None:
             from lazyllm import AutoModel
             from chat.utils.load_config import get_config_path
 
-            self._llm = AutoModel(model='llm_instruct', config=get_config_path())
+            try:
+                self._llm = AutoModel(model='llm_instruct', config=get_config_path())
+            except Exception as exc:
+                self._load_error = exc
+                raise
         return self._llm
 
     def complete_json(self, prompt: str) -> dict[str, Any]:

@@ -12,22 +12,15 @@ ReviewStatus = Literal['completed', 'skipped', 'failed', 'running']
 class SkillReviewRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
-    session_id: str = Field(..., min_length=1)
-    session_db_path: str = Field(..., min_length=1)
-    work_dir: Optional[str] = None
+    # TODO: The final API contract is still open. These fields are kept for
+    # compatibility with the first skeleton but are not required by the current
+    # algorithm, which reads all sessions from read_session().
     min_user_turns: int = Field(default=3, ge=0)
     min_tool_turns: int = Field(default=2, ge=0)
     resume: bool = True
     force: bool = False
     llm_config: Optional[Dict[str, Any]] = None
-
-    @model_validator(mode='after')
-    def normalize_strings(self) -> 'SkillReviewRequest':
-        self.session_id = self.session_id.strip()
-        self.session_db_path = self.session_db_path.strip()
-        if self.work_dir is not None:
-            self.work_dir = self.work_dir.strip() or None
-        return self
+    emb_config: Optional[Dict[str, Any]] = None
 
 
 class SessionMessage(BaseModel):
@@ -144,6 +137,30 @@ class SkillReviewResult(BaseModel):
     trigger: Dict[str, Any] = Field(default_factory=dict)
     candidates: List[SkillReviewDecision] = Field(default_factory=list)
     artifacts: Dict[str, str] = Field(default_factory=dict)
+    error: Optional[str] = None
+
+
+class UserSkillReviewResult(BaseModel):
+    user_id: str
+    status: ReviewStatus
+    qualified: bool
+    session_count: int = 0
+    qualified_session_count: int = 0
+    trigger: Dict[str, Any] = Field(default_factory=dict)
+    candidates: List[SkillReviewDecision] = Field(default_factory=list)
+    artifacts: Dict[str, Any] = Field(default_factory=dict)
+    error: Optional[str] = None
+
+
+class SkillReviewBatchResult(BaseModel):
+    review_id: str
+    status: ReviewStatus
+    qualified: bool
+    user_count: int = 0
+    qualified_user_count: int = 0
+    candidates: List[SkillReviewDecision] = Field(default_factory=list)
+    users: List[UserSkillReviewResult] = Field(default_factory=list)
+    artifacts: Dict[str, Any] = Field(default_factory=dict)
     error: Optional[str] = None
 
 
