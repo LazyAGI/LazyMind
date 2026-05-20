@@ -39,7 +39,11 @@ function resolveUserId(userInfo?: Partial<UserInfo> | null) {
 
   const payload = decodeJwtPayload(userInfo?.token);
   const candidate = payload?.sub || payload?.user_id || payload?.uid;
-  return typeof candidate === "string" ? candidate : undefined;
+  if (typeof candidate === "string") {
+    return candidate;
+  }
+
+  return userInfo?.username || undefined;
 }
 
 export interface UserInfo {

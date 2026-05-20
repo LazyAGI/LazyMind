@@ -1,9 +1,11 @@
-import { Button, Form, Input, Select, Tag, Tooltip, message } from "antd";
+import { Alert, Button, Form, Input, Select, Switch, Tag, Tooltip } from "antd";
 import type { FormInstance } from "antd";
 import {
+  CloudServerOutlined,
   KeyOutlined,
   QuestionCircleOutlined,
-  SaveOutlined,
+  SearchOutlined,
+  ToolOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 
@@ -11,58 +13,100 @@ type ExternalServiceKey =
   | "embedding"
   | "mineru"
   | "paddleocr"
-  | "searchEngine"
-  | "webCrawler";
+  | "bingSearch"
+  | "googleSearch"
+  | "tavily";
+
+type ServiceCategoryKey = "parsing" | "tools";
 
 interface ExternalServiceConfig {
   key: ExternalServiceKey;
   titleKey: string;
   descKey: string;
-  tagKey: string;
+  category: ServiceCategoryKey;
   providerOptions: string[];
+  currentKeyPreview?: string;
+  status: "configured" | "missing" | "tbd";
 }
 
 interface ExternalServiceFormValues {
   provider?: string;
   baseUrl?: string;
   apiKey?: string;
+  enabled?: boolean;
 }
 
-const externalServiceConfigs: ExternalServiceConfig[] = [
+const serviceCategories: Array<{
+  key: ServiceCategoryKey;
+  titleKey: string;
+  descKey: string;
+  icon: JSX.Element;
+}> = [
   {
-    key: "embedding",
-    titleKey: "modelProvider.external.embeddingTitle",
-    descKey: "modelProvider.external.embeddingDesc",
-    tagKey: "modelProvider.external.tagRetrieval",
-    providerOptions: ["Qwen", "OpenAI", "SiliconFlow", "Custom"],
+    key: "parsing",
+    titleKey: "modelProvider.external.parsingCategoryTitle",
+    descKey: "modelProvider.external.parsingCategoryDesc",
+    icon: <CloudServerOutlined />,
   },
+  {
+    key: "tools",
+    titleKey: "modelProvider.external.toolsCategoryTitle",
+    descKey: "modelProvider.external.toolsCategoryDesc",
+    icon: <ToolOutlined />,
+  },
+];
+
+const externalServiceConfigs: ExternalServiceConfig[] = [
   {
     key: "mineru",
     titleKey: "modelProvider.external.mineruTitle",
     descKey: "modelProvider.external.mineruDesc",
-    tagKey: "modelProvider.external.tagParsing",
+    category: "parsing",
     providerOptions: ["MinerU", "Custom"],
+    currentKeyPreview: "mu-a****91f2",
+    status: "configured",
   },
   {
     key: "paddleocr",
     titleKey: "modelProvider.external.paddleTitle",
     descKey: "modelProvider.external.paddleDesc",
-    tagKey: "modelProvider.external.tagParsing",
+    category: "parsing",
     providerOptions: ["PaddleOCR", "Custom"],
+    status: "tbd",
   },
   {
-    key: "searchEngine",
-    titleKey: "modelProvider.external.searchTitle",
-    descKey: "modelProvider.external.searchDesc",
-    tagKey: "modelProvider.external.tagTool",
-    providerOptions: ["Google CSE", "Bocha", "Bing", "Custom"],
+    key: "embedding",
+    titleKey: "modelProvider.external.embeddingTitle",
+    descKey: "modelProvider.external.embeddingDesc",
+    category: "parsing",
+    providerOptions: ["Qwen", "OpenAI", "SiliconFlow", "Custom"],
+    currentKeyPreview: "sk-e****7c3a",
+    status: "configured",
   },
   {
-    key: "webCrawler",
-    titleKey: "modelProvider.external.crawlerTitle",
-    descKey: "modelProvider.external.crawlerDesc",
-    tagKey: "modelProvider.external.tagTool",
-    providerOptions: ["Firecrawl", "Jina", "Custom"],
+    key: "bingSearch",
+    titleKey: "modelProvider.external.bingTitle",
+    descKey: "modelProvider.external.bingDesc",
+    category: "tools",
+    providerOptions: ["Bing Search"],
+    status: "missing",
+  },
+  {
+    key: "googleSearch",
+    titleKey: "modelProvider.external.googleTitle",
+    descKey: "modelProvider.external.googleDesc",
+    category: "tools",
+    providerOptions: ["Google CSE"],
+    currentKeyPreview: "gcs-****09bd",
+    status: "configured",
+  },
+  {
+    key: "tavily",
+    titleKey: "modelProvider.external.tavilyTitle",
+    descKey: "modelProvider.external.tavilyDesc",
+    category: "tools",
+    providerOptions: ["Tavily"],
+    status: "missing",
   },
 ];
 
@@ -72,24 +116,24 @@ function maskKeyPreview(value?: string) {
     return "";
   }
   if (normalized.length <= 8) {
-    return "********";
+    return "****";
   }
-  return `${normalized.slice(0, 4)}...${normalized.slice(-4)}`;
+  return `${normalized.slice(0, 4)}****${normalized.slice(-4)}`;
 }
 
 function ServiceKeyPreview({
   form,
-  serviceKey,
+  service,
 }: {
   form: FormInstance<Record<ExternalServiceKey, ExternalServiceFormValues>>;
-  serviceKey: ExternalServiceKey;
+  service: ExternalServiceConfig;
 }) {
   const { t } = useTranslation();
-  const apiKey = Form.useWatch([serviceKey, "apiKey"], form);
-  const preview = maskKeyPreview(apiKey) || "********";
+  const apiKey = Form.useWatch([service.key, "apiKey"], form);
+  const preview = maskKeyPreview(apiKey) || service.currentKeyPreview || t("modelProvider.external.noKey");
 
   return (
-    <span>
+    <span className="model-provider-key-preview">
       <KeyOutlined />
       {t("modelProvider.external.previewOnly", { preview })}
     </span>
@@ -100,87 +144,112 @@ export default function ExternalServicesPage() {
   const { t } = useTranslation();
   const [form] = Form.useForm<Record<ExternalServiceKey, ExternalServiceFormValues>>();
 
-  const handleSave = () => {
-    const values = form.getFieldsValue();
-    const configured = Object.values(values).filter((item) => item?.provider || item?.baseUrl || item?.apiKey).length;
-    message.success(t("modelProvider.external.saveMockMessage", { count: configured }));
-  };
-
   return (
     <div className="model-provider-service-page">
-      <section className="model-provider-service-hero">
-        <div>
-          <h2>{t("modelProvider.external.title")}</h2>
-          <p>{t("modelProvider.external.subtitle")}</p>
-        </div>
-        <Button type="primary" icon={<SaveOutlined />} onClick={handleSave}>
-          {t("modelProvider.external.savePolicy")}
-        </Button>
-      </section>
-
-      <Form form={form} layout="vertical" className="model-provider-service-grid">
-        {externalServiceConfigs.map((service) => (
-          <section className="model-provider-service-card" key={service.key}>
-            <div className="model-provider-service-card-head">
+      <Form form={form} layout="vertical" className="model-provider-service-stack">
+        {serviceCategories.map((category) => (
+          <section className="model-provider-service-category" key={category.key}>
+            <div className="model-provider-service-category-head">
+              <span>{category.icon}</span>
               <div>
-                <div className="model-provider-service-title-row">
-                  <h3>{t(service.titleKey)}</h3>
-                  <Tag>{t(service.tagKey)}</Tag>
-                </div>
-                <p>{t(service.descKey)}</p>
+                <h3>{t(category.titleKey)}</h3>
+                <p>{t(category.descKey)}</p>
               </div>
             </div>
 
-            <div className="model-provider-service-fields">
-              <Form.Item
-                label={t("modelProvider.external.provider")}
-                name={[service.key, "provider"]}
-                initialValue={service.providerOptions[0]}
-              >
-                <Select>
-                  {service.providerOptions.map((provider) => (
-                    <Select.Option key={provider} value={provider}>
-                      {provider}
-                    </Select.Option>
-                  ))}
-                </Select>
-              </Form.Item>
-              <Form.Item label="Base URL" name={[service.key, "baseUrl"]}>
-                <Input placeholder="https://api.example.com" />
-              </Form.Item>
-              <Form.Item
-                extra={t("modelProvider.external.keyExtra")}
-                label="API Key"
-                name={[service.key, "apiKey"]}
-                normalize={(value: string | undefined) => value?.trim()}
-                rules={[
-                  { max: 512, message: t("modelProvider.validation.apiKeyMax") },
-                  {
-                    validator: (_, value?: string) =>
-                      /\s/.test((value || "").trim())
-                        ? Promise.reject(new Error(t("modelProvider.validation.apiKeyNoSpaces")))
-                        : Promise.resolve(),
-                  },
-                ]}
-              >
-                <Input.Password
-                  autoComplete="off"
-                  maxLength={512}
-                  placeholder={t("modelProvider.external.keyPlaceholder")}
-                  visibilityToggle={false}
-                />
-              </Form.Item>
-            </div>
+            <div className="model-provider-service-grid">
+              {externalServiceConfigs
+                .filter((service) => service.category === category.key)
+                .map((service) => (
+                  <article className="model-provider-service-card" key={service.key}>
+                    <div className="model-provider-service-card-head">
+                      <div>
+                        <div className="model-provider-service-title-row">
+                          <h4>{t(service.titleKey)}</h4>
+                          <Tag
+                            color={
+                              service.status === "configured"
+                                ? "success"
+                                : service.status === "tbd"
+                                  ? "warning"
+                                  : "default"
+                            }
+                          >
+                            {t(`modelProvider.external.status.${service.status}`)}
+                          </Tag>
+                        </div>
+                        <p>{t(service.descKey)}</p>
+                      </div>
+                      <Form.Item name={[service.key, "enabled"]} initialValue valuePropName="checked">
+                        <Switch aria-label={t("modelProvider.external.enableAria", { name: t(service.titleKey) })} />
+                      </Form.Item>
+                    </div>
 
-            <div className="model-provider-service-footer">
-              <ServiceKeyPreview form={form} serviceKey={service.key} />
-              <Tooltip title={t("modelProvider.external.frontendOnlyTip")}>
-                <Button icon={<QuestionCircleOutlined />} />
-              </Tooltip>
+                    <div className="model-provider-service-fields">
+                      <Form.Item
+                        label={t("modelProvider.external.provider")}
+                        name={[service.key, "provider"]}
+                        initialValue={service.providerOptions[0]}
+                      >
+                        <Select>
+                          {service.providerOptions.map((provider) => (
+                            <Select.Option key={provider} value={provider}>
+                              {provider}
+                            </Select.Option>
+                          ))}
+                        </Select>
+                      </Form.Item>
+                      <Form.Item label="Base URL" name={[service.key, "baseUrl"]}>
+                        <Input placeholder="https://api.example.com" />
+                      </Form.Item>
+                      <Form.Item
+                        className="model-provider-api-key-field"
+                        extra={t("modelProvider.external.keyExtra")}
+                        label="API Key"
+                        name={[service.key, "apiKey"]}
+                        normalize={(value: string | undefined) => value?.trim()}
+                        rules={[
+                          { max: 512, message: t("modelProvider.validation.apiKeyMax") },
+                          {
+                            validator: (_, value?: string) =>
+                              /\s/.test((value || "").trim())
+                                ? Promise.reject(new Error(t("modelProvider.validation.apiKeyNoSpaces")))
+                                : Promise.resolve(),
+                          },
+                        ]}
+                      >
+                        <Input.Password
+                          autoComplete="new-password"
+                          maxLength={512}
+                          placeholder={t("modelProvider.external.keyPlaceholder")}
+                          visibilityToggle={false}
+                        />
+                      </Form.Item>
+                    </div>
+
+                    <div className="model-provider-service-footer">
+                      <ServiceKeyPreview form={form} service={service} />
+                      {service.status === "missing" ? (
+                        <Tag icon={<SearchOutlined />}>{t("modelProvider.external.toolUnavailable")}</Tag>
+                      ) : null}
+                      <Tooltip title={t("modelProvider.external.frontendOnlyTip")}>
+                        <Button icon={<QuestionCircleOutlined />} />
+                      </Tooltip>
+                    </div>
+                  </article>
+                ))}
             </div>
           </section>
         ))}
       </Form>
+
+      <Alert
+        className="model-provider-service-alert"
+        type="info"
+        showIcon
+        message={t("modelProvider.external.apiContractTitle")}
+        description={t("modelProvider.external.apiContractDesc")}
+      />
     </div>
   );
 }

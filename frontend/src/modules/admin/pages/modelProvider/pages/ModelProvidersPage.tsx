@@ -174,25 +174,6 @@ const builtInProviders: ProviderOption[] = [
   },
 ];
 
-const builtInProviderSlots = [
-  {
-    fallbackId: "tongyi",
-    pattern: /tongyi|qwen|dashscope|通义|千问/i,
-  },
-  {
-    fallbackId: "openai",
-    pattern: /openai|gpt/i,
-  },
-  {
-    fallbackId: "anthropic",
-    pattern: /anthropic|claude/i,
-  },
-  {
-    fallbackId: "deepseek",
-    pattern: /deepseek/i,
-  },
-] as const;
-
 function createConnectionGroup(provider: ProviderOption, overrides: Partial<ProviderConnectionGroup> = {}): ProviderConnectionGroup {
   return {
     id: overrides.id || `${provider.id}-default`,
@@ -276,20 +257,6 @@ function getProviderSearchText(provider: ProviderOption) {
   ]
     .join(" ")
     .toLowerCase();
-}
-
-function getCuratedBuiltInProviders(providers: ProviderOption[], keyword?: string) {
-  const fallbackById = new Map(builtInProviders.map((provider) => [provider.id, provider]));
-  const selectedProviders = builtInProviderSlots
-    .map(({ fallbackId, pattern }) => providers.find((provider) => pattern.test(getProviderSearchText(provider))) || fallbackById.get(fallbackId))
-    .filter((provider): provider is ProviderOption => Boolean(provider));
-  const normalizedKeyword = keyword?.trim().toLowerCase();
-
-  if (!normalizedKeyword) {
-    return selectedProviders;
-  }
-
-  return selectedProviders.filter((provider) => getProviderSearchText(provider).includes(normalizedKeyword));
 }
 
 function mapModelTypeToCapability(modelType?: string): ModelCapability {
@@ -610,7 +577,7 @@ export default function ModelProviderPage() {
       try {
         const providers = await fetchProviderOptions(searchKeyword);
         if (providerSearchRequestIdRef.current === requestId) {
-          setProviderOptions(getCuratedBuiltInProviders(providers, searchKeyword));
+          setProviderOptions(providers);
         }
       } catch (error) {
         if (providerSearchRequestIdRef.current === requestId) {
@@ -629,7 +596,7 @@ export default function ModelProviderPage() {
     setLoading(true);
     try {
       const providers = await fetchProviderOptions();
-      setProviderOptions(getCuratedBuiltInProviders(providers));
+      setProviderOptions(providers);
 
       const withGroupsData = await modelProviderRequest<{ providers?: ApiProvider[] }>("GET", "/model_providers:with_groups");
       const addedIds = new Set((withGroupsData.providers || []).map((provider) => provider.id));

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Modal, Select, Switch, Tag, Tooltip, message } from "antd";
-import { DownOutlined, QuestionCircleOutlined } from "@ant-design/icons";
+import { Button, Modal, Radio, Select, Tag, Tooltip, message } from "antd";
+import { DownOutlined, QuestionCircleOutlined, ShareAltOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { AgentAppsAuth } from "@/components/auth";
 import { BASE_URL, axiosInstance, getLocalizedErrorMessage } from "@/components/request";
@@ -95,6 +95,13 @@ type ModelOptionItem = {
   model: ProviderModel;
   value: string;
 };
+
+type ModelShareTarget = {
+  module: ModuleConfig;
+  option?: ModelOptionItem;
+};
+
+type ModelShareMode = "none" | "public" | "users";
 
 const moduleConfigs: ModuleConfig[] = [
   {
@@ -353,7 +360,9 @@ export default function DefaultModelConfigPanel() {
   const [selectedModels, setSelectedModels] = useState<SelectedModels>({});
   const [moduleModelOptions, setModuleModelOptions] = useState<Partial<Record<ModelCapability, ModelOptionItem[]>>>({});
   const [moduleModelLoading, setModuleModelLoading] = useState<Partial<Record<ModelCapability, boolean>>>({});
-  const [shareDefaultConfig, setShareDefaultConfig] = useState(true);
+  const [shareTarget, setShareTarget] = useState<ModelShareTarget | null>(null);
+  const [shareMode, setShareMode] = useState<ModelShareMode>("public");
+  const [shareUserIds, setShareUserIds] = useState<string[]>([]);
   const localizedFallbacks = useMemo(() => createModelProviderFallbacks(t), [i18n.language, t]);
 
   const loadDefaultModelState = useCallback(async () => {
@@ -522,101 +531,187 @@ export default function DefaultModelConfigPanel() {
     applyModelSelection(capability, value);
   };
 
+  const openShareModal = (module: ModuleConfig, option?: ModelOptionItem) => {
+    setShareTarget({ module, option });
+    setShareMode("public");
+    setShareUserIds([]);
+  };
+
+  const closeShareModal = () => {
+    setShareTarget(null);
+    setShareMode("public");
+    setShareUserIds([]);
+  };
+
+  const submitShare = () => {
+    if (!shareTarget?.option) {
+      return;
+    }
+
+    if (shareMode === "users" && !shareUserIds.length) {
+      message.warning(t("modelProvider.shareSelectUserRequired"));
+      return;
+    }
+
+    message.success(
+      shareMode === "none"
+        ? t("modelProvider.shareNoneSuccess", { name: shareTarget.option.model.name })
+        : shareMode === "public"
+          ? t("modelProvider.sharePublicSuccess", { name: shareTarget.option.model.name })
+          : t("modelProvider.shareUsersSuccess", {
+              name: shareTarget.option.model.name,
+              count: shareUserIds.length,
+            }),
+    );
+    closeShareModal();
+  };
+
   return (
-    <section className="model-provider-config-panel" aria-label={t("modelProvider.defaultConfigAria")}>
-      <div className="model-provider-panel-title-row">
-        <div>
-          <h2 className="model-provider-section-title">{t("modelProvider.defaultTitle")}</h2>
-          <p className="model-provider-section-subtitle">{t("modelProvider.defaultSubtitle")}</p>
+    <>
+      <section className="model-provider-config-panel" aria-label={t("modelProvider.defaultConfigAria")}>
+        <div className="model-provider-panel-title-row">
+          <div>
+            <h2 className="model-provider-section-title">{t("modelProvider.defaultTitle")}</h2>
+            <p className="model-provider-section-subtitle">{t("modelProvider.defaultSubtitle")}</p>
+          </div>
         </div>
-        <div className="model-provider-share-control">
-          <span>{t("modelProvider.shareConfigTitle")}</span>
-          <Switch
-            checked={shareDefaultConfig}
-            onChange={setShareDefaultConfig}
-            aria-label={t("modelProvider.shareConfigTitle")}
-          />
-        </div>
-      </div>
 
-      <div className="model-provider-default-list">
-        {visibleModuleConfigs.map((module) => {
-          const options = moduleModelOptions[module.key] || [];
-          const optionLoading = Boolean(moduleModelLoading[module.key]);
-          const moduleTitle = t(module.titleKey);
-          const moduleSubtitle = t(module.subtitleKey);
+        <div className="model-provider-default-list">
+          {visibleModuleConfigs.map((module) => {
+            const options = moduleModelOptions[module.key] || [];
+            const optionLoading = Boolean(moduleModelLoading[module.key]);
+            const moduleTitle = t(module.titleKey);
+            const moduleSubtitle = t(module.subtitleKey);
+            const selectedOption = options.find((option) => option.value === selectedModels[module.key]);
 
-          return (
-            <div className="model-provider-default-row" key={module.key}>
-              <div className="model-provider-default-meta">
-                <label
-                  className="model-provider-default-title"
-                  htmlFor={`model-provider-${module.key.toLowerCase()}`}
-                >
-                  {module.required ? <span className="is-required">*</span> : null}
-                  <span>{moduleTitle}</span>
-                </label>
-                <Tooltip placement="top" title={moduleSubtitle}>
-                  <button
-                    aria-label={t("modelProvider.moduleHelpAria", { title: moduleTitle })}
-                    className="model-provider-default-help"
-                    type="button"
+            return (
+              <div className="model-provider-default-row" key={module.key}>
+                <div className="model-provider-default-meta">
+                  <label
+                    className="model-provider-default-title"
+                    htmlFor={`model-provider-${module.key.toLowerCase()}`}
                   >
-                    <QuestionCircleOutlined />
-                  </button>
-                </Tooltip>
-                {module.restricted ? <Tag className="model-provider-limited-tag">{t("modelProvider.limited")}</Tag> : null}
-              </div>
+                    {module.required ? <span className="is-required">*</span> : null}
+                    <span>{moduleTitle}</span>
+                  </label>
+                  <Tooltip placement="top" title={moduleSubtitle}>
+                    <button
+                      aria-label={t("modelProvider.moduleHelpAria", { title: moduleTitle })}
+                      className="model-provider-default-help"
+                      type="button"
+                    >
+                      <QuestionCircleOutlined />
+                    </button>
+                  </Tooltip>
+                  {module.restricted ? <Tag className="model-provider-limited-tag">{t("modelProvider.limited")}</Tag> : null}
+                </div>
 
-              <Select
-                allowClear={!module.required}
-                className="model-provider-model-select"
-                id={`model-provider-${module.key.toLowerCase()}`}
-                listHeight={340}
-                optionLabelProp="label"
-                placeholder={module.required ? t("modelProvider.requiredModelPlaceholder") : t("modelProvider.optionalModelPlaceholder")}
-                popupClassName="model-provider-select-dropdown"
-                suffixIcon={<DownOutlined className="model-provider-select-caret" />}
-                value={selectedModels[module.key]}
-                onChange={(value) => handleModelSelection(module.key, value)}
-                onDropdownVisibleChange={(open) => {
-                  if (open) {
-                    void loadModuleModels(module.key, true);
-                  }
-                }}
-                loading={optionLoading}
-                notFoundContent={optionLoading ? t("common.loading") : t("modelProvider.noModelOptions")}
-              >
-                {options.map(({ provider, group, model, value }) => (
-                  <Select.Option
-                    key={value}
-                    label={
-                      <span className="model-provider-select-value">
-                        <ProviderLogo provider={provider} compact />
-                        <span className="model-provider-select-value-text">
-                          {model.name} · {group.name}
+                <div className="model-provider-default-control-row">
+                  <Select
+                    allowClear={!module.required}
+                    className="model-provider-model-select"
+                    id={`model-provider-${module.key.toLowerCase()}`}
+                    listHeight={340}
+                    optionLabelProp="label"
+                    placeholder={module.required ? t("modelProvider.requiredModelPlaceholder") : t("modelProvider.optionalModelPlaceholder")}
+                    popupClassName="model-provider-select-dropdown"
+                    suffixIcon={<DownOutlined className="model-provider-select-caret" />}
+                    value={selectedModels[module.key]}
+                    onChange={(value) => handleModelSelection(module.key, value)}
+                    onDropdownVisibleChange={(open) => {
+                      if (open) {
+                        void loadModuleModels(module.key, true);
+                      }
+                    }}
+                    loading={optionLoading}
+                    notFoundContent={optionLoading ? t("common.loading") : t("modelProvider.noModelOptions")}
+                  >
+                    {options.map(({ provider, group, model, value }) => (
+                      <Select.Option
+                        key={value}
+                        label={
+                          <span className="model-provider-select-value">
+                            <ProviderLogo provider={provider} compact />
+                            <span className="model-provider-select-value-text">
+                              {model.name} · {group.name}
+                            </span>
+                          </span>
+                        }
+                        value={value}
+                      >
+                        <span className="model-provider-select-option">
+                          <ProviderLogo provider={provider} compact />
+                          <span className="model-provider-select-copy">
+                            <strong>{model.name}</strong>
+                            <small>
+                              {provider.name} / {group.name}
+                              {model.builtIn ? t("modelProvider.builtInModelSuffix") : t("modelProvider.customModelSuffix")}
+                            </small>
+                          </span>
                         </span>
-                      </span>
-                    }
-                    value={value}
+                      </Select.Option>
+                    ))}
+                  </Select>
+                  <Button
+                    className="model-provider-model-share-button"
+                    disabled={!selectedOption}
+                    icon={<ShareAltOutlined />}
+                    onClick={() => openShareModal(module, selectedOption)}
                   >
-                    <span className="model-provider-select-option">
-                      <ProviderLogo provider={provider} compact />
-                      <span className="model-provider-select-copy">
-                        <strong>{model.name}</strong>
-                        <small>
-                          {provider.name} / {group.name}
-                          {model.builtIn ? t("modelProvider.builtInModelSuffix") : t("modelProvider.customModelSuffix")}
-                        </small>
-                      </span>
-                    </span>
-                  </Select.Option>
-                ))}
-              </Select>
+                    {t("modelProvider.shareModel")}
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <Modal
+        centered
+        destroyOnHidden
+        okText={t("modelProvider.shareConfirm")}
+        open={!!shareTarget}
+        title={t("modelProvider.shareModelTitle", { title: shareTarget ? t(shareTarget.module.titleKey) : "" })}
+        width={520}
+        onCancel={closeShareModal}
+        onOk={submitShare}
+      >
+        <div className="model-provider-share-modal">
+          <div className="model-provider-share-model-card">
+            <span>{t("modelProvider.shareCurrentModel")}</span>
+            <strong>{shareTarget?.option?.model.name || t("modelProvider.noModelOptions")}</strong>
+            {shareTarget?.option ? (
+              <small>
+                {shareTarget.option.provider.name} / {shareTarget.option.group.name}
+              </small>
+            ) : null}
+          </div>
+          <Radio.Group
+            className="model-provider-share-mode"
+            value={shareMode}
+            onChange={(event) => setShareMode(event.target.value)}
+          >
+            <Radio value="none">{t("modelProvider.shareNone")}</Radio>
+            <Radio value="public">{t("modelProvider.sharePublicModel")}</Radio>
+            <Radio value="users">{t("modelProvider.shareToUsers")}</Radio>
+          </Radio.Group>
+          {shareMode === "users" ? (
+            <div className="model-provider-share-users">
+              <label>{t("modelProvider.shareUserIds")}</label>
+              <Select
+                mode="tags"
+                allowClear
+                open={false}
+                placeholder={t("modelProvider.shareUserIdsPlaceholder")}
+                tokenSeparators={[",", "，", " "]}
+                value={shareUserIds}
+                onChange={setShareUserIds}
+              />
             </div>
-          );
-        })}
-      </div>
-    </section>
+          ) : null}
+        </div>
+      </Modal>
+    </>
   );
 }

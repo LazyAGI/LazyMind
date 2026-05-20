@@ -117,20 +117,6 @@
   }
 }
 
-.model-provider-share-control {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border: 1px solid #dbeafe;
-  border-radius: 12px;
-  background: #f8fbff;
-  color: #334155;
-  font-size: 13px;
-  font-weight: 800;
-}
-
 .model-provider-inline-alert.ant-alert {
   margin-bottom: 16px;
   border: 1px solid #dbeafe;
@@ -225,6 +211,21 @@
   pointer-events: none;
 }
 
+.model-provider-default-control-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.model-provider-model-share-button.ant-btn {
+  min-width: 84px;
+  height: 42px;
+  border-radius: 12px;
+  font-weight: 800;
+}
+
 .model-provider-model-select.ant-select {
   width: 100%;
   min-height: 42px;
@@ -312,6 +313,57 @@
   .ant-select-item-option-active:not(.ant-select-item-option-disabled),
   .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
     background: #f2f7ff;
+  }
+}
+
+.model-provider-share-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.model-provider-share-model-card {
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fbfdff;
+
+  span,
+  small,
+  strong {
+    display: block;
+  }
+
+  span,
+  small {
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  strong {
+    margin: 4px 0;
+    color: #101828;
+    font-size: 15px;
+    line-height: 1.4;
+  }
+}
+
+.model-provider-share-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.model-provider-share-users {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  label {
+    color: #334155;
+    font-size: 13px;
+    font-weight: 800;
   }
 }
 
@@ -963,39 +1015,11 @@
   -webkit-overflow-scrolling: touch;
 }
 
-.model-provider-service-hero,
-.model-provider-policy-section,
-.model-provider-policy-side,
 .model-provider-service-card {
   border: 1px solid rgba(211, 223, 239, 0.9);
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 18px 42px rgba(30, 58, 138, 0.08);
-}
-
-.model-provider-service-hero {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  margin-bottom: 18px;
-  padding: 22px;
-
-  h2 {
-    margin: 0;
-    color: #0f172a;
-    font-size: 24px;
-    font-weight: 850;
-    line-height: 1.25;
-  }
-
-  p {
-    max-width: 760px;
-    margin: 7px 0 0;
-    color: #64748b;
-    font-size: 13px;
-    line-height: 1.7;
-  }
 }
 
 .model-provider-service-page > .model-provider-config-panel {
@@ -1008,6 +1032,59 @@
   gap: 16px;
 }
 
+.model-provider-service-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.model-provider-service-category {
+  margin-bottom: 18px;
+  border: 1px solid rgba(211, 223, 239, 0.9);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 18px 42px rgba(30, 58, 138, 0.08);
+}
+
+.model-provider-service-category {
+  padding: 18px;
+}
+
+.model-provider-service-category-head {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 16px;
+
+  > span {
+    width: 42px;
+    height: 42px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 12px;
+    background: #eef6ff;
+    color: #2563eb;
+    font-size: 19px;
+  }
+
+  h3 {
+    margin: 0;
+    color: #101828;
+    font-size: 18px;
+    font-weight: 850;
+    line-height: 1.3;
+  }
+
+  p {
+    margin: 6px 0 0;
+    color: #64748b;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+}
+
 .model-provider-service-card {
   min-width: 0;
   display: flex;
@@ -1016,8 +1093,7 @@
   padding: 18px;
 }
 
-.model-provider-service-card-head,
-.model-provider-policy-head {
+.model-provider-service-card-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -1037,6 +1113,14 @@
     font-size: 13px;
     line-height: 1.65;
   }
+}
+
+.model-provider-service-card-head h4 {
+  margin: 0;
+  color: #101828;
+  font-size: 16px;
+  font-weight: 850;
+  line-height: 1.3;
 }
 
 .model-provider-service-title-row {
@@ -1059,6 +1143,10 @@
   gap: 0 14px;
 }
 
+.model-provider-api-key-field.ant-form-item {
+  grid-column: 1 / -1;
+}
+
 .model-provider-service-footer {
   display: flex;
   align-items: center;
@@ -1075,175 +1163,16 @@
   }
 }
 
+.model-provider-key-preview {
+  min-width: 0;
+}
+
+.model-provider-service-alert.ant-alert {
+  margin-top: 18px;
+}
+
 .model-provider-service-ready {
   color: #15803d;
-}
-
-.model-provider-policy-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 18px;
-  align-items: start;
-}
-
-.model-provider-policy-main {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.model-provider-policy-section,
-.model-provider-policy-side {
-  padding: 20px;
-}
-
-.model-provider-vector-options {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  margin-top: 18px;
-}
-
-.model-provider-slider-row {
-  display: grid;
-  grid-template-columns: 130px minmax(0, 1fr);
-  gap: 16px;
-  align-items: center;
-  color: #334155;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.model-provider-module-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 18px;
-}
-
-.model-provider-module-row {
-  min-height: 74px;
-  display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
-  gap: 14px;
-  align-items: center;
-  padding: 14px;
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  background: #fbfdff;
-
-  h4 {
-    margin: 0;
-    color: #101828;
-    font-size: 15px;
-    font-weight: 850;
-  }
-
-  p {
-    margin: 4px 0 0;
-    color: #64748b;
-    font-size: 13px;
-    line-height: 1.55;
-  }
-}
-
-.model-provider-module-icon {
-  width: 42px;
-  height: 42px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 12px;
-  background: #eef6ff;
-  color: #2563eb;
-  font-size: 18px;
-}
-
-.model-provider-radio-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 18px;
-}
-
-.model-provider-policy-side {
-  position: sticky;
-  top: 18px;
-
-  h3 {
-    margin: 0 0 14px;
-    color: #101828;
-    font-size: 18px;
-    font-weight: 850;
-  }
-}
-
-.model-provider-summary-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.model-provider-summary-item {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-  padding: 12px;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  background: #fbfdff;
-
-  > span {
-    color: #2563eb;
-    font-size: 18px;
-  }
-
-  small,
-  strong {
-    display: block;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-
-  small {
-    color: #64748b;
-    font-size: 12px;
-  }
-
-  strong {
-    margin-top: 2px;
-    color: #101828;
-    font-size: 13px;
-  }
-}
-
-.model-provider-limit-box {
-  margin-top: 16px;
-  padding: 14px;
-  border: 1px solid #fed7aa;
-  border-radius: 14px;
-  background: #fff7ed;
-
-  h4 {
-    margin: 0;
-    color: #9a3412;
-    font-size: 14px;
-    font-weight: 850;
-  }
-
-  p {
-    margin: 7px 0 12px;
-    color: #9a3412;
-    font-size: 13px;
-    line-height: 1.6;
-  }
-}
-
-.model-provider-default-service-select.ant-select {
-  width: 100%;
-  margin-top: 16px;
 }
 
 @media (max-width: 1360px) {
@@ -1274,9 +1203,6 @@
     max-height: none;
   }
 
-  .model-provider-policy-side {
-    position: static;
-  }
 }
 
 @media (max-width: 980px) {
@@ -1323,9 +1249,7 @@
 
   .model-provider-panel-title-row,
   .model-provider-added-summary,
-  .model-provider-service-hero,
-  .model-provider-service-card-head,
-  .model-provider-policy-head {
+  .model-provider-service-card-head {
     align-items: stretch;
     flex-direction: column;
   }
@@ -1356,6 +1280,14 @@
   .model-provider-model-actions {
     width: 100%;
     justify-content: flex-end;
+  }
+
+  .model-provider-default-control-row {
+    grid-template-columns: 1fr;
+  }
+
+  .model-provider-model-share-button.ant-btn {
+    width: 100%;
   }
 }
 
