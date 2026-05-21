@@ -2,6 +2,8 @@ import type { Query } from "@/api/generated/chatbot-client";
 
 const CITE_MESSAGE_PATTERN =
   /<cite_message>([\s\S]*?)<\/cite_message>\s*/i;
+const CITE_MESSAGE_GLOBAL_PATTERN =
+  /<cite_message>([\s\S]*?)<\/cite_message>\s*/gi;
 
 interface ChatUserMessageLike {
   delta?: string;
@@ -49,5 +51,5 @@ export function getCitationFromText(text?: string) {
 }
 
 export function stripCitationFromText(text?: string) {
-  return (text || "").replace(CITE_MESSAGE_PATTERN, "").trim();
+  return (text || "").replace(CITE_MESSAGE_GLOBAL_PATTERN, "").trim();
 }

@@ -452,6 +452,7 @@ const zhCN = {
     thinking: "思考中...",
     cite: "引用",
     clearCitation: "取消引用",
+    maxCitationsWarning: "最多只能引用 {{count}} 处内容",
     copy: "复制",
     copySuccess: "复制成功",
     copyFailedManual: "复制失败，请手动复制",

@@ -479,6 +479,7 @@ const enUS = {
     thinking: "Thinking...",
     cite: "Cite",
     clearCitation: "Remove citation",
+    maxCitationsWarning: "You can cite up to {{count}} selections",
     copy: "Copy",
     copySuccess: "Copied",
     copyFailedManual: "Copy failed. Please copy manually.",
