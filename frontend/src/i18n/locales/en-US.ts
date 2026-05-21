@@ -477,6 +477,8 @@ const enUS = {
     maxFilesWarning: "Maximum 3 files allowed",
     unsupportedFileType: "Only {{types}} file formats are supported",
     thinking: "Thinking...",
+    cite: "Cite",
+    clearCitation: "Remove citation",
     copy: "Copy",
     copySuccess: "Copied",
     copyFailedManual: "Copy failed. Please copy manually.",

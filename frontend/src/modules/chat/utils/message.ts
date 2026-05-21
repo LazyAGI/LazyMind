@@ -1,5 +1,8 @@
 import type { Query } from "@/api/generated/chatbot-client";
 
+const CITE_MESSAGE_PATTERN =
+  /<cite_message>([\s\S]*?)<\/cite_message>\s*/i;
+
 interface ChatUserMessageLike {
   delta?: string;
   inputs?: Query[] | null;
@@ -39,4 +42,12 @@ export function getRegenerationInputs(
   }
 
   return normalizeMessageInputs(userMessage.inputs, userMessage.delta);
+}
+
+export function getCitationFromText(text?: string) {
+  return text?.match(CITE_MESSAGE_PATTERN)?.[1]?.trim() || "";
+}
+
+export function stripCitationFromText(text?: string) {
+  return (text || "").replace(CITE_MESSAGE_PATTERN, "").trim();
 }

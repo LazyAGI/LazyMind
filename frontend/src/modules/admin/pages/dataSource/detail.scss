@@ -43,7 +43,7 @@
 }
 
 .data-source-detail-stat-card.ant-card {
-  min-height: 112px;
+  height: 112px;
 
   .ant-card-body {
     height: 100%;
@@ -62,6 +62,7 @@
 }
 
 .data-source-detail-stat-value {
+  min-width: 0;
   font-size: 24px;
   font-weight: 700;
   color: #1d2939;
@@ -73,6 +74,10 @@
       ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas,
       "Liberation Mono", "Courier New", monospace;
     font-size: 17px;
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
   }
 
   span {

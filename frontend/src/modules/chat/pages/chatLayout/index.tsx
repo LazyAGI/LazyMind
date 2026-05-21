@@ -37,7 +37,10 @@ import {
   CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
 } from "@/modules/chat/constants/chat";
-import { normalizeMessageInputs } from "@/modules/chat/utils/message";
+import {
+  normalizeMessageInputs,
+  stripCitationFromText,
+} from "@/modules/chat/utils/message";
 import { splitThinkingContent } from "@/modules/chat/utils/thinking";
 import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
 interface IChatLayoutProps {
@@ -179,10 +182,14 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
               const inputType = input.input_type || "text";
               return inputType === "text" && !!input.text;
             });
+            const displayQuery = stripCitationFromText(
+              record.query || textInput?.text || "",
+            );
 
             list.push({
               role: RoleTypes.USER,
-              delta: record.query || textInput?.text || "",
+              delta: displayQuery,
+              display_delta: displayQuery,
               images: normalizedInputs
                 ?.filter((i: any) => i.input_type === "image")
                 .map((img: any) => ({
@@ -427,11 +434,15 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
               const inputType = input.input_type || "text";
               return inputType === "text" && !!input.text;
             });
+            const displayQuery = stripCitationFromText(
+              record.query || textInput?.text || "",
+            );
 
             // Push user.
             list.push({
               role: RoleTypes.USER,
-              delta: record.query || textInput?.text || "",
+              delta: displayQuery,
+              display_delta: displayQuery,
               images: normalizedInputs
                 ?.filter((input) => {
                   return input.input_type === "image";

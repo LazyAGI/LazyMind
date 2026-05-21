@@ -1021,7 +1021,7 @@ export default function DataSourceDetail() {
       dataIndex: "updateState",
       key: "updateState",
       width: 220,
-      render: (updateState: DocumentStatusRow["updateState"]) => {
+      render: (updateState: DocumentStatusRow["updateState"], record) => {
         const meta = getUpdateStateMeta(updateState, t);
         return (
           <div className="data-source-detail-update-state">
@@ -1029,7 +1029,7 @@ export default function DataSourceDetail() {
               <span className="data-source-update-chip-dot" />
               {meta.text}
             </span>
-            <Text type="secondary">{meta.detail}</Text>
+            <Text type="secondary">{record.syncDetail || meta.detail}</Text>
           </div>
         );
       },

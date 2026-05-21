@@ -146,6 +146,43 @@
       flex-direction: column;
       gap: 8px;
       width: 100%;
+
+      .cite-message-preview {
+        display: grid;
+        grid-template-columns: 16px minmax(0, 1fr) 24px;
+        align-items: center;
+        gap: 8px;
+        max-width: 100%;
+        min-height: 34px;
+        border: 1px solid #c9ddff;
+        border-left: 3px solid #0b70e7;
+        border-radius: 6px;
+        padding: 6px 6px 6px 10px;
+        background: #f5f9ff;
+        color: #2c455c;
+      }
+
+      .cite-message-preview-icon {
+        color: #0b70e7;
+        font-size: 14px;
+      }
+
+      .cite-message-preview-text {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      .cite-message-preview-close {
+        width: 24px;
+        height: 24px;
+        min-width: 24px;
+        padding: 0;
+        color: #8d9ab2;
+      }
+
       .message-input {
         border: none;
         outline: none;

@@ -450,6 +450,8 @@ const zhCN = {
     maxFilesWarning: "最多只能上传 3 个文件",
     unsupportedFileType: "仅支持上传{{types}}格式的文件",
     thinking: "思考中...",
+    cite: "引用",
+    clearCitation: "取消引用",
     copy: "复制",
     copySuccess: "复制成功",
     copyFailedManual: "复制失败，请手动复制",
