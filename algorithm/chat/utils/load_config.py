@@ -242,8 +242,7 @@ def get_image_embed_key(config_path: Optional[str] = None) -> Optional[str]:
     '''
     raw = load_model_config(config_path)
     for role, entries in raw.items():
-        if not _is_embed_role(role, entries):
-            continue
+        if not _is_embed_role(role, entries): continue
         if isinstance(entries, list) and entries:
             entry = entries[0]
         elif isinstance(entries, dict):
@@ -294,17 +293,10 @@ def get_embed_index_kwargs(config_path: Optional[str] = None) -> list:
     raw = load_model_config(config_path)
     result = []
     for role, entries in raw.items():
-        if not _is_embed_role(role, entries):
-            continue
-        if not isinstance(entries, list) or not entries:
-            continue
-        entry = entries[0]
-        if 'index_kwargs' in entry:
-            ik = deepcopy(entry['index_kwargs'])
-        else:
-            model_name = (entry.get('name') or entry.get('model') or '').lower()
-            ik = deepcopy(_DEFAULT_SPARSE_INDEX_KWARGS if 'sparse' in model_name
-                          else _DEFAULT_DENSE_INDEX_KWARGS)
+        if not _is_embed_role(role, entries): continue
+        entry = entries[0] if isinstance(entries, list) and entries else entries
+        model_name = (entry.get('name') or entry.get('model') or '').lower()
+        ik = deepcopy(_DEFAULT_SPARSE_INDEX_KWARGS if 'sparse' in model_name else _DEFAULT_DENSE_INDEX_KWARGS)
         ik['embed_key'] = role
         result.append(ik)
     return result
