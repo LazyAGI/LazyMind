@@ -38,6 +38,7 @@ config.add('document_server_url', str, 'http://localhost:8000', 'DOCUMENT_SERVER
 config.add('agentic_kb_url', str, 'http://lazyllm-algo:8000', 'AGENTIC_KB_URL', description='Knowledge base service URL for agentic tools.')
 config.add('core_api_url', str, 'http://core:8000', 'CORE_API_URL', description='Core API service URL.')
 config.add('agentic_kb_name', str, 'general_algo', 'AGENTIC_KB_NAME', description='Default knowledge base name for agentic.')
+config.add('agentic_workspace', str, '/var/lib/lazymind/agentic-workspace', 'AGENTIC_WORKSPACE', description='Workspace directory for agentic runtime.')
 config.add('skill_fs_url', str, 'remote://skills', 'SKILL_FS_URL', description='Skill filesystem URL.')
 config.add('opensearch_uri', str, None, 'OPENSEARCH_URI', description='OpenSearch/Elasticsearch URI.')
 config.add('opensearch_user', str, 'admin', 'OPENSEARCH_USER', description='OpenSearch username.')

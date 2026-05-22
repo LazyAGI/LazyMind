@@ -22,10 +22,11 @@ from parsing.transform import GeneralParser, LineSplitter, NodeParser
 ALGO_ID = 'general_algo'
 
 
-class TraceQuietCallableDict(dict):
-    def __call__(self, cls, *args, **kwargs):
+def _quiet_trace(kbs):
+    def call(kb_group, *args, **kwargs):
         set_trace_context({'enabled': False})
-        return self[cls](*args, **kwargs)
+        return kbs[kb_group](*args, **kwargs)
+    return call
 
 
 def _parse_bool_config(value: str | None) -> bool | None:
@@ -259,7 +260,7 @@ def build_document() -> Document:
     docs.activate_group('block', embed_keys=text_embed_keys)
     docs.activate_group('line', embed_keys=text_embed_keys)
     docs._manager._kbs = lazyllm.ServerModule(
-        TraceQuietCallableDict(docs._manager._kbs),
+        _quiet_trace(docs._manager._kbs),
         port=server_port,
     )
     return docs
