@@ -6,10 +6,6 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 
 
-SkillReviewResolutionType = Literal['new', 'patch']
-ReviewStatus = Literal['completed', 'skipped', 'failed', 'running']
-
-
 class SkillReviewRequest(BaseModel):
     start_time: datetime
     end_time: datetime
@@ -106,24 +102,14 @@ class CandidateSkill(BaseModel):
 class SkillReviewResolution(BaseModel):
     id: str = Field(..., min_length=1)
     skill_name: str = Field(..., min_length=1)
-    type: SkillReviewResolutionType
+    type: Literal['new', 'patch']
     skill_content: Dict[str, Any]
     suggestion: Optional[str] = None
 
 
-class SkillReviewResult(BaseModel):
-    session_id: str
-    status: ReviewStatus
-    qualified: bool
-    trigger: Dict[str, Any] = Field(default_factory=dict)
-    candidates: List[SkillReviewResolution] = Field(default_factory=list)
-    artifacts: Dict[str, str] = Field(default_factory=dict)
-    error: Optional[str] = None
-
-
 class UserSkillReviewResult(BaseModel):
     user_id: str
-    status: ReviewStatus
+    status: Literal['completed', 'skipped', 'failed', 'running']
     qualified: bool
     session_count: int = 0
     qualified_session_count: int = 0
@@ -141,7 +127,7 @@ class SkillReviewBatchResult(BaseModel):
 
 class StageManifest(BaseModel):
     session_id: str
-    status: ReviewStatus = 'running'
+    status: Literal['completed', 'skipped', 'failed', 'running'] = 'running'
     current_stage: Optional[str] = None
     completed_stages: List[str] = Field(default_factory=list)
     input_hash: str = ''

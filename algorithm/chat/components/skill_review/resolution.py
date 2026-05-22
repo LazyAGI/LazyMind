@@ -8,21 +8,18 @@ from chat.prompts.skill_review import resolution_prompt
 
 def resolve_skill_action(
     candidate: CandidateSkill,
-    trajectory: Trajectory,
+    qualified_trajectories: list[Trajectory],
     llm,
 ) -> SkillReviewResolution:
-    resolution_type = 'patch' if trajectory.called_skills else 'new'
+    # TODO: Implement for Resolve Skill Action
+    called_skills = _unique_skill_names(qualified_trajectories)
+    resolution_type = 'patch' if called_skills else 'new'
     try:
-        payload = llm.complete_json(resolution_prompt(candidate.model_dump(), trajectory.called_skills))
+        payload = llm.complete_json(resolution_prompt(candidate.model_dump(), called_skills))
         resolution_type = _normalize_resolution_type(payload.get('type') or payload.get('action'), resolution_type)
         suggestion = payload.get('suggestion') or payload.get('reason') or ''
     except Exception:
         suggestion = 'Create a new reusable skill from the reviewed trajectories.'
-        if trajectory.called_skills:
-            suggestion = (
-                f'Patch existing skill {trajectory.called_skills[0]} with the candidate '
-                'steps, success patterns, failure avoidance notes, and self-checks.'
-            )
     return SkillReviewResolution(
         id=str(uuid4()),
         skill_name=candidate.skill_name,
@@ -39,3 +36,16 @@ def _normalize_resolution_type(value, fallback: str) -> str:
     if normalized in {'patch', 'modify', 'replace', 'merge'}:
         return 'patch'
     return fallback
+
+
+def _unique_skill_names(trajectories: list[Trajectory]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for trajectory in trajectories:
+        for skill in trajectory.called_skills:
+            name = str(skill or '').strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            result.append(name)
+    return result

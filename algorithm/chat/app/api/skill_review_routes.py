@@ -15,10 +15,21 @@ router = APIRouter()
 async def skill_review(payload: SkillReviewRequest):
     try:
         result = await asyncio.to_thread(run_skill_review, payload)
-        # TODO : 后需改为写消息队列
-        return {'code': 0, 'msg': 'ok', 'data': result.model_dump()}
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                'code': 0,
+                'msg': 'success',
+                'data': result.model_dump(),
+            },
+        )
     except Exception as exc:
         return JSONResponse(
             status_code=500,
-            content={'code': 500, 'msg': f'skill review failed: {exc}', 'data': None},
+            content={
+                'code': 500,
+                'msg': f'skill review failed: {exc}',
+                'data': None,
+            },
         )

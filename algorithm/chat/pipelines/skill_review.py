@@ -26,10 +26,9 @@ from chat.components.skill_review.schemas import (
     SkillReviewResolution,
     SkillReviewRequest,
     Trajectory,
-    TrajectoryStep,
     UserSkillReviewResult,
 )
-from chat.components.skill_review.trajectory import build_trajectory, format_steps_text
+from chat.components.skill_review.trajectory import build_trajectory
 from chat.components.skill_review.workspace import SkillReviewWorkspace, stable_hash
 from chat.utils.load_config import get_config_path
 
@@ -137,12 +136,8 @@ def _run_user_skill_review(
         workspace.write_json(STAGE_CANDIDATE, candidates)
         _write_candidate_skill_files(workspace, candidates)
 
-        aggregate_trajectory = _aggregate_trajectory(
-            user_id=user_id,
-            trajectories=qualified_trajectories,
-        )
         resolutions = [
-            resolve_skill_action(candidate, aggregate_trajectory, llm)
+            resolve_skill_action(candidate, qualified_trajectories, llm)
             for candidate in candidates
         ]
         workspace.write_json(STAGE_RESOLUTION, resolutions)
@@ -170,81 +165,13 @@ def _run_user_skill_review(
 
 def _group_sessions_by_user(raw_sessions: Any) -> dict[str, list[dict[str, Any]]]:
     sessions_by_user: dict[str, list[dict[str, Any]]] = {}
-    for index, raw in enumerate(raw_sessions or [], start=1):
-        session = _normalize_session(raw, index)
-        user_id = str((session.get('metadata') or {}).get('user_id') or 'unknown_user')
+    for raw in raw_sessions or []:
+        if not isinstance(raw, dict):
+            continue
+        user_id = str(raw.get('create_user_id') or 'unknown_user')
+        session = raw
         sessions_by_user.setdefault(user_id, []).append(session)
     return sessions_by_user
-
-
-def _normalize_session(raw: Any, index: int) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        raw = {'messages': [], 'raw': raw}
-    session_id = str(
-        raw.get('conversation_id')
-        or raw.get('session_id')
-        or raw.get('id')
-        or f'session-{index}'
-    )
-    user_id = str(
-        raw.get('create_user_id')
-        or raw.get('user_id')
-        or raw.get('uid')
-        or 'unknown_user'
-    )
-    messages = [
-        _normalize_message(message)
-        for message in raw.get('messages') or []
-        if isinstance(message, dict)
-    ]
-    return {
-        'session_id': session_id,
-        'source_db': 'read_session',
-        'tables': [],
-        'messages': messages,
-        'metadata': {
-            'user_id': user_id,
-            'raw_session': {
-                key: value
-                for key, value in raw.items()
-                if key != 'messages'
-            },
-        },
-    }
-
-
-def _normalize_message(raw: dict[str, Any]) -> dict[str, Any]:
-    tool_name = raw.get('tool_name') or raw.get('name')
-    skill_name = raw.get('skill_name') or raw.get('skill')
-    return {
-        'role': str(raw.get('role') or raw.get('type') or 'unknown'),
-        'content': str(raw.get('content') or raw.get('result') or ''),
-        'created_at': _optional_str(raw.get('created_at') or raw.get('timestamp')),
-        'tool_name': _optional_str(tool_name),
-        'skill_name': _optional_str(skill_name),
-        'raw': raw,
-    }
-
-
-def _aggregate_trajectory(*, user_id: str, trajectories: list[Trajectory]) -> Trajectory:
-    steps: list[TrajectoryStep] = []
-    called_tools: list[str] = []
-    called_skills: list[str] = []
-    for trajectory in trajectories:
-        called_tools.extend(trajectory.called_tools)
-        called_skills.extend(trajectory.called_skills)
-        steps.extend(trajectory.steps)
-    return Trajectory(
-        session_id=user_id,
-        user_turns=sum(item.user_turns for item in trajectories),
-        tool_turns=sum(item.tool_turns for item in trajectories),
-        called_tools=_unique(called_tools),
-        called_skills=_unique(called_skills),
-        steps=steps,
-        steps_text=format_steps_text(steps),
-        qualified=bool(trajectories),
-        skip_reason=None if trajectories else 'no qualified sessions',
-    )
 
 
 def _build_user_result(
@@ -306,25 +233,6 @@ def _candidate_skill_paths(workspace: SkillReviewWorkspace) -> list[str]:
     if not skill_dir.exists():
         return []
     return [str(path) for path in sorted(skill_dir.glob('*.md'))]
-
-
-def _optional_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _unique(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    result: list[str] = []
-    for value in values:
-        text = str(value or '').strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        result.append(text)
-    return result
 
 
 def _safe_filename(value: str) -> str:
