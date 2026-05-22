@@ -99,17 +99,7 @@ For the full service dependency graph, environment variables, and request auth c
 
 **Prerequisites:** Docker & Docker Compose
 
-### Step 1 — Get a model provider API key
-
-Sign up at your preferred model provider and obtain an API key. For example, [SiliconFlow](https://cloud.siliconflow.cn/account/ak) offers a wide range of LLM, VLM, and reranker models.
-
-```bash
-export LAZYLLM_SILICONFLOW_API_KEY=your_siliconflow_key
-```
-
-> **Note:** The environment variable prefix is `LAZYLLM_`, not `LAZYMIND_`.
-
-### Step 2 — Get a MinerU API key (for high-quality PDF parsing)
+### Step 1 — Get a MinerU API key (for high-quality PDF parsing)
 
 Apply for a MinerU API key at [https://mineru.net](https://mineru.net/apiManage/token).
 
@@ -119,9 +109,9 @@ export LAZYLLM_MINERU_API_KEY=your_mineru_key
 
 > **Note:** Same prefix — `LAZYLLM_`, not `LAZYMIND_`.
 
-> **Important:** Because embedding models are initialized at startup, the API key for your embedding model provider **must be set before launching the stack**. We are working on frontend-based key configuration for embedding and OCR — stay tuned for the next release.
+> **Important:** Because reader are initialized at startup, the API key for your ocr provider **must be set before launching the stack**. We are working on frontend-based key configuration for OCR — stay tuned for the next release.
 
-### Step 3 — Start the stack
+### Step 2 — Start the stack
 
 ```bash
 make up-build LAZYMIND_OCR_SERVER_TYPE=mineru LAZYMIND_OCR_SERVICE_VARIANT=online
@@ -132,9 +122,9 @@ After startup:
 - API docs: http://localhost:8090/docs.html
 - Default credentials: `admin` / `admin`
 
-### Step 4 — Configure models in the frontend
+### Step 3 — Configure models in the frontend
 
-Log in and go to the model settings page to configure your **LLM**, **VLM**, and **Reranker** models using the API key from Step 1.
+Log in and go to the model settings page to configure your **LLM**, **VLM**, **enbed**, **cross_embed** and **Reranker** models using the API key from Step 1.
 
 For environment setup and detailed examples, see [`docs/quick_start.md`](docs/quick_start.md).
 
@@ -146,7 +136,7 @@ For environment setup and detailed examples, see [`docs/quick_start.md`](docs/qu
 |----------|---------|
 | Standard | `make up` |
 | MinerU OCR | `make up LAZYMIND_OCR_SERVER_TYPE=mineru` |
-| PaddleOCR (GPU) | `make up LAZYMIND_OCR_SERVER_TYPE=paddleocr` |
+| PaddleOCR | `make up LAZYMIND_OCR_SERVER_TYPE=paddleocr` |
 | External Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 | Enable store dashboards | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
 
