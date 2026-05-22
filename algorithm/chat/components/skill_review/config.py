@@ -39,4 +39,3 @@ STAGE_FILES = {
 }
 
 MANIFEST_FILE = 'manifest.json'
-LOCK_FILE = 'run.lock'

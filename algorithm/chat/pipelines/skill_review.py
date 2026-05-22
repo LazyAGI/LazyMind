@@ -91,7 +91,6 @@ def _run_user_skill_review(
         base_dir=base_work_dir,
         session_id=user_id,
         input_hash=input_hash,
-        force=False,
     )
 
     try:
