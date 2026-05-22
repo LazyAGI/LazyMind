@@ -476,6 +476,14 @@ export const initialTools: StructuredAsset[] = [
     content: "搜索学术论文（arXiv）",
   },
   {
+    id: "tool-calculator",
+    name: "calculator",
+    description: "安全地计算数学表达式（算术与常用 math 函数）",
+    category: "通用工具",
+    tags: [],
+    content: "安全地计算数学表达式（算术与常用 math 函数）",
+  },
+  {
     id: "tool-get-skill",
     name: "get_skill",
     description: "获取某项技能的完整使用说明",

@@ -16,6 +16,7 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'kb_get_parent_node': 'node_id',
     'kb_get_window_nodes': 'number',
     'kb_keyword_search': 'keyword',
+    'calculator': 'expression',
     'web_search': 'query',
     'url_fetch': 'url',
     'arxiv_search': 'query',
@@ -48,6 +49,7 @@ _REPRESENTATIVE_TOOL_RESULTS: dict[str, str] = {
     'web_search': 'query',
     'url_fetch': 'final_url',
     'arxiv_search': 'query',
+    'calculator': 'result',
     'vision_extractor': 'description',
     'skill_manage': 'reason',
     'run_script': 'stdout',
@@ -66,6 +68,7 @@ _TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'kb_get_parent_node': 'Loading surrounding context for {value} before continuing now.',
     'kb_get_window_nodes': 'Expanding nearby related segments around {value} for review.',
     'kb_keyword_search': 'Searching target documents with {value} as the keyword.',
+    'calculator': 'Evaluating the expression {value}.',
     'web_search': 'Searching the web for {value}.',
     'url_fetch': 'Reading page content from {value}.',
     'arxiv_search': 'Searching arXiv papers for {value}.',
@@ -92,6 +95,7 @@ _ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'kb_get_parent_node': '正在加载 {value} 的相关上下文。',
     'kb_get_window_nodes': '正在扩展 {value} 附近的相关片段。',
     'kb_keyword_search': '正在目标文档中搜索关键词 {value}。',
+    'calculator': '正在计算表达式 {value}。',
     'web_search': '正在联网搜索 {value}。',
     'url_fetch': '正在读取网页 {value} 。',
     'arxiv_search': '正在 arXiv 中搜索论文 {value}。',
@@ -118,6 +122,7 @@ _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'kb_get_parent_node': 'Surrounding context for {value} was loaded successfully now.',
     'kb_get_window_nodes': 'Nearby related segments around {value} were expanded successfully.',
     'kb_keyword_search': 'Document results for keyword {value} were found successfully.',
+    'calculator': 'Expression was evaluated successfully, result is {value}',
     'web_search': 'Web results for {value} are ready now.',
     'url_fetch': 'Page content from {value} was loaded successfully.',
     'arxiv_search': 'arXiv results for {value} are ready now.',
@@ -143,6 +148,7 @@ _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'kb_get_parent_node': '已成功加载 {value} 的相关上下文。',
     'kb_get_window_nodes': '已成功扩展 {value} 附近的相关片段。',
     'kb_keyword_search': '已找到关键词 {value} 的文档结果。',
+    'calculator': '已计算完成，结果为 {value}',
     'web_search': '已找到 {value} 的网页搜索结果。',
     'url_fetch': '已成功加载 {value} 的网页内容。',
     'arxiv_search': '已找到 {value} 的 arXiv 结果。',
@@ -168,6 +174,7 @@ _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'kb_get_parent_node': 'Surrounding context for {value} could not be loaded.',
     'kb_get_window_nodes': 'Nearby related segments around {value} could not be expanded.',
     'kb_keyword_search': 'Document results for keyword {value} could not be found.',
+    'calculator': 'Expression {value} could not be evaluated.',
     'web_search': 'Web results for {value} could not be retrieved.',
     'url_fetch': 'Page content from {value} could not be loaded.',
     'arxiv_search': 'arXiv results for {value} could not be retrieved.',
@@ -193,6 +200,7 @@ _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'kb_get_parent_node': '未能加载 {value} 的相关上下文。',
     'kb_get_window_nodes': '未能扩展 {value} 附近的相关片段。',
     'kb_keyword_search': '未能找到关键词 {value} 的文档结果。',
+    'calculator': '未能计算表达式 {value}。',
     'web_search': '未能获取 {value} 的网页搜索结果。',
     'url_fetch': '未能加载网页 {value} 的内容。',
     'arxiv_search': '未能获取 {value} 的 arXiv 结果。',
@@ -609,8 +617,21 @@ def _tool_call_preview(tool_name: str, arguments: Any, language: str = 'en') -> 
     )
 
 
+def _tool_result_preview_display_value(tool_name: str, result: Any, value: str = '') -> str:
+    status = _tool_result_status(result)
+    if (
+        tool_name == 'calculator'
+        and status == 'ok'
+        and isinstance(result, dict)
+        and result.get('result')
+    ):
+        return _truncate_tool_result_preview(result.get('result'))
+    return value or _truncate_tool_result_preview(_representative_tool_result(tool_name, result))
+
+
 def _tool_result_preview(tool_name: str, result: Any, value: str = '', language: str = 'en') -> str:
     status = _tool_result_status(result)
+    display_value = _tool_result_preview_display_value(tool_name, result, value)
     if status == 'needs_approval':
         return _render_preview_template(
             tool_name,
@@ -625,7 +646,7 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
     if status == 'failed':
         return _render_preview_template(
             tool_name,
-            value or _tool_result_failure_detail(result),
+            display_value or _tool_result_failure_detail(result),
             _language_templates(language, _TOOL_RESULT_FAILURE_TEMPLATES, _ZH_TOOL_RESULT_FAILURE_TEMPLATES),
             _language_fallback(
                 language,
@@ -654,7 +675,7 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
                 return _ensure_trailing_newline('Keyword search finished with no matching document segments')
     return _render_preview_template(
         tool_name,
-        value or _truncate_tool_result_preview(_representative_tool_result(tool_name, result)),
+        display_value,
         _language_templates(language, _TOOL_RESULT_PREVIEW_TEMPLATES, _ZH_TOOL_RESULT_PREVIEW_TEMPLATES),
         _language_fallback(language, _TOOL_RESULT_FALLBACK_TEMPLATE, _ZH_TOOL_RESULT_FALLBACK_TEMPLATE),
     )

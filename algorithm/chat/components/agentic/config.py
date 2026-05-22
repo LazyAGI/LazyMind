@@ -22,6 +22,7 @@ DEFAULT_TOOLS = [
     'kb_get_parent_node',
     'kb_get_window_nodes',
     'kb_keyword_search',
+    'calculator',
     'web_search',
     'url_fetch',
     'arxiv_search',
