@@ -1,85 +1,70 @@
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 from typing import Any
+from lazyllm import AutoModel
 
-from chat.components.skill_review.cluster import cluster_crafts
+from chat.components.skill_review.cluster import cluster_drafts
 from chat.components.skill_review.config import (
-    DEFAULT_WORK_DIR,
     STAGE_CANDIDATE,
     STAGE_CLUSTER,
-    STAGE_CRAFT,
-    STAGE_DECISION,
+    STAGE_DRAFT,
     STAGE_OUTLINE,
+    STAGE_RESOLUTION,
     STAGE_RESULT,
     STAGE_SESSION,
     STAGE_TRAJECTORY,
 )
-from chat.components.skill_review.craft import build_skill_craft
-from chat.components.skill_review.decision import decide_skill_action
-from chat.components.skill_review.llm import SkillReviewLLM
+from chat.components.skill_review.draft import build_skill_draft
+from chat.components.skill_review.db import insert_skill_review_records, read_session
 from chat.components.skill_review.miner import build_candidate_skill, build_skill_outline
+from chat.components.skill_review.resolution import resolve_skill_action
 from chat.components.skill_review.schemas import (
     CandidateSkill,
-    SessionData,
-    SessionMessage,
     SkillReviewBatchResult,
-    SkillReviewDecision,
+    SkillReviewResolution,
     SkillReviewRequest,
     Trajectory,
     TrajectoryStep,
     UserSkillReviewResult,
 )
-from chat.components.skill_review.session_reader import read_session
-from chat.components.skill_review.trajectory import build_trajectory
+from chat.components.skill_review.trajectory import build_trajectory, format_steps_text
 from chat.components.skill_review.workspace import SkillReviewWorkspace, stable_hash
+from chat.utils.load_config import get_config_path
 
 
 def run_skill_review(request: SkillReviewRequest) -> SkillReviewBatchResult:
-    if request.llm_config:
-        from chat.utils.load_config import inject_model_config
+    llm = AutoModel(model='llm', config=get_config_path())
+    emb = AutoModel(model='embed_main', config=get_config_path())
+    work_dir = Path(tempfile.mkdtemp(prefix='lazyrag-skill-review-'))
 
-        inject_model_config(request.llm_config)
-    work_dir = Path(request.work_dir or DEFAULT_WORK_DIR)
-    model_hash = stable_hash(request.llm_config or {})
-
-    raw_sessions = read_session()
+    raw_sessions = read_session(request.start_time, request.end_time)
     user_sessions = _group_sessions_by_user(raw_sessions)
-    llm = SkillReviewLLM()
     user_results: list[UserSkillReviewResult] = []
-    all_decisions: list[SkillReviewDecision] = []
-
+    all_resolutions: list[SkillReviewResolution] = []
+    
     for user_id, sessions in user_sessions.items():
         user_result = _run_user_skill_review(
             user_id=user_id,
             sessions=sessions,
             request=request,
             base_work_dir=work_dir,
-            model_hash=model_hash,
             llm=llm,
+            emb=emb,
         )
         user_results.append(user_result)
-        all_decisions.extend(user_result.candidates)
+        all_resolutions.extend(user_result.candidates)
+
+    try:
+        inserted_count = insert_skill_review_records(all_resolutions)
+    except Exception as exc:
+        return SkillReviewBatchResult(success=False, inserted_count=0, error=str(exc))
 
     has_failure = any(item.status == 'failed' for item in user_results)
-    has_completed = any(item.status == 'completed' for item in user_results)
-    status = 'failed' if has_failure else 'completed' if has_completed else 'skipped'
-    qualified_user_count = sum(1 for item in user_results if item.qualified)
     return SkillReviewBatchResult(
-        review_id=request.session_id or 'all',
-        status=status,
-        qualified=qualified_user_count > 0,
-        user_count=len(user_results),
-        qualified_user_count=qualified_user_count,
-        candidates=all_decisions,
-        users=user_results,
-        artifacts={
-            'work_dir': str(work_dir),
-            'user_dirs': {
-                item.user_id: item.artifacts.get('work_dir', '')
-                for item in user_results
-            },
-        },
+        success=not has_failure,
+        inserted_count=inserted_count,
         error='one or more user skill review runs failed' if has_failure else None,
     )
 
@@ -87,24 +72,26 @@ def run_skill_review(request: SkillReviewRequest) -> SkillReviewBatchResult:
 def _run_user_skill_review(
     *,
     user_id: str,
-    sessions: list[SessionData],
+    sessions: list[dict[str, Any]],
     request: SkillReviewRequest,
     base_work_dir: Path,
-    model_hash: str,
-    llm: SkillReviewLLM,
+    llm: AutoModel,
+    emb: AutoModel,
 ) -> UserSkillReviewResult:
     input_hash = stable_hash({
         'user_id': user_id,
-        'sessions': [session.model_dump() for session in sessions],
+        'start_time': request.start_time.isoformat(),
+        'end_time': request.end_time.isoformat(),
+        'sessions': sessions,
         'min_user_turns': request.min_user_turns,
         'min_tool_turns': request.min_tool_turns,
+        'embedding_role': emb.__class__.__name__,
     })
     workspace = SkillReviewWorkspace(
         base_dir=base_work_dir,
         session_id=user_id,
         input_hash=input_hash,
-        model_config_hash=model_hash,
-        force=request.force,
+        force=False,
     )
 
     try:
@@ -126,19 +113,19 @@ def _run_user_skill_review(
                 user_id=user_id,
                 sessions=sessions,
                 trajectories=trajectories,
-                decisions=[],
+                resolutions=[],
                 workspace=workspace,
             )
             workspace.write_json(STAGE_RESULT, result)
             return result
 
-        crafts = [
-            build_skill_craft(trajectory, llm)
+        drafts = [
+            build_skill_draft(trajectory, llm)
             for trajectory in qualified_trajectories
         ]
-        workspace.write_json(STAGE_CRAFT, crafts)
+        workspace.write_json(STAGE_DRAFT, drafts)
 
-        clusters = cluster_crafts(crafts, llm)
+        clusters = cluster_drafts(drafts, llm)
         workspace.write_json(STAGE_CLUSTER, clusters)
 
         outlines = [build_skill_outline(cluster, llm) for cluster in clusters]
@@ -155,17 +142,17 @@ def _run_user_skill_review(
             user_id=user_id,
             trajectories=qualified_trajectories,
         )
-        decisions = [
-            decide_skill_action(candidate, aggregate_trajectory, llm)
+        resolutions = [
+            resolve_skill_action(candidate, aggregate_trajectory, llm)
             for candidate in candidates
         ]
-        workspace.write_json(STAGE_DECISION, decisions)
+        workspace.write_json(STAGE_RESOLUTION, resolutions)
 
         result = _build_user_result(
             user_id=user_id,
             sessions=sessions,
             trajectories=trajectories,
-            decisions=decisions,
+            resolutions=resolutions,
             workspace=workspace,
         )
         workspace.write_json(STAGE_RESULT, result)
@@ -182,18 +169,16 @@ def _run_user_skill_review(
         )
 
 
-def _group_sessions_by_user(raw_sessions: Any) -> dict[str, list[SessionData]]:
-    sessions_by_user: dict[str, list[SessionData]] = {}
+def _group_sessions_by_user(raw_sessions: Any) -> dict[str, list[dict[str, Any]]]:
+    sessions_by_user: dict[str, list[dict[str, Any]]] = {}
     for index, raw in enumerate(raw_sessions or [], start=1):
         session = _normalize_session(raw, index)
-        user_id = str(session.metadata.get('user_id') or 'unknown_user')
+        user_id = str((session.get('metadata') or {}).get('user_id') or 'unknown_user')
         sessions_by_user.setdefault(user_id, []).append(session)
     return sessions_by_user
 
 
-def _normalize_session(raw: Any, index: int) -> SessionData:
-    if isinstance(raw, SessionData):
-        return raw
+def _normalize_session(raw: Any, index: int) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raw = {'messages': [], 'raw': raw}
     session_id = str(
@@ -213,12 +198,12 @@ def _normalize_session(raw: Any, index: int) -> SessionData:
         for message in raw.get('messages') or []
         if isinstance(message, dict)
     ]
-    return SessionData(
-        session_id=session_id,
-        source_db='read_session',
-        tables=[],
-        messages=messages,
-        metadata={
+    return {
+        'session_id': session_id,
+        'source_db': 'read_session',
+        'tables': [],
+        'messages': messages,
+        'metadata': {
             'user_id': user_id,
             'raw_session': {
                 key: value
@@ -226,20 +211,20 @@ def _normalize_session(raw: Any, index: int) -> SessionData:
                 if key != 'messages'
             },
         },
-    )
+    }
 
 
-def _normalize_message(raw: dict[str, Any]) -> SessionMessage:
+def _normalize_message(raw: dict[str, Any]) -> dict[str, Any]:
     tool_name = raw.get('tool_name') or raw.get('name')
     skill_name = raw.get('skill_name') or raw.get('skill')
-    return SessionMessage(
-        role=str(raw.get('role') or raw.get('type') or 'unknown'),
-        content=str(raw.get('content') or raw.get('result') or ''),
-        created_at=_optional_str(raw.get('created_at') or raw.get('timestamp')),
-        tool_name=_optional_str(tool_name),
-        skill_name=_optional_str(skill_name),
-        raw=raw,
-    )
+    return {
+        'role': str(raw.get('role') or raw.get('type') or 'unknown'),
+        'content': str(raw.get('content') or raw.get('result') or ''),
+        'created_at': _optional_str(raw.get('created_at') or raw.get('timestamp')),
+        'tool_name': _optional_str(tool_name),
+        'skill_name': _optional_str(skill_name),
+        'raw': raw,
+    }
 
 
 def _aggregate_trajectory(*, user_id: str, trajectories: list[Trajectory]) -> Trajectory:
@@ -257,6 +242,7 @@ def _aggregate_trajectory(*, user_id: str, trajectories: list[Trajectory]) -> Tr
         called_tools=_unique(called_tools),
         called_skills=_unique(called_skills),
         steps=steps,
+        steps_text=format_steps_text(steps),
         qualified=bool(trajectories),
         skip_reason=None if trajectories else 'no qualified sessions',
     )
@@ -265,9 +251,9 @@ def _aggregate_trajectory(*, user_id: str, trajectories: list[Trajectory]) -> Tr
 def _build_user_result(
     *,
     user_id: str,
-    sessions: list[SessionData],
+    sessions: list[dict[str, Any]],
     trajectories: list[Trajectory],
-    decisions: list[SkillReviewDecision],
+    resolutions: list[SkillReviewResolution],
     workspace: SkillReviewWorkspace,
 ) -> UserSkillReviewResult:
     qualified_trajectories = [item for item in trajectories if item.qualified]
@@ -293,7 +279,7 @@ def _build_user_result(
             'total_tool_turns': sum(item.tool_turns for item in trajectories),
             'skipped_sessions': skipped,
         },
-        candidates=decisions if qualified else [],
+        candidates=resolutions if qualified else [],
         artifacts={
             'work_dir': str(workspace.path),
             'result_file': str(workspace.stage_path(STAGE_RESULT)),

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from chat.components.skill_review.llm import SkillReviewLLM
+import re
+import json
+from lazyllm import AutoModel
+
 from chat.components.skill_review.schemas import (
     ContextualDescription,
     GuidelineSet,
@@ -9,18 +12,27 @@ from chat.components.skill_review.schemas import (
     SuccessGuideline,
     Trajectory,
 )
-from chat.prompts.skill_review import craft_prompt
+from chat.prompts.skill_review import draft_prompt
 
 
-def build_skill_craft(trajectory: Trajectory, llm: SkillReviewLLM) -> SkillDraft:
+def build_skill_draft(trajectory: Trajectory, llm: AutoModel) -> SkillDraft:
     try:
-        payload = llm.complete_json(craft_prompt(trajectory.model_dump()))
-        return SkillDraft.model_validate(payload)
+        text = llm(draft_prompt(trajectory.steps_text))
+        fenced = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.S)
+        if fenced:
+            text = fenced.group(1)
+        else:
+            start = text.find('{')
+            end = text.rfind('}')
+            if start >= 0 and end > start:
+                text = text[start:end + 1]
+        parsed = json.loads(text)
+        return SkillDraft.model_validate(parsed)
     except Exception:
-        return _fallback_craft(trajectory)
+        return _fallback_draft(trajectory)
 
 
-def _fallback_craft(trajectory: Trajectory) -> SkillDraft:
+def _fallback_draft(trajectory: Trajectory) -> SkillDraft:
     user_steps = [step for step in trajectory.steps if step.role == 'user']
     assistant_steps = [step for step in trajectory.steps if step.role == 'assistant']
     goal = user_steps[0].action if user_steps else 'Unknown task goal'
@@ -51,3 +63,5 @@ def _fallback_craft(trajectory: Trajectory) -> SkillDraft:
             failure_patterns=[],
         ),
     )
+
+

@@ -4,9 +4,9 @@ import json
 from typing import Any
 
 
-def craft_prompt(trajectory: dict[str, Any]) -> str:
+def draft_prompt(trajectory: dict[str, Any]) -> str:
     return (
-        'You extract reusable skill craft from one agent trajectory.\n'
+        'You extract a reusable skill draft from one agent trajectory.\n'
         'Return JSON only with keys: contextual_description, refined_trajectory, guidelines.\n'
         'contextual_description has task_goal, applicable_scenario, execution_summary, key_result, environment.\n'
         'refined_trajectory has steps: step_index, role, action, state, tool_name, skill_name.\n'
@@ -15,10 +15,10 @@ def craft_prompt(trajectory: dict[str, Any]) -> str:
     )
 
 
-def cluster_prompt(crafts: list[dict[str, Any]]) -> str:
+def cluster_prompt(drafts: list[dict[str, Any]]) -> str:
     return (
-        'Cluster skill crafts by task type. Return JSON only: {"clusters":[{"task_scope":"...","craft_indexes":[0]}]}.\n'
-        f'CRAFTS:\n{json.dumps(crafts, ensure_ascii=False, indent=2)}'
+        'Cluster skill drafts by task type. Return JSON only: {"clusters":[{"task_scope":"...","draft_indexes":[0]}]}.\n'
+        f'DRAFTS:\n{json.dumps(drafts, ensure_ascii=False, indent=2)}'
     )
 
 
@@ -40,11 +40,11 @@ def candidate_prompt(outline: dict[str, Any], guidelines: dict[str, Any]) -> str
     )
 
 
-def decision_prompt(candidate: dict[str, Any], called_skills: list[str]) -> str:
+def resolution_prompt(candidate: dict[str, Any], called_skills: list[str]) -> str:
     return (
-        'Decide whether the candidate should create a new skill, modify an existing skill, '
-        'replace an existing skill, merge with existing skill, or skip. '
-        'Return JSON only with action, reason, confidence, target_skill, suggestions.\n'
+        'Resolve whether the candidate should be saved as a new skill or as a patch '
+        'to an existing skill. Return JSON only with keys: type and suggestion. '
+        'type must be either "new" or "patch". suggestion is a concise review note.\n'
         f'CALLED_SKILLS:\n{json.dumps(called_skills, ensure_ascii=False)}\n'
         f'CANDIDATE:\n{json.dumps(candidate, ensure_ascii=False, indent=2)}'
     )

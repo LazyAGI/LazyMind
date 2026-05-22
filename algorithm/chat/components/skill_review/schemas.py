@@ -1,45 +1,26 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
-ReviewAction = Literal['create', 'modify', 'replace', 'merge', 'skip']
+SkillReviewResolutionType = Literal['new', 'patch']
 ReviewStatus = Literal['completed', 'skipped', 'failed', 'running']
 
 
 class SkillReviewRequest(BaseModel):
-    model_config = ConfigDict(extra='forbid')
+    start_time: datetime
+    end_time: datetime
+    min_user_turns: int = Field(default=2, ge=0)
+    min_tool_turns: int = Field(default=5, ge=0)
 
-    # TODO: The final API contract is still open. These fields are kept for
-    # compatibility with the first skeleton but are not required by the current
-    # algorithm, which reads all sessions from read_session().
-    min_user_turns: int = Field(default=3, ge=0)
-    min_tool_turns: int = Field(default=2, ge=0)
-    resume: bool = True
-    force: bool = False
-    llm_config: Optional[Dict[str, Any]] = None
-    emb_config: Optional[Dict[str, Any]] = None
-
-
-class SessionMessage(BaseModel):
-    model_config = ConfigDict(extra='allow')
-
-    role: str
-    content: str = ''
-    created_at: Optional[str] = None
-    tool_name: Optional[str] = None
-    skill_name: Optional[str] = None
-    raw: Dict[str, Any] = Field(default_factory=dict)
-
-
-class SessionData(BaseModel):
-    session_id: str
-    source_db: str
-    tables: List[str] = Field(default_factory=list)
-    messages: List[SessionMessage] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    @model_validator(mode='after')
+    def validate_time_range(self) -> 'SkillReviewRequest':
+        if self.start_time > self.end_time:
+            raise ValueError('start_time must be earlier than or equal to end_time')
+        return self
 
 
 class TrajectoryStep(BaseModel):
@@ -58,6 +39,7 @@ class Trajectory(BaseModel):
     called_tools: List[str] = Field(default_factory=list)
     called_skills: List[str] = Field(default_factory=list)
     steps: List[TrajectoryStep] = Field(default_factory=list)
+    steps_text: str = ''
     qualified: bool = False
     skip_reason: Optional[str] = None
 
@@ -97,7 +79,7 @@ class SkillDraft(BaseModel):
 
 class TaskCluster(BaseModel):
     task_scope: str
-    crafts: List[SkillDraft] = Field(default_factory=list)
+    drafts: List[SkillDraft] = Field(default_factory=list)
 
 
 class SkillOutlineStep(BaseModel):
@@ -121,13 +103,12 @@ class CandidateSkill(BaseModel):
     outline: SkillOutline
 
 
-class SkillReviewDecision(BaseModel):
-    action: ReviewAction
-    reason: str
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    target_skill: Optional[Dict[str, str]] = None
-    suggestions: List[Dict[str, str]] = Field(default_factory=list)
-    candidate: Optional[CandidateSkill] = None
+class SkillReviewResolution(BaseModel):
+    id: str = Field(..., min_length=1)
+    skill_name: str = Field(..., min_length=1)
+    type: SkillReviewResolutionType
+    skill_content: Dict[str, Any]
+    suggestion: Optional[str] = None
 
 
 class SkillReviewResult(BaseModel):
@@ -135,7 +116,7 @@ class SkillReviewResult(BaseModel):
     status: ReviewStatus
     qualified: bool
     trigger: Dict[str, Any] = Field(default_factory=dict)
-    candidates: List[SkillReviewDecision] = Field(default_factory=list)
+    candidates: List[SkillReviewResolution] = Field(default_factory=list)
     artifacts: Dict[str, str] = Field(default_factory=dict)
     error: Optional[str] = None
 
@@ -147,20 +128,14 @@ class UserSkillReviewResult(BaseModel):
     session_count: int = 0
     qualified_session_count: int = 0
     trigger: Dict[str, Any] = Field(default_factory=dict)
-    candidates: List[SkillReviewDecision] = Field(default_factory=list)
+    candidates: List[SkillReviewResolution] = Field(default_factory=list)
     artifacts: Dict[str, Any] = Field(default_factory=dict)
     error: Optional[str] = None
 
 
 class SkillReviewBatchResult(BaseModel):
-    review_id: str
-    status: ReviewStatus
-    qualified: bool
-    user_count: int = 0
-    qualified_user_count: int = 0
-    candidates: List[SkillReviewDecision] = Field(default_factory=list)
-    users: List[UserSkillReviewResult] = Field(default_factory=list)
-    artifacts: Dict[str, Any] = Field(default_factory=dict)
+    success: bool
+    inserted_count: int = 0
     error: Optional[str] = None
 
 
@@ -170,7 +145,6 @@ class StageManifest(BaseModel):
     current_stage: Optional[str] = None
     completed_stages: List[str] = Field(default_factory=list)
     input_hash: str = ''
-    model_config_hash: str = ''
     error: Optional[str] = None
     created_at: str
     updated_at: str

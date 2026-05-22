@@ -11,7 +11,7 @@ from chat.pipelines.skill_review import run_skill_review
 router = APIRouter()
 
 
-@router.post('/api/chat/skill-review', summary='Run skill review from a session database')
+@router.post('/api/chat/skill-review', summary='Run skill review for chat histories in a time range')
 async def skill_review(payload: SkillReviewRequest):
     try:
         result = await asyncio.to_thread(run_skill_review, payload)

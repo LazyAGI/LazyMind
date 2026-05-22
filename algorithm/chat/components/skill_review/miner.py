@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 
-from chat.components.skill_review.llm import SkillReviewLLM
 from chat.components.skill_review.schemas import (
     CandidateSkill,
     GuidelineSet,
@@ -13,9 +12,10 @@ from chat.components.skill_review.schemas import (
 from chat.prompts.skill_review import candidate_prompt, outline_prompt
 
 
-def build_skill_outline(cluster: TaskCluster, llm: SkillReviewLLM) -> SkillOutline:
+def build_skill_outline(cluster: TaskCluster, llm) -> SkillOutline:
+    # TODO: Implement for Skill Outline
     try:
-        payload = llm.complete_json(outline_prompt(cluster.model_dump()))
+        payload = llm(outline_prompt(cluster.model_dump()))
         return SkillOutline.model_validate(payload)
     except Exception:
         return _fallback_outline(cluster)
@@ -24,11 +24,12 @@ def build_skill_outline(cluster: TaskCluster, llm: SkillReviewLLM) -> SkillOutli
 def build_candidate_skill(
     cluster: TaskCluster,
     outline: SkillOutline,
-    llm: SkillReviewLLM,
+    llm,
 ) -> CandidateSkill:
+    # TODO: Implement for Candidate Skill
     guidelines = _collect_guidelines(cluster)
     try:
-        payload = llm.complete_json(candidate_prompt(outline.model_dump(), guidelines.model_dump()))
+        payload = llm(candidate_prompt(outline.model_dump(), guidelines.model_dump()))
         payload['outline'] = outline.model_dump()
         return CandidateSkill.model_validate(payload)
     except Exception:
@@ -36,9 +37,9 @@ def build_candidate_skill(
 
 
 def _fallback_outline(cluster: TaskCluster) -> SkillOutline:
-    craft = cluster.crafts[0]
+    draft = cluster.drafts[0]
     steps = []
-    for step in craft.refined_trajectory.steps[:8]:
+    for step in draft.refined_trajectory.steps[:8]:
         steps.append(
             SkillOutlineStep(
                 step_name=f'Step {len(steps) + 1}',
@@ -57,8 +58,8 @@ def _fallback_outline(cluster: TaskCluster) -> SkillOutline:
             )
         )
     return SkillOutline(
-        skill_name=_skill_name_from_text(craft.contextual_description.task_goal),
-        applicable_scenario=craft.contextual_description.applicable_scenario or cluster.task_scope,
+        skill_name=_skill_name_from_text(draft.contextual_description.task_goal),
+        applicable_scenario=draft.contextual_description.applicable_scenario or cluster.task_scope,
         sop=steps,
     )
 
@@ -105,9 +106,9 @@ def _fallback_candidate(outline: SkillOutline, guidelines: GuidelineSet) -> Cand
 def _collect_guidelines(cluster: TaskCluster) -> GuidelineSet:
     success = []
     failure = []
-    for craft in cluster.crafts:
-        success.extend(craft.guidelines.success_patterns)
-        failure.extend(craft.guidelines.failure_patterns)
+    for draft in cluster.drafts:
+        success.extend(draft.guidelines.success_patterns)
+        failure.extend(draft.guidelines.failure_patterns)
     return GuidelineSet(success_patterns=success, failure_patterns=failure)
 
 

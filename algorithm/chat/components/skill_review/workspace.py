@@ -36,14 +36,12 @@ class SkillReviewWorkspace:
         base_dir: Path,
         session_id: str,
         input_hash: str,
-        model_config_hash: str = '',
         force: bool = False,
     ) -> None:
         self.base_dir = Path(base_dir)
         self.session_id = session_id
         self.path = self.base_dir / _safe_path_segment(session_id)
         self.input_hash = input_hash
-        self.model_config_hash = model_config_hash
         if force and self.path.exists():
             shutil.rmtree(self.path)
         self.path.mkdir(parents=True, exist_ok=True)
@@ -92,7 +90,6 @@ class SkillReviewWorkspace:
             session_id=self.session_id,
             status='running',
             input_hash=self.input_hash,
-            model_config_hash=self.model_config_hash,
             created_at=now,
             updated_at=now,
         )
