@@ -25,15 +25,9 @@ class RAGTraceMissing(RuntimeError):
     kind = 'permanent'
 
 
-def call_rag_chat(
-    question: str,
-    target_chat_url: str,
-    dataset_name: str = '',
-    filters: dict[str, Any] | None = None,
-    *,
-    require_trace: bool = True,
-    model_config: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+def call_rag_chat(question: str, target_chat_url: str, dataset_name: str = '', filters: dict[str, Any] | None = None,
+                  *, require_trace: bool = True, model_config: dict[str, Any] | None = None,
+                  ) -> dict[str, Any]:
     if not target_chat_url:
         raise RAGTargetRequiredError('target_chat_url is required for RAG evaluation')
     target_chat_url = _stream_chat_url(target_chat_url)
@@ -89,13 +83,11 @@ def _stream_chat_url(url: str) -> str:
 
 
 def _open_rag_stream(req: urllib.request.Request) -> dict[str, Any]:
-    timeout = EVO_RAG_TIMEOUT_S
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     text_parts: list[str] = []
     sources: list[Any] = []
     trace_id = ''
-    last_body: dict[str, Any] = {}
-    with opener.open(req, timeout=timeout) as resp:
+    with opener.open(req, timeout=EVO_RAG_TIMEOUT_S) as resp:
         for raw_line in resp:
             line = raw_line.decode('utf-8', errors='replace').strip()
             if not line:
@@ -107,22 +99,19 @@ def _open_rag_stream(req: urllib.request.Request) -> dict[str, Any]:
             body = json.loads(line)
             if not isinstance(body, dict):
                 continue
-            if body.get('code') not in (None, 200):
-                raise RAGCallFailed(f'RAG_CALL_FAILED: {body.get("msg") or body}')
-            last_body = body
             data = body.get('data') if isinstance(body.get('data'), dict) else {}
-            if data.get('status') == 'FAILED':
+            if body.get('code') not in (None, 200) or data.get('status') == 'FAILED':
                 raise RAGCallFailed(f'RAG_CALL_FAILED: {body.get("msg") or body}')
-            if isinstance(data.get('trace_id'), str):
-                trace_id = data['trace_id']
             text = data.get('text')
             if isinstance(text, str):
                 text_parts.append(text)
+            if isinstance(data.get('trace_id'), str):
+                trace_id = data['trace_id']
             if isinstance(data.get('sources'), list):
                 sources = data['sources']
     return {
-        'code': last_body.get('code', 200),
-        'msg': last_body.get('msg', 'success'),
+        'code': 200,
+        'msg': 'success',
         'data': {'text': ''.join(text_parts), 'sources': sources, 'trace_id': trace_id},
     }
 

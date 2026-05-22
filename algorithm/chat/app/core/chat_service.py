@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Union
 import lazyllm
 from lazyllm import LOG
 import lazyllm.tracing.collect.configs  # noqa: F401
-from lazyllm.tracing import current_trace, enable_trace, get_trace_context, set_trace_context
+from lazyllm.tracing import enable_trace, get_trace_context, set_trace_context
 from lazyllm.tracing.collect import runtime as tracing_runtime
 from fastapi.responses import StreamingResponse
 from chat.config import (RAG_MODE, MULTIMODAL_MODE, MAX_CONCURRENCY,
@@ -33,7 +33,7 @@ def _run_ppl_with_trace(ppl, ppl_args, *, session_id, dataset, mode_tag, trace_e
 
     def run_chat_pipeline(*args, **kwargs):
         out = ppl(*args, **kwargs)
-        captured['trace_id'] = _trace_id()
+        captured['trace_id'] = get_trace_context().trace_id
         return out
 
     result = enable_trace(
@@ -52,27 +52,17 @@ def _run_ppl_with_trace(ppl, ppl_args, *, session_id, dataset, mode_tag, trace_e
 def _set_request_trace(enabled: bool, *, session_id: str, dataset: str, mode_tag: str) -> None:
     set_trace_context({
         'enabled': bool(enabled),
+        'sampled': True,
         'session_id': session_id,
-        **({
-            'sampled': True,
-            'request_tags': [f'dataset:{dataset}', f'mode:{mode_tag}'],
-            'module_trace': {'default': True},
-        } if enabled else {}),
+        'request_tags': [f'dataset:{dataset}', f'mode:{mode_tag}'],
+        'module_trace': {'default': True},
     })
 
 
-def _trace_id() -> Optional[str]:
-    trace = current_trace()
-    return trace.trace_id if trace else get_trace_context().trace_id
-
-
 def _flush_trace_exporter() -> None:
-    provider = getattr(tracing_runtime._runtime, '_provider', None)
-    if provider is None:
-        return
     try:
-        from config import config as _cfg
-        provider.force_flush(timeout_millis=_cfg['langfuse_force_flush_timeout_ms'])
+        if provider := getattr(tracing_runtime._runtime, '_provider', None):
+            provider.force_flush()
     except Exception as exc:
         LOG.warning(f'[ChatServer] [TRACE_FLUSH_FAILED] {exc}')
 
@@ -288,7 +278,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
                     async for chunk in async_result:
                         if trace and trace_id is None:
-                            trace_id = _trace_id()
+                            trace_id = get_trace_context().trace_id
                         now = time.time()
                         if not first_frame_logged:
                             first_cost = round(now - start_time, 3)
@@ -349,7 +339,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
             cost = round(time.time() - start_time, 3)
             final_resp['cost'] = cost
             if trace and trace_id is None:
-                trace_id = _trace_id()
+                trace_id = get_trace_context().trace_id
             if trace_id:
                 final_resp['data'] = _attach_trace_info(final_resp['data'], trace_id)
                 _flush_trace_exporter()
