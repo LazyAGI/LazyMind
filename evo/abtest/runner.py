@@ -381,11 +381,18 @@ def _retire_candidate(candidate: ChatInstance, chat_runner: ChatRunner, chat_reg
 
 
 def _chat_api_url(base_url: str) -> str:
-    return base_url if base_url.rstrip('/').endswith('/api/chat') else base_url.rstrip('/') + '/api/chat'
+    url = base_url.rstrip('/')
+    if url.endswith('/api/chat/stream'):
+        return url
+    if url.endswith('/api/chat'):
+        return url + '/stream'
+    return url + '/api/chat/stream'
 
 
 def _chat_base_url(url: str) -> str:
     url = url.rstrip('/')
+    if url.endswith('/api/chat/stream'):
+        return url[: -len('/api/chat/stream')]
     return url[: -len('/api/chat')] if url.endswith('/api/chat') else url
 
 

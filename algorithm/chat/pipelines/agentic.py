@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional
 
 import lazyllm
 from lazyllm import loop, once_wrapper
+from lazyllm.tracing import set_trace_context
 from lazyllm.tools.agent.functionCall import FunctionCall
 from lazyllm.tools.fs.client import FS
 from lazyllm.tools.sandbox.sandbox_base import create_sandbox  # noqa: F401
@@ -319,6 +320,7 @@ async def _agentic_forward_stream(
     runtime_params: dict[str, Any],
     global_sid: str,
     local_sid: str,
+    trace_config: dict[str, Any],
 ):
     event_queue: Queue = Queue()
     sentinel = object()
@@ -330,6 +332,7 @@ async def _agentic_forward_stream(
 
     lazyllm.globals._init_sid(global_sid)
     lazyllm.locals._init_sid(local_sid)
+    set_trace_context(trace_config)
     _clear_orphaned_lazyllm_queue_lock()
     lazyllm.FileSystemQueue().clear()
     lazyllm.FileSystemQueue.get_instance('think').clear()
@@ -380,6 +383,7 @@ async def _agentic_forward_stream(
     def _stream_monitor() -> None:
         lazyllm.globals._init_sid(global_sid)
         lazyllm.locals._init_sid(local_sid)
+        set_trace_context(trace_config)
         while not worker_done.is_set() and not closed.is_set():
             with output_lock:
                 _flush_stream_frames_to_queue()
@@ -388,6 +392,7 @@ async def _agentic_forward_stream(
     def _worker() -> None:
         lazyllm.globals._init_sid(global_sid)
         lazyllm.locals._init_sid(local_sid)
+        set_trace_context(trace_config)
         lazyllm.globals['agentic_config'] = runtime_params
         try:
             result = agentic_forward(
@@ -523,4 +528,5 @@ def agentic_rag(
         runtime_params=runtime_params,
         global_sid=lazyllm.globals._sid,
         local_sid=lazyllm.locals._sid,
+        trace_config=lazyllm.globals.get('trace') or {},
     )
