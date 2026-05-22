@@ -449,7 +449,10 @@ const enUS = {
     updateSuccess: "Profile updated successfully",
     noUserInfo: "Could not retrieve user information",
     invalidEmail: "Please enter a valid email address",
+    emailMax: "Email cannot exceed {{max}} characters",
     invalidPhone: "Please enter a valid mainland China phone number",
+    nicknameMax: "Nickname cannot exceed {{max}} characters",
+    descriptionMax: "Description cannot exceed {{max}} characters",
   },
 
   // Chat
@@ -796,6 +799,9 @@ const enUS = {
     uploadResultMissing: "File upload failed, no upload result returned",
     createTaskFailed: "Failed to create task",
     uploadAndCreateTaskSuccess: "Upload and task creation succeeded",
+    uploadCompleteParsingStarted: "File upload completed. Document parsing has started",
+    documentParsingKeepTabOpen: "Document parsing is in progress. Do not close this tab",
+    startParsingFailed: "Failed to start document parsing, please try again later",
     uploadFailedRetry: "Upload failed, please try again",
     supportedFolderImport: "Folder import supported",
     supportedZipFile: "Only ZIP archive files are supported (.zip)",
@@ -1343,6 +1349,7 @@ const enUS = {
     selectRole: "Please select a role",
     selectRoleRequired: "Please select a role",
     bootstrapAdminRoleLocked: "Bootstrap admin role cannot be changed",
+    bootstrapAdminDisableLocked: "Bootstrap admin cannot be disabled",
     users: "Groups",
     memoryManagement: "Wisdom Accumulation",
     memoryManagementHelp: "Your wisdom and experience will accumulate here.",

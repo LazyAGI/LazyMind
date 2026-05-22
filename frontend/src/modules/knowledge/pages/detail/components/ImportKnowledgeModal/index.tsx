@@ -1,4 +1,4 @@
-import { Button, Form, message, Modal } from "antd";
+import { Alert, Button, Form, message, Modal } from "antd";
 import { useTranslation } from "react-i18next";
 import {
   forwardRef,
@@ -56,6 +56,8 @@ export interface IImportKnowledgeModalRef {
 
 interface IProps {
   onOk: (payload?: { pId?: string }) => void;
+  onParsingStart?: () => void;
+  onParsingSettled?: () => void;
 }
 
 const InitData = {
@@ -86,7 +88,7 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
   const isOnlyRead =
     (hasOnlyReadPermission || hasUploadPermission) && !hasWritePermission;
 
-  const { onOk } = props;
+  const { onOk, onParsingStart, onParsingSettled } = props;
 
   const [form] = Form.useForm();
 
@@ -124,6 +126,7 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
     setData(InitData);
     setVisible(false);
     setLoading(false);
+    setHasZipError(false);
   }
 
   async function submit(values: any) {
@@ -150,7 +153,7 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
         await submitNormalMode(fileItems, values.tags, startMode);
       }
 
-      message.success(t("knowledge.uploadAndCreateTaskSuccess"));
+      message.success(t("knowledge.uploadCompleteParsingStarted"));
       handleClose();
       onOk({ pId: data.p_id });
     } catch (err) {
@@ -161,6 +164,22 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
     } finally {
       setLoading(false);
     }
+  }
+
+  function startTasksAfterUpload(taskIds: string[], startMode: string | undefined) {
+    onParsingStart?.();
+    TaskServiceApi()
+      .startTasks(data.dataset_id, {
+        task_ids: taskIds,
+        ...(startMode ? { start_mode: startMode } : {}),
+      })
+      .catch((err) => {
+        console.error("Start parsing tasks failed:", err);
+        message.error(t("knowledge.startParsingFailed"));
+      })
+      .finally(() => {
+        onParsingSettled?.();
+      });
   }
 
   // Folder mode: upload each file individually with relative_path,
@@ -231,10 +250,7 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
       throw new Error(t("knowledge.createTaskFailed"));
     }
 
-    await TaskServiceApi().startTasks(data.dataset_id, {
-      task_ids: taskIds,
-      ...(startMode ? { start_mode: startMode } : {}),
-    });
+    startTasksAfterUpload(taskIds, startMode);
   }
 
   // Normal mode (plain files / zip): batch upload small files, multi-step for large files.
@@ -297,10 +313,7 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
       throw new Error(t("knowledge.createTaskFailed"));
     }
 
-    await TaskServiceApi().startTasks(data.dataset_id, {
-      task_ids: taskIds,
-      ...(startMode ? { start_mode: startMode } : {}),
-    });
+    startTasksAfterUpload(taskIds, startMode);
   }
 
   // function changeSourceType() {
@@ -334,6 +347,14 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
         </div>
       }
     >
+      {loading && (
+        <Alert
+          message={t("knowledge.documentParsingKeepTabOpen")}
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+      )}
       <Form
         form={form}
         layout="vertical"

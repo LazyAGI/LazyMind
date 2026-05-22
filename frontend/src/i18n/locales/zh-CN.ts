@@ -423,7 +423,10 @@ const zhCN = {
     updateSuccess: "账号信息已更新",
     noUserInfo: "未获取到当前用户信息",
     invalidEmail: "请输入有效的邮箱格式",
+    emailMax: "邮箱不能超过 {{max}} 个字符",
     invalidPhone: "请输入有效的中国大陆手机号",
+    nicknameMax: "昵称不能超过 {{max}} 个字符",
+    descriptionMax: "描述不能超过 {{max}} 个字符",
   },
 
   chat: {
@@ -760,6 +763,9 @@ const zhCN = {
     uploadResultMissing: "文件上传失败，未获取到上传结果",
     createTaskFailed: "创建任务失败",
     uploadAndCreateTaskSuccess: "上传并创建任务成功",
+    uploadCompleteParsingStarted: "文件上传完成，文档正在解析",
+    documentParsingKeepTabOpen: "文档正在解析中，请勿关闭此标签页",
+    startParsingFailed: "启动文档解析失败，请稍后重试",
     uploadFailedRetry: "上传失败，请重试",
     supportedFolderImport: "支持导入文件夹",
     supportedZipFile: "仅支持 ZIP 类型压缩包文件（.zip）",
@@ -1277,6 +1283,7 @@ const zhCN = {
     selectRole: "请选择角色",
     selectRoleRequired: "请选择角色",
     bootstrapAdminRoleLocked: "初始化管理员角色不允许修改",
+    bootstrapAdminDisableLocked: "初始化管理员不允许禁用",
     users: "用户组",
     memoryManagement: "智积阅累",
     memoryManagementHelp: "您的智慧和阅历将在此积累",

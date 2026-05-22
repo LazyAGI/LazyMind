@@ -1,4 +1,5 @@
 import {
+  Alert,
   message,
   Button,
   Badge,
@@ -87,6 +88,7 @@ const Detail = () => {
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
   const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<boolean | null>(null);
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
+  const [parsingNoticeVisible, setParsingNoticeVisible] = useState(false);
 
   const { id = "" } = useParams();
 
@@ -196,6 +198,7 @@ const Detail = () => {
         }
         compareTaskChange(newTaskList, importingTaskListRef.current);
         setImportingTotal(newTaskList.length);
+        setParsingNoticeVisible(newTaskList.length > 0);
         importingTaskListRef.current = newTaskList;
       },
     });
@@ -423,6 +426,14 @@ const Detail = () => {
           }
         }}
       />
+      {parsingNoticeVisible && (
+        <Alert
+          className="knowledge-parsing-notice"
+          message={t("knowledge.documentParsingKeepTabOpen")}
+          type="warning"
+          showIcon
+        />
+      )}
       <div className="toolbar my-4 mt-6 w-full">
         <Search
           className="search-input"
@@ -659,6 +670,8 @@ const Detail = () => {
 
       <ImportKnowledgeModal
         ref={importKnowledgeRef}
+        onParsingStart={() => setParsingNoticeVisible(true)}
+        onParsingSettled={() => setParsingNoticeVisible(false)}
         onOk={({ pId } = {}) => {
           importingTaskListRef.current = [];
           getImportingTotal();
