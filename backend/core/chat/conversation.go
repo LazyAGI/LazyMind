@@ -214,6 +214,11 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	if len(llmConfig) > 0 {
 		reqBody["llm_config"] = llmConfig
 	}
+	if feishuToken, err := fetchFeishuToken(r.Context(), r, userID); err != nil {
+		fmt.Printf("[Core] [FEISHU_TOKEN] failed to fetch feishu token for user %s: %v\n", userID, err)
+	} else if feishuToken != "" {
+		reqBody["tool_config"] = map[string]string{"feishu": feishuToken}
+	}
 	baseURL := chatServiceURL()
 	reqCtx := r.Context()
 	rdb := store.Redis()

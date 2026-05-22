@@ -175,7 +175,8 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       is_stream: bool, trace: bool = False,
                       environment_context: Optional[Dict[str, Any]] = None,
                       user_id: Optional[str] = None,
-                      model_config: Optional[Dict[str, Any]] = None) -> Union[Dict[str, Any], StreamingResponse]:
+                      model_config: Optional[Dict[str, Any]] = None,
+                      tool_config: Optional[Dict[str, str]] = None) -> Union[Dict[str, Any], StreamingResponse]:
     result = None
     priority = LAZYMIND_LLM_PRIORITY if priority is None else priority
 
@@ -216,6 +217,8 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         lazyllm.globals._init_sid(sid=session_id)
         lazyllm.locals._init_sid(sid=session_id)
         inject_model_config(model_config)
+        from lazyllm.tools.tool_config_inject import inject_tool_config  # type: ignore[import]  # noqa: PLC0415
+        inject_tool_config(tool_config)
 
     if not is_stream:
         if sensitive_check_result:

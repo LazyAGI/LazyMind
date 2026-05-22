@@ -52,6 +52,7 @@ from chat.components.agentic.tool_stream import (  # noqa: E402
     _tool_call_id,
 )
 from lazyllm import AutoModel  # noqa: E402
+from lazyllm.tools.fs.supplier.feishu import FeishuFS  # type: ignore[import]  # noqa: E402
 from chat.utils.load_config import get_config_path  # noqa: E402
 
 
@@ -203,6 +204,14 @@ class _StreamingReactAgent(lazyllm.tools.agent.ReactAgent):
         self._agent = agent
 
 
+def _feishu_key_source(_instance) -> str:
+    mapping = lazyllm.globals.config.get('dynamic_fs_auth') or {}
+    return (mapping.get('feishu') or '').strip()
+
+
+_FEISHU_FS_INSTANCE = FeishuFS(dynamic_auth=True)
+
+
 def agentic_forward(
     query: str,
     history: list[dict[str, Any]],
@@ -230,7 +239,7 @@ def agentic_forward(
     agent_cls = _StreamingReactAgent if stream_event_callback else lazyllm.tools.agent.ReactAgent
     agent_kwargs = {
         'llm': llm,
-        'tools': available_tools,
+        'tools': available_tools + [(_FEISHU_FS_INSTANCE, _feishu_key_source)],
         'max_retries': _cfg['max_retries'],
         'return_trace': config.get('return_trace', False),
         'stream': bool(stream_event_callback),

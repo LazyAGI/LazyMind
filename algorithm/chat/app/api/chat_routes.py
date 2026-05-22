@@ -49,6 +49,16 @@ async def chat(
             )
         ),
     ] = None,
+    tool_config: Annotated[
+        Optional[Dict[str, str]],
+        Body(
+            description=(
+                'Per-request tool credentials. Keys are tool/provider names, values are tokens. '
+                'For OAuth2 providers (e.g. feishu) pass a valid, unexpired access token. '
+                'Example: {"feishu": "u-xxx", "bing": "sk-xxx"}'
+            )
+        ),
+    ] = None,
     *,
     request: Request,
 ):
@@ -75,4 +85,5 @@ async def chat(
         environment_context=environment_context,
         user_id=(user_id or '').strip(),
         model_config=llm_config,
+        tool_config=tool_config,
     )
