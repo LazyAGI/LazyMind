@@ -148,11 +148,18 @@ def _source(state: State) -> str:
     return 'checkpoint_llm' if state.checkpoint else 'llm'
 
 
+def _extra_instructions(flow: str | None, message: str) -> dict[str, str]:
+    text = message.strip()
+    return {'extra_instructions': text} if text and flow in {'run', 'apply'} else {}
+
+
 def _normalize(ops: list[dict[str, Any]], ctx: PlanContext, state: State, message: str = '') -> list[dict[str, Any]]:
     out = []
     for item in ops or []:
         op, args = item.get('op'), dict(item.get('args') or {})
         op, args = _normalize_control_op(op, args, state)
+        if op == 'checkpoint.rewind' and (extra := _extra_instructions(_flow_arg(args), message)):
+            args.setdefault('input_patch', {}).setdefault('extra_instructions', extra['extra_instructions'])
         if state.checkpoint and (op in {'task.continue_latest', 'thread.retry'} or op == _checkpoint_next_op(state)):
             op, args = 'checkpoint.continue', {}
         elif op in {'task.continue_latest', 'thread.retry'}:
@@ -170,11 +177,15 @@ def _normalize(ops: list[dict[str, Any]], ctx: PlanContext, state: State, messag
             _fill_eval(args, state.inputs)
         elif op == 'run.start':
             args.setdefault('eval_id', state.latest_id('eval') if state.success('eval') else None)
+            if _reset_request(message, 'run'):
+                args.update(_extra_instructions('run', message))
         elif op == 'apply.start':
             report_id = state.latest_payload('run').get('report_id') or (state.latest.get('run') or {}).get(
                 'report_id'
             )
             args.setdefault('report_id', report_id)
+            if _reset_request(message, 'apply'):
+                args.update(_extra_instructions('apply', message))
         elif op == 'abtest.create':
             _fill_abtest(args, state)
         elif op == 'dataset_gen.start':
@@ -197,9 +208,10 @@ def _checkpoint_shortcut(message: str, state: State) -> Draft | None:
     text = message.strip().lower()
     action, flow = _checkpoint_action(text, state)
     if action == 'rewind' and flow:
+        patch: dict[str, Any] = {'resume': False, **_extra_instructions(flow, message)}
         return Draft(
             f'重新执行{_FLOW_LABELS[flow]}。',
-            [{'op': 'checkpoint.rewind', 'args': {'to_stage': flow, 'input_patch': {'resume': False}}}],
+            [{'op': 'checkpoint.rewind', 'args': {'to_stage': flow, 'input_patch': patch}}],
             'checkpoint_rule',
         )
     if action == 'continue':
@@ -221,6 +233,7 @@ _FLOW_META = {
 }
 _FLOW_LABELS = {flow: meta[0] for flow, meta in _FLOW_META.items()}
 _RERUN_WORDS = ('重新', '重跑', '再跑', '从头', '重置', 'rerun', 'reset')
+_RETRY_WORDS = ('重试', 'retry')
 _STOP_WORDS = ('停止', '暂停', 'stop', 'pause')
 _CONTINUE_WORDS = ('继续', '续跑', '恢复', '运行', '下一步', '确认', '执行', '开始', 'continue', 'resume', 'next')
 
@@ -240,35 +253,47 @@ def _stage_shortcut(message: str, ctx: PlanContext, state: State) -> Draft | Non
         return Draft(f'已暂停{label}。', [{'op': 'task.stop_active', 'args': args}], 'stage_rule')
     if not flow:
         return None
-    if not _has(text, _CONTINUE_WORDS + _RERUN_WORDS):
+    if not _has(text, _CONTINUE_WORDS + _RERUN_WORDS + _RETRY_WORDS):
         return None
     if active_flow:
         return Draft(f'{_FLOW_LABELS[flow]}正在执行中，请等待完成或先暂停当前任务。', [], 'stage_rule')
+    retry_restart = _has(text, _RETRY_WORDS) and (
+        (state.latest.get(flow) or {}).get('status') not in RESUMABLE_STATUSES | {'stopping'}
+    )
+    if _reset_request(message, flow) or retry_restart:
+        if blocker := _stage_blocker(flow, state):
+            return Draft(blocker, [], 'stage_rule')
+        return Draft(
+            f'重新执行{_FLOW_LABELS[flow]}。',
+            [_start_op(flow, ctx, state, resume=False, message=message)],
+            'stage_rule',
+        )
     if (state.latest.get(flow) or {}).get('status') in RESUMABLE_STATUSES | {'stopping'}:
         op = {'op': 'task.continue_latest', 'args': {'flow': flow}}
         return Draft(f'继续执行{_FLOW_LABELS[flow]}。', [op], 'stage_rule')
     if blocker := _stage_blocker(flow, state):
         return Draft(blocker, [], 'stage_rule')
-    if _reset_request(message, flow):
-        return Draft(f'重新执行{_FLOW_LABELS[flow]}。', [_start_op(flow, ctx, state, resume=False)], 'stage_rule')
     return Draft(f'继续执行{_FLOW_LABELS[flow]}。', [_start_op(flow, ctx, state, resume=True)], 'stage_rule')
 
 
-def _start_op(flow: str, ctx: PlanContext, state: State, *, resume: bool) -> dict[str, Any]:
+def _start_op(
+    flow: str, ctx: PlanContext, state: State, *, resume: bool, message: str | None = None
+) -> dict[str, Any]:
+    extra = _extra_instructions(flow, message or '')
     if flow == 'eval':
         return {'op': 'eval.run', 'args': {'dataset_id': state.artifact('dataset_ids'), 'resume': resume}}
     if flow == 'dataset_gen':
         return {'op': 'dataset_gen.start', 'args': {'resume': resume}}
     if flow == 'run':
-        return {'op': 'run.start', 'args': {}}
+        return {'op': 'run.start', 'args': extra}
     if flow == 'apply':
-        return {'op': 'apply.start', 'args': {}}
+        return {'op': 'apply.start', 'args': extra}
     return {'op': 'abtest.create', 'args': {}}
 
 
 def _checkpoint_action(text: str, state: State) -> tuple[str | None, str | None]:
     flow = _mentioned_flow(text)
-    if _has(text, _RERUN_WORDS):
+    if _has(text, _RERUN_WORDS) or (flow and state.checkpoint.get('terminal') and _has(text, _RETRY_WORDS)):
         return ('rewind', flow)
     next_flow = _op_flow(_checkpoint_next_op(state) or '')
     if _has(text, _CONTINUE_WORDS) or (next_flow and flow == next_flow):
@@ -395,7 +420,10 @@ def _fill_eval(args: dict, inputs: dict) -> None:
 
 def _fill_abtest(args: dict, state: State) -> None:
     args.setdefault('apply_id', state.latest_id('apply'))
-    args.setdefault('baseline_eval_id', state.latest_id('eval'))
+    args.setdefault(
+        'baseline_eval_id',
+        state.latest_payload('eval').get('eval_id') or state.artifact('eval_ids') or state.latest_id('eval'),
+    )
     args.setdefault('dataset_id', state.artifact('dataset_ids'))
     args['target_chat_url'] = EVO_TARGET_CHAT_URL
     if state.inputs.get('dataset_name'):
@@ -426,7 +454,7 @@ def _validate(op: str, args: dict, ctx: PlanContext) -> None:
 def _validate_checkpoint(op: str, args: dict, checkpoint: dict) -> None:
     if not checkpoint:
         raise ValueError('no pending checkpoint')
-    if op == 'checkpoint.continue' and not checkpoint.get('next_op') and not checkpoint.get('terminal'):
+    if op == 'checkpoint.continue' and not checkpoint.get('next_op'):
         raise ValueError('checkpoint has no next_op to continue')
     if op == 'checkpoint.rewind' and args.get('to_stage') not in (checkpoint.get('allowed_stages') or FLOWS):
         raise ValueError(f"rewind stage {args.get('to_stage')!r} is not allowed")

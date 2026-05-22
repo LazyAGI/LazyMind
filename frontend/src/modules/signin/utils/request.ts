@@ -95,6 +95,10 @@ type WrappedApiResponse<T> = {
   data?: T;
 };
 
+export type CurrentUserResponse = MeResponse & {
+  dynamic?: boolean;
+};
+
 function unwrapApiResponse<T>(responseData: T | WrappedApiResponse<T>): T {
   return ((responseData as WrappedApiResponse<T>)?.data ||
     responseData) as T;
@@ -112,9 +116,11 @@ export function unwrapLoginResponse(
   return normalized;
 }
 
-export async function fetchCurrentUser(): Promise<MeResponse> {
+export async function fetchCurrentUser(): Promise<CurrentUserResponse> {
   const response = await createAuthApi().meApiAuthserviceAuthMeGet();
-  const currentUser = unwrapApiResponse(response.data as any);
+  const currentUser = unwrapApiResponse(
+    response.data as any,
+  ) as CurrentUserResponse;
 
   AgentAppsAuth.updateUserInfo({
     userId: currentUser.user_id,
@@ -122,6 +128,7 @@ export async function fetchCurrentUser(): Promise<MeResponse> {
     email: currentUser.email || undefined,
     displayName: currentUser.display_name || undefined,
     role: currentUser.role,
+    dynamic: currentUser.dynamic === true,
   });
 
   return currentUser;

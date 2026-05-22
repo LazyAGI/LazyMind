@@ -43,6 +43,22 @@ def apply_model() -> OpencodeProviderConfig:
     )
 
 
+def explicit_env_model_configured() -> bool:
+    return bool(str(config['evo_code_api_key'] or '').strip())
+
+
+def provider_config_from_evo_llm(model_config: dict[str, Any] | None) -> OpencodeProviderConfig | None:
+    evo_llm = (model_config or {}).get('evo_llm')
+    if not isinstance(evo_llm, dict):
+        return None
+    provider = str(evo_llm.get('source') or '').strip().lower()
+    model = str(evo_llm.get('model') or '').strip()
+    api_key = str(evo_llm.get('api_key') or '').strip()
+    base_url = _normalize_provider_base_url(provider, str(evo_llm.get('base_url') or '').strip())
+    label = provider
+    return OpencodeProviderConfig(_provider_id(provider, base_url, label), model, api_key, base_url, label)
+
+
 @dataclass
 class OpencodeOptions:
     binary: str | None = None
@@ -231,6 +247,15 @@ def _provider_id(provider: str, base_url: str, label: str) -> str:
     if provider == 'openai' and base_url.rstrip('/') != PROVIDER_BASE_URLS['openai'].rstrip('/'):
         return _safe_provider_id(label or 'openai_compatible')
     return provider
+
+
+def _normalize_provider_base_url(provider: str, base_url: str) -> str:
+    if not base_url:
+        return PROVIDER_BASE_URLS.get(provider, '')
+    stripped = base_url.rstrip('/')
+    if provider == 'qwen' and stripped == 'https://dashscope.aliyuncs.com':
+        return PROVIDER_BASE_URLS['qwen']
+    return stripped
 
 
 def _safe_provider_id(value: str) -> str:

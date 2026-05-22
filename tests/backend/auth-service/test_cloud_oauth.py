@@ -12,7 +12,7 @@ def _authorize_payload() -> dict:
 
 
 def test_oauth_authorize_url_requires_secret_key(client: TestClient, monkeypatch):
-    monkeypatch.delenv('RAGSCAN_SECRET_KEY', raising=False)
+    monkeypatch.delenv('LAZYMIND_AUTH_CLOUD_SECRET_KEY', raising=False)
 
     resp = client.post('/api/authservice/v1/cloud/feishu/oauth/authorize-url', json=_authorize_payload())
     assert resp.status_code == 500
@@ -22,7 +22,7 @@ def test_oauth_authorize_url_requires_secret_key(client: TestClient, monkeypatch
 
 
 def test_oauth_authorize_url_success_when_secret_key_present(client: TestClient, monkeypatch):
-    monkeypatch.setenv('RAGSCAN_SECRET_KEY', 'test-ragscan-secret')
+    monkeypatch.setenv('LAZYMIND_AUTH_CLOUD_SECRET_KEY', 'test-ragscan-secret')
 
     resp = client.post('/api/authservice/v1/cloud/feishu/oauth/authorize-url', json=_authorize_payload())
     assert resp.status_code == 200

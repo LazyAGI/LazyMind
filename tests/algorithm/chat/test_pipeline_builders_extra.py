@@ -38,7 +38,7 @@ ppl_search_mod = importlib.import_module('chat.pipelines.builders.get_ppl_search
 # ---------------------------------------------------------------------------
 
 def test_build_default_retriever_configs_uses_topk_and_embed_keys(monkeypatch):
-    monkeypatch.setattr(retriever_mod, 'get_embed_keys', lambda: ['embed_main', 'embed_sparse'])
+    monkeypatch.setattr(retriever_mod, 'get_text_embed_keys', lambda: ['embed_main', 'embed_sparse'])
 
     configs = retriever_mod._build_default_retriever_configs(topk=15)
 
@@ -52,7 +52,7 @@ def test_build_default_retriever_configs_uses_topk_and_embed_keys(monkeypatch):
 
 
 def test_build_default_retriever_configs_falls_back_to_embed_main(monkeypatch):
-    monkeypatch.setattr(retriever_mod, 'get_embed_keys', lambda: [])
+    monkeypatch.setattr(retriever_mod, 'get_text_embed_keys', lambda: [])
 
     configs = retriever_mod._build_default_retriever_configs()
 
@@ -61,7 +61,7 @@ def test_build_default_retriever_configs_falls_back_to_embed_main(monkeypatch):
 
 
 def test_build_default_retriever_configs_line_has_block_target(monkeypatch):
-    monkeypatch.setattr(retriever_mod, 'get_embed_keys', lambda: ['embed_main'])
+    monkeypatch.setattr(retriever_mod, 'get_text_embed_keys', lambda: ['embed_main'])
 
     configs = retriever_mod._build_default_retriever_configs()
 

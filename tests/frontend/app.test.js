@@ -1,145 +1,62 @@
-/**
- * Unit tests for frontend app logic (from frontend/index.html).
- * Uses setup.js to load the script without modifying business code.
- */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  escapeHtml,
-  saveTokens,
-  saveRole,
-  getRole,
-  isAdmin,
-  shouldRefresh,
-  getHashRoute,
-  parseRoute,
-  getAdminNavHTML,
-  win,
+  formRulesSource,
+  indexHtml,
+  mainEntry,
+  routePaths,
+  routerSource,
 } from './setup.js';
 
-describe('escapeHtml', () => {
-  it('escapes < and >', () => {
-    expect(escapeHtml('<script>')).toBe('&lt;script&gt;');
-  });
-  it('escapes & and quotes', () => {
-    expect(escapeHtml('a & b "c" \'d\'')).toBe('a &amp; b &quot;c&quot; &#39;d&#39;');
-  });
-  it('returns empty string for null', () => {
-    expect(escapeHtml(null)).toBe('');
-  });
-  it('handles undefined', () => {
-    expect(escapeHtml(undefined)).toBe('');
+describe('Vite entrypoint', () => {
+  it('mounts the React app through the current module entry', () => {
+    expect(indexHtml).toContain('<div id="app"></div>');
+    expect(indexHtml).toContain('<script type="module" src="/src/main.tsx"></script>');
+    expect(mainEntry).toContain('createRoot');
+    expect(mainEntry).toContain('document.getElementById("app")');
+    expect(mainEntry).toMatch(/root\.render\s*\(\s*<App\s*\/>\s*\)/);
   });
 });
 
-describe('saveTokens / getRole / saveRole', () => {
-  beforeEach(() => {
-    win.localStorage.removeItem('access_token');
-    win.localStorage.removeItem('refresh_token');
-    win.localStorage.removeItem('access_expires_at');
-    win.localStorage.removeItem('user_role');
+describe('router contract', () => {
+  it('keeps public auth routes available', () => {
+    expect(routePaths).toContain('/login');
+    expect(routePaths).toContain('/register');
+    expect(routePaths).toContain('/loginTransition');
   });
 
-  it('saveTokens stores access token', () => {
-    saveTokens('abc', 'xyz', 3600);
-    expect(win.localStorage.getItem('access_token')).toBe('abc');
-    expect(win.localStorage.getItem('refresh_token')).toBe('xyz');
+  it('keeps primary authenticated product routes available', () => {
+    expect(routePaths).toContain('/');
+    expect(routePaths).toContain('agent/chat');
+    expect(routePaths).toContain('lib/knowledge');
+    expect(routePaths).toContain('data-sources');
+    expect(routePaths).toContain('model-providers');
+    expect(routePaths).toContain('memory-management');
+    expect(routePaths).toContain('self-evolution');
   });
 
-  it('saveTokens with empty clears storage', () => {
-    saveTokens('a', 'b', 60);
-    saveTokens('', '', 0);
-    expect(win.localStorage.getItem('access_token')).toBeNull();
+  it('keeps admin routes available', () => {
+    expect(routePaths).toContain('/admin');
+    expect(routePaths).toContain('users');
+    expect(routePaths).toContain('groups');
+    expect(routePaths).toContain('groups/:id');
   });
 
-  it('saveRole and getRole', () => {
-    saveRole('admin');
-    expect(getRole()).toBe('admin');
-    saveRole(null);
-    expect(getRole()).toBe('');
+  it('keeps fallback navigation wired to the app root', () => {
+    expect(routerSource).toContain('<Route path="*" element={<Navigate to="/" replace />} />');
   });
 });
 
-describe('isAdmin', () => {
-  beforeEach(() => {
-    win.localStorage.removeItem('user_role');
+describe('signin validation contract', () => {
+  it('keeps username and password validators exported', () => {
+    expect(formRulesSource).toContain('export const validateUsername');
+    expect(formRulesSource).toContain('export const validatePassword');
+    expect(formRulesSource).toContain('export const usernameRules');
+    expect(formRulesSource).toContain('export const passwordRules');
   });
 
-  it('returns true for admin role', () => {
-    saveRole('admin');
-    expect(isAdmin()).toBe(true);
-  });
-  it('returns true for ADMIN (case insensitive)', () => {
-    saveRole('ADMIN');
-    expect(isAdmin()).toBe(true);
-  });
-  it('returns false for user role', () => {
-    saveRole('user');
-    expect(isAdmin()).toBe(false);
-  });
-});
-
-describe('shouldRefresh', () => {
-  beforeEach(() => {
-    win.localStorage.removeItem('access_token');
-    win.localStorage.removeItem('access_expires_at');
-  });
-
-  it('returns false when no token', () => {
-    expect(shouldRefresh()).toBe(false);
-  });
-
-  it('returns false when expires_at is far future', () => {
-    saveTokens('t', 'r', 3600);
-    expect(shouldRefresh()).toBe(false);
-  });
-
-  it('returns true when token is about to expire', () => {
-    // Refresh buffer is 2 min (120s). Token expiring in 60s should trigger refresh.
-    saveTokens('t', 'r', 60);
-    expect(shouldRefresh()).toBe(true);
-  });
-});
-
-describe('parseRoute', () => {
-  it('parses login', () => {
-    expect(parseRoute('/login')).toEqual({ page: 'login' });
-  });
-  it('parses register', () => {
-    expect(parseRoute('/register')).toEqual({ page: 'register' });
-  });
-  it('parses home', () => {
-    expect(parseRoute('/')).toEqual({ page: 'home' });
-    expect(parseRoute('/home')).toEqual({ page: 'home' });
-  });
-  it('parses users', () => {
-    expect(parseRoute('/users')).toEqual({ page: 'users' });
-  });
-  it('parses roles', () => {
-    expect(parseRoute('/roles')).toEqual({ page: 'roles' });
-  });
-  it('parses role-permissions with id', () => {
-    expect(parseRoute('/roles/1')).toEqual({ page: 'role-permissions', id: '1' });
-    expect(parseRoute('/roles/2/permissions')).toEqual({ page: 'role-permissions', id: '2' });
-  });
-});
-
-describe('getHashRoute', () => {
-  it('returns path from hash', () => {
-    win.location.hash = '#/login';
-    expect(getHashRoute()).toBe('/login');
-  });
-  it('returns / for empty hash', () => {
-    win.location.hash = '';
-    expect(getHashRoute()).toBe('/');
-  });
-});
-
-describe('getAdminNavHTML', () => {
-  it('returns nav with expected links', () => {
-    const html = getAdminNavHTML();
-    expect(html).toContain('#/');
-    expect(html).toContain('#/users');
-    expect(html).toContain('#/roles');
-    expect(html).toContain('#/login');
+  it('keeps username and password regex definitions', () => {
+    expect(formRulesSource).toMatch(/const\s+USERNAME_REGEX\s*=/);
+    expect(formRulesSource).toMatch(/const\s+PASSWORD_REGEX\s*=/);
+    expect(formRulesSource).toContain('USERNAME_MAX_LENGTH');
   });
 });

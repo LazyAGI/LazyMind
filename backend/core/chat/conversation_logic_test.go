@@ -1,11 +1,19 @@
 package chat
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/gorilla/mux"
+
+	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/store"
 )
 
 func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
@@ -162,6 +170,113 @@ func TestBuildChatRequestBodyPreservesExplicitReasoningFalse(t *testing.T) {
 
 	if got, ok := body["reasoning"].(bool); !ok || got {
 		t.Fatalf("expected reasoning false, got %#v", body["reasoning"])
+	}
+}
+
+func TestBuildChatHistoryExtPreservesMultimodalInput(t *testing.T) {
+	ext := buildChatHistoryExt(map[string]any{
+		"input": []any{
+			map[string]any{"input_type": "text", "text": "记住这个是王牌超"},
+			map[string]any{
+				"input_type":   "image",
+				"uri":          "/var/lib/lazymind/uploads/tmp/users/u1/files/upload_a.jpg",
+				"input_base64": "data:image/jpeg;base64,/9j/abc",
+			},
+		},
+	}, "记住这个是王牌超")
+
+	var payload struct {
+		Input []map[string]any `json:"input"`
+	}
+	if err := json.Unmarshal(ext, &payload); err != nil {
+		t.Fatalf("unmarshal ext: %v", err)
+	}
+	if len(payload.Input) != 2 {
+		t.Fatalf("expected 2 input items, got %#v", payload.Input)
+	}
+	if got := payload.Input[1]["input_type"]; got != "image" {
+		t.Fatalf("expected image item to be preserved, got %#v", got)
+	}
+	if got := payload.Input[1]["input_base64"]; got != "data:image/jpeg;base64,/9j/abc" {
+		t.Fatalf("expected image base64 to be preserved, got %#v", got)
+	}
+}
+
+func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
+	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-detail.db")
+	if err != nil {
+		t.Fatalf("connect db: %v", err)
+	}
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	ext := buildChatHistoryExt(map[string]any{
+		"input": []any{
+			map[string]any{"input_type": "text", "text": "记住这个是王牌超"},
+			map[string]any{
+				"input_type":   "image",
+				"uri":          "/var/lib/lazymind/uploads/tmp/users/u1/files/upload_a.jpg",
+				"input_base64": "data:image/jpeg;base64,/9j/abc",
+			},
+		},
+	}, "记住这个是王牌超")
+	if err := db.Create(&orm.Conversation{
+		ID:           "conv-1",
+		DisplayName:  "记住这个是王牌超",
+		ChannelID:    "default",
+		SearchConfig: json.RawMessage(`{}`),
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "u1",
+			CreateUserName: "User 1",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	if err := db.Create(&orm.ChatHistory{
+		ID:             "h_1",
+		Seq:            1,
+		ConversationID: "conv-1",
+		RawContent:     "记住这个是王牌超",
+		Content:        "记住这个是王牌超",
+		Result:         "好的",
+		Ext:            ext,
+		TimeMixin:      orm.TimeMixin{CreateTime: now, UpdateTime: now},
+	}).Error; err != nil {
+		t.Fatalf("create history: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/conversations/conv-1:detail", nil)
+	req.Header.Set("X-User-Id", "u1")
+	req = mux.SetURLVars(req, map[string]string{"name": "conv-1:detail"})
+	rec := httptest.NewRecorder()
+
+	GetConversationDetail(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		History []struct {
+			Input []map[string]any `json:"input"`
+		} `json:"history"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.History) != 1 || len(resp.History[0].Input) != 2 {
+		t.Fatalf("expected response history input to include 2 items, got %#v", resp.History)
+	}
+	if got := resp.History[0].Input[1]["input_type"]; got != "image" {
+		t.Fatalf("expected image input in detail response, got %#v", got)
+	}
+	if got := resp.History[0].Input[1]["uri"]; got != "/var/lib/lazymind/uploads/tmp/users/u1/files/upload_a.jpg" {
+		t.Fatalf("expected image uri in detail response, got %#v", got)
 	}
 }
 

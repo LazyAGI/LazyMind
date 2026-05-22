@@ -58,10 +58,18 @@ def test_remote_fs_uses_core_readonly_api(monkeypatch):
 
 
 def test_remote_fs_reads_core_api_url_from_model_config(monkeypatch):
-    monkeypatch.setattr(
-        'common.remote_fs.load_model_config',
-        lambda: {'agentic': {'core_api_url': 'http://inner-core:9000'}},
-    )
+    class _Globals:
+        @staticmethod
+        def __getitem__(key):
+            if key == 'agentic_config':
+                return {'core_api_url': 'http://inner-core:9000'}
+            raise KeyError(key)
+
+        @staticmethod
+        def get(key, default=None):
+            return None
+
+    monkeypatch.setattr('common.remote_fs.lazyllm.globals', _Globals())
 
     fs = RemoteFS()
 
@@ -180,7 +188,7 @@ def test_skill_manager_reads_reference_from_remote_mock_server(monkeypatch, mock
 
     assert skill_doc['status'] == 'ok'
     assert 'Example Skill' in skill_doc['content']
-    assert '(source: remote,' in manager.build_prompt('use example')
+    assert '(source: remote,' in manager.build_prompt()
     assert reference_doc == {
         'status': 'ok',
         'path': 'remote://skills/writing/example/references/examples/daily-update.md',

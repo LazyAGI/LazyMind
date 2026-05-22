@@ -1007,8 +1007,10 @@ type systemDiscardOpenAPIResponse struct {
 
 type internalSkillSuggestionOpenAPIRequest struct {
 	SessionID   string                            `json:"session_id"`
-	Category    string                            `json:"category"`
-	SkillName   string                            `json:"skill_name"`
+	ID          string                            `json:"id,omitempty"`
+	SkillID     string                            `json:"skill_id,omitempty"`
+	Category    string                            `json:"category,omitempty"`
+	SkillName   string                            `json:"skill_name,omitempty"`
 	Suggestions []suggestionPayloadOpenAPIRequest `json:"suggestions"`
 }
 

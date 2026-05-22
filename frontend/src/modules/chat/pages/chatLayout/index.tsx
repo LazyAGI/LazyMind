@@ -1,4 +1,4 @@
-import { FC, useRef, useState, useEffect } from "react";
+import { FC, type ReactNode, useRef, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { message } from "antd";
 import { AgentAppsAuth } from "@/components/auth";
@@ -44,11 +44,29 @@ interface IChatLayoutProps {
   setIsChatContent: (isChatContent: boolean) => void;
   initchatConfig: ChatConfig;
   setChatConfigFn: (val: ChatConfig) => void;
+  canChat: boolean;
+  embeddingReady?: boolean | null;
+  multimodalEmbeddingReady?: boolean | null;
+  rerankReady?: boolean | null;
+  chatDisabledReason?: string;
+  chatDisabledDescription?: string;
+  chatDisabledAction?: ReactNode;
 }
 
 const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const { t } = useTranslation();
-  const { setIsChatContent, initchatConfig, setChatConfigFn } = props;
+  const {
+    setIsChatContent,
+    initchatConfig,
+    setChatConfigFn,
+    canChat,
+    embeddingReady,
+    multimodalEmbeddingReady,
+    rerankReady,
+    chatDisabledReason,
+    chatDisabledDescription,
+    chatDisabledAction,
+  } = props;
   const [sessionId, setSessionId] = useState("");
   const [chatConfig, setChatConfig] = useState<ChatConfig>(
     initchatConfig || {},
@@ -547,6 +565,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    if (!canChat) {
+      return;
+    }
     dragCounterRef.current++;
     if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
       setIsDragging(true);
@@ -572,6 +593,13 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     e.stopPropagation();
     setIsDragging(false);
     dragCounterRef.current = 0;
+
+    if (!canChat) {
+      if (chatDisabledReason) {
+        message.warning(chatDisabledReason);
+      }
+      return;
+    }
 
     const files = Array.from(e.dataTransfer.files);
 
@@ -609,6 +637,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       )}
       <ChatContainerComponent
         ref={chatRef}
+        canChat={canChat}
         initialCard={isRestoringConversation ? null : <InitialCard />}
         sessionId={sessionId}
         onOpenSSE={onOpenSSE}
@@ -621,6 +650,12 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         setChatConfig={setChatConfig}
         setChatConfigFn={setChatConfigFn}
         knowledgeRefreshKey={knowledgeRefreshKey}
+        embeddingReady={embeddingReady}
+        multimodalEmbeddingReady={multimodalEmbeddingReady}
+        rerankReady={rerankReady}
+        disabledReason={chatDisabledReason}
+        disabledDescription={chatDisabledDescription}
+        disabledAction={chatDisabledAction}
       />
     </div>
   );

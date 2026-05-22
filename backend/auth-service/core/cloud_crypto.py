@@ -6,7 +6,7 @@ import os
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
-_ENV_KEY = 'RAGSCAN_SECRET_KEY'
+_ENV_KEY = 'LAZYMIND_AUTH_CLOUD_SECRET_KEY'
 
 
 def _resolve_secret_key() -> bytes:

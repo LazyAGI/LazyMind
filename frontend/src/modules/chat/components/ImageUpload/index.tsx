@@ -25,6 +25,8 @@ interface Props {
   icon: React.ReactNode;
   updateFiles: (files: RcFile[]) => void;
   listNum: number;
+  disabled?: boolean;
+  disabledReason?: string;
   
   onBeforeAddFiles?: (
     newFiles: File[],
@@ -48,7 +50,16 @@ export type OnBeforeAddFilesResult = {
 const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
   (props, ref) => {
     const { t } = useTranslation();
-    const { max, types, icon, updateFiles, listNum, onBeforeAddFiles } = props;
+    const {
+      max,
+      types,
+      icon,
+      updateFiles,
+      listNum,
+      disabled = false,
+      disabledReason,
+      onBeforeAddFiles,
+    } = props;
     const [files, setFiles] = useState<FileItem[]>([]);
     const [uploadingCount, setUploadingCount] = useState(0);
 
@@ -189,7 +200,7 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
     const uploadProps: UploadProps = {
       multiple: false,
       showUploadList: false,
-      disabled: listNum >= max,
+      disabled: disabled || listNum >= max,
       maxCount: max,
       accept: types.join(","),
       fileList: files,
@@ -208,6 +219,12 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
       clear: () => setFiles([]),
       getUploadingCount: () => uploadingCount,
       uploadFiles: (droppedFiles: File[]) => {
+        if (disabled) {
+          if (disabledReason) {
+            message.warning(disabledReason);
+          }
+          return;
+        }
         const current = [...files];
         const result = onBeforeAddFiles?.(droppedFiles, current);
         if (result) {
@@ -231,6 +248,12 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
     }));
 
     function handleOnUploadChange(info: UploadChangeParam): string | void {
+      if (disabled) {
+        if (disabledReason) {
+          message.warning(disabledReason);
+        }
+        return Upload.LIST_IGNORE;
+      }
       const { file } = info;
 
       if (!validateFileType(file, types)) return Upload.LIST_IGNORE;

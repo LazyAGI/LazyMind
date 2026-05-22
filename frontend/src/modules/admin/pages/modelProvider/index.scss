@@ -88,6 +88,18 @@
   border: 1px solid #e2e8f0;
   border-radius: 16px;
   background: #fbfdff;
+
+  &.is-restricted {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    opacity: 0.72;
+    pointer-events: none;
+
+    .model-provider-limited-tag {
+      pointer-events: auto;
+      cursor: default;
+    }
+  }
 }
 
 .model-provider-default-meta {

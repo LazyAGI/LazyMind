@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, Body, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 from evo.runtime.fs import atomic_write_json
+from evo.runtime.model_config import activate_thread_model_config, extract_model_config, save_thread_model_config
 from evo.service.core import schemas, state as thread_state, store
 from evo.service.core.intent_store import IntentStore
 from evo.service.core.ops_executor import Op, OpsExecutor
@@ -53,10 +54,12 @@ class ThreadHub:
             'updated_at': now,
         }
         atomic_write_json(ws.thread_meta_path, meta)
+        if model_config := extract_model_config(payload):
+            save_thread_model_config(self.jm.config.storage.base_dir, tid, model_config)
         if mode == 'auto' and payload.get('start_auto', True):
             self.start(tid)
             self.auto_start(tid)
-        return meta
+        return dict(meta)
 
     def list_threads(self) -> list[dict]:
         return self.view.list_threads()
@@ -78,7 +81,9 @@ class ThreadHub:
     def flow_status(self, thread_id: str) -> dict:
         return self.view.flow_status(thread_id)
 
-    def start(self, thread_id: str) -> dict:
+    def start(self, thread_id: str, payload: dict | None = None) -> dict:
+        if model_config := extract_model_config(payload):
+            save_thread_model_config(self.jm.config.storage.base_dir, thread_id, model_config)
         ws = self._workspace(thread_id)
         active = [row for row in self._active_tasks(thread_id) if row.get('flow') == 'dataset_gen']
         if active:
@@ -115,7 +120,9 @@ class ThreadHub:
         self._save_record(thread_id, thread_state.THREAD_CANCELLED)
         return {'status': 'cancelled', 'thread_id': thread_id}
 
-    def retry(self, thread_id: str) -> dict:
+    def retry(self, thread_id: str, payload: dict | None = None) -> dict:
+        if model_config := extract_model_config(payload):
+            save_thread_model_config(self.jm.config.storage.base_dir, thread_id, model_config)
         task = self._latest_resumable(thread_id)
         if not task:
             raise store.StateError('NO_RESUMABLE_TASK', f'thread {thread_id} has no resumable task')
@@ -123,12 +130,15 @@ class ThreadHub:
         self._save_record(thread_id, thread_state.THREAD_RUNNING, active_task_id=task['id'])
         return {'status': 'running', 'thread_id': thread_id, 'active_task_id': task['id']}
 
-    def post_message(self, thread_id: str, content: str) -> dict:
+    def post_message(self, thread_id: str, content: str, model_config: dict | None = None) -> dict:
+        if model_config:
+            save_thread_model_config(self.jm.config.storage.base_dir, thread_id, model_config)
         ws = self._workspace(thread_id)
         elog = EventLog(ws.events_path)
         _append_message(ws.messages_path, 'user', content)
         elog.append_event('message.user', payload={'content': content})
         ctx = self.view.planner_context(thread_id, ws.messages_path, ws.load_artifacts())
+        activate_thread_model_config(self.jm.config.storage.base_dir, thread_id, session_id=f'evo:{thread_id}:planner')
         intent = self.planner.draft(content, ctx)
         plan = self.planner.materialize(intent, ctx)
         if intent.suggested_ops_preview and not plan.ops and plan.warnings:
@@ -153,7 +163,7 @@ class ThreadHub:
             'warnings': plan.warnings,
         }
 
-    async def post_message_stream(self, thread_id: str, content: str):
+    async def post_message_stream(self, thread_id: str, content: str, model_config: dict | None = None):
         message_id = f'msg_{thread_id}_{uuid.uuid4().hex[:8]}'
         seq = 0
 
@@ -165,7 +175,7 @@ class ThreadHub:
         yield emit('intent_start', {})
         yield emit('thinking_delta', {'delta': '正在理解你的请求并规划下一步。'})
         try:
-            result = await asyncio.to_thread(self.post_message, thread_id, content)
+            result = await asyncio.to_thread(self.post_message, thread_id, content, model_config)
             for chunk in _chunks(result['reply']):
                 yield emit('answer_delta', {'delta': chunk})
             yield emit(
@@ -368,9 +378,10 @@ def build_router(hub: ThreadHub) -> APIRouter:
     @router.post('/threads/{thread_id}/messages', operation_id='post_thread_message')
     async def post_message(thread_id: str, request: Request, body: dict = BODY_REQUIRED):
         content = body.get('content') or body.get('message') or ''
+        model_config = extract_model_config(body)
         if 'text/event-stream' in request.headers.get('accept', ''):
-            return EventSourceResponse(hub.post_message_stream(thread_id, content))
-        return await asyncio.to_thread(hub.post_message, thread_id, content)
+            return EventSourceResponse(hub.post_message_stream(thread_id, content, model_config))
+        return await asyncio.to_thread(hub.post_message, thread_id, content, model_config)
 
     @router.post('/threads/{thread_id}:messages:cancel', operation_id='cancel_active_thread_message_colon')
     @router.post('/threads/{thread_id}/messages:cancel', operation_id='cancel_active_thread_message')
@@ -382,8 +393,8 @@ def build_router(hub: ThreadHub) -> APIRouter:
         return hub.cancel_message(thread_id, message_id)
 
     @router.post('/threads/{thread_id}/start')
-    async def start_thread(thread_id: str) -> dict:
-        return await asyncio.to_thread(hub.start, thread_id)
+    async def start_thread(thread_id: str, body: dict = BODY_DICT_DEFAULT) -> dict:
+        return await asyncio.to_thread(hub.start, thread_id, body)
 
     @router.post('/threads/{thread_id}/pause')
     async def pause_thread(thread_id: str) -> dict:
@@ -394,8 +405,8 @@ def build_router(hub: ThreadHub) -> APIRouter:
         return await asyncio.to_thread(hub.cancel, thread_id)
 
     @router.post('/threads/{thread_id}/retry')
-    async def retry_thread(thread_id: str) -> dict:
-        return await asyncio.to_thread(hub.retry, thread_id)
+    async def retry_thread(thread_id: str, body: dict = BODY_DICT_DEFAULT) -> dict:
+        return await asyncio.to_thread(hub.retry, thread_id, body)
 
     @router.post('/threads/{thread_id}/auto/step')
     async def auto_step(thread_id: str) -> dict:

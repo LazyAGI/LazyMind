@@ -206,6 +206,11 @@ class JobManager:
     def _run_executor(self, tid: str, flow: str) -> None:
         ctx = self._make_ctx()
         try:
+            row = store.get(self._store, tid)
+            if row and row.get('thread_id'):
+                from evo.runtime.model_config import activate_thread_model_config
+
+                activate_thread_model_config(self._cfg.storage.base_dir, row.get('thread_id'), session_id=f'evo:{tid}')
             EXECUTORS[flow](ctx, tid)
         except Exception as exc:
             log.exception('executor %s failed for %s: %s', flow, tid, exc)

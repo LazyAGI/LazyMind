@@ -13,8 +13,9 @@ def atomic_write(path: Path, text: str, *, encoding: str = 'utf-8') -> None:
     os.replace(tmp, path)
 
 
-def atomic_write_json(path: Path, obj: Any, *, indent: int = 2) -> None:
-    text = json.dumps(obj, ensure_ascii=False, indent=indent, default=str)
+def atomic_write_json(path: Path, obj: Any, *, indent: int | None = 2) -> None:
+    separators = (',', ':') if indent is None else None
+    text = json.dumps(obj, ensure_ascii=False, indent=indent, separators=separators, default=str)
     atomic_write(Path(path), text)
 
 

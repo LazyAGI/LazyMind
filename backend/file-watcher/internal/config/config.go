@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -171,13 +172,21 @@ func (c *Config) expandEnvOverrides() error {
 		c.PathMappings[i].PublicRoot = strings.TrimSpace(expandEnvWithDefault(c.PathMappings[i].PublicRoot))
 		c.PathMappings[i].RuntimeRoot = strings.TrimSpace(expandEnvWithDefault(c.PathMappings[i].RuntimeRoot))
 	}
-	if raw, ok := os.LookupEnv("RAGSCAN_HOST_PATH_STYLE"); ok {
+	if raw, ok := os.LookupEnv("LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE"); ok {
 		c.HostPathStyle = strings.TrimSpace(raw)
 	}
-	if raw, ok := os.LookupEnv("RAGSCAN_PATH_MAPPINGS"); ok && strings.TrimSpace(raw) != "" {
+	// Resolve "auto" to the actual platform style at runtime.
+	if strings.ToLower(strings.TrimSpace(c.HostPathStyle)) == "auto" {
+		if runtime.GOOS == "windows" {
+			c.HostPathStyle = "windows"
+		} else {
+			c.HostPathStyle = "posix"
+		}
+	}
+	if raw, ok := os.LookupEnv("LAZYMIND_FILE_WATCHER_PATH_MAPPINGS"); ok && strings.TrimSpace(raw) != "" {
 		mappings, err := parsePathMappingsEnv(raw)
 		if err != nil {
-			return fmt.Errorf("parse RAGSCAN_PATH_MAPPINGS: %w", err)
+			return fmt.Errorf("parse LAZYMIND_FILE_WATCHER_PATH_MAPPINGS: %w", err)
 		}
 		c.PathMappings = mappings
 	} else if len(c.PathMappings) == 0 {
@@ -189,8 +198,19 @@ func (c *Config) expandEnvOverrides() error {
 }
 
 func watchVolumePathMappingFromEnv() (PathMapping, bool) {
-	hostRoot := strings.TrimSpace(os.Getenv("RAGSCAN_WATCH_HOST_DIR"))
-	runtimeRoot := strings.TrimSpace(os.Getenv("RAGSCAN_WATCH_CONTAINER_DIR"))
+	hostRoot := strings.TrimSpace(os.Getenv("LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR"))
+	// Apply a sensible platform default when the variable is not set.
+	if hostRoot == "" {
+		switch runtime.GOOS {
+		case "windows":
+			hostRoot = "D:/"
+		case "darwin":
+			hostRoot = "/Users"
+		default:
+			hostRoot = "/tmp"
+		}
+	}
+	runtimeRoot := strings.TrimSpace(os.Getenv("LAZYMIND_FILE_WATCHER_WATCH_CONTAINER_DIR"))
 	if hostRoot == "" || runtimeRoot == "" {
 		return PathMapping{}, false
 	}
@@ -266,7 +286,7 @@ func (c *Config) validate() error {
 		return fmt.Errorf("control_plane_base_url is required")
 	}
 	if strings.TrimSpace(c.BaseRoot) == "" {
-		return fmt.Errorf("base_root is required (set host path via RAGSCAN_BASE_ROOT)")
+		return fmt.Errorf("base_root is required (set host path via LAZYMIND_FILE_WATCHER_BASE_ROOT)")
 	}
 	style := strings.ToLower(strings.TrimSpace(c.HostPathStyle))
 	if style == "" {

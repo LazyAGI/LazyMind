@@ -6,7 +6,7 @@ from lazyllm.tools.rag.rank_fusion.reciprocal_rank_fusion import RRFFusion
 from chat.components.process import AdaptiveKComponent, ContextExpansionComponent
 # from chat.components.process.query_image_rewriter import QueryImageRewriter
 from chat.pipelines.builders.get_retriever import get_retriever, get_remote_docment
-from chat.utils.load_config import get_config_path
+from chat.utils.load_config import get_config_path, get_dynamic_role_slot_map
 from vocab.vocab_manager import get_vocab_manager
 
 
@@ -35,6 +35,23 @@ def _adaptive_get_token_len(n: Any) -> int:
     return max(1, len(txt) // 4)
 
 
+def _rerank(nodes, query: str, topk: int):
+    config_path = get_config_path()
+    role_slots = get_dynamic_role_slot_map(config_path)
+    cfg = lazyllm.globals.config['dynamic_model_configs']
+    role_cfg = cfg.get('reranker') if isinstance(cfg, dict) else None
+
+    if 'reranker' not in role_slots or (isinstance(role_cfg, dict) and role_cfg.get(role_slots['reranker'])):
+        return Reranker(
+            'ModuleReranker', model=AutoModel(model='reranker', config=config_path), topk=topk,
+        )(nodes, query=query)
+
+    for node in nodes or []:
+        if getattr(node, 'relevance_score', None) is None:
+            node.relevance_score = getattr(node, 'score', None) or getattr(node, 'similarity_score', None) or 0.0
+    return nodes
+
+
 def _build_text_branch(retrievers, tmp_retriever, document, topk: int, k_max: int):
     with pipeline() as text_branch:
         text_branch.parse_input = parse_query
@@ -48,11 +65,9 @@ def _build_text_branch(retrievers, tmp_retriever, document, topk: int, k_max: in
         )
         text_branch.merge_results = merge_rank_results
         text_branch.join = RRFFusion(top_k=50)
-        text_branch.reranker = Reranker(
-            'ModuleReranker',
-            model=AutoModel(model='reranker', config=get_config_path()),
-            topk=topk,
-        ) | bind(query=text_branch.input['query'])
+        text_branch.reranker = _rerank | bind(
+            query=text_branch.input['query'], topk=topk,
+        )
         text_branch.adaptive_k = AdaptiveKComponent(
             bias=2, k_max=k_max, gap_tau=0.2,
             get_token_len=_adaptive_get_token_len,

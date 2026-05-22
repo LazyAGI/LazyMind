@@ -18,6 +18,7 @@ tmp/
 build
 *.lock
 *.db
+*.sqlite3
 mkdocs.yml
 .temp
 infer_log/

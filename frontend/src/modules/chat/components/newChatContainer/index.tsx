@@ -82,6 +82,12 @@ interface Props {
   setChatConfig?: (chatConfig: ChatConfig) => void;
   setChatConfigFn: (chatConfig: ChatConfig) => void;
   knowledgeRefreshKey?: number | string;
+  embeddingReady?: boolean | null;
+  multimodalEmbeddingReady?: boolean | null;
+  rerankReady?: boolean | null;
+  disabledReason?: string;
+  disabledDescription?: string;
+  disabledAction?: ReactNode;
 }
 
 export interface ChatMessage {
@@ -135,6 +141,12 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       setChatConfig,
       setChatConfigFn,
       knowledgeRefreshKey,
+      embeddingReady,
+      multimodalEmbeddingReady,
+      rerankReady,
+      disabledReason,
+      disabledDescription,
+      disabledAction,
     } = props;
     const { getModelSelection, setModelSelection, resetForNewChat } =
       useModelSelectionStore();
@@ -253,7 +265,13 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
     function sendMessage(params: SendMessageParams) {
       const { text, clearInput = true, create_time } = params;
       const normalizedText = text.trim();
-      if (activeStreamRef.current || loading || !canChat || !normalizedText) {
+      if (!canChat) {
+        if (disabledReason) {
+          message.warning(disabledReason);
+        }
+        return;
+      }
+      if (activeStreamRef.current || loading || !normalizedText) {
         return;
       }
 
@@ -1019,6 +1037,12 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
     }
 
     function regenerate() {
+      if (!canChat) {
+        if (disabledReason) {
+          message.warning(disabledReason);
+        }
+        return;
+      }
       if (loading) {
         return;
       }
@@ -1405,8 +1429,15 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
             setChatConfig={setChatConfig}
             setChatConfigFn={setChatConfigFn}
             knowledgeRefreshKey={knowledgeRefreshKey}
+            embeddingReady={embeddingReady}
+            multimodalEmbeddingReady={multimodalEmbeddingReady}
+            rerankReady={rerankReady}
             sessionId={sessionId}
             isStreaming={IS_STREAMING}
+            disabled={!canChat}
+            disabledReason={disabledReason}
+            disabledDescription={disabledDescription}
+            disabledAction={disabledAction}
           />
         </div>
       </div>

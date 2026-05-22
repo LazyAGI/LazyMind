@@ -54,6 +54,7 @@ export interface UserInfo {
   loginType?: string;
   idToken?: string;
   refreshToken?: string;
+  dynamic?: boolean;
   timestamp?: number;
 }
 

@@ -20,6 +20,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 )
 
@@ -56,7 +57,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fmt.Println("[Core] [CHAT_REQUEST] path=", r.URL.Path,
-		" authorization=", apiKeyState(r.Header.Get("Authorization")),
+		" authorization=", modelconfig.APIKeyState(r.Header.Get("Authorization")),
 		" x_user_id=", r.Header.Get("X-User-Id"),
 		" x_user_name=", r.Header.Get("X-User-Name"))
 
@@ -204,7 +205,8 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqBody := buildChatRequestBody(convID, sessionID, query, upstreamHistories, raw, resourceContext, userID)
-	llmConfig, err := loadLLMConfig(r.Context(), db, userID)
+	historyExt := buildChatHistoryExt(raw, query)
+	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), db, userID)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load llm config failed", err), http.StatusInternalServerError)
 		return
@@ -217,11 +219,11 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	rdb := store.Redis()
 
 	if !stream {
-		handleNonStreamChat(w, reqCtx, db, rdb, baseURL, reqBody, convID, query, target)
+		handleNonStreamChat(w, reqCtx, db, rdb, baseURL, reqBody, convID, query, target, historyExt)
 		return
 	}
 
-	handleStreamChat(w, r, db, rdb, baseURL, reqBody, convID, query, target, dualReply)
+	handleStreamChat(w, r, db, rdb, baseURL, reqBody, convID, query, target, dualReply, historyExt)
 }
 
 // ResumeChat text POST /api/v1/conversations:resumeChat
@@ -715,6 +717,7 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 				RawContent:     in.RawContent,
 				Content:        in.RawContent,
 				Result:         "",
+				Ext:            in.Ext,
 				TimeMixin:      orm.TimeMixin{CreateTime: ct, UpdateTime: ct},
 			})
 		}

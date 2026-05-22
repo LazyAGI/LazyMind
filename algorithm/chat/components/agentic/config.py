@@ -22,6 +22,7 @@ DEFAULT_TOOLS = [
     'kb_get_parent_node',
     'kb_get_window_nodes',
     'kb_keyword_search',
+    'calculator',
     'web_search',
     'url_fetch',
     'arxiv_search',
@@ -157,6 +158,10 @@ def _sync_request_context(config: dict) -> None:
     if kb_url:
         config['kb_url'] = kb_url
     if kb_name:
+        if kb_name.startswith('ds_'):
+            config.setdefault('kb_id', kb_name)
+            from config import config as _cfg
+            kb_name = _cfg['agentic_kb_name']
         config['kb_name'] = kb_name
     config['skill_fs_url'] = normalize_skill_fs_url(config.get('skill_fs_url'))
     _normalize_environment_context(config)

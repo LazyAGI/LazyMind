@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, MouseEvent } from "react";
 import "./index.scss";
 import DisclaimerIcon from "../../assets/icons/disclaimer_icon.svg?react";
 import WarningIcon from "../../assets/icons/warning.svg?react";
@@ -7,16 +7,22 @@ import ChatInput, {
 } from "@/modules/chat/components/ChatInput";
 import ChatLayout from "../chatLayout";
 import { ChatConfig } from "@/modules/chat/components/ChatConfigs";
-import { Tooltip, message } from "antd";
+import { Button, Tooltip, message } from "antd";
 import {
   CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
 } from "@/modules/chat/constants/chat";
 import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
+import { useChatModelProviderGuard } from "@/modules/chat/hooks/useChatModelProviderGuard";
+import { AgentAppsAuth } from "@/components/auth";
 
 const NewChatPage = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const modelProviderGuard = useChatModelProviderGuard();
+  const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
   const getGreeting = () => {
     const currentHour = new Date().getHours();
     return currentHour < 12 ? t("chat.greetingMorning") : t("chat.greetingAfternoon");
@@ -31,6 +37,32 @@ const NewChatPage = () => {
 
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
+  const isChatDisabled = !modelProviderGuard.canChat;
+  const chatDisabledReason = modelProviderGuard.isChecking
+    ? t("chat.modelProviderChecking")
+    : modelProviderGuard.status === "error"
+      ? t("chat.modelProviderCheckFailed")
+      : t("chat.modelProviderRequiredTitle");
+  const chatDisabledDescription = modelProviderGuard.isChecking
+    ? t("chat.modelProviderCheckingDesc")
+    : modelProviderGuard.status === "error"
+      ? t("chat.modelProviderCheckFailedDesc")
+      : t("chat.modelProviderRequiredDesc");
+  const chatDisabledAction = modelProviderGuard.isChecking ? null : modelProviderGuard.status === "error" ? (
+    <Button size="small" onClick={() => void modelProviderGuard.refresh()}>
+      {t("chat.retryCheckModelProvider")}
+    </Button>
+  ) : (
+    <Button type="primary" size="small" onClick={() => navigate("/model-providers")}>
+      {t("chat.goConfigureModelProvider")}
+    </Button>
+  );
+
+  // Warn when knowledge base is selected but embedding is not ready.
+  const hasKnowledgeBase = Boolean(chatConfig.datasetIds?.length);
+  const showEmbeddingWarning = hasKnowledgeBase && modelProviderGuard.embeddingReady === false;
+  // Warn when VLM is not configured (informational only, does not block any feature).
+  const showVlmWarning = modelProviderGuard.vlmReady === false;
 
   useEffect(() => {
     if (!isChatContent) {
@@ -93,6 +125,9 @@ const NewChatPage = () => {
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    if (isChatDisabled) {
+      return;
+    }
     dragCounterRef.current++;
     if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
       setIsDragging(true);
@@ -119,6 +154,11 @@ const NewChatPage = () => {
     setIsDragging(false);
     dragCounterRef.current = 0;
 
+    if (isChatDisabled) {
+      message.warning(chatDisabledReason);
+      return;
+    }
+
     const files = Array.from(e.dataTransfer.files);
 
     if (files.length === 0) {
@@ -144,6 +184,13 @@ const NewChatPage = () => {
             setIsChatContent={handleSetIsChatContent}
             setChatConfigFn={setChatConfig}
             initchatConfig={chatConfig}
+            canChat={!isChatDisabled}
+            embeddingReady={modelProviderGuard.embeddingReady}
+            multimodalEmbeddingReady={modelProviderGuard.multimodalEmbeddingReady}
+            rerankReady={modelProviderGuard.rerankReady}
+            chatDisabledReason={chatDisabledReason}
+            chatDisabledDescription={chatDisabledDescription}
+            chatDisabledAction={chatDisabledAction}
           />
         </div>
       )}
@@ -176,6 +223,38 @@ const NewChatPage = () => {
                 </div>
 
                 <div className="input-section">
+                  {showEmbeddingWarning ? (
+                    <div className="embedding-warning-banner" role="alert">
+                      {t("chat.embeddingNotReadyWarning")}
+                    </div>
+                  ) : null}
+                  {showVlmWarning ? (
+                    <div className="vlm-warning-banner" role="alert">
+                      {isAdmin ? (
+                        <span>
+                          {t("chat.vlmNotReadyWarningAdmin")}
+                          <a
+                            href="/model-providers"
+                            style={{ marginLeft: 6, fontWeight: 500 }}
+                            onClick={(e: MouseEvent<HTMLAnchorElement>) => { e.preventDefault(); navigate('/model-providers'); }}
+                          >
+                            {t("knowledge.goToConfig")}
+                          </a>
+                        </span>
+                      ) : (
+                        <span>
+                          {t("chat.vlmNotReadyWarning")}
+                          <a
+                            href="/model-providers"
+                            style={{ marginLeft: 6, fontWeight: 500 }}
+                            onClick={(e: MouseEvent<HTMLAnchorElement>) => { e.preventDefault(); navigate('/model-providers'); }}
+                          >
+                            {t("knowledge.goToConfig")}
+                          </a>
+                        </span>
+                      )}
+                    </div>
+                  ) : null}
                   <ChatInput
                     ref={newChatInputRef}
                     value={inputValue}
@@ -194,6 +273,13 @@ const NewChatPage = () => {
                     }}
                     chatConfig={chatConfig}
                     setChatConfig={setChatConfig}
+                    disabled={isChatDisabled}
+                    embeddingReady={modelProviderGuard.embeddingReady}
+                    multimodalEmbeddingReady={modelProviderGuard.multimodalEmbeddingReady}
+                    rerankReady={modelProviderGuard.rerankReady}
+                    disabledReason={chatDisabledReason}
+                    disabledDescription={chatDisabledDescription}
+                    disabledAction={chatDisabledAction}
                   />
                 </div>
               </div>

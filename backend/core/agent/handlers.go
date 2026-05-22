@@ -137,6 +137,10 @@ func CreateThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	applyThreadCreateTitle(r.Context(), db, requestPayload, time.Now())
+	if err := attachThreadModelConfig(r.Context(), db, store.UserID(r), requestPayload); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load llm config failed", err), http.StatusInternalServerError)
+		return
+	}
 
 	var creationGuard *userActiveThreadCreationGuard
 	// Temporary integration bypass: comment this guard block to disable single-active-thread enforcement.
@@ -263,13 +267,22 @@ func StreamThreadMessages(w http.ResponseWriter, r *http.Request) {
 
 	var session *activeMessageStream
 	if !resumeOnly {
-		_, requestBytes, err := decodeRequestBody(r)
+		requestPayload, _, err := decodeRequestBody(r)
 		if err != nil {
 			common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
 			return
 		}
-		if len(requestBytes) == 0 || string(requestBytes) == "{}" {
+		if len(requestPayload) == 0 {
 			common.ReplyErr(w, "messages request body required", http.StatusBadRequest)
+			return
+		}
+		if err := attachThreadModelConfig(r.Context(), db, store.UserID(r), requestPayload); err != nil {
+			common.ReplyErr(w, fmt.Sprintf("%s: %v", "load llm config failed", err), http.StatusInternalServerError)
+			return
+		}
+		requestBytes, err := json.Marshal(requestPayload)
+		if err != nil {
+			common.ReplyErr(w, fmt.Sprintf("%s: %v", "marshal body failed", err), http.StatusInternalServerError)
 			return
 		}
 
@@ -599,7 +612,23 @@ func postThreadAction(w http.ResponseWriter, r *http.Request, action string) {
 			return
 		}
 	}
-	proxy, statusCode, err := postUpstreamProxy(r.Context(), r, threadActionURL(threadID, action))
+	var proxy *upstreamProxyResponse
+	var statusCode int
+	var err error
+	if action == "start" || action == "retry" {
+		payload, _, decodeErr := decodeRequestBody(r)
+		if decodeErr != nil {
+			common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", decodeErr), http.StatusBadRequest)
+			return
+		}
+		if attachErr := attachThreadModelConfig(r.Context(), store.DB(), store.UserID(r), payload); attachErr != nil {
+			common.ReplyErr(w, fmt.Sprintf("%s: %v", "load llm config failed", attachErr), http.StatusInternalServerError)
+			return
+		}
+		proxy, statusCode, err = postUpstreamProxy(r.Context(), r, threadActionURL(threadID, action), payload)
+	} else {
+		proxy, statusCode, err = postUpstreamProxy(r.Context(), r, threadActionURL(threadID, action), nil)
+	}
 	if err != nil {
 		common.ReplyErrWithData(w, "post thread action failed", map[string]any{"detail": err.Error()}, statusCode)
 		return
@@ -1133,7 +1162,7 @@ func shouldKeepThreadFlowStreamAlive(flowStatus *threadFlowStatusResponse) bool 
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(flowStatus.Status)) {
-	case "running", "pending", "waiting_checkpoint":
+	case "running", "pending", "waiting_checkpoint", "paused":
 		return true
 	default:
 		return false
@@ -1211,12 +1240,21 @@ func fetchUpstreamProxy(ctx context.Context, r *http.Request, targetURL string) 
 	return &upstreamProxyResponse{Body: string(bodyBytes), ContentType: contentType}, http.StatusOK, nil
 }
 
-func postUpstreamProxy(ctx context.Context, r *http.Request, targetURL string) (*upstreamProxyResponse, int, error) {
-	bodyBytes, err := io.ReadAll(r.Body)
-	if err != nil {
-		return nil, http.StatusBadRequest, err
+func postUpstreamProxy(ctx context.Context, r *http.Request, targetURL string, payload map[string]any) (*upstreamProxyResponse, int, error) {
+	body := ""
+	if payload != nil {
+		bodyBytes, err := json.Marshal(payload)
+		if err != nil {
+			return nil, http.StatusInternalServerError, err
+		}
+		body = string(bodyBytes)
+	} else {
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, http.StatusBadRequest, err
+		}
+		body = strings.TrimSpace(string(bodyBytes))
 	}
-	body := strings.TrimSpace(string(bodyBytes))
 	var reqBody io.Reader = http.NoBody
 	if body != "" {
 		reqBody = strings.NewReader(body)

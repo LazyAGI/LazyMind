@@ -48,14 +48,9 @@ class ToolResult(Generic[T]):
         return cls(ok=True, tool=tool, data=data, latency_ms=latency_ms, meta=meta or {})
 
     @classmethod
-    def failure(
-        cls,
-        tool: str,
-        code: str | ErrorCode,
-        message: str,
-        details: dict[str, Any] | None = None,
-        latency_ms: float = 0.0,
-    ) -> 'ToolResult[Any]':
+    def failure(cls, tool: str, code: str | ErrorCode, message: str,
+                details: dict[str, Any] | None = None, latency_ms: float = 0.0
+                ) -> 'ToolResult[Any]':
         c = code.value if isinstance(code, ErrorCode) else code
         return cls(
             ok=False, tool=tool, error=ToolError(code=c, message=message, details=details), latency_ms=latency_ms

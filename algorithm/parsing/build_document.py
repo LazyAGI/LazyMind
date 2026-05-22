@@ -1,5 +1,7 @@
 from urllib.parse import urlparse
 
+import lazyllm
+from lazyllm.tracing import set_trace_context
 from lazyllm import AutoModel
 from lazyllm.tools.rag import Document, MineruPDFReader, PDFReader
 from lazyllm.tools.rag.doc_impl import NodeGroupType
@@ -18,6 +20,13 @@ from parsing.readers import ImageEmbReader, VideoReader
 from parsing.transform import GeneralParser, LineSplitter, NodeParser
 
 ALGO_ID = 'general_algo'
+
+
+def _quiet_trace(kbs):
+    def call(kb_group, *args, **kwargs):
+        set_trace_context({'enabled': False})
+        return kbs[kb_group](*args, **kwargs)
+    return call
 
 
 def _parse_bool_config(value: str | None) -> bool | None:
@@ -96,13 +105,13 @@ def _build_pdf_reader():
             timeout=3600,
             patch_applied=patch_applied,
             service_variant=service_variant,
-            image_cache_dir='/app/uploads/.image_cache'
+            image_cache_dir=_cfg['image_cache_dir'],
         )
     if ocr_type == 'paddleocr':
         return PaddleOCRPDFReader(
             url=ocr_url,
             service_variant=service_variant,
-            images_dir='/app/uploads/.image_cache'
+            images_dir=_cfg['image_cache_dir'],
         )
     raise ValueError(f'Unsupported OCR server type: {ocr_type!r}')
 
@@ -227,7 +236,6 @@ def build_document() -> Document:
         embed=embed,
         manager=processor,
         doc_fields=[],
-        server=server_port,
     )
 
     docs.add_reader('*.pdf', _build_pdf_reader())
@@ -251,4 +259,8 @@ def build_document() -> Document:
         docs.activate_group('image', embed_keys=image_embed_key)
     docs.activate_group('block', embed_keys=text_embed_keys)
     docs.activate_group('line', embed_keys=text_embed_keys)
+    docs._manager._kbs = lazyllm.ServerModule(
+        _quiet_trace(docs._manager._kbs),
+        port=server_port,
+    )
     return docs

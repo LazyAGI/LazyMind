@@ -19,6 +19,12 @@ export interface ListGlossaryOptions {
   source?: GlossarySource;
 }
 
+export interface GlossaryAssetListResult {
+  records: GlossaryAsset[];
+  total: number;
+  nextPageToken: string;
+}
+
 export interface CheckGlossaryWordsResult {
   existing: string[];
 }
@@ -59,6 +65,19 @@ const toStringValue = (value: unknown, fallback = ""): string => {
   }
   if (typeof value === "number") {
     return String(value);
+  }
+  return fallback;
+};
+
+const toNumberValue = (value: unknown, fallback = 0): number => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
   }
   return fallback;
 };
@@ -277,9 +296,17 @@ const normalizeGlossaryConflictList = (payload: unknown): GlossaryConflict[] =>
 export async function listGlossaryAssets(
   options: ListGlossaryOptions = {},
 ): Promise<GlossaryAsset[]> {
+  const result = await listGlossaryAssetsPage(options);
+  return result.records;
+}
+
+export async function listGlossaryAssetsPage(
+  options: ListGlossaryOptions = {},
+): Promise<GlossaryAssetListResult> {
   const keyword = (options.keyword || "").trim();
   const pageSize = options.pageSize || defaultPageSize;
   const pageToken = options.pageToken || "";
+  let responseData: unknown;
 
   if (keyword || options.source) {
     const response = await axiosInstance.post(`${coreBasePath}/word_group:search`, {
@@ -288,16 +315,44 @@ export async function listGlossaryAssets(
       page_size: pageSize,
       page_token: pageToken,
     });
-    return normalizeGlossaryList(response.data);
+    responseData = response.data;
+  } else {
+    const response = await axiosInstance.get(`${coreBasePath}/word_group`, {
+      params: {
+        page_size: pageSize,
+        page_token: pageToken,
+      },
+    });
+    responseData = response.data;
   }
 
-  const response = await axiosInstance.get(`${coreBasePath}/word_group`, {
-    params: {
-      page_size: pageSize,
-      page_token: pageToken,
-    },
-  });
-  return normalizeGlossaryList(response.data);
+  const payload = unwrapEnvelope<unknown>(responseData);
+  const rawPayload = toRawObject(payload);
+  const rawEnvelope = toRawObject(responseData);
+  const records = normalizeGlossaryList(payload);
+  const totalCandidate =
+    rawPayload?.total_size ??
+    rawPayload?.totalSize ??
+    rawPayload?.total ??
+    rawEnvelope?.total_size ??
+    rawEnvelope?.totalSize ??
+    rawEnvelope?.total;
+  const nextPageToken = toStringValue(
+    rawPayload?.next_page_token ??
+      rawPayload?.nextPageToken ??
+      rawEnvelope?.next_page_token ??
+      rawEnvelope?.nextPageToken ??
+      "",
+  );
+
+  return {
+    records,
+    total:
+      totalCandidate === undefined || totalCandidate === null
+        ? records.length
+        : Math.max(0, toNumberValue(totalCandidate, records.length)),
+    nextPageToken,
+  };
 }
 
 export async function getGlossaryAssetDetail(groupId: string): Promise<GlossaryAsset | null> {

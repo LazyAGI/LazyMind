@@ -1,7 +1,6 @@
 import os
 import copy
 import functools
-import hashlib
 import inspect
 import itertools
 import re
@@ -9,7 +8,6 @@ from pathlib import Path
 from typing import Any, List, Union
 from urllib.parse import urlparse
 
-import requests
 import lazyllm
 from lazyllm import ModuleBase, LOG
 from lazyllm.tools.rag import DocNode
@@ -274,15 +272,13 @@ class TableConverterNode(ModuleBase):
         return document
 
 
-class ImageConverterNode(ModuleBase):
-    '''Extract image references from raw nodes and emit ImageDocNodes.'''
+class ImageNodeLoader(ModuleBase):
+    '''Load images from MinerU image cache and emit ImageDocNodes.'''
 
     def __init__(self, num_workers: int = 0, return_trace: bool = False, **kwargs):
         super().__init__(return_trace=return_trace, **kwargs)
-        self._ocr_server_url = (_cfg['ocr_server_url'] or '').rstrip('/')
-        self._image_root = _cfg['rag_image_path_prefix']
+        self._default_cache_dir = _cfg['image_cache_dir']
         self._normalized_root = Path(_cfg['shared_upload_dir']) / 'normalized_images'
-        os.makedirs(self._image_root, exist_ok=True)
         self._normalized_root.mkdir(parents=True, exist_ok=True)
 
     def forward(self, document: List[DocNode], **kwargs) -> List[ImageDocNode]:
@@ -290,7 +286,33 @@ class ImageConverterNode(ModuleBase):
 
     @classmethod
     def class_name(cls) -> str:
-        return 'ImageConverterNode'
+        return 'ImageNodeLoader'
+
+    def _get_image_cache_dir(self, node: DocNode) -> str:
+        cache_dir = node.global_metadata.get('image_cache_dir')
+        if cache_dir:
+            return str(cache_dir)
+        return self._default_cache_dir
+
+    def _resolve_cached_image_path(self, image_path: str, image_cache_dir: str) -> str:
+        if not image_path or not image_cache_dir:
+            return ''
+
+        path_obj = Path(image_path)
+        if path_obj.is_absolute():
+            if path_obj.is_file() and path_obj.stat().st_size > 0:
+                return str(path_obj.resolve())
+            return ''
+
+        if _is_url(image_path):
+            return ''
+
+        cache_root = Path(image_cache_dir)
+        rel = image_path.lstrip('/').replace('..', '_')
+        local_path = cache_root / rel
+        if local_path.is_file() and local_path.stat().st_size > 0:
+            return str(local_path.resolve())
+        return ''
 
     def _is_image_node(self, node: DocNode) -> bool:
         text = (node.text or '').strip()
@@ -302,40 +324,6 @@ class ImageConverterNode(ModuleBase):
             return True
         return bool(_extract_image_path(node))
 
-    def _build_download_url(self, image_path: str) -> str:
-        if not image_path:
-            return ''
-        if _is_url(image_path):
-            return image_path
-        if not self._ocr_server_url:
-            return ''
-        return f'{self._ocr_server_url}/{image_path.lstrip("/")}'
-
-    def _materialize_image(self, image_path: str) -> str:
-        if not image_path:
-            return ''
-
-        if _is_url(image_path):
-            remote_url = image_path
-            parsed = urlparse(image_path)
-            suffix = os.path.splitext(parsed.path)[1] or '.jpg'
-            file_name = hashlib.sha256(image_path.encode('utf-8')).hexdigest() + suffix
-            local_path = os.path.join(self._image_root, file_name)
-        else:
-            relative_path = image_path.lstrip('/').replace('..', '_')
-            local_path = os.path.join(self._image_root, relative_path)
-            remote_url = self._build_download_url(image_path)
-
-        Path(local_path).parent.mkdir(parents=True, exist_ok=True)
-        if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
-            return local_path
-
-        response = requests.get(remote_url, timeout=30)
-        response.raise_for_status()
-        with open(local_path, 'wb') as f:
-            f.write(response.content)
-        return local_path
-
     def _normalize_image_file(self, image_path: str) -> str:
         return normalize_image_file(image_path=image_path, normalized_root=self._normalized_root)
 
@@ -345,6 +333,7 @@ class ImageConverterNode(ModuleBase):
         for node in document:
             if not self._is_image_node(node):
                 continue
+            image_cache_dir = self._get_image_cache_dir(node)
             text = (node.text or '').strip()
             image_paths = re.findall(r'!\[.*?\]\((.*?)\)', text)
             if not image_paths:
@@ -355,12 +344,11 @@ class ImageConverterNode(ModuleBase):
                 if not image_path:
                     continue
                 try:
-                    image_url = self._build_download_url(image_path)
-                    if not image_url:
-                        raise ValueError(
-                            'LAZYMIND_OCR_SERVER_URL is empty, cannot resolve relative image path'
+                    local_image_path = self._resolve_cached_image_path(image_path, image_cache_dir)
+                    if not local_image_path:
+                        raise FileNotFoundError(
+                            f'image not found in cache: {image_path} (cache_dir={image_cache_dir})'
                         )
-                    local_image_path = self._materialize_image(image_path)
                     normalized_path = self._normalize_image_file(local_image_path)
                     if normalized_path in seen_paths:
                         continue
@@ -373,11 +361,11 @@ class ImageConverterNode(ModuleBase):
                         'file_ext': Path(source_path).suffix.lower() or '.jpg',
                         'file_type': 'image',
                         'is_pure_image': True,
-                        'image_url': image_url,
+                        'image_url': local_image_path,
                     }
                     image_nodes.append(ImageDocNode(image_path=normalized_path, metadata=metadata))
                 except Exception as exc:
-                    LOG.warning(f'[ImageConverterNode] materialize image failed: {image_path}, error: {exc}')
+                    LOG.warning(f'[ImageNodeLoader] load image failed: {image_path}, error: {exc}')
                     continue
         return image_nodes
 
@@ -779,7 +767,9 @@ class NodeParser:
             parser_ppl.merge_nodes = MergeNodeParser()
 
         nodes = parser_ppl(nodes)
-        extracted_img_nodes = ImageConverterNode()(raw_nodes)
+        # use parallel? text-img
+        # can be moved into mineruPdfReader
+        extracted_img_nodes = ImageNodeLoader()(raw_nodes)
         nodes.extend(extracted_img_nodes)
         embed_keys = ['file_name', 'title']
         del_keys = ['list_type', 'code_type', 'text_type', 'table_caption', 'table_footnote']

@@ -8,8 +8,10 @@ import {
   Tag,
   Space,
 } from "antd";
+import { axiosInstance, BASE_URL } from "@/components/request";
+import { AgentAppsAuth } from "@/components/auth";
 import type { MenuProps } from "antd";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, MouseEvent } from "react";
 import { useParams } from "react-router-dom";
 import {
   EditOutlined,
@@ -77,6 +79,9 @@ const Detail = () => {
   const [detail, setDetail] = useState<Dataset>();
   const [importingTotal, setImportingTotal] = useState(0);
   const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
+  const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
+  const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<boolean | null>(null);
+  const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
 
   const { id = "" } = useParams();
 
@@ -98,6 +103,34 @@ const Detail = () => {
     console.log("searchParams", searchParams);
     getDetail();
     getImportingTotal();
+    {
+      const unwrap = (resp: { data: { data?: { ready: boolean } } | { ready: boolean } } | null): boolean | null => {
+        if (!resp) return null;
+        const body = resp.data;
+        const d = body && typeof body === "object" && "data" in body
+          ? (body as { data?: { ready: boolean } }).data
+          : (body as { ready: boolean });
+        return d?.ready ?? null;
+      };
+      Promise.all([
+        axiosInstance
+          .get<{ data?: { ready: boolean } } | { ready: boolean }>(
+            `${BASE_URL}/api/core/model_providers/models/ready?model_type=embedding`
+          )
+          .catch(() => null),
+        axiosInstance
+          .get<{ data?: { ready: boolean } } | { ready: boolean }>(
+            `${BASE_URL}/api/core/model_providers/models/ready?model_type=multimodal_embedding`
+          )
+          .catch(() => null),
+      ]).then(([embResp, multiResp]) => {
+        setEmbeddingReady(unwrap(embResp));
+        setMultimodalEmbeddingReady(unwrap(multiResp));
+      }).catch(() => {
+        setEmbeddingReady(null);
+        setMultimodalEmbeddingReady(null);
+      });
+    }
 
     return () => {
       pollingRef.current.cancel();
@@ -426,26 +459,55 @@ const Detail = () => {
             )}
             <Badge count={importingTotal} size="small" style={{ zIndex: 2 }}>
               <Space.Compact>
-                <Button
-                  type="primary"
-                  onClick={() => openImportModal({ importMode: "file" })}
-                >
-                  {t("knowledge.importFile")}
-                </Button>
+                <Tooltip title={
+                  (embeddingReady === false || multimodalEmbeddingReady === false)
+                    ? (
+                      isAdmin ? (
+                        <span>
+                          {embeddingReady === false
+                            ? t("knowledge.embeddingNotReadyBannerAdmin")
+                            : t("knowledge.multimodalEmbeddingNotReadyBannerAdmin")}
+                          <a
+                            href="/model-providers"
+                            style={{ marginLeft: 8, color: '#fff', textDecoration: 'underline' }}
+                            onClick={(e: MouseEvent<HTMLAnchorElement>) => { e.preventDefault(); navigate('/model-providers'); }}
+                          >
+                            {t("knowledge.goToConfig")}
+                          </a>
+                        </span>
+                      ) : (
+                        embeddingReady === false
+                          ? t("knowledge.embeddingNotReadyBanner")
+                          : t("knowledge.multimodalEmbeddingNotReadyBanner")
+                      )
+                    )
+                    : undefined
+                }>
+                  <Button
+                    type="primary"
+                    disabled={embeddingReady === false || multimodalEmbeddingReady === false}
+                    onClick={() => openImportModal({ importMode: "file" })}
+                  >
+                    {t("knowledge.importFile")}
+                  </Button>
+                </Tooltip>
                 <Dropdown
                   menu={{
                     items: [
                       {
                         key: "importFile",
                         label: t("knowledge.importFile"),
+                        disabled: embeddingReady === false || multimodalEmbeddingReady === false,
                       },
                       {
                         key: "importFolder",
                         label: t("knowledge.importFolder"),
+                        disabled: embeddingReady === false || multimodalEmbeddingReady === false,
                       },
                       {
                         key: "importZip",
                         label: t("knowledge.importZip"),
+                        disabled: embeddingReady === false || multimodalEmbeddingReady === false,
                       },
                       {
                         key: "taskManage",

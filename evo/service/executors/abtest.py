@@ -3,6 +3,7 @@ from pathlib import Path
 from lazyllm import AutoModel
 from evo.abtest import AbtestInputs, VerdictPolicy, execute_abtest
 from evo.runtime.model_gateway import ModelGateway
+from evo.runtime.model_config import thread_model_config, wrap_model_call
 from evo.service.core import state as thread_state, store as _store
 from evo.service.threads.workspace import EventLog, ThreadWorkspace
 from .context import CancelToken, ExecCtx
@@ -24,6 +25,7 @@ def execute(ctx: ExecCtx, tid: str) -> None:
     elog = EventLog(ws.events_path)
     runner = ctx.chat_runner_factory()
     token = CancelToken(ctx, tid)
+    model_config = thread_model_config(ctx.cfg.storage.base_dir, thread_id)
     policy_data = payload.get('policy') or {}
     if isinstance(policy_data.get('guard_metrics'), list):
         policy_data['guard_metrics'] = tuple(policy_data['guard_metrics'])
@@ -42,6 +44,7 @@ def execute(ctx: ExecCtx, tid: str) -> None:
         eval_options=_eval_options(payload, ws),
         policy=ctx.abtest_policy.get(tid) or VerdictPolicy(**policy_data),
         candidate_env=_candidate_env(ctx, payload['apply_id'], Path(payload['apply_worktree'])),
+        model_config=model_config,
     )
     try:
         result = execute_abtest(
@@ -51,7 +54,13 @@ def execute(ctx: ExecCtx, tid: str) -> None:
             chat_runner=runner,
             chat_registry=ctx.chat_registry,
             cfg=ctx.cfg,
-            llm_factory=lambda: (lambda prompt: gateway.call(lambda: client(prompt), cache_key=prompt, agent='abtest')),
+            llm_factory=lambda: (
+                lambda prompt: gateway.call(
+                    wrap_model_call(lambda: client(prompt), model_config, session_id=f'evo:{tid}'),
+                    cache_key=prompt,
+                    agent='abtest',
+                )
+            ),
             cancel=token.requested,
         )
         ctx.update_payload(
@@ -88,7 +97,28 @@ def execute(ctx: ExecCtx, tid: str) -> None:
 def _candidate_env(ctx: ExecCtx, apply_id: str, worktree: Path) -> dict[str, str]:
     from . import apply as apply_exec
 
-    return apply_exec.candidate_launch_env(worktree, apply_exec._ensure_chat_package_alias(ctx, apply_id, worktree))
+    env = apply_exec.candidate_launch_env(worktree, apply_exec._ensure_chat_package_alias(ctx, apply_id, worktree))
+    env['LAZYMIND_MODEL_CONFIG_PATH'] = _candidate_model_config_path(
+        ctx, env.get('LAZYMIND_MODEL_CONFIG_PATH', 'dynamic')
+    )
+    return env
+
+
+def _candidate_model_config_path(ctx: ExecCtx, raw: str) -> str:
+    aliases = {
+        'dynamic': 'runtime_models.yaml',
+        'online': 'runtime_models.online.yaml',
+        'inner': 'runtime_models.inner.yaml',
+    }
+    name = aliases.get(str(raw or 'dynamic').strip().lower())
+    if not name:
+        return raw
+    from importlib import import_module
+
+    path = Path(import_module('algorithm.config').__file__).resolve().parent / 'common' / name
+    if not path.is_file():
+        raise RuntimeError(f'candidate model config not found: {path}')
+    return str(path)
 
 
 def _eval_options(payload: dict, ws: ThreadWorkspace) -> dict:

@@ -44,7 +44,7 @@ def _handle_tool_errors(func):
 def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, Any]:
     """Extract a text description from an image reachable at the given URL.
 
-    Uses the configured Qwen2.5-VL endpoint (role ``vlm`` in runtime_models)
+    Uses the configured VLM endpoint (role ``vlm`` in runtime_models)
     with the same multimodal encoding as ``QueryImageRewriter`` (file paths / URLs
     embedded in the prompt for the VLM).
 

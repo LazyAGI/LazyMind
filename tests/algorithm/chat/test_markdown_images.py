@@ -16,10 +16,10 @@ def test_rewrite_markdown_image_urls_replaces_hallucinated_host(tmp_path, monkey
         'normalized_images/exp9/frame.jpg'
     )
     markdown = f'![frame]({raw_url})'
+    expected = static_file_url_from_full_path(str(image))
     rewritten = rewrite_markdown_image_urls(
         markdown,
         url_map={'frame.jpg': expected},
     )
-    expected = static_file_url_from_full_path(str(image))
     assert expected in rewritten
     assert 'ext.lazymind.ai' not in rewritten

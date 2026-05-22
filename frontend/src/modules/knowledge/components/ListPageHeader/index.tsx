@@ -1,5 +1,5 @@
-import { FC, ReactElement } from "react";
-import { Input, Select, Form, Button } from "antd";
+import { FC, ReactElement, ReactNode } from "react";
+import { Input, Select, Form, Button, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 import "./index.scss";
 
@@ -29,6 +29,8 @@ interface Props {
 
   
   btnText?: string;
+  btnDisabled?: boolean;
+  btnDisabledTooltip?: ReactNode;
   onClick?: () => void;
   onSearch: () => void;
 }
@@ -41,6 +43,8 @@ const ListPageHeaderComponent: FC<Props> = ({
   searchKey = "keyword",
   sortKey = "sort",
   btnText = "",
+  btnDisabled = false,
+  btnDisabledTooltip,
   allowClear = true,
   onClick,
   onSearch,
@@ -81,9 +85,11 @@ const ListPageHeaderComponent: FC<Props> = ({
           </div>
         )}
         {btnText && onClick && (
-          <Button type="primary" onClick={onClick}>
-            {btnText || t("common.create")}
-          </Button>
+          <Tooltip title={btnDisabled ? btnDisabledTooltip : undefined}>
+            <Button type="primary" disabled={btnDisabled} onClick={onClick}>
+              {btnText || t("common.create")}
+            </Button>
+          </Tooltip>
         )}
       </div>
     </div>

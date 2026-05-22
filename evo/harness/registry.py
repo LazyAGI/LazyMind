@@ -51,7 +51,6 @@ class ToolRegistry:
         self._discovery_package = discovery_package
         self._discovered = False
         self._discover_lock = threading.Lock()
-        self._middlewares: list[Callable[[ToolSpec, dict[str, Any], ToolResult[Any]], ToolResult[Any]]] = []
 
     def register(self, spec: ToolSpec, *, replace: bool = False) -> None:
         if replace or spec.name not in self._specs:
@@ -84,17 +83,6 @@ class ToolRegistry:
 
     def subset(self, names: Iterable[str]) -> list[ToolSpec]:
         return [self.get(n) for n in names]
-
-    def add_middleware(self, fn: Callable[[ToolSpec, dict[str, Any], ToolResult[Any]], ToolResult[Any]]) -> None:
-        self._middlewares.append(fn)
-
-    def clear_middlewares(self) -> None:
-        self._middlewares.clear()
-
-    def apply_middlewares(self, spec: ToolSpec, kwargs: dict[str, Any], result: ToolResult[Any]) -> ToolResult[Any]:
-        for fn in self._middlewares:
-            result = fn(spec, kwargs, result)
-        return result
 
 
 _registry = ToolRegistry()
@@ -142,20 +130,14 @@ def _wrap(fn: ToolFn, name: str) -> ToolFn:
             sess = get_current_session()
             if sess is not None and sess.handle_store is not None:
                 result.handle = sess.handle_store.append(name, kwargs, result.data)
-        spec = _registry._specs.get(name)
-        return _registry.apply_middlewares(spec, kwargs, result) if spec is not None else result
+        return result
 
     return _inner
 
 
-def tool(
-    *,
-    name: str | None = None,
-    tags: list[str] | None = None,
-    lazyllm_group: str = 'tool',
-    llm_exposed: bool = True,
-    summarizer: Summarizer | None = None,
-) -> Callable[[ToolFn], ToolFn]:
+def tool(*, name: str | None = None, tags: list[str] | None = None, lazyllm_group: str = 'tool',
+         llm_exposed: bool = True, summarizer: Summarizer | None = None,
+         ) -> Callable[[ToolFn], ToolFn]:
     def decorator(fn: ToolFn) -> ToolFn:
         tool_name = name or fn.__name__
         wrapped = _wrap(fn, tool_name)

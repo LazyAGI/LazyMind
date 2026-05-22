@@ -92,7 +92,7 @@ def test_session_attaches_handle_store() -> None:
     cfg = load_config()
     session = create_session(cfg)
     assert session.handle_store is not None
-    expected = cfg.output_dir / "runs" / session.run_id / "handles.jsonl"
+    expected = cfg.storage.runs_dir / session.run_id / "handles.jsonl"
     assert session.handle_store.path == expected
     print(f"  store path: {session.handle_store.path}")
     print("  -> OK")

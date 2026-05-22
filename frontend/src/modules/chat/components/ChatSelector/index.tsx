@@ -1,4 +1,4 @@
-import { Button, Input, Popover } from "antd";
+import { Button, Input, Popover, Tooltip } from "antd";
 import {
   SearchOutlined,
   CheckOutlined,
@@ -12,6 +12,8 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
+  MouseEvent,
+  ReactNode,
 } from "react";
 import {
   KnowledgeBaseServiceApi,
@@ -22,10 +24,15 @@ import "./index.scss";
 import { debounce } from "lodash";
 import { ChatConfig } from "../ChatConfigs";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
+import { AgentAppsAuth } from "@/components/auth";
 
 export interface ChatSelectorProps {
   chatConfig: ChatConfig;
   refreshKey?: number | string;
+  embeddingReady?: boolean | null;
+  multimodalEmbeddingReady?: boolean | null;
+  rerankReady?: boolean | null;
   onChange?: (
     knowledgeIds: string[],
     creators: string[],
@@ -40,8 +47,38 @@ export interface ChatSelectorImperativeProps {
 
 const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
   (props, ref) => {
-    const { chatConfig, refreshKey, onChange } = props;
-    const { t } = useTranslation();
+  const { chatConfig, refreshKey, onChange, embeddingReady, multimodalEmbeddingReady, rerankReady } = props;
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
+  const isEmbeddingDisabled = embeddingReady === false || multimodalEmbeddingReady === false || rerankReady === false;
+
+  const buildKnowledgeDisabledReason = (): ReactNode => {
+    const goConfig = (
+      <a
+        href="/model-providers"
+        style={{ marginLeft: 6, color: '#fff', textDecoration: 'underline' }}
+        onClick={(e: MouseEvent<HTMLAnchorElement>) => { e.preventDefault(); navigate('/model-providers'); }}
+      >
+        {t("knowledge.goToConfig")}
+      </a>
+    );
+    if (embeddingReady === false) {
+      return isAdmin
+        ? <span>{t("chat.embeddingNotReadyKnowledgeAdmin")}{goConfig}</span>
+        : t("chat.embeddingNotReadyKnowledge");
+    }
+    if (multimodalEmbeddingReady === false) {
+      return isAdmin
+        ? <span>{t("chat.multimodalEmbeddingNotReadyKnowledgeAdmin")}{goConfig}</span>
+        : t("chat.multimodalEmbeddingNotReadyKnowledge");
+    }
+    if (rerankReady === false) {
+      return <span>{t("chat.rerankNotReadyKnowledge")}{goConfig}</span>;
+    }
+    return undefined;
+  };
+  const knowledgeDisabledReason = buildKnowledgeDisabledReason();
 
     const [knowledgeBaseList, setKnowledgeBaseList] = useState<Dataset[]>([]);
     const [filteredList, setFilteredList] = useState<Dataset[]>([]);
@@ -445,14 +482,25 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
           classNames={{ root: "knowledgePopover" }}
           trigger="click"
           open={open}
-          onOpenChange={(bool) => setOpen(bool)}
+          onOpenChange={(bool) => {
+            if (isEmbeddingDisabled) return;
+            setOpen(bool);
+          }}
         >
-          <div
-            className={`input-bottom-actions-left-item ${open || selectedIds.length > 0 ? "selected" : ""}`}
-          >
-            <KnowledgeIcon />
-            {t("chat.knowledgeBase")}
-          </div>
+          <Tooltip title={isEmbeddingDisabled ? knowledgeDisabledReason : undefined}>
+            <div
+              className={`input-bottom-actions-left-item ${open || selectedIds.length > 0 ? "selected" : ""}${isEmbeddingDisabled ? " is-disabled" : ""}`}
+              aria-disabled={isEmbeddingDisabled}
+              onClick={(e) => {
+                if (isEmbeddingDisabled) {
+                  e.stopPropagation();
+                }
+              }}
+            >
+              <KnowledgeIcon />
+              {t("chat.knowledgeBase")}
+            </div>
+          </Tooltip>
         </Popover>
       </div>
     );

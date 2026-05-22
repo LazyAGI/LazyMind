@@ -121,7 +121,7 @@ func TestListSuggestionsSupportsEvolutionAndResourceFilters(t *testing.T) {
 			ID:           "s-skill",
 			UserID:       "u1",
 			ResourceType: ResourceTypeSkill,
-			ResourceKey:  skill.RelativePath,
+			ResourceKey:  skill.ID,
 			Category:     skill.Category,
 			SkillName:    skill.SkillName,
 			RelativePath: skill.RelativePath,
@@ -246,7 +246,7 @@ func TestListSuggestionsSupportsEvolutionAndResourceFilters(t *testing.T) {
 	}
 }
 
-func TestListSuggestionsSupportsEvolutionIDFiltersWithoutResourceKey(t *testing.T) {
+func TestListSuggestionsSupportsEvolutionIDFilters(t *testing.T) {
 	db := newTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -323,7 +323,7 @@ func TestListSuggestionsSupportsEvolutionIDFiltersWithoutResourceKey(t *testing.
 			ID:              "s-skill-legacy",
 			UserID:          "u1",
 			ResourceType:    ResourceTypeSkill,
-			ResourceKey:     "",
+			ResourceKey:     parent.ID,
 			Category:        parent.Category,
 			ParentSkillName: "git-workflow",
 			SkillName:       "git-workflow",
@@ -1147,7 +1147,7 @@ func TestSuggestionDetailAndReviewIncludeOutdated(t *testing.T) {
 			ID:              "s-get",
 			UserID:          "u1",
 			ResourceType:    ResourceTypeSkill,
-			ResourceKey:     skill.RelativePath,
+			ResourceKey:     skill.ID,
 			Category:        skill.Category,
 			ParentSkillName: skill.ParentSkillName,
 			SkillName:       skill.SkillName,
@@ -1166,7 +1166,7 @@ func TestSuggestionDetailAndReviewIncludeOutdated(t *testing.T) {
 			ID:              "s-approve",
 			UserID:          "u1",
 			ResourceType:    ResourceTypeSkill,
-			ResourceKey:     skill.RelativePath,
+			ResourceKey:     skill.ID,
 			Category:        skill.Category,
 			ParentSkillName: skill.ParentSkillName,
 			SkillName:       skill.SkillName,
@@ -1185,7 +1185,7 @@ func TestSuggestionDetailAndReviewIncludeOutdated(t *testing.T) {
 			ID:              "s-reject",
 			UserID:          "u1",
 			ResourceType:    ResourceTypeSkill,
-			ResourceKey:     skill.RelativePath,
+			ResourceKey:     skill.ID,
 			Category:        skill.Category,
 			ParentSkillName: skill.ParentSkillName,
 			SkillName:       skill.SkillName,

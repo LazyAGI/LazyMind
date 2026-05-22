@@ -284,33 +284,10 @@ def test_standard_plan_definition_is_declarative() -> None:
 # ---------------------------------------------------------------------------
 
 def test_tool_middleware_hook() -> None:
-    _header("tool middleware hook fires after each call")
-    from evo.tools.stats import summarize_metrics
-
+    _header("tool registry no longer exposes middleware hooks")
     reg = get_registry()
-    seen: list[tuple[str, bool]] = []
-
-    def counter(spec, kwargs, result):
-        seen.append((spec.name, result.ok))
-        result.meta["middleware"] = "counter"
-        return result
-
-    reg.add_middleware(counter)
-    try:
-        cfg = load_config()
-        session = create_session(cfg)
-        with session_scope(session):
-            data_loader.load_corpus(session)
-            r1 = summarize_metrics()
-            r2 = summarize_metrics()
-            r3 = summarize_metrics()
-        assert [name for name, _ in seen[-3:]] == ["summarize_metrics"] * 3
-        assert all(ok for _, ok in seen[-3:])
-        assert r1.meta.get("middleware") == "counter"
-        assert r2.meta.get("middleware") == "counter"
-        assert r3.meta.get("middleware") == "counter"
-    finally:
-        reg.clear_middlewares()
+    assert not hasattr(reg, "add_middleware")
+    assert not hasattr(reg, "clear_middlewares")
     print("  -> OK")
 
 
@@ -340,9 +317,9 @@ def test_registry_lazy_autodiscovery() -> None:
     finally:
         reg_mod._discover_package = original
 
-    assert discovery_calls == 1, f"expected 1 discover call, got {discovery_calls}"
+    assert discovery_calls == 1
     assert reg._discovered is True
-    print("  8 concurrent callers -> 1 discovery invocation")
+    print(f"  8 concurrent callers -> {discovery_calls} discovery invocation(s)")
     print("  -> OK")
 
 

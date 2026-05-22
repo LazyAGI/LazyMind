@@ -83,6 +83,7 @@ def test_repositories_package_exports_expected_symbols():
     repositories_pkg = importlib.import_module('repositories')
 
     assert set(repositories_pkg.__all__) == {
+        'CloudAuthConnectionRepository',
         'GroupPermissionRepository',
         'GroupRepository',
         'PermissionGroupRepository',

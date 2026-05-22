@@ -203,6 +203,28 @@ class VideoReader(LazyLLMReaderBase):
         timestamp = self._format_timestamp_for_filename(index * self._frame_interval)
         return f'{video_name}_frame_{timestamp}.jpg'
 
+    def _get_video_duration(self, video_path: str) -> float:
+        ffprobe_path = shutil.which('ffprobe')
+        if not ffprobe_path:
+            raise RuntimeError('`ffprobe` not found in PATH.')
+
+        cmd = [
+            ffprobe_path,
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            video_path,
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        return float(result.stdout.strip())
+
     def _extract_frames(self, video_path: str) -> List[str]:
         ffmpeg_path = shutil.which('ffmpeg')
         if not ffmpeg_path:
@@ -210,31 +232,65 @@ class VideoReader(LazyLLMReaderBase):
 
         frame_dir = self._get_frame_dir(video_path)
         output_pattern = frame_dir / 'raw_%06d.jpg'
+
         for existing_path in frame_dir.glob('*.jpg'):
             existing_path.unlink()
 
-        cmd = [
-            ffmpeg_path,
-            '-y',
-            '-i',
-            video_path,
-            '-vf',
-            f'fps=1/{self._frame_interval}',
-            str(output_pattern),
-        ]
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        duration = self._get_video_duration(video_path)
+
+        if duration < self._frame_interval:
+            first_frame_path = frame_dir / 'raw_000001.jpg'
+
+            cmd = [
+                ffmpeg_path,
+                '-y',
+                '-i',
+                video_path,
+                '-frames:v', '1',
+                str(first_frame_path),
+            ]
+
+            subprocess.run(
+                cmd,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+        else:
+            cmd = [
+                ffmpeg_path,
+                '-y',
+                '-i',
+                video_path,
+                '-vf',
+                f'fps=1/{self._frame_interval}',
+                str(output_pattern),
+            ]
+
+            subprocess.run(
+                cmd,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
 
         raw_frame_paths = sorted(frame_dir.glob('raw_*.jpg'))
+
         if not raw_frame_paths:
             raise ValueError(f'No frames extracted from video: {video_path}')
 
         frame_paths = []
+
         for idx, raw_frame_path in enumerate(raw_frame_paths):
             readable_path = frame_dir / self._frame_filename(video_path, idx)
+
             if readable_path.exists():
                 readable_path.unlink()
+
             raw_frame_path.rename(readable_path)
             frame_paths.append(str(readable_path))
+
         return frame_paths
 
     def _load_frame_nodes(self, video_path: str, fs: Optional['fsspec.AbstractFileSystem']) -> List[ImageDocNode]:

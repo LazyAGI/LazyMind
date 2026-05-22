@@ -1,3 +1,4 @@
+import os
 from lazyllm.configs import Config
 
 # Single Config instance for the entire algorithm package.
@@ -30,9 +31,6 @@ config.add('model_config_path', str, 'dynamic', 'MODEL_CONFIG_PATH', description
 # Tracing / observability
 # ---------------------------------------------------------------------------
 config.add('langfuse_force_flush_timeout_ms', int, 5000, 'LANGFUSE_FORCE_FLUSH_TIMEOUT_MS', description='Langfuse flush timeout in ms.')
-config.add('local_trace_sink', bool, True, 'LOCAL_TRACE_SINK', description='Enable local in-memory trace sink.')
-config.add('local_trace_max_traces', int, 512, 'LOCAL_TRACE_MAX_TRACES', description='Max traces kept in local sink.')
-config.add('local_trace_ttl_s', int, 3600, 'LOCAL_TRACE_TTL_S', description='TTL in seconds for local trace entries.')
 config.add('document_server_url', str, 'http://localhost:8000', 'DOCUMENT_SERVER_URL', description='Document server URL for health checks.')
 
 # ---------------------------------------------------------------------------
@@ -41,6 +39,7 @@ config.add('document_server_url', str, 'http://localhost:8000', 'DOCUMENT_SERVER
 config.add('agentic_kb_url', str, 'http://lazyllm-algo:8000', 'AGENTIC_KB_URL', description='Knowledge base service URL for agentic tools.')
 config.add('core_api_url', str, 'http://core:8000', 'CORE_API_URL', description='Core API service URL.')
 config.add('agentic_kb_name', str, 'general_algo', 'AGENTIC_KB_NAME', description='Default knowledge base name for agentic.')
+config.add('agentic_workspace', str, '/var/lib/lazymind/agentic-workspace', 'AGENTIC_WORKSPACE', description='Workspace directory for agentic runtime.')
 config.add('skill_fs_url', str, 'remote://skills', 'SKILL_FS_URL', description='Skill filesystem URL.')
 config.add('opensearch_uri', str, None, 'OPENSEARCH_URI', description='OpenSearch/Elasticsearch URI.')
 config.add('opensearch_user', str, 'admin', 'OPENSEARCH_USER', description='OpenSearch username.')
@@ -73,6 +72,8 @@ config.add('mineru_backend', str, 'pipeline', 'MINERU_BACKEND', description='Min
 config.add('mineru_server_port', int, 8000, 'MINERU_SERVER_PORT', description='MinerU server port.')
 config.add('mineru_cache_dir', str, None, 'MINERU_CACHE_DIR', description='MinerU cache directory.')
 config.add('mineru_image_save_dir', str, None, 'MINERU_IMAGE_SAVE_DIR', description='MinerU image save directory.')
+config.add('image_cache_dir', str, os.path.join(config['shared_upload_dir'], '.image_cache'), 'IMAGE_CACHE_DIR',
+           description='OCR image cache root (per-document task subdirs).')
 config.add('document_processor_url', str, 'http://localhost:8000', 'DOCUMENT_PROCESSOR_URL', description='Document processor service URL.')
 config.add('algo_server_port', int, 8000, 'ALGO_SERVER_PORT', description='Algorithm server port.')
 config.add('document_server_port', int, 8000, 'DOCUMENT_SERVER_PORT', description='Document server port (fallback for algo_server_port).')

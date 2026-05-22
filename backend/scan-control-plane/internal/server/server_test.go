@@ -37,6 +37,28 @@ func newServerTestStore(t *testing.T) *store.Store {
 	return st
 }
 
+func markNextDueParseSucceededForTest(t *testing.T, st *store.Store, ctx context.Context, now time.Time, coreDocumentID string) {
+	t.Helper()
+	dueAt := now.UTC().Add(48 * time.Hour)
+	if _, err := st.ScheduleDueParses(ctx, dueAt); err != nil {
+		t.Fatalf("schedule due parses failed: %v", err)
+	}
+	tasks, err := st.ClaimDueTasks(ctx, "test-worker", dueAt, 10, time.Minute)
+	if err != nil {
+		t.Fatalf("claim due tasks failed: %v", err)
+	}
+	if len(tasks) == 0 {
+		t.Fatalf("expected at least one due parse task")
+	}
+	task := tasks[0]
+	if err := st.MarkTaskSubmitted(ctx, task.TaskID, "dataset-test", coreDocumentID, "core-task-"+coreDocumentID, dueAt); err != nil {
+		t.Fatalf("mark task submitted failed: %v", err)
+	}
+	if err := st.MarkTaskSucceeded(ctx, task.TaskID, task.DocumentID, task.TargetVersionID); err != nil {
+		t.Fatalf("mark task succeeded failed: %v", err)
+	}
+}
+
 func TestCreateSourceRejectsDuplicateLocalRootPath(t *testing.T) {
 	t.Parallel()
 
@@ -289,6 +311,7 @@ func TestReportScanResultsPersistsMetadataWhenMergerEnabled(t *testing.T) {
 	if len(merger.events) != 1 || merger.events[0].SourceID != src.ID {
 		t.Fatalf("expected scan result event to use request source_id fallback, got %#v", merger.events)
 	}
+	markNextDueParseSucceededForTest(t, st, ctx, time.Now().UTC(), "core-doc-server")
 
 	resp, err := st.ListSourceDocuments(ctx, src.ID, model.ListSourceDocumentsRequest{
 		TenantID: src.TenantID,
@@ -638,8 +661,8 @@ func TestBuildCloudTreeBySourceLiveKeepsWikiTreeStableFromExistingIndex(t *testi
 
 	provider := &fakeCloudProvider{
 		objects: []cloudprovider.RemoteObject{
-			{ExternalObjectID: "node_test4", ExternalPath: "test4", ExternalName: "test4", ExternalKind: "docx", ExternalVersion: "rev-test4", ProviderMeta: map[string]any{"has_child": true}},
-			{ExternalObjectID: "node_11111", ExternalParentID: "node_test4", ExternalPath: "test4/11111", ExternalName: "11111", ExternalKind: "docx", ExternalVersion: "rev-11111", ProviderMeta: map[string]any{"has_child": true}},
+			{ExternalObjectID: "node_test4", ExternalPath: "test4", ExternalName: "test4", ExternalKind: "docx", ExternalVersion: "rev-test4"},
+			{ExternalObjectID: "node_11111", ExternalParentID: "node_test4", ExternalPath: "test4/11111", ExternalName: "11111", ExternalKind: "docx", ExternalVersion: "rev-11111"},
 			{ExternalObjectID: "node_33333", ExternalParentID: "node_11111", ExternalPath: "test4/11111/33333", ExternalName: "33333", ExternalKind: "docx", ExternalVersion: "rev-33333"},
 			{ExternalObjectID: "node_222222", ExternalParentID: "node_test4", ExternalPath: "test4/222222", ExternalName: "222222", ExternalKind: "docx", ExternalVersion: "rev-222222"},
 		},
@@ -680,6 +703,120 @@ func TestBuildCloudTreeBySourceLiveKeepsWikiTreeStableFromExistingIndex(t *testi
 	}
 	if _, ok := fileStats[filepath.Join(mirrorRoot, "test4", "11111")]; !ok {
 		t.Fatalf("expected 11111 display path stat, got %+v", fileStats)
+	}
+}
+
+func TestPathTreeByAgentKeywordKeepsWikiDisplayPathAndDiffState(t *testing.T) {
+	ctx := context.Background()
+	st := newServerTestStore(t)
+	src, err := st.CreateSource(ctx, model.CreateSourceRequest{
+		TenantID:              "tenant-1",
+		Name:                  "handpull-feishu-wiki",
+		RootPath:              "/tmp/keyword-feishu-wiki-source",
+		AgentID:               "agent-1",
+		DefaultOriginType:     string(model.OriginTypeCloudSync),
+		DefaultOriginPlatform: "FEISHU",
+		DefaultTriggerPolicy:  string(model.TriggerPolicyImmediate),
+	})
+	if err != nil {
+		t.Fatalf("create source failed: %v", err)
+	}
+	if _, err := st.UpsertCloudSourceBinding(ctx, src.ID, model.UpsertCloudSourceBindingRequest{
+		Provider:         "feishu",
+		Enabled:          boolPtr(true),
+		AuthConnectionID: "conn-1",
+		TargetType:       "wiki_space",
+		TargetRef:        "space-1",
+	}); err != nil {
+		t.Fatalf("upsert cloud binding failed: %v", err)
+	}
+
+	mirrorRoot := filepath.Clean(sourcelayout.CloudMirrorRoot(src.RootPath))
+	rootDisplayPath := filepath.Join(mirrorRoot, "handpull-feishu-wiki")
+	rootObjectPath := filepath.Join(rootDisplayPath, "handpull-feishu-wiki.md")
+	childDisplayPath := filepath.Join(rootDisplayPath, "11111")
+	childObjectPath := filepath.Join(childDisplayPath, "11111.md")
+	now := time.Now().UTC().Add(-time.Minute)
+	if err := st.UpsertCloudObjectIndexBatch(ctx, src.ID, "feishu", []store.CloudObjectIndexRecord{
+		{
+			ExternalObjectID: "node_root",
+			ExternalName:     "handpull-feishu-wiki",
+			ExternalKind:     "docx",
+			ExternalVersion:  "rev-root",
+			LocalRelPath:     "handpull-feishu-wiki/handpull-feishu-wiki.md",
+			LocalAbsPath:     rootObjectPath,
+			Checksum:         "rev-root",
+			SizeBytes:        10,
+			ProviderMeta:     map[string]any{"has_child": true},
+		},
+		{
+			ExternalObjectID: "node_11111",
+			ExternalParentID: "node_root",
+			ExternalName:     "11111",
+			ExternalKind:     "docx",
+			ExternalVersion:  "rev-11111",
+			LocalRelPath:     "handpull-feishu-wiki/11111/11111.md",
+			LocalAbsPath:     childObjectPath,
+			Checksum:         "rev-11111",
+			SizeBytes:        14,
+			ProviderMeta:     map[string]any{"has_child": true},
+		},
+	}, now); err != nil {
+		t.Fatalf("seed cloud object index failed: %v", err)
+	}
+	if err := st.PersistScanResultSnapshotMetadata(ctx, model.ReportScanResultsRequest{
+		AgentID:  "agent-1",
+		SourceID: src.ID,
+		Mode:     "reconcile",
+		Records: []model.ScanRecord{
+			{SourceID: src.ID, Path: rootObjectPath, Size: 10, ModTime: now, Checksum: "rev-root"},
+			{SourceID: src.ID, Path: childObjectPath, Size: 14, ModTime: now, Checksum: "rev-11111"},
+		},
+	}); err != nil {
+		t.Fatalf("seed committed snapshot failed: %v", err)
+	}
+
+	provider := &fakeCloudProvider{
+		objects: []cloudprovider.RemoteObject{
+			{ExternalObjectID: "node_root", ExternalPath: "handpull-feishu-wiki", ExternalName: "handpull-feishu-wiki", ExternalKind: "docx", ExternalVersion: "rev-root"},
+			{ExternalObjectID: "node_11111", ExternalParentID: "node_root", ExternalPath: "handpull-feishu-wiki/11111", ExternalName: "11111", ExternalKind: "docx", ExternalVersion: "rev-11111"},
+		},
+	}
+	h := &Handler{
+		store:          st,
+		cloudAuth:      fakeCloudAuth{accessToken: "access-token-1"},
+		cloudProviders: map[string]cloudprovider.Provider{"feishu": provider},
+		log:            zap.NewNop(),
+	}
+	body := fmt.Sprintf(`{"source_id":%q,"path":%q,"keyword":"11111","include_files":true,"max_depth":8}`, src.ID, sourcelayout.CloudPublicRoot(src.ID))
+	req := httptest.NewRequest(http.MethodPost, "/api/scan/agents/fs/tree", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	h.pathTreeByAgent(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 status, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp model.AgentPathTreeResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode tree response failed: %v", err)
+	}
+	root, ok := findTreeNodeByPath(resp.Items, rootDisplayPath)
+	if !ok {
+		t.Fatalf("expected keyword response to keep wiki root %s, got %+v", rootDisplayPath, resp.Items)
+	}
+	child, ok := findTreeNodeByPath(root.Children, childDisplayPath)
+	if !ok {
+		t.Fatalf("expected keyword response to keep wiki child display path %s, got %+v", childDisplayPath, root.Children)
+	}
+	if child.Title != "11111" || child.Key != childDisplayPath || child.IsDir {
+		t.Fatalf("expected folded selectable wiki child, got %+v", child)
+	}
+	if _, ok := findTreeNodeByPath(root.Children, childObjectPath); ok {
+		t.Fatalf("did not expect keyword response to expose mirror object path %s", childObjectPath)
+	}
+	if child.UpdateType != "UNCHANGED" || child.HasUpdate == nil || *child.HasUpdate {
+		t.Fatalf("expected keyword response child to stay unchanged, got %+v", child)
 	}
 }
 
@@ -1433,6 +1570,7 @@ func TestListSourcesIncludesCurrentUserBatchOverview(t *testing.T) {
 	if err := st.BatchApplyDocumentMutations(ctx, mutations); err != nil {
 		t.Fatalf("apply mutations failed: %v", err)
 	}
+	markNextDueParseSucceededForTest(t, st, ctx, time.Now().UTC(), "core-doc-a")
 
 	h := &Handler{store: st, core: coreclient.NewNoop(), log: zap.NewNop()}
 	req := httptest.NewRequest(http.MethodGet, "/api/scan/sources?tenant_id=tenant-1", nil)

@@ -22,9 +22,9 @@ Select a model config via `LAZYMIND_MODEL_CONFIG_PATH`. Three built-in shorthand
 
 | Value | Description |
 |-------|-------------|
-| `online` | Public cloud API (default when not set) |
+| `dynamic` (default) | Key injected per request from frontend |
+| `online` | Public cloud API (static config) |
 | `inner` | On-premises / intranet deployment |
-| `dynamic` | Key injected per request |
 
 An explicit file path is also accepted.
 

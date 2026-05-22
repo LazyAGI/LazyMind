@@ -57,6 +57,7 @@ class MeResponse(BaseModel):
     role: str
     permissions: list[str]
     tenant_id: str | None = None
+    dynamic: bool
 
 
 class UpdateMeBody(BaseModel):

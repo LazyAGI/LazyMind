@@ -59,8 +59,7 @@ def test_markdown_image_hold_plugin_keeps_partial_image_across_chunks():
 
     assert first == [('text', 'intro ')]
     assert second == [
-        ('text', '![dog](/static-files/path/dog.jpg?sig=abcdef)'),
-        ('text', '\n\ntail'),
+        ('text', '![dog](/static-files/path/dog.jpg?sig=abcdef)\n\ntail'),
     ]
     assert tail == []
 

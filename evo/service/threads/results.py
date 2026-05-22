@@ -21,16 +21,16 @@ def build_results_router(*, base_dir: Path, store: _store.FsStateStore) -> APIRo
 
     @router.get('/eval-reports')
     def eval_reports(thread_id: str) -> list[dict]:
+        ws = _ws(base_dir, thread_id)
         out = []
-        for path in sorted((_ws(base_dir, thread_id).dir / 'evals').glob('*.json')):
-            data = _json(path) or {}
-            out.append({
-                'eval_id': path.stem,
-                'path': str(path),
-                'report_id': data.get('report_id'),
-                'total_cases': data.get('total_cases'),
-                'metrics': data.get('metrics') or data.get('summary'),
-            })
+        for row in _store.list_flow_tasks_by_thread(store, 'eval', thread_id):
+            eval_id = ((row.get('payload') or {}).get('eval_id') or '').strip()
+            if eval_id and (path := ws.eval_path(eval_id)).is_file():
+                out.append(_eval_report(path, row))
+        if not out:
+            for eval_id in ws.load_artifacts().get('eval_ids') or []:
+                if (path := ws.eval_path(eval_id)).is_file():
+                    out.append(_eval_report(path))
         return out
 
     @router.get('/analysis-reports')
@@ -115,6 +115,46 @@ def _text(path: Path) -> str | None:
         return path.read_text(encoding='utf-8')
     except OSError:
         return None
+
+
+def _eval_report(path: Path, row: dict | None = None) -> dict:
+    data = _json(path) or {}
+    summary = _case_details_summary(data.get('case_details') or [])
+    return {
+        'eval_id': path.stem,
+        'task_id': (row or {}).get('id'),
+        'path': str(path),
+        'report_id': data.get('report_id'),
+        'total_cases': data.get('total_cases') or summary['total_count'],
+        'metrics': summary['averages'],
+        'case_details_summary': summary,
+    }
+
+
+def _case_details_summary(cases: list[dict]) -> dict:
+    buckets: dict[int, list[dict]] = {}
+    for case in cases:
+        buckets.setdefault(int(case.get('question_type') or 1), []).append(case)
+    return {
+        'total_count': len(cases),
+        'averages': _averages(cases),
+        'question_types': [
+            {
+                'question_type': key,
+                'count': len(items),
+                'averages': _averages(items),
+            }
+            for key, items in sorted(buckets.items())
+        ],
+    }
+
+
+def _averages(cases: list[dict]) -> dict[str, float]:
+    metrics = ('answer_correctness', 'faithfulness', 'context_recall', 'doc_recall')
+    return {
+        key: round(sum(float(case.get(key) or 0) for case in cases) / len(cases), 4) if cases else 0.0
+        for key in metrics
+    }
 
 
 def _empty_analysis(data: dict | None) -> bool:

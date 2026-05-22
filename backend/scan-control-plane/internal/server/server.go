@@ -1247,7 +1247,7 @@ func (h *Handler) pathTreeByAgent(w http.ResponseWriter, r *http.Request) {
 			var treeResp model.AgentPathTreeResponse
 			payload := map[string]any{
 				"path":          treePath,
-				"keyword":       req.Keyword,
+				"keyword":       "",
 				"max_depth":     req.MaxDepth,
 				"include_files": req.IncludeFiles,
 			}
@@ -1255,15 +1255,13 @@ func (h *Handler) pathTreeByAgent(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadGateway, "AGENT_TREE_FAILED", err.Error())
 				return
 			}
-			treeItems = filterTreeByKeyword(treeResp.Items, req.Keyword)
+			treeItems = treeResp.Items
 			fileStats, err = h.fetchTreeFileStats(r.Context(), agent.ListenAddr, treeItems)
 			if err != nil {
 				writeError(w, http.StatusBadGateway, "AGENT_TREE_STAT_FAILED", err.Error())
 				return
 			}
 		}
-		treeItems = filterTreeByKeyword(treeItems, req.Keyword)
-
 		items, token, err := h.store.BuildTreeUpdateState(r.Context(), sourceID, treeItems, fileStats)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1681,6 +1679,13 @@ func (h *Handler) buildCloudTreeBySourceLive(
 			pathOwner[rel] = id
 		}
 	}
+	remoteParentIDs := make(map[string]struct{}, len(objects))
+	for _, obj := range objects {
+		parentID := strings.TrimSpace(obj.ExternalParentID)
+		if parentID != "" {
+			remoteParentIDs[parentID] = struct{}{}
+		}
+	}
 
 	rootPath := filepath.Clean(sourcelayout.CloudMirrorRoot(src.RootPath))
 	if h.log != nil {
@@ -1744,9 +1749,12 @@ func (h *Handler) buildCloudTreeBySourceLive(
 		if objectID == "" {
 			continue
 		}
-		kind := cloudNormalizeKind(obj.ExternalKind, obj.ProviderMeta)
+		_, hasRemoteChild := remoteParentIDs[objectID]
+		kind, providerMeta := cloudObjectKindAndMeta(obj, existingByID, hasRemoteChild)
 		isDir := cloudIsDirKind(kind)
-		objectPath, relPath := cloudResolveObjectPath(rootPath, obj, kind, existingByID, pathOwner)
+		pathObject := obj
+		pathObject.ProviderMeta = providerMeta
+		objectPath, relPath := cloudResolveObjectPath(rootPath, pathObject, kind, existingByID, pathOwner)
 		if objectPath == "" {
 			continue
 		}
@@ -1787,16 +1795,16 @@ func (h *Handler) buildCloudTreeBySourceLive(
 			SizeBytes:          sizeBytes,
 			IsDeleted:          false,
 			LastSyncedAt:       &now,
-			ProviderMeta:       obj.ProviderMeta,
+			ProviderMeta:       providerMeta,
 		})
 
-		treeObjectPath := cloudObjectTreePath(objectPath, kind, obj.ProviderMeta)
+		treeObjectPath := cloudObjectTreePath(objectPath, kind, providerMeta)
 		if treeObjectPath == "" || treeObjectPath == "." || !pathInSourceRoot(treeObjectPath, rootPath) {
 			filteredByRootScope++
 			continue
 		}
 
-		treeIsDir := isDir && !cloudWikiPageShouldFold(objectPath, kind, obj.ProviderMeta)
+		treeIsDir := isDir && !cloudWikiPageShouldFold(objectPath, kind, providerMeta)
 		if treeObjectPath == treePath {
 			hasScopedObject = true
 			if !isDir && treeObjectPath == objectPath {
@@ -2129,6 +2137,57 @@ func cloudWikiPageObject(kind string, meta map[string]any) bool {
 	return false
 }
 
+func cloudObjectKindAndMeta(obj cloudprovider.RemoteObject, existingByID map[string]store.CloudObjectIndexRecord, hasRemoteChild bool) (string, map[string]any) {
+	kind := cloudNormalizeKind(obj.ExternalKind, obj.ProviderMeta)
+	meta := copyCloudProviderMeta(nil)
+	if existingByID != nil {
+		if existing, ok := existingByID[strings.TrimSpace(obj.ExternalObjectID)]; ok {
+			if strings.TrimSpace(obj.ExternalKind) == "" && strings.TrimSpace(existing.ExternalKind) != "" {
+				kind = cloudNormalizeKind(existing.ExternalKind, obj.ProviderMeta)
+			}
+			meta = copyCloudProviderMeta(existing.ProviderMeta)
+		}
+	}
+	if len(obj.ProviderMeta) > 0 {
+		if meta == nil {
+			meta = make(map[string]any, len(obj.ProviderMeta))
+		}
+		for key, value := range obj.ProviderMeta {
+			meta[key] = value
+		}
+	}
+	if hasRemoteChild && cloudRemoteObjectShouldBeWikiParent(kind, meta) && !cloudWikiPageWithChildren(kind, meta) {
+		if meta == nil {
+			meta = make(map[string]any, 1)
+		}
+		meta["has_child"] = true
+	}
+	return kind, meta
+}
+
+func copyCloudProviderMeta(meta map[string]any) map[string]any {
+	if len(meta) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(meta))
+	for key, value := range meta {
+		out[key] = value
+	}
+	return out
+}
+
+func cloudRemoteObjectShouldBeWikiParent(kind string, meta map[string]any) bool {
+	if cloudWikiPageObject(kind, meta) {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "doc", "docx":
+		return true
+	default:
+		return false
+	}
+}
+
 func cloudWikiPageShouldFold(objectPath, kind string, meta map[string]any) bool {
 	if !cloudWikiPageObject(kind, meta) {
 		return false
@@ -2218,14 +2277,29 @@ func cloudTreePathByObjectID(
 		if strings.TrimSpace(obj.ExternalObjectID) != objectID {
 			continue
 		}
-		kind := cloudNormalizeKind(obj.ExternalKind, obj.ProviderMeta)
-		objectPath, _ := cloudResolveObjectPath(rootPath, obj, kind, existingByID, pathOwner)
+		kind, providerMeta := cloudObjectKindAndMeta(obj, existingByID, cloudRemoteObjectHasChild(objectID, objects))
+		pathObject := obj
+		pathObject.ProviderMeta = providerMeta
+		objectPath, _ := cloudResolveObjectPath(rootPath, pathObject, kind, existingByID, pathOwner)
 		if objectPath == "" {
 			return ""
 		}
-		return cloudObjectTreePath(objectPath, kind, obj.ProviderMeta)
+		return cloudObjectTreePath(objectPath, kind, providerMeta)
 	}
 	return ""
+}
+
+func cloudRemoteObjectHasChild(objectID string, objects []cloudprovider.RemoteObject) bool {
+	objectID = strings.TrimSpace(objectID)
+	if objectID == "" {
+		return false
+	}
+	for _, obj := range objects {
+		if strings.TrimSpace(obj.ExternalParentID) == objectID {
+			return true
+		}
+	}
+	return false
 }
 
 func cloudResolveObjectPath(

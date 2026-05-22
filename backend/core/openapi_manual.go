@@ -269,7 +269,7 @@ func manualSchemas() map[string]any {
 			prop("name", strSchema()), prop("conversation_id", strSchema()), prop("display_name", strSchema()), prop("search_config", obj()), prop("user", strSchema()), prop("chat_times", int64Schema()), prop("total_feedback_like", int64Schema()), prop("total_feedback_unlike", int64Schema()), prop("create_time", strSchema()), prop("update_time", strSchema()), prop("models", array(strSchema())),
 		),
 		"ConversationHistoryItem": obj(
-			prop("seq", intSchema()), prop("query", strSchema()), prop("result", strSchema()), prop("id", strSchema()), prop("feed_back", intSchema()), prop("sources", array(obj())), prop("input", obj()), prop("reasoning_content", strSchema()), prop("reason", strSchema()), prop("expected_answer", strSchema()), prop("create_time", strSchema()),
+			prop("seq", intSchema()), prop("query", strSchema()), prop("result", strSchema()), prop("id", strSchema()), prop("feed_back", intSchema()), prop("sources", array(obj())), prop("input", array(obj())), prop("reasoning_content", strSchema()), prop("reason", strSchema()), prop("expected_answer", strSchema()), prop("create_time", strSchema()),
 		),
 		"ConversationDetailResponse":  obj(prop("conversation", refSchema("ConversationItem")), prop("history", array(refSchema("ConversationHistoryItem")))),
 		"ConversationListResponse":    obj(prop("conversations", array(refSchema("ConversationItem"))), prop("total_size", int64Schema()), prop("next_page_token", strSchema())),

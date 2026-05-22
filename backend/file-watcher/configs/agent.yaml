@@ -1,19 +1,19 @@
-agent_id: "${RAGSCAN_AGENT_ID:-file-watcher-local-001}"
-tenant_id: "${RAGSCAN_TENANT_ID:-tenant-demo}"
-agent_token: "${RAGSCAN_AGENT_TOKEN:-my-secret-token}"
-listen_addr: "${RAGSCAN_AGENT_LISTEN_ADDR:-127.0.0.1:19090}"
+agent_id: "${LAZYMIND_FILE_WATCHER_AGENT_ID:-file-watcher-local-001}"
+tenant_id: "${LAZYMIND_FILE_WATCHER_TENANT_ID:-tenant-demo}"
+agent_token: "${LAZYMIND_FILE_WATCHER_AGENT_TOKEN:-my-secret-token}"
+listen_addr: "${LAZYMIND_FILE_WATCHER_LISTEN_ADDR:-127.0.0.1:19090}"
 # Address advertised to control-plane. Use host.docker.internal when control-plane runs in a container.
-advertise_addr: "${RAGSCAN_AGENT_ADVERTISE_ADDR:-http://host.docker.internal:19090}"
-control_plane_base_url: "${RAGSCAN_CONTROL_PLANE_BASE_URL:-http://127.0.0.1:18080}"
+advertise_addr: "${LAZYMIND_FILE_WATCHER_ADVERTISE_ADDR:-http://host.docker.internal:19090}"
+control_plane_base_url: "${LAZYMIND_FILE_WATCHER_CONTROL_PLANE_BASE_URL:-http://127.0.0.1:18080}"
 heartbeat_interval: "30s"
 pull_interval: "20s"
 reconcile_interval: "20m"
 # base_root is a writable directory in the file-watcher runtime environment.
 # Host mode defaults to the project data/scan directory; container mode overrides it to /data/ragscan via docker-compose.yml.
 # scan-control-plane must mount the same host data/scan directory and expose staging as /data/staging.
-base_root: "${RAGSCAN_BASE_ROOT:-../../../data/scan}"
-host_path_style: "${RAGSCAN_HOST_PATH_STYLE:-auto}"
-# In container mode, RAGSCAN_WATCH_HOST_DIR and RAGSCAN_WATCH_CONTAINER_DIR are preferred
+base_root: "${LAZYMIND_FILE_WATCHER_BASE_ROOT:-../../../data/scan}"
+host_path_style: "${LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE:-auto}"
+# In container mode, LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR and LAZYMIND_FILE_WATCHER_WATCH_CONTAINER_DIR are preferred
 # to derive the "user/host path -> actual in-container path" mapping automatically.
 log_level: "info"
 

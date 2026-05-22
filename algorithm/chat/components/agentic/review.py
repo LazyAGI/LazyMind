@@ -172,7 +172,8 @@ def _spawn_background_review(
             lazyllm.locals.clear()
             print(f'[bg-review:{review_mode}] EXIT thread={tname}')
 
-    if _cfg['review_debug'] in {'1', 'true', 'yes'}:
+    review_debug = _cfg['review_debug']
+    if review_debug is True or str(review_debug).strip().lower() in {'1', 'true', 'yes'}:
         _worker()
         return
 

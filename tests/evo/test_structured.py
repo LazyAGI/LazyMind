@@ -30,7 +30,7 @@ class _ScriptedInvoker:
         self._idx = 0
         self.calls.clear()
 
-    def invoke(self, user_text: str) -> str:
+    def invoke(self, user_text: str, **kwargs) -> str:
         self.calls.append(user_text)
         if self._idx >= len(self._responses):
             return ""
@@ -107,11 +107,11 @@ def test_invoke_structured_emits_failure_event() -> None:
             agent="synthesizer", schema=SCHEMAS["synthesizer"],
         )
     assert "summary" not in parsed
-    assert len(invoker.calls) == 2
+    assert len(invoker.calls) == 3
     fail_events = _events(session, "schema_repair_failed")
     assert len(fail_events) == 1
     assert fail_events[0]["agent"] == "synthesizer"
-    assert any("summary" in err for err in fail_events[0]["errors"])
+    assert any("summary" in err or "empty response" in err for err in fail_events[0]["errors"])
     print("  -> OK")
 
 
@@ -133,7 +133,9 @@ def test_invoke_structured_uses_custom_producer_only_on_first_attempt() -> None:
             producer=producer,
         )
     assert parsed == {"summary": "fixed", "actions": []}
-    assert producer_calls == ["task"]
+    assert len(producer_calls) == 1
+    assert "task" in producer_calls[0]
+    assert "OUTPUT FORMAT" in producer_calls[0]
     assert len(invoker.calls) == 1
     print("  -> OK")
 

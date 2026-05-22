@@ -38,6 +38,7 @@ def test_models_package_exports_expected_symbols():
 
     assert set(models_pkg.__all__) == {
         'Base',
+        'CloudAuthConnection',
         'Group',
         'GroupPermission',
         'PermissionGroup',

@@ -7,9 +7,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 from evo.chat_runner import ChatInstance, ChatRegistry, ChatRunner
-from evo.datagen import run_eval, load_report
-from evo.runtime.config import EVO_EVAL_MAX_WORKERS
+from evo.datagen import run_eval, load_report, fetch_traces_for_report
+from evo.harness.plan import StopRequested
+from evo.runtime.config import EVO_EVAL_JUDGE_MAX_WORKERS, EVO_EVAL_MAX_WORKERS, EVO_EVAL_RAG_MAX_WORKERS
 from evo.runtime.fs import atomic_write as _atomic_write
+from evo.runtime.fs import atomic_write_json
 from evo.service.threads.workspace import EventLog, ThreadWorkspace
 from .comparator import VerdictPolicy, compare_evals, judge_verdict
 
@@ -31,6 +33,7 @@ class AbtestInputs:
     policy: VerdictPolicy = field(default_factory=VerdictPolicy)
     judge_label: str = 'ab'
     candidate_env: dict[str, str] = field(default_factory=dict)
+    model_config: dict[str, Any] | None = None
 
 
 @dataclass
@@ -60,10 +63,11 @@ def execute_abtest(
     state.setdefault('candidate_chat_id', inputs.candidate_chat_id)
     state.setdefault('candidate_chat_url', inputs.target_chat_url)
     state.setdefault('new_eval_id', None)
+    _clear_failed_summary(state)
     candidate: ChatInstance | None = None
     if state['candidate_chat_id']:
         candidate = chat_registry.get(state['candidate_chat_id'])
-    ctx = _Ctx(inputs, workspace, log, chat_runner, chat_registry, cfg, llm_factory, state, candidate)
+    ctx = _Ctx(inputs, workspace, log, chat_runner, chat_registry, cfg, llm_factory, state, candidate, cancel)
     log.append_event(
         'abtest.start',
         task_id=inputs.abtest_id,
@@ -79,21 +83,7 @@ def execute_abtest(
     try:
         for phase in PHASES:
             if cancel():
-                if ctx.candidate is not None:
-                    chat_runner.stop(ctx.candidate.chat_id)
-                    chat_registry.purge(ctx.candidate.chat_id)
-                log.append_event(
-                    'abtest.finish',
-                    task_id=inputs.abtest_id,
-                    payload={
-                        'abtest_id': inputs.abtest_id,
-                        'status': 'cancelled',
-                        'candidate_chat_id': state.get('candidate_chat_id'),
-                        'new_eval_id': state.get('new_eval_id'),
-                    },
-                )
-                _save_state(state_path, state)
-                return AbtestResult('cancelled', None, None, state['candidate_chat_id'], state['new_eval_id'])
+                return _cancelled_result(ctx, state_path)
             if _phase_done(ctx, phase):
                 continue
             if phase in state['completed']:
@@ -101,11 +91,12 @@ def execute_abtest(
             _PHASES_FN[phase](ctx)
             state['completed'].append(phase)
             _save_state(state_path, state)
+    except StopRequested:
+        return _cancelled_result(ctx, state_path)
     except Exception as exc:
         state['summary'] = _invalid_summary(exc)
         try:
             _phase_persist(ctx)
-            state['completed'] = list(dict.fromkeys([*state.get('completed', []), 'persist']))
             _save_state(state_path, state)
         finally:
             if ctx.candidate is not None:
@@ -124,7 +115,12 @@ def execute_abtest(
             },
         )
         return AbtestResult(
-            'succeeded', 'invalid', state.get('summary'), state.get('candidate_chat_id'), state.get('new_eval_id')
+            'failed_transient',
+            'invalid',
+            state.get('summary'),
+            state.get('candidate_chat_id'),
+            state.get('new_eval_id'),
+            str(exc),
         )
     summary = state.get('summary') or {}
     verdict = summary.get('verdict')
@@ -165,25 +161,27 @@ class _Ctx:
     llm_factory: Any
     state: dict
     candidate: ChatInstance | None
+    cancel: Callable[[], bool]
+
+
+def _cancelled_result(c: _Ctx, state_path: Path) -> AbtestResult:
+    if c.candidate is not None:
+        _retire_candidate(c.candidate, c.runner, c.registry)
+    c.log.append_event(
+        'abtest.finish',
+        task_id=c.inputs.abtest_id,
+        payload={
+            'abtest_id': c.inputs.abtest_id,
+            'status': 'cancelled',
+            'candidate_chat_id': c.state.get('candidate_chat_id'),
+            'new_eval_id': c.state.get('new_eval_id'),
+        },
+    )
+    _save_state(state_path, c.state)
+    return AbtestResult('cancelled', None, None, c.state.get('candidate_chat_id'), c.state.get('new_eval_id'))
 
 
 def _phase_launch_chat(c: _Ctx) -> None:
-    if c.candidate is None and c.inputs.target_chat_url:
-        base_url = _chat_base_url(c.inputs.target_chat_url)
-        c.candidate = ChatInstance(
-            chat_id=c.inputs.candidate_chat_id or f'chat-{c.inputs.abtest_id}',
-            pid=None,
-            port=_url_port(base_url),
-            base_url=base_url,
-            source_dir=c.inputs.apply_worktree,
-            health_url=f'{base_url}/health',
-            status='healthy',
-            owner_thread_id=c.inputs.thread_id,
-        )
-        c.registry.register(c.candidate)
-        if not _probe_health(c.candidate, timeout_s=REUSE_HEALTH_TIMEOUT_S):
-            c.registry.purge(c.candidate.chat_id)
-            c.candidate = None
     if c.candidate is None or c.candidate.status != 'healthy':
         c.candidate = c.runner.launch(
             source_dir=c.inputs.apply_worktree,
@@ -193,7 +191,7 @@ def _phase_launch_chat(c: _Ctx) -> None:
         )
         c.registry.register(c.candidate)
     c.state['candidate_chat_id'] = c.candidate.chat_id
-    c.state['candidate_chat_url'] = _chat_api_url(c.candidate.base_url)
+    c.state['candidate_chat_url'] = f'{c.candidate.base_url}/api/chat/stream'
     _wait_health(c.candidate, timeout_s=60)
 
 
@@ -236,6 +234,12 @@ def _invalid_summary(exc: Exception) -> dict:
     }
 
 
+def _clear_failed_summary(state: dict) -> None:
+    if (state.get('summary') or {}).get('error'):
+        state['completed'] = [p for p in state.get('completed', []) if p not in {'compare', 'persist'}]
+        state.pop('summary', None)
+
+
 def _wait_health(candidate: ChatInstance, timeout_s: float = 60) -> None:
     import time
 
@@ -261,14 +265,20 @@ def _phase_run_eval(c: _Ctx) -> None:
         raise RuntimeError('candidate chat is not available')
     report = run_eval(
         dataset_id=c.inputs.dataset_id,
-        target_chat_url=_chat_api_url(c.candidate.base_url),
+        target_chat_url=f'{c.candidate.base_url}/api/chat/stream',
         cfg=c.cfg,
         llm_factory=c.llm_factory,
         max_workers=_eval_max_workers(c.inputs.eval_options),
+        rag_max_workers=_eval_phase_workers(c.inputs.eval_options, 'rag_max_workers', EVO_EVAL_RAG_MAX_WORKERS),
+        judge_max_workers=_eval_phase_workers(c.inputs.eval_options, 'judge_max_workers', EVO_EVAL_JUDGE_MAX_WORKERS),
         dataset_name=c.inputs.eval_options.get('dataset_name', ''),
         filters=c.inputs.eval_options.get('filters') or {},
-        require_trace=False,
+        require_trace=True,
+        model_config=c.inputs.model_config,
         persist_report=False,
+        attempt_id=c.inputs.abtest_id,
+        resume=_has_eval_partial(c),
+        cancel=c.cancel,
         on_progress=lambda current, total: c.log.append_event(
             'abtest.progress',
             task_id=c.inputs.abtest_id,
@@ -284,6 +294,7 @@ def _phase_run_eval(c: _Ctx) -> None:
     report['report_id'] = eval_id
     c.state['new_eval_id'] = eval_id
     _atomic_write(c.ws.eval_path(eval_id), json.dumps(report, ensure_ascii=False, indent=2))
+    atomic_write_json(c.ws.trace_bundle_path(eval_id), fetch_traces_for_report(report, max_workers=8))
 
 
 def _eval_max_workers(eval_options: dict[str, Any]) -> int:
@@ -291,6 +302,22 @@ def _eval_max_workers(eval_options: dict[str, Any]) -> int:
     if raw is None:
         raw = EVO_EVAL_MAX_WORKERS
     return max(1, int(raw))
+
+
+def _has_eval_partial(c: _Ctx) -> bool:
+    partial_path = (
+        c.cfg.storage.base_dir
+        / 'datasets'
+        / c.inputs.dataset_id
+        / 'eval_attempts'
+        / c.inputs.abtest_id
+        / 'partial.json'
+    )
+    return partial_path.is_file()
+
+
+def _eval_phase_workers(eval_options: dict[str, Any], key: str, default: int) -> int:
+    return max(1, int(eval_options.get(key) or eval_options.get('max_workers') or default))
 
 
 def _phase_compare(c: _Ctx) -> None:
@@ -351,15 +378,6 @@ def _retire_candidate(candidate: ChatInstance, chat_runner: ChatRunner, chat_reg
         chat_registry.purge(candidate.chat_id)
     except Exception:
         pass
-
-
-def _chat_api_url(base_url: str) -> str:
-    return base_url if base_url.rstrip('/').endswith('/api/chat') else base_url.rstrip('/') + '/api/chat'
-
-
-def _chat_base_url(url: str) -> str:
-    url = url.rstrip('/')
-    return url[: -len('/api/chat')] if url.endswith('/api/chat') else url
 
 
 def _url_port(url: str) -> int:

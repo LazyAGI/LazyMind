@@ -92,7 +92,8 @@ def local_path_from_static_file_url(path_or_url: str) -> str:
         return str((root / rel).resolve())
     marker = '/var/lib/lazymind/uploads/'
     if raw.startswith(marker):
-        return str(Path(raw.split('?', 1)[0]).resolve())
+        rel = raw.split('?', 1)[0][len(marker):].lstrip('/')
+        return str((root / rel).resolve())
     try:
         resolved_root = str(root)
         if raw.startswith(resolved_root):
@@ -102,7 +103,8 @@ def local_path_from_static_file_url(path_or_url: str) -> str:
     if raw.startswith('http://') or raw.startswith('https://'):
         idx = raw.find(marker)
         if idx >= 0:
-            return str(Path(raw[idx:].split('?', 1)[0]).resolve())
+            rel = raw[idx:].split('?', 1)[0][len(marker):].lstrip('/')
+            return str((root / rel).resolve())
         idx = raw.find(str(root))
         if idx >= 0:
             return str(Path(raw[idx:].split('?', 1)[0]).resolve())
@@ -136,9 +138,9 @@ def static_file_url_from_any(path: str) -> str:
         marker = '/var/lib/lazymind/uploads/'
         idx = raw.find(marker)
         if idx >= 0:
-            return static_file_url_from_full_path(raw[idx:])
+            return static_file_url_from_full_path(local_path_from_static_file_url(raw))
         return ''
     if raw.startswith('/var/lib/lazymind/uploads/'):
-        return static_file_url_from_full_path(raw)
+        return static_file_url_from_full_path(local_path_from_static_file_url(raw))
     joined = os.path.join(_upload_root(), raw.lstrip('/'))
     return static_file_url_from_full_path(joined)

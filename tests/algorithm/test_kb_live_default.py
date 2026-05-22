@@ -67,6 +67,7 @@ def test_kb_search_default_kb_branch(monkeypatch):
             'filters': {'kb_id': DEFAULT_AGENTIC_CONFIG['kb_id']},
             'files': [],
             'image_files': [],
+            'user_id': '',
         }
     }
     assert result['total'] == 1
@@ -116,7 +117,7 @@ def test_kb_get_parent_node_by_node_id(monkeypatch):
     assert result['total'] == 1
     assert result['items'][0]['uid'] == 'parent-node'
     assert result['items'][0]['text'] == 'parent text'
-    assert [call['index'] for call in calls] == ['col_general_algo_block', 'col_general_algo_block']
+    assert [call['index'] for call in calls] == ['col_block', 'col_block']
 
 
 if __name__ == '__main__':

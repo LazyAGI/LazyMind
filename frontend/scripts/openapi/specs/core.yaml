@@ -1948,16 +1948,26 @@ components:
             type: object
         internalSkillRemoveOpenAPIRequest:
             properties:
+                category:
+                    type: string
                 id:
                     type: string
-            required:
-                - id
+                reason:
+                    type: string
+                session_id:
+                    type: string
+                skill_name:
+                    type: string
             type: object
         internalSkillSuggestionOpenAPIRequest:
             properties:
                 category:
                     type: string
+                id:
+                    type: string
                 session_id:
+                    type: string
+                skill_id:
                     type: string
                 skill_name:
                     type: string
@@ -1966,9 +1976,7 @@ components:
                         $ref: '#/components/schemas/suggestionPayloadOpenAPIRequest'
                     type: array
             required:
-                - category
                 - session_id
-                - skill_name
             type: object
         listModelProviderGroupModelsOpenAPIItem:
             properties:
@@ -2199,10 +2207,16 @@ components:
                     type: boolean
                 content:
                     type: string
+                description:
+                    type: string
                 file_ext:
                     type: string
                 name:
                     type: string
+                tags:
+                    items:
+                        type: string
+                    type: array
             required:
                 - content
                 - name
@@ -2227,6 +2241,8 @@ components:
                     type: boolean
                 name:
                     type: string
+                parent_skill_id:
+                    type: string
                 parent_skill_name:
                     type: string
                 tags:
@@ -2234,7 +2250,6 @@ components:
                         type: string
                     type: array
             required:
-                - category
                 - content
                 - name
             type: object
@@ -2270,6 +2285,10 @@ components:
                     type: string
                 node_type:
                     type: string
+                parent_id:
+                    type: string
+                parent_skill_id:
+                    type: string
                 parent_skill_name:
                     type: string
                 skill_id:
@@ -2290,6 +2309,8 @@ components:
                 - is_enabled
                 - name
                 - node_type
+                - parent_id
+                - parent_skill_id
                 - parent_skill_name
                 - skill_id
                 - suggestion_status
@@ -2326,6 +2347,10 @@ components:
                     type: string
                 node_type:
                     type: string
+                parent_id:
+                    type: string
+                parent_skill_id:
+                    type: string
                 parent_skill_name:
                     type: string
                 skill_id:
@@ -2351,6 +2376,8 @@ components:
                 - is_enabled
                 - name
                 - node_type
+                - parent_id
+                - parent_skill_id
                 - parent_skill_name
                 - skill_id
                 - suggestion_status
@@ -2440,6 +2467,12 @@ components:
                     type: string
                 node_type:
                     type: string
+                parent_id:
+                    type: string
+                parent_skill_id:
+                    type: string
+                parent_skill_name:
+                    type: string
                 skill_id:
                     type: string
                 suggestion_status:
@@ -2457,6 +2490,9 @@ components:
                 - is_enabled
                 - name
                 - node_type
+                - parent_id
+                - parent_skill_id
+                - parent_skill_name
                 - skill_id
                 - suggestion_status
                 - update_status
@@ -2773,6 +2809,8 @@ components:
                 is_enabled:
                     type: boolean
                 name:
+                    type: string
+                parent_skill_id:
                     type: string
                 parent_skill_name:
                     type: string
@@ -6006,8 +6044,8 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/skillDeleteOpenAPIResponse'
-                    description: Deleted skill
+                                $ref: '#/components/schemas/recordedSuggestionListOpenAPIResponse'
+                    description: Created remove suggestion
             summary: Delete skill by ID
             tags:
                 - skill-evolution
@@ -6291,6 +6329,12 @@ paths:
                 "200":
                     description: OK
             summary: GET /static-files/{path:.*}
+    /api/core/static-files:sign:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /static-files:sign
     /api/core/temp/uploads:
         post:
             requestBody:

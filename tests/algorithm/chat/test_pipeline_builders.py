@@ -128,7 +128,10 @@ def test_get_retriever_builds_parts(monkeypatch):
 
     assert len(parts.kb_retrievers) == 1
     assert parts.tmp_retriever_pipeline is fake_pipeline
-    assert retriever_calls == [(fake_document, {'group_name': 'line', 'topk': 5})]
+    assert retriever_calls == [
+        (fake_document, {'group_name': 'line', 'topk': 5}),
+        (fake_document, {'group_name': 'image', 'topk': 3, 'embed_keys': ['embed_image']}),
+    ]
     assert automodel_calls == [retriever_mod.EMBED_MAIN]
     assert temp_calls == {'init': 'embed-model', 'sub': ('block', 3)}
     assert bind_calls == [{'query': 'pipeline-input'}]
@@ -154,6 +157,7 @@ def test_get_ppl_search_keeps_expected_stage_order(monkeypatch):
         lambda url, retriever_configs: SimpleNamespace(
             kb_retrievers=[_DummyPipe('r1'), _DummyPipe('r2')],
             tmp_retriever_pipeline=_DummyPipe('tmp'),
+            image_retriever=None,
         ),
     )
     monkeypatch.setattr(ppl_search_mod, 'get_remote_docment', lambda url: 'document')
@@ -213,9 +217,10 @@ def test_get_ppl_search_keeps_expected_stage_order(monkeypatch):
         'reranker',
         'adaptive_k',
         'ctx_expand',
+        'search',
     ]
     assert recorded['join_top_k'] == 50
-    assert recorded['ifs']['cond']('ignored') is False
+    assert recorded['ifs']['cond']() is False
     assert recorded['reranker'] == {'name': 'ModuleReranker', 'model': 'model:reranker', 'topk': 7}
     assert recorded['adaptive_k']['k_max'] == 4
     assert recorded['adaptive_k']['max_tokens'] == 2048
@@ -242,6 +247,7 @@ def test_get_ppl_search_diverts_to_temp_retriever_when_files_present(monkeypatch
         lambda url, retriever_configs: SimpleNamespace(
             kb_retrievers=[_DummyPipe('r1')],
             tmp_retriever_pipeline=_DummyPipe('tmp'),
+            image_retriever=None,
         ),
     )
     monkeypatch.setattr(ppl_search_mod, 'get_remote_docment', lambda url: 'document')
@@ -263,6 +269,5 @@ def test_get_ppl_search_diverts_to_temp_retriever_when_files_present(monkeypatch
 
     ppl_search_mod.get_ppl_search('http://kb-service', retriever_configs=[{'group_name': 'line'}])
 
-    assert recorded['ifs']['cond']('ignored') is True
-
+    assert recorded['ifs']['cond']() is True
 

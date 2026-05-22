@@ -1,5 +1,6 @@
 x-mirror-args: &mirror-args
   DOCKER_MIRROR: ${DOCKER_MIRROR:-docker.m.daocloud.io/library/}
+  LAZYMIND_IMAGE_MIRROR: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}
   PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
   PIP_DEFAULT_TIMEOUT: ${PIP_DEFAULT_TIMEOUT:-2400}
   PIP_RETRIES: ${PIP_RETRIES:-10}
@@ -20,9 +21,9 @@ x-trace-config: &trace-config
   LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
   LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
   LAZYLLM_TRACE_ENABLED: ${LAZYLLM_TRACE_ENABLED:-1}
-  LAZYLLM_TRACE_BACKEND: ${LAZYLLM_TRACE_BACKEND:-langfuse}
-  LAZYMIND_LOCAL_TRACE_SINK: ${LAZYMIND_LOCAL_TRACE_SINK:-false}
-  LOCAL_TRACE_SINK: ${LOCAL_TRACE_SINK:-false}
+  LAZYLLM_TRACE_BACKEND: ${LAZYLLM_TRACE_BACKEND:-local}
+  LAZYLLM_TRACE_LOCAL_STORAGE_DIR: ${LAZYLLM_TRACE_LOCAL_STORAGE_DIR:-/var/lib/lazymind/traces}
+  LAZYLLM_TRACE_CONSUME_BACKEND: ${LAZYLLM_TRACE_CONSUME_BACKEND:-local}
   OTEL_EXPORTER_OTLP_TIMEOUT: 60
   OTEL_EXPORTER_OTLP_TRACES_TIMEOUT: 60
   LAZYMIND_LANGFUSE_FORCE_FLUSH_TIMEOUT_MS: 70000
@@ -64,6 +65,9 @@ x-upload-paths: &upload-paths
   LAZYMIND_UPLOAD_HOST_DIR: ./data/core/uploads
   LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
 
+x-runtime-home: &runtime-home
+  LAZYMIND_HOME: /tmp/.lazyllm_rag
+
 x-db-conn: &db-conn
   LAZYMIND_DATABASE_URL: ${LAZYMIND_DATABASE_URL:-postgresql+psycopg://app:app@db:5432/app}
 
@@ -82,6 +86,7 @@ x-ocr-env: &ocr-env
 services:
 
   kong:
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-kong:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
       context: ./kong
@@ -97,8 +102,8 @@ services:
     volumes:
       - ./kong.yml:/kong/kong.yml
       - ./kong/plugins/rbac-auth:/usr/local/share/lua/5.1/kong/plugins/rbac-auth
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     depends_on:
       auth-service:
         condition: service_healthy
@@ -108,11 +113,8 @@ services:
     environment:
       POSTGRES_USER: root
       POSTGRES_PASSWORD: "123456"
-
     expose:
       - "5432"
-    ports:
-      - "5432:5432"
     volumes:
       - ./data/state/postgres:/var/lib/postgresql/data
       - ./db-init:/docker-entrypoint-initdb.d
@@ -144,6 +146,7 @@ services:
     restart: "no"
 
   scan-control-plane:
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-scan-control-plane:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
       context: ./backend/scan-control-plane
@@ -151,18 +154,20 @@ services:
       args:
         <<: *mirror-args
     command: ["-config", "/app/configs/control-plane.scan.yml"]
+    environment:
+      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
     volumes:
       - ./backend/scan-control-plane/configs/control-plane.scan.yml:/app/configs/control-plane.scan.yml:ro
-      - ${RAGSCAN_BASE_ROOT:-./data/scan}:/data/ragscan
-      - ${RAGSCAN_BASE_ROOT:-./data/scan}/staging:/data/staging
+      - ${LAZYMIND_FILE_WATCHER_BASE_ROOT:-./data/scan}:/data/ragscan
+      - ${LAZYMIND_FILE_WATCHER_BASE_ROOT:-./data/scan}/staging:/data/staging
       - ./data/core/uploads:/var/lib/lazymind/uploads
+    expose:
+      - "18080"
     depends_on:
       db:
         condition: service_healthy
       db-bootstrap:
         condition: service_completed_successfully
-    ports:
-      - "18080:18080"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:18080/healthz >/dev/null 2>&1 || exit 1"]
       interval: 5s
@@ -171,6 +176,7 @@ services:
     restart: unless-stopped
 
   file-watcher:
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-file-watcher:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
       context: ./backend/file-watcher
@@ -179,22 +185,22 @@ services:
         <<: *mirror-args
     command: ["-config", "/app/configs/agent.yaml"]
     environment:
-      RAGSCAN_AGENT_LISTEN_ADDR: "0.0.0.0:19090"
-      RAGSCAN_AGENT_ADVERTISE_ADDR: "http://file-watcher:19090"
-      RAGSCAN_CONTROL_PLANE_BASE_URL: "http://scan-control-plane:18080"
-      RAGSCAN_BASE_ROOT: /data/ragscan
-      RAGSCAN_HOST_PATH_STYLE: ${RAGSCAN_HOST_PATH_STYLE:-posix}
-      RAGSCAN_WATCH_HOST_DIR: ${RAGSCAN_WATCH_HOST_DIR:-${PWD}/data/watch}
-      RAGSCAN_WATCH_CONTAINER_DIR: /watch/docs
+      LAZYMIND_FILE_WATCHER_LISTEN_ADDR: "0.0.0.0:19090"
+      LAZYMIND_FILE_WATCHER_ADVERTISE_ADDR: "http://file-watcher:19090"
+      LAZYMIND_FILE_WATCHER_CONTROL_PLANE_BASE_URL: "http://scan-control-plane:18080"
+      LAZYMIND_FILE_WATCHER_BASE_ROOT: /data/ragscan
+      LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE: ${LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE:-posix}
+      LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR: ${LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR:-/Users}
+      LAZYMIND_FILE_WATCHER_WATCH_CONTAINER_DIR: /watch/docs
     volumes:
       - ./backend/file-watcher/configs/agent.yaml:/app/configs/agent.yaml:ro
-      - ${RAGSCAN_BASE_ROOT:-./data/scan}:/data/ragscan
-      - ${RAGSCAN_WATCH_HOST_DIR:-${PWD}/data/watch}:/watch/docs
+      - ${LAZYMIND_FILE_WATCHER_BASE_ROOT:-./data/scan}:/data/ragscan
+      - ${LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR:-/Users}:/watch/docs
+    expose:
+      - "19090"
     depends_on:
       scan-control-plane:
         condition: service_healthy
-    ports:
-      - "19090:19090"
     restart: unless-stopped
 
   redis:
@@ -210,6 +216,7 @@ services:
       retries: 20
 
   auth-service:
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-auth-service:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
       context: ./backend
@@ -227,10 +234,11 @@ services:
       LAZYMIND_JWT_SECRET: dev-secret-change-me
       LAZYMIND_JWT_TTL_MINUTES: "60"
       LAZYMIND_JWT_REFRESH_TTL_DAYS: "7"
-      RAGSCAN_SECRET_KEY: dev-ragscan-secret-key-change-me
-      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: dev-internal-service-token
+      LAZYMIND_AUTH_CLOUD_SECRET_KEY: dev-ragscan-secret-key-change-me
+      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
       LAZYMIND_BOOTSTRAP_ADMIN_USERNAME: ${LAZYMIND_BOOTSTRAP_ADMIN_USERNAME:-admin}
       LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD: ${LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD:-admin}
+      LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/authservice/auth/health')\" || exit 1"]
       interval: 10s
@@ -245,6 +253,7 @@ services:
         condition: service_healthy
 
   office-convert-service:
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-office-convert-service:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
       context: ./backend
@@ -256,6 +265,7 @@ services:
     environment:
       OFFICE_CONVERT_ALLOWED_ROOTS: /var/lib/lazymind/uploads
       OFFICE_CONVERT_TIMEOUT_SECONDS: "900"
+      OFFICE_CONVERT_CONCURRENCY: ${OFFICE_CONVERT_CONCURRENCY:-4}
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
     healthcheck:
@@ -265,6 +275,7 @@ services:
       retries: 3
 
   core:
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-core:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
       context: ./backend
@@ -273,7 +284,7 @@ services:
         <<: *mirror-args
     volumes:
       - ./api/backend:/openapi-export
-      - /tmp/evo:/var/lib/lazymind/evo
+      - ./data/evo:/var/lib/lazymind/evo
       - ./data/core/uploads:/var/lib/lazymind/uploads
     expose:
       - "8000"
@@ -290,7 +301,7 @@ services:
       LAZYMIND_PARSING_SERVICE_URL: http://lazyllm-parse-server:8000
       LAZYMIND_CHAT_SERVICE_URL: http://chat:8046
       LAZYMIND_EVO_SERVICE_URL: http://evo-api:8047
-      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: dev-internal-service-token
+      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
       LAZYMIND_OFFICE_CONVERT_WORKERS: "4"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
@@ -327,13 +338,14 @@ services:
         condition: service_healthy
 
   frontend:
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-frontend:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
       context: ./frontend
       args:
         <<: *mirror-args
     ports:
-      - "${LAZYMIND_FRONTEND_PORT:-8080}:80"
+      - "${LAZYMIND_FRONTEND_PORT:-8090}:80"
     expose:
       - "80"
     depends_on:
@@ -346,6 +358,7 @@ services:
       FRONTEND_API_DOCS_PROXY_PASS: http://kong:8000
 
   lazyllm-doc-server:
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-doc:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
       context: .
@@ -359,12 +372,12 @@ services:
       - "8000"
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
+      - ./data/traces:/var/lib/lazymind/traces
       # Image bakes /app/algorithm; Python may import lazyllm from there (not /opt/lazyllm). Mount repo
       # so doc_manager matches Core /v1/docs/add (kb bound to general_algo, no algo_id in body).
-      - ./algorithm:/app/algorithm:ro
       - ./algorithm/lazyllm:/opt/lazyllm:ro
     environment:
-      <<: [*db-conn, *upload-paths, *llm-api-keys]
+      <<: [*db-conn, *upload-paths, *llm-api-keys, *trace-config]
       LAZYMIND_DOCUMENT_SERVICE_PORT: "8000"
       LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
       LAZYMIND_DOCUMENT_SERVICE_CALLBACK_URL: http://doc-server:8000/v1/internal/callbacks/tasks
@@ -379,7 +392,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 120s
+      start_period: 180s
     depends_on:
       db:
         condition: service_healthy
@@ -397,10 +410,11 @@ services:
   mineru:
     profiles:
       - mineru
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-mineru:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
-      context: ./algorithm
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: algorithm/Dockerfile
       target: mineru
       args:
         <<: *mirror-args
@@ -455,7 +469,7 @@ services:
     shm_size: '16gb'
     healthcheck:
       test: ['CMD-SHELL', 'curl -f http://localhost:8118/health || exit 1']
-      start_period: 120s
+      start_period: 180s
 
   paddleocr:
     profiles:
@@ -484,6 +498,7 @@ services:
     restart: unless-stopped
 
   lazyllm-parse-server:
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-algorithm:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
       context: .
@@ -497,10 +512,11 @@ services:
       - "8000"
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
+      - ./data/traces:/var/lib/lazymind/traces
       - ./algorithm/lazyllm:/opt/lazyllm:ro
     environment:
       LAZYMIND_DOCUMENT_PROCESSOR_PORT: "8000"
-      <<: [*db-conn, *upload-paths, *llm-api-keys]
+      <<: [*runtime-home, *db-conn, *upload-paths, *llm-api-keys, *trace-config]
       LAZYLLM_EXPECTED_LOG_MODULES: "all"
     command: ["python", "processor/server.py"]
     healthcheck:
@@ -508,7 +524,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 90s
+      start_period: 180s
     depends_on:
       db:
         condition: service_healthy
@@ -520,6 +536,7 @@ services:
           - processor-server
 
   lazyllm-parse-worker:
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-algorithm:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
       context: .
@@ -531,6 +548,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
+      - ./data/traces:/var/lib/lazymind/traces
       - ./algorithm/lazyllm:/opt/lazyllm:ro
     environment:
       LAZYMIND_DOCUMENT_WORKER_PORT: "8001"
@@ -540,7 +558,7 @@ services:
       LAZYMIND_DOCUMENT_WORKER_HIGH_PRIORITY_TASK_TYPES: ""
       LAZYMIND_DOCUMENT_WORKER_HIGH_PRIORITY_ONLY: "false"
       LAZYMIND_DOCUMENT_WORKER_POLL_MODE: direct
-      <<: [*db-conn, *upload-paths, *llm-api-keys, *ocr-env]
+      <<: [*runtime-home, *db-conn, *upload-paths, *llm-api-keys, *ocr-env, *trace-config]
       LAZYLLM_EXPECTED_LOG_MODULES: "all"
     command: ["python", "processor/worker.py"]
     healthcheck:
@@ -548,7 +566,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 90s
+      start_period: 180s
     depends_on:
       db:
         condition: service_healthy
@@ -562,6 +580,7 @@ services:
           - processor-worker
 
   lazyllm-algo:
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-algorithm:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
       context: .
@@ -574,6 +593,7 @@ services:
     working_dir: /app
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
+      - ./data/traces:/var/lib/lazymind/traces
       - ./algorithm/chat:/app/chat:ro
       - ./algorithm/common:/app/common:ro
       - ./algorithm/vocab:/app/vocab:ro
@@ -587,10 +607,10 @@ services:
       interval: 15s
       timeout: 10s
       retries: 10
-      start_period: 120s
+      start_period: 180s
     environment:
       LAZYMIND_UPLOAD_ROOT: /var/lib/lazymind/uploads
-      <<: [*upload-paths, *llm-api-keys, *ocr-env]
+      <<: [*runtime-home, *upload-paths, *llm-api-keys, *ocr-env, *db-conn, *trace-config]
       LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
       LAZYMIND_ALGO_SERVER_PORT: "8000"
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
@@ -615,6 +635,7 @@ services:
           - parsing
 
   chat:
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-algorithm:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
       context: .
@@ -626,6 +647,7 @@ services:
       - "8046"
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
+      - ./data/traces:/var/lib/lazymind/traces
       - ./algorithm/chat:/app/chat:ro
       - ./algorithm/common:/app/common:ro
       - ./algorithm/vocab:/app/vocab:ro
@@ -638,7 +660,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 120s
+      start_period: 180s
     environment:
       LAZYMIND_DOCUMENT_SERVER_URL: http://parsing:8000,general_algo
       LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
@@ -662,12 +684,14 @@ services:
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
       LAZYMIND_CORE_SERVICE_URL: http://core:8000
       LAZYMIND_WORD_GROUP_APPLY_URL: ""
-      <<: [*trace-config, *proxy-env, *db-conn, *core-db-conn, *llm-api-keys, *upload-paths]
+      <<: [*runtime-home, *trace-config, *proxy-env, *db-conn, *core-db-conn, *llm-api-keys, *upload-paths]
     command: ["python", "-m", "chat.app.chat", "--port", "8046"]
     depends_on:
       lazyllm-algo:
         condition: service_healthy
+
   evo-api:
+    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-evo-api:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
       context: .
@@ -678,8 +702,6 @@ services:
         OPENCODE_VERSION: 1.14.28
     expose:
       - "8047"
-    ports:
-      - "8050:8047"
     environment:
       LAZYMIND_EVO_API_PORT: "8047"
       LAZYMIND_EVO_BASE_DIR: /var/lib/lazymind/evo
@@ -697,9 +719,10 @@ services:
       LAZYMIND_EVO_CHUNK_BASE_URL: http://doc-server:8000
       LAZYMIND_EVO_TARGET_CHAT_URL: http://chat:8046/api/chat
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
-      <<: [*trace-config, *proxy-env, *llm-api-keys]
+      <<: [*runtime-home, *trace-config, *proxy-env, *llm-api-keys]
     volumes:
-      - /tmp/evo:/var/lib/lazymind/evo
+      - ./data/evo:/var/lib/lazymind/evo
+      - ./data/traces:/var/lib/lazymind/traces
       - ./data/core/uploads:/var/lib/lazymind/uploads:ro
       - ./algorithm/chat:/var/lib/lazymind/chat-source:ro
       - ./algorithm/config.py:/app/config.py:ro
@@ -711,7 +734,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 180s
     depends_on:
       chat:
         condition: service_healthy
@@ -766,7 +789,7 @@ services:
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:9091/healthz']
       interval: 30s
-      start_period: 90s
+      start_period: 180s
       timeout: 20s
       retries: 3
     expose:
@@ -781,8 +804,8 @@ services:
     profiles:
       - milvus-dashboard
     image: zilliz/attu:v2.6.3
-    ports:
-      - '127.0.0.1:3000:3000'
+    expose:
+      - "3000"
     environment:
       MILVUS_URL: milvus:19530
     depends_on:
@@ -794,7 +817,6 @@ services:
     profiles:
       - opensearch
     image: opensearchproject/opensearch:2.18.0
-    container_name: opensearch
     environment:
       - cluster.name=opensearch-cluster
       - node.name=opensearch-node1
@@ -816,7 +838,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 180s
     expose:
       - '9200'
 
@@ -824,10 +846,8 @@ services:
     profiles:
       - opensearch-dashboard
     image: opensearchproject/opensearch-dashboards:2.18.0
-    ports:
-      - '127.0.0.1:5601:5601'
     expose:
-      - '5601'
+      - "5601"
     environment:
       OPENSEARCH_HOSTS: '["https://opensearch:9200"]'
     depends_on:

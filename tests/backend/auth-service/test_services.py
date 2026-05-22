@@ -143,8 +143,15 @@ def seeded_data(db_session):
 def test_services_package_exports_instances():
     services_pkg = importlib.import_module('services')
 
-    assert services_pkg.__all__ == ['auth_service', 'group_service', 'role_service', 'user_service']
+    assert services_pkg.__all__ == [
+        'auth_service',
+        'cloud_oauth_service',
+        'group_service',
+        'role_service',
+        'user_service',
+    ]
     assert services_pkg.auth_service is not None
+    assert services_pkg.cloud_oauth_service is not None
     assert services_pkg.group_service is not None
     assert services_pkg.role_service is not None
     assert services_pkg.user_service is not None

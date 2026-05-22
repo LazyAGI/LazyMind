@@ -82,8 +82,8 @@ def test_upload_and_add_saves_files_and_posts_add_doc_request(monkeypatch, tmp_p
     assert response.code == 200
     assert response.data == {'task_id': 'task-1', 'ids': ['doc-a.txt']}
     assert _FakeAsyncClient.posts[0]['url'] == 'http://127.0.0.1:18000/doc/add'
-    # algo_id is no longer forwarded to AddDocRequest (node-group refactor)
-    assert 'algo_id' not in _FakeAsyncClient.posts[0]['json'] or _FakeAsyncClient.posts[0]['json'].get('algo_id') is None
+    # algo_id is deprecated and omitted from AddDocRequest.
+    assert 'algo_id' not in _FakeAsyncClient.posts[0]['json']
     # kb_id is now a top-level field on AddDocRequest
     assert _FakeAsyncClient.posts[0]['json']['kb_id'] == 'query-group'
     # metadata no longer carries a redundant kb_id
@@ -108,8 +108,8 @@ def test_upload_and_add_uses_form_values_before_query_params(monkeypatch, tmp_pa
     )
 
     assert response.data == {'task_id': 'task-2', 'ids': ['fixed-doc-id']}
-    # algo_id is no longer forwarded to AddDocRequest (node-group refactor)
-    assert 'algo_id' not in _FakeAsyncClient.posts[0]['json'] or _FakeAsyncClient.posts[0]['json'].get('algo_id') is None
+    # algo_id is deprecated and omitted from AddDocRequest.
+    assert 'algo_id' not in _FakeAsyncClient.posts[0]['json']
     # kb_id is now a top-level field; form-group takes precedence over query-group
     assert _FakeAsyncClient.posts[0]['json']['kb_id'] == 'form-group'
     assert not (_FakeAsyncClient.posts[0]['json']['file_infos'][0].get('metadata') or {}).get('kb_id')
@@ -136,8 +136,8 @@ def test_upload_and_add_uses_defaults_and_unnamed_file(monkeypatch, tmp_path):
     saved_file = tmp_path / 'fixed-subdir' / 'unnamed'
     assert saved_file.read_bytes() == b'content'
     assert response.data == {'task_id': None, 'ids': ['doc-unnamed']}
-    # algo_id is no longer forwarded to AddDocRequest (node-group refactor)
-    assert 'algo_id' not in _FakeAsyncClient.posts[0]['json'] or _FakeAsyncClient.posts[0]['json'].get('algo_id') is None
+    # algo_id is deprecated and omitted from AddDocRequest.
+    assert 'algo_id' not in _FakeAsyncClient.posts[0]['json']
     # kb_id (= default-group) is now a top-level field on AddDocRequest
     assert _FakeAsyncClient.posts[0]['json']['kb_id'] == 'default-group'
     assert not (_FakeAsyncClient.posts[0]['json']['file_infos'][0].get('metadata') or {}).get('kb_id')

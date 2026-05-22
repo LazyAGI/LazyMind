@@ -47,7 +47,7 @@ class _Scripted:
     def __init__(self, *a, **kw):
         pass
 
-    def invoke(self, _: str) -> str:
+    def invoke(self, _: str, **kwargs) -> str:
         if _Scripted.idx >= len(_Scripted.responses):
             return ""
         out = _Scripted.responses[_Scripted.idx]
@@ -72,6 +72,7 @@ def _make_action_payload(aid: str = "A1") -> dict:
         "expected_direction": "+",
         "confidence": 0.85,
         "evidence_handles": ["h_0001"],
+        "code_map_target": "/LazyRAG/algorithm/chat/pipelines/naive.py",
     }
 
 
@@ -95,7 +96,7 @@ def test_synthesizer_single_pass_when_no_gaps() -> None:
 
 
 def test_synthesizer_bounded_refine_when_gaps_present() -> None:
-    _h("Synthesizer: gap_hypotheses -> spawn research+critic, then iter 2 (max 2 rounds)")
+    _h("Synthesizer: gap_hypotheses -> second synthesis pass")
     session = create_session(load_config())
     _seed(session)
     round1 = json.dumps({
@@ -112,39 +113,18 @@ def test_synthesizer_bounded_refine_when_gaps_present() -> None:
         "actions": [_make_action_payload()], "open_gaps": ["边界情况"],
     })
     _scripted(round1, round2)
-    spawn_calls: list[list] = []
-
-    def fake_execute(_, actions, max_workers=4):
-        spawn_calls.append(list(actions))
-        if actions and actions[0].get("kind") == "research":
-            session.world_store.update(lambda w: w.findings.append(Finding(
-                id=f"F{len(w.findings) + 1}", hypothesis_id="GH1",
-                claim="gap finding", verdict="confirmed",
-                evidence_handles=["h_0009"], critic_status="pending",
-            )))
-        else:
-            session.world_store.update(
-                lambda w: setattr(w.findings[-1], "critic_status", "approved"),
-            )
-        return []
-
     with session_scope(session):
         with patch("evo.agents.synthesizer.LLMInvoker", _Scripted):
-            with patch("evo.agents.synthesizer.execute_batch", fake_execute):
-                r = run_synthesizer(session)
+            r = run_synthesizer(session)
     assert r.iterations == 2
     assert r.summary == "final"
     assert len(r.actions) == 1
-    gh1 = next(h for h in session.world_store.world.hypotheses if h.id == "GH1")
-    assert gh1.source == SYNTHESIZER_NAME
-    assert len(spawn_calls) == 2
-    assert spawn_calls[0][0]["kind"] == "research"
-    assert spawn_calls[1][0]["kind"] == "critic"
+    assert _Scripted.idx == 2
     print("  -> OK")
 
 
-def test_synthesizer_caps_gap_hypotheses_to_4() -> None:
-    _h("Synthesizer: gap_hypotheses oversize -> only first 4 appended")
+def test_synthesizer_oversize_gap_hypotheses_triggers_single_refine() -> None:
+    _h("Synthesizer: gap_hypotheses oversize -> still only triggers one refine pass")
     session = create_session(load_config())
     _seed(session)
     big = json.dumps({
@@ -159,16 +139,13 @@ def test_synthesizer_caps_gap_hypotheses_to_4() -> None:
                         "actions": [], "open_gaps": []})
     _scripted(big, final)
 
-    def fake_execute(_, __, max_workers=4):
-        return []
-
     with session_scope(session):
         with patch("evo.agents.synthesizer.LLMInvoker", _Scripted):
-            with patch("evo.agents.synthesizer.execute_batch", fake_execute):
-                run_synthesizer(session)
+            result = run_synthesizer(session)
     new_hids = [h.id for h in session.world_store.world.hypotheses
                 if h.source == SYNTHESIZER_NAME]
-    assert len(new_hids) == 4, new_hids
+    assert new_hids == []
+    assert result.iterations == 2
     print("  -> OK")
 
 
@@ -233,6 +210,7 @@ def test_to_action_validates_priority_and_direction() -> None:
         "priority": "P9", "expected_impact_metric": "m",
         "expected_direction": "?", "confidence": "1.5",
         "evidence_handles": ["h_0001"],
+        "code_map_target": "/LazyRAG/algorithm/chat/pipelines/naive.py",
     }
     a = _to_action(raw, session)
     assert isinstance(a, VerifiedAction)
@@ -259,7 +237,7 @@ def main() -> int:
     return _run([
         test_synthesizer_single_pass_when_no_gaps,
         test_synthesizer_bounded_refine_when_gaps_present,
-        test_synthesizer_caps_gap_hypotheses_to_4,
+        test_synthesizer_oversize_gap_hypotheses_triggers_single_refine,
         test_synthesizer_handles_parse_failure,
         test_to_action_validates_priority_and_direction,
         test_annotate_with_code_map_demotes_when_target_missing,

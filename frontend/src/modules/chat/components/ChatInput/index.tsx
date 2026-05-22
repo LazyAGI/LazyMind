@@ -5,10 +5,13 @@ import {
   useEffect,
   useCallback,
   useImperativeHandle,
+  useId,
   useMemo,
+  type ReactNode,
 } from "react";
 import { RcFile } from "antd/es/upload";
 import { Button, Input, message } from "antd";
+import { SettingOutlined } from "@ant-design/icons";
 import { debounce } from "lodash";
 import AttachmentIcon from "../../assets/icons/attachment_icon.svg?react";
 import SendIcon from "../../assets/icons/send_icon.svg?react";
@@ -127,6 +130,13 @@ interface ChatInputProps {
   knowledgeRefreshKey?: number | string;
   sessionId?: string;
   isStreaming?: boolean;
+  embeddingReady?: boolean | null;
+  multimodalEmbeddingReady?: boolean | null;
+  rerankReady?: boolean | null;
+  disabled?: boolean;
+  disabledReason?: string;
+  disabledDescription?: string;
+  disabledAction?: ReactNode;
 }
 
 export interface ChatFileList {
@@ -145,17 +155,20 @@ export interface ChatInputImperativeProps {
 
 interface SendIconProps {
   disabled: boolean;
+  label: string;
   onClick: () => void;
 }
-const SendButton: React.FC<SendIconProps> = ({ disabled, onClick }) => {
+const SendButton: React.FC<SendIconProps> = ({ disabled, label, onClick }) => {
   return (
-    <div
+    <button
+      type="button"
       className={`send-button ${disabled ? "disabled" : ""}`}
       onClick={disabled ? undefined : onClick}
-      aria-disabled={disabled}
+      disabled={disabled}
+      aria-label={label}
     >
       <SendIcon />
-    </div>
+    </button>
   );
 };
 
@@ -181,6 +194,13 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       knowledgeRefreshKey,
       sessionId,
       isStreaming = false,
+      embeddingReady,
+      multimodalEmbeddingReady,
+      rerankReady,
+      disabled = false,
+      disabledReason,
+      disabledDescription,
+      disabledAction,
     } = props;
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
     const promptRef = useRef<PromptImperativeProps>(null);
@@ -192,6 +212,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const { setNewMessage } = useChatNewMessageStore();
     const { t } = useTranslation();
     const [text, setText] = useState("");
+    const disabledNoticeId = useId();
     const previousSessionIdRef = useRef<string | undefined>(undefined);
     const hasSentMessageRef = useRef(false);
 
@@ -227,10 +248,16 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         },
         element: innerRef.current,
         uploadFiles: (files: File[]) => {
+          if (disabled) {
+            if (disabledReason) {
+              message.warning(disabledReason);
+            }
+            return;
+          }
           fileListRef.current?.uploadFiles(files);
         },
       }),
-      [clearPendingMessage, clearMultiData],
+      [clearPendingMessage, clearMultiData, disabled, disabledReason],
     );
 
     useEffect(() => {
@@ -372,9 +399,16 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         preprocessUpload(newFiles, currentFiles, hasKB, t),
       [hasKB, t],
     );
-    const isSendDisabled = !value?.trim() || isUploading || isStreaming;
+    const isSendDisabled =
+      disabled || !value?.trim() || isUploading || isStreaming;
 
     const handleSend = () => {
+      if (disabled) {
+        if (disabledReason) {
+          message.warning(disabledReason);
+        }
+        return;
+      }
       if (isSendDisabled) {
         return;
       }
@@ -417,6 +451,13 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const handlePaste = useCallback(
       (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
         const clipboardData = e.clipboardData;
+        if (disabled) {
+          e.preventDefault();
+          if (disabledReason) {
+            message.warning(disabledReason);
+          }
+          return;
+        }
         if (!clipboardData) {
           return;
         }
@@ -476,11 +517,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           }
         }
       },
-      [fileList.length],
+      [disabled, disabledReason, fileList.length, t],
     );
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key !== "Enter" || e.shiftKey || isUploading) {
+      if (e.key !== "Enter" || e.shiftKey || isUploading || disabled) {
         return;
       }
 
@@ -500,7 +541,37 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     };
 
     return (
-      <div className="input-wrapper" ref={innerRef}>
+      <div
+        className={`input-wrapper${disabled ? " is-disabled" : ""}`}
+        ref={innerRef}
+      >
+        {disabled && (disabledReason || disabledDescription) ? (
+          <div
+            className="chat-input-disabled-notice"
+            id={disabledNoticeId}
+            role="status"
+            aria-live="polite"
+          >
+            <span className="chat-input-disabled-icon" aria-hidden="true">
+              <SettingOutlined />
+            </span>
+            <div className="chat-input-disabled-copy">
+              {disabledReason ? (
+                <span className="chat-input-disabled-title">
+                  {disabledReason}
+                </span>
+              ) : null}
+              {disabledDescription ? (
+                <span className="chat-input-disabled-description">
+                  {disabledDescription}
+                </span>
+              ) : null}
+            </div>
+            {disabledAction ? (
+              <div className="chat-input-disabled-action">{disabledAction}</div>
+            ) : null}
+          </div>
+        ) : null}
         <div className="input-container">
           <div className="input-top">
             <div className="input-field">
@@ -521,6 +592,12 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   isComposingRef.current = false;
                 }}
                 onKeyDown={handleKeyDown}
+                disabled={disabled}
+                aria-describedby={
+                  disabled && (disabledReason || disabledDescription)
+                    ? disabledNoticeId
+                    : undefined
+                }
               />
 
               <div className="input-bottom-actions">
@@ -543,6 +620,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   <ChatSelector
                     chatConfig={chatConfig ?? {}}
                     refreshKey={knowledgeRefreshKey}
+                    embeddingReady={embeddingReady}
+                    multimodalEmbeddingReady={multimodalEmbeddingReady}
+                    rerankReady={rerankReady}
                     onChange={onKnowledgeBaseChange}
                   />
                   {/* <ModelSelector sessionId={sessionId} disabled={isStreaming} /> */}
@@ -555,8 +635,17 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     </div>
                   )}
                   <div
-                    className={"input-bottom-actions-left-item"}
-                    onClick={() => promptRef.current?.onOpen()}
+                    className={`input-bottom-actions-left-item${disabled ? " is-disabled" : ""}`}
+                    aria-disabled={disabled}
+                    onClick={() => {
+                      if (disabled) {
+                        if (disabledReason) {
+                          message.warning(disabledReason);
+                        }
+                        return;
+                      }
+                      promptRef.current?.onOpen();
+                    }}
                   >
                     {t("chat.promptTemplate")}
                   </div>
@@ -572,12 +661,22 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       types={allowedUploadTypes}
                       max={MAX_UPLOAD_FILES}
                       onBeforeAddFiles={onBeforeAddFiles}
-                      icon={<Button icon={<AttachmentIcon />} type="text" />}
+                      disabled={disabled}
+                      disabledReason={disabledReason}
+                      icon={
+                        <Button
+                          aria-label={t("chat.upload")}
+                          icon={<AttachmentIcon />}
+                          type="text"
+                          disabled={disabled}
+                        />
+                      }
                     />
                   </div>
                   <div className="input-bottom-actions-right-item">
                     <SendButton
                       disabled={isSendDisabled}
+                      label={t("chat.send")}
                       onClick={handleSend}
                     />
                   </div>

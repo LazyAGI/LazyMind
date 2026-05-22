@@ -45,7 +45,7 @@ func uniqueTrimmedStrings(values []string) []string {
 
 func normalizeReconcilePolicy(reconcileSeconds int64, reconcileSchedule string, fallbackSeconds int64) (int64, string, error) {
 	schedule := strings.TrimSpace(reconcileSchedule)
-	if schedule == "" {
+	if schedule == "" || isManualCloudScheduleExpr(schedule) {
 		if reconcileSeconds <= 0 {
 			reconcileSeconds = fallbackSeconds
 		}
@@ -61,7 +61,12 @@ func normalizeReconcilePolicy(reconcileSeconds int64, reconcileSchedule string, 
 }
 
 func isManualCloudScheduleExpr(expr string) bool {
-	return strings.EqualFold(strings.TrimSpace(expr), "manual")
+	switch strings.ToLower(strings.TrimSpace(expr)) {
+	case "manual", "manual_only":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeStoredCloudScheduleExpr(expr string) string {
@@ -373,6 +378,21 @@ func applyVisibleDocumentFilter(db *gorm.DB, parseStatusColumn string) *gorm.DB 
 		"(UPPER(COALESCE("+parseStatusColumn+", '')) <> ? OR COALESCE("+currentVersionColumn+", '') <> '' OR COALESCE("+coreDocumentColumn+", '') <> '')",
 		"DELETED",
 	)
+}
+
+func applySourceDocumentListVisibilityFilter(db *gorm.DB, currentVersionColumn, coreDocumentColumn string) *gorm.DB {
+	currentVersionColumn = strings.TrimSpace(currentVersionColumn)
+	coreDocumentColumn = strings.TrimSpace(coreDocumentColumn)
+	if currentVersionColumn == "" || coreDocumentColumn == "" {
+		return db
+	}
+	return db.Where(
+		"(COALESCE(" + currentVersionColumn + ", '') <> '' OR COALESCE(" + coreDocumentColumn + ", '') <> '')",
+	)
+}
+
+func sourceDocumentHasKnowledgeBaseRelation(currentVersionID, coreDocumentID string) bool {
+	return strings.TrimSpace(currentVersionID) != "" || strings.TrimSpace(coreDocumentID) != ""
 }
 
 func applyPendingDeletedDocumentFilter(db *gorm.DB, parseStatusColumn string) *gorm.DB {

@@ -99,16 +99,32 @@ For the full service dependency graph, environment variables, and request auth c
 
 **Prerequisites:** Docker & Docker Compose
 
-**Full stack (Milvus + OpenSearch deployed automatically):**
+### Step 1 — Get a MinerU API key (for high-quality PDF parsing)
+
+Apply for a MinerU API key at [https://mineru.net](https://mineru.net/apiManage/token).
 
 ```bash
-make up
+export LAZYLLM_MINERU_API_KEY=your_mineru_key
+```
+
+> **Note:** Same prefix — `LAZYLLM_`, not `LAZYMIND_`.
+
+> **Important:** Because reader are initialized at startup, the API key for your ocr provider **must be set before launching the stack**. We are working on frontend-based key configuration for OCR — stay tuned for the next release.
+
+### Step 2 — Start the stack
+
+```bash
+make up-build LAZYMIND_OCR_SERVER_TYPE=mineru LAZYMIND_OCR_SERVICE_VARIANT=online
 ```
 
 After startup:
-- Frontend: http://localhost:8080
-- API docs: http://localhost:8080/docs.html
+- Frontend: http://localhost:8090
+- API docs: http://localhost:8090/docs.html
 - Default credentials: `admin` / `admin`
+
+### Step 3 — Configure models in the frontend
+
+Log in and go to the model settings page to configure your **LLM**, **VLM**, **enbed**, **cross_embed** and **Reranker** models using the API key from Step 1.
 
 For environment setup and detailed examples, see [`docs/quick_start.md`](docs/quick_start.md).
 
@@ -120,7 +136,7 @@ For environment setup and detailed examples, see [`docs/quick_start.md`](docs/qu
 |----------|---------|
 | Standard | `make up` |
 | MinerU OCR | `make up LAZYMIND_OCR_SERVER_TYPE=mineru` |
-| PaddleOCR (GPU) | `make up LAZYMIND_OCR_SERVER_TYPE=paddleocr` |
+| PaddleOCR | `make up LAZYMIND_OCR_SERVER_TYPE=paddleocr` |
 | External Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 | Enable store dashboards | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
 

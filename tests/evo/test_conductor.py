@@ -48,7 +48,7 @@ class _ScriptedInvoker:
     responses: list[str] = []
     idx: int = 0
 
-    def invoke(self, _: str) -> str:
+    def invoke(self, _: str, **kwargs) -> str:
         if _ScriptedInvoker.idx >= len(_ScriptedInvoker.responses):
             return json.dumps({"actions": [], "done": True})
         out = _ScriptedInvoker.responses[_ScriptedInvoker.idx]

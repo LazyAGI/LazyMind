@@ -967,6 +967,7 @@ export default function MemoryManagement() {
   const glossaryRouteItemId = glossaryDetailMatch?.params.itemId;
   const reviewRouteTab = parseChangeProposalTab(reviewRouteMatch?.params.tab);
   const reviewRouteItemId = reviewRouteMatch?.params.itemId;
+  const isReviewRouteRequested = Boolean(reviewRouteTab && reviewRouteItemId);
 
   useEffect(() => {
     const syncDeveloperActive = () => {
@@ -1573,12 +1574,21 @@ export default function MemoryManagement() {
 
   useEffect(() => {
     if (activeProposalId && !activeProposal) {
+      if (isReviewRouteRequested) {
+        return;
+      }
       setActiveProposalId(undefined);
       if (reviewRouteTab) {
         navigateToMemoryList(reviewRouteTab);
       }
     }
-  }, [activeProposal, activeProposalId, navigateToMemoryList, reviewRouteTab]);
+  }, [
+    activeProposal,
+    activeProposalId,
+    isReviewRouteRequested,
+    navigateToMemoryList,
+    reviewRouteTab,
+  ]);
 
   const keyword = query.trim().toLowerCase();
   const hasStructuredFilter = Boolean(keyword || category || tag);
@@ -4688,7 +4698,6 @@ export default function MemoryManagement() {
     label: item,
     value: item,
   }));
-  const isReviewRouteRequested = Boolean(reviewRouteTab && reviewRouteItemId);
   const isGlossaryRouteRequested = Boolean(glossaryRouteItemId);
   const isReviewMode = Boolean(activeProposal && (activeProposalDiff || isBackendSuggestionReviewMode));
   const glossaryDetailExists = useMemo(

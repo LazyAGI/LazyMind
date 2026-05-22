@@ -6,10 +6,9 @@ from typing import Any, Dict, List, Optional, Union
 import lazyllm
 from lazyllm import LOG
 import lazyllm.tracing.collect.configs  # noqa: F401
-from lazyllm.tracing import current_trace, enable_trace
+from lazyllm.tracing import enable_trace, get_trace_context, set_trace_context
 from lazyllm.tracing.collect import runtime as tracing_runtime
 from fastapi.responses import StreamingResponse
-from chat.app.core.trace_sink import ensure_local_trace_sink, local_trace_enabled
 from chat.config import (RAG_MODE, MULTIMODAL_MODE, MAX_CONCURRENCY,
                          LAZYMIND_LLM_PRIORITY, SENSITIVE_FILTER_RESPONSE_TEXT,
                          URL_MAP, resolve_dataset_url)
@@ -22,17 +21,19 @@ from chat.utils.markdown_images import rewrite_markdown_image_urls
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
 
 
-def _run_ppl_with_trace(ppl, ppl_args, *, session_id, dataset, mode_tag, trace_enabled):
+def _run_ppl_with_trace(ppl, ppl_args, *, session_id, dataset, mode_tag, trace_enabled, model_config):
+    lazyllm.globals._init_sid(sid=session_id)
+    lazyllm.locals._init_sid(sid=session_id)
+    inject_model_config(model_config)
+    _set_request_trace(False, session_id=session_id, dataset=dataset, mode_tag=mode_tag)
     if not trace_enabled:
-        return ppl(*ppl_args), None, None
+        return ppl(*ppl_args), None
 
     captured: Dict[str, Any] = {}
-    sink = ensure_local_trace_sink() if local_trace_enabled() else None
 
     def run_chat_pipeline(*args, **kwargs):
         out = ppl(*args, **kwargs)
-        trace = current_trace()
-        captured['trace_id'] = trace.trace_id if trace else None
+        captured['trace_id'] = get_trace_context().trace_id
         return out
 
     result = enable_trace(
@@ -45,19 +46,23 @@ def _run_ppl_with_trace(ppl, ppl_args, *, session_id, dataset, mode_tag, trace_e
     trace_id = captured.get('trace_id')
     if not trace_id:
         raise RuntimeError('LazyLLM trace did not expose a trace_id')
-    local_trace = sink.get_trace(trace_id) if sink is not None else None
-    if sink is not None and local_trace is None:
-        raise RuntimeError(f'local LazyLLM trace sink did not capture trace {trace_id}')
-    return result, trace_id, local_trace
+    return result, trace_id
+
+
+def _set_request_trace(enabled: bool, *, session_id: str, dataset: str, mode_tag: str) -> None:
+    set_trace_context({
+        'enabled': bool(enabled),
+        'sampled': True,
+        'session_id': session_id,
+        'request_tags': [f'dataset:{dataset}', f'mode:{mode_tag}'],
+        'module_trace': {'default': True},
+    })
 
 
 def _flush_trace_exporter() -> None:
-    provider = getattr(tracing_runtime._runtime, '_provider', None)
-    if provider is None:
-        return
     try:
-        from config import config as _cfg
-        provider.force_flush(timeout_millis=_cfg['langfuse_force_flush_timeout_ms'])
+        if provider := getattr(tracing_runtime._runtime, '_provider', None):
+            provider.force_flush()
     except Exception as exc:
         LOG.warning(f'[ChatServer] [TRACE_FLUSH_FAILED] {exc}')
 
@@ -146,13 +151,10 @@ def log_chat_request(query: str, session_id: str, filters: Optional[Dict[str, An
     )
 
 
-def _attach_trace_info(data: Any, trace_id: Optional[str], local_trace: Optional[dict]) -> Any:
+def _attach_trace_info(data: Any, trace_id: Optional[str]) -> Any:
     if trace_id is None:
         return data
-    out = {**data, 'trace_id': trace_id} if isinstance(data, dict) else {'data': data, 'trace_id': trace_id}
-    if local_trace is not None:
-        out['trace'] = local_trace
-    return out
+    return {**data, 'trace_id': trace_id} if isinstance(data, dict) else {'data': data, 'trace_id': trace_id}
 
 
 def _build_ppl_call(reasoning: bool, dataset: str, query_params: Dict[str, Any],
@@ -229,14 +231,14 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
             async with rag_sem:
                 _init_session()
                 ppl_call = _build_ppl_call(bool(reasoning), dataset, query_params, stream=False)
-                result, trace_id, local_trace = await asyncio.to_thread(
+                result, trace_id = await asyncio.to_thread(
                     _run_ppl_with_trace, ppl_call[0], ppl_call[1:],
                     session_id=session_id, dataset=dataset,
                     mode_tag='sync_reasoning' if reasoning else 'sync',
-                    trace_enabled=trace,
+                    trace_enabled=trace, model_config=model_config,
                 )
                 cost = round(time.time() - start_time, 3)
-                data = _attach_trace_info(result, trace_id, local_trace)
+                data = _attach_trace_info(result, trace_id)
                 return _resp(200, 'success', data, cost)
         except Exception as exc:
             LOG.exception(exc)
@@ -262,19 +264,21 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
         async def event_stream(ppl, *args) -> Any:
             nonlocal first_frame_logged
+            trace_id = None
             try:
                 async with rag_sem:
                     _init_session()
-                    async_result, trace_id, local_trace = await asyncio.to_thread(
-                        _run_ppl_with_trace, ppl, args,
-                        session_id=session_id, dataset=dataset,
+                    _set_request_trace(
+                        bool(trace),
+                        session_id=session_id,
+                        dataset=dataset,
                         mode_tag='stream_reasoning' if reasoning else 'stream',
-                        trace_enabled=trace,
                     )
-                    if trace_id is not None:
-                        yield _sse_line(_resp(200, 'success',
-                                              _attach_trace_info({}, trace_id, local_trace), 0.0))
+                    async_result = ppl(*args)
+
                     async for chunk in async_result:
+                        if trace and trace_id is None:
+                            trace_id = get_trace_context().trace_id
                         now = time.time()
                         if not first_frame_logged:
                             first_cost = round(now - start_time, 3)
@@ -334,6 +338,11 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
             cost = round(time.time() - start_time, 3)
             final_resp['cost'] = cost
+            if trace and trace_id is None:
+                trace_id = get_trace_context().trace_id
+            if trace_id:
+                final_resp['data'] = _attach_trace_info(final_resp['data'], trace_id)
+                _flush_trace_exporter()
             yield _sse_line(final_resp)
 
             log_chat_request(query, session_id, filters, other_files, databases, image_files,

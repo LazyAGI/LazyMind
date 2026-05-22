@@ -1,11 +1,13 @@
 {
   "code_map": {
-    "/LazyMind/algorithm/chat/pipelines/naive.py": "Naive RAG 入口：rewriter → search → generate；可改：是否启用多轮 rewriter、ifs 分支条件、bind 字段；retriever_configs 默认从 load_config 读",
-    "/LazyMind/algorithm/chat/pipelines/builders/get_ppl_search.py": "Search 子管道：parallel(KB retrievers) → RRFFusion(top_k=50) → Reranker(model='ModuleReranker', topk=20) → AdaptiveK(k_max=10, bias=2, gap_tau=0.2, max_tokens=2048) → ContextExpansion(token_budget=1500, score_decay=0.97, max_seeds=1)。所有数值都是关键可调参数",
-    "/LazyMind/algorithm/chat/pipelines/builders/get_ppl_generate.py": "Generate 子管道：AggregateComponent → RAGContextFormatter → answer LLM(Automodel('llm') + RAG_ANSWER_SYSTEM) → CustomOutputParser；可改：聚合策略、formatter 模板、answer 角色",
-    "/LazyMind/algorithm/chat/components/generate/prompt_formatter.py": "RAGContextFormatter 真实实现：把召回 nodes 渲染为 LLM context；可改：上下文排序、token budget、字段裁剪和模板格式",
-    "/LazyMind/algorithm/chat/pipelines/builders/get_retriever.py": "Retriever 构造：基于 retriever_configs 创建多路 KB Retriever，加上 TempDocRetriever(name='block', topk=DEFAULT_TMP_BLOCK_TOPK)；可改：retriever_configs 列表、tmp_block_topk、temp_doc_embed_key",
-    "/LazyMind/algorithm/common/runtime_models.yaml": "运行时模型配置：llm/reranker/embeddings 的 source/model/api_key；embed_1 的 index_type=IVF_FLAT/metric_type=COSINE/nlist=128 影响召回；reranker 默认 source=qwen, model=gte-rerank"
+    "/LazyMind/algorithm/chat/pipelines/agentic.py": "Agentic Chat 主入口：请求参数归一化、历史恢复、ReactAgent 构造、流式输出和后台 review 调度；可改：工具/技能传入、keep_full_turns、max_retries、runtime_prompt、stream 事件与最终结果格式。",
+    "/LazyMind/algorithm/chat/components/agentic/config.py": "Agentic 运行时配置：DEFAULT_TOOLS、请求上下文同步、kb_id/temp_files 过滤、系统提示拼装、默认 KB/检索/搜索配置；可改：工具选择策略、KB 优先级、提示片段启用条件、默认 runtime params。",
+    "/LazyMind/algorithm/chat/components/agentic/history.py": "Agentic 历史与引用恢复：解析历史中的 think/tool_call/tool_result，恢复 KB citation 状态，格式化非流式结果；可改：历史裁剪、工具结果保留、citation 去重和 source 输出。",
+    "/LazyMind/algorithm/chat/prompts/agentic.py": "Agentic 系统提示与工具使用规则：知识库优先、引用格式、图片引用、工具调用说明、memory/skill/vocab 指南；可改：工具调用策略、回答约束、引用和检索优先级。",
+    "/LazyMind/algorithm/chat/tools/kb.py": "Agentic KB 工具实现：kb_search、kb_get_parent_node、kb_get_window_nodes、kb_keyword_search、citation 注册、kb_id/algo_id 解析、OpenSearch 查询；可改：工具参数默认值、过滤条件、窗口扩展、关键词搜索、结果序列化和引用。",
+    "/LazyMind/algorithm/chat/pipelines/builders/get_ppl_search.py": "kb_search 复用的检索子管道：临时文件/知识库分支、RRF、可选 reranker、AdaptiveK、ContextExpansion、图片分支；可改：topk/k_max、reranker 判定、融合、截断和扩展参数。",
+    "/LazyMind/algorithm/chat/pipelines/builders/get_retriever.py": "检索器构造：runtime config 中的 text/image embed keys、line/block 多路 retriever、TempDocRetriever、Document 连接；可改：retriever_configs 默认路由、group/target/topk、image 检索、临时文件检索。",
+    "/LazyMind/algorithm/chat/utils/load_config.py": "动态模型配置读取和角色注入：dynamic/online/inner 配置、embed/reranker/llm 角色识别、api_key 注入、retrieval settings；可改：角色解析、动态配置兼容和 retriever config 读取。"
   },
   "read_scope": {
     "project_roots": ["/LazyMind"],
@@ -17,87 +19,72 @@
     ]
   },
   "subject_index": {
-    "subject_entry": "/LazyMind/algorithm/chat/pipelines/naive.py",
+    "subject_entry": "/LazyMind/algorithm/chat/pipelines/agentic.py",
     "step_to_source": {
-      "MultiturnQueryRewriter": {
-        "file": "pipelines/naive.py", "line": 18,
-        "symbol": "chat.components.process.multiturn_query_rewriter.MultiturnQueryRewriter",
-        "init_args": {"llm_role": "llm"}
+      "AgenticEntry": {
+        "file": "pipelines/agentic.py", "line": 488,
+        "symbol": "chat.pipelines.agentic.agentic_rag",
+        "init_args": {"normalizes": ["global_params", "history", "stream"], "sets": "lazyllm.globals['agentic_config']"}
       },
-      "Retriever_KB": {
-        "file": "pipelines/builders/get_retriever.py", "line": 29,
-        "symbol": "lazyllm.Retriever",
-        "init_args": {"source": "retriever_configs from chat.utils.load_config.get_retrieval_settings"}
+      "AgenticForward": {
+        "file": "pipelines/agentic.py", "line": 206,
+        "symbol": "chat.pipelines.agentic.agentic_forward",
+        "init_args": {"llm_role": "llm", "agent": "lazyllm.tools.agent.ReactAgent", "count": 20}
       },
-      "Retriever_Tmp_Block": {
-        "file": "pipelines/builders/get_retriever.py", "line": 33,
-        "symbol": "lazyllm.tools.rag.TempDocRetriever.add_subretriever",
-        "init_args": {"name": "block", "topk": "DEFAULT_TMP_BLOCK_TOPK"}
+      "ToolSelection": {
+        "file": "components/agentic/config.py", "line": 20,
+        "symbol": "DEFAULT_TOOLS / _filter_tools_for_request",
+        "init_args": {"kb_tools": ["kb_search", "kb_get_parent_node", "kb_get_window_nodes", "kb_keyword_search"]}
       },
-      "RRFFusion": {
-        "file": "pipelines/builders/get_ppl_search.py", "line": 34,
-        "symbol": "lazyllm.tools.rag.rank_fusion.reciprocal_rank_fusion.RRFFusion",
-        "init_args": {"top_k": 50}
+      "RuntimePrompt": {
+        "file": "components/agentic/config.py", "line": 214,
+        "symbol": "_build_runtime_system_prompt",
+        "init_args": {"adds": ["SEARCH_GUIDANCE", "TOOL_CALL_STATUS_GUIDANCE", "IMAGE_REFERENCE_MARKDOWN_GUIDANCE"]}
       },
-      "ModuleReranker": {
-        "file": "pipelines/builders/get_ppl_search.py", "line": 35,
-        "symbol": "lazyllm.tools.rag.Reranker",
-        "init_args": {"name": "ModuleReranker", "model_role": "reranker", "topk": 20}
+      "HistoryNormalize": {
+        "file": "components/agentic/history.py", "line": 200,
+        "symbol": "_parse_history_assistant_content / _normalize_history_for_agent",
+        "init_args": {"parses": ["think", "tool_call", "tool_result"], "restores": "kb citations"}
       },
-      "AdaptiveKComponent": {
-        "file": "pipelines/builders/get_ppl_search.py", "line": 38,
-        "symbol": "chat.components.process.AdaptiveKComponent",
-        "init_args": {"bias": 2, "k_max": 10, "gap_tau": 0.2, "max_tokens": 2048}
+      "KBSearchTool": {
+        "file": "tools/kb.py", "line": 508,
+        "symbol": "kb_search",
+        "init_args": {"defaults": {"topk": 20, "k_max": 10}, "uses": "get_ppl_search"}
       },
-      "ContextExpansionComponent": {
-        "file": "pipelines/builders/get_ppl_search.py", "line": 41,
-        "symbol": "chat.components.process.ContextExpansionComponent",
-        "init_args": {"token_budget": 1500, "score_decay": 0.97, "max_seeds": 1}
+      "KBContextTools": {
+        "file": "tools/kb.py", "line": 590,
+        "symbol": "kb_get_parent_node / kb_get_window_nodes / kb_keyword_search",
+        "init_args": {"uses": ["lazyllm.Document.get_nodes", "OpenSearch col_block/col_line"]}
       },
-      "AggregateComponent": {
-        "file": "pipelines/builders/get_ppl_generate.py", "line": 20,
-        "symbol": "chat.components.generate.AggregateComponent",
-        "init_args": {}
+      "KBSearchPipeline": {
+        "file": "pipelines/builders/get_ppl_search.py", "line": 96,
+        "symbol": "get_ppl_search",
+        "init_args": {"topk": 20, "k_max": 10, "stages": ["RRF", "reranker", "AdaptiveK", "ContextExpansion"]}
       },
-      "RAGContextFormatter": {
-        "file": "components/generate/prompt_formatter.py", "line": 65,
-        "symbol": "chat.components.generate.RAGContextFormatter",
-        "init_args": {}
+      "RetrieverFactory": {
+        "file": "pipelines/builders/get_retriever.py", "line": 44,
+        "symbol": "get_retriever",
+        "init_args": {"groups": ["line->block", "block"], "tmp_group": "block", "image_group": "image"}
       },
-      "AnswerLLM": {
-        "file": "pipelines/builders/get_ppl_generate.py", "line": 22,
-        "symbol": "lazyllm.AutoModel via Automodel('llm')",
-        "init_args": {"role": "llm", "system_prompt": "RAG_ANSWER_SYSTEM", "wrap_simple_llm": true}
-      },
-      "CustomOutputParser": {
-        "file": "pipelines/builders/get_ppl_generate.py", "line": 24,
-        "symbol": "chat.components.generate.CustomOutputParser",
-        "init_args": {"llm_type_think": "LLM_TYPE_THINK"}
-      },
-      "Embed_embed_1": {
-        "file": "../common/runtime_models.yaml", "line": 31,
-        "symbol": "embeddings.embed_1",
-        "init_args": {"source": "qwen", "model": "text-embedding-v3", "index_type": "IVF_FLAT", "metric_type": "COSINE", "nlist": 128}
-      },
-      "Reranker_Model": {
-        "file": "../common/runtime_models.yaml", "line": 24,
-        "symbol": "reranker",
-        "init_args": {"source": "qwen", "type": "rerank", "model": "gte-rerank"}
+      "DynamicModelConfig": {
+        "file": "utils/load_config.py", "line": 34,
+        "symbol": "get_config_path / inject_model_config / get_text_embed_keys",
+        "init_args": {"roles": ["llm", "embed_main", "reranker", "vlm"], "mode": "dynamic"}
       }
     },
     "symbol_hints": {
-      "lazyllm.Retriever": "group_name 决定从哪个 chunk group 召回；topk 决定召回数；similarity 默认 cosine",
-      "lazyllm.tools.rag.TempDocRetriever": "针对当次会话临时上传文件的检索器；add_subretriever 决定 group/topk",
-      "lazyllm.tools.rag.Reranker": "name='ModuleReranker' 时由 model 参数决定具体 reranker（如 gte-rerank）；topk 控制 rerank 后保留",
-      "lazyllm.tools.rag.rank_fusion.reciprocal_rank_fusion.RRFFusion": "Reciprocal Rank Fusion 合并多路召回；top_k 决定融合后保留",
-      "chat.components.process.AdaptiveKComponent": "动态决定 top-k：bias/k_max/gap_tau/max_tokens 控制截断与停止条件",
-      "chat.components.process.ContextExpansionComponent": "对召回 chunk 做上下文扩展；token_budget/score_decay/max_seeds 控制扩展量",
-      "chat.components.process.multiturn_query_rewriter.MultiturnQueryRewriter": "多轮历史改写当前 query；优先级、history、has_appendix 影响触发",
-      "chat.components.generate.AggregateComponent": "聚合多路召回 nodes；可改聚合策略",
-      "chat.components.generate.RAGContextFormatter": "把召回 nodes 渲染为给 LLM 的 context；模板与字段裁剪是关键",
-      "chat.components.generate.CustomOutputParser": "解析 LLM 输出（含可选 think 块）",
-      "lazyllm.AutoModel": "根据 runtime_models.yaml 的角色 (llm/reranker/embeddings) 路由 OnlineLLM/Rerank/Embed",
-      "embeddings.embed_1": "向量索引参数（IVF_FLAT, COSINE, nlist=128）影响召回质量"
+      "chat.pipelines.agentic.agentic_rag": "前端 agentic chat 的真实入口；它决定 runtime_params、history、stream，并把配置写入 agentic_config。",
+      "lazyllm.tools.agent.ReactAgent": "负责多轮工具调用；max_retries、prompt、tools、keep_full_turns 会影响是否检索、检索几轮以及最终回答。",
+      "DEFAULT_TOOLS": "决定 agent 默认可用工具；缺少 kb_* 或过滤条件错误会导致知识库不可访问或不能扩展上下文。",
+      "_filter_tools_for_request": "无 kb_id 时会过滤 kb_* 工具；temp_files 只保留 kb_search，是排查前端配置和知识库访问的关键。",
+      "SEARCH_GUIDANCE": "约束 agent 必须先用 kb_*；提示过弱会导致跳过知识库或过早使用 web/arxiv。",
+      "kb_search": "agentic 的主检索工具；topk/k_max/retriever_configs/files/filters 决定召回规模、临时文件分支和 KB 分支。",
+      "kb_get_window_nodes": "用于按 docid 和 node number 扩展上下文；docid/kb_id/algo_id/group 解析错误会导致上下文召回失败。",
+      "kb_keyword_search": "OpenSearch 关键词补召回；适合修复语义检索漏召回或精确术语问题。",
+      "get_ppl_search": "kb_search 内部共享检索管道；RRF/reranker/AdaptiveK/ContextExpansion 影响返回给 agent 的候选内容，不是最终回答生成器。",
+      "get_retriever": "构造 line/block/image/tmp retriever；group_name、target、embed_keys、topk 和 kb_id 过滤决定文档召回。",
+      "dynamic_model_configs": "dynamic 模式下模型角色和 api_key 注入来源；缺失 reranker/embed/llm 角色会影响 agentic 检索和回答质量。",
+      "_normalize_history_for_agent": "控制历史中的 tool_call/tool_result 是否回灌；错误会让 agent 丢失上一轮工具证据或 citation。"
     }
   }
 }

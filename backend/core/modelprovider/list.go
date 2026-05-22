@@ -54,7 +54,7 @@ func ListUserProviders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var rows []orm.UserModelProvider
-	if err := q.Order("name ASC").Find(&rows).Error; err != nil {
+	if err := q.Order("name DESC").Find(&rows).Error; err != nil {
 		common.ReplyErr(w, "list model providers failed", http.StatusInternalServerError)
 		return
 	}
@@ -86,7 +86,6 @@ func ListUserProvidersWithGroups(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
 		return
 	}
-
 	var providerIDs []string
 	if err := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroup{}).
 		Where("create_user_id = ? AND deleted_at IS NULL", userID).

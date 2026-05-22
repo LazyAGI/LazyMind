@@ -204,6 +204,7 @@ var errorCatalog = map[string]*AppError{
 	"request name and frontmatter name must match":                    NewAppError(http.StatusBadRequest, 2000884, "request name and frontmatter name must match"),
 	"selections required":                                             NewAppError(http.StatusBadRequest, 2000885, "selections required"),
 	"session_id required":                                             NewAppError(http.StatusBadRequest, 2000886, "session_id required"),
+	"session_id and id or category/skill_name required":               NewAppError(http.StatusBadRequest, 2000904, "session_id and id or category/skill_name required"),
 	"session_id/category/skill_name required":                         NewAppError(http.StatusBadRequest, 2000887, "session_id/category/skill_name required"),
 	"session_id/category/skill_name/content required":                 NewAppError(http.StatusBadRequest, 2000888, "session_id/category/skill_name/content required"),
 	"set_history_id required":                                         NewAppError(http.StatusBadRequest, 2000889, "set_history_id required"),
@@ -372,6 +373,7 @@ var errorCatalog = map[string]*AppError{
 	"当前已有任务正在运行，请先等待完成、暂停或取消后再继续该历史任务。":            NewAppError(http.StatusConflict, 2001118, "当前已有任务正在运行，请先等待完成、暂停或取消后再继续该历史任务。"),
 	"thread already has an active messages stream": NewAppError(http.StatusConflict, 2001119, "thread already has an active messages stream"),
 	"upstream messages request failed":             NewAppError(http.StatusConflict, 2001120, "upstream messages request failed"),
+	"auto_evo task is running":                     NewAppError(http.StatusConflict, 2001121, "auto_evo task is running"),
 
 	// Additional upstream errors discovered from handlers.
 	"auto_evo generated empty content":                NewAppError(http.StatusBadGateway, 2001201, "auto_evo generated empty content"),

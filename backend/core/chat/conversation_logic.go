@@ -258,6 +258,29 @@ func checkInput(raw map[string]any) bool {
 	return false
 }
 
+func buildChatHistoryExt(raw map[string]any, query string) json.RawMessage {
+	input := chatHistoryInput(raw, query)
+	if input == nil {
+		return nil
+	}
+	b, err := json.Marshal(map[string]any{"input": input})
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+func chatHistoryInput(raw map[string]any, query string) any {
+	if in, ok := raw["input"].([]any); ok && len(in) > 0 {
+		return in
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil
+	}
+	return []any{map[string]any{"input_type": "text", "text": query}}
+}
+
 func checkSearchConfig(raw map[string]any) bool {
 	conv, _ := raw["conversation"].(map[string]any)
 	if conv == nil {
@@ -467,6 +490,7 @@ func handleNonStreamChat(
 	reqBody map[string]any,
 	convID, query string,
 	target chatPersistTarget,
+	historyExt json.RawMessage,
 ) {
 	pyBody, _ := json.Marshal(reqBody)
 	upstreamURL := baseURL + "/api/chat"
@@ -530,7 +554,7 @@ func handleNonStreamChat(
 		FeedBack:        0,
 		Reason:          "",
 		ExpectedAnswer:  "",
-		Ext:             nil,
+		Ext:             historyExt,
 		TimeMixin:       orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
 	if target.IsRegeneration && target.Existing != nil {
@@ -544,7 +568,7 @@ func handleNonStreamChat(
 			"feed_back":        0,
 			"reason":           "",
 			"expected_answer":  "",
-			"ext":              nil,
+			"ext":              historyExt,
 			"update_time":      now,
 		}).Error; err != nil {
 			common.ReplyErr(w, "failed to update history", http.StatusInternalServerError)
@@ -583,6 +607,7 @@ func handleStreamChat(
 	convID, query string,
 	target chatPersistTarget,
 	dualReply bool,
+	historyExt json.RawMessage,
 ) {
 	reqCtx := r.Context()
 	flusher, ok := w.(http.Flusher)
@@ -609,9 +634,10 @@ func handleStreamChat(
 		if target.IsRegeneration {
 			_ = clearChatData(chatCtx, rdb, convID, historyID)
 		}
-		_ = setChatInput(chatCtx, rdb, convID, historyID, query, target.Seq)
+		_ = setChatInput(chatCtx, rdb, convID, historyID, query, target.Seq, historyExt)
 		_ = setChatStatus(chatCtx, rdb, convID, historyID, "generating", "")
 		if dualReply {
+			_ = setChatInput(chatCtx, rdb, convID, secondaryHistoryID, query, target.Seq, historyExt)
 			_ = setChatStatus(chatCtx, rdb, convID, secondaryHistoryID, "generating", "")
 			_ = setMultiAnswerInfo(chatCtx, rdb, convID, historyID, secondaryHistoryID, target.Seq)
 		}
@@ -622,10 +648,10 @@ func handleStreamChat(
 	}
 
 	if !dualReply {
-		streamSingleAnswer(chatCtx, reqCtx, w, flusher, db, rdb, baseURL, reqBody, convID, query, historyID, target)
+		streamSingleAnswer(chatCtx, reqCtx, w, flusher, db, rdb, baseURL, reqBody, convID, query, historyID, target, historyExt)
 		return
 	}
-	streamDualAnswer(chatCtx, reqCtx, w, flusher, db, rdb, baseURL, reqBody, convID, query, historyID, secondaryHistoryID, target)
+	streamDualAnswer(chatCtx, reqCtx, w, flusher, db, rdb, baseURL, reqBody, convID, query, historyID, secondaryHistoryID, target, historyExt)
 }
 
 func streamSingleAnswer(
@@ -638,6 +664,7 @@ func streamSingleAnswer(
 	reqBody map[string]any,
 	convID, query, historyID string,
 	target chatPersistTarget,
+	historyExt json.RawMessage,
 ) {
 	seq := target.Seq
 	ch, err := StreamChatUpstream(chatCtx, baseURL, reqBody)
@@ -729,7 +756,7 @@ func streamSingleAnswer(
 			"feed_back":        0,
 			"reason":           "",
 			"expected_answer":  "",
-			"ext":              nil,
+			"ext":              historyExt,
 			"update_time":      now,
 		}).Error
 	} else {
@@ -741,7 +768,7 @@ func streamSingleAnswer(
 			RetrievalResult: retrievalResult,
 			Content:         query,
 			Result:          fullResult,
-			Ext:             nil,
+			Ext:             historyExt,
 			TimeMixin:       orm.TimeMixin{CreateTime: now, UpdateTime: now},
 		}).Error
 	}
@@ -782,6 +809,7 @@ func streamDualAnswer(
 	reqBody map[string]any,
 	convID, query, historyID, secondaryHistoryID string,
 	target chatPersistTarget,
+	historyExt json.RawMessage,
 ) {
 	seq := target.Seq
 	primaryCh, err1 := StreamChatUpstream(chatCtx, baseURL, reqBody)
@@ -961,12 +989,12 @@ dualPersist:
 	}
 	_ = db.Create(&orm.MultiAnswersChatHistory{
 		ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: primaryResult,
-		Ext:       nil,
+		Ext:       historyExt,
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}).Error
 	_ = db.Create(&orm.MultiAnswersChatHistory{
 		ID: secondaryHistoryID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: secondaryResult,
-		Ext:       nil,
+		Ext:       historyExt,
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}).Error
 	if rdb != nil {

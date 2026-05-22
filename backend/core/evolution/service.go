@@ -70,21 +70,7 @@ func ChildSkillRelativePath(category, parentSkillName, skillName, fileExt string
 }
 
 func SkillSuggestionResourceKey(row orm.SkillResource) string {
-	resourceKey := strings.TrimSpace(row.RelativePath)
-	if resourceKey != "" {
-		return filepath.ToSlash(resourceKey)
-	}
-	if strings.TrimSpace(row.NodeType) == SkillNodeTypeChild {
-		resourceKey = ChildSkillRelativePath(
-			strings.TrimSpace(row.Category),
-			firstNonEmpty(strings.TrimSpace(row.ParentSkillName), strings.TrimSpace(row.SkillName)),
-			strings.TrimSpace(row.SkillName),
-			firstNonEmpty(strings.TrimSpace(row.FileExt), "md"),
-		)
-	} else {
-		resourceKey = ParentSkillRelativePath(strings.TrimSpace(row.Category), firstNonEmpty(strings.TrimSpace(row.ParentSkillName), strings.TrimSpace(row.SkillName)))
-	}
-	return filepath.ToSlash(resourceKey)
+	return strings.TrimSpace(row.ID)
 }
 
 func SystemResourceKey(resourceType string) string {
@@ -267,7 +253,7 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 			SessionID:       sessionID,
 			UserID:          userID,
 			ResourceType:    ResourceTypeSkill,
-			ResourceKey:     state.RelativePath,
+			ResourceKey:     SkillSuggestionResourceKey(skill),
 			Category:        strings.TrimSpace(skill.Category),
 			ParentSkillName: parentName,
 			SkillName:       strings.TrimSpace(skill.SkillName),
@@ -345,6 +331,24 @@ func FindSnapshot(ctx context.Context, db *gorm.DB, sessionID, resourceType, res
 	return &row, nil
 }
 
+func FindSkillSnapshotByIdentity(ctx context.Context, db *gorm.DB, sessionID, userID, category, skillName string) (*orm.ResourceSessionSnapshot, error) {
+	var row orm.ResourceSessionSnapshot
+	if err := db.WithContext(ctx).
+		Where(
+			"session_id = ? AND user_id = ? AND resource_type = ? AND category = ? AND (skill_name = ? OR parent_skill_name = ?)",
+			strings.TrimSpace(sessionID),
+			strings.TrimSpace(userID),
+			ResourceTypeSkill,
+			strings.TrimSpace(category),
+			strings.TrimSpace(skillName),
+			strings.TrimSpace(skillName),
+		).
+		Take(&row).Error; err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
 func loadLegacySystemMemoryTemplate(ctx context.Context, tx *gorm.DB, userID string) (orm.SystemMemory, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -382,9 +386,9 @@ func loadLegacySystemUserPreferenceTemplate(ctx context.Context, tx *gorm.DB, us
 func LoadSkillStateByResourceKey(ctx context.Context, db *gorm.DB, userID, resourceKey string) (*SkillState, error) {
 	var skill orm.SkillResource
 	err := db.WithContext(ctx).
-		Where("owner_user_id = ? AND relative_path = ?",
+		Where("owner_user_id = ? AND id = ?",
 			strings.TrimSpace(userID),
-			filepath.ToSlash(strings.TrimSpace(resourceKey)),
+			strings.TrimSpace(resourceKey),
 		).
 		Take(&skill).Error
 	if err != nil {

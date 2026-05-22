@@ -192,11 +192,32 @@ class TestAutoModelDynamic:
 # ---------------------------------------------------------------------------
 
 class TestStreamCallHelperAstream:
-    def test_astream_yields_chunks(self):
+    @staticmethod
+    def _patch_memory_queue(monkeypatch):
+        import lazyllm
+
+        class MemoryQueue:
+            _items = []
+
+            def clear(self):
+                self._items.clear()
+
+            def enqueue(self, item):
+                self._items.append(item)
+
+            def dequeue(self):
+                if not self._items:
+                    return None
+                return [self._items.pop(0)]
+
+        monkeypatch.setattr(lazyllm, 'FileSystemQueue', MemoryQueue)
+
+    def test_astream_yields_chunks(self, monkeypatch):
         '''StreamCallHelper.astream should yield tokens from FileSystemQueue.'''
         import lazyllm
         from lazyllm.tools.common import StreamCallHelper
 
+        self._patch_memory_queue(monkeypatch)
         chunks_received = []
 
         def fake_impl(*args, **kwargs):
@@ -215,9 +236,11 @@ class TestStreamCallHelperAstream:
         assert len(chunks_received) >= 1
         assert any('hello' in c for c in chunks_received)
 
-    def test_astream_yields_result_when_queue_empty(self):
+    def test_astream_yields_result_when_queue_empty(self, monkeypatch):
         '''When queue is empty, astream should still yield the final result.'''
         from lazyllm.tools.common import StreamCallHelper
+
+        self._patch_memory_queue(monkeypatch)
 
         def fake_impl(*args, **kwargs):
             return 'final answer'

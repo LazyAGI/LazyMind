@@ -1,4 +1,4 @@
-import os
+import chat.utils.static_file_url as sfu_mod
 
 from chat.utils.static_file_url import (
     local_path_from_static_file_url,
@@ -8,13 +8,17 @@ from chat.utils.static_file_url import (
 )
 
 
+def _mock_upload_root(monkeypatch, upload_root):
+    monkeypatch.setattr(sfu_mod, '_upload_root', lambda: str(upload_root.resolve()))
+
+
 def test_static_file_url_from_full_path_signs_upload_relative_path(tmp_path, monkeypatch):
     upload_root = tmp_path / 'uploads'
     image = upload_root / 'normalized_images' / 'exp9' / 'frame.jpg'
     image.parent.mkdir(parents=True)
     image.write_bytes(b'jpg')
 
-    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(upload_root))
+    _mock_upload_root(monkeypatch, upload_root)
     monkeypatch.setenv('LAZYMIND_FILE_URL_SIGN_SECRET', 'test-secret')
 
     signed = static_file_url_from_full_path(str(image))
@@ -29,7 +33,7 @@ def test_static_file_url_from_any_strips_external_host_prefix(tmp_path, monkeypa
     image.parent.mkdir(parents=True)
     image.write_bytes(b'jpg')
 
-    monkeypatch.setenv('LAZYMIND_UPLOAD_ROOT', str(upload_root))
+    _mock_upload_root(monkeypatch, upload_root)
     monkeypatch.setenv('LAZYMIND_FILE_URL_SIGN_SECRET', 'test-secret')
 
     raw = (

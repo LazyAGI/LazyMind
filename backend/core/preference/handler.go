@@ -33,6 +33,8 @@ type upsertRequest struct {
 	AutoEvo *bool   `json:"auto_evo"`
 }
 
+const errAutoEvoTaskRunning = "auto_evo task is running"
+
 type draftPreviewResponse struct {
 	DraftStatus        string `json:"draft_status"`
 	DraftSourceVersion int64  `json:"draft_source_version"`
@@ -42,6 +44,14 @@ type draftPreviewResponse struct {
 }
 
 const maxManagedContentChars = 1500
+
+func payloadForLog(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
 
 func compactManagedContent(content string) string {
 	return strings.Join(strings.Fields(content), "")
@@ -156,6 +166,46 @@ func upsertManagedPreferenceContent(r *http.Request, db *gorm.DB, userID, userNa
 	return existing, nil
 }
 
+func enableManagedPreferenceAutoEvoWithDiscardedDraft(r *http.Request, db *gorm.DB, row *orm.SystemUserPreference, userID, userName string) (*orm.SystemUserPreference, error) {
+	now := time.Now()
+	newExt := evolution.WithDraftSuggestionIDs(row.Ext, nil)
+	update := map[string]any{
+		"auto_evo":              true,
+		"auto_evo_generation":   gorm.Expr("auto_evo_generation + 1"),
+		"auto_evo_apply_status": evolution.AutoEvoApplyStatusIdle,
+		"auto_evo_error":        "",
+		"auto_evo_finished_at":  nil,
+		"draft_content":         "",
+		"draft_source_version":  0,
+		"draft_status":          "",
+		"draft_updated_at":      nil,
+		"updated_by":            userID,
+		"updated_by_name":       userName,
+		"updated_at":            now,
+		"ext":                   newExt,
+	}
+	if err := db.WithContext(r.Context()).
+		Model(&orm.SystemUserPreference{}).
+		Where("id = ?", row.ID).
+		Updates(update).Error; err != nil {
+		return nil, err
+	}
+	row.AutoEvo = true
+	row.AutoEvoGeneration++
+	row.AutoEvoApplyStatus = evolution.AutoEvoApplyStatusIdle
+	row.AutoEvoError = ""
+	row.AutoEvoFinishedAt = nil
+	row.DraftContent = ""
+	row.DraftSourceVersion = 0
+	row.DraftStatus = ""
+	row.DraftUpdatedAt = nil
+	row.UpdatedBy = userID
+	row.UpdatedByName = userName
+	row.UpdatedAt = now
+	row.Ext = newExt
+	return row, nil
+}
+
 func Upsert(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	if db == nil {
@@ -189,15 +239,29 @@ func Upsert(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query user_preference failed", http.StatusInternalServerError)
 		return
 	}
-	if existing != nil && strings.TrimSpace(existing.DraftStatus) == "pending_confirm" {
+	pendingDraft := existing != nil && strings.TrimSpace(existing.DraftStatus) == "pending_confirm"
+	if existing != nil && req.AutoEvo != nil && evolution.HasAutoEvoWorker(evolution.AutoEvoWorkerKey(evolution.ResourceTypeUserPreference, existing.ID)) {
+		common.ReplyErr(w, errAutoEvoTaskRunning, http.StatusConflict)
+		return
+	}
+	if pendingDraft && (req.AutoEvo == nil || !*req.AutoEvo) {
 		common.ReplyErr(w, "user_preference draft already pending_confirm", http.StatusConflict)
 		return
 	}
 
-	row, err := upsertManagedPreferenceContent(r, db, userID, userName, content, req.AutoEvo, false)
-	if err != nil {
-		common.ReplyErr(w, "update user_preference failed", http.StatusInternalServerError)
-		return
+	var row *orm.SystemUserPreference
+	if pendingDraft {
+		row, err = enableManagedPreferenceAutoEvoWithDiscardedDraft(r, db, existing, userID, userName)
+		if err != nil {
+			common.ReplyErr(w, "update user_preference failed", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		row, err = upsertManagedPreferenceContent(r, db, userID, userName, content, req.AutoEvo, false)
+		if err != nil {
+			common.ReplyErr(w, "update user_preference failed", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	if req.AutoEvo != nil && *req.AutoEvo {
@@ -395,6 +459,12 @@ func Generate(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query user_preference failed", http.StatusInternalServerError)
 		return
 	}
+	useDraft := len(req.SuggestionIDs) == 0 && req.UserInstruct != ""
+	content, err := preferenceGenerateBaseContent(*row, useDraft)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusNotFound)
+		return
+	}
 
 	var suggestions []orm.ResourceSuggestion
 	if len(req.SuggestionIDs) > 0 {
@@ -409,11 +479,18 @@ func Generate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	generated, err := algo.GenerateUserPreference(r.Context(), algo.MemoryGenerateRequest{
-		Content:      row.Content,
+	algoReq := algo.MemoryGenerateRequest{
+		Content:      content,
 		Suggestions:  toAlgoSuggestions(suggestions),
 		UserInstruct: req.UserInstruct,
-	})
+	}
+	appLog.Logger.Info().
+		Str("route", "/user-preference:generate").
+		Str("user_preference_id", row.ID).
+		Str("user_id", userID).
+		Str("payload", payloadForLog(algoReq)).
+		Msg("requesting external user preference generate")
+	generated, err := algo.GenerateUserPreference(r.Context(), algoReq)
 	if err != nil {
 		common.ReplyErr(w, "user_preference generate failed: "+err.Error(), http.StatusBadGateway)
 		return
@@ -421,6 +498,9 @@ func Generate(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	ids := suggestionIDs(suggestions)
+	if useDraft && len(ids) == 0 {
+		ids = evolution.DraftSuggestionIDs(row.Ext)
+	}
 	update := map[string]any{
 		"draft_content":        generated,
 		"draft_source_version": row.Version,
@@ -441,6 +521,16 @@ func Generate(w http.ResponseWriter, r *http.Request) {
 		"draft_content":        generated,
 		"suggestion_ids":       ids,
 	})
+}
+
+func preferenceGenerateBaseContent(row orm.SystemUserPreference, useDraft bool) (string, error) {
+	if !useDraft {
+		return row.Content, nil
+	}
+	if strings.TrimSpace(row.DraftStatus) != "pending_confirm" {
+		return "", errors.New("user_preference draft not found")
+	}
+	return row.DraftContent, nil
 }
 
 func Confirm(w http.ResponseWriter, r *http.Request) {

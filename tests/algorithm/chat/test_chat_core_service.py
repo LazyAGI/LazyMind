@@ -12,7 +12,10 @@ def _import_chat_service_module(monkeypatch, *, chat_server=None):
         warning=lambda *args, **kwargs: None,
         exception=lambda *args, **kwargs: None,
     )
-    fake_lazyllm.globals = SimpleNamespace(_init_sid=lambda sid: None)
+    fake_lazyllm.globals = SimpleNamespace(
+        _init_sid=lambda sid: None,
+        get=lambda key, default=None: None,
+    )
     fake_lazyllm.locals = SimpleNamespace(_init_sid=lambda sid: None)
 
     # Inject lazyllm.tracing submodule hierarchy so chat_service.py can import it
@@ -39,14 +42,25 @@ def _import_chat_service_module(monkeypatch, *, chat_server=None):
     fake_config.resolve_dataset_url = lambda dataset: f'http://kb-service/{dataset}'
 
     fake_helpers = ModuleType('chat.utils.helpers')
+    fake_helpers.tool_schema_to_string = lambda schema: '{}'
     fake_helpers.validate_and_resolve_files = lambda files: (['/tmp/a.txt'], ['/tmp/b.png'])
 
-    fake_load_config = ModuleType('chat.utils.load_config')
-    fake_load_config.inject_model_config = lambda *a, **kw: None
+    fake_schema = ModuleType('chat.utils.schema')
+    fake_schema.BaseMessage = type('BaseMessage', (), {})
+    fake_schema.SessionMemory = type('SessionMemory', (), {})
+    fake_schema.MiddleResults = type('MiddleResults', (), {})
+    fake_schema.ToolMemory = type('ToolMemory', (), {})
+    fake_schema.ToolCall = type('ToolCall', (), {})
+    fake_schema.PlanStep = type('PlanStep', (), {})
+    fake_schema.TaskContext = type('TaskContext', (), {})
 
-    fake_trace_sink = ModuleType('chat.app.core.trace_sink')
-    fake_trace_sink.ensure_local_trace_sink = lambda: None
-    fake_trace_sink.local_trace_enabled = lambda: False
+    fake_markdown_images = ModuleType('chat.utils.markdown_images')
+    fake_markdown_images.rewrite_markdown_image_urls = lambda markdown, **kw: markdown
+
+    fake_load_config = ModuleType('chat.utils.load_config')
+    fake_load_config.get_config_path = lambda: '/tmp/dummy_model_config.yaml'
+    fake_load_config.inject_model_config = lambda *a, **kw: None
+    fake_load_config.summarize_model_config_for_log = lambda model_config: 'roles=[]'
 
     if chat_server is None:
         chat_server = SimpleNamespace(
@@ -59,8 +73,6 @@ def _import_chat_service_module(monkeypatch, *, chat_server=None):
     fake_server = ModuleType('chat.app.core.chat_server')
     fake_server.chat_server = chat_server
 
-    # Build a fake lazyllm.configs so trace_sink's transitive import of
-    # `from config import config` doesn't blow up when lazyllm is the fake.
     fake_lazyllm_configs = ModuleType('lazyllm.configs')
     fake_lazyllm_configs.Config = type('Config', (), {
         '__init__': lambda self, *a, **kw: None,
@@ -71,7 +83,6 @@ def _import_chat_service_module(monkeypatch, *, chat_server=None):
 
     # Pop stale cached modules BEFORE setting up fakes
     sys.modules.pop('chat.app.core.chat_service', None)
-    sys.modules.pop('chat.app.core.trace_sink', None)
 
     monkeypatch.setitem(sys.modules, 'lazyllm', fake_lazyllm)
     monkeypatch.setitem(sys.modules, 'lazyllm.configs', fake_lazyllm_configs)
@@ -84,9 +95,10 @@ def _import_chat_service_module(monkeypatch, *, chat_server=None):
     fake_tracing_datamodel_raw.RawTraceRecord = type('RawTraceRecord', (), {})
     monkeypatch.setitem(sys.modules, 'lazyllm.tracing.datamodel', ModuleType('lazyllm.tracing.datamodel'))
     monkeypatch.setitem(sys.modules, 'lazyllm.tracing.datamodel.raw', fake_tracing_datamodel_raw)
-    monkeypatch.setitem(sys.modules, 'chat.app.core.trace_sink', fake_trace_sink)
     monkeypatch.setitem(sys.modules, 'chat.config', fake_config)
     monkeypatch.setitem(sys.modules, 'chat.utils.helpers', fake_helpers)
+    monkeypatch.setitem(sys.modules, 'chat.utils.schema', fake_schema)
+    monkeypatch.setitem(sys.modules, 'chat.utils.markdown_images', fake_markdown_images)
     monkeypatch.setitem(sys.modules, 'chat.utils.load_config', fake_load_config)
     monkeypatch.setitem(sys.modules, 'chat.app.core.chat_server', fake_server)
 

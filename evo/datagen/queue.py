@@ -21,6 +21,7 @@ def get_eval_queue(
     max_workers: int = 8,
     filters: dict[str, Any] | None = None,
     require_trace: bool = True,
+    model_config: dict[str, Any] | None = None,
     skip_case_ids: set[str] | None = None,
     on_item=None,
     cancel=None,
@@ -31,6 +32,7 @@ def get_eval_queue(
     with open(eval_file, 'r', encoding='utf-8') as f:
         eval_data = json.load(f)
     cases = eval_data.get('cases', [])
+    eval_filters = _eval_filters(filters or {}, eval_data)
     if case_id:
         cases = [c for c in cases if c.get('case_id') == case_id]
     if skip_case_ids:
@@ -63,8 +65,9 @@ def get_eval_queue(
                 {**case, '_order': i},
                 target_chat_url,
                 dataset_name,
-                filters or {},
+                eval_filters,
                 require_trace,
+                model_config,
             )] = case
             return True
 
@@ -105,16 +108,32 @@ def get_eval_queue(
     }
 
 
+def _eval_filters(filters: dict[str, Any], eval_data: dict[str, Any]) -> dict[str, Any]:
+    out = dict(filters)
+    kb_id = str(eval_data.get('kb_id') or '').strip()
+    if kb_id and not out.get('kb_id'):
+        out['kb_id'] = kb_id
+    return out
+
+
 def _build_eval_item(
     case: dict,
     target_chat_url: str,
     dataset_name: str,
     filters: dict[str, Any],
     require_trace: bool,
+    model_config: dict[str, Any] | None,
 ) -> dict:
     question = case['question']
     ground_truth = case['ground_truth']
-    rag_result = call_rag_chat(question, target_chat_url, dataset_name, filters, require_trace=require_trace)
+    rag_result = call_rag_chat(
+        question,
+        target_chat_url,
+        dataset_name,
+        filters,
+        require_trace=require_trace,
+        model_config=model_config,
+    )
     metrics = _calculate_metrics(
         case.get('reference_chunk_ids', []),
         case.get('reference_doc_ids', []),

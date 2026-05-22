@@ -42,8 +42,6 @@ export default function MemoryManagementListPage() {
     experienceFeatureEnabled,
     experienceSettingSaving,
     handleExperienceFeatureToggle,
-    refreshSkillAssets,
-    refreshExperienceSection,
     searchInput,
     setSearchInput,
     query,
@@ -60,6 +58,9 @@ export default function MemoryManagementListPage() {
     selectedGlossaryAssets,
     glossaryAssets,
     glossaryLoading,
+    glossaryListPage,
+    glossaryListPageSize,
+    glossaryListTotal,
     glossaryLoadError,
     refreshGlossaryAssets,
     handleBatchMergeGlossary,
@@ -70,6 +71,8 @@ export default function MemoryManagementListPage() {
     filteredGlossaryItems,
     glossaryColumns,
     selectedGlossaryAssetIds,
+    setGlossaryListPage,
+    setGlossaryListPageSize,
     setSelectedGlossaryAssetIds,
     skillLoading,
     skillListPage,
@@ -261,19 +264,6 @@ export default function MemoryManagementListPage() {
                 }
                 resetFilters();
                 navigateToMemoryList(tabKey);
-                void (async () => {
-                  if (tabKey === "skills") {
-                    await refreshSkillAssets();
-                    return;
-                  }
-                  if (tabKey === "experience") {
-                    await refreshExperienceSection({ silent: true });
-                    return;
-                  }
-                  if (tabKey === "glossary") {
-                    await refreshGlossaryAssets({ silent: true });
-                  }
-                })();
               }}
             >
               <span className="memory-tab-icon">{tabItem.icon}</span>
@@ -393,6 +383,9 @@ export default function MemoryManagementListPage() {
             assets={glossaryAssets}
             columns={glossaryColumns}
             filteredItems={filteredGlossaryItems}
+            glossaryListPage={glossaryListPage}
+            glossaryListPageSize={glossaryListPageSize}
+            glossaryListTotal={glossaryListTotal}
             glossaryLoadError={glossaryLoadError}
             glossaryLoading={glossaryLoading}
             glossarySource={glossarySource}
@@ -402,6 +395,8 @@ export default function MemoryManagementListPage() {
             refreshGlossaryAssets={refreshGlossaryAssets}
             selectedGlossaryAssetIds={selectedGlossaryAssetIds}
             selectedGlossaryAssets={selectedGlossaryAssets}
+            setGlossaryListPage={setGlossaryListPage}
+            setGlossaryListPageSize={setGlossaryListPageSize}
             setSelectedGlossaryAssetIds={setSelectedGlossaryAssetIds}
           />
         ) : (

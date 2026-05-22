@@ -1,5 +1,6 @@
-import { FC, useState, useEffect, useRef } from "react";
+import { FC, useState, useEffect, useRef, MouseEvent } from "react";
 import {
+  Alert,
   Button,
   Form,
   Tooltip,
@@ -35,11 +36,14 @@ import {
 } from "@/api/generated/knowledge-client";
 import KnowledgeTag from "@/modules/knowledge/components/KnowledgeTag";
 import FileUtils from "@/modules/knowledge/utils/file";
+import { isDocumentDetailUnsupported } from "@/modules/knowledge/utils/document";
 
 import { ListPageTable } from "@/components/ui";
 import EditTags from "@/modules/knowledge/pages/detail/components/KnowledgeTable/editTags";
 import type { TreeNode } from "@/modules/knowledge/pages/detail/components/KnowledgeTable";
 import { useTranslation } from "react-i18next";
+import { axiosInstance, BASE_URL } from "@/components/request";
+import { AgentAppsAuth } from "@/components/auth";
 
 import "./index.scss";
 
@@ -86,11 +90,40 @@ const KnowledgePage: FC = () => {
   const [knowledgeType, setKnowledgeType] = useState<string>("knowledgeBase");
   const [showTagEditModal, setShowTagEditModal] = useState(false);
   const [tagEditRecord, setTagEditRecord] = useState<DocRow | null>(null);
+  const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
+  const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<boolean | null>(null);
+  const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
 
   useEffect(() => {
     getTags();
     getTableData();
+    void checkEmbeddingReady();
   }, []);
+
+  async function checkEmbeddingReady() {
+    try {
+      const [embResp, multiResp] = await Promise.all([
+        axiosInstance.get<{ data?: { ready: boolean } } | { ready: boolean }>(
+          `${BASE_URL}/api/core/model_providers/models/ready?model_type=embedding`
+        ).catch(() => null),
+        axiosInstance.get<{ data?: { ready: boolean } } | { ready: boolean }>(
+          `${BASE_URL}/api/core/model_providers/models/ready?model_type=multimodal_embedding`
+        ).catch(() => null),
+      ]);
+      const unwrap = (resp: typeof embResp): boolean | null => {
+        if (!resp) return null;
+        const d = resp.data && typeof resp.data === 'object' && 'data' in resp.data
+          ? (resp.data as { data?: { ready: boolean } }).data
+          : resp.data as { ready: boolean };
+        return d?.ready ?? null;
+      };
+      setEmbeddingReady(unwrap(embResp));
+      setMultimodalEmbeddingReady(unwrap(multiResp));
+    } catch {
+      setEmbeddingReady(null);
+      setMultimodalEmbeddingReady(null);
+    }
+  }
 
   useEffect(() => {
     if (knowledgeType) {
@@ -262,6 +295,10 @@ const KnowledgePage: FC = () => {
                 if (relPathtype === "FOLDER") {
                   navigate({ pathname: `/lib/knowledge/detail/${datasetId}` });
                 } else {
+                  if (isDocumentDetailUnsupported(record?.display_name)) {
+                    message.info(t("knowledge.documentDetailUnsupported"));
+                    return;
+                  }
                   navigate({
                     pathname:
                       documentId && datasetId
@@ -561,6 +598,50 @@ const KnowledgePage: FC = () => {
   return (
     <div className="knowledge-list-page">
       <h2 className="knowledge-title admin-page-title">{t("layout.knowledgeBase")}</h2>
+      {embeddingReady === false ? (
+        <Alert
+          banner
+          className="knowledge-embedding-warning"
+          message={
+            isAdmin ? (
+              <span>
+                {t("knowledge.embeddingNotReadyBannerAdmin")}
+                <a
+                  href="/model-providers"
+                  style={{ marginLeft: 8, fontWeight: 500 }}
+                  onClick={(e: MouseEvent<HTMLAnchorElement>) => { e.preventDefault(); navigate('/model-providers'); }}
+                >
+                  {t("knowledge.goToConfig")}
+                </a>
+              </span>
+            ) : t("knowledge.embeddingNotReadyBanner")
+          }
+          showIcon
+          type="warning"
+        />
+      ) : null}
+      {multimodalEmbeddingReady === false ? (
+        <Alert
+          banner
+          className="knowledge-embedding-warning"
+          message={
+            isAdmin ? (
+              <span>
+                {t("knowledge.multimodalEmbeddingNotReadyBannerAdmin")}
+                <a
+                  href="/model-providers"
+                  style={{ marginLeft: 8, fontWeight: 500 }}
+                  onClick={(e: MouseEvent<HTMLAnchorElement>) => { e.preventDefault(); navigate('/model-providers'); }}
+                >
+                  {t("knowledge.goToConfig")}
+                </a>
+              </span>
+            ) : t("knowledge.multimodalEmbeddingNotReadyBanner")
+          }
+          showIcon
+          type="warning"
+        />
+      ) : null}
       <Form className="list-header" form={form}>
         <ListPageHeader
           placeholder={
@@ -570,6 +651,27 @@ const KnowledgePage: FC = () => {
           }
           searchKey="keyword"
           btnText={t("knowledge.createKnowledgeBase")}
+          btnDisabled={embeddingReady === false || multimodalEmbeddingReady === false}
+          btnDisabledTooltip={
+            isAdmin ? (
+              <span>
+                {embeddingReady === false
+                  ? t("knowledge.embeddingNotReadyBannerAdmin")
+                  : t("knowledge.multimodalEmbeddingNotReadyBannerAdmin")}
+                <a
+                  href="/model-providers"
+                  style={{ marginLeft: 8, color: '#fff', textDecoration: 'underline' }}
+                  onClick={(e: MouseEvent<HTMLAnchorElement>) => { e.preventDefault(); navigate('/model-providers'); }}
+                >
+                  {t("knowledge.goToConfig")}
+                </a>
+              </span>
+            ) : (
+              embeddingReady === false
+                ? t("knowledge.embeddingNotReadyBanner")
+                : t("knowledge.multimodalEmbeddingNotReadyBanner")
+            )
+          }
           onClick={() => {
             createUpdateRef.current?.onOpen();
           }}

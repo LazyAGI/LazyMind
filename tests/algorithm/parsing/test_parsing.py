@@ -29,6 +29,9 @@ def _import_parsing_runtime(monkeypatch):
     build_document.ALGO_ID = 'general_algo'
     build_document.get_algo_server_port = lambda: 18000
     build_document.build_document = lambda: None
+    build_document.reset_document = lambda: None
+    build_document.drop_lazyllm_tables = lambda: None
+    build_document.reset_stores = lambda: None
     monkeypatch.setitem(sys.modules, 'parsing.build_document', build_document)
     sys.modules.pop('parsing.parsing', None)
     return importlib.import_module('parsing.parsing')

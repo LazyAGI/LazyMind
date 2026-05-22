@@ -363,3 +363,34 @@ class TestForwardUsesCorrectKeyAndModel:
         assert cap_llm[0]['json']['model'] == 'gpt-4o'
         assert cap_instruct[0]['headers']['Authorization'] == 'Bearer sk-instruct'
         assert cap_instruct[0]['json']['model'] == 'gpt-4o-mini'
+
+    def test_same_source_roles_use_independent_api_key_configs(self, tmp_path):
+        with _runtime_models_yaml(tmp_path, '''
+            llm:
+              source: dynamic
+              type: llm
+            evo_llm:
+              source: dynamic
+              type: llm
+        '''):
+            with _clean_globals() as gcfg:
+                inject_model_config({
+                    'llm': {'source': 'openai', 'model': 'gpt-4o', 'api_key': 'sk-llm'},
+                    'evo_llm': {'source': 'openai', 'model': 'gpt-4o-mini', 'api_key': 'sk-evo'},
+                })
+                key_cfg = gcfg['openai_api_key']
+
+                m_llm = OnlineChatModule(source='dynamic', name='llm', stream=False, dynamic_auth=True)
+                m_evo = OnlineChatModule(source='dynamic', name='evo_llm', stream=False, dynamic_auth=True)
+                cap_llm, cap_evo = [], []
+
+                with patch('requests.post', side_effect=_make_fake_post(cap_llm)):
+                    with lazyllm.globals.stack_enter(m_llm.identities):
+                        m_llm.forward('q1')
+                with patch('requests.post', side_effect=_make_fake_post(cap_evo)):
+                    with lazyllm.globals.stack_enter(m_evo.identities):
+                        m_evo.forward('q2')
+
+        assert key_cfg == {'llm': 'sk-llm', 'evo_llm': 'sk-evo'}
+        assert cap_llm[0]['headers']['Authorization'] == 'Bearer sk-llm'
+        assert cap_evo[0]['headers']['Authorization'] == 'Bearer sk-evo'

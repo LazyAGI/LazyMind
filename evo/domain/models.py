@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 from dataclasses import dataclass, field, asdict
 from typing import Any, Optional
 
@@ -42,6 +43,7 @@ class TraceRecord:
 class TraceMeta:
     flow_skeleton: list[dict[str, Any]] = field(default_factory=list)
     pipeline: list[str] = field(default_factory=list)
+    flow_skeletons: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
 
 @dataclass
@@ -121,8 +123,22 @@ def parse_judge_record(data: dict[str, Any]) -> tuple[JudgeRecord, list[str]]:
     return (record, warnings)
 
 
+def _maybe_json(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
+
+
+def _raw_field(node: dict[str, Any], key: str) -> Any:
+    raw = node.get('raw_data') or {}
+    return _maybe_json(raw.get(key)) if isinstance(raw, dict) else None
+
+
 def _extract_query(tree: dict[str, Any]) -> str:
-    raw_in = tree.get('raw_data', {}).get('input', {})
+    raw_in = _raw_field(tree, 'input')
     args = raw_in.get('args', []) if isinstance(raw_in, dict) else []
     if not args:
         return ''
@@ -166,12 +182,17 @@ def _walk_execution_tree(tree: dict[str, Any]) -> tuple[list[str], dict[str, Mod
                 _walk(child, under_parallel)
             return
         raw = node.get('raw_data', {}) or {}
-        sem = node.get('semantic_data') or {}
+        sem_raw = _maybe_json(node.get('semantic_data') or {})
+        sem = sem_raw if isinstance(sem_raw, dict) else {}
         raw_scores = sem.get('scores')
         scores = [float(s) for s in raw_scores if isinstance(s, (int, float))] if isinstance(raw_scores, (list, tuple)) else []  # noqa: E501
         counter[name] = counter.get(name, 0) + 1
         key = name if counter[name] == 1 else f'{name}_{counter[name]}'
-        modules[key] = ModuleOutput(input=raw.get('input'), output=raw.get('output'), scores=scores)
+        modules[key] = ModuleOutput(
+            input=_maybe_json(raw.get('input')) if isinstance(raw, dict) else None,
+            output=_maybe_json(raw.get('output')) if isinstance(raw, dict) else None,
+            scores=scores,
+        )
         keys.append(key)
         if not under_parallel:
             skeleton.append({'type': node.get('node_type') or 'module', 'key': key, 'name': name})
@@ -236,8 +257,17 @@ def _parse_execution_tree_trace(data: dict[str, Any]) -> tuple[TraceRecord, list
 def parse_trace_file(raw: dict[str, Any]) -> tuple[TraceMeta, dict[str, TraceRecord], list[str]]:
     warnings: list[str] = []
     traces: dict[str, TraceRecord] = {}
-    ref_pipeline: list[str] | None = None
     ref_skeleton: list[dict[str, Any]] | None = None
+    flow_skeletons: dict[str, list[dict[str, Any]]] = {}
+    pipeline: list[str] = []
+    seen_steps: set[str] = set()
+
+    def add_pipeline(steps: list[str]) -> None:
+        for step in steps:
+            if step not in seen_steps:
+                seen_steps.add(step)
+                pipeline.append(step)
+
     for key, val in raw.items():
         if key == 'count' or not isinstance(val, dict):
             continue
@@ -246,24 +276,24 @@ def parse_trace_file(raw: dict[str, Any]) -> tuple[TraceMeta, dict[str, TraceRec
                 rec, w = _parse_legacy_trace(val)
                 traces[key] = rec
                 warnings.extend((f'[trace:{key}] {x}' for x in w))
-                pipeline = list(rec.modules)
-                skeleton = [{'type': 'module', 'key': step_key, 'name': step_key} for step_key in pipeline]
-                if ref_pipeline is None:
-                    ref_pipeline, ref_skeleton = (pipeline, skeleton)
-                elif pipeline != ref_pipeline:
-                    warnings.append(f'[trace:{key}] pipeline differs from first case')
+                steps = list(rec.modules)
+                skeleton = [{'type': 'module', 'key': step_key, 'name': step_key} for step_key in steps]
+                add_pipeline(steps)
+                flow_skeletons[key] = skeleton
+                if ref_skeleton is None:
+                    ref_skeleton = skeleton
             except ValueError as e:
                 warnings.append(f'[trace:{key}] {e}')
             continue
         tree = val.get('execution_tree', {})
         query = _extract_query(tree)
-        pipeline, modules, skeleton = _walk_execution_tree(tree)
+        steps, modules, skeleton = _walk_execution_tree(tree)
         traces[key] = TraceRecord(query=query, modules=modules)
-        if ref_pipeline is None:
-            ref_pipeline, ref_skeleton = (pipeline, skeleton)
-        elif pipeline != ref_pipeline:
-            warnings.append(f'[trace:{key}] pipeline differs from first case')
-    meta = TraceMeta(flow_skeleton=ref_skeleton or [], pipeline=ref_pipeline or [])
+        add_pipeline(steps)
+        flow_skeletons[key] = skeleton
+        if ref_skeleton is None:
+            ref_skeleton = skeleton
+    meta = TraceMeta(flow_skeleton=ref_skeleton or [], pipeline=pipeline, flow_skeletons=flow_skeletons)
     return (meta, traces, warnings)
 
 

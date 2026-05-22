@@ -50,7 +50,7 @@ def test_critic_approved_writes_status_and_confidence() -> None:
 
     class FakeInvoker:
         def __init__(self, *a, **kw): pass
-        def invoke(self, user: str) -> str:
+        def invoke(self, user: str, **kwargs) -> str:
             return fake
 
     with session_scope(session):
@@ -77,7 +77,7 @@ def test_critic_needs_revision_records_notes() -> None:
 
     class FakeInvoker:
         def __init__(self, *a, **kw): pass
-        def invoke(self, user: str) -> str:
+        def invoke(self, user: str, **kwargs) -> str:
             return fake
 
     with session_scope(session):
@@ -98,7 +98,7 @@ def test_critic_invalid_verdict_falls_back_to_needs_revision() -> None:
 
     class FakeInvoker:
         def __init__(self, *a, **kw): pass
-        def invoke(self, user: str) -> str:
+        def invoke(self, user: str, **kwargs) -> str:
             return fake
 
     with session_scope(session):
@@ -114,7 +114,7 @@ def test_critic_handles_parse_failure() -> None:
 
     class FakeInvoker:
         def __init__(self, *a, **kw): pass
-        def invoke(self, user: str) -> str:
+        def invoke(self, user: str, **kwargs) -> str:
             return "not a json"
 
     with session_scope(session):

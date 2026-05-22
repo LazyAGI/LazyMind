@@ -2,20 +2,32 @@
 name: CI
 
 on:
+  workflow_dispatch:
+  push:
+    branches: [main, master, 'dev/*']
+    paths-ignore:
+      - "**.md"
+      - ".git*"
+      - "docs/**"
   pull_request_target:
     branches: [main, master, 'dev/*']
+    paths-ignore:
+      - "**.md"
+      - ".git*"
+      - "docs/**"
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 2
 
       - name: Set up Python
@@ -33,10 +45,11 @@ jobs:
 
   doc_check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -57,10 +70,11 @@ jobs:
   test-frontend:
     needs: [wait_approve]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -72,10 +86,11 @@ jobs:
   test-auth-service:
     needs: [wait_approve]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: actions/setup-python@v5
         with:
@@ -85,6 +100,7 @@ jobs:
         run: |
           pip install -r backend/auth-service/requirements.txt
           pip install -r tests/backend/auth-service/requirements-test.txt
+          pip install 'httpx<0.28' 'anyio<4.5'
 
       - name: Test
         run: python -m pytest tests/backend/auth-service/ -v
@@ -92,10 +108,11 @@ jobs:
   test-backend-core:
     needs: [wait_approve]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: actions/setup-go@v5
         with:
@@ -104,13 +121,15 @@ jobs:
       - name: Test
         run: cd tests/backend/core && go mod tidy && go test ./... -v
 
-  test-algorithm:
+  test-evo-cli:
     needs: [wait_approve]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          submodules: true
 
       - uses: actions/setup-python@v5
         with:
@@ -118,8 +137,45 @@ jobs:
 
       - name: Install deps
         run: |
-          pip install -r algorithm/requirements.txt
+          sudo apt-get update -qq && sudo apt-get install -y -qq cmake
+          pip install scikit-build-core pybind11
+          CMAKE_POLICY_VERSION_MINIMUM=3.5 pip install --no-cache-dir algorithm/lazyllm
+          cp algorithm/lazyllm/pyproject.toml "$(python -c 'import lazyllm; print(lazyllm.__path__[0])')/"
+          pip install -r evo/requirements.txt
           pip install pytest httpx
+
+      - name: Test
+        run: python -m pytest tests/evo/ tests/test_cli.py -v
+
+  test-algorithm:
+    needs: [wait_approve]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          submodules: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq cmake
+          pip install scikit-build-core pybind11
+          CMAKE_POLICY_VERSION_MINIMUM=3.5 pip install --no-cache-dir algorithm/lazyllm
+          cp algorithm/lazyllm/pyproject.toml "$(python -c 'import lazyllm; print(lazyllm.__path__[0])')/"
+          pip install -r algorithm/requirements.txt
+          pip install pypdf docx2txt EbookLib html2text olefile spacy bm25s PyStemmer nltk jieba sentencepiece psycopg2-binary
+          pip install pytest httpx
+
+      - name: Verify lazyllm install
+        run: |
+          python -c "from lazyllm.tools.agent.skill_manager import SkillManager; print('tools OK')"
+          python -c "from lazyllm.module import ModuleBase; print('module OK')"
+          python -c "from lazyllm import fc_register; print('fc_register OK')"
 
       - name: Test
         run: python -m pytest tests/algorithm/ -v

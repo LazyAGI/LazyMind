@@ -134,8 +134,8 @@ def compare_cases(dataset_id1: str, dataset_id2: str) -> ToolResult[dict[str, An
             'diff': diff,
             'better': 'case1' if diff > 0 else 'case2' if diff < 0 else 'equal',
         }
-    ppl_meta = session.trace_meta.pipeline or list(case1.trace.modules.keys())
-    ppl2 = session.trace_meta.pipeline or list(case2.trace.modules.keys())
+    ppl_meta = list(case1.trace.modules.keys())
+    ppl2 = list(case2.trace.modules.keys())
     pipeline_diff = {
         'case1_pipeline': ppl_meta,
         'case2_pipeline': ppl2,

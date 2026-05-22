@@ -92,7 +92,7 @@ func DeleteThreadHistory(w http.ResponseWriter, r *http.Request) {
 
 	cancelRequested := false
 	if isThreadFlowRunning(flowStatus) {
-		if _, statusCode, err := postUpstreamProxy(r.Context(), r, threadActionURL(threadID, "cancel")); err != nil {
+		if _, statusCode, err := postUpstreamProxy(r.Context(), r, threadActionURL(threadID, "cancel"), nil); err != nil {
 			common.ReplyErrWithData(w, "cancel running thread failed", map[string]any{
 				"detail":      err.Error(),
 				"flow_status": flowStatus,

@@ -93,7 +93,7 @@ def test_session_attaches_world_store() -> None:
     cfg = load_config()
     session = create_session(cfg)
     assert session.world_store is not None
-    expected = cfg.output_dir / "runs" / session.run_id / "world_model.json"
+    expected = cfg.storage.runs_dir / session.run_id / "world_model.json"
     assert session.world_store.path == expected
     assert session.world_store.world.run_id == session.run_id
     print("  -> OK")

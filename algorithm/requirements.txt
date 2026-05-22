@@ -32,3 +32,5 @@ pandas==2.3.3
 opentelemetry-sdk>=1.27.0,<2.0.0
 opentelemetry-exporter-otlp-proto-http>=1.27.0,<2.0.0
 psycopg[binary]>=3,<4
+
+dashscope>=1.20.0

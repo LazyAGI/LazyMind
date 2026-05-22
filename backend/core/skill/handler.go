@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,6 +21,8 @@ import (
 
 type suggestionRequest struct {
 	SessionID   string                        `json:"session_id"`
+	ID          string                        `json:"id"`
+	SkillID     string                        `json:"skill_id"`
 	Category    string                        `json:"category"`
 	SkillName   string                        `json:"skill_name"`
 	Suggestions []evolution.SuggestionPayload `json:"suggestions"`
@@ -39,6 +42,11 @@ type removeRequest struct {
 	SkillName string `json:"skill_name"`
 	Reason    string `json:"reason"`
 }
+
+var (
+	errSuggestionSkillNotFound    = errors.New("skill not found")
+	errSuggestionSnapshotNotFound = errors.New("session snapshot not found")
+)
 
 func payloadForLog(v any) string {
 	b, err := json.Marshal(v)
@@ -61,23 +69,28 @@ func Suggestion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.SessionID = strings.TrimSpace(req.SessionID)
+	req.ID = strings.TrimSpace(req.ID)
+	req.SkillID = strings.TrimSpace(req.SkillID)
 	req.Category = strings.TrimSpace(req.Category)
 	req.SkillName = strings.TrimSpace(req.SkillName)
+	skillID := firstNonEmpty(req.SkillID, req.ID)
 	appLog.Logger.Info().
 		Str("route", "/skill/suggestion").
 		Str("session_id", req.SessionID).
+		Str("skill_id", skillID).
 		Str("category", req.Category).
 		Str("skill_name", req.SkillName).
 		Int("suggestion_count", len(req.Suggestions)).
 		Msg("internal skill mutation request received")
-	if req.SessionID == "" || req.Category == "" || req.SkillName == "" {
+	if req.SessionID == "" || (skillID == "" && (req.Category == "" || req.SkillName == "")) {
 		appLog.Logger.Warn().
 			Str("route", "/skill/suggestion").
 			Str("session_id", req.SessionID).
+			Str("skill_id", skillID).
 			Str("category", req.Category).
 			Str("skill_name", req.SkillName).
 			Msg("internal skill suggestion request rejected: missing required fields")
-		common.ReplyErr(w, "session_id/category/skill_name required", http.StatusBadRequest)
+		common.ReplyErr(w, "session_id and id or category/skill_name required", http.StatusBadRequest)
 		return
 	}
 	if len(req.Suggestions) == 0 || len(req.Suggestions) > 5 {
@@ -107,20 +120,20 @@ func Suggestion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state, err := evolution.LoadParentSkillState(r.Context(), db, userID, req.Category, req.SkillName)
+	state, snapshot, err := resolveSuggestionSkillSnapshot(r.Context(), db, req, userID, skillID)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, errSuggestionSkillNotFound) {
 			common.ReplyErr(w, "skill not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, errSuggestionSnapshotNotFound) {
+			common.ReplyErr(w, "session snapshot not found", http.StatusNotFound)
 			return
 		}
 		common.ReplyErr(w, "query skill failed", http.StatusInternalServerError)
 		return
 	}
-	snapshot, err := evolution.FindSnapshot(r.Context(), db, req.SessionID, evolution.ResourceTypeSkill, state.RelativePath)
-	if err != nil {
-		common.ReplyErr(w, "session snapshot not found", http.StatusNotFound)
-		return
-	}
+	resourceKey := evolution.SkillSuggestionResourceKey(*state.Resource)
 
 	status := evolution.SuggestionStatusPendingReview
 	invalidReason := ""
@@ -132,8 +145,8 @@ func Suggestion(w http.ResponseWriter, r *http.Request) {
 	rows := make([]orm.ResourceSuggestion, 0, len(req.Suggestions))
 	result := make([]evolution.RecordedSuggestion, 0, len(req.Suggestions))
 	for _, item := range req.Suggestions {
-		row := evolution.BuildSuggestionRecord(userID, evolution.ResourceTypeSkill, state.RelativePath, evolution.SuggestionActionModify, req.SessionID, status)
-		row.Category = req.Category
+		row := evolution.BuildSuggestionRecord(userID, evolution.ResourceTypeSkill, resourceKey, evolution.SuggestionActionModify, req.SessionID, status)
+		row.Category = strings.TrimSpace(state.Resource.Category)
 		row.ParentSkillName = strings.TrimSpace(state.Resource.ParentSkillName)
 		if row.ParentSkillName == "" {
 			row.ParentSkillName = strings.TrimSpace(state.Resource.SkillName)
@@ -187,6 +200,44 @@ func Suggestion(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	common.ReplyOK(w, map[string]any{"items": result})
+}
+
+func resolveSuggestionSkillSnapshot(ctx context.Context, db *gorm.DB, req suggestionRequest, userID, skillID string) (*evolution.SkillState, *orm.ResourceSessionSnapshot, error) {
+	var state *evolution.SkillState
+	var err error
+	if skillID != "" {
+		state, err = evolution.LoadSkillStateByResourceKey(ctx, db, userID, skillID)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, errSuggestionSkillNotFound
+		}
+	} else {
+		snapshot, snapshotErr := evolution.FindSkillSnapshotByIdentity(ctx, db, req.SessionID, userID, req.Category, req.SkillName)
+		if snapshotErr != nil {
+			if errors.Is(snapshotErr, gorm.ErrRecordNotFound) {
+				return nil, nil, errSuggestionSnapshotNotFound
+			}
+			return nil, nil, snapshotErr
+		}
+		state, err = evolution.LoadSkillStateByResourceKey(ctx, db, userID, snapshot.ResourceKey)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, nil, errSuggestionSkillNotFound
+			}
+			return nil, nil, err
+		}
+		return state, snapshot, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	snapshot, err := evolution.FindSnapshot(ctx, db, req.SessionID, evolution.ResourceTypeSkill, evolution.SkillSuggestionResourceKey(*state.Resource))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, errSuggestionSnapshotNotFound
+		}
+		return nil, nil, err
+	}
+	return state, snapshot, nil
 }
 
 func Create(w http.ResponseWriter, r *http.Request) {
@@ -360,10 +411,7 @@ func Remove(w http.ResponseWriter, r *http.Request) {
 
 	status := evolution.SuggestionStatusPendingReview
 	invalidReason := ""
-	resourceKey := strings.TrimSpace(skillRow.RelativePath)
-	if resourceKey == "" {
-		resourceKey = evolution.SkillSuggestionResourceKey(skillRow)
-	}
+	resourceKey := evolution.SkillSuggestionResourceKey(skillRow)
 	snapshotHash := strings.TrimSpace(skillRow.ContentHash)
 	if snapshotHash == "" {
 		snapshotHash = evolution.HashContent(skillRow.Content)
@@ -422,7 +470,7 @@ func Remove(w http.ResponseWriter, r *http.Request) {
 		row.ParentSkillName = parentSkillName
 		row.SkillName = strings.TrimSpace(skillRow.SkillName)
 		row.FileExt = firstNonEmpty(strings.TrimSpace(skillRow.FileExt), "md")
-		row.RelativePath = resourceKey
+		row.RelativePath = filepath.ToSlash(strings.TrimSpace(skillRow.RelativePath))
 		row.SnapshotHash = snapshotHash
 		row.Title = title
 		row.Content = req.Reason
@@ -527,9 +575,9 @@ func init() {
 func applyRemoveSuggestion(ctx context.Context, db *gorm.DB, suggestion orm.ResourceSuggestion) error {
 	var skill orm.SkillResource
 	err := db.WithContext(ctx).
-		Where("owner_user_id = ? AND relative_path = ?",
+		Where("owner_user_id = ? AND id = ?",
 			strings.TrimSpace(suggestion.UserID),
-			strings.TrimSpace(suggestion.RelativePath),
+			strings.TrimSpace(suggestion.ResourceKey),
 		).
 		Take(&skill).Error
 	if err != nil {

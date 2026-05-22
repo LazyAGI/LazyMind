@@ -5,13 +5,14 @@ import { getLocalizedTablePagination } from "@/components/ui/pagination";
 import type { TFunction } from "i18next";
 import type { GlossaryAsset, GlossarySource } from "../shared";
 
-const defaultGlossaryPageSize = 4;
-
 interface GlossaryListSectionProps {
   t: TFunction;
   assets: GlossaryAsset[];
   columns: ColumnsType<GlossaryAsset>;
   filteredItems: GlossaryAsset[];
+  glossaryListPage: number;
+  glossaryListPageSize: number;
+  glossaryListTotal: number;
   glossaryLoadError: string;
   glossaryLoading: boolean;
   glossarySource?: GlossarySource;
@@ -20,11 +21,15 @@ interface GlossaryListSectionProps {
   query: string;
   refreshGlossaryAssets: (options?: {
     keyword?: string;
+    page?: number;
+    pageSize?: number;
     silent?: boolean;
     source?: GlossarySource;
   }) => void;
   selectedGlossaryAssetIds: string[];
   selectedGlossaryAssets: GlossaryAsset[];
+  setGlossaryListPage: (page: number) => void;
+  setGlossaryListPageSize: (pageSize: number) => void;
   setSelectedGlossaryAssetIds: (ids: string[]) => void;
 }
 
@@ -34,6 +39,9 @@ export default function GlossaryListSection(props: GlossaryListSectionProps) {
     assets,
     columns,
     filteredItems,
+    glossaryListPage,
+    glossaryListPageSize,
+    glossaryListTotal,
     glossaryLoadError,
     glossaryLoading,
     glossarySource,
@@ -43,23 +51,13 @@ export default function GlossaryListSection(props: GlossaryListSectionProps) {
     refreshGlossaryAssets,
     selectedGlossaryAssetIds,
     selectedGlossaryAssets,
+    setGlossaryListPage,
+    setGlossaryListPageSize,
     setSelectedGlossaryAssetIds,
   } = props;
   const sectionRef = useRef<HTMLDivElement>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(defaultGlossaryPageSize);
   const [tableBodyHeight, setTableBodyHeight] = useState<number>();
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [glossarySource, query]);
-
-  useEffect(() => {
-    const maxPage = Math.max(1, Math.ceil(filteredItems.length / pageSize));
-    if (currentPage > maxPage) {
-      setCurrentPage(maxPage);
-    }
-  }, [currentPage, filteredItems.length, pageSize]);
   useEffect(() => {
     const sectionElement = sectionRef.current;
     if (!sectionElement) {
@@ -117,6 +115,8 @@ export default function GlossaryListSection(props: GlossaryListSectionProps) {
               onClick={() =>
                 refreshGlossaryAssets({
                   keyword: query,
+                  page: glossaryListPage,
+                  pageSize: glossaryListPageSize,
                   source: glossarySource,
                 })
               }
@@ -132,7 +132,7 @@ export default function GlossaryListSection(props: GlossaryListSectionProps) {
           {t("admin.memoryGlossaryBatchStats", {
             defaultValue: "已选 {{selected}} 条 / 共 {{total}} 条",
             selected: selectedGlossaryAssets.length,
-            total: assets.length,
+            total: glossaryListTotal || assets.length,
           })}
         </span>
         <Space size={8} wrap>
@@ -168,19 +168,19 @@ export default function GlossaryListSection(props: GlossaryListSectionProps) {
         tableLayout="fixed"
         pagination={getLocalizedTablePagination(
           {
-            current: currentPage,
-            pageSize,
-            total: filteredItems.length,
+            current: glossaryListPage,
+            pageSize: glossaryListPageSize,
+            total: glossaryListTotal,
             showSizeChanger: true,
             pageSizeOptions: [4, 8, 12, 20],
             showTotal: (total: number) => t("common.totalItems", { total }),
             onChange: (page: number, nextPageSize: number) => {
-              setCurrentPage(page);
-              setPageSize(nextPageSize);
+              setGlossaryListPage(page);
+              setGlossaryListPageSize(nextPageSize);
             },
             onShowSizeChange: (_current: number, nextPageSize: number) => {
-              setCurrentPage(1);
-              setPageSize(nextPageSize);
+              setGlossaryListPage(1);
+              setGlossaryListPageSize(nextPageSize);
             },
           },
           t,

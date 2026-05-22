@@ -63,6 +63,7 @@ class ApplyOptions:
         )
     )
     deploy_check: Callable[[Path, str | None], dict] | None = None
+    extra_instructions: str = ''
 
 
 def _check(token: Any | None, at: str | None = None) -> None:
@@ -166,6 +167,25 @@ def _prompt_allow_lines(allow_files: frozenset[str], new_roots: tuple[str, ...])
     return lines
 
 
+def _plan_allow_spec(plan: list[dict], config: EvoConfig) -> tuple[frozenset[str], tuple[str, ...]]:
+    allow_files, _ = _allow_spec(config)
+    plan_files = sorted({
+        str(f).strip()
+        for item in plan
+        for f in (item.get('files') or [])
+        if str(f).strip()
+    })
+    invalid = sorted(set(plan_files) - allow_files)
+    selected = frozenset(f for f in plan_files if f in allow_files)
+    if invalid or not selected:
+        raise ApplyError(
+            'REPORT_ACTIONS_NOT_READY',
+            'modification plan targets must be explicit code_map files',
+            {'invalid_files': invalid, 'plan_files': plan_files},
+        )
+    return selected, ()
+
+
 def _allowlist_violation_context(paths: list[str]) -> str:
     body = '\n'.join((f'- {p}' for p in paths)) if paths else ''
     return ('以下路径不在 allowlist，已回滚；请只改允许范围内的文件：\n' + body).strip()
@@ -173,7 +193,7 @@ def _allowlist_violation_context(paths: list[str]) -> str:
 
 def _sanitize_path_text(text: str, chat_source: Path) -> str:
     base = str(chat_source.resolve()).rstrip('/')
-    return text.replace(base + '/', '').replace('/var/lib/lazymind/chat-source/', '')
+    return text.replace(base + '/', '')
 
 
 def _build_modification_plan(actions: list[dict], chat_source: Path) -> list[dict]:
@@ -196,14 +216,25 @@ def _build_modification_plan(actions: list[dict], chat_source: Path) -> list[dic
     ]
 
 
-def _build_prompt(instruction: str, plan: list[dict], allow_lines: list[str], prior_failure: str) -> str:
+def _build_prompt(
+    instruction: str,
+    plan: list[dict],
+    allow_lines: list[str],
+    prior_failure: str,
+    extra_instructions: str = '',
+) -> str:
     parts: list[str] = [instruction.strip(), '']
+    if extra_instructions.strip():
+        parts.append('用户补充要求：')
+        parts.append(extra_instructions.strip())
+        parts.append('')
     parts.append('允许修改的范围（严格遵守，禁止改动其它路径）：')
     parts.extend((f'- {f}' for f in allow_lines))
     parts.append('')
     parts.append(
         '所有文件读写都必须使用上述相对路径；不要访问或修改 worktree 外的绝对路径，也不要修改未列出的依赖实现文件。'
     )
+    parts.append('只能修改每个 action.files 明确列出的文件；不要为了通过测试顺手改调用链上的其它模块。')
     parts.append('risk_level=low_confidence 的计划仍需执行，但必须采用最小、保守、可测试的修改；如果证据不足，只修复明确落在 files 中的问题。')
     parts.append('')
     parts.append('修改计划（JSON）：')
@@ -356,7 +387,8 @@ def execute_apply(
             branch_name=branch,
             status='SUCCEEDED',
         )
-    allow_files, new_roots = _allow_spec(config)
+    plan = _build_modification_plan(actions, config.chat_source)
+    allow_files, new_roots = _plan_allow_spec(plan, config)
     if not allow_files and (not new_roots):
         raise ApplyError('CODE_MAP_EMPTY', 'code_map is empty; nothing modifiable')
     allow_lines = _prompt_allow_lines(allow_files, new_roots)
@@ -369,7 +401,6 @@ def execute_apply(
         base_commit = wt_head
     branch = GitWorkspace.branch_name(apply_id)
     (apply_dir / 'input').mkdir(parents=True, exist_ok=True)
-    plan = _build_modification_plan(actions, config.chat_source)
     plan_path = apply_dir / 'input' / 'modification_plan.json'
     if not plan_path.exists():
         plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -394,7 +425,7 @@ def execute_apply(
                 shutil.rmtree(round_dir)
             (round_dir / 'input').mkdir(parents=True, exist_ok=True)
             rr = RoundResult(index=i, started_at=time.time())
-            prompt = _build_prompt(options.instruction, plan, allow_lines, prior_failure)
+            prompt = _build_prompt(options.instruction, plan, allow_lines, prior_failure, options.extra_instructions)
             (round_dir / 'input' / 'prompt.txt').write_text(prompt, encoding='utf-8')
             if on_round_start:
                 on_round_start(rr)
@@ -403,6 +434,8 @@ def execute_apply(
             except ApplyError as exc:
                 prior_failure = _mark_round(cp, rounds, rr, error=exc.to_payload(), on_round=on_round)
                 _write_checkpoint(cp_path, cp)
+                if exc.kind == 'permanent':
+                    break
                 continue
             if outcome.returncode != 0 or outcome.last_error:
                 err = _opencode_api_error(outcome.last_error) if outcome.last_error else _retry_error(
@@ -410,6 +443,8 @@ def execute_apply(
                 )
                 prior_failure = _mark_round(cp, rounds, rr, error=err, prior_failure=err['message'], on_round=on_round)
                 _write_checkpoint(cp_path, cp)
+                if err.get('kind') == 'permanent':
+                    break
                 continue
             _check(cancel_token, at=f'round_{i:03d}.opencode_done')
             sha, oob = workspace.commit_allowlisted(worktree, _commit_subj(

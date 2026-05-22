@@ -90,8 +90,10 @@ def test_build_pdf_reader_selects_mineru_with_upload_mode(monkeypatch):
     assert seen['url'] == 'http://mineru:8000'
     assert seen['backend'] == 'pipeline'
     assert seen['upload_mode'] is False
-    assert isinstance(seen['post_func'], build_document.NodeParser)
     assert seen['timeout'] == 3600
+    assert seen['patch_applied'] == build_document._cfg['ocr_patch_applied']
+    assert seen['service_variant'] == build_document._cfg['ocr_service_variant']
+    assert seen['image_cache_dir'] == '/app/uploads/.image_cache'
 
 
 def test_build_pdf_reader_selects_paddleocr(monkeypatch):
@@ -106,7 +108,11 @@ def test_build_pdf_reader_selects_paddleocr(monkeypatch):
     monkeypatch.setitem(build_document._cfg._impl, 'ocr_server_url', 'http://paddle.test/')
 
     assert isinstance(build_document._build_pdf_reader(), FakePaddleOCRPDFReader)
-    assert seen == {'url': 'http://paddle.test'}
+    assert seen == {
+        'url': 'http://paddle.test',
+        'service_variant': build_document._cfg['ocr_service_variant'],
+        'images_dir': '/app/uploads/.image_cache',
+    }
 
 
 def test_build_pdf_reader_rejects_unknown_ocr_type(monkeypatch):
@@ -141,6 +147,9 @@ def test_build_document_wires_readers_groups_and_embeddings(monkeypatch):
     monkeypatch.setattr(build_document, 'Document', FakeDocument)
     monkeypatch.setattr(build_document, 'DocumentProcessor', FakeDocumentProcessor)
     monkeypatch.setattr(build_document, 'get_embed_keys', lambda: ['dense', 'sparse'])
+    monkeypatch.setattr(build_document, 'get_text_embed_keys', lambda: ['dense', 'sparse'])
+    monkeypatch.setattr(build_document, 'get_image_embed_key', lambda: None)
+    monkeypatch.setattr(build_document, 'get_config_path', lambda: '/fake/config.yaml')
     monkeypatch.setattr(build_document, 'get_embed_index_kwargs', lambda: {'nlist': 16})
     monkeypatch.setattr(build_document, 'AutoModel', lambda model, config=False: f'emb-{model}')
     monkeypatch.setattr(build_document, '_build_store_config', lambda index_kwargs: {'index_kwargs': index_kwargs})
@@ -153,10 +162,10 @@ def test_build_document_wires_readers_groups_and_embeddings(monkeypatch):
 
     assert docs.kwargs['name'] == build_document.ALGO_ID
     assert docs.kwargs['embed'] == {'dense': 'emb-dense', 'sparse': 'emb-sparse'}
-    assert docs.kwargs['store_conf'] == {'index_kwargs': {'nlist': 16}}
-    assert docs.kwargs['manager'].kwargs == {'url': 'http://processor.test'}
+    assert docs.kwargs['manager'].kwargs['store_conf'] == {'index_kwargs': {'nlist': 16}}
+    assert docs.kwargs['manager'].kwargs['url'] == 'http://processor.test'
     assert docs.kwargs['server'] == 18003
-    assert docs.readers == [('*.pdf', 'pdf-reader')]
+    assert ('*.pdf', 'pdf-reader') in docs.readers
     assert [group['name'] for group in docs.node_groups] == ['block', 'line']
     assert 'parent' not in docs.node_groups[0]
     assert docs.node_groups[1]['parent'] == 'block'

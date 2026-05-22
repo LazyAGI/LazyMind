@@ -308,9 +308,13 @@ func TestShouldKeepThreadFlowStreamAliveKeepsRunningAndPending(t *testing.T) {
 		{status: "running", want: true},
 		{status: "pending", want: true},
 		{status: "waiting_checkpoint", want: true},
+		{status: "paused", want: true},
 		{status: "RUNNING", want: true},
-		{status: " completed ", want: false},
+		{status: "not_found", want: false},
+		{status: "idle", want: false},
+		{status: "ended", want: false},
 		{status: "failed", want: false},
+		{status: "cancelled", want: false},
 		{status: "", want: false},
 	}
 

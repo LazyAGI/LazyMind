@@ -41,7 +41,7 @@ class _Scripted:
     def __init__(self, *a, **kw):
         pass
 
-    def invoke(self, _: str) -> str:
+    def invoke(self, _: str, **kwargs) -> str:
         if _Scripted.idx >= len(_Scripted.responses):
             return ""
         out = _Scripted.responses[_Scripted.idx]

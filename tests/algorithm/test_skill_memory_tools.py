@@ -1,5 +1,6 @@
 from chat.tools import memory as memory_mod
 from chat.tools import skill_manager as skill_manager_mod
+from chat.tools.skill_manager import Suggestion
 
 
 def test_core_api_endpoint_uses_internal_core_base_url():
@@ -107,7 +108,7 @@ def test_skill_manage_create_modify_remove_use_core_api_paths(monkeypatch):
         '---\n'
         'Use this skill for tests.\n'
     )
-    suggestion = {'title': 'Update instructions', 'content': 'Tighten the wording.'}
+    suggestion = Suggestion(title='Update instructions', content='Tighten the wording.')
 
     create_result = skill_manager_mod.skill_manage(
         'new_skill',
@@ -142,12 +143,12 @@ def test_skill_manage_create_modify_remove_use_core_api_paths(monkeypatch):
                 'session_id': 'sid-1',
                 'skill_name': 'existing',
                 'category': 'writing',
-                'suggestions': [suggestion],
+                'suggestions': [{'title': 'Update instructions', 'content': 'Tighten the wording.'}],
             },
         ),
         (
             '/skill/remove',
-            {'session_id': 'sid-1', 'skill_name': 'existing', 'category': 'writing'},
+            {'session_id': 'sid-1', 'skill_name': 'existing', 'category': 'writing', 'reason': ''},
         ),
     ]
 

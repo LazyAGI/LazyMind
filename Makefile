@@ -52,21 +52,40 @@ endif
 # file-watcher runs in compose by default. Host mode is kept for local
 # debugging and disables the compose file-watcher service on make up.
 # Keep its writable roots under the compose volume root by default.
-# RAGSCAN_BASE_ROOT is exported as a compose-friendly path; internal Makefile
-# bookkeeping uses the resolved absolute path below.
-export RAGSCAN_BASE_ROOT ?= ./data/scan
-RAGSCAN_BASE_ROOT_ABS := $(abspath $(RAGSCAN_BASE_ROOT))
-export RAGSCAN_FILE_WATCHER_MODE ?= container
-export RAGSCAN_HOST_PATH_STYLE ?= posix
-export RAGSCAN_WATCH_HOST_DIR ?= ./data/watch
-RAGSCAN_WATCH_HOST_DIR_RAW := $(RAGSCAN_WATCH_HOST_DIR)
-RAGSCAN_WATCH_HOST_DIR_ABS := $(abspath $(RAGSCAN_WATCH_HOST_DIR_RAW))
-override RAGSCAN_WATCH_HOST_DIR := $(if $(filter windows,$(RAGSCAN_HOST_PATH_STYLE)),$(RAGSCAN_WATCH_HOST_DIR_RAW),$(RAGSCAN_WATCH_HOST_DIR_ABS))
-RAGSCAN_FILE_WATCHER_DIR := backend/file-watcher
-RAGSCAN_FILE_WATCHER_BIN := $(RAGSCAN_FILE_WATCHER_DIR)/file_watcher
-RAGSCAN_FILE_WATCHER_CONFIG := $(RAGSCAN_FILE_WATCHER_DIR)/configs/agent.yaml
-RAGSCAN_FILE_WATCHER_PID := $(RAGSCAN_BASE_ROOT_ABS)/run/file_watcher.pid
-RAGSCAN_FILE_WATCHER_CONSOLE_LOG := $(RAGSCAN_BASE_ROOT_ABS)/logs/file_watcher.console.log
+# LAZYMIND_FILE_WATCHER_BASE_ROOT is exported as a compose-friendly path;
+# internal Makefile bookkeeping uses the resolved absolute path below.
+export LAZYMIND_FILE_WATCHER_BASE_ROOT ?= ./data/scan
+LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS := $(abspath $(LAZYMIND_FILE_WATCHER_BASE_ROOT))
+export LAZYMIND_FILE_WATCHER_MODE ?= container
+
+# Auto-detect host OS for path style and default watch directory.
+# Override in .env or on the command line if needed.
+ifeq ($(OS),Windows_NT)
+  export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= windows
+  export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= D:/
+else
+  _UNAME_S := $(shell uname -s 2>/dev/null)
+  _UNAME_R := $(shell uname -r 2>/dev/null | tr '[:upper:]' '[:lower:]')
+  ifeq ($(_UNAME_S),Darwin)
+    export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= posix
+    export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= $(HOME)
+  else ifneq (,$(findstring microsoft,$(_UNAME_R))$(findstring wsl,$(_UNAME_R)))
+    export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= posix
+    export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= /mnt
+  else
+    export LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE ?= posix
+    export LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR  ?= $(HOME)
+  endif
+endif
+
+_LAZYMIND_FW_WATCH_HOST_DIR_RAW := $(LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR)
+_LAZYMIND_FW_WATCH_HOST_DIR_ABS := $(abspath $(_LAZYMIND_FW_WATCH_HOST_DIR_RAW))
+override LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR := $(if $(filter windows,$(LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE)),$(_LAZYMIND_FW_WATCH_HOST_DIR_RAW),$(_LAZYMIND_FW_WATCH_HOST_DIR_ABS))
+LAZYMIND_FILE_WATCHER_DIR := backend/file-watcher
+LAZYMIND_FILE_WATCHER_BIN := $(LAZYMIND_FILE_WATCHER_DIR)/file_watcher
+LAZYMIND_FILE_WATCHER_CONFIG := $(LAZYMIND_FILE_WATCHER_DIR)/configs/agent.yaml
+LAZYMIND_FILE_WATCHER_PID := $(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)/run/file_watcher.pid
+LAZYMIND_FILE_WATCHER_CONSOLE_LOG := $(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)/logs/file_watcher.console.log
 
 # ---------------------------------------------------------------------------
 # Environment variables (override via: make up VAR=value, or set in .env)
@@ -111,29 +130,11 @@ export LAZYMIND_LLM_PRIORITY ?= 0
 
 # Tracing (set LAZYLLM_TRACE_ENABLED=0 to disable; requires LANGFUSE_* keys when enabled)
 export LAZYLLM_TRACE_ENABLED ?= 1
-export LAZYLLM_TRACE_BACKEND ?= langfuse
+export LAZYLLM_TRACE_BACKEND ?= local
 
 # MinIO credentials (used by built-in Milvus profile)
 export MINIO_ACCESS_KEY ?= minioadmin
 export MINIO_SECRET_KEY ?= minioadmin
-
-# Build mirrors — defaults point to Aliyun / domestic mirrors so docker build works
-# without VPN. Override via env or .env to use upstream/internal mirrors, e.g.:
-#   make up DOCKER_MIRROR= APT_MIRROR=http://deb.debian.org/debian ...
-export DOCKER_MIRROR ?= docker.m.daocloud.io/library/
-export PIP_INDEX_URL ?= https://mirrors.aliyun.com/pypi/simple
-export PIP_DEFAULT_TIMEOUT ?= 2400
-export PIP_RETRIES ?= 10
-export APT_MIRROR ?= http://mirrors.aliyun.com/debian
-export APT_SECURITY_MIRROR ?= http://mirrors.aliyun.com/debian-security
-export APT_UBUNTU_MIRROR ?= http://mirrors.aliyun.com/ubuntu
-export ALPINE_MIRROR ?= https://mirrors.aliyun.com/alpine
-export NPM_REGISTRY ?= https://registry.npmmirror.com
-export GOPROXY ?= https://goproxy.cn,direct
-export GOSUMDB ?= sum.golang.google.cn
-# GitHub release/source proxy used when GitHub raw / luarocks.org / codeload
-# / raw.githubusercontent are blocked.
-export GITHUB_PROXY ?= https://gh-proxy.com/
 
 # Pluggable parent images for the algorithm Dockerfile's multi-stage chain:
 #
@@ -166,7 +167,7 @@ help:
 	@echo "LazyMind Make targets:"
 	@echo "  make up         - Start services in background (with derived profiles)"
 	@echo "                    file-watcher runs in compose by default"
-	@echo "                    Use RAGSCAN_FILE_WATCHER_MODE=host for host-process debugging"
+	@echo "                    Use LAZYMIND_FILE_WATCHER_MODE=host for host-process debugging"
 	@echo "                    Use SERVICES=svc1,svc2 to start specific services only"
 	@echo "  make up-build   - Build images and start services"
 	@echo "                    Use SERVICES=svc1,svc2 to target specific services"
@@ -226,11 +227,12 @@ test:
 # Only build/start mineru/paddleocr when LAZYMIND_OCR_SERVER_TYPE is mineru/paddleocr
 # AND LAZYMIND_OCR_SERVER_URL points to the internal service (user has not specified external URL).
 # Only mineru has build:; paddleocr/milvus/opensearch use image: only, so only needed for up.
-#  OCR_SERVER_TYPE	OCR_SERVICE_VARIANT	     OCR_SERVER_URL	     _need_mineru
-# mineru/paddleocr         online                Any                 false
-#      mineru          offline or none     http://mineru:8000         true
-#     paddleocr        offline or none   http://paddleocr:8000        true
-# mineru/paddleocr         offline            external URL           false 
+#  OCR_SERVER_TYPE	OCR_SERVICE_VARIANT	     OCR_SERVER_URL	     _need_mineru      _need_paddleocr
+# mineru/paddleocr         online                Any                 false             false
+# mineru/paddleocr          none                 Any                 false             false
+#      mineru              offline        http://mineru:8000         true              false
+#     paddleocr            offline       http://paddleocr:8000       false             true
+# mineru/paddleocr         offline            external URL           false             false
 
 _need_mineru := $(and $(filter mineru,$(LAZYMIND_OCR_SERVER_TYPE)),$(findstring mineru:8000,$(LAZYMIND_OCR_SERVER_URL)),$(filter-out online,$(LAZYMIND_OCR_SERVICE_VARIANT)))
 _need_paddleocr := $(and $(filter paddleocr,$(LAZYMIND_OCR_SERVER_TYPE)),$(findstring paddleocr:8080,$(LAZYMIND_OCR_SERVER_URL)),$(filter-out online,$(LAZYMIND_OCR_SERVICE_VARIANT)))
@@ -246,7 +248,7 @@ _need_opensearch_dashboard := $(and $(_need_opensearch),$(_enable_opensearch_das
 
 # Shared compose profile flags for up/down/up-build
 _COMPOSE_PROFILES := $(strip $(if $(_need_mineru),--profile mineru) $(if $(_need_paddleocr),--profile paddleocr) $(if $(_need_milvus),--profile milvus) $(if $(_need_opensearch),--profile opensearch) $(if $(_need_milvus_dashboard),--profile milvus-dashboard) $(if $(_need_opensearch_dashboard),--profile opensearch-dashboard))
-_COMPOSE_FILE_WATCHER_SCALE := $(if $(filter container,$(RAGSCAN_FILE_WATCHER_MODE)),,--scale file-watcher=0)
+_COMPOSE_FILE_WATCHER_SCALE := $(if $(filter container,$(LAZYMIND_FILE_WATCHER_MODE)),,--scale file-watcher=0)
 
 # Only init submodules when not yet cloned; if already present (even with different commit), do nothing. Never recursive.
 _SUBMODULE_INIT = @git submodule status | grep -q '^-' && git submodule update --init || true
@@ -257,17 +259,17 @@ build:
 		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
 
 file-watcher-dirs:
-	@mkdir -p "$(RAGSCAN_BASE_ROOT_ABS)" "$(RAGSCAN_BASE_ROOT_ABS)/staging" "$(RAGSCAN_BASE_ROOT_ABS)/snapshots" "$(RAGSCAN_BASE_ROOT_ABS)/logs" "$(RAGSCAN_BASE_ROOT_ABS)/run" "$(RAGSCAN_WATCH_HOST_DIR)"
+	@mkdir -p "$(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)" "$(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)/staging" "$(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)/snapshots" "$(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)/logs" "$(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)/run" "$(LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR)"
 
 file-watcher-build: file-watcher-stop file-watcher-dirs
 	@echo "🔨 Rebuilding file-watcher..."
-	@rm -f "$(RAGSCAN_FILE_WATCHER_BIN)"
-	@cd "$(RAGSCAN_FILE_WATCHER_DIR)" && $(GO) build -o file_watcher ./cmd/main.go
-	@echo "✅ file-watcher built: $(RAGSCAN_FILE_WATCHER_BIN)"
+	@rm -f "$(LAZYMIND_FILE_WATCHER_BIN)"
+	@cd "$(LAZYMIND_FILE_WATCHER_DIR)" && $(GO) build -o file_watcher ./cmd/main.go
+	@echo "✅ file-watcher built: $(LAZYMIND_FILE_WATCHER_BIN)"
 
 file-watcher-stop:
-	@if [ -f "$(RAGSCAN_FILE_WATCHER_PID)" ]; then \
-		pid=$$(cat "$(RAGSCAN_FILE_WATCHER_PID)"); \
+	@if [ -f "$(LAZYMIND_FILE_WATCHER_PID)" ]; then \
+		pid=$$(cat "$(LAZYMIND_FILE_WATCHER_PID)"); \
 		if [ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null; then \
 			echo "🛑 Stopping file-watcher ($$pid)..."; \
 			kill "$$pid"; \
@@ -279,7 +281,7 @@ file-watcher-stop:
 				echo "⚠️  file-watcher still running ($$pid), please stop it manually if needed."; \
 			fi; \
 		fi; \
-		rm -f "$(RAGSCAN_FILE_WATCHER_PID)"; \
+		rm -f "$(LAZYMIND_FILE_WATCHER_PID)"; \
 	fi
 	@if command -v lsof >/dev/null 2>&1; then \
 		for pid in $$(lsof -t -nP -iTCP:19090 -sTCP:LISTEN 2>/dev/null | sort -u); do \
@@ -294,16 +296,16 @@ file-watcher-stop:
 	fi
 
 file-watcher-run: file-watcher-stop file-watcher-dirs
-	@echo "🚀 Starting file-watcher (RAGSCAN_BASE_ROOT=$(RAGSCAN_BASE_ROOT_ABS))..."
-	@RAGSCAN_BASE_ROOT="$(RAGSCAN_BASE_ROOT_ABS)" nohup sh -c 'cd "$(RAGSCAN_FILE_WATCHER_DIR)" && exec ./file_watcher -config configs/agent.yaml' >> "$(RAGSCAN_FILE_WATCHER_CONSOLE_LOG)" 2>&1 & echo $$! > "$(RAGSCAN_FILE_WATCHER_PID)"
+	@echo "🚀 Starting file-watcher (LAZYMIND_FILE_WATCHER_BASE_ROOT=$(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS))..."
+	@LAZYMIND_FILE_WATCHER_BASE_ROOT="$(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)" nohup sh -c 'cd "$(LAZYMIND_FILE_WATCHER_DIR)" && exec ./file_watcher -config configs/agent.yaml' >> "$(LAZYMIND_FILE_WATCHER_CONSOLE_LOG)" 2>&1 & echo $$! > "$(LAZYMIND_FILE_WATCHER_PID)"
 	@sleep 1
-	@pid=$$(cat "$(RAGSCAN_FILE_WATCHER_PID)"); \
+	@pid=$$(cat "$(LAZYMIND_FILE_WATCHER_PID)"); \
 	if kill -0 "$$pid" 2>/dev/null; then \
-		echo "✅ file-watcher started ($$pid), log: $(RAGSCAN_FILE_WATCHER_CONSOLE_LOG)"; \
+		echo "✅ file-watcher started ($$pid), log: $(LAZYMIND_FILE_WATCHER_CONSOLE_LOG)"; \
 	else \
 		echo "❌ file-watcher failed to start. Recent log:"; \
-		tail -n 80 "$(RAGSCAN_FILE_WATCHER_CONSOLE_LOG)" 2>/dev/null || true; \
-		rm -f "$(RAGSCAN_FILE_WATCHER_PID)"; \
+		tail -n 80 "$(LAZYMIND_FILE_WATCHER_CONSOLE_LOG)" 2>/dev/null || true; \
+		rm -f "$(LAZYMIND_FILE_WATCHER_PID)"; \
 		exit 1; \
 	fi
 
@@ -311,7 +313,7 @@ file-watcher-start: file-watcher-build
 	@$(MAKE) --no-print-directory file-watcher-run
 
 up:
-	@if [ "$(RAGSCAN_FILE_WATCHER_MODE)" = "container" ]; then \
+	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" = "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-stop; \
 		$(MAKE) --no-print-directory file-watcher-dirs; \
 	else \
@@ -320,21 +322,21 @@ up:
 	$(_SUBMODULE_INIT)
 	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) -d \
 		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
-	@if [ "$(RAGSCAN_FILE_WATCHER_MODE)" != "container" ]; then \
+	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-run; \
 	else \
 		echo "✅ file-watcher container enabled"; \
 	fi
 
 down:
-	@if [ "$(RAGSCAN_FILE_WATCHER_MODE)" != "container" ]; then \
+	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-stop; \
 	fi
 	@$(_COMPOSE) $(_COMPOSE_PROFILES) down \
 		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
 
 up-build:
-	@if [ "$(RAGSCAN_FILE_WATCHER_MODE)" = "container" ]; then \
+	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" = "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-stop; \
 		$(MAKE) --no-print-directory file-watcher-dirs; \
 	else \
@@ -343,14 +345,14 @@ up-build:
 	$(_SUBMODULE_INIT)
 	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) --build -d \
 		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
-	@if [ "$(RAGSCAN_FILE_WATCHER_MODE)" != "container" ]; then \
+	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-run; \
 	else \
 		echo "✅ file-watcher container enabled"; \
 	fi
 
 clear:
-	@if [ "$(RAGSCAN_FILE_WATCHER_MODE)" != "container" ]; then \
+	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-stop; \
 	fi
 	@echo "🧹 Stopping containers and removing volumes (keeping built images/base cache)..."
@@ -416,7 +418,7 @@ endef
 export _RESET_KB_SQL_APP
 
 reset-kb:
-	@if [ "$(RAGSCAN_FILE_WATCHER_MODE)" != "container" ]; then \
+	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-stop; \
 	fi
 	@echo "⏹  Stopping all services (keeping db running for SQL cleanup)..."

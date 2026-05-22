@@ -30,8 +30,8 @@ func TestLoadResolvesRelativeBaseRootFromConfigDir(t *testing.T) {
 func TestLoadAllowsEnvOverrideForBaseRoot(t *testing.T) {
 	root := t.TempDir()
 	override := filepath.Join(root, "custom-scan-root")
-	t.Setenv("RAGSCAN_BASE_ROOT", override)
-	cfgPath := writeTestConfig(t, root, `${RAGSCAN_BASE_ROOT:-../../../data/scan}`)
+	t.Setenv("LAZYMIND_FILE_WATCHER_BASE_ROOT", override)
+	cfgPath := writeTestConfig(t, root, `${LAZYMIND_FILE_WATCHER_BASE_ROOT:-../../../data/scan}`)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -45,11 +45,11 @@ func TestLoadAllowsEnvOverrideForBaseRoot(t *testing.T) {
 
 func TestLoadExpandsAgentEndpointsAndPathMappingsFromEnv(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("RAGSCAN_AGENT_LISTEN_ADDR", "0.0.0.0:19090")
-	t.Setenv("RAGSCAN_CONTROL_PLANE_BASE_URL", "http://scan-control-plane:18080")
-	t.Setenv("RAGSCAN_HOST_PATH_STYLE", "windows")
-	t.Setenv("RAGSCAN_PATH_MAPPINGS", "C:/Users/alice/Documents=/watch/documents,D:/Data=/watch/data")
-	cfgPath := writeTestConfig(t, root, `${RAGSCAN_BASE_ROOT:-../../../data/scan}`)
+	t.Setenv("LAZYMIND_FILE_WATCHER_LISTEN_ADDR", "0.0.0.0:19090")
+	t.Setenv("LAZYMIND_FILE_WATCHER_CONTROL_PLANE_BASE_URL", "http://scan-control-plane:18080")
+	t.Setenv("LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE", "windows")
+	t.Setenv("LAZYMIND_FILE_WATCHER_PATH_MAPPINGS", "C:/Users/alice/Documents=/watch/documents,D:/Data=/watch/data")
+	cfgPath := writeTestConfig(t, root, `${LAZYMIND_FILE_WATCHER_BASE_ROOT:-../../../data/scan}`)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -76,9 +76,9 @@ func TestLoadExpandsAgentEndpointsAndPathMappingsFromEnv(t *testing.T) {
 func TestLoadDerivesPathMappingFromWatchVolumeEnv(t *testing.T) {
 	root := t.TempDir()
 	hostRoot := filepath.Join(root, "watch-root")
-	t.Setenv("RAGSCAN_WATCH_HOST_DIR", hostRoot)
-	t.Setenv("RAGSCAN_WATCH_CONTAINER_DIR", "/watch/docs")
-	cfgPath := writeTestConfig(t, root, `${RAGSCAN_BASE_ROOT:-../../../data/scan}`)
+	t.Setenv("LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR", hostRoot)
+	t.Setenv("LAZYMIND_FILE_WATCHER_WATCH_CONTAINER_DIR", "/watch/docs")
+	cfgPath := writeTestConfig(t, root, `${LAZYMIND_FILE_WATCHER_BASE_ROOT:-../../../data/scan}`)
 
 	cfg, err := Load(cfgPath)
 	if err != nil {
@@ -104,8 +104,8 @@ func writeTestConfig(t *testing.T, root, baseRoot string) string {
 	cfgPath := filepath.Join(cfgDir, "agent.yaml")
 	data := []byte(`agent_id: "agent-test"
 tenant_id: "tenant-test"
-listen_addr: "${RAGSCAN_AGENT_LISTEN_ADDR:-127.0.0.1:19090}"
-control_plane_base_url: "${RAGSCAN_CONTROL_PLANE_BASE_URL:-http://127.0.0.1:18080}"
+listen_addr: "${LAZYMIND_FILE_WATCHER_LISTEN_ADDR:-127.0.0.1:19090}"
+control_plane_base_url: "${LAZYMIND_FILE_WATCHER_CONTROL_PLANE_BASE_URL:-http://127.0.0.1:18080}"
 base_root: "` + baseRoot + `"
 `)
 	if err := os.WriteFile(cfgPath, data, 0o644); err != nil {

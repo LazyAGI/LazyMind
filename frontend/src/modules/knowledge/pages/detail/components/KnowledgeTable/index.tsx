@@ -51,6 +51,7 @@ import { useTranslation } from "react-i18next";
 import { ColumnType } from "antd/es/table";
 import { AgentAppsAuth } from "@/components/auth";
 import FileUtils from "@/modules/knowledge/utils/file";
+import { isDocumentDetailUnsupported } from "@/modules/knowledge/utils/document";
 import RenameModel, {
   RenameFormItem,
   RenameModalRef,
@@ -738,6 +739,10 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
                 onClick={() => {
                   if (record.type === DocTypeEnum.Folder) {
                     handleExpand(!isExpanded, record);
+                    return;
+                  }
+                  if (isDocumentDetailUnsupported(record.display_name)) {
+                    message.info(t("knowledge.documentDetailUnsupported"));
                     return;
                   }
                   navigate({

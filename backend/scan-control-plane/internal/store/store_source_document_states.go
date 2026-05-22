@@ -759,7 +759,7 @@ func applyStateToDocumentItem(item model.SourceDocumentItem, state sourceDocumen
 	if state.SourceModifiedAt != nil {
 		item.SourceUpdatedAt = state.SourceModifiedAt
 	}
-	kb := state.KnowledgeBasePresent
+	kb := state.KnowledgeBasePresent || (item.KnowledgeBasePresent != nil && *item.KnowledgeBasePresent)
 	item.KnowledgeBasePresent = &kb
 	if sourceDocumentStateSuppressesLegacyProcessing(item, state) {
 		item.ParseState = legacyIdleParseStateFromSourceState(state.SourceState)
@@ -854,6 +854,43 @@ func parseStateFromSourceSyncState(syncState string) string {
 	}
 }
 
+func sourceDocumentStateVisibleInSourceDocuments(state sourceDocumentStateView) bool {
+	return state.KnowledgeBasePresent
+}
+
+func mergeHiddenPendingSourceStateCounts(summary *model.SourceDocumentsSummary, rows []sourceDocumentStateEntity) {
+	if summary == nil {
+		return
+	}
+	seenPaths := map[string]struct{}{}
+	for _, row := range rows {
+		path := filepath.Clean(strings.TrimSpace(row.Path))
+		if path == "" || path == "." || row.IsDir {
+			continue
+		}
+		if _, ok := seenPaths[path]; ok {
+			continue
+		}
+		state := sourceDocumentStateViewFromEntity(row)
+		if sourceDocumentStateVisibleInSourceDocuments(state) {
+			seenPaths[path] = struct{}{}
+			continue
+		}
+		switch pendingSourceStateUpdateType(state) {
+		case "NEW":
+			summary.NewCount++
+		case "MODIFIED":
+			summary.ModifiedCount++
+		case "DELETED":
+			summary.DeletedCount++
+		default:
+			continue
+		}
+		seenPaths[path] = struct{}{}
+	}
+	summary.PendingPullCount = summary.NewCount + summary.ModifiedCount + summary.DeletedCount
+}
+
 func summarizeSourceDocumentStates(rows []sourceDocumentStateEntity, fallbackTotal int, parsedCount, storage int64) model.SourceDocumentsSummary {
 	summary := model.SourceDocumentsSummary{
 		ParsedDocumentCount: parsedCount,
@@ -862,6 +899,10 @@ func summarizeSourceDocumentStates(rows []sourceDocumentStateEntity, fallbackTot
 	}
 	seenPaths := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
+		state := sourceDocumentStateViewFromEntity(row)
+		if !sourceDocumentStateVisibleInSourceDocuments(state) {
+			continue
+		}
 		path := filepath.Clean(strings.TrimSpace(row.Path))
 		if path == "" || path == "." || row.IsDir {
 			continue

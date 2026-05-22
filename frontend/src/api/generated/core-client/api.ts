@@ -581,12 +581,18 @@ export interface InternalSkillCreateOpenAPIRequest {
     'skill_name': string;
 }
 export interface InternalSkillRemoveOpenAPIRequest {
-    'id': string;
+    'category'?: string;
+    'id'?: string;
+    'reason'?: string;
+    'session_id'?: string;
+    'skill_name'?: string;
 }
 export interface InternalSkillSuggestionOpenAPIRequest {
-    'category': string;
+    'category'?: string;
+    'id'?: string;
     'session_id': string;
-    'skill_name': string;
+    'skill_id'?: string;
+    'skill_name'?: string;
     'suggestions'?: Array<SuggestionPayloadOpenAPIRequest>;
 }
 export interface KBListResult {
@@ -820,18 +826,21 @@ export interface ShareSkillOpenAPIRequest {
 export interface SkillChildCreateOpenAPIRequest {
     'auto_evo'?: boolean;
     'content': string;
+    'description'?: string;
     'file_ext'?: string;
     'name': string;
+    'tags'?: Array<string>;
 }
 export interface SkillCreateManagedOpenAPIRequest {
     'auto_evo'?: boolean;
-    'category': string;
+    'category'?: string;
     'children'?: Array<SkillChildCreateOpenAPIRequest>;
     'content': string;
     'description'?: string;
     'file_ext'?: string;
     'is_enabled'?: boolean;
     'name': string;
+    'parent_skill_id'?: string;
     'parent_skill_name'?: string;
     'tags'?: Array<string>;
 }
@@ -850,6 +859,8 @@ export interface SkillDetailChildOpenAPIResponse {
     'is_enabled': boolean;
     'name': string;
     'node_type': string;
+    'parent_id': string;
+    'parent_skill_id': string;
     'parent_skill_name': string;
     'skill_id': string;
     'suggestion_status': string;
@@ -869,6 +880,8 @@ export interface SkillDetailOpenAPIResponse {
     'is_enabled': boolean;
     'name': string;
     'node_type': string;
+    'parent_id': string;
+    'parent_skill_id': string;
     'parent_skill_name': string;
     'skill_id': string;
     'suggestion_status': string;
@@ -908,6 +921,9 @@ export interface SkillListChildOpenAPIResponse {
     'is_enabled': boolean;
     'name': string;
     'node_type': string;
+    'parent_id': string;
+    'parent_skill_id': string;
+    'parent_skill_name': string;
     'skill_id': string;
     'suggestion_status': string;
     'update_status': string;
@@ -1027,6 +1043,7 @@ export interface SkillUpdateManagedOpenAPIRequest {
     'file_ext'?: string;
     'is_enabled'?: boolean;
     'name'?: string;
+    'parent_skill_id'?: string;
     'parent_skill_name'?: string;
     'tags'?: Array<string>;
 }
@@ -5372,6 +5389,35 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          * 
+         * @summary POST /static-files:sign
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreStaticFilesSignPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/static-files:sign`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary Upload temp file
          * @param {Array<File>} [files] 
          * @param {*} [options] Override http request option.
@@ -6637,6 +6683,18 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @summary POST /static-files:sign
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreStaticFilesSignPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreStaticFilesSignPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreStaticFilesSignPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
          * @summary Upload temp file
          * @param {Array<File>} [files] 
          * @param {*} [options] Override http request option.
@@ -7528,6 +7586,15 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreStaticFilesPathGet(requestParameters: DefaultApiApiCoreStaticFilesPathGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreStaticFilesPathGet(requestParameters.path, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary POST /static-files:sign
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreStaticFilesSignPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreStaticFilesSignPost(options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -9118,6 +9185,16 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreStaticFilesPathGet(requestParameters: DefaultApiApiCoreStaticFilesPathGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreStaticFilesPathGet(requestParameters.path, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary POST /static-files:sign
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreStaticFilesSignPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreStaticFilesSignPost(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -12688,7 +12765,7 @@ export const SkillEvolutionApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSkillRemovePost(internalSkillRemoveOpenAPIRequest: InternalSkillRemoveOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillDeleteOpenAPIResponse>> {
+        async apiCoreSkillRemovePost(internalSkillRemoveOpenAPIRequest: InternalSkillRemoveOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RecordedSuggestionListOpenAPIResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillRemovePost(internalSkillRemoveOpenAPIRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['SkillEvolutionApi.apiCoreSkillRemovePost']?.[localVarOperationServerIndex]?.url;
@@ -12733,7 +12810,7 @@ export const SkillEvolutionApiFactory = function (configuration?: Configuration,
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSkillRemovePost(requestParameters: SkillEvolutionApiApiCoreSkillRemovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<SkillDeleteOpenAPIResponse> {
+        apiCoreSkillRemovePost(requestParameters: SkillEvolutionApiApiCoreSkillRemovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<RecordedSuggestionListOpenAPIResponse> {
             return localVarFp.apiCoreSkillRemovePost(requestParameters.internalSkillRemoveOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**

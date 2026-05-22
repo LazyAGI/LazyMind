@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 import time
 from datetime import datetime, timezone
@@ -49,6 +50,7 @@ router = APIRouter(prefix='/auth', tags=['auth'])
 logger = logging.getLogger('uvicorn.error')
 
 PHONE_PATTERN = re.compile(r'^\+?[0-9]{6,20}$')
+MODEL_CONFIG_PATH_ENV = 'LAZYMIND_MODEL_CONFIG_PATH'
 
 
 def _normalize_and_validate_phone(phone: str | None) -> str | None:
@@ -64,6 +66,10 @@ def _normalize_and_validate_phone(phone: str | None) -> str | None:
             extra_msg='Phone must contain 6-20 digits and may start with +',
         )
     return normalized
+
+
+def _is_dynamic_model_config() -> bool:
+    return (os.getenv(MODEL_CONFIG_PATH_ENV) or '').strip() == 'dynamic'
 
 
 def _default_role_id(session):
@@ -257,6 +263,7 @@ def me(user: User = Depends(current_user)):  # noqa: B008
         'role': user.role.name,
         'permissions': list(get_effective_permission_codes(user)),
         'tenant_id': user.tenant_id,
+        'dynamic': _is_dynamic_model_config(),
     }
 
 

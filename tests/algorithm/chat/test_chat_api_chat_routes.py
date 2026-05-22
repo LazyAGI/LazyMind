@@ -67,6 +67,7 @@ def test_chat_route_forwards_parameters_and_stream_flag(monkeypatch):
         'user_id': '',
         'trace': False,
         'model_config': None,
+        'environment_context': None,
     }
 
 def test_chat_route_forwards_user_id(monkeypatch):

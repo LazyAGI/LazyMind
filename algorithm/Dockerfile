@@ -82,7 +82,6 @@ RUN if [ "$LAZYMIND_PRELOAD_WHISPER_MODEL" = "1" ]; then \
         python -c "import whisper; whisper.load_model('${LAZYMIND_WHISPER_MODEL}')"; \
     fi
 COPY algorithm/ /app/algorithm/
-RUN chmod +x /app/algorithm/docker-entrypoint.sh
 ENV PYTHONPATH=/opt/lazyllm:/app/algorithm \
   LAZYMIND_DOCUMENT_SERVER_URL=http://parsing:8000 \
   LAZYMIND_SHARED_UPLOAD_DIR=/var/lib/lazymind/uploads \
@@ -98,7 +97,6 @@ ENV PYTHONPATH=/opt/lazyllm:/app/algorithm \
   LAZYMIND_USE_INNER_MODEL=true \
   LAZYMIND_MODEL_CONFIG_PATH=dynamic
 WORKDIR /app/algorithm
-ENTRYPOINT ["/app/algorithm/docker-entrypoint.sh"]
 CMD ["python", "parsing/parsing.py"]
 
 
@@ -136,7 +134,7 @@ for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources; do \
     "$f"; \
 done; \
 apt-get update && apt-get install -y --no-install-recommends \
-    ripgrep cmake ninja-build \
+    ripgrep cmake ninja-build git \
 && rm -rf /var/lib/apt/lists/*
 
 # Detect arch inside the container (dpkg) so the binary always matches the base image,

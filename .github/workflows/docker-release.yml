@@ -1,6 +1,9 @@
 # Variables that need to be configured in the repository:
-## vars.REGISTRY && vars.REGISTRY_NAMESPACE && 
-## secrets.REGISTRY_USERNAME && secrets.REGISTRY_PASSWORD
+## vars.REGISTRY_DOCKERHUB && vars.REGISTRY_DOCKERHUB_NAMESPACE &&
+## secrets.REGISTRY_DOCKERHUB_USERNAME && secrets.REGISTRY_DOCKERHUB_TOKEN
+
+## vars.REGISTRY_ALIYUN && vars.REGISTRY_ALIYUN_NAMESPACE &&
+## secrets.REGISTRY_ALIYUN_USERNAME && secrets.REGISTRY_ALIYUN_TOKEN
 
 # Creates images for both linux/amd64 and linux/arm64 platforms
 
@@ -25,7 +28,7 @@ on:
         required: true
         type: string
       service:
-        description: JSON array of services to build (e.g. [ "backend", "frontend", "mineru", "processor-server", "processor-worker", "parsing", "chat", "auth-service" ] or ["all"])
+        description: JSON array of services to build (e.g. [ "auth-service", "core", "office-convert-service", "scan-control-plane", "file-watcher", "frontend", "kong", "doc", "mineru", "algorithm", "evo-api" ] or ["all"])
         required: false
         default: '["all"]'
         type: string
@@ -36,11 +39,14 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  # GitLab container registry host, defaults to registry.gitlab.com
-  REGISTRY: ${{ vars.REGISTRY || 'registry.gitlab.com' }}
-  # Namespace/repository path in GitLab registry (group/project)
-  REGISTRY_NAMESPACE: ${{ vars.REGISTRY_NAMESPACE || github.repository }}
-  
+  # DockerHub container registry host, defaults to docker.io
+  REGISTRY_DOCKERHUB: ${{ vars.REGISTRY_DOCKERHUB || 'docker.io' }}
+  # Namespace/repository path in DockerHub registry (group/project)
+  REGISTRY_DOCKERHUB_NAMESPACE: ${{ vars.REGISTRY_DOCKERHUB_NAMESPACE || 'lazyllm' }}
+  # Aliyun container registry host, defaults to registry.cn-hangzhou.aliyuncs.com
+  REGISTRY_ALIYUN: ${{ vars.REGISTRY_ALIYUN || 'registry.cn-hangzhou.aliyuncs.com' }}
+  # Namespace/repository path in Aliyun registry (group/project)
+  REGISTRY_ALIYUN_NAMESPACE: ${{ vars.REGISTRY_ALIYUN_NAMESPACE || 'lazyllm' }}
 
 
 jobs:
@@ -56,39 +62,50 @@ jobs:
             dockerfile: backend/auth-service/Dockerfile
             context: backend
             image: lazymind-auth-service
-          - service: backend
+          - service: core
             dockerfile: backend/core/Dockerfile
             context: backend
-            image: lazymind-backend
+            image: lazymind-core
+          - service: office-convert-service
+            dockerfile: backend/office-convert-service/Dockerfile
+            context: backend
+            image: lazymind-office-convert-service
+          - service: scan-control-plane
+            dockerfile: backend/scan-control-plane/Dockerfile
+            context: backend/scan-control-plane
+            image: lazymind-scan-control-plane
+          - service: file-watcher
+            dockerfile: backend/file-watcher/Dockerfile
+            context: backend/file-watcher
+            image: lazymind-file-watcher
           - service: frontend
             dockerfile: frontend/Dockerfile
             context: frontend
             image: lazymind-frontend
+          - service: kong
+            dockerfile: kong/Dockerfile
+            context: kong
+            image: lazymind-kong
+          - service: doc
+            dockerfile: algorithm/Dockerfile
+            context: .
+            target: doc
+            image: lazymind-doc
           - service: mineru
             dockerfile: algorithm/Dockerfile
-            context: algorithm
+            context: .
             target: mineru
             image: lazymind-mineru
-          - service: processor-server
+          - service: algorithm
             dockerfile: algorithm/Dockerfile
-            context: algorithm
-            target: default
-            image: lazymind-processor-server
-          - service: processor-worker
+            context: .
+            target: algorithm
+            image: lazymind-algorithm
+          - service: evo-api
             dockerfile: algorithm/Dockerfile
-            context: algorithm
-            target: default
-            image: lazymind-processor-worker
-          - service: parsing
-            dockerfile: algorithm/Dockerfile
-            context: algorithm
-            target: default
-            image: lazymind-parsing
-          - service: chat
-            dockerfile: algorithm/Dockerfile
-            context: algorithm
-            target: default
-            image: lazymind-chat
+            context: .
+            target: evo
+            image: lazymind-evo-api
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -96,12 +113,11 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-
       - name: Detect changed services
         id: changes
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
           if [[ "${{ github.event_name }}" == "push" ]]; then
             git fetch origin main --depth=2
@@ -110,16 +126,29 @@ jobs:
             CHANGED=""
           fi
 
+          add_service() {
+            local name
+            for name in "$@"; do
+              [[ " ${SERVICES} " == *" ${name} "* ]] || SERVICES="${SERVICES} ${name}"
+            done
+          }
+
           SERVICES=""
 
-          [[ "$CHANGED" == *"backend/auth-service"* ]] && SERVICES="$SERVICES auth-service"
-          [[ "$CHANGED" == *"backend/core"* ]] && SERVICES="$SERVICES backend"
-          [[ "$CHANGED" == *"frontend"* ]] && SERVICES="$SERVICES frontend"
-          [[ "$CHANGED" == *"algorithm"* ]] && SERVICES="$SERVICES mineru processor-server processor-worker parsing chat"
+          [[ "$CHANGED" == *"backend/auth-service"* ]] && add_service auth-service
+          [[ "$CHANGED" == *"backend/core/doc"* ]] && add_service doc
+          [[ "$CHANGED" == *"backend/core"* ]] && add_service core
+          [[ "$CHANGED" == *"backend/office-convert-service"* ]] && add_service office-convert-service
+          [[ "$CHANGED" == *"backend/scan-control-plane"* ]] && add_service scan-control-plane
+          [[ "$CHANGED" == *"backend/file-watcher/"* ]] && add_service file-watcher
+          [[ "$CHANGED" == *"frontend/"* || "$CHANGED" == "frontend" ]] && add_service frontend
+          [[ "$CHANGED" == *"kong/"* || "$CHANGED" == *"kong.yml"* ]] && add_service kong
+          [[ "$CHANGED" == *"algorithm/"* || "$CHANGED" == "algorithm" ]] && add_service algorithm mineru doc evo-api
+          [[ "$CHANGED" == *"evo/"* || "$CHANGED" == "evo" ]] && add_service evo-api
 
-          echo "services=$SERVICES"
-          echo "services=$SERVICES" >> $GITHUB_OUTPUT
-
+          SERVICES="${SERVICES# }"
+          echo "services=${SERVICES}"
+          echo "services=${SERVICES}" >> "$GITHUB_OUTPUT"
 
       - name: Resolve release tag
         id: tag
@@ -135,7 +164,7 @@ jobs:
           (github.ref_type == 'tag')
           ||
           (github.event_name == 'push' && github.ref_type != 'tag' &&
-            contains(steps.changes.outputs.services, matrix.service)
+            contains(format(' {0} ', steps.changes.outputs.services), format(' {0} ', matrix.service))
           )
         run: |
           set -euo pipefail
@@ -148,20 +177,25 @@ jobs:
           fi
           echo "value=${TAG}" >> "${GITHUB_OUTPUT}"
 
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         if: ${{ steps.tag.outputs.value != '' }}
 
-
-      - name: Login to Registry
+      - name: Login to DockerHub Registry
         uses: docker/login-action@v3
         if: ${{ steps.tag.outputs.value != '' }}
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
+          registry: ${{ env.REGISTRY_DOCKERHUB }}
+          username: ${{ secrets.REGISTRY_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.REGISTRY_DOCKERHUB_TOKEN }}
 
+      - name: Login to Aliyun Registry
+        uses: docker/login-action@v3
+        if: ${{ steps.tag.outputs.value != '' }}
+        with:
+          registry: ${{ env.REGISTRY_ALIYUN }}
+          username: ${{ secrets.REGISTRY_ALIYUN_USERNAME }}
+          password: ${{ secrets.REGISTRY_ALIYUN_TOKEN }}
 
       - name: Build and push ${{ matrix.service }} - linux/amd64
         uses: docker/build-push-action@v6
@@ -174,10 +208,12 @@ jobs:
           provenance: false
           platforms: linux/amd64
           tags: |
-            ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ matrix.image }}:${{ steps.tag.outputs.value }}-amd64
-            ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ matrix.image }}:latest-amd64
+            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.REGISTRY_DOCKERHUB_NAMESPACE }}/${{ matrix.image }}:${{ steps.tag.outputs.value }}-amd64
+            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.REGISTRY_DOCKERHUB_NAMESPACE }}/${{ matrix.image }}:latest-amd64
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.REGISTRY_ALIYUN_NAMESPACE }}/${{ matrix.image }}:${{ steps.tag.outputs.value }}-amd64
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.REGISTRY_ALIYUN_NAMESPACE }}/${{ matrix.image }}:latest-amd64
 
-      - name: Build and push ${{ matrix.service }} - linux/arm64 
+      - name: Build and push ${{ matrix.service }} - linux/arm64
         uses: docker/build-push-action@v6
         if: ${{ steps.tag.outputs.value != '' }}
         with:
@@ -186,27 +222,49 @@ jobs:
           target: ${{ matrix.target }}
           push: true
           provenance: false
-          platforms: linux/arm64 
+          platforms: linux/arm64
           tags: |
-            ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ matrix.image }}:${{ steps.tag.outputs.value }}-arm64
-            ${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ matrix.image }}:latest-arm64
-            
-      - name: Create and push manifest
+            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.REGISTRY_DOCKERHUB_NAMESPACE }}/${{ matrix.image }}:${{ steps.tag.outputs.value }}-arm64
+            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.REGISTRY_DOCKERHUB_NAMESPACE }}/${{ matrix.image }}:latest-arm64
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.REGISTRY_ALIYUN_NAMESPACE }}/${{ matrix.image }}:${{ steps.tag.outputs.value }}-arm64
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.REGISTRY_ALIYUN_NAMESPACE }}/${{ matrix.image }}:latest-arm64
+
+      - name: Create and push DockerHub manifest
         if: ${{ steps.tag.outputs.value != '' }}
-        run: |          
-          IMAGE="${{ env.REGISTRY }}/${{ env.REGISTRY_NAMESPACE }}/${{ matrix.image }}"
-          
+        run: |
+          DOCKERHUB_IMAGE="${{ env.REGISTRY_DOCKERHUB }}/${{ env.REGISTRY_DOCKERHUB_NAMESPACE }}/${{ matrix.image }}"
+
           echo "Waiting for images to be available..."
           sleep 30
-          
+
           # Create manifest
-          docker manifest create $IMAGE:${{ steps.tag.outputs.value }} \
-            --amend $IMAGE:${{ steps.tag.outputs.value }}-arm64 \
-            --amend $IMAGE:${{ steps.tag.outputs.value }}-amd64 || true
-          docker manifest push $IMAGE:${{ steps.tag.outputs.value }}
-          
+          docker manifest create $DOCKERHUB_IMAGE:${{ steps.tag.outputs.value }} \
+            --amend $DOCKERHUB_IMAGE:${{ steps.tag.outputs.value }}-arm64 \
+            --amend $DOCKERHUB_IMAGE:${{ steps.tag.outputs.value }}-amd64 || true
+          docker manifest push $DOCKERHUB_IMAGE:${{ steps.tag.outputs.value }}
+
           # Create latest manifest
-          docker manifest create $IMAGE:latest \
-            --amend $IMAGE:latest-arm64 \
-            --amend $IMAGE:latest-amd64 || true
-          docker manifest push $IMAGE:latest
+          docker manifest create $DOCKERHUB_IMAGE:latest \
+            --amend $DOCKERHUB_IMAGE:latest-arm64 \
+            --amend $DOCKERHUB_IMAGE:latest-amd64 || true
+          docker manifest push $DOCKERHUB_IMAGE:latest
+
+      - name: Create and push Aliyun manifest
+        if: ${{ steps.tag.outputs.value != '' }}
+        run: |
+          ALIYUN_IMAGE="${{ env.REGISTRY_ALIYUN }}/${{ env.REGISTRY_ALIYUN_NAMESPACE }}/${{ matrix.image }}"
+
+          echo "Waiting for images to be available..."
+          sleep 30
+
+          # Create manifest
+          docker manifest create $ALIYUN_IMAGE:${{ steps.tag.outputs.value }} \
+            --amend $ALIYUN_IMAGE:${{ steps.tag.outputs.value }}-arm64 \
+            --amend $ALIYUN_IMAGE:${{ steps.tag.outputs.value }}-amd64 || true
+          docker manifest push $ALIYUN_IMAGE:${{ steps.tag.outputs.value }}
+
+          # Create latest manifest
+          docker manifest create $ALIYUN_IMAGE:latest \
+            --amend $ALIYUN_IMAGE:latest-arm64 \
+            --amend $ALIYUN_IMAGE:latest-amd64 || true
+          docker manifest push $ALIYUN_IMAGE:latest

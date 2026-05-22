@@ -102,8 +102,17 @@ def test_run_researcher_writes_finding_with_id() -> None:
 
 
 def test_run_researcher_handles_invalid_verdict_as_inconclusive() -> None:
-    _h("run_researcher: invalid LLM verdict coerced to inconclusive")
+    _h("run_researcher: invalid verdict is repaired to inconclusive")
     session = _bootstrap_session()
+    session.llm_provider = lambda: (lambda _prompt: json.dumps({
+        "hypothesis_id": "H1",
+        "verdict": "inconclusive",
+        "confidence": 0.5,
+        "refined_claim": "x",
+        "evidence_handles": [],
+        "suggested_action": "?",
+        "reasoning": "schema repair normalized invalid verdict",
+    }))
     fake = json.dumps({
         "hypothesis_id": "H1", "verdict": "guessed",
         "confidence": 0.5, "refined_claim": "x", "evidence_handles": [],

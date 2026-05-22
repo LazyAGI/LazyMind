@@ -272,7 +272,11 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	groupNameByID := make(map[string]string)
+	type groupInfo struct {
+		name       string
+		isVerified bool
+	}
+	groupByID := make(map[string]groupInfo)
 	if len(groupIDs) > 0 {
 		var grps []orm.UserModelProviderGroup
 		if err := db.WithContext(r.Context()).
@@ -282,13 +286,17 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for i := range grps {
-			groupNameByID[grps[i].ID] = grps[i].Name
+			groupByID[grps[i].ID] = groupInfo{name: grps[i].Name, isVerified: grps[i].IsVerified}
 		}
 	}
 
 	out := make([]groupModelListItem, 0, len(rows))
 	for i := range rows {
 		m := rows[i]
+		grp, ok := groupByID[m.UserModelProviderGroupID]
+		if !ok || !grp.isVerified {
+			continue
+		}
 		out = append(out, groupModelListItem{
 			ID:                       m.ID,
 			UserModelProviderID:      m.UserModelProviderID,
@@ -296,7 +304,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			Name:                     m.Name,
 			ModelType:                m.ModelType,
 			ProviderName:             m.ProviderName,
-			GroupName:                groupNameByID[m.UserModelProviderGroupID],
+			GroupName:                grp.name,
 			BaseURL:                  m.BaseURL,
 			IsDefault:                m.IsDefault,
 		})

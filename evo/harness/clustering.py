@@ -237,6 +237,17 @@ def _edges_from_skeleton(skeleton: list[dict[str, Any]]) -> list[tuple[str, str]
     return edges
 
 
+def _edges_from_skeletons(skeletons: dict[str, list[dict[str, Any]]]) -> list[tuple[str, str]]:
+    seen: set[tuple[str, str]] = set()
+    out: list[tuple[str, str]] = []
+    for skeleton in skeletons.values():
+        for edge in _edges_from_skeleton(skeleton):
+            if edge not in seen:
+                seen.add(edge)
+                out.append(edge)
+    return out
+
+
 def _classify_transition(delta_h: float, nmi_val: float) -> str:
     if delta_h < -0.2:
         return 'convergence'
@@ -259,7 +270,9 @@ def analyze_step_flow() -> ToolResult[FlowAnalysisResult]:
     for sk, info in per.per_step.items():
         if info.labels:
             step_labels[sk] = np.array([info.labels.get(c, -1) for c in all_cids])
-    edges = _edges_from_skeleton(session.trace_meta.flow_skeleton)
+    edges = _edges_from_skeletons(session.trace_meta.flow_skeletons) or _edges_from_skeleton(
+        session.trace_meta.flow_skeleton
+    )
     transitions: list[StepTransition] = []
     for s_a, s_b in edges:
         la = step_labels.get(s_a)

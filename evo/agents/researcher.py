@@ -102,15 +102,35 @@ def run_researcher(
         cfg=ReActConfig(max_rounds=max_rounds, min_tool_calls=1, required_tools=(), use_memory_curator=True),
         logger=session.logger(f'react.{RESEARCHER_NAME}.{hypothesis.id}'),
     )
-    parsed = invoke_structured(
-        session,
-        invoker,
-        _build_task(snapshot),
-        agent=f'{RESEARCHER_NAME}:{hypothesis.id}',
-        schema=SCHEMAS['researcher'],
-        producer=lambda task: runner.run(task),
-        max_repair=2,
-    )
+    try:
+        parsed = invoke_structured(
+            session,
+            invoker,
+            _build_task(snapshot),
+            agent=f'{RESEARCHER_NAME}:{hypothesis.id}',
+            schema=SCHEMAS['researcher'],
+            producer=lambda task: runner.run(task),
+            max_repair=2,
+        )
+    except Exception as exc:
+        final = {
+            'hypothesis_id': hypothesis.id,
+            'verdict': 'inconclusive',
+            'confidence': 0.0,
+            'refined_claim': hypothesis.claim,
+            'evidence_handles': [],
+            'suggested_action': '检查 researcher 输出格式或重试该假设。',
+            'reasoning': f'researcher failed before a valid final result: {type(exc).__name__}: {exc}',
+        }
+        session.telemetry.emit(
+            'researcher.reasoning_summary',
+            actor=f'{RESEARCHER_NAME}:{hypothesis.id}',
+            rounds=runner.stats.rounds,
+            tool_calls=dict(runner.stats.tool_calls),
+            final_answer=json.dumps(final, ensure_ascii=False),
+            error=str(exc),
+        )
+        raise
     verdict = str(parsed.get('verdict', 'inconclusive'))
     if verdict not in _VALID_VERDICTS:
         verdict = 'inconclusive'

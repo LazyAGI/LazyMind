@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -20,6 +21,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/log"
+	"lazymind/core/modelconfig"
 )
 
 const (
@@ -111,6 +113,20 @@ func forwardedUpstreamHeaders(r *http.Request) map[string]string {
 		}
 	}
 	return headers
+}
+
+func attachThreadModelConfig(ctx context.Context, db *gorm.DB, userID string, payload map[string]any) error {
+	if payload == nil {
+		return nil
+	}
+	llmConfig, err := modelconfig.LoadLLMConfig(ctx, db, userID)
+	if err != nil {
+		return err
+	}
+	if len(llmConfig) > 0 {
+		payload["llm_config"] = llmConfig
+	}
+	return nil
 }
 
 func parseRecordLimit(raw string) int {

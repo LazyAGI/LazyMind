@@ -159,7 +159,7 @@ def invoke_structured(
         agent_tag = agent if attempt == 0 else f'{agent}:repair{attempt}'
         if attempt == 0:
             if producer is not None:
-                raw = producer(user_text)
+                raw = producer(wrapped_user)
             else:
                 raw = _call_llm(
                     session, producer=lambda u=current_user: _invoke(invoker, u), cache_key=cache_key, agent=agent_tag

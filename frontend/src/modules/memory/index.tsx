@@ -25,7 +25,13 @@ import {
 } from "@ant-design/icons";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useTranslation } from "react-i18next";
-import { Outlet, useMatch, useNavigate, useSearchParams } from "react-router-dom";
+import {
+  Outlet,
+  useLocation,
+  useMatch,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
 import {
   DEVELOPER_ACTIVE_EVENT,
   isDeveloperModeActive,
@@ -82,8 +88,8 @@ import {
   createGlossaryGroupFromConflict,
   createGlossaryAsset,
   getGlossaryAssetDetail,
-  listGlossaryAssets,
   listGlossaryConflicts,
+  listGlossaryAssetsPage,
   mergeGlossaryAssets,
   mergeGlossaryConflictAndAddWord,
   removeGlossaryConflict,
@@ -159,12 +165,15 @@ import "./index.scss";
 
 const backendSuggestionPageSize = 20;
 const defaultSkillListPageSize = 6;
+const defaultGlossaryListPageSize = 4;
 const showGlossaryInboxUi = true;
 const MERGED_GLOSSARY_GROUP_OPTION_ID = "__merged_glossary_group__";
 const MERGED_GLOSSARY_GROUP_OPTION_ID_PREFIX = `${MERGED_GLOSSARY_GROUP_OPTION_ID}:`;
 const NEW_GLOSSARY_GROUP_OPTION_ID = "__new_glossary_group__";
-const isPendingReviewSuggestionStatus = (status?: string) =>
-  String(status || "").trim().toLowerCase() === "pending_review";
+const isReviewableSuggestionStatus = (status?: string) => {
+  const normalized = String(status || "").trim().toLowerCase();
+  return normalized === "pending_review" || normalized === "accepted";
+};
 const isSkillRemoveSuggestion = (suggestion: EvolutionSuggestionRecord) =>
   String(suggestion.action || "").trim().toLowerCase() === "remove";
 const normalizeAutoEvoApplyStatus = (status?: string) =>
@@ -200,6 +209,7 @@ const mergeEvolutionSuggestionRecords = (
 
 export default function MemoryManagement() {
   const { t } = useTranslation();
+  const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabRouteMatch = useMatch(`${MEMORY_BASE_PATH}/:tab`);
@@ -208,17 +218,24 @@ export default function MemoryManagement() {
   const glossaryDetailMatch = useMatch(`${MEMORY_BASE_PATH}/glossary/:itemId`);
   const reviewRouteMatch = useMatch(`${MEMORY_BASE_PATH}/review/:tab/:itemId`);
   const reviewRouteReloadKeyRef = useRef("");
+  const skillRouteItemId = skillDetailMatch?.params.itemId;
+  const experienceRouteItemId = experienceDetailMatch?.params.itemId;
+  const glossaryRouteItemId = glossaryDetailMatch?.params.itemId;
+  const reviewRouteTab = parseChangeProposalTab(reviewRouteMatch?.params.tab);
+  const reviewRouteItemId = reviewRouteMatch?.params.itemId;
+  const isReviewRouteRequested = Boolean(reviewRouteTab && reviewRouteItemId);
   const routeListTab = parseMemoryTab(tabRouteMatch?.params.tab);
-  const initialRouteTab =
-    (skillDetailMatch?.params.itemId
+  const queryRouteTab = parseMemoryTab(searchParams.get("tab"));
+  const routeMemoryTab =
+    (skillRouteItemId
       ? "skills"
-      : experienceDetailMatch?.params.itemId
+      : experienceRouteItemId
       ? "experience"
-      : glossaryDetailMatch?.params.itemId
+      : glossaryRouteItemId
       ? "glossary"
-      : parseChangeProposalTab(reviewRouteMatch?.params.tab) ||
+      : reviewRouteTab ||
         routeListTab ||
-        parseMemoryTab(searchParams.get("tab")) ||
+        queryRouteTab ||
         "skills") as MemoryTab;
   const initialGlossaryDetailTarget = null;
   const initialReviewProposalId = (() => {
@@ -232,7 +249,7 @@ export default function MemoryManagement() {
       (item) => item.tab === routeTab && item.targetId === routeItemId,
     )?.id;
   })();
-  const [activeTab, setActiveTab] = useState<MemoryTab>(initialRouteTab);
+  const [activeTab, setActiveTab] = useState<MemoryTab>(routeMemoryTab);
   const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
   const [toolAssets] = useState<StructuredAsset[]>(initialTools);
   const [skillAssets, setSkillAssets] = useState<StructuredAsset[]>(initialSkills);
@@ -240,6 +257,13 @@ export default function MemoryManagement() {
   const [skillAutoEvoLoading, setSkillAutoEvoLoading] = useState<Set<string>>(new Set());
   const [skillsInitialized, setSkillsInitialized] = useState(false);
   const skillListRequestIdRef = useRef(0);
+  const skillListRouteLocationKeyRef = useRef("");
+  const skillListRefreshKeyRef = useRef("");
+  const experienceSectionRefreshKeyRef = useRef("");
+  const glossaryAssetsRefreshKeyRef = useRef("");
+  const glossaryAssetsFilterKeyRef = useRef("");
+  const glossaryAssetsRouteLocationKeyRef = useRef("");
+  const glossaryConflictsRefreshKeyRef = useRef("");
   const [skillListPage, setSkillListPage] = useState(1);
   const [skillListPageSize, setSkillListPageSize] = useState(defaultSkillListPageSize);
   const [skillListTotal, setSkillListTotal] = useState(initialSkills.length);
@@ -255,6 +279,11 @@ export default function MemoryManagement() {
   const [glossaryInitialized, setGlossaryInitialized] = useState(false);
   const [glossaryLoadError, setGlossaryLoadError] = useState("");
   const [glossarySaving, setGlossarySaving] = useState(false);
+  const [glossaryListPage, setGlossaryListPage] = useState(1);
+  const [glossaryListPageSize, setGlossaryListPageSize] = useState(
+    defaultGlossaryListPageSize,
+  );
+  const [glossaryListTotal, setGlossaryListTotal] = useState(0);
   const [query, setQuery] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [category, setCategory] = useState<string>();
@@ -666,9 +695,28 @@ export default function MemoryManagement() {
   }, [category, skillKeyword, skillListPage, skillListPageSize, tag]);
 
   const refreshGlossaryAssets = useCallback(
-    async (options?: { keyword?: string; silent?: boolean; source?: GlossarySource }) => {
+    async (options?: {
+      keyword?: string;
+      page?: number;
+      pageSize?: number;
+      silent?: boolean;
+      source?: GlossarySource;
+    }) => {
       const requestId = glossaryRequestIdRef.current + 1;
       glossaryRequestIdRef.current = requestId;
+      const nextPage = Math.max(1, options?.page ?? glossaryListPage);
+      const nextPageSize = Math.max(1, options?.pageSize ?? glossaryListPageSize);
+      const totalForToken = Math.max(glossaryListTotal, (nextPage - 1) * nextPageSize);
+      const pageToken =
+        nextPage > 1
+          ? window.btoa(
+              JSON.stringify({
+                Start: (nextPage - 1) * nextPageSize,
+                Limit: nextPageSize,
+                TotalCount: totalForToken,
+              }),
+            )
+          : "";
 
       if (!options?.silent) {
         setGlossaryLoading(true);
@@ -676,16 +724,21 @@ export default function MemoryManagement() {
       setGlossaryLoadError("");
 
       try {
-        const records = await listGlossaryAssets({
+        const result = await listGlossaryAssetsPage({
           keyword: options?.keyword,
           source: options?.source,
-          pageSize: 200,
+          pageSize: nextPageSize,
+          pageToken,
         });
 
         if (glossaryRequestIdRef.current !== requestId) {
           return;
         }
 
+        const records = result.records;
+        setGlossaryListPage(nextPage);
+        setGlossaryListPageSize(nextPageSize);
+        setGlossaryListTotal(result.total);
         setGlossaryAssets(records);
         setSelectedGlossaryAssetIds((previous) => {
           const validIds = new Set(records.map((item) => item.id));
@@ -720,7 +773,7 @@ export default function MemoryManagement() {
         }
       }
     },
-    [t],
+    [glossaryListPage, glossaryListPageSize, glossaryListTotal, t],
   );
 
   const buildGlossaryProposalFromConflict = useCallback(
@@ -933,12 +986,85 @@ export default function MemoryManagement() {
   );
 
   useEffect(() => {
-    void refreshSkillAssets();
-  }, [refreshSkillAssets]);
+    const shouldRefreshSkillAssets =
+      Boolean(skillRouteItemId) ||
+      reviewRouteTab === "skills" ||
+      routeMemoryTab === "skills";
+
+    if (!shouldRefreshSkillAssets) {
+      return;
+    }
+
+    const isNewSkillListEntry =
+      !skillRouteItemId &&
+      reviewRouteTab !== "skills" &&
+      skillListRouteLocationKeyRef.current !== location.key;
+    const requestPage = isNewSkillListEntry ? 1 : skillListPage;
+    const refreshKey = [
+      location.key,
+      location.pathname,
+      location.search,
+      skillKeyword,
+      category || "",
+      tag || "",
+      requestPage,
+      skillListPageSize,
+    ].join("|");
+
+    if (skillListRefreshKeyRef.current === refreshKey) {
+      return;
+    }
+    skillListRouteLocationKeyRef.current = location.key;
+    skillListRefreshKeyRef.current = refreshKey;
+
+    void refreshSkillAssets({ page: requestPage });
+  }, [
+    category,
+    location.key,
+    location.pathname,
+    location.search,
+    refreshSkillAssets,
+    reviewRouteTab,
+    routeMemoryTab,
+    skillKeyword,
+    skillListPage,
+    skillListPageSize,
+    skillRouteItemId,
+    tag,
+  ]);
 
   useEffect(() => {
-    void refreshExperienceSection({ silent: true });
-  }, [refreshExperienceSection]);
+    const shouldRefreshExperience =
+      Boolean(experienceRouteItemId) ||
+      reviewRouteTab === "experience" ||
+      routeMemoryTab === "experience";
+
+    if (!shouldRefreshExperience) {
+      return;
+    }
+
+    const refreshKey = [
+      location.key,
+      location.pathname,
+      location.search,
+      routeMemoryTab,
+    ].join("|");
+
+    if (experienceSectionRefreshKeyRef.current === refreshKey) {
+      return;
+    }
+    experienceSectionRefreshKeyRef.current = refreshKey;
+
+    void refreshExperienceSection();
+  }, [
+    experienceRouteItemId,
+    location.key,
+    location.pathname,
+    location.search,
+    refreshExperienceSection,
+    reviewRouteTab,
+    routeMemoryTab,
+  ]);
 
   useEffect(() => {
     if (activeTab !== "skills") {
@@ -949,37 +1075,74 @@ export default function MemoryManagement() {
   }, [activeTab, refreshSkillShareCenter]);
 
   useEffect(() => {
-    if (activeTab !== "experience") {
+    if (routeMemoryTab !== "glossary") {
       return;
     }
 
-    void refreshExperienceSection();
-  }, [activeTab, refreshExperienceSection]);
+    const filterKey = [query, glossarySource || ""].join("|");
+    const shouldResetGlossaryPage =
+      glossaryAssetsRouteLocationKeyRef.current !== location.key ||
+      glossaryAssetsFilterKeyRef.current !== filterKey;
+    const requestPage = shouldResetGlossaryPage ? 1 : glossaryListPage;
+    const refreshKey = [
+      location.key,
+      location.pathname,
+      location.search,
+      filterKey,
+      requestPage,
+      glossaryListPageSize,
+    ].join("|");
+
+    if (glossaryAssetsRefreshKeyRef.current === refreshKey) {
+      return;
+    }
+    glossaryAssetsRouteLocationKeyRef.current = location.key;
+    glossaryAssetsFilterKeyRef.current = filterKey;
+    glossaryAssetsRefreshKeyRef.current = refreshKey;
+
+    void refreshGlossaryAssets({
+      keyword: query,
+      page: requestPage,
+      pageSize: glossaryListPageSize,
+      source: glossarySource,
+    });
+  }, [
+    glossaryListPage,
+    glossaryListPageSize,
+    glossarySource,
+    location.key,
+    location.pathname,
+    location.search,
+    query,
+    refreshGlossaryAssets,
+    routeMemoryTab,
+  ]);
 
   useEffect(() => {
-    if (activeTab !== "glossary") {
+    if (routeMemoryTab !== "glossary") {
       return;
     }
 
-    const timer = window.setTimeout(() => {
-      void refreshGlossaryAssets({
-        keyword: query,
-        source: glossarySource,
-      });
-    }, 250);
+    const refreshKey = [
+      location.key,
+      location.pathname,
+      location.search,
+      routeMemoryTab,
+    ].join("|");
 
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [activeTab, glossarySource, query, refreshGlossaryAssets]);
-
-  useEffect(() => {
-    if (activeTab !== "glossary") {
+    if (glossaryConflictsRefreshKeyRef.current === refreshKey) {
       return;
     }
+    glossaryConflictsRefreshKeyRef.current = refreshKey;
 
     void refreshGlossaryConflicts({ silent: true });
-  }, [activeTab, refreshGlossaryConflicts]);
+  }, [
+    location.key,
+    location.pathname,
+    location.search,
+    refreshGlossaryConflicts,
+    routeMemoryTab,
+  ]);
 
   useEffect(() => {
     if (!glossaryInboxOpen) {
@@ -988,12 +1151,6 @@ export default function MemoryManagement() {
 
     void refreshGlossaryConflicts({ showErrorToast: true });
   }, [glossaryInboxOpen, refreshGlossaryConflicts]);
-
-  const glossaryRouteItemId = glossaryDetailMatch?.params.itemId;
-  const skillRouteItemId = skillDetailMatch?.params.itemId;
-  const experienceRouteItemId = experienceDetailMatch?.params.itemId;
-  const reviewRouteTab = parseChangeProposalTab(reviewRouteMatch?.params.tab);
-  const reviewRouteItemId = reviewRouteMatch?.params.itemId;
 
   useEffect(() => {
     const syncDeveloperActive = () => {
@@ -1651,12 +1808,21 @@ export default function MemoryManagement() {
 
   useEffect(() => {
     if (activeProposalId && !activeProposal) {
+      if (isReviewRouteRequested) {
+        return;
+      }
       setActiveProposalId(undefined);
       if (reviewRouteTab) {
         navigateToMemoryList(reviewRouteTab);
       }
     }
-  }, [activeProposal, activeProposalId, navigateToMemoryList, reviewRouteTab]);
+  }, [
+    activeProposal,
+    activeProposalId,
+    isReviewRouteRequested,
+    navigateToMemoryList,
+    reviewRouteTab,
+  ]);
 
   const keyword = query.trim().toLowerCase();
   const hasStructuredFilter = Boolean(keyword || category || tag);
@@ -2269,14 +2435,14 @@ export default function MemoryManagement() {
     if (!proposal || shouldReloadProposal) {
       if (tab === "skills") {
         const matchedSkill = skillAssets.find((item) => item.id === itemId);
-        const hasBackendPendingReview = Boolean(
+        const hasBackendReviewableSuggestions = Boolean(
           matchedSkill?.hasPendingReviewSuggestions,
         );
 
         if (
           shouldReloadProposal ||
           isSkillUpdatePending(skillUpdateStatus) ||
-          hasBackendPendingReview
+          hasBackendReviewableSuggestions
         ) {
           if (!matchedSkill) {
             message.warning(t("admin.memoryDiffTargetMissing"));
@@ -3424,6 +3590,8 @@ export default function MemoryManagement() {
             await removeGlossaryAsset(item.id);
             await refreshGlossaryAssets({
               keyword: query,
+              page: glossaryListPage,
+              pageSize: glossaryListPageSize,
               source: glossarySource,
               silent: true,
             });
@@ -3474,6 +3642,8 @@ export default function MemoryManagement() {
           await batchRemoveGlossaryAssets(removedIds);
           await refreshGlossaryAssets({
             keyword: query,
+            page: glossaryListPage,
+            pageSize: glossaryListPageSize,
             source: glossarySource,
             silent: true,
           });
@@ -3650,6 +3820,8 @@ export default function MemoryManagement() {
 
         await refreshGlossaryAssets({
           keyword: query,
+          page: glossaryListPage,
+          pageSize: glossaryListPageSize,
           source: glossarySource,
           silent: true,
         });
@@ -3670,6 +3842,8 @@ export default function MemoryManagement() {
           setSelectedGlossaryAssetIds([]);
           await refreshGlossaryAssets({
             keyword: query,
+            page: glossaryListPage,
+            pageSize: glossaryListPageSize,
             source: glossarySource,
             silent: true,
           });
@@ -4203,6 +4377,8 @@ export default function MemoryManagement() {
         await Promise.all([
           refreshGlossaryAssets({
             keyword: query,
+            page: glossaryListPage,
+            pageSize: glossaryListPageSize,
             source: glossarySource,
             silent: true,
           }),
@@ -4297,16 +4473,16 @@ export default function MemoryManagement() {
       render: (_value, record) => {
         const pendingProposal =
           activeTab === "skills" ? getPendingProposal("skills", record.id) : undefined;
-        const hasBackendPendingReview =
+        const hasBackendReviewableSuggestions =
           activeTab === "skills" &&
           !record.autoEvo &&
           (Boolean(record.hasPendingReviewSuggestions) ||
-            isPendingReviewSuggestionStatus(record.suggestionStatus));
+            isReviewableSuggestionStatus(record.suggestionStatus));
         const showPendingTag =
           !record.autoEvo &&
           (Boolean(pendingProposal) ||
             isSkillUpdatePending(record.updateStatus) ||
-            hasBackendPendingReview);
+            hasBackendReviewableSuggestions);
         const autoEvoStatusMeta =
           activeTab === "skills" && record.autoEvo
             ? getAutoEvoStatusMeta(record.autoEvoApplyStatus)
@@ -4450,21 +4626,21 @@ export default function MemoryManagement() {
       render: (_value, record) => {
         const pendingProposal =
           activeTab === "skills" ? getPendingProposal("skills", record.id) : undefined;
-        const hasBackendPendingReview =
+        const hasBackendReviewableSuggestions =
           activeTab === "skills" &&
           !record.autoEvo &&
           (Boolean(record.hasPendingReviewSuggestions) ||
-            isPendingReviewSuggestionStatus(record.suggestionStatus));
+            isReviewableSuggestionStatus(record.suggestionStatus));
         const canReviewChange =
           !record.autoEvo &&
           (Boolean(pendingProposal) ||
             isSkillUpdatePending(record.updateStatus) ||
-            hasBackendPendingReview);
+            hasBackendReviewableSuggestions);
         const reviewTooltip = record.autoEvo
           ? t("admin.memoryDiffNoPending")
           : pendingProposal
           ? t("admin.memoryDiffReviewAction")
-          : isSkillUpdatePending(record.updateStatus) || hasBackendPendingReview
+          : isSkillUpdatePending(record.updateStatus) || hasBackendReviewableSuggestions
             ? t("admin.memorySkillUpdateReviewAction")
             : t("admin.memoryDiffNoPending");
 
@@ -4556,12 +4732,12 @@ export default function MemoryManagement() {
       width: 320,
       render: (_value, record) => {
         const pendingProposal = getPendingProposal("experience", record.id);
-        const hasBackendPendingReview =
+        const hasBackendReviewableSuggestions =
           !record.autoEvo &&
           (Boolean(record.hasPendingReviewSuggestions) ||
-            isPendingReviewSuggestionStatus(record.suggestionStatus));
+            isReviewableSuggestionStatus(record.suggestionStatus));
         const showPendingTag =
-          !record.autoEvo && (Boolean(pendingProposal) || hasBackendPendingReview);
+          !record.autoEvo && (Boolean(pendingProposal) || hasBackendReviewableSuggestions);
         const autoEvoStatusMeta = record.autoEvo
           ? getAutoEvoStatusMeta(record.autoEvoApplyStatus)
           : null;
@@ -4662,12 +4838,12 @@ export default function MemoryManagement() {
       width: 210,
       render: (_value, record) => {
         const pendingProposal = getPendingProposal("experience", record.id);
-        const hasBackendPendingReview =
+        const hasBackendReviewableSuggestions =
           !record.autoEvo &&
           (Boolean(record.hasPendingReviewSuggestions) ||
-            isPendingReviewSuggestionStatus(record.suggestionStatus));
+            isReviewableSuggestionStatus(record.suggestionStatus));
         const canReviewChange =
-          !record.autoEvo && (Boolean(pendingProposal) || hasBackendPendingReview);
+          !record.autoEvo && (Boolean(pendingProposal) || hasBackendReviewableSuggestions);
         const reviewTooltip = canReviewChange
           ? t("admin.memoryDiffReviewAction")
           : t("admin.memoryDiffNoPending");
@@ -4796,7 +4972,6 @@ export default function MemoryManagement() {
     label: item,
     value: item,
   }));
-  const isReviewRouteRequested = Boolean(reviewRouteTab && reviewRouteItemId);
   const isGlossaryRouteRequested = Boolean(glossaryRouteItemId);
   const isReviewMode = Boolean(activeProposal && (activeProposalDiff || isBackendSuggestionReviewMode));
   const glossaryDetailExists = useMemo(
@@ -4834,6 +5009,9 @@ export default function MemoryManagement() {
     glossaryChangeProposals,
     glossaryAssets,
     glossaryLoading,
+    glossaryListPage,
+    glossaryListPageSize,
+    glossaryListTotal,
     glossaryLoadError,
     refreshGlossaryAssets,
     glossaryRouteItemId,
@@ -4880,6 +5058,8 @@ export default function MemoryManagement() {
     filteredGlossaryItems,
     glossaryColumns,
     selectedGlossaryAssetIds,
+    setGlossaryListPage,
+    setGlossaryListPageSize,
     setSelectedGlossaryAssetIds,
     skillLoading,
     skillsInitialized,

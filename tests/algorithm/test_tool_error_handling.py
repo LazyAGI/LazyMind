@@ -18,7 +18,7 @@ def test_memory_tool_returns_error_result_for_unexpected_exception(monkeypatch):
     monkeypatch.setattr(memory_mod, '_agentic_config', lambda: {'session_id': 'sid-1'})
     monkeypatch.setattr(memory_mod, '_post_core_api', raise_unexpected)
 
-    result = memory_mod.memory('memory', 'Remember the preference.')
+    result = memory_mod.memory('memory', [{'title': 'pref', 'content': 'Remember the preference.'}])
 
     assert result['success'] is False
     assert result['error_type'] == 'ValueError'

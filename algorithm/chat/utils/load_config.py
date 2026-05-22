@@ -1,6 +1,8 @@
+import os
+import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, NamedTuple, Optional
 
 import yaml
 from lazyllm.tools.agent.skill_manager import SkillManager as LazySkillManager
@@ -56,14 +58,20 @@ def get_config_path() -> str:
     return path
 
 
-def load_model_config(config_path: str | None = None) -> Dict[str, Any]:
-    '''Load and return the raw model config dict (yaml parsed, no env expansion).
+def load_model_config(config_path: str | None = None, *, expand_env: bool = False) -> Dict[str, Any]:
+    '''Load and return the raw model config dict (yaml parsed).
 
     When config_path is None, falls back to the path resolved by get_config_path()
     (controlled by LAZYMIND_MODEL_CONFIG_PATH).
+
+    If expand_env is True, environment variables in ${VAR} or $VAR format
+    are replaced with their values from os.environ.
     '''
     with Path(config_path or get_config_path()).open(encoding='utf-8') as f:
-        return yaml.safe_load(f) or {}
+        raw = yaml.safe_load(f) or {}
+    if expand_env:
+        raw = _deep_expand_env(raw)
+    return raw
 
 
 def normalize_skill_fs_url(value: Any) -> str:
@@ -173,130 +181,10 @@ def summarize_model_config_for_log(model_config: Optional[Dict[str, Any]]) -> st
 def inject_model_config(model_config: Optional[Dict[str, Any]]) -> None:
     '''Inject per-request model configuration into lazyllm globals.
 
-    model_config keys are role names defined in runtime_models.yaml (only roles
-    with source=dynamic are relevant).  Each value is a config dict for that role:
-        {
-            "llm":        {"source": "openai",      "model": "gpt-4o",      "api_key": "sk-..."},
-            "embed_main": {"source": "siliconflow", "model": "BAAI/bge-m3", "api_key": "..."},
-            "reranker":   {"source": "siliconflow", "model": "BAAI/bge-reranker-v2-m3", "api_key": "..."},
-        }
-
-    After this call, globals has the following structure:
-
-        globals.config['dynamic_model_configs'] = ConfigsDict({
-            'llm':          {'chat':  {'source': 'openai',      'model': 'gpt-4o',      ...}},
-            'embed_main':   {'embed': {'source': 'siliconflow', 'model': 'bge-m3',       ...}},
-            'reranker':     {'embed': {'source': 'siliconflow', 'model': 'bge-reranker', ...}},
-        })
-        # api_key is NOT stored in dynamic_model_configs.  It lives in the
-        # per-source config key so that _GlobalConfig.__getitem__ can resolve it
-        # dynamically via the stack lookup (stack = [config_id, role_name, group_id]):
-        globals.config['openai_api_key'] = ConfigsDict({
-            'llm':          'sk-...',
-        })
-        globals.config['siliconflow_api_key'] = ConfigsDict({
-            'embed_main': 'sk-...',
-            'reranker':   'sk-...',
-        })
-
-    Lookup chain at forward() time (OnlineChatModule with name='llm'):
-        stack_enter(m.identities)           # stack = [config_id, 'llm', group_id]
-        _build_supplier('openai', False)
-          → OpenAIChat(api_key='dynamic')   # _dynamic_auth = True
-        supplier.forward()
-          → _api_key → _materialize_lazy_api_key()
-              → _default_api_key()
-                  → globals.config['openai_api_key']
-                      → ConfigsDict lookup hits cfg['llm'] = 'sk-...'  ✓
-
-    Two roles with the same source but different keys (e.g. llm / evo_llm)
-    are fully isolated because the ConfigsDict is keyed by role name, and each
-    module's stack contains its own role name.
-
-    Missing dynamic roles are logged and left unconfigured.  If a later pipeline
-    uses one of those roles, LazyLLM will fail with a role-specific "No source"
-    error instead of silently falling back to a static provider.
+    Delegates to lazyllm.inject_model_config. Kept here for backward compatibility.
     '''
     import lazyllm
-    from lazyllm import LOG
-    from lazyllm.module.llms.onlinemodule.dynamic_router import ConfigsDict
-
-    # Pass the active config path so get_dynamic_role_slot_map reads the correct
-    # file (e.g. runtime_models.online.yaml) instead of always falling back to
-    # _DYNAMIC_CONFIG_PATH (runtime_models.yaml), which has no dynamic roles when
-    # LAZYMIND_MODEL_CONFIG_PATH=online/inner.
-    config_path = get_config_path()
-    role_slot_map = get_dynamic_role_slot_map(config_path)
-
-    if not role_slot_map:
-        if model_config:
-            LOG.warning(
-                f'[ChatServer] [MODEL_CONFIG_SKIPPED] [reason=no_dynamic_roles] '
-                f'[active_config={config_path}] [{summarize_model_config_for_log(model_config)}]'
-            )
-        return
-
-    if not model_config:
-        LOG.error(
-            f'[ChatServer] [MODEL_CONFIG_MISSING] [active_config={config_path}] '
-            f'[dynamic_roles={sorted(role_slot_map)}]'
-        )
-        raise ValueError(
-            f'model_config is required when dynamic roles are configured: '
-            f'{sorted(role_slot_map)}'
-        )
-
-    missing = sorted(role for role in role_slot_map if role not in model_config)
-    if missing:
-        LOG.warning(
-            f'[ChatServer] [MODEL_CONFIG_PARTIAL] [active_config={config_path}] '
-            f'[missing_roles={missing}] [dynamic_roles={sorted(role_slot_map)}] '
-            f'[{summarize_model_config_for_log(model_config)}]'
-        )
-
-    # Build the per-request dynamic_model_configs ConfigsDict (source/model/url/skip_auth only).
-    # Use globals.config[...] for writes so LazyLLM's supported-config registry is respected.
-    # We avoid reading existing ConfigsDict via globals.config[...] here because stack-based
-    # lookup is for per-forward reads; this request supplies the full dynamic role set.
-    cfg = ConfigsDict()
-    api_key_configs: Dict[str, Any] = {}
-    injected_roles = []
-
-    for role, role_cfg in model_config.items():
-        if role not in role_slot_map:
-            LOG.warning(f'[ChatServer] [MODEL_CONFIG_UNKNOWN_ROLE] [role={role!r}] [active_config={config_path}]')
-            continue
-        if not isinstance(role_cfg, dict):
-            raise ValueError(
-                f'model_config[{role!r}] must be a dict, got {type(role_cfg).__name__!r}'
-            )
-        bucket = _make_bucket(role_cfg)
-        if not bucket:
-            raise ValueError(
-                f'model_config[{role!r}] has no usable fields '
-                f'(expected at least one of: source, model, base_url, skip_auth)'
-            )
-        slot = role_slot_map[role]
-        cfg.setdefault(role, {})[slot] = bucket
-        injected_roles.append(role)
-
-        # Store api_key in globals.config['{source}_api_key'] as a ConfigsDict
-        # keyed by role name.  _default_api_key() reads this via the stack-based
-        # lookup in _GlobalConfig.__getitem__, so each role gets its own key even
-        # when multiple roles share the same source.
-        #
-        if (api_key := role_cfg.get('api_key')) and (source := role_cfg.get('source')):
-            config_key = f'{source}_api_key'
-            api_key_configs.setdefault(config_key, ConfigsDict())[role] = api_key
-
-    for config_key, api_key_cfg in api_key_configs.items():
-        lazyllm.globals.config[config_key] = api_key_cfg
-    lazyllm.globals.config['dynamic_model_configs'] = cfg
-    LOG.info(
-        f'[ChatServer] [MODEL_CONFIG_INJECTED] [active_config={config_path}] '
-        f'[dynamic_roles={sorted(role_slot_map)}] [injected_roles={sorted(injected_roles)}] '
-        f'[{summarize_model_config_for_log(model_config)}]'
-    )
+    lazyllm.inject_model_config(model_config)
 
 
 @lru_cache(maxsize=1)
@@ -354,8 +242,7 @@ def get_image_embed_key(config_path: Optional[str] = None) -> Optional[str]:
     '''
     raw = load_model_config(config_path)
     for role, entries in raw.items():
-        if not _is_embed_role(role, entries):
-            continue
+        if not _is_embed_role(role, entries): continue
         if isinstance(entries, list) and entries:
             entry = entries[0]
         elif isinstance(entries, dict):
@@ -406,17 +293,56 @@ def get_embed_index_kwargs(config_path: Optional[str] = None) -> list:
     raw = load_model_config(config_path)
     result = []
     for role, entries in raw.items():
-        if not _is_embed_role(role, entries):
-            continue
-        if not isinstance(entries, list) or not entries:
-            continue
-        entry = entries[0]
-        if 'index_kwargs' in entry:
-            ik = deepcopy(entry['index_kwargs'])
-        else:
-            model_name = (entry.get('name') or entry.get('model') or '').lower()
-            ik = deepcopy(_DEFAULT_SPARSE_INDEX_KWARGS if 'sparse' in model_name
-                          else _DEFAULT_DENSE_INDEX_KWARGS)
+        if not _is_embed_role(role, entries): continue
+        entry = entries[0] if isinstance(entries, list) and entries else entries
+        model_name = (entry.get('name') or entry.get('model') or '').lower()
+        ik = deepcopy(_DEFAULT_SPARSE_INDEX_KWARGS if 'sparse' in model_name else _DEFAULT_DENSE_INDEX_KWARGS)
         ik['embed_key'] = role
         result.append(ik)
     return result
+
+
+class RetrievalSettings(NamedTuple):
+    embed_keys: List[str]
+    file_search_embed_key: str
+    temp_doc_embed_key: str
+    index_kwargs: List[dict]
+    retriever_configs: List[dict]
+
+
+def _expand_env(value: str) -> str:
+    """Expand ${VAR} and $VAR patterns in a string using environment variables."""
+    def replacer(m: re.Match) -> str:
+        var = m.group(1) or m.group(2)
+        return os.environ.get(var, m.group(0))
+    return re.sub(r'\$\{(\w+)\}|\$(\w+)', replacer, value)
+
+
+def _deep_expand_env(obj: Any) -> Any:
+    """Recursively expand environment variables in a dict/list/string structure."""
+    if isinstance(obj, dict):
+        return {k: _deep_expand_env(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_deep_expand_env(v) for v in obj]
+    if isinstance(obj, str):
+        return _expand_env(obj)
+    return obj
+
+
+@lru_cache(maxsize=1)
+def get_retrieval_settings(config_path: str | None = None) -> RetrievalSettings:
+    embed_keys = get_embed_keys(config_path) or ['embed_main']
+    index_kwargs = get_embed_index_kwargs(config_path)
+    file_search = embed_keys[-1] if embed_keys else 'embed_main'
+    temp_doc = embed_keys[0] if embed_keys else 'embed_main'
+    retriever_configs = [
+        {'group_name': 'line', 'embed_keys': embed_keys, 'topk': 20, 'target': 'block'},
+        {'group_name': 'block', 'embed_keys': embed_keys, 'topk': 20},
+    ]
+    return RetrievalSettings(
+        embed_keys=embed_keys,
+        file_search_embed_key=file_search,
+        temp_doc_embed_key=temp_doc,
+        index_kwargs=index_kwargs,
+        retriever_configs=retriever_configs,
+    )

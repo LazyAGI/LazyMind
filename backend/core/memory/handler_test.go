@@ -188,6 +188,119 @@ func TestUpsertPreservesMemoryAutoEvoWhenOmitted(t *testing.T) {
 	}
 }
 
+func TestUpsertAutoEvoDiscardsPendingDraftWithoutOverwritingMemoryContent(t *testing.T) {
+	db := newMemoryTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	row := orm.SystemMemory{
+		ID:                 "memory-1",
+		UserID:             "u1",
+		Content:            "current memory",
+		ContentHash:        evolution.HashContent("current memory"),
+		Version:            7,
+		DraftContent:       "draft memory",
+		DraftSourceVersion: 7,
+		DraftStatus:        "pending_confirm",
+		AutoEvo:            false,
+		Ext:                evolution.WithDraftSuggestionIDs(nil, []string{"suggestion-1"}),
+		UpdatedBy:          "u1",
+		UpdatedByName:      "User 1",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	if err := db.Create(&row).Error; err != nil {
+		t.Fatalf("create memory: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/core/memory", strings.NewReader(`{"content":"request body should not win","auto_evo":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", "u1")
+	req.Header.Set("X-User-Name", "User 1")
+	rec := httptest.NewRecorder()
+
+	Upsert(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var updated orm.SystemMemory
+	if err := db.Where("id = ?", row.ID).Take(&updated).Error; err != nil {
+		t.Fatalf("query updated memory: %v", err)
+	}
+	if updated.Content != row.Content {
+		t.Fatalf("expected content to remain %q, got %q", row.Content, updated.Content)
+	}
+	if updated.Version != row.Version {
+		t.Fatalf("expected version to remain %d, got %d", row.Version, updated.Version)
+	}
+	if strings.TrimSpace(updated.DraftStatus) != "" || updated.DraftContent != "" || updated.DraftSourceVersion != 0 || updated.DraftUpdatedAt != nil {
+		t.Fatalf("expected draft to be discarded, got status=%q content=%q source=%d updated_at=%v", updated.DraftStatus, updated.DraftContent, updated.DraftSourceVersion, updated.DraftUpdatedAt)
+	}
+	if gotIDs := evolution.DraftSuggestionIDs(updated.Ext); len(gotIDs) != 0 {
+		t.Fatalf("expected draft suggestion ids to be cleared, got %#v", gotIDs)
+	}
+	if !updated.AutoEvo {
+		t.Fatalf("expected auto_evo to be enabled")
+	}
+	if updated.AutoEvoGeneration != row.AutoEvoGeneration+1 {
+		t.Fatalf("expected auto_evo_generation to increment, got %d", updated.AutoEvoGeneration)
+	}
+}
+
+func TestUpsertAutoEvoReturnsConflictWhenWorkerRunning(t *testing.T) {
+	db := newMemoryTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	row := orm.SystemMemory{
+		ID:                 "memory-1",
+		UserID:             "u1",
+		Content:            "current memory",
+		ContentHash:        evolution.HashContent("current memory"),
+		Version:            2,
+		AutoEvo:            false,
+		AutoEvoApplyStatus: evolution.AutoEvoApplyStatusRunning,
+		AutoEvoGeneration:  7,
+		UpdatedBy:          "u1",
+		UpdatedByName:      "User 1",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	if err := db.Create(&row).Error; err != nil {
+		t.Fatalf("create memory: %v", err)
+	}
+	workerKey := evolution.AutoEvoWorkerKey(evolution.ResourceTypeMemory, row.ID)
+	if !evolution.TryAcquireAutoEvoWorker(workerKey) {
+		t.Fatalf("expected to acquire worker lock")
+	}
+	t.Cleanup(func() { evolution.ReleaseAutoEvoWorker(workerKey) })
+
+	req := httptest.NewRequest(http.MethodPut, "/api/core/memory", strings.NewReader(`{"content":"new memory","auto_evo":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", "u1")
+	req.Header.Set("X-User-Name", "User 1")
+	rec := httptest.NewRecorder()
+
+	Upsert(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected status 409, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var updated orm.SystemMemory
+	if err := db.Where("id = ?", row.ID).Take(&updated).Error; err != nil {
+		t.Fatalf("query updated memory: %v", err)
+	}
+	if updated.Content != row.Content || updated.Version != row.Version || updated.AutoEvo != row.AutoEvo {
+		t.Fatalf("expected memory fields unchanged, got content=%q version=%d auto_evo=%v", updated.Content, updated.Version, updated.AutoEvo)
+	}
+	if updated.AutoEvoGeneration != row.AutoEvoGeneration || updated.AutoEvoApplyStatus != row.AutoEvoApplyStatus {
+		t.Fatalf("expected auto_evo state unchanged, got generation=%d status=%q", updated.AutoEvoGeneration, updated.AutoEvoApplyStatus)
+	}
+}
+
 func TestDraftPreviewReturnsCurrentDraftAndDiff(t *testing.T) {
 	db := newMemoryTestDB(t)
 	store.Init(db.DB, nil, nil)
@@ -347,7 +460,7 @@ func TestGenerateOverwritesExistingPendingDraft(t *testing.T) {
 	}
 }
 
-func TestGenerateAllowsUserInstructWithoutSuggestions(t *testing.T) {
+func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 	db := newMemoryTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -377,21 +490,41 @@ func TestGenerateAllowsUserInstructWithoutSuggestions(t *testing.T) {
 
 	now := time.Now()
 	row := orm.SystemMemory{
-		ID:            "memory-1",
-		UserID:        "u1",
-		Content:       "current memory",
-		ContentHash:   evolution.HashContent("current memory"),
-		Version:       3,
-		UpdatedBy:     "u1",
-		UpdatedByName: "User 1",
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:                 "memory-1",
+		UserID:             "u1",
+		Content:            "current memory",
+		ContentHash:        evolution.HashContent("current memory"),
+		Version:            3,
+		DraftContent:       "draft memory",
+		DraftSourceVersion: 3,
+		DraftStatus:        "pending_confirm",
+		Ext:                evolution.WithDraftSuggestionIDs(nil, []string{"suggestion-1"}),
+		UpdatedBy:          "u1",
+		UpdatedByName:      "User 1",
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatalf("create memory: %v", err)
 	}
+	suggestion := orm.ResourceSuggestion{
+		ID:           "suggestion-1",
+		UserID:       "u1",
+		ResourceType: evolution.ResourceTypeMemory,
+		ResourceKey:  evolution.SystemResourceKey(evolution.ResourceTypeMemory),
+		Action:       evolution.SuggestionActionModify,
+		SessionID:    "session-1",
+		Title:        "memory suggestion",
+		Content:      "update memory",
+		Status:       evolution.SuggestionStatusAccepted,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := db.Create(&suggestion).Error; err != nil {
+		t.Fatalf("create suggestion: %v", err)
+	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/core/memory:generate", strings.NewReader(`{"suggestion_ids":[],"user_instruct":"只按用户意见生成"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/core/memory:generate", strings.NewReader(`{"user_instruct":"只按用户意见生成"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "u1")
 	req.Header.Set("X-User-Name", "User 1")
@@ -405,9 +538,38 @@ func TestGenerateAllowsUserInstructWithoutSuggestions(t *testing.T) {
 	if algoBody["user_instruct"] != "只按用户意见生成" {
 		t.Fatalf("unexpected user_instruct sent to algorithm: %#v", algoBody["user_instruct"])
 	}
+	if algoBody["content"] != "draft memory" {
+		t.Fatalf("expected draft content sent to algorithm, got %#v", algoBody["content"])
+	}
 	suggestions, ok := algoBody["suggestions"].([]any)
 	if !ok || len(suggestions) != 0 {
 		t.Fatalf("expected empty suggestions array, got %#v", algoBody["suggestions"])
+	}
+	var updated orm.SystemMemory
+	if err := db.Where("id = ?", row.ID).Take(&updated).Error; err != nil {
+		t.Fatalf("query updated memory: %v", err)
+	}
+	gotIDs := evolution.DraftSuggestionIDs(updated.Ext)
+	if len(gotIDs) != 1 || gotIDs[0] != "suggestion-1" {
+		t.Fatalf("expected draft suggestion ids to be preserved, got %#v", gotIDs)
+	}
+
+	confirmReq := httptest.NewRequest(http.MethodPost, "/api/core/memory:confirm", nil)
+	confirmReq.Header.Set("X-User-Id", "u1")
+	confirmReq.Header.Set("X-User-Name", "User 1")
+	confirmRec := httptest.NewRecorder()
+
+	Confirm(confirmRec, confirmReq)
+
+	if confirmRec.Code != http.StatusOK {
+		t.Fatalf("expected confirm status 200, got %d body=%s", confirmRec.Code, confirmRec.Body.String())
+	}
+	var applied orm.ResourceSuggestion
+	if err := db.Where("id = ?", "suggestion-1").Take(&applied).Error; err != nil {
+		t.Fatalf("query applied suggestion: %v", err)
+	}
+	if applied.Status != evolution.SuggestionStatusApplied {
+		t.Fatalf("expected suggestion to be applied after confirm, got %q", applied.Status)
 	}
 }
 

@@ -14,6 +14,7 @@ _RERANKER_DROP_RATIO = 0.8
 _GEN_DRIFT_OVERLAP = 0.3
 _GEN_DRIFT_LENGTH = 0.5
 _TOKEN_RE = re.compile('\\w+')
+_TEXT_KEYS = ('context_str', 'text', 'content', 'query', 'snippet', 'title', 'reason', 'error', 'output')
 
 
 def _tokenize(text: str) -> set[str]:
@@ -48,13 +49,14 @@ def _extract_text(data: Any) -> str:
     if isinstance(data, str):
         return data
     if isinstance(data, dict):
-        for key in ('context_str', 'text', 'content', 'query'):
+        parts: list[str] = []
+        for key in _TEXT_KEYS:
             v = data.get(key)
-            if isinstance(v, str) and len(v) > 10:
-                return v
-        return ''
+            if isinstance(v, str) and v:
+                parts.append(v)
+        return '\n'.join(parts)
     if isinstance(data, list) and data and isinstance(data[0], (str, dict)):
-        return _extract_text(data[0])
+        return '\n'.join((text for item in data[:8] if (text := _extract_text(item))))
     return str(data) if data else ''
 
 

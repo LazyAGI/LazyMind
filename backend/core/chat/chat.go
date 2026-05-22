@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"lazymind/core/modelconfig"
 )
 
 const (
@@ -124,7 +126,7 @@ func (c *ChatService) Chat(ctx context.Context, req *LazyChatRequest) (*LazyChat
 	}
 	fmt.Printf(
 		"[Core] [CHAT_UPSTREAM_REQUEST] [stream=false] [url=%s] [session_id=%s] [user_id=%s] [reasoning=%v] [%s]\n",
-		c.chatURL, req.SessionID, req.UserID, req.Reasoning, summarizeLLMConfigForLog(req.LLMConfig),
+		c.chatURL, req.SessionID, req.UserID, req.Reasoning, modelconfig.SummarizeLLMConfigForLog(req.LLMConfig),
 	)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.chatURL, bytes.NewReader(bodyBytes))
 	if err != nil {
@@ -155,7 +157,7 @@ func (c *ChatService) StreamChat(ctx context.Context, req *LazyChatRequest) (<-c
 	}
 	fmt.Printf(
 		"[Core] [CHAT_UPSTREAM_REQUEST] [stream=true] [url=%s] [session_id=%s] [user_id=%s] [reasoning=%v] [%s]\n",
-		c.streamChatURL, req.SessionID, req.UserID, req.Reasoning, summarizeLLMConfigForLog(req.LLMConfig),
+		c.streamChatURL, req.SessionID, req.UserID, req.Reasoning, modelconfig.SummarizeLLMConfigForLog(req.LLMConfig),
 	)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.streamChatURL, bytes.NewReader(bodyBytes))
 	if err != nil {

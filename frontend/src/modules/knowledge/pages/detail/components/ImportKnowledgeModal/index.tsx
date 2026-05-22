@@ -18,7 +18,21 @@ import {
 import TagSelect from "@/modules/knowledge/components/TagSelect";
 import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
 
-const ALLOWED_FILE_TYPES = ["pdf", "docx", "doc", "jpg", "mp3", "mp4"];
+const ALLOWED_FILE_TYPES = [
+  "pdf",
+  "docx",
+  "doc",
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "bmp",
+  "webp",
+  "tiff",
+  "tif",
+  "mp3",
+  "mp4",
+];
 const SINGLE_FILE_MAX_SIZE = 500 * 1024 * 1024;
 const TOTAL_FILE_MAX_SIZE = 1 * 1024 * 1024 * 1024;
 const ZIP_FILE_TYPES = ["zip"];
