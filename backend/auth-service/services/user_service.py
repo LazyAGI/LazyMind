@@ -11,10 +11,24 @@ from services.auth_service import auth_service
 class UserService:
     """User CRUD, role assignment, password reset."""
 
+    SYSTEM_ADMIN_ROLE_NAME = 'system-admin'
+
     def _is_bootstrap_admin(self, user) -> bool:
         if not user:
             return False
         return (getattr(user, 'source', '') or '').strip() == 'init'
+
+    def _is_system_admin(self, user) -> bool:
+        if not user:
+            return False
+        role = getattr(user, 'role', None)
+        return ((getattr(role, 'name', '') or '').strip().lower() == self.SYSTEM_ADMIN_ROLE_NAME)
+
+    def _ensure_system_admin_can_downgrade(self, db, user) -> None:
+        if not self._is_system_admin(user):
+            return
+        if UserRepository.count_by_role_id(db, user.role_id) <= 1:
+            raise_error(ErrorCodes.LAST_SYSTEM_ADMIN_DOWNGRADE_FORBIDDEN)
 
     def _default_user_role_id(self, db) -> uuid.UUID:
         role = RoleRepository.get_by_name(db, 'user')
@@ -50,6 +64,8 @@ class UserService:
                 role = RoleRepository.get_by_id(db, rid)
                 if not role:
                     raise_error(ErrorCodes.ROLE_NOT_FOUND)
+                if disabled and ((role.name or '').strip().lower() == self.SYSTEM_ADMIN_ROLE_NAME):
+                    raise_error(ErrorCodes.SYSTEM_ADMIN_DISABLE_FORBIDDEN)
             user = UserRepository.create(
                 db,
                 username=username,
@@ -94,6 +110,7 @@ class UserService:
                     'role_id': str(u.role_id),
                     'role_name': u.role.name,
                     'is_bootstrap_admin': self._is_bootstrap_admin(u),
+                    'is_system_admin': self._is_system_admin(u),
                 }
                 for u in users
             ]
@@ -117,6 +134,7 @@ class UserService:
                 'role_id': str(u.role_id),
                 'role_name': u.role.name if u.role else 'user',
                 'is_bootstrap_admin': self._is_bootstrap_admin(u),
+                'is_system_admin': self._is_system_admin(u),
             }
 
     def set_user_role(self, user_id: uuid.UUID, role_id: uuid.UUID) -> None:
@@ -125,11 +143,16 @@ class UserService:
             user = UserRepository.get_by_id(db, user_id, load_role=True)
             if not user:
                 raise_error(ErrorCodes.USER_NOT_FOUND)
-            if self._is_bootstrap_admin(user):
-                raise_error(ErrorCodes.BOOTSTRAP_ADMIN_ROLE_CHANGE_FORBIDDEN)
             role = RoleRepository.get_by_id(db, role_id)
             if not role:
                 raise_error(ErrorCodes.ROLE_NOT_FOUND)
+            if self._is_system_admin(user):
+                if role.id == user.role_id:
+                    return
+                self._ensure_system_admin_can_downgrade(db, user)
+                raise_error(ErrorCodes.SYSTEM_ADMIN_ROLE_CHANGE_FORBIDDEN)
+            if self._is_bootstrap_admin(user):
+                raise_error(ErrorCodes.BOOTSTRAP_ADMIN_ROLE_CHANGE_FORBIDDEN)
             user.role_id = role.id
             db.commit()
 
@@ -151,6 +174,11 @@ class UserService:
                 user = UserRepository.get_by_id(db, uid, load_role=True)
                 if not user:
                     raise_error(ErrorCodes.USER_NOT_FOUND, extra_msg=str(uid))
+                if self._is_system_admin(user):
+                    if role.id == user.role_id:
+                        continue
+                    self._ensure_system_admin_can_downgrade(db, user)
+                    raise_error(ErrorCodes.SYSTEM_ADMIN_ROLE_CHANGE_FORBIDDEN, extra_msg=str(uid))
                 if self._is_bootstrap_admin(user):
                     raise_error(ErrorCodes.BOOTSTRAP_ADMIN_ROLE_CHANGE_FORBIDDEN, extra_msg=str(uid))
                 user.role_id = role.id
@@ -159,11 +187,23 @@ class UserService:
     def disable_user(self, user_id: uuid.UUID, disabled: bool = True) -> None:
         """Disable or enable a user. Raises if user not found."""
         with SessionLocal() as db:
-            user = UserRepository.get_by_id(db, user_id)
+            user = UserRepository.get_by_id(db, user_id, load_role=True)
             if not user:
                 raise_error(ErrorCodes.USER_NOT_FOUND)
+            if disabled and self._is_system_admin(user):
+                raise_error(ErrorCodes.SYSTEM_ADMIN_DISABLE_FORBIDDEN)
             user.disabled = disabled
             db.commit()
+
+    def delete_user(self, user_id: uuid.UUID) -> None:
+        """Delete a non-system-admin user."""
+        with SessionLocal() as db:
+            user = UserRepository.get_by_id(db, user_id, load_role=True)
+            if not user:
+                raise_error(ErrorCodes.USER_NOT_FOUND)
+            if self._is_system_admin(user):
+                raise_error(ErrorCodes.SYSTEM_ADMIN_DELETE_FORBIDDEN)
+            UserRepository.delete(db, user)
 
     def reset_password(self, user_id: uuid.UUID, new_password: str) -> None:
         """Reset user password. Raises if user not found or password invalid."""

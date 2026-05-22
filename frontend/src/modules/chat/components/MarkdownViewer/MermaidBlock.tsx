@@ -1,6 +1,6 @@
 import { CheckOutlined, CopyOutlined, FullscreenOutlined } from "@ant-design/icons";
 import { Modal, Tooltip, message } from "antd";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { highlightCode } from "./syntaxHighlight";
 
@@ -13,6 +13,8 @@ type RenderState =
 
 let mermaidInitialized = false;
 let mermaidBlockSequence = 0;
+const mermaidRenderCache = new Map<string, string>();
+const MERMAID_RENDER_CACHE_LIMIT = 80;
 
 async function getMermaid() {
   const mermaidModule = await import("mermaid");
@@ -37,6 +39,17 @@ function ensureMermaidInitialized(
 function getMermaidRenderId() {
   mermaidBlockSequence += 1;
   return `rag-mermaid-${Date.now()}-${mermaidBlockSequence}`;
+}
+
+function cacheMermaidRender(code: string, svg: string) {
+  mermaidRenderCache.set(code, svg);
+
+  if (mermaidRenderCache.size > MERMAID_RENDER_CACHE_LIMIT) {
+    const oldestKey = mermaidRenderCache.keys().next().value;
+    if (oldestKey) {
+      mermaidRenderCache.delete(oldestKey);
+    }
+  }
 }
 
 async function copyTextToClipboard(text: string) {
@@ -134,7 +147,13 @@ const MermaidDiagram = ({
   );
 };
 
-const MermaidBlock = ({ code }: { code: string }) => {
+const MermaidBlockComponent = ({
+  code,
+  isStreaming = false,
+}: {
+  code: string;
+  isStreaming?: boolean;
+}) => {
   const [activeView, setActiveView] = useState<MermaidView>("diagram");
   const [copyStatus, setCopyStatus] = useState<CopyStatus>("idle");
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -148,6 +167,7 @@ const MermaidBlock = ({ code }: { code: string }) => {
   useEffect(() => {
     let cancelled = false;
     const renderId = getMermaidRenderId();
+    const cachedSvg = mermaidRenderCache.get(code);
 
     if (!code.trim()) {
       setRenderState({ status: "error", svg: "", error: "empty" });
@@ -156,7 +176,18 @@ const MermaidBlock = ({ code }: { code: string }) => {
       };
     }
 
-    setRenderState({ status: "rendering", svg: "", error: "" });
+    if (cachedSvg) {
+      setRenderState({ status: "success", svg: cachedSvg, error: "" });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setRenderState((previous) => ({
+      status: "rendering",
+      svg: previous.svg,
+      error: "",
+    }));
 
     const renderDiagram = async () => {
       try {
@@ -166,15 +197,16 @@ const MermaidBlock = ({ code }: { code: string }) => {
         const { svg } = await mermaid.render(renderId, code);
 
         if (!cancelled) {
+          cacheMermaidRender(code, svg);
           setRenderState({ status: "success", svg, error: "" });
         }
       } catch (err) {
         if (!cancelled) {
-          setRenderState({
+          setRenderState((previous) => ({
             status: "error",
-            svg: "",
+            svg: isStreaming ? previous.svg : "",
             error: err instanceof Error ? err.message : "render failed",
-          });
+          }));
         }
       }
     };
@@ -184,7 +216,7 @@ const MermaidBlock = ({ code }: { code: string }) => {
     return () => {
       cancelled = true;
     };
-  }, [code]);
+  }, [code, isStreaming]);
 
   useEffect(() => {
     setCopyStatus("idle");
@@ -199,10 +231,10 @@ const MermaidBlock = ({ code }: { code: string }) => {
   }, []);
 
   const visibleView =
-    renderState.status === "error" && activeView === "diagram"
+    renderState.status === "error" && !isStreaming && activeView === "diagram"
       ? "source"
       : activeView;
-  const canShowDiagram = renderState.status === "success" && renderState.svg;
+  const canShowDiagram = Boolean(renderState.svg);
   const canCopySource = Boolean(code.trim());
 
   const resetCopyStatusLater = () => {
@@ -240,7 +272,7 @@ const MermaidBlock = ({ code }: { code: string }) => {
           <button
             aria-selected={visibleView === "diagram"}
             className={visibleView === "diagram" ? "active" : ""}
-            disabled={!canShowDiagram}
+            disabled={!canShowDiagram && !isStreaming}
             role="tab"
             type="button"
             onClick={() => setActiveView("diagram")}
@@ -292,14 +324,21 @@ const MermaidBlock = ({ code }: { code: string }) => {
       {renderState.status === "rendering" && (
         <div className="md-mermaid-status">图表渲染中...</div>
       )}
-      {renderState.status === "error" && (
+      {renderState.status === "error" && !isStreaming && (
         <div className="md-mermaid-status">图表渲染失败，已显示源码</div>
       )}
+      {renderState.status === "error" && isStreaming && !canShowDiagram && (
+        <div className="md-mermaid-status">图表生成中，等待完整内容...</div>
+      )}
 
-      {visibleView === "diagram" && canShowDiagram ? (
+      {visibleView === "source" ? (
+        <MermaidSource code={code} />
+      ) : canShowDiagram ? (
         <MermaidDiagram svg={renderState.svg} onOpen={() => setIsModalOpen(true)} />
       ) : (
-        <MermaidSource code={code} />
+        <div className="md-mermaid-placeholder" aria-live="polite">
+          图表生成中...
+        </div>
       )}
 
       <Modal
@@ -321,5 +360,7 @@ const MermaidBlock = ({ code }: { code: string }) => {
     </div>
   );
 };
+
+const MermaidBlock = memo(MermaidBlockComponent);
 
 export default MermaidBlock;

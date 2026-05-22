@@ -38,6 +38,9 @@ class UserRepository:
     def _count(self, session: Session) -> int:
         return session.query(self.model).count()
 
+    def _count_by_role_id(self, session: Session, role_id: uuid.UUID) -> int:
+        return session.query(self.model).filter_by(role_id=role_id).count()
+
     def _create(
         self,
         session: Session,
@@ -100,6 +103,10 @@ class UserRepository:
         users = q.offset((page - 1) * page_size).limit(page_size).all()
         return users, total
 
+    def _delete(self, session: Session, user: User) -> None:
+        session.delete(user)
+        session.commit()
+
     @classmethod
     def get_by_id(
         cls,
@@ -127,6 +134,10 @@ class UserRepository:
     @classmethod
     def count(cls, session: Session) -> int:
         return cls()._count(session)
+
+    @classmethod
+    def count_by_role_id(cls, session: Session, role_id: uuid.UUID) -> int:
+        return cls()._count_by_role_id(session, role_id)
 
     @classmethod
     def create(
@@ -160,6 +171,10 @@ class UserRepository:
         active_only: bool = False,
     ) -> tuple[list[User], int]:
         return cls()._list_paginated(session, page, page_size, search, tenant_id, active_only)
+
+    @classmethod
+    def delete(cls, session: Session, user: User) -> None:
+        cls()._delete(session, user)
 
     @classmethod
     def update_profile(

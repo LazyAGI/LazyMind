@@ -151,6 +151,18 @@
   cursor: zoom-in;
 }
 
+.md-mermaid-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 160px;
+  padding: 16px;
+
+  color: var(--color-fg-muted);
+  background: var(--color-canvas-default);
+  font-size: 13px;
+}
+
 .md-mermaid-preview svg,
 .md-mermaid-modal-content svg {
   display: block;

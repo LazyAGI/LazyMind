@@ -8,7 +8,15 @@ import { Popover } from "antd";
 import rehypeSanitize from "rehype-sanitize";
 import "./markdown.scss";
 import "./index.scss";
-import { isValidElement, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  isValidElement,
+  memo,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { customSchema } from "./config";
 import rehypeRaw from "rehype-raw";
 import {
@@ -19,6 +27,21 @@ import MermaidBlock from "./MermaidBlock";
 import { getLanguageFromClassName, highlightCode } from "./syntaxHighlight";
 
 const SOURCE_PREFIXES = ["#source-", "#user-content-source-"];
+
+const markdownRemarkPlugins = [[remarkGfm, { singleTilde: false }], remarkMath];
+const markdownRehypePlugins = [
+  rehypeRaw,
+  rehypeKatex,
+  [rehypeSanitize, customSchema],
+];
+
+const MarkdownRenderContext = createContext<{
+  isStreaming: boolean;
+  markSources: any[];
+}>({
+  isStreaming: false,
+  markSources: [],
+});
 
 function getSourceIndex(href: any) {
   if (typeof href !== "string") {
@@ -99,6 +122,7 @@ const CodeComponent = (props: any) => {
 };
 
 const PreComponent = (props: any) => {
+  const { isStreaming } = useContext(MarkdownRenderContext);
   const child = Array.isArray(props.children) ? props.children[0] : props.children;
 
   if (isValidElement(child)) {
@@ -110,7 +134,10 @@ const PreComponent = (props: any) => {
 
     if (language === "mermaid") {
       return (
-        <MermaidBlock code={String(childProps.children ?? "").replace(/\n$/, "")} />
+        <MermaidBlock
+          code={String(childProps.children ?? "").replace(/\n$/, "")}
+          isStreaming={isStreaming}
+        />
       );
     }
   }
@@ -118,8 +145,79 @@ const PreComponent = (props: any) => {
   return <pre {...props} />;
 };
 
-const MarkdownViewer = (props: any) => {
-  const { children, className = "", sources = [], IS_STREAMING } = props;
+const LinkComponent = (props: any) => {
+  const { isStreaming, markSources } = useContext(MarkdownRenderContext);
+  const href = props.href;
+  const sourceIndex = getSourceIndex(href);
+
+  if (sourceIndex) {
+    if (isStreaming) {
+      return (
+        <span
+          className="md-segment-index"
+          style={{ backgroundColor: "var(--color-text-description)" }}
+        >
+          {props.children}
+        </span>
+      );
+    }
+
+    return (
+      <Popover
+        title={props.title || ""}
+        content={
+          <div className="md-content-card">
+            <div className="md-content-card-content">
+              <MarkdownViewer>
+                {
+                  markSources.find(
+                    (source) => String(source.index) === sourceIndex,
+                  )?.content
+                }
+              </MarkdownViewer>
+            </div>
+          </div>
+        }
+      >
+        <span className="md-segment-index">{props.children}</span>
+      </Popover>
+    );
+  }
+
+  return (
+    <a href={props.href} target="_blank">
+      {props.children}
+    </a>
+  );
+};
+
+const ScriptComponent = () => null;
+
+const LiComponent = (props: any) => {
+  const children = Array.isArray(props.children)
+    ? props.children.filter((item: any) => item !== "\n")
+    : props.children;
+
+  return <li>{children}</li>;
+};
+
+const defaultMarkdownComponents = {
+  a: LinkComponent,
+  script: ScriptComponent,
+  li: LiComponent,
+  img: ImageComponent,
+  pre: PreComponent,
+  code: CodeComponent,
+};
+
+const MarkdownViewer = memo((props: any) => {
+  const {
+    children,
+    className = "",
+    components: customComponents,
+    sources = [],
+    IS_STREAMING,
+  } = props;
 
   const [markSources, setMarkSources] = useState<any[]>([]);
 
@@ -129,83 +227,40 @@ const MarkdownViewer = (props: any) => {
     }
   }, [sources]);
 
+  const renderContextValue = useMemo(
+    () => ({
+      isStreaming: Boolean(IS_STREAMING),
+      markSources,
+    }),
+    [IS_STREAMING, markSources],
+  );
+
+  const markdownComponents = useMemo(
+    () => ({
+      ...defaultMarkdownComponents,
+      ...customComponents,
+    }),
+    [customComponents],
+  );
+
   return (
     <div
       className={classnames("rag-markdown", {
         [className]: !!className,
       })}
     >
-      <Markdown
-        {...props}
-        remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
-        rehypePlugins={[
-          rehypeRaw,
-          rehypeKatex,
-          [rehypeSanitize, customSchema],
-        ]}
-        components={{
-          a(props: any) {
-            const href = props.href;
-            const sourceIndex = getSourceIndex(href);
-            if (sourceIndex) {
-              if (IS_STREAMING) {
-                return (
-                  <span
-                    className="md-segment-index"
-                    style={{ backgroundColor: "var(--color-text-description)" }}
-                  >
-                    {props.children}
-                  </span>
-                );
-              }
-              return (
-                <Popover
-                  title={props.title || ""}
-                  content={
-                    <div className="md-content-card">
-                      <div className="md-content-card-content">
-                        <MarkdownViewer>
-                          {
-                            markSources.find(
-                              (source) => String(source.index) === sourceIndex,
-                            )?.content
-                          }
-                        </MarkdownViewer>
-                      </div>
-                    </div>
-                  }
-                >
-                  <span className="md-segment-index">{props.children}</span>
-                </Popover>
-              );
-            }
-
-            return (
-              <a href={props.href} target="_blank">
-                {props.children}
-              </a>
-            );
-          },
-          script() {
-            return null;
-          },
-          li(props: any) {
-            const children = Array.isArray(props.children)
-              ? props.children.filter((item: any) => item !== "\n")
-              : props.children;
-
-            return <li>{children}</li>;
-          },
-          img: ImageComponent,
-          pre: PreComponent,
-          code: CodeComponent,
-          ...props.components,
-        }}
-      >
-        {children || ""}
-      </Markdown>
+      <MarkdownRenderContext.Provider value={renderContextValue}>
+        <Markdown
+          {...props}
+          remarkPlugins={markdownRemarkPlugins}
+          rehypePlugins={markdownRehypePlugins}
+          components={markdownComponents}
+        >
+          {children || ""}
+        </Markdown>
+      </MarkdownRenderContext.Provider>
     </div>
   );
-};
+});
 
 export default MarkdownViewer;

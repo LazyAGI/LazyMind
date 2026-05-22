@@ -40,6 +40,10 @@ class ErrorCodes:
     CANNOT_DELETE_BUILTIN_ROLE: ErrorTuple = (400, 1000410, 'Built-in role cannot be deleted')
     CANNOT_CHANGE_ADMIN_PERMS: ErrorTuple = (400, 1000411, 'System-admin role permissions cannot be changed')
     BOOTSTRAP_ADMIN_ROLE_CHANGE_FORBIDDEN: ErrorTuple = (403, 1000412, 'Bootstrap admin role cannot be changed')
+    SYSTEM_ADMIN_ROLE_CHANGE_FORBIDDEN: ErrorTuple = (403, 1000414, 'System-admin user role cannot be changed')
+    SYSTEM_ADMIN_DISABLE_FORBIDDEN: ErrorTuple = (403, 1000415, 'System-admin user cannot be disabled')
+    SYSTEM_ADMIN_DELETE_FORBIDDEN: ErrorTuple = (403, 1000416, 'System-admin user cannot be deleted')
+    LAST_SYSTEM_ADMIN_DOWNGRADE_FORBIDDEN: ErrorTuple = (403, 1000417, 'At least one system-admin user is required')
 
     DEFAULT_ROLE_NOT_FOUND: ErrorTuple = (500, 1000501, "Default role 'user' does not exist")
 

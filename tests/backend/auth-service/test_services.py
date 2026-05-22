@@ -459,6 +459,7 @@ def test_user_service_crud_role_assignment_and_password_reset(service_modules, d
     user_role = seeded_data['user_role']
     editor_role = seeded_data['editor_role']
     bootstrap = seeded_data['bootstrap']
+    admin = seeded_data['admin']
     normal = seeded_data['normal']
 
     monkeypatch.setattr(user_service_module.auth_service, 'hash_password', lambda password: f'hashed::{password}')
@@ -489,10 +490,8 @@ def test_user_service_crud_role_assignment_and_password_reset(service_modules, d
 
     assert service._is_bootstrap_admin(None) is False
     assert service._is_bootstrap_admin(bootstrap) is True
-
-    with pytest.raises(AppException) as username_required:
-        service.create_user(username='   ', password='Aa1!service')
-    assert username_required.value.code == 1000201
+    assert service._is_system_admin(admin) is True
+    assert service._is_system_admin(normal) is False
 
     with pytest.raises(AppException) as password_required:
         service.create_user(username='missing-password', password='   ')
@@ -510,6 +509,15 @@ def test_user_service_crud_role_assignment_and_password_reset(service_modules, d
         service.create_user(username='svc-user', password='Aa1!service')
     assert duplicate.value.code == 1000102
 
+    with pytest.raises(AppException) as disabled_system_admin:
+        service.create_user(
+            username='disabled-admin',
+            password='Aa1!service',
+            role_id=seeded_data['system_admin'].id,
+            disabled=True,
+        )
+    assert disabled_system_admin.value.code == 1000415
+
     users, total = service.list_users(search='user')
     assert total >= 2
     assert any(item['username'] == 'svc-user' for item in users)
@@ -525,13 +533,22 @@ def test_user_service_crud_role_assignment_and_password_reset(service_modules, d
 
     bootstrap_detail = service.get_user(bootstrap.id)
     assert bootstrap_detail['is_bootstrap_admin'] is True
+    assert bootstrap_detail['is_system_admin'] is True
 
     with pytest.raises(AppException) as get_missing_user:
         service.get_user(uuid.uuid4())
     assert get_missing_user.value.code == 1000401
 
+    with pytest.raises(AppException) as username_required:
+        service.create_user(username='   ', password='Aa1!service')
+    assert username_required.value.code == 1000201
+
     service.set_user_role(normal.id, editor_role.id)
     assert UserRepository.get_by_id(db_session, normal.id).role_id == editor_role.id
+
+    with pytest.raises(AppException) as system_admin_forbidden:
+        service.set_user_role(admin.id, user_role.id)
+    assert system_admin_forbidden.value.code == 1000414
 
     with pytest.raises(AppException) as set_missing_user:
         service.set_user_role(uuid.uuid4(), editor_role.id)
@@ -561,10 +578,14 @@ def test_user_service_crud_role_assignment_and_password_reset(service_modules, d
 
     with pytest.raises(AppException) as batch_bootstrap_forbidden:
         service.set_user_roles_batch([bootstrap.id], user_role.id)
-    assert batch_bootstrap_forbidden.value.code == 1000412
+    assert batch_bootstrap_forbidden.value.code == 1000414
 
     service.disable_user(normal.id, disabled=True)
     assert UserRepository.get_by_id(db_session, normal.id).disabled is True
+
+    with pytest.raises(AppException) as disable_system_admin:
+        service.disable_user(admin.id, disabled=True)
+    assert disable_system_admin.value.code == 1000415
 
     service.disable_user(normal.id, disabled=False)
     assert UserRepository.get_by_id(db_session, normal.id).disabled is False
@@ -572,6 +593,17 @@ def test_user_service_crud_role_assignment_and_password_reset(service_modules, d
     with pytest.raises(AppException) as disable_missing_user:
         service.disable_user(uuid.uuid4())
     assert disable_missing_user.value.code == 1000401
+
+    service.delete_user(explicit_user.id)
+    assert UserRepository.get_by_id(db_session, explicit_user.id) is None
+
+    with pytest.raises(AppException) as delete_system_admin:
+        service.delete_user(admin.id)
+    assert delete_system_admin.value.code == 1000416
+
+    with pytest.raises(AppException) as delete_missing_user:
+        service.delete_user(uuid.uuid4())
+    assert delete_missing_user.value.code == 1000401
 
     service.reset_password(normal.id, 'Aa1!reset')
     refreshed = UserRepository.get_by_id(db_session, normal.id)
@@ -614,3 +646,27 @@ def test_user_service_default_role_missing_raises(service_modules, db_session, m
     with pytest.raises(AppException) as default_role_missing:
         service.create_user(username='svc-user', password='Aa1!service')
     assert default_role_missing.value.code == 1000501
+
+
+def test_user_service_last_system_admin_cannot_be_downgraded(service_modules, seeded_data):
+    _, _, _ = service_modules
+    service = UserService()
+    user_role = seeded_data['user_role']
+    admin = seeded_data['admin']
+    bootstrap = seeded_data['bootstrap']
+
+    service.set_user_role(admin.id, admin.role_id)
+
+    with pytest.raises(AppException) as downgrade_forbidden:
+        service.set_user_role(admin.id, user_role.id)
+    assert downgrade_forbidden.value.code == 1000414
+
+    with pytest.raises(AppException) as batch_downgrade_forbidden:
+        service.set_user_roles_batch([admin.id], user_role.id)
+    assert batch_downgrade_forbidden.value.code == 1000414
+
+    bootstrap.role_id = user_role.id
+
+    with pytest.raises(AppException) as last_admin_forbidden:
+        service.set_user_role(admin.id, user_role.id)
+    assert last_admin_forbidden.value.code == 1000417
