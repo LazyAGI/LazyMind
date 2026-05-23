@@ -205,11 +205,16 @@ class _StreamingReactAgent(lazyllm.tools.agent.ReactAgent):
 
 
 def _feishu_key_source(_instance) -> str:
-    mapping = lazyllm.globals.config.get('dynamic_fs_auth') or {}
-    return (mapping.get('feishu') or '').strip()
+    try:
+        mapping = lazyllm.globals.config['dynamic_fs_auth'] or {}
+    except Exception:
+        return ''
+    r = (mapping.get('feishu') or '').strip()
+    lazyllm.LOG.warning(f'get feishu key: {r}')
+    return r
 
 
-_FEISHU_FS_INSTANCE = FeishuFS(dynamic_auth=True)
+_FEISHU_FS_INSTANCE = FeishuFS(space_id='dynamic', dynamic_auth=True)
 
 
 def agentic_forward(

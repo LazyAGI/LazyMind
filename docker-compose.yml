@@ -678,6 +678,7 @@ services:
       LAZYMIND_SKILL_REVIEW_INTERVAL: "5"
       LAZYMIND_SKILL_REVIEW_DEBUG: "false"
       LAZYMIND_SKIP_STARTUP_PIPELINE: "1"
+      LAZYLLM_INIT_DOC: 1
       # Chat uses the shared model config selector. Default dynamic mode enables
       # per-user model/API-key selection from core; set LAZYMIND_MODEL_CONFIG_PATH=online
       # or inner only when forcing a static config.

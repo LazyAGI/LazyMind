@@ -14,8 +14,8 @@ import (
 const (
 	_scanSourcesTimeout = 5 * time.Second
 	_authTokenTimeout   = 5 * time.Second
-	_feishuSourceType   = "feishu"
-	_sourceStatusActive = "active"
+	_feishuProvider     = "feishu"
+	_cloudBindingActive = "active"
 )
 
 // _scanSourceItem is a minimal projection of the scan-control-plane Source model.
@@ -25,6 +25,8 @@ type _scanSourceItem struct {
 	Status       string `json:"status"`
 	CloudBinding *struct {
 		AuthConnectionID string `json:"auth_connection_id"`
+		Provider         string `json:"provider"`
+		Status           string `json:"status"`
 	} `json:"cloud_binding,omitempty"`
 }
 
@@ -34,14 +36,9 @@ type _scanSourcesResponse struct {
 
 // _authTokenResponse is a minimal projection of the auth-service token response.
 type _authTokenResponse struct {
-	AccessToken string `json:"access_token"`
-}
-
-func scanControlPlaneEndpoint() string {
-	if u := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_URL")); u != "" {
-		return strings.TrimRight(u, "/")
-	}
-	return "http://scan-control-plane:18080"
+	Data struct {
+		AccessToken string `json:"access_token"`
+	} `json:"data"`
 }
 
 func authServiceInternalHeaders() map[string]string {
@@ -56,12 +53,14 @@ func authServiceInternalHeaders() map[string]string {
 // retrieves its OAuth access token from auth-service, and returns it.
 // Returns ("", nil) when the user has no active feishu source.
 func fetchFeishuToken(ctx context.Context, r *http.Request, userID string) (string, error) {
+	fmt.Printf("[Core] [FEISHU_TOKEN] fetchFeishuToken called userID=%q\n", userID)
 	if strings.TrimSpace(userID) == "" {
+		fmt.Printf("[Core] [FEISHU_TOKEN] empty userID, skip\n")
 		return "", nil
 	}
 
 	// 1. List the user's sources from scan-control-plane.
-	scanURL := fmt.Sprintf("%s/api/scan/sources", scanControlPlaneEndpoint())
+	scanURL := fmt.Sprintf("%s/api/scan/sources", common.ScanControlPlaneEndpoint())
 	var sourcesResp _scanSourcesResponse
 	err := common.ApiGet(
 		ctx,
@@ -74,25 +73,30 @@ func fetchFeishuToken(ctx context.Context, r *http.Request, userID string) (stri
 		return "", fmt.Errorf("list scan sources: %w", err)
 	}
 
-	// 2. Find the first active feishu source that has a cloud binding.
+	// 2. Find the first feishu cloud binding with an active status and a connection ID.
+	// The source_type may be "cloud_sync" with provider info inside cloud_binding,
+	// so we check cloud_binding.provider == "feishu" and cloud_binding.status == "ACTIVE".
 	connectionID := ""
 	for _, src := range sourcesResp.Items {
-		if !strings.EqualFold(src.SourceType, _feishuSourceType) {
+		cb := src.CloudBinding
+		if cb == nil || strings.TrimSpace(cb.AuthConnectionID) == "" {
 			continue
 		}
-		if !strings.EqualFold(src.Status, _sourceStatusActive) {
+		if !strings.EqualFold(cb.Provider, _feishuProvider) {
 			continue
 		}
-		if src.CloudBinding == nil || strings.TrimSpace(src.CloudBinding.AuthConnectionID) == "" {
+		if !strings.EqualFold(cb.Status, _cloudBindingActive) {
 			continue
 		}
-		connectionID = src.CloudBinding.AuthConnectionID
+		connectionID = cb.AuthConnectionID
 		break
 	}
 
 	if connectionID == "" {
+		fmt.Printf("[Core] [FEISHU_TOKEN] no active feishu binding found for userID=%q (total sources=%d)\n", userID, len(sourcesResp.Items))
 		return "", nil
 	}
+	fmt.Printf("[Core] [FEISHU_TOKEN] found connectionID=%q for userID=%q\n", connectionID, userID)
 
 	// 3. Fetch the access token from auth-service using the internal token.
 	tokenURL := fmt.Sprintf(
@@ -112,5 +116,7 @@ func fetchFeishuToken(ctx context.Context, r *http.Request, userID string) (stri
 		return "", fmt.Errorf("fetch feishu token for connection %s: %w", connectionID, err)
 	}
 
-	return strings.TrimSpace(tokenResp.AccessToken), nil
+	tok := strings.TrimSpace(tokenResp.Data.AccessToken)
+	fmt.Printf("[Core] [FEISHU_TOKEN] got token len=%d for connectionID=%q\n", len(tok), connectionID)
+	return tok, nil
 }

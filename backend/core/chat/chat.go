@@ -269,9 +269,13 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	if llmConfig, ok := body["llm_config"].(map[string]any); ok {
 		req.LLMConfig = llmConfig
 	}
-	if toolConfig, ok := body["tool_config"].(map[string]any); ok {
-		tc := make(map[string]string, len(toolConfig))
-		for k, v := range toolConfig {
+	if toolConfig, ok := body["tool_config"].(map[string]string); ok {
+		if len(toolConfig) > 0 {
+			req.ToolConfig = toolConfig
+		}
+	} else if toolConfigAny, ok := body["tool_config"].(map[string]any); ok {
+		tc := make(map[string]string, len(toolConfigAny))
+		for k, v := range toolConfigAny {
 			if s, ok := v.(string); ok {
 				tc[k] = s
 			}
