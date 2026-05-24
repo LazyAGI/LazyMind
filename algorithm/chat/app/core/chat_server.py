@@ -22,6 +22,7 @@ def create_app() -> FastAPI:
         health_routes,
         memory_generate_routes,
         model_check_routes,
+        model_features_routes,
         vocab_routes,
     )
 
@@ -29,6 +30,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_routes.router)
     app.include_router(memory_generate_routes.router)
     app.include_router(model_check_routes.router)
+    app.include_router(model_features_routes.router)
     app.include_router(vocab_routes.router)
     return app
 

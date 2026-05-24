@@ -18,6 +18,7 @@ import {
 import { AgentAppsAuth } from "@/components/auth";
 import { BASE_URL, axiosInstance, getLocalizedErrorMessage } from "@/components/request";
 import type { RawAxiosRequestConfig } from "axios";
+import { useModelFeatures } from "@/hooks/useModelFeatures";
 import "./index.scss";
 
 type ModelCapability =
@@ -639,8 +640,14 @@ export default function ModelProviderPage() {
   const [shareStatus, setShareStatus] = useState<Partial<Record<ModelCapability, boolean>>>({});
   const [modelReadyStatus, setModelReadyStatus] = useState<Partial<Record<ModelCapability, boolean | null>>>({});
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
-  // All roles see all modules; restricted modules are disabled for non-admin users.
-  const visibleModuleConfigs = moduleConfigs;
+  const modelFeaturesState = useModelFeatures();
+  const imageEmbedEnabled =
+    modelFeaturesState.status !== 'ready' || modelFeaturesState.features.image_embed_enabled;
+  // Hide MULTIMODAL_EMBEDDING slot when image embed is not configured in runtime_models.yaml.
+  const visibleModuleConfigs = useMemo(
+    () => moduleConfigs.filter((m) => m.key !== 'MULTIMODAL_EMBEDDING' || imageEmbedEnabled),
+    [imageEmbedEnabled],
+  );
   const watchedProviderBaseUrl = Form.useWatch("baseUrl", providerConfigForm);
   const providerSearchRequestIdRef = useRef(0);
   const initialProvidersLoadedRef = useRef(false);

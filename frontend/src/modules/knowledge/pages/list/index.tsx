@@ -44,6 +44,7 @@ import type { TreeNode } from "@/modules/knowledge/pages/detail/components/Knowl
 import { useTranslation } from "react-i18next";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { AgentAppsAuth } from "@/components/auth";
+import { fetchModelFeatures } from "@/hooks/useModelFeatures";
 
 import "./index.scss";
 
@@ -102,13 +103,18 @@ const KnowledgePage: FC = () => {
 
   async function checkEmbeddingReady() {
     try {
+      const features = await fetchModelFeatures();
+      const imageEmbedEnabled = features.image_embed_enabled;
+
       const [embResp, multiResp] = await Promise.all([
         axiosInstance.get<{ data?: { ready: boolean } } | { ready: boolean }>(
           `${BASE_URL}/api/core/model_providers/models/ready?model_type=embedding`
         ).catch(() => null),
-        axiosInstance.get<{ data?: { ready: boolean } } | { ready: boolean }>(
-          `${BASE_URL}/api/core/model_providers/models/ready?model_type=multimodal_embedding`
-        ).catch(() => null),
+        imageEmbedEnabled
+          ? axiosInstance.get<{ data?: { ready: boolean } } | { ready: boolean }>(
+              `${BASE_URL}/api/core/model_providers/models/ready?model_type=multimodal_embedding`
+            ).catch(() => null)
+          : Promise.resolve(null),
       ]);
       const unwrap = (resp: typeof embResp): boolean | null => {
         if (!resp) return null;
@@ -118,7 +124,8 @@ const KnowledgePage: FC = () => {
         return d?.ready ?? null;
       };
       setEmbeddingReady(unwrap(embResp));
-      setMultimodalEmbeddingReady(unwrap(multiResp));
+      // null means "not applicable" — does not trigger disabled state.
+      setMultimodalEmbeddingReady(imageEmbedEnabled ? unwrap(multiResp) : null);
     } catch {
       setEmbeddingReady(null);
       setMultimodalEmbeddingReady(null);

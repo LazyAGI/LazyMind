@@ -193,6 +193,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/inner/word_group:apply", []string{}, wordgroup.ApplyWordGroupAction)
 
 	// ----- Model provider -----
+	handleAPI(r, "GET", "/model_providers/features", nil, modelprovider.GetModelFeatures)
 	handleAPI(r, "GET", "/model_providers", []string{}, modelprovider.ListUserProviders)
 	handleAPI(r, "GET", "/model_providers:with_groups", []string{}, modelprovider.ListUserProvidersWithGroups)
 	handleAPI(r, "POST", "/model_providers/{model_provider_id}/groups/{group_id}:check", []string{}, modelprovider.CheckGroup)

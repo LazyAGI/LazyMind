@@ -27,6 +27,7 @@ embed_image:
   source: dynamic
   dynamic_auth: true
   type: cross_modal_embed
+  raise_in_no_key: false
 
 vlm:
   source: dynamic

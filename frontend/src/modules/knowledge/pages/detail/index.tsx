@@ -10,6 +10,7 @@ import {
 } from "antd";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { AgentAppsAuth } from "@/components/auth";
+import { fetchModelFeatures } from "@/hooks/useModelFeatures";
 import type { MenuProps } from "antd";
 import { useEffect, useRef, useState, useCallback, MouseEvent } from "react";
 import { useParams } from "react-router-dom";
@@ -112,20 +113,26 @@ const Detail = () => {
           : (body as { ready: boolean });
         return d?.ready ?? null;
       };
-      Promise.all([
-        axiosInstance
-          .get<{ data?: { ready: boolean } } | { ready: boolean }>(
-            `${BASE_URL}/api/core/model_providers/models/ready?model_type=embedding`
-          )
-          .catch(() => null),
-        axiosInstance
-          .get<{ data?: { ready: boolean } } | { ready: boolean }>(
-            `${BASE_URL}/api/core/model_providers/models/ready?model_type=multimodal_embedding`
-          )
-          .catch(() => null),
-      ]).then(([embResp, multiResp]) => {
-        setEmbeddingReady(unwrap(embResp));
-        setMultimodalEmbeddingReady(unwrap(multiResp));
+      fetchModelFeatures().then((features) => {
+        const imageEmbedEnabled = features.image_embed_enabled;
+        return Promise.all([
+          axiosInstance
+            .get<{ data?: { ready: boolean } } | { ready: boolean }>(
+              `${BASE_URL}/api/core/model_providers/models/ready?model_type=embedding`
+            )
+            .catch(() => null),
+          imageEmbedEnabled
+            ? axiosInstance
+                .get<{ data?: { ready: boolean } } | { ready: boolean }>(
+                  `${BASE_URL}/api/core/model_providers/models/ready?model_type=multimodal_embedding`
+                )
+                .catch(() => null)
+            : Promise.resolve(null),
+        ]).then(([embResp, multiResp]) => {
+          setEmbeddingReady(unwrap(embResp));
+          // null means "not applicable" — does not trigger disabled state.
+          setMultimodalEmbeddingReady(imageEmbedEnabled ? unwrap(multiResp) : null);
+        });
       }).catch(() => {
         setEmbeddingReady(null);
         setMultimodalEmbeddingReady(null);

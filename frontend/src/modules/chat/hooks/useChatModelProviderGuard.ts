@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentAppsAuth, AUTH_USER_CHANGE_EVENT } from "@/components/auth";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { fetchCurrentUser } from "@/modules/signin/utils/request";
+import { fetchModelFeatures } from "@/hooks/useModelFeatures";
 
 type ApiEnvelope<T> = {
   data?: T;
@@ -67,6 +68,9 @@ export function useChatModelProviderGuard() {
     }
 
     try {
+      const features = await fetchModelFeatures();
+      const imageEmbedEnabled = features.image_embed_enabled;
+
       const [chatReadyResp, embeddingResp, multimodalEmbeddingResp, rerankResp, vlmResp] = await Promise.all([
         axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
           `${BASE_URL}/api/core/model_providers/models/ready?model_type=llm-chat`
@@ -74,9 +78,11 @@ export function useChatModelProviderGuard() {
         axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
           `${BASE_URL}/api/core/model_providers/models/ready?model_type=embedding`
         ).catch(() => null),
-        axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
-          `${BASE_URL}/api/core/model_providers/models/ready?model_type=multimodal_embedding`
-        ).catch(() => null),
+        imageEmbedEnabled
+          ? axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
+              `${BASE_URL}/api/core/model_providers/models/ready?model_type=multimodal_embedding`
+            ).catch(() => null)
+          : Promise.resolve(null),
         axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
           `${BASE_URL}/api/core/model_providers/models/ready?model_type=rerank`
         ).catch(() => null),
@@ -99,7 +105,8 @@ export function useChatModelProviderGuard() {
         return unwrapResponse<ModelReadyResponse>(resp.data).ready ?? null;
       };
       setEmbeddingReady(getReady(embeddingResp));
-      setMultimodalEmbeddingReady(getReady(multimodalEmbeddingResp));
+      // null means "not applicable" (image embed not configured) — does not trigger disabled state.
+      setMultimodalEmbeddingReady(imageEmbedEnabled ? getReady(multimodalEmbeddingResp) : null);
       setRerankReady(getReady(rerankResp));
       setVlmReady(getReady(vlmResp));
 
