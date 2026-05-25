@@ -2,7 +2,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 import lazyllm
 from lazyllm import LOG
 import lazyllm.tracing.collect.configs  # noqa: F401
@@ -191,7 +191,6 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       user_id: Optional[str] = None,
                       model_config: Optional[Dict[str, Any]] = None,
                       tool_config: Optional[Dict[str, str]] = None) -> Union[Dict[str, Any], StreamingResponse]:
-    result = None
     priority = LAZYMIND_LLM_PRIORITY if priority is None else priority
 
     start_time = time.time()
