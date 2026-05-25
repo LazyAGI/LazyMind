@@ -914,6 +914,7 @@ const enUS = {
     selectParseAlgorithm: "Please select a parse algorithm",
     knowledgeTags: "Knowledge Base Tags",
     selectKnowledgeTags: "Please select knowledge base tags",
+    knowledgeTagMaxLength: "Tags can contain up to 20 characters",
     excelPreviewLoading: "Loading...",
     previewLoadFailed: "Load failed",
     previewLoadFailedLog: "Load failed:",

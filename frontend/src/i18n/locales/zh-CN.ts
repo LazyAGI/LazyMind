@@ -877,6 +877,7 @@ const zhCN = {
     selectParseAlgorithm: "请选择解析算法",
     knowledgeTags: "知识库标签",
     selectKnowledgeTags: "请选择知识库标签",
+    knowledgeTagMaxLength: "标签最多 20 个字符",
     excelPreviewLoading: "加载中...",
     previewLoadFailed: "加载失败",
     previewLoadFailedLog: "加载失败:",

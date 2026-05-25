@@ -1,27 +1,66 @@
 import { ALL_TAGS } from "@/modules/knowledge/constants/common";
 import { message, Select } from "antd";
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+
+const EMPTY_TAGS: string[] = [];
 
 interface TagSelectProps {
   tags: string[];
+  maxTagLength?: number;
+  maxTagLengthMessage?: string;
+  showOverLengthInputError?: boolean;
+  onLengthErrorChange?: (hasError: boolean) => void;
   value?: string[];
   onChange?: (value: string[]) => void;
 }
 
-const TagSelect = ({ tags, value = [], onChange }: TagSelectProps) => {
+const TagSelect = ({
+  tags,
+  maxTagLength = 100,
+  maxTagLengthMessage,
+  showOverLengthInputError = false,
+  onLengthErrorChange,
+  value,
+  onChange,
+}: TagSelectProps) => {
   const { t } = useTranslation();
   const MAX_TAG_COUNT = 10;
-  const MAX_TAG_LENGTH = 100;
+  const selectedTags = value ?? EMPTY_TAGS;
 
   const [searchValue, setSearchValue] = useState("");
+  const hasSelectedOverLengthTag = useMemo(
+    () => selectedTags.some((tag) => Array.from(tag).length > maxTagLength),
+    [maxTagLength, selectedTags],
+  );
+
+  const notifyLengthError = useCallback((currentInput: string, currentTags = selectedTags) => {
+    onLengthErrorChange?.(
+      (showOverLengthInputError &&
+        Array.from(currentInput).length > maxTagLength) ||
+        currentTags.some((tag) => Array.from(tag).length > maxTagLength),
+    );
+  }, [maxTagLength, onLengthErrorChange, selectedTags, showOverLengthInputError]);
+
+  useEffect(() => {
+    notifyLengthError(searchValue);
+  }, [
+    hasSelectedOverLengthTag,
+    maxTagLength,
+    notifyLengthError,
+    selectedTags,
+    searchValue,
+    showOverLengthInputError,
+  ]);
 
   function handleSearch(val: string) {
-    if (val.length <= MAX_TAG_LENGTH) {
-      setSearchValue(val);
-    } else {
+    if (!showOverLengthInputError && Array.from(val).length > maxTagLength) {
       setSearchValue("");
+      notifyLengthError("");
+      return;
     }
+    setSearchValue(val);
+    notifyLengthError(val);
   }
 
   function handleChange(nextValue: string[]) {
@@ -29,22 +68,26 @@ const TagSelect = ({ tags, value = [], onChange }: TagSelectProps) => {
       new Set((nextValue || []).map((tag) => tag.trim()).filter(Boolean)),
     );
     const validLengthTags = normalizedTags.filter(
-      (tag) => tag.length <= MAX_TAG_LENGTH,
+      (tag) => Array.from(tag).length <= maxTagLength,
     );
 
     if (validLengthTags.length < normalizedTags.length) {
       message.warning(
-        t("knowledge.singleTagMaxLength", { count: MAX_TAG_LENGTH }),
+        maxTagLengthMessage ||
+          t("knowledge.singleTagMaxLength", { count: maxTagLength }),
       );
+      setSearchValue("");
     }
 
     if (validLengthTags.length > MAX_TAG_COUNT) {
       message.warning(t("knowledge.maxTenTags"));
       setSearchValue("");
+      notifyLengthError("", validLengthTags.slice(0, MAX_TAG_COUNT));
       onChange?.(validLengthTags.slice(0, MAX_TAG_COUNT));
       return;
     }
 
+    notifyLengthError("", validLengthTags);
     onChange?.(validLengthTags);
   }
 
@@ -53,7 +96,7 @@ const TagSelect = ({ tags, value = [], onChange }: TagSelectProps) => {
       mode="tags"
       tokenSeparators={[","]}
       searchValue={searchValue}
-      value={value}
+      value={selectedTags}
       onChange={handleChange}
       onSearch={handleSearch}
       options={tags
@@ -62,11 +105,25 @@ const TagSelect = ({ tags, value = [], onChange }: TagSelectProps) => {
           return { value: tag, name: tag };
         })}
       onInputKeyDown={(e) => {
-        if (searchValue.length >= MAX_TAG_LENGTH && e.key !== "Backspace") {
+        if (
+          !showOverLengthInputError &&
+          Array.from(searchValue).length >= maxTagLength &&
+          e.key !== "Backspace"
+        ) {
           e.preventDefault();
         }
       }}
-      onSelect={() => setSearchValue("")}
+      status={
+        (showOverLengthInputError &&
+          Array.from(searchValue).length > maxTagLength) ||
+        hasSelectedOverLengthTag
+          ? "error"
+          : undefined
+      }
+      onSelect={() => {
+        setSearchValue("");
+        notifyLengthError("");
+      }}
       placeholder={t("knowledge.selectTagPlaceholder")}
     />
   );
