@@ -10,7 +10,8 @@ from lazyllm.tools.agent.skill_manager import SkillManager as LazySkillManager
 from lazyllm.tools.fs.client import FS
 
 from chat.tools.skill_manager import list_all_skill_entries
-from common.remote_fs import RemoteFS, _resolve_session_id
+from common.remote_fs import RemoteFS
+from config import config as algo_config
 
 
 class _Response:
@@ -41,7 +42,7 @@ def test_remote_fs_uses_core_readonly_api(monkeypatch):
         raise AssertionError(url)
 
     monkeypatch.setattr('common.remote_fs.requests.get', fake_get)
-    monkeypatch.setattr('common.remote_fs._resolve_session_id', lambda: 'sid-1')
+    monkeypatch.setattr('common.remote_fs.lazyllm.globals', {'agentic_config': {'session_id': 'sid-1'}})
 
     fs = RemoteFS(base_url='http://core:8000', timeout=3)
 
@@ -58,37 +59,30 @@ def test_remote_fs_uses_core_readonly_api(monkeypatch):
 
 
 def test_remote_fs_reads_core_api_url_from_model_config(monkeypatch):
-    class _Globals:
-        @staticmethod
-        def __getitem__(key):
-            if key == 'agentic_config':
-                return {'core_api_url': 'http://inner-core:9000'}
-            raise KeyError(key)
+    del monkeypatch
 
-        @staticmethod
-        def get(key, default=None):
-            return None
+    with algo_config.temp('core_api_url', 'http://inner-core:9000'):
+        fs = RemoteFS()
 
-    monkeypatch.setattr('common.remote_fs.lazyllm.globals', _Globals())
-
-    fs = RemoteFS()
-
-    assert fs.base_url == 'http://inner-core:9000'
+        assert fs.base_url == 'http://inner-core:9000'
 
 
-def test_remote_fs_uses_session_id_from_agentic_config(monkeypatch):
-    class _Globals:
-        _sid = 'sid-from-global'
+def test_remote_fs_omits_session_id_when_not_available(monkeypatch):
+    calls = []
 
-        @staticmethod
-        def get(key, default=None):
-            if key == 'agentic_config':
-                return {'session_id': 'sid-from-config'}
-            return default
+    def fake_get(url, params, timeout):
+        calls.append((url, params, timeout))
+        return _Response({'code': 0, 'data': {'exists': False}})
 
-    monkeypatch.setattr('common.remote_fs.lazyllm.globals', _Globals())
+    monkeypatch.setattr('common.remote_fs.requests.get', fake_get)
+    monkeypatch.setattr('common.remote_fs.lazyllm.globals', {'agentic_config': {}})
 
-    assert _resolve_session_id() == 'sid-from-config'
+    fs = RemoteFS(base_url='http://core:8000', timeout=3)
+
+    assert fs.exists('skills/a/SKILL.md') is False
+    assert calls == [
+        ('http://core:8000/remote-fs/exists', {'path': 'skills/a/SKILL.md'}, 3),
+    ]
 
 
 @pytest.fixture
@@ -157,40 +151,38 @@ def mock_remote_fs_server(tmp_path):
 
 def test_skill_manager_lists_remote_skills_from_mock_server(monkeypatch, mock_remote_fs_server):
     FS._instances.clear()
-    monkeypatch.setattr('common.remote_fs._resolve_base_url', lambda: mock_remote_fs_server)
-    monkeypatch.setattr('common.remote_fs._resolve_session_id', lambda: 'sid-demo')
-
-    assert list_all_skill_entries('remote://skills') == {
-        'writing/example': {
-            'name': 'example',
-            'category': 'writing',
-            'path': 'remote://skills/writing/example',
-            'source': 'remote',
-        },
-        'ops/deploy-checklist': {
-            'name': 'deploy-checklist',
-            'category': 'ops',
-            'path': 'remote://skills/ops/deploy-checklist',
-            'source': 'remote',
-        },
-    }
+    monkeypatch.setattr('common.remote_fs.lazyllm.globals', {'agentic_config': {'session_id': 'sid-demo'}})
+    with algo_config.temp('core_api_url', mock_remote_fs_server):
+        assert list_all_skill_entries('remote://skills') == {
+            'writing/example': {
+                'name': 'example',
+                'category': 'writing',
+                'path': 'remote://skills/writing/example',
+                'source': 'remote',
+            },
+            'ops/deploy-checklist': {
+                'name': 'deploy-checklist',
+                'category': 'ops',
+                'path': 'remote://skills/ops/deploy-checklist',
+                'source': 'remote',
+            },
+        }
 
 
 def test_skill_manager_reads_reference_from_remote_mock_server(monkeypatch, mock_remote_fs_server):
     FS._instances.clear()
-    monkeypatch.setattr('common.remote_fs._resolve_base_url', lambda: mock_remote_fs_server)
-    monkeypatch.setattr('common.remote_fs._resolve_session_id', lambda: 'sid-demo')
+    monkeypatch.setattr('common.remote_fs.lazyllm.globals', {'agentic_config': {'session_id': 'sid-demo'}})
+    with algo_config.temp('core_api_url', mock_remote_fs_server):
+        manager = LazySkillManager(dir='remote://skills', fs=FS)
 
-    manager = LazySkillManager(dir='remote://skills', fs=FS)
+        skill_doc = manager.get_skill('example')
+        reference_doc = manager.read_reference('example', 'references/examples/daily-update.md')
 
-    skill_doc = manager.get_skill('example')
-    reference_doc = manager.read_reference('example', 'references/examples/daily-update.md')
-
-    assert skill_doc['status'] == 'ok'
-    assert 'Example Skill' in skill_doc['content']
-    assert '(source: remote,' in manager.build_prompt()
-    assert reference_doc == {
-        'status': 'ok',
-        'path': 'remote://skills/writing/example/references/examples/daily-update.md',
-        'content': '# Daily Update\n\nCompleted API integration and validated the smoke test.\n',
-    }
+        assert skill_doc['status'] == 'ok'
+        assert 'Example Skill' in skill_doc['content']
+        assert '(source: remote,' in manager.build_prompt()
+        assert reference_doc == {
+            'status': 'ok',
+            'path': 'remote://skills/writing/example/references/examples/daily-update.md',
+            'content': '# Daily Update\n\nCompleted API integration and validated the smoke test.\n',
+        }

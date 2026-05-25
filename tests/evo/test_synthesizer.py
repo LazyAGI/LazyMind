@@ -72,7 +72,7 @@ def _make_action_payload(aid: str = "A1") -> dict:
         "expected_direction": "+",
         "confidence": 0.85,
         "evidence_handles": ["h_0001"],
-        "code_map_target": "/LazyRAG/algorithm/chat/pipelines/naive.py",
+        "code_map_target": "/LazyMind/algorithm/chat/pipelines/agentic.py",
     }
 
 
@@ -210,7 +210,7 @@ def test_to_action_validates_priority_and_direction() -> None:
         "priority": "P9", "expected_impact_metric": "m",
         "expected_direction": "?", "confidence": "1.5",
         "evidence_handles": ["h_0001"],
-        "code_map_target": "/LazyRAG/algorithm/chat/pipelines/naive.py",
+        "code_map_target": "/LazyMind/algorithm/chat/pipelines/agentic.py",
     }
     a = _to_action(raw, session)
     assert isinstance(a, VerifiedAction)

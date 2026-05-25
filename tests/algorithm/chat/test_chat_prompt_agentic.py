@@ -1,15 +1,14 @@
-from string import Formatter
-
 from chat.prompts.agentic import (
-    EVALUATOR_PROMPT,
-    EXTRACTOR_PROMPT,
-    GENERATE_PROMPT,
-    GENERATE_PROMPT_ZH,
-    PLANREFINE_PROMPT,
-    PLANNER_PROMPT,
-    QUERYREFINER_PROMPT,
-    TOOLCALL_PROMPT,
+    DEFAULT_SYSTEM_PROMPT,
+    IMAGE_REFERENCE_MARKDOWN_GUIDANCE,
+    MEMORY_GUIDANCE,
+    SEARCH_GUIDANCE,
+    SKILLS_GUIDANCE,
+    TOOL_CALL_STATUS_GUIDANCE,
+    VOCAB_GUIDANCE,
+    VISION_EXTRACTOR_GUIDANCE,
 )
+from chat.components.agentic.config import _build_runtime_system_prompt
 
 
 def assert_balanced_curly_braces(text):
@@ -23,83 +22,55 @@ def assert_balanced_curly_braces(text):
     assert depth == 0
 
 
-def test_agentic_template_prompts_substitute_required_variables():
-    rendered = {
-        'planner': PLANNER_PROMPT.substitute(
-            tool_num='1',
-            tool_description='vector_search: query text',
-            original_query='What is LazyMind?',
-        ),
-        'toolcall': TOOLCALL_PROMPT.substitute(
-            tool_description='vector_search accepts a query parameter',
-            original_query='What is LazyMind?',
-            current_goal='Find the definition of LazyMind',
-            previous_step_result='none',
-        ),
-        'extractor': EXTRACTOR_PROMPT.substitute(
-            original_query='What is LazyMind?',
-            inference='',
-            current_step='Find the definition of LazyMind',
-            new_nodes='NODE[[0]] LazyMind is a retrieval system.',
-        ),
-        'evaluator': EVALUATOR_PROMPT.substitute(
-            original_query='What is LazyMind?',
-            plans='[]',
-        ),
-        'planrefine': PLANREFINE_PROMPT.substitute(
-            tool_description='vector_search: query text',
-            original_query='What is LazyMind?',
-            executed_plan_and_inferences='[]',
-        ),
-        'queryrefiner': QUERYREFINER_PROMPT.substitute(
-            original_query='What is LazyMind?',
-            inference='',
-            retrieval_step='Find the definition of LazyMind',
-            chunks='[]',
-        ),
-    }
-
-    for text in rendered.values():
-        assert '$' not in text
-        assert 'JSON' in text
-
-
-def test_generate_prompts_include_grounding_fields():
-    rendered = GENERATE_PROMPT.format(
-        inference='LazyMind is described as a retrieval system.',
-        chunks='NODE[[0]] LazyMind is a retrieval system.',
-        query='What is LazyMind?',
-    )
-    rendered_zh = GENERATE_PROMPT_ZH.format(
-        inference='LazyMind 是检索系统。',
-        chunks='NODE[[0]] LazyMind 是检索系统。',
-        query='LazyMind 是什么？',
-    )
-
-    assert 'Auxiliary inference' in rendered
-    assert 'Grounding knowledge' in rendered
-    assert 'Question' in rendered
-    assert '辅助推理' in rendered_zh
-    assert '参考知识' in rendered_zh
-    assert '问题' in rendered_zh
-
-
-def test_agentic_prompts_have_valid_variable_braces():
-    template_prompts = [
-        PLANNER_PROMPT.template,
-        TOOLCALL_PROMPT.template,
-        EXTRACTOR_PROMPT.template,
-        EVALUATOR_PROMPT.template,
-        PLANREFINE_PROMPT.template,
-        QUERYREFINER_PROMPT.template,
+def test_agentic_guidance_strings_are_non_empty_and_balanced():
+    prompts = [
+        DEFAULT_SYSTEM_PROMPT,
+        MEMORY_GUIDANCE,
+        VOCAB_GUIDANCE,
+        SKILLS_GUIDANCE,
+        SEARCH_GUIDANCE,
+        TOOL_CALL_STATUS_GUIDANCE,
+        IMAGE_REFERENCE_MARKDOWN_GUIDANCE,
+        VISION_EXTRACTOR_GUIDANCE,
     ]
-    format_prompts = [GENERATE_PROMPT, GENERATE_PROMPT_ZH]
 
-    for prompt in template_prompts + format_prompts:
+    for prompt in prompts:
         assert isinstance(prompt, str)
+        assert prompt.strip()
         assert_balanced_curly_braces(prompt)
 
-    for prompt in format_prompts:
-        fields = [field_name for _, field_name, _, _ in Formatter().parse(prompt) if field_name]
-        assert fields == ['inference', 'chunks', 'query']
-        prompt.format(inference='inference', chunks='chunks', query='query')
+    assert 'LAZYMIND' in DEFAULT_SYSTEM_PROMPT
+    assert 'kb_search' in SEARCH_GUIDANCE
+    assert 'memory tool' in MEMORY_GUIDANCE
+    assert 'skill_manage' in SKILLS_GUIDANCE
+    assert 'vocab_manage' in VOCAB_GUIDANCE
+
+
+def test_runtime_system_prompt_includes_relevant_guidance_blocks():
+    config = {
+        'use_memory': True,
+        'user_preference': 'Respond in Chinese.',
+        'memory': '2026-05-25: User is debugging tests.',
+        'image_files': ['/tmp/example.png'],
+        'environment_context': {
+            'time': {
+                'now': '2026-05-25 10:30',
+                'timezone': 'Asia/Shanghai',
+            }
+        },
+    }
+
+    rendered = _build_runtime_system_prompt(
+        config,
+        ['kb_search', 'memory', 'skill_manage', 'vocab_manage', 'vision_extractor'],
+    )
+
+    assert 'LAZYMIND' in rendered
+    assert '## User Profile / Preferences' in rendered
+    assert '## Agent Working Memory' in rendered
+    assert 'Current user time: 2026-05-25 10:30' in rendered
+    assert 'User timezone: Asia/Shanghai' in rendered
+    assert 'kb_search' in rendered
+    assert 'skill_manage' in rendered
+    assert 'vocab_manage' in rendered
+    assert 'vision_extractor' in rendered
