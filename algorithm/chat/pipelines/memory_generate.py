@@ -8,12 +8,23 @@ from typing import Any, Dict, List, Literal, Optional
 from lazyllm import AutoModel
 from chat.tools.skill_manager import _validate_skill_content
 from chat.utils.load_config import get_config_path
+
+try:
+    from json_repair import repair_json as _repair_json  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    _repair_json = None
+
 MemoryType = Literal['skill', 'memory', 'user_preference']
 
 _MAX_GENERATE_ATTEMPTS = 3
 _MAX_MANAGED_CONTENT_CHARS = 1400
 _JSON_BLOCK_RE = re.compile(r'```json\s*(.*?)\s*```', re.DOTALL)
+_CODE_BLOCK_RE = re.compile(r'```(?:[a-zA-Z0-9_+-]+)?\s*(.*?)\s*```', re.DOTALL)
 _THINK_BLOCK_RE = re.compile(r'<think>.*?</think\s*>', re.DOTALL | re.IGNORECASE)
+_SINGLE_STRING_FIELD_RE = re.compile(
+    r'^\{\s*"(?P<key>[^"\\]+)"\s*:\s*"(?P<value>(?:[^"\\]|\\.)*)"\s*,?\s*\}\s*$',
+    re.DOTALL,
+)
 _DATE_BULLET_RE = re.compile(r'^-\s+(.+?)(?::\s*(.*))?$')
 _SECTION_HEADER_TO_KEY = OrderedDict((
     ('用户在做', 'doing'),
@@ -81,23 +92,93 @@ def _extract_json_object(raw: Any) -> Dict[str, Any]:
     if match:
         text = match.group(1).strip()
 
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        left = text.find('{')
-        right = text.rfind('}')
-        if left < 0 or right <= left:
-            raise UnprocessableContentError('Model output is not valid JSON.')
+    candidates: List[str] = [text]
+    left = text.find('{')
+    right = text.rfind('}')
+    if left >= 0 and right > left:
+        trimmed = text[left: right + 1]
+        if trimmed != text:
+            candidates.append(trimmed)
+
+    parsed: Any = None
+    last_error: Optional[json.JSONDecodeError] = None
+    for candidate in candidates:
         try:
-            parsed = json.loads(text[left: right + 1])
+            parsed = json.loads(candidate)
+            break
         except json.JSONDecodeError as exc:
+            last_error = exc
+    else:
+        try:
+            if _repair_json is None:
+                raise ImportError('json_repair is not installed')
+            for candidate in candidates:
+                repaired = _repair_json(candidate, return_objects=True)
+                if isinstance(repaired, dict):
+                    parsed = repaired
+                    break
+        except Exception:
+            pass
+
+    if parsed is None:
+        for candidate in candidates:
+            parsed = _extract_single_string_field_object(candidate)
+            if isinstance(parsed, dict):
+                break
+
+    if parsed is None:
+        if last_error is not None:
             raise UnprocessableContentError(
-                f'Model output is not valid JSON: {exc}'
-            ) from exc
+                f'Model output is not valid JSON: {last_error}'
+            ) from last_error
+        raise UnprocessableContentError('Model output is not valid JSON.')
 
     if not isinstance(parsed, dict):
         raise UnprocessableContentError('Model output must be a JSON object.')
     return parsed
+
+
+def _extract_single_string_field_object(text: str) -> Optional[Dict[str, str]]:
+    match = _SINGLE_STRING_FIELD_RE.match(text.strip())
+    if not match:
+        return None
+
+    key = match.group('key').strip()
+    raw_value = match.group('value').strip()
+    if raw_value.endswith(','):
+        raw_value = raw_value[:-1].rstrip()
+    if len(raw_value) < 2 or not raw_value.startswith('"') or not raw_value.endswith('"'):
+        return None
+
+    inner = raw_value[1:-1]
+    try:
+        value = json.loads(f'"{inner}"')
+    except json.JSONDecodeError:
+        value = (
+            inner.replace('\\"', '"')
+            .replace('\\\\', '\\')
+            .replace('\\r', '\r')
+            .replace('\\n', '\n')
+            .replace('\\t', '\t')
+        )
+    return {key: value}
+
+
+def _extract_skill_content(raw: Any) -> str:
+    text = str(raw).strip()
+    text = _THINK_BLOCK_RE.sub('', text).strip()
+
+    match = _CODE_BLOCK_RE.search(text)
+    if match:
+        text = match.group(1).strip()
+
+    frontmatter_start = text.find('---')
+    if frontmatter_start > 0:
+        text = text[frontmatter_start:].strip()
+
+    if text.endswith('```'):
+        text = text[:-3].rstrip()
+    return text
 
 
 def _validate_generated_content(memory_type: MemoryType, content: Any) -> str:
@@ -445,8 +526,8 @@ class MemoryGeneratePipeline:
                 previous_error=error,
             )
             raw = self.llm(prompt)
-            parsed = _extract_json_object(raw)
             try:
+                parsed = _extract_json_object(raw)
                 if memory_type == 'memory':
                     edited_content = _apply_memory_edit_operations(content, parsed)
                     return _validate_generated_content(memory_type, edited_content)
@@ -455,6 +536,13 @@ class MemoryGeneratePipeline:
                     return _validate_generated_content(memory_type, edited_content)
                 return _validate_generated_content(memory_type, parsed.get('content'))
             except UnprocessableContentError as exc:
+                if memory_type == 'skill':
+                    skill_content = _extract_skill_content(raw)
+                    validation_error = _validate_skill_content(skill_content)
+                    if validation_error is None:
+                        return skill_content
+                    error = f'{exc}; raw skill fallback invalid: {validation_error}'
+                    continue
                 error = str(exc)
 
         raise UnprocessableContentError(
