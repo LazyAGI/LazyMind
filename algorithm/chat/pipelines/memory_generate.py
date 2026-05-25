@@ -8,6 +8,12 @@ from typing import Any, Dict, List, Literal, Optional
 from lazyllm import AutoModel
 from chat.tools.skill_manager import _validate_skill_content
 from chat.utils.load_config import get_config_path
+
+try:
+    from json_repair import repair_json as _repair_json  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    _repair_json = None
+
 MemoryType = Literal['skill', 'memory', 'user_preference']
 
 _MAX_GENERATE_ATTEMPTS = 3
@@ -15,7 +21,10 @@ _MAX_MANAGED_CONTENT_CHARS = 1400
 _JSON_BLOCK_RE = re.compile(r'```json\s*(.*?)\s*```', re.DOTALL)
 _CODE_BLOCK_RE = re.compile(r'```(?:[a-zA-Z0-9_+-]+)?\s*(.*?)\s*```', re.DOTALL)
 _THINK_BLOCK_RE = re.compile(r'<think>.*?</think\s*>', re.DOTALL | re.IGNORECASE)
-_SINGLE_STRING_FIELD_RE = re.compile(r'^\{\s*"(?P<key>[^"]+)"\s*:\s*(?P<value>.*)\}\s*$', re.DOTALL)
+_SINGLE_STRING_FIELD_RE = re.compile(
+    r'^\{\s*"(?P<key>[^"\\]+)"\s*:\s*"(?P<value>(?:[^"\\]|\\.)*)"\s*,?\s*\}\s*$',
+    re.DOTALL,
+)
 _DATE_BULLET_RE = re.compile(r'^-\s+(.+?)(?::\s*(.*))?$')
 _SECTION_HEADER_TO_KEY = OrderedDict((
     ('用户在做', 'doing'),
@@ -101,10 +110,10 @@ def _extract_json_object(raw: Any) -> Dict[str, Any]:
             last_error = exc
     else:
         try:
-            from json_repair import repair_json  # type: ignore
-
+            if _repair_json is None:
+                raise ImportError('json_repair is not installed')
             for candidate in candidates:
-                repaired = repair_json(candidate, return_objects=True)
+                repaired = _repair_json(candidate, return_objects=True)
                 if isinstance(repaired, dict):
                     parsed = repaired
                     break
