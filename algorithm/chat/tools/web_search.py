@@ -3,7 +3,6 @@ from __future__ import annotations
 from socket import gaierror
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-import lazyllm
 import requests
 from bs4 import BeautifulSoup
 from httpx import ConnectError, HTTPError, HTTPStatusError, NetworkError, TimeoutException
