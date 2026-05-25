@@ -260,14 +260,6 @@ def _content_for_item(provider: Any, item: Dict[str, Any], include_content: bool
     return provider.get_content(item)
 
 
-def _fetch_timeout(url_fetch_timeout: Any) -> int:
-    return _coerce_int(url_fetch_timeout, _cfg['web_search_timeout'])
-
-
-def _fetch_text_limit(url_fetch_max_length: Any) -> int:
-    return max(200, _coerce_int(url_fetch_max_length, _MAX_FETCH_TEXT_LEN))
-
-
 def _extract_page_text(html: str) -> str:
     soup = BeautifulSoup(html, 'html.parser')
 
@@ -478,9 +470,8 @@ def url_fetch(
     if not normalized_url:
         raise ValueError('url is required')
 
-    config = lazyllm.globals['agentic_config']
-    timeout = _fetch_timeout(config.get('url_fetch_timeout'))
-    text_limit = _fetch_text_limit(config.get('url_fetch_max_length'))
+    timeout = _coerce_int(_cfg['web_search_timeout'], 10)
+    text_limit = max(200, _coerce_int(_cfg['url_fetch_max_length'], _MAX_FETCH_TEXT_LEN))
     headers = {
         'User-Agent': (
             'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '

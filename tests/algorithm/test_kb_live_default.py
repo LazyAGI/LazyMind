@@ -5,9 +5,6 @@ from chat.tools import kb
 
 DEFAULT_AGENTIC_CONFIG = {
     'kb_id': 'ds_9e96150bb1ceeec7d96055638072b8a9',
-    'es_url': 'https://10.119.24.129:9200',
-    'es_user': 'admin',
-    'es_password': 'LazyRAG_OpenSearch123!',
 }
 SEED_KEYWORD = '铁路路基设计规范'
 

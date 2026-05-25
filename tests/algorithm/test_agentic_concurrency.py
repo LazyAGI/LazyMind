@@ -36,7 +36,7 @@ class _FakeAgent:
         if callable(callback):
             callback({
                 'round': 1,
-                'content': f'observed:{snapshot.get("kb_name") if snapshot else None}',
+                'content': f'observed:{snapshot.get("algo_id") if snapshot else None}',
                 'tool_calls': [],
             })
         with type(self)._lock:
@@ -53,7 +53,7 @@ class _FakeAgent:
             })
         return {
             'text': f'final:{query}',
-            'observed_kb_name': snapshot.get('kb_name') if snapshot else None,
+            'observed_algo_id': snapshot.get('algo_id') if snapshot else None,
         }
 
 
@@ -93,9 +93,8 @@ def _build_configs(prefix: str, n: int) -> List[Dict[str, Any]]:
     return [
         {
             'query': f'{prefix}{i}',
-            'kb_name': f'{prefix}kb_{i}',
             'kb_id': f'{prefix}id_{i}',
-            'kb_url': f'http://{prefix}host/{i}',
+            'algo_id': f'{prefix}algo_{i}',
             'available_tools': [f'tool_{prefix}{i}'],
             'available_skills': [f'skill_{prefix}{i}'],
         }
@@ -131,12 +130,11 @@ def test_thread_parallel_requests_see_isolated_config(fake_pipeline):
         obs = obs_by_query[f't_{i}']
         sids.add(obs['sid'])
         assert obs['sid'] == f'sync-session-{i}'
-        assert obs['config']['kb_name'] == f't_kb_{i}'
         assert obs['config']['kb_id'] == f't_id_{i}'
-        assert obs['config']['kb_url'] == f'http://t_host/{i}'
+        assert obs['config']['algo_id'] == f't_algo_{i}'
         assert obs['agent_kwargs_tools'][0] == f'tool_t_{i}'
         assert obs['config']['available_skills'] == [f'skill_t_{i}']
-        assert results[i]['observed_kb_name'] == f't_kb_{i}'
+        assert results[i]['observed_algo_id'] == f't_algo_{i}'
 
     assert len(sids) == n, f'threads should get distinct SIDs, got {sids!r}'
 
@@ -151,8 +149,7 @@ def test_stream_parallel_requests_see_isolated_config(fake_pipeline):
             lazyllm.locals._init_sid(sid=session_id)
             params = {
                 'query': f's_{i}',
-                'kb_name': f's_kb_{i}',
-                'kb_url': f'http://s_host/{i}',
+                'algo_id': f's_algo_{i}',
                 'filters': {'kb_id': f's_id_{i}'},
                 'available_tools': [f's_tool_{i}'],
                 'available_skills': [f's_skill_{i}'],
@@ -176,9 +173,8 @@ def test_stream_parallel_requests_see_isolated_config(fake_pipeline):
     for i in range(n):
         obs = obs_by_query[f's_{i}']
         assert obs['sid'] == f'stream-session-{i}'
-        assert obs['config']['kb_name'] == f's_kb_{i}'
         assert obs['config']['kb_id'] == f's_id_{i}'
-        assert obs['config']['kb_url'] == f'http://s_host/{i}'
+        assert obs['config']['algo_id'] == f's_algo_{i}'
         assert obs['agent_kwargs_tools'][0] == f's_tool_{i}'
         assert obs['config']['available_skills'] == [f's_skill_{i}']
 
@@ -186,7 +182,7 @@ def test_stream_parallel_requests_see_isolated_config(fake_pipeline):
         assert session_id == f'stream-session-{i}'
         assert events
         assert isinstance(outer, dict)
-        assert outer.get('kb_name') == f's_kb_{i}', (
+        assert outer.get('algo_id') == f's_algo_{i}', (
             'the asyncio task should still see its own agentic_config after the '
             'streaming worker finishes'
         )
