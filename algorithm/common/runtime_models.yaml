@@ -1,6 +1,5 @@
 # Runtime model roles for LazyMind (online/cloud deployment).
-# Chat/rerank roles use source=dynamic: model config is injected per-request via globals.config.
-# Embedding roles stay static so lazyllm-algo can initialize vector-store schema at startup.
+# Chat/rerank/embed roles use source=dynamic: model config is injected per-request via globals.config.
 
 llm:
   source: dynamic
@@ -18,15 +17,16 @@ reranker:
   type: rerank
 
 embed_main:
-  - source: qwen
-    type: embed
-    name: text-embedding-v3
+  source: dynamic
+  dynamic_auth: true
+  type: embed
 
 # Cross-modal (image) embed; used by image nodes and image-only retrieval branch.
+# When configured via the model provider UI, source=dynamic overrides the static entry below.
 embed_image:
-  - source: qwen
-    type: cross_modal_embed
-    name: qwen2.5-vl-embedding
+  source: dynamic
+  dynamic_auth: true
+  type: cross_modal_embed
 
 vlm:
   source: dynamic

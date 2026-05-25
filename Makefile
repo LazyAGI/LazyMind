@@ -130,7 +130,7 @@ export LAZYMIND_LLM_PRIORITY ?= 0
 
 # Tracing (set LAZYLLM_TRACE_ENABLED=0 to disable; requires LANGFUSE_* keys when enabled)
 export LAZYLLM_TRACE_ENABLED ?= 1
-export LAZYLLM_TRACE_BACKEND ?= langfuse
+export LAZYLLM_TRACE_BACKEND ?= local
 
 # MinIO credentials (used by built-in Milvus profile)
 export MINIO_ACCESS_KEY ?= minioadmin

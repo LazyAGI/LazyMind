@@ -99,17 +99,7 @@ Kong API Gateway + JWT/RBAC 四层鉴权：前端 → Kong RBAC → Core ACL →
 
 **前置条件：** Docker & Docker Compose
 
-### 第一步 — 申请模型供应商 API Key
-
-前往你喜欢的模型供应商注册并申请 API Key。推荐使用[硅基流动](https://cloud.siliconflow.cn/account/ak)，因为它提供的模型类型比较全。
-
-```bash
-export LAZYLLM_SILICONFLOW_API_KEY=你的硅基流动key
-```
-
-> **注意：** 环境变量前缀是 `LAZYLLM_`，不是 `LAZYMIND_`。更多的供应商参考配置 https://docs.lazyllm.ai/zh-cn/stable/#hello-world
-
-### 第二步 — 申请 MinerU API Key（高质量 PDF 解析）
+### 第一步 — 申请 MinerU API Key（高质量 PDF 解析）
 
 前往 [https://mineru.net](https://mineru.net/apiManage/token) 申请 MinerU API Key。
 
@@ -119,9 +109,9 @@ export LAZYLLM_MINERU_API_KEY=你的mineru_key
 
 > **注意：** 同样是 `LAZYLLM_` 前缀，不是 `LAZYMIND_`。
 
-> **重要提示：** 由于 Embedding 模型在服务启动时即完成初始化，**Embedding 模型供应商的 API Key 必须在启动前配置好**。我们正在开发在前端配置 Embedding 和 OCR Key 的功能，下个版本即可支持，敬请期待。
+> **重要提示：** 由于 OCR 模型在服务启动时即完成初始化，**OCR 供应商的 API Key 必须在启动前配置好**。我们正在开发在前端配置 OCR Key 的功能，下个版本即可支持，敬请期待。
 
-### 第三步 — 启动服务
+### 第二步 — 启动服务
 
 ```bash
 make up-build LAZYMIND_OCR_SERVER_TYPE=mineru LAZYMIND_OCR_SERVICE_VARIANT=online
@@ -132,7 +122,7 @@ make up-build LAZYMIND_OCR_SERVER_TYPE=mineru LAZYMIND_OCR_SERVICE_VARIANT=onlin
 - API 文档：http://localhost:8090/docs.html
 - 默认账号：`admin` / `admin`
 
-### 第四步 — 在前端配置模型
+### 第三步 — 在前端配置模型
 
 登录后进入模型设置页面，使用第一步申请的 API Key 配置**大模型（LLM）**、**视觉模型（VLM）** 和 **Reranker 模型**。
 
@@ -147,7 +137,7 @@ make up-build LAZYMIND_OCR_SERVER_TYPE=mineru LAZYMIND_OCR_SERVICE_VARIANT=onlin
 | 标准启动 | `make up` |
 | 构建镜像并启动 | `make up-build` |
 | 启用 MinerU OCR | `make up LAZYMIND_OCR_SERVER_TYPE=mineru` |
-| 启用 PaddleOCR（GPU） | `make up LAZYMIND_OCR_SERVER_TYPE=paddleocr` |
+| 启用 PaddleOCR  | `make up LAZYMIND_OCR_SERVER_TYPE=paddleocr` |
 | 外接 Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 | 开启存储 Dashboard | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
 

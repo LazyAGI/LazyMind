@@ -2928,6 +2928,116 @@ func TestListSourceDocumentsUsesCloudIndexSnapshotDiff(t *testing.T) {
 	}
 }
 
+func TestListSourceDocumentsUsesDeletedCloudIndexWithoutSnapshot(t *testing.T) {
+	t.Parallel()
+	st := newTestStore(t)
+	ctx := context.Background()
+	src, err := st.CreateSource(ctx, model.CreateSourceRequest{
+		TenantID:              "tenant-feishu-deleted-index",
+		Name:                  "src-feishu-deleted-index",
+		RootPath:              "/tmp/cloud/feishu-deleted-index",
+		AgentID:               "agent-1",
+		DefaultOriginType:     string(model.OriginTypeCloudSync),
+		DefaultOriginPlatform: "FEISHU",
+	})
+	if err != nil {
+		t.Fatalf("create feishu source failed: %v", err)
+	}
+
+	now := time.Now().UTC()
+	objectPath := filepath.Join(sourcelayout.CloudMirrorRoot(src.RootPath), "wiki", "test2.md")
+	doc := documentEntity{
+		TenantID:         src.TenantID,
+		SourceID:         src.ID,
+		SourceObjectID:   objectPath,
+		DesiredVersionID: "v1",
+		CurrentVersionID: "v1",
+		ParseStatus:      "SUCCEEDED",
+		CoreDocumentID:   "core-doc-test2",
+		OriginType:       string(model.OriginTypeCloudSync),
+		OriginPlatform:   "FEISHU",
+		OriginRef:        "obj_test2",
+		UpdatedAt:        now,
+	}
+	if err := st.db.WithContext(ctx).Create(&doc).Error; err != nil {
+		t.Fatalf("create cloud document failed: %v", err)
+	}
+	if err := st.db.WithContext(ctx).Create(&sourceDocumentStateEntity{
+		TenantID:          src.TenantID,
+		SourceID:          src.ID,
+		ObjectKey:         "obj_test2",
+		Path:              objectPath,
+		Name:              "test2.md",
+		SourceExists:      true,
+		KnowledgeBaseSeen: true,
+		OriginType:        string(model.OriginTypeCloudSync),
+		OriginPlatform:    "FEISHU",
+		OriginRef:         "obj_test2",
+		SourceVersion:     "v1",
+		BaselineVersion:   "v1",
+		SourceState:       sourceStateUnchanged,
+		SyncState:         syncStateIdle,
+		PendingAction:     pendingActionNone,
+		DocumentID:        doc.ID,
+		CoreDocumentID:    doc.CoreDocumentID,
+		LastDetectedAt:    now,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}).Error; err != nil {
+		t.Fatalf("create unchanged source state failed: %v", err)
+	}
+	if err := st.db.WithContext(ctx).Create(&cloudObjectIndexEntity{
+		SourceID:         src.ID,
+		Provider:         "feishu",
+		ExternalObjectID: "obj_test2",
+		ExternalPath:     "wiki/test2",
+		ExternalName:     "test2",
+		ExternalKind:     "docx",
+		LocalAbsPath:     objectPath,
+		LocalRelPath:     "wiki/test2.md",
+		Checksum:         "v1",
+		SizeBytes:        20,
+		IsDeleted:        true,
+		LastSyncedAt:     &now,
+		ProviderMetaJSON: encodeJSON(map[string]any{"has_child": true}),
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}).Error; err != nil {
+		t.Fatalf("create deleted cloud object index row failed: %v", err)
+	}
+
+	resp, err := st.ListSourceDocuments(ctx, src.ID, model.ListSourceDocumentsRequest{
+		TenantID: src.TenantID,
+		Page:     1,
+		PageSize: 20,
+	})
+	if err != nil {
+		t.Fatalf("list source documents failed: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("expected one listed document, got %+v", resp.Items)
+	}
+	if resp.Items[0].UpdateType != "DELETED" || resp.Items[0].HasUpdate == nil || !*resp.Items[0].HasUpdate {
+		t.Fatalf("expected deleted cloud object to surface as pending delete, got %+v", resp.Items[0])
+	}
+	if resp.Summary.DeletedCount != 1 || resp.Summary.PendingPullCount != 1 {
+		t.Fatalf("expected deleted summary count, got %+v", resp.Summary)
+	}
+
+	deleted, err := st.ListSourceDocuments(ctx, src.ID, model.ListSourceDocumentsRequest{
+		TenantID:   src.TenantID,
+		UpdateType: "DELETED",
+		Page:       1,
+		PageSize:   20,
+	})
+	if err != nil {
+		t.Fatalf("list deleted documents failed: %v", err)
+	}
+	if deleted.Total != 1 || len(deleted.Items) != 1 || deleted.Items[0].Path != objectPath {
+		t.Fatalf("expected deleted filter to return cloud-index-deleted doc, got total=%d items=%+v", deleted.Total, deleted.Items)
+	}
+}
+
 func TestListSourceDocumentsUsesCloudIndexAgainstEmptySnapshot(t *testing.T) {
 	t.Parallel()
 	st := newTestStore(t)
@@ -4793,6 +4903,9 @@ func TestManualFeishuWikiDeletedAfterCloudSyncUsesDocumentState(t *testing.T) {
 	if deletedNode.UpdateType != "DELETED" {
 		t.Fatalf("expected deleted wiki node update_type DELETED, got %+v", deletedNode)
 	}
+	if deletedNode.Title != "test2" {
+		t.Fatalf("expected deleted wiki node title to use source title, got %q", deletedNode.Title)
+	}
 
 	resp, err := st.GenerateTasksForSource(ctx, src.ID, model.GenerateTasksRequest{
 		Mode:           "partial",
@@ -4820,6 +4933,80 @@ func TestManualFeishuWikiDeletedAfterCloudSyncUsesDocumentState(t *testing.T) {
 	}
 	if normalizeTaskAction(tasks[0].TaskAction) != taskActionDelete {
 		t.Fatalf("expected wiki delete task action, got %s", tasks[0].TaskAction)
+	}
+}
+
+func TestBuildTreeUpdateStateDeletedWikiLeafUsesExternalTitle(t *testing.T) {
+	t.Parallel()
+	st := newTestStore(t)
+	ctx := context.Background()
+	src, err := st.CreateSource(ctx, model.CreateSourceRequest{
+		TenantID:              "tenant-cloud",
+		Name:                  "src-cloud-wiki-deleted-title",
+		RootPath:              "/tmp/cloud-mirror/src-cloud-wiki-deleted-title",
+		AgentID:               "agent-1",
+		WatchEnabled:          false,
+		IdleWindowSeconds:     10,
+		DefaultOriginType:     string(model.OriginTypeCloudSync),
+		DefaultOriginPlatform: "FEISHU",
+	})
+	if err != nil {
+		t.Fatalf("create cloud source failed: %v", err)
+	}
+
+	now := time.Now().UTC()
+	mirrorRoot := filepath.Clean(sourcelayout.CloudMirrorRoot(src.RootPath))
+	objectPath := filepath.Join(mirrorRoot, "zhouqi-feishu-wiki", "test2.md")
+	if err := st.db.WithContext(ctx).Create(&cloudObjectIndexEntity{
+		SourceID:         src.ID,
+		Provider:         "feishu",
+		ExternalObjectID: "node_test2",
+		ExternalName:     "test2",
+		ExternalKind:     "docx",
+		ExternalPath:     "zhouqi-feishu-wiki/test2",
+		LocalRelPath:     "zhouqi-feishu-wiki/test2.md",
+		LocalAbsPath:     objectPath,
+		IsDeleted:        true,
+		ProviderMetaJSON: encodeJSON(map[string]any{
+			"has_child":  false,
+			"node_token": "node_test2",
+			"obj_type":   "docx",
+			"space_id":   "space_1",
+		}),
+		CreatedAt: now,
+		UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed deleted cloud object index failed: %v", err)
+	}
+	if err := st.db.WithContext(ctx).Create(&documentEntity{
+		TenantID:         src.TenantID,
+		SourceID:         src.ID,
+		SourceObjectID:   objectPath,
+		CoreDocumentID:   "core-doc-test2",
+		CurrentVersionID: "v_old",
+		DesiredVersionID: "v_old",
+		ParseStatus:      "SUCCEEDED",
+		OriginType:       string(model.OriginTypeCloudSync),
+		OriginPlatform:   "FEISHU",
+		OriginRef:        "node_test2",
+		UpdatedAt:        now,
+	}).Error; err != nil {
+		t.Fatalf("seed existing wiki document failed: %v", err)
+	}
+
+	tree, _, err := st.BuildTreeUpdateState(ctx, src.ID, nil, nil)
+	if err != nil {
+		t.Fatalf("build tree update state failed: %v", err)
+	}
+	deletedNode, ok := findTreeNodeByPath(tree, objectPath)
+	if !ok {
+		t.Fatalf("expected deleted wiki file node, got %+v", tree)
+	}
+	if deletedNode.UpdateType != "DELETED" {
+		t.Fatalf("expected deleted wiki node update_type DELETED, got %+v", deletedNode)
+	}
+	if deletedNode.Title != "test2" {
+		t.Fatalf("expected deleted wiki node title to use source title, got %q", deletedNode.Title)
 	}
 }
 
@@ -7851,6 +8038,102 @@ func TestListSourceDocumentOverviewsReturnsAllVisibleDocuments(t *testing.T) {
 	}
 	if updates["MODIFIED"] != 1 || updates["UNCHANGED"] != 3 {
 		t.Fatalf("expected one modified and three unchanged items, got %+v items=%+v", updates, overview.Items)
+	}
+}
+
+func TestListSourceDocumentOverviewsCountsPendingCloudNewState(t *testing.T) {
+	t.Parallel()
+	st := newTestStore(t)
+	ctx := context.Background()
+	src, err := st.CreateSource(ctx, model.CreateSourceRequest{
+		TenantID:              "tenant-cloud-overview-new",
+		Name:                  "src-cloud-overview-new",
+		RootPath:              "/tmp/cloud-mirror/src-cloud-overview-new",
+		AgentID:               "agent-1",
+		WatchEnabled:          false,
+		IdleWindowSeconds:     10,
+		DefaultOriginType:     string(model.OriginTypeCloudSync),
+		DefaultOriginPlatform: "FEISHU",
+	})
+	if err != nil {
+		t.Fatalf("create cloud source failed: %v", err)
+	}
+
+	now := time.Now().UTC()
+	visiblePath := filepath.Join(sourcelayout.CloudMirrorRoot(src.RootPath), "wiki", "synced.md")
+	pendingPath := filepath.Join(sourcelayout.CloudMirrorRoot(src.RootPath), "wiki", "new.md")
+	if err := st.db.WithContext(ctx).Create(&documentEntity{
+		TenantID:         src.TenantID,
+		SourceID:         src.ID,
+		SourceObjectID:   visiblePath,
+		CoreDocumentID:   "core-doc-synced",
+		CurrentVersionID: "v1",
+		DesiredVersionID: "v1",
+		ParseStatus:      "SUCCEEDED",
+		OriginType:       string(model.OriginTypeCloudSync),
+		OriginPlatform:   "FEISHU",
+		OriginRef:        "obj_synced",
+		UpdatedAt:        now,
+	}).Error; err != nil {
+		t.Fatalf("create visible cloud document failed: %v", err)
+	}
+	if err := st.db.WithContext(ctx).Create(&[]sourceDocumentStateEntity{
+		{
+			TenantID:          src.TenantID,
+			SourceID:          src.ID,
+			ObjectKey:         "obj_synced",
+			Path:              visiblePath,
+			Name:              "synced.md",
+			SourceExists:      true,
+			KnowledgeBaseSeen: true,
+			OriginType:        string(model.OriginTypeCloudSync),
+			OriginPlatform:    "FEISHU",
+			OriginRef:         "obj_synced",
+			SourceVersion:     "v1",
+			BaselineVersion:   "v1",
+			SourceState:       sourceStateUnchanged,
+			SyncState:         syncStateIdle,
+			PendingAction:     pendingActionNone,
+			CoreDocumentID:    "core-doc-synced",
+			LastDetectedAt:    now,
+			CreatedAt:         now,
+			UpdatedAt:         now,
+		},
+		{
+			TenantID:       src.TenantID,
+			SourceID:       src.ID,
+			ObjectKey:      "obj_new",
+			Path:           pendingPath,
+			Name:           "new.md",
+			SourceExists:   true,
+			OriginType:     string(model.OriginTypeCloudSync),
+			OriginPlatform: "FEISHU",
+			OriginRef:      "obj_new",
+			SourceVersion:  "v2",
+			SourceState:    sourceStateNew,
+			SyncState:      syncStateScheduled,
+			PendingAction:  pendingActionCreate,
+			LastDetectedAt: now,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create source document states failed: %v", err)
+	}
+
+	overviews, err := st.ListSourceDocumentOverviews(ctx, []model.Source{src})
+	if err != nil {
+		t.Fatalf("list source document overviews failed: %v", err)
+	}
+	overview := overviews[src.ID]
+	if overview.Summary.TotalDocumentCount != 1 {
+		t.Fatalf("expected total document count to remain visible synced docs only, got %+v", overview.Summary)
+	}
+	if overview.Summary.NewCount != 1 || overview.Summary.PendingPullCount != 1 {
+		t.Fatalf("expected pending cloud new state to be counted, got %+v", overview.Summary)
+	}
+	if len(overview.Items) != 1 {
+		t.Fatalf("expected overview items to keep visible document list only, got %+v", overview.Items)
 	}
 }
 

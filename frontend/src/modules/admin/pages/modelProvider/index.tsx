@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Empty, Form, Input, Modal, Popconfirm, Select, Tag, Tooltip, message } from "antd";
+import { Button, Empty, Form, Input, Modal, Popconfirm, Select, Switch, Tag, Tooltip, message } from "antd";
 import { useTranslation } from "react-i18next";
 import {
   CheckCircleFilled,
+  CheckCircleOutlined,
   DeleteOutlined,
   DownOutlined,
   EditOutlined,
   KeyOutlined,
   LoadingOutlined,
+  MinusCircleOutlined,
   PlusCircleOutlined,
   QuestionCircleOutlined,
   SearchOutlined,
@@ -16,6 +18,7 @@ import {
 import { AgentAppsAuth } from "@/components/auth";
 import { BASE_URL, axiosInstance, getLocalizedErrorMessage } from "@/components/request";
 import type { RawAxiosRequestConfig } from "axios";
+import { useModelFeatures } from "@/hooks/useModelFeatures";
 import "./index.scss";
 
 type ModelCapability =
@@ -112,6 +115,7 @@ interface SelectedModelApiItem {
   provider_name: string;
   user_model_provider_group_id: string;
   user_model_provider_id: string;
+  share?: boolean;
 }
 
 const capabilityLabelKeys: Record<ModelCapability, string> = {
@@ -142,6 +146,12 @@ const moduleConfigs: ModuleConfig[] = [
     restricted: true,
   },
   {
+    key: "MULTIMODAL_EMBEDDING",
+    titleKey: "modelProvider.module.multimodalEmbeddingTitle",
+    subtitleKey: "modelProvider.module.multimodalEmbeddingSubtitle",
+    restricted: true,
+  },
+  {
     key: "VLM",
     titleKey: "modelProvider.module.vlmTitle",
     subtitleKey: "modelProvider.module.vlmSubtitle",
@@ -152,29 +162,12 @@ const moduleConfigs: ModuleConfig[] = [
     subtitleKey: "modelProvider.module.rerankSubtitle",
   },
   {
-    key: "ASR",
-    titleKey: "modelProvider.module.asrTitle",
-    subtitleKey: "modelProvider.module.asrSubtitle",
-  },
-  {
-    key: "TTS",
-    titleKey: "modelProvider.module.ttsTitle",
-    subtitleKey: "modelProvider.module.ttsSubtitle",
-  },
-  {
-    key: "TEXT_TO_IMAGE",
-    titleKey: "modelProvider.module.textToImageTitle",
-    subtitleKey: "modelProvider.module.textToImageSubtitle",
-  },
-  {
     key: "LLM_SELF_EVOLUTION",
     titleKey: "modelProvider.module.selfEvolutionTitle",
     subtitleKey: "modelProvider.module.selfEvolutionSubtitle",
   },
 ];
 
-const hiddenDefaultModuleKeys = new Set<ModelCapability>(["EMBEDDING"]);
-const visibleModuleConfigs = moduleConfigs.filter((module) => !hiddenDefaultModuleKeys.has(module.key));
 
 const builtInProviders: ProviderOption[] = [
   {
@@ -391,7 +384,7 @@ function getCapabilityByModelType(modelType?: string): ModelCapability | undefin
   if (selectedCapability) {
     return selectedCapability;
   }
-  return visibleModuleConfigs.find((module) => selectedModelTypeByCapability[module.key].toLowerCase() === normalized)?.key;
+  return moduleConfigs.find((module) => selectedModelTypeByCapability[module.key].toLowerCase() === normalized)?.key;
 }
 
 const createModelProviderFallbacks = (t: ReturnType<typeof useTranslation>["t"]) => ({
@@ -644,6 +637,17 @@ export default function ModelProviderPage() {
   const [selectedModels, setSelectedModels] = useState<SelectedModels>({});
   const [moduleModelOptions, setModuleModelOptions] = useState<Partial<Record<ModelCapability, ModelOptionItem[]>>>({});
   const [moduleModelLoading, setModuleModelLoading] = useState<Partial<Record<ModelCapability, boolean>>>({});
+  const [shareStatus, setShareStatus] = useState<Partial<Record<ModelCapability, boolean>>>({});
+  const [modelReadyStatus, setModelReadyStatus] = useState<Partial<Record<ModelCapability, boolean | null>>>({});
+  const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
+  const modelFeaturesState = useModelFeatures();
+  const imageEmbedEnabled =
+    modelFeaturesState.status !== 'ready' || modelFeaturesState.features.image_embed_enabled;
+  // Hide MULTIMODAL_EMBEDDING slot when image embed is not configured in runtime_models.yaml.
+  const visibleModuleConfigs = useMemo(
+    () => moduleConfigs.filter((m) => m.key !== 'MULTIMODAL_EMBEDDING' || imageEmbedEnabled),
+    [imageEmbedEnabled],
+  );
   const watchedProviderBaseUrl = Form.useWatch("baseUrl", providerConfigForm);
   const providerSearchRequestIdRef = useRef(0);
   const initialProvidersLoadedRef = useRef(false);
@@ -764,6 +768,37 @@ export default function ModelProviderPage() {
       });
       setSelectedModels(nextSelectedModels);
       setModuleModelOptions((current) => ({ ...selectedOptions, ...current }));
+
+      // Extract share status from selections (admin view).
+      const nextShareStatus: Partial<Record<ModelCapability, boolean>> = {};
+      (selectedData.selections || []).forEach((selection) => {
+        const capability = getCapabilityByModelType(selection.model_type);
+        if (capability && selection.share) {
+          nextShareStatus[capability] = true;
+        }
+      });
+      setShareStatus(nextShareStatus);
+
+      // For non-admin users, fetch ready status for restricted capabilities.
+      if (!isAdmin) {
+        const readyResults = await Promise.allSettled(
+          moduleConfigs.map(async (m) => {
+            const dbModelType = selectedModelTypeByCapability[m.key];
+            const resp = await modelProviderRequest<{ ready: boolean; source?: string }>(
+              "GET",
+              `/model_providers/models/ready?model_type=${encodeURIComponent(dbModelType)}`
+            );
+            return { capability: m.key, ready: resp.ready };
+          })
+        );
+        const nextReadyStatus: Partial<Record<ModelCapability, boolean | null>> = {};
+        readyResults.forEach((result) => {
+          if (result.status === 'fulfilled') {
+            nextReadyStatus[result.value.capability] = result.value.ready;
+          }
+        });
+        setModelReadyStatus(nextReadyStatus);
+      }
     } catch (error) {
       message.error(getLocalizedErrorMessage(error, t("modelProvider.error.loadProvidersFailed")));
     } finally {
@@ -1307,9 +1342,29 @@ export default function ModelProviderPage() {
       },
     ];
 
-    await modelProviderRequest<{ selections?: SelectedModelApiItem[] }>("PUT", "/model_providers/selected_models", {
+    const resp = await modelProviderRequest<{ selections?: SelectedModelApiItem[] }>("PUT", "/model_providers/selected_models", {
       selections,
     });
+    return resp;
+  };
+
+  const toggleShareModel = async (capability: ModelCapability, share: boolean) => {
+    const value = selectedModels[capability];
+    if (!value) {
+      message.warning(t("modelProvider.noModelSelectedForShare"));
+      return;
+    }
+    const modelId = parseModelValue(value).modelId;
+    try {
+      await modelProviderRequest("PUT", "/model_providers/selected_models/share", {
+        model_id: modelId,
+        share,
+      });
+      setShareStatus((current) => ({ ...current, [capability]: share }));
+      message.success(share ? t("modelProvider.shareEnabled") : t("modelProvider.shareDisabled"));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error, t("modelProvider.error.shareUpdateFailed")));
+    }
   };
 
   const applyModelSelection = (capability: ModelCapability, value?: string) => {
@@ -1317,19 +1372,29 @@ export default function ModelProviderPage() {
       ...current,
       [capability]: value,
     }));
-    void saveSelectedModel(capability, value).catch((error) => {
+    void saveSelectedModel(capability, value).then((resp) => {
+      // Sync share status from response — backend may auto-share certain capabilities (e.g. EMBEDDING).
+      (resp.selections || []).forEach((selection) => {
+        const cap = getCapabilityByModelType(selection.model_type);
+        if (cap) {
+          setShareStatus((current) => ({ ...current, [cap]: !!selection.share }));
+        }
+      });
+    }).catch((error) => {
       message.error(getLocalizedErrorMessage(error, t("modelProvider.error.saveDefaultModelFailed")));
     });
   };
 
   const handleModelSelection = (capability: ModelCapability, value?: string) => {
     const previousValue = selectedModels[capability];
-    if (capability === "EMBEDDING" && previousValue && previousValue !== value) {
+    // Only warn when switching embedding that is already live (share=true means it's been configured and shared).
+    if (capability === "EMBEDDING" && previousValue && previousValue !== value && shareStatus["EMBEDDING"] === true) {
       Modal.confirm({
         title: t("modelProvider.embeddingChangeTitle"),
         content: t("modelProvider.embeddingChangeContent"),
         okText: t("modelProvider.confirmSwitch"),
         cancelText: t("modelProvider.cancelSwitch"),
+        okButtonProps: { danger: true },
         onOk: () => {
           applyModelSelection(capability, value);
         },
@@ -1360,7 +1425,7 @@ export default function ModelProviderPage() {
                 const moduleSubtitle = t(module.subtitleKey);
 
                 return (
-                  <div className="model-provider-default-row" key={module.key}>
+                  <div className={`model-provider-default-row${module.restricted && !isAdmin ? " is-restricted" : ""}`} key={module.key}>
                     <div className="model-provider-default-meta">
                       <label
                         className="model-provider-default-title"
@@ -1378,16 +1443,61 @@ export default function ModelProviderPage() {
                           <QuestionCircleOutlined />
                         </button>
                       </Tooltip>
-                      {module.restricted ? <Tag className="model-provider-limited-tag">{t("modelProvider.limited")}</Tag> : null}
+                      {module.restricted ? (
+                        <Tooltip placement="top" title={!isAdmin ? t("modelProvider.restrictedAdminOnly") : undefined}>
+                          <span style={{ pointerEvents: "auto" }}>
+                            <Tag className="model-provider-limited-tag">{t("modelProvider.limited")}</Tag>
+                          </span>
+                        </Tooltip>
+                      ) : null}
+                      {isAdmin ? (
+                        <Tooltip title={shareStatus[module.key] ? t("modelProvider.shareOn") : t("modelProvider.shareOff")}>
+                          <Switch
+                            aria-label={t("modelProvider.shareToggleAria", { title: moduleTitle })}
+                            checked={!!shareStatus[module.key]}
+                            checkedChildren={t("modelProvider.shared")}
+                            className="model-provider-share-switch"
+                            size="small"
+                            unCheckedChildren={t("modelProvider.unshared")}
+                            onChange={(checked) => void toggleShareModel(module.key, checked)}
+                          />
+                        </Tooltip>
+                      ) : null}
+                      {!isAdmin ? (
+                        <Tooltip
+                          title={
+                            modelReadyStatus[module.key] === false
+                              ? t("modelProvider.modelNotReadyTip")
+                              : modelReadyStatus[module.key] === true
+                                ? t("modelProvider.modelReadyTip")
+                                : undefined
+                          }
+                        >
+                          <span style={{ pointerEvents: "auto" }} className="model-provider-ready-indicator" aria-label={t("modelProvider.readyStatusAria", { title: moduleTitle })}>
+                            {modelReadyStatus[module.key] === true ? (
+                              <CheckCircleOutlined className="model-provider-ready-icon is-ready" />
+                            ) : modelReadyStatus[module.key] === false ? (
+                              <MinusCircleOutlined className="model-provider-ready-icon is-not-ready" />
+                            ) : null}
+                          </span>
+                        </Tooltip>
+                      ) : null}
                     </div>
 
                     <Select
                       allowClear={!module.required}
                       className="model-provider-model-select"
+                      disabled={module.restricted && !isAdmin}
                       id={`model-provider-${module.key.toLowerCase()}`}
                       listHeight={340}
                       optionLabelProp="label"
-                      placeholder={module.required ? t("modelProvider.requiredModelPlaceholder") : t("modelProvider.optionalModelPlaceholder")}
+                      placeholder={
+                        module.restricted && !isAdmin
+                          ? t("modelProvider.restrictedPlaceholder")
+                          : module.required
+                            ? t("modelProvider.requiredModelPlaceholder")
+                            : t("modelProvider.optionalModelPlaceholder")
+                      }
                       popupClassName="model-provider-select-dropdown"
                       suffixIcon={<DownOutlined className="model-provider-select-caret" />}
                       value={selectedModels[module.key]}

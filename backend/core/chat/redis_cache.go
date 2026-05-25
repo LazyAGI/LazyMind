@@ -28,9 +28,10 @@ type ChatStatus struct {
 }
 
 type ChatInput struct {
-	RawContent string `json:"raw_content"`
-	Seq        int    `json:"seq"`
-	CreatedAt  int64  `json:"created_at"`
+	RawContent string          `json:"raw_content"`
+	Seq        int             `json:"seq"`
+	CreatedAt  int64           `json:"created_at"`
+	Ext        json.RawMessage `json:"ext,omitempty"`
 }
 
 type MultiAnswerInfo struct {
@@ -116,8 +117,8 @@ func clearChatData(ctx context.Context, rdb *redis.Client, conversationID, histo
 	return nil
 }
 
-func setChatInput(ctx context.Context, rdb *redis.Client, conversationID, historyID, rawContent string, seq int) error {
-	data := ChatInput{RawContent: rawContent, Seq: seq, CreatedAt: time.Now().UnixMilli()}
+func setChatInput(ctx context.Context, rdb *redis.Client, conversationID, historyID, rawContent string, seq int, ext json.RawMessage) error {
+	data := ChatInput{RawContent: rawContent, Seq: seq, CreatedAt: time.Now().UnixMilli(), Ext: ext}
 	bs, _ := json.Marshal(data)
 	return rdb.Set(ctx, chatInputKey(conversationID, historyID), bs, chatCacheExpireTime).Err()
 }

@@ -589,14 +589,6 @@ export function getTimeLabel() {
   });
 }
 
-export function getSessionTitleByMessage(input: string) {
-  const trimmed = input.trim();
-  if (!trimmed) {
-    return "新会话";
-  }
-  return trimmed.length > 10 ? `${trimmed.slice(0, 10)}...` : trimmed;
-}
-
 export function createInitialWorkflowRuntimeState(): WorkflowRuntimeState {
   return {
     dataset: { status: "running" },

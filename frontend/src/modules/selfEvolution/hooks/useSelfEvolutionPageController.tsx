@@ -84,7 +84,6 @@ import {
   formatPercent,
   buildPxCategoryMetricAveragesFromReport,
   getTimeLabel,
-  getSessionTitleByMessage,
   createInitialWorkflowRuntimeState,
   createThreadRestoreWorkflowRuntimeState,
   createInitialWorkflowResultsState,
@@ -1506,9 +1505,6 @@ export function SelfEvolutionPageController({
         role: "user",
         content: trimmedPrompt,
         time: nowLabel,
-      },
-      {
-        title: activeSession.messages.length === 0 ? getSessionTitleByMessage(trimmedPrompt) : undefined,
       },
     );
     setPrompt("");

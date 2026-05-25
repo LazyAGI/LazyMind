@@ -1261,6 +1261,10 @@
   border: 1px solid #e4e7ec;
   border-radius: 6px;
   background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .memory-glossary-merge-stage {
@@ -1415,6 +1419,8 @@
 
 .memory-glossary-merge-request.ant-btn {
   align-self: flex-end;
+  margin-left: auto;
+  min-width: 88px;
   border-color: #d1d5db;
   color: #374151;
   background: #f9fafb;

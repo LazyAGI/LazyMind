@@ -16,11 +16,13 @@ import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useChatModelProviderGuard } from "@/modules/chat/hooks/useChatModelProviderGuard";
+import { AgentAppsAuth } from "@/components/auth";
 
 const NewChatPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const modelProviderGuard = useChatModelProviderGuard();
+  const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
   const getGreeting = () => {
     const currentHour = new Date().getHours();
     return currentHour < 12 ? t("chat.greetingMorning") : t("chat.greetingAfternoon");
@@ -55,6 +57,20 @@ const NewChatPage = () => {
       {t("chat.goConfigureModelProvider")}
     </Button>
   );
+
+  // Warn when knowledge base is selected but embedding is not ready.
+  const hasKnowledgeBase = Boolean(chatConfig.knowledgeBaseId?.length);
+  const showEmbeddingWarning = hasKnowledgeBase && modelProviderGuard.embeddingReady === false;
+  // Warn when VLM is not configured (informational only, does not block any feature).
+  const showVlmWarning = modelProviderGuard.vlmReady === false;
+  const vlmWarningText = isAdmin ? t("chat.vlmNotReadyWarningAdmin") : t("chat.vlmNotReadyWarning");
+  const mergeVlmWarningIntoDisabledNotice = showVlmWarning && modelProviderGuard.status === "missing";
+  const chatDisabledDescriptionContent = mergeVlmWarningIntoDisabledNotice ? (
+    <>
+      <span>{chatDisabledDescription}</span>
+      <span>{vlmWarningText}</span>
+    </>
+  ) : chatDisabledDescription;
 
   useEffect(() => {
     if (!isChatContent) {
@@ -177,6 +193,9 @@ const NewChatPage = () => {
             setChatConfigFn={setChatConfig}
             initchatConfig={chatConfig}
             canChat={!isChatDisabled}
+            embeddingReady={modelProviderGuard.embeddingReady}
+            multimodalEmbeddingReady={modelProviderGuard.multimodalEmbeddingReady}
+            rerankReady={modelProviderGuard.rerankReady}
             chatDisabledReason={chatDisabledReason}
             chatDisabledDescription={chatDisabledDescription}
             chatDisabledAction={chatDisabledAction}
@@ -212,6 +231,28 @@ const NewChatPage = () => {
                 </div>
 
                 <div className="input-section">
+                  {showEmbeddingWarning ? (
+                    <div className="model-provider-warning-banner embedding-warning-banner" role="alert">
+                      <span className="model-provider-warning-text">
+                        {t("chat.embeddingNotReadyWarning")}
+                      </span>
+                    </div>
+                  ) : null}
+                  {showVlmWarning && !mergeVlmWarningIntoDisabledNotice ? (
+                    <div className="model-provider-warning-banner vlm-warning-banner" role="alert">
+                      <span className="model-provider-warning-text">
+                        {vlmWarningText}
+                      </span>
+                      <Button
+                        type="primary"
+                        size="small"
+                        className="model-provider-warning-action"
+                        onClick={() => navigate("/model-providers")}
+                      >
+                        {t("knowledge.goToConfig")}
+                      </Button>
+                    </div>
+                  ) : null}
                   <ChatInput
                     ref={newChatInputRef}
                     value={inputValue}
@@ -231,8 +272,11 @@ const NewChatPage = () => {
                     chatConfig={chatConfig}
                     setChatConfig={setChatConfig}
                     disabled={isChatDisabled}
+                    embeddingReady={modelProviderGuard.embeddingReady}
+                    multimodalEmbeddingReady={modelProviderGuard.multimodalEmbeddingReady}
+                    rerankReady={modelProviderGuard.rerankReady}
                     disabledReason={chatDisabledReason}
-                    disabledDescription={chatDisabledDescription}
+                    disabledDescription={chatDisabledDescriptionContent}
                     disabledAction={chatDisabledAction}
                   />
                 </div>

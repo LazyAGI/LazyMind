@@ -38,22 +38,23 @@ type DatasetFilters struct {
 }
 
 type LazyChatRequest struct {
-	Query              string          `json:"query"`
-	History            []ChatMessage   `json:"history,omitempty"`
-	SessionID          string          `json:"session_id"`
-	Files              []string        `json:"files,omitempty"`
-	Filters            *DatasetFilters `json:"filters"`
-	Reasoning          bool            `json:"reasoning"`
-	Databases          []any           `json:"databases,omitempty"`
-	EnableThinking     bool            `json:"enable_thinking,omitempty"`
-	AvailableTools     []string        `json:"available_tools,omitempty"`
-	AvailableSkills    []string        `json:"available_skills,omitempty"`
-	Memory             string          `json:"memory,omitempty"`
-	UserPreference     string          `json:"user_preference,omitempty"`
-	UseMemory          bool            `json:"use_memory"`
-	UserID             string          `json:"user_id"`
-	EnvironmentContext map[string]any  `json:"environment_context,omitempty"`
-	LLMConfig          map[string]any  `json:"llm_config,omitempty"`
+	Query              string            `json:"query"`
+	History            []ChatMessage     `json:"history,omitempty"`
+	SessionID          string            `json:"session_id"`
+	Files              []string          `json:"files,omitempty"`
+	Filters            *DatasetFilters   `json:"filters"`
+	Reasoning          bool              `json:"reasoning"`
+	Databases          []any             `json:"databases,omitempty"`
+	EnableThinking     bool              `json:"enable_thinking,omitempty"`
+	AvailableTools     []string          `json:"available_tools,omitempty"`
+	AvailableSkills    []string          `json:"available_skills,omitempty"`
+	Memory             string            `json:"memory,omitempty"`
+	UserPreference     string            `json:"user_preference,omitempty"`
+	UseMemory          bool              `json:"use_memory"`
+	UserID             string            `json:"user_id"`
+	EnvironmentContext map[string]any    `json:"environment_context,omitempty"`
+	LLMConfig          map[string]any    `json:"llm_config,omitempty"`
+	ToolConfig         map[string]string `json:"tool_config,omitempty"`
 }
 
 // LazyChatData text data text。
@@ -267,6 +268,21 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if llmConfig, ok := body["llm_config"].(map[string]any); ok {
 		req.LLMConfig = llmConfig
+	}
+	if toolConfig, ok := body["tool_config"].(map[string]string); ok {
+		if len(toolConfig) > 0 {
+			req.ToolConfig = toolConfig
+		}
+	} else if toolConfigAny, ok := body["tool_config"].(map[string]any); ok {
+		tc := make(map[string]string, len(toolConfigAny))
+		for k, v := range toolConfigAny {
+			if s, ok := v.(string); ok {
+				tc[k] = s
+			}
+		}
+		if len(tc) > 0 {
+			req.ToolConfig = tc
+		}
 	}
 	return req
 }

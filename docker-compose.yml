@@ -389,7 +389,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 120s
+      start_period: 180s
     depends_on:
       db:
         condition: service_healthy
@@ -465,7 +465,7 @@ services:
     shm_size: '16gb'
     healthcheck:
       test: ['CMD-SHELL', 'curl -f http://localhost:8118/health || exit 1']
-      start_period: 120s
+      start_period: 180s
 
   paddleocr:
     profiles:
@@ -519,7 +519,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 90s
+      start_period: 180s
     depends_on:
       db:
         condition: service_healthy
@@ -560,7 +560,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 90s
+      start_period: 180s
     depends_on:
       db:
         condition: service_healthy
@@ -593,7 +593,7 @@ services:
       interval: 15s
       timeout: 10s
       retries: 10
-      start_period: 120s
+      start_period: 180s
     environment:
       LAZYMIND_UPLOAD_ROOT: /var/lib/lazymind/uploads
       <<: [*runtime-home, *upload-paths, *llm-api-keys, *ocr-env, *db-conn, *trace-config]
@@ -638,7 +638,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 120s
+      start_period: 180s
     environment:
       LAZYMIND_DOCUMENT_SERVER_URL: http://parsing:8000,general_algo
       LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
@@ -656,6 +656,7 @@ services:
       LAZYMIND_SKILL_REVIEW_INTERVAL: "5"
       LAZYMIND_SKILL_REVIEW_DEBUG: "false"
       LAZYMIND_SKIP_STARTUP_PIPELINE: "1"
+      LAZYLLM_INIT_DOC: 1
       # Chat uses the shared model config selector. Default dynamic mode enables
       # per-user model/API-key selection from core; set LAZYMIND_MODEL_CONFIG_PATH=online
       # or inner only when forcing a static config.
@@ -708,7 +709,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 180s
     depends_on:
       chat:
         condition: service_healthy
@@ -763,7 +764,7 @@ services:
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:9091/healthz']
       interval: 30s
-      start_period: 90s
+      start_period: 180s
       timeout: 20s
       retries: 3
     expose:
@@ -812,7 +813,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 180s
     expose:
       - '9200'
 

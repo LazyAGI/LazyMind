@@ -318,6 +318,14 @@ func (s *Store) buildSourceDocumentsSummary(ctx context.Context, src sourceEntit
 		return model.SourceDocumentsSummary{}, nil, err
 	}
 	stateSummary := summarizeSourceDocumentStates(stateRows, len(summaryDocs), parsedCount, storage)
+	seenSummaryPaths := make(map[string]struct{}, len(summaryDocs))
+	for _, doc := range summaryDocs {
+		path := filepath.Clean(strings.TrimSpace(doc.SourceObjectID))
+		if path == "" || path == "." {
+			continue
+		}
+		seenSummaryPaths[path] = struct{}{}
+	}
 	if (sourcelayout.IsCloudOriginType(src.DefaultOriginType) && snapshotUpdatesAvailable) || len(stateRows) == 0 {
 		stateSummary.NewCount = newCount
 		stateSummary.ModifiedCount = modCount
@@ -443,6 +451,9 @@ func (s *Store) ListSourceDocumentOverviews(ctx context.Context, sources []model
 			}, nil, false)
 			if err != nil {
 				return nil, err
+			}
+			if sourcelayout.IsCloudOriginType(src.DefaultOriginType) {
+				mergeHiddenPendingSourceStateCounts(&summary, statesBySourceID[sourceID])
 			}
 		} else {
 			summary = summarizeSourceDocumentStates(statesBySourceID[sourceID], int(row.TotalDocumentCount), row.ParsedDocumentCount, 0)
@@ -900,7 +911,7 @@ func (s *Store) sourceDocumentUpdateOverrides(ctx context.Context, src sourceEnt
 	var relation sourceSnapshotRelationEntity
 	if err := s.db.WithContext(ctx).Take(&relation, "source_id = ?", src.ID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, false, nil
+			return s.mergeCloudDeletedObjectUpdateOverrides(ctx, src, nil, false)
 		}
 		return nil, false, err
 	}
@@ -915,7 +926,7 @@ func (s *Store) sourceDocumentUpdateOverrides(ctx context.Context, src sourceEnt
 			if err != nil {
 				return nil, false, err
 			}
-			return normalizeSnapshotUpdateOverrides(diff), true, nil
+			return s.mergeCloudDeletedObjectUpdateOverrides(ctx, src, normalizeSnapshotUpdateOverrides(diff), true)
 		}
 	}
 
@@ -926,7 +937,7 @@ func (s *Store) sourceDocumentUpdateOverrides(ctx context.Context, src sourceEnt
 				return nil, false, err
 			}
 			if available {
-				return updates, true, nil
+				return s.mergeCloudDeletedObjectUpdateOverrides(ctx, src, updates, true)
 			}
 		}
 		items, _, err := s.snapshotItemsForDiffBase(ctx, src.ID, committedID)
@@ -945,11 +956,11 @@ func (s *Store) sourceDocumentUpdateOverrides(ctx context.Context, src sourceEnt
 			updates[path] = "UNCHANGED"
 		}
 		if len(updates) > 0 {
-			return updates, true, nil
+			return s.mergeCloudDeletedObjectUpdateOverrides(ctx, src, updates, true)
 		}
 	}
 
-	return nil, false, nil
+	return s.mergeCloudDeletedObjectUpdateOverrides(ctx, src, nil, false)
 }
 
 func (s *Store) cloudSourceDocumentUpdateOverridesFromIndex(ctx context.Context, src sourceEntity, committedSnapshotID string) (map[string]string, bool, error) {
@@ -1009,6 +1020,82 @@ func (s *Store) cloudSourceDocumentUpdateOverridesFromIndex(ctx context.Context,
 		currentItems[path] = item
 	}
 	return normalizeSnapshotUpdateOverrides(diffSnapshotMaps(baseItems, currentItems)), true, nil
+}
+
+func (s *Store) mergeCloudDeletedObjectUpdateOverrides(ctx context.Context, src sourceEntity, updates map[string]string, available bool) (map[string]string, bool, error) {
+	if !sourcelayout.IsCloudOriginType(src.DefaultOriginType) {
+		return updates, available, nil
+	}
+	deleted, err := s.cloudDeletedObjectUpdateOverrides(ctx, src)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(deleted) == 0 {
+		return updates, available, nil
+	}
+	if updates == nil {
+		updates = make(map[string]string, len(deleted))
+	}
+	for path, update := range deleted {
+		updates[path] = update
+	}
+	return updates, true, nil
+}
+
+func (s *Store) cloudDeletedObjectUpdateOverrides(ctx context.Context, src sourceEntity) (map[string]string, error) {
+	out := make(map[string]string)
+	sourceID := strings.TrimSpace(src.ID)
+	if sourceID == "" {
+		return out, nil
+	}
+	mirrorRoot := filepath.Clean(sourcelayout.CloudMirrorRoot(src.RootPath))
+	if mirrorRoot == "" || mirrorRoot == "." {
+		return out, nil
+	}
+	var rows []cloudObjectIndexEntity
+	if err := s.db.WithContext(ctx).
+		Where("source_id = ?", sourceID).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return out, nil
+	}
+
+	activePaths := make(map[string]struct{}, len(rows)*2)
+	for _, row := range rows {
+		if row.IsDeleted || cloudObjectIsDirectory(row.ExternalKind) {
+			continue
+		}
+		for _, path := range cloudObjectDocumentUpdatePaths(mirrorRoot, row) {
+			activePaths[path] = struct{}{}
+		}
+	}
+	for _, row := range rows {
+		if !row.IsDeleted || cloudObjectIsDirectory(row.ExternalKind) {
+			continue
+		}
+		for _, path := range cloudObjectDocumentUpdatePaths(mirrorRoot, row) {
+			if _, active := activePaths[path]; active {
+				continue
+			}
+			out[path] = "DELETED"
+		}
+	}
+	return out, nil
+}
+
+func cloudObjectDocumentUpdatePaths(mirrorRoot string, row cloudObjectIndexEntity) []string {
+	objectPath := filepath.Clean(strings.TrimSpace(resolveCloudObjectLocalPath(mirrorRoot, row)))
+	if objectPath == "" || objectPath == "." || isTransientSourceFilePath(objectPath, false) {
+		return nil
+	}
+	paths := []string{objectPath}
+	treePath := filepath.Clean(strings.TrimSpace(cloudObjectTreePath(objectPath, row)))
+	if treePath != "" && treePath != "." && treePath != objectPath && !isTransientSourceFilePath(treePath, false) {
+		paths = append(paths, treePath)
+	}
+	return paths
 }
 
 func normalizeSnapshotUpdateOverrides(diff map[string]string) map[string]string {
@@ -1201,9 +1288,13 @@ func (s *Store) BuildTreeUpdateState(ctx context.Context, sourceID string, items
 		stateDeletedPaths = s.displayPathsForCloudObjects(ctx, src, stateDeletedPaths)
 		stateDeletedPaths = excludeCurrentTreePaths(stateDeletedPaths, filePaths)
 		addDeletedPathsToDiff(diffByPath, stateDeletedPaths)
+		deletedTitleByPath, err := s.cloudTreeTitleByPath(ctx, src, append(append([]string{}, deletedPaths...), stateDeletedPaths...))
+		if err != nil {
+			return nil, "", err
+		}
 		updated := applyWatchTreeNodeStates(items, diffByPath, pathMap, queueMap)
-		updated = addDeletedNodes(updated, deletedPaths, deletedTreeRootPath(src, items, scopeRoots), "DOCUMENTS", pathMap, queueMap)
-		updated = addDeletedNodes(updated, stateDeletedPaths, deletedTreeRootPath(src, items, scopeRoots), "SOURCE_DOCUMENT_STATES", pathMap, queueMap)
+		updated = addDeletedNodes(updated, deletedPaths, deletedTreeRootPath(src, items, scopeRoots), "DOCUMENTS", pathMap, queueMap, deletedTitleByPath)
+		updated = addDeletedNodes(updated, stateDeletedPaths, deletedTreeRootPath(src, items, scopeRoots), "SOURCE_DOCUMENT_STATES", pathMap, queueMap, deletedTitleByPath)
 		treePaths := collectAllTreePaths(updated)
 		if states, err := s.sourceDocumentStateByPaths(ctx, src.ID, treePaths); err != nil {
 			return nil, "", err
@@ -1237,9 +1328,13 @@ func (s *Store) BuildTreeUpdateState(ctx context.Context, sourceID string, items
 	stateDeletedPaths = s.displayPathsForCloudObjects(ctx, src, stateDeletedPaths)
 	stateDeletedPaths = excludeCurrentTreePaths(stateDeletedPaths, filePaths)
 	addDeletedPathsToDiff(diffByPath, stateDeletedPaths)
+	deletedTitleByPath, err := s.cloudTreeTitleByPath(ctx, src, append(append([]string{}, deletedPaths...), stateDeletedPaths...))
+	if err != nil {
+		return nil, "", err
+	}
 	updated := applySnapshotTreeNodeStates(items, diffByPath, pathMap, queueMap)
-	updated = addDeletedNodes(updated, deletedPaths, deletedTreeRootPath(src, items, scopeRoots), "SNAPSHOT", pathMap, queueMap)
-	updated = addDeletedNodes(updated, stateDeletedPaths, deletedTreeRootPath(src, items, scopeRoots), "SOURCE_DOCUMENT_STATES", pathMap, queueMap)
+	updated = addDeletedNodes(updated, deletedPaths, deletedTreeRootPath(src, items, scopeRoots), "SNAPSHOT", pathMap, queueMap, deletedTitleByPath)
+	updated = addDeletedNodes(updated, stateDeletedPaths, deletedTreeRootPath(src, items, scopeRoots), "SOURCE_DOCUMENT_STATES", pathMap, queueMap, deletedTitleByPath)
 	treePaths := collectAllTreePaths(updated)
 	if states, err := s.sourceDocumentStateByPaths(ctx, src.ID, treePaths); err != nil {
 		return nil, "", err
@@ -1334,6 +1429,52 @@ func (s *Store) displayPathsForCloudObjects(ctx context.Context, src sourceEntit
 		out = append(out, path)
 	}
 	return out
+}
+
+func (s *Store) cloudTreeTitleByPath(ctx context.Context, src sourceEntity, paths []string) (map[string]string, error) {
+	out := make(map[string]string)
+	if !sourcelayout.IsCloudOriginType(src.DefaultOriginType) || len(paths) == 0 {
+		return out, nil
+	}
+	rootPath := filepath.Clean(sourcelayout.CloudMirrorRoot(src.RootPath))
+	if rootPath == "" || rootPath == "." {
+		return out, nil
+	}
+	wanted := make(map[string]struct{}, len(paths))
+	for _, rawPath := range paths {
+		path := filepath.Clean(strings.TrimSpace(rawPath))
+		if path == "" || path == "." {
+			continue
+		}
+		wanted[path] = struct{}{}
+	}
+	if len(wanted) == 0 {
+		return out, nil
+	}
+	var rows []cloudObjectIndexEntity
+	if err := s.db.WithContext(ctx).
+		Where("source_id = ?", src.ID).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		objectPath := resolveCloudObjectLocalPath(rootPath, row)
+		if objectPath == "" {
+			continue
+		}
+		objectPath = filepath.Clean(objectPath)
+		treePath := filepath.Clean(cloudObjectTreePath(objectPath, row))
+		if treePath == "" || treePath == "." {
+			continue
+		}
+		if _, ok := wanted[objectPath]; ok {
+			out[objectPath] = cloudObjectDisplayTitle(treePath, row, false)
+		}
+		if _, ok := wanted[treePath]; ok {
+			out[treePath] = cloudObjectDisplayTitle(treePath, row, false)
+		}
+	}
+	return out, nil
 }
 
 func excludeCurrentTreePaths(paths []string, currentPaths []string) []string {

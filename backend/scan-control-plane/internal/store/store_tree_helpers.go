@@ -993,14 +993,14 @@ func buildCloudTreeNodes(rootPath string, nodeMap map[string]*model.TreeNode, ch
 	return walk(rootPath)
 }
 
-func addDeletedNodes(items []model.TreeNode, deletedPaths []string, rootPath, statusSource string, docMap map[string]treeDocumentRow, queueMap map[int64]parseTaskDocJoin) []model.TreeNode {
+func addDeletedNodes(items []model.TreeNode, deletedPaths []string, rootPath, statusSource string, docMap map[string]treeDocumentRow, queueMap map[int64]parseTaskDocJoin, titleByPath map[string]string) []model.TreeNode {
 	for _, path := range deletedPaths {
-		items = insertDeletedNode(items, path, rootPath, statusSource, docMap, queueMap)
+		items = insertDeletedNode(items, path, rootPath, statusSource, docMap, queueMap, titleByPath)
 	}
 	return items
 }
 
-func insertDeletedNode(nodes []model.TreeNode, filePath, rootPath, statusSource string, docMap map[string]treeDocumentRow, queueMap map[int64]parseTaskDocJoin) []model.TreeNode {
+func insertDeletedNode(nodes []model.TreeNode, filePath, rootPath, statusSource string, docMap map[string]treeDocumentRow, queueMap map[int64]parseTaskDocJoin, titleByPath map[string]string) []model.TreeNode {
 	filePath = filepath.Clean(strings.TrimSpace(filePath))
 	if filePath == "" || filePath == "." {
 		return nodes
@@ -1009,10 +1009,10 @@ func insertDeletedNode(nodes []model.TreeNode, filePath, rootPath, statusSource 
 		return nodes
 	}
 	ancestors := buildAncestorPaths(filePath, rootPath)
-	return ensureDeletedAtPath(nodes, ancestors, filePath, statusSource, docMap, queueMap)
+	return ensureDeletedAtPath(nodes, ancestors, filePath, statusSource, docMap, queueMap, titleByPath)
 }
 
-func ensureDeletedAtPath(nodes []model.TreeNode, ancestors []string, filePath, statusSource string, docMap map[string]treeDocumentRow, queueMap map[int64]parseTaskDocJoin) []model.TreeNode {
+func ensureDeletedAtPath(nodes []model.TreeNode, ancestors []string, filePath, statusSource string, docMap map[string]treeDocumentRow, queueMap map[int64]parseTaskDocJoin, titleByPath map[string]string) []model.TreeNode {
 	if len(ancestors) == 0 {
 		if findNodeByKey(nodes, filePath) >= 0 {
 			return nodes
@@ -1020,7 +1020,7 @@ func ensureDeletedAtPath(nodes []model.TreeNode, ancestors []string, filePath, s
 		hasUpdate := true
 		selectable := true
 		node := model.TreeNode{
-			Title:        nodeTitleFromPath(filePath),
+			Title:        treeTitleForPath(filePath, titleByPath),
 			Key:          filePath,
 			IsDir:        false,
 			HasUpdate:    &hasUpdate,
@@ -1041,7 +1041,7 @@ func ensureDeletedAtPath(nodes []model.TreeNode, ancestors []string, filePath, s
 	if idx < 0 {
 		selectable := false
 		nodes = append(nodes, model.TreeNode{
-			Title:        nodeTitleFromPath(dirPath),
+			Title:        treeTitleForPath(dirPath, titleByPath),
 			Key:          dirPath,
 			IsDir:        true,
 			UpdateType:   "UNCHANGED",
@@ -1059,9 +1059,17 @@ func ensureDeletedAtPath(nodes []model.TreeNode, ancestors []string, filePath, s
 			child.StatusSource = "UNKNOWN"
 		}
 	}
-	child.Children = ensureDeletedAtPath(child.Children, ancestors[1:], filePath, statusSource, docMap, queueMap)
+	child.Children = ensureDeletedAtPath(child.Children, ancestors[1:], filePath, statusSource, docMap, queueMap, titleByPath)
 	nodes[idx] = child
 	return nodes
+}
+
+func treeTitleForPath(path string, titleByPath map[string]string) string {
+	clean := filepath.Clean(strings.TrimSpace(path))
+	if title := strings.TrimSpace(titleByPath[clean]); title != "" {
+		return title
+	}
+	return nodeTitleFromPath(clean)
 }
 
 func buildAncestorPaths(filePath, rootPath string) []string {

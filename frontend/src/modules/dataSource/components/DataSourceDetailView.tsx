@@ -9,6 +9,7 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
   Typography,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -124,7 +125,9 @@ export default function DataSourceDetailView({
             <Text className="data-source-detail-stat-label">
               {t("admin.dataSourceDetailSyncPath")}
             </Text>
-            <div className="data-source-detail-stat-value path">{detailSource.target}</div>
+            <Tooltip title={detailSource.target} placement="topLeft">
+              <div className="data-source-detail-stat-value path">{detailSource.target}</div>
+            </Tooltip>
           </Card>
         </Col>
         <Col xs={24} md={8}>

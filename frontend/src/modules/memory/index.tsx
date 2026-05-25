@@ -3758,6 +3758,15 @@ export default function MemoryManagement() {
         return;
       }
 
+      if (normalizedAliases.includes(normalizedTerm)) {
+        message.warning(
+          t("admin.memoryGlossaryTermAliasExactDuplicate", {
+            word: normalizedTerm,
+          }),
+        );
+        return;
+      }
+
       const payload: GlossaryAsset = {
         id: draft.id || createId("glossary"),
         term: normalizedTerm,
@@ -3775,6 +3784,21 @@ export default function MemoryManagement() {
 
       try {
         let savedGlossary: GlossaryAsset | null = null;
+        const shouldCheckExistingWords = !hasPendingMerge;
+
+        if (shouldCheckExistingWords) {
+          const existingWords = await checkGlossaryWordsExist(
+            payload.term,
+            payload.aliases,
+          );
+          if (existingWords.existing.length) {
+            message.warning(
+              t("admin.memoryGlossaryWordsAlreadyExist", {
+                words: existingWords.existing.join("、"),
+              }),
+            );
+          }
+        }
 
         if (hasPendingMerge) {
           const merged = await mergeGlossaryAssets([
@@ -3803,18 +3827,6 @@ export default function MemoryManagement() {
             previous.filter((proposal) => proposal.targetId !== payload.id),
           );
         } else {
-          const existingWords = await checkGlossaryWordsExist(
-            payload.term,
-            payload.aliases,
-          );
-          if (existingWords.existing.length) {
-            message.warning(
-              t("admin.memoryGlossaryWordsAlreadyExist", {
-                words: existingWords.existing.join("、"),
-              }),
-            );
-            return;
-          }
           savedGlossary = await createGlossaryAsset(payload);
         }
 

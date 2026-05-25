@@ -603,14 +603,6 @@ function getTimeLabel() {
   });
 }
 
-function getSessionTitleByMessage(input: string) {
-  const trimmed = input.trim();
-  if (!trimmed) {
-    return "新会话";
-  }
-  return trimmed.length > 10 ? `${trimmed.slice(0, 10)}...` : trimmed;
-}
-
 function createInitialWorkflowRuntimeState(): WorkflowRuntimeState {
   return {
     dataset: { status: "running" },
@@ -3883,9 +3875,6 @@ export default function SelfEvolutionPage() {
         role: "user",
         content: trimmedPrompt,
         time: nowLabel,
-      },
-      {
-        title: activeSession.messages.length === 0 ? getSessionTitleByMessage(trimmedPrompt) : undefined,
       },
     );
     setPrompt("");

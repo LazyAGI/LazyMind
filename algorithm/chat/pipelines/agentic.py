@@ -14,6 +14,7 @@ from typing import Any, Dict
 
 import lazyllm
 from lazyllm import loop, once_wrapper
+from lazyllm.tracing import set_trace_context
 from lazyllm.tools.agent.functionCall import FunctionCall
 from lazyllm.tools.fs.client import FS
 
@@ -49,6 +50,7 @@ from chat.components.agentic.tool_stream import (  # noqa: E402
     _tool_call_id,
 )
 from lazyllm import AutoModel  # noqa: E402
+from lazyllm.tools.fs.supplier.feishu import FeishuFS  # type: ignore[import]  # noqa: E402
 from chat.utils.load_config import get_config_path  # noqa: E402
 
 
@@ -200,6 +202,19 @@ class _StreamingReactAgent(lazyllm.tools.agent.ReactAgent):
         self._agent = agent
 
 
+def _feishu_key_source(_instance) -> str:
+    try:
+        mapping = lazyllm.globals.config['dynamic_fs_auth'] or {}
+    except Exception:
+        return ''
+    r = (mapping.get('feishu') or '').strip()
+    lazyllm.LOG.warning(f'get feishu key: {r}')
+    return r
+
+
+_FEISHU_FS_INSTANCE = FeishuFS(space_id='dynamic', dynamic_auth=True)
+
+
 def agentic_forward(
     query: str,
     history: list[dict[str, Any]],
@@ -227,7 +242,7 @@ def agentic_forward(
     agent_cls = _StreamingReactAgent if stream_event_callback else lazyllm.tools.agent.ReactAgent
     agent_kwargs = {
         'llm': llm,
-        'tools': available_tools,
+        'tools': available_tools + [(_FEISHU_FS_INSTANCE, _feishu_key_source)],
         'max_retries': _cfg['max_retries'],
         'stream': bool(stream_event_callback),
         'prompt': runtime_prompt,
@@ -315,6 +330,7 @@ async def _agentic_forward_stream(
     runtime_params: dict[str, Any],
     global_sid: str,
     local_sid: str,
+    trace_config: dict[str, Any],
 ):
     event_queue: Queue = Queue()
     sentinel = object()
@@ -326,6 +342,7 @@ async def _agentic_forward_stream(
 
     lazyllm.globals._init_sid(global_sid)
     lazyllm.locals._init_sid(local_sid)
+    set_trace_context(trace_config)
     _clear_orphaned_lazyllm_queue_lock()
     lazyllm.FileSystemQueue().clear()
     lazyllm.FileSystemQueue.get_instance('think').clear()
@@ -376,6 +393,7 @@ async def _agentic_forward_stream(
     def _stream_monitor() -> None:
         lazyllm.globals._init_sid(global_sid)
         lazyllm.locals._init_sid(local_sid)
+        set_trace_context(trace_config)
         while not worker_done.is_set() and not closed.is_set():
             with output_lock:
                 _flush_stream_frames_to_queue()
@@ -384,6 +402,7 @@ async def _agentic_forward_stream(
     def _worker() -> None:
         lazyllm.globals._init_sid(global_sid)
         lazyllm.locals._init_sid(local_sid)
+        set_trace_context(trace_config)
         lazyllm.globals['agentic_config'] = runtime_params
         try:
             result = agentic_forward(
@@ -469,7 +488,7 @@ async def _agentic_forward_stream(
 
 def _ensure_tools_registered() -> None:
     # Trigger @fc_register side effects once so ReactAgent can resolve tool names.
-    from chat.tools import kb, memory, skill_manager, vocab, vision_extractor, web_search  # noqa: F401
+    from chat.tools import calculator, kb, memory, skill_manager, vocab, vision_extractor, web_search  # noqa: F401
 
 
 def agentic_rag(
@@ -499,4 +518,5 @@ def agentic_rag(
         runtime_params=runtime_params,
         global_sid=lazyllm.globals._sid,
         local_sid=lazyllm.locals._sid,
+        trace_config=lazyllm.globals.get('trace') or {},
     )

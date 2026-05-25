@@ -24,6 +24,8 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
+	"lazymind/core/modelconfig"
+	"lazymind/core/modelprovider"
 	"lazymind/core/store"
 
 	"github.com/gorilla/mux"
@@ -220,6 +222,10 @@ func BatchUploadTasks(w http.ResponseWriter, r *http.Request) {
 		replyDatasetForbidden(w)
 		return
 	}
+	if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embedding"); err != nil || !ready {
+		common.ReplyErr(w, "embedding model is not ready", http.StatusUnprocessableEntity)
+		return
+	}
 	if err := r.ParseMultipartForm(512 << 20); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid multipart form", err), http.StatusBadRequest)
 		return
@@ -269,6 +275,10 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 	ds, _, ok := requireDatasetPermission(r, datasetID, acl.PermissionDatasetUpload)
 	if !ok {
 		replyDatasetForbidden(w)
+		return
+	}
+	if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embedding"); err != nil || !ready {
+		common.ReplyErr(w, "embedding model is not ready", http.StatusUnprocessableEntity)
 		return
 	}
 	if err := r.ParseMultipartForm(512 << 20); err != nil {
@@ -490,6 +500,10 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, _, ok := requireDatasetPermission(r, datasetID, acl.PermissionDatasetUpload); !ok {
 		replyDatasetForbidden(w)
+		return
+	}
+	if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embedding"); err != nil || !ready {
+		common.ReplyErr(w, "embedding model is not ready", http.StatusUnprocessableEntity)
 		return
 	}
 
@@ -1251,6 +1265,12 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 	if kbID == "" {
 		return nil, fmt.Errorf("dataset kb mapping not found")
 	}
+	userID := common.UserID(r)
+	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), userID)
+	if err != nil {
+		log.Printf("[startParseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
+		llmConfig = nil
+	}
 	resultsByTaskID := make(map[string]StartTaskResult, len(taskIDs))
 	orderedUniqueIDs := make([]string, 0, len(taskIDs))
 
@@ -1318,7 +1338,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 			items = append(items, buildAddFileItem(datasetID, candidate.task, candidate.doc, candidate.docExt, parsePath))
 		}
 		if len(baseTasks) > 0 {
-			extResults, err := callExternalAddDocs(r, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID()})
+			extResults, err := callExternalAddDocs(r, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig})
 			if err != nil {
 				for i, taskRow := range baseTasks {
 					resolved := common.ResolveAppError(err.Error(), http.StatusBadGateway)
@@ -1366,7 +1386,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 					return
 				}
 				item := buildAddFileItem(datasetID, candidate.task, candidate.doc, dExt, parsePath)
-				extResults, err := callExternalAddDocs(r, addRequest{Items: []addFileItem{item}, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID()})
+				extResults, err := callExternalAddDocs(r, addRequest{Items: []addFileItem{item}, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig})
 				if err != nil {
 					resolved := common.ResolveAppError(err.Error(), http.StatusBadGateway)
 					outcomes[idx] = officeOutcome{task: candidate.task, doc: candidate.doc, docExt: dExt, result: StartTaskResult{TaskID: candidate.task.ID, DocumentID: candidate.doc.ID, DisplayName: candidate.doc.DisplayName, Status: "FAILED", SubmitStatus: "FAILED", Message: resolved.Message, Detail: fmt.Sprint(resolved.Detail)}}
@@ -2288,6 +2308,12 @@ func createTaskFromExistingDocument(r *http.Request, datasetID, userID, userName
 func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]StartTaskResult, error) {
 	kbID := datasetKbIDByID(datasetID)
 	results := make([]StartTaskResult, 0, len(taskIDs))
+	userID := common.UserID(r)
+	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), userID)
+	if err != nil {
+		log.Printf("[startReparseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
+		llmConfig = nil
+	}
 	docIDs := make([]string, 0, len(taskIDs))
 	taskRows := make([]orm.Task, 0, len(taskIDs))
 	docRows := make([]orm.Document, 0, len(taskIDs))
@@ -2328,7 +2354,7 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 			break
 		}
 	}
-	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, IdempotencyKey: newTaskID()})
+	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, IdempotencyKey: newTaskID(), ModelConfig: llmConfig})
 	if err != nil {
 		for i, taskRow := range taskRows {
 			results = append(results, StartTaskResult{TaskID: taskRow.ID, DocumentID: docRows[i].ID, DisplayName: docRows[i].DisplayName, Status: "FAILED", SubmitStatus: "FAILED", Message: common.ResolveAppError(err.Error(), http.StatusBadGateway).Message, Detail: fmt.Sprint(common.ResolveAppError(err.Error(), http.StatusBadGateway).Detail)})

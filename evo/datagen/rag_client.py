@@ -25,17 +25,12 @@ class RAGTraceMissing(RuntimeError):
     kind = 'permanent'
 
 
-def call_rag_chat(
-    question: str,
-    target_chat_url: str,
-    dataset_name: str = '',
-    filters: dict[str, Any] | None = None,
-    *,
-    require_trace: bool = True,
-    model_config: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+def call_rag_chat(question: str, target_chat_url: str, dataset_name: str = '', filters: dict[str, Any] | None = None,
+                  *, require_trace: bool = True, model_config: dict[str, Any] | None = None,
+                  ) -> dict[str, Any]:
     if not target_chat_url:
         raise RAGTargetRequiredError('target_chat_url is required for RAG evaluation')
+    target_chat_url = _stream_chat_url(target_chat_url)
     session_id = f'evo-eval-{uuid.uuid4().hex}'
     payload = {'query': question, 'trace': require_trace, 'session_id': session_id}
     if dataset_name:
@@ -53,7 +48,7 @@ def call_rag_chat(
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
-            result = _open_rag_request(req)
+            result = _open_rag_stream(req)
             if not isinstance(result, dict):
                 raise RAGCallFailed(f'RAG_CALL_FAILED: invalid response {type(result).__name__}')
             code = result.get('code')
@@ -78,14 +73,47 @@ def call_rag_chat(
     raise RAGCallFailed(f'RAG_CALL_FAILED: {last_error}') from last_error
 
 
-def _open_rag_request(req: urllib.request.Request) -> dict[str, Any]:
-    try:
-        timeout = EVO_RAG_TIMEOUT_S
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode('utf-8'))
-    except (TimeoutError, urllib.error.URLError, json.JSONDecodeError) as exc:
-        raise exc
+def _stream_chat_url(url: str) -> str:
+    url = url.rstrip('/')
+    if url.endswith('/api/chat/stream'):
+        return url
+    if url.endswith('/api/chat'):
+        return url + '/stream'
+    return url + '/api/chat/stream'
+
+
+def _open_rag_stream(req: urllib.request.Request) -> dict[str, Any]:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    text_parts: list[str] = []
+    sources: list[Any] = []
+    trace_id = ''
+    with opener.open(req, timeout=EVO_RAG_TIMEOUT_S) as resp:
+        for raw_line in resp:
+            line = raw_line.decode('utf-8', errors='replace').strip()
+            if not line:
+                continue
+            if line.startswith('data:'):
+                line = line[5:].strip()
+            if line == '[DONE]':
+                break
+            body = json.loads(line)
+            if not isinstance(body, dict):
+                continue
+            data = body.get('data') if isinstance(body.get('data'), dict) else {}
+            if body.get('code') not in (None, 200) or data.get('status') == 'FAILED':
+                raise RAGCallFailed(f'RAG_CALL_FAILED: {body.get("msg") or body}')
+            text = data.get('text')
+            if isinstance(text, str):
+                text_parts.append(text)
+            if isinstance(data.get('trace_id'), str):
+                trace_id = data['trace_id']
+            if isinstance(data.get('sources'), list):
+                sources = data['sources']
+    return {
+        'code': 200,
+        'msg': 'success',
+        'data': {'text': ''.join(text_parts), 'sources': sources, 'trace_id': trace_id},
+    }
 
 
 def _normalize_rag_result(result: dict[str, Any], *, require_trace: bool) -> dict[str, Any]:

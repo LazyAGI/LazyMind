@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 import lazyllm
 from lazyllm import LOG
 import lazyllm.tracing.collect.configs  # noqa: F401
-from lazyllm.tracing import current_trace, enable_trace
+from lazyllm.tracing import enable_trace, get_trace_context, set_trace_context
 from lazyllm.tracing.collect import runtime as tracing_runtime
 from fastapi.responses import StreamingResponse
 from chat.components.process.sensitive_filter import SensitiveFilter
@@ -23,11 +23,11 @@ rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
 sensitive_filter = SensitiveFilter(SENSITIVE_WORDS_PATH)
 
 
-def _run_ppl_with_trace(ppl, ppl_args, *, session_id, dataset, mode_tag,
-                        trace_enabled, model_config):
+def _run_ppl_with_trace(ppl, ppl_args, *, session_id, dataset, mode_tag, trace_enabled, model_config):
     lazyllm.globals._init_sid(sid=session_id)
     lazyllm.locals._init_sid(sid=session_id)
     inject_model_config(model_config)
+    _set_request_trace(False, session_id=session_id, dataset=dataset, mode_tag=mode_tag)
     if not trace_enabled:
         return ppl(*ppl_args), None
 
@@ -35,8 +35,7 @@ def _run_ppl_with_trace(ppl, ppl_args, *, session_id, dataset, mode_tag,
 
     def run_chat_pipeline(*args, **kwargs):
         out = ppl(*args, **kwargs)
-        trace = current_trace()
-        captured['trace_id'] = trace.trace_id if trace else None
+        captured['trace_id'] = get_trace_context().trace_id
         return out
 
     result = enable_trace(
@@ -52,13 +51,20 @@ def _run_ppl_with_trace(ppl, ppl_args, *, session_id, dataset, mode_tag,
     return result, trace_id
 
 
+def _set_request_trace(enabled: bool, *, session_id: str, dataset: str, mode_tag: str) -> None:
+    set_trace_context({
+        'enabled': bool(enabled),
+        'sampled': True,
+        'session_id': session_id,
+        'request_tags': [f'dataset:{dataset}', f'mode:{mode_tag}'],
+        'module_trace': {'default': True},
+    })
+
+
 def _flush_trace_exporter() -> None:
-    provider = getattr(tracing_runtime._runtime, '_provider', None)
-    if provider is None:
-        return
     try:
-        from config import config as _cfg
-        provider.force_flush(timeout_millis=_cfg['langfuse_force_flush_timeout_ms'])
+        if provider := getattr(tracing_runtime._runtime, '_provider', None):
+            provider.force_flush()
     except Exception as exc:
         LOG.warning(f'[ChatServer] [TRACE_FLUSH_FAILED] {exc}')
 
@@ -183,7 +189,9 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       trace: bool = False,
                       environment_context: Optional[Dict[str, Any]] = None,
                       user_id: Optional[str] = None,
-                      model_config: Optional[Dict[str, Any]] = None) -> StreamingResponse:
+                      model_config: Optional[Dict[str, Any]] = None,
+                      tool_config: Optional[Dict[str, str]] = None) -> Union[Dict[str, Any], StreamingResponse]:
+    result = None
     priority = LAZYMIND_LLM_PRIORITY if priority is None else priority
 
     start_time = time.time()
@@ -220,6 +228,8 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         lazyllm.globals._init_sid(sid=session_id)
         lazyllm.locals._init_sid(sid=session_id)
         inject_model_config(model_config)
+        from lazyllm.tools.tool_config_inject import inject_tool_config  # type: ignore[import]  # noqa: PLC0415
+        inject_tool_config(tool_config)
 
     if sensitive_check_result:
         return _single_event_stream_response(sensitive_check_result)

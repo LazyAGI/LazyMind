@@ -67,6 +67,9 @@
   }
 
   .chat-input-disabled-description {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
     color: #6f7d91;
     font-size: 12px;
     line-height: 18px;

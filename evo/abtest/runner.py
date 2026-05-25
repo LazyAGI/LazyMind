@@ -191,7 +191,7 @@ def _phase_launch_chat(c: _Ctx) -> None:
         )
         c.registry.register(c.candidate)
     c.state['candidate_chat_id'] = c.candidate.chat_id
-    c.state['candidate_chat_url'] = _chat_api_url(c.candidate.base_url)
+    c.state['candidate_chat_url'] = f'{c.candidate.base_url}/api/chat/stream'
     _wait_health(c.candidate, timeout_s=60)
 
 
@@ -265,7 +265,7 @@ def _phase_run_eval(c: _Ctx) -> None:
         raise RuntimeError('candidate chat is not available')
     report = run_eval(
         dataset_id=c.inputs.dataset_id,
-        target_chat_url=_chat_api_url(c.candidate.base_url),
+        target_chat_url=f'{c.candidate.base_url}/api/chat/stream',
         cfg=c.cfg,
         llm_factory=c.llm_factory,
         max_workers=_eval_max_workers(c.inputs.eval_options),
@@ -378,15 +378,6 @@ def _retire_candidate(candidate: ChatInstance, chat_runner: ChatRunner, chat_reg
         chat_registry.purge(candidate.chat_id)
     except Exception:
         pass
-
-
-def _chat_api_url(base_url: str) -> str:
-    return base_url if base_url.rstrip('/').endswith('/api/chat') else base_url.rstrip('/') + '/api/chat'
-
-
-def _chat_base_url(url: str) -> str:
-    url = url.rstrip('/')
-    return url[: -len('/api/chat')] if url.endswith('/api/chat') else url
 
 
 def _url_port(url: str) -> int:

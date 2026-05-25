@@ -43,7 +43,6 @@ import {
   formatBytes,
   formatDateTime,
   getFileUpdateMeta,
-  getSourceStateMeta,
   getSyncStateMeta,
   normalizeDataSourceFileUpdateState,
   normalizeDataSourceParseStatus,
@@ -51,7 +50,6 @@ import {
   normalizePendingAction,
   resolveSourceState,
   resolveSyncState,
-  sourceStateToFileUpdate,
 } from "./shared";
 
 const { Text } = Typography;
@@ -292,7 +290,10 @@ function mapScanSyncDetail(updateState: DocumentStatusRow["updateState"]) {
 function mapScanDocumentToDetail(item: ScanSourceDocumentItem): DocumentStatusRow {
   const sourceState = resolveSourceState(item);
   const syncState = resolveSyncState(item);
-  const updateState = sourceStateToFileUpdate(sourceState);
+  const updateState = normalizeDataSourceFileUpdateState(
+    item.update_type,
+    item.has_update,
+  );
   const parseState = [
     item.parse_state,
     item.core_task_state,
@@ -1030,16 +1031,9 @@ export default function DataSourceDetail() {
       key: "updateState",
       width: 240,
       render: (_value, record) => {
-        const sourceState: SourceStateValue =
-          record.sourceState ||
-          (() => {
-            if (record.updateState === "new") return "NEW";
-            if (record.updateState === "changed") return "MODIFIED";
-            if (record.updateState === "deleted") return "DELETED";
-            return "UNCHANGED";
-          })();
+        const sourceState: SourceStateValue = record.sourceState || "UNCHANGED";
         const syncState: SyncStateValue = record.syncState || "IDLE";
-        const sourceMeta = getSourceStateMeta(sourceState, t);
+        const updateMeta = getFileUpdateMeta(record.updateState, t);
         const syncMeta = getSyncStateMeta(
           syncState,
           {
@@ -1050,24 +1044,26 @@ export default function DataSourceDetail() {
           },
           t,
         );
-        const detail = buildDocumentStatusDetail(
-          {
-            source_state: sourceState,
-            sync_state: syncState,
-            next_sync_at: record.nextSyncAt,
-            last_error: record.lastError,
-            knowledge_base_present: record.knowledgeBasePresent,
-            update_type: record.updateState.toUpperCase(),
-            has_update: record.updateState !== "unchanged",
-          },
-          t,
-        );
+        const detail =
+          record.syncDetail ||
+          buildDocumentStatusDetail(
+            {
+              source_state: sourceState,
+              sync_state: syncState,
+              next_sync_at: record.nextSyncAt,
+              last_error: record.lastError,
+              knowledge_base_present: record.knowledgeBasePresent,
+              update_type: record.updateState.toUpperCase(),
+              has_update: record.updateState !== "unchanged",
+            },
+            t,
+          );
         const shouldShowSyncState = syncState !== "IDLE";
         return (
           <div className="data-source-detail-update-state">
-            <span className={`data-source-update-chip data-source-update-chip-${sourceMeta.tone}`}>
+            <span className={`data-source-update-chip data-source-update-chip-${record.updateState}`}>
               <span className="data-source-update-chip-dot" />
-              {sourceMeta.text}
+              {updateMeta.text}
             </span>
             {shouldShowSyncState ? (
               <Tag color={syncMeta.color} style={{ marginInlineEnd: 0 }}>

@@ -86,7 +86,6 @@ func ListUserProvidersWithGroups(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
 		return
 	}
-
 	var providerIDs []string
 	if err := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroup{}).
 		Where("create_user_id = ? AND deleted_at IS NULL", userID).

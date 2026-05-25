@@ -25,17 +25,19 @@ type addFileItem struct {
 }
 
 type addRequest struct {
-	Items          []addFileItem `json:"items"`
-	KbID           string        `json:"kb_id,omitempty"`
-	SourceType     string        `json:"source_type,omitempty"`
-	IdempotencyKey string        `json:"idempotency_key,omitempty"`
+	Items          []addFileItem  `json:"items"`
+	KbID           string         `json:"kb_id,omitempty"`
+	SourceType     string         `json:"source_type,omitempty"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
+	ModelConfig    map[string]any `json:"llm_config,omitempty"`
 }
 
 type reparseRequest struct {
-	DocIDs         []string `json:"doc_ids"`
-	KbID           string   `json:"kb_id,omitempty"`
-	NgNames        []string `json:"ng_names,omitempty"`
-	IdempotencyKey string   `json:"idempotency_key,omitempty"`
+	DocIDs         []string       `json:"doc_ids"`
+	KbID           string         `json:"kb_id,omitempty"`
+	NgNames        []string       `json:"ng_names,omitempty"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
+	ModelConfig    map[string]any `json:"llm_config,omitempty"`
 }
 
 // transferItem no longer carries source/target algo IDs after the node-group

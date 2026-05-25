@@ -81,7 +81,6 @@ import {
   formatBytes,
   formatDateTime,
   getConnectionMeta,
-  getPendingUpdateCount,
   getSourceTypeTitle,
   getStatusMeta,
   getSyncModeLabel,
@@ -1821,27 +1820,17 @@ export default function DataSourceManagement() {
       title: t("admin.dataSourceTableSummary"),
       key: "summary",
       width: 180,
-      render: (_value, record) => {
-        const pendingCount = getPendingUpdateCount(record.fileCandidates);
-        return (
-          <div className="data-source-sync-cell">
-            <Text>{t("admin.dataSourceSummaryDocs", { count: record.documentCount })}</Text>
-            <Text type="secondary">
-              {t("admin.dataSourceSummaryChanges", {
-                add: record.addCount,
-                change: record.changeCount,
-                del: record.deleteCount,
-              })}
-            </Text>
-            <Text type={pendingCount > 0 ? "warning" : "secondary"}>
-              {t("admin.dataSourceSummaryPending", {
-                pending: pendingCount,
-                total: record.fileCandidates.length,
-              })}
-            </Text>
-          </div>
-        );
-      },
+      render: (_value, record) => (
+        <div className="data-source-sync-cell">
+          <Text type="secondary">
+            {t("admin.dataSourceSummaryChanges", {
+              add: record.addCount,
+              change: record.changeCount,
+              del: record.deleteCount,
+            })}
+          </Text>
+        </div>
+      ),
     },
     {
       title: t("admin.dataSourceTableActions"),

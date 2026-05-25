@@ -47,10 +47,21 @@ type selectedModelItem struct {
 	ProviderName             string `json:"provider_name"`
 	GroupName                string `json:"group_name"`
 	BaseURL                  string `json:"base_url"`
+	Share                    bool   `json:"share"`
 }
 
 type selectedModelsResponse struct {
 	Selections []selectedModelItem `json:"selections"`
+}
+
+type setSharedModelRequest struct {
+	ModelID string `json:"model_id"`
+	Share   bool   `json:"share"`
+}
+
+type modelReadyResponse struct {
+	Ready  bool   `json:"ready"`
+	Source string `json:"source,omitempty"`
 }
 
 // GetSelectedModels returns selected model rows for the current user.
@@ -171,19 +182,18 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 				}).Error; err != nil {
 					return err
 				}
-				continue
-			}
-			if err != nil {
+			} else if err != nil {
 				return err
-			}
-			if err := tx.Model(&orm.UserSelectedModel{}).
-				Where("id = ?", row.ID).
-				Updates(map[string]any{
-					"user_model_provider_group_model_id": modelID,
-					"user_name":                          userName,
-					"updated_at":                         now,
-				}).Error; err != nil {
-				return err
+			} else {
+				if err := tx.Model(&orm.UserSelectedModel{}).
+					Where("id = ?", row.ID).
+					Updates(map[string]any{
+						"user_model_provider_group_model_id": modelID,
+						"user_name":                          userName,
+						"updated_at":                         now,
+					}).Error; err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -207,6 +217,7 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 		Select(
 			"usm.model_type, "+
 				"usm.user_model_provider_group_model_id AS model_id, "+
+				"usm.share, "+
 				"m.user_model_provider_id, "+
 				"m.user_model_provider_group_id, "+
 				"m.name, "+
@@ -230,4 +241,130 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 		Order("usm.model_type ASC").
 		Scan(&out).Error
 	return out, err
+}
+
+// SetSharedModel sets or clears the share flag for a selected model row.
+// Protected by document.write permission (admin only).
+func SetSharedModel(w http.ResponseWriter, r *http.Request) {
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	var req setSharedModelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	modelID := strings.TrimSpace(req.ModelID)
+	if modelID == "" {
+		common.ReplyErr(w, "model_id is required", http.StatusBadRequest)
+		return
+	}
+
+	now := time.Now()
+	err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		// Look up the row to get its model_type (needed to clear other share=true rows of the same type).
+		var row orm.UserSelectedModel
+		if err := tx.Where("user_model_provider_group_model_id = ?", modelID).
+			First(&row).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("not found")
+			}
+			return err
+		}
+		if req.Share {
+			// Clear any existing share=true for this model_type first.
+			if err := tx.Model(&orm.UserSelectedModel{}).
+				Where("model_type = ? AND share = ?", row.ModelType, true).
+				Updates(map[string]any{"share": false, "updated_at": now}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Model(&orm.UserSelectedModel{}).
+			Where("user_model_provider_group_model_id = ?", modelID).
+			Updates(map[string]any{"share": req.Share, "updated_at": now}).Error
+	})
+	if err != nil {
+		if err.Error() == "not found" {
+			common.ReplyErr(w, "model not found in selected models", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "update share failed", http.StatusInternalServerError)
+		return
+	}
+	common.ReplyOK(w, map[string]any{"ok": true})
+}
+
+// GetModelReady checks whether a model of the given model_type is ready for the current user.
+// It first checks the user's own selection, then falls back to any share=true row.
+func GetModelReady(w http.ResponseWriter, r *http.Request) {
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	userID := strings.TrimSpace(store.UserID(r))
+	if userID == "" {
+		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
+		return
+	}
+	modelType := strings.TrimSpace(r.URL.Query().Get("model_type"))
+	if modelType == "" {
+		common.ReplyErr(w, "model_type is required", http.StatusBadRequest)
+		return
+	}
+
+	// Step 1: check own selection.
+	var ownCount int64
+	if err := db.WithContext(r.Context()).
+		Model(&orm.UserSelectedModel{}).
+		Where("user_id = ? AND model_type = ?", userID, modelType).
+		Count(&ownCount).Error; err != nil {
+		common.ReplyErr(w, "query failed", http.StatusInternalServerError)
+		return
+	}
+	if ownCount > 0 {
+		common.ReplyOK(w, modelReadyResponse{Ready: true, Source: "own"})
+		return
+	}
+
+	// Step 2: check shared selection.
+	var sharedCount int64
+	if err := db.WithContext(r.Context()).
+		Model(&orm.UserSelectedModel{}).
+		Where("share = ? AND model_type = ?", true, modelType).
+		Count(&sharedCount).Error; err != nil {
+		common.ReplyErr(w, "query failed", http.StatusInternalServerError)
+		return
+	}
+	if sharedCount > 0 {
+		common.ReplyOK(w, modelReadyResponse{Ready: true, Source: "shared"})
+		return
+	}
+
+	common.ReplyOK(w, modelReadyResponse{Ready: false})
+}
+
+// IsModelReady checks whether a model of the given model_type is available for the user.
+// It first checks the user's own selection, then falls back to any share=true row.
+func IsModelReady(ctx context.Context, db *gorm.DB, userID, modelType string) (bool, error) {
+	var ownCount int64
+	if err := db.WithContext(ctx).
+		Model(&orm.UserSelectedModel{}).
+		Where("user_id = ? AND model_type = ?", userID, modelType).
+		Count(&ownCount).Error; err != nil {
+		return false, err
+	}
+	if ownCount > 0 {
+		return true, nil
+	}
+	var sharedCount int64
+	if err := db.WithContext(ctx).
+		Model(&orm.UserSelectedModel{}).
+		Where("share = ? AND model_type = ?", true, modelType).
+		Count(&sharedCount).Error; err != nil {
+		return false, err
+	}
+	return sharedCount > 0, nil
 }

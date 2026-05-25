@@ -88,6 +88,18 @@
   border: 1px solid #e2e8f0;
   border-radius: 16px;
   background: #fbfdff;
+
+  &.is-restricted {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    opacity: 0.72;
+    pointer-events: none;
+
+    .model-provider-limited-tag {
+      pointer-events: auto;
+      cursor: default;
+    }
+  }
 }
 
 .model-provider-default-meta {
@@ -853,8 +865,20 @@
 }
 
 @media (max-width: 1360px) {
+  .model-provider-page {
+    height: auto;
+    min-height: 100%;
+    overflow: visible;
+  }
+
   .model-provider-shell {
     grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .model-provider-main-panel {
+    height: auto;
+    overflow: visible;
   }
 
   .model-provider-side-panel {
@@ -869,11 +893,6 @@
 }
 
 @media (max-width: 980px) {
-  .model-provider-page {
-    height: auto;
-    overflow: visible;
-  }
-
   .model-provider-shell,
   .model-provider-default-list {
     grid-template-columns: 1fr;
@@ -883,10 +902,6 @@
     padding: 18px;
   }
 
-  .model-provider-main-panel {
-    height: auto;
-    overflow: visible;
-  }
 }
 
 @media (max-width: 720px) {
