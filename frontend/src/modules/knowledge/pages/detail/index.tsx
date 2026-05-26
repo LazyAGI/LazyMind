@@ -88,7 +88,6 @@ const Detail = () => {
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
   const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<boolean | null>(null);
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
-  const [parsingNoticeVisible, setParsingNoticeVisible] = useState(false);
 
   const { id = "" } = useParams();
 
@@ -101,8 +100,9 @@ const Detail = () => {
     KnowledgeBaseServiceApi()
       .datasetServiceGetDataset({ dataset: id })
       .then((res) => {
-        setDetail(res.data);
-        setCurrentDataset(res.data);
+        const dataset = res.data as unknown as Dataset;
+        setDetail(dataset);
+        setCurrentDataset(dataset);
       });
   }, [id, setCurrentDataset]);
 
