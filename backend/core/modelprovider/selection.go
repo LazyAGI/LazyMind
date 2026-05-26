@@ -12,7 +12,6 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
-	"lazymind/core/log"
 	"lazymind/core/store"
 )
 
@@ -160,15 +159,22 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Check whether multimodal_embedding is being configured for the first time.
-	// If so, after saving we will clear the image group's lazy_mode so the algo
-	// service starts embedding images immediately.
-	multimodalModelID := selectionByType["multimodal_embedding"]
+	// When multimodal_embedding is configured for the first time, clear lazy_mode so
+	// image embedding runs immediately. When it is cleared, reset lazy_mode to embed.
+	multimodalModelID, hasMultimodalSelection := selectionByType["multimodal_embedding"]
 	triggerLazyModeClear := false
-	if multimodalModelID != "" {
-		wasReady, err := IsModelReady(r.Context(), store.DB(), userID, "multimodal_embedding")
-		if err == nil && !wasReady {
-			triggerLazyModeClear = true
+	checkLazyModeResetAfterSave := false
+	if hasMultimodalSelection {
+		if multimodalModelID == "" {
+			checkLazyModeResetAfterSave = true
+		} else {
+			wasReady, err := IsModelReady(r.Context(), store.DB(), userID, "multimodal_embedding")
+			if err == nil && !wasReady {
+				hadAny, gerr := HasAnyMultimodalEmbeddingSelection(r.Context(), store.DB())
+				if gerr == nil && !hadAny {
+					triggerLazyModeClear = true
+				}
+			}
 		}
 	}
 
@@ -216,15 +222,10 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if triggerLazyModeClear {
-		ctx := r.Context()
-		go func() {
-			url := common.JoinURL(common.AlgoServiceEndpoint(), "/v1/ng/image/lazy_mode")
-			if err := common.ApiPost(ctx, url, nil, nil, nil, 15*time.Second); err != nil {
-				log.Logger.Warn().Err(err).Msg("failed to clear image group lazy_mode")
-			} else {
-				SetImageEmbedRequired()
-			}
-		}()
+		scheduleImageGroupLazyClear(r.Context())
+	}
+	if checkLazyModeResetAfterSave {
+		maybeScheduleImageGroupLazyReset(r.Context(), db)
 	}
 
 	out, err := loadSelectedModels(r.Context(), db, userID)
@@ -369,6 +370,36 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 	}
 
 	common.ReplyOK(w, modelReadyResponse{Ready: false})
+}
+
+// HasAnyMultimodalEmbeddingSelection reports whether any user still has a valid
+// multimodal_embedding selection (joined model row not soft-deleted).
+func HasAnyMultimodalEmbeddingSelection(ctx context.Context, db *gorm.DB) (bool, error) {
+	var count int64
+	err := db.WithContext(ctx).
+		Table("user_selected_models usm").
+		Joins(
+			"JOIN user_model_provider_group_models m ON "+
+				"m.id = usm.user_model_provider_group_model_id AND "+
+				"m.deleted_at IS NULL",
+		).
+		Where("usm.model_type = ?", "multimodal_embedding").
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func maybeScheduleImageGroupLazyReset(ctx context.Context, db *gorm.DB) {
+	if !GetCachedModelFeatures().ImageEmbedEnabled {
+		return
+	}
+	hasAny, err := HasAnyMultimodalEmbeddingSelection(ctx, db)
+	if err != nil || hasAny {
+		return
+	}
+	scheduleImageGroupLazyEmbed(ctx)
 }
 
 // IsModelReady checks whether a model of the given model_type is available for the user.

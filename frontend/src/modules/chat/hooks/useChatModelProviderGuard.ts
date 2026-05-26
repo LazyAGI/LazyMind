@@ -29,6 +29,7 @@ function unwrapResponse<T>(payload: ApiEnvelope<T> | T): T {
 
 export function useChatModelProviderGuard() {
   const [status, setStatus] = useState<ChatModelProviderStatus>("idle");
+  const [triggerKey, setTriggerKey] = useState(0);
   const [requiresModelProviderConfig, setRequiresModelProviderConfig] =
     useState<boolean | null>(() => {
       const dynamic = AgentAppsAuth.getUserInfo()?.dynamic;
@@ -39,9 +40,13 @@ export function useChatModelProviderGuard() {
   const [rerankReady, setRerankReady] = useState<boolean | null>(null);
   const [vlmReady, setVlmReady] = useState<boolean | null>(null);
   const requestIdRef = useRef(0);
-  const mountedRef = useRef(true);
+  const mountedRef = useRef(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(() => {
+    setTriggerKey((k: number) => k + 1);
+  }, []);
+
+  const runCheck = useCallback(async () => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setStatus("loading");
@@ -139,12 +144,15 @@ export function useChatModelProviderGuard() {
 
   useEffect(() => {
     mountedRef.current = true;
-    void refresh();
+    void runCheck();
 
     return () => {
       mountedRef.current = false;
     };
-  }, [refresh]);
+  // triggerKey changes whenever refresh() is called, ensuring re-execution on
+  // both initial mount and manual retries even if the component remounts.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerKey]);
 
   return {
     canChat: status === "ready",

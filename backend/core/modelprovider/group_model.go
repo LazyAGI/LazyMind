@@ -379,15 +379,31 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clearMultimodalSelection := isMultimodalEmbeddingModelType(row.ModelType)
 	now := time.Now().UTC()
-	if err := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroupModel{}).
-		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, userID).
-		Updates(map[string]interface{}{
-			"deleted_at": now,
-			"updated_at": now,
-		}).Error; err != nil {
+	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&orm.UserModelProviderGroupModel{}).
+			Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, userID).
+			Updates(map[string]interface{}{
+				"deleted_at": now,
+				"updated_at": now,
+			}).Error; err != nil {
+			return err
+		}
+		if clearMultimodalSelection {
+			return tx.Where(
+				"user_id = ? AND model_type = ? AND user_model_provider_group_model_id = ?",
+				userID, "multimodal_embedding", row.ID,
+			).Delete(&orm.UserSelectedModel{}).Error
+		}
+		return nil
+	}); err != nil {
 		common.ReplyErr(w, "delete model failed", http.StatusInternalServerError)
 		return
+	}
+
+	if clearMultimodalSelection {
+		maybeScheduleImageGroupLazyReset(r.Context(), db)
 	}
 
 	common.ReplyOK(w, deleteGroupModelResponse{ID: modelID})

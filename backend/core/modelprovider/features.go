@@ -66,10 +66,9 @@ func GetCachedModelFeatures() ModelFeaturesResponse {
 	return featuresCache.value
 }
 
-// SetImageEmbedRequired marks image embed as required in the in-memory cache.
-// Called after lazy_mode is cleared so subsequent upload checks see the updated state
-// without waiting for a process restart.
-func SetImageEmbedRequired() {
+// SetImageEmbedRequired updates image_embed_required in the in-memory cache.
+// Called after lazy_mode changes so upload checks see the updated state without restart.
+func SetImageEmbedRequired(required bool) {
 	featuresCache.Do(func() {}) // ensure Once has run before we mutate value
-	featuresCache.value.ImageEmbedRequired = true
+	featuresCache.value.ImageEmbedRequired = required
 }
