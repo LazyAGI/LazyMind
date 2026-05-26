@@ -50,7 +50,7 @@ Rules:
 2. Each record can only contain one word and one synonym; arrays, compound phrases, or multi-word mixing are not allowed.  # noqa: E501
 3. message_ids must come from the message IDs provided in the input, and must include at least 1.
 4. description briefly explains the semantic context where this synonym relationship applies.
-5. reason explains why this record is valid.
+5. reason explains why this record is valid; write reason in the same language as the cited user history segments (Chinese segments -> Chinese reason, English segments -> English reason).
 6. Return at most {max_pairs} records.
 
 Below are the available user history segments. Each line binds a message_id with the corresponding user's original text; the returned message_ids can only be selected from these segments:  # noqa: E501
@@ -111,7 +111,7 @@ If evidence clearly states "this is a railway engineering context, not a financi
     "conflict_group_ids": []
 }
 
-Output JSON:
+Output JSON (reason must match the language of the conversation evidence: Chinese for Chinese, English for English):
 {
   "reason": "concise explanation",
     "group_ids_can_join": ["g1"],
