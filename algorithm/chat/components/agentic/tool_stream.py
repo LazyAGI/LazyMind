@@ -609,15 +609,16 @@ def _friendly_preview_text(value: Any) -> str:
 
 def _representative_tool_result(tool_name: str, result: Any) -> Any:
     if isinstance(result, dict):
+        payload = result.get('result') if isinstance(result.get('result'), dict) else result
         key = _REPRESENTATIVE_TOOL_RESULTS.get(tool_name)
-        if key and result.get(key) is not None:
-            return result.get(key)
+        if key and payload.get(key) is not None:
+            return payload.get(key)
         for fallback_key in _FALLBACK_REPRESENTATIVE_RESULT_KEYS:
-            if result.get(fallback_key) is not None:
-                return result.get(fallback_key)
-        if result:
-            first_key = next(iter(result))
-            return result.get(first_key)
+            if payload.get(fallback_key) is not None:
+                return payload.get(fallback_key)
+        if payload:
+            first_key = next(iter(payload))
+            return payload.get(first_key)
         return ''
     if isinstance(result, list):
         return result
@@ -655,7 +656,8 @@ def _tool_result_status(result: Any) -> str:
         success = result.get('success')
         if success is False:
             return 'failed'
-        status = str(result.get('status') or '').strip().lower()
+        payload = result.get('result') if isinstance(result.get('result'), dict) else result
+        status = str(payload.get('status') or '').strip().lower()
         if status == 'needs_approval':
             return 'needs_approval'
         if status in ('error', 'missing', 'failed', 'fail'):
@@ -669,6 +671,12 @@ def _tool_result_status(result: Any) -> str:
 
 def _tool_result_failure_detail(result: Any) -> str:
     if isinstance(result, dict):
+        error = result.get('error')
+        if isinstance(error, dict):
+            for key in ('reason', 'detail', 'type'):
+                value = error.get(key)
+                if value:
+                    return _truncate_tool_result_preview(value)
         for key in ('reason', 'error', 'message', 'path', 'status'):
             value = result.get(key)
             if value:
@@ -740,7 +748,8 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
                 _ZH_TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE,
             ),
         )
-    if isinstance(result, dict) and result.get('total') == 0 and tool_name.startswith('kb_'):
+    payload = result.get('result') if isinstance(result, dict) and isinstance(result.get('result'), dict) else result
+    if isinstance(payload, dict) and payload.get('total') == 0 and tool_name.startswith('kb_'):
         if language == 'zh':
             if tool_name == 'kb_search':
                 return _ensure_trailing_newline('知识库搜索已完成，但没有找到匹配结果')

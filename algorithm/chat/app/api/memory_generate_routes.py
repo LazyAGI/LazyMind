@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import model_validator
 
@@ -45,17 +44,6 @@ class GeneratePayload(BaseModel):
         return self
 
 
-def _ok(content: str) -> Dict[str, Any]:
-    return {'code': 0, 'msg': 'ok', 'data': {'content': content}}
-
-
-def _fail(status_code: int, msg: str) -> JSONResponse:
-    return JSONResponse(
-        status_code=status_code,
-        content={'code': status_code, 'msg': msg, 'data': None},
-    )
-
-
 def _handle_generate(memory_type: MemoryType, payload: GeneratePayload):
     try:
         generated = generate_memory_content(
@@ -64,13 +52,13 @@ def _handle_generate(memory_type: MemoryType, payload: GeneratePayload):
             suggestions=[s.model_dump() for s in payload.suggestions] if payload.suggestions else None,
             user_instruct=payload.user_instruct,
         )
-        return _ok(generated)
+        return {'content': generated}
     except BadRequestError as exc:
-        return _fail(400, str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except UnprocessableContentError as exc:
-        return _fail(422, str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        return _fail(500, f'generate failed: {exc}')
+        raise HTTPException(status_code=500, detail=f'generate failed: {exc}') from exc
 
 
 @router.post('/api/chat/skill/generate', summary='Generate new skill content')

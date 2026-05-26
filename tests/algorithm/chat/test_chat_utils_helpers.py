@@ -32,23 +32,3 @@ def test_validate_and_resolve_files_rejects_paths_outside_mount(monkeypatch, tmp
 
     with pytest.raises(HTTPException, match='Path outside mount directory'):
         helpers_mod.validate_and_resolve_files([str(outside)])
-
-
-def test_tool_schema_to_string_formats_description_and_parameters():
-    rendered = helpers_mod.tool_schema_to_string(
-        {
-            'search': {
-                'description': 'Find documents. Return top results.',
-                'parameters': {
-                    'query': {'type': 'str', 'des': 'Search text'},
-                    'topk': {'type': 'int'},
-                },
-            }
-        }
-    )
-
-    assert 'TOOL NAME: search' in rendered
-    assert '- Find documents.' in rendered
-    assert '- Return top results.' in rendered
-    assert '- query: str' in rendered
-    assert '- topk: int' in rendered

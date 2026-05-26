@@ -1,13 +1,8 @@
 import textwrap
-from pathlib import Path
 
 import pytest
-import yaml
 
-try:
-    import lazyllm  # noqa: F401
-except Exception as exc:
-    pytest.skip(f'lazyllm unavailable in test environment: {exc}', allow_module_level=True)
+from chat.utils.load_config import load_model_config, get_retrieval_settings
 
 from chat.utils.load_config import get_retrieval_settings, load_model_config
 

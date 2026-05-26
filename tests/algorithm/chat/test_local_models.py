@@ -3,8 +3,8 @@ from typing import Any, Dict, List
 import pytest
 import requests
 
-from chat.components.tmp import local_models as reranker_module
-from chat.components.tmp.local_models import BgeM3Embed, Qwen3Rerank
+import chat.components.online_models.local_models as reranker_module
+from chat.components.online_models.local_models import BgeM3Embed, Qwen3Rerank
 from lazyllm.tools.rag.doc_node import DocNode
 
 

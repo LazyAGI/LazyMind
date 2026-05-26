@@ -8,7 +8,7 @@ from html import escape
 from typing import Dict, List, Tuple
 from rapidfuzz import fuzz
 
-from chat.utils.url import get_url_basename
+from chat.utils.static_file_url import basename_from_path
 
 IMAGE_PATTERN = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
 # Qwen-style think delimiters (lengths 7 and 8; must stay in sync with parsers elsewhere)
@@ -64,7 +64,7 @@ class CitationPlugin(BasePlugin):
     def _source_node(idx: int, node):
         gm = node.global_metadata
         metadata = node.metadata
-        images = {get_url_basename(url): url for url in metadata.get('images', [])}
+        images = {basename_from_path(url): url for url in metadata.get('images', [])}
 
         def _recover_image_path(match: re.Match) -> str:
             """re.sub callback: if image exists locally, collect and replace with placeholder."""

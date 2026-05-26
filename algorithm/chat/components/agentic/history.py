@@ -454,25 +454,53 @@ def _split_think_and_body(raw_text: str, existing_think: Any = '') -> tuple[str,
     return think.strip(), body
 
 
-def _format_non_stream_result(result: Any, config: dict) -> dict[str, Any]:
+def _merge_sources(
+    cited_sources: list[dict[str, Any]],
+    existing_sources: Any,
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _push(source: Any) -> None:
+        if not isinstance(source, dict):
+            return
+        key = str(
+            source.get('index')
+            or source.get('segement_id')
+            or source.get('document_id')
+            or id(source)
+        )
+        if key in seen:
+            return
+        seen.add(key)
+        merged.append(source)
+
+    for source in cited_sources or []:
+        _push(source)
+    if isinstance(existing_sources, list):
+        for source in existing_sources:
+            _push(source)
+    return merged
+
+
+def _format_final_result(result: Any, config: dict) -> dict[str, Any]:
     if isinstance(result, dict):
         raw_text = str(result.get('text') or result.get('message') or '')
         existing_think = result.get('think') or result.get('reasoning_content') or ''
-        output = dict(result)
+        existing_sources = result.get('sources')
     else:
         raw_text = '' if result is None else str(result)
         existing_think = ''
-        output = {}
+        existing_sources = None
 
     think, body = _split_think_and_body(raw_text, existing_think)
     body = rewrite_markdown_image_urls(body, config=config)
-    text, sources = _rewrite_citations(body, config)
-    output.update({
+    text, cited_sources = _rewrite_citations(body, config)
+    return {
         'think': think,
         'text': text.strip(),
-        'sources': sources or _registered_citation_sources(config),
-    })
-    return output
+        'sources': _merge_sources(cited_sources, existing_sources),
+    }
 
 
 class _ConfigCitationPlugin(BasePlugin):

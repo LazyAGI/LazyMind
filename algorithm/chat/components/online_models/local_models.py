@@ -259,22 +259,21 @@ class Qwen3Rerank(LazyLLMOnlineRerankModuleBase):
                 documents = kwargs.pop('documents')
                 query = kwargs.pop('query', '')
                 return self._rerank_documents(query, documents, **kwargs)
-            raise TypeError('Qwen3Rerank.forward() missing required positional argument')
+            raise TypeError('forward() missing required arguments')
 
-        first_arg = args[0]
-        if isinstance(first_arg, list) and not first_arg:
-            return []
+        if len(args) == 1:
+            first = args[0]
+            if 'nodes' in kwargs:
+                nodes = kwargs.pop('nodes')
+                return self._rerank_nodes(nodes, first, **kwargs)
+            if 'documents' in kwargs:
+                documents = kwargs.pop('documents')
+                return self._rerank_documents(first, documents, **kwargs)
 
-        if isinstance(first_arg, list) and isinstance(first_arg[0], DocNode):
-            query = args[1] if len(args) > 1 else kwargs.pop('query', '')
-            return self._rerank_nodes(first_arg, query, **kwargs)
+        if len(args) == 2:
+            first, second = args
+            if isinstance(first, list) and first and isinstance(first[0], DocNode):
+                return self._rerank_nodes(first, second, **kwargs)
+            return self._rerank_documents(first, second, **kwargs)
 
-        if isinstance(first_arg, list):
-            query = args[1] if len(args) > 1 else kwargs.pop('query', '')
-            return self._rerank_documents(query, first_arg, **kwargs)
-
-        query = first_arg
-        documents = kwargs.pop('documents', args[1] if len(args) > 1 else None)
-        if documents is None:
-            raise TypeError('Qwen3Rerank.forward() missing required argument: `documents`')
-        return self._rerank_documents(query, documents, **kwargs)
+        raise TypeError(f'Unsupported forward arguments: {args!r}')

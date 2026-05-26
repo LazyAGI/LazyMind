@@ -14,9 +14,6 @@ ARG APT_SECURITY_MIRROR=http://mirrors.aliyun.com/debian-security
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
 ARG PIP_DEFAULT_TIMEOUT=2400
 ARG PIP_RETRIES=10
-ARG LAZYLLM_GITHUB_REF=main
-ARG LAZYLLM_ARCHIVE_BASE=https://codeload.github.com/LazyAGI/LazyLLM/tar.gz/refs/heads
-
 ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
     PIP_DEFAULT_TIMEOUT=${PIP_DEFAULT_TIMEOUT} \
     PIP_RETRIES=${PIP_RETRIES} \
@@ -37,15 +34,8 @@ RUN set -eu; \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN set -eu; \
-    curl -fL --http1.1 --no-progress-meter \
-      --retry 8 --retry-all-errors --retry-delay 3 \
-      --connect-timeout 30 --speed-limit 1024 --speed-time 60 --max-time 900 \
-      "${LAZYLLM_ARCHIVE_BASE}/${LAZYLLM_GITHUB_REF}" -o /tmp/lazyllm.tar.gz; \
-    mkdir -p /opt/lazyllm; \
-    tar -xzf /tmp/lazyllm.tar.gz -C /opt/lazyllm --strip-components=1; \
-    rm /tmp/lazyllm.tar.gz; \
-    pip install --no-cache-dir \
+COPY algorithm/lazyllm /opt/lazyllm
+RUN pip install --no-cache-dir \
       toml tqdm filelock pyyaml packaging \
       "fastapi>=0.111.0" "loguru>=0.7.2" "pydantic>=2.11.7,<3.0.0" \
       "requests>=2.32.2" "uvicorn>=0.23.2" "cloudpickle>=3.0.0" \
@@ -82,6 +72,7 @@ RUN if [ "$LAZYMIND_PRELOAD_WHISPER_MODEL" = "1" ]; then \
         python -c "import whisper; whisper.load_model('${LAZYMIND_WHISPER_MODEL}')"; \
     fi
 COPY algorithm/ /app/algorithm/
+RUN rm -rf /app/algorithm/lazyllm
 ENV PYTHONPATH=/opt/lazyllm:/app/algorithm \
   LAZYMIND_DOCUMENT_SERVER_URL=http://parsing:8000 \
   LAZYMIND_SHARED_UPLOAD_DIR=/var/lib/lazymind/uploads \
@@ -158,10 +149,6 @@ RUN pip install --no-cache-dir -r /tmp/evo-requirements.txt python-dotenv
 
 COPY evo/ /app/evo/
 
-RUN ln -s /app/algorithm/chat /app/chat && \
-    ln -s /app/algorithm/common /app/common && \
-    ln -s /app/algorithm/vocab /app/vocab && \
-    ln -s /app/algorithm/processor /app/processor
 RUN chmod +x /app/evo/service/entrypoint.sh
 
 EXPOSE 8047
@@ -195,6 +182,7 @@ RUN if [ -n "$MINERU_NUMPY_VERSION" ]; then \
         pip install --no-cache-dir "numpy==${MINERU_NUMPY_VERSION}"; \
     fi
 COPY algorithm/ /app/algorithm/
+RUN rm -rf /app/algorithm/lazyllm
 ENV PYTHONPATH=/opt/lazyllm:/app/algorithm
 WORKDIR /app/algorithm
 CMD ["python", "parsing/mineru.py"]

@@ -8,17 +8,15 @@ import os
 import re
 import threading
 import time
-from functools import lru_cache
 from pathlib import Path
 from queue import Empty, Queue
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import lazyllm
 from lazyllm import loop, once_wrapper
 from lazyllm.tracing import set_trace_context
 from lazyllm.tools.agent.functionCall import FunctionCall
 from lazyllm.tools.fs.client import FS
-from lazyllm.tools.sandbox.sandbox_base import create_sandbox  # noqa: F401
 
 from config import config as _cfg
 
@@ -26,7 +24,6 @@ from config import config as _cfg
 from chat.components.agentic.config import (  # noqa: E402
     _build_runtime_system_prompt,
     _filter_tools_for_request,
-    _get_runtime_agent_defaults,
     _normalize_available_skills,
     _normalize_available_tools,
     _sync_request_context,
@@ -35,7 +32,7 @@ from chat.components.agentic.history import (  # noqa: E402
     _build_stream_citation_scanner,
     _count_tool_turns,
     _count_user_turns,
-    _format_non_stream_result,
+    _format_final_result,
     _normalize_history_for_agent,
     _reset_citation_state,
 )
@@ -232,25 +229,24 @@ def agentic_forward(
         config,
     )
     available_skills = _normalize_available_skills(config.get('available_skills'))
-    skills_dir = config.get('skill_fs_url') or ''
+    skills_dir = _cfg['skill_fs_url']
     config['available_tools'] = available_tools
     config['available_skills'] = available_skills
 
     original_query = query.strip()
     agent_query = _augment_query_with_attached_images(original_query, config)
 
-    keep_full_turns = config.get('keep_full_turns', 3)
+    keep_full_turns = _cfg['agentic_keep_full_turns']
     runtime_prompt = _build_runtime_system_prompt(config, available_tools)
     agent_cls = _StreamingReactAgent if stream_event_callback else lazyllm.tools.agent.ReactAgent
     agent_kwargs = {
         'llm': llm,
         'tools': available_tools + [(_FEISHU_FS_INSTANCE, _feishu_key_source)],
         'max_retries': _cfg['max_retries'],
-        'return_trace': config.get('return_trace', False),
         'stream': bool(stream_event_callback),
         'prompt': runtime_prompt,
         'skills': available_skills,
-        'workspace': config.get('workspace', _cfg['agentic_workspace']),
+        'workspace': _cfg['agentic_workspace'],
         'keep_full_turns': keep_full_turns,
         'fs': FS,
         'skills_dir': skills_dir,
@@ -462,8 +458,8 @@ async def _agentic_forward_stream(
                 seg = rewrite_markdown_image_urls(seg, config=runtime_params)
                 yield _stream_frame(text=seg)
 
-        output = _format_non_stream_result(final_result, runtime_params)
-        chunk_size = int(runtime_params.get('stream_chunk_size') or _STREAM_CHUNK_SIZE)
+        output = _format_final_result(final_result, runtime_params)
+        chunk_size = int(_cfg['agentic_stream_chunk_size'] or _STREAM_CHUNK_SIZE)
         if not streamed_text:
             think = str(output.get('think') or '')
             if think:
@@ -494,46 +490,26 @@ def _ensure_tools_registered() -> None:
     from chat.tools import calculator, kb, memory, skill_manager, vocab, vision_extractor, web_search  # noqa: F401
 
 
-@lru_cache(maxsize=1)
-def _get_cwd() -> str:
-    return str(Path.cwd())
-
-
-def get_ppl_agentic():
-    return agentic_rag
-
-
 def agentic_rag(
-    global_params: Dict[str, Any],
-    tool_params: Optional[Dict[str, Any]] = None,
-    stream: bool = False,
-    **kwargs: Any,
+    params: Dict[str, Any],
 ) -> Any:
     _ensure_tools_registered()
 
-    query = (global_params or {}).get('query', '')
+    query = (params or {}).get('query', '')
     if not isinstance(query, str) or not query.strip():
         raise ValueError('query is required')
 
-    runtime_params = _get_runtime_agent_defaults()
-    runtime_params.update(global_params or {})
-    runtime_params.update(kwargs)
-    # stream can be passed either as a function arg or inside global_params dict
-    stream = stream or bool(runtime_params.get('stream', False))
-    runtime_params['stream'] = stream
+    runtime_params = dict(params or {})
+    runtime_params['stream'] = True
     _sync_request_context(runtime_params)
     _reset_citation_state(runtime_params)
 
-    history = (global_params or {}).get('history') or []
+    history = (params or {}).get('history') or []
     if not isinstance(history, list):
         history = []
     history = _normalize_history_for_agent(history, runtime_params)
 
     lazyllm.globals['agentic_config'] = runtime_params
-
-    if not stream:
-        result = agentic_forward(query=query.strip(), history=history)
-        return _format_non_stream_result(result, runtime_params)
 
     return _agentic_forward_stream(
         query=query.strip(),

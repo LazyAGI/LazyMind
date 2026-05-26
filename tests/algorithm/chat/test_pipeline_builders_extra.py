@@ -2,12 +2,11 @@
 Additional tests for pipeline builder helpers.
 
 These tests are kept in a separate file because importing
-chat.pipelines.builders.get_ppl_search triggers a circular import
-(vocab.evolution → chat.pipelines.builders) when the full vocab package
+chat.pipelines.get_ppl_search triggers a circular import
+(vocab.evolution → chat.pipelines) when the full vocab package
 is loaded.  We break the cycle by injecting a lightweight stub for
 vocab.vocab_manager into sys.modules before the real import happens.
 """
-import importlib
 import sys
 import types
 
@@ -16,8 +15,8 @@ def _stub_vocab():
     """Inject a minimal vocab.vocab_manager stub to prevent circular import.
 
     Only stubs modules that haven't been loaded yet.  vocab.evolution is NOT
-    stubbed here because the circular import (vocab.evolution →
-    chat.pipelines.builders) has been resolved with a lazy import inside the
+    stubbed here because the circular import (vocab.evolution → chat.pipelines)
+    has been resolved with a lazy import inside the
     class constructors.  Stubbing vocab.evolution would leave an empty module
     object in sys.modules and break any later test that imports real symbols
     from it (e.g. ActionPlanningModule).
@@ -29,8 +28,9 @@ def _stub_vocab():
         sys.modules['vocab.vocab_manager'] = stub
 _stub_vocab()
 
-retriever_mod = importlib.import_module('chat.pipelines.builders.get_retriever')
-ppl_search_mod = importlib.import_module('chat.pipelines.builders.get_ppl_search')
+import chat.pipelines.get_ppl_search as ppl_search_mod
+
+retriever_mod = ppl_search_mod
 
 
 # ---------------------------------------------------------------------------

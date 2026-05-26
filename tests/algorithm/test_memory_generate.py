@@ -260,11 +260,7 @@ def test_memory_generate_route_accepts_suggestions_without_user_instruct(monkeyp
     )
 
     assert response.status_code == 200
-    assert response.json() == {
-        'code': 0,
-        'msg': 'ok',
-        'data': {'content': 'new content'},
-    }
+    assert response.json() == {'content': 'new content'}
 
 
 def test_memory_generate_route_rejects_missing_suggestions_and_user_instruct():

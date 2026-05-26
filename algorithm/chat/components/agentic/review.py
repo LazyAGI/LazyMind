@@ -65,34 +65,6 @@ def _build_review_decision(
     }
 
 
-def _build_existing_state_context(config: dict, review_mode: str) -> str:
-    """Build a context block with existing memory and user_preference for review."""
-    parts: list[str] = []
-
-    if review_mode in ('memory', 'combined'):
-        memory_content = str(config.get('memory') or '').strip()
-        user_pref_content = str(config.get('user_preference') or '').strip()
-        if memory_content or user_pref_content:
-            parts.append('\n\n--- EXISTING STATE ---')
-            parts.append(
-                'Below is the CURRENT memory and user_preference stored on the backend. '
-                'You MUST read it carefully before deciding what to change.'
-            )
-            parts.append(
-                'When proposing updates, base the suggestions on this existing '
-                'content rather than replacing it wholesale. Retain still-valid '
-                'entries; add new entries; correct or remove only what is '
-                'outdated or wrong. Do NOT simply rewrite from scratch.'
-            )
-            if memory_content:
-                parts.append(f'\n## Current agent working memory (target=memory)\n{memory_content}')
-            if user_pref_content:
-                parts.append(f'\n## Current user_preference (target=user)\n{user_pref_content}')
-            parts.append('--- END EXISTING STATE ---\n')
-
-    return '\n'.join(parts)
-
-
 def _spawn_background_review(
     config: dict,
     llm: Any,
@@ -107,13 +79,8 @@ def _spawn_background_review(
         print(f'[bg-review:{review_mode}] SKIP no review tools')
         return
 
-    from chat.tools import vocab as _review_vocab_tool  # noqa: F401
-
-    # existing_context = _build_existing_state_context(config, review_mode)
-    # review_prompt = base_prompt + existing_context
-
     snapshot = list(history_snapshot)
-    skills_dir = config.get('skill_fs_url') or ''
+    skills_dir = _cfg['skill_fs_url']
     skills_with_cat = (
         list_all_skills_with_category(skills_dir)
         if review_mode in ('skill', 'combined') and skills_dir

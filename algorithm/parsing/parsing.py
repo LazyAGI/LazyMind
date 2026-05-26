@@ -3,7 +3,7 @@ import requests
 import urllib.error
 import urllib.request
 
-import chat.components.tmp  # noqa: F401 — registers BgeM3Embed / Qwen3Rerank into lazyllm.online
+import chat.components.online_models.local_models  # noqa: F401 — registers BgeM3Embed / Qwen3Rerank into lazyllm.online
 from config import config as _cfg
 from parsing.build_document import (
     build_document, drop_lazyllm_tables, reset_stores,

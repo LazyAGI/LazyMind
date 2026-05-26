@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-from functools import wraps
 from socket import gaierror
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-import lazyllm
 import requests
 from bs4 import BeautifulSoup
 from httpx import ConnectError, HTTPError, HTTPStatusError, NetworkError, TimeoutException
 from lazyllm import fc_register
 from lazyllm.tools.tools.search import ArxivSearch, BingSearch, BochaSearch, GoogleSearch, WikipediaSearch
 
+from chat.tools._common import handle_tool_errors, tool_error, tool_success
+from chat.tools._utils import absolute_url, truncate_text
+from config import config as _cfg
 
 _MAX_TEXT_LEN = 2000
 _MAX_FETCH_TEXT_LEN = 4000
@@ -22,38 +23,7 @@ _DEFAULT_WIKIPEDIA_URLS = {
 }
 
 
-def _tool_failure(tool_name: str, exc: Exception) -> Dict[str, Any]:
-    return {
-        'success': False,
-        'reason': f'{tool_name} failed: {exc}',
-        'error': str(exc),
-        'error_type': type(exc).__name__,
-    }
-
-
-def _handle_tool_errors(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as exc:
-            return _tool_failure(func.__name__, exc)
-
-    return wrapper
-
-
-def _agentic_config() -> Dict[str, Any]:
-    config = lazyllm.globals.get('agentic_config') or {}
-    return config if isinstance(config, dict) else {}
-
-
-def _config_str(config: Dict[str, Any], key: str, default: str = '') -> str:
-    value = config.get(key)
-    return str(value if value is not None else default).strip()
-
-
-def _config_int(config: Dict[str, Any], key: str, default: int) -> int:
-    value = config.get(key)
+def _coerce_int(value: Any, default: int) -> int:
     if value is None or value == '':
         return default
     try:
@@ -78,22 +48,6 @@ def _normalize_auto_sources(value: Any) -> List[str]:
     return normalized or list(_DEFAULT_WEB_SOURCES)
 
 
-def _truncate_text(text: Any, max_len: int = _MAX_TEXT_LEN) -> str:
-    if text is None:
-        return ''
-    raw = text if isinstance(text, str) else str(text)
-    return raw if len(raw) <= max_len else f'{raw[:max_len]}...'
-
-
-def _absolute_url(url: str) -> str:
-    normalized = str(url or '').strip()
-    if not normalized:
-        return ''
-    if normalized.startswith(('http://', 'https://')):
-        return normalized
-    return f'https://{normalized}'
-
-
 def _serialize_item(item: Dict[str, Any], content: Optional[str] = None) -> Dict[str, Any]:
     payload = {
         'title': item.get('title', ''),
@@ -105,7 +59,7 @@ def _serialize_item(item: Dict[str, Any], content: Optional[str] = None) -> Dict
     if isinstance(extra, dict) and extra:
         payload['extra'] = extra
     if content:
-        payload['content'] = _truncate_text(content)
+        payload['content'] = truncate_text(content, _MAX_TEXT_LEN)
     return payload
 
 
@@ -118,20 +72,28 @@ def _error_details(exc: Exception) -> Dict[str, Any]:
 
 def _search_failure(query: str, source: str, details: Dict[str, Any], *, lang: Optional[str] = None,
                     tried_sources: Optional[List[str]] = None) -> Dict[str, Any]:
-    payload = {
-        'success': False,
+    meta = {
         'status': 'search_error',
         'query': query,
         'resolved_source': source,
         'total': 0,
         'items': [],
-        **details,
     }
+    if 'status' in details:
+        meta['status'] = details['status']
+    if 'http_status' in details:
+        meta['http_status'] = details['http_status']
     if lang is not None:
-        payload['lang'] = lang
+        meta['lang'] = lang
     if tried_sources is not None:
-        payload['tried_sources'] = tried_sources
-    return payload
+        meta['tried_sources'] = tried_sources
+    return tool_error(
+        'web_search',
+        str(details.get('reason') or 'search failed'),
+        error_type=str(details.get('error_type') or '') or None,
+        detail=str(details.get('error') or '') or None,
+        meta=meta,
+    )
 
 
 def _classify_search_exception(exc: Exception) -> Dict[str, Any]:
@@ -169,37 +131,36 @@ def _classify_search_exception(exc: Exception) -> Dict[str, Any]:
     }
 
 
-def _build_wikipedia_search(config: Dict[str, Any], lang: str) -> WikipediaSearch:
-    base_url = _config_str(
-        config,
-        'web_search_wikipedia_base_url',
-        _DEFAULT_WIKIPEDIA_URLS.get(_normalize_lang(lang), _DEFAULT_WIKIPEDIA_URLS['zh']),
-    )
-    timeout = _config_int(config, 'web_search_timeout', 10)
+def _build_wikipedia_search(lang: str, wikipedia_base_url: Any) -> WikipediaSearch:
+    base_url = str(
+        wikipedia_base_url
+        or _DEFAULT_WIKIPEDIA_URLS.get(_normalize_lang(lang), _DEFAULT_WIKIPEDIA_URLS['zh'])
+    ).strip()
+    timeout = _cfg['web_search_timeout']
     return WikipediaSearch(base_url=base_url, timeout=timeout, source_name='wikipedia')
 
 
-def _provider_available(config: Dict[str, Any], source: str) -> bool:
+def _provider_available(source: str) -> bool:
     if source == 'wikipedia':
         return True
     if source == 'google':
-        return bool(_config_str(config, 'web_search_google_api_key')) and bool(
-            _config_str(config, 'web_search_google_search_engine_id')
+        return bool(_cfg['web_search_google_api_key']) and bool(
+            _cfg['web_search_google_search_engine_id']
         )
     if source == 'bing':
-        return bool(_config_str(config, 'web_search_bing_subscription_key'))
+        return bool(_cfg['web_search_bing_subscription_key'])
     if source == 'bocha':
-        return bool(_config_str(config, 'web_search_bocha_api_key'))
+        return bool(_cfg['web_search_bocha_api_key'])
     return False
 
 
-def _build_provider(config: Dict[str, Any], source: str, lang: str):
-    timeout = _config_int(config, 'web_search_timeout', 10)
+def _build_provider(source: str, lang: str):
+    timeout = _cfg['web_search_timeout']
     if source == 'wikipedia':
-        return _build_wikipedia_search(config, lang)
+        return _build_wikipedia_search(lang, _cfg['web_search_wikipedia_base_url'])
     if source == 'google':
-        api_key = _config_str(config, 'web_search_google_api_key')
-        search_engine_id = _config_str(config, 'web_search_google_search_engine_id')
+        api_key = _cfg['web_search_google_api_key']
+        search_engine_id = _cfg['web_search_google_search_engine_id']
         if not api_key or not search_engine_id:
             raise ValueError('google search is not configured')
         return GoogleSearch(
@@ -209,10 +170,10 @@ def _build_provider(config: Dict[str, Any], source: str, lang: str):
             source_name='google',
         )
     if source == 'bing':
-        subscription_key = _config_str(config, 'web_search_bing_subscription_key')
+        subscription_key = _cfg['web_search_bing_subscription_key']
         if not subscription_key:
             raise ValueError('bing search is not configured')
-        endpoint = _config_str(config, 'web_search_bing_endpoint')
+        endpoint = _cfg['web_search_bing_endpoint']
         return BingSearch(
             subscription_key=subscription_key,
             endpoint=endpoint or None,
@@ -220,10 +181,10 @@ def _build_provider(config: Dict[str, Any], source: str, lang: str):
             source_name='bing',
         )
     if source == 'bocha':
-        api_key = _config_str(config, 'web_search_bocha_api_key')
+        api_key = _cfg['web_search_bocha_api_key']
         if not api_key:
             raise ValueError('bocha search is not configured')
-        base_url = _config_str(config, 'web_search_bocha_base_url', 'https://api.bochaai.com')
+        base_url = _cfg['web_search_bocha_base_url']
         return BochaSearch(
             api_key=api_key,
             base_url=base_url,
@@ -245,18 +206,17 @@ def _search_provider(provider: Any, source: str, query: str, topk: int) -> List[
     raise ValueError(f'unsupported web_search source: {source}')
 
 
-def _candidate_sources(config: Dict[str, Any], requested_source: str) -> List[str]:
+def _candidate_sources(requested_source: str) -> List[str]:
     if requested_source != 'auto':
         return [requested_source]
 
-    candidates = _normalize_auto_sources(config.get('web_search_auto_sources'))
+    candidates = _normalize_auto_sources(_cfg['web_search_auto_sources'])
     if 'wikipedia' not in candidates:
         candidates.append('wikipedia')
     return candidates
 
 
 def _run_candidate_searches(
-    config: Dict[str, Any],
     source: str,
     query: str,
     topk: int,
@@ -268,12 +228,12 @@ def _run_candidate_searches(
     last_error_source: Optional[str] = None
     last_non_error_source: Optional[str] = None
 
-    for candidate in _candidate_sources(config, requested):
+    for candidate in _candidate_sources(requested):
         tried_sources.append(candidate)
-        if requested == 'auto' and not _provider_available(config, candidate):
+        if requested == 'auto' and not _provider_available(candidate):
             continue
 
-        provider = _build_provider(config, candidate, lang)
+        provider = _build_provider(candidate, lang)
         try:
             items = _search_provider(provider, candidate, query, topk)
         except Exception as exc:
@@ -297,14 +257,6 @@ def _content_for_item(provider: Any, item: Dict[str, Any], include_content: bool
     if not include_content:
         return None
     return provider.get_content(item)
-
-
-def _fetch_timeout(config: Dict[str, Any]) -> int:
-    return _config_int(config, 'url_fetch_timeout', _config_int(config, 'web_search_timeout', 10))
-
-
-def _fetch_text_limit(config: Dict[str, Any]) -> int:
-    return max(200, _config_int(config, 'url_fetch_max_length', _MAX_FETCH_TEXT_LEN))
 
 
 def _extract_page_text(html: str) -> str:
@@ -357,7 +309,7 @@ def _extract_page_description(soup: BeautifulSoup) -> str:
 
 
 @fc_register('tool', execute_in_sandbox=False)
-@_handle_tool_errors
+@handle_tool_errors
 def web_search(
     query: str,
     source: Literal['auto', 'wikipedia', 'google', 'bing', 'bocha'] = 'auto',
@@ -395,11 +347,9 @@ def web_search(
     if not normalized_query:
         raise ValueError('query is required')
 
-    config = _agentic_config()
     resolved_lang = _normalize_lang(lang)
     limit = max(1, min(int(topk), 10))
     resolved_source, tried_sources, items, provider, error = _run_candidate_searches(
-        config,
         source,
         normalized_query,
         limit,
@@ -419,8 +369,7 @@ def web_search(
         content = _content_for_item(provider, item, include_content) if provider is not None else None
         serialized_items.append(_serialize_item(item, content=content))
 
-    return {
-        'success': True,
+    return tool_success('web_search', {
         'status': 'ok' if serialized_items else 'no_results',
         'query': normalized_query,
         'requested_source': source,
@@ -429,11 +378,11 @@ def web_search(
         'lang': resolved_lang,
         'total': len(serialized_items),
         'items': serialized_items,
-    }
+    })
 
 
 @fc_register('tool', execute_in_sandbox=False)
-@_handle_tool_errors
+@handle_tool_errors
 def arxiv_search(
     query: str,
     max_results: int = 5,
@@ -460,8 +409,7 @@ def arxiv_search(
     if not normalized_query:
         raise ValueError('query is required')
 
-    config = _agentic_config()
-    timeout = _config_int(config, 'arxiv_search_timeout', 15)
+    timeout = _cfg['arxiv_search_timeout']
     limit = max(1, min(int(max_results), 10))
     provider = ArxivSearch(timeout=timeout, source_name='arxiv')
     try:
@@ -472,26 +420,37 @@ def arxiv_search(
             raise_on_error=True,
         )[:limit]
     except Exception as exc:
-        return _search_failure(normalized_query, 'arxiv', _classify_search_exception(exc))
+        return tool_error(
+            'arxiv_search',
+            str(_classify_search_exception(exc).get('reason') or 'search failed'),
+            error_type=type(exc).__name__,
+            detail=str(exc),
+            meta={
+                'status': _classify_search_exception(exc).get('status', 'search_error'),
+                'query': normalized_query,
+                'source': 'arxiv',
+                'total': 0,
+                'items': [],
+            },
+        )
 
     serialized_items = []
     for item in items:
         content = _content_for_item(provider, item, include_content)
         serialized_items.append(_serialize_item(item, content=content))
 
-    return {
-        'success': True,
+    return tool_success('arxiv_search', {
         'status': 'ok' if serialized_items else 'no_results',
         'query': normalized_query,
         'source': 'arxiv',
         'sort_by': sort_by,
         'total': len(serialized_items),
         'items': serialized_items,
-    }
+    })
 
 
 @fc_register('tool', execute_in_sandbox=False)
-@_handle_tool_errors
+@handle_tool_errors
 def url_fetch(
     url: str,
 ) -> Dict[str, Any]:
@@ -506,13 +465,12 @@ def url_fetch(
     Returns:
         A compact dict containing page metadata and extracted text content.
     """
-    normalized_url = _absolute_url(url)
+    normalized_url = absolute_url(url)
     if not normalized_url:
         raise ValueError('url is required')
 
-    config = _agentic_config()
-    timeout = _fetch_timeout(config)
-    text_limit = _fetch_text_limit(config)
+    timeout = _coerce_int(_cfg['web_search_timeout'], 10)
+    text_limit = max(200, _coerce_int(_cfg['url_fetch_max_length'], _MAX_FETCH_TEXT_LEN))
     headers = {
         'User-Agent': (
             'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
@@ -532,8 +490,7 @@ def url_fetch(
     content_type = str(response.headers.get('Content-Type') or '').lower()
     if 'text/html' not in content_type and 'application/xhtml+xml' not in content_type:
         raw_text = response.text.strip()
-        return {
-            'success': True,
+        return tool_success('url_fetch', {
             'status': 'ok',
             'url': normalized_url,
             'final_url': response.url,
@@ -541,18 +498,17 @@ def url_fetch(
             'content_type': content_type,
             'title': '',
             'description': '',
-            'content': _truncate_text(raw_text, text_limit),
-        }
+            'content': truncate_text(raw_text, text_limit),
+        })
 
     soup = BeautifulSoup(response.text, 'html.parser')
-    return {
-        'success': True,
+    return tool_success('url_fetch', {
         'status': 'ok',
         'url': normalized_url,
         'final_url': response.url,
         'status_code': response.status_code,
         'content_type': content_type,
         'title': _extract_page_title(soup),
-        'description': _truncate_text(_extract_page_description(soup), 500),
-        'content': _truncate_text(_extract_page_text(response.text), text_limit),
-    }
+        'description': truncate_text(_extract_page_description(soup), 500),
+        'content': truncate_text(_extract_page_text(response.text), text_limit),
+    })

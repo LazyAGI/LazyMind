@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import chat.pipelines.get_ppl_search as retriever_builder
 from cli.context import get as get_context
 from cli.context import resolve_algo_dataset, resolve_algo_url, resolve_dataset
 
@@ -19,7 +20,7 @@ import sys
 import tempfile
 
 from lazyllm import Document, Retriever
-from chat.pipelines.builders import get_retriever as retriever_builder
+import chat.pipelines.get_ppl_search as retriever_builder
 from chat.utils.load_config import get_embed_keys
 
 
@@ -149,7 +150,6 @@ def _run_config_retrievers(
 ) -> List[Dict[str, Any]]:
     """Run all retrievers defined in runtime_models config."""
     from lazyllm import Retriever
-    from chat.pipelines.builders import get_retriever as retriever_builder
     from chat.utils.load_config import get_embed_keys
 
     original_get_embed_keys = retriever_builder.get_embed_keys

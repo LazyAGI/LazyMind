@@ -1,5 +1,4 @@
 import json
-from functools import wraps
 from typing import Any, Dict, List, Optional
 
 import lazyllm
@@ -7,7 +6,9 @@ import requests
 
 from lazyllm import fc_register
 
-from chat.pipelines.builders.get_ppl_search import get_ppl_search
+from chat.tools._common import handle_tool_errors, tool_success
+from chat.tools._utils import parse_json_dict, truncate_text
+from chat.pipelines.get_ppl_search import get_ppl_search
 from chat.utils.static_file_url import (
     basename_from_path,
     local_path_from_static_file_url,
@@ -18,6 +19,7 @@ from config import config as _cfg
 _MAX_TEXT_LEN = 1200
 _MAX_RESULT_ITEMS = 50
 _DEFAULT_KB_URL = _cfg['agentic_kb_url']
+_DEFAULT_KB_NAME = _cfg['agentic_kb_name']
 _DEFAULT_ES_URL = _cfg['opensearch_uri'] or 'https://opensearch:9200'
 _DEFAULT_ES_USER = _cfg['opensearch_user']
 _DEFAULT_ES_PASSWORD = _cfg['opensearch_password']
@@ -30,38 +32,11 @@ _CITATION_NEXT_DOC_KEY = '_citation_next_doc_index'
 _CITATION_DOC_CHUNK_NEXT_KEY = '_citation_next_chunk_index_map'
 
 
-def _tool_failure(tool_name: str, exc: Exception) -> Dict[str, Any]:
-    return {
-        'success': False,
-        'reason': f'{tool_name} failed: {exc}',
-        'error': str(exc),
-        'error_type': type(exc).__name__,
-    }
-
-
-def _handle_tool_errors(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as exc:
-            return _tool_failure(func.__name__, exc)
-
-    return wrapper
-
-
 def _safe_getattr(obj: Any, key: str, default: Any = None) -> Any:
     try:
         return getattr(obj, key)
     except Exception:
         return default
-
-
-def _truncate_text(text: Any, max_len: int = _MAX_TEXT_LEN) -> str:
-    if text is None:
-        return ''
-    raw = text if isinstance(text, str) else str(text)
-    return raw if len(raw) <= max_len else f'{raw[:max_len]}...'
 
 
 def _parse_number_range(number: Any) -> tuple[int, int]:
@@ -146,7 +121,7 @@ def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
         'group': group,
         'parent': _safe_getattr(node, '_parent', None),
         'score': _safe_getattr(node, 'relevance_score', None),
-        'text': _truncate_text(text),
+        'text': truncate_text(text, _MAX_TEXT_LEN),
         'docid': global_md.get('docid'),
         'kb_id': global_md.get('kb_id'),
         'file_name': compact_metadata.get('file_name') or global_md.get('file_name'),
@@ -156,7 +131,7 @@ def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
     if image_markdown:
         serialized['image_markdown'] = image_markdown
         serialized['local_path'] = local_path
-        _register_image_url(_agentic_config(), text)
+        _register_image_url(lazyllm.globals['agentic_config'], text)
     return serialized
 
 
@@ -171,64 +146,42 @@ def _register_image_url(config: Dict[str, Any], path_or_url: str) -> None:
         registry[base] = signed
 
 
-def _agentic_config() -> Dict[str, Any]:
-    config = lazyllm.globals.get('agentic_config') or {}
-    return config if isinstance(config, dict) else {}
-
-
-def _parse_json_dict(value: Any) -> Dict[str, Any]:
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, (str, bytes, bytearray)) and value:
-        try:
-            parsed = json.loads(value)
-            return parsed if isinstance(parsed, dict) else {}
-        except (TypeError, ValueError):
-            return {}
-    return {}
-
-
 def _normalize_es_url(url: Optional[str]) -> str:
     return (url or _DEFAULT_ES_URL).rstrip('/')
 
 
-def _resolve_kb_name(config: Dict[str, Any]) -> str:
-    resolved = config.get('kb_name')
-    if not resolved:
-        raise ValueError('kb_name is required when it is not available in agentic_config')
-    return resolved
-
-
-def _resolve_kb_id(config: Dict[str, Any]) -> Optional[str]:
-    kb_id = config.get('kb_id')
+def _iter_lookup_kb_ids(kb_id: Any) -> List[Optional[str]]:
+    if kb_id is None:
+        return [None]
     if isinstance(kb_id, str):
-        normalized = kb_id.strip()
-        return normalized or None
+        return [kb_id]
     if isinstance(kb_id, list):
-        for item in kb_id:
-            if not isinstance(item, str):
-                continue
-            normalized = item.strip()
-            if normalized:
-                return normalized
-    return None
+        return kb_id or [None]
+    raise TypeError(f'agentic_config.kb_id must be None, str, or list[str], got {type(kb_id).__name__}')
 
 
-def _resolve_algo_name(config: Dict[str, Any]) -> str:
+def _build_agentic_document(config: Dict[str, Any]) -> Any:
+    return lazyllm.tools.rag.Document(
+        url=_DEFAULT_KB_URL,
+        name=_resolve_algo_name(config.get('algo_id')),
+    )
+
+
+def _resolve_algo_name(algo_id: Any) -> str:
     """Return the algo name bound to this dataset.
 
     After the node-group refactor the collection name no longer includes the
     algo name, but lazyllm.Document still needs 'name' (= algo_id) to connect
-    to the correct algorithm instance.  We read 'algo_id' from agentic_config
-    and fall back to 'kb_name' (= agentic_kb_name = 'general_algo').
+    to the correct algorithm instance. We read 'algo_id' from agentic_config
+    and otherwise fall back to the configured default kb name.
     """
-    algo_id = (config.get('algo_id') or '').strip()
-    if algo_id:
-        return algo_id
-    return _resolve_kb_name(config)
+    normalized_algo_id = str(algo_id or '').strip()
+    if normalized_algo_id:
+        return normalized_algo_id
+    return str(_DEFAULT_KB_NAME or '').strip()
 
 
-def _resolve_index(config: Dict[str, Any], group: str) -> str:
+def _resolve_index(group: str) -> str:
     # Post node-group refactor: collection name is col_{group}; kb_id is used as
     # a document-level filter inside OpenSearch so multi-KB isolation is preserved.
     group = (group or 'block').strip()
@@ -249,12 +202,12 @@ def _term_filter(field: str, value: Any) -> Dict[str, Any]:
     }
 
 
-def _opensearch_search(index: str, body: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
+def _opensearch_search(index: str, body: Dict[str, Any]) -> Dict[str, Any]:
     with requests.sessions.Session() as session:
         session.trust_env = False
         resp = session.post(
-            f'{_normalize_es_url(config.get("es_url"))}/{index}/_search',
-            auth=(config.get('es_user') or _DEFAULT_ES_USER, config.get('es_password') or _DEFAULT_ES_PASSWORD),
+            f'{_normalize_es_url(_DEFAULT_ES_URL)}/{index}/_search',
+            auth=(_DEFAULT_ES_USER, _DEFAULT_ES_PASSWORD),
             json=body,
             verify=False,
             timeout=30,
@@ -265,8 +218,8 @@ def _opensearch_search(index: str, body: Dict[str, Any], config: Dict[str, Any])
 
 def _source_to_result(hit: Dict[str, Any]) -> Dict[str, Any]:
     src = hit.get('_source') or {}
-    meta = _parse_json_dict(src.get('meta'))
-    global_meta = _parse_json_dict(src.get('global_meta'))
+    meta = parse_json_dict(src.get('meta'))
+    global_meta = parse_json_dict(src.get('global_meta'))
     return {
         'uid': src.get('uid') or hit.get('_id'),
         'number': src.get('number'),
@@ -275,7 +228,7 @@ def _source_to_result(hit: Dict[str, Any]) -> Dict[str, Any]:
         'docid': src.get('doc_id') or global_meta.get('docid'),
         'kb_id': src.get('kb_id') or global_meta.get('kb_id'),
         'score': hit.get('_score'),
-        'text': _truncate_text(src.get('content')),
+        'text': truncate_text(src.get('content'), _MAX_TEXT_LEN),
         'metadata': meta,
         'global_metadata': global_meta,
         'highlight': hit.get('highlight', {}).get('content', []),
@@ -373,7 +326,7 @@ def _register_citation_item(item: Dict[str, Any]) -> Dict[str, Any]:
     if not text:
         return item
 
-    config = _agentic_config()
+    config = lazyllm.globals['agentic_config']
     refs = config.setdefault(_CITATION_REFS_KEY, {})
     key_map = config.setdefault(_CITATION_KEY_MAP_KEY, {})
     doc_key_map = config.setdefault(_CITATION_DOC_KEY_MAP_KEY, {})
@@ -426,42 +379,6 @@ def _annotate_citations(result: Any) -> Any:
     return result
 
 
-def _node_id_query(node_id: str) -> Dict[str, Any]:
-    return {
-        'bool': {
-            'should': [
-                {'ids': {'values': [node_id]}},
-                {'term': {'uid': node_id}},
-                {'term': {'uid.keyword': node_id}},
-            ],
-            'minimum_should_match': 1,
-        }
-    }
-
-
-def _find_node_by_id(node_id: str, config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    kb_id = _resolve_kb_id(config)
-    filters = []
-    if kb_id:
-        filters.append(_term_filter('kb_id', kb_id))
-    body = {
-        'size': 1,
-        '_source': ['uid', 'doc_id', 'kb_id', 'group', 'content', 'meta', 'global_meta', 'type', 'number', 'parent'],
-        'query': {
-            'bool': {
-                'filter': filters,
-                'must': [_node_id_query(node_id)],
-            }
-        },
-    }
-    for group in ('block', 'line'):
-        index_name = _resolve_index(config, group)
-        hits = _opensearch_search(index_name, body, config).get('hits', {}).get('hits', [])
-        if hits:
-            return hits[0]
-    return None
-
-
 def _serialize_kb_result(result: Any) -> Any:
     if isinstance(result, (str, int, float, bool)) or result is None:
         return result
@@ -487,16 +404,16 @@ def _serialize_kb_result(result: Any) -> Any:
             if _safe_getattr(item, 'uid', None) is not None or _safe_getattr(item, 'text', None) is not None:
                 serialized_items.append(_serialize_doc_node_like(item))
                 continue
-            serialized_items.append(_truncate_text(item, max_len=400))
+            serialized_items.append(truncate_text(item, 400))
         return {
             'total': len(result),
             'items': serialized_items,
         }
-    return _truncate_text(result, max_len=400)
+    return truncate_text(result, 400)
 
 
 @fc_register('tool', execute_in_sandbox=False)
-@_handle_tool_errors
+@handle_tool_errors
 def kb_search(
     query: str,
     retriever_configs: Optional[List[Dict[str, Any]]] = None,
@@ -551,7 +468,7 @@ def kb_search(
         files: List of temporary file IDs (uploaded by the user in the current
             session). When non-empty, the pipeline switches to Branch A
             (TempDocRetriever). Defaults to the session's uploaded file list
-            from `agentic_config['temp_files']`; pass an explicit list to
+            from `agentic_config['files']`; pass an explicit list to
             override, or pass [] to force Branch B even when temp files exist.
             Attached images are read from `agentic_config['image_files']` and
             passed through so the search pipeline can rewrite the query.
@@ -559,12 +476,10 @@ def kb_search(
     Returns:
         Retrieval results returned by `get_ppl_search(...)(payload)`.
     """
-    agentic_config = lazyllm.globals.get('agentic_config') or {}
-    kb_url = agentic_config.get('kb_url')
-    kb_name = agentic_config.get('kb_name')
+    agentic_config = lazyllm.globals['agentic_config']
 
     if files is None:
-        files = agentic_config.get('temp_files') or []
+        files = agentic_config.get('files') or []
 
     payload = {
         'query': query,
@@ -573,26 +488,25 @@ def kb_search(
         'image_files': agentic_config.get('image_files') or [],
         'user_id': agentic_config.get('user_id', ''),
     }
-    resolved_kb_id = _resolve_kb_id(agentic_config)
-    if resolved_kb_id:
+    resolved_kb_id = agentic_config.get('kb_id')
+    if resolved_kb_id is not None:
         payload['filters']['kb_id'] = resolved_kb_id
     search_ppl = get_ppl_search(
-        url=f'{kb_url},{kb_name}',
+        url=f'{_DEFAULT_KB_URL},{_DEFAULT_KB_NAME}',
         retriever_configs=retriever_configs,
         topk=topk or 20,
         k_max=k_max or 10,
     )
-    return _annotate_citations(_serialize_kb_result(search_ppl(payload)))
+    return tool_success('kb_search', _annotate_citations(_serialize_kb_result(search_ppl(payload))))
 
 
 @fc_register('tool', execute_in_sandbox=False)
-@_handle_tool_errors
+@handle_tool_errors
 def kb_get_parent_node(node_id: str) -> Dict[str, Any]:
-    """Get the parent node of a target node by node id.
+    """Get the parent node of a target node by document node uid.
 
     Args:
-        node_id: Target node id. It can match either the OpenSearch document
-            id or the node ``uid`` field.
+        node_id: Target document node ``uid``.
 
     Returns:
         The matched parent node, if the current node has a parent and the
@@ -601,41 +515,48 @@ def kb_get_parent_node(node_id: str) -> Dict[str, Any]:
     if not node_id:
         raise ValueError('node_id is required')
 
-    config = _agentic_config()
-    current_hit = _find_node_by_id(node_id, config)
-    if not current_hit:
-        return {
-            'node_id': node_id,
-            'current_node': None,
-            'parent_id': None,
-            'total': 0,
-            'items': [],
-        }
+    config = lazyllm.globals['agentic_config']
+    doc = _build_agentic_document(config)
 
-    current = _source_to_result(current_hit)
-    parent_id = current.get('parent')
-    if not parent_id:
-        return _annotate_citations({
+    for kb_id in _iter_lookup_kb_ids(config.get('kb_id')):
+        current_nodes = doc.get_nodes(uids=[node_id], kb_id=kb_id)
+        current_nodes = current_nodes if isinstance(current_nodes, list) else []
+        if not current_nodes:
+            continue
+
+        current = _serialize_doc_node_like(current_nodes[0])
+        parent_id = current.get('parent')
+        if not parent_id:
+            return tool_success('kb_get_parent_node', _annotate_citations({
+                'node_id': node_id,
+                'current_node': current,
+                'parent_id': None,
+                'total': 0,
+                'items': [],
+            }))
+
+        parent_nodes = doc.get_nodes(uids=[parent_id], kb_id=kb_id)
+        parent_nodes = parent_nodes if isinstance(parent_nodes, list) else []
+        parent = _serialize_doc_node_like(parent_nodes[0]) if parent_nodes else None
+        return tool_success('kb_get_parent_node', _annotate_citations({
             'node_id': node_id,
             'current_node': current,
-            'parent_id': None,
-            'total': 0,
-            'items': [],
-        })
+            'parent_id': parent_id,
+            'total': 1 if parent else 0,
+            'items': [parent] if parent else [],
+        }))
 
-    parent_hit = _find_node_by_id(parent_id, config)
-    parent = _source_to_result(parent_hit) if parent_hit else None
-    return _annotate_citations({
+    return tool_success('kb_get_parent_node', {
         'node_id': node_id,
-        'current_node': current,
-        'parent_id': parent_id,
-        'total': 1 if parent else 0,
-        'items': [parent] if parent else [],
+        'current_node': None,
+        'parent_id': None,
+        'total': 0,
+        'items': [],
     })
 
 
 @fc_register('tool', execute_in_sandbox=False)
-@_handle_tool_errors
+@handle_tool_errors
 def kb_get_window_nodes(
     docid: str,
     number: Any,
@@ -664,33 +585,36 @@ def kb_get_window_nodes(
     if len(numbers) > _MAX_RESULT_ITEMS:
         raise ValueError(f'number range cannot exceed {_MAX_RESULT_ITEMS} nodes')
 
-    config = _agentic_config()
-    kb_id = _resolve_kb_id(config)
+    config = lazyllm.globals['agentic_config']
+    doc = _build_agentic_document(config)
 
-    doc = lazyllm.tools.rag.Document(
-        url=config.get('kb_url') or _DEFAULT_KB_URL,
-        name=_resolve_algo_name(config),
-    )
+    for kb_id in _iter_lookup_kb_ids(config.get('kb_id')):
+        nodes = doc.get_nodes(
+            doc_ids=[docid],
+            group=group,
+            kb_id=kb_id,
+            offset=max(start - 1, 0),
+            limit=len(numbers),
+            sort_by_number=True,
+        )
+        nodes = nodes if isinstance(nodes, list) else []
+        nodes = [n for n in nodes if _safe_getattr(n, 'number', None) in numbers]
+        if not nodes:
+            continue
+        nodes.sort(key=lambda n: (_safe_getattr(n, 'number', 0) or 0, _safe_getattr(n, 'uid', '') or ''))
+        return tool_success('kb_get_window_nodes', _annotate_citations({
+            'total': len(nodes),
+            'items': [_serialize_doc_node_like(n) for n in nodes],
+        }))
 
-    nodes = doc.get_nodes(
-        doc_ids=[docid],
-        group=group,
-        kb_id=kb_id,
-        offset=max(start - 1, 0),
-        limit=len(numbers),
-        sort_by_number=True,
-    )
-    nodes = nodes if isinstance(nodes, list) else []
-    nodes = [n for n in nodes if _safe_getattr(n, 'number', None) in numbers]
-    nodes.sort(key=lambda n: (_safe_getattr(n, 'number', 0) or 0, _safe_getattr(n, 'uid', '') or ''))
-    return _annotate_citations({
-        'total': len(nodes),
-        'items': [_serialize_doc_node_like(n) for n in nodes],
-    })
+    return tool_success('kb_get_window_nodes', _annotate_citations({
+        'total': 0,
+        'items': [],
+    }))
 
 
 @fc_register('tool', execute_in_sandbox=False)
-@_handle_tool_errors
+@handle_tool_errors
 def kb_keyword_search(
     keyword: str,
     docid: str,
@@ -718,43 +642,57 @@ def kb_keyword_search(
     if not docid:
         raise ValueError('docid is required')
 
-    config = _agentic_config()
-    kb_id = _resolve_kb_id(config)
+    config = lazyllm.globals['agentic_config']
     size = max(1, min(int(size), _MAX_RESULT_ITEMS))
     text_query = {'match_phrase' if phrase else 'match': {'content': keyword}}
     sort = [{'number': {'order': 'asc'}}] if sort_by == 'number' else [
         {'_score': {'order': 'desc'}},
         {'number': {'order': 'asc'}},
     ]
-    filters = [_term_filter('doc_id', docid)]
-    if kb_id:
-        filters.insert(0, _term_filter('kb_id', kb_id))
-    body = {
-        'size': size,
-        '_source': ['uid', 'doc_id', 'kb_id', 'group', 'content', 'meta', 'global_meta', 'type', 'number', 'parent'],
-        'query': {
-            'bool': {
-                'filter': filters,
-                'must': [text_query],
-            }
-        },
-        'sort': sort,
-        'highlight': {
-            'fields': {
-                'content': {
-                    'fragment_size': 180,
-                    'number_of_fragments': 3,
+    index_name = _resolve_index(group)
+    for kb_id in _iter_lookup_kb_ids(config.get('kb_id')):
+        filters = [_term_filter('doc_id', docid)]
+        if kb_id:
+            filters.insert(0, _term_filter('kb_id', kb_id))
+        body = {
+            'size': size,
+            '_source': [
+                'uid', 'doc_id', 'kb_id', 'group', 'content', 'meta',
+                'global_meta', 'type', 'number', 'parent',
+            ],
+            'query': {
+                'bool': {
+                    'filter': filters,
+                    'must': [text_query],
                 }
-            }
-        },
-    }
-    index_name = _resolve_index(config, group)
-    hits = _opensearch_search(index_name, body, config).get('hits', {}).get('hits', [])
-    return _annotate_citations({
+            },
+            'sort': sort,
+            'highlight': {
+                'fields': {
+                    'content': {
+                        'fragment_size': 180,
+                        'number_of_fragments': 3,
+                    }
+                }
+            },
+        }
+        hits = _opensearch_search(index_name, body).get('hits', {}).get('hits', [])
+        if not hits:
+            continue
+        return tool_success('kb_keyword_search', _annotate_citations({
+            'index': index_name,
+            'group': group,
+            'docid': docid,
+            'keyword': keyword,
+            'total': len(hits),
+            'items': [_source_to_result(hit) for hit in hits],
+        }))
+
+    return tool_success('kb_keyword_search', _annotate_citations({
         'index': index_name,
         'group': group,
         'docid': docid,
         'keyword': keyword,
-        'total': len(hits),
-        'items': [_source_to_result(hit) for hit in hits],
-    })
+        'total': 0,
+        'items': [],
+    }))

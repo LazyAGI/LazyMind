@@ -1,69 +1,4 @@
 # flake8: noqa
-from string import Template
-
-PLANNER_PROMPT = Template(
-    'You are a task planner. You have $tool_num tools available.\n'
-    'Tools: $tool_description\n'
-    'Original query: $original_query\n'
-    'Output a JSON plan with steps to answer the query.'
-)
-
-TOOLCALL_PROMPT = Template(
-    'You are a tool-call agent.\n'
-    'Tools: $tool_description\n'
-    'Original query: $original_query\n'
-    'Current goal: $current_goal\n'
-    'Previous step result: $previous_step_result\n'
-    'Output a JSON tool call to achieve the current goal.'
-)
-
-EXTRACTOR_PROMPT = Template(
-    'You are an information extractor.\n'
-    'Original query: $original_query\n'
-    'Current inference: $inference\n'
-    'Current step: $current_step\n'
-    'New nodes: $new_nodes\n'
-    'Extract relevant information and output a JSON summary.'
-)
-
-EVALUATOR_PROMPT = Template(
-    'You are a plan evaluator.\n'
-    'Original query: $original_query\n'
-    'Plans: $plans\n'
-    'Evaluate the plans and output a JSON assessment.'
-)
-
-PLANREFINE_PROMPT = Template(
-    'You are a plan refiner.\n'
-    'Tools: $tool_description\n'
-    'Original query: $original_query\n'
-    'Executed plan and inferences: $executed_plan_and_inferences\n'
-    'Refine the plan and output a JSON updated plan.'
-)
-
-QUERYREFINER_PROMPT = Template(
-    'You are a query refiner.\n'
-    'Original query: $original_query\n'
-    'Current inference: $inference\n'
-    'Retrieval step: $retrieval_step\n'
-    'Chunks: $chunks\n'
-    'Refine the query and output a JSON refined query.'
-)
-
-GENERATE_PROMPT = (
-    'Auxiliary inference: {inference}\n'
-    'Grounding knowledge: {chunks}\n'
-    'Question: {query}\n'
-    'Answer the question based on the grounding knowledge above.'
-)
-
-GENERATE_PROMPT_ZH = (
-    '辅助推理：{inference}\n'
-    '参考知识：{chunks}\n'
-    '问题：{query}\n'
-    '请根据以上参考知识回答问题。'
-)
-
 DEFAULT_SYSTEM_PROMPT = (
     "You are LAZYMIND, an intelligent AI assistant created by Sensetime. "
     "You are helpful, knowledgeable, and direct. You assist users with a wide "
@@ -74,12 +9,6 @@ DEFAULT_SYSTEM_PROMPT = (
     "Be targeted and efficient in your exploration and investigations."
 )
 
-_OLD_TOOL_PLACEHOLDER = "[Old tool output cleared to save context space]"
-SESSION_SEARCH_GUIDANCE = (
-    "When the user references something from a past conversation or you suspect "
-    "relevant cross-session context exists, use session_search to recall it before "
-    "asking them to repeat themselves."
-)
 MEMORY_GUIDANCE = (
     "Use the memory tool for durable cross-session knowledge only. "
     "Save user-stated identity, preferred names/nicknames, communication tone, "
@@ -170,7 +99,6 @@ TOOL_USE_ENFORCEMENT_GUIDANCE = (
     "Every response should either (a) contain tool calls that make progress, or "
     "(b) deliver a final result."
 )
-TOOL_USE_ENFORCEMENT_MODELS = ("gpt", "codex")
 _SKILL_REVIEW_PROMPT = (
     "Review the conversation above and determine whether a reusable skill should be created or updated.\n\n"
     "If the conversation reveals a good workflow, troubleshooting procedure, or general methodology, "
@@ -362,17 +290,3 @@ _COMBINED_REVIEW_PROMPT = (
     "If nothing is worth saving, reply with `Nothing to save` and a brief reason explaining why no skill, memory, "
     "user_preference, or vocabulary proposal is warranted."
 )
-_MEMORY_FLUSH_MESSAGES = {
-    "compression": (
-        "[System: The conversation is about to be compressed. "
-        "Save only durable memory worth keeping across sessions. "
-        "Prefer concise working-memory notes about what the user was doing, "
-        "what was discussed, and other future-relevant session context. "
-        "Do not save workflows, SOPs, procedures, or tool sequences as memory.]"
-    ),
-    "session_end": (
-        "[System: The current turn is ending. "
-        "Before context is lost, save only durable memory that will help in future sessions. "
-        "Prefer concise working-memory notes over transcript-like detail.]"
-    ),
-}

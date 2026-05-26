@@ -83,10 +83,6 @@ RUN pip install -r /tmp/evo-requirements.txt \
 WORKDIR /app
 COPY evo/ /app/evo/
 COPY algorithm /app/algorithm
-RUN ln -s /app/algorithm/chat /app/chat && \
-    ln -s /app/algorithm/common /app/common && \
-    ln -s /app/algorithm/vocab /app/vocab && \
-    ln -s /app/algorithm/processor /app/processor
 RUN chmod +x /app/evo/service/entrypoint.sh
 
 EXPOSE 8047

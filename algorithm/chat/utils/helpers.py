@@ -26,32 +26,3 @@ def validate_and_resolve_files(files: Optional[List[str]]) -> Tuple[List[str], L
     image_files = [p for p in resolved if p.lower().endswith(IMAGE_EXTENSIONS)]
     other_files = [p for p in resolved if p not in image_files]
     return other_files, image_files
-
-
-def tool_schema_to_string(
-    tool_schema: dict,
-    include_params: bool = True
-) -> str:
-    lines = []
-
-    for tool_name, tool_info in tool_schema.items():
-        lines.append(f'TOOL NAME: {tool_name}')
-
-        desc = tool_info.get('description')
-        if desc:
-            lines.append('DESCRIPTION:')
-            for sent in desc.split('. '):
-                sent = sent.strip()
-                if sent:
-                    lines.append(f"- {sent.rstrip('.')}.")
-
-        if include_params:
-            params = tool_info.get('parameters', {})
-            if params:
-                lines.append('PARAMETERS:')
-                for name, info in params.items():
-                    t = info.get('type', 'Any')
-                    d = info.get('des', '')
-                    lines.append(f'- {name}: {t}' + (f' — {d}' if d else ''))
-
-    return '\n'.join(lines).strip()

@@ -74,18 +74,6 @@ def load_model_config(config_path: str | None = None, *, expand_env: bool = Fals
     return raw
 
 
-def normalize_skill_fs_url(value: Any) -> str:
-    raw = str(value or '').strip()
-    if not raw:
-        return ''
-    parts = [part.strip() for part in raw.split(',') if part.strip()]
-    if not parts:
-        return ''
-    if parts[0].startswith('remote://') and '.agentic/skills' not in parts:
-        parts.append('.agentic/skills')
-    return ','.join(parts)
-
-
 def extract_skill_fs_source(path: Any) -> str:
     raw = str(path or '').strip()
     if not raw:

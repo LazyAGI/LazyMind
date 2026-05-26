@@ -85,6 +85,7 @@ def test_auth_schema_defaults_and_required_fields():
         status='active',
         role='user',
         permissions=['user.read'],
+        dynamic=False,
     )
     change_password = ChangePasswordBody(old_password='old', new_password='new')
     logout = LogoutBody()

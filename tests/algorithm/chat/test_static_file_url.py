@@ -1,6 +1,7 @@
 import chat.utils.static_file_url as sfu_mod
 
 from chat.utils.static_file_url import (
+    basename_from_path,
     local_path_from_static_file_url,
     resolve_local_image_path,
     static_file_url_from_any,
@@ -46,3 +47,9 @@ def test_static_file_url_from_any_strips_external_host_prefix(tmp_path, monkeypa
     local = local_path_from_static_file_url(signed)
     assert local == str(image.resolve())
     assert resolve_local_image_path(signed) == str(image.resolve())
+
+
+def test_basename_from_path_handles_urls_and_paths():
+    assert basename_from_path('https://example.test/assets/chart.png?token=1') == 'chart.png'
+    assert basename_from_path('/tmp/chart.png') == 'chart.png'
+    assert basename_from_path('./nested/chart.png') == 'chart.png'

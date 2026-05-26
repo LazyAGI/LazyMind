@@ -1,13 +1,80 @@
-from typing import List, Any
+from typing import List, Any, NamedTuple, Optional
 import lazyllm
-from lazyllm import AutoModel, pipeline, parallel, bind, ifs
+from lazyllm import AutoModel, Retriever, pipeline, parallel, bind, ifs, Document
 from lazyllm.tools.rag import Reranker
 from lazyllm.tools.rag.rank_fusion.reciprocal_rank_fusion import RRFFusion
+from lazyllm.tools.rag import TempDocRetriever
+
+import chat.components.online_models.local_models  # noqa: F401 — registers BgeM3Embed / Qwen3Rerank into lazyllm.online
+
+from chat.config import DEFAULT_TMP_BLOCK_TOPK
 from chat.components.process import AdaptiveKComponent, ContextExpansionComponent
-# from chat.components.process.query_image_rewriter import QueryImageRewriter
-from chat.pipelines.builders.get_retriever import get_retriever, get_remote_docment
-from chat.utils.load_config import get_config_path, get_dynamic_role_slot_map
+from chat.utils.load_config import (
+    get_config_path,
+    get_dynamic_role_slot_map,
+    get_image_embed_key,
+    get_text_embed_keys,
+)
 from vocab.vocab_manager import get_vocab_manager
+from config import config as _cfg
+
+EMBED_MAIN = 'embed_main'
+
+
+def _build_default_retriever_configs(topk: int = 20) -> List[dict]:
+    embed_keys = get_text_embed_keys() or [EMBED_MAIN]
+    return [
+        {'group_name': 'line', 'embed_keys': embed_keys, 'topk': topk, 'target': 'block'},
+        {'group_name': 'block', 'embed_keys': embed_keys, 'topk': topk},
+    ]
+
+
+class SearchRetrievalParts(NamedTuple):
+    kb_retrievers: List[Retriever]
+    tmp_retriever_pipeline: object
+    image_retriever: Optional[Retriever]
+
+
+def get_remote_document(url: str) -> Document:
+    url = url.split(',')
+    if len(url) == 1:
+        url, name = url[0], '__default__'
+    else:
+        url, name = url[0], url[1]
+    return Document(url=f'{url}/_call', name=name)
+
+
+def get_retriever(
+    url: str,
+    retriever_configs: List[dict] = None,
+    *,
+    tmp_block_topk: int = DEFAULT_TMP_BLOCK_TOPK,
+) -> SearchRetrievalParts:
+    retriever_configs = retriever_configs or _build_default_retriever_configs()
+    document = get_remote_document(url)
+    kb_retrievers = [Retriever(document, **cfg) for cfg in retriever_configs]
+
+    image_retriever: Optional[Retriever] = None
+    image_embed_key = get_image_embed_key()
+    if image_embed_key:
+        image_retriever = Retriever(
+            document,
+            group_name='image',
+            embed_keys=[image_embed_key],
+            topk=int(_cfg['image_topk']),
+        )
+
+    ref_docs_retriever = TempDocRetriever(embed=AutoModel(model=EMBED_MAIN, config=get_config_path()))
+    ref_docs_retriever.add_subretriever('block', topk=tmp_block_topk)
+    with pipeline() as tmp_ppl:
+        tmp_ppl.parse_input = lambda input, **kwargs: kwargs.get('files', [])
+        tmp_ppl.tmp_retriever = ref_docs_retriever | bind(query=tmp_ppl.input)
+
+    return SearchRetrievalParts(
+        kb_retrievers=kb_retrievers,
+        tmp_retriever_pipeline=tmp_ppl,
+        image_retriever=image_retriever,
+    )
 
 
 def parse_query(query_params: dict) -> str:
@@ -16,10 +83,6 @@ def parse_query(query_params: dict) -> str:
 
 def has_files(x: dict) -> bool:
     return bool(x.get('files'))
-
-
-# def has_image_files(x: dict) -> bool:
-#     return bool(x.get('image_files'))
 
 
 def merge_rank_results(*args):
@@ -98,34 +161,19 @@ def get_ppl_search(url: str, retriever_configs: List[dict] = None, topk=20, k_ma
     retrievers = retrieval.kb_retrievers
     tmp_retriever = retrieval.tmp_retriever_pipeline
     image_retriever = retrieval.image_retriever
-    document = get_remote_docment(url)
-    # Search-side VLM query rewrite (disabled): ``agentic_forward`` already runs
-    # ``QueryImageRewriter`` when ``image_files`` are set. Uncomment to restore.
-    # query_image_rewriter = QueryImageRewriter(
-    #     vlm=AutoModel(model='vlm', config=get_config_path()),
-    # )
+    document = get_remote_document(url)
 
     with lazyllm.save_pipeline_result():
         text_branch = _build_text_branch(retrievers, tmp_retriever, document, topk, k_max)
 
         if image_retriever is None:
             with pipeline() as text_search_ppl:
-                # text_search_ppl.query_image_rewriter = ifs(
-                #     has_image_files,
-                #     tpath=query_image_rewriter,
-                #     fpath=lambda x: x,
-                # )
                 text_search_ppl.search = text_branch
             return text_search_ppl
 
         image_branch = _build_image_branch(image_retriever)
 
         with pipeline() as search_ppl:
-            # search_ppl.query_image_rewriter = ifs(
-            #     has_image_files,
-            #     tpath=query_image_rewriter,
-            #     fpath=lambda x: x,
-            # )
             search_ppl.par = parallel(text_branch, image_branch)
             search_ppl.merge = merge_text_image_nodes
 

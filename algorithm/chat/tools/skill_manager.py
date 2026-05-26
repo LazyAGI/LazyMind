@@ -1,7 +1,6 @@
 import os
 import re
 import sys
-from functools import wraps
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel
@@ -18,7 +17,10 @@ if __package__ in (None, ''):
 
 from lazyllm.tools.fs.client import FS
 from common.remote_fs import RemoteFileSystem  # noqa: F401
+from chat.tools._common import handle_tool_errors, tool_error, tool_success
+from chat.tools._utils import post_core_api
 from chat.utils.load_config import extract_skill_fs_source
+from config import config as _cfg
 
 _PATH_SEGMENT_RE = re.compile(r'^[^\s/\\]+$')
 _UUID_SEGMENT_RE = re.compile(
@@ -26,86 +28,12 @@ _UUID_SEGMENT_RE = re.compile(
 )
 _FRONTMATTER_RE = re.compile(r'^---\s*\n(.*?)\n---\s*\n(.*)$', re.DOTALL)
 _MAX_DESCRIPTION_LENGTH = 1024
-_DEFAULT_CORE_API_TIMEOUT = 30
 MAX_SUGGESTIONS_PER_CALL = 5
 
 
 class Suggestion(BaseModel):
     title: str
     content: str
-
-
-def _agentic_config() -> Dict[str, Any]:
-    config = lazyllm.globals.get('agentic_config') or {}
-    return config if isinstance(config, dict) else {}
-
-
-def _core_api_base_url(agentic_config: Optional[Dict[str, Any]] = None) -> str:
-    config = agentic_config if isinstance(agentic_config, dict) else _agentic_config()
-    return str(config.get('core_api_url'))
-
-
-def _core_api_endpoint(path: str, agentic_config: Optional[Dict[str, Any]] = None) -> str:
-    base_url = _core_api_base_url(agentic_config)
-    normalized_path = '/' + path.lstrip('/')
-    return f'{base_url}{normalized_path}'
-
-
-def _session_id(agentic_config: Optional[Dict[str, Any]] = None) -> str:
-    config = agentic_config if isinstance(agentic_config, dict) else _agentic_config()
-    return str(config.get('session_id') or lazyllm.globals._sid or '').strip()
-
-
-def _post_core_api(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    config = _agentic_config()
-    url = _core_api_endpoint(path, config)
-    timeout = config.get('core_api_timeout', _DEFAULT_CORE_API_TIMEOUT)
-    with requests.sessions.Session() as session:
-        session.trust_env = False
-        response = session.post(url, json=payload, timeout=timeout)
-
-    try:
-        body = response.json()
-    except ValueError:
-        body = {'text': response.text}
-
-    if not response.ok:
-        msg = (
-            body.get('msg') or body.get('message')
-            if isinstance(body, dict)
-            else response.text
-        )
-        raise RuntimeError(f'POST {url} failed with HTTP {response.status_code}: {msg}')
-
-    if isinstance(body, dict) and body.get('code') not in (None, 0):
-        msg = body.get('msg') or body.get('message') or body
-        raise RuntimeError(f'POST {url} failed: {msg}')
-
-    return {
-        'persisted': 'core_api',
-        'url': url,
-        'response': body,
-    }
-
-
-def _tool_failure(tool_name: str, exc: Exception) -> Dict[str, Any]:
-    return {
-        'success': False,
-        'reason': f'{tool_name} failed: {exc}',
-        'error': str(exc),
-        'error_type': type(exc).__name__,
-    }
-
-
-def _handle_tool_errors(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as exc:
-            return _tool_failure(func.__name__, exc)
-
-    return wrapper
 
 
 def _validate_skill_name(name: str) -> Optional[str]:
@@ -242,7 +170,7 @@ def _is_writable_skill_source(source: str) -> bool:
 
 
 @fc_register('tool', execute_in_sandbox=False)
-@_handle_tool_errors
+@handle_tool_errors
 def skill_manage(
     name: str,
     action: Literal['create', 'modify', 'remove'],
@@ -263,41 +191,41 @@ def skill_manage(
             Do NOT pass for action='create' or 'remove'.
         reason: Why the skill should be removed. ONLY for action='remove'.
     """
-    def _ok(result: Dict[str, Any]) -> Dict[str, Any]:
-        return {'success': True, 'result': result}
-
-    def _fail(reason: str) -> Dict[str, Any]:
-        print(f'[skill_manage] FAIL reason={reason!r}')
-        return {'success': False, 'reason': reason}
-
-    print(
-        f'[skill_manage] CALLED name={name!r} action={action!r} '
+    lazyllm.LOG.info(
+        '[skill_manage] called '
+        f'name={name!r} action={action!r} '
         f'category={category!r} content_len={len(content) if content else 0} '
         f'suggestions_count={len(suggestions) if suggestions else 0}'
     )
 
     name_error = _validate_skill_name(name)
     if name_error:
-        return _fail(name_error)
+        return tool_error('skill_manage', name_error, log_message=f'[skill_manage] fail reason={name_error!r}')
 
-    agentic_config = _agentic_config()
-    session_id = _session_id(agentic_config)
+    agentic_config = lazyllm.globals['agentic_config']
+    session_id = str(agentic_config.get('session_id') or '').strip()
     if not session_id:
-        return _fail("'session_id' is required in agentic_config.")
+        return tool_error(
+            'skill_manage',
+            "'session_id' is required in agentic_config.",
+            log_message="[skill_manage] fail reason='session_id' is required in agentic_config.",
+        )
 
     normalized_category = _normalize_category(category)
     if normalized_category is None:
-        return _fail(
+        return tool_error(
+            'skill_manage',
             f'Category {category!r} is invalid; it must be a single '
             "ASCII-safe path segment (only letters, digits, '-', '_' "
             "and '.'; no spaces, no Chinese, no '/')."
         )
 
-    existing_skills = list_all_skill_entries(agentic_config.get('skill_fs_url') or '')
+    existing_skills = list_all_skill_entries(_cfg['skill_fs_url'])
     skill_id = _skill_identity(normalized_category or '', name)
     existing_skill = existing_skills.get(skill_id)
-    print(
-        f'[skill_manage] LOOKUP skill_id={skill_id!r} '
+    lazyllm.LOG.info(
+        '[skill_manage] lookup '
+        f'skill_id={skill_id!r} '
         f'found={existing_skill is not None} '
         f'existing_keys={list(existing_skills.keys())!r}'
     )
@@ -305,17 +233,23 @@ def skill_manage(
     if action == 'create':
         content_error = _validate_skill_content(content or '')
         if content_error:
-            return _fail(content_error)
+            return tool_error(
+                'skill_manage',
+                content_error,
+                log_message=f'[skill_manage] fail reason={content_error!r}',
+            )
         if suggestions:
-            return _fail("action='create' must not include 'suggestions'.")
+            return tool_error('skill_manage', "action='create' must not include 'suggestions'.")
         if existing_skill:
             source = existing_skill.get('source', 'file')
             if not _is_writable_skill_source(source):
-                return _fail(
+                return tool_error(
+                    'skill_manage',
                     f'Skill {name!r} already exists in category {normalized_category!r} '
                     f'with read-only source {source!r}; skill_manage can only write remote skills.'
                 )
-            return _fail(
+            return tool_error(
+                'skill_manage',
                 f'Skill {name!r} already exists in category {normalized_category!r}; '
                 "use action='modify' to edit it or action='remove' to delete it first."
             )
@@ -333,33 +267,42 @@ def skill_manage(
             'content': content,
         }
         try:
-            result.update(_post_core_api('/skill/create', payload))
+            result.update(post_core_api('/skill/create', payload))
         except (requests.RequestException, RuntimeError) as exc:
-            return _fail(f'Failed to create skill: {exc}')
-        return _ok(result)
+            return tool_error(
+                'skill_manage',
+                f'Failed to create skill: {exc}',
+                log_message=f'[skill_manage] create failed: {exc}',
+                log_level='error',
+            )
+        return tool_success('skill_manage', result)
 
     if action == 'modify':
         if content is not None:
-            return _fail("action='modify' must not include 'content'; use 'suggestions'.")
+            return tool_error('skill_manage', "action='modify' must not include 'content'; use 'suggestions'.")
         if not suggestions:
-            return _fail("action='modify' requires a non-empty 'suggestions' list.")
+            return tool_error('skill_manage', "action='modify' requires a non-empty 'suggestions' list.")
         if len(suggestions) > MAX_SUGGESTIONS_PER_CALL:
-            return _fail(
+            return tool_error(
+                'skill_manage',
                 f'At most {MAX_SUGGESTIONS_PER_CALL} suggestions are allowed per call; '
                 f'got {len(suggestions)}.'
             )
         if not existing_skill:
-            return _fail(
+            return tool_error(
+                'skill_manage',
                 f'Skill {name!r} does not exist in category {normalized_category!r}; '
                 "use action='create' to add a new skill."
             )
         source = existing_skill.get('source', 'file')
-        print(
-            f'[skill_manage] MODIFY_CHECK source={source!r} '
+        lazyllm.LOG.info(
+            '[skill_manage] modify_check '
+            f'source={source!r} '
             f'writable={_is_writable_skill_source(source)}'
         )
         if not _is_writable_skill_source(source):
-            return _fail(
+            return tool_error(
+                'skill_manage',
                 f'Skill {name!r} in category {normalized_category!r} has read-only source '
                 f'{source!r}; skill_manage can only modify remote skills.'
             )
@@ -377,22 +320,29 @@ def skill_manage(
             'suggestions': [s.model_dump() for s in suggestions],
         }
         try:
-            result.update(_post_core_api('/skill/suggestion', payload))
+            result.update(post_core_api('/skill/suggestion', payload))
         except (requests.RequestException, RuntimeError) as exc:
-            return _fail(f'Failed to submit skill suggestions: {exc}')
-        return _ok(result)
+            return tool_error(
+                'skill_manage',
+                f'Failed to submit skill suggestions: {exc}',
+                log_message=f'[skill_manage] modify failed: {exc}',
+                log_level='error',
+            )
+        return tool_success('skill_manage', result)
 
     if action == 'remove':
         if content is not None or suggestions:
-            return _fail("action='remove' must not include 'content' or 'suggestions'.")
+            return tool_error('skill_manage', "action='remove' must not include 'content' or 'suggestions'.")
         if not existing_skill:
-            return _fail(
+            return tool_error(
+                'skill_manage',
                 f'Skill {name!r} does not exist in category {normalized_category!r}; '
                 'nothing to remove.'
             )
         source = existing_skill.get('source', 'file')
         if not _is_writable_skill_source(source):
-            return _fail(
+            return tool_error(
+                'skill_manage',
                 f'Skill {name!r} in category {normalized_category!r} has read-only source '
                 f'{source!r}; skill_manage can only remove remote skills.'
             )
@@ -410,9 +360,17 @@ def skill_manage(
             'reason': reason or '',
         }
         try:
-            result.update(_post_core_api('/skill/remove', payload))
+            result.update(post_core_api('/skill/remove', payload))
         except (requests.RequestException, RuntimeError) as exc:
-            return _fail(f'Failed to remove skill: {exc}')
-        return _ok(result)
+            return tool_error(
+                'skill_manage',
+                f'Failed to remove skill: {exc}',
+                log_message=f'[skill_manage] remove failed: {exc}',
+                log_level='error',
+            )
+        return tool_success('skill_manage', result)
 
-    return _fail(f"Unknown action {action!r}; expected one of 'create', 'modify', 'remove'.")
+    return tool_error(
+        'skill_manage',
+        f"Unknown action {action!r}; expected one of 'create', 'modify', 'remove'."
+    )

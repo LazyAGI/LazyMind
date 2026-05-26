@@ -51,61 +51,54 @@ def test_web_search_auto_falls_through_runtime_error_and_empty_results(monkeypat
         }], content='wiki content'),
     }
 
-    monkeypatch.setattr(
-        web_search_mod,
-        '_agentic_config',
-        lambda: {'web_search_auto_sources': ['google', 'bing']},
-    )
-    monkeypatch.setattr(
-        web_search_mod,
-        '_provider_available',
-        lambda _config, source: source in providers or source == 'wikipedia',
-    )
-    monkeypatch.setattr(
-        web_search_mod,
-        '_build_provider',
-        lambda _config, source, _lang: providers[source],
-    )
+    monkeypatch.setattr(web_search_mod, '_candidate_sources', lambda _requested: ['google', 'bing', 'wikipedia'])
+    monkeypatch.setattr(web_search_mod, '_provider_available', lambda source: source in providers or source == 'wikipedia')
+    monkeypatch.setattr(web_search_mod, '_build_provider', lambda source, _lang: providers[source])
 
     result = web_search_mod.web_search('test query', source='auto', include_content=True)
 
     assert result == {
         'success': True,
-        'status': 'ok',
-        'query': 'test query',
-        'requested_source': 'auto',
-        'resolved_source': 'wikipedia',
-        'tried_sources': ['google', 'bing', 'wikipedia'],
-        'lang': 'zh',
-        'total': 1,
-        'items': [{
-            'title': 'Wiki',
-            'url': 'https://example.com/wiki',
-            'snippet': 'wiki snippet',
-            'source': 'wikipedia',
-            'content': 'wiki content',
-        }],
+        'tool': 'web_search',
+        'result': {
+            'status': 'ok',
+            'query': 'test query',
+            'requested_source': 'auto',
+            'resolved_source': 'wikipedia',
+            'tried_sources': ['google', 'bing', 'wikipedia'],
+            'lang': 'zh',
+            'total': 1,
+            'items': [{
+                'title': 'Wiki',
+                'url': 'https://example.com/wiki',
+                'snippet': 'wiki snippet',
+                'source': 'wikipedia',
+                'content': 'wiki content',
+            }],
+        },
     }
 
 
 def test_web_search_explicit_source_keeps_no_results_without_fallback(monkeypatch):
     provider = _FakeProvider(items=[])
 
-    monkeypatch.setattr(web_search_mod, '_agentic_config', lambda: {})
-    monkeypatch.setattr(web_search_mod, '_build_provider', lambda _config, _source, _lang: provider)
+    monkeypatch.setattr(web_search_mod, '_build_provider', lambda _source, _lang: provider)
 
     result = web_search_mod.web_search('test query', source='google')
 
     assert result == {
         'success': True,
-        'status': 'no_results',
-        'query': 'test query',
-        'requested_source': 'google',
-        'resolved_source': 'google',
-        'tried_sources': ['google'],
-        'lang': 'zh',
-        'total': 0,
-        'items': [],
+        'tool': 'web_search',
+        'result': {
+            'status': 'no_results',
+            'query': 'test query',
+            'requested_source': 'google',
+            'resolved_source': 'google',
+            'tried_sources': ['google'],
+            'lang': 'zh',
+            'total': 0,
+            'items': [],
+        },
     }
     assert provider.calls == [('test query', {'date_restrict': '', 'raise_on_error': True})]
 
@@ -118,24 +111,26 @@ def test_arxiv_search_dispatches_through_module_call(monkeypatch):
         'source': 'arxiv',
     }])
 
-    monkeypatch.setattr(web_search_mod, '_agentic_config', lambda: {})
     monkeypatch.setattr(web_search_mod, 'ArxivSearch', lambda **_kwargs: provider)
 
     result = web_search_mod.arxiv_search('paper query', max_results=3, sort_by='submittedDate')
 
     assert result == {
         'success': True,
-        'status': 'ok',
-        'query': 'paper query',
-        'source': 'arxiv',
-        'sort_by': 'submittedDate',
-        'total': 1,
-        'items': [{
-            'title': 'Arxiv',
-            'url': 'https://arxiv.org/abs/1234.5678',
-            'snippet': 'paper snippet',
+        'tool': 'arxiv_search',
+        'result': {
+            'status': 'ok',
+            'query': 'paper query',
             'source': 'arxiv',
-        }],
+            'sort_by': 'submittedDate',
+            'total': 1,
+            'items': [{
+                'title': 'Arxiv',
+                'url': 'https://arxiv.org/abs/1234.5678',
+                'snippet': 'paper snippet',
+                'source': 'arxiv',
+            }],
+        },
     }
     assert provider.calls == [('paper query', {
         'max_results': 3,

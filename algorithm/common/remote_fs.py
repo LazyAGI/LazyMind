@@ -10,25 +10,13 @@ import requests
 from lazyllm.tools.fs import LazyLLMFSBase
 
 
-def _resolve_base_url() -> str:
-    agentic_config = lazyllm.globals['agentic_config']
-    base_url = str(agentic_config.get('core_api_url') or '').strip()
-    return base_url
-
-
-def _resolve_session_id() -> str:
-    config = lazyllm.globals.get('agentic_config') or {}
-    if not isinstance(config, dict):
-        config = {}
-    return str(config.get('session_id') or lazyllm.globals._sid or '').strip()
-
-
 class RemoteFS(LazyLLMFSBase):
     """A read-only filesystem proxy using the backend core remote-fs API."""
 
     def __init__(self, token: str = 'remote', base_url: str = '', timeout: float = 10, **kwargs):
         super().__init__(token=token, **kwargs)
-        self.base_url = (base_url or _resolve_base_url()).rstrip('/')
+        from config import config as _cfg
+        self.base_url = (base_url or str(_cfg['core_api_url'] or '').strip()).rstrip('/')
         self.timeout = timeout
 
     @staticmethod
@@ -40,7 +28,7 @@ class RemoteFS(LazyLLMFSBase):
         return raw.strip('/')
 
     def _request_json(self, endpoint: str, **params) -> Any:
-        session_id = _resolve_session_id()
+        session_id = lazyllm.globals['agentic_config'].get('session_id')
         if session_id:
             params['session_id'] = session_id
         response = requests.get(
@@ -108,7 +96,7 @@ class RemoteFS(LazyLLMFSBase):
             )
 
         params = {'path': self._normalize_path(path)}
-        session_id = _resolve_session_id()
+        session_id = lazyllm.globals['agentic_config'].get('session_id')
         if session_id:
             params['session_id'] = session_id
         response = requests.get(

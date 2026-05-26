@@ -34,6 +34,6 @@ RUN pip install --no-cache-dir 'lazyllm[rag]==0.7.6a0' \
 COPY algorithm /app/algorithm
 COPY backend/core/doc /app/backend/core/doc
 
-ENV PYTHONPATH=/opt/lazyllm:/app/algorithm:/app
+ENV PYTHONPATH=/app/algorithm
 
 CMD ["python", "backend/core/doc/doc_server.py"]

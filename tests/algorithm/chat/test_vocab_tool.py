@@ -67,7 +67,7 @@ def test_fetch_chat_histories_for_timestamped_session(monkeypatch):
 
 
 def test_resolve_user_id_reads_agentic_config(monkeypatch):
-    monkeypatch.setattr(vocab_tool, '_agentic_config', lambda: {'user_id': 'user-9'})
+    monkeypatch.setattr(vocab_tool.lazyllm, 'globals', {'agentic_config': {'user_id': 'user-9'}})
 
     assert vocab_tool._resolve_user_id(None) == 'user-9'
 
@@ -75,10 +75,10 @@ def test_resolve_user_id_reads_agentic_config(monkeypatch):
 def test_vocab_manage_creates_group_for_new_pair(monkeypatch):
     captured = {}
 
-    monkeypatch.setattr(vocab_tool, '_agentic_config', lambda: {
+    monkeypatch.setattr(vocab_tool.lazyllm, 'globals', {'agentic_config': {
         'session_id': 'sid-1',
         'user_id': 'user-1',
-    })
+    }})
     monkeypatch.setattr(vocab_tool, 'fetch_vocab_groups_for_user_id', lambda user_id: {})
     monkeypatch.setattr(vocab_tool, 'fetch_chat_histories_for_session', lambda session_id: [
         {
@@ -98,13 +98,14 @@ def test_vocab_manage_creates_group_for_new_pair(monkeypatch):
         captured['payload'] = payload
         return {'persisted': 'core_api'}
 
-    monkeypatch.setattr(vocab_tool, '_post_core_api', _fake_post)
+    monkeypatch.setattr(vocab_tool, 'post_core_api', _fake_post)
 
     result = vocab_tool.vocab_manage([
         {'word': '苹果', 'synonym': 'apple', 'reason': 'user explicitly asked to remember it'},
     ])
 
     assert result['success'] is True
+    assert result['tool'] == 'vocab_manage'
     assert captured['path'] == '/inner/word_group:apply'
     assert captured['payload']['action_list'] == [{
         'reason': 'user explicitly asked to remember it',
@@ -120,7 +121,7 @@ def test_vocab_manage_creates_group_for_new_pair(monkeypatch):
 def test_vocab_manage_adds_to_group(monkeypatch):
     captured = {}
 
-    monkeypatch.setattr(vocab_tool, '_agentic_config', lambda: {'session_id': 'sid-2', 'user_id': 'user-2'})
+    monkeypatch.setattr(vocab_tool.lazyllm, 'globals', {'agentic_config': {'session_id': 'sid-2', 'user_id': 'user-2'}})
     monkeypatch.setattr(vocab_tool, 'fetch_vocab_groups_for_user_id', lambda user_id: {
         'g1': {'group_id': 'g1', 'words': ['民法'], 'description': '', 'references': []},
     })
@@ -142,13 +143,14 @@ def test_vocab_manage_adds_to_group(monkeypatch):
         captured['payload'] = payload
         return {'persisted': 'core_api'}
 
-    monkeypatch.setattr(vocab_tool, '_post_core_api', _fake_post)
+    monkeypatch.setattr(vocab_tool, 'post_core_api', _fake_post)
 
     result = vocab_tool.vocab_manage([
         {'word': '民法', 'synonym': '民事法律', 'reason': 'user used the terms as the same concept'},
     ])
 
     assert result['success'] is True
+    assert result['tool'] == 'vocab_manage'
     assert captured['payload']['action_list'] == [{
         'reason': 'user used the terms as the same concept',
         'words': ['民事法律'],
@@ -163,10 +165,10 @@ def test_vocab_manage_adds_to_group(monkeypatch):
 def test_vocab_manage_creates_new_group_when_domain_description_changes(monkeypatch):
     captured = {}
 
-    monkeypatch.setattr(vocab_tool, '_agentic_config', lambda: {
+    monkeypatch.setattr(vocab_tool.lazyllm, 'globals', {'agentic_config': {
         'session_id': 'sid-3',
         'user_id': 'user-3',
-    })
+    }})
     monkeypatch.setattr(vocab_tool, 'fetch_vocab_groups_for_user_id', lambda user_id: {
         'g-med': {'group_id': 'g-med', 'words': ['变白质'], 'description': '医学领域术语', 'references': ['["m-old"]']},
     })
@@ -188,13 +190,14 @@ def test_vocab_manage_creates_new_group_when_domain_description_changes(monkeypa
         captured['payload'] = payload
         return {'persisted': 'core_api'}
 
-    monkeypatch.setattr(vocab_tool, '_post_core_api', _fake_post)
+    monkeypatch.setattr(vocab_tool, 'post_core_api', _fake_post)
 
     result = vocab_tool.vocab_manage([
         {'word': '变白质', 'synonym': '铅球垫子', 'description': '体育领域术语', 'reason': '用户指定体育领域术语映射'},
     ])
 
     assert result['success'] is True
+    assert result['tool'] == 'vocab_manage'
     assert captured['payload']['action_list'] == [{
         'reason': '用户指定体育领域术语映射',
         'words': ['变白质', '铅球垫子'],

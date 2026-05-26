@@ -1,12 +1,13 @@
 import json
-from functools import wraps
 from typing import Any, Dict, List, Optional
 
+import lazyllm
 import requests
 from lazyllm import LOG, fc_register
 from typing_extensions import TypedDict
 
-from chat.tools.memory import _agentic_config, _post_core_api, _session_id
+from chat.tools._common import handle_tool_errors, tool_error, tool_success
+from chat.tools._utils import post_core_api
 from vocab.db import (
     fetch_chat_histories_for_session,
     fetch_vocab_groups_for_user_id,
@@ -16,27 +17,6 @@ from vocab.evolution import ActionPlanningModule, ChatHistoryRecord, SynonymCand
 
 MAX_VOCAB_SUGGESTIONS_PER_CALL = 5
 _WORD_GROUP_APPLY_INTERNAL_PATH = '/inner/word_group:apply'
-
-
-def _tool_failure(tool_name: str, exc: Exception) -> Dict[str, Any]:
-    return {
-        'success': False,
-        'reason': f'{tool_name} failed: {exc}',
-        'error': str(exc),
-        'error_type': type(exc).__name__,
-    }
-
-
-def _handle_tool_errors(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as exc:
-            LOG.exception(f'[VocabTool] {func.__name__} failed with unhandled exception: {exc}')
-            return _tool_failure(func.__name__, exc)
-
-    return wrapper
 
 
 class VocabSuggestion(TypedDict, total=False):
@@ -83,7 +63,7 @@ def _dedupe_keep_order(values: List[str]) -> List[str]:
 
 
 def _resolve_user_id(agentic_config: Optional[Dict[str, Any]] = None) -> str:
-    config = agentic_config if isinstance(agentic_config, dict) else _agentic_config()
+    config = agentic_config if isinstance(agentic_config, dict) else lazyllm.globals['agentic_config']
     return _norm_text(config.get('user_id'))
 
 
@@ -157,7 +137,7 @@ def _message_ids_for_suggestion(histories: List[ChatHistoryRecord], suggestion: 
 
 
 @fc_register('tool', execute_in_sandbox=False)
-@_handle_tool_errors
+@handle_tool_errors
 def vocab_manage(suggestions: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Apply durable user-specific vocabulary updates for the current session user.
 
@@ -176,29 +156,36 @@ def vocab_manage(suggestions: List[Dict[str, Any]]) -> Dict[str, Any]:
             optional `description` can be used to record the domain context.
     """
 
-    def _ok(result: Dict[str, Any]) -> Dict[str, Any]:
-        return {'success': True, 'result': result}
-
-    def _fail(reason: str) -> Dict[str, Any]:
-        LOG.warning(f'[VocabTool] rejected reason={reason}')
-        return {'success': False, 'reason': reason}
-
     if not suggestions:
-        return _fail("'suggestions' must be a non-empty list.")
+        return tool_error(
+            'vocab_manage',
+            "'suggestions' must be a non-empty list.",
+            log_message="[VocabTool] rejected reason='suggestions' must be a non-empty list.",
+        )
     if len(suggestions) > MAX_VOCAB_SUGGESTIONS_PER_CALL:
-        return _fail(
+        return tool_error(
+            'vocab_manage',
             f'At most {MAX_VOCAB_SUGGESTIONS_PER_CALL} suggestions are allowed per call; '
-            f'got {len(suggestions)}.'
+            f'got {len(suggestions)}.',
+            log_message=f'[VocabTool] rejected reason=too_many_suggestions count={len(suggestions)}',
         )
 
-    agentic_config = _agentic_config()
-    session_id = _session_id(agentic_config)
+    agentic_config = lazyllm.globals['agentic_config']
+    session_id = str(agentic_config.get('session_id') or '').strip()
     if not session_id:
-        return _fail("'session_id' is required in agentic_config.")
+        return tool_error(
+            'vocab_manage',
+            "'session_id' is required in agentic_config.",
+            log_message="[VocabTool] rejected reason='session_id' is required in agentic_config.",
+        )
 
     user_id = _resolve_user_id(agentic_config)
     if not user_id:
-        return _fail('user_id is required in agentic_config.')
+        return tool_error(
+            'vocab_manage',
+            'user_id is required in agentic_config.',
+            log_message="[VocabTool] rejected reason='user_id' is required in agentic_config.",
+        )
 
     LOG.info(
         '[VocabTool] start '
@@ -286,7 +273,7 @@ def vocab_manage(suggestions: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
     if not actions:
         LOG.info(f'[VocabTool] finish status=no-op result={json.dumps(result, ensure_ascii=False)}')
-        return _ok(result)
+        return tool_success('vocab_manage', result)
 
     payload = {'action_list': actions}
     LOG.info(
@@ -294,10 +281,14 @@ def vocab_manage(suggestions: List[Dict[str, Any]]) -> Dict[str, Any]:
         f'user_id={user_id!r} payload={json.dumps(payload, ensure_ascii=False)}'
     )
     try:
-        result.update(_post_core_api(_WORD_GROUP_APPLY_INTERNAL_PATH, payload))
+        result.update(post_core_api(_WORD_GROUP_APPLY_INTERNAL_PATH, payload))
     except (requests.RequestException, RuntimeError) as exc:
-        LOG.error(f'[VocabTool] failed to submit vocab suggestions user_id={user_id!r}: {exc}')
-        return _fail(f'Failed to submit vocab suggestions: {exc}')
+        return tool_error(
+            'vocab_manage',
+            f'Failed to submit vocab suggestions: {exc}',
+            log_message=f'[VocabTool] failed to submit vocab suggestions user_id={user_id!r}: {exc}',
+            log_level='error',
+        )
 
     LOG.info(f'[VocabTool] finish status=applied result={json.dumps(result, ensure_ascii=False)}')
-    return _ok(result)
+    return tool_success('vocab_manage', result)

@@ -1,6 +1,31 @@
 from __future__ import annotations
 
-from chat.app.core.chat_server import create_app
+from fastapi import FastAPI
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title='LazyLLM Chat API',
+        description='Knowledge-base-backed conversational API service',
+        version='1.0.0',
+    )
+    from chat.app.api import (
+        chat_routes,
+        health_routes,
+        memory_generate_routes,
+        model_features_routes,
+        model_check_routes,
+        vocab_routes,
+    )
+
+    app.include_router(health_routes.router)
+    app.include_router(chat_routes.router)
+    app.include_router(memory_generate_routes.router)
+    app.include_router(model_features_routes.router)
+    app.include_router(model_check_routes.router)
+    app.include_router(vocab_routes.router)
+    return app
+
 
 app = create_app()
 
