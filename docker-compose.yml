@@ -663,6 +663,7 @@ services:
       start_period: 180s
     environment:
       LAZYMIND_DOCUMENT_SERVER_URL: http://parsing:8000,general_algo
+      LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
       LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
       LAZYMIND_MOUNT_BASE_DIR: /var/lib/lazymind/uploads
       LAZYMIND_USE_INNER_MODEL: "true"

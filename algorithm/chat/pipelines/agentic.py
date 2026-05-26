@@ -211,7 +211,6 @@ def _feishu_key_source(_instance) -> str:
     except Exception:
         return ''
     r = (mapping.get('feishu') or '').strip()
-    lazyllm.LOG.warning(f'get feishu key: {r}')
     return r
 
 

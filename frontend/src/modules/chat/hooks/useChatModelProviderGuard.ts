@@ -80,7 +80,7 @@ export function useChatModelProviderGuard() {
     }
 
     try {
-      const features = await fetchModelFeatures();
+      const features = await fetchModelFeatures(true);
       const imageEmbedRequired = isImageEmbedRequired(features);
 
       const [chatReadyResp, embeddingResp, multimodalEmbeddingResp, rerankResp, vlmResp] = await Promise.all([

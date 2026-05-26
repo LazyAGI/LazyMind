@@ -328,8 +328,33 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fetch models before deletion to check for multimodal_embedding types and
+	// collect IDs for user_selected_models cleanup.
+	var groupModels []orm.UserModelProviderGroupModel
+	if err := db.WithContext(r.Context()).
+		Where("user_model_provider_group_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, userID).
+		Find(&groupModels).Error; err != nil {
+		common.ReplyErr(w, "query group models failed", http.StatusInternalServerError)
+		return
+	}
+
+	hasMultimodal := false
+	modelIDs := make([]string, 0, len(groupModels))
+	for i := range groupModels {
+		modelIDs = append(modelIDs, groupModels[i].ID)
+		if isMultimodalEmbeddingModelType(groupModels[i].ModelType) {
+			hasMultimodal = true
+		}
+	}
+
 	now := time.Now().UTC()
 	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if len(modelIDs) > 0 {
+			if err := tx.Where("user_model_provider_group_model_id IN ?", modelIDs).
+				Delete(&orm.UserSelectedModel{}).Error; err != nil {
+				return err
+			}
+		}
 		if err := tx.Model(&orm.UserModelProviderGroupModel{}).
 			Where(
 				"user_model_provider_group_id = ? AND create_user_id = ? AND deleted_at IS NULL",
@@ -351,6 +376,10 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		common.ReplyErr(w, "delete group failed", http.StatusInternalServerError)
 		return
+	}
+
+	if hasMultimodal {
+		maybeScheduleImageGroupLazyReset(r.Context(), db)
 	}
 
 	common.ReplyOK(w, deleteGroupResponse{ID: groupID})
