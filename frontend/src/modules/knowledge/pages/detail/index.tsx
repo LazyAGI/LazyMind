@@ -10,7 +10,11 @@ import {
 } from "antd";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { AgentAppsAuth } from "@/components/auth";
-import { fetchModelFeatures } from "@/hooks/useModelFeatures";
+import {
+  fetchModelFeatures,
+  isImageEmbedRequired,
+  MODEL_FEATURES_CHANGED_EVENT,
+} from "@/hooks/useModelFeatures";
 import type { MenuProps } from "antd";
 import { useEffect, useRef, useState, useCallback, MouseEvent } from "react";
 import { useParams } from "react-router-dom";
@@ -104,24 +108,24 @@ const Detail = () => {
     console.log("searchParams", searchParams);
     getDetail();
     getImportingTotal();
-    {
-      const unwrap = (resp: { data: { data?: { ready: boolean } } | { ready: boolean } } | null): boolean | null => {
-        if (!resp) return null;
-        const body = resp.data;
-        const d = body && typeof body === "object" && "data" in body
-          ? (body as { data?: { ready: boolean } }).data
-          : (body as { ready: boolean });
-        return d?.ready ?? null;
-      };
-      fetchModelFeatures().then((features) => {
-        const imageEmbedEnabled = features.image_embed_enabled;
+    const unwrap = (resp: { data: { data?: { ready: boolean } } | { ready: boolean } } | null): boolean | null => {
+      if (!resp) return null;
+      const body = resp.data;
+      const d = body && typeof body === "object" && "data" in body
+        ? (body as { data?: { ready: boolean } }).data
+        : (body as { ready: boolean });
+      return d?.ready ?? null;
+    };
+    const loadEmbeddingReady = () => {
+      fetchModelFeatures(true).then((features) => {
+        const imageEmbedRequired = isImageEmbedRequired(features);
         return Promise.all([
           axiosInstance
             .get<{ data?: { ready: boolean } } | { ready: boolean }>(
               `${BASE_URL}/api/core/model_providers/models/ready?model_type=embedding`
             )
             .catch(() => null),
-          imageEmbedEnabled
+          imageEmbedRequired
             ? axiosInstance
                 .get<{ data?: { ready: boolean } } | { ready: boolean }>(
                   `${BASE_URL}/api/core/model_providers/models/ready?model_type=multimodal_embedding`
@@ -130,16 +134,25 @@ const Detail = () => {
             : Promise.resolve(null),
         ]).then(([embResp, multiResp]) => {
           setEmbeddingReady(unwrap(embResp));
-          // null means "not applicable" — does not trigger disabled state.
-          setMultimodalEmbeddingReady(imageEmbedEnabled ? unwrap(multiResp) : null);
+          setMultimodalEmbeddingReady(imageEmbedRequired ? unwrap(multiResp) : null);
         });
       }).catch(() => {
         setEmbeddingReady(null);
         setMultimodalEmbeddingReady(null);
       });
-    }
+    };
+    loadEmbeddingReady();
+    window.addEventListener(MODEL_FEATURES_CHANGED_EVENT, loadEmbeddingReady);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        loadEmbeddingReady();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
+      window.removeEventListener(MODEL_FEATURES_CHANGED_EVENT, loadEmbeddingReady);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       pollingRef.current.cancel();
       clearDataset();
     };

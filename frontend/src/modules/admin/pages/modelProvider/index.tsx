@@ -18,7 +18,7 @@ import {
 import { AgentAppsAuth } from "@/components/auth";
 import { BASE_URL, axiosInstance, getLocalizedErrorMessage } from "@/components/request";
 import type { RawAxiosRequestConfig } from "axios";
-import { useModelFeatures } from "@/hooks/useModelFeatures";
+import { notifyModelFeaturesChanged, useModelFeatures } from "@/hooks/useModelFeatures";
 import "./index.scss";
 
 type ModelCapability =
@@ -670,6 +670,31 @@ export default function ModelProviderPage() {
     return (providerData.providers || []).map((provider) => mapApiProvider(provider, localizedFallbacks));
   }, [localizedFallbacks]);
 
+  const refreshSelectedModelsState = useCallback(async () => {
+    const selectedData = await modelProviderRequest<{ selections?: SelectedModelApiItem[] }>(
+      "GET",
+      "/model_providers/selected_models"
+    );
+    const nextSelectedModels: SelectedModels = {};
+    const nextShareStatus: Partial<Record<ModelCapability, boolean>> = {};
+    (selectedData.selections || []).forEach((selection) => {
+      const capability = getCapabilityByModelType(selection.model_type);
+      if (!capability) {
+        return;
+      }
+      nextSelectedModels[capability] = getModelValue(
+        selection.user_model_provider_id,
+        selection.user_model_provider_group_id,
+        selection.model_id,
+      );
+      if (selection.share) {
+        nextShareStatus[capability] = true;
+      }
+    });
+    setSelectedModels(nextSelectedModels);
+    setShareStatus(nextShareStatus);
+  }, []);
+
   const searchProviderOptions = useCallback(
     async (searchKeyword: string) => {
       const requestId = providerSearchRequestIdRef.current + 1;
@@ -1316,17 +1341,11 @@ export default function ModelProviderPage() {
             : provider
         )
       );
-      setSelectedModels((current) => {
-        const next = { ...current };
-        Object.entries(next).forEach(([capability, selectedValue]) => {
-          const parsed = parseModelValue(selectedValue);
-          if (parsed.providerId === providerId && parsed.groupId === groupId && parsed.modelId === model.id) {
-            delete next[capability as ModelCapability];
-          }
-        });
-        return next;
-      });
+      await refreshSelectedModelsState();
       clearModuleModelCache(model.capability);
+      if (model.capability === "EMBEDDING" || model.capability === "MULTIMODAL_EMBEDDING") {
+        notifyModelFeaturesChanged();
+      }
       message.success(t("modelProvider.message.modelDeleted"));
     } catch (error) {
       message.error(getLocalizedErrorMessage(error, t("modelProvider.error.deleteModelFailed")));
@@ -1372,14 +1391,11 @@ export default function ModelProviderPage() {
       ...current,
       [capability]: value,
     }));
-    void saveSelectedModel(capability, value).then((resp) => {
-      // Sync share status from response — backend may auto-share certain capabilities (e.g. EMBEDDING).
-      (resp.selections || []).forEach((selection) => {
-        const cap = getCapabilityByModelType(selection.model_type);
-        if (cap) {
-          setShareStatus((current) => ({ ...current, [cap]: !!selection.share }));
-        }
-      });
+    void saveSelectedModel(capability, value).then(async () => {
+      await refreshSelectedModelsState();
+      if (capability === "EMBEDDING" || capability === "MULTIMODAL_EMBEDDING") {
+        notifyModelFeaturesChanged();
+      }
     }).catch((error) => {
       message.error(getLocalizedErrorMessage(error, t("modelProvider.error.saveDefaultModelFailed")));
     });
@@ -1444,8 +1460,8 @@ export default function ModelProviderPage() {
                         </button>
                       </Tooltip>
                       {module.restricted ? (
-                        <Tooltip placement="top" title={!isAdmin ? t("modelProvider.restrictedAdminOnly") : undefined}>
-                          <span style={{ pointerEvents: "auto" }}>
+                        <Tooltip placement="top" title={t("modelProvider.restrictedAdminOnly")}>
+                          <span className="model-provider-limited-tag-wrap">
                             <Tag className="model-provider-limited-tag">{t("modelProvider.limited")}</Tag>
                           </span>
                         </Tooltip>

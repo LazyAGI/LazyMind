@@ -95,9 +95,10 @@
     opacity: 0.72;
     pointer-events: none;
 
-    .model-provider-limited-tag {
+    .model-provider-limited-tag-wrap {
       pointer-events: auto;
-      cursor: default;
+      cursor: help;
+      display: inline-flex;
     }
   }
 }
@@ -143,6 +144,11 @@
   }
 }
 
+.model-provider-limited-tag-wrap {
+  display: inline-flex;
+  cursor: help;
+}
+
 .model-provider-limited-tag.ant-tag {
   margin: 0;
   border: 0;
@@ -151,6 +157,7 @@
   color: #c2410c;
   font-size: 12px;
   font-weight: 800;
+  pointer-events: none;
 }
 
 .model-provider-model-select.ant-select {

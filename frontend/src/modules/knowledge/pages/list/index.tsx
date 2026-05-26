@@ -44,7 +44,11 @@ import type { TreeNode } from "@/modules/knowledge/pages/detail/components/Knowl
 import { useTranslation } from "react-i18next";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { AgentAppsAuth } from "@/components/auth";
-import { fetchModelFeatures } from "@/hooks/useModelFeatures";
+import {
+  fetchModelFeatures,
+  isImageEmbedRequired,
+  MODEL_FEATURES_CHANGED_EVENT,
+} from "@/hooks/useModelFeatures";
 
 import "./index.scss";
 
@@ -99,18 +103,33 @@ const KnowledgePage: FC = () => {
     getTags();
     getTableData();
     void checkEmbeddingReady();
+
+    const onFeaturesChanged = () => {
+      void checkEmbeddingReady();
+    };
+    window.addEventListener(MODEL_FEATURES_CHANGED_EVENT, onFeaturesChanged);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void checkEmbeddingReady();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener(MODEL_FEATURES_CHANGED_EVENT, onFeaturesChanged);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, []);
 
   async function checkEmbeddingReady() {
     try {
-      const features = await fetchModelFeatures();
-      const imageEmbedEnabled = features.image_embed_enabled;
+      const features = await fetchModelFeatures(true);
+      const imageEmbedRequired = isImageEmbedRequired(features);
 
       const [embResp, multiResp] = await Promise.all([
         axiosInstance.get<{ data?: { ready: boolean } } | { ready: boolean }>(
           `${BASE_URL}/api/core/model_providers/models/ready?model_type=embedding`
         ).catch(() => null),
-        imageEmbedEnabled
+        imageEmbedRequired
           ? axiosInstance.get<{ data?: { ready: boolean } } | { ready: boolean }>(
               `${BASE_URL}/api/core/model_providers/models/ready?model_type=multimodal_embedding`
             ).catch(() => null)
@@ -125,7 +144,7 @@ const KnowledgePage: FC = () => {
       };
       setEmbeddingReady(unwrap(embResp));
       // null means "not applicable" — does not trigger disabled state.
-      setMultimodalEmbeddingReady(imageEmbedEnabled ? unwrap(multiResp) : null);
+      setMultimodalEmbeddingReady(imageEmbedRequired ? unwrap(multiResp) : null);
     } catch {
       setEmbeddingReady(null);
       setMultimodalEmbeddingReady(null);

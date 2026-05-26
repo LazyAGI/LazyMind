@@ -19,22 +19,20 @@ func setImageGroupLazyMode(ctx context.Context, lazyMode *string) error {
 }
 
 func scheduleImageGroupLazyEmbed(ctx context.Context) {
+	SetImageEmbedRequired(false)
 	go func() {
 		embed := "embed"
 		if err := setImageGroupLazyMode(ctx, &embed); err != nil {
 			log.Logger.Warn().Err(err).Msg("failed to set image group lazy_mode=embed")
-		} else {
-			SetImageEmbedRequired(false)
 		}
 	}()
 }
 
 func scheduleImageGroupLazyClear(ctx context.Context) {
+	SetImageEmbedRequired(true)
 	go func() {
 		if err := setImageGroupLazyMode(ctx, nil); err != nil {
 			log.Logger.Warn().Err(err).Msg("failed to clear image group lazy_mode")
-		} else {
-			SetImageEmbedRequired(true)
 		}
 	}()
 }

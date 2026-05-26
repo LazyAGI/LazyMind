@@ -390,11 +390,10 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 			}).Error; err != nil {
 			return err
 		}
-		if clearMultimodalSelection {
-			return tx.Where(
-				"user_id = ? AND model_type = ? AND user_model_provider_group_model_id = ?",
-				userID, "multimodal_embedding", row.ID,
-			).Delete(&orm.UserSelectedModel{}).Error
+		// Drop any default-model rows pointing at this model (avoids stale share=true).
+		if err := tx.Where("user_model_provider_group_model_id = ?", row.ID).
+			Delete(&orm.UserSelectedModel{}).Error; err != nil {
+			return err
 		}
 		return nil
 	}); err != nil {

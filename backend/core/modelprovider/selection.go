@@ -29,6 +29,12 @@ var allowedSelectionModelTypes = map[string]struct{}{
 	"multimodal_embedding": {},
 }
 
+// autoShareModelTypes are set share=true when an admin saves a selection so other users can use them.
+var autoShareModelTypes = map[string]struct{}{
+	"embedding":            {},
+	"multimodal_embedding": {},
+}
+
 type selectedModelUpsertItem struct {
 	ModelType string `json:"model_type"`
 	ModelID   string `json:"model_id"`
@@ -188,29 +194,45 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
+			_, autoShare := autoShareModelTypes[modelType]
+			if autoShare {
+				if err := tx.Model(&orm.UserSelectedModel{}).
+					Where("model_type = ? AND share = ?", modelType, true).
+					Updates(map[string]any{"share": false, "updated_at": now}).Error; err != nil {
+					return err
+				}
+			}
 			var row orm.UserSelectedModel
 			err := tx.Where("user_id = ? AND model_type = ?", userID, modelType).Take(&row).Error
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				if err := tx.Model(&orm.UserSelectedModel{}).Create(map[string]any{
+				createFields := map[string]any{
 					"user_id":                            userID,
 					"model_type":                         modelType,
 					"user_model_provider_group_model_id": modelID,
 					"user_name":                          userName,
 					"created_at":                         now,
 					"updated_at":                         now,
-				}).Error; err != nil {
+				}
+				if autoShare {
+					createFields["share"] = true
+				}
+				if err := tx.Model(&orm.UserSelectedModel{}).Create(createFields).Error; err != nil {
 					return err
 				}
 			} else if err != nil {
 				return err
 			} else {
+				updateFields := map[string]any{
+					"user_model_provider_group_model_id": modelID,
+					"user_name":                          userName,
+					"updated_at":                         now,
+				}
+				if autoShare {
+					updateFields["share"] = true
+				}
 				if err := tx.Model(&orm.UserSelectedModel{}).
 					Where("id = ?", row.ID).
-					Updates(map[string]any{
-						"user_model_provider_group_model_id": modelID,
-						"user_name":                          userName,
-						"updated_at":                         now,
-					}).Error; err != nil {
+					Updates(updateFields).Error; err != nil {
 					return err
 				}
 			}
@@ -341,12 +363,8 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 1: check own selection.
-	var ownCount int64
-	if err := db.WithContext(r.Context()).
-		Model(&orm.UserSelectedModel{}).
-		Where("user_id = ? AND model_type = ?", userID, modelType).
-		Count(&ownCount).Error; err != nil {
+	ownCount, err := countValidModelSelection(r.Context(), db, userID, modelType, false)
+	if err != nil {
 		common.ReplyErr(w, "query failed", http.StatusInternalServerError)
 		return
 	}
@@ -355,12 +373,8 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 2: check shared selection.
-	var sharedCount int64
-	if err := db.WithContext(r.Context()).
-		Model(&orm.UserSelectedModel{}).
-		Where("share = ? AND model_type = ?", true, modelType).
-		Count(&sharedCount).Error; err != nil {
+	sharedCount, err := countValidModelSelection(r.Context(), db, userID, modelType, true)
+	if err != nil {
 		common.ReplyErr(w, "query failed", http.StatusInternalServerError)
 		return
 	}
@@ -402,24 +416,39 @@ func maybeScheduleImageGroupLazyReset(ctx context.Context, db *gorm.DB) {
 	scheduleImageGroupLazyEmbed(ctx)
 }
 
+// countValidModelSelection counts selections whose model row still exists (not soft-deleted).
+// When sharedOnly is true, only share=true rows are counted (any user).
+func countValidModelSelection(ctx context.Context, db *gorm.DB, userID, modelType string, sharedOnly bool) (int64, error) {
+	var count int64
+	q := db.WithContext(ctx).
+		Table("user_selected_models usm").
+		Joins(
+			"JOIN user_model_provider_group_models m ON "+
+				"m.id = usm.user_model_provider_group_model_id AND "+
+				"m.deleted_at IS NULL",
+		).
+		Where("usm.model_type = ?", modelType)
+	if sharedOnly {
+		q = q.Where("usm.share = ?", true)
+	} else {
+		q = q.Where("usm.user_id = ?", userID)
+	}
+	err := q.Count(&count).Error
+	return count, err
+}
+
 // IsModelReady checks whether a model of the given model_type is available for the user.
-// It first checks the user's own selection, then falls back to any share=true row.
+// It first checks the user's own valid selection, then falls back to any valid share=true row.
 func IsModelReady(ctx context.Context, db *gorm.DB, userID, modelType string) (bool, error) {
-	var ownCount int64
-	if err := db.WithContext(ctx).
-		Model(&orm.UserSelectedModel{}).
-		Where("user_id = ? AND model_type = ?", userID, modelType).
-		Count(&ownCount).Error; err != nil {
+	ownCount, err := countValidModelSelection(ctx, db, userID, modelType, false)
+	if err != nil {
 		return false, err
 	}
 	if ownCount > 0 {
 		return true, nil
 	}
-	var sharedCount int64
-	if err := db.WithContext(ctx).
-		Model(&orm.UserSelectedModel{}).
-		Where("share = ? AND model_type = ?", true, modelType).
-		Count(&sharedCount).Error; err != nil {
+	sharedCount, err := countValidModelSelection(ctx, db, userID, modelType, true)
+	if err != nil {
 		return false, err
 	}
 	return sharedCount > 0, nil

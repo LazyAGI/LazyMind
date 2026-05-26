@@ -2,7 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentAppsAuth, AUTH_USER_CHANGE_EVENT } from "@/components/auth";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { fetchCurrentUser } from "@/modules/signin/utils/request";
-import { fetchModelFeatures } from "@/hooks/useModelFeatures";
+import {
+  fetchModelFeatures,
+  isImageEmbedRequired,
+  MODEL_FEATURES_CHANGED_EVENT,
+} from "@/hooks/useModelFeatures";
 
 type ApiEnvelope<T> = {
   data?: T;
@@ -28,7 +32,7 @@ function unwrapResponse<T>(payload: ApiEnvelope<T> | T): T {
 }
 
 export function useChatModelProviderGuard() {
-  const [status, setStatus] = useState<ChatModelProviderStatus>("idle");
+  const [status, setStatus] = useState<ChatModelProviderStatus>("loading");
   const [triggerKey, setTriggerKey] = useState(0);
   const [requiresModelProviderConfig, setRequiresModelProviderConfig] =
     useState<boolean | null>(() => {
@@ -40,7 +44,6 @@ export function useChatModelProviderGuard() {
   const [rerankReady, setRerankReady] = useState<boolean | null>(null);
   const [vlmReady, setVlmReady] = useState<boolean | null>(null);
   const requestIdRef = useRef(0);
-  const mountedRef = useRef(false);
 
   const refresh = useCallback(() => {
     setTriggerKey((k: number) => k + 1);
@@ -51,30 +54,34 @@ export function useChatModelProviderGuard() {
     requestIdRef.current = requestId;
     setStatus("loading");
 
+    const isStale = () => requestIdRef.current !== requestId;
+
     let shouldCheckModelProvider = false;
 
     try {
       const currentUser = await fetchCurrentUser();
-      if (!mountedRef.current || requestIdRef.current !== requestId) {
+      if (isStale()) {
         return false;
       }
       shouldCheckModelProvider = currentUser.dynamic === true;
       setRequiresModelProviderConfig(shouldCheckModelProvider);
     } catch {
-      if (mountedRef.current && requestIdRef.current === requestId) {
+      if (!isStale()) {
         setStatus("error");
       }
       return false;
     }
 
     if (!shouldCheckModelProvider) {
-      setStatus("ready");
+      if (!isStale()) {
+        setStatus("ready");
+      }
       return true;
     }
 
     try {
       const features = await fetchModelFeatures();
-      const imageEmbedEnabled = features.image_embed_enabled;
+      const imageEmbedRequired = isImageEmbedRequired(features);
 
       const [chatReadyResp, embeddingResp, multimodalEmbeddingResp, rerankResp, vlmResp] = await Promise.all([
         axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
@@ -83,7 +90,7 @@ export function useChatModelProviderGuard() {
         axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
           `${BASE_URL}/api/core/model_providers/models/ready?model_type=embedding`
         ).catch(() => null),
-        imageEmbedEnabled
+        imageEmbedRequired
           ? axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
               `${BASE_URL}/api/core/model_providers/models/ready?model_type=multimodal_embedding`
             ).catch(() => null)
@@ -96,7 +103,7 @@ export function useChatModelProviderGuard() {
         ).catch(() => null),
       ]);
 
-      if (!mountedRef.current || requestIdRef.current !== requestId) {
+      if (isStale()) {
         return false;
       }
 
@@ -111,13 +118,13 @@ export function useChatModelProviderGuard() {
       };
       setEmbeddingReady(getReady(embeddingResp));
       // null means "not applicable" (image embed not configured) — does not trigger disabled state.
-      setMultimodalEmbeddingReady(imageEmbedEnabled ? getReady(multimodalEmbeddingResp) : null);
+      setMultimodalEmbeddingReady(imageEmbedRequired ? getReady(multimodalEmbeddingResp) : null);
       setRerankReady(getReady(rerankResp));
       setVlmReady(getReady(vlmResp));
 
       return ready;
     } catch {
-      if (mountedRef.current && requestIdRef.current === requestId) {
+      if (!isStale()) {
         setStatus("error");
       }
       return false;
@@ -143,20 +150,30 @@ export function useChatModelProviderGuard() {
   }, []);
 
   useEffect(() => {
-    mountedRef.current = true;
     void runCheck();
 
-    return () => {
-      mountedRef.current = false;
+    const onFeaturesChanged = () => {
+      refresh();
     };
-  // triggerKey changes whenever refresh() is called, ensuring re-execution on
-  // both initial mount and manual retries even if the component remounts.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [triggerKey]);
+    window.addEventListener(MODEL_FEATURES_CHANGED_EVENT, onFeaturesChanged);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refresh();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener(MODEL_FEATURES_CHANGED_EVENT, onFeaturesChanged);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      // Invalidate in-flight work from a previous mount (e.g. React Strict Mode).
+      requestIdRef.current += 1;
+    };
+  }, [triggerKey, runCheck, refresh]);
 
   return {
     canChat: status === "ready",
-    isChecking: status === "idle" || status === "loading",
+    isChecking: status === "loading",
     needsModelProviderConfig: status === "missing",
     requiresModelProviderConfig: requiresModelProviderConfig === true,
     embeddingReady,
