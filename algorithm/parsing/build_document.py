@@ -12,6 +12,7 @@ from chat.utils.load_config import (
     get_embed_keys,
     get_embed_index_kwargs,
     get_config_path,
+    get_dynamic_role_slot_map,
     get_image_embed_key,
     get_text_embed_keys,
 )
@@ -256,6 +257,10 @@ def build_document() -> Document:
     text_embed_keys = get_text_embed_keys() or embed_keys
     image_embed_key = get_image_embed_key()
     if image_embed_key:
+        # Only source=dynamic embed_image needs lazy mode; static configs are always ready.
+        if image_embed_key in get_dynamic_role_slot_map():
+            from lazyllm.tools.rag.store import LAZY_IMAGE_GROUP
+            docs._impl.node_groups[LAZY_IMAGE_GROUP]['lazy_mode'] = 'embed'
         docs.activate_group('image', embed_keys=image_embed_key)
     docs.activate_group('block', embed_keys=text_embed_keys)
     docs.activate_group('line', embed_keys=text_embed_keys)

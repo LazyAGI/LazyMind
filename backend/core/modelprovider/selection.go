@@ -12,6 +12,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/log"
 	"lazymind/core/store"
 )
 
@@ -159,6 +160,18 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Check whether multimodal_embedding is being configured for the first time.
+	// If so, after saving we will clear the image group's lazy_mode so the algo
+	// service starts embedding images immediately.
+	multimodalModelID := selectionByType["multimodal_embedding"]
+	triggerLazyModeClear := false
+	if multimodalModelID != "" {
+		wasReady, err := IsModelReady(r.Context(), store.DB(), userID, "multimodal_embedding")
+		if err == nil && !wasReady {
+			triggerLazyModeClear = true
+		}
+	}
+
 	now := time.Now()
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		for modelType, modelID := range selectionByType {
@@ -200,6 +213,18 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		common.ReplyErr(w, "save selected models failed", http.StatusInternalServerError)
 		return
+	}
+
+	if triggerLazyModeClear {
+		ctx := r.Context()
+		go func() {
+			url := common.JoinURL(common.AlgoServiceEndpoint(), "/v1/ng/image/lazy_mode")
+			if err := common.ApiPost(ctx, url, nil, nil, nil, 15*time.Second); err != nil {
+				log.Logger.Warn().Err(err).Msg("failed to clear image group lazy_mode")
+			} else {
+				SetImageEmbedRequired()
+			}
+		}()
 	}
 
 	out, err := loadSelectedModels(r.Context(), db, userID)
