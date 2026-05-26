@@ -1,4 +1,12 @@
-import type { Query } from "@/api/generated/chatbot-client";
+import {
+  ChatConversationsResponseFinishReasonEnum,
+  type ChatHistory as BaseChatHistory,
+  type Query,
+  type Source,
+} from "@/api/generated/chatbot-client";
+import type { ConversationHistoryItem as CoreConversationHistoryItem } from "@/api/generated/core-client";
+import { RoleTypes } from "@/modules/chat/constants/common";
+import { splitThinkingContent } from "@/modules/chat/utils/thinking";
 
 const CITE_MESSAGE_PATTERN =
   /<cite_message>([\s\S]*?)<\/cite_message>\s*/i;
@@ -8,6 +16,32 @@ const CITE_MESSAGE_GLOBAL_PATTERN =
 interface ChatUserMessageLike {
   delta?: string;
   inputs?: Query[] | null;
+}
+
+export type ConversationHistoryRecord = Omit<
+  Partial<BaseChatHistory>,
+  "feed_back" | "input" | "sources"
+> &
+  Omit<
+    Partial<CoreConversationHistoryItem>,
+    "feed_back" | "input" | "sources"
+  > & {
+    feed_back?: BaseChatHistory["feed_back"] | number | string;
+    input?: Query[] | Array<Record<string, unknown>> | null;
+    sources?: Source[] | Array<Record<string, unknown>>;
+    second_id?: string;
+    second_reasoning_content?: string;
+    second_result?: string;
+    thinking_time_s?: number | string;
+    second_thinking_time_s?: number | string;
+  };
+
+interface BuildChatMessageListOptions {
+  enableMultipleAnswers?: boolean;
+  fallbackCreateTime?: string;
+  isGenerating?: boolean;
+  reverseHistory?: boolean;
+  stripCitations?: boolean;
 }
 
 export function normalizeMessageInputs(
@@ -52,4 +86,139 @@ export function getCitationFromText(text?: string) {
 
 export function stripCitationFromText(text?: string) {
   return (text || "").replace(CITE_MESSAGE_GLOBAL_PATTERN, "").trim();
+}
+
+export function buildChatMessageListFromHistory(
+  history?: ConversationHistoryRecord[] | null,
+  options: BuildChatMessageListOptions = {},
+) {
+  const {
+    enableMultipleAnswers = true,
+    fallbackCreateTime = "",
+    isGenerating = false,
+    reverseHistory = true,
+    stripCitations = true,
+  } = options;
+  const records = Array.isArray(history)
+    ? reverseHistory
+      ? [...history].reverse()
+      : history
+    : [];
+  const lastRecord = records[records.length - 1];
+  const list: any[] = [];
+
+  records.forEach((record) => {
+    const normalizedInputs = normalizeMessageInputs(
+      record.input as Query[] | null | undefined,
+      record.query,
+    );
+    const textInput = normalizedInputs.find((input) => {
+      const inputType = input.input_type || "text";
+      return inputType === "text" && !!input.text;
+    });
+    const rawQuery = record.query || textInput?.text || "";
+    const displayQuery = stripCitations
+      ? stripCitationFromText(rawQuery)
+      : rawQuery;
+
+    list.push({
+      role: RoleTypes.USER,
+      delta: displayQuery,
+      display_delta: displayQuery,
+      images: normalizedInputs
+        ?.filter((input) => input.input_type === "image")
+        .map((image) => ({
+          base64: image?.input_base64,
+          uid: image.file_id,
+        })),
+      files: normalizedInputs
+        ?.filter((input) => input.input_type === "file")
+        .map((file) => ({
+          name: file?.uri?.split("/").pop(),
+          uid: file.file_id,
+        })),
+      finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+      inputs: normalizedInputs,
+      create_time: record.create_time || fallbackCreateTime,
+    });
+
+    const isLastRecord = record === lastRecord;
+    const isActuallyGenerating =
+      isGenerating && isLastRecord && !record.result;
+    const splitResult = splitThinkingContent(
+      record.result,
+      record.reasoning_content,
+    );
+    const secondSplitResult = splitThinkingContent(
+      record.second_result,
+      record.second_reasoning_content,
+    );
+    const assistantMessage: any = {
+      role: RoleTypes.ASSISTANT,
+      reasoning_content: splitResult.reasoning_content,
+      delta: splitResult.content,
+      raw_delta: record.result || "",
+      finish_reason: isActuallyGenerating
+        ? ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
+        : ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+      history_id: record.id,
+      sources: record.sources,
+      feed_back: record.feed_back,
+      thinking_time_s: record.thinking_time_s,
+    };
+
+    if (enableMultipleAnswers && record.second_result && record.second_id) {
+      assistantMessage.answers = [
+        {
+          content: splitResult.content,
+          index: 0,
+          history_id: record.id,
+          reasoning_content: splitResult.reasoning_content,
+          raw_content: record.result || "",
+          sources: record.sources,
+          thinking_duration_s: record.thinking_time_s,
+        },
+        {
+          content: secondSplitResult.content,
+          index: 1,
+          history_id: record.second_id,
+          reasoning_content: secondSplitResult.reasoning_content,
+          raw_content: record.second_result || "",
+          sources: record.sources,
+          thinking_duration_s: record.second_thinking_time_s,
+        },
+      ];
+      assistantMessage.reasoning_content = "";
+      assistantMessage.delta = "";
+    }
+
+    list.push(assistantMessage);
+  });
+
+  const lastAssistant = list[list.length - 1];
+  if (
+    isGenerating &&
+    (!lastAssistant ||
+      lastAssistant.finish_reason ===
+        ChatConversationsResponseFinishReasonEnum.FinishReasonStop)
+  ) {
+    list.push({
+      role: RoleTypes.USER,
+      delta: "",
+      finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+      inputs: [],
+      is_resumed: true,
+    });
+    list.push({
+      role: RoleTypes.ASSISTANT,
+      delta: "",
+      reasoning_content: "",
+      finish_reason:
+        ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
+      answers: [],
+      sources: [],
+    });
+  }
+
+  return list;
 }

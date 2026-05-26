@@ -426,10 +426,6 @@ components:
             properties:
                 conversation:
                     $ref: '#/components/schemas/ConversationItem'
-                history:
-                    items:
-                        $ref: '#/components/schemas/ConversationHistoryItem'
-                    type: array
             type: object
         ConversationFeedbackRequest:
             properties:
@@ -456,8 +452,10 @@ components:
                 id:
                     type: string
                 input:
-                    properties: {}
-                    type: object
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
                 query:
                     type: string
                 reason:
@@ -473,6 +471,22 @@ components:
                         properties: {}
                         type: object
                     type: array
+            type: object
+        ConversationHistoryListResponse:
+            properties:
+                conversation_id:
+                    type: string
+                history:
+                    items:
+                        $ref: '#/components/schemas/ConversationHistoryItem'
+                    type: array
+                name:
+                    type: string
+                next_page_token:
+                    type: string
+                total_size:
+                    format: int64
+                    type: integer
             type: object
         ConversationItem:
             properties:
@@ -3535,8 +3549,24 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ConversationDetailResponse'
-                    description: Conversation details and history
+                    description: Conversation details
             summary: Get conversationtext
+    /api/core/conversations/{name}:history:
+        get:
+            parameters:
+                - in: path
+                  name: name
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationHistoryListResponse'
+                    description: Paginated conversation history
+            summary: List conversation history
     /api/core/conversations:batchDelete:
         post:
             requestBody:
@@ -5672,6 +5702,12 @@ paths:
             summary: List current user's models by model_type
             tags:
                 - model_providers
+    /api/core/model_providers/models/ready:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /model_providers/models/ready
     /api/core/model_providers/selected_models:
         get:
             description: Returns the current user's selected model for each model_type.
@@ -5703,6 +5739,12 @@ paths:
             summary: Save selected models by model_type
             tags:
                 - model_providers
+    /api/core/model_providers/selected_models/share:
+        put:
+            responses:
+                "200":
+                    description: OK
+            summary: PUT /model_providers/selected_models/share
     /api/core/model_providers:with_groups:
         get:
             description: Returns user_model_providers for the current user that have at least one non-deleted row in user_model_provider_groups. The current user identity is injected by the auth gateway from the token. Same response shape as GET /model_providers.

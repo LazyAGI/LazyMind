@@ -4,19 +4,13 @@ import { message } from "antd";
 import { AgentAppsAuth } from "@/components/auth";
 import {
   ChatConversationsRequestActionEnum,
-  ChatConversationsResponseFinishReasonEnum,
-  ChatHistory as BaseChatHistory,
   Query,
 } from "@/api/generated/chatbot-client";
 
-type ChatHistory = BaseChatHistory;
-
 import ChatContainerComponent, {
   ChatImperativeProps,
-  ChatMessage,
 } from "@/modules/chat/components/newChatContainer";
 import "./index.scss";
-import { RoleTypes } from "@/modules/chat/constants/common";
 import UIUtils from "@/modules/chat/utils/ui";
 import InitialCard from "@/modules/chat/components/InitialCard";
 import { ChatConfig } from "@/modules/chat/components/ChatConfigs";
@@ -37,11 +31,7 @@ import {
   CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
 } from "@/modules/chat/constants/chat";
-import {
-  normalizeMessageInputs,
-  stripCitationFromText,
-} from "@/modules/chat/utils/message";
-import { splitThinkingContent } from "@/modules/chat/utils/thinking";
+import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
 interface IChatLayoutProps {
   setIsChatContent: (isChatContent: boolean) => void;
@@ -147,11 +137,22 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           .conversationServiceGetConversationDetail({
             conversation: resolvedId,
           })
-          .then((detailRes) => ({ detailRes, resolvedId, isGenerating }));
+          .then((detailRes) =>
+            ChatServiceApi()
+              .conversationServiceGetConversationHistory({
+                name: resolvedId,
+              })
+              .then((historyRes) => ({
+                detailRes,
+                historyRes,
+                resolvedId,
+                isGenerating,
+              })),
+          );
       })
-      .then(({ detailRes, resolvedId, isGenerating }) => {
+      .then(({ detailRes, historyRes, resolvedId, isGenerating }) => {
         const conversation = detailRes.data.conversation;
-        const history = detailRes.data.history;
+        const history = historyRes.data.history;
         const tempData = {
           knowledgeBaseId: conversation?.search_config?.dataset_list
             ?.map((d: any) => d.id)
@@ -170,133 +171,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         );
         setModelSelection(resolvedId, modelSelection);
 
-        const list: ChatMessage[] = [];
-        if (history?.length) {
-          const lastHistory = history[history.length - 1];
-          history.forEach((record: ChatHistory) => {
-            const normalizedInputs = normalizeMessageInputs(
-              record.input,
-              record.query,
-            );
-            const textInput = normalizedInputs.find((input) => {
-              const inputType = input.input_type || "text";
-              return inputType === "text" && !!input.text;
-            });
-            const displayQuery = stripCitationFromText(
-              record.query || textInput?.text || "",
-            );
-
-            list.push({
-              role: RoleTypes.USER,
-              delta: displayQuery,
-              display_delta: displayQuery,
-              images: normalizedInputs
-                ?.filter((i: any) => i.input_type === "image")
-                .map((img: any) => ({
-                  base64: img?.input_base64,
-                  uid: img.file_id,
-                })),
-              files: normalizedInputs
-                ?.filter((i: any) => i.input_type === "file")
-                .map((f: any) => ({
-                  name: f?.uri?.split("/").pop(),
-                  uid: f.file_id,
-                })),
-              finish_reason:
-                ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
-              inputs: normalizedInputs,
-              create_time: record.create_time || "",
-            });
-            const isLastRecord = record === lastHistory;
-            const isActuallyGenerating =
-              isLastRecord && (!record.result || record.result === "");
-            const splitResult = splitThinkingContent(
-              record.result,
-              record.reasoning_content,
-            );
-            const secondSplitResult = splitThinkingContent(
-              record.second_result,
-              record.second_reasoning_content,
-            );
-            const assistantMsg: any = {
-              role: RoleTypes.ASSISTANT,
-              reasoning_content: splitResult.reasoning_content,
-              delta: splitResult.content,
-              raw_delta: record.result || "",
-              finish_reason: isActuallyGenerating
-                ? ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
-                : ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
-              history_id: record.id,
-              sources: record.sources,
-              feed_back: record.feed_back,
-            };
-            if (record.second_result && record.second_id) {
-              assistantMsg.answers = [
-                {
-                  content: splitResult.content,
-                  index: 0,
-                  history_id: record.id,
-                  reasoning_content: splitResult.reasoning_content,
-                  raw_content: record.result || "",
-                  sources: record.sources,
-                },
-                {
-                  content: secondSplitResult.content,
-                  index: 1,
-                  history_id: record.second_id,
-                  reasoning_content: secondSplitResult.reasoning_content,
-                  raw_content: record.second_result || "",
-                },
-              ];
-              assistantMsg.reasoning_content = "";
-              assistantMsg.delta = "";
-            }
-            list.push(assistantMsg);
-          });
-
-          const lastAssistant = list[list.length - 1];
-          if (
-            isGenerating &&
-            lastAssistant?.finish_reason ===
-              ChatConversationsResponseFinishReasonEnum.FinishReasonStop
-          ) {
-            list.push({
-              role: RoleTypes.USER,
-              delta: "",
-              finish_reason:
-                ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
-              inputs: [],
-              is_resumed: true,
-            });
-            list.push({
-              role: RoleTypes.ASSISTANT,
-              delta: "",
-              reasoning_content: "",
-              finish_reason:
-                ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
-              answers: [],
-              sources: [],
-            });
-          }
-        } else if (isGenerating) {
-          list.push({
-            role: RoleTypes.USER,
-            delta: "",
-            finish_reason:
-              ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
-            inputs: [],
-            is_resumed: true,
-          });
-          list.push({
-            role: RoleTypes.ASSISTANT,
-            delta: "",
-            reasoning_content: "",
-            finish_reason:
-              ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
-            answers: [],
-            sources: [],
-          });
-        }
+        const list = buildChatMessageListFromHistory(history, {
+          isGenerating,
+        });
         chatRef.current?.replaceMessageList(resolvedId, list);
         if (isGenerating) {
           chatRef.current?.openResumeSSE?.(resolvedId);
@@ -400,8 +277,15 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       .conversationServiceGetConversationDetail({
         conversation: conversationId,
       })
-      .then((res) => {
-        const conversation = res.data.conversation;
+      .then((detailRes) =>
+        ChatServiceApi()
+          .conversationServiceGetConversationHistory({
+            name: conversationId,
+          })
+          .then((historyRes) => ({ detailRes, historyRes })),
+      )
+      .then(({ detailRes, historyRes }) => {
+        const conversation = detailRes.data.conversation;
         const tempData = {
           knowledgeBaseId: conversation?.search_config?.dataset_list
             ?.map((dataset) => dataset.id)
@@ -422,104 +306,10 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         }
 
         // Reset messages.
-        const history = res.data.history;
-        const list: ChatMessage[] = [];
-        if (history && history.length > 0) {
-          history.forEach((record: ChatHistory) => {
-            const normalizedInputs = normalizeMessageInputs(
-              record.input,
-              record.query,
-            );
-            const textInput = normalizedInputs.find((input) => {
-              const inputType = input.input_type || "text";
-              return inputType === "text" && !!input.text;
-            });
-            const displayQuery = stripCitationFromText(
-              record.query || textInput?.text || "",
-            );
-
-            // Push user.
-            list.push({
-              role: RoleTypes.USER,
-              delta: displayQuery,
-              display_delta: displayQuery,
-              images: normalizedInputs
-                ?.filter((input) => {
-                  return input.input_type === "image";
-                })
-                .map((image) => {
-                  return {
-                    base64: image?.input_base64,
-                    uid: image.file_id,
-                  };
-                }),
-              files: normalizedInputs
-                ?.filter((input) => {
-                  return input.input_type === "file";
-                })
-                .map((file) => {
-                  return {
-                    name: file?.uri?.split("/").pop(),
-                    uid: file.file_id,
-                  };
-              }),
-              finish_reason:
-                ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
-              inputs: normalizedInputs,
-              create_time: record.create_time || "xxx-xxx-xxx",
-            });
-
-            // Push assistant.
-            const splitResult = splitThinkingContent(
-              record.result,
-              record.reasoning_content,
-            );
-            const secondSplitResult = splitThinkingContent(
-              record.second_result,
-              record.second_reasoning_content,
-            );
-            const assistantMessage: any = {
-              role: RoleTypes.ASSISTANT,
-              reasoning_content: splitResult.reasoning_content,
-              delta: splitResult.content,
-              raw_delta: record.result || "",
-              finish_reason:
-                ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
-              history_id: record.id,
-              sources: record.sources,
-              feed_back: record.feed_back,
-              thinking_time_s: record.thinking_time_s,
-            };
-
-            if (record.second_result && record.second_id) {
-              assistantMessage.answers = [
-                {
-                  content: splitResult.content,
-                  index: 0,
-                  history_id: record.id,
-                  reasoning_content: splitResult.reasoning_content,
-                  raw_content: record.result || "",
-                  sources: record.sources,
-                  thinking_duration_s: record.thinking_time_s,
-                },
-                {
-                  content: secondSplitResult.content,
-                  index: 1,
-                  history_id: record.second_id,
-                  reasoning_content: secondSplitResult.reasoning_content,
-                  raw_content: record.second_result || "",
-                  sources: record.sources,
-                  thinking_duration_s: record.second_thinking_time_s,
-                },
-              ];
-
-              assistantMessage.reasoning_content = "";
-              assistantMessage.delta = "";
-            }
-
-            list.push(assistantMessage);
-          });
-        }
+        const history = historyRes.data.history;
+        const list = buildChatMessageListFromHistory(history, {
+          fallbackCreateTime: "xxx-xxx-xxx",
+        });
         chatRef.current?.replaceMessageList(
           conversation?.conversation_id || "",
           list,

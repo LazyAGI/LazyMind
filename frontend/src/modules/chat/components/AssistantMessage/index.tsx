@@ -19,6 +19,7 @@ import {
   FeedBackChatHistoryRequestTypeEnum,
   Source,
 } from "@/api/generated/chatbot-client";
+import { AgentAppsAuth } from "@/components/auth";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
@@ -452,7 +453,15 @@ const AssistantMessage = (props: any) => {
       return;
     }
 
-    dispatch({ type: "OPEN_MODAL", historyId: targetHistoryId });
+    if (AgentAppsAuth.getUserInfo()?.chatUnlikeSwitch === true) {
+      dispatch({ type: "OPEN_MODAL", historyId: targetHistoryId });
+      return;
+    }
+
+    onFeedBack(
+      FeedBackChatHistoryRequestTypeEnum.FeedBackTypeUnlike,
+      historyId,
+    );
   }
 
   

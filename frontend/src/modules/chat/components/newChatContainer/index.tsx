@@ -856,11 +856,22 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       if (!isMouseScrollingRef.current) {
         return;
       }
-      requestAnimationFrame(() => {
+      scrollToEndImmediately();
+    }
+
+    function scrollToEndImmediately() {
+      isMouseScrollingRef.current = true;
+      setShowScrollButton(false);
+      const scroll = () => {
         const container = chatContentRef.current;
         if (container) {
           container.scrollTop = container.scrollHeight;
         }
+      };
+      requestAnimationFrame(() => {
+        scroll();
+        requestAnimationFrame(scroll);
+        window.setTimeout(scroll, 80);
       });
     }
 
@@ -986,7 +997,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
         onConversationIdChange(id);
       }
 
-      scrollToEnd();
+      scrollToEndImmediately();
     }
 
     function createNewChat() {

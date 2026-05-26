@@ -59,6 +59,7 @@ export interface UserInfo {
   idToken?: string;
   refreshToken?: string;
   dynamic?: boolean;
+  chatUnlikeSwitch?: boolean;
   timestamp?: number;
 }
 

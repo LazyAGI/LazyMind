@@ -309,7 +309,6 @@ export interface ConversationChatStatusResponse {
 }
 export interface ConversationDetailResponse {
     'conversation'?: ConversationItem;
-    'history'?: Array<ConversationHistoryItem>;
 }
 export interface ConversationFeedbackRequest {
     'expected_answer'?: string;
@@ -322,13 +321,20 @@ export interface ConversationHistoryItem {
     'expected_answer'?: string;
     'feed_back'?: number;
     'id'?: string;
-    'input'?: object;
+    'input'?: Array<object>;
     'query'?: string;
     'reason'?: string;
     'reasoning_content'?: string;
     'result'?: string;
     'seq'?: number;
     'sources'?: Array<object>;
+}
+export interface ConversationHistoryListResponse {
+    'conversation_id'?: string;
+    'history'?: Array<ConversationHistoryItem>;
+    'name'?: string;
+    'next_page_token'?: string;
+    'total_size'?: number;
 }
 export interface ConversationItem {
     'chat_times'?: number;
@@ -3407,6 +3413,40 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
+         * 
+         * @summary List conversation history
+         * @param {string} name 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsNameHistoryGet: async (name: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'name' is not null or undefined
+            assertParamExists('apiCoreConversationsNameHistoryGet', 'name', name)
+            const localVarPath = `/api/core/conversations/{name}:history`
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Resumetext
          * @summary Resume conversation stream
          * @param {ConversationResumeRequest} conversationResumeRequest 
@@ -4990,6 +5030,64 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          * 
+         * @summary GET /model_providers/models/ready
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelsReadyGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/model_providers/models/ready`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary PUT /model_providers/selected_models/share
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersSelectedModelsSharePut: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/model_providers/selected_models/share`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary Prompt list
          * @param {number} [pageSize] 
          * @param {string} [pageToken] 
@@ -5951,6 +6049,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * 
+         * @summary List conversation history
+         * @param {string} name 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsNameHistoryGet(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationHistoryListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsNameHistoryGet(name, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsNameHistoryGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Resumetext
          * @summary Resume conversation stream
          * @param {ConversationResumeRequest} conversationResumeRequest 
@@ -6529,6 +6640,30 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @summary GET /model_providers/models/ready
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelsReadyGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelsReadyGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreModelProvidersModelsReadyGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary PUT /model_providers/selected_models/share
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersSelectedModelsSharePut(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersSelectedModelsSharePut(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreModelProvidersSelectedModelsSharePut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
          * @summary Prompt list
          * @param {number} [pageSize] 
          * @param {string} [pageToken] 
@@ -7059,6 +7194,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCoreConversationsNameGet(requestParameters.name, options).then((request) => request(axios, basePath));
         },
         /**
+         * 
+         * @summary List conversation history
+         * @param {DefaultApiApiCoreConversationsNameHistoryGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsNameHistoryGet(requestParameters: DefaultApiApiCoreConversationsNameHistoryGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationHistoryListResponse> {
+            return localVarFp.apiCoreConversationsNameHistoryGet(requestParameters.name, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Resumetext
          * @summary Resume conversation stream
          * @param {DefaultApiApiCoreConversationsResumeChatPostRequest} requestParameters Request parameters.
@@ -7473,6 +7618,24 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          * 
+         * @summary GET /model_providers/models/ready
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelsReadyGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreModelProvidersModelsReadyGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary PUT /model_providers/selected_models/share
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersSelectedModelsSharePut(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreModelProvidersSelectedModelsSharePut(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
          * @summary Prompt list
          * @param {DefaultApiApiCorePromptsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -7836,6 +7999,13 @@ export interface DefaultApiApiCoreConversationsNameDetailGetRequest {
  * Request parameters for apiCoreConversationsNameGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsNameGetRequest {
+    readonly name: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsNameHistoryGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsNameHistoryGetRequest {
     readonly name: string
 }
 
@@ -8605,6 +8775,17 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
+     * 
+     * @summary List conversation history
+     * @param {DefaultApiApiCoreConversationsNameHistoryGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsNameHistoryGet(requestParameters: DefaultApiApiCoreConversationsNameHistoryGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsNameHistoryGet(requestParameters.name, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Resumetext
      * @summary Resume conversation stream
      * @param {DefaultApiApiCoreConversationsResumeChatPostRequest} requestParameters Request parameters.
@@ -9057,6 +9238,26 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreListKbGroupsGet(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreListKbGroupsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary GET /model_providers/models/ready
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelsReadyGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreModelProvidersModelsReadyGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary PUT /model_providers/selected_models/share
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersSelectedModelsSharePut(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreModelProvidersSelectedModelsSharePut(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
