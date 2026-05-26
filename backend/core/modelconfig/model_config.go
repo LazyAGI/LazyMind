@@ -150,6 +150,8 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 			out["reranker"] = cfg
 		case "multimodal_embedding", "cross_modal_embed":
 			out["embed_image"] = cfg
+		case "vlm", "vision":
+			out["vlm"] = cfg
 		}
 	}
 	if len(out) == 0 {
