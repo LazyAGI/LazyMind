@@ -33,7 +33,6 @@ function unwrapResponse<T>(payload: ApiEnvelope<T> | T): T {
 
 export function useChatModelProviderGuard() {
   const [status, setStatus] = useState<ChatModelProviderStatus>("loading");
-  const [triggerKey, setTriggerKey] = useState(0);
   const [requiresModelProviderConfig, setRequiresModelProviderConfig] =
     useState<boolean | null>(() => {
       const dynamic = AgentAppsAuth.getUserInfo()?.dynamic;
@@ -44,10 +43,6 @@ export function useChatModelProviderGuard() {
   const [rerankReady, setRerankReady] = useState<boolean | null>(null);
   const [vlmReady, setVlmReady] = useState<boolean | null>(null);
   const requestIdRef = useRef(0);
-
-  const refresh = useCallback(() => {
-    setTriggerKey((k: number) => k + 1);
-  }, []);
 
   const runCheck = useCallback(async () => {
     const requestId = requestIdRef.current + 1;
@@ -131,6 +126,10 @@ export function useChatModelProviderGuard() {
     }
   }, []);
 
+  const refresh = useCallback(() => {
+    void runCheck();
+  }, [runCheck]);
+
   useEffect(() => {
     const updateDynamicUserState = () => {
       const dynamic = AgentAppsAuth.getUserInfo()?.dynamic;
@@ -153,12 +152,12 @@ export function useChatModelProviderGuard() {
     void runCheck();
 
     const onFeaturesChanged = () => {
-      refresh();
+      void runCheck();
     };
     window.addEventListener(MODEL_FEATURES_CHANGED_EVENT, onFeaturesChanged);
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        refresh();
+        void runCheck();
       }
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
@@ -169,7 +168,7 @@ export function useChatModelProviderGuard() {
       // Invalidate in-flight work from a previous mount (e.g. React Strict Mode).
       requestIdRef.current += 1;
     };
-  }, [triggerKey, runCheck, refresh]);
+  }, [runCheck]);
 
   return {
     canChat: status === "ready",

@@ -33,6 +33,10 @@ var imageEmbedEnabledCache struct {
 // imageEmbedRequiredMu protects imageEmbedRequired and imageEmbedRequiredInit.
 var imageEmbedRequiredMu sync.RWMutex
 
+// imageEmbedRequiredInitMu serialises the one-time initialisation fetch so that
+// concurrent callers do not all issue HTTP requests simultaneously (cache stampede).
+var imageEmbedRequiredInitMu sync.Mutex
+
 // imageEmbedRequired is the current value of image_embed_required.
 // It is initialised from the algorithm service on first use and updated by
 // SetImageEmbedRequired whenever lazy_mode changes.
@@ -82,6 +86,18 @@ func ensureImageEmbedRequiredInit(ctx context.Context) {
 		return
 	}
 
+	// Serialise the one-time fetch so concurrent callers don't all issue HTTP requests.
+	imageEmbedRequiredInitMu.Lock()
+	defer imageEmbedRequiredInitMu.Unlock()
+
+	// Double-check after acquiring the init lock — another goroutine may have finished.
+	imageEmbedRequiredMu.RLock()
+	already = imageEmbedRequiredInit
+	imageEmbedRequiredMu.RUnlock()
+	if already {
+		return
+	}
+
 	upstream := common.JoinURL(common.ChatServiceEndpoint(), "/api/model/features")
 	var algo algoFeaturesResponse
 	if err := common.ApiGet(ctx, upstream, nil, &algo, modelFeaturesTimeout); err != nil {
@@ -92,14 +108,11 @@ func ensureImageEmbedRequiredInit(ctx context.Context) {
 	}
 
 	imageEmbedRequiredMu.Lock()
-	// Double-check: another goroutine may have initialised while we were fetching.
-	if !imageEmbedRequiredInit {
-		imageEmbedRequired = algo.ImageEmbedRequired
-		imageEmbedRequiredInit = true
-		log.Logger.Info().
-			Bool("image_embed_required", algo.ImageEmbedRequired).
-			Msg("image_embed_required initialised from algorithm service")
-	}
+	imageEmbedRequired = algo.ImageEmbedRequired
+	imageEmbedRequiredInit = true
+	log.Logger.Info().
+		Bool("image_embed_required", algo.ImageEmbedRequired).
+		Msg("image_embed_required initialised from algorithm service")
 	imageEmbedRequiredMu.Unlock()
 }
 

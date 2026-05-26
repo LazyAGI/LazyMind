@@ -24,7 +24,7 @@ def _is_image_group_lazy() -> bool:
 
 
 @router.get('/api/model/features', summary='Get model feature flags derived from runtime config')
-async def get_model_features():
+def get_model_features():
     '''Return feature flags based on the active runtime_models config.
 
     image_embed_enabled is True when a cross_modal_embed role is present in the
