@@ -720,6 +720,7 @@ services:
       LAZYMIND_EVO_CHUNK_BASE_URL: http://doc-server:8000
       LAZYMIND_EVO_TARGET_CHAT_URL: http://chat:8046/api/chat
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
+      LAZYLLM_INIT_DOC: 1
       <<: [*runtime-home, *trace-config, *proxy-env, *llm-api-keys]
     volumes:
       - ./data/evo:/var/lib/lazymind/evo
