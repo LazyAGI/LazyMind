@@ -1176,7 +1176,8 @@
 }
 
 @media (max-width: 1360px) {
-  .model-provider-page {
+  .model-provider-page,
+  .model-provider-layout-frame {
     height: auto;
     min-height: 100%;
     overflow: visible;
@@ -1185,10 +1186,12 @@
   .model-provider-shell,
   .model-provider-policy-grid {
     grid-template-columns: 1fr;
+    height: auto;
     min-height: auto;
   }
 
-  .model-provider-main-panel {
+  .model-provider-main-panel,
+  .model-provider-service-page {
     height: auto;
     overflow: visible;
   }
@@ -1206,12 +1209,6 @@
 }
 
 @media (max-width: 980px) {
-  .model-provider-page,
-  .model-provider-layout-frame {
-    height: auto;
-    overflow: visible;
-  }
-
   .model-provider-shell,
   .model-provider-default-list,
   .model-provider-service-grid {
@@ -1220,14 +1217,7 @@
 
   .model-provider-shell,
   .model-provider-service-page {
-    height: auto;
-    overflow: visible;
     padding: 18px;
-  }
-
-  .model-provider-main-panel {
-    height: auto;
-    overflow: visible;
   }
 
   .model-provider-tabs {
