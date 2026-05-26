@@ -29,8 +29,8 @@ import {
 import { BASE_URL, axiosInstance, getLocalizedErrorMessage } from "@/components/request";
 
 import "./detail.scss";
-import DataSourceDetailView from "./components/DataSourceDetailView";
-import DataSourceSyncPickerModal from "./components/DataSourceSyncPickerModal";
+import DataSourceDetailView from "@/modules/dataSource/common/components/DataSourceDetailView";
+import DataSourceSyncPickerModal from "@/modules/dataSource/common/components/DataSourceSyncPickerModal";
 import {
   CLOUD_SYNC_POLL_INTERVAL_MS,
   CLOUD_SYNC_TIMEOUT_MS,

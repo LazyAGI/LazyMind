@@ -2,7 +2,7 @@ import { Alert, Button, Empty, Input, Modal, Space, Tree } from "antd";
 import type { DataNode } from "antd/es/tree";
 import { SearchOutlined } from "@ant-design/icons";
 
-interface DataSourceSyncPickerModalProps {
+export interface DataSourceSyncPickerModalProps {
   t: any;
   open: boolean;
   syncSubmitting: boolean;

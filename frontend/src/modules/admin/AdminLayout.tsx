@@ -1,14 +1,10 @@
 import {
-  BulbOutlined,
-  DatabaseOutlined,
-  ExperimentOutlined,
   LeftCircleOutlined,
   UserOutlined,
   UsergroupAddOutlined,
 } from "@ant-design/icons";
 import { Avatar, Layout, Menu } from "antd";
 import type { MenuProps } from "antd";
-import { useEffect, useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AgentAppsAuth } from "@/components/auth";
@@ -36,7 +32,6 @@ export default function AdminLayout() {
   const userInfo = AgentAppsAuth.getUserInfo();
   const isLoggedIn = Boolean(userInfo?.token);
   const isAdminUser = isAdminRole(userInfo?.role);
-  const [isSelfEvolutionMenuCollapsed, setIsSelfEvolutionMenuCollapsed] = useState(false);
 
   const pathname = location.pathname;
   const selectedKey = pathname.startsWith("/admin/users")
@@ -77,10 +72,6 @@ export default function AdminLayout() {
       navigate(String(key));
     }
   };
-
-  useEffect(() => {
-    // Cleanup effect no longer needed
-  }, []);
 
   if (!isLoggedIn) {
     return <Navigate to="/login" replace />;

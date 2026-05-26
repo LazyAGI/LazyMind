@@ -18,18 +18,18 @@ import {
   ClockCircleOutlined,
   WarningFilled,
 } from "@ant-design/icons";
-import type { DataSourceItem } from "../shared";
+import type { DataSourceItem } from "../../shared";
 import {
   getConflictPolicyLabel,
   getConnectionMeta,
   getFileUpdateMeta,
   getSourceTypeTitle,
   getStatusMeta,
-} from "../shared";
+} from "../../shared";
 
 const { Paragraph, Text } = Typography;
 
-interface DataSourceDetailDrawerProps {
+export interface DataSourceDetailDrawerProps {
   t: any;
   open: boolean;
   source: DataSourceItem | undefined;

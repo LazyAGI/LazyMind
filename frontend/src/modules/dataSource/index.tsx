@@ -44,8 +44,8 @@ import {
 import { BASE_URL, axiosInstance, getLocalizedErrorMessage } from "@/components/request";
 
 import "./index.scss";
-import DataSourceDetailDrawer from "./components/DataSourceDetailDrawer";
-import DataSourceSummaryCards from "./components/DataSourceSummaryCards";
+import DataSourceDetailDrawer from "@/modules/dataSource/common/components/DataSourceDetailDrawer";
+import DataSourceSummaryCards from "@/modules/dataSource/common/components/DataSourceSummaryCards";
 import DataSourceWizardModal from "./components/DataSourceWizardModal";
 import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
@@ -59,7 +59,7 @@ import {
   type FeishuDataSourceConnection,
   type FeishuDataSourceOAuthMessage,
   type FeishuDataSourceWizardDraft,
-} from "./feishuOAuth";
+} from "@/modules/dataSource/common/feishuOAuth";
 import {
   CLOUD_SYNC_POLL_INTERVAL_MS,
   CLOUD_SYNC_TIMEOUT_MS,
@@ -535,6 +535,7 @@ export default function DataSourceManagement() {
   );
   const [feishuSetupModalOpen, setFeishuSetupModalOpen] = useState(false);
   const [pendingSelectFeishu, setPendingSelectFeishu] = useState(false);
+  const [feishuSetupSubmitting, setFeishuSetupSubmitting] = useState(false);
   const [feishuSetupForm] = Form.useForm<FeishuAppSetup>();
   const [manualOauthModalOpen, setManualOauthModalOpen] = useState(false);
   const [manualOauthCallbackValue, setManualOauthCallbackValue] = useState("");
@@ -851,6 +852,7 @@ export default function DataSourceManagement() {
       setOauthConnection(payload.connection);
       setOauthState(nextOauthState);
       setConnectionVerified(nextOauthState === "connected");
+      setWizardStep(1);
       message.success(t("admin.dataSourceOauthSuccess"));
       return;
     }
@@ -1020,6 +1022,104 @@ export default function DataSourceManagement() {
     });
   };
 
+  const startFeishuOAuth = async (options?: {
+    setup?: FeishuAppSetup;
+    draftSelectedType?: SourceType | null;
+    draftWizardStep?: number;
+    draftFormValues?: Record<string, unknown>;
+    previousState?: OAuthState;
+    previousVerified?: boolean;
+    previousConnection?: FeishuDataSourceConnection | null;
+  }) => {
+    const activeSetup = options?.setup || feishuAppSetup;
+    const previousState = options?.previousState ?? oauthState;
+    const previousVerified = options?.previousVerified ?? connectionVerified;
+    const previousConnection = options?.previousConnection ?? oauthConnection;
+
+    try {
+      if (!activeSetup?.appId.trim() || !activeSetup.appSecret.trim()) {
+        message.warning(t("admin.dataSourceFeishuCredentialRequired"));
+        return false;
+      }
+
+      let currentAgents = scanAgents;
+      if (currentAgents.length === 0) {
+        const agentsResponse = await listScanAgents(createScanApiClient());
+        currentAgents = agentsResponse.data.items || [];
+        setScanAgents(currentAgents);
+      }
+
+      const selectedAgent = pickScanAgent(currentAgents, validatedAgentId || undefined);
+      if (!selectedAgent?.agent_id || !selectedAgent.tenant_id) {
+        message.error("未发现可用扫描 Agent，请先启动并注册扫描 Agent。");
+        return false;
+      }
+
+      setOauthState("waiting");
+      setValidatedAgentId(selectedAgent.agent_id);
+      const authorizeUrl = await requestFeishuDataSourceAuthorizeUrl({
+        tenantId: selectedAgent.tenant_id,
+        appId: activeSetup.appId,
+        appSecret: activeSetup.appSecret,
+        scopes: FEISHU_DEFAULT_SCOPES,
+        returnUrl: window.location.href,
+      });
+
+      const draft: FeishuDataSourceWizardDraft = {
+        wizardOpen: true,
+        wizardStep: options?.draftWizardStep ?? wizardStep,
+        wizardMode,
+        selectedType: options?.draftSelectedType ?? selectedType,
+        editingId,
+        validatedAgentId: selectedAgent.agent_id,
+        oauthState: "waiting",
+        connectionVerified: previousVerified,
+        oauthConnection: previousConnection,
+        formValues: options?.draftFormValues || form.getFieldsValue(true),
+      };
+
+      saveFeishuDataSourceWizardDraft(draft);
+
+      const popup = openCenteredPopup(authorizeUrl, t("admin.dataSourceFeishuAuthWindowTitle"));
+
+      oauthAttemptRef.current = {
+        timerId: null,
+        previousState,
+        previousVerified,
+        previousConnection,
+        resolved: false,
+      };
+
+      if (popup) {
+        const timerId = window.setInterval(() => {
+          if (!popup.closed) {
+            return;
+          }
+
+          if (oauthAttemptRef.current?.resolved) {
+            clearOauthAttempt();
+            return;
+          }
+
+          restorePreviousOauthState(t("admin.dataSourceOauthWindowClosed"));
+        }, 400);
+
+        oauthAttemptRef.current.timerId = timerId;
+        popup.focus();
+        return true;
+      }
+
+      window.location.assign(authorizeUrl);
+      return true;
+    } catch (error: any) {
+      setOauthState(previousState);
+      setConnectionVerified(previousVerified);
+      setOauthConnection(previousConnection);
+      message.error(error?.message || t("admin.dataSourceAuthorizeUrlFailed"));
+      return false;
+    }
+  };
+
   const openFeishuSetupModal = (autoSelect = false) => {
     setPendingSelectFeishu(autoSelect);
     feishuSetupForm.setFieldsValue({
@@ -1030,20 +1130,51 @@ export default function DataSourceManagement() {
   };
 
   const handleSaveFeishuSetup = async () => {
-    const values = await feishuSetupForm.validateFields();
-    const nextSetup: FeishuAppSetup = {
-      appId: values.appId.trim(),
-      appSecret: values.appSecret.trim(),
-    };
+    if (feishuSetupSubmitting) {
+      return;
+    }
 
-    persistFeishuAppSetup(nextSetup);
-    setFeishuAppSetup(nextSetup);
-    setFeishuSetupModalOpen(false);
-    message.success(t("admin.dataSourceFeishuCredentialSaved"));
+    setFeishuSetupSubmitting(true);
+    try {
+      const values = await feishuSetupForm.validateFields();
+      const nextSetup: FeishuAppSetup = {
+        appId: values.appId.trim(),
+        appSecret: values.appSecret.trim(),
+      };
+      const shouldStartOAuth = pendingSelectFeishu;
 
-    if (pendingSelectFeishu) {
-      applySourceType("feishu");
+      persistFeishuAppSetup(nextSetup);
+      setFeishuAppSetup(nextSetup);
+      setFeishuSetupModalOpen(false);
       setPendingSelectFeishu(false);
+      message.success(t("admin.dataSourceFeishuCredentialSaved"));
+
+      if (shouldStartOAuth) {
+        const feishuFormValues = {
+          ...form.getFieldsValue(true),
+          syncMode: "scheduled",
+          scheduleCycle: "daily",
+          scheduleTime: DEFAULT_SCHEDULE_TIME,
+          conflictPolicy: "versioned",
+          path: "",
+          target: "",
+          targetType: "wiki_space",
+        };
+
+        applySourceType("feishu");
+        setWizardStep(0);
+        await startFeishuOAuth({
+          setup: nextSetup,
+          draftSelectedType: "feishu",
+          draftWizardStep: 0,
+          draftFormValues: feishuFormValues,
+          previousState: "pending",
+          previousVerified: false,
+          previousConnection: null,
+        });
+      }
+    } finally {
+      setFeishuSetupSubmitting(false);
     }
   };
 
@@ -1141,94 +1272,6 @@ export default function DataSourceManagement() {
     }
   };
 
-  const handleConnectAccount = async () => {
-    const previousState = oauthState;
-    const previousVerified = connectionVerified;
-    const previousConnection = oauthConnection;
-
-    try {
-      if (!isFeishuSetupReady || !feishuAppSetup) {
-        message.warning(t("admin.dataSourceFeishuCredentialRequired"));
-        return;
-      }
-
-      await form.validateFields(["target"]);
-      let currentAgents = scanAgents;
-      if (currentAgents.length === 0) {
-        const agentsResponse = await listScanAgents(createScanApiClient());
-        currentAgents = agentsResponse.data.items || [];
-        setScanAgents(currentAgents);
-      }
-
-      const selectedAgent = pickScanAgent(currentAgents, validatedAgentId || undefined);
-      if (!selectedAgent?.agent_id || !selectedAgent.tenant_id) {
-        message.error("未发现可用扫描 Agent，请先启动并注册扫描 Agent。");
-        return;
-      }
-
-      setOauthState("waiting");
-      setValidatedAgentId(selectedAgent.agent_id);
-      const authorizeUrl = await requestFeishuDataSourceAuthorizeUrl({
-        tenantId: selectedAgent.tenant_id,
-        appId: feishuAppSetup.appId,
-        appSecret: feishuAppSetup.appSecret,
-        scopes: FEISHU_DEFAULT_SCOPES,
-        returnUrl: window.location.href,
-      });
-
-      const draft: FeishuDataSourceWizardDraft = {
-        wizardOpen: true,
-        wizardStep,
-        wizardMode,
-        selectedType,
-        editingId,
-        validatedAgentId: selectedAgent.agent_id,
-        oauthState: "waiting",
-        connectionVerified: previousVerified,
-        oauthConnection: previousConnection,
-        formValues: form.getFieldsValue(true),
-      };
-
-      saveFeishuDataSourceWizardDraft(draft);
-
-      const popup = openCenteredPopup(authorizeUrl, t("admin.dataSourceFeishuAuthWindowTitle"));
-
-      oauthAttemptRef.current = {
-        timerId: null,
-        previousState,
-        previousVerified,
-        previousConnection,
-        resolved: false,
-      };
-
-      if (popup) {
-        const timerId = window.setInterval(() => {
-          if (!popup.closed) {
-            return;
-          }
-
-          if (oauthAttemptRef.current?.resolved) {
-            clearOauthAttempt();
-            return;
-          }
-
-          restorePreviousOauthState(t("admin.dataSourceOauthWindowClosed"));
-        }, 400);
-
-        oauthAttemptRef.current.timerId = timerId;
-        popup.focus();
-        return;
-      }
-
-      window.location.assign(authorizeUrl);
-    } catch (error: any) {
-      setOauthState(previousState);
-      setConnectionVerified(previousVerified);
-      setOauthConnection(previousConnection);
-      message.error(error?.message || t("admin.dataSourceAuthorizeUrlFailed"));
-    }
-  };
-
   const handleSubmitManualOauthCallback = async () => {
     const parsed = parseFeishuOAuthCallbackInput(manualOauthCallbackValue);
     if (!parsed) {
@@ -1314,6 +1357,15 @@ export default function DataSourceManagement() {
       return false;
     }
 
+    if (isCloudType(selectedType)) {
+      if (!oauthConnection?.connectionId) {
+        message.warning(t("admin.dataSourceOauthRequiredBeforeSave"));
+        return false;
+      }
+
+      return true;
+    }
+
     if (!connectionVerified) {
       message.warning(t("admin.dataSourceTestConnectionFirst"));
       return false;
@@ -1359,6 +1411,20 @@ export default function DataSourceManagement() {
     if (wizardStep === 0) {
       if (!selectedType) {
         message.warning(t("admin.dataSourceSelectOneTypeFirst"));
+        return;
+      }
+      if (selectedType === "feishu" && !oauthConnection?.connectionId) {
+        if (isFeishuSetupReady && feishuAppSetup && oauthState !== "waiting") {
+          void startFeishuOAuth({
+            setup: feishuAppSetup,
+            draftSelectedType: "feishu",
+            draftWizardStep: 0,
+            previousState: oauthState,
+            previousVerified: connectionVerified,
+            previousConnection: oauthConnection,
+          });
+        }
+        message.warning(t("admin.dataSourceOauthRequiredBeforeSave"));
         return;
       }
       setWizardStep(1);
@@ -1950,6 +2016,9 @@ export default function DataSourceManagement() {
         open={feishuSetupModalOpen}
         destroyOnHidden
         onCancel={() => {
+          if (feishuSetupSubmitting) {
+            return;
+          }
           setFeishuSetupModalOpen(false);
           setPendingSelectFeishu(false);
         }}
@@ -1959,6 +2028,8 @@ export default function DataSourceManagement() {
             ? t("admin.dataSourceFeishuCredentialSaveAndSelect")
             : t("common.save")
         }
+        okButtonProps={{ loading: feishuSetupSubmitting }}
+        cancelButtonProps={{ disabled: feishuSetupSubmitting }}
         cancelText={t("common.cancel")}
       >
         <Form form={feishuSetupForm} layout="vertical">
@@ -1993,8 +2064,6 @@ export default function DataSourceManagement() {
         existingKnowledgeBaseNames={getKnownKnowledgeBaseNames()}
         selectedType={selectedType}
         isFeishuSetupReady={isFeishuSetupReady}
-        oauthState={oauthState}
-        oauthConnection={oauthConnection}
         connectionVerified={connectionVerified}
         syncMode={syncMode}
         feishuTargetType={feishuTargetType}
@@ -2007,10 +2076,6 @@ export default function DataSourceManagement() {
         }}
         onSelectType={handleSelectType}
         onResetFeishuSetup={handleResetFeishuSetup}
-        onConnectAccount={() => {
-          void handleConnectAccount();
-        }}
-        onOpenManualOauthModal={() => setManualOauthModalOpen(true)}
         onTestConnection={() => {
           void handleTestConnection();
         }}

@@ -15,25 +15,25 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { ArrowLeftOutlined, SearchOutlined } from "@ant-design/icons";
 import type { ReactNode } from "react";
-import type { DataSourceSummary, DocumentStatusRow } from "../shared";
-import { getStatusMeta } from "../shared";
+import type { DataSourceSummary, DocumentStatusRow } from "../../shared";
+import { getStatusMeta } from "../../shared";
 
 const { Paragraph, Text, Title } = Typography;
 
-interface LastOperation {
+export interface DataSourceDetailLastOperation {
   syncedCount: number;
   ignoredCount: number;
   checkedCount: number;
   time: string;
 }
 
-interface DataSourceDetailViewProps {
+export interface DataSourceDetailViewProps {
   t: any;
   detailSource: DataSourceSummary | null;
   detailLoading: boolean;
   lastSync: string;
   documents: DocumentStatusRow[];
-  lastOperation: LastOperation | null;
+  lastOperation: DataSourceDetailLastOperation | null;
   keyword: string;
   setKeyword: (value: string) => void;
   filteredDocuments: DocumentStatusRow[];

@@ -1,9 +1,7 @@
 import {
-  Alert,
   Button,
   Card,
   Col,
-  Descriptions,
   Empty,
   Form,
   Input,
@@ -25,21 +23,16 @@ import {
   FolderOpenOutlined,
   LinkOutlined,
   LockOutlined,
-  SyncOutlined,
 } from "@ant-design/icons";
-import type { FeishuDataSourceConnection } from "../feishuOAuth";
 import type {
   FeishuTargetType,
-  OAuthState,
   SourceFormValues,
   SourceType,
   SyncMode,
 } from "../shared";
 import {
-  getConnectionMeta,
   getSourceTypeDescription,
   getSourceTypeTitle,
-  isCloudType,
 } from "../shared";
 
 const { Paragraph, Text } = Typography;
@@ -69,8 +62,6 @@ interface DataSourceWizardModalProps {
   existingKnowledgeBaseNames: string[];
   selectedType: SourceType | null;
   isFeishuSetupReady: boolean;
-  oauthState: OAuthState;
-  oauthConnection: FeishuDataSourceConnection | null;
   connectionVerified: boolean;
   syncMode: SyncMode;
   feishuTargetType: FeishuTargetType;
@@ -81,8 +72,6 @@ interface DataSourceWizardModalProps {
   onSave: () => void;
   onSelectType: (type: SourceType) => void;
   onResetFeishuSetup: () => void;
-  onConnectAccount: () => void;
-  onOpenManualOauthModal: () => void;
   onTestConnection: () => void;
   onInvalidateConnection: () => void;
 }
@@ -96,8 +85,6 @@ export default function DataSourceWizardModal({
   existingKnowledgeBaseNames,
   selectedType,
   isFeishuSetupReady,
-  oauthState,
-  oauthConnection,
   connectionVerified,
   syncMode,
   feishuTargetType,
@@ -108,8 +95,6 @@ export default function DataSourceWizardModal({
   onSave,
   onSelectType,
   onResetFeishuSetup,
-  onConnectAccount,
-  onOpenManualOauthModal,
   onTestConnection,
   onInvalidateConnection,
 }: DataSourceWizardModalProps) {
@@ -134,119 +119,8 @@ export default function DataSourceWizardModal({
       return null;
     }
 
-    if (isCloudType(selectedType)) {
-      const meta = getConnectionMeta(oauthState, t);
-      return (
-        <Card size="small" className="data-source-connect-card">
-          <div className="data-source-connect-header">
-            <div>
-              <Text strong>{t("admin.dataSourceOauthConnectTitle")}</Text>
-              <Paragraph type="secondary">{t("admin.dataSourceOauthConnectDesc")}</Paragraph>
-            </div>
-            <Tag color={meta.color}>{meta.text}</Tag>
-          </div>
-          {!isFeishuSetupReady ? (
-            <Alert
-              showIcon
-              type="info"
-              message={t("admin.dataSourceFeishuNotReady")}
-              description={t("admin.dataSourceFeishuNotReadyDesc")}
-            />
-          ) : null}
-          <Space wrap>
-            <Button
-              type="primary"
-              icon={oauthState === "waiting" ? <SyncOutlined spin /> : <LinkOutlined />}
-              loading={oauthState === "waiting"}
-              disabled={isEditMode || !isFeishuSetupReady}
-              onClick={onConnectAccount}
-            >
-              {oauthConnection
-                ? t("admin.dataSourceReconnectAccount")
-                : t("admin.dataSourceConnectAccount")}
-            </Button>
-            {oauthState === "waiting" && !isEditMode ? (
-              <Button onClick={onOpenManualOauthModal}>
-                {t("admin.dataSourceOauthManualCallbackAction")}
-              </Button>
-            ) : null}
-          </Space>
-          {oauthState === "waiting" ? (
-            <Alert
-              showIcon
-              type="info"
-              message={t("admin.dataSourceOauthManualCallbackTitle")}
-              description={t("admin.dataSourceOauthManualCallbackDesc")}
-            />
-          ) : null}
-          {oauthConnection ? (
-            <div className="data-source-oauth-meta">
-              <Descriptions size="small" column={1} className="data-source-oauth-descriptions">
-                <Descriptions.Item label={t("admin.dataSourceConnectedAccount")}>
-                  {oauthConnection.accountName}
-                </Descriptions.Item>
-                {oauthConnection.tenantKey ? (
-                  <Descriptions.Item label={t("admin.dataSourceTenantKey")}>
-                    {oauthConnection.tenantKey}
-                  </Descriptions.Item>
-                ) : null}
-                {oauthConnection.connectedAt ? (
-                  <Descriptions.Item label={t("admin.dataSourceConnectedAt")}>
-                    {oauthConnection.connectedAt}
-                  </Descriptions.Item>
-                ) : null}
-                {oauthConnection.expiresAt ? (
-                  <Descriptions.Item label={t("admin.dataSourceAccessTokenExpireAt")}>
-                    {oauthConnection.expiresAt}
-                  </Descriptions.Item>
-                ) : null}
-                {oauthConnection.refreshExpiresAt ? (
-                  <Descriptions.Item label={t("admin.dataSourceRefreshTokenExpireAt")}>
-                    {oauthConnection.refreshExpiresAt}
-                  </Descriptions.Item>
-                ) : null}
-                {oauthConnection.accessTokenMasked || oauthConnection.refreshTokenMasked ? (
-                  <Descriptions.Item label={t("admin.dataSourceTokenSummary")}>
-                    <Space direction="vertical" size={2}>
-                      {oauthConnection.accessTokenMasked ? (
-                        <Text code>{oauthConnection.accessTokenMasked}</Text>
-                      ) : null}
-                      {oauthConnection.refreshTokenMasked ? (
-                        <Text code>{oauthConnection.refreshTokenMasked}</Text>
-                      ) : null}
-                    </Space>
-                  </Descriptions.Item>
-                ) : null}
-                {oauthConnection.grantedScopes.length > 0 ? (
-                  <Descriptions.Item label={t("admin.dataSourceGrantedScopes")}>
-                    <Space wrap size={[8, 8]}>
-                      {oauthConnection.grantedScopes.map((scope) => (
-                        <Tag key={scope}>{scope}</Tag>
-                      ))}
-                    </Space>
-                  </Descriptions.Item>
-                ) : null}
-              </Descriptions>
-            </div>
-          ) : null}
-          {oauthState === "expired" ? (
-            <Alert
-              showIcon
-              type="warning"
-              message={t("admin.dataSourceOauthExpired")}
-              description={t("admin.dataSourceOauthExpiredDesc")}
-            />
-          ) : null}
-          {oauthState === "error" ? (
-            <Alert
-              showIcon
-              type="error"
-              message={t("admin.dataSourceOauthError")}
-              description={t("admin.dataSourceOauthErrorDesc")}
-            />
-          ) : null}
-        </Card>
-      );
+    if (selectedType !== "local") {
+      return null;
     }
 
     return (
@@ -468,13 +342,12 @@ export default function DataSourceWizardModal({
                                 ? t("admin.dataSourceFeishuTargetPlaceholderDrive")
                                 : t("admin.dataSourceFeishuTargetPlaceholderWiki")
                             }
-                            onChange={isEditMode ? undefined : onInvalidateConnection}
                           />
                         </Form.Item>
                       </>
                     )}
 
-                    {renderConnectionSection()}
+                    {selectedType === "local" ? renderConnectionSection() : null}
                   </Card>
 
                   <Card

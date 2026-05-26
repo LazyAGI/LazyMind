@@ -23,6 +23,36 @@ interface FileViewerProps {
   segment?: Segment;
 }
 
+const IMAGE_FILE_TYPES = [
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "bmp",
+  "webp",
+  "tiff",
+  "tif",
+];
+
+const VIDEO_FILE_TYPES = ["mp4", "webm", "ogg", "ogv", "mov", "m4v"];
+
+const MEDIA_MIME_TYPES: Record<string, string> = {
+  bmp: "image/bmp",
+  gif: "image/gif",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  m4v: "video/mp4",
+  mov: "video/quicktime",
+  mp4: "video/mp4",
+  ogg: "video/ogg",
+  ogv: "video/ogg",
+  png: "image/png",
+  tif: "image/tiff",
+  tiff: "image/tiff",
+  webm: "video/webm",
+  webp: "image/webp",
+};
+
 const FileViewer = (props: FileViewerProps) => {
   const { t } = useTranslation();
   const { file, segment } = props;
@@ -32,6 +62,7 @@ const FileViewer = (props: FileViewerProps) => {
   const [meta, setMeta] = useState<Record<string, unknown> | null>(null);
   const [content, setContent] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [mediaObjectUrl, setMediaObjectUrl] = useState("");
 
   useEffect(() => {
     if (!segment) {
@@ -59,31 +90,39 @@ const FileViewer = (props: FileViewerProps) => {
     }
   }, [segment?.meta, segment?.content]);
 
-  const fileType = useMemo(() => {
+  const fileSuffix = useMemo(() => {
     const suffixFromUrl = FileUtils.getFileTypeFromURI(resolvedFileUrl || (file as string));
     const suffixFromName = FileUtils.getFileTypeFromURI(props.fileName || "");
-    const suffix = suffixFromUrl || suffixFromName;
+    return suffixFromUrl || suffixFromName;
+  }, [file, props.fileName, resolvedFileUrl]);
 
-    if (["txt", "md", "json", "log", "csv"].includes(suffix)) {
+  const fileType = useMemo(() => {
+    if (["txt", "md", "json", "log", "csv"].includes(fileSuffix)) {
       return "text";
     }
-    if (["html", "xml", "svg"].includes(suffix)) {
+    if (["html", "xml", "svg"].includes(fileSuffix)) {
       return "html";
     }
-    if (["pdf"].includes(suffix)) {
+    if (["pdf"].includes(fileSuffix)) {
       return "pdf";
     }
-    if (["pptx", "ppt"].includes(suffix)) {
+    if (["pptx", "ppt"].includes(fileSuffix)) {
       return "pptx";
     }
-    if (["docx", "doc"].includes(suffix)) {
+    if (["docx", "doc"].includes(fileSuffix)) {
       return "docx";
     }
-    if (["xlsx", "xls"].includes(suffix)) {
+    if (["xlsx", "xls"].includes(fileSuffix)) {
       return "excel";
     }
+    if (IMAGE_FILE_TYPES.includes(fileSuffix)) {
+      return "image";
+    }
+    if (VIDEO_FILE_TYPES.includes(fileSuffix)) {
+      return "video";
+    }
     return "unknown";
-  }, [file, props.fileName, resolvedFileUrl]);
+  }, [fileSuffix]);
 
   const getFileData = useCallback(
     async (
@@ -147,6 +186,24 @@ const FileViewer = (props: FileViewerProps) => {
       });
   }, [resolvedFileUrl, getFileData]);
 
+  useEffect(() => {
+    if (!fileData || (fileType !== "image" && fileType !== "video")) {
+      setMediaObjectUrl("");
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(
+      new Blob([fileData], {
+        type: MEDIA_MIME_TYPES[fileSuffix] || undefined,
+      }),
+    );
+    setMediaObjectUrl(objectUrl);
+
+    return () => {
+      URL.revokeObjectURL(objectUrl);
+    };
+  }, [fileData, fileSuffix, fileType]);
+
   const renderLoading = useMemo(() => {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2">
@@ -199,6 +256,28 @@ const FileViewer = (props: FileViewerProps) => {
         );
       case "pptx":
         return <RenderPpt fileData={fileData} />;
+      case "image":
+        return mediaObjectUrl ? (
+          <div className="file-viewer-media-container">
+            <img
+              alt={props.fileName}
+              className="file-viewer-media file-viewer-image"
+              src={mediaObjectUrl}
+            />
+          </div>
+        ) : null;
+      case "video":
+        return mediaObjectUrl ? (
+          <div className="file-viewer-media-container">
+            <video
+              className="file-viewer-media file-viewer-video"
+              controls
+              preload="metadata"
+              src={mediaObjectUrl}
+              title={props.fileName}
+            />
+          </div>
+        ) : null;
       case "unknown":
       default:
         return (
@@ -215,8 +294,8 @@ const FileViewer = (props: FileViewerProps) => {
             {t("knowledge.previewUnsupported")}
           </div>
         );
-    }
-  }, [fileData, content, fileType, meta]);
+      }
+  }, [fileData, content, fileType, mediaObjectUrl, meta, props.fileName]);
 
   return (
     <>

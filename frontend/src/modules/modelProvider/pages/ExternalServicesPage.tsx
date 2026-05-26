@@ -1,12 +1,5 @@
-import { Alert, Button, Form, Input, Select, Switch, Tag, Tooltip } from "antd";
-import type { FormInstance } from "antd";
-import {
-  CloudServerOutlined,
-  KeyOutlined,
-  QuestionCircleOutlined,
-  SearchOutlined,
-  ToolOutlined,
-} from "@ant-design/icons";
+import { Alert, Form, Input, Select, Tag } from "antd";
+import { CloudServerOutlined, ToolOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 
 type ExternalServiceKey =
@@ -25,7 +18,6 @@ interface ExternalServiceConfig {
   descKey: string;
   category: ServiceCategoryKey;
   providerOptions: string[];
-  currentKeyPreview?: string;
   status: "configured" | "missing" | "tbd";
 }
 
@@ -33,7 +25,6 @@ interface ExternalServiceFormValues {
   provider?: string;
   baseUrl?: string;
   apiKey?: string;
-  enabled?: boolean;
 }
 
 const serviceCategories: Array<{
@@ -63,7 +54,6 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     descKey: "modelProvider.external.mineruDesc",
     category: "parsing",
     providerOptions: ["MinerU", "Custom"],
-    currentKeyPreview: "mu-a****91f2",
     status: "configured",
   },
   {
@@ -80,7 +70,6 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     descKey: "modelProvider.external.embeddingDesc",
     category: "parsing",
     providerOptions: ["Qwen", "OpenAI", "SiliconFlow", "Custom"],
-    currentKeyPreview: "sk-e****7c3a",
     status: "configured",
   },
   {
@@ -97,7 +86,6 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     descKey: "modelProvider.external.googleDesc",
     category: "tools",
     providerOptions: ["Google CSE"],
-    currentKeyPreview: "gcs-****09bd",
     status: "configured",
   },
   {
@@ -109,36 +97,6 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     status: "missing",
   },
 ];
-
-function maskKeyPreview(value?: string) {
-  const normalized = (value || "").trim();
-  if (!normalized) {
-    return "";
-  }
-  if (normalized.length <= 8) {
-    return "****";
-  }
-  return `${normalized.slice(0, 4)}****${normalized.slice(-4)}`;
-}
-
-function ServiceKeyPreview({
-  form,
-  service,
-}: {
-  form: FormInstance<Record<ExternalServiceKey, ExternalServiceFormValues>>;
-  service: ExternalServiceConfig;
-}) {
-  const { t } = useTranslation();
-  const apiKey = Form.useWatch([service.key, "apiKey"], form);
-  const preview = maskKeyPreview(apiKey) || service.currentKeyPreview || t("modelProvider.external.noKey");
-
-  return (
-    <span className="model-provider-key-preview">
-      <KeyOutlined />
-      {t("modelProvider.external.previewOnly", { preview })}
-    </span>
-  );
-}
 
 export default function ExternalServicesPage() {
   const { t } = useTranslation();
@@ -180,9 +138,6 @@ export default function ExternalServicesPage() {
                         </div>
                         <p>{t(service.descKey)}</p>
                       </div>
-                      <Form.Item name={[service.key, "enabled"]} initialValue valuePropName="checked">
-                        <Switch aria-label={t("modelProvider.external.enableAria", { name: t(service.titleKey) })} />
-                      </Form.Item>
                     </div>
 
                     <div className="model-provider-service-fields">
@@ -225,16 +180,6 @@ export default function ExternalServicesPage() {
                           visibilityToggle={false}
                         />
                       </Form.Item>
-                    </div>
-
-                    <div className="model-provider-service-footer">
-                      <ServiceKeyPreview form={form} service={service} />
-                      {service.status === "missing" ? (
-                        <Tag icon={<SearchOutlined />}>{t("modelProvider.external.toolUnavailable")}</Tag>
-                      ) : null}
-                      <Tooltip title={t("modelProvider.external.frontendOnlyTip")}>
-                        <Button icon={<QuestionCircleOutlined />} />
-                      </Tooltip>
                     </div>
                   </article>
                 ))}

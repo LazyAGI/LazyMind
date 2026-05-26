@@ -2,7 +2,7 @@ import { Card, Col, Row, Typography } from "antd";
 
 const { Text } = Typography;
 
-interface DataSourceSummaryCardsProps {
+export interface DataSourceSummaryCardsProps {
   t: any;
   total: number;
   activeCount: number;

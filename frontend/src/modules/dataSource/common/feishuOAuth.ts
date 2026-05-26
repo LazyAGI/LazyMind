@@ -2,7 +2,6 @@ import { AgentAppsAuth } from "@/components/auth";
 import { BASE_URL } from "@/components/request";
 import i18n from "@/i18n";
 
-
 const API_BASE = `${BASE_URL || window.location.origin}/api/authservice/v1`;
 const RESULT_STORAGE_KEY = "lazymind:datasource:feishu-oauth:result";
 const DRAFT_STORAGE_KEY = "lazymind:datasource:feishu-oauth:draft";

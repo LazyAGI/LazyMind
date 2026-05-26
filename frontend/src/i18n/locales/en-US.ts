@@ -135,7 +135,6 @@ const enUS = {
     confirmRemoveProviderDesc: "Module selections that use this provider will be cleared.",
     removeProviderAria: "Remove {{name}}",
     providerModelListAria: "{{name}} model list",
-    providerCapabilitiesAria: "{{name}} supported capabilities",
     providerGroupsAria: "{{name}} connection groups",
     verified: "Verified",
     pendingVerify: "Pending",
@@ -317,12 +316,8 @@ const enUS = {
       systemOnly: "System config only",
       keyExtra: "The field is empty by default. If unchanged, the backend keeps the original key.",
       keyPlaceholder: "Enter or replace API Key; leave blank to keep",
-      previewOnly: "Masked preview: {{preview}}",
-      noKey: "Not configured",
-      frontendOnlyTip: "This is frontend UI only for now; backend storage policy will be connected later.",
       testConnection: "Test Connection",
       policyReady: "Policy ready",
-      enableAria: "Enable {{name}}",
       securityEncrypted: "Keys are encrypted with AES-256-GCM before database writes; KEY_ENCRYPTION_SECRET stays server-side",
       securityMasked: "GET /api/v1/keys only returns first 4 + **** + last 4 characters",
       securityServerSide: "External API calls happen server-side; plaintext keys are not logged",
@@ -330,7 +325,6 @@ const enUS = {
       shareDesc: "Group admins can share concrete default model usage settings. Members see shared settings read-only and may override with personal config; Personal Mode locks shared config on.",
       shareToggle: "Share with group members",
       priorityOrder: "User > Group > System",
-      toolUnavailable: "Not configured",
       apiContractTitle: "Backend API Contract",
       apiContractDesc: "Plaintext keys exist only briefly in server memory. The frontend provides no plaintext retrieval path, and empty edit submissions should keep the original key.",
       status: {
@@ -806,7 +800,7 @@ const enUS = {
     supportedFolderImport: "Folder import supported",
     supportedZipFile: "Only ZIP archive files are supported (.zip)",
     supportedDocTypes:
-      "PDF, DOCX, DOC, JPG, JPEG, PNG, GIF, BMP, WEBP, TIFF, TIF, MP3 and MP4 files are supported",
+      "PDF, DOCX, DOC, HWP, PPTX, PPT, PPTM, JPG, JPEG, PNG, GIF, BMP, WEBP, TIFF, TIF, IPYNB, EPUB, MD, MBOX, CSV, XLS, XLSX, MP3, MP4, TXT and XML files are supported",
     zipRootOnly: "ZIP archives only support files in the root directory; nested folders will be ignored",
     uploadLimitHint: "Up to 300 files per upload, each file must be under 500MB, total size under 1GB",
     uploadSecurityRiskTip:
@@ -837,6 +831,7 @@ const enUS = {
     segmentDocument: "Document Segments",
     segmentSplitBlock: "Segment Blocks",
     segmentSplitLine: "Segment Lines",
+    imageList: "Image List",
     segmentSummary: "Document Summary",
     segmentQa: "Document Q&A",
     imageCaption: "Image Caption Extraction",
@@ -962,7 +957,7 @@ const enUS = {
     dataSourceFeishuLockHint:
       "Set App ID / App Secret first before selecting Feishu as a data source",
     dataSourceFeishuCredentialModalTitle: "Set Feishu App Credentials",
-    dataSourceFeishuCredentialSaveAndSelect: "Save and Select Feishu",
+    dataSourceFeishuCredentialSaveAndSelect: "Save and Authorize Feishu",
     dataSourceFeishuCredentialHint:
       "Feishu data source can only be selected and connected after credentials are set.",
     dataSourceFeishuCredentialSaved: "Feishu App ID / App Secret saved.",
@@ -1057,6 +1052,8 @@ const enUS = {
       "Authorization session expired. Please start Feishu OAuth again.",
     dataSourceOauthStateMismatch:
       "Feishu authorization state verification failed. Please authorize again.",
+    dataSourceOauthRequiredBeforeSave:
+      "Feishu OAuth is not complete. Complete authorization before continuing configuration.",
     dataSourceOauthManualCallbackTitle: "Complete OAuth callback manually",
     dataSourceOauthManualCallbackDesc:
       "After Feishu authorization finishes, copy the full redirect URL from the callback page and paste it here to continue calling the backend callback endpoint.",
@@ -1521,21 +1518,29 @@ const enUS = {
     memorySkillShareNoDescription: "No skill description",
     memorySkillShareUnknownSender: "Unknown sender",
     memorySkillShareUnknownRecipient: "Recipient information unavailable",
-    memoryDiffDialogTitle: "Algorithm Change Review",
+    memoryDiffDialogTitle: "Review Suggested Changes",
     memoryDiffAlgorithmHint:
-      "The following content was suggested by the algorithm. Please approve or cancel.",
+      "Review the system-generated suggestions before applying them to the official content.",
     memoryDiffChangedFields: "Changed fields",
     memoryDiffBefore: "Original",
     memoryDiffAfter: "After",
     memoryDiffApprove: "Apply Changes",
     memoryDiffReject: "Reject and Close",
     memoryDiffKeepOriginal: "Keep Original and Close",
-    memoryDiffStepChooseTitle: "Choose Changes",
+    memoryDiffStepChooseTitle: "Select Suggestions",
     memoryDiffStepPreviewTitle: "Preview Result",
     memoryDiffStepChooseHint:
-      "Review the original text first, then decide each suggestion. By default, no action is selected.",
+      "The current content is on the left and the suggestions are on the right. Select the suggestions to apply, then preview the result.",
     memoryDiffStepPreviewHint:
-      "Preview the merged result before applying the selected changes.",
+      "Check the merged preview, then apply it to the official content when it looks right.",
+    memoryDiffBackendChooseHint:
+      "The system-generated suggestions are on the right. Select the suggestions to include in the draft, then generate the preview.",
+    memoryDiffSkillDraftPreviewHint:
+      "This is the skill draft preview generated from your selected suggestions. It will replace the official skill only after you confirm.",
+    memoryDiffMemoryDraftPreviewHint:
+      "This is the memory draft preview generated from your selected suggestions. It will replace the official memory only after you confirm.",
+    memoryDiffBackendFallbackHint:
+      "Review the system-generated skill suggestions before accepting or rejecting them.",
     memoryDiffPreviewMode: "Step 2 Mode",
     memoryDiffPreviewModeDiff: "Diff Preview",
     memoryDiffPreviewModeQa: "Q&A Mode (Manual Edit)",
@@ -1553,7 +1558,7 @@ const enUS = {
     memoryDiffManualPreviewTitle: "Markdown Preview",
     memoryDiffManualEditorPlaceholder: "Enter the revised content",
     memoryDiffManualSaveSuccess: "Manual edits saved. Diff updated.",
-    memoryDiffStepNext: "Next: Preview",
+    memoryDiffStepNext: "Next: Preview Result",
     memoryDiffStepPrev: "Back: Edit Selection",
     memoryDiffDiscardDraftAndBack: "Discard Draft and Go Back",
     memoryDiffDiscardDraftAndBackConfirmTitle: "Discard Draft and Go Back?",

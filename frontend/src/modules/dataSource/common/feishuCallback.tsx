@@ -12,7 +12,6 @@ import {
   type FeishuDataSourceOAuthMessage,
 } from "./feishuOAuth";
 
-
 const { Paragraph } = Typography;
 
 type CallbackStatus = "loading" | "success" | "error";

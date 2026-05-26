@@ -284,11 +284,11 @@ export default function MemoryReviewPage() {
             message={
               canPreviewBackendDraft
                 ? activeReviewStep === 0
-                  ? "先审阅原始建议，再决定是否纳入草稿生成。"
+                  ? t("admin.memoryDiffBackendChooseHint")
                   : activeProposal.tab === "skills"
-                    ? "以下内容来自技能 draft-preview，确认后才会覆盖正式技能。"
-                    : "以下内容来自后端 draft-preview，确认后才会覆盖正式 memory。"
-                : "先审阅技能变更建议，再决定接受或拒绝。"
+                    ? t("admin.memoryDiffSkillDraftPreviewHint")
+                    : t("admin.memoryDiffMemoryDraftPreviewHint")
+                : t("admin.memoryDiffBackendFallbackHint")
             }
           />
           {activeReviewStep === 0 || !canPreviewBackendDraft ? (

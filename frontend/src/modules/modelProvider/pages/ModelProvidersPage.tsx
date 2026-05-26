@@ -247,18 +247,6 @@ function getProviderLogoUrl(name: string) {
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(match[1])}&sz=96`;
 }
 
-function getProviderSearchText(provider: ProviderOption) {
-  return [
-    provider.id,
-    provider.name,
-    provider.source,
-    provider.headline,
-    ...provider.models.map((model) => model.name),
-  ]
-    .join(" ")
-    .toLowerCase();
-}
-
 function mapModelTypeToCapability(modelType?: string): ModelCapability {
   const normalized = (modelType || "").toLowerCase();
   if (normalized === ModelProviderModelType.MultimodalEmbedding) return "MULTIMODAL_EMBEDDING";
@@ -1127,12 +1115,6 @@ export default function ModelProviderPage() {
                           className="model-provider-added-models"
                           id={modelListId}
                         >
-                          <div className="model-provider-added-tags" aria-label={t("modelProvider.providerCapabilitiesAria", { name: provider.name })}>
-                            {provider.capabilities.map((capability) => (
-                              <CapabilityTag label={getCapabilityLabel(capability)} key={capability} />
-                            ))}
-                          </div>
-
                           <div className="model-provider-group-rows" aria-label={t("modelProvider.providerGroupsAria", { name: provider.name })}>
                             {provider.groups.map((group) => {
                               const verifyKey = `${provider.id}:${group.id}`;

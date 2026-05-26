@@ -22,6 +22,10 @@ const ALLOWED_FILE_TYPES = [
   "pdf",
   "docx",
   "doc",
+  "hwp",
+  "pptx",
+  "ppt",
+  "pptm",
   "jpg",
   "jpeg",
   "png",
@@ -30,8 +34,17 @@ const ALLOWED_FILE_TYPES = [
   "webp",
   "tiff",
   "tif",
+  "ipynb",
+  "epub",
+  "md",
+  "mbox",
+  "csv",
+  "xls",
+  "xlsx",
   "mp3",
   "mp4",
+  "txt",
+  "xml",
 ];
 const SINGLE_FILE_MAX_SIZE = 500 * 1024 * 1024;
 const TOTAL_FILE_MAX_SIZE = 1 * 1024 * 1024 * 1024;

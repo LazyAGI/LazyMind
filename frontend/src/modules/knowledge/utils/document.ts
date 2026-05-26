@@ -1,6 +1,6 @@
 import FileUtils from "./file";
 
-export const DETAIL_UNSUPPORTED_FILE_TYPES = [
+export const IMAGE_DOCUMENT_FILE_TYPES = [
   "jpg",
   "jpeg",
   "png",
@@ -9,11 +9,18 @@ export const DETAIL_UNSUPPORTED_FILE_TYPES = [
   "webp",
   "tiff",
   "tif",
+];
+
+export const DETAIL_UNSUPPORTED_FILE_TYPES = [
   "mp3",
-  "mp4",
 ];
 
 export function isDocumentDetailUnsupported(fileName?: string) {
   const suffix = FileUtils.getSuffix(fileName || "");
   return DETAIL_UNSUPPORTED_FILE_TYPES.includes(suffix);
+}
+
+export function isImageDocument(fileName?: string) {
+  const suffix = FileUtils.getSuffix(fileName || "");
+  return IMAGE_DOCUMENT_FILE_TYPES.includes(suffix);
 }
