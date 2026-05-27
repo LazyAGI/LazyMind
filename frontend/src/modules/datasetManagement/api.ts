@@ -10,6 +10,7 @@ import type {
 import { mockDatasets, mockDatasetItems, mockImportRecords } from "./constants";
 import { mockKnowledgeBases } from "./shared";
 import { normalizeItemFormValues } from "./utils/datasetValidation";
+import { AgentAppsAuth } from "@/components/auth";
 
 let datasets = [...mockDatasets];
 let datasetItems: Record<string, DatasetItem[]> = Object.fromEntries(
@@ -31,6 +32,11 @@ function now() {
 
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function getCurrentUsername() {
+  const userInfo = AgentAppsAuth.getUserInfo();
+  return userInfo?.displayName || userInfo?.username || userInfo?.userId || "admin";
 }
 
 function refreshDatasetStats(datasetId: string) {
@@ -79,7 +85,8 @@ export async function createDataset(payload: {
     id: createId("dataset"),
     name: payload.name,
     description: payload.description,
-    owner_id: "current-user",
+    owner_id: AgentAppsAuth.getUserInfo()?.userId || "current-user",
+    owner_name: getCurrentUsername(),
     group_id: "current-group",
     created_at: now(),
     updated_at: now(),

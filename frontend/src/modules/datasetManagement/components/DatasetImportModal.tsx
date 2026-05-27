@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Button,
   Modal,
-  Select,
   Steps,
   Table,
   Upload,
@@ -16,10 +15,8 @@ import type {
   DatasetImportRow,
   DatasetItem,
   DatasetItemField,
-  FieldMapping,
   ImportStep,
 } from "../shared";
-import { datasetItemFields, requiredDatasetItemFields } from "../shared";
 import DatasetTemplateDownload from "./DatasetTemplateDownload";
 import {
   buildImportPreview,
@@ -31,7 +28,6 @@ import {
 
 const importSteps: Array<{ key: ImportStep; title: string }> = [
   { key: "selectFile", title: "选择文件" },
-  { key: "fieldMapping", title: "字段映射" },
   { key: "preview", title: "数据预览" },
   { key: "result", title: "导入结果" },
 ];
@@ -69,9 +65,6 @@ export default function DatasetImportModal({
 }: DatasetImportModalProps) {
   const [step, setStep] = useState<ImportStep>("selectFile");
   const [file, setFile] = useState<File | null>(null);
-  const [rawRows, setRawRows] = useState<Record<string, unknown>[]>([]);
-  const [sourceFields, setSourceFields] = useState<string[]>([]);
-  const [fieldMapping, setFieldMapping] = useState<FieldMapping>({});
   const [previewRows, setPreviewRows] = useState<DatasetImportRow[]>([]);
   const [onlyErrors, setOnlyErrors] = useState(false);
   const [parsing, setParsing] = useState(false);
@@ -82,9 +75,6 @@ export default function DatasetImportModal({
     if (!open) {
       setStep("selectFile");
       setFile(null);
-      setRawRows([]);
-      setSourceFields([]);
-      setFieldMapping({});
       setPreviewRows([]);
       setOnlyErrors(false);
       setImporting(false);
@@ -97,10 +87,6 @@ export default function DatasetImportModal({
   }, [initialFile, open]);
 
   const currentStepIndex = importSteps.findIndex((item) => item.key === step);
-  const missingMappings = useMemo(
-    () => getMissingRequiredMappings(fieldMapping),
-    [fieldMapping],
-  );
   const visiblePreviewRows = onlyErrors
     ? previewRows.filter((row) => row.errors.length > 0)
     : previewRows;
@@ -123,25 +109,19 @@ export default function DatasetImportModal({
       });
       const fields = Array.from(fieldSet);
       const mapping = createAutoFieldMapping(fields);
-      setRawRows(rows);
-      setSourceFields(fields);
-      setFieldMapping(mapping);
-      setStep("fieldMapping");
+      const missing = getMissingRequiredMappings(mapping);
+      if (missing.length > 0) {
+        message.error(`必填字段未识别：${missing.map((field) => fieldLabels[field]).join("、")}`);
+        return;
+      }
+      setPreviewRows(buildImportPreview(rows, mapping));
+      setOnlyErrors(false);
+      setStep("preview");
     } catch (error: any) {
       message.error(error?.message || "文件解析失败");
     } finally {
       setParsing(false);
     }
-  };
-
-  const handleBuildPreview = () => {
-    const missing = getMissingRequiredMappings(fieldMapping);
-    if (missing.length > 0) {
-      message.error(`必填字段未映射：${missing.map((field) => fieldLabels[field]).join("、")}`);
-      return;
-    }
-    setPreviewRows(buildImportPreview(rawRows, fieldMapping));
-    setStep("preview");
   };
 
   const handleConfirmImport = async () => {
@@ -207,19 +187,9 @@ export default function DatasetImportModal({
         </Button>,
       ];
     }
-    if (step === "fieldMapping") {
-      return [
-        <Button key="prev" onClick={() => setStep("selectFile")}>
-          上一步
-        </Button>,
-        <Button key="next" type="primary" onClick={handleBuildPreview}>
-          下一步
-        </Button>,
-      ];
-    }
     if (step === "preview") {
       return [
-        <Button key="prev" onClick={() => setStep("fieldMapping")}>
+        <Button key="prev" onClick={() => setStep("selectFile")}>
           上一步
         </Button>,
         <Button key="confirm" type="primary" loading={importing} onClick={handleConfirmImport}>
@@ -279,44 +249,6 @@ export default function DatasetImportModal({
               支持 .xlsx / .xls / .csv / .json，一次只能上传一个文件
             </p>
           </Upload.Dragger>
-        </div>
-      ) : null}
-
-      {step === "fieldMapping" ? (
-        <div className="dataset-import-step">
-          {missingMappings.length > 0 ? (
-            <Alert
-              showIcon
-              type="warning"
-              message={`必填字段未映射：${missingMappings
-                .map((field) => fieldLabels[field])
-                .join("、")}`}
-            />
-          ) : null}
-          <div className="dataset-field-mapping-list">
-            {sourceFields.map((sourceField) => (
-              <div key={sourceField} className="dataset-field-mapping-row">
-                <span className="dataset-field-source">{sourceField}</span>
-                <span className="dataset-field-arrow">→</span>
-                <Select
-                  allowClear
-                  className="dataset-field-target"
-                  value={fieldMapping[sourceField] || undefined}
-                  placeholder="不导入"
-                  onChange={(value) =>
-                    setFieldMapping((previous) => ({
-                      ...previous,
-                      [sourceField]: (value || "") as DatasetItemField | "",
-                    }))
-                  }
-                  options={datasetItemFields.map((field) => ({
-                    label: `${fieldLabels[field]}${requiredDatasetItemFields.includes(field) ? " *" : ""}`,
-                    value: field,
-                  }))}
-                />
-              </div>
-            ))}
-          </div>
         </div>
       ) : null}
 
