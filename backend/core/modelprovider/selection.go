@@ -67,7 +67,7 @@ type setSharedModelRequest struct {
 
 type modelReadyResponse struct {
 	Ready        bool   `json:"ready"`
-	Source       string `json:"source,omitempty"`        // "own" | "shared"
+	Source       string `json:"source,omitempty"`         // "own" | "shared"
 	SharedByName string `json:"shared_by_name,omitempty"` // sharer's display name
 	SharedByID   string `json:"shared_by_id,omitempty"`   // sharer's user_id
 	ProviderName string `json:"provider_name,omitempty"`  // e.g. "OpenAI"
