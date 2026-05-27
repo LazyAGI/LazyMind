@@ -17,7 +17,7 @@ func (DefaultModelProvider) TableName() string { return "default_model_providers
 
 // DefaultModel is a built-in model row (model name, type, base URL) under a DefaultModelProvider.
 // ProviderName redundantly stores the provider display name (matches default_model_providers.name) for list UIs without joining.
-// ModelType stores UI categories such as llm, embedding, VLM (column model_type in DB; SQL keyword "type" avoided).
+// ModelType stores runtime_models.yaml role keys such as llm, embed_main, vlm (column model_type in DB; SQL keyword "type" avoided).
 type DefaultModel struct {
 	ID                     string     `gorm:"column:id;type:varchar(64);primaryKey"`
 	DefaultModelProviderID string     `gorm:"column:default_model_provider_id;type:varchar(64);not null;uniqueIndex:uk_default_models_provider_name,priority:1"`

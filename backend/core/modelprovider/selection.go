@@ -15,24 +15,24 @@ import (
 	"lazymind/core/store"
 )
 
-// Allowed keys match frontend modelTypeMap (selection slot types).
+// Allowed keys match runtime_models.yaml role keys (selection slot types).
 var allowedSelectionModelTypes = map[string]struct{}{
-	"llm-evo":              {},
-	"llm-chat":             {},
-	"VLM":                  {},
-	"text2image":           {},
-	"embedding":            {},
-	"tts":                  {},
-	"image_editing":        {},
-	"stt":                  {},
-	"rerank":               {},
-	"multimodal_embedding": {},
+	"llm":           {},
+	"evo_llm":       {},
+	"vlm":           {},
+	"text2image":    {},
+	"embed_main":    {},
+	"tts":           {},
+	"image_editing": {},
+	"stt":           {},
+	"reranker":      {},
+	"embed_image":   {},
 }
 
 // autoShareModelTypes are set share=true when an admin saves a selection so other users can use them.
 var autoShareModelTypes = map[string]struct{}{
-	"embedding":            {},
-	"multimodal_embedding": {},
+	"embed_main":  {},
+	"embed_image": {},
 }
 
 type selectedModelUpsertItem struct {
@@ -165,16 +165,16 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// When multimodal_embedding is configured for the first time, clear lazy_mode so
+	// When embed_image is configured for the first time, clear lazy_mode so
 	// image embedding runs immediately. When it is cleared, reset lazy_mode to embed.
-	multimodalModelID, hasMultimodalSelection := selectionByType["multimodal_embedding"]
+	multimodalModelID, hasMultimodalSelection := selectionByType["embed_image"]
 	triggerLazyModeClear := false
 	checkLazyModeResetAfterSave := false
 	if hasMultimodalSelection {
 		if multimodalModelID == "" {
 			checkLazyModeResetAfterSave = true
 		} else {
-			wasReady, err := IsModelReady(r.Context(), store.DB(), userID, "multimodal_embedding")
+			wasReady, err := IsModelReady(r.Context(), store.DB(), userID, "embed_image")
 			if err == nil && !wasReady {
 				hadAny, gerr := HasAnyMultimodalEmbeddingSelection(r.Context(), store.DB())
 				if gerr == nil && !hadAny {
@@ -387,7 +387,7 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 }
 
 // HasAnyMultimodalEmbeddingSelection reports whether any user still has a valid
-// multimodal_embedding selection (joined model row not soft-deleted).
+// embed_image selection (joined model row not soft-deleted).
 func HasAnyMultimodalEmbeddingSelection(ctx context.Context, db *gorm.DB) (bool, error) {
 	var count int64
 	err := db.WithContext(ctx).
@@ -397,7 +397,7 @@ func HasAnyMultimodalEmbeddingSelection(ctx context.Context, db *gorm.DB) (bool,
 				"m.id = usm.user_model_provider_group_model_id AND "+
 				"m.deleted_at IS NULL",
 		).
-		Where("usm.model_type = ?", "multimodal_embedding").
+		Where("usm.model_type = ?", "embed_image").
 		Count(&count).Error
 	if err != nil {
 		return false, err

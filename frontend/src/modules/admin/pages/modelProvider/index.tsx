@@ -291,16 +291,16 @@ const getAlgorithmProviderConfig = (
 });
 
 enum ModelProviderModelType {
-  VLM = "VLM",
+  VLM = "vlm",
   LLM = "llm",
-  LLMChat = "llm-chat",
-  LLMEvolution = "llm-evo",
-  Embedding = "embedding",
-  MultimodalEmbedding = "multimodal_embedding",
+  LLMChat = "llm",
+  LLMEvolution = "evo_llm",
+  Embedding = "embed_main",
+  MultimodalEmbedding = "embed_image",
   TextToImage = "text2image",
   TTS = "tts",
   STT = "stt",
-  Rerank = "rerank",
+  Rerank = "reranker",
   ImageEditing = "image_editing",
 }
 
@@ -326,8 +326,7 @@ const selectedModelTypeByCapability: Record<ModelCapability, ModelProviderModelT
 const selectedCapabilityByModelType: Record<string, ModelCapability> = {
   [ModelProviderModelType.LLMChat]: "LLM_CHAT",
   [ModelProviderModelType.LLMEvolution]: "LLM_SELF_EVOLUTION",
-  llm: "LLM_CHAT",
-  llm2: "LLM_SELF_EVOLUTION",
+  evo_llm: "LLM_SELF_EVOLUTION",
 };
 
 function normalizeProviderKey(value: string) {
@@ -368,13 +367,13 @@ function getProviderLogoUrl(name: string) {
 function mapModelTypeToCapability(modelType?: string): ModelCapability {
   const normalized = (modelType || "").toLowerCase();
   if (normalized === ModelProviderModelType.MultimodalEmbedding) return "MULTIMODAL_EMBEDDING";
-  if (normalized.includes("embedding")) return "EMBEDDING";
-  if (normalized.includes("rerank")) return "RERANK";
+  if (normalized === ModelProviderModelType.Embedding) return "EMBEDDING";
+  if (normalized === ModelProviderModelType.Rerank) return "RERANK";
   if (normalized === ModelProviderModelType.STT || normalized === "asr") return "ASR";
   if (normalized === ModelProviderModelType.TTS) return "TTS";
   if (normalized === ModelProviderModelType.ImageEditing) return "IMAGE_EDITING";
   if (normalized === ModelProviderModelType.TextToImage) return "TEXT_TO_IMAGE";
-  if (normalized === ModelProviderModelType.VLM.toLowerCase() || normalized.includes("vision")) return "VLM";
+  if (normalized === ModelProviderModelType.VLM || normalized.includes("vision")) return "VLM";
   return "LLM_CHAT";
 }
 

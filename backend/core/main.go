@@ -18,6 +18,7 @@ import (
 	"lazymind/core/common/readonlyorm"
 	"lazymind/core/log"
 	"lazymind/core/migrate"
+	"lazymind/core/modelprovider"
 	"lazymind/core/store"
 	"lazymind/core/wordgroup"
 )
@@ -86,6 +87,8 @@ func main() {
 	if err := migrate.RunUp(); err != nil {
 		log.Logger.Fatal().Err(err).Msg("run SQL migrations failed")
 	}
+	catalogPath := filepath.Join(".", "config", "model_catalog.yaml")
+	modelprovider.MustSeedModelCatalog(context.Background(), db.DB, catalogPath)
 
 	readonlyDriver := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DRIVER"))
 	readonlyDSN := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DSN"))

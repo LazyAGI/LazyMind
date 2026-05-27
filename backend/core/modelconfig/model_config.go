@@ -97,7 +97,7 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 }
 
 // LoadAdminEmbedConfig queries the first system-wide default embedding model
-// (is_default=true, model_type=embedding) across all users, and returns it as
+// (is_default=true, model_type=embed_main) across all users, and returns it as
 // an embed_main config map. This is the admin-configured embedding model shared
 // by all users for document parsing and knowledge-base search.
 // Returns nil when no default embedding model is configured.
@@ -111,7 +111,7 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 				"g.id = m.user_model_provider_group_id AND "+
 				"g.deleted_at IS NULL",
 		).
-		Where("m.model_type = ? AND m.is_default = ? AND m.deleted_at IS NULL", "embedding", true).
+		Where("m.model_type IN ? AND m.is_default = ? AND m.deleted_at IS NULL", []string{"embed_main", "embed_image"}, true).
 		Order("m.created_at ASC").
 		Limit(1).
 		Scan(&row).Error
@@ -139,20 +139,7 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 			"base_url": row.BaseURL,
 			"api_key":  row.APIKey,
 		}
-		switch strings.ToLower(strings.TrimSpace(row.ModelType)) {
-		case "llm", "llm-chat":
-			out["llm"] = cfg
-		case "llm-evo", "llm2":
-			out["evo_llm"] = cfg
-		case "embedding", "embed":
-			out["embed_main"] = cfg
-		case "rerank", "reranker":
-			out["reranker"] = cfg
-		case "multimodal_embedding", "cross_modal_embed":
-			out["embed_image"] = cfg
-		case "vlm", "vision":
-			out["vlm"] = cfg
-		}
+		out[strings.ToLower(strings.TrimSpace(row.ModelType))] = cfg
 	}
 	if len(out) == 0 {
 		return nil
