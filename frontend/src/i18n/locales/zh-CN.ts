@@ -206,6 +206,7 @@ const zhCN = {
     noModelSelectedForShare: "请先选择模型后再设置分享",
     shareOn: "已开启分享",
     shareOff: "未开启分享",
+    shareAdminTip: "仅管理员可分享，分享后，全平台的用户都可以使用",
     shared: "已分享",
     unshared: "未分享",
     shareEnabled: "分享已开启",
@@ -216,6 +217,7 @@ const zhCN = {
     embeddingReadyTip: "向量模型已就绪",
     modelNotReadyTip: "模型尚未就绪",
     modelReadyTip: "模型已就绪",
+    modelReadySharedTip: "模型已就绪（由 {{name}} 分享 · {{provider}} / {{model}}）",
     error: {
       searchFailed: "模型供应商搜索失败",
       loadProvidersFailed: "模型供应商加载失败",

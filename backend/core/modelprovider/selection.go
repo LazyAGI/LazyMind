@@ -66,8 +66,48 @@ type setSharedModelRequest struct {
 }
 
 type modelReadyResponse struct {
-	Ready  bool   `json:"ready"`
-	Source string `json:"source,omitempty"`
+	Ready        bool   `json:"ready"`
+	Source       string `json:"source,omitempty"`        // "own" | "shared"
+	SharedByName string `json:"shared_by_name,omitempty"` // sharer's display name
+	SharedByID   string `json:"shared_by_id,omitempty"`   // sharer's user_id
+	ProviderName string `json:"provider_name,omitempty"`  // e.g. "OpenAI"
+	ModelName    string `json:"model_name,omitempty"`     // e.g. "text-embedding-3-small"
+}
+
+type sharedModelDetail struct {
+	UserID       string
+	UserName     string
+	ProviderName string
+	ModelName    string
+}
+
+// getSharedModelDetail returns the detail of the active shared selection for the given model_type.
+// Returns nil (no error) if no shared selection exists.
+func getSharedModelDetail(ctx context.Context, db *gorm.DB, modelType string) (*sharedModelDetail, error) {
+	var row struct {
+		UserID       string `gorm:"column:user_id"`
+		UserName     string `gorm:"column:user_name"`
+		ProviderName string `gorm:"column:provider_name"`
+		ModelName    string `gorm:"column:model_name"`
+	}
+	err := db.WithContext(ctx).
+		Table("user_selected_models usm").
+		Joins("JOIN user_model_provider_group_models m ON m.id = usm.user_model_provider_group_model_id AND m.deleted_at IS NULL").
+		Where("usm.model_type = ? AND usm.share = ?", modelType, true).
+		Select("usm.user_id, usm.user_name, m.provider_name, m.name AS model_name").
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &sharedModelDetail{
+		UserID:       row.UserID,
+		UserName:     row.UserName,
+		ProviderName: row.ProviderName,
+		ModelName:    row.ModelName,
+	}, nil
 }
 
 // GetSelectedModels returns selected model rows for the current user.
@@ -379,7 +419,19 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if sharedCount > 0 {
-		common.ReplyOK(w, modelReadyResponse{Ready: true, Source: "shared"})
+		detail, detailErr := getSharedModelDetail(r.Context(), db, modelType)
+		if detailErr != nil {
+			common.ReplyOK(w, modelReadyResponse{Ready: true, Source: "shared"})
+			return
+		}
+		resp := modelReadyResponse{Ready: true, Source: "shared"}
+		if detail != nil {
+			resp.SharedByName = detail.UserName
+			resp.SharedByID = detail.UserID
+			resp.ProviderName = detail.ProviderName
+			resp.ModelName = detail.ModelName
+		}
+		common.ReplyOK(w, resp)
 		return
 	}
 

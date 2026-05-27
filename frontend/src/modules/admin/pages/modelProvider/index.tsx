@@ -249,6 +249,15 @@ const builtInProviders: ProviderOption[] = [
 
 type SelectedModels = Partial<Record<ModelCapability, string>>;
 
+type ModelReadyInfo = {
+  ready: boolean;
+  source?: 'own' | 'shared';
+  sharedByName?: string;
+  sharedByID?: string;
+  providerName?: string;
+  modelName?: string;
+} | null;
+
 type ModelOptionItem = {
   provider: ProviderOption;
   group: ProviderConnectionGroup;
@@ -637,7 +646,7 @@ export default function ModelProviderPage() {
   const [moduleModelOptions, setModuleModelOptions] = useState<Partial<Record<ModelCapability, ModelOptionItem[]>>>({});
   const [moduleModelLoading, setModuleModelLoading] = useState<Partial<Record<ModelCapability, boolean>>>({});
   const [shareStatus, setShareStatus] = useState<Partial<Record<ModelCapability, boolean>>>({});
-  const [modelReadyStatus, setModelReadyStatus] = useState<Partial<Record<ModelCapability, boolean | null>>>({});
+  const [modelReadyStatus, setModelReadyStatus] = useState<Partial<Record<ModelCapability, ModelReadyInfo>>>({});
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
   const modelFeaturesState = useModelFeatures();
   const imageEmbedEnabled =
@@ -808,17 +817,34 @@ export default function ModelProviderPage() {
         const readyResults = await Promise.allSettled(
           moduleConfigs.map(async (m) => {
             const dbModelType = selectedModelTypeByCapability[m.key];
-            const resp = await modelProviderRequest<{ ready: boolean; source?: string }>(
+            const resp = await modelProviderRequest<{
+              ready: boolean;
+              source?: string;
+              shared_by_name?: string;
+              shared_by_id?: string;
+              provider_name?: string;
+              model_name?: string;
+            }>(
               "GET",
               `/model_providers/models/ready?model_type=${encodeURIComponent(dbModelType)}`
             );
-            return { capability: m.key, ready: resp.ready };
+            return {
+              capability: m.key,
+              info: {
+                ready: resp.ready,
+                source: resp.source as 'own' | 'shared' | undefined,
+                sharedByName: resp.shared_by_name,
+                sharedByID: resp.shared_by_id,
+                providerName: resp.provider_name,
+                modelName: resp.model_name,
+              } as ModelReadyInfo,
+            };
           })
         );
-        const nextReadyStatus: Partial<Record<ModelCapability, boolean | null>> = {};
+        const nextReadyStatus: Partial<Record<ModelCapability, ModelReadyInfo>> = {};
         readyResults.forEach((result) => {
           if (result.status === 'fulfilled') {
-            nextReadyStatus[result.value.capability] = result.value.ready;
+            nextReadyStatus[result.value.capability] = result.value.info;
           }
         });
         setModelReadyStatus(nextReadyStatus);
@@ -1466,7 +1492,7 @@ export default function ModelProviderPage() {
                         </Tooltip>
                       ) : null}
                       {isAdmin ? (
-                        <Tooltip title={shareStatus[module.key] ? t("modelProvider.shareOn") : t("modelProvider.shareOff")}>
+                        <Tooltip title={t("modelProvider.shareAdminTip")}>
                           <Switch
                             aria-label={t("modelProvider.shareToggleAria", { title: moduleTitle })}
                             checked={!!shareStatus[module.key]}
@@ -1480,19 +1506,25 @@ export default function ModelProviderPage() {
                       ) : null}
                       {!isAdmin ? (
                         <Tooltip
-                          title={
-                            modelReadyStatus[module.key] === false
-                              ? t("modelProvider.modelNotReadyTip")
-                              : modelReadyStatus[module.key] === true
-                                ? t("modelProvider.modelReadyTip")
-                                : undefined
-                          }
+                          title={(() => {
+                            const info = modelReadyStatus[module.key];
+                            if (info == null) return undefined;
+                            if (!info.ready) return t("modelProvider.modelNotReadyTip");
+                            if (info.source === 'shared' && info.sharedByName) {
+                              return t("modelProvider.modelReadySharedTip", {
+                                name: info.sharedByName,
+                                provider: info.providerName || '',
+                                model: info.modelName || '',
+                              });
+                            }
+                            return t("modelProvider.modelReadyTip");
+                          })()}
                         >
                           <span style={{ pointerEvents: "auto" }} className="model-provider-ready-indicator" aria-label={t("modelProvider.readyStatusAria", { title: moduleTitle })}>
-                            {modelReadyStatus[module.key] === true ? (
+                            {modelReadyStatus[module.key]?.ready === true ? (
                               <CheckCircleOutlined className="model-provider-ready-icon is-ready" />
-                            ) : modelReadyStatus[module.key] === false ? (
-                              <MinusCircleOutlined className="model-provider-ready-icon is-not-ready" />
+                            ) : modelReadyStatus[module.key]?.ready === false ? (
+                              <MinusCircleOutlined className={`model-provider-ready-icon is-not-ready${module.required ? ' is-required' : ''}`} />
                             ) : null}
                           </span>
                         </Tooltip>
