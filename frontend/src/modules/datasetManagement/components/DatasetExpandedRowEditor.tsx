@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Button, Checkbox, Form, Input, Select, Space, Typography } from "antd";
+import { Button, Form, Input, Select, Space, Typography } from "antd";
 import type { DatasetItem, DatasetItemFormValues } from "../shared";
 import { questionTypeOptions, sourceLabelMap } from "../shared";
 import { joinListField } from "../utils/datasetValidation";
@@ -54,7 +54,13 @@ export default function DatasetExpandedRowEditor({
 
   const handleSave = async () => {
     const values = await form.validateFields();
-    onSave(values);
+    onSave({
+      ...values,
+      case_id: item?.case_id || values.case_id,
+      reference_doc_ids: joinListField(item?.reference_doc_ids) || values.reference_doc_ids,
+      reference_chunk_ids:
+        joinListField(item?.reference_chunk_ids) || values.reference_chunk_ids,
+    });
   };
 
   return (
@@ -84,9 +90,6 @@ export default function DatasetExpandedRowEditor({
               optionFilterProp="label"
             />
           </Form.Item>
-          <Form.Item name="case_id" label="Case ID">
-            <Input placeholder="可为空，系统可自动生成" />
-          </Form.Item>
         </div>
 
         <Form.Item
@@ -105,15 +108,9 @@ export default function DatasetExpandedRowEditor({
           <TextArea rows={4} placeholder="请输入参考上下文" />
         </Form.Item>
 
-        <div className="dataset-editor-grid">
+        <div className="dataset-editor-grid dataset-editor-grid-single">
           <Form.Item name="reference_doc" label="参考文档">
             <Input placeholder="请输入参考文档" />
-          </Form.Item>
-          <Form.Item name="reference_doc_ids" label="参考文档 ID">
-            <Input placeholder="多个 ID 使用英文逗号分隔" />
-          </Form.Item>
-          <Form.Item name="reference_chunk_ids" label="参考片段 ID">
-            <Input placeholder="多个 ID 使用英文逗号分隔" />
           </Form.Item>
         </div>
 
@@ -129,9 +126,6 @@ export default function DatasetExpandedRowEditor({
             {item?.source_session_id ? (
               <Text type="secondary">来源会话：{item.source_session_id}</Text>
             ) : null}
-            <Form.Item name="is_deleted" valuePropName="checked" noStyle>
-              <Checkbox>标记为删除</Checkbox>
-            </Form.Item>
           </Space>
           <Space>
             <Button onClick={onCancel}>取消</Button>
@@ -144,4 +138,3 @@ export default function DatasetExpandedRowEditor({
     </div>
   );
 }
-

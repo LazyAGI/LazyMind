@@ -29,7 +29,6 @@ import {
   getDataset,
   importDatasetItems,
   listDatasetItems,
-  listImportRecords,
   updateDatasetItem,
 } from "../../api";
 import DatasetExpandedRowEditor from "../../components/DatasetExpandedRowEditor";
@@ -37,18 +36,13 @@ import DatasetImportModal from "../../components/DatasetImportModal";
 import QuestionTypeSelect from "../../components/QuestionTypeSelect";
 import SourceTypeTag from "../../components/SourceTypeTag";
 import type {
-  DatasetImportRecord,
   DatasetImportResultState,
   DatasetItem,
   DatasetItemFormValues,
   DatasetItemSource,
   DatasetListItem,
 } from "../../shared";
-import {
-  formatDateTime,
-  formatFileSize,
-  sourceLabelMap,
-} from "../../shared";
+import { formatDateTime, sourceLabelMap } from "../../shared";
 import "../../index.scss";
 
 const { Paragraph } = Typography;
@@ -59,7 +53,6 @@ export default function DatasetDetailPage() {
   const { datasetId = "" } = useParams();
   const [dataset, setDataset] = useState<DatasetListItem | null>(null);
   const [items, setItems] = useState<DatasetItem[]>([]);
-  const [importRecords, setImportRecords] = useState<DatasetImportRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [keyword, setKeyword] = useState("");
@@ -70,7 +63,6 @@ export default function DatasetDetailPage() {
   const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
-  const [importRecordOpen, setImportRecordOpen] = useState(false);
   const [newItemVisible, setNewItemVisible] = useState(false);
 
   const loadDetail = async () => {
@@ -79,18 +71,16 @@ export default function DatasetDetailPage() {
     }
     setLoading(true);
     try {
-      const [datasetDetail, itemList, records] = await Promise.all([
+      const [datasetDetail, itemList] = await Promise.all([
         getDataset(datasetId),
         listDatasetItems(datasetId, {
           keyword,
           question_type: questionType,
           source,
         }),
-        listImportRecords(datasetId),
       ]);
       setDataset(datasetDetail);
       setItems(itemList);
-      setImportRecords(records);
     } catch (error: any) {
       message.error(error?.message || "数据集加载失败");
     } finally {
@@ -362,7 +352,6 @@ export default function DatasetDetailPage() {
               批量删除
             </Button>
           </Space>
-          <Button onClick={() => setImportRecordOpen(true)}>导入记录</Button>
         </div>
 
         <div className="dataset-detail-filters">
@@ -375,24 +364,28 @@ export default function DatasetDetailPage() {
             onChange={(event) => setKeyword(event.target.value)}
             onPressEnter={handleFilterSearch}
           />
-          <QuestionTypeSelect
-            allowClear
-            value={questionType}
-            onChange={setQuestionType}
-            placeholder="问题类型"
-          />
-          <Select
-            allowClear
-            className="dataset-source-filter"
-            value={source}
-            placeholder="来源"
-            onChange={setSource}
-            options={(["upload", "manual", "flowback"] as const).map((value) => ({
-              label: sourceLabelMap[value],
-              value,
-            }))}
-          />
-          <Button onClick={handleFilterSearch}>查询</Button>
+          <div className="dataset-filter-controls">
+            <QuestionTypeSelect
+              allowClear
+              value={questionType}
+              onChange={setQuestionType}
+              placeholder="问题类型"
+            />
+            <Select
+              allowClear
+              className="dataset-source-filter"
+              value={source}
+              placeholder="来源"
+              onChange={setSource}
+              options={(["upload", "manual", "flowback"] as const).map((value) => ({
+                label: sourceLabelMap[value],
+                value,
+              }))}
+            />
+            <Button type="primary" onClick={handleFilterSearch}>
+              查询
+            </Button>
+          </div>
         </div>
 
         <Table
@@ -462,38 +455,6 @@ export default function DatasetDetailPage() {
         onCancel={() => setImportModalOpen(false)}
         onImported={handleImported}
       />
-
-      <Modal
-        open={importRecordOpen}
-        title="导入记录"
-        footer={null}
-        width={760}
-        onCancel={() => setImportRecordOpen(false)}
-      >
-        <Table
-          rowKey="id"
-          size="small"
-          dataSource={importRecords}
-          pagination={false}
-          columns={[
-            { title: "文件名", dataIndex: "file_name", ellipsis: true },
-            {
-              title: "文件大小",
-              dataIndex: "file_size",
-              width: 100,
-              render: (value) => formatFileSize(value),
-            },
-            { title: "成功", dataIndex: "success_count", width: 80 },
-            { title: "失败", dataIndex: "failed_count", width: 80 },
-            {
-              title: "导入时间",
-              dataIndex: "created_at",
-              width: 150,
-              render: (value) => formatDateTime(value),
-            },
-          ]}
-        />
-      </Modal>
     </div>
   );
 }

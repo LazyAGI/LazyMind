@@ -6,6 +6,7 @@ export const mockDatasets: DatasetListItem[] = [
     name: "客服问答评测集",
     description: "售后场景评测数据",
     owner_id: "user-admin",
+    owner_name: "admin",
     group_id: "group-product",
     created_at: "2026-05-20T09:30:00",
     updated_at: "2026-05-27T10:30:00",
@@ -18,6 +19,7 @@ export const mockDatasets: DatasetListItem[] = [
     name: "模型供应商问答集",
     description: "配置类问题评测",
     owner_id: "user-admin",
+    owner_name: "admin",
     group_id: "group-rd",
     created_at: "2026-05-19T14:00:00",
     updated_at: "2026-05-26T18:20:00",
@@ -116,4 +118,3 @@ export const mockImportRecords: Record<string, DatasetImportRecord[]> = {
     },
   ],
 };
-

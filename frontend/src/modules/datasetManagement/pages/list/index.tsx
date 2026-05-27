@@ -29,7 +29,6 @@ import {
 } from "../../api";
 import DatasetFormModal from "../../components/DatasetFormModal";
 import DatasetImportModal from "../../components/DatasetImportModal";
-import SourceTypeTag from "../../components/SourceTypeTag";
 import type {
   DatasetFormValues,
   DatasetImportResultState,
@@ -211,25 +210,10 @@ export default function DatasetListPage() {
         render: (value) => value ?? 0,
       },
       {
-        title: "来源统计",
-        dataIndex: "source_stats",
-        width: 240,
-        render: (_, record) => (
-          <Space size={[6, 6]} wrap>
-            {(["upload", "manual", "flowback"] as const).map((source) => (
-              <span key={source} className="dataset-source-stat">
-                <SourceTypeTag source={source} />
-                <Text>{record.source_stats?.[source] || 0}</Text>
-              </span>
-            ))}
-          </Space>
-        ),
-      },
-      {
         title: "创建人",
         dataIndex: "owner_id",
         width: 120,
-        render: () => "当前用户",
+        render: (_, record) => record.owner_name || record.owner_id || "-",
       },
       {
         title: "更新时间",
@@ -239,11 +223,12 @@ export default function DatasetListPage() {
       },
       {
         title: "操作",
-        width: 210,
+        width: 240,
         fixed: "right",
         render: (_, record) => (
           <Space>
             <Button
+              type="link"
               size="small"
               icon={<EyeOutlined />}
               onClick={() => navigate(`/dataset-management/${record.id}`)}
@@ -251,6 +236,7 @@ export default function DatasetListPage() {
               进入
             </Button>
             <Button
+              type="link"
               size="small"
               icon={<EditOutlined />}
               onClick={() => handleOpenEdit(record)}
@@ -258,6 +244,7 @@ export default function DatasetListPage() {
               编辑
             </Button>
             <Button
+              type="link"
               danger
               size="small"
               icon={<DeleteOutlined />}
@@ -305,7 +292,7 @@ export default function DatasetListPage() {
           loading={loading}
           columns={columns}
           dataSource={datasets}
-          scroll={{ x: 1200 }}
+          scroll={{ x: 1050 }}
           pagination={{
             pageSize: 10,
             showTotal: (total) => `共 ${total} 条`,
