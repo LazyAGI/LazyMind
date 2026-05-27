@@ -1,6 +1,9 @@
+import type { UploadFile } from "antd";
+
 export type DatasetItemSource = "upload" | "flowback" | "manual";
+export type DatasetCreateMethod = "manual" | "upload";
 export type DatasetFileType = "xlsx" | "xls" | "csv" | "json";
-export type ImportStep = "selectFile" | "preview" | "result";
+export type ImportStep = "selectFile" | "fieldMapping" | "preview" | "result";
 
 export interface KnowledgeBaseOption {
   id: string;
@@ -12,7 +15,6 @@ export interface Dataset {
   name: string;
   description?: string;
   owner_id: string;
-  owner_name?: string;
   group_id: string;
   created_at: string;
   updated_at: string;
@@ -63,6 +65,8 @@ export interface DatasetFormValues {
   name: string;
   description?: string;
   knowledge_base_ids?: string[];
+  create_method: DatasetCreateMethod;
+  uploadFile?: UploadFile[];
 }
 
 export interface DatasetImportRecord {
@@ -172,3 +176,4 @@ export function formatFileSize(size?: number) {
   }
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
+

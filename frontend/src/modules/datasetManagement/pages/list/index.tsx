@@ -22,13 +22,18 @@ import { useNavigate } from "react-router-dom";
 import {
   createDataset,
   deleteDataset,
+  importDatasetItems,
   listDatasets,
   listKnowledgeBases,
   updateDataset,
 } from "../../api";
 import DatasetFormModal from "../../components/DatasetFormModal";
+import DatasetImportModal from "../../components/DatasetImportModal";
+import SourceTypeTag from "../../components/SourceTypeTag";
 import type {
   DatasetFormValues,
+  DatasetImportResultState,
+  DatasetItem,
   DatasetListItem,
   KnowledgeBaseOption,
 } from "../../shared";
@@ -46,6 +51,9 @@ export default function DatasetListPage() {
   const [formModalOpen, setFormModalOpen] = useState(false);
   const [editingDataset, setEditingDataset] = useState<DatasetListItem | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [uploadCreateDataset, setUploadCreateDataset] = useState<DatasetListItem | null>(null);
+  const [uploadCreateFile, setUploadCreateFile] = useState<File | null>(null);
 
   const loadDatasets = async (nextKeyword = keyword) => {
     setLoading(true);
@@ -118,6 +126,16 @@ export default function DatasetListPage() {
         knowledge_base_ids: values.knowledge_base_ids,
       });
 
+      if (values.create_method === "upload") {
+        const selectedFile = values.uploadFile?.[0]?.originFileObj as File | undefined;
+        setUploadCreateDataset(created);
+        setUploadCreateFile(selectedFile || null);
+        setFormModalOpen(false);
+        setImportModalOpen(true);
+        await loadDatasets();
+        return;
+      }
+
       message.success("数据集已创建");
       setFormModalOpen(false);
       navigate(`/dataset-management/${created.id}`);
@@ -125,6 +143,28 @@ export default function DatasetListPage() {
       message.error(error?.message || "保存失败");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleImported = async (
+    items: Array<Partial<DatasetItem>>,
+    result: DatasetImportResultState,
+    file: File | null,
+  ) => {
+    if (!uploadCreateDataset) {
+      return;
+    }
+    await importDatasetItems(uploadCreateDataset.id, file, items, result.failedCount);
+    await loadDatasets();
+  };
+
+  const handleCloseImport = () => {
+    const target = uploadCreateDataset;
+    setImportModalOpen(false);
+    setUploadCreateDataset(null);
+    setUploadCreateFile(null);
+    if (target) {
+      navigate(`/dataset-management/${target.id}`);
     }
   };
 
@@ -171,10 +211,25 @@ export default function DatasetListPage() {
         render: (value) => value ?? 0,
       },
       {
+        title: "来源统计",
+        dataIndex: "source_stats",
+        width: 240,
+        render: (_, record) => (
+          <Space size={[6, 6]} wrap>
+            {(["upload", "manual", "flowback"] as const).map((source) => (
+              <span key={source} className="dataset-source-stat">
+                <SourceTypeTag source={source} />
+                <Text>{record.source_stats?.[source] || 0}</Text>
+              </span>
+            ))}
+          </Space>
+        ),
+      },
+      {
         title: "创建人",
         dataIndex: "owner_id",
         width: 120,
-        render: (_, record) => record.owner_name || record.owner_id || "-",
+        render: () => "当前用户",
       },
       {
         title: "更新时间",
@@ -184,12 +239,11 @@ export default function DatasetListPage() {
       },
       {
         title: "操作",
-        width: 240,
+        width: 210,
         fixed: "right",
         render: (_, record) => (
           <Space>
             <Button
-              type="link"
               size="small"
               icon={<EyeOutlined />}
               onClick={() => navigate(`/dataset-management/${record.id}`)}
@@ -197,7 +251,6 @@ export default function DatasetListPage() {
               进入
             </Button>
             <Button
-              type="link"
               size="small"
               icon={<EditOutlined />}
               onClick={() => handleOpenEdit(record)}
@@ -205,7 +258,6 @@ export default function DatasetListPage() {
               编辑
             </Button>
             <Button
-              type="link"
               danger
               size="small"
               icon={<DeleteOutlined />}
@@ -253,7 +305,7 @@ export default function DatasetListPage() {
           loading={loading}
           columns={columns}
           dataSource={datasets}
-          scroll={{ x: 1050 }}
+          scroll={{ x: 1200 }}
           pagination={{
             pageSize: 10,
             showTotal: (total) => `共 ${total} 条`,
@@ -271,6 +323,12 @@ export default function DatasetListPage() {
         onSubmit={handleSubmitDataset}
       />
 
+      <DatasetImportModal
+        open={importModalOpen}
+        initialFile={uploadCreateFile}
+        onCancel={handleCloseImport}
+        onImported={handleImported}
+      />
     </div>
   );
 }
