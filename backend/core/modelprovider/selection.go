@@ -311,7 +311,7 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 				"m.name, "+
 				"m.provider_name, "+
 				"g.name AS group_name, "+
-				"m.base_url",
+				"g.base_url",
 		).
 		Joins(
 			"JOIN user_model_provider_group_models m ON "+

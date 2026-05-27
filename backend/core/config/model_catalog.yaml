@@ -7,9 +7,7 @@
 #
 # base_url rules:
 #   - Provider-level base_url must end with '/'.
-#   - Model-level base_url overrides the provider's when the model uses a
-#     specific endpoint path (e.g. /embeddings, /rerank). Keep as-is (no trailing slash).
-#   - Omit model-level base_url to inherit the provider's.
+#   - Model-level base_url is not supported; all models inherit the provider's base_url.
 
 model_providers:
   - name: Claude
@@ -91,10 +89,8 @@ model_providers:
         type: vlm
       - name: doubao-embedding-text-240715
         type: embed_main
-        base_url: "https://ark.cn-beijing.volces.com/api/v3/embeddings"
       - name: doubao-embedding-vision-241215
         type: embed_image
-        base_url: "https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal"
       - name: doubao-seed-1-6-250615
         type: llm
       - name: doubao-seed-1-6-251015
@@ -119,10 +115,8 @@ model_providers:
         type: llm
       - name: doubao-seedream-3-0-t2i-250415
         type: text2image
-        base_url: "https://ark.cn-beijing.volces.com/api/v3"
       - name: doubao-seedream-5-0
         type: text2image
-        base_url: "https://ark.cn-beijing.volces.com/api/v3"
       - name: glm-4-7-251222
         type: llm
 
@@ -150,16 +144,12 @@ model_providers:
         type: llm
       - name: CogView-3-Flash
         type: text2image
-        base_url: "https://open.bigmodel.cn/api/paas/v4"
       - name: CogView-4
         type: text2image
-        base_url: "https://open.bigmodel.cn/api/paas/v4"
       - name: Embedding-2
         type: embed_main
-        base_url: "https://open.bigmodel.cn/api/paas/v4/embeddings"
       - name: Embedding-3
         type: embed_main
-        base_url: "https://open.bigmodel.cn/api/paas/v4/embeddings"
       - name: GLM-4-Flash-250414
         type: llm
       - name: GLM-4-FlashX-250414
@@ -168,7 +158,6 @@ model_providers:
         type: llm
       - name: GLM-4-Voice
         type: tts
-        base_url: "https://open.bigmodel.cn/api/paas/v4"
       - name: GLM-4.1V-Thinking-Flash
         type: llm
       - name: GLM-4.1V-Thinking-FlashX
@@ -203,19 +192,14 @@ model_providers:
         type: vlm
       - name: GLM-ASR-2512
         type: stt
-        base_url: "https://open.bigmodel.cn/api/paas/v4"
       - name: GLM-Image
         type: text2image
-        base_url: "https://open.bigmodel.cn/api/paas/v4"
       - name: GLM-TTS
         type: tts
-        base_url: "https://open.bigmodel.cn/api/paas/v4"
       - name: GLM-TTS-Clone
         type: tts
-        base_url: "https://open.bigmodel.cn/api/paas/v4"
       - name: Rerank
         type: reranker
-        base_url: "https://open.bigmodel.cn/api/paas/v4/rerank"
 
   - name: Kimi
     description: |
@@ -394,26 +378,20 @@ model_providers:
     models:
       - name: Fun-ASR
         type: stt
-        base_url: "https://dashscope.aliyuncs.com/api/v1"
       - name: Gummy
         type: stt
-        base_url: "https://dashscope.aliyuncs.com/api/v1"
       - name: SenseVoice
         type: stt
-        base_url: "https://dashscope.aliyuncs.com/api/v1"
       - name: cosyvoice-v1
         type: tts
-        base_url: "https://dashscope.aliyuncs.com/api/v1"
       - name: cosyvoice-v2
         type: tts
-        base_url: "https://dashscope.aliyuncs.com/api/v1"
       - name: gte-rerank-v2
         type: reranker
       - name: multimodal-embedding-v1
         type: embed_image
       - name: paraformer-v2
         type: stt
-        base_url: "https://dashscope.aliyuncs.com/api/v1"
       - name: qvq-72b-preview
         type: vlm
       - name: qvq-max
@@ -422,7 +400,6 @@ model_providers:
         type: vlm
       - name: qwen-audio-turbo
         type: stt
-        base_url: "https://dashscope.aliyuncs.com/api/v1"
       - name: qwen-flash
         type: llm
       - name: qwen-flash-2025-07-28
@@ -439,7 +416,6 @@ model_providers:
         type: llm
       - name: qwen-tts
         type: tts
-        base_url: "https://dashscope.aliyuncs.com/api/v1"
       - name: qwen-turbo
         type: llm
       - name: qwen-vl-max
@@ -494,7 +470,6 @@ model_providers:
         type: llm
       - name: qwen3-asr-flash
         type: stt
-        base_url: "https://dashscope.aliyuncs.com/api/v1"
       - name: qwen3-embedding-32m
         type: embed_main
       - name: qwen3-next-80b-a3b-instruct
@@ -547,10 +522,8 @@ model_providers:
         type: vlm
       - name: sambert
         type: tts
-        base_url: "https://dashscope.aliyuncs.com/api/v1"
       - name: sensevoice-small
         type: stt
-        base_url: "https://dashscope.aliyuncs.com/api/v1"
       - name: text-embedding-async-v1
         type: embed_main
       - name: text-embedding-async-v2
@@ -708,7 +681,6 @@ model_providers:
         type: vlm
       - name: nova-embedding-stable
         type: embed_main
-        base_url: "https://api.sensenova.cn/v1/llm/embeddings"
 
   - name: SiliconFlow
     description: |
@@ -848,52 +820,36 @@ model_providers:
         type: llm
       - name: Qwen/Qwen3-VL-Embedding-8B
         type: embed_image
-        base_url: "https://api.siliconflow.cn/v1/embeddings"
       - name: Qwen/Qwen3-Embedding-8B
         type: embed_main
-        base_url: "https://api.siliconflow.cn/v1/embeddings"
       - name: Qwen/Qwen3-Embedding-4B
         type: embed_main
-        base_url: "https://api.siliconflow.cn/v1/embeddings"
       - name: Qwen/Qwen3-Embedding-0.6B
         type: embed_main
-        base_url: "https://api.siliconflow.cn/v1/embeddings"
       - name: BAAI/bge-m3
         type: embed_main
-        base_url: "https://api.siliconflow.cn/v1/embeddings"
       - name: BAAI/bge-large-zh-v1.5
         type: embed_main
-        base_url: "https://api.siliconflow.cn/v1/embeddings"
       - name: BAAI/bge-large-en-v1.5
         type: embed_main
-        base_url: "https://api.siliconflow.cn/v1/embeddings"
       - name: netease-youdao/bce-embedding-base_v1
         type: embed_main
-        base_url: "https://api.siliconflow.cn/v1/embeddings"
       - name: Pro/BAAI/bge-m3
         type: embed_main
-        base_url: "https://api.siliconflow.cn/v1/embeddings"
       - name: Qwen/Qwen3-VL-Reranker-8B
         type: reranker
-        base_url: "https://api.siliconflow.cn/v1/rerank"
       - name: Qwen/Qwen3-Reranker-8B
         type: reranker
-        base_url: "https://api.siliconflow.cn/v1/rerank"
       - name: Qwen/Qwen3-Reranker-4B
         type: reranker
-        base_url: "https://api.siliconflow.cn/v1/rerank"
       - name: Qwen/Qwen3-Reranker-0.6B
         type: reranker
-        base_url: "https://api.siliconflow.cn/v1/rerank"
       - name: BAAI/bge-reranker-v2-m3
         type: reranker
-        base_url: "https://api.siliconflow.cn/v1/rerank"
       - name: netease-youdao/bce-reranker-base_v1
         type: reranker
-        base_url: "https://api.siliconflow.cn/v1/rerank"
       - name: Pro/BAAI/bge-reranker-v2-m3
         type: reranker
-        base_url: "https://api.siliconflow.cn/v1/rerank"
       - name: Qwen/Qwen-Image-Edit-2509
         type: text2image
       - name: Qwen/Qwen-Image-Edit

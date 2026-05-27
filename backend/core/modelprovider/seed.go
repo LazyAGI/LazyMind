@@ -16,9 +16,8 @@ import (
 )
 
 type catalogModel struct {
-	Name    string `yaml:"name"`
-	Type    string `yaml:"type"`
-	BaseURL string `yaml:"base_url"`
+	Name string `yaml:"name"`
+	Type string `yaml:"type"`
 }
 
 type catalogProvider struct {
@@ -49,13 +48,6 @@ func normalizeBaseURL(raw string) string {
 		return url + "/"
 	}
 	return url
-}
-
-func resolveModelBaseURL(providerBaseURL, modelBaseURL string) string {
-	if strings.TrimSpace(modelBaseURL) != "" {
-		return normalizeBaseURL(modelBaseURL)
-	}
-	return normalizeBaseURL(providerBaseURL)
 }
 
 func loadModelCatalog(yamlBytes []byte) (*modelCatalog, error) {
@@ -100,14 +92,13 @@ func upsertDefaultProvider(tx *gorm.DB, now time.Time, item catalogProvider) (st
 		}).Error
 }
 
-func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName, baseURL string, item catalogModel) error {
+func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName string, item catalogModel) error {
 	name := strings.TrimSpace(item.Name)
 	modelType := strings.TrimSpace(item.Type)
 	if name == "" || modelType == "" {
 		return errors.New("model name and type are required")
 	}
 
-	modelBaseURL := resolveModelBaseURL(baseURL, item.BaseURL)
 	var row orm.DefaultModel
 	err := tx.Where("default_model_provider_id = ? AND name = ?", providerID, name).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -117,7 +108,6 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName, ba
 			ProviderName:           providerName,
 			Name:                   name,
 			ModelType:              modelType,
-			BaseURL:                modelBaseURL,
 			CreatedAt:              now,
 			UpdatedAt:              now,
 		}
@@ -132,7 +122,6 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName, ba
 		Updates(map[string]any{
 			"provider_name": providerName,
 			"model_type":    modelType,
-			"base_url":      modelBaseURL,
 			"updated_at":    now,
 			"deleted_at":    nil,
 		}).Error
@@ -162,9 +151,8 @@ func SeedModelCatalog(ctx context.Context, db *gorm.DB, yamlPath string) error {
 			if err != nil {
 				return err
 			}
-			providerBaseURL := normalizeBaseURL(provider.BaseURL)
 			for _, model := range provider.Models {
-				if err := upsertDefaultModel(tx, now, providerID, provider.Name, providerBaseURL, model); err != nil {
+				if err := upsertDefaultModel(tx, now, providerID, provider.Name, model); err != nil {
 					return err
 				}
 			}

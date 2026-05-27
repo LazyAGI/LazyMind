@@ -129,7 +129,6 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		ProviderName:             parent.Name,
 		Name:                     name,
 		ModelType:                modelType,
-		BaseURL:                  group.BaseURL,
 		IsDefault:                false,
 		BaseModel: orm.BaseModel{
 			CreateUserID:   userID,
@@ -152,7 +151,7 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		ModelType:                row.ModelType,
 		ProviderName:             row.ProviderName,
 		GroupName:                group.Name,
-		BaseURL:                  row.BaseURL,
+		BaseURL:                  group.BaseURL,
 		IsDefault:                row.IsDefault,
 	})
 }
@@ -226,7 +225,7 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 			ModelType:                m.ModelType,
 			ProviderName:             m.ProviderName,
 			GroupName:                group.Name,
-			BaseURL:                  m.BaseURL,
+			BaseURL:                  group.BaseURL,
 			IsDefault:                m.IsDefault,
 		})
 	}
@@ -274,6 +273,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 
 	type groupInfo struct {
 		name       string
+		baseURL    string
 		isVerified bool
 	}
 	groupByID := make(map[string]groupInfo)
@@ -286,7 +286,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for i := range grps {
-			groupByID[grps[i].ID] = groupInfo{name: grps[i].Name, isVerified: grps[i].IsVerified}
+			groupByID[grps[i].ID] = groupInfo{name: grps[i].Name, baseURL: grps[i].BaseURL, isVerified: grps[i].IsVerified}
 		}
 	}
 
@@ -305,7 +305,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			ModelType:                m.ModelType,
 			ProviderName:             m.ProviderName,
 			GroupName:                grp.name,
-			BaseURL:                  m.BaseURL,
+			BaseURL:                  grp.baseURL,
 			IsDefault:                m.IsDefault,
 		})
 	}

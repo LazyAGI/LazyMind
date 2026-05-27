@@ -26,7 +26,7 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 			"usm.model_type, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
-				"m.base_url, "+
+				"g.base_url, "+
 				"g.api_key",
 		).
 		Joins(
@@ -61,7 +61,7 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 			"usm.model_type, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
-				"m.base_url, "+
+				"g.base_url, "+
 				"g.api_key",
 		).
 		Joins(
@@ -105,7 +105,7 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 	var row SelectedRuntimeModel
 	err := db.WithContext(ctx).
 		Table("user_model_provider_group_models m").
-		Select("m.provider_name, m.name AS model_name, m.base_url, g.api_key").
+		Select("m.provider_name, m.name AS model_name, g.base_url, g.api_key").
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
