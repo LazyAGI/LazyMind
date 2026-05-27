@@ -150,7 +150,7 @@ def _is_retryable_exception(exc: Exception) -> bool:
 
 def _is_retryable_message(message: str) -> bool:
     text = message.lower()
-    return any(token in text for token in ('timed out', 'ssleoferror', 'eof occurred', 'service of servermodule'))
+    return any(token in text for token in ('kb_search failed', 'timed out', 'ssleoferror', 'eof occurred', 'service of servermodule'))
 
 
 def _pluck_any(sources: Any, keys: tuple[str, ...]) -> list[Any]:

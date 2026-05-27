@@ -685,7 +685,7 @@ services:
     environment:
       LAZYMIND_EVO_API_PORT: "8047"
       LAZYMIND_EVO_BASE_DIR: /var/lib/lazymind/evo
-      LAZYMIND_EVO_CHAT_SOURCE: /var/lib/lazymind/chat-source
+      LAZYMIND_EVO_CHAT_SOURCE: /app/algorithm/chat
       LAZYMIND_EVO_CODE_MAP: /app/evo/code_map.json
       LAZYMIND_EVO_CODE_BINARY: /usr/local/bin/opencode
       LAZYMIND_EVO_CODE_PROVIDER: ${LAZYMIND_EVO_CODE_PROVIDER:-qwen}
@@ -700,11 +700,13 @@ services:
       LAZYMIND_EVO_TARGET_CHAT_URL: http://chat:8046/api/chat
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
       LAZYLLM_INIT_DOC: 1
+      PYTHONPATH: /app/algorithm/lazyllm:/opt/lazyllm:/app/algorithm
       <<: [*runtime-home, *trace-config, *proxy-env, *llm-api-keys]
     volumes:
       - ./data/evo:/var/lib/lazymind/evo
       - ./data/traces:/var/lib/lazymind/traces
       - ./data/core/uploads:/var/lib/lazymind/uploads:ro
+      - ./algorithm:/app/algorithm:ro
       - ./evo:/app/evo:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8047/healthz || exit 1"]

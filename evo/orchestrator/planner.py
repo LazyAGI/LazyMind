@@ -153,6 +153,11 @@ def _extra_instructions(flow: str | None, message: str) -> dict[str, str]:
     return {'extra_instructions': text} if text and flow in {'run', 'apply'} else {}
 
 
+def _latest_eval_id(state: State) -> str | None:
+    return state.latest_payload('eval').get('eval_id') or state.artifact('eval_ids') or (
+        state.latest_id('eval') if state.success('eval') else None)
+
+
 def _normalize(ops: list[dict[str, Any]], ctx: PlanContext, state: State, message: str = '') -> list[dict[str, Any]]:
     out = []
     for item in ops or []:
@@ -176,7 +181,7 @@ def _normalize(ops: list[dict[str, Any]], ctx: PlanContext, state: State, messag
                 args['resume'] = not _reset_request(message, 'eval')
             _fill_eval(args, state.inputs)
         elif op == 'run.start':
-            args.setdefault('eval_id', state.latest_id('eval') if state.success('eval') else None)
+            args.setdefault('eval_id', _latest_eval_id(state))
             if _reset_request(message, 'run'):
                 args.update(_extra_instructions('run', message))
         elif op == 'apply.start':
@@ -397,7 +402,7 @@ def _restart_failed_op(flow: str | None, state: State) -> tuple[str, dict] | Non
         _fill_eval(args, state.inputs)
         return ('eval.run', args)
     if flow == 'run':
-        eval_id = state.latest_id('eval') if state.success('eval') else state.artifact('eval_ids')
+        eval_id = _latest_eval_id(state)
         return ('run.start', {'eval_id': eval_id})
     if flow == 'apply':
         return ('apply.start', {'report_id': state.latest_payload('run').get('report_id')})

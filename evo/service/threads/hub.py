@@ -8,7 +8,13 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, Body, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 from evo.runtime.fs import atomic_write_json
-from evo.runtime.model_config import activate_thread_model_config, extract_model_config, save_thread_model_config
+from evo.runtime.model_config import (
+    activate_thread_model_config,
+    extract_model_config,
+    require_evo_llm,
+    require_thread_model_config,
+    save_thread_model_config,
+)
 from evo.service.core import schemas, state as thread_state, store
 from evo.service.core.intent_store import IntentStore
 from evo.service.core.ops_executor import Op, OpsExecutor
@@ -38,6 +44,9 @@ class ThreadHub:
         mode = payload.get('mode', 'interactive')
         if mode not in {'interactive', 'auto'}:
             raise HTTPException(400, f'bad mode {mode!r}')
+        model_config = extract_model_config(payload)
+        if model_config or (mode == 'auto' and payload.get('start_auto', True)):
+            require_evo_llm(model_config, self.jm.config.model_config.llm_role)
         tid = f'thr-{uuid.uuid4().hex[:8]}'
         ws = ThreadWorkspace(self.jm.config.storage.base_dir, tid)
         now = time.time()
@@ -54,7 +63,7 @@ class ThreadHub:
             'updated_at': now,
         }
         atomic_write_json(ws.thread_meta_path, meta)
-        if model_config := extract_model_config(payload):
+        if model_config:
             save_thread_model_config(self.jm.config.storage.base_dir, tid, model_config)
         if mode == 'auto' and payload.get('start_auto', True):
             self.start(tid)
@@ -83,7 +92,9 @@ class ThreadHub:
 
     def start(self, thread_id: str, payload: dict | None = None) -> dict:
         if model_config := extract_model_config(payload):
+            require_evo_llm(model_config, self.jm.config.model_config.llm_role)
             save_thread_model_config(self.jm.config.storage.base_dir, thread_id, model_config)
+        require_thread_model_config(self.jm.config.storage.base_dir, thread_id, self.jm.config.model_config.llm_role)
         ws = self._workspace(thread_id)
         active = [row for row in self._active_tasks(thread_id) if row.get('flow') == 'dataset_gen']
         if active:
@@ -122,7 +133,9 @@ class ThreadHub:
 
     def retry(self, thread_id: str, payload: dict | None = None) -> dict:
         if model_config := extract_model_config(payload):
+            require_evo_llm(model_config, self.jm.config.model_config.llm_role)
             save_thread_model_config(self.jm.config.storage.base_dir, thread_id, model_config)
+        require_thread_model_config(self.jm.config.storage.base_dir, thread_id, self.jm.config.model_config.llm_role)
         task = self._latest_resumable(thread_id)
         if not task:
             raise store.StateError('NO_RESUMABLE_TASK', f'thread {thread_id} has no resumable task')
@@ -132,7 +145,9 @@ class ThreadHub:
 
     def post_message(self, thread_id: str, content: str, model_config: dict | None = None) -> dict:
         if model_config:
+            require_evo_llm(model_config, self.jm.config.model_config.llm_role)
             save_thread_model_config(self.jm.config.storage.base_dir, thread_id, model_config)
+        require_thread_model_config(self.jm.config.storage.base_dir, thread_id, self.jm.config.model_config.llm_role)
         ws = self._workspace(thread_id)
         elog = EventLog(ws.events_path)
         _append_message(ws.messages_path, 'user', content)
@@ -241,10 +256,13 @@ class ThreadHub:
         return {'status': 'stopped'}
 
     def _auto_loop(self, thread_id: str, interval_s: float, stop: threading.Event) -> None:
-        while not stop.is_set():
-            if self.auto_step(thread_id).get('status') in {'ended', 'cancelled'}:
-                break
-            stop.wait(interval_s)
+        try:
+            while not stop.is_set():
+                if self.auto_step(thread_id).get('status') in {'ended', 'cancelled', 'failed'}:
+                    break
+                stop.wait(interval_s)
+        finally:
+            stop.set()
 
     def _run_ops(self, thread_id: str, ops: list[dict]) -> dict:
         is_checkpoint_only = all(str(o.get('op') or '').startswith('checkpoint.') for o in ops)

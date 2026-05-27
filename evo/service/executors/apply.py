@@ -8,7 +8,7 @@ from evo.apply.errors import classify
 from evo.apply.runner import ApplyOptions, RoundResult, execute_apply
 from evo.harness.plan import StopRequested
 from evo.runtime.fs import load_json
-from evo.runtime.model_config import thread_model_config
+from evo.runtime.model_config import require_thread_model_config
 from evo.service.core import store as _store
 from evo.service.threads.workspace import EventLog, ThreadWorkspace
 from .context import CancelToken, ExecCtx
@@ -211,11 +211,10 @@ def _apply_options(ctx: ExecCtx, task: dict | None = None) -> ApplyOptions:
     extra = ((task or {}).get('payload') or {}).get('extra_instructions')
     if extra:
         opts.extra_instructions = extra
-    if not oc.explicit_env_model_configured():
-        provider_config = oc.provider_config_from_evo_llm(
-            thread_model_config(ctx.cfg.storage.base_dir, (task or {}).get('thread_id'))
-        )
-        if provider_config is not None:
-            opts.opencode_options.provider_config = provider_config
-            opts.opencode_options.model = f'{provider_config.provider}/{provider_config.model}'
+    model_config = require_thread_model_config(
+        ctx.cfg.storage.base_dir, (task or {}).get('thread_id'), ctx.cfg.model_config.llm_role
+    )
+    provider_config = oc.provider_config_from_evo_llm(model_config)
+    opts.opencode_options.provider_config = provider_config
+    opts.opencode_options.model = f'{provider_config.provider}/{provider_config.model}'
     return opts

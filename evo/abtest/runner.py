@@ -269,7 +269,7 @@ def _phase_run_eval(c: _Ctx) -> None:
         cfg=c.cfg,
         llm_factory=c.llm_factory,
         max_workers=_eval_max_workers(c.inputs.eval_options),
-        rag_max_workers=_eval_phase_workers(c.inputs.eval_options, 'rag_max_workers', EVO_EVAL_RAG_MAX_WORKERS),
+        rag_max_workers=_eval_phase_workers(c.inputs.eval_options, 'rag_max_workers', min(2, EVO_EVAL_RAG_MAX_WORKERS)),
         judge_max_workers=_eval_phase_workers(c.inputs.eval_options, 'judge_max_workers', EVO_EVAL_JUDGE_MAX_WORKERS),
         dataset_name=c.inputs.eval_options.get('dataset_name', ''),
         filters=c.inputs.eval_options.get('filters') or {},

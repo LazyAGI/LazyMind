@@ -200,7 +200,7 @@ def load_config(
         badcase_score_field=score_field,
         enable_embed_features=False,
     )
-    chat_source = Path(config['evo_chat_source'] or (project_root / 'algorithm' / 'chat'))
+    chat_source = Path(config['evo_chat_source'] or '/app/algorithm/chat')
     dataset_gen = DatasetGenConfig(
         kb_base_url=EVO_KB_BASE_URL,
         chunk_base_url=EVO_CHUNK_BASE_URL,
