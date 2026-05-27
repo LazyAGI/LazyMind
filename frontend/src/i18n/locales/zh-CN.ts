@@ -379,6 +379,7 @@ const zhCN = {
     developer: "开发者",
     userManagement: "用户管理",
     dataSourceManagement: "数据源管理",
+    datasetManagement: "数据集管理",
     modelProviderManagement: "模型提供商",
     memoryManagement: "智积阅累",
     selfEvolution: "算法跃迁",

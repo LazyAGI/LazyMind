@@ -404,6 +404,7 @@ const enUS = {
     developer: "Developer",
     userManagement: "Users",
     dataSourceManagement: "Data Sources",
+    datasetManagement: "Datasets",
     modelProviderManagement: "Model Providers",
     memoryManagement: "Wisdom Accumulation",
     selfEvolution: "Algorithm Leap",

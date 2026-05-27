@@ -27,6 +27,7 @@ import MermaidBlock from "./MermaidBlock";
 import { getLanguageFromClassName, highlightCode } from "./syntaxHighlight";
 
 const SOURCE_PREFIXES = ["#source-", "#user-content-source-"];
+const BOLD_BARE_URL_PATTERN = /\*\*((?:https?:\/\/|www\.)[^\s*<>()]+)\*\*/g;
 
 const markdownRemarkPlugins = [[remarkGfm, { singleTilde: false }], remarkMath];
 const markdownRehypePlugins = [
@@ -49,6 +50,16 @@ function getSourceIndex(href: any) {
   }
   const prefix = SOURCE_PREFIXES.find((item) => href.startsWith(item));
   return prefix ? href.slice(prefix.length) : "";
+}
+
+function normalizeBoldBareUrls(content: string) {
+  return content.replace(BOLD_BARE_URL_PATTERN, (match, url) => {
+    if (url.includes("](")) {
+      return match;
+    }
+    const href = url.startsWith("www.") ? `https://${url}` : url;
+    return `**[${url}](${href})**`;
+  });
 }
 
 const ImageComponent = (props: any) => {
@@ -218,6 +229,8 @@ const MarkdownViewer = memo((props: any) => {
     sources = [],
     IS_STREAMING,
   } = props;
+  const normalizedChildren =
+    typeof children === "string" ? normalizeBoldBareUrls(children) : children;
 
   const [markSources, setMarkSources] = useState<any[]>([]);
 
@@ -256,7 +269,7 @@ const MarkdownViewer = memo((props: any) => {
           rehypePlugins={markdownRehypePlugins}
           components={markdownComponents}
         >
-          {children || ""}
+          {normalizedChildren || ""}
         </Markdown>
       </MarkdownRenderContext.Provider>
     </div>
