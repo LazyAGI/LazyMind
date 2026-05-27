@@ -88,7 +88,11 @@ def get_eval_queue(
                 item = future.result()
             except Exception as exc:
                 if attempt < 3 and not (cancel and cancel()):
-                    _log.warning('rag eval item failed case_id=%s retry %s/3: %s', case.get('case_id'), attempt + 1, exc)
+                    _log.warning(
+                        'rag eval item failed case_id=%s retry %s/3: %s',
+                        case.get('case_id'), attempt + 1,
+                        exc
+                    )
                     submit(case, attempt + 1)
                     continue
                 _log.warning('rag eval item failed: %s', exc)
