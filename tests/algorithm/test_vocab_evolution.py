@@ -6,13 +6,15 @@ import sys
 
 import pytest
 
-from vocab.evolution import (  # noqa: E402
+from lazymind.vocab.engine.evolution import (  # noqa: E402
     ActionPlanningModule,
     ChatHistoryRecord,
     HistoryChunker,
     SynonymCandidate,
     SynonymExtractionModule,
     VocabEvolutionRequest,
+)
+from lazymind.vocab.service.evolution import (  # noqa: E402
     VocabEvolutionService,
     _resolve_word_group_apply_url,
     run_vocab_evolution,

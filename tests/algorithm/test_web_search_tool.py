@@ -1,7 +1,7 @@
 from httpx import ConnectError
 from lazyllm.module import ModuleBase
 
-from chat.tools import web_search as web_search_mod
+from lazymind.chat.engine.tools import web_search as web_search_mod
 
 
 class _FakeProvider(ModuleBase):
@@ -55,7 +55,7 @@ def test_web_search_auto_falls_through_runtime_error_and_empty_results(monkeypat
     monkeypatch.setattr(web_search_mod, '_provider_available', lambda source: source in providers or source == 'wikipedia')
     monkeypatch.setattr(web_search_mod, '_build_provider', lambda source, _lang: providers[source])
 
-    result = web_search_mod.web_search('test query', source='auto', include_content=True)
+    result = web_search_mod.WebSearchToolGroup().web_search('test query', source='auto', include_content=True)
 
     assert result == {
         'success': True,
@@ -84,7 +84,7 @@ def test_web_search_explicit_source_keeps_no_results_without_fallback(monkeypatc
 
     monkeypatch.setattr(web_search_mod, '_build_provider', lambda _source, _lang: provider)
 
-    result = web_search_mod.web_search('test query', source='google')
+    result = web_search_mod.WebSearchToolGroup().web_search('test query', source='google')
 
     assert result == {
         'success': True,
@@ -113,7 +113,7 @@ def test_arxiv_search_dispatches_through_module_call(monkeypatch):
 
     monkeypatch.setattr(web_search_mod, 'ArxivSearch', lambda **_kwargs: provider)
 
-    result = web_search_mod.arxiv_search('paper query', max_results=3, sort_by='submittedDate')
+    result = web_search_mod.WebSearchToolGroup().arxiv_search('paper query', max_results=3, sort_by='submittedDate')
 
     assert result == {
         'success': True,

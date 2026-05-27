@@ -10,10 +10,10 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
-from chat.utils.load_config import load_model_config as _source_load_model_config
+from lazymind.model_config import load_model_config as _source_load_model_config
 
 try:
-    import chat.pipelines.builders.get_models as get_models_mod
+    import lazymind.chat.engine.pipelines.builders.get_models as get_models_mod
 except ImportError:
     get_models_mod = None
 

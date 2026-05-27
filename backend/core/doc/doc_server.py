@@ -23,8 +23,8 @@ for path in (str(LAZYLLM_ROOT), str(REPO_ROOT)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from algorithm.processor.db import require_shared_db_config  # noqa: E402
-from algorithm.processor.env import env_int, env_float  # noqa: E402
+from lazymind.processor.service.db import require_shared_db_config  # noqa: E402
+from lazymind.processor.service.env import env_int, env_float  # noqa: E402
 from lazyllm.tools.rag.doc_service import DocServer  # noqa: E402
 
 

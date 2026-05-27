@@ -3,8 +3,8 @@ import re
 import pytest
 from lazyllm.tools.rag import DocNode
 
-from parsing.transform import general_parser as general_parser_module
-from parsing.transform.general_parser import GeneralParser, is_url
+from lazymind.parsing.engine.transform import general_parser as general_parser_module
+from lazymind.parsing.engine.transform.general_parser import GeneralParser, is_url
 
 
 def test_is_url_accepts_network_and_file_urls():

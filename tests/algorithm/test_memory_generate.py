@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 def _load_memory_generate_module():
     module_path = (
         Path(__file__).resolve().parents[2]
-        / 'algorithm/chat/pipelines/memory_generate.py'
+        / 'algorithm/lazymind/review/service/memory_generate.py'
     )
     spec = importlib.util.spec_from_file_location('test_memory_generate_module', module_path)
     assert spec is not None
@@ -19,23 +19,23 @@ def _load_memory_generate_module():
     fake_lazyllm = ModuleType('lazyllm')
     fake_lazyllm.AutoModel = lambda *args, **kwargs: object()
 
-    fake_skill_manager = ModuleType('chat.tools.skill_manager')
+    fake_skill_manager = ModuleType('lazymind.chat.engine.tools.skill_manager')
     fake_skill_manager._validate_skill_content = lambda *_args, **_kwargs: None
 
-    fake_load_config = ModuleType('chat.utils.load_config')
+    fake_load_config = ModuleType('lazymind.model_config')
     fake_load_config.get_config_path = lambda: ''
 
     original_modules = {
         'lazyllm': sys.modules.get('lazyllm'),
-        'chat.tools.skill_manager': sys.modules.get('chat.tools.skill_manager'),
-        'chat.utils.load_config': sys.modules.get('chat.utils.load_config'),
+        'lazymind.chat.engine.tools.skill_manager': sys.modules.get('lazymind.chat.engine.tools.skill_manager'),
+        'lazymind.model_config': sys.modules.get('lazymind.model_config'),
     }
 
     module = importlib.util.module_from_spec(spec)
     try:
         sys.modules['lazyllm'] = fake_lazyllm
-        sys.modules['chat.tools.skill_manager'] = fake_skill_manager
-        sys.modules['chat.utils.load_config'] = fake_load_config
+        sys.modules['lazymind.chat.engine.tools.skill_manager'] = fake_skill_manager
+        sys.modules['lazymind.model_config'] = fake_load_config
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         return module
@@ -59,24 +59,19 @@ generate_memory_content = memory_generate.generate_memory_content
 def _load_memory_generate_routes_module():
     module_path = (
         Path(__file__).resolve().parents[2]
-        / 'algorithm/chat/app/api/memory_generate_routes.py'
+        / 'algorithm/lazymind/chat/service/api/memory_generate_routes.py'
     )
     spec = importlib.util.spec_from_file_location('test_memory_generate_routes', module_path)
     assert spec is not None
     assert spec.loader is not None
 
-    fake_pipelines_pkg = ModuleType('chat.pipelines')
-    fake_pipelines_pkg.__path__ = []
-
     original_modules = {
-        'chat.pipelines': sys.modules.get('chat.pipelines'),
-        'chat.pipelines.memory_generate': sys.modules.get('chat.pipelines.memory_generate'),
+        'lazymind.review.service.memory_generate': sys.modules.get('lazymind.review.service.memory_generate'),
     }
 
     module = importlib.util.module_from_spec(spec)
     try:
-        sys.modules['chat.pipelines'] = fake_pipelines_pkg
-        sys.modules['chat.pipelines.memory_generate'] = memory_generate
+        sys.modules['lazymind.review.service.memory_generate'] = memory_generate
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         module.GeneratePayload.model_rebuild()

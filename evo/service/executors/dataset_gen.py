@@ -1,7 +1,7 @@
 from __future__ import annotations
 import logging
 from lazyllm import AutoModel
-from algorithm.chat.utils.load_config import get_config_path
+from lazymind.model_config import get_config_path
 from evo.datagen import run_generate_pipeline
 from evo.datagen.kb_client import KBClient
 from evo.harness.plan import StopRequested

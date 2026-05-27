@@ -6,7 +6,7 @@ from typing import AsyncIterator, Callable, Iterator
 from lazyllm import AutoModel
 from evo.runtime.config import EvoConfig
 from evo.runtime.model_gateway import ModelGateway
-from algorithm.chat.utils.load_config import get_config_path
+from lazymind.model_config import get_config_path
 
 LLMFactory = Callable[[], Callable[[str], AsyncIterator[str]]]
 

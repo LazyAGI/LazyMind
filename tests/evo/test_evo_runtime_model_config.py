@@ -2,9 +2,9 @@ import textwrap
 
 import pytest
 
-from chat.utils.load_config import load_model_config, get_retrieval_settings
+from lazymind.model_config import load_model_config, get_retrieval_settings
 
-from chat.utils.load_config import get_retrieval_settings, load_model_config
+from lazymind.model_config import get_retrieval_settings, load_model_config
 
 
 def write_config(tmp_path, content: str):

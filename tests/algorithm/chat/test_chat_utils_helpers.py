@@ -1,7 +1,7 @@
 import pytest
 from fastapi import HTTPException
 
-import chat.utils.helpers as helpers_mod
+import lazymind.chat.service.utils.file_validation as helpers_mod
 
 
 def test_validate_and_resolve_files_splits_images_and_other_files(monkeypatch, tmp_path):

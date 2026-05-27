@@ -3,7 +3,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from algorithm.config import config
+from lazymind.config import config
 
 
 @dataclass(frozen=True)
@@ -73,7 +73,7 @@ def _container_path(path: Path) -> Path:
     if not chat_source:
         return path
     parts = path.parts
-    marker = ('algorithm', 'chat')
+    marker = ('algorithm', 'lazymind', 'chat')
     for i in range(len(parts) - 1):
         if parts[i: i + 2] == marker:
             mapped = Path(chat_source).joinpath(*parts[i + 2:])

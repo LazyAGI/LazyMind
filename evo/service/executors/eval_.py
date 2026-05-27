@@ -4,7 +4,7 @@ import os
 from dataclasses import replace
 from typing import Any
 from lazyllm import AutoModel
-from algorithm.chat.utils.load_config import get_config_path
+from lazymind.model_config import get_config_path
 from evo.datagen import run_eval, load_report, fetch_traces_for_report
 from evo.harness.plan import StopRequested
 from evo.runtime.fs import atomic_write_json

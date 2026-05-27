@@ -5,7 +5,7 @@ import types
 
 
 def test_mineru_imports_server_class():
-    mineru = importlib.import_module('parsing.mineru')
+    mineru = importlib.import_module('lazymind.parsing.service.mineru')
 
     assert mineru.MineruServer is not None
 
@@ -36,7 +36,7 @@ def test_mineru_main_starts_configured_server(monkeypatch):
     monkeypatch.setenv('LAZYMIND_MINERU_CACHE_DIR', '/tmp/mineru-cache')
     monkeypatch.setenv('LAZYMIND_MINERU_IMAGE_SAVE_DIR', '/tmp/mineru-images')
 
-    runpy.run_module('parsing.mineru', run_name='__main__')
+    runpy.run_module('lazymind.parsing.service.mineru', run_name='__main__')
 
     assert len(created) == 1
     assert created[0].kwargs == {

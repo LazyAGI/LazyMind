@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from chat.utils.stream_scanner import (
+from lazymind.chat.service.stream_scanner import (
     CitationPlugin,
     ImagePlugin,
     IncrementalScanner,

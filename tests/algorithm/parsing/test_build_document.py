@@ -1,8 +1,6 @@
-from types import SimpleNamespace
-
 import pytest
 
-import parsing.build_document as build_document
+import lazymind.parsing.service.build_document as build_document
 
 
 def test_parse_bool_env_accepts_common_values(monkeypatch):
@@ -93,7 +91,7 @@ def test_build_pdf_reader_selects_mineru_with_upload_mode(monkeypatch):
     assert seen['timeout'] == 3600
     assert seen['patch_applied'] == build_document._cfg['ocr_patch_applied']
     assert seen['service_variant'] == build_document._cfg['ocr_service_variant']
-    assert seen['image_cache_dir'] == '/app/uploads/.image_cache'
+    assert seen['image_cache_dir'] == build_document._cfg['image_cache_dir']
 
 
 def test_build_pdf_reader_selects_paddleocr(monkeypatch):
@@ -111,7 +109,7 @@ def test_build_pdf_reader_selects_paddleocr(monkeypatch):
     assert seen == {
         'url': 'http://paddle.test',
         'service_variant': build_document._cfg['ocr_service_variant'],
-        'images_dir': '/app/uploads/.image_cache',
+        'images_dir': build_document._cfg['image_cache_dir'],
     }
 
 
@@ -130,6 +128,8 @@ def test_build_document_wires_readers_groups_and_embeddings(monkeypatch):
     class FakeDocument:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
+            self._manager = kwargs['manager']
+            self._manager._kbs = {'default': lambda *args, **kwargs: None}
             self.readers = []
             self.node_groups = []
             self.activated = []
@@ -143,7 +143,6 @@ def test_build_document_wires_readers_groups_and_embeddings(monkeypatch):
         def activate_group(self, name, embed_keys):
             self.activated.append((name, embed_keys))
 
-    settings = SimpleNamespace(embed_keys=['dense', 'sparse'], index_kwargs={'nlist': 16})
     monkeypatch.setattr(build_document, 'Document', FakeDocument)
     monkeypatch.setattr(build_document, 'DocumentProcessor', FakeDocumentProcessor)
     monkeypatch.setattr(build_document, 'get_embed_keys', lambda: ['dense', 'sparse'])
@@ -164,7 +163,6 @@ def test_build_document_wires_readers_groups_and_embeddings(monkeypatch):
     assert docs.kwargs['embed'] == {'dense': 'emb-dense', 'sparse': 'emb-sparse'}
     assert docs.kwargs['manager'].kwargs['store_conf'] == {'index_kwargs': {'nlist': 16}}
     assert docs.kwargs['manager'].kwargs['url'] == 'http://processor.test'
-    assert docs.kwargs['server'] == 18003
     assert ('*.pdf', 'pdf-reader') in docs.readers
     assert [group['name'] for group in docs.node_groups] == ['block', 'line']
     assert 'parent' not in docs.node_groups[0]

@@ -8,8 +8,8 @@ from typing import Any, Dict, List
 import pytest
 import lazyllm
 
-from chat.pipelines import agentic
-from chat.components.agentic.config import (
+from lazymind.chat.engine import agentic
+from lazymind.chat.service.agentic.request_context import (
     DEFAULT_TOOLS,
     _filter_tools_for_request,
 )
@@ -29,16 +29,9 @@ class _FakeAgent:
     def __init__(self, **kwargs: Any) -> None:
         self._kwargs = kwargs
 
-    def __call__(self, query: str, llm_chat_history: Any = None) -> Dict[str, Any]:
+    def _observe(self, query: str) -> Dict[str, Any]:
         config = lazyllm.globals.get('agentic_config')
         snapshot = dict(config) if isinstance(config, dict) else None
-        callback = self._kwargs.get('stream_event_callback')
-        if callable(callback):
-            callback({
-                'round': 1,
-                'content': f'observed:{snapshot.get("algo_id") if snapshot else None}',
-                'tool_calls': [],
-            })
         with type(self)._lock:
             type(self).observations.append({
                 'query': query,
@@ -55,6 +48,21 @@ class _FakeAgent:
             'text': f'final:{query}',
             'observed_algo_id': snapshot.get('algo_id') if snapshot else None,
         }
+
+    def __call__(self, query: str, llm_chat_history: Any = None) -> Dict[str, Any]:
+        return self._observe(query)
+
+    def stream(self, query: str, llm_chat_history: Any = None):
+        result = self._observe(query)
+
+        def _iter():
+            yield {
+                'type': 'agent.text.delta',
+                'delta': f'stream:{query}',
+            }
+            return result
+
+        return _iter()
 
 
 @pytest.fixture
@@ -77,12 +85,10 @@ def fake_pipeline(monkeypatch):
             return cls()
 
     monkeypatch.setattr(agentic, 'AutoModel', lambda *_a, **_kw: object())
-    monkeypatch.setattr(agentic, '_ensure_tools_registered', lambda: None)
     monkeypatch.setattr(agentic, '_augment_query_with_attached_images', lambda query, config: query)
     monkeypatch.setattr(agentic, '_build_review_decision', lambda **_kw: {'mode': None})
     monkeypatch.setattr(agentic, '_clear_orphaned_lazyllm_queue_lock', lambda: None)
     monkeypatch.setattr(agentic, '_spawn_background_review', lambda **_kw: None)
-    monkeypatch.setattr(agentic, '_StreamingReactAgent', _FakeAgent)
     monkeypatch.setattr(lazyllm.tools.agent, 'ReactAgent', _FakeAgent)
     monkeypatch.setattr(lazyllm, 'FileSystemQueue', _FakeFileSystemQueue)
 
@@ -100,43 +106,6 @@ def _build_configs(prefix: str, n: int) -> List[Dict[str, Any]]:
         }
         for i in range(n)
     ]
-
-
-def test_thread_parallel_requests_see_isolated_config(fake_pipeline):
-    n = 8
-    configs = _build_configs('t_', n)
-    results: List[Any] = [None] * n
-    barrier = threading.Barrier(n)
-
-    def _run(i: int) -> None:
-        lazyllm.globals._init_sid(sid=f'sync-session-{i}')
-        lazyllm.locals._init_sid(sid=f'sync-session-{i}')
-        lazyllm.globals['agentic_config'] = dict(configs[i])
-        barrier.wait()
-        results[i] = agentic.agentic_forward(query=configs[i]['query'], history=[])
-
-    threads = [threading.Thread(target=_run, args=(i,)) for i in range(n)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    assert len(fake_pipeline.observations) == n
-    obs_by_query = {obs['query']: obs for obs in fake_pipeline.observations}
-    assert set(obs_by_query.keys()) == {f't_{i}' for i in range(n)}
-
-    sids = set()
-    for i in range(n):
-        obs = obs_by_query[f't_{i}']
-        sids.add(obs['sid'])
-        assert obs['sid'] == f'sync-session-{i}'
-        assert obs['config']['kb_id'] == f't_id_{i}'
-        assert obs['config']['algo_id'] == f't_algo_{i}'
-        assert obs['agent_kwargs_tools'][0] == f'tool_t_{i}'
-        assert obs['config']['available_skills'] == [f'skill_t_{i}']
-        assert results[i]['observed_algo_id'] == f't_algo_{i}'
-
-    assert len(sids) == n, f'threads should get distinct SIDs, got {sids!r}'
 
 
 def test_stream_parallel_requests_see_isolated_config(fake_pipeline):

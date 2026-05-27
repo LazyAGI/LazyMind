@@ -1,0 +1,1 @@
+"""Vocabulary service modules."""

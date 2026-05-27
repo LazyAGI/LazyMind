@@ -7,7 +7,7 @@ from evo.runtime.model_config import thread_model_config, wrap_model_call
 from evo.service.core import state as thread_state, store as _store
 from evo.service.threads.workspace import EventLog, ThreadWorkspace
 from .context import CancelToken, ExecCtx
-from algorithm.chat.utils.load_config import get_config_path
+from lazymind.model_config import get_config_path
 
 
 def execute(ctx: ExecCtx, tid: str) -> None:
@@ -115,7 +115,7 @@ def _candidate_model_config_path(ctx: ExecCtx, raw: str) -> str:
         return raw
     from importlib import import_module
 
-    path = Path(import_module('algorithm.config').__file__).resolve().parent / 'common' / name
+    path = Path(import_module('lazymind.model_config').__file__).resolve().parent / 'resources' / name
     if not path.is_file():
         raise RuntimeError(f'candidate model config not found: {path}')
     return str(path)

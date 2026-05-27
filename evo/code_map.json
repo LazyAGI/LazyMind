@@ -26,11 +26,6 @@
         "symbol": "chat.pipelines.agentic.agentic_rag",
         "init_args": {"normalizes": ["global_params", "history", "stream"], "sets": "lazyllm.globals['agentic_config']"}
       },
-      "AgenticForward": {
-        "file": "pipelines/agentic.py", "line": 206,
-        "symbol": "chat.pipelines.agentic.agentic_forward",
-        "init_args": {"llm_role": "llm", "agent": "lazyllm.tools.agent.ReactAgent", "count": 20}
-      },
       "ToolSelection": {
         "file": "components/agentic/config.py", "line": 20,
         "symbol": "DEFAULT_TOOLS / _filter_tools_for_request",

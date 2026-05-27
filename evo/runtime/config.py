@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
-from algorithm.config import config
+from lazymind.config import config
 from evo.runtime.code_config import CodeAccessConfig, load_code_access
 
 EVO_LLM_HTTP_TIMEOUT_S = 300
@@ -146,7 +146,7 @@ class EvoConfig:
     storage: StorageConfig
     default_judge_path: Path
     default_trace_path: Path
-    chat_source: Path = Path('/app/algorithm/chat')
+    chat_source: Path = Path('/app/algorithm/lazymind/chat')
     code_access: CodeAccessConfig = field(default_factory=CodeAccessConfig)
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
     llm: ModelGovernanceConfig = field(default_factory=_default_llm_governance)
@@ -200,7 +200,7 @@ def load_config(
         badcase_score_field=score_field,
         enable_embed_features=False,
     )
-    chat_source = Path(config['evo_chat_source'] or (project_root / 'algorithm' / 'chat'))
+    chat_source = Path(config['evo_chat_source'] or (project_root / 'algorithm' / 'lazymind' / 'chat'))
     dataset_gen = DatasetGenConfig(
         kb_base_url=EVO_KB_BASE_URL,
         chunk_base_url=EVO_CHUNK_BASE_URL,

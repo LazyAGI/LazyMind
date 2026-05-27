@@ -11,8 +11,8 @@ if _ALGO not in sys.path:
 if _LAZYLLM_ROOT not in sys.path:
     sys.path.insert(0, _LAZYLLM_ROOT)
 
-from chat.tools import vocab as vocab_tool
-from vocab import db as vocab_db
+from lazymind.chat.engine.tools import vocab as vocab_tool
+from lazymind.vocab.service import db as vocab_db
 
 
 def test_fetch_chat_histories_for_timestamped_session(monkeypatch):
@@ -100,7 +100,7 @@ def test_vocab_manage_creates_group_for_new_pair(monkeypatch):
 
     monkeypatch.setattr(vocab_tool, 'post_core_api', _fake_post)
 
-    result = vocab_tool.vocab_manage([
+    result = vocab_tool.VocabToolGroup().vocab_manage([
         {'word': '苹果', 'synonym': 'apple', 'reason': 'user explicitly asked to remember it'},
     ])
 
@@ -145,7 +145,7 @@ def test_vocab_manage_adds_to_group(monkeypatch):
 
     monkeypatch.setattr(vocab_tool, 'post_core_api', _fake_post)
 
-    result = vocab_tool.vocab_manage([
+    result = vocab_tool.VocabToolGroup().vocab_manage([
         {'word': '民法', 'synonym': '民事法律', 'reason': 'user used the terms as the same concept'},
     ])
 
@@ -192,7 +192,7 @@ def test_vocab_manage_creates_new_group_when_domain_description_changes(monkeypa
 
     monkeypatch.setattr(vocab_tool, 'post_core_api', _fake_post)
 
-    result = vocab_tool.vocab_manage([
+    result = vocab_tool.VocabToolGroup().vocab_manage([
         {'word': '变白质', 'synonym': '铅球垫子', 'description': '体育领域术语', 'reason': '用户指定体育领域术语映射'},
     ])
 

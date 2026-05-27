@@ -3,7 +3,7 @@ import logging
 from functools import lru_cache
 from typing import Any
 import requests
-from algorithm.config import config
+from lazymind.config import config
 from evo.domain.node import NodeInfo
 from evo.runtime.config import (
     EVO_CHUNK_BASE_URL,

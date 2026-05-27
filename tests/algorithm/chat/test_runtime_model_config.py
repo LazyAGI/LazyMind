@@ -2,7 +2,7 @@
 import textwrap
 from pathlib import Path
 
-from chat.utils.load_config import load_model_config, get_config_path
+from lazymind.model_config import load_model_config, get_config_path
 
 
 def write_config(tmp_path: Path, content: str) -> Path:

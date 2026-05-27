@@ -1,4 +1,4 @@
-from chat.prompts.agentic import (
+from lazymind.chat.engine.prompts.agentic import (
     DEFAULT_SYSTEM_PROMPT,
     IMAGE_REFERENCE_MARKDOWN_GUIDANCE,
     MEMORY_GUIDANCE,
@@ -8,7 +8,7 @@ from chat.prompts.agentic import (
     VOCAB_GUIDANCE,
     VISION_EXTRACTOR_GUIDANCE,
 )
-from chat.components.agentic.config import _build_runtime_system_prompt
+from lazymind.chat.service.agentic.config import _build_runtime_system_prompt
 
 
 def assert_balanced_curly_braces(text):

@@ -1,8 +1,8 @@
 """
 Additional tests for kb tool helpers (filters, files, no-parent node).
 
-The chat.tools.kb module imports chat.pipelines.get_ppl_search which triggers a
-circular import via vocab.evolution.  We break the cycle with the same
+The lazymind.chat.engine.tools.kb module imports lazymind.chat.engine.pipelines.get_ppl_search which triggers a
+circular import via lazymind.vocab.engine.evolution.  We break the cycle with the same
 lightweight stub approach used in test_pipeline_builders_extra.py.
 """
 import sys
@@ -12,32 +12,29 @@ import types
 def _stub_vocab_and_chat_pipelines():
     """Stub out modules that cause circular imports at collection time.
 
-    vocab.evolution is NOT stubbed here because the circular import
-    (vocab.evolution → chat.pipelines) has been resolved with lazy
+    lazymind.vocab.engine.evolution is NOT stubbed here because the circular import
+    (lazymind.vocab.engine.evolution → lazymind.chat.engine.pipelines) has been resolved with lazy
     imports inside the class constructors.  Stubbing vocab.evolution would
     leave an empty module object in sys.modules and break any later test that
     imports real symbols from it (e.g. ActionPlanningModule).
     """
-    # vocab stubs — only inject if not already loaded
-    vocab_pkg = types.ModuleType('vocab')
-    sys.modules.setdefault('vocab', vocab_pkg)
-
-    if 'vocab.vocab_manager' not in sys.modules:
-        vm_stub = types.ModuleType('vocab.vocab_manager')
+    if 'lazymind.vocab.service.registry' not in sys.modules:
+        vm_stub = types.ModuleType('lazymind.vocab.service.registry')
         vm_stub.get_vocab_manager = lambda user_id: (lambda q: q)
-        sys.modules['vocab.vocab_manager'] = vm_stub
+        sys.modules['lazymind.vocab.service.registry'] = vm_stub
 
-    if 'vocab.db' not in sys.modules:
-        db_stub = types.ModuleType('vocab.db')
-        sys.modules['vocab.db'] = db_stub
+    if 'lazymind.vocab.service.db' not in sys.modules:
+        db_stub = types.ModuleType('lazymind.vocab.service.db')
+        sys.modules['lazymind.vocab.service.db'] = db_stub
 
 
 _stub_vocab_and_chat_pipelines()
 
-from chat.tools import kb  # noqa: E402  (must come after stubs)
+from lazymind.chat.engine.tools import kb  # noqa: E402  (must come after stubs)
 
 DEFAULT_AGENTIC_CONFIG = {
     'kb_id': 'ds_9e96150bb1ceeec7d96055638072b8a9',
+    'kb_api_key': 'test-key',
 }
 
 
@@ -48,17 +45,15 @@ DEFAULT_AGENTIC_CONFIG = {
 def test_kb_search_merges_explicit_filters_with_kb_id(monkeypatch):
     captured_payload = {}
 
-    def fake_get_ppl_search(url, retriever_configs=None, topk=20, k_max=10):
-        def fake_search(payload):
-            captured_payload.update(payload)
-            return []
-        return fake_search
+    def fake_ppl_search(payload, *, document, retriever_topk=20, rerank_topk=20, k_max=10):
+        captured_payload.update(payload)
+        return []
 
-    monkeypatch.setattr(kb, 'get_ppl_search', fake_get_ppl_search)
+    monkeypatch.setattr(kb, 'ppl_search', fake_ppl_search)
     original_config = kb.lazyllm.globals.get('agentic_config')
     kb.lazyllm.globals['agentic_config'] = DEFAULT_AGENTIC_CONFIG
     try:
-        kb.kb_search('query', filters={'file_name': 'report.pdf'})
+        kb.kb().search('query', filters={'file_name': 'report.pdf'})
     finally:
         kb.lazyllm.globals['agentic_config'] = original_config or {}
 
@@ -69,18 +64,16 @@ def test_kb_search_merges_explicit_filters_with_kb_id(monkeypatch):
 def test_kb_search_uses_files_from_agentic_config(monkeypatch):
     captured_payload = {}
 
-    def fake_get_ppl_search(url, retriever_configs=None, topk=20, k_max=10):
-        def fake_search(payload):
-            captured_payload.update(payload)
-            return []
-        return fake_search
+    def fake_ppl_search(payload, *, document, retriever_topk=20, rerank_topk=20, k_max=10):
+        captured_payload.update(payload)
+        return []
 
-    monkeypatch.setattr(kb, 'get_ppl_search', fake_get_ppl_search)
+    monkeypatch.setattr(kb, 'ppl_search', fake_ppl_search)
     config_with_files = dict(DEFAULT_AGENTIC_CONFIG, files=['file-a', 'file-b'])
     original_config = kb.lazyllm.globals.get('agentic_config')
     kb.lazyllm.globals['agentic_config'] = config_with_files
     try:
-        kb.kb_search('query')
+        kb.kb().search('query')
     finally:
         kb.lazyllm.globals['agentic_config'] = original_config or {}
 
@@ -90,18 +83,16 @@ def test_kb_search_uses_files_from_agentic_config(monkeypatch):
 def test_kb_search_passes_image_files_from_agentic_config(monkeypatch):
     captured_payload = {}
 
-    def fake_get_ppl_search(url, retriever_configs=None, topk=20, k_max=10):
-        def fake_search(payload):
-            captured_payload.update(payload)
-            return []
-        return fake_search
+    def fake_ppl_search(payload, *, document, retriever_topk=20, rerank_topk=20, k_max=10):
+        captured_payload.update(payload)
+        return []
 
-    monkeypatch.setattr(kb, 'get_ppl_search', fake_get_ppl_search)
+    monkeypatch.setattr(kb, 'ppl_search', fake_ppl_search)
     config_with_images = dict(DEFAULT_AGENTIC_CONFIG, image_files=['image-a.png'])
     original_config = kb.lazyllm.globals.get('agentic_config')
     kb.lazyllm.globals['agentic_config'] = config_with_images
     try:
-        kb.kb_search('query')
+        kb.kb().search('query')
     finally:
         kb.lazyllm.globals['agentic_config'] = original_config or {}
 
@@ -111,18 +102,16 @@ def test_kb_search_passes_image_files_from_agentic_config(monkeypatch):
 def test_kb_search_forwards_user_id_from_agentic_config(monkeypatch):
     captured_payload = {}
 
-    def fake_get_ppl_search(url, retriever_configs=None, topk=20, k_max=10):
-        def fake_search(payload):
-            captured_payload.update(payload)
-            return []
-        return fake_search
+    def fake_ppl_search(payload, *, document, retriever_topk=20, rerank_topk=20, k_max=10):
+        captured_payload.update(payload)
+        return []
 
-    monkeypatch.setattr(kb, 'get_ppl_search', fake_get_ppl_search)
+    monkeypatch.setattr(kb, 'ppl_search', fake_ppl_search)
     config_with_user = dict(DEFAULT_AGENTIC_CONFIG, user_id='user-007')
     original_config = kb.lazyllm.globals.get('agentic_config')
     kb.lazyllm.globals['agentic_config'] = config_with_user
     try:
-        kb.kb_search('query')
+        kb.kb().search('query')
     finally:
         kb.lazyllm.globals['agentic_config'] = original_config or {}
 
@@ -132,17 +121,15 @@ def test_kb_search_forwards_user_id_from_agentic_config(monkeypatch):
 def test_kb_search_user_id_defaults_to_empty_when_absent(monkeypatch):
     captured_payload = {}
 
-    def fake_get_ppl_search(url, retriever_configs=None, topk=20, k_max=10):
-        def fake_search(payload):
-            captured_payload.update(payload)
-            return []
-        return fake_search
+    def fake_ppl_search(payload, *, document, retriever_topk=20, rerank_topk=20, k_max=10):
+        captured_payload.update(payload)
+        return []
 
-    monkeypatch.setattr(kb, 'get_ppl_search', fake_get_ppl_search)
+    monkeypatch.setattr(kb, 'ppl_search', fake_ppl_search)
     original_config = kb.lazyllm.globals.get('agentic_config')
     kb.lazyllm.globals['agentic_config'] = DEFAULT_AGENTIC_CONFIG
     try:
-        kb.kb_search('query')
+        kb.kb().search('query')
     finally:
         kb.lazyllm.globals['agentic_config'] = original_config or {}
 
@@ -152,18 +139,16 @@ def test_kb_search_user_id_defaults_to_empty_when_absent(monkeypatch):
 def test_kb_search_explicit_empty_files_overrides_config_files(monkeypatch):
     captured_payload = {}
 
-    def fake_get_ppl_search(url, retriever_configs=None, topk=20, k_max=10):
-        def fake_search(payload):
-            captured_payload.update(payload)
-            return []
-        return fake_search
+    def fake_ppl_search(payload, *, document, retriever_topk=20, rerank_topk=20, k_max=10):
+        captured_payload.update(payload)
+        return []
 
-    monkeypatch.setattr(kb, 'get_ppl_search', fake_get_ppl_search)
+    monkeypatch.setattr(kb, 'ppl_search', fake_ppl_search)
     config_with_files = dict(DEFAULT_AGENTIC_CONFIG, files=['file-a'])
     original_config = kb.lazyllm.globals.get('agentic_config')
     kb.lazyllm.globals['agentic_config'] = config_with_files
     try:
-        kb.kb_search('query', files=[])
+        kb.kb().search('query', files=[])
     finally:
         kb.lazyllm.globals['agentic_config'] = original_config or {}
 
@@ -195,7 +180,7 @@ def test_kb_get_parent_node_returns_empty_when_no_parent(monkeypatch):
     original_config = kb.lazyllm.globals.get('agentic_config')
     kb.lazyllm.globals['agentic_config'] = DEFAULT_AGENTIC_CONFIG
     try:
-        result = kb.kb_get_parent_node('root-node')
+        result = kb.kb().get_parent_node('root-node')
     finally:
         kb.lazyllm.globals['agentic_config'] = original_config or {}
 
