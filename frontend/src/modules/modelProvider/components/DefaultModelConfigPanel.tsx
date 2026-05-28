@@ -7,16 +7,16 @@ import { BASE_URL, axiosInstance, getLocalizedErrorMessage } from "@/components/
 import { useModelFeatures } from "@/hooks/useModelFeatures";
 
 type ModelCapability =
-  | "LLM_CHAT"
-  | "EMBEDDING"
-  | "VLM"
-  | "RERANK"
-  | "ASR"
-  | "TTS"
-  | "TEXT_TO_IMAGE"
-  | "MULTIMODAL_EMBEDDING"
-  | "IMAGE_EDITING"
-  | "LLM_SELF_EVOLUTION";
+  | "llm"
+  | "embed_main"
+  | "vlm"
+  | "reranker"
+  | "stt"
+  | "tts"
+  | "text2image"
+  | "embed_image"
+  | "image_editing"
+  | "evo_llm";
 
 interface ProviderModel {
   id: string;
@@ -100,79 +100,43 @@ type ModelOptionItem = {
 
 const moduleConfigs: ModuleConfig[] = [
   {
-    key: "LLM_CHAT",
+    key: "llm",
     titleKey: "modelProvider.module.llmChatTitle",
     subtitleKey: "modelProvider.module.llmChatSubtitle",
     required: true,
   },
   {
-    key: "EMBEDDING",
+    key: "embed_main",
     titleKey: "modelProvider.module.embeddingTitle",
     subtitleKey: "modelProvider.module.embeddingSubtitle",
     required: true,
     restricted: true,
   },
   {
-    key: "MULTIMODAL_EMBEDDING",
+    key: "embed_image",
     titleKey: "modelProvider.module.multimodalEmbeddingTitle",
     subtitleKey: "modelProvider.module.multimodalEmbeddingSubtitle",
     restricted: true,
   },
   {
-    key: "VLM",
+    key: "vlm",
     titleKey: "modelProvider.module.vlmTitle",
     subtitleKey: "modelProvider.module.vlmSubtitle",
   },
   {
-    key: "RERANK",
+    key: "reranker",
     titleKey: "modelProvider.module.rerankTitle",
     subtitleKey: "modelProvider.module.rerankSubtitle",
   },
   {
-    key: "LLM_SELF_EVOLUTION",
+    key: "evo_llm",
     titleKey: "modelProvider.module.selfEvolutionTitle",
     subtitleKey: "modelProvider.module.selfEvolutionSubtitle",
   },
 ];
 
-enum ModelProviderModelType {
-  VLM = "VLM",
-  LLM = "llm",
-  LLMChat = "llm-chat",
-  LLMEvolution = "llm-evo",
-  Embedding = "embedding",
-  MultimodalEmbedding = "multimodal_embedding",
-  TextToImage = "text2image",
-  TTS = "tts",
-  STT = "stt",
-  Rerank = "rerank",
-  ImageEditing = "image_editing",
-}
-
-const modelTypeByCapability: Record<ModelCapability, ModelProviderModelType> = {
-  LLM_CHAT: ModelProviderModelType.LLM,
-  EMBEDDING: ModelProviderModelType.Embedding,
-  VLM: ModelProviderModelType.VLM,
-  RERANK: ModelProviderModelType.Rerank,
-  ASR: ModelProviderModelType.STT,
-  TTS: ModelProviderModelType.TTS,
-  TEXT_TO_IMAGE: ModelProviderModelType.TextToImage,
-  MULTIMODAL_EMBEDDING: ModelProviderModelType.MultimodalEmbedding,
-  IMAGE_EDITING: ModelProviderModelType.ImageEditing,
-  LLM_SELF_EVOLUTION: ModelProviderModelType.LLM,
-};
-
-const selectedModelTypeByCapability: Record<ModelCapability, ModelProviderModelType> = {
-  ...modelTypeByCapability,
-  LLM_CHAT: ModelProviderModelType.LLMChat,
-  LLM_SELF_EVOLUTION: ModelProviderModelType.LLMEvolution,
-};
-
 const selectedCapabilityByModelType: Record<string, ModelCapability> = {
-  [ModelProviderModelType.LLMChat]: "LLM_CHAT",
-  [ModelProviderModelType.LLMEvolution]: "LLM_SELF_EVOLUTION",
-  llm: "LLM_CHAT",
-  llm2: "LLM_SELF_EVOLUTION",
+  evo_llm: "evo_llm",
 };
 
 function normalizeProviderKey(value: string) {
@@ -241,7 +205,7 @@ function getCapabilityByModelType(modelType?: string): ModelCapability | undefin
   if (selectedCapability) {
     return selectedCapability;
   }
-  return moduleConfigs.find((module) => selectedModelTypeByCapability[module.key].toLowerCase() === normalized)?.key;
+  return moduleConfigs.find((module) => module.key === normalized)?.key;
 }
 
 function getApiBaseUrl() {
@@ -351,7 +315,7 @@ export default function DefaultModelConfigPanel() {
   const imageEmbedEnabled =
     modelFeaturesState.status !== "ready" || modelFeaturesState.features.image_embed_enabled;
   const visibleModuleConfigs = useMemo(
-    () => moduleConfigs.filter((module) => module.key !== "MULTIMODAL_EMBEDDING" || imageEmbedEnabled),
+    () => moduleConfigs.filter((module) => module.key !== "embed_image" || imageEmbedEnabled),
     [imageEmbedEnabled]
   );
   const localizedFallbacks = useMemo(() => createModelProviderFallbacks(t), [i18n.language, t]);
@@ -420,10 +384,9 @@ export default function DefaultModelConfigPanel() {
       if (!isAdmin) {
         const readyResults = await Promise.allSettled(
           moduleConfigs.map(async (module) => {
-            const modelType = selectedModelTypeByCapability[module.key];
             const response = await modelProviderRequest<{ ready: boolean; source?: string }>(
               "GET",
-              `/model_providers/models/ready?model_type=${encodeURIComponent(modelType)}`
+              `/model_providers/models/ready?model_type=${encodeURIComponent(module.key)}`
             );
             return { capability: module.key, ready: response.ready };
           })
@@ -455,14 +418,13 @@ export default function DefaultModelConfigPanel() {
 
     setModuleModelLoading((current) => ({ ...current, [capability]: true }));
     try {
-      const modelType = modelTypeByCapability[capability];
       const data = await modelProviderRequest<{ models?: Array<ApiModel & {
         user_model_provider_id: string;
         user_model_provider_group_id: string;
         provider_name: string;
         group_name: string;
         base_url?: string;
-      }> }>("GET", `/model_providers/models?model_type=${encodeURIComponent(modelType)}`);
+      }> }>("GET", `/model_providers/models?model_type=${encodeURIComponent(capability)}`);
       const options = (data.models || []).map((model) => {
         const provider =
           providerOptions.find((item) => item.id === model.user_model_provider_id) ||
@@ -510,10 +472,9 @@ export default function DefaultModelConfigPanel() {
   }, [selectedModels, moduleModelOptions]);
 
   const saveSelectedModel = async (capability: ModelCapability, value?: string) => {
-    const modelType = selectedModelTypeByCapability[capability];
     const selections = [
       {
-        model_type: modelType,
+        model_type: capability,
         model_id: value ? parseModelValue(value).modelId : "",
       },
     ];
@@ -563,7 +524,7 @@ export default function DefaultModelConfigPanel() {
 
   const handleModelSelection = (capability: ModelCapability, value?: string) => {
     const previousValue = selectedModels[capability];
-    if (capability === "EMBEDDING" && previousValue && previousValue !== value && shareStatus.EMBEDDING === true) {
+    if (capability === "embed_main" && previousValue && previousValue !== value && shareStatus.embed_main === true) {
       Modal.confirm({
         title: t("modelProvider.embeddingChangeTitle"),
         content: t("modelProvider.embeddingChangeContent"),

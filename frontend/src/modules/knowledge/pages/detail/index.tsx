@@ -87,6 +87,7 @@ const Detail = () => {
   const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
   const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<boolean | null>(null);
+  const [parsingNoticeVisible, setParsingNoticeVisible] = useState(false);
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
 
   const { id = "" } = useParams();
