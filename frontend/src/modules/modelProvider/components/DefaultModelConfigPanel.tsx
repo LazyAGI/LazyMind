@@ -19,6 +19,7 @@ import {
   axiosInstance,
   getLocalizedErrorMessage,
 } from "@/components/request";
+import { useModelFeatures } from "@/hooks/useModelFeatures";
 
 type ModelCapability =
   | "llm"
@@ -516,7 +517,17 @@ export default function DefaultModelConfigPanel() {
     Partial<Record<ModelCapability, boolean | null>>
   >({});
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
-  const visibleModuleConfigs = moduleConfigs;
+  const modelFeaturesState = useModelFeatures();
+  const imageEmbedEnabled =
+    modelFeaturesState.status !== "ready" ||
+    modelFeaturesState.features.image_embed_enabled;
+  const visibleModuleConfigs = useMemo(
+    () =>
+      moduleConfigs.filter(
+        (module) => module.key !== "embed_image" || imageEmbedEnabled,
+      ),
+    [imageEmbedEnabled],
+  );
   const localizedFallbacks = useMemo(
     () => createModelProviderFallbacks(t),
     [i18n.language, t],
