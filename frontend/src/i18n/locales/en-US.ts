@@ -945,6 +945,13 @@ const enUS = {
     dataSourceRefresh: "Refresh",
     dataSourceListTitle: "Data Source List",
     dataSourceListRefreshed: "List refreshed",
+    dataSourceProviderTitle: "Data Source Providers",
+    dataSourceProviderSubtitle:
+      "Choose a provider to enter connection configuration. Saving creates the data source.",
+    dataSourceProviderCredentialReady: "Credentials ready",
+    dataSourceProviderCredentialMissing: "Credentials needed",
+    dataSourceProviderConfigureAction: "Configure connection",
+    dataSourceProviderSetupAction: "Set up and authorize",
     dataSourceAccessAlertTitle: "Knowledge Source Access",
     dataSourceAccessAlertDesc:
       "Supports local paths and Feishu OAuth integration. Enter the knowledge base name and complete connection testing before saving.",
@@ -963,6 +970,7 @@ const enUS = {
       "Feishu data source can only be selected and connected after credentials are set.",
     dataSourceFeishuCredentialSaved: "Feishu App ID / App Secret saved.",
     dataSourceFeishuCredentialReset: "Feishu App ID / App Secret disconnected.",
+    dataSourceFeishuResetCredentialAction: "Reset credentials",
     dataSourceFeishuCredentialResetConfirmTitle: "Disconnect Feishu link?",
     dataSourceFeishuCredentialResetConfirmContent:
       "This will clear the current Feishu App ID / App Secret and OAuth connection state. You will need to configure them again before using Feishu data sources.",
@@ -1025,6 +1033,12 @@ const enUS = {
     dataSourceConnectionTestDesc:
       "After entering local scan path, you must verify path reachability and read-only permissions.",
     dataSourceConnectionTestAction: "Test Connection",
+    dataSourceFeishuAccountConnection: "Feishu Account Authorization",
+    dataSourceFeishuAccountConnectionDesc:
+      "Connect a Feishu account, then enter the Wiki space or Drive folder to sync.",
+    dataSourceFeishuAccountConnectedDesc: "Connected account: {{account}}.",
+    dataSourceFeishuAuthorizeAction: "Authorize Feishu",
+    dataSourceFeishuReconnectAction: "Re-authorize",
     dataSourceConnectionTestSuccess:
       "Connection test successful. Current configuration can access the data source.",
     dataSourceConnectionVerified: "Verified",

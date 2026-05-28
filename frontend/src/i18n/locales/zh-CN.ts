@@ -905,6 +905,13 @@ const zhCN = {
     dataSourceRefresh: "刷新",
     dataSourceListTitle: "数据源列表",
     dataSourceListRefreshed: "列表已刷新",
+    dataSourceProviderTitle: "数据源供应商",
+    dataSourceProviderSubtitle:
+      "选择一个数据源供应商进入连接配置，保存后会创建对应的数据源。",
+    dataSourceProviderCredentialReady: "已设置凭据",
+    dataSourceProviderCredentialMissing: "待设置凭据",
+    dataSourceProviderConfigureAction: "进入连接配置",
+    dataSourceProviderSetupAction: "设置并授权",
     dataSourceAccessAlertTitle: "知识源接入",
     dataSourceAccessAlertDesc:
       "支持本地路径与飞书 OAuth 接入，创建时填写知识库名称并完成连接测试后继续配置。",
@@ -920,6 +927,7 @@ const zhCN = {
     dataSourceFeishuCredentialHint: "设置完成后，飞书数据源才可被选择和连接。",
     dataSourceFeishuCredentialSaved: "飞书 App ID / App Secret 已设置。",
     dataSourceFeishuCredentialReset: "飞书 App ID / App Secret 已解绑。",
+    dataSourceFeishuResetCredentialAction: "重设凭据",
     dataSourceFeishuCredentialResetConfirmTitle: "确认取消飞书链接？",
     dataSourceFeishuCredentialResetConfirmContent:
       "取消后将清空当前飞书 App ID / App Secret 与 OAuth 连接状态，需要重新配置后才能继续使用飞书数据源。",
@@ -979,6 +987,12 @@ const zhCN = {
     dataSourceConnectionTest: "连接测试",
     dataSourceConnectionTestDesc: "填写本地扫描路径后，需要先完成路径可达性与只读权限检测。",
     dataSourceConnectionTestAction: "测试连接",
+    dataSourceFeishuAccountConnection: "飞书账号授权",
+    dataSourceFeishuAccountConnectionDesc:
+      "连接飞书账号后，再填写需要同步的 Wiki 空间或 Drive 文件夹。",
+    dataSourceFeishuAccountConnectedDesc: "当前已连接：{{account}}。",
+    dataSourceFeishuAuthorizeAction: "授权飞书账号",
+    dataSourceFeishuReconnectAction: "重新授权",
     dataSourceConnectionTestSuccess: "连接测试成功，当前配置可正常访问数据源。",
     dataSourceConnectionVerified: "已通过",
     dataSourceConnectionPending: "待验证",

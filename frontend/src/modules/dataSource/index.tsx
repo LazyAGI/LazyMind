@@ -7,6 +7,7 @@ import {
   Form,
   Input,
   Modal,
+  Segmented,
   Space,
   Table,
   Tag,
@@ -17,6 +18,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import {
   ApiOutlined,
+  ArrowRightOutlined,
   EditOutlined,
   EyeOutlined,
   FolderOpenOutlined,
@@ -81,6 +83,7 @@ import {
   formatBytes,
   formatDateTime,
   getConnectionMeta,
+  getSourceTypeDescription,
   getSourceTypeTitle,
   getStatusMeta,
   getSyncModeLabel,
@@ -94,6 +97,7 @@ import {
 const { Paragraph, Text } = Typography;
 const DEFAULT_SCHEDULE_TIME = "02:00:00";
 const SCHEDULE_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/;
+type DataSourceView = "list" | "providers";
 
 function normalizeScheduleTime(scheduleTime?: string) {
   const value = `${scheduleTime || ""}`.trim();
@@ -520,6 +524,7 @@ export default function DataSourceManagement() {
   const navigate = useNavigate();
   const [form] = Form.useForm<SourceFormValues>();
   const [sources, setSources] = useState<DataSourceItem[]>([]);
+  const [activeView, setActiveView] = useState<DataSourceView>("list");
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
   const [wizardMode, setWizardMode] = useState<"create" | "edit">("create");
@@ -943,15 +948,7 @@ export default function DataSourceManagement() {
   };
 
   const openCreateWizard = () => {
-    resetWizard();
-    form.setFieldsValue({
-      syncMode: "scheduled",
-      scheduleCycle: "daily",
-      scheduleTime: DEFAULT_SCHEDULE_TIME,
-      conflictPolicy: "versioned",
-      targetType: "wiki_space",
-    });
-    setWizardOpen(true);
+    setActiveView("providers");
   };
 
   const openEditWizard = (record: DataSourceItem) => {
@@ -1026,6 +1023,8 @@ export default function DataSourceManagement() {
     setup?: FeishuAppSetup;
     draftSelectedType?: SourceType | null;
     draftWizardStep?: number;
+    draftWizardMode?: "create" | "edit";
+    draftEditingId?: string | null;
     draftFormValues?: Record<string, unknown>;
     previousState?: OAuthState;
     previousVerified?: boolean;
@@ -1068,9 +1067,9 @@ export default function DataSourceManagement() {
       const draft: FeishuDataSourceWizardDraft = {
         wizardOpen: true,
         wizardStep: options?.draftWizardStep ?? wizardStep,
-        wizardMode,
+        wizardMode: options?.draftWizardMode ?? wizardMode,
         selectedType: options?.draftSelectedType ?? selectedType,
-        editingId,
+        editingId: options?.draftEditingId ?? editingId,
         validatedAgentId: selectedAgent.agent_id,
         oauthState: "waiting",
         connectionVerified: previousVerified,
@@ -1162,11 +1161,14 @@ export default function DataSourceManagement() {
         };
 
         applySourceType("feishu");
-        setWizardStep(0);
+        setWizardOpen(true);
+        setWizardStep(1);
         await startFeishuOAuth({
           setup: nextSetup,
           draftSelectedType: "feishu",
-          draftWizardStep: 0,
+          draftWizardStep: 1,
+          draftWizardMode: "create",
+          draftEditingId: null,
           draftFormValues: feishuFormValues,
           previousState: "pending",
           previousVerified: false,
@@ -1205,6 +1207,62 @@ export default function DataSourceManagement() {
       return;
     }
     applySourceType(type);
+  };
+
+  const openProviderCreateWizard = (type: SourceType) => {
+    resetWizard();
+    setWizardMode("create");
+    setEditingId(null);
+    applySourceType(type);
+    setWizardStep(1);
+
+    if (type === "feishu" && !isFeishuSetupReady) {
+      openFeishuSetupModal(true);
+      return;
+    }
+
+    setWizardOpen(true);
+
+    if (type === "feishu" && feishuAppSetup) {
+      const feishuFormValues = {
+        ...form.getFieldsValue(true),
+        syncMode: "scheduled",
+        scheduleCycle: "daily",
+        scheduleTime: DEFAULT_SCHEDULE_TIME,
+        conflictPolicy: "versioned",
+        path: "",
+        target: "",
+        targetType: "wiki_space",
+      };
+
+      void startFeishuOAuth({
+        setup: feishuAppSetup,
+        draftSelectedType: "feishu",
+        draftWizardStep: 1,
+        draftWizardMode: "create",
+        draftEditingId: null,
+        draftFormValues: feishuFormValues,
+        previousState: "pending",
+        previousVerified: false,
+        previousConnection: null,
+      });
+    }
+  };
+
+  const handleAuthorizeFeishu = () => {
+    if (!isFeishuSetupReady || !feishuAppSetup) {
+      openFeishuSetupModal(true);
+      return;
+    }
+
+    void startFeishuOAuth({
+      setup: feishuAppSetup,
+      draftSelectedType: "feishu",
+      draftWizardStep: 1,
+      previousState: oauthState,
+      previousVerified: connectionVerified,
+      previousConnection: oauthConnection,
+    });
   };
 
   const handleTestConnection = async () => {
@@ -1946,33 +2004,104 @@ export default function DataSourceManagement() {
         warningCount={warningCount}
       />
 
-      <Card
-        className="data-source-list-card"
-        title={t("admin.dataSourceListTitle")}
-        extra={
-          <Space size="middle">
-            <Button
-              icon={<ReloadOutlined />}
-              loading={scanLoading}
-              onClick={() => {
-                void refreshSources(true);
-              }}
-            >
-              {t("admin.dataSourceRefresh")}
-            </Button>
-          </Space>
-        }
-      >
-        <Table<DataSourceItem>
-          rowKey="id"
-          columns={columns}
-          dataSource={sources}
-          loading={scanLoading}
-          pagination={{ pageSize: 6, showSizeChanger: false }}
-          className="admin-page-table data-source-table"
-          scroll={{ x: 1480, y: "clamp(22vh, calc(100vh - 560px), 52vh)" }}
+      <div className="data-source-secondary-nav">
+        <Segmented
+          value={activeView}
+          onChange={(value) => setActiveView(value as DataSourceView)}
+          options={[
+            { label: t("admin.dataSourceListTitle"), value: "list" },
+            { label: t("admin.dataSourceProviderTitle"), value: "providers" },
+          ]}
         />
-      </Card>
+      </div>
+
+      {activeView === "list" ? (
+        <Card
+          className="data-source-list-card"
+          title={t("admin.dataSourceListTitle")}
+          extra={
+            <Space size="middle">
+              <Button
+                icon={<ReloadOutlined />}
+                loading={scanLoading}
+                onClick={() => {
+                  void refreshSources(true);
+                }}
+              >
+                {t("admin.dataSourceRefresh")}
+              </Button>
+            </Space>
+          }
+        >
+          <Table<DataSourceItem>
+            rowKey="id"
+            columns={columns}
+            dataSource={sources}
+            loading={scanLoading}
+            pagination={{ pageSize: 6, showSizeChanger: false }}
+            className="admin-page-table data-source-table"
+            scroll={{ x: 1480, y: "clamp(22vh, calc(100vh - 560px), 52vh)" }}
+          />
+        </Card>
+      ) : (
+        <section className="data-source-provider-panel">
+          <div className="data-source-provider-panel-header">
+            <div>
+              <Text strong className="data-source-provider-title">
+                {t("admin.dataSourceProviderTitle")}
+              </Text>
+              <Paragraph className="data-source-provider-subtitle">
+                {t("admin.dataSourceProviderSubtitle")}
+              </Paragraph>
+            </div>
+          </div>
+          <div className="data-source-provider-grid">
+            {sourceTypeOptions.map((item) => {
+              const isFeishuLocked = item.type === "feishu" && !isFeishuSetupReady;
+              return (
+                <button
+                  key={item.type}
+                  type="button"
+                  className={`data-source-provider-card ${isFeishuLocked ? "locked" : ""}`}
+                  onClick={() => openProviderCreateWizard(item.type)}
+                >
+                  <div className="data-source-provider-card-header">
+                    <span className={`data-source-icon data-source-icon-${item.type}`}>
+                      {item.icon}
+                    </span>
+                    <Space size={6}>
+                      {item.adminOnly ? (
+                        <Tag color="orange">{t("admin.dataSourceAdminOnly")}</Tag>
+                      ) : null}
+                      {item.type === "feishu" ? (
+                        <Tag color={isFeishuLocked ? "default" : "success"}>
+                          {isFeishuLocked
+                            ? t("admin.dataSourceProviderCredentialMissing")
+                            : t("admin.dataSourceProviderCredentialReady")}
+                        </Tag>
+                      ) : null}
+                    </Space>
+                  </div>
+                  <span className="data-source-provider-name">
+                    {getSourceTypeTitle(item.type, t)}
+                  </span>
+                  <span className="data-source-provider-desc">
+                    {item.type === "feishu" && isFeishuLocked
+                      ? t("admin.dataSourceFeishuLockHint")
+                      : getSourceTypeDescription(item.type, t)}
+                  </span>
+                  <span className="data-source-provider-action">
+                    {isFeishuLocked
+                      ? t("admin.dataSourceProviderSetupAction")
+                      : t("admin.dataSourceProviderConfigureAction")}
+                    <ArrowRightOutlined />
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <DataSourceDetailDrawer
         t={t}
@@ -2064,10 +2193,13 @@ export default function DataSourceManagement() {
         existingKnowledgeBaseNames={getKnownKnowledgeBaseNames()}
         selectedType={selectedType}
         isFeishuSetupReady={isFeishuSetupReady}
+        oauthState={oauthState}
+        oauthConnection={oauthConnection}
         connectionVerified={connectionVerified}
         syncMode={syncMode}
         feishuTargetType={feishuTargetType}
         saving={wizardSaving}
+        allowTypeSelection={false}
         onClose={handleCloseWizard}
         onPrev={() => setWizardStep((step) => step - 1)}
         onNext={handleNextStep}
@@ -2076,6 +2208,7 @@ export default function DataSourceManagement() {
         }}
         onSelectType={handleSelectType}
         onResetFeishuSetup={handleResetFeishuSetup}
+        onAuthorizeFeishu={handleAuthorizeFeishu}
         onTestConnection={() => {
           void handleTestConnection();
         }}

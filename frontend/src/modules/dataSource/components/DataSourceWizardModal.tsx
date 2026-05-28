@@ -23,9 +23,12 @@ import {
   FolderOpenOutlined,
   LinkOutlined,
   LockOutlined,
+  SafetyCertificateOutlined,
 } from "@ant-design/icons";
+import type { FeishuDataSourceConnection } from "@/modules/dataSource/common/feishuOAuth";
 import type {
   FeishuTargetType,
+  OAuthState,
   SourceFormValues,
   SourceType,
   SyncMode,
@@ -62,16 +65,20 @@ interface DataSourceWizardModalProps {
   existingKnowledgeBaseNames: string[];
   selectedType: SourceType | null;
   isFeishuSetupReady: boolean;
+  oauthState: OAuthState;
+  oauthConnection: FeishuDataSourceConnection | null;
   connectionVerified: boolean;
   syncMode: SyncMode;
   feishuTargetType: FeishuTargetType;
   saving: boolean;
+  allowTypeSelection?: boolean;
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
   onSave: () => void;
   onSelectType: (type: SourceType) => void;
   onResetFeishuSetup: () => void;
+  onAuthorizeFeishu: () => void;
   onTestConnection: () => void;
   onInvalidateConnection: () => void;
 }
@@ -85,16 +92,20 @@ export default function DataSourceWizardModal({
   existingKnowledgeBaseNames,
   selectedType,
   isFeishuSetupReady,
+  oauthState,
+  oauthConnection,
   connectionVerified,
   syncMode,
   feishuTargetType,
   saving,
+  allowTypeSelection = true,
   onClose,
   onPrev,
   onNext,
   onSave,
   onSelectType,
   onResetFeishuSetup,
+  onAuthorizeFeishu,
   onTestConnection,
   onInvalidateConnection,
 }: DataSourceWizardModalProps) {
@@ -148,6 +159,61 @@ export default function DataSourceWizardModal({
     );
   };
 
+  const renderFeishuConnectionSection = () => {
+    if (selectedType !== "feishu") {
+      return null;
+    }
+
+    const isConnected = oauthState === "connected";
+
+    return (
+      <Card size="small" className="data-source-connect-card">
+        <div className="data-source-connect-header">
+          <div>
+            <Text strong>{t("admin.dataSourceFeishuAccountConnection")}</Text>
+            <Paragraph type="secondary">
+              {isConnected
+                ? t("admin.dataSourceFeishuAccountConnectedDesc", {
+                    account:
+                      oauthConnection?.accountName ||
+                      t("admin.dataSourceFeishuConnectedAccountFallback"),
+                  })
+                : t("admin.dataSourceFeishuAccountConnectionDesc")}
+            </Paragraph>
+          </div>
+          <Tag color={isConnected ? "success" : oauthState === "waiting" ? "processing" : "default"}>
+            {isConnected
+              ? t("admin.dataSourceConnectionConnected")
+              : oauthState === "waiting"
+                ? t("admin.dataSourceConnectionWaiting")
+                : t("admin.dataSourceConnectionPending")}
+          </Tag>
+        </div>
+        <Space wrap>
+          <Button
+            type="primary"
+            icon={<SafetyCertificateOutlined />}
+            disabled={isEditMode || oauthState === "waiting"}
+            onClick={onAuthorizeFeishu}
+          >
+            {isConnected
+              ? t("admin.dataSourceFeishuReconnectAction")
+              : t("admin.dataSourceFeishuAuthorizeAction")}
+          </Button>
+          {!isEditMode && isFeishuSetupReady ? (
+            <Button
+              disabled={oauthState === "waiting"}
+              icon={<DisconnectOutlined />}
+              onClick={onResetFeishuSetup}
+            >
+              {t("admin.dataSourceFeishuResetCredentialAction")}
+            </Button>
+          ) : null}
+        </Space>
+      </Card>
+    );
+  };
+
   return (
     <Modal
       title={wizardMode === "edit" ? t("admin.dataSourceEdit") : t("admin.dataSourceCreate")}
@@ -164,7 +230,7 @@ export default function DataSourceWizardModal({
         <div className="data-source-wizard-footer">
           <Button disabled={saving} onClick={onClose}>{t("common.cancel")}</Button>
           <Space>
-            {wizardStep > 0 && !isEditMode ? (
+            {allowTypeSelection && wizardStep > 0 && !isEditMode ? (
               <Button disabled={saving} onClick={onPrev}>{t("admin.dataSourceWizardPrev")}</Button>
             ) : null}
             {wizardStep < 1 ? (
@@ -181,7 +247,7 @@ export default function DataSourceWizardModal({
         </div>
       }
     >
-      {!isEditMode ? (
+      {!isEditMode && allowTypeSelection ? (
         <Steps
           current={wizardStep}
           items={[
@@ -193,7 +259,7 @@ export default function DataSourceWizardModal({
       ) : null}
 
       <Form form={form} layout="vertical" className="data-source-wizard-form">
-        {wizardStep === 0 ? (
+        {allowTypeSelection && wizardStep === 0 ? (
           <div>
             <Paragraph type="secondary" className="data-source-wizard-intro">
               {t("admin.dataSourceTypeStepIntro")}
@@ -348,6 +414,7 @@ export default function DataSourceWizardModal({
                     )}
 
                     {selectedType === "local" ? renderConnectionSection() : null}
+                    {selectedType === "feishu" ? renderFeishuConnectionSection() : null}
                   </Card>
 
                   <Card
