@@ -4,7 +4,6 @@ import { CheckCircleOutlined, DownOutlined, MinusCircleOutlined, QuestionCircleO
 import { useTranslation } from "react-i18next";
 import { AgentAppsAuth } from "@/components/auth";
 import { BASE_URL, axiosInstance, getLocalizedErrorMessage } from "@/components/request";
-import { useModelFeatures } from "@/hooks/useModelFeatures";
 
 type ModelCapability =
   | "llm"
@@ -311,13 +310,7 @@ export default function DefaultModelConfigPanel() {
   const [shareStatus, setShareStatus] = useState<Partial<Record<ModelCapability, boolean>>>({});
   const [modelReadyStatus, setModelReadyStatus] = useState<Partial<Record<ModelCapability, boolean | null>>>({});
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
-  const modelFeaturesState = useModelFeatures();
-  const imageEmbedEnabled =
-    modelFeaturesState.status !== "ready" || modelFeaturesState.features.image_embed_enabled;
-  const visibleModuleConfigs = useMemo(
-    () => moduleConfigs.filter((module) => module.key !== "MULTIMODAL_EMBEDDING" || imageEmbedEnabled),
-    [imageEmbedEnabled]
-  );
+  const visibleModuleConfigs = moduleConfigs;
   const localizedFallbacks = useMemo(() => createModelProviderFallbacks(t), [i18n.language, t]);
 
   const loadDefaultModelState = useCallback(async () => {
