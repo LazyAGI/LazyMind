@@ -315,7 +315,7 @@ export default function DefaultModelConfigPanel() {
   const imageEmbedEnabled =
     modelFeaturesState.status !== "ready" || modelFeaturesState.features.image_embed_enabled;
   const visibleModuleConfigs = useMemo(
-    () => moduleConfigs.filter((module) => module.key !== "embed_image" || imageEmbedEnabled),
+    () => moduleConfigs.filter((module) => module.key !== "MULTIMODAL_EMBEDDING" || imageEmbedEnabled),
     [imageEmbedEnabled]
   );
   const localizedFallbacks = useMemo(() => createModelProviderFallbacks(t), [i18n.language, t]);
