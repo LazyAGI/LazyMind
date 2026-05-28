@@ -79,14 +79,20 @@
     }
   }
 
-  .contentReadOnly {
+  .contentReadOnly,
+  .contentWithNumber:not(.contentReadOnly) {
     padding: 32px 12px 10px;
     overflow-y: auto !important;
     overflow-x: hidden;
   }
 
+  .contentWithNumber:not(.contentReadOnly) {
+    padding-bottom: 0;
+  }
+
   &.segmentCard-no-number {
-    .contentReadOnly {
+    .contentReadOnly,
+    .contentWithNumber:not(.contentReadOnly) {
       padding-top: 10px;
     }
   }

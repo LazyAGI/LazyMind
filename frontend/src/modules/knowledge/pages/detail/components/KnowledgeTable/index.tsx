@@ -61,6 +61,7 @@ import RestartKnowledgeModal, {
 } from "../RestartKnowledgeModal";
 import TreeUtils from "@/modules/knowledge/utils/tree";
 import UIUtils from "@/modules/knowledge/utils/ui";
+import { startDocSummaryParse } from "@/modules/knowledge/utils/llmParse";
 import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
 import type { Job } from "@/api/generated/knowledge-client";
 
@@ -95,6 +96,7 @@ export interface IKnowledgeListRef {
   deleteKnowledge: () => void;
   downloadCheckedKnowledge: () => void;
   restartCheckedKnowledge: () => void;
+  llmParseCheckedKnowledge: () => void;
   openBatchEditTags: () => void;
   openBatchMove: () => void;
   refresh: (keyword: string) => void;
@@ -966,6 +968,10 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
               key: "reparse",
               label: t("knowledge.reparse"),
             });
+            isLeftItems.push({
+              key: "llmParse",
+              label: t("knowledge.llmParse"),
+            });
           }
         }
         isLeftItems.push({ key: "delete", label: t("common.delete"), danger: true });
@@ -1113,6 +1119,9 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
           dataset: record?.dataset_id || "",
           ids: [record?.document_id || ""],
         });
+        break;
+      case "llmParse":
+        void startLlmParse([record?.document_id || ""]);
         break;
       case "import": {
         const parents = TreeUtils.findParents(
@@ -1277,6 +1286,35 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
     });
   };
 
+  const startLlmParse = async (documentIds: string[]) => {
+    const ids = documentIds.filter(Boolean);
+    if (!ids.length || !detail.dataset_id) {
+      message.warning(t("knowledge.selectAtLeastOneFile"));
+      return;
+    }
+    try {
+      await startDocSummaryParse(
+        detail.dataset_id,
+        ids,
+        t("knowledge.llmParseTaskName", { count: ids.length }),
+      );
+      message.success(t("knowledge.llmParseTaskCreated"));
+      getImportingTotal();
+      tableDataRefresh();
+    } catch (error) {
+      console.log(error);
+      message.error(t("knowledge.llmParseTaskFailed"));
+    }
+  };
+
+  const llmParseCheckedKnowledge = () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning(t("knowledge.selectAtLeastOneFile"));
+      return;
+    }
+    void startLlmParse(selectedRowKeys);
+  };
+
   const updateDocument = (params?: {
     documentId: string;
     level?: number;
@@ -1333,6 +1371,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
     downloadCheckedKnowledge,
     updateDocument,
     restartCheckedKnowledge: restartCheckedKnowledge,
+    llmParseCheckedKnowledge,
     openBatchEditTags: () => {
       void doOpenBatchEditTags();
     },

@@ -10,7 +10,7 @@ import Polling from "@/modules/knowledge/utils/polling";
 import { TaskServiceApi } from "@/modules/knowledge/utils/request";
 import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
-import { IMPORT_TASK_POLL_INTERVAL } from "@/modules/knowledge/constants/common";
+import { IMPORT_TASK_POLL_INTERVAL, IMPORT_TASK_FAILED_STATES, IMPORT_TASK_RUNNING_STATES, IMPORT_TASK_SUCCESS_STATES } from "@/modules/knowledge/constants/common";
 
 interface IProps {
   datasetId: string;
@@ -24,9 +24,9 @@ export enum TaskTab {
   Failed = "3",
 }
 
-const RUNNING_STATES = ["WAITING", "WORKING"];
-const SUCCESS_STATES = ["SUCCESS"];
-const FAILED_STATES = ["FAILED", "CANCELED"];
+const RUNNING_STATES = IMPORT_TASK_RUNNING_STATES;
+const SUCCESS_STATES = IMPORT_TASK_SUCCESS_STATES;
+const FAILED_STATES = IMPORT_TASK_FAILED_STATES;
 
 export const TaskTabInfo = [
   { id: TaskTab.Running, titleKey: "knowledge.importRunning", taskStates: RUNNING_STATES },

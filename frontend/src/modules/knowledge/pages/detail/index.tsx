@@ -49,7 +49,7 @@ import ImportTaskManage, {
   IImportTaskManageRef,
 } from "./components/ImportTaskManage";
 import TreeUtils from "@/modules/knowledge/utils/tree";
-import { IMPORT_TASK_POLL_INTERVAL } from "@/modules/knowledge/constants/common";
+import { IMPORT_TASK_POLL_INTERVAL, IMPORT_TASK_RUNNING_STATES } from "@/modules/knowledge/constants/common";
 import ConfirmModal, {
   ConfirmImperativeProps,
 } from "@/modules/knowledge/components/ConfirmModal";
@@ -186,7 +186,7 @@ const Detail = () => {
       interval: IMPORT_TASK_POLL_INTERVAL,
       request: () => TaskServiceApi().listTasks(id),
       onSuccess: ({ data = {} }) => {
-        const RUNNING_STATES = ["WAITING", "WORKING"];
+        const RUNNING_STATES = IMPORT_TASK_RUNNING_STATES;
         const allTasks = data.tasks || [];
         const newTaskList = allTasks.filter((t: any) =>
           RUNNING_STATES.includes(t.task_state),
@@ -610,6 +610,13 @@ const Detail = () => {
                       label: t("knowledge.batchReparse"),
                       onClick: () => {
                         knowledgeListRef.current?.restartCheckedKnowledge();
+                      },
+                    },
+                    {
+                      key: "batchLlmParse",
+                      label: t("knowledge.batchLlmParse"),
+                      onClick: () => {
+                        knowledgeListRef.current?.llmParseCheckedKnowledge();
                       },
                     },
                     {

@@ -54,7 +54,6 @@ const SegmentList = forwardRef<SegmentListImperativeProps, IProps>(
       showNumber = true,
     } = props;
     const segmentDetailRef = useRef<ISegmentDetailModalRef>(null);
-    console.log("segments", segments);
     useImperativeHandle(ref, () => ({
       openDetail,
     }));

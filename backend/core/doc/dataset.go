@@ -113,6 +113,7 @@ type algoGroupInfoResp struct {
 		Name        string `json:"name"`
 		Type        string `json:"type"`
 		DisplayName string `json:"display_name"`
+		Active      *bool  `json:"active,omitempty"`
 	} `json:"data"`
 }
 
@@ -225,6 +226,9 @@ func fetchParsersByAlgoID(ctx context.Context, algoID string) []ParserConfig {
 	}
 	out := make([]ParserConfig, 0, len(resp.Data))
 	for _, item := range resp.Data {
+		if item.Active != nil && !*item.Active {
+			continue
+		}
 		parseType, ok := parserTypeMap[strings.TrimSpace(item.Type)]
 		if !ok {
 			continue
@@ -234,6 +238,37 @@ func fetchParsersByAlgoID(ctx context.Context, algoID string) []ParserConfig {
 			Params: map[string]any{},
 			Type:   parseType,
 		})
+	}
+	return out
+}
+
+func mergeParserConfigs(stored, live []ParserConfig) []ParserConfig {
+	if len(stored) == 0 {
+		return live
+	}
+	if len(live) == 0 {
+		return stored
+	}
+	out := make([]ParserConfig, 0, len(stored)+len(live))
+	seen := map[string]struct{}{}
+	add := func(p ParserConfig) {
+		name := strings.TrimSpace(p.Name)
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		p.Name = name
+		p.Type = strings.TrimSpace(p.Type)
+		out = append(out, p)
+	}
+	for _, p := range stored {
+		add(p)
+	}
+	for _, p := range live {
+		add(p)
 	}
 	return out
 }
@@ -522,15 +557,12 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 	for _, ds := range page {
 		datasetACL := datasetACLForUserWithGroups(&ds, userID, groupIDs)
 		algo := parseDatasetAlgo(ds.Ext)
-		parsers := parseDatasetParsers(ds.Ext)
-		if len(parsers) == 0 {
-			if cached, ok := parserCache[algo.AlgoID]; ok {
-				parsers = cached
-			} else {
-				parsers = fetchParsersByAlgoID(r.Context(), algo.AlgoID)
-				parserCache[algo.AlgoID] = parsers
-			}
+		liveParsers, ok := parserCache[algo.AlgoID]
+		if !ok {
+			liveParsers = fetchParsersByAlgoID(r.Context(), algo.AlgoID)
+			parserCache[algo.AlgoID] = liveParsers
 		}
+		parsers := mergeParserConfigs(parseDatasetParsers(ds.Ext), liveParsers)
 		stats := statsMap[ds.ID]
 		out = append(out, Dataset{
 			Name:           "datasets/" + ds.ID,
@@ -962,10 +994,7 @@ func GetDataset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	algo := parseDatasetAlgo(ds.Ext)
-	parsers := parseDatasetParsers(ds.Ext)
-	if len(parsers) == 0 {
-		parsers = fetchParsersByAlgoID(r.Context(), algo.AlgoID)
-	}
+	parsers := mergeParserConfigs(parseDatasetParsers(ds.Ext), fetchParsersByAlgoID(r.Context(), algo.AlgoID))
 	stats := calcDatasetStats(r.Context(), ds.ID)
 	common.ReplyJSON(w, Dataset{
 		Name:           "datasets/" + ds.ID,

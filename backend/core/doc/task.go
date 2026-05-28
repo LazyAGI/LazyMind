@@ -24,6 +24,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
+	applog "lazymind/core/log"
 	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
 	"lazymind/core/store"
@@ -1534,10 +1535,11 @@ func buildTaskResponse(r *http.Request, row orm.Task) TaskResponse {
 	if isSuccessState(resp.TaskState) {
 		resp.TaskInfo.SucceedDocumentSize = resp.TaskInfo.TotalDocumentSize
 		resp.TaskInfo.SucceedDocumentCount = resp.TaskInfo.TotalDocumentCount
-	} else if resp.TaskState == string(TaskStateFailed) {
+	} else if resp.TaskState == string(TaskStateFailed) || strings.EqualFold(resp.TaskState, "FAILED") {
 		resp.TaskInfo.FailedDocumentSize = resp.TaskInfo.TotalDocumentSize
 		resp.TaskInfo.FailedDocumentCount = resp.TaskInfo.TotalDocumentCount
 	}
+	resp.TaskState = normalizeTaskStateForUI(resp.TaskState)
 	return resp
 }
 
@@ -1676,7 +1678,39 @@ func firstNonEmpty(values ...string) string {
 }
 
 func isSuccessState(state string) bool {
-	return state == string(TaskStateSucceeded) || state == "SUCCEEDED"
+	s := strings.ToUpper(strings.TrimSpace(state))
+	return s == string(TaskStateSucceeded) || s == "SUCCEEDED" || s == "SUCCESS"
+}
+
+// normalizeTaskStateForUI maps core/lazyllm task states to the values expected by the
+// knowledge import-task panel (WAITING / WORKING / SUCCESS / FAILED / CANCELED).
+func normalizeTaskStateForUI(state string) string {
+	s := strings.ToUpper(strings.TrimSpace(state))
+	switch s {
+	case string(TaskStateCreating), string(TaskStateUploading), string(TaskStateUploaded):
+		return "WAITING"
+	case string(TaskStateRunning), "STARTED", "SUBMITTED", "PROCESSING":
+		return "WORKING"
+	case string(TaskStateSucceeded):
+		return "SUCCESS"
+	case string(TaskStateFailed):
+		return "FAILED"
+	case string(TaskStateCancelled):
+		return "CANCELED"
+	default:
+		return strings.TrimSpace(state)
+	}
+}
+
+func markTaskStartFailed(ctx context.Context, datasetID string, taskRow orm.Task, errMsg string) {
+	var ext taskExt
+	_ = json.Unmarshal(taskRow.Ext, &ext)
+	ext.TaskState = string(TaskStateFailed)
+	ext.ErrorMessage = strings.TrimSpace(errMsg)
+	now := time.Now().UTC()
+	_ = store.DB().WithContext(ctx).Model(&orm.Task{}).
+		Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", taskRow.ID, datasetID).
+		Updates(map[string]any{"ext": mustJSON(ext), "updated_at": now}).Error
 }
 
 func maxInt64(a, b int64) int64 {
@@ -2327,6 +2361,13 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 	kbID := datasetKbIDByID(datasetID)
 	results := make([]StartTaskResult, 0, len(taskIDs))
 	userID := common.UserID(r)
+	applog.Logger.Info().
+		Str("handler", "StartReparseTask").
+		Str("dataset_id", datasetID).
+		Str("kb_id", kbID).
+		Int("task_count", len(taskIDs)).
+		Strs("task_ids", taskIDs).
+		Msg("starting reparse tasks")
 	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), userID)
 	if err != nil {
 		log.Printf("[startReparseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
@@ -2338,19 +2379,26 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 	for _, taskID := range taskIDs {
 		var taskRow orm.Task
 		if err := store.DB().WithContext(r.Context()).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", taskID, datasetID).Take(&taskRow).Error; err != nil {
+			applog.Logger.Warn().Str("handler", "StartReparseTask").Str("task_id", taskID).Msg("task not found")
 			results = append(results, StartTaskResult{TaskID: taskID, Status: "FAILED", SubmitStatus: "REJECTED", Message: "task not found"})
 			continue
 		}
 		var docRow orm.Document
 		if err := store.DB().WithContext(r.Context()).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", taskRow.DocID, datasetID).Take(&docRow).Error; err != nil {
+			applog.Logger.Warn().Str("handler", "StartReparseTask").Str("task_id", taskID).Str("doc_id", taskRow.DocID).Msg("document not found")
+			markTaskStartFailed(r.Context(), datasetID, taskRow, "document not found")
 			results = append(results, StartTaskResult{TaskID: taskID, DocumentID: taskRow.DocID, DisplayName: taskRow.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "document not found"})
 			continue
 		}
 		if isFolderLikeDocument(docRow) {
+			applog.Logger.Warn().Str("handler", "StartReparseTask").Str("task_id", taskID).Str("doc_id", docRow.ID).Msg("folder document cannot be reparsed")
+			markTaskStartFailed(r.Context(), datasetID, taskRow, "folder document cannot be reparsed")
 			results = append(results, StartTaskResult{TaskID: taskID, DocumentID: docRow.ID, DisplayName: docRow.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "folder document cannot be reparsed"})
 			continue
 		}
 		if strings.TrimSpace(docRow.LazyllmDocID) == "" {
+			applog.Logger.Warn().Str("handler", "StartReparseTask").Str("task_id", taskID).Str("doc_id", docRow.ID).Msg("lazyllm doc id is empty")
+			markTaskStartFailed(r.Context(), datasetID, taskRow, "lazyllm doc id is empty")
 			results = append(results, StartTaskResult{TaskID: taskID, DocumentID: docRow.ID, DisplayName: docRow.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "lazyllm doc id is empty"})
 			continue
 		}
@@ -2372,10 +2420,26 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 			break
 		}
 	}
+	applog.Logger.Info().
+		Str("handler", "StartReparseTask").
+		Str("dataset_id", datasetID).
+		Str("kb_id", kbID).
+		Int("doc_count", len(docIDs)).
+		Strs("doc_ids", docIDs).
+		Strs("ng_names", ngNames).
+		Msg("submitting reparse batch to doc service")
 	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, IdempotencyKey: newTaskID(), ModelConfig: llmConfig})
 	if err != nil {
+		errMsg := common.ResolveAppError(err.Error(), http.StatusBadGateway).Message
+		applog.Logger.Error().
+			Err(err).
+			Str("handler", "StartReparseTask").
+			Str("dataset_id", datasetID).
+			Strs("ng_names", ngNames).
+			Msg("reparse batch submission failed")
 		for i, taskRow := range taskRows {
-			results = append(results, StartTaskResult{TaskID: taskRow.ID, DocumentID: docRows[i].ID, DisplayName: docRows[i].DisplayName, Status: "FAILED", SubmitStatus: "FAILED", Message: common.ResolveAppError(err.Error(), http.StatusBadGateway).Message, Detail: fmt.Sprint(common.ResolveAppError(err.Error(), http.StatusBadGateway).Detail)})
+			markTaskStartFailed(r.Context(), datasetID, taskRow, errMsg)
+			results = append(results, StartTaskResult{TaskID: taskRow.ID, DocumentID: docRows[i].ID, DisplayName: docRows[i].DisplayName, Status: "FAILED", SubmitStatus: "FAILED", Message: errMsg, Detail: fmt.Sprint(common.ResolveAppError(err.Error(), http.StatusBadGateway).Detail)})
 		}
 		return results, err
 	}
@@ -2403,6 +2467,12 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		})
 		results = append(results, StartTaskResult{TaskID: taskRow.ID, DocumentID: docRows[i].ID, DisplayName: docRows[i].DisplayName, Status: "STARTED", SubmitStatus: "SUBMITTED"})
 	}
+	applog.Logger.Info().
+		Str("handler", "StartReparseTask").
+		Str("dataset_id", datasetID).
+		Int("started_count", len(taskRows)).
+		Strs("ng_names", ngNames).
+		Msg("reparse tasks submitted")
 	return results, nil
 }
 

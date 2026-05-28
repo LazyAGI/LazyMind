@@ -2,7 +2,7 @@ import { Ref, forwardRef, useImperativeHandle, useState } from "react";
 import { Modal, Form, message, TreeSelect } from "antd";
 import { useTranslation } from "react-i18next";
 import type { ParserConfig } from "@/api/generated/knowledge-client";
-import { TaskServiceApi } from "@/modules/knowledge/utils/request";
+import { TaskServiceApi, type StartTaskResult } from "@/modules/knowledge/utils/request";
 
 interface IData {
   dataset: string;
@@ -66,7 +66,7 @@ const RestartKnowledgeModal = (
             upload_file_id: "",
             task: {
               task_type: "TASK_TYPE_REPARSE",
-              document_ids: ids.filter((i) => !!i),
+              document_ids: ids.filter((i: string) => !!i),
               display_name: t("knowledge.reparseTaskName", { count: ids.length }),
               reparse_groups: normalizedReparseGroups.filter(
                 (v: string) => !allParseList.includes(v),
@@ -78,14 +78,23 @@ const RestartKnowledgeModal = (
 
       const tasks = createRes.data.tasks || [];
       const taskIds = tasks
-        .map((t) => t.task_id)
-        .filter((taskId): taskId is string => !!taskId);
+        .map((task: { task_id?: string }) => task.task_id)
+        .filter((taskId: string | undefined): taskId is string => !!taskId);
       if (!taskIds.length) {
         message.error(t("knowledge.createReparseTaskFailed"));
         return;
       }
 
-      await TaskServiceApi().startTasks(dataset, { task_ids: taskIds });
+      const startRes = await TaskServiceApi().startTasks(dataset, { task_ids: taskIds });
+      const startedCount = startRes.data.started_count ?? 0;
+      if (startedCount <= 0) {
+        const failedTasks = (startRes.data.tasks || []) as StartTaskResult[];
+        const errMsg =
+          failedTasks.find((task: StartTaskResult) => task.message)?.message ||
+          t("knowledge.createReparseTaskFailed");
+        message.error(errMsg);
+        return;
+      }
       message.success(t("knowledge.createReparseTaskSuccess"));
       onFinish?.();
       onCancel();
@@ -115,7 +124,12 @@ const RestartKnowledgeModal = (
           label={t("knowledge.restartSlice")}
           rules={[{ required: true, message: t("knowledge.selectRestartSlice") }]}
           getValueFromEvent={(value: Array<string | undefined>) =>
-            normalizeReparseGroups(value || [])
+            normalizeReparseGroups(
+              value || [],
+              (parsers || [])
+                .map((parser) => parser.name)
+                .filter((name): name is string => !!name),
+            )
           }
           required
         >
@@ -129,11 +143,21 @@ const RestartKnowledgeModal = (
   );
 };
 
-const parseTypeMap = {
-};
+const parseKeyMap = {
+  PARSE_TYPE_QA: "knowledge.segmentQa",
+  PARSE_TYPE_SUMMARY: "knowledge.segmentSummary",
+  PARSE_TYPE_IMAGE_CAPTION: "knowledge.imageCaption",
+} as const;
 
-function normalizeReparseGroups(value: Array<string | undefined>) {
-  const selectableValues = new Set([allSegmentValue, ...documentSegmentValues]);
+function normalizeReparseGroups(
+  value: Array<string | undefined>,
+  extraValues: string[] = [],
+) {
+  const selectableValues = new Set([
+    allSegmentValue,
+    ...documentSegmentValues,
+    ...extraValues,
+  ]);
   const normalizedValue = value.filter(
     (v): v is string => !!v && selectableValues.has(v),
   );
@@ -168,14 +192,9 @@ function formatOptions(parsers: Array<ParserConfig>, t: (key: string, options?: 
         title: p.name,
         value: p.name,
       });
-    } else if (parseTypeMap[p.type as keyof typeof parseTypeMap]) {
-      const parseKeyMap = {
-        PARSE_TYPE_QA: "knowledge.segmentQa",
-        PARSE_TYPE_SUMMARY: "knowledge.segmentSummary",
-        PARSE_TYPE_IMAGE_CAPTION: "knowledge.imageCaption",
-      } as const;
+    } else if (p.type && p.type in parseKeyMap) {
       options.push({
-        title: t(parseKeyMap[p.type as keyof typeof parseKeyMap] || "knowledge.segmentDocument"),
+        title: t(parseKeyMap[p.type as keyof typeof parseKeyMap]),
         value: p?.name || "",
       });
     }
