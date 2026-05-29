@@ -1,5 +1,7 @@
 """Infrastructure helpers for chat engine tools."""
 
+# flake8: noqa: F401
+
 from lazymind.chat.engine.tools.infra.kb_document_provider import (
     build_agentic_document,
     get_default_document,

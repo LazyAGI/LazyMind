@@ -15,7 +15,7 @@ def sse_line(payload: Dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, default=str) + '\n\n'
 
 
-def _log_and_emit_frame(frame: Any, cost: float, query: str, session_id: str, tag: str = "FRAME") -> str:
+def _log_and_emit_frame(frame: Any, cost: float, query: str, session_id: str, tag: str = 'FRAME') -> str:
     LOG.debug(
         f'[ChatServer] [KB_CHAT_STREAM_{tag}] '
         f'[query={query}] [session_id={session_id}] '

@@ -11,7 +11,6 @@ from lazymind.config import config as _cfg
 from lazymind.review.vocab.evolution import (
     VocabEvolutionRequest,
     _LAZYLLM_CONTEXT_CREATE_USER_ATTR,
-    _dedupe_keep_order,
     _json_dump_list,
     _norm_text,
     _summarize_action_for_log,
@@ -150,7 +149,7 @@ class VocabEvolutionService:
         LOG.info(
             f'[VocabEvolution] finished requested_user_id={target_label!r} '
             f'action_count={len(serialized_actions)} '
-            f'actions={[ _summarize_action_for_log(item) for item in actions ]}'
+            f'actions={[_summarize_action_for_log(item) for item in actions]}'
         )
         return serialized_actions
 

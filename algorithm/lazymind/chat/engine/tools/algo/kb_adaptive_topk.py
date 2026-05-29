@@ -142,5 +142,5 @@ class AdaptiveKComponent(ModuleBase):
             get_token_len=self.get_token_len,
             **self.kwargs,
         )
-        LOG.info(f"[AdaptiveKComponent] AdaptiveK selected {k} / {len(nodes)} nodes, diag={diag}")
+        LOG.info(f'[AdaptiveKComponent] AdaptiveK selected {k} / {len(nodes)} nodes, diag={diag}')
         return selected

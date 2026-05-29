@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Optional
 
 from lazymind.config import config as _cfg
-from lazymind.chat.service.utils.citations import annotate_citations, build_stream_citation_scanner, rewrite_citations
+from lazymind.chat.service.utils.citations import (
+    annotate_citations,
+    build_stream_citation_scanner,
+    rewrite_citations,
+)
 from lazymind.chat.service.component.tool_rendering import (
     _preview_language,
     _tool_call_frame_text,
@@ -108,7 +112,14 @@ class AgentEventFrameTranslator:
                 else:
                     annotate_citations(result, self.citation_state)
             if tool_results:
-                parts = [_tool_result_frame_text(tr, self.language, self._pending_previews.pop(str(tr.get('id', '')), '')) for tr in tool_results]
+                parts = [
+                    _tool_result_frame_text(
+                        tr,
+                        self.language,
+                        self._pending_previews.pop(str(tr.get('id', '')), ''),
+                    )
+                    for tr in tool_results
+                ]
                 frames.append(_stream_frame(text=''.join(parts)))
         return frames
 
@@ -223,4 +234,3 @@ def _format_final_result(result: Any, config: dict) -> dict[str, Any]:
         'text': text.strip(),
         'sources': _merge_sources(cited_sources, existing_sources),
     }
-

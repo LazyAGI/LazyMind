@@ -158,7 +158,12 @@ def _normalize_history_for_agent(
                     pending_reasoning_parts.append(seg['content'])
                 elif seg_type == 'text':
                     restore_history_source_links(seg['content'], citation_state)
-                    pending_text_parts.append(SOURCE_LINK_PATTERN.sub(lambda match: f'[[{match.group(2)}]]', seg['content'] or ''))
+                    pending_text_parts.append(
+                        SOURCE_LINK_PATTERN.sub(
+                            lambda match: f'[[{match.group(2)}]]',
+                            seg['content'] or '',
+                        )
+                    )
                 elif seg_type == 'tool_call':
                     saw_structured_segments = True
                     pending_tool_calls.append({
@@ -184,7 +189,11 @@ def _normalize_history_for_agent(
                         'role': 'tool',
                         'tool_call_id': seg['id'],
                         'name': seg['name'],
-                        'content': seg['result'] if isinstance(seg['result'], str) else json.dumps(seg['result'], ensure_ascii=False, separators=(',', ':')),
+                        'content': (
+                            seg['result']
+                            if isinstance(seg['result'], str)
+                            else json.dumps(seg['result'], ensure_ascii=False, separators=(',', ':'))
+                        ),
                     })
 
             _append_pending_assistant(
@@ -201,7 +210,6 @@ def _normalize_history_for_agent(
             if content:
                 normalized.append({'role': 'user', 'content': content})
             continue
-
 
         content = _history_message_content(message)
         if content:

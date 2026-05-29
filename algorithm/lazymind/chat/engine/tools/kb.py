@@ -100,6 +100,7 @@ def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
         serialized['local_path'] = local_path
     return serialized
 
+
 def _source_to_result(hit: Dict[str, Any]) -> Dict[str, Any]:
     src = hit.get('_source') or {}
     meta = parse_json_dict(src.get('meta'))
@@ -266,7 +267,10 @@ class KBToolGroup:
         config = lazyllm.globals['agentic_config']
         doc = kb_document_provider.build_agentic_document(config)
 
-        for kb_id in iter_lookup_ids((config.get('filters') or {}).get('kb_id'), field_name='agentic_config.filters.kb_id'):
+        for kb_id in iter_lookup_ids(
+            (config.get('filters') or {}).get('kb_id'),
+            field_name='agentic_config.filters.kb_id',
+        ):
             current_nodes = doc.get_nodes(uids=[node_id], kb_id=kb_id)
             current_nodes = current_nodes if isinstance(current_nodes, list) else []
             if not current_nodes:
@@ -341,7 +345,10 @@ class KBToolGroup:
         config = lazyllm.globals['agentic_config']
         doc = kb_document_provider.build_agentic_document(config)
 
-        for kb_id in iter_lookup_ids((config.get('filters') or {}).get('kb_id'), field_name='agentic_config.filters.kb_id'):
+        for kb_id in iter_lookup_ids(
+            (config.get('filters') or {}).get('kb_id'),
+            field_name='agentic_config.filters.kb_id',
+        ):
             nodes = doc.get_nodes(
                 doc_ids=[docid],
                 group=group,
@@ -406,7 +413,10 @@ class KBToolGroup:
             {'number': {'order': 'asc'}},
         ]
         index_name = resolve_index(group)
-        for kb_id in iter_lookup_ids((config.get('filters') or {}).get('kb_id'), field_name='agentic_config.filters.kb_id'):
+        for kb_id in iter_lookup_ids(
+            (config.get('filters') or {}).get('kb_id'),
+            field_name='agentic_config.filters.kb_id',
+        ):
             filters = [term_filter('doc_id', docid)]
             if kb_id:
                 filters.insert(0, term_filter('kb_id', kb_id))

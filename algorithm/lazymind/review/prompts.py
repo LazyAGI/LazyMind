@@ -1,3 +1,5 @@
+# flake8: noqa: E501,Q000
+
 _SKILL_REVIEW_PROMPT = (
     "Review the conversation above and determine whether a reusable skill should be created or updated.\n\n"
     "If the conversation reveals a good workflow, troubleshooting procedure, or general methodology, "

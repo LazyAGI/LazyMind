@@ -4,14 +4,13 @@ import lazyllm
 from lazyllm import Document
 
 from lazymind.config import config as _cfg
-from lazymind.chat.engine.tools.infra.kb_retriever_factory import get_tmp_retriever
 
 _DEFAULT_KB_URL = _cfg['agentic_kb_url']
 _DEFAULT_KB_NAME = _cfg['agentic_kb_name']
 
 
-def get_remote_document(base_url: str, name: str = "__default__") -> Document:
-    return Document(url=f"{base_url}/_call", name=name)
+def get_remote_document(base_url: str, name: str = '__default__') -> Document:
+    return Document(url=f'{base_url}/_call', name=name)
 
 
 def get_default_document() -> Document:

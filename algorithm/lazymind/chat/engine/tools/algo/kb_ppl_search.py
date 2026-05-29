@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from lazyllm import Document
 from lazyllm.tools.rag import Reranker, Retriever, TempDocRetriever
@@ -10,14 +10,14 @@ from lazymind.review.service.registry import get_vocab_manager
 
 
 def _adaptive_get_token_len(n: Any) -> int:
-    txt = getattr(n, "text", "") or ""
+    txt = getattr(n, 'text', '') or ''
     return max(1, len(txt) // 4)
 
 
 def _pass_through_rerank(nodes):
     for node in nodes or []:
-        if getattr(node, "relevance_score", None) is None:
-            node.relevance_score = getattr(node, "score", None) or getattr(node, "similarity_score", None) or 0.0
+        if getattr(node, 'relevance_score', None) is None:
+            node.relevance_score = getattr(node, 'score', None) or getattr(node, 'similarity_score', None) or 0.0
     return nodes
 
 
@@ -32,14 +32,14 @@ def search_text(
     adaptive_k: AdaptiveKComponent,
     ctx_expand: ContextExpansionComponent,
 ):
-    query = get_vocab_manager(payload["user_id"])(payload["query"])
-    files = (payload or {}).get("files")
+    query = get_vocab_manager(payload['user_id'])(payload['query'])
+    files = (payload or {}).get('files')
     if files:
         if tmp_retriever is None:
-            raise ValueError("tmp_retriever is required when payload.files is set")
+            raise ValueError('tmp_retriever is required when payload.files is set')
         nodes = tmp_retriever(files, query, topk=retriever_topk)
     else:
-        filters = payload.get("filters") or {}
+        filters = payload.get('filters') or {}
         nodes = tuple(
             result for result in (
                 retriever(query, filters=filters, topk=retriever_topk) for retriever in retrievers
@@ -92,8 +92,8 @@ def ppl_search(
     if image_retriever is None:
         return text_nodes
 
-    if (payload or {}).get("files"):
+    if (payload or {}).get('files'):
         return text_nodes
 
-    image_nodes = image_retriever(payload["query"], filters=payload.get("filters") or {})
+    image_nodes = image_retriever(payload['query'], filters=payload.get('filters') or {})
     return list(text_nodes or []) + list(image_nodes or [])

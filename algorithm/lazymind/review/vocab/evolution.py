@@ -113,6 +113,8 @@ Do not output any explanation other than JSON."""
 
 
 _SENTENCE_BOUNDARY_RE = re.compile(r'.*?(?:[。！？!?；;]+|[\n]+|$)', re.S)
+
+
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 

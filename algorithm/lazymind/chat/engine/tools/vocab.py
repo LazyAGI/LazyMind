@@ -115,8 +115,8 @@ class VocabToolGroup:
             LOG.info(
                 '[VocabTool] skipped raw suggestion '
                 f'user_id={user_id!r} '
-                f"reason={skipped_log['reason']} "
-                f"suggestion={json.dumps(skipped_log['suggestion'], ensure_ascii=False)}"
+                f'reason={skipped_log["reason"]} '
+                f'suggestion={json.dumps(skipped_log["suggestion"], ensure_ascii=False)}'
             )
         for candidate in candidates:
             LOG.info(

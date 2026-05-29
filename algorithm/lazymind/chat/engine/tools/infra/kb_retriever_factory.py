@@ -5,7 +5,7 @@ from lazyllm.tools.rag import Retriever, TempDocRetriever
 
 from lazymind.model_config import get_config_path, get_text_embed_keys
 
-EMBED_MAIN = "embed_main"
+EMBED_MAIN = 'embed_main'
 _KB_RETRIEVER_CACHE: Dict[int, List[Retriever]] = {}
 _IMAGE_RETRIEVER_CACHE: Dict[Tuple[int, str, int], Retriever] = {}
 _TMP_RETRIEVER_CACHE: Dict[str, TempDocRetriever] = {}
@@ -14,8 +14,8 @@ _TMP_RETRIEVER_CACHE: Dict[str, TempDocRetriever] = {}
 def build_default_retriever_configs() -> List[dict]:
     embed_keys = get_text_embed_keys() or [EMBED_MAIN]
     return [
-        {"group_name": "line", "embed_keys": embed_keys, "target": "block"},
-        {"group_name": "block", "embed_keys": embed_keys},
+        {'group_name': 'line', 'embed_keys': embed_keys, 'target': 'block'},
+        {'group_name': 'block', 'embed_keys': embed_keys},
     ]
 
 
@@ -34,7 +34,7 @@ def get_image_retriever(document: Document, image_embed_key: str, image_topk: in
     if image_retriever is None:
         image_retriever = Retriever(
             document,
-            group_name="image",
+            group_name='image',
             embed_keys=[image_embed_key],
             topk=image_topk,
         )
@@ -47,6 +47,6 @@ def get_tmp_retriever() -> TempDocRetriever:
     tmp_retriever = _TMP_RETRIEVER_CACHE.get(cache_key)
     if tmp_retriever is None:
         tmp_retriever = TempDocRetriever(embed=AutoModel(model=EMBED_MAIN, config=cache_key))
-        tmp_retriever.add_subretriever("block")
+        tmp_retriever.add_subretriever('block')
         _TMP_RETRIEVER_CACHE[cache_key] = tmp_retriever
     return tmp_retriever

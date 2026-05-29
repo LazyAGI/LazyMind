@@ -1,6 +1,8 @@
 import os
 from lazyllm.configs import Config
 
+# flake8: noqa: E501
+
 # Single Config instance for the entire algorithm package.
 # All LAZYMIND_* environment variables are registered here.
 config = Config(prefix='LAZYMIND', home='~/.lazyllm_rag')

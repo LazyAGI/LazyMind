@@ -149,7 +149,7 @@ def _spawn_background_review(
             )
             print(
                 f'[bg-review:{review_mode}] AGENT_READY thread={tname} '
-                f"max_retries={_cfg['review_max_retries']} "
+                f'max_retries={_cfg["review_max_retries"]} '
                 f'review_tools={review_tools} '
                 f'runtime_review_tools={runtime_review_tools!r} '
                 f'review_skills={len(review_skills)}'

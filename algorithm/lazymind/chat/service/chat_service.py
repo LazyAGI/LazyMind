@@ -28,7 +28,7 @@ from lazymind.chat.service.utils.streaming import (
     single_event_stream_response,
     sse_line,
 )
-from lazymind.chat.engine import *
+from lazymind.chat.engine import *  # noqa: F401,F403
 from lazyllm.tools.fs.client import FS
 from lazymind.model_config import get_config_path, inject_model_config, summarize_model_config_for_log
 from lazyllm.tools.tool_config_inject import inject_tool_config
@@ -38,6 +38,7 @@ from lazymind.chat.service.component.event_translator import AgentEventFrameTran
 
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
 sensitive_filter = SensitiveFilter(SENSITIVE_WORDS_PATH)
+
 
 def _run_ppl_with_trace(ppl, ppl_args, *, session_id, dataset, mode_tag, trace_enabled, model_config):
     lazyllm.globals._init_sid(sid=session_id)
@@ -66,6 +67,7 @@ def _run_ppl_with_trace(ppl, ppl_args, *, session_id, dataset, mode_tag, trace_e
         raise RuntimeError('LazyLLM trace did not expose a trace_id')
     return result, trace_id
 
+
 def _set_request_trace(enabled: bool, *, session_id: str, dataset: str, mode_tag: str) -> None:
     set_trace_context({
         'enabled': bool(enabled),
@@ -75,6 +77,7 @@ def _set_request_trace(enabled: bool, *, session_id: str, dataset: str, mode_tag
         'module_trace': {'default': True},
     })
 
+
 def _flush_trace_exporter() -> None:
     try:
         if provider := getattr(tracing_runtime._runtime, '_provider', None):
@@ -82,10 +85,12 @@ def _flush_trace_exporter() -> None:
     except Exception as exc:
         LOG.warning(f'[ChatServer] [TRACE_FLUSH_FAILED] {exc}')
 
+
 def _attach_trace_info(data: Any, trace_id: Optional[str]) -> Any:
     if trace_id is None:
         return data
     return {**data, 'trace_id': trace_id} if isinstance(data, dict) else {'data': data, 'trace_id': trace_id}
+
 
 def check_sensitive_content(
     query: str,
@@ -94,6 +99,7 @@ def check_sensitive_content(
         return None
     has_sensitive, sensitive_word = sensitive_filter.check(query)
     return sensitive_word if has_sensitive else None
+
 
 async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       session_id: str, filters: Optional[Dict[str, Any]],
@@ -238,11 +244,11 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                             break
                         for frame in translator.feed(item):
                             cost = round(time.time() - start_time, 3)
-                            yield _log_and_emit_frame(frame, cost, query, session_id, tag="FEED")
+                            yield _log_and_emit_frame(frame, cost, query, session_id, tag='FEED')
 
                     for frame in translator.finish(final_result):
                         cost = round(time.time() - start_time, 3)
-                        yield _log_and_emit_frame(frame, cost, query, session_id, tag="FINISH")
+                        yield _log_and_emit_frame(frame, cost, query, session_id, tag='FINISH')
 
                     if trace_id is not None and not trace_emitted:
                         yield _log_and_emit_frame(

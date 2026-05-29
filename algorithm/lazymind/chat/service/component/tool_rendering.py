@@ -50,8 +50,6 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'FeishuWikiFS_copy': 'path1',
 }
 
-
-
 _REPRESENTATIVE_TOOL_RESULTS: dict[str, str] = {
     'WikipediaSearch_search': 'title',
     'GoogleSearch_search': 'title',
@@ -465,7 +463,10 @@ def _preview_language(value: Any) -> str:
 
 
 def _language_templates(
-    language: str, en_templates: dict[str, str], zh_templates: dict[str, str]) -> dict[str, str]:
+    language: str,
+    en_templates: dict[str, str],
+    zh_templates: dict[str, str],
+) -> dict[str, str]:
     return zh_templates if language == 'zh' else en_templates
 
 

@@ -8,7 +8,7 @@ _RPC_RETRY_DELAY = 0.3
 
 
 def _get_doc_id(node: DocNode) -> Optional[str]:
-    return (node.global_metadata or {}).get("docid")
+    return (node.global_metadata or {}).get('docid')
 
 
 def _estimate_tokens(text: str) -> int:
@@ -16,27 +16,27 @@ def _estimate_tokens(text: str) -> int:
 
 
 def _node_sort_key(node: DocNode) -> Tuple:
-    return (node.metadata.get("index") or 0, node.uid)
+    return (node.metadata.get('index') or 0, node.uid)
 
 
 def _get_node_type(node: DocNode) -> Optional[str]:
     try:
-        md = getattr(node, "metadata", None) or {}
+        md = getattr(node, 'metadata', None) or {}
         if isinstance(md, dict):
-            t = md.get("type") or md.get("node_type")
+            t = md.get('type') or md.get('node_type')
             if isinstance(t, str) and t:
                 return t
     except Exception:
         pass
     try:
-        t = getattr(node, "type", None)
+        t = getattr(node, 'type', None)
         return t if isinstance(t, str) and t else None
     except Exception:
         return None
 
 
 def _relevance_key(n: DocNode) -> Tuple:
-    return (-(getattr(n, "relevance_score", 0.0) or 0.0), n.uid)
+    return (-(getattr(n, 'relevance_score', 0.0) or 0.0), n.uid)
 
 
 class ContextExpansionComponent(ModuleBase):
@@ -55,7 +55,7 @@ class ContextExpansionComponent(ModuleBase):
         doc_id = _get_doc_id(node)
         if not doc_id:
             return []
-        span = (-2, 2) if (_get_node_type(node) or "").lower() == "table" else (-1, 1)
+        span = (-2, 2) if (_get_node_type(node) or '').lower() == 'table' else (-1, 1)
         window = None
         for attempt in range(_RPC_RETRIES + 1):
             try:
@@ -65,7 +65,7 @@ class ContextExpansionComponent(ModuleBase):
                 if attempt < _RPC_RETRIES:
                     time.sleep(_RPC_RETRY_DELAY)
                 else:
-                    LOG.warning("[CtxExpand] All RPC attempts failed uid=%s: %s", node.uid, e)
+                    LOG.warning('[CtxExpand] All RPC attempts failed uid=%s: %s', node.uid, e)
                     return []
         window = window if isinstance(window, list) else ([window] if window else [])
         neighbors = [
@@ -86,17 +86,17 @@ class ContextExpansionComponent(ModuleBase):
         all_added: List[DocNode] = []
         added_tokens = 0
         for seed in seeds:
-            is_table = (_get_node_type(seed) or "").lower() == "table"
+            is_table = (_get_node_type(seed) or '').lower() == 'table'
             if added_tokens >= self.token_budget and not is_table:
                 continue
             neighbors = self._fetch_neighbors(seed, existing_uids)
-            seed_score = getattr(seed, "relevance_score", 0.0) or 0.0
+            seed_score = getattr(seed, 'relevance_score', 0.0) or 0.0
             added_for_seed = 0
             cap = max(self.max_new_nodes_per_seed, 4) if is_table else self.max_new_nodes_per_seed
             for nb in neighbors:
                 if added_for_seed >= cap:
                     break
-                nb_tok = _estimate_tokens(nb.text or "")
+                nb_tok = _estimate_tokens(nb.text or '')
                 if not is_table and added_tokens + nb_tok > self.token_budget:
                     continue
                 existing_uids.add(nb.uid)
@@ -109,7 +109,7 @@ class ContextExpansionComponent(ModuleBase):
                     added_tokens += nb_tok
                 added_for_seed += 1
         if all_added:
-            LOG.info("[CtxExpand] Expanded +%d nodes (+%d tokens)", len(all_added), added_tokens)
+            LOG.info('[CtxExpand] Expanded +%d nodes (+%d tokens)', len(all_added), added_tokens)
         result = list(nodes) + all_added
         result.sort(key=_relevance_key)
         return result
