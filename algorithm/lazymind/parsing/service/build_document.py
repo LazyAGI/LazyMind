@@ -106,13 +106,13 @@ def _build_pdf_reader():
             timeout=3600,
             patch_applied=patch_applied,
             service_variant=service_variant,
-            image_cache_dir=_cfg['image_cache_dir'],
+            image_cache_dir=_cfg['ocr_cache_dir'],
         )
     if ocr_type == 'paddleocr':
         return PaddleOCRPDFReader(
             url=ocr_url,
             service_variant=service_variant,
-            images_dir=_cfg['image_cache_dir'],
+            images_dir=_cfg['ocr_cache_dir'],
         )
     raise ValueError(f'Unsupported OCR server type: {ocr_type!r}')
 

@@ -6,8 +6,8 @@ if __name__ == '__main__':
     server = MineruServer(
         port=_cfg['mineru_server_port'],
         default_backend=_cfg['mineru_backend'],
-        cache_dir=_cfg['mineru_cache_dir'],
-        image_save_dir=_cfg['mineru_image_save_dir'],
+        cache_dir=_cfg['ocr_cache_dir'],
+        image_save_dir=_cfg['ocr_cache_dir'],
     )
     server.start()
     server.wait()
