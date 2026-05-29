@@ -2,7 +2,7 @@ import requests
 from fastapi import APIRouter
 
 from lazymind.model_config import get_image_embed_key, get_dynamic_role_slot_map
-from config import config as _cfg
+from lazymind.config import config as _cfg
 from lazyllm.tools.rag.store import LAZY_IMAGE_GROUP
 
 router = APIRouter()

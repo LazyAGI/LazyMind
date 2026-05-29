@@ -200,7 +200,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
             if stream_iter is None:
                 lazyllm.globals._init_sid(sid=session_id)
                 lazyllm.locals._init_sid(sid=session_id)
-                stream_iter = react_agent.stream(query, llm_chat_history=agent_history)
+                stream_iter = react_agent.forward(query, llm_chat_history=agent_history)
             try:
                 return 'event', next(stream_iter)
             except StopIteration as stop:
