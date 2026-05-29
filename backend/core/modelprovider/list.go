@@ -19,6 +19,8 @@ type listItem struct {
 	Name                   string   `json:"name"`
 	Description            string   `json:"description"`
 	BaseURL                string   `json:"base_url"`
+	Category               string   `json:"category"`
+	Capabilities           []string `json:"capabilities"`
 	ModelTypes             []string `json:"model_types"`
 }
 
@@ -109,12 +111,15 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 	out := make([]listItem, 0, len(rows))
 	for i := range rows {
 		row := rows[i]
+		caps := splitCapabilities(row.Capabilities)
 		out = append(out, listItem{
 			ID:                     row.ID,
 			DefaultModelProviderID: row.DefaultModelProviderID,
 			Name:                   row.Name,
 			Description:            row.Description,
 			BaseURL:                row.BaseURL,
+			Category:               row.Category,
+			Capabilities:           caps,
 			ModelTypes:             []string{},
 		})
 	}
@@ -180,6 +185,8 @@ func seedUserProvidersIfEmpty(ctx context.Context, db *gorm.DB, userID, userName
 				Name:                   d.Name,
 				Description:            d.Description,
 				BaseURL:                d.BaseURL,
+				Category:               d.Category,
+				Capabilities:           d.Capabilities,
 				BaseModel: orm.BaseModel{
 					CreateUserID:   userID,
 					CreateUserName: userName,
@@ -191,4 +198,19 @@ func seedUserProvidersIfEmpty(ctx context.Context, db *gorm.DB, userID, userName
 		}
 		return tx.Create(&batch).Error
 	})
+}
+
+// splitCapabilities splits a comma-separated capabilities string into a slice.
+func splitCapabilities(caps string) []string {
+	if caps == "" {
+		return []string{}
+	}
+	parts := strings.Split(caps, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }

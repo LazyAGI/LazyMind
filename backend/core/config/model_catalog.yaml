@@ -1,6 +1,17 @@
 # Model catalog — source of truth for default_model_providers and default_models.
 # Loaded at startup by modelprovider.SeedModelCatalog(); replaces the seed SQL INSERT statements.
 #
+# Top-level keys must end with "_providers"; the prefix becomes the category:
+#   model_providers  → category: model
+#   ocr_providers    → category: ocr
+#   search_providers → category: search
+#
+# capabilities flags (comma-separated in DB):
+#   multi_group      — user may create multiple groups under one provider
+#   custom_base_url  — user may change base_url
+#   has_models       — group has a model list (seeded from default_models)
+#   api_key_required — api_key must not be empty
+#
 # model type values align with runtime_models.yaml role keys:
 #   llm, evo_llm, vlm, embed_main, embed_image, reranker,
 #   tts, stt, text2image, image_editing
@@ -10,859 +21,925 @@
 #   - Model-level base_url is not supported; all models inherit the provider's base_url.
 
 model_providers:
-  - name: Claude
-    description: |
-      Anthropic 打造的顶尖 AI 基座，具备强大的自适应思考能力与原生视觉支持，在代码开发与复杂 Agent 任务上业界领先。
+  capabilities: [multi_group, custom_base_url, has_models]
+  suppliers:
+    - name: Claude
+      description: |
+        Anthropic 打造的顶尖 AI 基座，具备强大的自适应思考能力与原生视觉支持，在代码开发与复杂 Agent 任务上业界领先。
 
-      获取 API Key：
-      https://console.anthropic.com/settings/keys
+        获取 API Key：
+        https://console.anthropic.com/settings/keys
 
-      申请教程：
+        申请教程：
 
-      1. 访问 Anthropic Console，使用海外邮箱或 Google 账号直接注册。
+        1. 访问 Anthropic Console，使用海外邮箱或 Google 账号直接注册。
 
-      2. 登录后（需验证海外手机号并绑定外币信用卡结算），进入左侧菜单的 Settings → API Keys 页面。
+        2. 登录后（需验证海外手机号并绑定外币信用卡结算），进入左侧菜单的 Settings → API Keys 页面。
 
-      3. 点击 Create Key，输入辨识名称后即可生成，请务必当场复制并妥善保存（关闭弹窗后无法再次查看完整 Key）。
-    base_url: "https://api.anthropic.com/v1/"
-    models:
-      - name: claude-haiku-4-5
-        type: vlm
-      - name: claude-opus-4-7
-        type: vlm
-      - name: claude-sonnet-4-6
-        type: vlm
+        3. 点击 Create Key，输入辨识名称后即可生成，请务必当场复制并妥善保存（关闭弹窗后无法再次查看完整 Key）。
+      base_url: "https://api.anthropic.com/v1/"
+      models:
+        - name: claude-haiku-4-5
+          type: vlm
+        - name: claude-opus-4-7
+          type: vlm
+        - name: claude-sonnet-4-6
+          type: vlm
 
-  - name: DeepSeek
-    description: |
-      国产顶尖大模型，推理模型性价比极高，支持深度推理与长链思考输出。
+    - name: DeepSeek
+      description: |
+        国产顶尖大模型，推理模型性价比极高，支持深度推理与长链思考输出。
 
-      获取 API Key：
-      https://platform.deepseek.com/api_keys
+        获取 API Key：
+        https://platform.deepseek.com/api_keys
 
-      申请教程：
+        申请教程：
 
-      1. 访问 DeepSeek 开放平台，使用手机号或邮箱完成注册。
+        1. 访问 DeepSeek 开放平台，使用手机号或邮箱完成注册。
 
-      2. 登录后进入左侧导航栏的 API Keys 页面，点击"创建 API Key"。
+        2. 登录后进入左侧导航栏的 API Keys 页面，点击"创建 API Key"。
 
-      3. 为 Key 命名后点击创建，系统会生成一串密钥，请复制并妥善保存至你的代码配置中。
-    base_url: "https://api.deepseek.com/"
-    models:
-      - name: deepseek-v4-flash
-        type: llm
-      - name: deepseek-v4-pro
-        type: llm
+        3. 为 Key 命名后点击创建，系统会生成一串密钥，请复制并妥善保存至你的代码配置中。
+      base_url: "https://api.deepseek.com/"
+      models:
+        - name: deepseek-v4-flash
+          type: llm
+        - name: deepseek-v4-pro
+          type: llm
 
-  - name: Doubao
-    description: |
-      字节跳动火山引擎出品，旗舰模型深度思考能力极强，全面覆盖复杂推理、代码开发及高精度文生图等多模态场景。
+    - name: Doubao
+      description: |
+        字节跳动火山引擎出品，旗舰模型深度思考能力极强，全面覆盖复杂推理、代码开发及高精度文生图等多模态场景。
 
-      获取 API Key 指南：
+        获取 API Key 指南：
 
-      访问 火山方舟
+        访问 火山方舟
 
-      一站式大模型服务平台 https://www.volcengine.com/product/ark，点击 【立即体验】 并登录。
+        一站式大模型服务平台 https://www.volcengine.com/product/ark，点击 【立即体验】 并登录。
 
-      点击页面右上角的 【控制台】。
+        点击页面右上角的 【控制台】。
 
-      在左侧导航栏中找到并点击 【API-Key 管理】 即可进行配置与创建。
-    base_url: "https://ark.cn-beijing.volces.com/api/v3/"
-    models:
-      - name: deepseek-r1-250528
-        type: llm
-      - name: deepseek-v3-1-terminus
-        type: llm
-      - name: deepseek-v3-2-251201
-        type: llm
-      - name: deepseek-v3-250324
-        type: llm
-      - name: doubao-1-5-lite-32k-250115
-        type: llm
-      - name: doubao-1-5-pro-32k-250115
-        type: llm
-      - name: doubao-1-5-pro-32k-character-250228
-        type: llm
-      - name: doubao-1-5-pro-32k-character-250715
-        type: llm
-      - name: doubao-1-5-vision-pro-32k-250115
-        type: vlm
-      - name: doubao-embedding-text-240715
-        type: embed_main
-      - name: doubao-embedding-vision-241215
-        type: embed_image
-      - name: doubao-seed-1-6-250615
-        type: llm
-      - name: doubao-seed-1-6-251015
-        type: llm
-      - name: doubao-seed-1-6-flash-250828
-        type: llm
-      - name: doubao-seed-1-6-lite-251015
-        type: llm
-      - name: doubao-seed-1-6-vision-250815
-        type: vlm
-      - name: doubao-seed-1-8-251228
-        type: llm
-      - name: doubao-seed-2-0-code-preview-260215
-        type: llm
-      - name: doubao-seed-2-0-lite-260215
-        type: llm
-      - name: doubao-seed-2-0-mini-260215
-        type: llm
-      - name: doubao-seed-2-0-pro-260215
-        type: llm
-      - name: doubao-seed-code-preview-251028
-        type: llm
-      - name: doubao-seedream-3-0-t2i-250415
-        type: text2image
-      - name: doubao-seedream-5-0
-        type: text2image
-      - name: glm-4-7-251222
-        type: llm
+        在左侧导航栏中找到并点击 【API-Key 管理】 即可进行配置与创建。
+      base_url: "https://ark.cn-beijing.volces.com/api/v3/"
+      models:
+        - name: deepseek-r1-250528
+          type: llm
+        - name: deepseek-v3-1-terminus
+          type: llm
+        - name: deepseek-v3-2-251201
+          type: llm
+        - name: deepseek-v3-250324
+          type: llm
+        - name: doubao-1-5-lite-32k-250115
+          type: llm
+        - name: doubao-1-5-pro-32k-250115
+          type: llm
+        - name: doubao-1-5-pro-32k-character-250228
+          type: llm
+        - name: doubao-1-5-pro-32k-character-250715
+          type: llm
+        - name: doubao-1-5-vision-pro-32k-250115
+          type: vlm
+        - name: doubao-embedding-text-240715
+          type: embed_main
+        - name: doubao-embedding-vision-241215
+          type: embed_image
+        - name: doubao-seed-1-6-250615
+          type: llm
+        - name: doubao-seed-1-6-251015
+          type: llm
+        - name: doubao-seed-1-6-flash-250828
+          type: llm
+        - name: doubao-seed-1-6-lite-251015
+          type: llm
+        - name: doubao-seed-1-6-vision-250815
+          type: vlm
+        - name: doubao-seed-1-8-251228
+          type: llm
+        - name: doubao-seed-2-0-code-preview-260215
+          type: llm
+        - name: doubao-seed-2-0-lite-260215
+          type: llm
+        - name: doubao-seed-2-0-mini-260215
+          type: llm
+        - name: doubao-seed-2-0-pro-260215
+          type: llm
+        - name: doubao-seed-code-preview-251028
+          type: llm
+        - name: doubao-seedream-3-0-t2i-250415
+          type: text2image
+        - name: doubao-seedream-5-0
+          type: text2image
+        - name: glm-4-7-251222
+          type: llm
 
-  - name: GLM
-    description: |
-      清华出身的国产大模型，Coding 能力已对齐顶尖闭源模型，深度适配 Agent 工作流、工具调用与超长上下文解析。
+    - name: GLM
+      description: |
+        清华出身的国产大模型，Coding 能力已对齐顶尖闭源模型，深度适配 Agent 工作流、工具调用与超长上下文解析。
 
-      获取 API Key：
-      https://open.bigmodel.cn/usercenter/apikeys
+        获取 API Key：
+        https://open.bigmodel.cn/usercenter/apikeys
 
-      申请教程：
+        申请教程：
 
-      1. 访问智谱 AI 开放平台，使用手机号或微信扫码注册并实名。
+        1. 访问智谱 AI 开放平台，使用手机号或微信扫码注册并实名。
 
-      2. 登录后进入右上角的"控制台"，在左侧菜单选择"API Keys"。
+        2. 登录后进入右上角的"控制台"，在左侧菜单选择"API Keys"。
 
-      3. 点击"添加新的 API Key"，设置便于区分的名称，生成后复制完整的 Key 即可使用。
-    base_url: "https://open.bigmodel.cn/api/paas/v4/"
-    models:
-      - name: AutoGLM-Phone
-        type: vlm
-      - name: CharGLM-4
-        type: llm
-      - name: CodeGeeX-4
-        type: llm
-      - name: CogView-3-Flash
-        type: text2image
-      - name: CogView-4
-        type: text2image
-      - name: Embedding-2
-        type: embed_main
-      - name: Embedding-3
-        type: embed_main
-      - name: GLM-4-Flash-250414
-        type: llm
-      - name: GLM-4-FlashX-250414
-        type: llm
-      - name: GLM-4-Long
-        type: llm
-      - name: GLM-4-Voice
-        type: tts
-      - name: GLM-4.1V-Thinking-Flash
-        type: llm
-      - name: GLM-4.1V-Thinking-FlashX
-        type: llm
-      - name: GLM-4.5-Air
-        type: llm
-      - name: GLM-4.5-AirX
-        type: llm
-      - name: GLM-4.5-Flash
-        type: llm
-      - name: GLM-4.6
-        type: llm
-      - name: GLM-4.6V
-        type: vlm
-      - name: GLM-4.6V-Flash
-        type: vlm
-      - name: GLM-4.7
-        type: llm
-      - name: GLM-4.7-Flash
-        type: llm
-      - name: GLM-4.7-FlashX
-        type: llm
-      - name: GLM-4V-Flash
-        type: vlm
-      - name: GLM-5
-        type: llm
-      - name: GLM-5-Turbo
-        type: llm
-      - name: GLM-5.1
-        type: llm
-      - name: GLM-5V-Turbo
-        type: vlm
-      - name: GLM-ASR-2512
-        type: stt
-      - name: GLM-Image
-        type: text2image
-      - name: GLM-TTS
-        type: tts
-      - name: GLM-TTS-Clone
-        type: tts
-      - name: Rerank
-        type: reranker
+        3. 点击"添加新的 API Key"，设置便于区分的名称，生成后复制完整的 Key 即可使用。
+      base_url: "https://open.bigmodel.cn/api/paas/v4/"
+      models:
+        - name: AutoGLM-Phone
+          type: vlm
+        - name: CharGLM-4
+          type: llm
+        - name: CodeGeeX-4
+          type: llm
+        - name: CogView-3-Flash
+          type: text2image
+        - name: CogView-4
+          type: text2image
+        - name: Embedding-2
+          type: embed_main
+        - name: Embedding-3
+          type: embed_main
+        - name: GLM-4-Flash-250414
+          type: llm
+        - name: GLM-4-FlashX-250414
+          type: llm
+        - name: GLM-4-Long
+          type: llm
+        - name: GLM-4-Voice
+          type: tts
+        - name: GLM-4.1V-Thinking-Flash
+          type: llm
+        - name: GLM-4.1V-Thinking-FlashX
+          type: llm
+        - name: GLM-4.5-Air
+          type: llm
+        - name: GLM-4.5-AirX
+          type: llm
+        - name: GLM-4.5-Flash
+          type: llm
+        - name: GLM-4.6
+          type: llm
+        - name: GLM-4.6V
+          type: vlm
+        - name: GLM-4.6V-Flash
+          type: vlm
+        - name: GLM-4.7
+          type: llm
+        - name: GLM-4.7-Flash
+          type: llm
+        - name: GLM-4.7-FlashX
+          type: llm
+        - name: GLM-4V-Flash
+          type: vlm
+        - name: GLM-5
+          type: llm
+        - name: GLM-5-Turbo
+          type: llm
+        - name: GLM-5.1
+          type: llm
+        - name: GLM-5V-Turbo
+          type: vlm
+        - name: GLM-ASR-2512
+          type: stt
+        - name: GLM-Image
+          type: text2image
+        - name: GLM-TTS
+          type: tts
+        - name: GLM-TTS-Clone
+          type: tts
+        - name: Rerank
+          type: reranker
 
-  - name: Kimi
-    description: |
-      Moonshot AI 出品，支持超长上下文推理，Agentic Coding 与长周期执行能力出众，中英文处理极佳。
+    - name: Kimi
+      description: |
+        Moonshot AI 出品，支持超长上下文推理，Agentic Coding 与长周期执行能力出众，中英文处理极佳。
 
-      获取 API Key：
-      https://platform.moonshot.cn/console/api-keys
+        获取 API Key：
+        https://platform.moonshot.cn/console/api-keys
 
-      申请教程：
+        申请教程：
 
-      1. 访问 Kimi 开放平台（Moonshot 开发者中心），使用手机号验证注册。
+        1. 访问 Kimi 开放平台（Moonshot 开发者中心），使用手机号验证注册。
 
-      2. 登录后在左侧导航栏选择"API Key 管理"页面。
+        2. 登录后在左侧导航栏选择"API Key 管理"页面。
 
-      3. 点击"新建 API Key"，输入名称后点击生成，请当场复制这段密钥并安全保存。
-    base_url: "https://api.moonshot.cn/"
-    models:
-      - name: kimi-k2-0711-preview
-        type: llm
-      - name: kimi-k2-0905-preview
-        type: llm
-      - name: kimi-k2-thinking
-        type: llm
-      - name: kimi-k2-thinking-turbo
-        type: llm
-      - name: kimi-k2-turbo-preview
-        type: llm
-      - name: kimi-k2.5
-        type: vlm
-      - name: kimi-k2.6
-        type: vlm
-      - name: moonshot-v1-128k
-        type: llm
-      - name: moonshot-v1-128k-vision-preview
-        type: vlm
-      - name: moonshot-v1-32k
-        type: llm
-      - name: moonshot-v1-32k-vision-preview
-        type: vlm
-      - name: moonshot-v1-8k
-        type: llm
-      - name: moonshot-v1-8k-vision-preview
-        type: vlm
+        3. 点击"新建 API Key"，输入名称后点击生成，请当场复制这段密钥并安全保存。
+      base_url: "https://api.moonshot.cn/"
+      models:
+        - name: kimi-k2-0711-preview
+          type: llm
+        - name: kimi-k2-0905-preview
+          type: llm
+        - name: kimi-k2-thinking
+          type: llm
+        - name: kimi-k2-thinking-turbo
+          type: llm
+        - name: kimi-k2-turbo-preview
+          type: llm
+        - name: kimi-k2.5
+          type: vlm
+        - name: kimi-k2.6
+          type: vlm
+        - name: moonshot-v1-128k
+          type: llm
+        - name: moonshot-v1-128k-vision-preview
+          type: vlm
+        - name: moonshot-v1-32k
+          type: llm
+        - name: moonshot-v1-32k-vision-preview
+          type: vlm
+        - name: moonshot-v1-8k
+          type: llm
+        - name: moonshot-v1-8k-vision-preview
+          type: vlm
 
-  - name: Minimax
-    description: |
-      MiniMax 自研的通用大模型，开启模型自我迭代，在文本对话、超拟人语音合成及视频生成领域稳居第一梯队。
+    - name: Minimax
+      description: |
+        MiniMax 自研的通用大模型，开启模型自我迭代，在文本对话、超拟人语音合成及视频生成领域稳居第一梯队。
 
-      获取 API Key：
-      https://platform.minimaxi.com/
+        获取 API Key：
+        https://platform.minimaxi.com/
 
-      申请教程：
+        申请教程：
 
-      1. 访问 MiniMax 开放平台主页，点击右上角登录/注册开发者账号。
+        1. 访问 MiniMax 开放平台主页，点击右上角登录/注册开发者账号。
 
-      2. 登录后进入后台工作台，在左侧导航栏找到 "账户管理"，点击展开后选择 "接口密钥"（或者"订阅管理"下的 Token Plan）。
+        2. 登录后进入后台工作台，在左侧导航栏找到 "账户管理"，点击展开后选择 "接口密钥"（或者"订阅管理"下的 Token Plan）。
 
-      3. 点击"创建新的 API Key"，设置名称并确认后，复制生成的 API Key 用于接口调用（请注意按量付费 Key 和 Token Plan Key 不互通）。
-    base_url: "https://api.minimaxi.com/v1/"
-    models:
-      - name: M2-her
-        type: llm
-      - name: MiniMax-M2.5
-        type: llm
-      - name: MiniMax-M2.5-highspeed
-        type: llm
-      - name: MiniMax-M2.7
-        type: llm
-      - name: MiniMax-M2.7-highspeed
-        type: llm
-      - name: Speech-02-HD
-        type: tts
-      - name: Speech-02-Turbo
-        type: tts
-      - name: Speech-2.6-HD
-        type: tts
-      - name: Speech-2.6-Turbo
-        type: tts
-      - name: Speech-2.8-HD
-        type: tts
-      - name: Speech-2.8-Turbo
-        type: tts
-      - name: image-01
-        type: text2image
-      - name: image-01-live
-        type: text2image
+        3. 点击"创建新的 API Key"，设置名称并确认后，复制生成的 API Key 用于接口调用（请注意按量付费 Key 和 Token Plan Key 不互通）。
+      base_url: "https://api.minimaxi.com/v1/"
+      models:
+        - name: M2-her
+          type: llm
+        - name: MiniMax-M2.5
+          type: llm
+        - name: MiniMax-M2.5-highspeed
+          type: llm
+        - name: MiniMax-M2.7
+          type: llm
+        - name: MiniMax-M2.7-highspeed
+          type: llm
+        - name: Speech-02-HD
+          type: tts
+        - name: Speech-02-Turbo
+          type: tts
+        - name: Speech-2.6-HD
+          type: tts
+        - name: Speech-2.6-Turbo
+          type: tts
+        - name: Speech-2.8-HD
+          type: tts
+        - name: Speech-2.8-Turbo
+          type: tts
+        - name: image-01
+          type: text2image
+        - name: image-01-live
+          type: text2image
 
-  - name: OpenAI
-    description: |
-      AI 行业绝对标杆，引领智能前沿，在复杂编码、专业工作流与子代理生态上最为完善。
+    - name: OpenAI
+      description: |
+        AI 行业绝对标杆，引领智能前沿，在复杂编码、专业工作流与子代理生态上最为完善。
 
-      获取 API Key：
-      https://platform.openai.com/api-keys
+        获取 API Key：
+        https://platform.openai.com/api-keys
 
-      申请教程：
+        申请教程：
 
-      1. 访问 OpenAI Platform，使用邮箱或 Google 账号注册（需具备海外网络环境及海外手机号验证）。
+        1. 访问 OpenAI Platform，使用邮箱或 Google 账号注册（需具备海外网络环境及海外手机号验证）。
 
-      2. 在左侧 Dashboard 菜单中选择"API keys"选项卡（需先在 Billing 中绑定海外信用卡并充值）。
+        2. 在左侧 Dashboard 菜单中选择"API keys"选项卡（需先在 Billing 中绑定海外信用卡并充值）。
 
-      3. 点击"Create new secret key"，为 Key 命名并配置权限，点击生成后立刻复制（该密钥仅显示一次）。
-    base_url: "https://api.openai.com/v1/"
-    models:
-      - name: gpt-4.1
-        type: vlm
-      - name: gpt-4.1-mini
-        type: vlm
-      - name: gpt-4o-mini
-        type: vlm
-      - name: gpt-4o-mini-transcribe
-        type: stt
-      - name: gpt-4o-transcribe
-        type: stt
-      - name: gpt-5
-        type: vlm
-      - name: gpt-5-mini
-        type: vlm
-      - name: gpt-5-nano
-        type: vlm
-      - name: gpt-5-pro
-        type: vlm
-      - name: gpt-5.1
-        type: vlm
-      - name: gpt-5.2
-        type: vlm
-      - name: gpt-5.2-pro
-        type: vlm
-      - name: gpt-5.4
-        type: vlm
-      - name: gpt-5.4-mini
-        type: vlm
-      - name: gpt-5.4-nano
-        type: vlm
-      - name: gpt-5.4-pro
-        type: vlm
-      - name: gpt-5.5
-        type: vlm
-      - name: gpt-5.5-pro
-        type: vlm
-      - name: gpt-image-1.5
-        type: text2image
-      - name: gpt-image-2
-        type: text2image
-      - name: o3
-        type: vlm
-      - name: rerank-multilingual-v3.0
-        type: reranker
-      - name: text-embedding-3-large
-        type: embed_main
-      - name: text-embedding-3-small
-        type: embed_main
-      - name: text-embedding-ada-002
-        type: embed_main
-      - name: tts-1
-        type: tts
-      - name: tts-1-hd
-        type: tts
-      - name: whisper-1
-        type: stt
+        3. 点击"Create new secret key"，为 Key 命名并配置权限，点击生成后立刻复制（该密钥仅显示一次）。
+      base_url: "https://api.openai.com/v1/"
+      models:
+        - name: gpt-4.1
+          type: vlm
+        - name: gpt-4.1-mini
+          type: vlm
+        - name: gpt-4o-mini
+          type: vlm
+        - name: gpt-4o-mini-transcribe
+          type: stt
+        - name: gpt-4o-transcribe
+          type: stt
+        - name: gpt-5
+          type: vlm
+        - name: gpt-5-mini
+          type: vlm
+        - name: gpt-5-nano
+          type: vlm
+        - name: gpt-5-pro
+          type: vlm
+        - name: gpt-5.1
+          type: vlm
+        - name: gpt-5.2
+          type: vlm
+        - name: gpt-5.2-pro
+          type: vlm
+        - name: gpt-5.4
+          type: vlm
+        - name: gpt-5.4-mini
+          type: vlm
+        - name: gpt-5.4-nano
+          type: vlm
+        - name: gpt-5.4-pro
+          type: vlm
+        - name: gpt-5.5
+          type: vlm
+        - name: gpt-5.5-pro
+          type: vlm
+        - name: gpt-image-1.5
+          type: text2image
+        - name: gpt-image-2
+          type: text2image
+        - name: o3
+          type: vlm
+        - name: rerank-multilingual-v3.0
+          type: reranker
+        - name: text-embedding-3-large
+          type: embed_main
+        - name: text-embedding-3-small
+          type: embed_main
+        - name: text-embedding-ada-002
+          type: embed_main
+        - name: tts-1
+          type: tts
+        - name: tts-1-hd
+          type: tts
+        - name: whisper-1
+          type: stt
 
-  - name: Qwen
-    description: |
-      阿里云开源与闭源双轨并行的王牌模型，全家桶覆盖文本、视觉、语音及图像编辑，国内生态最为丰富，API 调用极其便捷。
+    - name: Qwen
+      description: |
+        阿里云开源与闭源双轨并行的王牌模型，全家桶覆盖文本、视觉、语音及图像编辑，国内生态最为丰富，API 调用极其便捷。
 
-      获取 API Key：
-      https://bailian.console.aliyun.com/?apiKey=1#/api-key
+        获取 API Key：
+        https://bailian.console.aliyun.com/?apiKey=1#/api-key
 
-      申请教程：
+        申请教程：
 
-      1. 访问阿里云百炼控制台，使用阿里云账号（支持支付宝/钉钉扫码）登录并开通百炼服务。
+        1. 访问阿里云百炼控制台，使用阿里云账号（支持支付宝/钉钉扫码）登录并开通百炼服务。
 
-      2. 在控制台右上角点击头像，进入"API-KEY"管理页面。
+        2. 在控制台右上角点击头像，进入"API-KEY"管理页面。
 
-      3. 点击"创建 API-KEY"，系统会立即生成一串鉴权密钥，点击复制即可在应用中使用。
-    base_url: "https://dashscope.aliyuncs.com/"
-    models:
-      - name: Fun-ASR
-        type: stt
-      - name: Gummy
-        type: stt
-      - name: SenseVoice
-        type: stt
-      - name: cosyvoice-v1
-        type: tts
-      - name: cosyvoice-v2
-        type: tts
-      - name: gte-rerank-v2
-        type: reranker
-      - name: multimodal-embedding-v1
-        type: embed_image
-      - name: paraformer-v2
-        type: stt
-      - name: qvq-72b-preview
-        type: vlm
-      - name: qvq-max
-        type: vlm
-      - name: qvq-plus
-        type: vlm
-      - name: qwen-audio-turbo
-        type: stt
-      - name: qwen-flash
-        type: llm
-      - name: qwen-flash-2025-07-28
-        type: llm
-      - name: qwen-long
-        type: llm
-      - name: qwen-max
-        type: llm
-      - name: qwen-max-2025-01-25
-        type: llm
-      - name: qwen-plus
-        type: llm
-      - name: qwen-plus-2025-12-01
-        type: llm
-      - name: qwen-tts
-        type: tts
-      - name: qwen-turbo
-        type: llm
-      - name: qwen-vl-max
-        type: vlm
-      - name: qwen-vl-ocr
-        type: vlm
-      - name: qwen-vl-plus
-        type: vlm
-      - name: qwen2.5-0.5b-instruct
-        type: llm
-      - name: qwen2.5-1.5b-instruct
-        type: llm
-      - name: qwen2.5-14b-instruct
-        type: llm
-      - name: qwen2.5-14b-instruct-1m
-        type: llm
-      - name: qwen2.5-32b-instruct
-        type: llm
-      - name: qwen2.5-3b-instruct
-        type: llm
-      - name: qwen2.5-72b-instruct
-        type: llm
-      - name: qwen2.5-7b-instruct
-        type: llm
-      - name: qwen2.5-7b-instruct-1m
-        type: llm
-      - name: qwen2.5-vl-embedding
-        type: embed_image
-      - name: qwen3-0.6b
-        type: llm
-      - name: qwen3-1.7b
-        type: llm
-      - name: qwen3-14b
-        type: llm
-      - name: qwen3-235b-a22b
-        type: llm
-      - name: qwen3-235b-a22b-instruct-2507
-        type: llm
-      - name: qwen3-235b-a22b-thinking-2507
-        type: llm
-      - name: qwen3-30b-a3b
-        type: llm
-      - name: qwen3-30b-a3b-instruct-2507
-        type: llm
-      - name: qwen3-30b-a3b-thinking-2507
-        type: llm
-      - name: qwen3-32b
-        type: llm
-      - name: qwen3-4b
-        type: llm
-      - name: qwen3-8b
-        type: llm
-      - name: qwen3-asr-flash
-        type: stt
-      - name: qwen3-embedding-32m
-        type: embed_main
-      - name: qwen3-next-80b-a3b-instruct
-        type: llm
-      - name: qwen3-next-80b-a3b-thinking
-        type: llm
-      - name: qwen3-rerank
-        type: reranker
-      - name: qwen3-vl-embedding
-        type: embed_image
-      - name: qwen3-vl-flash
-        type: vlm
-      - name: qwen3-vl-flash-us
-        type: vlm
-      - name: qwen3-vl-plus
-        type: vlm
-      - name: qwen3-vl-rerank
-        type: reranker
-      - name: qwen3.5-122b-a10b
-        type: vlm
-      - name: qwen3.5-27b
-        type: vlm
-      - name: qwen3.5-35b-a3b
-        type: vlm
-      - name: qwen3.5-397b-a17b
-        type: vlm
-      - name: qwen3.5-4b
-        type: vlm
-      - name: qwen3.5-9b
-        type: vlm
-      - name: qwen3.5-flash
-        type: vlm
-      - name: qwen3.5-plus
-        type: vlm
-      - name: qwen3.6-27b
-        type: vlm
-      - name: qwen3.6-35b-a3b
-        type: vlm
-      - name: qwen3.6-flash
-        type: vlm
-      - name: qwen3.6-max-preview
-        type: vlm
-      - name: qwen3.6-plus
-        type: vlm
-      - name: qwq-32b
-        type: vlm
-      - name: qwq-32b-preview
-        type: vlm
-      - name: qwq-plus
-        type: vlm
-      - name: sambert
-        type: tts
-      - name: sensevoice-small
-        type: stt
-      - name: text-embedding-async-v1
-        type: embed_main
-      - name: text-embedding-async-v2
-        type: embed_main
-      - name: text-embedding-v1
-        type: embed_main
-      - name: text-embedding-v2
-        type: embed_main
-      - name: text-embedding-v3
-        type: embed_main
-      - name: text-embedding-v4
-        type: embed_main
-      - name: tongyi-embedding-vision-flash
-        type: embed_image
-      - name: tongyi-embedding-vision-flash-2026-03-06
-        type: embed_image
-      - name: tongyi-embedding-vision-plus
-        type: embed_image
-      - name: tongyi-embedding-vision-plus-2026-03-06
-        type: embed_image
-      - name: wan2.6-t2i
-        type: text2image
-      - name: wanx2.1-t2i-pro
-        type: text2image
-      - name: wanx2.1-t2i-turbo
-        type: text2image
-      - name: qwen-image-2.0-pro
-        type: text2image
-      - name: qwen-image-2.0-pro-2026-04-22
-        type: text2image
-      - name: qwen-image-2.0-pro-2026-03-03
-        type: text2image
-      - name: qwen-image-2.0
-        type: text2image
-      - name: qwen-image-2.0-2026-03-03
-        type: text2image
-      - name: qwen-image-max
-        type: text2image
-      - name: qwen-image-max-2025-12-30
-        type: text2image
-      - name: qwen-image-plus
-        type: text2image
-      - name: qwen-image-plus-2026-01-09
-        type: text2image
-      - name: qwen-image
-        type: text2image
-      - name: z-image-turbo
-        type: text2image
-      - name: wan2.5-t2i-preview
-        type: text2image
-      - name: wan2.2-t2i-plus
-        type: text2image
-      - name: wan2.2-t2i-flash
-        type: text2image
-      - name: wanx2.1-t2i-plus
-        type: text2image
-      - name: wanx2.0-t2i-turbo
-        type: text2image
-      - name: wanx-v1
-        type: text2image
-      - name: qwen-image-edit-max
-        type: image_editing
-      - name: qwen-image-edit-max-2026-01-16
-        type: image_editing
-      - name: qwen-image-edit-plus
-        type: image_editing
-      - name: qwen-image-edit-plus-2025-12-15
-        type: image_editing
-      - name: qwen-image-edit-plus-2025-10-30
-        type: image_editing
-      - name: qwen-image-edit
-        type: image_editing
-      - name: wan2.7-image-pro
-        type: image_editing
-      - name: wan2.7-image
-        type: image_editing
-      - name: wan2.6-image
-        type: image_editing
-      - name: wan2.5-i2i-preview
-        type: image_editing
-      - name: wanx2.1-imageedit
-        type: image_editing
-      - name: wanx-sketch-to-image-lite
-        type: image_editing
-      - name: wanx-style-repaint-v1
-        type: image_editing
-      - name: wanx-background-generation-v2
-        type: image_editing
-      - name: image-out-painting
-        type: image_editing
+        3. 点击"创建 API-KEY"，系统会立即生成一串鉴权密钥，点击复制即可在应用中使用。
+      base_url: "https://dashscope.aliyuncs.com/"
+      models:
+        - name: Fun-ASR
+          type: stt
+        - name: Gummy
+          type: stt
+        - name: SenseVoice
+          type: stt
+        - name: cosyvoice-v1
+          type: tts
+        - name: cosyvoice-v2
+          type: tts
+        - name: gte-rerank-v2
+          type: reranker
+        - name: multimodal-embedding-v1
+          type: embed_image
+        - name: paraformer-v2
+          type: stt
+        - name: qvq-72b-preview
+          type: vlm
+        - name: qvq-max
+          type: vlm
+        - name: qvq-plus
+          type: vlm
+        - name: qwen-audio-turbo
+          type: stt
+        - name: qwen-flash
+          type: llm
+        - name: qwen-flash-2025-07-28
+          type: llm
+        - name: qwen-long
+          type: llm
+        - name: qwen-max
+          type: llm
+        - name: qwen-max-2025-01-25
+          type: llm
+        - name: qwen-plus
+          type: llm
+        - name: qwen-plus-2025-12-01
+          type: llm
+        - name: qwen-tts
+          type: tts
+        - name: qwen-turbo
+          type: llm
+        - name: qwen-vl-max
+          type: vlm
+        - name: qwen-vl-ocr
+          type: vlm
+        - name: qwen-vl-plus
+          type: vlm
+        - name: qwen2.5-0.5b-instruct
+          type: llm
+        - name: qwen2.5-1.5b-instruct
+          type: llm
+        - name: qwen2.5-14b-instruct
+          type: llm
+        - name: qwen2.5-14b-instruct-1m
+          type: llm
+        - name: qwen2.5-32b-instruct
+          type: llm
+        - name: qwen2.5-3b-instruct
+          type: llm
+        - name: qwen2.5-72b-instruct
+          type: llm
+        - name: qwen2.5-7b-instruct
+          type: llm
+        - name: qwen2.5-7b-instruct-1m
+          type: llm
+        - name: qwen2.5-vl-embedding
+          type: embed_image
+        - name: qwen3-0.6b
+          type: llm
+        - name: qwen3-1.7b
+          type: llm
+        - name: qwen3-14b
+          type: llm
+        - name: qwen3-235b-a22b
+          type: llm
+        - name: qwen3-235b-a22b-instruct-2507
+          type: llm
+        - name: qwen3-235b-a22b-thinking-2507
+          type: llm
+        - name: qwen3-30b-a3b
+          type: llm
+        - name: qwen3-30b-a3b-instruct-2507
+          type: llm
+        - name: qwen3-30b-a3b-thinking-2507
+          type: llm
+        - name: qwen3-32b
+          type: llm
+        - name: qwen3-4b
+          type: llm
+        - name: qwen3-8b
+          type: llm
+        - name: qwen3-asr-flash
+          type: stt
+        - name: qwen3-embedding-32m
+          type: embed_main
+        - name: qwen3-next-80b-a3b-instruct
+          type: llm
+        - name: qwen3-next-80b-a3b-thinking
+          type: llm
+        - name: qwen3-rerank
+          type: reranker
+        - name: qwen3-vl-embedding
+          type: embed_image
+        - name: qwen3-vl-flash
+          type: vlm
+        - name: qwen3-vl-flash-us
+          type: vlm
+        - name: qwen3-vl-plus
+          type: vlm
+        - name: qwen3-vl-rerank
+          type: reranker
+        - name: qwen3.5-122b-a10b
+          type: vlm
+        - name: qwen3.5-27b
+          type: vlm
+        - name: qwen3.5-35b-a3b
+          type: vlm
+        - name: qwen3.5-397b-a17b
+          type: vlm
+        - name: qwen3.5-4b
+          type: vlm
+        - name: qwen3.5-9b
+          type: vlm
+        - name: qwen3.5-flash
+          type: vlm
+        - name: qwen3.5-plus
+          type: vlm
+        - name: qwen3.6-27b
+          type: vlm
+        - name: qwen3.6-35b-a3b
+          type: vlm
+        - name: qwen3.6-flash
+          type: vlm
+        - name: qwen3.6-max-preview
+          type: vlm
+        - name: qwen3.6-plus
+          type: vlm
+        - name: qwq-32b
+          type: vlm
+        - name: qwq-32b-preview
+          type: vlm
+        - name: qwq-plus
+          type: vlm
+        - name: sambert
+          type: tts
+        - name: sensevoice-small
+          type: stt
+        - name: text-embedding-async-v1
+          type: embed_main
+        - name: text-embedding-async-v2
+          type: embed_main
+        - name: text-embedding-v1
+          type: embed_main
+        - name: text-embedding-v2
+          type: embed_main
+        - name: text-embedding-v3
+          type: embed_main
+        - name: text-embedding-v4
+          type: embed_main
+        - name: tongyi-embedding-vision-flash
+          type: embed_image
+        - name: tongyi-embedding-vision-flash-2026-03-06
+          type: embed_image
+        - name: tongyi-embedding-vision-plus
+          type: embed_image
+        - name: tongyi-embedding-vision-plus-2026-03-06
+          type: embed_image
+        - name: wan2.6-t2i
+          type: text2image
+        - name: wanx2.1-t2i-pro
+          type: text2image
+        - name: wanx2.1-t2i-turbo
+          type: text2image
+        - name: qwen-image-2.0-pro
+          type: text2image
+        - name: qwen-image-2.0-pro-2026-04-22
+          type: text2image
+        - name: qwen-image-2.0-pro-2026-03-03
+          type: text2image
+        - name: qwen-image-2.0
+          type: text2image
+        - name: qwen-image-2.0-2026-03-03
+          type: text2image
+        - name: qwen-image-max
+          type: text2image
+        - name: qwen-image-max-2025-12-30
+          type: text2image
+        - name: qwen-image-plus
+          type: text2image
+        - name: qwen-image-plus-2026-01-09
+          type: text2image
+        - name: qwen-image
+          type: text2image
+        - name: z-image-turbo
+          type: text2image
+        - name: wan2.5-t2i-preview
+          type: text2image
+        - name: wan2.2-t2i-plus
+          type: text2image
+        - name: wan2.2-t2i-flash
+          type: text2image
+        - name: wanx2.1-t2i-plus
+          type: text2image
+        - name: wanx2.0-t2i-turbo
+          type: text2image
+        - name: wanx-v1
+          type: text2image
+        - name: qwen-image-edit-max
+          type: image_editing
+        - name: qwen-image-edit-max-2026-01-16
+          type: image_editing
+        - name: qwen-image-edit-plus
+          type: image_editing
+        - name: qwen-image-edit-plus-2025-12-15
+          type: image_editing
+        - name: qwen-image-edit-plus-2025-10-30
+          type: image_editing
+        - name: qwen-image-edit
+          type: image_editing
+        - name: wan2.7-image-pro
+          type: image_editing
+        - name: wan2.7-image
+          type: image_editing
+        - name: wan2.6-image
+          type: image_editing
+        - name: wan2.5-i2i-preview
+          type: image_editing
+        - name: wanx2.1-imageedit
+          type: image_editing
+        - name: wanx-sketch-to-image-lite
+          type: image_editing
+        - name: wanx-style-repaint-v1
+          type: image_editing
+        - name: wanx-background-generation-v2
+          type: image_editing
+        - name: image-out-painting
+          type: image_editing
 
-  - name: SenseNova
-    description: |
-      商汤科技打造的国产重磅基座，深度推理与多模态理解能力出色，综合性能强悍。
+    - name: SenseNova
+      description: |
+        商汤科技打造的国产重磅基座，深度推理与多模态理解能力出色，综合性能强悍。
 
-      获取 API Key：
-      https://console.sensecore.cn/cn-sh-01/aistudio/management/api-key
+        获取 API Key：
+        https://console.sensecore.cn/cn-sh-01/aistudio/management/api-key
 
-      申请教程：
+        申请教程：
 
-      1. 访问商汤大模型开放平台（SenseCore大装置），注册并完成企业或个人开发者认证。
+        1. 访问商汤大模型开放平台（SenseCore大装置），注册并完成企业或个人开发者认证。
 
-      2. 登录控制台，在左侧导航栏找到"API-Key管理"。
+        2. 登录控制台，在左侧导航栏找到"API-Key管理"。
 
-      3. 点击"创建API-Key"，自定义名称后即可生成，复制该 API Key 即可进行模型调用。
-    base_url: "https://api.sensenova.cn/compatible-mode/v1/"
-    models:
-      - name: DeepSeek V4 Flash
-        type: llm
-      - name: DeepSeek-R1
-        type: llm
-      - name: DeepSeek-R1-Distill-Qwen-14B
-        type: llm
-      - name: DeepSeek-V3
-        type: llm
-      - name: DeepSeek-V3-1
-        type: llm
-      - name: Qwen2-5-Coder
-        type: llm
-      - name: Qwen3-235B
-        type: llm
-      - name: Qwen3-32B
-        type: llm
-      - name: Qwen3-Coder
-        type: llm
-      - name: SenseChat
-        type: llm
-      - name: SenseChat-128K
-        type: llm
-      - name: SenseChat-5
-        type: llm
-      - name: SenseChat-5-1202
-        type: llm
-      - name: SenseChat-5-Cantonese
-        type: llm
-      - name: SenseChat-Turbo
-        type: llm
-      - name: SenseChat-Turbo-1202
-        type: llm
-      - name: SenseChat-Vision
-        type: vlm
-      - name: SenseNova 6.7 Flash-Lite
-        type: vlm
-      - name: SenseNova U1 Fast
-        type: vlm
-      - name: SenseNova-V6-5-Pro
-        type: vlm
-      - name: SenseNova-V6-5-Turbo
-        type: vlm
-      - name: SenseNova-V6-Pro
-        type: vlm
-      - name: SenseNova-V6-Reasoner
-        type: vlm
-      - name: SenseNova-V6-Turbo
-        type: vlm
-      - name: nova-embedding-stable
-        type: embed_main
+        3. 点击"创建API-Key"，自定义名称后即可生成，复制该 API Key 即可进行模型调用。
+      base_url: "https://api.sensenova.cn/compatible-mode/v1/"
+      models:
+        - name: DeepSeek V4 Flash
+          type: llm
+        - name: DeepSeek-R1
+          type: llm
+        - name: DeepSeek-R1-Distill-Qwen-14B
+          type: llm
+        - name: DeepSeek-V3
+          type: llm
+        - name: DeepSeek-V3-1
+          type: llm
+        - name: Qwen2-5-Coder
+          type: llm
+        - name: Qwen3-235B
+          type: llm
+        - name: Qwen3-32B
+          type: llm
+        - name: Qwen3-Coder
+          type: llm
+        - name: SenseChat
+          type: llm
+        - name: SenseChat-128K
+          type: llm
+        - name: SenseChat-5
+          type: llm
+        - name: SenseChat-5-1202
+          type: llm
+        - name: SenseChat-5-Cantonese
+          type: llm
+        - name: SenseChat-Turbo
+          type: llm
+        - name: SenseChat-Turbo-1202
+          type: llm
+        - name: SenseChat-Vision
+          type: vlm
+        - name: SenseNova 6.7 Flash-Lite
+          type: vlm
+        - name: SenseNova U1 Fast
+          type: vlm
+        - name: SenseNova-V6-5-Pro
+          type: vlm
+        - name: SenseNova-V6-5-Turbo
+          type: vlm
+        - name: SenseNova-V6-Pro
+          type: vlm
+        - name: SenseNova-V6-Reasoner
+          type: vlm
+        - name: SenseNova-V6-Turbo
+          type: vlm
+        - name: nova-embedding-stable
+          type: embed_main
 
-  - name: SiliconFlow
-    description: |
-      极致高效的模型 API 聚合加速平台，提供一站式、高并发调用服务，价格极其优惠。
+    - name: SiliconFlow
+      description: |
+        极致高效的模型 API 聚合加速平台，提供一站式、高并发调用服务，价格极其优惠。
 
-      获取 API Key：
-      https://cloud.siliconflow.cn/account/ak
+        获取 API Key：
+        https://cloud.siliconflow.cn/account/ak
 
-      申请教程：
+        申请教程：
 
-      1. 访问 SiliconFlow 云平台，使用手机号、微信或邮箱注册账号。
+        1. 访问 SiliconFlow 云平台，使用手机号、微信或邮箱注册账号。
 
-      2. 登录控制台，在左侧菜单栏中点击"API 密钥"选项。
+        2. 登录控制台，在左侧菜单栏中点击"API 密钥"选项。
 
-      3. 点击"新建 API 密钥"，输入自定义名称描述，生成后一键复制，即可轻松接入各大开源旗舰模型。
-    base_url: "https://api.siliconflow.cn/v1/"
-    models:
-      - name: deepseek-ai/DeepSeek-V4-Flash
-        type: llm
-      - name: Pro/moonshotai/Kimi-K2.6
-        type: vlm
-      - name: Pro/zai-org/GLM-5.1
-        type: llm
-      - name: MiniMaxAI/MiniMax-M2.5
-        type: llm
-      - name: Pro/MiniMaxAI/MiniMax-M2.5
-        type: llm
-      - name: Pro/zai-org/GLM-5
-        type: llm
-      - name: Pro/deepseek-ai/DeepSeek-V3.2
-        type: llm
-      - name: Pro/moonshotai/Kimi-K2.5
-        type: vlm
-      - name: Pro/zai-org/GLM-4.7
-        type: llm
-      - name: deepseek-ai/DeepSeek-V3.2
-        type: llm
-      - name: Pro/deepseek-ai/DeepSeek-V3.1-Terminus
-        type: llm
-      - name: deepseek-ai/DeepSeek-V3.1-Terminus
-        type: llm
-      - name: Qwen/Qwen3.6-35B-A3B
-        type: vlm
-      - name: Qwen/Qwen3.6-27B
-        type: vlm
-      - name: Qwen/Qwen3.5-397B-A17B
-        type: vlm
-      - name: Qwen/Qwen3.5-122B-A10B
-        type: vlm
-      - name: Qwen/Qwen3.5-35B-A3B
-        type: vlm
-      - name: Qwen/Qwen3.5-27B
-        type: vlm
-      - name: Qwen/Qwen3.5-9B
-        type: vlm
-      - name: Qwen/Qwen3.5-4B
-        type: vlm
-      - name: deepseek-ai/DeepSeek-R1
-        type: llm
-      - name: Pro/deepseek-ai/DeepSeek-R1
-        type: llm
-      - name: deepseek-ai/DeepSeek-V3
-        type: llm
-      - name: Pro/deepseek-ai/DeepSeek-V3
-        type: llm
-      - name: stepfun-ai/Step-3.5-Flash
-        type: llm
-      - name: zai-org/GLM-4.6V
-        type: vlm
-      - name: moonshotai/Kimi-K2-Thinking
-        type: llm
-      - name: Pro/moonshotai/Kimi-K2-Thinking
-        type: llm
-      - name: zai-org/GLM-4.6
-        type: llm
-      - name: Qwen/Qwen3-VL-32B-Instruct
-        type: vlm
-      - name: Qwen/Qwen3-VL-32B-Thinking
-        type: vlm
-      - name: Qwen/Qwen3-VL-8B-Instruct
-        type: vlm
-      - name: Qwen/Qwen3-VL-8B-Thinking
-        type: vlm
-      - name: Qwen/Qwen3-VL-30B-A3B-Instruct
-        type: vlm
-      - name: Qwen/Qwen3-VL-30B-A3B-Thinking
-        type: vlm
-      - name: moonshotai/Kimi-K2-Instruct-0905
-        type: llm
-      - name: Pro/moonshotai/Kimi-K2-Instruct-0905
-        type: llm
-      - name: inclusionAI/Ring-flash-2.0
-        type: llm
-      - name: inclusionAI/Ling-flash-2.0
-        type: llm
-      - name: inclusionAI/Ling-mini-2.0
-        type: llm
-      - name: Qwen/Qwen3-Coder-30B-A3B-Instruct
-        type: llm
-      - name: Qwen/Qwen3-30B-A3B-Thinking-2507
-        type: llm
-      - name: Qwen/Qwen3-30B-A3B-Instruct-2507
-        type: llm
-      - name: Qwen/Qwen3-235B-A22B-Instruct-2507
-        type: llm
-      - name: THUDM/GLM-4.1V-9B-Thinking
-        type: vlm
-      - name: tencent/Hunyuan-A13B-Instruct
-        type: llm
-      - name: deepseek-ai/DeepSeek-R1-0528-Qwen3-8B
-        type: llm
-      - name: Qwen/Qwen3-32B
-        type: llm
-      - name: Qwen/Qwen3-14B
-        type: llm
-      - name: Qwen/Qwen3-8B
-        type: llm
-      - name: encent/Hunyuan-MT-7B
-        type: llm
-      - name: ByteDance-Seed/Seed-OSS-36B-Instruct
-        type: vlm
-      - name: zai-org/GLM-4.5V
-        type: vlm
-      - name: zai-org/GLM-4.5-Air
-        type: llm
-      - name: Qwen/Qwen2.5-72B-Instruct-128K
-        type: llm
-      - name: Qwen/Qwen2.5-72B-Instruct
-        type: llm
-      - name: Qwen/Qwen2.5-32B-Instruct
-        type: llm
-      - name: Qwen/Qwen2.5-14B-Instruct
-        type: llm
-      - name: Qwen/Qwen2.5-7B-Instruct
-        type: llm
-      - name: Pro/Qwen/Qwen2.5-7B-Instruct
-        type: llm
-      - name: Qwen/Qwen3-VL-Embedding-8B
-        type: embed_image
-      - name: Qwen/Qwen3-Embedding-8B
-        type: embed_main
-      - name: Qwen/Qwen3-Embedding-4B
-        type: embed_main
-      - name: Qwen/Qwen3-Embedding-0.6B
-        type: embed_main
-      - name: BAAI/bge-m3
-        type: embed_main
-      - name: BAAI/bge-large-zh-v1.5
-        type: embed_main
-      - name: BAAI/bge-large-en-v1.5
-        type: embed_main
-      - name: netease-youdao/bce-embedding-base_v1
-        type: embed_main
-      - name: Pro/BAAI/bge-m3
-        type: embed_main
-      - name: Qwen/Qwen3-VL-Reranker-8B
-        type: reranker
-      - name: Qwen/Qwen3-Reranker-8B
-        type: reranker
-      - name: Qwen/Qwen3-Reranker-4B
-        type: reranker
-      - name: Qwen/Qwen3-Reranker-0.6B
-        type: reranker
-      - name: BAAI/bge-reranker-v2-m3
-        type: reranker
-      - name: netease-youdao/bce-reranker-base_v1
-        type: reranker
-      - name: Pro/BAAI/bge-reranker-v2-m3
-        type: reranker
-      - name: Qwen/Qwen-Image-Edit-2509
-        type: text2image
-      - name: Qwen/Qwen-Image-Edit
-        type: text2image
-      - name: Qwen/Qwen-Image
-        type: text2image
-      - name: Kwai-Kolors/Kolors
-        type: text2image
-      - name: fnlp/MOSS-TTSD-v0.5
-        type: tts
-      - name: FunAudioLLM/CosyVoice2-0.5B
-        type: tts
-      - name: FunAudioLLM/SenseVoiceSmall
-        type: stt
-      - name: TeleAI/TeleSpeechASR
-        type: stt
+        3. 点击"新建 API 密钥"，输入自定义名称描述，生成后一键复制，即可轻松接入各大开源旗舰模型。
+      base_url: "https://api.siliconflow.cn/v1/"
+      models:
+        - name: deepseek-ai/DeepSeek-V4-Flash
+          type: llm
+        - name: Pro/moonshotai/Kimi-K2.6
+          type: vlm
+        - name: Pro/zai-org/GLM-5.1
+          type: llm
+        - name: MiniMaxAI/MiniMax-M2.5
+          type: llm
+        - name: Pro/MiniMaxAI/MiniMax-M2.5
+          type: llm
+        - name: Pro/zai-org/GLM-5
+          type: llm
+        - name: Pro/deepseek-ai/DeepSeek-V3.2
+          type: llm
+        - name: Pro/moonshotai/Kimi-K2.5
+          type: vlm
+        - name: Pro/zai-org/GLM-4.7
+          type: llm
+        - name: deepseek-ai/DeepSeek-V3.2
+          type: llm
+        - name: Pro/deepseek-ai/DeepSeek-V3.1-Terminus
+          type: llm
+        - name: deepseek-ai/DeepSeek-V3.1-Terminus
+          type: llm
+        - name: Qwen/Qwen3.6-35B-A3B
+          type: vlm
+        - name: Qwen/Qwen3.6-27B
+          type: vlm
+        - name: Qwen/Qwen3.5-397B-A17B
+          type: vlm
+        - name: Qwen/Qwen3.5-122B-A10B
+          type: vlm
+        - name: Qwen/Qwen3.5-35B-A3B
+          type: vlm
+        - name: Qwen/Qwen3.5-27B
+          type: vlm
+        - name: Qwen/Qwen3.5-9B
+          type: vlm
+        - name: Qwen/Qwen3.5-4B
+          type: vlm
+        - name: deepseek-ai/DeepSeek-R1
+          type: llm
+        - name: Pro/deepseek-ai/DeepSeek-R1
+          type: llm
+        - name: deepseek-ai/DeepSeek-V3
+          type: llm
+        - name: Pro/deepseek-ai/DeepSeek-V3
+          type: llm
+        - name: stepfun-ai/Step-3.5-Flash
+          type: llm
+        - name: zai-org/GLM-4.6V
+          type: vlm
+        - name: moonshotai/Kimi-K2-Thinking
+          type: llm
+        - name: Pro/moonshotai/Kimi-K2-Thinking
+          type: llm
+        - name: zai-org/GLM-4.6
+          type: llm
+        - name: Qwen/Qwen3-VL-32B-Instruct
+          type: vlm
+        - name: Qwen/Qwen3-VL-32B-Thinking
+          type: vlm
+        - name: Qwen/Qwen3-VL-8B-Instruct
+          type: vlm
+        - name: Qwen/Qwen3-VL-8B-Thinking
+          type: vlm
+        - name: Qwen/Qwen3-VL-30B-A3B-Instruct
+          type: vlm
+        - name: Qwen/Qwen3-VL-30B-A3B-Thinking
+          type: vlm
+        - name: moonshotai/Kimi-K2-Instruct-0905
+          type: llm
+        - name: Pro/moonshotai/Kimi-K2-Instruct-0905
+          type: llm
+        - name: inclusionAI/Ring-flash-2.0
+          type: llm
+        - name: inclusionAI/Ling-flash-2.0
+          type: llm
+        - name: inclusionAI/Ling-mini-2.0
+          type: llm
+        - name: Qwen/Qwen3-Coder-30B-A3B-Instruct
+          type: llm
+        - name: Qwen/Qwen3-30B-A3B-Thinking-2507
+          type: llm
+        - name: Qwen/Qwen3-30B-A3B-Instruct-2507
+          type: llm
+        - name: Qwen/Qwen3-235B-A22B-Instruct-2507
+          type: llm
+        - name: THUDM/GLM-4.1V-9B-Thinking
+          type: vlm
+        - name: tencent/Hunyuan-A13B-Instruct
+          type: llm
+        - name: deepseek-ai/DeepSeek-R1-0528-Qwen3-8B
+          type: llm
+        - name: Qwen/Qwen3-32B
+          type: llm
+        - name: Qwen/Qwen3-14B
+          type: llm
+        - name: Qwen/Qwen3-8B
+          type: llm
+        - name: encent/Hunyuan-MT-7B
+          type: llm
+        - name: ByteDance-Seed/Seed-OSS-36B-Instruct
+          type: vlm
+        - name: zai-org/GLM-4.5V
+          type: vlm
+        - name: zai-org/GLM-4.5-Air
+          type: llm
+        - name: Qwen/Qwen2.5-72B-Instruct-128K
+          type: llm
+        - name: Qwen/Qwen2.5-72B-Instruct
+          type: llm
+        - name: Qwen/Qwen2.5-32B-Instruct
+          type: llm
+        - name: Qwen/Qwen2.5-14B-Instruct
+          type: llm
+        - name: Qwen/Qwen2.5-7B-Instruct
+          type: llm
+        - name: Pro/Qwen/Qwen2.5-7B-Instruct
+          type: llm
+        - name: Qwen/Qwen3-VL-Embedding-8B
+          type: embed_image
+        - name: Qwen/Qwen3-Embedding-8B
+          type: embed_main
+        - name: Qwen/Qwen3-Embedding-4B
+          type: embed_main
+        - name: Qwen/Qwen3-Embedding-0.6B
+          type: embed_main
+        - name: BAAI/bge-m3
+          type: embed_main
+        - name: BAAI/bge-large-zh-v1.5
+          type: embed_main
+        - name: BAAI/bge-large-en-v1.5
+          type: embed_main
+        - name: netease-youdao/bce-embedding-base_v1
+          type: embed_main
+        - name: Pro/BAAI/bge-m3
+          type: embed_main
+        - name: Qwen/Qwen3-VL-Reranker-8B
+          type: reranker
+        - name: Qwen/Qwen3-Reranker-8B
+          type: reranker
+        - name: Qwen/Qwen3-Reranker-4B
+          type: reranker
+        - name: Qwen/Qwen3-Reranker-0.6B
+          type: reranker
+        - name: BAAI/bge-reranker-v2-m3
+          type: reranker
+        - name: netease-youdao/bce-reranker-base_v1
+          type: reranker
+        - name: Pro/BAAI/bge-reranker-v2-m3
+          type: reranker
+        - name: Qwen/Qwen-Image-Edit-2509
+          type: text2image
+        - name: Qwen/Qwen-Image-Edit
+          type: text2image
+        - name: Qwen/Qwen-Image
+          type: text2image
+        - name: Kwai-Kolors/Kolors
+          type: text2image
+        - name: fnlp/MOSS-TTSD-v0.5
+          type: tts
+        - name: FunAudioLLM/CosyVoice2-0.5B
+          type: tts
+        - name: FunAudioLLM/SenseVoiceSmall
+          type: stt
+        - name: TeleAI/TeleSpeechASR
+          type: stt
+
+ocr_providers:
+  capabilities: [custom_base_url]
+  suppliers:
+    - name: MinerU
+      description: |
+        MinerU 是面向科研与企业的高精度文档解析服务，支持 PDF、Word、PPT 等多种格式，可精准提取文字、表格、公式与图片。
+
+        获取 API Key：
+        https://mineru.net/apiManage/token
+
+        申请教程：
+
+        1. 访问 MinerU 官网并注册账号。
+
+        2. 登录后进入控制台 → API 管理页面，点击"创建 Token"。
+
+        3. 复制生成的 Token 并妥善保存。
+      base_url: "https://mineru.net/api/v4/"
+    - name: PaddleOCR
+      description: |
+        百度飞桨开源 OCR 引擎，支持中英文及多语言识别，可私有化部署，适合对数据安全有要求的场景。
+
+        获取 API Key：
+        https://aistudio.baidu.com/paddleocr
+
+        申请教程：
+
+        1. 访问 PaddleOCR 官网并注册账号。
+
+        2. 登录后进入控制台 → API 管理页面，点击"创建 Token"。
+
+        3. 复制生成的 Token 并妥善保存。
+      base_url: "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
+
+search_providers:
+  capabilities: []
+  suppliers:
+    - name: Tavily
+      description: |
+        专为 AI Agent 设计的搜索引擎，返回结构化摘要，减少噪音，适合 RAG 与 Agent 工作流。
+
+        获取 API Key：
+        https://app.tavily.com/home
+
+        申请教程：
+
+        1. 访问 Tavily 官网并注册账号。
+
+        2. 登录后在 Dashboard 页面即可看到 API Key，点击复制。
+      base_url: "https://api.tavily.com/"
+    - name: Bing
+      description: |
+        微软必应搜索 API，覆盖全球网页、新闻、图片等多类型内容，适合需要实时互联网信息的场景。
+
+        获取 API Key：
+        https://portal.azure.com/#create/Microsoft.BingSearch
+
+        申请教程：
+
+        1. 登录 Azure 门户，搜索"Bing Search"并创建资源。
+
+        2. 创建完成后进入资源页面，在"密钥和终结点"中复制 Key1 或 Key2。
+      base_url: "https://api.bing.microsoft.com/"
