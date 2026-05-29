@@ -39,7 +39,10 @@ def file_relative_path(full_path: str) -> str:
     path = (full_path or '').strip()
     if not path:
         return ''
-    clean_path = Path(path).resolve()
+    try:
+        clean_path = Path(path).resolve()
+    except (ValueError, OSError):
+        return ''
     root = Path(_upload_root()).resolve()
     try:
         rel = clean_path.relative_to(root)

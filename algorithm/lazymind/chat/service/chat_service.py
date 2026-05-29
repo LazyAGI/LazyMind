@@ -144,6 +144,10 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     filters['kb_id'] = kb_id
     resolved_use_memory = use_memory is not False
 
+    raw_history = list(history) if isinstance(history, list) else []
+    agent_history, citation_state = _normalize_history_for_agent(raw_history)
+    translator = AgentEventFrameTranslator(query=query, citation_state=citation_state)
+
     agentic_config = {
         'session_id': session_id,
         'filters': filters if RAG_MODE and filters else {},
@@ -151,6 +155,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         'priority': priority,
         'user_id': user_id or '',
         'use_memory': resolved_use_memory,
+        'citation_state': citation_state,
     }
     lazyllm.globals._init_sid(sid=session_id)
     lazyllm.locals._init_sid(sid=session_id)
@@ -166,9 +171,6 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         memory=memory,
         files=resolved_files,
     )
-    raw_history = list(history) if isinstance(history, list) else []
-    agent_history, citation_state = _normalize_history_for_agent(raw_history)
-    translator = AgentEventFrameTranslator(query=query, citation_state=citation_state)
 
     llm = AutoModel(model='llm', config=get_config_path())
 

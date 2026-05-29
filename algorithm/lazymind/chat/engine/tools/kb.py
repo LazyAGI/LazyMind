@@ -24,6 +24,7 @@ from lazymind.chat.service.utils import (
     local_path_from_static_file_url,
     static_file_url_from_any,
 )
+from lazymind.chat.service.utils.citations import annotate_citations
 _MAX_TEXT_LEN = 1200
 _MAX_RESULT_ITEMS = 50
 _DEFAULT_KB_DOCUMENT = kb_document_provider.get_default_document()
@@ -151,6 +152,20 @@ def _serialize_kb_result(result: Any) -> Any:
     return truncate_text(result, 400)
 
 
+def _get_citation_state() -> dict:
+    agentic_config = lazyllm.globals.get('agentic_config') or {}
+    state = agentic_config.get('citation_state')
+    return state if isinstance(state, dict) else {}
+
+
+def _annotate_result_citations(result: Any) -> Any:
+    config = _get_citation_state()
+    if not config:
+        return result
+    annotate_citations(result, config)
+    return result
+
+
 class KBToolGroup:
     __public_apis__ = ['kb_search', 'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search']
 
@@ -227,9 +242,11 @@ class KBToolGroup:
             rerank_topk=rerank_topk or 20,
             k_max=k_max or 10,
         )
+        serialized = _serialize_kb_result(result)
+        _annotate_result_citations(serialized)
         return tool_success(
             'kb_search',
-            _serialize_kb_result(result),
+            serialized,
         )
 
     @handle_tool_errors
@@ -258,32 +275,38 @@ class KBToolGroup:
             current = _serialize_doc_node_like(current_nodes[0])
             parent_id = current.get('parent')
             if not parent_id:
-                return tool_success('kb_get_parent_node', {
+                result = {
                     'node_id': node_id,
                     'current_node': current,
                     'parent_id': None,
                     'total': 0,
                     'items': [],
-                })
+                }
+                _annotate_result_citations(result)
+                return tool_success('kb_get_parent_node', result)
 
             parent_nodes = doc.get_nodes(uids=[parent_id], kb_id=kb_id)
             parent_nodes = parent_nodes if isinstance(parent_nodes, list) else []
             parent = _serialize_doc_node_like(parent_nodes[0]) if parent_nodes else None
-            return tool_success('kb_get_parent_node', {
+            result = {
                 'node_id': node_id,
                 'current_node': current,
                 'parent_id': parent_id,
                 'total': 1 if parent else 0,
                 'items': [parent] if parent else [],
-            })
+            }
+            _annotate_result_citations(result)
+            return tool_success('kb_get_parent_node', result)
 
-        return tool_success('kb_get_parent_node', {
+        result = {
             'node_id': node_id,
             'current_node': None,
             'parent_id': None,
             'total': 0,
             'items': [],
-        })
+        }
+        _annotate_result_citations(result)
+        return tool_success('kb_get_parent_node', result)
 
     @handle_tool_errors
     def kb_get_window_nodes(
@@ -332,15 +355,19 @@ class KBToolGroup:
             if not nodes:
                 continue
             nodes.sort(key=lambda n: (safe_getattr(n, 'number', 0) or 0, safe_getattr(n, 'uid', '') or ''))
-            return tool_success('kb_get_window_nodes', {
+            result = {
                 'total': len(nodes),
                 'items': [_serialize_doc_node_like(n) for n in nodes],
-            })
+            }
+            _annotate_result_citations(result)
+            return tool_success('kb_get_window_nodes', result)
 
-        return tool_success('kb_get_window_nodes', {
+        result = {
             'total': 0,
             'items': [],
-        })
+        }
+        _annotate_result_citations(result)
+        return tool_success('kb_get_window_nodes', result)
 
     @handle_tool_errors
     def kb_keyword_search(
@@ -408,23 +435,27 @@ class KBToolGroup:
             hits = opensearch_search(index_name, body).get('hits', {}).get('hits', [])
             if not hits:
                 continue
-            return tool_success('kb_keyword_search', {
+            result = {
                 'index': index_name,
                 'group': group,
                 'docid': docid,
                 'keyword': keyword,
                 'total': len(hits),
                 'items': [_source_to_result(hit) for hit in hits],
-            })
+            }
+            _annotate_result_citations(result)
+            return tool_success('kb_keyword_search', result)
 
-        return tool_success('kb_keyword_search', {
+        result = {
             'index': index_name,
             'group': group,
             'docid': docid,
             'keyword': keyword,
             'total': 0,
             'items': [],
-        })
+        }
+        _annotate_result_citations(result)
+        return tool_success('kb_keyword_search', result)
 
 
 class TempKBToolGroup:
@@ -481,7 +512,9 @@ class TempKBToolGroup:
             rerank_topk=rerank_topk or 20,
             k_max=k_max or 10,
         )
+        serialized = _serialize_kb_result(result)
+        _annotate_result_citations(serialized)
         return tool_success(
             'kb_tmp_search',
-            _serialize_kb_result(result),
+            serialized,
         )
