@@ -12,7 +12,7 @@ if _LAZYLLM_ROOT not in sys.path:
     sys.path.insert(0, _LAZYLLM_ROOT)
 
 from lazymind.chat.engine.tools import vocab as vocab_tool
-from lazymind.vocab.service import db as vocab_db
+from lazymind.review.service import db as vocab_db
 
 
 def test_fetch_chat_histories_for_timestamped_session(monkeypatch):

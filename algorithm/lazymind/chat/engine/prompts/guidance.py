@@ -10,7 +10,7 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 
 MEMORY_GUIDANCE = (
-    "Use the memory tool for durable cross-session knowledge only. "
+    "Use memory_manage for durable cross-session knowledge only. "
     "Save user-stated identity, preferred names/nicknames, communication tone, "
     "language preference, output format, and stable habits to target='user'. "
     "Save agent working memory to target='memory': timestamped notes about what the user and agent discussed, "
@@ -70,6 +70,18 @@ VISION_EXTRACT_DEFAULT_INSTRUCTION = (
     'Describe the image in plain text. Include visible text, objects, charts, and any '
     'details that would help answer follow-up questions about this image.'
 )
+ATTACHED_FILES_GUIDANCE = (
+    '# Attached file rules\n'
+    'The user may provide attached files in this conversation. Treat the attached file '
+    'paths in the system prompt as available evidence, and choose tools by file type:\n'
+    '- If an attached file is an image, call `vision_extractor` with that local file path '
+    'before answering questions that depend on its visual content.\n'
+    '- If an attached file is a text/document/data file, call `kb_tmp_search` or another '
+    '`kb_*` tool with the attached file scope before answering questions that depend on '
+    'its contents.\n'
+    '- Do not ignore attached files or ask the user to paste their contents when a suitable '
+    'tool is available.'
+)
 
 SEARCH_GUIDANCE = (
     "# Search Tool Rules (CRITICAL — follow strictly)\n"
@@ -78,16 +90,18 @@ SEARCH_GUIDANCE = (
     "better information, or because the topic seems general, popular, or common "
     "knowledge. The knowledge base is your primary evidence source.\n\n"
     "Only after `kb_search` returns zero results or explicitly irrelevant results "
-    "may you fall back to `web_search`, `url_fetch`, or `arxiv_search`. "
+    "may you fall back to provider-specific search tools such as "
+    "`WikipediaSearch_search`, `GoogleSearch_search`, `BingSearch_search`, `BochaSearch_search`, "
+    "`url_fetch`, or `ArxivSearch_search`. "
     "You MUST NOT use any non-knowledge-base retrieval tool before trying `kb_*` tools.\n\n"
     "When the user gives a concrete URL or asks you to inspect a specific page, "
     "still try `kb_search` first; use `url_fetch` only when the knowledge base has "
     "no relevant result.\n\n"
     "For papers, research topics, arXiv ids, abstracts, or author-related questions, "
     "still try `kb_search` first; after knowledge-base evidence is unavailable or "
-    "insufficient, prefer `arxiv_search` over `web_search`.\n\n"
+    "insufficient, prefer `ArxivSearch_search` over general web search tools.\n\n"
     "When answering with knowledge-base evidence, cite with the original `[[document.chunk]]` "
-    "markers. When answering with `web_search`, `url_fetch`, or `arxiv_search`, do not "
+    "markers. When answering with web search tools, `url_fetch`, or `ArxivSearch_search`, do not "
     "fabricate `[[document.chunk]]`; instead, mention the source title or URL plainly.\n"
 )
 TOOL_CALL_STATUS_GUIDANCE = (

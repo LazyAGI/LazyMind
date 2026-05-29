@@ -6,7 +6,7 @@ from typing import Dict
 from lazyllm.tools.agent.skill_manager import SkillManager as LazySkillManager
 from lazyllm.tools.fs.client import FS
 
-from lazymind.chat.service.integrations.remote_fs import RemoteFS  # noqa: F401
+from algorithm.lazymind.chat.integrations.remote_fs import RemoteFS  # noqa: F401
 from lazymind.model_config import extract_skill_fs_source
 
 _UUID_SEGMENT_RE = re.compile(

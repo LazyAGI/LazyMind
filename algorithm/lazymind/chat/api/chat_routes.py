@@ -2,9 +2,15 @@ from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body
 from lazymind.chat.config import DEFAULT_CHAT_DATASET
-from lazymind.chat.service.core.chat_service import handle_chat
+from algorithm.lazymind.chat.service.chat_service import handle_chat
+from algorithm.lazymind.chat.service.component.tool_registry import get_all_tool_groups
 
 router = APIRouter()
+
+
+@router.get('/api/chat/tools', summary='List all available tool groups with their methods')
+async def list_available_tools():
+    return {'tool_groups': get_all_tool_groups()}
 
 
 @router.post('/api/chat/stream', summary='Chat with the knowledge base (streaming)')
@@ -25,7 +31,7 @@ async def chat(
         Optional[int],
         Body(description='Request priority for vllm scheduling; higher value means higher priority'),
     ] = None,
-    available_tools: Annotated[Optional[List[str]], Body(description='List of available tools')] = None,
+    available_tools: Annotated[Optional[List[str]], Body(description='List of available tool groups')] = None,
     available_skills: Annotated[Optional[List[str]], Body(description='List of available skills')] = None,
     memory: Annotated[Optional[str], Body(description='Memory content')] = None,
     user_preference: Annotated[Optional[str], Body(description='User preference content')] = None,
@@ -59,6 +65,8 @@ async def chat(
         ),
     ] = None,
 ):
+    if 'all' in available_tools:
+        available_tools = None
     return await handle_chat(
         query=query,
         history=history,

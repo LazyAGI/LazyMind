@@ -3,28 +3,28 @@ Additional tests for pipeline builder helpers.
 
 These tests are kept in a separate file because importing
 lazymind.chat.engine.pipelines.get_ppl_search triggers a circular import
-(lazymind.vocab.engine.evolution → lazymind.chat.engine.pipelines) when the full vocab package
+(lazymind.review.vocab.evolution → lazymind.chat.engine.pipelines) when the full vocab package
 is loaded.  We break the cycle by injecting a lightweight stub for
-lazymind.vocab.service.registry into sys.modules before the real import happens.
+lazymind.review.service.registry into sys.modules before the real import happens.
 """
 import sys
 import types
 
 
 def _stub_vocab():
-    """Inject a minimal lazymind.vocab.service.registry stub to prevent circular import.
+    """Inject a minimal lazymind.review.service.registry stub to prevent circular import.
 
-    Only stubs modules that haven't been loaded yet.  lazymind.vocab.engine.evolution is NOT
-    stubbed here because the circular import (lazymind.vocab.engine.evolution → lazymind.chat.engine.pipelines)
+    Only stubs modules that haven't been loaded yet.  lazymind.review.vocab.evolution is NOT
+    stubbed here because the circular import (lazymind.review.vocab.evolution → lazymind.chat.engine.pipelines)
     has been resolved with a lazy import inside the
     class constructors.  Stubbing vocab.evolution would leave an empty module
     object in sys.modules and break any later test that imports real symbols
     from it (e.g. ActionPlanningModule).
     """
-    if 'lazymind.vocab.service.registry' not in sys.modules:
-        stub = types.ModuleType('lazymind.vocab.service.registry')
+    if 'lazymind.review.service.registry' not in sys.modules:
+        stub = types.ModuleType('lazymind.review.service.registry')
         stub.get_vocab_manager = lambda user_id: (lambda q: q)
-        sys.modules['lazymind.vocab.service.registry'] = stub
+        sys.modules['lazymind.review.service.registry'] = stub
 _stub_vocab()
 
 from lazymind.chat.engine.tools.internal import ppl_search as ppl_search_mod

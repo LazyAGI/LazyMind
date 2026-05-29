@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 import lazyllm
 from pydantic import BaseModel
 
-from lazymind.vocab.engine.evolution import ChatHistoryRecord, SynonymCandidate
+from lazymind.review.vocab.evolution import ChatHistoryRecord, SynonymCandidate
 
 
 class VocabSuggestion(BaseModel):

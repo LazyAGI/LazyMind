@@ -1,14 +1,14 @@
 import os
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 from fastapi import HTTPException
 
-from lazymind.chat.config import IMAGE_EXTENSIONS, MOUNT_BASE_DIR
+from lazymind.chat.config import MOUNT_BASE_DIR
 
 
-def validate_and_resolve_files(files: Optional[List[str]]) -> Tuple[List[str], List[str]]:
+def validate_and_resolve_files(files: Optional[List[str]]) -> List[str]:
     if not files:
-        return [], []
+        return []
 
     root = Path(MOUNT_BASE_DIR).resolve()
     resolved: List[str] = []
@@ -23,6 +23,4 @@ def validate_and_resolve_files(files: Optional[List[str]]) -> Tuple[List[str], L
             raise HTTPException(status_code=400, detail=f'File not accessible: {f}')
         resolved.append(str(cand))
 
-    image_files = [p for p in resolved if p.lower().endswith(IMAGE_EXTENSIONS)]
-    other_files = [p for p in resolved if p not in image_files]
-    return other_files, image_files
+    return resolved

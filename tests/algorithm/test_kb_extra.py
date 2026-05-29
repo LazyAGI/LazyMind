@@ -2,7 +2,7 @@
 Additional tests for kb tool helpers (filters, files, no-parent node).
 
 The lazymind.chat.engine.tools.kb module imports lazymind.chat.engine.pipelines.get_ppl_search which triggers a
-circular import via lazymind.vocab.engine.evolution.  We break the cycle with the same
+circular import via lazymind.review.vocab.evolution.  We break the cycle with the same
 lightweight stub approach used in test_pipeline_builders_extra.py.
 """
 import sys
@@ -12,20 +12,20 @@ import types
 def _stub_vocab_and_chat_pipelines():
     """Stub out modules that cause circular imports at collection time.
 
-    lazymind.vocab.engine.evolution is NOT stubbed here because the circular import
-    (lazymind.vocab.engine.evolution → lazymind.chat.engine.pipelines) has been resolved with lazy
+    lazymind.review.vocab.evolution is NOT stubbed here because the circular import
+    (lazymind.review.vocab.evolution → lazymind.chat.engine.pipelines) has been resolved with lazy
     imports inside the class constructors.  Stubbing vocab.evolution would
     leave an empty module object in sys.modules and break any later test that
     imports real symbols from it (e.g. ActionPlanningModule).
     """
-    if 'lazymind.vocab.service.registry' not in sys.modules:
-        vm_stub = types.ModuleType('lazymind.vocab.service.registry')
+    if 'lazymind.review.service.registry' not in sys.modules:
+        vm_stub = types.ModuleType('lazymind.review.service.registry')
         vm_stub.get_vocab_manager = lambda user_id: (lambda q: q)
-        sys.modules['lazymind.vocab.service.registry'] = vm_stub
+        sys.modules['lazymind.review.service.registry'] = vm_stub
 
-    if 'lazymind.vocab.service.db' not in sys.modules:
-        db_stub = types.ModuleType('lazymind.vocab.service.db')
-        sys.modules['lazymind.vocab.service.db'] = db_stub
+    if 'lazymind.review.service.db' not in sys.modules:
+        db_stub = types.ModuleType('lazymind.review.service.db')
+        sys.modules['lazymind.review.service.db'] = db_stub
 
 
 _stub_vocab_and_chat_pipelines()

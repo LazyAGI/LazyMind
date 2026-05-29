@@ -16,10 +16,10 @@ MAX_SUGGESTIONS_PER_CALL = 5
 
 
 class MemoryToolGroup:
-    __public_apis__ = ['memory']
+    __public_apis__ = ['memory_manage']
 
     @handle_tool_errors
-    def memory(
+    def memory_manage(
         self,
         target: Literal['memory', 'user'],
         suggestions: List[Suggestion],
@@ -55,21 +55,21 @@ class MemoryToolGroup:
         """
         if target not in {'memory', 'user'}:
             return tool_error(
-                'memory',
+                'memory_manage',
                 f"Unknown target {target!r}; expected one of 'memory', 'user'."
             )
         if not suggestions:
-            return tool_error('memory', "'suggestions' must be a non-empty list.")
+            return tool_error('memory_manage', "'suggestions' must be a non-empty list.")
         if len(suggestions) > MAX_SUGGESTIONS_PER_CALL:
             return tool_error(
-                'memory',
+                'memory_manage',
                 f'At most {MAX_SUGGESTIONS_PER_CALL} suggestions are allowed per '
                 f'call; got {len(suggestions)}.'
             )
 
         session_id = str(lazyllm.globals['agentic_config'].get('session_id') or '').strip()
         if not session_id:
-            return tool_error('memory', "'session_id' is required in agentic_config.")
+            return tool_error('memory_manage', "'session_id' is required in agentic_config.")
 
         endpoint = (
             '/memory/suggestion'
@@ -89,10 +89,10 @@ class MemoryToolGroup:
             result.update(post_core_api(endpoint, payload))
         except (requests.RequestException, RuntimeError) as exc:
             return tool_error(
-                'memory',
+                'memory_manage',
                 f'Failed to submit memory suggestions: {exc}',
                 log_message=f'Failed to submit memory suggestions: {exc}',
                 log_level='error',
             )
 
-        return tool_success('memory', result)
+        return tool_success('memory_manage', result)

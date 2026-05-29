@@ -8,7 +8,7 @@ import lazyllm
 from lazyllm import LOG
 
 from lazymind.config import config as _cfg
-from lazymind.vocab.engine.evolution import (
+from lazymind.review.vocab.evolution import (
     VocabEvolutionRequest,
     _LAZYLLM_CONTEXT_CREATE_USER_ATTR,
     _dedupe_keep_order,
@@ -17,7 +17,7 @@ from lazymind.vocab.engine.evolution import (
     _summarize_action_for_log,
     get_ppl_vocab_evolution,
 )
-from lazymind.vocab.service.db import (
+from lazymind.review.service.db import (
     fetch_chat_histories_for_user_id,
     fetch_vocab_groups_for_user_id,
     list_chat_users,

@@ -18,11 +18,11 @@ from lazymind.chat.engine.tools.infra import (
     tool_error,
     tool_success,
 )
-from lazymind.vocab.service.db import (
+from lazymind.review.service.db import (
     fetch_chat_histories_for_session,
     fetch_vocab_groups_for_user_id,
 )
-from lazymind.vocab.engine.evolution import (
+from lazymind.review.vocab.evolution import (
     ActionPlanningModule,
     ChatHistoryRecord,
     VocabEvolutionRequest,

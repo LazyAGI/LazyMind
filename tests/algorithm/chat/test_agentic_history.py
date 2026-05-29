@@ -8,7 +8,7 @@ def test_normalize_history_restores_plain_assistant_text_without_name_errors():
         {'role': 'assistant', 'content': '\n\n你好！我吃牛肉。有什么我可以帮你的吗？'},
     ]
 
-    normalized = _normalize_history_for_agent(history, {})
+    normalized, _ = _normalize_history_for_agent(history)
 
     assert normalized == [
         {'role': 'user', 'content': 'nihao'},
@@ -21,7 +21,7 @@ def test_normalize_history_restores_source_links_to_bracket_refs():
         {'role': 'assistant', 'content': '答案见 [1](#source-1.2 "doc") 和 [2](#source-2.3)。'},
     ]
 
-    normalized = _normalize_history_for_agent(history, {})
+    normalized, _ = _normalize_history_for_agent(history)
 
     assert normalized == [
         {'role': 'assistant', 'content': '答案见 [[1.2]] 和 [[2.3]]。'},
@@ -34,7 +34,7 @@ def test_normalize_history_restores_next_document_index_from_source_links():
         {'role': 'assistant', 'content': '答案见 [1](#source-1.2 "doc-a")。'},
     ]
 
-    _normalize_history_for_agent(history, config)
+    _, config = _normalize_history_for_agent(history)
 
     item = {
         'text': 'new chunk',

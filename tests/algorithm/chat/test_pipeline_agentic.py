@@ -134,16 +134,7 @@ def _import_agentic_module(monkeypatch):
     fake_prompts.VISION_EXTRACTOR_GUIDANCE = ''
     fake_prompts.VOCAB_GUIDANCE = ''
     fake_prompts.VISION_EXTRACT_DEFAULT_INSTRUCTION = ''
-    fake_review_prompts = ModuleType('lazymind.review.prompts')
-    fake_review_prompts._COMBINED_REVIEW_PROMPT = ''
-    fake_review_prompts._MEMORY_REVIEW_PROMPT = ''
-    fake_review_prompts._SKILL_REVIEW_PROMPT = ''
-
     # Fake deep dependency modules to avoid import chain issues
-    fake_review = ModuleType('lazymind.review.service.review')
-    fake_review._build_review_decision = lambda *a, **kw: {'mode': None}
-    fake_review._spawn_background_review = lambda *a, **kw: None
-
     fake_skill_manager = ModuleType('lazymind.chat.engine.tools.skill_manager')
     fake_skill_manager.list_all_skills_with_category = lambda *a, **kw: []
 
@@ -154,10 +145,10 @@ def _import_agentic_module(monkeypatch):
     fake_local_models = ModuleType('lazymind.online_models.local_models')
     fake_tools_algo = ModuleType('lazymind.chat.engine.tools.algo')
     fake_tools_algo.ppl_search = lambda *a, **kw: []
-    fake_vocab_db = ModuleType('lazymind.vocab.service.db')
+    fake_vocab_db = ModuleType('lazymind.review.service.db')
     fake_vocab_db.fetch_chat_histories_for_session = lambda *a, **kw: []
     fake_vocab_db.fetch_vocab_groups_for_user_id = lambda *a, **kw: []
-    fake_vocab_evolution = ModuleType('lazymind.vocab.engine.evolution')
+    fake_vocab_evolution = ModuleType('lazymind.review.vocab.evolution')
 
     @dataclass
     class _FakeChatHistoryRecord:
@@ -198,6 +189,14 @@ def _import_agentic_module(monkeypatch):
         'opensearch_uri': '',
         'opensearch_user': '',
         'opensearch_password': '',
+        'mount_base_dir': '/tmp',
+        'sensitive_words_path': '/tmp/words.txt',
+        'llm_priority': 0,
+        'max_concurrency': 10,
+        'rag_mode': True,
+        'multimodal_mode': True,
+        'default_chat_dataset': 'default',
+        'agentic_stream_chunk_size': 20,
     }
 
     monkeypatch.setitem(sys.modules, 'lazymind.config', fake_config_mod)
@@ -227,13 +226,11 @@ def _import_agentic_module(monkeypatch):
     monkeypatch.setitem(sys.modules, 'lazyllm.tracing', fake_lazyllm_tracing)
     monkeypatch.setitem(sys.modules, 'tenacity', fake_tenacity)
     monkeypatch.setitem(sys.modules, 'lazymind.chat.engine.prompts.agentic', fake_prompts)
-    monkeypatch.setitem(sys.modules, 'lazymind.review.prompts', fake_review_prompts)
-    monkeypatch.setitem(sys.modules, 'lazymind.review.service.review', fake_review)
     monkeypatch.setitem(sys.modules, 'lazymind.chat.engine.tools.skill_manager', fake_skill_manager)
     monkeypatch.setitem(sys.modules, 'lazymind.chat.engine.tools.algo', fake_tools_algo)
     monkeypatch.setitem(sys.modules, 'lazymind.online_models.local_models', fake_local_models)
-    monkeypatch.setitem(sys.modules, 'lazymind.vocab.service.db', fake_vocab_db)
-    monkeypatch.setitem(sys.modules, 'lazymind.vocab.engine.evolution', fake_vocab_evolution)
+    monkeypatch.setitem(sys.modules, 'lazymind.review.service.db', fake_vocab_db)
+    monkeypatch.setitem(sys.modules, 'lazymind.review.vocab.evolution', fake_vocab_evolution)
 
     return importlib.import_module('lazymind.chat.service.agentic.runtime')
 
@@ -242,60 +239,26 @@ def test_agentic_module_exports_expected_functions(monkeypatch):
     # Verify the public API surface of the agentic module.
     module = _import_agentic_module(monkeypatch)
 
-    assert callable(module.agentic_rag)
+    assert callable(module.stream_agentic_runtime)
 
 
-def test_agentic_module_exports_stream_entry(monkeypatch):
+def test_stream_agentic_runtime_constructs_react_agent_from_runtime_context(monkeypatch):
     module = _import_agentic_module(monkeypatch)
 
-    assert hasattr(module, '_agentic_forward_stream')
-
-
-def test_agentic_rag_requires_query(monkeypatch):
-    module = _import_agentic_module(monkeypatch)
-
-    try:
-        module.agentic_rag({})
-    except ValueError as exc:
-        assert 'query' in str(exc).lower()
-    else:
-        raise AssertionError('agentic_rag should raise ValueError when query is missing')
-
-
-def test_agentic_rag_requires_non_empty_query(monkeypatch):
-    module = _import_agentic_module(monkeypatch)
-
-    try:
-        module.agentic_rag({'query': '   '})
-    except ValueError as exc:
-        assert 'query' in str(exc).lower()
-    else:
-        raise AssertionError('agentic_rag should raise ValueError for blank query')
-
-
-def test_lazyllm_queue_db_path_is_path_like(monkeypatch):
-    # _lazyllm_queue_db_path() calls lazyllm.configs internally; just verify
-    # the function exists and returns something with a 'name' attribute when
-    # lazyllm.configs is available (i.e. in the real import context).
-    import importlib
-    real_module = importlib.import_module('lazymind.chat.service.agentic.runtime')
-    path = real_module._lazyllm_queue_db_path()
-    assert hasattr(path, 'name')
-
-
-def test_build_agentic_run_context_uses_automodel(monkeypatch):
-    # Verify stream context creation initializes AutoModel(model='llm', config=get_config_path()).
-    module = _import_agentic_module(monkeypatch)
-
-    automodel_calls = []
+    agent_calls = []
 
     class _FakeAgent:
         def __init__(self, llm, tools, **kwargs):
-            automodel_calls.append(llm)
+            agent_calls.append({'llm': llm, 'tools': tools, 'kwargs': kwargs})
 
-    monkeypatch.setattr(module, 'AutoModel', lambda model, config=False: f'model:{model}')
+        def stream(self, query, llm_chat_history=None):
+            def _iter():
+                yield {'type': 'agent.text.delta', 'delta': f'answer:{query}'}
+                return {'text': f'final:{query}'}
 
-    class _FakeGlobals:
+            return _iter()
+
+    class _FakeScopedState:
         _sid = 'test-sid'
 
         def get(self, key, default=None):
@@ -310,14 +273,37 @@ def test_build_agentic_run_context_uses_automodel(monkeypatch):
         def __getitem__(self, key):
             return {}
 
-    module.lazyllm.globals = _FakeGlobals()
-    module.lazyllm.locals = SimpleNamespace(
-        get=lambda key, default=None: {},
-        _init_sid=lambda sid: None,
-        _sid='test-sid',
-    )
+    module.lazyllm.globals = _FakeScopedState()
+    module.lazyllm.locals = _FakeScopedState()
     module.lazyllm.tools.agent.ReactAgent = _FakeAgent
 
-    module._build_agentic_run_context(query='hello', stream=True)
+    async def _drive():
+        events = []
+        async for event in module.stream_agentic_runtime(
+            query='hello',
+            history=[],
+            runtime_params={
+                'runtime_prompt': 'prepared-prompt',
+                'available_skills': ['skill-a'],
+                'keep_full_turns': 3,
+                'skills_dir': 'remote://skills',
+                'agent_query': 'hello',
+            },
+            agent_components={
+                'llm': 'prepared-llm',
+                'runtime_tools': ['prepared-tool'],
+            },
+            global_sid='global-sid',
+            local_sid='local-sid',
+            trace_config={},
+        ):
+            events.append(event)
+        return events
 
-    assert automodel_calls == ['model:llm']
+    events = __import__('asyncio').run(_drive())
+
+    assert agent_calls[0]['llm'] == 'prepared-llm'
+    assert agent_calls[0]['tools'][0] == 'prepared-tool'
+    assert agent_calls[0]['kwargs']['prompt'] == 'prepared-prompt'
+    assert agent_calls[0]['kwargs']['skills'] == ['skill-a']
+    assert events

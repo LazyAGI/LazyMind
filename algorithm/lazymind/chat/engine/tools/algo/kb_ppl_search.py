@@ -6,7 +6,7 @@ from lazyllm.tools.rag.rank_fusion.reciprocal_rank_fusion import RRFFusion
 
 from lazymind.chat.engine.tools.algo.kb_adaptive_topk import AdaptiveKComponent
 from lazymind.chat.engine.tools.algo.kb_context_expansion import ContextExpansionComponent
-from lazymind.vocab.service.registry import get_vocab_manager
+from lazymind.review.service.registry import get_vocab_manager
 
 
 def _adaptive_get_token_len(n: Any) -> int:
@@ -27,7 +27,7 @@ def search_text(
     retrievers: List[Retriever],
     retriever_topk: int,
     rerank_topk: int,
-    tmp_retriever: TempDocRetriever,
+    tmp_retriever: Optional[TempDocRetriever],
     reranker: Optional[Reranker],
     adaptive_k: AdaptiveKComponent,
     ctx_expand: ContextExpansionComponent,
@@ -35,6 +35,8 @@ def search_text(
     query = get_vocab_manager(payload["user_id"])(payload["query"])
     files = (payload or {}).get("files")
     if files:
+        if tmp_retriever is None:
+            raise ValueError("tmp_retriever is required when payload.files is set")
         nodes = tmp_retriever(files, query, topk=retriever_topk)
     else:
         filters = payload.get("filters") or {}
@@ -55,7 +57,7 @@ def ppl_search(
     *,
     document: Document,
     retrievers: List[Retriever],
-    tmp_retriever: TempDocRetriever,
+    tmp_retriever: Optional[TempDocRetriever],
     reranker: Optional[Reranker],
     image_retriever: Optional[Retriever],
     retriever_topk: int = 20,

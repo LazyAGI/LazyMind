@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import threading
 
-from lazymind.vocab.engine.vocab_manager import VocabManager
-from lazymind.vocab.service.db import fetch_vocab_for_user_id
+from lazymind.review.vocab.vocab_manager import VocabManager
+from lazymind.review.service.db import fetch_vocab_for_user_id
 
 _registry: dict[str, VocabManager] = {}
 _registry_lock = threading.Lock()

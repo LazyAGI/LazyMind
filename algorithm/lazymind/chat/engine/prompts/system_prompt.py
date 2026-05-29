@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
-
-from lazymind.chat.engine.prompts.agentic import (
+from lazymind.chat.engine.prompts.guidance import (
     ATTACHED_FILES_GUIDANCE,
     DEFAULT_SYSTEM_PROMPT,
     IMAGE_REFERENCE_MARKDOWN_GUIDANCE,
@@ -13,7 +11,7 @@ from lazymind.chat.engine.prompts.agentic import (
     VISION_EXTRACTOR_GUIDANCE,
     VOCAB_GUIDANCE,
 )
-from lazymind.chat.service.component.tool_registry import _tool_names
+from lazymind.chat.service.component.tool_registry import ToolGroupConfig, group_is_active
 
 
 def _build_environment_context_prompt(environment_context: dict | None = None) -> str:
@@ -52,7 +50,7 @@ def _build_attached_files_prompt(files: list | None = None) -> str:
 
 
 def _build_system_prompt(
-    tools: list[Any],
+    configs: list[ToolGroupConfig],
     *,
     environment_context: dict | None = None,
     use_memory: bool = True,
@@ -60,7 +58,7 @@ def _build_system_prompt(
     memory: str | None = None,
     files: list | None = None,
 ) -> str:
-    available_tools = [name for tool in tools for name in _tool_names(tool)]
+    active_groups = {cfg.name for cfg in configs if group_is_active(cfg)}
     prompt_parts = [DEFAULT_SYSTEM_PROMPT]
 
     environment_prompt = _build_environment_context_prompt(environment_context)
@@ -78,21 +76,21 @@ def _build_system_prompt(
             prompt_parts.append(f'## Agent Working Memory\n{memory.strip()}')
 
     tool_guidance: list[str] = []
-    if 'vocab_manage' in available_tools:
+    if 'vocab' in active_groups:
         tool_guidance.append(VOCAB_GUIDANCE)
-    if 'memory' in available_tools and use_memory:
+    if 'memory' in active_groups and use_memory:
         tool_guidance.append(MEMORY_GUIDANCE)
-    if 'skill_manage' in available_tools:
+    if 'skill_manager' in active_groups:
         tool_guidance.append(SKILLS_GUIDANCE)
     if tool_guidance:
         prompt_parts.append(' '.join(tool_guidance))
-    if available_tools:
+    if active_groups:
         prompt_parts.append(TOOL_CALL_STATUS_GUIDANCE)
-    if any(tool.startswith('kb_') for tool in available_tools):
+    if 'kb' in active_groups or 'temp_kb' in active_groups:
         prompt_parts.append(SEARCH_GUIDANCE)
     if files:
         prompt_parts.append(IMAGE_REFERENCE_MARKDOWN_GUIDANCE)
-    if 'vision_extractor' in available_tools:
+    if 'multimodal' in active_groups:
         prompt_parts.append(VISION_EXTRACTOR_GUIDANCE)
 
     return '\n\n'.join(prompt_parts)

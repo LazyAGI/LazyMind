@@ -3,10 +3,10 @@ import types
 
 
 def _stub_vocab():
-    if "lazymind.vocab.service.registry" not in sys.modules:
-        stub = types.ModuleType("lazymind.vocab.service.registry")
+    if "lazymind.review.service.registry" not in sys.modules:
+        stub = types.ModuleType("lazymind.review.service.registry")
         stub.get_vocab_manager = lambda user_id: (lambda q: q)
-        sys.modules["lazymind.vocab.service.registry"] = stub
+        sys.modules["lazymind.review.service.registry"] = stub
 
 
 _stub_vocab()

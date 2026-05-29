@@ -8,16 +8,7 @@ from typing import Any, Dict, List
 import pytest
 import lazyllm
 
-from lazymind.chat.engine import agentic
-from lazymind.chat.service.agentic.request_context import (
-    DEFAULT_TOOLS,
-    _filter_tools_for_request,
-)
-
-
-def _expected_tools_for_request(config: Dict[str, Any]) -> tuple[str, ...]:
-    request_config = dict(config)
-    return tuple(_filter_tools_for_request(list(DEFAULT_TOOLS), request_config))
+from lazymind.chat.service.agentic import runtime as agentic
 
 
 class _FakeAgent:
@@ -84,11 +75,9 @@ def fake_pipeline(monkeypatch):
         def get_instance(cls, *_args, **_kwargs):
             return cls()
 
-    monkeypatch.setattr(agentic, 'AutoModel', lambda *_a, **_kw: object())
-    monkeypatch.setattr(agentic, '_augment_query_with_attached_images', lambda query, config: query)
-    monkeypatch.setattr(agentic, '_build_review_decision', lambda **_kw: {'mode': None})
-    monkeypatch.setattr(agentic, '_clear_orphaned_lazyllm_queue_lock', lambda: None)
-    monkeypatch.setattr(agentic, '_spawn_background_review', lambda **_kw: None)
+    monkeypatch.setattr(agentic, 'AutoModel', lambda *_a, **_kw: object(), raising=False)
+    monkeypatch.setattr(agentic, '_build_review_decision', lambda **_kw: {'mode': None}, raising=False)
+    monkeypatch.setattr(agentic, '_spawn_background_review', lambda **_kw: None, raising=False)
     monkeypatch.setattr(lazyllm.tools.agent, 'ReactAgent', _FakeAgent)
     monkeypatch.setattr(lazyllm, 'FileSystemQueue', _FakeFileSystemQueue)
 
@@ -119,11 +108,23 @@ def test_stream_parallel_requests_see_isolated_config(fake_pipeline):
             params = {
                 'query': f's_{i}',
                 'algo_id': f's_algo_{i}',
-                'filters': {'kb_id': f's_id_{i}'},
+                'kb_id': f's_id_{i}',
                 'available_tools': [f's_tool_{i}'],
                 'available_skills': [f's_skill_{i}'],
+                'stream': True,
             }
-            stream = agentic.agentic_rag(params)
+            stream = agentic.stream_agentic_runtime(
+                query=params['query'],
+                history=[],
+                runtime_params=params,
+                agent_components={
+                    'llm': object(),
+                    'runtime_tools': params['available_tools'],
+                },
+                global_sid=lazyllm.globals._sid,
+                local_sid=lazyllm.locals._sid,
+                trace_config=lazyllm.globals.get('trace') or {},
+            )
             events = []
             async for event in stream:
                 events.append(event)
@@ -155,13 +156,3 @@ def test_stream_parallel_requests_see_isolated_config(fake_pipeline):
             'the asyncio task should still see its own agentic_config after the '
             'streaming worker finishes'
         )
-
-
-def test_expected_tool_filter_matches_runtime_config():
-    request_config = {
-        'kb_id': 'kb-1',
-    }
-
-    filtered = _expected_tools_for_request(request_config)
-
-    assert filtered == tuple(DEFAULT_TOOLS)

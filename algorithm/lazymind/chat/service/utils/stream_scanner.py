@@ -3,14 +3,8 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from collections import OrderedDict
-from html import escape
 from typing import Dict, List, Tuple
 from rapidfuzz import fuzz
-
-from lazymind.chat.service.utils.static_file_url import basename_from_path
-
-IMAGE_PATTERN = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
 # Qwen-style think delimiters (lengths 7 and 8; must stay in sync with parsers elsewhere)
 _THINK_OPEN = '<think>'
 _THINK_CLOSE = '</think>'
@@ -31,71 +25,6 @@ class BasePlugin(ABC):
 
     def collect(self) -> List[Dict[str, str]]:
         return []
-
-
-# ============================================================
-# CitationPlugin  [[id]]
-# ============================================================
-class CitationPlugin(BasePlugin):
-    prefix_set = {'['}
-    _pat = re.compile(r'\[\[(\d+)\]\]')
-
-    def __init__(self, refs: Dict[int, object]):
-        self.refs = refs
-        self._collected: 'OrderedDict[int, Dict[str, str]]' = OrderedDict()
-
-    def match(self, src: str, pos: int):
-        m = self._pat.match(src, pos)
-        if not m:
-            return None
-        idx = int(m.group(1))
-        node = self.refs.get(idx)
-        if not node or not node.text:
-            return (m.end(), '')  # remove unknown citation number
-        self._collected.setdefault(idx, self._source_node(idx, node))
-        return (m.end(), self._citation(idx, node))
-
-    @staticmethod
-    def _citation(idx: int, node):
-        title = escape(node.global_metadata.get('file_name', 'title'))
-        return f'[{idx}](#source "{title}")'
-
-    @staticmethod
-    def _source_node(idx: int, node):
-        gm = node.global_metadata
-        metadata = node.metadata
-        images = {basename_from_path(url): url for url in metadata.get('images', [])}
-
-        def _recover_image_path(match: re.Match) -> str:
-            """re.sub callback: if image exists locally, collect and replace with placeholder."""
-            title, image_path = match.groups()
-            return f'![{title}]({images.get(image_path, image_path)})'
-
-        return {
-            'index': idx,
-            'segment_number': metadata.get('store_num') or metadata.get('lazyllm_store_num') or -1,
-            'document_id': gm.get('docid', 'file_id_example'),
-            'page': metadata.get('page', -1),
-            'bbox': metadata.get('bbox', []),
-            'dataset_id': gm.get('kb_id', 'kb_id_example'),
-            'file_name': gm.get('file_name', 'title_example'),
-            'segement_id': node._uid,
-            'content': IMAGE_PATTERN.sub(_recover_image_path, node.text) if images else node.text,
-            'group_name': node._group
-        }
-
-    def collect(self):
-        return list(self._collected.values())
-
-    def last_incomplete_pos(self, buf: str) -> int | None:
-        # 1) unclosed '[[...'
-        last_double = buf.rfind('[[')
-        if last_double != -1 and ']]' not in buf[last_double + 2:]:
-            return last_double
-        # 2) buffer ends with single '[', next chunk may be '['
-        if buf.endswith('['):
-            return len(buf) - 1
-        return None
 
 
 # ============================================================

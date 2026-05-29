@@ -7,7 +7,7 @@ import lazyllm
 from lazyllm import AutoModel
 from lazyllm.components.formatter import encode_query_with_filepaths
 
-from lazymind.chat.engine.prompts.agentic import VISION_EXTRACT_DEFAULT_INSTRUCTION
+from lazymind.chat.engine.prompts.guidance import VISION_EXTRACT_DEFAULT_INSTRUCTION
 from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
 from lazymind.chat.engine.tools.infra import extract_text_from_model_output
 from lazymind.chat.service.utils.static_file_url import resolve_local_image_path
@@ -22,8 +22,7 @@ class MultimodalToolGroup:
         """Extract a text description from an image reachable at the given URL.
 
         Uses the configured VLM endpoint (role ``vlm`` in runtime_models)
-        with the same multimodal encoding as ``QueryImageRewriter`` (file paths / URLs
-        embedded in the prompt for the VLM).
+        with LazyLLM multimodal file-path encoding.
 
         Args:
             url: Local filesystem path under the upload root, or a ``/static-files/``

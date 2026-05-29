@@ -78,19 +78,19 @@ def _mock_llm_discriminator(*call_returns):
 @pytest.fixture(autouse=True)
 def _patch_vocab_discriminator():
     model, _ = _mock_llm_discriminator([True])
-    with patch('lazymind.vocab.engine.vocab_manager.AutoModel', return_value=model):
+    with patch('lazymind.review.vocab.vocab_manager.AutoModel', return_value=model):
         yield
 
 
 def _make_manager(rows: list, user_id: str = 'test_user'):
     """Create an isolated VocabManager using an in-memory data_source (no DB)."""
-    from lazymind.vocab.engine.vocab_manager import VocabManager
+    from lazymind.review.vocab.vocab_manager import VocabManager
     return VocabManager(user_id=user_id, data_source=rows)
 
 
 def _reset_registry():
     """Clear the global registry between tests."""
-    from lazymind.vocab.service.registry import clear_registry
+    from lazymind.review.service.registry import clear_registry
     clear_registry()
 
 
@@ -173,7 +173,7 @@ class TestVocabManagerBasic:
         mgr = _make_manager([])
         query = ['query1', 123]
 
-        with patch('lazymind.vocab.engine.vocab_manager.LOG') as mock_log:
+        with patch('lazymind.review.vocab.vocab_manager.LOG') as mock_log:
             result = mgr(query)
 
         assert result is query
@@ -183,7 +183,7 @@ class TestVocabManagerBasic:
         mgr = _make_manager([])
 
         with patch.object(mgr, '_proc', side_effect=RuntimeError('boom')), \
-             patch('lazymind.vocab.engine.vocab_manager.LOG') as mock_log:
+             patch('lazymind.review.vocab.vocab_manager.LOG') as mock_log:
             result = mgr('关于民法的问题')
 
         assert result == '关于民法的问题'
@@ -242,8 +242,8 @@ class TestVocabRegistry:
         _reset_registry()
 
     def test_different_users_get_different_managers(self):
-        from lazymind.vocab.service.registry import get_vocab_manager
-        with patch('lazymind.vocab.service.registry.fetch_vocab_for_user_id', return_value=[]):
+        from lazymind.review.service.registry import get_vocab_manager
+        with patch('lazymind.review.service.registry.fetch_vocab_for_user_id', return_value=[]):
             mgr_a = get_vocab_manager('alice')
             mgr_b = get_vocab_manager('bob')
         assert mgr_a is not mgr_b
@@ -251,20 +251,20 @@ class TestVocabRegistry:
         assert mgr_b.user_id == 'bob'
 
     def test_same_user_gets_same_manager_instance(self):
-        from lazymind.vocab.service.registry import get_vocab_manager
-        with patch('lazymind.vocab.service.registry.fetch_vocab_for_user_id', return_value=[]):
+        from lazymind.review.service.registry import get_vocab_manager
+        with patch('lazymind.review.service.registry.fetch_vocab_for_user_id', return_value=[]):
             mgr1 = get_vocab_manager('charlie')
             mgr2 = get_vocab_manager('charlie')
         assert mgr1 is mgr2
 
     def test_user_isolation_vocab_does_not_bleed(self):
         """user_001's vocab should not affect user_002's query."""
-        from lazymind.vocab.service.registry import get_vocab_manager
+        from lazymind.review.service.registry import get_vocab_manager
 
         def _side_effect(user_id):
             return _SAMPLE_ROWS_USER1 if user_id == 'user_001' else _SAMPLE_ROWS_USER2
 
-        with patch('lazymind.vocab.service.registry.fetch_vocab_for_user_id', side_effect=_side_effect):
+        with patch('lazymind.review.service.registry.fetch_vocab_for_user_id', side_effect=_side_effect):
             mgr1 = get_vocab_manager('user_001')
             mgr2 = get_vocab_manager('user_002')
 
@@ -277,8 +277,8 @@ class TestVocabRegistry:
         assert '民法' not in mgr1._proc.word_to_cluster
 
     def test_empty_user_id_allowed(self):
-        from lazymind.vocab.service.registry import get_vocab_manager
-        with patch('lazymind.vocab.service.registry.fetch_vocab_for_user_id', return_value=[]):
+        from lazymind.review.service.registry import get_vocab_manager
+        with patch('lazymind.review.service.registry.fetch_vocab_for_user_id', return_value=[]):
             mgr = get_vocab_manager('')
         assert mgr.user_id == ''
         assert mgr.vocab_size == 0
@@ -326,28 +326,28 @@ class TestVocabManagerThreadSafety:
 class TestVocabDBQueryLayer:
 
     def test_get_vocab_conn_prefers_core_db_url(self):
-        import lazymind.vocab.service.db as vocab_db
+        import lazymind.review.service.db as vocab_db
 
         fake_engine = object()
         with patch.dict(_os.environ, {
             'LAZYMIND_DATABASE_URL': 'postgresql://legacy-app-db',
             'LAZYMIND_CORE_DATABASE_URL': 'postgresql://core-db',
             'ACL_DB_DSN': '',
-        }, clear=False), patch('lazymind.vocab.service.db._get_engine', return_value=fake_engine) as mock_get_engine:
+        }, clear=False), patch('lazymind.review.service.db._get_engine', return_value=fake_engine) as mock_get_engine:
             assert vocab_db._get_vocab_conn() is fake_engine
 
         assert mock_get_engine.call_args.kwargs == {'url': 'postgresql://core-db', 'dsn': None}
 
     def test_fetch_vocab_for_user_id_queries_public_words_and_filters_deleted(self):
-        from lazymind.vocab.service.db import fetch_vocab_for_user_id
+        from lazymind.review.service.db import fetch_vocab_for_user_id
 
         conn = _FakeConnection(
             _FakeMappingsResult(rows=[{'word': '苹果', 'group_id': 'g1'}]),
         )
         engine = _FakeEngine(conn)
-        with patch('lazymind.vocab.service.db._ensure_table_once', return_value=None), \
-             patch('lazymind.vocab.service.db._has_vocab_conn_target', return_value=True), \
-             patch('lazymind.vocab.service.db._get_vocab_conn', return_value=engine):
+        with patch('lazymind.review.service.db._ensure_table_once', return_value=None), \
+             patch('lazymind.review.service.db._has_vocab_conn_target', return_value=True), \
+             patch('lazymind.review.service.db._get_vocab_conn', return_value=engine):
             rows = fetch_vocab_for_user_id('user-x')
 
         assert rows == [{'word': '苹果', 'cluster_id': 'g1'}]
@@ -357,7 +357,7 @@ class TestVocabDBQueryLayer:
         assert params == {'user_id': 'user-x'}
 
     def test_fetch_vocab_groups_queries_reference_info_and_filters_deleted(self):
-        from lazymind.vocab.service.db import fetch_vocab_groups_for_user_id
+        from lazymind.review.service.db import fetch_vocab_groups_for_user_id
 
         conn = _FakeConnection(
             _FakeMappingsResult(rows=[
@@ -366,9 +366,9 @@ class TestVocabDBQueryLayer:
             ]),
         )
         engine = _FakeEngine(conn)
-        with patch('lazymind.vocab.service.db._ensure_table_once', return_value=None), \
-             patch('lazymind.vocab.service.db._has_vocab_conn_target', return_value=True), \
-             patch('lazymind.vocab.service.db._get_vocab_conn', return_value=engine):
+        with patch('lazymind.review.service.db._ensure_table_once', return_value=None), \
+             patch('lazymind.review.service.db._has_vocab_conn_target', return_value=True), \
+             patch('lazymind.review.service.db._get_vocab_conn', return_value=engine):
             groups = fetch_vocab_groups_for_user_id('user-y')
 
         assert groups == {
@@ -418,7 +418,7 @@ class TestVocabReloadRoute:
             'action': 'create_new_group',
         }])
 
-        with patch('lazymind.vocab.service.registry.get_vocab_manager', return_value=mock_mgr):
+        with patch('lazymind.review.service.registry.get_vocab_manager', return_value=mock_mgr):
             spec.loader.exec_module(vocab_routes_mod)
             test_app.include_router(vocab_routes_mod.router)
 
@@ -475,7 +475,7 @@ class TestVocabReloadRoute:
         mock_mgr = MagicMock()
         mock_extract = MagicMock()
 
-        with patch('lazymind.vocab.service.registry.get_vocab_manager', return_value=mock_mgr):
+        with patch('lazymind.review.service.registry.get_vocab_manager', return_value=mock_mgr):
             spec.loader.exec_module(vocab_routes_mod)
             test_app.include_router(vocab_routes_mod.router)
             tc = TestClient(test_app)
@@ -497,7 +497,7 @@ class TestVocabReloadRoute:
         mock_mgr = MagicMock()
         mock_mgr.reload.side_effect = RuntimeError('db down')
 
-        with patch('lazymind.vocab.service.registry.get_vocab_manager', return_value=mock_mgr):
+        with patch('lazymind.review.service.registry.get_vocab_manager', return_value=mock_mgr):
             spec.loader.exec_module(vocab_routes_mod)
             test_app.include_router(vocab_routes_mod.router)
             tc = TestClient(test_app)
@@ -510,7 +510,7 @@ class TestVocabReloadRoute:
         """Each user_id triggers reload on its own VocabManager instance."""
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
-        from lazymind.vocab.service.registry import clear_registry
+        from lazymind.review.service.registry import clear_registry
 
         clear_registry()
 
@@ -527,7 +527,7 @@ class TestVocabReloadRoute:
             m.reload.return_value = 0
             return m
 
-        with patch('lazymind.vocab.service.registry.get_vocab_manager', side_effect=fake_get_manager):
+        with patch('lazymind.review.service.registry.get_vocab_manager', side_effect=fake_get_manager):
             spec.loader.exec_module(vocab_routes_mod)
             test_app.include_router(vocab_routes_mod.router)
             tc = TestClient(test_app)
@@ -548,7 +548,7 @@ _REAL_VOCAB_DB_URL = _os.getenv('LAZYMIND_CORE_DATABASE_URL', '') or _os.getenv(
 
 
 def _real_vocab_users(limit: int = 2) -> list[str]:
-    from lazymind.vocab.service.db import _get_vocab_conn
+    from lazymind.review.service.db import _get_vocab_conn
 
     engine = _get_vocab_conn()
     with engine.connect() as conn:
@@ -570,7 +570,7 @@ def _real_vocab_users(limit: int = 2) -> list[str]:
 
 
 def _real_deleted_vocab_entry() -> dict | None:
-    from lazymind.vocab.service.db import _get_vocab_conn
+    from lazymind.review.service.db import _get_vocab_conn
 
     engine = _get_vocab_conn()
     with engine.connect() as conn:
@@ -593,7 +593,7 @@ class TestVocabDBIntegration:
     """Integration tests that hit the real core.public.words table."""
 
     def test_fetch_vocab_for_active_user(self):
-        from lazymind.vocab.service.db import fetch_vocab_for_user_id
+        from lazymind.review.service.db import fetch_vocab_for_user_id
         users = _real_vocab_users(limit=1)
         if not users:
             pytest.skip('no active vocab users in real core.words table')
@@ -604,7 +604,7 @@ class TestVocabDBIntegration:
         assert all(row['cluster_id'] for row in rows)
 
     def test_deleted_vocab_rows_are_excluded(self):
-        from lazymind.vocab.service.db import fetch_vocab_for_user_id
+        from lazymind.review.service.db import fetch_vocab_for_user_id
 
         deleted = _real_deleted_vocab_entry()
         if not deleted:
@@ -617,13 +617,13 @@ class TestVocabDBIntegration:
         } not in rows
 
     def test_fetch_vocab_unknown_user_returns_empty(self):
-        from lazymind.vocab.service.db import fetch_vocab_for_user_id
+        from lazymind.review.service.db import fetch_vocab_for_user_id
         rows = fetch_vocab_for_user_id('__nonexistent_user_xyz__')
         assert rows == []
 
     def test_vocab_manager_loads_from_db(self):
         _reset_registry()
-        from lazymind.vocab.service.registry import get_vocab_manager
+        from lazymind.review.service.registry import get_vocab_manager
         users = _real_vocab_users(limit=1)
         if not users:
             pytest.skip('no active vocab users in real core.words table')
@@ -634,7 +634,7 @@ class TestVocabDBIntegration:
 
     def test_reload_reads_db(self):
         _reset_registry()
-        from lazymind.vocab.service.registry import get_vocab_manager
+        from lazymind.review.service.registry import get_vocab_manager
         users = _real_vocab_users(limit=1)
         if not users:
             pytest.skip('no active vocab users in real core.words table')
@@ -647,7 +647,7 @@ class TestVocabDBIntegration:
     def test_user_isolation_in_full_stack(self):
         """Two active users should load independent vocab snapshots."""
         _reset_registry()
-        from lazymind.vocab.service.registry import get_vocab_manager
+        from lazymind.review.service.registry import get_vocab_manager
         users = _real_vocab_users(limit=2)
         if len(users) < 2:
             pytest.skip('need at least two active vocab users for isolation test')
@@ -664,19 +664,19 @@ class TestVocabDBIntegration:
 class TestVocabDbDsnParsing:
 
     def test_dsn_to_sqlalchemy_url_requires_host(self):
-        from lazymind.vocab.service.db import _dsn_to_sqlalchemy_url
+        from lazymind.review.service.db import _dsn_to_sqlalchemy_url
 
         with pytest.raises(ValueError, match='database host is required'):
             _dsn_to_sqlalchemy_url('user=app password=app dbname=core port=5432')
 
     def test_dsn_to_sqlalchemy_url_requires_database_name(self):
-        from lazymind.vocab.service.db import _dsn_to_sqlalchemy_url
+        from lazymind.review.service.db import _dsn_to_sqlalchemy_url
 
         with pytest.raises(ValueError, match='database name is required'):
             _dsn_to_sqlalchemy_url('host=db user=app password=app port=5432')
 
     def test_dsn_to_sqlalchemy_url_rejects_invalid_port(self):
-        from lazymind.vocab.service.db import _dsn_to_sqlalchemy_url
+        from lazymind.review.service.db import _dsn_to_sqlalchemy_url
 
         with pytest.raises(ValueError, match='invalid database port'):
             _dsn_to_sqlalchemy_url('host=db user=app password=app dbname=core port=abc')

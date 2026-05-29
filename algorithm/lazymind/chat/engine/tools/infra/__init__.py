@@ -12,12 +12,7 @@ from lazymind.chat.engine.tools.infra.calculator_eval import (
     safe_evaluate_expression,
 )
 from lazymind.chat.engine.tools.infra.web_search_support import (
-    classify_web_search_exception,
     fetch_url_content,
-    get_web_search_item_content,
-    normalize_web_search_lang,
-    run_web_search_candidates,
-    serialize_web_search_item,
 )
 from lazymind.chat.engine.tools.infra.kb_opensearch_client import (
     opensearch_search,

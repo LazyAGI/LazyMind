@@ -18,7 +18,7 @@ from fastapi import APIRouter, HTTPException, Response, status
 from lazyllm import LOG
 from pydantic import BaseModel
 
-from lazymind.vocab.service.registry import get_vocab_manager
+from lazymind.review.service.registry import get_vocab_manager
 
 router = APIRouter()
 

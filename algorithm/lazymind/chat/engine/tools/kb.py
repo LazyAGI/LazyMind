@@ -20,10 +20,8 @@ from lazymind.chat.engine.tools.infra import (
     term_filter,
 )
 from lazymind.chat.service.utils import (
-    annotate_citations,
     basename_from_path,
     local_path_from_static_file_url,
-    register_image_url,
     static_file_url_from_any,
 )
 _MAX_TEXT_LEN = 1200
@@ -99,7 +97,6 @@ def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
     if image_markdown:
         serialized['image_markdown'] = image_markdown
         serialized['local_path'] = local_path
-        register_image_url(lazyllm.globals['agentic_config'], text)
     return serialized
 
 def _source_to_result(hit: Dict[str, Any]) -> Dict[str, Any]:
@@ -155,12 +152,19 @@ def _serialize_kb_result(result: Any) -> Any:
 
 
 class KBToolGroup:
-    __public_apis__ = ['search', 'get_parent_node', 'get_window_nodes', 'keyword_search']
+    __public_apis__ = ['kb_search', 'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search']
 
     def __init__(self, document: Any = None) -> None:
         self._document = document or _DEFAULT_KB_DOCUMENT
+        self._retrievers = None
+        self._reranker = None
+        self._image_embed_key = None
+        self._image_retriever = None
+
+    def _ensure_search_runtime(self) -> None:
+        if self._retrievers is not None:
+            return
         self._retrievers = kb_retriever_factory.get_kb_retrievers(self._document)
-        self._tmp_retriever = kb_retriever_factory.get_tmp_retriever()
         self._reranker = kb_reranker_factory.get_reranker()
         self._image_embed_key = model_config.get_image_embed_key()
         self._image_retriever = (
@@ -169,7 +173,7 @@ class KBToolGroup:
         )
 
     @handle_tool_errors
-    def search(
+    def kb_search(
         self,
         query: str,
         retriever_topk: Optional[int] = None,
@@ -177,7 +181,6 @@ class KBToolGroup:
         k_max: Optional[int] = None,
         image_topk: Optional[int] = None,
         filters: Optional[Dict[str, Any]] = None,
-        files: Optional[List[str]] = None,
     ) -> Any:
         """Search the knowledge base and return text and image retrieval results.
 
@@ -194,24 +197,16 @@ class KBToolGroup:
             image_topk: Top-k for the image retrieval branch. Defaults to 3.
             filters: Metadata filters for retrieval, e.g.
                 {'file_name': 'report.pdf'}.
-            files: Optional list of temporary file IDs to search instead of the
-                persistent knowledge base.
         """
         agentic_config = lazyllm.globals['agentic_config']
-
-        if files is None:
-            files = agentic_config.get('files') or []
+        self._ensure_search_runtime()
 
         payload = {
             'query': query,
-            'filters': filters or {},
-            'files': files,
-            'image_files': agentic_config.get('image_files') or [],
+            'filters': filters or agentic_config.get('filters') or {},
+            'files': [],
             'user_id': agentic_config.get('user_id', ''),
         }
-        resolved_kb_id = agentic_config.get('kb_id')
-        if resolved_kb_id is not None:
-            payload['filters']['kb_id'] = resolved_kb_id
 
         resolved_image_topk = image_topk or 3
         if resolved_image_topk != 3 and self._image_embed_key:
@@ -225,7 +220,7 @@ class KBToolGroup:
             payload,
             document=self._document,
             retrievers=self._retrievers,
-            tmp_retriever=self._tmp_retriever,
+            tmp_retriever=None,
             reranker=self._reranker,
             image_retriever=image_retriever,
             retriever_topk=retriever_topk or 20,
@@ -234,11 +229,11 @@ class KBToolGroup:
         )
         return tool_success(
             'kb_search',
-            annotate_citations(_serialize_kb_result(result), lazyllm.globals['agentic_config']),
+            _serialize_kb_result(result),
         )
 
     @handle_tool_errors
-    def get_parent_node(self, node_id: str) -> Dict[str, Any]:
+    def kb_get_parent_node(self, node_id: str) -> Dict[str, Any]:
         """Get the parent node of a target node by document node uid.
 
         Args:
@@ -254,7 +249,7 @@ class KBToolGroup:
         config = lazyllm.globals['agentic_config']
         doc = kb_document_provider.build_agentic_document(config)
 
-        for kb_id in iter_lookup_ids(config.get('kb_id'), field_name='agentic_config.kb_id'):
+        for kb_id in iter_lookup_ids((config.get('filters') or {}).get('kb_id'), field_name='agentic_config.filters.kb_id'):
             current_nodes = doc.get_nodes(uids=[node_id], kb_id=kb_id)
             current_nodes = current_nodes if isinstance(current_nodes, list) else []
             if not current_nodes:
@@ -263,24 +258,24 @@ class KBToolGroup:
             current = _serialize_doc_node_like(current_nodes[0])
             parent_id = current.get('parent')
             if not parent_id:
-                return tool_success('kb_get_parent_node', annotate_citations({
+                return tool_success('kb_get_parent_node', {
                     'node_id': node_id,
                     'current_node': current,
                     'parent_id': None,
                     'total': 0,
                     'items': [],
-                }, lazyllm.globals['agentic_config']))
+                })
 
             parent_nodes = doc.get_nodes(uids=[parent_id], kb_id=kb_id)
             parent_nodes = parent_nodes if isinstance(parent_nodes, list) else []
             parent = _serialize_doc_node_like(parent_nodes[0]) if parent_nodes else None
-            return tool_success('kb_get_parent_node', annotate_citations({
+            return tool_success('kb_get_parent_node', {
                 'node_id': node_id,
                 'current_node': current,
                 'parent_id': parent_id,
                 'total': 1 if parent else 0,
                 'items': [parent] if parent else [],
-            }, lazyllm.globals['agentic_config']))
+            })
 
         return tool_success('kb_get_parent_node', {
             'node_id': node_id,
@@ -291,7 +286,7 @@ class KBToolGroup:
         })
 
     @handle_tool_errors
-    def get_window_nodes(
+    def kb_get_window_nodes(
         self,
         docid: str,
         number: Any,
@@ -323,7 +318,7 @@ class KBToolGroup:
         config = lazyllm.globals['agentic_config']
         doc = kb_document_provider.build_agentic_document(config)
 
-        for kb_id in iter_lookup_ids(config.get('kb_id'), field_name='agentic_config.kb_id'):
+        for kb_id in iter_lookup_ids((config.get('filters') or {}).get('kb_id'), field_name='agentic_config.filters.kb_id'):
             nodes = doc.get_nodes(
                 doc_ids=[docid],
                 group=group,
@@ -337,18 +332,18 @@ class KBToolGroup:
             if not nodes:
                 continue
             nodes.sort(key=lambda n: (safe_getattr(n, 'number', 0) or 0, safe_getattr(n, 'uid', '') or ''))
-            return tool_success('kb_get_window_nodes', annotate_citations({
+            return tool_success('kb_get_window_nodes', {
                 'total': len(nodes),
                 'items': [_serialize_doc_node_like(n) for n in nodes],
-            }, lazyllm.globals['agentic_config']))
+            })
 
-        return tool_success('kb_get_window_nodes', annotate_citations({
+        return tool_success('kb_get_window_nodes', {
             'total': 0,
             'items': [],
-        }, lazyllm.globals['agentic_config']))
+        })
 
     @handle_tool_errors
-    def keyword_search(
+    def kb_keyword_search(
         self,
         keyword: str,
         docid: str,
@@ -384,7 +379,7 @@ class KBToolGroup:
             {'number': {'order': 'asc'}},
         ]
         index_name = resolve_index(group)
-        for kb_id in iter_lookup_ids(config.get('kb_id'), field_name='agentic_config.kb_id'):
+        for kb_id in iter_lookup_ids((config.get('filters') or {}).get('kb_id'), field_name='agentic_config.filters.kb_id'):
             filters = [term_filter('doc_id', docid)]
             if kb_id:
                 filters.insert(0, term_filter('kb_id', kb_id))
@@ -413,20 +408,80 @@ class KBToolGroup:
             hits = opensearch_search(index_name, body).get('hits', {}).get('hits', [])
             if not hits:
                 continue
-            return tool_success('kb_keyword_search', annotate_citations({
+            return tool_success('kb_keyword_search', {
                 'index': index_name,
                 'group': group,
                 'docid': docid,
                 'keyword': keyword,
                 'total': len(hits),
                 'items': [_source_to_result(hit) for hit in hits],
-            }, lazyllm.globals['agentic_config']))
+            })
 
-        return tool_success('kb_keyword_search', annotate_citations({
+        return tool_success('kb_keyword_search', {
             'index': index_name,
             'group': group,
             'docid': docid,
             'keyword': keyword,
             'total': 0,
             'items': [],
-        }, lazyllm.globals['agentic_config']))
+        })
+
+
+class TempKBToolGroup:
+    __public_apis__ = ['kb_tmp_search']
+
+    def __init__(self, document: Any = None) -> None:
+        self._document = document or _DEFAULT_KB_DOCUMENT
+        self._tmp_retriever = None
+        self._reranker = None
+
+    def _ensure_search_runtime(self) -> None:
+        if self._tmp_retriever is not None:
+            return
+        self._tmp_retriever = kb_retriever_factory.get_tmp_retriever()
+        self._reranker = kb_reranker_factory.get_reranker()
+
+    @handle_tool_errors
+    def kb_tmp_search(
+        self,
+        query: str,
+        retriever_topk: Optional[int] = None,
+        rerank_topk: Optional[int] = None,
+        k_max: Optional[int] = None,
+        files: Optional[List[str]] = None,
+    ) -> Any:
+        """Search temporary uploaded files with the temporary document retriever.
+
+        Args:
+            query: Natural language query text used for retrieval.
+            retriever_topk: Candidate count used by the temporary retriever.
+                Defaults to 20.
+            rerank_topk: Number of nodes the reranker keeps before adaptive-k
+                trimming. Defaults to 20.
+            k_max: Hard upper bound on the adaptive-k stage. Defaults to 10.
+            files: Optional list of temporary file IDs. Defaults to the current
+                request's ``agentic_config.files``.
+        """
+        agentic_config = lazyllm.globals['agentic_config']
+        self._ensure_search_runtime()
+        payload = {
+            'query': query,
+            'filters': {},
+            'files': files,
+            'user_id': agentic_config.get('user_id', ''),
+        }
+        result = ppl_search(
+            payload,
+            document=self._document,
+            retrievers=[],
+            tmp_retriever=self._tmp_retriever,
+            reranker=self._reranker,
+            image_retriever=None,
+            retriever_topk=retriever_topk or 20,
+            rerank_topk=rerank_topk or 20,
+            k_max=k_max or 10,
+        )
+        return tool_success(
+            'kb_tmp_search',
+            _serialize_kb_result(result),
+        )

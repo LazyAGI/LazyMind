@@ -52,7 +52,6 @@ config.add('opensearch_user', str, 'admin', 'OPENSEARCH_USER', description='Open
 config.add('opensearch_password', str, '', 'OPENSEARCH_PASSWORD', description='OpenSearch password.')
 config.add('web_search_timeout', int, 10, 'WEB_SEARCH_TIMEOUT', description='Web search request timeout in seconds.')
 config.add('url_fetch_max_length', int, 4000, 'URL_FETCH_MAX_LENGTH', description='Maximum readable text length returned by url_fetch.')
-config.add('web_search_auto_sources', str, 'bocha,google,bing,wikipedia', 'WEB_SEARCH_AUTO_SOURCES', description='Comma-separated list of auto web search sources.')
 config.add('web_search_wikipedia_base_url', str, 'https://zh.wikipedia.org', 'WEB_SEARCH_WIKIPEDIA_BASE_URL', description='Wikipedia base URL for web search.')
 config.add('web_search_google_api_key', str, '', 'WEB_SEARCH_GOOGLE_API_KEY', description='Google Custom Search API key.')
 config.add('web_search_google_search_engine_id', str, '', 'WEB_SEARCH_GOOGLE_SEARCH_ENGINE_ID', description='Google Custom Search engine ID.')
