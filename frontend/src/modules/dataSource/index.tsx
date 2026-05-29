@@ -3,27 +3,26 @@ import type { ReactNode } from "react";
 import {
   Alert,
   Button,
-  Card,
   Form,
   Input,
   Modal,
-  Segmented,
   Space,
-  Table,
   Tag,
-  Tooltip,
+  Table,
   Typography,
+  Tooltip,
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   ApiOutlined,
   ArrowRightOutlined,
+  DatabaseOutlined,
   EditOutlined,
   EyeOutlined,
   FolderOpenOutlined,
   PlusOutlined,
-  ReloadOutlined,
+  SearchOutlined,
   WarningFilled,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -46,9 +45,18 @@ import {
 import { BASE_URL, axiosInstance, getLocalizedErrorMessage } from "@/components/request";
 
 import "./index.scss";
-import DataSourceDetailDrawer from "@/modules/dataSource/common/components/DataSourceDetailDrawer";
-import DataSourceSummaryCards from "@/modules/dataSource/common/components/DataSourceSummaryCards";
 import DataSourceWizardModal from "./components/DataSourceWizardModal";
+import {
+  clearFeishuAppSetup,
+  createFeishuAccountId,
+  getOAuthStateFromConnection,
+  loadFeishuAppSetup,
+  loadFeishuAuthAccounts,
+  persistFeishuAppSetup,
+  persistFeishuAuthAccounts,
+  type FeishuAccountFormValues,
+  type FeishuAuthAccount,
+} from "./common/feishuAccounts";
 import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
   clearFeishuDataSourceWizardDraft,
@@ -66,7 +74,6 @@ import {
   CLOUD_SYNC_POLL_INTERVAL_MS,
   CLOUD_SYNC_TIMEOUT_MS,
   DEFAULT_SCAN_TENANT_ID,
-  FEISHU_APP_SETUP_STORAGE_KEY,
   FEISHU_DEFAULT_SCOPES,
   FEISHU_EXCLUDE_PATTERNS,
   FEISHU_INCLUDE_PATTERNS,
@@ -97,7 +104,9 @@ import {
 const { Paragraph, Text } = Typography;
 const DEFAULT_SCHEDULE_TIME = "02:00:00";
 const SCHEDULE_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/;
-type DataSourceView = "list" | "providers";
+const LOCAL_SCAN_CHAT_STORAGE_KEY = "lazymind:datasource:local-scan:chat-enabled";
+type DataSourceView = "assets" | "connectors";
+type FeishuSetupIntent = "create" | "auth" | null;
 
 function normalizeScheduleTime(scheduleTime?: string) {
   const value = `${scheduleTime || ""}`.trim();
@@ -116,9 +125,22 @@ function getDatasetDisplayName(dataset: CoreDataset) {
   return `${dataset.display_name || dataset.name || ""}`.trim();
 }
 
+function loadLocalScanChatEnabled() {
+  try {
+    return localStorage.getItem(LOCAL_SCAN_CHAT_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function persistLocalScanChatEnabled(enabled: boolean) {
+  localStorage.setItem(LOCAL_SCAN_CHAT_STORAGE_KEY, enabled ? "true" : "false");
+}
+
 const sourceTypeOptions: Array<{
   type: SourceType;
   icon: ReactNode;
+  logoUrl?: string;
   adminOnly?: boolean;
 }> = [
   {
@@ -129,8 +151,10 @@ const sourceTypeOptions: Array<{
   {
     type: "feishu",
     icon: <ApiOutlined />,
+    logoUrl: "https://www.google.com/s2/favicons?domain=feishu.cn&sz=96",
   },
 ];
+const providerAuthOptions = sourceTypeOptions.filter((item) => item.type === "feishu");
 
 function createScanApiClient() {
   const baseUrl = BASE_URL || window.location.origin;
@@ -203,6 +227,32 @@ async function listKnowledgeBaseNames(client = createCoreDatasetsApiClient()) {
   }
 
   return names;
+}
+
+async function listDefaultKnowledgeBaseIds(client = createCoreDatasetsApiClient()) {
+  const ids: string[] = [];
+  let pageToken: string | undefined;
+
+  for (let pageIndex = 0; pageIndex < 20; pageIndex += 1) {
+    const response = await client.apiCoreDatasetsGet({
+      pageToken,
+      pageSize: 200,
+    });
+    ids.push(
+      ...(response.data.datasets || [])
+        .filter((dataset) => dataset.default_dataset)
+        .map((dataset) => dataset.dataset_id)
+        .filter(Boolean),
+    );
+
+    const nextPageToken = response.data.next_page_token || "";
+    if (!nextPageToken || nextPageToken === pageToken) {
+      break;
+    }
+    pageToken = nextPageToken;
+  }
+
+  return ids;
 }
 
 function sleep(ms: number) {
@@ -421,33 +471,6 @@ function pickScanAgent(agents: ScanAgent[], preferredAgentId?: string) {
   return onlineAgent || agents[0];
 }
 
-function loadFeishuAppSetup(): FeishuAppSetup | null {
-  try {
-    const raw = localStorage.getItem(FEISHU_APP_SETUP_STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw) as Partial<FeishuAppSetup>;
-    const appId = typeof parsed.appId === "string" ? parsed.appId.trim() : "";
-    const appSecret =
-      typeof parsed.appSecret === "string" ? parsed.appSecret.trim() : "";
-    if (!appId || !appSecret) {
-      return null;
-    }
-    return { appId, appSecret };
-  } catch {
-    return null;
-  }
-}
-
-function persistFeishuAppSetup(setup: FeishuAppSetup) {
-  localStorage.setItem(FEISHU_APP_SETUP_STORAGE_KEY, JSON.stringify(setup));
-}
-
-function clearFeishuAppSetup() {
-  localStorage.removeItem(FEISHU_APP_SETUP_STORAGE_KEY);
-}
-
 function inferScheduleCycle(scheduleLabel: string) {
   const normalized = scheduleLabel.toLowerCase();
   if (
@@ -461,26 +484,6 @@ function inferScheduleCycle(scheduleLabel: string) {
     return "weekly";
   }
   return "daily";
-}
-
-function getOAuthStateFromConnection(
-  connection?: FeishuDataSourceConnection | null,
-): OAuthState {
-  if (!connection) {
-    return "pending";
-  }
-
-  if (connection.status === "connected") {
-    return "connected";
-  }
-  if (connection.status === "expired") {
-    return "expired";
-  }
-  if (connection.status === "error") {
-    return "error";
-  }
-
-  return "pending";
 }
 
 function parseFeishuOAuthCallbackInput(value: string) {
@@ -524,30 +527,48 @@ export default function DataSourceManagement() {
   const navigate = useNavigate();
   const [form] = Form.useForm<SourceFormValues>();
   const [sources, setSources] = useState<DataSourceItem[]>([]);
-  const [activeView, setActiveView] = useState<DataSourceView>("list");
+  const [activeView, setActiveView] = useState<DataSourceView>(() =>
+    new URLSearchParams(window.location.search).get("view") === "connectors"
+      ? "connectors"
+      : "assets",
+  );
+  const [assetSearchValue, setAssetSearchValue] = useState("");
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
   const [wizardMode, setWizardMode] = useState<"create" | "edit">("create");
   const [selectedType, setSelectedType] = useState<SourceType | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [detailId, setDetailId] = useState<string | null>(null);
+  const [createProviderModalOpen, setCreateProviderModalOpen] = useState(false);
+  const [authSelectModalOpen, setAuthSelectModalOpen] = useState(false);
   const [oauthState, setOauthState] = useState<OAuthState>("pending");
   const [connectionVerified, setConnectionVerified] = useState(false);
   const [oauthConnection, setOauthConnection] =
     useState<FeishuDataSourceConnection | null>(null);
+  const [feishuAuthAccounts, setFeishuAuthAccounts] = useState<
+    FeishuAuthAccount[]
+  >(() => loadFeishuAuthAccounts());
+  const [editingFeishuAccountId, setEditingFeishuAccountId] = useState<
+    string | null
+  >(null);
   const [feishuAppSetup, setFeishuAppSetup] = useState<FeishuAppSetup | null>(
     () => loadFeishuAppSetup(),
   );
   const [feishuSetupModalOpen, setFeishuSetupModalOpen] = useState(false);
-  const [pendingSelectFeishu, setPendingSelectFeishu] = useState(false);
+  const [feishuSetupIntent, setFeishuSetupIntent] =
+    useState<FeishuSetupIntent>(null);
   const [feishuSetupSubmitting, setFeishuSetupSubmitting] = useState(false);
-  const [feishuSetupForm] = Form.useForm<FeishuAppSetup>();
+  const [feishuSetupForm] = Form.useForm<FeishuAccountFormValues>();
   const [manualOauthModalOpen, setManualOauthModalOpen] = useState(false);
   const [manualOauthCallbackValue, setManualOauthCallbackValue] = useState("");
   const [manualOauthSubmitting, setManualOauthSubmitting] = useState(false);
   const oauthAttemptRef = useRef<PendingOAuthAttempt | null>(null);
   const [scanAgents, setScanAgents] = useState<ScanAgent[]>([]);
   const [knowledgeBaseNames, setKnowledgeBaseNames] = useState<string[]>([]);
+  const [defaultDatasetIds, setDefaultDatasetIds] = useState<string[]>([]);
+  const [localScanChatEnabled, setLocalScanChatEnabled] = useState(
+    loadLocalScanChatEnabled,
+  );
+  const [localScanChatSaving, setLocalScanChatSaving] = useState(false);
   const [scanLoading, setScanLoading] = useState(false);
   const [validatedAgentId, setValidatedAgentId] = useState<string | null>(null);
   const [wizardSaving, setWizardSaving] = useState(false);
@@ -557,14 +578,22 @@ export default function DataSourceManagement() {
   const isFeishuSetupReady = Boolean(
     feishuAppSetup?.appId.trim() && feishuAppSetup?.appSecret.trim(),
   );
+  const validFeishuAccounts = feishuAuthAccounts.filter(
+    (account) =>
+      account.status === "connected" && Boolean(account.connection?.connectionId),
+  );
+  const isFeishuAuthValid = validFeishuAccounts.length > 0;
+  const localSourceCount = sources.filter((item) => item.type === "local").length;
 
-  const detailSource = sources.find((item) => item.id === detailId);
-  const totalDocuments = sources.reduce((sum, item) => sum + item.documentCount, 0);
-  const activeCount = sources.filter((item) => item.status === "active").length;
-  const warningCount = sources.filter((item) =>
-    ["expired", "error"].includes(item.status),
-  ).length;
-  const scheduledCount = sources.filter((item) => item.syncMode === "scheduled").length;
+  const filteredSources = sources.filter((item) => {
+    const normalizedSearch = assetSearchValue.trim().toLowerCase();
+    const matchesSearch =
+      !normalizedSearch ||
+      [item.name, item.knowledgeBase, item.target, item.description]
+        .some((value) => `${value || ""}`.toLowerCase().includes(normalizedSearch));
+
+    return matchesSearch;
+  });
 
   const buildScanScheduleLabel = (source: ScanSource) => {
     if (!source.watch_enabled) {
@@ -603,6 +632,89 @@ export default function DataSourceManagement() {
     return t("admin.dataSourceNextSyncPlanned", {
       time: `${hourEstimate}h`,
     });
+  };
+
+  const applyDatasetChatDefault = async (
+    datasetId: string,
+    datasetName: string,
+    chatEnabled: boolean,
+  ) => {
+    const client = createCoreDatasetsApiClient();
+    if (chatEnabled) {
+      await client.apiCoreDatasetsDatasetSetDefaultPost({
+        dataset: datasetId,
+        setDefaultDatasetRequest: { name: datasetName },
+      });
+      return;
+    }
+
+    await client.apiCoreDatasetsDatasetUnsetDefaultPost({
+      dataset: datasetId,
+      unsetDefaultDatasetRequest: { name: datasetName },
+    });
+  };
+
+  const syncDefaultDatasetState = (datasetIds: string[], chatEnabled: boolean) => {
+    setDefaultDatasetIds((current) => {
+      const next = new Set(current);
+      datasetIds.forEach((datasetId) => {
+        if (chatEnabled) {
+          next.add(datasetId);
+        } else {
+          next.delete(datasetId);
+        }
+      });
+      return [...next];
+    });
+  };
+
+  const handleToggleLocalScanChat = async (chatEnabled: boolean) => {
+    if (localScanChatSaving) {
+      return;
+    }
+
+    const localSources = sources.filter((item) => item.type === "local");
+    const localSourcesWithDataset = localSources.filter((item) => item.datasetId);
+    if (localSourcesWithDataset.length === 0) {
+      message.warning(t("admin.dataSourceLocalScanChatNoSourceHint"));
+      return;
+    }
+
+    const previousValue = localScanChatEnabled;
+    setLocalScanChatSaving(true);
+    setLocalScanChatEnabled(chatEnabled);
+
+    try {
+      await Promise.all(
+        localSourcesWithDataset.map((source) =>
+          applyDatasetChatDefault(
+            source.datasetId || "",
+            source.knowledgeBase || source.name,
+            chatEnabled,
+          ),
+        ),
+      );
+      syncDefaultDatasetState(
+        localSourcesWithDataset
+          .map((source) => source.datasetId)
+          .filter((datasetId): datasetId is string => Boolean(datasetId)),
+        chatEnabled,
+      );
+      persistLocalScanChatEnabled(chatEnabled);
+      message.success(
+        chatEnabled
+          ? t("admin.dataSourceLocalScanChatEnabledSuccess")
+          : t("admin.dataSourceLocalScanChatDisabledSuccess"),
+      );
+    } catch (error) {
+      setLocalScanChatEnabled(previousValue);
+      message.error(
+        getLocalizedErrorMessage(error, t("common.requestFailed")) ||
+          t("common.requestFailed"),
+      );
+    } finally {
+      setLocalScanChatSaving(false);
+    }
   };
 
   const mapScanSourceToDataSource = (
@@ -768,7 +880,14 @@ export default function DataSourceManagement() {
     const client = createScanApiClient();
     setScanLoading(true);
     try {
-      const sourcesResponse = await client.apiScanSourcesGet();
+      const [sourcesResponse, nextDefaultDatasetIds] = await Promise.all([
+        client.apiScanSourcesGet(),
+        listDefaultKnowledgeBaseIds().catch((error) => {
+          console.error("Failed to refresh default knowledge bases", error);
+          return defaultDatasetIds;
+        }),
+      ]);
+      const defaultDatasetIdSet = new Set(nextDefaultDatasetIds);
 
       const sourceList = sourcesResponse.data.items || [];
       const previousSourceMap = new Map(
@@ -780,7 +899,17 @@ export default function DataSourceManagement() {
           previousSourceMap.get(source.id),
         ),
       );
+      const localDatasetIds = nextSources
+        .filter((item) => item.type === "local")
+        .map((item) => item.datasetId)
+        .filter((datasetId): datasetId is string => Boolean(datasetId));
+      const nextLocalScanChatEnabled =
+        localDatasetIds.length > 0 &&
+        localDatasetIds.every((datasetId) => defaultDatasetIdSet.has(datasetId));
 
+      setDefaultDatasetIds(nextDefaultDatasetIds);
+      setLocalScanChatEnabled(nextLocalScanChatEnabled);
+      persistLocalScanChatEnabled(nextLocalScanChatEnabled);
       setSources(nextSources);
 
       if (showSuccessMessage) {
@@ -830,6 +959,22 @@ export default function DataSourceManagement() {
     setOauthState(attempt.previousState);
     setConnectionVerified(attempt.previousVerified);
     setOauthConnection(attempt.previousConnection);
+    if (attempt.accountId) {
+      setFeishuAuthAccounts((current) => {
+        const nextAccounts = current.map((item) =>
+          item.id === attempt.accountId
+            ? {
+                ...item,
+                status: attempt.previousState,
+                connection: attempt.previousConnection,
+                updatedAt: new Date().toISOString(),
+              }
+            : item,
+        );
+        persistFeishuAuthAccounts(nextAccounts);
+        return nextAccounts;
+      });
+    }
     oauthAttemptRef.current = null;
 
     if (messageText) {
@@ -857,6 +1002,37 @@ export default function DataSourceManagement() {
       setOauthConnection(payload.connection);
       setOauthState(nextOauthState);
       setConnectionVerified(nextOauthState === "connected");
+      if (nextOauthState === "connected") {
+        setFeishuAuthAccounts((current) => {
+          const matchedAccount = current.find(
+            (item) =>
+              (attempt?.accountId && item.id === attempt.accountId) ||
+              item.appId === attempt?.appId ||
+              item.appId === feishuAppSetup?.appId,
+          );
+          if (!matchedAccount) {
+            return current;
+          }
+
+          const nextAccounts = current.map((item) =>
+            item.id === matchedAccount.id
+              ? {
+                  ...item,
+                  name:
+                    item.name ||
+                    payload.connection.accountName ||
+                    item.appId,
+                  status: nextOauthState,
+                  connection: payload.connection,
+                  updatedAt: new Date().toISOString(),
+                  lastAuthorizedAt: new Date().toISOString(),
+                }
+              : item,
+          );
+          persistFeishuAuthAccounts(nextAccounts);
+          return nextAccounts;
+        });
+      }
       setWizardStep(1);
       message.success(t("admin.dataSourceOauthSuccess"));
       return;
@@ -876,6 +1052,22 @@ export default function DataSourceManagement() {
     setOauthConnection(null);
     setOauthState("error");
     setConnectionVerified(false);
+    if (attempt?.accountId) {
+      setFeishuAuthAccounts((current) => {
+        const nextAccounts = current.map((item) =>
+          item.id === attempt.accountId
+            ? {
+                ...item,
+                status: "error" as OAuthState,
+                connection: null,
+                updatedAt: new Date().toISOString(),
+              }
+            : item,
+        );
+        persistFeishuAuthAccounts(nextAccounts);
+        return nextAccounts;
+      });
+    }
     message.error(payload.message || t("admin.dataSourceOauthFailedRetry"));
   };
 
@@ -895,6 +1087,23 @@ export default function DataSourceManagement() {
       window.setTimeout(() => {
         form.setFieldsValue(draft.formValues);
       }, 0);
+    }
+
+    if (feishuAuthAccounts.length === 0 && feishuAppSetup) {
+      const seededAccounts: FeishuAuthAccount[] = [
+        {
+          id: createFeishuAccountId(),
+          name: feishuAppSetup.appId,
+          appId: feishuAppSetup.appId,
+          appSecret: feishuAppSetup.appSecret,
+          chatEnabled: false,
+          status: getOAuthStateFromConnection(oauthConnection),
+          connection: oauthConnection,
+          createdAt: new Date().toISOString(),
+        },
+      ];
+      setFeishuAuthAccounts(seededAccounts);
+      persistFeishuAuthAccounts(seededAccounts);
     }
 
     const storedResult = consumeFeishuDataSourceOAuthResult();
@@ -938,6 +1147,8 @@ export default function DataSourceManagement() {
     setWizardStep(0);
     setSelectedType(null);
     setEditingId(null);
+    setCreateProviderModalOpen(false);
+    setAuthSelectModalOpen(false);
     setOauthState("pending");
     setConnectionVerified(false);
     setOauthConnection(null);
@@ -947,8 +1158,38 @@ export default function DataSourceManagement() {
     setManualOauthSubmitting(false);
   };
 
-  const openCreateWizard = () => {
-    setActiveView("providers");
+  const upsertFeishuAuthAccount = (
+    setup: FeishuAccountFormValues,
+    status: OAuthState = "pending",
+  ) => {
+    const now = new Date().toISOString();
+    const appId = setup.appId.trim();
+    const appSecret = setup.appSecret.trim();
+    const existingAccount = editingFeishuAccountId
+      ? feishuAuthAccounts.find((item) => item.id === editingFeishuAccountId)
+      : feishuAuthAccounts.find((item) => item.appId === appId);
+    const nextAccount: FeishuAuthAccount = {
+      id: existingAccount?.id || createFeishuAccountId(),
+      name: `${setup.name || ""}`.trim() || existingAccount?.name || appId,
+      appId,
+      appSecret,
+      chatEnabled: existingAccount?.chatEnabled ?? false,
+      status,
+      connection: status === "pending" ? null : existingAccount?.connection || null,
+      createdAt: existingAccount?.createdAt || now,
+      updatedAt: now,
+      lastAuthorizedAt:
+        status === "connected" ? now : existingAccount?.lastAuthorizedAt,
+    };
+    const nextAccounts = existingAccount
+      ? feishuAuthAccounts.map((item) =>
+          item.id === existingAccount.id ? nextAccount : item,
+        )
+      : [nextAccount, ...feishuAuthAccounts];
+
+    setFeishuAuthAccounts(nextAccounts);
+    persistFeishuAuthAccounts(nextAccounts);
+    return nextAccount;
   };
 
   const openEditWizard = (record: DataSourceItem) => {
@@ -1023,12 +1264,15 @@ export default function DataSourceManagement() {
     setup?: FeishuAppSetup;
     draftSelectedType?: SourceType | null;
     draftWizardStep?: number;
+    draftWizardOpen?: boolean;
     draftWizardMode?: "create" | "edit";
     draftEditingId?: string | null;
     draftFormValues?: Record<string, unknown>;
     previousState?: OAuthState;
     previousVerified?: boolean;
     previousConnection?: FeishuDataSourceConnection | null;
+    accountId?: string;
+    appId?: string;
   }) => {
     const activeSetup = options?.setup || feishuAppSetup;
     const previousState = options?.previousState ?? oauthState;
@@ -1065,7 +1309,7 @@ export default function DataSourceManagement() {
       });
 
       const draft: FeishuDataSourceWizardDraft = {
-        wizardOpen: true,
+        wizardOpen: options?.draftWizardOpen ?? true,
         wizardStep: options?.draftWizardStep ?? wizardStep,
         wizardMode: options?.draftWizardMode ?? wizardMode,
         selectedType: options?.draftSelectedType ?? selectedType,
@@ -1081,12 +1325,18 @@ export default function DataSourceManagement() {
 
       const popup = openCenteredPopup(authorizeUrl, t("admin.dataSourceFeishuAuthWindowTitle"));
 
+      if (options?.draftWizardOpen === false) {
+        clearFeishuDataSourceWizardDraft();
+      }
+
       oauthAttemptRef.current = {
         timerId: null,
         previousState,
         previousVerified,
         previousConnection,
         resolved: false,
+        accountId: options?.accountId,
+        appId: options?.appId || activeSetup.appId,
       };
 
       if (popup) {
@@ -1119,11 +1369,16 @@ export default function DataSourceManagement() {
     }
   };
 
-  const openFeishuSetupModal = (autoSelect = false) => {
-    setPendingSelectFeishu(autoSelect);
+  const openFeishuSetupModal = (
+    intent: FeishuSetupIntent = null,
+    account?: FeishuAuthAccount | null,
+  ) => {
+    setFeishuSetupIntent(intent);
+    setEditingFeishuAccountId(account?.id || null);
     feishuSetupForm.setFieldsValue({
-      appId: feishuAppSetup?.appId || "",
-      appSecret: feishuAppSetup?.appSecret || "",
+      name: account?.name || "",
+      appId: account?.appId || feishuAppSetup?.appId || "",
+      appSecret: account?.appSecret || feishuAppSetup?.appSecret || "",
     });
     setFeishuSetupModalOpen(true);
   };
@@ -1140,17 +1395,22 @@ export default function DataSourceManagement() {
         appId: values.appId.trim(),
         appSecret: values.appSecret.trim(),
       };
-      const shouldStartOAuth = pendingSelectFeishu;
+      const shouldStartOAuth = feishuSetupIntent === "create" || feishuSetupIntent === "auth";
+      const nextAccount = upsertFeishuAuthAccount(values, "waiting");
 
       persistFeishuAppSetup(nextSetup);
       setFeishuAppSetup(nextSetup);
       setFeishuSetupModalOpen(false);
-      setPendingSelectFeishu(false);
+      const setupIntent = feishuSetupIntent;
+      setFeishuSetupIntent(null);
+      setEditingFeishuAccountId(null);
       message.success(t("admin.dataSourceFeishuCredentialSaved"));
 
       if (shouldStartOAuth) {
+        resetWizard();
+        setWizardMode("create");
+        setEditingId(null);
         const feishuFormValues = {
-          ...form.getFieldsValue(true),
           syncMode: "scheduled",
           scheduleCycle: "daily",
           scheduleTime: DEFAULT_SCHEDULE_TIME,
@@ -1161,7 +1421,7 @@ export default function DataSourceManagement() {
         };
 
         applySourceType("feishu");
-        setWizardOpen(true);
+        setWizardOpen(setupIntent === "create");
         setWizardStep(1);
         await startFeishuOAuth({
           setup: nextSetup,
@@ -1170,9 +1430,12 @@ export default function DataSourceManagement() {
           draftWizardMode: "create",
           draftEditingId: null,
           draftFormValues: feishuFormValues,
+          draftWizardOpen: setupIntent === "create",
           previousState: "pending",
           previousVerified: false,
           previousConnection: null,
+          accountId: nextAccount?.id,
+          appId: nextSetup.appId,
         });
       }
     } finally {
@@ -1203,55 +1466,78 @@ export default function DataSourceManagement() {
 
   const handleSelectType = (type: SourceType) => {
     if (type === "feishu" && !isFeishuSetupReady) {
-      openFeishuSetupModal(true);
+      openFeishuSetupModal("create");
       return;
     }
     applySourceType(type);
   };
 
-  const openProviderCreateWizard = (type: SourceType) => {
+  const openSourceCreateWizard = (
+    type: SourceType,
+    options?: { connection?: FeishuDataSourceConnection | null },
+  ) => {
+    const reusableConnection =
+      type === "feishu"
+        ? options?.connection || oauthConnection
+        : null;
     resetWizard();
     setWizardMode("create");
     setEditingId(null);
     applySourceType(type);
     setWizardStep(1);
+    setWizardOpen(true);
 
-    if (type === "feishu" && !isFeishuSetupReady) {
-      openFeishuSetupModal(true);
+    if (
+      type === "feishu" &&
+      reusableConnection?.connectionId &&
+      getOAuthStateFromConnection(reusableConnection) === "connected"
+    ) {
+      setOauthConnection(reusableConnection);
+      setOauthState("connected");
+      setConnectionVerified(true);
+    }
+  };
+
+  const handleCreateProviderSelect = (type: SourceType) => {
+    if (type !== "feishu") {
+      setCreateProviderModalOpen(false);
+      openSourceCreateWizard(type);
       return;
     }
 
-    setWizardOpen(true);
-
-    if (type === "feishu" && feishuAppSetup) {
-      const feishuFormValues = {
-        ...form.getFieldsValue(true),
-        syncMode: "scheduled",
-        scheduleCycle: "daily",
-        scheduleTime: DEFAULT_SCHEDULE_TIME,
-        conflictPolicy: "versioned",
-        path: "",
-        target: "",
-        targetType: "wiki_space",
-      };
-
-      void startFeishuOAuth({
-        setup: feishuAppSetup,
-        draftSelectedType: "feishu",
-        draftWizardStep: 1,
-        draftWizardMode: "create",
-        draftEditingId: null,
-        draftFormValues: feishuFormValues,
-        previousState: "pending",
-        previousVerified: false,
-        previousConnection: null,
-      });
+    if (isFeishuAuthValid) {
+      setCreateProviderModalOpen(false);
+      setAuthSelectModalOpen(true);
+      return;
     }
+
+    setCreateProviderModalOpen(false);
+    resetWizard();
+    setWizardMode("create");
+    setEditingId(null);
+    applySourceType("feishu");
+    setWizardStep(1);
+
+    if (!isFeishuAuthValid) {
+      openFeishuSetupModal("create");
+      return;
+    }
+  };
+
+  const handleSelectFeishuAuthConnection = (
+    connection: FeishuDataSourceConnection,
+  ) => {
+    setAuthSelectModalOpen(false);
+    openSourceCreateWizard("feishu", { connection });
+  };
+
+  const handleManageFeishuAuth = () => {
+    navigate("/data-sources/providers/feishu");
   };
 
   const handleAuthorizeFeishu = () => {
     if (!isFeishuSetupReady || !feishuAppSetup) {
-      openFeishuSetupModal(true);
+      openFeishuSetupModal("create");
       return;
     }
 
@@ -1501,6 +1787,7 @@ export default function DataSourceManagement() {
       editingId && selectedType === "local"
         ? sources.find((item) => item.id === editingId && item.type === "local")
         : undefined;
+    let datasetIdForLocalSource = currentLocalSource?.datasetId || "";
 
     if (!rootPath) {
       message.warning(t("admin.dataSourceAccessPathRequired"));
@@ -1569,6 +1856,7 @@ export default function DataSourceManagement() {
             },
           },
         });
+        datasetIdForLocalSource = kbResponse.data.dataset_id;
 
         const createSourceResponse = await client.apiScanSourcesPost({
           createSourceRequest: {
@@ -1603,6 +1891,11 @@ export default function DataSourceManagement() {
             id: createdSourceId,
           });
         }
+      }
+
+      if (localScanChatEnabled && datasetIdForLocalSource) {
+        await applyDatasetChatDefault(datasetIdForLocalSource, sourceName, true);
+        syncDefaultDatasetState([datasetIdForLocalSource], true);
       }
 
       setValidatedAgentId(selectedAgent.agent_id);
@@ -1858,12 +2151,12 @@ export default function DataSourceManagement() {
     }
   };
 
-  const columns: ColumnsType<DataSourceItem> = [
+  const assetColumns: ColumnsType<DataSourceItem> = [
     {
       title: t("admin.dataSourceTableSource"),
       dataIndex: "name",
       key: "name",
-      width: 280,
+      width: 260,
       render: (_value, record) => (
         <div className="data-source-table-name">
           <span className={`data-source-icon data-source-icon-${record.type}`}>
@@ -1894,19 +2187,27 @@ export default function DataSourceManagement() {
       title: t("admin.dataSourceTableType"),
       dataIndex: "type",
       key: "type",
-      width: 120,
+      width: 90,
       render: (type: SourceType) => <Tag>{getSourceTypeTitle(type, t)}</Tag>,
     },
     {
       title: t("admin.dataSourceTableKnowledgeBase"),
       dataIndex: "knowledgeBase",
       key: "knowledgeBase",
-      width: 140,
+      width: 130,
+      ellipsis: {
+        showTitle: false,
+      },
+      render: (knowledgeBase: string) => (
+        <Tooltip title={knowledgeBase} placement="topLeft">
+          <span className="data-source-ellipsis">{knowledgeBase}</span>
+        </Tooltip>
+      ),
     },
     {
       title: t("admin.dataSourceTableSyncStrategy"),
       key: "syncMode",
-      width: 260,
+      width: 205,
       render: (_value, record) => (
         <div className="data-source-sync-cell">
           <Text strong>{getSyncModeLabel(record.syncMode, t)}</Text>
@@ -1917,7 +2218,7 @@ export default function DataSourceManagement() {
     {
       title: t("admin.dataSourceTableConnectionStatus"),
       key: "status",
-      width: 140,
+      width: 105,
       render: (_value, record) => {
         const statusMeta = getStatusMeta(record.status, t);
         const connectionMeta = getConnectionMeta(record.connectionState, t);
@@ -1932,7 +2233,7 @@ export default function DataSourceManagement() {
     {
       title: t("admin.dataSourceTableLastSync"),
       key: "lastSync",
-      width: 220,
+      width: 190,
       render: (_value, record) => (
         <div className="data-source-sync-cell">
           <Text>{record.lastSync}</Text>
@@ -1943,7 +2244,7 @@ export default function DataSourceManagement() {
     {
       title: t("admin.dataSourceTableSummary"),
       key: "summary",
-      width: 180,
+      width: 150,
       render: (_value, record) => (
         <div className="data-source-sync-cell">
           <Text type="secondary">
@@ -1959,10 +2260,11 @@ export default function DataSourceManagement() {
     {
       title: t("admin.dataSourceTableActions"),
       key: "actions",
-      width: 220,
+      width: 150,
       fixed: "right",
+      className: "data-source-action-column",
       render: (_value, record) => (
-        <Space wrap>
+        <Space size={18} className="data-source-table-actions">
           <Button type="link" icon={<EyeOutlined />} onClick={() => openDetailPage(record)}>
             {t("admin.dataSourceActionDetail")}
           </Button>
@@ -1976,140 +2278,336 @@ export default function DataSourceManagement() {
 
   return (
     <div className="admin-page data-source-page">
-        <div className="admin-page-toolbar data-source-page-toolbar">
-          <div className="admin-page-toolbar-left data-source-page-toolbar-left">
-            <div>
-              <h2 className="admin-page-title">{t("admin.dataSourceManagement")}</h2>
-              <Paragraph className="data-source-page-subtitle">
-                {t("admin.dataSourceSubtitle")}
-              </Paragraph>
-            </div>
+      <div className="admin-page-toolbar data-source-page-toolbar">
+        <div className="admin-page-toolbar-left data-source-page-toolbar-left">
+          <div>
+            <h2 className="admin-page-title">{t("admin.dataSourceManagement")}</h2>
+            <Paragraph className="data-source-page-subtitle">
+              {t("admin.dataSourceSubtitle")}
+            </Paragraph>
           </div>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          className="admin-page-primary-button"
-          onClick={openCreateWizard}
+        </div>
+      </div>
+
+      <div className="data-source-view-tabs">
+        <button
+          type="button"
+          className={activeView === "assets" ? "selected" : ""}
+          onClick={() => setActiveView("assets")}
         >
-          {t("admin.dataSourceCreate")}
-        </Button>
+          {t("admin.dataSourceListTitle")}
+        </button>
+        <button
+          type="button"
+          className={activeView === "connectors" ? "selected" : ""}
+          onClick={() => setActiveView("connectors")}
+        >
+          {t("admin.dataSourceProviderTitle")}
+        </button>
       </div>
 
-      <DataSourceSummaryCards
-        t={t}
-        total={sources.length}
-        activeCount={activeCount}
-        scheduledCount={scheduledCount}
-        totalDocuments={totalDocuments}
-        warningCount={warningCount}
-      />
-
-      <div className="data-source-secondary-nav">
-        <Segmented
-          value={activeView}
-          onChange={(value) => setActiveView(value as DataSourceView)}
-          options={[
-            { label: t("admin.dataSourceListTitle"), value: "list" },
-            { label: t("admin.dataSourceProviderTitle"), value: "providers" },
-          ]}
-        />
-      </div>
-
-      {activeView === "list" ? (
-        <Card
-          className="data-source-list-card"
-          title={t("admin.dataSourceListTitle")}
-          extra={
-            <Space size="middle">
+      <section className="data-source-workbench">
+        {activeView === "assets" ? (
+          <main className="data-source-asset-directory">
+            <div className="data-source-asset-toolbar">
+              <Input
+                allowClear
+                prefix={<SearchOutlined />}
+                value={assetSearchValue}
+                onChange={(event) => setAssetSearchValue(event.target.value)}
+                placeholder={t("admin.dataSourceAssetSearchPlaceholder")}
+                className="data-source-asset-search"
+              />
               <Button
-                icon={<ReloadOutlined />}
-                loading={scanLoading}
-                onClick={() => {
-                  void refreshSources(true);
-                }}
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => setCreateProviderModalOpen(true)}
               >
-                {t("admin.dataSourceRefresh")}
+                {t("admin.dataSourceCreateKnowledgeSource")}
               </Button>
-            </Space>
-          }
-        >
-          <Table<DataSourceItem>
-            rowKey="id"
-            columns={columns}
-            dataSource={sources}
-            loading={scanLoading}
-            pagination={{ pageSize: 6, showSizeChanger: false }}
-            className="admin-page-table data-source-table"
-            scroll={{ x: 1480, y: "clamp(22vh, calc(100vh - 560px), 52vh)" }}
-          />
-        </Card>
-      ) : (
-        <section className="data-source-provider-panel">
-          <div className="data-source-provider-panel-header">
-            <div>
-              <Text strong className="data-source-provider-title">
-                {t("admin.dataSourceProviderTitle")}
-              </Text>
-              <Paragraph className="data-source-provider-subtitle">
-                {t("admin.dataSourceProviderSubtitle")}
-              </Paragraph>
             </div>
-          </div>
-          <div className="data-source-provider-grid">
-            {sourceTypeOptions.map((item) => {
-              const isFeishuLocked = item.type === "feishu" && !isFeishuSetupReady;
-              return (
-                <button
-                  key={item.type}
-                  type="button"
-                  className={`data-source-provider-card ${isFeishuLocked ? "locked" : ""}`}
-                  onClick={() => openProviderCreateWizard(item.type)}
-                >
-                  <div className="data-source-provider-card-header">
-                    <span className={`data-source-icon data-source-icon-${item.type}`}>
-                      {item.icon}
+            <div className="data-source-asset-table-wrap">
+              <Table<DataSourceItem>
+                className="admin-page-table data-source-asset-table"
+                rowKey="id"
+                columns={assetColumns}
+                dataSource={filteredSources}
+                loading={scanLoading}
+                pagination={false}
+                tableLayout="fixed"
+                scroll={{ x: 1280, y: "calc(100vh - 300px)" }}
+                locale={{
+                  emptyText: (
+                    <div className="data-source-asset-empty">
+                      <DatabaseOutlined />
+                      <Text strong>{t("admin.dataSourceAssetNoResultTitle")}</Text>
+                      <Text type="secondary">{t("admin.dataSourceAssetNoResultDesc")}</Text>
+                    </div>
+                  ),
+                }}
+              />
+            </div>
+          </main>
+        ) : (
+          <main className="data-source-provider-panel">
+            <div className="data-source-provider-panel-header">
+              <div>
+                <Text strong className="data-source-provider-title">
+                  {t("admin.dataSourceProviderTitle")}
+                </Text>
+                <Paragraph className="data-source-provider-subtitle">
+                  {t("admin.dataSourceProviderSubtitle")}
+                </Paragraph>
+              </div>
+            </div>
+            <div className="data-source-provider-grid">
+              <div className="data-source-local-scan-card">
+                <span className="data-source-provider-logo data-source-icon-local">
+                  <FolderOpenOutlined />
+                </span>
+                <span className="data-source-provider-card-copy">
+                  <span className="data-source-provider-title-row">
+                    <span className="data-source-provider-name">
+                      {t("admin.dataSourceLocalScanChatTitle")}
                     </span>
-                    <Space size={6}>
-                      {item.adminOnly ? (
-                        <Tag color="orange">{t("admin.dataSourceAdminOnly")}</Tag>
-                      ) : null}
-                      {item.type === "feishu" ? (
-                        <Tag color={isFeishuLocked ? "default" : "success"}>
-                          {isFeishuLocked
-                            ? t("admin.dataSourceProviderCredentialMissing")
-                            : t("admin.dataSourceProviderCredentialReady")}
-                        </Tag>
-                      ) : null}
-                    </Space>
-                  </div>
-                  <span className="data-source-provider-name">
-                    {getSourceTypeTitle(item.type, t)}
+                    <Tag color={localScanChatEnabled ? "success" : "default"}>
+                      {localScanChatEnabled
+                        ? t("admin.dataSourceFeishuAccountChatOn")
+                        : t("admin.dataSourceFeishuAccountChatOff")}
+                    </Tag>
                   </span>
                   <span className="data-source-provider-desc">
-                    {item.type === "feishu" && isFeishuLocked
-                      ? t("admin.dataSourceFeishuLockHint")
+                    {t("admin.dataSourceLocalScanChatDesc", {
+                      count: localSourceCount,
+                    })}
+                  </span>
+                </span>
+                <Tooltip
+                  title={
+                    localSourceCount > 0
+                      ? t("admin.dataSourceLocalScanChatSwitchHint")
+                      : t("admin.dataSourceLocalScanChatNoSourceHint")
+                  }
+                >
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={localScanChatEnabled}
+                    aria-label={t("admin.dataSourceLocalScanChatSwitchAria")}
+                    disabled={localScanChatSaving || localSourceCount === 0}
+                    className={`data-source-chat-switch${localScanChatEnabled ? " is-on" : ""}${
+                      localScanChatSaving || localSourceCount === 0 ? " is-disabled" : ""
+                    }`}
+                    onClick={() => {
+                      void handleToggleLocalScanChat(!localScanChatEnabled);
+                    }}
+                  >
+                    <span className="data-source-chat-switch-thumb" aria-hidden="true" />
+                    <span className="data-source-chat-switch-label">
+                      {localScanChatEnabled
+                        ? t("admin.dataSourceFeishuAccountChatOn")
+                        : t("admin.dataSourceFeishuAccountChatOff")}
+                    </span>
+                  </button>
+                </Tooltip>
+              </div>
+              {providerAuthOptions.map((item) => {
+                const isFeishuLocked = !isFeishuSetupReady;
+                const authStatusText = isFeishuAuthValid
+                  ? t("admin.dataSourceProviderAuthValid")
+                  : isFeishuLocked
+                    ? t("admin.dataSourceProviderCredentialMissing")
+                    : t("admin.dataSourceProviderAuthPending");
+                return (
+                  <button
+                    key={item.type}
+                    type="button"
+                    className={`data-source-provider-card ${isFeishuLocked ? "locked" : ""}`}
+                    onClick={handleManageFeishuAuth}
+                  >
+                    <span className={`data-source-provider-logo data-source-icon-${item.type}`}>
+                      {item.logoUrl ? (
+                        <img
+                          alt=""
+                          aria-hidden="true"
+                          loading="lazy"
+                          src={item.logoUrl}
+                          onError={(event) => {
+                            event.currentTarget.style.display = "none";
+                          }}
+                        />
+                      ) : (
+                        item.icon
+                      )}
+                    </span>
+                    <span className="data-source-provider-card-copy">
+                      <span className="data-source-provider-title-row">
+                        <span className="data-source-provider-name">
+                          {getSourceTypeTitle(item.type, t)}
+                        </span>
+                        {item.adminOnly ? (
+                          <Tag color="orange">{t("admin.dataSourceAdminOnly")}</Tag>
+                        ) : null}
+                        {item.type === "feishu" ? (
+                          <Tag
+                            color={
+                              isFeishuAuthValid
+                                ? "success"
+                                : isFeishuLocked
+                                  ? "default"
+                                  : "processing"
+                            }
+                          >
+                            {authStatusText}
+                          </Tag>
+                        ) : null}
+                      </span>
+                      <span className="data-source-provider-desc">
+                        {isFeishuAuthValid
+                          ? t("admin.dataSourceFeishuAuthConnectedHint", {
+                              account:
+                                oauthConnection?.accountName ||
+                                t("admin.dataSourceFeishuConnectedAccountFallback"),
+                            })
+                          : isFeishuLocked
+                            ? t("admin.dataSourceFeishuLockHint")
+                            : t("admin.dataSourceFeishuAuthReadyHint")}
+                      </span>
+                    </span>
+                    <span className="data-source-provider-card-arrow" aria-hidden="true">
+                      <ArrowRightOutlined />
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </main>
+        )}
+      </section>
+
+      <Modal
+        title={t("admin.dataSourceCreateKnowledgeSource")}
+        open={createProviderModalOpen}
+        footer={null}
+        width={720}
+        destroyOnHidden
+        onCancel={() => setCreateProviderModalOpen(false)}
+      >
+        <Paragraph className="data-source-create-provider-intro">
+          {t("admin.dataSourceCreateProviderIntro")}
+        </Paragraph>
+        <div className="data-source-create-provider-grid">
+          {sourceTypeOptions.map((item) => {
+            const isFeishu = item.type === "feishu";
+            const isFeishuLocked = isFeishu && !isFeishuAuthValid;
+            const authStatusText = isFeishuAuthValid
+              ? t("admin.dataSourceProviderAuthValid")
+              : t("admin.dataSourceProviderCredentialMissing");
+            return (
+              <button
+                key={item.type}
+                type="button"
+                className={`data-source-create-provider-card ${
+                  isFeishuLocked ? "locked" : ""
+                }`}
+                onClick={() => handleCreateProviderSelect(item.type)}
+              >
+                <span className={`data-source-provider-logo data-source-icon-${item.type}`}>
+                  {item.logoUrl ? (
+                    <img
+                      alt=""
+                      aria-hidden="true"
+                      loading="lazy"
+                      src={item.logoUrl}
+                      onError={(event) => {
+                        event.currentTarget.style.display = "none";
+                      }}
+                    />
+                  ) : (
+                    item.icon
+                  )}
+                </span>
+                <span className="data-source-provider-card-copy">
+                  <span className="data-source-provider-title-row">
+                    <span className="data-source-provider-name">
+                      {getSourceTypeTitle(item.type, t)}
+                    </span>
+                    {item.adminOnly ? (
+                      <Tag color="orange">{t("admin.dataSourceAdminOnly")}</Tag>
+                    ) : null}
+                    {isFeishu ? (
+                      <Tag color={isFeishuAuthValid ? "success" : "default"}>
+                        {authStatusText}
+                      </Tag>
+                    ) : null}
+                  </span>
+                  <span className="data-source-provider-desc">
+                    {isFeishuLocked
+                      ? t("admin.dataSourceCreateFeishuAuthRequiredHint")
                       : getSourceTypeDescription(item.type, t)}
                   </span>
-                  <span className="data-source-provider-action">
-                    {isFeishuLocked
-                      ? t("admin.dataSourceProviderSetupAction")
-                      : t("admin.dataSourceProviderConfigureAction")}
-                    <ArrowRightOutlined />
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      )}
+                </span>
+                <span className="data-source-provider-card-arrow" aria-hidden="true">
+                  <ArrowRightOutlined />
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </Modal>
 
-      <DataSourceDetailDrawer
-        t={t}
-        open={Boolean(detailSource)}
-        source={detailSource}
-        onClose={() => setDetailId(null)}
-        onEdit={openEditWizard}
-      />
+      <Modal
+        title={t("admin.dataSourceSelectFeishuAuthTitle")}
+        open={authSelectModalOpen}
+        footer={null}
+        width={640}
+        destroyOnHidden
+        onCancel={() => setAuthSelectModalOpen(false)}
+      >
+        <Paragraph className="data-source-create-provider-intro">
+          {t("admin.dataSourceSelectFeishuAuthIntro")}
+        </Paragraph>
+        <Space direction="vertical" size={10} style={{ width: "100%" }}>
+          {validFeishuAccounts.map((account) => (
+            <button
+              key={account.id}
+              type="button"
+              className="data-source-auth-option-card"
+              onClick={() => {
+                if (account.connection) {
+                  handleSelectFeishuAuthConnection(account.connection);
+                }
+              }}
+            >
+              <span className="data-source-provider-logo data-source-icon-feishu">
+                <img
+                  alt=""
+                  aria-hidden="true"
+                  loading="lazy"
+                  src="https://www.google.com/s2/favicons?domain=feishu.cn&sz=96"
+                  onError={(event) => {
+                    event.currentTarget.style.display = "none";
+                  }}
+                />
+              </span>
+              <span className="data-source-provider-card-copy">
+                <span className="data-source-provider-title-row">
+                  <span className="data-source-provider-name">
+                    {account.connection?.accountName || account.name}
+                  </span>
+                  <Tag color="success">{t("admin.dataSourceProviderAuthValid")}</Tag>
+                </span>
+                <span className="data-source-provider-desc">
+                  {account.connection?.connectionId}
+                </span>
+              </span>
+              <span className="data-source-provider-card-arrow" aria-hidden="true">
+                <ArrowRightOutlined />
+              </span>
+            </button>
+          ))}
+        </Space>
+      </Modal>
 
       <Modal
         title={t("admin.dataSourceOauthManualCallbackTitle")}
@@ -2149,11 +2647,11 @@ export default function DataSourceManagement() {
             return;
           }
           setFeishuSetupModalOpen(false);
-          setPendingSelectFeishu(false);
+          setFeishuSetupIntent(null);
         }}
         onOk={handleSaveFeishuSetup}
         okText={
-          pendingSelectFeishu
+          feishuSetupIntent
             ? t("admin.dataSourceFeishuCredentialSaveAndSelect")
             : t("common.save")
         }
@@ -2162,6 +2660,12 @@ export default function DataSourceManagement() {
         cancelText={t("common.cancel")}
       >
         <Form form={feishuSetupForm} layout="vertical">
+          <Form.Item
+            label={t("admin.dataSourceFeishuAccountName")}
+            name="name"
+          >
+            <Input placeholder={t("admin.dataSourceFeishuAccountNamePlaceholder")} />
+          </Form.Item>
           <Form.Item
             label={t("admin.dataSourceAppId")}
             name="appId"

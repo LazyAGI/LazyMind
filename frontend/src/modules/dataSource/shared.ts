@@ -52,6 +52,8 @@ export interface PendingOAuthAttempt {
   previousVerified: boolean;
   previousConnection: any | null;
   resolved: boolean;
+  accountId?: string;
+  appId?: string;
 }
 
 export interface SyncLogItem {

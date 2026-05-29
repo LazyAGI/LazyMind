@@ -1,5 +1,7 @@
+import { useState } from "react";
+import { Input } from "antd";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { ApiOutlined, AppstoreOutlined, ControlOutlined } from "@ant-design/icons";
+import { ApiOutlined, AppstoreOutlined, ControlOutlined, SearchOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "./index.scss";
 
@@ -25,6 +27,8 @@ export default function ModelProviderLayout() {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
+  const [externalServiceSearchValue, setExternalServiceSearchValue] = useState("");
+  const isExternalServicesPage = location.pathname.startsWith("/model-providers/external-services");
 
   return (
     <main className="model-provider-page">
@@ -44,8 +48,18 @@ export default function ModelProviderLayout() {
               </button>
             );
           })}
+          {isExternalServicesPage ? (
+            <Input
+              allowClear
+              className="model-provider-tabs-search"
+              prefix={<SearchOutlined />}
+              value={externalServiceSearchValue}
+              onChange={(event) => setExternalServiceSearchValue(event.target.value)}
+              placeholder={t("modelProvider.external.searchPlaceholder")}
+            />
+          ) : null}
         </nav>
-        <Outlet />
+        <Outlet context={{ externalServiceSearchValue }} />
       </div>
     </main>
   );

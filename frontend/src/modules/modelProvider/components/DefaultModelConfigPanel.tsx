@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, Select, Switch, Tag, Tooltip, message } from "antd";
-import { CheckCircleOutlined, DownOutlined, MinusCircleOutlined, QuestionCircleOutlined } from "@ant-design/icons";
+import {
+  CheckCircleOutlined,
+  CloudServerOutlined,
+  CompassOutlined,
+  DownOutlined,
+  FilePdfOutlined,
+  GoogleOutlined,
+  MinusCircleOutlined,
+  QuestionCircleOutlined,
+  ScanOutlined,
+  SearchOutlined,
+} from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { AgentAppsAuth } from "@/components/auth";
 import { BASE_URL, axiosInstance, getLocalizedErrorMessage } from "@/components/request";
@@ -90,12 +101,31 @@ interface SelectedModelApiItem {
 
 type SelectedModels = Partial<Record<ModelCapability, string>>;
 
+type CloudServiceSlotKey = "cloudParsing" | "searchEngine";
+type CloudServiceOptionKey = "none" | "mineru" | "paddleocr" | "bingSearch" | "googleSearch" | "tavily";
+
+type SelectedCloudServices = Partial<Record<CloudServiceSlotKey, CloudServiceOptionKey>>;
+
 type ModelOptionItem = {
   provider: ProviderOption;
   group: ProviderConnectionGroup;
   model: ProviderModel;
   value: string;
 };
+
+interface CloudServiceConfig {
+  key: CloudServiceSlotKey;
+  titleKey: string;
+  subtitleKey: string;
+  options: CloudServiceOption[];
+}
+
+interface CloudServiceOption {
+  key: CloudServiceOptionKey;
+  labelKey: string;
+  descriptionKey?: string;
+  icon: JSX.Element;
+}
 
 const moduleConfigs: ModuleConfig[] = [
   {
@@ -131,6 +161,60 @@ const moduleConfigs: ModuleConfig[] = [
     key: "evo_llm",
     titleKey: "modelProvider.module.selfEvolutionTitle",
     subtitleKey: "modelProvider.module.selfEvolutionSubtitle",
+  },
+];
+
+const cloudServiceConfigs: CloudServiceConfig[] = [
+  {
+    key: "cloudParsing",
+    titleKey: "modelProvider.module.cloudParsingServiceTitle",
+    subtitleKey: "modelProvider.module.cloudParsingServiceSubtitle",
+    options: [
+      {
+        key: "none",
+        labelKey: "modelProvider.module.cloudServiceNoneOption",
+        descriptionKey: "modelProvider.module.cloudServiceNoneDesc",
+        icon: <MinusCircleOutlined />,
+      },
+      {
+        key: "mineru",
+        labelKey: "modelProvider.module.cloudServiceMineruOption",
+        icon: <FilePdfOutlined />,
+      },
+      {
+        key: "paddleocr",
+        labelKey: "modelProvider.module.cloudServicePaddleOption",
+        icon: <ScanOutlined />,
+      },
+    ],
+  },
+  {
+    key: "searchEngine",
+    titleKey: "modelProvider.module.searchEngineServiceTitle",
+    subtitleKey: "modelProvider.module.searchEngineServiceSubtitle",
+    options: [
+      {
+        key: "none",
+        labelKey: "modelProvider.module.cloudServiceNoneOption",
+        descriptionKey: "modelProvider.module.searchServiceNoneDesc",
+        icon: <MinusCircleOutlined />,
+      },
+      {
+        key: "bingSearch",
+        labelKey: "modelProvider.module.cloudServiceBingOption",
+        icon: <SearchOutlined />,
+      },
+      {
+        key: "googleSearch",
+        labelKey: "modelProvider.module.cloudServiceGoogleOption",
+        icon: <GoogleOutlined />,
+      },
+      {
+        key: "tavily",
+        labelKey: "modelProvider.module.cloudServiceTavilyOption",
+        icon: <CompassOutlined />,
+      },
+    ],
   },
 ];
 
@@ -305,6 +389,8 @@ export default function DefaultModelConfigPanel() {
   const { t, i18n } = useTranslation();
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
   const [selectedModels, setSelectedModels] = useState<SelectedModels>({});
+  const [selectedCloudServices, setSelectedCloudServices] = useState<SelectedCloudServices>({});
+  const [cloudServiceShareStatus, setCloudServiceShareStatus] = useState<Partial<Record<CloudServiceSlotKey, boolean>>>({});
   const [moduleModelOptions, setModuleModelOptions] = useState<Partial<Record<ModelCapability, ModelOptionItem[]>>>({});
   const [moduleModelLoading, setModuleModelLoading] = useState<Partial<Record<ModelCapability, boolean>>>({});
   const [shareStatus, setShareStatus] = useState<Partial<Record<ModelCapability, boolean>>>({});
@@ -534,6 +620,26 @@ export default function DefaultModelConfigPanel() {
     applyModelSelection(capability, value);
   };
 
+  const handleCloudServiceSelection = (service: CloudServiceSlotKey, value?: CloudServiceOptionKey) => {
+    setSelectedCloudServices((current) => ({
+      ...current,
+      [service]: value,
+    }));
+    if (!value || value === "none") {
+      setCloudServiceShareStatus((current) => ({ ...current, [service]: false }));
+    }
+  };
+
+  const toggleShareCloudService = (service: CloudServiceSlotKey, share: boolean) => {
+    if (!selectedCloudServices[service] || selectedCloudServices[service] === "none") {
+      message.warning(t("modelProvider.noCloudServiceSelectedForShare"));
+      return;
+    }
+
+    setCloudServiceShareStatus((current) => ({ ...current, [service]: share }));
+    message.success(share ? t("modelProvider.shareEnabled") : t("modelProvider.shareDisabled"));
+  };
+
   return (
     <section className="model-provider-config-panel" aria-label={t("modelProvider.defaultConfigAria")}>
       <div className="model-provider-panel-title-row">
@@ -659,6 +765,87 @@ export default function DefaultModelConfigPanel() {
                         <small>
                           {provider.name} / {group.name}
                           {model.builtIn ? t("modelProvider.builtInModelSuffix") : t("modelProvider.customModelSuffix")}
+                        </small>
+                      </span>
+                    </span>
+                  </Select.Option>
+                ))}
+              </Select>
+            </div>
+          );
+        })}
+
+        {cloudServiceConfigs.map((service) => {
+          const serviceTitle = t(service.titleKey);
+          const serviceSubtitle = t(service.subtitleKey);
+
+          return (
+            <div className="model-provider-default-row model-provider-cloud-service-row" key={service.key}>
+              <div className="model-provider-default-meta">
+                <label
+                  className="model-provider-default-title"
+                  htmlFor={`model-provider-cloud-${service.key}`}
+                >
+                  <span>{serviceTitle}</span>
+                </label>
+                <Tooltip placement="top" title={serviceSubtitle}>
+                  <button
+                    aria-label={t("modelProvider.moduleHelpAria", { title: serviceTitle })}
+                    className="model-provider-default-help"
+                    type="button"
+                  >
+                    <QuestionCircleOutlined />
+                  </button>
+                </Tooltip>
+                {isAdmin ? (
+                  <Tooltip
+                    title={
+                      cloudServiceShareStatus[service.key] ? t("modelProvider.shareOn") : t("modelProvider.shareOff")
+                    }
+                  >
+                    <Switch
+                      aria-label={t("modelProvider.shareToggleAria", { title: serviceTitle })}
+                      checked={!!cloudServiceShareStatus[service.key]}
+                      checkedChildren={t("modelProvider.shared")}
+                      className="model-provider-share-switch"
+                      size="small"
+                      unCheckedChildren={t("modelProvider.unshared")}
+                      onChange={(checked) => toggleShareCloudService(service.key, checked)}
+                    />
+                  </Tooltip>
+                ) : null}
+              </div>
+
+              <Select
+                allowClear
+                className="model-provider-model-select"
+                id={`model-provider-cloud-${service.key}`}
+                optionLabelProp="label"
+                placeholder={t("modelProvider.cloudServicePlaceholder")}
+                popupClassName="model-provider-select-dropdown"
+                suffixIcon={<DownOutlined className="model-provider-select-caret" />}
+                value={selectedCloudServices[service.key]}
+                onChange={(value) => handleCloudServiceSelection(service.key, value)}
+                notFoundContent={t("modelProvider.noCloudServiceOptions")}
+              >
+                {service.options.map((option) => (
+                  <Select.Option
+                    key={option.key}
+                    label={
+                      <span className="model-provider-select-value">
+                        <span className="model-provider-cloud-service-icon">{option.icon}</span>
+                        <span className="model-provider-select-value-text">{t(option.labelKey)}</span>
+                      </span>
+                    }
+                    value={option.key}
+                  >
+                    <span className="model-provider-select-option">
+                      <span className="model-provider-cloud-service-icon">{option.icon}</span>
+                      <span className="model-provider-select-copy">
+                        <strong>{t(option.labelKey)}</strong>
+                        <small>
+                          <CloudServerOutlined />
+                          {t(option.descriptionKey || "modelProvider.cloudServiceOptionDesc")}
                         </small>
                       </span>
                     </span>
