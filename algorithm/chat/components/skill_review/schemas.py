@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field, model_validator
 class SkillReviewRequest(BaseModel):
     start_time: datetime
     end_time: datetime
+    user_ids: List[str] = Field(default_factory=list)
+    requestid: str = ''
     min_user_turns: int = Field(default=2, ge=0)
     min_tool_turns: int = Field(default=5, ge=0)
 
@@ -33,11 +35,10 @@ class Trajectory(BaseModel):
     user_turns: int
     tool_turns: int
     called_tools: List[str] = Field(default_factory=list)
-    called_skills: List[str] = Field(default_factory=list)
+    called_skills: Dict[str, str] = Field(default_factory=dict)
     steps: List[TrajectoryStep] = Field(default_factory=list)
     steps_text: str = ''
     qualified: bool = False
-    skip_reason: Optional[str] = None
 
 
 class ContextualDescription(BaseModel):
@@ -49,7 +50,7 @@ class ContextualDescription(BaseModel):
 
 
 class RefinedTrajectory(BaseModel):
-    steps: List[TrajectoryStep] = Field(default_factory=list)
+    steps: List[Any] = Field(default_factory=list)
 
 
 class SuccessGuideline(BaseModel):
@@ -68,9 +69,12 @@ class GuidelineSet(BaseModel):
 
 
 class SkillDraft(BaseModel):
+    session_id: str
     contextual_description: ContextualDescription
     refined_trajectory: RefinedTrajectory
     guidelines: GuidelineSet
+    source_trajectory: str = ''
+    source_skills: Dict[str, str] = Field(default_factory=dict)
 
 
 class TaskCluster(BaseModel):
@@ -82,7 +86,6 @@ class SkillOutlineStep(BaseModel):
     step_name: str
     action_goal: str
     branch_conditions: List[str] = Field(default_factory=list)
-    expected_state: str = ''
 
 
 class SkillOutline(BaseModel):
@@ -94,16 +97,28 @@ class SkillOutline(BaseModel):
 class CandidateSkill(BaseModel):
     skill_name: str
     category: str = 'general'
+    source_trajectories: List[str] = Field(default_factory=list)
+    source_skills: Dict[str, str] = Field(default_factory=dict)
     applicable_scenario: str
     content: str
     outline: SkillOutline
+
+
+class CandidateSkillLLMOutput(BaseModel):
+    skill_name: str
+    category: str = 'general'
+    applicable_scenario: str
+    content: str
 
 
 class SkillReviewResolution(BaseModel):
     id: str = Field(..., min_length=1)
     skill_name: str = Field(..., min_length=1)
     type: Literal['new', 'patch']
-    skill_content: Dict[str, Any]
+    state: Literal['success', 'failed'] = 'success'
+    userid: str = ''
+    requestid: str = ''
+    skill_content: str = ''
     suggestion: Optional[str] = None
 
 

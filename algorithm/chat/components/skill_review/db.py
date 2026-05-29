@@ -17,7 +17,7 @@ from chat.components.agentic.history import _normalize_history_for_agent
 from chat.components.skill_review.schemas import SkillReviewResolution
 from config import config as _cfg
 
-SKILL_REVIEW_TABLE = 'chat_skill_review'
+SKILL_REVIEW_TABLE = 'skill_review'
 _DB_URL_ENV = 'LAZYMIND_DATABASE_URL'
 _CORE_DB_URL_ENV = 'LAZYMIND_CORE_DATABASE_URL'
 _DB_ENV_HINT = f'{_CORE_DB_URL_ENV} or {_DB_URL_ENV}'
@@ -27,29 +27,35 @@ _table_ensure_lock = threading.Lock()
 _engine_cache: Dict[str, Engine] = {}
 _engine_cache_lock = threading.Lock()
 
-_HISTORY_SQL = text(
-    'SELECT ch.*, c.create_user_id'
-    ' FROM chat_histories ch'
-    ' LEFT JOIN conversations c ON ch.conversation_id = c.id'
-    ' WHERE ch.update_time >= :start_time AND ch.update_time <= :end_time'
-    ' ORDER BY ch.update_time ASC'
-)
-
-
-def read_session(start_time: datetime, end_time: datetime) -> list[dict[str, Any]]:
+def read_session(
+    start_time: datetime,
+    end_time: datetime,
+    user_ids: Optional[list[str]] = None,
+) -> list[dict[str, Any]]:
     """Read chat history rows in [start_time, end_time] by chat_histories.update_time."""
+    normalized_user_ids = [str(item).strip() for item in (user_ids or []) if str(item).strip()]
+    where = 'ch.update_time >= :start_time AND ch.update_time <= :end_time'
+    params: dict[str, Any] = {'start_time': start_time, 'end_time': end_time}
+    if normalized_user_ids:
+        where += ' AND c.create_user_id = ANY(:user_ids)'
+        params['user_ids'] = normalized_user_ids
+
+    query = text(
+        'SELECT ch.*, c.create_user_id'
+        ' FROM chat_histories ch'
+        ' LEFT JOIN conversations c ON ch.conversation_id = c.id'
+        f' WHERE {where}'
+        ' ORDER BY ch.update_time ASC'
+    )
     with _get_app_conn().connect() as conn:
-        rows = conn.execute(
-            _HISTORY_SQL,
-            {'start_time': start_time, 'end_time': end_time},
-        ).mappings().all()
+        rows = conn.execute(query, params).mappings().all()
     return _convert_history([_jsonable_value(dict(row)) for row in rows])
 
 
 def insert_skill_review_records(
     records: SkillReviewResolution | Iterable[SkillReviewResolution],
 ) -> int:
-    """Insert one or many skill review resolutions into ``chat_skill_review``."""
+    """Insert one or many skill review resolutions into ``skill_review``."""
     normalized = _normalize_records(records)
     if not normalized:
         return 0
@@ -59,7 +65,10 @@ def insert_skill_review_records(
             'id': item.id,
             'skill_name': item.skill_name,
             'type': item.type,
-            'skill_content': json.dumps(item.skill_content, ensure_ascii=False),
+            'state': item.state,
+            'userid': item.userid,
+            'requestid': item.requestid,
+            'skill_content': item.skill_content,
             'suggestion': item.suggestion,
         }
         for item in normalized
@@ -68,12 +77,15 @@ def insert_skill_review_records(
         conn.execute(
             text(
                 f"""INSERT INTO {SKILL_REVIEW_TABLE}
-                       (id, skill_name, "type", skill_content, suggestion)
+                       (id, skill_name, "type", state, userid, requestid, skill_content, suggestion)
                     VALUES
-                       (:id, :skill_name, :type, CAST(:skill_content AS JSONB), :suggestion)
+                       (:id, :skill_name, :type, :state, :userid, :requestid, :skill_content, :suggestion)
                     ON CONFLICT (id) DO UPDATE SET
                        skill_name = EXCLUDED.skill_name,
                        "type" = EXCLUDED."type",
+                       state = EXCLUDED.state,
+                       userid = EXCLUDED.userid,
+                       requestid = EXCLUDED.requestid,
                        skill_content = EXCLUDED.skill_content,
                        suggestion = EXCLUDED.suggestion"""
             ),
@@ -89,17 +101,29 @@ def add_skill_review_records(
 
 
 def fetch_all_skill_review_records() -> list[dict[str, Any]]:
-    """Return all rows from ``chat_skill_review`` ordered by insertion time."""
+    """Return all rows from ``skill_review`` ordered by insertion time."""
     _ensure_table_once()
     with _get_app_conn().connect() as conn:
         rows = conn.execute(
             text(
-                f"""SELECT id, skill_name, "type", skill_content, suggestion
+                f"""SELECT id, skill_name, "type", state, userid, requestid, skill_content, suggestion
                        FROM {SKILL_REVIEW_TABLE}
                       ORDER BY id ASC"""
             )
         ).mappings().all()
     return [_jsonable_row(dict(row)) for row in rows]
+
+
+def delete_all_skill_review_records() -> int:
+    """Delete all rows from ``skill_review``."""
+    _ensure_table_once()
+    with _get_app_conn().begin() as conn:
+        result = conn.execute(
+            text(f'DELETE FROM {SKILL_REVIEW_TABLE}')
+        )
+    deleted_count = int(result.rowcount or 0)
+    LOG.info(f'[SkillReviewDB] deleted {deleted_count} rows from {SKILL_REVIEW_TABLE}.')
+    return deleted_count
 
 
 def read_all_skill_review_records() -> list[dict[str, Any]]:
@@ -114,11 +138,21 @@ def ensure_skill_review_table() -> None:
                     id TEXT PRIMARY KEY,
                     skill_name TEXT NOT NULL,
                     "type" TEXT NOT NULL CHECK ("type" IN ('new', 'patch')),
-                    skill_content JSONB NOT NULL,
+                    state TEXT NOT NULL CHECK (state IN ('success', 'failed')),
+                    userid TEXT NOT NULL,
+                    requestid TEXT NOT NULL,
+                    skill_content TEXT NOT NULL,
                     suggestion TEXT
                 )"""
             )
         )
+        conn.execute(text(f"""ALTER TABLE {SKILL_REVIEW_TABLE}
+                    ADD COLUMN IF NOT EXISTS state TEXT NOT NULL DEFAULT 'success'
+                    CHECK (state IN ('success', 'failed'))"""))
+        conn.execute(text(f"""ALTER TABLE {SKILL_REVIEW_TABLE}
+                    ADD COLUMN IF NOT EXISTS userid TEXT NOT NULL DEFAULT ''"""))
+        conn.execute(text(f"""ALTER TABLE {SKILL_REVIEW_TABLE}
+                    ADD COLUMN IF NOT EXISTS requestid TEXT NOT NULL DEFAULT ''"""))
     LOG.info(f'[SkillReviewDB] ensured table {SKILL_REVIEW_TABLE}.')
 
 

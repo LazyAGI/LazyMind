@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import json
 from typing import Any, Iterable
 
 from chat.components.skill_review.schemas import Trajectory, TrajectoryStep
@@ -14,24 +15,28 @@ def build_trajectory(
     min_user_turns: int,
     min_tool_turns: int,
 ) -> Trajectory:
-    # TODO: Implement for Trajectory
     steps: list[TrajectoryStep] = []
-    called_tools: list[str] = []
-    called_skills: list[str] = []
+    called_tools = set()
+    called_skills = {}
 
-    for index, message in enumerate(_get_messages(session), start=1):
-        role = _normalize_role(_get_value(message, 'role') or _get_value(message, 'type') or 'unknown')
-        tool_name = _optional_str(_get_value(message, 'tool_name') or _get_value(message, 'name') or _extract_tool_name(message))
-        skill_name = _optional_str(_get_value(message, 'skill_name') or _get_value(message, 'skill') or _extract_skill_name(message))
+    for index, message in enumerate(session.get('messages', []), start=1):
+        role = message.get('role')
+        if not role:
+            continue
+        tool_name = message.get('name') if role == 'tool' else None
+        skill_name = json.loads(message.get('content')).get('name') if role == 'tool' and tool_name == 'get_skill' else None
+        skill_content = json.loads(message.get('content')).get('content') if role == 'tool' and tool_name == 'get_skill' else None
         if tool_name:
-            called_tools.append(tool_name)
-        if skill_name:
-            called_skills.append(skill_name)
+            called_tools.add(tool_name)
+        if skill_name and skill_content:
+            from lazyllm import LOG
+            LOG.info(f'find skill_name: {skill_name}')
+            called_skills[skill_name] = skill_content
         steps.append(
             TrajectoryStep(
                 step_index=index,
                 role=role,
-                action=_shorten(_get_value(message, 'content') or _get_value(message, 'result') or '', 1200),
+                action=_shorten(message.get('content'), 1200),
                 state='',
                 tool_name=tool_name,
                 skill_name=skill_name,
@@ -44,24 +49,16 @@ def build_trajectory(
         if step.role in _TOOL_ROLE_NAMES or step.tool_name
     )
     qualified = user_turns >= min_user_turns and tool_turns >= min_tool_turns
-    skip_reason = None
-    if not qualified:
-        skip_reason = (
-            f'trigger threshold not met: user_turns={user_turns}, '
-            f'tool_turns={tool_turns}, min_user_turns={min_user_turns}, '
-            f'min_tool_turns={min_tool_turns}'
-        )
 
     return Trajectory(
-        session_id=str(_get_value(session, 'session_id') or _get_value(session, 'conversation_id') or _get_value(session, 'id') or ''),
+        session_id=str(session.get('conversation_id')),
         user_turns=user_turns,
         tool_turns=tool_turns,
-        called_tools=_unique(called_tools),
-        called_skills=_unique(called_skills),
+        called_tools=list(called_tools),
+        called_skills=called_skills,
         steps=steps,
         steps_text=format_steps_text(steps),
         qualified=qualified,
-        skip_reason=skip_reason,
     )
 
 
@@ -73,67 +70,8 @@ def format_steps_text(steps: list[TrajectoryStep]) -> str:
             role = f'{role}({step.tool_name})'
         elif step.skill_name:
             role = f'{role}[{step.skill_name}]'
-        lines.append(f'[{step.step_index}] {role}: {step.action}')
+        lines.append(f'- {role}: {step.action}')
     return '\n'.join(lines)
-
-
-def _normalize_role(role: str) -> str:
-    lowered = str(role or '').strip().lower()
-    if lowered in {'human', 'customer'}:
-        return 'user'
-    if lowered in {'ai', 'agent', 'bot'}:
-        return 'assistant'
-    if 'tool' in lowered or 'function' in lowered:
-        return 'tool'
-    return lowered or 'unknown'
-
-
-def _get_messages(session: Any) -> list[Any]:
-    messages = _get_value(session, 'messages')
-    if isinstance(messages, list):
-        return messages
-    return []
-
-
-def _get_value(item: Any, key: str) -> Any:
-    if isinstance(item, dict):
-        return item.get(key)
-    return getattr(item, key, None)
-
-
-def _optional_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _extract_tool_name(message: Any) -> str | None:
-    raw_text = str(_get_value(message, 'raw') or message or {})
-    match = re.search(r'"(?:tool_name|tool|function_name|name)"\s*:\s*"([^"]+)"', raw_text)
-    if match:
-        return match.group(1)
-    return None
-
-
-def _extract_skill_name(message: Any) -> str | None:
-    raw_text = str(_get_value(message, 'raw') or message or {})
-    match = re.search(r'"(?:skill_name|skill|called_skill)"\s*:\s*"([^"]+)"', raw_text)
-    if match:
-        return match.group(1)
-    return None
-
-
-def _unique(values: Iterable[str]) -> list[str]:
-    seen: set[str] = set()
-    result: list[str] = []
-    for value in values:
-        trimmed = str(value or '').strip()
-        if not trimmed or trimmed in seen:
-            continue
-        seen.add(trimmed)
-        result.append(trimmed)
-    return result
 
 
 def _shorten(text: str, limit: int) -> str:

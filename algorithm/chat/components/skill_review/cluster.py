@@ -1,24 +1,100 @@
 from __future__ import annotations
 
+import json
+from collections import defaultdict
+from typing import Any
+
+import numpy as np
+from lazyllm import LOG
+
 from chat.components.skill_review.schemas import SkillDraft, TaskCluster
-from chat.prompts.skill_review import cluster_prompt
 
 
-def cluster_drafts(drafts: list[SkillDraft], llm) -> list[TaskCluster]:
-    # TODO: Implement for Cluster Drafts
+def cluster_drafts(drafts: list[SkillDraft], emb) -> list[TaskCluster]:
     if not drafts:
         return []
+    if len(drafts) == 1:
+        return [_cluster_from_indexes(drafts, [0])]
+
+    texts = [_cluster_text(draft) for draft in drafts]
     try:
-        payload = llm.complete_json(cluster_prompt([draft.model_dump() for draft in drafts]))
-        clusters = []
-        for item in payload.get('clusters') or []:
-            indexes = item.get('draft_indexes') or []
-            selected = [drafts[int(idx)] for idx in indexes if isinstance(idx, int) and 0 <= idx < len(drafts)]
-            if selected:
-                clusters.append(TaskCluster(task_scope=str(item.get('task_scope') or 'General task'), drafts=selected))
-        if clusters:
-            return clusters
-    except Exception:
-        pass
-    scope = drafts[0].contextual_description.applicable_scenario or drafts[0].contextual_description.task_goal
-    return [TaskCluster(task_scope=scope or 'General task', drafts=drafts)]
+        embeddings = np.array([emb(text) for text in texts])
+        labels = _hdbscan_labels(embeddings)
+        return _clusters_from_labels(drafts, labels)
+    except Exception as exc:
+        LOG.warning(f'Failed to cluster skill drafts with embeddings; using one cluster: {exc}')
+        return [_cluster_from_indexes(drafts, list(range(len(drafts))))]
+
+
+def _cluster_text(draft: SkillDraft) -> str:
+    description = draft.contextual_description
+    parts = [
+        description.applicable_scenario.strip(),
+        description.execution_summary.strip(),
+    ]
+    text = '\n'.join(part for part in parts if part)
+    return text or description.task_goal or description.key_result or 'General task'
+
+
+
+def _hdbscan_labels(embeddings: np.ndarray) -> list[int]:
+    min_cluster_size = max(2, min(5, len(embeddings) // 3))
+    try:
+        import hdbscan
+
+        clusterer = hdbscan.HDBSCAN(
+            min_cluster_size=min_cluster_size,
+            min_samples=1,
+            metric='euclidean',
+        )
+    except ImportError:
+        from sklearn.cluster import HDBSCAN
+
+        clusterer = HDBSCAN(
+            min_cluster_size=min_cluster_size,
+            min_samples=1,
+            metric='euclidean',
+        )
+    labels = clusterer.fit_predict(embeddings)
+    return [int(label) for label in labels]
+
+
+def _clusters_from_labels(drafts: list[SkillDraft], labels: list[int]) -> list[TaskCluster]:
+    grouped: dict[int, list[int]] = defaultdict(list)
+    noise_indexes: list[int] = []
+    for index, label in enumerate(labels):
+        if label == -1:
+            noise_indexes.append(index)
+        else:
+            grouped[label].append(index)
+
+    clusters = [
+        _cluster_from_indexes(drafts, indexes)
+        for _, indexes in sorted(grouped.items(), key=lambda item: item[0])
+        if indexes
+    ]
+    clusters.extend(_cluster_from_indexes(drafts, [index]) for index in noise_indexes)
+    return clusters or [_cluster_from_indexes(drafts, list(range(len(drafts))))]
+
+
+def _cluster_from_indexes(drafts: list[SkillDraft], indexes: list[int]) -> TaskCluster:
+    selected = [drafts[index] for index in indexes]
+    # print('cluster_from_indexes start=' + '=' * 100)
+    # for d in selected:
+    #     print(d.contextual_description.applicable_scenario)
+    #     print(d.contextual_description.task_goal)
+    #     print(d.contextual_description.key_result)
+    #     print(d.contextual_description.execution_summary)
+    #     print('-' * 100)
+    # print('cluster_from_indexes end=' + '=' * 100)
+    scope = _cluster_scope(selected)
+    return TaskCluster(task_scope=scope, drafts=selected)
+
+
+def _cluster_scope(drafts: list[SkillDraft]) -> str:
+    for draft in drafts:
+        description = draft.contextual_description
+        scope = description.applicable_scenario or description.task_goal
+        if scope:
+            return scope
+    return 'General task'
