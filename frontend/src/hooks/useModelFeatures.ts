@@ -3,22 +3,39 @@ import { axiosInstance, BASE_URL } from '@/components/request';
 
 export interface ModelFeatures {
   image_embed_enabled: boolean;
+  image_embed_required?: boolean;
 }
+
+export const MODEL_FEATURES_CHANGED_EVENT = 'lazymind:model-features-changed';
 
 type FeaturesState =
   | { status: 'loading' }
   | { status: 'ready'; features: ModelFeatures }
   | { status: 'error' };
 
-// Module-level cache: fetched at most once per page load.
+// Module-level cache: fetched at most once per page load unless invalidated.
 let cachedFeatures: ModelFeatures | null = null;
 let pendingPromise: Promise<ModelFeatures> | null = null;
 
-export function fetchModelFeatures(): Promise<ModelFeatures> {
-  if (cachedFeatures !== null) {
+export function isImageEmbedRequired(features: ModelFeatures): boolean {
+  return features.image_embed_required === true;
+}
+
+export function invalidateModelFeaturesCache(): void {
+  cachedFeatures = null;
+  pendingPromise = null;
+}
+
+export function notifyModelFeaturesChanged(): void {
+  invalidateModelFeaturesCache();
+  window.dispatchEvent(new Event(MODEL_FEATURES_CHANGED_EVENT));
+}
+
+export function fetchModelFeatures(force = false): Promise<ModelFeatures> {
+  if (!force && cachedFeatures !== null) {
     return Promise.resolve(cachedFeatures);
   }
-  if (pendingPromise !== null) {
+  if (!force && pendingPromise !== null) {
     return pendingPromise;
   }
   pendingPromise = axiosInstance
@@ -35,8 +52,10 @@ export function fetchModelFeatures(): Promise<ModelFeatures> {
       return features;
     })
     .catch(() => {
-      // On error, default to enabled so existing behaviour is preserved.
-      const fallback: ModelFeatures = { image_embed_enabled: true };
+      const fallback: ModelFeatures = {
+        image_embed_enabled: true,
+        image_embed_required: false,
+      };
       cachedFeatures = fallback;
       return fallback;
     })
@@ -58,18 +77,27 @@ export function useModelFeatures(): FeaturesState {
   );
 
   useEffect(() => {
-    if (cachedFeatures !== null) {
-      setState({ status: 'ready', features: cachedFeatures });
-      return;
-    }
-    let cancelled = false;
-    fetchModelFeatures().then((features) => {
-      if (!cancelled) {
-        setState({ status: 'ready', features });
+    const syncFromCache = () => {
+      if (cachedFeatures !== null) {
+        setState({ status: 'ready', features: cachedFeatures });
       }
-    });
+    };
+
+    const reload = () => {
+      setState({ status: 'loading' });
+      fetchModelFeatures(true).then((features) => {
+        setState({ status: 'ready', features });
+      });
+    };
+
+    syncFromCache();
+    if (cachedFeatures === null) {
+      reload();
+    }
+
+    window.addEventListener(MODEL_FEATURES_CHANGED_EVENT, reload);
     return () => {
-      cancelled = true;
+      window.removeEventListener(MODEL_FEATURES_CHANGED_EVENT, reload);
     };
   }, []);
 

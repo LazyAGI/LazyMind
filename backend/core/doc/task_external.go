@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -161,6 +162,14 @@ func callExternalSuspendJob(r *http.Request, req ExternalCancelTaskRequest) erro
 	url := common.JoinURL(parsingServiceEndpoint(), "/v1/tasks/cancel")
 	var resp map[string]any
 	return common.ApiPost(r.Context(), url, req, nil, &resp, 15*time.Second)
+}
+
+func callExternalSetNodeGroupLazyMode(ctx context.Context, groupName string, lazyMode *string) error {
+	url := common.JoinURL(common.AlgoServiceEndpoint(), "/v1/ng/"+groupName+"/lazy_mode")
+	if lazyMode != nil {
+		url += "?lazy_mode=" + *lazyMode
+	}
+	return common.ApiPost(ctx, url, nil, nil, nil, 15*time.Second)
 }
 
 func parseAddResponse(resp any, req addRequest) []addResultItem {

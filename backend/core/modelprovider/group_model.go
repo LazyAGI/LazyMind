@@ -129,7 +129,6 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		ProviderName:             parent.Name,
 		Name:                     name,
 		ModelType:                modelType,
-		BaseURL:                  group.BaseURL,
 		IsDefault:                false,
 		BaseModel: orm.BaseModel{
 			CreateUserID:   userID,
@@ -152,7 +151,7 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		ModelType:                row.ModelType,
 		ProviderName:             row.ProviderName,
 		GroupName:                group.Name,
-		BaseURL:                  row.BaseURL,
+		BaseURL:                  group.BaseURL,
 		IsDefault:                row.IsDefault,
 	})
 }
@@ -226,7 +225,7 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 			ModelType:                m.ModelType,
 			ProviderName:             m.ProviderName,
 			GroupName:                group.Name,
-			BaseURL:                  m.BaseURL,
+			BaseURL:                  group.BaseURL,
 			IsDefault:                m.IsDefault,
 		})
 	}
@@ -274,6 +273,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 
 	type groupInfo struct {
 		name       string
+		baseURL    string
 		isVerified bool
 	}
 	groupByID := make(map[string]groupInfo)
@@ -286,7 +286,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for i := range grps {
-			groupByID[grps[i].ID] = groupInfo{name: grps[i].Name, isVerified: grps[i].IsVerified}
+			groupByID[grps[i].ID] = groupInfo{name: grps[i].Name, baseURL: grps[i].BaseURL, isVerified: grps[i].IsVerified}
 		}
 	}
 
@@ -305,7 +305,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			ModelType:                m.ModelType,
 			ProviderName:             m.ProviderName,
 			GroupName:                grp.name,
-			BaseURL:                  m.BaseURL,
+			BaseURL:                  grp.baseURL,
 			IsDefault:                m.IsDefault,
 		})
 	}
@@ -379,15 +379,30 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clearMultimodalSelection := isMultimodalEmbeddingModelType(row.ModelType)
 	now := time.Now().UTC()
-	if err := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroupModel{}).
-		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, userID).
-		Updates(map[string]interface{}{
-			"deleted_at": now,
-			"updated_at": now,
-		}).Error; err != nil {
+	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&orm.UserModelProviderGroupModel{}).
+			Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, userID).
+			Updates(map[string]interface{}{
+				"deleted_at": now,
+				"updated_at": now,
+			}).Error; err != nil {
+			return err
+		}
+		// Drop any default-model rows pointing at this model (avoids stale share=true).
+		if err := tx.Where("user_model_provider_group_model_id = ?", row.ID).
+			Delete(&orm.UserSelectedModel{}).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		common.ReplyErr(w, "delete model failed", http.StatusInternalServerError)
 		return
+	}
+
+	if clearMultimodalSelection {
+		maybeScheduleImageGroupLazyReset(r.Context(), db)
 	}
 
 	common.ReplyOK(w, deleteGroupModelResponse{ID: modelID})

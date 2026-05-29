@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from lazyllm import LOG
+from lazyllm import LOG, ModuleBase
 
 
 def _moving_average(xs: List[float], w: int) -> List[float]:
@@ -122,18 +122,19 @@ def adaptive_k_select_from_nodes(
     return selected, k, diag
 
 
-class AdaptiveKComponent:
+class AdaptiveKComponent(ModuleBase):
     def __init__(
         self,
         get_score: Callable[[Any], float] = lambda n: n.relevance_score,
         get_token_len: Optional[Callable[[Any], int]] = None,
         **kwargs,
     ):
+        super().__init__()
         self.get_score = get_score
         self.get_token_len = get_token_len
         self.kwargs = kwargs or {}
 
-    def __call__(self, nodes: List[Any], **kwargs) -> List[Any]:
+    def forward(self, nodes: List[Any], **kwargs) -> List[Any]:
         self.kwargs.update(kwargs or {})
         selected, k, diag = adaptive_k_select_from_nodes(
             nodes,

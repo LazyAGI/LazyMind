@@ -171,6 +171,7 @@
 
     .record-header-top {
       align-items: center;
+      justify-content: space-between;
       padding: 0 8px 4px;
       gap: 8px;
     }
@@ -220,6 +221,31 @@
       min-height: 0;
       height: auto;
       padding: 2px 0 0;
+    }
+
+    .record-groups {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .record-group + .record-group {
+      margin-top: 6px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(15, 23, 42, 0.08);
+    }
+
+    .record-group-title {
+      padding: 0 8px 4px;
+      color: #4b5563;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 18px;
+      letter-spacing: 0;
+    }
+
+    .record-group:first-child .record-group-title {
+      padding-top: 0;
     }
 
     .record {

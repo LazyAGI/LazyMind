@@ -1,7 +1,6 @@
 import time
 from typing import List, Optional, Set, Tuple
-
-from lazyllm import LOG, Document
+from lazyllm import LOG, Document, ModuleBase
 from lazyllm.tools.rag import DocNode
 
 _RPC_RETRIES = 2
@@ -40,15 +39,12 @@ def _relevance_key(n: DocNode) -> Tuple:
     return (-(getattr(n, "relevance_score", 0.0) or 0.0), n.uid)
 
 
-class ContextExpansionComponent:
-    def __init__(
-        self,
-        document: Document,
-        token_budget: int = 3000,
-        score_decay: float = 0.98,
-        max_seeds: Optional[int] = None,
-        max_new_nodes_per_seed: int = 2,
-    ):
+class ContextExpansionComponent(ModuleBase):
+    def __init__(self, document: Document, token_budget: int = 3000,
+                 score_decay: float = 0.98, max_seeds: Optional[int] = None,
+                 max_new_nodes_per_seed: int = 2,
+                 return_trace: bool = False, **kwargs):
+        super().__init__(return_trace=return_trace, **kwargs)
         self.document = document
         self.token_budget = token_budget
         self.score_decay = score_decay
@@ -80,7 +76,7 @@ class ContextExpansionComponent:
         neighbors.sort(key=_node_sort_key)
         return neighbors
 
-    def __call__(self, nodes: List[DocNode], **kwargs) -> List[DocNode]:
+    def forward(self, nodes: List[DocNode], **kwargs) -> List[DocNode]:
         if not nodes:
             return nodes
         seeds = sorted(nodes, key=_relevance_key)

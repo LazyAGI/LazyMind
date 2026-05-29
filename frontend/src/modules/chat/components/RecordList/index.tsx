@@ -15,7 +15,13 @@ import {
   Configuration as CoreConfiguration,
   ConversationsApiFactory,
 } from "@/api/generated/core-client";
-import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import InfiniteScroll from "react-infinite-scroll-component";
@@ -30,6 +36,7 @@ import "./index.scss";
 import { downloadStream } from "@/modules/chat/utils/download";
 
 const EXPORT_FILE_TYPE_XLSX = "EXPORT_FILE_TYPE_XLSX";
+const SIDEBAR_SEARCH_DEBOUNCE_MS = 300;
 const conversationsClient = ConversationsApiFactory(
   new CoreConfiguration({ basePath: BASE_URL }),
   BASE_URL,
@@ -60,6 +67,7 @@ interface IRecordList {
   hideHeader?: boolean;
   hideSearch?: boolean;
   showBatchActions?: boolean;
+  searchText?: string;
   title?: string;
 }
 
@@ -68,6 +76,23 @@ export interface RecordListImperativeProps {
 }
 
 const { Search } = Input;
+
+type ConversationGroup = "today" | "recentWeek" | "earlier";
+
+function getConversationGroup(updateTime?: string): ConversationGroup {
+  const parsedTime = dayjs(updateTime);
+  if (!parsedTime.isValid()) {
+    return "earlier";
+  }
+  const todayStart = dayjs().startOf("day");
+  if (parsedTime.isSame(todayStart, "day")) {
+    return "today";
+  }
+  if (parsedTime.isAfter(todayStart.subtract(7, "day"))) {
+    return "recentWeek";
+  }
+  return "earlier";
+}
 
 const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
   (props, ref) => {
@@ -80,6 +105,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       hideHeader = false,
       hideSearch = false,
       showBatchActions = !compact,
+      searchText,
       title,
     } = props;
     const [historyList, setHistoryList] = useState<Conversation[]>([]);
@@ -95,6 +121,33 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const deleteHistoryLastInvokeRef = useRef(0);
     const { setThink } = useChatThinkStore();
     const { setNewMessage } = useChatNewMessageStore();
+    const groupedHistoryList = useMemo(() => {
+      const groups: Record<ConversationGroup, Conversation[]> = {
+        today: [],
+        recentWeek: [],
+        earlier: [],
+      };
+      historyList.forEach((item) => {
+        groups[getConversationGroup(item.update_time)].push(item);
+      });
+      return [
+        {
+          key: "today" as const,
+          title: t("chat.conversationGroupToday"),
+          items: groups.today,
+        },
+        {
+          key: "recentWeek" as const,
+          title: t("chat.conversationGroupRecentWeek"),
+          items: groups.recentWeek,
+        },
+        {
+          key: "earlier" as const,
+          title: t("chat.conversationGroupEarlier"),
+          items: groups.earlier,
+        },
+      ].filter((group) => group.items.length > 0);
+    }, [historyList, t]);
     useImperativeHandle(ref, () => ({
       refresh: () => {
         getHistory({ isFirst: true });
@@ -110,6 +163,17 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         getHistory({ isFirst: true });
       }
     }, [currentSessionId]);
+
+    useEffect(() => {
+      if (searchText === undefined) {
+        return;
+      }
+      const timer = window.setTimeout(() => {
+        setKeyword(searchText);
+        getHistory({ searchText, isFirst: true });
+      }, SIDEBAR_SEARCH_DEBOUNCE_MS);
+      return () => window.clearTimeout(timer);
+    }, [searchText]);
 
     function getHistory(params?: {
       isMore?: boolean;
@@ -232,6 +296,36 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     }
 
     function renderItem() {
+      if (compact) {
+        return (
+          <div className="record-groups">
+            {groupedHistoryList.map((group) => (
+              <div className="record-group" key={group.key}>
+                <div className="record-group-title">{group.title}</div>
+                <Row>
+                  {group.items.map((item) => {
+                    const selected = item.conversation_id === currentSessionId;
+                    return (
+                      <Col span={24} key={item.conversation_id}>
+                        {showBatchExport ? (
+                          <Checkbox
+                            className="export-checkbox-item"
+                            value={item.conversation_id}
+                          >
+                            {renderItemText({ item, selected })}
+                          </Checkbox>
+                        ) : (
+                          renderItemText({ item, selected })
+                        )}
+                      </Col>
+                    );
+                  })}
+                </Row>
+              </div>
+            ))}
+          </div>
+        );
+      }
       return (
         <Row>
           {historyList?.map((item) => {
@@ -259,47 +353,51 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       <div className={classnames("record-container", { compact })}>
         {!hideHeader && (
           <div className="record-header">
-            <div className="record-header-top">
-              <div className="list-title">{title || t("chat.chatHistory")}</div>
-              {showBatchActions && (
-                <div className="record-toolbar-actions">
-                  {showBatchExport ? (
-                    <>
+            {(!compact || showBatchActions) && (
+              <div className="record-header-top">
+                <div className="list-title">
+                  {compact ? t("chat.chatHistory") : title || t("chat.chatHistory")}
+                </div>
+                {showBatchActions && (
+                  <div className="record-toolbar-actions">
+                    {showBatchExport ? (
+                      <>
+                        <Button
+                          size="small"
+                          type="link"
+                          icon={<CloudDownloadOutlined />}
+                          onClick={() => {
+                            if (checkedList?.length) {
+                              exportHistoryFn();
+                            } else {
+                              message.warning(t("chat.selectConversationToExport"));
+                            }
+                          }}
+                        >
+                          {t("chat.export")}
+                        </Button>
+                        <Button
+                          size="small"
+                          type="text"
+                          onClick={() => setShowBatchExport(false)}
+                        >
+                          {t("common.cancel")}
+                        </Button>
+                      </>
+                    ) : (
                       <Button
                         size="small"
                         type="link"
-                        icon={<CloudDownloadOutlined />}
-                        onClick={() => {
-                          if (checkedList?.length) {
-                            exportHistoryFn();
-                          } else {
-                            message.warning(t("chat.selectConversationToExport"));
-                          }
-                        }}
+                        style={{ padding: 0 }}
+                        onClick={() => setShowBatchExport(true)}
                       >
-                        {t("chat.export")}
+                        {t("chat.batch")}
                       </Button>
-                      <Button
-                        size="small"
-                        type="text"
-                        onClick={() => setShowBatchExport(false)}
-                      >
-                        {t("common.cancel")}
-                      </Button>
-                    </>
-                  ) : (
-                    <Button
-                      size="small"
-                      type="link"
-                      style={{ padding: 0 }}
-                      onClick={() => setShowBatchExport(true)}
-                    >
-                      {t("chat.batch")}
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             {!hideSearch && (
               <div className="record-toolbar">
                 <Search

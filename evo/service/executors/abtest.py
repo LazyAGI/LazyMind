@@ -3,7 +3,7 @@ from pathlib import Path
 from lazyllm import AutoModel
 from evo.abtest import AbtestInputs, VerdictPolicy, execute_abtest
 from evo.runtime.model_gateway import ModelGateway
-from evo.runtime.model_config import thread_model_config, wrap_model_call
+from evo.runtime.model_config import require_thread_model_config, wrap_model_call
 from evo.service.core import state as thread_state, store as _store
 from evo.service.threads.workspace import EventLog, ThreadWorkspace
 from .context import CancelToken, ExecCtx
@@ -25,7 +25,7 @@ def execute(ctx: ExecCtx, tid: str) -> None:
     elog = EventLog(ws.events_path)
     runner = ctx.chat_runner_factory()
     token = CancelToken(ctx, tid)
-    model_config = thread_model_config(ctx.cfg.storage.base_dir, thread_id)
+    model_config = require_thread_model_config(ctx.cfg.storage.base_dir, thread_id, ctx.cfg.model_config.llm_role)
     policy_data = payload.get('policy') or {}
     if isinstance(policy_data.get('guard_metrics'), list):
         policy_data['guard_metrics'] = tuple(policy_data['guard_metrics'])
