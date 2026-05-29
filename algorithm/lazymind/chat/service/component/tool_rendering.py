@@ -766,7 +766,13 @@ def _tool_call_frame_text(tool_call: dict[str, Any], language: str = 'en') -> tu
     tool_call_id = str(tool_call.get('id') or '')
     tool_name = str(function.get('name', ''))
     raw_args = function.get('arguments', {})
-    arguments = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+    if isinstance(raw_args, str):
+        try:
+            arguments = json.loads(raw_args)
+        except json.JSONDecodeError:
+            arguments = raw_args
+    else:
+        arguments = raw_args
     preview_value = _tool_call_preview_value(tool_name, arguments, language)
     payload = {
         'id': tool_call_id,
