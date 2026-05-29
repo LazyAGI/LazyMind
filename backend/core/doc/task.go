@@ -1468,6 +1468,11 @@ func buildTaskResponse(r *http.Request, row orm.Task) TaskResponse {
 	var docRow orm.Document
 	if err := store.DB().WithContext(r.Context()).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", row.DocID, row.DatasetID).Take(&docRow).Error; err == nil {
 		lazyDoc = strings.TrimSpace(docRow.LazyllmDocID)
+		docDisplayName := strings.TrimSpace(docRow.DisplayName)
+		if TaskType(strings.TrimSpace(row.TaskType)) == TaskTypeReparse && docDisplayName != "" &&
+			!strings.Contains(resp.DisplayName, docDisplayName) {
+			resp.DisplayName = docDisplayName + " - " + resp.DisplayName
+		}
 		var dExt documentExt
 		_ = json.Unmarshal(docRow.Ext, &dExt)
 		resp.PDFConvertResult = strings.TrimSpace(docRow.PDFConvertResult)
@@ -1540,6 +1545,18 @@ func buildTaskResponse(r *http.Request, row orm.Task) TaskResponse {
 		resp.TaskInfo.FailedDocumentCount = resp.TaskInfo.TotalDocumentCount
 	}
 	resp.TaskState = normalizeTaskStateForUI(resp.TaskState)
+	if resp.TaskState == "FAILED" {
+		if resp.ErrMsg == "" {
+			resp.ErrMsg = resp.ConvertError
+		}
+		resp.ErrMsg = mapParseTaskError(resp.ErrMsg)
+		if resp.ErrMsg == "" {
+			resp.ErrMsg = defaultParseTaskErrCode
+		}
+	}
+	if resp.FinishTime == "" && isTerminalTaskStateForUI(resp.TaskState) {
+		resp.FinishTime = row.UpdatedAt.UTC().Format(time.RFC3339)
+	}
 	return resp
 }
 
@@ -1702,11 +1719,23 @@ func normalizeTaskStateForUI(state string) string {
 	}
 }
 
+func isTerminalTaskStateForUI(state string) bool {
+	switch strings.ToUpper(strings.TrimSpace(state)) {
+	case "FAILED", "SUCCESS", "CANCELED", "CANCELLED":
+		return true
+	default:
+		return false
+	}
+}
+
 func markTaskStartFailed(ctx context.Context, datasetID string, taskRow orm.Task, errMsg string) {
 	var ext taskExt
 	_ = json.Unmarshal(taskRow.Ext, &ext)
 	ext.TaskState = string(TaskStateFailed)
 	ext.ErrorMessage = strings.TrimSpace(errMsg)
+	if ext.ErrorMessage == "" {
+		ext.ErrorMessage = defaultParseTaskErrCode
+	}
 	now := time.Now().UTC()
 	_ = store.DB().WithContext(ctx).Model(&orm.Task{}).
 		Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", taskRow.ID, datasetID).
@@ -2338,7 +2367,7 @@ func createTaskFromExistingDocument(r *http.Request, datasetID, userID, userName
 	if len(tFiles) == 0 && (strings.TrimSpace(dExt.StoredPath) != "" || strings.TrimSpace(dExt.ParseStoredPath) != "") {
 		tFiles = []TaskFile{{DisplayName: displayName, StoredName: dExt.StoredName, StoredPath: dExt.StoredPath, ParseStoredPath: dExt.ParseStoredPath, FileSize: dExt.FileSize, RelativePath: dExt.RelativePath, ContentType: dExt.ContentType}}
 	}
-	tExt := taskExt{TaskType: tType, DocumentPID: documentPID, DisplayName: displayName, TargetDatasetID: strings.TrimSpace(item.Task.TargetDatasetID), TargetPID: strings.TrimSpace(item.Task.TargetPID), TargetPath: strings.TrimSpace(item.Task.TargetPath), DataSourceType: firstNonEmpty(strings.TrimSpace(item.Task.DataSourceType), "LOCAL_FILE"), Files: tFiles, DocumentTags: tags, ReparseGroups: item.Task.ReparseGroups}
+	tExt := taskExt{TaskType: tType, DocumentPID: documentPID, DisplayName: displayName, TargetDatasetID: strings.TrimSpace(item.Task.TargetDatasetID), TargetPID: strings.TrimSpace(item.Task.TargetPID), TargetPath: strings.TrimSpace(item.Task.TargetPath), DataSourceType: firstNonEmpty(strings.TrimSpace(item.Task.DataSourceType), "LOCAL_FILE"), Files: tFiles, DocumentTags: tags, ReparseGroups: item.Task.ReparseGroups, ReparseMode: strings.TrimSpace(item.Task.ReparseMode)}
 	now := time.Now().UTC()
 	taskRow := orm.Task{ID: taskID, LazyllmTaskID: "", DocID: baseDoc.ID, KbID: datasetKbIDByID(datasetID), AlgoID: datasetAlgoIDByID(datasetID), DatasetID: datasetID, TaskType: tType, DocumentPID: documentPID, TargetPID: strings.TrimSpace(item.Task.TargetPID), TargetDatasetID: strings.TrimSpace(item.Task.TargetDatasetID), DisplayName: displayName, Ext: mustJSON(tExt), BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now}}
 	if err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
@@ -2412,14 +2441,21 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 	// Collect ng_names from the first task that has ReparseGroups set.
 	// All tasks in a single reparse batch share the same reparse_groups selection.
 	var ngNames []string
+	reparseMode := "rebuild"
 	for _, taskRow := range taskRows {
 		var ext taskExt
 		_ = json.Unmarshal(taskRow.Ext, &ext)
-		if len(ext.ReparseGroups) > 0 {
+		if len(ngNames) == 0 && len(ext.ReparseGroups) > 0 {
 			ngNames = ext.ReparseGroups
+		}
+		if mode := strings.TrimSpace(ext.ReparseMode); mode != "" {
+			reparseMode = mode
+		}
+		if len(ngNames) > 0 {
 			break
 		}
 	}
+	embedOnly := reparseMode == "slice_and_embed"
 	applog.Logger.Info().
 		Str("handler", "StartReparseTask").
 		Str("dataset_id", datasetID).
@@ -2427,8 +2463,10 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		Int("doc_count", len(docIDs)).
 		Strs("doc_ids", docIDs).
 		Strs("ng_names", ngNames).
+		Str("reparse_mode", reparseMode).
+		Bool("embed_only", embedOnly).
 		Msg("submitting reparse batch to doc service")
-	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, IdempotencyKey: newTaskID(), ModelConfig: llmConfig})
+	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, EmbedOnly: embedOnly, ReparseMode: reparseMode, IdempotencyKey: newTaskID(), ModelConfig: llmConfig})
 	if err != nil {
 		errMsg := common.ResolveAppError(err.Error(), http.StatusBadGateway).Message
 		applog.Logger.Error().

@@ -62,6 +62,7 @@ type TaskPayload struct {
 	DocumentIDs     []string   `json:"document_ids,omitempty"`
 	Files           []TaskFile `json:"files,omitempty"`
 	ReparseGroups   []string   `json:"reparse_groups,omitempty"`
+	ReparseMode     string     `json:"reparse_mode,omitempty"`
 	DocumentTags    []string   `json:"document_tags,omitempty"`
 	TargetDatasetID string     `json:"target_dataset_id,omitempty"`
 	TargetPath      string     `json:"target_path,omitempty"`
@@ -277,6 +278,7 @@ type taskExt struct {
 	Files            []TaskFile        `json:"files,omitempty"`
 	DocumentTags     []string          `json:"document_tags,omitempty"`
 	ReparseGroups    []string          `json:"reparse_groups,omitempty"`
+	ReparseMode      string            `json:"reparse_mode,omitempty"`
 	TransferBindings []transferBinding `json:"transfer_bindings,omitempty"`
 }
 

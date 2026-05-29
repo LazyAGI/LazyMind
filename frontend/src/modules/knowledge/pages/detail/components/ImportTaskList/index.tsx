@@ -10,6 +10,7 @@ import Polling from "@/modules/knowledge/utils/polling";
 import { TaskServiceApi } from "@/modules/knowledge/utils/request";
 import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
+import { localizeErrorCode } from "@/components/request";
 import { IMPORT_TASK_POLL_INTERVAL, IMPORT_TASK_FAILED_STATES, IMPORT_TASK_RUNNING_STATES, IMPORT_TASK_SUCCESS_STATES } from "@/modules/knowledge/constants/common";
 
 interface IProps {
@@ -187,18 +188,35 @@ const ImportTaskList = (props: IProps) => {
       dataIndex: "create_time",
       width: 105,
       render: (time: string, record: any) => {
+        const isRunning = RUNNING_STATES.includes(record.task_state);
+        const endTime = isRunning
+          ? undefined
+          : record.finish_time || record.create_time || time;
         return (
           <ElapsedTime
             startTime={record.start_time || time}
-            endTime={
-              RUNNING_STATES.includes(record.task_state)
-                ? undefined
-                : record.finish_time
-            }
+            endTime={endTime}
           />
         );
       },
     },
+    ...(tab === TaskTab.Failed
+      ? [
+          {
+            title: t("knowledge.parseTaskError"),
+            dataIndex: "err_msg",
+            width: 200,
+            render: (text: string) => {
+              const display = localizeErrorCode(text, "-");
+              return (
+                <Tooltip title={display}>
+                  <div className="ellipsis-text">{display}</div>
+                </Tooltip>
+              );
+            },
+          },
+        ]
+      : []),
     {
       title: t("common.actions"),
       key: "action",

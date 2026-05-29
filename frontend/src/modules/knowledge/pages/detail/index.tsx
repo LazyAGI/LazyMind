@@ -613,13 +613,6 @@ const Detail = () => {
                       },
                     },
                     {
-                      key: "batchLlmParse",
-                      label: t("knowledge.batchLlmParse"),
-                      onClick: () => {
-                        knowledgeListRef.current?.llmParseCheckedKnowledge();
-                      },
-                    },
-                    {
                       key: "batchEditTags",
                       label: t("knowledge.batchEditTags"),
                       onClick: () => {

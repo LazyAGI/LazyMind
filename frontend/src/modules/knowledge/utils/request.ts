@@ -424,6 +424,7 @@ export interface TaskPayload {
   document_tags?: string[];
   files?: TaskFile[];
   reparse_groups?: string[];
+  reparse_mode?: string;
   target_dataset_id?: string;
   target_pid?: string;
   target_path?: string;

@@ -187,6 +187,7 @@ func manualSchemas() map[string]any {
 			prop("document_ids", array(strSchema())),
 			prop("files", array(refSchema("TaskFile"))),
 			prop("reparse_groups", array(strSchema())),
+			prop("reparse_mode", strSchema()),
 			prop("document_tags", array(strSchema())),
 			prop("target_dataset_id", strSchema()),
 			prop("target_path", strSchema()),
