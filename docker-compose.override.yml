@@ -1,0 +1,8 @@
+services:
+  chat:
+    command: ["sleep", "infinity"]
+    volumes:
+      - ./algorithm:/app/algorithm
+      - ./algorithm/lazyllm:/opt/lazyllm
+    healthcheck:
+      disable: true
