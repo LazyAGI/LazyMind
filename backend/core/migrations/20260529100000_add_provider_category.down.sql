@@ -1,4 +1,5 @@
-DROP TABLE IF EXISTS user_selected_providers;
+DROP TABLE IF EXISTS public.user_selected_providers;
+DROP SEQUENCE IF EXISTS public.user_selected_providers_id_seq;
 
 ALTER TABLE user_model_providers
   DROP COLUMN capabilities,
