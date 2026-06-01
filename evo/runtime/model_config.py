@@ -6,6 +6,7 @@ from typing import Any
 
 from evo.runtime.fs import atomic_write_json
 from evo.service.core import state as thread_state
+from evo.service.core.errors import StateError
 
 log = logging.getLogger('evo.runtime.model_config')
 MODEL_CONFIG_FILENAME = 'model_config.json'
@@ -25,6 +26,24 @@ def thread_model_config(base_dir: Path | str, thread_id: str | None) -> dict[str
 
 def save_thread_model_config(base_dir: Path | str, thread_id: str, model_config: dict) -> None:
     atomic_write_json(_thread_dir(base_dir, thread_id) / MODEL_CONFIG_FILENAME, model_config)
+
+
+def require_evo_llm(model_config: dict[str, Any] | None, role: str = 'evo_llm') -> dict[str, Any]:
+    evo_llm = (model_config or {}).get(role)
+    data = evo_llm if isinstance(evo_llm, dict) else {}
+    missing = [k for k in ('source', 'model', 'api_key') if not str(data.get(k) or '').strip()]
+    if not isinstance(evo_llm, dict) or missing:
+        fields = ', '.join(missing or ('source', 'model', 'api_key'))
+        raise StateError(
+            'EVO_LLM_CONFIG_MISSING', f'llm_config.{role} missing required fields: {fields}', kind='permanent'
+        )
+    return evo_llm
+
+
+def require_thread_model_config(base_dir: Path | str, thread_id: str | None, role: str = 'evo_llm') -> dict[str, Any]:
+    cfg = thread_model_config(base_dir, thread_id)
+    require_evo_llm(cfg, role)
+    return cfg or {}
 
 
 def _thread_dir(base_dir: Path | str, thread_id: str) -> Path:

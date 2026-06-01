@@ -54,10 +54,5 @@ func scheduleImageGroupLazyClear(_ context.Context) {
 }
 
 func isMultimodalEmbeddingModelType(modelType string) bool {
-	switch modelType {
-	case "multimodal_embedding", "cross_modal_embed":
-		return true
-	default:
-		return false
-	}
+	return modelType == "embed_image"
 }

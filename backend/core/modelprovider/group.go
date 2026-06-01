@@ -328,7 +328,7 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch models before deletion to check for multimodal_embedding types and
+	// Fetch models before deletion to check for embed_image types and
 	// collect IDs for user_selected_models cleanup.
 	var groupModels []orm.UserModelProviderGroupModel
 	if err := db.WithContext(r.Context()).
@@ -434,7 +434,6 @@ func seedGroupModelsFromDefaults(
 			ProviderName:             d.ProviderName,
 			Name:                     d.Name,
 			ModelType:                d.ModelType,
-			BaseURL:                  d.BaseURL,
 			IsDefault:                true,
 			BaseModel: orm.BaseModel{
 				CreateUserID:   userID,

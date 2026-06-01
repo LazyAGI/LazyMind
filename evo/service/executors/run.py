@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 from evo.harness.plan import StopRequested
 from evo.runtime.fs import load_json
+from evo.runtime.model_config import require_thread_model_config
 from evo.service.core import store as _store
 from evo.service.threads.workspace import EventLog, ThreadWorkspace
 from .context import CancelToken, ExecCtx
@@ -37,7 +38,11 @@ def _run(ctx: ExecCtx, tid: str, row: dict, *, resume: bool) -> None:
     from evo.runtime.session import create_session, session_scope
     payload = row.get('payload') or {}
     thread_id = row.get('thread_id')
+    require_thread_model_config(ctx.cfg.storage.base_dir, thread_id, ctx.cfg.model_config.llm_role)
     eval_id = payload.get('eval_id')
+    judge_path = _eval_path(ctx, thread_id, eval_id)
+    if judge_path is None:
+        raise _store.StateError('RUN_EVAL_REPORT_NOT_FOUND', f'eval report not found for eval_id={eval_id!r}')
     _write_feedback(ctx, tid, payload.get('extra_instructions'))
     elog = EventLog(ThreadWorkspace(ctx.cfg.storage.base_dir, thread_id).events_path) if thread_id else None
     if elog:
@@ -56,7 +61,7 @@ def _run(ctx: ExecCtx, tid: str, row: dict, *, resume: bool) -> None:
     plan = build_standard_plan(
         opts,
         logger=session.logger('plan'),
-        judge_path=_eval_path(ctx, thread_id, eval_id),
+        judge_path=judge_path,
         trace_path=_trace_path(ctx, thread_id, eval_id),
         before_step=_run_progress(ctx, tid, eval_id, elog),
     )

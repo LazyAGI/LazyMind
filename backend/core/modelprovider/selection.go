@@ -15,24 +15,24 @@ import (
 	"lazymind/core/store"
 )
 
-// Allowed keys match frontend modelTypeMap (selection slot types).
+// Allowed keys match runtime_models.yaml role keys (selection slot types).
 var allowedSelectionModelTypes = map[string]struct{}{
-	"llm-evo":              {},
-	"llm-chat":             {},
-	"VLM":                  {},
-	"text2image":           {},
-	"embedding":            {},
-	"tts":                  {},
-	"image_editing":        {},
-	"stt":                  {},
-	"rerank":               {},
-	"multimodal_embedding": {},
+	"llm":           {},
+	"evo_llm":       {},
+	"vlm":           {},
+	"text2image":    {},
+	"embed_main":    {},
+	"tts":           {},
+	"image_editing": {},
+	"stt":           {},
+	"reranker":      {},
+	"embed_image":   {},
 }
 
 // autoShareModelTypes are set share=true when an admin saves a selection so other users can use them.
 var autoShareModelTypes = map[string]struct{}{
-	"embedding":            {},
-	"multimodal_embedding": {},
+	"embed_main":  {},
+	"embed_image": {},
 }
 
 type selectedModelUpsertItem struct {
@@ -66,8 +66,48 @@ type setSharedModelRequest struct {
 }
 
 type modelReadyResponse struct {
-	Ready  bool   `json:"ready"`
-	Source string `json:"source,omitempty"`
+	Ready        bool   `json:"ready"`
+	Source       string `json:"source,omitempty"`         // "own" | "shared"
+	SharedByName string `json:"shared_by_name,omitempty"` // sharer's display name
+	SharedByID   string `json:"shared_by_id,omitempty"`   // sharer's user_id
+	ProviderName string `json:"provider_name,omitempty"`  // e.g. "OpenAI"
+	ModelName    string `json:"model_name,omitempty"`     // e.g. "text-embedding-3-small"
+}
+
+type sharedModelDetail struct {
+	UserID       string
+	UserName     string
+	ProviderName string
+	ModelName    string
+}
+
+// getSharedModelDetail returns the detail of the active shared selection for the given model_type.
+// Returns nil (no error) if no shared selection exists.
+func getSharedModelDetail(ctx context.Context, db *gorm.DB, modelType string) (*sharedModelDetail, error) {
+	var row struct {
+		UserID       string `gorm:"column:user_id"`
+		UserName     string `gorm:"column:user_name"`
+		ProviderName string `gorm:"column:provider_name"`
+		ModelName    string `gorm:"column:model_name"`
+	}
+	err := db.WithContext(ctx).
+		Table("user_selected_models usm").
+		Joins("JOIN user_model_provider_group_models m ON m.id = usm.user_model_provider_group_model_id AND m.deleted_at IS NULL").
+		Where("usm.model_type = ? AND usm.share = ?", modelType, true).
+		Select("usm.user_id, usm.user_name, m.provider_name, m.name AS model_name").
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &sharedModelDetail{
+		UserID:       row.UserID,
+		UserName:     row.UserName,
+		ProviderName: row.ProviderName,
+		ModelName:    row.ModelName,
+	}, nil
 }
 
 // GetSelectedModels returns selected model rows for the current user.
@@ -165,16 +205,16 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// When multimodal_embedding is configured for the first time, clear lazy_mode so
+	// When embed_image is configured for the first time, clear lazy_mode so
 	// image embedding runs immediately. When it is cleared, reset lazy_mode to embed.
-	multimodalModelID, hasMultimodalSelection := selectionByType["multimodal_embedding"]
+	multimodalModelID, hasMultimodalSelection := selectionByType["embed_image"]
 	triggerLazyModeClear := false
 	checkLazyModeResetAfterSave := false
 	if hasMultimodalSelection {
 		if multimodalModelID == "" {
 			checkLazyModeResetAfterSave = true
 		} else {
-			wasReady, err := IsModelReady(r.Context(), store.DB(), userID, "multimodal_embedding")
+			wasReady, err := IsModelReady(r.Context(), store.DB(), userID, "embed_image")
 			if err == nil && !wasReady {
 				hadAny, gerr := HasAnyMultimodalEmbeddingSelection(r.Context(), store.DB())
 				if gerr == nil && !hadAny {
@@ -271,7 +311,7 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 				"m.name, "+
 				"m.provider_name, "+
 				"g.name AS group_name, "+
-				"m.base_url",
+				"g.base_url",
 		).
 		Joins(
 			"JOIN user_model_provider_group_models m ON "+
@@ -379,7 +419,19 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if sharedCount > 0 {
-		common.ReplyOK(w, modelReadyResponse{Ready: true, Source: "shared"})
+		detail, detailErr := getSharedModelDetail(r.Context(), db, modelType)
+		if detailErr != nil {
+			common.ReplyOK(w, modelReadyResponse{Ready: true, Source: "shared"})
+			return
+		}
+		resp := modelReadyResponse{Ready: true, Source: "shared"}
+		if detail != nil {
+			resp.SharedByName = detail.UserName
+			resp.SharedByID = detail.UserID
+			resp.ProviderName = detail.ProviderName
+			resp.ModelName = detail.ModelName
+		}
+		common.ReplyOK(w, resp)
 		return
 	}
 
@@ -387,7 +439,7 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 }
 
 // HasAnyMultimodalEmbeddingSelection reports whether any user still has a valid
-// multimodal_embedding selection (joined model row not soft-deleted).
+// embed_image selection (joined model row not soft-deleted).
 func HasAnyMultimodalEmbeddingSelection(ctx context.Context, db *gorm.DB) (bool, error) {
 	var count int64
 	err := db.WithContext(ctx).
@@ -397,7 +449,7 @@ func HasAnyMultimodalEmbeddingSelection(ctx context.Context, db *gorm.DB) (bool,
 				"m.id = usm.user_model_provider_group_model_id AND "+
 				"m.deleted_at IS NULL",
 		).
-		Where("usm.model_type = ?", "multimodal_embedding").
+		Where("usm.model_type = ?", "embed_image").
 		Count(&count).Error
 	if err != nil {
 		return false, err

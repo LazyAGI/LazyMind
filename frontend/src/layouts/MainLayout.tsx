@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { Button, Form, Input, Layout, Modal, Popover, message } from "antd";
 import {
   CodeOutlined,
-  CloseOutlined,
   SettingOutlined,
   SearchOutlined,
   AppstoreOutlined,
@@ -106,7 +105,7 @@ export default function MainLayout() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSubmitting, setProfileSubmitting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [historySearchOpen, setHistorySearchOpen] = useState(false);
+  const [sidebarSearchText, setSidebarSearchText] = useState("");
   const [isMenuCollapsed, setIsMenuCollapsed] = useState(readStoredMainMenuCollapsed);
   const [shouldRenderMenuContent, setShouldRenderMenuContent] = useState(
     () => !readStoredMainMenuCollapsed(),
@@ -333,7 +332,6 @@ export default function MainLayout() {
     }
     setCurrentSidebarConversationId(conversationId);
     emitConversationSelection(conversationId);
-    setHistorySearchOpen(false);
     navigate("/agent/chat/home");
   };
 
@@ -615,14 +613,6 @@ export default function MainLayout() {
                 <img src={logoImage} alt="logo" />
               )}
             </button>
-            <Button
-              type="text"
-              className="sider-search-button"
-              icon={<SearchOutlined />}
-              onClick={() => setHistorySearchOpen(true)}
-              aria-label={t("chat.searchConversation")}
-              title={t("chat.searchConversation")}
-            />
             <button
               type="button"
               className="sider-inline-toggle"
@@ -681,6 +671,18 @@ export default function MainLayout() {
                   </button>
                 </Popover>
               </div>
+              <div className="sider-history-search">
+                <Input
+                  className="sider-history-search-input"
+                  type="search"
+                  prefix={<SearchOutlined />}
+                  allowClear
+                  value={sidebarSearchText}
+                  placeholder={t("chat.searchConversation")}
+                  aria-label={t("chat.searchConversation")}
+                  onChange={(event) => setSidebarSearchText(event.target.value)}
+                />
+              </div>
             </>
           ) : null}
           {shouldRenderMenuContent && (
@@ -690,6 +692,7 @@ export default function MainLayout() {
                 hideSearch
                 showBatchActions
                 title={t("chat.recentConversations")}
+                searchText={sidebarSearchText}
                 currentSessionId={currentSidebarConversationId}
                 onSelected={handleSidebarConversationSelected}
                 onRemove={handleSidebarConversationRemoved}
@@ -803,27 +806,6 @@ export default function MainLayout() {
           </div>
         </Content>
       </Layout>
-      <Modal
-        open={historySearchOpen}
-        footer={null}
-        closeIcon={<CloseOutlined />}
-        onCancel={() => setHistorySearchOpen(false)}
-        className="history-search-modal"
-        width={640}
-        centered
-        destroyOnHidden
-      >
-        <div className="history-search-tabs">
-          <button type="button" className="history-search-tab active">
-            {t("chat.chatHistory")}
-          </button>
-        </div>
-        <RecordList
-          currentSessionId={currentSidebarConversationId}
-          onSelected={handleSidebarConversationSelected}
-          onRemove={handleSidebarConversationRemoved}
-        />
-      </Modal>
       <Modal
         title={t("profile.title")}
         open={profileModalOpen}

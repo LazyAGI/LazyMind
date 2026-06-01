@@ -223,12 +223,12 @@ func BatchUploadTasks(w http.ResponseWriter, r *http.Request) {
 		replyDatasetForbidden(w)
 		return
 	}
-	if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embedding"); err != nil || !ready {
+	if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embed_main"); err != nil || !ready {
 		common.ReplyErr(w, "embedding model is not ready", http.StatusUnprocessableEntity)
 		return
 	}
 	if features := modelprovider.GetCachedModelFeatures(); features.ImageEmbedRequired {
-		if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "multimodal_embedding"); err != nil || !ready {
+		if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embed_image"); err != nil || !ready {
 			common.ReplyErr(w, "multimodal embedding model is not ready", http.StatusUnprocessableEntity)
 			return
 		}
@@ -284,12 +284,12 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		replyDatasetForbidden(w)
 		return
 	}
-	if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embedding"); err != nil || !ready {
+	if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embed_main"); err != nil || !ready {
 		common.ReplyErr(w, "embedding model is not ready", http.StatusUnprocessableEntity)
 		return
 	}
 	if features := modelprovider.GetCachedModelFeatures(); features.ImageEmbedRequired {
-		if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "multimodal_embedding"); err != nil || !ready {
+		if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embed_image"); err != nil || !ready {
 			common.ReplyErr(w, "multimodal embedding model is not ready", http.StatusUnprocessableEntity)
 			return
 		}
@@ -515,12 +515,12 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 		replyDatasetForbidden(w)
 		return
 	}
-	if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embedding"); err != nil || !ready {
+	if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embed_main"); err != nil || !ready {
 		common.ReplyErr(w, "embedding model is not ready", http.StatusUnprocessableEntity)
 		return
 	}
 	if features := modelprovider.GetCachedModelFeatures(); features.ImageEmbedRequired {
-		if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "multimodal_embedding"); err != nil || !ready {
+		if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embed_image"); err != nil || !ready {
 			common.ReplyErr(w, "multimodal embedding model is not ready", http.StatusUnprocessableEntity)
 			return
 		}

@@ -952,3 +952,20 @@
     justify-content: flex-end;
   }
 }
+
+.model-provider-ready-icon {
+  font-size: 14px;
+  vertical-align: middle;
+
+  &.is-ready {
+    color: #16a34a;
+  }
+
+  &.is-not-ready {
+    color: #f59e0b;
+
+    &.is-required {
+      color: #dc2626;
+    }
+  }
+}

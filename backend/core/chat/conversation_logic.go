@@ -493,7 +493,7 @@ func handleNonStreamChat(
 	historyExt json.RawMessage,
 ) {
 	pyBody, _ := json.Marshal(reqBody)
-	upstreamURL := baseURL + "/api/chat"
+	upstreamURL := common.JoinURL(baseURL, "/api/chat")
 	fmt.Printf("DEBUG upstream request url=%s params=%+v\n", upstreamURL, reqBody)
 	respBytes, statusCode, err := common.HTTPPost(reqCtx, upstreamURL, "application/json", pyBody)
 	if err != nil {

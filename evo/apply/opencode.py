@@ -43,10 +43,6 @@ def apply_model() -> OpencodeProviderConfig:
     )
 
 
-def explicit_env_model_configured() -> bool:
-    return bool(str(config['evo_code_api_key'] or '').strip())
-
-
 def provider_config_from_evo_llm(model_config: dict[str, Any] | None) -> OpencodeProviderConfig | None:
     evo_llm = (model_config or {}).get('evo_llm')
     if not isinstance(evo_llm, dict):

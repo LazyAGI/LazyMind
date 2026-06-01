@@ -16,7 +16,7 @@ from evo.runtime.config import (
     EVO_EVAL_MAX_WORKERS,
     EVO_EVAL_RAG_MAX_WORKERS,
 )
-from evo.runtime.model_config import thread_model_config, wrap_model_call
+from evo.runtime.model_config import require_thread_model_config, thread_model_config, wrap_model_call
 from evo.service.core import store as _store
 from evo.service.threads.workspace import EventLog, ThreadWorkspace
 from .context import CancelToken, ExecCtx
@@ -43,7 +43,11 @@ def execute(ctx: ExecCtx, tid: str) -> None:
     filters = dict(eval_options.get('filters') or {})
     elog = EventLog(ws.events_path)
     token = CancelToken(ctx, tid)
-    model_config = thread_model_config(ctx.cfg.storage.base_dir, thread_id)
+    model_config = (
+        require_thread_model_config(ctx.cfg.storage.base_dir, thread_id, ctx.cfg.model_config.llm_role)
+        if dataset_id
+        else thread_model_config(ctx.cfg.storage.base_dir, thread_id)
+    )
     try:
         if dataset_id:
             elog.append_event(

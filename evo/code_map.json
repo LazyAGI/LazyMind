@@ -5,8 +5,7 @@
     "/LazyMind/algorithm/chat/components/agentic/history.py": "Agentic 历史与引用恢复：解析历史中的 think/tool_call/tool_result，恢复 KB citation 状态，格式化非流式结果；可改：历史裁剪、工具结果保留、citation 去重和 source 输出。",
     "/LazyMind/algorithm/chat/prompts/agentic.py": "Agentic 系统提示与工具使用规则：知识库优先、引用格式、图片引用、工具调用说明、memory/skill/vocab 指南；可改：工具调用策略、回答约束、引用和检索优先级。",
     "/LazyMind/algorithm/chat/tools/kb.py": "Agentic KB 工具实现：kb_search、kb_get_parent_node、kb_get_window_nodes、kb_keyword_search、citation 注册、kb_id/algo_id 解析、OpenSearch 查询；可改：工具参数默认值、过滤条件、窗口扩展、关键词搜索、结果序列化和引用。",
-    "/LazyMind/algorithm/chat/pipelines/builders/get_ppl_search.py": "kb_search 复用的检索子管道：临时文件/知识库分支、RRF、可选 reranker、AdaptiveK、ContextExpansion、图片分支；可改：topk/k_max、reranker 判定、融合、截断和扩展参数。",
-    "/LazyMind/algorithm/chat/pipelines/builders/get_retriever.py": "检索器构造：runtime config 中的 text/image embed keys、line/block 多路 retriever、TempDocRetriever、Document 连接；可改：retriever_configs 默认路由、group/target/topk、image 检索、临时文件检索。",
+    "/LazyMind/algorithm/chat/pipelines/get_ppl_search.py": "kb_search 复用的检索子管道：临时文件/知识库分支、RRF、可选 reranker、AdaptiveK、ContextExpansion、图片分支、检索器构造；可改：topk/k_max、reranker 判定、融合、截断、扩展参数、retriever_configs、text/image embed keys。",
     "/LazyMind/algorithm/chat/utils/load_config.py": "动态模型配置读取和角色注入：dynamic/online/inner 配置、embed/reranker/llm 角色识别、api_key 注入、retrieval settings；可改：角色解析、动态配置兼容和 retriever config 读取。"
   },
   "read_scope": {
@@ -57,12 +56,12 @@
         "init_args": {"uses": ["lazyllm.Document.get_nodes", "OpenSearch col_block/col_line"]}
       },
       "KBSearchPipeline": {
-        "file": "pipelines/builders/get_ppl_search.py", "line": 96,
+        "file": "pipelines/get_ppl_search.py", "line": 163,
         "symbol": "get_ppl_search",
         "init_args": {"topk": 20, "k_max": 10, "stages": ["RRF", "reranker", "AdaptiveK", "ContextExpansion"]}
       },
       "RetrieverFactory": {
-        "file": "pipelines/builders/get_retriever.py", "line": 44,
+        "file": "pipelines/get_ppl_search.py", "line": 47,
         "symbol": "get_retriever",
         "init_args": {"groups": ["line->block", "block"], "tmp_group": "block", "image_group": "image"}
       },

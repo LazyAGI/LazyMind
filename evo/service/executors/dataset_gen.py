@@ -5,7 +5,7 @@ from algorithm.chat.utils.load_config import get_config_path
 from evo.datagen import run_generate_pipeline
 from evo.datagen.kb_client import KBClient
 from evo.harness.plan import StopRequested
-from evo.runtime.model_config import thread_model_config, wrap_model_call
+from evo.runtime.model_config import require_thread_model_config, wrap_model_call
 from evo.runtime.model_gateway import ModelGateway
 from evo.service.core import store as _store
 from evo.service.threads.workspace import EventLog, ThreadWorkspace
@@ -53,9 +53,10 @@ def execute(ctx: ExecCtx, tid: str) -> None:
                 payload={'dataset_id': eval_name, 'kb_id': kb_id, 'algo_id': algo_id, 'num_cases': num_cases},
             )
         ds = KBClient.from_config(ctx.cfg)
+        model_config = require_thread_model_config(ctx.cfg.storage.base_dir, thread_id, ctx.cfg.model_config.llm_role)
         llm_factory = _resolve_llm_factory(
             ctx.cfg,
-            model_config=thread_model_config(ctx.cfg.storage.base_dir, thread_id),
+            model_config=model_config,
             session_id=f'evo:{tid}',
         )
         path, data = run_generate_pipeline(

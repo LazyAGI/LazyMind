@@ -148,7 +148,7 @@ class JobManager:
     def cont(self, tid: str) -> dict:
         row = store.must_get(self._store, tid)
         fields: dict[str, Any] = {'error_code': None, 'error_kind': None}
-        if row.get('flow') in {'dataset_gen', 'eval'}:
+        if row.get('flow') in {'dataset_gen', 'eval', 'run'}:
             fields['payload'] = self._continue_payload(row)
         store.transition(self._store, tid, 'continue', **fields)
         if row.get('status') != 'stopping':
@@ -163,6 +163,10 @@ class JobManager:
             inputs = thread_state.read_json(ws.thread_meta_path) or {}
             if num_cases := (inputs.get('inputs') or {}).get('num_cases'):
                 payload['num_cases'] = num_cases
+        if row.get('flow') == 'run' and row.get('thread_id'):
+            ws = ThreadWorkspace(self._cfg.storage.base_dir, row['thread_id'], create=False)
+            if not payload.get('eval_id') or not ws.eval_path(payload['eval_id']).is_file():
+                payload['eval_id'] = self._latest_thread_eval(row['thread_id'])
         return payload
 
     def accept(self, tid: str, auto_next: str | bool = 'none') -> dict:

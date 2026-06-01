@@ -14,11 +14,12 @@ import (
 )
 
 type listItem struct {
-	ID                     string `json:"id"`
-	DefaultModelProviderID string `json:"default_model_provider_id"`
-	Name                   string `json:"name"`
-	Description            string `json:"description"`
-	BaseURL                string `json:"base_url"`
+	ID                     string   `json:"id"`
+	DefaultModelProviderID string   `json:"default_model_provider_id"`
+	Name                   string   `json:"name"`
+	Description            string   `json:"description"`
+	BaseURL                string   `json:"base_url"`
+	ModelTypes             []string `json:"model_types"`
 }
 
 type listResponse struct {
@@ -59,17 +60,7 @@ func ListUserProviders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := make([]listItem, 0, len(rows))
-	for i := range rows {
-		row := rows[i]
-		out = append(out, listItem{
-			ID:                     row.ID,
-			DefaultModelProviderID: row.DefaultModelProviderID,
-			Name:                   row.Name,
-			Description:            row.Description,
-			BaseURL:                row.BaseURL,
-		})
-	}
+	out := buildListItems(r.Context(), db, rows)
 	common.ReplyOK(w, listResponse{Providers: out})
 }
 
@@ -108,6 +99,13 @@ func ListUserProvidersWithGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	out := buildListItems(r.Context(), db, rows)
+	common.ReplyOK(w, listResponse{Providers: out})
+}
+
+// buildListItems converts UserModelProvider rows to listItems and batch-loads
+// distinct model_types from default_models for each provider.
+func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvider) []listItem {
 	out := make([]listItem, 0, len(rows))
 	for i := range rows {
 		row := rows[i]
@@ -117,9 +115,39 @@ func ListUserProvidersWithGroups(w http.ResponseWriter, r *http.Request) {
 			Name:                   row.Name,
 			Description:            row.Description,
 			BaseURL:                row.BaseURL,
+			ModelTypes:             []string{},
 		})
 	}
-	common.ReplyOK(w, listResponse{Providers: out})
+	if len(out) == 0 {
+		return out
+	}
+
+	defaultProviderIDs := make([]string, 0, len(out))
+	for i := range out {
+		defaultProviderIDs = append(defaultProviderIDs, out[i].DefaultModelProviderID)
+	}
+	type modelTypeRow struct {
+		DefaultModelProviderID string `gorm:"column:default_model_provider_id"`
+		ModelType              string `gorm:"column:model_type"`
+	}
+	var mtRows []modelTypeRow
+	if err := db.WithContext(ctx).
+		Model(&orm.DefaultModel{}).
+		Select("default_model_provider_id, model_type").
+		Where("default_model_provider_id IN ? AND deleted_at IS NULL", defaultProviderIDs).
+		Distinct("default_model_provider_id", "model_type").
+		Find(&mtRows).Error; err == nil {
+		mtMap := make(map[string][]string, len(defaultProviderIDs))
+		for _, r := range mtRows {
+			mtMap[r.DefaultModelProviderID] = append(mtMap[r.DefaultModelProviderID], r.ModelType)
+		}
+		for i := range out {
+			if types, ok := mtMap[out[i].DefaultModelProviderID]; ok {
+				out[i].ModelTypes = types
+			}
+		}
+	}
+	return out
 }
 
 func seedUserProvidersIfEmpty(ctx context.Context, db *gorm.DB, userID, userName string) error {

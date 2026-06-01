@@ -72,10 +72,8 @@ config.add('ocr_server_url', str, 'http://localhost:8000', 'OCR_SERVER_URL', des
 config.add('mineru_upload_mode', str, None, 'MINERU_UPLOAD_MODE', description='MinerU upload mode override (auto-detected if unset).')
 config.add('mineru_backend', str, 'pipeline', 'MINERU_BACKEND', description='MinerU processing backend.')
 config.add('mineru_server_port', int, 8000, 'MINERU_SERVER_PORT', description='MinerU server port.')
-config.add('mineru_cache_dir', str, None, 'MINERU_CACHE_DIR', description='MinerU cache directory.')
-config.add('mineru_image_save_dir', str, None, 'MINERU_IMAGE_SAVE_DIR', description='MinerU image save directory.')
-config.add('image_cache_dir', str, os.path.join(config['shared_upload_dir'], '.image_cache'), 'IMAGE_CACHE_DIR',
-           description='OCR image cache root (per-document task subdirs).')
+config.add('ocr_cache_dir', str, os.path.join(config['shared_upload_dir'], '.image_cache'), 'OCR_CACHE_DIR',
+           description='OCR cache root for parsed results and images.')
 config.add('document_processor_url', str, 'http://localhost:8000', 'DOCUMENT_PROCESSOR_URL', description='Document processor service URL.')
 config.add('algo_server_port', int, 8000, 'ALGO_SERVER_PORT', description='Algorithm server port.')
 config.add('document_server_port', int, 8000, 'DOCUMENT_SERVER_PORT', description='Document server port (fallback for algo_server_port).')

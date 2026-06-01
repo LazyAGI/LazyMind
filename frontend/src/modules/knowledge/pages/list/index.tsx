@@ -127,11 +127,11 @@ const KnowledgePage: FC = () => {
 
       const [embResp, multiResp] = await Promise.all([
         axiosInstance.get<{ data?: { ready: boolean } } | { ready: boolean }>(
-          `${BASE_URL}/api/core/model_providers/models/ready?model_type=embedding`
+          `${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_main`
         ).catch(() => null),
         imageEmbedRequired
           ? axiosInstance.get<{ data?: { ready: boolean } } | { ready: boolean }>(
-              `${BASE_URL}/api/core/model_providers/models/ready?model_type=multimodal_embedding`
+              `${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_image`
             ).catch(() => null)
           : Promise.resolve(null),
       ]);

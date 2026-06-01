@@ -22,16 +22,16 @@ import { notifyModelFeaturesChanged, useModelFeatures } from "@/hooks/useModelFe
 import "./index.scss";
 
 type ModelCapability =
-  | "LLM_CHAT"
-  | "EMBEDDING"
-  | "VLM"
-  | "RERANK"
-  | "ASR"
-  | "TTS"
-  | "TEXT_TO_IMAGE"
-  | "MULTIMODAL_EMBEDDING"
-  | "IMAGE_EDITING"
-  | "LLM_SELF_EVOLUTION";
+  | "llm"
+  | "embed_main"
+  | "vlm"
+  | "reranker"
+  | "stt"
+  | "tts"
+  | "text2image"
+  | "embed_image"
+  | "image_editing"
+  | "evo_llm";
 
 interface ProviderModel {
   id: string;
@@ -51,7 +51,6 @@ interface ProviderOption {
   source: string;
   baseUrl: string;
   capabilities: ModelCapability[];
-  models: ProviderModel[];
 }
 
 interface ProviderConnectionGroup {
@@ -107,7 +106,6 @@ interface CustomModelFormValues {
 }
 
 interface SelectedModelApiItem {
-  base_url?: string;
   group_name: string;
   model_id: string;
   model_type: string;
@@ -119,50 +117,50 @@ interface SelectedModelApiItem {
 }
 
 const capabilityLabelKeys: Record<ModelCapability, string> = {
-  LLM_CHAT: "modelProvider.capability.llmChat",
-  EMBEDDING: "modelProvider.capability.embedding",
-  VLM: "modelProvider.capability.vlm",
-  RERANK: "modelProvider.capability.rerank",
-  ASR: "modelProvider.capability.asr",
-  TTS: "modelProvider.capability.tts",
-  TEXT_TO_IMAGE: "modelProvider.capability.textToImage",
-  MULTIMODAL_EMBEDDING: "modelProvider.capability.multimodalEmbedding",
-  IMAGE_EDITING: "modelProvider.capability.imageEditing",
-  LLM_SELF_EVOLUTION: "modelProvider.capability.selfEvolution",
+  llm: "modelProvider.capability.llmChat",
+  embed_main: "modelProvider.capability.embedding",
+  vlm: "modelProvider.capability.vlm",
+  reranker: "modelProvider.capability.rerank",
+  stt: "modelProvider.capability.asr",
+  tts: "modelProvider.capability.tts",
+  text2image: "modelProvider.capability.textToImage",
+  embed_image: "modelProvider.capability.multimodalEmbedding",
+  image_editing: "modelProvider.capability.imageEditing",
+  evo_llm: "modelProvider.capability.selfEvolution",
 };
 
 const moduleConfigs: ModuleConfig[] = [
   {
-    key: "LLM_CHAT",
+    key: "llm",
     titleKey: "modelProvider.module.llmChatTitle",
     subtitleKey: "modelProvider.module.llmChatSubtitle",
     required: true,
   },
   {
-    key: "EMBEDDING",
+    key: "embed_main",
     titleKey: "modelProvider.module.embeddingTitle",
     subtitleKey: "modelProvider.module.embeddingSubtitle",
     required: true,
     restricted: true,
   },
   {
-    key: "MULTIMODAL_EMBEDDING",
+    key: "embed_image",
     titleKey: "modelProvider.module.multimodalEmbeddingTitle",
     subtitleKey: "modelProvider.module.multimodalEmbeddingSubtitle",
     restricted: true,
   },
   {
-    key: "VLM",
+    key: "vlm",
     titleKey: "modelProvider.module.vlmTitle",
     subtitleKey: "modelProvider.module.vlmSubtitle",
   },
   {
-    key: "RERANK",
+    key: "reranker",
     titleKey: "modelProvider.module.rerankTitle",
     subtitleKey: "modelProvider.module.rerankSubtitle",
   },
   {
-    key: "LLM_SELF_EVOLUTION",
+    key: "evo_llm",
     titleKey: "modelProvider.module.selfEvolutionTitle",
     subtitleKey: "modelProvider.module.selfEvolutionSubtitle",
   },
@@ -177,17 +175,7 @@ const builtInProviders: ProviderOption[] = [
     headline: "覆盖文本、向量、多模态、语音与重排序能力，适合作为默认全能供应商。",
     source: "tongyi",
     baseUrl: "https://dashscope.aliyuncs.com/",
-    capabilities: ["LLM_CHAT", "EMBEDDING", "VLM", "RERANK", "ASR", "TTS", "TEXT_TO_IMAGE"],
-    models: [
-      { id: "qwen-plus", name: "qwen-plus", capability: "LLM_CHAT", builtIn: true, enabled: true },
-      { id: "deepseek-r1", name: "deepseek-r1", capability: "LLM_CHAT", builtIn: true, enabled: true },
-      { id: "text-embedding-v2", name: "text-embedding-v2", capability: "EMBEDDING", builtIn: true, enabled: true },
-      { id: "qwen-vl-max", name: "qwen-vl-max", capability: "VLM", builtIn: true, enabled: true },
-      { id: "gte-rerank", name: "gte-rerank", capability: "RERANK", builtIn: true, enabled: true },
-      { id: "qwen3-asr-flash", name: "qwen3-asr-flash", capability: "ASR", builtIn: true, enabled: true },
-      { id: "sambert-zhide-v1", name: "sambert-zhide-v1", capability: "TTS", builtIn: true, enabled: true },
-      { id: "wanx2-1-t2i-turbo", name: "wanx2.1-t2i-turbo", capability: "TEXT_TO_IMAGE", builtIn: true, enabled: true },
-    ],
+    capabilities: ["llm", "embed_main", "vlm", "reranker", "stt", "tts", "text2image"],
   },
   {
     id: "openai",
@@ -196,14 +184,7 @@ const builtInProviders: ProviderOption[] = [
     headline: "通用模型生态完整，适合接入对话、向量、语音与多模态任务。",
     source: "openai",
     baseUrl: "https://api.openai.com/v1/",
-    capabilities: ["LLM_CHAT", "EMBEDDING", "VLM", "TTS", "ASR"],
-    models: [
-      { id: "gpt-4-1", name: "gpt-4.1", capability: "LLM_CHAT", builtIn: true, enabled: true },
-      { id: "gpt-4o", name: "gpt-4o", capability: "VLM", builtIn: true, enabled: true },
-      { id: "text-embedding-3-large", name: "text-embedding-3-large", capability: "EMBEDDING", builtIn: true, enabled: true },
-      { id: "whisper-1", name: "whisper-1", capability: "ASR", builtIn: true, enabled: true },
-      { id: "gpt-4o-mini-tts", name: "gpt-4o-mini-tts", capability: "TTS", builtIn: true, enabled: true },
-    ],
+    capabilities: ["llm", "embed_main", "vlm", "tts", "stt"],
   },
   {
     id: "anthropic",
@@ -212,11 +193,7 @@ const builtInProviders: ProviderOption[] = [
     headline: "长文本和稳健推理体验突出，适合高质量文本对话场景。",
     source: "anthropic",
     baseUrl: "https://api.anthropic.com/v1/",
-    capabilities: ["LLM_CHAT", "VLM"],
-    models: [
-      { id: "claude-sonnet-4-5", name: "claude-sonnet-4.5", capability: "LLM_CHAT", builtIn: true, enabled: true },
-      { id: "claude-opus-4-1", name: "claude-opus-4.1", capability: "LLM_CHAT", builtIn: true, enabled: true },
-    ],
+    capabilities: ["llm", "vlm"],
   },
   {
     id: "gemini",
@@ -225,12 +202,7 @@ const builtInProviders: ProviderOption[] = [
     headline: "视觉、搜索增强与跨模态协作能力均衡。",
     source: "gemini",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-    capabilities: ["LLM_CHAT", "EMBEDDING", "VLM"],
-    models: [
-      { id: "gemini-2-5-pro", name: "gemini-2.5-pro", capability: "LLM_CHAT", builtIn: true, enabled: true },
-      { id: "gemini-2-5-flash", name: "gemini-2.5-flash", capability: "LLM_CHAT", builtIn: true, enabled: true },
-      { id: "gemini-embedding-001", name: "gemini-embedding-001", capability: "EMBEDDING", builtIn: true, enabled: true },
-    ],
+    capabilities: ["llm", "embed_main", "vlm"],
   },
   {
     id: "deepseek",
@@ -239,15 +211,20 @@ const builtInProviders: ProviderOption[] = [
     headline: "推理模型性价比高，适合默认问答主模型或自进化任务。",
     source: "deepseek",
     baseUrl: "https://api.deepseek.com",
-    capabilities: ["LLM_CHAT", "LLM_SELF_EVOLUTION"],
-    models: [
-      { id: "deepseek-chat", name: "deepseek-chat", capability: "LLM_CHAT", builtIn: true, enabled: true },
-      { id: "deepseek-reasoner", name: "deepseek-reasoner", capability: "LLM_SELF_EVOLUTION", builtIn: true, enabled: true },
-    ],
+    capabilities: ["llm", "evo_llm"],
   },
 ];
 
 type SelectedModels = Partial<Record<ModelCapability, string>>;
+
+type ModelReadyInfo = {
+  ready: boolean;
+  source?: 'own' | 'shared';
+  sharedByName?: string;
+  sharedByID?: string;
+  providerName?: string;
+  modelName?: string;
+} | null;
 
 type ModelOptionItem = {
   provider: ProviderOption;
@@ -266,7 +243,7 @@ function createConnectionGroup(provider: ProviderOption, overrides: Partial<Prov
     apiKey: overrides.apiKey,
     apiKeyConfigured: overrides.apiKeyConfigured ?? false,
     verified: overrides.verified ?? false,
-    models: overrides.models || provider.models.map((model) => ({ ...model })),
+    models: overrides.models || [],
   };
 }
 
@@ -290,44 +267,8 @@ const getAlgorithmProviderConfig = (
   apiKey: group.apiKeyConfigured ? "********" : undefined,
 });
 
-enum ModelProviderModelType {
-  VLM = "VLM",
-  LLM = "llm",
-  LLMChat = "llm-chat",
-  LLMEvolution = "llm-evo",
-  Embedding = "embedding",
-  MultimodalEmbedding = "multimodal_embedding",
-  TextToImage = "text2image",
-  TTS = "tts",
-  STT = "stt",
-  Rerank = "rerank",
-  ImageEditing = "image_editing",
-}
-
-const modelTypeByCapability: Record<ModelCapability, ModelProviderModelType> = {
-  LLM_CHAT: ModelProviderModelType.LLM,
-  EMBEDDING: ModelProviderModelType.Embedding,
-  VLM: ModelProviderModelType.VLM,
-  RERANK: ModelProviderModelType.Rerank,
-  ASR: ModelProviderModelType.STT,
-  TTS: ModelProviderModelType.TTS,
-  TEXT_TO_IMAGE: ModelProviderModelType.TextToImage,
-  MULTIMODAL_EMBEDDING: ModelProviderModelType.MultimodalEmbedding,
-  IMAGE_EDITING: ModelProviderModelType.ImageEditing,
-  LLM_SELF_EVOLUTION: ModelProviderModelType.LLM,
-};
-
-const selectedModelTypeByCapability: Record<ModelCapability, ModelProviderModelType> = {
-  ...modelTypeByCapability,
-  LLM_CHAT: ModelProviderModelType.LLMChat,
-  LLM_SELF_EVOLUTION: ModelProviderModelType.LLMEvolution,
-};
-
 const selectedCapabilityByModelType: Record<string, ModelCapability> = {
-  [ModelProviderModelType.LLMChat]: "LLM_CHAT",
-  [ModelProviderModelType.LLMEvolution]: "LLM_SELF_EVOLUTION",
-  llm: "LLM_CHAT",
-  llm2: "LLM_SELF_EVOLUTION",
+  evo_llm: "evo_llm",
 };
 
 function normalizeProviderKey(value: string) {
@@ -365,26 +306,21 @@ function getProviderLogoUrl(name: string) {
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(match[1])}&sz=96`;
 }
 
+// Maps a raw model_type string from the backend to a ModelCapability.
+// Since ModelCapability values are now aligned with backend model_type keys,
+// this is mostly a passthrough with a fallback for legacy "vision" aliases.
 function mapModelTypeToCapability(modelType?: string): ModelCapability {
   const normalized = (modelType || "").toLowerCase();
-  if (normalized === ModelProviderModelType.MultimodalEmbedding) return "MULTIMODAL_EMBEDDING";
-  if (normalized.includes("embedding")) return "EMBEDDING";
-  if (normalized.includes("rerank")) return "RERANK";
-  if (normalized === ModelProviderModelType.STT || normalized === "asr") return "ASR";
-  if (normalized === ModelProviderModelType.TTS) return "TTS";
-  if (normalized === ModelProviderModelType.ImageEditing) return "IMAGE_EDITING";
-  if (normalized === ModelProviderModelType.TextToImage) return "TEXT_TO_IMAGE";
-  if (normalized === ModelProviderModelType.VLM.toLowerCase() || normalized.includes("vision")) return "VLM";
-  return "LLM_CHAT";
+  if (normalized.includes("vision") && normalized !== "vlm") return "vlm";
+  const known = moduleConfigs.find((m) => m.key === normalized);
+  return known ? normalized as ModelCapability : "llm";
 }
 
 function getCapabilityByModelType(modelType?: string): ModelCapability | undefined {
   const normalized = (modelType || "").toLowerCase();
-  const selectedCapability = selectedCapabilityByModelType[normalized];
-  if (selectedCapability) {
-    return selectedCapability;
-  }
-  return moduleConfigs.find((module) => selectedModelTypeByCapability[module.key].toLowerCase() === normalized)?.key;
+  const explicit = selectedCapabilityByModelType[normalized];
+  if (explicit) return explicit;
+  return moduleConfigs.find((m) => m.key === normalized)?.key;
 }
 
 const createModelProviderFallbacks = (t: ReturnType<typeof useTranslation>["t"]) => ({
@@ -426,6 +362,7 @@ interface ApiProvider {
   name: string;
   description?: string;
   base_url?: string;
+  model_types?: string[];
 }
 
 interface ApiGroup {
@@ -495,18 +432,9 @@ function mapApiProvider(provider: ApiProvider, fallbacks: ModelProviderFallbacks
     backendDescription,
     source: provider.name,
     baseUrl: provider.base_url || "",
-    capabilities: [
-      "LLM_CHAT",
-      "EMBEDDING",
-      "MULTIMODAL_EMBEDDING",
-      "VLM",
-      "RERANK",
-      "ASR",
-      "TTS",
-      "TEXT_TO_IMAGE",
-      "IMAGE_EDITING",
-    ],
-    models: [],
+    capabilities: (provider.model_types || []).filter(
+      (t): t is ModelCapability => moduleConfigs.some((m) => m.key === t)
+    ),
   };
 }
 
@@ -638,7 +566,7 @@ export default function ModelProviderPage() {
   const [moduleModelOptions, setModuleModelOptions] = useState<Partial<Record<ModelCapability, ModelOptionItem[]>>>({});
   const [moduleModelLoading, setModuleModelLoading] = useState<Partial<Record<ModelCapability, boolean>>>({});
   const [shareStatus, setShareStatus] = useState<Partial<Record<ModelCapability, boolean>>>({});
-  const [modelReadyStatus, setModelReadyStatus] = useState<Partial<Record<ModelCapability, boolean | null>>>({});
+  const [modelReadyStatus, setModelReadyStatus] = useState<Partial<Record<ModelCapability, ModelReadyInfo>>>({});
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
   const modelFeaturesState = useModelFeatures();
   const imageEmbedEnabled =
@@ -766,12 +694,11 @@ export default function ModelProviderPage() {
           mapApiProvider({
             id: selection.user_model_provider_id,
             name: selection.provider_name,
-            base_url: selection.base_url,
           }, localizedFallbacks);
         const group = createConnectionGroup(provider, {
           id: selection.user_model_provider_group_id,
           name: selection.group_name,
-          baseUrl: selection.base_url || provider.baseUrl,
+          baseUrl: provider.baseUrl,
           verified: true,
         });
         const model: ProviderModel = {
@@ -808,18 +735,35 @@ export default function ModelProviderPage() {
       if (!isAdmin) {
         const readyResults = await Promise.allSettled(
           moduleConfigs.map(async (m) => {
-            const dbModelType = selectedModelTypeByCapability[m.key];
-            const resp = await modelProviderRequest<{ ready: boolean; source?: string }>(
+            const dbModelType = m.key;
+            const resp = await modelProviderRequest<{
+              ready: boolean;
+              source?: string;
+              shared_by_name?: string;
+              shared_by_id?: string;
+              provider_name?: string;
+              model_name?: string;
+            }>(
               "GET",
               `/model_providers/models/ready?model_type=${encodeURIComponent(dbModelType)}`
             );
-            return { capability: m.key, ready: resp.ready };
+            return {
+              capability: m.key,
+              info: {
+                ready: resp.ready,
+                source: resp.source as 'own' | 'shared' | undefined,
+                sharedByName: resp.shared_by_name,
+                sharedByID: resp.shared_by_id,
+                providerName: resp.provider_name,
+                modelName: resp.model_name,
+              } as ModelReadyInfo,
+            };
           })
         );
-        const nextReadyStatus: Partial<Record<ModelCapability, boolean | null>> = {};
+        const nextReadyStatus: Partial<Record<ModelCapability, ModelReadyInfo>> = {};
         readyResults.forEach((result) => {
           if (result.status === 'fulfilled') {
-            nextReadyStatus[result.value.capability] = result.value.ready;
+            nextReadyStatus[result.value.capability] = result.value.info;
           }
         });
         setModelReadyStatus(nextReadyStatus);
@@ -865,13 +809,12 @@ export default function ModelProviderPage() {
 
     setModuleModelLoading((current) => ({ ...current, [capability]: true }));
     try {
-      const modelType = modelTypeByCapability[capability];
+      const modelType = capability;
       const data = await modelProviderRequest<{ models?: Array<ApiModel & {
         user_model_provider_id: string;
         user_model_provider_group_id: string;
         provider_name: string;
         group_name: string;
-        base_url?: string;
       }> }>("GET", `/model_providers/models?model_type=${encodeURIComponent(modelType)}`);
       const options = (data.models || []).map((model) => {
         const provider =
@@ -879,7 +822,6 @@ export default function ModelProviderPage() {
           mapApiProvider({
             id: model.user_model_provider_id,
             name: model.provider_name,
-            base_url: model.base_url,
           }, localizedFallbacks);
         const configuredProvider = addedProviderList.find((item) => item.id === provider.id);
         const group =
@@ -887,7 +829,7 @@ export default function ModelProviderPage() {
           createConnectionGroup(provider, {
             id: model.user_model_provider_group_id,
             name: model.group_name,
-            baseUrl: model.base_url || provider.baseUrl,
+            baseUrl: provider.baseUrl,
             verified: true,
           });
         const providerModel: ProviderModel = {
@@ -1252,7 +1194,7 @@ export default function ModelProviderPage() {
     customModelForm.setFieldsValue({
       providerId: provider.id,
       groupId: group.id,
-      capability: provider.capabilities[0] || "LLM_CHAT",
+      capability: provider.capabilities[0] || "llm",
       name: "",
     });
   };
@@ -1283,13 +1225,13 @@ export default function ModelProviderPage() {
         `/model_providers/${encodeURIComponent(provider.id)}/groups/${encodeURIComponent(group.id)}/models`,
         {
           name: values.name.trim(),
-          model_type: modelTypeByCapability[values.capability],
+          model_type: values.capability,
         }
       );
       const nextModel: ProviderModel = {
         id: createdModel.id,
         name: createdModel.name,
-        capability: mapModelTypeToCapability(createdModel.model_type || modelTypeByCapability[values.capability]),
+        capability: mapModelTypeToCapability(createdModel.model_type || values.capability),
         builtIn: Boolean(createdModel.is_default),
         enabled: true,
       };
@@ -1343,7 +1285,7 @@ export default function ModelProviderPage() {
       );
       await refreshSelectedModelsState();
       clearModuleModelCache(model.capability);
-      if (model.capability === "EMBEDDING" || model.capability === "MULTIMODAL_EMBEDDING") {
+      if (model.capability === "embed_main" || model.capability === "embed_image") {
         notifyModelFeaturesChanged();
       }
       message.success(t("modelProvider.message.modelDeleted"));
@@ -1353,10 +1295,9 @@ export default function ModelProviderPage() {
   };
 
   const saveSelectedModel = async (capability: ModelCapability, value?: string) => {
-    const modelType = selectedModelTypeByCapability[capability];
     const selections = [
       {
-        model_type: modelType,
+        model_type: capability,
         model_id: value ? parseModelValue(value).modelId : "",
       },
     ];
@@ -1393,7 +1334,7 @@ export default function ModelProviderPage() {
     }));
     void saveSelectedModel(capability, value).then(async () => {
       await refreshSelectedModelsState();
-      if (capability === "EMBEDDING" || capability === "MULTIMODAL_EMBEDDING") {
+      if (capability === "embed_main" || capability === "embed_image") {
         notifyModelFeaturesChanged();
       }
     }).catch((error) => {
@@ -1404,7 +1345,7 @@ export default function ModelProviderPage() {
   const handleModelSelection = (capability: ModelCapability, value?: string) => {
     const previousValue = selectedModels[capability];
     // Only warn when switching embedding that is already live (share=true means it's been configured and shared).
-    if (capability === "EMBEDDING" && previousValue && previousValue !== value && shareStatus["EMBEDDING"] === true) {
+    if (capability === "embed_main" && previousValue && previousValue !== value && shareStatus["embed_main"] === true) {
       Modal.confirm({
         title: t("modelProvider.embeddingChangeTitle"),
         content: t("modelProvider.embeddingChangeContent"),
@@ -1467,7 +1408,7 @@ export default function ModelProviderPage() {
                         </Tooltip>
                       ) : null}
                       {isAdmin ? (
-                        <Tooltip title={shareStatus[module.key] ? t("modelProvider.shareOn") : t("modelProvider.shareOff")}>
+                        <Tooltip title={t("modelProvider.shareAdminTip")}>
                           <Switch
                             aria-label={t("modelProvider.shareToggleAria", { title: moduleTitle })}
                             checked={!!shareStatus[module.key]}
@@ -1481,19 +1422,25 @@ export default function ModelProviderPage() {
                       ) : null}
                       {!isAdmin ? (
                         <Tooltip
-                          title={
-                            modelReadyStatus[module.key] === false
-                              ? t("modelProvider.modelNotReadyTip")
-                              : modelReadyStatus[module.key] === true
-                                ? t("modelProvider.modelReadyTip")
-                                : undefined
-                          }
+                          title={(() => {
+                            const info = modelReadyStatus[module.key];
+                            if (info == null) return undefined;
+                            if (!info.ready) return t("modelProvider.modelNotReadyTip");
+                            if (info.source === 'shared' && info.sharedByName) {
+                              return t("modelProvider.modelReadySharedTip", {
+                                name: info.sharedByName,
+                                provider: info.providerName || '',
+                                model: info.modelName || '',
+                              });
+                            }
+                            return t("modelProvider.modelReadyTip");
+                          })()}
                         >
                           <span style={{ pointerEvents: "auto" }} className="model-provider-ready-indicator" aria-label={t("modelProvider.readyStatusAria", { title: moduleTitle })}>
-                            {modelReadyStatus[module.key] === true ? (
+                            {modelReadyStatus[module.key]?.ready === true ? (
                               <CheckCircleOutlined className="model-provider-ready-icon is-ready" />
-                            ) : modelReadyStatus[module.key] === false ? (
-                              <MinusCircleOutlined className="model-provider-ready-icon is-not-ready" />
+                            ) : modelReadyStatus[module.key]?.ready === false ? (
+                              <MinusCircleOutlined className={`model-provider-ready-icon is-not-ready${module.required ? ' is-required' : ''}`} />
                             ) : null}
                           </span>
                         </Tooltip>

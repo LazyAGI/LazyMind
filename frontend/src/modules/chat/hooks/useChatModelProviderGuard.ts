@@ -80,21 +80,21 @@ export function useChatModelProviderGuard() {
 
       const [chatReadyResp, embeddingResp, multimodalEmbeddingResp, rerankResp, vlmResp] = await Promise.all([
         axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
-          `${BASE_URL}/api/core/model_providers/models/ready?model_type=llm-chat`
+          `${BASE_URL}/api/core/model_providers/models/ready?model_type=llm`
         ).catch(() => null),
         axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
-          `${BASE_URL}/api/core/model_providers/models/ready?model_type=embedding`
+          `${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_main`
         ).catch(() => null),
         imageEmbedRequired
           ? axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
-              `${BASE_URL}/api/core/model_providers/models/ready?model_type=multimodal_embedding`
+              `${BASE_URL}/api/core/model_providers/models/ready?model_type=embed_image`
             ).catch(() => null)
           : Promise.resolve(null),
         axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
-          `${BASE_URL}/api/core/model_providers/models/ready?model_type=rerank`
+          `${BASE_URL}/api/core/model_providers/models/ready?model_type=reranker`
         ).catch(() => null),
         axiosInstance.get<ApiEnvelope<ModelReadyResponse> | ModelReadyResponse>(
-          `${BASE_URL}/api/core/model_providers/models/ready?model_type=VLM`
+          `${BASE_URL}/api/core/model_providers/models/ready?model_type=vlm`
         ).catch(() => null),
       ]);
 
