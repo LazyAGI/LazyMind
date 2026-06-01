@@ -6,12 +6,8 @@ from typing import Dict
 from lazyllm.tools.agent.skill_manager import SkillManager as LazySkillManager
 from lazyllm.tools.fs.client import FS
 
-from algorithm.lazymind.chat.integrations.remote_fs import RemoteFS  # noqa: F401
+from lazymind.chat.integrations import RemoteFS  # noqa: F401
 from lazymind.model_config import extract_skill_fs_source
-
-_UUID_SEGMENT_RE = re.compile(
-    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-)
 
 
 def extract_skill_category_from_path(skill_dir: str, skill_name: str) -> str:
@@ -29,9 +25,6 @@ def extract_skill_category_from_path(skill_dir: str, skill_name: str) -> str:
 
     if parts[-1] == skill_name:
         parts = parts[:-1]
-
-    if parts and _UUID_SEGMENT_RE.match(parts[0]):
-        parts = parts[1:]
 
     return parts[-1] if parts else ''
 

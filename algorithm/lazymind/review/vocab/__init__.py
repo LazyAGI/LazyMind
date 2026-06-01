@@ -1,4 +1,4 @@
-from lazymind.review.vocab.evolution import (
+from .evolution import (
     ActionPlanningModule,
     ChatHistoryRecord,
     HistoryChunker,
@@ -8,7 +8,7 @@ from lazymind.review.vocab.evolution import (
     VocabEvolutionRequest,
     get_ppl_vocab_evolution,
 )
-from lazymind.review.vocab.vocab_manager import VocabManager
+from .vocab_manager import VocabManager
 
 __all__ = [
     'ActionPlanningModule',

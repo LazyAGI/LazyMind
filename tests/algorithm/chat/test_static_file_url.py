@@ -1,6 +1,6 @@
-import lazymind.chat.service.static_file_url as sfu_mod
+import lazymind.chat.service.utils.static_file_url as sfu_mod
 
-from lazymind.chat.service.static_file_url import (
+from lazymind.chat.service.utils.static_file_url import (
     basename_from_path,
     local_path_from_static_file_url,
     resolve_local_image_path,

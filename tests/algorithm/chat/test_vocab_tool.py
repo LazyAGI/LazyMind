@@ -11,8 +11,9 @@ if _ALGO not in sys.path:
 if _LAZYLLM_ROOT not in sys.path:
     sys.path.insert(0, _LAZYLLM_ROOT)
 
-from lazymind.chat.engine.tools import vocab as vocab_tool
-from lazymind.review.service import db as vocab_db
+from lazymind.chat.engine.tools import vocab as vocab_tool  # noqa: E402
+from lazymind.chat.engine.tools.infra import resolve_vocab_user_id  # noqa: E402
+from lazymind.review.service import db as vocab_db  # noqa: E402
 
 
 def test_fetch_chat_histories_for_timestamped_session(monkeypatch):
@@ -69,7 +70,7 @@ def test_fetch_chat_histories_for_timestamped_session(monkeypatch):
 def test_resolve_user_id_reads_agentic_config(monkeypatch):
     monkeypatch.setattr(vocab_tool.lazyllm, 'globals', {'agentic_config': {'user_id': 'user-9'}})
 
-    assert vocab_tool._resolve_user_id(None) == 'user-9'
+    assert resolve_vocab_user_id(None) == 'user-9'
 
 
 def test_vocab_manage_creates_group_for_new_pair(monkeypatch):

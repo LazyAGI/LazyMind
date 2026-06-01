@@ -1,3 +1,8 @@
 from __future__ import annotations
 
-__all__: list[str] = []
+from . import memory_generate_routes, vocab_routes
+
+__all__ = [
+    'memory_generate_routes',
+    'vocab_routes',
+]

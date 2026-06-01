@@ -59,7 +59,14 @@ def adaptive_k_select_from_nodes(
     smooth_w: int = 1,
     default_k: int = 6,
 ) -> Tuple[List[Any], int, Dict]:
-    """Select a dynamic k based on score gaps and an optional token budget."""
+    """
+    Adaptive k selection using DocNode.relevance_score:
+    - Finds the position of the "maximum first-order gap" in the score sequence within the first search_pct range as the threshold, plus a buffer B;  # noqa: E501
+    - Optional gap_tau: falls back to budget-driven or default_k when the maximum gap is not significant;
+    - Finally applies a token budget for secondary truncation.
+
+    Returns: (selected_nodes, k, diag)
+    """
     N = len(nodes)
     if N == 0:
         return [], 0, dict(max_gap=0.0, argmax_idx=-1, scores_head=[], tokens_used=0, k_before_budget=0)
@@ -75,11 +82,8 @@ def adaptive_k_select_from_nodes(
         k = 1
         tokens_used = int(get_token_len(nodes_sorted[0])) if get_token_len else 0
         return nodes_sorted[:1], k, dict(
-            max_gap=0.0,
-            argmax_idx=0,
-            scores_head=scores[:1],
-            tokens_used=tokens_used,
-            k_before_budget=1,
+            max_gap=0.0, argmax_idx=0, scores_head=scores[:1],
+            tokens_used=tokens_used, k_before_budget=1
         )
 
     s_sm = _moving_average(scores, smooth_w) if smooth_w > 1 else scores
@@ -140,7 +144,7 @@ class AdaptiveKComponent(ModuleBase):
             nodes,
             get_score=self.get_score,
             get_token_len=self.get_token_len,
-            **self.kwargs,
+            **self.kwargs
         )
         LOG.info(f'[AdaptiveKComponent] AdaptiveK selected {k} / {len(nodes)} nodes, diag={diag}')
         return selected

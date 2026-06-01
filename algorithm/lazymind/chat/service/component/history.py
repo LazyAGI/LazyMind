@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from lazymind.chat.service.utils.citations import (
+from lazymind.chat.service.utils import (
     SOURCE_LINK_PATTERN,
     reset_citation_state,
     restore_history_citations,

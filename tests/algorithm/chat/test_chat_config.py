@@ -45,7 +45,7 @@ def test_chat_config_bootstraps_canonical_config_module(monkeypatch):
     monkeypatch.setitem(sys.modules, 'config', fake_config_module)
 
     module_name = 'test_chat_config_isolated'
-    module_path = Path(__file__).resolve().parents[3] / 'algorithm/lazymind/chat/service/config.py'
+    module_path = Path(__file__).resolve().parents[3] / 'algorithm/lazymind/chat/config.py'
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     module = importlib.util.module_from_spec(spec)
     sys.modules.pop(module_name, None)

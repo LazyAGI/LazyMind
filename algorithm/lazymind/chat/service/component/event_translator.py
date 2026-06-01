@@ -4,9 +4,10 @@ import re
 from typing import Any, Optional
 
 from lazymind.config import config as _cfg
-from lazymind.chat.service.utils.citations import (
+from lazymind.chat.service.utils import (
     annotate_citations,
     build_stream_citation_scanner,
+    rewrite_markdown_image_urls,
     rewrite_citations,
 )
 from lazymind.chat.service.component.tool_rendering import (
@@ -14,7 +15,6 @@ from lazymind.chat.service.component.tool_rendering import (
     _tool_call_frame_text,
     _tool_result_frame_text,
 )
-from lazymind.chat.service.utils.markdown_images import rewrite_markdown_image_urls
 
 _STREAM_CHUNK_SIZE = 24
 

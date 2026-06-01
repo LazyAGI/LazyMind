@@ -20,15 +20,15 @@ from lazymind.chat.config import (
 from lazymind.chat.service.component.history import _normalize_history_for_agent
 from lazymind.chat.engine.prompts.system_prompt import _build_system_prompt
 from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, filter_tools, to_agent_inputs
-from lazymind.chat.service.utils.file_validation import validate_and_resolve_files
-from lazymind.chat.service.utils.sensitive_filter import SensitiveFilter
-from lazymind.chat.service.utils.streaming import (
-    _log_and_emit_frame,
+from lazymind.chat.service.utils import (
+    SensitiveFilter,
     response_payload,
     single_event_stream_response,
     sse_line,
+    validate_and_resolve_files,
 )
-from lazymind.chat.engine import *  # noqa: F401,F403
+from lazymind.chat.service.utils.streaming import _log_and_emit_frame
+from lazymind.chat import engine as _chat_engine  # noqa: F401
 from lazyllm.tools.fs.client import FS
 from lazymind.model_config import get_config_path, inject_model_config, summarize_model_config_for_log
 from lazyllm.tools.tool_config_inject import inject_tool_config

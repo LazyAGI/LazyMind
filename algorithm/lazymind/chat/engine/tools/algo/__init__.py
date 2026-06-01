@@ -1,3 +1,5 @@
 """Algorithm helpers for chat engine tools."""
 
-from lazymind.chat.engine.tools.algo.kb_ppl_search import ppl_search as ppl_search  # noqa: F401
+from .kb_ppl_search import ppl_search
+
+__all__ = ['ppl_search']

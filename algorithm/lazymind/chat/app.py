@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from algorithm.lazymind.chat.api import chat_routes, health_routes, model_check_routes
+from lazymind.chat.api import chat_routes, health_routes, model_check_routes
 
 
 def create_app() -> FastAPI:
@@ -11,7 +11,7 @@ def create_app() -> FastAPI:
         description='Knowledge-base-backed conversational API service',
         version='1.0.0',
     )
-    from algorithm.lazymind.chat.api import (
+    from lazymind.chat.api import (
         model_features_routes,
     )
     from lazymind.review.api import memory_generate_routes

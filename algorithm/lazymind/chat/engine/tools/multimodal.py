@@ -9,8 +9,7 @@ from lazyllm.components.formatter import encode_query_with_filepaths
 
 from lazymind.chat.engine.prompts.guidance import VISION_EXTRACT_DEFAULT_INSTRUCTION
 from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
-from lazymind.chat.engine.tools.infra import extract_text_from_model_output
-from lazymind.chat.service.utils.static_file_url import resolve_local_image_path
+from lazymind.chat.service.utils import resolve_local_image_path
 from lazymind.model_config import get_config_path
 
 
@@ -58,5 +57,5 @@ class MultimodalToolGroup:
             lazyllm_files=None,
             priority=priority,
         )
-        text = extract_text_from_model_output(out)
+        text = str(out).strip()
         return tool_success('vision_extractor', {'description': text, 'url': local_path})

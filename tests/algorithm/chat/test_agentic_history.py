@@ -1,4 +1,4 @@
-from lazymind.chat.service.agentic.history import _normalize_history_for_agent
+from lazymind.chat.service.component.history import _normalize_history_for_agent
 from lazymind.chat.service.utils.citations import annotate_citations
 
 

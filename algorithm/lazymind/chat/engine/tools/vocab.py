@@ -22,7 +22,7 @@ from lazymind.review.service.db import (
     fetch_chat_histories_for_session,
     fetch_vocab_groups_for_user_id,
 )
-from lazymind.review.vocab.evolution import (
+from lazymind.review.vocab import (
     ActionPlanningModule,
     ChatHistoryRecord,
     VocabEvolutionRequest,

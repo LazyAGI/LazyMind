@@ -69,8 +69,7 @@ class ContextExpansionComponent(ModuleBase):
                     return []
         window = window if isinstance(window, list) else ([window] if window else [])
         neighbors = [
-            n
-            for n in window
+            n for n in window
             if n.uid != node.uid and n.uid not in existing_uids and _get_doc_id(n) == doc_id
         ]
         neighbors.sort(key=_node_sort_key)

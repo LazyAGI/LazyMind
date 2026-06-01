@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 
-from lazymind.review.vocab.vocab_manager import VocabManager
+from lazymind.review.vocab import VocabManager
 from lazymind.review.service.db import fetch_vocab_for_user_id
 
 _registry: dict[str, VocabManager] = {}

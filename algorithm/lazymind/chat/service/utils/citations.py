@@ -5,11 +5,11 @@ from collections import OrderedDict
 from html import escape
 from typing import Any, Optional
 
-from lazymind.chat.service.utils.static_file_url import (
+from .static_file_url import (
     basename_from_path,
     static_file_url_from_any,
 )
-from lazymind.chat.service.utils.stream_scanner import (
+from .stream_scanner import (
     BasePlugin,
     IncrementalScanner,
     MarkdownImageHoldPlugin,

@@ -20,11 +20,11 @@ from lazymind.chat.engine.tools.infra import (
     term_filter,
 )
 from lazymind.chat.service.utils import (
+    annotate_citations,
     basename_from_path,
     local_path_from_static_file_url,
     static_file_url_from_any,
 )
-from lazymind.chat.service.utils.citations import annotate_citations
 _MAX_TEXT_LEN = 1200
 _MAX_RESULT_ITEMS = 50
 _DEFAULT_KB_DOCUMENT = kb_document_provider.get_default_document()
