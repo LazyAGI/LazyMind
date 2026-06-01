@@ -120,7 +120,7 @@ _TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_move': 'Moving Feishu file from {value} to the target path.',
     'FeishuWikiFS_copy': 'Copying Feishu file from {value} to the target path.',
 }
-_TOOL_CALL_FALLBACK_TEMPLATE = 'Preparing the requested tool action for {value}.'
+_TOOL_CALL_FALLBACK_TEMPLATE = 'Calling a tool to handle the request.'
 
 _ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'kb_search': '正在知识库中检索与 {value} 相关的知识。',
@@ -161,7 +161,7 @@ _ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_move': '正在将飞书文件从 {value} 移动到目标路径。',
     'FeishuWikiFS_copy': '正在将飞书文件从 {value} 复制到目标路径。',
 }
-_ZH_TOOL_CALL_FALLBACK_TEMPLATE = '正在准备执行与 {value} 相关的工具操作...'
+_ZH_TOOL_CALL_FALLBACK_TEMPLATE = '正在调用工具处理请求...'
 
 _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'kb_search': 'Knowledge base results for {value} are ready now.',
@@ -343,12 +343,12 @@ _ZH_TOOL_RESULT_APPROVAL_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_write': '写入这个飞书文件前，请先确认提示“{value}”。',
 }
 
-_TOOL_RESULT_FALLBACK_TEMPLATE = 'Tool results for {value} were received successfully.'
-_TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE = 'The step for {value} could not be completed.'
-_TOOL_RESULT_APPROVAL_FALLBACK_TEMPLATE = 'Please review the confirmation note "{value}" before continuing.'
-_ZH_TOOL_RESULT_FALLBACK_TEMPLATE = '已成功收到工具结果，为 {value} 。'
-_ZH_TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE = '未能完成与 {value} 相关的步骤。'
-_ZH_TOOL_RESULT_APPROVAL_FALLBACK_TEMPLATE = '继续前，请先确认提示“{value}”。'
+_TOOL_RESULT_FALLBACK_TEMPLATE = 'Tool processing has finished.'
+_TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE = 'Tool processing could not be completed.'
+_TOOL_RESULT_APPROVAL_FALLBACK_TEMPLATE = 'This operation needs confirmation before continuing.'
+_ZH_TOOL_RESULT_FALLBACK_TEMPLATE = '工具处理已完成。'
+_ZH_TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE = '工具处理未能完成。'
+_ZH_TOOL_RESULT_APPROVAL_FALLBACK_TEMPLATE = '此操作需要确认后才能继续。'
 
 _KB_EMPTY_RESULT_MESSAGES: dict[str, dict[str, str]] = {
     'kb_search': {
