@@ -7,17 +7,17 @@ import (
 
 // Parse-task failure codes (localized on frontend via errors.{code}).
 const (
-	parseTaskErrCodeSubmitFailed      = "2000720"
-	parseTaskErrCodeRateLimit         = "2000721"
-	parseTaskErrCodeLLMNotConfigured  = "2000722"
-	parseTaskErrCodeNgNames           = "2000723"
-	parseTaskErrCodeNoNodes           = "2000724"
-	parseTaskErrCodeMilvusUnavailable = "2000725"
-	parseTaskErrCodeVectorPool        = "2000726"
-	parseTaskErrCodeParserSubmit      = "2000727"
-	parseTaskErrCodeReparseFailed     = "2000728"
+	parseTaskErrCodeSubmitFailed       = "2000720"
+	parseTaskErrCodeRateLimit          = "2000721"
+	parseTaskErrCodeLLMNotConfigured   = "2000722"
+	parseTaskErrCodeNgNames            = "2000723"
+	parseTaskErrCodeNoNodes            = "2000724"
+	parseTaskErrCodeMilvusUnavailable  = "2000725"
+	parseTaskErrCodeVectorPool         = "2000726"
+	parseTaskErrCodeParserSubmit       = "2000727"
+	parseTaskErrCodeReparseFailed      = "2000728"
 	parseTaskErrCodeServiceUnavailable = "2000729"
-	parseTaskErrCodeTimeout           = "2000730"
+	parseTaskErrCodeTimeout            = "2000730"
 )
 
 const defaultParseTaskErrCode = parseTaskErrCodeSubmitFailed
@@ -43,17 +43,17 @@ var parseTaskErrorRules = []parseTaskErrorRule{
 
 // legacyParseTaskErrText maps previously persisted Chinese messages to error codes.
 var legacyParseTaskErrText = map[string]string{
-	"任务提交失败":                    parseTaskErrCodeSubmitFailed,
-	"API 调用频率超限，请稍后重试":          parseTaskErrCodeRateLimit,
-	"LLM 模型未配置":                  parseTaskErrCodeLLMNotConfigured,
-	"解析组不存在或未注册":                parseTaskErrCodeNgNames,
-	"依赖切片未生成，请先完成基础解析":          parseTaskErrCodeNoNodes,
+	"任务提交失败":                   parseTaskErrCodeSubmitFailed,
+	"API 调用频率超限，请稍后重试":         parseTaskErrCodeRateLimit,
+	"LLM 模型未配置":                parseTaskErrCodeLLMNotConfigured,
+	"解析组不存在或未注册":               parseTaskErrCodeNgNames,
+	"依赖切片未生成，请先完成基础解析":         parseTaskErrCodeNoNodes,
 	"Milvus 连接失败，请检查向量库服务是否可用": parseTaskErrCodeMilvusUnavailable,
-	"向量库连接异常":                   parseTaskErrCodeVectorPool,
-	"解析任务提交失败":                  parseTaskErrCodeParserSubmit,
-	"解析执行失败":                    parseTaskErrCodeReparseFailed,
-	"解析服务不可用":                   parseTaskErrCodeServiceUnavailable,
-	"解析超时":                      parseTaskErrCodeTimeout,
+	"向量库连接异常":                  parseTaskErrCodeVectorPool,
+	"解析任务提交失败":                 parseTaskErrCodeParserSubmit,
+	"解析执行失败":                   parseTaskErrCodeReparseFailed,
+	"解析服务不可用":                  parseTaskErrCodeServiceUnavailable,
+	"解析超时":                     parseTaskErrCodeTimeout,
 }
 
 func isParseTaskErrCode(s string) bool {

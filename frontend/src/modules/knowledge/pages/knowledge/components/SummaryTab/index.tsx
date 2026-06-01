@@ -17,7 +17,7 @@ const SummaryTab = (props: SummaryTabProps) => {
       detail={detail}
       type={type}
       names={[type]}
-      editable={true}
+      editable={false}
       onGetItemInfo={onGetItemInfo}
     />
   );

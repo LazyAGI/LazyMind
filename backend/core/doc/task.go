@@ -1737,9 +1737,16 @@ func markTaskStartFailed(ctx context.Context, datasetID string, taskRow orm.Task
 		ext.ErrorMessage = defaultParseTaskErrCode
 	}
 	now := time.Now().UTC()
-	_ = store.DB().WithContext(ctx).Model(&orm.Task{}).
+	if err := store.DB().WithContext(ctx).Model(&orm.Task{}).
 		Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", taskRow.ID, datasetID).
-		Updates(map[string]any{"ext": mustJSON(ext), "updated_at": now}).Error
+		Updates(map[string]any{"ext": mustJSON(ext), "updated_at": now}).Error; err != nil {
+		applog.Logger.Error().
+			Err(err).
+			Str("handler", "markTaskStartFailed").
+			Str("task_id", taskRow.ID).
+			Str("dataset_id", datasetID).
+			Msg("failed to persist task failure state")
+	}
 }
 
 func maxInt64(a, b int64) int64 {
