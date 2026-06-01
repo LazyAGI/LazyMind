@@ -25,13 +25,13 @@ type setSharedProviderRequest struct {
 }
 
 type selectedProviderItem struct {
-	Category                 string `json:"category"`
-	GroupID                  string `json:"group_id"`
-	UserModelProviderID      string `json:"user_model_provider_id"`
-	ProviderName             string `json:"provider_name"`
-	GroupName                string `json:"group_name"`
-	BaseURL                  string `json:"base_url"`
-	Share                    bool   `json:"share"`
+	Category            string `json:"category"`
+	GroupID             string `json:"group_id"`
+	UserModelProviderID string `json:"user_model_provider_id"`
+	ProviderName        string `json:"provider_name"`
+	GroupName           string `json:"group_name"`
+	BaseURL             string `json:"base_url"`
+	Share               bool   `json:"share"`
 }
 
 type selectedProvidersResponse struct {

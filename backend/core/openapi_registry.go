@@ -459,7 +459,9 @@ type listWordGroupsQueryParams struct {
 }
 
 type listUserModelProvidersQueryParams struct {
-	Keyword string `query:"keyword"`
+	Category        string `query:"category"`
+	ExcludeCategory string `query:"exclude_category"`
+	Keyword         string `query:"keyword"`
 }
 
 type checkModelProviderOpenAPIRequest struct {
@@ -599,13 +601,13 @@ type setSelectedProviderOpenAPIRequest struct {
 }
 
 type selectedProviderOpenAPIItem struct {
-	Category                string `json:"category"`
-	GroupID                 string `json:"group_id"`
-	UserModelProviderID     string `json:"user_model_provider_id"`
-	ProviderName            string `json:"provider_name"`
-	GroupName               string `json:"group_name"`
-	BaseURL                 string `json:"base_url"`
-	Share                   bool   `json:"share"`
+	Category            string `json:"category"`
+	GroupID             string `json:"group_id"`
+	UserModelProviderID string `json:"user_model_provider_id"`
+	ProviderName        string `json:"provider_name"`
+	GroupName           string `json:"group_name"`
+	BaseURL             string `json:"base_url"`
+	Share               bool   `json:"share"`
 }
 
 type selectedProvidersOpenAPIResponse struct {
@@ -1577,7 +1579,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/model_providers",
 			Summary:     "List user model providers",
-			Description: "Per-user model provider list. On first request for a user, rows are copied from the built-in default_model_providers table. The current user identity is injected by the auth gateway from the token. Query parameter keyword filters by provider name (SQL LIKE).",
+			Description: "Per-user model provider list. Missing catalog rows are synced from default_model_providers on each request. Query parameter category filters by provider category (default model when category and exclude_category are both omitted). Query parameter exclude_category excludes a category (e.g. exclude_category=model returns ocr and search providers). Query parameter keyword filters by provider name (SQL LIKE).",
 			Tags:        []string{"model_providers"},
 			QueryParams: listUserModelProvidersQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("User model provider list", listUserModelProvidersOpenAPIResponse{})},

@@ -28,9 +28,12 @@ type listResponse struct {
 	Providers []listItem `json:"providers"`
 }
 
-// ListUserProviders returns the current user's model providers. When the list
-// is empty, all DefaultModelProvider rows are copied into user_model_providers.
-// Optional query param: keyword — substring match on name (SQL LIKE).
+const defaultProviderCategory = "model"
+
+// ListUserProviders returns the current user's model providers. Missing catalog
+// rows are copied from default_model_providers on each request (incremental sync).
+// Query params: category (default model when omitted), exclude_category,
+// keyword — substring match on name (SQL LIKE).
 func ListUserProviders(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	if db == nil {
@@ -44,14 +47,24 @@ func ListUserProviders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userName := strings.TrimSpace(store.UserName(r))
-	if err := seedUserProvidersIfEmpty(r.Context(), db, userID, userName); err != nil {
+	if err := syncUserProvidersFromDefaults(r.Context(), db, userID, userName); err != nil {
 		common.ReplyErr(w, "sync model providers failed", http.StatusInternalServerError)
 		return
 	}
 
+	category := strings.TrimSpace(r.URL.Query().Get("category"))
+	excludeCategory := strings.TrimSpace(r.URL.Query().Get("exclude_category"))
 	keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
 	q := db.WithContext(r.Context()).Model(&orm.UserModelProvider{}).
 		Where("create_user_id = ? AND deleted_at IS NULL", userID)
+	if category != "" {
+		q = q.Where("category = ?", category)
+	} else if excludeCategory == "" {
+		q = q.Where("category = ?", defaultProviderCategory)
+	}
+	if excludeCategory != "" {
+		q = q.Where("category != ?", excludeCategory)
+	}
 	if keyword != "" {
 		q = q.Where("name LIKE ?", "%"+keyword+"%")
 	}
@@ -155,20 +168,23 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 	return out
 }
 
-func seedUserProvidersIfEmpty(ctx context.Context, db *gorm.DB, userID, userName string) error {
+// syncUserProvidersFromDefaults copies missing default_model_providers rows into
+// user_model_providers for the given user (matched by default_model_provider_id).
+func syncUserProvidersFromDefaults(ctx context.Context, db *gorm.DB, userID, userName string) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var n int64
+		var existingIDs []string
 		if err := tx.Model(&orm.UserModelProvider{}).
 			Where("create_user_id = ? AND deleted_at IS NULL", userID).
-			Count(&n).Error; err != nil {
+			Pluck("default_model_provider_id", &existingIDs).Error; err != nil {
 			return err
 		}
-		if n > 0 {
-			return nil
-		}
 
+		q := tx.Model(&orm.DefaultModelProvider{}).Where("deleted_at IS NULL")
+		if len(existingIDs) > 0 {
+			q = q.Where("id NOT IN ?", existingIDs)
+		}
 		var defs []orm.DefaultModelProvider
-		if err := tx.Find(&defs).Error; err != nil {
+		if err := q.Find(&defs).Error; err != nil {
 			return err
 		}
 		if len(defs) == 0 {

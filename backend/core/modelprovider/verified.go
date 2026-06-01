@@ -19,9 +19,9 @@ type verifiedGroupItem struct {
 	GroupName           string `json:"group_name"`
 	BaseURL             string `json:"base_url"`
 	Category            string `json:"category"`
-	Source              string `json:"source,omitempty"`          // "own" | "shared"
-	SharedByName        string `json:"shared_by_name,omitempty"`  // sharer's display name
-	SharedByID          string `json:"shared_by_id,omitempty"`    // sharer's user_id
+	Source              string `json:"source,omitempty"`         // "own" | "shared"
+	SharedByName        string `json:"shared_by_name,omitempty"` // sharer's display name
+	SharedByID          string `json:"shared_by_id,omitempty"`   // sharer's user_id
 }
 
 type verifiedGroupResponse struct {
