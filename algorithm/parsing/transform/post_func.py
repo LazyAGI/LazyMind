@@ -277,7 +277,7 @@ class ImageNodeLoader(ModuleBase):
 
     def __init__(self, num_workers: int = 0, return_trace: bool = False, **kwargs):
         super().__init__(return_trace=return_trace, **kwargs)
-        self._default_cache_dir = _cfg['image_cache_dir']
+        self._default_cache_dir = _cfg['ocr_cache_dir']
         self._normalized_root = Path(_cfg['shared_upload_dir']) / 'normalized_images'
         self._normalized_root.mkdir(parents=True, exist_ok=True)
 
