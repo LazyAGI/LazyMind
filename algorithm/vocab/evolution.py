@@ -24,7 +24,6 @@ from lazyllm import LOG, pipeline, AutoModel
 from lazyllm.components import ChatPrompter
 from lazyllm.components.formatter import JsonFormatter
 from lazyllm.module import ModuleBase
-from chat.utils.load_config import get_config_path
 
 from config import config as _cfg
 from .db import (
@@ -454,7 +453,7 @@ class SynonymExtractionModule(ModuleBase):
     def __init__(self, llm: Optional[Any] = None, *, return_trace: bool = False) -> None:
         super().__init__(return_trace=return_trace)
         if llm is None:
-            llm = AutoModel(model='llm', config=get_config_path())
+            llm = AutoModel(model='llm')
         base_llm = llm
         self._llm = base_llm.share(
             prompt=ChatPrompter(instruction=_EXTRACTION_PROMPT),
@@ -570,7 +569,7 @@ class ActionPlanningModule(ModuleBase):
 
     def _get_llm(self) -> Any:
         if self._llm is None:
-            base_llm = self._base_llm or AutoModel(model='llm', config=get_config_path())
+            base_llm = self._base_llm or AutoModel(model='llm')
             self._llm = base_llm.share(
                 prompt=ChatPrompter(instruction=_CONFLICT_PROMPT),
                 format=JsonFormatter(),

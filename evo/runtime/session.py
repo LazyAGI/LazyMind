@@ -94,9 +94,7 @@ class AnalysisSession:
                 self._llm_client = self.llm_provider()
             else:
                 from lazyllm import AutoModel
-                from algorithm.chat.utils.load_config import get_config_path
-
-                self._llm_client = AutoModel(model=self.config.model_config.llm_role, config=get_config_path())
+                self._llm_client = AutoModel(model=self.config.model_config.llm_role)
         if self._llm_client is None:
             raise RuntimeError('LLM factory returned None; check LAZYMIND_EVO_LLM_ROLE and LAZYMIND_MODEL_CONFIG_PATH.')
         return self._llm_client
@@ -107,9 +105,7 @@ class AnalysisSession:
                 self._embed_client = self.embed_provider()
             else:
                 from lazyllm import AutoModel
-                from algorithm.chat.utils.load_config import get_config_path
-
-                self._embed_client = AutoModel(model=self.config.model_config.embed_role, config=get_config_path())
+                self._embed_client = AutoModel(model=self.config.model_config.embed_role)
         return self._embed_client
 
     @property

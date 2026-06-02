@@ -51,7 +51,6 @@ from chat.components.agentic.tool_stream import (  # noqa: E402
 )
 from lazyllm import AutoModel  # noqa: E402
 from lazyllm.tools.fs.supplier.feishu import FeishuFS  # type: ignore[import]  # noqa: E402
-from chat.utils.load_config import get_config_path  # noqa: E402
 
 
 def _augment_query_with_attached_images(query: str, config: dict[str, Any]) -> str:
@@ -75,7 +74,7 @@ def _augment_query_with_attached_images(query: str, config: dict[str, Any]) -> s
             'priority': int(config.get('priority', 0) or 0),
         }
         rewriter = QueryImageRewriter(
-            vlm=AutoModel(model='vlm', config=get_config_path()),
+            vlm=AutoModel(model='vlm'),
         )
         out = rewriter(payload)
         if isinstance(out, dict):
@@ -223,7 +222,7 @@ def agentic_forward(
     if not isinstance(config, dict):
         config = {}
 
-    llm = AutoModel(model='llm', config=get_config_path())
+    llm = AutoModel(model='llm')
     available_tools = _filter_tools_for_request(
         _normalize_available_tools(config.get('available_tools')),
         config,

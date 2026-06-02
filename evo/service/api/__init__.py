@@ -32,10 +32,9 @@ def create_app(
     from evo.orchestrator.planner import Planner
     from evo.runtime.model_gateway import ModelGateway
     from lazyllm import AutoModel
-    from algorithm.chat.utils.load_config import get_config_path
     from evo.orchestrator.llm import make_evo_stream_llm
 
-    client = AutoModel(model=cfg.model_config.llm_role, config=get_config_path())
+    client = AutoModel(model=cfg.model_config.llm_role)
     gateway: ModelGateway[str] = ModelGateway(cfg.llm, name='evo-planner-llm')
     planner = Planner(
         llm=lambda prompt: gateway.call(lambda: client(prompt), cache_key=prompt, agent='planner'),

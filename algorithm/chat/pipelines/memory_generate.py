@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Literal, Optional
 
 from lazyllm import AutoModel
 from chat.tools.skill_manager import _validate_skill_content
-from chat.utils.load_config import get_config_path
 
 try:
     from json_repair import repair_json as _repair_json  # type: ignore
@@ -497,7 +496,7 @@ def _build_generate_prompt(
 
 class MemoryGeneratePipeline:
     def __init__(self) -> None:
-        self.llm = AutoModel(model='llm', config=get_config_path())
+        self.llm = AutoModel(model='llm')
 
     def generate(
         self,
