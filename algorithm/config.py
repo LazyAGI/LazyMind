@@ -1,47 +1,15 @@
 import os
-import sys
 from pathlib import Path
 
-# Prefer the vendored lazyllm package in this repo (algorithm/lazyllm/lazyllm)
-# over any site-packages installation, so config extensions (alias/options/post_action)
-# stay consistent in all entrypoints.
-_VENDORED_LAZYLLM_ROOT = (Path(__file__).resolve().parent / 'lazyllm').as_posix()
-if _VENDORED_LAZYLLM_ROOT not in sys.path:
-    sys.path.insert(0, _VENDORED_LAZYLLM_ROOT)
-
-_lazyllm_mod = sys.modules.get('lazyllm')
-if _lazyllm_mod is not None:
-    lazyllm_file = getattr(_lazyllm_mod, '__file__', '') or ''
-    try:
-        lazyllm_file = str(Path(lazyllm_file).resolve())
-    except Exception:
-        pass
-    try:
-        vendored_root = str(Path(_VENDORED_LAZYLLM_ROOT).resolve())
-    except Exception:
-        vendored_root = _VENDORED_LAZYLLM_ROOT
-    if lazyllm_file and not lazyllm_file.startswith(vendored_root):
-        # A site-packages lazyllm may have been imported earlier in this process.
-        # Drop it so subsequent imports resolve to the vendored package.
-        for name in list(sys.modules.keys()):
-            if name == 'lazyllm' or name.startswith('lazyllm.'):
-                sys.modules.pop(name, None)
-
+import lazyllm
 from lazyllm.configs import Config
 
 _COMMON_DIR = Path(__file__).resolve().parent / 'common'
 
 
 def _model_config_path_post_action(resolved_path):
-    '''Sync the resolved model_config_path into lazyllm.config after alias resolution.'''
-    if not resolved_path:
-        return
-    # Delayed import to avoid circular dependency (lazyllm imports algorithm modules).
-    try:
-        import lazyllm
-        lazyllm.config['auto_model_config_map_path'] = str(resolved_path)
-    except Exception:
-        pass
+    if not resolved_path: return
+    lazyllm.config['auto_model_config_map_path'] = str(resolved_path)
 
 # Single Config instance for the entire algorithm package.
 # All LAZYMIND_* environment variables are registered here.
@@ -66,13 +34,7 @@ config.add('algo_dataset_name', str, 'general_algo', 'ALGO_DATASET_NAME', descri
 config.add('default_chat_dataset', str, 'algo', 'DEFAULT_CHAT_DATASET', description='Default chat dataset.')
 config.add('skip_startup_pipeline', bool, False, 'SKIP_STARTUP_PIPELINE', description='Skip startup pipeline initialization.')
 config.add('model_config_path', str, 'dynamic', 'MODEL_CONFIG_PATH',
-           description=(
-               'Runtime model config path. Accepts shorthand aliases (inner/online/dynamic) '
-               'or an explicit YAML file path. '
-               'inner → runtime_models.inner.yaml (intranet/on-prem), '
-               'online → runtime_models.online.yaml (public cloud API), '
-               'dynamic → runtime_models.yaml (fully dynamic, key injected per request).'
-           ),
+           description='Runtime model config YAML path. Shorthand aliases are auto-resolved to absolute paths.',
            alias={
                'inner': str(_COMMON_DIR / 'runtime_models.inner.yaml'),
                'online': str(_COMMON_DIR / 'runtime_models.online.yaml'),
