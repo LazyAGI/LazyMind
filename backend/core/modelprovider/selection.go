@@ -364,7 +364,7 @@ func SetSharedModel(w http.ResponseWriter, r *http.Request) {
 		if req.Share {
 			// Clear any existing share=true for this model_type first.
 			if err := tx.Model(&orm.UserSelectedModel{}).
-				Where("model_type = ? AND share = ?", row.ModelType, true).
+				Where("model_type = ? AND share = ?", row.ModelKey, true).
 				Updates(map[string]any{"share": false, "updated_at": now}).Error; err != nil {
 				return err
 			}
@@ -385,7 +385,8 @@ func SetSharedModel(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetModelReady checks whether a model of the given model_type is ready for the current user.
-// It first checks the user's own selection, then falls back to any share=true row.
+// If the role is source=static in the runtime config yaml it is always ready (no user selection
+// required). Otherwise it checks the user's own selection first, then falls back to share=true.
 func GetModelReady(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	if db == nil {
@@ -400,6 +401,13 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 	modelType := strings.TrimSpace(r.URL.Query().Get("model_type"))
 	if modelType == "" {
 		common.ReplyErr(w, "model_type is required", http.StatusBadRequest)
+		return
+	}
+
+	// Static-source roles do not require a user selection — they are always ready.
+	isDynamic, _ := FetchRoleIsDynamic(r.Context(), modelType)
+	if !isDynamic {
+		common.ReplyOK(w, modelReadyResponse{Ready: true, Source: "static"})
 		return
 	}
 

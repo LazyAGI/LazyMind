@@ -111,7 +111,7 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 				"g.id = m.user_model_provider_group_id AND "+
 				"g.deleted_at IS NULL",
 		).
-		Where("m.model_type IN ? AND m.is_default = ? AND m.deleted_at IS NULL", []string{"embed_main", "embed_image"}, true).
+		Where("m.model_type IN ? AND m.is_default = ? AND m.deleted_at IS NULL", []string{"embed", "cross_modal_embed"}, true).
 		Order("m.created_at ASC").
 		Limit(1).
 		Scan(&row).Error

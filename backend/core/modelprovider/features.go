@@ -48,6 +48,70 @@ var imageEmbedRequiredInit bool
 
 const modelFeaturesTimeout = 5 * time.Second
 
+// algoRoleTypeResponse mirrors the algorithm GET /api/model/role_type JSON.
+type algoRoleTypeResponse struct {
+	Role      string `json:"role"`
+	Type      string `json:"type"`
+	Source    string `json:"source"`
+	IsDynamic bool   `json:"is_dynamic"`
+}
+
+// roleTypeInfo holds the cached result of a single GET /api/model/role_type call.
+type roleTypeInfo struct {
+	Type      string
+	IsDynamic bool
+}
+
+// roleTypeCache caches per-role info permanently (yaml is static per process).
+// Key: role string, Value: roleTypeInfo
+var roleTypeCache sync.Map
+
+// fetchRoleTypeInfo calls /api/model/role_type and caches the result.
+// On any error the zero value is returned so callers can decide their own fallback.
+func fetchRoleTypeInfo(ctx context.Context, role string) (roleTypeInfo, error) {
+	if v, ok := roleTypeCache.Load(role); ok {
+		return v.(roleTypeInfo), nil
+	}
+	upstream := common.JoinURL(common.ChatServiceEndpoint(), "/api/model/role_type")
+	var resp algoRoleTypeResponse
+	if err := common.ApiGet(ctx, upstream+"?role="+role, nil, &resp, modelFeaturesTimeout); err != nil {
+		return roleTypeInfo{}, err
+	}
+	info := roleTypeInfo{Type: resp.Type, IsDynamic: resp.IsDynamic}
+	roleTypeCache.Store(role, info)
+	return info, nil
+}
+
+// FetchRoleIsDynamic returns whether the given model_type role is source=dynamic in the runtime
+// config yaml.  Results are permanently cached since the yaml does not change at runtime.
+// Returns (true, nil) on any fetch error so that the caller falls back to the normal DB path.
+func FetchRoleIsDynamic(ctx context.Context, role string) (bool, error) {
+	info, err := fetchRoleTypeInfo(ctx, role)
+	if err != nil {
+		log.Logger.Warn().Err(err).Str("role", role).
+			Msg("role_type fetch failed; assuming dynamic=true")
+		return true, err
+	}
+	return info.IsDynamic, nil
+}
+
+// resolveModelType translates a runtime_models.yaml role key (e.g. "evo_llm") into the
+// lazyllm technical type (e.g. "llm") by calling the algorithm service.
+// If the algorithm service returns 404 (role not in yaml) or an error, the original
+// roleKey is returned unchanged so the caller can still query the DB directly.
+func resolveModelType(ctx context.Context, roleKey string) string {
+	info, err := fetchRoleTypeInfo(ctx, roleKey)
+	if err != nil {
+		log.Logger.Warn().Err(err).Str("role", roleKey).
+			Msg("resolveModelType: algo call failed, using role key as-is")
+		return roleKey
+	}
+	if info.Type == "" {
+		return roleKey
+	}
+	return info.Type
+}
+
 // fetchImageEmbedEnabled fetches and permanently caches image_embed_enabled from the algorithm service.
 func fetchImageEmbedEnabled(ctx context.Context) (bool, error) {
 	imageEmbedEnabledCache.Do(func() {
