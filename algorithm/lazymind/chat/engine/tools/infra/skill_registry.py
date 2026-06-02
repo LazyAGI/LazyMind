@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from typing import Dict
 
 from lazyllm.tools.agent.skill_manager import SkillManager as LazySkillManager
