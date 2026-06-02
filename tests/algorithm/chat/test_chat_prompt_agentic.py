@@ -1,4 +1,4 @@
-from lazymind.chat.engine.prompts.guidance import (
+from lazymind.chat.engine.prompts import (
     ATTACHED_FILES_GUIDANCE,
     DEFAULT_SYSTEM_PROMPT,
     IMAGE_REFERENCE_MARKDOWN_GUIDANCE,
@@ -9,6 +9,7 @@ from lazymind.chat.engine.prompts.guidance import (
     VOCAB_GUIDANCE,
     VISION_EXTRACTOR_GUIDANCE,
 )
+
 
 def assert_balanced_curly_braces(text):
     depth = 0
@@ -41,7 +42,6 @@ def test_agentic_guidance_strings_are_non_empty_and_balanced():
 
     assert 'LAZYMIND' in DEFAULT_SYSTEM_PROMPT
     assert 'kb_search' in SEARCH_GUIDANCE
-    assert 'memory tool' in MEMORY_GUIDANCE
+    assert 'memory_manage' in MEMORY_GUIDANCE
     assert 'skill_manage' in SKILLS_GUIDANCE
     assert 'vocab_manage' in VOCAB_GUIDANCE
-

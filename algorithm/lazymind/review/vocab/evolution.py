@@ -24,7 +24,7 @@ from lazyllm.components.formatter import JsonFormatter
 from lazyllm.module import ModuleBase
 from lazymind.model_config import get_config_path
 
-_LAZYLLM_CONTEXT_CREATE_USER_ATTR = 'user' + '_id'
+LAZYLLM_CONTEXT_CREATE_USER_ATTR = 'user' + '_id'
 
 
 _EXTRACTION_PROMPT = """You are a "Vocabulary Evolution Extractor".
@@ -119,19 +119,19 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _norm_text(value: Any) -> str:
+def norm_text(value: Any) -> str:
     return ' '.join(str(value or '').strip().split())
 
 
 def _norm_key(value: str) -> str:
-    return _norm_text(value).casefold()
+    return norm_text(value).casefold()
 
 
 def _dedupe_keep_order(values: Iterable[str]) -> List[str]:
     seen = set()
     out = []
     for value in values:
-        item = _norm_text(value)
+        item = norm_text(value)
         if not item or item in seen:
             continue
         seen.add(item)
@@ -140,7 +140,7 @@ def _dedupe_keep_order(values: Iterable[str]) -> List[str]:
 
 
 def _clip_text(value: str, limit: int) -> str:
-    value = _norm_text(value)
+    value = norm_text(value)
     if limit <= 0 or len(value) <= limit:
         return value
     return value[: max(0, limit - 3)] + '...'
@@ -153,11 +153,11 @@ def _split_text_for_limit(value: Any, limit: int) -> List[str]:
     limit = max(1, limit)
     pieces = []
     for match in _SENTENCE_BOUNDARY_RE.finditer(raw):
-        piece = _norm_text(match.group(0))
+        piece = norm_text(match.group(0))
         if piece:
             pieces.append(piece)
     if not pieces:
-        pieces = [_norm_text(raw)]
+        pieces = [norm_text(raw)]
 
     segments: List[str] = []
     current = ''
@@ -167,7 +167,7 @@ def _split_text_for_limit(value: Any, limit: int) -> List[str]:
                 segments.append(current)
                 current = ''
             for start in range(0, len(piece), limit):
-                fragment = _norm_text(piece[start:start + limit])
+                fragment = norm_text(piece[start:start + limit])
                 if fragment:
                     segments.append(fragment)
             continue
@@ -193,14 +193,14 @@ def _format_evidence_lines(evidence: Sequence[Dict[str, str]]) -> str:
 def _format_group_summaries(groups: Sequence[Dict[str, Any]]) -> str:
     lines = []
     for group in groups:
-        group_id = _norm_text(group.get('group_id'))
-        description = _norm_text(group.get('description')) or 'N/A'
+        group_id = norm_text(group.get('group_id'))
+        description = norm_text(group.get('description')) or 'N/A'
         words = ', '.join(_dedupe_keep_order(group.get('words') or [])) or 'N/A'
         lines.append(f'[group_id={group_id}] description={description}; words={words}')
     return '\n'.join(lines) if lines else 'N/A'
 
 
-def _json_dump_list(values: Sequence[str]) -> str:
+def json_dump_list(values: Sequence[str]) -> str:
     return json.dumps(_dedupe_keep_order(values), ensure_ascii=False)
 
 
@@ -214,9 +214,9 @@ def _summarize_candidate_for_log(candidate: 'SynonymCandidate') -> Dict[str, Any
     }
 
 
-def _summarize_action_for_log(action: Dict[str, Any]) -> Dict[str, Any]:
+def summarize_action_for_log(action: Dict[str, Any]) -> Dict[str, Any]:
     return {
-        'action': _norm_text(action.get('action')),
+        'action': norm_text(action.get('action')),
         'words': _dedupe_keep_order(action.get('words') or []),
         'group_ids': _dedupe_keep_order(action.get('group_ids') or []),
         'description': _clip_text(action.get('description'), 80),
@@ -245,7 +245,7 @@ class VocabEvolutionRequest:
             return value
         if isinstance(value, dict):
             payload = dict(value)
-            user_id = _norm_text(payload.pop('user_id', ''))
+            user_id = norm_text(payload.pop('user_id', ''))
             if user_id:
                 payload['user_id'] = user_id
             return cls(**payload)
@@ -271,9 +271,9 @@ class ChatHistoryRecord:
     @classmethod
     def from_dict(cls, value: Dict[str, Any]) -> 'ChatHistoryRecord':
         return cls(
-            user_id=_norm_text(value.get('user_id')),
-            conversation_id=_norm_text(value.get('conversation_id')),
-            message_id=_norm_text(value.get('message_id')),
+            user_id=norm_text(value.get('user_id')),
+            conversation_id=norm_text(value.get('conversation_id')),
+            message_id=norm_text(value.get('message_id')),
             seq=int(value.get('seq') or 0),
             raw_content=str(value.get('raw_content') or ''),
             content=str(value.get('content') or ''),
@@ -287,7 +287,7 @@ class ChatHistoryRecord:
 
     @property
     def searchable_text(self) -> str:
-        return _norm_text(self.user_text)
+        return norm_text(self.user_text)
 
     def prompt_block(self, per_field_limit: int = 320) -> str:
         return f'[message_id={self.message_id}] {_clip_text(self.user_text, per_field_limit)}'
@@ -318,7 +318,7 @@ class HistoryCollector(ModuleBase):
 
     def forward(self, payload: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
         request = VocabEvolutionRequest.from_value(payload.get('request'))
-        user_id = _norm_text(payload.get('user_id'))
+        user_id = norm_text(payload.get('user_id'))
         start_time, end_time = request.resolve_time_range()
         histories = self._fetch_histories(
             user_id,
@@ -409,8 +409,8 @@ class SynonymExtractionModule(ModuleBase):
         item: Dict[str, Any],
         history_by_id: Dict[str, ChatHistoryRecord],
     ) -> Optional[SynonymCandidate]:
-        word = _norm_text(item.get('word'))
-        synonym = _norm_text(item.get('synonym'))
+        word = norm_text(item.get('word'))
+        synonym = norm_text(item.get('synonym'))
         if not word or not synonym or _norm_key(word) == _norm_key(synonym):
             return None
         message_ids = item.get('message_ids') or []
@@ -418,7 +418,7 @@ class SynonymExtractionModule(ModuleBase):
             return None
         valid_ids = []
         for message_id in message_ids:
-            msg_id = _norm_text(message_id)
+            msg_id = norm_text(message_id)
             row = history_by_id.get(msg_id)
             if not row:
                 continue
@@ -432,8 +432,8 @@ class SynonymExtractionModule(ModuleBase):
             user_id=user_id,
             word=word,
             synonym=synonym,
-            description=_norm_text(item.get('description')),
-            reason=_norm_text(item.get('reason')),
+            description=norm_text(item.get('description')),
+            reason=norm_text(item.get('reason')),
             message_ids=valid_ids,
         )
 
@@ -598,7 +598,7 @@ class ActionPlanningModule(ModuleBase):
             conflicts = list(candidate_group_ids)
         return {
             'reason': (
-                _norm_text(response.get('reason'))
+                norm_text(response.get('reason'))
                 or candidate.reason
                 or f'`{candidate_word}` and `{anchor_word}` membership requires further confirmation.'
             ),
@@ -619,13 +619,13 @@ class ActionPlanningModule(ModuleBase):
         action: str,
     ) -> Dict[str, Any]:
         return {
-            'reason': _norm_text(reason),
+            'reason': norm_text(reason),
             'words': _dedupe_keep_order(words),
-            'description': _norm_text(description),
+            'description': norm_text(description),
             'group_ids': _dedupe_keep_order(group_ids),
-            'user_id': _norm_text(user_id),
+            'user_id': norm_text(user_id),
             'message_ids': _dedupe_keep_order(message_ids),
-            'action': _norm_text(action),
+            'action': norm_text(action),
         }
 
     def _merge_related_actions(self, actions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -781,7 +781,7 @@ class ActionPlanningModule(ModuleBase):
                     '[VocabEvolution] planner decision '
                     f'user_id={user_id!r} decision=create_new_group '
                     f'candidate={json.dumps(candidate_summary, ensure_ascii=False)} '
-                    f'action={json.dumps(_summarize_action_for_log(action), ensure_ascii=False)}'
+                    f'action={json.dumps(summarize_action_for_log(action), ensure_ascii=False)}'
                 )
                 continue
             if word_groups and synonym_groups:
@@ -825,7 +825,7 @@ class ActionPlanningModule(ModuleBase):
                         f'candidate={json.dumps(candidate_summary, ensure_ascii=False)} '
                         f'anchor_group_id={anchor_groups[0]!r} '
                         f'existing_description={groups.get(anchor_groups[0], {}).get("description", "")} '
-                        f'action={json.dumps(_summarize_action_for_log(action), ensure_ascii=False)}'
+                        f'action={json.dumps(summarize_action_for_log(action), ensure_ascii=False)}'
                     )
                     continue
                 action = self._build_action(
@@ -843,7 +843,7 @@ class ActionPlanningModule(ModuleBase):
                     f'user_id={user_id!r} decision=add_to_group '
                     f'candidate={json.dumps(candidate_summary, ensure_ascii=False)} '
                     f'anchor_word={anchor_word!r} anchor_groups={anchor_groups} '
-                    f'action={json.dumps(_summarize_action_for_log(action), ensure_ascii=False)}'
+                    f'action={json.dumps(summarize_action_for_log(action), ensure_ascii=False)}'
                 )
                 continue
 
@@ -877,7 +877,7 @@ class ActionPlanningModule(ModuleBase):
                 LOG.info(
                     '[VocabEvolution] planner decision '
                     f'user_id={user_id!r} decision=add_to_group_after_conflict '
-                    f'action={json.dumps(_summarize_action_for_log(action), ensure_ascii=False)}'
+                    f'action={json.dumps(summarize_action_for_log(action), ensure_ascii=False)}'
                 )
             if decision['conflict_group_ids']:
                 action = self._build_action(
@@ -893,7 +893,7 @@ class ActionPlanningModule(ModuleBase):
                 LOG.info(
                     '[VocabEvolution] planner decision '
                     f'user_id={user_id!r} decision=conflict '
-                    f'action={json.dumps(_summarize_action_for_log(action), ensure_ascii=False)}'
+                    f'action={json.dumps(summarize_action_for_log(action), ensure_ascii=False)}'
                 )
             if (
                 not decision['allowed_group_ids']
@@ -918,7 +918,7 @@ class ActionPlanningModule(ModuleBase):
         LOG.info(
             '[VocabEvolution] planner finished '
             f'user_id={user_id!r} action_count={len(merged_actions)} skipped_count={len(skipped)} '
-            f'actions={json.dumps([_summarize_action_for_log(item) for item in merged_actions], ensure_ascii=False)}'
+            f'actions={json.dumps([summarize_action_for_log(item) for item in merged_actions], ensure_ascii=False)}'
         )
         payload['actions'] = merged_actions
         payload['skipped_reasons'] = skipped
@@ -950,8 +950,12 @@ __all__ = [
     'ChatHistoryRecord',
     'HistoryChunker',
     'HistoryCollector',
+    'LAZYLLM_CONTEXT_CREATE_USER_ATTR',
     'SynonymCandidate',
     'SynonymExtractionModule',
     'VocabEvolutionRequest',
     'get_ppl_vocab_evolution',
+    'json_dump_list',
+    'norm_text',
+    'summarize_action_for_log',
 ]

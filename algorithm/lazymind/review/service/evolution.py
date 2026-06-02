@@ -8,13 +8,13 @@ import lazyllm
 from lazyllm import LOG
 
 from lazymind.config import config as _cfg
-from lazymind.review.vocab.evolution import (
+from lazymind.review.vocab import (
+    LAZYLLM_CONTEXT_CREATE_USER_ATTR,
     VocabEvolutionRequest,
-    _LAZYLLM_CONTEXT_CREATE_USER_ATTR,
-    _json_dump_list,
-    _norm_text,
-    _summarize_action_for_log,
     get_ppl_vocab_evolution,
+    json_dump_list,
+    norm_text,
+    summarize_action_for_log,
 )
 from lazymind.review.service.db import (
     fetch_chat_histories_for_user_id,
@@ -31,8 +31,8 @@ _BACKEND_APPLY_TIMEOUT = 10.0
 
 def _serialize_backend_action(action: Dict[str, Any]) -> Dict[str, Any]:
     payload = dict(action)
-    payload['group_ids'] = _json_dump_list(payload.get('group_ids') or [])
-    payload['message_ids'] = _json_dump_list(payload.get('message_ids') or [])
+    payload['group_ids'] = json_dump_list(payload.get('group_ids') or [])
+    payload['message_ids'] = json_dump_list(payload.get('message_ids') or [])
     return payload
 
 
@@ -41,11 +41,11 @@ def _wrap_backend_action_payload(actions: Sequence[Dict[str, Any]]) -> Dict[str,
 
 
 def resolve_word_group_apply_url(apply_url: Optional[str] = None) -> str:
-    resolved_url = (_norm_text(apply_url) or _norm_text(_cfg['word_group_apply_url'])).rstrip('/')
+    resolved_url = (norm_text(apply_url) or norm_text(_cfg['word_group_apply_url'])).rstrip('/')
     if resolved_url:
         return resolved_url
 
-    core_service_url = _norm_text(_cfg['core_service_url']).rstrip('/')
+    core_service_url = norm_text(_cfg['core_service_url']).rstrip('/')
     if core_service_url:
         if (
             core_service_url.endswith(_WORD_GROUP_APPLY_PATH)
@@ -59,9 +59,6 @@ def resolve_word_group_apply_url(apply_url: Optional[str] = None) -> str:
         f'set {_WORD_GROUP_APPLY_URL_ENV} or {_CORE_SERVICE_URL_ENV} '
         '(for example: http://core:8000 or http://kong:8000/api/core)'
     )
-
-
-_resolve_word_group_apply_url = resolve_word_group_apply_url
 
 
 def apply_vocab_evolution_actions(
@@ -133,7 +130,7 @@ class VocabEvolutionService:
             try:
                 lazyllm.globals._init_sid(sid=user_id)
                 lazyllm.locals._init_sid(sid=user_id)
-                setattr(lazyllm.globals, _LAZYLLM_CONTEXT_CREATE_USER_ATTR, user_id)
+                setattr(lazyllm.globals, LAZYLLM_CONTEXT_CREATE_USER_ATTR, user_id)
                 result = self._pipeline({'request': req, 'user_id': user_id})
             except Exception as exc:
                 LOG.error(f'[VocabEvolution] processing failed user_id={user_id!r} error={exc}')
@@ -149,7 +146,7 @@ class VocabEvolutionService:
         LOG.info(
             f'[VocabEvolution] finished requested_user_id={target_label!r} '
             f'action_count={len(serialized_actions)} '
-            f'actions={[_summarize_action_for_log(item) for item in actions]}'
+            f'actions={[summarize_action_for_log(item) for item in actions]}'
         )
         return serialized_actions
 

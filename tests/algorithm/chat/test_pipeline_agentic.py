@@ -1,5 +1,4 @@
 import asyncio
-from types import SimpleNamespace
 
 from lazymind.chat.service import chat_service
 
@@ -21,7 +20,7 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
             agent_calls.append({'llm': llm, 'tools': tools, 'kwargs': kwargs})
 
         def forward(self, query, llm_chat_history=None):
-            yield SimpleNamespace(type='agent.text.delta', delta=f'answer:{query}')
+            chat_service.lazyllm.FileSystemQueue().enqueue(f'answer:{query}')
             return {'text': f'final:{query}'}
 
     monkeypatch.setattr(chat_service, 'AutoModel', lambda model, config: f'{model}:{config}')

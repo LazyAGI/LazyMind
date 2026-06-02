@@ -132,7 +132,7 @@ def _append_pending_assistant(
     pending_tool_calls.clear()
 
 
-def _normalize_history_for_agent(
+def normalize_history_for_agent(
     history: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     citation_state: dict[str, Any] = {}

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from lazymind.chat.engine.prompts.guidance import (
+from .guidance import (
     ATTACHED_FILES_GUIDANCE,
     DEFAULT_SYSTEM_PROMPT,
     IMAGE_REFERENCE_MARKDOWN_GUIDANCE,
@@ -11,7 +11,6 @@ from lazymind.chat.engine.prompts.guidance import (
     VISION_EXTRACTOR_GUIDANCE,
     VOCAB_GUIDANCE,
 )
-from lazymind.chat.service.component.tool_registry import ToolGroupConfig, group_is_active
 
 
 def _build_environment_context_prompt(environment_context: dict | None = None) -> str:
@@ -49,8 +48,8 @@ def _build_attached_files_prompt(files: list | None = None) -> str:
     return '\n'.join(lines) + '\n\n' + ATTACHED_FILES_GUIDANCE
 
 
-def _build_system_prompt(
-    configs: list[ToolGroupConfig],
+def build_system_prompt(
+    active_groups: set[str],
     *,
     environment_context: dict | None = None,
     use_memory: bool = True,
@@ -58,7 +57,6 @@ def _build_system_prompt(
     memory: str | None = None,
     files: list | None = None,
 ) -> str:
-    active_groups = {cfg.name for cfg in configs if group_is_active(cfg)}
     prompt_parts = [DEFAULT_SYSTEM_PROMPT]
 
     environment_prompt = _build_environment_context_prompt(environment_context)

@@ -1,6 +1,6 @@
 # flake8: noqa: E501,Q000
 
-_SKILL_REVIEW_PROMPT = (
+SKILL_REVIEW_PROMPT = (
     "Review the conversation above and determine whether a reusable skill should be created or updated.\n\n"
     "If the conversation reveals a good workflow, troubleshooting procedure, or general methodology, "
     "summarize it as a skill. A reusable method for handling a class of problems is enough; "
@@ -50,7 +50,7 @@ _SKILL_REVIEW_PROMPT = (
     "and a brief reason explaining why no skill proposal is warranted."
 )
 
-_MEMORY_REVIEW_PROMPT = (
+MEMORY_REVIEW_PROMPT = (
     "Review the conversation above and consider saving durable memory if appropriate.\n\n"
     "Be conservative with memory changes (target='memory'): save only concise agent working memory that is likely to help in future sessions, "
     "such as when the discussion happened, what the user and agent discussed, what the user was working on, "
@@ -109,7 +109,7 @@ _MEMORY_REVIEW_PROMPT = (
     "memory or user_preference proposal is warranted."
 )
 
-_COMBINED_REVIEW_PROMPT = (
+COMBINED_REVIEW_PROMPT = (
     "Review the conversation above and decide whether exactly one durable update should be saved.\n\n"
     "You have exactly three tool choices, and you must call at most one of them: memory, skill_manage, or vocab_manage. "
     "Choose the single best tool for this conversation. Do not call multiple tools in the same review.\n\n"
@@ -195,7 +195,7 @@ _COMBINED_REVIEW_PROMPT = (
 )
 
 __all__ = [
-    '_COMBINED_REVIEW_PROMPT',
-    '_MEMORY_REVIEW_PROMPT',
-    '_SKILL_REVIEW_PROMPT',
+    'COMBINED_REVIEW_PROMPT',
+    'MEMORY_REVIEW_PROMPT',
+    'SKILL_REVIEW_PROMPT',
 ]

@@ -1,4 +1,4 @@
-from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
+from lazymind.chat.service.component import AgentEventFrameTranslator
 from lazymind.chat.service.utils.citations import CITATION_REFS_KEY
 from lazyllm.tools.agent import AgentEvent
 

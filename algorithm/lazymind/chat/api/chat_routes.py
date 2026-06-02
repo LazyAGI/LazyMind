@@ -3,7 +3,7 @@ from typing import Annotated, Any, Dict, List, Optional
 from fastapi import APIRouter, Body
 from lazymind.chat.config import DEFAULT_CHAT_DATASET
 from lazymind.chat.service.chat_service import handle_chat
-from lazymind.chat.service.component.tool_registry import get_all_tool_groups
+from lazymind.chat.service.component import get_all_tool_groups
 
 router = APIRouter()
 

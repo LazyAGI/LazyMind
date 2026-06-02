@@ -20,6 +20,7 @@ from .static_file_url import (
 from .markdown_images import rewrite_markdown_image_urls
 from .file_validation import validate_and_resolve_files
 from .streaming import (
+    log_and_emit_frame,
     response_payload,
     single_event_stream_response,
     sse_line,
@@ -32,6 +33,7 @@ __all__ = [
     'basename_from_path',
     'build_stream_citation_scanner',
     'local_path_from_static_file_url',
+    'log_and_emit_frame',
     'register_image_url',
     'reset_citation_state',
     'response_payload',

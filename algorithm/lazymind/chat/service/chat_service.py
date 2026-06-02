@@ -2,7 +2,6 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Union
 import lazyllm
 from lazyllm import LOG
@@ -17,24 +16,28 @@ from lazymind.chat.config import (
     SENSITIVE_FILTER_RESPONSE_TEXT,
     SENSITIVE_WORDS_PATH,
 )
-from lazymind.chat.service.component.history import _normalize_history_for_agent
-from lazymind.chat.engine.prompts.system_prompt import _build_system_prompt
-from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, filter_tools, to_agent_inputs
+from lazymind.chat.engine.prompts import build_system_prompt
+from lazymind.chat.service.component import (
+    AgentEventFrameTranslator,
+    DEFAULT_TOOLS,
+    filter_tools,
+    normalize_history_for_agent,
+    to_agent_inputs,
+)
 from lazymind.chat.service.utils import (
     SensitiveFilter,
+    log_and_emit_frame,
     response_payload,
     single_event_stream_response,
     sse_line,
     validate_and_resolve_files,
 )
-from lazymind.chat.service.utils.streaming import _log_and_emit_frame
 from lazymind.chat import engine as _chat_engine  # noqa: F401
 from lazyllm.tools.fs.client import FS
 from lazymind.model_config import get_config_path, inject_model_config, summarize_model_config_for_log
 from lazyllm.tools.tool_config_inject import inject_tool_config
 from lazyllm import AutoModel
 from lazymind.config import config as _cfg
-from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
 sensitive_filter = SensitiveFilter(SENSITIVE_WORDS_PATH)
@@ -151,7 +154,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     resolved_use_memory = use_memory is not False
 
     raw_history = list(history) if isinstance(history, list) else []
-    agent_history, citation_state = _normalize_history_for_agent(raw_history)
+    agent_history, citation_state = normalize_history_for_agent(raw_history)
     translator = AgentEventFrameTranslator(query=query, citation_state=citation_state)
 
     agentic_config = {
@@ -169,8 +172,8 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     inject_tool_config(tool_config)
     lazyllm.globals['agentic_config'] = agentic_config
     active_configs = filter_tools(DEFAULT_TOOLS, available_tools)
-    runtime_prompt = _build_system_prompt(
-        active_configs,
+    runtime_prompt = build_system_prompt(
+        {cfg.name for cfg in active_configs},
         environment_context=environment_context,
         use_memory=resolved_use_memory,
         user_preference=user_preference,
@@ -196,67 +199,52 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         force_summarize_context=query,
     )
 
+    def _run_agent():
+        lazyllm.globals._init_sid(sid=session_id)
+        lazyllm.locals._init_sid(sid=session_id)
+        return _run_ppl_with_trace(
+            lambda: react_agent.forward(query, llm_chat_history=agent_history), (),
+            session_id=session_id, dataset=dataset,
+            mode_tag='stream_reasoning' if reasoning else 'stream',
+            trace_enabled=trace, model_config=model_config,
+        )
+    _run_agent._lazyllm_stream_adapter = react_agent._lazyllm_stream_adapter
+
     async def event_stream() -> Any:
         trace_id: Optional[str] = None
-        trace_emitted = False
         final_result: Any = None
-        stream_iter: Any = None
-        worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='chat-agent-stream')
-
-        def _advance_agent_stream() -> tuple[str, Any]:
-            nonlocal stream_iter
-            if stream_iter is None:
-                lazyllm.globals._init_sid(sid=session_id)
-                lazyllm.locals._init_sid(sid=session_id)
-                stream_iter = react_agent.forward(query, llm_chat_history=agent_history)
-            try:
-                return 'event', next(stream_iter)
-            except StopIteration as stop:
-                return 'final', stop.value
-
-        def _next_agent_event() -> tuple[str, Any]:
-            nonlocal trace_id
-            item, next_trace_id = _run_ppl_with_trace(
-                _advance_agent_stream, (),
-                session_id=session_id, dataset=dataset,
-                mode_tag='stream_reasoning' if reasoning else 'stream',
-                trace_enabled=trace, model_config=model_config,
-            )
-            if next_trace_id is not None:
-                trace_id = next_trace_id
-            item_type, item = item
-            return item_type, item
 
         try:
-            try:
-                async with rag_sem:
-                    while True:
-                        item_type, item = await asyncio.get_running_loop().run_in_executor(
-                            worker, _next_agent_event,
-                        )
-                        if trace_id is not None and not trace_emitted:
-                            trace_emitted = True
-                            yield _log_and_emit_frame(
-                                _attach_trace_info({}, trace_id), 0.0, query, session_id, tag='TRACE',
-                            )
-                        if item_type == 'final':
-                            final_result = item
-                            break
-                        for frame in translator.feed(item):
-                            cost = round(time.time() - start_time, 3)
-                            yield _log_and_emit_frame(frame, cost, query, session_id, tag='FEED')
-
-                    for frame in translator.finish(final_result):
+            async with rag_sem:
+                async for event in lazyllm.module.StreamCallHelper(_run_agent).astream():
+                    item_type = str(getattr(event, 'type', '') or '')
+                    if item_type == 'agent.finished':
+                        metadata = getattr(event, 'metadata', None) or {}
+                        final_result = getattr(event, 'text', None)
+                        if final_result is None and isinstance(metadata, dict):
+                            final_result = metadata.get('result')
+                        trace_id = metadata.get('trace_id') if isinstance(metadata, dict) else None
+                        break
+                    if item_type == 'agent.failed':
+                        raise RuntimeError(getattr(event, 'error', '') or 'agent failed')
+                    for frame in translator.feed(event):
                         cost = round(time.time() - start_time, 3)
-                        yield _log_and_emit_frame(frame, cost, query, session_id, tag='FINISH')
+                        yield log_and_emit_frame(frame, cost, query, session_id, tag='FEED')
 
-                    if trace_id is not None and not trace_emitted:
-                        yield _log_and_emit_frame(
-                            _attach_trace_info({}, trace_id), 0.0, query, session_id, tag='TRACE',
-                        )
-                    _flush_trace_exporter()
-            finally:
-                worker.shutdown(wait=False, cancel_futures=True)
+            if trace_id is not None:
+                yield log_and_emit_frame(
+                    _attach_trace_info({}, trace_id), 0.0, query, session_id, tag='TRACE',
+                )
+
+            for frame in translator.finish(final_result):
+                cost = round(time.time() - start_time, 3)
+                yield log_and_emit_frame(frame, cost, query, session_id, tag='FINISH')
+
+            if trace_id is None:
+                yield log_and_emit_frame(
+                    _attach_trace_info({}, None), 0.0, query, session_id, tag='TRACE',
+                )
+            _flush_trace_exporter()
         except Exception as exc:
             LOG.exception(exc)
             final_resp = response_payload(

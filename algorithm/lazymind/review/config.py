@@ -1,7 +1,7 @@
 from lazymind.review.prompts import (
-    _COMBINED_REVIEW_PROMPT,
-    _MEMORY_REVIEW_PROMPT,
-    _SKILL_REVIEW_PROMPT,
+    COMBINED_REVIEW_PROMPT,
+    MEMORY_REVIEW_PROMPT,
+    SKILL_REVIEW_PROMPT,
 )
 
 REVIEW_TOOLS: dict[str, list[str]] = {
@@ -11,9 +11,9 @@ REVIEW_TOOLS: dict[str, list[str]] = {
 }
 
 REVIEW_PROMPTS: dict[str, str] = {
-    'memory': _MEMORY_REVIEW_PROMPT,
-    'skill': _SKILL_REVIEW_PROMPT,
-    'combined': _COMBINED_REVIEW_PROMPT,
+    'memory': MEMORY_REVIEW_PROMPT,
+    'skill': SKILL_REVIEW_PROMPT,
+    'combined': COMBINED_REVIEW_PROMPT,
 }
 
 __all__ = ['REVIEW_TOOLS', 'REVIEW_PROMPTS']

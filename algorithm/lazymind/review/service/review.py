@@ -15,7 +15,7 @@ from lazymind.chat.engine.tools import (
 from lazymind.chat.engine.tools.infra import list_all_skills_with_category
 from lazymind.config import config as _cfg
 from lazymind.review.config import REVIEW_PROMPTS, REVIEW_TOOLS
-from lazymind.review.prompts import _COMBINED_REVIEW_PROMPT
+from lazymind.review.prompts import COMBINED_REVIEW_PROMPT
 
 
 _REVIEW_TOOL_GROUP_BUILDERS: dict[str, Any] = {
@@ -101,7 +101,7 @@ def _spawn_background_review(
 ) -> None:
     review_tools = REVIEW_TOOLS.get(review_mode, [])
     runtime_review_tools = _resolve_review_runtime_tools(review_tools)
-    review_prompt = REVIEW_PROMPTS.get(review_mode, _COMBINED_REVIEW_PROMPT)
+    review_prompt = REVIEW_PROMPTS.get(review_mode, COMBINED_REVIEW_PROMPT)
     if not review_tools:
         print(f'[bg-review:{review_mode}] SKIP no review tools')
         return

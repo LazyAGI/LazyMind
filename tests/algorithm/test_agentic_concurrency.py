@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from types import SimpleNamespace
 from typing import Any, Dict, List
 
 from lazymind.chat.service import chat_service
@@ -37,7 +36,7 @@ class _FakeAgent:
 
     def forward(self, query: str, llm_chat_history: Any = None):
         self._observe(query)
-        yield SimpleNamespace(type='agent.text.delta', delta=f'stream:{query}')
+        chat_service.lazyllm.FileSystemQueue().enqueue(f'stream:{query}')
         return {'text': f'final:{query}'}
 
 

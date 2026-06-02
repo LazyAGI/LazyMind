@@ -7,7 +7,7 @@ import lazyllm
 from lazyllm import AutoModel
 from lazyllm.components.formatter import encode_query_with_filepaths
 
-from lazymind.chat.engine.prompts.guidance import VISION_EXTRACT_DEFAULT_INSTRUCTION
+from lazymind.chat.engine.prompts import VISION_EXTRACT_DEFAULT_INSTRUCTION
 from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
 from lazymind.chat.service.utils import resolve_local_image_path
 from lazymind.model_config import get_config_path
