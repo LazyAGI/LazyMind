@@ -5,9 +5,6 @@ import time
 from typing import Any, Dict, List, Optional, Union
 import lazyllm
 from lazyllm import LOG
-import lazyllm.tracing.collect.configs  # noqa: F401
-from lazyllm.tracing import enable_trace, get_trace_context, set_trace_context
-from lazyllm.tracing.collect import runtime as tracing_runtime
 from fastapi.responses import StreamingResponse
 from lazymind.chat.config import (
     LAZYMIND_LLM_PRIORITY,
@@ -32,7 +29,6 @@ from lazymind.chat.service.utils import (
     sse_line,
     validate_and_resolve_files,
 )
-from lazymind.chat import engine as _chat_engine  # noqa: F401
 from lazyllm.tools.fs.client import FS
 from lazymind.model_config import get_config_path, inject_model_config, summarize_model_config_for_log
 from lazyllm.tools.tool_config_inject import inject_tool_config
@@ -41,59 +37,6 @@ from lazymind.config import config as _cfg
 
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
 sensitive_filter = SensitiveFilter(SENSITIVE_WORDS_PATH)
-
-
-def _run_ppl_with_trace(ppl, ppl_args, *, session_id, dataset, mode_tag, trace_enabled, model_config):
-    lazyllm.globals._init_sid(sid=session_id)
-    lazyllm.locals._init_sid(sid=session_id)
-    inject_model_config(model_config)
-    _set_request_trace(False, session_id=session_id, dataset=dataset, mode_tag=mode_tag)
-    if not trace_enabled:
-        return ppl(*ppl_args), None
-
-    captured: Dict[str, Any] = {}
-
-    def run_chat_pipeline(*args, **kwargs):
-        out = ppl(*args, **kwargs)
-        captured['trace_id'] = get_trace_context().trace_id
-        return out
-
-    result = enable_trace(
-        run_chat_pipeline, *ppl_args,
-        session_id=session_id,
-        request_tags=[f'dataset:{dataset}', f'mode:{mode_tag}'],
-        module_trace={'default': True},
-    )
-    _flush_trace_exporter()
-    trace_id = captured.get('trace_id')
-    if not trace_id:
-        raise RuntimeError('LazyLLM trace did not expose a trace_id')
-    return result, trace_id
-
-
-def _set_request_trace(enabled: bool, *, session_id: str, dataset: str, mode_tag: str) -> None:
-    set_trace_context({
-        'enabled': bool(enabled),
-        'sampled': True,
-        'session_id': session_id,
-        'request_tags': [f'dataset:{dataset}', f'mode:{mode_tag}'],
-        'module_trace': {'default': True},
-    })
-
-
-def _flush_trace_exporter() -> None:
-    try:
-        if provider := getattr(tracing_runtime._runtime, '_provider', None):
-            provider.force_flush()
-    except Exception as exc:
-        LOG.warning(f'[ChatServer] [TRACE_FLUSH_FAILED] {exc}')
-
-
-def _attach_trace_info(data: Any, trace_id: Optional[str]) -> Any:
-    if trace_id is None:
-        return data
-    return {**data, 'trace_id': trace_id} if isinstance(data, dict) else {'data': data, 'trace_id': trace_id}
-
 
 def check_sensitive_content(
     query: str,
@@ -199,22 +142,13 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         force_summarize_context=query,
     )
 
-    def _run_agent():
-        return _run_ppl_with_trace(
-            lambda: react_agent.forward(query, llm_chat_history=agent_history), (),
-            session_id=session_id, dataset=dataset,
-            mode_tag='stream_reasoning' if reasoning else 'stream',
-            trace_enabled=trace, model_config=model_config,
-        )
-
     async def event_stream() -> Any:
-        trace_id: Optional[str] = None
         final_result: Any = None
 
         try:
             async with rag_sem:
-                helper = lazyllm.module.stream_helper.StreamCallHelper(_run_agent, init_sid=False)
-                async for item in helper.astream():
+                helper = lazyllm.module.stream_helper.StreamCallHelper(react_agent, init_sid=False)
+                async for item in helper.astream(query, llm_chat_history=agent_history):
                     for frame in translator.feed(item):
                         cost = round(time.time() - start_time, 3)
                         yield log_and_emit_frame(frame, cost, query, session_id, tag='FEED')
@@ -225,28 +159,12 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                     LOG.exception('[ChatServer] agent failed')
                     raise RuntimeError(f'agent failed: {exc}') from exc
 
-                if isinstance(result, tuple) and len(result) == 2:
-                    final_result = result[0]
-                    trace_id = result[1] if isinstance(result[1], str) else None
-                elif isinstance(result, str):
-                    final_result = result
-                else:
-                    final_result = result
-
-            if trace_id is not None:
-                yield log_and_emit_frame(
-                    _attach_trace_info({}, trace_id), 0.0, query, session_id, tag='TRACE',
-                )
+                final_result = result
 
             for frame in translator.finish(final_result):
                 cost = round(time.time() - start_time, 3)
                 yield log_and_emit_frame(frame, cost, query, session_id, tag='FINISH')
 
-            if trace_id is None:
-                yield log_and_emit_frame(
-                    _attach_trace_info({}, None), 0.0, query, session_id, tag='TRACE',
-                )
-            _flush_trace_exporter()
         except Exception as exc:
             LOG.exception(exc)
             final_resp = response_payload(
