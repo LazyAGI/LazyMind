@@ -63,10 +63,10 @@ def get_role_type(role: str):
         cfg = cfg[0] if cfg else {}
     if not isinstance(cfg, dict):
         cfg = {}
-    source = (cfg.get('source') or '').strip()
+    source = str(cfg.get('source') or '').strip()
     return {
         'role': role,
-        'type': (cfg.get('type') or 'llm').lower(),
+        'type': str(cfg.get('type') or 'llm').lower(),
         'source': source,
         'is_dynamic': source.lower() == 'dynamic',
     }

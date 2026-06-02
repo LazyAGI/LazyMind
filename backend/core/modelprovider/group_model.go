@@ -1,10 +1,8 @@
 package modelprovider
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -14,7 +12,6 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
-	"lazymind/core/log"
 	"lazymind/core/store"
 )
 
@@ -244,33 +241,6 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	common.ReplyOK(w, groupModelListResponse{Models: out})
-}
-
-// algoRoleTypeResponse mirrors algorithm GET /api/model/role_type JSON.
-type algoRoleTypeResponse struct {
-	Role      string `json:"role"`
-	Type      string `json:"type"`
-	Source    string `json:"source"`
-	IsDynamic bool   `json:"is_dynamic"`
-}
-
-const roleTypeTimeout = 5 * time.Second
-
-// resolveModelType translates a runtime_models.yaml role key (e.g. "evo_llm") into the
-// lazyllm technical type (e.g. "llm") by calling the algorithm service.
-// If the algorithm service returns 404 (role not in yaml) or an error, the original
-// roleKey is returned unchanged so the caller can still query the DB directly.
-func resolveModelType(ctx context.Context, roleKey string) string {
-	upstream := common.JoinURL(common.ChatServiceEndpoint(), fmt.Sprintf("/api/model/role_type?role=%s", roleKey))
-	var resp algoRoleTypeResponse
-	if err := common.ApiGet(ctx, upstream, nil, &resp, roleTypeTimeout); err != nil {
-		log.Logger.Warn().Err(err).Str("role", roleKey).Msg("resolveModelType: algo call failed, using role key as-is")
-		return roleKey
-	}
-	if resp.Type == "" {
-		return roleKey
-	}
-	return resp.Type
 }
 
 // ListUserModelsByModelType lists the current user's models across all user_model_providers,
