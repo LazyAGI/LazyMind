@@ -48,6 +48,29 @@ var imageEmbedRequiredInit bool
 
 const modelFeaturesTimeout = 5 * time.Second
 
+// roleIsDynamicCache caches per-role is_dynamic results permanently (yaml is static per process).
+// Key: role string, Value: bool
+var roleIsDynamicCache sync.Map
+
+// FetchRoleIsDynamic returns whether the given model_type role is source=dynamic in the runtime
+// config yaml.  Results are permanently cached since the yaml does not change at runtime.
+// Returns (true, nil) on any fetch error so that the caller falls back to the normal DB path.
+func FetchRoleIsDynamic(ctx context.Context, role string) (bool, error) {
+	if v, ok := roleIsDynamicCache.Load(role); ok {
+		return v.(bool), nil
+	}
+	upstream := common.JoinURL(common.ChatServiceEndpoint(), "/api/model/role_type")
+	var resp algoRoleTypeResponse
+	if err := common.ApiGet(ctx, upstream+"?role="+role, nil, &resp, modelFeaturesTimeout); err != nil {
+		// On error default to dynamic=true so we fall back to the DB check.
+		log.Logger.Warn().Err(err).Str("role", role).
+			Msg("role_type fetch failed; assuming dynamic=true")
+		return true, err
+	}
+	roleIsDynamicCache.Store(role, resp.IsDynamic)
+	return resp.IsDynamic, nil
+}
+
 // fetchImageEmbedEnabled fetches and permanently caches image_embed_enabled from the algorithm service.
 func fetchImageEmbedEnabled(ctx context.Context) (bool, error) {
 	imageEmbedEnabledCache.Do(func() {
