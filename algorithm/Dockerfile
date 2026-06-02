@@ -54,7 +54,9 @@ RUN pip install --no-cache-dir -r algorithm/requirements.txt
 
 # Stage: base_code - copy all source code on top of the fully-installed env.
 # Only this stage and its children need to rebuild when code changes.
-FROM ${BASE_LAZYMIND_IMAGE} AS base_code
+# NOTE: must use a hard-coded stage name here; Docker does not resolve
+# same-file stage references when the name comes from an ARG.
+FROM base_env AS base_code
 ARG LAZYMIND_GIT_SHA=unknown
 ARG LAZYLLM_GIT_SHA=unknown
 LABEL org.opencontainers.image.title="LazyMind algorithm/chat"
@@ -161,7 +163,8 @@ ENTRYPOINT ["/app/evo/service/entrypoint.sh"]
 # Stage: mineru - base_env (full env, no code) + torch/mineru extras + code.
 # Inherits from base_env so torch/mineru layers are cached independently of
 # lazyllm/LazyMind source changes.
-FROM ${BASE_LAZYLLM_IMAGE} AS mineru
+# NOTE: hard-coded stage name; ARG-based FROM does not resolve in-file stages.
+FROM base_env AS mineru
 ARG LAZYMIND_GIT_SHA=unknown
 ARG LAZYLLM_GIT_SHA=unknown
 LABEL org.opencontainers.image.title="LazyMind algorithm/mineru"

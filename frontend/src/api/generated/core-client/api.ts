@@ -791,7 +791,7 @@ export interface SelectedModelOpenAPIItem {
     'base_url': string;
     'group_name': string;
     'model_id': string;
-    'model_type': string;
+    'model_key': string;
     'name': string;
     'provider_name': string;
     'user_model_provider_group_id': string;
@@ -813,7 +813,7 @@ export interface SetKBAuthorizationRequest {
 }
 export interface SetSelectedModelOpenAPIItem {
     'model_id': string;
-    'model_type': string;
+    'model_key': string;
 }
 export interface SetSelectedModelsOpenAPIRequest {
     'selections'?: Array<SetSelectedModelOpenAPIItem>;

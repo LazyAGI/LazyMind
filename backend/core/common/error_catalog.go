@@ -175,6 +175,8 @@ var errorCatalog = map[string]*AppError{
 	"missing suggestion id":                                       NewAppError(http.StatusBadRequest, 2000855, "missing suggestion id"),
 	"model not found":                                             NewAppError(http.StatusBadRequest, 2000856, "model not found"),
 	"model_type is required":                                      NewAppError(http.StatusBadRequest, 2000857, "model_type is required"),
+	"model_key is required":                                       NewAppError(http.StatusBadRequest, 2000857, "model_key is required"),
+	"invalid model_key":                                           NewAppError(http.StatusBadRequest, 2000857, "invalid model_key"),
 	"name and base_url are required":                              NewAppError(http.StatusBadRequest, 2000858, "name and base_url are required"),
 	"name and model_type are required":                            NewAppError(http.StatusBadRequest, 2000859, "name and model_type are required"),
 	"name required":                                               NewAppError(http.StatusBadRequest, 2000860, "name required"),
