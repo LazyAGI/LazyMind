@@ -1,10 +1,12 @@
 from lazymind.chat.service.component import AgentEventFrameTranslator
-from lazymind.chat.service.utils.citations import CITATION_REFS_KEY
+from lazymind.chat.service.utils.citations import (
+    CITATION_REFS_KEY,
+    annotate_citations,
+)
 
 
-def test_translator_registers_citations_from_tool_results_before_text_rewrite():
-    citation_state = {}
-    translator = AgentEventFrameTranslator(query='q', citation_state=citation_state)
+def test_translator_rewrites_citations_registered_by_tools():
+    translator = AgentEventFrameTranslator(query='q')
     item = {
         'uid': 'node-1',
         'text': 'source text',
@@ -15,6 +17,7 @@ def test_translator_registers_citations_from_tool_results_before_text_rewrite():
         'metadata': {'file_name': 'doc.md'},
         'global_metadata': {'docid': 'doc-1', 'kb_id': 'kb-1', 'file_name': 'doc.md'},
     }
+    annotate_citations(item, translator.citation_state)
 
     translator.feed({
         'tag': 'tool_results',
@@ -34,7 +37,7 @@ def test_translator_registers_citations_from_tool_results_before_text_rewrite():
 
     assert item['citation_index'] == '1.1'
     assert item['ref'] == '[[1.1]]'
-    assert citation_state[CITATION_REFS_KEY]['1.1']['content'] == 'source text'
+    assert translator.citation_state[CITATION_REFS_KEY]['1.1']['content'] == 'source text'
 
     frames = translator.feed({'tag': 'text', 'delta': 'Use [[1.1]].'})
     assert ''.join(frame['text'] for frame in frames) == 'Use [1](#source-1.1 "doc.md").'

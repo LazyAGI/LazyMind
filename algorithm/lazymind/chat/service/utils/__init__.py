@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 from .citations import (
-    SOURCE_LINK_PATTERN,
     annotate_citations,
     build_stream_citation_scanner,
     register_image_url,
     reset_citation_state,
-    restore_history_citations,
-    restore_history_source_links,
     rewrite_citations,
 )
 from .sensitive_filter import SensitiveFilter
@@ -27,7 +24,6 @@ from .streaming import (
 )
 
 __all__ = [
-    'SOURCE_LINK_PATTERN',
     'SensitiveFilter',
     'annotate_citations',
     'basename_from_path',
@@ -38,8 +34,6 @@ __all__ = [
     'reset_citation_state',
     'response_payload',
     'resolve_local_image_path',
-    'restore_history_citations',
-    'restore_history_source_links',
     'rewrite_citations',
     'rewrite_markdown_image_urls',
     'single_event_stream_response',

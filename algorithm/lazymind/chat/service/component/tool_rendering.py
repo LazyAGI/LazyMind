@@ -346,9 +346,11 @@ _ZH_TOOL_RESULT_APPROVAL_TEMPLATES: dict[str, str] = {
 _TOOL_RESULT_FALLBACK_TEMPLATE = 'Tool processing has finished.'
 _TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE = 'Tool processing could not be completed.'
 _TOOL_RESULT_APPROVAL_FALLBACK_TEMPLATE = 'This operation needs confirmation before continuing.'
+_TOOL_RESULT_INACTIVE_FALLBACK_TEMPLATE = 'Tool inactive.'
 _ZH_TOOL_RESULT_FALLBACK_TEMPLATE = '工具处理已完成。'
 _ZH_TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE = '工具处理未能完成。'
 _ZH_TOOL_RESULT_APPROVAL_FALLBACK_TEMPLATE = '此操作需要确认后才能继续。'
+_ZH_TOOL_RESULT_INACTIVE_FALLBACK_TEMPLATE = '工具未激活。'
 
 _KB_EMPTY_RESULT_MESSAGES: dict[str, dict[str, str]] = {
     'kb_search': {
@@ -421,6 +423,10 @@ _MAX_REPRESENTATIVE_RESULT_LENGTH = 200
 _MAX_TOOL_RESULT_PREVIEW_LENGTH = 50
 
 _ZH_PREVIEW_RE = re.compile('[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]')
+_TOOL_NOT_AVAILABLE_RE = re.compile(
+    r'Tool \[[^\]]+\] is not available\. Please choose from the available tools\.',
+    re.IGNORECASE,
+)
 
 
 def _resolve_tool_key(tool_name: str, mapping: dict[str, Any]) -> Any:
@@ -665,6 +671,8 @@ def _tool_result_status(result: Any) -> str:
             return 'failed'
     elif isinstance(result, str):
         text = result.strip().lower()
+        if _TOOL_NOT_AVAILABLE_RE.search(result):
+            return 'inactive'
         if any(marker in text for marker in ('error', 'failed', 'parameters error')):
             return 'failed'
     return 'ok'
@@ -726,6 +734,14 @@ def _tool_result_preview_display_value(tool_name: str, result: Any, value: str =
 def _tool_result_preview(tool_name: str, result: Any, value: str = '', language: str = 'en') -> str:
     status = _tool_result_status(result)
     display_value = _tool_result_preview_display_value(tool_name, result, value)
+    if status == 'inactive':
+        return _ensure_trailing_newline(
+            _language_fallback(
+                language,
+                _TOOL_RESULT_INACTIVE_FALLBACK_TEMPLATE,
+                _ZH_TOOL_RESULT_INACTIVE_FALLBACK_TEMPLATE,
+            )
+        )
     if status == 'needs_approval':
         return _render_preview_template(
             tool_name,

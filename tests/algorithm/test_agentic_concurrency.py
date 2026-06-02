@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 from typing import Any, Dict, List
 
+import lazyllm
 from lazymind.chat.service import chat_service
 
 
@@ -36,7 +38,7 @@ class _FakeAgent:
 
     def forward(self, query: str, llm_chat_history: Any = None):
         self._observe(query)
-        chat_service.lazyllm.FileSystemQueue().enqueue(f'stream:{query}')
+        chat_service.lazyllm.FileSystemQueue().enqueue(json.dumps({'tag': 'text', 'delta': f'stream:{query}'}))
         return {'text': f'final:{query}'}
 
 
@@ -102,5 +104,42 @@ def test_stream_parallel_requests_see_isolated_config(monkeypatch):
     for i, (body, outer, session_id) in enumerate(results):
         assert session_id == f'stream-session-{i}'
         assert f'stream:s_{i}' in body
-        assert isinstance(outer, dict)
-        assert outer['filters']['kb_id'] == f's_id_{i}'
+        assert outer is None
+
+
+def test_stream_response_keeps_session_after_route_context_exits(monkeypatch):
+    _FakeAgent.observations = []
+    monkeypatch.setattr(chat_service, 'AutoModel', lambda *_a, **_kw: object())
+    monkeypatch.setattr(chat_service.lazyllm.tools.agent, 'ReactAgent', _FakeAgent)
+
+    async def drive():
+        session_id = 'route-stream-session'
+        with lazyllm.new_session(session_id):
+            response = await chat_service.handle_chat(
+                query='route_query',
+                history=[],
+                session_id=session_id,
+                filters={'kb_id': 'route_kb'},
+                files=None,
+                debug=False,
+                reasoning=False,
+                databases=None,
+                dataset='default',
+                priority=None,
+                available_tools=['calculator'],
+                available_skills=['route_skill'],
+                memory=None,
+                user_preference=None,
+                use_memory=True,
+                model_config={},
+            )
+        return await _drain_response(response)
+
+    body = asyncio.run(drive())
+
+    assert 'stream:route_query' in body
+    assert len(_FakeAgent.observations) == 1
+    obs = _FakeAgent.observations[0]
+    assert obs['sid'] == 'route-stream-session'
+    assert obs['config']['session_id'] == 'route-stream-session'
+    assert obs['config']['filters']['kb_id'] == 'route_kb'

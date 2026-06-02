@@ -17,7 +17,6 @@ from .stream_scanner import (
 
 CITATION_REFS_KEY = '_citation_sources'
 CITATION_KEY_MAP_KEY = '_citation_key_map'
-CITATION_NEXT_KEY = '_citation_next_index'
 IMAGE_URL_REGISTRY_KEY = '_image_url_registry'
 CITATION_DOC_KEY_MAP_KEY = '_citation_doc_key_map'
 CITATION_NEXT_DOC_KEY = '_citation_next_doc_index'
@@ -32,7 +31,7 @@ def register_image_url(config: dict[str, Any], path_or_url: str) -> None:
     signed = static_file_url_from_any(path_or_url)
     if not signed:
         return
-    registry = config.setdefault(IMAGE_URL_REGISTRY_KEY, {})
+    registry = config[IMAGE_URL_REGISTRY_KEY]
     registry[signed] = signed
     base = basename_from_path(signed)
     if base:
@@ -130,10 +129,10 @@ def register_citation_item(item: dict[str, Any], config: dict[str, Any]) -> dict
     if not text:
         return item
 
-    refs = config.setdefault(CITATION_REFS_KEY, {})
-    key_map = config.setdefault(CITATION_KEY_MAP_KEY, {})
-    doc_key_map = config.setdefault(CITATION_DOC_KEY_MAP_KEY, {})
-    doc_chunk_next_map = config.setdefault(CITATION_DOC_CHUNK_NEXT_KEY, {})
+    refs = config[CITATION_REFS_KEY]
+    key_map = config[CITATION_KEY_MAP_KEY]
+    doc_key_map = config[CITATION_DOC_KEY_MAP_KEY]
+    doc_chunk_next_map = config[CITATION_DOC_CHUNK_NEXT_KEY]
     key = build_citation_key(item)
     if not key:
         return item
@@ -182,88 +181,9 @@ def annotate_citations(result: Any, config: dict[str, Any]) -> Any:
     return result
 
 
-def citation_index_from_item(item: dict[str, Any]) -> Optional[str]:
-    raw_index = item.get('citation_index') or item.get('index')
-    if isinstance(raw_index, str) and re.fullmatch(CITATION_INDEX_PATTERN, raw_index):
-        return raw_index
-    ref = item.get('ref')
-    if isinstance(ref, str):
-        match = SOURCE_REF_PATTERN.fullmatch(ref.strip())
-        if match:
-            return match.group(1)
-    return None
-
-
-def restore_history_index_state(index: str, item: dict[str, Any], config: dict[str, Any]) -> None:
-    document_index, chunk_index = split_citation_index(index)
-    if document_index is None or chunk_index is None:
-        return
-    doc_key = build_document_citation_key(item)
-    if not doc_key:
-        return
-    doc_key_map = config.setdefault(CITATION_DOC_KEY_MAP_KEY, {})
-    doc_chunk_next_map = config.setdefault(CITATION_DOC_CHUNK_NEXT_KEY, {})
-    doc_key_map[doc_key] = document_index
-    next_doc_index = int(config.get(CITATION_NEXT_DOC_KEY) or 1)
-    if document_index >= next_doc_index:
-        config[CITATION_NEXT_DOC_KEY] = document_index + 1
-    next_chunk_index = int(doc_chunk_next_map.get(doc_key) or 1)
-    if chunk_index >= next_chunk_index:
-        doc_chunk_next_map[doc_key] = chunk_index + 1
-
-
-def restore_history_citation_item(item: dict[str, Any], config: dict[str, Any]) -> None:
-    index = citation_index_from_item(item)
-    if index is None:
-        return
-    text = item.get('text') if item.get('text') is not None else item.get('content')
-    if not text:
-        return
-
-    refs = config.setdefault(CITATION_REFS_KEY, {})
-    key_map = config.setdefault(CITATION_KEY_MAP_KEY, {})
-    restore_history_index_state(index, item, config)
-
-    source = build_source_node_from_item(index, item)
-    existing = refs.get(index) or refs.get(str(index))
-    if not isinstance(existing, dict) or (not existing.get('content') and source.get('content')):
-        refs[index] = source
-
-    key = build_citation_key(item)
-    if key:
-        key_map[key] = index
-
-
-def restore_history_citations(result: Any, config: Optional[dict[str, Any]]) -> None:
-    if config is None:
-        return
-    if isinstance(result, dict):
-        restore_history_citation_item(result, config)
-        for value in result.values():
-            restore_history_citations(value, config)
-        return
-    if isinstance(result, list):
-        for item in result:
-            restore_history_citation_item(item, config)
-
-
-def restore_history_source_links(text: str, config: Optional[dict[str, Any]]) -> None:
-    if config is None or not text:
-        return
-    next_doc_index = int(config.get(CITATION_NEXT_DOC_KEY) or 1)
-    for match in SOURCE_LINK_PATTERN.finditer(text):
-        document_index, _ = split_citation_index(match.group(2))
-        if document_index is None:
-            continue
-        if document_index >= next_doc_index:
-            next_doc_index = document_index + 1
-    config[CITATION_NEXT_DOC_KEY] = next_doc_index
-
-
 def reset_citation_state(config: dict[str, Any]) -> None:
     config[CITATION_REFS_KEY] = {}
     config[CITATION_KEY_MAP_KEY] = {}
-    config[CITATION_NEXT_KEY] = 1
     config[CITATION_DOC_KEY_MAP_KEY] = {}
     config[CITATION_NEXT_DOC_KEY] = 1
     config[CITATION_DOC_CHUNK_NEXT_KEY] = {}
@@ -305,13 +225,6 @@ def rewrite_citations(text: str, config: dict[str, Any]) -> tuple[str, list[dict
             collected.setdefault(index, source)
 
     return rewritten, list(collected.values())
-
-
-def registered_citation_sources(config: dict[str, Any]) -> list[dict[str, Any]]:
-    refs = config.get(CITATION_REFS_KEY)
-    if not isinstance(refs, dict):
-        return []
-    return [source for source in refs.values() if isinstance(source, dict)]
 
 
 class ConfigCitationPlugin(BasePlugin):

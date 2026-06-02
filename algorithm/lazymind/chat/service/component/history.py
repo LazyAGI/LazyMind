@@ -4,11 +4,9 @@ import json
 import re
 from typing import Any
 
-from lazymind.chat.service.utils import (
+from lazymind.chat.service.utils.citations import (
     SOURCE_LINK_PATTERN,
-    reset_citation_state,
-    restore_history_citations,
-    restore_history_source_links,
+    SOURCE_REF_PATTERN,
 )
 
 from lazymind.chat.service.component.tool_rendering import (
@@ -22,12 +20,37 @@ _HISTORY_TAG_PATTERN = re.compile(
     r'<(?P<tag>tp|trp|tool_call|tool_result)(?P<attrs>[^>]*)>(?P<body>.*?)</(?P=tag)>',
     re.DOTALL,
 )
-_KB_TOOL_PREFIX = 'kb_'
+_WHITESPACE_BEFORE_PUNCT_PATTERN = re.compile(r'\s+([。！？，、.!?,;:])')
+_MULTI_SPACE_PATTERN = re.compile(r'[ \t]{2,}')
 
 
 def _history_message_content(message: dict[str, Any]) -> str:
     content = message.get('content')
     return content if isinstance(content, str) else ''
+
+
+def _strip_history_citations(text: str) -> str:
+    if not text:
+        return ''
+    text = SOURCE_LINK_PATTERN.sub('', text)
+    text = SOURCE_REF_PATTERN.sub('', text)
+    text = _WHITESPACE_BEFORE_PUNCT_PATTERN.sub(r'\1', text)
+    return _MULTI_SPACE_PATTERN.sub(' ', text)
+
+
+def _sanitize_history_tool_result(result: Any) -> Any:
+    if isinstance(result, str):
+        return _strip_history_citations(result)
+    if isinstance(result, list):
+        return [_sanitize_history_tool_result(item) for item in result]
+    if isinstance(result, dict):
+        sanitized = {}
+        for key, value in result.items():
+            if key in ('citation_index', 'ref'):
+                continue
+            sanitized[key] = _sanitize_history_tool_result(value)
+        return sanitized
+    return result
 
 
 def _parse_history_assistant_content(
@@ -134,9 +157,7 @@ def _append_pending_assistant(
 
 def normalize_history_for_agent(
     history: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    citation_state: dict[str, Any] = {}
-    reset_citation_state(citation_state)
+) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for message in history or []:
         if not isinstance(message, dict):
@@ -157,13 +178,7 @@ def normalize_history_for_agent(
                     saw_structured_segments = True
                     pending_reasoning_parts.append(seg['content'])
                 elif seg_type == 'text':
-                    restore_history_source_links(seg['content'], citation_state)
-                    pending_text_parts.append(
-                        SOURCE_LINK_PATTERN.sub(
-                            lambda match: f'[[{match.group(2)}]]',
-                            seg['content'] or '',
-                        )
-                    )
+                    pending_text_parts.append(_strip_history_citations(seg['content']))
                 elif seg_type == 'tool_call':
                     saw_structured_segments = True
                     pending_tool_calls.append({
@@ -183,16 +198,18 @@ def normalize_history_for_agent(
                         pending_tool_calls,
                         saw_structured_segments,
                     )
-                    if isinstance(seg['name'], str) and seg['name'].startswith(_KB_TOOL_PREFIX):
-                        restore_history_citations(seg['result'], citation_state)
                     normalized.append({
                         'role': 'tool',
                         'tool_call_id': seg['id'],
                         'name': seg['name'],
                         'content': (
-                            seg['result']
+                            _sanitize_history_tool_result(seg['result'])
                             if isinstance(seg['result'], str)
-                            else json.dumps(seg['result'], ensure_ascii=False, separators=(',', ':'))
+                            else json.dumps(
+                                _sanitize_history_tool_result(seg['result']),
+                                ensure_ascii=False,
+                                separators=(',', ':'),
+                            )
                         ),
                     })
 
@@ -214,4 +231,4 @@ def normalize_history_for_agent(
         content = _history_message_content(message)
         if content:
             normalized.append({'role': role or 'assistant', 'content': content})
-    return normalized, citation_state
+    return normalized

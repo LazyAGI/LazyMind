@@ -154,8 +154,8 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     resolved_use_memory = use_memory is not False
 
     raw_history = list(history) if isinstance(history, list) else []
-    agent_history, citation_state = normalize_history_for_agent(raw_history)
-    translator = AgentEventFrameTranslator(query=query, citation_state=citation_state)
+    agent_history = normalize_history_for_agent(raw_history)
+    translator = AgentEventFrameTranslator(query=query)
 
     agentic_config = {
         'session_id': session_id,
@@ -164,7 +164,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         'priority': priority,
         'user_id': user_id or '',
         'use_memory': resolved_use_memory,
-        'citation_state': citation_state,
+        'citation_state': translator.citation_state,
     }
     lazyllm.globals._init_sid(sid=session_id)
     lazyllm.locals._init_sid(sid=session_id)
@@ -200,8 +200,6 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     )
 
     def _run_agent():
-        lazyllm.globals._init_sid(sid=session_id)
-        lazyllm.locals._init_sid(sid=session_id)
         return _run_ppl_with_trace(
             lambda: react_agent.forward(query, llm_chat_history=agent_history), (),
             session_id=session_id, dataset=dataset,
@@ -215,7 +213,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
         try:
             async with rag_sem:
-                helper = lazyllm.module.stream_helper.StreamCallHelper(_run_agent, sid=session_id)
+                helper = lazyllm.module.stream_helper.StreamCallHelper(_run_agent, init_sid=False)
                 async for item in helper.astream():
                     for frame in translator.feed(item):
                         cost = round(time.time() - start_time, 3)
@@ -223,8 +221,9 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
                 try:
                     result = helper.future.result()
-                except Exception:
-                    raise RuntimeError('agent failed') from None
+                except Exception as exc:
+                    LOG.exception('[ChatServer] agent failed')
+                    raise RuntimeError(f'agent failed: {exc}') from exc
 
                 if isinstance(result, tuple) and len(result) == 2:
                     final_result = result[0]

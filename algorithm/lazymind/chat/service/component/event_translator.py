@@ -5,8 +5,8 @@ from typing import Any, Optional
 
 from lazymind.config import config as _cfg
 from lazymind.chat.service.utils import (
-    annotate_citations,
     build_stream_citation_scanner,
+    reset_citation_state,
     rewrite_markdown_image_urls,
     rewrite_citations,
 )
@@ -63,9 +63,10 @@ def _iter_scanned_text_frames(
 
 
 class AgentEventFrameTranslator:
-    def __init__(self, *, query: str, citation_state: dict[str, Any] | None = None) -> None:
+    def __init__(self, *, query: str) -> None:
         self.query = query
-        self.citation_state = citation_state if citation_state is not None else {}
+        self.citation_state: dict[str, Any] = {}
+        reset_citation_state(self.citation_state)
         self.language = _preview_language(query)
         self._pending_previews: dict[str, str] = {}
         self.streamed_text = False
@@ -105,12 +106,6 @@ class AgentEventFrameTranslator:
 
         if event_type == 'tool_results':
             tool_results = [tr for tr in (event.get('tool_results', []) or []) if isinstance(tr, dict)]
-            for tr in tool_results:
-                result = tr.get('result')
-                if isinstance(result, dict) and 'result' in result:
-                    result['result'] = annotate_citations(result['result'], self.citation_state)
-                else:
-                    annotate_citations(result, self.citation_state)
             if tool_results:
                 parts = [
                     _tool_result_frame_text(

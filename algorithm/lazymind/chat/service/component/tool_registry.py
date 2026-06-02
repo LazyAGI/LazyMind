@@ -245,5 +245,23 @@ def filter_tools(
     return result
 
 
+def _is_lazymind_tool_group(instance: Any) -> bool:
+    return instance.__class__.__module__.startswith('lazymind.chat.engine.tools.')
+
+
 def to_agent_inputs(configs: list[ToolGroupConfig]) -> list[Any]:
-    return [cfg.instance for cfg in configs]
+    result = []
+    for cfg in configs:
+        instance = cfg.instance
+        public_apis = list(getattr(instance, '__public_apis__', []))
+        if not public_apis or not _is_lazymind_tool_group(instance):
+            result.append(instance)
+            continue
+        result.append({
+            'name': cfg.name,
+            'desc': cfg.description,
+            'lazy': len(public_apis) > 1,
+            'prefix': False,
+            'tools': [getattr(instance, name) for name in public_apis],
+        })
+    return result
