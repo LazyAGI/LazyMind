@@ -208,7 +208,6 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
             mode_tag='stream_reasoning' if reasoning else 'stream',
             trace_enabled=trace, model_config=model_config,
         )
-    _run_agent._lazyllm_stream_adapter = react_agent._lazyllm_stream_adapter
 
     async def event_stream() -> Any:
         trace_id: Optional[str] = None
@@ -216,20 +215,24 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
         try:
             async with rag_sem:
-                async for event in lazyllm.module.StreamCallHelper(_run_agent).astream():
-                    item_type = str(getattr(event, 'type', '') or '')
-                    if item_type == 'agent.finished':
-                        metadata = getattr(event, 'metadata', None) or {}
-                        final_result = getattr(event, 'text', None)
-                        if final_result is None and isinstance(metadata, dict):
-                            final_result = metadata.get('result')
-                        trace_id = metadata.get('trace_id') if isinstance(metadata, dict) else None
-                        break
-                    if item_type == 'agent.failed':
-                        raise RuntimeError(getattr(event, 'error', '') or 'agent failed')
-                    for frame in translator.feed(event):
+                helper = lazyllm.module.stream_helper.StreamCallHelper(_run_agent, sid=session_id)
+                async for item in helper.astream():
+                    for frame in translator.feed(item):
                         cost = round(time.time() - start_time, 3)
                         yield log_and_emit_frame(frame, cost, query, session_id, tag='FEED')
+
+                try:
+                    result = helper.future.result()
+                except Exception:
+                    raise RuntimeError('agent failed') from None
+
+                if isinstance(result, tuple) and len(result) == 2:
+                    final_result = result[0]
+                    trace_id = result[1] if isinstance(result[1], str) else None
+                elif isinstance(result, str):
+                    final_result = result
+                else:
+                    final_result = result
 
             if trace_id is not None:
                 yield log_and_emit_frame(

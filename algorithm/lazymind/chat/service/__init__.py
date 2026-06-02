@@ -1,3 +1,5 @@
 """Chat service-layer modules."""
 
-__all__: list[str] = []
+from lazymind.chat.service.chat_service import handle_chat
+
+__all__: list[str] = ["handle_chat"]

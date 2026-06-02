@@ -73,15 +73,15 @@ class AgentEventFrameTranslator:
 
     def feed(self, event: Any) -> list[dict[str, Any]]:
         frames: list[dict[str, Any]] = []
-        event_type = str(getattr(event, 'type', '') or '')
-        if event_type == 'agent.reasoning.delta':
-            delta = str(getattr(event, 'delta', '') or '')
+        event_type = str(event.get('tag', '') or '')
+        if event_type == 'think':
+            delta = str(event.get('delta', '') or '')
             if delta:
                 frames.append(_stream_frame(think=delta))
             return frames
 
-        if event_type == 'agent.text.delta':
-            delta = str(getattr(event, 'delta', '') or '')
+        if event_type == 'text':
+            delta = str(event.get('delta', '') or '')
             if not delta:
                 return frames
             for has_text, frame in _iter_scanned_text_frames(
@@ -91,8 +91,8 @@ class AgentEventFrameTranslator:
                 frames.append(frame)
             return frames
 
-        if event_type == 'agent.tool.calls':
-            tool_calls = [tc for tc in (getattr(event, 'tool_calls', []) or []) if isinstance(tc, dict)]
+        if event_type == 'tool_calls':
+            tool_calls = [tc for tc in (event.get('tool_calls', []) or []) if isinstance(tc, dict)]
             if tool_calls:
                 parts: list[str] = []
                 for tc in tool_calls:
@@ -103,8 +103,8 @@ class AgentEventFrameTranslator:
                 frames.append(_stream_frame(text=''.join(parts)))
             return frames
 
-        if event_type == 'agent.tool.results':
-            tool_results = [tr for tr in (getattr(event, 'tool_results', []) or []) if isinstance(tr, dict)]
+        if event_type == 'tool_results':
+            tool_results = [tr for tr in (event.get('tool_results', []) or []) if isinstance(tr, dict)]
             for tr in tool_results:
                 result = tr.get('result')
                 if isinstance(result, dict) and 'result' in result:

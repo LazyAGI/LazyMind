@@ -215,15 +215,15 @@ class TestStreamCallHelperAstream:
     def test_astream_yields_chunks(self, monkeypatch):
         '''StreamCallHelper.astream should yield tokens from FileSystemQueue.'''
         import lazyllm
-        from lazyllm.tools.common import StreamCallHelper
+        from lazyllm.module.stream_helper import StreamCallHelper
 
         self._patch_memory_queue(monkeypatch)
         chunks_received = []
 
         def fake_impl(*args, **kwargs):
-            # Simulate writing to the queue — enqueue one string at a time
-            lazyllm.FileSystemQueue().enqueue('hello')
-            lazyllm.FileSystemQueue().enqueue(' world')
+            # Simulate writing tagged JSON to the default queue
+            lazyllm.FileSystemQueue().enqueue('{"tag": "text", "delta": "hello"}')
+            lazyllm.FileSystemQueue().enqueue('{"tag": "text", "delta": " world"}')
             return 'hello world'
 
         helper = StreamCallHelper(fake_impl, interval=0.01)
@@ -234,11 +234,11 @@ class TestStreamCallHelperAstream:
 
         asyncio.run(run())
         assert len(chunks_received) >= 1
-        assert any('hello' in c for c in chunks_received)
+        assert any('hello' in (c.get('delta') or '') for c in chunks_received)
 
     def test_astream_yields_result_when_queue_empty(self, monkeypatch):
-        '''When queue is empty, astream should still yield the final result.'''
-        from lazyllm.tools.common import StreamCallHelper
+        '''When queue is empty, future.result() should give the final result.'''
+        from lazyllm.module.stream_helper import StreamCallHelper
 
         self._patch_memory_queue(monkeypatch)
 
@@ -253,7 +253,7 @@ class TestStreamCallHelperAstream:
                 results.append(chunk)
 
         asyncio.run(run())
-        assert 'final answer' in results
+        assert helper.future.result() == 'final answer'
 
 
 # ---------------------------------------------------------------------------
@@ -271,10 +271,13 @@ class TestLLMBaseAstreamCall:
     def test_astream_call_delegates_to_stream_call_helper(self):
         '''astream_call should yield chunks via StreamCallHelper.astream.'''
         from lazyllm.module.servermodule import LLMBase
-        from lazyllm.tools.common import StreamCallHelper
+        from lazyllm.module.stream_helper import StreamCallHelper
 
         chunks = []
-        fake_chunks = ['tok1', 'tok2']
+        fake_chunks = [
+            {'tag': 'text', 'delta': 'tok1'},
+            {'tag': 'text', 'delta': 'tok2'},
+        ]
 
         async def fake_astream(self_helper, *args, **kwargs):
             for c in fake_chunks:
@@ -305,7 +308,7 @@ class TestLLMBaseAstreamCall:
 
             asyncio.run(run())
 
-        assert chunks == fake_chunks
+        assert chunks == ['tok1', 'tok2']
 
 
 # ---------------------------------------------------------------------------
