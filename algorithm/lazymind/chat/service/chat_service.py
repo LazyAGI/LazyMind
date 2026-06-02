@@ -30,7 +30,7 @@ from lazymind.chat.service.utils import (
     validate_and_resolve_files,
 )
 from lazyllm.tools.fs.client import FS
-from lazymind.model_config import get_config_path, inject_model_config, summarize_model_config_for_log
+from lazymind.model_config import inject_model_config, summarize_model_config_for_log
 from lazyllm.tools.tool_config_inject import inject_tool_config
 from lazyllm import AutoModel
 from lazymind.config import config as _cfg
@@ -71,7 +71,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       tool_config: Optional[Dict[str, str]] = None) -> Union[Dict[str, Any], StreamingResponse]:
     LOG.info(
         f'[ChatServer] [MODEL_CONFIG_RECEIVED] [sid={session_id}] [user_id={user_id or ""}] '
-        f'[active_config={get_config_path()}] [{summarize_model_config_for_log(model_config)}]'
+        f'[{summarize_model_config_for_log(model_config)}]'
     )
     start_time = time.time()
     priority = priority or LAZYMIND_LLM_PRIORITY
@@ -126,7 +126,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         files=resolved_files,
     )
 
-    llm = AutoModel(model='llm', config=get_config_path())
+    llm = AutoModel(model='llm')
 
     react_agent = lazyllm.tools.agent.ReactAgent(
         llm=llm,

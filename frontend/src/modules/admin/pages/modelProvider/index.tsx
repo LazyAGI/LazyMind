@@ -108,7 +108,7 @@ interface CustomModelFormValues {
 interface SelectedModelApiItem {
   group_name: string;
   model_id: string;
-  model_type: string;
+  model_key: string;
   name: string;
   provider_name: string;
   user_model_provider_group_id: string;
@@ -606,7 +606,7 @@ export default function ModelProviderPage() {
     const nextSelectedModels: SelectedModels = {};
     const nextShareStatus: Partial<Record<ModelCapability, boolean>> = {};
     (selectedData.selections || []).forEach((selection) => {
-      const capability = getCapabilityByModelType(selection.model_type);
+      const capability = getCapabilityByModelType(selection.model_key);
       if (!capability) {
         return;
       }
@@ -685,7 +685,7 @@ export default function ModelProviderPage() {
       const nextSelectedModels: SelectedModels = {};
       const selectedOptions: Partial<Record<ModelCapability, ModelOptionItem[]>> = {};
       (selectedData.selections || []).forEach((selection) => {
-        const capability = getCapabilityByModelType(selection.model_type);
+        const capability = getCapabilityByModelType(selection.model_key);
         if (!capability) {
           return;
         }
@@ -724,7 +724,7 @@ export default function ModelProviderPage() {
       // Extract share status from selections (admin view).
       const nextShareStatus: Partial<Record<ModelCapability, boolean>> = {};
       (selectedData.selections || []).forEach((selection) => {
-        const capability = getCapabilityByModelType(selection.model_type);
+        const capability = getCapabilityByModelType(selection.model_key);
         if (capability && selection.share) {
           nextShareStatus[capability] = true;
         }
@@ -1297,7 +1297,7 @@ export default function ModelProviderPage() {
   const saveSelectedModel = async (capability: ModelCapability, value?: string) => {
     const selections = [
       {
-        model_type: capability,
+        model_key: capability,
         model_id: value ? parseModelValue(value).modelId : "",
       },
     ];
@@ -1318,6 +1318,7 @@ export default function ModelProviderPage() {
     try {
       await modelProviderRequest("PUT", "/model_providers/selected_models/share", {
         model_id: modelId,
+        model_key: capability,
         share,
       });
       setShareStatus((current) => ({ ...current, [capability]: share }));

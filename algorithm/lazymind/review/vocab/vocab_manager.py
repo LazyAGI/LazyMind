@@ -10,7 +10,8 @@ from typing import Callable, List, Optional, Union
 
 from lazyllm import LOG, AutoModel, ModuleBase
 from lazyllm.tools.rag.query_enh_ac import QueryEnhACProcessor
-from lazymind.model_config import get_config_path
+
+from ..service.db import fetch_vocab_for_user_id
 
 
 class VocabManager(ModuleBase):
@@ -30,7 +31,7 @@ class VocabManager(ModuleBase):
         self._data_source = actual_source
         self._proc = QueryEnhACProcessor(
             data_source=actual_source,
-            discriminator=AutoModel(model='llm', config=get_config_path()),
+            discriminator=AutoModel(model='llm'),
         )
         LOG.info(f'[VocabManager] initialized for user_id={user_id!r}, vocab_size={self.vocab_size}')
 

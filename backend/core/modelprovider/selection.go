@@ -36,8 +36,8 @@ var autoShareModelTypes = map[string]struct{}{
 }
 
 type selectedModelUpsertItem struct {
-	ModelType string `json:"model_type"`
-	ModelID   string `json:"model_id"`
+	ModelKey string `json:"model_key"`
+	ModelID  string `json:"model_id"`
 }
 
 type setSelectedModelsRequest struct {
@@ -45,15 +45,15 @@ type setSelectedModelsRequest struct {
 }
 
 type selectedModelItem struct {
-	ModelType                string `json:"model_type"`
-	ModelID                  string `json:"model_id"`
-	UserModelProviderID      string `json:"user_model_provider_id"`
-	UserModelProviderGroupID string `json:"user_model_provider_group_id"`
-	Name                     string `json:"name"`
-	ProviderName             string `json:"provider_name"`
-	GroupName                string `json:"group_name"`
-	BaseURL                  string `json:"base_url"`
-	Share                    bool   `json:"share"`
+	ModelKey                 string `json:"model_key" gorm:"column:model_type"`
+	ModelID                  string `json:"model_id" gorm:"column:model_id"`
+	UserModelProviderID      string `json:"user_model_provider_id" gorm:"column:user_model_provider_id"`
+	UserModelProviderGroupID string `json:"user_model_provider_group_id" gorm:"column:user_model_provider_group_id"`
+	Name                     string `json:"name" gorm:"column:name"`
+	ProviderName             string `json:"provider_name" gorm:"column:provider_name"`
+	GroupName                string `json:"group_name" gorm:"column:group_name"`
+	BaseURL                  string `json:"base_url" gorm:"column:base_url"`
+	Share                    bool   `json:"share" gorm:"column:share"`
 }
 
 type selectedModelsResponse struct {
@@ -61,8 +61,9 @@ type selectedModelsResponse struct {
 }
 
 type setSharedModelRequest struct {
-	ModelID string `json:"model_id"`
-	Share   bool   `json:"share"`
+	ModelID  string `json:"model_id"`
+	ModelKey string `json:"model_key"`
+	Share    bool   `json:"share"`
 }
 
 type modelReadyResponse struct {
@@ -158,21 +159,21 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 	selectionByType := make(map[string]string, len(req.Selections))
 	modelIDs := make([]string, 0, len(req.Selections))
 	for _, item := range req.Selections {
-		modelType := strings.TrimSpace(item.ModelType)
+		modelKey := strings.TrimSpace(item.ModelKey)
 		modelID := strings.TrimSpace(item.ModelID)
-		if modelType == "" {
-			common.ReplyErr(w, "model_type is required", http.StatusBadRequest)
+		if modelKey == "" {
+			common.ReplyErr(w, "model_key is required", http.StatusBadRequest)
 			return
 		}
-		if _, ok := allowedSelectionModelTypes[modelType]; !ok {
-			common.ReplyErr(w, "invalid model_type", http.StatusBadRequest)
+		if _, ok := allowedSelectionModelTypes[modelKey]; !ok {
+			common.ReplyErr(w, "invalid model_key", http.StatusBadRequest)
 			return
 		}
-		if _, exists := selectionByType[modelType]; exists {
+		if _, exists := selectionByType[modelKey]; exists {
 			common.ReplyErr(w, "duplicate model_type in selections", http.StatusBadRequest)
 			return
 		}
-		selectionByType[modelType] = modelID
+		selectionByType[modelKey] = modelID
 		if modelID == "" {
 			continue
 		}
@@ -344,17 +345,23 @@ func SetSharedModel(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	modelID := strings.TrimSpace(req.ModelID)
-	if modelID == "" {
-		common.ReplyErr(w, "model_id is required", http.StatusBadRequest)
+	modelKey := strings.TrimSpace(req.ModelKey)
+	if modelKey == "" {
+		common.ReplyErr(w, "model_key is required", http.StatusBadRequest)
+		return
+	}
+	userID := strings.TrimSpace(store.UserID(r))
+	if userID == "" {
+		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
 		return
 	}
 
 	now := time.Now()
 	err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		// Look up the row to get its model_type (needed to clear other share=true rows of the same type).
+		// Look up the exact row by (user_id, model_type) — the unique key — so we
+		// never accidentally touch another user's row for the same model_id.
 		var row orm.UserSelectedModel
-		if err := tx.Where("user_model_provider_group_model_id = ?", modelID).
+		if err := tx.Where("user_id = ? AND model_type = ?", userID, modelKey).
 			First(&row).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return errors.New("not found")
@@ -362,15 +369,16 @@ func SetSharedModel(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if req.Share {
-			// Clear any existing share=true for this model_type first.
+			// Clear any existing share=true for this model_key globally first.
 			if err := tx.Model(&orm.UserSelectedModel{}).
-				Where("model_type = ? AND share = ?", row.ModelKey, true).
+				Where("model_type = ? AND share = ?", modelKey, true).
 				Updates(map[string]any{"share": false, "updated_at": now}).Error; err != nil {
 				return err
 			}
 		}
+		// Update only this specific row by primary key.
 		return tx.Model(&orm.UserSelectedModel{}).
-			Where("user_model_provider_group_model_id = ?", modelID).
+			Where("id = ?", row.ID).
 			Updates(map[string]any{"share": req.Share, "updated_at": now}).Error
 	})
 	if err != nil {
