@@ -12,8 +12,8 @@ x-mirror-args: &mirror-args
   GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
   GOSUMDB: ${GOSUMDB:-sum.golang.google.cn}
   GITHUB_PROXY: ${GITHUB_PROXY:-https://gh-proxy.com/}
-  BASE_LAZYLLM_IMAGE: ${BASE_LAZYLLM_IMAGE:-base}
-  BASE_LAZYMIND_IMAGE: ${BASE_LAZYMIND_IMAGE:-base_lazymind}
+  BASE_LAZYLLM_IMAGE: ${BASE_LAZYLLM_IMAGE:-base_env}
+  BASE_LAZYMIND_IMAGE: ${BASE_LAZYMIND_IMAGE:-base_code}
 
 x-trace-config: &trace-config
   LANGFUSE_HOST: ${LANGFUSE_HOST:-}

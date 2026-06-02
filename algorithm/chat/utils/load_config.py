@@ -7,11 +7,6 @@ from typing import Any, Dict, List, NamedTuple, Optional
 import yaml
 from lazyllm.tools.agent.skill_manager import SkillManager as LazySkillManager
 
-_COMMON_DIR = Path(__file__).resolve().parents[2] / 'common'
-_INNER_CONFIG_PATH = _COMMON_DIR / 'runtime_models.inner.yaml'
-_ONLINE_CONFIG_PATH = _COMMON_DIR / 'runtime_models.online.yaml'
-_DYNAMIC_CONFIG_PATH = _COMMON_DIR / 'runtime_models.yaml'
-
 # Maps runtime_models.yaml type values to _dynamic_module_slot names used by
 # _DynamicSourceRouterMixin subclasses (OnlineChatModule / OnlineEmbeddingModule).
 _TYPE_TO_SLOT: Dict[str, str] = {
@@ -33,29 +28,18 @@ _IMAGE_EMBED_TYPES = {'cross_modal_embed'}
 def get_config_path() -> str:
     '''Return the active runtime_models config file path as a string.
 
-    Controlled entirely by LAZYMIND_MODEL_CONFIG_PATH.  Three shorthand values
+    Controlled entirely by LAZYMIND_MODEL_CONFIG_PATH.  Three shorthand aliases
     are accepted in addition to an explicit file path:
 
         inner    → runtime_models.inner.yaml   (intranet / on-prem deployment)
         online   → runtime_models.online.yaml  (public cloud API deployment)
         dynamic  → runtime_models.yaml         (fully dynamic, key injected per request)
 
-    If the env var is not set, defaults to 'dynamic'.
+    Alias resolution is handled by algorithm/config.py (Config alias mechanism),
+    so config['model_config_path'] always contains the resolved absolute path.
     '''
-    # Aliases are resolved at call time (not at import time) so that tests can
-    # patch the module-level path variables and have the change take effect.
-    aliases = {
-        'inner': _INNER_CONFIG_PATH,
-        'online': _ONLINE_CONFIG_PATH,
-        'dynamic': _DYNAMIC_CONFIG_PATH,
-    }
     from config import config as _cfg
-    raw = _cfg['model_config_path']
-    if raw in aliases:
-        path = str(aliases[raw])
-    else:
-        path = raw
-    return path
+    return _cfg['model_config_path']
 
 
 def load_model_config(config_path: str | None = None, *, expand_env: bool = False) -> Dict[str, Any]:
@@ -98,10 +82,9 @@ def get_dynamic_role_slot_map(config_path: Optional[str] = None) -> Dict[str, st
             'embed_main': 'embed',
         }
 
-    When config_path is None, reads from _DYNAMIC_CONFIG_PATH (runtime_models.yaml).
-    Pass get_config_path() to read from the currently active config file instead.
+    When config_path is None, reads from get_config_path() (LAZYMIND_MODEL_CONFIG_PATH).
     '''
-    raw = load_model_config(config_path or str(_DYNAMIC_CONFIG_PATH))
+    raw = load_model_config(config_path or get_config_path())
     result: Dict[str, str] = {}
     for role, cfg in raw.items():
         if not isinstance(cfg, dict):

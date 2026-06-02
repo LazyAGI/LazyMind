@@ -6,7 +6,6 @@ from typing import AsyncIterator, Callable, Iterator
 from lazyllm import AutoModel
 from evo.runtime.config import EvoConfig
 from evo.runtime.model_gateway import ModelGateway
-from algorithm.chat.utils.load_config import get_config_path
 
 LLMFactory = Callable[[], Callable[[str], AsyncIterator[str]]]
 
@@ -17,7 +16,7 @@ def default_llm_provider(cfg: EvoConfig):
     def provider():
         nonlocal client
         if client is None:
-            client = AutoModel(model=cfg.model_config.llm_role, config=get_config_path())
+            client = AutoModel(model=cfg.model_config.llm_role)
         return client
 
     return provider
@@ -29,7 +28,7 @@ def default_embed_provider(cfg: EvoConfig):
     def provider():
         nonlocal client
         if client is None:
-            client = AutoModel(model=cfg.model_config.embed_role, config=get_config_path())
+            client = AutoModel(model=cfg.model_config.embed_role)
         return client
 
     return provider
@@ -44,7 +43,7 @@ def make_evo_llm(cfg: EvoConfig, *, chunk_size: int = 64) -> LLMFactory:
     gateway: ModelGateway[str] = ModelGateway(
         cfg.llm, name='evo-orchestrator-llm', logger=logging.getLogger('evo.orchestrator.llm')
     )
-    client = AutoModel(model=role, config=get_config_path())
+    client = AutoModel(model=role)
 
     def factory() -> Callable[[str], AsyncIterator[str]]:
         async def call(prompt: str) -> AsyncIterator[str]:
@@ -63,7 +62,7 @@ def make_evo_stream_llm(cfg: EvoConfig) -> Callable[[str, Callable[[], bool]], I
     gateway: ModelGateway[str] = ModelGateway(
         cfg.llm, name='evo-stream-llm', logger=logging.getLogger('evo.orchestrator.llm')
     )
-    client = AutoModel(model=role, config=get_config_path())
+    client = AutoModel(model=role)
 
     def stream(prompt: str, cancel_requested: Callable[[], bool]) -> Iterator[str]:
         if cancel_requested():

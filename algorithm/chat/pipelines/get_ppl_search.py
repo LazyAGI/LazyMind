@@ -10,7 +10,6 @@ import chat.components.online_models.local_models  # noqa: F401 — registers Bg
 from chat.config import DEFAULT_TMP_BLOCK_TOPK
 from chat.components.process import AdaptiveKComponent, ContextExpansionComponent
 from chat.utils.load_config import (
-    get_config_path,
     get_dynamic_role_slot_map,
     get_image_embed_key,
     get_text_embed_keys,
@@ -64,7 +63,7 @@ def get_retriever(
             topk=int(_cfg['image_topk']),
         )
 
-    ref_docs_retriever = TempDocRetriever(embed=AutoModel(model=EMBED_MAIN, config=get_config_path()))
+    ref_docs_retriever = TempDocRetriever(embed=AutoModel(model=EMBED_MAIN))
     ref_docs_retriever.add_subretriever('block', topk=tmp_block_topk)
     with pipeline() as tmp_ppl:
         tmp_ppl.parse_input = lambda input, **kwargs: kwargs.get('files', [])
@@ -99,14 +98,13 @@ def _adaptive_get_token_len(n: Any) -> int:
 
 
 def _rerank(nodes, query: str, topk: int):
-    config_path = get_config_path()
-    role_slots = get_dynamic_role_slot_map(config_path)
+    role_slots = get_dynamic_role_slot_map()
     cfg = lazyllm.globals.config['dynamic_model_configs']
     role_cfg = cfg.get('reranker') if isinstance(cfg, dict) else None
 
     if 'reranker' not in role_slots or (isinstance(role_cfg, dict) and role_cfg.get(role_slots['reranker'])):
         return Reranker(
-            'ModuleReranker', model=AutoModel(model='reranker', config=config_path), topk=topk,
+            'ModuleReranker', model=AutoModel(model='reranker'), topk=topk,
         )(nodes, query=query)
 
     for node in nodes or []:

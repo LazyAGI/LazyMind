@@ -39,6 +39,17 @@ def _import_agentic_module(monkeypatch):
     fake_lazyllm_tools_fs = ModuleType('lazyllm.tools.fs')
     fake_lazyllm_tools_fs_client = ModuleType('lazyllm.tools.fs.client')
     fake_lazyllm_tools_fs_client.FS = object
+    fake_lazyllm_tools_fs_supplier = ModuleType('lazyllm.tools.fs.supplier')
+    fake_lazyllm_tools_fs_supplier_feishu = ModuleType('lazyllm.tools.fs.supplier.feishu')
+
+    class _FakeFeishuFS:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    fake_lazyllm_tools_fs_supplier_feishu.FeishuFS = _FakeFeishuFS
+    fake_lazyllm_tracing = ModuleType('lazyllm.tracing')
+    fake_lazyllm_tracing.set_trace_context = lambda *a, **kw: None
+
     fake_lazyllm_tools_sandbox = ModuleType('lazyllm.tools.sandbox')
     fake_lazyllm_tools_sandbox_base = ModuleType('lazyllm.tools.sandbox.sandbox_base')
     fake_lazyllm_tools_sandbox_base.create_sandbox = lambda *a, **kw: None
@@ -59,10 +70,13 @@ def _import_agentic_module(monkeypatch):
     # Symbols used by chat.components.agentic.config
     fake_prompts.CITATION_GUIDANCE = ''
     fake_prompts.DEFAULT_SYSTEM_PROMPT = ''
+    fake_prompts.IMAGE_REFERENCE_MARKDOWN_GUIDANCE = ''
+    fake_prompts.VISION_EXTRACTOR_GUIDANCE = ''
     fake_prompts.MEMORY_GUIDANCE = ''
     fake_prompts.SEARCH_GUIDANCE = ''
     fake_prompts.SKILLS_GUIDANCE = ''
     fake_prompts.TOOL_CALL_STATUS_GUIDANCE = ''
+    fake_prompts.VOCAB_GUIDANCE = ''
     fake_prompts._COMBINED_REVIEW_PROMPT = ''
     fake_prompts._MEMORY_REVIEW_PROMPT = ''
     fake_prompts._SKILL_REVIEW_PROMPT = ''
@@ -87,6 +101,9 @@ def _import_agentic_module(monkeypatch):
         'memory_review_interval': 1,
         'skill_review_interval': 5,
         'model_config_path': 'dynamic',
+        'skill_fs_url': 'remote://skills',
+        'agentic_keep_full_turns': 3,
+        'agentic_workspace': './workspace',
     }
 
     # Fake chat.pipelines package for isolated agentic import
@@ -114,6 +131,9 @@ def _import_agentic_module(monkeypatch):
     monkeypatch.setitem(sys.modules, 'lazyllm.tools.agent.functionCall', fake_lazyllm_tools_agent_fc)
     monkeypatch.setitem(sys.modules, 'lazyllm.tools.fs', fake_lazyllm_tools_fs)
     monkeypatch.setitem(sys.modules, 'lazyllm.tools.fs.client', fake_lazyllm_tools_fs_client)
+    monkeypatch.setitem(sys.modules, 'lazyllm.tools.fs.supplier', fake_lazyllm_tools_fs_supplier)
+    monkeypatch.setitem(sys.modules, 'lazyllm.tools.fs.supplier.feishu', fake_lazyllm_tools_fs_supplier_feishu)
+    monkeypatch.setitem(sys.modules, 'lazyllm.tracing', fake_lazyllm_tracing)
     monkeypatch.setitem(sys.modules, 'lazyllm.tools.sandbox', fake_lazyllm_tools_sandbox)
     monkeypatch.setitem(sys.modules, 'lazyllm.tools.sandbox.sandbox_base', fake_lazyllm_tools_sandbox_base)
     monkeypatch.setitem(sys.modules, 'tenacity', fake_tenacity)
@@ -180,7 +200,7 @@ def test_lazyllm_queue_db_path_is_path_like(monkeypatch):
 
 
 def test_agentic_forward_uses_automodel(monkeypatch):
-    # Verify agentic_forward calls AutoModel(model='llm', config=get_config_path()).
+    # Verify agentic_forward calls AutoModel(model='llm').
     # We use the fake-lazyllm module to isolate the test.
     module = _import_agentic_module(monkeypatch)
 

@@ -190,8 +190,10 @@ func SetSharedProvider(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		// Scope to the exact row (by id) to avoid touching other users' rows that
+		// reference the same group_id, which would violate the unique partial index.
 		return tx.Model(&orm.UserSelectedProvider{}).
-			Where("user_model_provider_group_id = ?", groupID).
+			Where("id = ?", row.ID).
 			Updates(map[string]any{"share": req.Share, "updated_at": now}).Error
 	})
 	if err != nil {

@@ -9,7 +9,6 @@ from lazyllm.components.formatter import encode_query_with_filepaths
 
 from chat.tools._common import handle_tool_errors, tool_success
 from chat.components.process.query_image_rewriter import extract_text_from_model_output
-from chat.utils.load_config import get_config_path
 from chat.utils.static_file_url import resolve_local_image_path
 
 
@@ -54,7 +53,7 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
     agentic_config = lazyllm.globals['agentic_config']
     priority = int(agentic_config.get('priority', 0) or 0)
 
-    vlm = AutoModel(model='vlm', config=get_config_path())
+    vlm = AutoModel(model='vlm')
     out = vlm(
         encoded_query,
         stream_output=False,

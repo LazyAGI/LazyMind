@@ -542,7 +542,7 @@ type listUserModelsByModelTypeQueryParams struct {
 }
 
 type selectedModelOpenAPIItem struct {
-	ModelType                string `json:"model_type"`
+	ModelKey                 string `json:"model_key"`
 	ModelID                  string `json:"model_id"`
 	UserModelProviderID      string `json:"user_model_provider_id"`
 	UserModelProviderGroupID string `json:"user_model_provider_group_id"`
@@ -557,8 +557,8 @@ type listSelectedModelsOpenAPIResponse struct {
 }
 
 type setSelectedModelOpenAPIItem struct {
-	ModelType string `json:"model_type"`
-	ModelID   string `json:"model_id"`
+	ModelKey string `json:"model_key"`
+	ModelID  string `json:"model_id"`
 }
 
 type setSelectedModelsOpenAPIRequest struct {
