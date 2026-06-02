@@ -38,6 +38,16 @@ from lazymind.config import config as _cfg
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
 sensitive_filter = SensitiveFilter(SENSITIVE_WORDS_PATH)
 
+
+def _normalize_kb_id_filter(raw_kb_id: Any) -> str | list[str] | None:
+    if isinstance(raw_kb_id, str):
+        return raw_kb_id.strip() or None
+    if isinstance(raw_kb_id, list):
+        cleaned = [item.strip() for item in raw_kb_id if isinstance(item, str) and item.strip()]
+        return cleaned[0] if len(cleaned) == 1 else (cleaned or None)
+    return None
+
+
 def check_sensitive_content(
     query: str,
 ) -> Optional[str]:
@@ -85,15 +95,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
     filters = dict(filters or {})
     resolved_files = validate_and_resolve_files(files)
-    raw_kb_id = filters.get('kb_id')
-    if isinstance(raw_kb_id, str):
-        kb_id = raw_kb_id.strip() or None
-    elif isinstance(raw_kb_id, list):
-        cleaned = [item.strip() for item in raw_kb_id if isinstance(item, str) and item.strip()]
-        kb_id = cleaned[0] if len(cleaned) == 1 else (cleaned or None)
-    else:
-        kb_id = None
-    filters['kb_id'] = kb_id
+    filters['kb_id'] = _normalize_kb_id_filter(filters.get('kb_id'))
     resolved_use_memory = use_memory is not False
 
     raw_history = list(history) if isinstance(history, list) else []
