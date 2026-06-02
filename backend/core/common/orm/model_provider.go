@@ -22,7 +22,9 @@ func (DefaultModelProvider) TableName() string { return "default_model_providers
 
 // DefaultModel is a built-in model row (model name, type) under a DefaultModelProvider.
 // ProviderName redundantly stores the provider display name (matches default_model_providers.name) for list UIs without joining.
-// ModelType stores runtime_models.yaml role keys such as llm, embed_main, vlm (column model_type in DB; SQL keyword "type" avoided).
+// ModelType stores the lazyllm technical type (e.g. "llm", "embed", "rerank", "vlm", "cross_modal_embed").
+// This is distinct from the runtime_models.yaml role key (e.g. "evo_llm", "embed_main") stored in
+// user_selected_models.model_type (mapped via UserSelectedModel.ModelKey).
 type DefaultModel struct {
 	ID                     string     `gorm:"column:id;type:varchar(64);primaryKey"`
 	DefaultModelProviderID string     `gorm:"column:default_model_provider_id;type:varchar(64);not null;uniqueIndex:uk_default_models_provider_name,priority:1"`
@@ -76,6 +78,8 @@ func (UserModelProviderGroup) TableName() string { return "user_model_provider_g
 
 // UserModelProviderGroupModel is a user-scoped model row under a connection group (often seeded from DefaultModel).
 // ProviderName denormalizes user_model_providers.name; connection group display name comes from user_model_provider_groups.
+// ModelType stores the lazyllm technical type (e.g. "llm", "embed", "rerank", "vlm", "cross_modal_embed"),
+// matching the type values in model_catalog.yaml and DefaultModel.ModelType.
 type UserModelProviderGroupModel struct {
 	ID                       string `gorm:"column:id;type:varchar(64);primaryKey"`
 	UserModelProviderID      string `gorm:"column:user_model_provider_id;type:varchar(64);not null;index:idx_user_model_provider_group_models_provider"`

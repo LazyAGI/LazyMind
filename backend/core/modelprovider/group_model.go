@@ -263,10 +263,14 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Translate runtime_models.yaml role key (e.g. "evo_llm") to the lazyllm
+	// technical type (e.g. "llm") stored in user_model_provider_group_models.
+	dbModelType := resolveModelType(r.Context(), modelType)
+
 	var rows []orm.UserModelProviderGroupModel
 	if err := db.WithContext(r.Context()).
 		Joins("JOIN user_model_providers ON user_model_providers.id = user_model_provider_group_models.user_model_provider_id AND user_model_providers.deleted_at IS NULL AND user_model_providers.capabilities LIKE '%has_models%'").
-		Where("user_model_provider_group_models.create_user_id = ? AND user_model_provider_group_models.deleted_at IS NULL AND user_model_provider_group_models.model_type = ?", userID, modelType).
+		Where("user_model_provider_group_models.create_user_id = ? AND user_model_provider_group_models.deleted_at IS NULL AND user_model_provider_group_models.model_type = ?", userID, dbModelType).
 		Order("user_model_provider_group_models.user_model_provider_id ASC, user_model_provider_group_models.user_model_provider_group_id ASC, user_model_provider_group_models.name ASC").
 		Find(&rows).Error; err != nil {
 		common.ReplyErr(w, "list models failed", http.StatusInternalServerError)

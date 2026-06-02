@@ -101,9 +101,9 @@ model_providers:
         - name: doubao-1-5-vision-pro-32k-250115
           type: vlm
         - name: doubao-embedding-text-240715
-          type: embed_main
+          type: embed
         - name: doubao-embedding-vision-241215
-          type: embed_image
+          type: cross_modal_embed
         - name: doubao-seed-1-6-250615
           type: llm
         - name: doubao-seed-1-6-251015
@@ -160,9 +160,9 @@ model_providers:
         - name: CogView-4
           type: text2image
         - name: Embedding-2
-          type: embed_main
+          type: embed
         - name: Embedding-3
-          type: embed_main
+          type: embed
         - name: GLM-4-Flash-250414
           type: llm
         - name: GLM-4-FlashX-250414
@@ -212,7 +212,7 @@ model_providers:
         - name: GLM-TTS-Clone
           type: tts
         - name: Rerank
-          type: reranker
+          type: rerank
 
     - name: Kimi
       description: |
@@ -359,13 +359,13 @@ model_providers:
         - name: o3
           type: vlm
         - name: rerank-multilingual-v3.0
-          type: reranker
+          type: rerank
         - name: text-embedding-3-large
-          type: embed_main
+          type: embed
         - name: text-embedding-3-small
-          type: embed_main
+          type: embed
         - name: text-embedding-ada-002
-          type: embed_main
+          type: embed
         - name: tts-1
           type: tts
         - name: tts-1-hd
@@ -400,9 +400,9 @@ model_providers:
         - name: cosyvoice-v2
           type: tts
         - name: gte-rerank-v2
-          type: reranker
+          type: rerank
         - name: multimodal-embedding-v1
-          type: embed_image
+          type: cross_modal_embed
         - name: paraformer-v2
           type: stt
         - name: qvq-72b-preview
@@ -456,7 +456,7 @@ model_providers:
         - name: qwen2.5-7b-instruct-1m
           type: llm
         - name: qwen2.5-vl-embedding
-          type: embed_image
+          type: cross_modal_embed
         - name: qwen3-0.6b
           type: llm
         - name: qwen3-1.7b
@@ -484,15 +484,15 @@ model_providers:
         - name: qwen3-asr-flash
           type: stt
         - name: qwen3-embedding-32m
-          type: embed_main
+          type: embed
         - name: qwen3-next-80b-a3b-instruct
           type: llm
         - name: qwen3-next-80b-a3b-thinking
           type: llm
         - name: qwen3-rerank
-          type: reranker
+          type: rerank
         - name: qwen3-vl-embedding
-          type: embed_image
+          type: cross_modal_embed
         - name: qwen3-vl-flash
           type: vlm
         - name: qwen3-vl-flash-us
@@ -500,7 +500,7 @@ model_providers:
         - name: qwen3-vl-plus
           type: vlm
         - name: qwen3-vl-rerank
-          type: reranker
+          type: rerank
         - name: qwen3.5-122b-a10b
           type: vlm
         - name: qwen3.5-27b
@@ -538,25 +538,25 @@ model_providers:
         - name: sensevoice-small
           type: stt
         - name: text-embedding-async-v1
-          type: embed_main
+          type: embed
         - name: text-embedding-async-v2
-          type: embed_main
+          type: embed
         - name: text-embedding-v1
-          type: embed_main
+          type: embed
         - name: text-embedding-v2
-          type: embed_main
+          type: embed
         - name: text-embedding-v3
-          type: embed_main
+          type: embed
         - name: text-embedding-v4
-          type: embed_main
+          type: embed
         - name: tongyi-embedding-vision-flash
-          type: embed_image
+          type: cross_modal_embed
         - name: tongyi-embedding-vision-flash-2026-03-06
-          type: embed_image
+          type: cross_modal_embed
         - name: tongyi-embedding-vision-plus
-          type: embed_image
+          type: cross_modal_embed
         - name: tongyi-embedding-vision-plus-2026-03-06
-          type: embed_image
+          type: cross_modal_embed
         - name: wan2.6-t2i
           type: text2image
         - name: wanx2.1-t2i-pro
@@ -693,7 +693,7 @@ model_providers:
         - name: SenseNova-V6-Turbo
           type: vlm
         - name: nova-embedding-stable
-          type: embed_main
+          type: embed
 
     - name: SiliconFlow
       description: |
@@ -832,37 +832,37 @@ model_providers:
         - name: Pro/Qwen/Qwen2.5-7B-Instruct
           type: llm
         - name: Qwen/Qwen3-VL-Embedding-8B
-          type: embed_image
+          type: cross_modal_embed
         - name: Qwen/Qwen3-Embedding-8B
-          type: embed_main
+          type: embed
         - name: Qwen/Qwen3-Embedding-4B
-          type: embed_main
+          type: embed
         - name: Qwen/Qwen3-Embedding-0.6B
-          type: embed_main
+          type: embed
         - name: BAAI/bge-m3
-          type: embed_main
+          type: embed
         - name: BAAI/bge-large-zh-v1.5
-          type: embed_main
+          type: embed
         - name: BAAI/bge-large-en-v1.5
-          type: embed_main
+          type: embed
         - name: netease-youdao/bce-embedding-base_v1
-          type: embed_main
+          type: embed
         - name: Pro/BAAI/bge-m3
-          type: embed_main
+          type: embed
         - name: Qwen/Qwen3-VL-Reranker-8B
-          type: reranker
+          type: rerank
         - name: Qwen/Qwen3-Reranker-8B
-          type: reranker
+          type: rerank
         - name: Qwen/Qwen3-Reranker-4B
-          type: reranker
+          type: rerank
         - name: Qwen/Qwen3-Reranker-0.6B
-          type: reranker
+          type: rerank
         - name: BAAI/bge-reranker-v2-m3
-          type: reranker
+          type: rerank
         - name: netease-youdao/bce-reranker-base_v1
-          type: reranker
+          type: rerank
         - name: Pro/BAAI/bge-reranker-v2-m3
-          type: reranker
+          type: rerank
         - name: Qwen/Qwen-Image-Edit-2509
           type: text2image
         - name: Qwen/Qwen-Image-Edit
