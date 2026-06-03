@@ -201,6 +201,24 @@
   }
 }
 
+.data-source-auth-select-title {
+  width: 100%;
+  min-width: 0;
+  padding-right: 42px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.data-source-auth-select-guide.ant-btn {
+  flex: none;
+  height: 24px;
+  padding: 0;
+  font-weight: 600;
+}
+
 .data-source-view-tabs {
   min-height: 34px;
   display: inline-flex;
@@ -318,7 +336,7 @@
 }
 
 .data-source-chat-switch {
-  width: 58px;
+  width: 82px;
   height: 28px;
   padding: 3px;
   border: 1px solid #d0d5dd;
@@ -345,7 +363,7 @@
     color: #ffffff;
 
     .data-source-chat-switch-thumb {
-      transform: translateX(29px);
+      transform: translateX(53px);
     }
 
     .data-source-chat-switch-label {
@@ -437,6 +455,42 @@
   margin-bottom: 12px;
   border-color: #f9dc8c;
   background: #fffbeb;
+}
+
+.data-source-feishu-account-reauth-alert.ant-alert {
+  flex: none;
+  margin: 8px 12px 0;
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.data-source-feishu-account-alert-message {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0;
+  line-height: 22px;
+
+  > div {
+    display: inline;
+  }
+
+  .ant-typography {
+    margin: 0 4px;
+    white-space: normal;
+    word-break: break-all;
+  }
+
+  .data-source-feishu-account-alert-highlight.ant-typography {
+    margin: 0 4px;
+    padding: 1px 6px;
+    border: 1px solid #f59e0b;
+    border-radius: 4px;
+    background: #fff7ed;
+    color: #b45309;
+    font-weight: 700;
+    word-break: keep-all;
+  }
 }
 
 .data-source-feishu-account-table.ant-table-wrapper {

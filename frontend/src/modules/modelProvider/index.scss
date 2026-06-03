@@ -1212,6 +1212,17 @@
   line-height: 1.55;
 }
 
+.model-provider-service-summary-wrap {
+  display: block;
+}
+
+.model-provider-service-summary {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .model-provider-service-title-row {
   display: flex;
   align-items: center;

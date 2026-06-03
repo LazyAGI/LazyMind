@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Alert, AutoComplete, Button, Form, Input, Modal, Tag } from "antd";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Alert, AutoComplete, Button, Empty, Form, Input, Modal, Spin, Tag, Tooltip, message } from "antd";
 import {
   CloudServerOutlined,
   CompassOutlined,
@@ -12,27 +12,26 @@ import {
 } from "@ant-design/icons";
 import { useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-
-type ExternalServiceKey =
-  | "mineru"
-  | "paddleocr"
-  | "bingSearch"
-  | "googleSearch"
-  | "tavily";
+import { BASE_URL, axiosInstance, getLocalizedErrorMessage } from "@/components/request";
+import { AgentAppsAuth } from "@/components/auth";
+import type { RawAxiosRequestConfig } from "axios";
 
 type ServiceCategoryKey = "parsing" | "tools";
+type ServiceProviderCategory = "ocr" | "search";
+type ServiceTone = "blue" | "cyan" | "green" | "red" | "violet";
 
 interface ExternalServiceConfig {
-  key: ExternalServiceKey;
-  titleKey: string;
-  descKey: string;
-  summaryKey: string;
+  key: string;
+  name: string;
+  description: string;
+  summary: string;
   category: ServiceCategoryKey;
   fields: Array<keyof ExternalServiceFormValues>;
   logo: JSX.Element;
   logoUrl: string;
-  tone: "blue" | "cyan" | "green" | "red" | "violet";
+  tone: ServiceTone;
   status: "configured" | "missing" | "tbd";
+  baseUrl?: string;
   baseUrlPresets?: BaseUrlPreset[];
 }
 
@@ -49,6 +48,39 @@ interface BaseUrlPreset {
   labelKey: string;
   descKey: string;
   value: string;
+}
+
+interface ApiEnvelope<T> {
+  code?: number;
+  message?: string;
+  data?: T;
+}
+
+interface ApiExternalProvider {
+  base_url?: string;
+  capabilities?: string[];
+  category?: string;
+  description?: string;
+  id: string;
+  is_configured?: boolean;
+  name: string;
+}
+
+interface ApiExternalGroup {
+  base_url?: string;
+  id: string;
+  is_verified?: boolean;
+  name?: string;
+  user_model_provider_id?: string;
+}
+
+interface CheckExternalServiceResult {
+  success: boolean;
+  message?: string;
+}
+
+interface SaveExternalGroupResponse extends ApiExternalGroup {
+  check?: CheckExternalServiceResult;
 }
 
 const mineruDockerComposeBaseUrl = "http://host.docker.internal:8000/api/v1/pdf_parse";
@@ -77,9 +109,9 @@ const serviceCategories: Array<{
 const externalServiceConfigs: ExternalServiceConfig[] = [
   {
     key: "mineru",
-    titleKey: "modelProvider.external.mineruTitle",
-    descKey: "modelProvider.external.mineruDesc",
-    summaryKey: "modelProvider.external.mineruSummary",
+    name: "MinerU",
+    description: "",
+    summary: "",
     category: "parsing",
     fields: ["baseUrl", "apiKey"],
     logo: <FilePdfOutlined />,
@@ -101,9 +133,9 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
   },
   {
     key: "paddleocr",
-    titleKey: "modelProvider.external.paddleTitle",
-    descKey: "modelProvider.external.paddleDesc",
-    summaryKey: "modelProvider.external.paddleSummary",
+    name: "PaddleOCR",
+    description: "",
+    summary: "",
     category: "parsing",
     fields: ["baseUrl", "apiKey"],
     logo: <ScanOutlined />,
@@ -113,9 +145,9 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
   },
   {
     key: "bingSearch",
-    titleKey: "modelProvider.external.bingTitle",
-    descKey: "modelProvider.external.bingDesc",
-    summaryKey: "modelProvider.external.bingSummary",
+    name: "Bing Search",
+    description: "",
+    summary: "",
     category: "tools",
     fields: ["apiKey"],
     logo: <SearchOutlined />,
@@ -125,9 +157,9 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
   },
   {
     key: "googleSearch",
-    titleKey: "modelProvider.external.googleTitle",
-    descKey: "modelProvider.external.googleDesc",
-    summaryKey: "modelProvider.external.googleSummary",
+    name: "Google Custom Search",
+    description: "",
+    summary: "",
     category: "tools",
     fields: ["apiKey"],
     logo: <GoogleOutlined />,
@@ -137,9 +169,9 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
   },
   {
     key: "tavily",
-    titleKey: "modelProvider.external.tavilyTitle",
-    descKey: "modelProvider.external.tavilyDesc",
-    summaryKey: "modelProvider.external.tavilySummary",
+    name: "Tavily",
+    description: "",
+    summary: "",
     category: "tools",
     fields: ["apiKey"],
     logo: <CompassOutlined />,
@@ -148,6 +180,143 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     status: "missing",
   },
 ];
+
+const fallbackServiceByName = new Map<string, ExternalServiceConfig>(
+  externalServiceConfigs.map((service) => [normalizeProviderName(service.name), service])
+);
+
+const serviceToneByCategory: Record<ServiceCategoryKey, ServiceTone> = {
+  parsing: "blue",
+  tools: "green",
+};
+
+function normalizeProviderName(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function unwrapResponse<T>(payload: ApiEnvelope<T> | T): T {
+  if (payload && typeof payload === "object" && "data" in payload) {
+    return (payload as ApiEnvelope<T>).data as T;
+  }
+  return payload as T;
+}
+
+function getCheckFailureMessage(checkResult?: CheckExternalServiceResult): string | undefined {
+  if (!checkResult || typeof checkResult !== "object") {
+    return undefined;
+  }
+
+  if (typeof checkResult.message === "string" && checkResult.message.trim()) {
+    return checkResult.message.trim();
+  }
+
+  return undefined;
+}
+
+function shouldVerifyExternalService(service: ExternalServiceConfig) {
+  return normalizeProviderName(service.name) === "paddleocr";
+}
+
+function getServiceProviderCategory(service: ExternalServiceConfig): ServiceProviderCategory {
+  return service.category === "parsing" ? "ocr" : "search";
+}
+
+function getExternalProvidersUrl(keyword: string) {
+  const query = new URLSearchParams({ exclude_category: "model" });
+  const normalizedKeyword = keyword.trim();
+  if (normalizedKeyword) {
+    query.set("keyword", normalizedKeyword);
+  }
+  return `${BASE_URL || window.location.origin}/api/core/model_providers?${query.toString()}`;
+}
+
+function mapProviderCategory(category?: string): ServiceCategoryKey {
+  const normalizedCategory = category?.trim().toLowerCase();
+  if (normalizedCategory === "ocr" || normalizedCategory === "parse" || normalizedCategory === "parsing") {
+    return "parsing";
+  }
+  return "tools";
+}
+
+function getProviderLogoUrl(name: string) {
+  const normalizedName = normalizeProviderName(name);
+  if (!normalizedName) {
+    return "";
+  }
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(normalizedName)}.com&sz=96`;
+}
+
+function getProviderIcon(category: ServiceCategoryKey) {
+  return category === "parsing" ? <ScanOutlined /> : <ToolOutlined />;
+}
+
+function getServiceFields(provider: ApiExternalProvider, category: ServiceCategoryKey): Array<keyof ExternalServiceFormValues> {
+  if (category === "tools") {
+    return ["apiKey"];
+  }
+  return provider.base_url ? ["baseUrl", "apiKey"] : ["apiKey"];
+}
+
+function mapApiProviderToService(provider: ApiExternalProvider, t: ReturnType<typeof useTranslation>["t"]): ExternalServiceConfig {
+  const fallback = fallbackServiceByName.get(normalizeProviderName(provider.name));
+  const category = fallback?.category || mapProviderCategory(provider.category);
+  const description = provider.description?.trim() || fallback?.description || t("modelProvider.external.providerDescriptionFallback");
+
+  return {
+    key: provider.id,
+    name: provider.name,
+    description,
+    summary: description,
+    category,
+    fields: fallback?.fields || getServiceFields(provider, category),
+    logo: fallback?.logo || getProviderIcon(category),
+    logoUrl: fallback?.logoUrl || getProviderLogoUrl(provider.name),
+    tone: fallback?.tone || serviceToneByCategory[category],
+    status: provider.is_configured ? "configured" : "missing",
+    baseUrl: provider.base_url,
+    baseUrlPresets: fallback?.baseUrlPresets,
+  };
+}
+
+async function fetchExternalProviders(keyword: string, signal: AbortSignal) {
+  const response = await axiosInstance.request<ApiEnvelope<{ providers?: ApiExternalProvider[] }> | { providers?: ApiExternalProvider[] }>({
+    method: "GET",
+    url: getExternalProvidersUrl(keyword),
+    headers: {
+      "Content-Type": "application/json",
+      ...AgentAppsAuth.getAuthHeaders(),
+    },
+    signal,
+  } satisfies RawAxiosRequestConfig);
+  return unwrapResponse<{ providers?: ApiExternalProvider[] }>(response.data).providers || [];
+}
+
+function getApiBaseUrl() {
+  return `${BASE_URL || window.location.origin}/api/core`;
+}
+
+function getRequestHeaders() {
+  return {
+    "Content-Type": "application/json",
+    ...AgentAppsAuth.getAuthHeaders(),
+  };
+}
+
+async function modelProviderRequest<T>(
+  method: "GET" | "POST" | "PUT" | "PATCH",
+  path: string,
+  data?: unknown,
+  options?: RawAxiosRequestConfig
+) {
+  const response = await axiosInstance.request<ApiEnvelope<T> | T>({
+    method,
+    url: `${getApiBaseUrl()}${path}`,
+    data,
+    headers: getRequestHeaders(),
+    ...options,
+  });
+  return unwrapResponse<T>(response.data);
+}
 
 function ExternalServiceLogo({ service }: { service: ExternalServiceConfig }) {
   const [imageReady, setImageReady] = useState(false);
@@ -173,21 +342,67 @@ function ExternalServiceLogo({ service }: { service: ExternalServiceConfig }) {
 export default function ExternalServicesPage() {
   const { t } = useTranslation();
   const { externalServiceSearchValue = "" } = useOutletContext<ModelProviderOutletContext>();
-  const [form] = Form.useForm<Record<ExternalServiceKey, ExternalServiceFormValues>>();
+  const [form] = Form.useForm<Record<string, ExternalServiceFormValues>>();
   const [activeService, setActiveService] = useState<ExternalServiceConfig | null>(null);
-  const normalizedSearchValue = externalServiceSearchValue.trim().toLowerCase();
+  const [services, setServices] = useState<ExternalServiceConfig[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
+  const normalizedSearchValue = externalServiceSearchValue.trim();
+
+  const loadExternalServices = useCallback((keyword: string) => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    const controller = new AbortController();
+
+    setLoading(true);
+    setLoadError(null);
+
+    fetchExternalProviders(keyword, controller.signal)
+      .then((providers) => {
+        if (requestIdRef.current !== requestId) {
+          return;
+        }
+        setServices(providers.map((provider) => mapApiProviderToService(provider, t)));
+      })
+      .catch((error) => {
+        if (controller.signal.aborted || requestIdRef.current !== requestId) {
+          return;
+        }
+        setServices([]);
+        setLoadError(getLocalizedErrorMessage(error, t("modelProvider.external.loadFailed")) || t("modelProvider.external.loadFailed"));
+      })
+      .finally(() => {
+        if (requestIdRef.current === requestId) {
+          setLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [t]);
+
+  useEffect(() => loadExternalServices(normalizedSearchValue), [loadExternalServices, normalizedSearchValue]);
 
   const closeConfigModal = () => {
+    if (saving) {
+      return;
+    }
     setActiveService(null);
   };
 
   const openConfigModal = (service: ExternalServiceConfig) => {
     setActiveService(service);
-    if (service.key === "mineru") {
+    if (service.fields.includes("baseUrl")) {
       window.setTimeout(() => {
         const currentBaseUrl = form.getFieldValue([service.key, "baseUrl"]);
         if (!currentBaseUrl) {
-          form.setFieldValue([service.key, "baseUrl"], mineruDockerComposeBaseUrl);
+          const defaultBaseUrl = service.baseUrl || (
+            normalizeProviderName(service.name) === "mineru" ? mineruDockerComposeBaseUrl : undefined
+          );
+          if (defaultBaseUrl) {
+            form.setFieldValue([service.key, "baseUrl"], defaultBaseUrl);
+          }
         }
       }, 0);
     }
@@ -204,91 +419,163 @@ export default function ExternalServicesPage() {
       return;
     }
 
-    closeConfigModal();
+    const values = form.getFieldValue(activeService.key) || {};
+    const baseUrl = values.baseUrl?.trim() || activeService.baseUrl || "";
+    const apiKey = values.apiKey?.trim() || "";
+
+    setSaving(true);
+    try {
+      const groupData = await modelProviderRequest<{ groups?: ApiExternalGroup[] }>(
+        "GET",
+        `/model_providers/${encodeURIComponent(activeService.key)}/groups`
+      );
+      const existingGroup = (groupData.groups || [])[0];
+      const shouldVerify = shouldVerifyExternalService(activeService);
+      const payload = {
+        name: activeService.name,
+        base_url: baseUrl,
+        ...(apiKey ? { api_key: apiKey } : {}),
+        ...(shouldVerify ? { verify: true } : {}),
+      };
+      const savedGroup = existingGroup
+        ? await modelProviderRequest<SaveExternalGroupResponse>(
+            "PATCH",
+            `/model_providers/${encodeURIComponent(activeService.key)}/groups/${encodeURIComponent(existingGroup.id)}`,
+            payload,
+            shouldVerify ? { timeout: 3 * 60 * 1000 } : undefined
+          )
+        : await modelProviderRequest<SaveExternalGroupResponse>(
+            "POST",
+            `/model_providers/${encodeURIComponent(activeService.key)}/groups`,
+            payload,
+            shouldVerify ? { timeout: 3 * 60 * 1000 } : undefined
+      );
+      if (savedGroup.check && savedGroup.check.success !== true) {
+        message.error(getCheckFailureMessage(savedGroup.check) || t("modelProvider.external.checkFailed"));
+        return;
+      }
+
+      await modelProviderRequest("PUT", "/model_providers/selected_providers", {
+        selections: [
+          {
+            category: getServiceProviderCategory(activeService),
+            group_id: savedGroup.id,
+          },
+        ],
+      });
+
+      form.setFieldValue([activeService.key, "apiKey"], "");
+      message.success(t("modelProvider.external.configSaved", { name: activeService.name }));
+      setActiveService(null);
+      void loadExternalServices(normalizedSearchValue);
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const matchesSearch = (values: string[]) => (
-    !normalizedSearchValue ||
-    values.some((value) => value.toLowerCase().includes(normalizedSearchValue))
-  );
+  const categorizedServices = useMemo(() => {
+    const byCategory: Record<ServiceCategoryKey, ExternalServiceConfig[]> = {
+      parsing: [],
+      tools: [],
+    };
+    services.forEach((service) => {
+      byCategory[service.category].push(service);
+    });
+    return byCategory;
+  }, [services]);
 
   return (
     <div className="model-provider-service-page">
-      <div className="model-provider-service-stack">
-        {serviceCategories.map((category) => {
-          const categoryTitle = t(category.titleKey);
-          const categoryDesc = t(category.descKey);
-          const categoryMatches = matchesSearch([categoryTitle, categoryDesc]);
-          const categoryServices = externalServiceConfigs.filter((service) => service.category === category.key);
-          const matchedServices = categoryServices.filter((service) =>
-            matchesSearch([
-              service.key,
-              t(service.titleKey),
-              t(service.descKey),
-              t(service.summaryKey),
-              t(`modelProvider.external.status.${service.status}`),
-            ])
-          );
-          const services = normalizedSearchValue && matchedServices.length
-            ? matchedServices
-            : categoryMatches
-              ? categoryServices
-              : matchedServices;
+      <Spin spinning={loading}>
+        <div className="model-provider-service-stack">
+          {loadError ? (
+            <Alert
+              action={
+                <Button size="small" type="primary" onClick={() => loadExternalServices(normalizedSearchValue)}>
+                  {t("common.retry")}
+                </Button>
+              }
+              message={loadError}
+              showIcon
+              type="error"
+            />
+          ) : null}
 
-          if (!services.length) {
-            return null;
-          }
+          {!loading && !loadError && services.length === 0 ? (
+            <div className="model-provider-empty-state" role="status">
+              <Empty
+                description={normalizedSearchValue ? t("modelProvider.external.noMatchedServices") : t("common.noData")}
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+              />
+            </div>
+          ) : null}
 
-          return (
-            <section className="model-provider-service-category" key={category.key}>
-              <div className="model-provider-service-category-head">
-                <span>{category.icon}</span>
-                <div>
-                  <h3>{categoryTitle}</h3>
-                  <p>{categoryDesc}</p>
+          {serviceCategories.map((category) => {
+            const categoryTitle = t(category.titleKey);
+            const categoryDesc = t(category.descKey);
+            const categoryServices = categorizedServices[category.key];
+
+            if (!categoryServices.length) {
+              return null;
+            }
+
+            return (
+              <section className="model-provider-service-category" key={category.key}>
+                <div className="model-provider-service-category-head">
+                  <span>{category.icon}</span>
+                  <div>
+                    <h3>{categoryTitle}</h3>
+                    <p>{categoryDesc}</p>
+                  </div>
                 </div>
-              </div>
 
-              <div className="model-provider-service-grid">
-                {services.map((service) => (
-                  <button
-                    aria-label={t("modelProvider.external.configModalTitle", { name: t(service.titleKey) })}
-                    className="model-provider-service-card"
-                    key={service.key}
-                    onClick={() => openConfigModal(service)}
-                    type="button"
-                  >
-                    <ExternalServiceLogo service={service} />
-                    <div className="model-provider-service-card-copy">
-                      <div>
-                        <div className="model-provider-service-title-row">
-                          <h4>{t(service.titleKey)}</h4>
-                          <Tag
-                            className="model-provider-service-status"
-                            color={
-                              service.status === "configured"
-                                ? "success"
-                                : service.status === "tbd"
-                                  ? "warning"
-                                  : "default"
-                            }
-                          >
-                            {t(`modelProvider.external.status.${service.status}`)}
-                          </Tag>
+                <div className="model-provider-service-grid">
+                  {categoryServices.map((service) => (
+                    <button
+                      aria-label={t("modelProvider.external.configModalTitle", { name: service.name })}
+                      className="model-provider-service-card"
+                      key={service.key}
+                      onClick={() => openConfigModal(service)}
+                      type="button"
+                    >
+                      <ExternalServiceLogo service={service} />
+                      <div className="model-provider-service-card-copy">
+                        <div>
+                          <div className="model-provider-service-title-row">
+                            <h4>{service.name}</h4>
+                            <Tag
+                              className="model-provider-service-status"
+                              color={
+                                service.status === "configured"
+                                  ? "success"
+                                  : service.status === "tbd"
+                                    ? "warning"
+                                    : "default"
+                              }
+                            >
+                              {t(`modelProvider.external.status.${service.status}`)}
+                            </Tag>
+                          </div>
+                          <Tooltip placement="topLeft" title={service.summary}>
+                            <span className="model-provider-service-summary-wrap">
+                              <p className="model-provider-service-summary">{service.summary}</p>
+                            </span>
+                          </Tooltip>
                         </div>
-                        <p>{t(service.summaryKey)}</p>
                       </div>
-                    </div>
-                    <span className="model-provider-service-card-arrow" aria-hidden="true">
-                      <RightOutlined />
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          );
-        })}
-      </div>
+                      <span className="model-provider-service-card-arrow" aria-hidden="true">
+                        <RightOutlined />
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      </Spin>
 
       <Modal
         className="model-provider-service-config-modal"
@@ -297,14 +584,14 @@ export default function ExternalServicesPage() {
         open={!!activeService}
         title={
           activeService
-            ? t("modelProvider.external.configModalTitle", { name: t(activeService.titleKey) })
+            ? t("modelProvider.external.configModalTitle", { name: activeService.name })
             : t("modelProvider.external.configureAction")
         }
         footer={[
           <Button key="cancel" onClick={closeConfigModal}>
             {t("common.cancel")}
           </Button>,
-          <Button key="save" onClick={handleSaveConfig} type="primary">
+          <Button key="save" loading={saving} onClick={handleSaveConfig} type="primary">
             {t("modelProvider.external.saveConfig")}
           </Button>,
         ]}
@@ -315,7 +602,7 @@ export default function ExternalServicesPage() {
               <ExternalServiceLogo service={activeService} />
               <div>
                 <div className="model-provider-service-title-row">
-                  <h4>{t(activeService.titleKey)}</h4>
+                  <h4>{activeService.name}</h4>
                   <Tag
                     color={
                       activeService.status === "configured"
@@ -328,14 +615,14 @@ export default function ExternalServicesPage() {
                     {t(`modelProvider.external.status.${activeService.status}`)}
                   </Tag>
                 </div>
-                <p>{t(activeService.descKey)}</p>
+                <p>{activeService.description}</p>
               </div>
             </div>
             <Form form={form} layout="vertical">
               {activeService.fields.includes("baseUrl") ? (
                 <Form.Item
                   extra={
-                    activeService.key === "mineru"
+                    normalizeProviderName(activeService.name) === "mineru"
                       ? t("modelProvider.external.mineruBaseUrlPresetExtra")
                       : undefined
                   }

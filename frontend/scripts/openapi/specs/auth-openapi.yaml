@@ -240,6 +240,8 @@ paths:
       - cloud-oauth
       summary: Create Connection
       operationId: create_connection_api_authservice_v1_cloud__provider__connections_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: provider
         in: path
@@ -272,6 +274,8 @@ paths:
       - cloud-oauth
       summary: Oauth Authorize Url
       operationId: oauth_authorize_url_api_authservice_v1_cloud__provider__oauth_authorize_url_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: provider
         in: path
@@ -304,6 +308,8 @@ paths:
       - cloud-oauth
       summary: Oauth Callback
       operationId: oauth_callback_api_authservice_v1_cloud__provider__oauth_callback_post
+      security:
+      - HTTPBearer: []
       parameters:
       - name: provider
         in: path
@@ -330,12 +336,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/authservice/v1/cloud/connections:
+    get:
+      tags:
+      - cloud-oauth
+      summary: List Connections
+      operationId: list_connections_api_authservice_v1_cloud_connections_get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: provider
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Provider
+      - name: auth_mode
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Auth Mode
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: ACTIVE
+          title: Status
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudConnectionListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/authservice/v1/cloud/connections/{connection_id}:
     get:
       tags:
       - cloud-oauth
       summary: Get Connection
       operationId: get_connection_api_authservice_v1_cloud_connections__connection_id__get
+      security:
+      - HTTPBearer: []
       parameters:
       - name: connection_id
         in: path
@@ -369,6 +424,22 @@ paths:
         schema:
           type: string
           title: Connection Id
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+      - name: tenant_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tenant Id
       responses:
         '200':
           description: Successful Response
@@ -376,6 +447,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CloudConnectionTokenResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/authservice/v1/cloud/connections/{connection_id}/verify:
+    get:
+      tags:
+      - cloud-oauth
+      summary: Verify Connection
+      operationId: verify_connection_api_authservice_v1_cloud_connections__connection_id__verify_get
+      parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Connection Id
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+      - name: tenant_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tenant Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudConnectionVerifyResponse'
         '422':
           description: Validation Error
           content:
@@ -1191,6 +1304,12 @@ components:
         tenant_id:
           type: string
           title: Tenant Id
+          default: ''
+        owner_user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Owner User Id
         auth_mode:
           type: string
           title: Auth Mode
@@ -1209,7 +1328,6 @@ components:
           title: Provider Options
       type: object
       required:
-      - tenant_id
       - client_id
       - client_secret
       title: CloudConnectionCreateBody
@@ -1221,12 +1339,20 @@ components:
         tenant_id:
           type: string
           title: Tenant Id
+        owner_user_id:
+          type: string
+          title: Owner User Id
+          default: ''
         provider:
           type: string
           title: Provider
         auth_mode:
           type: string
           title: Auth Mode
+        scope:
+          type: string
+          title: Scope
+          default: ''
         status:
           type: string
           title: Status
@@ -1238,6 +1364,17 @@ components:
       - provider
       - auth_mode
       title: CloudConnectionCreateResponse
+    CloudConnectionListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/CloudConnectionResponse'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: CloudConnectionListResponse
     CloudConnectionResponse:
       properties:
         connection_id:
@@ -1246,12 +1383,44 @@ components:
         tenant_id:
           type: string
           title: Tenant Id
+        owner_user_id:
+          type: string
+          title: Owner User Id
+          default: ''
         provider:
           type: string
           title: Provider
         auth_mode:
           type: string
           title: Auth Mode
+        provider_account_id:
+          type: string
+          title: Provider Account Id
+          default: ''
+        display_name:
+          type: string
+          title: Display Name
+          default: ''
+        provider_tenant_key:
+          type: string
+          title: Provider Tenant Key
+          default: ''
+        provider_account_meta:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Provider Account Meta
+        scope:
+          type: string
+          title: Scope
+          default: ''
+        last_used_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Used At
         status:
           type: string
           title: Status
@@ -1286,6 +1455,10 @@ components:
         provider:
           type: string
           title: Provider
+        auth_mode:
+          type: string
+          title: Auth Mode
+          default: ''
         access_token:
           type: string
           title: Access Token
@@ -1309,11 +1482,42 @@ components:
       - provider
       - access_token
       title: CloudConnectionTokenResponse
+    CloudConnectionVerifyResponse:
+      properties:
+        connection_id:
+          type: string
+          title: Connection Id
+        tenant_id:
+          type: string
+          title: Tenant Id
+        owner_user_id:
+          type: string
+          title: Owner User Id
+          default: ''
+        provider:
+          type: string
+          title: Provider
+        status:
+          type: string
+          title: Status
+          default: ACTIVE
+      type: object
+      required:
+      - connection_id
+      - tenant_id
+      - provider
+      title: CloudConnectionVerifyResponse
     CloudOAuthAuthorizeURLBody:
       properties:
         tenant_id:
           type: string
           title: Tenant Id
+          default: ''
+        owner_user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Owner User Id
         auth_mode:
           type: string
           title: Auth Mode
@@ -1347,7 +1551,6 @@ components:
           title: Provider Options
       type: object
       required:
-      - tenant_id
       - client_id
       - client_secret
       title: CloudOAuthAuthorizeURLBody
@@ -1359,12 +1562,20 @@ components:
         tenant_id:
           type: string
           title: Tenant Id
+        owner_user_id:
+          type: string
+          title: Owner User Id
+          default: ''
         provider:
           type: string
           title: Provider
         auth_mode:
           type: string
           title: Auth Mode
+        scope:
+          type: string
+          title: Scope
+          default: ''
         authorize_url:
           type: string
           title: Authorize Url
@@ -1385,6 +1596,12 @@ components:
         tenant_id:
           type: string
           title: Tenant Id
+          default: ''
+        owner_user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Owner User Id
         connection_id:
           type: string
           title: Connection Id
@@ -1403,7 +1620,6 @@ components:
           title: Redirect Uri
       type: object
       required:
-      - tenant_id
       - connection_id
       - code
       title: CloudOAuthCallbackBody
@@ -1415,9 +1631,39 @@ components:
         tenant_id:
           type: string
           title: Tenant Id
+        owner_user_id:
+          type: string
+          title: Owner User Id
+          default: ''
         provider:
           type: string
           title: Provider
+        auth_mode:
+          type: string
+          title: Auth Mode
+          default: oauth_user
+        provider_account_id:
+          type: string
+          title: Provider Account Id
+          default: ''
+        display_name:
+          type: string
+          title: Display Name
+          default: ''
+        provider_tenant_key:
+          type: string
+          title: Provider Tenant Key
+          default: ''
+        provider_account_meta:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Provider Account Meta
+        scope:
+          type: string
+          title: Scope
+          default: ''
         status:
           type: string
           title: Status
@@ -1813,6 +2059,9 @@ components:
           - type: string
           - type: 'null'
           title: Tenant Id
+        dynamic:
+          type: boolean
+          title: Dynamic
       type: object
       required:
       - user_id
@@ -1820,6 +2069,7 @@ components:
       - status
       - role
       - permissions
+      - dynamic
       title: MeResponse
     OkResponse:
       properties:

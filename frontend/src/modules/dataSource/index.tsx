@@ -13,13 +13,17 @@ import {
   Tooltip,
   message,
 } from "antd";
+import type { TreeSelectProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import type { DataNode } from "antd/es/tree";
 import {
   ApiOutlined,
   ArrowRightOutlined,
   DatabaseOutlined,
+  DeleteOutlined,
   EditOutlined,
   EyeOutlined,
+  FileTextOutlined,
   FolderOpenOutlined,
   PlusOutlined,
   SearchOutlined,
@@ -29,19 +33,16 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useNavigate } from "react-router-dom";
 import {
-  Configuration as ScanConfiguration,
-  DefaultApi as ScanDefaultApi,
-  type Agent as ScanAgent,
-  type Source as ScanSource,
-  type CloudSourceBinding,
-  type SourceDocumentItem as ScanSourceDocumentItem,
-} from "@/api/generated/scan-client";
+  CloudOauthApi,
+  Configuration as AuthConfiguration,
+  type CloudConnectionResponse,
+} from "@/api/generated/auth-client";
 import {
   Configuration as CoreConfiguration,
   DatasetsApi as CoreDatasetsApi,
-  DefaultApi as CoreDefaultApi,
   type Dataset as CoreDataset,
 } from "@/api/generated/core-client";
+import { AgentAppsAuth } from "@/components/auth";
 import { BASE_URL, axiosInstance, getLocalizedErrorMessage } from "@/components/request";
 
 import "./index.scss";
@@ -66,6 +67,7 @@ import {
   openCenteredPopup,
   requestFeishuDataSourceAuthorizeUrl,
   saveFeishuDataSourceWizardDraft,
+  type FeishuConnectionStatus,
   type FeishuDataSourceConnection,
   type FeishuDataSourceOAuthMessage,
   type FeishuDataSourceWizardDraft,
@@ -73,7 +75,6 @@ import {
 import {
   CLOUD_SYNC_POLL_INTERVAL_MS,
   CLOUD_SYNC_TIMEOUT_MS,
-  DEFAULT_SCAN_TENANT_ID,
   FEISHU_DEFAULT_SCOPES,
   FEISHU_EXCLUDE_PATTERNS,
   FEISHU_INCLUDE_PATTERNS,
@@ -87,7 +88,6 @@ import {
   type PendingOAuthAttempt,
   type SourceFormValues,
   type SourceType,
-  formatBytes,
   formatDateTime,
   getConnectionMeta,
   getSourceTypeDescription,
@@ -96,17 +96,56 @@ import {
   getSyncModeLabel,
   isCloudType,
   normalizeDataSourceConnectionState,
-  normalizeDataSourceFileUpdateState,
-  normalizeDataSourceParseStatus,
   normalizeDataSourceStatus,
 } from "./shared";
+import {
+  createScanRequestId,
+  createScanV2ApiClient,
+  getBindingLastError,
+  getBindingSchedule,
+  getFirstScanBinding,
+  getScanBindingAgentId,
+  getScanBindingId,
+  getScanBindingTarget,
+  getScanSourceConfigVersion,
+  getScanSourceDatasetId,
+  getScanSourceId,
+  getScanSourceName,
+  getScanSourceUpdatedAt,
+  getScanTenantId,
+  getScanTreeNodePath,
+  inferSourceKind,
+  type ScanV2AgentHint,
+  type ScanV2Binding,
+  type ScanV2Client,
+  type ScanV2Source,
+  type ScanV2TreeNode,
+} from "./scanV2Api";
 
 const { Paragraph, Text } = Typography;
 const DEFAULT_SCHEDULE_TIME = "02:00:00";
 const SCHEDULE_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/;
 const LOCAL_SCAN_CHAT_STORAGE_KEY = "lazymind:datasource:local-scan:chat-enabled";
+const LOCAL_PATH_CACHE_ROOT_KEY = "__root__";
+const FEISHU_TARGET_CACHE_ROOT_KEY = "__root__";
+const DATA_SOURCE_LIST_DEFAULT_PAGE_SIZE = 10;
 type DataSourceView = "assets" | "connectors";
 type FeishuSetupIntent = "create" | "auth" | null;
+type DataSourceSaveMode = "create" | "createAndSync";
+type FeishuTargetTreeNode = DataNode & {
+  value: string;
+  nodeRef?: string;
+  targetRef?: string;
+  targetType?: FeishuTargetType;
+  children?: FeishuTargetTreeNode[];
+};
+type LocalPathTreeNode = DataNode & {
+  value: string;
+  nodeRef?: string;
+  targetRef?: string;
+  childrenLoaded?: boolean;
+  children?: LocalPathTreeNode[];
+};
 
 function normalizeScheduleTime(scheduleTime?: string) {
   const value = `${scheduleTime || ""}`.trim();
@@ -156,34 +195,6 @@ const sourceTypeOptions: Array<{
 ];
 const providerAuthOptions = sourceTypeOptions.filter((item) => item.type === "feishu");
 
-function createScanApiClient() {
-  const baseUrl = BASE_URL || window.location.origin;
-  return new ScanDefaultApi(
-    new ScanConfiguration({
-      basePath: baseUrl,
-      baseOptions: {
-        headers: { "Content-Type": "application/json" },
-      },
-    }),
-    baseUrl,
-    axiosInstance,
-  );
-}
-
-function createCoreApiClient() {
-  const baseUrl = BASE_URL || window.location.origin;
-  return new CoreDefaultApi(
-    new CoreConfiguration({
-      basePath: baseUrl,
-      baseOptions: {
-        headers: { "Content-Type": "application/json" },
-      },
-    }),
-    baseUrl,
-    axiosInstance,
-  );
-}
-
 function createCoreDatasetsApiClient() {
   const baseUrl = BASE_URL || window.location.origin;
   return new CoreDatasetsApi(
@@ -198,12 +209,102 @@ function createCoreDatasetsApiClient() {
   );
 }
 
-function listScanAgents(client: ScanDefaultApi) {
-  return client.apiScanAgentsGet({
-    params: {
-      tenant_id: DEFAULT_SCAN_TENANT_ID,
+function createCloudOauthApiClient() {
+  const baseUrl = BASE_URL || window.location.origin;
+  return new CloudOauthApi(
+    new AuthConfiguration({
+      basePath: baseUrl,
+      accessToken: () => AgentAppsAuth.getAccessToken(),
+      baseOptions: {
+        headers: AgentAppsAuth.getAuthHeaders(),
+      },
+    }),
+    baseUrl,
+    axiosInstance,
+  );
+}
+
+function normalizeFeishuAccountStatus(status?: string): FeishuConnectionStatus {
+  const normalized = `${status || ""}`.trim().toLowerCase();
+  if (["active", "connected", "success", "succeeded", "enabled"].includes(normalized)) {
+    return "connected";
+  }
+  if (["expired", "inactive"].includes(normalized)) {
+    return "expired";
+  }
+  if (["error", "failed", "failure", "invalid"].includes(normalized)) {
+    return "error";
+  }
+  return "pending";
+}
+
+function splitFeishuScopes(value?: string | null) {
+  return `${value || ""}`
+    .split(/[,\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getCloudConnectionItems(payload: unknown): CloudConnectionResponse[] {
+  const responsePayload = payload as {
+    items?: CloudConnectionResponse[];
+    data?: { items?: CloudConnectionResponse[] };
+  };
+
+  if (Array.isArray(responsePayload.items)) {
+    return responsePayload.items;
+  }
+  if (Array.isArray(responsePayload.data?.items)) {
+    return responsePayload.data.items;
+  }
+  return [];
+}
+
+function mapCloudConnectionToFeishuAccount(
+  connection: CloudConnectionResponse,
+  cachedAccounts: FeishuAuthAccount[],
+): FeishuAuthAccount {
+  const providerMeta = connection.provider_account_meta || {};
+  const cachedAccount =
+    cachedAccounts.find((item) => item.connection?.connectionId === connection.connection_id) ||
+    cachedAccounts.find(
+      (item) =>
+        item.appId &&
+        (item.appId === providerMeta.client_id ||
+          item.appId === providerMeta.app_id ||
+          item.appId === connection.provider_account_id),
+    );
+  const appId = `${providerMeta.client_id || providerMeta.app_id || cachedAccount?.appId || connection.provider_account_id || connection.connection_id}`;
+  const displayName =
+    connection.display_name ||
+    providerMeta.name ||
+    providerMeta.display_name ||
+    providerMeta.tenant_name ||
+    cachedAccount?.name ||
+    appId;
+  const status = normalizeFeishuAccountStatus(connection.status);
+
+  return {
+    id: connection.connection_id,
+    name: displayName,
+    appId,
+    appSecret: cachedAccount?.appSecret || "",
+    chatEnabled: cachedAccount?.chatEnabled ?? false,
+    status,
+    connection: {
+      provider: "feishu",
+      connectionId: connection.connection_id,
+      status,
+      accountName: displayName,
+      grantedScopes: splitFeishuScopes(connection.scope),
+      connectedAt: connection.last_used_at || connection.updated_at || connection.created_at,
+      tenantKey: connection.provider_tenant_key,
+      openId: connection.provider_account_id,
     },
-  });
+    createdAt: connection.created_at,
+    updatedAt: connection.updated_at || undefined,
+    lastAuthorizedAt: connection.last_used_at || connection.updated_at || undefined,
+  };
 }
 
 async function listKnowledgeBaseNames(client = createCoreDatasetsApiClient()) {
@@ -262,24 +363,27 @@ function sleep(ms: number) {
 }
 
 async function waitForCloudSyncRun(
-  client: ScanDefaultApi,
+  client: ScanV2Client,
   sourceId: string,
   runId?: string,
 ) {
   const deadline = Date.now() + CLOUD_SYNC_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
-    const runsResponse = await client.apiScanSourcesIdCloudSyncRunsGet({
-      id: sourceId,
-      limit: 20,
+    const [detailResponse, summaryResponse] = await Promise.all([
+      client.getSource({ sourceId }).catch(() => null),
+      client.getSourceSummary({ sourceId }).catch(() => null),
+    ]);
+    const bindings = (detailResponse?.data.bindings || []) as ScanV2Binding[];
+    const summary = summaryResponse?.data as Record<string, any> | undefined;
+    const matchedBinding = bindings.find((item) => {
+      const status = `${item.status || ""}`.toUpperCase();
+      return status === "ACTIVE" || status === "ERROR";
     });
-    const matchedRun = runId
-      ? runsResponse.data.items?.find((item) => item.run_id === runId)
-      : runsResponse.data.items?.[0];
-    const status = (matchedRun?.status || "").toUpperCase();
+    const status = `${matchedBinding?.status || summary?.status || ""}`.toUpperCase();
 
-    if (status === "SUCCEEDED" || status === "PARTIAL_SUCCESS") {
-      return matchedRun;
+    if (status === "ACTIVE" || summary?.total_objects !== undefined) {
+      return { run_id: runId, status: status || "SUCCEEDED" };
     }
 
     if (
@@ -287,27 +391,13 @@ async function waitForCloudSyncRun(
       status.includes("ERROR") ||
       status.includes("CANCEL")
     ) {
-      throw new Error(matchedRun?.error_message || "飞书云同步失败，请检查绑定配置后重试。");
+      throw new Error(getBindingLastError(matchedBinding) || "飞书云同步失败，请检查绑定配置后重试。");
     }
 
     await sleep(CLOUD_SYNC_POLL_INTERVAL_MS);
   }
 
   throw new Error("等待飞书目录同步超时，请稍后重试。");
-}
-
-function isFeishuScanSource(source: ScanSource) {
-  const originPlatform = (source.default_origin_platform || "").toUpperCase();
-  const originType = (source.default_origin_type || "").toUpperCase();
-  const sourceType = (source.source_type || "").toUpperCase();
-  const rootPath = (source.root_path || "").toLowerCase();
-
-  return (
-    originPlatform.includes("FEISHU") ||
-    originType.includes("CLOUD_SYNC") ||
-    sourceType.includes("CLOUD") ||
-    rootPath.startsWith("cloud://source/")
-  );
 }
 
 function parseFeishuScheduleExpr(expr?: string) {
@@ -328,6 +418,154 @@ function buildFeishuScheduleExpr(scheduleCycle?: string, scheduleTime?: string) 
 
 function buildFeishuManualScheduleExpr() {
   return "manual";
+}
+
+function normalizeFeishuTargetType(
+  targetType?: string,
+  targetRef?: string,
+): FeishuTargetType | undefined {
+  const normalizedRef = `${targetRef || ""}`.trim().toLowerCase();
+  if (normalizedRef.includes("feishu:drive:") || normalizedRef === "drive") {
+    return "drive_folder";
+  }
+  if (normalizedRef.includes("feishu:wiki:") || normalizedRef === "wiki") {
+    return "wiki_space";
+  }
+
+  const normalizedType = `${targetType || ""}`.trim().toLowerCase();
+  if (
+    normalizedType === "drive_folder" ||
+    normalizedType === "drive" ||
+    normalizedType === "folder"
+  ) {
+    return "drive_folder";
+  }
+  if (
+    normalizedType === "wiki_space" ||
+    normalizedType === "wiki_node" ||
+    normalizedType === "wiki"
+  ) {
+    return "wiki_space";
+  }
+
+  return undefined;
+}
+
+function toScanFeishuTargetType(targetType: FeishuTargetType) {
+  return targetType === "wiki_space" ? "wiki_node" : targetType;
+}
+
+function toUiFeishuTargetType(targetType?: string): FeishuTargetType | undefined {
+  return normalizeFeishuTargetType(targetType);
+}
+
+function collectFeishuTargetTypes(
+  nodes: FeishuTargetTreeNode[],
+  inheritedTargetType?: FeishuTargetType,
+  targetTypes = new Map<string, FeishuTargetType>(),
+) {
+  nodes.forEach((node) => {
+    const targetRef = `${node.targetRef || node.value || ""}`.trim();
+    const nodeRef = `${node.nodeRef || ""}`.trim();
+    const targetType =
+      normalizeFeishuTargetType(
+        node.targetType,
+        `${targetRef || nodeRef || node.value || ""}`,
+      ) || inheritedTargetType;
+
+    if (targetType) {
+      [targetRef, nodeRef, `${node.value || ""}`.trim()]
+        .filter(Boolean)
+        .forEach((ref) => {
+          targetTypes.set(ref, targetType);
+        });
+    }
+
+    if (node.children) {
+      collectFeishuTargetTypes(node.children, targetType, targetTypes);
+    }
+  });
+
+  return targetTypes;
+}
+
+function normalizeFeishuTargetRefs(value?: SourceFormValues["target"]) {
+  const values = Array.isArray(value) ? value : value ? [value] : [];
+  return values.map((item) => `${item || ""}`.trim()).filter(Boolean);
+}
+
+function normalizeLocalPathRefs(value?: SourceFormValues["path"]) {
+  const values = Array.isArray(value) ? value : value ? [value] : [];
+  return values.map((item) => `${item || ""}`.trim()).filter(Boolean);
+}
+
+function hasFeishuTargetTypes(targetTypes?: Record<string, FeishuTargetType>) {
+  return Boolean(targetTypes && Object.keys(targetTypes).length > 0);
+}
+
+function getFeishuBindingTargetTypes(bindings: ScanV2Binding[]) {
+  const targetTypes: Record<string, FeishuTargetType> = {};
+
+  bindings.forEach((binding) => {
+    const targetRef = getScanBindingTarget(binding);
+    const targetType = toUiFeishuTargetType(binding.target_type);
+    if (targetRef && targetType) {
+      targetTypes[targetRef] = targetType;
+    }
+  });
+
+  return targetTypes;
+}
+
+function normalizeFeishuTargetTypeRecord(
+  targetTypes?: Record<string, FeishuTargetType>,
+) {
+  if (!targetTypes) {
+    return undefined;
+  }
+
+  const normalizedTypes: Record<string, FeishuTargetType> = {};
+  Object.entries(targetTypes).forEach(([targetRef, targetType]) => {
+    const normalizedTargetRef = `${targetRef || ""}`.trim();
+    const normalizedTargetType = normalizeFeishuTargetType(
+      targetType,
+      normalizedTargetRef,
+    );
+    if (normalizedTargetRef && normalizedTargetType) {
+      normalizedTypes[normalizedTargetRef] = normalizedTargetType;
+    }
+  });
+
+  return hasFeishuTargetTypes(normalizedTypes) ? normalizedTypes : undefined;
+}
+
+function buildFeishuTargetOptionsCacheKey(
+  authConnectionId: string,
+  keyword = "",
+) {
+  const normalizedKeyword = keyword.trim();
+  return [
+    authConnectionId.trim(),
+    normalizedKeyword || FEISHU_TARGET_CACHE_ROOT_KEY,
+  ].join("::");
+}
+
+function buildFeishuTargetChildrenCacheKey(params: {
+  authConnectionId: string;
+  targetType: FeishuTargetType;
+  targetRef: string;
+  nodeRef: string;
+}) {
+  return [
+    params.authConnectionId.trim(),
+    params.targetType,
+    params.targetRef.trim(),
+    params.nodeRef.trim(),
+  ].join("::");
+}
+
+function isFeishuHelperNode(node: FeishuTargetTreeNode) {
+  return `${node.value || ""}`.startsWith("__scan-feishu-target-helper__");
 }
 
 // Shared schedule expression helpers (used by both local reconcile_schedule and
@@ -371,8 +609,8 @@ function getScheduleCycleLabel(scheduleCycle: string, t: TFunction): string {
   return t("admin.dataSourceCycleDaily");
 }
 
-function buildFeishuScheduleLabel(binding: CloudSourceBinding | null, t: TFunction) {
-  const parsed = parseFeishuScheduleExpr(binding?.schedule_expr);
+function buildFeishuScheduleLabel(binding: ScanV2Binding | null, t: TFunction) {
+  const parsed = parseFeishuScheduleExpr(getBindingSchedule(binding));
   if (!parsed) {
     return t("admin.dataSourceSyncModeManual");
   }
@@ -383,15 +621,15 @@ function buildFeishuScheduleLabel(binding: CloudSourceBinding | null, t: TFuncti
   });
 }
 
-function buildFeishuNextSyncLabel(binding: CloudSourceBinding | null, t: TFunction) {
-  const nextSyncAt = formatDateTime(binding?.next_sync_at);
+function buildFeishuNextSyncLabel(binding: ScanV2Binding | null, t: TFunction) {
+  const nextSyncAt = formatDateTime(binding?.next_sync_at || binding?.nextSyncAt);
   if (nextSyncAt !== "-") {
     return t("admin.dataSourceNextSyncPlanned", {
       time: nextSyncAt,
     });
   }
 
-  const parsed = parseFeishuScheduleExpr(binding?.schedule_expr);
+  const parsed = parseFeishuScheduleExpr(getBindingSchedule(binding));
   if (!parsed) {
     return t("admin.dataSourceNextSyncManual");
   }
@@ -414,44 +652,7 @@ function mapScanSyncDetail(updateState: FileUpdateState) {
   return "当前文件已是最新";
 }
 
-function mapScanDocumentToDetail(item: ScanSourceDocumentItem): DetailDocumentItem {
-  const updateState = normalizeDataSourceFileUpdateState(
-    item.update_type,
-    item.has_update,
-  );
-  const parseState = [
-    item.parse_state,
-    item.core_task_state,
-    item.scan_orchestration_status,
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const lastSyncedAt = formatDateTime(item.last_synced_at);
-  return {
-    id: `${item.document_id}`,
-    name: item.name,
-    path: item.path,
-    size: formatBytes(item.size_bytes),
-    tags: item.tags || [],
-    updateState,
-    syncDetail: item.update_desc || mapScanSyncDetail(updateState),
-    parseStatus: normalizeDataSourceParseStatus(parseState),
-    sourceUpdatedAt: lastSyncedAt,
-    updatedAt: lastSyncedAt,
-  };
-}
-
-function getReconcileSeconds(scheduleCycle?: string) {
-  if (scheduleCycle === "twoDays") {
-    return 2 * 24 * 60 * 60;
-  }
-  if (scheduleCycle === "weekly") {
-    return 7 * 24 * 60 * 60;
-  }
-  return 24 * 60 * 60;
-}
-
-function pickScanAgent(agents: ScanAgent[], preferredAgentId?: string) {
+function pickScanAgent(agents: ScanV2AgentHint[], preferredAgentId?: string) {
   if (preferredAgentId) {
     const preferred = agents.find((item) => item.agent_id === preferredAgentId);
     if (preferred) {
@@ -533,6 +734,11 @@ export default function DataSourceManagement() {
       : "assets",
   );
   const [assetSearchValue, setAssetSearchValue] = useState("");
+  const [sourceListPage, setSourceListPage] = useState(1);
+  const [sourceListPageSize, setSourceListPageSize] = useState(
+    DATA_SOURCE_LIST_DEFAULT_PAGE_SIZE,
+  );
+  const [sourceListTotal, setSourceListTotal] = useState(0);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
   const [wizardMode, setWizardMode] = useState<"create" | "edit">("create");
@@ -562,7 +768,7 @@ export default function DataSourceManagement() {
   const [manualOauthCallbackValue, setManualOauthCallbackValue] = useState("");
   const [manualOauthSubmitting, setManualOauthSubmitting] = useState(false);
   const oauthAttemptRef = useRef<PendingOAuthAttempt | null>(null);
-  const [scanAgents, setScanAgents] = useState<ScanAgent[]>([]);
+  const scanAgents: ScanV2AgentHint[] = [];
   const [knowledgeBaseNames, setKnowledgeBaseNames] = useState<string[]>([]);
   const [defaultDatasetIds, setDefaultDatasetIds] = useState<string[]>([]);
   const [localScanChatEnabled, setLocalScanChatEnabled] = useState(
@@ -572,6 +778,22 @@ export default function DataSourceManagement() {
   const [scanLoading, setScanLoading] = useState(false);
   const [validatedAgentId, setValidatedAgentId] = useState<string | null>(null);
   const [wizardSaving, setWizardSaving] = useState(false);
+  const [localPathOptions, setLocalPathOptions] = useState<LocalPathTreeNode[]>([]);
+  const [localPathLoading, setLocalPathLoading] = useState(false);
+  const localPathRequestSeqRef = useRef(0);
+  const localPathSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const localPathOptionsCacheRef = useRef(new Map<string, LocalPathTreeNode[]>());
+  const localPathChildrenCacheRef = useRef(new Map<string, LocalPathTreeNode[]>());
+  const localPathActiveOptionsCacheKeyRef = useRef("");
+  const [feishuTargetTreeData, setFeishuTargetTreeData] = useState<FeishuTargetTreeNode[]>([]);
+  const [feishuTargetLoading, setFeishuTargetLoading] = useState(false);
+  const feishuTargetRequestSeqRef = useRef(0);
+  const feishuTargetSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const feishuTargetOptionsCacheRef = useRef(new Map<string, FeishuTargetTreeNode[]>());
+  const feishuTargetChildrenCacheRef = useRef(new Map<string, FeishuTargetTreeNode[]>());
+  const sourceListRequestSeqRef = useRef(0);
+  const assetSearchInitializedRef = useRef(false);
+  const feishuAuthAccountsLoadedRef = useRef(false);
 
   const syncMode = Form.useWatch("syncMode", form) || "scheduled";
   const feishuTargetType = (Form.useWatch("targetType", form) || "wiki_space") as FeishuTargetType;
@@ -585,52 +807,547 @@ export default function DataSourceManagement() {
   const isFeishuAuthValid = validFeishuAccounts.length > 0;
   const localSourceCount = sources.filter((item) => item.type === "local").length;
 
-  const filteredSources = sources.filter((item) => {
-    const normalizedSearch = assetSearchValue.trim().toLowerCase();
-    const matchesSearch =
-      !normalizedSearch ||
-      [item.name, item.knowledgeBase, item.target, item.description]
-        .some((value) => `${value || ""}`.toLowerCase().includes(normalizedSearch));
-
-    return matchesSearch;
-  });
-
-  const buildScanScheduleLabel = (source: ScanSource) => {
-    if (!source.watch_enabled) {
+  const buildScanScheduleLabel = (binding?: ScanV2Binding | null) => {
+    if (binding?.sync_mode !== "scheduled" && binding?.sync_mode !== "watch") {
       return t("admin.dataSourceSyncModeManual");
     }
 
-    const parsed = parseReconcileSchedule(source.reconcile_schedule);
+    const parsed = parseReconcileSchedule(getBindingSchedule(binding));
     if (parsed) {
       const cycleLabel = getScheduleCycleLabel(parsed.scheduleCycle, t);
       return `${cycleLabel} ${parsed.scheduleTime} ${t("admin.dataSourceScheduleAutoSuffix")}`;
     }
 
-    const reconcileSeconds = source.reconcile_seconds || 0;
-    if (reconcileSeconds === 7 * 24 * 60 * 60) {
-      return `${t("admin.dataSourceCycleWeekly")} (${reconcileSeconds}s)`;
-    }
-    if (reconcileSeconds === 2 * 24 * 60 * 60) {
-      return `${t("admin.dataSourceCycleTwoDays")} (${reconcileSeconds}s)`;
-    }
-    if (reconcileSeconds === 24 * 60 * 60) {
-      return `${t("admin.dataSourceCycleDaily")} (${reconcileSeconds}s)`;
-    }
-    return `${t("admin.dataSourceSyncModeScheduled")} (${reconcileSeconds}s)`;
+    return t("admin.dataSourceSyncModeScheduled");
   };
 
-  const buildScanNextSyncLabel = (source: ScanSource) => {
-    if (!source.watch_enabled) {
+  const buildScanNextSyncLabel = (binding?: ScanV2Binding | null) => {
+    if (binding?.sync_mode !== "scheduled" && binding?.sync_mode !== "watch") {
       return t("admin.dataSourceNextSyncManual");
     }
-    const parsed = parseReconcileSchedule(source.reconcile_schedule);
+    const parsed = parseReconcileSchedule(getBindingSchedule(binding));
     if (parsed) {
       return t("admin.dataSourceNextSyncPlanned", { time: parsed.scheduleTime });
     }
-    const reconcileSeconds = source.reconcile_seconds || 0;
-    const hourEstimate = Math.max(1, Math.round(reconcileSeconds / 3600));
-    return t("admin.dataSourceNextSyncPlanned", {
-      time: `${hourEstimate}h`,
+    return t("admin.dataSourceNextSyncPlanned", { time: "-" });
+  };
+
+  const getPreferredLocalAgentId = () => {
+    const currentLocalSource =
+      editingId && selectedType === "local"
+        ? sources.find((item) => item.id === editingId && item.type === "local")
+        : undefined;
+    const selectedAgent = pickScanAgent(
+      scanAgents,
+      validatedAgentId || currentLocalSource?.agentId,
+    );
+
+    return selectedAgent?.agent_id || validatedAgentId || currentLocalSource?.agentId || "";
+  };
+
+  const buildManualLocalPathOptions = (
+    pathValue: string,
+    helperText?: string,
+  ): LocalPathTreeNode[] => {
+    const normalizedPath = pathValue.trim();
+    const options: LocalPathTreeNode[] = [];
+
+    if (normalizedPath) {
+      options.push({
+        key: normalizedPath,
+        value: normalizedPath,
+        title: `使用当前输入：${normalizedPath}`,
+        isLeaf: true,
+      });
+    }
+
+    if (helperText) {
+      options.push({
+        key: "__scan-local-path-helper__",
+        value: "__scan-local-path-helper__",
+        title: helperText,
+        disabled: true,
+        isLeaf: true,
+      });
+    }
+
+    return options;
+  };
+
+  const mapLocalPathNodes = (nodes: ScanV2TreeNode[]): LocalPathTreeNode[] =>
+    nodes
+      .filter((node) => node.is_container || !node.is_document)
+      .map((node) => {
+        const value = getScanTreeNodePath(node) || `${node.key || node.node_ref || node.display_name}`;
+        const title = node.display_name || node.object_key || value;
+        return {
+          key: value,
+          value,
+          title,
+          isLeaf: !node.has_children,
+          selectable: node.selectable !== false,
+          disabled: node.selectable === false,
+          nodeRef: node.node_ref,
+          targetRef: node.target_ref || value,
+        };
+      })
+      .filter((node) => Boolean(node.value));
+
+  const mergeLocalPathChildren = (
+    list: LocalPathTreeNode[],
+    key: React.Key,
+    children: LocalPathTreeNode[],
+  ): LocalPathTreeNode[] =>
+    list.map((node) => {
+      if (node.key === key || node.value === key) {
+        return { ...node, children, childrenLoaded: true };
+      }
+      if (node.children) {
+        return {
+          ...node,
+          children: mergeLocalPathChildren(node.children, key, children),
+        };
+      }
+      return node;
+    });
+
+  const buildLocalPathOptionsCacheKey = (agentId: string, keyword = "") =>
+    [agentId.trim(), keyword.trim() || LOCAL_PATH_CACHE_ROOT_KEY].join("::");
+
+  const buildLocalPathChildrenCacheKey = (params: {
+    agentId: string;
+    targetRef: string;
+    nodeRef: string;
+  }) =>
+    [
+      params.agentId.trim(),
+      params.targetRef.trim(),
+      params.nodeRef.trim(),
+    ].join("::");
+
+  const loadLocalPathOptions = async (pathValue?: string) => {
+    const fallbackPathValue = form.getFieldValue("path");
+    const normalizedPath =
+      typeof pathValue === "string"
+        ? pathValue.trim()
+        : Array.isArray(fallbackPathValue)
+          ? ""
+          : `${fallbackPathValue || ""}`.trim();
+    const requestSeq = localPathRequestSeqRef.current + 1;
+    localPathRequestSeqRef.current = requestSeq;
+
+    const agentId = getPreferredLocalAgentId();
+    const cacheKey = buildLocalPathOptionsCacheKey(agentId, normalizedPath);
+    const cachedNodes = localPathOptionsCacheRef.current.get(cacheKey);
+    if (cachedNodes) {
+      localPathActiveOptionsCacheKeyRef.current = cacheKey;
+      setLocalPathOptions(cachedNodes);
+      setLocalPathLoading(false);
+      return;
+    }
+
+    setLocalPathLoading(true);
+    try {
+      const client = createScanV2ApiClient();
+      const response = normalizedPath
+        ? await client.searchBindingTargets({
+            bindingTargetSearchRequest: {
+              connector_type: "local_fs",
+              target_type: "local_path",
+              keyword: normalizedPath,
+              agent_id: agentId || undefined,
+              include_files: false,
+              list_mode: "page",
+              page_size: 50,
+            } as any,
+          })
+        : await client.listBindingTargetChildren({
+            bindingTargetChildrenRequest: {
+              connector_type: "local_fs",
+              target_type: "local_path",
+              target_ref: "/",
+              agent_id: agentId || undefined,
+              include_files: false,
+              list_mode: "page",
+              page_size: 50,
+            } as any,
+          });
+
+      if (localPathRequestSeqRef.current !== requestSeq) {
+        return;
+      }
+
+      const nodes = [
+        ...buildManualLocalPathOptions(normalizedPath),
+        ...mapLocalPathNodes(response.data.items || []).filter(
+          (node) => node.value !== normalizedPath,
+        ),
+      ];
+      const nextNodes =
+        nodes.length > 0 ? nodes : buildManualLocalPathOptions("", "未获取到可选目录");
+      localPathOptionsCacheRef.current.set(cacheKey, nextNodes);
+      localPathActiveOptionsCacheKeyRef.current = cacheKey;
+      setLocalPathOptions(nextNodes);
+    } catch (error) {
+      if (localPathRequestSeqRef.current !== requestSeq) {
+        return;
+      }
+      setLocalPathOptions(
+        buildManualLocalPathOptions(
+          normalizedPath,
+          agentId
+            ? getLocalizedErrorMessage(error, "目录列表获取失败，可先手动输入路径")
+            : "后端未返回可用扫描 Agent，暂时只能手动输入路径",
+        ),
+      );
+    } finally {
+      if (localPathRequestSeqRef.current === requestSeq) {
+        setLocalPathLoading(false);
+      }
+    }
+  };
+
+  const handleSearchLocalPathOptions = (keyword: string) => {
+    const normalizedKeyword = `${keyword || ""}`.trim();
+    if (localPathSearchTimerRef.current) {
+      clearTimeout(localPathSearchTimerRef.current);
+    }
+
+    if (!normalizedKeyword) {
+      const agentId = getPreferredLocalAgentId();
+      const rootCacheKey = buildLocalPathOptionsCacheKey(agentId);
+      const cachedRootNodes = localPathOptionsCacheRef.current.get(rootCacheKey);
+      if (cachedRootNodes) {
+        localPathActiveOptionsCacheKeyRef.current = rootCacheKey;
+        setLocalPathOptions(cachedRootNodes);
+      }
+      localPathSearchTimerRef.current = setTimeout(() => {
+        void loadLocalPathOptions("");
+      }, 300);
+      return;
+    }
+
+    setLocalPathOptions(buildManualLocalPathOptions(normalizedKeyword));
+    localPathSearchTimerRef.current = setTimeout(() => {
+      void loadLocalPathOptions(normalizedKeyword);
+    }, 300);
+  };
+
+  const handleLoadLocalPathChildren: TreeSelectProps["loadData"] = async (node) => {
+    const treeNode = node as LocalPathTreeNode;
+    const nodeRef = `${treeNode.nodeRef || ""}`.trim();
+    const targetRef = `${treeNode.targetRef || treeNode.value || ""}`.trim();
+
+    if (!targetRef || treeNode.childrenLoaded) {
+      return;
+    }
+
+    const agentId = getPreferredLocalAgentId();
+    const cacheKey = buildLocalPathChildrenCacheKey({ agentId, targetRef, nodeRef });
+    const cachedChildren = localPathChildrenCacheRef.current.get(cacheKey);
+    if (cachedChildren) {
+      setLocalPathOptions((current) => {
+        const nextTreeData = mergeLocalPathChildren(
+          current,
+          treeNode.key || treeNode.value,
+          cachedChildren,
+        );
+        localPathOptionsCacheRef.current.set(
+          localPathActiveOptionsCacheKeyRef.current ||
+            buildLocalPathOptionsCacheKey(agentId),
+          nextTreeData,
+        );
+        return nextTreeData;
+      });
+      return;
+    }
+
+    if (treeNode.children) {
+      localPathChildrenCacheRef.current.set(cacheKey, treeNode.children);
+      setLocalPathOptions((current) => {
+        const nextTreeData = mergeLocalPathChildren(
+          current,
+          treeNode.key || treeNode.value,
+          treeNode.children || [],
+        );
+        localPathOptionsCacheRef.current.set(
+          localPathActiveOptionsCacheKeyRef.current ||
+            buildLocalPathOptionsCacheKey(agentId),
+          nextTreeData,
+        );
+        return nextTreeData;
+      });
+      return;
+    }
+
+    const response = await createScanV2ApiClient().listBindingTargetChildren({
+      bindingTargetChildrenRequest: {
+        connector_type: "local_fs",
+        target_type: "local_path",
+        target_ref: targetRef,
+        node_ref: nodeRef || undefined,
+        agent_id: agentId || undefined,
+        include_files: false,
+        list_mode: "page",
+        page_size: 50,
+      } as any,
+    });
+
+    const children = mapLocalPathNodes(response.data.items || []);
+    localPathChildrenCacheRef.current.set(cacheKey, children);
+    setLocalPathOptions((current) => {
+      const nextTreeData = mergeLocalPathChildren(
+        current,
+        treeNode.key || treeNode.value,
+        children,
+      );
+      localPathOptionsCacheRef.current.set(
+        localPathActiveOptionsCacheKeyRef.current ||
+          buildLocalPathOptionsCacheKey(agentId),
+        nextTreeData,
+      );
+      return nextTreeData;
+    });
+  };
+
+  const getActiveFeishuAuthConnectionId = () => {
+    if (oauthConnection?.connectionId) {
+      return oauthConnection.connectionId;
+    }
+    if (wizardMode === "edit" && editingId) {
+      return sources.find((item) => item.id === editingId && item.type === "feishu")
+        ?.authConnectionId || "";
+    }
+    return "";
+  };
+
+  const buildFeishuHelperNode = (title: string): FeishuTargetTreeNode => ({
+    key: "__scan-feishu-target-helper__",
+    value: "__scan-feishu-target-helper__",
+    title,
+    disabled: true,
+    isLeaf: true,
+  });
+
+  const mapFeishuTargetNodes = (
+    nodes: ScanV2TreeNode[],
+    inheritedTargetType?: FeishuTargetType,
+  ): FeishuTargetTreeNode[] =>
+    nodes.map((node) => {
+      const value = getScanTreeNodePath(node) || `${node.key || node.node_ref || node.display_name}`;
+      const title = node.display_name || node.title || node.object_key || value;
+      const targetRef = node.target_ref || value;
+      const nodeRef = node.node_ref;
+      const targetType = normalizeFeishuTargetType(
+        node.target_type,
+        `${targetRef || nodeRef || value}`,
+      ) || inheritedTargetType;
+
+      return {
+        key: value,
+        value,
+        title,
+        isLeaf: !node.has_children,
+        selectable: node.selectable !== false,
+        disabled: node.selectable === false,
+        nodeRef,
+        targetRef,
+        targetType,
+      };
+    });
+
+  const mergeFeishuTargetChildren = (
+    list: FeishuTargetTreeNode[],
+    key: React.Key,
+    children: FeishuTargetTreeNode[],
+  ): FeishuTargetTreeNode[] =>
+    list.map((node) => {
+      if (node.key === key || node.value === key) {
+        return { ...node, children };
+      }
+      if (node.children) {
+        return {
+          ...node,
+          children: mergeFeishuTargetChildren(node.children, key, children),
+        };
+      }
+      return node;
+    });
+
+  const loadFeishuTargetOptions = async (keyword = "") => {
+    const requestSeq = feishuTargetRequestSeqRef.current + 1;
+    feishuTargetRequestSeqRef.current = requestSeq;
+    const authConnectionId = getActiveFeishuAuthConnectionId();
+
+    if (!authConnectionId) {
+      setFeishuTargetTreeData([
+        buildFeishuHelperNode("请先完成飞书授权，再联机选择空间或文件夹"),
+      ]);
+      setFeishuTargetLoading(false);
+      return;
+    }
+
+    const normalizedKeyword = keyword.trim();
+    const cacheKey = buildFeishuTargetOptionsCacheKey(
+      authConnectionId,
+      normalizedKeyword,
+    );
+    const cachedNodes = feishuTargetOptionsCacheRef.current.get(cacheKey);
+    if (cachedNodes) {
+      setFeishuTargetTreeData((current) =>
+        normalizedKeyword || current.length === 0 || current.every(isFeishuHelperNode)
+          ? cachedNodes
+          : current,
+      );
+      setFeishuTargetLoading(false);
+      return;
+    }
+
+    setFeishuTargetLoading(true);
+    try {
+      const client = createScanV2ApiClient();
+      const response = normalizedKeyword
+        ? await client.searchBindingTargets({
+            bindingTargetSearchRequest: {
+              connector_type: "feishu",
+              auth_connection_id: authConnectionId,
+              keyword: normalizedKeyword,
+              include_files: true,
+              list_mode: "page",
+              page_size: 50,
+              provider_options: {
+                tenant_key: getScanTenantId(),
+              },
+            } as any,
+          })
+        : await client.listBindingTargetChildren({
+            bindingTargetChildrenRequest: {
+              connector_type: "feishu",
+              auth_connection_id: authConnectionId,
+              include_files: true,
+              list_mode: "page",
+              page_size: 50,
+              provider_options: {
+                tenant_key: getScanTenantId(),
+              },
+            } as any,
+          });
+
+      if (feishuTargetRequestSeqRef.current !== requestSeq) {
+        return;
+      }
+
+      const nodes = mapFeishuTargetNodes(response.data.items || []);
+      const nextNodes =
+        nodes.length > 0 ? nodes : [buildFeishuHelperNode("未获取到可选飞书目标")];
+      feishuTargetOptionsCacheRef.current.set(cacheKey, nextNodes);
+      setFeishuTargetTreeData(nextNodes);
+    } catch (error) {
+      if (feishuTargetRequestSeqRef.current !== requestSeq) {
+        return;
+      }
+      setFeishuTargetTreeData([
+        buildFeishuHelperNode(
+          getLocalizedErrorMessage(error, "飞书目录列表获取失败，可先手动输入目标 ID") ||
+            "飞书目录列表获取失败，可先手动输入目标 ID",
+        ),
+      ]);
+    } finally {
+      if (feishuTargetRequestSeqRef.current === requestSeq) {
+        setFeishuTargetLoading(false);
+      }
+    }
+  };
+
+  const handleSearchFeishuTargetOptions = (keyword: string) => {
+    if (feishuTargetSearchTimerRef.current) {
+      clearTimeout(feishuTargetSearchTimerRef.current);
+    }
+    feishuTargetSearchTimerRef.current = setTimeout(() => {
+      void loadFeishuTargetOptions(keyword);
+    }, 300);
+  };
+
+  const handleLoadFeishuTargetChildren: TreeSelectProps["loadData"] = async (node) => {
+    const authConnectionId = getActiveFeishuAuthConnectionId();
+    if (!authConnectionId) {
+      return;
+    }
+
+    const treeNode = node as FeishuTargetTreeNode;
+    const nodeRef = `${treeNode.nodeRef || ""}`.trim();
+    const targetRef = `${treeNode.targetRef || treeNode.value || ""}`.trim();
+    const uiTargetType = normalizeFeishuTargetType(treeNode.targetType, targetRef) || feishuTargetType;
+    const targetType = toScanFeishuTargetType(uiTargetType);
+    const cacheKey = buildFeishuTargetChildrenCacheKey({
+      authConnectionId,
+      targetType: uiTargetType,
+      targetRef,
+      nodeRef,
+    });
+    const cachedChildren = feishuTargetChildrenCacheRef.current.get(cacheKey);
+    if (cachedChildren) {
+      setFeishuTargetTreeData((current) => {
+        const nextTreeData = mergeFeishuTargetChildren(
+          current,
+          treeNode.key || treeNode.value,
+          cachedChildren,
+        );
+        feishuTargetOptionsCacheRef.current.set(
+          buildFeishuTargetOptionsCacheKey(authConnectionId),
+          nextTreeData,
+        );
+        return nextTreeData;
+      });
+      return;
+    }
+
+    if (treeNode.children) {
+      feishuTargetChildrenCacheRef.current.set(cacheKey, treeNode.children);
+      setFeishuTargetTreeData((current) => {
+        const nextTreeData = mergeFeishuTargetChildren(
+          current,
+          treeNode.key || treeNode.value,
+          treeNode.children || [],
+        );
+        feishuTargetOptionsCacheRef.current.set(
+          buildFeishuTargetOptionsCacheKey(authConnectionId),
+          nextTreeData,
+        );
+        return nextTreeData;
+      });
+      return;
+    }
+
+    const response = await createScanV2ApiClient().listBindingTargetChildren({
+      bindingTargetChildrenRequest: {
+        connector_type: "feishu",
+        target_type: targetType,
+        auth_connection_id: authConnectionId,
+        target_ref: targetRef || undefined,
+        node_ref: nodeRef || undefined,
+        include_files: true,
+        list_mode: "page",
+        page_size: 50,
+        provider_options: {
+          tenant_key: getScanTenantId(),
+        },
+      } as any,
+    });
+
+    const children = mapFeishuTargetNodes(response.data.items || [], uiTargetType);
+    feishuTargetChildrenCacheRef.current.set(cacheKey, children);
+    setFeishuTargetTreeData((current) => {
+      const nextTreeData = mergeFeishuTargetChildren(
+        current,
+        treeNode.key || treeNode.value,
+        children,
+      );
+      feishuTargetOptionsCacheRef.current.set(
+        buildFeishuTargetOptionsCacheKey(authConnectionId),
+        nextTreeData,
+      );
+      return nextTreeData;
     });
   };
 
@@ -675,11 +1392,6 @@ export default function DataSourceManagement() {
 
     const localSources = sources.filter((item) => item.type === "local");
     const localSourcesWithDataset = localSources.filter((item) => item.datasetId);
-    if (localSourcesWithDataset.length === 0) {
-      message.warning(t("admin.dataSourceLocalScanChatNoSourceHint"));
-      return;
-    }
-
     const previousValue = localScanChatEnabled;
     setLocalScanChatSaving(true);
     setLocalScanChatEnabled(chatEnabled);
@@ -718,53 +1430,54 @@ export default function DataSourceManagement() {
   };
 
   const mapScanSourceToDataSource = (
-    source: ScanSource,
+    source: ScanV2Source,
     fallback?: DataSourceItem,
-    binding: CloudSourceBinding | null = source.cloud_binding || null,
+    binding: ScanV2Binding | null = null,
+    bindings: ScanV2Binding[] = binding ? [binding] : [],
   ): DataSourceItem => {
-    const documentsPayload = source.documents;
-    const summary = documentsPayload?.summary;
-    const documentsSource = documentsPayload?.source;
-    const isFeishuSource = isFeishuScanSource(source);
+    const summary = (source.summary || {}) as Record<string, any>;
+    const isFeishuSource = inferSourceKind(source, binding) === "feishu";
+    const sourceId = getScanSourceId(source);
+    const sourceName = getScanSourceName(source);
+    const targetRef = getScanBindingTarget(binding);
+    const targetRefs = bindings.map(getScanBindingTarget).filter(Boolean);
+    const targetLabel =
+      targetRefs.length > 1 ? targetRefs.join("、") : targetRef || fallback?.target || "-";
     const sourceStatus = normalizeDataSourceStatus(
       binding?.status || source.status,
-      isFeishuSource ? true : source.watch_enabled,
+      isFeishuSource ? true : binding?.sync_mode !== "manual",
     );
     const connectionState = normalizeDataSourceConnectionState(binding?.status || source.status);
     const currentTime = formatDateTime(
-      documentsSource?.last_synced_at || binding?.updated_at || source.updated_at,
+      binding?.updated_at || getScanSourceUpdatedAt(source),
     );
-    const detailDocuments = documentsPayload?.items
-      ? documentsPayload.items.map(mapScanDocumentToDetail)
-      : fallback?.detailDocuments || [];
-    const fileCandidates = documentsPayload?.items
-      ? detailDocuments.map((item) => ({
-        id: item.id,
-        name: item.name,
-        path: item.path,
-        size: item.size,
-        type: item.path.split(".").pop() || "",
-        updateState: item.updateState,
-      }))
-      : fallback?.fileCandidates || [];
-    const documentCount = summary?.total_document_count ?? fallback?.documentCount ?? 0;
+    const detailDocuments = fallback?.detailDocuments || [];
+    const fileCandidates = fallback?.fileCandidates || [];
+    const documentCount =
+      summary?.document_objects ??
+      summary?.total_objects ??
+      summary?.total_document_count ??
+      fallback?.documentCount ??
+      0;
     const addCount = summary?.new_count ?? fallback?.addCount ?? 0;
     const deleteCount = summary?.deleted_count ?? fallback?.deleteCount ?? 0;
     const changeCount = summary?.modified_count ?? fallback?.changeCount ?? 0;
-    const storageUsed =
-      typeof summary?.storage_bytes === "number"
-        ? formatBytes(summary.storage_bytes)
-        : fallback?.storageUsed || "0 B";
+    const storageUsed = fallback?.storageUsed || "0 B";
 
     if (isFeishuSource) {
+      const bindingTargetTypes = getFeishuBindingTargetTypes(bindings);
+      const targetTypes = hasFeishuTargetTypes(bindingTargetTypes)
+        ? bindingTargetTypes
+        : fallback?.targetTypes;
+
       return {
-        id: source.id,
-        name: source.name,
+        id: sourceId,
+        name: sourceName,
         type: "feishu",
-        knowledgeBase: source.name,
+        knowledgeBase: sourceName,
         description: t("admin.dataSourceTypeFeishuDesc"),
-        target: binding?.target_ref || fallback?.target || source.root_path,
-        syncMode: parseFeishuScheduleExpr(binding?.schedule_expr) ? "scheduled" : "manual",
+        target: targetLabel,
+        syncMode: parseFeishuScheduleExpr(getBindingSchedule(binding)) ? "scheduled" : "manual",
         scheduleLabel: buildFeishuScheduleLabel(binding, t),
         status: sourceStatus,
         connectionState,
@@ -782,7 +1495,7 @@ export default function DataSourceManagement() {
         fileCandidates,
         logs: [
           {
-            id: `scan-log-${source.id}-${binding?.updated_at || source.updated_at}`,
+            id: `scan-log-${sourceId}-${binding?.updated_at || getScanSourceUpdatedAt(source)}`,
             time: currentTime,
             result:
               sourceStatus === "error"
@@ -795,46 +1508,50 @@ export default function DataSourceManagement() {
                 ? t("admin.dataSourceStatusError")
                 : t("admin.dataSourceConnectionConnected"),
             description:
-              binding?.last_error ||
-              (parseFeishuScheduleExpr(binding?.schedule_expr)
+              getBindingLastError(binding) ||
+              (parseFeishuScheduleExpr(getBindingSchedule(binding))
                 ? t("admin.dataSourceSyncModeScheduledDesc")
                 : t("admin.dataSourceSyncModeManualDesc")),
           },
         ],
-        warning: binding?.last_error || t("admin.dataSourceReadonlyPermissionHint"),
+        warning: getBindingLastError(binding) || t("admin.dataSourceReadonlyPermissionHint"),
         oauthConnection:
           fallback?.oauthConnection && fallback.oauthConnection.connectionId === binding?.auth_connection_id
             ? fallback.oauthConnection
             : null,
-        agentId: source.agent_id,
-        tenantId: source.tenant_id,
+        agentId: getScanBindingAgentId(binding),
+        tenantId: source.tenant_id || getScanTenantId(),
         scanManaged: true,
-        storageUsed:
-          typeof summary?.storage_bytes === "number"
-            ? formatBytes(summary.storage_bytes)
-            : fallback?.storageUsed || "0 B",
+        storageUsed,
         detailDocuments,
-        rootPath: source.root_path,
-        targetRef: binding?.target_ref || fallback?.targetRef,
-        targetType: (binding?.target_type as FeishuTargetType | undefined) || fallback?.targetType,
+        rootPath: targetRef,
+        targetRef: targetRef || fallback?.targetRef,
+        targetRefs: targetRefs.length > 0 ? targetRefs : fallback?.targetRefs,
+        targetType: toUiFeishuTargetType(binding?.target_type) || fallback?.targetType,
+        targetTypes,
         authConnectionId: binding?.auth_connection_id || fallback?.authConnectionId,
-        datasetId: source.dataset_id,
+        datasetId: getScanSourceDatasetId(source),
+        bindingId: getScanBindingId(binding),
+        bindingIds: bindings.map(getScanBindingId).filter(Boolean),
+        bindingTreeKey: binding?.tree_key,
+        bindingTreeKeys: bindings.map((item) => item.tree_key).filter(Boolean),
+        configVersion: getScanSourceConfigVersion(source),
       };
     }
 
     return {
-      id: source.id,
-      name: source.name,
+      id: sourceId,
+      name: sourceName,
       type: "local",
-      knowledgeBase: source.name,
+      knowledgeBase: sourceName,
       description: t("admin.dataSourceTypeLocalDesc"),
-      target: source.root_path,
-      syncMode: source.watch_enabled ? "scheduled" : "manual",
-      scheduleLabel: buildScanScheduleLabel(source),
+      target: targetLabel,
+      syncMode: binding?.sync_mode === "scheduled" || binding?.sync_mode === "watch" ? "scheduled" : "manual",
+      scheduleLabel: buildScanScheduleLabel(binding),
       status: sourceStatus,
       connectionState,
       lastSync: currentTime,
-      nextSync: buildScanNextSyncLabel(source),
+      nextSync: buildScanNextSyncLabel(binding),
       documentCount,
       addCount,
       deleteCount,
@@ -847,7 +1564,7 @@ export default function DataSourceManagement() {
       fileCandidates,
       logs: [
         {
-          id: `scan-log-${source.id}-${source.updated_at}`,
+          id: `scan-log-${sourceId}-${getScanSourceUpdatedAt(source)}`,
           time: currentTime,
           result:
             sourceStatus === "error"
@@ -859,58 +1576,111 @@ export default function DataSourceManagement() {
             sourceStatus === "error"
               ? t("admin.dataSourceStatusError")
               : t("admin.dataSourceConnectionConnected"),
-          description: source.watch_enabled
+          description: binding?.sync_mode === "scheduled" || binding?.sync_mode === "watch"
             ? t("admin.dataSourceSyncModeScheduledDesc")
             : t("admin.dataSourceSyncModeManualDesc"),
         },
       ],
       warning: t("admin.dataSourceReadonlyPermissionHint"),
       oauthConnection: null,
-      agentId: source.agent_id,
-      tenantId: source.tenant_id,
+      agentId: getScanBindingAgentId(binding),
+      tenantId: source.tenant_id || getScanTenantId(),
       scanManaged: true,
       storageUsed,
       detailDocuments,
-      rootPath: source.root_path,
-      datasetId: source.dataset_id,
+      rootPath: targetRef,
+      targetRef,
+      targetRefs: targetRefs.length > 0 ? targetRefs : fallback?.targetRefs,
+      targetType: toUiFeishuTargetType(binding?.target_type),
+      datasetId: getScanSourceDatasetId(source),
+      bindingId: getScanBindingId(binding),
+      bindingIds: bindings.map(getScanBindingId).filter(Boolean),
+      bindingTreeKey: binding?.tree_key,
+      bindingTreeKeys: bindings.map((item) => item.tree_key).filter(Boolean),
+      configVersion: getScanSourceConfigVersion(source),
     };
   };
 
-  const refreshSources = async (showSuccessMessage = false) => {
-    const client = createScanApiClient();
+  const refreshSources = async (
+    showSuccessMessage = false,
+    options?: {
+      page?: number;
+      pageSize?: number;
+      keyword?: string;
+    },
+  ) => {
+    const client = createScanV2ApiClient();
+    const nextPage = Math.max(1, options?.page ?? sourceListPage);
+    const nextPageSize = Math.max(
+      1,
+      options?.pageSize ?? sourceListPageSize,
+    );
+    const keyword = `${options?.keyword ?? assetSearchValue}`.trim();
+    const requestSeq = sourceListRequestSeqRef.current + 1;
+    sourceListRequestSeqRef.current = requestSeq;
+
     setScanLoading(true);
     try {
       const [sourcesResponse, nextDefaultDatasetIds] = await Promise.all([
-        client.apiScanSourcesGet(),
+        client.listSources({
+          keyword: keyword || undefined,
+          page: nextPage,
+          pageSize: nextPageSize,
+        }),
         listDefaultKnowledgeBaseIds().catch((error) => {
           console.error("Failed to refresh default knowledge bases", error);
           return defaultDatasetIds;
         }),
       ]);
-      const defaultDatasetIdSet = new Set(nextDefaultDatasetIds);
-
-      const sourceList = sourcesResponse.data.items || [];
+      const sourceList = (sourcesResponse.data.items || []) as ScanV2Source[];
       const previousSourceMap = new Map(
         sources.map((item) => [item.id, item]),
       );
-      const nextSources = sourceList.map((source) =>
-        mapScanSourceToDataSource(
-          source,
-          previousSourceMap.get(source.id),
-        ),
+      const nextSources = await Promise.all(
+        sourceList.map(async (source) => {
+          const sourceId = getScanSourceId(source);
+          const fallback = previousSourceMap.get(sourceId);
+          try {
+            const [detailResponse, summaryResponse] = await Promise.all([
+              client.getSource({ sourceId }),
+              client.getSourceSummary({ sourceId }).catch(() => null),
+            ]);
+            const detailSource = {
+              ...source,
+              ...detailResponse.data.source,
+              summary: summaryResponse?.data || source.summary,
+            };
+            const bindings = (detailResponse.data.bindings || []) as ScanV2Binding[];
+            return mapScanSourceToDataSource(
+              detailSource,
+              fallback,
+              getFirstScanBinding(bindings),
+              bindings,
+            );
+          } catch (error) {
+            console.error("Failed to load source detail", error);
+            return mapScanSourceToDataSource(source, fallback);
+          }
+        }),
       );
+      if (sourceListRequestSeqRef.current !== requestSeq) {
+        return;
+      }
       const localDatasetIds = nextSources
         .filter((item) => item.type === "local")
         .map((item) => item.datasetId)
         .filter((datasetId): datasetId is string => Boolean(datasetId));
-      const nextLocalScanChatEnabled =
-        localDatasetIds.length > 0 &&
-        localDatasetIds.every((datasetId) => defaultDatasetIdSet.has(datasetId));
+      const nextLocalScanChatEnabled = loadLocalScanChatEnabled();
 
       setDefaultDatasetIds(nextDefaultDatasetIds);
       setLocalScanChatEnabled(nextLocalScanChatEnabled);
-      persistLocalScanChatEnabled(nextLocalScanChatEnabled);
+      if (localDatasetIds.length > 0 && nextLocalScanChatEnabled) {
+        syncDefaultDatasetState(localDatasetIds, true);
+      }
       setSources(nextSources);
+      setSourceListPage(nextPage);
+      setSourceListPageSize(nextPageSize);
+      setSourceListTotal(Number(sourcesResponse.data.total || 0));
 
       if (showSuccessMessage) {
         message.success(t("admin.dataSourceListRefreshed"));
@@ -925,7 +1695,9 @@ export default function DataSourceManagement() {
         console.error("Failed to refresh local sources", error);
       }
     } finally {
-      setScanLoading(false);
+      if (sourceListRequestSeqRef.current === requestSeq) {
+        setScanLoading(false);
+      }
     }
   };
 
@@ -934,6 +1706,34 @@ export default function DataSourceManagement() {
       setKnowledgeBaseNames(await listKnowledgeBaseNames());
     } catch (error) {
       console.error("Failed to refresh knowledge base names", error);
+    }
+  };
+
+  const refreshFeishuAuthAccounts = async () => {
+    try {
+      const response =
+        await createCloudOauthApiClient().listConnectionsApiAuthserviceV1CloudConnectionsGet({
+          provider: "feishu",
+          status: null,
+        });
+      const cachedAccounts = loadFeishuAuthAccounts();
+      const nextAccounts = getCloudConnectionItems(response.data).map((item) =>
+        mapCloudConnectionToFeishuAccount(item, cachedAccounts),
+      );
+      feishuAuthAccountsLoadedRef.current = true;
+      setFeishuAuthAccounts(nextAccounts);
+      persistFeishuAuthAccounts(nextAccounts);
+      const connectedAccount = nextAccounts.find(
+        (account) =>
+          account.status === "connected" && Boolean(account.connection?.connectionId),
+      );
+      if (connectedAccount?.connection) {
+        setOauthConnection(connectedAccount.connection);
+        setOauthState("connected");
+        setConnectionVerified(true);
+      }
+    } catch (error) {
+      console.error("Failed to refresh Feishu auth accounts", error);
     }
   };
 
@@ -1075,6 +1875,10 @@ export default function DataSourceManagement() {
     const draft = consumeFeishuDataSourceWizardDraft();
     if (draft) {
       const normalizedWizardStep = Math.min(Math.max(draft.wizardStep, 0), 1);
+      if (draft.activeView) {
+        setActiveView(draft.activeView);
+      }
+      setAuthSelectModalOpen(Boolean(draft.authSelectModalOpen));
       setWizardMode(draft.wizardMode);
       setWizardOpen(draft.wizardOpen);
       setWizardStep(normalizedWizardStep);
@@ -1134,7 +1938,46 @@ export default function DataSourceManagement() {
   useEffect(() => {
     void refreshSources(false);
     void refreshKnowledgeBaseNames();
+    void refreshFeishuAuthAccounts();
   }, []);
+
+  useEffect(() => {
+    if (activeView !== "connectors" || feishuAuthAccountsLoadedRef.current) {
+      return;
+    }
+    void refreshFeishuAuthAccounts();
+  }, [activeView]);
+
+  useEffect(() => {
+    if (!assetSearchInitializedRef.current) {
+      assetSearchInitializedRef.current = true;
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void refreshSources(false, {
+        page: 1,
+        pageSize: sourceListPageSize,
+        keyword: assetSearchValue,
+      });
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [assetSearchValue]);
+
+  useEffect(
+    () => () => {
+      if (localPathSearchTimerRef.current) {
+        clearTimeout(localPathSearchTimerRef.current);
+      }
+      if (feishuTargetSearchTimerRef.current) {
+        clearTimeout(feishuTargetSearchTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const getKnownKnowledgeBaseNames = () => [
     ...knowledgeBaseNames,
@@ -1156,6 +1999,23 @@ export default function DataSourceManagement() {
     setManualOauthModalOpen(false);
     setManualOauthCallbackValue("");
     setManualOauthSubmitting(false);
+    setLocalPathOptions([]);
+    setLocalPathLoading(false);
+    localPathOptionsCacheRef.current.clear();
+    localPathChildrenCacheRef.current.clear();
+    localPathActiveOptionsCacheKeyRef.current = "";
+    localPathRequestSeqRef.current += 1;
+    if (localPathSearchTimerRef.current) {
+      clearTimeout(localPathSearchTimerRef.current);
+      localPathSearchTimerRef.current = null;
+    }
+    setFeishuTargetTreeData([]);
+    setFeishuTargetLoading(false);
+    feishuTargetRequestSeqRef.current += 1;
+    if (feishuTargetSearchTimerRef.current) {
+      clearTimeout(feishuTargetSearchTimerRef.current);
+      feishuTargetSearchTimerRef.current = null;
+    }
   };
 
   const upsertFeishuAuthAccount = (
@@ -1222,8 +2082,14 @@ export default function DataSourceManagement() {
         record.scheduleLabel.match(/\d{2}:\d{2}(?::\d{2})?/)?.[0],
       ),
       conflictPolicy: record.conflictPolicy,
-      path: record.type === "local" ? record.target : undefined,
-      target: record.type === "feishu" ? record.targetRef || record.target : undefined,
+      path:
+        record.type === "local"
+          ? normalizeLocalPathRefs(record.targetRefs || record.targetRef || record.target)
+          : undefined,
+      target:
+        record.type === "feishu"
+          ? normalizeFeishuTargetRefs(record.targetRefs || record.targetRef || record.target)
+          : undefined,
       targetType: record.type === "feishu" ? record.targetType || "wiki_space" : undefined,
       bucket:
         record.type === "s3"
@@ -1249,13 +2115,20 @@ export default function DataSourceManagement() {
     setOauthState("pending");
     setOauthConnection(null);
     setValidatedAgentId(null);
+    setLocalPathOptions([]);
+    setLocalPathLoading(false);
+    localPathOptionsCacheRef.current.clear();
+    localPathChildrenCacheRef.current.clear();
+    localPathActiveOptionsCacheKeyRef.current = "";
+    setFeishuTargetTreeData([]);
+    setFeishuTargetLoading(false);
     form.setFieldsValue({
       syncMode: "scheduled",
       scheduleCycle: "daily",
       scheduleTime: DEFAULT_SCHEDULE_TIME,
       conflictPolicy: "versioned",
-      path: "",
-      target: "",
+      path: [],
+      target: type === "feishu" ? [] : "",
       targetType: type === "feishu" ? "wiki_space" : undefined,
     });
   };
@@ -1285,23 +2158,15 @@ export default function DataSourceManagement() {
         return false;
       }
 
-      let currentAgents = scanAgents;
-      if (currentAgents.length === 0) {
-        const agentsResponse = await listScanAgents(createScanApiClient());
-        currentAgents = agentsResponse.data.items || [];
-        setScanAgents(currentAgents);
-      }
-
-      const selectedAgent = pickScanAgent(currentAgents, validatedAgentId || undefined);
-      if (!selectedAgent?.agent_id || !selectedAgent.tenant_id) {
-        message.error("未发现可用扫描 Agent，请先启动并注册扫描 Agent。");
-        return false;
-      }
+      const selectedAgent = pickScanAgent(scanAgents, validatedAgentId || undefined) || {
+        agent_id: validatedAgentId || "",
+        tenant_id: getScanTenantId(),
+      };
 
       setOauthState("waiting");
-      setValidatedAgentId(selectedAgent.agent_id);
+      setValidatedAgentId(selectedAgent.agent_id || null);
       const authorizeUrl = await requestFeishuDataSourceAuthorizeUrl({
-        tenantId: selectedAgent.tenant_id,
+        tenantId: selectedAgent.tenant_id || getScanTenantId(),
         appId: activeSetup.appId,
         appSecret: activeSetup.appSecret,
         scopes: FEISHU_DEFAULT_SCOPES,
@@ -1314,7 +2179,7 @@ export default function DataSourceManagement() {
         wizardMode: options?.draftWizardMode ?? wizardMode,
         selectedType: options?.draftSelectedType ?? selectedType,
         editingId: options?.draftEditingId ?? editingId,
-        validatedAgentId: selectedAgent.agent_id,
+        validatedAgentId: selectedAgent.agent_id || null,
         oauthState: "waiting",
         connectionVerified: previousVerified,
         oauthConnection: previousConnection,
@@ -1415,8 +2280,8 @@ export default function DataSourceManagement() {
           scheduleCycle: "daily",
           scheduleTime: DEFAULT_SCHEDULE_TIME,
           conflictPolicy: "versioned",
-          path: "",
-          target: "",
+          path: [],
+          target: [],
           targetType: "wiki_space",
         };
 
@@ -1483,6 +2348,8 @@ export default function DataSourceManagement() {
     resetWizard();
     setWizardMode("create");
     setEditingId(null);
+    setCreateProviderModalOpen(false);
+    setAuthSelectModalOpen(false);
     applySourceType(type);
     setWizardStep(1);
     setWizardOpen(true);
@@ -1535,20 +2402,22 @@ export default function DataSourceManagement() {
     navigate("/data-sources/providers/feishu");
   };
 
-  const handleAuthorizeFeishu = () => {
-    if (!isFeishuSetupReady || !feishuAppSetup) {
-      openFeishuSetupModal("create");
-      return;
-    }
-
-    void startFeishuOAuth({
-      setup: feishuAppSetup,
-      draftSelectedType: "feishu",
-      draftWizardStep: 1,
-      previousState: oauthState,
-      previousVerified: connectionVerified,
-      previousConnection: oauthConnection,
+  const handleOpenFeishuGuideFromAuthSelect = () => {
+    saveFeishuDataSourceWizardDraft({
+      activeView,
+      authSelectModalOpen: true,
+      wizardOpen: false,
+      wizardStep,
+      wizardMode,
+      selectedType,
+      editingId,
+      validatedAgentId,
+      oauthState,
+      connectionVerified,
+      oauthConnection,
+      formValues: form.getFieldsValue(true),
     });
+    navigate("/data-sources/docs/feishu-setup?from=create-source");
   };
 
   const handleTestConnection = async () => {
@@ -1561,18 +2430,11 @@ export default function DataSourceManagement() {
     try {
       await form.validateFields(["path"]);
       const { path = "" } = form.getFieldsValue(["path"]);
-      const normalizedPath = `${path}`.trim();
+      const normalizedPaths = normalizeLocalPathRefs(path);
 
-      if (!normalizedPath) {
+      if (normalizedPaths.length === 0) {
         message.warning(t("admin.dataSourceAccessPathRequired"));
         return;
-      }
-
-      let currentAgents = scanAgents;
-      if (currentAgents.length === 0) {
-        const agentsResponse = await listScanAgents(createScanApiClient());
-        currentAgents = agentsResponse.data.items || [];
-        setScanAgents(currentAgents);
       }
 
       const preferredAgentId =
@@ -1580,33 +2442,35 @@ export default function DataSourceManagement() {
         (editingId
           ? sources.find((item) => item.id === editingId)?.agentId
           : undefined);
-      const selectedAgent = pickScanAgent(currentAgents, preferredAgentId);
-      if (!selectedAgent?.agent_id) {
-        message.error("未发现可用扫描 Agent，请先启动并注册扫描 Agent。");
-        return;
-      }
-
-      const validateResponse = await createScanApiClient().apiScanAgentsFsValidatePost({
-        agentPathRequest: {
-          agent_id: selectedAgent.agent_id,
-          path: normalizedPath,
-        },
+      const selectedAgent = pickScanAgent(scanAgents, preferredAgentId);
+      const validateResponses = await Promise.all(
+        normalizedPaths.map((normalizedPath) =>
+          createScanV2ApiClient().validateBindingTarget({
+            validateBindingTargetRequest: {
+              connector_type: "local_fs",
+              target_type: "local_path",
+              target_ref: normalizedPath,
+              agent_id: selectedAgent?.agent_id || preferredAgentId || undefined,
+            },
+          }),
+        ),
+      );
+      const passed = validateResponses.every((response) => {
+        const validation = response.data;
+        return (
+          Boolean(validation.target_ref) &&
+          Boolean(validation.target_fingerprint || validation.root_object_key)
+        );
       });
-      const validation = validateResponse.data;
-      const passed =
-        Boolean(validation.allowed) &&
-        Boolean(validation.exists) &&
-        Boolean(validation.readable) &&
-        Boolean(validation.is_dir);
 
       setConnectionVerified(passed);
       if (passed) {
-        setValidatedAgentId(selectedAgent.agent_id);
+        setValidatedAgentId(selectedAgent?.agent_id || preferredAgentId || null);
         message.success(t("admin.dataSourceConnectionTestSuccess"));
         return;
       }
 
-      message.error(validation.reason || "路径校验未通过，请检查目录是否存在且具备只读权限。");
+      message.error("路径校验未通过，请检查目录是否存在且具备只读权限。");
     } catch (error) {
       setConnectionVerified(false);
       message.error(
@@ -1672,7 +2536,9 @@ export default function DataSourceManagement() {
           target: record.target,
           rootPath: record.rootPath,
           targetRef: record.targetRef,
+          targetRefs: record.targetRefs,
           targetType: record.targetType,
+          targetTypes: record.targetTypes,
           sourceType: record.type,
           documentCount: record.documentCount,
           status: record.status,
@@ -1685,7 +2551,40 @@ export default function DataSourceManagement() {
           scanManaged: record.scanManaged,
           tenantId: record.tenantId,
           agentId: record.agentId,
+          bindingId: record.bindingId,
+          bindingIds: record.bindingIds,
+          bindingTreeKey: record.bindingTreeKey,
+          bindingTreeKeys: record.bindingTreeKeys,
+          configVersion: record.configVersion,
         },
+      },
+    });
+  };
+
+  const handleDeleteSource = (record: DataSourceItem) => {
+    Modal.confirm({
+      title: t("admin.dataSourceDeleteTitle"),
+      content: t("admin.dataSourceDeleteContent", { name: record.name }),
+      okText: t("common.delete"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      icon: <WarningFilled />,
+      onOk: async () => {
+        try {
+          await createScanV2ApiClient().deleteSource({ sourceId: record.id });
+          message.success(t("admin.dataSourceDeleteSuccess"));
+          const nextPage =
+            sources.length <= 1 && sourceListPage > 1
+              ? sourceListPage - 1
+              : sourceListPage;
+          await refreshSources(false, { page: nextPage });
+        } catch (error) {
+          message.error(
+            getLocalizedErrorMessage(error, t("admin.dataSourceDeleteFailed")) ||
+              t("admin.dataSourceDeleteFailed"),
+          );
+          throw error;
+        }
       },
     });
   };
@@ -1776,10 +2675,9 @@ export default function DataSourceManagement() {
   };
 
   const handleSaveLocalSource = async (values: SourceFormValues) => {
-    const rootPath = `${values.path || ""}`.trim();
+    const rootPaths = normalizeLocalPathRefs(values.path);
     const sourceName = `${values.knowledgeBase || getSourceTypeTitle("local", t)}`.trim();
     const isScheduled = (values.syncMode || "scheduled") === "scheduled";
-    const reconcileSeconds = getReconcileSeconds(values.scheduleCycle);
     const reconcileSchedule = isScheduled
       ? buildReconcileSchedule(values.scheduleCycle, values.scheduleTime)
       : "manual";
@@ -1789,108 +2687,58 @@ export default function DataSourceManagement() {
         : undefined;
     let datasetIdForLocalSource = currentLocalSource?.datasetId || "";
 
-    if (!rootPath) {
+    if (rootPaths.length === 0) {
       message.warning(t("admin.dataSourceAccessPathRequired"));
       return;
     }
 
-    const client = createScanApiClient();
-    let currentAgents = scanAgents;
-    if (currentAgents.length === 0) {
-      const agentsResponse = await listScanAgents(client);
-      currentAgents = agentsResponse.data.items || [];
-      setScanAgents(currentAgents);
-    }
-
+    const client = createScanV2ApiClient();
     const selectedAgent = pickScanAgent(
-      currentAgents,
+      scanAgents,
       validatedAgentId || currentLocalSource?.agentId,
     );
-    if (!selectedAgent) {
-      message.error("未发现可用扫描 Agent，请先启动并注册扫描 Agent。");
-      return;
-    }
+    const buildBindingRequest = (targetRef: string) => ({
+      connector_type: "local_fs",
+      target_type: "local_path",
+      target_ref: targetRef,
+      sync_mode: isScheduled ? "scheduled" : "manual",
+      schedule_expr: isScheduled ? reconcileSchedule : undefined,
+      schedule_tz: "Asia/Shanghai",
+      agent_id: selectedAgent?.agent_id || validatedAgentId || currentLocalSource?.agentId,
+      provider_options: {},
+    });
 
     try {
       if (currentLocalSource?.scanManaged) {
-        await client.apiScanSourcesIdPut({
-          id: currentLocalSource.id,
+        await client.updateSource({
+          sourceId: currentLocalSource.id,
           updateSourceRequest: {
             name: sourceName,
-            root_path: rootPath,
-            reconcile_seconds: reconcileSeconds,
-            reconcile_schedule: reconcileSchedule,
-            idle_window_seconds: 300,
+            config_version: currentLocalSource.configVersion || 0,
+            bindings: rootPaths.map((pathValue, index) => ({
+              ...buildBindingRequest(pathValue),
+              binding_id:
+                currentLocalSource.bindingIds?.[index] ||
+                (index === 0 ? currentLocalSource.bindingId : undefined),
+            })) as any,
+            source_options: {
+              source_type: "local",
+            },
           },
         });
-
-        if (isScheduled) {
-          await client.apiScanSourcesIdWatchEnablePost({
-            id: currentLocalSource.id,
-            enableWatchRequest: {
-              reconcile_seconds: reconcileSeconds,
-              reconcile_schedule: reconcileSchedule,
-            },
-          });
-        } else {
-          await client.apiScanSourcesIdWatchDisablePost({
-            id: currentLocalSource.id,
-          });
-        }
       } else {
-        const algosResponse = await createCoreApiClient().apiCoreDatasetAlgosGet();
-        const algos = algosResponse.data.algos || [];
-        const selectedAlgo = algos[0];
-        if (!selectedAlgo?.algo_id) {
-          message.error("未获取到可用知识库算法，请先检查 Core 服务算法配置。");
-          return;
-        }
-
-        const kbResponse = await client.apiScanKnowledgeBasesPost({
-          createKnowledgeBaseRequest: {
-            name: sourceName,
-            algo: {
-              algo_id: selectedAlgo.algo_id,
-              display_name: selectedAlgo.display_name,
-              description: selectedAlgo.description,
-            },
-          },
-        });
-        datasetIdForLocalSource = kbResponse.data.dataset_id;
-
-        const createSourceResponse = await client.apiScanSourcesPost({
+        const createSourceResponse = await client.createSource({
           createSourceRequest: {
-            tenant_id: selectedAgent.tenant_id,
-            agent_id: selectedAgent.agent_id,
-            dataset_id: kbResponse.data.dataset_id,
+            request_id: createScanRequestId("local-source"),
             name: sourceName,
-            root_path: rootPath,
-            watch_enabled: isScheduled,
-            reconcile_seconds: reconcileSeconds,
-            reconcile_schedule: reconcileSchedule,
-            idle_window_seconds: 300,
+            bindings: rootPaths.map((pathValue) => buildBindingRequest(pathValue)) as any,
+            source_options: {
+              source_type: "local",
+              dataset_id: datasetIdForLocalSource,
+            },
           },
         });
-
-        const createdSourceId = createSourceResponse.data.id;
-        if (!createdSourceId) {
-          message.error("数据源创建成功但未返回 source id，无法配置监听状态。");
-          return;
-        }
-
-        if (isScheduled) {
-          await client.apiScanSourcesIdWatchEnablePost({
-            id: createdSourceId,
-            enableWatchRequest: {
-              reconcile_seconds: reconcileSeconds,
-              reconcile_schedule: reconcileSchedule,
-            },
-          });
-        } else {
-          await client.apiScanSourcesIdWatchDisablePost({
-            id: createdSourceId,
-          });
-        }
+        datasetIdForLocalSource = createSourceResponse.data.source.dataset_id || "";
       }
 
       if (localScanChatEnabled && datasetIdForLocalSource) {
@@ -1898,7 +2746,7 @@ export default function DataSourceManagement() {
         syncDefaultDatasetState([datasetIdForLocalSource], true);
       }
 
-      setValidatedAgentId(selectedAgent.agent_id);
+      setValidatedAgentId(selectedAgent?.agent_id || validatedAgentId);
       await refreshSources(false);
       message.success(
         editingId ? t("admin.dataSourceConfigUpdated") : t("admin.dataSourceCreated"),
@@ -1912,53 +2760,12 @@ export default function DataSourceManagement() {
     }
   };
 
-  const validateFeishuTargetBeforeSave = async (
-    client: ScanDefaultApi,
-    authConnectionId: string,
-    targetType: FeishuTargetType,
-    targetRef: string,
+  const handleSaveFeishuSource = async (
+    values: SourceFormValues,
+    saveMode: DataSourceSaveMode,
   ) => {
-    try {
-      const response = await client.apiScanCloudTargetValidatePost({
-        validateCloudTargetRequest: {
-          provider: "feishu",
-          auth_connection_id: authConnectionId,
-          target_type: targetType,
-          target_ref: targetRef,
-        },
-      });
-
-      if (response.data.valid) {
-        return true;
-      }
-
-      const validation = response.data as typeof response.data & {
-        reason?: string;
-        message?: string;
-        detail?: string;
-      };
-      const errorMessage =
-        validation.reason ||
-        validation.message ||
-        validation.detail ||
-        t("admin.dataSourceFeishuTargetValidateFailed");
-      form.setFields([{ name: "target", errors: [errorMessage] }]);
-      message.error(errorMessage);
-      return false;
-    } catch (error) {
-      const errorMessage =
-        getLocalizedErrorMessage(error, t("admin.dataSourceFeishuTargetValidateFailed")) ||
-        t("admin.dataSourceFeishuTargetValidateFailed");
-      form.setFields([{ name: "target", errors: [errorMessage] }]);
-      message.error(errorMessage);
-      return false;
-    }
-  };
-
-  const handleSaveFeishuSource = async (values: SourceFormValues) => {
     const sourceName = `${values.knowledgeBase || getSourceTypeTitle("feishu", t)}`.trim();
-    const targetRef = `${values.target || ""}`.trim();
-    const targetType = (values.targetType || "wiki_space") as FeishuTargetType;
+    const targetRefs = normalizeFeishuTargetRefs(values.target);
     const currentFeishuSource =
       editingId && selectedType === "feishu"
         ? sources.find((item) => item.id === editingId && item.type === "feishu")
@@ -1972,86 +2779,90 @@ export default function DataSourceManagement() {
       return;
     }
 
-    if (!targetRef) {
+    if (targetRefs.length === 0) {
       message.warning(t("admin.dataSourceFeishuSpaceRequired"));
       return;
     }
 
-    const client = createScanApiClient();
-    let currentAgents = scanAgents;
-    if (currentAgents.length === 0) {
-      const agentsResponse = await listScanAgents(client);
-      currentAgents = agentsResponse.data.items || [];
-      setScanAgents(currentAgents);
-    }
-
+    const client = createScanV2ApiClient();
     const selectedAgent = pickScanAgent(
-      currentAgents,
+      scanAgents,
       validatedAgentId || currentFeishuSource?.agentId,
     );
-    if (!selectedAgent?.agent_id || !selectedAgent.tenant_id) {
-      message.error("未发现可用扫描 Agent，请先启动并注册扫描 Agent。");
-      return;
-    }
+    const treeTargetTypeMap = collectFeishuTargetTypes(feishuTargetTreeData);
+    const fallbackTargetTypes = normalizeFeishuTargetTypeRecord(currentFeishuSource?.targetTypes);
+    const defaultTargetType =
+      normalizeFeishuTargetType(currentFeishuSource?.targetType) ||
+      normalizeFeishuTargetType(values.targetType) ||
+      "wiki_space";
+    const targets = targetRefs.map((targetRef) => ({
+      targetRef,
+      targetType:
+        treeTargetTypeMap.get(targetRef) ||
+        fallbackTargetTypes?.[targetRef] ||
+        normalizeFeishuTargetType(undefined, targetRef) ||
+        defaultTargetType,
+    }));
 
     try {
-      const targetValid = await validateFeishuTargetBeforeSave(
-        client,
-        authConnectionId,
-        targetType,
-        targetRef,
-      );
-      if (!targetValid) {
-        return;
-      }
-
       let sourceId = currentFeishuSource?.id || "";
+      const scheduleExpr =
+        values.syncMode === "scheduled"
+          ? buildFeishuScheduleExpr(values.scheduleCycle, values.scheduleTime)
+          : buildFeishuManualScheduleExpr();
+      const bindingRequest = {
+        connector_type: "feishu",
+        sync_mode: values.syncMode === "scheduled" ? "scheduled" : "manual",
+        schedule_expr: scheduleExpr,
+        schedule_tz: "Asia/Shanghai",
+        auth_connection_id: authConnectionId,
+        provider_options: {
+          include_patterns: FEISHU_INCLUDE_PATTERNS,
+          exclude_patterns: FEISHU_EXCLUDE_PATTERNS,
+          max_object_size_bytes: FEISHU_MAX_OBJECT_SIZE_BYTES,
+          reconcile_after_sync: true,
+          reconcile_delay_minutes: 10,
+        },
+      };
+
       if (currentFeishuSource?.scanManaged) {
-        await client.apiScanSourcesIdPut({
-          id: currentFeishuSource.id,
+        await client.updateSource({
+          sourceId: currentFeishuSource.id,
           updateSourceRequest: {
             name: sourceName,
-            idle_window_seconds: 600,
-            default_origin_platform: "FEISHU",
-            default_origin_type: "CLOUD_SYNC",
-            default_trigger_policy: "IMMEDIATE",
+            config_version: currentFeishuSource.configVersion || 0,
+            bindings: targets.map(({ targetRef, targetType }, index) => ({
+              ...bindingRequest,
+              target_type: toScanFeishuTargetType(targetType),
+              target_ref: targetRef,
+              binding_id:
+                currentFeishuSource.bindingIds?.[index] ||
+                (index === 0 ? currentFeishuSource.bindingId : undefined),
+            })) as any,
+            source_options: {
+              source_type: "feishu",
+              auth_connection_id: authConnectionId,
+            },
           },
         });
       } else {
-        const algosResponse = await createCoreApiClient().apiCoreDatasetAlgosGet();
-        const algos = algosResponse.data.algos || [];
-        const selectedAlgo = algos[0];
-        if (!selectedAlgo?.algo_id) {
-          message.error("未获取到可用知识库算法，请先检查 Core 服务算法配置。");
-          return;
-        }
-
-        const kbResponse = await client.apiScanKnowledgeBasesPost({
-          createKnowledgeBaseRequest: {
+        const createSourceResponse = await client.createSource({
+          createSourceRequest: {
+            request_id: createScanRequestId("feishu-source"),
             name: sourceName,
-            algo: {
-              algo_id: selectedAlgo.algo_id,
-              display_name: selectedAlgo.display_name,
-              description: selectedAlgo.description,
+            bindings: targets.map(({ targetRef, targetType }) => ({
+              ...bindingRequest,
+              target_type: toScanFeishuTargetType(targetType),
+              target_ref: targetRef,
+            })) as any,
+            source_options: {
+              source_type: "feishu",
+              auth_connection_id: authConnectionId,
             },
           },
         });
 
-        const createSourceResponse = await client.apiScanSourcesPost({
-          createSourceRequest: {
-            tenant_id: selectedAgent.tenant_id,
-            agent_id: selectedAgent.agent_id,
-            dataset_id: kbResponse.data.dataset_id,
-            name: sourceName,
-            watch_enabled: false,
-            idle_window_seconds: 600,
-            default_origin_type: "CLOUD_SYNC",
-            default_origin_platform: "FEISHU",
-            default_trigger_policy: "IMMEDIATE",
-          },
-        });
-
-        sourceId = createSourceResponse.data.id || "";
+        sourceId = createSourceResponse.data.source.source_id || "";
       }
 
       if (!sourceId) {
@@ -2059,44 +2870,25 @@ export default function DataSourceManagement() {
         return;
       }
 
-      await client.apiScanSourcesIdCloudBindingPost({
-        id: sourceId,
-        upsertCloudSourceBindingRequest: {
-          provider: "feishu",
-          enabled: true,
-          auth_connection_id: authConnectionId,
-          target_type: targetType,
-          target_ref: targetRef,
-          reconcile_after_sync: true,
-          reconcile_delay_minutes: 10,
-          include_patterns: FEISHU_INCLUDE_PATTERNS,
-          exclude_patterns: FEISHU_EXCLUDE_PATTERNS,
-          max_object_size_bytes: FEISHU_MAX_OBJECT_SIZE_BYTES,
-          ...(values.syncMode === "scheduled"
-            ? {
-                schedule_expr: buildFeishuScheduleExpr(
-                  values.scheduleCycle,
-                  values.scheduleTime,
-                ),
-                schedule_tz: "Asia/Shanghai",
-              }
-            : {
-                schedule_expr: buildFeishuManualScheduleExpr(),
-                schedule_tz: "Asia/Shanghai",
-              }),
-        },
-      });
+      if (saveMode === "createAndSync") {
+        message.info(t("admin.dataSourceDetailCloudSyncPreparing"));
+        const latestSource = await client.getSource({ sourceId }).catch(() => null);
+        const latestBinding = getFirstScanBinding(
+          latestSource?.data.bindings as ScanV2Binding[] | undefined,
+        );
+        const triggerResponse = await client.triggerSourceSync({
+          sourceId,
+          triggerSourceSyncRequest: {
+            request_id: createScanRequestId("feishu-sync"),
+            binding_id: getScanBindingId(latestBinding) || currentFeishuSource?.bindingId,
+            scope_type: "full",
+            scope_ref: {},
+          },
+        });
+        await waitForCloudSyncRun(client, sourceId, triggerResponse.data.run_ids?.[0]);
+      }
 
-      message.info("正在从飞书拉取最新目录，请稍候。");
-      const triggerResponse = await client.apiScanSourcesIdCloudSyncTriggerPost({
-        id: sourceId,
-        triggerCloudSyncRequest: {
-          trigger_type: "manual",
-        },
-      });
-      await waitForCloudSyncRun(client, sourceId, triggerResponse.data.run_id);
-
-      setValidatedAgentId(selectedAgent.agent_id);
+      setValidatedAgentId(selectedAgent?.agent_id || validatedAgentId);
       await refreshSources(false);
       message.success(
         editingId ? t("admin.dataSourceConfigUpdated") : t("admin.dataSourceCreated"),
@@ -2110,7 +2902,7 @@ export default function DataSourceManagement() {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (saveMode: DataSourceSaveMode = "createAndSync") => {
     if (!selectedType || wizardSaving) {
       return;
     }
@@ -2145,7 +2937,7 @@ export default function DataSourceManagement() {
         await handleSaveLocalSource(values);
         return;
       }
-      await handleSaveFeishuSource(values);
+      await handleSaveFeishuSource(values, saveMode);
     } finally {
       setWizardSaving(false);
     }
@@ -2260,16 +3052,24 @@ export default function DataSourceManagement() {
     {
       title: t("admin.dataSourceTableActions"),
       key: "actions",
-      width: 150,
+      width: 220,
       fixed: "right",
       className: "data-source-action-column",
       render: (_value, record) => (
-        <Space size={18} className="data-source-table-actions">
+        <Space size={12} className="data-source-table-actions">
           <Button type="link" icon={<EyeOutlined />} onClick={() => openDetailPage(record)}>
             {t("admin.dataSourceActionDetail")}
           </Button>
           <Button type="link" icon={<EditOutlined />} onClick={() => openEditWizard(record)}>
             {t("admin.dataSourceActionConfig")}
+          </Button>
+          <Button
+            type="link"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => handleDeleteSource(record)}
+          >
+            {t("common.delete")}
           </Button>
         </Space>
       ),
@@ -2331,9 +3131,22 @@ export default function DataSourceManagement() {
                 className="admin-page-table data-source-asset-table"
                 rowKey="id"
                 columns={assetColumns}
-                dataSource={filteredSources}
+                dataSource={sources}
                 loading={scanLoading}
-                pagination={false}
+                pagination={{
+                  current: sourceListPage,
+                  pageSize: sourceListPageSize,
+                  total: sourceListTotal,
+                  showSizeChanger: true,
+                  showTotal: (total) => t("common.totalItems", { total }),
+                  onChange: (page, pageSize) => {
+                    void refreshSources(false, {
+                      page,
+                      pageSize,
+                      keyword: assetSearchValue,
+                    });
+                  },
+                }}
                 tableLayout="fixed"
                 scroll={{ x: 1280, y: "calc(100vh - 300px)" }}
                 locale={{
@@ -2370,11 +3183,6 @@ export default function DataSourceManagement() {
                     <span className="data-source-provider-name">
                       {t("admin.dataSourceLocalScanChatTitle")}
                     </span>
-                    <Tag color={localScanChatEnabled ? "success" : "default"}>
-                      {localScanChatEnabled
-                        ? t("admin.dataSourceFeishuAccountChatOn")
-                        : t("admin.dataSourceFeishuAccountChatOff")}
-                    </Tag>
                   </span>
                   <span className="data-source-provider-desc">
                     {t("admin.dataSourceLocalScanChatDesc", {
@@ -2384,9 +3192,7 @@ export default function DataSourceManagement() {
                 </span>
                 <Tooltip
                   title={
-                    localSourceCount > 0
-                      ? t("admin.dataSourceLocalScanChatSwitchHint")
-                      : t("admin.dataSourceLocalScanChatNoSourceHint")
+                    t("admin.dataSourceLocalScanChatSwitchHint")
                   }
                 >
                   <button
@@ -2394,9 +3200,9 @@ export default function DataSourceManagement() {
                     role="switch"
                     aria-checked={localScanChatEnabled}
                     aria-label={t("admin.dataSourceLocalScanChatSwitchAria")}
-                    disabled={localScanChatSaving || localSourceCount === 0}
+                    disabled={localScanChatSaving}
                     className={`data-source-chat-switch${localScanChatEnabled ? " is-on" : ""}${
-                      localScanChatSaving || localSourceCount === 0 ? " is-disabled" : ""
+                      localScanChatSaving ? " is-disabled" : ""
                     }`}
                     onClick={() => {
                       void handleToggleLocalScanChat(!localScanChatEnabled);
@@ -2405,14 +3211,14 @@ export default function DataSourceManagement() {
                     <span className="data-source-chat-switch-thumb" aria-hidden="true" />
                     <span className="data-source-chat-switch-label">
                       {localScanChatEnabled
-                        ? t("admin.dataSourceFeishuAccountChatOn")
-                        : t("admin.dataSourceFeishuAccountChatOff")}
+                        ? t("admin.dataSourceLocalScanChatSwitchEnabledStatus")
+                        : t("admin.dataSourceLocalScanChatSwitchDisabledStatus")}
                     </span>
                   </button>
                 </Tooltip>
               </div>
               {providerAuthOptions.map((item) => {
-                const isFeishuLocked = !isFeishuSetupReady;
+                const isFeishuLocked = !isFeishuAuthValid && !isFeishuSetupReady;
                 const authStatusText = isFeishuAuthValid
                   ? t("admin.dataSourceProviderAuthValid")
                   : isFeishuLocked
@@ -2557,7 +3363,20 @@ export default function DataSourceManagement() {
       </Modal>
 
       <Modal
-        title={t("admin.dataSourceSelectFeishuAuthTitle")}
+        title={
+          <div className="data-source-auth-select-title">
+            <span>{t("admin.dataSourceSelectFeishuAuthTitle")}</span>
+            <Button
+              type="link"
+              size="small"
+              className="data-source-auth-select-guide"
+              icon={<FileTextOutlined />}
+              onClick={handleOpenFeishuGuideFromAuthSelect}
+            >
+              {t("admin.dataSourceFeishuSetupGuideAction")}
+            </Button>
+          </div>
+        }
         open={authSelectModalOpen}
         footer={null}
         width={640}
@@ -2697,22 +3516,22 @@ export default function DataSourceManagement() {
         existingKnowledgeBaseNames={getKnownKnowledgeBaseNames()}
         selectedType={selectedType}
         isFeishuSetupReady={isFeishuSetupReady}
-        oauthState={oauthState}
-        oauthConnection={oauthConnection}
         connectionVerified={connectionVerified}
         syncMode={syncMode}
-        feishuTargetType={feishuTargetType}
         saving={wizardSaving}
+        localPathOptions={localPathOptions}
+        localPathLoading={localPathLoading}
+        feishuTargetLoading={feishuTargetLoading}
+        feishuTargetTreeData={feishuTargetTreeData}
         allowTypeSelection={false}
         onClose={handleCloseWizard}
         onPrev={() => setWizardStep((step) => step - 1)}
         onNext={handleNextStep}
-        onSave={() => {
-          void handleSave();
+        onSave={(mode) => {
+          void handleSave(mode);
         }}
         onSelectType={handleSelectType}
         onResetFeishuSetup={handleResetFeishuSetup}
-        onAuthorizeFeishu={handleAuthorizeFeishu}
         onTestConnection={() => {
           void handleTestConnection();
         }}
@@ -2720,6 +3539,16 @@ export default function DataSourceManagement() {
           setConnectionVerified(false);
           setValidatedAgentId(null);
         }}
+        onLoadLocalPathOptions={(path) => {
+          void loadLocalPathOptions(path);
+        }}
+        onSearchLocalPathOptions={handleSearchLocalPathOptions}
+        onLoadLocalPathChildren={handleLoadLocalPathChildren}
+        onLoadFeishuTargetOptions={() => {
+          void loadFeishuTargetOptions();
+        }}
+        onSearchFeishuTargetOptions={handleSearchFeishuTargetOptions}
+        onLoadFeishuTargetChildren={handleLoadFeishuTargetChildren}
       />
     </div>
   );

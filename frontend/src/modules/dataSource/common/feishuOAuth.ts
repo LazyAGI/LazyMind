@@ -35,6 +35,8 @@ export interface FeishuDataSourceConnection {
 }
 
 export interface FeishuDataSourceWizardDraft {
+  activeView?: "assets" | "connectors";
+  authSelectModalOpen?: boolean;
   wizardOpen: boolean;
   wizardStep: number;
   wizardMode: "create" | "edit";

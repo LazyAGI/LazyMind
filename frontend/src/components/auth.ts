@@ -55,6 +55,10 @@ export interface UserInfo {
   displayName?: string;
   phone?: string;
   clientId?: string;
+  tenantId?: string;
+  tenant_id?: string;
+  tenantKey?: string;
+  tenant_key?: string;
   loginType?: string;
   idToken?: string;
   refreshToken?: string;
@@ -118,6 +122,15 @@ export const AgentAppsAuth = {
 
     if (userInfo?.userId) {
       headers["X-User-Id"] = userInfo.userId;
+    }
+
+    const tenantId =
+      userInfo?.tenantId ||
+      userInfo?.tenant_id ||
+      userInfo?.tenantKey ||
+      userInfo?.tenant_key;
+    if (tenantId) {
+      headers["X-Tenant-ID"] = tenantId;
     }
 
     return headers;

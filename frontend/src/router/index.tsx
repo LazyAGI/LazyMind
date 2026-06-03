@@ -21,6 +21,7 @@ import DataSourceManagement from "@/modules/dataSource";
 import DataSourceDetail from "@/modules/dataSource/detail";
 import DataSourceFeishuCallback from "@/modules/dataSource/common/feishuCallback";
 import FeishuAccountPage from "@/modules/dataSource/feishuAccounts";
+import FeishuSetupGuide from "@/modules/dataSource/FeishuSetupGuide";
 import DatasetListPage from "@/modules/datasetManagement/pages/list";
 import DatasetDetailPage from "@/modules/datasetManagement/pages/detail";
 import MemoryManagement from "@/modules/memory";
@@ -70,6 +71,7 @@ export default function AppRouter() {
             />
           </Route>
           <Route path="data-sources" element={<DataSourceManagement />} />
+          <Route path="data-sources/docs/feishu-setup" element={<FeishuSetupGuide />} />
           <Route path="data-sources/providers/feishu" element={<FeishuAccountPage />} />
           <Route path="data-sources/:id" element={<DataSourceDetail />} />
           <Route path="dataset-management" element={<DatasetListPage />} />

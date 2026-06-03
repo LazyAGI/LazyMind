@@ -1,6 +1,12 @@
+import { useEffect, useMemo, useState, type Key } from "react";
 import { Alert, Button, Empty, Input, Modal, Space, Tree } from "antd";
 import type { DataNode } from "antd/es/tree";
+import type { TreeProps } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
+
+type LazySyncDataNode = DataNode & {
+  childrenLoaded?: boolean;
+};
 
 export interface DataSourceSyncPickerModalProps {
   t: any;
@@ -16,6 +22,7 @@ export interface DataSourceSyncPickerModalProps {
   syncTreeData: DataNode[];
   checkedTreeKeys: string[];
   selectableSyncFileKeys: Set<string>;
+  onLoadSyncTreeNode?: TreeProps["loadData"];
   onCancel: () => void;
   onOk: () => void;
 }
@@ -34,9 +41,66 @@ export default function DataSourceSyncPickerModal({
   syncTreeData,
   checkedTreeKeys,
   selectableSyncFileKeys,
+  onLoadSyncTreeNode,
   onCancel,
   onOk,
 }: DataSourceSyncPickerModalProps) {
+  const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
+  const treeKeySet = useMemo(() => {
+    const keys = new Set<Key>();
+    const collectKeys = (nodes: DataNode[]) => {
+      nodes.forEach((node) => {
+        keys.add(node.key);
+        if (node.children) {
+          collectKeys(node.children);
+        }
+      });
+    };
+    collectKeys(syncTreeData);
+    return keys;
+  }, [syncTreeData]);
+
+  useEffect(() => {
+    if (!open) {
+      setExpandedKeys([]);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    setExpandedKeys((current) => current.filter((key) => treeKeySet.has(key)));
+  }, [treeKeySet]);
+
+  const isTreeNodeLoaded = (node: DataNode) =>
+    Boolean((node as LazySyncDataNode).childrenLoaded);
+
+  const loadTreeNode = (node: DataNode) => {
+    if (node.isLeaf || isTreeNodeLoaded(node)) {
+      return;
+    }
+    void onLoadSyncTreeNode?.(node as Parameters<NonNullable<TreeProps["loadData"]>>[0]);
+  };
+
+  const toggleTreeNode = (node: DataNode) => {
+    if (node.isLeaf) {
+      return;
+    }
+
+    if (!expandedKeys.includes(node.key)) {
+      setExpandedKeys((current) =>
+        current.includes(node.key) ? current : [...current, node.key],
+      );
+      loadTreeNode(node);
+      return;
+    }
+
+    if (!isTreeNodeLoaded(node)) {
+      loadTreeNode(node);
+      return;
+    }
+
+    setExpandedKeys((current) => current.filter((key) => key !== node.key));
+  };
+
   return (
     <Modal
       title={t("admin.dataSourceDetailManualPullTitle")}
@@ -92,11 +156,22 @@ export default function DataSourceSyncPickerModal({
           <div className="data-source-sync-tree-loading">加载目录树中...</div>
         ) : syncTreeData.length > 0 ? (
           <Tree
+            blockNode
             checkable
-            defaultExpandAll
             checkedKeys={checkedTreeKeys}
+            expandedKeys={expandedKeys}
+            loadData={onLoadSyncTreeNode}
             treeData={syncTreeData}
             className="data-source-sync-tree"
+            onExpand={(keys, info) => {
+              setExpandedKeys(keys);
+              if (info.expanded) {
+                loadTreeNode(info.node);
+              }
+            }}
+            onSelect={(_keys, info) => {
+              toggleTreeNode(info.node);
+            }}
             onCheck={(keys) => {
               const nextKeys = Array.isArray(keys) ? keys : keys.checked;
               setSyncSelectedDocIds(

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Input } from "antd";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { ApiOutlined, AppstoreOutlined, ControlOutlined, SearchOutlined } from "@ant-design/icons";
@@ -28,7 +28,16 @@ export default function ModelProviderLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [externalServiceSearchValue, setExternalServiceSearchValue] = useState("");
+  const [debouncedExternalServiceSearchValue, setDebouncedExternalServiceSearchValue] = useState("");
   const isExternalServicesPage = location.pathname.startsWith("/model-providers/external-services");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedExternalServiceSearchValue(externalServiceSearchValue);
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [externalServiceSearchValue]);
 
   return (
     <main className="model-provider-page">
@@ -59,7 +68,7 @@ export default function ModelProviderLayout() {
             />
           ) : null}
         </nav>
-        <Outlet context={{ externalServiceSearchValue }} />
+        <Outlet context={{ externalServiceSearchValue: debouncedExternalServiceSearchValue }} />
       </div>
     </main>
   );

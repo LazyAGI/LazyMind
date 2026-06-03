@@ -10,11 +10,16 @@ import {
   Row,
   Select,
   Space,
+  Spin,
   Steps,
   Tag,
+  TreeSelect,
   Typography,
 } from "antd";
 import type { FormInstance } from "antd";
+import type { DataNode } from "antd/es/tree";
+import type { TreeSelectProps } from "antd";
+import { useState } from "react";
 import type { ReactNode } from "react";
 import {
   ApiOutlined,
@@ -23,12 +28,8 @@ import {
   FolderOpenOutlined,
   LinkOutlined,
   LockOutlined,
-  SafetyCertificateOutlined,
 } from "@ant-design/icons";
-import type { FeishuDataSourceConnection } from "@/modules/dataSource/common/feishuOAuth";
 import type {
-  FeishuTargetType,
-  OAuthState,
   SourceFormValues,
   SourceType,
   SyncMode,
@@ -39,6 +40,13 @@ import {
 } from "../shared";
 
 const { Paragraph, Text } = Typography;
+
+export type LocalPathSelectOption = DataNode & {
+  value: string;
+  nodeRef?: string;
+  targetRef?: string;
+  children?: LocalPathSelectOption[];
+};
 
 const sourceTypeOptions: Array<{
   type: SourceType;
@@ -65,22 +73,28 @@ interface DataSourceWizardModalProps {
   existingKnowledgeBaseNames: string[];
   selectedType: SourceType | null;
   isFeishuSetupReady: boolean;
-  oauthState: OAuthState;
-  oauthConnection: FeishuDataSourceConnection | null;
   connectionVerified: boolean;
   syncMode: SyncMode;
-  feishuTargetType: FeishuTargetType;
   saving: boolean;
+  localPathOptions?: LocalPathSelectOption[];
+  localPathLoading?: boolean;
+  feishuTargetLoading?: boolean;
+  feishuTargetTreeData?: DataNode[];
   allowTypeSelection?: boolean;
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
-  onSave: () => void;
+  onSave: (mode: "create" | "createAndSync") => void;
   onSelectType: (type: SourceType) => void;
   onResetFeishuSetup: () => void;
-  onAuthorizeFeishu: () => void;
   onTestConnection: () => void;
   onInvalidateConnection: () => void;
+  onLoadLocalPathOptions?: (path?: string) => void;
+  onSearchLocalPathOptions?: (keyword: string) => void;
+  onLoadLocalPathChildren?: TreeSelectProps["loadData"];
+  onLoadFeishuTargetOptions?: () => void;
+  onSearchFeishuTargetOptions?: (keyword: string) => void;
+  onLoadFeishuTargetChildren?: TreeSelectProps["loadData"];
 }
 
 export default function DataSourceWizardModal({
@@ -92,12 +106,13 @@ export default function DataSourceWizardModal({
   existingKnowledgeBaseNames,
   selectedType,
   isFeishuSetupReady,
-  oauthState,
-  oauthConnection,
   connectionVerified,
   syncMode,
-  feishuTargetType,
   saving,
+  localPathOptions = [],
+  localPathLoading = false,
+  feishuTargetLoading = false,
+  feishuTargetTreeData = [],
   allowTypeSelection = true,
   onClose,
   onPrev,
@@ -105,11 +120,18 @@ export default function DataSourceWizardModal({
   onSave,
   onSelectType,
   onResetFeishuSetup,
-  onAuthorizeFeishu,
   onTestConnection,
   onInvalidateConnection,
+  onLoadLocalPathOptions,
+  onSearchLocalPathOptions,
+  onLoadLocalPathChildren,
+  onLoadFeishuTargetOptions,
+  onSearchFeishuTargetOptions,
+  onLoadFeishuTargetChildren,
 }: DataSourceWizardModalProps) {
   const isEditMode = wizardMode === "edit";
+  const [localPathSearchValue, setLocalPathSearchValue] = useState("");
+  const [feishuTargetSearchValue, setFeishuTargetSearchValue] = useState("");
   const existingKnowledgeBaseNameSet = new Set(
     existingKnowledgeBaseNames.map((name) => name.trim().toLowerCase()).filter(Boolean),
   );
@@ -159,61 +181,6 @@ export default function DataSourceWizardModal({
     );
   };
 
-  const renderFeishuConnectionSection = () => {
-    if (selectedType !== "feishu") {
-      return null;
-    }
-
-    const isConnected = oauthState === "connected";
-
-    return (
-      <Card size="small" className="data-source-connect-card">
-        <div className="data-source-connect-header">
-          <div>
-            <Text strong>{t("admin.dataSourceFeishuAccountConnection")}</Text>
-            <Paragraph type="secondary">
-              {isConnected
-                ? t("admin.dataSourceFeishuAccountConnectedDesc", {
-                    account:
-                      oauthConnection?.accountName ||
-                      t("admin.dataSourceFeishuConnectedAccountFallback"),
-                  })
-                : t("admin.dataSourceFeishuAccountConnectionDesc")}
-            </Paragraph>
-          </div>
-          <Tag color={isConnected ? "success" : oauthState === "waiting" ? "processing" : "default"}>
-            {isConnected
-              ? t("admin.dataSourceConnectionConnected")
-              : oauthState === "waiting"
-                ? t("admin.dataSourceConnectionWaiting")
-                : t("admin.dataSourceConnectionPending")}
-          </Tag>
-        </div>
-        <Space wrap>
-          <Button
-            type="primary"
-            icon={<SafetyCertificateOutlined />}
-            disabled={isEditMode || oauthState === "waiting"}
-            onClick={onAuthorizeFeishu}
-          >
-            {isConnected
-              ? t("admin.dataSourceFeishuReconnectAction")
-              : t("admin.dataSourceFeishuAuthorizeAction")}
-          </Button>
-          {!isEditMode && isFeishuSetupReady ? (
-            <Button
-              disabled={oauthState === "waiting"}
-              icon={<DisconnectOutlined />}
-              onClick={onResetFeishuSetup}
-            >
-              {t("admin.dataSourceFeishuResetCredentialAction")}
-            </Button>
-          ) : null}
-        </Space>
-      </Card>
-    );
-  };
-
   return (
     <Modal
       title={wizardMode === "edit" ? t("admin.dataSourceEdit") : t("admin.dataSourceCreate")}
@@ -229,7 +196,7 @@ export default function DataSourceWizardModal({
       footer={
         <div className="data-source-wizard-footer">
           <Button disabled={saving} onClick={onClose}>{t("common.cancel")}</Button>
-          <Space>
+          <Space wrap>
             {allowTypeSelection && wizardStep > 0 && !isEditMode ? (
               <Button disabled={saving} onClick={onPrev}>{t("admin.dataSourceWizardPrev")}</Button>
             ) : null}
@@ -239,9 +206,22 @@ export default function DataSourceWizardModal({
               </Button>
             ) : null}
             {wizardStep === 1 ? (
-              <Button type="primary" loading={saving} onClick={onSave}>
-                {t("admin.dataSourceSaveConfig")}
-              </Button>
+              <>
+                <Button disabled={saving} onClick={() => onSave("create")}>
+                  {isEditMode
+                    ? t("admin.dataSourceSaveOnly")
+                    : t("admin.dataSourceCreateOnly")}
+                </Button>
+                <Button
+                  type="primary"
+                  loading={saving}
+                  onClick={() => onSave("createAndSync")}
+                >
+                  {isEditMode
+                    ? t("admin.dataSourceSaveAndSync")
+                    : t("admin.dataSourceCreateAndSync")}
+                </Button>
+              </>
             ) : null}
           </Space>
         </div>
@@ -356,65 +336,114 @@ export default function DataSourceWizardModal({
                         label={t("admin.dataSourceAccessPath")}
                         name="path"
                         rules={[
-                          { required: true, message: t("admin.dataSourceAccessPathRequired") },
+                          {
+                            validator: (_rule, value) => {
+                              const values = Array.isArray(value) ? value : value ? [value] : [];
+                              return values.length > 0
+                                ? Promise.resolve()
+                                : Promise.reject(
+                                    new Error(t("admin.dataSourceAccessPathRequired")),
+                                  );
+                            },
+                          },
                         ]}
                       >
-                        <Input
+                        <TreeSelect
+                          multiple
+                          allowClear
                           disabled={isEditMode}
+                          filterTreeNode={false}
+                          loadData={onLoadLocalPathChildren}
+                          loading={localPathLoading}
+                          maxTagCount="responsive"
+                          notFoundContent={localPathLoading ? <Spin size="small" /> : null}
                           placeholder="/mnt/team-share/ops-docs"
-                          onChange={isEditMode ? undefined : onInvalidateConnection}
+                          searchValue={localPathSearchValue}
+                          showSearch
+                          style={{ width: "100%" }}
+                          treeCheckable
+                          treeData={localPathOptions}
+                          treeDefaultExpandAll={false}
+                          treeLine
+                          styles={{
+                            popup: { root: { maxHeight: 360, overflow: "auto" } },
+                          }}
+                          onChange={() => {
+                            if (!isEditMode) {
+                              onInvalidateConnection();
+                            }
+                          }}
+                          onOpenChange={(open) => {
+                            if (!open) {
+                              setLocalPathSearchValue("");
+                            }
+                            if (open && !isEditMode) {
+                              onLoadLocalPathOptions?.("");
+                            }
+                          }}
+                          onSearch={(value) => {
+                            setLocalPathSearchValue(value);
+                            if (!isEditMode) {
+                              onSearchLocalPathOptions?.(value);
+                            }
+                          }}
                         />
                       </Form.Item>
                     ) : (
-                      <>
-                        <Form.Item
-                          label={t("admin.dataSourceFeishuTargetType")}
-                          name="targetType"
-                          rules={[
-                            {
-                              required: true,
-                              message: t("admin.dataSourceFeishuTargetTypeRequired"),
+                      <Form.Item
+                        label={t("admin.dataSourceFeishuSpace")}
+                        name="target"
+                        rules={[
+                          {
+                            validator: (_rule, value) => {
+                              const values = Array.isArray(value) ? value : value ? [value] : [];
+                              return values.length > 0
+                                ? Promise.resolve()
+                                : Promise.reject(
+                                    new Error(t("admin.dataSourceFeishuSpaceRequired")),
+                                  );
                             },
-                          ]}
-                        >
-                          <Select
-                            disabled={isEditMode}
-                            options={[
-                              {
-                                label: t("admin.dataSourceFeishuTargetTypeWiki"),
-                                value: "wiki_space",
-                              },
-                              {
-                                label: t("admin.dataSourceFeishuTargetTypeDrive"),
-                                value: "drive_folder",
-                              },
-                            ]}
-                          />
-                        </Form.Item>
-                        <Form.Item
-                          label={t("admin.dataSourceFeishuSpace")}
-                          name="target"
-                          rules={[
-                            {
-                              required: true,
-                              message: t("admin.dataSourceFeishuSpaceRequired"),
-                            },
-                          ]}
-                        >
-                          <Input
-                            disabled={isEditMode}
-                            placeholder={
-                              feishuTargetType === "drive_folder"
-                                ? t("admin.dataSourceFeishuTargetPlaceholderDrive")
-                                : t("admin.dataSourceFeishuTargetPlaceholderWiki")
+                          },
+                        ]}
+                      >
+                        <TreeSelect
+                          multiple
+                          allowClear
+                          disabled={isEditMode}
+                          filterTreeNode={false}
+                          loadData={onLoadFeishuTargetChildren}
+                          loading={feishuTargetLoading}
+                          maxTagCount="responsive"
+                          placeholder={t("admin.dataSourceFeishuTargetPlaceholderWiki")}
+                          showSearch
+                          searchValue={feishuTargetSearchValue}
+                          style={{ width: "100%" }}
+                          treeCheckable
+                          treeData={feishuTargetTreeData}
+                          treeDefaultExpandAll={false}
+                          treeLine
+                          styles={{
+                            popup: { root: { maxHeight: 360, overflow: "auto" } },
+                          }}
+                          onOpenChange={(open) => {
+                            if (!open) {
+                              setFeishuTargetSearchValue("");
                             }
-                          />
-                        </Form.Item>
-                      </>
+                            if (open && !isEditMode) {
+                              onLoadFeishuTargetOptions?.();
+                            }
+                          }}
+                          onSearch={(value) => {
+                            setFeishuTargetSearchValue(value);
+                            if (!isEditMode) {
+                              onSearchFeishuTargetOptions?.(value);
+                            }
+                          }}
+                        />
+                      </Form.Item>
                     )}
 
                     {selectedType === "local" ? renderConnectionSection() : null}
-                    {selectedType === "feishu" ? renderFeishuConnectionSection() : null}
                   </Card>
 
                   <Card

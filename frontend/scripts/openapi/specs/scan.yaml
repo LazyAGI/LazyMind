@@ -1,2402 +1,3683 @@
-components:
-    schemas:
-        AckCommandRequest:
-            properties:
-                agent_id:
-                    type: string
-                command_id:
-                    format: int64
-                    type: integer
-                error:
-                    type: string
-                result_json:
-                    type: string
-                success:
-                    type: boolean
-            required:
-                - agent_id
-                - command_id
-                - success
-            type: object
-        Agent:
-            properties:
-                active_source_count:
-                    format: int64
-                    type: integer
-                active_task_count:
-                    format: int64
-                    type: integer
-                active_watch_count:
-                    format: int64
-                    type: integer
-                agent_id:
-                    type: string
-                hostname:
-                    type: string
-                last_heartbeat_at:
-                    format: date-time
-                    type: string
-                listen_addr:
-                    type: string
-                status:
-                    type: string
-                tenant_id:
-                    type: string
-                updated_at:
-                    format: date-time
-                    type: string
-                version:
-                    type: string
-            required:
-                - agent_id
-                - tenant_id
-                - status
-                - listen_addr
-            type: object
-        AgentPathRequest:
-            properties:
-                agent_id:
-                    type: string
-                path:
-                    type: string
-            required:
-                - agent_id
-                - path
-            type: object
-        AgentPathTreeRequest:
-            properties:
-                agent_id:
-                    type: string
-                changes_only:
-                    type: boolean
-                include_files:
-                    type: boolean
-                keyword:
-                    type: string
-                max_depth:
-                    format: int64
-                    type: integer
-                path:
-                    type: string
-                source_id:
-                    type: string
-                updated_only:
-                    type: boolean
-            required:
-                - agent_id
-                - path
-            type: object
-        AgentPathTreeResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/TreeNode'
-                    type: array
-                selection_token:
-                    type: string
-            required:
-                - items
-            type: object
-        AgentPathValidateResponse:
-            properties:
-                allowed:
-                    type: boolean
-                exists:
-                    type: boolean
-                is_dir:
-                    type: boolean
-                path:
-                    type: string
-                readable:
-                    type: boolean
-                reason:
-                    type: string
-            required:
-                - path
-                - exists
-                - readable
-                - is_dir
-                - allowed
-            type: object
-        CloudSourceBinding:
-            properties:
-                auth_connection_id:
-                    type: string
-                created_at:
-                    format: date-time
-                    type: string
-                enabled:
-                    type: boolean
-                exclude_patterns:
-                    items:
-                        type: string
-                    type: array
-                include_patterns:
-                    items:
-                        type: string
-                    type: array
-                last_error:
-                    type: string
-                max_object_size_bytes:
-                    format: int64
-                    type: integer
-                next_sync_at:
-                    format: date-time
-                    type: string
-                provider:
-                    type: string
-                provider_options:
-                    additionalProperties: true
-                    type: object
-                reconcile_after_sync:
-                    type: boolean
-                reconcile_delay_minutes:
-                    format: int64
-                    type: integer
-                schedule_expr:
-                    type: string
-                schedule_tz:
-                    type: string
-                source_id:
-                    type: string
-                status:
-                    type: string
-                target_ref:
-                    type: string
-                target_type:
-                    type: string
-                tenant_id:
-                    type: string
-                updated_at:
-                    format: date-time
-                    type: string
-            required:
-                - source_id
-                - tenant_id
-                - provider
-                - enabled
-                - status
-                - auth_connection_id
-                - schedule_expr
-                - schedule_tz
-                - created_at
-                - updated_at
-            type: object
-        CloudSyncRun:
-            properties:
-                created_count:
-                    format: int64
-                    type: integer
-                deleted_count:
-                    format: int64
-                    type: integer
-                error_code:
-                    type: string
-                error_message:
-                    type: string
-                failed_count:
-                    format: int64
-                    type: integer
-                finished_at:
-                    format: date-time
-                    type: string
-                provider:
-                    type: string
-                remote_total:
-                    format: int64
-                    type: integer
-                requested_paths:
-                    items:
-                        type: string
-                    type: array
-                run_id:
-                    type: string
-                skipped_count:
-                    format: int64
-                    type: integer
-                source_id:
-                    type: string
-                started_at:
-                    format: date-time
-                    type: string
-                status:
-                    type: string
-                tenant_id:
-                    type: string
-                trigger_type:
-                    type: string
-                updated_count:
-                    format: int64
-                    type: integer
-            required:
-                - run_id
-                - source_id
-                - tenant_id
-                - provider
-                - trigger_type
-                - status
-            type: object
-        CreateKnowledgeBaseRequest:
-            properties:
-                algo:
-                    properties:
-                        algo_id:
-                            type: string
-                        description:
-                            type: string
-                        display_name:
-                            type: string
-                    required:
-                        - algo_id
-                    type: object
-                name:
-                    type: string
-            required:
-                - name
-                - algo
-            type: object
-        CreateKnowledgeBaseResponse:
-            properties:
-                dataset_id:
-                    type: string
-                name:
-                    type: string
-            required:
-                - dataset_id
-                - name
-            type: object
-        CreateSourceRequest:
-            properties:
-                agent_id:
-                    type: string
-                create_user_id:
-                    type: string
-                dataset_id:
-                    type: string
-                default_origin_platform:
-                    type: string
-                default_origin_type:
-                    type: string
-                default_trigger_policy:
-                    type: string
-                idle_window_seconds:
-                    format: int64
-                    type: integer
-                name:
-                    type: string
-                reconcile_schedule:
-                    type: string
-                reconcile_seconds:
-                    format: int64
-                    type: integer
-                root_path:
-                    type: string
-                tenant_id:
-                    type: string
-                watch_enabled:
-                    type: boolean
-            required:
-                - tenant_id
-                - name
-                - agent_id
-            type: object
-        DeleteSourceResponse:
-            properties:
-                deleted:
-                    type: boolean
-                source_id:
-                    type: string
-            required:
-                - source_id
-                - deleted
-            type: object
-        EnableWatchRequest:
-            properties:
-                reconcile_schedule:
-                    type: string
-                reconcile_seconds:
-                    format: int64
-                    type: integer
-            type: object
-        ErrorResponse:
-            properties:
-                code:
-                    type: string
-                message:
-                    type: string
-            required:
-                - code
-                - message
-            type: object
-        ExpediteTasksRequest:
-            properties:
-                paths:
-                    items:
-                        type: string
-                    type: array
-            required:
-                - paths
-            type: object
-        ExpediteTasksResponse:
-            properties:
-                created_task_count:
-                    format: int64
-                    type: integer
-                skipped_count:
-                    format: int64
-                    type: integer
-                updated_existing_task_count:
-                    format: int64
-                    type: integer
-            required:
-                - updated_existing_task_count
-                - created_task_count
-                - skipped_count
-            type: object
-        FileEvent:
-            properties:
-                event_type:
-                    type: string
-                is_dir:
-                    type: boolean
-                occurred_at:
-                    format: date-time
-                    type: string
-                origin_platform:
-                    type: string
-                origin_ref:
-                    type: string
-                origin_type:
-                    type: string
-                path:
-                    type: string
-                source_id:
-                    type: string
-                tenant_id:
-                    type: string
-                trigger_policy:
-                    type: string
-            required:
-                - source_id
-                - event_type
-                - path
-            type: object
-        GenerateTasksRequest:
-            properties:
-                mode:
-                    type: string
-                paths:
-                    items:
-                        type: string
-                    type: array
-                selection_token:
-                    type: string
-                trigger_policy:
-                    type: string
-                updated_only:
-                    type: boolean
-            required:
-                - mode
-                - paths
-            type: object
-        GenerateTasksResponse:
-            properties:
-                accepted_count:
-                    format: int64
-                    type: integer
-                baseline_snapshot_queued:
-                    type: boolean
-                ignored_unchanged_count:
-                    format: int64
-                    type: integer
-                manual_pull_job_id:
-                    type: string
-                merged_pending_count:
-                    format: int64
-                    type: integer
-                requested_count:
-                    format: int64
-                    type: integer
-                skipped_count:
-                    format: int64
-                    type: integer
-            required:
-                - requested_count
-                - accepted_count
-                - merged_pending_count
-                - skipped_count
-            type: object
-        HeartbeatPayload:
-            properties:
-                active_task_count:
-                    format: int64
-                    type: integer
-                active_watch_count:
-                    format: int64
-                    type: integer
-                agent_id:
-                    type: string
-                hostname:
-                    type: string
-                last_heartbeat_at:
-                    format: date-time
-                    type: string
-                listen_addr:
-                    type: string
-                source_count:
-                    format: int64
-                    type: integer
-                status:
-                    type: string
-                tenant_id:
-                    type: string
-                version:
-                    type: string
-            required:
-                - agent_id
-                - tenant_id
-                - status
-            type: object
-        ListCloudSyncRunsResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/CloudSyncRun'
-                    type: array
-            required:
-                - items
-            type: object
-        ListManualPullJobsResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/ManualPullJob'
-                    type: array
-                page:
-                    format: int64
-                    type: integer
-                page_size:
-                    format: int64
-                    type: integer
-                total:
-                    format: int64
-                    type: integer
-            required:
-                - items
-                - total
-                - page
-                - page_size
-            type: object
-        ListParseTasksResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/ParseTaskListItem'
-                    type: array
-                page:
-                    format: int64
-                    type: integer
-                page_size:
-                    format: int64
-                    type: integer
-                total:
-                    format: int64
-                    type: integer
-            required:
-                - items
-                - total
-                - page
-                - page_size
-            type: object
-        ManualPullJob:
-            properties:
-                accepted_count:
-                    format: int64
-                    type: integer
-                created_at:
-                    format: date-time
-                    type: string
-                error_message:
-                    type: string
-                finished_at:
-                    format: date-time
-                    type: string
-                ignored_unchanged_count:
-                    format: int64
-                    type: integer
-                job_id:
-                    type: string
-                mode:
-                    type: string
-                requested_count:
-                    format: int64
-                    type: integer
-                selection_token:
-                    type: string
-                skipped_count:
-                    format: int64
-                    type: integer
-                source_id:
-                    type: string
-                status:
-                    type: string
-                tenant_id:
-                    type: string
-                trigger_policy:
-                    type: string
-                updated_at:
-                    format: date-time
-                    type: string
-                updated_only:
-                    type: boolean
-            required:
-                - job_id
-                - tenant_id
-                - source_id
-                - status
-                - mode
-                - updated_only
-                - requested_count
-                - accepted_count
-                - skipped_count
-                - created_at
-                - updated_at
-            type: object
-        ParseTaskDetailResponse:
-            properties:
-                agent_id:
-                    type: string
-                agent_listen_addr:
-                    type: string
-                core_dataset_id:
-                    type: string
-                core_document_id:
-                    type: string
-                core_task_id:
-                    type: string
-                core_task_state:
-                    type: string
-                created_at:
-                    format: date-time
-                    type: string
-                current_version_id:
-                    type: string
-                desired_version_id:
-                    type: string
-                document_id:
-                    format: int64
-                    type: integer
-                document_parse_status:
-                    type: string
-                finished_at:
-                    format: date-time
-                    type: string
-                last_error:
-                    type: string
-                max_retry_count:
-                    format: int64
-                    type: integer
-                next_run_at:
-                    format: date-time
-                    type: string
-                origin_platform:
-                    type: string
-                origin_type:
-                    type: string
-                retry_count:
-                    format: int64
-                    type: integer
-                scan_orchestration_status:
-                    type: string
-                source_id:
-                    type: string
-                source_name:
-                    type: string
-                source_object_id:
-                    type: string
-                started_at:
-                    format: date-time
-                    type: string
-                status:
-                    type: string
-                submit_at:
-                    format: date-time
-                    type: string
-                submit_error_message:
-                    type: string
-                target_version_id:
-                    type: string
-                task_action:
-                    type: string
-                task_id:
-                    format: int64
-                    type: integer
-                tenant_id:
-                    type: string
-                trigger_policy:
-                    type: string
-                updated_at:
-                    format: date-time
-                    type: string
-            required:
-                - task_id
-                - tenant_id
-                - source_id
-                - document_id
-                - source_object_id
-                - target_version_id
-                - status
-                - retry_count
-                - max_retry_count
-                - next_run_at
-                - created_at
-                - updated_at
-            type: object
-        ParseTaskListItem:
-            properties:
-                agent_id:
-                    type: string
-                agent_listen_addr:
-                    type: string
-                core_dataset_id:
-                    type: string
-                core_document_id:
-                    type: string
-                core_task_id:
-                    type: string
-                core_task_state:
-                    type: string
-                created_at:
-                    format: date-time
-                    type: string
-                document_id:
-                    format: int64
-                    type: integer
-                finished_at:
-                    format: date-time
-                    type: string
-                last_error:
-                    type: string
-                max_retry_count:
-                    format: int64
-                    type: integer
-                next_run_at:
-                    format: date-time
-                    type: string
-                origin_platform:
-                    type: string
-                origin_type:
-                    type: string
-                retry_count:
-                    format: int64
-                    type: integer
-                scan_orchestration_status:
-                    type: string
-                source_id:
-                    type: string
-                source_name:
-                    type: string
-                source_object_id:
-                    type: string
-                started_at:
-                    format: date-time
-                    type: string
-                status:
-                    type: string
-                submit_at:
-                    format: date-time
-                    type: string
-                submit_error_message:
-                    type: string
-                target_version_id:
-                    type: string
-                task_action:
-                    type: string
-                task_id:
-                    format: int64
-                    type: integer
-                tenant_id:
-                    type: string
-                trigger_policy:
-                    type: string
-                updated_at:
-                    format: date-time
-                    type: string
-            required:
-                - task_id
-                - tenant_id
-                - source_id
-                - document_id
-                - source_object_id
-                - target_version_id
-                - status
-                - retry_count
-                - max_retry_count
-                - next_run_at
-                - created_at
-                - updated_at
-            type: object
-        ParseTaskStatsResponse:
-            properties:
-                counts:
-                    additionalProperties:
-                        format: int64
-                        type: integer
-                    type: object
-            required:
-                - counts
-            type: object
-        PullCommandsRequest:
-            properties:
-                agent_id:
-                    type: string
-                tenant_id:
-                    type: string
-            required:
-                - agent_id
-                - tenant_id
-            type: object
-        PullCommandsResponse:
-            properties:
-                commands:
-                    items:
-                        $ref: '#/components/schemas/PulledCommand'
-                    type: array
-            required:
-                - commands
-            type: object
-        PulledCommand:
-            properties:
-                document_id:
-                    type: string
-                id:
-                    format: int64
-                    type: integer
-                mode:
-                    type: string
-                reason:
-                    type: string
-                reconcile_schedule:
-                    type: string
-                reconcile_seconds:
-                    format: int64
-                    type: integer
-                root_path:
-                    type: string
-                skip_initial_scan:
-                    type: boolean
-                source_id:
-                    type: string
-                src_path:
-                    type: string
-                tenant_id:
-                    type: string
-                type:
-                    type: string
-                version_id:
-                    type: string
-            required:
-                - id
-                - type
-            type: object
-        RegisterAgentRequest:
-            properties:
-                agent_id:
-                    type: string
-                hostname:
-                    type: string
-                listen_addr:
-                    type: string
-                tenant_id:
-                    type: string
-                version:
-                    type: string
-            required:
-                - agent_id
-                - tenant_id
-                - hostname
-                - version
-            type: object
-        ReportEventsRequest:
-            properties:
-                agent_id:
-                    type: string
-                events:
-                    items:
-                        $ref: '#/components/schemas/FileEvent'
-                    type: array
-            required:
-                - agent_id
-                - events
-            type: object
-        ReportScanResultsRequest:
-            properties:
-                agent_id:
-                    type: string
-                mode:
-                    type: string
-                records:
-                    items:
-                        $ref: '#/components/schemas/ScanRecord'
-                    type: array
-                source_id:
-                    type: string
-            required:
-                - agent_id
-                - source_id
-                - mode
-                - records
-            type: object
-        ReportSnapshotRequest:
-            properties:
-                agent_id:
-                    type: string
-                file_count:
-                    format: int64
-                    type: integer
-                snapshot_ref:
-                    type: string
-                source_id:
-                    type: string
-                taken_at:
-                    format: date-time
-                    type: string
-            required:
-                - agent_id
-                - source_id
-                - snapshot_ref
-                - taken_at
-            type: object
-        ScanRecord:
-            properties:
-                checksum:
-                    type: string
-                is_dir:
-                    type: boolean
-                mod_time:
-                    format: date-time
-                    type: string
-                origin_platform:
-                    type: string
-                origin_ref:
-                    type: string
-                origin_type:
-                    type: string
-                path:
-                    type: string
-                size:
-                    format: int64
-                    type: integer
-                source_id:
-                    type: string
-                trigger_policy:
-                    type: string
-            required:
-                - source_id
-                - path
-            type: object
-        Source:
-            properties:
-                agent_id:
-                    type: string
-                cloud_binding:
-                    $ref: '#/components/schemas/CloudSourceBinding'
-                create_user_id:
-                    type: string
-                created_at:
-                    format: date-time
-                    type: string
-                dataset_id:
-                    type: string
-                default_origin_platform:
-                    type: string
-                default_origin_type:
-                    type: string
-                default_trigger_policy:
-                    type: string
-                documents:
-                    $ref: '#/components/schemas/SourceDocumentsResponse'
-                id:
-                    type: string
-                idle_window_seconds:
-                    format: int64
-                    type: integer
-                name:
-                    type: string
-                reconcile_schedule:
-                    type: string
-                reconcile_seconds:
-                    format: int64
-                    type: integer
-                root_path:
-                    type: string
-                source_type:
-                    type: string
-                status:
-                    type: string
-                tenant_id:
-                    type: string
-                updated_at:
-                    format: date-time
-                    type: string
-                watch_enabled:
-                    type: boolean
-            required:
-                - id
-                - tenant_id
-                - name
-                - source_type
-                - root_path
-                - status
-                - watch_enabled
-                - idle_window_seconds
-                - reconcile_seconds
-                - agent_id
-                - created_at
-                - updated_at
-            type: object
-        SourceDocumentItem:
-            properties:
-                baseline_version:
-                    type: string
-                core_dataset_id:
-                    type: string
-                core_task_id:
-                    type: string
-                core_task_state:
-                    type: string
-                directory:
-                    type: string
-                document_id:
-                    format: int64
-                    type: integer
-                file_type:
-                    type: string
-                has_update:
-                    type: boolean
-                knowledge_base_present:
-                    type: boolean
-                last_error:
-                    type: string
-                last_synced_at:
-                    format: date-time
-                    type: string
-                name:
-                    type: string
-                next_sync_at:
-                    format: date-time
-                    type: string
-                object_key:
-                    type: string
-                parse_state:
-                    type: string
-                path:
-                    type: string
-                pending_action:
-                    enum:
-                        - NONE
-                        - CREATE
-                        - UPDATE
-                        - DELETE
-                    type: string
-                scan_orchestration_status:
-                    type: string
-                size_bytes:
-                    format: int64
-                    type: integer
-                source_state:
-                    enum:
-                        - UNCHANGED
-                        - NEW
-                        - MODIFIED
-                        - DELETED
-                    type: string
-                source_updated_at:
-                    format: date-time
-                    type: string
-                source_version:
-                    type: string
-                sync_state:
-                    enum:
-                        - IDLE
-                        - PENDING
-                        - SCHEDULED
-                        - RUNNING
-                        - FAILED
-                    type: string
-                tags:
-                    items:
-                        type: string
-                    type: array
-                update_desc:
-                    type: string
-                update_type:
-                    enum:
-                        - NEW
-                        - MODIFIED
-                        - DELETED
-                        - UNCHANGED
-                    type: string
-            required:
-                - document_id
-                - name
-                - path
-                - directory
-                - parse_state
-                - size_bytes
-            type: object
-        SourceDocumentsResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/SourceDocumentItem'
-                    type: array
-                page:
-                    format: int64
-                    type: integer
-                page_size:
-                    format: int64
-                    type: integer
-                source:
-                    $ref: '#/components/schemas/SourceDocumentsSource'
-                summary:
-                    $ref: '#/components/schemas/SourceDocumentsSummary'
-                total:
-                    format: int64
-                    type: integer
-            required:
-                - source
-                - summary
-                - items
-                - total
-                - page
-                - page_size
-            type: object
-        SourceDocumentsSource:
-            properties:
-                agent_id:
-                    type: string
-                agent_online:
-                    type: boolean
-                id:
-                    type: string
-                last_synced_at:
-                    format: date-time
-                    type: string
-                name:
-                    type: string
-                root_path:
-                    type: string
-                update_tracking_supported:
-                    type: boolean
-                watch_enabled:
-                    type: boolean
-            required:
-                - id
-                - name
-                - root_path
-                - watch_enabled
-                - agent_id
-                - agent_online
-                - update_tracking_supported
-            type: object
-        SourceDocumentsSummary:
-            properties:
-                deleted_count:
-                    format: int64
-                    type: integer
-                modified_count:
-                    format: int64
-                    type: integer
-                new_count:
-                    format: int64
-                    type: integer
-                parsed_document_count:
-                    format: int64
-                    type: integer
-                pending_pull_count:
-                    format: int64
-                    type: integer
-                storage_bytes:
-                    format: int64
-                    type: integer
-                total_document_count:
-                    format: int64
-                    type: integer
-            required:
-                - parsed_document_count
-                - storage_bytes
-                - total_document_count
-                - new_count
-                - modified_count
-                - deleted_count
-                - pending_pull_count
-            type: object
-        SourcePathTreeRequest:
-            properties:
-                changes_only:
-                    type: boolean
-                include_files:
-                    type: boolean
-                keyword:
-                    type: string
-                max_depth:
-                    format: int64
-                    type: integer
-                path:
-                    type: string
-                updated_only:
-                    type: boolean
-            type: object
-        TreeNode:
-            properties:
-                children:
-                    items:
-                        $ref: '#/components/schemas/TreeNode'
-                    type: array
-                core_task_state:
-                    type: string
-                external_file_id:
-                    type: string
-                has_update:
-                    type: boolean
-                is_dir:
-                    type: boolean
-                key:
-                    type: string
-                knowledge_base_present:
-                    type: boolean
-                last_error:
-                    type: string
-                next_sync_at:
-                    format: date-time
-                    type: string
-                object_key:
-                    type: string
-                parse_queue_state:
-                    type: string
-                pending_action:
-                    enum:
-                        - NONE
-                        - CREATE
-                        - UPDATE
-                        - DELETE
-                    type: string
-                selectable:
-                    type: boolean
-                source_state:
-                    enum:
-                        - UNCHANGED
-                        - NEW
-                        - MODIFIED
-                        - DELETED
-                    type: string
-                status_source:
-                    type: string
-                sync_state:
-                    enum:
-                        - IDLE
-                        - PENDING
-                        - SCHEDULED
-                        - RUNNING
-                        - FAILED
-                    type: string
-                title:
-                    type: string
-                update_desc:
-                    type: string
-                update_type:
-                    enum:
-                        - NEW
-                        - MODIFIED
-                        - DELETED
-                        - UNCHANGED
-                    type: string
-            required:
-                - title
-                - key
-                - is_dir
-            type: object
-        TriggerCloudSyncRequest:
-            properties:
-                paths:
-                    items:
-                        type: string
-                    type: array
-                trigger_type:
-                    type: string
-            type: object
-        TriggerCloudSyncResponse:
-            properties:
-                accepted:
-                    type: boolean
-                run_id:
-                    type: string
-            required:
-                - run_id
-                - accepted
-            type: object
-        UpdateSourceRequest:
-            properties:
-                dataset_id:
-                    type: string
-                default_origin_platform:
-                    type: string
-                default_origin_type:
-                    type: string
-                default_trigger_policy:
-                    type: string
-                idle_window_seconds:
-                    format: int64
-                    type: integer
-                name:
-                    type: string
-                reconcile_schedule:
-                    type: string
-                reconcile_seconds:
-                    format: int64
-                    type: integer
-                root_path:
-                    type: string
-            type: object
-        UpsertCloudSourceBindingRequest:
-            properties:
-                auth_connection_id:
-                    type: string
-                enabled:
-                    type: boolean
-                exclude_patterns:
-                    items:
-                        type: string
-                    type: array
-                include_patterns:
-                    items:
-                        type: string
-                    type: array
-                max_object_size_bytes:
-                    format: int64
-                    type: integer
-                provider:
-                    type: string
-                provider_options:
-                    additionalProperties: true
-                    type: object
-                reconcile_after_sync:
-                    type: boolean
-                reconcile_delay_minutes:
-                    format: int64
-                    type: integer
-                schedule_expr:
-                    type: string
-                schedule_tz:
-                    type: string
-                target_ref:
-                    type: string
-                target_type:
-                    type: string
-            required:
-                - provider
-                - auth_connection_id
-            type: object
-        ValidateCloudTargetRequest:
-            properties:
-                auth_connection_id:
-                    type: string
-                provider:
-                    type: string
-                provider_options:
-                    additionalProperties: true
-                    type: object
-                target_ref:
-                    type: string
-                target_type:
-                    type: string
-            required:
-                - provider
-                - auth_connection_id
-            type: object
-        ValidateCloudTargetResponse:
-            properties:
-                valid:
-                    type: boolean
-            required:
-                - valid
-            type: object
-        WatchToggleResponse:
-            properties:
-                accepted:
-                    type: boolean
-                baseline_snapshot_queued:
-                    type: boolean
-                skip_initial_scan:
-                    type: boolean
-            required:
-                - accepted
-            type: object
-info:
-    description: Control plane for local source management, agent coordination, and idle-window scheduling.
-    title: Scan Control Plane API
-    version: 0.1.0
-openapi: 3.0.3
-paths:
-    /api/scan/agents:
-        get:
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    items:
-                                        items:
-                                            $ref: '#/components/schemas/Agent'
-                                        type: array
-                                required:
-                                    - items
-                                type: object
-                    description: Agent list
-            summary: List agents
-    /api/scan/agents/{id}:
-        get:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Agent'
-                    description: Agent
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Get agent
-    /api/scan/agents/fs/tree:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/AgentPathTreeRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/AgentPathTreeResponse'
-                    description: Directory tree
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "502":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Get directory tree via agent
-    /api/scan/agents/fs/validate:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/AgentPathRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/AgentPathValidateResponse'
-                    description: Path validation result
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "502":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Validate path via agent
-    /api/scan/cloud/target/validate:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/ValidateCloudTargetRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ValidateCloudTargetResponse'
-                    description: Validation result
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Validate cloud target
-    /api/scan/knowledge-bases:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/CreateKnowledgeBaseRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/CreateKnowledgeBaseResponse'
-                    description: Created knowledge base
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "409":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "502":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Create knowledge base in core and grant current user read permission
-    /api/scan/parse-tasks:
-        get:
-            parameters:
-                - in: query
-                  name: tenant_id
-                  required: true
-                  schema:
-                    type: string
-                - in: query
-                  name: source_id
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: status
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: keyword
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: page
-                  required: false
-                  schema:
-                    format: int64
-                    type: integer
-                - in: query
-                  name: page_size
-                  required: false
-                  schema:
-                    format: int64
-                    type: integer
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ListParseTasksResponse'
-                    description: Parse task list
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "500":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: List parse tasks
-    /api/scan/parse-tasks/{id}:
-        get:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ParseTaskDetailResponse'
-                    description: Parse task detail
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "500":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Get parse task detail
-    /api/scan/parse-tasks/{id}/retry:
-        post:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ParseTaskDetailResponse'
-                    description: Retried parse task detail
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "500":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Retry parse task
-    /api/scan/parse-tasks/stats:
-        get:
-            parameters:
-                - in: query
-                  name: tenant_id
-                  required: true
-                  schema:
-                    type: string
-                - in: query
-                  name: source_id
-                  required: false
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ParseTaskStatsResponse'
-                    description: Status counts
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "500":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Parse task status stats
-    /api/scan/sources:
-        get:
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    items:
-                                        items:
-                                            $ref: '#/components/schemas/Source'
-                                        type: array
-                                required:
-                                    - items
-                                type: object
-                    description: Source list
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: List sources
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/CreateSourceRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Source'
-                    description: Created source
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Create source
-    /api/scan/sources/{id}:
-        delete:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/DeleteSourceResponse'
-                    description: Deleted source
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Delete source
-        get:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Source'
-                    description: Source
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Get source
-        put:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/UpdateSourceRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Source'
-                    description: Updated source
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Update source
-    /api/scan/sources/{id}/cloud/binding:
-        get:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/CloudSourceBinding'
-                    description: Cloud binding
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "500":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Get cloud binding
-        post:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/UpsertCloudSourceBindingRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/CloudSourceBinding'
-                    description: Cloud binding
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Create or update cloud binding
-    /api/scan/sources/{id}/cloud/sync/runs:
-        get:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-                - in: query
-                  name: limit
-                  required: false
-                  schema:
-                    format: int64
-                    type: integer
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ListCloudSyncRunsResponse'
-                    description: Cloud sync runs
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "500":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: List cloud sync runs
-    /api/scan/sources/{id}/cloud/sync/trigger:
-        post:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/TriggerCloudSyncRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/TriggerCloudSyncResponse'
-                    description: Trigger accepted
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "500":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Trigger cloud sync once
-    /api/scan/sources/{id}/disable:
-        post:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Source'
-                    description: Source
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Disable source
-    /api/scan/sources/{id}/documents:
-        get:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-                - in: query
-                  name: tenant_id
-                  required: true
-                  schema:
-                    type: string
-                - in: query
-                  name: keyword
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: update_type
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: parse_state
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: page
-                  required: false
-                  schema:
-                    format: int64
-                    type: integer
-                - in: query
-                  name: page_size
-                  required: false
-                  schema:
-                    format: int64
-                    type: integer
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/SourceDocumentsResponse'
-                    description: Source documents
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "500":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: List source documents
-    /api/scan/sources/{id}/enable:
-        post:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Source'
-                    description: Source
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Enable source
-    /api/scan/sources/{id}/manual-pull-jobs:
-        get:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-                - in: query
-                  name: status
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: page
-                  required: false
-                  schema:
-                    format: int64
-                    type: integer
-                - in: query
-                  name: page_size
-                  required: false
-                  schema:
-                    format: int64
-                    type: integer
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ListManualPullJobsResponse'
-                    description: Manual pull jobs
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "500":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: List source manual pull jobs
-    /api/scan/sources/{id}/tasks/expedite:
-        post:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/ExpediteTasksRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ExpediteTasksResponse'
-                    description: Expedite stats
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Expedite source tasks by paths
-    /api/scan/sources/{id}/tasks/generate:
-        post:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/GenerateTasksRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/GenerateTasksResponse'
-                    description: Generated task stats
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Generate parse tasks for source
-    /api/scan/sources/{id}/watch/disable:
-        post:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/WatchToggleResponse'
-                    description: Watch toggle result
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Disable source watch
-    /api/scan/sources/{id}/watch/enable:
-        post:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/EnableWatchRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/WatchToggleResponse'
-                    description: Watch toggle result
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-                "404":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Enable source watch
-    /api/v1/agents/commands/ack:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/AckCommandRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    accepted:
-                                        type: boolean
-                                required:
-                                    - accepted
-                                type: object
-                    description: Accepted
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Acknowledge command
-    /api/v1/agents/events:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/ReportEventsRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    accepted:
-                                        type: boolean
-                                required:
-                                    - accepted
-                                type: object
-                    description: Accepted
-                "500":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Report file events
-    /api/v1/agents/heartbeat:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/HeartbeatPayload'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    accepted:
-                                        type: boolean
-                                required:
-                                    - accepted
-                                type: object
-                    description: Accepted
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Report heartbeat
-    /api/v1/agents/pull:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/PullCommandsRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/PullCommandsResponse'
-                    description: Commands
-                "500":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Pull commands
-    /api/v1/agents/register:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/RegisterAgentRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    accepted:
-                                        type: boolean
-                                required:
-                                    - accepted
-                                type: object
-                    description: Accepted
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Register agent
-    /api/v1/agents/scan-results:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/ReportScanResultsRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    accepted:
-                                        type: boolean
-                                required:
-                                    - accepted
-                                type: object
-                    description: Accepted
-                "500":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Report scan results
-    /api/v1/agents/snapshots/report:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/ReportSnapshotRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    accepted:
-                                        type: boolean
-                                required:
-                                    - accepted
-                                type: object
-                    description: Accepted
-                "400":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ErrorResponse'
-                    description: Error
-            summary: Report reconcile snapshot metadata
-    /healthz:
-        get:
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    status:
-                                        type: string
-                                required:
-                                    - status
-                                type: object
-                    description: OK
-            summary: Health check
-servers:
-    - description: same origin
-      url: /
+{
+  "components": {
+    "schemas": {
+      "BindingMutationResponse": {
+        "properties": {
+          "binding": {
+            "$ref": "#/components/schemas/SourceBindingResponse"
+          },
+          "job_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "new_generation": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "old_generation": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "binding"
+        ],
+        "type": "object"
+      },
+      "BindingStatus": {
+        "enum": [
+          "ACTIVE",
+          "PAUSED",
+          "DELETING",
+          "ERROR"
+        ],
+        "type": "string"
+      },
+      "BindingTargetChildrenRequest": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "auth_connection_id": {
+            "type": "string"
+          },
+          "connector_type": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "include_files": {
+            "type": "boolean"
+          },
+          "list_mode": {
+            "$ref": "#/components/schemas/ListMode"
+          },
+          "max_items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "node_ref": {
+            "type": "string"
+          },
+          "page_size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "provider_options": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "target_ref": {
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "connector_type"
+        ],
+        "type": "object"
+      },
+      "BindingTargetSearchRequest": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "auth_connection_id": {
+            "type": "string"
+          },
+          "connector_type": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "include_files": {
+            "type": "boolean"
+          },
+          "keyword": {
+            "type": "string"
+          },
+          "list_mode": {
+            "$ref": "#/components/schemas/ListMode"
+          },
+          "max_items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "node_ref": {
+            "type": "string"
+          },
+          "page_size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "provider_options": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "target_ref": {
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "connector_type",
+          "keyword"
+        ],
+        "type": "object"
+      },
+      "Compensation": {
+        "properties": {
+          "compensation_error": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "compensation_status": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "status",
+          "compensation_status",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "CompensationListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Compensation"
+            },
+            "type": "array"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "type": "object"
+      },
+      "ConnectorListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectorSpec"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ConnectorSpec": {
+        "properties": {
+          "connector_type": {
+            "type": "string"
+          },
+          "max_page_size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "supports_delta": {
+            "type": "boolean"
+          },
+          "supports_dual_role_object": {
+            "type": "boolean"
+          },
+          "supports_export_formats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "supports_search": {
+            "type": "boolean"
+          },
+          "target_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "connector_type",
+          "target_types",
+          "supports_search",
+          "supports_delta",
+          "supports_dual_role_object",
+          "supports_export_formats",
+          "max_page_size"
+        ],
+        "type": "object"
+      },
+      "CreateSourceRequest": {
+        "properties": {
+          "bindings": {
+            "items": {
+              "$ref": "#/components/schemas/SourceBindingRequest"
+            },
+            "type": "array"
+          },
+          "exclude_extensions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "include_extensions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "source_options": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "request_id",
+          "name",
+          "bindings"
+        ],
+        "type": "object"
+      },
+      "CreateSourceResponse": {
+        "properties": {
+          "bindings": {
+            "items": {
+              "$ref": "#/components/schemas/SourceBindingResponse"
+            },
+            "type": "array"
+          },
+          "job_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SourceResponse"
+          }
+        },
+        "required": [
+          "source",
+          "bindings"
+        ],
+        "type": "object"
+      },
+      "DeadLetter": {
+        "properties": {
+          "binding_generation": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "binding_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "dead_letter_id": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "failed_at": {
+            "type": "string"
+          },
+          "last_error": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "object_key": {
+            "type": "string"
+          },
+          "retry_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "target_version_id": {
+            "type": "string"
+          },
+          "task_action": {
+            "$ref": "#/components/schemas/TaskAction"
+          },
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "dead_letter_id",
+          "task_id",
+          "source_id",
+          "binding_id",
+          "binding_generation",
+          "object_key",
+          "document_id",
+          "task_action",
+          "target_version_id",
+          "retry_count",
+          "failed_at"
+        ],
+        "type": "object"
+      },
+      "DeadLetterListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DeadLetter"
+            },
+            "type": "array"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "type": "object"
+      },
+      "DeleteBindingResponse": {
+        "properties": {
+          "binding_id": {
+            "type": "string"
+          },
+          "cancelled_task_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "deleted": {
+            "type": "boolean"
+          },
+          "removed_core_parent_document_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "deleted",
+          "binding_id"
+        ],
+        "type": "object"
+      },
+      "DeleteSourceResponse": {
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          },
+          "removed_binding_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "removed_dataset_id": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "deleted",
+          "source_id"
+        ],
+        "type": "object"
+      },
+      "DeletingResource": {
+        "properties": {
+          "binding_id": {
+            "type": "string"
+          },
+          "deleted_at": {
+            "type": "string"
+          },
+          "last_error": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "resource_type": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BindingStatus"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "resource_type",
+          "source_id",
+          "status",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "DeletingResourceListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DeletingResource"
+            },
+            "type": "array"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "details"
+        ],
+        "type": "object"
+      },
+      "ExpediteTasksRequest": {
+        "properties": {
+          "binding_id": {
+            "type": "string"
+          },
+          "document_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "object_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "priority": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "task_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "ExpediteTasksResponse": {
+        "properties": {
+          "skipped_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "skipped_items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "task_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "updated_count": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "updated_count",
+          "skipped_count",
+          "task_ids"
+        ],
+        "type": "object"
+      },
+      "GenerateTasksRequest": {
+        "properties": {
+          "binding_id": {
+            "type": "string"
+          },
+          "document_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "object_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "priority": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "GenerateTasksResponse": {
+        "properties": {
+          "accepted_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "already_active_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "duplicate_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "requested_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "skipped_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "task_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "requested_count",
+          "accepted_count",
+          "duplicate_count",
+          "already_active_count",
+          "skipped_count",
+          "task_ids"
+        ],
+        "type": "object"
+      },
+      "GetSourceResponse": {
+        "properties": {
+          "bindings": {
+            "items": {
+              "$ref": "#/components/schemas/SourceBindingResponse"
+            },
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SourceResponse"
+          },
+          "summary": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "type": "object"
+      },
+      "ListMode": {
+        "enum": [
+          "page",
+          "all_current_level"
+        ],
+        "type": "string"
+      },
+      "ParseTaskDetailResponse": {
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/TaskDocument"
+          },
+          "object": {
+            "$ref": "#/components/schemas/TaskObject"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TaskDocumentState"
+          },
+          "task": {
+            "$ref": "#/components/schemas/ParseTaskResponse"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "type": "object"
+      },
+      "ParseTaskListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ParseTaskResponse"
+            },
+            "type": "array"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "type": "object"
+      },
+      "ParseTaskResponse": {
+        "properties": {
+          "binding_generation": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "binding_id": {
+            "type": "string"
+          },
+          "core_document_id": {
+            "type": "string"
+          },
+          "core_task_id": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "next_run_at": {
+            "type": "string"
+          },
+          "object_key": {
+            "type": "string"
+          },
+          "retry_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ParseTaskStatus"
+          },
+          "target_version_id": {
+            "type": "string"
+          },
+          "task_action": {
+            "$ref": "#/components/schemas/TaskAction"
+          },
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "source_id",
+          "binding_id",
+          "object_key",
+          "document_id",
+          "task_action",
+          "target_version_id",
+          "binding_generation",
+          "status"
+        ],
+        "type": "object"
+      },
+      "ParseTaskStatsResponse": {
+        "properties": {
+          "by_action": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "by_status": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "retryable_failed_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "by_status",
+          "by_action",
+          "retryable_failed_count"
+        ],
+        "type": "object"
+      },
+      "ParseTaskStatus": {
+        "enum": [
+          "PENDING",
+          "RUNNING",
+          "SUBMITTED",
+          "SUCCEEDED",
+          "FAILED",
+          "SUPERSEDED"
+        ],
+        "type": "string"
+      },
+      "ReconcileBindingRequest": {
+        "properties": {
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ReconcileBindingResponse": {
+        "properties": {
+          "binding_generation": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "binding_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "scope_type": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "trigger_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "source_id",
+          "binding_id",
+          "binding_generation",
+          "status",
+          "trigger_type",
+          "scope_type"
+        ],
+        "type": "object"
+      },
+      "RetryParseTaskRequest": {
+        "properties": {
+          "force": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "SourceBindingRequest": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "auth_connection_id": {
+            "type": "string"
+          },
+          "binding_id": {
+            "type": "string"
+          },
+          "connector_type": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "exclude_extensions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "include_extensions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "provider_options": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "schedule_expr": {
+            "type": "string"
+          },
+          "schedule_tz": {
+            "type": "string"
+          },
+          "sync_mode": {
+            "$ref": "#/components/schemas/SyncMode"
+          },
+          "target_ref": {
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "connector_type",
+          "target_type",
+          "target_ref",
+          "sync_mode"
+        ],
+        "type": "object"
+      },
+      "SourceBindingResponse": {
+        "properties": {
+          "binding_generation": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "binding_id": {
+            "type": "string"
+          },
+          "connector_type": {
+            "type": "string"
+          },
+          "core_parent_document_id": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BindingStatus"
+          },
+          "sync_mode": {
+            "$ref": "#/components/schemas/SyncMode"
+          },
+          "target_fingerprint": {
+            "type": "string"
+          },
+          "target_ref": {
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          },
+          "tree_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "binding_id",
+          "connector_type",
+          "target_type",
+          "tree_key",
+          "binding_generation",
+          "core_parent_document_id"
+        ],
+        "type": "object"
+      },
+      "SourceDocumentItem": {
+        "properties": {
+          "binding_id": {
+            "type": "string"
+          },
+          "core_document_id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "last_error": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "modified_at": {
+            "type": "string"
+          },
+          "object_key": {
+            "type": "string"
+          },
+          "parse_queue_state": {
+            "type": "string"
+          },
+          "parse_status": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "source_state": {
+            "$ref": "#/components/schemas/SourceState"
+          },
+          "sync_state": {
+            "$ref": "#/components/schemas/SyncState"
+          }
+        },
+        "type": "object"
+      },
+      "SourceDocumentListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SourceDocumentItem"
+            },
+            "type": "array"
+          },
+          "page": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "page_size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "type": "object"
+      },
+      "SourceListItem": {
+        "properties": {
+          "binding_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "config_version": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "deleted_at": {
+            "type": "string"
+          },
+          "exclude_extensions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "include_extensions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "source_options": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SourceStatus"
+          },
+          "summary": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "tenant_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "name",
+          "dataset_id",
+          "status",
+          "config_version",
+          "binding_count",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "SourceListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SourceListItem"
+            },
+            "type": "array"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "type": "object"
+      },
+      "SourceResponse": {
+        "properties": {
+          "config_version": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SourceStatus"
+          }
+        },
+        "required": [
+          "source_id",
+          "name",
+          "dataset_id",
+          "status",
+          "config_version"
+        ],
+        "type": "object"
+      },
+      "SourceState": {
+        "enum": [
+          "NEW",
+          "MODIFIED",
+          "DELETED",
+          "UNCHANGED"
+        ],
+        "type": "string"
+      },
+      "SourceStatus": {
+        "enum": [
+          "ACTIVE",
+          "PAUSED",
+          "DELETING",
+          "ERROR"
+        ],
+        "type": "string"
+      },
+      "SourceSummaryResponse": {
+        "properties": {
+          "bindings": {
+            "items": {
+              "$ref": "#/components/schemas/SourceSummaryResponse"
+            },
+            "type": "array"
+          },
+          "deleted_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "document_objects": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "failed_task_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "modified_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "new_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pending_task_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "running_task_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "total_objects": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "unchanged_count": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source_id",
+          "total_objects",
+          "document_objects"
+        ],
+        "type": "object"
+      },
+      "SourceTreeChildrenRequest": {
+        "properties": {
+          "binding_id": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "include_containers": {
+            "type": "boolean"
+          },
+          "include_documents": {
+            "type": "boolean"
+          },
+          "list_mode": {
+            "$ref": "#/components/schemas/ListMode"
+          },
+          "max_items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "page_size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "parent_key": {
+            "type": "string"
+          },
+          "state_filter": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tree_key": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SourceTreeSearchRequest": {
+        "properties": {
+          "binding_id": {
+            "type": "string"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "include_containers": {
+            "type": "boolean"
+          },
+          "include_documents": {
+            "type": "boolean"
+          },
+          "keyword": {
+            "type": "string"
+          },
+          "list_mode": {
+            "$ref": "#/components/schemas/ListMode"
+          },
+          "max_items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "page_size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "parent_key": {
+            "type": "string"
+          },
+          "state_filter": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tree_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "keyword"
+        ],
+        "type": "object"
+      },
+      "SyncMode": {
+        "enum": [
+          "manual",
+          "scheduled",
+          "watch"
+        ],
+        "type": "string"
+      },
+      "SyncRunIntent": {
+        "properties": {
+          "binding_generation": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "binding_id": {
+            "type": "string"
+          },
+          "created": {
+            "type": "boolean"
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "scope_ref": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "scope_type": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "trigger_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "source_id",
+          "binding_id",
+          "binding_generation",
+          "status",
+          "trigger_type",
+          "scope_type",
+          "created"
+        ],
+        "type": "object"
+      },
+      "SyncState": {
+        "enum": [
+          "IDLE",
+          "SCHEDULED",
+          "PENDING",
+          "RUNNING",
+          "FAILED"
+        ],
+        "type": "string"
+      },
+      "TaskAction": {
+        "enum": [
+          "CREATE",
+          "REPARSE",
+          "DELETE"
+        ],
+        "type": "string"
+      },
+      "TaskDocument": {
+        "properties": {
+          "binding_id": {
+            "type": "string"
+          },
+          "core_document_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "current_version_id": {
+            "type": "string"
+          },
+          "desired_version_id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "object_key": {
+            "type": "string"
+          },
+          "parse_status": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "source_version": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "source_id",
+          "binding_id",
+          "object_key"
+        ],
+        "type": "object"
+      },
+      "TaskDocumentState": {
+        "properties": {
+          "active_task_id": {
+            "type": "string"
+          },
+          "baseline_version": {
+            "type": "string"
+          },
+          "binding_generation": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "binding_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "document_list_visible": {
+            "type": "boolean"
+          },
+          "last_detected_at": {
+            "type": "string"
+          },
+          "last_error": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "last_synced_at": {
+            "type": "string"
+          },
+          "object_key": {
+            "type": "string"
+          },
+          "parse_queue_state": {
+            "type": "string"
+          },
+          "pending_action": {
+            "type": "string"
+          },
+          "selectable": {
+            "type": "boolean"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "source_state": {
+            "$ref": "#/components/schemas/SourceState"
+          },
+          "source_version": {
+            "type": "string"
+          },
+          "sync_state": {
+            "$ref": "#/components/schemas/SyncState"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "binding_id",
+          "binding_generation",
+          "object_key",
+          "source_state",
+          "sync_state",
+          "document_list_visible",
+          "selectable"
+        ],
+        "type": "object"
+      },
+      "TaskObject": {
+        "properties": {
+          "binding_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "is_container": {
+            "type": "boolean"
+          },
+          "is_document": {
+            "type": "boolean"
+          },
+          "object_key": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "source_version": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "binding_id",
+          "object_key",
+          "display_name",
+          "is_document",
+          "is_container"
+        ],
+        "type": "object"
+      },
+      "TreeNode": {
+        "properties": {
+          "binding_id": {
+            "type": "string"
+          },
+          "connector_type": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "has_children": {
+            "type": "boolean"
+          },
+          "is_container": {
+            "type": "boolean"
+          },
+          "is_document": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "node_ref": {
+            "type": "string"
+          },
+          "object_key": {
+            "type": "string"
+          },
+          "parent_key": {
+            "type": "string"
+          },
+          "parse_queue_state": {
+            "type": "string"
+          },
+          "provider_meta": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "selectable": {
+            "type": "boolean"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "source_state": {
+            "type": "string"
+          },
+          "sync_state": {
+            "type": "string"
+          },
+          "target_ref": {
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          },
+          "tree_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "display_name",
+          "is_document",
+          "is_container",
+          "has_children",
+          "selectable"
+        ],
+        "type": "object"
+      },
+      "TreeNodePage": {
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TreeNode"
+            },
+            "type": "array"
+          },
+          "list_complete": {
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "type": "string"
+          },
+          "search_mode": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor",
+          "has_more",
+          "list_complete",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "TriggerSourceSyncRequest": {
+        "properties": {
+          "binding_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "scope_ref": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "scope_type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TriggerSourceSyncResponse": {
+        "properties": {
+          "intents": {
+            "items": {
+              "$ref": "#/components/schemas/SyncRunIntent"
+            },
+            "type": "array"
+          },
+          "job_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "run_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_ids",
+          "job_ids"
+        ],
+        "type": "object"
+      },
+      "UpdateSourceRequest": {
+        "properties": {
+          "bindings": {
+            "items": {
+              "$ref": "#/components/schemas/SourceBindingRequest"
+            },
+            "type": "array"
+          },
+          "config_version": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "exclude_extensions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "include_extensions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source_options": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "config_version"
+        ],
+        "type": "object"
+      },
+      "UpdateSourceResponse": {
+        "properties": {
+          "bindings": {
+            "items": {
+              "$ref": "#/components/schemas/SourceBindingResponse"
+            },
+            "type": "array"
+          },
+          "created_binding_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "job_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "removed_binding_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SourceResponse"
+          },
+          "updated_binding_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "source",
+          "bindings"
+        ],
+        "type": "object"
+      },
+      "ValidateBindingTargetRequest": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "auth_connection_id": {
+            "type": "string"
+          },
+          "connector_type": {
+            "type": "string"
+          },
+          "provider_options": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "target_ref": {
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "connector_type",
+          "target_type",
+          "target_ref"
+        ],
+        "type": "object"
+      },
+      "ValidateBindingTargetResponse": {
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "provider_meta": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "root_object_key": {
+            "type": "string"
+          },
+          "target_fingerprint": {
+            "type": "string"
+          },
+          "target_ref": {
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_type",
+          "target_ref",
+          "target_fingerprint",
+          "display_name",
+          "root_object_key"
+        ],
+        "type": "object"
+      },
+      "CompensationResponse": {
+        "type": "object",
+        "properties": {
+          "compensation": {
+            "$ref": "#/components/schemas/Compensation"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/Compensation"
+          },
+          "accepted": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "info": {
+    "title": "scan-control-plane-v2",
+    "version": "0.3.0"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/scan/admin/compensations": {
+      "get": {
+        "operationId": "listCompensations",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "binding_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/CompensationListResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/admin/compensations/{operation_id}/retry": {
+      "post": {
+        "operationId": "retryCompensation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/CompensationResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/admin/dead-letters": {
+      "get": {
+        "operationId": "listDeadLetters",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "binding_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/DeadLetterListResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/admin/dead-letters/{dead_letter_id}/retry": {
+      "post": {
+        "operationId": "retryDeadLetter",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dead_letter_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {}
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/RetryParseTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ParseTaskDetailResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/admin/deleting": {
+      "get": {
+        "operationId": "listDeletingResources",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "binding_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/DeletingResourceListResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/admin/sources/{source_id}/bindings/{binding_id}/reconcile": {
+      "post": {
+        "operationId": "reconcileBinding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "binding_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {}
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ReconcileBindingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ReconcileBindingResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/binding-targets/tree/children": {
+      "post": {
+        "operationId": "listBindingTargetChildren",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {}
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/BindingTargetChildrenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/TreeNodePage"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/binding-targets/tree/search": {
+      "post": {
+        "operationId": "searchBindingTargets",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {}
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/BindingTargetSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/TreeNodePage"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/binding-targets/validate": {
+      "post": {
+        "operationId": "validateBindingTarget",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {}
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ValidateBindingTargetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ValidateBindingTargetResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/connectors": {
+      "get": {
+        "operationId": "listConnectors",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorListResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/parse-tasks": {
+      "get": {
+        "operationId": "listParseTasks",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "binding_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "document_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "task_action",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ParseTaskListResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/parse-tasks/stats": {
+      "get": {
+        "operationId": "getParseTaskStats",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "binding_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "document_id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ParseTaskStatsResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/parse-tasks/{task_id}": {
+      "get": {
+        "operationId": "getParseTask",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ParseTaskDetailResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/parse-tasks/{task_id}/retry": {
+      "post": {
+        "operationId": "retryParseTask",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {}
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/RetryParseTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ParseTaskDetailResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/sources": {
+      "get": {
+        "operationId": "listSources",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "keyword",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "$ref": "#/components/schemas/SourceStatus"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/SourceListResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      },
+      "post": {
+        "operationId": "createSource",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {}
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/CreateSourceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/CreateSourceResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/sources/{source_id}": {
+      "delete": {
+        "operationId": "deleteSource",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSourceResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      },
+      "get": {
+        "operationId": "getSource",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/GetSourceResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      },
+      "put": {
+        "operationId": "updateSource",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {}
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSourceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateSourceResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/sources/{source_id}/bindings": {
+      "post": {
+        "operationId": "createSourceBinding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {}
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/SourceBindingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/BindingMutationResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/sources/{source_id}/bindings/{binding_id}": {
+      "delete": {
+        "operationId": "deleteSourceBinding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "binding_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteBindingResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      },
+      "put": {
+        "operationId": "updateSourceBinding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "binding_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {}
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/SourceBindingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/BindingMutationResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/sources/{source_id}/documents": {
+      "get": {
+        "operationId": "listSourceDocuments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "binding_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "keyword",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state_filter",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "parse_status",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDocumentListResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/sources/{source_id}/summary": {
+      "get": {
+        "operationId": "getSourceSummary",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/SourceSummaryResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/sources/{source_id}/sync": {
+      "post": {
+        "operationId": "triggerSourceSync",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {}
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/TriggerSourceSyncRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/TriggerSourceSyncResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/sources/{source_id}/tasks/expedite": {
+      "post": {
+        "operationId": "expediteParseTasks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {}
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ExpediteTasksRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ExpediteTasksResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/sources/{source_id}/tasks/generate": {
+      "post": {
+        "operationId": "generateParseTasks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {}
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/GenerateTasksRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateTasksResponse"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/sources/{source_id}/tree/children": {
+      "post": {
+        "operationId": "listSourceTreeChildren",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {}
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/SourceTreeChildrenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/TreeNodePage"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    },
+    "/api/scan/sources/{source_id}/tree/search": {
+      "post": {
+        "operationId": "searchSourceTree",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {}
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/SourceTreeSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/TreeNodePage"
+                }
+              }
+            },
+            "description": "ok"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {}
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "standard error"
+          }
+        },
+        "tags": [
+          "scan"
+        ]
+      }
+    }
+  }
+}

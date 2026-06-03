@@ -20,6 +20,7 @@ type listItem struct {
 	Description            string   `json:"description"`
 	BaseURL                string   `json:"base_url"`
 	Category               string   `json:"category"`
+	IsConfigured           bool     `json:"is_configured"`
 	Capabilities           []string `json:"capabilities"`
 	ModelTypes             []string `json:"model_types"`
 }
@@ -132,6 +133,7 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 			Description:            row.Description,
 			BaseURL:                row.BaseURL,
 			Category:               row.Category,
+			IsConfigured:           false,
 			Capabilities:           caps,
 			ModelTypes:             []string{},
 		})
@@ -140,10 +142,31 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 		return out
 	}
 
+	providerIDs := make([]string, 0, len(out))
 	defaultProviderIDs := make([]string, 0, len(out))
 	for i := range out {
+		providerIDs = append(providerIDs, out[i].ID)
 		defaultProviderIDs = append(defaultProviderIDs, out[i].DefaultModelProviderID)
 	}
+	type configuredProviderRow struct {
+		UserModelProviderID string `gorm:"column:user_model_provider_id"`
+	}
+	var configuredRows []configuredProviderRow
+	if err := db.WithContext(ctx).
+		Model(&orm.UserModelProviderGroup{}).
+		Select("user_model_provider_id").
+		Where("user_model_provider_id IN ? AND deleted_at IS NULL AND is_verified = ?", providerIDs, true).
+		Distinct("user_model_provider_id").
+		Find(&configuredRows).Error; err == nil {
+		configuredProviderIDs := make(map[string]bool, len(configuredRows))
+		for _, row := range configuredRows {
+			configuredProviderIDs[row.UserModelProviderID] = true
+		}
+		for i := range out {
+			out[i].IsConfigured = configuredProviderIDs[out[i].ID]
+		}
+	}
+
 	type modelTypeRow struct {
 		DefaultModelProviderID string `gorm:"column:default_model_provider_id"`
 		ModelType              string `gorm:"column:model_type"`
