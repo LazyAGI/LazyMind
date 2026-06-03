@@ -21,7 +21,13 @@ class CloudAuthConnection(Base):
     )
     credential_ciphertext = mapped_column(Text, nullable=False, comment='Encrypted app credential payload')
     auth_state_ciphertext = mapped_column(Text, nullable=False, default='', comment='Encrypted token/auth state')
-    provider_account_id = mapped_column(String(255), nullable=False, default='', index=True, comment='Provider account id')
+    provider_account_id = mapped_column(
+        String(255),
+        nullable=False,
+        default='',
+        index=True,
+        comment='Provider account id',
+    )
     display_name = mapped_column(String(255), nullable=False, default='', comment='Display name')
     provider_tenant_key = mapped_column(String(255), nullable=False, default='', comment='Provider tenant key')
     provider_account_meta = mapped_column(Text, nullable=False, default='', comment='Provider account metadata JSON')

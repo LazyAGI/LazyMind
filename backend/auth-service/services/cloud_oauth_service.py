@@ -260,7 +260,13 @@ class CloudOAuthService:
         account_id = (profile.provider_account_id or '').strip()
         if account_id:
             row.provider_account_id = account_id
-        display_name = (profile.display_name or fallback_display_name or row.display_name or row.provider_account_id or '').strip()
+        display_name = (
+            profile.display_name
+            or fallback_display_name
+            or row.display_name
+            or row.provider_account_id
+            or ''
+        ).strip()
         if display_name:
             row.display_name = display_name
         row.provider_tenant_key = (profile.provider_tenant_key or row.provider_tenant_key or '').strip()
