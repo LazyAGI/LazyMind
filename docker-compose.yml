@@ -158,17 +158,17 @@ services:
       args:
         <<: *mirror-args
     environment:
-      SCAN_CONTROL_PLANE_ADDRESS: "0.0.0.0"
-      SCAN_CONTROL_PLANE_PORT: "18080"
-      SCAN_CONTROL_PLANE_DB_DSN: "host=db user=root password=123456 dbname=scan_control_plane port=5432 sslmode=disable TimeZone=UTC"
-      SCAN_CONTROL_PLANE_CORE_BASE_URL: "http://core:8000"
-      SCAN_CONTROL_PLANE_AGENT_BASE_URL: "http://file-watcher:19090"
-      SCAN_CONTROL_PLANE_AGENT_TOKEN: "my-secret-token"
-      SCAN_CONTROL_PLANE_LOCAL_FS_DEFAULT_AGENT_ID: "file-watcher-local-001"
-      SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT: "/data/ragscan"
-      SCAN_CONTROL_PLANE_FEISHU_BASE_URL: "https://open.feishu.cn"
-      SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL: "http://auth-service:8000"
-      SCAN_CONTROL_PLANE_TEMP_DIR: "/data/staging"
+      LAZYMIND_SCAN_CONTROL_PLANE_ADDRESS: "0.0.0.0"
+      LAZYMIND_SCAN_CONTROL_PLANE_PORT: "18080"
+      LAZYMIND_SCAN_CONTROL_PLANE_DB_DSN: "host=db user=root password=123456 dbname=scan_control_plane port=5432 sslmode=disable TimeZone=UTC"
+      LAZYMIND_SCAN_CONTROL_PLANE_CORE_BASE_URL: "http://core:8000"
+      LAZYMIND_SCAN_CONTROL_PLANE_AGENT_BASE_URL: "http://file-watcher:19090"
+      LAZYMIND_SCAN_CONTROL_PLANE_AGENT_TOKEN: "my-secret-token"
+      LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_DEFAULT_AGENT_ID: "file-watcher-local-001"
+      LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT: "/data/ragscan"
+      LAZYMIND_SCAN_CONTROL_PLANE_FEISHU_BASE_URL: "https://open.feishu.cn"
+      LAZYMIND_SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL: "http://auth-service:8000"
+      LAZYMIND_SCAN_CONTROL_PLANE_TEMP_DIR: "/data/staging"
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
     volumes:
       - ${LAZYMIND_FILE_WATCHER_BASE_ROOT:-./data/scan}:/data/ragscan

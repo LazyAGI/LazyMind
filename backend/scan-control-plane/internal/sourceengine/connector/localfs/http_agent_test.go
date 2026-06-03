@@ -40,7 +40,7 @@ func TestHTTPAgentClientMapsLocalFSRequests(t *testing.T) {
 		return agentJSONResponse(t, http.StatusOK, payload), nil
 	})
 
-	t.Setenv("SCAN_CONTROL_PLANE_AGENT_TOKEN", "agent-token")
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_AGENT_TOKEN", "agent-token")
 	client := newHTTPAgentTestClient(t, "http://agent.test", transport)
 	info, err := client.ValidatePath(context.Background(), ValidatePathRequest{AgentID: "agent-1", Path: "/workspace/docs", UserID: "user-1"})
 	if err != nil || info.NormalizedPath != "/workspace/docs" {

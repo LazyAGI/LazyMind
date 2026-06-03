@@ -3,10 +3,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MIGRATION="${MIGRATION:-$ROOT_DIR/migrations/20260519101723_init.up.sql}"
-DB_DSN="${SCAN_CONTROL_PLANE_DB_DSN:-${DATABASE_URL:-}}"
+DB_DSN="${LAZYMIND_SCAN_CONTROL_PLANE_DB_DSN:-${DATABASE_URL:-}}"
 
 if [[ -z "$DB_DSN" ]]; then
-  echo "SCAN_CONTROL_PLANE_DB_DSN or DATABASE_URL is required" >&2
+  echo "LAZYMIND_SCAN_CONTROL_PLANE_DB_DSN or DATABASE_URL is required" >&2
   exit 2
 fi
 
@@ -30,8 +30,8 @@ for table in "${OWNED_TABLES[@]}"; do
   echo "  public.${table}"
 done
 
-if [[ "${SCAN_CONTROL_PLANE_RESET_CONFIRM:-}" != "drop-scan-control-plane-owned-tables" ]]; then
-  echo "Set SCAN_CONTROL_PLANE_RESET_CONFIRM=drop-scan-control-plane-owned-tables to continue." >&2
+if [[ "${LAZYMIND_SCAN_CONTROL_PLANE_RESET_CONFIRM:-}" != "drop-scan-control-plane-owned-tables" ]]; then
+  echo "Set LAZYMIND_SCAN_CONTROL_PLANE_RESET_CONFIRM=drop-scan-control-plane-owned-tables to continue." >&2
   exit 3
 fi
 

@@ -98,7 +98,7 @@ func (c *HTTPAgentClient) doJSON(ctx context.Context, endpoint string, in any, o
 }
 
 func agentTokenFromEnv() string {
-	if token := strings.TrimSpace(os.Getenv("SCAN_CONTROL_PLANE_AGENT_TOKEN")); token != "" {
+	if token := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_AGENT_TOKEN")); token != "" {
 		return token
 	}
 	return strings.TrimSpace(os.Getenv("LAZYMIND_FILE_WATCHER_AGENT_TOKEN"))

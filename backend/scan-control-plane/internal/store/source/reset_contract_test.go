@@ -41,7 +41,7 @@ func TestResetScriptDropsOnlyOwnedTablesAndPrintsList(t *testing.T) {
 	for _, forbidden := range []string{"auth", "core", "lazyllm", "cloud_source_bindings", "DROP SCHEMA"} {
 		assertNotContains(t, script, forbidden)
 	}
-	assertContains(t, script, "SCAN_CONTROL_PLANE_RESET_CONFIRM")
+	assertContains(t, script, "LAZYMIND_SCAN_CONTROL_PLANE_RESET_CONFIRM")
 	assertContains(t, script, "psql \"$DB_DSN\" -v ON_ERROR_STOP=1 -f \"$MIGRATION\"")
 }
 

@@ -66,10 +66,10 @@ func defaultConfig() Config {
 }
 
 func (c *Config) applyEnv() {
-	if address := strings.TrimSpace(os.Getenv("SCAN_CONTROL_PLANE_ADDRESS")); address != "" {
+	if address := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_ADDRESS")); address != "" {
 		c.Address = address
 	}
-	if portText := strings.TrimSpace(os.Getenv("SCAN_CONTROL_PLANE_PORT")); portText != "" {
+	if portText := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_PORT")); portText != "" {
 		port, err := strconv.Atoi(portText)
 		if err == nil {
 			c.Port = port
@@ -77,40 +77,40 @@ func (c *Config) applyEnv() {
 			c.Port = -1
 		}
 	}
-	if dsn := strings.TrimSpace(os.Getenv("SCAN_CONTROL_PLANE_DB_DSN")); dsn != "" {
+	if dsn := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_DB_DSN")); dsn != "" {
 		c.DBDSN = dsn
 	}
-	if baseURL := strings.TrimSpace(os.Getenv("SCAN_CONTROL_PLANE_CORE_BASE_URL")); baseURL != "" {
+	if baseURL := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_CORE_BASE_URL")); baseURL != "" {
 		c.CoreBaseURL = baseURL
 	}
-	if algoID := strings.TrimSpace(os.Getenv("SCAN_CONTROL_PLANE_DEFAULT_DATASET_ALGO_ID")); algoID != "" {
+	if algoID := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_DEFAULT_DATASET_ALGO_ID")); algoID != "" {
 		c.DefaultDatasetAlgoID = algoID
 	}
-	if algoName := strings.TrimSpace(os.Getenv("SCAN_CONTROL_PLANE_DEFAULT_DATASET_ALGO_NAME")); algoName != "" {
+	if algoName := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_DEFAULT_DATASET_ALGO_NAME")); algoName != "" {
 		c.DefaultDatasetAlgoName = algoName
 	}
-	if baseURL := strings.TrimSpace(os.Getenv("SCAN_CONTROL_PLANE_AGENT_BASE_URL")); baseURL != "" {
+	if baseURL := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_AGENT_BASE_URL")); baseURL != "" {
 		c.AgentBaseURL = baseURL
 	}
-	if token := strings.TrimSpace(os.Getenv("SCAN_CONTROL_PLANE_AGENT_TOKEN")); token != "" {
+	if token := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_AGENT_TOKEN")); token != "" {
 		c.AgentToken = token
 	}
-	if agentID := strings.TrimSpace(os.Getenv("SCAN_CONTROL_PLANE_LOCAL_FS_DEFAULT_AGENT_ID")); agentID != "" {
+	if agentID := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_DEFAULT_AGENT_ID")); agentID != "" {
 		c.LocalFSDefaultAgentID = agentID
 	}
-	if publicRoot := strings.TrimSpace(os.Getenv("SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT")); publicRoot != "" {
+	if publicRoot := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT")); publicRoot != "" {
 		c.LocalFSPublicRoot = publicRoot
 	}
-	if baseURL := strings.TrimSpace(os.Getenv("SCAN_CONTROL_PLANE_FEISHU_BASE_URL")); baseURL != "" {
+	if baseURL := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_FEISHU_BASE_URL")); baseURL != "" {
 		c.FeishuBaseURL = baseURL
 	}
-	if baseURL := strings.TrimSpace(os.Getenv("SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL")); baseURL != "" {
+	if baseURL := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL")); baseURL != "" {
 		c.AuthServiceBaseURL = baseURL
 	}
 	if token := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")); token != "" {
 		c.AuthServiceInternalToken = token
 	}
-	if tempDir := strings.TrimSpace(os.Getenv("SCAN_CONTROL_PLANE_TEMP_DIR")); tempDir != "" {
+	if tempDir := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_TEMP_DIR")); tempDir != "" {
 		c.TempDir = tempDir
 	}
 	c.TempTTL = durationEnv("SOURCEENGINE_TEMP_TTL", c.TempTTL)

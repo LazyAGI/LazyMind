@@ -42,11 +42,11 @@ func main() {
 }
 
 func healthcheck() error {
-	address := os.Getenv("SCAN_CONTROL_PLANE_ADDRESS")
+	address := os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_ADDRESS")
 	if address == "" || address == "0.0.0.0" {
 		address = "127.0.0.1"
 	}
-	port := os.Getenv("SCAN_CONTROL_PLANE_PORT")
+	port := os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_PORT")
 	if port == "" {
 		port = "18080"
 	}
