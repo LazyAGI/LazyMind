@@ -129,6 +129,7 @@ const LOCAL_SCAN_CHAT_STORAGE_KEY = "lazymind:datasource:local-scan:chat-enabled
 const LOCAL_PATH_CACHE_ROOT_KEY = "__root__";
 const FEISHU_TARGET_CACHE_ROOT_KEY = "__root__";
 const DATA_SOURCE_LIST_DEFAULT_PAGE_SIZE = 10;
+const DEFAULT_SCHEDULE_WEEKDAYS = ["1", "2", "3", "4", "5", "6", "7"];
 type DataSourceView = "assets" | "connectors";
 type FeishuSetupIntent = "create" | "auth" | null;
 type DataSourceSaveMode = "create" | "createAndSync";
@@ -154,6 +155,16 @@ function normalizeScheduleTime(scheduleTime?: string) {
     return `${value}:00`;
   }
   return SCHEDULE_TIME_PATTERN.test(value) ? value : DEFAULT_SCHEDULE_TIME;
+}
+
+function normalizeScheduleWeekdays(scheduleWeekdays?: string[]) {
+  const uniqueDays = Array.from(
+    new Set((scheduleWeekdays || []).map((day) => `${day}`.trim())),
+  ).filter((day) => /^[1-7]$/.test(day));
+  if (uniqueDays.length === 0) {
+    return DEFAULT_SCHEDULE_WEEKDAYS;
+  }
+  return uniqueDays.sort((left, right) => Number(left) - Number(right));
 }
 
 function normalizeKnowledgeBaseName(value?: string) {
@@ -407,13 +418,13 @@ function parseFeishuScheduleExpr(expr?: string) {
   }
   return {
     syncMode: "scheduled" as const,
-    scheduleCycle: parsed.scheduleCycle,
+    scheduleWeekdays: parsed.scheduleWeekdays,
     scheduleTime: parsed.scheduleTime,
   };
 }
 
-function buildFeishuScheduleExpr(scheduleCycle?: string, scheduleTime?: string) {
-  return buildReconcileSchedule(scheduleCycle, scheduleTime);
+function buildFeishuScheduleExpr(scheduleWeekdays?: string[], scheduleTime?: string) {
+  return buildReconcileSchedule(scheduleWeekdays, scheduleTime);
 }
 
 function buildFeishuManualScheduleExpr() {
@@ -569,10 +580,11 @@ function isFeishuHelperNode(node: FeishuTargetTreeNode) {
 }
 
 // Shared schedule expression helpers (used by both local reconcile_schedule and
-// cloud schedule_expr). Format follows backend: `daily@HH:MM:SS`,
-// `every2d@HH:MM:SS`, `every7d@HH:MM:SS`, or `manual`.
+// cloud schedule_expr). New weekly format is `weekly:1,2,3@HH:MM:SS`;
+// legacy `daily@HH:MM:SS`, `every2d@HH:MM:SS`, and `every7d@HH:MM:SS`
+// are still parsed for existing records.
 function parseReconcileSchedule(expr?: string): {
-  scheduleCycle: "daily" | "twoDays" | "weekly";
+  scheduleWeekdays: string[];
   scheduleTime: string;
 } | null {
   if (!expr) return null;
@@ -581,32 +593,46 @@ function parseReconcileSchedule(expr?: string): {
   const lower = trimmed.toLowerCase();
   if (lower === "manual" || lower === "manual_only") return null;
 
+  const weeklyMatch = trimmed.match(
+    /^weekly:([1-7](?:,[1-7])*)@(([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?)$/i,
+  );
+  if (weeklyMatch) {
+    return {
+      scheduleWeekdays: normalizeScheduleWeekdays(weeklyMatch[1].split(",")),
+      scheduleTime: normalizeScheduleTime(weeklyMatch[2]),
+    };
+  }
   const dailyMatch = trimmed.match(/^daily@(([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?)$/i);
   if (dailyMatch) {
-    return { scheduleCycle: "daily", scheduleTime: normalizeScheduleTime(dailyMatch[1]) };
+    return {
+      scheduleWeekdays: DEFAULT_SCHEDULE_WEEKDAYS,
+      scheduleTime: normalizeScheduleTime(dailyMatch[1]),
+    };
   }
   const everyMatch = trimmed.match(/^every(\d+)d@(([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?)$/i);
   if (everyMatch) {
-    const days = Number(everyMatch[1]);
-    const time = normalizeScheduleTime(everyMatch[2]);
-    if (days === 2) return { scheduleCycle: "twoDays", scheduleTime: time };
-    if (days === 7) return { scheduleCycle: "weekly", scheduleTime: time };
-    return { scheduleCycle: "daily", scheduleTime: time };
+    return {
+      scheduleWeekdays: DEFAULT_SCHEDULE_WEEKDAYS,
+      scheduleTime: normalizeScheduleTime(everyMatch[2]),
+    };
   }
   return null;
 }
 
-function buildReconcileSchedule(scheduleCycle?: string, scheduleTime?: string): string {
+function buildReconcileSchedule(scheduleWeekdays?: string[], scheduleTime?: string): string {
   const time = normalizeScheduleTime(scheduleTime);
-  if (scheduleCycle === "twoDays") return `every2d@${time}`;
-  if (scheduleCycle === "weekly") return `every7d@${time}`;
-  return `daily@${time}`;
+  const weekdays = normalizeScheduleWeekdays(scheduleWeekdays);
+  return `weekly:${weekdays.join(",")}@${time}`;
 }
 
-function getScheduleCycleLabel(scheduleCycle: string, t: TFunction): string {
-  if (scheduleCycle === "twoDays") return t("admin.dataSourceCycleTwoDays");
-  if (scheduleCycle === "weekly") return t("admin.dataSourceCycleWeekly");
-  return t("admin.dataSourceCycleDaily");
+function getScheduleWeekdaysLabel(scheduleWeekdays: string[], t: TFunction): string {
+  const weekdays = normalizeScheduleWeekdays(scheduleWeekdays);
+  if (weekdays.length === 7) {
+    return t("admin.dataSourceScheduleEveryday");
+  }
+  return weekdays
+    .map((day) => t(`admin.dataSourceScheduleWeekday${day}`))
+    .join("、");
 }
 
 function buildFeishuScheduleLabel(binding: ScanV2Binding | null, t: TFunction) {
@@ -616,7 +642,7 @@ function buildFeishuScheduleLabel(binding: ScanV2Binding | null, t: TFunction) {
   }
 
   return t("admin.dataSourceScheduleLabel", {
-    cycle: getScheduleCycleLabel(parsed.scheduleCycle, t),
+    cycle: getScheduleWeekdaysLabel(parsed.scheduleWeekdays, t),
     time: parsed.scheduleTime,
   });
 }
@@ -672,19 +698,31 @@ function pickScanAgent(agents: ScanV2AgentHint[], preferredAgentId?: string) {
   return onlineAgent || agents[0];
 }
 
-function inferScheduleCycle(scheduleLabel: string) {
+function inferScheduleWeekdays(scheduleLabel: string) {
   const normalized = scheduleLabel.toLowerCase();
   if (
-    scheduleLabel.includes("每 2 天") ||
-    normalized.includes("every 2 day") ||
-    normalized.includes("2 day")
+    scheduleLabel.includes("每天") ||
+    scheduleLabel.includes("全天") ||
+    normalized.includes("daily") ||
+    normalized.includes("every day")
   ) {
-    return "twoDays";
+    return DEFAULT_SCHEDULE_WEEKDAYS;
   }
-  if (scheduleLabel.includes("每周") || normalized.includes("week")) {
-    return "weekly";
-  }
-  return "daily";
+  const weekdayMap: Array<[string, string[]]> = [
+    ["1", ["周一", "星期一", "monday", "mon"]],
+    ["2", ["周二", "星期二", "tuesday", "tue"]],
+    ["3", ["周三", "星期三", "wednesday", "wed"]],
+    ["4", ["周四", "星期四", "thursday", "thu"]],
+    ["5", ["周五", "星期五", "friday", "fri"]],
+    ["6", ["周六", "星期六", "saturday", "sat"]],
+    ["7", ["周日", "周天", "星期日", "星期天", "sunday", "sun"]],
+  ];
+  const matchedDays = weekdayMap
+    .filter(([, labels]) =>
+      labels.some((label) => normalized.includes(label.toLowerCase())),
+    )
+    .map(([day]) => day);
+  return normalizeScheduleWeekdays(matchedDays);
 }
 
 function parseFeishuOAuthCallbackInput(value: string) {
@@ -814,7 +852,7 @@ export default function DataSourceManagement() {
 
     const parsed = parseReconcileSchedule(getBindingSchedule(binding));
     if (parsed) {
-      const cycleLabel = getScheduleCycleLabel(parsed.scheduleCycle, t);
+      const cycleLabel = getScheduleWeekdaysLabel(parsed.scheduleWeekdays, t);
       return `${cycleLabel} ${parsed.scheduleTime} ${t("admin.dataSourceScheduleAutoSuffix")}`;
     }
 
@@ -2076,8 +2114,7 @@ export default function DataSourceManagement() {
     form.setFieldsValue({
       knowledgeBase: record.knowledgeBase,
       syncMode: record.syncMode,
-      scheduleCycle:
-        inferScheduleCycle(record.scheduleLabel),
+      scheduleWeekdays: inferScheduleWeekdays(record.scheduleLabel),
       scheduleTime: normalizeScheduleTime(
         record.scheduleLabel.match(/\d{2}:\d{2}(?::\d{2})?/)?.[0],
       ),
@@ -2124,7 +2161,7 @@ export default function DataSourceManagement() {
     setFeishuTargetLoading(false);
     form.setFieldsValue({
       syncMode: "scheduled",
-      scheduleCycle: "daily",
+      scheduleWeekdays: DEFAULT_SCHEDULE_WEEKDAYS,
       scheduleTime: DEFAULT_SCHEDULE_TIME,
       conflictPolicy: "versioned",
       path: [],
@@ -2277,7 +2314,7 @@ export default function DataSourceManagement() {
         setEditingId(null);
         const feishuFormValues = {
           syncMode: "scheduled",
-          scheduleCycle: "daily",
+          scheduleWeekdays: DEFAULT_SCHEDULE_WEEKDAYS,
           scheduleTime: DEFAULT_SCHEDULE_TIME,
           conflictPolicy: "versioned",
           path: [],
@@ -2679,7 +2716,7 @@ export default function DataSourceManagement() {
     const sourceName = `${values.knowledgeBase || getSourceTypeTitle("local", t)}`.trim();
     const isScheduled = (values.syncMode || "scheduled") === "scheduled";
     const reconcileSchedule = isScheduled
-      ? buildReconcileSchedule(values.scheduleCycle, values.scheduleTime)
+      ? buildReconcileSchedule(values.scheduleWeekdays, values.scheduleTime)
       : "manual";
     const currentLocalSource =
       editingId && selectedType === "local"
@@ -2808,7 +2845,7 @@ export default function DataSourceManagement() {
       let sourceId = currentFeishuSource?.id || "";
       const scheduleExpr =
         values.syncMode === "scheduled"
-          ? buildFeishuScheduleExpr(values.scheduleCycle, values.scheduleTime)
+          ? buildFeishuScheduleExpr(values.scheduleWeekdays, values.scheduleTime)
           : buildFeishuManualScheduleExpr();
       const bindingRequest = {
         connector_type: "feishu",
@@ -2911,7 +2948,7 @@ export default function DataSourceManagement() {
     try {
       const syncStrategyFields =
         form.getFieldValue("syncMode") === "scheduled"
-          ? ["syncMode", "scheduleCycle", "scheduleTime"]
+          ? ["syncMode", "scheduleWeekdays", "scheduleTime"]
           : ["syncMode"];
 
       if (wizardMode === "edit") {

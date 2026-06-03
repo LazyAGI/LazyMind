@@ -997,6 +997,20 @@
   }
 }
 
+.data-source-schedule-weekdays.ant-checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+
+  .ant-checkbox-wrapper {
+    margin-inline-start: 0;
+  }
+}
+
+.data-source-schedule-shortcuts {
+  margin: -6px 0 12px;
+}
+
 .data-source-strategy-notes {
   display: flex;
   flex-direction: column;

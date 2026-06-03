@@ -148,6 +148,7 @@ export interface SourceFormValues {
   scopes?: string[];
   syncMode?: SyncMode;
   scheduleCycle?: string;
+  scheduleWeekdays?: string[];
   scheduleTime?: string;
   fileSyncMode?: FileSyncMode;
   selectedFiles?: string[];

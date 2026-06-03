@@ -1,6 +1,7 @@
 import {
   Button,
   Card,
+  Checkbox,
   Col,
   Empty,
   Form,
@@ -8,7 +9,6 @@ import {
   Modal,
   Radio,
   Row,
-  Select,
   Space,
   Spin,
   Steps,
@@ -40,6 +40,10 @@ import {
 } from "../shared";
 
 const { Paragraph, Text } = Typography;
+
+const SCHEDULE_WEEKDAYS = ["1", "2", "3", "4", "5", "6", "7"];
+const SCHEDULE_WORKDAYS = ["1", "2", "3", "4", "5"];
+const SCHEDULE_WEEKENDS = ["6", "7"];
 
 export type LocalPathSelectOption = DataNode & {
   value: string;
@@ -484,28 +488,51 @@ export default function DataSourceWizardModal({
                           <Text type="secondary">{t("admin.dataSourceScheduleDesc")}</Text>
                         </div>
                         <Row gutter={16}>
-                          <Col xs={24} md={12}>
+                          <Col xs={24}>
                             <Form.Item
-                              label={t("admin.dataSourceScheduleCycle")}
-                              name="scheduleCycle"
+                              label={t("admin.dataSourceScheduleWeekdays")}
+                              name="scheduleWeekdays"
+                              rules={[
+                                {
+                                  required: true,
+                                  message: t("admin.dataSourceScheduleWeekdaysRequired"),
+                                },
+                              ]}
                             >
-                              <Select
-                                options={[
-                                  {
-                                    label: t("admin.dataSourceCycleDaily"),
-                                    value: "daily",
-                                  },
-                                  {
-                                    label: t("admin.dataSourceCycleTwoDays"),
-                                    value: "twoDays",
-                                  },
-                                  {
-                                    label: t("admin.dataSourceCycleWeekly"),
-                                    value: "weekly",
-                                  },
-                                ]}
-                              />
+                              <Checkbox.Group className="data-source-schedule-weekdays">
+                                {SCHEDULE_WEEKDAYS.map((day) => (
+                                  <Checkbox key={day} value={day}>
+                                    {t(`admin.dataSourceScheduleWeekday${day}`)}
+                                  </Checkbox>
+                                ))}
+                              </Checkbox.Group>
                             </Form.Item>
+                            <Space wrap className="data-source-schedule-shortcuts">
+                              <Button
+                                size="small"
+                                onClick={() =>
+                                  form.setFieldValue("scheduleWeekdays", SCHEDULE_WORKDAYS)
+                                }
+                              >
+                                {t("admin.dataSourceScheduleShortcutWorkdays")}
+                              </Button>
+                              <Button
+                                size="small"
+                                onClick={() =>
+                                  form.setFieldValue("scheduleWeekdays", SCHEDULE_WEEKENDS)
+                                }
+                              >
+                                {t("admin.dataSourceScheduleShortcutWeekends")}
+                              </Button>
+                              <Button
+                                size="small"
+                                onClick={() =>
+                                  form.setFieldValue("scheduleWeekdays", SCHEDULE_WEEKDAYS)
+                                }
+                              >
+                                {t("admin.dataSourceScheduleShortcutEveryday")}
+                              </Button>
+                            </Space>
                           </Col>
                           <Col xs={24} md={12}>
                             <Form.Item
