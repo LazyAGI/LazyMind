@@ -2462,18 +2462,11 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 			break
 		}
 	}
-	// Map frontend reparse scope to embed_only value:
-	//   slice_missing    → "slice_missing" (fill gaps: slice+embed only groups with no segments)
-	//   slice_and_embed  → true (rebuild vectors: skip slice, reembed existing nodes)
-	//   rebuild / other  → false (full reparse: reslice + reembed all)
-	var embedOnly any = false
-	switch reparseMode {
-	case "slice_missing":
-		embedOnly = "slice_missing"
-	case "slice_and_embed":
-		embedOnly = true
-	default:
-		embedOnly = false
+	// Pass reparse_mode through as the strategy string; only
+	// "slice_and_embed" is renamed to "reembed" for the algorithm.
+	strategy := reparseMode
+	if reparseMode == "slice_and_embed" {
+		strategy = "reembed"
 	}
 	applog.Logger.Info().
 		Str("handler", "StartReparseTask").
@@ -2483,9 +2476,9 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		Strs("doc_ids", docIDs).
 		Strs("ng_names", ngNames).
 		Str("reparse_mode", reparseMode).
-		Any("embed_only", embedOnly).
+		Str("strategy", strategy).
 		Msg("submitting reparse batch to doc service")
-	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, EmbedOnly: embedOnly, IdempotencyKey: newTaskID(), ModelConfig: llmConfig})
+	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, Strategy: strategy, IdempotencyKey: newTaskID(), ModelConfig: llmConfig})
 	if err != nil {
 		errMsg := common.ResolveAppError(err.Error(), http.StatusBadGateway).Message
 		applog.Logger.Error().

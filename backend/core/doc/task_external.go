@@ -37,7 +37,7 @@ type reparseRequest struct {
 	DocIDs         []string       `json:"doc_ids"`
 	KbID           string         `json:"kb_id,omitempty"`
 	NgNames        []string       `json:"ng_names,omitempty"`
-	EmbedOnly      any            `json:"embed_only,omitempty"`
+	Strategy       string         `json:"strategy,omitempty"`
 	IdempotencyKey string         `json:"idempotency_key,omitempty"`
 	ModelConfig    map[string]any `json:"llm_config,omitempty"`
 }
