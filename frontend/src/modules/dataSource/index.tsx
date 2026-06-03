@@ -94,7 +94,6 @@ import {
   getSourceTypeTitle,
   getStatusMeta,
   getSyncModeLabel,
-  isCloudType,
   normalizeDataSourceConnectionState,
   normalizeDataSourceStatus,
 } from "./shared";
@@ -2654,41 +2653,6 @@ export default function DataSourceManagement() {
     });
   };
 
-  const validateConnectionBeforeSave = (
-    sourceType: SourceType | null,
-    saveMode: DataSourceSaveMode,
-  ) => {
-    if (!sourceType) {
-      message.warning(t("admin.dataSourceSelectTypeFirst"));
-      return false;
-    }
-
-    if (isCloudType(sourceType) && !isFeishuSetupReady) {
-      message.warning(t("admin.dataSourceFeishuCredentialFirst"));
-      return false;
-    }
-
-    if (isCloudType(sourceType)) {
-      if (!oauthConnection?.connectionId) {
-        message.warning(t("admin.dataSourceOauthRequiredBeforeSave"));
-        return false;
-      }
-
-      return true;
-    }
-
-    if (saveMode === "create") {
-      return true;
-    }
-
-    if (!connectionVerified) {
-      message.warning(t("admin.dataSourceTestConnectionFirst"));
-      return false;
-    }
-
-    return true;
-  };
-
   const ensureKnowledgeBaseNameUnique = async (value?: string) => {
     if (wizardMode === "edit") {
       return true;
@@ -2859,11 +2823,6 @@ export default function DataSourceManagement() {
     const authConnectionId =
       oauthConnection?.connectionId || (wizardMode === "edit" ? currentFeishuSource?.authConnectionId : "");
 
-    if (!authConnectionId) {
-      message.warning(t("admin.dataSourceTestConnectionFirst"));
-      return;
-    }
-
     if (targetRefs.length === 0) {
       message.warning(t("admin.dataSourceFeishuSpaceRequired"));
       return;
@@ -3015,13 +2974,6 @@ export default function DataSourceManagement() {
       if (
         wizardMode !== "edit" &&
         !(await ensureKnowledgeBaseNameUnique(values.knowledgeBase))
-      ) {
-        return;
-      }
-
-      if (
-        wizardMode !== "edit" &&
-        !validateConnectionBeforeSave(effectiveSourceType, saveMode)
       ) {
         return;
       }
