@@ -74,11 +74,11 @@ def build_system_prompt(
             prompt_parts.append(f'## Agent Working Memory\n{memory.strip()}')
 
     tool_guidance: list[str] = []
-    if 'vocab' in active_groups:
+    if 'vocab_learn' in active_groups:
         tool_guidance.append(VOCAB_GUIDANCE)
-    if 'memory' in active_groups and use_memory:
+    if 'memory_editor' in active_groups and use_memory:
         tool_guidance.append(MEMORY_GUIDANCE)
-    if 'skill_manager' in active_groups:
+    if 'skill_editor' in active_groups:
         tool_guidance.append(SKILLS_GUIDANCE)
     if tool_guidance:
         prompt_parts.append(' '.join(tool_guidance))

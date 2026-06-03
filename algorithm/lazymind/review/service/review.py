@@ -8,9 +8,9 @@ import lazyllm
 from lazyllm.tools.fs.client import FS
 
 from lazymind.chat.engine.tools import (
-    memory_manage,
-    skill_manage,
-    vocab_manage,
+    memory_editor,
+    skill_editor,
+    vocab_learn,
 )
 from lazymind.chat.engine.tools.infra import list_all_skills_with_category
 from lazymind.config import config as _cfg
@@ -19,9 +19,9 @@ from lazymind.review.prompts import COMBINED_REVIEW_PROMPT
 
 
 _REVIEW_TOOLS: dict[str, Any] = {
-    'memory': memory_manage,
-    'skill_manage': skill_manage,
-    'vocab_manage': vocab_manage,
+    'memory_editor': memory_editor,
+    'skill_editor': skill_editor,
+    'vocab_learn': vocab_learn,
 }
 
 
@@ -44,16 +44,16 @@ def _build_review_decision(
     skill_review_interval: int,
 ) -> dict[str, Any]:
     memory_due = (
-        'memory' in available_tools
+        'memory_editor' in available_tools
         and user_turns > memory_review_interval
     )
     skill_due_by_tool_turns = (
-        'skill_manage' in available_tools
+        'skill_editor' in available_tools
         and tool_turns >= skill_review_interval
         and user_turns > 1
     )
     skill_due_by_user_turns = (
-        'skill_manage' in available_tools
+        'skill_editor' in available_tools
         and user_turns > skill_review_interval
     )
     skill_due = skill_due_by_tool_turns or skill_due_by_user_turns

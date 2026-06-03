@@ -5,9 +5,9 @@ from lazymind.review.prompts import (
 )
 
 REVIEW_TOOLS: dict[str, list[str]] = {
-    'memory': ['memory'],
-    'skill': ['skill_manage'],
-    'combined': ['memory', 'skill_manage', 'vocab_manage'],
+    'memory': ['memory_editor'],
+    'skill': ['skill_editor'],
+    'combined': ['memory_editor', 'skill_editor', 'vocab_learn'],
 }
 
 REVIEW_PROMPTS: dict[str, str] = {

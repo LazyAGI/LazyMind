@@ -42,6 +42,6 @@ def test_agentic_guidance_strings_are_non_empty_and_balanced():
 
     assert 'LAZYMIND' in DEFAULT_SYSTEM_PROMPT
     assert 'kb_search' in SEARCH_GUIDANCE
-    assert 'memory_manage' in MEMORY_GUIDANCE
-    assert 'skill_manage' in SKILLS_GUIDANCE
-    assert 'vocab_manage' in VOCAB_GUIDANCE
+    assert 'memory_editor' in MEMORY_GUIDANCE
+    assert 'skill_editor' in SKILLS_GUIDANCE
+    assert 'vocab_learn' in VOCAB_GUIDANCE

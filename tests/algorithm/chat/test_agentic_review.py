@@ -25,19 +25,19 @@ from lazymind.review.service.review import (  # noqa: E402
 
 
 def test_combined_review_uses_three_tools_and_single_choice_prompt():
-    assert REVIEW_TOOLS['combined'] == ['memory', 'skill_manage', 'vocab_manage']
-    assert 'vocab_manage' in COMBINED_REVIEW_PROMPT
+    assert REVIEW_TOOLS['combined'] == ['memory_editor', 'skill_editor', 'vocab_learn']
+    assert 'vocab_learn' in COMBINED_REVIEW_PROMPT
     assert 'exactly three tool choices' in COMBINED_REVIEW_PROMPT
     assert 'at most one' in COMBINED_REVIEW_PROMPT
 
 
 def test_resolve_review_runtime_tools_builds_tool_groups():
-    runtime_tools = _resolve_review_runtime_tools(['memory', 'skill_manage', 'vocab_manage'])
+    runtime_tools = _resolve_review_runtime_tools(['memory_editor', 'skill_editor', 'vocab_learn'])
 
     assert [tool.__name__ for tool in runtime_tools] == [
-        'memory_manage',
-        'skill_manage',
-        'vocab_manage',
+        'memory_editor',
+        'skill_editor',
+        'vocab_learn',
     ]
 
 
@@ -74,4 +74,4 @@ def test_spawn_background_review_passes_runtime_tool_instances(monkeypatch):
         request_global_sid='sid-1',
     )
 
-    assert [tool.__name__ for tool in captured['tools']] == ['memory_manage']
+    assert [tool.__name__ for tool in captured['tools']] == ['memory_editor']

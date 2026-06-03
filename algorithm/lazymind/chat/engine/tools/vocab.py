@@ -34,7 +34,7 @@ _WORD_GROUP_APPLY_INTERNAL_PATH = '/inner/word_group:apply'
 
 
 @handle_tool_errors
-def vocab_manage(suggestions: List[VocabSuggestion]) -> Dict[str, Any]:
+def vocab_learn(suggestions: List[VocabSuggestion]) -> Dict[str, Any]:
     """Apply durable user-specific vocabulary updates for the current session user.
 
     Use this tool only when the conversation clearly establishes a stable term mapping for this user,
@@ -54,13 +54,13 @@ def vocab_manage(suggestions: List[VocabSuggestion]) -> Dict[str, Any]:
 
     if not suggestions:
         return tool_error(
-            'vocab_manage',
+            'vocab_learn',
             "'suggestions' must be a non-empty list.",
             log_message="[VocabTool] rejected reason='suggestions' must be a non-empty list.",
         )
     if len(suggestions) > MAX_VOCAB_SUGGESTIONS_PER_CALL:
         return tool_error(
-            'vocab_manage',
+            'vocab_learn',
             f'At most {MAX_VOCAB_SUGGESTIONS_PER_CALL} suggestions are allowed per call; '
             f'got {len(suggestions)}.',
             log_message=f'[VocabTool] rejected reason=too_many_suggestions count={len(suggestions)}',
@@ -70,7 +70,7 @@ def vocab_manage(suggestions: List[VocabSuggestion]) -> Dict[str, Any]:
     session_id = str(agentic_config.get('session_id') or '').strip()
     if not session_id:
         return tool_error(
-            'vocab_manage',
+            'vocab_learn',
             "'session_id' is required in agentic_config.",
             log_message="[VocabTool] rejected reason='session_id' is required in agentic_config.",
         )
@@ -78,7 +78,7 @@ def vocab_manage(suggestions: List[VocabSuggestion]) -> Dict[str, Any]:
     user_id = resolve_vocab_user_id(agentic_config)
     if not user_id:
         return tool_error(
-            'vocab_manage',
+            'vocab_learn',
             'user_id is required in agentic_config.',
             log_message="[VocabTool] rejected reason='user_id' is required in agentic_config.",
         )
@@ -159,7 +159,7 @@ def vocab_manage(suggestions: List[VocabSuggestion]) -> Dict[str, Any]:
     }
     if not actions:
         LOG.info(f'[VocabTool] finish status=no-op result={json.dumps(result, ensure_ascii=False)}')
-        return tool_success('vocab_manage', result)
+        return tool_success('vocab_learn', result)
 
     payload = {'action_list': actions}
     LOG.info(
@@ -170,11 +170,11 @@ def vocab_manage(suggestions: List[VocabSuggestion]) -> Dict[str, Any]:
         result.update(post_core_api(_WORD_GROUP_APPLY_INTERNAL_PATH, payload))
     except (requests.RequestException, RuntimeError) as exc:
         return tool_error(
-            'vocab_manage',
+            'vocab_learn',
             f'Failed to submit vocab suggestions: {exc}',
             log_message=f'[VocabTool] failed to submit vocab suggestions user_id={user_id!r}: {exc}',
             log_level='error',
         )
 
     LOG.info(f'[VocabTool] finish status=applied result={json.dumps(result, ensure_ascii=False)}')
-    return tool_success('vocab_manage', result)
+    return tool_success('vocab_learn', result)

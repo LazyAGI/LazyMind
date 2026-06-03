@@ -23,7 +23,7 @@ MAX_SUGGESTIONS_PER_CALL = 5
 
 
 @handle_tool_errors
-def skill_manage(
+def skill_editor(
     name: str,
     action: Literal['create', 'modify', 'remove'],
     category: Optional[str],
@@ -54,7 +54,7 @@ def skill_manage(
         reason: Why the skill should be removed. ONLY for action='remove'.
     """
     lazyllm.LOG.info(
-        '[skill_manage] called '
+        '[skill_editor] called '
         f'name={name!r} action={action!r} '
         f'category={category!r} content_len={len(content) if content else 0} '
         f'suggestions_count={len(suggestions) if suggestions else 0}'
@@ -62,21 +62,21 @@ def skill_manage(
 
     name_error = validate_skill_name(name)
     if name_error:
-        return tool_error('skill_manage', name_error, log_message=f'[skill_manage] fail reason={name_error!r}')
+        return tool_error('skill_editor', name_error, log_message=f'[skill_editor] fail reason={name_error!r}')
 
     agentic_config = lazyllm.globals['agentic_config']
     session_id = str(agentic_config.get('session_id') or '').strip()
     if not session_id:
         return tool_error(
-            'skill_manage',
+            'skill_editor',
             "'session_id' is required in agentic_config.",
-            log_message="[skill_manage] fail reason='session_id' is required in agentic_config.",
+            log_message="[skill_editor] fail reason='session_id' is required in agentic_config.",
         )
 
     normalized_category = normalize_skill_category(category)
     if normalized_category is None:
         return tool_error(
-            'skill_manage',
+            'skill_editor',
             f'Category {category!r} is invalid; it must be a single '
             "ASCII-safe path segment (only letters, digits, '-', '_' "
             "and '.'; no spaces, no Chinese, no '/')."
@@ -86,7 +86,7 @@ def skill_manage(
     skill_id = build_skill_identity(normalized_category or '', name)
     existing_skill = existing_skills.get(skill_id)
     lazyllm.LOG.info(
-        '[skill_manage] lookup '
+        '[skill_editor] lookup '
         f'skill_id={skill_id!r} '
         f'found={existing_skill is not None} '
         f'existing_keys={list(existing_skills.keys())!r}'
@@ -96,22 +96,22 @@ def skill_manage(
         content_error = validate_skill_content(content or '')
         if content_error:
             return tool_error(
-                'skill_manage',
+                'skill_editor',
                 content_error,
-                log_message=f'[skill_manage] fail reason={content_error!r}',
+                log_message=f'[skill_editor] fail reason={content_error!r}',
             )
         if suggestions:
-            return tool_error('skill_manage', "action='create' must not include 'suggestions'.")
+            return tool_error('skill_editor', "action='create' must not include 'suggestions'.")
         if existing_skill:
             source = existing_skill.get('source', 'file')
             if not is_writable_skill_source(source):
                 return tool_error(
-                    'skill_manage',
+                    'skill_editor',
                     f'Skill {name!r} already exists in category {normalized_category!r} '
-                    f'with read-only source {source!r}; skill_manage can only write remote skills.'
+                    f'with read-only source {source!r}; skill_editor can only write remote skills.'
                 )
             return tool_error(
-                'skill_manage',
+                'skill_editor',
                 f'Skill {name!r} already exists in category {normalized_category!r}; '
                 "use action='modify' to edit it or action='remove' to delete it first."
             )
@@ -132,41 +132,41 @@ def skill_manage(
             result.update(post_core_api('/skill/create', payload))
         except (requests.RequestException, RuntimeError) as exc:
             return tool_error(
-                'skill_manage',
+                'skill_editor',
                 f'Failed to create skill: {exc}',
-                log_message=f'[skill_manage] create failed: {exc}',
+                log_message=f'[skill_editor] create failed: {exc}',
                 log_level='error',
             )
-        return tool_success('skill_manage', result)
+        return tool_success('skill_editor', result)
 
     if action == 'modify':
         if content is not None:
-            return tool_error('skill_manage', "action='modify' must not include 'content'; use 'suggestions'.")
+            return tool_error('skill_editor', "action='modify' must not include 'content'; use 'suggestions'.")
         if not suggestions:
-            return tool_error('skill_manage', "action='modify' requires a non-empty 'suggestions' list.")
+            return tool_error('skill_editor', "action='modify' requires a non-empty 'suggestions' list.")
         if len(suggestions) > MAX_SUGGESTIONS_PER_CALL:
             return tool_error(
-                'skill_manage',
+                'skill_editor',
                 f'At most {MAX_SUGGESTIONS_PER_CALL} suggestions are allowed per call; '
                 f'got {len(suggestions)}.'
             )
         if not existing_skill:
             return tool_error(
-                'skill_manage',
+                'skill_editor',
                 f'Skill {name!r} does not exist in category {normalized_category!r}; '
                 "use action='create' to add a new skill."
             )
         source = existing_skill.get('source', 'file')
         lazyllm.LOG.info(
-            '[skill_manage] modify_check '
+            '[skill_editor] modify_check '
             f'source={source!r} '
             f'writable={is_writable_skill_source(source)}'
         )
         if not is_writable_skill_source(source):
             return tool_error(
-                'skill_manage',
+                'skill_editor',
                 f'Skill {name!r} in category {normalized_category!r} has read-only source '
-                f'{source!r}; skill_manage can only modify remote skills.'
+                f'{source!r}; skill_editor can only modify remote skills.'
             )
 
         result = {
@@ -185,28 +185,28 @@ def skill_manage(
             result.update(post_core_api('/skill/suggestion', payload))
         except (requests.RequestException, RuntimeError) as exc:
             return tool_error(
-                'skill_manage',
+                'skill_editor',
                 f'Failed to submit skill suggestions: {exc}',
-                log_message=f'[skill_manage] modify failed: {exc}',
+                log_message=f'[skill_editor] modify failed: {exc}',
                 log_level='error',
             )
-        return tool_success('skill_manage', result)
+        return tool_success('skill_editor', result)
 
     if action == 'remove':
         if content is not None or suggestions:
-            return tool_error('skill_manage', "action='remove' must not include 'content' or 'suggestions'.")
+            return tool_error('skill_editor', "action='remove' must not include 'content' or 'suggestions'.")
         if not existing_skill:
             return tool_error(
-                'skill_manage',
+                'skill_editor',
                 f'Skill {name!r} does not exist in category {normalized_category!r}; '
                 'nothing to remove.'
             )
         source = existing_skill.get('source', 'file')
         if not is_writable_skill_source(source):
             return tool_error(
-                'skill_manage',
+                'skill_editor',
                 f'Skill {name!r} in category {normalized_category!r} has read-only source '
-                f'{source!r}; skill_manage can only remove remote skills.'
+                f'{source!r}; skill_editor can only remove remote skills.'
             )
 
         result = {
@@ -225,14 +225,14 @@ def skill_manage(
             result.update(post_core_api('/skill/remove', payload))
         except (requests.RequestException, RuntimeError) as exc:
             return tool_error(
-                'skill_manage',
+                'skill_editor',
                 f'Failed to remove skill: {exc}',
-                log_message=f'[skill_manage] remove failed: {exc}',
+                log_message=f'[skill_editor] remove failed: {exc}',
                 log_level='error',
             )
-        return tool_success('skill_manage', result)
+        return tool_success('skill_editor', result)
 
     return tool_error(
-        'skill_manage',
+        'skill_editor',
         f"Unknown action {action!r}; expected one of 'create', 'modify', 'remove'."
     )

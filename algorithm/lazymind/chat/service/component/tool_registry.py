@@ -12,11 +12,11 @@ from lazymind.chat.engine.tools import (
     KBToolGroup,
     TempKBToolGroup,
     calculator,
-    memory_manage,
-    skill_manage,
+    memory_editor,
+    skill_editor,
     url_fetch,
     vision_extractor,
-    vocab_manage,
+    vocab_learn,
 )
 
 
@@ -98,22 +98,22 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         instance=vision_extractor,
     ),
     ToolGroupConfig(
-        name='vocab',
-        label='词汇管理',
-        description='管理用户专属的词汇映射和同义词',
-        instance=vocab_manage,
+        name='vocab_learn',
+        label='词汇学习',
+        description='学习用户专属的词汇映射和同义词',
+        instance=vocab_learn,
     ),
     ToolGroupConfig(
-        name='memory',
-        label='记忆管理',
-        description='记录和管理跨会话的用户记忆和偏好',
-        instance=memory_manage,
+        name='memory_editor',
+        label='记忆编辑',
+        description='记录和编辑跨会话的用户记忆和偏好',
+        instance=memory_editor,
     ),
     ToolGroupConfig(
-        name='skill_manager',
-        label='技能管理',
+        name='skill_editor',
+        label='技能编辑',
         description='创建、修改和删除技能',
-        instance=skill_manage,
+        instance=skill_editor,
     ),
     ToolGroupConfig(
         name='feishu',

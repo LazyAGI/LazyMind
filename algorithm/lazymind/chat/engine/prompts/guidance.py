@@ -10,7 +10,7 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 
 MEMORY_GUIDANCE = (
-    "Use memory_manage for durable cross-session knowledge only. "
+    "Use memory_editor for durable cross-session knowledge only. "
     "Save user-stated identity, preferred names/nicknames, communication tone, "
     "language preference, output format, and stable habits to target='user'. "
     "Save agent working memory to target='memory': timestamped notes about what the user and agent discussed, "
@@ -19,16 +19,16 @@ MEMORY_GUIDANCE = (
     "Never save workflows, procedures, lessons learned, tool usage patterns, implementation recipes, "
     "SOPs, or general task conventions to memory or user_preference; those belong in skills. "
     "Do NOT save obvious facts derivable from the codebase or raw transcript dumps. "
-    "Do not use memory for explicit user-specific vocabulary or terminology mappings; use vocab_manage instead."
+    "Do not use memory for explicit user-specific vocabulary or terminology mappings; use vocab_learn instead."
 )
 VOCAB_GUIDANCE = (
-    "Use vocab_manage for explicit user-specific vocabulary or terminology mappings. "
+    "Use vocab_learn for explicit user-specific vocabulary or terminology mappings. "
     "When the user asks to remember a mapping in a vocabulary, glossary, domain terminology, synonym list, "
-    "or says that one term means / equals / is another term in a domain, prefer vocab_manage over memory. "
+    "or says that one term means / equals / is another term in a domain, prefer vocab_learn over memory. "
     "Pass each mapping as one suggestion with word, synonym, description, and reason."
 )
 SKILLS_GUIDANCE = (
-    "Use skill_manage to curate reusable skills. It has three actions:\n"
+    "Use skill_editor to curate reusable skills. It has three actions:\n"
     "- action='create': after completing a complex task (5+ tool calls), fixing a "
     "tricky error, or discovering a non-trivial workflow, save the approach as a "
     "new skill by passing the full SKILL.md body in `content`. Both `name` and "
@@ -46,7 +46,7 @@ SKILLS_GUIDANCE = (
     "- action='remove': when a skill is superseded or no longer correct, request "
     "its deletion by (`category`, `name`) (no `content` / `suggestions`).\n"
     "Only skills with `source=remote` are writable. Skills with `source=file` "
-    "or any other source are read-only; do not use skill_manage to modify or remove them."
+    "or any other source are read-only; do not use skill_editor to modify or remove them."
 )
 IMAGE_REFERENCE_MARKDOWN_GUIDANCE = (
     '# Image path formatting (mandatory)\n'
