@@ -172,6 +172,26 @@
   gap: 10px;
 }
 
+.dataset-column-settings {
+  width: 220px;
+}
+
+.dataset-column-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: #344054;
+  font-weight: 600;
+}
+
+.dataset-column-settings-options.ant-checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .dataset-item-table .is-editing-row > td {
   background: #f6faff;
 }
