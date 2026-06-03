@@ -65,7 +65,7 @@ export interface DatasetItemFormValues {
 export interface DatasetFormValues {
   name: string;
   description?: string;
-  knowledge_base_ids?: string[];
+  knowledge_base_id?: string;
   create_method: DatasetCreateMethod;
   uploadFile?: UploadFile[];
 }

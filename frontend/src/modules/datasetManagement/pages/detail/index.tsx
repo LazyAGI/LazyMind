@@ -7,6 +7,7 @@ import type {
   HTMLAttributes,
 } from "react";
 import {
+  AutoComplete,
   Button,
   Card,
   Checkbox,
@@ -36,6 +37,9 @@ import {
   getDataset,
   importDatasetItems,
   listDatasetItems,
+  type KnowledgeDocumentOption,
+  listQuestionTypes,
+  searchKnowledgeBaseDocuments,
   updateDatasetItem,
 } from "../../api";
 import DatasetImportModal from "../../components/DatasetImportModal";
@@ -87,6 +91,11 @@ type ActiveEditableCell = {
   itemId: string;
   field: EditableDatasetItemField;
 } | null;
+type DocumentSearchState = {
+  loading: boolean;
+  keyword: string;
+  options: KnowledgeDocumentOption[];
+};
 type ConfigurableColumnKey = Exclude<ResizableColumnKey, "actions">;
 
 const CONFIGURABLE_COLUMN_OPTIONS: Array<{
@@ -97,8 +106,8 @@ const CONFIGURABLE_COLUMN_OPTIONS: Array<{
   { label: "问题类型", value: "question_type" },
   { label: "标准答案", value: "ground_truth" },
   { label: "答案要点", value: "key_points" },
-  { label: "参考上下文", value: "reference_context" },
   { label: "参考文档", value: "reference_doc" },
+  { label: "参考上下文", value: "reference_context" },
   { label: "生成依据", value: "generate_reason" },
   { label: "来源", value: "source" },
   { label: "更新时间", value: "updated_at" },
@@ -247,6 +256,8 @@ export default function DatasetDetailPage() {
   const [questionType, setQuestionType] = useState<string>();
   const [source, setSource] = useState<DatasetItemSource>();
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
+  const [total, setTotal] = useState(0);
+  const [questionTypeOptions, setQuestionTypeOptions] = useState<string[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
   const [drafts, setDrafts] = useState<Record<string, DatasetItemFormValues>>({});
   const [dirtyItemIds, setDirtyItemIds] = useState<string[]>([]);
@@ -259,6 +270,9 @@ export default function DatasetDetailPage() {
     DEFAULT_VISIBLE_COLUMN_KEYS,
   );
   const [rowHeight, setRowHeight] = useState(DEFAULT_ROW_HEIGHT);
+  const [documentSearchState, setDocumentSearchState] = useState<
+    Record<string, DocumentSearchState>
+  >({});
 
   const handleColumnResize = useCallback(
     (columnKey: ResizableColumnKey, startX: number, startWidth: number) => {
@@ -319,16 +333,23 @@ export default function DatasetDetailPage() {
     }
     setLoading(true);
     try {
-      const [datasetDetail, itemList] = await Promise.all([
+      const [datasetDetail, itemList, remoteQuestionTypes] = await Promise.all([
         getDataset(datasetId),
         listDatasetItems(datasetId, {
           keyword,
           question_type: questionType,
           source,
+          page: pagination.current,
+          pageSize: pagination.pageSize,
         }),
+        listQuestionTypes().catch(() => []),
       ]);
       setDataset(datasetDetail);
-      setItems(itemList);
+      setItems(itemList.items);
+      setTotal(itemList.total);
+      if (remoteQuestionTypes.length > 0) {
+        setQuestionTypeOptions(remoteQuestionTypes);
+      }
     } catch (error: any) {
       message.error(error?.message || "数据集加载失败");
     } finally {
@@ -339,7 +360,7 @@ export default function DatasetDetailPage() {
   useEffect(() => {
     void loadDetail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datasetId]);
+  }, [datasetId, pagination.current, pagination.pageSize]);
 
   useEffect(() => {
     setDrafts((current) => {
@@ -420,6 +441,92 @@ export default function DatasetDetailPage() {
     setDirtyItemIds((current) =>
       current.includes(item.id) ? current : [...current, item.id],
     );
+  };
+
+  const updateDocumentSearchState = (
+    itemId: string,
+    patch: Partial<DocumentSearchState>,
+  ) => {
+    setDocumentSearchState((current) => ({
+      ...current,
+      [itemId]: {
+        ...(current[itemId] || {}),
+        loading: current[itemId]?.loading || false,
+        keyword: current[itemId]?.keyword || "",
+        options: current[itemId]?.options || [],
+        ...patch,
+      },
+    }));
+  };
+
+  const handleReferenceDocumentSearch = async (record: DatasetItem, value: string) => {
+    handleDraftChange(record, "reference_doc", value);
+
+    const match = value.match(/@([^@]*)$/);
+    const rawKeyword = `${match?.[1] || ""}`;
+    const keyword = rawKeyword.trim();
+    const knowledgeBaseId = `${dataset?.knowledge_bases?.[0]?.id || ""}`.trim();
+
+    if (!match || !knowledgeBaseId) {
+      updateDocumentSearchState(record.id, {
+        keyword,
+        loading: false,
+        options: [],
+      });
+      return;
+    }
+
+    updateDocumentSearchState(record.id, {
+      keyword,
+      loading: true,
+      options: [],
+    });
+
+    try {
+      const options = await searchKnowledgeBaseDocuments(knowledgeBaseId, keyword);
+      setDocumentSearchState((current) => {
+        const latestKeyword = current[record.id]?.keyword || "";
+        if (latestKeyword !== keyword) {
+          return current;
+        }
+        return {
+          ...current,
+          [record.id]: {
+            loading: false,
+            keyword,
+            options,
+          },
+        };
+      });
+    } catch {
+      updateDocumentSearchState(record.id, {
+        keyword,
+        loading: false,
+        options: [],
+      });
+    }
+  };
+
+  const handleReferenceDocumentSelect = (
+    record: DatasetItem,
+    option: KnowledgeDocumentOption,
+  ) => {
+    setDrafts((current) => ({
+      ...current,
+      [record.id]: {
+        ...(current[record.id] || createItemDraft(record.id === NEW_ITEM_ID ? undefined : record)),
+        reference_doc: option.name,
+        reference_doc_ids: option.documentId,
+      },
+    }));
+    setDirtyItemIds((current) =>
+      current.includes(record.id) ? current : [...current, record.id],
+    );
+    updateDocumentSearchState(record.id, {
+      keyword: "",
+      loading: false,
+      options: [],
+    });
   };
 
   const handleCancelItem = (item: DatasetItem) => {
@@ -595,6 +702,50 @@ export default function DatasetDetailPage() {
     );
   };
 
+  const renderReferenceDocumentInput = (record: DatasetItem) => {
+    if (activeCell?.itemId !== record.id || activeCell.field !== "reference_doc") {
+      return renderCellDisplay(record, "reference_doc", "请输入参考文档");
+    }
+
+    const searchState = documentSearchState[record.id];
+    const autoCompleteOptions = (searchState?.options || []).map((option) => ({
+      label: option.name,
+      value: option.name,
+      option,
+    }));
+    const shouldOpenDocumentOptions =
+      activeCell?.itemId === record.id &&
+      activeCell.field === "reference_doc" &&
+      (drafts[record.id]?.reference_doc || "").includes("@") &&
+      (Boolean(searchState?.loading) || autoCompleteOptions.length > 0);
+
+    return (
+      <AutoComplete
+        autoFocus
+        open={shouldOpenDocumentOptions}
+        className="dataset-inline-input"
+        value={drafts[record.id]?.reference_doc || ""}
+        placeholder="请输入参考文档，输入 @ 可搜索知识库文档"
+        notFoundContent={searchState?.loading ? "搜索中..." : "暂无匹配文档"}
+        options={autoCompleteOptions}
+        onChange={(value) => {
+          void handleReferenceDocumentSearch(record, value);
+        }}
+        onSelect={(_, selectedOption) => {
+          if ((selectedOption as { option?: KnowledgeDocumentOption })?.option) {
+            handleReferenceDocumentSelect(
+              record,
+              (selectedOption as { option: KnowledgeDocumentOption }).option,
+            );
+          }
+        }}
+        onBlur={() => void handleAutoSaveItem(record)}
+      >
+        <Input />
+      </AutoComplete>
+    );
+  };
+
   const renderInlineTextArea = (
     record: DatasetItem,
     field: EditableDatasetItemField,
@@ -667,6 +818,14 @@ export default function DatasetDetailPage() {
           renderInlineTextArea(record, "key_points", "请输入答案要点"),
       },
       {
+        title: "参考文档",
+        dataIndex: "reference_doc",
+        key: "reference_doc",
+        width: columnWidths.reference_doc,
+        onHeaderCell: () => getHeaderCellProps("reference_doc"),
+        render: (_, record) => renderReferenceDocumentInput(record),
+      },
+      {
         title: "参考上下文",
         dataIndex: "reference_context",
         key: "reference_context",
@@ -674,15 +833,6 @@ export default function DatasetDetailPage() {
         onHeaderCell: () => getHeaderCellProps("reference_context"),
         render: (_, record) =>
           renderInlineTextArea(record, "reference_context", "请输入参考上下文"),
-      },
-      {
-        title: "参考文档",
-        dataIndex: "reference_doc",
-        key: "reference_doc",
-        width: columnWidths.reference_doc,
-        onHeaderCell: () => getHeaderCellProps("reference_doc"),
-        render: (_, record) =>
-          renderInlineInput(record, "reference_doc", "请输入参考文档"),
       },
       {
         title: "生成依据",
@@ -831,6 +981,7 @@ export default function DatasetDetailPage() {
               value={questionType}
               onChange={setQuestionType}
               placeholder="问题类型"
+              options={questionTypeOptions}
             />
             <Select
               allowClear
@@ -881,7 +1032,8 @@ export default function DatasetDetailPage() {
           pagination={{
             current: pagination.current,
             pageSize: pagination.pageSize,
-            showTotal: (total) => `共 ${total} 条`,
+            total,
+            showTotal: (currentTotal) => `共 ${currentTotal} 条`,
             onChange: async (current, pageSize) => {
               const canContinue = await confirmDiscardDirty();
               if (!canContinue) {

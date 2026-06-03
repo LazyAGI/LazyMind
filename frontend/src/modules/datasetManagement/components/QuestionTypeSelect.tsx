@@ -7,6 +7,7 @@ interface QuestionTypeSelectProps {
   onBlur?: () => void;
   placeholder?: string;
   allowClear?: boolean;
+  options?: string[];
 }
 
 export default function QuestionTypeSelect({
@@ -15,7 +16,11 @@ export default function QuestionTypeSelect({
   onBlur,
   placeholder = "请选择问题类型",
   allowClear,
+  options,
 }: QuestionTypeSelectProps) {
+  const resolvedOptions =
+    options && options.length > 0 ? options : questionTypeOptions;
+
   return (
     <Select
       allowClear={allowClear}
@@ -24,7 +29,7 @@ export default function QuestionTypeSelect({
       onChange={onChange}
       onBlur={onBlur}
       placeholder={placeholder}
-      options={questionTypeOptions.map((item) => ({ label: item, value: item }))}
+      options={resolvedOptions.map((item) => ({ label: item, value: item }))}
       optionFilterProp="label"
     />
   );
