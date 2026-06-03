@@ -59,13 +59,13 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         name='wikipedia',
         label='Wikipedia 搜索',
         description='从 Wikipedia 搜索知识条目',
-        instance=WikipediaSearch(),
+        instance=WikipediaSearch(skip_auth=True),
     ),
     ToolGroupConfig(
         name='arxiv',
         label='Arxiv 论文搜索',
         description='从 Arxiv 搜索学术论文',
-        instance=ArxivSearch(),
+        instance=ArxivSearch(skip_auth=True),
     ),
     ToolGroupConfig(
         name='google',
