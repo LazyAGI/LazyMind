@@ -27,7 +27,7 @@ from lazyllm.module.llms.onlinemodule.chat import OnlineChatModule
 from lazyllm.module.llms.onlinemodule.embedding import OnlineEmbeddingModule
 from lazyllm.module.llms.onlinemodule.dynamic_router import ConfigsDict
 
-from chat.utils.load_config import inject_model_config, get_dynamic_role_slot_map
+from lazymind.model_config import inject_model_config, get_dynamic_role_slot_map
 
 
 # ---------------------------------------------------------------------------
@@ -40,7 +40,7 @@ def _runtime_models_yaml(tmp_path: Path, content: str):
     config_path = tmp_path / 'runtime_models.yaml'
     config_path.write_text(textwrap.dedent(content), encoding='utf-8')
     get_dynamic_role_slot_map.cache_clear()
-    import chat.utils.load_config as lc
+    import lazymind.model_config as lc
     old = lc._DYNAMIC_CONFIG_PATH
     lc._DYNAMIC_CONFIG_PATH = config_path
     try:
@@ -159,14 +159,13 @@ class TestInjectToGlobals:
 
         assert cfg['llm']['chat']['skip_auth'] is True
 
-    def test_raises_when_model_config_missing(self, tmp_path):
+    def test_none_model_config_is_forwarded_to_lazyllm(self, tmp_path):
         with _runtime_models_yaml(tmp_path, '''
             llm:
               source: dynamic
               type: llm
         '''):
-            with pytest.raises(ValueError, match='model_config is required'):
-                inject_model_config(None)
+            inject_model_config(None)
 
     def test_missing_role_left_unconfigured(self, tmp_path):
         with _runtime_models_yaml(tmp_path, '''

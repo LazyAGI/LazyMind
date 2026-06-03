@@ -157,11 +157,20 @@ services:
       dockerfile: Dockerfile
       args:
         <<: *mirror-args
-    command: ["-config", "/app/configs/control-plane.scan.yml"]
     environment:
+      LAZYMIND_SCAN_CONTROL_PLANE_ADDRESS: "0.0.0.0"
+      LAZYMIND_SCAN_CONTROL_PLANE_PORT: "18080"
+      LAZYMIND_SCAN_CONTROL_PLANE_DB_DSN: "host=db user=root password=123456 dbname=scan_control_plane port=5432 sslmode=disable TimeZone=UTC"
+      LAZYMIND_SCAN_CONTROL_PLANE_CORE_BASE_URL: "http://core:8000"
+      LAZYMIND_SCAN_CONTROL_PLANE_AGENT_BASE_URL: "http://file-watcher:19090"
+      LAZYMIND_SCAN_CONTROL_PLANE_AGENT_TOKEN: "my-secret-token"
+      LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_DEFAULT_AGENT_ID: "file-watcher-local-001"
+      LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT: "/data/ragscan"
+      LAZYMIND_SCAN_CONTROL_PLANE_FEISHU_BASE_URL: "https://open.feishu.cn"
+      LAZYMIND_SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL: "http://auth-service:8000"
+      LAZYMIND_SCAN_CONTROL_PLANE_TEMP_DIR: "/data/staging"
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
     volumes:
-      - ./backend/scan-control-plane/configs/control-plane.scan.yml:/app/configs/control-plane.scan.yml:ro
       - ${LAZYMIND_FILE_WATCHER_BASE_ROOT:-./data/scan}:/data/ragscan
       - ${LAZYMIND_FILE_WATCHER_BASE_ROOT:-./data/scan}/staging:/data/staging
       - ./data/core/uploads:/var/lib/lazymind/uploads
@@ -173,7 +182,7 @@ services:
       db-bootstrap:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:18080/healthz >/dev/null 2>&1 || exit 1"]
+      test: ["CMD", "/app/scan-control-plane", "healthcheck"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -517,7 +526,7 @@ services:
       LAZYMIND_DOCUMENT_PROCESSOR_PORT: "8000"
       <<: [*runtime-home, *db-conn, *upload-paths, *llm-api-keys, *trace-config]
       LAZYLLM_EXPECTED_LOG_MODULES: "all"
-    command: ["python", "processor/server.py"]
+    command: ["python", "-m", "lazymind.processor.service.server"]
     healthcheck:
       test: ['CMD-SHELL', 'curl -f http://localhost:8000/health || exit 1']
       interval: 10s
@@ -559,7 +568,7 @@ services:
       LAZYMIND_DOCUMENT_WORKER_POLL_MODE: direct
       <<: [*runtime-home, *db-conn, *upload-paths, *llm-api-keys, *ocr-env, *trace-config]
       LAZYLLM_EXPECTED_LOG_MODULES: "all"
-    command: ["python", "processor/worker.py"]
+    command: ["python", "-m", "lazymind.processor.service.worker"]
     healthcheck:
       test: ['CMD-SHELL', 'curl -f http://localhost:8001/health || exit 1']
       interval: 10s
@@ -595,7 +604,7 @@ services:
       - ./data/traces:/var/lib/lazymind/traces
       - *lazyllm-src-mount
     healthcheck:
-      test: ['CMD-SHELL', 'python algorithm/parsing/healthcheck.py']
+      test: ['CMD-SHELL', 'python -m lazymind.parsing.service.healthcheck']
       interval: 15s
       timeout: 10s
       retries: 10
@@ -614,7 +623,7 @@ services:
       LAZYMIND_OPENSEARCH_PASSWORD: ${LAZYMIND_OPENSEARCH_PASSWORD:-LazyRAG_OpenSearch123!}
       LAZYMIND_RESET_ALGO_ON_STARTUP: ${LAZYMIND_RESET_ALGO_ON_STARTUP:-false}
       LAZYMIND_RESET_ALL_ON_STARTUP: ${LAZYMIND_RESET_ALL_ON_STARTUP:-false}
-    command: ["python", "-m", "parsing.parsing"]
+    command: ["python", "-m", "lazymind.parsing.app"]
     depends_on:
       lazyllm-parse-server:
         condition: service_healthy
@@ -641,12 +650,14 @@ services:
       - ./data/traces:/var/lib/lazymind/traces
       - *lazyllm-src-mount
     healthcheck:
-      test: ['CMD-SHELL', 'curl -sf http://localhost:8046/docs || exit 1']
+      test: ['CMD-SHELL', 'curl -sf http://localhost:8046/health || exit 1']
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 180s
     environment:
+      # chat/review/vocab are packaged separately in code, but they are exposed
+      # as one API surface from the chat container.
       LAZYMIND_DOCUMENT_SERVER_URL: http://parsing:8000,general_algo
       LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
       LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
@@ -660,10 +671,7 @@ services:
       LAZYMIND_FILE_URL_EXPIRE_SECONDS: "3600"
       LAZYMIND_MAX_RETRIES: "20"
       LAZYMIND_REVIEW_MAX_RETRIES: "5"
-      LAZYMIND_MEMORY_REVIEW_INTERVAL: "1"
-      LAZYMIND_SKILL_REVIEW_INTERVAL: "5"
       LAZYMIND_SKILL_REVIEW_DEBUG: "false"
-      LAZYMIND_SKIP_STARTUP_PIPELINE: "1"
       LAZYLLM_INIT_DOC: 1
       # Chat uses the shared model config selector. Default dynamic mode enables
       # per-user model/API-key selection from core; set LAZYMIND_MODEL_CONFIG_PATH=online
@@ -672,7 +680,7 @@ services:
       LAZYMIND_CORE_SERVICE_URL: http://core:8000
       LAZYMIND_WORD_GROUP_APPLY_URL: ""
       <<: [*runtime-home, *trace-config, *proxy-env, *db-conn, *core-db-conn, *llm-api-keys, *upload-paths]
-    command: ["python", "-m", "chat.app.chat", "--port", "8046"]
+    command: ["python", "-m", "lazymind.chat.app", "--port", "8046"]
     depends_on:
       lazyllm-algo:
         condition: service_healthy

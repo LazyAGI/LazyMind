@@ -1,6 +1,6 @@
 from lazyllm.tools.rag import DocNode
 
-from parsing.transform.para_parser import (
+from lazymind.parsing.engine.transform.para_parser import (
     LineSplitter,
     MineruLineSplitter,
     NormalLineSplitter,

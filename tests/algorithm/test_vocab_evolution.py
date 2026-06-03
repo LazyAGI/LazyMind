@@ -1,20 +1,17 @@
 """Unit tests for vocabulary evolution pipeline and service."""
 from __future__ import annotations
 
-import os as _os
-import sys
-
-import pytest
-
-from vocab.evolution import (  # noqa: E402
+from lazymind.review.vocab import (  # noqa: E402
     ActionPlanningModule,
     ChatHistoryRecord,
     HistoryChunker,
     SynonymCandidate,
     SynonymExtractionModule,
     VocabEvolutionRequest,
+)
+from lazymind.review.service import (  # noqa: E402
     VocabEvolutionService,
-    _resolve_word_group_apply_url,
+    resolve_word_group_apply_url,
     run_vocab_evolution,
 )
 
@@ -253,7 +250,11 @@ def test_action_planner_splits_add_and_conflict_for_multi_group_anchor():
         'anchor_word': 'B',
         'description': '铁路工程语境',
         'evidence': '- [message_id=m1] 记住 K 就是 B',
-        'existing_groups': '[group_id=g1] description=词族1; words=B, C, D\n[group_id=g2] description=词族2; words=B, U, H\n[group_id=g3] description=词族3; words=B, L, J',
+        'existing_groups': (
+            '[group_id=g1] description=词族1; words=B, C, D\n'
+            '[group_id=g2] description=词族2; words=B, U, H\n'
+            '[group_id=g3] description=词族3; words=B, L, J'
+        ),
     }]
 
 
@@ -358,10 +359,16 @@ def test_vocab_evolution_request_accepts_user_id():
 
 def test_vocab_evolution_service_returns_flat_actions():
     histories = {
-    'u1': [{'user_id': 'u1', 'conversation_id': 'c1', 'message_id': 'm1', 'seq': 1,
-                'raw_content': '', 'content': '记住 苹果 就是 apple', 'result': '好的', 'create_time': None}],
-    'u2': [{'user_id': 'u2', 'conversation_id': 'c2', 'message_id': 'm2', 'seq': 1,
-                'raw_content': '', 'content': '记住 民法 就是 民事法律', 'result': '好的', 'create_time': None}],
+        'u1': [{
+            'user_id': 'u1', 'conversation_id': 'c1', 'message_id': 'm1', 'seq': 1,
+            'raw_content': '', 'content': '记住 苹果 就是 apple', 'result': '好的',
+            'create_time': None,
+        }],
+        'u2': [{
+            'user_id': 'u2', 'conversation_id': 'c2', 'message_id': 'm2', 'seq': 1,
+            'raw_content': '', 'content': '记住 民法 就是 民事法律', 'result': '好的',
+            'create_time': None,
+        }],
     }
     extraction_llm = FakeLLM([
         [{'word': '苹果', 'synonym': 'apple', 'description': '水果语境', 'reason': '明确同义', 'message_ids': ['m1']}],
@@ -671,18 +678,18 @@ def test_resolve_word_group_apply_url_prefers_exact_apply_url_env(monkeypatch):
     monkeypatch.setenv('LAZYMIND_WORD_GROUP_APPLY_URL', 'http://backend.local/api/core/inner/word_group:apply')
     monkeypatch.setenv('LAZYMIND_CORE_SERVICE_URL', 'http://core:8000')
 
-    assert _resolve_word_group_apply_url() == 'http://backend.local/api/core/inner/word_group:apply'
+    assert resolve_word_group_apply_url() == 'http://backend.local/api/core/inner/word_group:apply'
 
 
 def test_resolve_word_group_apply_url_supports_direct_core_service_base(monkeypatch):
     monkeypatch.delenv('LAZYMIND_WORD_GROUP_APPLY_URL', raising=False)
     monkeypatch.setenv('LAZYMIND_CORE_SERVICE_URL', 'http://core:8000')
 
-    assert _resolve_word_group_apply_url() == 'http://core:8000/inner/word_group:apply'
+    assert resolve_word_group_apply_url() == 'http://core:8000/inner/word_group:apply'
 
 
 def test_resolve_word_group_apply_url_supports_public_core_base(monkeypatch):
     monkeypatch.delenv('LAZYMIND_WORD_GROUP_APPLY_URL', raising=False)
     monkeypatch.setenv('LAZYMIND_CORE_SERVICE_URL', 'http://gateway.local/api/core')
 
-    assert _resolve_word_group_apply_url() == 'http://gateway.local/api/core/inner/word_group:apply'
+    assert resolve_word_group_apply_url() == 'http://gateway.local/api/core/inner/word_group:apply'

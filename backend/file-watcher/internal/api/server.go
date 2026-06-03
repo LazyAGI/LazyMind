@@ -33,9 +33,12 @@ func registerRoutes(mux *http.ServeMux, h *Handler, token string, log *zap.Logge
 	mux.HandleFunc("/api/v1/fs/validate", auth(h.ValidatePath))
 	mux.HandleFunc("/api/v1/fs/stat", auth(h.StatFile))
 	mux.HandleFunc("/api/v1/fs/stage", auth(h.StageFile))
+	mux.HandleFunc("/api/v1/agents/fs/validate", auth(h.AgentValidatePath))
+	mux.HandleFunc("/api/v1/agents/fs/list", auth(h.AgentListDir))
+	mux.HandleFunc("/api/v1/agents/fs/stat", auth(h.AgentStatPath))
+	mux.HandleFunc("/api/v1/agents/fs/export", auth(h.AgentExportFile))
 	mux.HandleFunc("/api/v1/sources/start", auth(h.StartSource))
 	mux.HandleFunc("/api/v1/sources/stop", auth(h.StopSource))
-	mux.HandleFunc("/api/v1/sources/scan", auth(h.ScanSource))
 }
 
 // bearerAuth is Bearer Token authentication middleware.

@@ -5,23 +5,18 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import chat.pipelines.get_ppl_search as retriever_builder
 from cli.context import get as get_context
 from cli.context import resolve_algo_dataset, resolve_algo_url, resolve_dataset
 
 
 DOCKER_RETRIEVE_SCRIPT = r"""
 import json
-import os
 import sys
-import tempfile
 
 from lazyllm import Document, Retriever
-import chat.pipelines.get_ppl_search as retriever_builder
-from chat.utils.load_config import get_embed_keys
+from lazymind.config import EMBED_MAIN
 
 
 def run_single(document, payload):
@@ -38,38 +33,24 @@ def run_single(document, payload):
 
 
 def run_config(document, payload):
-    config_path = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            'w', encoding='utf-8', suffix='.yaml', delete=False,
-        ) as handle:
-            handle.write(payload['config_content'])
-            config_path = handle.name
-        original_get_embed_keys = retriever_builder.get_embed_keys
-        try:
-            get_embed_keys.cache_clear()
-            retriever_builder.get_embed_keys = lambda: get_embed_keys(config_path)
-            retriever_configs = retriever_builder._build_default_retriever_configs()
-        finally:
-            retriever_builder.get_embed_keys = original_get_embed_keys
-            get_embed_keys.cache_clear()
-        results = []
-        for cfg in retriever_configs:
-            cfg = dict(cfg)
-            cfg['output_format'] = 'dict'
-            retriever = Retriever(document, **cfg)
-            result = retriever(query=payload['query'], filters=payload['filters'])
-            if isinstance(result, list):
-                results.extend(result)
-        return results
-    finally:
-        if config_path and os.path.exists(config_path):
-            os.unlink(config_path)
+    retriever_configs = [
+        {'group_name': 'line', 'embed_keys': [EMBED_MAIN], 'target': 'block'},
+        {'group_name': 'block', 'embed_keys': [EMBED_MAIN]},
+    ]
+    results = []
+    for cfg in retriever_configs:
+        cfg = dict(cfg)
+        cfg['output_format'] = 'dict'
+        retriever = Retriever(document, **cfg)
+        result = retriever(query=payload['query'], filters=payload['filters'])
+        if isinstance(result, list):
+            results.extend(result)
+    return results
 
 
 payload = json.load(sys.stdin)
 document = Document(url=f"{payload['url']}/_call", name=payload['algo_dataset'])
-if payload.get('config_content'):
+if payload.get('config_mode'):
     output = run_config(document, payload)
 else:
     output = run_single(document, payload)
@@ -148,20 +129,14 @@ def _run_single_retriever(
 def _run_config_retrievers(
     document, query: str, filters: Dict[str, str], config_path: Optional[str],
 ) -> List[Dict[str, Any]]:
-    """Run all retrievers defined in runtime_models config."""
+    """Run the default fixed retriever routes."""
     from lazyllm import Retriever
-    from chat.utils.load_config import get_embed_keys
+    from lazymind.config import EMBED_MAIN
 
-    original_get_embed_keys = retriever_builder.get_embed_keys
-    try:
-        if config_path:
-            get_embed_keys.cache_clear()
-            retriever_builder.get_embed_keys = lambda: get_embed_keys(config_path)
-        retriever_configs = retriever_builder._build_default_retriever_configs()
-    finally:
-        if config_path:
-            retriever_builder.get_embed_keys = original_get_embed_keys
-            get_embed_keys.cache_clear()
+    retriever_configs = [
+        {'group_name': 'line', 'embed_keys': [EMBED_MAIN], 'target': 'block'},
+        {'group_name': 'block', 'embed_keys': [EMBED_MAIN]},
+    ]
     all_results = []
     for cfg in retriever_configs:
         cfg = dict(cfg)
@@ -237,12 +212,6 @@ def _run_local_retrieve(args: argparse.Namespace) -> List[Dict[str, Any]]:
     )
 
 
-def _read_config_content(config_path: Optional[str]) -> Optional[str]:
-    if not config_path:
-        return None
-    return Path(config_path).read_text(encoding='utf-8')
-
-
 def _run_docker_retrieve(
     container: str, args: argparse.Namespace,
 ) -> List[Dict[str, Any]]:
@@ -262,7 +231,7 @@ def _run_docker_retrieve(
         'topk': args.topk,
         'similarity': args.similarity,
         'embed_keys': _resolve_embed_keys(args.embed_keys),
-        'config_content': _read_config_content(args.config),
+        'config_mode': bool(args.config),
     }
     result = subprocess.run(
         ['docker', 'exec', '-i', container, 'python', '-c', DOCKER_RETRIEVE_SCRIPT],

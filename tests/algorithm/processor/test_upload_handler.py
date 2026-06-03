@@ -2,6 +2,7 @@ import asyncio
 import importlib
 import runpy
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -56,8 +57,14 @@ def _fresh_import_upload_handler(monkeypatch, tmp_path):
     monkeypatch.setenv('LAZYMIND_DEFAULT_ALGO_ID', 'default-algo')
     monkeypatch.setenv('LAZYMIND_DEFAULT_GROUP', 'default-group')
     monkeypatch.setenv('LAZYMIND_DOCUMENT_PROCESSOR_PORT', '18000')
-    sys.modules.pop('processor.upload_handler', None)
-    return importlib.import_module('processor.upload_handler')
+    multipart = types.ModuleType('multipart')
+    multipart.__version__ = '0.0-test'
+    multipart_submodule = types.ModuleType('multipart.multipart')
+    multipart_submodule.parse_options_header = lambda value: ('multipart/form-data', {})
+    monkeypatch.setitem(sys.modules, 'multipart', multipart)
+    monkeypatch.setitem(sys.modules, 'multipart.multipart', multipart_submodule)
+    sys.modules.pop('lazymind.processor.service.upload_handler', None)
+    return importlib.import_module('lazymind.processor.service.upload_handler')
 
 
 def test_upload_and_add_saves_files_and_posts_add_doc_request(monkeypatch, tmp_path):
@@ -272,9 +279,15 @@ def test_upload_handler_main_uses_env_port(monkeypatch, tmp_path):
 
     monkeypatch.setenv('LAZYMIND_UPLOAD_DIR', str(tmp_path))
     monkeypatch.setenv('LAZYMIND_UPLOAD_SERVER_PORT', '18100')
+    multipart = types.ModuleType('multipart')
+    multipart.__version__ = '0.0-test'
+    multipart_submodule = types.ModuleType('multipart.multipart')
+    multipart_submodule.parse_options_header = lambda value: ('multipart/form-data', {})
+    monkeypatch.setitem(sys.modules, 'multipart', multipart)
+    monkeypatch.setitem(sys.modules, 'multipart.multipart', multipart_submodule)
     monkeypatch.setitem(sys.modules, 'uvicorn', FakeUvicorn)
-    sys.modules.pop('processor.upload_handler', None)
+    sys.modules.pop('lazymind.processor.service.upload_handler', None)
 
-    runpy.run_module('processor.upload_handler', run_name='__main__')
+    runpy.run_module('lazymind.processor.service.upload_handler', run_name='__main__')
 
     assert seen == {'host': '0.0.0.0', 'port': 18100}

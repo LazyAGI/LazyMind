@@ -1,4 +1,10 @@
-import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useState,
+} from "react";
 import { Modal, Form, Input, Select } from "antd";
 import { useTranslation } from "react-i18next";
 import { Dataset, Algo } from "@/api/generated/knowledge-client";
@@ -7,6 +13,7 @@ import { KnowledgeBaseServiceApi } from "@/modules/knowledge/utils/request";
 import TagSelect from "../TagSelect";
 
 const { TextArea } = Input;
+const KNOWLEDGE_TAG_MAX_LENGTH = 20;
 
 export interface ForwardProps {
   onUpdate: (dataset: Dataset) => Promise<void>;
@@ -24,6 +31,7 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
     const [data, setData] = useState<Dataset>();
     const [tags, setTags] = useState<string[]>([]);
     const [algorithm, setAlgorithm] = useState<Algo[]>([]);
+    const [hasTagLengthError, setHasTagLengthError] = useState(false);
 
     const [form] = Form.useForm();
     useImperativeHandle(ref, () => ({
@@ -72,6 +80,7 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
     function onOpen(sourceData: Dataset | undefined) {
       getTags();
       setData(sourceData);
+      setHasTagLengthError(false);
       if (sourceData) {
         form.setFieldsValue({
           ...sourceData,
@@ -89,10 +98,32 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
 
     function onCancel() {
       form.resetFields();
+      setHasTagLengthError(false);
       setVisible(false);
     }
 
+    const handleTagLengthErrorChange = useCallback(
+      (hasError: boolean) => {
+        setHasTagLengthError(hasError);
+        form.setFields([
+          {
+            name: "tags",
+            errors: hasError
+              ? [t("knowledge.knowledgeTagMaxLength")]
+              : [],
+          },
+        ]);
+      },
+      [form, t],
+    );
+
     function onOk() {
+      if (hasTagLengthError) {
+        form.setFields([
+          { name: "tags", errors: [t("knowledge.knowledgeTagMaxLength")] },
+        ]);
+        return;
+      }
       form.validateFields().then(async (values) => {
         const params = { ...values };
         const selectedAlgoId =
@@ -184,9 +215,35 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
           <Form.Item
             name="tags"
             label={t("knowledge.knowledgeTags")}
-            rules={[{ required: true, message: t("knowledge.selectKnowledgeTags") }]}
+            rules={[
+              { required: true, message: t("knowledge.selectKnowledgeTags") },
+              {
+                validator: (_, value?: string[]) => {
+                  const hasOverLengthTag = (value || []).some(
+                    (tag) => Array.from(tag).length > KNOWLEDGE_TAG_MAX_LENGTH,
+                  );
+                  return hasOverLengthTag
+                    ? Promise.reject(
+                        new Error(t("knowledge.knowledgeTagMaxLength")),
+                      )
+                    : Promise.resolve();
+                },
+              },
+            ]}
+            validateStatus={hasTagLengthError ? "error" : undefined}
+            help={
+              hasTagLengthError
+                ? t("knowledge.knowledgeTagMaxLength")
+                : undefined
+            }
           >
-            <TagSelect tags={tags} />
+            <TagSelect
+              tags={tags}
+              maxTagLength={KNOWLEDGE_TAG_MAX_LENGTH}
+              maxTagLengthMessage={t("knowledge.knowledgeTagMaxLength")}
+              showOverLengthInputError
+              onLengthErrorChange={handleTagLengthErrorChange}
+            />
           </Form.Item>
         </Form>
       </Modal>

@@ -695,11 +695,21 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       if (!isMouseScrollingRef.current) {
         return;
       }
-      requestAnimationFrame(() => {
+      scrollToEndImmediately();
+    }
+
+    function scrollToEndImmediately() {
+      isMouseScrollingRef.current = true;
+      const scroll = () => {
         const container = chatBoxRef.current;
         if (container) {
           container.scrollTop = container.scrollHeight;
         }
+      };
+      requestAnimationFrame(() => {
+        scroll();
+        requestAnimationFrame(scroll);
+        window.setTimeout(scroll, 80);
       });
     }
 
@@ -811,7 +821,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       if (onConversationIdChange) {
         onConversationIdChange(id);
       }
-      scrollToEnd();
+      scrollToEndImmediately();
     }
 
     function createNewChat() {
@@ -900,6 +910,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
     }
 
     function renderText(item: any) {
+      const isStreaming =
+        item.finish_reason !==
+        ChatConversationsResponseFinishReasonEnum.FinishReasonStop;
+
       return (
         <Flex vertical>
           {item.images && <ChatImages images={item.images} />}
@@ -929,7 +943,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
                 className={isThinkingCollapse ? "chat-collapse" : "chat-expand"}
               >
                 <div className="chat-think-text">
-                  <MarkdownViewer sources={item.sources}>
+                  <MarkdownViewer
+                    sources={item.sources}
+                    IS_STREAMING={isStreaming}
+                  >
                     {formatThinkingForDisplay(item.reasoning_content)}
                   </MarkdownViewer>
                 </div>
@@ -942,7 +959,9 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
             </>
           )}
           <div className="chat-text">
-            <MarkdownViewer sources={item.sources}>{item.delta}</MarkdownViewer>
+            <MarkdownViewer sources={item.sources} IS_STREAMING={isStreaming}>
+              {item.delta}
+            </MarkdownViewer>
           </div>
         </Flex>
       );

@@ -1,6 +1,7 @@
 import { Avatar, Button, Divider, Flex, message, Spin, Tooltip } from "antd";
 import { trim } from "lodash";
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useRef } from "react";
+import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import "./index.scss";
@@ -18,6 +19,7 @@ import {
   FeedBackChatHistoryRequestTypeEnum,
   Source,
 } from "@/api/generated/chatbot-client";
+import { AgentAppsAuth } from "@/components/auth";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
@@ -150,7 +152,10 @@ const AssistantMessage = (props: any) => {
     sessionId,
     onPreferenceSelect,
     isLatestDualAnswer,
+    onCiteMessage,
   } = props;
+  const citeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const citeSelectionTextRef = useRef("");
   const [feedbackState, dispatch] = useReducer(feedbackReducer, {
     showModal: false,
     isSubmitting: false,
@@ -169,6 +174,80 @@ const AssistantMessage = (props: any) => {
     } catch {
       message.error(t("chat.copyFailedManual"));
     }
+  };
+
+  const hideCiteButton = () => {
+    citeButtonRef.current?.remove();
+    citeButtonRef.current = null;
+    citeSelectionTextRef.current = "";
+  };
+
+  useEffect(() => {
+    return hideCiteButton;
+  }, []);
+
+  const handleCiteSelectedText = () => {
+    const selectedText = citeSelectionTextRef.current.trim();
+    if (!selectedText) {
+      hideCiteButton();
+      return;
+    }
+    onCiteMessage?.(selectedText);
+    window.getSelection()?.removeAllRanges();
+    hideCiteButton();
+  };
+
+  const showCiteButton = (text: string, top: number, left: number) => {
+    let button = citeButtonRef.current;
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = "chat-cite-selection-btn";
+      button.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+      });
+      button.addEventListener("click", handleCiteSelectedText);
+      document.body.appendChild(button);
+      citeButtonRef.current = button;
+    }
+
+    citeSelectionTextRef.current = text;
+    button.textContent = t("chat.cite");
+    button.style.top = `${top}px`;
+    button.style.left = `${left}px`;
+  };
+
+  const handleMouseUp = (event: MouseEvent<HTMLDivElement>) => {
+    const selection = window.getSelection();
+    const selectedText = selection?.toString().trim() || "";
+    if (!selection || !selectedText || selection.rangeCount < 1) {
+      hideCiteButton();
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    const currentTarget = range.commonAncestorContainer;
+    const element =
+      currentTarget.nodeType === Node.ELEMENT_NODE
+        ? (currentTarget as Element)
+        : currentTarget.parentElement;
+
+    const messageBody = event.currentTarget.querySelector(".chat-bot");
+    if (!element || !messageBody?.contains(element)) {
+      hideCiteButton();
+      return;
+    }
+
+    const rect = range.getBoundingClientRect();
+    if (rect.width <= 0 && rect.height <= 0) {
+      hideCiteButton();
+      return;
+    }
+    showCiteButton(
+      selectedText,
+      Math.max(8, rect.top - 42),
+      rect.left + rect.width / 2,
+    );
   };
 
   function renderLoading() {
@@ -374,7 +453,15 @@ const AssistantMessage = (props: any) => {
       return;
     }
 
-    dispatch({ type: "OPEN_MODAL", historyId: targetHistoryId });
+    if (AgentAppsAuth.getUserInfo()?.chatUnlikeSwitch === true) {
+      dispatch({ type: "OPEN_MODAL", historyId: targetHistoryId });
+      return;
+    }
+
+    onFeedBack(
+      FeedBackChatHistoryRequestTypeEnum.FeedBackTypeUnlike,
+      historyId,
+    );
   }
 
   
@@ -696,7 +783,10 @@ const AssistantMessage = (props: any) => {
 
   if (shouldUseMultiAnswerStyle) {
     return (
-      <div className="chat-assistant-msg-multi-answer-wrap">
+      <div
+        className="chat-assistant-msg-multi-answer-wrap"
+        onMouseUp={handleMouseUp}
+      >
         <Avatar
           className="chat-avatar"
           size={"small"}
@@ -773,7 +863,10 @@ const AssistantMessage = (props: any) => {
   }
 
   return (
-    <div className="chat-assistant-msg-single-answer-wrap">
+    <div
+      className="chat-assistant-msg-single-answer-wrap"
+      onMouseUp={handleMouseUp}
+    >
       <Avatar
         className="chat-avatar"
         size={"small"}

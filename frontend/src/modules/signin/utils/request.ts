@@ -97,6 +97,7 @@ type WrappedApiResponse<T> = {
 
 export type CurrentUserResponse = MeResponse & {
   dynamic?: boolean;
+  chat_unlike_switch?: boolean;
 };
 
 function unwrapApiResponse<T>(responseData: T | WrappedApiResponse<T>): T {
@@ -129,6 +130,7 @@ export async function fetchCurrentUser(): Promise<CurrentUserResponse> {
     displayName: currentUser.display_name || undefined,
     role: currentUser.role,
     dynamic: currentUser.dynamic === true,
+    chatUnlikeSwitch: currentUser.chat_unlike_switch === true,
   });
 
   return currentUser;

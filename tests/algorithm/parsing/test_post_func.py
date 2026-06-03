@@ -1,7 +1,7 @@
 from lazyllm.tools.rag import DocNode
-from processor.table_image_map import normalize_table_image_map, serialize_table_image_map
+from lazymind.processor.engine.table_image_map import normalize_table_image_map, serialize_table_image_map
 
-from parsing.transform.post_func import (
+from lazymind.parsing.engine.transform.post_func import (
     GroupFilterNodeParser,
     GroupNodeParser,
     LayoutNodeParser,
@@ -199,7 +199,7 @@ def test_group_filter_node_parser_removes_table_of_contents_group():
 
 
 def test_node_parser_sets_indexes_cleans_metadata_and_exclusions(monkeypatch, tmp_path):
-    import parsing.transform.post_func as post_func_module
+    import lazymind.parsing.engine.transform.post_func as post_func_module
     upload_dir = str(tmp_path / 'uploads')
     monkeypatch.setitem(post_func_module._cfg._impl, 'shared_upload_dir', upload_dir)
     monkeypatch.setitem(post_func_module._cfg._impl, 'rag_image_path_prefix', str(tmp_path / 'images'))
@@ -304,7 +304,7 @@ def test_process_group_preserves_metadata_on_split_nodes():
 # ---------------------------------------------------------------------------
 
 def test_node_parser_full_pipeline_cleans_and_merges(monkeypatch, tmp_path):
-    import parsing.transform.post_func as post_func_module
+    import lazymind.parsing.engine.transform.post_func as post_func_module
     monkeypatch.setitem(post_func_module._cfg._impl, 'shared_upload_dir', str(tmp_path / 'uploads'))
     monkeypatch.setitem(post_func_module._cfg._impl, 'rag_image_path_prefix', str(tmp_path / 'images'))
     (tmp_path / 'uploads' / 'normalized_images').mkdir(parents=True)
@@ -326,7 +326,7 @@ def test_node_parser_full_pipeline_cleans_and_merges(monkeypatch, tmp_path):
 
 
 def test_node_parser_drops_empty_nodes(monkeypatch, tmp_path):
-    import parsing.transform.post_func as post_func_module
+    import lazymind.parsing.engine.transform.post_func as post_func_module
     monkeypatch.setitem(post_func_module._cfg._impl, 'shared_upload_dir', str(tmp_path / 'uploads'))
     monkeypatch.setitem(post_func_module._cfg._impl, 'rag_image_path_prefix', str(tmp_path / 'images'))
     (tmp_path / 'uploads' / 'normalized_images').mkdir(parents=True)

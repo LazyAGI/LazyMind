@@ -1,11 +1,15 @@
 package modelprovider
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +23,17 @@ import (
 )
 
 const modelProviderCheckTimeout = 5 * time.Minute
+const cloudServiceCheckTimeout = 30 * time.Second
+
+const (
+	minerUCheckFileName        = "lazymind-key-check.pdf"
+	paddleOCRDefaultModel      = "PaddleOCR-VL-1.6"
+	paddleOCROptionalPayload   = `{"useDocOrientationClassify":false,"useDocUnwarping":false,"useChartRecognition":true}`
+	paddleOCRAcceptedNoFileMsg = "PaddleOCR API key accepted"
+	minerUAcceptedMsg          = "MinerU API key accepted"
+	tavilyAcceptedMsg          = "Tavily API key accepted"
+	bingSearchAcceptedMsg      = "Bing Search API key accepted"
+)
 
 // recentVerifyCache stores sha256(group_id+base_url+api_key) → expiry time for dry_run results.
 // Single-instance only; replace with Redis for multi-instance deployments.
@@ -78,6 +93,321 @@ func doCheck(ctx context.Context, category, providerName, baseURL, apiKey string
 	return &result, nil
 }
 
+func doProviderGroupCheck(ctx context.Context, category, providerName, baseURL, apiKey string) (*modelCheckResponse, error) {
+	if category == "ocr" && isSupportedOCRCloudProvider(providerName) {
+		return doOCRCloudServiceCheck(ctx, providerName, baseURL, apiKey)
+	}
+	if category == "search" {
+		return doSearchCloudServiceCheck(ctx, providerName, baseURL, apiKey)
+	}
+	return doCheck(ctx, category, providerName, baseURL, apiKey)
+}
+
+func isSupportedOCRCloudProvider(providerName string) bool {
+	switch normalizeProviderName(providerName) {
+	case "mineru", "paddleocr":
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldVerifyCloudServiceOnSave(category, providerName string) bool {
+	return category == "search" || category == "ocr" && isSupportedOCRCloudProvider(providerName)
+}
+
+func doOCRCloudServiceCheck(ctx context.Context, providerName, baseURL, apiKey string) (*modelCheckResponse, error) {
+	switch normalizeProviderName(providerName) {
+	case "mineru":
+		return doMinerUCloudServiceCheck(ctx, providerName, baseURL, apiKey)
+	case "paddleocr":
+		return doPaddleOCRCloudServiceCheck(ctx, providerName, baseURL, apiKey)
+	default:
+		return &modelCheckResponse{Success: false, Message: "unsupported OCR cloud service"}, nil
+	}
+}
+
+func doSearchCloudServiceCheck(ctx context.Context, providerName, baseURL, apiKey string) (*modelCheckResponse, error) {
+	switch normalizeProviderName(providerName) {
+	case "tavily":
+		return doTavilySearchCloudServiceCheck(ctx, providerName, baseURL, apiKey)
+	case "bing", "bingsearch":
+		return doBingSearchCloudServiceCheck(ctx, providerName, baseURL, apiKey)
+	default:
+		return &modelCheckResponse{Success: false, Message: "unsupported search cloud service"}, nil
+	}
+}
+
+func doMinerUCloudServiceCheck(ctx context.Context, providerName, baseURL, apiKey string) (*modelCheckResponse, error) {
+	payload := map[string]any{
+		"files": []map[string]string{
+			{"name": minerUCheckFileName},
+		},
+		"model_version": "vlm",
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal mineru check body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, minerUFileURLBatchEndpoint(baseURL), bytes.NewReader(body))
+	if err != nil {
+		return &modelCheckResponse{Success: false, Message: safeCheckMessage(err.Error(), apiKey)}, nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	return doCloudServiceCheckRequest(req, providerName, baseURL, apiKey, minerUAcceptedMsg)
+}
+
+func doPaddleOCRCloudServiceCheck(ctx context.Context, providerName, baseURL, apiKey string) (*modelCheckResponse, error) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("model", paddleOCRDefaultModel); err != nil {
+		return nil, fmt.Errorf("write paddleocr model field: %w", err)
+	}
+	if err := writer.WriteField("optionalPayload", paddleOCROptionalPayload); err != nil {
+		return nil, fmt.Errorf("write paddleocr optional payload: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("close paddleocr multipart body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSpace(baseURL), &body)
+	if err != nil {
+		return &modelCheckResponse{Success: false, Message: safeCheckMessage(err.Error(), apiKey)}, nil
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "bearer "+apiKey)
+
+	return doCloudServiceCheckRequest(req, providerName, baseURL, apiKey, paddleOCRAcceptedNoFileMsg)
+}
+
+func doTavilySearchCloudServiceCheck(ctx context.Context, providerName, baseURL, apiKey string) (*modelCheckResponse, error) {
+	payload := map[string]any{
+		"query":       "lazymind key check",
+		"max_results": 1,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal tavily check body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tavilySearchEndpoint(baseURL), bytes.NewReader(body))
+	if err != nil {
+		return &modelCheckResponse{Success: false, Message: safeCheckMessage(err.Error(), apiKey)}, nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	return doSearchServiceCheckRequest(req, providerName, baseURL, apiKey, tavilyAcceptedMsg)
+}
+
+func doBingSearchCloudServiceCheck(ctx context.Context, providerName, baseURL, apiKey string) (*modelCheckResponse, error) {
+	endpoint, err := addQueryParams(bingSearchEndpoint(baseURL), url.Values{
+		"q":              []string{"lazymind key check"},
+		"count":          []string{"1"},
+		"responseFilter": []string{"Webpages"},
+	})
+	if err != nil {
+		return &modelCheckResponse{Success: false, Message: safeCheckMessage(err.Error(), apiKey)}, nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return &modelCheckResponse{Success: false, Message: safeCheckMessage(err.Error(), apiKey)}, nil
+	}
+	req.Header.Set("Ocp-Apim-Subscription-Key", apiKey)
+
+	return doSearchServiceCheckRequest(req, providerName, baseURL, apiKey, bingSearchAcceptedMsg)
+}
+
+func minerUFileURLBatchEndpoint(baseURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if strings.HasSuffix(base, "/file-urls/batch") {
+		return base
+	}
+	return common.JoinURL(base, "file-urls/batch")
+}
+
+func tavilySearchEndpoint(baseURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if strings.HasSuffix(base, "/search") {
+		return base
+	}
+	return common.JoinURL(base, "search")
+}
+
+func bingSearchEndpoint(baseURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if strings.HasSuffix(base, "/v7.0/search") {
+		return base
+	}
+	return common.JoinURL(base, "v7.0/search")
+}
+
+func addQueryParams(rawURL string, values url.Values) (string, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	query := parsed.Query()
+	for key, entries := range values {
+		for _, entry := range entries {
+			query.Add(key, entry)
+		}
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
+}
+
+func doSearchServiceCheckRequest(req *http.Request, providerName, baseURL, apiKey, successMessage string) (*modelCheckResponse, error) {
+	resp, err := (&http.Client{Timeout: cloudServiceCheckTimeout}).Do(req)
+	if err != nil {
+		return &modelCheckResponse{Success: false, Message: safeCheckMessage(err.Error(), apiKey), Source: providerName, URL: baseURL}, nil
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return &modelCheckResponse{Success: false, Message: safeCheckMessage(err.Error(), apiKey), Source: providerName, URL: baseURL}, nil
+	}
+	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		return &modelCheckResponse{Success: true, Message: successMessage, Source: providerName, URL: baseURL}, nil
+	}
+
+	message := cloudServiceCheckFailureMessage(resp.StatusCode, respBytes, apiKey)
+	return &modelCheckResponse{Success: false, Message: message, Source: providerName, URL: baseURL}, nil
+}
+
+func doCloudServiceCheckRequest(req *http.Request, providerName, baseURL, apiKey, successMessage string) (*modelCheckResponse, error) {
+	resp, err := (&http.Client{Timeout: cloudServiceCheckTimeout}).Do(req)
+	if err != nil {
+		return &modelCheckResponse{Success: false, Message: safeCheckMessage(err.Error(), apiKey), Source: providerName, URL: baseURL}, nil
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return &modelCheckResponse{Success: false, Message: safeCheckMessage(err.Error(), apiKey), Source: providerName, URL: baseURL}, nil
+	}
+	if cloudServiceCheckAccepted(resp.StatusCode, respBytes) {
+		return &modelCheckResponse{Success: true, Message: successMessage, Source: providerName, URL: baseURL}, nil
+	}
+
+	message := cloudServiceCheckFailureMessage(resp.StatusCode, respBytes, apiKey)
+	return &modelCheckResponse{Success: false, Message: message, Source: providerName, URL: baseURL}, nil
+}
+
+func cloudServiceCheckAccepted(statusCode int, respBytes []byte) bool {
+	if statusCode >= http.StatusOK && statusCode < http.StatusMultipleChoices {
+		return true
+	}
+	if statusCode == http.StatusBadRequest || statusCode == http.StatusUnprocessableEntity {
+		return !looksLikeAuthFailure(respBytes)
+	}
+	return false
+}
+
+func looksLikeAuthFailure(respBytes []byte) bool {
+	text := strings.ToLower(strings.TrimSpace(string(respBytes)))
+	if text == "" {
+		return false
+	}
+	authSignals := []string{
+		"unauthorized",
+		"forbidden",
+		"invalid token",
+		"invalid api key",
+		"invalid apikey",
+		"api key invalid",
+		"token invalid",
+		"authentication",
+		"authorization",
+	}
+	for _, signal := range authSignals {
+		if strings.Contains(text, signal) {
+			return true
+		}
+	}
+	return false
+}
+
+func cloudServiceCheckFailureMessage(statusCode int, respBytes []byte, apiKey string) string {
+	message := extractCloudServiceMessage(respBytes)
+	if message == "" {
+		message = fmt.Sprintf("cloud service returned HTTP %d", statusCode)
+	}
+	return safeCheckMessage(message, apiKey)
+}
+
+func extractCloudServiceMessage(respBytes []byte) string {
+	body := strings.TrimSpace(string(respBytes))
+	if body == "" {
+		return ""
+	}
+	var payload any
+	if err := json.Unmarshal(respBytes, &payload); err != nil {
+		return body
+	}
+	return extractCloudServiceMessageValue(payload)
+}
+
+func extractCloudServiceMessageValue(value any) string {
+	switch v := value.(type) {
+	case map[string]any:
+		for _, key := range []string{"message", "msg", "error", "detail", "reason", "errorMsg"} {
+			if raw, ok := v[key]; ok {
+				if text := extractCloudServiceMessageValue(raw); text != "" {
+					return text
+				}
+			}
+		}
+		for _, raw := range v {
+			if text := extractCloudServiceMessageValue(raw); text != "" {
+				return text
+			}
+		}
+	case []any:
+		for _, raw := range v {
+			if text := extractCloudServiceMessageValue(raw); text != "" {
+				return text
+			}
+		}
+	case string:
+		return strings.TrimSpace(v)
+	case float64, bool, int, int64, uint64:
+		return fmt.Sprint(v)
+	}
+	return ""
+}
+
+func safeCheckMessage(message, apiKey string) string {
+	const maxLen = 240
+	text := strings.TrimSpace(strings.Join(strings.Fields(message), " "))
+	if apiKey != "" {
+		text = strings.ReplaceAll(text, apiKey, "[api_key]")
+	}
+	if text == "" {
+		text = "cloud service verification failed"
+	}
+	if len(text) > maxLen {
+		return text[:maxLen] + "..."
+	}
+	return text
+}
+
+func normalizeProviderName(value string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			return r
+		}
+		if r >= 'A' && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		return -1
+	}, value)
+}
+
 // verifyCheckCacheKey returns the sha256 hex key for the dry_run cache.
 func verifyCheckCacheKey(groupID, baseURL, apiKey string) string {
 	h := sha256.Sum256([]byte(groupID + "|" + baseURL + "|" + apiKey))
@@ -127,7 +457,7 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	checkStart := time.Now()
-	algo, err := doCheck(r.Context(), parent.Category, source, urlStr, apiKey)
+	algo, err := doProviderGroupCheck(r.Context(), parent.Category, source, urlStr, apiKey)
 	if err != nil {
 		log.Logger.Error().
 			Err(err).

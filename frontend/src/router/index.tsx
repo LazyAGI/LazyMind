@@ -19,14 +19,21 @@ import GroupManagement from "@/modules/admin/pages/group";
 import GroupDetail from "@/modules/admin/pages/group/detail.tsx";
 import DataSourceManagement from "@/modules/dataSource";
 import DataSourceDetail from "@/modules/dataSource/detail";
-import DataSourceFeishuCallback from "@/modules/dataSource/feishuCallback";
+import DataSourceFeishuCallback from "@/modules/dataSource/common/feishuCallback";
+import FeishuAccountPage from "@/modules/dataSource/feishuAccounts";
+import FeishuSetupGuide from "@/modules/dataSource/FeishuSetupGuide";
+import DatasetListPage from "@/modules/datasetManagement/pages/list";
+import DatasetDetailPage from "@/modules/datasetManagement/pages/detail";
 import MemoryManagement from "@/modules/memory";
 import MemoryManagementListPage from "@/modules/memory/pages/list";
 import MemoryReviewPage from "@/modules/memory/pages/review";
 import MemoryGlossaryDetailPage from "@/modules/memory/pages/glossaryDetail";
 import MemorySkillDetailPage from "@/modules/memory/pages/skillDetail";
 import MemoryExperienceDetailPage from "@/modules/memory/pages/experienceDetail";
-import ModelProviderPage from "@/modules/admin/pages/modelProvider";
+import ModelProviderPage from "@/modules/modelProvider";
+import ModelProvidersPage from "@/modules/modelProvider/pages/ModelProvidersPage";
+import ExternalServicesPage from "@/modules/modelProvider/pages/ExternalServicesPage";
+import DefaultServicesPage from "@/modules/modelProvider/pages/DefaultServicesPage";
 import { SelfEvolutionHomePage, SelfEvolutionDetailPage } from "@/modules/selfEvolution";
 import { getAntdLocale } from "@/i18n/antdLocale";
 
@@ -64,8 +71,17 @@ export default function AppRouter() {
             />
           </Route>
           <Route path="data-sources" element={<DataSourceManagement />} />
+          <Route path="data-sources/docs/feishu-setup" element={<FeishuSetupGuide />} />
+          <Route path="data-sources/providers/feishu" element={<FeishuAccountPage />} />
           <Route path="data-sources/:id" element={<DataSourceDetail />} />
-          <Route path="model-providers" element={<ModelProviderPage />} />
+          <Route path="dataset-management" element={<DatasetListPage />} />
+          <Route path="dataset-management/:datasetId" element={<DatasetDetailPage />} />
+          <Route path="model-providers" element={<ModelProviderPage />}>
+            <Route index element={<Navigate to="models" replace />} />
+            <Route path="models" element={<ModelProvidersPage />} />
+            <Route path="external-services" element={<ExternalServicesPage />} />
+            <Route path="default-services" element={<DefaultServicesPage />} />
+          </Route>
           <Route path="memory-management" element={<MemoryManagement />}>
             <Route index element={<MemoryManagementListPage />} />
             <Route path="tools" element={<MemoryManagementListPage />} />

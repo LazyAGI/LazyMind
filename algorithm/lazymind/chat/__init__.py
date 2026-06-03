@@ -1,0 +1,1 @@
+"""LazyMind chat package."""

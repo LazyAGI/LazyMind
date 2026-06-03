@@ -20,13 +20,15 @@ type createGroupRequest struct {
 	Name    string `json:"name"`
 	BaseURL string `json:"base_url"`
 	APIKey  string `json:"api_key"`
+	Verify  bool   `json:"verify"`
 }
 
 type createGroupResponse struct {
-	ID                  string `json:"id"`
-	UserModelProviderID string `json:"user_model_provider_id"`
-	Name                string `json:"name"`
-	BaseURL             string `json:"base_url"`
+	ID                  string                  `json:"id"`
+	UserModelProviderID string                  `json:"user_model_provider_id"`
+	Name                string                  `json:"name"`
+	BaseURL             string                  `json:"base_url"`
+	Check               *CheckModelProviderData `json:"check,omitempty"`
 }
 
 type groupListItem struct {
@@ -172,6 +174,36 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var checkData *CheckModelProviderData
+	if shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
+		if apiKey == "" {
+			common.ReplyErrWithData(
+				w,
+				"verification failed: api_key is required",
+				CheckModelProviderData{Success: false, Message: "api_key is required"},
+				http.StatusBadRequest,
+			)
+			return
+		}
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, apiKey)
+		if checkErr != nil || checkResult == nil || !checkResult.Success {
+			msg := "verification failed"
+			checkMsg := msg
+			if checkResult != nil && strings.TrimSpace(checkResult.Message) != "" {
+				checkMsg = strings.TrimSpace(checkResult.Message)
+				msg = msg + ": " + checkMsg
+			}
+			common.ReplyErrWithData(
+				w,
+				msg,
+				CheckModelProviderData{Success: false, Message: checkMsg},
+				http.StatusBadGateway,
+			)
+			return
+		}
+		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
+	}
+
 	now := time.Now()
 	row := orm.UserModelProviderGroup{
 		ID:                  common.GenerateID(),
@@ -179,7 +211,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		Name:                name,
 		BaseURL:             baseURL,
 		APIKey:              apiKey,
-		IsVerified:          false,
+		IsVerified:          checkData != nil,
 		BaseModel: orm.BaseModel{
 			CreateUserID:   userID,
 			CreateUserName: userName,
@@ -204,6 +236,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		UserModelProviderID: row.UserModelProviderID,
 		Name:                row.Name,
 		BaseURL:             row.BaseURL,
+		Check:               checkData,
 	})
 }
 
@@ -297,12 +330,43 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// verify=true: run connectivity check before persisting; on success mark is_verified=true atomically.
-	if req.Verify {
-		effectiveAPIKey := apiKey
+	var checkData *CheckModelProviderData
+	effectiveAPIKey := apiKey
+	if effectiveAPIKey == "" {
+		effectiveAPIKey = row.APIKey
+	}
+	if shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
 		if effectiveAPIKey == "" {
-			effectiveAPIKey = row.APIKey
+			common.ReplyErrWithData(
+				w,
+				"verification failed: api_key is required",
+				CheckModelProviderData{Success: false, Message: "api_key is required"},
+				http.StatusBadRequest,
+			)
+			return
 		}
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey)
+		if checkErr != nil || checkResult == nil || !checkResult.Success {
+			msg := "verification failed"
+			checkMsg := msg
+			if checkResult != nil && strings.TrimSpace(checkResult.Message) != "" {
+				checkMsg = strings.TrimSpace(checkResult.Message)
+				msg = msg + ": " + checkMsg
+			}
+			common.ReplyErrWithData(
+				w,
+				msg,
+				CheckModelProviderData{Success: false, Message: checkMsg},
+				http.StatusBadGateway,
+			)
+			return
+		}
+		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
+		updates["is_verified"] = true
+	}
+
+	// verify=true: run connectivity check before persisting; on success mark is_verified=true atomically.
+	if req.Verify && checkData == nil {
 		checkResult, checkErr := doCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey)
 		if checkErr != nil || !checkResult.Success {
 			msg := "verification failed"
@@ -329,6 +393,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		UserModelProviderID: row.UserModelProviderID,
 		Name:                row.Name,
 		BaseURL:             row.BaseURL,
+		Check:               checkData,
 	})
 }
 

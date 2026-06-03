@@ -3,12 +3,13 @@ from datetime import datetime, timedelta, timezone
 from urllib import parse, request
 from urllib.error import HTTPError, URLError
 
-from services.cloud_oauth_provider import CloudOAuthProvider, CloudTokenPayload
+from services.cloud_oauth_provider import CloudAccountProfile, CloudOAuthProvider, CloudTokenPayload
 
 
 _FEISHU_OAUTH_AUTHORIZE_URL = 'https://accounts.feishu.cn/open-apis/authen/v1/authorize'
 _FEISHU_USER_TOKEN_URL = 'https://open.feishu.cn/open-apis/authen/v2/oauth/token'
 _FEISHU_TENANT_TOKEN_URL = 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal'
+_FEISHU_USER_INFO_URL = 'https://open.feishu.cn/open-apis/authen/v1/user_info'
 
 _DEFAULT_SCOPE = (
     'offline_access '
@@ -26,6 +27,23 @@ def _post_json(url: str, payload: dict, timeout_seconds: int = 30) -> dict:
         method='POST',
         data=body,
         headers={'Content-Type': 'application/json; charset=utf-8'},
+    )
+    try:
+        with request.urlopen(req, timeout=timeout_seconds) as resp:
+            resp_body = resp.read().decode('utf-8')
+            return json.loads(resp_body) if resp_body else {}
+    except HTTPError as exc:
+        detail = exc.read().decode('utf-8', errors='ignore')
+        raise RuntimeError(f'provider http error {exc.code}: {detail}') from exc
+    except URLError as exc:
+        raise RuntimeError(f'provider network error: {exc}') from exc
+
+
+def _get_json(url: str, *, access_token: str, timeout_seconds: int = 30) -> dict:
+    req = request.Request(
+        url=url,
+        method='GET',
+        headers={'Authorization': f'Bearer {access_token}'},
     )
     try:
         with request.urlopen(req, timeout=timeout_seconds) as resp:
@@ -134,4 +152,38 @@ class FeishuOAuthProvider(CloudOAuthProvider):
             expires_at=_safe_expires_at(int(data.get('expire') or 0)),
             refresh_token=None,
             token_type='Bearer',
+        )
+
+    def fetch_account_profile(self, *, access_token: str) -> CloudAccountProfile:
+        data = _get_json(_FEISHU_USER_INFO_URL, access_token=access_token)
+        if data.get('code', 0) != 0:
+            raise RuntimeError(f"feishu user info failed: {data.get('msg') or data}")
+        user = data.get('data') or data
+        open_id = (user.get('open_id') or '').strip()
+        union_id = (user.get('union_id') or '').strip()
+        user_id = (user.get('user_id') or '').strip()
+        tenant_key = (user.get('tenant_key') or '').strip()
+        display_name = (
+            user.get('name')
+            or user.get('en_name')
+            or user.get('email')
+            or open_id
+            or union_id
+            or user_id
+            or ''
+        )
+        return CloudAccountProfile(
+            provider_account_id=open_id or union_id or user_id,
+            display_name=(display_name or '').strip(),
+            provider_tenant_key=tenant_key,
+            meta={
+                'open_id': open_id,
+                'union_id': union_id,
+                'user_id': user_id,
+                'tenant_key': tenant_key,
+                'name': user.get('name') or '',
+                'en_name': user.get('en_name') or '',
+                'email': user.get('email') or '',
+                'avatar_url': user.get('avatar_url') or user.get('avatar_thumb') or '',
+            },
         )

@@ -19,20 +19,32 @@ class CloudAuthConnectionRepository:
         *,
         connection_id: str,
         tenant_id: str,
+        owner_user_id: str = '',
         provider: str,
         auth_mode: str,
         credential_ciphertext: str,
         auth_state_ciphertext: str,
+        provider_account_id: str = '',
+        display_name: str = '',
+        provider_tenant_key: str = '',
+        provider_account_meta: str = '',
+        scope: str = '',
         status: str = 'ACTIVE',
         last_error: str = '',
     ) -> CloudAuthConnection:
         row = CloudAuthConnection(
             connection_id=(connection_id or '').strip(),
             tenant_id=(tenant_id or '').strip(),
+            owner_user_id=(owner_user_id or '').strip(),
             provider=(provider or '').strip().lower(),
             auth_mode=(auth_mode or '').strip().lower(),
             credential_ciphertext=credential_ciphertext,
             auth_state_ciphertext=auth_state_ciphertext,
+            provider_account_id=(provider_account_id or '').strip(),
+            display_name=(display_name or '').strip(),
+            provider_tenant_key=(provider_tenant_key or '').strip(),
+            provider_account_meta=provider_account_meta or '',
+            scope=(scope or '').strip(),
             status=(status or '').strip().upper() or 'ACTIVE',
             last_error=last_error or '',
         )
@@ -47,3 +59,51 @@ class CloudAuthConnectionRepository:
         session.commit()
         session.refresh(row)
         return row
+
+    @classmethod
+    def list_for_owner(
+        cls,
+        session: Session,
+        *,
+        owner_user_id: str,
+        provider: str | None = None,
+        auth_mode: str | None = None,
+        status: str | None = None,
+    ) -> list[CloudAuthConnection]:
+        q = session.query(CloudAuthConnection).filter(
+            CloudAuthConnection.tenant_id == '',
+            CloudAuthConnection.owner_user_id == (owner_user_id or '').strip(),
+        )
+        if provider:
+            q = q.filter(CloudAuthConnection.provider == provider.strip().lower())
+        if auth_mode:
+            q = q.filter(CloudAuthConnection.auth_mode == auth_mode.strip().lower())
+        if status:
+            q = q.filter(CloudAuthConnection.status == status.strip().upper())
+        return q.order_by(CloudAuthConnection.updated_at.desc(), CloudAuthConnection.created_at.desc()).all()
+
+    @classmethod
+    def find_by_provider_account(
+        cls,
+        session: Session,
+        *,
+        owner_user_id: str,
+        provider: str,
+        auth_mode: str,
+        provider_account_id: str,
+    ) -> CloudAuthConnection | None:
+        account_id = (provider_account_id or '').strip()
+        if not account_id:
+            return None
+        return (
+            session.query(CloudAuthConnection)
+            .filter(
+                CloudAuthConnection.tenant_id == '',
+                CloudAuthConnection.owner_user_id == (owner_user_id or '').strip(),
+                CloudAuthConnection.provider == (provider or '').strip().lower(),
+                CloudAuthConnection.auth_mode == (auth_mode or '').strip().lower(),
+                CloudAuthConnection.provider_account_id == account_id,
+            )
+            .order_by(CloudAuthConnection.updated_at.desc(), CloudAuthConnection.created_at.desc())
+            .first()
+        )

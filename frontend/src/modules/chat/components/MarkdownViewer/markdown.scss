@@ -969,6 +969,73 @@
   background-color: transparent;
 }
 
+.rag-markdown code[class*="language-"],
+.rag-markdown pre[class*="language-"] {
+  color: var(--color-fg-default);
+  text-shadow: none;
+}
+
+.rag-markdown .token.comment,
+.rag-markdown .token.prolog,
+.rag-markdown .token.doctype,
+.rag-markdown .token.cdata {
+  color: var(--color-prettylights-syntax-comment);
+}
+
+.rag-markdown .token.punctuation,
+.rag-markdown .token.operator {
+  color: var(--color-fg-muted);
+}
+
+.rag-markdown .token.property,
+.rag-markdown .token.boolean,
+.rag-markdown .token.number,
+.rag-markdown .token.constant,
+.rag-markdown .token.symbol,
+.rag-markdown .token.deleted {
+  color: var(--color-prettylights-syntax-constant);
+}
+
+.rag-markdown .token.selector,
+.rag-markdown .token.attr-name,
+.rag-markdown .token.string,
+.rag-markdown .token.char,
+.rag-markdown .token.builtin,
+.rag-markdown .token.inserted {
+  color: var(--color-prettylights-syntax-string);
+}
+
+.rag-markdown .token.entity,
+.rag-markdown .token.url,
+.rag-markdown .token.variable {
+  color: var(--color-prettylights-syntax-variable);
+}
+
+.rag-markdown .token.atrule,
+.rag-markdown .token.attr-value,
+.rag-markdown .token.keyword {
+  color: var(--color-prettylights-syntax-keyword);
+}
+
+.rag-markdown .token.function,
+.rag-markdown .token.class-name {
+  color: var(--color-prettylights-syntax-entity);
+}
+
+.rag-markdown .token.regex,
+.rag-markdown .token.important {
+  color: var(--color-prettylights-syntax-string-regexp);
+}
+
+.rag-markdown .token.important,
+.rag-markdown .token.bold {
+  font-weight: 600;
+}
+
+.rag-markdown .token.italic {
+  font-style: italic;
+}
+
 .rag-markdown .csv-data td,
 .rag-markdown .csv-data th {
   padding: 5px;

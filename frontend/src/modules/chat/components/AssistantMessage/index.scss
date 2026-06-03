@@ -219,3 +219,23 @@
     }
   }
 }
+
+.chat-cite-selection-btn {
+  position: fixed;
+  z-index: 1200;
+  height: 28px;
+  border: none;
+  padding: 0 10px;
+  border-radius: 14px;
+  background: #1677ff;
+  transform: translateX(-50%);
+  box-shadow: 0 8px 20px rgb(11 112 231 / 20%);
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 28px;
+
+  &:hover {
+    background: #4096ff;
+  }
+}

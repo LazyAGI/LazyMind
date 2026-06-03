@@ -1,23 +1,13 @@
-"""Concurrency tests for the current agentic pipeline entry points."""
+"""Concurrency tests for the current chat streaming entry point."""
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 from typing import Any, Dict, List
 
-import pytest
 import lazyllm
-
-from chat.pipelines import agentic
-from chat.components.agentic.config import (
-    DEFAULT_TOOLS,
-    _filter_tools_for_request,
-)
-
-
-def _expected_tools_for_request(config: Dict[str, Any]) -> tuple[str, ...]:
-    request_config = dict(config)
-    return tuple(_filter_tools_for_request(list(DEFAULT_TOOLS), request_config))
+from lazymind.chat.service import chat_service
 
 
 class _FakeAgent:
@@ -29,20 +19,13 @@ class _FakeAgent:
     def __init__(self, **kwargs: Any) -> None:
         self._kwargs = kwargs
 
-    def __call__(self, query: str, llm_chat_history: Any = None) -> Dict[str, Any]:
-        config = lazyllm.globals.get('agentic_config')
+    def _observe(self, query: str) -> Dict[str, Any]:
+        config = chat_service.lazyllm.globals.get('agentic_config')
         snapshot = dict(config) if isinstance(config, dict) else None
-        callback = self._kwargs.get('stream_event_callback')
-        if callable(callback):
-            callback({
-                'round': 1,
-                'content': f'observed:{snapshot.get("algo_id") if snapshot else None}',
-                'tool_calls': [],
-            })
         with type(self)._lock:
             type(self).observations.append({
                 'query': query,
-                'sid': lazyllm.globals._sid,
+                'sid': chat_service.lazyllm.globals._sid,
                 'config': snapshot,
                 'agent_kwargs_prompt': self._kwargs.get('prompt'),
                 'agent_kwargs_tools': tuple(self._kwargs.get('tools') or ()),
@@ -51,148 +34,112 @@ class _FakeAgent:
                 'agent_kwargs_force_summarize': self._kwargs.get('force_summarize'),
                 'agent_kwargs_force_summarize_context': self._kwargs.get('force_summarize_context'),
             })
-        return {
-            'text': f'final:{query}',
-            'observed_algo_id': snapshot.get('algo_id') if snapshot else None,
-        }
+        return {'text': f'final:{query}'}
+
+    def forward(self, query: str, llm_chat_history: Any = None):
+        self._observe(query)
+        chat_service.lazyllm.FileSystemQueue().enqueue(json.dumps({'tag': 'text', 'delta': f'stream:{query}'}))
+        return {'text': f'final:{query}'}
 
 
-@pytest.fixture
-def fake_pipeline(monkeypatch):
-    """Patch agentic's heavy external deps so it can run offline."""
+async def _drain_response(response):
+    chunks = []
+    async for chunk in response.body_iterator:
+        if isinstance(chunk, bytes):
+            chunk = chunk.decode('utf-8')
+        chunks.append(chunk)
+    return ''.join(chunks)
+
+
+def test_stream_parallel_requests_see_isolated_config(monkeypatch):
     _FakeAgent.observations = []
+    monkeypatch.setattr(chat_service, 'AutoModel', lambda *_a, **_kw: object())
+    monkeypatch.setattr(chat_service.lazyllm.tools.agent, 'ReactAgent', _FakeAgent)
 
-    class _FakeFileSystemQueue:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        def clear(self):
-            return None
-
-        def dequeue(self):
-            return []
-
-        @classmethod
-        def get_instance(cls, *_args, **_kwargs):
-            return cls()
-
-    monkeypatch.setattr(agentic, 'AutoModel', lambda *_a, **_kw: object())
-    monkeypatch.setattr(agentic, '_ensure_tools_registered', lambda: None)
-    monkeypatch.setattr(agentic, '_augment_query_with_attached_images', lambda query, config: query)
-    monkeypatch.setattr(agentic, '_build_review_decision', lambda **_kw: {'mode': None})
-    monkeypatch.setattr(agentic, '_clear_orphaned_lazyllm_queue_lock', lambda: None)
-    monkeypatch.setattr(agentic, '_spawn_background_review', lambda **_kw: None)
-    monkeypatch.setattr(agentic, '_StreamingReactAgent', _FakeAgent)
-    monkeypatch.setattr(lazyllm.tools.agent, 'ReactAgent', _FakeAgent)
-    monkeypatch.setattr(lazyllm, 'FileSystemQueue', _FakeFileSystemQueue)
-
-    yield _FakeAgent
-
-
-def _build_configs(prefix: str, n: int) -> List[Dict[str, Any]]:
-    return [
-        {
-            'query': f'{prefix}{i}',
-            'kb_id': f'{prefix}id_{i}',
-            'algo_id': f'{prefix}algo_{i}',
-            'available_tools': [f'tool_{prefix}{i}'],
-            'available_skills': [f'skill_{prefix}{i}'],
+    async def drive_one(i: int):
+        session_id = f'stream-session-{i}'
+        params = {
+            'query': f's_{i}',
+            'kb_id': f's_id_{i}',
+            'available_tools': ['calculator'],
+            'available_skills': [f's_skill_{i}'],
         }
-        for i in range(n)
-    ]
+        response = await chat_service.handle_chat(
+            query=params['query'],
+            history=[],
+            session_id=session_id,
+            filters={'kb_id': params['kb_id']},
+            files=None,
+            debug=False,
+            reasoning=False,
+            databases=None,
+            dataset='default',
+            priority=None,
+            available_tools=params['available_tools'],
+            available_skills=params['available_skills'],
+            memory=None,
+            user_preference=None,
+            use_memory=True,
+            model_config={},
+        )
+        body = await _drain_response(response)
+        outer = chat_service.lazyllm.globals.get('agentic_config')
+        return body, outer, session_id
 
+    async def drive_all():
+        return await asyncio.gather(*(drive_one(i) for i in range(6)))
 
-def test_thread_parallel_requests_see_isolated_config(fake_pipeline):
-    n = 8
-    configs = _build_configs('t_', n)
-    results: List[Any] = [None] * n
-    barrier = threading.Barrier(n)
+    results = asyncio.run(drive_all())
 
-    def _run(i: int) -> None:
-        lazyllm.globals._init_sid(sid=f'sync-session-{i}')
-        lazyllm.locals._init_sid(sid=f'sync-session-{i}')
-        lazyllm.globals['agentic_config'] = dict(configs[i])
-        barrier.wait()
-        results[i] = agentic.agentic_forward(query=configs[i]['query'], history=[])
+    assert len(_FakeAgent.observations) == 6
+    obs_by_query = {obs['query']: obs for obs in _FakeAgent.observations}
+    assert set(obs_by_query.keys()) == {f's_{i}' for i in range(6)}
 
-    threads = [threading.Thread(target=_run, args=(i,)) for i in range(n)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    assert len(fake_pipeline.observations) == n
-    obs_by_query = {obs['query']: obs for obs in fake_pipeline.observations}
-    assert set(obs_by_query.keys()) == {f't_{i}' for i in range(n)}
-
-    sids = set()
-    for i in range(n):
-        obs = obs_by_query[f't_{i}']
-        sids.add(obs['sid'])
-        assert obs['sid'] == f'sync-session-{i}'
-        assert obs['config']['kb_id'] == f't_id_{i}'
-        assert obs['config']['algo_id'] == f't_algo_{i}'
-        assert obs['agent_kwargs_tools'][0] == f'tool_t_{i}'
-        assert obs['config']['available_skills'] == [f'skill_t_{i}']
-        assert results[i]['observed_algo_id'] == f't_algo_{i}'
-
-    assert len(sids) == n, f'threads should get distinct SIDs, got {sids!r}'
-
-
-def test_stream_parallel_requests_see_isolated_config(fake_pipeline):
-    n = 6
-
-    async def _drive():
-        async def _one(i: int):
-            session_id = f'stream-session-{i}'
-            lazyllm.globals._init_sid(sid=session_id)
-            lazyllm.locals._init_sid(sid=session_id)
-            params = {
-                'query': f's_{i}',
-                'algo_id': f's_algo_{i}',
-                'filters': {'kb_id': f's_id_{i}'},
-                'available_tools': [f's_tool_{i}'],
-                'available_skills': [f's_skill_{i}'],
-            }
-            stream = agentic.agentic_rag(params)
-            events = []
-            async for event in stream:
-                events.append(event)
-            outer = lazyllm.globals.get('agentic_config')
-            return events, outer, session_id
-
-        tasks = [asyncio.create_task(_one(i)) for i in range(n)]
-        return await asyncio.gather(*tasks)
-
-    results = asyncio.run(_drive())
-
-    assert len(fake_pipeline.observations) == n
-    obs_by_query = {obs['query']: obs for obs in fake_pipeline.observations}
-    assert set(obs_by_query.keys()) == {f's_{i}' for i in range(n)}
-
-    for i in range(n):
+    for i in range(6):
         obs = obs_by_query[f's_{i}']
         assert obs['sid'] == f'stream-session-{i}'
-        assert obs['config']['kb_id'] == f's_id_{i}'
-        assert obs['config']['algo_id'] == f's_algo_{i}'
-        assert obs['agent_kwargs_tools'][0] == f's_tool_{i}'
-        assert obs['config']['available_skills'] == [f's_skill_{i}']
+        assert obs['config']['filters']['kb_id'] == f's_id_{i}'
+        assert obs['agent_kwargs_skills'] == (f's_skill_{i}',)
 
-    for i, (events, outer, session_id) in enumerate(results):
+    for i, (body, outer, session_id) in enumerate(results):
         assert session_id == f'stream-session-{i}'
-        assert events
-        assert isinstance(outer, dict)
-        assert outer.get('algo_id') == f's_algo_{i}', (
-            'the asyncio task should still see its own agentic_config after the '
-            'streaming worker finishes'
-        )
+        assert f'stream:s_{i}' in body
+        assert outer is None
 
 
-def test_expected_tool_filter_matches_runtime_config():
-    request_config = {
-        'kb_id': 'kb-1',
-    }
+def test_stream_response_keeps_session_after_route_context_exits(monkeypatch):
+    _FakeAgent.observations = []
+    monkeypatch.setattr(chat_service, 'AutoModel', lambda *_a, **_kw: object())
+    monkeypatch.setattr(chat_service.lazyllm.tools.agent, 'ReactAgent', _FakeAgent)
 
-    filtered = _expected_tools_for_request(request_config)
+    async def drive():
+        session_id = 'route-stream-session'
+        with lazyllm.new_session(session_id):
+            response = await chat_service.handle_chat(
+                query='route_query',
+                history=[],
+                session_id=session_id,
+                filters={'kb_id': 'route_kb'},
+                files=None,
+                debug=False,
+                reasoning=False,
+                databases=None,
+                dataset='default',
+                priority=None,
+                available_tools=['calculator'],
+                available_skills=['route_skill'],
+                memory=None,
+                user_preference=None,
+                use_memory=True,
+                model_config={},
+            )
+        return await _drain_response(response)
 
-    assert filtered == tuple(DEFAULT_TOOLS)
+    body = asyncio.run(drive())
+
+    assert 'stream:route_query' in body
+    assert len(_FakeAgent.observations) == 1
+    obs = _FakeAgent.observations[0]
+    assert obs['sid'] == 'route-stream-session'
+    assert obs['config']['session_id'] == 'route-stream-session'
+    assert obs['config']['filters']['kb_id'] == 'route_kb'

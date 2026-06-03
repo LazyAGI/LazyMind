@@ -58,6 +58,7 @@ class MeResponse(BaseModel):
     permissions: list[str]
     tenant_id: str | None = None
     dynamic: bool
+    chat_unlike_switch: bool = False
 
 
 class UpdateMeBody(BaseModel):

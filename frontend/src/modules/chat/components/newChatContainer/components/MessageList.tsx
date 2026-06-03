@@ -26,6 +26,7 @@ interface MessageListProps {
   onCancelEditUserMessage?: () => void;
   onResendEditedUserMessage?: (index: number, value: string) => void;
   onCopyUserMessage?: (item: any) => void;
+  onCiteMessage?: (text: string) => void;
 }
 
 const MessageList: React.FC<MessageListProps> = ({
@@ -47,6 +48,7 @@ const MessageList: React.FC<MessageListProps> = ({
   onCancelEditUserMessage,
   onResendEditedUserMessage,
   onCopyUserMessage,
+  onCiteMessage,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -159,6 +161,7 @@ const MessageList: React.FC<MessageListProps> = ({
                   }
                   sessionId={sessionId}
                   onPreferenceSelect={onPreferenceSelect}
+                  onCiteMessage={onCiteMessage}
                   isLatestDualAnswer={
                     index === messageList.length - 1 &&
                     !!(

@@ -1,16 +1,5 @@
-import { Tooltip } from "antd";
-import { InfoCircleOutlined } from "@ant-design/icons";
-import { useTranslation } from "react-i18next";
+import { RiskTip } from "@/components/ui";
 
-function RiskTip() {
-  const { t } = useTranslation();
-  return (
-    <Tooltip
-      title={<span>{t("chat.riskTip")}</span>}
-    >
-      <InfoCircleOutlined />
-    </Tooltip>
-  );
+export default function ChatRiskTip() {
+  return <RiskTip titleKey="chat.riskTip" />;
 }
-
-export default RiskTip;

@@ -20,7 +20,6 @@ type Config struct {
 	ControlPlaneBaseURL string        `yaml:"control_plane_base_url"`
 	HeartbeatInterval   time.Duration `yaml:"heartbeat_interval"`
 	PullInterval        time.Duration `yaml:"pull_interval"`
-	ReconcileInterval   time.Duration `yaml:"reconcile_interval"`
 	BaseRoot            string        `yaml:"base_root"`
 	HostPathStyle       string        `yaml:"host_path_style"`
 	PathMappings        []PathMapping `yaml:"path_mappings"`
@@ -28,9 +27,7 @@ type Config struct {
 	// These directories are derived from base_root and are not read from YAML directly.
 	LogDir   string         `yaml:"-"`
 	Staging  StagingConfig  `yaml:"-"`
-	Snapshot SnapshotConfig `yaml:"-"`
 	Watch    WatchConfig    `yaml:"watch"`
-	Scan     ScanConfig     `yaml:"scan"`
 	Security SecurityConfig `yaml:"security"`
 	HTTP     HTTPConfig     `yaml:"http"`
 }
@@ -39,10 +36,6 @@ type StagingConfig struct {
 	Enabled       bool   `yaml:"-"`
 	HostRoot      string `yaml:"-"`
 	ContainerRoot string `yaml:"-"`
-}
-
-type SnapshotConfig struct {
-	HostRoot string `yaml:"-"`
 }
 
 type PathMapping struct {
@@ -54,18 +47,6 @@ type WatchConfig struct {
 	DebounceWindow time.Duration `yaml:"debounce_window"`
 	MaxBatchSize   int           `yaml:"max_batch_size"`
 	Recursive      bool          `yaml:"recursive"`
-}
-
-type ScanConfig struct {
-	BatchSize            int   `yaml:"batch_size"`
-	MaxConcurrency       int   `yaml:"max_concurrency"`
-	LargeFileThresholdMB int64 `yaml:"large_file_threshold_mb"`
-	// IncludeExtensions is an allowlist of extensions to scan, such as [".pdf", ".docx"].
-	// It is mutually exclusive with ExcludeExtensions; IncludeExtensions wins when both are set.
-	// When unset, files are not filtered by extension.
-	IncludeExtensions []string `yaml:"include_extensions"`
-	// ExcludeExtensions is a blocklist of extensions to skip, such as [".tmp", ".log"].
-	ExcludeExtensions []string `yaml:"exclude_extensions"`
 }
 
 type SecurityConfig struct {
@@ -130,7 +111,6 @@ func defaultConfig() *Config {
 		ListenAddr:        "127.0.0.1:19090",
 		HeartbeatInterval: 15 * time.Second,
 		PullInterval:      10 * time.Second,
-		ReconcileInterval: 10 * time.Minute,
 		BaseRoot:          "",
 		HostPathStyle:     "auto",
 		LogLevel:          "info",
@@ -142,11 +122,6 @@ func defaultConfig() *Config {
 			DebounceWindow: 2 * time.Second,
 			MaxBatchSize:   256,
 			Recursive:      true,
-		},
-		Scan: ScanConfig{
-			BatchSize:            500,
-			MaxConcurrency:       4,
-			LargeFileThresholdMB: 100,
 		},
 		HTTP: HTTPConfig{
 			ReadTimeout:  10 * time.Second,
@@ -256,7 +231,6 @@ func (c *Config) deriveDirsFromBaseRoot(baseDir string) error {
 	if strings.TrimSpace(c.Staging.ContainerRoot) == "" {
 		c.Staging.ContainerRoot = "/data/staging"
 	}
-	c.Snapshot.HostRoot = filepath.Join(base, "snapshots")
 	return nil
 }
 

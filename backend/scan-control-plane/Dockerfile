@@ -1,31 +1,26 @@
-ARG DOCKER_MIRROR=docker.m.daocloud.io/library/
-FROM ${DOCKER_MIRROR}golang:1.24.6-alpine AS builder
-WORKDIR /build
+# syntax=docker/dockerfile:1
 
-ARG ALPINE_MIRROR=https://mirrors.aliyun.com/alpine
-ARG GOPROXY=https://goproxy.cn,direct
-ARG GOSUMDB=sum.golang.google.cn
-ENV GOPROXY=${GOPROXY} \
-    GOSUMDB=${GOSUMDB}
+FROM golang:1.23-bookworm AS build
 
-RUN sed -i "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" /etc/apk/repositories \
-    && apk add --no-cache build-base
-
+WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+COPY migrations ./migrations
+COPY scripts ./scripts
 
-COPY . .
-RUN CGO_ENABLED=1 GOOS=linux go build -o /out/scan-control-plane ./cmd/main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /out/scan-control-plane ./cmd/scan-control-plane
 
-FROM ${DOCKER_MIRROR}alpine:3.19
-ARG ALPINE_MIRROR=https://mirrors.aliyun.com/alpine
-RUN sed -i "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" /etc/apk/repositories \
-    && apk add --no-cache ca-certificates wget
+FROM gcr.io/distroless/static-debian12:nonroot
+
 WORKDIR /app
+COPY --from=build /out/scan-control-plane /app/scan-control-plane
+COPY --from=build /src/migrations /app/migrations
+COPY --from=build /src/scripts /app/scripts
 
-COPY --from=builder /out/scan-control-plane /usr/local/bin/scan-control-plane
-COPY --from=builder /build/configs /app/configs
-
+ENV LAZYMIND_SCAN_CONTROL_PLANE_ADDRESS=0.0.0.0
+ENV LAZYMIND_SCAN_CONTROL_PLANE_PORT=18080
 EXPOSE 18080
-ENTRYPOINT ["/usr/local/bin/scan-control-plane"]
-CMD ["-config", "/app/configs/control-plane.yaml"]
+
+USER nonroot:nonroot
+ENTRYPOINT ["/app/scan-control-plane"]

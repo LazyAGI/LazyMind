@@ -4,364 +4,230 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	ListenAddr        string          `yaml:"listen_addr"`
-	DatabaseDriver    string          `yaml:"database_driver"`
-	DatabaseDSN       string          `yaml:"database_dsn"`
-	DatabasePath      string          `yaml:"database_path"` // deprecated: kept for backward compatibility
-	LogLevel          string          `yaml:"log_level"`
-	AgentToken        string          `yaml:"agent_token"`
-	DefaultIdleWindow time.Duration   `yaml:"default_idle_window"`
-	SchedulerTick     time.Duration   `yaml:"scheduler_tick"`
-	EventMerge        MergeConfig     `yaml:"event_merge"`
-	Parser            ParserConfig    `yaml:"parser"`
-	Core              CoreConfig      `yaml:"core"`
-	Metrics           MetricsConfig   `yaml:"metrics"`
-	Worker            WorkerConfig    `yaml:"worker"`
-	CloudSync         CloudSyncConfig `yaml:"cloud_sync"`
+	Address                           string
+	Port                              int
+	DBDSN                             string
+	CoreBaseURL                       string
+	DefaultDatasetAlgoID              string
+	DefaultDatasetAlgoName            string
+	AgentBaseURL                      string
+	AgentToken                        string
+	LocalFSDefaultAgentID             string
+	LocalFSPublicRoot                 string
+	FeishuBaseURL                     string
+	AuthServiceBaseURL                string
+	AuthServiceInternalToken          string
+	TempDir                           string
+	TempTTL                           time.Duration
+	WorkerLeaseTTL                    time.Duration
+	WorkerMaxBackoff                  time.Duration
+	ParseDeadLetterAfter              int64
+	GenerateTasksMaxObjectsPerRequest int
+	ParseWorkerGlobalConcurrency      int
+	ParseWorkerSourceConcurrency      int
+	WorkerPollInterval                time.Duration
+	CoreResultPollInterval            time.Duration
+	CompensationPollInterval          time.Duration
 }
 
-type MergeConfig struct {
-	FlushTick      time.Duration `yaml:"flush_tick"`
-	FlushIdle      time.Duration `yaml:"flush_idle"`
-	FlushMaxWait   time.Duration `yaml:"flush_max_wait"`
-	FlushBatchSize int           `yaml:"flush_batch_size"`
-	MaxMemoryKeys  int           `yaml:"max_memory_keys"`
-}
-
-type WorkerConfig struct {
-	Enabled bool `yaml:"enabled"`
-	// Deprecated: execution mode has been unified to core_task.
-	ExecutionMode       string        `yaml:"execution_mode"`
-	Tick                time.Duration `yaml:"tick"`
-	MaxConcurrent       int           `yaml:"max_concurrent"`
-	MaxPerTenant        int           `yaml:"max_per_tenant"`
-	MaxPerSource        int           `yaml:"max_per_source"`
-	MaxLargeFile        int           `yaml:"max_large_file"`
-	LargeFileThreshold  int64         `yaml:"large_file_threshold_bytes"`
-	ClaimBatchSize      int           `yaml:"claim_batch_size"`
-	LeaseDuration       time.Duration `yaml:"lease_duration"`
-	RetryBaseBackoff    time.Duration `yaml:"retry_base_backoff"`
-	RetryMaxBackoff     time.Duration `yaml:"retry_max_backoff"`
-	AgentTimeout        time.Duration `yaml:"agent_timeout"`
-	CommandAckTimeout   time.Duration `yaml:"command_ack_timeout"`
-	CommandMaxAttempts  int           `yaml:"command_max_attempts"`
-	AgentOfflineTimeout time.Duration `yaml:"agent_offline_timeout"`
-}
-
-type ParserConfig struct {
-	// Deprecated: parser is no longer used by runtime execution path.
-	Enabled   bool          `yaml:"enabled"`
-	Endpoint  string        `yaml:"endpoint"`
-	Timeout   time.Duration `yaml:"timeout"`
-	AuthToken string        `yaml:"auth_token"`
-}
-
-type CoreConfig struct {
-	Enabled   bool          `yaml:"enabled"`
-	Endpoint  string        `yaml:"endpoint"`
-	DatasetID string        `yaml:"dataset_id"`
-	UserID    string        `yaml:"user_id"`
-	UserName  string        `yaml:"user_name"`
-	StartMode string        `yaml:"start_mode"`
-	AuthToken string        `yaml:"auth_token"`
-	Timeout   time.Duration `yaml:"timeout"`
-}
-
-type MetricsConfig struct {
-	Enabled bool          `yaml:"enabled"`
-	Tick    time.Duration `yaml:"tick"`
-}
-
-type CloudSyncConfig struct {
-	Enabled                  bool          `yaml:"enabled"`
-	Tick                     time.Duration `yaml:"tick"`
-	MaxConcurrent            int           `yaml:"max_concurrent"`
-	LockTTL                  time.Duration `yaml:"lock_ttl"`
-	DefaultScheduleTZ        string        `yaml:"default_schedule_tz"`
-	HTTPTimeout              time.Duration `yaml:"http_timeout"`
-	RetryMaxAttempts         int           `yaml:"retry_max_attempts"`
-	RetryBaseBackoff         time.Duration `yaml:"retry_base_backoff"`
-	RetryMaxBackoff          time.Duration `yaml:"retry_max_backoff"`
-	AuthServiceBaseURL       string        `yaml:"auth_service_base_url"`
-	AuthServiceInternalToken string        `yaml:"auth_service_internal_token"`
-	TempDir                  string        `yaml:"temp_dir"`
-}
-
-func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read config: %w", err)
-	}
+func Load() (Config, error) {
 	cfg := defaultConfig()
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
-	}
-	cfg.applyEnvOverrides()
-	cfg.normalizeDatabaseConfig()
+	cfg.applyEnv()
 	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
-	if strings.EqualFold(cfg.DatabaseDriver, "sqlite") {
-		path := strings.TrimSpace(cfg.DatabaseDSN)
-		if strings.HasPrefix(path, "file:") {
-			path = strings.TrimPrefix(path, "file:")
-			if idx := strings.Index(path, "?"); idx >= 0 {
-				path = path[:idx]
-			}
-		}
-		if path != "" && path != ":memory:" {
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-				return nil, fmt.Errorf("mkdir db dir: %w", err)
-			}
-		}
+		return Config{}, err
 	}
 	return cfg, nil
 }
 
-func defaultConfig() *Config {
-	return &Config{
-		ListenAddr:        "127.0.0.1:18080",
-		DatabaseDriver:    "postgres",
-		DatabaseDSN:       "host=127.0.0.1 user=root password=123456 dbname=scan_control_plane port=5432 sslmode=disable TimeZone=UTC",
-		LogLevel:          "info",
-		AgentToken:        "",
-		DefaultIdleWindow: time.Hour,
-		SchedulerTick:     30 * time.Second,
-		EventMerge: MergeConfig{
-			FlushTick:      500 * time.Millisecond,
-			FlushIdle:      2 * time.Second,
-			FlushMaxWait:   5 * time.Second,
-			FlushBatchSize: 256,
-			MaxMemoryKeys:  10000,
-		},
-		Worker: WorkerConfig{
-			Enabled:             true,
-			ExecutionMode:       "core_task",
-			Tick:                time.Second,
-			MaxConcurrent:       4,
-			MaxPerTenant:        2,
-			MaxPerSource:        2,
-			MaxLargeFile:        1,
-			LargeFileThreshold:  100 * 1024 * 1024,
-			ClaimBatchSize:      32,
-			LeaseDuration:       30 * time.Second,
-			RetryBaseBackoff:    2 * time.Second,
-			RetryMaxBackoff:     60 * time.Second,
-			AgentTimeout:        15 * time.Second,
-			CommandAckTimeout:   30 * time.Second,
-			CommandMaxAttempts:  8,
-			AgentOfflineTimeout: 45 * time.Second,
-		},
-		Parser: ParserConfig{
-			Enabled:   false,
-			Endpoint:  "",
-			Timeout:   60 * time.Second,
-			AuthToken: "",
-		},
-		Core: CoreConfig{
-			Enabled:   false,
-			Endpoint:  "",
-			DatasetID: "",
-			UserID:    "scan-control-plane",
-			UserName:  "scan-control-plane",
-			StartMode: "ASYNC",
-			AuthToken: "",
-			Timeout:   60 * time.Second,
-		},
-		Metrics: MetricsConfig{
-			Enabled: true,
-			Tick:    30 * time.Second,
-		},
-		CloudSync: CloudSyncConfig{
-			Enabled:            true,
-			Tick:               30 * time.Second,
-			MaxConcurrent:      4,
-			LockTTL:            20 * time.Minute,
-			DefaultScheduleTZ:  "Asia/Shanghai",
-			HTTPTimeout:        30 * time.Second,
-			RetryMaxAttempts:   3,
-			RetryBaseBackoff:   time.Second,
-			RetryMaxBackoff:    30 * time.Second,
-			AuthServiceBaseURL: "http://auth-service:8000",
-			TempDir:            "/var/lib/ragscan/cloud-sync-tmp",
-		},
+func defaultConfig() Config {
+	return Config{
+		Address:                           "127.0.0.1",
+		Port:                              18080,
+		DefaultDatasetAlgoID:              "general_algo",
+		DefaultDatasetAlgoName:            "General",
+		LocalFSDefaultAgentID:             "file-watcher-local-001",
+		TempTTL:                           24 * time.Hour,
+		WorkerLeaseTTL:                    60 * time.Second,
+		WorkerMaxBackoff:                  10 * time.Minute,
+		ParseDeadLetterAfter:              3,
+		GenerateTasksMaxObjectsPerRequest: 20,
+		ParseWorkerGlobalConcurrency:      20,
+		ParseWorkerSourceConcurrency:      2,
+		WorkerPollInterval:                5 * time.Second,
+		CoreResultPollInterval:            10 * time.Second,
+		CompensationPollInterval:          30 * time.Second,
 	}
 }
 
-func (c *Config) normalizeDatabaseConfig() {
-	c.DatabaseDriver = strings.ToLower(strings.TrimSpace(c.DatabaseDriver))
-	c.DatabaseDSN = strings.TrimSpace(c.DatabaseDSN)
-	c.DatabasePath = strings.TrimSpace(c.DatabasePath)
-
-	if c.DatabaseDriver == "" && c.DatabasePath != "" {
-		c.DatabaseDriver = "sqlite"
+func (c *Config) applyEnv() {
+	if address := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_ADDRESS")); address != "" {
+		c.Address = address
 	}
-	if c.DatabaseDSN == "" && c.DatabasePath != "" {
-		c.DatabaseDSN = c.DatabasePath
+	if portText := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_PORT")); portText != "" {
+		port, err := strconv.Atoi(portText)
+		if err == nil {
+			c.Port = port
+		} else {
+			c.Port = -1
+		}
 	}
-	if c.DatabaseDriver == "" {
-		c.DatabaseDriver = "postgres"
+	if dsn := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_DB_DSN")); dsn != "" {
+		c.DBDSN = dsn
 	}
-	c.Worker.ExecutionMode = strings.ToLower(strings.TrimSpace(c.Worker.ExecutionMode))
-	c.AgentToken = strings.TrimSpace(c.AgentToken)
-	c.Core.Endpoint = strings.TrimSpace(c.Core.Endpoint)
-	c.Core.DatasetID = strings.TrimSpace(c.Core.DatasetID)
-	c.Core.UserID = strings.TrimSpace(c.Core.UserID)
-	c.Core.UserName = strings.TrimSpace(c.Core.UserName)
-	c.Core.StartMode = strings.TrimSpace(c.Core.StartMode)
-	c.CloudSync.DefaultScheduleTZ = strings.TrimSpace(c.CloudSync.DefaultScheduleTZ)
-	c.CloudSync.AuthServiceBaseURL = strings.TrimSpace(c.CloudSync.AuthServiceBaseURL)
-	c.CloudSync.AuthServiceInternalToken = strings.TrimSpace(c.CloudSync.AuthServiceInternalToken)
-	c.CloudSync.TempDir = strings.TrimSpace(c.CloudSync.TempDir)
+	if baseURL := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_CORE_BASE_URL")); baseURL != "" {
+		c.CoreBaseURL = baseURL
+	}
+	if algoID := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_DEFAULT_DATASET_ALGO_ID")); algoID != "" {
+		c.DefaultDatasetAlgoID = algoID
+	}
+	if algoName := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_DEFAULT_DATASET_ALGO_NAME")); algoName != "" {
+		c.DefaultDatasetAlgoName = algoName
+	}
+	if baseURL := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_AGENT_BASE_URL")); baseURL != "" {
+		c.AgentBaseURL = baseURL
+	}
+	if token := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_AGENT_TOKEN")); token != "" {
+		c.AgentToken = token
+	}
+	if agentID := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_DEFAULT_AGENT_ID")); agentID != "" {
+		c.LocalFSDefaultAgentID = agentID
+	}
+	if publicRoot := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT")); publicRoot != "" {
+		c.LocalFSPublicRoot = publicRoot
+	}
+	if baseURL := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_FEISHU_BASE_URL")); baseURL != "" {
+		c.FeishuBaseURL = baseURL
+	}
+	if baseURL := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL")); baseURL != "" {
+		c.AuthServiceBaseURL = baseURL
+	}
+	if token := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")); token != "" {
+		c.AuthServiceInternalToken = token
+	}
+	if tempDir := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_TEMP_DIR")); tempDir != "" {
+		c.TempDir = tempDir
+	}
+	c.TempTTL = durationEnv("SOURCEENGINE_TEMP_TTL", c.TempTTL)
+	c.WorkerLeaseTTL = durationEnv("SOURCEENGINE_WORKER_LEASE_TTL", c.WorkerLeaseTTL)
+	c.WorkerMaxBackoff = durationEnv("SOURCEENGINE_WORKER_MAX_BACKOFF", c.WorkerMaxBackoff)
+	c.ParseDeadLetterAfter = int64Env("SOURCEENGINE_PARSE_DEAD_LETTER_AFTER", c.ParseDeadLetterAfter)
+	c.GenerateTasksMaxObjectsPerRequest = intEnv("SOURCEENGINE_GENERATE_TASKS_MAX_OBJECTS_PER_REQUEST", c.GenerateTasksMaxObjectsPerRequest)
+	c.ParseWorkerGlobalConcurrency = intEnv("SOURCEENGINE_PARSE_WORKER_GLOBAL_CONCURRENCY", c.ParseWorkerGlobalConcurrency)
+	c.ParseWorkerSourceConcurrency = intEnv("SOURCEENGINE_PARSE_WORKER_SOURCE_CONCURRENCY", c.ParseWorkerSourceConcurrency)
+	c.WorkerPollInterval = durationEnv("SOURCEENGINE_WORKER_POLL_INTERVAL", c.WorkerPollInterval)
+	c.CoreResultPollInterval = durationEnv("SOURCEENGINE_CORE_RESULT_POLL_INTERVAL", c.CoreResultPollInterval)
+	c.CompensationPollInterval = durationEnv("SOURCEENGINE_COMPENSATION_POLL_INTERVAL", c.CompensationPollInterval)
 }
 
-func (c *Config) applyEnvOverrides() {
-	if value := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")); value != "" {
-		c.CloudSync.AuthServiceInternalToken = value
+func (c Config) Validate() error {
+	if strings.TrimSpace(c.Address) == "" {
+		return fmt.Errorf("address is required")
 	}
-}
-
-func (c *Config) Validate() error {
-	if c.ListenAddr == "" {
-		return fmt.Errorf("listen_addr is required")
+	if c.Port <= 0 || c.Port > 65535 {
+		return fmt.Errorf("port must be between 1 and 65535")
 	}
-	if c.AgentToken == "" && !listenAddrIsLoopback(c.ListenAddr) {
-		return fmt.Errorf("agent_token is required when listen_addr is not loopback")
+	if strings.TrimSpace(c.DBDSN) == "" {
+		return fmt.Errorf("db dsn is required")
 	}
-	if c.DatabaseDriver != "postgres" && c.DatabaseDriver != "sqlite" {
-		return fmt.Errorf("database_driver must be one of: postgres, sqlite")
+	if strings.TrimSpace(c.CoreBaseURL) == "" {
+		return fmt.Errorf("core base url is required")
 	}
-	if strings.TrimSpace(c.DatabaseDSN) == "" {
-		return fmt.Errorf("database_dsn is required")
+	if strings.TrimSpace(c.DefaultDatasetAlgoID) == "" {
+		return fmt.Errorf("default dataset algo id is required")
 	}
-	if c.DefaultIdleWindow <= 0 {
-		return fmt.Errorf("default_idle_window must be > 0")
+	if strings.TrimSpace(c.DefaultDatasetAlgoName) == "" {
+		return fmt.Errorf("default dataset algo name is required")
 	}
-	if c.SchedulerTick <= 0 {
-		return fmt.Errorf("scheduler_tick must be > 0")
+	if strings.TrimSpace(c.TempDir) == "" {
+		return fmt.Errorf("temp dir is required")
 	}
-	if c.EventMerge.FlushTick <= 0 {
-		return fmt.Errorf("event_merge.flush_tick must be > 0")
+	if strings.TrimSpace(c.AgentBaseURL) == "" {
+		return fmt.Errorf("agent base url is required")
 	}
-	if c.EventMerge.FlushIdle <= 0 {
-		return fmt.Errorf("event_merge.flush_idle must be > 0")
+	if strings.TrimSpace(c.FeishuBaseURL) == "" {
+		return fmt.Errorf("feishu base url is required")
 	}
-	if c.EventMerge.FlushMaxWait <= 0 {
-		return fmt.Errorf("event_merge.flush_max_wait must be > 0")
+	if strings.TrimSpace(c.AuthServiceBaseURL) == "" {
+		return fmt.Errorf("auth service base url is required")
 	}
-	if c.EventMerge.FlushBatchSize <= 0 {
-		return fmt.Errorf("event_merge.flush_batch_size must be > 0")
+	if strings.TrimSpace(c.AuthServiceInternalToken) == "" {
+		return fmt.Errorf("auth service internal token is required")
 	}
-	if c.EventMerge.MaxMemoryKeys <= 0 {
-		return fmt.Errorf("event_merge.max_memory_keys must be > 0")
+	if c.GenerateTasksMaxObjectsPerRequest <= 0 {
+		return fmt.Errorf("generate tasks max objects per request must be positive")
 	}
-	if c.Worker.Tick <= 0 {
-		return fmt.Errorf("worker.tick must be > 0")
+	if c.TempTTL <= 0 {
+		return fmt.Errorf("temp ttl must be positive")
 	}
-	if c.Worker.ExecutionMode == "" {
-		c.Worker.ExecutionMode = "core_task"
+	if c.WorkerLeaseTTL <= 0 {
+		return fmt.Errorf("worker lease ttl must be positive")
 	}
-	if c.Worker.ExecutionMode != "core_task" {
-		// Keep backward compatibility with legacy configs and force the only
-		// supported runtime mode.
-		c.Worker.ExecutionMode = "core_task"
+	if c.WorkerMaxBackoff <= 0 {
+		return fmt.Errorf("worker max backoff must be positive")
 	}
-	if c.Worker.MaxConcurrent <= 0 {
-		return fmt.Errorf("worker.max_concurrent must be > 0")
+	if c.ParseDeadLetterAfter <= 0 {
+		return fmt.Errorf("parse dead letter after must be positive")
 	}
-	if c.Worker.MaxPerTenant <= 0 {
-		return fmt.Errorf("worker.max_per_tenant must be > 0")
+	if c.ParseWorkerGlobalConcurrency <= 0 {
+		return fmt.Errorf("parse worker global concurrency must be positive")
 	}
-	if c.Worker.MaxPerSource <= 0 {
-		return fmt.Errorf("worker.max_per_source must be > 0")
+	if c.ParseWorkerSourceConcurrency <= 0 {
+		return fmt.Errorf("parse worker source concurrency must be positive")
 	}
-	if c.Worker.MaxLargeFile <= 0 {
-		return fmt.Errorf("worker.max_large_file must be > 0")
+	if c.WorkerPollInterval <= 0 {
+		return fmt.Errorf("worker poll interval must be positive")
 	}
-	if c.Worker.LargeFileThreshold <= 0 {
-		return fmt.Errorf("worker.large_file_threshold_bytes must be > 0")
+	if c.CoreResultPollInterval <= 0 {
+		return fmt.Errorf("core result poll interval must be positive")
 	}
-	if c.Worker.ClaimBatchSize <= 0 {
-		return fmt.Errorf("worker.claim_batch_size must be > 0")
-	}
-	if c.Worker.LeaseDuration <= 0 {
-		return fmt.Errorf("worker.lease_duration must be > 0")
-	}
-	if c.Worker.RetryBaseBackoff <= 0 || c.Worker.RetryMaxBackoff <= 0 {
-		return fmt.Errorf("worker retry backoff must be > 0")
-	}
-	if c.Worker.CommandMaxAttempts <= 0 {
-		return fmt.Errorf("worker.command_max_attempts must be > 0")
-	}
-	if c.Worker.CommandAckTimeout <= 0 {
-		return fmt.Errorf("worker.command_ack_timeout must be > 0")
-	}
-	if c.Worker.AgentOfflineTimeout <= 0 {
-		return fmt.Errorf("worker.agent_offline_timeout must be > 0")
-	}
-	if c.CloudSync.Enabled {
-		if c.CloudSync.Tick <= 0 {
-			return fmt.Errorf("cloud_sync.tick must be > 0")
-		}
-		if c.CloudSync.MaxConcurrent <= 0 {
-			return fmt.Errorf("cloud_sync.max_concurrent must be > 0")
-		}
-		if c.CloudSync.LockTTL <= 0 {
-			return fmt.Errorf("cloud_sync.lock_ttl must be > 0")
-		}
-		if c.CloudSync.HTTPTimeout <= 0 {
-			return fmt.Errorf("cloud_sync.http_timeout must be > 0")
-		}
-		if c.CloudSync.RetryMaxAttempts <= 0 {
-			return fmt.Errorf("cloud_sync.retry_max_attempts must be > 0")
-		}
-		if c.CloudSync.RetryBaseBackoff <= 0 || c.CloudSync.RetryMaxBackoff <= 0 {
-			return fmt.Errorf("cloud_sync retry backoff must be > 0")
-		}
-		if c.CloudSync.AuthServiceBaseURL == "" {
-			return fmt.Errorf("cloud_sync.auth_service_base_url is required when cloud_sync.enabled=true")
-		}
-	}
-	if c.Core.Enabled && strings.TrimSpace(c.Core.Endpoint) == "" {
-		return fmt.Errorf("core.endpoint is required when core.enabled=true")
-	}
-	if c.Core.Enabled && strings.TrimSpace(c.Core.UserID) == "" {
-		return fmt.Errorf("core.user_id is required when core.enabled=true")
-	}
-	if c.Core.Timeout <= 0 {
-		return fmt.Errorf("core.timeout must be > 0")
-	}
-	if c.Metrics.Tick <= 0 {
-		return fmt.Errorf("metrics.tick must be > 0")
+	if c.CompensationPollInterval <= 0 {
+		return fmt.Errorf("compensation poll interval must be positive")
 	}
 	return nil
 }
 
-func listenAddrIsLoopback(listenAddr string) bool {
-	host := strings.TrimSpace(listenAddr)
-	if host == "" {
-		return false
+func (c Config) ListenAddr() string {
+	return net.JoinHostPort(c.Address, strconv.Itoa(c.Port))
+}
+
+func intEnv(name string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
 	}
-	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
-		host = strings.TrimSpace(parsedHost)
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return -1
 	}
-	host = strings.Trim(host, "[]")
-	if host == "" {
-		return false
+	return parsed
+}
+
+func int64Env(name string, fallback int64) int64 {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
 	}
-	if strings.EqualFold(host, "localhost") {
-		return true
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return -1
 	}
-	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback()
+	return parsed
+}
+
+func durationEnv(name string, fallback time.Duration) time.Duration {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
 	}
-	return false
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return -1
+	}
+	return parsed
 }

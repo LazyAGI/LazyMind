@@ -1,5 +1,18 @@
+import asyncio
+import json
 import sys
 from types import ModuleType, SimpleNamespace
+
+from lazymind.chat.service import chat_service
+
+
+async def _collect_streaming_response(response):
+    chunks = []
+    async for chunk in response.body_iterator:
+        if isinstance(chunk, bytes):
+            chunk = chunk.decode('utf-8')
+        chunks.append(chunk)
+    return ''.join(chunks)
 
 
 def _import_agentic_module(monkeypatch):
@@ -242,3 +255,49 @@ def test_agentic_forward_uses_automodel(monkeypatch):
     module.agentic_forward(query='hello', history=[])
 
     assert automodel_calls == ['model:llm']
+
+
+def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
+    agent_calls = []
+
+    class FakeAgent:
+        def __init__(self, llm, tools, **kwargs):
+            agent_calls.append({'llm': llm, 'tools': tools, 'kwargs': kwargs})
+
+        def forward(self, query, llm_chat_history=None):
+            chat_service.lazyllm.FileSystemQueue().enqueue(json.dumps({'tag': 'text', 'delta': f'answer:{query}'}))
+            return {'text': f'final:{query}'}
+
+    monkeypatch.setattr(chat_service, 'AutoModel', lambda model, config: f'{model}:{config}')
+    monkeypatch.setattr(chat_service.lazyllm.tools.agent, 'ReactAgent', FakeAgent)
+
+    async def drive():
+        response = await chat_service.handle_chat(
+            query='hello',
+            history=[],
+            session_id='sid-1',
+            filters={},
+            files=None,
+            debug=False,
+            reasoning=False,
+            databases=None,
+            dataset='default',
+            priority=None,
+            available_tools=['calculator'],
+            available_skills=['skill-a'],
+            memory=None,
+            user_preference=None,
+            use_memory=True,
+            model_config={},
+        )
+        return await _collect_streaming_response(response)
+
+    body = asyncio.run(drive())
+
+    assert agent_calls
+    assert agent_calls[0]['llm'].startswith('llm:')
+    assert agent_calls[0]['tools']
+    assert agent_calls[0]['kwargs']['skills'] == ['skill-a']
+    assert agent_calls[0]['kwargs']['stream'] is True
+    assert 'answer:hello' in body
+    assert '"status": "FINISHED"' in body

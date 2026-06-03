@@ -335,6 +335,9 @@ export const skillUploadAccept = ".md,.markdown,.txt,.json,.yaml,.yml";
 const skillUploadSuffixes = ["md", "markdown", "txt", "json", "yaml", "yml"];
 const markdownFrontMatterPattern = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 const frontMatterFieldPattern = /^([a-zA-Z0-9_-]+)\s*:\s*(.*)$/;
+const skillDisplayMetaLinePattern =
+  /^\s*(?:\*\*)?\s*(?:name|description|名称|描述)\s*(?:\*\*)?\s*[:：].*$/i;
+const skillDisplayDividerPattern = /^\s*---\s*$/;
 
 export const getBaseName = (filename: string) => filename.replace(/\.[^/.]+$/, "");
 
@@ -379,6 +382,38 @@ export const parseMarkdownFrontMatter = (content: string) => {
     description: metadata.description || "",
     content: content.slice(matched[0].length),
   };
+};
+
+export const getSkillBodyContentForDisplay = (content: string) => {
+  if (!content) {
+    return "";
+  }
+
+  const contentWithoutFrontMatter = parseMarkdownFrontMatter(content)?.content ?? content;
+  const normalizedContent = contentWithoutFrontMatter.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = normalizedContent.split("\n");
+  let bodyStartIndex = 0;
+
+  while (bodyStartIndex < lines.length) {
+    const trimmedLine = lines[bodyStartIndex].trim();
+
+    if (
+      !trimmedLine ||
+      skillDisplayDividerPattern.test(trimmedLine) ||
+      skillDisplayMetaLinePattern.test(trimmedLine)
+    ) {
+      bodyStartIndex += 1;
+      continue;
+    }
+
+    break;
+  }
+
+  return lines
+    .slice(bodyStartIndex)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/^\s+/, "");
 };
 
 export const inferSkillFileExt = (filename?: string, content?: string) => {

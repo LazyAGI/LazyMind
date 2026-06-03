@@ -11,7 +11,6 @@ import (
 
 // PathValidator validates filesystem paths.
 type PathValidator interface {
-	Validate(path string) internal.ValidatePathResponse
 	EnsureAllowed(path string) error
 }
 
@@ -29,57 +28,6 @@ func NewPathValidator(allowedRoots []string) PathValidator {
 		cleaned = append(cleaned, canonical)
 	}
 	return &pathValidator{allowedRoots: cleaned}
-}
-
-func (v *pathValidator) Validate(path string) internal.ValidatePathResponse {
-	resp := internal.ValidatePathResponse{Path: path}
-
-	clean, err := canonicalize(path)
-	if err != nil {
-		resp.Reason = fmt.Sprintf("invalid path: %v", err)
-		return resp
-	}
-	resp.Path = clean
-
-	if !v.isAllowed(clean) {
-		resp.Reason = "path is not under any allowed root"
-		return resp
-	}
-	resp.Allowed = true
-
-	info, err := os.Stat(clean)
-	if err != nil {
-		if os.IsNotExist(err) {
-			resp.Reason = "path does not exist"
-		} else {
-			resp.Reason = fmt.Sprintf("stat error: %v", err)
-		}
-		return resp
-	}
-
-	resp.Exists = true
-	resp.IsDir = info.IsDir()
-
-	// Try reading the path to determine readability.
-	if info.IsDir() {
-		f, err := os.Open(clean)
-		if err == nil {
-			_ = f.Close()
-			resp.Readable = true
-		} else {
-			resp.Reason = "directory not readable"
-		}
-	} else {
-		f, err := os.Open(clean)
-		if err == nil {
-			_ = f.Close()
-			resp.Readable = true
-		} else {
-			resp.Reason = "file not readable"
-		}
-	}
-
-	return resp
 }
 
 func (v *pathValidator) EnsureAllowed(path string) error {

@@ -1,6 +1,6 @@
 import pytest
 
-from chat.components.process.context_expansion import (
+from lazymind.chat.engine.tools.internal.context_expansion import (
     ContextExpansionComponent,
     _estimate_tokens,
     _get_doc_id,
@@ -69,7 +69,7 @@ def test_context_expansion_fetches_neighbors_with_budget_and_doc_filter():
 
 
 def test_context_expansion_retries_rpc_failure_and_accepts_single_window_node(monkeypatch):
-    monkeypatch.setattr('chat.components.process.context_expansion.time.sleep', lambda _: None)
+    monkeypatch.setattr('lazymind.chat.engine.tools.internal.context_expansion.time.sleep', lambda _: None)
     seed = DummyNode('seed', score=1.0, metadata={'index': 1}, global_metadata={'docid': 'doc-1'})
     neighbor = DummyNode('neighbor', metadata={'index': 2}, global_metadata={'docid': 'doc-1'})
 
@@ -94,7 +94,7 @@ def test_context_expansion_retries_rpc_failure_and_accepts_single_window_node(mo
 
 
 def test_context_expansion_returns_seed_when_rpc_retries_exhausted(monkeypatch):
-    monkeypatch.setattr('chat.components.process.context_expansion.time.sleep', lambda _: None)
+    monkeypatch.setattr('lazymind.chat.engine.tools.internal.context_expansion.time.sleep', lambda _: None)
     seed = DummyNode('seed', global_metadata={'docid': 'doc-1'})
 
     class FakeDocument:

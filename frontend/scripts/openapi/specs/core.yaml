@@ -123,6 +123,20 @@ components:
                         type: string
                     type: array
             type: object
+        AppendEvalSetImportRequest:
+            properties:
+                import_token:
+                    type: string
+            required:
+                - import_token
+            type: object
+        AppendEvalSetImportResponse:
+            properties:
+                task_id:
+                    type: string
+            required:
+                - task_id
+            type: object
         ApplyWordGroupActionBatchResponse:
             properties:
                 results:
@@ -269,6 +283,21 @@ components:
                     type: string
             required:
                 - parent
+            type: object
+        BatchDeleteEvalSetItemsRequest:
+            properties:
+                item_ids:
+                    items:
+                        type: string
+                    type: array
+            type: object
+        BatchDeleteEvalSetItemsResponse:
+            properties:
+                deleted_count:
+                    format: int64
+                    type: integer
+            required:
+                - deleted_count
             type: object
         BatchDeleteWordGroupsRequest:
             properties:
@@ -426,10 +455,6 @@ components:
             properties:
                 conversation:
                     $ref: '#/components/schemas/ConversationItem'
-                history:
-                    items:
-                        $ref: '#/components/schemas/ConversationHistoryItem'
-                    type: array
             type: object
         ConversationFeedbackRequest:
             properties:
@@ -456,8 +481,10 @@ components:
                 id:
                     type: string
                 input:
-                    properties: {}
-                    type: object
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
                 query:
                     type: string
                 reason:
@@ -473,6 +500,22 @@ components:
                         properties: {}
                         type: object
                     type: array
+            type: object
+        ConversationHistoryListResponse:
+            properties:
+                conversation_id:
+                    type: string
+                history:
+                    items:
+                        $ref: '#/components/schemas/ConversationHistoryItem'
+                    type: array
+                name:
+                    type: string
+                next_page_token:
+                    type: string
+                total_size:
+                    format: int64
+                    type: integer
             type: object
         ConversationItem:
             properties:
@@ -556,6 +599,87 @@ components:
             properties:
                 status:
                     type: integer
+            type: object
+        CreateEvalSetByImportRequest:
+            properties:
+                dataset_id:
+                    type: string
+                description:
+                    type: string
+                group_id:
+                    type: string
+                import_token:
+                    type: string
+                name:
+                    type: string
+            required:
+                - dataset_id
+                - description
+                - group_id
+                - import_token
+                - name
+            type: object
+        CreateEvalSetByImportResponse:
+            properties:
+                eval_set_id:
+                    type: string
+                task_id:
+                    type: string
+            required:
+                - eval_set_id
+                - task_id
+            type: object
+        CreateEvalSetItemRequest:
+            properties:
+                case_id:
+                    type: string
+                generate_reason:
+                    type: string
+                ground_truth:
+                    type: string
+                is_deleted:
+                    type: boolean
+                key_points:
+                    type: string
+                question:
+                    type: string
+                question_type:
+                    type: string
+                reference_chunk_ids:
+                    type: string
+                reference_context:
+                    type: string
+                reference_doc:
+                    type: string
+                reference_doc_ids:
+                    type: string
+            required:
+                - case_id
+                - generate_reason
+                - ground_truth
+                - key_points
+                - question
+                - question_type
+                - reference_chunk_ids
+                - reference_context
+                - reference_doc
+                - reference_doc_ids
+            type: object
+        CreateEvalSetRequest:
+            properties:
+                dataset_id:
+                    type: string
+                description:
+                    type: string
+                group_id:
+                    type: string
+                name:
+                    type: string
+            required:
+                - dataset_id
+                - description
+                - group_id
+                - name
             type: object
         CreateTaskItem:
             properties:
@@ -802,12 +926,43 @@ components:
                 user_id:
                     type: string
             type: object
+        DatasetOption:
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+            required:
+                - id
+                - name
+            type: object
+        DatasetOptionsResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/DatasetOption'
+                    type: array
+            type: object
         DatasetRole:
             properties:
                 display_name:
                     type: string
                 role:
                     type: string
+            type: object
+        DeleteEvalSetItemResponse:
+            properties:
+                deleted:
+                    type: boolean
+            required:
+                - deleted
+            type: object
+        DeleteEvalSetResponse:
+            properties:
+                deleted:
+                    type: boolean
+            required:
+                - deleted
             type: object
         DeleteWordGroupConflictResponse:
             properties:
@@ -972,6 +1127,181 @@ components:
                 message:
                     type: string
             type: object
+        EvalSetImportTaskResponse:
+            properties:
+                created_at:
+                    format: date-time
+                    type: string
+                error_code:
+                    type: string
+                error_details:
+                    items:
+                        $ref: '#/components/schemas/ImportValidationErrorDetail'
+                    type: array
+                error_message:
+                    type: string
+                eval_set_id:
+                    type: string
+                file_name:
+                    type: string
+                file_type:
+                    type: string
+                finished_at:
+                    format: date-time
+                    type: string
+                id:
+                    type: string
+                inserted_rows:
+                    format: int64
+                    type: integer
+                progress_current:
+                    format: int64
+                    type: integer
+                progress_total:
+                    format: int64
+                    type: integer
+                started_at:
+                    format: date-time
+                    type: string
+                status:
+                    type: string
+                total_rows:
+                    format: int64
+                    type: integer
+                valid_rows:
+                    format: int64
+                    type: integer
+            required:
+                - created_at
+                - error_code
+                - error_message
+                - eval_set_id
+                - file_name
+                - file_type
+                - id
+                - inserted_rows
+                - progress_current
+                - progress_total
+                - status
+                - total_rows
+                - valid_rows
+            type: object
+        EvalSetItemResponse:
+            properties:
+                case_id:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                created_by:
+                    type: string
+                created_by_name:
+                    type: string
+                eval_set_id:
+                    type: string
+                generate_reason:
+                    type: string
+                ground_truth:
+                    type: string
+                id:
+                    type: string
+                is_deleted:
+                    type: boolean
+                key_points:
+                    type: string
+                question:
+                    type: string
+                question_type:
+                    type: string
+                reference_chunk_ids:
+                    type: string
+                reference_context:
+                    type: string
+                reference_doc:
+                    type: string
+                reference_doc_ids:
+                    type: string
+                shard_id:
+                    type: string
+                source:
+                    type: string
+                source_history_id:
+                    type: string
+                source_session_id:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+            required:
+                - case_id
+                - created_at
+                - created_by
+                - created_by_name
+                - eval_set_id
+                - generate_reason
+                - ground_truth
+                - id
+                - is_deleted
+                - key_points
+                - question
+                - question_type
+                - reference_chunk_ids
+                - reference_context
+                - reference_doc
+                - reference_doc_ids
+                - shard_id
+                - source
+                - source_history_id
+                - source_session_id
+                - updated_at
+            type: object
+        EvalSetResponse:
+            properties:
+                created_at:
+                    format: date-time
+                    type: string
+                created_by:
+                    type: string
+                created_by_name:
+                    type: string
+                dataset_id:
+                    type: string
+                dataset_name:
+                    type: string
+                description:
+                    type: string
+                group_id:
+                    type: string
+                id:
+                    type: string
+                item_count:
+                    format: int64
+                    type: integer
+                name:
+                    type: string
+                permissions:
+                    items:
+                        type: string
+                    type: array
+                shard_id:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+            required:
+                - created_at
+                - created_by
+                - created_by_name
+                - dataset_id
+                - dataset_name
+                - description
+                - group_id
+                - id
+                - item_count
+                - name
+                - shard_id
+                - updated_at
+            type: object
         ExportConversationsRequest:
             properties:
                 conversation_ids:
@@ -1019,6 +1349,121 @@ components:
                     type: string
                 name:
                     type: string
+            type: object
+        ImportInvalidPreviewRow:
+            properties:
+                errors:
+                    items:
+                        $ref: '#/components/schemas/ImportValidationErrorDetail'
+                    type: array
+                row:
+                    type: integer
+                values:
+                    additionalProperties:
+                        type: string
+                    type: object
+            required:
+                - row
+            type: object
+        ImportNormalizedRow:
+            properties:
+                case_id:
+                    type: string
+                generate_reason:
+                    type: string
+                ground_truth:
+                    type: string
+                is_deleted:
+                    type: boolean
+                key_points:
+                    type: string
+                question:
+                    type: string
+                question_type:
+                    type: string
+                reference_chunk_ids:
+                    type: string
+                reference_context:
+                    type: string
+                reference_doc:
+                    type: string
+                reference_doc_ids:
+                    type: string
+            required:
+                - case_id
+                - generate_reason
+                - ground_truth
+                - is_deleted
+                - key_points
+                - question
+                - question_type
+                - reference_chunk_ids
+                - reference_context
+                - reference_doc
+                - reference_doc_ids
+            type: object
+        ImportPreviewResponse:
+            properties:
+                empty_rows:
+                    format: int64
+                    type: integer
+                error_details:
+                    items:
+                        $ref: '#/components/schemas/ImportValidationErrorDetail'
+                    type: array
+                errors_truncated:
+                    type: boolean
+                expires_at:
+                    format: date-time
+                    type: string
+                file_name:
+                    type: string
+                file_type:
+                    type: string
+                import_token:
+                    type: string
+                invalid_preview_rows:
+                    items:
+                        $ref: '#/components/schemas/ImportInvalidPreviewRow'
+                    type: array
+                invalid_rows:
+                    format: int64
+                    type: integer
+                invalid_rows_download_url:
+                    type: string
+                preview_rows:
+                    items:
+                        $ref: '#/components/schemas/ImportNormalizedRow'
+                    type: array
+                total_rows:
+                    format: int64
+                    type: integer
+                valid_rows:
+                    format: int64
+                    type: integer
+            required:
+                - empty_rows
+                - errors_truncated
+                - expires_at
+                - file_name
+                - file_type
+                - import_token
+                - invalid_rows
+                - total_rows
+                - valid_rows
+            type: object
+        ImportValidationErrorDetail:
+            properties:
+                column:
+                    type: string
+                reason:
+                    type: string
+                row:
+                    type: integer
+            required:
+                - column
+                - reason
+                - row
             type: object
         InitUploadRequest:
             properties:
@@ -1134,6 +1579,42 @@ components:
                 total_size:
                     type: integer
             type: object
+        ListEvalSetItemsResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/EvalSetItemResponse'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - page
+                - page_size
+                - total
+            type: object
+        ListEvalSetsResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/EvalSetResponse'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - page
+                - page_size
+                - total
+            type: object
         ListGrantPrincipalsResponse:
             properties:
                 groups:
@@ -1227,6 +1708,16 @@ components:
                 - description
                 - term
             type: object
+        ModelFeaturesResponse:
+            properties:
+                image_embed_enabled:
+                    type: boolean
+                image_embed_required:
+                    type: boolean
+            required:
+                - image_embed_enabled
+                - image_embed_required
+            type: object
         ParserConfig:
             properties:
                 name:
@@ -1311,6 +1802,23 @@ components:
             required:
                 - display_name
                 - content
+            type: object
+        QuestionTypeOption:
+            properties:
+                label:
+                    type: string
+                value:
+                    type: string
+            required:
+                - label
+                - value
+            type: object
+        QuestionTypeOptionsResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/QuestionTypeOption'
+                    type: array
             type: object
         ResumeTaskRequest:
             properties:
@@ -1658,6 +2166,42 @@ components:
                             type: array
                     type: object
             type: object
+        UpdateEvalSetItemRequest:
+            properties:
+                case_id:
+                    type: string
+                generate_reason:
+                    type: string
+                ground_truth:
+                    type: string
+                is_deleted:
+                    type: boolean
+                key_points:
+                    type: string
+                question:
+                    type: string
+                question_type:
+                    type: string
+                reference_chunk_ids:
+                    type: string
+                reference_context:
+                    type: string
+                reference_doc:
+                    type: string
+                reference_doc_ids:
+                    type: string
+            type: object
+        UpdateEvalSetRequest:
+            properties:
+                dataset_id:
+                    type: string
+                description:
+                    type: string
+                group_id:
+                    type: string
+                name:
+                    type: string
+            type: object
         UpdateWordGroupRequest:
             properties:
                 aliases:
@@ -1881,11 +2425,14 @@ components:
                     type: string
                 base_url:
                     type: string
+                dry_run:
+                    type: boolean
                 provider_name:
                     type: string
             required:
                 - api_key
                 - base_url
+                - dry_run
                 - provider_name
             type: object
         createModelProviderGroupOpenAPIRequest:
@@ -1929,6 +2476,15 @@ components:
                     type: string
             required:
                 - id
+            type: object
+        evalSetImportPreviewOpenAPIRequest:
+            properties:
+                file:
+                    type: string
+                file_type:
+                    type: string
+            required:
+                - file
             type: object
         internalSkillCreateOpenAPIRequest:
             properties:
@@ -2171,6 +2727,38 @@ components:
                 - user_model_provider_group_id
                 - user_model_provider_id
             type: object
+        selectedProviderOpenAPIItem:
+            properties:
+                base_url:
+                    type: string
+                category:
+                    type: string
+                group_id:
+                    type: string
+                group_name:
+                    type: string
+                provider_name:
+                    type: string
+                share:
+                    type: boolean
+                user_model_provider_id:
+                    type: string
+            required:
+                - base_url
+                - category
+                - group_id
+                - group_name
+                - provider_name
+                - share
+                - user_model_provider_id
+            type: object
+        selectedProvidersOpenAPIResponse:
+            properties:
+                selections:
+                    items:
+                        $ref: '#/components/schemas/selectedProviderOpenAPIItem'
+                    type: array
+            type: object
         setSelectedModelOpenAPIItem:
             properties:
                 model_id:
@@ -2187,6 +2775,23 @@ components:
                     items:
                         $ref: '#/components/schemas/setSelectedModelOpenAPIItem'
                     type: array
+            type: object
+        setSelectedProviderOpenAPIRequest:
+            properties:
+                group_id:
+                    type: string
+            required:
+                - group_id
+            type: object
+        setSharedProviderOpenAPIRequest:
+            properties:
+                group_id:
+                    type: string
+                share:
+                    type: boolean
+            required:
+                - group_id
+                - share
             type: object
         shareSkillOpenAPIRequest:
             properties:
@@ -3010,13 +3615,22 @@ components:
                     type: string
                 name:
                     type: string
+                verify:
+                    type: boolean
             required:
                 - base_url
                 - name
+                - verify
             type: object
         userModelProviderOpenAPIItem:
             properties:
                 base_url:
+                    type: string
+                capabilities:
+                    items:
+                        type: string
+                    type: array
+                category:
                     type: string
                 default_model_provider_id:
                     type: string
@@ -3028,10 +3642,48 @@ components:
                     type: string
             required:
                 - base_url
+                - category
                 - default_model_provider_id
                 - description
                 - id
                 - name
+            type: object
+        verifiedProviderGroupOpenAPIItem:
+            properties:
+                base_url:
+                    type: string
+                category:
+                    type: string
+                group_id:
+                    type: string
+                group_name:
+                    type: string
+                provider_name:
+                    type: string
+                shared_by_id:
+                    type: string
+                shared_by_name:
+                    type: string
+                source:
+                    type: string
+                user_model_provider_id:
+                    type: string
+            required:
+                - base_url
+                - category
+                - group_id
+                - group_name
+                - provider_name
+                - user_model_provider_id
+            type: object
+        verifiedProviderOpenAPIResponse:
+            properties:
+                group:
+                    $ref: '#/components/schemas/verifiedProviderGroupOpenAPIItem'
+                ready:
+                    type: boolean
+            required:
+                - ready
             type: object
 info:
     description: LazyMind Go backend core API - proxies to algorithm services. text Kong text /api/core。
@@ -3535,8 +4187,37 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ConversationDetailResponse'
-                    description: Conversation details and history
-            summary: Get conversationtext
+                    description: Conversation metadata (no chat history; use :history)
+            summary: Get conversation metadata
+    /api/core/conversations/{name}:history:
+        get:
+            parameters:
+                - in: path
+                  name: name
+                  required: true
+                  schema:
+                    description: Conversation ID or resource name (e.g. conv-1 or conversations/conv-1; :history suffix is stripped)
+                    type: string
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    description: Page size (default 20, max 100)
+                    type: integer
+                - in: query
+                  name: page_token
+                  required: false
+                  schema:
+                    description: Pagination offset token from a previous response next_page_token
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationHistoryListResponse'
+                    description: Chat history page ordered by seq descending; may include in-flight turns from Redis
+            summary: List conversation history (paginated)
     /api/core/conversations:batchDelete:
         post:
             requestBody:
@@ -4227,6 +4908,11 @@ paths:
     /api/core/datasets/{dataset}/members:search:
         post:
             parameters:
+                - in: query
+                  name: name_prefix
+                  required: false
+                  schema:
+                    type: string
                 - in: path
                   name: dataset
                   required: true
@@ -4829,6 +5515,381 @@ paths:
             summary: textSearch documents
             tags:
                 - documents
+    /api/core/eval-set-import-tasks/{task_id}:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EvalSetImportTaskResponse'
+                    description: Eval set import task
+            summary: Get eval set import task
+            tags:
+                - eval-set-imports
+    /api/core/eval-set-import-templates/{file_type}:
+        get:
+            parameters:
+                - in: path
+                  name: file_type
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/octet-stream:
+                            schema:
+                                format: binary
+                                type: string
+                    description: Import template file
+            summary: Download eval set import template
+            tags:
+                - eval-set-imports
+    /api/core/eval-sets:
+        get:
+            parameters:
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: dataset_id
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListEvalSetsResponse'
+                    description: Eval set list
+            summary: List eval sets
+            tags:
+                - eval-sets
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateEvalSetRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EvalSetResponse'
+                    description: Created eval set
+            summary: Create eval set
+            tags:
+                - eval-sets
+    /api/core/eval-sets/{eval_set_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: eval_set_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteEvalSetResponse'
+                    description: Deleted eval set
+            summary: Delete eval set
+            tags:
+                - eval-sets
+        get:
+            parameters:
+                - in: path
+                  name: eval_set_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EvalSetResponse'
+                    description: Eval set details
+            summary: Get eval set
+            tags:
+                - eval-sets
+        patch:
+            parameters:
+                - in: path
+                  name: eval_set_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateEvalSetRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EvalSetResponse'
+                    description: Updated eval set
+            summary: Update eval set
+            tags:
+                - eval-sets
+    /api/core/eval-sets/{eval_set_id}/imports:
+        post:
+            parameters:
+                - in: path
+                  name: eval_set_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/AppendEvalSetImportRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/AppendEvalSetImportResponse'
+                    description: Appended eval set import task
+            summary: Append eval set import
+            tags:
+                - eval-set-imports
+    /api/core/eval-sets/{eval_set_id}/items:
+        get:
+            parameters:
+                - in: path
+                  name: eval_set_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: question_type
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: source
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: order_by
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListEvalSetItemsResponse'
+                    description: Eval set item list
+            summary: List eval set items
+            tags:
+                - eval-set-items
+        post:
+            parameters:
+                - in: path
+                  name: eval_set_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateEvalSetItemRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EvalSetItemResponse'
+                    description: Created eval set item
+            summary: Create eval set item
+            tags:
+                - eval-set-items
+    /api/core/eval-sets/{eval_set_id}/items/{item_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: eval_set_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: item_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteEvalSetItemResponse'
+                    description: Deleted eval set item
+            summary: Delete eval set item
+            tags:
+                - eval-set-items
+        patch:
+            parameters:
+                - in: path
+                  name: eval_set_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: item_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateEvalSetItemRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EvalSetItemResponse'
+                    description: Updated eval set item
+            summary: Update eval set item
+            tags:
+                - eval-set-items
+    /api/core/eval-sets/{eval_set_id}/items:batchDelete:
+        post:
+            parameters:
+                - in: path
+                  name: eval_set_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/BatchDeleteEvalSetItemsRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/BatchDeleteEvalSetItemsResponse'
+                    description: Deleted eval set items
+            summary: Batch delete eval set items
+            tags:
+                - eval-set-items
+    /api/core/eval-sets/datasets:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DatasetOptionsResponse'
+                    description: Dataset options
+            summary: List eval set dataset options
+            tags:
+                - eval-sets
+    /api/core/eval-sets/imports:preview:
+        post:
+            requestBody:
+                content:
+                    multipart/form-data:
+                        schema:
+                            $ref: '#/components/schemas/evalSetImportPreviewOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ImportPreviewResponse'
+                    description: Eval set import preview
+            summary: Preview eval set import
+            tags:
+                - eval-set-imports
+    /api/core/eval-sets/question-types:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/QuestionTypeOptionsResponse'
+                    description: Question type options
+            summary: List eval set question type options
+            tags:
+                - eval-sets
+    /api/core/eval-sets:import:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateEvalSetByImportRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateEvalSetByImportResponse'
+                    description: Created eval set import task
+            summary: Create eval set by import
+            tags:
+                - eval-set-imports
     /api/core/evolution/suggestions:
         get:
             description: Use evolution_id=<resource_type>:<resource_id> for a single-parameter resource filter. resource_type and resource_key remain available as optional compatibility filters.
@@ -4998,6 +6059,11 @@ paths:
     /api/core/kb/{kb_id}/acl:
         get:
             parameters:
+                - in: query
+                  name: grantee_type
+                  required: false
+                  schema:
+                    type: string
                 - in: path
                   name: kb_id
                   required: true
@@ -5177,6 +6243,11 @@ paths:
     /api/core/kb/{kb_id}/can:
         get:
             parameters:
+                - in: query
+                  name: action
+                  required: true
+                  schema:
+                    type: string
                 - in: path
                   name: kb_id
                   required: true
@@ -5428,8 +6499,18 @@ paths:
                 - memory
     /api/core/model_providers:
         get:
-            description: Per-user model provider list. On first request for a user, rows are copied from the built-in default_model_providers table. The current user identity is injected by the auth gateway from the token. Query parameter keyword filters by provider name (SQL LIKE).
+            description: Per-user model provider list. Missing catalog rows are synced from default_model_providers on each request. Query parameter category filters by provider category (default model when category and exclude_category are both omitted). Query parameter exclude_category excludes a category (e.g. exclude_category=model returns ocr and search providers). Query parameter keyword filters by provider name (SQL LIKE).
             parameters:
+                - in: query
+                  name: category
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: exclude_category
+                  required: false
+                  schema:
+                    type: string
                 - in: query
                   name: keyword
                   required: false
@@ -5653,6 +6734,19 @@ paths:
             summary: Check model provider connectivity
             tags:
                 - model_providers
+    /api/core/model_providers/features:
+        get:
+            description: Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ModelFeaturesResponse'
+                    description: Feature flags
+            summary: Get model feature flags
+            tags:
+                - model_providers
     /api/core/model_providers/models:
         get:
             description: Requires query model_type (e.g. llm, embedding). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
@@ -5672,6 +6766,12 @@ paths:
             summary: List current user's models by model_type
             tags:
                 - model_providers
+    /api/core/model_providers/models/ready:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /model_providers/models/ready
     /api/core/model_providers/selected_models:
         get:
             description: Returns the current user's selected model for each model_type.
@@ -5701,6 +6801,81 @@ paths:
                                 $ref: '#/components/schemas/listSelectedModelsOpenAPIResponse'
                     description: Saved selected models
             summary: Save selected models by model_type
+            tags:
+                - model_providers
+    /api/core/model_providers/selected_models/share:
+        put:
+            responses:
+                "200":
+                    description: OK
+            summary: PUT /model_providers/selected_models/share
+    /api/core/model_providers/selected_providers:
+        get:
+            description: Returns the current user's selected provider group for each non-model category.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/selectedProvidersOpenAPIResponse'
+                    description: Selected providers
+            summary: Get selected provider groups (OCR, search, etc.)
+            tags:
+                - model_providers
+        put:
+            description: Upserts the selected provider group for the category derived from the group's parent provider. group_id must belong to the current user.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/setSelectedProviderOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/selectedProvidersOpenAPIResponse'
+                    description: Saved selected providers
+            summary: Set selected provider group for a category
+            tags:
+                - model_providers
+    /api/core/model_providers/selected_providers/share:
+        put:
+            description: Sets or clears the share flag for a selected provider row. Only one share=true row is allowed per category. Protected by document.write permission.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/setSharedProviderOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmptyObject'
+                    description: Updated share flag
+            summary: Set shared provider group for a category
+            tags:
+                - model_providers
+    /api/core/model_providers/verified:
+        get:
+            description: 'Returns the verified provider group the current user has selected for the given category (e.g. ocr, search). Falls back to any share=true row when the user has no own selection. Response includes source: ''own'' or ''shared''.'
+            parameters:
+                - in: query
+                  name: category
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/verifiedProviderOpenAPIResponse'
+                    description: Verified provider group
+            summary: Get verified provider group for a category
             tags:
                 - model_providers
     /api/core/model_providers:with_groups:
