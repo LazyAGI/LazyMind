@@ -1,6 +1,6 @@
 from lazymind.chat.engine.tools import memory as memory_mod
 from lazymind.chat.engine.tools import skill_manager as skill_manager_mod
-from lazymind.chat.engine.tools.skill_manager import Suggestion
+from lazymind.chat.engine.tools.infra.suggestion import Suggestion
 
 
 def test_memory_submits_core_api_suggestion_paths(monkeypatch):
@@ -21,15 +21,14 @@ def test_memory_submits_core_api_suggestion_paths(monkeypatch):
         }
     ]
 
-    tool = memory_mod.MemoryToolGroup()
-    memory_result = tool.memory('memory', suggestions)
-    user_result = tool.memory('user', suggestions)
+    memory_result = memory_mod.memory_manage('memory', suggestions)
+    user_result = memory_mod.memory_manage('user', suggestions)
 
     assert memory_result['success'] is True
-    assert memory_result['tool'] == 'memory'
+    assert memory_result['tool'] == 'memory_manage'
     assert memory_result['result']['target'] == 'memory'
     assert user_result['success'] is True
-    assert user_result['tool'] == 'memory'
+    assert user_result['tool'] == 'memory_manage'
     assert user_result['result']['target'] == 'user'
     assert calls == [
         ('/memory/suggestion', {'session_id': 'sid-1', 'suggestions': suggestions}),
@@ -40,14 +39,14 @@ def test_memory_submits_core_api_suggestion_paths(monkeypatch):
 def test_memory_requires_session_id(monkeypatch):
     monkeypatch.setattr(memory_mod.lazyllm, 'globals', {'agentic_config': {}})
 
-    result = memory_mod.MemoryToolGroup().memory(
+    result = memory_mod.memory_manage(
         'memory',
         [{'title': 'Remember this', 'content': 'Store as a durable suggestion.'}],
     )
 
     assert result == {
         'success': False,
-        'tool': 'memory',
+        'tool': 'memory_manage',
         'error': {
             'reason': "'session_id' is required in agentic_config.",
         },
@@ -57,14 +56,14 @@ def test_memory_requires_session_id(monkeypatch):
 def test_memory_rejects_too_many_suggestions(monkeypatch):
     monkeypatch.setattr(memory_mod.lazyllm, 'globals', {'agentic_config': {'session_id': 'sid-1'}})
 
-    result = memory_mod.MemoryToolGroup().memory(
+    result = memory_mod.memory_manage(
         'memory',
         [{'title': f'item-{i}', 'content': 'x'} for i in range(6)],
     )
 
     assert result == {
         'success': False,
-        'tool': 'memory',
+        'tool': 'memory_manage',
         'error': {
             'reason': 'At most 5 suggestions are allowed per call; got 6.',
         },
@@ -102,20 +101,19 @@ def test_skill_manage_create_modify_remove_use_core_api_paths(monkeypatch):
     )
     suggestion = Suggestion(title='Update instructions', content='Tighten the wording.')
 
-    tool = skill_manager_mod.SkillManagerToolGroup()
-    create_result = tool.skill_manage(
+    create_result = skill_manager_mod.skill_manage(
         'new_skill',
         'create',
         category='drafts',
         content=content,
     )
-    modify_result = tool.skill_manage(
+    modify_result = skill_manager_mod.skill_manage(
         'existing',
         'modify',
         category='writing',
         suggestions=[suggestion],
     )
-    remove_result = tool.skill_manage('existing', 'remove', category='writing')
+    remove_result = skill_manager_mod.skill_manage('existing', 'remove', category='writing')
 
     assert create_result['success'] is True
     assert create_result['tool'] == 'skill_manage'
@@ -156,7 +154,7 @@ def test_skill_manage_rejects_missing_skill_without_post(monkeypatch):
     monkeypatch.setattr(skill_manager_mod, 'post_core_api', lambda path, payload: calls.append((path, payload)))
     monkeypatch.setattr(skill_manager_mod, 'list_all_skill_entries', lambda _base_dir: {})
 
-    result = skill_manager_mod.SkillManagerToolGroup().skill_manage(
+    result = skill_manager_mod.skill_manage(
         'missing',
         'modify',
         category='writing',

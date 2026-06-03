@@ -86,5 +86,7 @@ def test_arxiv_search_public_api_dispatches(monkeypatch):
     assert result[0]['content'] == 'page content'
 
 
-def test_lazymind_web_search_group_keeps_only_url_fetch():
-    assert web_search_mod.UrlFetchToolGroup.__public_apis__ == ['url_fetch']
+def test_lazymind_web_search_url_fetch_exists():
+    import inspect
+    assert inspect.isfunction(web_search_mod.url_fetch)
+    assert web_search_mod.url_fetch.__name__ == 'url_fetch'

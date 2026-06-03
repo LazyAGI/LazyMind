@@ -7,8 +7,6 @@ LAZYMIND_LLM_PRIORITY: int = config['llm_priority']
 
 MAX_CONCURRENCY: int = config['max_concurrency']
 RAG_MODE: bool = config['rag_mode']
-MULTIMODAL_MODE: bool = config['multimodal_mode']
-
 SENSITIVE_FILTER_RESPONSE_TEXT = 'Sorry, I have not learned how to answer this question yet. If you have other questions, I am happy to help.'  # noqa: E501
 
 IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg')

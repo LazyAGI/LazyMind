@@ -192,19 +192,22 @@ def _annotate_result_citations(result: Any) -> Any:
 
 class KBToolGroup:
     __public_apis__ = ['kb_search', 'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search']
+    _document = None
     _retrievers = None
     _reranker = None
     _image_retriever = None
 
-    def __init__(self, document: Any = None) -> None:
-        self._document = document or _DEFAULT_KB_DOCUMENT
+    def __key_source__(self) -> Any:
+        agentic_config = lazyllm.globals.get('agentic_config') or {}
+        return (agentic_config.get('filters') or {}).get('kb_id')
 
     def _ensure_search_runtime(self) -> None:
         cls = type(self)
-        if cls._retrievers is not None:
+        if cls._document is not None:
             return
+        cls._document = _DEFAULT_KB_DOCUMENT
         cls._retrievers = [
-            Retriever(self._document, **cfg)
+            Retriever(cls._document, **cfg)
             for cfg in build_default_retriever_configs()
         ]
         cls._reranker = (
@@ -213,7 +216,7 @@ class KBToolGroup:
             else None
         )
         cls._image_retriever = Retriever(
-            self._document,
+            cls._document,
             group_name='image',
             embed_keys=[EMBED_IMAGE],
         )
@@ -256,7 +259,7 @@ class KBToolGroup:
 
         result = search_kb(
             payload,
-            document=self._document,
+            document=type(self)._document,
             retrievers=type(self)._retrievers,
             tmp_retriever=None,
             reranker=type(self)._reranker,
@@ -493,16 +496,19 @@ class KBToolGroup:
 
 class TempKBToolGroup:
     __public_apis__ = ['kb_tmp_search']
+    _document = None
     _tmp_retriever = None
     _reranker = None
 
-    def __init__(self, document: Any = None) -> None:
-        self._document = document or _DEFAULT_KB_DOCUMENT
+    def __key_source__(self) -> Any:
+        agentic_config = lazyllm.globals.get('agentic_config') or {}
+        return agentic_config.get('files')
 
     def _ensure_search_runtime(self) -> None:
         cls = type(self)
         if cls._tmp_retriever is not None:
             return
+        cls._document = _DEFAULT_KB_DOCUMENT
         cls._tmp_retriever = TempDocRetriever(embed=AutoModel(model=EMBED_MAIN))
         cls._tmp_retriever.add_subretriever('block')
         cls._reranker = (
@@ -542,7 +548,7 @@ class TempKBToolGroup:
         }
         result = search_kb(
             payload,
-            document=self._document,
+            document=type(self)._document,
             retrievers=[],
             tmp_retriever=type(self)._tmp_retriever,
             reranker=type(self)._reranker,

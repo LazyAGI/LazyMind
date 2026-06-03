@@ -1,21 +1,21 @@
 from .tools import (
-    CalculatorToolGroup,
     KBToolGroup,
     TempKBToolGroup,
-    MemoryToolGroup,
-    MultimodalToolGroup,
-    SkillManagerToolGroup,
-    VocabToolGroup,
-    UrlFetchToolGroup,
+    calculator,
+    memory_manage,
+    skill_manage,
+    url_fetch,
+    vision_extractor,
+    vocab_manage,
 )
 
 __all__ = [
-    'CalculatorToolGroup',
     'KBToolGroup',
     'TempKBToolGroup',
-    'MemoryToolGroup',
-    'MultimodalToolGroup',
-    'SkillManagerToolGroup',
-    'VocabToolGroup',
-    'UrlFetchToolGroup',
+    'calculator',
+    'memory_manage',
+    'skill_manage',
+    'url_fetch',
+    'vision_extractor',
+    'vocab_manage',
 ]

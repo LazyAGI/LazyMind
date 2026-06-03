@@ -48,7 +48,6 @@ config.add(
 config.add('llm_priority', int, 0, 'LLM_PRIORITY', description='LLM priority level.')
 config.add('max_concurrency', int, 10, 'MAX_CONCURRENCY', description='Max concurrent requests.')
 config.add('rag_mode', bool, True, 'RAG_MODE', description='Enable RAG mode.')
-config.add('multimodal_mode', bool, True, 'MULTIMODAL_MODE', description='Enable multimodal mode.')
 config.add('shared_upload_dir', str, '/var/lib/lazymind/uploads', 'SHARED_UPLOAD_DIR',
            description='Shared upload dir for normalized images and frames.')
 config.add('whisper_model', str, 'base', 'WHISPER_MODEL',
@@ -57,13 +56,7 @@ config.add('video_frame_interval', int, 20, 'VIDEO_FRAME_INTERVAL',
            description='Interval (seconds) between extracted video frames.')
 config.add('audio_segment_interval', int, 15, 'AUDIO_SEGMENT_INTERVAL',
            description='Audio transcript segment merge interval in seconds.')
-
-config.add('algo_service_url', str, 'http://lazyllm-algo:8000', 'ALGO_SERVICE_URL',
-           description='Algorithm service URL.')
-config.add('algo_dataset_name', str, 'general_algo', 'ALGO_DATASET_NAME', description='Default algorithm dataset name.')
 config.add('default_chat_dataset', str, 'algo', 'DEFAULT_CHAT_DATASET', description='Default chat dataset.')
-config.add('skip_startup_pipeline', bool, False, 'SKIP_STARTUP_PIPELINE',
-           description='Skip startup pipeline initialization.')
 config.add('model_config_path', str, 'dynamic', 'MODEL_CONFIG_PATH',
            description='Runtime model config YAML path. Shorthand aliases are auto-resolved to absolute paths.',
            alias={
@@ -90,7 +83,6 @@ config.add('core_api_url', str, 'http://core:8000', 'CORE_API_URL', description=
 config.add('core_api_timeout', int, 30, 'CORE_API_TIMEOUT', description='Core API request timeout in seconds.')
 config.add('agentic_kb_name', str, 'general_algo', 'AGENTIC_KB_NAME',
            description='Default knowledge base name for agentic.')
-config.add('agentic_kb_api_key', str, '', 'AGENTIC_KB_API_KEY', description='API key used to enable agentic KB tools.')
 config.add('skill_fs_url', str, 'remote://skills', 'SKILL_FS_URL', description='Skill filesystem URL.')
 config.add('opensearch_uri', str, None, 'OPENSEARCH_URI', description='OpenSearch/Elasticsearch URI.')
 config.add('opensearch_user', str, 'admin', 'OPENSEARCH_USER', description='OpenSearch username.')
@@ -98,19 +90,6 @@ config.add('opensearch_password', str, '', 'OPENSEARCH_PASSWORD', description='O
 config.add('web_search_timeout', int, 10, 'WEB_SEARCH_TIMEOUT', description='Web search request timeout in seconds.')
 config.add('url_fetch_max_length', int, 4000, 'URL_FETCH_MAX_LENGTH',
            description='Maximum readable text length returned by url_fetch.')
-config.add('web_search_wikipedia_base_url', str, 'https://zh.wikipedia.org', 'WEB_SEARCH_WIKIPEDIA_BASE_URL',
-           description='Wikipedia base URL for web search.')
-config.add('web_search_google_api_key', str, '', 'WEB_SEARCH_GOOGLE_API_KEY',
-           description='Google Custom Search API key.')
-config.add('web_search_google_search_engine_id', str, '', 'WEB_SEARCH_GOOGLE_SEARCH_ENGINE_ID',
-           description='Google Custom Search engine ID.')
-config.add('web_search_bing_subscription_key', str, '', 'WEB_SEARCH_BING_SUBSCRIPTION_KEY',
-           description='Bing Search subscription key.')
-config.add('web_search_bing_endpoint', str, '', 'WEB_SEARCH_BING_ENDPOINT', description='Bing Search endpoint URL.')
-config.add('web_search_bocha_api_key', str, '', 'WEB_SEARCH_BOCHA_API_KEY', description='Bocha search API key.')
-config.add('web_search_bocha_base_url', str, 'https://api.bochaai.com', 'WEB_SEARCH_BOCHA_BASE_URL',
-           description='Bocha search base URL.')
-config.add('arxiv_search_timeout', int, 15, 'ARXIV_SEARCH_TIMEOUT', description='Arxiv search timeout in seconds.')
 config.add('max_retries', int, 20, 'MAX_RETRIES', description='Max retries for agentic function call loop.')
 config.add('agentic_workspace', str, './workspace', 'AGENTIC_WORKSPACE',
            description='Workspace directory for agentic tools.')
@@ -118,10 +97,6 @@ config.add('agentic_keep_full_turns', int, 3, 'AGENTIC_KEEP_FULL_TURNS',
            description='Number of full turns retained in agentic history.')
 config.add('agentic_stream_chunk_size', int, 24, 'AGENTIC_STREAM_CHUNK_SIZE',
            description='Fallback chunk size for final streamed agentic text.')
-config.add('memory_review_interval', int, 1, 'MEMORY_REVIEW_INTERVAL',
-           description='Memory review trigger interval (turns).')
-config.add('skill_review_interval', int, 5, 'SKILL_REVIEW_INTERVAL',
-           description='Skill review trigger interval (turns).')
 config.add('review_max_retries', int, 5, 'REVIEW_MAX_RETRIES', description='Max retries for background review agent.')
 config.add('skill_review_debug', bool, False, 'SKILL_REVIEW_DEBUG', description='Enable skill review debug logging.')
 config.add('review_debug', bool, False, 'REVIEW_DEBUG', description='Enable review debug logging.')

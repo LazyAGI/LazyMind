@@ -19,7 +19,6 @@ from lazymind.chat.service.component import (
     DEFAULT_TOOLS,
     filter_tools,
     normalize_history_for_agent,
-    to_agent_inputs,
 )
 from lazymind.chat.service.utils import (
     SensitiveFilter,
@@ -130,7 +129,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
     react_agent = lazyllm.tools.agent.ReactAgent(
         llm=llm,
-        tools=to_agent_inputs(active_configs),
+        tools=[cfg.instance for cfg in active_configs],
         max_retries=_cfg['max_retries'],
         stream=True,
         prompt=runtime_prompt,

@@ -7,7 +7,7 @@ from lazymind.chat.engine.tools import calculator as calculator_mod
 
 class TestSafeCalculator:
     def test_basic_arithmetic(self):
-        result = calculator_mod.CalculatorToolGroup().calculator('(12 * 13) / 6')
+        result = calculator_mod.calculator('(12 * 13) / 6')
         assert result == {
             'success': True,
             'tool': 'calculator',
@@ -20,7 +20,7 @@ class TestSafeCalculator:
         }
 
     def test_math_functions_and_constants(self):
-        result = calculator_mod.CalculatorToolGroup().calculator('sqrt(2) + sin(pi / 2)')
+        result = calculator_mod.calculator('sqrt(2) + sin(pi / 2)')
         assert result['success'] is True
         assert result['tool'] == 'calculator'
         assert result['result']['expression'] == 'sqrt(2) + sin(pi / 2)'
@@ -34,12 +34,12 @@ class TestSafeCalculator:
             "lambda: 1",
             "[x for x in (1,)]",
         ):
-            result = calculator_mod.CalculatorToolGroup().calculator(expression)
+            result = calculator_mod.calculator(expression)
             assert result['success'] is False
             assert 'error' in result
 
     def test_rejects_empty_expression(self):
-        result = calculator_mod.CalculatorToolGroup().calculator('   ')
+        result = calculator_mod.calculator('   ')
         assert result['success'] is False
 
 
@@ -52,4 +52,4 @@ class TestSafeCalculator:
     ],
 )
 def test_safe_evaluate_cases(expression, expected):
-    assert calculator_mod._safe_evaluate(expression) == expected
+    assert calculator_mod.safe_evaluate_expression(expression) == expected

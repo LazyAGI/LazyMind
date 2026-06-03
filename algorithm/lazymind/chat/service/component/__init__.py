@@ -8,7 +8,6 @@ from .tool_registry import (
     filter_tools,
     get_all_tool_groups,
     group_is_active,
-    to_agent_inputs,
 )
 
 __all__ = [
@@ -19,5 +18,4 @@ __all__ = [
     'get_all_tool_groups',
     'group_is_active',
     'normalize_history_for_agent',
-    'to_agent_inputs',
 ]

@@ -34,10 +34,10 @@ def test_combined_review_uses_three_tools_and_single_choice_prompt():
 def test_resolve_review_runtime_tools_builds_tool_groups():
     runtime_tools = _resolve_review_runtime_tools(['memory', 'skill_manage', 'vocab_manage'])
 
-    assert [type(tool).__name__ for tool in runtime_tools] == [
-        'MemoryToolGroup',
-        'SkillManagerToolGroup',
-        'VocabToolGroup',
+    assert [tool.__name__ for tool in runtime_tools] == [
+        'memory_manage',
+        'skill_manage',
+        'vocab_manage',
     ]
 
 
@@ -74,4 +74,4 @@ def test_spawn_background_review_passes_runtime_tool_instances(monkeypatch):
         request_global_sid='sid-1',
     )
 
-    assert [type(tool).__name__ for tool in captured['tools']] == ['MemoryToolGroup']
+    assert [tool.__name__ for tool in captured['tools']] == ['memory_manage']

@@ -19,7 +19,7 @@ def test_skill_manage_returns_error_result_for_skill_index_exception(monkeypatch
     monkeypatch.setattr(skill_manager_mod.lazyllm, 'globals', {'agentic_config': {'session_id': 'sid-1'}})
     monkeypatch.setattr(skill_manager_mod, 'list_all_skill_entries', raise_unexpected)
 
-    result = skill_manager_mod.SkillManagerToolGroup().skill_manage(
+    result = skill_manager_mod.skill_manage(
         'existing',
         'modify',
         '',

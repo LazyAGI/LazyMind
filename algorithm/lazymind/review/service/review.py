@@ -8,9 +8,9 @@ import lazyllm
 from lazyllm.tools.fs.client import FS
 
 from lazymind.chat.engine.tools import (
-    MemoryToolGroup,
-    SkillManagerToolGroup,
-    VocabToolGroup,
+    memory_manage,
+    skill_manage,
+    vocab_manage,
 )
 from lazymind.chat.engine.tools.infra import list_all_skills_with_category
 from lazymind.config import config as _cfg
@@ -18,26 +18,21 @@ from lazymind.review.config import REVIEW_PROMPTS, REVIEW_TOOLS
 from lazymind.review.prompts import COMBINED_REVIEW_PROMPT
 
 
-_REVIEW_TOOL_GROUP_BUILDERS: dict[str, Any] = {
-    'memory': MemoryToolGroup,
-    'skill_manage': SkillManagerToolGroup,
-    'vocab_manage': VocabToolGroup,
+_REVIEW_TOOLS: dict[str, Any] = {
+    'memory': memory_manage,
+    'skill_manage': skill_manage,
+    'vocab_manage': vocab_manage,
 }
 
 
 def _resolve_review_runtime_tools(review_tools: list[str]) -> list[Any]:
     runtime_tools: list[Any] = []
-    tool_group_instances: dict[type, Any] = {}
-
     for tool_name in review_tools:
-        tool_group_builder = _REVIEW_TOOL_GROUP_BUILDERS.get(tool_name)
-        if tool_group_builder is None:
+        tool = _REVIEW_TOOLS.get(tool_name)
+        if tool is None:
             runtime_tools.append(tool_name)
-            continue
-        if tool_group_builder not in tool_group_instances:
-            tool_group_instances[tool_group_builder] = tool_group_builder()
-            runtime_tools.append(tool_group_instances[tool_group_builder])
-
+        else:
+            runtime_tools.append(tool)
     return runtime_tools
 
 

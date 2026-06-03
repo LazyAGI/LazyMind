@@ -2,22 +2,21 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 import docstring_parser
-import lazyllm
 from lazyllm.tools.fs.supplier.feishu import FeishuFS
 from lazyllm.tools.tools.search import ArxivSearch, BingSearch, BochaSearch, GoogleSearch, WikipediaSearch
 
 from lazymind.chat.engine.tools import (
-    CalculatorToolGroup,
     KBToolGroup,
-    MemoryToolGroup,
-    MultimodalToolGroup,
-    SkillManagerToolGroup,
     TempKBToolGroup,
-    VocabToolGroup,
-    UrlFetchToolGroup,
+    calculator,
+    memory_manage,
+    skill_manage,
+    url_fetch,
+    vision_extractor,
+    vocab_manage,
 )
 
 
@@ -27,19 +26,6 @@ class ToolGroupConfig:
     label: str
     description: str
     instance: Any
-    key_source: Callable[[Any], Any] | None = None
-
-
-def _memory_key_source(_instance) -> str:
-    return lazyllm.globals['agentic_config'].get('use_memory', True)
-
-
-def _kb_key_source(_instance) -> str:
-    return lazyllm.globals['agentic_config'].get('filters', {}).get('kb_id')
-
-
-def _temp_kb_key_source(_instance) -> str:
-    return lazyllm.globals['agentic_config'].get('files')
 
 
 SKILL_TOOL_GROUP = ToolGroupConfig(
@@ -56,20 +42,18 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         label='知识库检索',
         description='从知识库中搜索文档，支持语义检索、关键词检索、上下文窗口等',
         instance=KBToolGroup(),
-        key_source=_kb_key_source,
     ),
     ToolGroupConfig(
         name='temp_kb',
         label='临时文件检索',
         description='从用户上传的临时文件中搜索相关内容',
         instance=TempKBToolGroup(),
-        key_source=_temp_kb_key_source,
     ),
     ToolGroupConfig(
         name='calculator',
         label='科学计算器',
         description='安全地执行数学表达式计算',
-        instance=CalculatorToolGroup(),
+        instance=calculator,
     ),
     ToolGroupConfig(
         name='wikipedia',
@@ -105,32 +89,31 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         name='url_fetch',
         label='网页抓取',
         description='获取并解析公开网页的可读内容',
-        instance=UrlFetchToolGroup(),
+        instance=url_fetch,
     ),
     ToolGroupConfig(
         name='multimodal',
         label='多模态识别',
         description='从图片中提取文字描述',
-        instance=MultimodalToolGroup(),
+        instance=vision_extractor,
     ),
     ToolGroupConfig(
         name='vocab',
         label='词汇管理',
         description='管理用户专属的词汇映射和同义词',
-        instance=VocabToolGroup(),
+        instance=vocab_manage,
     ),
     ToolGroupConfig(
         name='memory',
         label='记忆管理',
         description='记录和管理跨会话的用户记忆和偏好',
-        instance=MemoryToolGroup(),
-        key_source=_memory_key_source,
+        instance=memory_manage,
     ),
     ToolGroupConfig(
         name='skill_manager',
         label='技能管理',
         description='创建、修改和删除技能',
-        instance=SkillManagerToolGroup(),
+        instance=skill_manage,
     ),
     ToolGroupConfig(
         name='feishu',
@@ -148,20 +131,33 @@ def _resolve_method_name(instance: Any, method_name: str) -> str:
 
 
 def _extract_methods(instance: Any) -> list[dict]:
-    methods = []
-    for method_name in instance.__public_apis__:
-        resolved_name = _resolve_method_name(instance, method_name)
-        method = getattr(instance, method_name, None)
-        if method is None:
-            methods.append({'name': resolved_name, 'summary': ''})
-            continue
+    public_apis = getattr(instance, '__public_apis__', None)
+    if public_apis is not None:
+        methods = []
+        for method_name in public_apis:
+            resolved_name = _resolve_method_name(instance, method_name)
+            method = getattr(instance, method_name, None)
+            if method is None:
+                methods.append({'name': resolved_name, 'summary': ''})
+                continue
+            try:
+                doc = inspect.getdoc(method)
+                summary = docstring_parser.parse(doc).short_description if doc else ''
+            except Exception:
+                summary = ''
+            methods.append({'name': resolved_name, 'summary': summary})
+        return methods
+
+    if callable(instance):
+        name = getattr(instance, '__name__', '')
         try:
-            doc = inspect.getdoc(method)
+            doc = inspect.getdoc(instance)
             summary = docstring_parser.parse(doc).short_description if doc else ''
         except Exception:
             summary = ''
-        methods.append({'name': resolved_name, 'summary': summary})
-    return methods
+        return [{'name': name, 'summary': summary}]
+
+    return []
 
 
 _SKILL_METHODS = [
@@ -193,10 +189,11 @@ def get_all_tool_groups() -> list[dict]:
 
 
 def group_is_active(cfg: ToolGroupConfig) -> bool:
-    if cfg.key_source is None:
+    key_source = getattr(cfg.instance, '__key_source__', None)
+    if key_source is None:
         return True
     try:
-        return bool(cfg.key_source(cfg.instance))
+        return bool(key_source())
     except Exception:
         return False
 
@@ -212,26 +209,4 @@ def filter_tools(
         if not group_is_active(cfg):
             continue
         result.append(cfg)
-    return result
-
-
-def _is_lazymind_tool_group(instance: Any) -> bool:
-    return instance.__class__.__module__.startswith('lazymind.chat.engine.tools.')
-
-
-def to_agent_inputs(configs: list[ToolGroupConfig]) -> list[Any]:
-    result = []
-    for cfg in configs:
-        instance = cfg.instance
-        public_apis = list(getattr(instance, '__public_apis__', []))
-        if not public_apis or not _is_lazymind_tool_group(instance):
-            result.append(instance)
-            continue
-        result.append({
-            'name': cfg.name,
-            'desc': cfg.description,
-            'lazy': len(public_apis) > 1,
-            'prefix': False,
-            'tools': [getattr(instance, name) for name in public_apis],
-        })
     return result
