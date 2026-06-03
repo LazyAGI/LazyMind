@@ -123,6 +123,17 @@
   }
 }
 
+.feishu-setup-guide-step-details {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: #475467;
+  line-height: 1.7;
+
+  li + li {
+    margin-top: 4px;
+  }
+}
+
 .feishu-setup-guide-step-index {
   min-width: 34px;
   height: 28px;
