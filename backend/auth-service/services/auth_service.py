@@ -16,6 +16,7 @@ pwd_context = CryptContext(schemes=['pbkdf2_sha256'], deprecated='auto')
 USERNAME_PATTERN = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._@#-]*[a-zA-Z0-9]$')
 PASSWORD_MIN_LEN = 8
 PASSWORD_MAX_LEN = 32
+EMAIL_MAX_LEN = 30
 
 
 class AuthService:
@@ -66,6 +67,12 @@ class AuthService:
                 ),
                 exc_cls=AuthError,
             )
+        if email is not None:
+            email = email.strip()
+            if not email:
+                email = None
+            elif len(email) > EMAIL_MAX_LEN:
+                raise_error(ErrorCodes.EMAIL_TOO_LONG, exc_cls=AuthError)
         if not password:
             raise_error(ErrorCodes.PASSWORD_REQUIRED, exc_cls=AuthError)
         if not self.validate_password(password):

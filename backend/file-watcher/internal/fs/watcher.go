@@ -225,6 +225,7 @@ func (rw *recursiveWatcher) loop(ctx context.Context, sourceID, tenantID string,
 			TenantID:   tenantID,
 			EventType:  et,
 			Path:       publicPath,
+			ObjectKey:  pathObjectKey(rw.agentID, publicPath),
 			IsDir:      isDir,
 			OccurredAt: time.Now(),
 		}

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from core.database import SessionLocal
 from core.errors import ErrorCodes, raise_error
 from repositories import RoleRepository, UserRepository
-from services.auth_service import auth_service
+from services.auth_service import EMAIL_MAX_LEN, auth_service
 
 
 class UserService:
@@ -40,6 +40,12 @@ class UserService:
             raise_error(ErrorCodes.PASSWORD_REQUIRED)
         if not auth_service.validate_password(password):
             raise_error(ErrorCodes.INVALID_PASSWORD)
+        if email is not None:
+            email = email.strip()
+            if not email:
+                email = None
+            elif len(email) > EMAIL_MAX_LEN:
+                raise_error(ErrorCodes.EMAIL_TOO_LONG)
         with SessionLocal() as db:
             if UserRepository.get_by_username(db, username):
                 raise_error(ErrorCodes.USER_ALREADY_EXISTS)

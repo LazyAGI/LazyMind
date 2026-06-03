@@ -18,8 +18,6 @@ type ControlPlaneClient interface {
 	RegisterAgent(ctx context.Context, req internal.RegisterAgentRequest) error
 	ReportHeartbeat(ctx context.Context, req internal.HeartbeatPayload) error
 	ReportEvents(ctx context.Context, req internal.ReportEventsRequest) error
-	ReportScanResults(ctx context.Context, req internal.ReportScanResultsRequest) error
-	ReportSnapshot(ctx context.Context, req internal.ReportSnapshotRequest) error
 	PullCommands(ctx context.Context, req internal.PullCommandsRequest) (internal.PullCommandsResponse, error)
 	AckCommand(ctx context.Context, req internal.AckCommandRequest) error
 }
@@ -50,14 +48,6 @@ func (c *httpClient) ReportHeartbeat(ctx context.Context, req internal.Heartbeat
 
 func (c *httpClient) ReportEvents(ctx context.Context, req internal.ReportEventsRequest) error {
 	return c.post(ctx, "/api/v1/agents/events", req, nil)
-}
-
-func (c *httpClient) ReportScanResults(ctx context.Context, req internal.ReportScanResultsRequest) error {
-	return c.post(ctx, "/api/v1/agents/scan-results", req, nil)
-}
-
-func (c *httpClient) ReportSnapshot(ctx context.Context, req internal.ReportSnapshotRequest) error {
-	return c.post(ctx, "/api/v1/agents/snapshots/report", req, nil)
 }
 
 func (c *httpClient) PullCommands(ctx context.Context, req internal.PullCommandsRequest) (internal.PullCommandsResponse, error) {

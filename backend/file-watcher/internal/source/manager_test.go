@@ -13,20 +13,6 @@ import (
 	"github.com/lazymind/file_watcher/internal/fs"
 )
 
-type scannerStub struct{}
-
-func (scannerStub) FullScan(context.Context, string, string) error {
-	return nil
-}
-
-func (scannerStub) ReconcileScan(context.Context, string, string) (*internal.Snapshot, error) {
-	return &internal.Snapshot{Files: map[string]internal.SnapshotEntry{}}, nil
-}
-
-func (scannerStub) Stat(context.Context, string) (internal.FileMeta, error) {
-	return internal.FileMeta{}, nil
-}
-
 type startCall struct {
 	sourceID string
 	tenantID string
@@ -71,41 +57,18 @@ func (w *watcherStub) Health(sourceID string) fs.WatcherHealth {
 
 type validatorStub struct{}
 
-func (validatorStub) Validate(path string) internal.ValidatePathResponse {
-	return internal.ValidatePathResponse{Path: path, Allowed: true}
-}
-
 func (validatorStub) EnsureAllowed(string) error {
 	return nil
-}
-
-type reporterStub struct{}
-
-func (reporterStub) ReportEvents(context.Context, internal.ReportEventsRequest) error {
-	return nil
-}
-
-func (reporterStub) ReportSnapshot(context.Context, internal.ReportSnapshotRequest) error {
-	return nil
-}
-
-type stagingStub struct{}
-
-func (stagingStub) StageFile(context.Context, string, string, string, string) (internal.StageResult, error) {
-	return internal.StageResult{}, nil
 }
 
 func TestStopSourceIsIdempotent(t *testing.T) {
 	t.Parallel()
 
 	mgr := NewManager(
-		&config.Config{AgentID: "agent-1", TenantID: "tenant-default", ReconcileInterval: time.Hour},
-		scannerStub{},
+		&config.Config{AgentID: "agent-1", TenantID: "tenant-default"},
 		newWatcherStub(),
 		validatorStub{},
 		fs.NewPathMapper("", nil),
-		reporterStub{},
-		stagingStub{},
 		zap.NewNop(),
 	)
 
@@ -119,13 +82,10 @@ func TestHandleCommandUsesCommandTenantID(t *testing.T) {
 
 	watcher := newWatcherStub()
 	mgr := NewManager(
-		&config.Config{AgentID: "agent-1", TenantID: "tenant-default", ReconcileInterval: time.Hour},
-		scannerStub{},
+		&config.Config{AgentID: "agent-1", TenantID: "tenant-default"},
 		watcher,
 		validatorStub{},
 		fs.NewPathMapper("", nil),
-		reporterStub{},
-		stagingStub{},
 		zap.NewNop(),
 	)
 
@@ -167,13 +127,10 @@ func TestHandleCommandFallsBackToAgentTenantID(t *testing.T) {
 
 	watcher := newWatcherStub()
 	mgr := NewManager(
-		&config.Config{AgentID: "agent-1", TenantID: "tenant-default", ReconcileInterval: time.Hour},
-		scannerStub{},
+		&config.Config{AgentID: "agent-1", TenantID: "tenant-default"},
 		watcher,
 		validatorStub{},
 		fs.NewPathMapper("", nil),
-		reporterStub{},
-		stagingStub{},
 		zap.NewNop(),
 	)
 
@@ -210,13 +167,10 @@ func TestStartSourceMapsPublicRootToRuntimeRoot(t *testing.T) {
 		{PublicRoot: "/host/docs", RuntimeRoot: runtimeRoot},
 	})
 	mgr := NewManager(
-		&config.Config{AgentID: "agent-1", TenantID: "tenant-default", ReconcileInterval: time.Hour},
-		scannerStub{},
+		&config.Config{AgentID: "agent-1", TenantID: "tenant-default"},
 		watcher,
 		validatorStub{},
 		mapper,
-		reporterStub{},
-		stagingStub{},
 		zap.NewNop(),
 	)
 
@@ -246,5 +200,32 @@ func TestStartSourceMapsPublicRootToRuntimeRoot(t *testing.T) {
 	}
 	if err := mgr.StopSource(context.Background(), "src-map"); err != nil {
 		t.Fatalf("stop source: %v", err)
+	}
+}
+
+func TestLegacyDocumentCommandsAreV2Disabled(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewManager(
+		&config.Config{AgentID: "agent-1", TenantID: "tenant-default"},
+		newWatcherStub(),
+		validatorStub{},
+		fs.NewPathMapper("", nil),
+		zap.NewNop(),
+	)
+
+	for _, commandType := range []internal.CommandType{
+		internal.CommandScanSource,
+		internal.CommandSnapshotSource,
+		internal.CommandStageFile,
+	} {
+		result, err := mgr.HandleCommand(context.Background(), internal.Command{Type: commandType, SourceID: "src-1"})
+		if err != nil {
+			t.Fatalf("expected %s to be compatibility-acked, got error %v", commandType, err)
+		}
+		payload, ok := result.(map[string]any)
+		if !ok || payload["code"] != "V2_DISABLED" || payload["accepted"] != false {
+			t.Fatalf("expected v2-disabled result for %s, got %#v", commandType, result)
+		}
 	}
 }

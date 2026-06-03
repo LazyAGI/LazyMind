@@ -1,0 +1,12 @@
+DROP TABLE IF EXISTS public.parse_task_dead_letters;
+DROP TABLE IF EXISTS public.agent_commands;
+DROP TABLE IF EXISTS public.agents;
+DROP TABLE IF EXISTS public.data_source_create_operations;
+DROP TABLE IF EXISTS public.source_sync_runs;
+DROP TABLE IF EXISTS public.source_sync_checkpoints;
+DROP TABLE IF EXISTS public.parse_tasks;
+DROP TABLE IF EXISTS public.documents;
+DROP TABLE IF EXISTS public.source_document_states;
+DROP TABLE IF EXISTS public.source_object_index;
+DROP TABLE IF EXISTS public.source_bindings;
+DROP TABLE IF EXISTS public.sources;

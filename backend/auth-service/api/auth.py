@@ -51,6 +51,7 @@ logger = logging.getLogger('uvicorn.error')
 
 PHONE_PATTERN = re.compile(r'^\+?[0-9]{6,20}$')
 MODEL_CONFIG_PATH_ENV = 'LAZYMIND_MODEL_CONFIG_PATH'
+CHAT_UNLIKE_SWITCH_ENV = 'LAZYMIND_CHAT_UNLIKE_SWITCH'
 
 
 def _normalize_and_validate_phone(phone: str | None) -> str | None:
@@ -70,6 +71,10 @@ def _normalize_and_validate_phone(phone: str | None) -> str | None:
 
 def _is_dynamic_model_config() -> bool:
     return (os.getenv(MODEL_CONFIG_PATH_ENV) or '').strip() == 'dynamic'
+
+
+def _is_chat_unlike_switch_enabled() -> bool:
+    return (os.getenv(CHAT_UNLIKE_SWITCH_ENV) or '').strip().lower() == 'true'
 
 
 def _default_role_id(session):
@@ -264,6 +269,7 @@ def me(user: User = Depends(current_user)):  # noqa: B008
         'permissions': list(get_effective_permission_codes(user)),
         'tenant_id': user.tenant_id,
         'dynamic': _is_dynamic_model_config(),
+        'chat_unlike_switch': _is_chat_unlike_switch_enabled(),
     }
 
 

@@ -1,0 +1,224 @@
+package state
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/crawl"
+	store "github.com/lazymind/scan_control_plane/internal/store/source"
+)
+
+func TestReduceMissingPartialSubtreeMarksOnlyDescendantsDeleted(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	repo := newReducerStore()
+	repo.objects["folder"] = sourceObject("folder", "", false, true)
+	repo.objects["folder/doc-missing"] = sourceObject("folder/doc-missing", "folder", true, false)
+	repo.objects["other/doc"] = sourceObject("other/doc", "", true, false)
+	repo.states["folder/doc-missing"] = documentState("folder/doc-missing", now)
+	repo.states["other/doc"] = documentState("other/doc", now)
+	reducer := NewDBStateReducer(repo, WithClock(func() time.Time { return now }))
+
+	result, err := reducer.ReduceMissingObjects(ctx, crawl.ReduceMissingInput{
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 2,
+		RunID:             "run-1",
+		Coverage: crawl.Coverage{
+			ScopeType:       connector.ScopeTypePartial,
+			CoveredSubtrees: []string{"folder"},
+			Complete:        true,
+		},
+		SeenObjectKeys: []string{"folder"},
+		RunSucceeded:   true,
+		DetectedAt:     now,
+	})
+	if err != nil {
+		t.Fatalf("reduce missing: %v", err)
+	}
+	if result.DeletedCount != 1 || len(result.AffectedObjectKeys) != 1 || result.AffectedObjectKeys[0] != "folder/doc-missing" {
+		t.Fatalf("expected only subtree descendant to be deleted, got %+v", result)
+	}
+	if got := repo.states["folder/doc-missing"]; got.SourceState != SourceStateDeleted || got.PendingAction != PendingActionDelete {
+		t.Fatalf("missing subtree descendant was not marked deleted: %+v", got)
+	}
+	if got := repo.states["other/doc"]; got.SourceState != SourceStateUnchanged || got.PendingAction != "" {
+		t.Fatalf("coverage outside subtree was modified: %+v", got)
+	}
+}
+
+func TestReduceMissingIgnoresIncompleteCoverage(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	repo := newReducerStore()
+	repo.objects["doc"] = sourceObject("doc", "", true, false)
+	repo.states["doc"] = documentState("doc", now)
+	reducer := NewDBStateReducer(repo, WithClock(func() time.Time { return now }))
+
+	result, err := reducer.ReduceMissingObjects(ctx, crawl.ReduceMissingInput{
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		Coverage: crawl.Coverage{
+			ScopeType:         connector.ScopeTypeFull,
+			CoveredTargetRoot: true,
+			Complete:          false,
+		},
+		RunSucceeded: true,
+		DetectedAt:   now,
+	})
+	if err != nil {
+		t.Fatalf("reduce missing: %v", err)
+	}
+	if result.DeletedCount != 0 {
+		t.Fatalf("incomplete coverage must not delete, got %+v", result)
+	}
+	if got := repo.states["doc"]; got.SourceState != SourceStateUnchanged {
+		t.Fatalf("incomplete coverage changed state: %+v", got)
+	}
+}
+
+func TestReduceMissingDeltaAndWatchOnlyDeleteCoveredKeys(t *testing.T) {
+	t.Parallel()
+
+	for _, scopeType := range []connector.ScopeType{connector.ScopeTypeDelta, connector.ScopeTypeWatchEvent} {
+		t.Run(string(scopeType), func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+			repo := newReducerStore()
+			repo.objects["covered"] = sourceObject("covered", "", true, false)
+			repo.objects["outside"] = sourceObject("outside", "", true, false)
+			repo.states["covered"] = documentState("covered", now)
+			repo.states["outside"] = documentState("outside", now)
+			reducer := NewDBStateReducer(repo, WithClock(func() time.Time { return now }))
+
+			result, err := reducer.ReduceMissingObjects(ctx, crawl.ReduceMissingInput{
+				SourceID:          "source-1",
+				BindingID:         "binding-1",
+				BindingGeneration: 2,
+				RunID:             "run-1",
+				Coverage: crawl.Coverage{
+					ScopeType:         scopeType,
+					CoveredObjectKeys: []string{"covered"},
+					Complete:          true,
+				},
+				RunSucceeded: true,
+				DetectedAt:   now,
+			})
+			if err != nil {
+				t.Fatalf("reduce missing: %v", err)
+			}
+			if result.DeletedCount != 1 || result.AffectedObjectKeys[0] != "covered" {
+				t.Fatalf("expected only covered key to delete, got %+v", result)
+			}
+			if got := repo.states["outside"]; got.SourceState != SourceStateUnchanged || got.PendingAction != "" {
+				t.Fatalf("outside key was changed: %+v", got)
+			}
+		})
+	}
+}
+
+type reducerStore struct {
+	objects   map[string]store.SourceObject
+	states    map[string]store.DocumentState
+	documents map[string]store.Document
+}
+
+func newReducerStore() *reducerStore {
+	return &reducerStore{
+		objects:   map[string]store.SourceObject{},
+		states:    map[string]store.DocumentState{},
+		documents: map[string]store.Document{},
+	}
+}
+
+func (s *reducerStore) GetDocumentState(_ context.Context, _, _, objectKey string) (store.DocumentState, error) {
+	state, ok := s.states[objectKey]
+	if !ok {
+		return store.DocumentState{}, store.NewStoreError(store.ErrCodeNotFound, "state not found")
+	}
+	return state, nil
+}
+
+func (s *reducerStore) SaveDocumentState(_ context.Context, state store.DocumentState) error {
+	s.states[state.ObjectKey] = state
+	return nil
+}
+
+func (s *reducerStore) MutateDocumentState(_ context.Context, _, _, objectKey string, mutate store.DocumentStateMutation) (store.DocumentState, error) {
+	current, exists := s.states[objectKey]
+	next, err := mutate(current, !exists)
+	if err != nil {
+		return store.DocumentState{}, err
+	}
+	s.states[next.ObjectKey] = next
+	return next, nil
+}
+
+func (s *reducerStore) ListDocumentStates(context.Context, string, string) ([]store.DocumentState, error) {
+	states := make([]store.DocumentState, 0, len(s.states))
+	for _, state := range s.states {
+		states = append(states, state)
+	}
+	return states, nil
+}
+
+func (s *reducerStore) GetObject(_ context.Context, _, _, objectKey string) (store.SourceObject, error) {
+	object, ok := s.objects[objectKey]
+	if !ok {
+		return store.SourceObject{}, store.NewStoreError(store.ErrCodeNotFound, "object not found")
+	}
+	return object, nil
+}
+
+func (s *reducerStore) UpdateDocument(_ context.Context, document store.Document) error {
+	s.documents[document.ObjectKey] = document
+	return nil
+}
+
+func (s *reducerStore) GetDocument(_ context.Context, _, _, objectKey string) (store.Document, error) {
+	document, ok := s.documents[objectKey]
+	if !ok {
+		return store.Document{}, store.NewStoreError(store.ErrCodeNotFound, "document not found")
+	}
+	return document, nil
+}
+
+func sourceObject(objectKey, parentKey string, isDocument, isContainer bool) store.SourceObject {
+	return store.SourceObject{
+		SourceID:    "source-1",
+		BindingID:   "binding-1",
+		ObjectKey:   objectKey,
+		ParentKey:   parentKey,
+		IsDocument:  isDocument,
+		IsContainer: isContainer,
+	}
+}
+
+func documentState(objectKey string, now time.Time) store.DocumentState {
+	return store.DocumentState{
+		SourceID:            "source-1",
+		BindingID:           "binding-1",
+		BindingGeneration:   1,
+		ObjectKey:           objectKey,
+		SourceVersion:       "v1",
+		BaselineVersion:     "v1",
+		SourceState:         SourceStateUnchanged,
+		SyncState:           SyncStateIdle,
+		DocumentListVisible: true,
+		Selectable:          true,
+		ParseQueueState:     ParseQueueStateNone,
+		CreatedAt:           now,
+		UpdatedAt:           now,
+	}
+}
+
+var _ Store = (*reducerStore)(nil)
