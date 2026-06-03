@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
+  CSSProperties,
   Key,
   MouseEvent as ReactMouseEvent,
   ThHTMLAttributes,
@@ -456,6 +457,9 @@ export default function DatasetDetailPage() {
       Object.values(columnWidths).reduce((total, width) => total + width, 96),
     [columnWidths],
   );
+  const tableStyle = {
+    "--dataset-table-header-height": `${headerHeight}px`,
+  } as CSSProperties;
 
   const expandedRowRender = (record: DatasetItem) => (
     <DatasetExpandedRowEditor
@@ -543,6 +547,7 @@ export default function DatasetDetailPage() {
         <Table
           rowKey="id"
           className="dataset-item-table"
+          style={tableStyle}
           loading={loading}
           components={tableComponents}
           columns={columns}
