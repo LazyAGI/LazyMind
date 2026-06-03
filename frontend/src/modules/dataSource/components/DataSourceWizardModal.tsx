@@ -45,6 +45,12 @@ const SCHEDULE_WEEKDAYS = ["1", "2", "3", "4", "5", "6", "7"];
 const SCHEDULE_WORKDAYS = ["1", "2", "3", "4", "5"];
 const SCHEDULE_WEEKENDS = ["6", "7"];
 
+function normalizeScheduleWeekdays(value?: string[]) {
+  return Array.from(new Set(value || []))
+    .filter((day) => SCHEDULE_WEEKDAYS.includes(day))
+    .sort((left, right) => Number(left) - Number(right));
+}
+
 export type LocalPathSelectOption = DataNode & {
   value: string;
   nodeRef?: string;
@@ -136,6 +142,16 @@ export default function DataSourceWizardModal({
   const isEditMode = wizardMode === "edit";
   const [localPathSearchValue, setLocalPathSearchValue] = useState("");
   const [feishuTargetSearchValue, setFeishuTargetSearchValue] = useState("");
+  const scheduleWeekdays = Form.useWatch("scheduleWeekdays", form) || [];
+  const scheduleTime = Form.useWatch("scheduleTime", form);
+  const normalizedScheduleWeekdays = normalizeScheduleWeekdays(scheduleWeekdays);
+  const scheduleDaysText =
+    normalizedScheduleWeekdays.length === SCHEDULE_WEEKDAYS.length
+      ? t("admin.dataSourceScheduleEveryday")
+      : normalizedScheduleWeekdays
+          .map((day) => t(`admin.dataSourceScheduleWeekday${day}`))
+          .join("、") || t("admin.dataSourceScheduleNoDaysSelected");
+  const scheduleTimeText = scheduleTime || t("admin.dataSourceScheduleNoTimeSelected");
   const existingKnowledgeBaseNameSet = new Set(
     existingKnowledgeBaseNames.map((name) => name.trim().toLowerCase()).filter(Boolean),
   );
@@ -533,6 +549,15 @@ export default function DataSourceWizardModal({
                                 {t("admin.dataSourceScheduleShortcutEveryday")}
                               </Button>
                             </Space>
+                            <div className="data-source-schedule-summary">
+                              <ClockCircleOutlined />
+                              <Text>
+                                {t("admin.dataSourceScheduleSummary", {
+                                  days: scheduleDaysText,
+                                  time: scheduleTimeText,
+                                })}
+                              </Text>
+                            </div>
                           </Col>
                           <Col xs={24} md={12}>
                             <Form.Item

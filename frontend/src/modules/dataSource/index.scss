@@ -1011,6 +1011,23 @@
   margin: -6px 0 12px;
 }
 
+.data-source-schedule-summary {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .ant-typography {
+    margin: 0;
+    color: inherit;
+  }
+}
+
 .data-source-strategy-notes {
   display: flex;
   flex-direction: column;
