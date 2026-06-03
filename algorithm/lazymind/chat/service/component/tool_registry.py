@@ -30,32 +30,6 @@ class ToolGroupConfig:
     key_source: Callable[[Any], Any] | None = None
 
 
-def _dynamic_key(namespace: str, name: str) -> str:
-    try:
-        mapping = lazyllm.globals.config[namespace] or {}
-    except Exception:
-        return ''
-    r = (mapping.get(name) or '').strip()
-    lazyllm.LOG.debug(f'get dynamic key {namespace}.{name}: {r}')
-    return r
-
-
-def _feishu_key_source(_instance) -> str:
-    return _dynamic_key('dynamic_fs_auth', 'feishu')
-
-
-def _google_key_source(_instance) -> str:
-    return _dynamic_key('dynamic_tool_auth', 'google')
-
-
-def _bing_key_source(_instance) -> str:
-    return _dynamic_key('dynamic_tool_auth', 'bing')
-
-
-def _bocha_key_source(_instance) -> str:
-    return _dynamic_key('dynamic_tool_auth', 'bocha')
-
-
 def _memory_key_source(_instance) -> str:
     return lazyllm.globals['agentic_config'].get('use_memory', True)
 
@@ -114,21 +88,18 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         label='Google 搜索',
         description='使用 Google 搜索引擎检索互联网内容',
         instance=GoogleSearch(),
-        key_source=_google_key_source,
     ),
     ToolGroupConfig(
         name='bing',
         label='Bing 搜索',
         description='使用 Bing 搜索引擎检索互联网内容',
         instance=BingSearch(),
-        key_source=_bing_key_source,
     ),
     ToolGroupConfig(
         name='bocha',
         label='Bocha 搜索',
         description='使用 Bocha 搜索引擎检索互联网内容',
         instance=BochaSearch(),
-        key_source=_bocha_key_source,
     ),
     ToolGroupConfig(
         name='url_fetch',
@@ -166,7 +137,6 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         label='飞书文件系统',
         description='浏览和管理飞书云文档',
         instance=FeishuFS(space_id='dynamic', dynamic_auth=True),
-        key_source=_feishu_key_source,
     ),
 ]
 
