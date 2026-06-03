@@ -250,7 +250,7 @@ def build_document() -> Document:
         name='doc-summary',
         display_name='document summary',
         group_type=NodeGroupType.SUMMARY,
-        transform=LLMParser(AutoModel(model='llm', config=resolved_config_path), language='zh', task_type='summary'),
+        transform=LLMParser(AutoModel(model='llm'), language='zh', task_type='summary'),
         lazy_mode='all',
     )
 
