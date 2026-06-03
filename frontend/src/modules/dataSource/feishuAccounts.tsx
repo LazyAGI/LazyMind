@@ -88,9 +88,19 @@ function isFeishuAppId(value?: string | null) {
 
 function getFeishuConnectionAppId(connection: CloudConnectionResponse) {
   const providerMeta = connection.provider_account_meta || {};
+  const connectionMeta = connection as CloudConnectionResponse & {
+    appid?: unknown;
+    appId?: unknown;
+    app_id?: unknown;
+  };
   return [
     providerMeta.client_id,
     providerMeta.app_id,
+    providerMeta.appid,
+    providerMeta.appId,
+    connectionMeta.appid,
+    connectionMeta.appId,
+    connectionMeta.app_id,
     connection.provider_account_id,
   ].find((value) => isFeishuAppId(`${value || ""}`));
 }
