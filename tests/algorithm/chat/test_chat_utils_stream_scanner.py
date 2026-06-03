@@ -1,39 +1,11 @@
 from types import SimpleNamespace
 
-from chat.utils.stream_scanner import (
-    CitationPlugin,
+from lazymind.chat.service.utils.citations import ConfigCitationPlugin, CITATION_REFS_KEY
+from lazymind.chat.service.utils.stream_scanner import (
     ImagePlugin,
     IncrementalScanner,
     MarkdownImageHoldPlugin,
 )
-
-
-def test_citation_plugin_collects_sources_and_rewrites_images():
-    node = SimpleNamespace(
-        text='See image ![fig](fig.png)',
-        metadata={'images': ['https://cdn.example.com/path/fig.png'], 'page': 3},
-        global_metadata={'file_name': 'Doc.md', 'docid': 'doc-1', 'kb_id': 'kb-1'},
-        _uid='uid-1',
-        _group='group-a',
-    )
-    plugin = CitationPlugin({1: node})
-
-    end, replacement = plugin.match('ref [[1]] tail', 4)
-
-    assert replacement == '[1](#source "Doc.md")'
-    assert end == 9
-    assert plugin.collect() == [{
-        'index': 1,
-        'segment_number': -1,
-        'document_id': 'doc-1',
-        'page': 3,
-        'bbox': [],
-        'dataset_id': 'kb-1',
-        'file_name': 'Doc.md',
-        'segement_id': 'uid-1',
-        'content': 'See image ![fig](https://cdn.example.com/path/fig.png)',
-        'group_name': 'group-a',
-    }]
 
 
 def test_image_plugin_matches_exact_and_fuzzy_urls():
@@ -65,25 +37,23 @@ def test_markdown_image_hold_plugin_keeps_partial_image_across_chunks():
 
 
 def test_incremental_scanner_handles_partial_think_tags_and_plugins():
-    refs = {
-        1: SimpleNamespace(
-            text='source text',
-            metadata={},
-            global_metadata={'file_name': 'Source.md', 'docid': 'doc-1', 'kb_id': 'kb-1'},
-            _uid='uid-1',
-            _group='group-a',
-        )
+    config = {
+        CITATION_REFS_KEY: {
+            '1.1': {
+                'file_name': 'Source.md',
+            },
+        },
     }
-    scanner = IncrementalScanner([CitationPlugin(refs)], initial_state='BODY')
+    scanner = IncrementalScanner([ConfigCitationPlugin(config)], initial_state='BODY')
 
     first = scanner.feed('hello <thi')
-    second = scanner.feed('nk>plan</think> cite [[1]]')
+    second = scanner.feed('nk>plan</think> cite [[1.1]]')
     tail = scanner.flush()
 
     assert first == [('text', 'hello ')]
     assert second == [
         ('think', 'plan'),
         ('text', ' cite '),
-        ('text', '[1](#source "Source.md")'),
+        ('text', '[1](#source-1.1 "Source.md")'),
     ]
     assert tail == []

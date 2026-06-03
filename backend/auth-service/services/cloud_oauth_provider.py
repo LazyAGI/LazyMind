@@ -1,6 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 
 @dataclass
@@ -9,6 +9,14 @@ class CloudTokenPayload:
     expires_at: datetime | None = None
     refresh_token: str | None = None
     token_type: str = 'Bearer'
+
+
+@dataclass
+class CloudAccountProfile:
+    provider_account_id: str = ''
+    display_name: str = ''
+    provider_tenant_key: str = ''
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 class CloudOAuthProvider(Protocol):
@@ -50,4 +58,11 @@ class CloudOAuthProvider(Protocol):
         client_id: str,
         client_secret: str,
     ) -> CloudTokenPayload:
+        ...
+
+    def fetch_account_profile(
+        self,
+        *,
+        access_token: str,
+    ) -> CloudAccountProfile:
         ...

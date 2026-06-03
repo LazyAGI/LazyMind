@@ -1,22 +1,25 @@
 import {
-  Alert,
   Button,
   Card,
+  Checkbox,
   Col,
-  Descriptions,
   Empty,
   Form,
   Input,
   Modal,
   Radio,
   Row,
-  Select,
   Space,
+  Spin,
   Steps,
   Tag,
+  TreeSelect,
   Typography,
 } from "antd";
 import type { FormInstance } from "antd";
+import type { DataNode } from "antd/es/tree";
+import type { TreeSelectProps } from "antd";
+import { useState } from "react";
 import type { ReactNode } from "react";
 import {
   ApiOutlined,
@@ -25,24 +28,35 @@ import {
   FolderOpenOutlined,
   LinkOutlined,
   LockOutlined,
-  SyncOutlined,
 } from "@ant-design/icons";
-import type { FeishuDataSourceConnection } from "../feishuOAuth";
 import type {
-  FeishuTargetType,
-  OAuthState,
   SourceFormValues,
   SourceType,
   SyncMode,
 } from "../shared";
 import {
-  getConnectionMeta,
   getSourceTypeDescription,
   getSourceTypeTitle,
-  isCloudType,
 } from "../shared";
 
 const { Paragraph, Text } = Typography;
+
+const SCHEDULE_WEEKDAYS = ["1", "2", "3", "4", "5", "6", "7"];
+const SCHEDULE_WORKDAYS = ["1", "2", "3", "4", "5"];
+const SCHEDULE_WEEKENDS = ["6", "7"];
+
+function normalizeScheduleWeekdays(value?: string[]) {
+  return Array.from(new Set(value || []))
+    .filter((day) => SCHEDULE_WEEKDAYS.includes(day))
+    .sort((left, right) => Number(left) - Number(right));
+}
+
+export type LocalPathSelectOption = DataNode & {
+  value: string;
+  nodeRef?: string;
+  targetRef?: string;
+  children?: LocalPathSelectOption[];
+};
 
 const sourceTypeOptions: Array<{
   type: SourceType;
@@ -69,22 +83,28 @@ interface DataSourceWizardModalProps {
   existingKnowledgeBaseNames: string[];
   selectedType: SourceType | null;
   isFeishuSetupReady: boolean;
-  oauthState: OAuthState;
-  oauthConnection: FeishuDataSourceConnection | null;
   connectionVerified: boolean;
   syncMode: SyncMode;
-  feishuTargetType: FeishuTargetType;
   saving: boolean;
+  localPathOptions?: LocalPathSelectOption[];
+  localPathLoading?: boolean;
+  feishuTargetLoading?: boolean;
+  feishuTargetTreeData?: DataNode[];
+  allowTypeSelection?: boolean;
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
-  onSave: () => void;
+  onSave: (mode: "create" | "createAndSync") => void;
   onSelectType: (type: SourceType) => void;
   onResetFeishuSetup: () => void;
-  onConnectAccount: () => void;
-  onOpenManualOauthModal: () => void;
   onTestConnection: () => void;
   onInvalidateConnection: () => void;
+  onLoadLocalPathOptions?: (path?: string) => void;
+  onSearchLocalPathOptions?: (keyword: string) => void;
+  onLoadLocalPathChildren?: TreeSelectProps["loadData"];
+  onLoadFeishuTargetOptions?: () => void;
+  onSearchFeishuTargetOptions?: (keyword: string) => void;
+  onLoadFeishuTargetChildren?: TreeSelectProps["loadData"];
 }
 
 export default function DataSourceWizardModal({
@@ -96,24 +116,42 @@ export default function DataSourceWizardModal({
   existingKnowledgeBaseNames,
   selectedType,
   isFeishuSetupReady,
-  oauthState,
-  oauthConnection,
   connectionVerified,
   syncMode,
-  feishuTargetType,
   saving,
+  localPathOptions = [],
+  localPathLoading = false,
+  feishuTargetLoading = false,
+  feishuTargetTreeData = [],
+  allowTypeSelection = true,
   onClose,
   onPrev,
   onNext,
   onSave,
   onSelectType,
   onResetFeishuSetup,
-  onConnectAccount,
-  onOpenManualOauthModal,
   onTestConnection,
   onInvalidateConnection,
+  onLoadLocalPathOptions,
+  onSearchLocalPathOptions,
+  onLoadLocalPathChildren,
+  onLoadFeishuTargetOptions,
+  onSearchFeishuTargetOptions,
+  onLoadFeishuTargetChildren,
 }: DataSourceWizardModalProps) {
   const isEditMode = wizardMode === "edit";
+  const [localPathSearchValue, setLocalPathSearchValue] = useState("");
+  const [feishuTargetSearchValue, setFeishuTargetSearchValue] = useState("");
+  const scheduleWeekdays = Form.useWatch("scheduleWeekdays", form) || [];
+  const scheduleTime = Form.useWatch("scheduleTime", form);
+  const normalizedScheduleWeekdays = normalizeScheduleWeekdays(scheduleWeekdays);
+  const scheduleDaysText =
+    normalizedScheduleWeekdays.length === SCHEDULE_WEEKDAYS.length
+      ? t("admin.dataSourceScheduleEveryday")
+      : normalizedScheduleWeekdays
+          .map((day) => t(`admin.dataSourceScheduleWeekday${day}`))
+          .join("、") || t("admin.dataSourceScheduleNoDaysSelected");
+  const scheduleTimeText = scheduleTime || t("admin.dataSourceScheduleNoTimeSelected");
   const existingKnowledgeBaseNameSet = new Set(
     existingKnowledgeBaseNames.map((name) => name.trim().toLowerCase()).filter(Boolean),
   );
@@ -134,119 +172,8 @@ export default function DataSourceWizardModal({
       return null;
     }
 
-    if (isCloudType(selectedType)) {
-      const meta = getConnectionMeta(oauthState, t);
-      return (
-        <Card size="small" className="data-source-connect-card">
-          <div className="data-source-connect-header">
-            <div>
-              <Text strong>{t("admin.dataSourceOauthConnectTitle")}</Text>
-              <Paragraph type="secondary">{t("admin.dataSourceOauthConnectDesc")}</Paragraph>
-            </div>
-            <Tag color={meta.color}>{meta.text}</Tag>
-          </div>
-          {!isFeishuSetupReady ? (
-            <Alert
-              showIcon
-              type="info"
-              message={t("admin.dataSourceFeishuNotReady")}
-              description={t("admin.dataSourceFeishuNotReadyDesc")}
-            />
-          ) : null}
-          <Space wrap>
-            <Button
-              type="primary"
-              icon={oauthState === "waiting" ? <SyncOutlined spin /> : <LinkOutlined />}
-              loading={oauthState === "waiting"}
-              disabled={isEditMode || !isFeishuSetupReady}
-              onClick={onConnectAccount}
-            >
-              {oauthConnection
-                ? t("admin.dataSourceReconnectAccount")
-                : t("admin.dataSourceConnectAccount")}
-            </Button>
-            {oauthState === "waiting" && !isEditMode ? (
-              <Button onClick={onOpenManualOauthModal}>
-                {t("admin.dataSourceOauthManualCallbackAction")}
-              </Button>
-            ) : null}
-          </Space>
-          {oauthState === "waiting" ? (
-            <Alert
-              showIcon
-              type="info"
-              message={t("admin.dataSourceOauthManualCallbackTitle")}
-              description={t("admin.dataSourceOauthManualCallbackDesc")}
-            />
-          ) : null}
-          {oauthConnection ? (
-            <div className="data-source-oauth-meta">
-              <Descriptions size="small" column={1} className="data-source-oauth-descriptions">
-                <Descriptions.Item label={t("admin.dataSourceConnectedAccount")}>
-                  {oauthConnection.accountName}
-                </Descriptions.Item>
-                {oauthConnection.tenantKey ? (
-                  <Descriptions.Item label={t("admin.dataSourceTenantKey")}>
-                    {oauthConnection.tenantKey}
-                  </Descriptions.Item>
-                ) : null}
-                {oauthConnection.connectedAt ? (
-                  <Descriptions.Item label={t("admin.dataSourceConnectedAt")}>
-                    {oauthConnection.connectedAt}
-                  </Descriptions.Item>
-                ) : null}
-                {oauthConnection.expiresAt ? (
-                  <Descriptions.Item label={t("admin.dataSourceAccessTokenExpireAt")}>
-                    {oauthConnection.expiresAt}
-                  </Descriptions.Item>
-                ) : null}
-                {oauthConnection.refreshExpiresAt ? (
-                  <Descriptions.Item label={t("admin.dataSourceRefreshTokenExpireAt")}>
-                    {oauthConnection.refreshExpiresAt}
-                  </Descriptions.Item>
-                ) : null}
-                {oauthConnection.accessTokenMasked || oauthConnection.refreshTokenMasked ? (
-                  <Descriptions.Item label={t("admin.dataSourceTokenSummary")}>
-                    <Space direction="vertical" size={2}>
-                      {oauthConnection.accessTokenMasked ? (
-                        <Text code>{oauthConnection.accessTokenMasked}</Text>
-                      ) : null}
-                      {oauthConnection.refreshTokenMasked ? (
-                        <Text code>{oauthConnection.refreshTokenMasked}</Text>
-                      ) : null}
-                    </Space>
-                  </Descriptions.Item>
-                ) : null}
-                {oauthConnection.grantedScopes.length > 0 ? (
-                  <Descriptions.Item label={t("admin.dataSourceGrantedScopes")}>
-                    <Space wrap size={[8, 8]}>
-                      {oauthConnection.grantedScopes.map((scope) => (
-                        <Tag key={scope}>{scope}</Tag>
-                      ))}
-                    </Space>
-                  </Descriptions.Item>
-                ) : null}
-              </Descriptions>
-            </div>
-          ) : null}
-          {oauthState === "expired" ? (
-            <Alert
-              showIcon
-              type="warning"
-              message={t("admin.dataSourceOauthExpired")}
-              description={t("admin.dataSourceOauthExpiredDesc")}
-            />
-          ) : null}
-          {oauthState === "error" ? (
-            <Alert
-              showIcon
-              type="error"
-              message={t("admin.dataSourceOauthError")}
-              description={t("admin.dataSourceOauthErrorDesc")}
-            />
-          ) : null}
-        </Card>
-      );
+    if (selectedType !== "local") {
+      return null;
     }
 
     return (
@@ -289,8 +216,8 @@ export default function DataSourceWizardModal({
       footer={
         <div className="data-source-wizard-footer">
           <Button disabled={saving} onClick={onClose}>{t("common.cancel")}</Button>
-          <Space>
-            {wizardStep > 0 && !isEditMode ? (
+          <Space wrap>
+            {allowTypeSelection && wizardStep > 0 && !isEditMode ? (
               <Button disabled={saving} onClick={onPrev}>{t("admin.dataSourceWizardPrev")}</Button>
             ) : null}
             {wizardStep < 1 ? (
@@ -299,15 +226,28 @@ export default function DataSourceWizardModal({
               </Button>
             ) : null}
             {wizardStep === 1 ? (
-              <Button type="primary" loading={saving} onClick={onSave}>
-                {t("admin.dataSourceSaveConfig")}
-              </Button>
+              <>
+                <Button disabled={saving} onClick={() => onSave("create")}>
+                  {isEditMode
+                    ? t("admin.dataSourceSaveOnly")
+                    : t("admin.dataSourceCreateOnly")}
+                </Button>
+                <Button
+                  type="primary"
+                  loading={saving}
+                  onClick={() => onSave("createAndSync")}
+                >
+                  {isEditMode
+                    ? t("admin.dataSourceSaveAndSync")
+                    : t("admin.dataSourceCreateAndSync")}
+                </Button>
+              </>
             ) : null}
           </Space>
         </div>
       }
     >
-      {!isEditMode ? (
+      {!isEditMode && allowTypeSelection ? (
         <Steps
           current={wizardStep}
           items={[
@@ -319,7 +259,7 @@ export default function DataSourceWizardModal({
       ) : null}
 
       <Form form={form} layout="vertical" className="data-source-wizard-form">
-        {wizardStep === 0 ? (
+        {allowTypeSelection && wizardStep === 0 ? (
           <div>
             <Paragraph type="secondary" className="data-source-wizard-intro">
               {t("admin.dataSourceTypeStepIntro")}
@@ -416,65 +356,114 @@ export default function DataSourceWizardModal({
                         label={t("admin.dataSourceAccessPath")}
                         name="path"
                         rules={[
-                          { required: true, message: t("admin.dataSourceAccessPathRequired") },
+                          {
+                            validator: (_rule, value) => {
+                              const values = Array.isArray(value) ? value : value ? [value] : [];
+                              return values.length > 0
+                                ? Promise.resolve()
+                                : Promise.reject(
+                                    new Error(t("admin.dataSourceAccessPathRequired")),
+                                  );
+                            },
+                          },
                         ]}
                       >
-                        <Input
+                        <TreeSelect
+                          multiple
+                          allowClear
                           disabled={isEditMode}
+                          filterTreeNode={false}
+                          loadData={onLoadLocalPathChildren}
+                          loading={localPathLoading}
+                          maxTagCount="responsive"
+                          notFoundContent={localPathLoading ? <Spin size="small" /> : null}
                           placeholder="/mnt/team-share/ops-docs"
-                          onChange={isEditMode ? undefined : onInvalidateConnection}
+                          searchValue={localPathSearchValue}
+                          showSearch
+                          style={{ width: "100%" }}
+                          treeCheckable
+                          treeData={localPathOptions}
+                          treeDefaultExpandAll={false}
+                          treeLine
+                          styles={{
+                            popup: { root: { maxHeight: 360, overflow: "auto" } },
+                          }}
+                          onChange={() => {
+                            if (!isEditMode) {
+                              onInvalidateConnection();
+                            }
+                          }}
+                          onOpenChange={(open) => {
+                            if (!open) {
+                              setLocalPathSearchValue("");
+                            }
+                            if (open && !isEditMode) {
+                              onLoadLocalPathOptions?.("");
+                            }
+                          }}
+                          onSearch={(value) => {
+                            setLocalPathSearchValue(value);
+                            if (!isEditMode) {
+                              onSearchLocalPathOptions?.(value);
+                            }
+                          }}
                         />
                       </Form.Item>
                     ) : (
-                      <>
-                        <Form.Item
-                          label={t("admin.dataSourceFeishuTargetType")}
-                          name="targetType"
-                          rules={[
-                            {
-                              required: true,
-                              message: t("admin.dataSourceFeishuTargetTypeRequired"),
+                      <Form.Item
+                        label={t("admin.dataSourceFeishuSpace")}
+                        name="target"
+                        rules={[
+                          {
+                            validator: (_rule, value) => {
+                              const values = Array.isArray(value) ? value : value ? [value] : [];
+                              return values.length > 0
+                                ? Promise.resolve()
+                                : Promise.reject(
+                                    new Error(t("admin.dataSourceFeishuSpaceRequired")),
+                                  );
                             },
-                          ]}
-                        >
-                          <Select
-                            disabled={isEditMode}
-                            options={[
-                              {
-                                label: t("admin.dataSourceFeishuTargetTypeWiki"),
-                                value: "wiki_space",
-                              },
-                              {
-                                label: t("admin.dataSourceFeishuTargetTypeDrive"),
-                                value: "drive_folder",
-                              },
-                            ]}
-                          />
-                        </Form.Item>
-                        <Form.Item
-                          label={t("admin.dataSourceFeishuSpace")}
-                          name="target"
-                          rules={[
-                            {
-                              required: true,
-                              message: t("admin.dataSourceFeishuSpaceRequired"),
-                            },
-                          ]}
-                        >
-                          <Input
-                            disabled={isEditMode}
-                            placeholder={
-                              feishuTargetType === "drive_folder"
-                                ? t("admin.dataSourceFeishuTargetPlaceholderDrive")
-                                : t("admin.dataSourceFeishuTargetPlaceholderWiki")
+                          },
+                        ]}
+                      >
+                        <TreeSelect
+                          multiple
+                          allowClear
+                          disabled={isEditMode}
+                          filterTreeNode={false}
+                          loadData={onLoadFeishuTargetChildren}
+                          loading={feishuTargetLoading}
+                          maxTagCount="responsive"
+                          placeholder={t("admin.dataSourceFeishuTargetPlaceholderWiki")}
+                          showSearch
+                          searchValue={feishuTargetSearchValue}
+                          style={{ width: "100%" }}
+                          treeCheckable
+                          treeData={feishuTargetTreeData}
+                          treeDefaultExpandAll={false}
+                          treeLine
+                          styles={{
+                            popup: { root: { maxHeight: 360, overflow: "auto" } },
+                          }}
+                          onOpenChange={(open) => {
+                            if (!open) {
+                              setFeishuTargetSearchValue("");
                             }
-                            onChange={isEditMode ? undefined : onInvalidateConnection}
-                          />
-                        </Form.Item>
-                      </>
+                            if (open && !isEditMode) {
+                              onLoadFeishuTargetOptions?.();
+                            }
+                          }}
+                          onSearch={(value) => {
+                            setFeishuTargetSearchValue(value);
+                            if (!isEditMode) {
+                              onSearchFeishuTargetOptions?.(value);
+                            }
+                          }}
+                        />
+                      </Form.Item>
                     )}
 
-                    {renderConnectionSection()}
+                    {selectedType === "local" ? renderConnectionSection() : null}
                   </Card>
 
                   <Card
@@ -515,28 +504,60 @@ export default function DataSourceWizardModal({
                           <Text type="secondary">{t("admin.dataSourceScheduleDesc")}</Text>
                         </div>
                         <Row gutter={16}>
-                          <Col xs={24} md={12}>
+                          <Col xs={24}>
                             <Form.Item
-                              label={t("admin.dataSourceScheduleCycle")}
-                              name="scheduleCycle"
+                              label={t("admin.dataSourceScheduleWeekdays")}
+                              name="scheduleWeekdays"
+                              rules={[
+                                {
+                                  required: true,
+                                  message: t("admin.dataSourceScheduleWeekdaysRequired"),
+                                },
+                              ]}
                             >
-                              <Select
-                                options={[
-                                  {
-                                    label: t("admin.dataSourceCycleDaily"),
-                                    value: "daily",
-                                  },
-                                  {
-                                    label: t("admin.dataSourceCycleTwoDays"),
-                                    value: "twoDays",
-                                  },
-                                  {
-                                    label: t("admin.dataSourceCycleWeekly"),
-                                    value: "weekly",
-                                  },
-                                ]}
-                              />
+                              <Checkbox.Group className="data-source-schedule-weekdays">
+                                {SCHEDULE_WEEKDAYS.map((day) => (
+                                  <Checkbox key={day} value={day}>
+                                    {t(`admin.dataSourceScheduleWeekday${day}`)}
+                                  </Checkbox>
+                                ))}
+                              </Checkbox.Group>
                             </Form.Item>
+                            <Space wrap className="data-source-schedule-shortcuts">
+                              <Button
+                                size="small"
+                                onClick={() =>
+                                  form.setFieldValue("scheduleWeekdays", SCHEDULE_WORKDAYS)
+                                }
+                              >
+                                {t("admin.dataSourceScheduleShortcutWorkdays")}
+                              </Button>
+                              <Button
+                                size="small"
+                                onClick={() =>
+                                  form.setFieldValue("scheduleWeekdays", SCHEDULE_WEEKENDS)
+                                }
+                              >
+                                {t("admin.dataSourceScheduleShortcutWeekends")}
+                              </Button>
+                              <Button
+                                size="small"
+                                onClick={() =>
+                                  form.setFieldValue("scheduleWeekdays", SCHEDULE_WEEKDAYS)
+                                }
+                              >
+                                {t("admin.dataSourceScheduleShortcutEveryday")}
+                              </Button>
+                            </Space>
+                            <div className="data-source-schedule-summary">
+                              <ClockCircleOutlined />
+                              <Text>
+                                {t("admin.dataSourceScheduleSummary", {
+                                  days: scheduleDaysText,
+                                  time: scheduleTimeText,
+                                })}
+                              </Text>
+                            </div>
                           </Col>
                           <Col xs={24} md={12}>
                             <Form.Item

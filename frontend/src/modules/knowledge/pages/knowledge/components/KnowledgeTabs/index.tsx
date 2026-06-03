@@ -15,6 +15,7 @@ import SegmentTab from "../SegmentTab";
 import SummaryTab from "../SummaryTab";
 import QaTab from "../QaTab";
 import Rendering from "@/modules/knowledge/components/Rendering";
+import { isImageDocument } from "@/modules/knowledge/utils/document";
 import "./index.scss";
 
 const TAB_KEYS = {
@@ -22,9 +23,11 @@ const TAB_KEYS = {
   document: "3:",
   qa: "4",
   imageCaption: "5",
+  imageList: "6",
 } as const;
 
 const LEGACY_SPLIT_GROUPS = ["lazyllm_root", "block", "line"];
+const IMAGE_GROUP = "image";
 
 const KnowledgeTabs = (props: {
   knowledgeDetail: Doc;
@@ -34,7 +37,6 @@ const KnowledgeTabs = (props: {
   const { t } = useTranslation();
 
   const [activeKey, setActiveKey] = useState("");
-  const [parsers, setParsers] = useState<ParserConfig[]>([]);
   const [tabs, setTabs] = useState<TabsProps["items"]>([]);
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
@@ -43,13 +45,23 @@ const KnowledgeTabs = (props: {
     return searchParams.get("group_name") || "";
   }, [searchParams]);
 
+  const imageOnly = useMemo(() => {
+    return isImageDocument(knowledgeDetail.display_name || "");
+  }, [knowledgeDetail.display_name]);
+
   useEffect(() => {
+    if (imageOnly) {
+      setTabs([createImageListTab()]);
+      setActiveKey(TAB_KEYS.imageList);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     KnowledgeBaseServiceApi()
       .datasetServiceGetDataset({ dataset: knowledgeDetail.dataset_id || "" })
       .then((res) => {
         const result = res.data.parsers || [];
-        setParsers(result);
         const currentTabs = generateTabs(result);
         setTabs(currentTabs);
         setActiveKey(
@@ -60,7 +72,7 @@ const KnowledgeTabs = (props: {
       .finally(() => {
         setLoading(false);
       });
-  }, [knowledgeDetail]);
+  }, [knowledgeDetail, imageOnly]);
 
   function getSplitTypeLabel(splitType: string, splitCount = 1) {
     if (splitCount <= 1) {
@@ -76,11 +88,8 @@ const KnowledgeTabs = (props: {
   }
 
   function generateTabs(configs: ParserConfig[]) {
-    if (!configs || configs.length < 1) {
-      return [];
-    }
     const initTabs: TabsProps["items"] = [];
-    configs.forEach((parser) => {
+    (configs || []).forEach((parser) => {
       switch (parser.type) {
         case ParserConfigTypeEnum.ParseTypeSplit:
           if (
@@ -160,12 +169,33 @@ const KnowledgeTabs = (props: {
           break;
       }
     });
+    initTabs.push(createImageListTab());
     return initTabs;
+  }
+
+  function createImageListTab() {
+    return {
+      label: t("knowledge.imageList"),
+      children: (
+        <SegmentTab
+          detail={knowledgeDetail}
+          names={[IMAGE_GROUP]}
+          type={IMAGE_GROUP}
+          editable={false}
+          onGetItemInfo={onGetItemInfo}
+        />
+      ),
+      key: TAB_KEYS.imageList,
+      closable: false,
+    };
   }
 
   function getInitialActiveKey(configs: ParserConfig[], groupName?: string | null) {
     if (!groupName) {
       return "";
+    }
+    if (groupName === IMAGE_GROUP) {
+      return TAB_KEYS.imageList;
     }
 
     const parser = configs.find((config) => config.name === groupName);
@@ -213,7 +243,7 @@ const KnowledgeTabs = (props: {
 
   return loading ? (
     <Rendering text={t("common.loading")} />
-  ) : parsers.length < 1 ? (
+  ) : !tabs?.length ? (
     <Empty description={t("knowledge.noContent")} style={{ marginTop: 80 }} />
   ) : (
     <Tabs

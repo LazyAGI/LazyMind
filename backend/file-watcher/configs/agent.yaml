@@ -7,7 +7,6 @@ advertise_addr: "${LAZYMIND_FILE_WATCHER_ADVERTISE_ADDR:-http://host.docker.inte
 control_plane_base_url: "${LAZYMIND_FILE_WATCHER_CONTROL_PLANE_BASE_URL:-http://127.0.0.1:18080}"
 heartbeat_interval: "30s"
 pull_interval: "20s"
-reconcile_interval: "20m"
 # base_root is a writable directory in the file-watcher runtime environment.
 # Host mode defaults to the project data/scan directory; container mode overrides it to /data/ragscan via docker-compose.yml.
 # scan-control-plane must mount the same host data/scan directory and expose staging as /data/staging.
@@ -21,24 +20,6 @@ watch:
   debounce_window: "10s"
   max_batch_size: 512
   recursive: true
-
-scan:
-  batch_size: 1000
-  max_concurrency: 2
-  large_file_threshold_mb: 200
-  # Allowlist: scan only these types (mutually exclusive with exclude_extensions; include wins).
-  # include_extensions:
-  #   - ".pdf"
-  #   - ".docx"
-  #   - ".xlsx"
-  #   - ".pptx"
-  #   - ".txt"
-  #   - ".md"
-  # Blocklist: skip these types.
-  # exclude_extensions:
-  #   - ".tmp"
-  #   - ".log"
-  #   - ".DS_Store"
 
 security:
   allowed_roots:

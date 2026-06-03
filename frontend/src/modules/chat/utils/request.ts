@@ -32,6 +32,12 @@ import {
   type SetMultiAnswersSwitchStatusResponse,
 } from "@/api/generated/chatbot-client";
 import {
+  Configuration as CoreConfiguration,
+  DefaultApiFactory as CoreDefaultApiFactory,
+  type ConversationHistoryListResponse,
+  type DefaultApiApiCoreConversationsNameHistoryGetRequest,
+} from "@/api/generated/core-client";
+import {
   type AllDocumentCreatorsResponse,
   type AllDocumentTagsResponse,
   type DatasetServiceApiDatasetServiceListDatasetsRequest,
@@ -50,6 +56,12 @@ const coreApiBaseUrl = `${BASE_URL}/api/core`;
 axiosInstance.defaults.timeout = 60 * 1000; // 10 seconds
 
 const Config = new Configuration();
+const CoreConfig = new CoreConfiguration({ basePath: BASE_URL });
+const coreDefaultClient = CoreDefaultApiFactory(
+  CoreConfig,
+  BASE_URL,
+  axiosInstance,
+);
 
 export const CHAT_STREAM_URL = `${coreApiBaseUrl}/conversations:chat`;
 export const CHAT_RESUME_STREAM_URL = `${coreApiBaseUrl}/conversations:resumeChat`;
@@ -157,6 +169,15 @@ export function ChatServiceApi() {
         `${coreApiBaseUrl}/conversations/${encodeURIComponent(requestParameters.conversation)}:detail`,
         options,
       );
+    },
+    conversationServiceGetConversationHistory(
+      requestParameters: DefaultApiApiCoreConversationsNameHistoryGetRequest,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return coreDefaultClient.apiCoreConversationsNameHistoryGet(
+        requestParameters,
+        options,
+      ) as Promise<AxiosResponse<ConversationHistoryListResponse>>;
     },
     conversationServiceBatchChat(
       requestParameters: ConversationServiceApiConversationServiceBatchChatRequest,

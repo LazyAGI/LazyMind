@@ -25,16 +25,16 @@ class _Response:
 
 
 def _import_parsing_runtime(monkeypatch):
-    build_document = types.ModuleType('parsing.build_document')
+    build_document = types.ModuleType('lazymind.parsing.service.build_document')
     build_document.ALGO_ID = 'general_algo'
     build_document.get_algo_server_port = lambda: 18000
     build_document.build_document = lambda: None
     build_document.reset_document = lambda: None
     build_document.drop_lazyllm_tables = lambda: None
     build_document.reset_stores = lambda: None
-    monkeypatch.setitem(sys.modules, 'parsing.build_document', build_document)
-    sys.modules.pop('parsing.parsing', None)
-    return importlib.import_module('parsing.parsing')
+    monkeypatch.setitem(sys.modules, 'lazymind.parsing.service.build_document', build_document)
+    sys.modules.pop('lazymind.parsing.app', None)
+    return importlib.import_module('lazymind.parsing.app')
 
 
 def test_wait_for_http_ok_returns_on_success(monkeypatch):

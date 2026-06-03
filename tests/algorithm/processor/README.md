@@ -1,3 +1,3 @@
 # Processor Algorithm Tests
 
-Tests for `LazyMind/algorithm/processor`.
+Tests for `LazyMind/algorithm/lazymind/processor`.

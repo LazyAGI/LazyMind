@@ -5,7 +5,14 @@ import (
 	"net/http"
 	"strings"
 
+	sourceengine "github.com/lazymind/scan_control_plane/internal/sourceengine/source"
 	"gopkg.in/yaml.v3"
+)
+
+const (
+	scanFrontendPrefix  = "/api/scan"
+	scanOpenAPIJSONPath = scanFrontendPrefix + "/openapi.json"
+	openAPIJSONPath     = "/openapi.json"
 )
 
 func (h *Handler) docs(w http.ResponseWriter, r *http.Request) {
@@ -18,932 +25,19 @@ func (h *Handler) docs(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(docsHTML(specURL)))
 }
 
-func (h *Handler) openapiJSON(w http.ResponseWriter, _ *http.Request) {
-	spec := buildOpenAPISpec()
-	writeJSON(w, http.StatusOK, spec)
+func (h *Handler) openapi(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, OpenAPISpec())
 }
 
 func (h *Handler) openapiYAML(w http.ResponseWriter, _ *http.Request) {
-	spec := buildOpenAPISpec()
-	body, err := yaml.Marshal(spec)
+	body, err := yaml.Marshal(OpenAPISpec())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "OPENAPI_YAML_FAILED", "marshal OpenAPI yaml failed")
+		writeError(w, &sourceengine.EngineError{Code: sourceengine.ErrCodeInternal, Message: "marshal OpenAPI yaml failed"})
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-yaml")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
-}
-
-func buildOpenAPISpec() map[string]any {
-	return map[string]any{
-		"openapi": "3.0.3",
-		"info": map[string]any{
-			"title":       "Scan Control Plane API",
-			"version":     "0.1.0",
-			"description": "Control plane for local source management, agent coordination, and idle-window scheduling.",
-		},
-		"servers": []map[string]any{
-			{
-				"url":         "/",
-				"description": "same origin",
-			},
-		},
-		"paths": map[string]any{
-			"/healthz": map[string]any{
-				"get": op("Health check", nil, map[string]any{
-					"200": resp("OK", inlineObj(map[string]any{
-						"status": strSchema(),
-					}, []string{"status"})),
-				}),
-			},
-			"/api/scan/sources": map[string]any{
-				"get": op("List sources", nil, map[string]any{
-					"200": resp("Source list", inlineObj(map[string]any{
-						"items": arrSchema(refSchema("Source")),
-					}, []string{"items"})),
-					"400": errResp(),
-				}),
-				"post": op("Create source", reqBody(refSchema("CreateSourceRequest")), map[string]any{
-					"200": resp("Created source", refSchema("Source")),
-					"400": errResp(),
-				}),
-			},
-			"/api/scan/knowledge-bases": map[string]any{
-				"post": op("Create knowledge base in core and grant current user read permission", reqBody(refSchema("CreateKnowledgeBaseRequest")), map[string]any{
-					"200": resp("Created knowledge base", refSchema("CreateKnowledgeBaseResponse")),
-					"400": errResp(),
-					"409": errResp(),
-					"502": errResp(),
-				}),
-			},
-			"/api/scan/cloud/target/validate": map[string]any{
-				"post": op("Validate cloud target", reqBody(refSchema("ValidateCloudTargetRequest")), map[string]any{
-					"200": resp("Validation result", refSchema("ValidateCloudTargetResponse")),
-					"400": errResp(),
-				}),
-			},
-			"/api/scan/sources/{id}": map[string]any{
-				"get": op("Get source", nil, map[string]any{
-					"200": resp("Source", refSchema("Source")),
-					"404": errResp(),
-				}, pathParam("id")),
-				"put": op("Update source", reqBody(refSchema("UpdateSourceRequest")), map[string]any{
-					"200": resp("Updated source", refSchema("Source")),
-					"400": errResp(),
-					"404": errResp(),
-				}, pathParam("id")),
-				"delete": op("Delete source", nil, map[string]any{
-					"200": resp("Deleted source", refSchema("DeleteSourceResponse")),
-					"400": errResp(),
-					"404": errResp(),
-				}, pathParam("id")),
-			},
-			"/api/scan/sources/{id}/enable": map[string]any{
-				"post": op("Enable source", nil, map[string]any{
-					"200": resp("Source", refSchema("Source")),
-					"404": errResp(),
-				}, pathParam("id")),
-			},
-			"/api/scan/sources/{id}/disable": map[string]any{
-				"post": op("Disable source", nil, map[string]any{
-					"200": resp("Source", refSchema("Source")),
-					"404": errResp(),
-				}, pathParam("id")),
-			},
-			"/api/scan/sources/{id}/cloud/binding": map[string]any{
-				"post": op("Create or update cloud binding", reqBody(refSchema("UpsertCloudSourceBindingRequest")), map[string]any{
-					"200": resp("Cloud binding", refSchema("CloudSourceBinding")),
-					"400": errResp(),
-					"404": errResp(),
-				}, pathParam("id")),
-				"get": op("Get cloud binding", nil, map[string]any{
-					"200": resp("Cloud binding", refSchema("CloudSourceBinding")),
-					"404": errResp(),
-					"500": errResp(),
-				}, pathParam("id")),
-			},
-			"/api/scan/sources/{id}/cloud/sync/trigger": map[string]any{
-				"post": op("Trigger cloud sync once", reqBody(refSchema("TriggerCloudSyncRequest")), map[string]any{
-					"200": resp("Trigger accepted", refSchema("TriggerCloudSyncResponse")),
-					"400": errResp(),
-					"404": errResp(),
-					"500": errResp(),
-				}, pathParam("id")),
-			},
-			"/api/scan/sources/{id}/cloud/sync/runs": map[string]any{
-				"get": op("List cloud sync runs", nil, map[string]any{
-					"200": resp("Cloud sync runs", refSchema("ListCloudSyncRunsResponse")),
-					"400": errResp(),
-					"404": errResp(),
-					"500": errResp(),
-				},
-					pathParam("id"),
-					queryIntParam("limit", false),
-				),
-			},
-			"/api/scan/sources/{id}/tasks/generate": map[string]any{
-				"post": op("Generate parse tasks for source", reqBody(refSchema("GenerateTasksRequest")), map[string]any{
-					"200": resp("Generated task stats", refSchema("GenerateTasksResponse")),
-					"400": errResp(),
-					"404": errResp(),
-				}, pathParam("id")),
-			},
-			"/api/scan/sources/{id}/watch/enable": map[string]any{
-				"post": op("Enable source watch", reqBody(refSchema("EnableWatchRequest")), map[string]any{
-					"200": resp("Watch toggle result", refSchema("WatchToggleResponse")),
-					"400": errResp(),
-					"404": errResp(),
-				}, pathParam("id")),
-			},
-			"/api/scan/sources/{id}/watch/disable": map[string]any{
-				"post": op("Disable source watch", nil, map[string]any{
-					"200": resp("Watch toggle result", refSchema("WatchToggleResponse")),
-					"400": errResp(),
-					"404": errResp(),
-				}, pathParam("id")),
-			},
-			"/api/scan/sources/{id}/tasks/expedite": map[string]any{
-				"post": op("Expedite source tasks by paths", reqBody(refSchema("ExpediteTasksRequest")), map[string]any{
-					"200": resp("Expedite stats", refSchema("ExpediteTasksResponse")),
-					"400": errResp(),
-					"404": errResp(),
-				}, pathParam("id")),
-			},
-			"/api/scan/sources/{id}/documents": map[string]any{
-				"get": op("List source documents", nil, map[string]any{
-					"200": resp("Source documents", refSchema("SourceDocumentsResponse")),
-					"400": errResp(),
-					"404": errResp(),
-					"500": errResp(),
-				},
-					pathParam("id"),
-					queryParam("tenant_id", true),
-					queryParam("keyword", false),
-					queryParam("update_type", false),
-					queryParam("parse_state", false),
-					queryIntParam("page", false),
-					queryIntParam("page_size", false),
-				),
-			},
-			"/api/scan/sources/{id}/manual-pull-jobs": map[string]any{
-				"get": op("List source manual pull jobs", nil, map[string]any{
-					"200": resp("Manual pull jobs", refSchema("ListManualPullJobsResponse")),
-					"400": errResp(),
-					"404": errResp(),
-					"500": errResp(),
-				},
-					pathParam("id"),
-					queryParam("status", false),
-					queryIntParam("page", false),
-					queryIntParam("page_size", false),
-				),
-			},
-			"/api/scan/parse-tasks": map[string]any{
-				"get": op("List parse tasks", nil, map[string]any{
-					"200": resp("Parse task list", refSchema("ListParseTasksResponse")),
-					"400": errResp(),
-					"500": errResp(),
-				},
-					queryParam("tenant_id", true),
-					queryParam("source_id", false),
-					queryParam("status", false),
-					queryParam("keyword", false),
-					queryIntParam("page", false),
-					queryIntParam("page_size", false),
-				),
-			},
-			"/api/scan/parse-tasks/stats": map[string]any{
-				"get": op("Parse task status stats", nil, map[string]any{
-					"200": resp("Status counts", refSchema("ParseTaskStatsResponse")),
-					"400": errResp(),
-					"500": errResp(),
-				},
-					queryParam("tenant_id", true),
-					queryParam("source_id", false),
-				),
-			},
-			"/api/scan/parse-tasks/{id}": map[string]any{
-				"get": op("Get parse task detail", nil, map[string]any{
-					"200": resp("Parse task detail", refSchema("ParseTaskDetailResponse")),
-					"404": errResp(),
-					"500": errResp(),
-				}, pathParam("id")),
-			},
-			"/api/scan/parse-tasks/{id}/retry": map[string]any{
-				"post": op("Retry parse task", nil, map[string]any{
-					"200": resp("Retried parse task detail", refSchema("ParseTaskDetailResponse")),
-					"400": errResp(),
-					"404": errResp(),
-					"500": errResp(),
-				}, pathParam("id")),
-			},
-			"/api/scan/agents": map[string]any{
-				"get": op("List agents", nil, map[string]any{
-					"200": resp("Agent list", inlineObj(map[string]any{
-						"items": arrSchema(refSchema("Agent")),
-					}, []string{"items"})),
-				}),
-			},
-			"/api/scan/agents/{id}": map[string]any{
-				"get": op("Get agent", nil, map[string]any{
-					"200": resp("Agent", refSchema("Agent")),
-					"404": errResp(),
-				}, pathParam("id")),
-			},
-			"/api/v1/agents/register": map[string]any{
-				"post": op("Register agent", reqBody(refSchema("RegisterAgentRequest")), map[string]any{
-					"200": acceptedResp(),
-					"400": errResp(),
-				}),
-			},
-			"/api/v1/agents/heartbeat": map[string]any{
-				"post": op("Report heartbeat", reqBody(refSchema("HeartbeatPayload")), map[string]any{
-					"200": acceptedResp(),
-					"400": errResp(),
-				}),
-			},
-			"/api/v1/agents/pull": map[string]any{
-				"post": op("Pull commands", reqBody(refSchema("PullCommandsRequest")), map[string]any{
-					"200": resp("Commands", refSchema("PullCommandsResponse")),
-					"500": errResp(),
-				}),
-			},
-			"/api/v1/agents/commands/ack": map[string]any{
-				"post": op("Acknowledge command", reqBody(refSchema("AckCommandRequest")), map[string]any{
-					"200": acceptedResp(),
-					"400": errResp(),
-				}),
-			},
-			"/api/v1/agents/snapshots/report": map[string]any{
-				"post": op("Report reconcile snapshot metadata", reqBody(refSchema("ReportSnapshotRequest")), map[string]any{
-					"200": acceptedResp(),
-					"400": errResp(),
-				}),
-			},
-			"/api/v1/agents/events": map[string]any{
-				"post": op("Report file events", reqBody(refSchema("ReportEventsRequest")), map[string]any{
-					"200": acceptedResp(),
-					"500": errResp(),
-				}),
-			},
-			"/api/v1/agents/scan-results": map[string]any{
-				"post": op("Report scan results", reqBody(refSchema("ReportScanResultsRequest")), map[string]any{
-					"200": acceptedResp(),
-					"500": errResp(),
-				}),
-			},
-			"/api/scan/agents/fs/validate": map[string]any{
-				"post": op("Validate path via agent", reqBody(refSchema("AgentPathRequest")), map[string]any{
-					"200": resp("Path validation result", refSchema("AgentPathValidateResponse")),
-					"404": errResp(),
-					"502": errResp(),
-				}),
-			},
-			"/api/scan/agents/fs/tree": map[string]any{
-				"post": op("Get directory tree via agent", reqBody(refSchema("AgentPathTreeRequest")), map[string]any{
-					"200": resp("Directory tree", refSchema("AgentPathTreeResponse")),
-					"404": errResp(),
-					"502": errResp(),
-				}),
-			},
-		},
-		"components": map[string]any{
-			"schemas": schemas(),
-		},
-	}
-}
-
-func schemas() map[string]any {
-	// Keep schemas aligned with model DTOs used by handlers.
-	return map[string]any{
-		"ErrorResponse": inlineObj(map[string]any{
-			"code":    strSchema(),
-			"message": strSchema(),
-		}, []string{"code", "message"}),
-		"Source": inlineObj(map[string]any{
-			"id":                      strSchema(),
-			"tenant_id":               strSchema(),
-			"create_user_id":          strSchema(),
-			"name":                    strSchema(),
-			"source_type":             strSchema(),
-			"root_path":               strSchema(),
-			"status":                  strSchema(),
-			"watch_enabled":           boolSchema(),
-			"idle_window_seconds":     intSchema(),
-			"reconcile_seconds":       intSchema(),
-			"reconcile_schedule":      strSchema(),
-			"agent_id":                strSchema(),
-			"dataset_id":              strSchema(),
-			"default_origin_type":     strSchema(),
-			"default_origin_platform": strSchema(),
-			"default_trigger_policy":  strSchema(),
-			"created_at":              dateTimeSchema(),
-			"updated_at":              dateTimeSchema(),
-			"cloud_binding":           refSchema("CloudSourceBinding"),
-			"documents":               refSchema("SourceDocumentsResponse"),
-		}, []string{"id", "tenant_id", "name", "source_type", "root_path", "status", "watch_enabled", "idle_window_seconds", "reconcile_seconds", "agent_id", "created_at", "updated_at"}),
-		"CreateSourceRequest": inlineObj(map[string]any{
-			"tenant_id":               strSchema(),
-			"create_user_id":          strSchema(),
-			"name":                    strSchema(),
-			"root_path":               strSchema(),
-			"agent_id":                strSchema(),
-			"dataset_id":              strSchema(),
-			"watch_enabled":           boolSchema(),
-			"idle_window_seconds":     intSchema(),
-			"reconcile_seconds":       intSchema(),
-			"reconcile_schedule":      strSchema(),
-			"default_origin_type":     strSchema(),
-			"default_origin_platform": strSchema(),
-			"default_trigger_policy":  strSchema(),
-		}, []string{"tenant_id", "name", "agent_id"}),
-		"CreateKnowledgeBaseRequest": inlineObj(map[string]any{
-			"name": strSchema(),
-			"algo": inlineObj(map[string]any{
-				"algo_id":      strSchema(),
-				"description":  strSchema(),
-				"display_name": strSchema(),
-			}, []string{"algo_id"}),
-		}, []string{"name", "algo"}),
-		"CreateKnowledgeBaseResponse": inlineObj(map[string]any{
-			"dataset_id": strSchema(),
-			"name":       strSchema(),
-		}, []string{"dataset_id", "name"}),
-		"UpdateSourceRequest": inlineObj(map[string]any{
-			"name":                    strSchema(),
-			"root_path":               strSchema(),
-			"dataset_id":              strSchema(),
-			"idle_window_seconds":     intSchema(),
-			"reconcile_seconds":       intSchema(),
-			"reconcile_schedule":      strSchema(),
-			"default_origin_type":     strSchema(),
-			"default_origin_platform": strSchema(),
-			"default_trigger_policy":  strSchema(),
-		}, nil),
-		"DeleteSourceResponse": inlineObj(map[string]any{
-			"source_id": strSchema(),
-			"deleted":   boolSchema(),
-		}, []string{"source_id", "deleted"}),
-		"ValidateCloudTargetRequest": inlineObj(map[string]any{
-			"provider":           strSchema(),
-			"auth_connection_id": strSchema(),
-			"target_type":        strSchema(),
-			"target_ref":         strSchema(),
-			"provider_options": map[string]any{
-				"type":                 "object",
-				"additionalProperties": true,
-			},
-		}, []string{"provider", "auth_connection_id"}),
-		"ValidateCloudTargetResponse": inlineObj(map[string]any{
-			"valid": boolSchema(),
-		}, []string{"valid"}),
-		"UpsertCloudSourceBindingRequest": inlineObj(map[string]any{
-			"provider":                strSchema(),
-			"enabled":                 boolSchema(),
-			"auth_connection_id":      strSchema(),
-			"target_type":             strSchema(),
-			"target_ref":              strSchema(),
-			"schedule_expr":           strSchema(),
-			"schedule_tz":             strSchema(),
-			"reconcile_after_sync":    boolSchema(),
-			"reconcile_delay_minutes": intSchema(),
-			"include_patterns":        arrSchema(strSchema()),
-			"exclude_patterns":        arrSchema(strSchema()),
-			"max_object_size_bytes":   intSchema(),
-			"provider_options": map[string]any{
-				"type":                 "object",
-				"additionalProperties": true,
-			},
-		}, []string{"provider", "auth_connection_id"}),
-		"CloudSourceBinding": inlineObj(map[string]any{
-			"source_id":               strSchema(),
-			"tenant_id":               strSchema(),
-			"provider":                strSchema(),
-			"enabled":                 boolSchema(),
-			"status":                  strSchema(),
-			"auth_connection_id":      strSchema(),
-			"target_type":             strSchema(),
-			"target_ref":              strSchema(),
-			"schedule_expr":           strSchema(),
-			"schedule_tz":             strSchema(),
-			"reconcile_after_sync":    boolSchema(),
-			"reconcile_delay_minutes": intSchema(),
-			"include_patterns":        arrSchema(strSchema()),
-			"exclude_patterns":        arrSchema(strSchema()),
-			"max_object_size_bytes":   intSchema(),
-			"provider_options": map[string]any{
-				"type":                 "object",
-				"additionalProperties": true,
-			},
-			"last_error":   strSchema(),
-			"next_sync_at": dateTimeSchema(),
-			"created_at":   dateTimeSchema(),
-			"updated_at":   dateTimeSchema(),
-		}, []string{"source_id", "tenant_id", "provider", "enabled", "status", "auth_connection_id", "schedule_expr", "schedule_tz", "created_at", "updated_at"}),
-		"TriggerCloudSyncRequest": inlineObj(map[string]any{
-			"trigger_type": strSchema(),
-			"paths":        arrSchema(strSchema()),
-		}, nil),
-		"TriggerCloudSyncResponse": inlineObj(map[string]any{
-			"run_id":   strSchema(),
-			"accepted": boolSchema(),
-		}, []string{"run_id", "accepted"}),
-		"CloudSyncRun": inlineObj(map[string]any{
-			"run_id":          strSchema(),
-			"source_id":       strSchema(),
-			"tenant_id":       strSchema(),
-			"provider":        strSchema(),
-			"trigger_type":    strSchema(),
-			"requested_paths": arrSchema(strSchema()),
-			"status":          strSchema(),
-			"started_at":      dateTimeSchema(),
-			"finished_at":     dateTimeSchema(),
-			"remote_total":    intSchema(),
-			"created_count":   intSchema(),
-			"updated_count":   intSchema(),
-			"deleted_count":   intSchema(),
-			"skipped_count":   intSchema(),
-			"failed_count":    intSchema(),
-			"error_code":      strSchema(),
-			"error_message":   strSchema(),
-		}, []string{"run_id", "source_id", "tenant_id", "provider", "trigger_type", "status"}),
-		"ListCloudSyncRunsResponse": inlineObj(map[string]any{
-			"items": arrSchema(refSchema("CloudSyncRun")),
-		}, []string{"items"}),
-		"Agent": inlineObj(map[string]any{
-			"agent_id":            strSchema(),
-			"tenant_id":           strSchema(),
-			"hostname":            strSchema(),
-			"version":             strSchema(),
-			"status":              strSchema(),
-			"listen_addr":         strSchema(),
-			"last_heartbeat_at":   dateTimeSchema(),
-			"active_source_count": intSchema(),
-			"active_watch_count":  intSchema(),
-			"active_task_count":   intSchema(),
-			"updated_at":          dateTimeSchema(),
-		}, []string{"agent_id", "tenant_id", "status", "listen_addr"}),
-		"RegisterAgentRequest": inlineObj(map[string]any{
-			"agent_id":    strSchema(),
-			"tenant_id":   strSchema(),
-			"hostname":    strSchema(),
-			"version":     strSchema(),
-			"listen_addr": strSchema(),
-		}, []string{"agent_id", "tenant_id", "hostname", "version"}),
-		"HeartbeatPayload": inlineObj(map[string]any{
-			"agent_id":           strSchema(),
-			"tenant_id":          strSchema(),
-			"hostname":           strSchema(),
-			"version":            strSchema(),
-			"status":             strSchema(),
-			"last_heartbeat_at":  dateTimeSchema(),
-			"source_count":       intSchema(),
-			"active_watch_count": intSchema(),
-			"active_task_count":  intSchema(),
-			"listen_addr":        strSchema(),
-		}, []string{"agent_id", "tenant_id", "status"}),
-		"PullCommandsRequest": inlineObj(map[string]any{
-			"agent_id":  strSchema(),
-			"tenant_id": strSchema(),
-		}, []string{"agent_id", "tenant_id"}),
-		"PulledCommand": inlineObj(map[string]any{
-			"id":                 intSchema(),
-			"type":               strSchema(),
-			"tenant_id":          strSchema(),
-			"source_id":          strSchema(),
-			"root_path":          strSchema(),
-			"mode":               strSchema(),
-			"reason":             strSchema(),
-			"skip_initial_scan":  boolSchema(),
-			"reconcile_seconds":  intSchema(),
-			"reconcile_schedule": strSchema(),
-			"document_id":        strSchema(),
-			"version_id":         strSchema(),
-			"src_path":           strSchema(),
-		}, []string{"id", "type"}),
-		"GenerateTasksRequest": inlineObj(map[string]any{
-			"mode":            strSchema(),
-			"paths":           arrSchema(strSchema()),
-			"trigger_policy":  strSchema(),
-			"updated_only":    boolSchema(),
-			"selection_token": strSchema(),
-		}, []string{"mode", "paths"}),
-		"GenerateTasksResponse": inlineObj(map[string]any{
-			"requested_count":          intSchema(),
-			"accepted_count":           intSchema(),
-			"merged_pending_count":     intSchema(),
-			"skipped_count":            intSchema(),
-			"ignored_unchanged_count":  intSchema(),
-			"baseline_snapshot_queued": boolSchema(),
-			"manual_pull_job_id":       strSchema(),
-		}, []string{"requested_count", "accepted_count", "merged_pending_count", "skipped_count"}),
-		"EnableWatchRequest": inlineObj(map[string]any{
-			"reconcile_seconds":  intSchema(),
-			"reconcile_schedule": strSchema(),
-		}, nil),
-		"WatchToggleResponse": inlineObj(map[string]any{
-			"accepted":                 boolSchema(),
-			"skip_initial_scan":        boolSchema(),
-			"baseline_snapshot_queued": boolSchema(),
-		}, []string{"accepted"}),
-		"ExpediteTasksRequest": inlineObj(map[string]any{
-			"paths": arrSchema(strSchema()),
-		}, []string{"paths"}),
-		"ExpediteTasksResponse": inlineObj(map[string]any{
-			"updated_existing_task_count": intSchema(),
-			"created_task_count":          intSchema(),
-			"skipped_count":               intSchema(),
-		}, []string{"updated_existing_task_count", "created_task_count", "skipped_count"}),
-		"SourceDocumentsSource": inlineObj(map[string]any{
-			"id":                        strSchema(),
-			"name":                      strSchema(),
-			"root_path":                 strSchema(),
-			"watch_enabled":             boolSchema(),
-			"agent_id":                  strSchema(),
-			"agent_online":              boolSchema(),
-			"update_tracking_supported": boolSchema(),
-			"last_synced_at":            dateTimeSchema(),
-		}, []string{"id", "name", "root_path", "watch_enabled", "agent_id", "agent_online", "update_tracking_supported"}),
-		"SourceDocumentsSummary": inlineObj(map[string]any{
-			"parsed_document_count": intSchema(),
-			"storage_bytes":         intSchema(),
-			"total_document_count":  intSchema(),
-			"new_count":             intSchema(),
-			"modified_count":        intSchema(),
-			"deleted_count":         intSchema(),
-			"pending_pull_count":    intSchema(),
-		}, []string{"parsed_document_count", "storage_bytes", "total_document_count", "new_count", "modified_count", "deleted_count", "pending_pull_count"}),
-		"SourceDocumentItem": inlineObj(map[string]any{
-			"document_id":               intSchema(),
-			"name":                      strSchema(),
-			"path":                      strSchema(),
-			"directory":                 strSchema(),
-			"tags":                      arrSchema(strSchema()),
-			"has_update":                boolSchema(),
-			"update_type":               enumSchema("NEW", "MODIFIED", "DELETED", "UNCHANGED"),
-			"update_desc":               strSchema(),
-			"parse_state":               strSchema(),
-			"file_type":                 strSchema(),
-			"size_bytes":                intSchema(),
-			"source_updated_at":         dateTimeSchema(),
-			"last_synced_at":            dateTimeSchema(),
-			"core_dataset_id":           strSchema(),
-			"core_task_id":              strSchema(),
-			"core_task_state":           strSchema(),
-			"scan_orchestration_status": strSchema(),
-			"object_key":                strSchema(),
-			"source_state":              enumSchema("UNCHANGED", "NEW", "MODIFIED", "DELETED"),
-			"sync_state":                enumSchema("IDLE", "PENDING", "SCHEDULED", "RUNNING", "FAILED"),
-			"pending_action":            enumSchema("NONE", "CREATE", "UPDATE", "DELETE"),
-			"source_version":            strSchema(),
-			"baseline_version":          strSchema(),
-			"next_sync_at":              dateTimeSchema(),
-			"knowledge_base_present":    boolSchema(),
-			"last_error":                strSchema(),
-		}, []string{"document_id", "name", "path", "directory", "parse_state", "size_bytes"}),
-		"SourceDocumentsResponse": inlineObj(map[string]any{
-			"source":    refSchema("SourceDocumentsSource"),
-			"summary":   refSchema("SourceDocumentsSummary"),
-			"items":     arrSchema(refSchema("SourceDocumentItem")),
-			"total":     intSchema(),
-			"page":      intSchema(),
-			"page_size": intSchema(),
-		}, []string{"source", "summary", "items", "total", "page", "page_size"}),
-		"ManualPullJob": inlineObj(map[string]any{
-			"job_id":                  strSchema(),
-			"tenant_id":               strSchema(),
-			"source_id":               strSchema(),
-			"status":                  strSchema(),
-			"mode":                    strSchema(),
-			"trigger_policy":          strSchema(),
-			"selection_token":         strSchema(),
-			"updated_only":            boolSchema(),
-			"requested_count":         intSchema(),
-			"accepted_count":          intSchema(),
-			"skipped_count":           intSchema(),
-			"ignored_unchanged_count": intSchema(),
-			"error_message":           strSchema(),
-			"created_at":              dateTimeSchema(),
-			"updated_at":              dateTimeSchema(),
-			"finished_at":             dateTimeSchema(),
-		}, []string{"job_id", "tenant_id", "source_id", "status", "mode", "updated_only", "requested_count", "accepted_count", "skipped_count", "created_at", "updated_at"}),
-		"ListManualPullJobsResponse": inlineObj(map[string]any{
-			"items":     arrSchema(refSchema("ManualPullJob")),
-			"total":     intSchema(),
-			"page":      intSchema(),
-			"page_size": intSchema(),
-		}, []string{"items", "total", "page", "page_size"}),
-		"ParseTaskListItem": inlineObj(map[string]any{
-			"task_id":                   intSchema(),
-			"tenant_id":                 strSchema(),
-			"source_id":                 strSchema(),
-			"source_name":               strSchema(),
-			"document_id":               intSchema(),
-			"source_object_id":          strSchema(),
-			"task_action":               strSchema(),
-			"target_version_id":         strSchema(),
-			"status":                    strSchema(),
-			"retry_count":               intSchema(),
-			"max_retry_count":           intSchema(),
-			"origin_type":               strSchema(),
-			"origin_platform":           strSchema(),
-			"trigger_policy":            strSchema(),
-			"next_run_at":               dateTimeSchema(),
-			"started_at":                dateTimeSchema(),
-			"finished_at":               dateTimeSchema(),
-			"last_error":                strSchema(),
-			"created_at":                dateTimeSchema(),
-			"updated_at":                dateTimeSchema(),
-			"agent_id":                  strSchema(),
-			"agent_listen_addr":         strSchema(),
-			"core_dataset_id":           strSchema(),
-			"core_document_id":          strSchema(),
-			"core_task_id":              strSchema(),
-			"core_task_state":           strSchema(),
-			"scan_orchestration_status": strSchema(),
-			"submit_error_message":      strSchema(),
-			"submit_at":                 dateTimeSchema(),
-		}, []string{"task_id", "tenant_id", "source_id", "document_id", "source_object_id", "target_version_id", "status", "retry_count", "max_retry_count", "next_run_at", "created_at", "updated_at"}),
-		"ListParseTasksResponse": inlineObj(map[string]any{
-			"items":     arrSchema(refSchema("ParseTaskListItem")),
-			"total":     intSchema(),
-			"page":      intSchema(),
-			"page_size": intSchema(),
-		}, []string{"items", "total", "page", "page_size"}),
-		"ParseTaskDetailResponse": inlineObj(map[string]any{
-			"task_id":                   intSchema(),
-			"tenant_id":                 strSchema(),
-			"source_id":                 strSchema(),
-			"source_name":               strSchema(),
-			"document_id":               intSchema(),
-			"source_object_id":          strSchema(),
-			"task_action":               strSchema(),
-			"target_version_id":         strSchema(),
-			"status":                    strSchema(),
-			"retry_count":               intSchema(),
-			"max_retry_count":           intSchema(),
-			"origin_type":               strSchema(),
-			"origin_platform":           strSchema(),
-			"trigger_policy":            strSchema(),
-			"next_run_at":               dateTimeSchema(),
-			"started_at":                dateTimeSchema(),
-			"finished_at":               dateTimeSchema(),
-			"last_error":                strSchema(),
-			"created_at":                dateTimeSchema(),
-			"updated_at":                dateTimeSchema(),
-			"agent_id":                  strSchema(),
-			"agent_listen_addr":         strSchema(),
-			"core_dataset_id":           strSchema(),
-			"core_document_id":          strSchema(),
-			"core_task_id":              strSchema(),
-			"core_task_state":           strSchema(),
-			"scan_orchestration_status": strSchema(),
-			"submit_error_message":      strSchema(),
-			"submit_at":                 dateTimeSchema(),
-			"desired_version_id":        strSchema(),
-			"current_version_id":        strSchema(),
-			"document_parse_status":     strSchema(),
-		}, []string{"task_id", "tenant_id", "source_id", "document_id", "source_object_id", "target_version_id", "status", "retry_count", "max_retry_count", "next_run_at", "created_at", "updated_at"}),
-		"ParseTaskStatsResponse": inlineObj(map[string]any{
-			"counts": map[string]any{
-				"type":                 "object",
-				"additionalProperties": intSchema(),
-			},
-		}, []string{"counts"}),
-		"PullCommandsResponse": inlineObj(map[string]any{
-			"commands": arrSchema(refSchema("PulledCommand")),
-		}, []string{"commands"}),
-		"AckCommandRequest": inlineObj(map[string]any{
-			"agent_id":    strSchema(),
-			"command_id":  intSchema(),
-			"success":     boolSchema(),
-			"error":       strSchema(),
-			"result_json": strSchema(),
-		}, []string{"agent_id", "command_id", "success"}),
-		"ReportSnapshotRequest": inlineObj(map[string]any{
-			"agent_id":     strSchema(),
-			"source_id":    strSchema(),
-			"snapshot_ref": strSchema(),
-			"file_count":   intSchema(),
-			"taken_at":     dateTimeSchema(),
-		}, []string{"agent_id", "source_id", "snapshot_ref", "taken_at"}),
-		"FileEvent": inlineObj(map[string]any{
-			"source_id":       strSchema(),
-			"tenant_id":       strSchema(),
-			"event_type":      strSchema(),
-			"path":            strSchema(),
-			"is_dir":          boolSchema(),
-			"occurred_at":     dateTimeSchema(),
-			"origin_type":     strSchema(),
-			"origin_platform": strSchema(),
-			"origin_ref":      strSchema(),
-			"trigger_policy":  strSchema(),
-		}, []string{"source_id", "event_type", "path"}),
-		"ReportEventsRequest": inlineObj(map[string]any{
-			"agent_id": strSchema(),
-			"events":   arrSchema(refSchema("FileEvent")),
-		}, []string{"agent_id", "events"}),
-		"ScanRecord": inlineObj(map[string]any{
-			"source_id":       strSchema(),
-			"path":            strSchema(),
-			"is_dir":          boolSchema(),
-			"size":            intSchema(),
-			"mod_time":        dateTimeSchema(),
-			"checksum":        strSchema(),
-			"origin_type":     strSchema(),
-			"origin_platform": strSchema(),
-			"origin_ref":      strSchema(),
-			"trigger_policy":  strSchema(),
-		}, []string{"source_id", "path"}),
-		"ReportScanResultsRequest": inlineObj(map[string]any{
-			"agent_id":  strSchema(),
-			"source_id": strSchema(),
-			"mode":      strSchema(),
-			"records":   arrSchema(refSchema("ScanRecord")),
-		}, []string{"agent_id", "source_id", "mode", "records"}),
-		"AgentPathRequest": inlineObj(map[string]any{
-			"agent_id": strSchema(),
-			"path":     strSchema(),
-		}, []string{"agent_id", "path"}),
-		"AgentPathValidateResponse": inlineObj(map[string]any{
-			"path":     strSchema(),
-			"exists":   boolSchema(),
-			"readable": boolSchema(),
-			"is_dir":   boolSchema(),
-			"allowed":  boolSchema(),
-			"reason":   strSchema(),
-		}, []string{"path", "exists", "readable", "is_dir", "allowed"}),
-		"AgentPathTreeRequest": inlineObj(map[string]any{
-			"agent_id":      strSchema(),
-			"source_id":     strSchema(),
-			"path":          strSchema(),
-			"keyword":       strSchema(),
-			"max_depth":     intSchema(),
-			"include_files": boolSchema(),
-			"changes_only":  boolSchema(),
-			"updated_only":  boolSchema(),
-		}, []string{"agent_id", "path"}),
-		"SourcePathTreeRequest": inlineObj(map[string]any{
-			"path":          strSchema(),
-			"keyword":       strSchema(),
-			"max_depth":     intSchema(),
-			"include_files": boolSchema(),
-			"changes_only":  boolSchema(),
-			"updated_only":  boolSchema(),
-		}, nil),
-		"TreeNode": inlineObj(map[string]any{
-			"title":                  strSchema(),
-			"key":                    strSchema(),
-			"is_dir":                 boolSchema(),
-			"has_update":             boolSchema(),
-			"update_type":            enumSchema("NEW", "MODIFIED", "DELETED", "UNCHANGED"),
-			"update_desc":            strSchema(),
-			"selectable":             boolSchema(),
-			"external_file_id":       strSchema(),
-			"parse_queue_state":      strSchema(),
-			"core_task_state":        strSchema(),
-			"status_source":          strSchema(),
-			"object_key":             strSchema(),
-			"source_state":           enumSchema("UNCHANGED", "NEW", "MODIFIED", "DELETED"),
-			"sync_state":             enumSchema("IDLE", "PENDING", "SCHEDULED", "RUNNING", "FAILED"),
-			"pending_action":         enumSchema("NONE", "CREATE", "UPDATE", "DELETE"),
-			"next_sync_at":           dateTimeSchema(),
-			"last_error":             strSchema(),
-			"knowledge_base_present": boolSchema(),
-			"children":               arrSchema(refSchema("TreeNode")),
-		}, []string{"title", "key", "is_dir"}),
-		"AgentPathTreeResponse": inlineObj(map[string]any{
-			"items":           arrSchema(refSchema("TreeNode")),
-			"selection_token": strSchema(),
-		}, []string{"items"}),
-	}
-}
-
-func op(summary string, req map[string]any, responses map[string]any, params ...map[string]any) map[string]any {
-	opMap := map[string]any{
-		"summary":   summary,
-		"responses": responses,
-	}
-	if req != nil {
-		opMap["requestBody"] = req
-	}
-	if len(params) > 0 {
-		items := make([]any, 0, len(params))
-		for _, p := range params {
-			items = append(items, p)
-		}
-		opMap["parameters"] = items
-	}
-	return opMap
-}
-
-func reqBody(schema map[string]any) map[string]any {
-	return map[string]any{
-		"required": true,
-		"content": map[string]any{
-			"application/json": map[string]any{
-				"schema": schema,
-			},
-		},
-	}
-}
-
-func resp(desc string, schema map[string]any) map[string]any {
-	m := map[string]any{"description": desc}
-	if schema != nil {
-		m["content"] = map[string]any{
-			"application/json": map[string]any{"schema": schema},
-		}
-	}
-	return m
-}
-
-func acceptedResp() map[string]any {
-	return resp("Accepted", inlineObj(map[string]any{
-		"accepted": boolSchema(),
-	}, []string{"accepted"}))
-}
-
-func errResp() map[string]any {
-	return resp("Error", refSchema("ErrorResponse"))
-}
-
-func pathParam(name string) map[string]any {
-	return map[string]any{
-		"name":     name,
-		"in":       "path",
-		"required": true,
-		"schema":   strSchema(),
-	}
-}
-
-func queryParam(name string, required bool) map[string]any {
-	return map[string]any{
-		"name":     name,
-		"in":       "query",
-		"required": required,
-		"schema":   strSchema(),
-	}
-}
-
-func queryIntParam(name string, required bool) map[string]any {
-	return map[string]any{
-		"name":     name,
-		"in":       "query",
-		"required": required,
-		"schema":   intSchema(),
-	}
-}
-
-func refSchema(name string) map[string]any {
-	return map[string]any{"$ref": "#/components/schemas/" + name}
-}
-
-func inlineObj(props map[string]any, required []string) map[string]any {
-	m := map[string]any{
-		"type":       "object",
-		"properties": props,
-	}
-	if len(required) > 0 {
-		items := make([]any, 0, len(required))
-		for _, r := range required {
-			items = append(items, r)
-		}
-		m["required"] = items
-	}
-	return m
-}
-
-func arrSchema(item map[string]any) map[string]any {
-	return map[string]any{"type": "array", "items": item}
-}
-
-func strSchema() map[string]any {
-	return map[string]any{"type": "string"}
-}
-
-func enumSchema(values ...string) map[string]any {
-	items := make([]any, 0, len(values))
-	for _, value := range values {
-		items = append(items, value)
-	}
-	return map[string]any{
-		"type": "string",
-		"enum": items,
-	}
-}
-
-func intSchema() map[string]any {
-	return map[string]any{"type": "integer", "format": "int64"}
-}
-
-func boolSchema() map[string]any {
-	return map[string]any{"type": "boolean"}
-}
-
-func dateTimeSchema() map[string]any {
-	return map[string]any{"type": "string", "format": "date-time"}
 }
 
 func docsHTML(specURL string) string {
@@ -961,4 +55,792 @@ func docsHTML(specURL string) string {
 		"<script>window.__META__=" + string(payload) + ";" +
 		"window.onload=function(){window.ui=SwaggerUIBundle({url:" + string(specURLJSON) + ",dom_id:'#swagger-ui',presets:[SwaggerUIBundle.presets.apis,SwaggerUIStandalonePreset],layout:'StandaloneLayout'});};</script>" +
 		"</body></html>"
+}
+
+func OpenAPISpec() map[string]any {
+	return map[string]any{
+		"openapi": "3.0.3",
+		"info": map[string]any{
+			"title":   "scan-control-plane",
+			"version": "0.3.0",
+		},
+		"paths":      openAPIPaths(),
+		"components": map[string]any{"schemas": openAPISchemas()},
+	}
+}
+
+func openAPIPaths() map[string]any {
+	return map[string]any{
+		"/api/scan/connectors": map[string]any{
+			"get": operation("listConnectors", "", "ConnectorListResponse"),
+		},
+		"/api/scan/binding-targets/tree/children": map[string]any{
+			"post": operation("listBindingTargetChildren", "BindingTargetChildrenRequest", "TreeNodePage"),
+		},
+		"/api/scan/binding-targets/tree/search": map[string]any{
+			"post": operation("searchBindingTargets", "BindingTargetSearchRequest", "TreeNodePage"),
+		},
+		"/api/scan/binding-targets/validate": map[string]any{
+			"post": operation("validateBindingTarget", "ValidateBindingTargetRequest", "ValidateBindingTargetResponse"),
+		},
+		"/api/scan/sources": map[string]any{
+			"post": createdOperation("createSource", "CreateSourceRequest", "CreateSourceResponse"),
+			"get":  withQueryParameters(operation("listSources", "", "SourceListResponse"), sourceListQueryParameters()),
+		},
+		"/api/scan/sources/{source_id}": map[string]any{
+			"get":    pathOperation("getSource", "", "GetSourceResponse", "source_id"),
+			"put":    pathOperation("updateSource", "UpdateSourceRequest", "UpdateSourceResponse", "source_id"),
+			"delete": pathOperation("deleteSource", "", "DeleteSourceResponse", "source_id"),
+		},
+		"/api/scan/sources/{source_id}/bindings": map[string]any{
+			"post": createdPathOperation("createSourceBinding", "SourceBindingRequest", "BindingMutationResponse", "source_id"),
+		},
+		"/api/scan/sources/{source_id}/bindings/{binding_id}": map[string]any{
+			"put":    pathOperation("updateSourceBinding", "SourceBindingRequest", "BindingMutationResponse", "source_id", "binding_id"),
+			"delete": pathOperation("deleteSourceBinding", "", "DeleteBindingResponse", "source_id", "binding_id"),
+		},
+		"/api/scan/sources/{source_id}/sync": map[string]any{
+			"post": pathOperation("triggerSourceSync", "TriggerSourceSyncRequest", "TriggerSourceSyncResponse", "source_id"),
+		},
+		"/api/scan/sources/{source_id}/tree/children": map[string]any{
+			"post": pathOperation("listSourceTreeChildren", "SourceTreeChildrenRequest", "TreeNodePage", "source_id"),
+		},
+		"/api/scan/sources/{source_id}/tree/search": map[string]any{
+			"post": pathOperation("searchSourceTree", "SourceTreeSearchRequest", "TreeNodePage", "source_id"),
+		},
+		"/api/scan/sources/{source_id}/documents": map[string]any{
+			"get": withQueryParameters(pathOperation("listSourceDocuments", "", "SourceDocumentListResponse", "source_id"), documentQueryParameters()),
+		},
+		"/api/scan/sources/{source_id}/summary": map[string]any{
+			"get": pathOperation("getSourceSummary", "", "SourceSummaryResponse", "source_id"),
+		},
+		"/api/scan/sources/{source_id}/tasks/generate": map[string]any{
+			"post": pathOperation("generateParseTasks", "GenerateTasksRequest", "GenerateTasksResponse", "source_id"),
+		},
+		"/api/scan/sources/{source_id}/tasks/expedite": map[string]any{
+			"post": pathOperation("expediteParseTasks", "ExpediteTasksRequest", "ExpediteTasksResponse", "source_id"),
+		},
+		"/api/scan/parse-tasks": map[string]any{
+			"get": withQueryParameters(operation("listParseTasks", "", "ParseTaskListResponse"), parseTaskQueryParameters()),
+		},
+		"/api/scan/parse-tasks/stats": map[string]any{
+			"get": withQueryParameters(operation("getParseTaskStats", "", "ParseTaskStatsResponse"), parseTaskStatsQueryParameters()),
+		},
+		"/api/scan/parse-tasks/{task_id}": map[string]any{
+			"get": pathOperation("getParseTask", "", "ParseTaskDetailResponse", "task_id"),
+		},
+		"/api/scan/parse-tasks/{task_id}/retry": map[string]any{
+			"post": pathOperation("retryParseTask", "RetryParseTaskRequest", "ParseTaskDetailResponse", "task_id"),
+		},
+		"/api/scan/admin/deleting": map[string]any{
+			"get": withQueryParameters(operation("listDeletingResources", "", "DeletingResourceListResponse"), adminQueryParameters()),
+		},
+		"/api/scan/admin/compensations": map[string]any{
+			"get": withQueryParameters(operation("listCompensations", "", "CompensationListResponse"), adminQueryParameters()),
+		},
+		"/api/scan/admin/compensations/{operation_id}/retry": map[string]any{
+			"post": pathOperation("retryCompensation", "", "CompensationResponse", "operation_id"),
+		},
+		"/api/scan/admin/dead-letters": map[string]any{
+			"get": withQueryParameters(operation("listDeadLetters", "", "DeadLetterListResponse"), adminQueryParameters()),
+		},
+		"/api/scan/admin/dead-letters/{dead_letter_id}/retry": map[string]any{
+			"post": pathOperation("retryDeadLetter", "RetryParseTaskRequest", "ParseTaskDetailResponse", "dead_letter_id"),
+		},
+		"/api/scan/admin/sources/{source_id}/bindings/{binding_id}/reconcile": map[string]any{
+			"post": pathOperation("reconcileBinding", "ReconcileBindingRequest", "ReconcileBindingResponse", "source_id", "binding_id"),
+		},
+	}
+}
+
+func operation(operationID, requestSchema, responseSchema string) map[string]any {
+	return statusOperation(operationID, requestSchema, responseSchema, "200")
+}
+
+func createdOperation(operationID, requestSchema, responseSchema string) map[string]any {
+	return statusOperation(operationID, requestSchema, responseSchema, "201")
+}
+
+func statusOperation(operationID, requestSchema, responseSchema, successStatus string) map[string]any {
+	op := map[string]any{
+		"operationId": operationID,
+		"tags":        []string{"scan"},
+		"responses": map[string]any{
+			successStatus: response(responseSchema),
+			"default": map[string]any{
+				"description": "standard error",
+				"content":     jsonContent("ErrorResponse"),
+			},
+		},
+	}
+	if requestSchema != "" {
+		op["requestBody"] = map[string]any{
+			"required": true,
+			"content":  jsonContent(requestSchema),
+		}
+	}
+	return op
+}
+
+func pathOperation(operationID, requestSchema, responseSchema string, pathParams ...string) map[string]any {
+	op := operation(operationID, requestSchema, responseSchema)
+	op["parameters"] = pathParameters(pathParams...)
+	return op
+}
+
+func withQueryParameters(op map[string]any, queryParams []map[string]any) map[string]any {
+	if len(queryParams) == 0 {
+		return op
+	}
+	raw, _ := op["parameters"].([]map[string]any)
+	params := append([]map[string]any{}, raw...)
+	params = append(params, queryParams...)
+	op["parameters"] = params
+	return op
+}
+
+func createdPathOperation(operationID, requestSchema, responseSchema string, pathParams ...string) map[string]any {
+	op := createdOperation(operationID, requestSchema, responseSchema)
+	op["parameters"] = pathParameters(pathParams...)
+	return op
+}
+
+func pathParameters(pathParams ...string) []map[string]any {
+	params := make([]map[string]any, 0, len(pathParams))
+	for _, name := range pathParams {
+		params = append(params, map[string]any{
+			"name":     name,
+			"in":       "path",
+			"required": true,
+			"schema":   map[string]any{"type": "string"},
+		})
+	}
+	return params
+}
+
+func response(schema string) map[string]any {
+	return map[string]any{
+		"description": "ok",
+		"content":     jsonContent(schema),
+	}
+}
+
+func jsonContent(schema string) map[string]any {
+	return map[string]any{
+		"application/json": map[string]any{
+			"schema": schemaRef(schema),
+			"examples": map[string]any{
+				"default": map[string]any{"value": map[string]any{}},
+			},
+		},
+	}
+}
+
+func schemaRef(name string) map[string]any {
+	return map[string]any{"$ref": "#/components/schemas/" + name}
+}
+
+func openAPISchemas() map[string]any {
+	return map[string]any{
+		"ErrorResponse":                 object([]string{"code", "message", "details"}, props("code", stringSchema(), "message", stringSchema(), "details", objectSchema())),
+		"ConnectorSpec":                 connectorSpecSchema(),
+		"ConnectorListResponse":         object([]string{"items"}, props("items", arrayOf("ConnectorSpec"))),
+		"TreeNode":                      treeNodeSchema(),
+		"TreeNodePage":                  treeNodePageSchema(),
+		"BindingTargetChildrenRequest":  object([]string{"connector_type"}, treeRequestProps()),
+		"BindingTargetSearchRequest":    object([]string{"connector_type", "keyword"}, mergeProps(treeRequestProps(), props("keyword", stringSchema()))),
+		"ValidateBindingTargetRequest":  object([]string{"connector_type", "target_type", "target_ref"}, targetProps()),
+		"ValidateBindingTargetResponse": object([]string{"target_type", "target_ref", "target_fingerprint", "display_name", "root_object_key"}, targetResponseProps()),
+		"CreateSourceRequest":           createSourceRequestSchema(),
+		"CreateSourceResponse":          object([]string{"source", "bindings"}, props("source", schemaRef("SourceResponse"), "bindings", arrayOf("SourceBindingResponse"))),
+		"SourceResponse":                sourceResponseSchema(),
+		"SourceListResponse":            object([]string{"items", "total"}, props("items", arrayOf("SourceListItem"), "total", integerSchema())),
+		"SourceListItem":                sourceListItemSchema(),
+		"GetSourceResponse":             object([]string{"source"}, props("source", schemaRef("SourceResponse"), "bindings", arrayOf("SourceBindingResponse"), "summary", objectSchema())),
+		"UpdateSourceRequest":           updateSourceRequestSchema(),
+		"UpdateSourceResponse":          object([]string{"source", "bindings"}, props("source", schemaRef("SourceResponse"), "bindings", arrayOf("SourceBindingResponse"), "created_binding_ids", stringArray(), "updated_binding_ids", stringArray(), "removed_binding_ids", stringArray(), "job_ids", stringArray())),
+		"DeleteSourceResponse":          object([]string{"deleted", "source_id"}, props("deleted", boolSchema(), "source_id", stringSchema(), "removed_binding_ids", stringArray(), "removed_dataset_id", stringSchema())),
+		"SourceBindingRequest":          sourceBindingRequestSchema(),
+		"SourceBindingResponse":         sourceBindingResponseSchema(),
+		"SchedulePolicy":                schedulePolicySchema(),
+		"ScheduleRule":                  scheduleRuleSchema(),
+		"BindingMutationResponse":       object([]string{"binding"}, props("binding", schemaRef("SourceBindingResponse"), "old_generation", integerSchema(), "new_generation", integerSchema(), "job_ids", stringArray())),
+		"DeleteBindingResponse":         object([]string{"deleted", "binding_id"}, props("deleted", boolSchema(), "binding_id", stringSchema(), "removed_core_parent_document_id", stringSchema(), "cancelled_task_count", integerSchema())),
+		"TriggerSourceSyncRequest":      object(nil, props("request_id", stringSchema(), "binding_id", stringSchema(), "scope_type", stringSchema(), "scope_ref", objectSchema())),
+		"TriggerSourceSyncResponse":     object([]string{"run_ids", "job_ids"}, props("run_ids", stringArray(), "job_ids", stringArray(), "intents", arrayOf("SyncRunIntent"))),
+		"SyncRunIntent":                 syncRunIntentSchema(),
+		"SourceTreeChildrenRequest":     object(nil, sourceTreeRequestProps()),
+		"SourceTreeSearchRequest":       object([]string{"keyword"}, mergeProps(sourceTreeRequestProps(), props("keyword", stringSchema()))),
+		"SourceDocumentListResponse":    object([]string{"items", "total", "page", "page_size"}, props("items", arrayOf("SourceDocumentItem"), "total", integerSchema(), "page", integerSchema(), "page_size", integerSchema())),
+		"SourceDocumentItem":            sourceDocumentItemSchema(),
+		"SourceSummaryResponse":         sourceSummarySchema(),
+		"GenerateTasksRequest":          generateTasksRequestSchema(),
+		"GenerateTasksResponse":         generateTasksResponseSchema(),
+		"ExpediteTasksRequest":          expediteTasksRequestSchema(),
+		"ExpediteTasksResponse":         expediteTasksResponseSchema(),
+		"ParseTaskListResponse":         object([]string{"items", "total"}, props("items", arrayOf("ParseTaskResponse"), "total", integerSchema())),
+		"ParseTaskResponse":             parseTaskResponseSchema(),
+		"ParseTaskDetailResponse":       object([]string{"task"}, props("task", schemaRef("ParseTaskResponse"), "document", schemaRef("TaskDocument"), "state", schemaRef("TaskDocumentState"), "object", schemaRef("TaskObject"))),
+		"TaskDocument":                  taskDocumentSchema(),
+		"TaskDocumentState":             taskDocumentStateSchema(),
+		"TaskObject":                    taskObjectSchema(),
+		"ParseTaskStatsResponse":        parseTaskStatsResponseSchema(),
+		"RetryParseTaskRequest":         object(nil, props("force", boolSchema())),
+		"DeletingResourceListResponse":  object([]string{"items", "total"}, props("items", arrayOf("DeletingResource"), "total", integerSchema())),
+		"DeletingResource":              deletingResourceSchema(),
+		"CompensationListResponse":      object([]string{"items", "total"}, props("items", arrayOf("Compensation"), "total", integerSchema())),
+		"Compensation":                  compensationSchema(),
+		"DeadLetterListResponse":        object([]string{"items", "total"}, props("items", arrayOf("DeadLetter"), "total", integerSchema())),
+		"DeadLetter":                    deadLetterSchema(),
+		"ReconcileBindingRequest":       object(nil, props("request_id", stringSchema())),
+		"ReconcileBindingResponse":      reconcileBindingResponseSchema(),
+		"ListMode":                      enumSchema("page", "all_current_level"),
+		"SourceStatus":                  enumSchema("ACTIVE", "PAUSED", "DELETING", "ERROR"),
+		"BindingStatus":                 enumSchema("ACTIVE", "PAUSED", "DELETING", "ERROR"),
+		"SyncMode":                      enumSchema("manual", "scheduled", "watch"),
+		"SourceState":                   enumSchema("NEW", "MODIFIED", "DELETED", "UNCHANGED"),
+		"SyncState":                     enumSchema("IDLE", "SCHEDULED", "PENDING", "RUNNING", "FAILED"),
+		"TaskAction":                    enumSchema("CREATE", "REPARSE", "DELETE"),
+		"ParseTaskStatus":               enumSchema("PENDING", "RUNNING", "SUBMITTED", "SUCCEEDED", "FAILED", "SUPERSEDED"),
+	}
+}
+
+func connectorSpecSchema() map[string]any {
+	return object([]string{"connector_type", "target_types", "supports_search", "supports_delta", "supports_dual_role_object", "supports_export_formats", "max_page_size"}, props(
+		"connector_type", stringSchema(),
+		"target_types", stringArray(),
+		"supports_search", boolSchema(),
+		"supports_delta", boolSchema(),
+		"supports_dual_role_object", boolSchema(),
+		"supports_export_formats", stringArray(),
+		"max_page_size", integerSchema(),
+	))
+}
+
+func treeNodeSchema() map[string]any {
+	return object([]string{"key", "display_name", "is_document", "is_container", "has_children", "selectable"}, props(
+		"key", stringSchema(),
+		"node_ref", stringSchema(),
+		"display_name", stringSchema(),
+		"connector_type", stringSchema(),
+		"target_type", stringSchema(),
+		"target_ref", stringSchema(),
+		"source_id", stringSchema(),
+		"binding_id", stringSchema(),
+		"tree_key", stringSchema(),
+		"object_key", stringSchema(),
+		"parent_key", stringSchema(),
+		"is_document", boolSchema(),
+		"is_container", boolSchema(),
+		"has_children", boolSchema(),
+		"selectable", boolSchema(),
+		"source_state", stringSchema(),
+		"sync_state", stringSchema(),
+		"parse_queue_state", stringSchema(),
+		"provider_meta", objectSchema(),
+	))
+}
+
+func treeNodePageSchema() map[string]any {
+	return object([]string{"items", "next_cursor", "has_more", "list_complete", "truncated"}, props(
+		"items", arrayOf("TreeNode"),
+		"next_cursor", stringSchema(),
+		"has_more", boolSchema(),
+		"list_complete", boolSchema(),
+		"truncated", boolSchema(),
+		"search_mode", stringSchema(),
+	))
+}
+
+func createSourceRequestSchema() map[string]any {
+	return object([]string{"request_id", "name", "bindings"}, props(
+		"request_id", stringSchema(),
+		"name", stringSchema(),
+		"bindings", arrayOf("SourceBindingRequest"),
+		"include_extensions", stringArray(),
+		"exclude_extensions", stringArray(),
+		"source_options", objectSchema(),
+	))
+}
+
+func updateSourceRequestSchema() map[string]any {
+	return object([]string{"config_version"}, props(
+		"config_version", integerSchema(),
+		"name", stringSchema(),
+		"bindings", arrayOf("SourceBindingRequest"),
+		"include_extensions", stringArray(),
+		"exclude_extensions", stringArray(),
+		"source_options", objectSchema(),
+	))
+}
+
+func sourceResponseSchema() map[string]any {
+	return object([]string{"source_id", "name", "dataset_id", "status", "config_version"}, props(
+		"source_id", stringSchema(),
+		"name", stringSchema(),
+		"dataset_id", stringSchema(),
+		"status", schemaRef("SourceStatus"),
+		"config_version", integerSchema(),
+	))
+}
+
+func sourceListItemSchema() map[string]any {
+	return object([]string{"source_id", "name", "dataset_id", "status", "config_version", "binding_count", "updated_at"}, props(
+		"source_id", stringSchema(),
+		"tenant_id", stringSchema(),
+		"created_by", stringSchema(),
+		"name", stringSchema(),
+		"dataset_id", stringSchema(),
+		"status", schemaRef("SourceStatus"),
+		"source_options", objectSchema(),
+		"include_extensions", stringArray(),
+		"exclude_extensions", stringArray(),
+		"config_version", integerSchema(),
+		"binding_count", integerSchema(),
+		"summary", objectSchema(),
+		"deleted_at", stringSchema(),
+		"created_at", stringSchema(),
+		"updated_at", stringSchema(),
+	))
+}
+
+func sourceBindingRequestSchema() map[string]any {
+	return object([]string{"connector_type", "target_type", "target_ref", "sync_mode"}, props(
+		"binding_id", stringSchema(),
+		"connector_type", stringSchema(),
+		"target_type", stringSchema(),
+		"target_ref", stringSchema(),
+		"display_name", stringSchema(),
+		"agent_id", stringSchema(),
+		"auth_connection_id", stringSchema(),
+		"provider_options", objectSchema(),
+		"sync_mode", schemaRef("SyncMode"),
+		"schedule_policy", schemaRef("SchedulePolicy"),
+		"include_extensions", stringArray(),
+		"exclude_extensions", stringArray(),
+	))
+}
+
+func sourceBindingResponseSchema() map[string]any {
+	return object([]string{"binding_id", "connector_type", "target_type", "tree_key", "binding_generation", "core_parent_document_id"}, props(
+		"binding_id", stringSchema(),
+		"source_id", stringSchema(),
+		"connector_type", stringSchema(),
+		"target_type", stringSchema(),
+		"target_ref", stringSchema(),
+		"target_fingerprint", stringSchema(),
+		"tree_key", stringSchema(),
+		"binding_generation", integerSchema(),
+		"core_parent_document_id", stringSchema(),
+		"sync_mode", schemaRef("SyncMode"),
+		"schedule_policy", schemaRef("SchedulePolicy"),
+		"next_sync_at", stringSchema(),
+		"status", schemaRef("BindingStatus"),
+	))
+}
+
+func schedulePolicySchema() map[string]any {
+	return object([]string{"timezone", "calendar", "rules"}, props(
+		"timezone", stringSchema(),
+		"calendar", enumSchema("weekly"),
+		"rules", arrayOf("ScheduleRule"),
+	))
+}
+
+func scheduleRuleSchema() map[string]any {
+	return object([]string{"days", "time"}, props(
+		"days", map[string]any{"type": "array", "items": enumSchema("everyday", "workday", "non_workday", "mon", "tue", "wed", "thu", "fri", "sat", "sun")},
+		"time", stringSchema(),
+	))
+}
+
+func sourceDocumentItemSchema() map[string]any {
+	return object(nil, props(
+		"document_id", stringSchema(),
+		"source_id", stringSchema(),
+		"binding_id", stringSchema(),
+		"object_key", stringSchema(),
+		"display_name", stringSchema(),
+		"source_state", schemaRef("SourceState"),
+		"sync_state", schemaRef("SyncState"),
+		"parse_queue_state", stringSchema(),
+		"parse_status", stringSchema(),
+		"core_document_id", stringSchema(),
+		"modified_at", stringSchema(),
+		"last_error", objectSchema(),
+	))
+}
+
+func sourceSummarySchema() map[string]any {
+	return object([]string{"source_id", "total_objects", "document_objects"}, props(
+		"source_id", stringSchema(),
+		"total_objects", integerSchema(),
+		"document_objects", integerSchema(),
+		"new_count", integerSchema(),
+		"modified_count", integerSchema(),
+		"deleted_count", integerSchema(),
+		"unchanged_count", integerSchema(),
+		"pending_task_count", integerSchema(),
+		"running_task_count", integerSchema(),
+		"failed_task_count", integerSchema(),
+		"bindings", arrayOf("SourceSummaryResponse"),
+	))
+}
+
+func syncRunIntentSchema() map[string]any {
+	return object([]string{"run_id", "source_id", "binding_id", "binding_generation", "status", "trigger_type", "scope_type", "created"}, props(
+		"run_id", stringSchema(),
+		"job_id", stringSchema(),
+		"source_id", stringSchema(),
+		"binding_id", stringSchema(),
+		"binding_generation", integerSchema(),
+		"status", stringSchema(),
+		"trigger_type", stringSchema(),
+		"scope_type", stringSchema(),
+		"scope_ref", objectSchema(),
+		"created", boolSchema(),
+	))
+}
+
+func generateTasksRequestSchema() map[string]any {
+	return object(nil, props(
+		"binding_id", stringSchema(),
+		"object_keys", stringArray(),
+		"document_ids", stringArray(),
+		"mode", stringSchema(),
+		"priority", integerSchema(),
+	))
+}
+
+func generateTasksResponseSchema() map[string]any {
+	return object([]string{"requested_count", "accepted_count", "duplicate_count", "already_active_count", "skipped_count", "task_ids"}, props(
+		"requested_count", integerSchema(),
+		"accepted_count", integerSchema(),
+		"duplicate_count", integerSchema(),
+		"already_active_count", integerSchema(),
+		"skipped_count", integerSchema(),
+		"task_ids", stringArray(),
+	))
+}
+
+func expediteTasksRequestSchema() map[string]any {
+	return object(nil, props(
+		"binding_id", stringSchema(),
+		"task_ids", stringArray(),
+		"document_ids", stringArray(),
+		"object_keys", stringArray(),
+		"priority", integerSchema(),
+	))
+}
+
+func expediteTasksResponseSchema() map[string]any {
+	return object([]string{"updated_count", "skipped_count", "task_ids"}, props(
+		"updated_count", integerSchema(),
+		"skipped_count", integerSchema(),
+		"task_ids", stringArray(),
+		"skipped_items", stringArray(),
+	))
+}
+
+func parseTaskResponseSchema() map[string]any {
+	return object([]string{"task_id", "source_id", "binding_id", "object_key", "document_id", "task_action", "target_version_id", "binding_generation", "status"}, props(
+		"task_id", stringSchema(),
+		"source_id", stringSchema(),
+		"binding_id", stringSchema(),
+		"object_key", stringSchema(),
+		"document_id", stringSchema(),
+		"task_action", schemaRef("TaskAction"),
+		"target_version_id", stringSchema(),
+		"binding_generation", integerSchema(),
+		"status", schemaRef("ParseTaskStatus"),
+		"retry_count", integerSchema(),
+		"next_run_at", stringSchema(),
+		"core_task_id", stringSchema(),
+		"core_document_id", stringSchema(),
+	))
+}
+
+func taskDocumentSchema() map[string]any {
+	return object([]string{"document_id", "source_id", "binding_id", "object_key"}, props(
+		"document_id", stringSchema(),
+		"source_id", stringSchema(),
+		"binding_id", stringSchema(),
+		"object_key", stringSchema(),
+		"core_document_id", stringSchema(),
+		"current_version_id", stringSchema(),
+		"desired_version_id", stringSchema(),
+		"source_version", stringSchema(),
+		"display_name", stringSchema(),
+		"parse_status", stringSchema(),
+		"created_at", stringSchema(),
+		"updated_at", stringSchema(),
+	))
+}
+
+func taskDocumentStateSchema() map[string]any {
+	return object([]string{"source_id", "binding_id", "binding_generation", "object_key", "source_state", "sync_state", "document_list_visible", "selectable"}, props(
+		"source_id", stringSchema(),
+		"binding_id", stringSchema(),
+		"binding_generation", integerSchema(),
+		"object_key", stringSchema(),
+		"source_version", stringSchema(),
+		"baseline_version", stringSchema(),
+		"source_state", schemaRef("SourceState"),
+		"sync_state", schemaRef("SyncState"),
+		"pending_action", stringSchema(),
+		"document_list_visible", boolSchema(),
+		"selectable", boolSchema(),
+		"parse_queue_state", stringSchema(),
+		"document_id", stringSchema(),
+		"active_task_id", stringSchema(),
+		"last_detected_at", stringSchema(),
+		"last_synced_at", stringSchema(),
+		"last_error", objectSchema(),
+		"created_at", stringSchema(),
+		"updated_at", stringSchema(),
+	))
+}
+
+func taskObjectSchema() map[string]any {
+	return object([]string{"source_id", "binding_id", "object_key", "display_name", "is_document", "is_container"}, props(
+		"source_id", stringSchema(),
+		"binding_id", stringSchema(),
+		"object_key", stringSchema(),
+		"display_name", stringSchema(),
+		"source_version", stringSchema(),
+		"is_document", boolSchema(),
+		"is_container", boolSchema(),
+		"created_at", stringSchema(),
+		"updated_at", stringSchema(),
+	))
+}
+
+func parseTaskStatsResponseSchema() map[string]any {
+	return object([]string{"total", "by_status", "by_action", "retryable_failed_count"}, props(
+		"total", integerSchema(),
+		"by_status", objectSchema(),
+		"by_action", objectSchema(),
+		"retryable_failed_count", integerSchema(),
+	))
+}
+
+func deletingResourceSchema() map[string]any {
+	return object([]string{"resource_type", "source_id", "status", "updated_at"}, props(
+		"resource_type", stringSchema(),
+		"source_id", stringSchema(),
+		"binding_id", stringSchema(),
+		"status", schemaRef("BindingStatus"),
+		"deleted_at", stringSchema(),
+		"last_error", objectSchema(),
+		"updated_at", stringSchema(),
+	))
+}
+
+func compensationSchema() map[string]any {
+	return object([]string{"operation_id", "status", "compensation_status", "updated_at"}, props(
+		"operation_id", stringSchema(),
+		"source_id", stringSchema(),
+		"dataset_id", stringSchema(),
+		"status", stringSchema(),
+		"compensation_status", stringSchema(),
+		"compensation_error", objectSchema(),
+		"updated_at", stringSchema(),
+	))
+}
+
+func deadLetterSchema() map[string]any {
+	return object([]string{"dead_letter_id", "task_id", "source_id", "binding_id", "binding_generation", "object_key", "document_id", "task_action", "target_version_id", "retry_count", "failed_at"}, props(
+		"dead_letter_id", stringSchema(),
+		"task_id", stringSchema(),
+		"source_id", stringSchema(),
+		"binding_id", stringSchema(),
+		"binding_generation", integerSchema(),
+		"object_key", stringSchema(),
+		"document_id", stringSchema(),
+		"task_action", schemaRef("TaskAction"),
+		"target_version_id", stringSchema(),
+		"retry_count", integerSchema(),
+		"error_code", stringSchema(),
+		"last_error", objectSchema(),
+		"failed_at", stringSchema(),
+		"created_at", stringSchema(),
+	))
+}
+
+func reconcileBindingResponseSchema() map[string]any {
+	return object([]string{"run_id", "source_id", "binding_id", "binding_generation", "status", "trigger_type", "scope_type"}, props(
+		"run_id", stringSchema(),
+		"source_id", stringSchema(),
+		"binding_id", stringSchema(),
+		"binding_generation", integerSchema(),
+		"status", stringSchema(),
+		"trigger_type", stringSchema(),
+		"scope_type", stringSchema(),
+	))
+}
+
+func treeRequestProps() map[string]any {
+	return props(
+		"connector_type", stringSchema(),
+		"target_type", stringSchema(),
+		"target_ref", stringSchema(),
+		"node_ref", stringSchema(),
+		"agent_id", stringSchema(),
+		"auth_connection_id", stringSchema(),
+		"provider_options", objectSchema(),
+		"include_files", boolSchema(),
+		"list_mode", schemaRef("ListMode"),
+		"page_size", integerSchema(),
+		"cursor", stringSchema(),
+		"max_items", integerSchema(),
+	)
+}
+
+func targetProps() map[string]any {
+	return props(
+		"connector_type", stringSchema(),
+		"target_type", stringSchema(),
+		"target_ref", stringSchema(),
+		"agent_id", stringSchema(),
+		"auth_connection_id", stringSchema(),
+		"provider_options", objectSchema(),
+	)
+}
+
+func targetResponseProps() map[string]any {
+	return props(
+		"target_type", stringSchema(),
+		"target_ref", stringSchema(),
+		"target_fingerprint", stringSchema(),
+		"display_name", stringSchema(),
+		"root_object_key", stringSchema(),
+		"provider_meta", objectSchema(),
+	)
+}
+
+func sourceTreeRequestProps() map[string]any {
+	return props(
+		"binding_id", stringSchema(),
+		"tree_key", stringSchema(),
+		"parent_key", stringSchema(),
+		"include_documents", boolSchema(),
+		"include_containers", boolSchema(),
+		"state_filter", stringArray(),
+		"list_mode", schemaRef("ListMode"),
+		"page_size", integerSchema(),
+		"cursor", stringSchema(),
+		"max_items", integerSchema(),
+	)
+}
+
+func documentQueryParameters() []map[string]any {
+	return []map[string]any{
+		queryParameter("binding_id", stringSchema()),
+		queryParameter("keyword", stringSchema()),
+		queryParameter("state_filter", stringArray()),
+		queryParameter("parse_status", stringArray()),
+		queryParameter("page", integerSchema()),
+		queryParameter("page_size", integerSchema()),
+	}
+}
+
+func parseTaskQueryParameters() []map[string]any {
+	return []map[string]any{
+		queryParameter("source_id", stringSchema()),
+		queryParameter("binding_id", stringSchema()),
+		queryParameter("document_id", stringSchema()),
+		queryParameter("status", stringArray()),
+		queryParameter("task_action", stringArray()),
+		queryParameter("page", integerSchema()),
+		queryParameter("page_size", integerSchema()),
+	}
+}
+
+func parseTaskStatsQueryParameters() []map[string]any {
+	return []map[string]any{
+		queryParameter("source_id", stringSchema()),
+		queryParameter("binding_id", stringSchema()),
+		queryParameter("document_id", stringSchema()),
+	}
+}
+
+func adminQueryParameters() []map[string]any {
+	return []map[string]any{
+		queryParameter("source_id", stringSchema()),
+		queryParameter("binding_id", stringSchema()),
+		queryParameter("page", integerSchema()),
+		queryParameter("page_size", integerSchema()),
+	}
+}
+
+func sourceListQueryParameters() []map[string]any {
+	return []map[string]any{
+		queryParameter("keyword", stringSchema()),
+		queryParameter("status", schemaRef("SourceStatus")),
+		queryParameter("page", integerSchema()),
+		queryParameter("page_size", integerSchema()),
+	}
+}
+
+func queryParameter(name string, schema map[string]any) map[string]any {
+	return map[string]any{
+		"name":   name,
+		"in":     "query",
+		"schema": schema,
+	}
+}
+
+func object(required []string, properties map[string]any) map[string]any {
+	schema := map[string]any{"type": "object", "properties": properties}
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+	return schema
+}
+
+func props(values ...any) map[string]any {
+	out := make(map[string]any, len(values)/2)
+	for i := 0; i+1 < len(values); i += 2 {
+		out[values[i].(string)] = values[i+1]
+	}
+	return out
+}
+
+func mergeProps(left, right map[string]any) map[string]any {
+	out := make(map[string]any, len(left)+len(right))
+	for key, value := range left {
+		out[key] = value
+	}
+	for key, value := range right {
+		out[key] = value
+	}
+	return out
+}
+
+func stringSchema() map[string]any {
+	return map[string]any{"type": "string"}
+}
+
+func integerSchema() map[string]any {
+	return map[string]any{"type": "integer", "format": "int64"}
+}
+
+func boolSchema() map[string]any {
+	return map[string]any{"type": "boolean"}
+}
+
+func objectSchema() map[string]any {
+	return map[string]any{"type": "object", "additionalProperties": true}
+}
+
+func stringArray() map[string]any {
+	return map[string]any{"type": "array", "items": stringSchema()}
+}
+
+func arrayOf(schema string) map[string]any {
+	return map[string]any{"type": "array", "items": schemaRef(schema)}
+}
+
+func enumSchema(values ...string) map[string]any {
+	return map[string]any{"type": "string", "enum": values}
 }

@@ -1,139 +1,92 @@
-from httpx import ConnectError
-from lazyllm.module import ModuleBase
+from lazyllm.tools.tools.search import ArxivSearch, BingSearch, BochaSearch, GoogleSearch, WikipediaSearch
+from lazyllm.tools.tools.search.base import SearchBase
 
-from chat.tools import web_search as web_search_mod
-
-
-class _FakeProvider(ModuleBase):
-    def __init__(self, *, items=None, error=None, content=''):
-        super().__init__()
-        self._items = list(items or [])
-        self._error = error
-        self._content = content
-        self.calls = []
-
-    def forward(self, query: str, **kwargs):
-        self.calls.append((query, kwargs))
-        if self._error is not None:
-            raise self._error
-        return list(self._items)
-
-    def get_content(self, item):
-        return self._content or f"content:{item.get('title', '')}"
+from lazymind.chat.engine.tools import web_search as web_search_mod
 
 
-def test_search_provider_dispatches_lazyllm_search_kwargs():
-    google = _FakeProvider()
-    bing = _FakeProvider()
-    bocha = _FakeProvider()
-    wikipedia = _FakeProvider()
+def _patch_provider(provider, monkeypatch):
+    calls = []
 
-    assert web_search_mod._search_provider(google, 'google', 'g', 3) == []
-    assert web_search_mod._search_provider(bing, 'bing', 'b', 4) == []
-    assert web_search_mod._search_provider(bocha, 'bocha', 'o', 5) == []
-    assert web_search_mod._search_provider(wikipedia, 'wikipedia', 'w', 6) == []
+    def fake_search(**kwargs):
+        calls.append(kwargs)
+        return [{
+            'title': 'Result',
+            'url': 'https://example.com',
+            'snippet': 'snippet',
+            'source': provider.source_name,
+        }]
 
-    assert google.calls == [('g', {'date_restrict': '', 'raise_on_error': True})]
-    assert bing.calls == [('b', {'count': 4, 'raise_on_error': True})]
-    assert bocha.calls == [('o', {'count': 5, 'summary': False, 'raise_on_error': True})]
-    assert wikipedia.calls == [('w', {'limit': 6, 'raise_on_error': True})]
-
-
-def test_web_search_auto_falls_through_runtime_error_and_empty_results(monkeypatch):
-    providers = {
-        'google': _FakeProvider(error=ConnectError('google down')),
-        'bing': _FakeProvider(items=[]),
-        'wikipedia': _FakeProvider(items=[{
-            'title': 'Wiki',
-            'url': 'https://example.com/wiki',
-            'snippet': 'wiki snippet',
-            'source': 'wikipedia',
-        }], content='wiki content'),
-    }
-
-    monkeypatch.setattr(web_search_mod, '_candidate_sources', lambda _requested: ['google', 'bing', 'wikipedia'])
-    monkeypatch.setattr(web_search_mod, '_provider_available', lambda source: source in providers or source == 'wikipedia')
-    monkeypatch.setattr(web_search_mod, '_build_provider', lambda source, _lang: providers[source])
-
-    result = web_search_mod.web_search('test query', source='auto', include_content=True)
-
-    assert result == {
-        'success': True,
-        'tool': 'web_search',
-        'result': {
-            'status': 'ok',
-            'query': 'test query',
-            'requested_source': 'auto',
-            'resolved_source': 'wikipedia',
-            'tried_sources': ['google', 'bing', 'wikipedia'],
-            'lang': 'zh',
-            'total': 1,
-            'items': [{
-                'title': 'Wiki',
-                'url': 'https://example.com/wiki',
-                'snippet': 'wiki snippet',
-                'source': 'wikipedia',
-                'content': 'wiki content',
-            }],
-        },
-    }
+    monkeypatch.setattr(provider, 'search', fake_search)
+    monkeypatch.setattr(provider, 'get_content', lambda _item: 'page content')
+    return calls
 
 
-def test_web_search_explicit_source_keeps_no_results_without_fallback(monkeypatch):
-    provider = _FakeProvider(items=[])
-
-    monkeypatch.setattr(web_search_mod, '_build_provider', lambda _source, _lang: provider)
-
-    result = web_search_mod.web_search('test query', source='google')
-
-    assert result == {
-        'success': True,
-        'tool': 'web_search',
-        'result': {
-            'status': 'no_results',
-            'query': 'test query',
-            'requested_source': 'google',
-            'resolved_source': 'google',
-            'tried_sources': ['google'],
-            'lang': 'zh',
-            'total': 0,
-            'items': [],
-        },
-    }
-    assert provider.calls == [('test query', {'date_restrict': '', 'raise_on_error': True})]
+def test_lazyllm_search_public_apis_are_provider_specific():
+    base_apis = ['search', 'get_content', 'get_contents']
+    assert WikipediaSearch.__public_apis__ == base_apis
+    assert ArxivSearch.__public_apis__ == base_apis
+    assert GoogleSearch.__public_apis__ == base_apis
+    assert BingSearch.__public_apis__ == base_apis
+    assert BochaSearch.__public_apis__ == base_apis
 
 
-def test_arxiv_search_dispatches_through_module_call(monkeypatch):
-    provider = _FakeProvider(items=[{
-        'title': 'Arxiv',
-        'url': 'https://arxiv.org/abs/1234.5678',
-        'snippet': 'paper snippet',
-        'source': 'arxiv',
-    }])
+def test_google_search_public_api_dispatches(monkeypatch):
+    provider = GoogleSearch(custom_search_api_key='key', search_engine_id='cx')
+    calls = _patch_provider(provider, monkeypatch)
 
-    monkeypatch.setattr(web_search_mod, 'ArxivSearch', lambda **_kwargs: provider)
+    result = provider.search('test query', topk=3, include_content=True, date_restrict='d7')
 
-    result = web_search_mod.arxiv_search('paper query', max_results=3, sort_by='submittedDate')
+    assert calls == [{'query': 'test query', 'date_restrict': 'd7'}]
+    assert result[0]['content'] == 'page content'
 
-    assert result == {
-        'success': True,
-        'tool': 'arxiv_search',
-        'result': {
-            'status': 'ok',
-            'query': 'paper query',
-            'source': 'arxiv',
-            'sort_by': 'submittedDate',
-            'total': 1,
-            'items': [{
-                'title': 'Arxiv',
-                'url': 'https://arxiv.org/abs/1234.5678',
-                'snippet': 'paper snippet',
-                'source': 'arxiv',
-            }],
-        },
-    }
-    assert provider.calls == [('paper query', {
+
+def test_bing_search_public_api_dispatches(monkeypatch):
+    provider = BingSearch(subscription_key='key')
+    calls = _patch_provider(provider, monkeypatch)
+
+    provider.search('test query', topk=4)
+
+    assert calls == [{'query': 'test query', 'count': 4}]
+
+
+def test_bocha_search_public_api_dispatches(monkeypatch):
+    provider = BochaSearch(api_key='key')
+    calls = _patch_provider(provider, monkeypatch)
+
+    provider.search('test query', topk=5, freshness='oneDay', summary=True)
+
+    assert calls == [{
+        'query': 'test query',
+        'count': 5,
+        'freshness': 'oneDay',
+        'summary': True,
+    }]
+
+
+def test_wikipedia_search_public_api_dispatches(monkeypatch):
+    provider = WikipediaSearch(base_url='https://zh.wikipedia.org')
+    calls = _patch_provider(provider, monkeypatch)
+
+    provider.search('test query', topk=6)
+
+    assert calls == [{'query': 'test query', 'limit': 6}]
+
+
+def test_arxiv_search_public_api_dispatches(monkeypatch):
+    provider = ArxivSearch()
+    calls = _patch_provider(provider, monkeypatch)
+
+    result = provider.search('paper query', max_results=3, include_content=True, sort_by='submittedDate')
+
+    assert calls == [{
+        'query': 'paper query',
         'max_results': 3,
         'sort_by': 'submittedDate',
-        'raise_on_error': True,
-    })]
+    }]
+    assert result[0]['content'] == 'page content'
+
+
+def test_lazymind_web_search_url_fetch_exists():
+    import inspect
+    assert inspect.isfunction(web_search_mod.url_fetch)
+    assert web_search_mod.url_fetch.__name__ == 'url_fetch'

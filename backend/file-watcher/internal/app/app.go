@@ -28,7 +28,6 @@ type App struct {
 	heartbeat   *control.HeartbeatReporter
 	manager     source.Manager
 	cpClient    control.ControlPlaneClient
-	stagingSvc  fs.StagingService
 	agentStatus internal.AgentStatus
 	statusMu    sync.Mutex
 }
@@ -41,19 +40,17 @@ func New(cfg *config.Config, log *zap.Logger) *App {
 	// fs layer.
 	pathMapper := fs.NewPathMapper(cfg.HostPathStyle, cfg.PathMappings)
 	validator := fs.NewPathValidator(cfg.Security.AllowedRoots)
-	scanner := fs.NewScanner(cfg.AgentID, cfg.Scan, cpClient, validator, pathMapper, log)
 	watcher := fs.NewRecursiveWatcher(cfg.AgentID, cfg.Watch, cpClient, pathMapper, log)
 	stagingSvc := fs.NewStagingService(cfg.Staging, log)
 
 	// Source manager, which also implements Manager and CommandDispatcher.
-	mgr := source.NewManager(cfg, scanner, watcher, validator, pathMapper, cpClient, stagingSvc, log)
+	mgr := source.NewManager(cfg, watcher, validator, pathMapper, log)
 
 	a := &App{
 		cfg:         cfg,
 		log:         log,
 		manager:     mgr,
 		cpClient:    cpClient,
-		stagingSvc:  stagingSvc,
 		agentStatus: internal.AgentStatusRegistering,
 	}
 
@@ -69,7 +66,7 @@ func New(cfg *config.Config, log *zap.Logger) *App {
 	a.heartbeat = heartbeat
 
 	// HTTP server
-	handler := api.NewHandler(mgr, validator, scanner, stagingSvc, pathMapper, log)
+	handler := api.NewHandler(mgr, validator, stagingSvc, pathMapper, log)
 	a.server = api.NewServer(cfg, handler, log)
 
 	return a
@@ -89,7 +86,6 @@ func (a *App) Run(ctx context.Context) error {
 		zap.String("advertise", advertiseAddr),
 		zap.String("base_root", a.cfg.BaseRoot),
 		zap.String("staging_root", a.cfg.Staging.HostRoot),
-		zap.String("snapshot_root", a.cfg.Snapshot.HostRoot),
 		zap.String("log_dir", a.cfg.LogDir),
 	)
 
@@ -171,11 +167,6 @@ func (a *App) runHealthCheck(ctx context.Context) {
 			failures = append(failures, "staging_not_writable: "+err.Error())
 		}
 	}
-	if strings.TrimSpace(a.cfg.Snapshot.HostRoot) != "" {
-		if err := checkDirWritable(a.cfg.Snapshot.HostRoot); err != nil {
-			failures = append(failures, "snapshot_not_writable: "+err.Error())
-		}
-	}
 	if strings.TrimSpace(a.cfg.LogDir) != "" {
 		if err := checkDirWritable(a.cfg.LogDir); err != nil {
 			failures = append(failures, "log_dir_not_writable: "+err.Error())
@@ -254,11 +245,6 @@ func checkDirWritable(dir string) error {
 func (a *App) ensureBaseDirs() error {
 	if a.cfg.Staging.Enabled && strings.TrimSpace(a.cfg.Staging.HostRoot) != "" {
 		if err := os.MkdirAll(a.cfg.Staging.HostRoot, 0o755); err != nil {
-			return err
-		}
-	}
-	if strings.TrimSpace(a.cfg.Snapshot.HostRoot) != "" {
-		if err := os.MkdirAll(a.cfg.Snapshot.HostRoot, 0o755); err != nil {
 			return err
 		}
 	}

@@ -1,7 +1,7 @@
 import sys
 import types
 
-from chat.components.process.sensitive_filter import SensitiveFilter
+from lazymind.chat.service.utils.sensitive_filter import SensitiveFilter
 
 
 class FakeAutomaton:

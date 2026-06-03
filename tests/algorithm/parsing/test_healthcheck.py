@@ -1,6 +1,6 @@
 import pytest
 
-import parsing.healthcheck as healthcheck
+import lazymind.parsing.service.healthcheck as healthcheck
 
 
 class _UrlopenResponse:

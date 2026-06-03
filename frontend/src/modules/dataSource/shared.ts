@@ -52,6 +52,8 @@ export interface PendingOAuthAttempt {
   previousVerified: boolean;
   previousConnection: any | null;
   resolved: boolean;
+  accountId?: string;
+  appId?: string;
 }
 
 export interface SyncLogItem {
@@ -117,9 +119,16 @@ export interface DataSourceItem {
   detailDocuments?: DetailDocumentItem[];
   rootPath?: string;
   targetRef?: string;
+  targetRefs?: string[];
   targetType?: FeishuTargetType;
+  targetTypes?: Record<string, FeishuTargetType>;
   authConnectionId?: string;
   datasetId?: string;
+  bindingId?: string;
+  bindingIds?: string[];
+  bindingTreeKey?: string;
+  bindingTreeKeys?: string[];
+  configVersion?: number;
 }
 
 export interface SourceFormValues {
@@ -128,17 +137,18 @@ export interface SourceFormValues {
   description?: string;
   enabled?: boolean;
   localMode?: "fs" | "mount" | "s3mirror";
-  path?: string;
+  path?: string | string[];
   mountName?: string;
   bucket?: string;
   region?: string;
   prefix?: string;
-  target?: string;
+  target?: string | string[];
   targetType?: FeishuTargetType;
   spaceKey?: string;
   scopes?: string[];
   syncMode?: SyncMode;
   scheduleCycle?: string;
+  scheduleWeekdays?: string[];
   scheduleTime?: string;
   fileSyncMode?: FileSyncMode;
   selectedFiles?: string[];
@@ -159,6 +169,7 @@ export interface DataSourceSummary {
   rootPath?: string;
   targetRef?: string;
   targetType?: string;
+  targetTypes?: Record<string, string>;
   sourceType?: DataSourceKind;
   documentCount: number;
   status: SourceStatus;
@@ -171,6 +182,9 @@ export interface DataSourceSummary {
   scanManaged?: boolean;
   tenantId?: string;
   agentId?: string;
+  bindingId?: string;
+  bindingTreeKey?: string;
+  configVersion?: number;
 }
 
 export interface DataSourceDetailState {

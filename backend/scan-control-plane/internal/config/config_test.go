@@ -1,120 +1,152 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
+	"time"
 )
 
-func TestValidateRejectsNonPositiveCommandAckTimeout(t *testing.T) {
-	t.Parallel()
-	cfg := defaultConfig()
-	cfg.Worker.CommandAckTimeout = 0
+func TestLoadConfigFromEnv(t *testing.T) {
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_DB_DSN", "postgres://scan-control-plane")
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_CORE_BASE_URL", "http://core.test")
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_DEFAULT_DATASET_ALGO_ID", "custom_algo")
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_DEFAULT_DATASET_ALGO_NAME", "Custom Algo")
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_AGENT_BASE_URL", "http://agent.test")
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_DEFAULT_AGENT_ID", "agent-default")
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT", "/host/root")
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_FEISHU_BASE_URL", "http://feishu.test")
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL", "http://auth.test")
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "internal-token")
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_TEMP_DIR", "/tmp/scan-control-plane-test")
+	t.Setenv("SOURCEENGINE_TEMP_TTL", "2h")
+	t.Setenv("SOURCEENGINE_WORKER_LEASE_TTL", "45s")
+	t.Setenv("SOURCEENGINE_WORKER_MAX_BACKOFF", "3m")
+	t.Setenv("SOURCEENGINE_PARSE_DEAD_LETTER_AFTER", "4")
+	t.Setenv("SOURCEENGINE_GENERATE_TASKS_MAX_OBJECTS_PER_REQUEST", "7")
+	t.Setenv("SOURCEENGINE_PARSE_WORKER_GLOBAL_CONCURRENCY", "9")
+	t.Setenv("SOURCEENGINE_PARSE_WORKER_SOURCE_CONCURRENCY", "3")
+	t.Setenv("SOURCEENGINE_WORKER_POLL_INTERVAL", "6s")
+	t.Setenv("SOURCEENGINE_CORE_RESULT_POLL_INTERVAL", "11s")
+	t.Setenv("SOURCEENGINE_COMPENSATION_POLL_INTERVAL", "31s")
 
-	err := cfg.Validate()
-	if err == nil {
-		t.Fatalf("expected validate to fail when command_ack_timeout <= 0")
-	}
-	if !strings.Contains(err.Error(), "worker.command_ack_timeout") {
-		t.Fatalf("expected command_ack_timeout validation error, got %v", err)
-	}
-}
-
-func TestValidateRejectsNonPositiveAgentOfflineTimeout(t *testing.T) {
-	t.Parallel()
-	cfg := defaultConfig()
-	cfg.Worker.AgentOfflineTimeout = -1
-
-	err := cfg.Validate()
-	if err == nil {
-		t.Fatalf("expected validate to fail when agent_offline_timeout <= 0")
-	}
-	if !strings.Contains(err.Error(), "worker.agent_offline_timeout") {
-		t.Fatalf("expected agent_offline_timeout validation error, got %v", err)
-	}
-}
-
-func TestValidateRequiresAgentTokenOnNonLoopbackListenAddr(t *testing.T) {
-	t.Parallel()
-	cfg := defaultConfig()
-	cfg.ListenAddr = "0.0.0.0:18080"
-	cfg.AgentToken = ""
-
-	err := cfg.Validate()
-	if err == nil {
-		t.Fatalf("expected validate to fail when non-loopback listen_addr has empty agent_token")
-	}
-	if !strings.Contains(err.Error(), "agent_token") {
-		t.Fatalf("expected agent_token validation error, got %v", err)
-	}
-}
-
-func TestValidateAllowsEmptyAgentTokenOnLoopbackListenAddr(t *testing.T) {
-	t.Parallel()
-	cfg := defaultConfig()
-	cfg.ListenAddr = "127.0.0.1:18080"
-	cfg.AgentToken = ""
-
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("expected loopback listen_addr to allow empty agent_token, got %v", err)
-	}
-}
-
-func TestValidateAllowsDeprecatedParserConfigWithoutEndpoint(t *testing.T) {
-	t.Parallel()
-	cfg := defaultConfig()
-	cfg.Parser.Enabled = true
-	cfg.Parser.Endpoint = ""
-	cfg.Parser.Timeout = 0
-
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("expected deprecated parser config to be ignored, got %v", err)
-	}
-}
-
-func TestLoadOverridesAuthServiceInternalTokenFromEnv(t *testing.T) {
-	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "env-internal-token")
-
-	cfgPath := filepath.Join(t.TempDir(), "control-plane.yml")
-	if err := os.WriteFile(cfgPath, []byte(`
-listen_addr: "127.0.0.1:18080"
-database_driver: "sqlite"
-database_dsn: ":memory:"
-cloud_sync:
-  enabled: true
-  tick: "30s"
-  max_concurrent: 1
-  lock_ttl: "20m"
-  default_schedule_tz: "Asia/Shanghai"
-  http_timeout: "30s"
-  retry_max_attempts: 1
-  retry_base_backoff: "1s"
-  retry_max_backoff: "30s"
-  auth_service_base_url: "http://auth-service:8000"
-  auth_service_internal_token: "file-internal-token"
-`), 0o644); err != nil {
-		t.Fatalf("write config failed: %v", err)
-	}
-
-	cfg, err := Load(cfgPath)
+	cfg, err := Load()
 	if err != nil {
-		t.Fatalf("load config failed: %v", err)
+		t.Fatalf("load config: %v", err)
 	}
-	if cfg.CloudSync.AuthServiceInternalToken != "env-internal-token" {
-		t.Fatalf("expected env token override, got %q", cfg.CloudSync.AuthServiceInternalToken)
+	if cfg.DBDSN == "" || cfg.CoreBaseURL == "" || cfg.AgentBaseURL == "" || cfg.FeishuBaseURL == "" || cfg.AuthServiceBaseURL == "" || cfg.AuthServiceInternalToken == "" || cfg.TempDir == "" {
+		t.Fatalf("config did not read required env: %+v", cfg)
+	}
+	if cfg.DefaultDatasetAlgoID != "custom_algo" || cfg.DefaultDatasetAlgoName != "Custom Algo" {
+		t.Fatalf("config did not read default dataset algo: %+v", cfg)
+	}
+	if cfg.LocalFSDefaultAgentID != "agent-default" {
+		t.Fatalf("config did not read local_fs default agent id: %+v", cfg)
+	}
+	if cfg.LocalFSPublicRoot != "/host/root" {
+		t.Fatalf("config did not read local_fs public root: %+v", cfg)
+	}
+	if cfg.GenerateTasksMaxObjectsPerRequest != 7 || cfg.ParseWorkerGlobalConcurrency != 9 || cfg.ParseWorkerSourceConcurrency != 3 {
+		t.Fatalf("config did not read limits: %+v", cfg)
+	}
+	if cfg.TempTTL != 2*time.Hour || cfg.WorkerLeaseTTL != 45*time.Second || cfg.WorkerMaxBackoff != 3*time.Minute || cfg.ParseDeadLetterAfter != 4 {
+		t.Fatalf("config did not read worker ttl/backoff/deadletter: %+v", cfg)
+	}
+	if cfg.WorkerPollInterval != 6*time.Second || cfg.CoreResultPollInterval != 11*time.Second || cfg.CompensationPollInterval != 31*time.Second {
+		t.Fatalf("config did not read poll intervals: %+v", cfg)
 	}
 }
 
-func TestValidateCoercesDeprecatedWorkerExecutionMode(t *testing.T) {
-	t.Parallel()
-	cfg := defaultConfig()
-	cfg.Worker.ExecutionMode = "direct_parser"
-
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("expected deprecated worker.execution_mode to be coerced, got %v", err)
+func TestValidateRequiresSQLBoundaries(t *testing.T) {
+	base := Config{
+		Address:                           "127.0.0.1",
+		Port:                              18080,
+		DBDSN:                             "postgres://scan-control-plane",
+		CoreBaseURL:                       "http://core.test",
+		DefaultDatasetAlgoID:              "general_algo",
+		DefaultDatasetAlgoName:            "General",
+		AgentBaseURL:                      "http://agent.test",
+		FeishuBaseURL:                     "http://feishu.test",
+		AuthServiceBaseURL:                "http://auth.test",
+		AuthServiceInternalToken:          "internal-token",
+		TempDir:                           "/tmp/scan-control-plane-test",
+		TempTTL:                           24 * time.Hour,
+		WorkerLeaseTTL:                    time.Minute,
+		WorkerMaxBackoff:                  10 * time.Minute,
+		ParseDeadLetterAfter:              3,
+		GenerateTasksMaxObjectsPerRequest: 20,
+		ParseWorkerGlobalConcurrency:      20,
+		ParseWorkerSourceConcurrency:      2,
+		WorkerPollInterval:                5 * time.Second,
+		CoreResultPollInterval:            10 * time.Second,
+		CompensationPollInterval:          30 * time.Second,
 	}
-	if cfg.Worker.ExecutionMode != "core_task" {
-		t.Fatalf("expected execution_mode coerced to core_task, got %s", cfg.Worker.ExecutionMode)
+
+	for name, mutate := range map[string]func(*Config){
+		"db dsn": func(cfg *Config) {
+			cfg.DBDSN = ""
+		},
+		"core url": func(cfg *Config) {
+			cfg.CoreBaseURL = ""
+		},
+		"default dataset algo id": func(cfg *Config) {
+			cfg.DefaultDatasetAlgoID = ""
+		},
+		"default dataset algo name": func(cfg *Config) {
+			cfg.DefaultDatasetAlgoName = ""
+		},
+		"agent url": func(cfg *Config) {
+			cfg.AgentBaseURL = ""
+		},
+		"temp dir": func(cfg *Config) {
+			cfg.TempDir = ""
+		},
+		"feishu url": func(cfg *Config) {
+			cfg.FeishuBaseURL = ""
+			cfg.AuthServiceBaseURL = "http://auth.test"
+		},
+		"auth service url": func(cfg *Config) {
+			cfg.FeishuBaseURL = "http://feishu.test"
+			cfg.AuthServiceBaseURL = ""
+		},
+		"auth service internal token": func(cfg *Config) {
+			cfg.AuthServiceInternalToken = ""
+		},
+		"generate tasks max objects": func(cfg *Config) {
+			cfg.GenerateTasksMaxObjectsPerRequest = 0
+		},
+		"temp ttl": func(cfg *Config) {
+			cfg.TempTTL = 0
+		},
+		"worker lease ttl": func(cfg *Config) {
+			cfg.WorkerLeaseTTL = 0
+		},
+		"worker max backoff": func(cfg *Config) {
+			cfg.WorkerMaxBackoff = 0
+		},
+		"parse dead letter after": func(cfg *Config) {
+			cfg.ParseDeadLetterAfter = 0
+		},
+		"parse worker global concurrency": func(cfg *Config) {
+			cfg.ParseWorkerGlobalConcurrency = 0
+		},
+		"parse worker source concurrency": func(cfg *Config) {
+			cfg.ParseWorkerSourceConcurrency = 0
+		},
+		"worker poll interval": func(cfg *Config) {
+			cfg.WorkerPollInterval = 0
+		},
+		"core result poll interval": func(cfg *Config) {
+			cfg.CoreResultPollInterval = 0
+		},
+		"compensation poll interval": func(cfg *Config) {
+			cfg.CompensationPollInterval = 0
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := base
+			mutate(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatalf("expected missing %s to fail validation", name)
+			}
+		})
 	}
 }

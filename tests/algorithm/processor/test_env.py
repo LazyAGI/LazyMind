@@ -1,6 +1,6 @@
 import pytest
 
-from processor.env import env_bool, env_float, env_int, env_list
+from lazymind.processor.service.env import env_bool, env_float, env_int, env_list
 
 
 def test_env_int_uses_default_for_missing_or_blank(monkeypatch):

@@ -52,19 +52,19 @@ class _FakeDocumentProcessorWorker:
 
 def _fresh_import_worker(monkeypatch):
     from lazyllm.tools.rag import parsing_service
-    import processor.db
+    import lazymind.processor.service.db
 
     _FakeDocumentProcessorWorker.instances = []
-    monkeypatch.setattr(processor.db, 'require_shared_db_config', lambda service_name: {'service': service_name})
+    monkeypatch.setattr(lazymind.processor.service.db, 'require_shared_db_config', lambda service_name: {'service': service_name})
     # Patch parsing_service AFTER capturing the real class so supported_params still works.
     # We replace it with _FakeDocumentProcessorWorker which has the same explicit signature.
     monkeypatch.setattr(parsing_service, 'DocumentProcessorWorker', _FakeDocumentProcessorWorker)
-    sys.modules.pop('processor.worker', None)
-    return importlib.import_module('processor.worker')
+    sys.modules.pop('lazymind.processor.service.worker', None)
+    return importlib.import_module('lazymind.processor.service.worker')
 
 
 def test_worker_constructs_document_processor_worker_from_env(monkeypatch):
-    from config import config as _cfg
+    from lazymind.config import config as _cfg
 
     monkeypatch.setitem(_cfg._impl, 'document_worker_port', 8124)
     monkeypatch.setitem(_cfg._impl, 'document_worker_num_workers', 3)
@@ -115,7 +115,7 @@ def test_worker_signal_handler_ignores_stop_errors(monkeypatch):
 
 def test_worker_main_starts_waits_and_registers_signals(monkeypatch):
     from lazyllm.tools.rag import parsing_service
-    import processor.db
+    import lazymind.processor.service.db
     import threading
 
     _FakeDocumentProcessorWorker.instances = []
@@ -136,13 +136,13 @@ def test_worker_main_starts_waits_and_registers_signals(monkeypatch):
             return None
 
     monkeypatch.setattr(parsing_service, 'DocumentProcessorWorker', _FakeDocumentProcessorWorker)
-    monkeypatch.setattr(processor.db, 'require_shared_db_config', lambda service_name: {'service': service_name})
+    monkeypatch.setattr(lazymind.processor.service.db, 'require_shared_db_config', lambda service_name: {'service': service_name})
     monkeypatch.setattr(threading, 'Event', FakeEvent)
     monkeypatch.setattr(signal, 'signal', lambda sig, handler: signal_calls.append((sig, handler.__name__)))
     monkeypatch.setenv('LAZYMIND_DOCUMENT_WORKER_PORT', '8126')
-    sys.modules.pop('processor.worker', None)
+    sys.modules.pop('lazymind.processor.service.worker', None)
 
-    runpy.run_module('processor.worker', run_name='__main__')
+    runpy.run_module('lazymind.processor.service.worker', run_name='__main__')
 
     instance = _FakeDocumentProcessorWorker.instances[0]
     assert instance.started is True
@@ -153,7 +153,7 @@ def test_worker_main_starts_waits_and_registers_signals(monkeypatch):
 
 def test_worker_main_handles_keyboard_interrupt_from_wait(monkeypatch):
     from lazyllm.tools.rag import parsing_service
-    import processor.db
+    import lazymind.processor.service.db
     import threading
 
     signal_calls = []
@@ -171,11 +171,11 @@ def test_worker_main_handles_keyboard_interrupt_from_wait(monkeypatch):
             return None
 
     monkeypatch.setattr(parsing_service, 'DocumentProcessorWorker', InterruptingDocumentProcessorWorker)
-    monkeypatch.setattr(processor.db, 'require_shared_db_config', lambda service_name: {'service': service_name})
+    monkeypatch.setattr(lazymind.processor.service.db, 'require_shared_db_config', lambda service_name: {'service': service_name})
     monkeypatch.setattr(threading, 'Event', FakeEvent)
     monkeypatch.setattr(signal, 'signal', lambda sig, handler: signal_calls.append((sig, handler.__name__)))
-    sys.modules.pop('processor.worker', None)
+    sys.modules.pop('lazymind.processor.service.worker', None)
 
-    runpy.run_module('processor.worker', run_name='__main__')
+    runpy.run_module('lazymind.processor.service.worker', run_name='__main__')
 
     assert signal_calls

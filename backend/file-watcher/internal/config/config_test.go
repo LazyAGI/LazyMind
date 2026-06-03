@@ -22,9 +22,6 @@ func TestLoadResolvesRelativeBaseRootFromConfigDir(t *testing.T) {
 	if cfg.Staging.HostRoot != filepath.Join(want, "staging") {
 		t.Fatalf("Staging.HostRoot = %q", cfg.Staging.HostRoot)
 	}
-	if cfg.Snapshot.HostRoot != filepath.Join(want, "snapshots") {
-		t.Fatalf("Snapshot.HostRoot = %q", cfg.Snapshot.HostRoot)
-	}
 }
 
 func TestLoadAllowsEnvOverrideForBaseRoot(t *testing.T) {

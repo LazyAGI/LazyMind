@@ -202,6 +202,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/model_providers/selected_models", []string{}, modelprovider.GetSelectedModels)
 	handleAPI(r, "PUT", "/model_providers/selected_models", []string{}, modelprovider.SetSelectedModels)
 	handleAPI(r, "PUT", "/model_providers/selected_models/share", []string{"document.write"}, modelprovider.SetSharedModel)
+	handleAPI(r, "GET", "/model_providers/provider_groups", []string{}, modelprovider.ListUserProviderGroupsByCategory)
 	handleAPI(r, "GET", "/model_providers/verified", []string{}, modelprovider.GetVerifiedProvider)
 	handleAPI(r, "GET", "/model_providers/selected_providers", []string{}, modelprovider.GetSelectedProviders)
 	handleAPI(r, "PUT", "/model_providers/selected_providers", []string{}, modelprovider.SetSelectedProvider)

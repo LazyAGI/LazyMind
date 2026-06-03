@@ -10,7 +10,7 @@ import {
 } from "@/modules/signin/utils/formRules";
 import type { UserItem, RoleItem } from "@/api/generated/auth-client";
 
-const EMAIL_MAX_LENGTH = 100;
+const EMAIL_MAX_LENGTH = 30;
 const PASSWORD_MAX_LENGTH = 32;
 
 type EditableUserItem = UserItem & {
