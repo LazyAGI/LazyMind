@@ -198,6 +198,80 @@
   background: #f6faff;
 }
 
+.dataset-item-table {
+  .ant-table-thead > tr > th {
+    position: relative;
+    padding-top: 0;
+    padding-bottom: 0;
+    user-select: none;
+  }
+}
+
+.dataset-resizable-header-content {
+  height: 100%;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+}
+
+.dataset-column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  z-index: 2;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+
+  &::after {
+    position: absolute;
+    top: 25%;
+    right: 3px;
+    width: 1px;
+    height: 50%;
+    background: transparent;
+    content: "";
+  }
+
+  &:hover::after {
+    background: #1677ff;
+  }
+}
+
+.dataset-header-height-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: -4px;
+  left: 0;
+  z-index: 1;
+  height: 8px;
+  cursor: row-resize;
+
+  &::after {
+    position: absolute;
+    right: 16px;
+    bottom: 3px;
+    left: 16px;
+    height: 1px;
+    background: transparent;
+    content: "";
+  }
+
+  &:hover::after {
+    background: #1677ff;
+  }
+}
+
+.dataset-table-column-is-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.dataset-table-row-is-resizing {
+  cursor: row-resize;
+  user-select: none;
+}
+
 .dataset-expanded-editor {
   padding: 16px 18px 14px;
   border: 1px solid #e6eaf0;
