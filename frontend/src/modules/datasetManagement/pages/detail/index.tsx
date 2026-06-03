@@ -9,9 +9,11 @@ import type {
 import {
   Button,
   Card,
+  Checkbox,
   Empty,
   Input,
   Modal,
+  Popover,
   Select,
   Space,
   Table,
@@ -24,6 +26,7 @@ import {
   ImportOutlined,
   PlusOutlined,
   SearchOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -84,6 +87,36 @@ type ActiveEditableCell = {
   itemId: string;
   field: EditableDatasetItemField;
 } | null;
+type ConfigurableColumnKey = Exclude<ResizableColumnKey, "actions">;
+
+const CONFIGURABLE_COLUMN_OPTIONS: Array<{
+  label: string;
+  value: ConfigurableColumnKey;
+}> = [
+  { label: "问题", value: "question" },
+  { label: "问题类型", value: "question_type" },
+  { label: "标准答案", value: "ground_truth" },
+  { label: "答案要点", value: "key_points" },
+  { label: "参考上下文", value: "reference_context" },
+  { label: "参考文档", value: "reference_doc" },
+  { label: "生成依据", value: "generate_reason" },
+  { label: "来源", value: "source" },
+  { label: "更新时间", value: "updated_at" },
+];
+
+const DEFAULT_VISIBLE_COLUMN_KEYS = CONFIGURABLE_COLUMN_OPTIONS.map(
+  (option) => option.value,
+);
+
+const editableFieldColumnMap: Record<EditableDatasetItemField, ConfigurableColumnKey> = {
+  question: "question",
+  question_type: "question_type",
+  ground_truth: "ground_truth",
+  key_points: "key_points",
+  reference_context: "reference_context",
+  reference_doc: "reference_doc",
+  generate_reason: "generate_reason",
+};
 
 type ResizableHeaderCellProps = ThHTMLAttributes<HTMLTableCellElement> & {
   columnKey?: ResizableColumnKey;
@@ -222,6 +255,9 @@ export default function DatasetDetailPage() {
   const [newItemVisible, setNewItemVisible] = useState(false);
   const [columnWidths, setColumnWidths] =
     useState<Record<ResizableColumnKey, number>>(DEFAULT_COLUMN_WIDTHS);
+  const [visibleColumnKeys, setVisibleColumnKeys] = useState<ConfigurableColumnKey[]>(
+    DEFAULT_VISIBLE_COLUMN_KEYS,
+  );
   const [rowHeight, setRowHeight] = useState(DEFAULT_ROW_HEIGHT);
 
   const handleColumnResize = useCallback(
@@ -319,6 +355,15 @@ export default function DatasetDetailPage() {
       return nextDrafts;
     });
   }, [dirtyItemIds, items, newItemVisible]);
+
+  useEffect(() => {
+    if (
+      activeCell &&
+      !visibleColumnKeys.includes(editableFieldColumnMap[activeCell.field])
+    ) {
+      setActiveCell(null);
+    }
+  }, [activeCell, visibleColumnKeys]);
 
   const confirmDiscardDirty = () =>
     new Promise<boolean>((resolve) => {
@@ -565,11 +610,12 @@ export default function DatasetDetailPage() {
     );
   };
 
-  const columns = useMemo<ColumnsType<DatasetItem>>(
-    () => [
+  const columns = useMemo<ColumnsType<DatasetItem>>(() => {
+    const allColumns: ColumnsType<DatasetItem> = [
       {
         title: "问题",
         dataIndex: "question",
+        key: "question",
         width: columnWidths.question,
         onHeaderCell: () => getHeaderCellProps("question"),
         render: (_, record) => renderInlineInput(record, "question", "请输入问题"),
@@ -577,6 +623,7 @@ export default function DatasetDetailPage() {
       {
         title: "问题类型",
         dataIndex: "question_type",
+        key: "question_type",
         width: columnWidths.question_type,
         onHeaderCell: () => getHeaderCellProps("question_type"),
         render: (_, record) => renderQuestionTypeCell(record),
@@ -584,6 +631,7 @@ export default function DatasetDetailPage() {
       {
         title: "标准答案",
         dataIndex: "ground_truth",
+        key: "ground_truth",
         width: columnWidths.ground_truth,
         onHeaderCell: () => getHeaderCellProps("ground_truth"),
         render: (_, record) =>
@@ -592,6 +640,7 @@ export default function DatasetDetailPage() {
       {
         title: "答案要点",
         dataIndex: "key_points",
+        key: "key_points",
         width: columnWidths.key_points,
         onHeaderCell: () => getHeaderCellProps("key_points"),
         render: (_, record) =>
@@ -600,6 +649,7 @@ export default function DatasetDetailPage() {
       {
         title: "参考上下文",
         dataIndex: "reference_context",
+        key: "reference_context",
         width: columnWidths.reference_context,
         onHeaderCell: () => getHeaderCellProps("reference_context"),
         render: (_, record) =>
@@ -608,6 +658,7 @@ export default function DatasetDetailPage() {
       {
         title: "参考文档",
         dataIndex: "reference_doc",
+        key: "reference_doc",
         width: columnWidths.reference_doc,
         onHeaderCell: () => getHeaderCellProps("reference_doc"),
         render: (_, record) =>
@@ -616,6 +667,7 @@ export default function DatasetDetailPage() {
       {
         title: "生成依据",
         dataIndex: "generate_reason",
+        key: "generate_reason",
         width: columnWidths.generate_reason,
         onHeaderCell: () => getHeaderCellProps("generate_reason"),
         render: (_, record) =>
@@ -624,6 +676,7 @@ export default function DatasetDetailPage() {
       {
         title: "来源",
         dataIndex: "source",
+        key: "source",
         width: columnWidths.source,
         onHeaderCell: () => getHeaderCellProps("source"),
         render: (value: DatasetItemSource) => <SourceTypeTag source={value} />,
@@ -631,12 +684,14 @@ export default function DatasetDetailPage() {
       {
         title: "更新时间",
         dataIndex: "updated_at",
+        key: "updated_at",
         width: columnWidths.updated_at,
         onHeaderCell: () => getHeaderCellProps("updated_at"),
         render: (value) => formatDateTime(value),
       },
       {
         title: "操作",
+        key: "actions",
         width: columnWidths.actions,
         fixed: "right",
         onHeaderCell: () => getHeaderCellProps("actions"),
@@ -671,25 +726,55 @@ export default function DatasetDetailPage() {
           );
         },
       },
-    ],
-    [
-      columnWidths,
-      dirtyItemIds,
-      drafts,
-      activeCell,
-      getHeaderCellProps,
-      saving,
-    ],
-  );
+    ];
+
+    return allColumns.filter((column) => {
+      if (column.key === "actions") {
+        return true;
+      }
+      return visibleColumnKeys.includes(column.key as ConfigurableColumnKey);
+    });
+  }, [
+    columnWidths,
+    dirtyItemIds,
+    drafts,
+    activeCell,
+    getHeaderCellProps,
+    saving,
+    visibleColumnKeys,
+  ]);
 
   const tableScrollX = useMemo(
     () =>
-      Object.values(columnWidths).reduce((total, width) => total + width, 96),
-    [columnWidths],
+      visibleColumnKeys.reduce(
+        (total, columnKey) => total + columnWidths[columnKey],
+        columnWidths.actions + 96,
+      ),
+    [columnWidths, visibleColumnKeys],
   );
   const tableStyle = {
     "--dataset-table-row-height": `${rowHeight}px`,
   } as CSSProperties;
+  const columnSettingsContent = (
+    <div className="dataset-column-settings">
+      <div className="dataset-column-settings-header">
+        <span>选择展示列</span>
+        <Button
+          type="link"
+          size="small"
+          onClick={() => setVisibleColumnKeys(DEFAULT_VISIBLE_COLUMN_KEYS)}
+        >
+          恢复默认
+        </Button>
+      </div>
+      <Checkbox.Group
+        className="dataset-column-settings-options"
+        value={visibleColumnKeys}
+        options={CONFIGURABLE_COLUMN_OPTIONS}
+        onChange={(values) => setVisibleColumnKeys(values as ConfigurableColumnKey[])}
+      />
+    </div>
+  );
 
   return (
     <div className="dataset-page dataset-detail-page">
@@ -720,6 +805,13 @@ export default function DatasetDetailPage() {
             <Button danger icon={<DeleteOutlined />} onClick={handleBatchDelete}>
               批量删除
             </Button>
+            <Popover
+              trigger="click"
+              placement="bottomRight"
+              content={columnSettingsContent}
+            >
+              <Button icon={<SettingOutlined />}>列设置</Button>
+            </Popover>
           </Space>
         </div>
 
