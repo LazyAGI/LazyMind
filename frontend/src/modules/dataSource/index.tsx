@@ -198,6 +198,21 @@ function normalizeKnowledgeBaseName(value?: string) {
   return `${value || ""}`.trim().toLowerCase();
 }
 
+function resolveSourceTypeFromValues(
+  fallbackType: SourceType | null,
+  values: SourceFormValues,
+): SourceType | null {
+  const localPaths = normalizeLocalPathRefs(values.path);
+  const feishuTargets = normalizeFeishuTargetRefs(values.target);
+  if (localPaths.length > 0 && feishuTargets.length === 0) {
+    return "local";
+  }
+  if (feishuTargets.length > 0 && localPaths.length === 0) {
+    return "feishu";
+  }
+  return fallbackType;
+}
+
 function getDatasetDisplayName(dataset: CoreDataset) {
   return `${dataset.display_name || dataset.name || ""}`.trim();
 }
@@ -2639,23 +2654,30 @@ export default function DataSourceManagement() {
     });
   };
 
-  const validateConnectionBeforeSave = () => {
-    if (!selectedType) {
+  const validateConnectionBeforeSave = (
+    sourceType: SourceType | null,
+    saveMode: DataSourceSaveMode,
+  ) => {
+    if (!sourceType) {
       message.warning(t("admin.dataSourceSelectTypeFirst"));
       return false;
     }
 
-    if (isCloudType(selectedType) && !isFeishuSetupReady) {
+    if (isCloudType(sourceType) && !isFeishuSetupReady) {
       message.warning(t("admin.dataSourceFeishuCredentialFirst"));
       return false;
     }
 
-    if (isCloudType(selectedType)) {
+    if (isCloudType(sourceType)) {
       if (!oauthConnection?.connectionId) {
         message.warning(t("admin.dataSourceOauthRequiredBeforeSave"));
         return false;
       }
 
+      return true;
+    }
+
+    if (saveMode === "create") {
       return true;
     }
 
@@ -2965,7 +2987,7 @@ export default function DataSourceManagement() {
   };
 
   const handleSave = async (saveMode: DataSourceSaveMode = "createAndSync") => {
-    if (!selectedType || wizardSaving) {
+    if (wizardSaving) {
       return;
     }
 
@@ -2983,6 +3005,12 @@ export default function DataSourceManagement() {
       }
 
       const values = form.getFieldsValue(true);
+      const effectiveSourceType = resolveSourceTypeFromValues(selectedType, values);
+
+      if (!effectiveSourceType) {
+        message.warning(t("admin.dataSourceSelectTypeFirst"));
+        return;
+      }
 
       if (
         wizardMode !== "edit" &&
@@ -2991,11 +3019,14 @@ export default function DataSourceManagement() {
         return;
       }
 
-      if (wizardMode !== "edit" && !validateConnectionBeforeSave()) {
+      if (
+        wizardMode !== "edit" &&
+        !validateConnectionBeforeSave(effectiveSourceType, saveMode)
+      ) {
         return;
       }
 
-      if (selectedType === "local") {
+      if (effectiveSourceType === "local") {
         await handleSaveLocalSource(values, saveMode);
         return;
       }
