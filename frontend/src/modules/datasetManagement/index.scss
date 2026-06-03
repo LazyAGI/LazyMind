@@ -239,18 +239,46 @@
 
   .ant-table-thead > tr > th {
     position: relative;
-    height: var(--dataset-table-header-height, 44px);
     padding-top: 0;
     padding-bottom: 0;
     user-select: none;
   }
 
-  .ant-table-thead > tr > th::before {
-    height: calc(var(--dataset-table-header-height, 44px) - 16px) !important;
-  }
+  .ant-table-tbody > tr.ant-table-row.dataset-resizable-row {
+    position: relative;
 
-  .ant-table-thead > tr > th:hover .dataset-header-height-resize-handle::after {
-    background: #93c5fd;
+    > td {
+      height: var(--dataset-table-row-height, 64px);
+      padding-top: 0;
+      padding-bottom: 0;
+    }
+
+    > td {
+      position: relative;
+    }
+
+    > td::after {
+      position: absolute;
+      right: 0;
+      bottom: -1px;
+      left: 0;
+      z-index: 3;
+      height: 10px;
+      cursor: row-resize;
+      content: "";
+    }
+
+    &:hover > td::before {
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 2;
+      height: 2px;
+      border-radius: 999px;
+      background: #93c5fd;
+      content: "";
+    }
   }
 
   .ant-table-tbody > tr.ant-table-row.dataset-resizable-row {
@@ -367,31 +395,6 @@
     right: 3px;
     width: 1px;
     height: 50%;
-    background: transparent;
-    content: "";
-  }
-
-  &:hover::after {
-    background: #1677ff;
-  }
-}
-
-.dataset-header-height-resize-handle {
-  position: absolute;
-  right: 0;
-  bottom: -5px;
-  left: 0;
-  z-index: 3;
-  height: 10px;
-  cursor: row-resize;
-
-  &::after {
-    position: absolute;
-    right: 16px;
-    bottom: 4px;
-    left: 16px;
-    height: 2px;
-    border-radius: 999px;
     background: transparent;
     content: "";
   }
