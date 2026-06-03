@@ -1,4 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type {
+  Key,
+  MouseEvent as ReactMouseEvent,
+  ThHTMLAttributes,
+} from "react";
 import {
   Button,
   Card,
@@ -47,6 +52,86 @@ import "../../index.scss";
 
 const { Paragraph } = Typography;
 const NEW_ITEM_ID = "__new_dataset_item__";
+const MIN_COLUMN_WIDTH = 88;
+const MIN_HEADER_HEIGHT = 40;
+const MAX_HEADER_HEIGHT = 96;
+const DEFAULT_HEADER_HEIGHT = 44;
+const DEFAULT_COLUMN_WIDTHS = {
+  question: 240,
+  question_type: 130,
+  ground_truth: 240,
+  reference_doc: 160,
+  source: 100,
+  updated_at: 150,
+  actions: 120,
+};
+
+type ResizableColumnKey = keyof typeof DEFAULT_COLUMN_WIDTHS;
+
+type ResizableHeaderCellProps = ThHTMLAttributes<HTMLTableCellElement> & {
+  columnKey?: ResizableColumnKey;
+  columnWidth?: number;
+  headerHeight?: number;
+  onResizeColumn?: (
+    columnKey: ResizableColumnKey,
+    startX: number,
+    startWidth: number,
+  ) => void;
+  onResizeHeader?: (startY: number, startHeight: number) => void;
+};
+
+function ResizableHeaderCell({
+  columnKey,
+  columnWidth,
+  headerHeight,
+  onResizeColumn,
+  onResizeHeader,
+  children,
+  style,
+  ...rest
+}: ResizableHeaderCellProps) {
+  const handleColumnResizeStart = (event: ReactMouseEvent<HTMLSpanElement>) => {
+    if (!columnKey || !columnWidth || !onResizeColumn) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    onResizeColumn(columnKey, event.clientX, columnWidth);
+  };
+
+  const handleHeaderResizeStart = (event: ReactMouseEvent<HTMLSpanElement>) => {
+    if (!headerHeight || !onResizeHeader) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    onResizeHeader(event.clientY, headerHeight);
+  };
+
+  return (
+    <th {...rest} style={{ ...style, height: headerHeight }}>
+      <div className="dataset-resizable-header-content">{children}</div>
+      {columnKey ? (
+        <span
+          aria-hidden="true"
+          className="dataset-column-resize-handle"
+          onMouseDown={handleColumnResizeStart}
+        />
+      ) : null}
+      <span
+        aria-hidden="true"
+        className="dataset-header-height-resize-handle"
+        onMouseDown={handleHeaderResizeStart}
+      />
+    </th>
+  );
+}
+
+const tableComponents = {
+  header: {
+    cell: ResizableHeaderCell,
+  },
+};
 
 export default function DatasetDetailPage() {
   const navigate = useNavigate();
@@ -59,11 +144,69 @@ export default function DatasetDetailPage() {
   const [questionType, setQuestionType] = useState<string>();
   const [source, setSource] = useState<DatasetItemSource>();
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
-  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
   const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [newItemVisible, setNewItemVisible] = useState(false);
+  const [columnWidths, setColumnWidths] =
+    useState<Record<ResizableColumnKey, number>>(DEFAULT_COLUMN_WIDTHS);
+  const [headerHeight, setHeaderHeight] = useState(DEFAULT_HEADER_HEIGHT);
+
+  const handleColumnResize = useCallback(
+    (columnKey: ResizableColumnKey, startX: number, startWidth: number) => {
+      const handleMouseMove = (event: MouseEvent) => {
+        const nextWidth = Math.max(
+          MIN_COLUMN_WIDTH,
+          Math.round(startWidth + event.clientX - startX),
+        );
+        setColumnWidths((current) => ({
+          ...current,
+          [columnKey]: nextWidth,
+        }));
+      };
+      const handleMouseUp = () => {
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener("mouseup", handleMouseUp);
+        document.body.classList.remove("dataset-table-column-is-resizing");
+      };
+
+      document.body.classList.add("dataset-table-column-is-resizing");
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+    },
+    [],
+  );
+
+  const handleHeaderResize = useCallback((startY: number, startHeight: number) => {
+    const handleMouseMove = (event: MouseEvent) => {
+      const nextHeight = Math.min(
+        MAX_HEADER_HEIGHT,
+        Math.max(MIN_HEADER_HEIGHT, Math.round(startHeight + event.clientY - startY)),
+      );
+      setHeaderHeight(nextHeight);
+    };
+    const handleMouseUp = () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.classList.remove("dataset-table-row-is-resizing");
+    };
+
+    document.body.classList.add("dataset-table-row-is-resizing");
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  }, []);
+
+  const getHeaderCellProps = useCallback(
+    (columnKey: ResizableColumnKey) => ({
+      columnKey,
+      columnWidth: columnWidths[columnKey],
+      headerHeight,
+      onResizeColumn: handleColumnResize,
+      onResizeHeader: handleHeaderResize,
+    }) as ResizableHeaderCellProps,
+    [columnWidths, handleColumnResize, handleHeaderResize, headerHeight],
+  );
 
   const loadDetail = async () => {
     if (!datasetId) {
@@ -242,44 +385,53 @@ export default function DatasetDetailPage() {
       {
         title: "问题",
         dataIndex: "question",
+        width: columnWidths.question,
         ellipsis: true,
+        onHeaderCell: () => getHeaderCellProps("question"),
         render: (value) => <Paragraph ellipsis={{ rows: 1 }}>{value || "-"}</Paragraph>,
       },
       {
         title: "问题类型",
         dataIndex: "question_type",
-        width: 130,
+        width: columnWidths.question_type,
+        onHeaderCell: () => getHeaderCellProps("question_type"),
         render: (value) => value || "-",
       },
       {
         title: "标准答案",
         dataIndex: "ground_truth",
+        width: columnWidths.ground_truth,
         ellipsis: true,
+        onHeaderCell: () => getHeaderCellProps("ground_truth"),
         render: (value) => <Paragraph ellipsis={{ rows: 1 }}>{value || "-"}</Paragraph>,
       },
       {
         title: "参考文档",
         dataIndex: "reference_doc",
-        width: 160,
+        width: columnWidths.reference_doc,
         ellipsis: true,
+        onHeaderCell: () => getHeaderCellProps("reference_doc"),
         render: (value) => value || "-",
       },
       {
         title: "来源",
         dataIndex: "source",
-        width: 100,
+        width: columnWidths.source,
+        onHeaderCell: () => getHeaderCellProps("source"),
         render: (value: DatasetItemSource) => <SourceTypeTag source={value} />,
       },
       {
         title: "更新时间",
         dataIndex: "updated_at",
-        width: 150,
+        width: columnWidths.updated_at,
+        onHeaderCell: () => getHeaderCellProps("updated_at"),
         render: (value) => formatDateTime(value),
       },
       {
         title: "操作",
-        width: 120,
+        width: columnWidths.actions,
         fixed: "right",
+        onHeaderCell: () => getHeaderCellProps("actions"),
         render: (_, record) =>
           record.id === NEW_ITEM_ID ? null : (
             <Button
@@ -296,7 +448,13 @@ export default function DatasetDetailPage() {
           ),
       },
     ],
-    [datasetId],
+    [columnWidths, datasetId, getHeaderCellProps],
+  );
+
+  const tableScrollX = useMemo(
+    () =>
+      Object.values(columnWidths).reduce((total, width) => total + width, 96),
+    [columnWidths],
   );
 
   const expandedRowRender = (record: DatasetItem) => (
@@ -386,6 +544,7 @@ export default function DatasetDetailPage() {
           rowKey="id"
           className="dataset-item-table"
           loading={loading}
+          components={tableComponents}
           columns={columns}
           dataSource={dataSource}
           locale={{
@@ -426,7 +585,7 @@ export default function DatasetDetailPage() {
               void handleExpandItem(record.id);
             },
           })}
-          scroll={{ x: 1080 }}
+          scroll={{ x: tableScrollX }}
           pagination={{
             current: pagination.current,
             pageSize: pagination.pageSize,
