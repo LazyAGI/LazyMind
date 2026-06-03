@@ -47,7 +47,6 @@ class UserItem(BaseModel):
     role_id: str  # UUID string
     role_name: str
     is_bootstrap_admin: bool = False
-    is_system_admin: bool = False
 
 
 class UserListResponse(BaseModel):
@@ -71,7 +70,6 @@ class UserDetailResponse(BaseModel):
     role_id: str
     role_name: str
     is_bootstrap_admin: bool = False
-    is_system_admin: bool = False
 
 
 class OkResponse(BaseModel):
