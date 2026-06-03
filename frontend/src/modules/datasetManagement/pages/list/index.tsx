@@ -112,7 +112,7 @@ export default function DatasetListPage() {
         await updateDataset(editingDataset.id, {
           name: values.name,
           description: values.description,
-          knowledge_base_ids: values.knowledge_base_ids,
+          knowledge_base_id: values.knowledge_base_id,
         });
         message.success("数据集已更新");
         setFormModalOpen(false);
@@ -123,7 +123,7 @@ export default function DatasetListPage() {
       const created = await createDataset({
         name: values.name,
         description: values.description,
-        knowledge_base_ids: values.knowledge_base_ids,
+        knowledge_base_id: values.knowledge_base_id,
       });
 
       if (values.create_method === "upload") {
