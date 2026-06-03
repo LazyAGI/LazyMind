@@ -152,7 +152,35 @@ export function inferSourceKind(source?: ScanV2Source | null, binding?: ScanV2Bi
 }
 
 export function getBindingSchedule(binding?: ScanV2Binding | null) {
-  return `${binding?.schedule_expr || binding?.scheduleExpr || ""}`.trim();
+  const legacyExpr = `${binding?.schedule_expr || binding?.scheduleExpr || ""}`.trim();
+  if (legacyExpr) {
+    return legacyExpr;
+  }
+
+  const policy = binding?.schedule_policy || binding?.schedulePolicy;
+  const firstRule = Array.isArray(policy?.rules) ? policy.rules[0] : null;
+  const time = `${firstRule?.time || ""}`.trim();
+  const days = Array.isArray(firstRule?.days) ? firstRule.days : [];
+  if (!time || days.length === 0) {
+    return "";
+  }
+
+  const dayMap: Record<string, string[]> = {
+    everyday: ["1", "2", "3", "4", "5", "6", "7"],
+    workday: ["1", "2", "3", "4", "5"],
+    non_workday: ["6", "7"],
+    mon: ["1"],
+    tue: ["2"],
+    wed: ["3"],
+    thu: ["4"],
+    fri: ["5"],
+    sat: ["6"],
+    sun: ["7"],
+  };
+  const normalizedDays = Array.from(
+    new Set(days.flatMap((day: string) => dayMap[`${day}`] || [])),
+  ).sort((left, right) => Number(left) - Number(right));
+  return normalizedDays.length > 0 ? `weekly:${normalizedDays.join(",")}@${time}` : "";
 }
 
 export function getBindingLastError(binding?: ScanV2Binding | null) {

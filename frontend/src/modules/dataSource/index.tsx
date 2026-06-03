@@ -130,6 +130,15 @@ const LOCAL_PATH_CACHE_ROOT_KEY = "__root__";
 const FEISHU_TARGET_CACHE_ROOT_KEY = "__root__";
 const DATA_SOURCE_LIST_DEFAULT_PAGE_SIZE = 10;
 const DEFAULT_SCHEDULE_WEEKDAYS = ["1", "2", "3", "4", "5", "6", "7"];
+const SCHEDULE_WEEKDAY_API_MAP: Record<string, string> = {
+  "1": "mon",
+  "2": "tue",
+  "3": "wed",
+  "4": "thu",
+  "5": "fri",
+  "6": "sat",
+  "7": "sun",
+};
 type DataSourceView = "assets" | "connectors";
 type FeishuSetupIntent = "create" | "auth" | null;
 type DataSourceSaveMode = "create" | "createAndSync";
@@ -165,6 +174,24 @@ function normalizeScheduleWeekdays(scheduleWeekdays?: string[]) {
     return DEFAULT_SCHEDULE_WEEKDAYS;
   }
   return uniqueDays.sort((left, right) => Number(left) - Number(right));
+}
+
+function buildSchedulePolicy(scheduleWeekdays?: string[], scheduleTime?: string) {
+  const weekdays = normalizeScheduleWeekdays(scheduleWeekdays);
+  const days =
+    weekdays.length === DEFAULT_SCHEDULE_WEEKDAYS.length
+      ? ["everyday"]
+      : weekdays.map((day) => SCHEDULE_WEEKDAY_API_MAP[day]).filter(Boolean);
+  return {
+    timezone: "Asia/Shanghai",
+    calendar: "weekly",
+    rules: [
+      {
+        days,
+        time: normalizeScheduleTime(scheduleTime),
+      },
+    ],
+  };
 }
 
 function normalizeKnowledgeBaseName(value?: string) {
@@ -423,14 +450,6 @@ function parseFeishuScheduleExpr(expr?: string) {
   };
 }
 
-function buildFeishuScheduleExpr(scheduleWeekdays?: string[], scheduleTime?: string) {
-  return buildReconcileSchedule(scheduleWeekdays, scheduleTime);
-}
-
-function buildFeishuManualScheduleExpr() {
-  return "manual";
-}
-
 function normalizeFeishuTargetType(
   targetType?: string,
   targetRef?: string,
@@ -617,12 +636,6 @@ function parseReconcileSchedule(expr?: string): {
     };
   }
   return null;
-}
-
-function buildReconcileSchedule(scheduleWeekdays?: string[], scheduleTime?: string): string {
-  const time = normalizeScheduleTime(scheduleTime);
-  const weekdays = normalizeScheduleWeekdays(scheduleWeekdays);
-  return `weekly:${weekdays.join(",")}@${time}`;
 }
 
 function getScheduleWeekdaysLabel(scheduleWeekdays: string[], t: TFunction): string {
@@ -2711,13 +2724,16 @@ export default function DataSourceManagement() {
     }
   };
 
-  const handleSaveLocalSource = async (values: SourceFormValues) => {
+  const handleSaveLocalSource = async (
+    values: SourceFormValues,
+    saveMode: DataSourceSaveMode,
+  ) => {
     const rootPaths = normalizeLocalPathRefs(values.path);
     const sourceName = `${values.knowledgeBase || getSourceTypeTitle("local", t)}`.trim();
     const isScheduled = (values.syncMode || "scheduled") === "scheduled";
-    const reconcileSchedule = isScheduled
-      ? buildReconcileSchedule(values.scheduleWeekdays, values.scheduleTime)
-      : "manual";
+    const schedulePolicy = isScheduled
+      ? buildSchedulePolicy(values.scheduleWeekdays, values.scheduleTime)
+      : undefined;
     const currentLocalSource =
       editingId && selectedType === "local"
         ? sources.find((item) => item.id === editingId && item.type === "local")
@@ -2739,8 +2755,7 @@ export default function DataSourceManagement() {
       target_type: "local_path",
       target_ref: targetRef,
       sync_mode: isScheduled ? "scheduled" : "manual",
-      schedule_expr: isScheduled ? reconcileSchedule : undefined,
-      schedule_tz: "Asia/Shanghai",
+      schedule_policy: schedulePolicy,
       agent_id: selectedAgent?.agent_id || validatedAgentId || currentLocalSource?.agentId,
       provider_options: {},
     });
@@ -2776,6 +2791,17 @@ export default function DataSourceManagement() {
           },
         });
         datasetIdForLocalSource = createSourceResponse.data.source.dataset_id || "";
+        const sourceId = createSourceResponse.data.source.source_id || "";
+        if (saveMode === "createAndSync" && sourceId) {
+          await client.triggerSourceSync({
+            sourceId,
+            triggerSourceSyncRequest: {
+              request_id: createScanRequestId("local-sync"),
+              scope_type: "full",
+              scope_ref: {},
+            },
+          });
+        }
       }
 
       if (localScanChatEnabled && datasetIdForLocalSource) {
@@ -2843,15 +2869,14 @@ export default function DataSourceManagement() {
 
     try {
       let sourceId = currentFeishuSource?.id || "";
-      const scheduleExpr =
+      const schedulePolicy =
         values.syncMode === "scheduled"
-          ? buildFeishuScheduleExpr(values.scheduleWeekdays, values.scheduleTime)
-          : buildFeishuManualScheduleExpr();
+          ? buildSchedulePolicy(values.scheduleWeekdays, values.scheduleTime)
+          : undefined;
       const bindingRequest = {
         connector_type: "feishu",
         sync_mode: values.syncMode === "scheduled" ? "scheduled" : "manual",
-        schedule_expr: scheduleExpr,
-        schedule_tz: "Asia/Shanghai",
+        schedule_policy: schedulePolicy,
         auth_connection_id: authConnectionId,
         provider_options: {
           include_patterns: FEISHU_INCLUDE_PATTERNS,
@@ -2971,7 +2996,7 @@ export default function DataSourceManagement() {
       }
 
       if (selectedType === "local") {
-        await handleSaveLocalSource(values);
+        await handleSaveLocalSource(values, saveMode);
         return;
       }
       await handleSaveFeishuSource(values, saveMode);
