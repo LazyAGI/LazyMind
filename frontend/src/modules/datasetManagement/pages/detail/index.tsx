@@ -80,6 +80,10 @@ type EditableDatasetItemField =
   | "reference_context"
   | "reference_doc"
   | "generate_reason";
+type ActiveEditableCell = {
+  itemId: string;
+  field: EditableDatasetItemField;
+} | null;
 
 type ResizableHeaderCellProps = ThHTMLAttributes<HTMLTableCellElement> & {
   columnKey?: ResizableColumnKey;
@@ -213,6 +217,7 @@ export default function DatasetDetailPage() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
   const [drafts, setDrafts] = useState<Record<string, DatasetItemFormValues>>({});
   const [dirtyItemIds, setDirtyItemIds] = useState<string[]>([]);
+  const [activeCell, setActiveCell] = useState<ActiveEditableCell>(null);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [newItemVisible, setNewItemVisible] = useState(false);
   const [columnWidths, setColumnWidths] =
@@ -338,6 +343,7 @@ export default function DatasetDetailPage() {
     }
     setDirtyItemIds([]);
     setNewItemVisible(false);
+    setActiveCell(null);
     setPagination((current) => ({ ...current, current: 1 }));
     await loadDetail();
   };
@@ -350,6 +356,7 @@ export default function DatasetDetailPage() {
     setNewItemVisible(true);
     setDirtyItemIds([NEW_ITEM_ID]);
     setDrafts({ [NEW_ITEM_ID]: createItemDraft() });
+    setActiveCell({ itemId: NEW_ITEM_ID, field: "question" });
     setPagination((current) => ({ ...current, current: 1 }));
   };
 
@@ -373,12 +380,16 @@ export default function DatasetDetailPage() {
   const handleCancelItem = (item: DatasetItem) => {
     if (item.id === NEW_ITEM_ID) {
       setNewItemVisible(false);
+      setActiveCell(null);
       setDirtyItemIds((current) => current.filter((id) => id !== NEW_ITEM_ID));
       setDrafts((current) => {
         const { [NEW_ITEM_ID]: _newItemDraft, ...rest } = current;
         return rest;
       });
       return;
+    }
+    if (activeCell?.itemId === item.id) {
+      setActiveCell(null);
     }
     setDrafts((current) => ({
       ...current,
@@ -399,6 +410,7 @@ export default function DatasetDetailPage() {
         await createDatasetItem(datasetId, values);
         message.success("样本已新增");
         setNewItemVisible(false);
+        setActiveCell(null);
       } else {
         const currentItem = items.find((item) => item.id === itemId);
         await updateDatasetItem(
@@ -407,6 +419,9 @@ export default function DatasetDetailPage() {
           currentItem ? mergeHiddenItemFields(currentItem, values) : values,
         );
         message.success("样本已保存");
+      }
+      if (activeCell?.itemId === itemId) {
+        setActiveCell(null);
       }
       setDirtyItemIds((current) => current.filter((id) => id !== itemId));
       await loadDetail();
@@ -481,32 +496,74 @@ export default function DatasetDetailPage() {
     return [newItem, ...items];
   }, [datasetId, items, newItemVisible]);
 
+  const renderCellDisplay = (
+    record: DatasetItem,
+    field: EditableDatasetItemField,
+    placeholder: string,
+  ) => {
+    const value = drafts[record.id]?.[field] || "";
+    return (
+      <button
+        type="button"
+        className="dataset-inline-display"
+        onClick={() => setActiveCell({ itemId: record.id, field })}
+      >
+        {value || <span className="dataset-inline-placeholder">{placeholder}</span>}
+      </button>
+    );
+  };
+
   const renderInlineInput = (
     record: DatasetItem,
     field: EditableDatasetItemField,
     placeholder: string,
-  ) => (
-    <Input
-      className="dataset-inline-input"
-      value={drafts[record.id]?.[field] || ""}
-      placeholder={placeholder}
-      onChange={(event) => handleDraftChange(record, field, event.target.value)}
-    />
-  );
+  ) => {
+    if (activeCell?.itemId !== record.id || activeCell.field !== field) {
+      return renderCellDisplay(record, field, placeholder);
+    }
+    return (
+      <Input
+        autoFocus
+        className="dataset-inline-input"
+        value={drafts[record.id]?.[field] || ""}
+        placeholder={placeholder}
+        onChange={(event) => handleDraftChange(record, field, event.target.value)}
+      />
+    );
+  };
 
   const renderInlineTextArea = (
     record: DatasetItem,
     field: EditableDatasetItemField,
     placeholder: string,
-  ) => (
-    <TextArea
-      className="dataset-inline-textarea"
-      value={drafts[record.id]?.[field] || ""}
-      placeholder={placeholder}
-      autoSize={{ minRows: 1, maxRows: 4 }}
-      onChange={(event) => handleDraftChange(record, field, event.target.value)}
-    />
-  );
+  ) => {
+    if (activeCell?.itemId !== record.id || activeCell.field !== field) {
+      return renderCellDisplay(record, field, placeholder);
+    }
+    return (
+      <TextArea
+        autoFocus
+        className="dataset-inline-textarea"
+        value={drafts[record.id]?.[field] || ""}
+        placeholder={placeholder}
+        autoSize={{ minRows: 1, maxRows: 4 }}
+        onChange={(event) => handleDraftChange(record, field, event.target.value)}
+      />
+    );
+  };
+
+  const renderQuestionTypeCell = (record: DatasetItem) => {
+    if (activeCell?.itemId !== record.id || activeCell.field !== "question_type") {
+      return renderCellDisplay(record, "question_type", "请选择问题类型");
+    }
+    return (
+      <QuestionTypeSelect
+        value={drafts[record.id]?.question_type || undefined}
+        placeholder="问题类型"
+        onChange={(value) => handleDraftChange(record, "question_type", value)}
+      />
+    );
+  };
 
   const columns = useMemo<ColumnsType<DatasetItem>>(
     () => [
@@ -522,13 +579,7 @@ export default function DatasetDetailPage() {
         dataIndex: "question_type",
         width: columnWidths.question_type,
         onHeaderCell: () => getHeaderCellProps("question_type"),
-        render: (_, record) => (
-          <QuestionTypeSelect
-            value={drafts[record.id]?.question_type || undefined}
-            placeholder="问题类型"
-            onChange={(value) => handleDraftChange(record, "question_type", value)}
-          />
-        ),
+        render: (_, record) => renderQuestionTypeCell(record),
       },
       {
         title: "标准答案",
@@ -625,6 +676,7 @@ export default function DatasetDetailPage() {
       columnWidths,
       dirtyItemIds,
       drafts,
+      activeCell,
       getHeaderCellProps,
       saving,
     ],
@@ -745,6 +797,7 @@ export default function DatasetDetailPage() {
               }
               setDirtyItemIds([]);
               setNewItemVisible(false);
+              setActiveCell(null);
               setPagination({ current, pageSize });
             },
           }}

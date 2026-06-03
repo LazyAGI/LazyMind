@@ -238,6 +238,34 @@
   resize: none;
 }
 
+.dataset-inline-display {
+  width: 100%;
+  min-height: 32px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #344054;
+  cursor: pointer;
+  display: -webkit-box;
+  line-height: 1.5;
+  overflow: hidden;
+  padding: 4px 8px;
+  text-align: left;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+
+  &:hover,
+  &:focus-visible {
+    background: #eef5ff;
+    color: #1677ff;
+    outline: none;
+  }
+}
+
+.dataset-inline-placeholder {
+  color: #98a2b3;
+}
+
 .dataset-resizable-header-content {
   height: 100%;
   min-height: 40px;
