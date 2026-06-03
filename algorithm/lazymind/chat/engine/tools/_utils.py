@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any, Dict
 
 
 def truncate_text(text: Any, max_len: int) -> str:
