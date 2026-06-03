@@ -8,14 +8,8 @@ from lazyllm.tools.rag.doc_impl import NodeGroupType
 from lazyllm.tools.rag.parsing_service import DocumentProcessor
 from lazyllm.tools.rag.readers import PaddleOCRPDFReader
 
-from lazymind.model_config import (
-    get_embed_keys,
-    get_embed_index_kwargs,
-    get_dynamic_role_slot_map,
-    get_image_embed_key,
-    get_text_embed_keys,
-)
-from lazymind.config import config as _cfg
+from lazymind.model_config import get_dynamic_role_slot_map
+from lazymind.config import EMBED_IMAGE, EMBED_INDEX_KWARGS, EMBED_KEYS, EMBED_MAIN, config as _cfg
 from lazymind.parsing.engine.readers import ImageEmbReader, VideoReader
 from lazymind.parsing.engine.transform import GeneralParser, LineSplitter, NodeParser
 
@@ -142,7 +136,7 @@ def reset_stores() -> None:
         return _pat.sub('_', f'col_{group}'.lower()).strip('_')
 
     activated_groups = ['block', 'line', 'image', '__lazyllm_root__', '__lazyllm_image__']
-    store_conf = _build_store_config(get_embed_index_kwargs())
+    store_conf = _build_store_config(EMBED_INDEX_KWARGS)
 
     milvus_cfg = (store_conf.get('vector_store') or {}).get('kwargs', {})
     opensearch_cfg = (store_conf.get('segment_store') or {}).get('kwargs', {})
@@ -214,15 +208,12 @@ def drop_lazyllm_tables() -> None:
 def build_document() -> Document:
     processor_url = _cfg['document_processor_url']
     server_port = get_algo_server_port()
-    embed_keys = get_embed_keys()
-    if not embed_keys:
-        raise ValueError('At least one embed role must be configured in the model config.')
-    embed = {k: AutoModel(model=k) for k in embed_keys}
+    embed = {k: AutoModel(model=k) for k in EMBED_KEYS}
 
     # Current LazyLLM expects store_conf on DocumentProcessor when using DocumentProcessor,
     # while Document receives only the remote processor manager.
     # Document validates this manager/store_conf combination before wiring DocImpl.
-    processor = DocumentProcessor(url=processor_url, store_conf=_build_store_config(get_embed_index_kwargs()))
+    processor = DocumentProcessor(url=processor_url, store_conf=_build_store_config(EMBED_INDEX_KWARGS))
 
     docs = Document(
         dataset_path=None,
@@ -247,16 +238,13 @@ def build_document() -> Document:
     docs.create_node_group(name='line', display_name='sentence slice',
                            group_type=NodeGroupType.CHUNK, transform=LineSplitter, parent='block')
 
-    text_embed_keys = get_text_embed_keys() or embed_keys
-    image_embed_key = get_image_embed_key()
-    if image_embed_key:
-        # Only source=dynamic embed_image needs lazy mode; static configs are always ready.
-        if image_embed_key in get_dynamic_role_slot_map():
-            from lazyllm.tools.rag.store import LAZY_IMAGE_GROUP
-            docs._impl.node_groups[LAZY_IMAGE_GROUP]['lazy_mode'] = 'embed'
-        docs.activate_group('image', embed_keys=image_embed_key)
-    docs.activate_group('block', embed_keys=text_embed_keys)
-    docs.activate_group('line', embed_keys=text_embed_keys)
+    # Only source=dynamic embed_image needs lazy mode; static configs are always ready.
+    if EMBED_IMAGE in get_dynamic_role_slot_map():
+        from lazyllm.tools.rag.store import LAZY_IMAGE_GROUP
+        docs._impl.node_groups[LAZY_IMAGE_GROUP]['lazy_mode'] = 'embed'
+    docs.activate_group('image', embed_keys=EMBED_IMAGE)
+    docs.activate_group('block', embed_keys=[EMBED_MAIN])
+    docs.activate_group('line', embed_keys=[EMBED_MAIN])
     docs._manager._kbs = lazyllm.ServerModule(
         _quiet_trace(docs._manager._kbs),
         port=server_port,

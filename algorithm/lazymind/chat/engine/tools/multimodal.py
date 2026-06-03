@@ -10,7 +10,6 @@ from lazyllm.components.formatter import encode_query_with_filepaths
 from lazymind.chat.engine.prompts import VISION_EXTRACT_DEFAULT_INSTRUCTION
 from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
 from lazymind.chat.service.utils import resolve_local_image_path
-from lazymind.model_config import get_config_path
 
 
 class MultimodalToolGroup:
@@ -49,7 +48,7 @@ class MultimodalToolGroup:
         agentic_config = lazyllm.globals['agentic_config']
         priority = int(agentic_config.get('priority', 0) or 0)
 
-        vlm = AutoModel(model='vlm', config=get_config_path())
+        vlm = AutoModel(model='vlm')
         out = vlm(
             encoded_query,
             stream_output=False,

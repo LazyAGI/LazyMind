@@ -63,6 +63,7 @@ def ppl_search(
     retriever_topk: int = 20,
     rerank_topk: int = 20,
     k_max: int = 10,
+    image_topk: int = 3,
 ):
     adaptive_k = AdaptiveKComponent(
         bias=2,
@@ -95,5 +96,5 @@ def ppl_search(
     if (payload or {}).get('files'):
         return text_nodes
 
-    image_nodes = image_retriever(payload['query'], filters=payload.get('filters') or {})
+    image_nodes = image_retriever(payload['query'], filters=payload.get('filters') or {}, topk=image_topk)
     return list(text_nodes or []) + list(image_nodes or [])

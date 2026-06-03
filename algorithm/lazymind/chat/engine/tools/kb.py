@@ -1,8 +1,9 @@
 from typing import Any, Dict, List, Optional
 
 import lazyllm
+from lazyllm import AutoModel
+from lazyllm.tools.rag import Reranker, Retriever, TempDocRetriever
 
-from lazymind import model_config
 from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
 from lazymind.chat.engine.tools._utils import (
     iter_lookup_ids,
@@ -12,9 +13,7 @@ from lazymind.chat.engine.tools._utils import (
     truncate_text,
 )
 from lazymind.chat.engine.tools.algo import ppl_search
-from lazymind.chat.engine.tools.infra import kb_document_provider, kb_reranker_factory, kb_retriever_factory
 from lazymind.chat.engine.tools.infra import (
-    get_image_retriever,
     opensearch_search,
     resolve_index,
     term_filter,
@@ -25,9 +24,34 @@ from lazymind.chat.service.utils import (
     local_path_from_static_file_url,
     static_file_url_from_any,
 )
+from lazymind.config import EMBED_IMAGE, EMBED_MAIN, config as _cfg
+from lazymind.model_config import get_dynamic_role_slot_map
+
 _MAX_TEXT_LEN = 1200
 _MAX_RESULT_ITEMS = 50
-_DEFAULT_KB_DOCUMENT = kb_document_provider.get_default_document()
+_DEFAULT_KB_URL = _cfg['agentic_kb_url']
+_DEFAULT_KB_NAME = _cfg['agentic_kb_name']
+_DEFAULT_KB_DOCUMENT = lazyllm.Document(url=f'{_DEFAULT_KB_URL}/_call', name=_DEFAULT_KB_NAME)
+
+
+def build_default_retriever_configs() -> List[dict]:
+    return [
+        {'group_name': 'line', 'embed_keys': [EMBED_MAIN], 'target': 'block'},
+        {'group_name': 'block', 'embed_keys': [EMBED_MAIN]},
+    ]
+
+
+def _is_reranker_enabled() -> bool:
+    role_slots = get_dynamic_role_slot_map()
+    if 'reranker' not in role_slots:
+        return True
+
+    try:
+        cfg = lazyllm.globals.config['dynamic_model_configs']
+    except Exception:
+        cfg = None
+    role_cfg = cfg.get('reranker') if isinstance(cfg, dict) else None
+    return isinstance(role_cfg, dict) and bool(role_cfg.get(role_slots['reranker']))
 
 
 def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
@@ -169,23 +193,30 @@ def _annotate_result_citations(result: Any) -> Any:
 
 class KBToolGroup:
     __public_apis__ = ['kb_search', 'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search']
+    _retrievers = None
+    _reranker = None
+    _image_retriever = None
 
     def __init__(self, document: Any = None) -> None:
         self._document = document or _DEFAULT_KB_DOCUMENT
-        self._retrievers = None
-        self._reranker = None
-        self._image_embed_key = None
-        self._image_retriever = None
 
     def _ensure_search_runtime(self) -> None:
-        if self._retrievers is not None:
+        cls = type(self)
+        if cls._retrievers is not None:
             return
-        self._retrievers = kb_retriever_factory.get_kb_retrievers(self._document)
-        self._reranker = kb_reranker_factory.get_reranker()
-        self._image_embed_key = model_config.get_image_embed_key()
-        self._image_retriever = (
-            get_image_retriever(self._document, self._image_embed_key, 3)
-            if self._image_embed_key else None
+        cls._retrievers = [
+            Retriever(self._document, **cfg)
+            for cfg in build_default_retriever_configs()
+        ]
+        cls._reranker = (
+            Reranker('ModuleReranker', model=AutoModel(model='reranker'))
+            if _is_reranker_enabled()
+            else None
+        )
+        cls._image_retriever = Retriever(
+            self._document,
+            group_name='image',
+            embed_keys=[EMBED_IMAGE],
         )
 
     @handle_tool_errors
@@ -224,24 +255,17 @@ class KBToolGroup:
             'user_id': agentic_config.get('user_id', ''),
         }
 
-        resolved_image_topk = image_topk or 3
-        if resolved_image_topk != 3 and self._image_embed_key:
-            image_retriever = get_image_retriever(
-                self._document, self._image_embed_key, resolved_image_topk
-            )
-        else:
-            image_retriever = self._image_retriever
-
         result = ppl_search(
             payload,
             document=self._document,
-            retrievers=self._retrievers,
+            retrievers=type(self)._retrievers,
             tmp_retriever=None,
-            reranker=self._reranker,
-            image_retriever=image_retriever,
+            reranker=type(self)._reranker,
+            image_retriever=type(self)._image_retriever,
             retriever_topk=retriever_topk or 20,
             rerank_topk=rerank_topk or 20,
             k_max=k_max or 10,
+            image_topk=image_topk or 3,
         )
         serialized = _serialize_kb_result(result)
         _annotate_result_citations(serialized)
@@ -265,7 +289,7 @@ class KBToolGroup:
             raise ValueError('node_id is required')
 
         config = lazyllm.globals['agentic_config']
-        doc = kb_document_provider.build_agentic_document(config)
+        doc = _DEFAULT_KB_DOCUMENT
 
         for kb_id in iter_lookup_ids(
             (config.get('filters') or {}).get('kb_id'),
@@ -343,7 +367,7 @@ class KBToolGroup:
             raise ValueError(f'number range cannot exceed {_MAX_RESULT_ITEMS} nodes')
 
         config = lazyllm.globals['agentic_config']
-        doc = kb_document_provider.build_agentic_document(config)
+        doc = _DEFAULT_KB_DOCUMENT
 
         for kb_id in iter_lookup_ids(
             (config.get('filters') or {}).get('kb_id'),
@@ -470,17 +494,23 @@ class KBToolGroup:
 
 class TempKBToolGroup:
     __public_apis__ = ['kb_tmp_search']
+    _tmp_retriever = None
+    _reranker = None
 
     def __init__(self, document: Any = None) -> None:
         self._document = document or _DEFAULT_KB_DOCUMENT
-        self._tmp_retriever = None
-        self._reranker = None
 
     def _ensure_search_runtime(self) -> None:
-        if self._tmp_retriever is not None:
+        cls = type(self)
+        if cls._tmp_retriever is not None:
             return
-        self._tmp_retriever = kb_retriever_factory.get_tmp_retriever()
-        self._reranker = kb_reranker_factory.get_reranker()
+        cls._tmp_retriever = TempDocRetriever(embed=AutoModel(model=EMBED_MAIN))
+        cls._tmp_retriever.add_subretriever('block')
+        cls._reranker = (
+            Reranker('ModuleReranker', model=AutoModel(model='reranker'))
+            if _is_reranker_enabled()
+            else None
+        )
 
     @handle_tool_errors
     def kb_tmp_search(
@@ -515,8 +545,8 @@ class TempKBToolGroup:
             payload,
             document=self._document,
             retrievers=[],
-            tmp_retriever=self._tmp_retriever,
-            reranker=self._reranker,
+            tmp_retriever=type(self)._tmp_retriever,
+            reranker=type(self)._reranker,
             image_retriever=None,
             retriever_topk=retriever_topk or 20,
             rerank_topk=rerank_topk or 20,

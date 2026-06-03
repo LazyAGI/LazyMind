@@ -394,7 +394,7 @@ class TestInjectModelConfig:
         config_path.write_text(yaml_content, encoding='utf-8')
         try:
             get_dynamic_role_slot_map.cache_clear()
-            monkeypatch.setattr('lazymind.model_config._DYNAMIC_CONFIG_PATH', config_path)
+            monkeypatch.setattr('lazymind.model_config.get_config_path', lambda: str(config_path))
 
             with _globals_config_patch('dynamic_model_configs', None) as gcfg:
                 inject_model_config({
@@ -429,7 +429,7 @@ class TestInjectModelConfig:
               type: llm
         '''), encoding='utf-8')
         get_dynamic_role_slot_map.cache_clear()
-        monkeypatch.setattr('lazymind.model_config._DYNAMIC_CONFIG_PATH', config_path)
+        monkeypatch.setattr('lazymind.model_config.get_config_path', lambda: str(config_path))
 
         with _globals_config_patch('dynamic_model_configs', None) as gcfg:
             inject_model_config({
@@ -456,7 +456,7 @@ class TestInjectModelConfig:
               model: qwen-turbo
         '''), encoding='utf-8')
         get_dynamic_role_slot_map.cache_clear()
-        monkeypatch.setattr('lazymind.model_config._DYNAMIC_CONFIG_PATH', config_path)
+        monkeypatch.setattr('lazymind.model_config.get_config_path', lambda: str(config_path))
 
         inject_model_config(None)
         inject_model_config({})
@@ -475,7 +475,7 @@ class TestInjectModelConfig:
               type: llm
         '''), encoding='utf-8')
         get_dynamic_role_slot_map.cache_clear()
-        monkeypatch.setattr('lazymind.model_config._DYNAMIC_CONFIG_PATH', config_path)
+        monkeypatch.setattr('lazymind.model_config.get_config_path', lambda: str(config_path))
 
         inject_model_config(None)
         inject_model_config({})
@@ -498,7 +498,7 @@ class TestInjectModelConfig:
               type: embed
         '''), encoding='utf-8')
         get_dynamic_role_slot_map.cache_clear()
-        monkeypatch.setattr('lazymind.model_config._DYNAMIC_CONFIG_PATH', config_path)
+        monkeypatch.setattr('lazymind.model_config.get_config_path', lambda: str(config_path))
 
         with _globals_config_patch('dynamic_model_configs', None) as gcfg:
             inject_model_config({'llm': {'source': 'openai', 'model': 'gpt-4o', 'api_key': 'sk-x'}})
@@ -523,7 +523,7 @@ class TestInjectModelConfig:
               type: llm
         '''), encoding='utf-8')
         get_dynamic_role_slot_map.cache_clear()
-        monkeypatch.setattr('lazymind.model_config._DYNAMIC_CONFIG_PATH', config_path)
+        monkeypatch.setattr('lazymind.model_config.get_config_path', lambda: str(config_path))
 
         with _globals_config_patch('dynamic_model_configs', None) as gcfg:
             inject_model_config({'llm': {'source': None, 'model': None}})
@@ -546,7 +546,7 @@ class TestInjectModelConfig:
               type: llm
         '''), encoding='utf-8')
         get_dynamic_role_slot_map.cache_clear()
-        monkeypatch.setattr('lazymind.model_config._DYNAMIC_CONFIG_PATH', config_path)
+        monkeypatch.setattr('lazymind.model_config.get_config_path', lambda: str(config_path))
 
         with _globals_config_patch('dynamic_model_configs', None) as gcfg:
             inject_model_config({
@@ -572,7 +572,7 @@ class TestInjectModelConfig:
               type: llm
         '''), encoding='utf-8')
         get_dynamic_role_slot_map.cache_clear()
-        monkeypatch.setattr('lazymind.model_config._DYNAMIC_CONFIG_PATH', config_path)
+        monkeypatch.setattr('lazymind.model_config.get_config_path', lambda: str(config_path))
 
         with _globals_config_patch('dynamic_model_configs', None) as gcfg:
             inject_model_config({'llm': {'source': 'qwen', 'model': None, 'base_url': None}})
@@ -640,57 +640,13 @@ class TestGetDynamicRoleSlotMap:
         get_dynamic_role_slot_map.cache_clear()
 
 
-class TestRoleEnablementHelpers:
-    def test_is_role_enabled_returns_true_for_non_dynamic_role(self, tmp_path):
-        import textwrap
-        from lazymind.model_config import is_role_enabled
-
-        config_path = tmp_path / 'runtime_models.yaml'
-        config_path.write_text(textwrap.dedent('''
-            reranker:
-              source: siliconflow
-              type: rerank
-              model: bge-reranker-v2-m3
-        '''), encoding='utf-8')
-
-        assert is_role_enabled('reranker', str(config_path), dynamic_model_configs=None) is True
-
-    def test_is_role_enabled_requires_dynamic_slot_payload(self, tmp_path):
-        import textwrap
-        from lazymind.model_config import get_dynamic_role_slot_map, is_role_enabled
-
-        config_path = tmp_path / 'runtime_models.yaml'
-        config_path.write_text(textwrap.dedent('''
-            reranker:
-              source: dynamic
-              type: rerank
-        '''), encoding='utf-8')
-        get_dynamic_role_slot_map.cache_clear()
-
-        assert is_role_enabled('reranker', str(config_path), dynamic_model_configs=None) is False
-        assert is_role_enabled(
-            'reranker',
-            str(config_path),
-            dynamic_model_configs={'reranker': {'embed': {'source': 'openai', 'model': 'r1'}}},
-        ) is True
-        get_dynamic_role_slot_map.cache_clear()
-
-    def test_get_enabled_role_config_path_returns_none_when_disabled(self, monkeypatch):
-        from lazymind import model_config as model_config_mod
-
-        monkeypatch.setattr(model_config_mod, 'get_config_path', lambda: '/tmp/runtime.yml')
-        monkeypatch.setattr(model_config_mod, 'is_role_enabled', lambda role, config_path=None: False)
-
-        assert model_config_mod.get_enabled_role_config_path('reranker') is None
-
-
 # ---------------------------------------------------------------------------
 # Task 5: chat_routes model_config parameter forwarding
 # ---------------------------------------------------------------------------
 
 def _load_chat_routes_module():
     module_name = 'test_chat_routes_isolated_dynamic'
-    module_path = Path(__file__).resolve().parents[3] / 'algorithm/lazymind/chat/service/api/chat_routes.py'
+    module_path = Path(__file__).resolve().parents[3] / 'algorithm/lazymind/chat/api/chat_routes.py'
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     module = importlib.util.module_from_spec(spec)
     sys.modules.pop(module_name, None)
@@ -709,13 +665,13 @@ class TestChatRouteModelConfig:
             recorded.update(kwargs)
             return {'ok': True}
 
-        fake_service = ModuleType('lazymind.chat.service.core.chat_service')
+        fake_service = ModuleType('lazymind.chat.service.chat_service')
         fake_service.handle_chat = fake_handle_chat
 
         fake_config = ModuleType('lazymind.chat.config')
         fake_config.DEFAULT_CHAT_DATASET = 'default'
 
-        monkeypatch.setitem(sys.modules, 'lazymind.chat.service.core.chat_service', fake_service)
+        monkeypatch.setitem(sys.modules, 'lazymind.chat.service.chat_service', fake_service)
         monkeypatch.setitem(sys.modules, 'lazymind.chat.config', fake_config)
 
         routes_mod = _load_chat_routes_module()
@@ -739,13 +695,13 @@ class TestChatRouteModelConfig:
             recorded.update(kwargs)
             return {'ok': True}
 
-        fake_service = ModuleType('lazymind.chat.service.core.chat_service')
+        fake_service = ModuleType('lazymind.chat.service.chat_service')
         fake_service.handle_chat = fake_handle_chat
 
         fake_config = ModuleType('lazymind.chat.config')
         fake_config.DEFAULT_CHAT_DATASET = 'default'
 
-        monkeypatch.setitem(sys.modules, 'lazymind.chat.service.core.chat_service', fake_service)
+        monkeypatch.setitem(sys.modules, 'lazymind.chat.service.chat_service', fake_service)
         monkeypatch.setitem(sys.modules, 'lazymind.chat.config', fake_config)
 
         routes_mod = _load_chat_routes_module()

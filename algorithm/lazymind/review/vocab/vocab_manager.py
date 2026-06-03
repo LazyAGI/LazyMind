@@ -11,8 +11,6 @@ from typing import Callable, List, Optional, Union
 from lazyllm import LOG, AutoModel, ModuleBase
 from lazyllm.tools.rag.query_enh_ac import QueryEnhACProcessor
 
-from ..service.db import fetch_vocab_for_user_id
-
 
 class VocabManager(ModuleBase):
     """Single-user vocabulary manager: bound to one user_id, loads vocabulary from DB, supports hot-reload.

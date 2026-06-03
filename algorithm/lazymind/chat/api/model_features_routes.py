@@ -1,8 +1,8 @@
 import requests
 from fastapi import APIRouter, HTTPException
 
-from lazymind.model_config import get_image_embed_key, get_dynamic_role_slot_map, load_model_config
-from lazymind.config import config as _cfg
+from lazymind.model_config import get_dynamic_role_slot_map, load_model_config
+from lazymind.config import EMBED_IMAGE, config as _cfg
 from lazyllm.tools.rag.store import LAZY_IMAGE_GROUP
 
 router = APIRouter()
@@ -27,18 +27,19 @@ def _is_image_group_lazy() -> bool:
 def get_model_features():
     '''Return feature flags based on the active runtime_models config.
 
-    image_embed_enabled is True when a cross_modal_embed role is present in the
-    config (i.e. get_image_embed_key() returns a non-None value).
+    image_embed_enabled is True when the fixed embed_image role is present in
+    the config.
 
     image_embed_required is True when embed_image is source=dynamic AND the admin
     has already configured it at least once (lazy_mode is no longer 'embed').
     '''
-    image_embed_key = get_image_embed_key()
+    raw = load_model_config()
+    image_embed_enabled = EMBED_IMAGE in raw
     image_embed_required = False
-    if image_embed_key and image_embed_key in get_dynamic_role_slot_map():
+    if image_embed_enabled and EMBED_IMAGE in get_dynamic_role_slot_map():
         image_embed_required = not _is_image_group_lazy()
     return {
-        'image_embed_enabled': image_embed_key is not None,
+        'image_embed_enabled': image_embed_enabled,
         'image_embed_required': image_embed_required,
     }
 

@@ -1,10 +1,5 @@
 """Infrastructure helpers for chat engine tools."""
 
-from .kb_document_provider import (
-    build_agentic_document,
-    get_default_document,
-    get_remote_document,
-)
 from .core_api_client import (
     post_core_api,
 )
@@ -18,16 +13,6 @@ from .kb_opensearch_client import (
     opensearch_search,
     resolve_index,
     term_filter,
-)
-from .kb_reranker_factory import (
-    build_reranker,
-    get_reranker,
-)
-from .kb_retriever_factory import (
-    build_default_retriever_configs,
-    get_image_retriever,
-    get_kb_retrievers,
-    get_tmp_retriever,
 )
 from .skill_registry import (
     build_skill_identity,
@@ -67,20 +52,11 @@ from .tool_runtime import (
 __all__ = [
     'Suggestion',
     'VocabSuggestion',
-    'build_agentic_document',
-    'build_default_retriever_configs',
-    'build_reranker',
     'build_skill_identity',
     'dedupe_vocab_values_keep_order',
     'dump_suggestion',
     'dump_vocab_suggestion',
     'fetch_url_content',
-    'get_default_document',
-    'get_image_retriever',
-    'get_kb_retrievers',
-    'get_remote_document',
-    'get_reranker',
-    'get_tmp_retriever',
     'handle_tool_errors',
     'is_writable_skill_source',
     'list_all_skill_entries',

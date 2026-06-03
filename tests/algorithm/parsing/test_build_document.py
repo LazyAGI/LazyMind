@@ -145,11 +145,7 @@ def test_build_document_wires_readers_groups_and_embeddings(monkeypatch):
 
     monkeypatch.setattr(build_document, 'Document', FakeDocument)
     monkeypatch.setattr(build_document, 'DocumentProcessor', FakeDocumentProcessor)
-    monkeypatch.setattr(build_document, 'get_embed_keys', lambda: ['dense', 'sparse'])
-    monkeypatch.setattr(build_document, 'get_text_embed_keys', lambda: ['dense', 'sparse'])
-    monkeypatch.setattr(build_document, 'get_image_embed_key', lambda: None)
-    monkeypatch.setattr(build_document, 'get_config_path', lambda: '/fake/config.yaml')
-    monkeypatch.setattr(build_document, 'get_embed_index_kwargs', lambda: {'nlist': 16})
+    monkeypatch.setattr(build_document, 'get_dynamic_role_slot_map', lambda: {})
     monkeypatch.setattr(build_document, 'AutoModel', lambda model, config=False: f'emb-{model}')
     monkeypatch.setattr(build_document, '_build_store_config', lambda index_kwargs: {'index_kwargs': index_kwargs})
     monkeypatch.setattr(build_document, '_build_pdf_reader', lambda: 'pdf-reader')
@@ -160,14 +156,21 @@ def test_build_document_wires_readers_groups_and_embeddings(monkeypatch):
     docs = build_document.build_document()
 
     assert docs.kwargs['name'] == build_document.ALGO_ID
-    assert docs.kwargs['embed'] == {'dense': 'emb-dense', 'sparse': 'emb-sparse'}
-    assert docs.kwargs['manager'].kwargs['store_conf'] == {'index_kwargs': {'nlist': 16}}
+    assert docs.kwargs['embed'] == {
+        key: f'emb-{key}'
+        for key in build_document.EMBED_KEYS
+    }
+    assert docs.kwargs['manager'].kwargs['store_conf'] == {'index_kwargs': build_document.EMBED_INDEX_KWARGS}
     assert docs.kwargs['manager'].kwargs['url'] == 'http://processor.test'
     assert ('*.pdf', 'pdf-reader') in docs.readers
     assert [group['name'] for group in docs.node_groups] == ['block', 'line']
     assert 'parent' not in docs.node_groups[0]
     assert docs.node_groups[1]['parent'] == 'block'
-    assert docs.activated == [('block', ['dense', 'sparse']), ('line', ['dense', 'sparse'])]
+    assert docs.activated == [
+        ('image', build_document.EMBED_IMAGE),
+        ('block', [build_document.EMBED_MAIN]),
+        ('line', [build_document.EMBED_MAIN]),
+    ]
 
 
 # ---------------------------------------------------------------------------
