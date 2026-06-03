@@ -22,7 +22,7 @@ type Handler struct {
 
 // Tree POST /api/v1/fs/tree
 func (h *Handler) Tree(w http.ResponseWriter, r *http.Request) {
-	writeV2Disabled(w, "legacy /api/v1/fs/tree is disabled; use /api/v1/agents/fs/list")
+	writeLegacyDisabled(w, "legacy /api/v1/fs/tree is disabled; use /api/v1/agents/fs/list")
 }
 
 func NewHandler(manager source.Manager, validator fs.PathValidator, staging fs.StagingService, mapper fs.PathMapper, log *zap.Logger) *Handler {
@@ -39,17 +39,17 @@ func (h *Handler) Healthz(w http.ResponseWriter, _ *http.Request) {
 
 // Browse POST /api/v1/fs/browse
 func (h *Handler) Browse(w http.ResponseWriter, r *http.Request) {
-	writeV2Disabled(w, "legacy /api/v1/fs/browse is disabled; use /api/v1/agents/fs/list")
+	writeLegacyDisabled(w, "legacy /api/v1/fs/browse is disabled; use /api/v1/agents/fs/list")
 }
 
 // ValidatePath POST /api/v1/fs/validate
 func (h *Handler) ValidatePath(w http.ResponseWriter, r *http.Request) {
-	writeV2Disabled(w, "legacy /api/v1/fs/validate is disabled; use /api/v1/agents/fs/validate")
+	writeLegacyDisabled(w, "legacy /api/v1/fs/validate is disabled; use /api/v1/agents/fs/validate")
 }
 
 // StatFile POST /api/v1/fs/stat
 func (h *Handler) StatFile(w http.ResponseWriter, r *http.Request) {
-	writeV2Disabled(w, "legacy /api/v1/fs/stat is disabled; use /api/v1/agents/fs/stat")
+	writeLegacyDisabled(w, "legacy /api/v1/fs/stat is disabled; use /api/v1/agents/fs/stat")
 }
 
 // StartSource POST /api/v1/sources/start
@@ -82,7 +82,7 @@ func (h *Handler) StopSource(w http.ResponseWriter, r *http.Request) {
 
 // StageFile POST /api/v1/fs/stage
 func (h *Handler) StageFile(w http.ResponseWriter, r *http.Request) {
-	writeV2Disabled(w, "legacy /api/v1/fs/stage is disabled; use /api/v1/agents/fs/export")
+	writeLegacyDisabled(w, "legacy /api/v1/fs/stage is disabled; use /api/v1/agents/fs/export")
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -105,6 +105,6 @@ func writeError(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, internal.ErrorResponse{Code: code, Message: msg})
 }
 
-func writeV2Disabled(w http.ResponseWriter, message string) {
-	writeError(w, http.StatusGone, "V2_DISABLED", message)
+func writeLegacyDisabled(w http.ResponseWriter, message string) {
+	writeError(w, http.StatusGone, "LEGACY_DISABLED", message)
 }

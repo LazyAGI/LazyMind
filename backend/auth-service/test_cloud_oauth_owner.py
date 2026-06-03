@@ -152,7 +152,11 @@ class CloudOAuthOwnerTest(unittest.TestCase):
         self.assertEqual(len(listed['items']), 1)
         item = listed['items'][0]
         self.assertEqual(item['connection_id'], created['connection_id'])
+        self.assertEqual(item['app_id'], 'client')
         self.assertEqual(item['provider_account_id'], 'feishu-open-1')
+
+        detail = self.service.get_connection(created['connection_id'], user_id='user-1')
+        self.assertEqual(detail['app_id'], 'client')
 
         other = self.service.list_connections(owner_user_id='user-2', provider='feishu')
         self.assertEqual(other['items'], [])

@@ -14,7 +14,7 @@ import (
 	"github.com/lazymind/file_watcher/internal/fs"
 )
 
-func TestLegacyFSHandlersAreV2Disabled(t *testing.T) {
+func TestLegacyFSHandlersAreDisabled(t *testing.T) {
 	t.Parallel()
 
 	root := filepath.Join(t.TempDir(), "release-root")
@@ -44,8 +44,8 @@ func TestLegacyFSHandlersAreV2Disabled(t *testing.T) {
 			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 				t.Fatalf("decode response failed: %v", err)
 			}
-			if resp.Code != "V2_DISABLED" {
-				t.Fatalf("expected V2_DISABLED, got %+v", resp)
+			if resp.Code != "LEGACY_DISABLED" {
+				t.Fatalf("expected LEGACY_DISABLED, got %+v", resp)
 			}
 		})
 	}

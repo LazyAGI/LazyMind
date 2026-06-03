@@ -58,6 +58,7 @@ class CloudConnectionResponse(BaseModel):
     owner_user_id: str = ''
     provider: str
     auth_mode: str
+    app_id: str = ''
     provider_account_id: str = ''
     display_name: str = ''
     provider_tenant_key: str = ''

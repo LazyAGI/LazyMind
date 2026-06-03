@@ -157,11 +157,20 @@ services:
       dockerfile: Dockerfile
       args:
         <<: *mirror-args
-    command: ["-config", "/app/configs/control-plane.scan.yml"]
     environment:
+      SCAN_CONTROL_PLANE_ADDRESS: "0.0.0.0"
+      SCAN_CONTROL_PLANE_PORT: "18080"
+      SCAN_CONTROL_PLANE_DB_DSN: "host=db user=root password=123456 dbname=scan_control_plane port=5432 sslmode=disable TimeZone=UTC"
+      SCAN_CONTROL_PLANE_CORE_BASE_URL: "http://core:8000"
+      SCAN_CONTROL_PLANE_AGENT_BASE_URL: "http://file-watcher:19090"
+      SCAN_CONTROL_PLANE_AGENT_TOKEN: "my-secret-token"
+      SCAN_CONTROL_PLANE_LOCAL_FS_DEFAULT_AGENT_ID: "file-watcher-local-001"
+      SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT: "/data/ragscan"
+      SCAN_CONTROL_PLANE_FEISHU_BASE_URL: "https://open.feishu.cn"
+      SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL: "http://auth-service:8000"
+      SCAN_CONTROL_PLANE_TEMP_DIR: "/data/staging"
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
     volumes:
-      - ./backend/scan-control-plane/configs/control-plane.scan.yml:/app/configs/control-plane.scan.yml:ro
       - ${LAZYMIND_FILE_WATCHER_BASE_ROOT:-./data/scan}:/data/ragscan
       - ${LAZYMIND_FILE_WATCHER_BASE_ROOT:-./data/scan}/staging:/data/staging
       - ./data/core/uploads:/var/lib/lazymind/uploads
@@ -173,7 +182,7 @@ services:
       db-bootstrap:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:18080/healthz >/dev/null 2>&1 || exit 1"]
+      test: ["CMD", "/app/scan-control-plane", "healthcheck"]
       interval: 5s
       timeout: 3s
       retries: 20

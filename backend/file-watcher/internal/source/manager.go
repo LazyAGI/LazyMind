@@ -97,7 +97,7 @@ func (m *manager) StartSource(ctx context.Context, req internal.StartSourceReque
 
 	go func() {
 		if !req.SkipInitialScan {
-			m.log.Info("v2 source start uses watcher only; initial scan disabled",
+			m.log.Info("source start uses watcher only; initial scan disabled",
 				zap.String("source_id", req.SourceID),
 				zap.String("root_path", publicRootPath),
 			)
@@ -186,7 +186,7 @@ func (m *manager) HandleCommand(ctx context.Context, cmd internal.Command) (any,
 	case internal.CommandStopSource:
 		return nil, m.StopSource(ctx, cmd.SourceID)
 	case internal.CommandScanSource:
-		return v2DisabledResult(cmd.Type), nil
+		return legacyDisabledResult(cmd.Type), nil
 	case internal.CommandReloadSource:
 		_ = m.StopSource(ctx, cmd.SourceID)
 		if err := m.ensureSourceDirs(cmd.SourceID); err != nil {
@@ -199,9 +199,9 @@ func (m *manager) HandleCommand(ctx context.Context, cmd internal.Command) (any,
 			SkipInitialScan: cmd.SkipInitialScan,
 		})
 	case internal.CommandSnapshotSource:
-		return v2DisabledResult(cmd.Type), nil
+		return legacyDisabledResult(cmd.Type), nil
 	case internal.CommandStageFile:
-		return v2DisabledResult(cmd.Type), nil
+		return legacyDisabledResult(cmd.Type), nil
 	default:
 		return nil, fmt.Errorf("unknown command type: %s", cmd.Type)
 	}
@@ -269,10 +269,10 @@ func (m *manager) Stats() (sourceCount, watchCount, taskCount int) {
 	return
 }
 
-func v2DisabledResult(commandType internal.CommandType) map[string]any {
+func legacyDisabledResult(commandType internal.CommandType) map[string]any {
 	return map[string]any{
 		"accepted": false,
-		"code":     "V2_DISABLED",
-		"message":  fmt.Sprintf("%s is disabled in file-watcher v2", commandType),
+		"code":     "LEGACY_DISABLED",
+		"message":  fmt.Sprintf("%s is disabled in file-watcher", commandType),
 	}
 }

@@ -224,8 +224,8 @@ func TestLegacyDocumentCommandsAreV2Disabled(t *testing.T) {
 			t.Fatalf("expected %s to be compatibility-acked, got error %v", commandType, err)
 		}
 		payload, ok := result.(map[string]any)
-		if !ok || payload["code"] != "V2_DISABLED" || payload["accepted"] != false {
-			t.Fatalf("expected v2-disabled result for %s, got %#v", commandType, result)
+		if !ok || payload["code"] != "LEGACY_DISABLED" || payload["accepted"] != false {
+			t.Fatalf("expected legacy-disabled result for %s, got %#v", commandType, result)
 		}
 	}
 }
