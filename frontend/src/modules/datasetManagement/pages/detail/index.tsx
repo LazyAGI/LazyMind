@@ -71,7 +71,7 @@ const DEFAULT_COLUMN_WIDTHS = {
   generate_reason: 220,
   source: 100,
   updated_at: 150,
-  actions: 180,
+  actions: 90,
 };
 
 type ResizableColumnKey = keyof typeof DEFAULT_COLUMN_WIDTHS;
@@ -477,7 +477,24 @@ export default function DatasetDetailPage() {
     }
   };
 
+  const handleAutoSaveItem = async (item: DatasetItem) => {
+    const draft = drafts[item.id] || createItemDraft(item);
+    if (item.id !== NEW_ITEM_ID && !dirtyItemIds.includes(item.id)) {
+      setActiveCell(null);
+      return;
+    }
+    if (item.id === NEW_ITEM_ID && validateRequiredDatasetItem(draft).length > 0) {
+      setActiveCell(null);
+      return;
+    }
+    await handleSaveItem(item.id, draft);
+  };
+
   const handleDeleteItem = (item: DatasetItem) => {
+    if (item.id === NEW_ITEM_ID) {
+      handleCancelItem(item);
+      return;
+    }
     Modal.confirm({
       title: "确认删除该样本？",
       content: item.question,
@@ -573,6 +590,7 @@ export default function DatasetDetailPage() {
         value={drafts[record.id]?.[field] || ""}
         placeholder={placeholder}
         onChange={(event) => handleDraftChange(record, field, event.target.value)}
+        onBlur={() => void handleAutoSaveItem(record)}
       />
     );
   };
@@ -593,6 +611,7 @@ export default function DatasetDetailPage() {
         placeholder={placeholder}
         autoSize={{ minRows: 1, maxRows: 4 }}
         onChange={(event) => handleDraftChange(record, field, event.target.value)}
+        onBlur={() => void handleAutoSaveItem(record)}
       />
     );
   };
@@ -606,6 +625,7 @@ export default function DatasetDetailPage() {
         value={drafts[record.id]?.question_type || undefined}
         placeholder="问题类型"
         onChange={(value) => handleDraftChange(record, "question_type", value)}
+        onBlur={() => void handleAutoSaveItem(record)}
       />
     );
   };
@@ -695,36 +715,16 @@ export default function DatasetDetailPage() {
         width: columnWidths.actions,
         fixed: "right",
         onHeaderCell: () => getHeaderCellProps("actions"),
-        render: (_, record) => {
-          const isDirty = dirtyItemIds.includes(record.id);
-          const draft = drafts[record.id] || createItemDraft(record);
-          return (
-            <Space size={6}>
-              <Button
-                type="primary"
-                size="small"
-                loading={saving}
-                disabled={record.id !== NEW_ITEM_ID && !isDirty}
-                onClick={() => handleSaveItem(record.id, draft)}
-              >
-                保存
-              </Button>
-              <Button size="small" onClick={() => handleCancelItem(record)}>
-                取消
-              </Button>
-              {record.id === NEW_ITEM_ID ? null : (
-                <Button
-                  danger
-                  size="small"
-                  icon={<DeleteOutlined />}
-                  onClick={() => handleDeleteItem(record)}
-                >
-                  删除
-                </Button>
-              )}
-            </Space>
-          );
-        },
+        render: (_, record) => (
+          <Button
+            danger
+            size="small"
+            icon={<DeleteOutlined />}
+            onClick={() => handleDeleteItem(record)}
+          >
+            删除
+          </Button>
+        ),
       },
     ];
 
