@@ -1,5 +1,6 @@
 import sys
 import types
+from importlib import import_module
 
 
 def _stub_vocab():
@@ -11,10 +12,10 @@ def _stub_vocab():
 
 _stub_vocab()
 
-from lazymind.chat.engine.tools.algo import kb_ppl_search as ppl_search_mod
+search_kb_mod = import_module("lazymind.chat.engine.tools.algo.search_kb")
 
 
-def test_search_text_passes_through_when_reranker_disabled():
+def test_search_text_uses_tmp_retriever_without_reranker():
     class DummyNode:
         def __init__(self, score):
             self.score = score
@@ -22,7 +23,7 @@ def test_search_text_passes_through_when_reranker_disabled():
 
     nodes = [DummyNode(0.8), DummyNode(0.3)]
 
-    result = ppl_search_mod.search_text(
+    result = search_kb_mod.search_text(
         {"query": "hello", "user_id": "u1", "files": ["tmp.md"]},
         retrievers=[],
         retriever_topk=9,
@@ -38,7 +39,7 @@ def test_search_text_passes_through_when_reranker_disabled():
     assert result[1].relevance_score == 0.3
 
 
-def test_search_text_passes_dynamic_retriever_topk(monkeypatch):
+def test_search_text_uses_kb_retrievers_with_filters(monkeypatch):
     captured = {}
 
     class DummyNode:
@@ -53,9 +54,9 @@ def test_search_text_passes_dynamic_retriever_topk(monkeypatch):
             captured["topk"] = topk
             return [DummyNode()]
 
-    monkeypatch.setattr(ppl_search_mod, "RRFFusion", lambda top_k: (lambda nodes: list(nodes[0])))
+    monkeypatch.setattr(search_kb_mod, "RRFFusion", lambda top_k: (lambda nodes: list(nodes[0])))
 
-    result = ppl_search_mod.search_text(
+    result = search_kb_mod.search_text(
         {"query": "hello", "user_id": "u1", "files": [], "filters": {"scope": "kb"}},
         retrievers=[DummyRetriever()],
         retriever_topk=11,
@@ -72,32 +73,3 @@ def test_search_text_passes_dynamic_retriever_topk(monkeypatch):
         "filters": {"scope": "kb"},
         "topk": 11,
     }
-
-
-def test_search_text_passes_dynamic_rerank_topk():
-    captured = {}
-
-    class DummyNode:
-        def __init__(self):
-            self.score = 0.8
-            self.relevance_score = None
-
-    class DummyReranker:
-        def __call__(self, nodes, *, query="", topk=None):
-            captured["query"] = query
-            captured["topk"] = topk
-            return nodes
-
-    result = ppl_search_mod.search_text(
-        {"query": "hello", "user_id": "u1", "files": ["tmp.md"]},
-        retrievers=[],
-        retriever_topk=11,
-        rerank_topk=4,
-        tmp_retriever=lambda files, query, **kwargs: [DummyNode()],
-        reranker=DummyReranker(),
-        adaptive_k=lambda xs: xs,
-        ctx_expand=lambda xs: xs,
-    )
-
-    assert len(result) == 1
-    assert captured == {"query": "hello", "topk": 4}

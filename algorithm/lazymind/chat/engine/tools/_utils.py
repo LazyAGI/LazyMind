@@ -1,14 +1,6 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
-
-
-def safe_getattr(obj: Any, key: str, default: Any = None) -> Any:
-    try:
-        return getattr(obj, key)
-    except Exception:
-        return default
 
 
 def truncate_text(text: Any, max_len: int) -> str:

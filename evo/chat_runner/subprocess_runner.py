@@ -27,7 +27,7 @@ class SubprocessChatRunner:
     ) -> None:
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.command = command or ['python', '-m', 'lazymind.chat.app']
+        self.command = command or ['python', '-m', 'chat.app.chat']
         self.health_path = health_path
         self.startup_timeout_s = startup_timeout_s
         self.stop_timeout_s = stop_timeout_s

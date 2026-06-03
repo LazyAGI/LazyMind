@@ -114,7 +114,7 @@ def _candidate_model_config_path(ctx: ExecCtx, raw: str) -> str:
         return raw
     from importlib import import_module
 
-    path = Path(import_module('lazymind.model_config').__file__).resolve().parent / 'resources' / name
+    path = Path(import_module('algorithm.config').__file__).resolve().parent / 'common' / name
     if not path.is_file():
         raise RuntimeError(f'candidate model config not found: {path}')
     return str(path)

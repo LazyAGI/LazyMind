@@ -9,10 +9,9 @@ from lazymind.chat.engine.tools._utils import (
     iter_lookup_ids,
     parse_json_dict,
     parse_number_range,
-    safe_getattr,
     truncate_text,
 )
-from lazymind.chat.engine.tools.algo import ppl_search
+from lazymind.chat.engine.tools.algo import search_kb
 from lazymind.chat.engine.tools.infra import (
     opensearch_search,
     resolve_index,
@@ -55,10 +54,10 @@ def _is_reranker_enabled() -> bool:
 
 
 def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
-    metadata = safe_getattr(node, 'metadata', {}) or {}
+    metadata = getattr(node, 'metadata', {}) or {}
     if not isinstance(metadata, dict):
         metadata = {}
-    global_md = safe_getattr(node, 'global_metadata', {}) or {}
+    global_md = getattr(node, 'global_metadata', {}) or {}
     if not isinstance(global_md, dict):
         global_md = {}
     compact_metadata = {
@@ -77,8 +76,8 @@ def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
         )
         if k in metadata
     }
-    group = safe_getattr(node, 'group', None) or safe_getattr(node, '_group', None)
-    text = safe_getattr(node, 'text', '') or ''
+    group = getattr(node, 'group', None) or getattr(node, '_group', None)
+    text = getattr(node, 'text', '') or ''
     raw_text = text.strip() if isinstance(text, str) else ''
     local_path = raw_text
     if raw_text.startswith('/static-files/'):
@@ -107,11 +106,11 @@ def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
         local_path = ''
 
     serialized = {
-        'uid': safe_getattr(node, 'uid', None) or safe_getattr(node, '_uid', None),
-        'number': safe_getattr(node, 'number', metadata.get('index')),
+        'uid': getattr(node, 'uid', None) or getattr(node, '_uid', None),
+        'number': getattr(node, 'number', metadata.get('index')),
         'group': group,
-        'parent': safe_getattr(node, '_parent', None),
-        'score': safe_getattr(node, 'relevance_score', None),
+        'parent': getattr(node, '_parent', None),
+        'score': getattr(node, 'relevance_score', None),
         'text': truncate_text(text, _MAX_TEXT_LEN),
         'docid': global_md.get('docid'),
         'kb_id': global_md.get('kb_id'),
@@ -166,7 +165,7 @@ def _serialize_kb_result(result: Any) -> Any:
             if isinstance(item, dict):
                 serialized_items.append(item)
                 continue
-            if safe_getattr(item, 'uid', None) is not None or safe_getattr(item, 'text', None) is not None:
+            if getattr(item, 'uid', None) is not None or getattr(item, 'text', None) is not None:
                 serialized_items.append(_serialize_doc_node_like(item))
                 continue
             serialized_items.append(truncate_text(item, 400))
@@ -255,7 +254,7 @@ class KBToolGroup:
             'user_id': agentic_config.get('user_id', ''),
         }
 
-        result = ppl_search(
+        result = search_kb(
             payload,
             document=self._document,
             retrievers=type(self)._retrievers,
@@ -382,10 +381,10 @@ class KBToolGroup:
                 sort_by_number=True,
             )
             nodes = nodes if isinstance(nodes, list) else []
-            nodes = [n for n in nodes if safe_getattr(n, 'number', None) in numbers]
+            nodes = [n for n in nodes if getattr(n, 'number', None) in numbers]
             if not nodes:
                 continue
-            nodes.sort(key=lambda n: (safe_getattr(n, 'number', 0) or 0, safe_getattr(n, 'uid', '') or ''))
+            nodes.sort(key=lambda n: (getattr(n, 'number', 0) or 0, getattr(n, 'uid', '') or ''))
             result = {
                 'total': len(nodes),
                 'items': [_serialize_doc_node_like(n) for n in nodes],
@@ -541,7 +540,7 @@ class TempKBToolGroup:
             'files': files,
             'user_id': agentic_config.get('user_id', ''),
         }
-        result = ppl_search(
+        result = search_kb(
             payload,
             document=self._document,
             retrievers=[],

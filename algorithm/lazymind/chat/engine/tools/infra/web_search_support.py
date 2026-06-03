@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import ipaddress
+import socket
 from typing import Any, Dict, List
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -9,6 +12,9 @@ from lazymind.chat.engine.tools._utils import absolute_url, truncate_text
 from lazymind.config import config as _cfg
 
 _MAX_FETCH_TEXT_LEN = 4000
+_MAX_FETCH_BYTES = 1024 * 1024
+_MAX_REDIRECTS = 5
+_ALLOWED_URL_SCHEMES = {'http', 'https'}
 
 
 def coerce_web_int(value: Any, default: int) -> int:
@@ -18,6 +24,90 @@ def coerce_web_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def is_public_ip_address(value: str) -> bool:
+    try:
+        return ipaddress.ip_address(value).is_global
+    except ValueError:
+        return False
+
+
+def resolve_public_host(hostname: str) -> None:
+    try:
+        addrinfos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(f'could not resolve url host: {hostname}') from exc
+
+    resolved_ips = {item[4][0] for item in addrinfos}
+    if not resolved_ips:
+        raise ValueError(f'could not resolve url host: {hostname}')
+
+    blocked_ips = [ip for ip in resolved_ips if not is_public_ip_address(ip)]
+    if blocked_ips:
+        raise ValueError('url host resolves to a non-public address')
+
+
+def validate_public_http_url(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme not in _ALLOWED_URL_SCHEMES:
+        raise ValueError('url scheme must be http or https')
+    if not parsed.hostname:
+        raise ValueError('url host is required')
+    if parsed.username or parsed.password:
+        raise ValueError('url credentials are not allowed')
+
+    hostname = parsed.hostname.rstrip('.')
+    if not hostname:
+        raise ValueError('url host is required')
+    resolve_public_host(hostname)
+    return url
+
+
+def read_limited_response(response: requests.Response, max_bytes: int = _MAX_FETCH_BYTES) -> None:
+    chunks: List[bytes] = []
+    total = 0
+    for chunk in response.iter_content(chunk_size=16384):
+        if not chunk:
+            continue
+        remaining = max_bytes - total
+        if remaining <= 0:
+            break
+        chunks.append(chunk[:remaining])
+        total += len(chunk[:remaining])
+        if len(chunk) > remaining:
+            break
+    response._content = b''.join(chunks)
+
+
+def fetch_public_url(
+    session: requests.Session,
+    url: str,
+    *,
+    timeout: int,
+    headers: Dict[str, str],
+) -> requests.Response:
+    current_url = validate_public_http_url(url)
+    for _ in range(_MAX_REDIRECTS + 1):
+        response = session.get(
+            current_url,
+            timeout=timeout,
+            headers=headers,
+            allow_redirects=False,
+            stream=True,
+        )
+
+        if not response.is_redirect:
+            read_limited_response(response)
+            return response
+
+        location = response.headers.get('Location')
+        response.close()
+        if not location:
+            raise ValueError('redirect response is missing Location header')
+        current_url = validate_public_http_url(urljoin(current_url, location))
+
+    raise ValueError('too many redirects while fetching url')
 
 
 def extract_web_page_text(html: str) -> str:
@@ -73,6 +163,7 @@ def fetch_url_content(url: str) -> Dict[str, Any]:
     normalized_url = absolute_url(url)
     if not normalized_url:
         raise ValueError('url is required')
+    normalized_url = validate_public_http_url(normalized_url)
 
     timeout = coerce_web_int(_cfg['web_search_timeout'], 10)
     text_limit = max(200, coerce_web_int(_cfg['url_fetch_max_length'], _MAX_FETCH_TEXT_LEN))
@@ -84,11 +175,11 @@ def fetch_url_content(url: str) -> Dict[str, Any]:
     }
 
     with requests.sessions.Session() as session:
-        response = session.get(
+        response = fetch_public_url(
+            session,
             normalized_url,
             timeout=timeout,
             headers=headers,
-            allow_redirects=True,
         )
         response.raise_for_status()
 

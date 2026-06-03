@@ -13,7 +13,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 from evo.apply.errors import ApplyError
 
-from lazymind.config import config
+from algorithm.config import config
 
 log = logging.getLogger('evo.apply.opencode')
 PERMISSIONS = {

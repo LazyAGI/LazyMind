@@ -1,5 +1,5 @@
 """Algorithm helpers for chat engine tools."""
 
-from .kb_ppl_search import ppl_search
+from .search_kb import search_kb
 
-__all__ = ['ppl_search']
+__all__ = ['search_kb']

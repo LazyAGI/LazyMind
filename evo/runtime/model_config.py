@@ -55,7 +55,7 @@ def activate_model_config(model_config: dict[str, Any] | None, *, session_id: st
         return False
 
     import lazyllm
-    from lazymind.model_config import inject_model_config, summarize_model_config_for_log
+    from algorithm.chat.utils.load_config import inject_model_config, summarize_model_config_for_log
 
     lazyllm.globals._init_sid(sid=session_id)
     lazyllm.locals._init_sid(sid=session_id)

@@ -52,7 +52,7 @@ def search_text(
     return ctx_expand(nodes)
 
 
-def ppl_search(
+def search_kb(
     payload: dict,
     *,
     document: Document,

@@ -351,8 +351,8 @@ def test_llm_provider_injection() -> None:
     def fake_provider() -> Any:
         return sentinel
 
-    # Wipe any cached lazymind.chat.engine.pipelines.builders.get_models so we can prove non-import.
-    chat_keys = [k for k in sys.modules if k.startswith("lazymind.chat.engine.pipelines.builders.get_models")]
+    # Wipe any cached chat.pipelines.builders.get_models so we can prove non-import.
+    chat_keys = [k for k in sys.modules if k.startswith("chat.pipelines.builders.get_models")]
     for k in chat_keys:
         del sys.modules[k]
 
@@ -360,7 +360,7 @@ def test_llm_provider_injection() -> None:
     session = create_session(cfg, llm_provider=fake_provider)
     inv = LLMInvoker(session=session, system_prompt="...")
     assert inv._build_llm() is sentinel
-    assert "lazymind.chat.engine.pipelines.builders.get_models" not in sys.modules, \
+    assert "chat.pipelines.builders.get_models" not in sys.modules, \
         "LLMInvoker must not import the chat module when a provider is supplied."
     print("  -> OK")
 

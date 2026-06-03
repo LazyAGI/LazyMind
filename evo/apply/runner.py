@@ -14,7 +14,7 @@ from evo.apply.git_workspace import GitWorkspace
 from evo.apply.tests import TestOutcome, run_tests
 from evo.harness.plan import StopRequested
 from evo.runtime.config import EvoConfig
-from lazymind.config import config
+from algorithm.config import config
 
 _NO_CHANGES_FEEDBACK = (
     '上一轮 opencode 未对任何 allowlist 中的文件做出修改。本轮必须实际改动至少一个允许文件，否则任务无法收尾。'
@@ -135,7 +135,7 @@ def _rel_under_chat(key: str, base: Path) -> str:
         try:
             return p.resolve().relative_to(base).as_posix()
         except ValueError:
-            marker = '/algorithm/lazymind/chat/'
+            marker = '/algorithm/chat/'
             raw = p.as_posix()
             if marker in raw:
                 return raw.split(marker, 1)[1]
