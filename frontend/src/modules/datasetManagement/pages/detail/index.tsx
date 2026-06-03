@@ -75,6 +75,9 @@ import "../../index.scss";
 const { TextArea } = Input;
 const NEW_ITEM_ID = "__new_dataset_item__";
 const MIN_COLUMN_WIDTH = 88;
+const MIN_HEADER_HEIGHT = 40;
+const MAX_HEADER_HEIGHT = 96;
+const DEFAULT_HEADER_HEIGHT = 44;
 const MIN_ROW_HEIGHT = 48;
 const MAX_ROW_HEIGHT = 140;
 const DEFAULT_ROW_HEIGHT = 64;
@@ -164,17 +167,21 @@ const editableFieldColumnMap: Record<EditableDatasetItemField, ConfigurableColum
 type ResizableHeaderCellProps = ThHTMLAttributes<HTMLTableCellElement> & {
   columnKey?: ResizableColumnKey;
   columnWidth?: number;
+  headerHeight?: number;
   onResizeColumn?: (
     columnKey: ResizableColumnKey,
     startX: number,
     startWidth: number,
   ) => void;
+  onResizeHeader?: (startY: number, startHeight: number) => void;
 };
 
 function ResizableHeaderCell({
   columnKey,
   columnWidth,
+  headerHeight,
   onResizeColumn,
+  onResizeHeader,
   children,
   style,
   ...rest
@@ -188,8 +195,17 @@ function ResizableHeaderCell({
     onResizeColumn(columnKey, event.clientX, columnWidth);
   };
 
+  const handleHeaderResizeStart = (event: ReactMouseEvent<HTMLSpanElement>) => {
+    if (!headerHeight || !onResizeHeader) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    onResizeHeader(event.clientY, headerHeight);
+  };
+
   return (
-    <th {...rest} style={style}>
+    <th {...rest} style={{ ...style, height: headerHeight }}>
       <div className="dataset-resizable-header-content">{children}</div>
       {columnKey ? (
         <span
@@ -198,6 +214,11 @@ function ResizableHeaderCell({
           onMouseDown={handleColumnResizeStart}
         />
       ) : null}
+      <span
+        aria-hidden="true"
+        className="dataset-header-height-resize-handle"
+        onMouseDown={handleHeaderResizeStart}
+      />
     </th>
   );
 }
@@ -303,6 +324,7 @@ export default function DatasetDetailPage() {
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<ConfigurableColumnKey[]>(
     DEFAULT_VISIBLE_COLUMN_KEYS,
   );
+  const [headerHeight, setHeaderHeight] = useState(DEFAULT_HEADER_HEIGHT);
   const [rowHeight, setRowHeight] = useState(DEFAULT_ROW_HEIGHT);
   const [documentSearchState, setDocumentSearchState] = useState<
     Record<string, DocumentSearchState>
@@ -383,13 +405,34 @@ export default function DatasetDetailPage() {
     document.addEventListener("mouseup", handleMouseUp);
   }, []);
 
+  const handleHeaderResize = useCallback((startY: number, startHeight: number) => {
+    const handleMouseMove = (event: MouseEvent) => {
+      const nextHeight = Math.min(
+        MAX_HEADER_HEIGHT,
+        Math.max(MIN_HEADER_HEIGHT, Math.round(startHeight + event.clientY - startY)),
+      );
+      setHeaderHeight(nextHeight);
+    };
+    const handleMouseUp = () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.classList.remove("dataset-table-row-is-resizing");
+    };
+
+    document.body.classList.add("dataset-table-row-is-resizing");
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  }, []);
+
   const getHeaderCellProps = useCallback(
     (columnKey: ResizableColumnKey) => ({
       columnKey,
       columnWidth: columnWidths[columnKey],
+      headerHeight,
       onResizeColumn: handleColumnResize,
+      onResizeHeader: handleHeaderResize,
     }) as ResizableHeaderCellProps,
-    [columnWidths, handleColumnResize],
+    [columnWidths, handleColumnResize, handleHeaderResize, headerHeight],
   );
 
   const loadDetail = async () => {
@@ -1334,6 +1377,7 @@ export default function DatasetDetailPage() {
     [columnWidths, visibleColumnKeys],
   );
   const tableStyle = {
+    "--dataset-table-header-height": `${headerHeight}px`,
     "--dataset-table-row-height": `${rowHeight}px`,
   } as CSSProperties;
   const columnSettingsContent = (
