@@ -240,12 +240,6 @@ export default function DatasetDetailPage() {
   const columns = useMemo<ColumnsType<DatasetItem>>(
     () => [
       {
-        title: "Case ID",
-        dataIndex: "case_id",
-        width: 130,
-        render: (value) => value || "-",
-      },
-      {
         title: "问题",
         dataIndex: "question",
         ellipsis: true,
@@ -432,7 +426,7 @@ export default function DatasetDetailPage() {
               void handleExpandItem(record.id);
             },
           })}
-          scroll={{ x: 1200 }}
+          scroll={{ x: 1080 }}
           pagination={{
             current: pagination.current,
             pageSize: pagination.pageSize,
