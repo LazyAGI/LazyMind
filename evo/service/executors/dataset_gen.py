@@ -1,7 +1,6 @@
 from __future__ import annotations
 import logging
 from lazyllm import AutoModel
-from algorithm.chat.utils.load_config import get_config_path
 from evo.datagen import run_generate_pipeline
 from evo.datagen.kb_client import KBClient
 from evo.harness.plan import StopRequested
@@ -15,7 +14,7 @@ log = logging.getLogger('evo.service.executors.dataset_gen')
 
 
 def _resolve_llm_factory(cfg, *, model_config=None, session_id: str = 'evo:dataset_gen'):
-    client = AutoModel(model=cfg.model_config.llm_role, config=get_config_path())
+    client = AutoModel(model=cfg.model_config.llm_role)
     gateway: ModelGateway[str] = ModelGateway(cfg.llm, name='evo-dataset-gen-llm', logger=log)
 
     return lambda: (

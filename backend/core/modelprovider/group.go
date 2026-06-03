@@ -102,6 +102,7 @@ type updateGroupRequest struct {
 	Name    string `json:"name"`
 	BaseURL string `json:"base_url"`
 	APIKey  string `json:"api_key,omitempty"`
+	Verify  bool   `json:"verify"`
 }
 
 // CreateGroup creates a connection group under the user's model provider (path model_provider_id = user_model_providers.id).
@@ -147,6 +148,27 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Capability: single-group providers only allow one group per user.
+	if !parent.HasCapability("multi_group") {
+		var count int64
+		if err := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroup{}).
+			Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, userID).
+			Count(&count).Error; err != nil {
+			common.ReplyErr(w, "check existing groups failed", http.StatusInternalServerError)
+			return
+		}
+		if count > 0 {
+			common.ReplyErr(w, "this provider only allows one group per user", http.StatusConflict)
+			return
+		}
+	}
+
+	// When the user's base_url matches the catalog default, api_key is required.
+	if apiKey == "" && isDefaultBaseURL(r.Context(), db, parent.DefaultModelProviderID, baseURL) {
+		common.ReplyErr(w, "api_key is required when using the default base_url", http.StatusBadRequest)
 		return
 	}
 
@@ -251,6 +273,20 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		"base_url":   baseURL,
 		"updated_at": now,
 	}
+
+	// Capability: providers without custom_base_url must keep the original base_url.
+	if !parent.HasCapability("custom_base_url") {
+		baseURL = row.BaseURL
+		updates["base_url"] = row.BaseURL
+	}
+
+	// When the effective base_url matches the catalog default, api_key must not be empty.
+	effectiveBaseURL := baseURL
+	if apiKey == "" && row.APIKey == "" && isDefaultBaseURL(r.Context(), db, parent.DefaultModelProviderID, effectiveBaseURL) {
+		common.ReplyErr(w, "api_key is required when using the default base_url", http.StatusBadRequest)
+		return
+	}
+
 	if baseURL != row.BaseURL {
 		updates["is_verified"] = false
 	}
@@ -259,6 +295,24 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		if apiKey != row.APIKey {
 			updates["is_verified"] = false
 		}
+	}
+
+	// verify=true: run connectivity check before persisting; on success mark is_verified=true atomically.
+	if req.Verify {
+		effectiveAPIKey := apiKey
+		if effectiveAPIKey == "" {
+			effectiveAPIKey = row.APIKey
+		}
+		checkResult, checkErr := doCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey)
+		if checkErr != nil || !checkResult.Success {
+			msg := "verification failed"
+			if checkResult != nil {
+				msg = "verification failed: " + checkResult.Message
+			}
+			common.ReplyErr(w, msg, http.StatusBadGateway)
+			return
+		}
+		updates["is_verified"] = true
 	}
 	if err := db.WithContext(r.Context()).Model(&row).Updates(updates).Error; err != nil {
 		common.ReplyErr(w, "update group failed", http.StatusInternalServerError)
@@ -403,6 +457,11 @@ func seedGroupModelsFromDefaults(
 	requestBaseURL, userID, userName string,
 	now time.Time,
 ) error {
+	// Providers without has_models capability (e.g. OCR, search) have no model list.
+	if !parent.HasCapability("has_models") {
+		return nil
+	}
+
 	var catalog orm.DefaultModelProvider
 	err := tx.WithContext(ctx).
 		Where("id = ? AND deleted_at IS NULL", parent.DefaultModelProviderID).
@@ -445,4 +504,19 @@ func seedGroupModelsFromDefaults(
 		}
 	}
 	return tx.WithContext(ctx).CreateInBatches(&batch, 100).Error
+}
+
+// isDefaultBaseURL reports whether the given base_url matches the catalog default for the provider.
+// When true, the user is using the official hosted service and api_key is required.
+func isDefaultBaseURL(ctx context.Context, db *gorm.DB, defaultProviderID, baseURL string) bool {
+	if defaultProviderID == "" {
+		return false
+	}
+	var catalog orm.DefaultModelProvider
+	if err := db.WithContext(ctx).
+		Where("id = ? AND deleted_at IS NULL", defaultProviderID).
+		Take(&catalog).Error; err != nil {
+		return false
+	}
+	return normalizeBaseURLForCompare(baseURL) == normalizeBaseURLForCompare(catalog.BaseURL)
 }

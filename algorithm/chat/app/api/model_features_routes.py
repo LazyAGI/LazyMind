@@ -1,7 +1,7 @@
 import requests
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
-from chat.utils.load_config import get_dynamic_role_slot_map, get_image_embed_key
+from chat.utils.load_config import get_dynamic_role_slot_map, get_image_embed_key, load_model_config
 from config import config as _cfg
 from lazyllm.tools.rag.store import LAZY_IMAGE_GROUP
 
@@ -40,4 +40,33 @@ def get_model_features():
     return {
         'image_embed_enabled': image_embed_key is not None,
         'image_embed_required': image_embed_required,
+    }
+
+
+@router.get('/api/model/role_type', summary='Get the lazyllm type and source for a runtime_models.yaml role key')
+def get_role_type(role: str):
+    '''Return the lazyllm technical type and source for the given runtime_models.yaml role key.
+
+    Example: role=evo_llm   → {"role": "evo_llm",   "type": "llm",   "source": "dynamic", "is_dynamic": true}
+             role=embed_main → {"role": "embed_main", "type": "embed", "source": "dynamic", "is_dynamic": true}
+
+    source is the raw value from the yaml entry (e.g. "dynamic", "openai", a URL, etc.).
+    is_dynamic is true when source == "dynamic".
+
+    Returns 404 when the role is not defined in the active config file.
+    '''
+    raw = load_model_config()
+    cfg = raw.get(role)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail=f'role {role!r} not found in runtime config')
+    if isinstance(cfg, list):
+        cfg = cfg[0] if cfg else {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    source = str(cfg.get('source') or '').strip()
+    return {
+        'role': role,
+        'type': str(cfg.get('type') or 'llm').lower(),
+        'source': source,
+        'is_dynamic': source.lower() == 'dynamic',
     }

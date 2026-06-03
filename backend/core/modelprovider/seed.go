@@ -20,16 +20,21 @@ type catalogModel struct {
 	Type string `yaml:"type"`
 }
 
-type catalogProvider struct {
-	Name        string         `yaml:"name"`
-	Description string         `yaml:"description"`
-	BaseURL     string         `yaml:"base_url"`
-	Models      []catalogModel `yaml:"models"`
+type catalogSupplier struct {
+	Name         string         `yaml:"name"`
+	Description  string         `yaml:"description"`
+	BaseURL      string         `yaml:"base_url"`
+	Capabilities []string       `yaml:"capabilities"` // overrides section-level default when non-empty
+	Models       []catalogModel `yaml:"models"`
 }
 
-type modelCatalog struct {
-	Providers []catalogProvider `yaml:"model_providers"`
+type catalogSection struct {
+	Capabilities []string          `yaml:"capabilities"`
+	Suppliers    []catalogSupplier `yaml:"suppliers"`
 }
+
+// modelCatalog is a map from section key (e.g. "model_providers") to its section.
+type modelCatalog map[string]catalogSection
 
 var endpointPathMarkers = []string{"/embeddings", "/rerank", "/embed"}
 
@@ -50,31 +55,40 @@ func normalizeBaseURL(raw string) string {
 	return url
 }
 
-func loadModelCatalog(yamlBytes []byte) (*modelCatalog, error) {
+func loadModelCatalog(yamlBytes []byte) (modelCatalog, error) {
 	var catalog modelCatalog
 	if err := yaml.Unmarshal(yamlBytes, &catalog); err != nil {
 		return nil, err
 	}
-	return &catalog, nil
+	return catalog, nil
 }
 
-func upsertDefaultProvider(tx *gorm.DB, now time.Time, item catalogProvider) (string, error) {
+func upsertDefaultProvider(tx *gorm.DB, now time.Time, category string, caps []string, item catalogSupplier) (string, error) {
 	name := strings.TrimSpace(item.Name)
 	if name == "" {
 		return "", errors.New("provider name is required")
 	}
+
+	// Supplier-level capabilities override section-level when present.
+	effectiveCaps := caps
+	if len(item.Capabilities) > 0 {
+		effectiveCaps = item.Capabilities
+	}
+	capStr := strings.Join(effectiveCaps, ",")
 
 	baseURL := normalizeBaseURL(item.BaseURL)
 	var row orm.DefaultModelProvider
 	err := tx.Where("name = ?", name).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		row = orm.DefaultModelProvider{
-			ID:          common.GenerateID(),
-			Name:        name,
-			Description: item.Description,
-			BaseURL:     baseURL,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			ID:           common.GenerateID(),
+			Name:         name,
+			Description:  item.Description,
+			BaseURL:      baseURL,
+			Category:     category,
+			Capabilities: capStr,
+			CreatedAt:    now,
+			UpdatedAt:    now,
 		}
 		return row.ID, tx.Create(&row).Error
 	}
@@ -85,10 +99,12 @@ func upsertDefaultProvider(tx *gorm.DB, now time.Time, item catalogProvider) (st
 	return row.ID, tx.Model(&orm.DefaultModelProvider{}).
 		Where("id = ?", row.ID).
 		Updates(map[string]any{
-			"description": item.Description,
-			"base_url":    baseURL,
-			"updated_at":  now,
-			"deleted_at":  nil,
+			"description":  item.Description,
+			"base_url":     baseURL,
+			"category":     category,
+			"capabilities": capStr,
+			"updated_at":   now,
+			"deleted_at":   nil,
 		}).Error
 }
 
@@ -146,14 +162,18 @@ func SeedModelCatalog(ctx context.Context, db *gorm.DB, yamlPath string) error {
 
 	now := time.Now().UTC()
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, provider := range catalog.Providers {
-			providerID, err := upsertDefaultProvider(tx, now, provider)
-			if err != nil {
-				return err
-			}
-			for _, model := range provider.Models {
-				if err := upsertDefaultModel(tx, now, providerID, provider.Name, model); err != nil {
+		for sectionKey, section := range catalog {
+			// Derive category from section key: "model_providers" → "model"
+			category := strings.TrimSuffix(sectionKey, "_providers")
+			for _, supplier := range section.Suppliers {
+				providerID, err := upsertDefaultProvider(tx, now, category, section.Capabilities, supplier)
+				if err != nil {
 					return err
+				}
+				for _, model := range supplier.Models {
+					if err := upsertDefaultModel(tx, now, providerID, supplier.Name, model); err != nil {
+						return err
+					}
 				}
 			}
 		}

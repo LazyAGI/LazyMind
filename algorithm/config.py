@@ -1,5 +1,15 @@
 import os
+from pathlib import Path
+
+import lazyllm
 from lazyllm.configs import Config
+
+_COMMON_DIR = Path(__file__).resolve().parent / 'common'
+
+
+def _model_config_path_post_action(resolved_path):
+    if not resolved_path: return
+    lazyllm.config['auto_model_config_map_path'] = str(resolved_path)
 
 # Single Config instance for the entire algorithm package.
 # All LAZYMIND_* environment variables are registered here.
@@ -23,7 +33,14 @@ config.add('algo_service_url', str, 'http://lazyllm-algo:8000', 'ALGO_SERVICE_UR
 config.add('algo_dataset_name', str, 'general_algo', 'ALGO_DATASET_NAME', description='Default algorithm dataset name.')
 config.add('default_chat_dataset', str, 'algo', 'DEFAULT_CHAT_DATASET', description='Default chat dataset.')
 config.add('skip_startup_pipeline', bool, False, 'SKIP_STARTUP_PIPELINE', description='Skip startup pipeline initialization.')
-config.add('model_config_path', str, 'dynamic', 'MODEL_CONFIG_PATH', description='Runtime model config path (inner/online/dynamic or file path).')
+config.add('model_config_path', str, 'dynamic', 'MODEL_CONFIG_PATH',
+           description='Runtime model config YAML path. Shorthand aliases are auto-resolved to absolute paths.',
+           alias={
+               'inner': str(_COMMON_DIR / 'runtime_models.inner.yaml'),
+               'online': str(_COMMON_DIR / 'runtime_models.online.yaml'),
+               'dynamic': str(_COMMON_DIR / 'runtime_models.yaml'),
+           },
+           post_action=_model_config_path_post_action)
 
 # ---------------------------------------------------------------------------
 # Tracing / observability

@@ -22,7 +22,6 @@ from typing import Callable, List, Optional, Union
 
 from lazyllm import LOG, AutoModel, ModuleBase
 from lazyllm.tools.rag.query_enh_ac import QueryEnhACProcessor
-from chat.utils.load_config import get_config_path
 
 from .db import fetch_vocab_for_user_id
 
@@ -43,7 +42,7 @@ class VocabManager(ModuleBase):
         actual_source = data_source if data_source is not None else self._load_from_db
         self._proc = QueryEnhACProcessor(
             data_source=actual_source,
-            discriminator=AutoModel(model='llm', config=get_config_path()),
+            discriminator=AutoModel(model='llm'),
         )
         LOG.info(f'[VocabManager] initialized for user_id={user_id!r}, vocab_size={self.vocab_size}')
 

@@ -94,6 +94,11 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !parent.HasCapability("has_models") {
+		common.ReplyErr(w, "this provider does not support models", http.StatusBadRequest)
+		return
+	}
+
 	var group orm.UserModelProviderGroup
 	err = db.WithContext(r.Context()).
 		Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parent.ID, userID).
@@ -189,6 +194,12 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Providers without has_models return an empty list rather than an error.
+	if !parent.HasCapability("has_models") {
+		common.ReplyOK(w, groupModelListResponse{Models: []groupModelListItem{}})
+		return
+	}
+
 	var group orm.UserModelProviderGroup
 	err = db.WithContext(r.Context()).
 		Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parent.ID, userID).
@@ -252,10 +263,15 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Translate runtime_models.yaml role key (e.g. "evo_llm") to the lazyllm
+	// technical type (e.g. "llm") stored in user_model_provider_group_models.
+	dbModelType := resolveModelType(r.Context(), modelType)
+
 	var rows []orm.UserModelProviderGroupModel
 	if err := db.WithContext(r.Context()).
-		Where("create_user_id = ? AND deleted_at IS NULL AND model_type = ?", userID, modelType).
-		Order("user_model_provider_id ASC, user_model_provider_group_id ASC, name ASC").
+		Joins("JOIN user_model_providers ON user_model_providers.id = user_model_provider_group_models.user_model_provider_id AND user_model_providers.deleted_at IS NULL AND user_model_providers.capabilities LIKE '%has_models%'").
+		Where("user_model_provider_group_models.create_user_id = ? AND user_model_provider_group_models.deleted_at IS NULL AND user_model_provider_group_models.model_type = ?", userID, dbModelType).
+		Order("user_model_provider_group_models.user_model_provider_id ASC, user_model_provider_group_models.user_model_provider_group_id ASC, user_model_provider_group_models.name ASC").
 		Find(&rows).Error; err != nil {
 		common.ReplyErr(w, "list models failed", http.StatusInternalServerError)
 		return
@@ -347,6 +363,11 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
+		return
+	}
+
+	if !parent.HasCapability("has_models") {
+		common.ReplyErr(w, "this provider does not support models", http.StatusBadRequest)
 		return
 	}
 
