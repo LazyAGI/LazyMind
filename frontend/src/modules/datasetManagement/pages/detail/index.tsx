@@ -15,17 +15,14 @@ import {
   Select,
   Space,
   Table,
-  Typography,
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   ArrowLeftOutlined,
   DeleteOutlined,
-  DownOutlined,
   ImportOutlined,
   PlusOutlined,
-  RightOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
@@ -38,7 +35,6 @@ import {
   listDatasetItems,
   updateDatasetItem,
 } from "../../api";
-import DatasetExpandedRowEditor from "../../components/DatasetExpandedRowEditor";
 import DatasetImportModal from "../../components/DatasetImportModal";
 import QuestionTypeSelect from "../../components/QuestionTypeSelect";
 import SourceTypeTag from "../../components/SourceTypeTag";
@@ -50,9 +46,13 @@ import type {
   DatasetListItem,
 } from "../../shared";
 import { formatDateTime, sourceLabelMap } from "../../shared";
+import {
+  joinListField,
+  validateRequiredDatasetItem,
+} from "../../utils/datasetValidation";
 import "../../index.scss";
 
-const { Paragraph } = Typography;
+const { TextArea } = Input;
 const NEW_ITEM_ID = "__new_dataset_item__";
 const MIN_COLUMN_WIDTH = 88;
 const MIN_ROW_HEIGHT = 48;
@@ -62,13 +62,24 @@ const DEFAULT_COLUMN_WIDTHS = {
   question: 240,
   question_type: 130,
   ground_truth: 240,
+  key_points: 220,
+  reference_context: 260,
   reference_doc: 160,
+  generate_reason: 220,
   source: 100,
   updated_at: 150,
-  actions: 120,
+  actions: 180,
 };
 
 type ResizableColumnKey = keyof typeof DEFAULT_COLUMN_WIDTHS;
+type EditableDatasetItemField =
+  | "question"
+  | "question_type"
+  | "ground_truth"
+  | "key_points"
+  | "reference_context"
+  | "reference_doc"
+  | "generate_reason";
 
 type ResizableHeaderCellProps = ThHTMLAttributes<HTMLTableCellElement> & {
   columnKey?: ResizableColumnKey;
@@ -158,6 +169,36 @@ const tableComponents = {
   },
 };
 
+function createItemDraft(item?: DatasetItem): DatasetItemFormValues {
+  return {
+    case_id: item?.case_id || "",
+    question: item?.question || "",
+    question_type: item?.question_type || "",
+    ground_truth: item?.ground_truth || "",
+    key_points: item?.key_points || "",
+    reference_context: item?.reference_context || "",
+    reference_doc: item?.reference_doc || "",
+    reference_doc_ids: joinListField(item?.reference_doc_ids),
+    reference_chunk_ids: joinListField(item?.reference_chunk_ids),
+    generate_reason: item?.generate_reason || "",
+    is_deleted: Boolean(item?.is_deleted),
+  };
+}
+
+function mergeHiddenItemFields(
+  item: DatasetItem,
+  values: DatasetItemFormValues,
+): DatasetItemFormValues {
+  return {
+    ...values,
+    case_id: item.case_id || values.case_id,
+    reference_doc_ids: joinListField(item.reference_doc_ids) || values.reference_doc_ids,
+    reference_chunk_ids:
+      joinListField(item.reference_chunk_ids) || values.reference_chunk_ids,
+    is_deleted: Boolean(item.is_deleted),
+  };
+}
+
 export default function DatasetDetailPage() {
   const navigate = useNavigate();
   const { datasetId = "" } = useParams();
@@ -170,8 +211,8 @@ export default function DatasetDetailPage() {
   const [source, setSource] = useState<DatasetItemSource>();
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
   const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
-  const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, DatasetItemFormValues>>({});
+  const [dirtyItemIds, setDirtyItemIds] = useState<string[]>([]);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [newItemVisible, setNewItemVisible] = useState(false);
   const [columnWidths, setColumnWidths] =
@@ -259,9 +300,24 @@ export default function DatasetDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datasetId]);
 
+  useEffect(() => {
+    setDrafts((current) => {
+      const nextDrafts: Record<string, DatasetItemFormValues> = {};
+      items.forEach((item) => {
+        nextDrafts[item.id] = dirtyItemIds.includes(item.id)
+          ? current[item.id] || createItemDraft(item)
+          : createItemDraft(item);
+      });
+      if (newItemVisible) {
+        nextDrafts[NEW_ITEM_ID] = current[NEW_ITEM_ID] || createItemDraft();
+      }
+      return nextDrafts;
+    });
+  }, [dirtyItemIds, items, newItemVisible]);
+
   const confirmDiscardDirty = () =>
     new Promise<boolean>((resolve) => {
-      if (!dirty) {
+      if (dirtyItemIds.length === 0 && !newItemVisible) {
         resolve(true);
         return;
       }
@@ -280,31 +336,10 @@ export default function DatasetDetailPage() {
     if (!canContinue) {
       return;
     }
-    setExpandedItemId(null);
-    setDirty(false);
+    setDirtyItemIds([]);
+    setNewItemVisible(false);
     setPagination((current) => ({ ...current, current: 1 }));
     await loadDetail();
-  };
-
-  const handleExpandItem = async (itemId: string) => {
-    if (expandedItemId === itemId) {
-      const canContinue = await confirmDiscardDirty();
-      if (!canContinue) {
-        return;
-      }
-      setExpandedItemId(null);
-      setDirty(false);
-      if (itemId === NEW_ITEM_ID) {
-        setNewItemVisible(false);
-      }
-      return;
-    }
-    const canContinue = await confirmDiscardDirty();
-    if (!canContinue) {
-      return;
-    }
-    setExpandedItemId(itemId);
-    setDirty(false);
   };
 
   const handleAddItem = async () => {
@@ -313,12 +348,51 @@ export default function DatasetDetailPage() {
       return;
     }
     setNewItemVisible(true);
-    setExpandedItemId(NEW_ITEM_ID);
-    setDirty(false);
+    setDirtyItemIds([NEW_ITEM_ID]);
+    setDrafts({ [NEW_ITEM_ID]: createItemDraft() });
     setPagination((current) => ({ ...current, current: 1 }));
   };
 
+  const handleDraftChange = (
+    item: DatasetItem,
+    field: EditableDatasetItemField,
+    value?: string,
+  ) => {
+    setDrafts((current) => ({
+      ...current,
+      [item.id]: {
+        ...(current[item.id] || createItemDraft(item.id === NEW_ITEM_ID ? undefined : item)),
+        [field]: value || "",
+      },
+    }));
+    setDirtyItemIds((current) =>
+      current.includes(item.id) ? current : [...current, item.id],
+    );
+  };
+
+  const handleCancelItem = (item: DatasetItem) => {
+    if (item.id === NEW_ITEM_ID) {
+      setNewItemVisible(false);
+      setDirtyItemIds((current) => current.filter((id) => id !== NEW_ITEM_ID));
+      setDrafts((current) => {
+        const { [NEW_ITEM_ID]: _newItemDraft, ...rest } = current;
+        return rest;
+      });
+      return;
+    }
+    setDrafts((current) => ({
+      ...current,
+      [item.id]: createItemDraft(item),
+    }));
+    setDirtyItemIds((current) => current.filter((id) => id !== item.id));
+  };
+
   const handleSaveItem = async (itemId: string, values: DatasetItemFormValues) => {
+    const validationErrors = validateRequiredDatasetItem(values);
+    if (validationErrors.length > 0) {
+      message.warning(validationErrors[0]);
+      return;
+    }
     setSaving(true);
     try {
       if (itemId === NEW_ITEM_ID) {
@@ -326,11 +400,15 @@ export default function DatasetDetailPage() {
         message.success("样本已新增");
         setNewItemVisible(false);
       } else {
-        await updateDatasetItem(datasetId, itemId, values);
+        const currentItem = items.find((item) => item.id === itemId);
+        await updateDatasetItem(
+          datasetId,
+          itemId,
+          currentItem ? mergeHiddenItemFields(currentItem, values) : values,
+        );
         message.success("样本已保存");
       }
-      setExpandedItemId(null);
-      setDirty(false);
+      setDirtyItemIds((current) => current.filter((id) => id !== itemId));
       await loadDetail();
     } catch (error: any) {
       message.error(error?.message || "保存失败");
@@ -403,38 +481,94 @@ export default function DatasetDetailPage() {
     return [newItem, ...items];
   }, [datasetId, items, newItemVisible]);
 
+  const renderInlineInput = (
+    record: DatasetItem,
+    field: EditableDatasetItemField,
+    placeholder: string,
+  ) => (
+    <Input
+      className="dataset-inline-input"
+      value={drafts[record.id]?.[field] || ""}
+      placeholder={placeholder}
+      onChange={(event) => handleDraftChange(record, field, event.target.value)}
+    />
+  );
+
+  const renderInlineTextArea = (
+    record: DatasetItem,
+    field: EditableDatasetItemField,
+    placeholder: string,
+  ) => (
+    <TextArea
+      className="dataset-inline-textarea"
+      value={drafts[record.id]?.[field] || ""}
+      placeholder={placeholder}
+      autoSize={{ minRows: 1, maxRows: 4 }}
+      onChange={(event) => handleDraftChange(record, field, event.target.value)}
+    />
+  );
+
   const columns = useMemo<ColumnsType<DatasetItem>>(
     () => [
       {
         title: "问题",
         dataIndex: "question",
         width: columnWidths.question,
-        ellipsis: true,
         onHeaderCell: () => getHeaderCellProps("question"),
-        render: (value) => <Paragraph ellipsis={{ rows: 1 }}>{value || "-"}</Paragraph>,
+        render: (_, record) => renderInlineInput(record, "question", "请输入问题"),
       },
       {
         title: "问题类型",
         dataIndex: "question_type",
         width: columnWidths.question_type,
         onHeaderCell: () => getHeaderCellProps("question_type"),
-        render: (value) => value || "-",
+        render: (_, record) => (
+          <QuestionTypeSelect
+            value={drafts[record.id]?.question_type || undefined}
+            placeholder="问题类型"
+            onChange={(value) => handleDraftChange(record, "question_type", value)}
+          />
+        ),
       },
       {
         title: "标准答案",
         dataIndex: "ground_truth",
         width: columnWidths.ground_truth,
-        ellipsis: true,
         onHeaderCell: () => getHeaderCellProps("ground_truth"),
-        render: (value) => <Paragraph ellipsis={{ rows: 1 }}>{value || "-"}</Paragraph>,
+        render: (_, record) =>
+          renderInlineTextArea(record, "ground_truth", "请输入标准答案"),
+      },
+      {
+        title: "答案要点",
+        dataIndex: "key_points",
+        width: columnWidths.key_points,
+        onHeaderCell: () => getHeaderCellProps("key_points"),
+        render: (_, record) =>
+          renderInlineTextArea(record, "key_points", "请输入答案要点"),
+      },
+      {
+        title: "参考上下文",
+        dataIndex: "reference_context",
+        width: columnWidths.reference_context,
+        onHeaderCell: () => getHeaderCellProps("reference_context"),
+        render: (_, record) =>
+          renderInlineTextArea(record, "reference_context", "请输入参考上下文"),
       },
       {
         title: "参考文档",
         dataIndex: "reference_doc",
         width: columnWidths.reference_doc,
-        ellipsis: true,
         onHeaderCell: () => getHeaderCellProps("reference_doc"),
-        render: (value) => value || "-",
+        render: (_, record) =>
+          renderInlineInput(record, "reference_doc", "请输入参考文档"),
+      },
+      {
+        title: "生成依据",
+        dataIndex: "generate_reason",
+        width: columnWidths.generate_reason,
+        onHeaderCell: () => getHeaderCellProps("generate_reason"),
+        render: (_, record) =>
+          renderInlineTextArea(record, "generate_reason", "请输入生成依据"),
       },
       {
         title: "来源",
@@ -455,23 +589,45 @@ export default function DatasetDetailPage() {
         width: columnWidths.actions,
         fixed: "right",
         onHeaderCell: () => getHeaderCellProps("actions"),
-        render: (_, record) =>
-          record.id === NEW_ITEM_ID ? null : (
-            <Button
-              danger
-              size="small"
-              icon={<DeleteOutlined />}
-              onClick={(event) => {
-                event.stopPropagation();
-                handleDeleteItem(record);
-              }}
-            >
-              删除
-            </Button>
-          ),
+        render: (_, record) => {
+          const isDirty = dirtyItemIds.includes(record.id);
+          const draft = drafts[record.id] || createItemDraft(record);
+          return (
+            <Space size={6}>
+              <Button
+                type="primary"
+                size="small"
+                loading={saving}
+                disabled={record.id !== NEW_ITEM_ID && !isDirty}
+                onClick={() => handleSaveItem(record.id, draft)}
+              >
+                保存
+              </Button>
+              <Button size="small" onClick={() => handleCancelItem(record)}>
+                取消
+              </Button>
+              {record.id === NEW_ITEM_ID ? null : (
+                <Button
+                  danger
+                  size="small"
+                  icon={<DeleteOutlined />}
+                  onClick={() => handleDeleteItem(record)}
+                >
+                  删除
+                </Button>
+              )}
+            </Space>
+          );
+        },
       },
     ],
-    [columnWidths, datasetId, getHeaderCellProps],
+    [
+      columnWidths,
+      dirtyItemIds,
+      drafts,
+      getHeaderCellProps,
+      saving,
+    ],
   );
 
   const tableScrollX = useMemo(
@@ -482,23 +638,6 @@ export default function DatasetDetailPage() {
   const tableStyle = {
     "--dataset-table-row-height": `${rowHeight}px`,
   } as CSSProperties;
-
-  const expandedRowRender = (record: DatasetItem) => (
-    <DatasetExpandedRowEditor
-      item={record.id === NEW_ITEM_ID ? undefined : record}
-      isNew={record.id === NEW_ITEM_ID}
-      saving={saving}
-      onDirtyChange={setDirty}
-      onCancel={() => {
-        setExpandedItemId(null);
-        setDirty(false);
-        if (record.id === NEW_ITEM_ID) {
-          setNewItemVisible(false);
-        }
-      }}
-      onSave={(values) => handleSaveItem(record.id, values)}
-    />
-  );
 
   return (
     <div className="dataset-page dataset-detail-page">
@@ -589,30 +728,10 @@ export default function DatasetDetailPage() {
               disabled: record.id === NEW_ITEM_ID,
             }),
           }}
-          expandable={{
-            expandedRowRender,
-            expandedRowKeys: expandedItemId ? [expandedItemId] : [],
-            expandIcon: ({ expanded, record }) => (
-              <button
-                type="button"
-                className="dataset-row-expand-button"
-                aria-label={expanded ? "收起编辑区" : "展开编辑区"}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleExpandItem(record.id);
-                }}
-              >
-                {expanded ? <DownOutlined /> : <RightOutlined />}
-              </button>
-            ),
-          }}
           onRow={(record) => ({
-            className: record.id === expandedItemId ? "is-editing-row" : "",
+            className: dirtyItemIds.includes(record.id) ? "is-editing-row" : "",
             rowHeight,
             onResizeRow: handleRowResize,
-            onClick: () => {
-              void handleExpandItem(record.id);
-            },
           })}
           scroll={{ x: tableScrollX }}
           pagination={{
@@ -624,8 +743,8 @@ export default function DatasetDetailPage() {
               if (!canContinue) {
                 return;
               }
-              setExpandedItemId(null);
-              setDirty(false);
+              setDirtyItemIds([]);
+              setNewItemVisible(false);
               setPagination({ current, pageSize });
             },
           }}
