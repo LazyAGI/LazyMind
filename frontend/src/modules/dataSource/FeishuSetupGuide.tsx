@@ -26,7 +26,9 @@ const guideSteps = [
   {
     title: "进入飞书开发平台",
     description:
-      "打开飞书开发平台，进入企业自建应用页面后点击开发者后台。这里会创建一个专门给 LazyRAG 使用的飞书授权应用。",
+      "进入企业自建应用页面后点击开发者后台。这里会创建一个专门给 LazyRAG 使用的飞书授权应用。",
+    linkLabel: "打开飞书开发平台",
+    linkHref: FEISHU_OPEN_PLATFORM_URL,
     image: "/docs/feishu-setup/step-01.jpg",
     alt: "飞书开发平台首页与开发者后台入口",
   },
@@ -133,9 +135,6 @@ export default function FeishuSetupGuide() {
               </li>
             ))}
           </ol>
-          <a href={FEISHU_OPEN_PLATFORM_URL} target="_blank" rel="noreferrer">
-            打开飞书开发平台
-          </a>
         </aside>
 
         <section className="feishu-setup-guide-content">
@@ -154,7 +153,22 @@ export default function FeishuSetupGuide() {
                 </span>
                 <div>
                   <h2>{step.title}</h2>
-                  <Paragraph>{step.description}</Paragraph>
+                  <Paragraph>
+                    {"linkLabel" in step && step.linkLabel ? (
+                      <>
+                        <a
+                          className="feishu-setup-guide-inline-link"
+                          href={step.linkHref}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {step.linkLabel}
+                        </a>
+                        ，
+                      </>
+                    ) : null}
+                    {step.description}
+                  </Paragraph>
                   {"details" in step && step.details ? (
                     <ul className="feishu-setup-guide-step-details">
                       {step.details.map((detail) => (

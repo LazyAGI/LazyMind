@@ -83,10 +83,6 @@
     }
   }
 
-  a {
-    color: #2563eb;
-    font-weight: 650;
-  }
 }
 
 .feishu-setup-guide-content {
@@ -131,6 +127,16 @@
 
   li + li {
     margin-top: 4px;
+  }
+}
+
+.feishu-setup-guide-inline-link {
+  color: #2563eb;
+  font-weight: 650;
+
+  &:hover,
+  &:focus-visible {
+    color: #1d4ed8;
   }
 }
 
