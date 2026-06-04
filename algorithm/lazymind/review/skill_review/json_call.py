@@ -9,8 +9,6 @@ from json_repair import repair_json
 from lazyllm import LOG
 from pydantic import BaseModel, TypeAdapter
 
-from lazymind.review.skill_review.config import DEFAULT_LLM_CALL_TIMEOUT_SECONDS
-
 # Approximate token usage by summing prompt/response string lengths across LLM calls.
 TOTAL_INPUT_TOKEN_CHARS = 0
 TOTAL_OUTPUT_TOKEN_CHARS = 0
