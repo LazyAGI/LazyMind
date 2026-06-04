@@ -84,7 +84,6 @@ def resolve_skill_actions(
             except Exception as exc:
                 LOG.warning(f'failed to resolve candidate {candidate.skill_name}: {exc}')
                 errors.append(stage_error(STAGE_RESOLUTION, candidate.skill_name, exc))
-                results[index] = _failed_new_resolution(candidate, exc)
     resolutions = [item for item in results if item is not None]
     if artifact_dir is not None:
         write_json_file(artifact_dir / STAGE_FILES[STAGE_RESOLUTION], resolutions)
@@ -98,16 +97,6 @@ def resolve_skill_actions(
 
 
 def _new_resolution(candidate: CandidateSkill) -> SkillReviewResolution:
-    return SkillReviewResolution(
-        id=str(uuid4()),
-        skill_name=candidate.skill_name,
-        type='new',
-        skill_content=candidate.content,
-        summary=None,
-    )
-
-
-def _failed_new_resolution(candidate: CandidateSkill, exc: Exception) -> SkillReviewResolution:
     return SkillReviewResolution(
         id=str(uuid4()),
         skill_name=candidate.skill_name,

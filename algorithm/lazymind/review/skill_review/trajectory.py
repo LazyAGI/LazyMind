@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import json
 from pathlib import Path
 from typing import Any
@@ -22,7 +21,7 @@ def build_trajectory(
     tool_calls_by_id: dict[str, dict[str, Any]] = {}
     tool_turn_count = 0
 
-    for index, message in enumerate(session.get('messages', []), start=1):
+    for _index, message in enumerate(session.get('messages', []), start=1):
         role = message.get('role')
         if not role:
             continue

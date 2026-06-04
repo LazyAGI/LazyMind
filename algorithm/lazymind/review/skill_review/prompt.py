@@ -1,3 +1,5 @@
+# flake8: noqa: E501
+
 from __future__ import annotations
 
 import json
@@ -143,6 +145,7 @@ Return ONLY valid JSON:
 
 {trajectory}
 """
+
 
 def refined_trajectory_prompt(trajectory: str) -> str:
     return f"""

@@ -153,10 +153,7 @@ def _build_trajectory_draft(trajectory: Trajectory, llm: AutoModel) -> SkillDraf
 
         gate = _build_skill_extraction_gate(trajectory, llm)
         if not gate.get('should_extract'):
-            LOG.info(
-                f"skip skill draft for trajectory {trajectory.session_id}: "
-                # f"{gate.get('reason') or 'skill extraction gate returned false'}"
-            )
+            LOG.info(f'skip skill draft for trajectory {trajectory.session_id}')
             return None
 
         contextual_description = _build_contextual_description(trajectory, llm)

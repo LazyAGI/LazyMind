@@ -7,10 +7,10 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class SkillReviewRequest(BaseModel):
+    requestid: str = Field(..., min_length=1)
     start_time: datetime
     end_time: datetime
     user_ids: List[str] = Field(default_factory=list)
-    requestid: str = ''
     min_user_turns: int = Field(default=2, ge=0)
     min_tool_turns: int = Field(default=5, ge=0)
     artifact_dir: Optional[str] = None

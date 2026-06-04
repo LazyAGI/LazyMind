@@ -35,7 +35,6 @@ from lazymind.review.skill_review.reports import (
     write_report_file,
 )
 from lazymind.review.skill_review.trajectory import build_trajectories
-from lazymind.model_config import get_config_path
 
 
 @dataclass
@@ -221,7 +220,10 @@ def _run_user_skill_review(
             llm,
             artifact_dir=base_work_dir,
         )
-        LOG.info(f'user {user_id} built {len(state.candidates)} candidates from {len(qualified_trajectories)} qualified_trajectories')
+        LOG.info(
+            f'user {user_id} built {len(state.candidates)} candidates '
+            f'from {len(qualified_trajectories)} qualified_trajectories',
+        )
         state.stage_reports.append(candidate_report)
         if not state.candidates:
             return _fail_user_skill_review(state, 'all outlines failed during candidate generation')
@@ -482,13 +484,6 @@ def _build_user_result(
         candidates=resolutions if qualified else [],
     )
 
-
-def _request_id(request: SkillReviewRequest) -> str:
-    return request.requestid or stable_hash({
-        'start_time': request.start_time.isoformat(),
-        'end_time': request.end_time.isoformat(),
-        'user_ids': request.user_ids,
-    })[:16]
 
 def _resolve_artifact_dir(artifact_dir: str | Path | None, *, requestid: str) -> Path:
     if artifact_dir is None or (isinstance(artifact_dir, str) and not artifact_dir.strip()):

@@ -18,7 +18,7 @@ from lazymind.review.skill_review.schemas import SkillReviewResolution, SkillRev
 from lazymind.config import config as _cfg
 
 SKILL_REVIEW_TABLE = 'skill_review_results'
-SKILL_REVIEW_RUN_STATS_TABLE = 'skill_review_run_status'
+SKILL_REVIEW_RUN_STATS_TABLE = 'skill_review_run_stats'
 _DB_URL_ENV = 'LAZYMIND_DATABASE_URL'
 _CORE_DB_URL_ENV = 'LAZYMIND_CORE_DATABASE_URL'
 _DB_ENV_HINT = f'{_CORE_DB_URL_ENV} or {_DB_URL_ENV}'
@@ -27,6 +27,7 @@ _table_ensured = False
 _table_ensure_lock = threading.Lock()
 _engine_cache: Dict[str, Engine] = {}
 _engine_cache_lock = threading.Lock()
+
 
 def read_session(
     start_time: datetime,
@@ -214,33 +215,6 @@ def ensure_skill_review_table() -> None:
                 )"""
             )
         )
-        conn.execute(text(f"""ALTER TABLE {SKILL_REVIEW_TABLE}
-                    DROP COLUMN IF EXISTS state"""))
-        conn.execute(text(f"""ALTER TABLE {SKILL_REVIEW_TABLE}
-                    ADD COLUMN IF NOT EXISTS userid TEXT NOT NULL DEFAULT ''"""))
-        conn.execute(text(f"""ALTER TABLE {SKILL_REVIEW_TABLE}
-                    ADD COLUMN IF NOT EXISTS requestid TEXT NOT NULL DEFAULT ''"""))
-        conn.execute(text(f"""ALTER TABLE {SKILL_REVIEW_TABLE}
-                    ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'pending'
-                    CHECK (review_status IN ('pending', 'accepted', 'rejected', 'expired'))"""))
-        conn.execute(text(f"""ALTER TABLE {SKILL_REVIEW_TABLE}
-                    DROP CONSTRAINT IF EXISTS {SKILL_REVIEW_TABLE}_review_status_check"""))
-        conn.execute(text(f"""ALTER TABLE {SKILL_REVIEW_TABLE}
-                    ADD CONSTRAINT {SKILL_REVIEW_TABLE}_review_status_check
-                    CHECK (review_status IN ('pending', 'accepted', 'rejected', 'expired'))"""))
-        conn.execute(text(f"""ALTER TABLE {SKILL_REVIEW_TABLE}
-                    ADD COLUMN IF NOT EXISTS summary TEXT"""))
-        conn.execute(text(f"""ALTER TABLE {SKILL_REVIEW_TABLE}
-                    ADD COLUMN IF NOT EXISTS "time" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP"""))
-        conn.execute(text(f"""ALTER TABLE {SKILL_REVIEW_TABLE}
-                    ALTER COLUMN "time" DROP DEFAULT"""))
-        conn.execute(text(f"""ALTER TABLE {SKILL_REVIEW_TABLE}
-                    ALTER COLUMN "time" TYPE TIMESTAMPTZ
-                    USING COALESCE(NULLIF("time"::TEXT, '')::TIMESTAMPTZ, CURRENT_TIMESTAMP)"""))
-        conn.execute(text(f"""ALTER TABLE {SKILL_REVIEW_TABLE}
-                    ALTER COLUMN "time" SET DEFAULT CURRENT_TIMESTAMP"""))
-        conn.execute(text(f"""ALTER TABLE {SKILL_REVIEW_TABLE}
-                    ALTER COLUMN "time" SET NOT NULL"""))
         conn.execute(
             text(
                 f"""CREATE TABLE IF NOT EXISTS {SKILL_REVIEW_RUN_STATS_TABLE} (
@@ -254,12 +228,6 @@ def ensure_skill_review_table() -> None:
                 )"""
             )
         )
-        conn.execute(text(f"""ALTER TABLE {SKILL_REVIEW_RUN_STATS_TABLE}
-                    ADD COLUMN IF NOT EXISTS summary JSONB NOT NULL DEFAULT '{{}}'::jsonb"""))
-        conn.execute(text(
-            f"""CREATE INDEX IF NOT EXISTS idx_{SKILL_REVIEW_RUN_STATS_TABLE}_request_user
-                   ON {SKILL_REVIEW_RUN_STATS_TABLE} (requestid, userid)"""
-        ))
     LOG.info(f'[SkillReviewDB] ensured table {SKILL_REVIEW_TABLE}.')
 
 

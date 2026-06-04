@@ -155,11 +155,3 @@ def _validate_json_object(payload: dict[str, Any], schema: Any) -> dict[str, Any
     if isinstance(schema, type) and issubclass(schema, BaseModel):
         return schema.model_validate(payload).model_dump()
     return payload
-
-
-def _retry_prompt(prompt: str) -> str:
-    return (
-        f'{prompt}\n\n'
-        'Return ONLY one valid JSON object that conforms to the provided JSON schema. '
-        'Do not return markdown, comments, arrays, or plain text.'
-    )

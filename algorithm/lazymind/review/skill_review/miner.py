@@ -310,7 +310,6 @@ def _cluster_item_id(index: int, cluster: TaskCluster) -> str:
     return f'cluster_{index}:{"|".join(sources[:5])}'
 
 
-
 def _write_candidate_skill_files(artifact_dir: Path, candidates: list[CandidateSkill]) -> None:
     skill_dir = artifact_dir / 'skills'
     skill_dir.mkdir(parents=True, exist_ok=True)
