@@ -3,6 +3,7 @@ package modelprovider
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -19,10 +20,16 @@ type listItem struct {
 	Name                   string   `json:"name"`
 	Description            string   `json:"description"`
 	BaseURL                string   `json:"base_url"`
+	BaseURLPresets         []baseURLPresetItem `json:"base_url_presets,omitempty"`
 	Category               string   `json:"category"`
 	IsConfigured           bool     `json:"is_configured"`
 	Capabilities           []string `json:"capabilities"`
 	ModelTypes             []string `json:"model_types"`
+}
+
+type baseURLPresetItem struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
 }
 
 type listResponse struct {
@@ -76,7 +83,7 @@ func ListUserProviders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var rows []orm.UserModelProvider
-	if err := q.Order("name DESC").Find(&rows).Error; err != nil {
+	if err := q.Order("name ASC").Find(&rows).Error; err != nil {
 		common.ReplyErr(w, "list model providers failed", http.StatusInternalServerError)
 		return
 	}
@@ -137,6 +144,7 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 			Name:                   row.Name,
 			Description:            row.Description,
 			BaseURL:                row.BaseURL,
+			BaseURLPresets:         buildBaseURLPresets(row),
 			Category:               row.Category,
 			IsConfigured:           false,
 			Capabilities:           caps,
@@ -144,6 +152,9 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 		})
 	}
 	if len(out) == 0 {
+		return out
+	}
+	if db == nil {
 		return out
 	}
 
@@ -267,4 +278,42 @@ func splitCapabilities(caps string) []string {
 		}
 	}
 	return out
+}
+
+func buildBaseURLPresets(row orm.UserModelProvider) []baseURLPresetItem {
+	if normalizeProviderName(row.Name) != "mineru" {
+		return nil
+	}
+
+	presets := make([]baseURLPresetItem, 0, 2)
+	seen := map[string]struct{}{}
+	appendPreset := func(key, value string) {
+		trimmedValue := strings.TrimSpace(value)
+		if trimmedValue == "" {
+			return
+		}
+		normalizedValue := strings.TrimRight(trimmedValue, "/")
+		if _, ok := seen[normalizedValue]; ok {
+			return
+		}
+		seen[normalizedValue] = struct{}{}
+		presets = append(presets, baseURLPresetItem{
+			Key:   key,
+			Value: trimmedValue,
+		})
+	}
+
+	appendPreset("official", row.BaseURL)
+	if localBaseURL := configuredLocalMinerUBaseURL(); localBaseURL != "" {
+		appendPreset("local", localBaseURL)
+	}
+
+	return presets
+}
+
+func configuredLocalMinerUBaseURL() string {
+	if strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_OCR_SERVER_TYPE"))) != "mineru" {
+		return ""
+	}
+	return strings.TrimSpace(os.Getenv("LAZYMIND_OCR_SERVER_URL"))
 }

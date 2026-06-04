@@ -1,6 +1,7 @@
 package modelprovider
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -149,5 +150,57 @@ func TestBuildListItemsRequiresVerifiedGroupWithNonEmptyAPIKey(t *testing.T) {
 	}
 	if items[0].IsConfigured {
 		t.Fatalf("expected verified group with empty key to be missing: %#v", items[0])
+	}
+}
+
+func TestBuildListItemsAddsMinerULocalPresetWhenConfigured(t *testing.T) {
+	t.Setenv("LAZYMIND_OCR_SERVER_TYPE", "mineru")
+	t.Setenv("LAZYMIND_OCR_SERVER_URL", "http://mineru.local:8000/api/v1/pdf_parse")
+
+	items := buildListItems(t.Context(), nil, []orm.UserModelProvider{
+		{
+			ID:                     "provider-mineru",
+			DefaultModelProviderID: "default-mineru",
+			Name:                   "MinerU",
+			Description:            "MinerU OCR",
+			BaseURL:                "https://mineru.net/api/v4/",
+			Category:               "ocr",
+		},
+	})
+
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if len(items[0].BaseURLPresets) != 2 {
+		t.Fatalf("expected 2 presets, got %#v", items[0].BaseURLPresets)
+	}
+	if items[0].BaseURLPresets[0].Key != "official" || items[0].BaseURLPresets[1].Key != "local" {
+		t.Fatalf("unexpected preset order: %#v", items[0].BaseURLPresets)
+	}
+}
+
+func TestBuildListItemsOmitsMinerULocalPresetWithoutConfiguredURL(t *testing.T) {
+	t.Setenv("LAZYMIND_OCR_SERVER_TYPE", "mineru")
+	_ = os.Unsetenv("LAZYMIND_OCR_SERVER_URL")
+
+	items := buildListItems(t.Context(), nil, []orm.UserModelProvider{
+		{
+			ID:                     "provider-mineru",
+			DefaultModelProviderID: "default-mineru",
+			Name:                   "MinerU",
+			Description:            "MinerU OCR",
+			BaseURL:                "https://mineru.net/api/v4/",
+			Category:               "ocr",
+		},
+	})
+
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if len(items[0].BaseURLPresets) != 1 {
+		t.Fatalf("expected only official preset, got %#v", items[0].BaseURLPresets)
+	}
+	if items[0].BaseURLPresets[0].Key != "official" {
+		t.Fatalf("expected official preset, got %#v", items[0].BaseURLPresets)
 	}
 }

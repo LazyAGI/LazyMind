@@ -56,7 +56,7 @@ export default function DatasetFormModal({
     return {
       name: dataset.name,
       description: dataset.description,
-      knowledge_base_id: dataset.knowledge_bases?.[0]?.id,
+      knowledge_base_ids: dataset.knowledge_bases?.map((item) => item.id) || [],
       create_method: "manual",
     };
   }, [dataset]);
@@ -112,11 +112,12 @@ export default function DatasetFormModal({
         </Form.Item>
 
         <Form.Item
-          name="knowledge_base_id"
+          name="knowledge_base_ids"
           label="关联知识库"
           rules={[{ required: true, message: "请选择关联知识库" }]}
         >
           <Select
+            mode="multiple"
             allowClear
             placeholder="请选择知识库"
             options={knowledgeBases.map((item) => ({

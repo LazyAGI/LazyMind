@@ -66,8 +66,9 @@ func ListUserProviderGroupsByCategory(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "category is required", http.StatusBadRequest)
 		return
 	}
+	keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
 
-	groups, err := loadVerifiedGroupsForUser(r.Context(), db, userID, category)
+	groups, err := loadVerifiedGroupsForUser(r.Context(), db, userID, category, keyword)
 	if err != nil {
 		common.ReplyErr(w, "list provider groups failed", http.StatusInternalServerError)
 		return

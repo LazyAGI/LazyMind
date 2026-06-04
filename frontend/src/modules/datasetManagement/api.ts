@@ -1,6 +1,7 @@
 import {
   Configuration,
   type Doc,
+  DocumentsApiFactory,
   EvalSetImportsApiFactory,
   EvalSetItemsApiFactory,
   EvalSetsApiFactory,
@@ -16,7 +17,6 @@ import {
 import { AgentAppsAuth } from "@/components/auth";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import {
-  DocumentServiceApi,
   KnowledgeBaseServiceApi,
 } from "@/modules/knowledge/utils/request";
 import type {
@@ -39,6 +39,7 @@ const coreConfig = new Configuration({ basePath: BASE_URL });
 const evalSetsClient = EvalSetsApiFactory(coreConfig, BASE_URL, axiosInstance);
 const evalSetItemsClient = EvalSetItemsApiFactory(coreConfig, BASE_URL, axiosInstance);
 const evalSetImportsClient = EvalSetImportsApiFactory(coreConfig, BASE_URL, axiosInstance);
+const documentsClient = DocumentsApiFactory(coreConfig, BASE_URL, axiosInstance);
 
 const IMPORT_TASK_PROCESSING_STATUSES = new Set([
   "pending",
@@ -56,7 +57,77 @@ export interface DatasetItemListResult {
 
 export interface KnowledgeDocumentOption {
   documentId: string;
+  datasetId?: string;
   name: string;
+}
+
+export interface KnowledgeDocumentSearchResult {
+  options: KnowledgeDocumentOption[];
+  nextPageToken?: string;
+  totalSize?: number;
+}
+
+export async function findKnowledgeBaseDocumentById(
+  knowledgeBaseIds: string[],
+  documentId: string,
+): Promise<KnowledgeDocumentOption | null> {
+  const normalizedKnowledgeBaseIds = Array.from(
+    new Set((knowledgeBaseIds || []).map((item) => `${item || ""}`.trim())),
+  ).filter(Boolean);
+  const normalizedDocumentId = `${documentId || ""}`.trim();
+  if (normalizedKnowledgeBaseIds.length === 0 || !normalizedDocumentId) {
+    return null;
+  }
+
+  for (const knowledgeBaseId of normalizedKnowledgeBaseIds) {
+    let pageToken = "";
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const response = await documentsClient.apiCoreDatasetsDatasetDocumentsGet({
+        dataset: knowledgeBaseId,
+        pageToken: pageToken || undefined,
+        pageSize: 100,
+      });
+      const payload = unwrapPayload(
+        response.data as {
+          documents?: Doc[];
+          next_page_token?: string;
+        },
+      );
+      const matchedDocument = (payload.documents || []).find(
+        (item) => `${item.document_id || ""}`.trim() === normalizedDocumentId,
+      );
+      if (matchedDocument) {
+        return {
+          documentId: normalizedDocumentId,
+          datasetId: knowledgeBaseId,
+          name:
+            `${matchedDocument.display_name || matchedDocument.name || normalizedDocumentId}`.trim(),
+        };
+      }
+
+      pageToken = `${payload.next_page_token || ""}`.trim();
+      if (!pageToken) {
+        break;
+      }
+    }
+  }
+
+  return null;
+}
+
+export function mergeKnowledgeDocumentOptions(
+  currentOptions: KnowledgeDocumentOption[],
+  nextOptions: KnowledgeDocumentOption[],
+) {
+  const seen = new Set<string>();
+  return [...currentOptions, ...nextOptions].filter((option) => {
+    const dedupeKey = `${option.name || option.documentId}`.trim().toLowerCase();
+    if (!dedupeKey || seen.has(dedupeKey)) {
+      return false;
+    }
+    seen.add(dedupeKey);
+    return true;
+  });
 }
 
 interface ApiEnvelope<T> {
@@ -134,14 +205,20 @@ function normalizeItemSource(source?: string): DatasetItemSource {
 }
 
 function mapEvalSetToDatasetListItem(item: EvalSetResponse): DatasetListItem {
-  const knowledgeBase = item.dataset_id
-    ? [
-        {
-          id: item.dataset_id,
-          name: item.dataset_name || item.dataset_id,
-        },
-      ]
-    : [];
+  const datasetIds = Array.isArray(item.dataset_ids) ? item.dataset_ids : [];
+  const datasetNames = Array.isArray(item.dataset_names) ? item.dataset_names : [];
+  const knowledgeBase = datasetIds
+    .map((datasetId, index) => {
+      const id = `${datasetId || ""}`.trim();
+      if (!id) {
+        return null;
+      }
+      return {
+        id,
+        name: `${datasetNames[index] || datasetId || ""}`.trim() || id,
+      };
+    })
+    .filter((item): item is KnowledgeBaseOption => Boolean(item));
 
   return {
     id: item.id,
@@ -183,16 +260,18 @@ function mapEvalSetItemToDatasetItem(item: EvalSetItemResponse): DatasetItem {
 function buildCreateEvalSetPayload(payload: {
   name: string;
   description?: string;
-  knowledge_base_id?: string;
+  knowledge_base_ids?: string[];
 }): CreateEvalSetRequest {
-  const datasetId = `${payload.knowledge_base_id || ""}`.trim();
-  if (!datasetId) {
+  const datasetIds = Array.from(
+    new Set((payload.knowledge_base_ids || []).map((item) => `${item || ""}`.trim())),
+  ).filter(Boolean);
+  if (datasetIds.length === 0) {
     throw new Error("请选择关联知识库");
   }
   return {
     name: payload.name.trim(),
     description: `${payload.description || ""}`.trim(),
-    dataset_id: datasetId,
+    dataset_ids: datasetIds,
     group_id: ensureGroupId(),
   };
 }
@@ -202,18 +281,22 @@ function buildUpdateEvalSetPayload(
   payload: {
     name: string;
     description?: string;
-    knowledge_base_id?: string;
+    knowledge_base_ids?: string[];
   },
 ): UpdateEvalSetRequest {
-  const datasetId =
-    `${payload.knowledge_base_id || current.knowledge_bases?.[0]?.id || ""}`.trim();
-  if (!datasetId) {
+  const fallbackDatasetIds = (current.knowledge_bases || []).map((item) => `${item.id || ""}`.trim());
+  const datasetIds = Array.from(
+    new Set(
+      (payload.knowledge_base_ids || fallbackDatasetIds).map((item) => `${item || ""}`.trim()),
+    ),
+  ).filter(Boolean);
+  if (datasetIds.length === 0) {
     throw new Error("请选择关联知识库");
   }
   return {
     name: payload.name.trim(),
     description: `${payload.description || ""}`.trim(),
-    dataset_id: datasetId,
+    dataset_ids: datasetIds,
     group_id: ensureGroupId(current.group_id),
   };
 }
@@ -317,39 +400,50 @@ export async function listKnowledgeBases(): Promise<KnowledgeBaseOption[]> {
 }
 
 export async function searchKnowledgeBaseDocuments(
-  knowledgeBaseId: string,
+  knowledgeBaseIds: string[],
   keyword: string,
-): Promise<KnowledgeDocumentOption[]> {
-  const normalizedKnowledgeBaseId = `${knowledgeBaseId || ""}`.trim();
+  pageToken?: string,
+): Promise<KnowledgeDocumentSearchResult> {
+  const normalizedKnowledgeBaseIds = Array.from(
+    new Set((knowledgeBaseIds || []).map((item) => `${item || ""}`.trim())),
+  ).filter(Boolean);
   const normalizedKeyword = `${keyword || ""}`.trim();
-  if (!normalizedKnowledgeBaseId) {
-    return [];
+  if (normalizedKnowledgeBaseIds.length === 0) {
+    return {
+      options: [],
+    };
   }
 
-  const response = normalizedKeyword
-    ? await DocumentServiceApi().documentServiceSearchDocuments({
-        dataset: normalizedKnowledgeBaseId,
-        searchDocumentsRequest: {
-          parent: "",
-          keyword: normalizedKeyword,
-          page_size: 10,
-        },
-      })
-    : await DocumentServiceApi().documentServiceSearchDocuments({
-        dataset: normalizedKnowledgeBaseId,
-        searchDocumentsRequest: {
-          parent: "",
-          page_size: 10,
-        },
-      });
+  const response = await documentsClient.apiCoreDocumentsListByDatasetsPost({
+    listDatasetDocumentsRequest: {
+      dataset_ids: normalizedKnowledgeBaseIds,
+      keyword: normalizedKeyword || undefined,
+      page_size: 10,
+      page_token: `${pageToken || ""}`.trim() || undefined,
+    },
+  });
 
-  const payload = unwrapPayload(response.data as { documents?: Doc[] });
-  return (payload.documents || [])
-    .map((item) => ({
-      documentId: `${item.document_id || ""}`.trim(),
-      name: `${item.display_name || item.name || item.document_id || ""}`.trim(),
-    }))
-    .filter((item) => item.documentId && item.name);
+  const payload = unwrapPayload(
+    response.data as {
+      documents?: Doc[];
+      next_page_token?: string;
+      total_size?: number;
+    },
+  );
+  return {
+    options: mergeKnowledgeDocumentOptions(
+      [],
+      (payload.documents || [])
+        .map((item) => ({
+          documentId: `${item.document_id || ""}`.trim(),
+          datasetId: `${item.dataset_id || ""}`.trim() || undefined,
+          name: `${item.display_name || item.name || item.document_id || ""}`.trim(),
+        }))
+        .filter((item) => item.documentId && item.name),
+    ),
+    nextPageToken: `${payload.next_page_token || ""}`.trim() || undefined,
+    totalSize: payload.total_size,
+  };
 }
 
 export async function listQuestionTypes(): Promise<string[]> {
@@ -374,7 +468,7 @@ export async function listDatasets(keyword?: string): Promise<DatasetListItem[]>
 export async function createDataset(payload: {
   name: string;
   description?: string;
-  knowledge_base_id?: string;
+  knowledge_base_ids?: string[];
 }): Promise<DatasetListItem> {
   const response = await evalSetsClient.apiCoreEvalSetsPost({
     createEvalSetRequest: buildCreateEvalSetPayload(payload),
@@ -387,7 +481,7 @@ export async function updateDataset(
   payload: {
     name: string;
     description?: string;
-    knowledge_base_id?: string;
+    knowledge_base_ids?: string[];
   },
 ): Promise<DatasetListItem> {
   const currentDataset = await getDataset(datasetId);

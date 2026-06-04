@@ -89,7 +89,7 @@ func GetVerifiedProvider(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, verifiedGroupResponse{Ready: false})
 }
 
-func loadVerifiedGroupsForUser(ctx context.Context, db *gorm.DB, userID, category string) ([]verifiedGroupItem, error) {
+func loadVerifiedGroupsForUser(ctx context.Context, db *gorm.DB, userID, category, keyword string) ([]verifiedGroupItem, error) {
 	type row struct {
 		GroupID             string `gorm:"column:group_id"`
 		UserModelProviderID string `gorm:"column:user_model_provider_id"`
@@ -99,7 +99,7 @@ func loadVerifiedGroupsForUser(ctx context.Context, db *gorm.DB, userID, categor
 		Category            string `gorm:"column:category"`
 	}
 	var rows []row
-	err := db.WithContext(ctx).Table("user_model_provider_groups g").
+	q := db.WithContext(ctx).Table("user_model_provider_groups g").
 		Select(
 			"g.id AS group_id, "+
 				"g.user_model_provider_id, "+
@@ -109,8 +109,12 @@ func loadVerifiedGroupsForUser(ctx context.Context, db *gorm.DB, userID, categor
 				"p.category",
 		).
 		Joins("JOIN user_model_providers p ON p.id = g.user_model_provider_id AND p.create_user_id = g.create_user_id AND p.deleted_at IS NULL").
-		Where("g.create_user_id = ? AND p.category = ? AND g.deleted_at IS NULL AND g.is_verified = ?", userID, category, true).
-		Order("p.name ASC, g.name ASC").
+		Where("g.create_user_id = ? AND p.category = ? AND g.deleted_at IS NULL AND g.is_verified = ?", userID, category, true)
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		q = q.Where("p.name LIKE ? OR g.name LIKE ?", like, like)
+	}
+	err := q.Order("p.name ASC, g.name ASC").
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err

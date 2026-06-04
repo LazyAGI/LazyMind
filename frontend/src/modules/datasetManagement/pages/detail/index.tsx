@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   Key,
@@ -34,14 +34,27 @@ import {
   batchDeleteDatasetItems,
   createDatasetItem,
   deleteDatasetItem,
+  findKnowledgeBaseDocumentById,
   getDataset,
   importDatasetItems,
   listDatasetItems,
   type KnowledgeDocumentOption,
   listQuestionTypes,
+  mergeKnowledgeDocumentOptions,
   searchKnowledgeBaseDocuments,
   updateDatasetItem,
 } from "../../api";
+import FileViewer from "@/modules/knowledge/components/FileViewer";
+import {
+  DocumentServiceApi,
+  KnowledgeBaseServiceApi,
+  SegmentServiceApi,
+  normalizeProxyableUrl,
+} from "@/modules/knowledge/utils/request";
+import {
+  ParserConfigTypeEnum,
+  type Segment,
+} from "@/api/generated/knowledge-client";
 import DatasetImportModal from "../../components/DatasetImportModal";
 import QuestionTypeSelect from "../../components/QuestionTypeSelect";
 import SourceTypeTag from "../../components/SourceTypeTag";
@@ -95,8 +108,29 @@ type DocumentSearchState = {
   loading: boolean;
   keyword: string;
   options: KnowledgeDocumentOption[];
+  nextPageToken?: string;
+  totalSize?: number;
 };
 type ConfigurableColumnKey = Exclude<ResizableColumnKey, "actions">;
+type ReferenceDocumentPreview = {
+  datasetId: string;
+  documentId: string;
+  name: string;
+  fileUrl?: string;
+};
+type ReferenceChunkSelectorState = {
+  open: boolean;
+  loading: boolean;
+  confirming: boolean;
+  error: string;
+  itemId: string;
+  documentName: string;
+  documentPreviewUrl: string;
+  segmentGroup: string;
+  chunks: Segment[];
+  selectedChunkIds: string[];
+  previewSegment?: Segment;
+};
 
 const CONFIGURABLE_COLUMN_OPTIONS: Array<{
   label: string;
@@ -238,9 +272,9 @@ function mergeHiddenItemFields(
   return {
     ...values,
     case_id: item.case_id || values.case_id,
-    reference_doc_ids: joinListField(item.reference_doc_ids) || values.reference_doc_ids,
+    reference_doc_ids: values.reference_doc_ids || joinListField(item.reference_doc_ids),
     reference_chunk_ids:
-      joinListField(item.reference_chunk_ids) || values.reference_chunk_ids,
+      values.reference_chunk_ids || joinListField(item.reference_chunk_ids),
     is_deleted: Boolean(item.is_deleted),
   };
 }
@@ -273,6 +307,37 @@ export default function DatasetDetailPage() {
   const [documentSearchState, setDocumentSearchState] = useState<
     Record<string, DocumentSearchState>
   >({});
+  const [referenceChunkSelector, setReferenceChunkSelector] =
+    useState<ReferenceChunkSelectorState>({
+      open: false,
+      loading: false,
+      confirming: false,
+      error: "",
+      itemId: "",
+      documentName: "",
+      documentPreviewUrl: "",
+      segmentGroup: "",
+      chunks: [],
+      selectedChunkIds: [],
+    });
+  const documentSearchPaginationRequestRef = useRef<Record<string, string>>({});
+  const referenceDocumentCacheRef = useRef<Record<string, ReferenceDocumentPreview>>({});
+  const [referenceDocumentCacheVersion, setReferenceDocumentCacheVersion] = useState(0);
+
+  const resetReferenceChunkSelector = useCallback(() => {
+    setReferenceChunkSelector({
+      open: false,
+      loading: false,
+      confirming: false,
+      error: "",
+      itemId: "",
+      documentName: "",
+      documentPreviewUrl: "",
+      segmentGroup: "",
+      chunks: [],
+      selectedChunkIds: [],
+    });
+  }, []);
 
   const handleColumnResize = useCallback(
     (columnKey: ResizableColumnKey, startX: number, startWidth: number) => {
@@ -454,20 +519,36 @@ export default function DatasetDetailPage() {
         loading: current[itemId]?.loading || false,
         keyword: current[itemId]?.keyword || "",
         options: current[itemId]?.options || [],
+        nextPageToken: current[itemId]?.nextPageToken,
+        totalSize: current[itemId]?.totalSize,
         ...patch,
       },
     }));
   };
 
   const handleReferenceDocumentSearch = async (record: DatasetItem, value: string) => {
-    handleDraftChange(record, "reference_doc", value);
+    setDrafts((current) => ({
+      ...current,
+      [record.id]: {
+        ...(current[record.id] || createItemDraft(record.id === NEW_ITEM_ID ? undefined : record)),
+        reference_doc: value || "",
+        reference_doc_ids: "",
+        reference_chunk_ids: "",
+      },
+    }));
+    setDirtyItemIds((current) =>
+      current.includes(record.id) ? current : [...current, record.id],
+    );
+    delete documentSearchPaginationRequestRef.current[record.id];
 
     const match = value.match(/@([^@]*)$/);
     const rawKeyword = `${match?.[1] || ""}`;
     const keyword = rawKeyword.trim();
-    const knowledgeBaseId = `${dataset?.knowledge_bases?.[0]?.id || ""}`.trim();
+    const knowledgeBaseIds = (dataset?.knowledge_bases || [])
+      .map((item) => `${item.id || ""}`.trim())
+      .filter(Boolean);
 
-    if (!match || !knowledgeBaseId) {
+    if (!match || knowledgeBaseIds.length === 0) {
       updateDocumentSearchState(record.id, {
         keyword,
         loading: false,
@@ -483,7 +564,7 @@ export default function DatasetDetailPage() {
     });
 
     try {
-      const options = await searchKnowledgeBaseDocuments(knowledgeBaseId, keyword);
+      const result = await searchKnowledgeBaseDocuments(knowledgeBaseIds, keyword);
       setDocumentSearchState((current) => {
         const latestKeyword = current[record.id]?.keyword || "";
         if (latestKeyword !== keyword) {
@@ -494,7 +575,9 @@ export default function DatasetDetailPage() {
           [record.id]: {
             loading: false,
             keyword,
-            options,
+            options: result.options,
+            nextPageToken: result.nextPageToken,
+            totalSize: result.totalSize,
           },
         };
       });
@@ -507,16 +590,97 @@ export default function DatasetDetailPage() {
     }
   };
 
+  const handleReferenceDocumentScroll = async (record: DatasetItem, event: React.UIEvent<HTMLDivElement>) => {
+    const searchState = documentSearchState[record.id];
+    const nextPageToken = `${searchState?.nextPageToken || ""}`.trim();
+    const keyword = `${searchState?.keyword || ""}`.trim();
+    const knowledgeBaseIds = (dataset?.knowledge_bases || [])
+      .map((item) => `${item.id || ""}`.trim())
+      .filter(Boolean);
+
+    if (!nextPageToken || searchState?.loading || knowledgeBaseIds.length === 0) {
+      return;
+    }
+
+    const target = event.currentTarget;
+    const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+    if (distanceToBottom > 24) {
+      return;
+    }
+
+    const requestKey = `${keyword}::${nextPageToken}`;
+    if (documentSearchPaginationRequestRef.current[record.id] === requestKey) {
+      return;
+    }
+    documentSearchPaginationRequestRef.current[record.id] = requestKey;
+
+    updateDocumentSearchState(record.id, {
+      loading: true,
+    });
+
+    try {
+      const result = await searchKnowledgeBaseDocuments(
+        knowledgeBaseIds,
+        keyword,
+        nextPageToken,
+      );
+      setDocumentSearchState((current) => {
+        const latestState = current[record.id];
+        if (
+          `${latestState?.keyword || ""}`.trim() !== keyword ||
+          `${latestState?.nextPageToken || ""}`.trim() !== nextPageToken
+        ) {
+          delete documentSearchPaginationRequestRef.current[record.id];
+          return {
+            ...current,
+            [record.id]: {
+              ...(latestState || {}),
+              loading: false,
+            },
+          };
+        }
+
+        const currentOptions = latestState?.options || [];
+        return {
+          ...current,
+          [record.id]: {
+            ...(latestState || {}),
+            loading: false,
+            keyword,
+            options: mergeKnowledgeDocumentOptions(currentOptions, result.options),
+            nextPageToken: result.nextPageToken,
+            totalSize: result.totalSize,
+          },
+        };
+      });
+      delete documentSearchPaginationRequestRef.current[record.id];
+    } catch {
+      delete documentSearchPaginationRequestRef.current[record.id];
+      updateDocumentSearchState(record.id, {
+        loading: false,
+      });
+    }
+  };
+
   const handleReferenceDocumentSelect = (
     record: DatasetItem,
     option: KnowledgeDocumentOption,
   ) => {
+    if (option.datasetId) {
+      referenceDocumentCacheRef.current[option.documentId] = {
+        datasetId: option.datasetId,
+        documentId: option.documentId,
+        name: option.name,
+      };
+      setReferenceDocumentCacheVersion((version) => version + 1);
+    }
     setDrafts((current) => ({
       ...current,
       [record.id]: {
         ...(current[record.id] || createItemDraft(record.id === NEW_ITEM_ID ? undefined : record)),
         reference_doc: option.name,
         reference_doc_ids: option.documentId,
+        reference_chunk_ids: "",
       },
     }));
     setDirtyItemIds((current) =>
@@ -527,7 +691,233 @@ export default function DatasetDetailPage() {
       loading: false,
       options: [],
     });
+    delete documentSearchPaginationRequestRef.current[record.id];
   };
+
+  const resolveReferenceDocument = useCallback(
+    async (documentId: string, fallbackName: string) => {
+      const normalizedDocumentId = `${documentId || ""}`.trim();
+      if (!normalizedDocumentId) {
+        throw new Error("请先选择知识库文档");
+      }
+
+      const cachedDocument = referenceDocumentCacheRef.current[normalizedDocumentId];
+      if (cachedDocument?.datasetId) {
+        const response = await DocumentServiceApi().documentServiceGetDocument({
+          dataset: cachedDocument.datasetId,
+          document: normalizedDocumentId,
+        });
+        const detail = response.data;
+        return {
+          datasetId: cachedDocument.datasetId,
+          documentId: normalizedDocumentId,
+          name:
+            `${detail.display_name || cachedDocument.name || fallbackName || normalizedDocumentId}`.trim(),
+          fileUrl: normalizeProxyableUrl(
+            detail.file_url ? `${window.location.origin}/api/core${detail.file_url}` : "",
+          ),
+        } satisfies ReferenceDocumentPreview;
+      }
+
+      const knowledgeBaseIds = (dataset?.knowledge_bases || [])
+        .map((item) => `${item.id || ""}`.trim())
+        .filter(Boolean);
+      if (knowledgeBaseIds.length === 0) {
+        throw new Error("未找到文档所属知识库，请重新从下拉中选择参考文档");
+      }
+
+      const matchedDocument = await findKnowledgeBaseDocumentById(
+        knowledgeBaseIds,
+        normalizedDocumentId,
+      );
+      if (!matchedDocument?.datasetId) {
+        throw new Error("未找到文档所属知识库，请重新从下拉中选择参考文档");
+      }
+      const resolvedDocument = {
+        datasetId: matchedDocument.datasetId,
+        documentId: normalizedDocumentId,
+        name: `${matchedDocument.name || fallbackName || normalizedDocumentId}`.trim(),
+      } satisfies ReferenceDocumentPreview;
+      referenceDocumentCacheRef.current[normalizedDocumentId] = resolvedDocument;
+      setReferenceDocumentCacheVersion((version) => version + 1);
+      const detailResponse = await DocumentServiceApi().documentServiceGetDocument({
+        dataset: matchedDocument.datasetId,
+        document: normalizedDocumentId,
+      });
+      const detail = detailResponse.data;
+      return {
+        ...resolvedDocument,
+        name:
+          `${detail.display_name || resolvedDocument.name || normalizedDocumentId}`.trim(),
+        fileUrl: normalizeProxyableUrl(
+          detail.file_url ? `${window.location.origin}/api/core${detail.file_url}` : "",
+        ),
+      } satisfies ReferenceDocumentPreview;
+    },
+    [dataset?.knowledge_bases],
+  );
+
+  const handleOpenReferenceChunkSelector = useCallback(
+    async (record: DatasetItem) => {
+      const draft = drafts[record.id] || createItemDraft(record.id === NEW_ITEM_ID ? undefined : record);
+      const documentId = `${draft.reference_doc_ids || ""}`
+        .split(",")
+        .map((item) => item.trim())
+        .find(Boolean) || "";
+      if (!documentId) {
+        message.warning("请先在参考文档中选择平台知识库文档");
+        return;
+      }
+
+      setReferenceChunkSelector({
+        open: true,
+        loading: true,
+        confirming: false,
+        error: "",
+        itemId: record.id,
+        documentName: `${draft.reference_doc || record.reference_doc || ""}`.trim(),
+        documentPreviewUrl: "",
+        segmentGroup: "",
+        chunks: [],
+        selectedChunkIds: `${draft.reference_chunk_ids || ""}`
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      });
+
+      try {
+        const resolvedDocument = await resolveReferenceDocument(
+          documentId,
+          `${draft.reference_doc || record.reference_doc || ""}`.trim(),
+        );
+        const datasetDetailResponse = await KnowledgeBaseServiceApi().datasetServiceGetDataset({
+          dataset: resolvedDocument.datasetId,
+        });
+        const parsers = datasetDetailResponse.data.parsers || [];
+        const splitParsers = parsers.filter(
+          (parser) => parser.type === ParserConfigTypeEnum.ParseTypeSplit,
+        );
+        const segmentGroup = `${splitParsers[0]?.name || "block"}`.trim() || "block";
+
+        const segmentResponse = await SegmentServiceApi().segmentServiceSearchSegments({
+          dataset: resolvedDocument.datasetId,
+          document: resolvedDocument.documentId,
+          searchSegmentsRequest: {
+            parent: "",
+            group: segmentGroup,
+            page_size: 100,
+            page_token: "",
+          },
+        });
+        const chunks = segmentResponse.data.segments || [];
+        const nextSelectedChunkIds =
+          `${draft.reference_chunk_ids || ""}`
+            .split(",")
+            .map((item) => item.trim())
+            .filter((item) => chunks.some((chunk) => chunk.segment_id === item)) || [];
+        const previewSegment =
+          chunks.find((chunk) => nextSelectedChunkIds.includes(`${chunk.segment_id || ""}`)) ||
+          chunks[0];
+
+        setReferenceChunkSelector((current) => ({
+          ...current,
+          loading: false,
+          documentName: resolvedDocument.name,
+          documentPreviewUrl: resolvedDocument.fileUrl || "",
+          segmentGroup,
+          chunks,
+          selectedChunkIds: nextSelectedChunkIds,
+          previewSegment,
+          error: chunks.length === 0 ? "该文档暂无可选 chunk" : "",
+        }));
+      } catch (error: any) {
+        setReferenceChunkSelector((current) => ({
+          ...current,
+          loading: false,
+          error: error?.message || "知识库文档加载失败",
+        }));
+      }
+    },
+    [drafts, resolveReferenceDocument],
+  );
+
+  const canSelectReferenceChunks = useCallback(
+    (record: DatasetItem) => {
+      const draft = drafts[record.id] || createItemDraft(record.id === NEW_ITEM_ID ? undefined : record);
+      const documentId = `${draft.reference_doc_ids || ""}`
+        .split(",")
+        .map((item) => item.trim())
+        .find(Boolean) || "";
+      if (!documentId) {
+        return false;
+      }
+
+      if (referenceDocumentCacheRef.current[documentId]?.datasetId) {
+        return true;
+      }
+
+      return false;
+    },
+    [drafts, referenceDocumentCacheVersion],
+  );
+
+  const handleToggleReferenceChunk = useCallback((segment: Segment, checked: boolean) => {
+    const segmentId = `${segment.segment_id || ""}`.trim();
+    if (!segmentId) {
+      return;
+    }
+    setReferenceChunkSelector((current) => {
+      const selectedChunkIds = checked
+        ? Array.from(new Set([...current.selectedChunkIds, segmentId]))
+        : current.selectedChunkIds.filter((item) => item !== segmentId);
+      return {
+        ...current,
+        selectedChunkIds,
+        previewSegment: segment,
+      };
+    });
+  }, []);
+
+  const handleConfirmReferenceChunks = useCallback(async () => {
+    const itemId = referenceChunkSelector.itemId;
+    if (!itemId) {
+      return;
+    }
+
+    const selectedChunks = referenceChunkSelector.chunks.filter((chunk) =>
+      referenceChunkSelector.selectedChunkIds.includes(`${chunk.segment_id || ""}`.trim()),
+    );
+    if (selectedChunks.length === 0) {
+      message.warning("请至少勾选一个 chunk");
+      return;
+    }
+
+    const selectedChunkContent = selectedChunks
+      .map((chunk) => `${chunk.display_content || chunk.content || ""}`.trim())
+      .filter(Boolean)
+      .join("\n\n");
+    const selectedChunkIds = selectedChunks
+      .map((chunk) => `${chunk.segment_id || ""}`.trim())
+      .filter(Boolean)
+      .join(", ");
+
+    setReferenceChunkSelector((current) => ({
+      ...current,
+      confirming: true,
+    }));
+
+    setDrafts((current) => ({
+      ...current,
+      [itemId]: {
+        ...(current[itemId] || createItemDraft(items.find((item) => item.id === itemId))),
+        reference_context: selectedChunkContent,
+        reference_chunk_ids: selectedChunkIds,
+      },
+    }));
+    setDirtyItemIds((current) => (current.includes(itemId) ? current : [...current, itemId]));
+
+    resetReferenceChunkSelector();
+  }, [referenceChunkSelector, resetReferenceChunkSelector]);
 
   const handleCancelItem = (item: DatasetItem) => {
     if (item.id === NEW_ITEM_ID) {
@@ -671,14 +1061,28 @@ export default function DatasetDetailPage() {
     placeholder: string,
   ) => {
     const value = drafts[record.id]?.[field] || "";
+    const shouldShowReferenceChunkSelector =
+      field === "reference_context" && canSelectReferenceChunks(record);
     return (
-      <button
-        type="button"
-        className="dataset-inline-display"
-        onClick={() => setActiveCell({ itemId: record.id, field })}
-      >
-        {value || <span className="dataset-inline-placeholder">{placeholder}</span>}
-      </button>
+      <div className="dataset-inline-display-wrapper">
+        <button
+          type="button"
+          className="dataset-inline-display"
+          onClick={() => setActiveCell({ itemId: record.id, field })}
+        >
+          {value || <span className="dataset-inline-placeholder">{placeholder}</span>}
+        </button>
+        {shouldShowReferenceChunkSelector ? (
+          <Button
+            size="small"
+            type="link"
+            className="dataset-reference-chunk-trigger"
+            onClick={() => void handleOpenReferenceChunkSelector(record)}
+          >
+            选择 chunk
+          </Button>
+        ) : null}
+      </div>
     );
   };
 
@@ -708,9 +1112,14 @@ export default function DatasetDetailPage() {
     }
 
     const searchState = documentSearchState[record.id];
-    const autoCompleteOptions = (searchState?.options || []).map((option) => ({
+    const displayDocumentOptions = mergeKnowledgeDocumentOptions(
+      [],
+      searchState?.options || [],
+    );
+    const autoCompleteOptions = displayDocumentOptions.map((option) => ({
+      key: option.documentId,
       label: option.name,
-      value: option.name,
+      value: option.documentId,
       option,
     }));
     const shouldOpenDocumentOptions =
@@ -724,10 +1133,15 @@ export default function DatasetDetailPage() {
         autoFocus
         open={shouldOpenDocumentOptions}
         className="dataset-inline-input"
+        filterOption={false}
+        listHeight={280}
         value={drafts[record.id]?.reference_doc || ""}
         placeholder="请输入参考文档，输入 @ 可搜索知识库文档"
         notFoundContent={searchState?.loading ? "搜索中..." : "暂无匹配文档"}
         options={autoCompleteOptions}
+        onPopupScroll={(event) => {
+          void handleReferenceDocumentScroll(record, event);
+        }}
         onChange={(value) => {
           void handleReferenceDocumentSearch(record, value);
         }}
@@ -755,15 +1169,31 @@ export default function DatasetDetailPage() {
       return renderCellDisplay(record, field, placeholder);
     }
     return (
-      <TextArea
-        autoFocus
-        className="dataset-inline-textarea"
-        value={drafts[record.id]?.[field] || ""}
-        placeholder={placeholder}
-        autoSize={{ minRows: 1, maxRows: 4 }}
-        onChange={(event) => handleDraftChange(record, field, event.target.value)}
-        onBlur={() => void handleAutoSaveItem(record)}
-      />
+      <div className="dataset-inline-textarea-wrapper">
+        <TextArea
+          autoFocus
+          className="dataset-inline-textarea"
+          value={drafts[record.id]?.[field] || ""}
+          placeholder={placeholder}
+          autoSize={{ minRows: 1, maxRows: 4 }}
+          onChange={(event) => handleDraftChange(record, field, event.target.value)}
+          onBlur={() => void handleAutoSaveItem(record)}
+        />
+        {field === "reference_context" && canSelectReferenceChunks(record) ? (
+          <Button
+            size="small"
+            type="link"
+            className="dataset-reference-chunk-trigger"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onClick={() => void handleOpenReferenceChunkSelector(record)}
+          >
+            选择 chunk
+          </Button>
+        ) : null}
+      </div>
     );
   };
 
@@ -889,6 +1319,7 @@ export default function DatasetDetailPage() {
     dirtyItemIds,
     drafts,
     activeCell,
+    documentSearchState,
     getHeaderCellProps,
     saving,
     visibleColumnKeys,
@@ -1053,6 +1484,87 @@ export default function DatasetDetailPage() {
         onCancel={() => setImportModalOpen(false)}
         onImported={handleImported}
       />
+
+      <Modal
+        open={referenceChunkSelector.open}
+        title={`选择参考上下文${referenceChunkSelector.documentName ? ` - ${referenceChunkSelector.documentName}` : ""}`}
+        width={1200}
+        okText="确定"
+        cancelText="取消"
+        confirmLoading={referenceChunkSelector.confirming}
+        onOk={() => void handleConfirmReferenceChunks()}
+        onCancel={resetReferenceChunkSelector}
+        destroyOnClose
+      >
+        <div className="dataset-reference-modal">
+          <div className="dataset-reference-modal-panel">
+            <div className="dataset-reference-modal-panel-header">文档原文</div>
+            <div className="dataset-reference-modal-panel-body dataset-reference-modal-preview">
+              {referenceChunkSelector.loading ? (
+                <div className="dataset-reference-modal-empty">加载中...</div>
+              ) : referenceChunkSelector.documentPreviewUrl ? (
+                <FileViewer
+                  file={referenceChunkSelector.documentPreviewUrl}
+                  fileName={referenceChunkSelector.documentName}
+                  segment={referenceChunkSelector.previewSegment}
+                />
+              ) : (
+                <div className="dataset-reference-modal-empty">当前文档暂不支持原文预览</div>
+              )}
+            </div>
+          </div>
+          <div className="dataset-reference-modal-panel">
+            <div className="dataset-reference-modal-panel-header">
+              已解析 chunk（已选 {referenceChunkSelector.selectedChunkIds.length}）
+            </div>
+            <div className="dataset-reference-modal-panel-body">
+              {referenceChunkSelector.error ? (
+                <div className="dataset-reference-modal-empty">{referenceChunkSelector.error}</div>
+              ) : referenceChunkSelector.loading ? (
+                <div className="dataset-reference-modal-empty">加载中...</div>
+              ) : referenceChunkSelector.chunks.length === 0 ? (
+                <div className="dataset-reference-modal-empty">暂无可选 chunk</div>
+              ) : (
+                <div className="dataset-reference-chunk-list">
+                  {referenceChunkSelector.chunks.map((chunk, index) => {
+                    const segmentId = `${chunk.segment_id || ""}`.trim();
+                    const content = `${chunk.display_content || chunk.content || ""}`.trim();
+                    const checked = referenceChunkSelector.selectedChunkIds.includes(segmentId);
+                    return (
+                      <label
+                        key={segmentId || `${index}`}
+                        className={`dataset-reference-chunk-item${checked ? " is-selected" : ""}`}
+                        onMouseEnter={() =>
+                          setReferenceChunkSelector((current) => ({
+                            ...current,
+                            previewSegment: chunk,
+                          }))
+                        }
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onChange={(event) =>
+                            handleToggleReferenceChunk(chunk, event.target.checked)
+                          }
+                        />
+                        <div className="dataset-reference-chunk-content">
+                          <div className="dataset-reference-chunk-title">
+                            Chunk {index + 1}
+                            {segmentId ? ` · ${segmentId}` : ""}
+                          </div>
+                          <div className="dataset-reference-chunk-text">
+                            {content || "该 chunk 暂无文本内容"}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

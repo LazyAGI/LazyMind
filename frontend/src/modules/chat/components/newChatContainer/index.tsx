@@ -1022,6 +1022,16 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
             previousConversationId,
             messageListRef.current,
           );
+
+          if (sseRef.current) {
+            try {
+              sseRef.current.close();
+            } catch (error) {
+              console.error("Error closing SSE when creating new chat:", error);
+            }
+          }
+
+          streamManager.closeAndCleanup(previousConversationId);
         }
 
         streamManager.setActiveConversation(null);
@@ -1038,7 +1048,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       setLoading(false);
       setIS_STREAMING(false);
 
-      sseRef.current = null;
+      closeSSE();
+      sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
 
       if (onConversationIdChange) {
         onConversationIdChange("");

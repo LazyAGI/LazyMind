@@ -89,7 +89,7 @@ func TestLoadVerifiedGroupsForUserReturnsOnlyOwnGroups(t *testing.T) {
 		t.Fatalf("create shared selection: %v", err)
 	}
 
-	groups, err := loadVerifiedGroupsForUser(t.Context(), db, "user-1", "ocr")
+	groups, err := loadVerifiedGroupsForUser(t.Context(), db, "user-1", "ocr", "")
 	if err != nil {
 		t.Fatalf("loadVerifiedGroupsForUser: %v", err)
 	}

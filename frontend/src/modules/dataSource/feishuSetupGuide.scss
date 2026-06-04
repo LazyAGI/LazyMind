@@ -161,7 +161,7 @@
 
 .feishu-setup-guide-step figure {
   margin: 0;
-  padding: 0 18px 18px;
+  padding: 0 18px 20px;
 }
 
 .feishu-setup-guide-step img {
@@ -170,6 +170,13 @@
   border: 1px solid #eaecf0;
   border-radius: 8px;
   background: #ffffff;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.06);
+  object-fit: contain;
+}
+
+.feishu-setup-guide-step .ant-image,
+.feishu-setup-guide-step .ant-image-img {
+  width: 100%;
 }
 
 @media (max-width: 900px) {
