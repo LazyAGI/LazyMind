@@ -4,7 +4,7 @@ import json
 import time
 from typing import Any, Dict, List, Optional, Union
 import lazyllm
-from lazyllm import LOG
+from lazyllm import LOG, set_trace_context
 from fastapi.responses import StreamingResponse
 from lazymind.chat.config import (
     LAZYMIND_LLM_PRIORITY,
@@ -116,6 +116,14 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     inject_tool_config(tool_config)
     lazyllm.globals['agentic_config'] = agentic_config
     active_configs = filter_tools(DEFAULT_TOOLS, available_tools)
+    set_trace_context({
+        'enabled': bool(trace),
+        'trace_id': session_id if trace else None,
+        'session_id': session_id,
+        'sampled': True,
+        'module_trace': {'default': True},
+        'request_tags': ['handle_chat'],
+    })
     runtime_prompt = build_system_prompt(
         {cfg.name for cfg in active_configs},
         environment_context=environment_context,
