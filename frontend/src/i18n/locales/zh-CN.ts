@@ -416,7 +416,7 @@ const zhCN = {
     systemManagement: "系统管理",
     developer: "开发者",
     userManagement: "用户管理",
-    dataSourceManagement: "王大本事",
+    dataSourceManagement: "知识源管理",
     datasetManagement: "数据集管理",
     modelProviderManagement: "模型提供商",
     memoryManagement: "智积阅累",
@@ -934,7 +934,7 @@ const zhCN = {
 
   admin: {
     userManagement: "用户管理",
-    dataSourceManagement: "王大本事",
+    dataSourceManagement: "知识源管理",
     dataSourceSubtitle: "统一管理本地、对象存储与 OAuth 云端知识源的接入、同步与运行状态",
     dataSourceDemoTitle: "当前为前端演示态",
     dataSourceCreate: "新建数据源",
