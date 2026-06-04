@@ -166,17 +166,25 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 	}
 	type configuredProviderRow struct {
 		UserModelProviderID string `gorm:"column:user_model_provider_id"`
+		BaseURL             string `gorm:"column:base_url"`
+		APIKey              string `gorm:"column:api_key"`
 	}
 	var configuredRows []configuredProviderRow
 	if err := db.WithContext(ctx).
 		Model(&orm.UserModelProviderGroup{}).
-		Select("user_model_provider_id").
-		Where("user_model_provider_id IN ? AND deleted_at IS NULL AND is_verified = ? AND TRIM(api_key) <> ''", providerIDs, true).
-		Distinct("user_model_provider_id").
+		Select("user_model_provider_id, base_url, api_key").
+		Where("user_model_provider_id IN ? AND deleted_at IS NULL AND is_verified = ?", providerIDs, true).
 		Find(&configuredRows).Error; err == nil {
+		defaultProviderIDByProviderID := make(map[string]string, len(out))
+		for i := range out {
+			defaultProviderIDByProviderID[out[i].ID] = out[i].DefaultModelProviderID
+		}
 		configuredProviderIDs := make(map[string]bool, len(configuredRows))
 		for _, row := range configuredRows {
-			configuredProviderIDs[row.UserModelProviderID] = true
+			if strings.TrimSpace(row.APIKey) != "" ||
+				isCustomBaseURL(ctx, db, defaultProviderIDByProviderID[row.UserModelProviderID], row.BaseURL) {
+				configuredProviderIDs[row.UserModelProviderID] = true
+			}
 		}
 		for i := range out {
 			out[i].IsConfigured = configuredProviderIDs[out[i].ID]

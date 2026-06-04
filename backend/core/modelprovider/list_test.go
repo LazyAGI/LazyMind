@@ -21,6 +21,7 @@ func setupListProviderTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	if err := db.AutoMigrate(
+		&orm.DefaultModelProvider{},
 		&orm.DefaultModel{},
 		&orm.UserModelProvider{},
 		&orm.UserModelProviderGroup{},
@@ -107,12 +108,12 @@ func TestBuildListItemsReturnsConfigurationFlagFromVerifiedGroups(t *testing.T) 
 	}
 }
 
-func TestBuildListItemsRequiresVerifiedGroupWithNonEmptyAPIKey(t *testing.T) {
+func TestBuildListItemsAllowsVerifiedCustomBaseURLWithoutAPIKey(t *testing.T) {
 	db := setupListProviderTestDB(t)
 	now := time.Now()
 	rows := []orm.UserModelProvider{
 		{
-			ID:                     "provider-empty-key",
+			ID:                     "provider-default-empty-key",
 			DefaultModelProviderID: "default-empty-key",
 			Name:                   "Sciverse",
 			Description:            "Sciverse Search",
@@ -124,13 +125,37 @@ func TestBuildListItemsRequiresVerifiedGroupWithNonEmptyAPIKey(t *testing.T) {
 				UpdatedAt:    now,
 			},
 		},
+		{
+			ID:                     "provider-custom-empty-key",
+			DefaultModelProviderID: "default-empty-key",
+			Name:                   "Sciverse Local",
+			Description:            "Sciverse Search",
+			BaseURL:                "https://api.sciverse.space",
+			Category:               "search",
+			BaseModel: orm.BaseModel{
+				CreateUserID: "user-1",
+				CreatedAt:    now,
+				UpdatedAt:    now,
+			},
+		},
+	}
+	if err := db.Create(&orm.DefaultModelProvider{
+		ID:          "default-empty-key",
+		Name:        "Sciverse",
+		Description: "Sciverse Search",
+		BaseURL:     "https://api.sciverse.space",
+		Category:    "search",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}).Error; err != nil {
+		t.Fatalf("create default provider: %v", err)
 	}
 	if err := db.Create(&rows).Error; err != nil {
 		t.Fatalf("create providers: %v", err)
 	}
 	if err := db.Create(&orm.UserModelProviderGroup{
-		ID:                  "group-empty-key",
-		UserModelProviderID: "provider-empty-key",
+		ID:                  "group-default-empty-key",
+		UserModelProviderID: "provider-default-empty-key",
 		Name:                "Sciverse",
 		BaseURL:             "https://api.sciverse.space",
 		APIKey:              "",
@@ -143,13 +168,31 @@ func TestBuildListItemsRequiresVerifiedGroupWithNonEmptyAPIKey(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("create verified group: %v", err)
 	}
+	if err := db.Create(&orm.UserModelProviderGroup{
+		ID:                  "group-custom-empty-key",
+		UserModelProviderID: "provider-custom-empty-key",
+		Name:                "Sciverse Local",
+		BaseURL:             "http://localhost:9000/search",
+		APIKey:              "",
+		IsVerified:          true,
+		BaseModel: orm.BaseModel{
+			CreateUserID: "user-1",
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create custom verified group: %v", err)
+	}
 
 	items := buildListItems(t.Context(), db, rows)
-	if len(items) != 1 {
-		t.Fatalf("expected 1 item, got %d", len(items))
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
 	}
 	if items[0].IsConfigured {
-		t.Fatalf("expected verified group with empty key to be missing: %#v", items[0])
+		t.Fatalf("expected default base URL with empty key to be missing: %#v", items[0])
+	}
+	if !items[1].IsConfigured {
+		t.Fatalf("expected custom base URL with empty key to be configured: %#v", items[1])
 	}
 }
 

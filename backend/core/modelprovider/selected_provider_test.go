@@ -23,6 +23,7 @@ func setupSelectedProviderTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	if err := db.AutoMigrate(
+		&orm.DefaultModelProvider{},
 		&orm.UserModelProvider{},
 		&orm.UserModelProviderGroup{},
 		&orm.UserSelectedProvider{},
@@ -52,6 +53,7 @@ func seedProviderGroup(t *testing.T, db *gorm.DB, userID, providerID, groupID, n
 		UserModelProviderID: providerID,
 		Name:                name,
 		BaseURL:             "https://example.test/" + category,
+		APIKey:              "secret",
 		IsVerified:          true,
 		BaseModel: orm.BaseModel{
 			CreateUserID: userID,
@@ -129,6 +131,47 @@ func TestSetSelectedProviderRejectsLegacyGroupIDOnlyShape(t *testing.T) {
 	seedProviderGroup(t, db, "user-1", "provider-ocr", "group-ocr", "MinerU", "ocr")
 
 	rec := performSetSelectedProvider(`{"group_id":"group-ocr"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSetSelectedProviderRejectsDefaultBaseURLWithoutAPIKey(t *testing.T) {
+	db := setupSelectedProviderTestDB(t)
+	now := time.Now()
+	if err := db.Create(&orm.DefaultModelProvider{
+		ID:          "default-search",
+		Name:        "Search",
+		Description: "Search",
+		BaseURL:     "https://api.search.test",
+		Category:    "search",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}).Error; err != nil {
+		t.Fatalf("create default provider: %v", err)
+	}
+	if err := db.Create(&orm.UserModelProvider{
+		ID:                     "provider-search",
+		DefaultModelProviderID: "default-search",
+		Name:                   "Search",
+		Category:               "search",
+		BaseModel:              orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now},
+	}).Error; err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	if err := db.Create(&orm.UserModelProviderGroup{
+		ID:                  "group-search",
+		UserModelProviderID: "provider-search",
+		Name:                "Search",
+		BaseURL:             "https://api.search.test",
+		APIKey:              "",
+		IsVerified:          true,
+		BaseModel:           orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now},
+	}).Error; err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+
+	rec := performSetSelectedProvider(`{"selections":[{"category":"search","group_id":"group-search"}]}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
 	}

@@ -203,6 +203,10 @@ function normalizeProviderName(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+function normalizeBaseUrlForCompare(value?: string) {
+  return (value || "").trim().replace(/\/+$/, "");
+}
+
 function unwrapResponse<T>(payload: ApiEnvelope<T> | T): T {
   if (payload && typeof payload === "object" && "data" in payload) {
     return (payload as ApiEnvelope<T>).data as T;
@@ -228,6 +232,13 @@ function isGoogleCustomSearch(service?: ExternalServiceConfig | null) {
 
 function getServiceProviderCategory(service: ExternalServiceConfig): ServiceProviderCategory {
   return service.category === "parsing" ? "ocr" : "search";
+}
+
+function isCustomServiceBaseUrl(service: ExternalServiceConfig, baseUrl?: string) {
+  if (!service.fields.includes("baseUrl")) {
+    return false;
+  }
+  return normalizeBaseUrlForCompare(baseUrl) !== normalizeBaseUrlForCompare(service.baseUrl);
 }
 
 function getExternalProvidersUrl(keyword: string) {
@@ -535,6 +546,14 @@ export default function ExternalServicesPage() {
     }
   }
 
+  async function loadFirstGroup(serviceKey: string) {
+    const groupData = await modelProviderRequest<{ groups?: ApiExternalGroup[] }>(
+      "GET",
+      `/model_providers/${encodeURIComponent(serviceKey)}/groups`
+    );
+    return (groupData.groups || [])[0] || null;
+  }
+
   async function handleBaseUrlChange() {
     if (!activeService) {
       return;
@@ -548,8 +567,7 @@ export default function ExternalServicesPage() {
       return;
     }
 
-    const normalizeUrl = (url: string) => url.trim().replace(/\/+$/, "");
-    const isRealChange = normalizeUrl(currentUrl) !== normalizeUrl(originalBaseUrlRef.current);
+    const isRealChange = normalizeBaseUrlForCompare(currentUrl) !== normalizeBaseUrlForCompare(originalBaseUrlRef.current);
 
     if (keyList.length === 0) {
       // No keys: update backend if group exists, otherwise just update ref
@@ -595,16 +613,23 @@ export default function ExternalServicesPage() {
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
-          await modelProviderRequest(
+          const updatedGroup = await modelProviderRequest<SaveExternalGroupResponse>(
             "PATCH",
             `/model_providers/${encodeURIComponent(activeService.key)}/groups/${encodeURIComponent(groupForActiveService!.id)}`,
             { base_url: currentUrl },
           );
           setKeyList([]);
-          setGroupForActiveService(null);
+          setGroupForActiveService(updatedGroup);
           loadGroupKeysGenRef.current += 1;
           originalBaseUrlRef.current = currentUrl;
+          if (isCustomServiceBaseUrl(activeService, currentUrl)) {
+            await modelProviderRequest("PUT", "/model_providers/selected_providers", {
+              selections: [{ category: getServiceProviderCategory(activeService), group_id: updatedGroup.id }],
+            });
+          }
+          message.success(t("modelProvider.external.baseUrlChanged"));
           void loadExternalServices(normalizedSearchValue);
+          closeConfigModal();
         } catch (error) {
           message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
         }
@@ -675,6 +700,55 @@ export default function ExternalServicesPage() {
       message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
     } finally {
       setAddingKey(false);
+    }
+  }
+
+  async function handleSaveServiceConfig() {
+    if (!activeService || addingKey) {
+      return;
+    }
+    try {
+      await form.validateFields();
+      const baseUrl = form.getFieldValue([activeService.key, "baseUrl"]) || activeService.baseUrl || "";
+      const normalizedBaseUrl = baseUrl.trim();
+      let savedGroup = groupForActiveService;
+
+      if (activeService.fields.includes("baseUrl")) {
+        if (!savedGroup) {
+          savedGroup = await loadFirstGroup(activeService.key);
+        }
+        if (savedGroup) {
+          savedGroup = await modelProviderRequest<SaveExternalGroupResponse>(
+            "PATCH",
+            `/model_providers/${encodeURIComponent(activeService.key)}/groups/${encodeURIComponent(savedGroup.id)}`,
+            { base_url: normalizedBaseUrl },
+          );
+        } else {
+          savedGroup = await modelProviderRequest<SaveExternalGroupResponse>(
+            "POST",
+            `/model_providers/${encodeURIComponent(activeService.key)}/groups`,
+            {
+              name: activeService.name,
+              base_url: normalizedBaseUrl,
+              verify: true,
+            },
+          );
+        }
+        setGroupForActiveService(savedGroup);
+        originalBaseUrlRef.current = normalizedBaseUrl;
+      }
+
+      if (savedGroup && (keyList.length > 0 || isCustomServiceBaseUrl(activeService, normalizedBaseUrl))) {
+        await modelProviderRequest("PUT", "/model_providers/selected_providers", {
+          selections: [{ category: getServiceProviderCategory(activeService), group_id: savedGroup.id }],
+        });
+      }
+
+      message.success(t("modelProvider.external.baseUrlChanged"));
+      void loadExternalServices(normalizedSearchValue);
+      closeConfigModal();
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
     }
   }
 
@@ -856,8 +930,8 @@ export default function ExternalServicesPage() {
             : t("modelProvider.external.configureAction")
         }
         footer={[
-          <Button key="close" onClick={closeConfigModal}>
-            {t("common.close")}
+          <Button key="save" loading={addingKey} onClick={handleSaveServiceConfig} type="primary">
+            {t("modelProvider.external.saveConfig")}
           </Button>,
         ]}
       >
