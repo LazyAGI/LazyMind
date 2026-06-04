@@ -112,7 +112,7 @@ config.add(
     str,
     None,
     'CORE_DATABASE_URL',
-    description='Core service PostgreSQL URL (required for router mode).',
+    description='Database URL for router mode. Supports PostgreSQL (postgresql://...) and SQLite (sqlite:///path). Required for router mode.',
 )
 
 # ---------------------------------------------------------------------------
@@ -126,35 +126,13 @@ config.add(
     description='Hostname / IP advertised for this router instance (auto-detected if not set).',
 )
 
-# ---------------------------------------------------------------------------
-# Exported constants
-# ---------------------------------------------------------------------------
-ENABLE_ROUTER: bool = config['enable_router']
-PORT_POOL_START: int = config['router_port_pool_start']
-PORT_POOL_END: int = config['router_port_pool_end']
-PORTS_PER_INSTANCE: int = config['router_ports_per_instance']
-DEFAULT_ALGO_PATH: str = config['router_default_algo_path']
-DEFAULT_INSTANCE_COUNT: int = config['router_default_instance_count']
-HEALTH_INTERVAL: int = config['router_health_interval']
-HEALTH_MAX_FAILURES: int = config['router_health_max_failures']
-HEARTBEAT_INTERVAL: int = config['router_heartbeat_interval']
-INSTANCE_TIMEOUT: int = config['router_instance_timeout']
-REGISTRY_REFRESH_INTERVAL: int = config['router_registry_refresh_interval']
-STARTUP_TIMEOUT: int = config['router_startup_timeout']
-CORE_DATABASE_URL: str = config['core_database_url'] or ''
-
-# Resolve advertised host: prefer explicit env, then POD_IP (K8s), then socket hostname
-_explicit_host: str | None = config['router_host']
-
-
-def _resolve_host() -> str:
-    if _explicit_host:
-        return _explicit_host
+def resolve_host() -> str:
+    """Resolve the advertised host: prefer explicit config, then POD_IP (K8s), then socket hostname."""
+    explicit = config['router_host']
+    if explicit:
+        return explicit
     pod_ip = os.environ.get('POD_IP') or os.environ.get('MY_POD_IP')
     if pod_ip:
         return pod_ip
     import socket
     return socket.gethostname()
-
-
-ROUTER_HOST: str = _resolve_host()

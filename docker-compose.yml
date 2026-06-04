@@ -689,12 +689,12 @@ services:
       LAZYMIND_WORD_GROUP_APPLY_URL: ""
       # Router mode: set LAZYMIND_ENABLE_ROUTER=true to enable multi-algorithm AB routing.
       # Defaults to false for full backward compatibility with the original chat service.
-      LAZYMIND_ENABLE_ROUTER: ${LAZYMIND_ENABLE_ROUTER:-false}
-      LAZYMIND_ROUTER_PORT_POOL_START: ${LAZYMIND_ROUTER_PORT_POOL_START:-18000}
-      LAZYMIND_ROUTER_PORT_POOL_END: ${LAZYMIND_ROUTER_PORT_POOL_END:-18999}
-      LAZYMIND_ROUTER_PORTS_PER_INSTANCE: ${LAZYMIND_ROUTER_PORTS_PER_INSTANCE:-100}
-      LAZYMIND_ROUTER_DEFAULT_ALGO_PATH: ${LAZYMIND_ROUTER_DEFAULT_ALGO_PATH:-/opt/lazymind/chat}
-      LAZYMIND_ROUTER_DEFAULT_INSTANCE_COUNT: ${LAZYMIND_ROUTER_DEFAULT_INSTANCE_COUNT:-1}
+      LAZYMIND_ENABLE_ROUTER: false
+      LAZYMIND_ROUTER_PORT_POOL_START: 18000
+      LAZYMIND_ROUTER_PORT_POOL_END: 18999
+      LAZYMIND_ROUTER_PORTS_PER_INSTANCE: 100
+      LAZYMIND_ROUTER_DEFAULT_ALGO_PATH: /opt/lazymind/chat
+      LAZYMIND_ROUTER_DEFAULT_INSTANCE_COUNT: 1
       <<: [*runtime-home, *trace-config, *proxy-env, *db-conn, *core-db-conn, *llm-api-keys, *upload-paths]
     command: ["python", "-m", "lazymind.router.app", "--port", "8046"]
     depends_on:

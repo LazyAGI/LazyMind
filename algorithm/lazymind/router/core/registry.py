@@ -7,7 +7,8 @@ from typing import Literal, Optional
 
 from sqlalchemy import select
 
-from lazymind.router.config import REGISTRY_REFRESH_INTERVAL
+from lazymind.config import config
+import lazymind.router.config  # noqa: F401 — registers router config keys
 from lazymind.router.db.client import AsyncSessionLocal
 from lazymind.router.db.models import RouterChildProcess
 
@@ -41,7 +42,7 @@ class GlobalRegistry:
         # algo_id -> round-robin cursor
         self._rr_cursors: dict[str, int] = {}
         self._lock = asyncio.Lock()
-        self._refresh_interval = REGISTRY_REFRESH_INTERVAL
+        self._refresh_interval = config['router_registry_refresh_interval']
 
     # ------------------------------------------------------------------
     # Refresh

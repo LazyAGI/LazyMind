@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import logging
 import random
+from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select, text
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import insert, select
 
 from lazymind.router.db.client import AsyncSessionLocal
 from lazymind.router.db.models import (
@@ -44,7 +44,7 @@ class ABRouter:
                 await session.execute(
                     RouterSessionAssignment.__table__.update()
                     .where(RouterSessionAssignment.session_id == session_id)
-                    .values(last_seen_at=text('NOW()'))
+                    .values(last_seen_at=datetime.now(timezone.utc))
                 )
                 await session.commit()
                 return row.algorithm_id
@@ -55,13 +55,16 @@ class ABRouter:
         # Persist the assignment
         if algo_id:
             async with AsyncSessionLocal() as session:
-                stmt = pg_insert(RouterSessionAssignment).values(
+                now = datetime.now(timezone.utc)
+                stmt = insert(RouterSessionAssignment).values(
                     session_id=session_id,
                     algorithm_id=algo_id,
+                    assigned_at=now,
+                    last_seen_at=now,
                 )
                 stmt = stmt.on_conflict_do_update(
                     index_elements=['session_id'],
-                    set_={'last_seen_at': text('NOW()')},
+                    set_={'last_seen_at': now},
                 )
                 await session.execute(stmt)
                 await session.commit()

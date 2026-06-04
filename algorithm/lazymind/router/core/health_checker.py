@@ -2,19 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 import httpx
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, select
 
-from lazymind.router.config import (
-    HEALTH_INTERVAL,
-    HEALTH_MAX_FAILURES,
-    HEARTBEAT_INTERVAL,
-    INSTANCE_TIMEOUT,
-    REGISTRY_REFRESH_INTERVAL,
-    ROUTER_HOST,
-)
+from lazymind.config import config
+import lazymind.router.config  # noqa: F401 — registers router config keys
+from lazymind.router.config import resolve_host
 from lazymind.router.db.client import AsyncSessionLocal
 from lazymind.router.db.models import RouterChildProcess, RouterInstance
 
@@ -32,11 +28,11 @@ class HealthChecker:
     """Manages periodic health probing, heartbeats, and global registry refresh.
 
     Responsibilities:
-    1. Probe child processes owned by this instance every HEALTH_INTERVAL seconds.
+    1. Probe child processes owned by this instance every `router_health_interval` seconds.
        On N consecutive failures: mark unhealthy → trigger restart with backoff.
-    2. Update this instance's heartbeat in `router_instances` every HEARTBEAT_INTERVAL s.
-    3. Trigger GlobalRegistry.refresh() every REGISTRY_REFRESH_INTERVAL s.
-    4. Clean up dead instance records (heartbeat timeout > INSTANCE_TIMEOUT) every cycle.
+    2. Update this instance's heartbeat in `router_instances` every `router_heartbeat_interval` s.
+    3. Trigger GlobalRegistry.refresh() every `router_registry_refresh_interval` s.
+    4. Clean up dead instance records (heartbeat timeout > `router_instance_timeout`) every cycle.
     """
 
     def __init__(self, process_manager: ProcessManager, registry: GlobalRegistry) -> None:
@@ -72,7 +68,7 @@ class HealthChecker:
     async def _health_loop(self) -> None:
         while True:
             await self._probe_all()
-            await asyncio.sleep(HEALTH_INTERVAL)
+            await asyncio.sleep(config['router_health_interval'])
 
     async def _probe_all(self) -> None:
         async with AsyncSessionLocal() as session:
@@ -104,9 +100,9 @@ class HealthChecker:
         else:
             count = self._failure_counts.get(port, 0) + 1
             self._failure_counts[port] = count
-            logger.warning('Child on port %d failed health check (%d/%d)', port, count, HEALTH_MAX_FAILURES)
+            logger.warning('Child on port %d failed health check (%d/%d)', port, count, config['router_health_max_failures'])
 
-            if count >= HEALTH_MAX_FAILURES:
+            if count >= config['router_health_max_failures']:
                 await self._update_child_status(port, 'unhealthy', failures=count)
                 # Trigger restart if not already pending
                 if port not in self._restart_tasks or self._restart_tasks[port].done():
@@ -122,7 +118,7 @@ class HealthChecker:
         logger.info('Scheduling restart for port %d in %.0fs', port, delay)
         await asyncio.sleep(delay)
         try:
-            await self._pm.restart_instance(ROUTER_HOST, port)
+            await self._pm.restart_instance(resolve_host(), port)
             self._failure_counts[port] = 0
             logger.info('Restarted child process on port %d', port)
         except Exception as exc:
@@ -131,19 +127,20 @@ class HealthChecker:
     async def _update_child_status(
         self, port: int, status: str, failures: int
     ) -> None:
+        now = datetime.now(timezone.utc)
         async with AsyncSessionLocal() as session:
             await session.execute(
                 RouterChildProcess.__table__.update()
                 .where(
-                    RouterChildProcess.host == ROUTER_HOST,
+                    RouterChildProcess.host == resolve_host(),
                     RouterChildProcess.port == port,
                     RouterChildProcess.instance_id == self._pm.instance_id,
                 )
                 .values(
                     status=status,
                     failures=failures,
-                    last_health_at=text('NOW()'),
-                    updated_at=text('NOW()'),
+                    last_health_at=now,
+                    updated_at=now,
                 )
             )
             await session.commit()
@@ -154,18 +151,19 @@ class HealthChecker:
 
     async def _heartbeat_loop(self) -> None:
         while True:
-            await asyncio.sleep(HEARTBEAT_INTERVAL)
+            await asyncio.sleep(config['router_heartbeat_interval'])
             try:
                 await self._update_heartbeat()
             except Exception as exc:
                 logger.warning('Heartbeat update failed: %s', exc)
 
     async def _update_heartbeat(self) -> None:
+        now = datetime.now(timezone.utc)
         async with AsyncSessionLocal() as session:
             await session.execute(
                 RouterInstance.__table__.update()
                 .where(RouterInstance.instance_id == self._pm.instance_id)
-                .values(last_heartbeat=text('NOW()'))
+                .values(last_heartbeat=now)
             )
             await session.commit()
 
@@ -175,7 +173,7 @@ class HealthChecker:
 
     async def _registry_refresh_loop(self) -> None:
         while True:
-            await asyncio.sleep(REGISTRY_REFRESH_INTERVAL)
+            await asyncio.sleep(config['router_registry_refresh_interval'])
             try:
                 await self._registry.refresh()
             except Exception as exc:
@@ -187,7 +185,7 @@ class HealthChecker:
 
     async def _cleanup_dead_instances_loop(self) -> None:
         while True:
-            await asyncio.sleep(HEARTBEAT_INTERVAL * 2)
+            await asyncio.sleep(config['router_heartbeat_interval'] * 2)
             try:
                 await self._cleanup_dead_instances()
             except Exception as exc:
@@ -195,10 +193,13 @@ class HealthChecker:
 
     async def _cleanup_dead_instances(self) -> None:
         """Delete child_process records and instance records for stale instances."""
-        timeout_expr = text(f"last_heartbeat < NOW() - INTERVAL '{INSTANCE_TIMEOUT} seconds'")
+        timeout_secs = config['router_instance_timeout']
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=timeout_secs)
         async with AsyncSessionLocal() as session:
             dead = await session.execute(
-                select(RouterInstance.instance_id).where(timeout_expr)
+                select(RouterInstance.instance_id).where(
+                    RouterInstance.last_heartbeat < cutoff
+                )
             )
             dead_ids = [r.instance_id for r in dead]
 

@@ -6,17 +6,14 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
-from lazymind.router.config import (
-    DEFAULT_ALGO_PATH,
-    DEFAULT_INSTANCE_COUNT,
-    ENABLE_ROUTER,
-)
+from lazymind.config import config
+import lazymind.router.config  # noqa: F401 — registers router config keys
 
 logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
-    if not ENABLE_ROUTER:
+    if not config['enable_router']:
         # Fallback mode: behave exactly like the original chat service
         from lazymind.chat.app import create_app as create_chat_app
         return create_chat_app()
@@ -79,8 +76,8 @@ async def _startup(get_engine, Base, get_process_manager, get_global_registry, H
     # Start default algorithm instances
     ports = await pm.start_algorithm(
         algo_id='default',
-        code_path=DEFAULT_ALGO_PATH,
-        count=DEFAULT_INSTANCE_COUNT,
+        code_path=config['router_default_algo_path'],
+        count=config['router_default_instance_count'],
     )
     logger.info('Started default algorithm instances on ports: %s', ports)
     await pm.wait_all_healthy(ports)

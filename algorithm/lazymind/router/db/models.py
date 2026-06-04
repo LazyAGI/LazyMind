@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from sqlalchemy import (
-    TIMESTAMP,
+    JSON,
     Boolean,
     Column,
+    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -12,7 +13,6 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase
 
 
@@ -26,21 +26,21 @@ class RouterAlgorithm(Base):
     id = Column(String(64), primary_key=True)
     name = Column(String(255), nullable=False)
     code_path = Column(String(512), nullable=False)
-    config = Column(JSONB, nullable=False, server_default=text("'{}'"))
+    config = Column(JSON, nullable=False, server_default=text("'{}'"))
     # pending / active / disabled
     status = Column(String(32), nullable=False, server_default=text("'pending'"))
-    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
-    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
 class RouterAbStrategy(Base):
     __tablename__ = 'router_ab_strategies'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    weights = Column(JSONB, nullable=False)
+    weights = Column(JSON, nullable=False)
     is_active = Column(Boolean, nullable=False, server_default=text('TRUE'))
-    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
-    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
 class RouterSessionAssignment(Base):
@@ -48,8 +48,8 @@ class RouterSessionAssignment(Base):
 
     session_id = Column(String(255), primary_key=True)
     algorithm_id = Column(String(64), ForeignKey('router_algorithms.id'), nullable=False)
-    assigned_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
-    last_seen_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    assigned_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (Index('ix_router_session_assignments_algorithm_id', 'algorithm_id'),)
 
@@ -62,7 +62,7 @@ class RouterInstance(Base):
     pid = Column(Integer, nullable=False)
     port_range_start = Column(Integer, nullable=False)
     port_range_end = Column(Integer, nullable=False)
-    last_heartbeat = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+    last_heartbeat = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class RouterChildProcess(Base):
@@ -77,8 +77,8 @@ class RouterChildProcess(Base):
     # starting / healthy / unhealthy / stopped
     status = Column(String(32), nullable=False, server_default=text("'starting'"))
     failures = Column(Integer, nullable=False, server_default=text('0'))
-    last_health_at = Column(TIMESTAMP(timezone=True), nullable=True)
-    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    last_health_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
         UniqueConstraint('host', 'port', name='uq_router_child_processes_host_port'),

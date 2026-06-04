@@ -7,20 +7,15 @@ import subprocess
 import sys
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
-from sqlalchemy import delete, select, text
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import delete, insert, select
 
-from lazymind.router.config import (
-    DEFAULT_ALGO_PATH,
-    PORTS_PER_INSTANCE,
-    PORT_POOL_END,
-    PORT_POOL_START,
-    ROUTER_HOST,
-    STARTUP_TIMEOUT,
-)
+from lazymind.config import config
+import lazymind.router.config  # noqa: F401 — registers router config keys
+from lazymind.router.config import resolve_host
 from lazymind.router.db.client import AsyncSessionLocal
 from lazymind.router.db.models import (
     RouterAlgorithm,
@@ -36,7 +31,7 @@ class ProcessManager:
 
     def __init__(self) -> None:
         self._instance_id: str = str(uuid.uuid4())
-        self._host: str = ROUTER_HOST
+        self._host: str = resolve_host()
         self._port_range: tuple[int, int] = (0, -1)
         self._next_port: int = 0
         # pid -> subprocess.Popen
@@ -62,17 +57,16 @@ class ProcessManager:
 
     async def claim_port_range(self) -> tuple[int, int]:
         """Atomically claim an unused port segment and register this instance."""
-        pool_start = PORT_POOL_START
-        pool_end = PORT_POOL_END
-        stride = PORTS_PER_INSTANCE
+        pool_start = config['router_port_pool_start']
+        pool_end = config['router_port_pool_end']
+        stride = config['router_ports_per_instance']
 
         async with AsyncSessionLocal() as session:
             # Clean up stale instances that have lost their heartbeat
+            stale_cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
             await session.execute(
                 delete(RouterInstance).where(
-                    text(
-                        "last_heartbeat < NOW() - INTERVAL '60 seconds'"
-                    )
+                    RouterInstance.last_heartbeat < stale_cutoff
                 )
             )
             await session.commit()
@@ -101,7 +95,7 @@ class ProcessManager:
         claimed_end = claimed_start + stride - 1
 
         async with AsyncSessionLocal() as session:
-            stmt = pg_insert(RouterInstance).values(
+            stmt = insert(RouterInstance).values(
                 instance_id=self._instance_id,
                 host=self._host,
                 pid=os.getpid(),
@@ -145,13 +139,13 @@ class ProcessManager:
                 algo = RouterAlgorithm(
                     id='default',
                     name='default',
-                    code_path=DEFAULT_ALGO_PATH,
+                    code_path=config['router_default_algo_path'],
                     config={},
                     status='active',
                 )
                 session.add(algo)
                 await session.commit()
-                logger.info('Registered default algorithm at %s', DEFAULT_ALGO_PATH)
+                logger.info('Registered default algorithm at %s', config['router_default_algo_path'])
             elif row.status != 'active':
                 row.status = 'active'
                 await session.commit()
@@ -196,7 +190,7 @@ class ProcessManager:
         self._port_algo[(self._host, port)] = algo_id
 
         async with AsyncSessionLocal() as session:
-            stmt = pg_insert(RouterChildProcess).values(
+            stmt = insert(RouterChildProcess).values(
                 instance_id=self._instance_id,
                 algorithm_id=algo_id,
                 host=self._host,
@@ -287,7 +281,9 @@ class ProcessManager:
     # Health wait
     # ------------------------------------------------------------------
 
-    async def _wait_until_healthy(self, port: int, timeout: int = STARTUP_TIMEOUT) -> bool:
+    async def _wait_until_healthy(self, port: int, timeout: int = -1) -> bool:
+        if timeout < 0:
+            timeout = config['router_startup_timeout']
         url = f'http://127.0.0.1:{port}/health'
         deadline = time.monotonic() + timeout
         async with httpx.AsyncClient(timeout=2.0) as client:
@@ -312,7 +308,9 @@ class ProcessManager:
         logger.warning('Child process on port %d did not become healthy within %ds', port, timeout)
         return False
 
-    async def wait_all_healthy(self, ports: list[int], timeout: int = STARTUP_TIMEOUT) -> None:
+    async def wait_all_healthy(self, ports: list[int], timeout: int = -1) -> None:
+        if timeout < 0:
+            timeout = config['router_startup_timeout']
         tasks = [self._wait_until_healthy(p, timeout) for p in ports]
         await asyncio.gather(*tasks)
 
