@@ -1,9 +1,16 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.23-bookworm AS build
+ARG DOCKER_MIRROR=docker.m.daocloud.io/library/
+FROM ${DOCKER_MIRROR}golang:1.23-bookworm AS build
+
+ARG GOPROXY=https://goproxy.cn,direct
+ARG GOSUMDB=sum.golang.google.cn
+ENV GOPROXY=${GOPROXY} \
+    GOSUMDB=${GOSUMDB}
 
 WORKDIR /src
 COPY go.mod go.sum ./
+RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 COPY migrations ./migrations
@@ -11,7 +18,13 @@ COPY scripts ./scripts
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /out/scan-control-plane ./cmd/scan-control-plane
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM ${DOCKER_MIRROR}alpine:3.21
+
+ARG ALPINE_MIRROR=https://mirrors.aliyun.com/alpine
+RUN sed -i "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" /etc/apk/repositories \
+    && apk add --no-cache ca-certificates
+
+RUN addgroup -S nonroot && adduser -S nonroot -G nonroot
 
 WORKDIR /app
 COPY --from=build /out/scan-control-plane /app/scan-control-plane
