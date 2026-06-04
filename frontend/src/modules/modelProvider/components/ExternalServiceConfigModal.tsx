@@ -314,7 +314,7 @@ export default function ExternalServiceConfigModal({
       destroyOnClose
       footer={[
         <Button key="close" onClick={handleClose}>
-          {t("common.close")}
+          {t("modelProvider.external.saveConfig")}
         </Button>,
       ]}
       onCancel={handleClose}
