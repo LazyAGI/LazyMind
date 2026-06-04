@@ -299,7 +299,11 @@ class CloudOAuthService:
             'display_name': row.display_name or '',
             'provider_tenant_key': row.provider_tenant_key or '',
             'provider_account_meta': _json_loads(row.provider_account_meta),
-            'provider_options': credential.get('provider_options') if isinstance(credential.get('provider_options'), dict) else {},
+            'provider_options': (
+                credential.get('provider_options')
+                if isinstance(credential.get('provider_options'), dict)
+                else {}
+            ),
             'scope': row.scope or '',
             'last_used_at': row.last_used_at,
             'status': row.status,
@@ -350,7 +354,11 @@ class CloudOAuthService:
         client_secret = (credential.get('client_secret') or '').strip()
         if not client_id or not client_secret:
             raise_error(ErrorCodes.CLOUD_CREDENTIAL_INVALID, extra_msg='cloud app credential is incomplete')
-        provider_options = credential.get('provider_options') if isinstance(credential.get('provider_options'), dict) else {}
+        provider_options = (
+            credential.get('provider_options')
+            if isinstance(credential.get('provider_options'), dict)
+            else {}
+        )
         return client_id, client_secret, provider_options
 
     def _get_connection_credentials(
@@ -377,8 +385,15 @@ class CloudOAuthService:
         client_id = (credential.get('client_id') or '').strip()
         client_secret = (credential.get('client_secret') or '').strip()
         if not client_id or not client_secret:
-            raise_error(ErrorCodes.CLOUD_CREDENTIAL_INVALID, extra_msg='reauthorize connection credential is incomplete')
-        provider_options = credential.get('provider_options') if isinstance(credential.get('provider_options'), dict) else {}
+            raise_error(
+                ErrorCodes.CLOUD_CREDENTIAL_INVALID,
+                extra_msg='reauthorize connection credential is incomplete',
+            )
+        provider_options = (
+            credential.get('provider_options')
+            if isinstance(credential.get('provider_options'), dict)
+            else {}
+        )
         return client_id, client_secret, provider_options
 
     def _get_reauthorize_target(
