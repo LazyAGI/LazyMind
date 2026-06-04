@@ -9,6 +9,12 @@ import (
 )
 
 func (c *FeishuConnector) rawObject(authConnectionID string, object Object) connector.RawObject {
+	mimeType := object.MimeType
+	fileExtension := object.FileExtension
+	if isMarkdownExportObject(object) {
+		mimeType = firstNonEmpty(mimeType, "text/markdown")
+		fileExtension = ".md"
+	}
 	raw := connector.RawObject{
 		ObjectRef:         targetRefFor(object),
 		ObjectKey:         objectKeyFor(object),
@@ -25,8 +31,8 @@ func (c *FeishuConnector) rawObject(authConnectionID string, object Object) conn
 		BindingTargetRef:  bindingTargetRef(object),
 		SourceVersion:     versionFor(object),
 		SizeBytes:         object.SizeBytes,
-		MimeType:          object.MimeType,
-		FileExtension:     object.FileExtension,
+		MimeType:          mimeType,
+		FileExtension:     fileExtension,
 		ProviderMeta:      providerMeta(authConnectionID, object),
 	}
 	raw.TreeKey = raw.ObjectKey
@@ -35,6 +41,17 @@ func (c *FeishuConnector) rawObject(authConnectionID string, object Object) conn
 		raw.ModifiedAt = &modifiedAt
 	}
 	return raw
+}
+
+func isMarkdownExportObject(object Object) bool {
+	if object.Kind == ObjectKindWikiNode && object.IsDocument {
+		return true
+	}
+	if object.Kind != ObjectKindDriveFile || !object.IsDocument {
+		return false
+	}
+	driveType := strings.ToLower(strings.TrimSpace(object.DriveType))
+	return driveType == "doc" || driveType == "docx"
 }
 
 func isBindableObject(object Object) bool {
@@ -159,6 +176,9 @@ func providerMeta(authConnectionID string, object Object) connector.ProviderMeta
 	}
 	if object.StableID != "" {
 		meta["stable_id"] = object.StableID
+	}
+	if object.DriveType != "" {
+		meta["file_type"] = object.DriveType
 	}
 	return meta
 }

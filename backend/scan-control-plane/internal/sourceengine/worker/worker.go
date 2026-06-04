@@ -116,7 +116,7 @@ func (w *DefaultParseWorker) runClaimed(ctx context.Context, task store.ParseTas
 		return w.supersede(ctx, task, err.Error())
 	}
 	if task.CoreTaskID != "" || task.CoreDocumentID != "" || task.Status == TaskStatusSubmitted {
-		response, err := w.recoverCoreTask(ctx, task, exec.source.DatasetID)
+		response, err := w.recoverCoreTask(ctx, task, exec.source)
 		if err != nil {
 			return w.handleFailure(ctx, task, err)
 		}
@@ -131,6 +131,7 @@ func (w *DefaultParseWorker) runClaimed(ctx context.Context, task store.ParseTas
 			DatasetID:        exec.source.DatasetID,
 			ParentDocumentID: task.CoreParentDocumentID,
 			SourceDocumentID: exec.document.CoreDocumentID,
+			UserID:           exec.source.CreatedBy,
 			DisplayName:      exec.document.DisplayName,
 			Action:           task.TaskAction,
 		})
@@ -153,6 +154,9 @@ func (w *DefaultParseWorker) runClaimed(ctx context.Context, task store.ParseTas
 		defer func() {
 			_ = w.temp.Cleanup(ctx, exported.CleanupToken)
 		}()
+	}
+	if err := w.updateObjectMetadata(ctx, exec, exported); err != nil {
+		return w.handleFailure(ctx, task, err)
 	}
 	response, err := w.submitToCore(ctx, exec, exported)
 	if err != nil {
@@ -246,6 +250,28 @@ func (w *DefaultParseWorker) exportObject(ctx context.Context, exec executionCon
 	return exported, nil
 }
 
+func (w *DefaultParseWorker) updateObjectMetadata(ctx context.Context, exec executionContext, exported connector.ExportedObject) error {
+	object := exec.object
+	changed := false
+	if exported.SizeBytes > 0 && object.SizeBytes != exported.SizeBytes {
+		object.SizeBytes = exported.SizeBytes
+		changed = true
+	}
+	if exported.MimeType != "" && object.MimeType != exported.MimeType {
+		object.MimeType = exported.MimeType
+		changed = true
+	}
+	if exported.FileExtension != "" && object.FileExtension != exported.FileExtension {
+		object.FileExtension = exported.FileExtension
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	object.UpdatedAt = w.clock()
+	return w.store.UpsertObjects(ctx, []store.SourceObject{object})
+}
+
 func (w *DefaultParseWorker) submitToCore(ctx context.Context, exec executionContext, exported connector.ExportedObject) (coreclient.SubmitParseTaskResponse, error) {
 	content, err := w.temp.Open(ctx, exported.ContentURI)
 	if err != nil {
@@ -257,6 +283,7 @@ func (w *DefaultParseWorker) submitToCore(ctx context.Context, exec executionCon
 		DatasetID:        exec.source.DatasetID,
 		ParentDocumentID: exec.task.CoreParentDocumentID,
 		SourceDocumentID: exec.document.CoreDocumentID,
+		UserID:           exec.source.CreatedBy,
 		DisplayName:      exec.document.DisplayName,
 		ContentURI:       exported.ContentURI,
 		Content:          content,
@@ -266,14 +293,15 @@ func (w *DefaultParseWorker) submitToCore(ctx context.Context, exec executionCon
 	})
 }
 
-func (w *DefaultParseWorker) recoverCoreTask(ctx context.Context, task store.ParseTask, datasetID string) (coreclient.SubmitParseTaskResponse, error) {
+func (w *DefaultParseWorker) recoverCoreTask(ctx context.Context, task store.ParseTask, source store.Source) (coreclient.SubmitParseTaskResponse, error) {
 	if task.CoreTaskID == "" {
 		return coreclient.SubmitParseTaskResponse{Status: coreclient.ResultStatusNotFound}, nil
 	}
 	result, err := w.core.GetCoreTaskResult(ctx, coreclient.GetCoreTaskResultRequest{
 		IdempotencyKey: task.IdempotencyKey,
-		DatasetID:      datasetID,
+		DatasetID:      source.DatasetID,
 		CoreTaskID:     task.CoreTaskID,
+		UserID:         source.CreatedBy,
 	})
 	if err != nil {
 		return coreclient.SubmitParseTaskResponse{}, err

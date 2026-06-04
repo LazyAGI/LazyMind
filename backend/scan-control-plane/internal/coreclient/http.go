@@ -10,9 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
-	"os"
 	"path"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -154,7 +152,7 @@ func (c *HTTPCoreClient) SubmitParseTask(ctx context.Context, req SubmitParseTas
 		if req.SourceDocumentID == "" {
 			return SubmitParseTaskResponse{}, fmt.Errorf("source_document_id is required for delete")
 		}
-		if err := c.DeleteDocument(ctx, DeleteDocumentRequest{DatasetID: req.DatasetID, DocumentID: req.SourceDocumentID}); err != nil {
+		if err := c.DeleteDocument(ctx, DeleteDocumentRequest{DatasetID: req.DatasetID, DocumentID: req.SourceDocumentID, UserID: req.UserID}); err != nil {
 			return SubmitParseTaskResponse{}, err
 		}
 		return SubmitParseTaskResponse{CoreDocumentID: req.SourceDocumentID, Status: StatusSucceeded, Created: false}, nil
@@ -168,14 +166,14 @@ func (c *HTTPCoreClient) submitCreate(ctx context.Context, req SubmitParseTaskRe
 	if err != nil {
 		return SubmitParseTaskResponse{}, err
 	}
-	taskID, documentID, created, err := c.createCoreTask(ctx, req.DatasetID, map[string]any{
+	taskID, documentID, created, err := c.createCoreTask(ctx, req.DatasetID, req.UserID, map[string]any{
 		"idempotency_key": req.IdempotencyKey,
 		"items": []map[string]any{{
 			"upload_file_id": uploadID,
 			"task": map[string]any{
 				"task_type":    "TASK_TYPE_PARSE_UPLOADED",
 				"document_pid": req.ParentDocumentID,
-				"display_name": req.DisplayName,
+				"display_name": uploadFileName(req),
 			},
 		}},
 	})
@@ -183,7 +181,7 @@ func (c *HTTPCoreClient) submitCreate(ctx context.Context, req SubmitParseTaskRe
 		return SubmitParseTaskResponse{}, err
 	}
 	if created {
-		if err := c.startCoreTask(ctx, req.DatasetID, taskID); err != nil {
+		if err := c.startCoreTask(ctx, req.DatasetID, taskID, req.UserID); err != nil {
 			return SubmitParseTaskResponse{}, err
 		}
 	}
@@ -203,25 +201,18 @@ func (c *HTTPCoreClient) submitCreate(ctx context.Context, req SubmitParseTaskRe
 }
 
 func (c *HTTPCoreClient) submitReparse(ctx context.Context, req SubmitParseTaskRequest) (SubmitParseTaskResponse, error) {
-	targetPath, err := c.getDocumentFileSystemPath(ctx, req.DatasetID, req.SourceDocumentID)
+	uploadID, err := c.uploadContent(ctx, req)
 	if err != nil {
 		return SubmitParseTaskResponse{}, err
 	}
-	content, closeContent, err := c.contentReader(ctx, req)
-	if err != nil {
-		return SubmitParseTaskResponse{}, err
-	}
-	defer closeContent()
-	if err := writeContentToTarget(content, targetPath); err != nil {
-		return SubmitParseTaskResponse{}, err
-	}
-	taskID, documentID, created, err := c.createCoreTask(ctx, req.DatasetID, map[string]any{
+	taskID, documentID, created, err := c.createCoreTask(ctx, req.DatasetID, req.UserID, map[string]any{
 		"idempotency_key": req.IdempotencyKey,
 		"items": []map[string]any{{
+			"upload_file_id": uploadID,
 			"task": map[string]any{
-				"task_type":    "TASK_TYPE_REPARSE",
-				"document_id":  req.SourceDocumentID,
-				"display_name": req.DisplayName,
+				"task_type":    "TASK_TYPE_PARSE_UPLOADED",
+				"document_pid": req.ParentDocumentID,
+				"display_name": uploadFileName(req),
 			},
 		}},
 	})
@@ -229,7 +220,12 @@ func (c *HTTPCoreClient) submitReparse(ctx context.Context, req SubmitParseTaskR
 		return SubmitParseTaskResponse{}, err
 	}
 	if created {
-		if err := c.startCoreTask(ctx, req.DatasetID, taskID); err != nil {
+		if err := c.startCoreTask(ctx, req.DatasetID, taskID, req.UserID); err != nil {
+			return SubmitParseTaskResponse{}, err
+		}
+	}
+	if created && documentID != "" && documentID != req.SourceDocumentID {
+		if err := c.DeleteDocument(ctx, DeleteDocumentRequest{DatasetID: req.DatasetID, DocumentID: req.SourceDocumentID, UserID: req.UserID}); err != nil {
 			return SubmitParseTaskResponse{}, err
 		}
 	}
@@ -258,7 +254,7 @@ func (c *HTTPCoreClient) GetCoreTaskResult(ctx context.Context, req GetCoreTaskR
 		ConvertError  string `json:"convert_error"`
 		ErrMsg        string `json:"err_msg"`
 	}
-	if err := c.doJSON(ctx, http.MethodGet, "/datasets/"+url.PathEscape(req.DatasetID)+"/tasks/"+url.PathEscape(req.CoreTaskID), nil, &out, "", ""); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, "/datasets/"+url.PathEscape(req.DatasetID)+"/tasks/"+url.PathEscape(req.CoreTaskID), nil, &out, req.UserID, ""); err != nil {
 		if isHTTPStatus(err, http.StatusNotFound) {
 			return CoreTaskResult{Status: ResultStatusNotFound}, nil
 		}
@@ -283,7 +279,7 @@ func (c *HTTPCoreClient) uploadContent(ctx context.Context, req SubmitParseTaskR
 	defer closeContent()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	part, err := writer.CreateFormFile("files", firstNonEmpty(req.DisplayName, "source-object"))
+	part, err := writer.CreateFormFile("files", uploadFileName(req))
 	if err != nil {
 		return "", err
 	}
@@ -299,7 +295,7 @@ func (c *HTTPCoreClient) uploadContent(ctx context.Context, req SubmitParseTaskR
 	}
 	httpReq.Header.Set("Accept", "application/json")
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
-	c.setAuthHeaders(httpReq, "")
+	c.setAuthHeaders(httpReq, req.UserID)
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return "", err
@@ -322,7 +318,25 @@ func (c *HTTPCoreClient) uploadContent(ctx context.Context, req SubmitParseTaskR
 	return strings.TrimSpace(out.Files[0].UploadFileID), nil
 }
 
-func (c *HTTPCoreClient) createCoreTask(ctx context.Context, datasetID string, payload map[string]any) (string, string, bool, error) {
+func uploadFileName(req SubmitParseTaskRequest) string {
+	name := firstNonEmpty(req.DisplayName, "source-object")
+	if strings.TrimSpace(path.Ext(name)) != "" {
+		return name
+	}
+	ext := strings.TrimSpace(req.FileExtension)
+	if ext == "" {
+		return name
+	}
+	if !strings.HasPrefix(ext, ".") {
+		ext = "." + ext
+	}
+	if ext == "." {
+		return name
+	}
+	return name + strings.ToLower(ext)
+}
+
+func (c *HTTPCoreClient) createCoreTask(ctx context.Context, datasetID, userID string, payload map[string]any) (string, string, bool, error) {
 	var out struct {
 		Tasks []struct {
 			TaskID     string `json:"task_id"`
@@ -332,7 +346,7 @@ func (c *HTTPCoreClient) createCoreTask(ctx context.Context, datasetID string, p
 		DocumentID string `json:"document_id"`
 		Created    *bool  `json:"created"`
 	}
-	if err := c.doJSON(ctx, http.MethodPost, "/datasets/"+url.PathEscape(datasetID)+"/tasks", payload, &out, "", ""); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, "/datasets/"+url.PathEscape(datasetID)+"/tasks", payload, &out, userID, ""); err != nil {
 		if resp, ok := recoverSubmitTaskConflict(err); ok {
 			return resp.CoreTaskID, resp.CoreDocumentID, false, nil
 		}
@@ -351,25 +365,12 @@ func (c *HTTPCoreClient) createCoreTask(ctx context.Context, datasetID string, p
 	return strings.TrimSpace(out.Tasks[0].TaskID), strings.TrimSpace(out.Tasks[0].DocumentID), created, nil
 }
 
-func (c *HTTPCoreClient) startCoreTask(ctx context.Context, datasetID, taskID string) error {
+func (c *HTTPCoreClient) startCoreTask(ctx context.Context, datasetID, taskID, userID string) error {
 	body := map[string]any{
 		"task_ids":   []string{taskID},
 		"start_mode": "ASYNC",
 	}
-	return c.doJSON(ctx, http.MethodPost, "/datasets/"+url.PathEscape(datasetID)+"/tasks:start", body, nil, "", "")
-}
-
-func (c *HTTPCoreClient) getDocumentFileSystemPath(ctx context.Context, datasetID, documentID string) (string, error) {
-	var out struct {
-		FileSystemPath string `json:"file_system_path"`
-	}
-	if err := c.doJSON(ctx, http.MethodGet, "/datasets/"+url.PathEscape(datasetID)+"/documents/"+url.PathEscape(documentID), nil, &out, "", ""); err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(out.FileSystemPath) == "" {
-		return "", fmt.Errorf("core document file_system_path is empty")
-	}
-	return strings.TrimSpace(out.FileSystemPath), nil
+	return c.doJSON(ctx, http.MethodPost, "/datasets/"+url.PathEscape(datasetID)+"/tasks:start", body, nil, userID, "")
 }
 
 func (c *HTTPCoreClient) doJSON(ctx context.Context, method, endpoint string, in any, out any, userID, userName string) error {
@@ -587,56 +588,6 @@ func mapCoreTaskStatus(status string) string {
 	default:
 		return ResultStatusRunning
 	}
-}
-
-func writeContentToTarget(reader io.Reader, targetPath string) error {
-	if reader == nil {
-		return fmt.Errorf("content reader is required")
-	}
-	if strings.TrimSpace(targetPath) == "" {
-		return fmt.Errorf("target path is required")
-	}
-	return writeFileAtomically(targetPath, reader)
-}
-
-func writeFileAtomically(targetPath string, reader io.Reader) error {
-	var data bytes.Buffer
-	if _, err := io.Copy(&data, reader); err != nil {
-		return err
-	}
-	return writeFile(targetPath, data.Bytes())
-}
-
-var writeFile = func(targetPath string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(targetPath), ".scan-reparse-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	cleanup := func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-	}
-	if _, err := tmp.Write(data); err != nil {
-		cleanup()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		cleanup()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	if err := os.Rename(tmpPath, targetPath); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
-	}
-	return nil
 }
 
 func isHTTPStatus(err error, status int) bool {

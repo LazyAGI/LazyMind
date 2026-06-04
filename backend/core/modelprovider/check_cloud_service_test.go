@@ -143,9 +143,125 @@ func TestDoBingSearchCloudServiceCheckUsesOfficialRequestShape(t *testing.T) {
 	}
 }
 
+func TestDoGoogleCustomSearchCloudServiceCheckUsesOfficialRequestShape(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/customsearch/v1" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		query := r.URL.Query()
+		if query.Get("key") != "test-key" || query.Get("cx") != "engine-id" || query.Get("q") == "" || query.Get("num") != "1" {
+			t.Fatalf("unexpected query: %s", r.URL.RawQuery)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"items":[]}`))
+	}))
+	defer server.Close()
+
+	result, err := doGoogleCustomSearchCloudServiceCheck(
+		t.Context(),
+		"Google Custom Search",
+		server.URL+"/customsearch/v1",
+		"test-key|engine-id",
+	)
+	if err != nil {
+		t.Fatalf("doGoogleCustomSearchCloudServiceCheck error: %v", err)
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("expected success, got %+v", result)
+	}
+}
+
+func TestDoGoogleCustomSearchCloudServiceCheckRequiresEngineID(t *testing.T) {
+	result, err := doGoogleCustomSearchCloudServiceCheck(t.Context(), "Google Custom Search", "https://example.test", "test-key")
+	if err != nil {
+		t.Fatalf("doGoogleCustomSearchCloudServiceCheck error: %v", err)
+	}
+	if result == nil || result.Success {
+		t.Fatalf("expected failure, got %+v", result)
+	}
+	if !strings.Contains(result.Message, "Search Engine ID") {
+		t.Fatalf("unexpected message: %q", result.Message)
+	}
+}
+
+func TestDoBochaSearchCloudServiceCheckUsesOfficialRequestShape(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/web-search" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
+			t.Fatalf("unexpected authorization header: %q", got)
+		}
+		if got := r.Header.Get("Content-Type"); !strings.Contains(got, "application/json") {
+			t.Fatalf("unexpected content type: %q", got)
+		}
+		var payload struct {
+			Query string `json:"query"`
+			Count int    `json:"count"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if payload.Query == "" || payload.Count != 1 {
+			t.Fatalf("unexpected payload: %+v", payload)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":{"webPages":{"value":[]}}}`))
+	}))
+	defer server.Close()
+
+	result, err := doBochaSearchCloudServiceCheck(t.Context(), "Bocha", server.URL, "test-key")
+	if err != nil {
+		t.Fatalf("doBochaSearchCloudServiceCheck error: %v", err)
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("expected success, got %+v", result)
+	}
+}
+
+func TestDoSciverseSearchCloudServiceCheckUsesOfficialRequestShape(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/meta-search" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
+			t.Fatalf("unexpected authorization header: %q", got)
+		}
+		if got := r.Header.Get("Content-Type"); !strings.Contains(got, "application/json") {
+			t.Fatalf("unexpected content type: %q", got)
+		}
+		var payload struct {
+			Fields   []string `json:"fields"`
+			Page     int      `json:"page"`
+			Query    string   `json:"query"`
+			PageSize int      `json:"page_size"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if len(payload.Fields) == 0 || payload.Page != 1 || payload.Query == "" || payload.PageSize != 1 {
+			t.Fatalf("unexpected payload: %+v", payload)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"items":[],"total_count":0}`))
+	}))
+	defer server.Close()
+
+	result, err := doSciverseSearchCloudServiceCheck(t.Context(), "Sciverse", server.URL, "test-key")
+	if err != nil {
+		t.Fatalf("doSciverseSearchCloudServiceCheck error: %v", err)
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("expected success, got %+v", result)
+	}
+}
+
 func TestShouldVerifyCloudServiceOnSaveIncludesSearchProviders(t *testing.T) {
 	if !shouldVerifyCloudServiceOnSave("search", "Bing") {
 		t.Fatal("expected search providers to be verified on save")
+	}
+	if !shouldVerifyCloudServiceOnSave("datasource", "Sciverse") {
+		t.Fatal("expected Sciverse datasource provider to be verified on save")
 	}
 	if !shouldVerifyCloudServiceOnSave("ocr", "PaddleOCR") {
 		t.Fatal("expected supported OCR providers to be verified on save")

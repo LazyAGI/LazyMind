@@ -58,16 +58,16 @@ def check_sensitive_content(
 
 async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       session_id: str, filters: Optional[Dict[str, Any]],
-                      files: Optional[List[str]], debug: Optional[bool], reasoning: Optional[bool],
-                      databases: Optional[List[Dict[str, Any]]], dataset: Optional[str],
+                      files: Optional[List[str]],
+                      databases: Optional[List[Dict[str, Any]]],
                       priority: Optional[int], available_tools: Optional[List[str]],
                       available_skills: Optional[List[str]], memory: Optional[str],
                       user_preference: Optional[str], use_memory: Optional[bool],
-                      trace: bool = False,
                       environment_context: Optional[Dict[str, Any]] = None,
                       user_id: Optional[str] = None,
                       model_config: Optional[Dict[str, Any]] = None,
-                      tool_config: Optional[Dict[str, str]] = None) -> Union[Dict[str, Any], StreamingResponse]:
+                      tool_config: Optional[Dict[str, Union[str, List[str]]]] = None
+                      ) -> Union[Dict[str, Any], StreamingResponse]:
     LOG.info(
         f'[ChatServer] [MODEL_CONFIG_RECEIVED] [sid={session_id}] [user_id={user_id or ""}] '
         f'[{summarize_model_config_for_log(model_config)}]'

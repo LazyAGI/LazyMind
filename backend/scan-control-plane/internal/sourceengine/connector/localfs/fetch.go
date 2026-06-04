@@ -85,6 +85,9 @@ func (c *LocalFSConnector) decodeScopePath(targetRef string, scopeRef connector.
 	}
 	if objectKey := strings.TrimSpace(scopeRef["object_key"]); objectKey != "" {
 		if path, ok := pathFromObjectKey(objectKey); ok {
+			if err := c.rejectOutsidePublicRoot(path); err != nil {
+				return "", err
+			}
 			return path, nil
 		}
 		return "", connector.NewError(connector.ErrorCodeInvalidArgument, "object_key does not include a local path")

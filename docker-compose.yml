@@ -66,6 +66,10 @@ x-upload-paths: &upload-paths
   LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
   LAZYMIND_OCR_CACHE_DIR: /var/lib/lazymind/uploads/.image_cache
 
+# Single source for the local_fs visible root. Makefile exports the normal
+# per-OS default; ECS_01 should override this to /tmp/test_watch.
+x-file-watcher-watch-host-dir: &file-watcher-watch-host-dir ${LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR:-${HOME}}
+
 # Local lazyllm source -> /opt/lazyllm (edit on host, docker compose restart; no image rebuild).
 x-lazyllm-src-mount: &lazyllm-src-mount ./algorithm/lazyllm:/opt/lazyllm
 
@@ -165,10 +169,10 @@ services:
       LAZYMIND_SCAN_CONTROL_PLANE_AGENT_BASE_URL: "http://file-watcher:19090"
       LAZYMIND_SCAN_CONTROL_PLANE_AGENT_TOKEN: "my-secret-token"
       LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_DEFAULT_AGENT_ID: "file-watcher-local-001"
-      LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT: "/data/ragscan"
+      LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT: *file-watcher-watch-host-dir
       LAZYMIND_SCAN_CONTROL_PLANE_FEISHU_BASE_URL: "https://open.feishu.cn"
       LAZYMIND_SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL: "http://auth-service:8000"
-      LAZYMIND_SCAN_CONTROL_PLANE_TEMP_DIR: "/data/staging"
+      LAZYMIND_SCAN_CONTROL_PLANE_TEMP_DIR: "/tmp/scan-control-plane/sourceengine"
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
     volumes:
       - ${LAZYMIND_FILE_WATCHER_BASE_ROOT:-./data/scan}:/data/ragscan
@@ -203,12 +207,14 @@ services:
       LAZYMIND_FILE_WATCHER_CONTROL_PLANE_BASE_URL: "http://scan-control-plane:18080"
       LAZYMIND_FILE_WATCHER_BASE_ROOT: /data/ragscan
       LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE: ${LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE:-posix}
-      LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR: ${LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR:-/Users}
+      LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR: *file-watcher-watch-host-dir
       LAZYMIND_FILE_WATCHER_WATCH_CONTAINER_DIR: /watch/docs
     volumes:
       - ./backend/file-watcher/configs/agent.yaml:/app/configs/agent.yaml:ro
       - ${LAZYMIND_FILE_WATCHER_BASE_ROOT:-./data/scan}:/data/ragscan
-      - ${LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR:-/Users}:/watch/docs
+      - type: bind
+        source: *file-watcher-watch-host-dir
+        target: /watch/docs
     expose:
       - "19090"
     depends_on:

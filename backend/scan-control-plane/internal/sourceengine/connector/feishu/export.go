@@ -14,6 +14,7 @@ type exportTarget struct {
 	kind      ObjectKind
 	token     string
 	spaceID   string
+	driveType string
 	objectKey string
 }
 
@@ -26,7 +27,13 @@ func (c *FeishuConnector) locateObject(req connector.ExportObjectRequest) (expor
 	if token == "" {
 		token = req.ObjectKey
 	}
-	target := exportTarget{kind: kind, token: token, spaceID: req.ProviderMeta["space_id"], objectKey: req.ObjectKey}
+	target := exportTarget{
+		kind:      kind,
+		token:     token,
+		spaceID:   req.ProviderMeta["space_id"],
+		driveType: strings.ToLower(strings.TrimSpace(req.ProviderMeta["file_type"])),
+		objectKey: req.ObjectKey,
+	}
 	switch kind {
 	case ObjectKindDriveFile:
 		if req.ExportFormat != "" && req.ExportFormat != connector.ExportFormatOriginal {
@@ -51,6 +58,9 @@ func (c *FeishuConnector) locateObject(req connector.ExportObjectRequest) (expor
 func (c *FeishuConnector) exportToTempURI(ctx context.Context, token string, target exportTarget, req connector.ExportObjectRequest) (ExportedContent, error) {
 	switch target.kind {
 	case ObjectKindDriveFile:
+		if target.driveType == "docx" || target.driveType == "doc" {
+			return c.api.ExportDriveDocumentMarkdown(ctx, token, target.token, req.SourceVersion)
+		}
 		return c.api.DownloadDriveFile(ctx, token, target.token, req.SourceVersion)
 	case ObjectKindWikiNode:
 		return c.api.ExportWikiNodeMarkdown(ctx, token, target.spaceID, target.token, req.SourceVersion)
@@ -77,7 +87,7 @@ func (c *FeishuConnector) ensureScanTempURI(ctx context.Context, exported Export
 		return exported, nil
 	}
 	reader := exported.Reader
-	if reader == nil && len(exported.Content) > 0 {
+	if reader == nil && exported.Content != nil {
 		reader = bytes.NewReader(exported.Content)
 	}
 	if reader == nil {

@@ -228,6 +228,7 @@ type SourceSummaryResponse struct {
 	FailedTaskCount     int64                   `json:"failed_task_count"`
 	SucceededTaskCount  int64                   `json:"succeeded_task_count"`
 	SupersededTaskCount int64                   `json:"superseded_task_count"`
+	StorageBytes        int64                   `json:"storage_bytes"`
 	LastSuccessAt       *time.Time              `json:"last_success_at,omitempty"`
 	LastError           map[string]any          `json:"last_error,omitempty"`
 	Bindings            []SourceSummaryResponse `json:"bindings,omitempty"`

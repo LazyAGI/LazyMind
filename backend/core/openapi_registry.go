@@ -8,6 +8,7 @@ import (
 
 	"lazymind/core/chat"
 	"lazymind/core/doc"
+	"lazymind/core/evalset"
 	"lazymind/core/modelprovider"
 	"lazymind/core/wordgroup"
 )
@@ -1092,9 +1093,17 @@ type internalSkillRemoveOpenAPIRequest struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
+type evalSetImportPreviewOpenAPIRequest struct {
+	File     string `json:"file" required:"true"`
+	FileType string `json:"file_type,omitempty"`
+}
+
 func registeredCoreOperations() []openAPIOperation {
 	jsonBodyOf := func(v any, required bool) *openAPIBody {
 		return &openAPIBody{Required: required, ContentType: "application/json", Schema: schemaSource{Type: v}}
+	}
+	multipartBodyOf := func(v any, required bool) *openAPIBody {
+		return &openAPIBody{Required: required, ContentType: "multipart/form-data", Schema: schemaSource{Type: v}}
 	}
 	resp := func(description string, v any) openAPIResponse {
 		return openAPIResponse{Description: description, ContentType: "application/json", Schema: schemaSource{Type: v}}
@@ -1165,6 +1174,153 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "GET",
+			Path:        "/eval-sets",
+			Summary:     "List eval sets",
+			Tags:        []string{"eval-sets"},
+			QueryParams: evalset.ListEvalSetsQuery{},
+			Responses:   map[int]openAPIResponse{200: resp("Eval set list", evalset.ListEvalSetsResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/eval-sets",
+			Summary:     "Create eval set",
+			Tags:        []string{"eval-sets"},
+			RequestBody: jsonBodyOf(evalset.CreateEvalSetRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Created eval set", evalset.EvalSetResponse{})},
+		},
+		{
+			Method:    "GET",
+			Path:      "/eval-sets/datasets",
+			Summary:   "List eval set dataset options",
+			Tags:      []string{"eval-sets"},
+			Responses: map[int]openAPIResponse{200: resp("Dataset options", evalset.DatasetOptionsResponse{})},
+		},
+		{
+			Method:    "GET",
+			Path:      "/eval-sets/question-types",
+			Summary:   "List eval set question type options",
+			Tags:      []string{"eval-sets"},
+			Responses: map[int]openAPIResponse{200: resp("Question type options", evalset.QuestionTypeOptionsResponse{})},
+		},
+		{
+			Method:     "GET",
+			Path:       "/eval-set-import-templates/{file_type}",
+			Summary:    "Download eval set import template",
+			Tags:       []string{"eval-set-imports"},
+			PathParams: evalset.ImportTemplatePathParams{},
+			Responses: map[int]openAPIResponse{200: {
+				Description: "Import template file",
+				ContentType: "application/octet-stream",
+				Schema: schemaSource{Inline: map[string]any{
+					"type":   "string",
+					"format": "binary",
+				}},
+			}},
+		},
+		{
+			Method:      "POST",
+			Path:        "/eval-sets/imports:preview",
+			Summary:     "Preview eval set import",
+			Tags:        []string{"eval-set-imports"},
+			RequestBody: multipartBodyOf(evalSetImportPreviewOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Eval set import preview", evalset.ImportPreviewResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/eval-sets:import",
+			Summary:     "Create eval set by import",
+			Tags:        []string{"eval-set-imports"},
+			RequestBody: jsonBodyOf(evalset.CreateEvalSetByImportRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Created eval set import task", evalset.CreateEvalSetByImportResponse{})},
+		},
+		{
+			Method:     "GET",
+			Path:       "/eval-set-import-tasks/{task_id}",
+			Summary:    "Get eval set import task",
+			Tags:       []string{"eval-set-imports"},
+			PathParams: evalset.EvalSetImportTaskPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Eval set import task", evalset.EvalSetImportTaskResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/eval-sets/{eval_set_id}/items",
+			Summary:     "List eval set items",
+			Tags:        []string{"eval-set-items"},
+			PathParams:  evalset.EvalSetPathParams{},
+			QueryParams: evalset.ListEvalSetItemsQuery{},
+			Responses:   map[int]openAPIResponse{200: resp("Eval set item list", evalset.ListEvalSetItemsResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/eval-sets/{eval_set_id}/imports",
+			Summary:     "Append eval set import",
+			Tags:        []string{"eval-set-imports"},
+			PathParams:  evalset.EvalSetPathParams{},
+			RequestBody: jsonBodyOf(evalset.AppendEvalSetImportRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Appended eval set import task", evalset.AppendEvalSetImportResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/eval-sets/{eval_set_id}/items",
+			Summary:     "Create eval set item",
+			Tags:        []string{"eval-set-items"},
+			PathParams:  evalset.EvalSetPathParams{},
+			RequestBody: jsonBodyOf(evalset.CreateEvalSetItemRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Created eval set item", evalset.EvalSetItemResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/eval-sets/{eval_set_id}/items:batchDelete",
+			Summary:     "Batch delete eval set items",
+			Tags:        []string{"eval-set-items"},
+			PathParams:  evalset.EvalSetPathParams{},
+			RequestBody: jsonBodyOf(evalset.BatchDeleteEvalSetItemsRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Deleted eval set items", evalset.BatchDeleteEvalSetItemsResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/eval-sets/{eval_set_id}/items/{item_id}",
+			Summary:     "Update eval set item",
+			Tags:        []string{"eval-set-items"},
+			PathParams:  evalset.EvalSetItemPathParams{},
+			RequestBody: jsonBodyOf(evalset.UpdateEvalSetItemRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Updated eval set item", evalset.EvalSetItemResponse{})},
+		},
+		{
+			Method:     "DELETE",
+			Path:       "/eval-sets/{eval_set_id}/items/{item_id}",
+			Summary:    "Delete eval set item",
+			Tags:       []string{"eval-set-items"},
+			PathParams: evalset.EvalSetItemPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Deleted eval set item", evalset.DeleteEvalSetItemResponse{})},
+		},
+		{
+			Method:     "GET",
+			Path:       "/eval-sets/{eval_set_id}",
+			Summary:    "Get eval set",
+			Tags:       []string{"eval-sets"},
+			PathParams: evalset.EvalSetPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Eval set details", evalset.EvalSetResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/eval-sets/{eval_set_id}",
+			Summary:     "Update eval set",
+			Tags:        []string{"eval-sets"},
+			PathParams:  evalset.EvalSetPathParams{},
+			RequestBody: jsonBodyOf(evalset.UpdateEvalSetRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Updated eval set", evalset.EvalSetResponse{})},
+		},
+		{
+			Method:     "DELETE",
+			Path:       "/eval-sets/{eval_set_id}",
+			Summary:    "Delete eval set",
+			Tags:       []string{"eval-sets"},
+			PathParams: evalset.EvalSetPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Deleted eval set", evalset.DeleteEvalSetResponse{})},
+		},
+		{
+			Method:      "GET",
 			Path:        "/datasets/{dataset}/documents",
 			Summary:     "Document list",
 			Tags:        []string{"documents"},
@@ -1214,6 +1370,14 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  datasetPathParams{},
 			RequestBody: jsonBodyOf(doc.SearchDocumentsRequest{}, false),
 			Responses:   map[int]openAPIResponse{200: resp("Document search results", doc.ListDocumentsResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/documents:listByDatasets",
+			Summary:     "List documents by datasets",
+			Tags:        []string{"documents"},
+			RequestBody: jsonBodyOf(doc.ListDatasetDocumentsRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Dataset document list", doc.ListDocumentsResponse{})},
 		},
 		{
 			Method:      "POST",

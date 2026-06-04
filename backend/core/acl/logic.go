@@ -18,12 +18,18 @@ func normalizePermission(resourceType, permission string) string {
 		if resourceType == ResourceTypeDB {
 			return PermissionDatasetRead
 		}
+		if resourceType == ResourceTypeEvalSet {
+			return PermissionEvalSetRead
+		}
 	case strings.ToUpper(PermWrite):
 		if resourceType == ResourceTypeKB {
 			return PermissionKBWrite
 		}
 		if resourceType == ResourceTypeDB {
 			return PermissionDatasetWrite
+		}
+		if resourceType == ResourceTypeEvalSet {
+			return PermissionEvalSetWrite
 		}
 	case strings.ToUpper(PermUpload):
 		if resourceType == ResourceTypeDB {
@@ -37,6 +43,10 @@ func normalizePermission(resourceType, permission string) string {
 		if resourceType == ResourceTypeDB {
 			return p
 		}
+	case PermissionEvalSetRead, PermissionEvalSetWrite:
+		if resourceType == ResourceTypeEvalSet {
+			return p
+		}
 	}
 	return ""
 }
@@ -47,6 +57,8 @@ func ownerPermissions(resourceType string) []string {
 		return []string{PermissionKBRead, PermissionKBWrite, PermissionKBCreateDoc, PermissionKBDeleteDoc, PermissionKBDelete}
 	case ResourceTypeDB:
 		return []string{PermissionDatasetRead, PermissionDatasetWrite, PermissionDatasetUpload}
+	case ResourceTypeEvalSet:
+		return []string{PermissionEvalSetRead, PermissionEvalSetWrite}
 	default:
 		return nil
 	}
@@ -124,7 +136,7 @@ func PermissionFor(resourceType, resourceID string, userID string) (permission s
 	}
 	for _, perm := range permissions {
 		switch perm {
-		case PermissionKBWrite, PermissionKBCreateDoc, PermissionKBDeleteDoc, PermissionKBDelete, PermissionDatasetWrite, PermissionDatasetUpload:
+		case PermissionKBWrite, PermissionKBCreateDoc, PermissionKBDeleteDoc, PermissionKBDelete, PermissionDatasetWrite, PermissionDatasetUpload, PermissionEvalSetWrite:
 			return PermWrite, source
 		}
 	}
@@ -192,6 +204,15 @@ func actionToPermission(resourceType, action string) string {
 		default:
 			return normalizePermission(resourceType, a)
 		}
+	case ResourceTypeEvalSet:
+		switch a {
+		case PermRead:
+			return PermissionEvalSetRead
+		case PermWrite:
+			return PermissionEvalSetWrite
+		default:
+			return normalizePermission(resourceType, a)
+		}
 	default:
 		return ""
 	}
@@ -225,6 +246,9 @@ func Can(userID string, resourceType, resourceID string, action string) bool {
 		if want == PermissionKBCreateDoc || want == PermissionKBDeleteDoc {
 			return hasPermission(permissions, PermissionKBWrite)
 		}
+	}
+	if resourceType == ResourceTypeEvalSet && want == PermissionEvalSetRead {
+		return hasPermission(permissions, PermissionEvalSetWrite)
 	}
 	return false
 }

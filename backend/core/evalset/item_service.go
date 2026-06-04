@@ -1,0 +1,600 @@
+package evalset
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"gorm.io/gorm"
+
+	"lazymind/core/acl"
+	"lazymind/core/common"
+	"lazymind/core/common/orm"
+)
+
+var (
+	errEvalSetItemNotFound = errors.New("eval set item not found")
+	errNoItemSelected      = errors.New("请先选择样本")
+)
+
+type ListEvalSetItemsFilter struct {
+	Keyword      string
+	QuestionType string
+	Source       string
+	Page         int
+	PageSize     int
+	OrderBy      string
+}
+
+func (s *Service) requireEvalSetPermission(ctx context.Context, id, userID string, groupIDs []string, want string) (*orm.EvalSet, error) {
+	row, err := s.repo.GetActive(ctx, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errEvalSetNotFound
+		}
+		return nil, err
+	}
+	perms := evalSetPermissionsForUser(row, userID, groupIDs)
+	if want == acl.PermissionEvalSetRead && hasPermission(perms, acl.PermissionEvalSetWrite) {
+		return row, nil
+	}
+	if !hasPermission(perms, want) {
+		return nil, errForbidden
+	}
+	return row, nil
+}
+
+func (s *Service) ListItems(ctx context.Context, evalSet *orm.EvalSet, filter ListEvalSetItemsFilter) (*ListEvalSetItemsResponse, error) {
+	filter.Keyword = strings.TrimSpace(filter.Keyword)
+	filter.QuestionType = strings.TrimSpace(filter.QuestionType)
+	filter.Source = strings.TrimSpace(filter.Source)
+	filter.OrderBy = strings.TrimSpace(filter.OrderBy)
+	if filter.Page < 1 {
+		filter.Page = 1
+	}
+	if filter.PageSize < 1 {
+		filter.PageSize = 20
+	}
+	if filter.PageSize > 100 {
+		filter.PageSize = 100
+	}
+	if filter.OrderBy == "" {
+		filter.OrderBy = "created_at_desc"
+	}
+	if filter.OrderBy != "created_at_desc" && filter.OrderBy != "updated_at_desc" {
+		return nil, errors.New("unsupported order_by")
+	}
+	if filter.Source != "" && !isValidItemSource(filter.Source) {
+		return nil, errors.New("invalid source")
+	}
+
+	items, total, err := s.repo.ListItems(ctx, evalSet.ID, evalSet.ShardID, filter)
+	if err != nil {
+		return nil, err
+	}
+	return &ListEvalSetItemsResponse{
+		Items:    itemResponses(items),
+		Total:    total,
+		Page:     filter.Page,
+		PageSize: filter.PageSize,
+	}, nil
+}
+
+func (s *Service) CreateItem(ctx context.Context, evalSetID string, req CreateEvalSetItemRequest, userID, userName string) (*EvalSetItemResponse, error) {
+	normalized, err := normalizeCreateItemRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	item, err := s.repo.CreateItem(ctx, evalSetID, normalized, userID, userName)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errEvalSetNotFound
+		}
+		return nil, err
+	}
+	return itemResponse(item), nil
+}
+
+func (s *Service) UpdateItem(ctx context.Context, evalSetID, itemID string, req UpdateEvalSetItemRequest) (*EvalSetItemResponse, error) {
+	if !hasUpdateItemField(req) {
+		return nil, errors.New("at least one field required")
+	}
+	itemID = strings.TrimSpace(itemID)
+	if itemID == "" {
+		return nil, errors.New("item_id required")
+	}
+	item, err := s.repo.UpdateItem(ctx, evalSetID, itemID, req)
+	if err != nil {
+		if errors.Is(err, errEvalSetItemNotFound) {
+			return nil, errEvalSetItemNotFound
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errEvalSetNotFound
+		}
+		return nil, err
+	}
+	return itemResponse(item), nil
+}
+
+func (s *Service) DeleteItem(ctx context.Context, evalSetID, itemID string) error {
+	itemID = strings.TrimSpace(itemID)
+	if itemID == "" {
+		return errors.New("item_id required")
+	}
+	if err := s.repo.DeleteItem(ctx, evalSetID, itemID); err != nil {
+		if errors.Is(err, errEvalSetItemNotFound) {
+			return errEvalSetItemNotFound
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errEvalSetNotFound
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *Service) BatchDeleteItems(ctx context.Context, evalSetID string, req BatchDeleteEvalSetItemsRequest) (int64, error) {
+	itemIDs := normalizeItemIDs(req.ItemIDs)
+	if len(itemIDs) == 0 {
+		return 0, errNoItemSelected
+	}
+	deletedCount, err := s.repo.BatchDeleteItems(ctx, evalSetID, itemIDs)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, errEvalSetNotFound
+		}
+		return 0, err
+	}
+	return deletedCount, nil
+}
+
+func (r *Repository) ListItems(ctx context.Context, evalSetID, shardID string, filter ListEvalSetItemsFilter) ([]orm.EvalSetItem, int64, error) {
+	q := r.db.WithContext(ctx).Model(&orm.EvalSetItem{}).
+		Where("shard_id = ? AND eval_set_id = ?", shardID, evalSetID)
+	if filter.Keyword != "" {
+		like := "%" + filter.Keyword + "%"
+		q = q.Where("(case_id LIKE ? OR question LIKE ? OR ground_truth LIKE ? OR reference_doc LIKE ?)", like, like, like, like)
+	}
+	if filter.QuestionType != "" {
+		q = q.Where("question_type = ?", filter.QuestionType)
+	}
+	if filter.Source != "" {
+		q = q.Where("source = ?", filter.Source)
+	}
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	orderBy := "created_at DESC, id DESC"
+	if filter.OrderBy == "updated_at_desc" {
+		orderBy = "updated_at DESC, id DESC"
+	}
+	var rows []orm.EvalSetItem
+	err := q.Order(orderBy).
+		Offset((filter.Page - 1) * filter.PageSize).
+		Limit(filter.PageSize).
+		Find(&rows).Error
+	return rows, total, err
+}
+
+func (r *Repository) CreateItem(ctx context.Context, evalSetID string, req CreateEvalSetItemRequest, userID, userName string) (*orm.EvalSetItem, error) {
+	var created orm.EvalSetItem
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		evalSet, shard, err := lockEvalSetAndShard(ctx, tx, evalSetID)
+		if err != nil {
+			return err
+		}
+
+		now := time.Now().UTC()
+		created = orm.EvalSetItem{
+			ShardID:           evalSet.ShardID,
+			ID:                newEvalSetItemID(),
+			EvalSetID:         evalSet.ID,
+			CaseID:            req.CaseID,
+			Question:          req.Question,
+			GroundTruth:       req.GroundTruth,
+			QuestionType:      req.QuestionType,
+			GenerateReason:    req.GenerateReason,
+			KeyPoints:         req.KeyPoints,
+			ReferenceChunkIDs: req.ReferenceChunkIDs,
+			ReferenceContext:  req.ReferenceContext,
+			ReferenceDoc:      req.ReferenceDoc,
+			ReferenceDocIDs:   req.ReferenceDocIDs,
+			Source:            SourceManual,
+			CreateUserID:      userID,
+			CreateUserName:    userName,
+			CreatedAt:         now,
+			UpdatedAt:         now,
+		}
+		if req.IsDeleted != nil {
+			created.IsDeleted = *req.IsDeleted
+		}
+		created.EstimatedBytes = estimateEvalSetItemBytes(&created)
+		if err := tx.Create(&created).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&orm.EvalSet{}).
+			Where("id = ? AND status = ?", evalSet.ID, StatusActive).
+			Update("item_count", evalSet.ItemCount+1).Error; err != nil {
+			return err
+		}
+		return updateShardCounters(tx, shard, 1, created.EstimatedBytes, now)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &created, nil
+}
+
+func (r *Repository) UpdateItem(ctx context.Context, evalSetID, itemID string, req UpdateEvalSetItemRequest) (*orm.EvalSetItem, error) {
+	var updated orm.EvalSetItem
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		evalSet, shard, err := lockEvalSetAndShard(ctx, tx, evalSetID)
+		if err != nil {
+			return err
+		}
+
+		var locked orm.EvalSetItem
+		if err := withUpdateLock(tx.WithContext(ctx)).
+			Where("shard_id = ? AND eval_set_id = ? AND id = ?", evalSet.ShardID, evalSet.ID, itemID).
+			First(&locked).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errEvalSetItemNotFound
+			}
+			return err
+		}
+
+		updated = locked
+		applyUpdateItemRequest(&updated, req)
+		if err := validateItemFields(&updated); err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		updated.UpdatedAt = now
+		newBytes := estimateEvalSetItemBytes(&updated)
+		values := map[string]any{
+			"case_id":             updated.CaseID,
+			"question":            updated.Question,
+			"ground_truth":        updated.GroundTruth,
+			"question_type":       updated.QuestionType,
+			"generate_reason":     updated.GenerateReason,
+			"key_points":          updated.KeyPoints,
+			"reference_chunk_ids": updated.ReferenceChunkIDs,
+			"reference_context":   updated.ReferenceContext,
+			"reference_doc":       updated.ReferenceDoc,
+			"reference_doc_ids":   updated.ReferenceDocIDs,
+			"is_deleted":          updated.IsDeleted,
+			"estimated_bytes":     newBytes,
+			"updated_at":          now,
+		}
+		if err := tx.Model(&orm.EvalSetItem{}).
+			Where("shard_id = ? AND eval_set_id = ? AND id = ?", evalSet.ShardID, evalSet.ID, itemID).
+			Updates(values).Error; err != nil {
+			return err
+		}
+		if err := updateShardCounters(tx, shard, 0, newBytes-locked.EstimatedBytes, now); err != nil {
+			return err
+		}
+		return tx.Where("shard_id = ? AND eval_set_id = ? AND id = ?", evalSet.ShardID, evalSet.ID, itemID).
+			First(&updated).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &updated, nil
+}
+
+func (r *Repository) DeleteItem(ctx context.Context, evalSetID, itemID string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		evalSet, shard, err := lockEvalSetAndShard(ctx, tx, evalSetID)
+		if err != nil {
+			return err
+		}
+
+		var item orm.EvalSetItem
+		if err := withUpdateLock(tx.WithContext(ctx)).
+			Where("shard_id = ? AND eval_set_id = ? AND id = ?", evalSet.ShardID, evalSet.ID, itemID).
+			First(&item).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errEvalSetItemNotFound
+			}
+			return err
+		}
+		if err := tx.Where("shard_id = ? AND eval_set_id = ? AND id = ?", evalSet.ShardID, evalSet.ID, itemID).
+			Delete(&orm.EvalSetItem{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&orm.EvalSet{}).
+			Where("id = ? AND status = ?", evalSet.ID, StatusActive).
+			Update("item_count", subtractInt64(evalSet.ItemCount, 1)).Error; err != nil {
+			return err
+		}
+		return updateShardCounters(tx, shard, -1, -item.EstimatedBytes, time.Now().UTC())
+	})
+}
+
+func (r *Repository) BatchDeleteItems(ctx context.Context, evalSetID string, itemIDs []string) (int64, error) {
+	var deletedCount int64
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		evalSet, shard, err := lockEvalSetAndShard(ctx, tx, evalSetID)
+		if err != nil {
+			return err
+		}
+
+		var items []orm.EvalSetItem
+		if err := withUpdateLock(tx.WithContext(ctx)).
+			Where("shard_id = ? AND eval_set_id = ? AND id IN ?", evalSet.ShardID, evalSet.ID, itemIDs).
+			Find(&items).Error; err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			deletedCount = 0
+			return nil
+		}
+
+		ids := make([]string, 0, len(items))
+		var deletedBytes int64
+		for _, item := range items {
+			ids = append(ids, item.ID)
+			deletedBytes += item.EstimatedBytes
+		}
+		deletedCount = int64(len(items))
+		if err := tx.Where("shard_id = ? AND eval_set_id = ? AND id IN ?", evalSet.ShardID, evalSet.ID, ids).
+			Delete(&orm.EvalSetItem{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&orm.EvalSet{}).
+			Where("id = ? AND status = ?", evalSet.ID, StatusActive).
+			Update("item_count", subtractInt64(evalSet.ItemCount, deletedCount)).Error; err != nil {
+			return err
+		}
+		return updateShardCounters(tx, shard, -deletedCount, -deletedBytes, time.Now().UTC())
+	})
+	return deletedCount, err
+}
+
+func lockEvalSetAndShard(ctx context.Context, tx *gorm.DB, evalSetID string) (*orm.EvalSet, *orm.EvalSetShard, error) {
+	var evalSet orm.EvalSet
+	if err := withUpdateLock(tx.WithContext(ctx)).
+		Where("id = ? AND status = ?", evalSetID, StatusActive).
+		First(&evalSet).Error; err != nil {
+		return nil, nil, err
+	}
+	var shard orm.EvalSetShard
+	if err := withUpdateLock(tx.WithContext(ctx)).
+		Where("id = ?", evalSet.ShardID).
+		First(&shard).Error; err != nil {
+		return nil, nil, err
+	}
+	return &evalSet, &shard, nil
+}
+
+func updateShardCounters(tx *gorm.DB, shard *orm.EvalSetShard, rowDelta, byteDelta int64, now time.Time) error {
+	actualRows := shard.ActualRows + rowDelta
+	if actualRows < 0 {
+		actualRows = 0
+	}
+	estimatedBytes := shard.EstimatedBytes + byteDelta
+	if estimatedBytes < 0 {
+		estimatedBytes = 0
+	}
+	updates := map[string]any{
+		"actual_rows":     actualRows,
+		"estimated_bytes": estimatedBytes,
+		"updated_at":      now,
+	}
+	if actualRows >= shard.RowOpenThreshold || estimatedBytes >= shard.SizeOpenThresholdBytes {
+		updates["status"] = ShardStatusSealed
+		if shard.Status != ShardStatusSealed || shard.SealedAt == nil {
+			updates["sealed_at"] = now
+		}
+	} else if shard.Status == ShardStatusSealed {
+		updates["status"] = ShardStatusOpen
+		updates["sealed_at"] = nil
+	}
+	return tx.Model(&orm.EvalSetShard{}).Where("id = ?", shard.ID).Updates(updates).Error
+}
+
+func normalizeCreateItemRequest(req CreateEvalSetItemRequest) (CreateEvalSetItemRequest, error) {
+	req.CaseID = strings.TrimSpace(req.CaseID)
+	req.Question = strings.TrimSpace(req.Question)
+	req.GroundTruth = strings.TrimSpace(req.GroundTruth)
+	req.QuestionType = strings.TrimSpace(req.QuestionType)
+	req.GenerateReason = strings.TrimSpace(req.GenerateReason)
+	req.KeyPoints = strings.TrimSpace(req.KeyPoints)
+	req.ReferenceChunkIDs = strings.TrimSpace(req.ReferenceChunkIDs)
+	req.ReferenceContext = strings.TrimSpace(req.ReferenceContext)
+	req.ReferenceDoc = strings.TrimSpace(req.ReferenceDoc)
+	req.ReferenceDocIDs = strings.TrimSpace(req.ReferenceDocIDs)
+	if req.CaseID == "" {
+		req.CaseID = "case_" + common.GenerateID()
+	}
+	item := orm.EvalSetItem{
+		CaseID:            req.CaseID,
+		Question:          req.Question,
+		GroundTruth:       req.GroundTruth,
+		QuestionType:      req.QuestionType,
+		GenerateReason:    req.GenerateReason,
+		KeyPoints:         req.KeyPoints,
+		ReferenceChunkIDs: req.ReferenceChunkIDs,
+		ReferenceContext:  req.ReferenceContext,
+		ReferenceDoc:      req.ReferenceDoc,
+		ReferenceDocIDs:   req.ReferenceDocIDs,
+	}
+	if err := validateItemFields(&item); err != nil {
+		return CreateEvalSetItemRequest{}, err
+	}
+	return req, nil
+}
+
+func applyUpdateItemRequest(item *orm.EvalSetItem, req UpdateEvalSetItemRequest) {
+	if req.CaseID != nil {
+		item.CaseID = strings.TrimSpace(*req.CaseID)
+		if item.CaseID == "" {
+			item.CaseID = "case_" + common.GenerateID()
+		}
+	}
+	if req.Question != nil {
+		item.Question = strings.TrimSpace(*req.Question)
+	}
+	if req.GroundTruth != nil {
+		item.GroundTruth = strings.TrimSpace(*req.GroundTruth)
+	}
+	if req.QuestionType != nil {
+		item.QuestionType = strings.TrimSpace(*req.QuestionType)
+	}
+	if req.GenerateReason != nil {
+		item.GenerateReason = strings.TrimSpace(*req.GenerateReason)
+	}
+	if req.KeyPoints != nil {
+		item.KeyPoints = strings.TrimSpace(*req.KeyPoints)
+	}
+	if req.ReferenceChunkIDs != nil {
+		item.ReferenceChunkIDs = strings.TrimSpace(*req.ReferenceChunkIDs)
+	}
+	if req.ReferenceContext != nil {
+		item.ReferenceContext = strings.TrimSpace(*req.ReferenceContext)
+	}
+	if req.ReferenceDoc != nil {
+		item.ReferenceDoc = strings.TrimSpace(*req.ReferenceDoc)
+	}
+	if req.ReferenceDocIDs != nil {
+		item.ReferenceDocIDs = strings.TrimSpace(*req.ReferenceDocIDs)
+	}
+	if req.IsDeleted != nil {
+		item.IsDeleted = *req.IsDeleted
+	}
+}
+
+func validateItemFields(item *orm.EvalSetItem) error {
+	if strings.TrimSpace(item.Question) == "" {
+		return errors.New("question required")
+	}
+	if strings.TrimSpace(item.GroundTruth) == "" {
+		return errors.New("ground_truth required")
+	}
+	if strings.TrimSpace(item.QuestionType) == "" {
+		return errors.New("question_type required")
+	}
+	if utf8.RuneCountInString(item.QuestionType) > 128 {
+		return errors.New("question_type too long")
+	}
+	if utf8.RuneCountInString(item.CaseID) > 255 {
+		return errors.New("case_id too long")
+	}
+	return nil
+}
+
+func hasUpdateItemField(req UpdateEvalSetItemRequest) bool {
+	return req.CaseID != nil ||
+		req.Question != nil ||
+		req.GroundTruth != nil ||
+		req.QuestionType != nil ||
+		req.GenerateReason != nil ||
+		req.KeyPoints != nil ||
+		req.ReferenceChunkIDs != nil ||
+		req.ReferenceContext != nil ||
+		req.ReferenceDoc != nil ||
+		req.ReferenceDocIDs != nil ||
+		req.IsDeleted != nil
+}
+
+func estimateEvalSetItemBytes(item *orm.EvalSetItem) int64 {
+	var total int64
+	fields := []string{
+		item.ShardID,
+		item.ID,
+		item.EvalSetID,
+		item.CaseID,
+		item.Question,
+		item.GroundTruth,
+		item.QuestionType,
+		item.GenerateReason,
+		item.KeyPoints,
+		item.ReferenceChunkIDs,
+		item.ReferenceContext,
+		item.ReferenceDoc,
+		item.ReferenceDocIDs,
+		item.Source,
+		item.SourceSessionID,
+		item.SourceHistoryID,
+		item.CreateUserID,
+		item.CreateUserName,
+	}
+	for _, field := range fields {
+		total += int64(len([]byte(field)))
+	}
+	return total
+}
+
+func itemResponses(items []orm.EvalSetItem) []EvalSetItemResponse {
+	out := make([]EvalSetItemResponse, 0, len(items))
+	for i := range items {
+		out = append(out, *itemResponse(&items[i]))
+	}
+	return out
+}
+
+func itemResponse(item *orm.EvalSetItem) *EvalSetItemResponse {
+	return &EvalSetItemResponse{
+		ID:                item.ID,
+		EvalSetID:         item.EvalSetID,
+		ShardID:           item.ShardID,
+		CaseID:            item.CaseID,
+		Question:          item.Question,
+		GroundTruth:       item.GroundTruth,
+		QuestionType:      item.QuestionType,
+		GenerateReason:    item.GenerateReason,
+		KeyPoints:         item.KeyPoints,
+		ReferenceChunkIDs: item.ReferenceChunkIDs,
+		ReferenceContext:  item.ReferenceContext,
+		ReferenceDoc:      item.ReferenceDoc,
+		ReferenceDocIDs:   item.ReferenceDocIDs,
+		IsDeleted:         item.IsDeleted,
+		Source:            item.Source,
+		SourceSessionID:   item.SourceSessionID,
+		SourceHistoryID:   item.SourceHistoryID,
+		CreatedBy:         item.CreateUserID,
+		CreatedByName:     item.CreateUserName,
+		CreatedAt:         item.CreatedAt,
+		UpdatedAt:         item.UpdatedAt,
+	}
+}
+
+func isValidItemSource(source string) bool {
+	switch source {
+	case SourceUpload, SourceManual, SourceFlowback:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeItemIDs(raw []string) []string {
+	out := make([]string, 0, len(raw))
+	seen := map[string]struct{}{}
+	for _, id := range raw {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func subtractInt64(value, delta int64) int64 {
+	out := value - delta
+	if out < 0 {
+		return 0
+	}
+	return out
+}

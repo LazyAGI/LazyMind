@@ -64,7 +64,12 @@ func ListUserProviders(w http.ResponseWriter, r *http.Request) {
 		q = q.Where("category = ?", defaultProviderCategory)
 	}
 	if excludeCategory != "" {
-		q = q.Where("category != ?", excludeCategory)
+		for _, cat := range strings.Split(excludeCategory, ",") {
+			cat = strings.TrimSpace(cat)
+			if cat != "" {
+				q = q.Where("category != ?", cat)
+			}
+		}
 	}
 	if keyword != "" {
 		q = q.Where("name LIKE ?", "%"+keyword+"%")
@@ -155,7 +160,7 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 	if err := db.WithContext(ctx).
 		Model(&orm.UserModelProviderGroup{}).
 		Select("user_model_provider_id").
-		Where("user_model_provider_id IN ? AND deleted_at IS NULL AND is_verified = ?", providerIDs, true).
+		Where("user_model_provider_id IN ? AND deleted_at IS NULL AND is_verified = ? AND TRIM(api_key) <> ''", providerIDs, true).
 		Distinct("user_model_provider_id").
 		Find(&configuredRows).Error; err == nil {
 		configuredProviderIDs := make(map[string]bool, len(configuredRows))
@@ -193,49 +198,59 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 
 // syncUserProvidersFromDefaults copies missing default_model_providers rows into
 // user_model_providers for the given user (matched by default_model_provider_id).
+// It also syncs category and capabilities for already-existing rows.
 func syncUserProvidersFromDefaults(ctx context.Context, db *gorm.DB, userID, userName string) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var existingIDs []string
-		if err := tx.Model(&orm.UserModelProvider{}).
-			Where("create_user_id = ? AND deleted_at IS NULL", userID).
-			Pluck("default_model_provider_id", &existingIDs).Error; err != nil {
+		var existing []orm.UserModelProvider
+		if err := tx.Where("create_user_id = ? AND deleted_at IS NULL", userID).Find(&existing).Error; err != nil {
 			return err
+		}
+		existingByDefault := make(map[string]*orm.UserModelProvider, len(existing))
+		for i := range existing {
+			existingByDefault[existing[i].DefaultModelProviderID] = &existing[i]
 		}
 
-		q := tx.Model(&orm.DefaultModelProvider{}).Where("deleted_at IS NULL")
-		if len(existingIDs) > 0 {
-			q = q.Where("id NOT IN ?", existingIDs)
-		}
 		var defs []orm.DefaultModelProvider
-		if err := q.Find(&defs).Error; err != nil {
+		if err := tx.Where("deleted_at IS NULL").Find(&defs).Error; err != nil {
 			return err
-		}
-		if len(defs) == 0 {
-			return nil
 		}
 
 		now := time.Now()
-		batch := make([]orm.UserModelProvider, len(defs))
+		var toCreate []orm.UserModelProvider
 		for i := range defs {
 			d := defs[i]
-			batch[i] = orm.UserModelProvider{
-				ID:                     common.GenerateID(),
-				DefaultModelProviderID: d.ID,
-				Name:                   d.Name,
-				Description:            d.Description,
-				BaseURL:                d.BaseURL,
-				Category:               d.Category,
-				Capabilities:           d.Capabilities,
-				BaseModel: orm.BaseModel{
-					CreateUserID:   userID,
-					CreateUserName: userName,
-					CreatedAt:      now,
-					UpdatedAt:      now,
-					DeletedAt:      nil,
-				},
+			if row, ok := existingByDefault[d.ID]; ok {
+				// Sync category / capabilities from defaults if changed.
+				if row.Category != d.Category || row.Capabilities != d.Capabilities {
+					_ = tx.Model(row).Updates(map[string]interface{}{
+						"category":     d.Category,
+						"capabilities": d.Capabilities,
+						"updated_at":   now,
+					})
+				}
+			} else {
+				toCreate = append(toCreate, orm.UserModelProvider{
+					ID:                     common.GenerateID(),
+					DefaultModelProviderID: d.ID,
+					Name:                   d.Name,
+					Description:            d.Description,
+					BaseURL:                d.BaseURL,
+					Category:               d.Category,
+					Capabilities:           d.Capabilities,
+					BaseModel: orm.BaseModel{
+						CreateUserID:   userID,
+						CreateUserName: userName,
+						CreatedAt:      now,
+						UpdatedAt:      now,
+						DeletedAt:      nil,
+					},
+				})
 			}
 		}
-		return tx.Create(&batch).Error
+		if len(toCreate) == 0 {
+			return nil
+		}
+		return tx.Create(&toCreate).Error
 	})
 }
 

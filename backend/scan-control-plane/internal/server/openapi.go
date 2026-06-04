@@ -269,13 +269,14 @@ func openAPISchemas() map[string]any {
 		"TriggerSourceSyncRequest":      object(nil, props("request_id", stringSchema(), "binding_id", stringSchema(), "scope_type", stringSchema(), "scope_ref", objectSchema())),
 		"TriggerSourceSyncResponse":     object([]string{"run_ids", "job_ids"}, props("run_ids", stringArray(), "job_ids", stringArray(), "intents", arrayOf("SyncRunIntent"))),
 		"SyncRunIntent":                 syncRunIntentSchema(),
-		"SourceTreeChildrenRequest":     object(nil, sourceTreeRequestProps()),
+		"SourceTreeChildrenRequest":     object(nil, mergeProps(sourceTreeRequestProps(), props("use_cache", boolSchema()))),
 		"SourceTreeSearchRequest":       object([]string{"keyword"}, mergeProps(sourceTreeRequestProps(), props("keyword", stringSchema()))),
-		"SourceDocumentListResponse":    object([]string{"items", "total", "page", "page_size"}, props("items", arrayOf("SourceDocumentItem"), "total", integerSchema(), "page", integerSchema(), "page_size", integerSchema())),
+		"SourceDocumentListResponse":    object([]string{"items", "total", "page", "page_size"}, props("items", arrayOf("SourceDocumentItem"), "total", integerSchema(), "page", integerSchema(), "page_size", integerSchema(), "summary", objectSchema())),
 		"SourceDocumentItem":            sourceDocumentItemSchema(),
 		"SourceSummaryResponse":         sourceSummarySchema(),
 		"GenerateTasksRequest":          generateTasksRequestSchema(),
 		"GenerateTasksResponse":         generateTasksResponseSchema(),
+		"GenerateTaskScope":             generateTaskScopeSchema(),
 		"ExpediteTasksRequest":          expediteTasksRequestSchema(),
 		"ExpediteTasksResponse":         expediteTasksResponseSchema(),
 		"ParseTaskListResponse":         object([]string{"items", "total"}, props("items", arrayOf("ParseTaskResponse"), "total", integerSchema())),
@@ -461,12 +462,25 @@ func sourceDocumentItemSchema() map[string]any {
 		"binding_id", stringSchema(),
 		"object_key", stringSchema(),
 		"display_name", stringSchema(),
+		"name", stringSchema(),
+		"path", stringSchema(),
+		"directory", stringSchema(),
+		"file_type", stringSchema(),
+		"size_bytes", integerSchema(),
+		"source_version", stringSchema(),
+		"baseline_version", stringSchema(),
 		"source_state", schemaRef("SourceState"),
 		"sync_state", schemaRef("SyncState"),
+		"pending_action", stringSchema(),
 		"parse_queue_state", stringSchema(),
 		"parse_status", stringSchema(),
+		"parse_state", stringSchema(),
+		"has_update", boolSchema(),
+		"update_type", stringSchema(),
+		"update_desc", stringSchema(),
 		"core_document_id", stringSchema(),
 		"modified_at", stringSchema(),
+		"last_synced_at", stringSchema(),
 		"last_error", objectSchema(),
 	))
 }
@@ -480,6 +494,10 @@ func sourceSummarySchema() map[string]any {
 		"modified_count", integerSchema(),
 		"deleted_count", integerSchema(),
 		"unchanged_count", integerSchema(),
+		"storage_bytes", integerSchema(),
+		"total_document_count", integerSchema(),
+		"parsed_document_count", integerSchema(),
+		"pending_pull_count", integerSchema(),
 		"pending_task_count", integerSchema(),
 		"running_task_count", integerSchema(),
 		"failed_task_count", integerSchema(),
@@ -504,11 +522,17 @@ func syncRunIntentSchema() map[string]any {
 
 func generateTasksRequestSchema() map[string]any {
 	return object(nil, props(
+		"request_id", stringSchema(),
 		"binding_id", stringSchema(),
 		"object_keys", stringArray(),
 		"document_ids", stringArray(),
+		"paths", stringArray(),
+		"scopes", arrayOf("GenerateTaskScope"),
 		"mode", stringSchema(),
 		"priority", integerSchema(),
+		"trigger_policy", stringSchema(),
+		"updated_only", boolSchema(),
+		"selection_token", stringSchema(),
 	))
 }
 
@@ -520,6 +544,21 @@ func generateTasksResponseSchema() map[string]any {
 		"already_active_count", integerSchema(),
 		"skipped_count", integerSchema(),
 		"task_ids", stringArray(),
+		"job_id", stringSchema(),
+		"job_ids", stringArray(),
+		"run_ids", stringArray(),
+		"queued_sync_count", integerSchema(),
+	))
+}
+
+func generateTaskScopeSchema() map[string]any {
+	return object(nil, props(
+		"key", stringSchema(),
+		"object_key", stringSchema(),
+		"node_ref", stringSchema(),
+		"path", stringSchema(),
+		"is_document", boolSchema(),
+		"is_container", boolSchema(),
 	))
 }
 

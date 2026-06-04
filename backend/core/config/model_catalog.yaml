@@ -917,6 +917,37 @@ ocr_providers:
 search_providers:
   capabilities: []
   suppliers:
+    - name: Google Custom Search
+      description: |
+        Google Custom Search JSON API 基于 Programmable Search Engine 提供网页搜索能力，适合需要接入 Google 官方搜索结果的 Agent 工具。
+
+        获取 API Key：
+        https://developers.google.com/custom-search/v1/introduction
+
+        获取 Search Engine ID：
+        https://programmablesearchengine.google.com/
+
+        申请教程：
+
+        1. 在 Google Cloud Console 启用 Custom Search JSON API 并创建 API Key。
+
+        2. 在 Programmable Search Engine 控制台创建搜索引擎，复制 Search Engine ID。
+
+        3. 在云服务配置页分别填写 API Key 和 Search Engine ID。
+      base_url: "https://customsearch.googleapis.com/customsearch/v1"
+    - name: Bocha
+      description: |
+        博查搜索 API 面向 AI 应用提供实时网页搜索能力，可返回结构化搜索结果，适合中文互联网信息检索。
+
+        获取 API Key：
+        https://open.bochaai.com/
+
+        申请教程：
+
+        1. 访问博查开放平台并注册账号。
+
+        2. 登录控制台后创建或复制 API Key。
+      base_url: "https://api.bochaai.com"
     - name: Tavily
       description: |
         专为 AI Agent 设计的搜索引擎，返回结构化摘要，减少噪音，适合 RAG 与 Agent 工作流。

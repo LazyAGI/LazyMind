@@ -105,3 +105,49 @@ func TestBuildListItemsReturnsConfigurationFlagFromVerifiedGroups(t *testing.T) 
 		t.Fatalf("expected provider without verified groups to be missing: %#v", items[1])
 	}
 }
+
+func TestBuildListItemsRequiresVerifiedGroupWithNonEmptyAPIKey(t *testing.T) {
+	db := setupListProviderTestDB(t)
+	now := time.Now()
+	rows := []orm.UserModelProvider{
+		{
+			ID:                     "provider-empty-key",
+			DefaultModelProviderID: "default-empty-key",
+			Name:                   "Sciverse",
+			Description:            "Sciverse Search",
+			BaseURL:                "https://api.sciverse.space",
+			Category:               "search",
+			BaseModel: orm.BaseModel{
+				CreateUserID: "user-1",
+				CreatedAt:    now,
+				UpdatedAt:    now,
+			},
+		},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("create providers: %v", err)
+	}
+	if err := db.Create(&orm.UserModelProviderGroup{
+		ID:                  "group-empty-key",
+		UserModelProviderID: "provider-empty-key",
+		Name:                "Sciverse",
+		BaseURL:             "https://api.sciverse.space",
+		APIKey:              "",
+		IsVerified:          true,
+		BaseModel: orm.BaseModel{
+			CreateUserID: "user-1",
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create verified group: %v", err)
+	}
+
+	items := buildListItems(t.Context(), db, rows)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].IsConfigured {
+		t.Fatalf("expected verified group with empty key to be missing: %#v", items[0])
+	}
+}

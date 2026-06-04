@@ -1,0 +1,38 @@
+# Datasource catalog — source of truth for external data sources (file systems, academic search, etc.).
+# Loaded at startup by modelprovider.SeedDatasourceCatalog().
+#
+# All suppliers are seeded with category "datasource" regardless of section key,
+# so they do not appear in the model-provider / external-services listings.
+#
+# capabilities flags (comma-separated in DB):
+#   multi_group      — user may create multiple groups under one provider
+#   custom_base_url  — user may change base_url
+#   has_models       — group has a model list (seeded from default_models)
+#   api_key_required — api_key must not be empty
+
+file_sources:
+  capabilities: []
+  suppliers:
+    - name: Feishu
+      description: |
+        飞书文档/知识库数据源，支持 OAuth 授权后同步文档内容到知识库。
+
+        接入教程：参考数据源管理页面中的飞书接入文档
+      base_url: "https://open.feishu.cn/open-apis"
+
+search_sources:
+  capabilities: [api_key_required]
+  suppliers:
+    - name: Sciverse
+      description: |
+        Sciverse 面向科研场景提供论文搜索、元数据检索和文献内容读取能力，适合学术问答与论文调研。
+
+        获取 API Key：
+        https://sciverse.space/docs#sciverse/overview
+
+        申请教程：
+
+        1. 访问 Sciverse 官方文档并登录账号。
+
+        2. 根据文档说明申请或复制 API Key。
+      base_url: "https://api.sciverse.space"

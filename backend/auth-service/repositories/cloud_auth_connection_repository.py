@@ -69,6 +69,7 @@ class CloudAuthConnectionRepository:
         provider: str | None = None,
         auth_mode: str | None = None,
         status: str | None = None,
+        exclude_auth_modes: tuple[str, ...] | None = None,
     ) -> list[CloudAuthConnection]:
         q = session.query(CloudAuthConnection).filter(
             CloudAuthConnection.tenant_id == '',
@@ -78,9 +79,37 @@ class CloudAuthConnectionRepository:
             q = q.filter(CloudAuthConnection.provider == provider.strip().lower())
         if auth_mode:
             q = q.filter(CloudAuthConnection.auth_mode == auth_mode.strip().lower())
+        elif exclude_auth_modes:
+            normalized_modes = tuple(
+                mode.strip().lower()
+                for mode in exclude_auth_modes
+                if mode and mode.strip()
+            )
+            if normalized_modes:
+                q = q.filter(~CloudAuthConnection.auth_mode.in_(normalized_modes))
         if status:
             q = q.filter(CloudAuthConnection.status == status.strip().upper())
         return q.order_by(CloudAuthConnection.updated_at.desc(), CloudAuthConnection.created_at.desc()).all()
+
+    @classmethod
+    def find_latest_for_owner(
+        cls,
+        session: Session,
+        *,
+        owner_user_id: str,
+        provider: str,
+        auth_mode: str,
+        status: str | None = None,
+    ) -> CloudAuthConnection | None:
+        q = session.query(CloudAuthConnection).filter(
+            CloudAuthConnection.tenant_id == '',
+            CloudAuthConnection.owner_user_id == (owner_user_id or '').strip(),
+            CloudAuthConnection.provider == (provider or '').strip().lower(),
+            CloudAuthConnection.auth_mode == (auth_mode or '').strip().lower(),
+        )
+        if status:
+            q = q.filter(CloudAuthConnection.status == status.strip().upper())
+        return q.order_by(CloudAuthConnection.updated_at.desc(), CloudAuthConnection.created_at.desc()).first()
 
     @classmethod
     def find_by_provider_account(
@@ -91,19 +120,27 @@ class CloudAuthConnectionRepository:
         provider: str,
         auth_mode: str,
         provider_account_id: str,
+        status: str | None = None,
+        exclude_statuses: tuple[str, ...] | None = None,
     ) -> CloudAuthConnection | None:
         account_id = (provider_account_id or '').strip()
         if not account_id:
             return None
-        return (
-            session.query(CloudAuthConnection)
-            .filter(
-                CloudAuthConnection.tenant_id == '',
-                CloudAuthConnection.owner_user_id == (owner_user_id or '').strip(),
-                CloudAuthConnection.provider == (provider or '').strip().lower(),
-                CloudAuthConnection.auth_mode == (auth_mode or '').strip().lower(),
-                CloudAuthConnection.provider_account_id == account_id,
-            )
-            .order_by(CloudAuthConnection.updated_at.desc(), CloudAuthConnection.created_at.desc())
-            .first()
+        q = session.query(CloudAuthConnection).filter(
+            CloudAuthConnection.tenant_id == '',
+            CloudAuthConnection.owner_user_id == (owner_user_id or '').strip(),
+            CloudAuthConnection.provider == (provider or '').strip().lower(),
+            CloudAuthConnection.auth_mode == (auth_mode or '').strip().lower(),
+            CloudAuthConnection.provider_account_id == account_id,
         )
+        if status:
+            q = q.filter(CloudAuthConnection.status == status.strip().upper())
+        elif exclude_statuses:
+            normalized_statuses = tuple(
+                item.strip().upper()
+                for item in exclude_statuses
+                if item and item.strip()
+            )
+            if normalized_statuses:
+                q = q.filter(~CloudAuthConnection.status.in_(normalized_statuses))
+        return q.order_by(CloudAuthConnection.updated_at.desc(), CloudAuthConnection.created_at.desc()).first()

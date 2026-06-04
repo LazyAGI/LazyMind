@@ -1,9 +1,19 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestDefaultConfigUsesPrivateTempDir(t *testing.T) {
+	cfg := defaultConfig()
+	want := filepath.Join(os.TempDir(), "scan-control-plane", "sourceengine")
+	if cfg.TempDir != want {
+		t.Fatalf("default temp dir = %q, want %q", cfg.TempDir, want)
+	}
+}
 
 func TestLoadConfigFromEnv(t *testing.T) {
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_DB_DSN", "postgres://scan-control-plane")
@@ -17,6 +27,7 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL", "http://auth.test")
 	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "internal-token")
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_TEMP_DIR", "/tmp/scan-control-plane-test")
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_DB_MIGRATION_FILE", "/tmp/scan-control-plane-test/init.up.sql")
 	t.Setenv("SOURCEENGINE_TEMP_TTL", "2h")
 	t.Setenv("SOURCEENGINE_WORKER_LEASE_TTL", "45s")
 	t.Setenv("SOURCEENGINE_WORKER_MAX_BACKOFF", "3m")
@@ -34,6 +45,9 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	}
 	if cfg.DBDSN == "" || cfg.CoreBaseURL == "" || cfg.AgentBaseURL == "" || cfg.FeishuBaseURL == "" || cfg.AuthServiceBaseURL == "" || cfg.AuthServiceInternalToken == "" || cfg.TempDir == "" {
 		t.Fatalf("config did not read required env: %+v", cfg)
+	}
+	if cfg.DBMigrationFile != "/tmp/scan-control-plane-test/init.up.sql" {
+		t.Fatalf("config did not read db bootstrap env: %+v", cfg)
 	}
 	if cfg.DefaultDatasetAlgoID != "custom_algo" || cfg.DefaultDatasetAlgoName != "Custom Algo" {
 		t.Fatalf("config did not read default dataset algo: %+v", cfg)
