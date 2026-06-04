@@ -15,16 +15,16 @@ import (
 )
 
 type listItem struct {
-	ID                     string   `json:"id"`
-	DefaultModelProviderID string   `json:"default_model_provider_id"`
-	Name                   string   `json:"name"`
-	Description            string   `json:"description"`
-	BaseURL                string   `json:"base_url"`
+	ID                     string              `json:"id"`
+	DefaultModelProviderID string              `json:"default_model_provider_id"`
+	Name                   string              `json:"name"`
+	Description            string              `json:"description"`
+	BaseURL                string              `json:"base_url"`
 	BaseURLPresets         []baseURLPresetItem `json:"base_url_presets,omitempty"`
-	Category               string   `json:"category"`
-	IsConfigured           bool     `json:"is_configured"`
-	Capabilities           []string `json:"capabilities"`
-	ModelTypes             []string `json:"model_types"`
+	Category               string              `json:"category"`
+	IsConfigured           bool                `json:"is_configured"`
+	Capabilities           []string            `json:"capabilities"`
+	ModelTypes             []string            `json:"model_types"`
 }
 
 type baseURLPresetItem struct {
