@@ -228,7 +228,7 @@ def ensure_skill_review_table() -> None:
                 )"""
             )
         )
-    LOG.info(f'[SkillReviewDB] ensured table {SKILL_REVIEW_TABLE}.')
+    LOG.info(f'[SkillReview] ensured table {SKILL_REVIEW_TABLE}.')
 
 
 def _convert_history(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

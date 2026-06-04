@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import re
 import threading
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import Any
 
 from json_repair import repair_json
@@ -24,7 +23,6 @@ def call_json(
     schema: Any,
     *,
     max_retries: int = 3,
-    timeout_seconds: int = DEFAULT_LLM_CALL_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     """Call an LLM with a JSON schema response_format and return a JSON object."""
     if max_retries < 1:
@@ -37,12 +35,7 @@ def call_json(
         try:
             if round > 0:
                 LOG.warning(f'LLM JSON call failed after {round} attempts, retrying...')
-            raw = _call_llm_with_timeout(
-                llm,
-                prompt,
-                response_format=response_format,
-                timeout_seconds=timeout_seconds,
-            )
+            raw = llm(prompt, response_format=response_format)
             last_raw = raw
             _record_token_usage(prompt, raw)
             parsed = _json_object(raw)
@@ -56,27 +49,6 @@ def call_json(
     ) from last_error
 
 
-def _call_llm_with_timeout(
-    llm,
-    prompt: str,
-    *,
-    response_format: dict[str, Any],
-    timeout_seconds: int,
-) -> Any:
-    if timeout_seconds <= 0:
-        return llm(prompt, response_format=response_format)
-
-    executor = ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(llm, prompt, response_format=response_format)
-    try:
-        return future.result(timeout=timeout_seconds)
-    except FutureTimeoutError as exc:
-        future.cancel()
-        raise TimeoutError(f'LLM call timed out after {timeout_seconds}s') from exc
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
-
-
 def _record_token_usage(prompt: str, raw: Any) -> None:
     global TOTAL_INPUT_TOKEN_CHARS, TOTAL_OUTPUT_TOKEN_CHARS
     with _TOKEN_USAGE_LOCK:
@@ -84,7 +56,7 @@ def _record_token_usage(prompt: str, raw: Any) -> None:
         TOTAL_OUTPUT_TOKEN_CHARS += len(str(raw))
         input_chars = TOTAL_INPUT_TOKEN_CHARS
         output_chars = TOTAL_OUTPUT_TOKEN_CHARS
-    LOG.info(f'Total input token chars: {input_chars}, total output token chars: {output_chars}')
+    LOG.info(f'[SkillReview] Total input token chars: {input_chars}, total output token chars: {output_chars}')
 
 
 def _response_format(schema: Any) -> dict[str, Any]:

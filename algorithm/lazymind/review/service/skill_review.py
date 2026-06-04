@@ -84,12 +84,12 @@ def run_skill_review(
     run_stats: list[SkillReviewRunStat] = []
     inserted_count = 0
     user_ids = sorted(set(user_sessions) | set(pending_records_by_user))
-    LOG.info(f'Found {len(user_sessions)} users and {len(pending_records)} pending skill review records')
+    LOG.info(f'[SkillReview] Found {len(user_sessions)} users and {len(pending_records)} pending skill review records')
 
     for user_id in user_ids:
         sessions = user_sessions.get(user_id, [])
         user_pending_records = pending_records_by_user.get(user_id, [])
-        LOG.info(f'Running skill review for user {user_id} with {len(sessions)} sessions')
+        LOG.info(f'[SkillReview] Running skill review for user {user_id} with {len(sessions)} sessions')
         task_id = f"{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
 
         user_result, user_stat = _run_user_skill_review(
@@ -112,16 +112,14 @@ def run_skill_review(
         try:
             inserted_count += insert_skill_review_records(records)
         except Exception as exc:
-            import traceback
-            traceback.print_exc()
+            LOG.exception(f'[SkillReview] failed to insert skill review records for user {user_id}: {exc}')
             raise exc
 
     try:
         stats_count = insert_skill_review_run_stats(run_stats)
-        LOG.info(f'inserted {stats_count} skill review run stats')
+        LOG.info(f'[SkillReview] inserted {stats_count} skill review run stats')
     except Exception as exc:
-        import traceback
-        traceback.print_exc()
+        LOG.exception(f'[SkillReview] failed to insert skill review run stats: {exc}')
         raise exc
 
     has_failure = any(item.status == 'failed' for item in user_results)
@@ -178,7 +176,7 @@ def _run_user_skill_review(
         state.stage_reports.append(trajectory_report)
 
         qualified_trajectories = [item for item in state.trajectories if item.qualified]
-        LOG.info(f'user {user_id} found {len(qualified_trajectories)} qualified trajectories')
+        LOG.info(f'[SkillReview] user {user_id} found {len(qualified_trajectories)} qualified trajectories')
         if not qualified_trajectories and not pending_records:
             return _complete_user_skill_review(state)
 
@@ -198,7 +196,7 @@ def _run_user_skill_review(
             artifact_dir=base_work_dir,
         )
         state.stage_reports.append(cluster_report)
-        LOG.info(f'user {user_id} found {len(state.clusters)} clusters')
+        LOG.info(f'[SkillReview] user {user_id} found {len(state.clusters)} clusters')
         if not state.clusters:
             return _fail_user_skill_review(
                 state,
@@ -221,7 +219,7 @@ def _run_user_skill_review(
             artifact_dir=base_work_dir,
         )
         LOG.info(
-            f'user {user_id} built {len(state.candidates)} candidates '
+            f'[SkillReview] user {user_id} built {len(state.candidates)} candidates '
             f'from {len(qualified_trajectories)} qualified_trajectories',
         )
         state.stage_reports.append(candidate_report)

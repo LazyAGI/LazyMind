@@ -91,7 +91,7 @@ def build_skill_drafts(
 
     metadata = _draft_report_metadata(jobs, results, errors)
     LOG.info(
-        f"built {len(drafts)} skill drafts from {metadata['trajectory']['input_count']} trajectories "
+        f"[SkillReview] built {len(drafts)} skill drafts from {metadata['trajectory']['input_count']} trajectories "
         f"and {metadata['pending_skill']['input_count']} pending skill reviews; errors={len(errors)}"
     )
     report = finish_stage_report(
@@ -153,7 +153,7 @@ def _build_trajectory_draft(trajectory: Trajectory, llm: AutoModel) -> SkillDraf
 
         gate = _build_skill_extraction_gate(trajectory, llm)
         if not gate.get('should_extract'):
-            LOG.info(f'skip skill draft for trajectory {trajectory.session_id}')
+            LOG.info(f'[SkillReview] skip skill draft for trajectory {trajectory.session_id}')
             return None
 
         contextual_description = _build_contextual_description(trajectory, llm)
