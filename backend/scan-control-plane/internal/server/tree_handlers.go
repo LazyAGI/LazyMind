@@ -83,6 +83,7 @@ func (h *Handler) listSourceTreeChildren(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
+	req.ProviderOptions = withActorProviderOptions(req.ProviderOptions, actor)
 	page, err := h.sourceTree.ListChildren(r.Context(), req)
 	if err != nil {
 		writeError(w, err)

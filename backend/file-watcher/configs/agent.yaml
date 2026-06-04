@@ -23,11 +23,7 @@ watch:
 
 security:
   allowed_roots:
-    - "/Users"
-    - "/home"
-    - "/data"
-    - "/watch"
-    - "/tmp/test_watch"
+    - "/watch/docs"
 
 http:
   read_timeout: "10s"

@@ -28,6 +28,9 @@ func TestWorkerUsesCoreClientIdempotencyAndSupersede(t *testing.T) {
 		reducer := statepkg.NewDBStateReducer(repo, statepkg.WithClock(func() time.Time { return now }))
 		temp := &workerIdempotencyTempObjectStore{Objects: map[string][]byte{"doc-worker": []byte("content")}}
 		task := repo.seedPendingTask("doc-worker", "v1", statepkg.SourceStateNew, statepkg.PendingActionCreate)
+		state := repo.states[workerIdempotencyKey("source-1", "binding-1", "doc-worker")]
+		state.LastError = store.JSON{"code": "previous", "message": "old failure"}
+		repo.states[workerIdempotencyKey("source-1", "binding-1", "doc-worker")] = state
 		parseWorker := worker.NewDefaultParseWorker(repo, registry, core, reducer, temp, worker.WithClock(func() time.Time { return now }))
 
 		if err := parseWorker.RunOnce(ctx, "worker-1"); err != nil {
@@ -42,8 +45,15 @@ func TestWorkerUsesCoreClientIdempotencyAndSupersede(t *testing.T) {
 		if core.Submissions[0].Action != coreclient.ActionCreate || core.Submissions[0].ParentDocumentID != "core-folder-1" || core.Submissions[0].SourceDocumentID != "" {
 			t.Fatalf("create task should parse uploaded content under binding root: %+v", core.Submissions[0])
 		}
+		if core.Submissions[0].UserID != "user-1" {
+			t.Fatalf("create task should submit as source owner, got %q", core.Submissions[0].UserID)
+		}
 		if conn.exportCalls != 1 {
 			t.Fatalf("expected connector export once, got %d", conn.exportCalls)
+		}
+		object := repo.objects[workerIdempotencyKey("source-1", "binding-1", "doc-worker")]
+		if object.SizeBytes != int64(len("exported:doc-worker")) {
+			t.Fatalf("exported object size was not reflected in source index: %+v", object)
 		}
 		if !slices.Contains(temp.CleanupTokens, "cleanup-doc-worker") {
 			t.Fatalf("expected temp cleanup, got %v", temp.CleanupTokens)
@@ -52,9 +62,12 @@ func TestWorkerUsesCoreClientIdempotencyAndSupersede(t *testing.T) {
 		if saved.Status != worker.TaskStatusSucceeded {
 			t.Fatalf("expected task success, got %+v", saved)
 		}
-		state := repo.states[workerIdempotencyKey("source-1", "binding-1", "doc-worker")]
+		state = repo.states[workerIdempotencyKey("source-1", "binding-1", "doc-worker")]
 		if state.BaselineVersion != "v1" || state.ActiveTaskID != "" || state.SourceState != statepkg.SourceStateUnchanged {
 			t.Fatalf("baseline was not advanced correctly: %+v", state)
+		}
+		if len(state.LastError) != 0 {
+			t.Fatalf("successful task should clear previous error: %+v", state.LastError)
 		}
 	})
 
@@ -153,6 +166,9 @@ func TestWorkerDispatchesReparseAndDeleteCoreActions(t *testing.T) {
 		if got.Action != coreclient.ActionReparse || got.SourceDocumentID != "core-doc-existing" || got.Content == nil {
 			t.Fatalf("reparse task should target existing core document with exported content: %+v", got)
 		}
+		if got.UserID != "user-1" {
+			t.Fatalf("reparse task should submit as source owner, got %q", got.UserID)
+		}
 		if conn.exportCalls != 1 {
 			t.Fatalf("expected export for reparse, got %d", conn.exportCalls)
 		}
@@ -187,10 +203,41 @@ func TestWorkerDispatchesReparseAndDeleteCoreActions(t *testing.T) {
 		if got.Action != coreclient.ActionDelete || got.SourceDocumentID != "core-doc-delete" || got.Content != nil {
 			t.Fatalf("delete task should call core document delete without export: %+v", got)
 		}
+		if got.UserID != "user-1" {
+			t.Fatalf("delete task should submit as source owner, got %q", got.UserID)
+		}
 		if conn.exportCalls != 0 {
 			t.Fatalf("delete should not export source content, got %d exports", conn.exportCalls)
 		}
 	})
+}
+
+func TestRunnerRequeuesDeferredSameSourceTasks(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 4, 11, 0, 0, 0, time.UTC)
+	repo := newWorkerIdempotencyStore(now)
+	conn := &workerSpyConnector{exportVersion: "v1"}
+	registry := mustRegistry(t, conn)
+	core := newWorkerIdempotencyCoreClient()
+	reducer := statepkg.NewDBStateReducer(repo, statepkg.WithClock(func() time.Time { return now }))
+	temp := &workerIdempotencyTempObjectStore{Objects: map[string][]byte{
+		"doc-a": []byte("content-a"),
+		"doc-b": []byte("content-b"),
+	}}
+	first := repo.seedPendingTask("doc-a", "v1", statepkg.SourceStateNew, statepkg.PendingActionCreate)
+	deferred := repo.seedPendingTask("doc-b", "v1", statepkg.SourceStateNew, statepkg.PendingActionCreate)
+	parseWorker := worker.NewDefaultParseWorker(repo, registry, core, reducer, temp, worker.WithClock(func() time.Time { return now }))
+	runner := worker.NewRunner(parseWorker, worker.WithGlobalConcurrency(2), worker.WithSourceConcurrency(1))
+
+	if err := runner.RunPending(ctx, "worker-1"); err != nil {
+		t.Fatalf("run pending: %v", err)
+	}
+	if got := repo.tasks[first.TaskID].Status; got != worker.TaskStatusSucceeded {
+		t.Fatalf("first same-source task should run, got %s", got)
+	}
+	if got := repo.tasks[deferred.TaskID]; got.Status != worker.TaskStatusPending || got.LeaseOwner != "" || got.LeaseUntil != nil {
+		t.Fatalf("deferred same-source task should be requeued, got %+v", got)
+	}
 }
 
 func TestWorkerRetriesTransientFailureThenDeadLetters(t *testing.T) {
@@ -436,6 +483,13 @@ func (s *workerIdempotencyStore) GetObject(_ context.Context, sourceID, bindingI
 	return object, nil
 }
 
+func (s *workerIdempotencyStore) UpsertObjects(_ context.Context, objects []store.SourceObject) error {
+	for _, object := range objects {
+		s.objects[workerIdempotencyKey(object.SourceID, object.BindingID, object.ObjectKey)] = object
+	}
+	return nil
+}
+
 func (s *workerIdempotencyStore) SaveParseTask(_ context.Context, task store.ParseTask) error {
 	s.tasks[task.TaskID] = task
 	return nil
@@ -448,6 +502,9 @@ func (s *workerIdempotencyStore) ReleaseTaskLease(_ context.Context, taskID, wor
 	}
 	if task.LeaseOwner != workerID {
 		return task, false, nil
+	}
+	if task.Status == taskpkg.TaskStatusRunning {
+		task.Status = taskpkg.TaskStatusPending
 	}
 	task.LeaseOwner = ""
 	task.LeaseUntil = nil
@@ -670,6 +727,7 @@ func (c *workerSpyConnector) ExportObject(_ context.Context, req connector.Expor
 		ContentURI:      "scan-temp://" + req.ObjectKey,
 		MimeType:        "text/markdown",
 		FileExtension:   ".md",
+		SizeBytes:       int64(len("exported:" + req.ObjectKey)),
 		CleanupToken:    "cleanup-" + req.ObjectKey,
 		ExportedVersion: c.exportVersion,
 	}, nil

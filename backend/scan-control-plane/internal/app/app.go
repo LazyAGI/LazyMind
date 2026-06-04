@@ -14,6 +14,7 @@ import (
 	adminservice "github.com/lazymind/scan_control_plane/internal/admin"
 	"github.com/lazymind/scan_control_plane/internal/config"
 	"github.com/lazymind/scan_control_plane/internal/coreclient"
+	"github.com/lazymind/scan_control_plane/internal/dbbootstrap"
 	"github.com/lazymind/scan_control_plane/internal/observability"
 	"github.com/lazymind/scan_control_plane/internal/server"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
@@ -128,6 +129,18 @@ func buildSQLComponents(cfg config.Config, opener DBOpener) (Components, error) 
 	if err != nil {
 		return Components{}, fmt.Errorf("open sql repository: %w", err)
 	}
+	bootstrapResult, err := dbbootstrap.Bootstrap(context.Background(), db, dbbootstrap.Options{
+		MigrationFile: cfg.DBMigrationFile,
+	})
+	if err != nil {
+		_ = db.Close()
+		return Components{}, err
+	}
+	if bootstrapResult.ResetLegacy {
+		fmt.Fprintf(os.Stdout, "scan-control-plane reset legacy database and applied migration %s\n", dbbootstrap.BaselineVersion)
+	} else if bootstrapResult.AppliedMigration {
+		fmt.Fprintf(os.Stdout, "scan-control-plane applied migration %s to empty database\n", dbbootstrap.BaselineVersion)
+	}
 	if err := applyRuntimeSchemaRepairs(db); err != nil {
 		_ = db.Close()
 		return Components{}, err
@@ -209,7 +222,7 @@ func newHandlerWithComponents(built Components) http.Handler {
 		panic("app repository is required")
 	}
 	var repo handlerRepository = built.Repository
-	registry, err := connectorRegistryFromTypes(built.ConnectorTypes, built.AgentClient, built.LocalFSDefaultAgentID, built.LocalFSPublicRoot, built.AuthConnectionClient, built.FeishuClient)
+	registry, err := connectorRegistryFromTypes(built.ConnectorTypes, built.AgentClient, built.LocalFSDefaultAgentID, built.LocalFSPublicRoot, built.AuthConnectionClient, built.FeishuClient, built.TempObjectStore)
 	if err != nil {
 		panic(err)
 	}
@@ -241,9 +254,10 @@ func newHandlerWithComponents(built Components) http.Handler {
 		scheduler,
 		sourceengine.WithDefaultDatasetAlgo(built.DefaultDatasetAlgo),
 	)
+	taskPlanner.SetManualSyncScheduler(sourceEngine)
 	taskQuery := taskengine.NewDBParseTaskQuery(repo)
 	limits := tree.TreeQueryLimits{DefaultPageSize: 50, MaxPageSize: 100, MaxAllCurrentLevelItems: 1000}
-	sourceTree := tree.NewDBSourceTreeQueryEngine(repo, limits)
+	sourceTree := tree.NewDBSourceTreeQueryEngine(repo, limits, tree.WithSourceTreeConnectorRegistry(registry))
 	documents := tree.NewDBSourceDocumentQuery(repo, limits)
 	targetTree := tree.NewDefaultTargetTreeEngine(
 		registry,
@@ -276,13 +290,13 @@ func (p pendingTaskPlanner) GeneratePendingTasks(ctx context.Context, sourceID, 
 	return p.planner.GeneratePendingTasksForRun(ctx, sourceID, bindingID, runID)
 }
 
-func connectorRegistryFromTypes(types []connector.ConnectorType, agent localfs.AgentClient, localFSDefaultAgentID, localFSPublicRoot string, auth feishu.AuthConnectionClient, feishuClient feishu.FeishuClient) (*connector.DefaultConnectorRegistry, error) {
+func connectorRegistryFromTypes(types []connector.ConnectorType, agent localfs.AgentClient, localFSDefaultAgentID, localFSPublicRoot string, auth feishu.AuthConnectionClient, feishuClient feishu.FeishuClient, temp worker.TempObjectStore) (*connector.DefaultConnectorRegistry, error) {
 	registry, err := connector.NewDefaultConnectorRegistry()
 	if err != nil {
 		return nil, err
 	}
 	for _, connectorType := range types {
-		connector, err := connectorForType(connectorType, agent, localFSDefaultAgentID, localFSPublicRoot, auth, feishuClient)
+		connector, err := connectorForType(connectorType, agent, localFSDefaultAgentID, localFSPublicRoot, auth, feishuClient, temp)
 		if err != nil {
 			return nil, err
 		}
@@ -293,19 +307,22 @@ func connectorRegistryFromTypes(types []connector.ConnectorType, agent localfs.A
 	return registry, nil
 }
 
-func connectorForType(connectorType connector.ConnectorType, agent localfs.AgentClient, localFSDefaultAgentID, localFSPublicRoot string, auth feishu.AuthConnectionClient, feishuClient feishu.FeishuClient) (connector.SourceConnector, error) {
+func connectorForType(connectorType connector.ConnectorType, agent localfs.AgentClient, localFSDefaultAgentID, localFSPublicRoot string, auth feishu.AuthConnectionClient, feishuClient feishu.FeishuClient, temp worker.TempObjectStore) (connector.SourceConnector, error) {
 	switch connectorType {
 	case localfs.ConnectorType:
 		options := []localfs.Option{
 			localfs.WithDefaultAgentID(localFSDefaultAgentID),
 			localfs.WithRecommendedRoots("/"),
+			localfs.WithTempObjectStore(temp),
 		}
 		if localFSPublicRoot != "" {
 			options = append(options, localfs.WithPublicRoot(localFSPublicRoot))
 		}
 		return localfs.NewLocalFSConnector(agent, options...), nil
 	case feishu.ConnectorType:
-		return feishu.NewFeishuConnector(auth, feishuClient), nil
+		conn := feishu.NewFeishuConnector(auth, feishuClient)
+		conn.UseTempObjectStore(temp)
+		return conn, nil
 	default:
 		return nil, fmt.Errorf("unsupported connector type %q", connectorType)
 	}
@@ -348,7 +365,7 @@ func buildTempObjectStore(cfg config.Config) worker.TempObjectStore {
 }
 
 func buildParseWorkerRunner(built Components, cfg config.Config) (*worker.Runner, error) {
-	registry, err := connectorRegistryFromTypes(built.ConnectorTypes, built.AgentClient, built.LocalFSDefaultAgentID, built.LocalFSPublicRoot, built.AuthConnectionClient, built.FeishuClient)
+	registry, err := connectorRegistryFromTypes(built.ConnectorTypes, built.AgentClient, built.LocalFSDefaultAgentID, built.LocalFSPublicRoot, built.AuthConnectionClient, built.FeishuClient, built.TempObjectStore)
 	if err != nil {
 		return nil, err
 	}
@@ -371,7 +388,7 @@ func buildParseWorkerRunner(built Components, cfg config.Config) (*worker.Runner
 }
 
 func buildCrawlWorker(built Components, cfg config.Config) (*crawl.RunOnceWorker, error) {
-	registry, err := connectorRegistryFromTypes(built.ConnectorTypes, built.AgentClient, built.LocalFSDefaultAgentID, built.LocalFSPublicRoot, built.AuthConnectionClient, built.FeishuClient)
+	registry, err := connectorRegistryFromTypes(built.ConnectorTypes, built.AgentClient, built.LocalFSDefaultAgentID, built.LocalFSPublicRoot, built.AuthConnectionClient, built.FeishuClient, built.TempObjectStore)
 	if err != nil {
 		return nil, err
 	}

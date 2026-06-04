@@ -6,7 +6,14 @@ from typing import Any
 
 import docstring_parser
 from lazyllm.tools.fs.supplier.feishu import FeishuFS
-from lazyllm.tools.tools.search import ArxivSearch, BingSearch, BochaSearch, GoogleSearch, WikipediaSearch
+from lazyllm.tools.tools.search import (
+    ArxivSearch,
+    BingSearch,
+    BochaSearch,
+    GoogleSearch,
+    SciverseSearch,
+    WikipediaSearch,
+)
 
 from lazymind.chat.engine.tools import (
     KBToolGroup,
@@ -66,6 +73,12 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         label='Arxiv 论文搜索',
         description='从 Arxiv 搜索学术论文',
         instance=ArxivSearch(skip_auth=True),
+    ),
+    ToolGroupConfig(
+        name='sciverse',
+        label='Sciverse 论文搜索',
+        description='从 Sciverse 搜索科研论文、元数据和文献片段',
+        instance=SciverseSearch(),
     ),
     ToolGroupConfig(
         name='google',
@@ -177,6 +190,7 @@ def get_all_tool_groups() -> list[dict]:
             'description': cfg.description,
             'methods': methods,
             'can_disable': True,
+            'active': group_is_active(cfg),
         })
     result.append({
         'name': SKILL_TOOL_GROUP.name,
@@ -184,6 +198,7 @@ def get_all_tool_groups() -> list[dict]:
         'description': SKILL_TOOL_GROUP.description,
         'methods': _SKILL_METHODS,
         'can_disable': False,
+        'active': True,
     })
     return result
 

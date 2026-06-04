@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	sourceengine "github.com/lazymind/scan_control_plane/internal/sourceengine/source"
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
 )
 
@@ -26,14 +27,29 @@ const (
 )
 
 type GenerateRequest struct {
-	CallerID    string   `json:"-"`
-	TenantID    string   `json:"-"`
-	SourceID    string   `json:"-"`
-	BindingID   string   `json:"binding_id,omitempty"`
-	ObjectKeys  []string `json:"object_keys,omitempty"`
-	DocumentIDs []string `json:"document_ids,omitempty"`
-	Mode        string   `json:"mode,omitempty"`
-	Priority    int      `json:"priority,omitempty"`
+	CallerID       string          `json:"-"`
+	TenantID       string          `json:"-"`
+	RequestID      string          `json:"request_id,omitempty"`
+	SourceID       string          `json:"-"`
+	BindingID      string          `json:"binding_id,omitempty"`
+	ObjectKeys     []string        `json:"object_keys,omitempty"`
+	DocumentIDs    []string        `json:"document_ids,omitempty"`
+	Paths          []string        `json:"paths,omitempty"`
+	Mode           string          `json:"mode,omitempty"`
+	Priority       int             `json:"priority,omitempty"`
+	TriggerPolicy  string          `json:"trigger_policy,omitempty"`
+	UpdatedOnly    bool            `json:"updated_only,omitempty"`
+	SelectionToken string          `json:"selection_token,omitempty"`
+	Scopes         []GenerateScope `json:"scopes,omitempty"`
+}
+
+type GenerateScope struct {
+	Key         string `json:"key,omitempty"`
+	ObjectKey   string `json:"object_key,omitempty"`
+	NodeRef     string `json:"node_ref,omitempty"`
+	Path        string `json:"path,omitempty"`
+	IsDocument  bool   `json:"is_document,omitempty"`
+	IsContainer bool   `json:"is_container,omitempty"`
 }
 
 type GeneratePendingRequest struct {
@@ -53,6 +69,13 @@ type GenerateResult struct {
 	SkippedCount       int      `json:"skipped_count"`
 	TaskIDs            []string `json:"task_ids"`
 	JobID              string   `json:"job_id,omitempty"`
+	JobIDs             []string `json:"job_ids,omitempty"`
+	RunIDs             []string `json:"run_ids,omitempty"`
+	QueuedSyncCount    int      `json:"queued_sync_count,omitempty"`
+}
+
+type ManualSyncScheduler interface {
+	TriggerSourceSync(ctx context.Context, req sourceengine.TriggerSourceSyncRequest) (sourceengine.TriggerSourceSyncResponse, error)
 }
 
 type ExpediteRequest struct {

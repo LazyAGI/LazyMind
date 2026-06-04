@@ -86,6 +86,7 @@ func (r *CoreResultReconciler) RunOnce(ctx context.Context, workerID string) err
 		IdempotencyKey: task.IdempotencyKey,
 		DatasetID:      source.DatasetID,
 		CoreTaskID:     task.CoreTaskID,
+		UserID:         source.CreatedBy,
 	})
 	if err != nil {
 		return err

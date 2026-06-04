@@ -1,4 +1,4 @@
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Body
 from lazymind.chat.config import DEFAULT_CHAT_DATASET
@@ -55,12 +55,12 @@ async def chat(
         ),
     ] = None,
     tool_config: Annotated[
-        Optional[Dict[str, str]],
+        Optional[Dict[str, Union[str, List[str]]]],
         Body(
             description=(
-                'Per-request tool credentials. Keys are tool/provider names, values are tokens. '
+                'Per-request tool credentials. Format: {tool_name: token} or {tool_name: [token, ...]}. '
                 'For OAuth2 providers (e.g. feishu) pass a valid, unexpired access token. '
-                'Example: {"feishu": "u-xxx", "bing": "sk-xxx"}'
+                'Example: {"feishu": "u-xxx", "bing": ["sk-1", "sk-2"]}'
             )
         ),
     ] = None,
@@ -73,12 +73,8 @@ async def chat(
         session_id=session_id,
         filters=filters,
         files=files,
-        debug=debug,
-        reasoning=reasoning,
         databases=databases,
-        dataset=dataset,
         priority=priority,
-        trace=bool(trace),
         available_tools=available_tools,
         available_skills=available_skills,
         memory=memory,

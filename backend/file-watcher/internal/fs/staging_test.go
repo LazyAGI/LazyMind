@@ -83,8 +83,14 @@ func TestStageFilePreservesModTimeAndSkipsUpToDateCopy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat staged file: %v", err)
 	}
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Fatalf("expected staged file mode 0644, got %o", got)
+	}
 	if !info.ModTime().Equal(modTime) {
 		t.Fatalf("expected staged mtime %v, got %v", modTime, info.ModTime())
+	}
+	if err := os.Chmod(first.HostPath, 0o600); err != nil {
+		t.Fatalf("simulate legacy private staging mode: %v", err)
 	}
 
 	second, err := svc.StageFile(context.Background(), "src-1", "doc-1", "v1", srcPath)
@@ -93,6 +99,13 @@ func TestStageFilePreservesModTimeAndSkipsUpToDateCopy(t *testing.T) {
 	}
 	if second.HostPath != first.HostPath {
 		t.Fatalf("expected same staged path, got %q vs %q", second.HostPath, first.HostPath)
+	}
+	info, err = os.Stat(second.HostPath)
+	if err != nil {
+		t.Fatalf("stat restaged file: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Fatalf("expected skipped staging to repair mode to 0644, got %o", got)
 	}
 	wantDir := filepath.Join(hostRoot, "sources", "src-1", "files")
 	if filepath.Dir(first.HostPath) != wantDir {

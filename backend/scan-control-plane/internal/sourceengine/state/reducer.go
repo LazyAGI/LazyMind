@@ -295,6 +295,7 @@ func (r *DBStateReducer) ApplyTaskSuccess(ctx context.Context, input TaskSuccess
 		current.ParseQueueState = ParseQueueStateNone
 		current.ActiveTaskID = ""
 		current.LastSyncedAt = &now
+		current.LastError = store.JSON{}
 		current.UpdatedAt = now
 		return r.store.SaveDocumentState(ctx, current)
 	}
@@ -304,6 +305,7 @@ func (r *DBStateReducer) ApplyTaskSuccess(ctx context.Context, input TaskSuccess
 	current.ParseQueueState = ParseQueueStateNone
 	current.ActiveTaskID = ""
 	current.LastSyncedAt = &now
+	current.LastError = store.JSON{}
 	current.UpdatedAt = now
 	if err := r.store.SaveDocumentState(ctx, current); err != nil {
 		return err

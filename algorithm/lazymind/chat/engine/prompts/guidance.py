@@ -51,7 +51,7 @@ SKILLS_GUIDANCE = (
 IMAGE_REFERENCE_MARKDOWN_GUIDANCE = (
     '# Image path formatting (mandatory)\n'
     'When showing knowledge-base images, you MUST copy the `image_markdown` field from '
-    '`kb_search` / `kb_*` tool results verbatim. If `image_markdown` is absent, copy the '
+    '`KBToolGroup` tool results verbatim. If `image_markdown` is absent, copy the '
     '`image_url` or signed `text` field that starts with `/static-files/` exactly.\n'
     'Rules:\n'
     '- Use Markdown image syntax only: `![alt](/static-files/...?expires=...&sig=...)`.\n'
@@ -63,7 +63,7 @@ IMAGE_REFERENCE_MARKDOWN_GUIDANCE = (
 )
 VISION_EXTRACTOR_GUIDANCE = (
     'When calling vision_extractor on knowledge-base images, pass the `local_path` field '
-    'from kb_search results (filesystem path under /var/lib/lazymind/uploads/). '
+    'from KBToolGroup results (filesystem path under /var/lib/lazymind/uploads/). '
     'Do NOT pass `/static-files/` signed URLs to vision_extractor.'
 )
 VISION_EXTRACT_DEFAULT_INSTRUCTION = (
@@ -85,21 +85,22 @@ ATTACHED_FILES_GUIDANCE = (
 
 SEARCH_GUIDANCE = (
     "# Search Tool Rules (CRITICAL — follow strictly)\n"
-    "You MUST call `kb_search` (or another `kb_*` tool) FIRST for every retrieval "
+    "You MUST call `KBToolGroup` (or another `kb_*` tool) FIRST for every retrieval "
     "need — no exceptions. Do not skip it because you think the web might have "
     "better information, or because the topic seems general, popular, or common "
     "knowledge. The knowledge base is your primary evidence source.\n\n"
-    "Only after `kb_search` returns zero results or explicitly irrelevant results "
+    "Only after `KBToolGroup` returns zero results or explicitly irrelevant results "
     "may you fall back to provider-specific search tools"
     "You MUST NOT use any non-knowledge-base retrieval tool before trying `kb_*` tools.\n\n"
     "When the user gives a concrete URL or asks you to inspect a specific page, "
-    "still try `kb_search` first; use `url_fetch` only when the knowledge base has "
+    "still try `KBToolGroup` first; use `url_fetch` only when the knowledge base has "
     "no relevant result.\n\n"
     "For papers, research topics, arXiv ids, abstracts, or author-related questions, "
-    "still try `kb_search` first; after knowledge-base evidence is unavailable or "
-    "insufficient, prefer `ArxivSearch_search` over general web search tools.\n\n"
+    "still try `KBToolGroup` first; after knowledge-base evidence is unavailable or "
+    "insufficient, prefer `ArxivSearch` over general web search tools. "
     "When answering with knowledge-base evidence, cite with the original `[[document.chunk]]` "
-    "markers. When answering with web search tools, `url_fetch`, or `ArxivSearch_search`, do not "
+    "markers. When answering with web search tools, `url_fetch`, "
+    "or `ArxivSearch`, do not "
     "fabricate `[[document.chunk]]`; instead, mention the source title or URL plainly.\n"
 )
 TOOL_CALL_STATUS_GUIDANCE = (

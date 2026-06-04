@@ -130,6 +130,122 @@ func TestLoadMergedDocumentsUsesCoreUpdatedAtWhenNewerThanReadonlyBase(t *testin
 	}
 }
 
+func TestListDocumentsByDatasetsDefaultPaginationCursorNoDuplicates(t *testing.T) {
+	db := newDocumentTestDB(t)
+	seedDocumentListDataset(t, db, "dataset-a", "user-1")
+	seedDocumentListDataset(t, db, "dataset-b", "user-1")
+
+	base := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	for i := 0; i < 6; i++ {
+		seedDocumentListDoc(t, db, "dataset-a", fmt.Sprintf("a-doc-%02d", i), fmt.Sprintf("A-%02d.pdf", i), base.Add(time.Duration(-i)*time.Minute), "Alice", nil)
+		seedDocumentListDoc(t, db, "dataset-b", fmt.Sprintf("b-doc-%02d", i), fmt.Sprintf("B-%02d.pdf", i), base.Add(time.Duration(-i)*time.Minute), "Alice", nil)
+	}
+
+	first := requestListDocumentsByDatasets(t, `{"dataset_ids":["dataset-b","dataset-a","dataset-a","missing"]}`, "user-1")
+	if first.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", first.Code, first.Body.String())
+	}
+	var firstBody ListDocumentsResponse
+	decodeRecorderJSON(t, first, &firstBody)
+	if len(firstBody.Documents) != 10 {
+		t.Fatalf("expected default page size 10, got %d", len(firstBody.Documents))
+	}
+	if firstBody.TotalSize != 12 {
+		t.Fatalf("expected total size 12, got %d", firstBody.TotalSize)
+	}
+	if strings.TrimSpace(firstBody.NextPageToken) == "" {
+		t.Fatalf("expected next_page_token")
+	}
+	if got, want := firstBody.Documents[0].DocumentID, "a-doc-00"; got != want {
+		t.Fatalf("expected stable dataset tie-break first doc %q, got %q", want, got)
+	}
+	if got, want := firstBody.Documents[1].DocumentID, "b-doc-00"; got != want {
+		t.Fatalf("expected stable dataset tie-break second doc %q, got %q", want, got)
+	}
+
+	if err := db.Model(&orm.Document{}).
+		Where("id = ?", firstBody.Documents[0].DocumentID).
+		Update("updated_at", base.Add(-30*time.Minute)).Error; err != nil {
+		t.Fatalf("move first page document behind cursor: %v", err)
+	}
+
+	second := requestListDocumentsByDatasets(t, fmt.Sprintf(`{"dataset_ids":["dataset-b","dataset-a"],"page_token":%q}`, firstBody.NextPageToken), "user-1")
+	if second.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", second.Code, second.Body.String())
+	}
+	var secondBody ListDocumentsResponse
+	decodeRecorderJSON(t, second, &secondBody)
+	if len(secondBody.Documents) != 2 {
+		t.Fatalf("expected remaining 2 documents, got %d", len(secondBody.Documents))
+	}
+	if secondBody.NextPageToken != "" {
+		t.Fatalf("expected no next_page_token on final page, got %q", secondBody.NextPageToken)
+	}
+
+	seen := map[string]struct{}{}
+	for _, doc := range firstBody.Documents {
+		seen[doc.DocumentID] = struct{}{}
+	}
+	for _, doc := range secondBody.Documents {
+		if _, ok := seen[doc.DocumentID]; ok {
+			t.Fatalf("document %q repeated on next page", doc.DocumentID)
+		}
+	}
+}
+
+func TestListDocumentsByDatasetsKeywordMatchesDocumentNameOnly(t *testing.T) {
+	db := newDocumentTestDB(t)
+	seedDocumentListDataset(t, db, "dataset-a", "user-1")
+	now := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	seedDocumentListDoc(t, db, "dataset-a", "doc-name", "needle-report.pdf", now, "Alice", nil)
+	seedDocumentListDoc(t, db, "dataset-a", "doc-tag", "budget.pdf", now.Add(-time.Minute), "Alice", json.RawMessage(`{"stored_path":"/tmp/needle/budget.pdf"}`))
+	seedDocumentListDoc(t, db, "dataset-a", "doc-creator", "notes.pdf", now.Add(-2*time.Minute), "needle-user", nil)
+
+	rec := requestListDocumentsByDatasets(t, `{"dataset_ids":["dataset-a"],"keyword":"needle"}`, "user-1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body ListDocumentsResponse
+	decodeRecorderJSON(t, rec, &body)
+	if body.TotalSize != 1 || len(body.Documents) != 1 {
+		t.Fatalf("expected only name match, total=%d len=%d body=%s", body.TotalSize, len(body.Documents), rec.Body.String())
+	}
+	if got, want := body.Documents[0].DocumentID, "doc-name"; got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestListDocumentsByDatasetsSkipsInaccessibleAndMissingDatasets(t *testing.T) {
+	db := newDocumentTestDB(t)
+	seedDocumentListDataset(t, db, "dataset-owned", "user-1")
+	seedDocumentListDataset(t, db, "dataset-other", "user-2")
+	now := time.Date(2026, 6, 4, 10, 0, 0, 0, time.UTC)
+	seedDocumentListDoc(t, db, "dataset-owned", "doc-owned", "owned.pdf", now, "Alice", nil)
+	seedDocumentListDoc(t, db, "dataset-other", "doc-other", "other.pdf", now, "Bob", nil)
+
+	rec := requestListDocumentsByDatasets(t, `{"dataset_ids":["dataset-other","dataset-owned","missing"]}`, "user-1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body ListDocumentsResponse
+	decodeRecorderJSON(t, rec, &body)
+	if body.TotalSize != 1 || len(body.Documents) != 1 {
+		t.Fatalf("expected one accessible document, total=%d len=%d body=%s", body.TotalSize, len(body.Documents), rec.Body.String())
+	}
+	if got, want := body.Documents[0].DocumentID, "doc-owned"; got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestListDocumentsByDatasetsRequiresDatasetIDs(t *testing.T) {
+	_ = newDocumentTestDB(t)
+
+	rec := requestListDocumentsByDatasets(t, `{}`, "user-1")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestDeleteDocumentRecalculatesParentFolderSize(t *testing.T) {
 	db := newDocumentTestDB(t)
 	seedFolderWithSizedDoc(t, db, "dataset-1", "folder-1", "doc-1", 31744)
@@ -215,6 +331,68 @@ func seedFolderWithSizedDoc(t *testing.T, db *orm.DB, datasetID, folderID, docID
 		},
 	}).Error; err != nil {
 		t.Fatalf("create child document: %v", err)
+	}
+}
+
+func requestListDocumentsByDatasets(t *testing.T, body string, userID string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/core/documents:listByDatasets", strings.NewReader(body))
+	if userID != "" {
+		req.Header.Set("X-User-Id", userID)
+	}
+	rec := httptest.NewRecorder()
+	ListDocumentsByDatasets(rec, req)
+	return rec
+}
+
+func decodeRecorderJSON(t *testing.T, rec *httptest.ResponseRecorder, out any) {
+	t.Helper()
+	if err := json.Unmarshal(rec.Body.Bytes(), out); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rec.Body.String())
+	}
+}
+
+func seedDocumentListDataset(t *testing.T, db *orm.DB, datasetID, ownerID string) {
+	t.Helper()
+	now := time.Date(2026, 6, 4, 9, 0, 0, 0, time.UTC)
+	if err := db.Create(&orm.Dataset{
+		ID:           datasetID,
+		KbID:         "kb-" + datasetID,
+		DisplayName:  "Dataset " + datasetID,
+		DatasetState: 0,
+		ShareType:    0,
+		Type:         1,
+		Ext:          json.RawMessage(`{}`),
+		BaseModel: orm.BaseModel{
+			CreateUserID:   ownerID,
+			CreateUserName: ownerID,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create dataset %s: %v", datasetID, err)
+	}
+}
+
+func seedDocumentListDoc(t *testing.T, db *orm.DB, datasetID, docID, displayName string, updatedAt time.Time, creator string, ext json.RawMessage) {
+	t.Helper()
+	if ext == nil {
+		ext = json.RawMessage(`{}`)
+	}
+	if err := db.Create(&orm.Document{
+		ID:          docID,
+		DatasetID:   datasetID,
+		DisplayName: displayName,
+		Tags:        []byte(`["needle"]`),
+		Ext:         ext,
+		BaseModel: orm.BaseModel{
+			CreateUserID:   creator,
+			CreateUserName: creator,
+			CreatedAt:      updatedAt.Add(-time.Hour),
+			UpdatedAt:      updatedAt,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create document %s: %v", docID, err)
 	}
 }
 

@@ -269,6 +269,14 @@ func (r *SQLRepository) bindingSummary(ctx context.Context, sourceID, bindingID 
 	_ = db.Count(&summary.TotalObjects).Error
 	_ = db.Where("is_document").Count(&summary.DocumentObjects).Error
 	_ = db.Where("is_container").Count(&summary.ContainerObjects).Error
+	var storage struct {
+		StorageBytes int64
+	}
+	_ = r.ormDB(ctx).Model(&ormSourceObject{}).
+		Where("source_id = ? AND binding_id = ? AND is_document", sourceID, bindingID).
+		Select("COALESCE(SUM(size_bytes), 0) AS storage_bytes").
+		Scan(&storage).Error
+	summary.StorageBytes = storage.StorageBytes
 	r.fillSummaryStateCounts(ctx, &summary)
 	r.fillSummaryTaskCounts(ctx, &summary)
 	checkpoint, err := r.GetSyncCheckpoint(ctx, bindingID)

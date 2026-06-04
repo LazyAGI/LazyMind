@@ -13,9 +13,11 @@ import (
 	"github.com/gorilla/mux"
 	"gopkg.in/yaml.v3"
 	"lazymind/core/acl"
+	"lazymind/core/asyncjob"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
+	"lazymind/core/evalset"
 	"lazymind/core/log"
 	"lazymind/core/migrate"
 	"lazymind/core/modelprovider"
@@ -89,6 +91,8 @@ func main() {
 	}
 	catalogPath := filepath.Join(".", "config", "model_catalog.yaml")
 	modelprovider.MustSeedModelCatalog(context.Background(), db.DB, catalogPath)
+	datasourceCatalogPath := filepath.Join(".", "config", "datasource_catalog.yaml")
+	modelprovider.MustSeedDatasourceCatalog(context.Background(), db.DB, datasourceCatalogPath)
 
 	readonlyDriver := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DRIVER"))
 	readonlyDSN := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DSN"))
@@ -130,6 +134,15 @@ func main() {
 
 	// text/PrompttextInitialize（DB + Redis）。DB text ACL text；Redis textConversationtext/text/text。
 	store.Init(db.DB, readonlyDB.DB, store.MustRedisFromEnv())
+	evalset.RegisterAsyncJobs()
+	asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
+	asyncjob.Start(context.Background(), store.DB(), asyncjob.Options{
+		Concurrency:  asyncConfig.Concurrency,
+		PollInterval: asyncConfig.PollInterval,
+		LockTTL:      asyncConfig.LockTTL,
+	})
+	importConfig := evalset.LoadImportRuntimeConfigFromEnv()
+	evalset.StartImportPreviewCleanup(context.Background(), store.DB(), importConfig.CleanupInterval)
 
 	r := mux.NewRouter()
 	r.UseEncodedPath()

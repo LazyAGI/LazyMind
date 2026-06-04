@@ -144,10 +144,21 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 }
 
 // SeedModelCatalog upserts default_model_providers and default_models from the YAML catalog file.
+// Section keys ending with "_providers" derive their category by trimming that suffix.
 func SeedModelCatalog(ctx context.Context, db *gorm.DB, yamlPath string) error {
+	return seedCatalog(ctx, db, yamlPath, "_providers", "")
+}
+
+// SeedDatasourceCatalog upserts default_model_providers from the datasource YAML catalog file.
+// All suppliers are seeded with category "datasource" regardless of section key.
+func SeedDatasourceCatalog(ctx context.Context, db *gorm.DB, yamlPath string) error {
+	return seedCatalog(ctx, db, yamlPath, "_sources", "datasource")
+}
+
+func seedCatalog(ctx context.Context, db *gorm.DB, yamlPath, categorySuffix, forceCategory string) error {
 	yamlPath = strings.TrimSpace(yamlPath)
 	if yamlPath == "" {
-		return errors.New("model catalog yaml path is required")
+		return errors.New("catalog yaml path is required")
 	}
 
 	yamlBytes, err := os.ReadFile(yamlPath)
@@ -163,8 +174,10 @@ func SeedModelCatalog(ctx context.Context, db *gorm.DB, yamlPath string) error {
 	now := time.Now().UTC()
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for sectionKey, section := range catalog {
-			// Derive category from section key: "model_providers" → "model"
-			category := strings.TrimSuffix(sectionKey, "_providers")
+			category := forceCategory
+			if category == "" {
+				category = strings.TrimSuffix(sectionKey, categorySuffix)
+			}
 			for _, supplier := range section.Suppliers {
 				providerID, err := upsertDefaultProvider(tx, now, category, section.Capabilities, supplier)
 				if err != nil {
@@ -187,4 +200,12 @@ func MustSeedModelCatalog(ctx context.Context, db *gorm.DB, yamlPath string) {
 		log.Logger.Fatal().Err(err).Str("path", yamlPath).Msg("seed model catalog failed")
 	}
 	log.Logger.Info().Str("path", yamlPath).Msg("model catalog seeded from YAML")
+}
+
+// MustSeedDatasourceCatalog runs SeedDatasourceCatalog using config/datasource_catalog.yaml under the working directory.
+func MustSeedDatasourceCatalog(ctx context.Context, db *gorm.DB, yamlPath string) {
+	if err := SeedDatasourceCatalog(ctx, db, yamlPath); err != nil {
+		log.Logger.Fatal().Err(err).Str("path", yamlPath).Msg("seed datasource catalog failed")
+	}
+	log.Logger.Info().Str("path", yamlPath).Msg("datasource catalog seeded from YAML")
 }

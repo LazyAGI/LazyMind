@@ -2,11 +2,15 @@ package task
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
+	sourceengine "github.com/lazymind/scan_control_plane/internal/sourceengine/source"
 	statepkg "github.com/lazymind/scan_control_plane/internal/sourceengine/state"
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
 )
@@ -30,6 +34,7 @@ type Store interface {
 
 type DBTaskPlanner struct {
 	store            Store
+	sync             ManualSyncScheduler
 	clock            func() time.Time
 	newID            func(prefix string) string
 	maxManualObjects int
@@ -76,7 +81,20 @@ func WithMaxObjectsPerGenerateRequest(limit int) Option {
 	}
 }
 
+func WithManualSyncScheduler(sync ManualSyncScheduler) Option {
+	return func(p *DBTaskPlanner) {
+		p.sync = sync
+	}
+}
+
+func (p *DBTaskPlanner) SetManualSyncScheduler(sync ManualSyncScheduler) {
+	p.sync = sync
+}
+
 func (p *DBTaskPlanner) GenerateTasks(ctx context.Context, req GenerateRequest) (GenerateResult, error) {
+	if p.shouldQueueManualSync(req) {
+		return p.queueManualSyncs(ctx, req)
+	}
 	return p.generateTasks(ctx, req, p.maxManualObjects, false, nil)
 }
 
@@ -122,6 +140,184 @@ func (p *DBTaskPlanner) GeneratePendingTasksForRun(ctx context.Context, sourceID
 		RunID:     runID,
 	})
 	return err
+}
+
+func (p *DBTaskPlanner) shouldQueueManualSync(req GenerateRequest) bool {
+	if p.sync == nil {
+		return false
+	}
+	mode := strings.ToLower(strings.TrimSpace(req.Mode))
+	if mode == "full" || mode == "partial" || mode == "all" {
+		return true
+	}
+	return len(req.Paths) > 0 || len(req.Scopes) > 0
+}
+
+func (p *DBTaskPlanner) queueManualSyncs(ctx context.Context, req GenerateRequest) (GenerateResult, error) {
+	bindingID, err := p.resolveBindingID(ctx, req.SourceID, req.BindingID)
+	if err != nil {
+		return GenerateResult{}, err
+	}
+	scopes := manualSyncScopes(req, bindingID)
+	if len(scopes) == 0 {
+		scopes = []manualSyncScope{{scopeType: string(connector.ScopeTypeFull)}}
+	}
+	if p.maxManualObjects > 0 && len(scopes) > p.maxManualObjects {
+		return GenerateResult{}, parseBatchLimitError(p.maxManualObjects, len(scopes), "request_object_ids")
+	}
+	result := GenerateResult{RequestedCount: len(scopes), TaskIDs: []string{}}
+	for idx, scope := range scopes {
+		syncReq := sourceengine.TriggerSourceSyncRequest{
+			CallerID:  req.CallerID,
+			TenantID:  req.TenantID,
+			RequestID: syncRequestID(req, scope, idx),
+			SourceID:  req.SourceID,
+			BindingID: bindingID,
+			ScopeType: scope.scopeType,
+			ScopeRef:  scope.scopeRef,
+		}
+		resp, err := p.sync.TriggerSourceSync(ctx, syncReq)
+		if err != nil {
+			return result, err
+		}
+		result.RunIDs = append(result.RunIDs, resp.RunIDs...)
+		result.JobIDs = append(result.JobIDs, resp.JobIDs...)
+		result.AcceptedCount += len(resp.RunIDs)
+		for _, intent := range resp.Intents {
+			if !intent.Created {
+				result.DuplicateCount++
+			}
+		}
+	}
+	if len(result.JobIDs) > 0 {
+		result.JobID = result.JobIDs[0]
+	}
+	result.QueuedSyncCount = len(result.RunIDs)
+	return result, nil
+}
+
+func (p *DBTaskPlanner) resolveBindingID(ctx context.Context, sourceID, bindingID string) (string, error) {
+	if bindingID != "" {
+		return bindingID, nil
+	}
+	bindings, err := p.generateBindings(ctx, sourceID)
+	if err != nil {
+		return "", err
+	}
+	if len(bindings) != 1 {
+		return "", NewError(ErrCodeInvalidRequest, "binding_id is required when source has multiple bindings")
+	}
+	return bindings[0].BindingID, nil
+}
+
+type manualSyncScope struct {
+	scopeType string
+	scopeRef  map[string]any
+}
+
+func manualSyncScopes(req GenerateRequest, bindingID string) []manualSyncScope {
+	mode := strings.ToLower(strings.TrimSpace(req.Mode))
+	if mode == "full" || mode == "all" || (mode == "" && len(req.Paths) == 0 && len(req.ObjectKeys) == 0 && len(req.Scopes) == 0) {
+		return []manualSyncScope{{scopeType: string(connector.ScopeTypeFull)}}
+	}
+	scopes := make([]manualSyncScope, 0, len(req.Scopes)+len(req.Paths)+len(req.ObjectKeys))
+	for _, scope := range req.Scopes {
+		if syncScope, ok := manualSyncScopeFromGenerateScope(scope, bindingID); ok {
+			scopes = append(scopes, syncScope)
+		}
+	}
+	for _, path := range compactStrings(req.Paths) {
+		if objectKey := objectKeyFromTreeKey(path, bindingID); objectKey != "" {
+			scopes = append(scopes, manualSyncScope{
+				scopeType: string(connector.ScopeTypePartial),
+				scopeRef:  map[string]any{"object_key": objectKey},
+			})
+			continue
+		}
+		scopes = append(scopes, manualSyncScope{
+			scopeType: string(connector.ScopeTypePartial),
+			scopeRef:  map[string]any{"path": path},
+		})
+	}
+	for _, objectKey := range compactStrings(req.ObjectKeys) {
+		scopes = append(scopes, manualSyncScope{
+			scopeType: string(connector.ScopeTypePartial),
+			scopeRef:  map[string]any{"object_key": objectKey},
+		})
+	}
+	return scopes
+}
+
+func manualSyncScopeFromGenerateScope(scope GenerateScope, bindingID string) (manualSyncScope, bool) {
+	scopeRef := map[string]any{}
+	objectKey := firstNonBlank(scope.ObjectKey, objectKeyFromTreeKey(scope.Key, bindingID))
+	if scope.IsContainer {
+		nodeRef := firstNonBlank(scope.NodeRef, scope.Path, objectKey)
+		if nodeRef == "" {
+			return manualSyncScope{}, false
+		}
+		scopeRef["node_ref"] = nodeRef
+		if objectKey != "" {
+			scopeRef["subtree_root"] = objectKey
+		}
+		return manualSyncScope{scopeType: string(connector.ScopeTypePartial), scopeRef: scopeRef}, true
+	}
+	if objectKey != "" {
+		scopeRef["object_key"] = objectKey
+		return manualSyncScope{scopeType: string(connector.ScopeTypePartial), scopeRef: scopeRef}, true
+	}
+	if path := strings.TrimSpace(scope.Path); path != "" {
+		scopeRef["path"] = path
+		return manualSyncScope{scopeType: string(connector.ScopeTypePartial), scopeRef: scopeRef}, true
+	}
+	if nodeRef := strings.TrimSpace(scope.NodeRef); nodeRef != "" {
+		scopeRef["node_ref"] = nodeRef
+		return manualSyncScope{scopeType: string(connector.ScopeTypePartial), scopeRef: scopeRef}, true
+	}
+	return manualSyncScope{}, false
+}
+
+func objectKeyFromTreeKey(key, bindingID string) string {
+	key = strings.TrimSpace(key)
+	bindingID = strings.TrimSpace(bindingID)
+	if key == "" || bindingID == "" || !strings.HasPrefix(key, bindingID+":") {
+		return ""
+	}
+	return strings.TrimPrefix(key, bindingID+":")
+}
+
+func firstNonBlank(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func compactStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func syncRequestID(req GenerateRequest, scope manualSyncScope, idx int) string {
+	if req.RequestID != "" && idx == 0 {
+		return req.RequestID
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d\x00%s\x00%v", req.RequestID, req.SourceID, idx, scope.scopeType, scope.scopeRef)))
+	return "manual-pull-" + hex.EncodeToString(sum[:12])
 }
 
 func (p *DBTaskPlanner) generateTasks(ctx context.Context, req GenerateRequest, maxObjects int, requirePendingAction bool, coverage *coverageSelector) (GenerateResult, error) {
@@ -220,6 +416,7 @@ func (p *DBTaskPlanner) generateTasks(ctx context.Context, req GenerateRequest, 
 		}
 		docState.ActiveTaskID = parseTask.TaskID
 		docState.ParseQueueState = statepkg.ParseQueueStateQueued
+		docState.DocumentID = document.DocumentID
 		docState.UpdatedAt = p.clock()
 		if err := p.store.SaveDocumentState(ctx, docState); err != nil {
 			return result, mapStoreError(err)

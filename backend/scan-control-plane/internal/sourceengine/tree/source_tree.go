@@ -1,10 +1,26 @@
 package tree
 
+import "github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
+
 type DBSourceTreeQueryEngine struct {
-	repo   SourceTreeReadRepository
-	limits TreeQueryLimits
+	repo     SourceTreeReadRepository
+	registry connector.ConnectorRegistry
+	limits   TreeQueryLimits
 }
 
-func NewDBSourceTreeQueryEngine(repo SourceTreeReadRepository, limits TreeQueryLimits) *DBSourceTreeQueryEngine {
-	return &DBSourceTreeQueryEngine{repo: repo, limits: defaultLimits(limits)}
+type SourceTreeOption func(*DBSourceTreeQueryEngine)
+
+func NewDBSourceTreeQueryEngine(repo SourceTreeReadRepository, limits TreeQueryLimits, options ...SourceTreeOption) *DBSourceTreeQueryEngine {
+	e := &DBSourceTreeQueryEngine{repo: repo, limits: defaultLimits(limits)}
+	for _, option := range options {
+		option(e)
+	}
+	e.limits = defaultLimits(e.limits)
+	return e
+}
+
+func WithSourceTreeConnectorRegistry(registry connector.ConnectorRegistry) SourceTreeOption {
+	return func(e *DBSourceTreeQueryEngine) {
+		e.registry = registry
+	}
 }
