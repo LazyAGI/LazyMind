@@ -286,9 +286,10 @@ const enUS = {
     embeddingReadyTip: "Embedding model is ready",
     modelNotReadyTip: "Model is not ready",
     modelReadyTip: "Model is ready",
+    modelReadySharedTip: "Model is ready (shared by {{user}} · {{provider}} / {{model}})",
     cloudServiceNotReadyTip: "Cloud service is not ready",
     cloudServiceReadyTip: "Cloud service is ready",
-    modelReadySharedTip: "Model is ready (shared by {{name}} · {{provider}} / {{model}})",
+    cloudServiceReadySharedTip: "Cloud service is ready (shared by {{user}} · {{provider}} / {{group}})",
     error: {
       searchFailed: "Model provider search failed",
       loadProvidersFailed: "Failed to load model providers",
@@ -313,11 +314,11 @@ const enUS = {
       mineruTitle: "MinerU",
       mineruDesc: "Used for cloud PDF parsing. Whether offline parsing allows per-user keys is currently TBD.",
       mineruSummary: "Cloud PDF parsing and layout recognition for structured document import.",
-      mineruDockerComposePreset: "Docker Compose MinerU",
-      mineruDockerComposePresetDesc: "MinerU service started by local docker-compose; adjust it for your deployment.",
       mineruOfficialPreset: "Official MinerU",
-      mineruOfficialPresetDesc: "Frontend placeholder official URL. Replace it with the real service URL later.",
-      mineruBaseUrlPresetExtra: "Defaults to the Docker Compose MinerU URL. You can choose Official MinerU or type a custom Base URL.",
+      mineruOfficialPresetDesc: "Use the official cloud parsing endpoint provided by MinerU.",
+      mineruLocalPreset: "Local MinerU",
+      mineruLocalPresetDesc: "Loaded from the current system's local MinerU configuration.",
+      mineruBaseUrlPresetExtra: "Choose the official or local MinerU URL, or type a custom Base URL. Manually entered values are not added to the dropdown list.",
       paddleTitle: "PaddleOCR",
       paddleDesc: "Used for cloud OCR service. User-level keys for local offline OCR are pending product confirmation.",
       paddleSummary: "OCR text recognition for images, scans, and complex document layouts.",
@@ -383,8 +384,8 @@ const enUS = {
       shareDesc: "Group admins can share concrete default model usage settings. Members see shared settings read-only and may override with personal config; Personal Mode locks shared config on.",
       shareToggle: "Share with group members",
       priorityOrder: "User > Group > System",
-      apiContractTitle: "Backend API Contract",
-      apiContractDesc: "Plaintext keys exist only briefly in server memory. The frontend provides no plaintext retrieval path, and empty edit submissions should keep the original key.",
+      apiContractTitle: "Security Note",
+      apiContractDesc: "To protect your key, the full value will not be shown again. If you do not want to replace it, leave the field empty and save.",
       status: {
         configured: "Configured",
         missing: "Missing",
@@ -1083,8 +1084,9 @@ const enUS = {
     dataSourceFeishuCredentialModalTitle: "Set Feishu App Credentials",
     dataSourceFeishuCredentialSaveAndSelect: "Save and Authorize Feishu",
     dataSourceFeishuCredentialHint:
-      "Feishu data source can only be selected and connected after credentials are set.",
-    dataSourceFeishuCredentialSaved: "Feishu App ID / App Secret saved.",
+      "After saving, credentials are stored on the backend. Reauthorization will reuse the saved App ID / App Secret directly.",
+    dataSourceFeishuCredentialSaved:
+      "Feishu App ID / App Secret saved on the backend. You can now reauthorize.",
     dataSourceFeishuCredentialReset: "Feishu App ID / App Secret disconnected.",
     dataSourceFeishuResetCredentialAction: "Reset credentials",
     dataSourceFeishuCredentialResetConfirmTitle: "Disconnect Feishu link?",
@@ -1092,7 +1094,8 @@ const enUS = {
       "This will clear the current Feishu App ID / App Secret and OAuth connection state. You will need to configure them again before using Feishu data sources.",
     dataSourceFeishuCredentialRequired:
       "Please set Feishu App ID / App Secret in the previous step.",
-    dataSourceFeishuCredentialFirst: "Please set Feishu App ID / App Secret first.",
+    dataSourceFeishuCredentialFirst:
+      "Please enter and save the Feishu App ID / App Secret before reauthorizing.",
     dataSourceFeishuAuthWindowTitle: "Feishu Account Authorization",
     dataSourceFeishuNotReady: "Feishu data source setup is incomplete",
     dataSourceFeishuNotReadyDesc:
@@ -1215,6 +1218,8 @@ const enUS = {
       "Authorization window was closed before account connection completed.",
     dataSourceOauthReconnectFailed:
       "Reconnect failed. Existing connection status is preserved.{{message}}",
+    dataSourceOauthReauthorizeAccountMismatch:
+      "Reauthorization failed. Please authorize with the original Feishu account.",
     dataSourceOauthExpired: "Authorization expired",
     dataSourceOauthExpiredDesc:
       "Please reconnect account and verify access token / refresh token renewal flow before saving.",

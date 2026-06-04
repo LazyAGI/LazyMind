@@ -12,6 +12,10 @@ import (
 	"lazymind/core/store"
 )
 
+func isSelectableProviderGroup(ctx context.Context, db *gorm.DB, defaultProviderID, baseURL, apiKey string) bool {
+	return strings.TrimSpace(apiKey) != "" || isCustomBaseURL(ctx, db, defaultProviderID, baseURL)
+}
+
 type verifiedGroupItem struct {
 	GroupID             string `json:"group_id"`
 	UserModelProviderID string `json:"user_model_provider_id"`
@@ -89,28 +93,36 @@ func GetVerifiedProvider(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, verifiedGroupResponse{Ready: false})
 }
 
-func loadVerifiedGroupsForUser(ctx context.Context, db *gorm.DB, userID, category string) ([]verifiedGroupItem, error) {
+func loadVerifiedGroupsForUser(ctx context.Context, db *gorm.DB, userID, category, keyword string) ([]verifiedGroupItem, error) {
 	type row struct {
 		GroupID             string `gorm:"column:group_id"`
 		UserModelProviderID string `gorm:"column:user_model_provider_id"`
 		ProviderName        string `gorm:"column:provider_name"`
 		GroupName           string `gorm:"column:group_name"`
 		BaseURL             string `gorm:"column:base_url"`
+		APIKey              string `gorm:"column:api_key"`
 		Category            string `gorm:"column:category"`
+		DefaultProviderID   string `gorm:"column:default_model_provider_id"`
 	}
 	var rows []row
-	err := db.WithContext(ctx).Table("user_model_provider_groups g").
+	q := db.WithContext(ctx).Table("user_model_provider_groups g").
 		Select(
 			"g.id AS group_id, "+
 				"g.user_model_provider_id, "+
 				"p.name AS provider_name, "+
 				"g.name AS group_name, "+
 				"g.base_url, "+
-				"p.category",
+				"g.api_key, "+
+				"p.category, "+
+				"p.default_model_provider_id",
 		).
 		Joins("JOIN user_model_providers p ON p.id = g.user_model_provider_id AND p.create_user_id = g.create_user_id AND p.deleted_at IS NULL").
-		Where("g.create_user_id = ? AND p.category = ? AND g.deleted_at IS NULL AND g.is_verified = ?", userID, category, true).
-		Order("p.name ASC, g.name ASC").
+		Where("g.create_user_id = ? AND p.category = ? AND g.deleted_at IS NULL AND g.is_verified = ?", userID, category, true)
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		q = q.Where("p.name LIKE ? OR g.name LIKE ?", like, like)
+	}
+	err := q.Order("p.name ASC, g.name ASC").
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -118,6 +130,9 @@ func loadVerifiedGroupsForUser(ctx context.Context, db *gorm.DB, userID, categor
 
 	out := make([]verifiedGroupItem, 0, len(rows))
 	for _, r := range rows {
+		if !isSelectableProviderGroup(ctx, db, r.DefaultProviderID, r.BaseURL, r.APIKey) {
+			continue
+		}
 		out = append(out, verifiedGroupItem{
 			GroupID:             r.GroupID,
 			UserModelProviderID: r.UserModelProviderID,
@@ -131,8 +146,14 @@ func loadVerifiedGroupsForUser(ctx context.Context, db *gorm.DB, userID, categor
 }
 
 func countValidProviderSelection(ctx context.Context, db *gorm.DB, userID, category string, sharedOnly bool) (int64, error) {
-	var count int64
+	type row struct {
+		DefaultProviderID string `gorm:"column:default_model_provider_id"`
+		BaseURL           string `gorm:"column:base_url"`
+		APIKey            string `gorm:"column:api_key"`
+	}
+	var rows []row
 	q := db.WithContext(ctx).Table("user_selected_providers usp").
+		Select("p.default_model_provider_id, g.base_url, g.api_key").
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = usp.user_model_provider_group_id AND "+
@@ -153,23 +174,37 @@ func countValidProviderSelection(ctx context.Context, db *gorm.DB, userID, categ
 	} else {
 		q = q.Where("usp.user_id = ?", userID)
 	}
-	err := q.Count(&count).Error
-	return count, err
+	if err := q.Scan(&rows).Error; err != nil {
+		return 0, err
+	}
+	var count int64
+	for _, row := range rows {
+		if isSelectableProviderGroup(ctx, db, row.DefaultProviderID, row.BaseURL, row.APIKey) {
+			count++
+		}
+	}
+	return count, nil
 }
 
 func getSharedProviderDetail(ctx context.Context, db *gorm.DB, category string) (*sharedProviderDetail, error) {
 	var row struct {
-		UserID       string `gorm:"column:user_id"`
-		UserName     string `gorm:"column:user_name"`
-		ProviderName string `gorm:"column:provider_name"`
-		GroupName    string `gorm:"column:group_name"`
+		UserID            string `gorm:"column:user_id"`
+		UserName          string `gorm:"column:user_name"`
+		ProviderName      string `gorm:"column:provider_name"`
+		GroupName         string `gorm:"column:group_name"`
+		DefaultProviderID string `gorm:"column:default_model_provider_id"`
+		BaseURL           string `gorm:"column:base_url"`
+		APIKey            string `gorm:"column:api_key"`
 	}
 	err := db.WithContext(ctx).Table("user_selected_providers usp").
 		Select(
 			"usp.user_id, "+
 				"usp.user_name, "+
 				"p.name AS provider_name, "+
-				"g.name AS group_name",
+				"g.name AS group_name, "+
+				"p.default_model_provider_id, "+
+				"g.base_url, "+
+				"g.api_key",
 		).
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
@@ -192,6 +227,9 @@ func getSharedProviderDetail(ctx context.Context, db *gorm.DB, category string) 
 	}
 	if err != nil {
 		return nil, err
+	}
+	if !isSelectableProviderGroup(ctx, db, row.DefaultProviderID, row.BaseURL, row.APIKey) {
+		return nil, nil
 	}
 	return &sharedProviderDetail{
 		UserID:       row.UserID,

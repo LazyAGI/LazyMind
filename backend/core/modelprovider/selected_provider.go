@@ -66,8 +66,9 @@ func ListUserProviderGroupsByCategory(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "category is required", http.StatusBadRequest)
 		return
 	}
+	keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
 
-	groups, err := loadVerifiedGroupsForUser(r.Context(), db, userID, category)
+	groups, err := loadVerifiedGroupsForUser(r.Context(), db, userID, category, keyword)
 	if err != nil {
 		common.ReplyErr(w, "list provider groups failed", http.StatusInternalServerError)
 		return
@@ -143,13 +144,16 @@ func SetSelectedProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type groupWithCategory struct {
-		ID       string `gorm:"column:id"`
-		Category string `gorm:"column:category"`
+		ID                string `gorm:"column:id"`
+		Category          string `gorm:"column:category"`
+		DefaultProviderID string `gorm:"column:default_model_provider_id"`
+		BaseURL           string `gorm:"column:base_url"`
+		APIKey            string `gorm:"column:api_key"`
 	}
 	var groups []groupWithCategory
 	if len(groupIDs) > 0 {
 		if err := db.WithContext(r.Context()).Table("user_model_provider_groups g").
-			Select("g.id, p.category").
+			Select("g.id, p.category, p.default_model_provider_id, g.base_url, g.api_key").
 			Joins("JOIN user_model_providers p ON p.id = g.user_model_provider_id AND p.create_user_id = g.create_user_id AND p.deleted_at IS NULL").
 			Where("g.id IN ? AND g.create_user_id = ? AND p.create_user_id = ? AND g.deleted_at IS NULL", groupIDs, userID, userID).
 			Scan(&groups).Error; err != nil {
@@ -159,6 +163,10 @@ func SetSelectedProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	categoryByGroupID := make(map[string]string, len(groups))
 	for _, group := range groups {
+		if !isSelectableProviderGroup(r.Context(), db, group.DefaultProviderID, group.BaseURL, group.APIKey) {
+			common.ReplyErr(w, "group is not selectable without api_key when using the default base_url", http.StatusBadRequest)
+			return
+		}
 		categoryByGroupID[group.ID] = group.Category
 	}
 	for _, item := range req.Selections {
@@ -299,6 +307,18 @@ func SetSharedProvider(w http.ResponseWriter, r *http.Request) {
 
 func loadSelectedProviders(ctx context.Context, db *gorm.DB, userID string) ([]selectedProviderItem, error) {
 	out := make([]selectedProviderItem, 0)
+	type row struct {
+		Category            string `gorm:"column:category"`
+		GroupID             string `gorm:"column:group_id"`
+		Share               bool   `gorm:"column:share"`
+		UserModelProviderID string `gorm:"column:user_model_provider_id"`
+		ProviderName        string `gorm:"column:provider_name"`
+		GroupName           string `gorm:"column:group_name"`
+		BaseURL             string `gorm:"column:base_url"`
+		APIKey              string `gorm:"column:api_key"`
+		DefaultProviderID   string `gorm:"column:default_model_provider_id"`
+	}
+	var rows []row
 	err := db.WithContext(ctx).Table("user_selected_providers usp").
 		Select(
 			"usp.category, "+
@@ -307,7 +327,9 @@ func loadSelectedProviders(ctx context.Context, db *gorm.DB, userID string) ([]s
 				"g.user_model_provider_id, "+
 				"p.name AS provider_name, "+
 				"g.name AS group_name, "+
-				"g.base_url",
+				"g.base_url, "+
+				"g.api_key, "+
+				"p.default_model_provider_id",
 		).
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
@@ -325,6 +347,23 @@ func loadSelectedProviders(ctx context.Context, db *gorm.DB, userID string) ([]s
 		).
 		Where("usp.user_id = ?", userID).
 		Order("usp.category ASC").
-		Scan(&out).Error
-	return out, err
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if !isSelectableProviderGroup(ctx, db, row.DefaultProviderID, row.BaseURL, row.APIKey) {
+			continue
+		}
+		out = append(out, selectedProviderItem{
+			Category:            row.Category,
+			GroupID:             row.GroupID,
+			UserModelProviderID: row.UserModelProviderID,
+			ProviderName:        row.ProviderName,
+			GroupName:           row.GroupName,
+			BaseURL:             row.BaseURL,
+			Share:               row.Share,
+		})
+	}
+	return out, nil
 }

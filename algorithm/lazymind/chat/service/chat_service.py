@@ -66,7 +66,8 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       environment_context: Optional[Dict[str, Any]] = None,
                       user_id: Optional[str] = None,
                       model_config: Optional[Dict[str, Any]] = None,
-                      tool_config: Optional[Dict[str, Union[str, List[str]]]] = None
+                      tool_config: Optional[Dict[str, Union[str, List[str]]]] = None,
+                      trace: Optional[bool] = False,
                       ) -> Union[Dict[str, Any], StreamingResponse]:
     LOG.info(
         f'[ChatServer] [MODEL_CONFIG_RECEIVED] [sid={session_id}] [user_id={user_id or ""}] '

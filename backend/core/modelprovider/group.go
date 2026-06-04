@@ -168,23 +168,10 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// When the user's base_url matches the catalog default, api_key is required.
-	if apiKey == "" && isDefaultBaseURL(r.Context(), db, parent.DefaultModelProviderID, baseURL) {
-		common.ReplyErr(w, "api_key is required when using the default base_url", http.StatusBadRequest)
-		return
-	}
+	apiKeyRequired := isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, baseURL)
 
 	var checkData *CheckModelProviderData
-	if shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
-		if apiKey == "" {
-			common.ReplyErrWithData(
-				w,
-				"verification failed: api_key is required",
-				CheckModelProviderData{Success: false, Message: "api_key is required"},
-				http.StatusBadRequest,
-			)
-			return
-		}
+	if apiKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
 		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, apiKey)
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
@@ -211,7 +198,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		Name:                name,
 		BaseURL:             baseURL,
 		APIKey:              apiKey,
-		IsVerified:          checkData != nil,
+		IsVerified:          checkData != nil || !apiKeyRequired,
 		BaseModel: orm.BaseModel{
 			CreateUserID:   userID,
 			CreateUserName: userName,
@@ -317,8 +304,10 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		updates["base_url"] = row.BaseURL
 	}
 
+	baseURLChanged := normalizeBaseURLForCompare(baseURL) != normalizeBaseURLForCompare(row.BaseURL)
+
 	skipVerify := false
-	if normalizeBaseURLForCompare(baseURL) != normalizeBaseURLForCompare(row.BaseURL) {
+	if baseURLChanged {
 		updates["is_verified"] = false
 		updates["api_key"] = ""
 		skipVerify = true
@@ -332,19 +321,13 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 
 	var checkData *CheckModelProviderData
 	effectiveAPIKey := apiKey
-	if effectiveAPIKey == "" {
+	if effectiveAPIKey == "" && !baseURLChanged {
 		effectiveAPIKey = row.APIKey
 	}
-	if !skipVerify && shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
-		if effectiveAPIKey == "" {
-			common.ReplyErrWithData(
-				w,
-				"verification failed: api_key is required",
-				CheckModelProviderData{Success: false, Message: "api_key is required"},
-				http.StatusBadRequest,
-			)
-			return
-		}
+	if effectiveAPIKey == "" {
+		updates["is_verified"] = true
+	}
+	if !skipVerify && effectiveAPIKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
 		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey)
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
@@ -367,16 +350,20 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 
 	// verify=true: run connectivity check before persisting; on success mark is_verified=true atomically.
 	if req.Verify && checkData == nil {
-		checkResult, checkErr := doCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey)
-		if checkErr != nil || !checkResult.Success {
-			msg := "verification failed"
-			if checkResult != nil {
-				msg = "verification failed: " + checkResult.Message
+		if effectiveAPIKey == "" {
+			updates["is_verified"] = true
+		} else {
+			checkResult, checkErr := doCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey)
+			if checkErr != nil || !checkResult.Success {
+				msg := "verification failed"
+				if checkResult != nil {
+					msg = "verification failed: " + checkResult.Message
+				}
+				common.ReplyErr(w, msg, http.StatusBadGateway)
+				return
 			}
-			common.ReplyErr(w, msg, http.StatusBadGateway)
-			return
+			updates["is_verified"] = true
 		}
-		updates["is_verified"] = true
 	}
 	if err := db.WithContext(r.Context()).Model(&row).Updates(updates).Error; err != nil {
 		common.ReplyErr(w, "update group failed", http.StatusInternalServerError)
@@ -512,6 +499,28 @@ func normalizeBaseURLForCompare(s string) string {
 	return s
 }
 
+func defaultBaseURL(ctx context.Context, db *gorm.DB, defaultProviderID string) (string, bool) {
+	if db == nil || strings.TrimSpace(defaultProviderID) == "" {
+		return "", false
+	}
+	var catalog orm.DefaultModelProvider
+	if err := db.WithContext(ctx).
+		Where("id = ? AND deleted_at IS NULL", defaultProviderID).
+		Take(&catalog).Error; err != nil {
+		return "", false
+	}
+	return catalog.BaseURL, true
+}
+
+func isCustomBaseURL(ctx context.Context, db *gorm.DB, defaultProviderID, baseURL string) bool {
+	defaultURL, ok := defaultBaseURL(ctx, db, defaultProviderID)
+	return ok && normalizeBaseURLForCompare(baseURL) != normalizeBaseURLForCompare(defaultURL)
+}
+
+func isAPIKeyRequiredForBaseURL(ctx context.Context, db *gorm.DB, defaultProviderID, baseURL string) bool {
+	return !isCustomBaseURL(ctx, db, defaultProviderID, baseURL)
+}
+
 // seedGroupModelsFromDefaults inserts user_model_provider_group_models from default_models when the group's
 // base_url matches the catalog DefaultModelProvider.base_url for parent.DefaultModelProviderID.
 func seedGroupModelsFromDefaults(
@@ -574,16 +583,11 @@ func seedGroupModelsFromDefaults(
 // isDefaultBaseURL reports whether the given base_url matches the catalog default for the provider.
 // When true, the user is using the official hosted service and api_key is required.
 func isDefaultBaseURL(ctx context.Context, db *gorm.DB, defaultProviderID, baseURL string) bool {
-	if defaultProviderID == "" {
+	defaultURL, ok := defaultBaseURL(ctx, db, defaultProviderID)
+	if !ok {
 		return false
 	}
-	var catalog orm.DefaultModelProvider
-	if err := db.WithContext(ctx).
-		Where("id = ? AND deleted_at IS NULL", defaultProviderID).
-		Take(&catalog).Error; err != nil {
-		return false
-	}
-	return normalizeBaseURLForCompare(baseURL) == normalizeBaseURLForCompare(catalog.BaseURL)
+	return normalizeBaseURLForCompare(baseURL) == normalizeBaseURLForCompare(defaultURL)
 }
 
 type addKeyRequest struct {

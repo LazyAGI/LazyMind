@@ -84,4 +84,5 @@ async def chat(
         user_id=(user_id or '').strip(),
         model_config=llm_config,
         tool_config=tool_config,
+        trace=trace,
     )

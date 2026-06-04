@@ -849,28 +849,58 @@
 .data-source-wizard-body {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
 }
 
-.data-source-form-card.ant-card {
-  border-radius: 14px;
-  border: 1px solid #edf1f5;
-  box-shadow: none;
+.data-source-form-section {
+  padding-top: 2px;
 
-  .ant-card-head {
+  & + .data-source-form-section {
+    border-top: 1px solid #eef2f6;
+    padding-top: 10px;
+  }
+
+  .ant-form-item {
+    margin-bottom: 10px;
+  }
+
+  .ant-form-item-label {
+    padding-bottom: 4px;
+  }
+
+  .ant-form-item-extra {
     min-height: auto;
-    padding: 0 20px;
+    margin-top: 4px;
+    font-size: 12px;
+    line-height: 1.45;
   }
 
-  .ant-card-body {
-    padding: 20px;
+  .ant-input,
+  .ant-select-selector,
+  .ant-picker,
+  .ant-tree-select-selector {
+    min-height: 36px !important;
+  }
+
+  .ant-input {
+    padding-top: 6px;
+    padding-bottom: 6px;
   }
 }
 
-.data-source-connect-card.ant-card {
-  margin-top: 8px;
+.data-source-form-section-title {
+  margin-bottom: 8px;
+  color: #101828;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.data-source-connect-card {
+  margin-top: 4px;
+  padding: 10px 12px;
   background: #fafcff;
   border: 1px dashed #cbd5e1;
+  border-radius: 12px;
 }
 
 .data-source-connect-header {
@@ -878,7 +908,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 
   .ant-typography {
     margin-bottom: 0;
@@ -911,12 +941,12 @@
 }
 
 .data-source-strategy-section {
-  margin-bottom: 14px;
+  margin-bottom: 8px;
 }
 
 .data-source-strategy-label.ant-typography {
   display: block;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   color: #344054;
 }
 
@@ -928,7 +958,7 @@
   width: 100%;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 
   .ant-radio-button-wrapper {
     height: auto;
@@ -963,10 +993,10 @@
 }
 
 .data-source-sync-mode-pill-content {
-  padding: 12px 14px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 
   .ant-typography {
     margin: 0;
@@ -974,8 +1004,8 @@
 }
 
 .data-source-schedule-panel {
-  margin-top: 14px;
-  padding: 14px;
+  margin-top: 8px;
+  padding: 10px 12px;
   border: 1px solid #d4e8ff;
   border-radius: 14px;
   background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
@@ -989,7 +1019,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   color: #1677ff;
 
   .ant-typography {
@@ -997,34 +1027,167 @@
   }
 }
 
-.data-source-schedule-weekdays.ant-checkbox-group {
+.data-source-schedule-inline-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.data-source-schedule-inline-toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 14px;
+  align-items: center;
+  gap: 6px 8px;
+}
 
-  .ant-checkbox-wrapper {
-    margin-inline-start: 0;
+.data-source-schedule-inline-sentence {
+  padding: 10px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid #dbeafe;
+}
+
+.data-source-schedule-inline-prefix.ant-typography,
+.data-source-schedule-inline-connector.ant-typography,
+.data-source-schedule-inline-suffix.ant-typography {
+  margin: 0;
+  color: #344054;
+  font-size: 13px;
+}
+
+.data-source-schedule-inline-prefix.ant-typography {
+  font-weight: 600;
+}
+
+.data-source-schedule-shortcuts.ant-space {
+  gap: 6px !important;
+}
+
+.data-source-schedule-inline-weekdays-item.ant-form-item,
+.data-source-schedule-inline-time-item.ant-form-item {
+  margin-bottom: 0;
+}
+
+.data-source-schedule-inline-weekdays-item.ant-form-item {
+  flex: 1 1 100%;
+
+  .ant-form-item-explain-error {
+    margin-top: 8px;
   }
 }
 
+.data-source-schedule-inline-time-item.ant-form-item {
+  min-width: 168px;
+
+  .ant-form-item-explain-error {
+    margin-top: 8px;
+  }
+}
+
+.data-source-schedule-weekdays.ant-checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+
+  .ant-checkbox-wrapper {
+    margin-inline-start: 0;
+    padding: 0;
+
+    &::after {
+      display: none;
+    }
+  }
+
+  .ant-checkbox {
+    display: none;
+  }
+
+  .ant-checkbox-wrapper-checked .data-source-schedule-weekday-pill {
+    border-color: #1677ff;
+    background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
+    color: #175cd3;
+    box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.12);
+  }
+
+  .ant-checkbox-wrapper:hover .data-source-schedule-weekday-pill {
+    border-color: #98c5ff;
+    background: #f8fbff;
+  }
+}
+
+.data-source-schedule-weekday-pill {
+  min-height: 30px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d0d5dd;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 500;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease,
+    color 0.2s ease;
+}
+
 .data-source-schedule-shortcuts {
-  margin: -6px 0 12px;
+  margin: 0;
+
+  .ant-btn {
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 999px;
+    border-color: #d0d5dd;
+    color: #475467;
+    background: #ffffff;
+    font-size: 12px;
+  }
+
+  .ant-btn.is-active {
+    border-color: #1677ff;
+    background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
+    color: #175cd3;
+    box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.12);
+  }
 }
 
 .data-source-schedule-summary {
-  margin-bottom: 14px;
+  margin-bottom: 0;
   padding: 10px 12px;
-  border: 1px solid #bfdbfe;
-  border-radius: 10px;
-  background: #eff6ff;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #f8fbff;
   color: #1d4ed8;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
 
   .ant-typography {
     margin: 0;
     color: inherit;
+    line-height: 1.6;
+  }
+}
+
+.data-source-schedule-time-picker.ant-picker {
+  min-width: 168px;
+  width: 100%;
+  height: 38px;
+  border-radius: 999px;
+  border-color: #d0d5dd;
+
+  &:hover,
+  &.ant-picker-focused {
+    border-color: #84caff;
+    box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.1);
   }
 }
 

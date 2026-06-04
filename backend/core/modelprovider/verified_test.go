@@ -25,6 +25,7 @@ func setupVerifiedProviderTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	if err := db.AutoMigrate(
+		&orm.DefaultModelProvider{},
 		&orm.UserModelProvider{},
 		&orm.UserModelProviderGroup{},
 		&orm.UserSelectedProvider{},
@@ -54,6 +55,7 @@ func seedVerifiedProviderGroup(t *testing.T, db *gorm.DB, userID, providerID, gr
 		UserModelProviderID: providerID,
 		Name:                name,
 		BaseURL:             "https://example.test/" + category + "/" + strings.ToLower(name),
+		APIKey:              "secret",
 		IsVerified:          true,
 		BaseModel: orm.BaseModel{
 			CreateUserID: userID,
@@ -89,7 +91,7 @@ func TestLoadVerifiedGroupsForUserReturnsOnlyOwnGroups(t *testing.T) {
 		t.Fatalf("create shared selection: %v", err)
 	}
 
-	groups, err := loadVerifiedGroupsForUser(t.Context(), db, "user-1", "ocr")
+	groups, err := loadVerifiedGroupsForUser(t.Context(), db, "user-1", "ocr", "")
 	if err != nil {
 		t.Fatalf("loadVerifiedGroupsForUser: %v", err)
 	}
@@ -101,6 +103,72 @@ func TestLoadVerifiedGroupsForUserReturnsOnlyOwnGroups(t *testing.T) {
 	}
 	if groups[1].GroupID != "group-paddle" {
 		t.Fatalf("unexpected second group: %#v", groups[1])
+	}
+}
+
+func TestLoadVerifiedGroupsForUserAllowsCustomBaseURLWithoutAPIKey(t *testing.T) {
+	db := setupVerifiedProviderTestDB(t)
+	now := time.Now()
+	if err := db.Create(&orm.DefaultModelProvider{
+		ID:          "default-search",
+		Name:        "Search",
+		Description: "Search",
+		BaseURL:     "https://api.search.test",
+		Category:    "search",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}).Error; err != nil {
+		t.Fatalf("create default provider: %v", err)
+	}
+	providers := []orm.UserModelProvider{
+		{
+			ID:                     "provider-default",
+			DefaultModelProviderID: "default-search",
+			Name:                   "Default Search",
+			Category:               "search",
+			BaseModel:              orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now},
+		},
+		{
+			ID:                     "provider-custom",
+			DefaultModelProviderID: "default-search",
+			Name:                   "Custom Search",
+			Category:               "search",
+			BaseModel:              orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now},
+		},
+	}
+	if err := db.Create(&providers).Error; err != nil {
+		t.Fatalf("create providers: %v", err)
+	}
+	groups := []orm.UserModelProviderGroup{
+		{
+			ID:                  "group-default-empty-key",
+			UserModelProviderID: "provider-default",
+			Name:                "Default Search",
+			BaseURL:             "https://api.search.test",
+			APIKey:              "",
+			IsVerified:          true,
+			BaseModel:           orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now},
+		},
+		{
+			ID:                  "group-custom-empty-key",
+			UserModelProviderID: "provider-custom",
+			Name:                "Custom Search",
+			BaseURL:             "http://localhost:19000/search",
+			APIKey:              "",
+			IsVerified:          true,
+			BaseModel:           orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now},
+		},
+	}
+	if err := db.Create(&groups).Error; err != nil {
+		t.Fatalf("create groups: %v", err)
+	}
+
+	out, err := loadVerifiedGroupsForUser(t.Context(), db, "user-1", "search", "")
+	if err != nil {
+		t.Fatalf("loadVerifiedGroupsForUser: %v", err)
+	}
+	if len(out) != 1 || out[0].GroupID != "group-custom-empty-key" {
+		t.Fatalf("expected only custom base URL group, got %#v", out)
 	}
 }
 

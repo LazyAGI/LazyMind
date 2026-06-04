@@ -3,6 +3,7 @@ package modelprovider
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -14,15 +15,21 @@ import (
 )
 
 type listItem struct {
-	ID                     string   `json:"id"`
-	DefaultModelProviderID string   `json:"default_model_provider_id"`
-	Name                   string   `json:"name"`
-	Description            string   `json:"description"`
-	BaseURL                string   `json:"base_url"`
-	Category               string   `json:"category"`
-	IsConfigured           bool     `json:"is_configured"`
-	Capabilities           []string `json:"capabilities"`
-	ModelTypes             []string `json:"model_types"`
+	ID                     string              `json:"id"`
+	DefaultModelProviderID string              `json:"default_model_provider_id"`
+	Name                   string              `json:"name"`
+	Description            string              `json:"description"`
+	BaseURL                string              `json:"base_url"`
+	BaseURLPresets         []baseURLPresetItem `json:"base_url_presets,omitempty"`
+	Category               string              `json:"category"`
+	IsConfigured           bool                `json:"is_configured"`
+	Capabilities           []string            `json:"capabilities"`
+	ModelTypes             []string            `json:"model_types"`
+}
+
+type baseURLPresetItem struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
 }
 
 type listResponse struct {
@@ -76,7 +83,7 @@ func ListUserProviders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var rows []orm.UserModelProvider
-	if err := q.Order("name DESC").Find(&rows).Error; err != nil {
+	if err := q.Order("name ASC").Find(&rows).Error; err != nil {
 		common.ReplyErr(w, "list model providers failed", http.StatusInternalServerError)
 		return
 	}
@@ -137,6 +144,7 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 			Name:                   row.Name,
 			Description:            row.Description,
 			BaseURL:                row.BaseURL,
+			BaseURLPresets:         buildBaseURLPresets(row),
 			Category:               row.Category,
 			IsConfigured:           false,
 			Capabilities:           caps,
@@ -144,6 +152,9 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 		})
 	}
 	if len(out) == 0 {
+		return out
+	}
+	if db == nil {
 		return out
 	}
 
@@ -155,17 +166,25 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 	}
 	type configuredProviderRow struct {
 		UserModelProviderID string `gorm:"column:user_model_provider_id"`
+		BaseURL             string `gorm:"column:base_url"`
+		APIKey              string `gorm:"column:api_key"`
 	}
 	var configuredRows []configuredProviderRow
 	if err := db.WithContext(ctx).
 		Model(&orm.UserModelProviderGroup{}).
-		Select("user_model_provider_id").
-		Where("user_model_provider_id IN ? AND deleted_at IS NULL AND is_verified = ? AND TRIM(api_key) <> ''", providerIDs, true).
-		Distinct("user_model_provider_id").
+		Select("user_model_provider_id, base_url, api_key").
+		Where("user_model_provider_id IN ? AND deleted_at IS NULL AND is_verified = ?", providerIDs, true).
 		Find(&configuredRows).Error; err == nil {
+		defaultProviderIDByProviderID := make(map[string]string, len(out))
+		for i := range out {
+			defaultProviderIDByProviderID[out[i].ID] = out[i].DefaultModelProviderID
+		}
 		configuredProviderIDs := make(map[string]bool, len(configuredRows))
 		for _, row := range configuredRows {
-			configuredProviderIDs[row.UserModelProviderID] = true
+			if strings.TrimSpace(row.APIKey) != "" ||
+				isCustomBaseURL(ctx, db, defaultProviderIDByProviderID[row.UserModelProviderID], row.BaseURL) {
+				configuredProviderIDs[row.UserModelProviderID] = true
+			}
 		}
 		for i := range out {
 			out[i].IsConfigured = configuredProviderIDs[out[i].ID]
@@ -267,4 +286,42 @@ func splitCapabilities(caps string) []string {
 		}
 	}
 	return out
+}
+
+func buildBaseURLPresets(row orm.UserModelProvider) []baseURLPresetItem {
+	if normalizeProviderName(row.Name) != "mineru" {
+		return nil
+	}
+
+	presets := make([]baseURLPresetItem, 0, 2)
+	seen := map[string]struct{}{}
+	appendPreset := func(key, value string) {
+		trimmedValue := strings.TrimSpace(value)
+		if trimmedValue == "" {
+			return
+		}
+		normalizedValue := strings.TrimRight(trimmedValue, "/")
+		if _, ok := seen[normalizedValue]; ok {
+			return
+		}
+		seen[normalizedValue] = struct{}{}
+		presets = append(presets, baseURLPresetItem{
+			Key:   key,
+			Value: trimmedValue,
+		})
+	}
+
+	appendPreset("official", row.BaseURL)
+	if localBaseURL := configuredLocalMinerUBaseURL(); localBaseURL != "" {
+		appendPreset("local", localBaseURL)
+	}
+
+	return presets
+}
+
+func configuredLocalMinerUBaseURL() string {
+	if strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_OCR_SERVER_TYPE"))) != "mineru" {
+		return ""
+	}
+	return strings.TrimSpace(os.Getenv("LAZYMIND_OCR_SERVER_URL"))
 }

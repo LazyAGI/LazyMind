@@ -1,24 +1,23 @@
 import {
   Button,
-  Card,
   Checkbox,
-  Col,
   Empty,
   Form,
   Input,
   Modal,
   Radio,
-  Row,
   Space,
   Spin,
   Steps,
   Tag,
+  TimePicker,
   TreeSelect,
   Typography,
 } from "antd";
 import type { FormInstance } from "antd";
 import type { DataNode } from "antd/es/tree";
 import type { TreeSelectProps } from "antd";
+import dayjs from "dayjs";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -45,10 +44,25 @@ const SCHEDULE_WEEKDAYS = ["1", "2", "3", "4", "5", "6", "7"];
 const SCHEDULE_WORKDAYS = ["1", "2", "3", "4", "5"];
 const SCHEDULE_WEEKENDS = ["6", "7"];
 
-function normalizeScheduleWeekdays(value?: string[]) {
+function normalizeSelectedWeekdays(value?: string[]) {
   return Array.from(new Set(value || []))
     .filter((day) => SCHEDULE_WEEKDAYS.includes(day))
     .sort((left, right) => Number(left) - Number(right));
+}
+
+function isSameWeekdaySet(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => value === right[index]);
+}
+
+function toggleShortcutWeekdays(
+  current: string[],
+  target: string[],
+) {
+  return isSameWeekdaySet(current, target) ? [] : target;
 }
 
 export type LocalPathSelectOption = DataNode & {
@@ -142,16 +156,21 @@ export default function DataSourceWizardModal({
   const isEditMode = wizardMode === "edit";
   const [localPathSearchValue, setLocalPathSearchValue] = useState("");
   const [feishuTargetSearchValue, setFeishuTargetSearchValue] = useState("");
-  const scheduleWeekdays = Form.useWatch("scheduleWeekdays", form) || [];
-  const scheduleTime = Form.useWatch("scheduleTime", form);
-  const normalizedScheduleWeekdays = normalizeScheduleWeekdays(scheduleWeekdays);
-  const scheduleDaysText =
-    normalizedScheduleWeekdays.length === SCHEDULE_WEEKDAYS.length
-      ? t("admin.dataSourceScheduleEveryday")
-      : normalizedScheduleWeekdays
-          .map((day) => t(`admin.dataSourceScheduleWeekday${day}`))
-          .join("、") || t("admin.dataSourceScheduleNoDaysSelected");
-  const scheduleTimeText = scheduleTime || t("admin.dataSourceScheduleNoTimeSelected");
+  const selectedScheduleWeekdays = normalizeSelectedWeekdays(
+    Form.useWatch("scheduleWeekdays", form),
+  );
+  const isWorkdaysSelected = isSameWeekdaySet(
+    selectedScheduleWeekdays,
+    SCHEDULE_WORKDAYS,
+  );
+  const isWeekendsSelected = isSameWeekdaySet(
+    selectedScheduleWeekdays,
+    SCHEDULE_WEEKENDS,
+  );
+  const isEverydaySelected = isSameWeekdaySet(
+    selectedScheduleWeekdays,
+    SCHEDULE_WEEKDAYS,
+  );
   const existingKnowledgeBaseNameSet = new Set(
     existingKnowledgeBaseNames.map((name) => name.trim().toLowerCase()).filter(Boolean),
   );
@@ -177,11 +196,10 @@ export default function DataSourceWizardModal({
     }
 
     return (
-      <Card size="small" className="data-source-connect-card">
+      <div className="data-source-connect-card">
         <div className="data-source-connect-header">
           <div>
             <Text strong>{t("admin.dataSourceConnectionTest")}</Text>
-            <Paragraph type="secondary">{t("admin.dataSourceConnectionTestDesc")}</Paragraph>
           </div>
           <Tag color={connectionVerified ? "success" : "default"}>
             {connectionVerified
@@ -197,7 +215,7 @@ export default function DataSourceWizardModal({
         >
           {t("admin.dataSourceConnectionTestAction")}
         </Button>
-      </Card>
+      </div>
     );
   };
 
@@ -321,273 +339,285 @@ export default function DataSourceWizardModal({
         {wizardStep === 1 ? (
           selectedType ? (
             <div className="data-source-wizard-body">
-              <Row gutter={[16, 16]}>
-                <Col xs={24}>
-                  <Card className="data-source-form-card" title={t("admin.dataSourceBasicConfig")}>
-                    <Form.Item
-                      label={t("admin.dataSourceKnowledgeBaseName")}
-                      name="knowledgeBase"
-                      extra={
-                        selectedType === "local"
-                          ? t("admin.dataSourceKnowledgeBaseNameLocalHint")
-                          : t("admin.dataSourceKnowledgeBaseNameHint")
-                      }
-                      rules={[
-                        {
-                          required: true,
-                          whitespace: true,
-                          message: t("admin.dataSourceKnowledgeBaseNameRequired"),
+              <section className="data-source-form-section">
+                <div className="data-source-form-section-title">
+                  {t("admin.dataSourceBasicConfig")}
+                </div>
+                <Form.Item
+                  label={t("admin.dataSourceKnowledgeBaseName")}
+                  name="knowledgeBase"
+                  rules={[
+                    {
+                      required: true,
+                      whitespace: true,
+                      message: t("admin.dataSourceKnowledgeBaseNameRequired"),
+                    },
+                    {
+                      validator: validateKnowledgeBaseName,
+                    },
+                  ]}
+                >
+                  <Input
+                    disabled={isEditMode}
+                    placeholder={t("admin.dataSourceKnowledgeBaseNamePlaceholder")}
+                  />
+                </Form.Item>
+              </section>
+
+              <section className="data-source-form-section">
+                <div className="data-source-form-section-title">
+                  {t("admin.dataSourceAccessConfig")}
+                </div>
+                {selectedType === "local" ? (
+                  <Form.Item
+                    label={t("admin.dataSourceAccessPath")}
+                    name="path"
+                    rules={[
+                      {
+                        validator: (_rule, value) => {
+                          const values = Array.isArray(value) ? value : value ? [value] : [];
+                          return values.length > 0
+                            ? Promise.resolve()
+                            : Promise.reject(
+                                new Error(t("admin.dataSourceAccessPathRequired")),
+                              );
                         },
-                        {
-                          validator: validateKnowledgeBaseName,
-                        },
-                      ]}
-                    >
-                      <Input
-                        disabled={isEditMode}
-                        placeholder={t("admin.dataSourceKnowledgeBaseNamePlaceholder")}
-                      />
-                    </Form.Item>
-                  </Card>
-
-                  <Card className="data-source-form-card" title={t("admin.dataSourceAccessConfig")}>
-                    {selectedType === "local" ? (
-                      <Form.Item
-                        label={t("admin.dataSourceAccessPath")}
-                        name="path"
-                        rules={[
-                          {
-                            validator: (_rule, value) => {
-                              const values = Array.isArray(value) ? value : value ? [value] : [];
-                              return values.length > 0
-                                ? Promise.resolve()
-                                : Promise.reject(
-                                    new Error(t("admin.dataSourceAccessPathRequired")),
-                                  );
-                            },
-                          },
-                        ]}
-                      >
-                        <TreeSelect
-                          multiple
-                          allowClear
-                          disabled={isEditMode}
-                          filterTreeNode={false}
-                          loadData={onLoadLocalPathChildren}
-                          loading={localPathLoading}
-                          maxTagCount="responsive"
-                          notFoundContent={localPathLoading ? <Spin size="small" /> : null}
-                          placeholder="/mnt/team-share/ops-docs"
-                          searchValue={localPathSearchValue}
-                          showSearch
-                          style={{ width: "100%" }}
-                          treeCheckable
-                          treeData={localPathOptions}
-                          treeDefaultExpandAll={false}
-                          treeLine
-                          styles={{
-                            popup: { root: { maxHeight: 360, overflow: "auto" } },
-                          }}
-                          onChange={() => {
-                            if (!isEditMode) {
-                              onInvalidateConnection();
-                            }
-                          }}
-                          onOpenChange={(open) => {
-                            if (!open) {
-                              setLocalPathSearchValue("");
-                            }
-                            if (open && !isEditMode) {
-                              onLoadLocalPathOptions?.("");
-                            }
-                          }}
-                          onSearch={(value) => {
-                            setLocalPathSearchValue(value);
-                            if (!isEditMode) {
-                              onSearchLocalPathOptions?.(value);
-                            }
-                          }}
-                        />
-                      </Form.Item>
-                    ) : (
-                      <Form.Item
-                        label={t("admin.dataSourceFeishuSpace")}
-                        name="target"
-                        rules={[
-                          {
-                            validator: (_rule, value) => {
-                              const values = Array.isArray(value) ? value : value ? [value] : [];
-                              return values.length > 0
-                                ? Promise.resolve()
-                                : Promise.reject(
-                                    new Error(t("admin.dataSourceFeishuSpaceRequired")),
-                                  );
-                            },
-                          },
-                        ]}
-                      >
-                        <TreeSelect
-                          multiple
-                          allowClear
-                          disabled={isEditMode}
-                          filterTreeNode={false}
-                          loadData={onLoadFeishuTargetChildren}
-                          loading={feishuTargetLoading}
-                          maxTagCount="responsive"
-                          placeholder={t("admin.dataSourceFeishuTargetPlaceholderWiki")}
-                          showSearch
-                          searchValue={feishuTargetSearchValue}
-                          style={{ width: "100%" }}
-                          treeCheckable
-                          treeData={feishuTargetTreeData}
-                          treeDefaultExpandAll={false}
-                          treeLine
-                          styles={{
-                            popup: { root: { maxHeight: 360, overflow: "auto" } },
-                          }}
-                          onOpenChange={(open) => {
-                            if (!open) {
-                              setFeishuTargetSearchValue("");
-                            }
-                            if (open && !isEditMode) {
-                              onLoadFeishuTargetOptions?.();
-                            }
-                          }}
-                          onSearch={(value) => {
-                            setFeishuTargetSearchValue(value);
-                            if (!isEditMode) {
-                              onSearchFeishuTargetOptions?.(value);
-                            }
-                          }}
-                        />
-                      </Form.Item>
-                    )}
-
-                    {selectedType === "local" ? renderConnectionSection() : null}
-                  </Card>
-
-                  <Card
-                    className="data-source-form-card"
-                    title={t("admin.dataSourceSyncStrategyTitle")}
+                      },
+                    ]}
                   >
-                    <div className="data-source-strategy-section">
-                      <Text className="data-source-strategy-label">
-                        {t("admin.dataSourceSyncModeTitle")}
-                      </Text>
-                      <Form.Item name="syncMode" className="data-source-strategy-item">
-                        <Radio.Group className="data-source-sync-mode-pills">
-                          <Radio.Button value="scheduled">
-                            <div className="data-source-sync-mode-pill-content">
-                              <Text strong>{t("admin.dataSourceSyncModeScheduled")}</Text>
-                              <Text type="secondary">
-                                {t("admin.dataSourceSyncModeScheduledDesc")}
-                              </Text>
-                            </div>
-                          </Radio.Button>
-                          <Radio.Button value="manual">
-                            <div className="data-source-sync-mode-pill-content">
-                              <Text strong>{t("admin.dataSourceSyncModeManual")}</Text>
-                              <Text type="secondary">
-                                {t("admin.dataSourceSyncModeManualDesc")}
-                              </Text>
-                            </div>
-                          </Radio.Button>
-                        </Radio.Group>
-                      </Form.Item>
-                    </div>
+                    <TreeSelect
+                      multiple
+                      allowClear
+                      disabled={isEditMode}
+                      filterTreeNode={false}
+                      loadData={onLoadLocalPathChildren}
+                      loading={localPathLoading}
+                      maxTagCount="responsive"
+                      notFoundContent={localPathLoading ? <Spin size="small" /> : null}
+                      placeholder="/mnt/team-share/ops-docs"
+                      searchValue={localPathSearchValue}
+                      showSearch
+                      style={{ width: "100%" }}
+                      treeCheckable
+                      treeData={localPathOptions}
+                      treeDefaultExpandAll={false}
+                      treeLine
+                      styles={{
+                        popup: { root: { maxHeight: 360, overflow: "auto" } },
+                      }}
+                      onChange={() => {
+                        if (!isEditMode) {
+                          onInvalidateConnection();
+                        }
+                      }}
+                      onOpenChange={(open) => {
+                        if (!open) {
+                          setLocalPathSearchValue("");
+                        }
+                        if (open && !isEditMode) {
+                          onLoadLocalPathOptions?.("");
+                        }
+                      }}
+                      onSearch={(value) => {
+                        setLocalPathSearchValue(value);
+                        if (!isEditMode) {
+                          onSearchLocalPathOptions?.(value);
+                        }
+                      }}
+                    />
+                  </Form.Item>
+                ) : (
+                  <Form.Item
+                    label={t("admin.dataSourceFeishuSpace")}
+                    name="target"
+                    rules={[
+                      {
+                        validator: (_rule, value) => {
+                          const values = Array.isArray(value) ? value : value ? [value] : [];
+                          return values.length > 0
+                            ? Promise.resolve()
+                            : Promise.reject(
+                                new Error(t("admin.dataSourceFeishuSpaceRequired")),
+                              );
+                        },
+                      },
+                    ]}
+                  >
+                    <TreeSelect
+                      multiple
+                      allowClear
+                      disabled={isEditMode}
+                      filterTreeNode={false}
+                      loadData={onLoadFeishuTargetChildren}
+                      loading={feishuTargetLoading}
+                      maxTagCount="responsive"
+                      placeholder={t("admin.dataSourceFeishuTargetPlaceholderWiki")}
+                      showSearch
+                      searchValue={feishuTargetSearchValue}
+                      style={{ width: "100%" }}
+                      treeCheckable
+                      treeData={feishuTargetTreeData}
+                      treeDefaultExpandAll={false}
+                      treeLine
+                      styles={{
+                        popup: { root: { maxHeight: 360, overflow: "auto" } },
+                      }}
+                      onOpenChange={(open) => {
+                        if (!open) {
+                          setFeishuTargetSearchValue("");
+                        }
+                        if (open && !isEditMode) {
+                          onLoadFeishuTargetOptions?.();
+                        }
+                      }}
+                      onSearch={(value) => {
+                        setFeishuTargetSearchValue(value);
+                        if (!isEditMode) {
+                          onSearchFeishuTargetOptions?.(value);
+                        }
+                      }}
+                    />
+                  </Form.Item>
+                )}
 
-                    {syncMode === "scheduled" ? (
-                      <div className="data-source-schedule-panel">
-                        <div className="data-source-schedule-panel-head">
-                          <ClockCircleOutlined />
-                          <Text strong>{t("admin.dataSourceScheduleTitle")}</Text>
-                          <Text type="secondary">{t("admin.dataSourceScheduleDesc")}</Text>
+                {selectedType === "local" ? renderConnectionSection() : null}
+              </section>
+
+              <section className="data-source-form-section">
+                <div className="data-source-form-section-title">
+                  {t("admin.dataSourceSyncStrategyTitle")}
+                </div>
+                <div className="data-source-strategy-section">
+                  <Text className="data-source-strategy-label">
+                    {t("admin.dataSourceSyncModeTitle")}
+                  </Text>
+                  <Form.Item name="syncMode" className="data-source-strategy-item">
+                    <Radio.Group className="data-source-sync-mode-pills">
+                      <Radio.Button value="scheduled">
+                        <div className="data-source-sync-mode-pill-content">
+                          <Text strong>{t("admin.dataSourceSyncModeScheduled")}</Text>
                         </div>
-                        <Row gutter={16}>
-                          <Col xs={24}>
-                            <Form.Item
-                              label={t("admin.dataSourceScheduleWeekdays")}
-                              name="scheduleWeekdays"
-                              rules={[
-                                {
-                                  required: true,
-                                  message: t("admin.dataSourceScheduleWeekdaysRequired"),
-                                },
-                              ]}
-                            >
-                              <Checkbox.Group className="data-source-schedule-weekdays">
-                                {SCHEDULE_WEEKDAYS.map((day) => (
-                                  <Checkbox key={day} value={day}>
-                                    {t(`admin.dataSourceScheduleWeekday${day}`)}
-                                  </Checkbox>
-                                ))}
-                              </Checkbox.Group>
-                            </Form.Item>
-                            <Space wrap className="data-source-schedule-shortcuts">
-                              <Button
-                                size="small"
-                                onClick={() =>
-                                  form.setFieldValue("scheduleWeekdays", SCHEDULE_WORKDAYS)
-                                }
-                              >
-                                {t("admin.dataSourceScheduleShortcutWorkdays")}
-                              </Button>
-                              <Button
-                                size="small"
-                                onClick={() =>
-                                  form.setFieldValue("scheduleWeekdays", SCHEDULE_WEEKENDS)
-                                }
-                              >
-                                {t("admin.dataSourceScheduleShortcutWeekends")}
-                              </Button>
-                              <Button
-                                size="small"
-                                onClick={() =>
-                                  form.setFieldValue("scheduleWeekdays", SCHEDULE_WEEKDAYS)
-                                }
-                              >
-                                {t("admin.dataSourceScheduleShortcutEveryday")}
-                              </Button>
-                            </Space>
-                            <div className="data-source-schedule-summary">
-                              <ClockCircleOutlined />
-                              <Text>
-                                {t("admin.dataSourceScheduleSummary", {
-                                  days: scheduleDaysText,
-                                  time: scheduleTimeText,
-                                })}
-                              </Text>
-                            </div>
-                          </Col>
-                          <Col xs={24} md={12}>
-                            <Form.Item
-                              label={t("admin.dataSourceScheduleTime")}
-                              name="scheduleTime"
-                              rules={[
-                                {
-                                  required: true,
-                                  message: t("admin.dataSourceScheduleTimeRequired"),
-                                },
-                                {
-                                  pattern: /^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/,
-                                  message: t("admin.dataSourceScheduleTimeInvalid"),
-                                },
-                              ]}
-                            >
-                              <Input
-                                type="time"
-                                min="00:00"
-                                max="23:59:59"
-                                step={1}
-                              />
-                            </Form.Item>
-                          </Col>
-                        </Row>
+                      </Radio.Button>
+                      <Radio.Button value="manual">
+                        <div className="data-source-sync-mode-pill-content">
+                          <Text strong>{t("admin.dataSourceSyncModeManual")}</Text>
+                        </div>
+                      </Radio.Button>
+                    </Radio.Group>
+                  </Form.Item>
+                </div>
+
+                {syncMode === "scheduled" ? (
+                  <div className="data-source-schedule-panel">
+                    <div className="data-source-schedule-panel-head">
+                      <ClockCircleOutlined />
+                      <Text strong>{t("admin.dataSourceScheduleTitle")}</Text>
+                    </div>
+                    <div className="data-source-schedule-inline-builder">
+                      <div className="data-source-schedule-inline-toolbar">
+                        <Space wrap className="data-source-schedule-shortcuts">
+                          <Button
+                            size="small"
+                            className={isWorkdaysSelected ? "is-active" : ""}
+                            onClick={() =>
+                              form.setFieldValue(
+                                "scheduleWeekdays",
+                                toggleShortcutWeekdays(
+                                  selectedScheduleWeekdays,
+                                  SCHEDULE_WORKDAYS,
+                                ),
+                              )
+                            }
+                          >
+                            {t("admin.dataSourceScheduleShortcutWorkdays")}
+                          </Button>
+                          <Button
+                            size="small"
+                            className={isWeekendsSelected ? "is-active" : ""}
+                            onClick={() =>
+                              form.setFieldValue(
+                                "scheduleWeekdays",
+                                toggleShortcutWeekdays(
+                                  selectedScheduleWeekdays,
+                                  SCHEDULE_WEEKENDS,
+                                ),
+                              )
+                            }
+                          >
+                            {t("admin.dataSourceScheduleShortcutWeekends")}
+                          </Button>
+                          <Button
+                            size="small"
+                            className={isEverydaySelected ? "is-active" : ""}
+                            onClick={() =>
+                              form.setFieldValue(
+                                "scheduleWeekdays",
+                                toggleShortcutWeekdays(
+                                  selectedScheduleWeekdays,
+                                  SCHEDULE_WEEKDAYS,
+                                ),
+                              )
+                            }
+                          >
+                            {t("admin.dataSourceScheduleShortcutEveryday")}
+                          </Button>
+                        </Space>
                       </div>
-                    ) : null}
-                  </Card>
-                </Col>
-              </Row>
+                      <div className="data-source-schedule-inline-sentence">
+                        <Form.Item
+                          name="scheduleWeekdays"
+                          className="data-source-schedule-inline-weekdays-item"
+                          rules={[
+                            {
+                              required: true,
+                              message: t("admin.dataSourceScheduleWeekdaysRequired"),
+                            },
+                          ]}
+                        >
+                          <Checkbox.Group className="data-source-schedule-weekdays">
+                            {SCHEDULE_WEEKDAYS.map((day) => (
+                              <Checkbox key={day} value={day}>
+                                <span className="data-source-schedule-weekday-pill">
+                                  {t(`admin.dataSourceScheduleWeekday${day}`)}
+                                </span>
+                              </Checkbox>
+                            ))}
+                          </Checkbox.Group>
+                        </Form.Item>
+                        <Text className="data-source-schedule-inline-connector">将在</Text>
+                        <Form.Item
+                          name="scheduleTime"
+                          className="data-source-schedule-inline-time-item"
+                          getValueProps={(value?: string) => ({
+                            value: value ? dayjs(value, "HH:mm:ss") : null,
+                          })}
+                          normalize={(value: ReturnType<typeof dayjs> | null) =>
+                            value ? value.format("HH:mm:ss") : undefined
+                          }
+                          rules={[
+                            {
+                              required: true,
+                              message: t("admin.dataSourceScheduleTimeRequired"),
+                            },
+                            {
+                              pattern: /^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/,
+                              message: t("admin.dataSourceScheduleTimeInvalid"),
+                            },
+                          ]}
+                        >
+                          <TimePicker
+                            className="data-source-schedule-time-picker"
+                            format="HH:mm:ss"
+                            needConfirm={false}
+                            showNow={false}
+                          />
+                        </Form.Item>
+                        <Text className="data-source-schedule-inline-suffix">进行同步</Text>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </section>
             </div>
           ) : (
             <Empty

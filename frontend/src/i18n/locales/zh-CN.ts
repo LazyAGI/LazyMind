@@ -262,9 +262,10 @@ const zhCN = {
     embeddingReadyTip: "向量模型已就绪",
     modelNotReadyTip: "模型尚未就绪",
     modelReadyTip: "模型已就绪",
+    modelReadySharedTip: "模型已就绪（由 {{user}} 分享 · {{provider}} / {{model}}）",
     cloudServiceNotReadyTip: "云服务尚未就绪",
     cloudServiceReadyTip: "云服务已就绪",
-    modelReadySharedTip: "模型已就绪（由 {{name}} 分享 · {{provider}} / {{model}}）",
+    cloudServiceReadySharedTip: "云服务已就绪（由 {{user}} 分享 · {{provider}} / {{group}}）",
     error: {
       searchFailed: "模型供应商搜索失败",
       loadProvidersFailed: "模型供应商加载失败",
@@ -289,11 +290,11 @@ const zhCN = {
       mineruTitle: "MinerU",
       mineruDesc: "用于云端 PDF 解析。是否允许离线解析用户各自配置 Key 当前标记为 TBD。",
       mineruSummary: "云端 PDF 解析与版面识别服务，适合文档结构化导入。",
-      mineruDockerComposePreset: "Docker Compose MinerU",
-      mineruDockerComposePresetDesc: "本地 docker-compose 启动的 MinerU 服务，可按部署环境修改。",
       mineruOfficialPreset: "官方 MinerU",
-      mineruOfficialPresetDesc: "前端占位官方地址，后续可替换为真实服务地址。",
-      mineruBaseUrlPresetExtra: "默认使用 Docker Compose MinerU 地址；也可以选择官方 MinerU 或直接输入自定义 Base URL。",
+      mineruOfficialPresetDesc: "使用 MinerU 官网提供的云端解析地址。",
+      mineruLocalPreset: "本地部署 MinerU",
+      mineruLocalPresetDesc: "来自当前系统配置的本地 MinerU 地址。",
+      mineruBaseUrlPresetExtra: "可选择官方地址或本地部署地址，也可以手动输入自定义 Base URL。手动输入的内容不会加入下拉列表。",
       paddleTitle: "PaddleOCR",
       paddleDesc: "用于云端 OCR 服务；本地离线 OCR 的用户级 Key 策略待产品确认。",
       paddleSummary: "OCR 文本识别服务，用于图片、扫描件和复杂版面解析。",
@@ -359,8 +360,8 @@ const zhCN = {
       shareDesc: "group-admin 可共享具体模型默认使用配置，组成员只读可见并可用个人配置覆盖；Personal Mode 下默认开启且成员不可自行配置。",
       shareToggle: "共享给组内成员",
       priorityOrder: "用户级 > 用户组级 > 系统级",
-      apiContractTitle: "后端接口约束",
-      apiContractDesc: "Key 明文只在服务端内存中短暂存在；前端不提供获取明文入口，编辑提交空值时应保持原 Key。",
+      apiContractTitle: "安全说明",
+      apiContractDesc: "为了保护你的密钥，系统不会再次显示完整内容。如果这次不需要更换，留空后直接保存就可以。",
       status: {
         configured: "已配置",
         missing: "未配置",
@@ -1036,15 +1037,18 @@ const zhCN = {
     dataSourceFeishuAuthConnectedHint: "当前有效认证：{{account}}。",
     dataSourceFeishuCredentialModalTitle: "设置飞书 App 凭据",
     dataSourceFeishuCredentialSaveAndSelect: "保存并授权飞书",
-    dataSourceFeishuCredentialHint: "设置完成后，飞书数据源才可被选择和连接。",
-    dataSourceFeishuCredentialSaved: "飞书 App ID / App Secret 已设置。",
+    dataSourceFeishuCredentialHint:
+      "保存后会同步到后端，重新授权时将直接读取后端已保存的 App ID / App Secret。",
+    dataSourceFeishuCredentialSaved:
+      "飞书 App ID / App Secret 已保存到后端，可继续重新授权。",
     dataSourceFeishuCredentialReset: "飞书 App ID / App Secret 已解绑。",
     dataSourceFeishuResetCredentialAction: "重设凭据",
     dataSourceFeishuCredentialResetConfirmTitle: "确认取消飞书链接？",
     dataSourceFeishuCredentialResetConfirmContent:
       "取消后将清空当前飞书 App ID / App Secret 与 OAuth 连接状态，需要重新配置后才能继续使用飞书数据源。",
     dataSourceFeishuCredentialRequired: "请先在上一步设置飞书 App ID / App Secret。",
-    dataSourceFeishuCredentialFirst: "请先设置飞书 App ID / App Secret。",
+    dataSourceFeishuCredentialFirst:
+      "请先填写并保存飞书 App ID / App Secret，再进行重新授权。",
     dataSourceFeishuAuthWindowTitle: "飞书账号授权",
     dataSourceFeishuNotReady: "飞书数据源未完成配置",
     dataSourceFeishuNotReadyDesc:
@@ -1098,7 +1102,7 @@ const zhCN = {
     dataSourceScheduleWeekday7: "周日",
     dataSourceScheduleShortcutWorkdays: "工作日",
     dataSourceScheduleShortcutWeekends: "休息日",
-    dataSourceScheduleShortcutEveryday: "全天",
+    dataSourceScheduleShortcutEveryday: "每天",
     dataSourceScheduleEveryday: "每天",
     dataSourceScheduleNoDaysSelected: "未选择日期",
     dataSourceScheduleNoTimeSelected: "未选择时间",
@@ -1156,6 +1160,8 @@ const zhCN = {
     dataSourceOauthManualCallbackInvalid: "未识别到有效的 code / state，请检查回跳地址。",
     dataSourceOauthWindowClosed: "授权窗口已关闭，尚未完成账号连接。",
     dataSourceOauthReconnectFailed: "重新连接失败，已保留当前连接状态。{{message}}",
+    dataSourceOauthReauthorizeAccountMismatch:
+      "重新授权失败，请使用原飞书账号完成授权。",
     dataSourceOauthExpired: "当前授权已过期",
     dataSourceOauthExpiredDesc:
       "请重新连接账号，完成 access token / refresh token 的刷新链路校验后再保存配置。",
