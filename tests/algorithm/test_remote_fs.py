@@ -9,9 +9,9 @@ import requests
 from lazyllm.tools.agent.skill_manager import SkillManager as LazySkillManager
 from lazyllm.tools.fs.client import FS
 
-from chat.tools.skill_manager import list_all_skill_entries
-from common.remote_fs import RemoteFS
-from config import config as algo_config
+from lazymind.chat.engine.tools.skill_manager import list_all_skill_entries
+from lazymind.chat.integrations.remote_fs import RemoteFS
+from lazymind.config import config as algo_config
 
 
 class _Response:
@@ -41,8 +41,11 @@ def test_remote_fs_uses_core_readonly_api(monkeypatch):
             return _Response(content=b'test')
         raise AssertionError(url)
 
-    monkeypatch.setattr('common.remote_fs.requests.get', fake_get)
-    monkeypatch.setattr('common.remote_fs.lazyllm.globals', {'agentic_config': {'session_id': 'sid-1'}})
+    monkeypatch.setattr('lazymind.chat.integrations.remote_fs.requests.get', fake_get)
+    monkeypatch.setattr(
+        'lazymind.chat.integrations.remote_fs.lazyllm.globals',
+        {'agentic_config': {'session_id': 'sid-1'}},
+    )
 
     fs = RemoteFS(base_url='http://core:8000', timeout=3)
 
@@ -74,8 +77,8 @@ def test_remote_fs_omits_session_id_when_not_available(monkeypatch):
         calls.append((url, params, timeout))
         return _Response({'code': 0, 'data': {'exists': False}})
 
-    monkeypatch.setattr('common.remote_fs.requests.get', fake_get)
-    monkeypatch.setattr('common.remote_fs.lazyllm.globals', {'agentic_config': {}})
+    monkeypatch.setattr('lazymind.chat.integrations.remote_fs.requests.get', fake_get)
+    monkeypatch.setattr('lazymind.chat.integrations.remote_fs.lazyllm.globals', {'agentic_config': {}})
 
     fs = RemoteFS(base_url='http://core:8000', timeout=3)
 
@@ -151,7 +154,10 @@ def mock_remote_fs_server(tmp_path):
 
 def test_skill_manager_lists_remote_skills_from_mock_server(monkeypatch, mock_remote_fs_server):
     FS._instances.clear()
-    monkeypatch.setattr('common.remote_fs.lazyllm.globals', {'agentic_config': {'session_id': 'sid-demo'}})
+    monkeypatch.setattr(
+        'lazymind.chat.integrations.remote_fs.lazyllm.globals',
+        {'agentic_config': {'session_id': 'sid-demo'}},
+    )
     with algo_config.temp('core_api_url', mock_remote_fs_server):
         assert list_all_skill_entries('remote://skills') == {
             'writing/example': {
@@ -171,7 +177,10 @@ def test_skill_manager_lists_remote_skills_from_mock_server(monkeypatch, mock_re
 
 def test_skill_manager_reads_reference_from_remote_mock_server(monkeypatch, mock_remote_fs_server):
     FS._instances.clear()
-    monkeypatch.setattr('common.remote_fs.lazyllm.globals', {'agentic_config': {'session_id': 'sid-demo'}})
+    monkeypatch.setattr(
+        'lazymind.chat.integrations.remote_fs.lazyllm.globals',
+        {'agentic_config': {'session_id': 'sid-demo'}},
+    )
     with algo_config.temp('core_api_url', mock_remote_fs_server):
         manager = LazySkillManager(dir='remote://skills', fs=FS)
 

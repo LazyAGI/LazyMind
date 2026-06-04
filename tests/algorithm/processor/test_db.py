@@ -1,6 +1,6 @@
 import pytest
 
-from processor.db import (
+from lazymind.processor.service.db import (
     SHARED_DB_ENV_KEY,
     get_doc_task_db_config,
     get_shared_database_url,
@@ -89,7 +89,7 @@ def test_require_shared_db_config_wraps_invalid_url(monkeypatch):
 
 def test_require_shared_db_config_rejects_none_after_parse(monkeypatch):
     monkeypatch.setenv(SHARED_DB_ENV_KEY, 'postgresql://u:p@localhost/tasks')
-    monkeypatch.setattr('processor.db.parse_db_url', lambda url: None)
+    monkeypatch.setattr('lazymind.processor.service.db.parse_db_url', lambda url: None)
 
     with pytest.raises(RuntimeError, match='shared database configuration'):
         require_shared_db_config('DocumentProcessor')

@@ -1,5 +1,5 @@
-from chat.utils.markdown_images import rewrite_markdown_image_urls
-from chat.utils.static_file_url import static_file_url_from_full_path
+from lazymind.chat.service.utils.markdown_images import rewrite_markdown_image_urls
+from lazymind.chat.service.utils.static_file_url import static_file_url_from_full_path
 
 
 def test_rewrite_markdown_image_urls_replaces_hallucinated_host(tmp_path, monkeypatch):

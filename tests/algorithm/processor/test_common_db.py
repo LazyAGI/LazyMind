@@ -1,10 +1,10 @@
 """
-Unit tests for algorithm/processor/db.py (parse_db_url, get_doc_task_db_config).
+Unit tests for lazymind.processor.service.db (parse_db_url, get_doc_task_db_config).
 No external deps - pure functions.
 """
 import pytest
 
-from processor.db import parse_db_url, get_doc_task_db_config
+from lazymind.processor.service.db import parse_db_url, get_doc_task_db_config
 
 
 def test_parse_db_url_empty():

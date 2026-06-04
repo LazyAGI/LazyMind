@@ -17,20 +17,11 @@ import {
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import {
-  Configuration as ScanConfiguration,
-  DefaultApi as ScanDefaultApi,
-  type CloudSourceBinding,
-  type Source as ScanSource,
-  type SourceDocumentItem as ScanSourceDocumentItem,
-  type SourceDocumentsSummary as ScanSourceDocumentsSummary,
-  type TreeNode as ScanTreeNode,
-} from "@/api/generated/scan-client";
-import { BASE_URL, axiosInstance, getLocalizedErrorMessage } from "@/components/request";
+import { getLocalizedErrorMessage } from "@/components/request";
 
 import "./detail.scss";
-import DataSourceDetailView from "./components/DataSourceDetailView";
-import DataSourceSyncPickerModal from "./components/DataSourceSyncPickerModal";
+import DataSourceDetailView from "@/modules/dataSource/common/components/DataSourceDetailView";
+import DataSourceSyncPickerModal from "@/modules/dataSource/common/components/DataSourceSyncPickerModal";
 import {
   CLOUD_SYNC_POLL_INTERVAL_MS,
   CLOUD_SYNC_TIMEOUT_MS,
@@ -51,8 +42,38 @@ import {
   resolveSourceState,
   resolveSyncState,
 } from "./shared";
+import {
+  createScanRequestId,
+  createScanV2ApiClient,
+  getDocumentDisplayName,
+  getDocumentLastUpdatedAt,
+  getDocumentPath,
+  getFirstScanBinding,
+  getScanBindingId,
+  getScanBindingTarget,
+  getScanBindingTreeKey,
+  getScanSourceConfigVersion,
+  getScanSourceId,
+  getScanSourceName,
+  getScanSourceUpdatedAt,
+  inferSourceKind,
+  type ScanV2Binding,
+  type ScanV2Client,
+  type ScanV2Document,
+  type ScanV2Source,
+  type ScanV2Summary,
+  type ScanV2TreeNode,
+} from "./scanV2Api";
 
 const { Text } = Typography;
+
+type SyncTreeDataNode = DataNode & {
+  treeKey?: string;
+  objectKey?: string;
+  targetRef?: string;
+  nodeRef?: string;
+  childrenLoaded?: boolean;
+};
 
 const fallbackSources: Record<
   string,
@@ -260,20 +281,6 @@ function getDocumentType(name: string) {
   return extension.toLowerCase();
 }
 
-function createScanApiClient() {
-  const baseUrl = BASE_URL || window.location.origin;
-  return new ScanDefaultApi(
-    new ScanConfiguration({
-      basePath: baseUrl,
-      baseOptions: {
-        headers: { "Content-Type": "application/json" },
-      },
-    }),
-    baseUrl,
-    axiosInstance,
-  );
-}
-
 function mapScanSyncDetail(updateState: DocumentStatusRow["updateState"]) {
   if (updateState === "new") {
     return "新文件待入库";
@@ -287,25 +294,44 @@ function mapScanSyncDetail(updateState: DocumentStatusRow["updateState"]) {
   return "当前文件已是最新";
 }
 
-function mapScanDocumentToDetail(item: ScanSourceDocumentItem): DocumentStatusRow {
-  const sourceState = resolveSourceState(item);
-  const syncState = resolveSyncState(item);
+function stringifyScanError(value: unknown) {
+  if (!value) return undefined;
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value !== null) {
+    const message = (value as { message?: string; error?: string }).message ||
+      (value as { message?: string; error?: string }).error;
+    return message || JSON.stringify(value);
+  }
+  return `${value}`;
+}
+
+function mapScanDocumentToDetail(item: ScanV2Document): DocumentStatusRow {
+  const sourceState = resolveSourceState({
+    source_state: item.source_state,
+    update_type: item.update_type || item.source_state,
+    has_update: item.has_update ?? item.source_state !== "UNCHANGED",
+  });
+  const syncState = resolveSyncState({
+    sync_state: item.sync_state,
+  });
   const updateState = normalizeDataSourceFileUpdateState(
-    item.update_type,
-    item.has_update,
+    item.update_type || item.source_state,
+    item.has_update ?? item.source_state !== "UNCHANGED",
   );
   const parseState = [
     item.parse_state,
+    item.parse_status,
+    item.parse_queue_state,
     item.core_task_state,
     item.scan_orchestration_status,
   ]
     .filter(Boolean)
     .join(" ");
-  const lastSyncedAt = formatDateTime(item.last_synced_at);
+  const lastSyncedAt = formatDateTime(getDocumentLastUpdatedAt(item));
   return {
     id: `${item.document_id}`,
-    name: item.name,
-    path: item.path,
+    name: getDocumentDisplayName(item),
+    path: getDocumentPath(item),
     size: formatBytes(item.size_bytes),
     tags: item.tags || [],
     updateState,
@@ -317,67 +343,140 @@ function mapScanDocumentToDetail(item: ScanSourceDocumentItem): DocumentStatusRo
     syncState,
     pendingAction: normalizePendingAction(item.pending_action),
     nextSyncAt: item.next_sync_at,
-    lastError: item.last_error,
+    lastError: stringifyScanError(item.last_error),
     knowledgeBasePresent: item.knowledge_base_present,
   };
 }
 
 function buildDetailSummaryFromSource(
-  source: ScanSource,
-  summary: ScanSourceDocumentsSummary | undefined,
+  source: ScanV2Source,
+  summary: ScanV2Summary | undefined,
   documents: DocumentStatusRow[],
-  binding?: CloudSourceBinding | null,
+  binding?: ScanV2Binding | null,
   lastSyncedAt?: string,
 ): DataSourceSummary {
-  const lastSync = formatDateTime(lastSyncedAt || source.updated_at) || "-";
-  const isFeishuSource =
-    (source.default_origin_platform || "").toUpperCase().includes("FEISHU") ||
-    (source.default_origin_type || "").toUpperCase().includes("CLOUD_SYNC") ||
-    (source.root_path || "").toLowerCase().startsWith("cloud://source/");
+  const sourceId = getScanSourceId(source);
+  const target = getScanBindingTarget(binding);
+  const lastSync = formatDateTime(lastSyncedAt || binding?.updated_at || getScanSourceUpdatedAt(source)) || "-";
+  const isFeishuSource = inferSourceKind(source, binding) === "feishu";
   return {
-    id: source.id,
-    name: source.name,
-    target: binding?.target_ref || source.root_path,
-    rootPath: source.root_path,
-    targetRef: binding?.target_ref,
+    id: sourceId,
+    name: getScanSourceName(source),
+    target: target || "-",
+    rootPath: target,
+    targetRef: target,
     targetType: binding?.target_type,
     sourceType: isFeishuSource ? "feishu" : "local",
-    documentCount: summary?.total_document_count || documents.length,
+    documentCount: summary?.document_objects || summary?.total_objects || documents.length,
     status: normalizeDataSourceStatus(
       binding?.status || source.status,
-      isFeishuSource ? true : source.watch_enabled,
+      isFeishuSource ? true : binding?.sync_mode !== "manual",
     ),
     lastSync,
     addCount: summary?.new_count || 0,
     deleteCount: summary?.deleted_count || 0,
     changeCount: summary?.modified_count || 0,
-    storageUsed: formatBytes(summary?.storage_bytes),
+    storageUsed: "0 B",
     documents,
     scanManaged: true,
     tenantId: source.tenant_id,
-    agentId: source.agent_id,
+    agentId: binding?.agent_id,
+    bindingId: getScanBindingId(binding),
+    bindingTreeKey: getScanBindingTreeKey(binding),
+    configVersion: getScanSourceConfigVersion(source),
   };
 }
 
-function collectScanTreeFileKeys(nodes: ScanTreeNode[]): string[] {
+function collectScanTreeFileKeys(nodes: ScanV2TreeNode[]): string[] {
   const keys: string[] = [];
-  const walk = (items: ScanTreeNode[]) => {
+  const walk = (items: ScanV2TreeNode[]) => {
     items.forEach((node) => {
       if (node.children?.length) {
         walk(node.children);
       }
-      if (node.selectable === false) {
+      if (node.selectable === false || node.is_container === true) {
         return;
       }
-      keys.push(node.key);
+      keys.push(`${node.object_key || node.key}`);
     });
   };
   walk(nodes);
   return keys;
 }
 
-function getTreeNodeUpdateState(node: ScanTreeNode) {
-  return normalizeDataSourceFileUpdateState(node.update_type, node.has_update);
+function getScanTreeNodeKey(node: ScanV2TreeNode) {
+  return `${node.object_key || node.key}`;
+}
+
+function getScanTreeNodePage(payload: unknown) {
+  const responsePayload = payload as {
+    data?: {
+      items?: ScanV2TreeNode[];
+      next_cursor?: string;
+    };
+    items?: ScanV2TreeNode[];
+    next_cursor?: string;
+  };
+  const pagePayload = Array.isArray(responsePayload.items)
+    ? responsePayload
+    : responsePayload.data;
+
+  return {
+    items: Array.isArray(pagePayload?.items) ? pagePayload.items : [],
+    nextCursor: `${pagePayload?.next_cursor || ""}`,
+  };
+}
+
+function getScanTreeNodeMergeKeys(node: ScanV2TreeNode) {
+  return [
+    getScanTreeNodeKey(node),
+    node.key,
+    node.object_key,
+    node.target_ref,
+    node.node_ref,
+  ]
+    .map((key) => `${key || ""}`.trim())
+    .filter(Boolean);
+}
+
+function uniqueScanTreeKeys(keys: Array<string | undefined>) {
+  return Array.from(
+    new Set(keys.map((key) => `${key || ""}`.trim()).filter(Boolean)),
+  );
+}
+
+function normalizeLazyScanTreeNodes(nodes: ScanV2TreeNode[]) {
+  return nodes.map((node) => {
+    const nextNode = { ...node };
+    delete nextNode.children;
+    return nextNode;
+  });
+}
+
+function mergeScanTreeChildren(
+  nodes: ScanV2TreeNode[],
+  parentKey: string,
+  children: ScanV2TreeNode[],
+): ScanV2TreeNode[] {
+  return nodes.map((node) => {
+    if (getScanTreeNodeMergeKeys(node).includes(parentKey)) {
+      return { ...node, children };
+    }
+    if (node.children?.length) {
+      return {
+        ...node,
+        children: mergeScanTreeChildren(node.children, parentKey, children),
+      };
+    }
+    return node;
+  });
+}
+
+function getTreeNodeUpdateState(node: ScanV2TreeNode) {
+  return normalizeDataSourceFileUpdateState(
+    node.update_type || node.source_state,
+    node.has_update ?? node.source_state !== "UNCHANGED",
+  );
 }
 
 function shouldPollByParseStatus(items: DocumentStatusRow[]) {
@@ -393,24 +492,18 @@ function sleep(ms: number) {
 }
 
 async function waitForCloudSyncRun(
-  client: ScanDefaultApi,
+  client: ScanV2Client,
   sourceId: string,
   runId?: string,
 ) {
   const deadline = Date.now() + CLOUD_SYNC_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
-    const runsResponse = await client.apiScanSourcesIdCloudSyncRunsGet({
-      id: sourceId,
-      limit: 20,
-    });
-    const matchedRun = runId
-      ? runsResponse.data.items?.find((item) => item.run_id === runId)
-      : runsResponse.data.items?.[0];
-    const status = (matchedRun?.status || "").toUpperCase();
+    const summaryResponse = await client.getSourceSummary({ sourceId }).catch(() => null);
+    const status = `${(summaryResponse?.data as any)?.status || ""}`.toUpperCase();
 
-    if (status === "SUCCEEDED" || status === "PARTIAL_SUCCESS") {
-      return matchedRun;
+    if (status === "SUCCEEDED" || status === "PARTIAL_SUCCESS" || summaryResponse?.data) {
+      return { run_id: runId, status: status || "SUCCEEDED" };
     }
 
     if (
@@ -418,9 +511,7 @@ async function waitForCloudSyncRun(
       status.includes("ERROR") ||
       status.includes("CANCEL")
     ) {
-      throw new Error(
-        matchedRun?.error_message || "飞书云同步失败，请检查绑定配置后重试。",
-      );
+      throw new Error("飞书云同步失败，请检查绑定配置后重试。");
     }
 
     await sleep(CLOUD_SYNC_POLL_INTERVAL_MS);
@@ -453,12 +544,12 @@ export default function DataSourceDetail() {
   const [detailLoading, setDetailLoading] = useState(true);
   const [syncSelectedDocIds, setSyncSelectedDocIds] = useState<string[]>([]);
   const [syncPickerOpen, setSyncPickerOpen] = useState(false);
-  const [syncTreeNodes, setSyncTreeNodes] = useState<ScanTreeNode[]>([]);
+  const [syncTreeNodes, setSyncTreeNodes] = useState<ScanV2TreeNode[]>([]);
   const [syncKnownSelectableFileKeys, setSyncKnownSelectableFileKeys] = useState<Set<string>>(
     () => new Set(),
   );
   const [syncTreeLoading, setSyncTreeLoading] = useState(false);
-  const [syncSelectionToken, setSyncSelectionToken] = useState<string>("");
+  const [, setSyncSelectionToken] = useState<string>("");
   const [syncSubmitting, setSyncSubmitting] = useState(false);
   const [syncKeyword, setSyncKeyword] = useState("");
   const [lastSync, setLastSync] = useState(
@@ -474,6 +565,7 @@ export default function DataSourceDetail() {
   const syncPollingActiveRef = useRef(false);
   const syncTreeRequestSeqRef = useRef(0);
   const syncTreeInitialLoadRef = useRef(false);
+  const syncTreeChildrenCacheRef = useRef(new Map<string, ScanV2TreeNode[]>());
 
   const stopSyncPolling = useCallback(() => {
     syncPollingActiveRef.current = false;
@@ -496,6 +588,7 @@ export default function DataSourceDetail() {
     setSyncSubmitting(false);
     syncTreeRequestSeqRef.current += 1;
     syncTreeInitialLoadRef.current = false;
+    syncTreeChildrenCacheRef.current.clear();
     setLastOperation(null);
   }, [id, routeSource?.id, routeSource?.lastSync, stopSyncPolling]);
 
@@ -526,38 +619,31 @@ export default function DataSourceDetail() {
       }
 
       try {
-        const client = createScanApiClient();
-        const sourceResponse = await client.apiScanSourcesIdGet({ id });
-        const source = sourceResponse.data;
-        const tenantId = source.tenant_id || routeSource?.tenantId;
-
-        if (!tenantId) {
-          throw new Error("缺少 tenant_id，无法加载数据源详情。");
-        }
-
-        const documentsResponse = await client.apiScanSourcesIdDocumentsGet({
-          id,
-          tenantId,
+        const client = createScanV2ApiClient();
+        const sourceResponse = await client.getSource({ sourceId: id });
+        const source = {
+          ...sourceResponse.data.source,
+          tenant_id: routeSource?.tenantId,
+        };
+        const binding = getFirstScanBinding(
+          sourceResponse.data.bindings as ScanV2Binding[] | undefined,
+        );
+        const documentsResponse = await client.listSourceDocuments({
+          sourceId: id,
+          bindingId: getScanBindingId(binding) || routeSource?.bindingId,
           page: 1,
           pageSize: 200,
         });
-        const binding =
-          (source.root_path || "").toLowerCase().startsWith("cloud://source/") ||
-          (source.default_origin_platform || "").toUpperCase().includes("FEISHU")
-            ? await client
-                .apiScanSourcesIdCloudBindingGet({ id })
-                .then((response) => response.data)
-                .catch(() => null)
-            : null;
+        const summaryResponse = await client.getSourceSummary({ sourceId: id }).catch(() => null);
         const nextDocuments = (documentsResponse.data.items || []).map(
           mapScanDocumentToDetail,
         );
         const nextSource = buildDetailSummaryFromSource(
           source,
-          documentsResponse.data.summary,
+          (summaryResponse?.data || sourceResponse.data.summary) as ScanV2Summary | undefined,
           nextDocuments,
           binding,
-          documentsResponse.data.source?.last_synced_at,
+          undefined,
         );
 
         setDetailSource(nextSource);
@@ -628,17 +714,8 @@ export default function DataSourceDetail() {
       keywordValue: string,
       options: { selectAll?: boolean; closeOnError?: boolean } = {},
     ) => {
-      if (!detailSource?.agentId) {
-        message.error("未获取到扫描 Agent 信息，无法加载目录树。");
-        if (options.closeOnError) {
-          setSyncPickerOpen(false);
-        }
-        return;
-      }
-
-      const treePath = detailSource.rootPath || detailSource.target;
-      if (!treePath) {
-        message.error("未获取到同步路径，无法加载目录树。");
+      if (!detailSource?.id) {
+        message.error("未获取到数据源信息，无法加载目录树。");
         if (options.closeOnError) {
           setSyncPickerOpen(false);
         }
@@ -651,29 +728,46 @@ export default function DataSourceDetail() {
 
       try {
         const normalizedKeyword = keywordValue.trim();
-        const client = createScanApiClient();
-        const response = await client.apiScanAgentsFsTreePost({
-          agentPathTreeRequest: {
-            agent_id: detailSource.agentId,
-            source_id: detailSource.id,
-            path: treePath,
-            keyword: normalizedKeyword || undefined,
-            include_files: true,
-            changes_only: false,
-            updated_only: false,
-            max_depth: 8,
-          },
-        });
+        const client = createScanV2ApiClient();
+        const response = normalizedKeyword
+          ? await client.searchSourceTree({
+              sourceId: detailSource.id,
+              sourceTreeSearchRequest: {
+                binding_id: detailSource.bindingId,
+                tree_key: detailSource.bindingTreeKey,
+                keyword: normalizedKeyword,
+                include_documents: true,
+                include_containers: true,
+                list_mode: "page",
+                page_size: 100,
+              },
+            })
+          : await client.listSourceTreeChildren({
+              sourceId: detailSource.id,
+              sourceTreeChildrenRequest: {
+                binding_id: detailSource.bindingId,
+                tree_key: detailSource.bindingTreeKey,
+                include_documents: true,
+                include_containers: true,
+                list_mode: "page",
+                page_size: 100,
+                parent_key: "",
+              },
+            });
 
         if (syncTreeRequestSeqRef.current !== requestSeq) {
           return;
         }
 
-        const nextTreeNodes = response.data.items || [];
-        const nextSelectionToken = response.data.selection_token || "";
+        const treePage = getScanTreeNodePage(response.data);
+        const nextTreeNodes = normalizeLazyScanTreeNodes(treePage.items);
+        const nextSelectionToken = treePage.nextCursor;
         const nextSelectableKeys = collectScanTreeFileKeys(nextTreeNodes);
 
         setSyncTreeNodes(nextTreeNodes);
+        if (!normalizedKeyword) {
+          syncTreeChildrenCacheRef.current.set("", nextTreeNodes);
+        }
         setSyncKnownSelectableFileKeys((prev) => {
           const next = new Set(prev);
           nextSelectableKeys.forEach((key) => next.add(key));
@@ -703,6 +797,80 @@ export default function DataSourceDetail() {
     [detailSource, t],
   );
 
+  const loadSyncTreeChildren = useCallback(
+    async (node: DataNode) => {
+      if (!detailSource?.id || syncKeyword.trim()) {
+        return;
+      }
+
+      const treeNode = node as SyncTreeDataNode;
+      const parentKeyCandidates = uniqueScanTreeKeys([
+        treeNode.objectKey,
+        treeNode.treeKey,
+        treeNode.targetRef,
+        treeNode.nodeRef,
+        `${treeNode.key}`,
+      ]);
+      const parentKey = parentKeyCandidates[0] || `${treeNode.key}`;
+      const mergeKey = `${treeNode.key}`;
+      const cachedChildren = parentKeyCandidates
+        .map((key) => syncTreeChildrenCacheRef.current.get(key))
+        .find((items): items is ScanV2TreeNode[] => Boolean(items));
+      if (cachedChildren) {
+        setSyncTreeNodes((current) =>
+          mergeScanTreeChildren(current, mergeKey, cachedChildren),
+        );
+        return;
+      }
+
+      try {
+        const client = createScanV2ApiClient();
+        const requestPage = async (candidate: string) => {
+          const response = await client.listSourceTreeChildren({
+            sourceId: detailSource.id,
+            sourceTreeChildrenRequest: {
+              binding_id: detailSource.bindingId,
+              tree_key: detailSource.bindingTreeKey,
+              parent_key: candidate,
+              include_documents: true,
+              include_containers: true,
+              list_mode: "page",
+              page_size: 100,
+            },
+          });
+          return getScanTreeNodePage(response.data);
+        };
+        let treePage = await requestPage(parentKey);
+        for (const candidate of parentKeyCandidates.slice(1)) {
+          if (treePage.items.length > 0) {
+            break;
+          }
+          treePage = await requestPage(candidate);
+        }
+
+        const children = normalizeLazyScanTreeNodes(treePage.items);
+        const selectableKeys = collectScanTreeFileKeys(children);
+        parentKeyCandidates.forEach((key) => {
+          syncTreeChildrenCacheRef.current.set(key, children);
+        });
+        setSyncKnownSelectableFileKeys((prev) => {
+          const next = new Set(prev);
+          selectableKeys.forEach((key) => next.add(key));
+          return next;
+        });
+        setSyncTreeNodes((current) =>
+          mergeScanTreeChildren(current, mergeKey, children),
+        );
+      } catch (error) {
+        message.error(
+          getLocalizedErrorMessage(error, t("common.requestFailed")) ||
+            t("common.requestFailed"),
+        );
+      }
+    },
+    [detailSource, syncKeyword, t],
+  );
+
   useEffect(() => {
     if (!syncPickerOpen) {
       return;
@@ -724,14 +892,8 @@ export default function DataSourceDetail() {
   }, [loadSyncTree, syncKeyword, syncPickerOpen]);
 
   const openSyncPicker = () => {
-    if (!detailSource?.agentId) {
-      message.error("未获取到扫描 Agent 信息，无法加载目录树。");
-      return;
-    }
-
-    const treePath = detailSource.rootPath || detailSource.target;
-    if (!treePath) {
-      message.error("未获取到同步路径，无法加载目录树。");
+    if (!detailSource?.id) {
+      message.error("未获取到数据源信息，无法加载目录树。");
       return;
     }
 
@@ -772,33 +934,33 @@ export default function DataSourceDetail() {
     stopSyncPolling();
     setSyncSubmitting(true);
     try {
-      const client = createScanApiClient();
+      const client = createScanV2ApiClient();
       if (detailSource.sourceType === "feishu") {
         message.info(t("admin.dataSourceDetailCloudSyncPreparing"));
-        const triggerResponse = await client.apiScanSourcesIdCloudSyncTriggerPost({
-          id: detailSource.id,
-          triggerCloudSyncRequest: {
-            trigger_type: "manual",
-            paths: targetPaths,
+        const triggerResponse = await client.triggerSourceSync({
+          sourceId: detailSource.id,
+          triggerSourceSyncRequest: {
+            request_id: createScanRequestId("manual-sync"),
+            binding_id: detailSource.bindingId,
+            scope_type: "partial",
+            scope_ref: {
+              object_keys: targetPaths,
+            },
           },
         });
-        await waitForCloudSyncRun(client, detailSource.id, triggerResponse.data.run_id);
+        await waitForCloudSyncRun(client, detailSource.id, triggerResponse.data.run_ids?.[0]);
       }
 
       const generateTasksRequest: {
         mode: string;
-        paths: string[];
-        trigger_policy?: string;
-        updated_only?: boolean;
-        selection_token?: string;
+        binding_id?: string;
+        object_keys: string[];
+        priority?: number;
       } = {
         mode: "partial",
-        paths: targetPaths,
-        trigger_policy: "IMMEDIATE",
-        updated_only: false,
-      };
-      if (syncSelectionToken) {
-        generateTasksRequest.selection_token = syncSelectionToken;
+        binding_id: detailSource.bindingId,
+        object_keys: targetPaths,
+        priority: 5,
       }
 
       // If at least one selected target is a deleted-state synthetic node,
@@ -812,23 +974,26 @@ export default function DataSourceDetail() {
 
       let generateResponse;
       try {
-        generateResponse = await client.apiScanSourcesIdTasksGeneratePost({
-          id: detailSource.id,
+        generateResponse = await client.generateParseTasks({
+          sourceId: detailSource.id,
           generateTasksRequest,
         });
       } catch (err) {
-        if (hasDeletedTarget && generateTasksRequest.selection_token) {
-          const retryRequest = { ...generateTasksRequest };
-          delete retryRequest.selection_token;
-          generateResponse = await client.apiScanSourcesIdTasksGeneratePost({
-            id: detailSource.id,
-            generateTasksRequest: retryRequest,
+        if (hasDeletedTarget) {
+          generateResponse = await client.generateParseTasks({
+            sourceId: detailSource.id,
+            generateTasksRequest: {
+              ...generateTasksRequest,
+              mode: "full",
+            },
           });
         } else {
           throw err;
         }
       }
-      const result = generateResponse.data;
+      const result = generateResponse.data as typeof generateResponse.data & {
+        ignored_unchanged_count?: number;
+      };
       const checkedCount = result.requested_count ?? targetPaths.length;
       const syncedCount = result.accepted_count ?? 0;
       const ignoredCount =
@@ -938,23 +1103,28 @@ export default function DataSourceDetail() {
   };
 
   const syncTreeData = useMemo<DataNode[]>(() => {
-    const toDataNode = (nodes: ScanTreeNode[]): DataNode[] =>
+    const toDataNode = (nodes: ScanV2TreeNode[]): SyncTreeDataNode[] =>
       nodes.map((node) => {
         const children = node.children ? toDataNode(node.children) : undefined;
         const updateState = getTreeNodeUpdateState(node);
         const updateMeta = getFileUpdateMeta(updateState, t);
-        const updateText = `${node.update_desc || ""}`.trim() || updateMeta.text;
+        const updateText = `${node.update_desc || node.source_state || ""}`.trim() || updateMeta.text;
         const hasUpdateStatus =
-          typeof node.has_update === "boolean" || Boolean(node.update_type || node.update_desc);
+          typeof node.has_update === "boolean" || Boolean(node.update_type || node.update_desc || node.source_state);
+        const title = node.display_name || node.title || node.object_key || node.key;
 
         return {
-          key: node.key,
-          isLeaf: !node.is_dir,
-          disableCheckbox: !node.is_dir && node.selectable === false,
+          key: getScanTreeNodeKey(node),
+          treeKey: `${node.key}`,
+          objectKey: node.object_key,
+          targetRef: node.target_ref,
+          nodeRef: node.node_ref,
+          isLeaf: !node.has_children,
+          disableCheckbox: node.is_container === true || node.selectable === false,
           title: (
             <div className="data-source-sync-tree-file">
               <div className="data-source-sync-tree-file-main">
-                <span>{node.title}</span>
+                <span>{title}</span>
                 {hasUpdateStatus ? (
                   <span
                     className={`data-source-sync-tree-chip data-source-sync-tree-chip-${updateState}`}
@@ -966,6 +1136,7 @@ export default function DataSourceDetail() {
               </div>
             </div>
           ),
+          childrenLoaded: Boolean(node.children),
           children,
         };
       });
@@ -1159,6 +1330,7 @@ export default function DataSourceDetail() {
           syncTreeData={syncTreeData}
           checkedTreeKeys={checkedTreeKeys}
           selectableSyncFileKeys={selectableSyncFileKeys}
+          onLoadSyncTreeNode={loadSyncTreeChildren}
           onCancel={() => {
             if (!syncSubmitting) {
               syncTreeRequestSeqRef.current += 1;

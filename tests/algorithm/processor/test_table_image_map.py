@@ -1,6 +1,6 @@
 import re
 
-from processor.table_image_map import (
+from lazymind.processor.engine.table_image_map import (
     merge_table_image_maps,
     normalize_table_image_map,
     serialize_table_image_map,

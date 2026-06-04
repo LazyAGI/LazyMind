@@ -24,7 +24,7 @@ class _FakeAsyncClient:
 
 def _load_health_routes_module():
     module_name = 'test_health_routes_isolated'
-    module_path = Path(__file__).resolve().parents[3] / 'algorithm/chat/app/api/health_routes.py'
+    module_path = Path(__file__).resolve().parents[3] / 'algorithm/lazymind/chat/api/health_routes.py'
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     module = importlib.util.module_from_spec(spec)
     sys.modules.pop(module_name, None)

@@ -39,7 +39,11 @@ function resolveUserId(userInfo?: Partial<UserInfo> | null) {
 
   const payload = decodeJwtPayload(userInfo?.token);
   const candidate = payload?.sub || payload?.user_id || payload?.uid;
-  return typeof candidate === "string" ? candidate : undefined;
+  if (typeof candidate === "string") {
+    return candidate;
+  }
+
+  return userInfo?.username || undefined;
 }
 
 export interface UserInfo {
@@ -51,10 +55,15 @@ export interface UserInfo {
   displayName?: string;
   phone?: string;
   clientId?: string;
+  tenantId?: string;
+  tenant_id?: string;
+  tenantKey?: string;
+  tenant_key?: string;
   loginType?: string;
   idToken?: string;
   refreshToken?: string;
   dynamic?: boolean;
+  chatUnlikeSwitch?: boolean;
   timestamp?: number;
 }
 
@@ -113,6 +122,15 @@ export const AgentAppsAuth = {
 
     if (userInfo?.userId) {
       headers["X-User-Id"] = userInfo.userId;
+    }
+
+    const tenantId =
+      userInfo?.tenantId ||
+      userInfo?.tenant_id ||
+      userInfo?.tenantKey ||
+      userInfo?.tenant_key;
+    if (tenantId) {
+      headers["X-Tenant-ID"] = tenantId;
     }
 
     return headers;

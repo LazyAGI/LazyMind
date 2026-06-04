@@ -1,4 +1,4 @@
-from chat.utils.markdown_images import rewrite_markdown_image_urls
+from lazymind.chat.service.utils.markdown_images import rewrite_markdown_image_urls
 
 
 def test_rewrite_strips_blocked_minimax_cdn_when_no_registry_match():

@@ -1,0 +1,188 @@
+.feishu-setup-guide-page {
+  height: 100vh;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  box-sizing: border-box;
+  background: #f8fafc;
+}
+
+.feishu-setup-guide-header {
+  max-width: 1180px;
+  margin: 0 auto 12px;
+  padding: 4px 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+
+  h1 {
+    margin: 4px 0 0;
+    color: #101828;
+    font-size: 28px;
+    font-weight: 760;
+    line-height: 1.25;
+  }
+}
+
+.feishu-setup-guide-back.ant-btn {
+  height: auto;
+  padding: 0;
+  font-weight: 600;
+}
+
+.feishu-setup-guide-subtitle.ant-typography {
+  margin: 6px 0 0;
+  color: #667085;
+}
+
+.feishu-setup-guide-shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.feishu-setup-guide-summary {
+  position: sticky;
+  top: 12px;
+  padding: 14px;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  background: #ffffff;
+
+  ol {
+    margin: 12px 0;
+    padding-left: 20px;
+    color: #475467;
+    line-height: 1.8;
+  }
+
+  button {
+    width: 100%;
+    border: 0;
+    padding: 2px 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    line-height: inherit;
+    text-align: left;
+
+    &:hover,
+    &:focus-visible {
+      color: #2563eb;
+    }
+
+    &:focus-visible {
+      border-radius: 4px;
+      outline: 2px solid #93c5fd;
+      outline-offset: 2px;
+    }
+  }
+
+}
+
+.feishu-setup-guide-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.feishu-setup-guide-step {
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.feishu-setup-guide-step-copy {
+  padding: 16px 18px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+
+  h2 {
+    margin: 0;
+    color: #101828;
+    font-size: 18px;
+    font-weight: 760;
+    line-height: 1.35;
+  }
+
+  .ant-typography {
+    margin: 6px 0 0;
+    color: #667085;
+  }
+}
+
+.feishu-setup-guide-step-details {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: #475467;
+  line-height: 1.7;
+
+  li + li {
+    margin-top: 4px;
+  }
+}
+
+.feishu-setup-guide-inline-link {
+  color: #2563eb;
+  font-weight: 650;
+
+  &:hover,
+  &:focus-visible {
+    color: #1d4ed8;
+  }
+}
+
+.feishu-setup-guide-step-index {
+  min-width: 34px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #2563eb;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 760;
+}
+
+.feishu-setup-guide-step-icon {
+  margin-top: 3px;
+  color: #12b76a;
+  font-size: 18px;
+}
+
+.feishu-setup-guide-step figure {
+  margin: 0;
+  padding: 0 18px 18px;
+}
+
+.feishu-setup-guide-step img {
+  width: 100%;
+  display: block;
+  border: 1px solid #eaecf0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+@media (max-width: 900px) {
+  .feishu-setup-guide-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .feishu-setup-guide-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .feishu-setup-guide-summary {
+    position: static;
+  }
+}

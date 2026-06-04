@@ -10,7 +10,6 @@ import {
 } from "@ant-design/icons";
 import CreateGroupModal from "./components/CreateGroupModal";
 import ManageMembersModal from "./components/ManageMembersModal";
-import ManagePermissionsModal from "./components/ManagePermissionsModal";
 import { createGroupApi } from "@/modules/signin/utils/request";
 import { AgentAppsAuth } from "@/components/auth";
 import type { GroupItem } from "@/api/generated/auth-client";
@@ -24,8 +23,6 @@ const GroupManagement = () => {
   const navigate = useNavigate();
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isMemberModalVisible, setIsMemberModalVisible] = useState(false);
-  const [isPermissionModalVisible, setIsPermissionModalVisible] =
-    useState(false);
   const [loading, setLoading] = useState(false);
   const [groups, setGroups] = useState<GroupItem[]>([]);
   const [pagination, setPagination] = useState({
@@ -35,8 +32,6 @@ const GroupManagement = () => {
   });
   const [editingGroup, setEditingGroup] = useState<GroupItem | null>(null);
   const [selectedGroupForMembers, setSelectedGroupForMembers] =
-    useState<GroupItem | null>(null);
-  const [selectedGroupForPermissions, setSelectedGroupForPermissions] =
     useState<GroupItem | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -110,11 +105,6 @@ const GroupManagement = () => {
   const handleAddMembers = (group: GroupItem) => {
     setSelectedGroupForMembers(group);
     setIsMemberModalVisible(true);
-  };
-
-  const handleManagePermissions = (group: GroupItem) => {
-    setSelectedGroupForPermissions(group);
-    setIsPermissionModalVisible(true);
   };
 
   const renderEllipsisText = (text?: string, emptyText = "-") => {
@@ -304,16 +294,6 @@ const GroupManagement = () => {
         onSuccess={() => {
           setIsMemberModalVisible(false);
           setSelectedGroupForMembers(null);
-        }}
-      />
-
-      <ManagePermissionsModal
-        visible={isPermissionModalVisible}
-        group={selectedGroupForPermissions}
-        isAdmin={isUserAdmin}
-        onCancel={() => {
-          setIsPermissionModalVisible(false);
-          setSelectedGroupForPermissions(null);
         }}
       />
     </div>

@@ -127,6 +127,11 @@ const UserManagement = () => {
   const handleToggleUserStatus = async (user: RawUserItem, disabled: boolean) => {
     const userId = resolveUserId(user);
 
+    if (disabled && user.is_bootstrap_admin) {
+      message.warning(t("admin.bootstrapAdminDisableLocked"));
+      return;
+    }
+
     if (!userId) {
       message.error(
         disabled ? t("admin.disableFailed") : t("admin.enableFailed"),
@@ -272,6 +277,7 @@ const UserManagement = () => {
       render: (_: any, record: AdminUserItem) => {
         const disabled = isUserDisabled(record.status);
         const isBootstrapAdmin = !!record.is_bootstrap_admin;
+        const statusButtonDisabled = isBootstrapAdmin && !disabled;
         const editRoleButton = (
           <Button
             type="link"
@@ -301,29 +307,45 @@ const UserManagement = () => {
           >
             {t("admin.resetPassword")}
           </Button>
-          <Popconfirm
-            title={
-              disabled
-                ? t("admin.enableUserConfirm")
-                : t("admin.disableUserConfirm")
-            }
-            onConfirm={() =>
-              disabled
-                ? handleEnable(record)
-                : handleDisable(record)
-            }
-            okText={t("common.confirm")}
-            cancelText={t("common.cancel")}
-          >
-            <Button
-              type="link"
-              size="small"
-              danger={!disabled}
-              icon={disabled ? <CheckCircleOutlined /> : <StopOutlined />}
+          {statusButtonDisabled ? (
+            <Tooltip title={t("admin.bootstrapAdminDisableLocked")}>
+              <span>
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  disabled
+                  icon={<StopOutlined />}
+                >
+                  {t("admin.disable")}
+                </Button>
+              </span>
+            </Tooltip>
+          ) : (
+            <Popconfirm
+              title={
+                disabled
+                  ? t("admin.enableUserConfirm")
+                  : t("admin.disableUserConfirm")
+              }
+              onConfirm={() =>
+                disabled
+                  ? handleEnable(record)
+                  : handleDisable(record)
+              }
+              okText={t("common.confirm")}
+              cancelText={t("common.cancel")}
             >
-              {disabled ? t("admin.enable") : t("admin.disable")}
-            </Button>
-          </Popconfirm>
+              <Button
+                type="link"
+                size="small"
+                danger={!disabled}
+                icon={disabled ? <CheckCircleOutlined /> : <StopOutlined />}
+              >
+                {disabled ? t("admin.enable") : t("admin.disable")}
+              </Button>
+            </Popconfirm>
+          )}
         </Space>
         );
       },
