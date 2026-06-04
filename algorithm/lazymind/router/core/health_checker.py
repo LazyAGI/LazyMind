@@ -100,13 +100,14 @@ class HealthChecker:
         else:
             count = self._failure_counts.get(port, 0) + 1
             self._failure_counts[port] = count
-            logger.warning('Child on port %d failed health check (%d/%d)', port, count, config['router_health_max_failures'])
+            logger.warning('Child on port %d failed health check (%d/%d)', port,
+                           count, config['router_health_max_failures'])
 
             if count >= config['router_health_max_failures']:
                 await self._update_child_status(port, 'unhealthy', failures=count)
                 # Trigger restart if not already pending
                 if port not in self._restart_tasks or self._restart_tasks[port].done():
-                    backoff_idx = min(count - HEALTH_MAX_FAILURES, len(_BACKOFF_SCHEDULE) - 1)
+                    backoff_idx = min(count - config['router_health_max_failures'], len(_BACKOFF_SCHEDULE) - 1)
                     delay = _BACKOFF_SCHEDULE[backoff_idx]
                     self._restart_tasks[port] = asyncio.create_task(
                         self._deferred_restart(port, delay)

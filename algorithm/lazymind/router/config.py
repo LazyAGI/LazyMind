@@ -108,11 +108,9 @@ config.add(
 # DB
 # ---------------------------------------------------------------------------
 config.add(
-    'core_database_url',
-    str,
-    None,
-    'CORE_DATABASE_URL',
-    description='Database URL for router mode. Supports PostgreSQL (postgresql://...) and SQLite (sqlite:///path). Required for router mode.',
+    'core_database_url', str, None, 'CORE_DATABASE_URL',
+    description='Database URL for router mode. Supports PostgreSQL (postgresql://...) '
+                'and SQLite (sqlite:///path). Required for router mode.',
 )
 
 # ---------------------------------------------------------------------------
@@ -125,6 +123,7 @@ config.add(
     'ROUTER_HOST',
     description='Hostname / IP advertised for this router instance (auto-detected if not set).',
 )
+
 
 def resolve_host() -> str:
     """Resolve the advertised host: prefer explicit config, then POD_IP (K8s), then socket hostname."""
