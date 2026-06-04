@@ -35,6 +35,9 @@ const (
 	PermissionDatasetRead   = "DATASET_READ"
 	PermissionDatasetWrite  = "DATASET_WRITE"
 	PermissionDatasetUpload = "DATASET_UPLOAD"
+
+	PermissionEvalSetRead  = "EVAL_SET_READ"
+	PermissionEvalSetWrite = "EVAL_SET_WRITE"
 )
 
 // Permissiontext（text）。
@@ -47,8 +50,9 @@ const (
 
 // ACL text。
 const (
-	ResourceTypeKB = "kb" // Knowledge base
-	ResourceTypeDB = "db" // text
+	ResourceTypeKB      = "kb"       // Knowledge base
+	ResourceTypeDB      = "db"       // text
+	ResourceTypeEvalSet = "eval_set" // Evaluation set
 )
 
 // VisibilityRow text：id、resource_id(kb_id)、level（text private）。

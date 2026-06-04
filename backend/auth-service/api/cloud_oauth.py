@@ -4,11 +4,15 @@ from core.deps import current_user, require_internal_service_token
 from models import User
 from schemas.cloud_oauth import (
     CloudConnectionCreateBody,
+    CloudConnectionDeleteResponse,
     CloudConnectionListResponse,
     CloudConnectionCreateResponse,
     CloudConnectionResponse,
     CloudConnectionTokenResponse,
+    CloudConnectionUpdateBody,
     CloudConnectionVerifyResponse,
+    CloudOAuthAppCredentialBody,
+    CloudOAuthAppCredentialResponse,
     CloudOAuthAuthorizeURLBody,
     CloudOAuthAuthorizeURLResponse,
     CloudOAuthCallbackBody,
@@ -37,6 +41,43 @@ def create_connection(
     )
 
 
+@router.get('/{provider}/oauth/app-credentials', response_model=CloudOAuthAppCredentialResponse)
+def get_oauth_app_credentials(
+    provider: str,
+    user: User = Depends(current_user),  # noqa: B008
+):
+    return cloud_oauth_service.get_app_credentials(
+        provider=provider,
+        owner_user_id=str(user.id),
+    )
+
+
+@router.put('/{provider}/oauth/app-credentials', response_model=CloudOAuthAppCredentialResponse)
+def save_oauth_app_credentials(
+    provider: str,
+    body: CloudOAuthAppCredentialBody,
+    user: User = Depends(current_user),  # noqa: B008
+):
+    return cloud_oauth_service.save_app_credentials(
+        provider=provider,
+        owner_user_id=str(user.id),
+        client_id=body.client_id,
+        client_secret=body.client_secret,
+        provider_options=body.provider_options,
+    )
+
+
+@router.delete('/{provider}/oauth/app-credentials', response_model=CloudOAuthAppCredentialResponse)
+def delete_oauth_app_credentials(
+    provider: str,
+    user: User = Depends(current_user),  # noqa: B008
+):
+    return cloud_oauth_service.delete_app_credentials(
+        provider=provider,
+        owner_user_id=str(user.id),
+    )
+
+
 @router.post('/{provider}/oauth/authorize-url', response_model=CloudOAuthAuthorizeURLResponse)
 def oauth_authorize_url(
     provider: str,
@@ -53,6 +94,7 @@ def oauth_authorize_url(
         redirect_uri=body.redirect_uri or '',
         scope=body.scope,
         state=body.state,
+        reauthorize_connection_id=body.reauthorize_connection_id,
         provider_options=body.provider_options,
     )
 
@@ -95,6 +137,48 @@ def get_connection(
     user: User = Depends(current_user),  # noqa: B008
 ):
     return cloud_oauth_service.get_connection(connection_id, user_id=str(user.id))
+
+
+@router.delete('/connections/{connection_id}', response_model=CloudConnectionDeleteResponse)
+def delete_connection(
+    connection_id: str,
+    user: User = Depends(current_user),  # noqa: B008
+):
+    return cloud_oauth_service.delete_connection(connection_id, user_id=str(user.id))
+
+
+@router.put('/connections/{connection_id}', response_model=CloudConnectionResponse)
+def update_connection(
+    connection_id: str,
+    body: CloudConnectionUpdateBody,
+    user: User = Depends(current_user),  # noqa: B008
+):
+    return cloud_oauth_service.update_connection(
+        connection_id,
+        user_id=str(user.id),
+        display_name=body.display_name,
+        displayName=body.displayName,
+        name=body.name,
+        client_id=body.client_id,
+        app_id=body.app_id,
+        appId=body.appId,
+        client_secret=body.client_secret,
+        app_secret=body.app_secret,
+        appSecret=body.appSecret,
+        provider_options=body.provider_options,
+        provider_account_meta=body.provider_account_meta,
+        chat_enabled=body.chat_enabled,
+        chatEnabled=body.chatEnabled,
+    )
+
+
+@router.patch('/connections/{connection_id}', response_model=CloudConnectionResponse)
+def patch_connection(
+    connection_id: str,
+    body: CloudConnectionUpdateBody,
+    user: User = Depends(current_user),  # noqa: B008
+):
+    return update_connection(connection_id, body, user)
 
 
 @router.get('/connections/{connection_id}/token', response_model=CloudConnectionTokenResponse)

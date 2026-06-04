@@ -163,3 +163,149 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		}
 	}
 }
+
+func TestOpenAPISpecUsesEvalSetDatasetIDsContract(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+
+	components, ok := spec["components"].(map[string]any)
+	if !ok {
+		t.Fatalf("components missing in openapi spec")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		t.Fatalf("schemas missing in openapi spec")
+	}
+
+	assertSchemaProperties := func(schemaName string, required []string, forbidden []string) {
+		t.Helper()
+		schema, ok := schemas[schemaName].(map[string]any)
+		if !ok {
+			t.Fatalf("schema %s missing", schemaName)
+		}
+		properties, ok := schema["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("schema %s properties missing", schemaName)
+		}
+		for _, name := range required {
+			if _, ok := properties[name]; !ok {
+				t.Fatalf("schema %s expected property %q", schemaName, name)
+			}
+		}
+		for _, name := range forbidden {
+			if _, ok := properties[name]; ok {
+				t.Fatalf("schema %s has removed property %q", schemaName, name)
+			}
+		}
+	}
+
+	assertSchemaProperties("CreateEvalSetRequest", []string{"dataset_ids"}, []string{"dataset_id"})
+	assertSchemaProperties("UpdateEvalSetRequest", []string{"dataset_ids"}, []string{"dataset_id"})
+	assertSchemaProperties("CreateEvalSetByImportRequest", []string{"dataset_ids"}, []string{"dataset_id"})
+	assertSchemaProperties("EvalSetResponse", []string{"dataset_ids", "dataset_names"}, []string{"dataset_id", "dataset_name"})
+	assertSchemaProperties("EvalSetImportTaskResponse", []string{"dataset_ids", "dataset_names"}, []string{"dataset_id", "dataset_name"})
+
+	paths, ok := spec["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("paths missing in openapi spec")
+	}
+	pathItem, ok := paths["/api/core/eval-sets"].(map[string]any)
+	if !ok {
+		t.Fatalf("path missing from openapi spec: /api/core/eval-sets")
+	}
+	getOp, ok := pathItem["get"].(map[string]any)
+	if !ok {
+		t.Fatalf("get /api/core/eval-sets missing")
+	}
+	params, ok := getOp["parameters"].([]any)
+	if !ok {
+		t.Fatalf("parameters missing for get /api/core/eval-sets")
+	}
+	paramNames := make(map[string]struct{}, len(params))
+	for _, item := range params {
+		param, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := param["name"].(string)
+		if name != "" {
+			paramNames[name] = struct{}{}
+		}
+	}
+	if _, ok := paramNames["dataset_ids"]; !ok {
+		t.Fatalf("expected dataset_ids query parameter")
+	}
+	if _, ok := paramNames["dataset_id"]; ok {
+		t.Fatalf("unexpected removed dataset_id query parameter")
+	}
+}
+
+func TestOpenAPISpecIncludesListDocumentsByDatasets(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+
+	paths, ok := spec["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("paths missing in openapi spec")
+	}
+	pathItem, ok := paths["/api/core/documents:listByDatasets"].(map[string]any)
+	if !ok {
+		t.Fatalf("path missing from openapi spec: /api/core/documents:listByDatasets")
+	}
+	postOp, ok := pathItem["post"].(map[string]any)
+	if !ok {
+		t.Fatalf("post /api/core/documents:listByDatasets missing")
+	}
+	if _, ok := postOp["requestBody"].(map[string]any); !ok {
+		t.Fatalf("requestBody missing for post /api/core/documents:listByDatasets")
+	}
+	responses, ok := postOp["responses"].(map[string]any)
+	if !ok {
+		t.Fatalf("responses missing for post /api/core/documents:listByDatasets")
+	}
+	if _, ok := responses["200"].(map[string]any); !ok {
+		t.Fatalf("200 response missing for post /api/core/documents:listByDatasets")
+	}
+
+	components, ok := spec["components"].(map[string]any)
+	if !ok {
+		t.Fatalf("components missing in openapi spec")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		t.Fatalf("schemas missing in openapi spec")
+	}
+	schema, ok := schemas["ListDatasetDocumentsRequest"].(map[string]any)
+	if !ok {
+		t.Fatalf("ListDatasetDocumentsRequest schema missing")
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("ListDatasetDocumentsRequest properties missing")
+	}
+	for _, name := range []string{"dataset_ids", "keyword", "page_size", "page_token"} {
+		if _, ok := properties[name]; !ok {
+			t.Fatalf("ListDatasetDocumentsRequest expected property %q", name)
+		}
+	}
+}

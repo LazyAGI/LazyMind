@@ -14,6 +14,7 @@ type LocalFSConnector struct {
 	publicRoot       string
 	allowedPrefixes  []string
 	recommendedRoots []string
+	temp             TempObjectStore
 	clock            func() time.Time
 }
 
@@ -53,6 +54,12 @@ func WithPublicRoot(publicRoot string) Option {
 		if cleaned := cleanPath(publicRoot); cleaned != "." {
 			c.publicRoot = cleaned
 		}
+	}
+}
+
+func WithTempObjectStore(temp TempObjectStore) Option {
+	return func(c *LocalFSConnector) {
+		c.temp = temp
 	}
 }
 

@@ -122,6 +122,7 @@ type SubmitParseTaskRequest struct {
 	DatasetID        string    `json:"dataset_id"`
 	ParentDocumentID string    `json:"parent_document_id"`
 	SourceDocumentID string    `json:"source_document_id,omitempty"`
+	UserID           string    `json:"user_id,omitempty"`
 	DisplayName      string    `json:"display_name"`
 	ContentURI       string    `json:"content_uri,omitempty"`
 	Content          io.Reader `json:"-"`
@@ -142,6 +143,7 @@ type GetCoreTaskResultRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
 	DatasetID      string `json:"dataset_id"`
 	CoreTaskID     string `json:"core_task_id"`
+	UserID         string `json:"user_id,omitempty"`
 }
 
 type CoreTaskResult struct {

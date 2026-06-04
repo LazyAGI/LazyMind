@@ -5,6 +5,7 @@ import (
 	"lazymind/core/agent"
 	"lazymind/core/chat"
 	"lazymind/core/doc"
+	"lazymind/core/evalset"
 	"lazymind/core/evolution"
 	"lazymind/core/file"
 	"lazymind/core/memory"
@@ -29,6 +30,25 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/datasets/{dataset}:setDefault", []string{"document.read"}, doc.SetDefault)
 	handleAPI(r, "POST", "/datasets/{dataset}:unsetDefault", []string{"document.read"}, doc.UnsetDefault)
 
+	// ----- Eval set metadata -----
+	handleAPI(r, "GET", "/eval-sets", []string{"document.read"}, evalset.ListEvalSets)
+	handleAPI(r, "POST", "/eval-sets", []string{"document.write"}, evalset.CreateEvalSet)
+	handleAPI(r, "GET", "/eval-sets/datasets", []string{"document.read"}, evalset.ListDatasetOptions)
+	handleAPI(r, "GET", "/eval-sets/question-types", []string{"document.read"}, evalset.ListQuestionTypeOptions)
+	handleAPI(r, "GET", "/eval-set-import-templates/{file_type}", []string{"document.read"}, evalset.DownloadImportTemplate)
+	handleAPI(r, "POST", "/eval-sets/imports:preview", []string{"document.write"}, evalset.PreviewEvalSetImport)
+	handleAPI(r, "POST", "/eval-sets:import", []string{"document.write"}, evalset.CreateEvalSetByImport)
+	handleAPI(r, "GET", "/eval-set-import-tasks/{task_id}", []string{"document.read"}, evalset.GetEvalSetImportTask)
+	handleAPI(r, "GET", "/eval-sets/{eval_set_id}/items", []string{"document.read"}, evalset.ListEvalSetItems)
+	handleAPI(r, "POST", "/eval-sets/{eval_set_id}/imports", []string{"document.write"}, evalset.AppendEvalSetImport)
+	handleAPI(r, "POST", "/eval-sets/{eval_set_id}/items", []string{"document.write"}, evalset.CreateEvalSetItem)
+	handleAPI(r, "POST", "/eval-sets/{eval_set_id}/items:batchDelete", []string{"document.write"}, evalset.BatchDeleteEvalSetItems)
+	handleAPI(r, "PATCH", "/eval-sets/{eval_set_id}/items/{item_id}", []string{"document.write"}, evalset.UpdateEvalSetItem)
+	handleAPI(r, "DELETE", "/eval-sets/{eval_set_id}/items/{item_id}", []string{"document.write"}, evalset.DeleteEvalSetItem)
+	handleAPI(r, "GET", "/eval-sets/{eval_set_id}", []string{"document.read"}, evalset.GetEvalSet)
+	handleAPI(r, "PATCH", "/eval-sets/{eval_set_id}", []string{"document.write"}, evalset.UpdateEvalSet)
+	handleAPI(r, "DELETE", "/eval-sets/{eval_set_id}", []string{"document.write"}, evalset.DeleteEvalSet)
+
 	// ----- DocumentService -----
 	handleAPI(r, "GET", "/datasets/{dataset}/documents", []string{"document.read"}, doc.ListDocuments)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents", []string{"document.write"}, doc.CreateDocument)
@@ -40,6 +60,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PATCH", "/datasets/{dataset}/documents/{document}", []string{"document.write"}, doc.UpdateDocument)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents:search", []string{"document.read"}, doc.SearchDocuments)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents:batchUpdateTags", []string{"document.write"}, doc.BatchUpdateDocumentTags)
+	handleAPI(r, "POST", "/documents:listByDatasets", []string{"document.read"}, doc.ListDocumentsByDatasets)
 	handleAPI(r, "POST", "/documents:search", []string{"document.read"}, doc.SearchAllDocuments)
 	handleAPI(r, "POST", "/datasets/{dataset}:batchDelete", []string{"document.write"}, doc.BatchDeleteDocument)
 	handleAPI(r, "GET", "/document/creators", []string{"document.read"}, doc.AllDocumentCreators)

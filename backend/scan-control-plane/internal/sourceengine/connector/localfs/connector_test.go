@@ -3,10 +3,14 @@ package localfs
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/worker"
 )
 
 func TestValidateTargetCanonicalFingerprintAndClientOnly(t *testing.T) {
@@ -33,8 +37,14 @@ func TestListFetchMapExportAndStableIDDedupe(t *testing.T) {
 	t.Parallel()
 
 	agent := newAgentStub()
-	conn := NewLocalFSConnector(agent)
+	temp := &localTempStoreStub{}
+	conn := NewLocalFSConnector(agent, WithTempObjectStore(temp))
 	ctx := context.Background()
+	stagedPath := filepath.Join(t.TempDir(), "a.md")
+	if err := os.WriteFile(stagedPath, []byte("content from staging"), 0o600); err != nil {
+		t.Fatalf("write staged file: %v", err)
+	}
+	agent.exportContentURI = "file://" + stagedPath
 
 	children, err := conn.ListChildren(ctx, connector.ListChildrenRequest{
 		TargetType: TargetTypeLocalPath,
@@ -91,7 +101,7 @@ func TestListFetchMapExportAndStableIDDedupe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("export object: %v", err)
 	}
-	if exported.ContentURI != "agent-temp://file-a" || exported.ExportedVersion != "10:5" {
+	if exported.ContentURI != "scan-temp://local-1" || exported.CleanupToken != "local-1" || exported.ExportedVersion != "10:5" || temp.objects["local-1"] != "content from staging" {
 		t.Fatalf("unexpected exported local file: %+v", exported)
 	}
 	if agent.exportCalls != 1 {
@@ -250,6 +260,59 @@ func TestPublicRootMapsVirtualPathsForBrowseAndValidation(t *testing.T) {
 	}
 }
 
+func TestPublicRootRejectsPathsOutsideMountedRoot(t *testing.T) {
+	t.Parallel()
+
+	agent := newAgentStub()
+	conn := NewLocalFSConnector(agent, WithDefaultAgentID("agent-default"), WithRecommendedRoots("/"), WithPublicRoot("/host/root"))
+
+	_, err := conn.ValidateTarget(context.Background(), connector.ValidateTargetRequest{
+		ConnectorType: ConnectorType,
+		TargetType:    TargetTypeLocalPath,
+		TargetRef:     "/escape",
+		UserID:        "user-1",
+	})
+	assertLocalErrorCode(t, err, connector.ErrorCodePermissionDenied)
+}
+
+func TestPublicRootDoesNotProbeExternalAbsolutePath(t *testing.T) {
+	t.Parallel()
+
+	agent := newAgentStub()
+	conn := NewLocalFSConnector(agent, WithDefaultAgentID("agent-default"), WithRecommendedRoots("/"), WithPublicRoot("/host/root"))
+
+	_, err := conn.ValidateTarget(context.Background(), connector.ValidateTargetRequest{
+		ConnectorType: ConnectorType,
+		TargetType:    TargetTypeLocalPath,
+		TargetRef:     "/home/sensetime/project/docs",
+		UserID:        "user-1",
+	})
+	assertLocalErrorCode(t, err, ErrorCodeTargetNotFound)
+	if agent.lastValidatePath != "/host/root/home/sensetime/project/docs" {
+		t.Fatalf("external absolute path escaped public root: %q", agent.lastValidatePath)
+	}
+}
+
+func TestPublicRootRejectsStaleExternalExportPath(t *testing.T) {
+	t.Parallel()
+
+	agent := newAgentStub()
+	conn := NewLocalFSConnector(agent, WithDefaultAgentID("agent-default"), WithRecommendedRoots("/"), WithPublicRoot("/host/root"))
+
+	_, err := conn.ExportObject(context.Background(), connector.ExportObjectRequest{
+		ObjectKey:     "local_fs:agent-default:path:/home/sensetime/project/docs/a.md",
+		SourceVersion: "10:5",
+		ProviderMeta: connector.ProviderMeta{
+			"agent_id": "agent-default",
+			"path":     "/home/sensetime/project/docs/a.md",
+		},
+	})
+	assertLocalErrorCode(t, err, connector.ErrorCodePermissionDenied)
+	if agent.exportCalls != 0 {
+		t.Fatalf("stale external path should be rejected before agent export, calls=%d", agent.exportCalls)
+	}
+}
+
 func TestSearchAndDeltaAreUnsupported(t *testing.T) {
 	t.Parallel()
 
@@ -326,6 +389,7 @@ type agentStub struct {
 	lastListPath     string
 	lastStatPath     string
 	lastExportPath   string
+	exportContentURI string
 }
 
 func newAgentStub() *agentStub {
@@ -339,6 +403,8 @@ func newAgentStub() *agentStub {
 	hostRoot := PathInfo{Path: "/host/root", NormalizedPath: "/host/root", DisplayName: "root", Exists: true, Readable: true, IsDir: true, MTimeUnixNano: 40}
 	project := PathInfo{Path: "/host/root/project-a", NormalizedPath: "/host/root/project-a", DisplayName: "project-a", Exists: true, Readable: true, IsDir: true, MTimeUnixNano: 50, ParentPath: "/host/root"}
 	readme := PathInfo{Path: "/host/root/project-a/readme.md", NormalizedPath: "/host/root/project-a/readme.md", DisplayName: "readme.md", Exists: true, Readable: true, SizeBytes: 6, MTimeUnixNano: 60, MimeType: "text/markdown", FileExtension: ".md", ParentPath: "/host/root/project-a"}
+	outside := PathInfo{Path: "/outside", NormalizedPath: "/outside", DisplayName: "outside", Exists: true, Readable: true, IsDir: true, MTimeUnixNano: 70}
+	escape := PathInfo{Path: "/host/root/escape", NormalizedPath: "/outside", DisplayName: "escape", Exists: true, Readable: true, IsDir: true, MTimeUnixNano: 80}
 	return &agentStub{
 		infos: map[string]PathInfo{
 			"/workspace/docs":                root,
@@ -348,6 +414,8 @@ func newAgentStub() *agentStub {
 			"/host/root":                     hostRoot,
 			"/host/root/project-a":           project,
 			"/host/root/project-a/readme.md": readme,
+			"/outside":                       outside,
+			"/host/root/escape":              escape,
 		},
 		children: map[string][]PathInfo{
 			"/workspace/docs":      {file, alias, folder},
@@ -414,13 +482,30 @@ func (a *agentStub) ExportFile(_ context.Context, req ExportFileRequest) (Export
 		return ExportedFile{}, connector.NewError(connector.ErrorCodeVersionMismatch, fmt.Sprintf("got %s", got))
 	}
 	return ExportedFile{
-		ContentURI:    "agent-temp://" + info.StableID,
+		ContentURI:    a.exportContentURI,
 		SizeBytes:     info.SizeBytes,
 		MTimeUnixNano: info.MTimeUnixNano,
 		MimeType:      info.MimeType,
 		FileExtension: info.FileExtension,
 		CleanupToken:  "cleanup-" + info.StableID,
 	}, nil
+}
+
+type localTempStoreStub struct {
+	objects map[string]string
+}
+
+func (s *localTempStoreStub) Put(_ context.Context, input worker.TempObjectInput) (worker.TempObject, error) {
+	if s.objects == nil {
+		s.objects = map[string]string{}
+	}
+	content, err := io.ReadAll(input.Reader)
+	if err != nil {
+		return worker.TempObject{}, err
+	}
+	token := "local-" + strconv.Itoa(len(s.objects)+1)
+	s.objects[token] = string(content)
+	return worker.TempObject{URI: "scan-temp://" + token, CleanupToken: token, SizeBytes: int64(len(content))}, nil
 }
 
 func localObjectKeys(items []connector.RawObject) []string {

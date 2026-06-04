@@ -8,7 +8,7 @@ import (
 
 type PartialCrawlStrategy struct {
 	*FullCrawlStrategy
-	objectKey string
+	fetchOne bool
 }
 
 func NewPartialCrawlStrategy(input strategyInput) *PartialCrawlStrategy {
@@ -16,15 +16,15 @@ func NewPartialCrawlStrategy(input strategyInput) *PartialCrawlStrategy {
 	full := NewFullCrawlStrategy(input)
 	full.builder = newCoverageBuilder(connector.ScopeTypePartial, input.claim.ScopeRef)
 	full.recursive = input.spec.SupportsRecursiveFetch
-	objectKey := firstScopeValue(input.claim.ScopeRef, "object_key")
+	fetchOne := firstScopeValue(input.claim.ScopeRef, "object_key", "path") != ""
 	if !full.recursive {
 		full.queue = partialQueue(input.binding.TargetRef, input.binding.TreeKey, input.claim.ScopeRef)
 	}
-	return &PartialCrawlStrategy{FullCrawlStrategy: full, objectKey: objectKey}
+	return &PartialCrawlStrategy{FullCrawlStrategy: full, fetchOne: fetchOne}
 }
 
 func (s *PartialCrawlStrategy) NextRequest(ctx context.Context, state CrawlLoopState) (CrawlRequest, bool, error) {
-	if s.objectKey != "" && !s.recursive {
+	if s.fetchOne && !s.recursive {
 		if s.done {
 			return CrawlRequest{}, true, nil
 		}
@@ -44,7 +44,7 @@ func (s *PartialCrawlStrategy) ObservePage(ctx context.Context, page connector.R
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if s.recursive || s.objectKey != "" {
+	if s.recursive || s.fetchOne {
 		s.observePage(page)
 		return nil
 	}

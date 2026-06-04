@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
 )
 
@@ -22,6 +23,9 @@ func (e *DBSourceTreeQueryEngine) ListChildren(ctx context.Context, req SourceTr
 	binding, err := e.repo.GetBinding(ctx, req.SourceID, req.BindingID)
 	if err != nil {
 		return TreeNodePage{}, mapStoreError(err)
+	}
+	if !req.UseCache {
+		return e.listLiveChildren(ctx, req, binding, listMode)
 	}
 	treeKey := req.TreeKey
 	if treeKey == "" {
@@ -46,6 +50,53 @@ func (e *DBSourceTreeQueryEngine) ListChildren(ctx context.Context, req SourceTr
 		return TreeNodePage{}, NewError(ErrCodeResultTooLarge, "current level has more items than max_items")
 	}
 	return objectPage(items, nextCursor, hasMore, listMode == ListModeAllCurrentLevel), nil
+}
+
+func (e *DBSourceTreeQueryEngine) listLiveChildren(ctx context.Context, req SourceTreeChildrenRequest, binding store.Binding, listMode string) (TreeNodePage, error) {
+	if e.registry == nil {
+		return TreeNodePage{}, NewError(ErrCodeInternal, "source tree connector registry is not configured")
+	}
+	conn, err := e.registry.Get(connector.ConnectorType(binding.ConnectorType))
+	if err != nil {
+		return TreeNodePage{}, mapConnectorError(err)
+	}
+	pageSize := normalizePageSize(req.PageSize, sourceLiveLimits(e.limits, conn.Spec()))
+	rawPage, err := conn.ListChildren(ctx, connector.ListChildrenRequest{
+		TargetType:       connector.TargetType(binding.TargetType),
+		TargetRef:        binding.TargetRef,
+		NodeRef:          liveSourceNodeRef(req, binding),
+		ListMode:         connector.ListMode(listMode),
+		Cursor:           req.Cursor,
+		PageSize:         pageSize,
+		MaxItems:         req.MaxItems,
+		AgentID:          binding.AgentID,
+		AuthConnectionID: binding.AuthConnectionID,
+		ProviderOptions:  liveSourceProviderOptions(binding.ProviderOptions, req.ProviderOptions),
+	})
+	if err != nil {
+		return TreeNodePage{}, mapConnectorError(err)
+	}
+	nodes := make([]TreeNode, 0, len(rawPage.Items))
+	for _, raw := range rawPage.Items {
+		normalized, err := conn.MapObject(ctx, raw)
+		if err != nil {
+			return TreeNodePage{}, mapConnectorError(err)
+		}
+		if normalized.IsDocument && !req.IncludeDocuments {
+			continue
+		}
+		if normalized.IsContainer && !req.IncludeContainers {
+			continue
+		}
+		nodes = append(nodes, liveSourceNode(req.SourceID, binding, raw, normalized))
+	}
+	return TreeNodePage{
+		Items:        nodes,
+		NextCursor:   rawPage.NextCursor,
+		HasMore:      rawPage.HasMore,
+		ListComplete: rawPage.ListComplete,
+		SearchMode:   SearchModeConnector,
+	}, nil
 }
 
 func (e *DBSourceTreeQueryEngine) listObjects(ctx context.Context, req SourceTreeChildrenRequest, treeKey, parentKey string, pageSize int) ([]ObjectWithState, string, bool, error) {
@@ -120,6 +171,47 @@ func normalizeSourceNodeKey(value string, binding store.Binding) string {
 		return "feishu:" + value
 	}
 	return value
+}
+
+func liveSourceNodeRef(req SourceTreeChildrenRequest, binding store.Binding) string {
+	for _, ref := range []string{req.NodeRef, req.ParentRef, req.ParentKey, req.Key} {
+		if nodeRef := normalizeLiveSourceNodeRef(ref, binding); nodeRef != "" {
+			return nodeRef
+		}
+	}
+	return ""
+}
+
+func normalizeLiveSourceNodeRef(value string, binding store.Binding) string {
+	value = normalizeSourceNodeKey(value, binding)
+	if value == "" || value == binding.TreeKey || value == binding.TargetRef {
+		return ""
+	}
+	if binding.ConnectorType == "feishu" && strings.HasPrefix(value, "feishu:") {
+		return strings.TrimPrefix(value, "feishu:")
+	}
+	return value
+}
+
+func liveSourceProviderOptions(bindingOptions store.JSON, requestOptions map[string]any) connector.ProviderOptions {
+	out := connector.ProviderOptions(store.CloneJSON(bindingOptions))
+	if out == nil {
+		out = connector.ProviderOptions{}
+	}
+	for key, value := range requestOptions {
+		out[key] = value
+	}
+	return out
+}
+
+func sourceLiveLimits(limits TreeQueryLimits, spec connector.ConnectorSpec) TreeQueryLimits {
+	if spec.MaxPageSize > 0 && spec.MaxPageSize < limits.MaxPageSize {
+		limits.MaxPageSize = spec.MaxPageSize
+	}
+	if limits.DefaultPageSize > limits.MaxPageSize {
+		limits.DefaultPageSize = limits.MaxPageSize
+	}
+	return limits
 }
 
 func shouldExpandBindingRoot(req SourceTreeChildrenRequest, binding store.Binding, parentKey string) bool {

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	sourceengine "github.com/lazymind/scan_control_plane/internal/sourceengine/source"
 	statepkg "github.com/lazymind/scan_control_plane/internal/sourceengine/state"
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
 )
@@ -44,7 +45,7 @@ func TestGenerateTasksSkipsContainersAndUnselectableStates(t *testing.T) {
 	if task.Status != TaskStatusPending || !task.NextRunAt.Equal(now) {
 		t.Fatalf("generated task should be pending and immediately due: %+v", task)
 	}
-	if repo.states["doc"].ActiveTaskID != task.TaskID || repo.states["doc"].ParseQueueState != statepkg.ParseQueueStateQueued {
+	if repo.states["doc"].ActiveTaskID != task.TaskID || repo.states["doc"].ParseQueueState != statepkg.ParseQueueStateQueued || repo.states["doc"].DocumentID == "" {
 		t.Fatalf("accepted state was not linked to task: %+v", repo.states["doc"])
 	}
 	if repo.states["folder"].ActiveTaskID != "" || repo.states["blocked"].ActiveTaskID != "" {
@@ -125,6 +126,81 @@ func TestGenerateTasksRejectsManualRequestOverObjectLimit(t *testing.T) {
 	}
 	if len(repo.tasks) != 0 {
 		t.Fatalf("manual over-limit request should not create tasks: %+v", repo.tasks)
+	}
+}
+
+func TestGenerateTasksQueuesManualSyncForSelectedPath(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	repo := newPlannerStore(now)
+	syncer := &manualSyncSchedulerStub{}
+	planner := NewDBTaskPlanner(
+		repo,
+		WithClock(func() time.Time { return now }),
+		WithIDGenerator(repo.nextID),
+		WithManualSyncScheduler(syncer),
+	)
+
+	result, err := planner.GenerateTasks(ctx, GenerateRequest{
+		CallerID:  "user-1",
+		TenantID:  "tenant-1",
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		Mode:      "partial",
+		Paths:     []string{"/workspace/docs/111.txt"},
+	})
+	if err != nil {
+		t.Fatalf("generate selected path: %v", err)
+	}
+	if result.RequestedCount != 1 || result.AcceptedCount != 1 || result.QueuedSyncCount != 1 || len(result.RunIDs) != 1 {
+		t.Fatalf("expected one queued sync run, got %+v", result)
+	}
+	if len(repo.tasks) != 0 {
+		t.Fatalf("selected path should queue sync before parse tasks, got %+v", repo.tasks)
+	}
+	if len(syncer.calls) != 1 {
+		t.Fatalf("expected one sync call, got %+v", syncer.calls)
+	}
+	call := syncer.calls[0]
+	if call.CallerID != "user-1" || call.TenantID != "tenant-1" || call.SourceID != "source-1" || call.BindingID != "binding-1" {
+		t.Fatalf("sync call did not preserve actor/source: %+v", call)
+	}
+	if call.ScopeType != "partial" || call.ScopeRef["path"] != "/workspace/docs/111.txt" {
+		t.Fatalf("selected path was not converted to partial sync scope: %+v", call)
+	}
+}
+
+func TestGenerateTasksQueuesManualSyncForTreeNodeKey(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	repo := newPlannerStore(now)
+	syncer := &manualSyncSchedulerStub{}
+	planner := NewDBTaskPlanner(
+		repo,
+		WithClock(func() time.Time { return now }),
+		WithIDGenerator(repo.nextID),
+		WithManualSyncScheduler(syncer),
+	)
+
+	_, err := planner.GenerateTasks(ctx, GenerateRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		Mode:      "partial",
+		Paths:     []string{"binding-1:local_fs:agent-1:path:/workspace/docs/111.txt"},
+	})
+	if err != nil {
+		t.Fatalf("generate selected tree node key: %v", err)
+	}
+	if len(syncer.calls) != 1 {
+		t.Fatalf("expected one sync call, got %+v", syncer.calls)
+	}
+	call := syncer.calls[0]
+	if call.ScopeType != "partial" || call.ScopeRef["object_key"] != "local_fs:agent-1:path:/workspace/docs/111.txt" {
+		t.Fatalf("tree node key should be converted to object_key scope: %+v", call)
 	}
 }
 
@@ -316,6 +392,30 @@ type plannerStore struct {
 	tasks   map[string]store.ParseTask
 	now     time.Time
 	next    int
+}
+
+type manualSyncSchedulerStub struct {
+	calls []sourceengine.TriggerSourceSyncRequest
+}
+
+func (s *manualSyncSchedulerStub) TriggerSourceSync(_ context.Context, req sourceengine.TriggerSourceSyncRequest) (sourceengine.TriggerSourceSyncResponse, error) {
+	s.calls = append(s.calls, req)
+	runID := "sync-run-" + string(rune('0'+len(s.calls)))
+	return sourceengine.TriggerSourceSyncResponse{
+		RunIDs: []string{runID},
+		JobIDs: []string{runID},
+		Intents: []sourceengine.SyncRunIntentResponse{{
+			RunID:       runID,
+			JobID:       runID,
+			SourceID:    req.SourceID,
+			BindingID:   req.BindingID,
+			Status:      store.SyncRunStatusPending,
+			TriggerType: "manual",
+			ScopeType:   req.ScopeType,
+			ScopeRef:    req.ScopeRef,
+			Created:     true,
+		}},
+	}, nil
 }
 
 func newPlannerStore(now time.Time) *plannerStore {

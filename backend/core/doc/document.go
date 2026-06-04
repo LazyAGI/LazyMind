@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -796,6 +797,68 @@ func SearchAllDocuments(w http.ResponseWriter, r *http.Request) {
 	common.ReplyJSON(w, ListDocumentsResponse{Documents: out, TotalSize: int32(total), NextPageToken: next})
 }
 
+func ListDocumentsByDatasets(w http.ResponseWriter, r *http.Request) {
+	userID := strings.TrimSpace(store.UserID(r))
+	if userID == "" {
+		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
+		return
+	}
+	var req ListDatasetDocumentsRequest
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err.Error() != "EOF" {
+			common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+	}
+
+	datasetIDs := normalizeDocumentDatasetIDs(req.DatasetIDs)
+	if len(datasetIDs) == 0 {
+		common.ReplyErr(w, "dataset_ids required", http.StatusBadRequest)
+		return
+	}
+	readableDatasetIDs, err := readableRequestedDatasetIDs(r.Context(), userID, datasetIDs)
+	if err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query datasets failed", err), http.StatusInternalServerError)
+		return
+	}
+	if len(readableDatasetIDs) == 0 {
+		common.ReplyJSON(w, ListDocumentsResponse{Documents: []Doc{}, TotalSize: 0, NextPageToken: ""})
+		return
+	}
+
+	cursor, err := parseListDatasetDocumentsPageToken(req.PageToken)
+	if err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid page_token", err), http.StatusBadRequest)
+		return
+	}
+	pageSize := int(req.PageSize)
+	if pageSize <= 0 {
+		pageSize = 10
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	rows, total, hasMore, snapshotUpdatedAt, err := loadDocumentsByDatasetIDs(r.Context(), readableDatasetIDs, strings.TrimSpace(req.Keyword), cursor, pageSize)
+	if err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query documents failed", err), http.StatusInternalServerError)
+		return
+	}
+	relPaths := buildDocumentTreeRelPaths(r.Context(), rows)
+	out := make([]Doc, 0, len(rows))
+	for _, rr := range rows {
+		rr.RelPath = relPaths[rr.DocID]
+		doc := docFromRow(rr)
+		setDocumentURI(&doc)
+		out = append(out, doc)
+	}
+	next := ""
+	if hasMore && len(rows) > 0 {
+		next = encodeListDatasetDocumentsPageToken(rows[len(rows)-1], snapshotUpdatedAt, listDatasetDocumentsSeenIDs(cursor, rows))
+	}
+	common.ReplyJSON(w, ListDocumentsResponse{Documents: out, TotalSize: int32(total), NextPageToken: next})
+}
+
 func BatchUpdateDocumentTags(w http.ResponseWriter, r *http.Request) {
 	datasetID := datasetIDFromPath(r)
 	if datasetID == "" {
@@ -1143,6 +1206,13 @@ type SearchDocumentsRequest struct {
 	Keyword     string   `json:"keyword,omitempty"`
 	KeywordList []string `json:"keyword_list,omitempty"`
 	Recursive   bool     `json:"recursive,omitempty"`
+}
+
+type ListDatasetDocumentsRequest struct {
+	DatasetIDs []string `json:"dataset_ids"`
+	PageToken  string   `json:"page_token,omitempty"`
+	PageSize   int32    `json:"page_size,omitempty"`
+	Keyword    string   `json:"keyword,omitempty"`
 }
 
 type BatchUpdateDocumentTagsRequest struct {
@@ -1658,6 +1728,23 @@ type scoredMergedDoc struct {
 	score int
 }
 
+type listDatasetDocumentsCursor struct {
+	UpdatedAt         time.Time
+	DatasetID         string
+	DocumentID        string
+	SnapshotUpdatedAt time.Time
+	SeenDocumentIDs   []string
+}
+
+type listDatasetDocumentsPageToken struct {
+	V                 int      `json:"v"`
+	UpdatedAt         string   `json:"updated_at"`
+	DatasetID         string   `json:"dataset_id"`
+	DocumentID        string   `json:"document_id"`
+	SnapshotUpdatedAt string   `json:"snapshot_updated_at"`
+	SeenDocumentIDs   []string `json:"seen_document_ids,omitempty"`
+}
+
 func scoreMergedDocuments(keyword string, rows []mergedDocRow) []scoredMergedDoc {
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" || len(rows) == 0 {
@@ -1724,6 +1811,249 @@ func pageScoredMergedDocuments(scored []scoredMergedDoc, offset, pageSize int) [
 		out = append(out, item.row)
 	}
 	return out
+}
+
+func loadDocumentsByDatasetIDs(ctx context.Context, datasetIDs []string, keyword string, cursor *listDatasetDocumentsCursor, limit int) ([]mergedDocRow, int64, bool, time.Time, error) {
+	if len(datasetIDs) == 0 {
+		return []mergedDocRow{}, 0, false, time.Time{}, nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	maxInt := int(^uint(0) >> 1)
+	rows, _, err := loadMergedDocumentsBySearch(ctx, datasetIDs, "", nil, maxInt, 0)
+	if err != nil {
+		return nil, 0, false, time.Time{}, err
+	}
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if mergedDocNameMatchesKeyword(row, keyword) {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+	}
+	sortMergedDocumentsForDatasetList(rows)
+
+	snapshotUpdatedAt := time.Time{}
+	snapshotSet := false
+	if cursor != nil {
+		snapshotUpdatedAt = cursor.SnapshotUpdatedAt
+		snapshotSet = true
+	} else if len(rows) > 0 {
+		snapshotUpdatedAt = rows[0].BaseUpdatedAt
+		snapshotSet = true
+	}
+	if snapshotSet {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if !row.BaseUpdatedAt.After(snapshotUpdatedAt) {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+	}
+
+	total := int64(len(rows))
+	if cursor != nil {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if mergedDocRowAfterCursor(row, *cursor) {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+	}
+	if cursor != nil && len(cursor.SeenDocumentIDs) > 0 {
+		seen := make(map[string]struct{}, len(cursor.SeenDocumentIDs))
+		for _, docID := range cursor.SeenDocumentIDs {
+			if docID = strings.TrimSpace(docID); docID != "" {
+				seen[docID] = struct{}{}
+			}
+		}
+		filtered := rows[:0]
+		for _, row := range rows {
+			if _, ok := seen[row.DocID]; ok {
+				continue
+			}
+			filtered = append(filtered, row)
+		}
+		rows = filtered
+	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	out := make([]mergedDocRow, 0, len(rows))
+	out = append(out, rows...)
+	return out, total, hasMore, snapshotUpdatedAt, nil
+}
+
+func sortMergedDocumentsForDatasetList(rows []mergedDocRow) {
+	sort.Slice(rows, func(i, j int) bool {
+		if !rows[i].BaseUpdatedAt.Equal(rows[j].BaseUpdatedAt) {
+			return rows[i].BaseUpdatedAt.After(rows[j].BaseUpdatedAt)
+		}
+		if rows[i].DatasetID != rows[j].DatasetID {
+			return rows[i].DatasetID < rows[j].DatasetID
+		}
+		return rows[i].DocID < rows[j].DocID
+	})
+}
+
+func mergedDocRowAfterCursor(row mergedDocRow, cursor listDatasetDocumentsCursor) bool {
+	if !row.BaseUpdatedAt.Equal(cursor.UpdatedAt) {
+		return row.BaseUpdatedAt.Before(cursor.UpdatedAt)
+	}
+	if row.DatasetID != cursor.DatasetID {
+		return row.DatasetID > cursor.DatasetID
+	}
+	return row.DocID > cursor.DocumentID
+}
+
+func mergedDocNameMatchesKeyword(row mergedDocRow, keyword string) bool {
+	kw := strings.ToLower(strings.TrimSpace(keyword))
+	if kw == "" {
+		return true
+	}
+	if strings.Contains(strings.ToLower(strings.TrimSpace(row.DisplayName)), kw) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(strings.TrimSpace(row.Filename)), kw)
+}
+
+func encodeListDatasetDocumentsPageToken(row mergedDocRow, snapshotUpdatedAt time.Time, seenDocumentIDs []string) string {
+	payload := listDatasetDocumentsPageToken{
+		V:                 1,
+		UpdatedAt:         row.BaseUpdatedAt.UTC().Format(time.RFC3339Nano),
+		DatasetID:         row.DatasetID,
+		DocumentID:        row.DocID,
+		SnapshotUpdatedAt: snapshotUpdatedAt.UTC().Format(time.RFC3339Nano),
+		SeenDocumentIDs:   seenDocumentIDs,
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	return base64.RawStdEncoding.EncodeToString(b)
+}
+
+func parseListDatasetDocumentsPageToken(token string) (*listDatasetDocumentsCursor, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, nil
+	}
+	decoders := []*base64.Encoding{
+		base64.RawStdEncoding,
+		base64.StdEncoding,
+		base64.RawURLEncoding,
+		base64.URLEncoding,
+	}
+	var payload listDatasetDocumentsPageToken
+	for _, decoder := range decoders {
+		b, err := decoder.DecodeString(token)
+		if err != nil {
+			continue
+		}
+		if err := json.Unmarshal(b, &payload); err != nil {
+			continue
+		}
+		break
+	}
+	if strings.TrimSpace(payload.UpdatedAt) == "" || strings.TrimSpace(payload.DatasetID) == "" || strings.TrimSpace(payload.DocumentID) == "" || strings.TrimSpace(payload.SnapshotUpdatedAt) == "" {
+		return nil, fmt.Errorf("invalid cursor")
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, payload.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	snapshotUpdatedAt, err := time.Parse(time.RFC3339Nano, payload.SnapshotUpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &listDatasetDocumentsCursor{
+		UpdatedAt:         updatedAt,
+		DatasetID:         strings.TrimSpace(payload.DatasetID),
+		DocumentID:        strings.TrimSpace(payload.DocumentID),
+		SnapshotUpdatedAt: snapshotUpdatedAt,
+		SeenDocumentIDs:   normalizeDocumentDatasetIDs(payload.SeenDocumentIDs),
+	}, nil
+}
+
+func listDatasetDocumentsSeenIDs(cursor *listDatasetDocumentsCursor, rows []mergedDocRow) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(rows))
+	if cursor != nil {
+		for _, docID := range cursor.SeenDocumentIDs {
+			docID = strings.TrimSpace(docID)
+			if docID == "" {
+				continue
+			}
+			if _, ok := seen[docID]; ok {
+				continue
+			}
+			seen[docID] = struct{}{}
+			out = append(out, docID)
+		}
+	}
+	for _, row := range rows {
+		docID := strings.TrimSpace(row.DocID)
+		if docID == "" {
+			continue
+		}
+		if _, ok := seen[docID]; ok {
+			continue
+		}
+		seen[docID] = struct{}{}
+		out = append(out, docID)
+	}
+	return out
+}
+
+func normalizeDocumentDatasetIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func readableRequestedDatasetIDs(ctx context.Context, userID string, datasetIDs []string) ([]string, error) {
+	if len(datasetIDs) == 0 {
+		return nil, nil
+	}
+	var datasets []orm.Dataset
+	if err := store.DB().WithContext(ctx).Where("id IN ? AND deleted_at IS NULL", datasetIDs).Find(&datasets).Error; err != nil {
+		return nil, err
+	}
+	byID := make(map[string]orm.Dataset, len(datasets))
+	for _, ds := range datasets {
+		byID[ds.ID] = ds
+	}
+	out := make([]string, 0, len(datasetIDs))
+	for _, id := range datasetIDs {
+		ds, ok := byID[id]
+		if !ok {
+			continue
+		}
+		if canAccessDataset(&ds, userID, acl.PermissionDatasetRead) {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 
 func boundedLevenshtein(a, b string, _ int) int {

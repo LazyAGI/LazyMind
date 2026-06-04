@@ -28,6 +28,7 @@ type Store interface {
 	GetDocumentState(ctx context.Context, sourceID, bindingID, objectKey string) (store.DocumentState, error)
 	GetDocument(ctx context.Context, sourceID, bindingID, objectKey string) (store.Document, error)
 	GetObject(ctx context.Context, sourceID, bindingID, objectKey string) (store.SourceObject, error)
+	UpsertObjects(ctx context.Context, objects []store.SourceObject) error
 	SaveParseTask(ctx context.Context, task store.ParseTask) error
 	SupersedeTask(ctx context.Context, taskID string, reason string) error
 	FailTask(ctx context.Context, taskID string, reason string) error

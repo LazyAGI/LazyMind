@@ -261,6 +261,34 @@ func TestDefaultFeishuAPIClientDriveRootChildrenParseOpenAPIList(t *testing.T) {
 	}
 }
 
+func TestDefaultFeishuAPIClientExportsDriveDocumentRawContent(t *testing.T) {
+	t.Parallel()
+
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/open-apis/docx/v1/documents/docx-token/raw_content":
+			writeFeishuOpenAPIData(t, w, map[string]string{"content": "docx markdown"})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := newHTTPFeishuAPITestClient(t, server.URL)
+	exported, err := client.ExportDriveDocumentMarkdown(context.Background(), "user-token", "docx-token", "rev-1")
+	if err != nil {
+		t.Fatalf("export drive document raw content: %v", err)
+	}
+	if string(exported.Content) != "docx markdown" || exported.FileExtension != ".md" || exported.MimeType != "text/markdown" || exported.ExportedVersion != "rev-1" {
+		t.Fatalf("unexpected exported content: %+v", exported)
+	}
+	if len(paths) != 1 || paths[0] != "/open-apis/docx/v1/documents/docx-token/raw_content" {
+		t.Fatalf("unexpected request sequence: %v", paths)
+	}
+}
+
 func TestDefaultFeishuAPIClientMapsScopeMissing(t *testing.T) {
 	t.Parallel()
 
