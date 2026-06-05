@@ -10,7 +10,9 @@ import uuid
 from typing import Optional
 
 import httpx
-from sqlalchemy import delete, insert, select
+from sqlalchemy import delete, insert, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from lazymind.config import config
 import lazymind.router.config  # noqa: F401 — registers router config keys
@@ -21,8 +23,45 @@ from lazymind.router.db.models import (
     RouterChildProcess,
     RouterInstance,
 )
+from lazymind.router.db.client import get_engine
 
 logger = logging.getLogger(__name__)
+
+
+def _is_sqlite_engine() -> bool:
+    """Return True if the current DB engine is SQLite."""
+    return get_engine().dialect.name == 'sqlite'
+
+
+def _upsert_instance(instance_id: str, host: str, pid: int,
+                     port_range_start: int, port_range_end: int):
+    """Build a dialect-appropriate INSERT ... ON CONFLICT DO NOTHING for RouterInstance."""
+    values = dict(instance_id=instance_id, host=host, pid=pid,
+                  port_range_start=port_range_start, port_range_end=port_range_end)
+    if _is_sqlite_engine():
+        return sqlite_insert(RouterInstance).values(**values).on_conflict_do_nothing(
+            index_elements=['instance_id']
+        )
+    return pg_insert(RouterInstance).values(**values).on_conflict_do_nothing(
+        index_elements=['instance_id']
+    )
+
+
+def _upsert_child_process(instance_id: str, algo_id: str, host: str,
+                           port: int, pid: int):
+    """Build a dialect-appropriate UPSERT for RouterChildProcess."""
+    values = dict(instance_id=instance_id, algorithm_id=algo_id,
+                  host=host, port=port, pid=pid, status='starting', failures=0)
+    set_vals = {'pid': pid, 'status': 'starting', 'failures': 0}
+    if _is_sqlite_engine():
+        return sqlite_insert(RouterChildProcess).values(**values).on_conflict_do_update(
+            index_elements=['host', 'port'],
+            set_=set_vals,
+        )
+    return pg_insert(RouterChildProcess).values(**values).on_conflict_do_update(
+        constraint='uq_router_child_processes_host_port',
+        set_=set_vals,
+    )
 
 
 class ProcessManager:
@@ -112,14 +151,13 @@ class ProcessManager:
 
             try:
                 async with AsyncSessionLocal() as session:
-                    stmt = insert(RouterInstance).values(
+                    stmt = _upsert_instance(
                         instance_id=self._instance_id,
                         host=self._host,
                         pid=os.getpid(),
                         port_range_start=claimed_start,
                         port_range_end=claimed_end,
                     )
-                    stmt = stmt.on_conflict_do_nothing(index_elements=['instance_id'])
                     await session.execute(stmt)
                     await session.commit()
 
@@ -214,18 +252,12 @@ class ProcessManager:
         self._port_algo[(self._host, port)] = algo_id
 
         async with AsyncSessionLocal() as session:
-            stmt = insert(RouterChildProcess).values(
+            stmt = _upsert_child_process(
                 instance_id=self._instance_id,
-                algorithm_id=algo_id,
+                algo_id=algo_id,
                 host=self._host,
                 port=port,
                 pid=proc.pid,
-                status='starting',
-                failures=0,
-            )
-            stmt = stmt.on_conflict_do_update(
-                constraint='uq_router_child_processes_host_port',
-                set_={'pid': proc.pid, 'status': 'starting', 'failures': 0},
             )
             await session.execute(stmt)
             await session.commit()

@@ -63,9 +63,8 @@ class ABRouter:
 
         # Filter to only active algorithms
         async with AsyncSessionLocal() as session:
-            active_ids = {
-                r.id
-                for r in (
+            active_ids = set(
+                (
                     await session.execute(
                         select(RouterAlgorithm.id).where(
                             RouterAlgorithm.status == 'active',
@@ -73,7 +72,7 @@ class ABRouter:
                         )
                     )
                 ).scalars()
-            }
+            )
 
         valid_weights = {k: v for k, v in weights.items() if k in active_ids}
         if not valid_weights:
