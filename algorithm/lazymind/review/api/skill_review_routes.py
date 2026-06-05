@@ -26,6 +26,8 @@ def shutdown_background_executor() -> None:
 
 @router.post('/api/chat/skill-review', summary='Run skill review for chat histories in a time range')
 async def skill_review(payload: SkillReviewRequest):
+    lazyllm.globals._init_sid(payload.requestid)
+    lazyllm.locals._init_sid(payload.requestid)
     try:
         llm, emb = await asyncio.wait_for(
             asyncio.to_thread(_build_and_check_models, payload),
@@ -55,8 +57,6 @@ async def skill_review(payload: SkillReviewRequest):
 
 
 def _build_and_check_models(payload: SkillReviewRequest):
-    lazyllm.globals._init_sid(payload.requestid)
-    lazyllm.locals._init_sid(payload.requestid)
     inject_model_config(payload.model_configs)
     llm = AutoModel(model='llm')
     emb = AutoModel(model='embed_main')

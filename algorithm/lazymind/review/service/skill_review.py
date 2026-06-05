@@ -5,7 +5,6 @@ from datetime import datetime
 from pathlib import Path
 from tempfile import gettempdir
 from typing import Any
-import lazyllm
 from lazyllm import AutoModel, LOG
 
 from lazymind.review.skill_review.config import DEFAULT_REPORT_DIR_NAME
@@ -70,8 +69,7 @@ def run_skill_review(
     emb: AutoModel | None = None,
     artifact_dir: str | Path | None = None,
 ) -> SkillReviewBatchResult:
-    lazyllm.globals._init_sid(request.requestid)
-    lazyllm.locals._init_sid(request.requestid)
+
     requestid = request.requestid
     work_dir = _resolve_artifact_dir(
         artifact_dir if artifact_dir is not None else request.artifact_dir,
