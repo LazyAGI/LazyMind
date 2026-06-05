@@ -232,6 +232,178 @@ func TestSourceTreeListChildrenUsesLiveConnectorByDefault(t *testing.T) {
 	}
 }
 
+func TestSourceTreeLiveRootRequestUsesTreeKeyNodeRef(t *testing.T) {
+	t.Parallel()
+
+	spy := &treeConnectorSpy{connectorType: connector.ConnectorType("feishu")}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	repo := newTreeReadRepo()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{{
+		BindingID:        "binding-1",
+		SourceID:         "source-1",
+		TreeKey:          "feishu:wiki:space-1:node-root",
+		ConnectorType:    "feishu",
+		TargetType:       string(treeTestTargetType),
+		TargetRef:        "wiki:space-1:node-root",
+		AuthConnectionID: "auth-1",
+		Status:           "ACTIVE",
+	}}
+	engine := NewDBSourceTreeQueryEngine(
+		repo,
+		TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 100, MaxAllCurrentLevelItems: 10},
+		WithSourceTreeConnectorRegistry(registry),
+	)
+
+	_, err = engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		TreeKey:   "feishu:wiki:space-1:node-root",
+		ParentKey: "",
+		PageSize:  40,
+	})
+	if err != nil {
+		t.Fatalf("list live root children: %v", err)
+	}
+	if len(spy.listRequests) != 1 || spy.listRequests[0].NodeRef != "wiki:space-1:node-root" {
+		t.Fatalf("live root request should pass tree_key as provider node_ref, got %+v", spy.listRequests)
+	}
+}
+
+func TestSourceTreeLiveWikiRootFallsBackToBindingTargetWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	spy := &treeConnectorSpy{
+		connectorType: connector.ConnectorType("feishu"),
+		childrenSet:   true,
+		children:      []connector.RawObject{},
+		fetchPage: connector.RawObjectPage{Items: []connector.RawObject{
+			rawTreeObject("feishu:wiki:space-1:node-root", "", "Root Wiki", true, false),
+		}},
+	}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	repo := newTreeReadRepo()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{{
+		BindingID:         "binding-1",
+		SourceID:          "source-1",
+		TreeKey:           "feishu:wiki:space-1:node-root",
+		ConnectorType:     "feishu",
+		TargetType:        "wiki_node",
+		TargetRef:         "wiki:space-1:node-root",
+		BindingGeneration: 1,
+		AuthConnectionID:  "auth-1",
+		Status:            "ACTIVE",
+	}}
+	engine := NewDBSourceTreeQueryEngine(
+		repo,
+		TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 100, MaxAllCurrentLevelItems: 10},
+		WithSourceTreeConnectorRegistry(registry),
+	)
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		TreeKey:   "feishu:wiki:space-1:node-root",
+		PageSize:  40,
+	})
+	if err != nil {
+		t.Fatalf("list live wiki root children: %v", err)
+	}
+	if len(spy.fetchRequests) != 1 {
+		t.Fatalf("expected empty live root to fetch binding target, got %d fetches", len(spy.fetchRequests))
+	}
+	gotFetch := spy.fetchRequests[0]
+	if gotFetch.ScopeType != connector.ScopeTypeWatchEvent || gotFetch.ScopeRef["target_ref"] != "wiki:space-1:node-root" {
+		t.Fatalf("unexpected root fetch request: %+v", gotFetch)
+	}
+	if page.SearchMode != SearchModeConnector || len(page.Items) != 1 {
+		t.Fatalf("unexpected fallback page: %+v", page)
+	}
+	if page.Items[0].ObjectKey != "feishu:wiki:space-1:node-root" || !page.Items[0].Selectable {
+		t.Fatalf("binding target document was not returned as selectable root: %+v", page.Items[0])
+	}
+}
+
+func TestSourceTreeLiveWikiRootPreservesBindingRootLayer(t *testing.T) {
+	t.Parallel()
+
+	spy := &treeConnectorSpy{
+		connectorType: connector.ConnectorType("feishu"),
+		childrenSet:   true,
+		children: []connector.RawObject{
+			rawTreeObject("feishu:wiki:space-1:node-child", "feishu:wiki:space-1:node-root", "Child Wiki", true, false),
+		},
+		fetchPage: connector.RawObjectPage{Items: []connector.RawObject{
+			rawTreeObject("feishu:wiki:space-1:node-root", "", "Root Wiki", true, true),
+		}},
+	}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	repo := newTreeReadRepo()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{{
+		BindingID:         "binding-1",
+		SourceID:          "source-1",
+		TreeKey:           "feishu:wiki:space-1:node-root",
+		ConnectorType:     "feishu",
+		TargetType:        "wiki_node",
+		TargetRef:         "wiki:space-1:node-root",
+		BindingGeneration: 1,
+		AuthConnectionID:  "auth-1",
+		Status:            "ACTIVE",
+	}}
+	engine := NewDBSourceTreeQueryEngine(
+		repo,
+		TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 100, MaxAllCurrentLevelItems: 10},
+		WithSourceTreeConnectorRegistry(registry),
+	)
+
+	rootPage, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		TreeKey:   "feishu:wiki:space-1:node-root",
+		PageSize:  40,
+	})
+	if err != nil {
+		t.Fatalf("list live wiki root: %v", err)
+	}
+	if len(spy.fetchRequests) != 1 {
+		t.Fatalf("expected root request to fetch binding target, got %d fetches", len(spy.fetchRequests))
+	}
+	if len(rootPage.Items) != 1 || rootPage.Items[0].ObjectKey != "feishu:wiki:space-1:node-root" {
+		t.Fatalf("root request should return binding root layer, got %+v", rootPage.Items)
+	}
+	if !rootPage.Items[0].Selectable || !rootPage.Items[0].IsDocument || !rootPage.Items[0].HasChildren {
+		t.Fatalf("dual-role wiki root should be selectable and expandable: %+v", rootPage.Items[0])
+	}
+
+	childPage, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		TreeKey:   "feishu:wiki:space-1:node-root",
+		ParentKey: "feishu:wiki:space-1:node-root",
+		PageSize:  40,
+	})
+	if err != nil {
+		t.Fatalf("list live wiki root children: %v", err)
+	}
+	if len(spy.fetchRequests) != 1 {
+		t.Fatalf("expanded root should list children without fetching root again, got %d fetches", len(spy.fetchRequests))
+	}
+	if len(childPage.Items) != 1 || childPage.Items[0].ObjectKey != "feishu:wiki:space-1:node-child" {
+		t.Fatalf("expanded root should return real children, got %+v", childPage.Items)
+	}
+}
+
 func TestSourceTreeListChildrenUsesIndexedRepoWhenUseCache(t *testing.T) {
 	t.Parallel()
 
@@ -513,16 +685,24 @@ const (
 )
 
 type treeConnectorSpy struct {
+	connectorType  connector.ConnectorType
 	supportsSearch bool
+	childrenSet    bool
 	children       []connector.RawObject
+	fetchPage      connector.RawObjectPage
 	listRequests   []connector.ListChildrenRequest
+	fetchRequests  []connector.FetchPageRequest
 	searchRequests []connector.SearchRequest
 	mapObjects     []connector.RawObject
 }
 
 func (c *treeConnectorSpy) Spec() connector.ConnectorSpec {
+	connectorType := c.connectorType
+	if connectorType == "" {
+		connectorType = treeTestConnectorType
+	}
 	return connector.ConnectorSpec{
-		ConnectorType:         treeTestConnectorType,
+		ConnectorType:         connectorType,
 		TargetTypes:           []connector.TargetType{treeTestTargetType},
 		SupportsSearch:        c.supportsSearch,
 		SupportsExportFormats: []connector.ExportFormat{connector.ExportFormatOriginal},
@@ -537,7 +717,7 @@ func (c *treeConnectorSpy) ValidateTarget(context.Context, connector.ValidateTar
 func (c *treeConnectorSpy) ListChildren(_ context.Context, req connector.ListChildrenRequest) (connector.RawObjectPage, error) {
 	c.listRequests = append(c.listRequests, req)
 	items := c.children
-	if len(items) == 0 {
+	if !c.childrenSet && len(items) == 0 {
 		items = []connector.RawObject{
 			rawTreeObject("folder-1", "", "Guides", false, true),
 			rawTreeObject("doc-1", "", "Welcome.md", true, false),
@@ -565,7 +745,11 @@ func (c *treeConnectorSpy) Search(_ context.Context, req connector.SearchRequest
 	return connector.RawObjectPage{Items: []connector.RawObject{rawTreeObject("doc-1", "", "Welcome.md", true, false)}}, nil
 }
 
-func (c *treeConnectorSpy) FetchPage(context.Context, connector.FetchPageRequest) (connector.RawObjectPage, error) {
+func (c *treeConnectorSpy) FetchPage(_ context.Context, req connector.FetchPageRequest) (connector.RawObjectPage, error) {
+	c.fetchRequests = append(c.fetchRequests, req)
+	if len(c.fetchPage.Items) > 0 || c.fetchPage.HasMore || c.fetchPage.NextCursor != "" || c.fetchPage.ListComplete {
+		return c.fetchPage, nil
+	}
 	return connector.RawObjectPage{}, connector.NewError(connector.ErrorCodeUnsupported, "not used")
 }
 

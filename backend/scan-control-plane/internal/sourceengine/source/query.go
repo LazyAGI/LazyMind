@@ -2,6 +2,8 @@ package source
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 	scheduleengine "github.com/lazymind/scan_control_plane/internal/sourceengine/schedule"
@@ -122,29 +124,49 @@ func (e *DefaultEngine) syncBindings(ctx context.Context, req TriggerSourceSyncR
 func (e *DefaultEngine) enqueueManualSyncs(ctx context.Context, req TriggerSourceSyncRequest, bindings []store.Binding) (TriggerSourceSyncResponse, error) {
 	resp := TriggerSourceSyncResponse{RunIDs: []string{}, JobIDs: []string{}, Intents: []SyncRunIntentResponse{}}
 	for _, binding := range bindings {
-		intent, err := e.schedule.EnqueueManualSync(ctx, scheduleengine.ManualSyncRequest{
-			RequestID: req.RequestID,
-			SourceID:  binding.SourceID,
-			BindingID: binding.BindingID,
-			ScopeType: connector.ScopeType(req.ScopeType),
-			ScopeRef:  syncScopeRef(req.ScopeRef),
-		})
-		if err != nil {
-			return resp, mapStoreError(err)
+		for idx, scopeRef := range syncScopeRefs(req.ScopeRef, binding.BindingID) {
+			intent, err := e.schedule.EnqueueManualSync(ctx, scheduleengine.ManualSyncRequest{
+				RequestID: scopedSyncRequestID(req.RequestID, idx),
+				SourceID:  binding.SourceID,
+				BindingID: binding.BindingID,
+				ScopeType: connector.ScopeType(req.ScopeType),
+				ScopeRef:  scopeRef,
+			})
+			if err != nil {
+				return resp, mapStoreError(err)
+			}
+			if intent.Run.RunID == "" {
+				continue
+			}
+			resp.RunIDs = append(resp.RunIDs, intent.Run.RunID)
+			resp.JobIDs = append(resp.JobIDs, intent.Run.RunID)
+			resp.Intents = append(resp.Intents, syncRunIntentToResponse(intent))
 		}
-		if intent.Run.RunID == "" {
-			continue
-		}
-		resp.RunIDs = append(resp.RunIDs, intent.Run.RunID)
-		resp.JobIDs = append(resp.JobIDs, intent.Run.RunID)
-		resp.Intents = append(resp.Intents, syncRunIntentToResponse(intent))
 	}
 	return resp, nil
 }
 
 func syncScopeRef(values map[string]any) connector.ScopeRef {
-	if len(values) == 0 {
+	refs := syncScopeRefs(values, "")
+	if len(refs) == 0 {
 		return nil
+	}
+	return refs[0]
+}
+
+func syncScopeRefs(values map[string]any, bindingID string) []connector.ScopeRef {
+	if len(values) == 0 {
+		return []connector.ScopeRef{nil}
+	}
+	if scopes := scopeRefListFromAny(values["scopes"], bindingID); len(scopes) > 0 {
+		return scopes
+	}
+	if keys := stringListFromAny(values["object_keys"]); len(keys) > 0 {
+		out := make([]connector.ScopeRef, 0, len(keys))
+		for _, key := range keys {
+			out = append(out, connector.ScopeRef{"object_key": key})
+		}
+		return out
 	}
 	out := make(connector.ScopeRef, len(values))
 	for key, value := range values {
@@ -152,7 +174,126 @@ func syncScopeRef(values map[string]any) connector.ScopeRef {
 			out[key] = s
 		}
 	}
+	return []connector.ScopeRef{out}
+}
+
+func scopeRefListFromAny(value any, bindingID string) []connector.ScopeRef {
+	values, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]connector.ScopeRef, 0, len(values))
+	for _, item := range values {
+		scope, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		ref := syncScopeRefFromMap(scope, bindingID)
+		if len(ref) > 0 {
+			out = append(out, ref)
+		}
+	}
 	return out
+}
+
+func syncScopeRefFromMap(scope map[string]any, bindingID string) connector.ScopeRef {
+	ref := connector.ScopeRef{}
+	objectKey := firstSourceNonBlank(
+		stringFromAny(scope["object_key"]),
+		objectKeyFromSourceTreeKey(stringFromAny(scope["key"]), bindingID),
+	)
+	nodeRef := firstSourceNonBlank(
+		stringFromAny(scope["node_ref"]),
+		stringFromAny(scope["path"]),
+		objectKey,
+	)
+	if boolFromAny(scope["is_container"]) {
+		if nodeRef != "" {
+			ref["node_ref"] = nodeRef
+		}
+		if objectKey != "" {
+			ref["subtree_root"] = objectKey
+		}
+		return ref
+	}
+	if objectKey != "" {
+		ref["object_key"] = objectKey
+		return ref
+	}
+	if path := strings.TrimSpace(stringFromAny(scope["path"])); path != "" {
+		ref["path"] = path
+		return ref
+	}
+	if nodeRef != "" {
+		ref["node_ref"] = nodeRef
+	}
+	return ref
+}
+
+func objectKeyFromSourceTreeKey(key, bindingID string) string {
+	key = strings.TrimSpace(key)
+	bindingID = strings.TrimSpace(bindingID)
+	if key == "" || bindingID == "" || !strings.HasPrefix(key, bindingID+":") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(key, bindingID+":"))
+}
+
+func firstSourceNonBlank(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func stringFromAny(value any) string {
+	if s, ok := value.(string); ok {
+		return s
+	}
+	return ""
+}
+
+func boolFromAny(value any) bool {
+	if b, ok := value.(bool); ok {
+		return b
+	}
+	return false
+}
+
+func stringListFromAny(value any) []string {
+	switch v := value.(type) {
+	case []string:
+		return compactSourceStrings(v)
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return compactSourceStrings(out)
+	default:
+		return nil
+	}
+}
+
+func compactSourceStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func scopedSyncRequestID(requestID string, index int) string {
+	if requestID == "" || index == 0 {
+		return requestID
+	}
+	return fmt.Sprintf("%s-%d", requestID, index+1)
 }
 
 func syncRunIntentToResponse(intent scheduleengine.SyncRunIntent) SyncRunIntentResponse {

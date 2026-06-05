@@ -21,7 +21,12 @@ func (c *FeishuConnector) validateFetchRequest(req connector.FetchPageRequest) e
 
 func (c *FeishuConnector) fetchOnePage(ctx context.Context, token string, req connector.FetchPageRequest) (connector.RawObjectPage, error) {
 	switch req.ScopeType {
-	case connector.ScopeTypeFull, connector.ScopeTypePartial:
+	case connector.ScopeTypeFull:
+		return c.fetchListPage(ctx, token, req)
+	case connector.ScopeTypePartial:
+		if req.TargetType == TargetTypeWikiNode && scopeNodeRef(req.ScopeRef) != "" {
+			return c.fetchWatchObject(ctx, token, req)
+		}
 		return c.fetchListPage(ctx, token, req)
 	case connector.ScopeTypeWatchEvent:
 		return c.fetchWatchObject(ctx, token, req)
@@ -37,7 +42,7 @@ func (c *FeishuConnector) fetchListPage(ctx context.Context, token string, req c
 	if scoped := scopeNodeRef(req.ScopeRef); scoped != "" {
 		targetRef = scoped
 	}
-	page, err := c.listProviderPage(ctx, token, req.TargetType, req.TargetRef, targetRef, req.Cursor, req.PageSize)
+	page, err := c.listProviderPage(ctx, token, req.TargetType, req.TargetRef, targetRef, req.Cursor, providerPageSize(req.TargetType, targetRef, req.PageSize))
 	if err != nil {
 		return connector.RawObjectPage{}, err
 	}

@@ -67,12 +67,22 @@ import {
 
 const { Text } = Typography;
 
+const SCAN_TREE_PAGE_SIZE = 50;
+
 type SyncTreeDataNode = DataNode & {
   treeKey?: string;
   objectKey?: string;
-  targetRef?: string;
   nodeRef?: string;
   childrenLoaded?: boolean;
+};
+
+type SyncGenerateScope = {
+  key?: string;
+  object_key?: string;
+  node_ref?: string;
+  path?: string;
+  is_document?: boolean;
+  is_container?: boolean;
 };
 
 const fallbackSources: Record<
@@ -394,7 +404,7 @@ function collectScanTreeFileKeys(nodes: ScanV2TreeNode[]): string[] {
       if (node.children?.length) {
         walk(node.children);
       }
-      if (node.selectable === false || node.is_container === true) {
+      if (!isSelectableScanTreeDocument(node)) {
         return;
       }
       keys.push(`${node.object_key || node.key}`);
@@ -404,8 +414,30 @@ function collectScanTreeFileKeys(nodes: ScanV2TreeNode[]): string[] {
   return keys;
 }
 
+function collectScanTreeNodesByKey(nodes: ScanV2TreeNode[]) {
+  const byKey = new Map<string, ScanV2TreeNode>();
+  const walk = (items: ScanV2TreeNode[]) => {
+    items.forEach((node) => {
+      byKey.set(getScanTreeNodeKey(node), node);
+      if (node.children?.length) {
+        walk(node.children);
+      }
+    });
+  };
+  walk(nodes);
+  return byKey;
+}
+
+function isSelectableScanTreeDocument(node: ScanV2TreeNode) {
+  return node.selectable !== false && node.is_document === true;
+}
+
 function getScanTreeNodeKey(node: ScanV2TreeNode) {
   return `${node.object_key || node.key}`;
+}
+
+function getScanTreeNodeParentKey(node: ScanV2TreeNode) {
+  return `${node.parent_key || ""}`.trim();
 }
 
 function getScanTreeNodePage(payload: unknown) {
@@ -432,17 +464,10 @@ function getScanTreeNodeMergeKeys(node: ScanV2TreeNode) {
     getScanTreeNodeKey(node),
     node.key,
     node.object_key,
-    node.target_ref,
     node.node_ref,
   ]
     .map((key) => `${key || ""}`.trim())
     .filter(Boolean);
-}
-
-function uniqueScanTreeKeys(keys: Array<string | undefined>) {
-  return Array.from(
-    new Set(keys.map((key) => `${key || ""}`.trim()).filter(Boolean)),
-  );
 }
 
 function normalizeLazyScanTreeNodes(nodes: ScanV2TreeNode[]) {
@@ -451,6 +476,51 @@ function normalizeLazyScanTreeNodes(nodes: ScanV2TreeNode[]) {
     delete nextNode.children;
     return nextNode;
   });
+}
+
+function filterScanTreeChildren(parentKey: string, children: ScanV2TreeNode[]) {
+  return children.filter((child) => {
+    if (getScanTreeNodeMergeKeys(child).includes(parentKey)) {
+      return false;
+    }
+    const childParentKey = `${child.parent_key || ""}`.trim();
+    return !childParentKey || childParentKey === parentKey;
+  });
+}
+
+function buildSyncGenerateScopes(
+  selectedKeys: string[],
+  nodeByKey: Map<string, ScanV2TreeNode>,
+) {
+  const selectedSet = new Set(selectedKeys);
+  const scopes: SyncGenerateScope[] = [];
+
+  selectedKeys.forEach((key) => {
+    const node = nodeByKey.get(key);
+    if (!node) {
+      scopes.push({ object_key: key });
+      return;
+    }
+
+    let parentKey = getScanTreeNodeParentKey(node);
+    while (parentKey) {
+      if (selectedSet.has(parentKey)) {
+        return;
+      }
+      const parent = nodeByKey.get(parentKey);
+      parentKey = parent ? getScanTreeNodeParentKey(parent) : "";
+    }
+
+    scopes.push({
+      key: node.key,
+      object_key: node.object_key || key,
+      node_ref: node.node_ref || node.object_key || key,
+      is_document: node.is_document === true,
+      is_container: node.is_container === true || node.has_children === true,
+    });
+  });
+
+  return scopes;
 }
 
 function mergeScanTreeChildren(
@@ -739,7 +809,7 @@ export default function DataSourceDetail() {
                 include_documents: true,
                 include_containers: true,
                 list_mode: "page",
-                page_size: 100,
+                page_size: SCAN_TREE_PAGE_SIZE,
               },
             })
           : await client.listSourceTreeChildren({
@@ -750,7 +820,7 @@ export default function DataSourceDetail() {
                 include_documents: true,
                 include_containers: true,
                 list_mode: "page",
-                page_size: 100,
+                page_size: SCAN_TREE_PAGE_SIZE,
                 parent_key: "",
               },
             });
@@ -765,9 +835,7 @@ export default function DataSourceDetail() {
         const nextSelectableKeys = collectScanTreeFileKeys(nextTreeNodes);
 
         setSyncTreeNodes(nextTreeNodes);
-        if (!normalizedKeyword) {
-          syncTreeChildrenCacheRef.current.set("", nextTreeNodes);
-        }
+        syncTreeChildrenCacheRef.current.clear();
         setSyncKnownSelectableFileKeys((prev) => {
           const next = new Set(prev);
           nextSelectableKeys.forEach((key) => next.add(key));
@@ -804,21 +872,14 @@ export default function DataSourceDetail() {
       }
 
       const treeNode = node as SyncTreeDataNode;
-      const parentKeyCandidates = uniqueScanTreeKeys([
-        treeNode.objectKey,
-        treeNode.treeKey,
-        treeNode.targetRef,
-        treeNode.nodeRef,
-        `${treeNode.key}`,
-      ]);
-      const parentKey = parentKeyCandidates[0] || `${treeNode.key}`;
-      const mergeKey = `${treeNode.key}`;
-      const cachedChildren = parentKeyCandidates
-        .map((key) => syncTreeChildrenCacheRef.current.get(key))
-        .find((items): items is ScanV2TreeNode[] => Boolean(items));
+      const parentKey = `${treeNode.objectKey || treeNode.key || ""}`.trim();
+      if (!parentKey) {
+        return;
+      }
+      const cachedChildren = syncTreeChildrenCacheRef.current.get(parentKey);
       if (cachedChildren) {
         setSyncTreeNodes((current) =>
-          mergeScanTreeChildren(current, mergeKey, cachedChildren),
+          mergeScanTreeChildren(current, parentKey, cachedChildren),
         );
         return;
       }
@@ -835,31 +896,26 @@ export default function DataSourceDetail() {
               include_documents: true,
               include_containers: true,
               list_mode: "page",
-              page_size: 100,
+              page_size: SCAN_TREE_PAGE_SIZE,
             },
           });
           return getScanTreeNodePage(response.data);
         };
-        let treePage = await requestPage(parentKey);
-        for (const candidate of parentKeyCandidates.slice(1)) {
-          if (treePage.items.length > 0) {
-            break;
-          }
-          treePage = await requestPage(candidate);
-        }
+        const treePage = await requestPage(parentKey);
 
-        const children = normalizeLazyScanTreeNodes(treePage.items);
+        const children = filterScanTreeChildren(
+          parentKey,
+          normalizeLazyScanTreeNodes(treePage.items),
+        );
         const selectableKeys = collectScanTreeFileKeys(children);
-        parentKeyCandidates.forEach((key) => {
-          syncTreeChildrenCacheRef.current.set(key, children);
-        });
+        syncTreeChildrenCacheRef.current.set(parentKey, children);
         setSyncKnownSelectableFileKeys((prev) => {
           const next = new Set(prev);
           selectableKeys.forEach((key) => next.add(key));
           return next;
         });
         setSyncTreeNodes((current) =>
-          mergeScanTreeChildren(current, mergeKey, children),
+          mergeScanTreeChildren(current, parentKey, children),
         );
       } catch (error) {
         message.error(
@@ -903,6 +959,7 @@ export default function DataSourceDetail() {
     setSyncKnownSelectableFileKeys(new Set());
     setSyncSelectionToken("");
     setSyncTreeLoading(true);
+    syncTreeChildrenCacheRef.current.clear();
     syncTreeInitialLoadRef.current = true;
     setSyncSelectedDocIds([]);
   };
@@ -929,6 +986,12 @@ export default function DataSourceDetail() {
     }
 
     const targetSet = new Set(targetPaths);
+    const syncScopeNodesByKey = collectScanTreeNodesByKey(syncTreeNodes);
+    const targetScopes = buildSyncGenerateScopes(targetPaths, syncScopeNodesByKey);
+    if (targetScopes.length === 0) {
+      message.warning(t("admin.dataSourceDetailSelectFileFirst"));
+      return false;
+    }
     const currentTime = formatNow();
 
     stopSyncPolling();
@@ -937,29 +1000,17 @@ export default function DataSourceDetail() {
       const client = createScanV2ApiClient();
       if (detailSource.sourceType === "feishu") {
         message.info(t("admin.dataSourceDetailCloudSyncPreparing"));
-        const triggerResponse = await client.triggerSourceSync({
-          sourceId: detailSource.id,
-          triggerSourceSyncRequest: {
-            request_id: createScanRequestId("manual-sync"),
-            binding_id: detailSource.bindingId,
-            scope_type: "partial",
-            scope_ref: {
-              object_keys: targetPaths,
-            },
-          },
-        });
-        await waitForCloudSyncRun(client, detailSource.id, triggerResponse.data.run_ids?.[0]);
       }
 
       const generateTasksRequest: {
         mode: string;
         binding_id?: string;
-        object_keys: string[];
+        scopes: SyncGenerateScope[];
         priority?: number;
       } = {
         mode: "partial",
         binding_id: detailSource.bindingId,
-        object_keys: targetPaths,
+        scopes: targetScopes,
         priority: 5,
       }
 
@@ -1117,10 +1168,9 @@ export default function DataSourceDetail() {
           key: getScanTreeNodeKey(node),
           treeKey: `${node.key}`,
           objectKey: node.object_key,
-          targetRef: node.target_ref,
           nodeRef: node.node_ref,
           isLeaf: !node.has_children,
-          disableCheckbox: node.is_container === true || node.selectable === false,
+          disableCheckbox: !isSelectableScanTreeDocument(node),
           title: (
             <div className="data-source-sync-tree-file">
               <div className="data-source-sync-tree-file-main">
@@ -1144,7 +1194,10 @@ export default function DataSourceDetail() {
     return toDataNode(syncTreeNodes);
   }, [syncTreeNodes, t]);
 
-  const checkedTreeKeys = syncSelectedDocIds;
+  const checkedTreeKeys = useMemo(
+    () => ({ checked: syncSelectedDocIds, halfChecked: [] }),
+    [syncSelectedDocIds],
+  );
   const filteredSyncNodeKeys = useMemo(
     () => collectScanTreeFileKeys(syncTreeNodes),
     [syncTreeNodes],
