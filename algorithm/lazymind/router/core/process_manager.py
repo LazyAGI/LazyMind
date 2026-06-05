@@ -7,7 +7,6 @@ import subprocess
 import sys
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
@@ -62,13 +61,30 @@ class ProcessManager:
         stride = config['router_ports_per_instance']
 
         async with AsyncSessionLocal() as session:
-            # Clean up stale instances that have lost their heartbeat
-            stale_cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
-            await session.execute(
-                delete(RouterInstance).where(
-                    RouterInstance.last_heartbeat < stale_cutoff
+            # On restart after a crash (SIGKILL / OOMKill), the previous instance record
+            # for this host may still exist with a stale heartbeat.  Clean it up immediately
+            # so port ranges are reclaimed and no traffic is sent to dead child processes.
+            stale_instances = await session.execute(
+                select(RouterInstance.instance_id).where(
+                    RouterInstance.host == self._host
                 )
             )
+            stale_ids = [r.instance_id for r in stale_instances]
+            if stale_ids:
+                await session.execute(
+                    delete(RouterChildProcess).where(
+                        RouterChildProcess.instance_id.in_(stale_ids)
+                    )
+                )
+                await session.execute(
+                    delete(RouterInstance).where(
+                        RouterInstance.instance_id.in_(stale_ids)
+                    )
+                )
+                logger.info(
+                    'Cleaned up %d stale instance(s) for host %s on startup',
+                    len(stale_ids), self._host,
+                )
             await session.commit()
 
             # Find all occupied ranges

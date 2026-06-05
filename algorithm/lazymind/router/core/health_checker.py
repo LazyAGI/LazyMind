@@ -48,17 +48,40 @@ class HealthChecker:
     # ------------------------------------------------------------------
 
     async def run_forever(self) -> None:
-        tasks = [
-            asyncio.create_task(self._health_loop(), name='health-probe'),
-            asyncio.create_task(self._heartbeat_loop(), name='heartbeat'),
-            asyncio.create_task(self._registry_refresh_loop(), name='registry-refresh'),
-            asyncio.create_task(self._cleanup_dead_instances_loop(), name='cleanup-dead'),
+        """Run all background loops, restarting any that crash unexpectedly."""
+        loop_fns = [
+            ('health-probe', self._health_loop),
+            ('heartbeat', self._heartbeat_loop),
+            ('registry-refresh', self._registry_refresh_loop),
+            ('cleanup-dead', self._cleanup_dead_instances_loop),
         ]
+        tasks: dict[str, asyncio.Task] = {
+            name: asyncio.create_task(fn(), name=name)
+            for name, fn in loop_fns
+        }
+        fn_map = dict(loop_fns)
         try:
-            await asyncio.gather(*tasks)
+            while True:
+                done, _ = await asyncio.wait(
+                    tasks.values(), return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in done:
+                    name = task.get_name()
+                    exc = task.exception() if not task.cancelled() else None
+                    if exc is not None:
+                        logger.error(
+                            'Background loop "%s" crashed: %s — restarting in 5s',
+                            name, exc, exc_info=exc,
+                        )
+                        await asyncio.sleep(5)
+                        tasks[name] = asyncio.create_task(fn_map[name](), name=name)
+                    else:
+                        # Normal exit or cancellation means we should stop entirely
+                        raise asyncio.CancelledError
         except asyncio.CancelledError:
-            for t in tasks:
+            for t in tasks.values():
                 t.cancel()
+            await asyncio.gather(*tasks.values(), return_exceptions=True)
             raise
 
     # ------------------------------------------------------------------
@@ -103,6 +126,10 @@ class HealthChecker:
             logger.warning('Child on port %d failed health check (%d/%d)', port,
                            count, config['router_health_max_failures'])
 
+            # Evict from registry immediately on first failure so no traffic is
+            # sent to a potentially-dead instance while we wait for the threshold.
+            self._registry.evict_instance(resolve_host(), port)
+
             if count >= config['router_health_max_failures']:
                 await self._update_child_status(port, 'unhealthy', failures=count)
                 # Trigger restart if not already pending
@@ -122,6 +149,8 @@ class HealthChecker:
             await self._pm.restart_instance(resolve_host(), port)
             self._failure_counts[port] = 0
             logger.info('Restarted child process on port %d', port)
+            # Immediately refresh registry so the recovered instance gets traffic again
+            await self._registry.refresh()
         except Exception as exc:
             logger.error('Failed to restart child process on port %d: %s', port, exc)
 

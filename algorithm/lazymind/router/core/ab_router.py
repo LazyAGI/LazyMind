@@ -2,16 +2,14 @@ from __future__ import annotations
 
 import logging
 import random
-from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import insert, select
+from sqlalchemy import select
 
 from lazymind.router.db.client import AsyncSessionLocal
 from lazymind.router.db.models import (
     RouterAbStrategy,
     RouterAlgorithm,
-    RouterSessionAssignment,
 )
 
 logger = logging.getLogger(__name__)
@@ -22,55 +20,28 @@ class ABRouter:
 
     Priority:
     1. Caller explicitly passes `algorithm_id` → use it directly.
-    2. Session already has a binding in `router_session_assignments` → reuse.
-    3. Active strategy exists → weighted random selection → persist binding.
-    4. Fallback → use the 'default' algorithm.
+    2. Active strategy exists → weighted random selection.
+    3. Fallback → use the 'default' algorithm.
+
+    Session stickiness is intentionally NOT handled here. Callers that need
+    multi-turn consistency should persist the returned `X-Algorithm-Id` response
+    header and pass it back as `algorithm_id` in subsequent requests.
     """
 
     async def select_algorithm(
         self,
-        session_id: str,
         caller_algorithm_id: Optional[str] = None,
     ) -> str:
-        # Priority 1: explicit override
+        # Priority 1: explicit override from caller
         if caller_algorithm_id:
             return caller_algorithm_id
 
-        # Priority 2: existing session binding
-        async with AsyncSessionLocal() as session:
-            row = await session.get(RouterSessionAssignment, session_id)
-            if row is not None:
-                # Touch last_seen_at
-                await session.execute(
-                    RouterSessionAssignment.__table__.update()
-                    .where(RouterSessionAssignment.session_id == session_id)
-                    .values(last_seen_at=datetime.now(timezone.utc))
-                )
-                await session.commit()
-                return row.algorithm_id
-
-        # Priority 3: active strategy weighted random
+        # Priority 2: active strategy weighted random
         algo_id = await self._weighted_random_from_active_strategy()
-
-        # Persist the assignment
         if algo_id:
-            async with AsyncSessionLocal() as session:
-                now = datetime.now(timezone.utc)
-                stmt = insert(RouterSessionAssignment).values(
-                    session_id=session_id,
-                    algorithm_id=algo_id,
-                    assigned_at=now,
-                    last_seen_at=now,
-                )
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=['session_id'],
-                    set_={'last_seen_at': now},
-                )
-                await session.execute(stmt)
-                await session.commit()
             return algo_id
 
-        # Priority 4: fallback to default
+        # Priority 3: fallback to default
         return 'default'
 
     async def _weighted_random_from_active_strategy(self) -> Optional[str]:
@@ -90,7 +61,7 @@ class ABRouter:
         if not weights:
             return None
 
-        # Validate all referenced algorithms are active
+        # Filter to only active algorithms
         async with AsyncSessionLocal() as session:
             active_ids = {
                 r.id
@@ -108,12 +79,8 @@ class ABRouter:
         if not valid_weights:
             return None
 
-        return await self._weighted_random(valid_weights)
-
-    @staticmethod
-    async def _weighted_random(weights: dict[str, int]) -> str:
-        population = list(weights.keys())
-        w = [weights[k] for k in population]
+        population = list(valid_weights.keys())
+        w = [valid_weights[k] for k in population]
         return random.choices(population, weights=w, k=1)[0]
 
 

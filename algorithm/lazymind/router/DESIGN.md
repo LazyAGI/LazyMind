@@ -18,6 +18,7 @@
 - asyncio 足够处理 IO 密集型的代理并发场景
 
 **为什么不挂载 Docker Socket**：技术上可行，但不选择，原因如下：
+
 - 挂载 `/var/run/docker.sock` 等同于给容器宿主机 root 权限，生产环境安全风险高
 - evo 修改的是运行时 Python 文件（volume mount 路径下），`docker run` 新容器仍需通过 volume 传代码，绕了一圈回到原点
 - K8s 下 Docker Socket 不存在（containerd 时代），迁移需完全重写
@@ -33,12 +34,12 @@
 - 管理 1-N 个"算法版本"，每个版本对应一个代码路径，可在本 Pod 内启动 1-M 个子进程实例
 - 通过 `router_instances` 表发现其他 router 实例管理的子进程，跨实例路由请求
 - 通过 `router_child_processes` 表感知所有子进程（包括其他实例管理的）的健康状态
-- 根据 AB 策略（权重随机 + session 粘性）将请求分配到指定算法版本，从全局健康实例中选取
+- 根据 AB 策略（权重随机）将请求分配到指定算法版本，从全局健康实例中选取
 - 支持调用方在请求中直接指定 `algorithm_id`，此时绕过分流策略
 - 对**本实例管理的**子进程做周期性健康探活，失败时自动退避重启；通过共享表感知其他实例子进程的健康状态
 - 提供 API 供 evo 模块注册/注销算法版本、动态更新 AB 策略
-- 将 session→algorithm 映射和 AB 策略持久化到 PostgreSQL（多 router 实例共享）
-- 在响应 header 中注入 `X-Algorithm-Id` 供上层追踪
+- 将 AB 策略持久化到数据库（多 router 实例共享）
+- 在响应 header 中注入 `X-Algorithm-Id` 供上层追踪和 session 粘性
 - 启动时自动从 `router_instances` 表申请端口范围，无需手动配置
 
 ### 不做什么
@@ -47,7 +48,7 @@
 - 不做算法内多实例之间的加权负载均衡（只做简单 round-robin）
 - 不修改 chat 子服务任何代码
 - 不持久化聊天内容（由 core 负责）
-- 不做跨算法版本的 session 迁移
+- **不维护 session→algorithm 绑定**（由调用方持有，见 §8.4）
 - 不接管其他 router 实例挂掉后遗留的子进程（子进程随其 router 实例一起消失，重启后恢复）
 
 ---
@@ -64,7 +65,7 @@ graph TD
     chatB1["chat-B inst-1\npod-1 :18011"]
     chatA3["chat-A inst-3\npod-2 :18001"]
     chatB2["chat-B inst-2\npod-2 :18011"]
-    postgres["PostgreSQL\nrouter_* tables"]
+    db["PostgreSQL / SQLite\nrouter_* tables"]
     evo["evo module"]
 
     core -->|"POST /api/chat/stream"| router1
@@ -77,8 +78,8 @@ graph TD
     router2 -->|"proxy local"| chatA3
     router2 -->|"proxy local"| chatB2
     router2 -->|"proxy remote"| chatA1
-    router1 <-->|"R/W"| postgres
-    router2 <-->|"R/W"| postgres
+    router1 <-->|"R/W"| db
+    router2 <-->|"R/W"| db
     evo -->|"POST /inner/algorithm/register"| router1
 ```
 
@@ -86,7 +87,8 @@ graph TD
 
 - 每个 router 实例只负责**启动和重启**本 Pod 内的 chat 子进程；但路由时从 `router_child_processes` 表读取**全局所有健康实例**（含其他 Pod 的），按 round-robin 选择目标，实现跨实例负载均衡
 - 端口分配：router 启动时在 `router_instances` 表中原子地申请一段端口范围，无需手动配置
-- AB 策略、session 映射、子进程状态全部存 PostgreSQL，多实例天然共享
+- AB 策略、子进程状态全部存数据库，多实例天然共享
+- 跨 Pod 路由依赖 K8s overlay 网络（Pod IP 互通）；子进程需绑定 `0.0.0.0` 才能被其他 Pod 访问
 
 ---
 
@@ -107,20 +109,21 @@ LAZYMIND_ENABLE_ROUTER=true
 `app.py` 核心逻辑：
 
 ```python
-from lazymind.router.config import ENABLE_ROUTER
+from lazymind.config import config
+import lazymind.router.config  # registers router config keys
 
 def create_app() -> FastAPI:
-    if not ENABLE_ROUTER:
-        # 退化模式：直接返回原始 chat 应用，零额外依赖
+    if not config['enable_router']:
         from lazymind.chat.app import create_app as create_chat_app
         return create_chat_app()
-    # router 模式：注册 proxy_routes、algorithm_routes、strategy_routes 等
+    # router 模式
     ...
 
 app = create_app()
 ```
 
 **退化模式的行为**：
+
 - 不建 `router_*` 数据表，不申请端口范围，不启动子进程
 - 不启动 `HealthChecker` 和 `GlobalRegistry` 后台任务
 - `/inner/*` 路由全部不注册，返回 404
@@ -133,21 +136,18 @@ chat:
   command: python -m lazymind.router.app --port 8046
   environment:
     - LAZYMIND_ENABLE_ROUTER=${LAZYMIND_ENABLE_ROUTER:-false}
-    # router 模式所需配置（enable_router=false 时忽略）
     - LAZYMIND_ROUTER_PORT_POOL_START=18000
     - LAZYMIND_ROUTER_PORT_POOL_END=18999
     - LAZYMIND_ROUTER_PORTS_PER_INSTANCE=100
     - LAZYMIND_ROUTER_DEFAULT_ALGO_PATH=/opt/lazymind/chat
     - LAZYMIND_ROUTER_DEFAULT_INSTANCE_COUNT=1
-    - *db-conn
-    - *core-db-conn
-    # 原 chat 所有环境变量保持不变
+    - LAZYMIND_CORE_DATABASE_URL=postgresql://...
   volumes:
     - ./algorithm/lazymind:/opt/lazymind
     - ./data/core/uploads:/var/lib/lazymind/uploads
 ```
 
-默认 `LAZYMIND_ENABLE_ROUTER=false`，与改造前行为完全一致，不影响现有部署。需要 AB 测试时在 `.env` 中设置 `LAZYMIND_ENABLE_ROUTER=true` 即可。
+默认 `LAZYMIND_ENABLE_ROUTER=false`，与改造前行为完全一致。需要 AB 测试时在 `.env` 中设置 `LAZYMIND_ENABLE_ROUTER=true` 即可。
 
 ---
 
@@ -159,20 +159,47 @@ router 模式启动时自动将 `LAZYMIND_ROUTER_DEFAULT_ALGO_PATH` 所指路径
 
 ---
 
-## 6. 数据表设计（PostgreSQL）
+## 6. 配置项
 
-**初始化方式**：遵循 algorithm 侧的现有惯例，在 `router/db/models.py` 中用 SQLAlchemy ORM 定义表，在 `router/app.py` 启动时调用 `Base.metadata.create_all(engine, checkfirst=True)` 自动建表。不使用 `backend/core/migrations/`——那套迁移框架是 Go backend 侧的机制，algorithm 侧的表不应混入其中。
+所有配置通过 `lazymind.config` 注册，在使用处直接 `config['xxx']` 读取，不导出模块级常量。`router/config.py` 仅负责 `config.add(...)` 注册。
 
-共 5 张表：
+| 配置 key | 环境变量 | 类型 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `enable_router` | `ENABLE_ROUTER` | bool | `false` | 是否启用 router 模式 |
+| `router_port_pool_start` | `ROUTER_PORT_POOL_START` | int | `18000` | 端口池起始 |
+| `router_port_pool_end` | `ROUTER_PORT_POOL_END` | int | `18999` | 端口池结束（含） |
+| `router_ports_per_instance` | `ROUTER_PORTS_PER_INSTANCE` | int | `100` | 每个 router 实例申请的端口数 |
+| `router_default_algo_path` | `ROUTER_DEFAULT_ALGO_PATH` | str | `/opt/lazymind/chat` | 默认算法代码路径 |
+| `router_default_instance_count` | `ROUTER_DEFAULT_INSTANCE_COUNT` | int | `1` | 默认算法启动实例数 |
+| `router_health_interval` | `ROUTER_HEALTH_INTERVAL` | int | `10` | 健康探活间隔（秒） |
+| `router_health_max_failures` | `ROUTER_HEALTH_MAX_FAILURES` | int | `3` | 连续失败次数触发重启 |
+| `router_heartbeat_interval` | `ROUTER_HEARTBEAT_INTERVAL` | int | `10` | 实例心跳更新间隔（秒） |
+| `router_instance_timeout` | `ROUTER_INSTANCE_TIMEOUT` | int | `30` | 心跳超时判定死亡（秒） |
+| `router_registry_refresh_interval` | `ROUTER_REGISTRY_REFRESH_INTERVAL` | int | `5` | 全局实例视图刷新间隔（秒） |
+| `router_startup_timeout` | `ROUTER_STARTUP_TIMEOUT` | int | `30` | 子进程启动健康等待超时（秒） |
+| `core_database_url` | `CORE_DATABASE_URL` | str | — | 数据库 URL（router 模式必填） |
+| `router_host` | `ROUTER_HOST` | str | — | 对外广播的 host（未设置时自动检测） |
+
+`resolve_host()` 函数（`router/config.py`）负责解析对外广播的 host：优先 `router_host` 配置 → `POD_IP` / `MY_POD_IP` 环境变量 → `socket.gethostname()`。
+
+---
+
+## 7. 数据表设计
+
+**初始化方式**：在 `router/db/models.py` 中用 SQLAlchemy ORM 定义表，在 `router/app.py` 启动时调用 `Base.metadata.create_all(engine, checkfirst=True)` 自动建表。
+
+**数据库兼容**：同时支持 PostgreSQL 和 SQLite。`db/client.py` 根据 URL 前缀自动选择驱动（`postgresql+asyncpg` / `sqlite+aiosqlite`）。ORM 使用通用 `JSON` 类型（非 PG 专有 `JSONB`），时间戳使用 Python `datetime` 写入（非 SQL 内嵌 `NOW()` / `INTERVAL`）。
+
+共 **4 张表**：
 
 ### `router_algorithms` — 算法版本注册表
 
 ```sql
 CREATE TABLE router_algorithms (
-    id           VARCHAR(64) PRIMARY KEY,        -- 由 evo 传入或自动生成
+    id           VARCHAR(64) PRIMARY KEY,
     name         VARCHAR(255) NOT NULL,
-    code_path    VARCHAR(512) NOT NULL,           -- 容器内代码绝对路径
-    config       JSONB NOT NULL DEFAULT '{}',     -- 额外环境变量覆盖
+    code_path    VARCHAR(512) NOT NULL,
+    config       JSON NOT NULL DEFAULT '{}',
     status       VARCHAR(32) NOT NULL DEFAULT 'pending',  -- pending/active/disabled
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -184,39 +211,25 @@ CREATE TABLE router_algorithms (
 ```sql
 CREATE TABLE router_ab_strategies (
     id          SERIAL PRIMARY KEY,
-    weights     JSONB NOT NULL,          -- {"algo_v1": 70, "algo_v2": 30}
+    weights     JSON NOT NULL,          -- {"algo_v1": 70, "algo_v2": 30}
     is_active   BOOLEAN NOT NULL DEFAULT TRUE,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
--- 仅一条 is_active=true 的记录为当前策略
-```
-
-### `router_session_assignments` — session 到算法的绑定
-
-```sql
-CREATE TABLE router_session_assignments (
-    session_id   VARCHAR(255) PRIMARY KEY,
-    algorithm_id VARCHAR(64) NOT NULL REFERENCES router_algorithms(id),
-    assigned_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX ON router_session_assignments (algorithm_id);
+-- 仅一条 is_active=true 的记录为当前策略；更新时旧策略标记 is_active=false，插入新行
 ```
 
 ### `router_instances` — router 实例注册与端口池协调
 
 ```sql
 CREATE TABLE router_instances (
-    instance_id    VARCHAR(64) PRIMARY KEY,   -- UUID，启动时生成
-    host           VARCHAR(255) NOT NULL,      -- Pod IP 或容器名
-    pid            INTEGER NOT NULL,
-    port_range_start INTEGER NOT NULL,         -- 本实例申请到的端口范围起始
-    port_range_end   INTEGER NOT NULL,         -- 本实例申请到的端口范围结束
-    last_heartbeat TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    instance_id      VARCHAR(64) PRIMARY KEY,
+    host             VARCHAR(255) NOT NULL,
+    pid              INTEGER NOT NULL,
+    port_range_start INTEGER NOT NULL,
+    port_range_end   INTEGER NOT NULL,
+    last_heartbeat   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
--- router 启动时原子地找到未被占用的端口段并插入此表
--- 心跳超时（默认 30s 未更新）的实例视为死亡，其端口范围可被回收
 ```
 
 ### `router_child_processes` — 子进程注册表（全局可见）
@@ -226,10 +239,10 @@ CREATE TABLE router_child_processes (
     id             SERIAL PRIMARY KEY,
     instance_id    VARCHAR(64) NOT NULL REFERENCES router_instances(instance_id),
     algorithm_id   VARCHAR(64) NOT NULL REFERENCES router_algorithms(id),
-    host           VARCHAR(255) NOT NULL,      -- 与所属 router 实例相同的 host
+    host           VARCHAR(255) NOT NULL,
     port           INTEGER NOT NULL,
     pid            INTEGER,
-    status         VARCHAR(32) NOT NULL DEFAULT 'starting', -- starting/healthy/unhealthy/stopped
+    status         VARCHAR(32) NOT NULL DEFAULT 'starting',
     failures       INTEGER NOT NULL DEFAULT 0,
     last_health_at TIMESTAMPTZ,
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -243,40 +256,33 @@ CREATE INDEX ON router_child_processes (instance_id);
 
 ---
 
-## 7. 模块结构
-
-新增目录 `algorithm/lazymind/router/`，与 `chat/` 平级：
+## 8. 模块结构
 
 ```
 algorithm/lazymind/router/
 ├── __init__.py
-├── app.py                        # 统一入口：读取 LAZYMIND_ENABLE_ROUTER，
-│                                 # false -> 直接返回 chat app；true -> 启动 router 模式
-├── config.py                     # 所有 LAZYMIND_ROUTER_* 环境变量（复用 Config 机制）
-│                                 # 含 ENABLE_ROUTER、PORT_POOL_*、DEFAULT_ALGO_PATH 等
+├── app.py                        # 统一入口：enable_router 分支 + lifespan 管理
+├── config.py                     # config.add() 注册所有配置项 + resolve_host()
 ├── api/
-│   ├── __init__.py
 │   ├── proxy_routes.py           # 透明代理 /api/chat/stream, /api/chat/tools
 │   ├── algorithm_routes.py       # 算法版本 CRUD + 注册接口（供 evo 调用）
 │   ├── strategy_routes.py        # AB 策略读写
-│   └── health_routes.py          # /health, /inner/status（含子进程状态）
+│   ├── diagnostics_routes.py   # /inner/status 诊断接口
+│   └── health_routes.py          # /health
 ├── core/
-│   ├── __init__.py
-│   ├── registry.py               # GlobalRegistry：从 DB 构建全局实例视图（本地缓存）
+│   ├── registry.py               # GlobalRegistry：全局实例视图（内存缓存）
 │   ├── process_manager.py        # ProcessManager：本实例子进程生命周期
-│   ├── health_checker.py         # HealthChecker：本实例子进程探活 + 退避重启 + 心跳上报
-│   ├── ab_router.py              # ABRouter：分流决策（策略 + session 粘性）
+│   ├── health_checker.py         # HealthChecker：探活 + 退避重启 + 心跳 + 死亡清理
+│   ├── ab_router.py              # ABRouter：分流决策（显式指定 / 加权随机 / default）
 │   └── stream_proxy.py           # StreamProxy：httpx 流式转发
 └── db/
-    ├── __init__.py
-    ├── client.py                 # DB 连接（复用 LAZYMIND_CORE_DATABASE_URL）
-    └── models.py                 # SQLAlchemy ORM 模型（对应上述 5 张表）
-                                  # app.py 启动时调用 Base.metadata.create_all(checkfirst=True)
+    ├── client.py                 # DB 连接（自动适配 PG / SQLite）
+    └── models.py                 # SQLAlchemy ORM 模型（4 张表）
 ```
 
 ---
 
-## 8. 关键类和函数
+## 9. 关键类和函数
 
 ### `core/registry.py` — `GlobalRegistry`
 
@@ -296,7 +302,6 @@ class ChildProcessInfo:
         return f'http://{self.host}:{self.port}'
 
 class GlobalRegistry:
-    # 每 5s 从 router_child_processes 表刷新一次
     _global_instances: dict[str, list[ChildProcessInfo]]  # algo_id -> 全局实例列表
     _rr_cursors: dict[str, int]                           # algo_id -> round-robin 指针
 
@@ -304,9 +309,10 @@ class GlobalRegistry:
         # SELECT * FROM router_child_processes WHERE status = 'healthy'
 
     def get_healthy_instance(self, algorithm_id: str) -> ChildProcessInfo | None
-        # round-robin 选择，跳过 unhealthy
+        # round-robin 选择
 
-    def get_all_instances(self, algorithm_id: str) -> list[ChildProcessInfo]
+    def evict_instance(self, host: str, port: int) -> None
+        # 立即从内存缓存摘除指定实例（健康探测失败时调用，不等 DB 刷新）
 ```
 
 ### `core/process_manager.py` — `ProcessManager`
@@ -315,122 +321,164 @@ class GlobalRegistry:
 
 ```python
 class ProcessManager:
-    _my_instance_id: str
-    _my_host: str
-    _port_range: tuple[int, int]   # 从 DB 申请到的端口范围
+    _instance_id: str          # UUID，启动时生成
+    _host: str                 # resolve_host()
+    _port_range: tuple[int, int]
+    _next_port: int
 
     async def claim_port_range(self) -> tuple[int, int]
-        # 在 router_instances 表中原子申请空闲端口段：
-        # SELECT port_range_start, port_range_end FROM router_instances
-        # 找到未被占用的段后 INSERT，失败则重试
+        # 1. 清理本 host 的所有历史残留记录（crash 重启后立即回收）
+        # 2. 在 router_instances 表中找到未被占用的端口段并 INSERT
 
-    async def start_algorithm(self, algo_id: str, code_path: str,
-                               count: int) -> list[int]
-        # 从本实例端口范围中分配端口
-        # subprocess.Popen('python -m lazymind.chat.app --port {port}',
-        #                  env={**os.environ, 'PYTHONPATH': code_path_parent})
-        # 写入 router_child_processes 表（status=starting）
+    async def start_algorithm(self, algo_id, code_path, count) -> list[int]
+        # subprocess.Popen('python -m lazymind.chat.app --port {port}')
+        # UPSERT router_child_processes（status=starting）
 
-    async def stop_algorithm(self, algo_id: str) -> None
-    async def restart_instance(self, host: str, port: int) -> None
-    async def _wait_until_healthy(self, port: int, timeout: int = 30) -> bool
+    async def restart_instance(self, host, port) -> None
+        # kill 旧进程 → 同一 port 重新 spawn → UPSERT DB 记录
+
+    async def shutdown(self) -> None
+        # graceful：kill 所有子进程 + 删除本实例的 child_processes 和 instances 记录
 ```
 
 ### `core/health_checker.py` — `HealthChecker`
 
-每 10s 对**本实例管理的**子进程发 `GET /health`，更新 `router_child_processes` 表（所有 router 实例都能看到）。同时每 10s 更新本实例在 `router_instances` 表中的 `last_heartbeat`。
+四个并行后台循环，任一崩溃后 5s 自动重建：
 
 ```python
 class HealthChecker:
     async def run_forever(self) -> None:
-        # 并行任务：
-        # 1. 探活本实例子进程，失败 3 次 -> 标记 unhealthy -> restart_instance
-        #    重启退避：1s -> 2s -> 4s -> 8s，上限 60s
-        # 2. 每 10s 更新本实例 heartbeat
-        # 3. 每 5s 触发 GlobalRegistry.refresh()（刷新全局视图）
-        # 4. 清理 heartbeat 超时的死亡实例记录（超过 30s 未心跳则删除其 child_processes 记录）
+        # 监督循环：health-probe / heartbeat / registry-refresh / cleanup-dead
+        # 任一子 task 异常退出 → 等 5s → 重建该 task，其他 task 不受影响
+
+    # 1. health-probe（每 router_health_interval 秒）
+    #    对本实例子进程 GET http://127.0.0.1:{port}/health
+    #    第一次失败 → 立即 registry.evict_instance() 摘除，停止向其转发流量
+    #    连续失败 router_health_max_failures 次 → 标记 unhealthy → 退避重启
+    #    重启成功 → 立即 registry.refresh() 恢复流量
+    #    退避序列：1s → 2s → 4s → 8s → 16s → 32s → 60s
+
+    # 2. heartbeat（每 router_heartbeat_interval 秒）
+    #    更新 router_instances.last_heartbeat
+
+    # 3. registry-refresh（每 router_registry_refresh_interval 秒）
+    #    触发 GlobalRegistry.refresh()
+
+    # 4. cleanup-dead（每 heartbeat_interval * 2 秒）
+    #    删除 last_heartbeat 超过 router_instance_timeout 的实例及其子进程记录
 ```
 
 ### `core/ab_router.py` — `ABRouter`
 
 分流决策优先级：
 
-1. 请求中携带 `algorithm_id` → 直接使用（策略失效）
-2. `router_session_assignments` 表中存在该 session 的绑定 → 复用
-3. 按当前激活策略的权重做加权随机选择 → 写入 `router_session_assignments`
+1. 请求中携带 `algorithm_id` → 直接使用
+2. 当前激活策略的权重做加权随机选择
+3. fallback → `default`
+
+**不维护 session 绑定**。多轮对话一致性由调用方负责：首次请求拿到响应头 `X-Algorithm-Id`，后续请求在 body 中传入 `algorithm_id` 即可。
 
 ```python
 class ABRouter:
     async def select_algorithm(
         self,
-        session_id: str,
-        caller_algorithm_id: str | None,
+        caller_algorithm_id: str | None = None,
     ) -> str
-
-    async def _weighted_random(self, weights: dict[str, int]) -> str
 ```
 
 ### `core/stream_proxy.py` — `StreamProxy`
 
-使用 `httpx.AsyncClient(timeout=None)` 转发完整请求体，逐 chunk `yield`，保持 `Content-Type: text/event-stream`。在响应 header 中注入 `X-Algorithm-Id` 和 `X-Instance-Host` 供上层追踪。
+使用 `httpx.AsyncClient(timeout=None)` 转发完整请求体，逐 chunk `yield`，保持 `Content-Type: text/event-stream`。在响应 header 中注入 `X-Algorithm-Id` 和 `X-Instance-Host`。
 
-### `api/proxy_routes.py` — 对外接口（与现有 chat API 完全兼容）
+### `api/proxy_routes.py` — 对外接口
 
 ```python
 @router.post('/api/chat/stream')
 async def proxy_chat_stream(request: Request):
-    # 1. 解析 body，提取 session_id 和可选的 algorithm_id
-    # 2. ab_router.select_algorithm(session_id, caller_algorithm_id)
-    # 3. global_registry.get_healthy_instance(algorithm_id)  # 全局实例，含其他 Pod
+    # 1. 解析 body 中的可选 algorithm_id
+    # 2. ab_router.select_algorithm(caller_algorithm_id)
+    # 3. global_registry.get_healthy_instance(algorithm_id)
     # 4. stream_proxy.forward(request, instance.url)
-
-@router.get('/api/chat/tools')
-async def proxy_chat_tools():
-    # 选第一个 active 算法的任一全局健康实例转发
+    #    响应 header 注入 X-Algorithm-Id
 ```
 
 ---
 
-## 9. 全部 API
+## 10. AB 策略管理
 
-### 对外（`core` backend 调用，与现有 chat 完全兼容，`enable_router=false` 时同样提供）
+### 更新逻辑（`PUT /inner/ab/strategy`）
 
-| 方法 | 路径 | 描述 |
-|---|---|---|
-| `GET` | `/health` | 健康检查（router 模式返回子进程状态摘要；退化模式返回原始 chat 健康状态） |
-| `GET` | `/api/health` | 同上，兼容现有 health_routes |
-| `GET` | `/api/chat/tools` | 列出可用工具组，透传给某个 active 算法实例 |
-| `POST` | `/api/chat/stream` | 流式对话。body 与现有 chat_routes 完全相同，**额外增加可选字段 `algorithm_id: str`**（传入时绕过 AB 策略，`enable_router=false` 时忽略此字段）；router 模式下 response header 注入 `X-Algorithm-Id` |
+**全量替换**，不支持局部更新：
 
-### 算法版本管理（`/inner/algorithm/*`，仅 `enable_router=true` 时可用，供 evo 和运维调用）
+1. 校验所有 weight 值为正整数
+2. 若 sum ≠ 100，自动 normalize 到 100（余数补到最大权重项）
+3. 校验所有 algo_id 存在且 `status=active`
+4. 将所有 `is_active=True` 的旧策略标记为 `is_active=False`
+5. 插入新行 `is_active=True`
 
-| 方法 | 路径 | 关键参数 | 描述 |
-|---|---|---|---|
-| `POST` | `/inner/algorithm/register` | `id?`, `name`, `code_path`, `instance_count=1`, `config={}` | evo 完成代码修改后调用；写 DB + 启动子进程，等待健康后返回端口列表 |
-| `DELETE` | `/inner/algorithm/{algorithm_id}` | path: `algorithm_id` | 停止该算法所有子进程，标记 DB status=disabled |
-| `GET` | `/inner/algorithm` | — | 列出所有算法版本及全局实例健康状态 |
-| `GET` | `/inner/algorithm/{algorithm_id}` | path: `algorithm_id` | 查询单个算法版本详情 |
-| `POST` | `/inner/algorithm/{algorithm_id}/restart` | path: `algorithm_id`；body: `port?` | 手动重启，不带 port 则重启该算法所有**本实例**的子进程 |
+示例：`{"algo_v1": 1, "algo_v2": 1}` → normalize 为 `{"algo_v1": 50, "algo_v2": 50}`
 
-### AB 策略管理（`/inner/ab/*`，仅 `enable_router=true` 时可用）
+### 选择逻辑（运行时）
 
-| 方法 | 路径 | 关键参数 | 描述 |
-|---|---|---|---|
-| `PUT` | `/inner/ab/strategy` | `weights: dict[str, int]`（值之和须为 100） | 更新当前激活的分流策略，校验所有 algorithm_id 存在且 active |
-| `GET` | `/inner/ab/strategy` | — | 查询当前策略，附带各算法的 session 分配数量统计 |
-| `DELETE` | `/inner/ab/strategy` | — | 清空策略（所有流量回落到 `default` 算法） |
+```
+SELECT ... WHERE is_active=True ORDER BY id DESC LIMIT 1
+```
 
-### 状态与诊断（`/inner/*`，仅 `enable_router=true` 时可用）
+取最新 active 策略 → 过滤掉已 disabled 的算法 → `random.choices(population, weights=w, k=1)` 加权随机。
 
-| 方法 | 路径 | 关键参数 | 描述 |
-|---|---|---|---|
-| `GET` | `/inner/status` | — | 本实例完整状态：instance_id、端口范围、本实例子进程列表、全局子进程摘要、当前 AB 策略 |
-| `GET` | `/inner/session/{session_id}` | path: `session_id` | 查询某 session 当前绑定的算法版本 |
-| `DELETE` | `/inner/session/{session_id}` | path: `session_id` | 清除 session 绑定，下次请求重新走 AB 策略（用于测试） |
+### Session 粘性（调用方职责）
+
+router 不做 session 绑定。调用方实现多轮一致性的方式：
+
+```
+第一次请求（不带 algorithm_id）
+  → router 按 AB 策略抽签
+  → 响应 header: X-Algorithm-Id: algo_v2
+
+后续请求（body 带 algorithm_id: "algo_v2"）
+  → router Priority 1 直接使用，不经过随机
+```
 
 ---
 
-## 10. 启动流程
+## 11. 全部 API
+
+### 对外（`core` backend 调用，与现有 chat 完全兼容）
+
+| 方法 | 路径 | 描述 |
+|---|---|---|
+| `GET` | `/health` | 健康检查 |
+| `GET` | `/api/health` | 同上，兼容现有 health_routes |
+| `GET` | `/api/chat/tools` | 列出可用工具组，透传给某个 active 算法实例 |
+| `POST` | `/api/chat/stream` | 流式对话。body 与现有 chat_routes 完全相同，**额外增加可选字段 `algorithm_id: str`**（传入时绕过 AB 策略）；response header 注入 `X-Algorithm-Id` |
+
+### 算法版本管理（`/inner/algorithm/*`，供 evo 和运维调用）
+
+| 方法 | 路径 | 关键参数 | 描述 |
+|---|---|---|---|
+| `POST` | `/inner/algorithm/register` | `id?`, `name`, `code_path`, `instance_count=1`, `config={}` | 写 DB + 启动子进程，等待健康后返回端口列表 |
+| `DELETE` | `/inner/algorithm/{algorithm_id}` | path: `algorithm_id` | 停止该算法所有子进程，标记 DB status=disabled |
+| `GET` | `/inner/algorithm` | — | 列出所有算法版本及全局实例健康状态 |
+| `GET` | `/inner/algorithm/{algorithm_id}` | path: `algorithm_id` | 查询单个算法版本详情 |
+| `POST` | `/inner/algorithm/{algorithm_id}/restart` | path: `algorithm_id`；body: `port?` | 手动重启 |
+
+### AB 策略管理（`/inner/ab/*`）
+
+| 方法 | 路径 | 关键参数 | 描述 |
+|---|---|---|---|
+| `PUT` | `/inner/ab/strategy` | `weights: dict[str, int]`（正整数，自动 normalize 到 sum=100） | 全量更新当前激活策略 |
+| `GET` | `/inner/ab/strategy` | — | 查询当前策略 |
+| `DELETE` | `/inner/ab/strategy` | — | 清空策略（流量回落到 `default`） |
+
+### 状态与诊断（`/inner/*`）
+
+| 方法 | 路径 | 描述 |
+|---|---|---|
+| `GET` | `/inner/status` | 本实例完整状态：instance_id、端口范围、本实例子进程列表、全局子进程摘要、当前 AB 策略 |
+
+---
+
+## 12. 启动流程
 
 ### `enable_router=false`（退化模式）
 
@@ -439,9 +487,9 @@ sequenceDiagram
     participant app as "router app.py"
     participant chat as "lazymind.chat.app"
 
-    app->>app: 读取 LAZYMIND_ENABLE_ROUTER=false
+    app->>app: config['enable_router'] == false
     app->>chat: create_chat_app()
-    app-->>app: 直接监听 :8046，行为与改造前完全一致
+    app-->>app: 直接监听 :8046
 ```
 
 ### `enable_router=true`（router 模式）
@@ -449,65 +497,82 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant app as "router app.py"
-    participant db as "PostgreSQL"
+    participant db as "Database"
     participant pm as "ProcessManager"
     participant hc as "HealthChecker"
     participant gr as "GlobalRegistry"
 
-    app->>app: 读取 LAZYMIND_ENABLE_ROUTER=true
-    app->>db: Base.metadata.create_all(checkfirst=True) 建 router_* 表
+    app->>db: Base.metadata.create_all(checkfirst=True)
     app->>pm: claim_port_range()
+    pm->>db: 清理本 host 残留记录
     pm->>db: 原子申请空闲端口段，写入 router_instances
-    app->>db: 查询 status=active 的所有算法
-    app->>pm: start_algorithm（每个 active 算法）
-    pm->>db: 写入 router_child_processes（status=starting）
-    pm-->>app: 端口列表
-    app->>hc: 启动后台任务（探活 + 心跳 + 刷新全局视图）
-    hc->>gr: 定期 refresh() 从 DB 更新全局实例缓存
+    app->>pm: ensure_default_algorithm()
+    app->>pm: start_algorithm('default', ...)
+    pm->>db: UPSERT router_child_processes（status=starting）
+    app->>pm: wait_all_healthy(ports)
+    app->>gr: refresh()
+    app->>hc: asyncio.create_task(hc.run_forever())
     app-->>app: FastAPI 开始监听 :8046
 ```
 
 ---
 
-## 11. 与现有模块的复用关系
+## 13. 故障处理
+
+### 算法子进程意外退出
+
+| 阶段 | 行为 |
+|---|---|
+| 探测失败（第 1 次） | 立即 `registry.evict_instance()` 从内存摘除，停止转发流量 |
+| 连续失败达阈值（默认 3 次 × 10s） | 标记 DB `status=unhealthy`，调度退避重启（同一 port） |
+| 重启成功 | 立即 `registry.refresh()` 恢复流量；DB 记录 UPSERT（覆盖原行，不产生新行） |
+| 重启失败 | 继续退避重试，退避上限 60s |
+
+### router 进程意外退出
+
+| 退出方式 | 数据表清理 | 恢复时间 |
+|---|---|---|
+| graceful shutdown（SIGTERM） | `ProcessManager.shutdown()` 删除本实例的 child_processes + instances 记录 | 立即 |
+| crash / SIGKILL / OOMKill | 不清理，残留记录留在 DB | 下次 startup 时 `claim_port_range()` 主动按 host 清理残留；其他 pod 的 cleanup 循环也会在 30s 后清除 |
+
+### health checker task 崩溃
+
+`run_forever()` 内置监督循环：任一子 task 异常退出后等 5s 自动重建，其他 task 不受影响。顶层 `health-checker` task 加了 `done_callback`，崩溃时打 `CRITICAL` 日志。
+
+---
+
+## 14. 分布式策略说明
+
+| 能力 | 方案 |
+|---|---|
+| 多 router 实例共享 AB 策略 | 存 `router_ab_strategies` 表，所有实例读同一条 active 记录 |
+| Session 粘性 | **不由 router 维护**。调用方保存 `X-Algorithm-Id` 响应头，后续请求传入 `algorithm_id` |
+| 端口范围自动申请 | 启动时在 `router_instances` 表原子 INSERT 空闲端口段 |
+| 跨实例子进程发现 | 所有子进程状态写 `router_child_processes` 表，任意 router 读全表构建全局视图 |
+| 跨 Pod 路由 | `host` 字段存 Pod IP（`resolve_host()`），K8s overlay 网络下 Pod 间 L3 互通；子进程需 bind `0.0.0.0` |
+| 感知其他实例子进程健康状态 | 各子进程的属主 router 负责更新 status；其他实例通过 `GlobalRegistry.refresh()` 读取；探测失败时 `evict_instance()` 立即摘除 |
+| 死亡实例清理 | startup 时按 host 主动清理残留；运行时 `cleanup-dead` 循环删除 heartbeat 超时实例 |
+| crash 重启快速恢复 | `claim_port_range()` 启动时立即清理本 host 所有历史记录，不等心跳超时 |
+| **不做**：故障实例子进程接管 | router 挂掉后子进程随之消失；重启后 router 自动重建 |
+
+---
+
+## 15. 与现有模块的复用关系
 
 | 现有代码 | 复用方式 |
 |---|---|
 | `lazymind.chat.app` | `ProcessManager` 以子进程方式启动 `python -m lazymind.chat.app` |
-| `backend/core/chat/chat.go` 中 `ChatServiceEndpoint()` | 环境变量 `LAZYMIND_CHAT_SERVICE_URL=http://chat:8046` 完全不变，代码零改动 |
-| `lazyllm/tools/sql/sql_manager.py` 中 `SqlManager` | 可选复用（传入表定义字典）；或直接用 SQLAlchemy `Base.metadata.create_all(checkfirst=True)`，与 `SqlManager` 内部机制相同 |
-| `lazymind.config.Config` | router 复用同一套 `Config(prefix='LAZYMIND')` 机制读取环境变量 |
+| `backend/core/chat/chat.go` 中 `ChatServiceEndpoint()` | `LAZYMIND_CHAT_SERVICE_URL=http://chat:8046` 完全不变 |
+| `lazymind.config` | router 复用同一套 `Config(prefix='LAZYMIND')` 机制，使用处直接 `config['xxx']` 读取 |
 
 ---
 
-## 12. 分布式策略说明
-
-| 能力 | 方案 |
-|---|---|
-| 多 router 实例共享 AB 策略 | 存 `router_ab_strategies` 表，所有实例读同一条记录 |
-| 多 router 实例共享 session 绑定 | 存 `router_session_assignments` 表，同一 session 无论打到哪个 router 都路由到同一算法版本 |
-| 端口范围自动申请 | 启动时在 `router_instances` 表中原子 INSERT 空闲端口段，无需手动配置 `PORT_RANGE_START/END` |
-| 跨实例子进程发现 | 所有子进程状态写 `router_child_processes` 表，任意 router 实例读全表构建全局视图，可路由到其他 Pod 的子进程 |
-| 感知其他实例子进程健康状态 | `router_child_processes.status` 由各子进程的**属主** router 实例负责更新，其他实例通过 `GlobalRegistry.refresh()` 定期读取，发现 unhealthy 后不向其转发 |
-| 死亡实例清理 | `HealthChecker` 定期检查 `router_instances.last_heartbeat`，超时 30s 则删除其 `router_child_processes` 记录，避免路由到已消失的子进程 |
-| **不做**：故障实例子进程接管 | router 实例挂掉后子进程随之消失；重启后 router 自动重建子进程，不跨实例迁移 |
-
----
-
-## 13. 实施路径（分阶段）
-
-- **Phase 1**：`app.py` 统一入口（含 `enable_router` 分支）+ 退化模式验证 + `ProcessManager`（含端口自动申请）+ `GlobalRegistry` + `HealthChecker`（含心跳）+ 透明代理（单算法，无 AB）+ `router_instances` + `router_child_processes` 表
-- **Phase 2**：`ABRouter` + `router_session_assignments` + `router_ab_strategies` + DB 层完整 ORM
-- **Phase 3**：`algorithm_routes.py` 注册接口 + evo 模块对接 + `router_algorithms` 表
-- **Phase 4**：多 router 实例联调（死亡清理、跨实例路由验证）
-
----
-
-## 14. K8s 兼容性
+## 16. K8s 兼容性
 
 子进程模式不依赖 Docker Socket，K8s Pod 内完全有效：
 
 - 端口自动申请机制无需 K8s 侧配置，每个 Pod 独立申请端口段
 - `ProcessManager` 未来可替换为调用 K8s API 启动 sidecar container，`GlobalRegistry` 接口不变
-- `router_session_assignments` 和 `router_ab_strategies` 存 PostgreSQL，天然多副本共享
-- `router_child_processes` 的 `host` 字段在 K8s 下填 Pod IP，跨 Pod 路由无缝衔接
+- `router_ab_strategies` 和 `router_child_processes` 存数据库，天然多副本共享
+- `router_child_processes.host` 在 K8s 下填 Pod IP（通过 `POD_IP` 环境变量或 Downward API），跨 Pod 路由依赖 CNI overlay 网络
+- 子进程启动命令应显式传 `--host 0.0.0.0`，确保其他 Pod 可通过 Pod IP 访问

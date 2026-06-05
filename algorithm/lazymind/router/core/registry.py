@@ -100,6 +100,23 @@ class GlobalRegistry:
     def get_all_algorithms(self) -> list[str]:
         return list(self._global_instances.keys())
 
+    def evict_instance(self, host: str, port: int) -> None:
+        """Immediately remove a specific (host, port) from the in-memory cache.
+
+        Called by HealthChecker as soon as a child process is found unhealthy,
+        so no traffic is sent to it while it is being restarted.
+        """
+        changed = False
+        for algo_id, instances in list(self._global_instances.items()):
+            filtered = [i for i in instances if not (i.host == host and i.port == port)]
+            if len(filtered) != len(instances):
+                self._global_instances[algo_id] = filtered
+                changed = True
+                logger.info('Evicted unhealthy instance %s:%d from registry', host, port)
+        if changed:
+            # Reset round-robin cursors to avoid index-out-of-range on smaller lists
+            self._rr_cursors.clear()
+
     def snapshot(self) -> dict[str, list[ChildProcessInfo]]:
         return {k: list(v) for k, v in self._global_instances.items()}
 

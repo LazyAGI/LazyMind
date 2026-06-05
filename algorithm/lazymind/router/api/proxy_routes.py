@@ -15,24 +15,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def _parse_session_and_algo(request: Request) -> tuple[str, Optional[str]]:
-    """Extract session_id and optional algorithm_id from the JSON body without consuming it."""
+async def _parse_algo_id(request: Request) -> Optional[str]:
+    """Extract optional algorithm_id from the JSON body without consuming it."""
     try:
         body_bytes = await request.body()
         data = json.loads(body_bytes) if body_bytes else {}
     except Exception:
         data = {}
-    session_id = data.get('session_id', 'default_session') or 'default_session'
-    algo_id = data.get('algorithm_id') or None
-    return session_id, algo_id
+    return data.get('algorithm_id') or None
 
 
 @router.post('/api/chat/stream', summary='Proxy: streaming chat (router mode)')
 async def proxy_chat_stream(request: Request):
-    session_id, caller_algo_id = await _parse_session_and_algo(request)
+    caller_algo_id = await _parse_algo_id(request)
 
     ab_router = get_ab_router()
-    algorithm_id = await ab_router.select_algorithm(session_id, caller_algo_id)
+    algorithm_id = await ab_router.select_algorithm(caller_algo_id)
 
     registry = get_global_registry()
     instance = registry.get_healthy_instance(algorithm_id)

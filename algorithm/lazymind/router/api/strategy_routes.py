@@ -5,13 +5,12 @@ from typing import Dict
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from lazymind.router.db.client import AsyncSessionLocal
 from lazymind.router.db.models import (
     RouterAbStrategy,
     RouterAlgorithm,
-    RouterSessionAssignment,
 )
 
 logger = logging.getLogger(__name__)
@@ -21,14 +20,25 @@ router = APIRouter(prefix='/inner/ab', tags=['ab-strategy'])
 
 class UpdateStrategyRequest(BaseModel):
     weights: Dict[str, int] = Field(
-        description='Map of algorithm_id -> weight (integers, sum must equal 100)'
+        description='Map of algorithm_id -> weight (positive integers, will be normalized to sum=100)'
     )
 
     @model_validator(mode='after')
-    def check_weights_sum(self) -> 'UpdateStrategyRequest':
+    def check_weights_valid(self) -> 'UpdateStrategyRequest':
+        if not self.weights:
+            raise ValueError('weights must not be empty')
+        if any(v <= 0 for v in self.weights.values()):
+            raise ValueError('all weight values must be positive integers')
         total = sum(self.weights.values())
         if total != 100:
-            raise ValueError(f'Weights must sum to 100, got {total}')
+            # Normalize to sum=100, rounding remainders onto the largest-weight entry
+            factor = 100 / total
+            normalized = {k: int(v * factor) for k, v in self.weights.items()}
+            remainder = 100 - sum(normalized.values())
+            if remainder:
+                largest_key = max(self.weights, key=lambda k: self.weights[k])
+                normalized[largest_key] += remainder
+            self.weights = normalized
         return self
 
 
@@ -63,10 +73,15 @@ async def update_strategy(req: UpdateStrategyRequest):
         await session.commit()
         await session.refresh(new_strategy)
 
-    return {'id': new_strategy.id, 'weights': new_strategy.weights, 'is_active': True}
+    return {
+        'id': new_strategy.id,
+        'weights': new_strategy.weights,
+        'is_active': True,
+        'normalized': sum(req.weights.values()) == 100,
+    }
 
 
-@router.get('/strategy', summary='Get the current active AB strategy with session counts')
+@router.get('/strategy', summary='Get the current active AB strategy')
 async def get_strategy():
     async with AsyncSessionLocal() as session:
         row = await session.execute(
@@ -77,27 +92,13 @@ async def get_strategy():
         )
         strategy = row.scalar_one_or_none()
 
-        if strategy is None:
-            return {'strategy': None}
-
-        # Count sessions per algorithm
-        counts_rows = await session.execute(
-            select(
-                RouterSessionAssignment.algorithm_id,
-                func.count(RouterSessionAssignment.session_id).label('count'),
-            ).group_by(RouterSessionAssignment.algorithm_id)
-        )
-        session_counts = {r.algorithm_id: r.count for r in counts_rows}
-
-    weights_with_counts = {
-        algo_id: {'weight': w, 'session_count': session_counts.get(algo_id, 0)}
-        for algo_id, w in (strategy.weights or {}).items()
-    }
+    if strategy is None:
+        return {'strategy': None}
 
     return {
         'strategy': {
             'id': strategy.id,
-            'weights': weights_with_counts,
+            'weights': strategy.weights,
             'is_active': strategy.is_active,
             'created_at': strategy.created_at.isoformat() if strategy.created_at else None,
         }

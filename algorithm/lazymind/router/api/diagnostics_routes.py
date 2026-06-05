@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
-from sqlalchemy import delete, select
+from fastapi import APIRouter
+from sqlalchemy import select
 
 from lazymind.router.core.process_manager import get_process_manager
 from lazymind.router.core.registry import get_global_registry
@@ -11,7 +11,6 @@ from lazymind.router.db.client import AsyncSessionLocal
 from lazymind.router.db.models import (
     RouterAbStrategy,
     RouterChildProcess,
-    RouterSessionAssignment,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,32 +74,3 @@ async def get_status():
             'is_active': strategy.is_active,
         } if strategy else None,
     }
-
-
-@router.get('/session/{session_id}', summary='Get the algorithm binding for a session')
-async def get_session_binding(session_id: str):
-    async with AsyncSessionLocal() as session:
-        row = await session.get(RouterSessionAssignment, session_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail=f'No binding for session {session_id!r}')
-    return {
-        'session_id': row.session_id,
-        'algorithm_id': row.algorithm_id,
-        'assigned_at': row.assigned_at.isoformat() if row.assigned_at else None,
-        'last_seen_at': row.last_seen_at.isoformat() if row.last_seen_at else None,
-    }
-
-
-@router.delete('/session/{session_id}', summary='Clear a session binding (re-routes via AB on next request)')
-async def delete_session_binding(session_id: str):
-    async with AsyncSessionLocal() as session:
-        row = await session.get(RouterSessionAssignment, session_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail=f'No binding for session {session_id!r}')
-        await session.execute(
-            delete(RouterSessionAssignment).where(
-                RouterSessionAssignment.session_id == session_id
-            )
-        )
-        await session.commit()
-    return {'status': 'deleted', 'session_id': session_id}

@@ -43,17 +43,6 @@ class RouterAbStrategy(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
-class RouterSessionAssignment(Base):
-    __tablename__ = 'router_session_assignments'
-
-    session_id = Column(String(255), primary_key=True)
-    algorithm_id = Column(String(64), ForeignKey('router_algorithms.id'), nullable=False)
-    assigned_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    last_seen_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
-    __table_args__ = (Index('ix_router_session_assignments_algorithm_id', 'algorithm_id'),)
-
-
 class RouterInstance(Base):
     __tablename__ = 'router_instances'
 

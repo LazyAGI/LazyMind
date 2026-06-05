@@ -87,7 +87,13 @@ async def _startup(get_engine, Base, get_process_manager, get_global_registry, H
 
     # Start background tasks (health checker, heartbeat, registry refresh, dead-instance cleanup)
     hc = HealthChecker(pm, registry)
-    asyncio.create_task(hc.run_forever(), name='health-checker')
+    hc_task = asyncio.create_task(hc.run_forever(), name='health-checker')
+
+    def _on_hc_done(t: asyncio.Task) -> None:
+        if not t.cancelled() and t.exception():
+            logger.critical('health-checker task exited with error: %s', t.exception())
+
+    hc_task.add_done_callback(_on_hc_done)
     logger.info('Router startup complete — instance_id=%s', pm.instance_id)
 
 
