@@ -26,6 +26,7 @@ _DB_ENV_HINT = f'{_CORE_DB_URL_ENV} or {_DB_URL_ENV}'
 _engine_cache: Dict[str, Engine] = {}
 _engine_cache_lock = threading.Lock()
 
+
 def read_session(
     start_time: datetime,
     end_time: datetime,
