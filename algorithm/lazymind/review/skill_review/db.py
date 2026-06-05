@@ -23,23 +23,8 @@ _DB_URL_ENV = 'LAZYMIND_DATABASE_URL'
 _CORE_DB_URL_ENV = 'LAZYMIND_CORE_DATABASE_URL'
 _DB_ENV_HINT = f'{_CORE_DB_URL_ENV} or {_DB_URL_ENV}'
 
-_table_ensured = False
-_table_ensure_lock = threading.Lock()
 _engine_cache: Dict[str, Engine] = {}
 _engine_cache_lock = threading.Lock()
-
-_REQUIRED_SKILL_REVIEW_RESULT_COLUMNS: set[str] = {
-    'id',
-    'skill_name',
-    'type',
-    'review_status',
-    'userid',
-    'requestid',
-    'skill_content',
-    'summary',
-    'time',
-}
-
 
 def read_session(
     start_time: datetime,
@@ -73,7 +58,6 @@ def insert_skill_review_records(
     normalized = _normalize_records(records)
     if not normalized:
         return 0
-    _ensure_table_once()
     payload = [
         {
             'id': item.id,
@@ -118,7 +102,6 @@ def insert_skill_review_run_stats(
     normalized = _normalize_run_stats(records)
     if not normalized:
         return 0
-    _ensure_table_once()
     payload = [
         {
             'id': item.id,
@@ -157,7 +140,6 @@ def read_skill_review_records_by_ids(ids: list[str]) -> list[dict[str, Any]]:
     normalized_ids = [str(item).strip() for item in ids or [] if str(item).strip()]
     if not normalized_ids:
         return []
-    _ensure_table_once()
     with _get_app_conn().connect() as conn:
         rows = conn.execute(
             text(
@@ -180,7 +162,6 @@ def add_skill_review_records(
 
 def fetch_all_skill_review_records() -> list[dict[str, Any]]:
     """Return all rows from ``skill_review`` ordered by insertion time."""
-    _ensure_table_once()
     with _get_app_conn().connect() as conn:
         rows = conn.execute(
             text(
@@ -195,7 +176,6 @@ def fetch_all_skill_review_records() -> list[dict[str, Any]]:
 
 def delete_all_skill_review_records() -> int:
     """Delete all rows from ``skill_review``."""
-    _ensure_table_once()
     with _get_app_conn().begin() as conn:
         result = conn.execute(
             text(f'DELETE FROM {SKILL_REVIEW_TABLE}')
@@ -207,57 +187,6 @@ def delete_all_skill_review_records() -> int:
 
 def read_all_skill_review_records() -> list[dict[str, Any]]:
     return fetch_all_skill_review_records()
-
-
-def ensure_skill_review_table() -> None:
-    engine = _get_app_conn()
-    with engine.begin() as conn:
-        _validate_skill_review_result_schema(conn)
-        _ensure_skill_review_run_stats_table(conn)
-    LOG.info(
-        f'[SkillReview] verified database schema for {SKILL_REVIEW_TABLE} '
-        f'and ensured table {SKILL_REVIEW_RUN_STATS_TABLE}.'
-    )
-
-
-def _validate_skill_review_result_schema(conn) -> None:
-    rows = conn.execute(
-        text(
-            """SELECT column_name
-                 FROM information_schema.columns
-                WHERE table_schema = current_schema()
-                  AND table_name = :table_name"""
-        ),
-        {'table_name': SKILL_REVIEW_TABLE},
-    ).mappings().all()
-    actual_columns = {str(row['column_name']) for row in rows}
-    missing = sorted(_REQUIRED_SKILL_REVIEW_RESULT_COLUMNS - actual_columns)
-    if not actual_columns or missing:
-        details: list[str] = []
-        if not actual_columns:
-            details.append(f'missing table: {SKILL_REVIEW_TABLE}')
-        if missing:
-            details.append(f'{SKILL_REVIEW_TABLE} missing columns: {", ".join(missing)}')
-        raise RuntimeError(
-            f'[SkillReviewDB] backend database migration is required before skill review runs: '
-            f'{"; ".join(details)}'
-        )
-
-
-def _ensure_skill_review_run_stats_table(conn) -> None:
-    conn.execute(
-        text(
-            f"""CREATE TABLE IF NOT EXISTS {SKILL_REVIEW_RUN_STATS_TABLE} (
-                id TEXT PRIMARY KEY,
-                requestid TEXT NOT NULL,
-                userid TEXT NOT NULL,
-                status TEXT NOT NULL CHECK (status IN ('completed', 'skipped', 'failed', 'running')),
-                started_at TEXT NOT NULL,
-                duration_ms INTEGER NOT NULL DEFAULT 0,
-                summary JSONB NOT NULL DEFAULT '{{}}'::jsonb
-            )"""
-        )
-    )
 
 
 def _convert_history(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -358,16 +287,6 @@ def _normalize_run_stats(
     if isinstance(records, SkillReviewRunStat):
         return [records]
     return [SkillReviewRunStat.model_validate(item) for item in records]
-
-
-def _ensure_table_once() -> None:
-    global _table_ensured
-    if _table_ensured:
-        return
-    with _table_ensure_lock:
-        if not _table_ensured:
-            ensure_skill_review_table()
-            _table_ensured = True
 
 
 def _get_app_conn() -> Engine:
