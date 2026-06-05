@@ -60,10 +60,8 @@ class ProcessManager:
         pool_end = config['router_port_pool_end']
         stride = config['router_ports_per_instance']
 
+        # Clean up stale instances for this host on startup (crash recovery)
         async with AsyncSessionLocal() as session:
-            # On restart after a crash (SIGKILL / OOMKill), the previous instance record
-            # for this host may still exist with a stale heartbeat.  Clean it up immediately
-            # so port ranges are reclaimed and no traffic is sent to dead child processes.
             stale_instances = await session.execute(
                 select(RouterInstance.instance_id).where(
                     RouterInstance.host == self._host
@@ -87,51 +85,61 @@ class ProcessManager:
                 )
             await session.commit()
 
+        for attempt in range(5):
             # Find all occupied ranges
-            rows = await session.execute(
-                select(RouterInstance.port_range_start, RouterInstance.port_range_end)
-            )
-            occupied: list[tuple[int, int]] = [(r.port_range_start, r.port_range_end) for r in rows]
+            async with AsyncSessionLocal() as session:
+                rows = await session.execute(
+                    select(RouterInstance.port_range_start, RouterInstance.port_range_end)
+                )
+                occupied: list[tuple[int, int]] = [(r.port_range_start, r.port_range_end) for r in rows]
 
-        occupied_starts = {s for s, _ in occupied}
-        claimed_start = -1
-        candidate = pool_start
-        while candidate + stride - 1 <= pool_end:
-            if candidate not in occupied_starts:
-                claimed_start = candidate
-                break
-            candidate += stride
+            occupied_starts = {s for s, _ in occupied}
+            claimed_start = -1
+            candidate = pool_start
+            while candidate + stride - 1 <= pool_end:
+                if candidate not in occupied_starts:
+                    claimed_start = candidate
+                    break
+                candidate += stride
 
-        if claimed_start < 0:
-            raise RuntimeError(
-                f'No free port range available in [{pool_start}, {pool_end}] '
-                f'with stride {stride}'
-            )
+            if claimed_start < 0:
+                raise RuntimeError(
+                    f'No free port range available in [{pool_start}, {pool_end}] '
+                    f'with stride {stride}'
+                )
 
-        claimed_end = claimed_start + stride - 1
+            claimed_end = claimed_start + stride - 1
 
-        async with AsyncSessionLocal() as session:
-            stmt = insert(RouterInstance).values(
-                instance_id=self._instance_id,
-                host=self._host,
-                pid=os.getpid(),
-                port_range_start=claimed_start,
-                port_range_end=claimed_end,
-            )
-            # ON CONFLICT DO NOTHING for idempotent restart
-            stmt = stmt.on_conflict_do_nothing(index_elements=['instance_id'])
-            await session.execute(stmt)
-            await session.commit()
+            try:
+                async with AsyncSessionLocal() as session:
+                    stmt = insert(RouterInstance).values(
+                        instance_id=self._instance_id,
+                        host=self._host,
+                        pid=os.getpid(),
+                        port_range_start=claimed_start,
+                        port_range_end=claimed_end,
+                    )
+                    stmt = stmt.on_conflict_do_nothing(index_elements=['instance_id'])
+                    await session.execute(stmt)
+                    await session.commit()
 
-        self._port_range = (claimed_start, claimed_end)
-        self._next_port = claimed_start
-        logger.info(
-            'Router instance %s claimed port range [%d, %d]',
-            self._instance_id,
-            claimed_start,
-            claimed_end,
-        )
-        return self._port_range
+                self._port_range = (claimed_start, claimed_end)
+                self._next_port = claimed_start
+                logger.info(
+                    'Router instance %s claimed port range [%d, %d]',
+                    self._instance_id,
+                    claimed_start,
+                    claimed_end,
+                )
+                return self._port_range
+            except Exception as exc:
+                logger.warning(
+                    'Failed to claim port range %d-%d (attempt %d/5): %s',
+                    claimed_start, claimed_end, attempt + 1, exc,
+                )
+                await asyncio.sleep(0.5 * (attempt + 1))
+
+        raise RuntimeError('Failed to claim a unique port range after 5 attempts')
 
     def _allocate_port(self) -> int:
         start, end = self._port_range
@@ -193,8 +201,8 @@ class ProcessManager:
         extra_env: Optional[dict] = None,
     ) -> None:
         env = {**os.environ}
-        # Prepend code_path's parent to PYTHONPATH so `python -m lazymind.chat.app` resolves
-        code_parent = str(os.path.dirname(code_path.rstrip('/')))
+        # Prepend the grandparent of code_path (parent of the lazymind package) to PYTHONPATH
+        code_parent = str(os.path.dirname(os.path.dirname(code_path.rstrip('/'))))
         existing_pp = env.get('PYTHONPATH', '')
         env['PYTHONPATH'] = f'{code_parent}:{existing_pp}' if existing_pp else code_parent
         if extra_env:
@@ -289,8 +297,6 @@ class ProcessManager:
             extra_env = dict(row.config or {})
 
         await self._kill_child(port)
-        # Re-use the same port (already allocated in our range)
-        self._next_port = min(self._next_port, port)  # allow reuse only if same slot
         await self._spawn_child(algo_id, code_path, port, extra_env or None)
 
     # ------------------------------------------------------------------

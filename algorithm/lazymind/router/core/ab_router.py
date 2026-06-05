@@ -79,6 +79,16 @@ class ABRouter:
         if not valid_weights:
             return None
 
+        # Further filter to only algorithms with at least one healthy instance
+        from lazymind.router.core.registry import get_global_registry
+        registry = get_global_registry()
+        valid_weights = {
+            k: v for k, v in valid_weights.items()
+            if registry.get_healthy_instance(k) is not None
+        }
+        if not valid_weights:
+            return None
+
         population = list(valid_weights.keys())
         w = [valid_weights[k] for k in population]
         return random.choices(population, weights=w, k=1)[0]

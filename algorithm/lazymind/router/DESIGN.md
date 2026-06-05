@@ -30,7 +30,7 @@
 
 ### 做什么
 
-- 接收来自 `core` backend 的 `/api/chat/stream`、`/api/chat/tools` 等请求，完整透明代理给 chat 子进程
+- 接收来自 `core` backend 的 `/api/chat/stream` 请求，完整透明代理给 chat 子进程
 - 管理 1-N 个"算法版本"，每个版本对应一个代码路径，可在本 Pod 内启动 1-M 个子进程实例
 - 通过 `router_instances` 表发现其他 router 实例管理的子进程，跨实例路由请求
 - 通过 `router_child_processes` 表感知所有子进程（包括其他实例管理的）的健康状态
@@ -127,7 +127,7 @@ app = create_app()
 - 不建 `router_*` 数据表，不申请端口范围，不启动子进程
 - 不启动 `HealthChecker` 和 `GlobalRegistry` 后台任务
 - `/inner/*` 路由全部不注册，返回 404
-- `GET /health`、`GET /api/chat/tools`、`POST /api/chat/stream` 行为与原始 chat 完全相同
+- `GET /health`、`POST /api/chat/stream` 行为与原始 chat 完全相同
 
 **Docker Compose 中的用法**：
 
@@ -200,7 +200,7 @@ CREATE TABLE router_algorithms (
     name         VARCHAR(255) NOT NULL,
     code_path    VARCHAR(512) NOT NULL,
     config       JSON NOT NULL DEFAULT '{}',
-    status       VARCHAR(32) NOT NULL DEFAULT 'pending',  -- pending/active/disabled
+    status       VARCHAR(32) NOT NULL DEFAULT 'starting',  -- starting/active/disabled
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -226,7 +226,7 @@ CREATE TABLE router_instances (
     instance_id      VARCHAR(64) PRIMARY KEY,
     host             VARCHAR(255) NOT NULL,
     pid              INTEGER NOT NULL,
-    port_range_start INTEGER NOT NULL,
+    port_range_start INTEGER NOT NULL UNIQUE,
     port_range_end   INTEGER NOT NULL,
     last_heartbeat   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -264,7 +264,7 @@ algorithm/lazymind/router/
 ├── app.py                        # 统一入口：enable_router 分支 + lifespan 管理
 ├── config.py                     # config.add() 注册所有配置项 + resolve_host()
 ├── api/
-│   ├── proxy_routes.py           # 透明代理 /api/chat/stream, /api/chat/tools
+│   ├── proxy_routes.py           # 透明代理 /api/chat/stream
 │   ├── algorithm_routes.py       # 算法版本 CRUD + 注册接口（供 evo 调用）
 │   ├── strategy_routes.py        # AB 策略读写
 │   ├── diagnostics_routes.py   # /inner/status 诊断接口
@@ -424,7 +424,7 @@ async def proxy_chat_stream(request: Request):
 SELECT ... WHERE is_active=True ORDER BY id DESC LIMIT 1
 ```
 
-取最新 active 策略 → 过滤掉已 disabled 的算法 → `random.choices(population, weights=w, k=1)` 加权随机。
+取最新 active 策略 → 过滤掉已 disabled / starting 的算法 → 过滤掉没有健康实例的算法 → `random.choices(population, weights=w, k=1)` 加权随机。
 
 ### Session 粘性（调用方职责）
 
@@ -449,18 +449,17 @@ router 不做 session 绑定。调用方实现多轮一致性的方式：
 |---|---|---|
 | `GET` | `/health` | 健康检查 |
 | `GET` | `/api/health` | 同上，兼容现有 health_routes |
-| `GET` | `/api/chat/tools` | 列出可用工具组，透传给某个 active 算法实例 |
 | `POST` | `/api/chat/stream` | 流式对话。body 与现有 chat_routes 完全相同，**额外增加可选字段 `algorithm_id: str`**（传入时绕过 AB 策略）；response header 注入 `X-Algorithm-Id` |
 
 ### 算法版本管理（`/inner/algorithm/*`，供 evo 和运维调用）
 
 | 方法 | 路径 | 关键参数 | 描述 |
 |---|---|---|---|
-| `POST` | `/inner/algorithm/register` | `id?`, `name`, `code_path`, `instance_count=1`, `config={}` | 写 DB + 启动子进程，等待健康后返回端口列表 |
-| `DELETE` | `/inner/algorithm/{algorithm_id}` | path: `algorithm_id` | 停止该算法所有子进程，标记 DB status=disabled |
-| `GET` | `/inner/algorithm` | — | 列出所有算法版本及全局实例健康状态 |
-| `GET` | `/inner/algorithm/{algorithm_id}` | path: `algorithm_id` | 查询单个算法版本详情 |
-| `POST` | `/inner/algorithm/{algorithm_id}/restart` | path: `algorithm_id`；body: `port?` | 手动重启 |
+| `POST` | `/inner/algorithm/register` | `id?`, `name`, `code_path`, `instance_count=1`, `config={}` | 写 DB（status=starting）+ 启动子进程，全部健康后置 status=active 并返回端口列表 |
+| `DELETE` | `/inner/algorithm/{algorithm_id}` | path: `algorithm_id` | 停止该算法所有子进程，标记 DB status=disabled（记录保留用于审计） |
+| `GET` | `/inner/algorithm` | — | 列出所有算法版本（id/name/status/config，不含实例列表） |
+| `GET` | `/inner/algorithm/{algorithm_id}` | path: `algorithm_id` | 查询单个算法版本详情（含全局实例列表） |
+| `POST` | `/inner/algorithm/{algorithm_id}/restart` | path: `algorithm_id` | 重启本节点上该算法的所有子进程 |
 
 ### AB 策略管理（`/inner/ab/*`）
 
@@ -523,7 +522,7 @@ sequenceDiagram
 
 | 阶段 | 行为 |
 |---|---|
-| 探测失败（第 1 次） | 立即 `registry.evict_instance()` 从内存摘除，停止转发流量 |
+| 探测失败（第 1 次） | 立即 `registry.evict_instance()` 从内存摘除，停止转发流量；DB status 不变，仅更新 failures 计数 |
 | 连续失败达阈值（默认 3 次 × 10s） | 标记 DB `status=unhealthy`，调度退避重启（同一 port） |
 | 重启成功 | 立即 `registry.refresh()` 恢复流量；DB 记录 UPSERT（覆盖原行，不产生新行） |
 | 重启失败 | 继续退避重试，退避上限 60s |
@@ -547,7 +546,7 @@ sequenceDiagram
 |---|---|
 | 多 router 实例共享 AB 策略 | 存 `router_ab_strategies` 表，所有实例读同一条 active 记录 |
 | Session 粘性 | **不由 router 维护**。调用方保存 `X-Algorithm-Id` 响应头，后续请求传入 `algorithm_id` |
-| 端口范围自动申请 | 启动时在 `router_instances` 表原子 INSERT 空闲端口段 |
+| 端口范围自动申请 | 启动时在 `router_instances` 表原子 INSERT 空闲端口段（`port_range_start` UNIQUE 约束 + retry loop，防并发冲突） |
 | 跨实例子进程发现 | 所有子进程状态写 `router_child_processes` 表，任意 router 读全表构建全局视图 |
 | 跨 Pod 路由 | `host` 字段存 Pod IP（`resolve_host()`），K8s overlay 网络下 Pod 间 L3 互通；子进程需 bind `0.0.0.0` |
 | 感知其他实例子进程健康状态 | 各子进程的属主 router 负责更新 status；其他实例通过 `GlobalRegistry.refresh()` 读取；探测失败时 `evict_instance()` 立即摘除 |

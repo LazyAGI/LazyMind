@@ -27,8 +27,8 @@ class RouterAlgorithm(Base):
     name = Column(String(255), nullable=False)
     code_path = Column(String(512), nullable=False)
     config = Column(JSON, nullable=False, server_default=text("'{}'"))
-    # pending / active / disabled
-    status = Column(String(32), nullable=False, server_default=text("'pending'"))
+    # starting / active / disabled
+    status = Column(String(32), nullable=False, server_default=text("'starting'"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
@@ -49,7 +49,7 @@ class RouterInstance(Base):
     instance_id = Column(String(64), primary_key=True)
     host = Column(String(255), nullable=False)
     pid = Column(Integer, nullable=False)
-    port_range_start = Column(Integer, nullable=False)
+    port_range_start = Column(Integer, nullable=False, unique=True)
     port_range_end = Column(Integer, nullable=False)
     last_heartbeat = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

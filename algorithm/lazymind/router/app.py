@@ -100,6 +100,11 @@ async def _startup(get_engine, Base, get_process_manager, get_global_registry, H
 async def _shutdown(get_process_manager):
     pm = get_process_manager()
     await pm.shutdown()
+    from lazymind.router.core.stream_proxy import get_stream_proxy
+    try:
+        await get_stream_proxy().close()
+    except Exception as exc:
+        logger.warning('Failed to close stream proxy: %s', exc)
     logger.info('Router shutdown complete')
 
 

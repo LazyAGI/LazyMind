@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import httpx
 from sqlalchemy import delete, select
@@ -140,7 +140,7 @@ class HealthChecker:
                         self._deferred_restart(port, delay)
                     )
             else:
-                await self._update_child_status(port, 'unhealthy', failures=count)
+                await self._update_child_status(port, None, failures=count)
 
     async def _deferred_restart(self, port: int, delay: float) -> None:
         logger.info('Scheduling restart for port %d in %.0fs', port, delay)
@@ -155,9 +155,16 @@ class HealthChecker:
             logger.error('Failed to restart child process on port %d: %s', port, exc)
 
     async def _update_child_status(
-        self, port: int, status: str, failures: int
+        self, port: int, status: Optional[str], failures: int
     ) -> None:
         now = datetime.now(timezone.utc)
+        values: dict = {
+            'failures': failures,
+            'last_health_at': now,
+            'updated_at': now,
+        }
+        if status is not None:
+            values['status'] = status
         async with AsyncSessionLocal() as session:
             await session.execute(
                 RouterChildProcess.__table__.update()
@@ -166,12 +173,7 @@ class HealthChecker:
                     RouterChildProcess.port == port,
                     RouterChildProcess.instance_id == self._pm.instance_id,
                 )
-                .values(
-                    status=status,
-                    failures=failures,
-                    last_health_at=now,
-                    updated_at=now,
-                )
+                .values(**values)
             )
             await session.commit()
 

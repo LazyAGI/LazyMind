@@ -52,21 +52,3 @@ async def proxy_chat_stream(request: Request):
         algorithm_id=algorithm_id,
         instance_host=instance.host,
     )
-
-
-@router.get('/api/chat/tools', summary='Proxy: list available tools (router mode)')
-async def proxy_chat_tools(request: Request):
-    registry = get_global_registry()
-    # Try each known algorithm until one responds
-    for algo_id in registry.get_all_algorithms():
-        instance = registry.get_healthy_instance(algo_id)
-        if instance:
-            proxy = get_stream_proxy()
-            return await proxy.forward(request, instance.url, algorithm_id=algo_id)
-
-    # Fallback to 'default' if no algorithm known yet
-    instance = registry.get_healthy_instance('default')
-    if instance is None:
-        raise HTTPException(status_code=503, detail='No healthy instance available')
-    proxy = get_stream_proxy()
-    return await proxy.forward(request, instance.url, algorithm_id='default')
