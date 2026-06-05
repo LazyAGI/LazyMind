@@ -181,6 +181,19 @@ def patch_connection(
     return update_connection(connection_id, body, user)
 
 
+@router.get('/connections/internal/chat-enabled', response_model=CloudConnectionListResponse)
+def list_chat_enabled_connections(
+    provider: str | None = None,
+    owner_user_id: str | None = None,
+    _internal: None = Depends(require_internal_service_token),  # noqa: B008
+):
+    """Internal endpoint: list connections with chat_enabled=true for a given owner."""
+    return cloud_oauth_service.list_chat_enabled_connections(
+        owner_user_id=owner_user_id or '',
+        provider=provider,
+    )
+
+
 @router.get('/connections/{connection_id}/token', response_model=CloudConnectionTokenResponse)
 def get_connection_token(
     connection_id: str,

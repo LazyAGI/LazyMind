@@ -923,6 +923,34 @@ class CloudOAuthService:
             )
             return {'items': [self._connection_payload(row) for row in rows]}
 
+    def list_chat_enabled_connections(
+        self,
+        *,
+        owner_user_id: str,
+        provider: str | None = None,
+    ) -> dict[str, Any]:
+        """Return connections where provider_options.chat_enabled is True."""
+        owner = _normalize_owner_user_id(owner_user_id)
+        with SessionLocal() as db:
+            rows = CloudAuthConnectionRepository.list_for_owner(
+                db,
+                owner_user_id=owner if owner else None,
+                provider=provider,
+                auth_mode=None,
+                status='ACTIVE',
+                exclude_auth_modes=(_OAUTH_APP_AUTH_MODE,),
+            )
+            enabled = []
+            for row in rows:
+                try:
+                    credential = self._decrypt_payload(row.credential_ciphertext, field_name='credential')
+                    opts = credential.get('provider_options')
+                    if isinstance(opts, dict) and opts.get('chat_enabled'):
+                        enabled.append(self._connection_payload(row))
+                except Exception:
+                    pass
+            return {'items': enabled}
+
     def get_connection(self, connection_id: str, *, user_id: str | None = None) -> dict[str, Any]:
         with SessionLocal() as db:
             row = CloudAuthConnectionRepository.get_by_id(db, connection_id)

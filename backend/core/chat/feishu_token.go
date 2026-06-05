@@ -3,7 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
-	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -12,26 +12,19 @@ import (
 )
 
 const (
-	_scanSourcesTimeout = 5 * time.Second
-	_authTokenTimeout   = 5 * time.Second
-	_feishuProvider     = "feishu"
-	_cloudBindingActive = "active"
+	_authTokenTimeout = 5 * time.Second
+	_feishuProvider   = "feishu"
 )
 
-// _scanSourceItem is a minimal projection of the scan-control-plane Source model.
-type _scanSourceItem struct {
-	ID           string `json:"id"`
-	SourceType   string `json:"source_type"`
-	Status       string `json:"status"`
-	CloudBinding *struct {
-		AuthConnectionID string `json:"auth_connection_id"`
-		Provider         string `json:"provider"`
-		Status           string `json:"status"`
-	} `json:"cloud_binding,omitempty"`
+// _chatEnabledConnectionItem is a minimal projection of the auth-service connection list response.
+type _chatEnabledConnectionItem struct {
+	ConnectionID string `json:"connection_id"`
 }
 
-type _scanSourcesResponse struct {
-	Items []_scanSourceItem `json:"items"`
+type _chatEnabledConnectionsResponse struct {
+	Data struct {
+		Items []_chatEnabledConnectionItem `json:"items"`
+	} `json:"data"`
 }
 
 // _authTokenResponse is a minimal projection of the auth-service token response.
@@ -49,74 +42,67 @@ func authServiceInternalHeaders() map[string]string {
 	return headers
 }
 
-// fetchFeishuToken looks up the first active feishu source for userID,
-// retrieves its OAuth access token from auth-service, and returns it.
-// Returns ("", nil) when the user has no active feishu source.
-func fetchFeishuToken(ctx context.Context, r *http.Request, userID string) (string, error) {
-	fmt.Printf("[Core] [FEISHU_TOKEN] fetchFeishuToken called userID=%q\n", userID)
+// fetchFeishuTokens returns all feishu OAuth access tokens for connections that
+// have chat_enabled=true for the given userID. Returns nil when none are found.
+func fetchFeishuTokens(ctx context.Context, userID string) ([]string, error) {
+	fmt.Printf("[Core] [FEISHU_TOKEN] fetchFeishuTokens called userID=%q\n", userID)
 	if strings.TrimSpace(userID) == "" {
 		fmt.Printf("[Core] [FEISHU_TOKEN] empty userID, skip\n")
-		return "", nil
+		return nil, nil
 	}
 
-	// 1. List the user's sources from scan-control-plane.
-	scanURL := fmt.Sprintf("%s/api/scan/sources", common.ScanControlPlaneEndpoint())
-	var sourcesResp _scanSourcesResponse
+	// 1. Query auth-service for all feishu connections with chat_enabled=true for this user.
+	listURL := fmt.Sprintf(
+		"%s/v1/cloud/connections/internal/chat-enabled?provider=%s&owner_user_id=%s",
+		common.AuthServiceBaseURL(),
+		url.QueryEscape(_feishuProvider),
+		url.QueryEscape(userID),
+	)
+	var connectionsResp _chatEnabledConnectionsResponse
 	err := common.ApiGet(
 		ctx,
-		scanURL,
-		map[string]string{"X-User-Id": userID},
-		&sourcesResp,
-		_scanSourcesTimeout,
-	)
-	if err != nil {
-		return "", fmt.Errorf("list scan sources: %w", err)
-	}
-
-	// 2. Find the first feishu cloud binding with an active status and a connection ID.
-	// The source_type may be "cloud_sync" with provider info inside cloud_binding,
-	// so we check cloud_binding.provider == "feishu" and cloud_binding.status == "ACTIVE".
-	connectionID := ""
-	for _, src := range sourcesResp.Items {
-		cb := src.CloudBinding
-		if cb == nil || strings.TrimSpace(cb.AuthConnectionID) == "" {
-			continue
-		}
-		if !strings.EqualFold(cb.Provider, _feishuProvider) {
-			continue
-		}
-		if !strings.EqualFold(cb.Status, _cloudBindingActive) {
-			continue
-		}
-		connectionID = cb.AuthConnectionID
-		break
-	}
-
-	if connectionID == "" {
-		fmt.Printf("[Core] [FEISHU_TOKEN] no active feishu binding found for userID=%q (total sources=%d)\n", userID, len(sourcesResp.Items))
-		return "", nil
-	}
-	fmt.Printf("[Core] [FEISHU_TOKEN] found connectionID=%q for userID=%q\n", connectionID, userID)
-
-	// 3. Fetch the access token from auth-service using the internal token.
-	tokenURL := fmt.Sprintf(
-		"%s/v1/cloud/connections/%s/token",
-		common.AuthServiceBaseURL(),
-		connectionID,
-	)
-	var tokenResp _authTokenResponse
-	err = common.ApiGet(
-		ctx,
-		tokenURL,
+		listURL,
 		authServiceInternalHeaders(),
-		&tokenResp,
+		&connectionsResp,
 		_authTokenTimeout,
 	)
 	if err != nil {
-		return "", fmt.Errorf("fetch feishu token for connection %s: %w", connectionID, err)
+		return nil, fmt.Errorf("list chat-enabled feishu connections: %w", err)
 	}
+	if len(connectionsResp.Data.Items) == 0 {
+		fmt.Printf("[Core] [FEISHU_TOKEN] no chat-enabled feishu connections for userID=%q\n", userID)
+		return nil, nil
+	}
+	fmt.Printf("[Core] [FEISHU_TOKEN] found %d chat-enabled feishu connection(s) for userID=%q\n", len(connectionsResp.Data.Items), userID)
 
-	tok := strings.TrimSpace(tokenResp.Data.AccessToken)
-	fmt.Printf("[Core] [FEISHU_TOKEN] got token len=%d for connectionID=%q\n", len(tok), connectionID)
-	return tok, nil
+	// 2. Fetch access token for each connection.
+	tokens := make([]string, 0, len(connectionsResp.Data.Items))
+	for _, item := range connectionsResp.Data.Items {
+		connectionID := strings.TrimSpace(item.ConnectionID)
+		if connectionID == "" {
+			continue
+		}
+		tokenURL := fmt.Sprintf(
+			"%s/v1/cloud/connections/%s/token",
+			common.AuthServiceBaseURL(),
+			url.PathEscape(connectionID),
+		)
+		var tokenResp _authTokenResponse
+		if err := common.ApiGet(
+			ctx,
+			tokenURL,
+			authServiceInternalHeaders(),
+			&tokenResp,
+			_authTokenTimeout,
+		); err != nil {
+			fmt.Printf("[Core] [FEISHU_TOKEN] failed to fetch token for connectionID=%q: %v\n", connectionID, err)
+			continue
+		}
+		tok := strings.TrimSpace(tokenResp.Data.AccessToken)
+		if tok != "" {
+			fmt.Printf("[Core] [FEISHU_TOKEN] got token len=%d for connectionID=%q\n", len(tok), connectionID)
+			tokens = append(tokens, tok)
+		}
+	}
+	return tokens, nil
 }

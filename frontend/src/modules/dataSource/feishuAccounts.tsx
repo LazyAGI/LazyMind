@@ -163,12 +163,21 @@ function mapCloudConnectionToFeishuAccount(
     appId;
   const status = normalizeFeishuAccountStatus(connection.status);
 
+  // Resolve chat_enabled: server-side provider_options is the source of truth.
+  // Fall back to provider_account_meta, then cached local state.
+  const providerOptions = connection.provider_options || {};
+  const serverChatEnabled =
+    providerOptions.chat_enabled ?? providerOptions.chatEnabled ??
+    providerMeta.chat_enabled ?? providerMeta.chatEnabled;
+  const chatEnabled =
+    serverChatEnabled != null ? Boolean(serverChatEnabled) : (cachedAccount?.chatEnabled ?? false);
+
   return {
     id: connection.connection_id,
     name: displayName,
     appId,
     appSecret: cachedAccount?.appSecret || "",
-    chatEnabled: cachedAccount?.chatEnabled ?? false,
+    chatEnabled,
     status,
     connection: {
       provider: "feishu",
