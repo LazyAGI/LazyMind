@@ -322,6 +322,7 @@ export interface ConversationChatStatusResponse {
 }
 export interface ConversationDetailResponse {
     'conversation'?: ConversationItem;
+    'history'?: Array<ConversationHistoryItem>;
 }
 export interface ConversationFeedbackRequest {
     'expected_answer'?: string;
@@ -386,7 +387,7 @@ export interface ConversationSwitchStatusResponse {
     'status'?: number;
 }
 export interface CreateEvalSetByImportRequest {
-    'dataset_id': string;
+    'dataset_ids'?: Array<string>;
     'description': string;
     'group_id': string;
     'import_token': string;
@@ -410,7 +411,7 @@ export interface CreateEvalSetItemRequest {
     'reference_doc_ids': string;
 }
 export interface CreateEvalSetRequest {
-    'dataset_id': string;
+    'dataset_ids'?: Array<string>;
     'description': string;
     'group_id': string;
     'name': string;
@@ -596,6 +597,8 @@ export interface ErrorResponse {
 }
 export interface EvalSetImportTaskResponse {
     'created_at': string;
+    'dataset_ids'?: Array<string>;
+    'dataset_names'?: Array<string>;
     'error_code': string;
     'error_details'?: Array<ImportValidationErrorDetail>;
     'error_message': string;
@@ -639,8 +642,8 @@ export interface EvalSetResponse {
     'created_at': string;
     'created_by': string;
     'created_by_name': string;
-    'dataset_id': string;
-    'dataset_name': string;
+    'dataset_ids'?: Array<string>;
+    'dataset_names'?: Array<string>;
     'description': string;
     'group_id': string;
     'id': string;
@@ -763,6 +766,12 @@ export interface KBListRow {
 }
 export interface ListAlgosResponse {
     'algos'?: Array<Algo>;
+}
+export interface ListDatasetDocumentsRequest {
+    'dataset_ids'?: Array<string>;
+    'keyword'?: string;
+    'page_size'?: number;
+    'page_token'?: string;
 }
 export interface ListDatasetMembersResponse {
     'dataset_members'?: Array<DatasetMember>;
@@ -1436,7 +1445,7 @@ export interface UpdateEvalSetItemRequest {
     'reference_doc_ids'?: string;
 }
 export interface UpdateEvalSetRequest {
-    'dataset_id'?: string;
+    'dataset_ids'?: Array<string>;
     'description'?: string;
     'group_id'?: string;
     'name'?: string;
@@ -4237,12 +4246,11 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          * 
          * @summary Search dataset members
          * @param {string} dataset 
-         * @param {string} [namePrefix] 
          * @param {SearchDatasetMemberRequest} [searchDatasetMemberRequest] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreDatasetsDatasetMembersSearchPost: async (dataset: string, namePrefix?: string, searchDatasetMemberRequest?: SearchDatasetMemberRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreDatasetsDatasetMembersSearchPost: async (dataset: string, searchDatasetMemberRequest?: SearchDatasetMemberRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'dataset' is not null or undefined
             assertParamExists('apiCoreDatasetsDatasetMembersSearchPost', 'dataset', dataset)
             const localVarPath = `/api/core/datasets/{dataset}/members:search`
@@ -4257,10 +4265,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
-
-            if (namePrefix !== undefined) {
-                localVarQueryParameter['name_prefix'] = namePrefix;
-            }
 
             localVarHeaderParameter['Content-Type'] = 'application/json';
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -4860,11 +4864,10 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          * 
          * @summary ACL list
          * @param {string} kbId 
-         * @param {string} [granteeType] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreKbKbIdAclGet: async (kbId: string, granteeType?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreKbKbIdAclGet: async (kbId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'kbId' is not null or undefined
             assertParamExists('apiCoreKbKbIdAclGet', 'kbId', kbId)
             const localVarPath = `/api/core/kb/{kb_id}/acl`
@@ -4879,10 +4882,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
-
-            if (granteeType !== undefined) {
-                localVarQueryParameter['grantee_type'] = granteeType;
-            }
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -5010,14 +5009,11 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         /**
          * 
          * @summary Check knowledge base operation permission
-         * @param {string} action 
          * @param {string} kbId 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreKbKbIdCanGet: async (action: string, kbId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'action' is not null or undefined
-            assertParamExists('apiCoreKbKbIdCanGet', 'action', action)
+        apiCoreKbKbIdCanGet: async (kbId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'kbId' is not null or undefined
             assertParamExists('apiCoreKbKbIdCanGet', 'kbId', kbId)
             const localVarPath = `/api/core/kb/{kb_id}/can`
@@ -5032,10 +5028,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
-
-            if (action !== undefined) {
-                localVarQueryParameter['action'] = action;
-            }
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -6527,13 +6519,12 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * 
          * @summary Search dataset members
          * @param {string} dataset 
-         * @param {string} [namePrefix] 
          * @param {SearchDatasetMemberRequest} [searchDatasetMemberRequest] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreDatasetsDatasetMembersSearchPost(dataset: string, namePrefix?: string, searchDatasetMemberRequest?: SearchDatasetMemberRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ListDatasetMembersResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetMembersSearchPost(dataset, namePrefix, searchDatasetMemberRequest, options);
+        async apiCoreDatasetsDatasetMembersSearchPost(dataset: string, searchDatasetMemberRequest?: SearchDatasetMemberRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ListDatasetMembersResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetMembersSearchPost(dataset, searchDatasetMemberRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetMembersSearchPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -6750,12 +6741,11 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * 
          * @summary ACL list
          * @param {string} kbId 
-         * @param {string} [granteeType] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreKbKbIdAclGet(kbId: string, granteeType?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreKbKbIdAclGet200Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKbKbIdAclGet(kbId, granteeType, options);
+        async apiCoreKbKbIdAclGet(kbId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreKbKbIdAclGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKbKbIdAclGet(kbId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreKbKbIdAclGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -6804,13 +6794,12 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         /**
          * 
          * @summary Check knowledge base operation permission
-         * @param {string} action 
          * @param {string} kbId 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreKbKbIdCanGet(action: string, kbId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreKbKbIdCanGet200Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKbKbIdCanGet(action, kbId, options);
+        async apiCoreKbKbIdCanGet(kbId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreKbKbIdCanGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKbKbIdCanGet(kbId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreKbKbIdCanGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -7621,7 +7610,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @throws {RequiredError}
          */
         apiCoreDatasetsDatasetMembersSearchPost(requestParameters: DefaultApiApiCoreDatasetsDatasetMembersSearchPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ListDatasetMembersResponse> {
-            return localVarFp.apiCoreDatasetsDatasetMembersSearchPost(requestParameters.dataset, requestParameters.namePrefix, requestParameters.searchDatasetMemberRequest, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreDatasetsDatasetMembersSearchPost(requestParameters.dataset, requestParameters.searchDatasetMemberRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -7776,7 +7765,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @throws {RequiredError}
          */
         apiCoreKbKbIdAclGet(requestParameters: DefaultApiApiCoreKbKbIdAclGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreKbKbIdAclGet200Response> {
-            return localVarFp.apiCoreKbKbIdAclGet(requestParameters.kbId, requestParameters.granteeType, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreKbKbIdAclGet(requestParameters.kbId, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -7816,7 +7805,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @throws {RequiredError}
          */
         apiCoreKbKbIdCanGet(requestParameters: DefaultApiApiCoreKbKbIdCanGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreKbKbIdCanGet200Response> {
-            return localVarFp.apiCoreKbKbIdCanGet(requestParameters.action, requestParameters.kbId, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreKbKbIdCanGet(requestParameters.kbId, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -8398,8 +8387,6 @@ export interface DefaultApiApiCoreDatasetsDatasetMembersGroupsGroupIdPatchReques
 export interface DefaultApiApiCoreDatasetsDatasetMembersSearchPostRequest {
     readonly dataset: string
 
-    readonly namePrefix?: string
-
     readonly searchDatasetMemberRequest?: SearchDatasetMemberRequest
 }
 
@@ -8514,8 +8501,6 @@ export interface DefaultApiApiCoreKbKbIdAclBatchPostRequest {
  */
 export interface DefaultApiApiCoreKbKbIdAclGetRequest {
     readonly kbId: string
-
-    readonly granteeType?: string
 }
 
 /**
@@ -8547,8 +8532,6 @@ export interface DefaultApiApiCoreKbKbIdAuthorizationPostRequest {
  * Request parameters for apiCoreKbKbIdCanGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreKbKbIdCanGetRequest {
-    readonly action: string
-
     readonly kbId: string
 }
 
@@ -9228,7 +9211,7 @@ export class DefaultApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreDatasetsDatasetMembersSearchPost(requestParameters: DefaultApiApiCoreDatasetsDatasetMembersSearchPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetMembersSearchPost(requestParameters.dataset, requestParameters.namePrefix, requestParameters.searchDatasetMemberRequest, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetMembersSearchPost(requestParameters.dataset, requestParameters.searchDatasetMemberRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -9399,7 +9382,7 @@ export class DefaultApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreKbKbIdAclGet(requestParameters: DefaultApiApiCoreKbKbIdAclGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreKbKbIdAclGet(requestParameters.kbId, requestParameters.granteeType, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreKbKbIdAclGet(requestParameters.kbId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -9443,7 +9426,7 @@ export class DefaultApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreKbKbIdCanGet(requestParameters: DefaultApiApiCoreKbKbIdCanGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreKbKbIdCanGet(requestParameters.action, requestParameters.kbId, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreKbKbIdCanGet(requestParameters.kbId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -9975,6 +9958,41 @@ export const DocumentsApiAxiosParamCreator = function (configuration?: Configura
         },
         /**
          * 
+         * @summary List documents by datasets
+         * @param {ListDatasetDocumentsRequest} listDatasetDocumentsRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDocumentsListByDatasetsPost: async (listDatasetDocumentsRequest: ListDatasetDocumentsRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'listDatasetDocumentsRequest' is not null or undefined
+            assertParamExists('apiCoreDocumentsListByDatasetsPost', 'listDatasetDocumentsRequest', listDatasetDocumentsRequest)
+            const localVarPath = `/api/core/documents:listByDatasets`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(listDatasetDocumentsRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary textSearch documents
          * @param {SearchDocumentsRequest} [searchDocumentsRequest] 
          * @param {*} [options] Override http request option.
@@ -10117,6 +10135,19 @@ export const DocumentsApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @summary List documents by datasets
+         * @param {ListDatasetDocumentsRequest} listDatasetDocumentsRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDocumentsListByDatasetsPost(listDatasetDocumentsRequest: ListDatasetDocumentsRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ListDocumentsResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDocumentsListByDatasetsPost(listDatasetDocumentsRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DocumentsApi.apiCoreDocumentsListByDatasetsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
          * @summary textSearch documents
          * @param {SearchDocumentsRequest} [searchDocumentsRequest] 
          * @param {*} [options] Override http request option.
@@ -10209,6 +10240,16 @@ export const DocumentsApiFactory = function (configuration?: Configuration, base
         },
         /**
          * 
+         * @summary List documents by datasets
+         * @param {DocumentsApiApiCoreDocumentsListByDatasetsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDocumentsListByDatasetsPost(requestParameters: DocumentsApiApiCoreDocumentsListByDatasetsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ListDocumentsResponse> {
+            return localVarFp.apiCoreDocumentsListByDatasetsPost(requestParameters.listDatasetDocumentsRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
          * @summary textSearch documents
          * @param {DocumentsApiApiCoreDocumentsSearchPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -10285,6 +10326,13 @@ export interface DocumentsApiApiCoreDatasetsDatasetDocumentsSearchPostRequest {
     readonly dataset: string
 
     readonly searchDocumentsRequest?: SearchDocumentsRequest
+}
+
+/**
+ * Request parameters for apiCoreDocumentsListByDatasetsPost operation in DocumentsApi.
+ */
+export interface DocumentsApiApiCoreDocumentsListByDatasetsPostRequest {
+    readonly listDatasetDocumentsRequest: ListDatasetDocumentsRequest
 }
 
 /**
@@ -10373,6 +10421,17 @@ export class DocumentsApi extends BaseAPI {
      */
     public apiCoreDatasetsDatasetDocumentsSearchPost(requestParameters: DocumentsApiApiCoreDatasetsDatasetDocumentsSearchPostRequest, options?: RawAxiosRequestConfig) {
         return DocumentsApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsSearchPost(requestParameters.dataset, requestParameters.searchDocumentsRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary List documents by datasets
+     * @param {DocumentsApiApiCoreDocumentsListByDatasetsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDocumentsListByDatasetsPost(requestParameters: DocumentsApiApiCoreDocumentsListByDatasetsPostRequest, options?: RawAxiosRequestConfig) {
+        return DocumentsApiFp(this.configuration).apiCoreDocumentsListByDatasetsPost(requestParameters.listDatasetDocumentsRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -11460,13 +11519,13 @@ export const EvalSetsApiAxiosParamCreator = function (configuration?: Configurat
          * 
          * @summary List eval sets
          * @param {string} [keyword] 
-         * @param {string} [datasetId] 
+         * @param {Array<string>} [datasetIds] 
          * @param {number} [page] 
          * @param {number} [pageSize] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreEvalSetsGet: async (keyword?: string, datasetId?: string, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreEvalSetsGet: async (keyword?: string, datasetIds?: Array<string>, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/eval-sets`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -11483,8 +11542,8 @@ export const EvalSetsApiAxiosParamCreator = function (configuration?: Configurat
                 localVarQueryParameter['keyword'] = keyword;
             }
 
-            if (datasetId !== undefined) {
-                localVarQueryParameter['dataset_id'] = datasetId;
+            if (datasetIds) {
+                localVarQueryParameter['dataset_ids'] = datasetIds;
             }
 
             if (page !== undefined) {
@@ -11636,14 +11695,14 @@ export const EvalSetsApiFp = function(configuration?: Configuration) {
          * 
          * @summary List eval sets
          * @param {string} [keyword] 
-         * @param {string} [datasetId] 
+         * @param {Array<string>} [datasetIds] 
          * @param {number} [page] 
          * @param {number} [pageSize] 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreEvalSetsGet(keyword?: string, datasetId?: string, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ListEvalSetsResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreEvalSetsGet(keyword, datasetId, page, pageSize, options);
+        async apiCoreEvalSetsGet(keyword?: string, datasetIds?: Array<string>, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ListEvalSetsResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreEvalSetsGet(keyword, datasetIds, page, pageSize, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['EvalSetsApi.apiCoreEvalSetsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -11729,7 +11788,7 @@ export const EvalSetsApiFactory = function (configuration?: Configuration, baseP
          * @throws {RequiredError}
          */
         apiCoreEvalSetsGet(requestParameters: EvalSetsApiApiCoreEvalSetsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ListEvalSetsResponse> {
-            return localVarFp.apiCoreEvalSetsGet(requestParameters.keyword, requestParameters.datasetId, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreEvalSetsGet(requestParameters.keyword, requestParameters.datasetIds, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -11782,7 +11841,7 @@ export interface EvalSetsApiApiCoreEvalSetsEvalSetIdPatchRequest {
 export interface EvalSetsApiApiCoreEvalSetsGetRequest {
     readonly keyword?: string
 
-    readonly datasetId?: string
+    readonly datasetIds?: Array<string>
 
     readonly page?: number
 
@@ -11851,7 +11910,7 @@ export class EvalSetsApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreEvalSetsGet(requestParameters: EvalSetsApiApiCoreEvalSetsGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return EvalSetsApiFp(this.configuration).apiCoreEvalSetsGet(requestParameters.keyword, requestParameters.datasetId, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
+        return EvalSetsApiFp(this.configuration).apiCoreEvalSetsGet(requestParameters.keyword, requestParameters.datasetIds, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -12963,7 +13022,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Validates credentials by proxying to the algorithm POST /api/model/check (LAZYMIND_ALGO_SERVICE_URL). Maps provider_name→source, base_url→url, api_key→api_key. The current user identity is injected by the auth gateway from the token. Response data is the algorithm JSON payload.
+         * Validates credentials by proxying to the algorithm POST /api/model/check (LAZYRAG_ALGO_SERVICE_URL). Maps provider_name→source, base_url→url, api_key→api_key. The current user identity is injected by the auth gateway from the token. Response data is the algorithm JSON payload.
          * @summary Check model provider connectivity
          * @param {string} modelProviderId 
          * @param {string} groupId 
@@ -13563,7 +13622,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Validates credentials by proxying to the algorithm POST /api/model/check (LAZYMIND_ALGO_SERVICE_URL). Maps provider_name→source, base_url→url, api_key→api_key. The current user identity is injected by the auth gateway from the token. Response data is the algorithm JSON payload.
+         * Validates credentials by proxying to the algorithm POST /api/model/check (LAZYRAG_ALGO_SERVICE_URL). Maps provider_name→source, base_url→url, api_key→api_key. The current user identity is injected by the auth gateway from the token. Response data is the algorithm JSON payload.
          * @summary Check model provider connectivity
          * @param {string} modelProviderId 
          * @param {string} groupId 
@@ -13804,7 +13863,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGet(requestParameters.modelProviderId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Validates credentials by proxying to the algorithm POST /api/model/check (LAZYMIND_ALGO_SERVICE_URL). Maps provider_name→source, base_url→url, api_key→api_key. The current user identity is injected by the auth gateway from the token. Response data is the algorithm JSON payload.
+         * Validates credentials by proxying to the algorithm POST /api/model/check (LAZYRAG_ALGO_SERVICE_URL). Maps provider_name→source, base_url→url, api_key→api_key. The current user identity is injected by the auth gateway from the token. Response data is the algorithm JSON payload.
          * @summary Check model provider connectivity
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -14114,7 +14173,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Validates credentials by proxying to the algorithm POST /api/model/check (LAZYMIND_ALGO_SERVICE_URL). Maps provider_name→source, base_url→url, api_key→api_key. The current user identity is injected by the auth gateway from the token. Response data is the algorithm JSON payload.
+     * Validates credentials by proxying to the algorithm POST /api/model/check (LAZYRAG_ALGO_SERVICE_URL). Maps provider_name→source, base_url→url, api_key→api_key. The current user identity is injected by the auth gateway from the token. Response data is the algorithm JSON payload.
      * @summary Check model provider connectivity
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.

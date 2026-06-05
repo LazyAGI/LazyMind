@@ -152,6 +152,25 @@ func (c *DefaultFeishuAPIClient) DownloadDriveFile(ctx context.Context, token, f
 	return ExportedContent{Content: body, ExportedVersion: expectedVersion}, nil
 }
 
+func (c *DefaultFeishuAPIClient) ExportDriveDocumentMarkdown(ctx context.Context, token, docToken, expectedVersion string) (ExportedContent, error) {
+	content, err := c.rawContent(ctx, token, "docx", docToken)
+	if err != nil {
+		if isFeishuNotFound(err) {
+			content, err = c.rawContent(ctx, token, "doc", docToken)
+		}
+		if err != nil {
+			return ExportedContent{}, err
+		}
+	}
+	return ExportedContent{
+		Content:         []byte(content),
+		MimeType:        "text/markdown",
+		FileExtension:   ".md",
+		SizeBytes:       int64(len(content)),
+		ExportedVersion: expectedVersion,
+	}, nil
+}
+
 func (c *DefaultFeishuAPIClient) ListWikiSpaces(ctx context.Context, token, cursor string, pageSize int) (ObjectPage, error) {
 	var out openAPIWikiSpaces
 	if err := doFeishuOpenAPIJSON(ctx, c.httpClient, endpoint(c.baseURL, "/wiki/v2/spaces", openAPIPageQuery(cursor, pageSize)), http.MethodGet, token, nil, &out); err != nil {
@@ -195,6 +214,14 @@ func (c *DefaultFeishuAPIClient) ExportWikiNodeMarkdown(ctx context.Context, tok
 	} else if objType == ".docx" || objType == "" {
 		objType = "docx"
 	}
+	content, err := c.rawContent(ctx, token, objType, objToken)
+	if err != nil {
+		return ExportedContent{}, err
+	}
+	return ExportedContent{Content: []byte(content), MimeType: "text/markdown", FileExtension: ".md", SizeBytes: int64(len(content)), ExportedVersion: expectedVersion}, nil
+}
+
+func (c *DefaultFeishuAPIClient) rawContent(ctx context.Context, token, objType, objToken string) (string, error) {
 	path := "/docx/v1/documents/" + url.PathEscape(objToken) + "/raw_content"
 	if objType == "doc" {
 		path = "/doc/v2/" + url.PathEscape(objToken) + "/raw_content"
@@ -203,9 +230,9 @@ func (c *DefaultFeishuAPIClient) ExportWikiNodeMarkdown(ctx context.Context, tok
 		Content string `json:"content"`
 	}
 	if err := doFeishuOpenAPIJSON(ctx, c.httpClient, endpoint(c.baseURL, path, nil), http.MethodGet, token, nil, &out); err != nil {
-		return ExportedContent{}, err
+		return "", err
 	}
-	return ExportedContent{Content: []byte(out.Content), MimeType: "text/markdown", FileExtension: ".md", SizeBytes: int64(len(out.Content)), ExportedVersion: expectedVersion}, nil
+	return out.Content, nil
 }
 
 func newHTTPBoundary(baseURL string, client *http.Client) (*url.URL, *http.Client, error) {
@@ -453,6 +480,7 @@ func driveObject(item map[string]any, parentToken string) Object {
 		SizeBytes:       openAPIInt64(item["size"]),
 		MimeType:        openAPIString(item["mime_type"]),
 		FileExtension:   openAPIString(item["file_extension"]),
+		DriveType:       rawType,
 		StableID:        token,
 	}
 	if isFolder {
@@ -645,6 +673,9 @@ func mapFeishuOpenAPIError(code, message string, statusCode int) error {
 		if statusCode == http.StatusUnauthorized {
 			return connector.NewError(ErrorCodeAuthInvalid, message)
 		}
+		if statusCode == http.StatusNotFound {
+			return connector.NewError(connector.ErrorCodeNotFound, message)
+		}
 		if statusCode == http.StatusForbidden {
 			return connector.NewError(connector.ErrorCodePermissionDenied, message)
 		}
@@ -658,4 +689,9 @@ func isHTMLResponse(contentType string, body []byte) bool {
 	}
 	trimmed := strings.TrimSpace(string(body))
 	return strings.HasPrefix(strings.ToLower(trimmed), "<!doctype html") || strings.HasPrefix(strings.ToLower(trimmed), "<html")
+}
+
+func isFeishuNotFound(err error) bool {
+	code, ok := connector.ErrorCodeOf(err)
+	return ok && code == connector.ErrorCodeNotFound
 }

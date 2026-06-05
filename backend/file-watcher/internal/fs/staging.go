@@ -128,6 +128,9 @@ func (s *stagingService) StageFile(_ context.Context, sourceID, documentID, vers
 	// Idempotency check: skip when the target exists with matching size and mtime.
 	if destInfo, err := os.Stat(hostDest); err == nil {
 		if destInfo.Size() == srcInfo.Size() && destInfo.ModTime().Equal(srcInfo.ModTime()) {
+			if err := os.Chmod(hostDest, 0o644); err != nil {
+				return internal.StageResult{}, fmt.Errorf("%s: chmod target: %w", internal.ErrStageFailed, err)
+			}
 			s.log.Info("staging skipped (already up-to-date)", zap.String("dest", hostDest))
 			return internal.StageResult{
 				HostPath:      hostDest,
@@ -321,6 +324,9 @@ func copyFile(src, dst string, modTime time.Time) (_ int64, retErr error) {
 		return 0, err
 	}
 	if err := os.Chtimes(tmpPath, modTime, modTime); err != nil {
+		return 0, err
+	}
+	if err := os.Chmod(tmpPath, 0o644); err != nil {
 		return 0, err
 	}
 	_ = os.Remove(dst)

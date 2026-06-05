@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ type Config struct {
 	Address                           string
 	Port                              int
 	DBDSN                             string
+	DBMigrationFile                   string
 	CoreBaseURL                       string
 	DefaultDatasetAlgoID              string
 	DefaultDatasetAlgoName            string
@@ -52,6 +54,7 @@ func defaultConfig() Config {
 		DefaultDatasetAlgoID:              "general_algo",
 		DefaultDatasetAlgoName:            "General",
 		LocalFSDefaultAgentID:             "file-watcher-local-001",
+		TempDir:                           filepath.Join(os.TempDir(), "scan-control-plane", "sourceengine"),
 		TempTTL:                           24 * time.Hour,
 		WorkerLeaseTTL:                    60 * time.Second,
 		WorkerMaxBackoff:                  10 * time.Minute,
@@ -79,6 +82,9 @@ func (c *Config) applyEnv() {
 	}
 	if dsn := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_DB_DSN")); dsn != "" {
 		c.DBDSN = dsn
+	}
+	if migrationFile := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_DB_MIGRATION_FILE")); migrationFile != "" {
+		c.DBMigrationFile = migrationFile
 	}
 	if baseURL := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_CORE_BASE_URL")); baseURL != "" {
 		c.CoreBaseURL = baseURL

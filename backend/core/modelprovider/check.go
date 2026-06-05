@@ -33,7 +33,20 @@ const (
 	minerUAcceptedMsg          = "MinerU API key accepted"
 	tavilyAcceptedMsg          = "Tavily API key accepted"
 	bingSearchAcceptedMsg      = "Bing Search API key accepted"
+	googleSearchAcceptedMsg    = "Google Custom Search API key accepted"
+	bochaSearchAcceptedMsg     = "Bocha Search API key accepted"
+	sciverseSearchAcceptedMsg  = "Sciverse API key accepted"
 )
+
+var sciverseDefaultMetaFields = []string{
+	"title",
+	"doi",
+	"doc_id",
+	"abstract",
+	"author",
+	"publication_published_year",
+	"publication_venue_name_unified",
+}
 
 // recentVerifyCache stores sha256(group_id+base_url+api_key) → expiry time for dry_run results.
 // Single-instance only; replace with Redis for multi-instance deployments.
@@ -97,7 +110,7 @@ func doProviderGroupCheck(ctx context.Context, category, providerName, baseURL, 
 	if category == "ocr" && isSupportedOCRCloudProvider(providerName) {
 		return doOCRCloudServiceCheck(ctx, providerName, baseURL, apiKey)
 	}
-	if category == "search" {
+	if usesSearchCloudServiceCheck(category, providerName) {
 		return doSearchCloudServiceCheck(ctx, providerName, baseURL, apiKey)
 	}
 	return doCheck(ctx, category, providerName, baseURL, apiKey)
@@ -112,8 +125,24 @@ func isSupportedOCRCloudProvider(providerName string) bool {
 	}
 }
 
+func isSupportedSearchCloudProvider(providerName string) bool {
+	switch normalizeProviderName(providerName) {
+	case "tavily", "bing", "bingsearch", "google", "googlesearch", "googlecustomsearch", "bocha", "bochasearch", "sciverse", "sciversesearch":
+		return true
+	default:
+		return false
+	}
+}
+
+func usesSearchCloudServiceCheck(category, providerName string) bool {
+	if category == "search" {
+		return true
+	}
+	return category == "datasource" && isSupportedSearchCloudProvider(providerName)
+}
+
 func shouldVerifyCloudServiceOnSave(category, providerName string) bool {
-	return category == "search" || category == "ocr" && isSupportedOCRCloudProvider(providerName)
+	return usesSearchCloudServiceCheck(category, providerName) || category == "ocr" && isSupportedOCRCloudProvider(providerName)
 }
 
 func doOCRCloudServiceCheck(ctx context.Context, providerName, baseURL, apiKey string) (*modelCheckResponse, error) {
@@ -133,6 +162,12 @@ func doSearchCloudServiceCheck(ctx context.Context, providerName, baseURL, apiKe
 		return doTavilySearchCloudServiceCheck(ctx, providerName, baseURL, apiKey)
 	case "bing", "bingsearch":
 		return doBingSearchCloudServiceCheck(ctx, providerName, baseURL, apiKey)
+	case "google", "googlesearch", "googlecustomsearch":
+		return doGoogleCustomSearchCloudServiceCheck(ctx, providerName, baseURL, apiKey)
+	case "bocha", "bochasearch":
+		return doBochaSearchCloudServiceCheck(ctx, providerName, baseURL, apiKey)
+	case "sciverse", "sciversesearch":
+		return doSciverseSearchCloudServiceCheck(ctx, providerName, baseURL, apiKey)
 	default:
 		return &modelCheckResponse{Success: false, Message: "unsupported search cloud service"}, nil
 	}
@@ -221,6 +256,75 @@ func doBingSearchCloudServiceCheck(ctx context.Context, providerName, baseURL, a
 	return doSearchServiceCheckRequest(req, providerName, baseURL, apiKey, bingSearchAcceptedMsg)
 }
 
+func doGoogleCustomSearchCloudServiceCheck(ctx context.Context, providerName, baseURL, credential string) (*modelCheckResponse, error) {
+	apiKey, searchEngineID := splitGoogleCustomSearchCredential(credential)
+	if apiKey == "" || searchEngineID == "" {
+		return &modelCheckResponse{
+			Success: false,
+			Message: "Google Custom Search requires API Key and Search Engine ID",
+			Source:  providerName,
+			URL:     baseURL,
+		}, nil
+	}
+	endpoint, err := addQueryParams(googleCustomSearchEndpoint(baseURL), url.Values{
+		"key": []string{apiKey},
+		"cx":  []string{searchEngineID},
+		"q":   []string{"lazymind key check"},
+		"num": []string{"1"},
+	})
+	if err != nil {
+		return &modelCheckResponse{Success: false, Message: safeCheckMessage(err.Error(), credential), Source: providerName, URL: baseURL}, nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return &modelCheckResponse{Success: false, Message: safeCheckMessage(err.Error(), credential), Source: providerName, URL: baseURL}, nil
+	}
+
+	return doSearchServiceCheckRequest(req, providerName, baseURL, credential, googleSearchAcceptedMsg)
+}
+
+func doBochaSearchCloudServiceCheck(ctx context.Context, providerName, baseURL, apiKey string) (*modelCheckResponse, error) {
+	payload := map[string]any{
+		"query": "lazymind key check",
+		"count": 1,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal bocha check body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, bochaSearchEndpoint(baseURL), bytes.NewReader(body))
+	if err != nil {
+		return &modelCheckResponse{Success: false, Message: safeCheckMessage(err.Error(), apiKey)}, nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	return doSearchServiceCheckRequest(req, providerName, baseURL, apiKey, bochaSearchAcceptedMsg)
+}
+
+func doSciverseSearchCloudServiceCheck(ctx context.Context, providerName, baseURL, apiKey string) (*modelCheckResponse, error) {
+	payload := map[string]any{
+		"fields":    sciverseDefaultMetaFields,
+		"page":      1,
+		"query":     "lazymind key check",
+		"page_size": 1,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal sciverse check body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sciverseMetaSearchEndpoint(baseURL), bytes.NewReader(body))
+	if err != nil {
+		return &modelCheckResponse{Success: false, Message: safeCheckMessage(err.Error(), apiKey)}, nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	return doSearchServiceCheckRequest(req, providerName, baseURL, apiKey, sciverseSearchAcceptedMsg)
+}
+
 func minerUFileURLBatchEndpoint(baseURL string) string {
 	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if strings.HasSuffix(base, "/file-urls/batch") {
@@ -243,6 +347,34 @@ func bingSearchEndpoint(baseURL string) string {
 		return base
 	}
 	return common.JoinURL(base, "v7.0/search")
+}
+
+func googleCustomSearchEndpoint(baseURL string) string {
+	return strings.TrimRight(strings.TrimSpace(baseURL), "/")
+}
+
+func bochaSearchEndpoint(baseURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if strings.HasSuffix(base, "/v1/web-search") {
+		return base
+	}
+	return common.JoinURL(base, "v1/web-search")
+}
+
+func sciverseMetaSearchEndpoint(baseURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if strings.HasSuffix(base, "/meta-search") {
+		return base
+	}
+	return common.JoinURL(base, "meta-search")
+}
+
+func splitGoogleCustomSearchCredential(credential string) (string, string) {
+	parts := strings.SplitN(strings.TrimSpace(credential), "|", 2)
+	if len(parts) != 2 {
+		return strings.TrimSpace(credential), ""
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 }
 
 func addQueryParams(rawURL string, values url.Values) (string, error) {
@@ -425,8 +557,8 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 	source := strings.TrimSpace(req.ProviderName)
 	urlStr := strings.TrimSpace(req.BaseURL)
 	apiKey := strings.TrimSpace(req.APIKey)
-	if source == "" || urlStr == "" || apiKey == "" {
-		common.ReplyErr(w, "provider_name, base_url, and api_key are required", http.StatusBadRequest)
+	if source == "" || urlStr == "" {
+		common.ReplyErr(w, "provider_name and base_url are required", http.StatusBadRequest)
 		return
 	}
 
@@ -453,6 +585,33 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", parentID, userID).
 		Take(&parent).Error; err != nil {
 		common.ReplyErr(w, "model provider not found", http.StatusNotFound)
+		return
+	}
+	apiKeyRequired := isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, urlStr)
+	if apiKey == "" && apiKeyRequired {
+		common.ReplyErr(w, "api_key is required when using the default base_url", http.StatusBadRequest)
+		return
+	}
+	if apiKey == "" {
+		if !req.DryRun {
+			now := time.Now()
+			tx := db.WithContext(r.Context()).
+				Model(&orm.UserModelProviderGroup{}).
+				Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parentID, userID).
+				Updates(map[string]interface{}{
+					"is_verified": true,
+					"updated_at":  now,
+				})
+			if tx.Error != nil {
+				common.ReplyErr(w, "update group verify status failed", http.StatusInternalServerError)
+				return
+			}
+			if tx.RowsAffected == 0 {
+				common.ReplyErr(w, "group not found", http.StatusNotFound)
+				return
+			}
+		}
+		common.ReplyOK(w, CheckModelProviderData{Success: true})
 		return
 	}
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -164,6 +166,73 @@ func TestEnabledConnectorTypesIncludesLocalFSAndFeishu(t *testing.T) {
 	}
 }
 
+func TestConnectorRegistryWiresTempObjectStore(t *testing.T) {
+	t.Parallel()
+
+	temp := worker.NewFileTempObjectStore(t.TempDir())
+	stagedPath := t.TempDir() + "/local.md"
+	if err := os.WriteFile(stagedPath, []byte("local content"), 0o600); err != nil {
+		t.Fatalf("write local staged file: %v", err)
+	}
+	agent := &appLocalAgentStub{contentURI: "file://" + stagedPath}
+	registry, err := connectorRegistryFromTypes(
+		[]connector.ConnectorType{localfs.ConnectorType, feishu.ConnectorType},
+		agent,
+		"agent-default",
+		"/host/root",
+		&appFeishuAuthStub{},
+		&appFeishuAPIStub{},
+		temp,
+	)
+	if err != nil {
+		t.Fatalf("build registry: %v", err)
+	}
+
+	localConn, err := registry.Get(localfs.ConnectorType)
+	if err != nil {
+		t.Fatalf("get local_fs connector: %v", err)
+	}
+	localTyped, ok := localConn.(*localfs.LocalFSConnector)
+	if !ok {
+		t.Fatalf("local_fs connector = %T", localConn)
+	}
+	localExported, err := localTyped.ExportObject(context.Background(), connector.ExportObjectRequest{
+		ObjectKey:     "local_fs:agent-default:path:/host/root/a.md",
+		SourceVersion: "1:1",
+		ProviderMeta:  connector.ProviderMeta{"agent_id": "agent-default", "path": "/host/root/a.md"},
+	})
+	if err != nil {
+		t.Fatalf("export local_fs through wired registry: %v", err)
+	}
+	if !strings.HasPrefix(localExported.ContentURI, "scan-temp://") {
+		t.Fatalf("local_fs export did not use temp store: %+v", localExported)
+	}
+
+	feishuConn, err := registry.Get(feishu.ConnectorType)
+	if err != nil {
+		t.Fatalf("get feishu connector: %v", err)
+	}
+	feishuTyped, ok := feishuConn.(*feishu.FeishuConnector)
+	if !ok {
+		t.Fatalf("feishu connector = %T", feishuConn)
+	}
+	feishuExported, err := feishuTyped.ExportObject(context.Background(), connector.ExportObjectRequest{
+		ObjectKey:     "feishu:drive:file-a",
+		SourceVersion: "rev-a",
+		ProviderMeta: connector.ProviderMeta{
+			"auth_connection_id": "auth-1",
+			"kind":               string(feishu.ObjectKindDriveFile),
+			"token":              "file-a",
+		},
+	})
+	if err != nil {
+		t.Fatalf("export feishu through wired registry: %v", err)
+	}
+	if !strings.HasPrefix(feishuExported.ContentURI, "scan-temp://") {
+		t.Fatalf("feishu export did not use temp store: %+v", feishuExported)
+	}
+}
+
 func TestRuntimeStartEnqueuesDueSyncRuns(t *testing.T) {
 	t.Parallel()
 
@@ -195,4 +264,77 @@ type runtimeSchedulerSpy struct {
 func (s *runtimeSchedulerSpy) EnqueueDueSyncRuns(_ context.Context, limit int) ([]schedule.SyncRunIntent, error) {
 	s.calls <- limit
 	return nil, nil
+}
+
+type appLocalAgentStub struct {
+	contentURI string
+}
+
+func (a *appLocalAgentStub) ValidatePath(context.Context, localfs.ValidatePathRequest) (localfs.PathInfo, error) {
+	return localfs.PathInfo{}, fmt.Errorf("not implemented")
+}
+
+func (a *appLocalAgentStub) ListDir(context.Context, localfs.ListDirRequest) (localfs.ListDirPage, error) {
+	return localfs.ListDirPage{}, fmt.Errorf("not implemented")
+}
+
+func (a *appLocalAgentStub) StatPath(context.Context, localfs.StatPathRequest) (localfs.PathInfo, error) {
+	return localfs.PathInfo{}, fmt.Errorf("not implemented")
+}
+
+func (a *appLocalAgentStub) ExportFile(_ context.Context, req localfs.ExportFileRequest) (localfs.ExportedFile, error) {
+	if req.ExpectedVersion != "1:1" {
+		return localfs.ExportedFile{}, fmt.Errorf("unexpected version %q", req.ExpectedVersion)
+	}
+	return localfs.ExportedFile{
+		ContentURI:    a.contentURI,
+		SizeBytes:     1,
+		MTimeUnixNano: 1,
+		MimeType:      "text/markdown",
+		FileExtension: ".md",
+	}, nil
+}
+
+type appFeishuAuthStub struct{}
+
+func (a *appFeishuAuthStub) GetToken(context.Context, feishu.TokenRequest) (feishu.Token, error) {
+	return feishu.Token{AccessToken: "token"}, nil
+}
+
+type appFeishuAPIStub struct{}
+
+func (a *appFeishuAPIStub) GetDriveRoot(context.Context, string) (feishu.Object, error) {
+	return feishu.Object{}, fmt.Errorf("not implemented")
+}
+
+func (a *appFeishuAPIStub) GetDriveFolder(context.Context, string, string) (feishu.Object, error) {
+	return feishu.Object{}, fmt.Errorf("not implemented")
+}
+
+func (a *appFeishuAPIStub) ListDriveChildren(context.Context, string, string, string, int) (feishu.ObjectPage, error) {
+	return feishu.ObjectPage{}, fmt.Errorf("not implemented")
+}
+
+func (a *appFeishuAPIStub) DownloadDriveFile(context.Context, string, string, string) (feishu.ExportedContent, error) {
+	return feishu.ExportedContent{Content: []byte("drive content"), ExportedVersion: "rev-a"}, nil
+}
+
+func (a *appFeishuAPIStub) ExportDriveDocumentMarkdown(context.Context, string, string, string) (feishu.ExportedContent, error) {
+	return feishu.ExportedContent{Content: []byte("drive content"), MimeType: "text/markdown", FileExtension: ".md", ExportedVersion: "rev-a"}, nil
+}
+
+func (a *appFeishuAPIStub) ListWikiSpaces(context.Context, string, string, int) (feishu.ObjectPage, error) {
+	return feishu.ObjectPage{}, fmt.Errorf("not implemented")
+}
+
+func (a *appFeishuAPIStub) GetWikiNode(context.Context, string, string, string) (feishu.Object, error) {
+	return feishu.Object{}, fmt.Errorf("not implemented")
+}
+
+func (a *appFeishuAPIStub) ListWikiChildren(context.Context, string, string, string, string, int) (feishu.ObjectPage, error) {
+	return feishu.ObjectPage{}, fmt.Errorf("not implemented")
+}
+
+func (a *appFeishuAPIStub) ExportWikiNodeMarkdown(context.Context, string, string, string, string) (feishu.ExportedContent, error) {
+	return feishu.ExportedContent{}, fmt.Errorf("not implemented")
 }

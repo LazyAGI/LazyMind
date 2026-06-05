@@ -168,23 +168,10 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// When the user's base_url matches the catalog default, api_key is required.
-	if apiKey == "" && isDefaultBaseURL(r.Context(), db, parent.DefaultModelProviderID, baseURL) {
-		common.ReplyErr(w, "api_key is required when using the default base_url", http.StatusBadRequest)
-		return
-	}
+	apiKeyRequired := isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, baseURL)
 
 	var checkData *CheckModelProviderData
-	if shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
-		if apiKey == "" {
-			common.ReplyErrWithData(
-				w,
-				"verification failed: api_key is required",
-				CheckModelProviderData{Success: false, Message: "api_key is required"},
-				http.StatusBadRequest,
-			)
-			return
-		}
+	if apiKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
 		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, apiKey)
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
@@ -211,7 +198,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		Name:                name,
 		BaseURL:             baseURL,
 		APIKey:              apiKey,
-		IsVerified:          checkData != nil,
+		IsVerified:          checkData != nil || !apiKeyRequired,
 		BaseModel: orm.BaseModel{
 			CreateUserID:   userID,
 			CreateUserName: userName,
@@ -269,8 +256,8 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(req.Name)
 	baseURL := strings.TrimSpace(req.BaseURL)
 	apiKey := strings.TrimSpace(req.APIKey)
-	if name == "" || baseURL == "" {
-		common.ReplyErr(w, "name and base_url are required", http.StatusBadRequest)
+	if baseURL == "" {
+		common.ReplyErr(w, "base_url is required", http.StatusBadRequest)
 		return
 	}
 
@@ -300,6 +287,10 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if name == "" {
+		name = row.Name
+	}
+
 	now := time.Now()
 	updates := map[string]interface{}{
 		"name":       name,
@@ -313,15 +304,13 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		updates["base_url"] = row.BaseURL
 	}
 
-	// When the effective base_url matches the catalog default, api_key must not be empty.
-	effectiveBaseURL := baseURL
-	if apiKey == "" && row.APIKey == "" && isDefaultBaseURL(r.Context(), db, parent.DefaultModelProviderID, effectiveBaseURL) {
-		common.ReplyErr(w, "api_key is required when using the default base_url", http.StatusBadRequest)
-		return
-	}
+	baseURLChanged := normalizeBaseURLForCompare(baseURL) != normalizeBaseURLForCompare(row.BaseURL)
 
-	if baseURL != row.BaseURL {
+	skipVerify := false
+	if baseURLChanged {
 		updates["is_verified"] = false
+		updates["api_key"] = ""
+		skipVerify = true
 	}
 	if apiKey != "" {
 		updates["api_key"] = apiKey
@@ -332,19 +321,13 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 
 	var checkData *CheckModelProviderData
 	effectiveAPIKey := apiKey
-	if effectiveAPIKey == "" {
+	if effectiveAPIKey == "" && !baseURLChanged {
 		effectiveAPIKey = row.APIKey
 	}
-	if shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
-		if effectiveAPIKey == "" {
-			common.ReplyErrWithData(
-				w,
-				"verification failed: api_key is required",
-				CheckModelProviderData{Success: false, Message: "api_key is required"},
-				http.StatusBadRequest,
-			)
-			return
-		}
+	if effectiveAPIKey == "" {
+		updates["is_verified"] = true
+	}
+	if !skipVerify && effectiveAPIKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
 		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey)
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
@@ -367,16 +350,20 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 
 	// verify=true: run connectivity check before persisting; on success mark is_verified=true atomically.
 	if req.Verify && checkData == nil {
-		checkResult, checkErr := doCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey)
-		if checkErr != nil || !checkResult.Success {
-			msg := "verification failed"
-			if checkResult != nil {
-				msg = "verification failed: " + checkResult.Message
+		if effectiveAPIKey == "" {
+			updates["is_verified"] = true
+		} else {
+			checkResult, checkErr := doCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey)
+			if checkErr != nil || !checkResult.Success {
+				msg := "verification failed"
+				if checkResult != nil {
+					msg = "verification failed: " + checkResult.Message
+				}
+				common.ReplyErr(w, msg, http.StatusBadGateway)
+				return
 			}
-			common.ReplyErr(w, msg, http.StatusBadGateway)
-			return
+			updates["is_verified"] = true
 		}
-		updates["is_verified"] = true
 	}
 	if err := db.WithContext(r.Context()).Model(&row).Updates(updates).Error; err != nil {
 		common.ReplyErr(w, "update group failed", http.StatusInternalServerError)
@@ -512,6 +499,28 @@ func normalizeBaseURLForCompare(s string) string {
 	return s
 }
 
+func defaultBaseURL(ctx context.Context, db *gorm.DB, defaultProviderID string) (string, bool) {
+	if db == nil || strings.TrimSpace(defaultProviderID) == "" {
+		return "", false
+	}
+	var catalog orm.DefaultModelProvider
+	if err := db.WithContext(ctx).
+		Where("id = ? AND deleted_at IS NULL", defaultProviderID).
+		Take(&catalog).Error; err != nil {
+		return "", false
+	}
+	return catalog.BaseURL, true
+}
+
+func isCustomBaseURL(ctx context.Context, db *gorm.DB, defaultProviderID, baseURL string) bool {
+	defaultURL, ok := defaultBaseURL(ctx, db, defaultProviderID)
+	return ok && normalizeBaseURLForCompare(baseURL) != normalizeBaseURLForCompare(defaultURL)
+}
+
+func isAPIKeyRequiredForBaseURL(ctx context.Context, db *gorm.DB, defaultProviderID, baseURL string) bool {
+	return !isCustomBaseURL(ctx, db, defaultProviderID, baseURL)
+}
+
 // seedGroupModelsFromDefaults inserts user_model_provider_group_models from default_models when the group's
 // base_url matches the catalog DefaultModelProvider.base_url for parent.DefaultModelProviderID.
 func seedGroupModelsFromDefaults(
@@ -574,14 +583,219 @@ func seedGroupModelsFromDefaults(
 // isDefaultBaseURL reports whether the given base_url matches the catalog default for the provider.
 // When true, the user is using the official hosted service and api_key is required.
 func isDefaultBaseURL(ctx context.Context, db *gorm.DB, defaultProviderID, baseURL string) bool {
-	if defaultProviderID == "" {
+	defaultURL, ok := defaultBaseURL(ctx, db, defaultProviderID)
+	if !ok {
 		return false
 	}
-	var catalog orm.DefaultModelProvider
-	if err := db.WithContext(ctx).
-		Where("id = ? AND deleted_at IS NULL", defaultProviderID).
-		Take(&catalog).Error; err != nil {
-		return false
+	return normalizeBaseURLForCompare(baseURL) == normalizeBaseURLForCompare(defaultURL)
+}
+
+type addKeyRequest struct {
+	APIKey string `json:"api_key"`
+}
+
+type addKeyResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+}
+
+type removeKeyRequest struct {
+	APIKey string `json:"api_key"`
+}
+
+// AddKey validates and appends a single API key to the group.
+// POST /model_providers/{model_provider_id}/groups/{group_id}/keys
+func AddKey(w http.ResponseWriter, r *http.Request) {
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
 	}
-	return normalizeBaseURLForCompare(baseURL) == normalizeBaseURLForCompare(catalog.BaseURL)
+	userID := strings.TrimSpace(store.UserID(r))
+	if userID == "" {
+		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
+		return
+	}
+
+	parentID := strings.TrimSpace(mux.Vars(r)["model_provider_id"])
+	groupID := strings.TrimSpace(mux.Vars(r)["group_id"])
+	if parentID == "" || groupID == "" {
+		common.ReplyErr(w, "missing model_provider_id or group_id", http.StatusBadRequest)
+		return
+	}
+
+	var req addKeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	newKey := strings.TrimSpace(req.APIKey)
+	if newKey == "" {
+		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
+		return
+	}
+
+	var parent orm.UserModelProvider
+	err := db.WithContext(r.Context()).
+		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", parentID, userID).
+		Take(&parent).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ReplyErr(w, "model provider not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
+		return
+	}
+
+	var row orm.UserModelProviderGroup
+	err = db.WithContext(r.Context()).
+		Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parent.ID, userID).
+		Take(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ReplyErr(w, "group not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query group failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Check for duplicate.
+	existing := splitAPIKeys(row.APIKey)
+	for _, k := range existing {
+		if k == newKey {
+			common.ReplyErr(w, "api_key already exists", http.StatusConflict)
+			return
+		}
+	}
+
+	// Verify the key before storing.
+	checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, row.BaseURL, newKey)
+	if checkErr != nil || checkResult == nil || !checkResult.Success {
+		msg := "verification failed"
+		if checkResult != nil && strings.TrimSpace(checkResult.Message) != "" {
+			msg = strings.TrimSpace(checkResult.Message)
+		}
+		common.ReplyErrWithData(w, "verification failed: "+msg, CheckModelProviderData{Success: false, Message: msg}, http.StatusBadGateway)
+		return
+	}
+
+	// Append the new key.
+	existing = append(existing, newKey)
+	updatedKeys := strings.Join(existing, "\n")
+	now := time.Now()
+	if err := db.WithContext(r.Context()).Model(&row).Updates(map[string]interface{}{
+		"api_key":     updatedKeys,
+		"is_verified": true,
+		"updated_at":  now,
+	}).Error; err != nil {
+		common.ReplyErr(w, "update api_key failed", http.StatusInternalServerError)
+		return
+	}
+
+	common.ReplyOK(w, addKeyResponse{Success: true, Message: checkResult.Message})
+}
+
+// RemoveKey removes a specific API key by exact match from the group.
+// DELETE /model_providers/{model_provider_id}/groups/{group_id}/keys
+func RemoveKey(w http.ResponseWriter, r *http.Request) {
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	userID := strings.TrimSpace(store.UserID(r))
+	if userID == "" {
+		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
+		return
+	}
+
+	parentID := strings.TrimSpace(mux.Vars(r)["model_provider_id"])
+	groupID := strings.TrimSpace(mux.Vars(r)["group_id"])
+	if parentID == "" || groupID == "" {
+		common.ReplyErr(w, "missing model_provider_id or group_id", http.StatusBadRequest)
+		return
+	}
+
+	var req removeKeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	targetKey := strings.TrimSpace(req.APIKey)
+	if targetKey == "" {
+		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
+		return
+	}
+
+	var parent orm.UserModelProvider
+	err := db.WithContext(r.Context()).
+		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", parentID, userID).
+		Take(&parent).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ReplyErr(w, "model provider not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
+		return
+	}
+
+	var row orm.UserModelProviderGroup
+	err = db.WithContext(r.Context()).
+		Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parent.ID, userID).
+		Take(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ReplyErr(w, "group not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, "query group failed", http.StatusInternalServerError)
+		return
+	}
+
+	existing := splitAPIKeys(row.APIKey)
+	found := false
+	filtered := make([]string, 0, len(existing))
+	for _, k := range existing {
+		if k == targetKey {
+			found = true
+		} else {
+			filtered = append(filtered, k)
+		}
+	}
+	if !found {
+		common.ReplyErr(w, "api_key not found", http.StatusNotFound)
+		return
+	}
+
+	now := time.Now()
+	updatedKeys := strings.Join(filtered, "\n")
+	if err := db.WithContext(r.Context()).Model(&row).Updates(map[string]interface{}{
+		"api_key":     updatedKeys,
+		"is_verified": len(filtered) > 0,
+		"updated_at":  now,
+	}).Error; err != nil {
+		common.ReplyErr(w, "update api_key failed", http.StatusInternalServerError)
+		return
+	}
+
+	common.ReplyOK(w, map[string]bool{"success": true})
+}
+
+func splitAPIKeys(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, "\n")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

@@ -52,3 +52,22 @@ func TestSkillDraftPreviewRouteWinsOverGenericSkillRoute(t *testing.T) {
 		t.Fatalf("expected skill_id %q, got %q", "skill-306c5b7b", gotID)
 	}
 }
+
+func TestListDocumentsByDatasetsRouteRegistered(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+
+	req := httptest.NewRequest(http.MethodPost, "/documents:listByDatasets", nil)
+	var match mux.RouteMatch
+	if !r.Match(req, &match) {
+		t.Fatalf("expected listByDatasets route to match")
+	}
+
+	gotTemplate, err := match.Route.GetPathTemplate()
+	if err != nil {
+		t.Fatalf("get matched route template: %v", err)
+	}
+	if want := "/documents:listByDatasets"; gotTemplate != want {
+		t.Fatalf("expected template %q, got %q", want, gotTemplate)
+	}
+}

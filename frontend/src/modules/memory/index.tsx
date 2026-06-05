@@ -4023,7 +4023,6 @@ export default function MemoryManagement() {
               childPayloads = draft.childSkills.map((child) => ({
                 name: child.name.trim(),
                 description: child.description.trim(),
-                tags: normalizeTagValues(child.tags),
                 content: child.content.trim(),
                 file_ext: inferSkillFileExt(undefined, child.content),
                 is_locked: Boolean(payload.protect),

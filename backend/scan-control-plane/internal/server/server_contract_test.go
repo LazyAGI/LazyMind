@@ -32,7 +32,7 @@ func TestOpenAPIDocumentsSeparateTargetTreeAndSourceTreeContracts(t *testing.T) 
 			t.Fatalf("target tree request missing source-target field %s", field)
 		}
 	}
-	for _, field := range []string{"binding_id", "tree_key", "parent_key", "state_filter"} {
+	for _, field := range []string{"binding_id", "tree_key", "parent_key", "state_filter", "use_cache"} {
 		if _, ok := sourceProps[field]; !ok {
 			t.Fatalf("source tree request missing indexed-tree field %s", field)
 		}

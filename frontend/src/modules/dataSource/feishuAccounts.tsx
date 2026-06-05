@@ -27,6 +27,7 @@ import { useNavigate } from "react-router-dom";
 import {
   CloudOauthApi,
   Configuration as AuthConfiguration,
+  type CloudConnectionUpdateBody,
   type CloudConnectionResponse,
 } from "@/api/generated/auth-client";
 import { AgentAppsAuth } from "@/components/auth";
@@ -44,9 +45,6 @@ import {
 import {
   createFeishuAccountId,
   getOAuthStateFromConnection,
-  loadFeishuAuthAccounts,
-  persistFeishuAppSetup,
-  persistFeishuAuthAccounts,
   type FeishuAccountFormValues,
   type FeishuAuthAccount,
 } from "./common/feishuAccounts";
@@ -229,9 +227,7 @@ export default function FeishuAccountPage() {
   const navigate = useNavigate();
   const [form] = Form.useForm<FeishuAccountFormValues>();
   const callbackUrl = getFeishuDataSourceCallbackUrl();
-  const [accounts, setAccounts] = useState<FeishuAuthAccount[]>(() =>
-    loadFeishuAuthAccounts(),
-  );
+  const [accounts, setAccounts] = useState<FeishuAuthAccount[]>([]);
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
@@ -243,7 +239,6 @@ export default function FeishuAccountPage() {
 
   const persistAccounts = (nextAccounts: FeishuAuthAccount[]) => {
     setAccounts(nextAccounts);
-    persistFeishuAuthAccounts(nextAccounts);
   };
 
   const refreshAccounts = useCallback(async () => {
@@ -254,11 +249,11 @@ export default function FeishuAccountPage() {
           provider: "feishu",
           status: null,
         });
-      const cachedAccounts = loadFeishuAuthAccounts();
-      const nextAccounts = getCloudConnectionItems(response.data).map((item) =>
-        mapCloudConnectionToFeishuAccount(item, cachedAccounts),
+      setAccounts((currentAccounts) =>
+        getCloudConnectionItems(response.data).map((item) =>
+          mapCloudConnectionToFeishuAccount(item, currentAccounts),
+        ),
       );
-      persistAccounts(nextAccounts);
     } catch (error) {
       message.error(
         getLocalizedErrorMessage(error, t("common.requestFailed")) ||
@@ -302,7 +297,6 @@ export default function FeishuAccountPage() {
             }
           : item,
       );
-      persistFeishuAuthAccounts(nextAccounts);
       return nextAccounts;
     });
     oauthAttemptRef.current = null;
@@ -333,6 +327,7 @@ export default function FeishuAccountPage() {
         const matchedAccount =
           current.find(
             (item) =>
+              item.connection?.connectionId === payload.connection.connectionId ||
               (attempt?.accountId && item.id === attempt.accountId) ||
               item.appId === attempt?.appId,
           ) ||
@@ -354,7 +349,6 @@ export default function FeishuAccountPage() {
               }
             : item,
         );
-        persistFeishuAuthAccounts(nextAccounts);
         return nextAccounts;
       });
       message.success(t("admin.dataSourceOauthSuccess"));
@@ -393,7 +387,6 @@ export default function FeishuAccountPage() {
             }
           : item,
       );
-      persistFeishuAuthAccounts(nextAccounts);
       return nextAccounts;
     });
     message.error(payload.message || t("admin.dataSourceOauthFailedRetry"));
@@ -437,9 +430,25 @@ export default function FeishuAccountPage() {
     setModalOpen(true);
   };
 
-  const startFeishuOAuth = async (account: FeishuAuthAccount) => {
+  const updateFeishuConnection = async (
+    connectionId: string,
+    body: CloudConnectionUpdateBody,
+  ) => {
+    await createCloudOauthApiClient().updateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPut(
+      {
+        connectionId,
+        cloudConnectionUpdateBody: body,
+      },
+    );
+  };
+
+  const startFeishuOAuth = async (
+    account: FeishuAuthAccount,
+    options?: { reauthorizeConnectionId?: string },
+  ) => {
     const previousState = account.status;
     const previousConnection = account.connection;
+    const reauthorizeConnectionId = options?.reauthorizeConnectionId?.trim();
 
     try {
       setAccounts((current) => {
@@ -452,22 +461,23 @@ export default function FeishuAccountPage() {
               }
             : item,
         );
-        persistFeishuAuthAccounts(nextAccounts);
         return nextAccounts;
       });
 
-      const authorizeUrl = await requestFeishuDataSourceAuthorizeUrl({
-        tenantId: getScanTenantId(),
-        appId: account.appId,
-        appSecret: account.appSecret,
-        scopes: FEISHU_DEFAULT_SCOPES,
-        returnUrl: window.location.href,
-      });
-
-      const popup = openCenteredPopup(
-        authorizeUrl,
-        t("admin.dataSourceFeishuAuthWindowTitle"),
-      );
+      const authorizeUrl = reauthorizeConnectionId
+        ? await requestFeishuDataSourceAuthorizeUrl({
+            tenantId: getScanTenantId(),
+            scopes: FEISHU_DEFAULT_SCOPES,
+            returnUrl: window.location.href,
+            reauthorizeConnectionId,
+          })
+        : await requestFeishuDataSourceAuthorizeUrl({
+            tenantId: getScanTenantId(),
+            appId: account.appId,
+            appSecret: account.appSecret,
+            scopes: FEISHU_DEFAULT_SCOPES,
+            returnUrl: window.location.href,
+          });
 
       oauthAttemptRef.current = {
         timerId: null,
@@ -478,6 +488,16 @@ export default function FeishuAccountPage() {
         accountId: account.id,
         appId: account.appId,
       };
+
+      if (reauthorizeConnectionId) {
+        window.location.assign(authorizeUrl);
+        return true;
+      }
+
+      const popup = openCenteredPopup(
+        authorizeUrl,
+        t("admin.dataSourceFeishuAuthWindowTitle"),
+      );
 
       if (popup) {
         const timerId = window.setInterval(() => {
@@ -533,7 +553,6 @@ export default function FeishuAccountPage() {
       : [nextAccount, ...accounts];
 
     persistAccounts(nextAccounts);
-    persistFeishuAppSetup({ appId, appSecret });
     return nextAccount;
   };
 
@@ -545,6 +564,66 @@ export default function FeishuAccountPage() {
     setSubmitting(true);
     try {
       const values = await form.validateFields();
+      const existingAccount = editingAccountId
+        ? accounts.find((item) => item.id === editingAccountId)
+        : null;
+      const connectionId = existingAccount?.connection?.connectionId?.trim();
+
+      if (existingAccount && connectionId) {
+        const appId = values.appId.trim();
+        const appSecret = values.appSecret.trim();
+        const displayName = `${values.name || ""}`.trim() || existingAccount.name || appId;
+        const updateBody: CloudConnectionUpdateBody = {
+          display_name: displayName,
+          name: displayName,
+          client_id: appId,
+          app_id: appId,
+          client_secret: appSecret,
+          app_secret: appSecret,
+          provider_account_meta: {
+            ...(existingAccount.connection
+              ? {
+                  account_name: existingAccount.connection.accountName,
+                  open_id: existingAccount.connection.openId,
+                  tenant_key: existingAccount.connection.tenantKey,
+                }
+              : {}),
+            client_id: appId,
+            app_id: appId,
+            name: displayName,
+            display_name: displayName,
+          },
+        };
+
+        await updateFeishuConnection(connectionId, updateBody);
+
+        const now = new Date().toISOString();
+        const updatedAccount: FeishuAuthAccount = {
+          ...existingAccount,
+          name: displayName,
+          appId,
+          appSecret,
+          updatedAt: now,
+          connection: existingAccount.connection
+            ? {
+                ...existingAccount.connection,
+                accountName: displayName,
+              }
+            : existingAccount.connection,
+        };
+        const nextAccounts = accounts.map((item) =>
+          item.id === existingAccount.id ? updatedAccount : item,
+        );
+        persistAccounts(nextAccounts);
+        setModalOpen(false);
+        setEditingAccountId(null);
+        message.success(t("admin.dataSourceFeishuCredentialSaved"));
+        await startFeishuOAuth(updatedAccount, {
+          reauthorizeConnectionId: connectionId,
+        });
+        return;
+      }
+
       const account = upsertAccount(values);
       setModalOpen(false);
       setEditingAccountId(null);
@@ -556,15 +635,21 @@ export default function FeishuAccountPage() {
   };
 
   const handleAuthorizeAccount = (account: FeishuAuthAccount) => {
+    const connectionId = account.connection?.connectionId?.trim();
+
+    if (connectionId) {
+      void startFeishuOAuth(account, {
+        reauthorizeConnectionId: connectionId,
+      });
+      return;
+    }
+
     if (!account.appId || !account.appSecret) {
       openAccountModal(account);
       message.warning(t("admin.dataSourceFeishuCredentialFirst"));
       return;
     }
-    persistFeishuAppSetup({
-      appId: account.appId,
-      appSecret: account.appSecret,
-    });
+
     void startFeishuOAuth(account);
   };
 
@@ -577,21 +662,58 @@ export default function FeishuAccountPage() {
       okText: t("common.confirm"),
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
-      onOk: () => {
+      onOk: async () => {
+        const connectionId = account.connection?.connectionId?.trim();
+        if (connectionId) {
+          try {
+            await createCloudOauthApiClient().deleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDelete(
+              {
+                connectionId,
+              },
+            );
+          } catch (error: any) {
+            message.error(
+              getLocalizedErrorMessage(error, t("admin.dataSourceDeleteFailed")) ||
+                t("admin.dataSourceDeleteFailed"),
+            );
+            throw error;
+          }
+        }
+
         persistAccounts(accounts.filter((item) => item.id !== account.id));
+        if (connectionId) {
+          await refreshAccounts();
+        }
       },
     });
   };
 
   const handleToggleChat = (account: FeishuAuthAccount, checked: boolean) => {
+    const connectionId = account.connection?.connectionId?.trim();
+    const previousAccounts = accounts;
+
     setAccounts((current) => {
       const nextAccounts = current.map((item) =>
         item.id === account.id
           ? { ...item, chatEnabled: checked, updatedAt: new Date().toISOString() }
           : item,
       );
-      persistFeishuAuthAccounts(nextAccounts);
       return nextAccounts;
+    });
+
+    if (!connectionId) {
+      return;
+    }
+
+    updateFeishuConnection(connectionId, {
+      chat_enabled: checked,
+      chatEnabled: checked,
+    }).catch((error: any) => {
+      persistAccounts(previousAccounts);
+      message.error(
+        getLocalizedErrorMessage(error, t("common.requestFailed")) ||
+          t("common.requestFailed"),
+      );
     });
   };
 

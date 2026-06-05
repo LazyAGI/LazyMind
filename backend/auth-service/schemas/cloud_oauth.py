@@ -8,11 +8,12 @@ class CloudOAuthAuthorizeURLBody(BaseModel):
     tenant_id: str = ''
     owner_user_id: str | None = None
     auth_mode: str = 'oauth_user'
-    client_id: str
-    client_secret: str
+    client_id: str | None = None
+    client_secret: str | None = None
     redirect_uri: str | None = None
     scope: str | None = None
     state: str | None = None
+    reauthorize_connection_id: str | None = None
     provider_options: dict[str, Any] | None = None
 
 
@@ -25,6 +26,21 @@ class CloudOAuthAuthorizeURLResponse(BaseModel):
     scope: str = ''
     authorize_url: str
     state: str
+
+
+class CloudOAuthAppCredentialBody(BaseModel):
+    client_id: str
+    client_secret: str | None = None
+    provider_options: dict[str, Any] | None = None
+
+
+class CloudOAuthAppCredentialResponse(BaseModel):
+    provider: str
+    app_id: str = ''
+    secret_configured: bool = False
+    status: str = ''
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class CloudOAuthCallbackBody(BaseModel):
@@ -63,6 +79,7 @@ class CloudConnectionResponse(BaseModel):
     display_name: str = ''
     provider_tenant_key: str = ''
     provider_account_meta: dict[str, Any] | None = None
+    provider_options: dict[str, Any] | None = None
     scope: str = ''
     last_used_at: datetime | None = None
     status: str
@@ -91,6 +108,28 @@ class CloudConnectionVerifyResponse(BaseModel):
 
 class CloudConnectionListResponse(BaseModel):
     items: list[CloudConnectionResponse]
+
+
+class CloudConnectionDeleteResponse(BaseModel):
+    connection_id: str
+    status: str = Field(default='REVOKED')
+    deleted: bool = True
+
+
+class CloudConnectionUpdateBody(BaseModel):
+    display_name: str | None = None
+    displayName: str | None = None
+    name: str | None = None
+    client_id: str | None = None
+    app_id: str | None = None
+    appId: str | None = None
+    client_secret: str | None = None
+    app_secret: str | None = None
+    appSecret: str | None = None
+    provider_options: dict[str, Any] | None = None
+    provider_account_meta: dict[str, Any] | None = None
+    chat_enabled: bool | None = None
+    chatEnabled: bool | None = None
 
 
 class CloudConnectionCreateBody(BaseModel):

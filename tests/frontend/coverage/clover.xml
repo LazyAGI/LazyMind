@@ -2,7 +2,7 @@
 <coverage generated="1778551650052" clover="3.2.0">
   <project timestamp="1778551650052" name="All files">
     <metrics statements="13" coveredstatements="13" conditionals="2" coveredconditionals="2" methods="1" coveredmethods="1" elements="16" coveredelements="16" complexity="0" loc="13" ncloc="13" packages="1" files="1" classes="1"/>
-    <file name="setup.js" path="/home/mnt/huangchongjin/LazyRAG/tests/frontend/setup.js">
+    <file name="setup.js" path="/home/mnt/huangchongjin/LazyMind/tests/frontend/setup.js">
       <metrics statements="13" coveredstatements="13" conditionals="2" coveredconditionals="2" methods="1" coveredmethods="1"/>
       <line num="1" count="1" type="stmt"/>
       <line num="5" count="1" type="stmt"/>

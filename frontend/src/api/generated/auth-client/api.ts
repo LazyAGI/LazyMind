@@ -51,6 +51,11 @@ export interface CloudConnectionCreateResponse {
     'scope'?: string;
     'status'?: string;
 }
+export interface CloudConnectionDeleteResponse {
+    'connection_id': string;
+    'status'?: string;
+    'deleted'?: boolean;
+}
 export interface CloudConnectionListResponse {
     'items': Array<CloudConnectionResponse>;
 }
@@ -60,10 +65,12 @@ export interface CloudConnectionResponse {
     'owner_user_id'?: string;
     'provider': string;
     'auth_mode': string;
+    'app_id'?: string;
     'provider_account_id'?: string;
     'display_name'?: string;
     'provider_tenant_key'?: string;
     'provider_account_meta'?: { [key: string]: any; } | null;
+    'provider_options'?: { [key: string]: any; } | null;
     'scope'?: string;
     'last_used_at'?: string | null;
     'status': string;
@@ -80,6 +87,21 @@ export interface CloudConnectionTokenResponse {
     'expires_at'?: string | null;
     'status'?: string;
 }
+export interface CloudConnectionUpdateBody {
+    'display_name'?: string | null;
+    'displayName'?: string | null;
+    'name'?: string | null;
+    'client_id'?: string | null;
+    'app_id'?: string | null;
+    'appId'?: string | null;
+    'client_secret'?: string | null;
+    'app_secret'?: string | null;
+    'appSecret'?: string | null;
+    'provider_options'?: { [key: string]: any; } | null;
+    'provider_account_meta'?: { [key: string]: any; } | null;
+    'chat_enabled'?: boolean | null;
+    'chatEnabled'?: boolean | null;
+}
 export interface CloudConnectionVerifyResponse {
     'connection_id': string;
     'tenant_id': string;
@@ -87,15 +109,29 @@ export interface CloudConnectionVerifyResponse {
     'provider': string;
     'status'?: string;
 }
+export interface CloudOAuthAppCredentialBody {
+    'client_id': string;
+    'client_secret'?: string | null;
+    'provider_options'?: { [key: string]: any; } | null;
+}
+export interface CloudOAuthAppCredentialResponse {
+    'provider': string;
+    'app_id'?: string;
+    'secret_configured'?: boolean;
+    'status'?: string;
+    'created_at'?: string | null;
+    'updated_at'?: string | null;
+}
 export interface CloudOAuthAuthorizeURLBody {
     'tenant_id'?: string;
     'owner_user_id'?: string | null;
     'auth_mode'?: string;
-    'client_id': string;
-    'client_secret': string;
+    'client_id'?: string | null;
+    'client_secret'?: string | null;
     'redirect_uri'?: string | null;
     'scope'?: string | null;
     'state'?: string | null;
+    'reauthorize_connection_id'?: string | null;
     'provider_options'?: { [key: string]: any; } | null;
 }
 export interface CloudOAuthAuthorizeURLResponse {
@@ -256,6 +292,7 @@ export interface MeResponse {
     'permissions': Array<string>;
     'tenant_id'?: string | null;
     'dynamic': boolean;
+    'chat_unlike_switch'?: boolean;
 }
 /**
  * Generic ok response
@@ -1255,6 +1292,82 @@ export const CloudOauthApiAxiosParamCreator = function (configuration?: Configur
         },
         /**
          * 
+         * @summary Delete Connection
+         * @param {string} connectionId 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        deleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDelete: async (connectionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'connectionId' is not null or undefined
+            assertParamExists('deleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDelete', 'connectionId', connectionId)
+            const localVarPath = `/api/authservice/v1/cloud/connections/{connection_id}`
+                .replace(`{${"connection_id"}}`, encodeURIComponent(String(connectionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication HTTPBearer required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary Delete Oauth App Credentials
+         * @param {string} provider 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        deleteOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsDelete: async (provider: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('deleteOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsDelete', 'provider', provider)
+            const localVarPath = `/api/authservice/v1/cloud/{provider}/oauth/app-credentials`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication HTTPBearer required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary Get Connection
          * @param {string} connectionId 
          * @param {*} [options] Override http request option.
@@ -1323,6 +1436,44 @@ export const CloudOauthApiAxiosParamCreator = function (configuration?: Configur
             if (tenantId !== undefined) {
                 localVarQueryParameter['tenant_id'] = tenantId;
             }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary Get Oauth App Credentials
+         * @param {string} provider 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsGet: async (provider: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('getOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsGet', 'provider', provider)
+            const localVarPath = `/api/authservice/v1/cloud/{provider}/oauth/app-credentials`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication HTTPBearer required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -1472,6 +1623,135 @@ export const CloudOauthApiAxiosParamCreator = function (configuration?: Configur
         },
         /**
          * 
+         * @summary Patch Connection
+         * @param {string} connectionId 
+         * @param {CloudConnectionUpdateBody} cloudConnectionUpdateBody 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        patchConnectionApiAuthserviceV1CloudConnectionsConnectionIdPatch: async (connectionId: string, cloudConnectionUpdateBody: CloudConnectionUpdateBody, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'connectionId' is not null or undefined
+            assertParamExists('patchConnectionApiAuthserviceV1CloudConnectionsConnectionIdPatch', 'connectionId', connectionId)
+            // verify required parameter 'cloudConnectionUpdateBody' is not null or undefined
+            assertParamExists('patchConnectionApiAuthserviceV1CloudConnectionsConnectionIdPatch', 'cloudConnectionUpdateBody', cloudConnectionUpdateBody)
+            const localVarPath = `/api/authservice/v1/cloud/connections/{connection_id}`
+                .replace(`{${"connection_id"}}`, encodeURIComponent(String(connectionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication HTTPBearer required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(cloudConnectionUpdateBody, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary Save Oauth App Credentials
+         * @param {string} provider 
+         * @param {CloudOAuthAppCredentialBody} cloudOAuthAppCredentialBody 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        saveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPut: async (provider: string, cloudOAuthAppCredentialBody: CloudOAuthAppCredentialBody, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('saveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPut', 'provider', provider)
+            // verify required parameter 'cloudOAuthAppCredentialBody' is not null or undefined
+            assertParamExists('saveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPut', 'cloudOAuthAppCredentialBody', cloudOAuthAppCredentialBody)
+            const localVarPath = `/api/authservice/v1/cloud/{provider}/oauth/app-credentials`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication HTTPBearer required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(cloudOAuthAppCredentialBody, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary Update Connection
+         * @param {string} connectionId 
+         * @param {CloudConnectionUpdateBody} cloudConnectionUpdateBody 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        updateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPut: async (connectionId: string, cloudConnectionUpdateBody: CloudConnectionUpdateBody, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'connectionId' is not null or undefined
+            assertParamExists('updateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPut', 'connectionId', connectionId)
+            // verify required parameter 'cloudConnectionUpdateBody' is not null or undefined
+            assertParamExists('updateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPut', 'cloudConnectionUpdateBody', cloudConnectionUpdateBody)
+            const localVarPath = `/api/authservice/v1/cloud/connections/{connection_id}`
+                .replace(`{${"connection_id"}}`, encodeURIComponent(String(connectionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication HTTPBearer required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(cloudConnectionUpdateBody, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary Verify Connection
          * @param {string} connectionId 
          * @param {string | null} [userId] 
@@ -1539,6 +1819,32 @@ export const CloudOauthApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Delete Connection
+         * @param {string} connectionId 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async deleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDelete(connectionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CloudConnectionDeleteResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.deleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDelete(connectionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['CloudOauthApi.deleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary Delete Oauth App Credentials
+         * @param {string} provider 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async deleteOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsDelete(provider: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CloudOAuthAppCredentialResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.deleteOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsDelete(provider, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['CloudOauthApi.deleteOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
          * @summary Get Connection
          * @param {string} connectionId 
          * @param {*} [options] Override http request option.
@@ -1563,6 +1869,19 @@ export const CloudOauthApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.getConnectionTokenApiAuthserviceV1CloudConnectionsConnectionIdTokenGet(connectionId, userId, tenantId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['CloudOauthApi.getConnectionTokenApiAuthserviceV1CloudConnectionsConnectionIdTokenGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary Get Oauth App Credentials
+         * @param {string} provider 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsGet(provider: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CloudOAuthAppCredentialResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsGet(provider, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['CloudOauthApi.getOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -1610,6 +1929,48 @@ export const CloudOauthApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Patch Connection
+         * @param {string} connectionId 
+         * @param {CloudConnectionUpdateBody} cloudConnectionUpdateBody 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async patchConnectionApiAuthserviceV1CloudConnectionsConnectionIdPatch(connectionId: string, cloudConnectionUpdateBody: CloudConnectionUpdateBody, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CloudConnectionResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.patchConnectionApiAuthserviceV1CloudConnectionsConnectionIdPatch(connectionId, cloudConnectionUpdateBody, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['CloudOauthApi.patchConnectionApiAuthserviceV1CloudConnectionsConnectionIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary Save Oauth App Credentials
+         * @param {string} provider 
+         * @param {CloudOAuthAppCredentialBody} cloudOAuthAppCredentialBody 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async saveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPut(provider: string, cloudOAuthAppCredentialBody: CloudOAuthAppCredentialBody, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CloudOAuthAppCredentialResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.saveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPut(provider, cloudOAuthAppCredentialBody, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['CloudOauthApi.saveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary Update Connection
+         * @param {string} connectionId 
+         * @param {CloudConnectionUpdateBody} cloudConnectionUpdateBody 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async updateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPut(connectionId: string, cloudConnectionUpdateBody: CloudConnectionUpdateBody, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CloudConnectionResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.updateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPut(connectionId, cloudConnectionUpdateBody, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['CloudOauthApi.updateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
          * @summary Verify Connection
          * @param {string} connectionId 
          * @param {string | null} [userId] 
@@ -1644,6 +2005,26 @@ export const CloudOauthApiFactory = function (configuration?: Configuration, bas
         },
         /**
          * 
+         * @summary Delete Connection
+         * @param {CloudOauthApiDeleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        deleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDelete(requestParameters: CloudOauthApiDeleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<CloudConnectionDeleteResponse> {
+            return localVarFp.deleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDelete(requestParameters.connectionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary Delete Oauth App Credentials
+         * @param {CloudOauthApiDeleteOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        deleteOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsDelete(requestParameters: CloudOauthApiDeleteOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<CloudOAuthAppCredentialResponse> {
+            return localVarFp.deleteOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsDelete(requestParameters.provider, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
          * @summary Get Connection
          * @param {CloudOauthApiGetConnectionApiAuthserviceV1CloudConnectionsConnectionIdGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -1661,6 +2042,16 @@ export const CloudOauthApiFactory = function (configuration?: Configuration, bas
          */
         getConnectionTokenApiAuthserviceV1CloudConnectionsConnectionIdTokenGet(requestParameters: CloudOauthApiGetConnectionTokenApiAuthserviceV1CloudConnectionsConnectionIdTokenGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<CloudConnectionTokenResponse> {
             return localVarFp.getConnectionTokenApiAuthserviceV1CloudConnectionsConnectionIdTokenGet(requestParameters.connectionId, requestParameters.userId, requestParameters.tenantId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary Get Oauth App Credentials
+         * @param {CloudOauthApiGetOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsGet(requestParameters: CloudOauthApiGetOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<CloudOAuthAppCredentialResponse> {
+            return localVarFp.getOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsGet(requestParameters.provider, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -1694,6 +2085,36 @@ export const CloudOauthApiFactory = function (configuration?: Configuration, bas
         },
         /**
          * 
+         * @summary Patch Connection
+         * @param {CloudOauthApiPatchConnectionApiAuthserviceV1CloudConnectionsConnectionIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        patchConnectionApiAuthserviceV1CloudConnectionsConnectionIdPatch(requestParameters: CloudOauthApiPatchConnectionApiAuthserviceV1CloudConnectionsConnectionIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<CloudConnectionResponse> {
+            return localVarFp.patchConnectionApiAuthserviceV1CloudConnectionsConnectionIdPatch(requestParameters.connectionId, requestParameters.cloudConnectionUpdateBody, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary Save Oauth App Credentials
+         * @param {CloudOauthApiSaveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        saveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPut(requestParameters: CloudOauthApiSaveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<CloudOAuthAppCredentialResponse> {
+            return localVarFp.saveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPut(requestParameters.provider, requestParameters.cloudOAuthAppCredentialBody, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary Update Connection
+         * @param {CloudOauthApiUpdateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        updateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPut(requestParameters: CloudOauthApiUpdateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<CloudConnectionResponse> {
+            return localVarFp.updateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPut(requestParameters.connectionId, requestParameters.cloudConnectionUpdateBody, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
          * @summary Verify Connection
          * @param {CloudOauthApiVerifyConnectionApiAuthserviceV1CloudConnectionsConnectionIdVerifyGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -1715,6 +2136,20 @@ export interface CloudOauthApiCreateConnectionApiAuthserviceV1CloudProviderConne
 }
 
 /**
+ * Request parameters for deleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDelete operation in CloudOauthApi.
+ */
+export interface CloudOauthApiDeleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDeleteRequest {
+    readonly connectionId: string
+}
+
+/**
+ * Request parameters for deleteOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsDelete operation in CloudOauthApi.
+ */
+export interface CloudOauthApiDeleteOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsDeleteRequest {
+    readonly provider: string
+}
+
+/**
  * Request parameters for getConnectionApiAuthserviceV1CloudConnectionsConnectionIdGet operation in CloudOauthApi.
  */
 export interface CloudOauthApiGetConnectionApiAuthserviceV1CloudConnectionsConnectionIdGetRequest {
@@ -1730,6 +2165,13 @@ export interface CloudOauthApiGetConnectionTokenApiAuthserviceV1CloudConnections
     readonly userId?: string | null
 
     readonly tenantId?: string | null
+}
+
+/**
+ * Request parameters for getOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsGet operation in CloudOauthApi.
+ */
+export interface CloudOauthApiGetOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsGetRequest {
+    readonly provider: string
 }
 
 /**
@@ -1762,6 +2204,33 @@ export interface CloudOauthApiOauthCallbackApiAuthserviceV1CloudProviderOauthCal
 }
 
 /**
+ * Request parameters for patchConnectionApiAuthserviceV1CloudConnectionsConnectionIdPatch operation in CloudOauthApi.
+ */
+export interface CloudOauthApiPatchConnectionApiAuthserviceV1CloudConnectionsConnectionIdPatchRequest {
+    readonly connectionId: string
+
+    readonly cloudConnectionUpdateBody: CloudConnectionUpdateBody
+}
+
+/**
+ * Request parameters for saveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPut operation in CloudOauthApi.
+ */
+export interface CloudOauthApiSaveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPutRequest {
+    readonly provider: string
+
+    readonly cloudOAuthAppCredentialBody: CloudOAuthAppCredentialBody
+}
+
+/**
+ * Request parameters for updateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPut operation in CloudOauthApi.
+ */
+export interface CloudOauthApiUpdateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPutRequest {
+    readonly connectionId: string
+
+    readonly cloudConnectionUpdateBody: CloudConnectionUpdateBody
+}
+
+/**
  * Request parameters for verifyConnectionApiAuthserviceV1CloudConnectionsConnectionIdVerifyGet operation in CloudOauthApi.
  */
 export interface CloudOauthApiVerifyConnectionApiAuthserviceV1CloudConnectionsConnectionIdVerifyGetRequest {
@@ -1789,6 +2258,28 @@ export class CloudOauthApi extends BaseAPI {
 
     /**
      * 
+     * @summary Delete Connection
+     * @param {CloudOauthApiDeleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public deleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDelete(requestParameters: CloudOauthApiDeleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return CloudOauthApiFp(this.configuration).deleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDelete(requestParameters.connectionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Delete Oauth App Credentials
+     * @param {CloudOauthApiDeleteOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public deleteOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsDelete(requestParameters: CloudOauthApiDeleteOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsDeleteRequest, options?: RawAxiosRequestConfig) {
+        return CloudOauthApiFp(this.configuration).deleteOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsDelete(requestParameters.provider, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
      * @summary Get Connection
      * @param {CloudOauthApiGetConnectionApiAuthserviceV1CloudConnectionsConnectionIdGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -1807,6 +2298,17 @@ export class CloudOauthApi extends BaseAPI {
      */
     public getConnectionTokenApiAuthserviceV1CloudConnectionsConnectionIdTokenGet(requestParameters: CloudOauthApiGetConnectionTokenApiAuthserviceV1CloudConnectionsConnectionIdTokenGetRequest, options?: RawAxiosRequestConfig) {
         return CloudOauthApiFp(this.configuration).getConnectionTokenApiAuthserviceV1CloudConnectionsConnectionIdTokenGet(requestParameters.connectionId, requestParameters.userId, requestParameters.tenantId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Get Oauth App Credentials
+     * @param {CloudOauthApiGetOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsGet(requestParameters: CloudOauthApiGetOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsGetRequest, options?: RawAxiosRequestConfig) {
+        return CloudOauthApiFp(this.configuration).getOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsGet(requestParameters.provider, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1840,6 +2342,39 @@ export class CloudOauthApi extends BaseAPI {
      */
     public oauthCallbackApiAuthserviceV1CloudProviderOauthCallbackPost(requestParameters: CloudOauthApiOauthCallbackApiAuthserviceV1CloudProviderOauthCallbackPostRequest, options?: RawAxiosRequestConfig) {
         return CloudOauthApiFp(this.configuration).oauthCallbackApiAuthserviceV1CloudProviderOauthCallbackPost(requestParameters.provider, requestParameters.cloudOAuthCallbackBody, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Patch Connection
+     * @param {CloudOauthApiPatchConnectionApiAuthserviceV1CloudConnectionsConnectionIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public patchConnectionApiAuthserviceV1CloudConnectionsConnectionIdPatch(requestParameters: CloudOauthApiPatchConnectionApiAuthserviceV1CloudConnectionsConnectionIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return CloudOauthApiFp(this.configuration).patchConnectionApiAuthserviceV1CloudConnectionsConnectionIdPatch(requestParameters.connectionId, requestParameters.cloudConnectionUpdateBody, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Save Oauth App Credentials
+     * @param {CloudOauthApiSaveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public saveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPut(requestParameters: CloudOauthApiSaveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPutRequest, options?: RawAxiosRequestConfig) {
+        return CloudOauthApiFp(this.configuration).saveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPut(requestParameters.provider, requestParameters.cloudOAuthAppCredentialBody, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Update Connection
+     * @param {CloudOauthApiUpdateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public updateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPut(requestParameters: CloudOauthApiUpdateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPutRequest, options?: RawAxiosRequestConfig) {
+        return CloudOauthApiFp(this.configuration).updateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPut(requestParameters.connectionId, requestParameters.cloudConnectionUpdateBody, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

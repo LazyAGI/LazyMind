@@ -15,6 +15,7 @@ import (
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector/localfs"
 	sourceengine "github.com/lazymind/scan_control_plane/internal/sourceengine/source"
+	taskengine "github.com/lazymind/scan_control_plane/internal/sourceengine/task"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/tree"
 )
 
@@ -167,12 +168,15 @@ func TestHandlersExposeConnectorsTargetTreeAndSourceTree(t *testing.T) {
 		t.Fatalf("target tree handler did not pass actor to connector provider options: %+v", targetTree.lastChildren.ProviderOptions)
 	}
 
-	sourceReq := httptest.NewRequest(http.MethodPost, "/api/scan/sources/source-1/tree/children", strings.NewReader(`{"binding_id":"binding-1"}`))
+	sourceReq := httptest.NewRequest(http.MethodPost, "/api/scan/sources/source-1/tree/children", strings.NewReader(`{"binding_id":"binding-1","use_cache":true}`))
 	setAPIContractActor(sourceReq)
 	sourceResp := httptest.NewRecorder()
 	handler.ServeHTTP(sourceResp, sourceReq)
-	if sourceResp.Code != http.StatusOK || sourceTree.childrenCalls != 1 || sourceTree.lastChildren.SourceID != "source-1" {
+	if sourceResp.Code != http.StatusOK || sourceTree.childrenCalls != 1 || sourceTree.lastChildren.SourceID != "source-1" || !sourceTree.lastChildren.UseCache {
 		t.Fatalf("source tree handler did not set source_id: code=%d calls=%d req=%+v body=%s", sourceResp.Code, sourceTree.childrenCalls, sourceTree.lastChildren, sourceResp.Body.String())
+	}
+	if sourceTree.lastChildren.ProviderOptions["user_id"] != "user-1" || sourceTree.lastChildren.ProviderOptions["tenant_id"] != "tenant-1" {
+		t.Fatalf("source tree handler did not pass actor to connector provider options: %+v", sourceTree.lastChildren.ProviderOptions)
 	}
 
 	docReq := httptest.NewRequest(http.MethodGet, "/api/scan/sources/source-1/documents?binding_id=binding-1", nil)
@@ -336,6 +340,34 @@ func TestSyncHandlerAllowsMissingRequestIDAndEmptyBody(t *testing.T) {
 	}
 	if engine.lastSync.SourceID != "source-1" || engine.lastSync.RequestID != "" {
 		t.Fatalf("sync request was not decoded as optional request_id: %+v", engine.lastSync)
+	}
+}
+
+func TestGenerateTasksHandlerAcceptsManualPullSelection(t *testing.T) {
+	t.Parallel()
+
+	tasks := &serverTaskPlannerStub{}
+	handler := NewHandler(WithTaskPlanner(tasks), WithAccessChecker(allowAccess{}))
+	req := httptest.NewRequest(http.MethodPost, "/api/scan/sources/source-1/tasks/generate", strings.NewReader(`{
+		"mode":"partial",
+		"paths":["binding-1:local_fs:agent-1:path:/workspace/docs/111.txt"],
+		"selection_token":"token-1",
+		"trigger_policy":"IMMEDIATE",
+		"updated_only":false
+	}`))
+	setAPIContractActor(req)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected OK, got %d body=%s", w.Code, w.Body.String())
+	}
+	if tasks.lastGenerate.CallerID != "user-1" || tasks.lastGenerate.TenantID != "tenant-1" || tasks.lastGenerate.SourceID != "source-1" {
+		t.Fatalf("generate request did not preserve actor/source: %+v", tasks.lastGenerate)
+	}
+	if tasks.lastGenerate.Mode != "partial" || len(tasks.lastGenerate.Paths) != 1 || tasks.lastGenerate.SelectionToken != "token-1" {
+		t.Fatalf("manual pull selection was not decoded: %+v", tasks.lastGenerate)
 	}
 }
 
@@ -675,6 +707,27 @@ func (s *serverSourceEngineStub) DeleteBinding(context.Context, string, string) 
 type serverTargetTreeStub struct {
 	childrenCalls int
 	lastChildren  tree.TargetTreeChildrenRequest
+}
+
+type serverTaskPlannerStub struct {
+	lastGenerate taskengine.GenerateRequest
+}
+
+func (s *serverTaskPlannerStub) GenerateTasks(_ context.Context, req taskengine.GenerateRequest) (taskengine.GenerateResult, error) {
+	s.lastGenerate = req
+	return taskengine.GenerateResult{RequestedCount: 1, AcceptedCount: 1, TaskIDs: []string{}}, nil
+}
+
+func (s *serverTaskPlannerStub) GeneratePendingTasks(context.Context, taskengine.GeneratePendingRequest) (taskengine.GenerateResult, error) {
+	return taskengine.GenerateResult{}, nil
+}
+
+func (s *serverTaskPlannerStub) ExpediteTasks(context.Context, taskengine.ExpediteRequest) (taskengine.ExpediteResult, error) {
+	return taskengine.ExpediteResult{}, nil
+}
+
+func (s *serverTaskPlannerStub) RetryTask(context.Context, taskengine.RetryRequest) (taskengine.ParseTaskDetailResponse, error) {
+	return taskengine.ParseTaskDetailResponse{}, nil
 }
 
 func (s *serverTargetTreeStub) ListChildren(_ context.Context, req tree.TargetTreeChildrenRequest) (tree.TreeNodePage, error) {

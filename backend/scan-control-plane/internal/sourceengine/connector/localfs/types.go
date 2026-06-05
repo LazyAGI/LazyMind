@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/worker"
 )
 
 const (
@@ -24,6 +25,10 @@ type AgentClient interface {
 
 type RootListingAgent interface {
 	ListRoots(ctx context.Context, req ListRootsRequest) ([]PathInfo, error)
+}
+
+type TempObjectStore interface {
+	Put(ctx context.Context, input worker.TempObjectInput) (worker.TempObject, error)
 }
 
 type ValidatePathRequest struct {

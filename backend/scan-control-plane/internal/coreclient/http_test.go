@@ -143,6 +143,10 @@ func TestHTTPCoreClientSubmitCreateUsesUploadTaskAndStart(t *testing.T) {
 	t.Parallel()
 
 	var paths []string
+	var uploadedFilename string
+	var uploadUserID string
+	var taskUserID string
+	var startUserID string
 	var createTaskReq map[string]any
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
@@ -151,23 +155,27 @@ func TestHTTPCoreClientSubmitCreateUsesUploadTaskAndStart(t *testing.T) {
 			if r.Method != http.MethodPost {
 				t.Fatalf("unexpected upload method %s", r.Method)
 			}
+			uploadUserID = r.Header.Get("X-User-Id")
 			if err := r.ParseMultipartForm(1 << 20); err != nil {
 				t.Fatalf("parse multipart: %v", err)
 			}
-			file, _, err := r.FormFile("files")
+			file, header, err := r.FormFile("files")
 			if err != nil {
 				t.Fatalf("uploaded file missing: %v", err)
 			}
 			defer file.Close()
+			uploadedFilename = header.Filename
 			content, _ := io.ReadAll(file)
 			if string(content) != "hello" {
 				t.Fatalf("unexpected upload content %q", string(content))
 			}
 			writeJSON(t, w, http.StatusOK, map[string]any{"files": []map[string]string{{"upload_file_id": "upload-1"}}})
 		case "/datasets/dataset-1/tasks":
+			taskUserID = r.Header.Get("X-User-Id")
 			decodeJSON(t, r, &createTaskReq)
 			writeJSON(t, w, http.StatusOK, map[string]any{"tasks": []map[string]string{{"task_id": "core-task-1", "document_id": "core-doc-1"}}})
 		case "/datasets/dataset-1/tasks:start":
+			startUserID = r.Header.Get("X-User-Id")
 			var req map[string]any
 			decodeJSON(t, r, &req)
 			writeJSON(t, w, http.StatusOK, map[string]any{"tasks": []map[string]any{{"task_id": "core-task-1", "status": "STARTED"}}})
@@ -186,6 +194,7 @@ func TestHTTPCoreClientSubmitCreateUsesUploadTaskAndStart(t *testing.T) {
 		Content:          strings.NewReader("hello"),
 		MimeType:         "text/markdown",
 		FileExtension:    ".md",
+		UserID:           "user-1",
 		Action:           ActionCreate,
 	})
 	if err != nil {
@@ -201,6 +210,63 @@ func TestHTTPCoreClientSubmitCreateUsesUploadTaskAndStart(t *testing.T) {
 	}
 	if createTaskReq["idempotency_key"] != "idem-create" {
 		t.Fatalf("create task did not carry idempotency key: %+v", createTaskReq)
+	}
+	if uploadedFilename != "a.md" {
+		t.Fatalf("unexpected multipart filename %q", uploadedFilename)
+	}
+	if uploadUserID != "user-1" || taskUserID != "user-1" || startUserID != "user-1" {
+		t.Fatalf("submit create should carry owner user id, upload=%q task=%q start=%q", uploadUserID, taskUserID, startUserID)
+	}
+}
+
+func TestHTTPCoreClientSubmitCreateUsesExportedExtensionForMultipartFilename(t *testing.T) {
+	t.Parallel()
+
+	var uploadedFilename string
+	var createTaskReq map[string]any
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/datasets/dataset-1/uploads":
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Fatalf("parse multipart: %v", err)
+			}
+			file, header, err := r.FormFile("files")
+			if err != nil {
+				t.Fatalf("uploaded file missing: %v", err)
+			}
+			defer file.Close()
+			uploadedFilename = header.Filename
+			writeJSON(t, w, http.StatusOK, map[string]any{"files": []map[string]string{{"upload_file_id": "upload-1"}}})
+		case "/datasets/dataset-1/tasks":
+			decodeJSON(t, r, &createTaskReq)
+			writeJSON(t, w, http.StatusOK, map[string]any{"tasks": []map[string]string{{"task_id": "core-task-1", "document_id": "core-doc-1"}}})
+		case "/datasets/dataset-1/tasks:start":
+			writeJSON(t, w, http.StatusOK, map[string]any{"tasks": []map[string]any{{"task_id": "core-task-1", "status": "STARTED"}}})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	})
+
+	client := newHTTPTestCoreClient(t, handler)
+	_, err := client.SubmitParseTask(context.Background(), SubmitParseTaskRequest{
+		IdempotencyKey:   "idem-create",
+		DatasetID:        "dataset-1",
+		ParentDocumentID: "binding-root-1",
+		DisplayName:      "perm2",
+		Content:          strings.NewReader("hello"),
+		MimeType:         "text/markdown",
+		FileExtension:    ".md",
+		Action:           ActionCreate,
+	})
+	if err != nil {
+		t.Fatalf("submit create: %v", err)
+	}
+	if uploadedFilename != "perm2.md" {
+		t.Fatalf("expected multipart filename to use exported extension, got %q", uploadedFilename)
+	}
+	task := firstTaskPayload(t, createTaskReq)
+	if task["display_name"] != "perm2.md" {
+		t.Fatalf("core display_name should use exported extension, got %+v", createTaskReq)
 	}
 }
 
@@ -314,47 +380,84 @@ func TestHTTPCoreClientSubmitReparseUsesDocumentPathTaskAndStart(t *testing.T) {
 	t.Parallel()
 
 	var paths []string
+	var uploaded string
+	var uploadedFilename string
+	var taskUserID string
+	var startUserID string
+	var deleteDocumentUserID string
 	var createTaskReq map[string]any
-	restore := replaceWriteFileForTest(t)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
 		switch r.URL.Path {
-		case "/datasets/dataset-1/documents/core-doc-1":
-			writeJSON(t, w, http.StatusOK, map[string]string{"file_system_path": "/core/storage/a.md"})
+		case "/datasets/dataset-1/uploads":
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Fatalf("parse multipart: %v", err)
+			}
+			files := r.MultipartForm.File["files"]
+			if len(files) != 1 {
+				t.Fatalf("expected one uploaded file, got %d", len(files))
+			}
+			uploadedFilename = files[0].Filename
+			file, err := files[0].Open()
+			if err != nil {
+				t.Fatalf("open uploaded file: %v", err)
+			}
+			body, err := io.ReadAll(file)
+			_ = file.Close()
+			if err != nil {
+				t.Fatalf("read uploaded file: %v", err)
+			}
+			uploaded = string(body)
+			writeJSON(t, w, http.StatusOK, map[string]any{"files": []map[string]string{{"upload_file_id": "upload-reparse"}}})
 		case "/datasets/dataset-1/tasks":
+			taskUserID = r.Header.Get("X-User-Id")
 			decodeJSON(t, r, &createTaskReq)
-			writeJSON(t, w, http.StatusOK, map[string]any{"tasks": []map[string]string{{"task_id": "core-task-reparse", "document_id": "core-doc-1"}}})
+			writeJSON(t, w, http.StatusOK, map[string]any{"tasks": []map[string]string{{"task_id": "core-task-reparse", "document_id": "core-doc-new"}}})
 		case "/datasets/dataset-1/tasks:start":
+			startUserID = r.Header.Get("X-User-Id")
 			writeJSON(t, w, http.StatusOK, map[string]any{"tasks": []map[string]any{{"task_id": "core-task-reparse", "status": "STARTED"}}})
+		case "/datasets/dataset-1/documents/core-doc-1":
+			if r.Method != http.MethodDelete {
+				t.Fatalf("unexpected document method %s", r.Method)
+			}
+			deleteDocumentUserID = r.Header.Get("X-User-Id")
+			w.WriteHeader(http.StatusOK)
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 	})
-	defer restore()
 
 	client := newHTTPTestCoreClient(t, handler)
 	resp, err := client.SubmitParseTask(context.Background(), SubmitParseTaskRequest{
 		IdempotencyKey:   "idem-reparse",
 		DatasetID:        "dataset-1",
+		ParentDocumentID: "folder-1",
 		SourceDocumentID: "core-doc-1",
 		DisplayName:      "a.md",
 		ContentURI:       "scan-temp://token",
 		Content:          strings.NewReader("new content"),
+		UserID:           "user-1",
 		Action:           ActionReparse,
 	})
 	if err != nil {
 		t.Fatalf("submit reparse: %v", err)
 	}
-	if resp.Status != StatusSubmitted || resp.CoreTaskID != "core-task-reparse" || resp.CoreDocumentID != "core-doc-1" {
+	if resp.Status != StatusSubmitted || resp.CoreTaskID != "core-task-reparse" || resp.CoreDocumentID != "core-doc-new" {
 		t.Fatalf("unexpected response: %+v", resp)
 	}
-	assertNoPath(t, paths, "/parse/tasks")
-	if got := writtenFiles["/core/storage/a.md"]; got != "new content" {
-		t.Fatalf("reparse did not replace Core document file, got %q", got)
+	assertNoPath(t, paths, "/datasets/dataset-1/documents/core-doc-1:content")
+	if uploaded != "new content" || uploadedFilename != "a.md" {
+		t.Fatalf("reparse did not upload replacement content, filename=%q content=%q", uploadedFilename, uploaded)
 	}
 	task := firstTaskPayload(t, createTaskReq)
-	if task["task_type"] != "TASK_TYPE_REPARSE" || task["document_id"] != "core-doc-1" {
+	if task["task_type"] != "TASK_TYPE_PARSE_UPLOADED" || task["document_pid"] != "folder-1" {
 		t.Fatalf("reparse task payload does not match Core contract: %+v", createTaskReq)
+	}
+	if itemUploadID(t, createTaskReq) != "upload-reparse" {
+		t.Fatalf("reparse task should bind replacement upload: %+v", createTaskReq)
+	}
+	if taskUserID != "user-1" || startUserID != "user-1" || deleteDocumentUserID != "user-1" {
+		t.Fatalf("submit reparse should carry owner user id, task=%q start=%q delete=%q", taskUserID, startUserID, deleteDocumentUserID)
 	}
 }
 
@@ -362,11 +465,13 @@ func TestHTTPCoreClientSubmitDeleteUsesDocumentDelete(t *testing.T) {
 	t.Parallel()
 
 	var paths []string
+	var deleteUserID string
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
 		if r.URL.Path != "/datasets/dataset-1/documents/core-doc-1" || r.Method != http.MethodDelete {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
+		deleteUserID = r.Header.Get("X-User-Id")
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -376,6 +481,7 @@ func TestHTTPCoreClientSubmitDeleteUsesDocumentDelete(t *testing.T) {
 		DatasetID:        "dataset-1",
 		SourceDocumentID: "core-doc-1",
 		DisplayName:      "a.md",
+		UserID:           "user-1",
 		Action:           ActionDelete,
 	})
 	if err != nil {
@@ -383,6 +489,9 @@ func TestHTTPCoreClientSubmitDeleteUsesDocumentDelete(t *testing.T) {
 	}
 	if resp.Status != StatusSucceeded || resp.CoreDocumentID != "core-doc-1" {
 		t.Fatalf("unexpected delete response: %+v", resp)
+	}
+	if deleteUserID != "user-1" {
+		t.Fatalf("submit delete should carry owner user id, got %q", deleteUserID)
 	}
 	assertNoPath(t, paths, "/parse/tasks")
 }
@@ -465,20 +574,18 @@ func firstTaskPayload(t *testing.T, req map[string]any) map[string]any {
 	return task
 }
 
-var writtenFiles map[string]string
-
-func replaceWriteFileForTest(t *testing.T) func() {
+func itemUploadID(t *testing.T, req map[string]any) string {
 	t.Helper()
-	original := writeFile
-	writtenFiles = map[string]string{}
-	writeFile = func(targetPath string, data []byte) error {
-		writtenFiles[targetPath] = string(data)
-		return nil
+	items, ok := req["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("unexpected items payload: %+v", req)
 	}
-	return func() {
-		writeFile = original
-		writtenFiles = nil
+	item, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected item payload: %+v", items[0])
 	}
+	uploadID, _ := item["upload_file_id"].(string)
+	return uploadID
 }
 
 type coreTestContentStore map[string]string

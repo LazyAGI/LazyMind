@@ -192,6 +192,32 @@ func TestListSourcesScansProjectedSourceFields(t *testing.T) {
 	}
 }
 
+func TestGetSourceSummaryComputesStorageBytesFromDocuments(t *testing.T) {
+	db := openStoreFakeDB(t, []storeFakeQuery{
+		{columns: []string{"source_id"}, rows: [][]driver.Value{{"source-1"}}},
+		{columns: []string{"source_id", "binding_id"}, rows: [][]driver.Value{{"source-1", "binding-1"}}},
+		{columns: []string{"count"}, rows: [][]driver.Value{{int64(5)}}},
+		{columns: []string{"count"}, rows: [][]driver.Value{{int64(3)}}},
+		{columns: []string{"count"}, rows: [][]driver.Value{{int64(2)}}},
+		{columns: []string{"storage_bytes"}, rows: [][]driver.Value{{int64(42)}}},
+		{columns: []string{"source_state", "count"}, rows: [][]driver.Value{}},
+		{columns: []string{"status", "count"}, rows: [][]driver.Value{}},
+		{columns: []string{"binding_id"}, rows: [][]driver.Value{}},
+	})
+	repo := NewSQLRepository(db)
+
+	summary, err := repo.GetSourceSummary(context.Background(), SourceSummaryRequest{SourceID: "source-1", BindingID: "binding-1"})
+	if err != nil {
+		t.Fatalf("get source summary: %v", err)
+	}
+	if summary.TotalObjects != 5 || summary.DocumentObjects != 3 || summary.ContainerObjects != 2 {
+		t.Fatalf("summary counts were not scanned: %+v", summary)
+	}
+	if summary.StorageBytes != 42 {
+		t.Fatalf("storage bytes were not aggregated: got=%d", summary.StorageBytes)
+	}
+}
+
 func TestValidateSourceObjectIndexRowEnforcesParentDepthContract(t *testing.T) {
 	t.Parallel()
 

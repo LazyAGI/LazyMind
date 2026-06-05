@@ -91,6 +91,31 @@ func TestPartialStrategyCoversDeclaredSubtreeOnly(t *testing.T) {
 	}
 }
 
+func TestPartialStrategyFetchesSelectedPath(t *testing.T) {
+	t.Parallel()
+
+	strategy := NewPartialCrawlStrategy(strategyInput{
+		binding:  strategyBinding(),
+		spec:     connector.ConnectorSpec{SupportsRecursiveFetch: false},
+		claim:    strategyClaim(connector.ScopeTypePartial, connector.ScopeRef{"path": "/workspace/docs/111.txt"}),
+		pageSize: 10,
+	})
+	req, done, err := strategy.NextRequest(context.Background(), CrawlLoopState{})
+	if err != nil || done {
+		t.Fatalf("next request done=%v err=%v", done, err)
+	}
+	if req.Kind != CrawlRequestKindFetch || req.Fetch.ScopeRef["path"] != "/workspace/docs/111.txt" {
+		t.Fatalf("expected selected path fetch request, got %+v", req)
+	}
+	if err := strategy.ObservePage(context.Background(), connector.RawObjectPage{Items: []connector.RawObject{{ObjectKey: "doc-1"}}}); err != nil {
+		t.Fatalf("observe selected path page: %v", err)
+	}
+	coverage := strategy.Coverage()
+	if !coverage.Complete || len(coverage.CoveredObjectKeys) != 1 || coverage.CoveredObjectKeys[0] != "doc-1" {
+		t.Fatalf("unexpected selected path coverage: %+v", coverage)
+	}
+}
+
 func TestDeltaStrategyRequestsCursorAndReportsUnsupported(t *testing.T) {
 	t.Parallel()
 

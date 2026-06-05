@@ -388,35 +388,6 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
                             }
                           />
                         </div>
-                        <div className="memory-form-field">
-                          <label>{t("admin.memoryTagSet")}</label>
-                          <Select
-                            mode="tags"
-                            allowClear
-                            showSearch
-                            optionFilterProp="label"
-                            tokenSeparators={[",", "，"]}
-                            style={{ width: "100%" }}
-                            value={child.tags}
-                            disabled={isReadOnly}
-                            placeholder={t("admin.memoryTagsPlaceholder")}
-                            onChange={(value) => {
-                              const normalizedTags = normalizeTagValues(value);
-                              if (normalizedTags.length > SKILL_TAG_MAX_COUNT) {
-                                message.warning(
-                                  t("admin.memorySkillTagMaxCount", {
-                                    count: SKILL_TAG_MAX_COUNT,
-                                  }),
-                                );
-                              }
-                              updateChildSkillDraft(child.tempId, {
-                                tags: normalizedTags.slice(0, SKILL_TAG_MAX_COUNT),
-                              });
-                            }}
-                            options={tagOptions}
-                          />
-                          <span className="memory-form-hint">{t("admin.memoryTagsHint")}</span>
-                        </div>
                         <div className="memory-form-field memory-form-field-full">
                           <label>{t("admin.memoryMarkdown")}</label>
                           <Input.TextArea

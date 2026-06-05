@@ -93,6 +93,9 @@ func (c *LocalFSConnector) decodeNodeRef(targetRef, nodeRef string) (string, err
 		return c.publicPath(targetRef), nil
 	}
 	if keyPath, ok := pathFromObjectKey(nodeRef); ok {
+		if err := c.rejectOutsidePublicRoot(keyPath); err != nil {
+			return "", err
+		}
 		return keyPath, nil
 	}
 	return c.publicPath(nodeRef), nil

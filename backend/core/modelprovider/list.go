@@ -3,6 +3,7 @@ package modelprovider
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -14,15 +15,21 @@ import (
 )
 
 type listItem struct {
-	ID                     string   `json:"id"`
-	DefaultModelProviderID string   `json:"default_model_provider_id"`
-	Name                   string   `json:"name"`
-	Description            string   `json:"description"`
-	BaseURL                string   `json:"base_url"`
-	Category               string   `json:"category"`
-	IsConfigured           bool     `json:"is_configured"`
-	Capabilities           []string `json:"capabilities"`
-	ModelTypes             []string `json:"model_types"`
+	ID                     string              `json:"id"`
+	DefaultModelProviderID string              `json:"default_model_provider_id"`
+	Name                   string              `json:"name"`
+	Description            string              `json:"description"`
+	BaseURL                string              `json:"base_url"`
+	BaseURLPresets         []baseURLPresetItem `json:"base_url_presets,omitempty"`
+	Category               string              `json:"category"`
+	IsConfigured           bool                `json:"is_configured"`
+	Capabilities           []string            `json:"capabilities"`
+	ModelTypes             []string            `json:"model_types"`
+}
+
+type baseURLPresetItem struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
 }
 
 type listResponse struct {
@@ -64,14 +71,19 @@ func ListUserProviders(w http.ResponseWriter, r *http.Request) {
 		q = q.Where("category = ?", defaultProviderCategory)
 	}
 	if excludeCategory != "" {
-		q = q.Where("category != ?", excludeCategory)
+		for _, cat := range strings.Split(excludeCategory, ",") {
+			cat = strings.TrimSpace(cat)
+			if cat != "" {
+				q = q.Where("category != ?", cat)
+			}
+		}
 	}
 	if keyword != "" {
 		q = q.Where("name LIKE ?", "%"+keyword+"%")
 	}
 
 	var rows []orm.UserModelProvider
-	if err := q.Order("name DESC").Find(&rows).Error; err != nil {
+	if err := q.Order("name ASC").Find(&rows).Error; err != nil {
 		common.ReplyErr(w, "list model providers failed", http.StatusInternalServerError)
 		return
 	}
@@ -132,6 +144,7 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 			Name:                   row.Name,
 			Description:            row.Description,
 			BaseURL:                row.BaseURL,
+			BaseURLPresets:         buildBaseURLPresets(row),
 			Category:               row.Category,
 			IsConfigured:           false,
 			Capabilities:           caps,
@@ -139,6 +152,9 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 		})
 	}
 	if len(out) == 0 {
+		return out
+	}
+	if db == nil {
 		return out
 	}
 
@@ -150,17 +166,25 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 	}
 	type configuredProviderRow struct {
 		UserModelProviderID string `gorm:"column:user_model_provider_id"`
+		BaseURL             string `gorm:"column:base_url"`
+		APIKey              string `gorm:"column:api_key"`
 	}
 	var configuredRows []configuredProviderRow
 	if err := db.WithContext(ctx).
 		Model(&orm.UserModelProviderGroup{}).
-		Select("user_model_provider_id").
+		Select("user_model_provider_id, base_url, api_key").
 		Where("user_model_provider_id IN ? AND deleted_at IS NULL AND is_verified = ?", providerIDs, true).
-		Distinct("user_model_provider_id").
 		Find(&configuredRows).Error; err == nil {
+		defaultProviderIDByProviderID := make(map[string]string, len(out))
+		for i := range out {
+			defaultProviderIDByProviderID[out[i].ID] = out[i].DefaultModelProviderID
+		}
 		configuredProviderIDs := make(map[string]bool, len(configuredRows))
 		for _, row := range configuredRows {
-			configuredProviderIDs[row.UserModelProviderID] = true
+			if strings.TrimSpace(row.APIKey) != "" ||
+				isCustomBaseURL(ctx, db, defaultProviderIDByProviderID[row.UserModelProviderID], row.BaseURL) {
+				configuredProviderIDs[row.UserModelProviderID] = true
+			}
 		}
 		for i := range out {
 			out[i].IsConfigured = configuredProviderIDs[out[i].ID]
@@ -193,49 +217,59 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 
 // syncUserProvidersFromDefaults copies missing default_model_providers rows into
 // user_model_providers for the given user (matched by default_model_provider_id).
+// It also syncs category and capabilities for already-existing rows.
 func syncUserProvidersFromDefaults(ctx context.Context, db *gorm.DB, userID, userName string) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var existingIDs []string
-		if err := tx.Model(&orm.UserModelProvider{}).
-			Where("create_user_id = ? AND deleted_at IS NULL", userID).
-			Pluck("default_model_provider_id", &existingIDs).Error; err != nil {
+		var existing []orm.UserModelProvider
+		if err := tx.Where("create_user_id = ? AND deleted_at IS NULL", userID).Find(&existing).Error; err != nil {
 			return err
+		}
+		existingByDefault := make(map[string]*orm.UserModelProvider, len(existing))
+		for i := range existing {
+			existingByDefault[existing[i].DefaultModelProviderID] = &existing[i]
 		}
 
-		q := tx.Model(&orm.DefaultModelProvider{}).Where("deleted_at IS NULL")
-		if len(existingIDs) > 0 {
-			q = q.Where("id NOT IN ?", existingIDs)
-		}
 		var defs []orm.DefaultModelProvider
-		if err := q.Find(&defs).Error; err != nil {
+		if err := tx.Where("deleted_at IS NULL").Find(&defs).Error; err != nil {
 			return err
-		}
-		if len(defs) == 0 {
-			return nil
 		}
 
 		now := time.Now()
-		batch := make([]orm.UserModelProvider, len(defs))
+		var toCreate []orm.UserModelProvider
 		for i := range defs {
 			d := defs[i]
-			batch[i] = orm.UserModelProvider{
-				ID:                     common.GenerateID(),
-				DefaultModelProviderID: d.ID,
-				Name:                   d.Name,
-				Description:            d.Description,
-				BaseURL:                d.BaseURL,
-				Category:               d.Category,
-				Capabilities:           d.Capabilities,
-				BaseModel: orm.BaseModel{
-					CreateUserID:   userID,
-					CreateUserName: userName,
-					CreatedAt:      now,
-					UpdatedAt:      now,
-					DeletedAt:      nil,
-				},
+			if row, ok := existingByDefault[d.ID]; ok {
+				// Sync category / capabilities from defaults if changed.
+				if row.Category != d.Category || row.Capabilities != d.Capabilities {
+					_ = tx.Model(row).Updates(map[string]interface{}{
+						"category":     d.Category,
+						"capabilities": d.Capabilities,
+						"updated_at":   now,
+					})
+				}
+			} else {
+				toCreate = append(toCreate, orm.UserModelProvider{
+					ID:                     common.GenerateID(),
+					DefaultModelProviderID: d.ID,
+					Name:                   d.Name,
+					Description:            d.Description,
+					BaseURL:                d.BaseURL,
+					Category:               d.Category,
+					Capabilities:           d.Capabilities,
+					BaseModel: orm.BaseModel{
+						CreateUserID:   userID,
+						CreateUserName: userName,
+						CreatedAt:      now,
+						UpdatedAt:      now,
+						DeletedAt:      nil,
+					},
+				})
 			}
 		}
-		return tx.Create(&batch).Error
+		if len(toCreate) == 0 {
+			return nil
+		}
+		return tx.Create(&toCreate).Error
 	})
 }
 
@@ -252,4 +286,42 @@ func splitCapabilities(caps string) []string {
 		}
 	}
 	return out
+}
+
+func buildBaseURLPresets(row orm.UserModelProvider) []baseURLPresetItem {
+	if normalizeProviderName(row.Name) != "mineru" {
+		return nil
+	}
+
+	presets := make([]baseURLPresetItem, 0, 2)
+	seen := map[string]struct{}{}
+	appendPreset := func(key, value string) {
+		trimmedValue := strings.TrimSpace(value)
+		if trimmedValue == "" {
+			return
+		}
+		normalizedValue := strings.TrimRight(trimmedValue, "/")
+		if _, ok := seen[normalizedValue]; ok {
+			return
+		}
+		seen[normalizedValue] = struct{}{}
+		presets = append(presets, baseURLPresetItem{
+			Key:   key,
+			Value: trimmedValue,
+		})
+	}
+
+	appendPreset("official", row.BaseURL)
+	if localBaseURL := configuredLocalMinerUBaseURL(); localBaseURL != "" {
+		appendPreset("local", localBaseURL)
+	}
+
+	return presets
+}
+
+func configuredLocalMinerUBaseURL() string {
+	if strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_OCR_SERVER_TYPE"))) != "mineru" {
+		return ""
+	}
+	return strings.TrimSpace(os.Getenv("LAZYMIND_OCR_SERVER_URL"))
 }
