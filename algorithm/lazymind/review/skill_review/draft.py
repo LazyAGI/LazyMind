@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from pathlib import Path
 
 from tqdm import tqdm
 
-from lazyllm import AutoModel, LOG
+from lazyllm import AutoModel, LOG, ThreadPoolExecutor
 
 from lazymind.review.skill_review.schemas import (
     ContextualDescription,

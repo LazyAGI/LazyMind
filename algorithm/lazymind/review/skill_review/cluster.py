@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from pathlib import Path
 
 import numpy as np
-from lazyllm import LOG
+from lazyllm import LOG, ThreadPoolExecutor
 
 from lazymind.review.skill_review.config import (
     DEFAULT_EMBEDDING_MAX_CHARS,

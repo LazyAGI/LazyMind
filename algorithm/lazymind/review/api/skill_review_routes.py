@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+import lazyllm
 from lazyllm import AutoModel, LOG
+from lazyllm import ThreadPoolExecutor
 
 from lazymind.review.skill_review.config import DEFAULT_BACKGROUND_WORKERS, DEFAULT_LLM_CALL_TIMEOUT_SECONDS
 from lazymind.review.skill_review.schemas import SkillReviewRequest
 from lazymind.review.service.skill_review import run_skill_review
-from lazymind.model_config import get_config_path
+from lazymind.model_config import inject_model_config
 
 router = APIRouter()
 background_tasks: set[asyncio.Task] = set()
@@ -27,7 +28,7 @@ def shutdown_background_executor() -> None:
 async def skill_review(payload: SkillReviewRequest):
     try:
         llm, emb = await asyncio.wait_for(
-            asyncio.to_thread(_build_and_check_models),
+            asyncio.to_thread(_build_and_check_models, payload),
             timeout=DEFAULT_LLM_CALL_TIMEOUT_SECONDS,
         )
     except Exception as exc:
@@ -53,9 +54,12 @@ async def skill_review(payload: SkillReviewRequest):
     )
 
 
-def _build_and_check_models():
-    llm = AutoModel(model='llm', config=get_config_path())
-    emb = AutoModel(model='embed_main', config=get_config_path())
+def _build_and_check_models(payload: SkillReviewRequest):
+    lazyllm.globals._init_sid(payload.requestid)
+    lazyllm.locals._init_sid(payload.requestid)
+    inject_model_config(payload.model_configs)
+    llm = AutoModel(model='llm')
+    emb = AutoModel(model='embed_main')
     if llm('hello world') is None:
         raise RuntimeError('llm returned empty response')
     if emb('hello world') is None:

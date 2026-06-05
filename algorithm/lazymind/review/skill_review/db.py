@@ -28,6 +28,18 @@ _table_ensure_lock = threading.Lock()
 _engine_cache: Dict[str, Engine] = {}
 _engine_cache_lock = threading.Lock()
 
+_REQUIRED_SKILL_REVIEW_RESULT_COLUMNS: set[str] = {
+    'id',
+    'skill_name',
+    'type',
+    'review_status',
+    'userid',
+    'requestid',
+    'skill_content',
+    'summary',
+    'time',
+}
+
 
 def read_session(
     start_time: datetime,
@@ -189,7 +201,7 @@ def delete_all_skill_review_records() -> int:
             text(f'DELETE FROM {SKILL_REVIEW_TABLE}')
         )
     deleted_count = int(result.rowcount or 0)
-    LOG.info(f'[SkillReviewDB] deleted {deleted_count} rows from {SKILL_REVIEW_TABLE}.')
+    LOG.info(f'[SkillReview] deleted {deleted_count} rows from {SKILL_REVIEW_TABLE}.')
     return deleted_count
 
 
@@ -198,37 +210,54 @@ def read_all_skill_review_records() -> list[dict[str, Any]]:
 
 
 def ensure_skill_review_table() -> None:
-    with _get_app_conn().begin() as conn:
-        conn.execute(
-            text(
-                f"""CREATE TABLE IF NOT EXISTS {SKILL_REVIEW_TABLE} (
-                    id TEXT PRIMARY KEY,
-                    skill_name TEXT NOT NULL,
-                    "type" TEXT NOT NULL CHECK ("type" IN ('new', 'patch')),
-                    review_status TEXT NOT NULL DEFAULT 'pending'
-                        CHECK (review_status IN ('pending', 'accepted', 'rejected', 'expired')),
-                    userid TEXT NOT NULL,
-                    requestid TEXT NOT NULL,
-                    skill_content TEXT NOT NULL,
-                    summary TEXT,
-                    "time" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )"""
-            )
+    engine = _get_app_conn()
+    with engine.begin() as conn:
+        _validate_skill_review_result_schema(conn)
+        _ensure_skill_review_run_stats_table(conn)
+    LOG.info(
+        f'[SkillReview] verified database schema for {SKILL_REVIEW_TABLE} '
+        f'and ensured table {SKILL_REVIEW_RUN_STATS_TABLE}.'
+    )
+
+
+def _validate_skill_review_result_schema(conn) -> None:
+    rows = conn.execute(
+        text(
+            """SELECT column_name
+                 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = :table_name"""
+        ),
+        {'table_name': SKILL_REVIEW_TABLE},
+    ).mappings().all()
+    actual_columns = {str(row['column_name']) for row in rows}
+    missing = sorted(_REQUIRED_SKILL_REVIEW_RESULT_COLUMNS - actual_columns)
+    if not actual_columns or missing:
+        details: list[str] = []
+        if not actual_columns:
+            details.append(f'missing table: {SKILL_REVIEW_TABLE}')
+        if missing:
+            details.append(f'{SKILL_REVIEW_TABLE} missing columns: {", ".join(missing)}')
+        raise RuntimeError(
+            f'[SkillReviewDB] backend database migration is required before skill review runs: '
+            f'{"; ".join(details)}'
         )
-        conn.execute(
-            text(
-                f"""CREATE TABLE IF NOT EXISTS {SKILL_REVIEW_RUN_STATS_TABLE} (
-                    id TEXT PRIMARY KEY,
-                    requestid TEXT NOT NULL,
-                    userid TEXT NOT NULL,
-                    status TEXT NOT NULL CHECK (status IN ('completed', 'skipped', 'failed', 'running')),
-                    started_at TEXT NOT NULL,
-                    duration_ms INTEGER NOT NULL DEFAULT 0,
-                    summary JSONB NOT NULL DEFAULT '{{}}'::jsonb
-                )"""
-            )
+
+
+def _ensure_skill_review_run_stats_table(conn) -> None:
+    conn.execute(
+        text(
+            f"""CREATE TABLE IF NOT EXISTS {SKILL_REVIEW_RUN_STATS_TABLE} (
+                id TEXT PRIMARY KEY,
+                requestid TEXT NOT NULL,
+                userid TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('completed', 'skipped', 'failed', 'running')),
+                started_at TEXT NOT NULL,
+                duration_ms INTEGER NOT NULL DEFAULT 0,
+                summary JSONB NOT NULL DEFAULT '{{}}'::jsonb
+            )"""
         )
-    LOG.info(f'[SkillReview] ensured table {SKILL_REVIEW_TABLE}.')
+    )
 
 
 def _convert_history(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -15,6 +15,7 @@ class SkillReviewRequest(BaseModel):
     min_tool_turns: int = Field(default=5, ge=0)
     artifact_dir: Optional[str] = None
     pending_skill_ids: List[str] = Field(default_factory=list)
+    model_configs: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode='after')
     def validate_time_range(self) -> 'SkillReviewRequest':

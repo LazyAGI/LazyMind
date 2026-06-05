@@ -9,6 +9,8 @@ from json_repair import repair_json
 from lazyllm import LOG
 from pydantic import BaseModel, TypeAdapter
 
+from lazymind.review.skill_review.config import DEFAULT_LLM_CALL_TIMEOUT_SECONDS
+
 # Approximate token usage by summing prompt/response string lengths across LLM calls.
 TOTAL_INPUT_TOKEN_CHARS = 0
 TOTAL_OUTPUT_TOKEN_CHARS = 0
@@ -33,7 +35,7 @@ def call_json(
         try:
             if round > 0:
                 LOG.warning(f'LLM JSON call failed after {round} attempts, retrying...')
-            raw = llm(prompt, response_format=response_format)
+            raw = llm(prompt, response_format=response_format, timeout=DEFAULT_LLM_CALL_TIMEOUT_SECONDS)
             last_raw = raw
             _record_token_usage(prompt, raw)
             parsed = _json_object(raw)

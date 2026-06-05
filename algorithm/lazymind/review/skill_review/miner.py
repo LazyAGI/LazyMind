@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from pathlib import Path
 from typing import Any
 
-from lazyllm import LOG
+from lazyllm import LOG, ThreadPoolExecutor
 
 from lazymind.review.skill_review.config import (
     DEFAULT_STAGE_WORKERS,
