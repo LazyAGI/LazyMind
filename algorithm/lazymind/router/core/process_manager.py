@@ -10,7 +10,7 @@ import uuid
 from typing import Optional
 
 import httpx
-from sqlalchemy import delete, insert, select, text
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -47,8 +47,7 @@ def _upsert_instance(instance_id: str, host: str, pid: int,
     )
 
 
-def _upsert_child_process(instance_id: str, algo_id: str, host: str,
-                           port: int, pid: int):
+def _upsert_child_process(instance_id: str, algo_id: str, host: str, port: int, pid: int):
     """Build a dialect-appropriate UPSERT for RouterChildProcess."""
     values = dict(instance_id=instance_id, algorithm_id=algo_id,
                   host=host, port=port, pid=pid, status='starting', failures=0)

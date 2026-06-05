@@ -689,7 +689,7 @@ services:
       LAZYMIND_WORD_GROUP_APPLY_URL: ""
       # Router mode: set LAZYMIND_ENABLE_ROUTER=true to enable multi-algorithm AB routing.
       # Defaults to false for full backward compatibility with the original chat service.
-      LAZYMIND_ENABLE_ROUTER: false
+      LAZYMIND_ENABLE_ROUTER: ${LAZYMIND_ENABLE_ROUTER:-false}
       LAZYMIND_ROUTER_PORT_POOL_START: 18000
       LAZYMIND_ROUTER_PORT_POOL_END: 18999
       LAZYMIND_ROUTER_PORTS_PER_INSTANCE: 100
