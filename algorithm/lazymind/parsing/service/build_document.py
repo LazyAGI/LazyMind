@@ -83,8 +83,6 @@ def _build_store_config(index_kwargs):
 def _build_pdf_reader():
     ocr_type = _cfg['ocr_server_type']
     ocr_url = _cfg['ocr_server_url'].rstrip('/')
-    patch_applied = _cfg['ocr_patch_applied']
-    service_variant = _cfg['ocr_service_variant']
     if ocr_type in ('none', None, ''):
         return PDFReader()
     if ocr_type == 'mineru':
@@ -97,15 +95,12 @@ def _build_pdf_reader():
             upload_mode=upload_mode,
             post_func=NodeParser(),
             timeout=3600,
-            patch_applied=patch_applied,
-            service_variant=service_variant,
             image_cache_dir=_cfg['ocr_cache_dir'],
         )
     if ocr_type == 'paddleocr':
         return PaddleOCRPDFReader(
             url=ocr_url,
-            service_variant=service_variant,
-            images_dir=_cfg['ocr_cache_dir'],
+            image_cache_dir=_cfg['ocr_cache_dir'],
         )
     raise ValueError(f'Unsupported OCR server type: {ocr_type!r}')
 
