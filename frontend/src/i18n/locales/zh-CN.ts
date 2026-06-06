@@ -826,6 +826,7 @@ const zhCN = {
     uploadAndCreateTaskSuccess: "上传并创建任务成功",
     uploadCompleteParsingStarted: "文件上传完成，文档正在解析",
     documentParsingKeepTabOpen: "文档正在解析中，请勿关闭此标签页",
+    documentUploadingKeepTabOpen: "文档正在上传中，请勿关闭此标签页",
     startParsingFailed: "启动文档解析失败，请稍后重试",
     uploadFailedRetry: "上传失败，请重试",
     supportedFolderImport: "支持导入文件夹",

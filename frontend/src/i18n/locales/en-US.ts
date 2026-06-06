@@ -862,6 +862,7 @@ const enUS = {
     uploadAndCreateTaskSuccess: "Upload and task creation succeeded",
     uploadCompleteParsingStarted: "File upload completed. Document parsing has started",
     documentParsingKeepTabOpen: "Document parsing is in progress. Do not close this tab",
+    documentUploadingKeepTabOpen: "Document uploading is in progress. Do not close this tab",
     startParsingFailed: "Failed to start document parsing, please try again later",
     uploadFailedRetry: "Upload failed, please try again",
     supportedFolderImport: "Folder import supported",

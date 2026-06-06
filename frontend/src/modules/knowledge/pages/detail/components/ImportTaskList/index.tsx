@@ -11,7 +11,7 @@ import { TaskServiceApi } from "@/modules/knowledge/utils/request";
 import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
 import { localizeErrorCode } from "@/components/request";
-import { IMPORT_TASK_POLL_INTERVAL, IMPORT_TASK_FAILED_STATES, IMPORT_TASK_RUNNING_STATES, IMPORT_TASK_SUCCESS_STATES } from "@/modules/knowledge/constants/common";
+import { IMPORT_TASK_POLL_INTERVAL } from "@/modules/knowledge/constants/common";
 
 interface IProps {
   datasetId: string;
@@ -25,14 +25,17 @@ export enum TaskTab {
   Failed = "3",
 }
 
-const RUNNING_STATES = IMPORT_TASK_RUNNING_STATES;
-const SUCCESS_STATES = IMPORT_TASK_SUCCESS_STATES;
-const FAILED_STATES = IMPORT_TASK_FAILED_STATES;
+// Maps each tab to the task_state value sent to the backend.
+const TAB_TO_TASK_STATUS: Record<TaskTab, string> = {
+  [TaskTab.Running]: "running",
+  [TaskTab.Successed]: "success",
+  [TaskTab.Failed]: "failed",
+};
 
 export const TaskTabInfo = [
-  { id: TaskTab.Running, titleKey: "knowledge.importRunning", taskStates: RUNNING_STATES },
-  { id: TaskTab.Successed, titleKey: "knowledge.importSuccessTitle", taskStates: SUCCESS_STATES },
-  { id: TaskTab.Failed, titleKey: "knowledge.importFailedTitle", taskStates: FAILED_STATES },
+  { id: TaskTab.Running, titleKey: "knowledge.importRunning" },
+  { id: TaskTab.Successed, titleKey: "knowledge.importSuccessTitle" },
+  { id: TaskTab.Failed, titleKey: "knowledge.importFailedTitle" },
 ];
 
 const ImportTaskList = (props: IProps) => {
@@ -42,6 +45,8 @@ const ImportTaskList = (props: IProps) => {
   const [total, setTotal] = useState(0);
   const [dataSource, setDataSource] = useState([]);
   const [tab, setTab] = useState(TaskTab.Running);
+  // pageTokens[i] is the token to fetch page i+1 (index 0 = first page, no token needed).
+  const [pageTokens, setPageTokens] = useState<(string | undefined)[]>([undefined]);
   const pollingRef = useRef(new Polling());
   const { datasetId, onClose, onSuspendSuccess } = props;
   const hasOnlyReadPermission = useDatasetPermissionStore((state) =>
@@ -60,28 +65,40 @@ const ImportTaskList = (props: IProps) => {
     page?: number;
     size?: number;
     currentTab?: TaskTab;
+    tokens?: (string | undefined)[];
   }) => {
-    const { page = 1, size = pageSize, currentTab = tab } = params || {};
+    const { page = 1, size = pageSize, currentTab = tab, tokens = pageTokens } = params || {};
     setPage(page);
     setPageSize(size);
     pollingRef.current.cancel();
 
-    const updateTableData = ({ data = {} }: { data?: { tasks?: any[] } }) => {
-      const allTasks: any[] = data.tasks || [];
-      const states = TaskTabInfo.find((item) => item.id === currentTab)?.taskStates || [];
-      const filtered = allTasks.filter((t) => states.includes(t.task_state));
-      const start = (page - 1) * size;
-      setTotal(filtered.length);
-      setDataSource(filtered.slice(start, start + size) as any);
+    const taskStatus = TAB_TO_TASK_STATUS[currentTab];
+    const pageToken = tokens[page - 1];
 
-      if (currentTab === TaskTab.Running && filtered.length === 0) {
+    const updateTableData = ({ data = {} }: { data?: { tasks?: any[]; total_size?: number; next_page_token?: string } }) => {
+      const tasks: any[] = data.tasks || [];
+      setTotal(data.total_size ?? 0);
+      setDataSource(tasks as any);
+
+      // Store the next page token so the user can navigate forward.
+      if (data.next_page_token) {
+        setPageTokens((prev) => {
+          const next = [...prev];
+          next[page] = data.next_page_token;
+          return next;
+        });
+      }
+
+      if (currentTab === TaskTab.Running && tasks.length === 0) {
         pollingRef.current.cancel();
       }
     };
 
+    const requestFn = () =>
+      TaskServiceApi().listTasks(datasetId, { taskStatus, pageSize: size, pageToken });
+
     if (currentTab !== TaskTab.Running) {
-      TaskServiceApi()
-        .listTasks(datasetId)
+      requestFn()
         .then(updateTableData)
         .catch((err) => {
           console.error(err);
@@ -93,7 +110,7 @@ const ImportTaskList = (props: IProps) => {
 
     pollingRef.current.start({
       interval: IMPORT_TASK_POLL_INTERVAL,
-      request: () => TaskServiceApi().listTasks(datasetId),
+      request: requestFn,
       onSuccess: updateTableData,
       onError: (err) => {
         console.error(err);
@@ -106,7 +123,10 @@ const ImportTaskList = (props: IProps) => {
   const changeTab = (v: TaskTab) => {
     setDataSource([]);
     setTab(v);
-    getTableData({ currentTab: v });
+    setPage(1);
+    const freshTokens = [undefined] as (string | undefined)[];
+    setPageTokens(freshTokens);
+    getTableData({ currentTab: v, page: 1, tokens: freshTokens });
   };
 
   function suspendTaskFn(cvm: any) {
@@ -188,7 +208,7 @@ const ImportTaskList = (props: IProps) => {
       dataIndex: "create_time",
       width: 105,
       render: (time: string, record: any) => {
-        const isRunning = RUNNING_STATES.includes(record.task_state);
+        const isRunning = tab === TaskTab.Running;
         const endTime = isRunning
           ? undefined
           : record.finish_time || record.create_time || time;
@@ -280,7 +300,16 @@ const ImportTaskList = (props: IProps) => {
           total,
         }, t)}
         onChange={(pagination) => {
-          getTableData({ page: pagination.current, size: pagination.pageSize });
+          const newPage = pagination.current ?? 1;
+          const newSize = pagination.pageSize ?? pageSize;
+          if (newSize !== pageSize) {
+            // Page size changed: token cache is invalid, reset and refetch from page 1.
+            const freshTokens = [undefined] as (string | undefined)[];
+            setPageTokens(freshTokens);
+            getTableData({ page: 1, size: newSize, tokens: freshTokens });
+          } else {
+            getTableData({ page: newPage, size: newSize });
+          }
         }}
       />
     </div>

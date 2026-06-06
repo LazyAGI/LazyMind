@@ -51,6 +51,17 @@ RUN pip install --no-cache-dir lazyllm && lazyllm install rag; \
 COPY algorithm/requirements.txt /app/algorithm/requirements.txt
 RUN pip install --no-cache-dir -r algorithm/requirements.txt
 
+# Pre-warm tiktoken encoding cache so the worker never needs to fetch it at
+# runtime (openaipublic.blob.core.windows.net may be unreachable in air-gapped
+# or restricted environments).
+RUN python -c "\
+import os, pathlib; \
+cache = pathlib.Path('/root/.lazyllm/tiktoken'); \
+cache.mkdir(parents=True, exist_ok=True); \
+os.environ['TIKTOKEN_CACHE_DIR'] = str(cache); \
+import tiktoken; tiktoken.get_encoding('gpt2'); \
+print('tiktoken gpt2 cache warmed at', cache)"
+
 
 # Stage: base_code - copy all source code on top of the fully-installed env.
 # Only this stage and its children need to rebuild when code changes.
