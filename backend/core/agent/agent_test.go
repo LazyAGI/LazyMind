@@ -1404,6 +1404,8 @@ func TestDeleteThreadHistoryCancelsRunningFlowBeforeDeleting(t *testing.T) {
 			})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/evo/threads/thr_1/cancel":
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "cancelled"})
+		case r.Method == http.MethodDelete && r.URL.Path == "/v1/evo/threads/thr_1":
+			_ = json.NewEncoder(w).Encode(map[string]any{"deleted_run": true, "deleted_thread": true})
 		default:
 			http.Error(w, "unexpected request", http.StatusNotFound)
 		}
@@ -1426,6 +1428,7 @@ func TestDeleteThreadHistoryCancelsRunningFlowBeforeDeleting(t *testing.T) {
 	wantCalls := []string{
 		"GET /v1/evo/threads/thr_1/flow-status",
 		"POST /v1/evo/threads/thr_1/cancel",
+		"DELETE /v1/evo/threads/thr_1",
 	}
 	if fmt.Sprint(gotCalls) != fmt.Sprint(wantCalls) {
 		t.Fatalf("unexpected upstream calls: want %v got %v", wantCalls, gotCalls)
@@ -1458,6 +1461,10 @@ func TestDeleteThreadHistoryDoesNotCancelEndedFlow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/v1/evo/threads/thr_1/flow-status" {
 			_ = json.NewEncoder(w).Encode(threadFlowStatusResponse{ThreadID: "thr_1", Status: "ended"})
+			return
+		}
+		if r.Method == http.MethodDelete && r.URL.Path == "/v1/evo/threads/thr_1" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"deleted_run": true, "deleted_thread": true})
 			return
 		}
 		http.Error(w, "unexpected request", http.StatusNotFound)

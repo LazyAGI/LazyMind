@@ -1997,7 +1997,7 @@ const zhCN = {
     autoInteractionStatus: "自动处理进行中，系统会按流程推进并在上方展示过程消息。",
     retrying: "重试中...",
     continuing: "继续中...",
-    checkpointInputPlaceholder: "可继续输入补充指令，或点击上方按钮继续执行。",
+    checkpointInputPlaceholder: "可输入“继续执行”，或补充本轮干预指令。",
     inputPlaceholder: "继续输入指令，例如：请先扩展数据集样本，再进入评测阶段。",
     inputAria: "继续输入自进化指令",
     sendingMessage: "消息发送中",

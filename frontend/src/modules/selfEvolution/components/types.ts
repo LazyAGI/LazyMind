@@ -18,6 +18,7 @@ export type SelfEvolutionHistoryEntry = {
   status?: string;
   source: "thread" | "local";
   isCurrent?: boolean;
+  isPreviewing?: boolean;
 };
 
 export type SelfEvolutionCheckpointPrompt = {
@@ -25,6 +26,8 @@ export type SelfEvolutionCheckpointPrompt = {
   kind?: "checkpoint" | "failure";
   command: string;
 };
+
+export type SelfEvolutionWorkbenchTab = "artifacts" | "messages" | "processes";
 
 export type SelfEvolutionStepStatus = "running" | "pending" | "done" | "paused" | "canceled" | "failed";
 

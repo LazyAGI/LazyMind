@@ -114,6 +114,11 @@ func DeleteThreadHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var upstreamDelete map[string]any
+	if err := common.ApiDelete(r.Context(), threadDeleteURL(threadID), forwardedUpstreamHeaders(r), &upstreamDelete, 30*time.Second); err != nil {
+		common.ReplyErrWithData(w, "delete upstream thread failed", map[string]any{"detail": err.Error()}, http.StatusBadGateway)
+		return
+	}
 	result, err := deleteThreadHistory(db, threadID)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "delete thread history failed", err), http.StatusInternalServerError)
@@ -122,6 +127,7 @@ func DeleteThreadHistory(w http.ResponseWriter, r *http.Request) {
 	if cancelRequested {
 		result["cancel_requested"] = true
 	}
+	result["upstream"] = upstreamDelete
 	common.ReplyOK(w, result)
 }
 

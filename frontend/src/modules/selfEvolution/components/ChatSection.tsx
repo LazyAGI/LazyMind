@@ -1,6 +1,6 @@
 import { type ChangeEvent, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { Input, Typography } from "antd";
-import { ClockCircleFilled, MessageOutlined } from "@ant-design/icons";
+import { MessageOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import {
   type SelfEvolutionChatMessage,
@@ -61,6 +61,7 @@ export function AutoInteractionStatus() {
 
 type ChatComposerProps = {
   activeStepText: string;
+  isAutoMode: boolean;
   isSendingMessage: boolean;
   pendingCheckpointWaitPrompt?: SelfEvolutionCheckpointPrompt;
   prompt: string;
@@ -72,6 +73,7 @@ type ChatComposerProps = {
 
 export function ChatComposer({
   activeStepText,
+  isAutoMode,
   isSendingMessage,
   pendingCheckpointWaitPrompt,
   prompt,
@@ -97,37 +99,8 @@ export function ChatComposer({
   const isCheckpointWaiting = Boolean(pendingCheckpointWaitPrompt);
 
   return (
-    <div className="self-evolution-chat-composer">
-      {pendingCheckpointWaitPrompt && (
-        <div
-          className={`self-evolution-checkpoint-wait${
-            pendingCheckpointWaitPrompt.kind === "failure" ? " is-failure" : ""
-          }`}
-          role="status"
-          aria-live="polite"
-        >
-          <div className="self-evolution-checkpoint-wait-icon">
-            <ClockCircleFilled />
-          </div>
-          <div className="self-evolution-checkpoint-wait-content">
-            <Paragraph className="self-evolution-checkpoint-wait-message">
-              {pendingCheckpointWaitPrompt.message}
-            </Paragraph>
-          </div>
-          <button
-            type="button"
-            className="self-evolution-checkpoint-wait-command"
-            onClick={() => onSend(pendingCheckpointWaitPrompt.command)}
-            disabled={isSendingMessage}
-          >
-            {isSendingMessage
-              ? pendingCheckpointWaitPrompt.command === t("selfEvolutionRun.retry")
-                ? t("selfEvolutionRun.retrying")
-                : t("selfEvolutionRun.continuing")
-              : pendingCheckpointWaitPrompt.command}
-          </button>
-        </div>
-      )}
+    <div className={`self-evolution-chat-composer${isAutoMode ? " is-auto" : ""}`}>
+      {isAutoMode && <AutoInteractionStatus />}
 
       <Input.TextArea
         value={prompt}
