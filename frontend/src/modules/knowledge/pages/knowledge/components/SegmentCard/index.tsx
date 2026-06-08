@@ -75,7 +75,7 @@ const SegmentCard = (props: IProps) => {
       )}
       <div className="content" onClick={onOpenDetail}>
         <div
-          className={`contentInner ${contentReadOnly ? "contentReadOnly" : ""}`}
+          className={`contentInner ${contentReadOnly ? "contentReadOnly" : ""} ${showNumber ? "contentWithNumber" : ""}`}
         >
           <SegmentContent
             segment={segment}

@@ -9,6 +9,8 @@ import (
 type FullCrawlStrategy struct {
 	strategyBase
 	recursive bool
+	fetchRoot bool
+	rootDone  bool
 	queue     []string
 	active    bfsContainer
 }
@@ -23,6 +25,7 @@ func NewFullCrawlStrategy(input strategyInput) *FullCrawlStrategy {
 	s := &FullCrawlStrategy{
 		strategyBase: newStrategyBase(input, connector.ScopeTypeFull),
 		recursive:    input.spec.SupportsRecursiveFetch,
+		fetchRoot:    !input.spec.SupportsRecursiveFetch && input.spec.SupportsDualRoleObject,
 	}
 	if !s.recursive {
 		s.queue = []string{""}
@@ -63,6 +66,9 @@ func (s *FullCrawlStrategy) nextRecursiveRequest() (CrawlRequest, bool, error) {
 }
 
 func (s *FullCrawlStrategy) nextBFSRequest() (CrawlRequest, bool, error) {
+	if s.fetchRoot && !s.rootDone {
+		return CrawlRequest{Kind: CrawlRequestKindFetch, Fetch: s.fetchRequest(connector.ScopeTypeWatchEvent, "")}, false, nil
+	}
 	if !s.active.set {
 		if len(s.queue) == 0 {
 			s.done = true
@@ -79,6 +85,10 @@ func (s *FullCrawlStrategy) nextBFSRequest() (CrawlRequest, bool, error) {
 
 func (s *FullCrawlStrategy) observeBFSPage(page connector.RawObjectPage) {
 	s.builder.observePage(page)
+	if s.fetchRoot && !s.rootDone {
+		s.rootDone = true
+		return
+	}
 	for _, raw := range page.Items {
 		if raw.IsContainer || raw.HasChildren {
 			s.queue = append(s.queue, nodeRefForRaw(raw))

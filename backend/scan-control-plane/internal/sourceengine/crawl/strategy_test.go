@@ -66,6 +66,39 @@ func TestFullStrategyUsesBFSListChildrenFallback(t *testing.T) {
 	}
 }
 
+func TestFullStrategyFetchesDualRoleRootBeforeBFSChildren(t *testing.T) {
+	t.Parallel()
+
+	strategy := NewFullCrawlStrategy(strategyInput{
+		binding: strategyBinding(),
+		spec: connector.ConnectorSpec{
+			SupportsRecursiveFetch: false,
+			SupportsDualRoleObject: true,
+		},
+		claim:    strategyClaim(connector.ScopeTypeFull, nil),
+		pageSize: 10,
+	})
+
+	req, done, err := strategy.NextRequest(context.Background(), CrawlLoopState{})
+	if err != nil || done {
+		t.Fatalf("first next request done=%v err=%v", done, err)
+	}
+	if req.Kind != CrawlRequestKindFetch || req.Fetch.ScopeType != connector.ScopeTypeWatchEvent {
+		t.Fatalf("expected dual-role root fetch, got %+v", req)
+	}
+	if err := strategy.ObservePage(context.Background(), connector.RawObjectPage{Items: []connector.RawObject{{ObjectKey: "root", IsDocument: true}}}); err != nil {
+		t.Fatalf("observe root fetch: %v", err)
+	}
+
+	req, done, err = strategy.NextRequest(context.Background(), CrawlLoopState{})
+	if err != nil || done {
+		t.Fatalf("second next request done=%v err=%v", done, err)
+	}
+	if req.Kind != CrawlRequestKindListChildren || req.ListChildren.NodeRef != "" {
+		t.Fatalf("expected root children list after root fetch, got %+v", req)
+	}
+}
+
 func TestPartialStrategyCoversDeclaredSubtreeOnly(t *testing.T) {
 	t.Parallel()
 

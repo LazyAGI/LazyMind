@@ -29,6 +29,7 @@ import (
 	"lazymind/core/store"
 
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
 )
 
 // DocumentService implements document APIs by joining:
@@ -575,10 +576,19 @@ func DeleteDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	if err := store.DB().WithContext(r.Context()).
-		Model(&orm.Document{}).
-		Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", docID, datasetID).
-		Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
+	if err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&orm.Document{}).
+			Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", docID, datasetID).
+			Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&orm.Task{}).
+			Where("doc_id = ? AND dataset_id = ? AND deleted_at IS NULL", docID, datasetID).
+			Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		common.ReplyErr(w, "delete document failed", http.StatusInternalServerError)
 		return
 	}
@@ -1072,10 +1082,23 @@ func BatchDeleteDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	if err := store.DB().WithContext(r.Context()).
-		Model(&orm.Document{}).
-		Where("dataset_id = ? AND id IN ? AND deleted_at IS NULL", datasetID, req.Names).
-		Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
+	docIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		docIDs = append(docIDs, row.ID)
+	}
+	if err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&orm.Document{}).
+			Where("dataset_id = ? AND id IN ? AND deleted_at IS NULL", datasetID, req.Names).
+			Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&orm.Task{}).
+			Where("doc_id IN ? AND dataset_id = ? AND deleted_at IS NULL", docIDs, datasetID).
+			Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		common.ReplyErr(w, "batch delete document failed", http.StatusInternalServerError)
 		return
 	}

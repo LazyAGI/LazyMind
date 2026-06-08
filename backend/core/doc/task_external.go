@@ -37,6 +37,7 @@ type reparseRequest struct {
 	DocIDs         []string       `json:"doc_ids"`
 	KbID           string         `json:"kb_id,omitempty"`
 	NgNames        []string       `json:"ng_names,omitempty"`
+	Strategy       string         `json:"strategy,omitempty"`
 	IdempotencyKey string         `json:"idempotency_key,omitempty"`
 	ModelConfig    map[string]any `json:"llm_config,omitempty"`
 }
@@ -96,11 +97,36 @@ func callExternalAddDocs(r *http.Request, req addRequest) ([]addResultItem, erro
 }
 
 func callExternalReparseDocs(r *http.Request, req reparseRequest) ([]string, error) {
+	url := common.JoinURL(parsingServiceEndpoint(), "/v1/docs/reparse")
+	log.Logger.Info().
+		Str("handler", "StartReparseTask").
+		Str("external_url", url).
+		Int("doc_count", len(req.DocIDs)).
+		Strs("doc_ids", req.DocIDs).
+		Str("kb_id", req.KbID).
+		Strs("ng_names", req.NgNames).
+		Msg("calling external reparse-docs request")
 	var resp reparseResponse
-	if err := common.ApiPost(r.Context(), common.JoinURL(parsingServiceEndpoint(), "/v1/docs/reparse"), req, nil, &resp, 15*time.Second); err != nil {
+	if err := common.ApiPost(r.Context(), url, req, nil, &resp, 15*time.Second); err != nil {
+		log.Logger.Error().
+			Err(err).
+			Str("handler", "StartReparseTask").
+			Str("external_url", url).
+			Int("doc_count", len(req.DocIDs)).
+			Strs("ng_names", req.NgNames).
+			Msg("external reparse-docs request failed")
 		return nil, err
 	}
-	return parseReparseTaskIDs(resp), nil
+	taskIDs := parseReparseTaskIDs(resp)
+	log.Logger.Info().
+		Str("handler", "StartReparseTask").
+		Str("external_url", url).
+		Int("doc_count", len(req.DocIDs)).
+		Strs("ng_names", req.NgNames).
+		Int("task_id_count", len(taskIDs)).
+		Strs("lazyllm_task_ids", taskIDs).
+		Msg("external reparse-docs request succeeded")
+	return taskIDs, nil
 }
 
 type reparseResponse struct {

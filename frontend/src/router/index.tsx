@@ -50,7 +50,7 @@ export default function AppRouter() {
           <Route index element={<SigninRegister />} />
         </Route>
         <Route
-          path="/oauth/feishu/data-source/callback"
+          path="/oauth/feishu/callback"
           element={<DataSourceFeishuCallback />}
         />
         <Route path="/loginTransition" element={<LoginTransition />} />

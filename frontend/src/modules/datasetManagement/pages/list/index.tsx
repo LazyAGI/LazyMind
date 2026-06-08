@@ -7,6 +7,7 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from "antd";
@@ -22,13 +23,17 @@ import { useNavigate } from "react-router-dom";
 import {
   createDataset,
   deleteDataset,
+  importDatasetItems,
   listDatasets,
   listKnowledgeBases,
   updateDataset,
 } from "../../api";
 import DatasetFormModal from "../../components/DatasetFormModal";
+import DatasetImportModal from "../../components/DatasetImportModal";
 import type {
   DatasetFormValues,
+  DatasetImportResultState,
+  DatasetItem,
   DatasetListItem,
   KnowledgeBaseOption,
 } from "../../shared";
@@ -46,6 +51,9 @@ export default function DatasetListPage() {
   const [formModalOpen, setFormModalOpen] = useState(false);
   const [editingDataset, setEditingDataset] = useState<DatasetListItem | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [uploadCreateDataset, setUploadCreateDataset] = useState<DatasetListItem | null>(null);
+  const [uploadCreateFile, setUploadCreateFile] = useState<File | null>(null);
 
   const loadDatasets = async (nextKeyword = keyword) => {
     setLoading(true);
@@ -118,6 +126,16 @@ export default function DatasetListPage() {
         knowledge_base_ids: values.knowledge_base_ids,
       });
 
+      if (values.create_method === "upload") {
+        const selectedFile = values.uploadFile?.[0]?.originFileObj as File | undefined;
+        setUploadCreateDataset(created);
+        setUploadCreateFile(selectedFile || null);
+        setFormModalOpen(false);
+        setImportModalOpen(true);
+        await loadDatasets();
+        return;
+      }
+
       message.success("数据集已创建");
       setFormModalOpen(false);
       navigate(`/dataset-management/${created.id}`);
@@ -125,6 +143,28 @@ export default function DatasetListPage() {
       message.error(error?.message || "保存失败");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleImported = async (
+    items: Array<Partial<DatasetItem>>,
+    result: DatasetImportResultState,
+    file: File | null,
+  ) => {
+    if (!uploadCreateDataset) {
+      return;
+    }
+    await importDatasetItems(uploadCreateDataset.id, file, items, result.failedCount);
+    await loadDatasets();
+  };
+
+  const handleCloseImport = () => {
+    const target = uploadCreateDataset;
+    setImportModalOpen(false);
+    setUploadCreateDataset(null);
+    setUploadCreateFile(null);
+    if (target) {
+      navigate(`/dataset-management/${target.id}`);
     }
   };
 
@@ -141,11 +181,15 @@ export default function DatasetListPage() {
               className="dataset-link-button"
               onClick={() => navigate(`/dataset-management/${record.id}`)}
             >
-              {record.name}
+              <Tooltip title={record.name}>
+                <span className="dataset-name-text">{record.name}</span>
+              </Tooltip>
             </Button>
-            <Paragraph className="dataset-description" ellipsis={{ rows: 1 }}>
-              {record.description || "-"}
-            </Paragraph>
+            <Tooltip title={record.description || ""}>
+              <Paragraph className="dataset-description" ellipsis={{ rows: 1 }}>
+                {record.description || "-"}
+              </Paragraph>
+            </Tooltip>
           </div>
         ),
       },
@@ -155,11 +199,13 @@ export default function DatasetListPage() {
         width: 220,
         render: (_, record) =>
           record.knowledge_bases?.length ? (
-            <Space size={[4, 4]} wrap>
+            <div className="dataset-kb-scroll-list">
               {record.knowledge_bases.map((item) => (
-                <Tag key={item.id}>{item.name}</Tag>
+                <Tag key={item.id} className="dataset-kb-scroll-tag">
+                  {item.name}
+                </Tag>
               ))}
-            </Space>
+            </div>
           ) : (
             <Text type="secondary">-</Text>
           ),
@@ -271,6 +317,12 @@ export default function DatasetListPage() {
         onSubmit={handleSubmitDataset}
       />
 
+      <DatasetImportModal
+        open={importModalOpen}
+        initialFile={uploadCreateFile}
+        onCancel={handleCloseImport}
+        onImported={handleImported}
+      />
     </div>
   );
 }

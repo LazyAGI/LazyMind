@@ -406,6 +406,11 @@ export default function MemoryManagementListPage() {
             loading={activeTab === "skills" ? skillLoading : false}
             dataSource={activeTab === "skills" ? filteredSkillTree : filteredStructuredItems}
             columns={activeTab === "tools" ? toolColumns : genericColumns}
+            rowClassName={(record) =>
+              activeTab === "skills" && record.isBuiltinTemplate
+                ? "memory-builtin-template-row"
+                : ""
+            }
             expandable={
               activeTab === "skills"
                 ? {

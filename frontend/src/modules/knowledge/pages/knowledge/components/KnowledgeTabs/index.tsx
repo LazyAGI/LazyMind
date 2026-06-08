@@ -126,14 +126,13 @@ const KnowledgeTabs = (props: {
           initTabs.push({
             label: t("knowledge.segmentSummary"),
             children: (
-              <div className="summary-container">
-                <SummaryTab
-                  detail={knowledgeDetail}
-                  type={
-                    group === parser.name ? group : parser.name || "summary"
-                  }
-                />
-              </div>
+              <SummaryTab
+                detail={knowledgeDetail}
+                type={
+                  group === parser.name ? group : parser.name || "summary"
+                }
+                onGetItemInfo={onGetItemInfo}
+              />
             ),
             key: TAB_KEYS.summary,
             closable: false,

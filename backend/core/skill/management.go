@@ -86,14 +86,8 @@ func List(w http.ResponseWriter, r *http.Request) {
 	filtered := make([]skillListParentEntry, 0, len(parents))
 	total := 0
 	for _, parent := range parents {
-		if keyword != "" && !strings.Contains(strings.ToLower(parent.SkillName), strings.ToLower(keyword)) && !strings.Contains(strings.ToLower(parent.Description), strings.ToLower(keyword)) {
-			continue
-		}
-		if category != "" && parent.Category != category {
-			continue
-		}
 		parentTags := parseTags(parent.Tags)
-		if len(filterTags) > 0 && !containsAllTags(parentTags, filterTags) {
+		if !skillMatchesListFilters(parent.SkillName, parent.Description, parent.Category, parentTags, keyword, category, filterTags) {
 			continue
 		}
 		key := parent.Category + "/" + parent.SkillName
@@ -104,6 +98,23 @@ func List(w http.ResponseWriter, r *http.Request) {
 			children: childrenForParent,
 		})
 	}
+	catalog, err := loadBuiltinCatalog()
+	if err != nil {
+		common.ReplyErr(w, "load builtin skills failed", http.StatusInternalServerError)
+		return
+	}
+	enabledBuiltinUIDs := enabledBuiltinSkillUIDs(parents)
+	for _, builtin := range catalog {
+		if _, exists := enabledBuiltinUIDs[builtin.UID]; exists {
+			continue
+		}
+		if !skillMatchesListFilters(builtin.Name, builtin.Description, builtin.Category, builtin.Tags, keyword, category, filterTags) {
+			continue
+		}
+		total++
+		builtinItem := builtin
+		filtered = append(filtered, skillListParentEntry{builtin: &builtinItem})
+	}
 
 	page := parsePositiveInt(r.URL.Query().Get("page"), 1)
 	pageSize := parsePositiveInt(r.URL.Query().Get("page_size"), 20)
@@ -113,6 +124,10 @@ func List(w http.ResponseWriter, r *http.Request) {
 	pageItems := paginateSkillListParents(filtered, page, pageSize)
 	items := make([]map[string]any, 0, len(pageItems))
 	for _, item := range pageItems {
+		if item.builtin != nil {
+			items = append(items, builtinListResponse(*item.builtin))
+			continue
+		}
 		items = append(items, parentListResponse(item.parent, item.children, suggestionStatesByKey))
 	}
 
@@ -770,6 +785,11 @@ func getSkillDetail(ctx context.Context, db *gorm.DB, userID, skillID string) (m
 		"has_pending_remove_suggestion":  suggestionState.HasPendingRemove,
 		"suggestion_status":              suggestionState.Status,
 		"node_type":                      row.NodeType,
+		"builtin_skill_uid":              "",
+		"origin_builtin_skill_uid":       row.OriginBuiltinSkillUID,
+		"is_builtin_template":            false,
+		"activation_status":              builtinActivationStatus(row.OriginBuiltinSkillUID),
+		"readonly":                       false,
 		"parent_id":                      "",
 		"parent_skill_id":                "",
 		"parent_skill_name":              row.ParentSkillName,
@@ -810,6 +830,11 @@ func getSkillDetail(ctx context.Context, db *gorm.DB, userID, skillID string) (m
 				"has_pending_remove_suggestion":  childSuggestionState.HasPendingRemove,
 				"suggestion_status":              childSuggestionState.Status,
 				"node_type":                      child.NodeType,
+				"builtin_skill_uid":              "",
+				"origin_builtin_skill_uid":       child.OriginBuiltinSkillUID,
+				"is_builtin_template":            false,
+				"activation_status":              builtinActivationStatus(child.OriginBuiltinSkillUID),
+				"readonly":                       false,
 				"parent_id":                      row.ID,
 				"parent_skill_id":                row.ID,
 				"parent_skill_name":              child.ParentSkillName,
@@ -1476,6 +1501,11 @@ func parentListResponse(parent orm.SkillResource, children []orm.SkillResource, 
 		"has_pending_remove_suggestion":  parentSuggestionState.HasPendingRemove,
 		"suggestion_status":              parentSuggestionState.Status,
 		"node_type":                      parent.NodeType,
+		"builtin_skill_uid":              "",
+		"origin_builtin_skill_uid":       parent.OriginBuiltinSkillUID,
+		"is_builtin_template":            false,
+		"activation_status":              builtinActivationStatus(parent.OriginBuiltinSkillUID),
+		"readonly":                       false,
 		"children":                       childItems,
 	}
 }
@@ -1502,12 +1532,18 @@ func childListResponse(parent, child orm.SkillResource, suggestionStatesByKey ma
 		"has_pending_remove_suggestion":  childSuggestionState.HasPendingRemove,
 		"suggestion_status":              childSuggestionState.Status,
 		"node_type":                      child.NodeType,
+		"builtin_skill_uid":              "",
+		"origin_builtin_skill_uid":       child.OriginBuiltinSkillUID,
+		"is_builtin_template":            false,
+		"activation_status":              builtinActivationStatus(child.OriginBuiltinSkillUID),
+		"readonly":                       false,
 	}
 }
 
 type skillListParentEntry struct {
 	parent   orm.SkillResource
 	children []orm.SkillResource
+	builtin  *builtinSkill
 }
 
 func paginateSkillListParents(entries []skillListParentEntry, page, pageSize int) []skillListParentEntry {

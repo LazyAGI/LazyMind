@@ -34,6 +34,15 @@ interface SkillNode {
   auto_evo_apply_status?: string;
   auto_evo_generation?: number;
   auto_evo_error?: string;
+  builtin_skill_uid?: string;
+  builtinSkillUid?: string;
+  origin_builtin_skill_uid?: string;
+  originBuiltinSkillUid?: string;
+  is_builtin_template?: boolean;
+  isBuiltinTemplate?: boolean;
+  activation_status?: string;
+  activationStatus?: string;
+  readonly?: boolean;
   children?: SkillNode[];
   [key: string]: unknown;
 }
@@ -58,6 +67,11 @@ export interface SkillAssetRecord {
   autoEvoApplyStatus?: string;
   autoEvoGeneration?: number;
   autoEvoError?: string;
+  builtinSkillUid?: string;
+  originBuiltinSkillUid?: string;
+  isBuiltinTemplate?: boolean;
+  activationStatus?: string;
+  readonly?: boolean;
 }
 
 export interface SkillDraftGeneratePayload {
@@ -295,6 +309,13 @@ const normalizeSkillNode = (raw: SkillNode, parentId?: string): SkillAssetRecord
     autoEvoApplyStatus: toStringValue(raw.auto_evo_apply_status || ""),
     autoEvoGeneration: typeof raw.auto_evo_generation === "number" ? raw.auto_evo_generation : 0,
     autoEvoError: toStringValue(raw.auto_evo_error || ""),
+    builtinSkillUid: toStringValue(raw.builtin_skill_uid || raw.builtinSkillUid || ""),
+    originBuiltinSkillUid: toStringValue(
+      raw.origin_builtin_skill_uid || raw.originBuiltinSkillUid || "",
+    ),
+    isBuiltinTemplate: toBoolean(raw.is_builtin_template || raw.isBuiltinTemplate, false),
+    activationStatus: toStringValue(raw.activation_status || raw.activationStatus || ""),
+    readonly: toBoolean(raw.readonly, false),
   };
 };
 
@@ -965,6 +986,16 @@ export async function getSkillAssetDetail(skillId: string): Promise<SkillAssetRe
 
 export async function createSkillAsset(payload: RawObject) {
   return axiosInstance.post(`${coreBasePath}/skills`, payload);
+}
+
+export async function enableBuiltinSkill(
+  builtinSkillUid: string,
+): Promise<SkillAssetRecord | null> {
+  const response = await axiosInstance.post(
+    `${coreBasePath}/builtin-skills/${encodeURIComponent(builtinSkillUid)}:enable`,
+  );
+  const payload = unwrapEnvelope<unknown>(response.data);
+  return normalizeSkillNode((payload || {}) as SkillNode);
 }
 
 export async function patchSkillAsset(skillId: string, payload: RawObject) {

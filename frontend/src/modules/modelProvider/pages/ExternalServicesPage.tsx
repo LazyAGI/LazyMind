@@ -9,6 +9,7 @@ import {
   EyeOutlined,
   FilePdfOutlined,
   GoogleOutlined,
+  InfoCircleFilled,
   PlusOutlined,
   RightOutlined,
   ScanOutlined,
@@ -51,8 +52,9 @@ interface ModelProviderOutletContext {
 }
 
 interface BaseUrlPreset {
-  labelKey: string;
-  descKey: string;
+  key?: string;
+  labelKey?: string;
+  descKey?: string;
   value: string;
 }
 
@@ -64,6 +66,10 @@ interface ApiEnvelope<T> {
 
 interface ApiExternalProvider {
   base_url?: string;
+  base_url_presets?: Array<{
+    key?: string;
+    value?: string;
+  }>;
   capabilities?: string[];
   category?: string;
   description?: string;
@@ -88,9 +94,6 @@ interface CheckExternalServiceResult {
 interface SaveExternalGroupResponse extends ApiExternalGroup {
   check?: CheckExternalServiceResult;
 }
-
-const mineruDockerComposeBaseUrl = "http://host.docker.internal:8000/api/v1/pdf_parse";
-const mineruOfficialBaseUrl = "https://mineru.example.com/api/v1/pdf_parse";
 
 const serviceCategories: Array<{
   key: ServiceCategoryKey;
@@ -124,18 +127,6 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     logoUrl: "https://www.google.com/s2/favicons?domain=mineru.net&sz=96",
     tone: "blue",
     status: "configured",
-    baseUrlPresets: [
-      {
-        labelKey: "modelProvider.external.mineruDockerComposePreset",
-        descKey: "modelProvider.external.mineruDockerComposePresetDesc",
-        value: mineruDockerComposeBaseUrl,
-      },
-      {
-        labelKey: "modelProvider.external.mineruOfficialPreset",
-        descKey: "modelProvider.external.mineruOfficialPresetDesc",
-        value: mineruOfficialBaseUrl,
-      },
-    ],
   },
   {
     key: "paddleocr",
@@ -212,6 +203,10 @@ function normalizeProviderName(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+function normalizeBaseUrlForCompare(value?: string) {
+  return (value || "").trim().replace(/\/+$/, "");
+}
+
 function unwrapResponse<T>(payload: ApiEnvelope<T> | T): T {
   if (payload && typeof payload === "object" && "data" in payload) {
     return (payload as ApiEnvelope<T>).data as T;
@@ -237,6 +232,13 @@ function isGoogleCustomSearch(service?: ExternalServiceConfig | null) {
 
 function getServiceProviderCategory(service: ExternalServiceConfig): ServiceProviderCategory {
   return service.category === "parsing" ? "ocr" : "search";
+}
+
+function isCustomServiceBaseUrl(service: ExternalServiceConfig, baseUrl?: string) {
+  if (!service.fields.includes("baseUrl")) {
+    return false;
+  }
+  return normalizeBaseUrlForCompare(baseUrl) !== normalizeBaseUrlForCompare(service.baseUrl);
 }
 
 function getExternalProvidersUrl(keyword: string) {
@@ -275,6 +277,64 @@ function getServiceFields(provider: ApiExternalProvider, category: ServiceCatego
   return provider.base_url ? ["baseUrl", "apiKey"] : ["apiKey"];
 }
 
+function getBaseUrlPresetLabelKey(serviceName: string, presetKey?: string) {
+  if (normalizeProviderName(serviceName) !== "mineru") {
+    return undefined;
+  }
+  if (presetKey === "local") {
+    return "modelProvider.external.mineruLocalPreset";
+  }
+  return "modelProvider.external.mineruOfficialPreset";
+}
+
+function getBaseUrlPresetDescKey(serviceName: string, presetKey?: string) {
+  if (normalizeProviderName(serviceName) !== "mineru") {
+    return undefined;
+  }
+  if (presetKey === "local") {
+    return "modelProvider.external.mineruLocalPresetDesc";
+  }
+  return "modelProvider.external.mineruOfficialPresetDesc";
+}
+
+function createBaseUrlPreset(
+  serviceName: string,
+  value: string,
+  presetKey?: string,
+): BaseUrlPreset | null {
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    return null;
+  }
+  return {
+    key: presetKey,
+    value: trimmedValue,
+    labelKey: getBaseUrlPresetLabelKey(serviceName, presetKey),
+    descKey: getBaseUrlPresetDescKey(serviceName, presetKey),
+  };
+}
+
+function mapBaseUrlPresets(provider: ApiExternalProvider, fallback?: ExternalServiceConfig): BaseUrlPreset[] | undefined {
+  const apiPresets: BaseUrlPreset[] = [];
+  (provider.base_url_presets || []).forEach((preset) => {
+    const nextPreset = createBaseUrlPreset(provider.name, preset.value || "", preset.key);
+    if (nextPreset) {
+      apiPresets.push(nextPreset);
+    }
+  });
+
+  if (apiPresets.length > 0) {
+    return apiPresets;
+  }
+
+  const officialPreset = createBaseUrlPreset(provider.name, provider.base_url || "", "official");
+  if (officialPreset) {
+    return [officialPreset];
+  }
+
+  return fallback?.baseUrlPresets;
+}
+
 function mapApiProviderToService(provider: ApiExternalProvider, t: ReturnType<typeof useTranslation>["t"]): ExternalServiceConfig {
   const fallback = fallbackServiceByName.get(normalizeProviderName(provider.name));
   const category = fallback?.category || mapProviderCategory(provider.category);
@@ -292,7 +352,7 @@ function mapApiProviderToService(provider: ApiExternalProvider, t: ReturnType<ty
     tone: fallback?.tone || serviceToneByCategory[category],
     status: provider.is_configured ? "configured" : "missing",
     baseUrl: provider.base_url,
-    baseUrlPresets: fallback?.baseUrlPresets,
+    baseUrlPresets: mapBaseUrlPresets(provider, fallback),
   };
 }
 
@@ -486,6 +546,14 @@ export default function ExternalServicesPage() {
     }
   }
 
+  async function loadFirstGroup(serviceKey: string) {
+    const groupData = await modelProviderRequest<{ groups?: ApiExternalGroup[] }>(
+      "GET",
+      `/model_providers/${encodeURIComponent(serviceKey)}/groups`
+    );
+    return (groupData.groups || [])[0] || null;
+  }
+
   async function handleBaseUrlChange() {
     if (!activeService) {
       return;
@@ -499,8 +567,7 @@ export default function ExternalServicesPage() {
       return;
     }
 
-    const normalizeUrl = (url: string) => url.trim().replace(/\/+$/, "");
-    const isRealChange = normalizeUrl(currentUrl) !== normalizeUrl(originalBaseUrlRef.current);
+    const isRealChange = normalizeBaseUrlForCompare(currentUrl) !== normalizeBaseUrlForCompare(originalBaseUrlRef.current);
 
     if (keyList.length === 0) {
       // No keys: update backend if group exists, otherwise just update ref
@@ -546,16 +613,23 @@ export default function ExternalServicesPage() {
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
-          await modelProviderRequest(
+          const updatedGroup = await modelProviderRequest<SaveExternalGroupResponse>(
             "PATCH",
             `/model_providers/${encodeURIComponent(activeService.key)}/groups/${encodeURIComponent(groupForActiveService!.id)}`,
             { base_url: currentUrl },
           );
           setKeyList([]);
-          setGroupForActiveService(null);
+          setGroupForActiveService(updatedGroup);
           loadGroupKeysGenRef.current += 1;
           originalBaseUrlRef.current = currentUrl;
+          if (isCustomServiceBaseUrl(activeService, currentUrl)) {
+            await modelProviderRequest("PUT", "/model_providers/selected_providers", {
+              selections: [{ category: getServiceProviderCategory(activeService), group_id: updatedGroup.id }],
+            });
+          }
+          message.success(t("modelProvider.external.baseUrlChanged"));
           void loadExternalServices(normalizedSearchValue);
+          closeConfigModal();
         } catch (error) {
           message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
         }
@@ -629,6 +703,55 @@ export default function ExternalServicesPage() {
     }
   }
 
+  async function handleSaveServiceConfig() {
+    if (!activeService || addingKey) {
+      return;
+    }
+    try {
+      await form.validateFields();
+      const baseUrl = form.getFieldValue([activeService.key, "baseUrl"]) || activeService.baseUrl || "";
+      const normalizedBaseUrl = baseUrl.trim();
+      let savedGroup = groupForActiveService;
+
+      if (activeService.fields.includes("baseUrl")) {
+        if (!savedGroup) {
+          savedGroup = await loadFirstGroup(activeService.key);
+        }
+        if (savedGroup) {
+          savedGroup = await modelProviderRequest<SaveExternalGroupResponse>(
+            "PATCH",
+            `/model_providers/${encodeURIComponent(activeService.key)}/groups/${encodeURIComponent(savedGroup.id)}`,
+            { base_url: normalizedBaseUrl },
+          );
+        } else {
+          savedGroup = await modelProviderRequest<SaveExternalGroupResponse>(
+            "POST",
+            `/model_providers/${encodeURIComponent(activeService.key)}/groups`,
+            {
+              name: activeService.name,
+              base_url: normalizedBaseUrl,
+              verify: true,
+            },
+          );
+        }
+        setGroupForActiveService(savedGroup);
+        originalBaseUrlRef.current = normalizedBaseUrl;
+      }
+
+      if (savedGroup && (keyList.length > 0 || isCustomServiceBaseUrl(activeService, normalizedBaseUrl))) {
+        await modelProviderRequest("PUT", "/model_providers/selected_providers", {
+          selections: [{ category: getServiceProviderCategory(activeService), group_id: savedGroup.id }],
+        });
+      }
+
+      message.success(t("modelProvider.external.baseUrlChanged"));
+      void loadExternalServices(normalizedSearchValue);
+      closeConfigModal();
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
+    }
+  }
+
   async function handleRemoveKey(targetKey: string) {
     if (!activeService || !groupForActiveService) {
       return;
@@ -666,22 +789,31 @@ export default function ExternalServicesPage() {
     setGroupForActiveService(null);
     void loadGroupKeys(service.key);
     if (service.fields.includes("baseUrl")) {
+      const fallbackBaseUrl = service.baseUrl || service.baseUrlPresets?.[0]?.value || "";
       const currentFormValue = form.getFieldValue([service.key, "baseUrl"]);
-      originalBaseUrlRef.current = currentFormValue || service.baseUrl || (
-        normalizeProviderName(service.name) === "mineru" ? mineruDockerComposeBaseUrl : ""
-      );
+      originalBaseUrlRef.current = currentFormValue || fallbackBaseUrl;
       window.setTimeout(() => {
         const currentBaseUrl = form.getFieldValue([service.key, "baseUrl"]);
         if (!currentBaseUrl) {
-          const defaultBaseUrl = service.baseUrl || (
-            normalizeProviderName(service.name) === "mineru" ? mineruDockerComposeBaseUrl : undefined
-          );
-          if (defaultBaseUrl) {
-            form.setFieldValue([service.key, "baseUrl"], defaultBaseUrl);
+          if (fallbackBaseUrl) {
+            form.setFieldValue([service.key, "baseUrl"], fallbackBaseUrl);
           }
         }
       }, 0);
     }
+
+    void modelProviderRequest<{ groups?: ApiExternalGroup[] }>(
+      "GET",
+      `/model_providers/${encodeURIComponent(service.key)}/groups`
+    )
+      .then((groupData) => {
+        const existingGroup = (groupData.groups || [])[0];
+        const nextBaseUrl = existingGroup?.base_url?.trim() || service.baseUrl || "";
+        form.setFieldValue([service.key, "baseUrl"], nextBaseUrl);
+      })
+      .catch(() => {
+        form.setFieldValue([service.key, "baseUrl"], service.baseUrl || "");
+      });
   };
 
   const categorizedServices = useMemo(() => {
@@ -798,8 +930,8 @@ export default function ExternalServicesPage() {
             : t("modelProvider.external.configureAction")
         }
         footer={[
-          <Button key="close" onClick={closeConfigModal}>
-            {t("common.close")}
+          <Button key="save" loading={addingKey} onClick={handleSaveServiceConfig} type="primary">
+            {t("modelProvider.external.saveConfig")}
           </Button>,
         ]}
       >
@@ -851,14 +983,15 @@ export default function ExternalServicesPage() {
                         value: preset.value,
                         label: (
                           <span className="model-provider-service-preset-option">
-                            <strong>{t(preset.labelKey)}</strong>
+                            <strong>{preset.labelKey ? t(preset.labelKey) : preset.value}</strong>
                             <small>{preset.value}</small>
-                            <small>{t(preset.descKey)}</small>
+                            {preset.descKey ? <small>{t(preset.descKey)}</small> : null}
                           </span>
                         ),
                       }))}
                       placeholder="https://api.example.com"
                       popupClassName="model-provider-service-preset-dropdown"
+                      onChange={(value) => form.setFieldValue([activeService.key, "baseUrl"], value)}
                     />
                   ) : (
                     <Input maxLength={512} onBlur={() => handleBaseUrlChange()} placeholder="https://api.example.com" />
@@ -957,13 +1090,15 @@ export default function ExternalServicesPage() {
         )}
       </Modal>
 
-      <Alert
-        className="model-provider-service-alert"
-        type="info"
-        showIcon
-        message={t("modelProvider.external.apiContractTitle")}
-        description={t("modelProvider.external.apiContractDesc")}
-      />
+      <section className="model-provider-service-alert" aria-label={t("modelProvider.external.apiContractTitle")}>
+        <div className="model-provider-service-alert-icon" aria-hidden="true">
+          <InfoCircleFilled />
+        </div>
+        <div className="model-provider-service-alert-copy">
+          <h3>{t("modelProvider.external.apiContractTitle")}</h3>
+          <p>{t("modelProvider.external.apiContractDesc")}</p>
+        </div>
+      </section>
     </div>
   );
 }

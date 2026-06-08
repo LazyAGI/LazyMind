@@ -155,6 +155,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PUT", "/personalization-setting", []string{"qa.read"}, evolution.SetPersonalizationSetting)
 	handleAPI(r, "GET", "/skills", []string{"qa.read"}, skill.List)
 	handleAPI(r, "POST", "/skills", []string{"qa.read"}, skill.CreateManaged)
+	handleAPI(r, "POST", "/builtin-skills/{builtin_skill_uid}:enable", []string{"qa.read"}, skill.EnableBuiltinSkill)
 	handleAPI(r, "GET", "/skills/{skill_id}:shares", []string{"qa.read"}, skill.ListSkillShareTargets)
 	handleAPI(r, "GET", "/skill-shares/incoming", []string{"qa.read"}, skill.IncomingShares)
 	handleAPI(r, "GET", "/skill-shares/outgoing", []string{"qa.read"}, skill.OutgoingShares)
@@ -180,8 +181,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/user-preference:confirm", []string{"qa.read"}, preference.Confirm)
 	handleAPI(r, "POST", "/user-preference:discard", []string{"qa.read"}, preference.Discard)
 
-	// :detail text {name} text，text /conversations/xxx:detail text {name} text GetConversation（text history）
 	handleAPI(r, "GET", "/conversations/{name}:detail", []string{"qa.read"}, chat.GetConversationDetail)
+	handleAPI(r, "GET", "/conversations/{name}:history", []string{"qa.read"}, chat.GetConversationHistory)
 	handleAPI(r, "GET", "/conversations/{name}", []string{"qa.read"}, chat.GetConversation)
 	handleAPI(r, "DELETE", "/conversations/{name}", []string{"qa.read"}, chat.DeleteConversation)
 	handleAPI(r, "POST", "/conversations:batchDelete", []string{"qa.read"}, chat.BatchDeleteConversations)

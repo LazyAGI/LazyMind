@@ -424,6 +424,7 @@ export interface TaskPayload {
   document_tags?: string[];
   files?: TaskFile[];
   reparse_groups?: string[];
+  reparse_mode?: string;
   target_dataset_id?: string;
   target_pid?: string;
   target_path?: string;
@@ -543,9 +544,18 @@ export function TaskServiceApi() {
 
     listTasks(
       dataset: string,
+      params?: { taskStatus?: string; pageSize?: number; pageToken?: string },
       options?: RawAxiosRequestConfig,
     ) {
-      return coreClient.apiCoreDatasetsDatasetTasksGet({ dataset }, options);
+      return coreClient.apiCoreDatasetsDatasetTasksGet(
+        {
+          dataset,
+          pageSize: params?.pageSize,
+          pageToken: params?.pageToken,
+          taskState: params?.taskStatus,
+        },
+        options,
+      );
     },
 
 

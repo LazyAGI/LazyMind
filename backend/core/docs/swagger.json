@@ -206,9 +206,20 @@
     },
     "/conversations/{name}:detail": {
       "get": {
-        "summary": "Get conversationtext (requires qa.read)",
+        "summary": "Get conversation metadata (requires qa.read)",
         "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
-        "responses": { "200": { "description": "Conversation detail" } }
+        "responses": { "200": { "description": "Conversation metadata (no chat history)" } }
+      }
+    },
+    "/conversations/{name}:history": {
+      "get": {
+        "summary": "List conversation history paginated (requires qa.read)",
+        "parameters": [
+          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "page_size", "in": "query", "schema": { "type": "integer" } },
+          { "name": "page_token", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Paginated chat history" } }
       }
     },
     "/conversations": {

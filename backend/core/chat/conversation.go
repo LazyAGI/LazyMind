@@ -215,10 +215,16 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		reqBody["llm_config"] = llmConfig
 	}
 	var toolConfig map[string]any
-	if feishuToken, err := fetchFeishuToken(r.Context(), r, userID); err != nil {
-		fmt.Printf("[Core] [FEISHU_TOKEN] failed to fetch feishu token for user %s: %v\n", userID, err)
-	} else if feishuToken != "" {
-		toolConfig = mergeToolConfig(toolConfig, map[string]any{"feishu": feishuToken})
+	if feishuTokens, err := fetchFeishuTokens(r.Context(), userID); err != nil {
+		fmt.Printf("[Core] [FEISHU_TOKEN] failed to fetch feishu tokens for user %s: %v\n", userID, err)
+	} else if len(feishuTokens) > 0 {
+		var feishuValue any
+		if len(feishuTokens) == 1 {
+			feishuValue = feishuTokens[0]
+		} else {
+			feishuValue = feishuTokens
+		}
+		toolConfig = mergeToolConfig(toolConfig, map[string]any{"feishu": feishuValue})
 	}
 	if searchConfig, err := searchToolConfigEntry(r.Context(), db, userID); err != nil {
 		fmt.Printf("[Core] [SEARCH_TOOL_CONFIG] failed to load search tool config for user %s: %v\n", userID, err)
@@ -688,6 +694,108 @@ func GetConversation(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func parseConversationHistoryPage(r *http.Request) (pageSize, offset int) {
+	q := r.URL.Query()
+	pageToken := strings.TrimSpace(q.Get("page_token"))
+	pageSizeStr := strings.TrimSpace(q.Get("page_size"))
+
+	pageSize = 20
+	if pageSizeStr != "" {
+		if v, err := strconv.Atoi(pageSizeStr); err == nil && v > 0 {
+			pageSize = v
+		}
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	offset = 0
+	if pageToken != "" {
+		if v, err := parseListPageToken(pageToken); err == nil && v >= 0 {
+			offset = v
+		}
+	}
+	return pageSize, offset
+}
+
+func loadConversationHistories(ctx context.Context, convID string) []orm.ChatHistory {
+	var histories []orm.ChatHistory
+	store.DB().Where("conversation_id = ?", convID).Order("seq DESC").Find(&histories)
+
+	rdb := store.Redis()
+	if rdb == nil {
+		return histories
+	}
+	ids, _ := getGeneratingHistoryIDs(ctx, rdb, convID)
+	exists := make(map[string]struct{}, len(histories))
+	for _, h := range histories {
+		exists[h.ID] = struct{}{}
+	}
+	for _, hid := range ids {
+		if _, ok := exists[hid]; ok {
+			continue
+		}
+		in, err := getChatInput(ctx, rdb, convID, hid)
+		if err != nil || in == nil || strings.TrimSpace(in.RawContent) == "" {
+			continue
+		}
+		ct := time.UnixMilli(in.CreatedAt)
+		histories = append(histories, orm.ChatHistory{
+			ID:             hid,
+			Seq:            in.Seq,
+			ConversationID: convID,
+			RawContent:     in.RawContent,
+			Content:        in.RawContent,
+			Result:         "",
+			Ext:            in.Ext,
+			TimeMixin:      orm.TimeMixin{CreateTime: ct, UpdateTime: ct},
+		})
+	}
+	sort.Slice(histories, func(i, j int) bool { return histories[i].Seq > histories[j].Seq })
+	return histories
+}
+
+func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
+	var sources any
+	if len(h.RetrievalResult) > 0 {
+		var rr struct {
+			Sources any `json:"sources"`
+		}
+		if err := json.Unmarshal(h.RetrievalResult, &rr); err == nil {
+			sources = rr.Sources
+		}
+	}
+	var input any
+	if len(h.Ext) > 0 {
+		var ext struct {
+			Input any `json:"input"`
+		}
+		if err := json.Unmarshal(h.Ext, &ext); err == nil {
+			input = ext.Input
+		}
+	}
+	return map[string]any{
+		"seq":             h.Seq,
+		"query":           h.RawContent,
+		"result":          stripThinkTags(stripToolTags(h.Result)),
+		"id":              h.ID,
+		"feed_back":       h.FeedBack,
+		"sources":         sources,
+		"input":           input,
+		"reason":          h.Reason,
+		"expected_answer": h.ExpectedAnswer,
+		"create_time":     h.CreateTime.UTC().Format(time.RFC3339),
+	}
+}
+
+func conversationHistoryResponseItems(histories []orm.ChatHistory) []map[string]any {
+	list := make([]map[string]any, 0, len(histories))
+	for _, h := range histories {
+		list = append(list, chatHistoryToResponseItem(h))
+	}
+	return list
+}
+
 // GetConversationDetail text GET /api/v1/conversations/{name}:detail
 func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 	name := conversationNameFromPath(r)
@@ -705,75 +813,6 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "conversation not found", err), http.StatusNotFound)
 		return
 	}
-	var histories []orm.ChatHistory
-	store.DB().Where("conversation_id = ?", convID).Order("seq ASC").Find(&histories)
-
-	rdb := store.Redis()
-	if rdb != nil {
-		ids, _ := getGeneratingHistoryIDs(r.Context(), rdb, convID)
-		exists := make(map[string]struct{}, len(histories))
-		for _, h := range histories {
-			exists[h.ID] = struct{}{}
-		}
-		for _, hid := range ids {
-			if _, ok := exists[hid]; ok {
-				continue
-			}
-			in, err := getChatInput(r.Context(), rdb, convID, hid)
-			if err != nil || in == nil || strings.TrimSpace(in.RawContent) == "" {
-				continue
-			}
-			ct := time.UnixMilli(in.CreatedAt)
-			histories = append(histories, orm.ChatHistory{
-				ID:             hid,
-				Seq:            in.Seq,
-				ConversationID: convID,
-				RawContent:     in.RawContent,
-				Content:        in.RawContent,
-				Result:         "",
-				Ext:            in.Ext,
-				TimeMixin:      orm.TimeMixin{CreateTime: ct, UpdateTime: ct},
-			})
-		}
-		sort.Slice(histories, func(i, j int) bool { return histories[i].Seq < histories[j].Seq })
-	}
-
-	list := make([]map[string]any, 0, len(histories))
-	for _, h := range histories {
-		var sources any
-		if len(h.RetrievalResult) > 0 {
-			var rr struct {
-				Sources any `json:"sources"`
-			}
-			if err := json.Unmarshal(h.RetrievalResult, &rr); err == nil {
-				sources = rr.Sources
-			}
-		}
-		// text input
-		var input any
-		if len(h.Ext) > 0 {
-			var ext struct {
-				Input any `json:"input"`
-			}
-			if err := json.Unmarshal(h.Ext, &ext); err == nil {
-				input = ext.Input
-			}
-		}
-
-		list = append(list, map[string]any{
-			"seq":             h.Seq,
-			"query":           h.RawContent,
-			"result":          stripThinkTags(stripToolTags(h.Result)),
-			"id":              h.ID,
-			"feed_back":       h.FeedBack,
-			"sources":         sources,
-			"input":           input,
-			"reason":          h.Reason,
-			"expected_answer": h.ExpectedAnswer,
-			"create_time":     h.CreateTime.UTC().Format(time.RFC3339),
-		})
-	}
-
 	// textConversationtext
 	var searchCfg any
 	if len(c.SearchConfig) > 0 {
@@ -805,7 +844,48 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 			"update_time":           c.UpdatedAt.UTC().Format(time.RFC3339),
 			"models":                models,
 		},
-		"history": list,
+	})
+}
+
+// GetConversationHistory text GET /api/v1/conversations/{name}:history
+func GetConversationHistory(w http.ResponseWriter, r *http.Request) {
+	name := conversationNameFromPath(r)
+	convID := conversationIDFromName(name)
+	if convID == "" {
+		common.ReplyErr(w, "invalid conversation name", http.StatusBadRequest)
+		return
+	}
+	userID := store.UserID(r)
+	if userID == "" {
+		userID = "0"
+	}
+	if err := store.DB().Where("id = ? AND create_user_id = ?", convID, userID).First(&orm.Conversation{}).Error; err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "conversation not found", err), http.StatusNotFound)
+		return
+	}
+
+	pageSize, offset := parseConversationHistoryPage(r)
+	histories := loadConversationHistories(r.Context(), convID)
+	total := len(histories)
+	if offset > total {
+		offset = total
+	}
+	end := offset + pageSize
+	if end > total {
+		end = total
+	}
+	page := histories[offset:end]
+
+	nextToken := ""
+	if end < total {
+		nextToken = encodeListPageToken(end, pageSize, total)
+	}
+	writeConversationJSON(w, http.StatusOK, map[string]any{
+		"conversation_id": convID,
+		"name":            "conversations/" + convID,
+		"history":         conversationHistoryResponseItems(page),
+		"total_size":      total,
+		"next_page_token": nextToken,
 	})
 }
 

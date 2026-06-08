@@ -141,17 +141,20 @@ func extractPathParameters(path string) []map[string]any {
 }
 
 func toParameterList(v any) []map[string]any {
-	items, ok := v.([]any)
-	if !ok {
+	switch items := v.(type) {
+	case []map[string]any:
+		return append([]map[string]any(nil), items...)
+	case []any:
+		result := make([]map[string]any, 0, len(items))
+		for _, item := range items {
+			if m, ok := item.(map[string]any); ok {
+				result = append(result, m)
+			}
+		}
+		return result
+	default:
 		return nil
 	}
-	result := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		if m, ok := item.(map[string]any); ok {
-			result = append(result, m)
-		}
-	}
-	return result
 }
 
 func mergeParameters(existing, generated []map[string]any) []map[string]any {

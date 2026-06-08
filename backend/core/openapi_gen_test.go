@@ -88,6 +88,7 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		{"post", "/api/core/user-preference:confirm", false, false, true},
 		{"post", "/api/core/user-preference:discard", false, false, true},
 		{"get", "/api/core/agent/threads", false, true, true},
+		{"get", "/api/core/conversations/{name}:history", false, true, true},
 	}
 
 	for _, tc := range cases {
@@ -160,6 +161,100 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 	for _, name := range []string{"user_id", "skill_id", "memory_id", "user_preference_id", "preference_id"} {
 		if _, ok := paramNames[name]; ok {
 			t.Fatalf("unexpected removed query parameter %q on get /api/core/evolution/suggestions", name)
+		}
+	}
+
+	historyItem, ok := paths["/api/core/conversations/{name}:history"].(map[string]any)
+	if !ok {
+		t.Fatalf("path missing: /api/core/conversations/{name}:history")
+	}
+	historyGet, ok := historyItem["get"].(map[string]any)
+	if !ok {
+		t.Fatalf("get operation missing for conversation history")
+	}
+	historyParams, ok := historyGet["parameters"].([]any)
+	if !ok {
+		t.Fatalf("parameters missing for conversation history")
+	}
+	historyParamNames := make(map[string]string, len(historyParams))
+	for _, item := range historyParams {
+		p, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		historyParamNames[p["name"].(string)] = p["in"].(string)
+	}
+	for _, want := range []struct{ name, inVal string }{
+		{"name", "path"},
+		{"page_size", "query"},
+		{"page_token", "query"},
+	} {
+		if got, ok := historyParamNames[want.name]; !ok || got != want.inVal {
+			t.Fatalf("expected history parameter %q in %q, got %q (%v)", want.name, want.inVal, got, historyParamNames)
+		}
+	}
+}
+
+func TestOpenAPISpecCoversEvalSetOperations(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	paths, ok := spec["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("paths missing in openapi spec")
+	}
+
+	cases := []struct {
+		method string
+		path   string
+		tag    string
+	}{
+		{"get", "/api/core/eval-sets", "eval-sets"},
+		{"post", "/api/core/eval-sets", "eval-sets"},
+		{"get", "/api/core/eval-sets/datasets", "eval-sets"},
+		{"get", "/api/core/eval-sets/question-types", "eval-sets"},
+		{"get", "/api/core/eval-sets/{eval_set_id}", "eval-sets"},
+		{"patch", "/api/core/eval-sets/{eval_set_id}", "eval-sets"},
+		{"delete", "/api/core/eval-sets/{eval_set_id}", "eval-sets"},
+		{"get", "/api/core/eval-sets/{eval_set_id}/items", "eval-set-items"},
+		{"post", "/api/core/eval-sets/{eval_set_id}/items", "eval-set-items"},
+		{"patch", "/api/core/eval-sets/{eval_set_id}/items/{item_id}", "eval-set-items"},
+		{"delete", "/api/core/eval-sets/{eval_set_id}/items/{item_id}", "eval-set-items"},
+		{"post", "/api/core/eval-sets/{eval_set_id}/items:batchDelete", "eval-set-items"},
+		{"get", "/api/core/eval-set-import-templates/{file_type}", "eval-set-imports"},
+		{"post", "/api/core/eval-sets/imports:preview", "eval-set-imports"},
+		{"post", "/api/core/eval-sets:import", "eval-set-imports"},
+		{"post", "/api/core/eval-sets/{eval_set_id}/imports", "eval-set-imports"},
+		{"get", "/api/core/eval-set-import-tasks/{task_id}", "eval-set-imports"},
+	}
+
+	for _, tc := range cases {
+		pathItem, ok := paths[tc.path].(map[string]any)
+		if !ok {
+			t.Fatalf("path missing from openapi spec: %s", tc.path)
+		}
+		op, ok := pathItem[tc.method].(map[string]any)
+		if !ok {
+			t.Fatalf("operation missing from openapi spec: %s %s", tc.method, tc.path)
+		}
+		tags, ok := op["tags"].([]any)
+		if !ok || len(tags) == 0 || tags[0] != tc.tag {
+			t.Fatalf("expected tag %q for %s %s, got %#v", tc.tag, tc.method, tc.path, op["tags"])
+		}
+	}
+
+	for _, legacyPath := range []string{"/api/core/qa-datasets", "/api/core/qa-dataset-import-tasks/{task_id}"} {
+		if _, ok := paths[legacyPath]; ok {
+			t.Fatalf("unexpected legacy qa dataset path in openapi spec: %s", legacyPath)
 		}
 	}
 }

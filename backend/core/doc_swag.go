@@ -366,10 +366,15 @@ func _swagGetChatStatus() {}
 // @Router    /conversations/{name} [get]
 func _swagGetConversation() {}
 
-// @Summary  Get conversationtext
+// @Summary  Get conversation metadata
 // @Tags      conversations
 // @Router    /conversations/{name}:detail [get]
 func _swagGetConversationDetail() {}
+
+// @Summary  List conversation history (paginated)
+// @Tags      conversations
+// @Router    /conversations/{name}:history [get]
+func _swagGetConversationHistory() {}
 
 // @Summary  Delete conversation
 // @Tags      conversations

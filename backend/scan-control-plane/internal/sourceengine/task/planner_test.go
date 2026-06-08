@@ -204,6 +204,44 @@ func TestGenerateTasksQueuesManualSyncForTreeNodeKey(t *testing.T) {
 	}
 }
 
+func TestGenerateTasksQueuesManualSyncForContainerScope(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	repo := newPlannerStore(now)
+	syncer := &manualSyncSchedulerStub{}
+	planner := NewDBTaskPlanner(
+		repo,
+		WithClock(func() time.Time { return now }),
+		WithIDGenerator(repo.nextID),
+		WithManualSyncScheduler(syncer),
+	)
+
+	_, err := planner.GenerateTasks(ctx, GenerateRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		Mode:      "partial",
+		Scopes: []GenerateScope{{
+			Key:         "binding-1:feishu:wiki:space-1:node-1",
+			ObjectKey:   "feishu:wiki:space-1:node-1",
+			NodeRef:     "wiki:space-1:node-1",
+			IsDocument:  true,
+			IsContainer: true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("generate selected container scope: %v", err)
+	}
+	if len(syncer.calls) != 1 {
+		t.Fatalf("expected one sync call, got %+v", syncer.calls)
+	}
+	call := syncer.calls[0]
+	if call.ScopeType != "partial" || call.ScopeRef["node_ref"] != "wiki:space-1:node-1" || call.ScopeRef["subtree_root"] != "feishu:wiki:space-1:node-1" {
+		t.Fatalf("container scope should be converted to subtree sync: %+v", call)
+	}
+}
+
 func TestGeneratePendingTasksBypassesManualRequestLimit(t *testing.T) {
 	t.Parallel()
 

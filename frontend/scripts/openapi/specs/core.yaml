@@ -455,6 +455,10 @@ components:
             properties:
                 conversation:
                     $ref: '#/components/schemas/ConversationItem'
+                history:
+                    items:
+                        $ref: '#/components/schemas/ConversationHistoryItem'
+                    type: array
             type: object
         ConversationFeedbackRequest:
             properties:
@@ -602,8 +606,10 @@ components:
             type: object
         CreateEvalSetByImportRequest:
             properties:
-                dataset_id:
-                    type: string
+                dataset_ids:
+                    items:
+                        type: string
+                    type: array
                 description:
                     type: string
                 group_id:
@@ -613,7 +619,6 @@ components:
                 name:
                     type: string
             required:
-                - dataset_id
                 - description
                 - group_id
                 - import_token
@@ -667,8 +672,10 @@ components:
             type: object
         CreateEvalSetRequest:
             properties:
-                dataset_id:
-                    type: string
+                dataset_ids:
+                    items:
+                        type: string
+                    type: array
                 description:
                     type: string
                 group_id:
@@ -676,7 +683,6 @@ components:
                 name:
                     type: string
             required:
-                - dataset_id
                 - description
                 - group_id
                 - name
@@ -1132,6 +1138,14 @@ components:
                 created_at:
                     format: date-time
                     type: string
+                dataset_ids:
+                    items:
+                        type: string
+                    type: array
+                dataset_names:
+                    items:
+                        type: string
+                    type: array
                 error_code:
                     type: string
                 error_details:
@@ -1264,10 +1278,14 @@ components:
                     type: string
                 created_by_name:
                     type: string
-                dataset_id:
-                    type: string
-                dataset_name:
-                    type: string
+                dataset_ids:
+                    items:
+                        type: string
+                    type: array
+                dataset_names:
+                    items:
+                        type: string
+                    type: array
                 description:
                     type: string
                 group_id:
@@ -1292,8 +1310,6 @@ components:
                 - created_at
                 - created_by
                 - created_by_name
-                - dataset_id
-                - dataset_name
                 - description
                 - group_id
                 - id
@@ -1544,6 +1560,19 @@ components:
                     items:
                         $ref: '#/components/schemas/Algo'
                     type: array
+            type: object
+        ListDatasetDocumentsRequest:
+            properties:
+                dataset_ids:
+                    items:
+                        type: string
+                    type: array
+                keyword:
+                    type: string
+                page_size:
+                    type: integer
+                page_token:
+                    type: string
             type: object
         ListDatasetMembersResponse:
             properties:
@@ -2193,8 +2222,10 @@ components:
             type: object
         UpdateEvalSetRequest:
             properties:
-                dataset_id:
-                    type: string
+                dataset_ids:
+                    items:
+                        type: string
+                    type: array
                 description:
                     type: string
                 group_id:
@@ -2707,7 +2738,7 @@ components:
                     type: string
                 model_id:
                     type: string
-                model_type:
+                model_key:
                     type: string
                 name:
                     type: string
@@ -2721,7 +2752,7 @@ components:
                 - base_url
                 - group_name
                 - model_id
-                - model_type
+                - model_key
                 - name
                 - provider_name
                 - user_model_provider_group_id
@@ -2763,11 +2794,11 @@ components:
             properties:
                 model_id:
                     type: string
-                model_type:
+                model_key:
                     type: string
             required:
                 - model_id
-                - model_type
+                - model_key
             type: object
         setSelectedModelsOpenAPIRequest:
             properties:
@@ -4908,11 +4939,6 @@ paths:
     /api/core/datasets/{dataset}/members:search:
         post:
             parameters:
-                - in: query
-                  name: name_prefix
-                  required: false
-                  schema:
-                    type: string
                 - in: path
                   name: dataset
                   required: true
@@ -5497,6 +5523,24 @@ paths:
                                 $ref: '#/components/schemas/DocumentTagsResponse'
                     description: Document tag list
             summary: Document tag list
+    /api/core/documents:listByDatasets:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ListDatasetDocumentsRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListDocumentsResponse'
+                    description: Dataset document list
+            summary: List documents by datasets
+            tags:
+                - documents
     /api/core/documents:search:
         post:
             requestBody:
@@ -5561,10 +5605,12 @@ paths:
                   schema:
                     type: string
                 - in: query
-                  name: dataset_id
+                  name: dataset_ids
                   required: false
                   schema:
-                    type: string
+                    items:
+                        type: string
+                    type: array
                 - in: query
                   name: page
                   required: false
@@ -6059,11 +6105,6 @@ paths:
     /api/core/kb/{kb_id}/acl:
         get:
             parameters:
-                - in: query
-                  name: grantee_type
-                  required: false
-                  schema:
-                    type: string
                 - in: path
                   name: kb_id
                   required: true
@@ -6243,11 +6284,6 @@ paths:
     /api/core/kb/{kb_id}/can:
         get:
             parameters:
-                - in: query
-                  name: action
-                  required: true
-                  schema:
-                    type: string
                 - in: path
                   name: kb_id
                   required: true
@@ -6706,7 +6742,7 @@ paths:
                 - model_providers
     /api/core/model_providers/{model_provider_id}/groups/{group_id}:check:
         post:
-            description: Validates credentials by proxying to the algorithm POST /api/model/check (LAZYMIND_ALGO_SERVICE_URL). Maps provider_name→source, base_url→url, api_key→api_key. The current user identity is injected by the auth gateway from the token. Response data is the algorithm JSON payload.
+            description: Validates credentials by proxying to the algorithm POST /api/model/check (LAZYRAG_ALGO_SERVICE_URL). Maps provider_name→source, base_url→url, api_key→api_key. The current user identity is injected by the auth gateway from the token. Response data is the algorithm JSON payload.
             parameters:
                 - in: path
                   name: model_provider_id

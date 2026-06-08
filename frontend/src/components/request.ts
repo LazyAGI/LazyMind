@@ -154,6 +154,15 @@ export function getLocalizedErrorMessage(
   return extractRawErrorMessage(error) || fallback;
 }
 
+/** Resolve a core error code (e.g. err_msg "2000725") via errors.{code} i18n. */
+export function localizeErrorCode(code?: string, fallback = ""): string {
+  const normalized = String(code ?? "").trim();
+  if (normalized && i18n.exists(`errors.${normalized}`)) {
+    return i18n.t(`errors.${normalized}`);
+  }
+  return normalized || fallback;
+}
+
 function isRefreshEndpoint(url?: string): boolean {
   if (!url) return false;
   return url.includes("/auth/refresh") || url.includes("/auth/login") || url.includes("/auth/logout");

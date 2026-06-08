@@ -262,21 +262,105 @@ func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	var resp struct {
-		History []struct {
-			Input []map[string]any `json:"input"`
-		} `json:"history"`
+		Conversation struct {
+			ConversationID string `json:"conversation_id"`
+			DisplayName    string `json:"display_name"`
+		} `json:"conversation"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Conversation.ConversationID != "conv-1" {
+		t.Fatalf("expected conversation_id conv-1, got %q", resp.Conversation.ConversationID)
+	}
+	if resp.Conversation.DisplayName != "记住这个是王牌超" {
+		t.Fatalf("expected display_name preserved, got %q", resp.Conversation.DisplayName)
+	}
+}
+
+func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
+	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/chat-history.db")
+	if err != nil {
+		t.Fatalf("connect db: %v", err)
+	}
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ChatHistory{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	ext := buildChatHistoryExt(map[string]any{
+		"input": []any{
+			map[string]any{"input_type": "text", "text": "记住这个是王牌超"},
+			map[string]any{
+				"input_type":   "image",
+				"uri":          "/var/lib/lazymind/uploads/tmp/users/u1/files/upload_a.jpg",
+				"input_base64": "data:image/jpeg;base64,/9j/abc",
+			},
+		},
+	}, "记住这个是王牌超")
+	if err := db.Create(&orm.Conversation{
+		ID:           "conv-1",
+		DisplayName:  "记住这个是王牌超",
+		ChannelID:    "default",
+		SearchConfig: json.RawMessage(`{}`),
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "u1",
+			CreateUserName: "User 1",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	if err := db.Create(&orm.ChatHistory{
+		ID:             "h_1",
+		Seq:            1,
+		ConversationID: "conv-1",
+		RawContent:     "记住这个是王牌超",
+		Content:        "记住这个是王牌超",
+		Result:         "好的",
+		Ext:            ext,
+		TimeMixin:      orm.TimeMixin{CreateTime: now, UpdateTime: now},
+	}).Error; err != nil {
+		t.Fatalf("create history: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/conversations/conv-1:history", nil)
+	req.Header.Set("X-User-Id", "u1")
+	req = mux.SetURLVars(req, map[string]string{"name": "conv-1:history"})
+	rec := httptest.NewRecorder()
+
+	GetConversationHistory(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		ConversationID string `json:"conversation_id"`
+		History        []struct {
+			Input []map[string]any `json:"input"`
+		} `json:"history"`
+		TotalSize int `json:"total_size"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.ConversationID != "conv-1" {
+		t.Fatalf("expected conversation_id conv-1, got %q", resp.ConversationID)
+	}
+	if resp.TotalSize != 1 {
+		t.Fatalf("expected total_size 1, got %d", resp.TotalSize)
 	}
 	if len(resp.History) != 1 || len(resp.History[0].Input) != 2 {
 		t.Fatalf("expected response history input to include 2 items, got %#v", resp.History)
 	}
 	if got := resp.History[0].Input[1]["input_type"]; got != "image" {
-		t.Fatalf("expected image input in detail response, got %#v", got)
+		t.Fatalf("expected image input in history response, got %#v", got)
 	}
 	if got := resp.History[0].Input[1]["uri"]; got != "/var/lib/lazymind/uploads/tmp/users/u1/files/upload_a.jpg" {
-		t.Fatalf("expected image uri in detail response, got %#v", got)
+		t.Fatalf("expected image uri in history response, got %#v", got)
 	}
 }
 

@@ -40,7 +40,7 @@ func (c *FeishuConnector) locateObject(req connector.ExportObjectRequest) (expor
 			return exportTarget{}, connector.NewError(connector.ErrorCodeUnsupported, "drive file export_format is not supported")
 		}
 	case ObjectKindWikiNode:
-		if req.ExportFormat != "" && req.ExportFormat != connector.ExportFormatMarkdown {
+		if req.ExportFormat != "" && req.ExportFormat != connector.ExportFormatOriginal && req.ExportFormat != connector.ExportFormatMarkdown {
 			return exportTarget{}, connector.NewError(connector.ErrorCodeUnsupported, "wiki export_format is not supported")
 		}
 		if target.spaceID == "" {

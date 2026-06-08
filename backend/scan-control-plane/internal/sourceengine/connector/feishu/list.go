@@ -33,7 +33,7 @@ func (c *FeishuConnector) validateListRequest(req connector.ListChildrenRequest)
 }
 
 func (c *FeishuConnector) listOnePage(ctx context.Context, token string, req connector.ListChildrenRequest, cursor string) (connector.RawObjectPage, error) {
-	page, err := c.listProviderPage(ctx, token, req.TargetType, req.TargetRef, req.NodeRef, cursor, req.PageSize)
+	page, err := c.listProviderPage(ctx, token, req.TargetType, req.TargetRef, req.NodeRef, cursor, providerPageSize(req.TargetType, req.NodeRef, req.PageSize))
 	if err != nil {
 		return connector.RawObjectPage{}, err
 	}
@@ -86,6 +86,13 @@ func (c *FeishuConnector) listProviderPage(ctx context.Context, token string, ta
 	default:
 		return ObjectPage{}, connector.NewError(connector.ErrorCodeInvalidTarget, "target_type is not supported")
 	}
+}
+
+func providerPageSize(targetType connector.TargetType, nodeRef string, pageSize int) int {
+	if targetType == TargetTypeWikiNode {
+		return min(pageSize, 50)
+	}
+	return pageSize
 }
 
 func (c *FeishuConnector) listDriveRootChildren(ctx context.Context, token, cursor string, pageSize int) (ObjectPage, error) {

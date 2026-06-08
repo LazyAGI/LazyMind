@@ -167,9 +167,8 @@ export const ROLE_TYPE_INFO = [
   { id: RoleType.UPLOADER, title: ROLE_TITLE_MAP[RoleType.UPLOADER] },
 ];
 
-export const RUNNING_TASK_STATES = [
-  JobJobStateEnum.Creating,
-  JobJobStateEnum.Parsing,
-];
+export const IMPORT_TASK_RUNNING_STATES = ["WAITING", "WORKING", "CREATING", "RUNNING"];
+export const IMPORT_TASK_SUCCESS_STATES = ["SUCCESS", "SUCCEEDED"];
+export const IMPORT_TASK_FAILED_STATES = ["FAILED", "CANCELED"];
 
 export const ALL_TAGS = "__ALL__";

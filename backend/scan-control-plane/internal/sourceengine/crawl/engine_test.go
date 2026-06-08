@@ -186,6 +186,38 @@ func TestCrawlEngineFullWritesBindingRootAndNormalizesDirectChildren(t *testing.
 	}
 }
 
+func TestCrawlEngineFullIndexesDualRoleBindingRootDocument(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := crawlTestTime()
+	repo := newCrawlTestRepo(now)
+	repo.binding.ConnectorType = string(crawlDualRoleConnectorType)
+	conn := newCrawlTreeConnector(false, false, []connector.RawObject{docRaw("root", "", "root-v1")})
+	conn.connectorType = crawlDualRoleConnectorType
+	conn.dualRole = true
+	engine := newCrawlTestEngine(t, repo, conn, now)
+
+	result, err := engine.Run(ctx, BindingRunClaim{
+		RunID:             "run-dual-root",
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		ScopeType:         connector.ScopeTypeFull,
+	})
+	if err != nil || result.Status != RunStatusSucceeded {
+		t.Fatalf("full dual-role result=%+v err=%v", result, err)
+	}
+	if conn.fetchCalls != 1 || !slices.Equal(conn.fetchScopes, []connector.ScopeType{connector.ScopeTypeWatchEvent}) {
+		t.Fatalf("expected one root fetch before BFS, calls=%d scopes=%v", conn.fetchCalls, conn.fetchScopes)
+	}
+	root := repo.objects["root"]
+	if root.ObjectKey != "root" || !root.IsDocument || root.SourceVersion != "root-v1" {
+		t.Fatalf("dual-role binding root document was not indexed: %+v", root)
+	}
+	assertCrawlState(t, repo.reducer, "root", "NEW", "CREATE")
+}
+
 func TestCrawlEnginePermissionDeniedMarksBindingErrorWithoutDeleting(t *testing.T) {
 	t.Parallel()
 
@@ -430,18 +462,21 @@ func firstTime(value, fallback time.Time) time.Time {
 }
 
 type crawlTreeConnector struct {
-	recursive   bool
-	delta       bool
-	deltaItems  []connector.RawObject
-	fetchErr    error
-	fetchCalls  int
-	fetchScopes []connector.ScopeType
-	listNodes   []string
+	connectorType connector.ConnectorType
+	recursive     bool
+	delta         bool
+	dualRole      bool
+	deltaItems    []connector.RawObject
+	fetchErr      error
+	fetchCalls    int
+	fetchScopes   []connector.ScopeType
+	listNodes     []string
 }
 
 const (
-	crawlTreeConnectorType connector.ConnectorType = "crawl_tree"
-	crawlTreeTargetType    connector.TargetType    = "crawl_tree_root"
+	crawlTreeConnectorType     connector.ConnectorType = "crawl_tree"
+	crawlDualRoleConnectorType connector.ConnectorType = "crawl_dual_role_tree"
+	crawlTreeTargetType        connector.TargetType    = "crawl_tree_root"
 )
 
 func newCrawlTreeConnector(recursive, delta bool, deltaItems []connector.RawObject) *crawlTreeConnector {
@@ -449,11 +484,16 @@ func newCrawlTreeConnector(recursive, delta bool, deltaItems []connector.RawObje
 }
 
 func (c *crawlTreeConnector) Spec() connector.ConnectorSpec {
+	connectorType := c.connectorType
+	if connectorType == "" {
+		connectorType = crawlTreeConnectorType
+	}
 	return connector.ConnectorSpec{
-		ConnectorType:          crawlTreeConnectorType,
+		ConnectorType:          connectorType,
 		TargetTypes:            []connector.TargetType{crawlTreeTargetType},
 		SupportsDelta:          c.delta,
 		SupportsRecursiveFetch: c.recursive,
+		SupportsDualRoleObject: c.dualRole,
 		MaxPageSize:            100,
 	}
 }

@@ -1,4 +1,7 @@
+import type { UploadFile } from "antd";
+
 export type DatasetItemSource = "upload" | "flowback" | "manual";
+export type DatasetCreateMethod = "manual" | "upload";
 export type DatasetFileType = "xlsx" | "xls" | "csv" | "json";
 export type ImportStep = "selectFile" | "preview" | "result";
 
@@ -63,6 +66,8 @@ export interface DatasetFormValues {
   name: string;
   description?: string;
   knowledge_base_ids?: string[];
+  create_method: DatasetCreateMethod;
+  uploadFile?: UploadFile[];
 }
 
 export interface DatasetImportRecord {

@@ -187,6 +187,7 @@ func manualSchemas() map[string]any {
 			prop("document_ids", array(strSchema())),
 			prop("files", array(refSchema("TaskFile"))),
 			prop("reparse_groups", array(strSchema())),
+			prop("reparse_mode", strSchema()),
 			prop("document_tags", array(strSchema())),
 			prop("target_dataset_id", strSchema()),
 			prop("target_path", strSchema()),
@@ -271,31 +272,32 @@ func manualSchemas() map[string]any {
 		"ConversationHistoryItem": obj(
 			prop("seq", intSchema()), prop("query", strSchema()), prop("result", strSchema()), prop("id", strSchema()), prop("feed_back", intSchema()), prop("sources", array(obj())), prop("input", array(obj())), prop("reasoning_content", strSchema()), prop("reason", strSchema()), prop("expected_answer", strSchema()), prop("create_time", strSchema()),
 		),
-		"ConversationDetailResponse":  obj(prop("conversation", refSchema("ConversationItem")), prop("history", array(refSchema("ConversationHistoryItem")))),
-		"ConversationListResponse":    obj(prop("conversations", array(refSchema("ConversationItem"))), prop("total_size", int64Schema()), prop("next_page_token", strSchema())),
-		"SetChatHistoryResponse":      obj(prop("history_id", strSchema())),
-		"ChatChunkResponse":           obj(prop("conversation_id", strSchema()), prop("seq", intSchema()), prop("message", strSchema()), prop("delta", strSchema()), prop("finish_reason", strSchema()), prop("history_id", strSchema()), prop("sources", array(obj())), prop("prompt_questions", array(strSchema())), prop("reasoning_content", strSchema()), prop("thinking_duration_s", int64Schema())),
-		"ACLApiResponse":              obj(prop("code", intSchema()), prop("message", strSchema()), prop("data", obj())),
-		"AddACLRequest":               objReq([]string{"grantee_type", "grantee_id", "permission"}, prop("grantee_type", strSchema()), prop("grantee_id", strSchema()), prop("permission", strSchema()), prop("expires_at", dateTimeSchema())),
-		"UpdateACLRequest":            objReq([]string{"permission"}, prop("permission", strSchema()), prop("expires_at", dateTimeSchema())),
-		"BatchAddACLItem":             objReq([]string{"grantee_type", "grantee_id", "permission"}, prop("grantee_type", strSchema()), prop("grantee_id", strSchema()), prop("permission", strSchema())),
-		"BatchAddACLRequest":          objReq([]string{"items"}, prop("items", array(refSchema("BatchAddACLItem")))),
-		"PermissionBatchRequest":      objReq([]string{"kb_ids"}, prop("kb_ids", array(strSchema()))),
-		"ACLListItem":                 obj(prop("id", int64Schema()), prop("grantee_type", strSchema()), prop("grantee_id", strSchema()), prop("permission", strSchema()), prop("created_at", dateTimeSchema())),
-		"ACLListData":                 obj(prop("list", array(refSchema("ACLListItem")))),
-		"AddACLData":                  obj(prop("acl_id", int64Schema())),
-		"BatchAddACLData":             obj(prop("count", intSchema()), prop("invalid_count", intSchema()), prop("failed_count", intSchema())),
-		"PermissionResult":            obj(prop("permissions", array(strSchema())), prop("source", strSchema())),
-		"PermissionBatchItem":         obj(prop("kb_id", strSchema()), prop("permissions", array(strSchema()))),
-		"CanResult":                   obj(prop("allowed", boolSchema())),
-		"KBListRow":                   obj(prop("id", strSchema()), prop("name", strSchema()), prop("visibility", strSchema()), prop("permissions", array(strSchema()))),
-		"KBListResult":                obj(prop("total", int64Schema()), prop("list", array(refSchema("KBListRow")))),
-		"AuthorizationSubjectGrant":   obj(prop("grantee_type", strSchema()), prop("grantee_id", strSchema()), prop("permissions", array(strSchema()))),
-		"GetKBAuthorizationResponse":  obj(prop("kb_id", strSchema()), prop("grants", array(refSchema("AuthorizationSubjectGrant")))),
-		"SetKBAuthorizationRequest":   obj(prop("grants", array(refSchema("AuthorizationSubjectGrant")))),
-		"SetKBAuthorizationData":      obj(prop("kb_id", strSchema()), prop("subject_count", intSchema()), prop("acl_rows", intSchema())),
-		"GrantPrincipal":              obj(prop("grantee_type", strSchema()), prop("grantee_id", strSchema()), prop("name", strSchema())),
-		"ListGrantPrincipalsResponse": obj(prop("users", array(refSchema("GrantPrincipal"))), prop("groups", array(refSchema("GrantPrincipal")))),
+		"ConversationDetailResponse":      obj(prop("conversation", refSchema("ConversationItem"))),
+		"ConversationHistoryListResponse": obj(prop("conversation_id", strSchema()), prop("name", strSchema()), prop("history", array(refSchema("ConversationHistoryItem"))), prop("total_size", int64Schema()), prop("next_page_token", strSchema())),
+		"ConversationListResponse":        obj(prop("conversations", array(refSchema("ConversationItem"))), prop("total_size", int64Schema()), prop("next_page_token", strSchema())),
+		"SetChatHistoryResponse":          obj(prop("history_id", strSchema())),
+		"ChatChunkResponse":               obj(prop("conversation_id", strSchema()), prop("seq", intSchema()), prop("message", strSchema()), prop("delta", strSchema()), prop("finish_reason", strSchema()), prop("history_id", strSchema()), prop("sources", array(obj())), prop("prompt_questions", array(strSchema())), prop("reasoning_content", strSchema()), prop("thinking_duration_s", int64Schema())),
+		"ACLApiResponse":                  obj(prop("code", intSchema()), prop("message", strSchema()), prop("data", obj())),
+		"AddACLRequest":                   objReq([]string{"grantee_type", "grantee_id", "permission"}, prop("grantee_type", strSchema()), prop("grantee_id", strSchema()), prop("permission", strSchema()), prop("expires_at", dateTimeSchema())),
+		"UpdateACLRequest":                objReq([]string{"permission"}, prop("permission", strSchema()), prop("expires_at", dateTimeSchema())),
+		"BatchAddACLItem":                 objReq([]string{"grantee_type", "grantee_id", "permission"}, prop("grantee_type", strSchema()), prop("grantee_id", strSchema()), prop("permission", strSchema())),
+		"BatchAddACLRequest":              objReq([]string{"items"}, prop("items", array(refSchema("BatchAddACLItem")))),
+		"PermissionBatchRequest":          objReq([]string{"kb_ids"}, prop("kb_ids", array(strSchema()))),
+		"ACLListItem":                     obj(prop("id", int64Schema()), prop("grantee_type", strSchema()), prop("grantee_id", strSchema()), prop("permission", strSchema()), prop("created_at", dateTimeSchema())),
+		"ACLListData":                     obj(prop("list", array(refSchema("ACLListItem")))),
+		"AddACLData":                      obj(prop("acl_id", int64Schema())),
+		"BatchAddACLData":                 obj(prop("count", intSchema()), prop("invalid_count", intSchema()), prop("failed_count", intSchema())),
+		"PermissionResult":                obj(prop("permissions", array(strSchema())), prop("source", strSchema())),
+		"PermissionBatchItem":             obj(prop("kb_id", strSchema()), prop("permissions", array(strSchema()))),
+		"CanResult":                       obj(prop("allowed", boolSchema())),
+		"KBListRow":                       obj(prop("id", strSchema()), prop("name", strSchema()), prop("visibility", strSchema()), prop("permissions", array(strSchema()))),
+		"KBListResult":                    obj(prop("total", int64Schema()), prop("list", array(refSchema("KBListRow")))),
+		"AuthorizationSubjectGrant":       obj(prop("grantee_type", strSchema()), prop("grantee_id", strSchema()), prop("permissions", array(strSchema()))),
+		"GetKBAuthorizationResponse":      obj(prop("kb_id", strSchema()), prop("grants", array(refSchema("AuthorizationSubjectGrant")))),
+		"SetKBAuthorizationRequest":       obj(prop("grants", array(refSchema("AuthorizationSubjectGrant")))),
+		"SetKBAuthorizationData":          obj(prop("kb_id", strSchema()), prop("subject_count", intSchema()), prop("acl_rows", intSchema())),
+		"GrantPrincipal":                  obj(prop("grantee_type", strSchema()), prop("grantee_id", strSchema()), prop("name", strSchema())),
+		"ListGrantPrincipalsResponse":     obj(prop("users", array(refSchema("GrantPrincipal"))), prop("groups", array(refSchema("GrantPrincipal")))),
 	}
 }
 
@@ -385,7 +387,18 @@ func manualPaths() map[string]any {
 			"get":    op("Get conversation", nil, nil, response(200, "Conversationtext", refSchema("ConversationItem"))),
 			"delete": op("Delete conversation", nil, nil, response(200, "Deleted successfully", refSchema("EmptyObject"))),
 		},
-		"/conversations/{name}:detail":       map[string]any{"get": op("Get conversationtext", nil, nil, response(200, "Conversation details and history", refSchema("ConversationDetailResponse")))},
+		"/conversations/{name}:detail": map[string]any{"get": op(
+			"Get conversation metadata",
+			[]map[string]any{param("path", "name", true, strSchema())},
+			nil,
+			response(200, "Conversation metadata (no chat history; use :history)", refSchema("ConversationDetailResponse")),
+		)},
+		"/conversations/{name}:history": map[string]any{"get": op(
+			"List conversation history (paginated)",
+			conversationHistoryListParams(),
+			nil,
+			response(200, "Chat history page ordered by seq descending; may include in-flight turns from Redis", refSchema("ConversationHistoryListResponse")),
+		)},
 		"/conversations":                     map[string]any{"get": op("Conversation list", queryParams(param("query", "keyword", false, strSchema()), param("query", "page_size", false, intSchema()), param("query", "page_token", false, strSchema())), nil, response(200, "Conversation list", refSchema("ConversationListResponse")))},
 		"/conversations:setChatHistory":      map[string]any{"post": op("Set conversation history", nil, jsonBody(refSchema("ConversationSetHistoryRequest"), true), response(200, "Set result", refSchema("SetChatHistoryResponse")))},
 		"/conversations:batchDelete":         map[string]any{"post": op("Batch delete conversations", nil, jsonBody(refSchema("ConversationBatchDeleteRequest"), true), response(200, "Batch deleted conversations", refSchema("ConversationBatchDeleteResponse")))},
@@ -450,6 +463,23 @@ func param(in, name string, required bool, schema map[string]any) map[string]any
 }
 
 func queryParams(params ...map[string]any) []map[string]any { return params }
+
+func conversationHistoryListParams() []map[string]any {
+	return []map[string]any{
+		param("path", "name", true, map[string]any{
+			"type":        "string",
+			"description": "Conversation ID or resource name (e.g. conv-1 or conversations/conv-1; :history suffix is stripped)",
+		}),
+		param("query", "page_size", false, map[string]any{
+			"type":        "integer",
+			"description": "Page size (default 20, max 100)",
+		}),
+		param("query", "page_token", false, map[string]any{
+			"type":        "string",
+			"description": "Pagination offset token from a previous response next_page_token",
+		}),
+	}
+}
 
 func jsonBody(schema map[string]any, required bool) map[string]any {
 	return map[string]any{"required": required, "content": map[string]any{"application/json": map[string]any{"schema": schema}}}

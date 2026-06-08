@@ -172,6 +172,98 @@ func TestCreateSourceRejectsInvalidSchedulePolicyAsInvalidRequest(t *testing.T) 
 	}
 }
 
+func TestTriggerSourceSyncSplitsObjectKeysScope(t *testing.T) {
+	t.Parallel()
+
+	now := fixedSourceTestTime()
+	repo := newSourceEngineRepoStub()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1", Status: SourceStatusActive, CreatedAt: now, UpdatedAt: now}
+	repo.bindings["source-1"] = []store.Binding{{
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		Status:            BindingStatusActive,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}}
+	scheduler := &sourceScheduleSpy{}
+	engine := newTestSourceEngineWithSchedule(t, repo, &sourceCoreSpy{}, &sourceSpyConnector{}, scheduler, now)
+
+	resp, err := engine.TriggerSourceSync(context.Background(), TriggerSourceSyncRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		RequestID: "request-1",
+		ScopeType: string(connector.ScopeTypePartial),
+		ScopeRef: map[string]any{
+			"object_keys": []any{"doc-1", "doc-2"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("trigger source sync: %v", err)
+	}
+	if len(resp.RunIDs) != 2 || len(scheduler.manual) != 2 {
+		t.Fatalf("expected one manual sync per object key, resp=%+v manual=%+v", resp, scheduler.manual)
+	}
+	if scheduler.manual[0].ScopeRef["object_key"] != "doc-1" || scheduler.manual[1].ScopeRef["object_key"] != "doc-2" {
+		t.Fatalf("object_keys scope was not split: %+v", scheduler.manual)
+	}
+	if scheduler.manual[0].RequestID != "request-1" || scheduler.manual[1].RequestID != "request-1-2" {
+		t.Fatalf("split manual sync request ids are not stable: %+v", scheduler.manual)
+	}
+}
+
+func TestTriggerSourceSyncSplitsGenerateScopes(t *testing.T) {
+	t.Parallel()
+
+	now := fixedSourceTestTime()
+	repo := newSourceEngineRepoStub()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1", Status: SourceStatusActive, CreatedAt: now, UpdatedAt: now}
+	repo.bindings["source-1"] = []store.Binding{{
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		Status:            BindingStatusActive,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}}
+	scheduler := &sourceScheduleSpy{}
+	engine := newTestSourceEngineWithSchedule(t, repo, &sourceCoreSpy{}, &sourceSpyConnector{}, scheduler, now)
+
+	resp, err := engine.TriggerSourceSync(context.Background(), TriggerSourceSyncRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		RequestID: "request-1",
+		ScopeType: string(connector.ScopeTypePartial),
+		ScopeRef: map[string]any{
+			"scopes": []any{
+				map[string]any{
+					"key":          "binding-1:feishu:wiki:space-1:node-1",
+					"object_key":   "feishu:wiki:space-1:node-1",
+					"node_ref":     "wiki:space-1:node-1",
+					"is_document":  true,
+					"is_container": true,
+				},
+				map[string]any{
+					"object_key":  "feishu:wiki:space-1:node-2",
+					"is_document": true,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("trigger source sync: %v", err)
+	}
+	if len(resp.RunIDs) != 2 || len(scheduler.manual) != 2 {
+		t.Fatalf("expected one manual sync per scope, resp=%+v manual=%+v", resp, scheduler.manual)
+	}
+	if scheduler.manual[0].ScopeRef["node_ref"] != "wiki:space-1:node-1" || scheduler.manual[0].ScopeRef["subtree_root"] != "feishu:wiki:space-1:node-1" {
+		t.Fatalf("container scope was not converted to subtree sync: %+v", scheduler.manual[0])
+	}
+	if scheduler.manual[1].ScopeRef["object_key"] != "feishu:wiki:space-1:node-2" {
+		t.Fatalf("document scope was not converted to object sync: %+v", scheduler.manual[1])
+	}
+}
+
 func TestCreateSourceDuplicateConnectorFingerprintCompensates(t *testing.T) {
 	t.Parallel()
 
@@ -769,6 +861,7 @@ func (sourceTestScheduleEngine) EnqueueManualSync(context.Context, scheduleengin
 
 type sourceScheduleSpy struct {
 	triggered  []store.Binding
+	manual     []scheduleengine.ManualSyncRequest
 	triggerErr error
 	nextSyncAt *time.Time
 }
@@ -797,8 +890,28 @@ func (s *sourceScheduleSpy) TriggerInitialSync(_ context.Context, binding store.
 	return []string{"job-" + strconv.Itoa(len(s.triggered))}, nil
 }
 
-func (sourceScheduleSpy) EnqueueManualSync(context.Context, scheduleengine.ManualSyncRequest) (scheduleengine.SyncRunIntent, error) {
-	return scheduleengine.SyncRunIntent{}, nil
+func (s *sourceScheduleSpy) EnqueueManualSync(_ context.Context, req scheduleengine.ManualSyncRequest) (scheduleengine.SyncRunIntent, error) {
+	s.manual = append(s.manual, req)
+	runID := "manual-job-" + strconv.Itoa(len(s.manual))
+	return scheduleengine.SyncRunIntent{
+		Run: store.SyncRun{
+			RunID:     runID,
+			SourceID:  req.SourceID,
+			BindingID: req.BindingID,
+			ScopeType: string(req.ScopeType),
+			ScopeRef:  sourceTestScopeRefJSON(req.ScopeRef),
+			Status:    store.SyncRunStatusPending,
+		},
+		Created: true,
+	}, nil
+}
+
+func sourceTestScopeRefJSON(scopeRef connector.ScopeRef) store.JSON {
+	out := store.JSON{}
+	for key, value := range scopeRef {
+		out[key] = value
+	}
+	return out
 }
 
 func sourceTestIDGenerator() func(string) string {

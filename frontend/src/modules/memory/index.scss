@@ -410,6 +410,19 @@
   min-width: 0;
 }
 
+.memory-builtin-template-row {
+  color: #8a94a6;
+  background: #f7f8fa;
+}
+
+.memory-builtin-template-row:hover > td {
+  background: #f1f4f8 !important;
+}
+
+.memory-table-main.is-builtin-template {
+  opacity: 0.72;
+}
+
 .memory-table-main-title {
   display: flex;
   align-items: center;
@@ -432,6 +445,15 @@
 
   &:hover {
     color: #1677ff;
+  }
+
+  &.is-disabled {
+    cursor: default;
+    color: #667085;
+
+    &:hover {
+      color: #667085;
+    }
   }
 }
 

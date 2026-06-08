@@ -34,6 +34,11 @@ export interface StructuredAsset extends BaseAsset {
   parentId?: string;
   fileExt?: string;
   isEnabled?: boolean;
+  builtinSkillUid?: string;
+  originBuiltinSkillUid?: string;
+  isBuiltinTemplate?: boolean;
+  activationStatus?: string;
+  readonly?: boolean;
   hasPendingReviewSuggestions?: boolean;
   hasPendingRemoveSuggestion?: boolean;
   suggestionStatus?: string;

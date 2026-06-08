@@ -76,6 +76,30 @@ func (e *DBSourceTreeQueryEngine) listLiveChildren(ctx context.Context, req Sour
 	if err != nil {
 		return TreeNodePage{}, mapConnectorError(err)
 	}
+	if shouldFetchLiveBindingRoot(req, binding) {
+		rootPage, err := conn.FetchPage(ctx, connector.FetchPageRequest{
+			SourceID:          req.SourceID,
+			BindingID:         binding.BindingID,
+			BindingGeneration: binding.BindingGeneration,
+			TargetType:        connector.TargetType(binding.TargetType),
+			TargetRef:         binding.TargetRef,
+			ScopeType:         connector.ScopeTypeWatchEvent,
+			ScopeRef:          connector.ScopeRef{"target_ref": binding.TargetRef},
+			PageSize:          1,
+			AgentID:           binding.AgentID,
+			AuthConnectionID:  binding.AuthConnectionID,
+			ProviderOptions:   liveSourceProviderOptions(binding.ProviderOptions, req.ProviderOptions),
+		})
+		if err != nil {
+			return TreeNodePage{}, mapConnectorError(err)
+		}
+		if len(rootPage.Items) > 0 {
+			rawPage.Items = rootPage.Items[:1]
+			rawPage.NextCursor = ""
+			rawPage.HasMore = false
+			rawPage.ListComplete = true
+		}
+	}
 	nodes := make([]TreeNode, 0, len(rawPage.Items))
 	for _, raw := range rawPage.Items {
 		normalized, err := conn.MapObject(ctx, raw)
@@ -174,7 +198,7 @@ func normalizeSourceNodeKey(value string, binding store.Binding) string {
 }
 
 func liveSourceNodeRef(req SourceTreeChildrenRequest, binding store.Binding) string {
-	for _, ref := range []string{req.NodeRef, req.ParentRef, req.ParentKey, req.Key} {
+	for _, ref := range []string{req.NodeRef, req.ParentRef, req.ParentKey, req.Key, req.TreeKey} {
 		if nodeRef := normalizeLiveSourceNodeRef(ref, binding); nodeRef != "" {
 			return nodeRef
 		}
@@ -184,11 +208,11 @@ func liveSourceNodeRef(req SourceTreeChildrenRequest, binding store.Binding) str
 
 func normalizeLiveSourceNodeRef(value string, binding store.Binding) string {
 	value = normalizeSourceNodeKey(value, binding)
-	if value == "" || value == binding.TreeKey || value == binding.TargetRef {
-		return ""
-	}
 	if binding.ConnectorType == "feishu" && strings.HasPrefix(value, "feishu:") {
 		return strings.TrimPrefix(value, "feishu:")
+	}
+	if value == "" || value == binding.TreeKey || value == binding.TargetRef {
+		return ""
 	}
 	return value
 }
@@ -219,6 +243,14 @@ func shouldExpandBindingRoot(req SourceTreeChildrenRequest, binding store.Bindin
 		strings.TrimSpace(req.NodeRef) == "" &&
 		strings.TrimSpace(req.ParentRef) == "" &&
 		strings.TrimSpace(req.Key) == "" &&
+		strings.TrimSpace(req.Cursor) == "" &&
 		parentKey == binding.TreeKey &&
 		binding.TreeKey != ""
+}
+
+func shouldFetchLiveBindingRoot(req SourceTreeChildrenRequest, binding store.Binding) bool {
+	if binding.ConnectorType != "feishu" || binding.TargetType != "wiki_node" {
+		return false
+	}
+	return shouldExpandBindingRoot(req, binding, effectiveSourceParentKey(req, binding))
 }
