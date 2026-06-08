@@ -7,13 +7,13 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, Iterable, Optional
 from uuid import UUID
-from urllib.parse import urlsplit, urlunsplit
 
 from lazyllm import LOG
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from lazymind.chat.service.component.history import normalize_history_for_agent
+from lazymind.common.postgres import normalize_postgres_sqlalchemy_url
 from lazymind.review.skill_review.schemas import SkillReviewResolution, SkillReviewRunStat
 from lazymind.config import config as _cfg
 
@@ -324,16 +324,10 @@ def _get_engine(url: str) -> Engine:
 
 
 def _postgres_url(url: str) -> str:
-    normalized = url.strip()
-    if not normalized:
-        raise RuntimeError('postgres connection url is required')
-    parts = urlsplit(normalized)
-    scheme = (parts.scheme or '').lower()
-    if scheme in {'postgresql', 'postgres'}:
-        return urlunsplit((f'{scheme}+psycopg2', parts.netloc, parts.path, parts.query, parts.fragment))
-    if scheme.startswith('postgresql+') or scheme.startswith('postgres+'):
-        return normalized
-    raise RuntimeError(f'[SkillReviewDB] unsupported database scheme for postgres connection: {parts.scheme}')
+    try:
+        return normalize_postgres_sqlalchemy_url(url)
+    except RuntimeError as exc:
+        raise RuntimeError(f'[SkillReviewDB] {exc}') from exc
 
 
 def _jsonable_row(row: dict[str, Any]) -> dict[str, Any]:

@@ -3,14 +3,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class SkillReviewRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
     requestid: str = Field(..., min_length=1)
     start_time: datetime
     end_time: datetime
-    user_ids: List[str] = Field(default_factory=list)
+    user_id: Optional[str] = None
     min_user_turns: int = Field(default=2, ge=0)
     min_tool_turns: int = Field(default=5, ge=0)
     artifact_dir: Optional[str] = None
@@ -21,6 +23,8 @@ class SkillReviewRequest(BaseModel):
     def validate_time_range(self) -> 'SkillReviewRequest':
         if self.start_time > self.end_time:
             raise ValueError('start_time must be earlier than or equal to end_time')
+        normalized_user_id = str(self.user_id).strip() if self.user_id is not None else ''
+        self.user_id = normalized_user_id or None
         return self
 
 

@@ -297,14 +297,6 @@ def _clusters_from_labels(drafts: list[SkillDraft], labels: list[int]) -> list[T
 
 def _cluster_from_indexes(drafts: list[SkillDraft], indexes: list[int]) -> TaskCluster:
     selected = [drafts[index] for index in indexes]
-    # print('cluster_from_indexes start=' + '=' * 100)
-    # for d in selected:
-    #     print(d.contextual_description.applicable_scenario)
-    #     print(d.contextual_description.task_goal)
-    #     print(d.contextual_description.key_result)
-    #     print(d.contextual_description.execution_summary)
-    #     print('-' * 100)
-    # print('cluster_from_indexes end=' + '=' * 100)
     scope = _cluster_scope(selected)
     return TaskCluster(task_scope=scope, drafts=selected)
 

@@ -5,8 +5,10 @@ from datetime import datetime
 from pathlib import Path
 from tempfile import gettempdir
 from typing import Any
+import lazyllm
 from lazyllm import AutoModel, LOG
 
+from lazymind.model_config import inject_model_config
 from lazymind.review.skill_review.config import DEFAULT_REPORT_DIR_NAME
 from lazymind.review.skill_review.cluster import cluster_drafts
 from lazymind.review.skill_review.draft import build_skill_drafts
@@ -34,6 +36,8 @@ from lazymind.review.skill_review.reports import (
     write_report_file,
 )
 from lazymind.review.skill_review.trajectory import build_trajectories
+
+GLOBAL_USER_ID = 'global'
 
 
 @dataclass
@@ -63,70 +67,95 @@ class _UserSkillReviewState:
         }
 
 
-def run_skill_review(
-    request: SkillReviewRequest,
-    llm: AutoModel | None = None,
-    emb: AutoModel | None = None,
-    artifact_dir: str | Path | None = None,
-) -> SkillReviewBatchResult:
+def run_skill_review(request: SkillReviewRequest) -> SkillReviewBatchResult:
+    with lazyllm.new_session(request.requestid):
+        inject_model_config(request.model_configs)
+        llm = AutoModel(model='llm')
+        emb = AutoModel(model='embed_main')
+        return _run_skill_review(request, llm, emb)
 
-    requestid = request.requestid
-    work_dir = _resolve_artifact_dir(
-        artifact_dir if artifact_dir is not None else request.artifact_dir,
-        requestid=requestid,
+
+def _run_skill_review(request: SkillReviewRequest, llm: AutoModel, emb: AutoModel) -> SkillReviewBatchResult:
+    work_dir = _resolve_artifact_dir(request.artifact_dir, requestid=request.requestid)
+    read_user_ids = [request.user_id] if request.user_id else None
+
+    raw_sessions = read_session(request.start_time, request.end_time, read_user_ids)
+    pending_records = read_skill_review_records_by_ids(request.pending_skill_ids)
+    if request.user_id:
+        user_sessions = _group_sessions_by_user(raw_sessions)
+        user_sessions = {
+            user_id: sessions
+            for user_id, sessions in user_sessions.items()
+            if user_id == request.user_id
+        }
+        pending_records_by_user = _group_pending_records_by_user(pending_records)
+        pending_records_by_user = {
+            user_id: records
+            for user_id, records in pending_records_by_user.items()
+            if user_id == request.user_id
+        }
+    else:
+        user_sessions = {
+            GLOBAL_USER_ID: [
+                session
+                for session in raw_sessions or []
+                if isinstance(session, dict)
+            ]
+        }
+        pending_records_by_user = {
+            GLOBAL_USER_ID: [
+                record
+                for record in pending_records or []
+                if isinstance(record, dict)
+            ]
+        }
+    review_user_id = request.user_id or GLOBAL_USER_ID
+    user_sessions.setdefault(review_user_id, [])
+    pending_records_by_user.setdefault(review_user_id, [])
+    scoped_pending_count = sum(len(records) for records in pending_records_by_user.values())
+    LOG.info(
+        f'[SkillReview] Found {len(user_sessions)} users and {scoped_pending_count} pending skill review records '
+        f'for scope={request.user_id or GLOBAL_USER_ID}'
     )
 
-    raw_sessions = read_session(request.start_time, request.end_time, request.user_ids)
-    user_sessions = _group_sessions_by_user(raw_sessions)
-    pending_records = read_skill_review_records_by_ids(request.pending_skill_ids)
-    pending_records_by_user = _group_pending_records_by_user(pending_records)
-    user_results: list[UserSkillReviewResult] = []
-    run_stats: list[SkillReviewRunStat] = []
-    inserted_count = 0
-    user_ids = sorted(set(user_sessions) | set(pending_records_by_user))
-    LOG.info(f'[SkillReview] Found {len(user_sessions)} users and {len(pending_records)} pending skill review records')
+    sessions = user_sessions.get(review_user_id, [])
+    user_pending_records = pending_records_by_user.get(review_user_id, [])
+    LOG.info(f'[SkillReview] Running skill review for user {review_user_id} with {len(sessions)} sessions')
+    task_id = f"{review_user_id}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
 
-    for user_id in user_ids:
-        sessions = user_sessions.get(user_id, [])
-        user_pending_records = pending_records_by_user.get(user_id, [])
-        LOG.info(f'[SkillReview] Running skill review for user {user_id} with {len(sessions)} sessions')
-        task_id = f"{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
-
-        user_result, user_stat = _run_user_skill_review(
-            user_id=user_id,
-            source_user_id=user_id,
-            sessions=sessions,
-            pending_records=user_pending_records,
-            request=request,
-            base_work_dir=work_dir / task_id,
-            llm=llm,
-            emb=emb,
-        )
-        user_results.append(user_result)
-        run_stats.append(user_stat)
-        records = _with_review_metadata(
-            user_result.candidates,
-            request=request,
-            source_user_id=user_id,
-        )
-        try:
-            inserted_count += insert_skill_review_records(records)
-        except Exception as exc:
-            LOG.exception(f'[SkillReview] failed to insert skill review records for user {user_id}: {exc}')
-            raise exc
+    user_result, user_stat = _run_user_skill_review(
+        user_id=review_user_id,
+        source_user_id=review_user_id,
+        sessions=sessions,
+        pending_records=user_pending_records,
+        request=request,
+        base_work_dir=work_dir / task_id,
+        llm=llm,
+        emb=emb,
+    )
+    records = _with_review_metadata(
+        user_result.candidates,
+        request=request,
+        source_user_id=review_user_id,
+    )
+    try:
+        inserted_count = insert_skill_review_records(records)
+        LOG.info(f'[SkillReview] inserted skill review records: {inserted_count} records')
+    except Exception as exc:
+        LOG.exception(f'[SkillReview] failed to insert skill review records for user {review_user_id}: {exc}')
+        raise exc
 
     try:
-        stats_count = insert_skill_review_run_stats(run_stats)
-        LOG.info(f'[SkillReview] inserted {stats_count} skill review run stats')
+        insert_skill_review_run_stats([user_stat])
     except Exception as exc:
         LOG.exception(f'[SkillReview] failed to insert skill review run stats: {exc}')
         raise exc
 
-    has_failure = any(item.status == 'failed' for item in user_results)
+    has_failure = user_result.status == 'failed'
     return SkillReviewBatchResult(
         success=not has_failure,
         inserted_count=inserted_count,
-        error=_batch_failure_message(user_results) if has_failure else None,
+        error=_batch_failure_message([user_result]) if has_failure else None,
     )
 
 
