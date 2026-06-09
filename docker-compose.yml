@@ -534,6 +534,7 @@ services:
     environment:
       LAZYMIND_DOCUMENT_PROCESSOR_PORT: "8000"
       <<: [*runtime-home, *db-conn, *upload-paths, *llm-api-keys, *trace-config]
+      LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
       LAZYLLM_EXPECTED_LOG_MODULES: "all"
     command: ["python", "-m", "lazymind.processor.service.server"]
     healthcheck:
@@ -576,6 +577,7 @@ services:
       LAZYMIND_DOCUMENT_WORKER_HIGH_PRIORITY_ONLY: "false"
       LAZYMIND_DOCUMENT_WORKER_POLL_MODE: direct
       <<: [*runtime-home, *db-conn, *upload-paths, *llm-api-keys, *ocr-env, *trace-config]
+      LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
       LAZYLLM_EXPECTED_LOG_MODULES: "all"
     command: ["python", "-m", "lazymind.processor.service.worker"]
     healthcheck:
