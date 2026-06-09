@@ -205,6 +205,27 @@ function normalizeBaseUrlForCompare(value?: string) {
   return (value || "").trim().replace(/\/+$/, "");
 }
 
+function validateHttpBaseUrl(value?: string) {
+  const normalizedValue = (value || "").trim();
+  if (!normalizedValue) {
+    return false;
+  }
+  try {
+    const parsedUrl = new URL(normalizedValue);
+    return parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isFormValidationError(error: unknown) {
+  return (
+    !!error &&
+    typeof error === "object" &&
+    Array.isArray((error as { errorFields?: unknown[] }).errorFields)
+  );
+}
+
 function getCheckFailureMessage(checkResult?: CheckExternalServiceResult): string | undefined {
   if (!checkResult || typeof checkResult !== "object") {
     return undefined;
@@ -717,6 +738,9 @@ export default function ExternalServicesPage() {
       void loadExternalServices(normalizedSearchValue);
       closeConfigModal();
     } catch (error) {
+      if (isFormValidationError(error)) {
+        return;
+      }
       message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
     }
   }
@@ -938,7 +962,12 @@ export default function ExternalServicesPage() {
                   normalize={(value: string | undefined) => value?.trim()}
                   rules={[
                     { required: true, message: t("modelProvider.validation.baseUrlRequired") },
-                    { type: "url", message: t("modelProvider.validation.baseUrlInvalid") },
+                    {
+                      validator: (_, value?: string) =>
+                        validateHttpBaseUrl(value)
+                          ? Promise.resolve()
+                          : Promise.reject(new Error(t("modelProvider.validation.baseUrlInvalid"))),
+                    },
                     { max: 512, message: t("modelProvider.validation.baseUrlMax") },
                   ]}
                 >

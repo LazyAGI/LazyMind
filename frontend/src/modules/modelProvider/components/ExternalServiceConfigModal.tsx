@@ -69,6 +69,27 @@ function normalizeProviderName(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+function validateHttpBaseUrl(value?: string) {
+  const normalizedValue = (value || "").trim();
+  if (!normalizedValue) {
+    return false;
+  }
+  try {
+    const parsedUrl = new URL(normalizedValue);
+    return parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isFormValidationError(error: unknown) {
+  return (
+    !!error &&
+    typeof error === "object" &&
+    Array.isArray((error as { errorFields?: unknown[] }).errorFields)
+  );
+}
+
 function isGoogleCustomSearch(service?: ExternalServiceConfigModalService | null) {
   return normalizeProviderName(service?.name || "") === "googlecustomsearch";
 }
@@ -265,6 +286,9 @@ export default function ExternalServiceConfigModal({
       setNewKeyEngineId("");
       onChanged?.();
     } catch (error) {
+      if (isFormValidationError(error)) {
+        return;
+      }
       message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
     } finally {
       setAddingKey(false);
@@ -324,7 +348,12 @@ export default function ExternalServiceConfigModal({
                 normalize={(value: string | undefined) => value?.trim()}
                 rules={[
                   { required: true, message: t("modelProvider.validation.baseUrlRequired") },
-                  { type: "url", message: t("modelProvider.validation.baseUrlInvalid") },
+                  {
+                    validator: (_, value?: string) =>
+                      validateHttpBaseUrl(value)
+                        ? Promise.resolve()
+                        : Promise.reject(new Error(t("modelProvider.validation.baseUrlInvalid"))),
+                  },
                   { max: 512, message: t("modelProvider.validation.baseUrlMax") },
                 ]}
               >
