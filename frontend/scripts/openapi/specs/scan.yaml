@@ -127,6 +127,11 @@ components:
                 - items
                 - total
             type: object
+        CompensationResponse:
+            properties:
+                compensation:
+                    $ref: '#/components/schemas/Compensation'
+            type: object
         ConnectorListResponse:
             properties:
                 items:
@@ -385,21 +390,6 @@ components:
                 - skipped_count
                 - task_ids
             type: object
-        GenerateTaskScope:
-            properties:
-                is_container:
-                    type: boolean
-                is_document:
-                    type: boolean
-                key:
-                    type: string
-                node_ref:
-                    type: string
-                object_key:
-                    type: string
-                path:
-                    type: string
-            type: object
         GenerateTasksRequest:
             properties:
                 binding_id:
@@ -414,25 +404,9 @@ components:
                     items:
                         type: string
                     type: array
-                paths:
-                    items:
-                        type: string
-                    type: array
                 priority:
                     format: int64
                     type: integer
-                request_id:
-                    type: string
-                scopes:
-                    items:
-                        $ref: '#/components/schemas/GenerateTaskScope'
-                    type: array
-                selection_token:
-                    type: string
-                trigger_policy:
-                    type: string
-                updated_only:
-                    type: boolean
             type: object
         GenerateTasksResponse:
             properties:
@@ -445,22 +419,9 @@ components:
                 duplicate_count:
                     format: int64
                     type: integer
-                job_id:
-                    type: string
-                job_ids:
-                    items:
-                        type: string
-                    type: array
-                queued_sync_count:
-                    format: int64
-                    type: integer
                 requested_count:
                     format: int64
                     type: integer
-                run_ids:
-                    items:
-                        type: string
-                    type: array
                 skipped_count:
                     format: int64
                     type: integer
@@ -743,58 +704,31 @@ components:
             type: object
         SourceDocumentItem:
             properties:
-                baseline_version:
-                    type: string
                 binding_id:
                     type: string
                 core_document_id:
-                    type: string
-                directory:
                     type: string
                 display_name:
                     type: string
                 document_id:
                     type: string
-                file_type:
-                    type: string
-                has_update:
-                    type: boolean
                 last_error:
                     additionalProperties: true
                     type: object
-                last_synced_at:
-                    type: string
                 modified_at:
-                    type: string
-                name:
                     type: string
                 object_key:
                     type: string
                 parse_queue_state:
                     type: string
-                parse_state:
-                    type: string
                 parse_status:
                     type: string
-                path:
-                    type: string
-                pending_action:
-                    type: string
-                size_bytes:
-                    format: int64
-                    type: integer
                 source_id:
                     type: string
                 source_state:
                     $ref: '#/components/schemas/SourceState'
-                source_version:
-                    type: string
                 sync_state:
                     $ref: '#/components/schemas/SyncState'
-                update_desc:
-                    type: string
-                update_type:
-                    type: string
             type: object
         SourceDocumentListResponse:
             properties:
@@ -808,9 +742,6 @@ components:
                 page_size:
                     format: int64
                     type: integer
-                summary:
-                    additionalProperties: true
-                    type: object
                 total:
                     format: int64
                     type: integer
@@ -937,12 +868,6 @@ components:
                 new_count:
                     format: int64
                     type: integer
-                parsed_document_count:
-                    format: int64
-                    type: integer
-                pending_pull_count:
-                    format: int64
-                    type: integer
                 pending_task_count:
                     format: int64
                     type: integer
@@ -951,12 +876,6 @@ components:
                     type: integer
                 source_id:
                     type: string
-                storage_bytes:
-                    format: int64
-                    type: integer
-                total_document_count:
-                    format: int64
-                    type: integer
                 total_objects:
                     format: int64
                     type: integer
@@ -994,8 +913,6 @@ components:
                     type: array
                 tree_key:
                     type: string
-                use_cache:
-                    type: boolean
             type: object
         SourceTreeSearchRequest:
             properties:
