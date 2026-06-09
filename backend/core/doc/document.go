@@ -26,6 +26,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
 	"lazymind/core/log"
+	"lazymind/core/modelprovider"
 	"lazymind/core/store"
 
 	"github.com/gorilla/mux"
@@ -62,6 +63,34 @@ func replyDatasetForbidden(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusForbidden)
 	_, _ = w.Write([]byte(common.ForbiddenBody))
+}
+
+// replyEmbedNotReady checks embed_main (and optionally embed_image) readiness and
+// writes an appropriate HTTP error response when the check fails.
+// Returns true when a response was written so the caller can return early.
+// Distinguishes algorithm-service failures (502) from missing user configuration (422).
+func replyEmbedNotReady(w http.ResponseWriter, r *http.Request, userID string) bool {
+	ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embed_main")
+	if err != nil {
+		common.ReplyErr(w, "algorithm service unavailable: cannot check embedding model", http.StatusBadGateway)
+		return true
+	}
+	if !ready {
+		common.ReplyErr(w, "embedding model is not ready", http.StatusUnprocessableEntity)
+		return true
+	}
+	if features := modelprovider.GetCachedModelFeatures(); features.ImageEmbedRequired {
+		ready, err = modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embed_image")
+		if err != nil {
+			common.ReplyErr(w, "algorithm service unavailable: cannot check multimodal embedding model", http.StatusBadGateway)
+			return true
+		}
+		if !ready {
+			common.ReplyErr(w, "multimodal embedding model is not ready", http.StatusUnprocessableEntity)
+			return true
+		}
+	}
+	return false
 }
 
 func publicBaseURL() string {
