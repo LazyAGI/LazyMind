@@ -33,10 +33,10 @@ func TestTargetTreeListChildrenUsesConnectorAndDoesNotUseFallbackOrStore(t *test
 	if len(spy.listRequests) != 1 || len(spy.mapObjects) != 2 {
 		t.Fatalf("expected connector list and map calls, list=%d map=%d", len(spy.listRequests), len(spy.mapObjects))
 	}
-	if len(page.Items) != 2 {
-		t.Fatalf("expected current page nodes only, got %+v", page.Items)
+	if len(page.Items) != 1 {
+		t.Fatalf("expected target directory tree to hide files, got %+v", page.Items)
 	}
-	if page.Items[0].ObjectKey != "folder-1" || page.Items[1].ObjectKey != "doc-1" {
+	if page.Items[0].ObjectKey != "folder-1" {
 		t.Fatalf("unexpected target tree nodes: %+v", page.Items)
 	}
 	if fallback.called {
@@ -69,8 +69,11 @@ func TestTargetTreeAllCurrentLevelPullsPagesWithoutWritingBusinessTables(t *test
 	if len(spy.listRequests) != 2 {
 		t.Fatalf("expected connector pagination, got %d requests", len(spy.listRequests))
 	}
-	if !page.ListComplete || page.HasMore || len(page.Items) != 3 {
-		t.Fatalf("expected complete current-level page, got %+v", page)
+	if !page.ListComplete || page.HasMore || len(page.Items) != 2 {
+		t.Fatalf("expected complete current-level directory page, got %+v", page)
+	}
+	if page.Items[0].ObjectKey != "folder-1" || page.Items[1].ObjectKey != "page-1" {
+		t.Fatalf("target directory tree should keep containers and hide files, got %+v", page.Items)
 	}
 }
 
