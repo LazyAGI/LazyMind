@@ -587,6 +587,16 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "model provider not found", http.StatusNotFound)
 		return
 	}
+	var group orm.UserModelProviderGroup
+	if err := db.WithContext(r.Context()).
+		Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parentID, userID).
+		Take(&group).Error; err != nil {
+		common.ReplyErr(w, "group not found", http.StatusNotFound)
+		return
+	}
+	if apiKey == "" {
+		apiKey = strings.TrimSpace(group.APIKey)
+	}
 	apiKeyRequired := isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, urlStr)
 	if apiKey == "" && apiKeyRequired {
 		common.ReplyErr(w, "api_key is required when using the default base_url", http.StatusBadRequest)

@@ -73,6 +73,9 @@ x-file-watcher-watch-host-dir: &file-watcher-watch-host-dir ${LAZYMIND_FILE_WATC
 # Local lazyllm source -> /opt/lazyllm (edit on host, docker compose restart; no image rebuild).
 x-lazyllm-src-mount: &lazyllm-src-mount ./algorithm/lazyllm:/opt/lazyllm
 
+# Local inner model config -> image path (edit on host, docker compose restart; no image rebuild).
+x-runtime-models-inner-mount: &runtime-models-inner-mount ./algorithm/lazymind/common/runtime_models.inner.yaml:/app/algorithm/lazymind/common/runtime_models.inner.yaml:ro
+
 x-runtime-home: &runtime-home
   LAZYMIND_HOME: /tmp/.lazyllm_rag
 
@@ -395,6 +398,7 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
+      - *runtime-models-inner-mount
     environment:
       <<: [*db-conn, *upload-paths, *llm-api-keys, *trace-config]
       LAZYMIND_DOCUMENT_SERVICE_PORT: "8000"
@@ -531,6 +535,7 @@ services:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
       - *lazyllm-src-mount
+      - *runtime-models-inner-mount
     environment:
       LAZYMIND_DOCUMENT_PROCESSOR_PORT: "8000"
       <<: [*runtime-home, *db-conn, *upload-paths, *llm-api-keys, *trace-config]
@@ -568,6 +573,7 @@ services:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
       - *lazyllm-src-mount
+      - *runtime-models-inner-mount
     environment:
       LAZYMIND_DOCUMENT_WORKER_PORT: "8001"
       LAZYMIND_DOCUMENT_WORKER_NUM_WORKERS: "1"
@@ -614,6 +620,7 @@ services:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
       - *lazyllm-src-mount
+      - *runtime-models-inner-mount
     healthcheck:
       test: ['CMD-SHELL', 'python -m lazymind.parsing.service.healthcheck']
       interval: 15s
@@ -660,6 +667,7 @@ services:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
       - *lazyllm-src-mount
+      - *runtime-models-inner-mount
       # Router mode: mount algorithm source so child processes can load different versions.
       - ./algorithm/lazymind:/opt/lazymind
     healthcheck:
@@ -744,6 +752,7 @@ services:
       - ./data/core/uploads:/var/lib/lazymind/uploads:ro
       - ./algorithm:/app/algorithm:ro
       - ./evo:/app/evo:ro
+      - *runtime-models-inner-mount
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8047/healthz || exit 1"]
       interval: 10s

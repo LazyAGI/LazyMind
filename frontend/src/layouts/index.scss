@@ -535,10 +535,12 @@
 
 .main-layout-content.is-sidebar-collapsed {
   .knowledge-list-page .knowledge-title,
+  .dataset-page .dataset-page-header,
   .data-source-page .data-source-page-toolbar-left {
     padding-left: 48px;
   }
 
+  .dataset-page .dataset-page-header,
   .data-source-page .data-source-page-toolbar-left {
     box-sizing: border-box;
   }

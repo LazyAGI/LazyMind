@@ -190,6 +190,7 @@ const enUS = {
     apiKeyOptionalPlaceholder: "Optional",
     verifyGroupTitle: "Verify {{name}}",
     verifyApiKeyExtra: "Used only for this connection check. The frontend will not save or display the full key again.",
+    verifyConfiguredApiKeyExtra: "Leave blank to use the saved key for this connection check. A newly entered key is used only for this verification.",
     verifyApiKeyPlaceholder: "Enter the API Key for this verification",
     keyConfiguredStatus: "Configured key: {{preview}}",
     shareConfigTitle: "Share with group members",
@@ -520,6 +521,23 @@ const enUS = {
     noConversations: "No conversations yet",
     promptTemplate: "Common Phrases",
     inputPlaceholder: "Ask a question, supports multi-turn conversation and image understanding",
+    promptSuggestionsAria: "Prompt improvement suggestions",
+    promptSuggestionPersuasive: "Make it more persuasive",
+    promptSuggestionPersuasiveDesc: "Add goal, audience, and evidence",
+    promptSuggestionPersuasiveTemplate:
+      "Please make the following message more persuasive while preserving the original meaning. Add a clearer goal, audience, and supporting reasons:\n\n{{prompt}}",
+    promptSuggestionStructure: "Improve the structure",
+    promptSuggestionStructureDesc: "Organize it into a clearer flow",
+    promptSuggestionStructureTemplate:
+      "Please improve the structure of the following content so it has clearer hierarchy and stronger emphasis. You may use headings and lists, but do not change the core meaning:\n\n{{prompt}}",
+    promptSuggestionTone: "Improve my tone",
+    promptSuggestionToneDesc: "Make it natural, polite, and professional",
+    promptSuggestionToneTemplate:
+      "Please improve the tone of the following message so it feels more natural, polite, and professional while preserving my original intent:\n\n{{prompt}}",
+    promptSuggestionPolish: "Polish the message",
+    promptSuggestionPolishDesc: "Trim redundancy and improve readability",
+    promptSuggestionPolishTemplate:
+      "Please polish the following message by removing redundant wording and improving readability and accuracy:\n\n{{prompt}}",
     upload: "Upload file",
     modelProviderChecking: "Checking model configuration",
     modelProviderCheckingDesc: "Q&A will be available once the check finishes.",

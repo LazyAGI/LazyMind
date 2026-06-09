@@ -14,12 +14,14 @@ import {
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { AgentAppsAuth } from "@/components/auth";
-import {
-  BASE_URL,
-  axiosInstance,
-  getLocalizedErrorMessage,
-} from "@/components/request";
+import { getLocalizedErrorMessage } from "@/components/request";
 import { useModelFeatures } from "@/hooks/useModelFeatures";
+import {
+  modelProvidersApi,
+  modelProvidersDefaultApi,
+  unwrapModelProviderData,
+  withModelProviderJsonOptions,
+} from "../api";
 
 type ModelCapability =
   | "llm"
@@ -70,12 +72,6 @@ interface ModuleConfig {
   subtitleKey: string;
   required?: boolean;
   restricted?: boolean;
-}
-
-interface ApiEnvelope<T> {
-  code?: number;
-  message?: string;
-  data?: T;
 }
 
 interface ApiProvider {
@@ -328,38 +324,6 @@ function getCapabilityByModelType(
   return moduleConfigs.find((module) => module.key === normalized)?.key;
 }
 
-function getApiBaseUrl() {
-  return `${BASE_URL || window.location.origin}/api/core`;
-}
-
-function getRequestHeaders() {
-  return {
-    "Content-Type": "application/json",
-    ...AgentAppsAuth.getAuthHeaders(),
-  };
-}
-
-function unwrapResponse<T>(payload: ApiEnvelope<T> | T): T {
-  if (payload && typeof payload === "object" && "data" in payload) {
-    return (payload as ApiEnvelope<T>).data as T;
-  }
-  return payload as T;
-}
-
-async function modelProviderRequest<T>(
-  method: "GET" | "PUT",
-  path: string,
-  data?: unknown,
-) {
-  const response = await axiosInstance.request<ApiEnvelope<T> | T>({
-    method,
-    url: `${getApiBaseUrl()}${path}`,
-    data,
-    headers: getRequestHeaders(),
-  });
-  return unwrapResponse<T>(response.data);
-}
-
 const createModelProviderFallbacks = (
   t: ReturnType<typeof useTranslation>["t"],
 ) => ({
@@ -609,17 +573,15 @@ export default function DefaultModelConfigPanel() {
 
   const loadDefaultModelState = useCallback(async () => {
     try {
-      const providerData = await modelProviderRequest<{
-        providers?: ApiProvider[];
-      }>("GET", "/model_providers");
+      const providerResponse = await modelProvidersApi.apiCoreModelProvidersGet();
+      const providerData = unwrapModelProviderData<{ providers?: ApiProvider[] }>(providerResponse.data);
       const providers = (providerData.providers || []).map((provider) =>
         mapApiProvider(provider, localizedFallbacks),
       );
       setProviderOptions(providers);
 
-      const selectedData = await modelProviderRequest<{
-        selections?: SelectedModelApiItem[];
-      }>("GET", "/model_providers/selected_models");
+      const selectedResponse = await modelProvidersApi.apiCoreModelProvidersSelectedModelsGet();
+      const selectedData = unwrapModelProviderData<{ selections?: SelectedModelApiItem[] }>(selectedResponse.data);
       const nextSelectedModels: SelectedModels = {};
       const selectedOptions: Partial<
         Record<ModelCapability, ModelOptionItem[]>
@@ -681,9 +643,10 @@ export default function DefaultModelConfigPanel() {
       });
       setShareStatus(nextShareStatus);
 
-      const selectedProviderData = await modelProviderRequest<{
-        selections?: SelectedCloudServiceApiItem[];
-      }>("GET", "/model_providers/selected_providers");
+      const selectedProviderResponse = await modelProvidersApi.apiCoreModelProvidersSelectedProvidersGet();
+      const selectedProviderData = unwrapModelProviderData<{ selections?: SelectedCloudServiceApiItem[] }>(
+        selectedProviderResponse.data as unknown,
+      );
       const nextSelectedCloudServices: SelectedCloudServices = {};
       const nextCloudShareStatus: Partial<
         Record<CloudServiceSlotKey, boolean>
@@ -725,21 +688,27 @@ export default function DefaultModelConfigPanel() {
         const [modelReadyResults, cloudReadyResults] = await Promise.all([
           Promise.allSettled(
             moduleConfigs.map(async (module) => {
-              const response = await modelProviderRequest<ModelReadyResponse>(
-                "GET",
-                `/model_providers/models/ready?model_type=${encodeURIComponent(module.key)}`,
+              const response = await modelProvidersDefaultApi.apiCoreModelProvidersModelsReadyGet(
+                withModelProviderJsonOptions({
+                  params: { model_type: module.key },
+                }),
               );
-              return { capability: module.key, response };
+              return {
+                capability: module.key,
+                response: unwrapModelProviderData<ModelReadyResponse>(response.data as unknown),
+              };
             }),
           ),
           Promise.allSettled(
             cloudServiceConfigs.map(async (service) => {
               const response =
-                await modelProviderRequest<VerifiedCloudServiceResponse>(
-                  "GET",
-                  `/model_providers/verified?category=${encodeURIComponent(service.category)}`,
-                );
-              return { service: service.key, response };
+                await modelProvidersApi.apiCoreModelProvidersVerifiedGet({
+                  category: service.category,
+                });
+              return {
+                service: service.key,
+                response: unwrapModelProviderData<VerifiedCloudServiceResponse>(response.data),
+              };
             }),
           ),
         ]);
@@ -788,7 +757,10 @@ export default function DefaultModelConfigPanel() {
 
     setModuleModelLoading((current) => ({ ...current, [capability]: true }));
     try {
-      const data = await modelProviderRequest<{
+      const response = await modelProvidersApi.apiCoreModelProvidersModelsGet({
+        modelType: capability,
+      });
+      const data = unwrapModelProviderData<{
         models?: Array<
           ApiModel & {
             user_model_provider_id: string;
@@ -798,11 +770,16 @@ export default function DefaultModelConfigPanel() {
             base_url?: string;
           }
         >;
-      }>(
-        "GET",
-        `/model_providers/models?model_type=${encodeURIComponent(capability)}${trimmedKeyword ? `&keyword=${encodeURIComponent(trimmedKeyword)}` : ""}`,
-      );
-      const fetchedOptions = (data.models || []).map((model) => {
+      }>(response.data);
+      const fetchedOptions = (data.models || [])
+        .filter((model) =>
+          trimmedKeyword
+            ? `${model.name} ${model.provider_name} ${model.group_name}`
+                .toLowerCase()
+                .includes(trimmedKeyword.toLowerCase())
+            : true,
+        )
+        .map((model) => {
         const provider =
           providerOptions.find(
             (item) => item.id === model.user_model_provider_id,
@@ -883,13 +860,12 @@ export default function DefaultModelConfigPanel() {
       },
     ];
 
-    return modelProviderRequest<{ selections?: SelectedModelApiItem[] }>(
-      "PUT",
-      "/model_providers/selected_models",
-      {
+    const response = await modelProvidersApi.apiCoreModelProvidersSelectedModelsPut({
+      setSelectedModelsOpenAPIRequest: {
         selections,
       },
-    );
+    });
+    return unwrapModelProviderData<{ selections?: SelectedModelApiItem[] }>(response.data);
   };
 
   const toggleShareModel = async (
@@ -903,14 +879,14 @@ export default function DefaultModelConfigPanel() {
     }
 
     try {
-      await modelProviderRequest(
-        "PUT",
-        "/model_providers/selected_models/share",
-        {
-          model_id: parseModelValue(value).modelId,
-          model_key: capability,
-          share,
-        },
+      await modelProvidersDefaultApi.apiCoreModelProvidersSelectedModelsSharePut(
+        withModelProviderJsonOptions({
+          data: {
+            model_id: parseModelValue(value).modelId,
+            model_key: capability,
+            share,
+          },
+        }),
       );
       setShareStatus((current) => ({ ...current, [capability]: share }));
       message.success(
@@ -988,10 +964,8 @@ export default function DefaultModelConfigPanel() {
     service: CloudServiceSlotKey,
     value?: string,
   ) => {
-    return modelProviderRequest<{ selections?: SelectedCloudServiceApiItem[] }>(
-      "PUT",
-      "/model_providers/selected_providers",
-      {
+    const response = await modelProvidersApi.apiCoreModelProvidersSelectedProvidersPut({
+      setSelectedProviderOpenAPIRequest: {
         selections: [
           {
             category: cloudServiceCategoryBySlot[service],
@@ -999,6 +973,9 @@ export default function DefaultModelConfigPanel() {
           },
         ],
       },
+    });
+    return unwrapModelProviderData<{ selections?: SelectedCloudServiceApiItem[] }>(
+      response.data as unknown,
     );
   };
 
@@ -1013,11 +990,17 @@ export default function DefaultModelConfigPanel() {
     setCloudServiceLoading((current) => ({ ...current, [service.key]: true }));
     try {
       const trimmedKeyword = keyword.trim();
-      const data = await modelProviderRequest<CloudServiceGroupListResponse>(
-        "GET",
-        `/model_providers/provider_groups?category=${encodeURIComponent(service.category)}${trimmedKeyword ? `&keyword=${encodeURIComponent(trimmedKeyword)}` : ""}`,
+      const response = await modelProvidersApi.apiCoreModelProvidersProviderGroupsGet({
+        category: service.category,
+      });
+      const data = unwrapModelProviderData<CloudServiceGroupListResponse>(response.data);
+      const groups = (data.groups || []).filter((group) =>
+        trimmedKeyword
+          ? `${group.provider_name} ${group.group_name} ${group.base_url}`
+              .toLowerCase()
+              .includes(trimmedKeyword.toLowerCase())
+          : true,
       );
-      const groups = data.groups || [];
       const fetchedOptions = groups.map((group) =>
         mapVerifiedCloudServiceGroup(group, service.category),
       );
@@ -1120,14 +1103,14 @@ export default function DefaultModelConfigPanel() {
       return;
     }
 
-    void modelProviderRequest(
-      "PUT",
-      "/model_providers/selected_providers/share",
-      {
-        group_id: selectedCloudServices[service],
-        share,
+    void modelProvidersApi
+      .apiCoreModelProvidersSelectedProvidersSharePut({
+        setSharedProviderOpenAPIRequest: {
+          group_id: selectedCloudServices[service],
+          share,
+        },
       },
-    )
+      )
       .then(() => {
         setCloudServiceShareStatus((current) => ({
           ...current,

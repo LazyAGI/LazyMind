@@ -247,6 +247,8 @@ function mapEvalSetItemToDatasetItem(item: EvalSetItemResponse): DatasetItem {
     reference_doc: item.reference_doc,
     reference_doc_ids: splitListField(item.reference_doc_ids),
     reference_chunk_ids: splitListField(item.reference_chunk_ids),
+    reference_doc_from_knowledge_base: item.reference_doc_from_knowledge_base,
+    reference_chunk_selected: item.reference_chunk_selected,
     generate_reason: item.generate_reason,
     is_deleted: item.is_deleted,
     source: normalizeItemSource(item.source),

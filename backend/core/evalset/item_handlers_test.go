@@ -56,7 +56,7 @@ func TestCreateEvalSetItemManualSource(t *testing.T) {
 	db := newEvalSetTestDB(t)
 	seedEvalSet(t, db, "eval_set_items_create", "user_1", "", "", time.Now().UTC())
 
-	body := `{"case_id":"case_001","question":"How?","ground_truth":"Like this","question_type":"操作问答","source":"upload"}`
+	body := `{"case_id":"case_001","question":"How?","ground_truth":"Like this","question_type":"操作问答","reference_context":"  line 1\r\nline 2  ","source":"upload"}`
 	rec, req := requestWithUser(http.MethodPost, "/api/core/eval-sets/eval_set_items_create/items", body, "user_1")
 	req = mux.SetURLVars(req, map[string]string{"eval_set_id": "eval_set_items_create"})
 	CreateEvalSetItem(rec, req)
@@ -64,6 +64,7 @@ func TestCreateEvalSetItemManualSource(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
+	rawResponse := rec.Body.String()
 	resp := decodeOKData[EvalSetItemResponse](t, rec)
 	if !strings.HasPrefix(resp.ID, "eval_item_") {
 		t.Fatalf("expected eval_item_ id, got %q", resp.ID)
@@ -73,6 +74,27 @@ func TestCreateEvalSetItemManualSource(t *testing.T) {
 	}
 	if resp.EvalSetID != "eval_set_items_create" || resp.ShardID != DefaultShardID {
 		t.Fatalf("unexpected eval set or shard: %#v", resp)
+	}
+	if resp.ReferenceContext != "line 1\r\nline 2" {
+		t.Fatalf("expected frontend reference context to be preserved after trim, got %q", resp.ReferenceContext)
+	}
+	var responseFields map[string]any
+	if err := json.Unmarshal([]byte(rawResponse), &responseFields); err != nil {
+		t.Fatalf("decode response fields: %v", err)
+	}
+	data, ok := responseFields["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected response data object, got %#v", responseFields["data"])
+	}
+	if _, ok := data["algorithm_reference_context"]; ok {
+		t.Fatalf("algorithm_reference_context must not be returned to frontend: %#v", data)
+	}
+	var createdItem orm.EvalSetItem
+	if err := db.First(&createdItem, "id = ?", resp.ID).Error; err != nil {
+		t.Fatalf("query created item: %v", err)
+	}
+	if createdItem.AlgorithmReferenceContext != "line 1\nline 2" {
+		t.Fatalf("expected algorithm reference context to be derived, got %q", createdItem.AlgorithmReferenceContext)
 	}
 
 	var evalSet orm.EvalSet
@@ -147,6 +169,67 @@ func TestListEvalSetItemsFiltersBySourceAndQuestionType(t *testing.T) {
 	}
 }
 
+func TestListEvalSetItemsMarksKnowledgeBaseReferenceDocAndChunkSelection(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	now := time.Now().UTC()
+	seedEvalSet(t, db, "eval_set_items_reference", "user_1", "", "kb_1", now)
+	if err := db.Create(&orm.Document{
+		ID:          "doc_kb",
+		DatasetID:   "kb_1",
+		DisplayName: "knowledge doc",
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "user_1",
+			CreateUserName: "user_1 name",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("seed document: %v", err)
+	}
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:                "eval_item_with_chunk",
+		EvalSetID:         "eval_set_items_reference",
+		ReferenceDocIDs:   "doc_kb",
+		ReferenceChunkIDs: "chunk_1",
+	})
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:              "eval_item_without_chunk",
+		EvalSetID:       "eval_set_items_reference",
+		ReferenceDocIDs: "doc_kb",
+	})
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:              "eval_item_external_doc",
+		EvalSetID:       "eval_set_items_reference",
+		ReferenceDocIDs: "doc_external",
+	})
+
+	rec, req := requestWithUser(http.MethodGet, "/api/core/eval-sets/eval_set_items_reference/items", "", "user_1")
+	req = mux.SetURLVars(req, map[string]string{"eval_set_id": "eval_set_items_reference"})
+	ListEvalSetItems(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeOKData[ListEvalSetItemsResponse](t, rec)
+	itemsByID := make(map[string]EvalSetItemResponse, len(resp.Items))
+	for _, item := range resp.Items {
+		itemsByID[item.ID] = item
+	}
+
+	withChunk := itemsByID["eval_item_with_chunk"]
+	if !withChunk.ReferenceDocFromKnowledgeBase || !withChunk.ReferenceChunkSelected {
+		t.Fatalf("expected kb doc with selected chunk flags, got %#v", withChunk)
+	}
+	withoutChunk := itemsByID["eval_item_without_chunk"]
+	if !withoutChunk.ReferenceDocFromKnowledgeBase || withoutChunk.ReferenceChunkSelected {
+		t.Fatalf("expected kb doc without selected chunk flags, got %#v", withoutChunk)
+	}
+	externalDoc := itemsByID["eval_item_external_doc"]
+	if externalDoc.ReferenceDocFromKnowledgeBase || externalDoc.ReferenceChunkSelected {
+		t.Fatalf("expected external doc flags false, got %#v", externalDoc)
+	}
+}
+
 func TestUpdateEvalSetItemKeepsUploadSource(t *testing.T) {
 	db := newEvalSetTestDB(t)
 	seedEvalSet(t, db, "eval_set_items_update", "user_1", "", "", time.Now().UTC())
@@ -170,6 +253,66 @@ func TestUpdateEvalSetItemKeepsUploadSource(t *testing.T) {
 	}
 	if resp.QuestionType != "new" || resp.GroundTruth != "updated" {
 		t.Fatalf("unexpected updated item: %#v", resp)
+	}
+}
+
+func TestUpdateEvalSetItemDerivesAlgorithmReferenceContext(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	seedEvalSet(t, db, "eval_set_items_update_context", "user_1", "", "", time.Now().UTC())
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:                        "eval_item_context",
+		EvalSetID:                 "eval_set_items_update_context",
+		ReferenceContext:          "old frontend",
+		AlgorithmReferenceContext: "old algorithm",
+	})
+
+	rec, req := requestWithUser(http.MethodPatch, "/api/core/eval-sets/eval_set_items_update_context/items/eval_item_context", `{"reference_context":"  new\r\ncontext  "}`, "user_1")
+	req = mux.SetURLVars(req, map[string]string{"eval_set_id": "eval_set_items_update_context", "item_id": "eval_item_context"})
+	UpdateEvalSetItem(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeOKData[EvalSetItemResponse](t, rec)
+	if resp.ReferenceContext != "new\r\ncontext" {
+		t.Fatalf("expected frontend reference context in response, got %q", resp.ReferenceContext)
+	}
+	var item orm.EvalSetItem
+	if err := db.First(&item, "id = ?", "eval_item_context").Error; err != nil {
+		t.Fatalf("query updated item: %v", err)
+	}
+	if item.AlgorithmReferenceContext != "new\ncontext" {
+		t.Fatalf("expected derived algorithm reference context, got %q", item.AlgorithmReferenceContext)
+	}
+}
+
+func TestUpdateEvalSetItemDerivesAlgorithmReferenceContextFromStructuredParts(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	seedEvalSet(t, db, "eval_set_items_structured_context", "user_1", "", "", time.Now().UTC())
+	seedEvalSetItem(t, db, orm.EvalSetItem{ID: "eval_item_structured_context", EvalSetID: "eval_set_items_structured_context"})
+
+	payload := `{"type":"reference_context","version":1,"parts":[{"type":"chunk","content":"片段一内容"},{"type":"text","content":"用户补充内容"},{"type":"chunk","content":"片段二内容"}]}`
+	bodyBytes, err := json.Marshal(map[string]string{"reference_context": payload})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	rec, req := requestWithUser(http.MethodPatch, "/api/core/eval-sets/eval_set_items_structured_context/items/eval_item_structured_context", string(bodyBytes), "user_1")
+	req = mux.SetURLVars(req, map[string]string{"eval_set_id": "eval_set_items_structured_context", "item_id": "eval_item_structured_context"})
+	UpdateEvalSetItem(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var item orm.EvalSetItem
+	if err := db.First(&item, "id = ?", "eval_item_structured_context").Error; err != nil {
+		t.Fatalf("query updated item: %v", err)
+	}
+	if item.ReferenceContext != payload {
+		t.Fatalf("expected frontend structured context to be stored, got %q", item.ReferenceContext)
+	}
+	wantAlgorithmContext := "片段一内容\n\n用户补充内容\n\n片段二内容"
+	if item.AlgorithmReferenceContext != wantAlgorithmContext {
+		t.Fatalf("expected derived algorithm reference context %q, got %q", wantAlgorithmContext, item.AlgorithmReferenceContext)
 	}
 }
 

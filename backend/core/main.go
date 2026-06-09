@@ -49,6 +49,7 @@ func exportOpenAPIArtifacts(openAPIJSON []byte) {
 	outputs := map[string][]byte{
 		filepath.Join(wd, "openapi.json"):                                                   openAPIJSON,
 		filepath.Join(wd, "swagger.json"):                                                   openAPIJSON,
+		filepath.Join(wd, "docs", "swagger.json"):                                           openAPIJSON,
 		filepath.Join(wd, "..", "..", "api", "backend", "core", "swagger.json"):             openAPIJSON,
 		filepath.Join(wd, "..", "..", "api", "backend", "core", "openapi.yml"):              openAPIYAML,
 		filepath.Join(string(filepath.Separator), "openapi-export", "core", "swagger.json"): openAPIJSON,
@@ -72,8 +73,43 @@ func handleAPI(r *mux.Router, method, path string, perms []string, h http.Handle
 	r.HandleFunc(path, withMutationRequestAudit(method, path, h)).Methods(method)
 }
 
+func registerCoreRoutes(r *mux.Router) {
+	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}).Methods(http.MethodGet)
+	handleAPI(r, "GET", "/hello", []string{"user.read"}, func(w http.ResponseWriter, r *http.Request) {
+		common.ReplyJSON(w, map[string]string{"message": "Hello from Backend"})
+	})
+	handleAPI(r, "GET", "/admin", []string{"document.write"}, func(w http.ResponseWriter, r *http.Request) {
+		common.ReplyJSON(w, map[string]string{"message": "Admin only area"})
+	})
+	registerAllRoutes(r)
+}
+
+func exportRegisteredOpenAPIArtifacts() error {
+	r := mux.NewRouter()
+	r.UseEncodedPath()
+	registerCoreRoutes(r)
+
+	openAPIJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		return err
+	}
+	exportOpenAPIArtifacts(openAPIJSON)
+	return nil
+}
+
 func main() {
 	log.Init()
+
+	if len(os.Args) > 1 && os.Args[1] == "--export-openapi" {
+		if err := exportRegisteredOpenAPIArtifacts(); err != nil {
+			log.Logger.Fatal().Err(err).Msg("export OpenAPI artifacts failed")
+		}
+		log.Logger.Info().Msg("OpenAPI artifacts exported")
+		return
+	}
 
 	// textInitialize ACL text（text：postgres/sqlite/mysql）。
 	// textSet ACL_DB_DRIVER textDefaulttext sqlite，text ./acl.db。
@@ -146,17 +182,7 @@ func main() {
 
 	r := mux.NewRouter()
 	r.UseEncodedPath()
-	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
-	}).Methods(http.MethodGet)
-	handleAPI(r, "GET", "/hello", []string{"user.read"}, func(w http.ResponseWriter, r *http.Request) {
-		common.ReplyJSON(w, map[string]string{"message": "Hello from Backend"})
-	})
-	handleAPI(r, "GET", "/admin", []string{"document.write"}, func(w http.ResponseWriter, r *http.Request) {
-		common.ReplyJSON(w, map[string]string{"message": "Admin only area"})
-	})
-	registerAllRoutes(r)
+	registerCoreRoutes(r)
 
 	// Starttext OpenAPI spec，text doc_swag.go / swag init
 	openAPIJSON, err := buildOpenAPISpecFromRouter(r)
