@@ -163,6 +163,25 @@ func TestDefaultFeishuAPIClientDriveAndWikiMapping(t *testing.T) {
 	}
 }
 
+func TestDriveObjectMapsShortcutTargetMetadata(t *testing.T) {
+	t.Parallel()
+
+	obj := driveObject(map[string]any{
+		"type":     "shortcut",
+		"token":    "shortcut-1",
+		"name":     "alias.pdf",
+		"revision": "rev-1",
+		"shortcut_info": map[string]any{
+			"target_type":  "file",
+			"target_token": "file-target",
+		},
+	}, "folder-1")
+
+	if obj.DriveType != "shortcut" || obj.ShortcutTargetType != "file" || obj.ShortcutTargetToken != "file-target" {
+		t.Fatalf("shortcut target metadata was not mapped: %+v", obj)
+	}
+}
+
 func TestDefaultFeishuAPIClientMapsWikiNodeNameFallbacks(t *testing.T) {
 	t.Parallel()
 

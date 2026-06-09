@@ -370,6 +370,60 @@ func TestWikiPartialFetchWithObjectKeyReturnsSelectedNode(t *testing.T) {
 	}
 }
 
+func TestDriveShortcutExportsTargetFile(t *testing.T) {
+	t.Parallel()
+
+	auth := &authStub{}
+	api := newFeishuAPIStub()
+	api.driveObjects["file-target"] = Object{
+		Kind:          ObjectKindDriveFile,
+		Token:         "file-target",
+		Name:          "target.pdf",
+		IsDocument:    true,
+		Revision:      "shortcut-rev",
+		SizeBytes:     7,
+		MimeType:      "application/pdf",
+		FileExtension: ".pdf",
+		DriveType:     "file",
+		StableID:      "file-target",
+	}
+	conn := NewFeishuConnector(auth, api)
+	temp := &feishuTempStoreStub{}
+	conn.UseTempObjectStore(temp)
+
+	raw := conn.rawObject("auth-1", Object{
+		Kind:                ObjectKindDriveFile,
+		Token:               "shortcut-1",
+		Name:                "alias.pdf",
+		IsDocument:          true,
+		Revision:            "shortcut-rev",
+		DriveType:           "shortcut",
+		ShortcutTargetType:  "file",
+		ShortcutTargetToken: "file-target",
+		StableID:            "shortcut-1",
+	})
+	normalized, err := conn.MapObject(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("map shortcut: %v", err)
+	}
+	if normalized.ProviderMeta["shortcut_target_token"] != "file-target" {
+		t.Fatalf("shortcut target metadata was not preserved: %+v", normalized.ProviderMeta)
+	}
+
+	exported, err := conn.ExportObject(context.Background(), connector.ExportObjectRequest{
+		ObjectKey:     normalized.ObjectKey,
+		SourceVersion: normalized.SourceVersion,
+		ExportFormat:  connector.ExportFormatOriginal,
+		ProviderMeta:  normalized.ProviderMeta,
+	})
+	if err != nil {
+		t.Fatalf("export shortcut: %v", err)
+	}
+	if exported.ContentURI != "scan-temp://feishu-1" || temp.objects["feishu-1"] != "drive:file-target" {
+		t.Fatalf("shortcut should export target content, got exported=%+v temp=%+v", exported, temp.objects)
+	}
+}
+
 func TestWikiListClampsProviderPageSizeToOpenAPILimit(t *testing.T) {
 	t.Parallel()
 

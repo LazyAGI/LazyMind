@@ -1583,7 +1583,9 @@ func buildTaskResponse(r *http.Request, row orm.Task) TaskResponse {
 		// be a brand-new un-submitted task (no lazyllm doc at all and no terminal state in ext).
 		rawState := strings.TrimSpace(ext.TaskState)
 		if rawState == "" {
-			if lazyDoc != "" {
+			if lazyTask != "" {
+				rawState = string(TaskStateRunning)
+			} else if lazyDoc != "" {
 				// Document was already registered with lazyllm → task must have completed.
 				rawState = string(TaskStateSucceeded)
 			} else {

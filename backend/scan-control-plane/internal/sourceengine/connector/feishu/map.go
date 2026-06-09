@@ -178,5 +178,11 @@ func providerMeta(authConnectionID string, object Object) connector.ProviderMeta
 	if object.DriveType != "" {
 		meta["file_type"] = object.DriveType
 	}
+	if object.ShortcutTargetType != "" {
+		meta["shortcut_target_type"] = object.ShortcutTargetType
+	}
+	if object.ShortcutTargetToken != "" {
+		meta["shortcut_target_token"] = object.ShortcutTargetToken
+	}
 	return meta
 }

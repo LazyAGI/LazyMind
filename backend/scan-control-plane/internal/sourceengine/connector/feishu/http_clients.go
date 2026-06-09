@@ -451,6 +451,7 @@ func driveObject(item map[string]any, parentToken string) Object {
 	name := firstNonEmpty(openAPIString(item["name"]), token)
 	rawType := strings.ToLower(firstNonEmpty(openAPIString(item["type"]), openAPIString(item["file_type"])))
 	isFolder := rawType == "folder"
+	shortcutInfo, _ := item["shortcut_info"].(map[string]any)
 	modified := openAPIInt64(firstNonEmpty(
 		openAPIString(item["modified_time"]),
 		openAPIString(item["edit_time"]),
@@ -470,18 +471,20 @@ func driveObject(item map[string]any, parentToken string) Object {
 		token,
 	)
 	object := Object{
-		Kind:            ObjectKindDriveFile,
-		Token:           token,
-		ParentToken:     strings.TrimSpace(parentToken),
-		Name:            name,
-		IsDocument:      true,
-		Revision:        revision,
-		ModifiedUnixSec: modified,
-		SizeBytes:       openAPIInt64(item["size"]),
-		MimeType:        openAPIString(item["mime_type"]),
-		FileExtension:   openAPIString(item["file_extension"]),
-		DriveType:       rawType,
-		StableID:        token,
+		Kind:                ObjectKindDriveFile,
+		Token:               token,
+		ParentToken:         strings.TrimSpace(parentToken),
+		Name:                name,
+		IsDocument:          true,
+		Revision:            revision,
+		ModifiedUnixSec:     modified,
+		SizeBytes:           openAPIInt64(item["size"]),
+		MimeType:            openAPIString(item["mime_type"]),
+		FileExtension:       openAPIString(item["file_extension"]),
+		DriveType:           rawType,
+		ShortcutTargetType:  strings.ToLower(openAPIString(shortcutInfo["target_type"])),
+		ShortcutTargetToken: openAPIString(shortcutInfo["target_token"]),
+		StableID:            token,
 	}
 	if isFolder {
 		object.Kind = ObjectKindDriveFolder
