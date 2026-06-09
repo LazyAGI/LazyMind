@@ -3,6 +3,7 @@
 Extract (method, path) -> permissions from:
 - Python: FastAPI apps using @permission_required (auth-service).
 - Go: handleAPI(mux, method, path, []string{...}, handler) at route registration (core).
+- Go: routeAPI(mux, method, path, []string{...}, handler) at route registration (scan-control-plane).
 Run at deploy time; writes api_permissions.json for auth-service and Kong.
 """
 
@@ -108,9 +109,10 @@ def extract_from_py_file(filepath: Path) -> list[dict]:
     return entries
 
 
-# handleAPI(mux, "GET", "/api/hello", []string{"user.read"}, handler) — per-route permission at registration
+# handleAPI(mux, "GET", "/api/hello", []string{"user.read"}, handler) — per-route permission at registration (core)
+# routeAPI(mux, "GET", "/api/scan/hello", []string{"scan.read"}, handler) — same convention for scan-control-plane
 _GO_HANDLE_API_RE = re.compile(
-    r'handleAPI\s*\(\s*[^,]+,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*\[\]string\{(.*?)\}\s*,',  # noqa: Q000
+    r'(?:handleAPI|routeAPI)\s*\(\s*[^,]+,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*\[\]string\{(.*?)\}\s*,',  # noqa: Q000
     re.DOTALL,
 )
 
@@ -119,11 +121,24 @@ def _parse_go_permissions(s: str) -> list[str]:
     return [p.strip().strip(chr(34)) for p in s.split(',') if p.strip()]
 
 
+# Map from a path segment keyword to the API prefix injected by the script.
+_GO_SERVICE_PREFIX: dict[str, str] = {
+    'core': '/api/core',
+    'scan-control-plane': '',  # scan routes already include /api/scan prefix
+}
+
+
 def extract_from_go_file(filepath: Path) -> list[dict]:
-    """Parse a Go file for handleAPI(mux, method, path, []string{...}, ...) calls."""
+    """Parse a Go file for handleAPI/routeAPI(mux, method, path, []string{...}, ...) calls."""
     text = filepath.read_text(encoding='utf-8')
     entries = []
-    api_prefix = '/api/core' if 'core' in filepath.parts else ''
+    # Determine service prefix from path parts.
+    parts = filepath.parts
+    api_prefix = ''
+    for part, prefix in _GO_SERVICE_PREFIX.items():
+        if part in parts:
+            api_prefix = prefix
+            break
     for m in _GO_HANDLE_API_RE.finditer(text):
         method = (m.group(1) or 'GET').upper()
         if method not in ('GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'):
@@ -189,17 +204,20 @@ def _read_permission_groups_yaml(path: Path) -> tuple[str, dict]:
 
 def _sync_permission_groups_yaml(path: Path, used_codes: list[str]) -> None:
     """
-    Sync permission_groups.yaml.permission_groups from used_codes (full overwrite).
-    - Overwrites permission_groups with the full, de-duplicated set of used codes.
-    - Does NOT delete/modify any DB data (bootstrap is additive).
-    - Preserves leading comment block best-effort.
-    - Keeps other YAML keys as-is (e.g. default_user_role_permissions) if present.
+    Sync permission_groups.yaml: add any permission codes from used_codes that are not yet listed,
+    but do NOT remove existing codes (yaml is the authoritative source for the permission catalog).
+    Preserves leading comment block and all other YAML keys (e.g. default_user_role_permissions).
     """
     header, data = _read_permission_groups_yaml(path)
-    merged = sorted(set(used_codes))
+    existing: list[str] = list(data.get('permission_groups') or [])
+    existing_set = set(existing)
+    added = [c for c in used_codes if c and c not in existing_set]
+    if not added:
+        # Nothing new to add — skip rewrite to preserve file as-is.
+        return
 
     out: dict = dict(data)
-    out['permission_groups'] = merged
+    out['permission_groups'] = sorted(existing_set | set(added))
     if 'default_user_role_permissions' not in out:
         out['default_user_role_permissions'] = []
 
@@ -236,7 +254,7 @@ def main() -> None:
         out_path = args.sources[-1]
     else:
         base = Path(__file__).resolve().parent.parent
-        source_dirs = [base / 'core', base / 'auth-service']
+        source_dirs = [base / 'core', base / 'auth-service', base / 'scan-control-plane']
         out_path = base / 'auth-service' / 'api_permissions.json'
         exclude = exclude or {'scripts', 'core', 'vendor'}
 
