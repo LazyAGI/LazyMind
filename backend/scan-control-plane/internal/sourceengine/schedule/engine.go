@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	_ "time/tzdata" // embed IANA zones for minimal runtime images
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 	store "github.com/lazymind/scan_control_plane/internal/store/source"

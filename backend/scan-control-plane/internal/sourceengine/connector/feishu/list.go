@@ -75,7 +75,7 @@ func (c *FeishuConnector) listProviderPage(ctx context.Context, token string, ta
 		if nodeRef == VirtualWikiSpacesRef {
 			return c.api.ListWikiSpaces(ctx, token, cursor, pageSize)
 		}
-		if spaceID, ok := wikiSpaceID(nodeRef); ok {
+		if spaceID, ok := wikiSpaceID(firstNonEmpty(nodeRef, targetRef)); ok {
 			return c.api.ListWikiChildren(ctx, token, spaceID, "", cursor, pageSize)
 		}
 		spaceID, nodeToken, err := wikiNode(firstNonEmpty(nodeRef, targetRef))

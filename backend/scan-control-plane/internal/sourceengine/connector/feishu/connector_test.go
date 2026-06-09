@@ -40,6 +40,14 @@ func TestValidateTargetStableFingerprintAndClientOnly(t *testing.T) {
 	if wiki.DisplayName != "Wiki Root" {
 		t.Fatalf("wiki target display name should come from metadata, got %+v", wiki)
 	}
+
+	wikiSpace := validateFeishuTarget(t, ctx, conn, TargetTypeWikiNode, "feishu:wiki:space:space-1")
+	if wikiSpace.TargetFingerprint != "feishu:wiki:space:space-1" || wikiSpace.RootObjectKey != "feishu:wiki:space:space-1" {
+		t.Fatalf("unexpected wiki space target identity: %+v", wikiSpace)
+	}
+	if wikiSpace.DisplayName != "Engineering Wiki" {
+		t.Fatalf("wiki space target display name should come from metadata, got %+v", wikiSpace)
+	}
 }
 
 func TestDriveListFetchExportAndStableIDDedupe(t *testing.T) {
@@ -196,8 +204,8 @@ func TestInitialRootsReturnDriveAndWikiVirtualBranches(t *testing.T) {
 		t.Fatalf("expected drive/wiki virtual roots, got %+v", page.Items)
 	}
 	drive := page.Items[0]
-	if !drive.Bindable || drive.BindingTargetType != TargetTypeDriveFolder || drive.BindingTargetRef != "drive:root" {
-		t.Fatalf("drive virtual root should represent the drive root target, got %+v", drive)
+	if drive.Bindable || drive.BindingTargetType != "" || drive.BindingTargetRef != "" {
+		t.Fatalf("drive virtual root must not be bindable, got %+v", drive)
 	}
 	wiki := page.Items[1]
 	if wiki.Bindable || wiki.BindingTargetType != "" || wiki.BindingTargetRef != "" {
@@ -240,8 +248,41 @@ func TestDriveVirtualRootListsRootChildrenAndWikiNodeExposesSemanticBindingTarge
 	if err != nil {
 		t.Fatalf("list wiki spaces: %v", err)
 	}
-	if len(wiki.Items) != 1 || wiki.Items[0].Bindable || wiki.Items[0].ObjectRef != "feishu:wiki:space:space-1" {
-		t.Fatalf("wiki spaces should be virtual containers, got %+v", wiki.Items)
+	if len(wiki.Items) != 1 || !wiki.Items[0].Bindable || wiki.Items[0].BindingTargetType != TargetTypeWikiNode || wiki.Items[0].BindingTargetRef != "feishu:wiki:space:space-1" || wiki.Items[0].ObjectRef != "feishu:wiki:space:space-1" {
+		t.Fatalf("wiki spaces should expose selectable binding targets, got %+v", wiki.Items)
+	}
+}
+
+func TestWikiSpaceTargetListsRootNodes(t *testing.T) {
+	t.Parallel()
+
+	conn := NewFeishuConnector(&authStub{}, newFeishuAPIStub())
+	page, err := conn.ListChildren(context.Background(), connector.ListChildrenRequest{
+		TargetType:       TargetTypeWikiNode,
+		TargetRef:        "feishu:wiki:space:space-1",
+		AuthConnectionID: "auth-1",
+		PageSize:         10,
+	})
+	if err != nil {
+		t.Fatalf("list wiki space target: %v", err)
+	}
+	if got := feishuObjectKeys(page.Items); !sameStrings(got, []string{"feishu:wiki:space-1:node-root"}) {
+		t.Fatalf("wiki space target should list root nodes, got %v", got)
+	}
+
+	fetched, err := conn.FetchPage(context.Background(), connector.FetchPageRequest{
+		BindingGeneration: 1,
+		TargetType:        TargetTypeWikiNode,
+		TargetRef:         "feishu:wiki:space:space-1",
+		ScopeType:         connector.ScopeTypeFull,
+		PageSize:          10,
+		AuthConnectionID:  "auth-1",
+	})
+	if err != nil {
+		t.Fatalf("fetch wiki space target: %v", err)
+	}
+	if got := feishuObjectKeys(fetched.Items); !sameStrings(got, []string{"feishu:wiki:space-1:node-root"}) {
+		t.Fatalf("wiki space fetch should list root nodes, got %v", got)
 	}
 }
 
@@ -474,6 +515,7 @@ func newFeishuAPIStub() *feishuAPIStub {
 			"folder-root": {file, alias, folder},
 		},
 		wikiChildren: map[string][]Object{
+			"space-1:":          {wikiRoot},
 			"space-1:node-root": {wikiChild},
 		},
 	}

@@ -67,6 +67,9 @@ func (c *FeishuConnector) loadScopedObject(ctx context.Context, token string, re
 	case TargetTypeDriveFolder:
 		return c.api.GetDriveFolder(ctx, token, driveFolderToken(nodeRef))
 	case TargetTypeWikiNode:
+		if spaceID, ok := wikiSpaceID(nodeRef); ok {
+			return c.getWikiSpace(ctx, token, spaceID)
+		}
 		spaceID, nodeToken, err := wikiNode(nodeRef)
 		if err != nil {
 			return Object{}, err

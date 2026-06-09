@@ -22,7 +22,7 @@ FROM ${DOCKER_MIRROR}alpine:3.21
 
 ARG ALPINE_MIRROR=https://mirrors.aliyun.com/alpine
 RUN sed -i "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" /etc/apk/repositories \
-    && apk add --no-cache ca-certificates
+    && apk add --no-cache ca-certificates tzdata
 
 RUN addgroup -S nonroot && adduser -S nonroot -G nonroot
 
