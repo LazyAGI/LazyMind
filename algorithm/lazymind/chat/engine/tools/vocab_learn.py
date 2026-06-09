@@ -7,6 +7,11 @@ from lazyllm import LOG
 
 from lazymind.chat.engine.tools.infra import (
     VocabSuggestion,
+    ActionPlanningModule,
+    ChatHistoryRecord,
+    VocabEvolutionRequest,
+    fetch_chat_histories_for_session,
+    fetch_vocab_groups_for_user_id,
     handle_tool_errors,
     post_core_api,
     prepare_vocab_candidates,
@@ -17,15 +22,6 @@ from lazymind.chat.engine.tools.infra import (
     summarize_vocab_suggestion_for_log,
     tool_error,
     tool_success,
-)
-from lazymind.review.service.db import (
-    fetch_chat_histories_for_session,
-    fetch_vocab_groups_for_user_id,
-)
-from lazymind.review.vocab import (
-    ActionPlanningModule,
-    ChatHistoryRecord,
-    VocabEvolutionRequest,
 )
 
 

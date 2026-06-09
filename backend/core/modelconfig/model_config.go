@@ -96,6 +96,110 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 	return config, nil
 }
 
+func LoadOCRConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {
+	row, err := loadSelectedProviderConfig(ctx, db, strings.TrimSpace(userID), "ocr", false)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		row, err = loadSelectedProviderConfig(ctx, db, "", "ocr", true)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if row == nil {
+		return nil, nil
+	}
+	ocrType := normalizeOCRType(row.ProviderName)
+	if ocrType == "" {
+		return nil, nil
+	}
+	config := map[string]any{
+		"ocr_type": ocrType,
+		"ocr_url":  row.BaseURL,
+	}
+	if authValue := normalizeOCRAuthValue(row.APIKey); authValue != nil {
+		config["ocr_auth"] = map[string]any{ocrType: authValue}
+	}
+	return config, nil
+}
+
+func normalizeOCRAuthValue(raw string) any {
+	keys := splitOCRAuthKeys(raw)
+	if len(keys) == 0 {
+		return nil
+	}
+	if len(keys) == 1 {
+		return keys[0]
+	}
+	return keys
+}
+
+func splitOCRAuthKeys(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, "\n")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+type selectedProviderConfig struct {
+	ProviderName string
+	BaseURL      string
+	APIKey       string
+}
+
+func loadSelectedProviderConfig(
+	ctx context.Context,
+	db *gorm.DB,
+	userID string,
+	category string,
+	sharedOnly bool,
+) (*selectedProviderConfig, error) {
+	var row selectedProviderConfig
+	q := db.WithContext(ctx).Table("user_selected_providers usp").
+		Select(
+			"p.name AS provider_name, "+
+				"g.base_url, "+
+				"g.api_key",
+		).
+		Joins("JOIN user_model_provider_groups g ON g.id = usp.user_model_provider_group_id AND g.deleted_at IS NULL").
+		Joins("JOIN user_model_providers p ON p.id = g.user_model_provider_id AND p.deleted_at IS NULL").
+		Where("usp.category = ?", category)
+	if sharedOnly {
+		q = q.Where("usp.share = ?", true)
+	} else {
+		q = q.Where("usp.user_id = ?", userID)
+	}
+	err := q.Order("usp.updated_at DESC").Limit(1).Scan(&row).Error
+	if err != nil {
+		return nil, err
+	}
+	if row.ProviderName == "" && row.BaseURL == "" {
+		return nil, nil
+	}
+	return &row, nil
+}
+
+func normalizeOCRType(providerName string) string {
+	switch strings.ToLower(strings.ReplaceAll(strings.TrimSpace(providerName), " ", "")) {
+	case "mineru":
+		return "mineru"
+	case "paddleocr", "paddle":
+		return "paddleocr"
+	default:
+		return ""
+	}
+}
+
 // LoadAdminEmbedConfig queries the first system-wide default embedding model
 // (is_default=true, model_type=embed_main) across all users, and returns it as
 // an embed_main config map. This is the admin-configured embedding model shared

@@ -365,7 +365,7 @@ func TestGenerateOverwritesExistingPendingDraft(t *testing.T) {
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/chat/memory/generate" {
+		if r.URL.Path != "/api/chat/rewrite" {
 			http.NotFound(w, r)
 			return
 		}
@@ -419,7 +419,7 @@ func TestGenerateOverwritesExistingPendingDraft(t *testing.T) {
 		t.Fatalf("create suggestion: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/core/memory:generate", strings.NewReader(`{"suggestion_ids":["suggestion-1"],"user_instruct":"生成新版"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/core/memory:generate", strings.NewReader(`{"user_instruct":"生成新版"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Id", "u1")
 	req.Header.Set("X-User-Name", "User 1")
@@ -455,8 +455,8 @@ func TestGenerateOverwritesExistingPendingDraft(t *testing.T) {
 		t.Fatalf("expected draft source version %d, got %d", row.Version, updated.DraftSourceVersion)
 	}
 	gotIDs := evolution.DraftSuggestionIDs(updated.Ext)
-	if len(gotIDs) != 1 || gotIDs[0] != "suggestion-1" {
-		t.Fatalf("expected draft suggestion ids to be replaced, got %#v", gotIDs)
+	if len(gotIDs) != 0 {
+		t.Fatalf("expected draft suggestion ids to be cleared, got %#v", gotIDs)
 	}
 }
 
@@ -467,7 +467,7 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 
 	var algoBody map[string]any
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/chat/memory/generate" {
+		if r.URL.Path != "/api/chat/rewrite" {
 			http.NotFound(w, r)
 			return
 		}
@@ -541,17 +541,19 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 	if algoBody["content"] != "draft memory" {
 		t.Fatalf("expected draft content sent to algorithm, got %#v", algoBody["content"])
 	}
-	suggestions, ok := algoBody["suggestions"].([]any)
-	if !ok || len(suggestions) != 0 {
-		t.Fatalf("expected empty suggestions array, got %#v", algoBody["suggestions"])
+	if algoBody["task_type"] != "memory" {
+		t.Fatalf("expected memory task_type, got %#v", algoBody["task_type"])
+	}
+	if _, ok := algoBody["suggestions"]; ok {
+		t.Fatalf("suggestions should not be sent to algorithm: %#v", algoBody["suggestions"])
 	}
 	var updated orm.SystemMemory
 	if err := db.Where("id = ?", row.ID).Take(&updated).Error; err != nil {
 		t.Fatalf("query updated memory: %v", err)
 	}
 	gotIDs := evolution.DraftSuggestionIDs(updated.Ext)
-	if len(gotIDs) != 1 || gotIDs[0] != "suggestion-1" {
-		t.Fatalf("expected draft suggestion ids to be preserved, got %#v", gotIDs)
+	if len(gotIDs) != 0 {
+		t.Fatalf("expected draft suggestion ids to be cleared, got %#v", gotIDs)
 	}
 
 	confirmReq := httptest.NewRequest(http.MethodPost, "/api/core/memory:confirm", nil)
@@ -568,8 +570,8 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 	if err := db.Where("id = ?", "suggestion-1").Take(&applied).Error; err != nil {
 		t.Fatalf("query applied suggestion: %v", err)
 	}
-	if applied.Status != evolution.SuggestionStatusApplied {
-		t.Fatalf("expected suggestion to be applied after confirm, got %q", applied.Status)
+	if applied.Status != evolution.SuggestionStatusAccepted {
+		t.Fatalf("expected suggestion status to stay accepted after confirm, got %q", applied.Status)
 	}
 }
 

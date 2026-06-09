@@ -114,7 +114,7 @@ export LAZYLLM_MINERU_API_KEY=你的mineru_key
 ### 第二步 — 启动服务
 
 ```bash
-make up-build LAZYMIND_OCR_SERVER_TYPE=mineru LAZYMIND_OCR_SERVICE_VARIANT=online
+make up-build
 ```
 
 启动后访问：
@@ -136,8 +136,8 @@ make up-build LAZYMIND_OCR_SERVER_TYPE=mineru LAZYMIND_OCR_SERVICE_VARIANT=onlin
 |------|------|
 | 标准启动 | `make up` |
 | 构建镜像并启动 | `make up-build` |
-| 启用 MinerU OCR | `make up LAZYMIND_OCR_SERVER_TYPE=mineru` |
-| 启用 PaddleOCR  | `make up LAZYMIND_OCR_SERVER_TYPE=paddleocr` |
+| 私有化部署 MinerU OCR | `make up LAZYMIND_DEPLOY_MINERU=1` |
+| 私有化部署 PaddleOCR  | `make up LAZYMIND_DEPLOY_PADDLEOCR=1` |
 | 外接 Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 | 开启存储 Dashboard | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
 

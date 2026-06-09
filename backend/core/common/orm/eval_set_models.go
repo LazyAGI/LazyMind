@@ -40,28 +40,29 @@ type EvalSetShard struct {
 func (EvalSetShard) TableName() string { return "eval_set_shards" }
 
 type EvalSetItem struct {
-	ShardID           string    `gorm:"column:shard_id;type:varchar(64);primaryKey;not null;index:idx_eval_set_items_set_created,priority:1;index:idx_eval_set_items_set_source,priority:1;index:idx_eval_set_items_set_type,priority:1;index:idx_eval_set_items_set_updated,priority:1"`
-	ID                string    `gorm:"column:id;type:varchar(64);primaryKey"`
-	EvalSetID         string    `gorm:"column:eval_set_id;type:varchar(64);not null;index:idx_eval_set_items_set_created,priority:2;index:idx_eval_set_items_set_source,priority:2;index:idx_eval_set_items_set_type,priority:2;index:idx_eval_set_items_set_updated,priority:2"`
-	CaseID            string    `gorm:"column:case_id;type:varchar(255);not null;default:''"`
-	Question          string    `gorm:"column:question;type:text;not null"`
-	GroundTruth       string    `gorm:"column:ground_truth;type:text;not null"`
-	QuestionType      string    `gorm:"column:question_type;type:varchar(128);not null;index:idx_eval_set_items_set_type,priority:3"`
-	GenerateReason    string    `gorm:"column:generate_reason;type:text;not null;default:''"`
-	KeyPoints         string    `gorm:"column:key_points;type:text;not null;default:''"`
-	ReferenceChunkIDs string    `gorm:"column:reference_chunk_ids;type:text;not null;default:''"`
-	ReferenceContext  string    `gorm:"column:reference_context;type:text;not null;default:''"`
-	ReferenceDoc      string    `gorm:"column:reference_doc;type:text;not null;default:''"`
-	ReferenceDocIDs   string    `gorm:"column:reference_doc_ids;type:text;not null;default:''"`
-	IsDeleted         bool      `gorm:"column:is_deleted;not null;default:false;comment:template field, not logical delete"`
-	EstimatedBytes    int64     `gorm:"column:estimated_bytes;not null;default:0"`
-	Source            string    `gorm:"column:source;type:varchar(32);not null;index:idx_eval_set_items_set_source,priority:3"`
-	SourceSessionID   string    `gorm:"column:source_session_id;type:varchar(128);not null;default:''"`
-	SourceHistoryID   string    `gorm:"column:source_history_id;type:varchar(128);not null;default:''"`
-	CreateUserID      string    `gorm:"column:create_user_id;type:varchar(255);not null"`
-	CreateUserName    string    `gorm:"column:create_user_name;type:varchar(255);not null;default:''"`
-	CreatedAt         time.Time `gorm:"column:created_at;not null;index:idx_eval_set_items_set_created,priority:4"`
-	UpdatedAt         time.Time `gorm:"column:updated_at;not null;index:idx_eval_set_items_set_updated,priority:3"`
+	ShardID                   string    `gorm:"column:shard_id;type:varchar(64);primaryKey;not null;index:idx_eval_set_items_set_created,priority:1;index:idx_eval_set_items_set_source,priority:1;index:idx_eval_set_items_set_type,priority:1;index:idx_eval_set_items_set_updated,priority:1"`
+	ID                        string    `gorm:"column:id;type:varchar(64);primaryKey"`
+	EvalSetID                 string    `gorm:"column:eval_set_id;type:varchar(64);not null;index:idx_eval_set_items_set_created,priority:2;index:idx_eval_set_items_set_source,priority:2;index:idx_eval_set_items_set_type,priority:2;index:idx_eval_set_items_set_updated,priority:2"`
+	CaseID                    string    `gorm:"column:case_id;type:varchar(255);not null;default:''"`
+	Question                  string    `gorm:"column:question;type:text;not null"`
+	GroundTruth               string    `gorm:"column:ground_truth;type:text;not null"`
+	QuestionType              string    `gorm:"column:question_type;type:varchar(128);not null;index:idx_eval_set_items_set_type,priority:3"`
+	GenerateReason            string    `gorm:"column:generate_reason;type:text;not null;default:''"`
+	KeyPoints                 string    `gorm:"column:key_points;type:text;not null;default:''"`
+	ReferenceChunkIDs         string    `gorm:"column:reference_chunk_ids;type:text;not null;default:''"`
+	ReferenceContext          string    `gorm:"column:reference_context;type:text;not null;default:''"`
+	AlgorithmReferenceContext string    `gorm:"column:algorithm_reference_context;type:text;not null;default:''"`
+	ReferenceDoc              string    `gorm:"column:reference_doc;type:text;not null;default:''"`
+	ReferenceDocIDs           string    `gorm:"column:reference_doc_ids;type:text;not null;default:''"`
+	IsDeleted                 bool      `gorm:"column:is_deleted;not null;default:false;comment:template field, not logical delete"`
+	EstimatedBytes            int64     `gorm:"column:estimated_bytes;not null;default:0"`
+	Source                    string    `gorm:"column:source;type:varchar(32);not null;index:idx_eval_set_items_set_source,priority:3"`
+	SourceSessionID           string    `gorm:"column:source_session_id;type:varchar(128);not null;default:''"`
+	SourceHistoryID           string    `gorm:"column:source_history_id;type:varchar(128);not null;default:''"`
+	CreateUserID              string    `gorm:"column:create_user_id;type:varchar(255);not null"`
+	CreateUserName            string    `gorm:"column:create_user_name;type:varchar(255);not null;default:''"`
+	CreatedAt                 time.Time `gorm:"column:created_at;not null;index:idx_eval_set_items_set_created,priority:4"`
+	UpdatedAt                 time.Time `gorm:"column:updated_at;not null;index:idx_eval_set_items_set_updated,priority:3"`
 }
 
 func (EvalSetItem) TableName() string { return "eval_set_items" }

@@ -2,6 +2,7 @@ package evalset
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -74,8 +75,16 @@ func (s *Service) ListItems(ctx context.Context, evalSet *orm.EvalSet, filter Li
 	if err != nil {
 		return nil, err
 	}
+	referenceDocIDs, err := s.repo.KnowledgeBaseReferenceDocIDs(
+		ctx,
+		parseDatasetIDsJSON(evalSet.DatasetIDs),
+		collectReferenceDocIDs(items),
+	)
+	if err != nil {
+		return nil, err
+	}
 	return &ListEvalSetItemsResponse{
-		Items:    itemResponses(items),
+		Items:    itemResponses(items, referenceDocIDs),
 		Total:    total,
 		Page:     filter.Page,
 		PageSize: filter.PageSize,
@@ -94,7 +103,7 @@ func (s *Service) CreateItem(ctx context.Context, evalSetID string, req CreateEv
 		}
 		return nil, err
 	}
-	return itemResponse(item), nil
+	return s.itemResponseForEvalSet(ctx, evalSetID, item)
 }
 
 func (s *Service) UpdateItem(ctx context.Context, evalSetID, itemID string, req UpdateEvalSetItemRequest) (*EvalSetItemResponse, error) {
@@ -115,7 +124,7 @@ func (s *Service) UpdateItem(ctx context.Context, evalSetID, itemID string, req 
 		}
 		return nil, err
 	}
-	return itemResponse(item), nil
+	return s.itemResponseForEvalSet(ctx, evalSetID, item)
 }
 
 func (s *Service) DeleteItem(ctx context.Context, evalSetID, itemID string) error {
@@ -181,6 +190,47 @@ func (r *Repository) ListItems(ctx context.Context, evalSetID, shardID string, f
 	return rows, total, err
 }
 
+func (r *Repository) KnowledgeBaseReferenceDocIDs(ctx context.Context, datasetIDs, documentIDs []string) (map[string]struct{}, error) {
+	datasetIDs = normalizeDatasetIDs(datasetIDs)
+	documentIDs = normalizeItemIDs(documentIDs)
+	out := make(map[string]struct{}, len(documentIDs))
+	if len(datasetIDs) == 0 || len(documentIDs) == 0 {
+		return out, nil
+	}
+
+	var rows []orm.Document
+	if err := r.db.WithContext(ctx).
+		Select("id").
+		Where("id IN ? AND dataset_id IN ?", documentIDs, datasetIDs).
+		Where("deleted_at IS NULL").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out[row.ID] = struct{}{}
+	}
+	return out, nil
+}
+
+func (s *Service) itemResponseForEvalSet(ctx context.Context, evalSetID string, item *orm.EvalSetItem) (*EvalSetItemResponse, error) {
+	evalSet, err := s.repo.GetActive(ctx, evalSetID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errEvalSetNotFound
+		}
+		return nil, err
+	}
+	referenceDocIDs, err := s.repo.KnowledgeBaseReferenceDocIDs(
+		ctx,
+		parseDatasetIDsJSON(evalSet.DatasetIDs),
+		splitListIDs(item.ReferenceDocIDs),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return itemResponse(item, referenceDocIDs), nil
+}
+
 func (r *Repository) CreateItem(ctx context.Context, evalSetID string, req CreateEvalSetItemRequest, userID, userName string) (*orm.EvalSetItem, error) {
 	var created orm.EvalSetItem
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -191,24 +241,25 @@ func (r *Repository) CreateItem(ctx context.Context, evalSetID string, req Creat
 
 		now := time.Now().UTC()
 		created = orm.EvalSetItem{
-			ShardID:           evalSet.ShardID,
-			ID:                newEvalSetItemID(),
-			EvalSetID:         evalSet.ID,
-			CaseID:            req.CaseID,
-			Question:          req.Question,
-			GroundTruth:       req.GroundTruth,
-			QuestionType:      req.QuestionType,
-			GenerateReason:    req.GenerateReason,
-			KeyPoints:         req.KeyPoints,
-			ReferenceChunkIDs: req.ReferenceChunkIDs,
-			ReferenceContext:  req.ReferenceContext,
-			ReferenceDoc:      req.ReferenceDoc,
-			ReferenceDocIDs:   req.ReferenceDocIDs,
-			Source:            SourceManual,
-			CreateUserID:      userID,
-			CreateUserName:    userName,
-			CreatedAt:         now,
-			UpdatedAt:         now,
+			ShardID:                   evalSet.ShardID,
+			ID:                        newEvalSetItemID(),
+			EvalSetID:                 evalSet.ID,
+			CaseID:                    req.CaseID,
+			Question:                  req.Question,
+			GroundTruth:               req.GroundTruth,
+			QuestionType:              req.QuestionType,
+			GenerateReason:            req.GenerateReason,
+			KeyPoints:                 req.KeyPoints,
+			ReferenceChunkIDs:         req.ReferenceChunkIDs,
+			ReferenceContext:          req.ReferenceContext,
+			AlgorithmReferenceContext: algorithmReferenceContextFromFrontend(req.ReferenceContext),
+			ReferenceDoc:              req.ReferenceDoc,
+			ReferenceDocIDs:           req.ReferenceDocIDs,
+			Source:                    SourceManual,
+			CreateUserID:              userID,
+			CreateUserName:            userName,
+			CreatedAt:                 now,
+			UpdatedAt:                 now,
 		}
 		if req.IsDeleted != nil {
 			created.IsDeleted = *req.IsDeleted
@@ -257,19 +308,20 @@ func (r *Repository) UpdateItem(ctx context.Context, evalSetID, itemID string, r
 		updated.UpdatedAt = now
 		newBytes := estimateEvalSetItemBytes(&updated)
 		values := map[string]any{
-			"case_id":             updated.CaseID,
-			"question":            updated.Question,
-			"ground_truth":        updated.GroundTruth,
-			"question_type":       updated.QuestionType,
-			"generate_reason":     updated.GenerateReason,
-			"key_points":          updated.KeyPoints,
-			"reference_chunk_ids": updated.ReferenceChunkIDs,
-			"reference_context":   updated.ReferenceContext,
-			"reference_doc":       updated.ReferenceDoc,
-			"reference_doc_ids":   updated.ReferenceDocIDs,
-			"is_deleted":          updated.IsDeleted,
-			"estimated_bytes":     newBytes,
-			"updated_at":          now,
+			"case_id":                     updated.CaseID,
+			"question":                    updated.Question,
+			"ground_truth":                updated.GroundTruth,
+			"question_type":               updated.QuestionType,
+			"generate_reason":             updated.GenerateReason,
+			"key_points":                  updated.KeyPoints,
+			"reference_chunk_ids":         updated.ReferenceChunkIDs,
+			"reference_context":           updated.ReferenceContext,
+			"algorithm_reference_context": updated.AlgorithmReferenceContext,
+			"reference_doc":               updated.ReferenceDoc,
+			"reference_doc_ids":           updated.ReferenceDocIDs,
+			"is_deleted":                  updated.IsDeleted,
+			"estimated_bytes":             newBytes,
+			"updated_at":                  now,
 		}
 		if err := tx.Model(&orm.EvalSetItem{}).
 			Where("shard_id = ? AND eval_set_id = ? AND id = ?", evalSet.ShardID, evalSet.ID, itemID).
@@ -458,6 +510,7 @@ func applyUpdateItemRequest(item *orm.EvalSetItem, req UpdateEvalSetItemRequest)
 	}
 	if req.ReferenceContext != nil {
 		item.ReferenceContext = strings.TrimSpace(*req.ReferenceContext)
+		item.AlgorithmReferenceContext = algorithmReferenceContextFromFrontend(item.ReferenceContext)
 	}
 	if req.ReferenceDoc != nil {
 		item.ReferenceDoc = strings.TrimSpace(*req.ReferenceDoc)
@@ -517,6 +570,7 @@ func estimateEvalSetItemBytes(item *orm.EvalSetItem) int64 {
 		item.KeyPoints,
 		item.ReferenceChunkIDs,
 		item.ReferenceContext,
+		item.AlgorithmReferenceContext,
 		item.ReferenceDoc,
 		item.ReferenceDocIDs,
 		item.Source,
@@ -531,38 +585,97 @@ func estimateEvalSetItemBytes(item *orm.EvalSetItem) int64 {
 	return total
 }
 
-func itemResponses(items []orm.EvalSetItem) []EvalSetItemResponse {
+func algorithmReferenceContextFromFrontend(referenceContext string) string {
+	normalized := normalizeReferenceContextText(referenceContext)
+	var payload struct {
+		Type    string `json:"type"`
+		Version int    `json:"version"`
+		Parts   []struct {
+			Type    string `json:"type"`
+			Content string `json:"content"`
+		} `json:"parts"`
+	}
+	if err := json.Unmarshal([]byte(normalized), &payload); err != nil || payload.Type != "reference_context" {
+		return normalized
+	}
+	parts := make([]string, 0, len(payload.Parts))
+	for _, part := range payload.Parts {
+		if part.Type != "chunk" && part.Type != "text" {
+			continue
+		}
+		content := normalizeReferenceContextText(part.Content)
+		if content != "" {
+			parts = append(parts, content)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func normalizeReferenceContextText(value string) string {
+	return strings.TrimSpace(strings.ReplaceAll(value, "\r\n", "\n"))
+}
+
+func itemResponses(items []orm.EvalSetItem, knowledgeBaseReferenceDocIDs map[string]struct{}) []EvalSetItemResponse {
 	out := make([]EvalSetItemResponse, 0, len(items))
 	for i := range items {
-		out = append(out, *itemResponse(&items[i]))
+		out = append(out, *itemResponse(&items[i], knowledgeBaseReferenceDocIDs))
 	}
 	return out
 }
 
-func itemResponse(item *orm.EvalSetItem) *EvalSetItemResponse {
+func itemResponse(item *orm.EvalSetItem, knowledgeBaseReferenceDocIDs map[string]struct{}) *EvalSetItemResponse {
 	return &EvalSetItemResponse{
-		ID:                item.ID,
-		EvalSetID:         item.EvalSetID,
-		ShardID:           item.ShardID,
-		CaseID:            item.CaseID,
-		Question:          item.Question,
-		GroundTruth:       item.GroundTruth,
-		QuestionType:      item.QuestionType,
-		GenerateReason:    item.GenerateReason,
-		KeyPoints:         item.KeyPoints,
-		ReferenceChunkIDs: item.ReferenceChunkIDs,
-		ReferenceContext:  item.ReferenceContext,
-		ReferenceDoc:      item.ReferenceDoc,
-		ReferenceDocIDs:   item.ReferenceDocIDs,
-		IsDeleted:         item.IsDeleted,
-		Source:            item.Source,
-		SourceSessionID:   item.SourceSessionID,
-		SourceHistoryID:   item.SourceHistoryID,
-		CreatedBy:         item.CreateUserID,
-		CreatedByName:     item.CreateUserName,
-		CreatedAt:         item.CreatedAt,
-		UpdatedAt:         item.UpdatedAt,
+		ID:                            item.ID,
+		EvalSetID:                     item.EvalSetID,
+		ShardID:                       item.ShardID,
+		CaseID:                        item.CaseID,
+		Question:                      item.Question,
+		GroundTruth:                   item.GroundTruth,
+		QuestionType:                  item.QuestionType,
+		GenerateReason:                item.GenerateReason,
+		KeyPoints:                     item.KeyPoints,
+		ReferenceChunkIDs:             item.ReferenceChunkIDs,
+		ReferenceContext:              item.ReferenceContext,
+		ReferenceDoc:                  item.ReferenceDoc,
+		ReferenceDocIDs:               item.ReferenceDocIDs,
+		ReferenceDocFromKnowledgeBase: hasReferenceDocInSet(item.ReferenceDocIDs, knowledgeBaseReferenceDocIDs),
+		ReferenceChunkSelected:        len(splitListIDs(item.ReferenceChunkIDs)) > 0,
+		IsDeleted:                     item.IsDeleted,
+		Source:                        item.Source,
+		SourceSessionID:               item.SourceSessionID,
+		SourceHistoryID:               item.SourceHistoryID,
+		CreatedBy:                     item.CreateUserID,
+		CreatedByName:                 item.CreateUserName,
+		CreatedAt:                     item.CreatedAt,
+		UpdatedAt:                     item.UpdatedAt,
 	}
+}
+
+func collectReferenceDocIDs(items []orm.EvalSetItem) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, splitListIDs(item.ReferenceDocIDs)...)
+	}
+	return normalizeItemIDs(out)
+}
+
+func splitListIDs(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	return normalizeItemIDs(strings.Split(raw, ","))
+}
+
+func hasReferenceDocInSet(raw string, ids map[string]struct{}) bool {
+	if len(ids) == 0 {
+		return false
+	}
+	for _, id := range splitListIDs(raw) {
+		if _, ok := ids[id]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func isValidItemSource(source string) bool {

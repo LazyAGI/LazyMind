@@ -15,6 +15,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	appLog "lazymind/core/log"
+	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 )
 
@@ -24,8 +25,7 @@ type suggestionRequest struct {
 }
 
 type generateRequest struct {
-	SuggestionIDs []string `json:"suggestion_ids"`
-	UserInstruct  string   `json:"user_instruct"`
+	UserInstruct string `json:"user_instruct"`
 }
 
 type upsertRequest struct {
@@ -448,10 +448,9 @@ func Generate(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	req.SuggestionIDs = compactIDs(req.SuggestionIDs)
 	req.UserInstruct = strings.TrimSpace(req.UserInstruct)
-	if len(req.SuggestionIDs) == 0 && req.UserInstruct == "" {
-		common.ReplyErr(w, "suggestion_ids or user_instruct required", http.StatusBadRequest)
+	if req.UserInstruct == "" {
+		common.ReplyErr(w, "user_instruct required", http.StatusBadRequest)
 		return
 	}
 
@@ -460,31 +459,22 @@ func Generate(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query memory failed", http.StatusInternalServerError)
 		return
 	}
-	useDraft := len(req.SuggestionIDs) == 0 && req.UserInstruct != ""
-	content, err := memoryGenerateBaseContent(*row, useDraft)
+	content, err := memoryGenerateBaseContent(*row)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
-	var suggestions []orm.ResourceSuggestion
-	if len(req.SuggestionIDs) > 0 {
-		suggestions, err = evolution.LoadApprovedSuggestions(r.Context(), db, userID, evolution.ResourceTypeMemory, evolution.SystemResourceKey(evolution.ResourceTypeMemory), req.SuggestionIDs)
-		if err != nil {
-			common.ReplyErr(w, "query suggestions failed", http.StatusInternalServerError)
-			return
-		}
-		if len(suggestions) == 0 {
-			common.ReplyErr(w, "no accepted suggestions found", http.StatusBadRequest)
-			return
-		}
-	}
-
-	algoReq := algo.MemoryGenerateRequest{
+	algoReq := algo.ManagedGenerateRequest{
 		Content:      content,
-		Suggestions:  toAlgoSuggestions(suggestions),
 		UserInstruct: req.UserInstruct,
 	}
+	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), db, userID)
+	if err != nil {
+		common.ReplyErr(w, "load llm config failed", http.StatusInternalServerError)
+		return
+	}
+	algoReq.LLMConfig = llmConfig
 	appLog.Logger.Info().
 		Str("route", "/memory:generate").
 		Str("memory_id", row.ID).
@@ -498,11 +488,6 @@ func Generate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
-	ids := suggestionIDs(suggestions)
-	if useDraft && len(ids) == 0 {
-		ids = evolution.DraftSuggestionIDs(row.Ext)
-	}
-	ext := evolution.WithDraftSuggestionIDs(row.Ext, ids)
 	update := map[string]any{
 		"draft_content":        generated,
 		"draft_source_version": row.Version,
@@ -511,7 +496,7 @@ func Generate(w http.ResponseWriter, r *http.Request) {
 		"updated_by":           userID,
 		"updated_by_name":      userName,
 		"updated_at":           now,
-		"ext":                  ext,
+		"ext":                  evolution.WithDraftSuggestionIDs(row.Ext, nil),
 	}
 	if err := db.WithContext(r.Context()).Model(&orm.SystemMemory{}).Where("id = ?", row.ID).Updates(update).Error; err != nil {
 		common.ReplyErr(w, "update memory draft failed", http.StatusInternalServerError)
@@ -521,18 +506,14 @@ func Generate(w http.ResponseWriter, r *http.Request) {
 		"draft_status":         "pending_confirm",
 		"draft_source_version": row.Version,
 		"draft_content":        generated,
-		"suggestion_ids":       ids,
 	})
 }
 
-func memoryGenerateBaseContent(row orm.SystemMemory, useDraft bool) (string, error) {
-	if !useDraft {
-		return row.Content, nil
+func memoryGenerateBaseContent(row orm.SystemMemory) (string, error) {
+	if strings.TrimSpace(row.DraftStatus) == "pending_confirm" {
+		return row.DraftContent, nil
 	}
-	if strings.TrimSpace(row.DraftStatus) != "pending_confirm" {
-		return "", errors.New("memory draft not found")
-	}
-	return row.DraftContent, nil
+	return row.Content, nil
 }
 
 func Confirm(w http.ResponseWriter, r *http.Request) {
@@ -562,7 +543,6 @@ func Confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ids := evolution.DraftSuggestionIDs(row.Ext)
 	now := time.Now()
 	newContent := row.DraftContent
 	newHash := evolution.HashContent(newContent)
@@ -582,10 +562,6 @@ func Confirm(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := db.WithContext(r.Context()).Model(&orm.SystemMemory{}).Where("id = ? AND version = ?", row.ID, row.Version).Updates(update).Error; err != nil {
 		common.ReplyErr(w, "confirm memory draft failed", http.StatusInternalServerError)
-		return
-	}
-	if err := evolution.UpdateSuggestionStatus(r.Context(), db, ids, evolution.SuggestionStatusApplied); err != nil {
-		common.ReplyErr(w, "update suggestion status failed", http.StatusInternalServerError)
 		return
 	}
 	common.ReplyOK(w, map[string]any{
@@ -642,43 +618,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func compactIDs(ids []string) []string {
-	seen := make(map[string]struct{}, len(ids))
-	out := make([]string, 0, len(ids))
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		out = append(out, id)
-	}
-	return out
-}
-
-func suggestionIDs(rows []orm.ResourceSuggestion) []string {
-	out := make([]string, 0, len(rows))
-	for _, row := range rows {
-		if strings.TrimSpace(row.ID) != "" {
-			out = append(out, strings.TrimSpace(row.ID))
-		}
-	}
-	return out
-}
-
-func toAlgoSuggestions(rows []orm.ResourceSuggestion) []algo.Suggestion {
-	out := make([]algo.Suggestion, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, algo.Suggestion{
-			Title:   row.Title,
-			Content: row.Content,
-			Reason:  row.Reason,
-		})
-	}
-	return out
 }

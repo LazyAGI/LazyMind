@@ -105,10 +105,6 @@ config.add('review_debug', bool, False, 'REVIEW_DEBUG', description='Enable revi
 # Parsing
 # ---------------------------------------------------------------------------
 config.add('milvus_uri', str, None, 'MILVUS_URI', description='Milvus vector store URI (required).')
-config.add('ocr_server_type', str, 'none', 'OCR_SERVER_TYPE', description='OCR server type (none/mineru/paddleocr).')
-config.add('ocr_server_url', str, 'http://localhost:8000', 'OCR_SERVER_URL', description='OCR server URL.')
-config.add('mineru_upload_mode', str, None, 'MINERU_UPLOAD_MODE',
-           description='MinerU upload mode override (auto-detected if unset).')
 config.add('mineru_backend', str, 'pipeline', 'MINERU_BACKEND', description='MinerU processing backend.')
 config.add('mineru_server_port', int, 8000, 'MINERU_SERVER_PORT', description='MinerU server port.')
 config.add('ocr_cache_dir', str, os.path.join(config['shared_upload_dir'], '.image_cache'), 'OCR_CACHE_DIR',
@@ -126,10 +122,6 @@ config.add('reset_algo_on_startup', bool, False, 'RESET_ALGO_ON_STARTUP',
            description='Drop all vector/segment data and algorithm registration on startup, then rebuild from scratch.')
 config.add('rag_image_path_prefix', str, '/mnt/lustre/share_data/mineru/images/', 'RAG_IMAGE_PATH_PREFIX',
            description='Image path prefix for RAG documents.')
-config.add('ocr_patch_applied', bool, False, 'OCR_PATCH_APPLIED',
-           description='Whether the OCR service patch has been applied.')
-config.add('ocr_service_variant', str, 'online', 'OCR_SERVICE_VARIANT',
-           description='OCR service variant (online/offline).')
 
 # ---------------------------------------------------------------------------
 # Processor

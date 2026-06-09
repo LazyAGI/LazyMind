@@ -197,8 +197,8 @@ func TestBuildListItemsAllowsVerifiedCustomBaseURLWithoutAPIKey(t *testing.T) {
 }
 
 func TestBuildListItemsAddsMinerULocalPresetWhenConfigured(t *testing.T) {
-	t.Setenv("LAZYMIND_OCR_SERVER_TYPE", "mineru")
-	t.Setenv("LAZYMIND_OCR_SERVER_URL", "http://mineru.local:8000/api/v1/pdf_parse")
+	t.Setenv("LAZYMIND_DEPLOY_MINERU", "1")
+	_ = os.Unsetenv("LAZYMIND_OCR_SERVER_TYPE")
 
 	items := buildListItems(t.Context(), nil, []orm.UserModelProvider{
 		{
@@ -223,8 +223,8 @@ func TestBuildListItemsAddsMinerULocalPresetWhenConfigured(t *testing.T) {
 }
 
 func TestBuildListItemsOmitsMinerULocalPresetWithoutConfiguredURL(t *testing.T) {
-	t.Setenv("LAZYMIND_OCR_SERVER_TYPE", "mineru")
-	_ = os.Unsetenv("LAZYMIND_OCR_SERVER_URL")
+	_ = os.Unsetenv("LAZYMIND_DEPLOY_MINERU")
+	_ = os.Unsetenv("LAZYMIND_OCR_SERVER_TYPE")
 
 	items := buildListItems(t.Context(), nil, []orm.UserModelProvider{
 		{

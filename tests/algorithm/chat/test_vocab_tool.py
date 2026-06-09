@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import importlib
 
 
 _ALGO = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'algorithm')
@@ -11,9 +12,10 @@ if _ALGO not in sys.path:
 if _LAZYLLM_ROOT not in sys.path:
     sys.path.insert(0, _LAZYLLM_ROOT)
 
-from lazymind.chat.engine.tools import vocab as vocab_tool  # noqa: E402
 from lazymind.chat.engine.tools.infra import resolve_vocab_user_id  # noqa: E402
-from lazymind.review.service import db as vocab_db  # noqa: E402
+from lazymind.chat.engine.tools.infra import vocab_db  # noqa: E402
+
+vocab_tool = importlib.import_module('lazymind.chat.engine.tools.vocab_learn')
 
 
 def test_fetch_chat_histories_for_timestamped_session(monkeypatch):

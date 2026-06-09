@@ -3,27 +3,6 @@ import pytest
 import lazymind.parsing.service.build_document as build_document
 
 
-def test_parse_bool_env_accepts_common_values(monkeypatch):
-    # _parse_bool_config takes a value string directly (not an env var name)
-    assert build_document._parse_bool_config(None) is None
-    assert build_document._parse_bool_config('  ') is None
-    for value in ['1', 'true', 'yes', 'on']:
-        assert build_document._parse_bool_config(value) is True
-    for value in ['0', 'false', 'no', 'off']:
-        assert build_document._parse_bool_config(value) is False
-
-
-def test_parse_bool_env_rejects_invalid_values(monkeypatch):
-    with pytest.raises(ValueError, match='mineru_upload_mode must be a boolean string'):
-        build_document._parse_bool_config('maybe')
-
-
-def test_default_mineru_upload_mode_only_disables_container_hostname(monkeypatch):
-    assert build_document._default_mineru_upload_mode('http://mineru:8000') is False
-    assert build_document._default_mineru_upload_mode('http://localhost:8000') is True
-    assert build_document._default_mineru_upload_mode('https://ocr.example.test') is True
-
-
 def test_get_algo_server_port_prefers_algo_port(monkeypatch):
     # _cfg is read at call time, so we patch _impl directly
     monkeypatch.setitem(build_document._cfg._impl, 'algo_server_port', 0)
@@ -59,65 +38,23 @@ def test_build_store_config_raises_for_missing_milvus_uri(monkeypatch):
         build_document._build_store_config({})
 
 
-def test_build_pdf_reader_selects_plain_pdf_reader(monkeypatch):
-    class FakePDFReader:
-        pass
-
-    monkeypatch.setattr(build_document, 'PDFReader', FakePDFReader)
-    monkeypatch.setitem(build_document._cfg._impl, 'ocr_server_type', 'none')
-
-    assert isinstance(build_document._build_pdf_reader(), FakePDFReader)
-
-
-def test_build_pdf_reader_selects_mineru_with_upload_mode(monkeypatch):
+def test_build_pdf_reader_uses_dynamic_reader_without_static_ocr_route(monkeypatch):
     seen = {}
 
-    class FakeMineruPDFReader:
+    class FakeDynamicPDFReader:
         def __init__(self, **kwargs):
             seen.update(kwargs)
 
-    monkeypatch.setattr(build_document, 'MineruPDFReader', FakeMineruPDFReader)
-    monkeypatch.setitem(build_document._cfg._impl, 'ocr_server_type', 'mineru')
-    monkeypatch.setitem(build_document._cfg._impl, 'ocr_server_url', 'http://mineru:8000/')
-    monkeypatch.setitem(build_document._cfg._impl, 'mineru_upload_mode', '')
-    monkeypatch.setitem(build_document._cfg._impl, 'mineru_backend', 'pipeline')
+    monkeypatch.setattr(build_document, 'DynamicPDFReader', FakeDynamicPDFReader)
+    monkeypatch.setitem(build_document._cfg._impl, 'ocr_cache_dir', '/app/uploads/.image_cache')
 
     reader = build_document._build_pdf_reader()
 
-    assert isinstance(reader, FakeMineruPDFReader)
-    assert seen['url'] == 'http://mineru:8000'
-    assert seen['backend'] == 'pipeline'
-    assert seen['upload_mode'] is False
+    assert isinstance(reader, FakeDynamicPDFReader)
+    assert 'ocr_type' not in seen
+    assert 'ocr_url' not in seen
     assert seen['timeout'] == 3600
-    assert seen['patch_applied'] == build_document._cfg['ocr_patch_applied']
-    assert seen['service_variant'] == build_document._cfg['ocr_service_variant']
-    assert seen['image_cache_dir'] == build_document._cfg['image_cache_dir']
-
-
-def test_build_pdf_reader_selects_paddleocr(monkeypatch):
-    seen = {}
-
-    class FakePaddleOCRPDFReader:
-        def __init__(self, **kwargs):
-            seen.update(kwargs)
-
-    monkeypatch.setattr(build_document, 'PaddleOCRPDFReader', FakePaddleOCRPDFReader)
-    monkeypatch.setitem(build_document._cfg._impl, 'ocr_server_type', 'paddleocr')
-    monkeypatch.setitem(build_document._cfg._impl, 'ocr_server_url', 'http://paddle.test/')
-
-    assert isinstance(build_document._build_pdf_reader(), FakePaddleOCRPDFReader)
-    assert seen == {
-        'url': 'http://paddle.test',
-        'service_variant': build_document._cfg['ocr_service_variant'],
-        'images_dir': build_document._cfg['image_cache_dir'],
-    }
-
-
-def test_build_pdf_reader_rejects_unknown_ocr_type(monkeypatch):
-    monkeypatch.setitem(build_document._cfg._impl, 'ocr_server_type', 'unknown')
-
-    with pytest.raises(ValueError, match='Unsupported OCR server type'):
-        build_document._build_pdf_reader()
+    assert seen['image_cache_dir'] == '/app/uploads/.image_cache'
 
 
 def test_build_document_wires_readers_groups_and_embeddings(monkeypatch):
@@ -171,55 +108,3 @@ def test_build_document_wires_readers_groups_and_embeddings(monkeypatch):
         ('block', [build_document.EMBED_MAIN]),
         ('line', [build_document.EMBED_MAIN]),
     ]
-
-
-# ---------------------------------------------------------------------------
-# _build_pdf_reader — explicit LAZYMIND_MINERU_UPLOAD_MODE override
-# ---------------------------------------------------------------------------
-
-def test_build_pdf_reader_mineru_upload_mode_explicit_true(monkeypatch):
-    seen = {}
-
-    class FakeMineruPDFReader:
-        def __init__(self, **kwargs):
-            seen.update(kwargs)
-
-    monkeypatch.setattr(build_document, 'MineruPDFReader', FakeMineruPDFReader)
-    monkeypatch.setitem(build_document._cfg._impl, 'ocr_server_type', 'mineru')
-    monkeypatch.setitem(build_document._cfg._impl, 'ocr_server_url', 'http://mineru:8000/')
-    monkeypatch.setitem(build_document._cfg._impl, 'mineru_upload_mode', 'true')
-    monkeypatch.setitem(build_document._cfg._impl, 'mineru_backend', 'pipeline')
-
-    build_document._build_pdf_reader()
-
-    assert seen['upload_mode'] is True
-
-
-def test_build_pdf_reader_mineru_upload_mode_explicit_false(monkeypatch):
-    seen = {}
-
-    class FakeMineruPDFReader:
-        def __init__(self, **kwargs):
-            seen.update(kwargs)
-
-    monkeypatch.setattr(build_document, 'MineruPDFReader', FakeMineruPDFReader)
-    monkeypatch.setitem(build_document._cfg._impl, 'ocr_server_type', 'mineru')
-    monkeypatch.setitem(build_document._cfg._impl, 'ocr_server_url', 'http://localhost:8000/')
-    monkeypatch.setitem(build_document._cfg._impl, 'mineru_upload_mode', 'false')
-    monkeypatch.setitem(build_document._cfg._impl, 'mineru_backend', 'pipeline')
-
-    build_document._build_pdf_reader()
-
-    # explicit 'false' overrides the default (which would be True for localhost)
-    assert seen['upload_mode'] is False
-
-
-def test_build_pdf_reader_mineru_upload_mode_invalid_raises(monkeypatch):
-    import pytest
-
-    monkeypatch.setitem(build_document._cfg._impl, 'ocr_server_type', 'mineru')
-    monkeypatch.setitem(build_document._cfg._impl, 'ocr_server_url', 'http://mineru:8000/')
-    monkeypatch.setitem(build_document._cfg._impl, 'mineru_upload_mode', 'maybe')
-
-    with pytest.raises(ValueError, match='mineru_upload_mode must be a boolean string'):
-        build_document._build_pdf_reader()

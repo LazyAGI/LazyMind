@@ -46,7 +46,7 @@ type LazyChatRequest struct {
 	Reasoning          bool            `json:"reasoning"`
 	Databases          []any           `json:"databases,omitempty"`
 	EnableThinking     bool            `json:"enable_thinking,omitempty"`
-	AvailableTools     []string        `json:"available_tools,omitempty"`
+	DisabledTools      []string        `json:"disabled_tools,omitempty"`
 	AvailableSkills    []string        `json:"available_skills,omitempty"`
 	Memory             string          `json:"memory,omitempty"`
 	UserPreference     string          `json:"user_preference,omitempty"`
@@ -249,7 +249,7 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	if enableThinking, ok := body["enable_thinking"].(bool); ok {
 		req.EnableThinking = enableThinking
 	}
-	req.AvailableTools = stringSlice(body["available_tools"])
+	req.DisabledTools = stringSlice(body["disabled_tools"])
 	req.AvailableSkills = stringSlice(body["available_skills"])
 	if memory, ok := body["memory"].(string); ok {
 		req.Memory = memory

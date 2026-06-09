@@ -10,6 +10,24 @@ import lazyllm
 from lazymind.chat.service import chat_service
 
 
+DISABLED_TOOLS_EXCEPT_CALCULATOR = [
+    'kb',
+    'temp_kb',
+    'wikipedia',
+    'arxiv',
+    'sciverse',
+    'google',
+    'bing',
+    'bocha',
+    'url_fetch',
+    'multimodal',
+    'vocab_learn',
+    'memory_editor',
+    'skill_editor',
+    'feishu',
+]
+
+
 class _FakeAgent:
     """Fake agent that snapshots the per-request config visible at call time."""
 
@@ -61,7 +79,7 @@ def test_stream_parallel_requests_see_isolated_config(monkeypatch):
         params = {
             'query': f's_{i}',
             'kb_id': f's_id_{i}',
-            'available_tools': ['calculator'],
+            'disabled_tools': DISABLED_TOOLS_EXCEPT_CALCULATOR,
             'available_skills': [f's_skill_{i}'],
         }
         response = await chat_service.handle_chat(
@@ -70,12 +88,9 @@ def test_stream_parallel_requests_see_isolated_config(monkeypatch):
             session_id=session_id,
             filters={'kb_id': params['kb_id']},
             files=None,
-            debug=False,
-            reasoning=False,
             databases=None,
-            dataset='default',
             priority=None,
-            available_tools=params['available_tools'],
+            disabled_tools=params['disabled_tools'],
             available_skills=params['available_skills'],
             memory=None,
             user_preference=None,
@@ -121,12 +136,9 @@ def test_stream_response_keeps_session_after_route_context_exits(monkeypatch):
                 session_id=session_id,
                 filters={'kb_id': 'route_kb'},
                 files=None,
-                debug=False,
-                reasoning=False,
                 databases=None,
-                dataset='default',
                 priority=None,
-                available_tools=['calculator'],
+                disabled_tools=DISABLED_TOOLS_EXCEPT_CALCULATOR,
                 available_skills=['route_skill'],
                 memory=None,
                 user_preference=None,

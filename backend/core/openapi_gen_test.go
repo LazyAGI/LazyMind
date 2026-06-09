@@ -2,10 +2,67 @@ package main
 
 import (
 	"encoding/json"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/gorilla/mux"
 )
+
+func TestOpenAPISpecCoversAllRegisteredRoutes(t *testing.T) {
+	r := mux.NewRouter()
+	registerCoreRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	paths, ok := spec["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("paths missing in openapi spec")
+	}
+
+	missing := make([]string, 0)
+	err = r.Walk(func(route *mux.Route, _ *mux.Router, _ []*mux.Route) error {
+		path, err := route.GetPathTemplate()
+		if err != nil || path == "" {
+			return nil
+		}
+		if strings.HasPrefix(path, "/openapi") || path == "/docs" {
+			return nil
+		}
+		methods, err := route.GetMethods()
+		if err != nil {
+			return nil
+		}
+		fullPath := apiPrefix + path
+		pathItem, ok := paths[fullPath].(map[string]any)
+		if !ok {
+			for _, method := range methods {
+				missing = append(missing, method+" "+fullPath)
+			}
+			return nil
+		}
+		for _, method := range methods {
+			if _, ok := pathItem[strings.ToLower(method)].(map[string]any); !ok {
+				missing = append(missing, method+" "+fullPath)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk routes: %v", err)
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		t.Fatalf("openapi spec missing registered routes:\n%s", strings.Join(missing, "\n"))
+	}
+}
 
 func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T) {
 	r := mux.NewRouter()

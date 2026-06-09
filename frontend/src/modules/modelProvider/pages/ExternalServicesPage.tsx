@@ -18,9 +18,13 @@ import {
 } from "@ant-design/icons";
 import { useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BASE_URL, axiosInstance, getLocalizedErrorMessage } from "@/components/request";
-import { AgentAppsAuth } from "@/components/auth";
-import type { RawAxiosRequestConfig } from "axios";
+import { getLocalizedErrorMessage } from "@/components/request";
+import {
+  modelProvidersApi,
+  modelProvidersDefaultApi,
+  unwrapModelProviderData,
+  withModelProviderJsonOptions,
+} from "../api";
 
 type ServiceCategoryKey = "parsing" | "tools";
 type ServiceProviderCategory = "ocr" | "search";
@@ -56,12 +60,6 @@ interface BaseUrlPreset {
   labelKey?: string;
   descKey?: string;
   value: string;
-}
-
-interface ApiEnvelope<T> {
-  code?: number;
-  message?: string;
-  data?: T;
 }
 
 interface ApiExternalProvider {
@@ -207,11 +205,25 @@ function normalizeBaseUrlForCompare(value?: string) {
   return (value || "").trim().replace(/\/+$/, "");
 }
 
-function unwrapResponse<T>(payload: ApiEnvelope<T> | T): T {
-  if (payload && typeof payload === "object" && "data" in payload) {
-    return (payload as ApiEnvelope<T>).data as T;
+function validateHttpBaseUrl(value?: string) {
+  const normalizedValue = (value || "").trim();
+  if (!normalizedValue) {
+    return false;
   }
-  return payload as T;
+  try {
+    const parsedUrl = new URL(normalizedValue);
+    return parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isFormValidationError(error: unknown) {
+  return (
+    !!error &&
+    typeof error === "object" &&
+    Array.isArray((error as { errorFields?: unknown[] }).errorFields)
+  );
 }
 
 function getCheckFailureMessage(checkResult?: CheckExternalServiceResult): string | undefined {
@@ -239,15 +251,6 @@ function isCustomServiceBaseUrl(service: ExternalServiceConfig, baseUrl?: string
     return false;
   }
   return normalizeBaseUrlForCompare(baseUrl) !== normalizeBaseUrlForCompare(service.baseUrl);
-}
-
-function getExternalProvidersUrl(keyword: string) {
-  const query = new URLSearchParams({ exclude_category: "model,datasource" });
-  const normalizedKeyword = keyword.trim();
-  if (normalizedKeyword) {
-    query.set("keyword", normalizedKeyword);
-  }
-  return `${BASE_URL || window.location.origin}/api/core/model_providers?${query.toString()}`;
 }
 
 function mapProviderCategory(category?: string): ServiceCategoryKey {
@@ -357,43 +360,60 @@ function mapApiProviderToService(provider: ApiExternalProvider, t: ReturnType<ty
 }
 
 async function fetchExternalProviders(keyword: string, signal: AbortSignal) {
-  const response = await axiosInstance.request<ApiEnvelope<{ providers?: ApiExternalProvider[] }> | { providers?: ApiExternalProvider[] }>({
-    method: "GET",
-    url: getExternalProvidersUrl(keyword),
-    headers: {
-      "Content-Type": "application/json",
-      ...AgentAppsAuth.getAuthHeaders(),
+  const response = await modelProvidersApi.apiCoreModelProvidersGet(
+    {
+      excludeCategory: "model,datasource",
+      keyword: keyword.trim() || undefined,
     },
-    signal,
-  } satisfies RawAxiosRequestConfig);
-  return unwrapResponse<{ providers?: ApiExternalProvider[] }>(response.data).providers || [];
+    { signal },
+  );
+  return unwrapModelProviderData<{ providers?: ApiExternalProvider[] }>(response.data).providers || [];
 }
 
-function getApiBaseUrl() {
-  return `${BASE_URL || window.location.origin}/api/core`;
-}
-
-function getRequestHeaders() {
-  return {
-    "Content-Type": "application/json",
-    ...AgentAppsAuth.getAuthHeaders(),
-  };
-}
-
-async function modelProviderRequest<T>(
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
-  path: string,
-  data?: unknown,
-  options?: RawAxiosRequestConfig
-) {
-  const response = await axiosInstance.request<ApiEnvelope<T> | T>({
-    method,
-    url: `${getApiBaseUrl()}${path}`,
-    data,
-    headers: getRequestHeaders(),
-    ...options,
+async function listProviderGroups(serviceKey: string) {
+  const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGet({
+    modelProviderId: serviceKey,
   });
-  return unwrapResponse<T>(response.data);
+  return unwrapModelProviderData<{ groups?: ApiExternalGroup[] }>(response.data);
+}
+
+async function updateProviderGroup(
+  service: ExternalServiceConfig,
+  group: ApiExternalGroup,
+  baseUrl: string,
+) {
+  const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch({
+    modelProviderId: service.key,
+    groupId: group.id,
+    updateModelProviderGroupOpenAPIRequest: {
+      name: group.name || service.name,
+      base_url: baseUrl,
+      verify: false,
+    },
+  });
+  return unwrapModelProviderData<SaveExternalGroupResponse>(response.data);
+}
+
+async function createProviderGroup(
+  service: ExternalServiceConfig,
+  payload: { name: string; base_url: string; api_key?: string; verify: boolean },
+) {
+  const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsPost(
+    {
+      modelProviderId: service.key,
+      createModelProviderGroupOpenAPIRequest: payload,
+    },
+    payload.api_key ? { timeout: 3 * 60 * 1000 } : undefined,
+  );
+  return unwrapModelProviderData<SaveExternalGroupResponse>(response.data);
+}
+
+function selectServiceProvider(service: ExternalServiceConfig, groupId: string) {
+  return modelProvidersApi.apiCoreModelProvidersSelectedProvidersPut({
+    setSelectedProviderOpenAPIRequest: {
+      selections: [{ category: getServiceProviderCategory(service), group_id: groupId }],
+    },
+  });
 }
 
 function ExternalServiceLogo({ service }: { service: ExternalServiceConfig }) {
@@ -518,10 +538,7 @@ export default function ExternalServicesPage() {
   async function loadGroupKeys(serviceKey: string) {
     const gen = loadGroupKeysGenRef.current;
     try {
-      const groupData = await modelProviderRequest<{ groups?: ApiExternalGroup[] }>(
-        "GET",
-        `/model_providers/${encodeURIComponent(serviceKey)}/groups`
-      );
+      const groupData = await listProviderGroups(serviceKey);
       if (loadGroupKeysGenRef.current !== gen) return;
       const group = (groupData.groups || [])[0] || null;
       setGroupForActiveService(group);
@@ -547,10 +564,7 @@ export default function ExternalServicesPage() {
   }
 
   async function loadFirstGroup(serviceKey: string) {
-    const groupData = await modelProviderRequest<{ groups?: ApiExternalGroup[] }>(
-      "GET",
-      `/model_providers/${encodeURIComponent(serviceKey)}/groups`
-    );
+    const groupData = await listProviderGroups(serviceKey);
     return (groupData.groups || [])[0] || null;
   }
 
@@ -573,11 +587,7 @@ export default function ExternalServicesPage() {
       // No keys: update backend if group exists, otherwise just update ref
       if (groupForActiveService) {
         try {
-          await modelProviderRequest(
-            "PATCH",
-            `/model_providers/${encodeURIComponent(activeService.key)}/groups/${encodeURIComponent(groupForActiveService.id)}`,
-            { base_url: currentUrl },
-          );
+          await updateProviderGroup(activeService, groupForActiveService, currentUrl);
           message.success(t("modelProvider.external.baseUrlChanged"));
         } catch (error) {
           message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
@@ -591,11 +601,7 @@ export default function ExternalServicesPage() {
     if (!isRealChange) {
       // Trivial change (e.g. trailing slash): PATCH without confirm, keep keyList
       try {
-        await modelProviderRequest(
-          "PATCH",
-          `/model_providers/${encodeURIComponent(activeService.key)}/groups/${encodeURIComponent(groupForActiveService!.id)}`,
-          { base_url: currentUrl },
-        );
+        await updateProviderGroup(activeService, groupForActiveService!, currentUrl);
         message.success(t("modelProvider.external.baseUrlChanged"));
         originalBaseUrlRef.current = currentUrl;
       } catch (error) {
@@ -613,19 +619,13 @@ export default function ExternalServicesPage() {
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
-          const updatedGroup = await modelProviderRequest<SaveExternalGroupResponse>(
-            "PATCH",
-            `/model_providers/${encodeURIComponent(activeService.key)}/groups/${encodeURIComponent(groupForActiveService!.id)}`,
-            { base_url: currentUrl },
-          );
+          const updatedGroup = await updateProviderGroup(activeService, groupForActiveService!, currentUrl);
           setKeyList([]);
           setGroupForActiveService(updatedGroup);
           loadGroupKeysGenRef.current += 1;
           originalBaseUrlRef.current = currentUrl;
           if (isCustomServiceBaseUrl(activeService, currentUrl)) {
-            await modelProviderRequest("PUT", "/model_providers/selected_providers", {
-              selections: [{ category: getServiceProviderCategory(activeService), group_id: updatedGroup.id }],
-            });
+            await selectServiceProvider(activeService, updatedGroup.id);
           }
           message.success(t("modelProvider.external.baseUrlChanged"));
           void loadExternalServices(normalizedSearchValue);
@@ -666,11 +666,9 @@ export default function ExternalServicesPage() {
           api_key: apiKey,
           verify: true,
         };
-        const savedGroup = await modelProviderRequest<SaveExternalGroupResponse>(
-          "POST",
-          `/model_providers/${encodeURIComponent(activeService.key)}/groups`,
-          payload,
-          { timeout: 3 * 60 * 1000 }
+        const savedGroup = await createProviderGroup(
+          activeService,
+          payload as { name: string; base_url: string; api_key?: string; verify: boolean },
         );
         if (savedGroup.check && savedGroup.check.success !== true) {
           message.error(getCheckFailureMessage(savedGroup.check) || t("modelProvider.external.checkFailed"));
@@ -680,16 +678,18 @@ export default function ExternalServicesPage() {
         setKeyList([apiKey]);
 
         // Select the provider
-        await modelProviderRequest("PUT", "/model_providers/selected_providers", {
-          selections: [{ category: getServiceProviderCategory(activeService), group_id: savedGroup.id }],
-        });
+        await selectServiceProvider(activeService, savedGroup.id);
       } else {
         // Add key to existing group
-        await modelProviderRequest(
-          "POST",
-          `/model_providers/${encodeURIComponent(activeService.key)}/groups/${encodeURIComponent(groupForActiveService.id)}/keys`,
-          { api_key: apiKey },
-          { timeout: 3 * 60 * 1000 }
+        await modelProvidersDefaultApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysPost(
+          {
+            modelProviderId: activeService.key,
+            groupId: groupForActiveService.id,
+          },
+          withModelProviderJsonOptions({
+            data: { api_key: apiKey },
+            timeout: 3 * 60 * 1000,
+          }),
         );
         setKeyList((prev) => [...prev, apiKey]);
       }
@@ -718,36 +718,29 @@ export default function ExternalServicesPage() {
           savedGroup = await loadFirstGroup(activeService.key);
         }
         if (savedGroup) {
-          savedGroup = await modelProviderRequest<SaveExternalGroupResponse>(
-            "PATCH",
-            `/model_providers/${encodeURIComponent(activeService.key)}/groups/${encodeURIComponent(savedGroup.id)}`,
-            { base_url: normalizedBaseUrl },
-          );
+          savedGroup = await updateProviderGroup(activeService, savedGroup, normalizedBaseUrl);
         } else {
-          savedGroup = await modelProviderRequest<SaveExternalGroupResponse>(
-            "POST",
-            `/model_providers/${encodeURIComponent(activeService.key)}/groups`,
-            {
-              name: activeService.name,
-              base_url: normalizedBaseUrl,
-              verify: true,
-            },
-          );
+          savedGroup = await createProviderGroup(activeService, {
+            name: activeService.name,
+            base_url: normalizedBaseUrl,
+            verify: true,
+          });
         }
         setGroupForActiveService(savedGroup);
         originalBaseUrlRef.current = normalizedBaseUrl;
       }
 
       if (savedGroup && (keyList.length > 0 || isCustomServiceBaseUrl(activeService, normalizedBaseUrl))) {
-        await modelProviderRequest("PUT", "/model_providers/selected_providers", {
-          selections: [{ category: getServiceProviderCategory(activeService), group_id: savedGroup.id }],
-        });
+        await selectServiceProvider(activeService, savedGroup.id);
       }
 
       message.success(t("modelProvider.external.baseUrlChanged"));
       void loadExternalServices(normalizedSearchValue);
       closeConfigModal();
     } catch (error) {
+      if (isFormValidationError(error)) {
+        return;
+      }
       message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
     }
   }
@@ -757,10 +750,12 @@ export default function ExternalServicesPage() {
       return;
     }
     try {
-      await modelProviderRequest(
-        "DELETE",
-        `/model_providers/${encodeURIComponent(activeService.key)}/groups/${encodeURIComponent(groupForActiveService.id)}/keys`,
-        { api_key: targetKey }
+      await modelProvidersDefaultApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysDelete(
+        {
+          modelProviderId: activeService.key,
+          groupId: groupForActiveService.id,
+        },
+        withModelProviderJsonOptions({ data: { api_key: targetKey } }),
       );
       setKeyList((prev) => prev.filter((k) => k !== targetKey));
     } catch (error) {
@@ -802,10 +797,7 @@ export default function ExternalServicesPage() {
       }, 0);
     }
 
-    void modelProviderRequest<{ groups?: ApiExternalGroup[] }>(
-      "GET",
-      `/model_providers/${encodeURIComponent(service.key)}/groups`
-    )
+    void listProviderGroups(service.key)
       .then((groupData) => {
         const existingGroup = (groupData.groups || [])[0];
         const nextBaseUrl = existingGroup?.base_url?.trim() || service.baseUrl || "";
@@ -970,7 +962,12 @@ export default function ExternalServicesPage() {
                   normalize={(value: string | undefined) => value?.trim()}
                   rules={[
                     { required: true, message: t("modelProvider.validation.baseUrlRequired") },
-                    { type: "url", message: t("modelProvider.validation.baseUrlInvalid") },
+                    {
+                      validator: (_, value?: string) =>
+                        validateHttpBaseUrl(value)
+                          ? Promise.resolve()
+                          : Promise.reject(new Error(t("modelProvider.validation.baseUrlInvalid"))),
+                    },
                     { max: 512, message: t("modelProvider.validation.baseUrlMax") },
                   ]}
                 >

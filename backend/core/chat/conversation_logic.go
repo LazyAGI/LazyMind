@@ -387,7 +387,7 @@ func buildChatRequestBody(convID, sessionID, query string, histories []orm.ChatH
 		body["environment_context"] = environmentContext
 	}
 	if resourceContext != nil {
-		body["available_tools"] = resourceContext.AvailableTools
+		body["disabled_tools"] = resourceContext.DisabledTools
 		body["available_skills"] = resourceContext.AvailableSkills
 		if useMemory {
 			body["memory"] = resourceContext.Memory

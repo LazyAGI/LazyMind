@@ -60,7 +60,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       session_id: str, filters: Optional[Dict[str, Any]],
                       files: Optional[List[str]],
                       databases: Optional[List[Dict[str, Any]]],
-                      priority: Optional[int], available_tools: Optional[List[str]],
+                      priority: Optional[int], disabled_tools: Optional[List[str]],
                       available_skills: Optional[List[str]], memory: Optional[str],
                       user_preference: Optional[str], use_memory: Optional[bool],
                       environment_context: Optional[Dict[str, Any]] = None,
@@ -91,7 +91,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                 'sources': [],
             },
             cost,
-        ))
+        ), final_data={'tool_call_turns': 0})
 
     filters = dict(filters or {})
     resolved_files = validate_and_resolve_files(files)
@@ -116,7 +116,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     inject_model_config(model_config)
     inject_tool_config(tool_config)
     lazyllm.globals['agentic_config'] = agentic_config
-    active_configs = filter_tools(DEFAULT_TOOLS, available_tools)
+    active_configs = filter_tools(DEFAULT_TOOLS, disabled_tools)
     set_trace_context({
         'enabled': bool(trace),
         'trace_id': session_id if trace else None,
@@ -178,10 +178,18 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         except Exception as exc:
             LOG.exception(exc)
             final_resp = response_payload(
-                500, f'chat service failed: {exc}', {'status': 'FAILED'}, 0.0
+                500,
+                f'chat service failed: {exc}',
+                {'status': 'FAILED', 'tool_call_turns': translator.tool_call_turns},
+                0.0,
             )
         else:
-            final_resp = response_payload(200, 'success', {'status': 'FINISHED'}, 0.0)
+            final_resp = response_payload(
+                200,
+                'success',
+                {'status': 'FINISHED', 'tool_call_turns': translator.tool_call_turns},
+                0.0,
+            )
 
         cost = round(time.time() - start_time, 3)
         final_resp['cost'] = cost

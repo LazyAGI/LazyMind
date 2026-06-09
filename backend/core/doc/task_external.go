@@ -31,6 +31,7 @@ type addRequest struct {
 	SourceType     string         `json:"source_type,omitempty"`
 	IdempotencyKey string         `json:"idempotency_key,omitempty"`
 	ModelConfig    map[string]any `json:"llm_config,omitempty"`
+	OCRConfig      map[string]any `json:"ocr_config,omitempty"`
 }
 
 type reparseRequest struct {
@@ -40,6 +41,7 @@ type reparseRequest struct {
 	Strategy       string         `json:"strategy,omitempty"`
 	IdempotencyKey string         `json:"idempotency_key,omitempty"`
 	ModelConfig    map[string]any `json:"llm_config,omitempty"`
+	OCRConfig      map[string]any `json:"ocr_config,omitempty"`
 }
 
 // transferItem no longer carries source/target algo IDs after the node-group

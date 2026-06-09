@@ -4,12 +4,36 @@ from fastapi import APIRouter, Body
 from lazymind.chat.config import DEFAULT_CHAT_DATASET
 from lazymind.chat.service.chat_service import handle_chat
 from lazymind.chat.service.component import get_all_tool_groups
+from lazymind.model_config import inject_model_config
+from lazyllm.tools.tool_config_inject import inject_tool_config
 
 router = APIRouter()
 
 
-@router.get('/api/chat/tools', summary='List all available tool groups with their methods')
-async def list_available_tools():
+@router.post('/api/chat/tools', summary='List all tool groups with their methods')
+async def list_chat_tools(
+    llm_config: Annotated[
+        Optional[Dict[str, Any]],
+        Body(
+            description=(
+                'Per-request model configuration. Keys are role names from runtime_models.yaml '
+                '(llm, reranker, embed_main), each with its own config dict '
+                '{source, model, base_url, api_key, skip_auth}.'
+            )
+        ),
+    ] = None,
+    tool_config: Annotated[
+        Optional[Dict[str, Union[str, List[str]]]],
+        Body(
+            description=(
+                'Per-request tool credentials. Format: {tool_name: token} or {tool_name: [token, ...]}. '
+                'For OAuth2 providers (e.g. feishu) pass a valid, unexpired access token.'
+            )
+        ),
+    ] = None,
+):
+    inject_model_config(llm_config)
+    inject_tool_config(tool_config)
     return {'tool_groups': get_all_tool_groups()}
 
 
@@ -31,7 +55,7 @@ async def chat(
         Optional[int],
         Body(description='Request priority for vllm scheduling; higher value means higher priority'),
     ] = None,
-    available_tools: Annotated[Optional[List[str]], Body(description='List of available tool groups')] = None,
+    disabled_tools: Annotated[Optional[List[str]], Body(description='List of disabled tool groups')] = None,
     available_skills: Annotated[Optional[List[str]], Body(description='List of available skills')] = None,
     memory: Annotated[Optional[str], Body(description='Memory content')] = None,
     user_preference: Annotated[Optional[str], Body(description='User preference content')] = None,
@@ -65,8 +89,6 @@ async def chat(
         ),
     ] = None,
 ):
-    if available_tools and 'all' in available_tools:
-        available_tools = None
     return await handle_chat(
         query=query,
         history=history,
@@ -75,7 +97,7 @@ async def chat(
         files=files,
         databases=databases,
         priority=priority,
-        available_tools=available_tools,
+        disabled_tools=disabled_tools,
         available_skills=available_skills,
         memory=memory,
         user_preference=user_preference,

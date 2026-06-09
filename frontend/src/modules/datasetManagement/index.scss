@@ -280,6 +280,43 @@
       content: "";
     }
   }
+
+  .ant-table-tbody > tr.ant-table-row.dataset-resizable-row {
+    position: relative;
+
+    > td {
+      height: var(--dataset-table-row-height, 64px);
+      padding-top: 0;
+      padding-bottom: 0;
+    }
+
+    > td {
+      position: relative;
+    }
+
+    > td::after {
+      position: absolute;
+      right: 0;
+      bottom: -1px;
+      left: 0;
+      z-index: 3;
+      height: 10px;
+      cursor: row-resize;
+      content: "";
+    }
+
+    &:hover > td::before {
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 2;
+      height: 2px;
+      border-radius: 999px;
+      background: #93c5fd;
+      content: "";
+    }
+  }
 }
 
 .dataset-inline-input.ant-input,
@@ -308,6 +345,147 @@
   font-size: 12px;
 }
 
+.dataset-reference-doc-tag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 1px 8px;
+  border: 1px solid #b7eb8f;
+  border-radius: 6px;
+  background: #f6ffed;
+  color: #237804;
+  font-size: 12px;
+  line-height: 18px;
+  vertical-align: baseline;
+}
+
+.dataset-reference-doc-tag-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dataset-reference-doc-tag-editing {
+  gap: 4px;
+  width: fit-content;
+}
+
+.dataset-reference-doc-tag-remove {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #237804;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  line-height: 1;
+
+  &:hover,
+  &:focus-visible {
+    background: #d9f7be;
+    outline: none;
+  }
+}
+
+.dataset-reference-context-preview {
+  display: inline;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.dataset-reference-context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 1px 8px;
+  border: 1px solid #91caff;
+  border-radius: 6px;
+  background: #e6f4ff;
+  color: #0958d9;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  vertical-align: baseline;
+  margin: 0 3px;
+}
+
+.dataset-reference-context-chip-remove {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #0958d9;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  line-height: 1;
+
+  &:hover,
+  &:focus-visible {
+    background: #bae0ff;
+    outline: none;
+  }
+}
+
+.dataset-reference-context-text {
+  min-width: 0;
+  color: #344054;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.dataset-reference-context-editor {
+  width: 100%;
+  min-height: 32px;
+  max-height: calc(1.5em * 4 + 8px);
+  padding: 4px 8px;
+  border: 1px solid #91caff;
+  border-radius: 6px;
+  background: #ffffff;
+  overflow: auto;
+  color: #344054;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  outline: none;
+}
+
+.dataset-reference-context-editor.is-empty:not(:focus)::before {
+  color: #98a2b3;
+  content: attr(data-placeholder);
+}
+
+.dataset-reference-context-editor-text {
+  min-width: 8px;
+  outline: none;
+}
+
+.dataset-reference-context-popover {
+  max-width: 420px;
+  max-height: 280px;
+  overflow: auto;
+  color: #344054;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .dataset-inline-display {
   width: 100%;
   min-height: 32px;
@@ -330,6 +508,13 @@
     color: #1677ff;
     outline: none;
   }
+}
+
+.dataset-inline-display.dataset-reference-context-display {
+  display: block;
+  max-height: calc(1.5em * 4 + 8px);
+  overflow: auto;
+  -webkit-line-clamp: unset;
 }
 
 .dataset-inline-placeholder {
@@ -489,7 +674,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
   gap: 16px;
-  min-height: 560px;
+  align-items: start;
 }
 
 .dataset-reference-modal-panel {
@@ -512,13 +697,13 @@
 
 .dataset-reference-modal-panel-body {
   min-height: 0;
-  flex: 1;
+  overflow: hidden;
 }
 
 .dataset-reference-modal-preview {
-  height: 100%;
-  min-height: 500px;
-  overflow: hidden;
+  height: min(560px, calc(100vh - 240px));
+  min-height: 240px;
+  overflow: auto;
 }
 
 .dataset-reference-modal-empty {
@@ -533,15 +718,17 @@
 }
 
 .dataset-reference-chunk-list {
-  max-height: 560px;
+  max-height: min(560px, calc(100vh - 240px));
   overflow: auto;
   padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  box-sizing: border-box;
 }
 
 .dataset-reference-chunk-item {
+  flex: 0 0 auto;
   display: flex;
   align-items: flex-start;
   gap: 10px;

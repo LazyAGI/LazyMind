@@ -26,7 +26,7 @@
 
 | 外部服务 | 配置项 | 代码默认值 | docker-compose 默认值 | 主要用途 |
 | --- | --- | --- | --- | --- |
-| Chat / Generation 服务 | `LAZYMIND_CHAT_SERVICE_URL` | `http://chat:8046` | `http://chat:8046` | 对话、流式对话、技能/记忆/偏好生成、模型连通性检查、词表刷新/抽取 |
+| Chat / Generation 服务 | `LAZYMIND_CHAT_SERVICE_URL` | `http://chat:8046` | `http://chat:8046` | 对话、流式对话、技能/记忆/偏好生成、模型连通性检查 |
 | Algorithm / KB 服务 | `LAZYMIND_ALGO_SERVICE_URL` | `http://10.119.24.129:8850` | `http://lazyllm-doc-server:8000` | 算法列表、算法分组、KB 创建/更新/删除、chunk 查询 |
 | Document 服务 | `LAZYMIND_DOCUMENT_SERVICE_URL` | 回退到 `LAZYMIND_ALGO_SERVICE_URL` | `http://lazyllm-doc-server:8000` | 文档 add/reparse/transfer/delete、任务取消 |
 | Evo Service | `LAZYMIND_EVO_SERVICE_URL` | `http://host.docker.internal:8048` | `http://evo-api:8048` | Agent 线程、自进化流程、结果、报告和 diff 代理 |
@@ -43,14 +43,8 @@ Core 调用的端点:
 | --- | --- | --- | --- |
 | POST | `/api/chat` | 非流式问答 | `chat/conversation_logic.go`, `chat/chat.go` |
 | POST | `/api/chat/stream` | 流式问答 | `chat/chat.go`, `chat/conversation_logic.go` |
-| POST | `/api/chat/skill/generate` | 技能内容生成 | `algo/generate_client.go`, `skill/management.go` |
-| POST | `/api/chat/memory/generate` | 记忆内容生成 | `algo/generate_client.go`, `memory/handler.go` |
-| POST | `/api/chat/user_preference/generate` | 用户偏好生成 | `algo/generate_client.go`, `preference/handler.go` |
+| POST | `/api/chat/llm_generate` | 按 `task_type` 生成技能、记忆、用户偏好或润色 prompt | `algo/generate_client.go`, `skill/management.go`, `memory/handler.go`, `preference/handler.go` |
 | POST | `/api/model/check` | 校验模型 provider/group 的连通性 | `modelprovider/check.go` |
-| POST | `/api/vocab/reload` | 词组变更后通知词表刷新 | `wordgroup/wordgroup.go` |
-| POST | `/api/vocab/extract` | 启动后立即执行并按周期抽取词表 | `wordgroup/vocab_extract_schedule.go` |
-
-注意: `wordgroup/vocab_extract_schedule.go` 中实际周期常量为 `12 * time.Hour`。
 
 ### 2. Algorithm / KB 服务
 
@@ -125,4 +119,3 @@ flowchart LR
   Core --> DocSvc
   Core --> Evo
 ```
-

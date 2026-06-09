@@ -214,6 +214,8 @@ var errorCatalog = map[string]*AppError{
 	"status must be 0 or 1":                                           NewAppError(http.StatusBadRequest, 2000891, "status must be 0 or 1"),
 	"suggestion title/content required":                               NewAppError(http.StatusBadRequest, 2000892, "suggestion title/content required"),
 	"suggestion_ids or user_instruct required":                        NewAppError(http.StatusBadRequest, 2000893, "suggestion_ids or user_instruct required"),
+	"user_instruct required":                                          NewAppError(http.StatusBadRequest, 2000893, "user_instruct required"),
+	"content and user_instruct required":                              NewAppError(http.StatusBadRequest, 2000893, "content and user_instruct required"),
 	"suggestions length must be between 1 and 5":                      NewAppError(http.StatusBadRequest, 2000894, "suggestions length must be between 1 and 5"),
 	"term and aliases are empty":                                      NewAppError(http.StatusBadRequest, 2000895, "term and aliases are empty"),
 	"term is required":                                                NewAppError(http.StatusBadRequest, 2000896, "term is required"),

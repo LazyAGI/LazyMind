@@ -10,25 +10,30 @@ import (
 )
 
 const generateTimeout = 10 * time.Minute
+const rewritePath = "/api/chat/rewrite"
 
 func GenerateSkill(ctx context.Context, req SkillGenerateRequest) (string, error) {
-	return generate(ctx, "/api/chat/skill/generate", req)
+	return generate(ctx, rewritePayload("skill", req.Content, req.UserInstruct, req.LLMConfig))
 }
 
-func GenerateMemory(ctx context.Context, req MemoryGenerateRequest) (string, error) {
-	return generate(ctx, "/api/chat/memory/generate", req)
+func GenerateMemory(ctx context.Context, req ManagedGenerateRequest) (string, error) {
+	return generate(ctx, rewritePayload("memory", req.Content, req.UserInstruct, req.LLMConfig))
 }
 
-func GenerateUserPreference(ctx context.Context, req MemoryGenerateRequest) (string, error) {
-	return generate(ctx, "/api/chat/user_preference/generate", req)
+func GenerateUserPreference(ctx context.Context, req ManagedGenerateRequest) (string, error) {
+	return generate(ctx, rewritePayload("user_preference", req.Content, req.UserInstruct, req.LLMConfig))
+}
+
+func GeneratePolish(ctx context.Context, req PolishGenerateRequest) (string, error) {
+	return generate(ctx, rewritePayload("polish", req.Content, req.UserInstruct, req.LLMConfig))
 }
 
 func generateURL(path string) string {
 	return common.ChatServiceEndpoint() + path
 }
 
-func generate(ctx context.Context, path string, req any) (string, error) {
-	url := generateURL(path)
+func generate(ctx context.Context, req RewriteRequest) (string, error) {
+	url := generateURL(rewritePath)
 	var response map[string]any
 	if err := common.ApiPost(ctx, url, req, nil, &response, generateTimeout); err != nil {
 		return "", err
@@ -38,6 +43,18 @@ func generate(ctx context.Context, path string, req any) (string, error) {
 		return "", fmt.Errorf("generate endpoint returned empty content")
 	}
 	return content, nil
+}
+
+func rewritePayload(taskType, content, userInstruct string, llmConfig map[string]any) RewriteRequest {
+	if llmConfig == nil {
+		llmConfig = map[string]any{}
+	}
+	return RewriteRequest{
+		TaskType:     taskType,
+		Content:      content,
+		UserInstruct: strings.TrimSpace(userInstruct),
+		LLMConfig:    llmConfig,
+	}
 }
 
 func extractGeneratedContent(payload any) string {

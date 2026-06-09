@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS public.eval_set_items (
     key_points text DEFAULT ''::text NOT NULL,
     reference_chunk_ids text DEFAULT ''::text NOT NULL,
     reference_context text DEFAULT ''::text NOT NULL,
+    algorithm_reference_context text DEFAULT ''::text NOT NULL,
     reference_doc text DEFAULT ''::text NOT NULL,
     reference_doc_ids text DEFAULT ''::text NOT NULL,
     is_deleted boolean DEFAULT false NOT NULL,

@@ -255,6 +255,8 @@ func manualSchemas() map[string]any {
 		"ListTasksResponse":                obj(prop("tasks", array(refSchema("TaskResponse"))), prop("total_size", intSchema()), prop("next_page_token", strSchema())),
 		"PromptRequest":                    objReq([]string{"display_name", "content"}, prop("display_name", strSchema()), prop("content", strSchema())),
 		"PromptPatchRequest":               obj(prop("display_name", strSchema()), prop("content", strSchema())),
+		"PromptPolishRequest":              objReq([]string{"content", "user_instruct"}, prop("content", strSchema()), prop("user_instruct", strSchema())),
+		"PromptPolishResponse":             obj(prop("content", strSchema())),
 		"PromptItem":                       obj(prop("name", strSchema()), prop("id", strSchema()), prop("content", strSchema()), prop("display_name", strSchema()), prop("is_default", boolSchema())),
 		"PromptListResponse":               obj(prop("prompts", array(refSchema("PromptItem"))), prop("next_page_token", strSchema()), prop("total", int64Schema())),
 		"ConversationResumeRequest":        objReq([]string{"conversation_id"}, prop("conversation_id", strSchema()), prop("history_id", strSchema())),
@@ -373,6 +375,7 @@ func manualPaths() map[string]any {
 			"get":  op("Prompt list", queryParams(param("query", "page_size", false, intSchema()), param("query", "page_token", false, strSchema())), nil, response(200, "Prompt list", refSchema("PromptListResponse"))),
 			"post": op("Create prompt", nil, jsonBody(refSchema("PromptRequest"), true), response(200, "Created prompt", refSchema("PromptItem"))),
 		},
+		"/prompts:polish": map[string]any{"post": op("Polish prompt", nil, jsonBody(refSchema("PromptPolishRequest"), true), response(200, "Polished prompt", refSchema("PromptPolishResponse")))},
 		"/prompts/{name}": map[string]any{
 			"get":    op("Get prompt", nil, nil, response(200, "Prompt details", refSchema("PromptItem"))),
 			"patch":  op("Update prompt", nil, jsonBody(refSchema("PromptPatchRequest"), true), response(200, "Updated prompt", refSchema("PromptItem"))),

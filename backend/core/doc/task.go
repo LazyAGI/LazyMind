@@ -1340,6 +1340,11 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 		log.Printf("[startParseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
 		llmConfig = nil
 	}
+	ocrConfig, err := modelconfig.LoadOCRConfig(r.Context(), store.DB(), userID)
+	if err != nil {
+		log.Printf("[startParseTasksInternal] failed to load ocr_config for user=%s: %v", userID, err)
+		ocrConfig = nil
+	}
 	resultsByTaskID := make(map[string]StartTaskResult, len(taskIDs))
 	orderedUniqueIDs := make([]string, 0, len(taskIDs))
 
@@ -1407,7 +1412,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 			items = append(items, buildAddFileItem(datasetID, candidate.task, candidate.doc, candidate.docExt, parsePath))
 		}
 		if len(baseTasks) > 0 {
-			extResults, err := callExternalAddDocs(r, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig})
+			extResults, err := callExternalAddDocs(r, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig})
 			if err != nil {
 				for i, taskRow := range baseTasks {
 					resolved := common.ResolveAppError(err.Error(), http.StatusBadGateway)
@@ -1455,7 +1460,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 					return
 				}
 				item := buildAddFileItem(datasetID, candidate.task, candidate.doc, dExt, parsePath)
-				extResults, err := callExternalAddDocs(r, addRequest{Items: []addFileItem{item}, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig})
+				extResults, err := callExternalAddDocs(r, addRequest{Items: []addFileItem{item}, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig})
 				if err != nil {
 					resolved := common.ResolveAppError(err.Error(), http.StatusBadGateway)
 					outcomes[idx] = officeOutcome{task: candidate.task, doc: candidate.doc, docExt: dExt, result: StartTaskResult{TaskID: candidate.task.ID, DocumentID: candidate.doc.ID, DisplayName: candidate.doc.DisplayName, Status: "FAILED", SubmitStatus: "FAILED", Message: resolved.Message, Detail: fmt.Sprint(resolved.Detail)}}
@@ -2499,6 +2504,11 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		log.Printf("[startReparseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
 		llmConfig = nil
 	}
+	ocrConfig, err := modelconfig.LoadOCRConfig(r.Context(), store.DB(), userID)
+	if err != nil {
+		log.Printf("[startReparseTasksInternal] failed to load ocr_config for user=%s: %v", userID, err)
+		ocrConfig = nil
+	}
 	docIDs := make([]string, 0, len(taskIDs))
 	taskRows := make([]orm.Task, 0, len(taskIDs))
 	docRows := make([]orm.Document, 0, len(taskIDs))
@@ -2568,7 +2578,7 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		Str("reparse_mode", reparseMode).
 		Str("strategy", strategy).
 		Msg("submitting reparse batch to doc service")
-	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, Strategy: strategy, IdempotencyKey: newTaskID(), ModelConfig: llmConfig})
+	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, Strategy: strategy, IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig})
 	if err != nil {
 		errMsg := common.ResolveAppError(err.Error(), http.StatusBadGateway).Message
 		applog.Logger.Error().

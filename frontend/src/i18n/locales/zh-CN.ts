@@ -188,6 +188,7 @@ const zhCN = {
     apiKeyOptionalPlaceholder: "可不填写",
     verifyGroupTitle: "验证 {{name}}",
     verifyApiKeyExtra: "仅用于本次连接验证，前端不会保存或再次展示完整 Key。",
+    verifyConfiguredApiKeyExtra: "留空将使用已保存的 Key 进行本次连接验证；填写新 Key 时仅用于本次验证。",
     verifyApiKeyPlaceholder: "请输入本次验证使用的 API Key",
     keyConfiguredStatus: "已配置 Key：{{preview}}",
     shareConfigTitle: "共享给组成员",
@@ -493,6 +494,23 @@ const zhCN = {
     noConversations: "暂无对话",
     promptTemplate: "常用话术",
     inputPlaceholder: "请输入您的问题，支持多轮对话、图文理解等",
+    promptSuggestionsAria: "Prompt 优化建议",
+    promptSuggestionPersuasive: "增强消息的说服力",
+    promptSuggestionPersuasiveDesc: "补充目标、受众和依据",
+    promptSuggestionPersuasiveTemplate:
+      "请增强下面这段消息的说服力，保留原意，并补充更清晰的目标、受众和支撑理由：\n\n{{prompt}}",
+    promptSuggestionStructure: "优化文章结构",
+    promptSuggestionStructureDesc: "整理成层次清楚的表达",
+    promptSuggestionStructureTemplate:
+      "请优化下面内容的结构，使它层次更清楚、重点更突出，可以使用标题和列表，但不要改变核心意思：\n\n{{prompt}}",
+    promptSuggestionTone: "改善我的语气",
+    promptSuggestionToneDesc: "更自然、礼貌、专业",
+    promptSuggestionToneTemplate:
+      "请改善下面这段话的语气，让表达更自然、礼貌、专业，同时保留我的原始意图：\n\n{{prompt}}",
+    promptSuggestionPolish: "润色消息",
+    promptSuggestionPolishDesc: "精简冗余并提升可读性",
+    promptSuggestionPolishTemplate:
+      "请润色下面这段消息，去掉冗余表达，提升可读性和准确性：\n\n{{prompt}}",
     upload: "上传文件",
     modelProviderChecking: "正在确认模型配置",
     modelProviderCheckingDesc: "检查完成后即可开始问答。",

@@ -676,8 +676,8 @@ const Detail = () => {
 
       <ImportKnowledgeModal
         ref={importKnowledgeRef}
-        onParsingStart={() => setParsingNoticeVisible(true)}
-        onParsingSettled={() => setParsingNoticeVisible(false)}
+        onParsingStart={() => setUploadingNoticeVisible(true)}
+        onParsingSettled={() => setUploadingNoticeVisible(false)}
         onOk={({ pId } = {}) => {
           importingTaskListRef.current = [];
           getImportingTotal();

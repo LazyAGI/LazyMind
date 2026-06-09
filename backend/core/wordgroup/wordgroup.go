@@ -1,12 +1,10 @@
 package wordgroup
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -18,22 +16,6 @@ import (
 
 	"gorm.io/gorm"
 )
-
-func wordGroupServiceURL() string {
-	if u := os.Getenv("LAZYMIND_CHAT_SERVICE_URL"); u != "" {
-		return u
-	}
-	return "http://chat:8046"
-}
-
-const vocabReloadPath = "/api/vocab/reload"
-
-func notifyVocabReload(ctx context.Context, userID string) {
-	reloadURL := common.JoinURL(wordGroupServiceURL(), vocabReloadPath)
-	if err := common.ApiPost(ctx, reloadURL, map[string]string{"user_id": userID}, nil, nil, 15*time.Second); err != nil {
-		log.Logger.Warn().Err(err).Str("url", reloadURL).Str("user_id", userID).Msg("vocab reload notify failed")
-	}
-}
 
 // CreateWordGroupRequest is the JSON body for POST /word_group.
 // Submits one term plus optional aliases in a single request.
@@ -248,8 +230,6 @@ func CreateWordGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	notifyVocabReload(r.Context(), userID)
-
 	common.ReplyOK(w, CreateWordGroupResponse{
 		TermID:      termID,
 		Term:        term,
@@ -378,7 +358,6 @@ func UpdateWordGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "update word group failed", http.StatusInternalServerError)
 		return
 	}
-	notifyVocabReload(r.Context(), userID)
 	common.ReplyOK(w, out)
 }
 
@@ -735,7 +714,6 @@ func MergeWordGroups(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "merge word group failed", http.StatusInternalServerError)
 		return
 	}
-	notifyVocabReload(r.Context(), userID)
 	common.ReplyOK(w, out)
 }
 
@@ -841,7 +819,6 @@ func MergeWordGroupsAndAddWord(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, out)
 	}
-	notifyVocabReload(r.Context(), userID)
 	common.ReplyOK(w, MergeAndAddWordResponse{Items: items})
 }
 
@@ -1084,7 +1061,6 @@ func DeleteWordGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "word group not found", http.StatusNotFound)
 		return
 	}
-	notifyVocabReload(r.Context(), userID)
 	common.ReplyOK(w, DeleteWordGroupResponse{GroupID: groupID, DeletedRows: rows})
 }
 
@@ -1134,7 +1110,6 @@ func BatchDeleteWordGroups(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "word group not found", http.StatusNotFound)
 		return
 	}
-	notifyVocabReload(r.Context(), userID)
 	common.ReplyOK(w, BatchDeleteWordGroupsResponse{GroupIDs: hitGroups, DeletedRows: rows})
 }
 

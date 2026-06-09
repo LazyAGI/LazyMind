@@ -1,19 +1,26 @@
 package algo
 
-type Suggestion struct {
-	Title   string `json:"title"`
-	Content string `json:"content"`
-	Reason  string `json:"reason,omitempty"`
+type RewriteRequest struct {
+	TaskType     string         `json:"task_type"`
+	Content      string         `json:"content"`
+	UserInstruct string         `json:"user_instruct"`
+	LLMConfig    map[string]any `json:"llm_config"`
 }
 
 type SkillGenerateRequest struct {
-	Content      string       `json:"content"`
-	Suggestions  []Suggestion `json:"suggestions"`
-	UserInstruct string       `json:"user_instruct"`
+	Content      string
+	UserInstruct string
+	LLMConfig    map[string]any
 }
 
-type MemoryGenerateRequest struct {
-	Content      string       `json:"content"`
-	Suggestions  []Suggestion `json:"suggestions"`
-	UserInstruct string       `json:"user_instruct"`
+type ManagedGenerateRequest struct {
+	Content      string
+	UserInstruct string
+	LLMConfig    map[string]any
+}
+
+type PolishGenerateRequest struct {
+	Content      string
+	UserInstruct string
+	LLMConfig    map[string]any
 }

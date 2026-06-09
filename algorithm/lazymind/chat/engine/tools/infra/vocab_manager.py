@@ -1,8 +1,4 @@
-"""VocabManager: Multi-user vocabulary manager wrapping QueryEnhACProcessor with hot-reload support.
-
-The manager itself is algorithm-only. Service-side registry / DB loading lives
-under ``lazymind.review.service``.
-"""
+"""VocabManager: multi-user vocabulary manager wrapping QueryEnhACProcessor."""
 from __future__ import annotations
 
 import threading

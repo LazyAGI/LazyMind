@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from lazyllm import LOG
 
 from fastapi.responses import StreamingResponse
@@ -24,9 +24,17 @@ def log_and_emit_frame(frame: Any, cost: float, query: str, session_id: str, tag
     return sse_line(response_payload(200, 'success', frame, cost))
 
 
-def single_event_stream_response(payload: Dict[str, Any]) -> StreamingResponse:
+def single_event_stream_response(
+    payload: Dict[str, Any],
+    final_data: Optional[Dict[str, Any]] = None,
+) -> StreamingResponse:
     async def _stream():
         yield sse_line(payload)
-        yield sse_line(response_payload(200, 'success', {'status': 'FINISHED'}, 0.0))
+        yield sse_line(response_payload(
+            200,
+            'success',
+            {'status': 'FINISHED', **(final_data or {})},
+            0.0,
+        ))
 
     return StreamingResponse(_stream(), media_type='text/event-stream')

@@ -1,12 +1,10 @@
-from urllib.parse import urlparse
-
 import lazyllm
 from lazyllm.tracing import set_trace_context
 from lazyllm import AutoModel
-from lazyllm.tools.rag import Document, LLMParser, MineruPDFReader, PDFReader
+from lazyllm.tools.rag import Document, LLMParser
 from lazyllm.tools.rag.doc_impl import NodeGroupType
 from lazyllm.tools.rag.parsing_service import DocumentProcessor
-from lazyllm.tools.rag.readers import PaddleOCRPDFReader
+from lazyllm.tools.rag.readers.ocrReader import DynamicPDFReader
 
 from lazymind.model_config import get_dynamic_role_slot_map
 from lazymind.config import EMBED_IMAGE, EMBED_INDEX_KWARGS, EMBED_KEYS, EMBED_MAIN, config as _cfg
@@ -21,25 +19,6 @@ def _quiet_trace(kbs):
         set_trace_context({'enabled': False})
         return kbs[kb_group](*args, **kwargs)
     return call
-
-
-def _parse_bool_config(value: str | None) -> bool | None:
-    if value is None:
-        return None
-    value = value.strip().lower()
-    if value == '':
-        return None
-    if value in ('1', 'true', 'yes', 'on'):
-        return True
-    if value in ('0', 'false', 'no', 'off'):
-        return False
-    raise ValueError(f'mineru_upload_mode must be a boolean string, got: {value!r}')
-
-
-def _default_mineru_upload_mode(ocr_url: str) -> bool:
-    hostname = (urlparse(ocr_url).hostname or '').lower()
-    # Only the in-network MinerU service can resolve the same container path.
-    return hostname != 'mineru'
 
 
 def get_algo_server_port() -> int:
@@ -81,28 +60,11 @@ def _build_store_config(index_kwargs):
 
 
 def _build_pdf_reader():
-    ocr_type = _cfg['ocr_server_type']
-    ocr_url = _cfg['ocr_server_url'].rstrip('/')
-    if ocr_type in ('none', None, ''):
-        return PDFReader()
-    if ocr_type == 'mineru':
-        upload_mode = _parse_bool_config(_cfg['mineru_upload_mode'])
-        if upload_mode is None:
-            upload_mode = _default_mineru_upload_mode(ocr_url)
-        return MineruPDFReader(
-            url=ocr_url,
-            backend=_cfg['mineru_backend'],
-            upload_mode=upload_mode,
-            post_func=NodeParser(),
-            timeout=3600,
-            image_cache_dir=_cfg['ocr_cache_dir'],
-        )
-    if ocr_type == 'paddleocr':
-        return PaddleOCRPDFReader(
-            url=ocr_url,
-            image_cache_dir=_cfg['ocr_cache_dir'],
-        )
-    raise ValueError(f'Unsupported OCR server type: {ocr_type!r}')
+    return DynamicPDFReader(
+        image_cache_dir=_cfg['ocr_cache_dir'],
+        post_func=NodeParser(),
+        timeout=3600,
+    )
 
 
 def reset_stores() -> None:

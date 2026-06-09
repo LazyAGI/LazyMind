@@ -86,9 +86,6 @@ export interface CompensationListResponse {
     'items': Array<Compensation>;
     'total': number;
 }
-export interface CompensationResponse {
-    'compensation'?: Compensation;
-}
 export interface ConnectorListResponse {
     'items': Array<ConnectorSpec>;
 }
@@ -180,18 +177,36 @@ export interface ExpediteTasksResponse {
     'task_ids': Array<string>;
     'updated_count': number;
 }
+export interface GenerateTaskScope {
+    'is_container'?: boolean;
+    'is_document'?: boolean;
+    'key'?: string;
+    'node_ref'?: string;
+    'object_key'?: string;
+    'path'?: string;
+}
 export interface GenerateTasksRequest {
     'binding_id'?: string;
     'document_ids'?: Array<string>;
     'mode'?: string;
     'object_keys'?: Array<string>;
+    'paths'?: Array<string>;
     'priority'?: number;
+    'request_id'?: string;
+    'scopes'?: Array<GenerateTaskScope>;
+    'selection_token'?: string;
+    'trigger_policy'?: string;
+    'updated_only'?: boolean;
 }
 export interface GenerateTasksResponse {
     'accepted_count': number;
     'already_active_count': number;
     'duplicate_count': number;
+    'job_id'?: string;
+    'job_ids'?: Array<string>;
+    'queued_sync_count'?: number;
     'requested_count': number;
+    'run_ids'?: Array<string>;
     'skipped_count': number;
     'task_ids': Array<string>;
 }
@@ -336,18 +351,31 @@ export interface SourceBindingResponse {
 
 
 export interface SourceDocumentItem {
+    'baseline_version'?: string;
     'binding_id'?: string;
     'core_document_id'?: string;
+    'directory'?: string;
     'display_name'?: string;
     'document_id'?: string;
+    'file_type'?: string;
+    'has_update'?: boolean;
     'last_error'?: { [key: string]: any; };
+    'last_synced_at'?: string;
     'modified_at'?: string;
+    'name'?: string;
     'object_key'?: string;
     'parse_queue_state'?: string;
+    'parse_state'?: string;
     'parse_status'?: string;
+    'path'?: string;
+    'pending_action'?: string;
+    'size_bytes'?: number;
     'source_id'?: string;
     'source_state'?: SourceState;
+    'source_version'?: string;
     'sync_state'?: SyncState;
+    'update_desc'?: string;
+    'update_type'?: string;
 }
 
 
@@ -355,6 +383,7 @@ export interface SourceDocumentListResponse {
     'items': Array<SourceDocumentItem>;
     'page': number;
     'page_size': number;
+    'summary'?: { [key: string]: any; };
     'total': number;
 }
 export interface SourceListItem {
@@ -418,9 +447,13 @@ export interface SourceSummaryResponse {
     'failed_task_count'?: number;
     'modified_count'?: number;
     'new_count'?: number;
+    'parsed_document_count'?: number;
+    'pending_pull_count'?: number;
     'pending_task_count'?: number;
     'running_task_count'?: number;
     'source_id': string;
+    'storage_bytes'?: number;
+    'total_document_count'?: number;
     'total_objects': number;
     'unchanged_count'?: number;
 }
@@ -435,6 +468,7 @@ export interface SourceTreeChildrenRequest {
     'parent_key'?: string;
     'state_filter'?: Array<string>;
     'tree_key'?: string;
+    'use_cache'?: boolean;
 }
 
 

@@ -272,7 +272,7 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 	}
 
 	context := &ChatResourceContext{
-		AvailableTools:     []string{"all"},
+		DisabledTools:      []string{},
 		AvailableSkills:    availableSkills,
 		Memory:             mem.Content,
 		UserPreference:     pref.Content,
@@ -281,7 +281,7 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 	appLog.Logger.Info().
 		Str("session_id", sessionID).
 		Str("user_id", userID).
-		Strs("available_tools", context.AvailableTools).
+		Strs("disabled_tools", context.DisabledTools).
 		Int("available_skill_count", len(context.AvailableSkills)).
 		Bool("use_personalization", context.UsePersonalization).
 		Msg("built chat resource context for algorithm request")
