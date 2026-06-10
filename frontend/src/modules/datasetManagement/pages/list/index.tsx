@@ -141,8 +141,8 @@ export default function DatasetListPage() {
       message.success("数据集已创建");
       handleCloseFormModal();
       navigate(`/dataset-management/${created.id}`);
-    } catch (error: any) {
-      message.error(error?.message || "保存失败");
+    } catch {
+      // The global axios interceptor already shows the backend error message.
     } finally {
       setSubmitting(false);
     }
