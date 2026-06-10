@@ -447,6 +447,9 @@ class EvoMessageHub:
         had_run = self._has_run(thread_id)
         service = self._service(thread_id)
         if not had_run: service.plan_full_flow()
+        checkpoint = self._stage_checkpoint(thread_id)
+        if checkpoint:
+            return self._checkpoint_messages.handle(thread_id, service, checkpoint, message_id, content, payload)
         resume_stage = self._stalled_resume_stage(thread_id)
         result = self._preview_message(thread_id, service, message_id, content, payload) if not dispatch else (
             service.send_message(message_id, content, allowed_capabilities=payload.get('allowed_capabilities'),
@@ -456,8 +459,16 @@ class EvoMessageHub:
             self._start_resume_stage(thread_id, service, resume_stage, 'message')
             reply = f'已继续：{resume_stage}。'
         else:
+            if result.action == 'resume_checkpointed': self._start_resumed_dispatch(thread_id)
             reply = self._result_reply(thread_id, service, result)
         return self._message_response(thread_id, message_id, reply, result)
+
+    def _start_resumed_dispatch(self, thread_id: str) -> None:
+        """resume_checkpointed only closes the checkpoint; dispatch runs in a flow task."""
+        with self._lock:
+            if self._task_alive(thread_id): return
+            self._update_meta(thread_id, status='running', updated_at=time.time())
+            self._start_flow_task_locked(thread_id, self._resume_start_stage(thread_id))
 
     def _message_response(self, thread_id: str, message_id: str, reply: str, result: FlowMessageResult, *,
                           requires_confirmation: bool | None = None, confirmation_checkpoint_id: str | None = None,
@@ -708,7 +719,7 @@ class EvoMessageHub:
 
     def _resume_stage_checkpoint(self, thread_id: str, service: EvoFlowService, checkpoint: CheckpointState,
                                  source: str, input_policy: str) -> bool:
-        start_stage = checkpoint.next_stage
+        start_stage = checkpoint.next_stage or _blocked_operations_stage(checkpoint)
         if not start_stage: raise RuntimeError('checkpoint missing next_stage')
         if checkpoint.is_manual_cutover:
             self._hold_queued_messages(thread_id, service)
@@ -717,8 +728,11 @@ class EvoMessageHub:
             if queued.blocked:
                 self._cache_active_checkpoint(thread_id, service)
                 return False
-        # Heavy store/rebind work stays outside the hub lock; the lock only guards task/meta mutation.
-        service.resume_stage_checkpoint(checkpoint, source=source, input_policy=input_policy, thread_id=thread_id)
+
+        if checkpoint.dispatch_block_reason == 'checkpointed':
+            service.resume_checkpointed(input_policy=input_policy, dispatch=False)
+        else:
+            service.resume_stage_checkpoint(checkpoint, source=source, input_policy=input_policy, thread_id=thread_id)
         with self._lock:
             alive = self._task_alive(thread_id)
             self._clear_stage_checkpoint(thread_id)
@@ -887,6 +901,7 @@ class EvoMessageHub:
             shutil.copytree(service.run_root / 'store', root / 'store', ignore=_preview_copy_ignore)
         try:
             runner = EvoFlowService.resume(**self._service_kwargs(thread_id, root))
+            StoreRunLifecycle(runner.store, RUN_ID).open_dispatch(checkpoint_close_verified=True, preview=True)
             return runner.send_message(message_id, content, allowed_capabilities=payload.get('allowed_capabilities'),
                                        dispatch=False, max_dispatch=int(payload.get('max_dispatch') or 1))
         finally:
@@ -1231,6 +1246,14 @@ def _normalized_confirmation(message: str) -> str:
 
 def _cutover_confirmation(message: str) -> bool:
     return _normalized_confirmation(message) in {'确认切流', '执行切流', '开始切流', '切流', 'confirmcutover', 'cutover'}
+
+
+def _blocked_operations_stage(checkpoint: CheckpointState) -> str:
+    """Operation checkpoints carry no next_stage; derive the restart stage from blocked operations."""
+    for operation in checkpoint.blocked_operations or checkpoint.next_operations or ():
+        stage = STAGE_MAP.get(str(operation).split('.', 1)[0])
+        if stage: return stage
+    return ''
 
 
 def _resume_confirmation(message: str) -> bool:

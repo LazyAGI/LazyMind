@@ -135,11 +135,11 @@ class CheckpointManager:
             self.record_cancel(run_id, {**payload, 'checkpoint_id': checkpoint_id})
 
     def open_dispatch(self, run_id: str, **extra: Any) -> None:
-        self._assert_active_checkpoint_closed(run_id, allow_cancel=False)
+        self._assert_active_checkpoint_closed(run_id, allow_cancel=True)
         StoreRunLifecycle(self.store, run_id).open_dispatch(checkpoint_close_verified=True, **extra)
 
     def restore_parent_dispatch(self, run_id: str, **extra: Any) -> bool:
-        self._assert_current_checkpoint_closed(run_id, allow_cancel=False)
+        self._assert_current_checkpoint_closed(run_id, allow_cancel=True)
         return StoreRunLifecycle(self.store, run_id).restore_parent_dispatch(checkpoint_close_verified=True, **extra)
 
     def active_checkpoint(self, run_id: str) -> CheckpointState | None:

@@ -114,6 +114,12 @@ class EvoFlowService:
         start = stages.index(start_stage)
         out: dict[str, list[OperationResult]] = {}
         self._flow_progress('full_flow', 'running', 'starting evo full flow')
+        leftover = self.graph.run_refs({'checkpointed'})
+        if leftover:
+            self.checkpoints.resume_operation_runs(
+                self.run_id, self.graph, leftover, checkpoint_id='operation_checkpointed',
+                input_policy=RESUME_FROM_SNAPSHOT, old_refs_for=self._operation_input_refs,
+            )
         if start == 0:
             self.plan_dataset()
             out['dataset_corpus'] = self._dispatch_stage('dataset_corpus', 'msg_flow_dataset_corpus',
@@ -124,10 +130,11 @@ class EvoFlowService:
         if start == 0:
             notify('dataset', eval_dataset_ref=str(eval_dataset_ref))
             eval_dataset_ref = self.artifacts.latest_ref('eval_dataset')
-        if start <= 1 and not _artifact_field_matches(self.artifacts, 'eval_report', 'eval_dataset_ref',
-                                                      eval_dataset_ref):
+        if start <= 1 and (not _artifact_field_matches(self.artifacts, 'eval_report', 'eval_dataset_ref',
+                                                       eval_dataset_ref) or not self._eval_report_ready()):
             self.create_eval_runs(eval_dataset_ref)
             out['eval'] = self._dispatch_stage('eval', 'msg_flow_eval', ['eval_report'])
+            self._require_eval_report_ready()
         eval_report_ref = self.artifacts.latest_ref('eval_report')
         if start <= 1:
             notify('eval', eval_report_ref=str(eval_report_ref))
@@ -457,7 +464,7 @@ class EvoFlowService:
         allowed = self.registry.capability_ids() if allowed_capabilities is None else list(allowed_capabilities)
         blocked_result = self.blocked_confirmation_result(message_id)
         if blocked_result: return blocked_result
-        self.checkpoints.open_dispatch(self.run_id, message_id=message_id)
+        if dispatch: self.checkpoints.open_dispatch(self.run_id, message_id=message_id)
         return self._plan_message(message_id, message, allowed, dispatch=dispatch, max_dispatch=max_dispatch,
                                   scope=MessageExecutionScope.ROOT)
 
@@ -549,7 +556,7 @@ class EvoFlowService:
         self.runtime.request_interrupt(operation_ref)
         return self.runtime.settle_running(operation_ref)
 
-    def resume_checkpointed(self, *, input_policy: str) -> list[OperationResult]:
+    def resume_checkpointed(self, *, input_policy: str, dispatch: bool = True) -> list[OperationResult]:
         if input_policy not in {RESUME_FROM_SNAPSHOT, RESUME_WITH_INTERVENTIONS}:
             raise ValueError(f'unsupported checkpoint resume input policy: {input_policy}')
         self.checkpoints.resume_operation_runs(
@@ -557,7 +564,7 @@ class EvoFlowService:
             checkpoint_id='operation_checkpointed', input_policy=input_policy,
             old_refs_for=self._operation_input_refs,
         )
-        return self.dispatch(message_id='msg_resume')
+        return self.dispatch(message_id='msg_resume') if dispatch else []
 
     def apply_stage_interventions(self, checkpoint_id: str,
                                   input_policy: ResumeInputPolicy) -> dict[str, list[dict[str, str]]]:
@@ -648,8 +655,12 @@ class EvoFlowService:
         return self.store.artifact_graph(self.run_id)
 
     def _create_run(self, operation_id: str, operation_type: str, *, inputs=None, run_depends_on=None, **spec: Any):
-        # Stable artifact ids are versioned streams: interventions and stage re-runs write new versions.
         if (spec.get('tags') or {}).get('writes_artifact_id'): spec['write_policy'] = 'versioned'
+        active = self.graph.active_run_for(operation_id)
+        if active is not None:
+            status = self.graph.get_run(active).status
+            if status == 'checkpointed': self.graph.reset_run(active)
+            if status in {'pending', 'running', 'checkpointed'}: return active
         return self.graph.create_run(
             OperationSpec(operation_id, operation_type, **spec), inputs=list(inputs or []), depends_on=run_depends_on
         )
@@ -700,6 +711,23 @@ class EvoFlowService:
         self.store.append_event(Event('evo_flow.progress', self.run_id, {
             'stage': stage, 'status': status, 'message': message, 'detail': detail or {}, 'timestamp': time.time(),
         }))
+
+    def _eval_report_checks(self) -> dict[str, Any]:
+        if not _has_latest(self.artifacts, 'eval_report'): return {}
+        report = self.artifacts.get(self.artifacts.latest_ref('eval_report'))
+        return report.get('checks') or {}
+
+    def _eval_report_ready(self) -> bool:
+        checks = self._eval_report_checks()
+        return checks.get('ready') is not False
+
+    def _require_eval_report_ready(self) -> None:
+        """Infra failures (e.g. chat 503) yield no quality data; fail the eval stage instead of 'no badcase'."""
+        checks = self._eval_report_checks()
+        if checks.get('ready') is not False: return
+        detail = {'errors': list(checks.get('errors') or [])[:5]}
+        self._flow_progress('eval', 'failed', 'eval report failed quality gate', detail)
+        raise RuntimeError(f'eval report failed quality gate: {detail}')
 
     def _require_repair_candidate(self) -> None:
         verified_ref = self._latest_ref_prefix('verified_repair_')
@@ -880,7 +908,7 @@ class EvoFlowService:
             policy = str(intent.params.get('input_policy') or '')
             if policy not in {RESUME_FROM_SNAPSHOT, RESUME_WITH_INTERVENTIONS}:
                 raise ValueError('resume_checkpointed requires explicit input_policy')
-            return self.resume_checkpointed(input_policy=policy), True
+            return self.resume_checkpointed(input_policy=policy, dispatch=False), True
         if intent.action == 'retry_operation':
             refs = self.graph.retry_with_downstream(OperationRunRef(str(intent.params['operation_run_id'])),
                                                     source_message_id=message_id)
