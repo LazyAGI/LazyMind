@@ -136,6 +136,19 @@ func (c *DefaultFeishuAPIClient) GetDriveFolder(ctx context.Context, token, fold
 	return driveFolderObject(openAPIMapValue(out["folder"], out), folderToken), nil
 }
 
+func (c *DefaultFeishuAPIClient) GetDriveFile(ctx context.Context, token, fileToken string) (Object, error) {
+	fileToken = strings.TrimSpace(fileToken)
+	if fileToken == "" {
+		return Object{}, connector.NewError(connector.ErrorCodeInvalidArgument, "file token is required")
+	}
+	var out map[string]any
+	path := "/drive/explorer/v2/file/" + url.PathEscape(fileToken) + "/meta"
+	if err := doFeishuOpenAPIJSON(ctx, c.httpClient, endpoint(c.baseURL, path, nil), http.MethodGet, token, nil, &out); err != nil {
+		return Object{}, err
+	}
+	return driveObject(openAPIMapValue(out["file"], out), ""), nil
+}
+
 func (c *DefaultFeishuAPIClient) ListDriveChildren(ctx context.Context, token, folderToken, cursor string, pageSize int) (ObjectPage, error) {
 	var out openAPIDriveFiles
 	if err := doFeishuOpenAPIJSON(ctx, c.httpClient, endpoint(c.baseURL, "/drive/v1/files", driveFilesQuery(folderToken, cursor, pageSize)), http.MethodGet, token, nil, &out); err != nil {
@@ -447,7 +460,7 @@ func driveObjectPage(data openAPIDriveFiles, parentToken string) ObjectPage {
 }
 
 func driveObject(item map[string]any, parentToken string) Object {
-	token := openAPIString(item["token"])
+	token := firstNonEmpty(openAPIString(item["token"]), openAPIString(item["file_token"]))
 	name := firstNonEmpty(openAPIString(item["name"]), token)
 	rawType := strings.ToLower(firstNonEmpty(openAPIString(item["type"]), openAPIString(item["file_type"])))
 	isFolder := rawType == "folder"
@@ -473,7 +486,7 @@ func driveObject(item map[string]any, parentToken string) Object {
 	object := Object{
 		Kind:                ObjectKindDriveFile,
 		Token:               token,
-		ParentToken:         strings.TrimSpace(parentToken),
+		ParentToken:         firstNonEmpty(strings.TrimSpace(parentToken), openAPIString(item["parent_token"]), openAPIString(item["parent_folder_token"])),
 		Name:                name,
 		IsDocument:          true,
 		Revision:            revision,

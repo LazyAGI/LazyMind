@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"context"
+	"strings"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 )
@@ -24,6 +25,9 @@ func (c *FeishuConnector) fetchOnePage(ctx context.Context, token string, req co
 	case connector.ScopeTypeFull:
 		return c.fetchListPage(ctx, token, req)
 	case connector.ScopeTypePartial:
+		if req.TargetType == TargetTypeDriveFolder && scopedDriveObjectKey(req.ScopeRef) != "" {
+			return c.fetchWatchObject(ctx, token, req)
+		}
 		if req.TargetType == TargetTypeWikiNode && scopeNodeRef(req.ScopeRef) != "" {
 			return c.fetchWatchObject(ctx, token, req)
 		}
@@ -65,6 +69,16 @@ func (c *FeishuConnector) loadScopedObject(ctx context.Context, token string, re
 	}
 	switch req.TargetType {
 	case TargetTypeDriveFolder:
+		if objectKey := scopedDriveObjectKey(req.ScopeRef); objectKey != "" {
+			object, err := c.api.GetDriveFile(ctx, token, driveFolderToken(objectKey))
+			if err == nil {
+				return object, nil
+			}
+			if isFeishuNotFound(err) {
+				return c.api.GetDriveFolder(ctx, token, driveFolderToken(objectKey))
+			}
+			return Object{}, err
+		}
 		return c.api.GetDriveFolder(ctx, token, driveFolderToken(nodeRef))
 	case TargetTypeWikiNode:
 		if spaceID, ok := wikiSpaceID(nodeRef); ok {
@@ -78,4 +92,12 @@ func (c *FeishuConnector) loadScopedObject(ctx context.Context, token string, re
 	default:
 		return Object{}, connector.NewError(connector.ErrorCodeInvalidTarget, "target_type is not supported")
 	}
+}
+
+func scopedDriveObjectKey(scopeRef connector.ScopeRef) string {
+	objectKey := strings.TrimSpace(scopeRef["object_key"])
+	if strings.HasPrefix(objectKey, string(ConnectorType)+":drive:") {
+		return strings.TrimPrefix(objectKey, string(ConnectorType)+":drive:")
+	}
+	return ""
 }

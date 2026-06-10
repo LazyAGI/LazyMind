@@ -204,6 +204,48 @@ func TestGenerateTasksQueuesManualSyncForTreeNodeKey(t *testing.T) {
 	}
 }
 
+func TestGenerateTasksUsesFreshManualRequestIDWhenClientOmitsRequestID(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	repo := newPlannerStore(now)
+	syncer := &manualSyncSchedulerStub{}
+	planner := NewDBTaskPlanner(
+		repo,
+		WithClock(func() time.Time { return now }),
+		WithIDGenerator(repo.nextID),
+		WithManualSyncScheduler(syncer),
+	)
+	req := GenerateRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		Mode:      "partial",
+		Scopes: []GenerateScope{{
+			ObjectKey:  "feishu:drive:file-a",
+			IsDocument: true,
+		}},
+	}
+
+	first, err := planner.GenerateTasks(ctx, req)
+	if err != nil {
+		t.Fatalf("generate first manual sync: %v", err)
+	}
+	second, err := planner.GenerateTasks(ctx, req)
+	if err != nil {
+		t.Fatalf("generate second manual sync: %v", err)
+	}
+	if len(syncer.calls) != 2 {
+		t.Fatalf("expected two sync calls, got %+v", syncer.calls)
+	}
+	if syncer.calls[0].RequestID == syncer.calls[1].RequestID {
+		t.Fatalf("manual sync without client request_id should not reuse request id: %q", syncer.calls[0].RequestID)
+	}
+	if len(first.RunIDs) != 1 || len(second.RunIDs) != 1 || first.RunIDs[0] == second.RunIDs[0] {
+		t.Fatalf("manual sync without client request_id should queue distinct runs, first=%+v second=%+v", first, second)
+	}
+}
+
 func TestGenerateTasksQueuesManualSyncForContainerScope(t *testing.T) {
 	t.Parallel()
 

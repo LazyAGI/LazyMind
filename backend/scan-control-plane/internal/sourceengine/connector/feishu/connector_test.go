@@ -370,6 +370,60 @@ func TestWikiPartialFetchWithObjectKeyReturnsSelectedNode(t *testing.T) {
 	}
 }
 
+func TestDrivePartialFetchWithObjectKeyReturnsSelectedFile(t *testing.T) {
+	t.Parallel()
+
+	api := newFeishuAPIStub()
+	conn := NewFeishuConnector(&authStub{}, api)
+	page, err := conn.FetchPage(context.Background(), connector.FetchPageRequest{
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		TargetType:        TargetTypeDriveFolder,
+		TargetRef:         "folder-root",
+		ScopeType:         connector.ScopeTypePartial,
+		ScopeRef:          connector.ScopeRef{"object_key": "feishu:drive:file-a"},
+		PageSize:          10,
+		AuthConnectionID:  "auth-1",
+	})
+	if err != nil {
+		t.Fatalf("partial fetch drive object: %v", err)
+	}
+	if got := feishuObjectKeys(page.Items); !sameStrings(got, []string{"feishu:drive:file-a"}) {
+		t.Fatalf("partial object fetch should return selected drive file, got %v", got)
+	}
+	if api.driveFileCalls != 1 || len(api.drivePageSizes) != 0 {
+		t.Fatalf("drive object fetch should use file metadata, file_calls=%d list_calls=%d", api.driveFileCalls, len(api.drivePageSizes))
+	}
+}
+
+func TestDrivePartialFetchWithFolderObjectKeyFallsBackToFolderMetadata(t *testing.T) {
+	t.Parallel()
+
+	api := newFeishuAPIStub()
+	conn := NewFeishuConnector(&authStub{}, api)
+	page, err := conn.FetchPage(context.Background(), connector.FetchPageRequest{
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		TargetType:        TargetTypeDriveFolder,
+		TargetRef:         "folder-root",
+		ScopeType:         connector.ScopeTypePartial,
+		ScopeRef:          connector.ScopeRef{"object_key": "feishu:drive:folder-guides"},
+		PageSize:          10,
+		AuthConnectionID:  "auth-1",
+	})
+	if err != nil {
+		t.Fatalf("partial fetch drive folder object: %v", err)
+	}
+	if got := feishuObjectKeys(page.Items); !sameStrings(got, []string{"feishu:drive:folder-guides"}) {
+		t.Fatalf("partial folder object fetch should return selected folder, got %v", got)
+	}
+	if api.driveFileCalls != 1 || api.driveFolderCalls != 1 {
+		t.Fatalf("folder object fetch should try file metadata then folder metadata, file_calls=%d folder_calls=%d", api.driveFileCalls, api.driveFolderCalls)
+	}
+}
+
 func TestDriveShortcutExportsTargetFile(t *testing.T) {
 	t.Parallel()
 
@@ -540,6 +594,7 @@ type feishuAPIStub struct {
 	drivePageSizes   []int
 	wikiPageSizes    []int
 	driveFolderCalls int
+	driveFileCalls   int
 	downloadCalls    int
 	driveExportCalls int
 }
@@ -579,9 +634,22 @@ func (a *feishuAPIStub) GetDriveRoot(context.Context, string) (Object, error) {
 	return a.GetDriveFolder(context.Background(), "", "folder-root")
 }
 
-func (a *feishuAPIStub) GetDriveFolder(context.Context, string, string) (Object, error) {
+func (a *feishuAPIStub) GetDriveFolder(_ context.Context, _ string, folderToken string) (Object, error) {
 	a.driveFolderCalls++
-	return a.driveObjects["folder-root"], nil
+	object, ok := a.driveObjects[driveFolderToken(folderToken)]
+	if !ok || object.Kind != ObjectKindDriveFolder {
+		return Object{}, connector.NewError(connector.ErrorCodeNotFound, "drive folder not found")
+	}
+	return object, nil
+}
+
+func (a *feishuAPIStub) GetDriveFile(_ context.Context, _ string, fileToken string) (Object, error) {
+	a.driveFileCalls++
+	object, ok := a.driveObjects[fileToken]
+	if !ok || object.Kind != ObjectKindDriveFile {
+		return Object{}, connector.NewError(connector.ErrorCodeNotFound, "drive file not found")
+	}
+	return object, nil
 }
 
 func (a *feishuAPIStub) ListDriveChildren(_ context.Context, _ string, folderToken, cursor string, pageSize int) (ObjectPage, error) {

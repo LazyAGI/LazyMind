@@ -311,6 +311,10 @@ func (a *appFeishuAPIStub) GetDriveFolder(context.Context, string, string) (feis
 	return feishu.Object{}, fmt.Errorf("not implemented")
 }
 
+func (a *appFeishuAPIStub) GetDriveFile(context.Context, string, string) (feishu.Object, error) {
+	return feishu.Object{}, fmt.Errorf("not implemented")
+}
+
 func (a *appFeishuAPIStub) ListDriveChildren(context.Context, string, string, string, int) (feishu.ObjectPage, error) {
 	return feishu.ObjectPage{}, fmt.Errorf("not implemented")
 }

@@ -165,12 +165,16 @@ func (p *DBTaskPlanner) queueManualSyncs(ctx context.Context, req GenerateReques
 	if p.maxManualObjects > 0 && len(scopes) > p.maxManualObjects {
 		return GenerateResult{}, parseBatchLimitError(p.maxManualObjects, len(scopes), "request_object_ids")
 	}
+	syncReqBase := req
+	if strings.TrimSpace(syncReqBase.RequestID) == "" {
+		syncReqBase.RequestID = p.newID("manual-pull")
+	}
 	result := GenerateResult{RequestedCount: len(scopes), TaskIDs: []string{}}
 	for idx, scope := range scopes {
 		syncReq := sourceengine.TriggerSourceSyncRequest{
 			CallerID:  req.CallerID,
 			TenantID:  req.TenantID,
-			RequestID: syncRequestID(req, scope, idx),
+			RequestID: syncRequestID(syncReqBase, scope, idx),
 			SourceID:  req.SourceID,
 			BindingID: bindingID,
 			ScopeType: scope.scopeType,
