@@ -114,6 +114,14 @@ func (r *Repository) GetActive(ctx context.Context, id string) (*orm.EvalSet, er
 func (r *Repository) Create(ctx context.Context, req CreateEvalSetRequest, userID, userName string) (*orm.EvalSet, error) {
 	var created orm.EvalSet
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		exists, err := evalSetNameExists(ctx, tx, userID, "", req.Name)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return errDatasetNameExists
+		}
+
 		shard, err := r.allocateShard(ctx, tx)
 		if err != nil {
 			return err
@@ -198,6 +206,15 @@ func (r *Repository) Update(ctx context.Context, id string, update EvalSetUpdate
 			First(&locked).Error; err != nil {
 			return err
 		}
+		if update.Name != nil {
+			exists, err := evalSetNameExists(ctx, tx, locked.OwnerID, locked.ID, *update.Name)
+			if err != nil {
+				return err
+			}
+			if exists {
+				return errDatasetNameExists
+			}
+		}
 
 		values := map[string]any{"updated_at": time.Now().UTC()}
 		if update.Name != nil {
@@ -240,6 +257,23 @@ func (r *Repository) Update(ctx context.Context, id string, update EvalSetUpdate
 		return nil, err
 	}
 	return &updated, nil
+}
+
+func evalSetNameExists(ctx context.Context, tx *gorm.DB, ownerID, excludeID, name string) (bool, error) {
+	normalizedName := strings.ToLower(strings.TrimSpace(name))
+	if normalizedName == "" {
+		return false, nil
+	}
+	q := tx.WithContext(ctx).Model(&orm.EvalSet{}).
+		Where("owner_id = ? AND status = ? AND LOWER(name) = ?", ownerID, StatusActive, normalizedName)
+	if strings.TrimSpace(excludeID) != "" {
+		q = q.Where("id <> ?", excludeID)
+	}
+	var count int64
+	if err := q.Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func (r *Repository) Delete(ctx context.Context, id string) error {

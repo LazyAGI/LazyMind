@@ -163,6 +163,45 @@ func TestCreateEvalSetWritesOwnerACL(t *testing.T) {
 	}
 }
 
+func TestCreateEvalSetRejectsDuplicateNameForSameOwner(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	existing := seedEvalSet(t, db, "eval_set_existing", "owner_1", "", "", time.Now().UTC())
+	if err := db.Model(&orm.EvalSet{}).Where("id = ?", existing.ID).Update("name", "wbc_test").Error; err != nil {
+		t.Fatalf("update existing name: %v", err)
+	}
+
+	rec, req := requestWithUser(http.MethodPost, "/api/core/eval-sets", `{"name":" wbc_test ","dataset_ids":["dataset_1"]}`, "owner_1")
+	CreateEvalSet(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected status 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "dataset name already exists") {
+		t.Fatalf("expected duplicate name message, got %s", rec.Body.String())
+	}
+}
+
+func TestUpdateEvalSetRejectsDuplicateNameForSameOwner(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	now := time.Now().UTC()
+	existing := seedEvalSet(t, db, "eval_set_existing", "owner_1", "", "", now)
+	target := seedEvalSet(t, db, "eval_set_target", "owner_1", "", "", now)
+	if err := db.Model(&orm.EvalSet{}).Where("id = ?", existing.ID).Update("name", "wbc_test").Error; err != nil {
+		t.Fatalf("update existing name: %v", err)
+	}
+
+	rec, req := requestWithUser(http.MethodPatch, "/api/core/eval-sets/eval_set_target", `{"name":"WBC_TEST"}`, "owner_1")
+	req = mux.SetURLVars(req, map[string]string{"eval_set_id": target.ID})
+	UpdateEvalSet(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected status 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "dataset name already exists") {
+		t.Fatalf("expected duplicate name message, got %s", rec.Body.String())
+	}
+}
+
 func TestListEvalSetsOnlyReturnsAccessibleRows(t *testing.T) {
 	db := newEvalSetTestDB(t)
 	now := time.Now().UTC()
