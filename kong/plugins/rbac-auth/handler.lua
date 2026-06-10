@@ -111,7 +111,7 @@ function RbacAuthHandler:access(conf)
       local uid = payload.user_id or payload.sub
       local uname = payload.username
       local tenant = payload.tenant_id or payload.tenant_code
-      kong.log.err("rbac-auth: jwt payload user_id=", uid, " username=", uname, " tenant=", tenant)
+      kong.log.debug("rbac-auth: jwt payload user_id=", uid, " username=", uname, " tenant=", tenant)
       if uid then
         kong.service.request.set_header("X-User-Id", tostring(uid))
       end
@@ -122,7 +122,7 @@ function RbacAuthHandler:access(conf)
         kong.service.request.set_header("X-Tenant-Id", tostring(tenant))
       end
     else
-      kong.log.err("rbac-auth: failed to decode JWT payload for header injection")
+      kong.log.warn("rbac-auth: failed to decode JWT payload for header injection")
     end
   end
 end

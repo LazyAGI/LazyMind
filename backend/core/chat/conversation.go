@@ -204,35 +204,19 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "build chat resource context failed", err), http.StatusInternalServerError)
 		return
 	}
-	reqBody := buildChatRequestBody(convID, sessionID, query, upstreamHistories, raw, resourceContext, userID)
-	historyExt := buildChatHistoryExt(raw, query)
-	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), db, userID)
+	dbDisabledTools, err := listDisabledToolNames(r.Context(), db, userID)
 	if err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load llm config failed", err), http.StatusInternalServerError)
+		common.ReplyErr(w, "query disabled tools failed", http.StatusInternalServerError)
 		return
 	}
-	if len(llmConfig) > 0 {
-		reqBody["llm_config"] = llmConfig
+	if len(dbDisabledTools) > 0 {
+		resourceContext.DisabledTools = mergeDisabledToolNames(resourceContext.DisabledTools, dbDisabledTools)
 	}
-	var toolConfig map[string]any
-	if feishuTokens, err := fetchFeishuTokens(r.Context(), userID); err != nil {
-		fmt.Printf("[Core] [FEISHU_TOKEN] failed to fetch feishu tokens for user %s: %v\n", userID, err)
-	} else if len(feishuTokens) > 0 {
-		var feishuValue any
-		if len(feishuTokens) == 1 {
-			feishuValue = feishuTokens[0]
-		} else {
-			feishuValue = feishuTokens
-		}
-		toolConfig = mergeToolConfig(toolConfig, map[string]any{"feishu": feishuValue})
-	}
-	if searchConfig, err := searchToolConfigEntry(r.Context(), db, userID); err != nil {
-		fmt.Printf("[Core] [SEARCH_TOOL_CONFIG] failed to load search tool config for user %s: %v\n", userID, err)
-	} else if len(searchConfig) > 0 {
-		toolConfig = mergeToolConfig(toolConfig, searchConfig)
-	}
-	if len(toolConfig) > 0 {
-		reqBody["tool_config"] = toolConfig
+	reqBody := buildChatRequestBody(convID, sessionID, query, upstreamHistories, raw, resourceContext, userID)
+	historyExt := buildChatHistoryExt(raw, query)
+	if err := applyChatRuntimeConfigs(r.Context(), db, userID, reqBody); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat runtime config failed", err), http.StatusInternalServerError)
+		return
 	}
 	baseURL := chatServiceURL()
 	reqCtx := r.Context()

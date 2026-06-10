@@ -23,8 +23,27 @@ const headerCss = `
 .detail-page-title {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 12px;
   min-width: 0;
+  flex-wrap: nowrap;
+}
+.detail-page-title-main,
+.detail-page-title-actions {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.detail-page-title-main {
+  flex: 1 1 auto;
+  gap: 10px;
+}
+.detail-page-title-actions {
+  flex: 0 0 auto;
+  gap: 12px;
+  justify-content: flex-end;
+  max-width: 50%;
+  overflow: hidden;
 }
 .detail-title {
   font-size: 20px;
@@ -53,6 +72,7 @@ const headerCss = `
   min-width: 0;
   display: flex;
   align-items: center;
+  flex: 0 1 auto;
 }
 .title-extra-text {
   max-width: 320px;
@@ -60,7 +80,20 @@ const headerCss = `
 .detail-page-description-text {
   max-width: 100%;
 }
-.settings-menu { display: flex; align-items: center; gap: 4px; }
+.settings-menu {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-width: max-content;
+}
+.settings-menu > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-menu button {
+  margin-left: 0 !important;
+}
 .extra-content { display: flex; flex-wrap: wrap; gap: 8px 24px; }
 .extra-content-item { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
 .extra-content-label { font-size: 12px; color: #666; }
@@ -71,6 +104,17 @@ const headerCss = `
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .detail-page-title {
+    gap: 8px;
+  }
+  .detail-page-title-main {
+    gap: 8px;
+  }
+  .detail-page-title-actions {
+    display: none;
+  }
 }
 `;
 
@@ -142,21 +186,27 @@ export default function DetailPageHeader({
         <Breadcrumb items={normalizedBreadcrumbs} />
       )}
       <div className="detail-page-title">
-        {showBackButton && (
-          <Button
-            type="primary"
-            ghost
-            icon={<LeftOutlined />}
-            onClick={() => (onBack ? onBack() : window.history.back())}
-          />
-        )}
-        <span className="detail-title">
-          {renderTextWithTooltip(title, "detail-title-text")}
-        </span>
-        {settingsMenu && <div className="settings-menu">{settingsMenu}</div>}
-        {titleExtra && (
-          <div className="title-extra">
-            {renderTextWithTooltip(titleExtra, "title-extra-text")}
+        <div className="detail-page-title-main">
+          {showBackButton && (
+            <Button
+              type="primary"
+              ghost
+              icon={<LeftOutlined />}
+              onClick={() => (onBack ? onBack() : window.history.back())}
+            />
+          )}
+          <span className="detail-title">
+            {renderTextWithTooltip(title, "detail-title-text")}
+          </span>
+        </div>
+        {(settingsMenu || titleExtra) && (
+          <div className="detail-page-title-actions">
+            {settingsMenu && <div className="settings-menu">{settingsMenu}</div>}
+            {titleExtra && (
+              <div className="title-extra">
+                {renderTextWithTooltip(titleExtra, "title-extra-text")}
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -26,7 +26,6 @@ import (
 	"lazymind/core/common/readonlyorm"
 	applog "lazymind/core/log"
 	"lazymind/core/modelconfig"
-	"lazymind/core/modelprovider"
 	"lazymind/core/store"
 
 	"github.com/gorilla/mux"
@@ -223,15 +222,8 @@ func BatchUploadTasks(w http.ResponseWriter, r *http.Request) {
 		replyDatasetForbidden(w)
 		return
 	}
-	if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embed_main"); err != nil || !ready {
-		common.ReplyErr(w, "embedding model is not ready", http.StatusUnprocessableEntity)
+	if replyEmbedNotReady(w, r, userID) {
 		return
-	}
-	if features := modelprovider.GetCachedModelFeatures(); features.ImageEmbedRequired {
-		if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embed_image"); err != nil || !ready {
-			common.ReplyErr(w, "multimodal embedding model is not ready", http.StatusUnprocessableEntity)
-			return
-		}
 	}
 	if err := r.ParseMultipartForm(512 << 20); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid multipart form", err), http.StatusBadRequest)
@@ -284,15 +276,8 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		replyDatasetForbidden(w)
 		return
 	}
-	if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embed_main"); err != nil || !ready {
-		common.ReplyErr(w, "embedding model is not ready", http.StatusUnprocessableEntity)
+	if replyEmbedNotReady(w, r, userID) {
 		return
-	}
-	if features := modelprovider.GetCachedModelFeatures(); features.ImageEmbedRequired {
-		if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embed_image"); err != nil || !ready {
-			common.ReplyErr(w, "multimodal embedding model is not ready", http.StatusUnprocessableEntity)
-			return
-		}
 	}
 	if err := r.ParseMultipartForm(512 << 20); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid multipart form", err), http.StatusBadRequest)
@@ -457,10 +442,8 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		offset = v
 	}
 
-	var rows []orm.Task
 	db := store.DB().WithContext(r.Context())
 	query := db.Where("dataset_id = ? AND deleted_at IS NULL", datasetID)
-	filterTaskState := strings.TrimSpace(q.Get("task_state"))
 	if taskType := strings.TrimSpace(q.Get("task_type")); taskType != "" {
 		query = query.Where("task_type = ?", taskType)
 	}
@@ -470,8 +453,71 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 	if documentPID := strings.TrimSpace(q.Get("document_pid")); documentPID != "" {
 		query = query.Where("document_pid = ?", documentPID)
 	}
+
+	// task_state doubles as a UI-level filter when set to "running", "success", or "failed".
+	// These UI values are expanded into sets of internal lazyllm status strings so that
+	// filtering happens at the database level and pagination counts are accurate.
+	if uiStatus := strings.ToLower(strings.TrimSpace(q.Get("task_state"))); uiStatus != "" {
+		internalStates := uiTaskStatusToInternalStates(uiStatus)
+		if len(internalStates) > 0 {
+			var lazyllmTaskIDs []string
+			store.LazyLLMDB().WithContext(r.Context()).
+				Table((readonlyorm.LazyLLMDocServiceTaskRow{}).TableName()).
+				Select("task_id").
+				Where("kb_id = ? AND status IN ?", datasetID, internalStates).
+				Pluck("task_id", &lazyllmTaskIDs)
+			if uiStatus == "running" {
+				// Tasks that have not yet been submitted to lazyllm have no lazyllm_task_id.
+				// Their state lives in ext and they are implicitly "running" only when their
+				// ext.task_state is a non-terminal value (CREATING / UPLOADING / UPLOADED / "").
+				// We must NOT include tasks whose ext.task_state is already SUCCEEDED/FAILED/etc.
+				// because those are historical completed tasks that happen to lack a lazyllm_task_id.
+				var noLazyllmIDs []string
+				{
+					var noLazyllmRows []orm.Task
+					noLazyllmQ := db.Where("dataset_id = ? AND deleted_at IS NULL AND lazyllm_task_id = ''", datasetID)
+					if taskType := strings.TrimSpace(q.Get("task_type")); taskType != "" {
+						noLazyllmQ = noLazyllmQ.Where("task_type = ?", taskType)
+					}
+					if documentID := strings.TrimSpace(q.Get("document_id")); documentID != "" {
+						noLazyllmQ = noLazyllmQ.Where("doc_id = ?", documentID)
+					}
+					if documentPID := strings.TrimSpace(q.Get("document_pid")); documentPID != "" {
+						noLazyllmQ = noLazyllmQ.Where("document_pid = ?", documentPID)
+					}
+					_ = noLazyllmQ.Select("id, ext").Find(&noLazyllmRows).Error
+					for _, row := range noLazyllmRows {
+						var ext taskExt
+						_ = json.Unmarshal(row.Ext, &ext)
+						s := strings.ToUpper(strings.TrimSpace(ext.TaskState))
+						if s == "" || s == string(TaskStateCreating) || s == string(TaskStateUploading) || s == string(TaskStateUploaded) {
+							noLazyllmIDs = append(noLazyllmIDs, row.ID)
+						}
+					}
+				}
+				if len(lazyllmTaskIDs) > 0 && len(noLazyllmIDs) > 0 {
+					query = query.Where("lazyllm_task_id IN ? OR id IN ?", lazyllmTaskIDs, noLazyllmIDs)
+				} else if len(lazyllmTaskIDs) > 0 {
+					query = query.Where("lazyllm_task_id IN ?", lazyllmTaskIDs)
+				} else if len(noLazyllmIDs) > 0 {
+					query = query.Where("id IN ?", noLazyllmIDs)
+				} else {
+					common.ReplyJSON(w, ListTasksResponse{Tasks: []TaskResponse{}, TotalSize: 0, NextPageToken: ""})
+					return
+				}
+			} else {
+				if len(lazyllmTaskIDs) == 0 {
+					common.ReplyJSON(w, ListTasksResponse{Tasks: []TaskResponse{}, TotalSize: 0, NextPageToken: ""})
+					return
+				}
+				query = query.Where("lazyllm_task_id IN ?", lazyllmTaskIDs)
+			}
+		}
+	}
+
 	var total int64
 	_ = query.Model(&orm.Task{}).Count(&total).Error
+	var rows []orm.Task
 	if err := query.Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&rows).Error; err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query tasks failed", err), http.StatusInternalServerError)
 		return
@@ -479,24 +525,13 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]TaskResponse, 0, len(rows))
 	for _, row := range rows {
-		item := buildTaskResponse(r, row)
-		if filterTaskState != "" && item.TaskState != filterTaskState {
-			continue
-		}
-		out = append(out, item)
+		out = append(out, buildTaskResponse(r, row))
 	}
 	next := ""
 	if offset+len(rows) < int(total) {
 		next = encodeDatasetPageToken(offset+len(rows), pageSize, int(total))
 	}
-	totalResp := total
-	if filterTaskState != "" {
-		totalResp = int64(len(out))
-		if next != "" {
-			next = ""
-		}
-	}
-	common.ReplyJSON(w, ListTasksResponse{Tasks: out, TotalSize: int32(totalResp), NextPageToken: next})
+	common.ReplyJSON(w, ListTasksResponse{Tasks: out, TotalSize: int32(total), NextPageToken: next})
 }
 
 func CreateTask(w http.ResponseWriter, r *http.Request) {
@@ -515,15 +550,8 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 		replyDatasetForbidden(w)
 		return
 	}
-	if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embed_main"); err != nil || !ready {
-		common.ReplyErr(w, "embedding model is not ready", http.StatusUnprocessableEntity)
+	if replyEmbedNotReady(w, r, userID) {
 		return
-	}
-	if features := modelprovider.GetCachedModelFeatures(); features.ImageEmbedRequired {
-		if ready, err := modelprovider.IsModelReady(r.Context(), store.DB(), userID, "embed_image"); err != nil || !ready {
-			common.ReplyErr(w, "multimodal embedding model is not ready", http.StatusUnprocessableEntity)
-			return
-		}
 	}
 
 	var req CreateTaskRequest
@@ -1290,6 +1318,11 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 		log.Printf("[startParseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
 		llmConfig = nil
 	}
+	ocrConfig, err := modelconfig.LoadOCRConfig(r.Context(), store.DB(), userID)
+	if err != nil {
+		log.Printf("[startParseTasksInternal] failed to load ocr_config for user=%s: %v", userID, err)
+		ocrConfig = nil
+	}
 	resultsByTaskID := make(map[string]StartTaskResult, len(taskIDs))
 	orderedUniqueIDs := make([]string, 0, len(taskIDs))
 
@@ -1357,7 +1390,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 			items = append(items, buildAddFileItem(datasetID, candidate.task, candidate.doc, candidate.docExt, parsePath))
 		}
 		if len(baseTasks) > 0 {
-			extResults, err := callExternalAddDocs(r, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig})
+			extResults, err := callExternalAddDocs(r, addRequest{Items: items, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig})
 			if err != nil {
 				for i, taskRow := range baseTasks {
 					resolved := common.ResolveAppError(err.Error(), http.StatusBadGateway)
@@ -1405,7 +1438,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 					return
 				}
 				item := buildAddFileItem(datasetID, candidate.task, candidate.doc, dExt, parsePath)
-				extResults, err := callExternalAddDocs(r, addRequest{Items: []addFileItem{item}, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig})
+				extResults, err := callExternalAddDocs(r, addRequest{Items: []addFileItem{item}, KbID: kbID, SourceType: "EXTERNAL", IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig})
 				if err != nil {
 					resolved := common.ResolveAppError(err.Error(), http.StatusBadGateway)
 					outcomes[idx] = officeOutcome{task: candidate.task, doc: candidate.doc, docExt: dExt, result: StartTaskResult{TaskID: candidate.task.ID, DocumentID: candidate.doc.ID, DisplayName: candidate.doc.DisplayName, Status: "FAILED", SubmitStatus: "FAILED", Message: resolved.Message, Detail: fmt.Sprint(resolved.Detail)}}
@@ -1495,6 +1528,14 @@ func buildTaskResponse(r *http.Request, row orm.Task) TaskResponse {
 			extTaskFound = true
 		}
 	}
+	if !extTaskFound && lazyTask != "" && lazyDoc == "" {
+		// Document was deleted from core DB (lazyDoc is empty) but the lazyllm task record
+		// may still exist. Query by task_id alone so we can report the correct terminal state
+		// rather than falling back to a misleading CREATING/WAITING default.
+		if err := store.LazyLLMDB().WithContext(r.Context()).Table((readonlyorm.LazyLLMDocServiceTaskRow{}).TableName()).Where("task_id = ?", lazyTask).Take(&extTask).Error; err == nil {
+			extTaskFound = true
+		}
+	}
 	if !extTaskFound && lazyDoc != "" && TaskType(strings.TrimSpace(row.TaskType)) != TaskTypeReparse {
 		if err := store.LazyLLMDB().WithContext(r.Context()).Table((readonlyorm.LazyLLMDocServiceTaskRow{}).TableName()).Where("doc_id = ?", lazyDoc).Order("updated_at DESC").Take(&extTask).Error; err == nil {
 			extTaskFound = true
@@ -1512,7 +1553,24 @@ func buildTaskResponse(r *http.Request, row orm.Task) TaskResponse {
 			resp.FinishTime = extTask.FinishedAt.UTC().Format(time.RFC3339Nano)
 		}
 	} else {
-		resp.TaskState = firstNonEmpty(strings.TrimSpace(ext.TaskState), string(TaskStateCreating))
+		// When there is no lazyllm task record we fall back to the state stored in ext.
+		// If ext.TaskState is empty this task was created before state tracking was added.
+		// In that case, check whether the associated document exists and has a lazyllm_doc_id;
+		// if so the task already completed successfully in the past.  Only default to
+		// TaskStateCreating (which renders as WAITING/in-progress) when it really appears to
+		// be a brand-new un-submitted task (no lazyllm doc at all and no terminal state in ext).
+		rawState := strings.TrimSpace(ext.TaskState)
+		if rawState == "" {
+			if lazyTask != "" {
+				rawState = string(TaskStateRunning)
+			} else if lazyDoc != "" {
+				// Document was already registered with lazyllm → task must have completed.
+				rawState = string(TaskStateSucceeded)
+			} else {
+				rawState = string(TaskStateCreating)
+			}
+		}
+		resp.TaskState = rawState
 		resp.ErrMsg = strings.TrimSpace(ext.ErrorMessage)
 	}
 	var extDoc readonlyorm.LazyLLMDocRow
@@ -1712,10 +1770,27 @@ func normalizeTaskStateForUI(state string) string {
 		return "SUCCESS"
 	case string(TaskStateFailed):
 		return "FAILED"
-	case string(TaskStateCancelled):
+	case string(TaskStateCancelled), string(TaskStateSuspended):
 		return "CANCELED"
 	default:
 		return strings.TrimSpace(state)
+	}
+}
+
+// uiTaskStatusToInternalStates maps the three UI-level task status values
+// ("running", "success", "failed") to the raw status strings stored in the
+// lazyllm_doc_service_tasks table. These are the values used for DB-level
+// filtering in ListTasks so that pagination is accurate.
+func uiTaskStatusToInternalStates(uiStatus string) []string {
+	switch strings.ToLower(strings.TrimSpace(uiStatus)) {
+	case "running":
+		return []string{"CREATING", "UPLOADING", "UPLOADED", "RUNNING", "STARTED", "SUBMITTED", "PROCESSING"}
+	case "success":
+		return []string{"SUCCEEDED", "SUCCESS"}
+	case "failed":
+		return []string{"FAILED", "CANCELED", "SUSPENDED"}
+	default:
+		return nil
 	}
 }
 
@@ -2409,6 +2484,11 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		log.Printf("[startReparseTasksInternal] failed to load llm_config for user=%s: %v", userID, err)
 		llmConfig = nil
 	}
+	ocrConfig, err := modelconfig.LoadOCRConfig(r.Context(), store.DB(), userID)
+	if err != nil {
+		log.Printf("[startReparseTasksInternal] failed to load ocr_config for user=%s: %v", userID, err)
+		ocrConfig = nil
+	}
 	docIDs := make([]string, 0, len(taskIDs))
 	taskRows := make([]orm.Task, 0, len(taskIDs))
 	docRows := make([]orm.Document, 0, len(taskIDs))
@@ -2478,7 +2558,7 @@ func startReparseTasksInternal(r *http.Request, datasetID string, taskIDs []stri
 		Str("reparse_mode", reparseMode).
 		Str("strategy", strategy).
 		Msg("submitting reparse batch to doc service")
-	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, Strategy: strategy, IdempotencyKey: newTaskID(), ModelConfig: llmConfig})
+	lazyllmTaskIDs, err := callExternalReparseDocs(r, reparseRequest{DocIDs: docIDs, KbID: kbID, NgNames: ngNames, Strategy: strategy, IdempotencyKey: newTaskID(), ModelConfig: llmConfig, OCRConfig: ocrConfig})
 	if err != nil {
 		errMsg := common.ResolveAppError(err.Error(), http.StatusBadGateway).Message
 		applog.Logger.Error().

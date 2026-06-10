@@ -70,6 +70,7 @@ class AgentEventFrameTranslator:
         self.language = _preview_language(query)
         self._pending_previews: dict[str, str] = {}
         self.streamed_text = False
+        self.tool_call_turns = 0
         self.text_scanner, self.citation_plugin = build_stream_citation_scanner(self.citation_state)
 
     def feed(self, event: Any) -> list[dict[str, Any]]:
@@ -95,6 +96,7 @@ class AgentEventFrameTranslator:
         if event_type == 'tool_calls':
             tool_calls = [tc for tc in (event.get('tool_calls', []) or []) if isinstance(tc, dict)]
             if tool_calls:
+                self.tool_call_turns += 1
                 parts: list[str] = []
                 for tc in tool_calls:
                     text, pv = _tool_call_frame_text(tc, self.language)

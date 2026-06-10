@@ -1,7 +1,4 @@
-import type { UploadFile } from "antd";
-
 export type DatasetItemSource = "upload" | "flowback" | "manual";
-export type DatasetCreateMethod = "manual" | "upload";
 export type DatasetFileType = "xlsx" | "xls" | "csv" | "json";
 export type ImportStep = "selectFile" | "preview" | "result";
 
@@ -39,6 +36,8 @@ export interface DatasetItem {
   reference_doc?: string;
   reference_doc_ids?: string[];
   reference_chunk_ids?: string[];
+  reference_doc_from_knowledge_base?: boolean;
+  reference_chunk_selected?: boolean;
   generate_reason?: string;
   is_deleted?: boolean;
   source: DatasetItemSource;
@@ -66,8 +65,6 @@ export interface DatasetFormValues {
   name: string;
   description?: string;
   knowledge_base_ids?: string[];
-  create_method: DatasetCreateMethod;
-  uploadFile?: UploadFile[];
 }
 
 export interface DatasetImportRecord {
@@ -123,6 +120,20 @@ export const datasetItemFields: DatasetItemField[] = [
   "generate_reason",
   "is_deleted",
 ];
+
+export const datasetItemFieldI18nKeys: Record<DatasetItemField, string> = {
+  case_id: "datasetManagement.fields.caseId",
+  question: "datasetManagement.fields.question",
+  question_type: "datasetManagement.fields.questionType",
+  ground_truth: "datasetManagement.fields.groundTruth",
+  key_points: "datasetManagement.fields.keyPoints",
+  reference_context: "datasetManagement.fields.referenceContext",
+  reference_doc: "datasetManagement.fields.referenceDoc",
+  reference_doc_ids: "datasetManagement.fields.referenceDocIds",
+  reference_chunk_ids: "datasetManagement.fields.referenceChunkIds",
+  generate_reason: "datasetManagement.fields.generateReason",
+  is_deleted: "datasetManagement.fields.isDeleted",
+};
 
 export const requiredDatasetItemFields: DatasetItemField[] = [
   "question",

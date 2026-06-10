@@ -298,11 +298,13 @@ const FileViewer = (props: FileViewerProps) => {
   }, [fileData, content, fileType, mediaObjectUrl, meta, props.fileName]);
 
   return (
-    <>
-      {loading && renderLoading}
-      {!loading && !fileData && renderEmpty}
-      {!loading && fileData && renderFile}
-    </>
+    <div className="file-viewer-container">
+      <div className="file-viewer-content">
+        {loading && renderLoading}
+        {!loading && !fileData && renderEmpty}
+        {!loading && fileData && renderFile}
+      </div>
+    </div>
   );
 };
 

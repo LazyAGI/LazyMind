@@ -4,6 +4,7 @@ from lazymind.processor.engine.table_image_map import normalize_table_image_map,
 from lazymind.parsing.engine.transform.post_func import (
     GroupFilterNodeParser,
     GroupNodeParser,
+    ImageNodeLoader,
     LayoutNodeParser,
     MergeNodeParser,
     NodeParser,
@@ -323,6 +324,19 @@ def test_node_parser_full_pipeline_cleans_and_merges(monkeypatch, tmp_path):
     assert 'ABC正文内容' in result[0].text
     assert 'text_type' not in result[0].metadata
     assert 'table_caption' not in result[0].metadata
+
+
+def test_image_node_loader_uses_ocr_cache_dir_config(monkeypatch, tmp_path):
+    import parsing.transform.post_func as post_func_module
+
+    cache_root = tmp_path / 'ocr_cache'
+    cache_root.mkdir()
+    uploads = tmp_path / 'uploads'
+    monkeypatch.setitem(post_func_module._cfg._impl, 'ocr_cache_dir', str(cache_root))
+    monkeypatch.setitem(post_func_module._cfg._impl, 'shared_upload_dir', str(uploads))
+
+    loader = ImageNodeLoader()
+    assert loader._default_cache_dir == str(cache_root)
 
 
 def test_node_parser_drops_empty_nodes(monkeypatch, tmp_path):

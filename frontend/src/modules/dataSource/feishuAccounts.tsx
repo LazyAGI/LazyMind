@@ -25,13 +25,11 @@ import {
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import {
-  CloudOauthApi,
-  Configuration as AuthConfiguration,
   type CloudConnectionUpdateBody,
   type CloudConnectionResponse,
 } from "@/api/generated/auth-client";
-import { AgentAppsAuth } from "@/components/auth";
-import { BASE_URL, axiosInstance, getLocalizedErrorMessage } from "@/components/request";
+import { getLocalizedErrorMessage } from "@/components/request";
+import { dataSourceCloudOauthApi } from "./api";
 import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
   consumeFeishuDataSourceOAuthResult,
@@ -60,21 +58,6 @@ import "./index.scss";
 const { Link, Paragraph, Text } = Typography;
 const FEISHU_LOGO_URL = "https://www.google.com/s2/favicons?domain=feishu.cn&sz=96";
 const FEISHU_OPEN_PLATFORM_URL = "https://open.feishu.cn/app";
-
-function createCloudOauthApiClient() {
-  const baseUrl = BASE_URL || window.location.origin;
-  return new CloudOauthApi(
-    new AuthConfiguration({
-      basePath: baseUrl,
-      accessToken: () => AgentAppsAuth.getAccessToken(),
-      baseOptions: {
-        headers: AgentAppsAuth.getAuthHeaders(),
-      },
-    }),
-    baseUrl,
-    axiosInstance,
-  );
-}
 
 function getFeishuOpenPlatformAppUrl(appId: string) {
   return `${FEISHU_OPEN_PLATFORM_URL}/${encodeURIComponent(appId)}/baseinfo`;
@@ -254,7 +237,7 @@ export default function FeishuAccountPage() {
     setAccountsLoading(true);
     try {
       const response =
-        await createCloudOauthApiClient().listConnectionsApiAuthserviceV1CloudConnectionsGet({
+        await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet({
           provider: "feishu",
           status: null,
         });
@@ -443,7 +426,7 @@ export default function FeishuAccountPage() {
     connectionId: string,
     body: CloudConnectionUpdateBody,
   ) => {
-    await createCloudOauthApiClient().updateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPut(
+    await dataSourceCloudOauthApi.updateConnectionApiAuthserviceV1CloudConnectionsConnectionIdPut(
       {
         connectionId,
         cloudConnectionUpdateBody: body,
@@ -675,7 +658,7 @@ export default function FeishuAccountPage() {
         const connectionId = account.connection?.connectionId?.trim();
         if (connectionId) {
           try {
-            await createCloudOauthApiClient().deleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDelete(
+            await dataSourceCloudOauthApi.deleteConnectionApiAuthserviceV1CloudConnectionsConnectionIdDelete(
               {
                 connectionId,
               },

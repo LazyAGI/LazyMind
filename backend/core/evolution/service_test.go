@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -64,13 +63,13 @@ func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.
 	if err != nil {
 		t.Fatalf("build chat resource context: %v", err)
 	}
-	if len(ctx.AvailableTools) != 1 || ctx.AvailableTools[0] != "all" {
-		t.Fatalf("unexpected available_tools: %#v", ctx.AvailableTools)
+	if len(ctx.DisabledTools) != 0 {
+		t.Fatalf("unexpected disabled_tools: %#v", ctx.DisabledTools)
 	}
 	if len(ctx.AvailableSkills) != 1 || ctx.AvailableSkills[0] != "coding/git-workflow" {
 		t.Fatalf("unexpected available_skills: %#v", ctx.AvailableSkills)
 	}
-	if ctx.Memory != "" || ctx.UserPreference != "" {
+	if ctx.Memory != FormatSystemMemoryForChat(orm.SystemMemory{}) || ctx.UserPreference != "" {
 		t.Fatalf("expected empty user-scoped content, got memory=%q preference=%q", ctx.Memory, ctx.UserPreference)
 	}
 	if !ctx.UsePersonalization {
@@ -81,7 +80,7 @@ func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.
 	if err != nil {
 		t.Fatalf("build second chat resource context: %v", err)
 	}
-	if secondCtx.Memory != "" || secondCtx.UserPreference != "" {
+	if secondCtx.Memory != FormatSystemMemoryForChat(orm.SystemMemory{}) || secondCtx.UserPreference != "" {
 		t.Fatalf("expected empty second user-scoped content, got memory=%q preference=%q", secondCtx.Memory, secondCtx.UserPreference)
 	}
 	if !secondCtx.UsePersonalization {
@@ -129,6 +128,9 @@ func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.
 	if len(memories) != 2 || memories[0].UserID != "u1" || memories[1].UserID != "u2" {
 		t.Fatalf("expected per-user memory rows for u1/u2, got %#v", memories)
 	}
+	if ctx.Memory != FormatSystemMemoryForChat(memories[0]) {
+		t.Fatalf("expected formatted memory context, got %q", ctx.Memory)
+	}
 
 	var prefs []orm.SystemUserPreference
 	if err := db.Order("user_id ASC").Find(&prefs).Error; err != nil {
@@ -136,6 +138,47 @@ func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.
 	}
 	if len(prefs) != 2 || prefs[0].UserID != "u1" || prefs[1].UserID != "u2" {
 		t.Fatalf("expected per-user preference rows for u1/u2, got %#v", prefs)
+	}
+}
+
+func TestBuildChatResourceContextFormatsMemoryForChat(t *testing.T) {
+	db := newTestDB(t)
+
+	now := time.Now()
+	memory := orm.SystemMemory{
+		ID:            "memory-1",
+		UserID:        "u1",
+		Content:       "记住用户偏好简洁回答",
+		AgentPersona:  "资深研究助理",
+		UserAddress:   "老师",
+		ResponseStyle: "先结论后解释",
+		Version:       1,
+		UpdatedBy:     "u1",
+		UpdatedByName: "User 1",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	memory.ContentHash = HashSystemMemory(memory)
+	if err := db.Create(&memory).Error; err != nil {
+		t.Fatalf("create memory: %v", err)
+	}
+
+	ctx, err := BuildChatResourceContext(context.Background(), db.DB, "u1", "User 1", "session-memory")
+	if err != nil {
+		t.Fatalf("build chat resource context: %v", err)
+	}
+
+	want := "---\nagent_persona: |-\n  资深研究助理\nuser_address: |-\n  老师\nresponse_style: |-\n  先结论后解释\n---\n\n记住用户偏好简洁回答"
+	if ctx.Memory != want {
+		t.Fatalf("unexpected formatted memory:\n%s", ctx.Memory)
+	}
+
+	var snapshot orm.ResourceSessionSnapshot
+	if err := db.Where("session_id = ? AND resource_type = ?", "session-memory", ResourceTypeMemory).Take(&snapshot).Error; err != nil {
+		t.Fatalf("query memory snapshot: %v", err)
+	}
+	if snapshot.SnapshotHash != HashContent(want) {
+		t.Fatalf("expected snapshot hash to use formatted memory, got %q want %q", snapshot.SnapshotHash, HashContent(want))
 	}
 }
 
@@ -273,7 +316,7 @@ func TestApplyManagedPreferenceAutoEvolutionAppliesPendingAndAcceptedSuggestions
 
 	var algoBody map[string]any
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/chat/user_preference/generate" {
+		if r.URL.Path != "/api/chat/rewrite" {
 			http.NotFound(w, r)
 			return
 		}
@@ -347,35 +390,34 @@ func TestApplyManagedPreferenceAutoEvolutionAppliesPendingAndAcceptedSuggestions
 	if err != nil {
 		t.Fatalf("apply auto evolution: %v", err)
 	}
-	if !applied {
-		t.Fatalf("expected auto evolution to apply suggestions")
+	if applied {
+		t.Fatalf("expected auto evolution not to apply suggestions through generate")
 	}
-	rawSuggestions, ok := algoBody["suggestions"].([]any)
-	if !ok || len(rawSuggestions) != 2 {
-		t.Fatalf("expected pending and accepted suggestions in algo request, got %#v", algoBody["suggestions"])
+	if len(algoBody) != 0 {
+		t.Fatalf("algorithm should not be called by auto evolution, got %#v", algoBody)
 	}
 	var updated orm.SystemUserPreference
 	if err := db.Where("id = ?", row.ID).Take(&updated).Error; err != nil {
 		t.Fatalf("query updated preference: %v", err)
 	}
-	if updated.Content != "generated preference" {
-		t.Fatalf("expected generated content, got %q", updated.Content)
+	if updated.Content != row.Content {
+		t.Fatalf("expected content to stay unchanged, got %q", updated.Content)
 	}
-	if updated.Version != row.Version+1 {
-		t.Fatalf("expected version %d, got %d", row.Version+1, updated.Version)
+	if updated.Version != row.Version {
+		t.Fatalf("expected version %d, got %d", row.Version, updated.Version)
 	}
-	if strings.TrimSpace(updated.DraftStatus) != "" || updated.DraftContent != "" || updated.DraftSourceVersion != 0 || updated.DraftUpdatedAt != nil {
-		t.Fatalf("expected draft to be cleared, got status=%q content=%q source=%d updated_at=%v", updated.DraftStatus, updated.DraftContent, updated.DraftSourceVersion, updated.DraftUpdatedAt)
+	if updated.DraftStatus != row.DraftStatus || updated.DraftContent != row.DraftContent || updated.DraftSourceVersion != row.DraftSourceVersion {
+		t.Fatalf("expected draft to stay unchanged, got status=%q content=%q source=%d", updated.DraftStatus, updated.DraftContent, updated.DraftSourceVersion)
 	}
-	if gotIDs := DraftSuggestionIDs(updated.Ext); len(gotIDs) != 0 {
-		t.Fatalf("expected draft suggestion ids to be cleared, got %#v", gotIDs)
+	if gotIDs := DraftSuggestionIDs(updated.Ext); len(gotIDs) != 1 || gotIDs[0] != "old-draft-suggestion" {
+		t.Fatalf("expected draft suggestion ids to stay unchanged, got %#v", gotIDs)
 	}
 	var updatedSuggestions []orm.ResourceSuggestion
 	if err := db.Where("id IN ?", []string{"s-pending", "s-accepted"}).Order("created_at ASC").Find(&updatedSuggestions).Error; err != nil {
 		t.Fatalf("query updated suggestions: %v", err)
 	}
-	if len(updatedSuggestions) != 2 || updatedSuggestions[0].Status != SuggestionStatusApplied || updatedSuggestions[1].Status != SuggestionStatusApplied {
-		t.Fatalf("expected suggestions to be applied, got %#v", updatedSuggestions)
+	if len(updatedSuggestions) != 2 || updatedSuggestions[0].Status != SuggestionStatusPendingReview || updatedSuggestions[1].Status != SuggestionStatusAccepted {
+		t.Fatalf("expected suggestions to stay unchanged, got %#v", updatedSuggestions)
 	}
 }
 

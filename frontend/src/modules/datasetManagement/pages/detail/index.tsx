@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
+  ClipboardEvent as ReactClipboardEvent,
   Key,
+  KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   ThHTMLAttributes,
   HTMLAttributes,
@@ -23,6 +25,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import {
   ArrowLeftOutlined,
+  CloseOutlined,
   DeleteOutlined,
   ImportOutlined,
   PlusOutlined,
@@ -30,6 +33,7 @@ import {
   SettingOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   batchDeleteDatasetItems,
   createDatasetItem,
@@ -37,9 +41,9 @@ import {
   findKnowledgeBaseDocumentById,
   getDataset,
   importDatasetItems,
+  listDatasetQuestionTypes,
   listDatasetItems,
   type KnowledgeDocumentOption,
-  listQuestionTypes,
   mergeKnowledgeDocumentOptions,
   searchKnowledgeBaseDocuments,
   updateDatasetItem,
@@ -65,7 +69,11 @@ import type {
   DatasetItemSource,
   DatasetListItem,
 } from "../../shared";
-import { formatDateTime, sourceLabelMap } from "../../shared";
+import {
+  datasetItemFieldI18nKeys,
+  formatDateTime,
+  sourceLabelMap,
+} from "../../shared";
 import {
   joinListField,
   validateRequiredDatasetItem,
@@ -75,6 +83,9 @@ import "../../index.scss";
 const { TextArea } = Input;
 const NEW_ITEM_ID = "__new_dataset_item__";
 const MIN_COLUMN_WIDTH = 88;
+const MIN_HEADER_HEIGHT = 40;
+const MAX_HEADER_HEIGHT = 96;
+const DEFAULT_HEADER_HEIGHT = 44;
 const MIN_ROW_HEIGHT = 48;
 const MAX_ROW_HEIGHT = 140;
 const DEFAULT_ROW_HEIGHT = 64;
@@ -86,6 +97,7 @@ const DEFAULT_COLUMN_WIDTHS = {
   reference_context: 260,
   reference_doc: 160,
   generate_reason: 220,
+  is_deleted: 120,
   source: 100,
   updated_at: 150,
   actions: 90,
@@ -112,6 +124,11 @@ type DocumentSearchState = {
   totalSize?: number;
 };
 type ConfigurableColumnKey = Exclude<ResizableColumnKey, "actions">;
+const REQUIRED_VISIBLE_COLUMN_KEYS: ConfigurableColumnKey[] = [
+  "question",
+  "question_type",
+  "ground_truth",
+];
 type ReferenceDocumentPreview = {
   datasetId: string;
   documentId: string;
@@ -131,25 +148,44 @@ type ReferenceChunkSelectorState = {
   selectedChunkIds: string[];
   previewSegment?: Segment;
 };
+type ReferenceContextChunkPart = {
+  type: "chunk";
+  id: string;
+  content: string;
+};
+type ReferenceContextTextPart = {
+  type: "text";
+  content: string;
+};
+type ReferenceContextPart = ReferenceContextChunkPart | ReferenceContextTextPart;
+type ReferenceContextValue = {
+  parts: ReferenceContextPart[];
+};
 
 const CONFIGURABLE_COLUMN_OPTIONS: Array<{
-  label: string;
+  labelKey: string;
   value: ConfigurableColumnKey;
+  disabled?: boolean;
 }> = [
-  { label: "问题", value: "question" },
-  { label: "问题类型", value: "question_type" },
-  { label: "标准答案", value: "ground_truth" },
-  { label: "答案要点", value: "key_points" },
-  { label: "参考文档", value: "reference_doc" },
-  { label: "参考上下文", value: "reference_context" },
-  { label: "生成依据", value: "generate_reason" },
-  { label: "来源", value: "source" },
-  { label: "更新时间", value: "updated_at" },
+  { labelKey: datasetItemFieldI18nKeys.question, value: "question", disabled: true },
+  { labelKey: datasetItemFieldI18nKeys.question_type, value: "question_type", disabled: true },
+  { labelKey: datasetItemFieldI18nKeys.ground_truth, value: "ground_truth", disabled: true },
+  { labelKey: datasetItemFieldI18nKeys.key_points, value: "key_points" },
+  { labelKey: datasetItemFieldI18nKeys.reference_doc, value: "reference_doc" },
+  { labelKey: datasetItemFieldI18nKeys.reference_context, value: "reference_context" },
+  { labelKey: datasetItemFieldI18nKeys.generate_reason, value: "generate_reason" },
+  { labelKey: datasetItemFieldI18nKeys.is_deleted, value: "is_deleted" },
+  { labelKey: "datasetManagement.fields.source", value: "source" },
+  { labelKey: "datasetManagement.fields.updatedAt", value: "updated_at" },
 ];
 
-const DEFAULT_VISIBLE_COLUMN_KEYS = CONFIGURABLE_COLUMN_OPTIONS.map(
-  (option) => option.value,
-);
+const DEFAULT_VISIBLE_COLUMN_KEYS = [
+  ...CONFIGURABLE_COLUMN_OPTIONS.map((option) => option.value),
+];
+
+function normalizeVisibleColumnKeys(keys: ConfigurableColumnKey[]) {
+  return Array.from(new Set([...REQUIRED_VISIBLE_COLUMN_KEYS, ...keys]));
+}
 
 const editableFieldColumnMap: Record<EditableDatasetItemField, ConfigurableColumnKey> = {
   question: "question",
@@ -161,20 +197,31 @@ const editableFieldColumnMap: Record<EditableDatasetItemField, ConfigurableColum
   generate_reason: "generate_reason",
 };
 
+const renderRequiredColumnTitle = (title: string) => (
+  <span className="dataset-required-column-title">
+    <span className="dataset-required-column-mark" aria-hidden="true">*</span>
+    {title}
+  </span>
+);
+
 type ResizableHeaderCellProps = ThHTMLAttributes<HTMLTableCellElement> & {
   columnKey?: ResizableColumnKey;
   columnWidth?: number;
+  headerHeight?: number;
   onResizeColumn?: (
     columnKey: ResizableColumnKey,
     startX: number,
     startWidth: number,
   ) => void;
+  onResizeHeader?: (startY: number, startHeight: number) => void;
 };
 
 function ResizableHeaderCell({
   columnKey,
   columnWidth,
+  headerHeight,
   onResizeColumn,
+  onResizeHeader,
   children,
   style,
   ...rest
@@ -188,8 +235,17 @@ function ResizableHeaderCell({
     onResizeColumn(columnKey, event.clientX, columnWidth);
   };
 
+  const handleHeaderResizeStart = (event: ReactMouseEvent<HTMLSpanElement>) => {
+    if (!headerHeight || !onResizeHeader) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    onResizeHeader(event.clientY, headerHeight);
+  };
+
   return (
-    <th {...rest} style={style}>
+    <th {...rest} style={{ ...style, height: headerHeight }}>
       <div className="dataset-resizable-header-content">{children}</div>
       {columnKey ? (
         <span
@@ -198,6 +254,11 @@ function ResizableHeaderCell({
           onMouseDown={handleColumnResizeStart}
         />
       ) : null}
+      <span
+        aria-hidden="true"
+        className="dataset-header-height-resize-handle"
+        onMouseDown={handleHeaderResizeStart}
+      />
     </th>
   );
 }
@@ -249,6 +310,477 @@ const tableComponents = {
   },
 };
 
+function normalizeReferenceContextText(value?: string) {
+  return `${value || ""}`.replace(/\r\n/g, "\n").trim();
+}
+
+function parseReferenceContextValue(raw?: string): ReferenceContextValue {
+  const value = `${raw || ""}`.trim();
+  if (!value) {
+    return { parts: [] };
+  }
+  try {
+    const parsed = JSON.parse(value) as {
+      type?: string;
+      parts?: Array<Partial<ReferenceContextPart>>;
+    };
+    if (parsed?.type === "reference_context" && Array.isArray(parsed.parts)) {
+      return {
+        parts: parsed.parts
+          .map((part): ReferenceContextPart | null => {
+            if (part?.type === "chunk") {
+              const content = normalizeReferenceContextText(part.content);
+              if (!content) {
+                return null;
+              }
+              return {
+                type: "chunk",
+                id: `${part.id || ""}`.trim(),
+                content,
+              };
+            }
+            if (part?.type === "text") {
+              const content = normalizeReferenceContextText(part.content);
+              return content ? { type: "text", content } : null;
+            }
+            return null;
+          })
+          .filter((part): part is ReferenceContextPart => Boolean(part)),
+      };
+    }
+  } catch {
+    // Old rows are plain text; keep them editable as user text.
+  }
+  return { parts: [{ type: "text", content: value }] };
+}
+
+function serializeReferenceContextValue(value: ReferenceContextValue) {
+  const parts = value.parts
+    .map((part): ReferenceContextPart | null => {
+      if (part.type === "chunk") {
+        const content = normalizeReferenceContextText(part.content);
+        return content ? { type: "chunk", id: part.id, content } : null;
+      }
+      const content = normalizeReferenceContextText(part.content);
+      return content ? { type: "text", content } : null;
+    })
+    .filter((part): part is ReferenceContextPart => Boolean(part));
+
+  if (parts.length === 0) {
+    return "";
+  }
+  if (parts.length === 1 && parts[0].type === "text") {
+    return parts[0].content;
+  }
+  return JSON.stringify({
+    type: "reference_context",
+    version: 1,
+    parts,
+  });
+}
+
+function referenceContextEditorValue(raw?: string): ReferenceContextValue {
+  const parts = parseReferenceContextValue(raw).parts;
+  if (!parts.some((part) => part.type === "chunk")) {
+    return { parts };
+  }
+
+  const editorParts: ReferenceContextPart[] = [];
+  parts.forEach((part, index) => {
+    if (part.type === "text") {
+      editorParts.push(part);
+      return;
+    }
+    const previousPart = editorParts[editorParts.length - 1];
+    if (!previousPart || previousPart.type !== "text") {
+      editorParts.push({ type: "text", content: "" });
+    }
+    editorParts.push(part);
+    if (parts[index + 1]?.type !== "text") {
+      editorParts.push({ type: "text", content: "" });
+    }
+  });
+  return { parts: editorParts };
+}
+
+function buildReferenceContextWithChunks(raw: string | undefined, chunks: ReferenceContextChunkPart[]) {
+  const parts = parseReferenceContextValue(raw).parts;
+  const firstChunkIndex = parts.findIndex((part) => part.type === "chunk");
+  if (firstChunkIndex < 0) {
+    return serializeReferenceContextValue({ parts: [...parts, ...chunks] });
+  }
+
+  let lastChunkIndex = firstChunkIndex;
+  parts.forEach((part, index) => {
+    if (part.type === "chunk") {
+      lastChunkIndex = index;
+    }
+  });
+  const leadingParts = parts.slice(0, firstChunkIndex);
+  const trailingParts = parts.slice(lastChunkIndex + 1);
+  return serializeReferenceContextValue({
+    parts: [...leadingParts, ...chunks, ...trailingParts],
+  });
+}
+
+function buildReferenceContextWithChunksAtTextPart(
+  raw: string | undefined,
+  chunks: ReferenceContextChunkPart[],
+  partIndex?: number,
+) {
+  const value = referenceContextEditorValue(raw);
+  if (partIndex === undefined && !value.parts.some((part) => part.type === "chunk")) {
+    return serializeReferenceContextValue({
+      parts: [...value.parts, ...chunks, { type: "text", content: "" }],
+    });
+  }
+  if (partIndex === undefined) {
+    return buildReferenceContextWithChunks(raw, chunks);
+  }
+  if (value.parts[partIndex]?.type !== "text") {
+    return buildReferenceContextWithChunks(raw, chunks);
+  }
+  const parts: ReferenceContextPart[] = [];
+  value.parts.forEach((part, index) => {
+    if (index !== partIndex) {
+      parts.push(part);
+      return;
+    }
+    if (part.content) {
+      parts.push(part);
+    }
+    parts.push(...chunks, { type: "text", content: "" });
+  });
+  return serializeReferenceContextValue({ parts });
+}
+
+function referenceContextChunkIDs(raw?: string) {
+  return parseReferenceContextValue(raw).parts
+    .filter((part): part is ReferenceContextChunkPart => part.type === "chunk")
+    .map((part) => part.id)
+    .filter(Boolean);
+}
+
+function removeReferenceContextPart(raw: string | undefined, partIndex: number) {
+  return serializeReferenceContextValue({
+    parts: referenceContextEditorValue(raw).parts.filter((_, index) => index !== partIndex),
+  });
+}
+
+function renderReferenceContextParts(raw: string | undefined, placeholder: string) {
+  const value = parseReferenceContextValue(raw);
+  if (value.parts.length === 0) {
+    return <span className="dataset-inline-placeholder">{placeholder}</span>;
+  }
+
+  let chunkIndex = 0;
+  return (
+    <span className="dataset-reference-context-preview">
+      {value.parts.map((part, index) => {
+        if (part.type === "chunk") {
+          chunkIndex += 1;
+          return (
+            <Popover
+              key={`${part.id || index}-${chunkIndex}`}
+              trigger="hover"
+              placement="topLeft"
+              content={
+                <div className="dataset-reference-context-popover">
+                  {part.content}
+                </div>
+              }
+            >
+              <span className="dataset-reference-context-chip">
+                引用片段{chunkIndex}
+              </span>
+            </Popover>
+          );
+        }
+        return (
+          <span key={`text-${index}`} className="dataset-reference-context-text">
+            {part.content}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function renderReferenceDocumentTag(value: string | undefined, placeholder: string) {
+  const text = `${value || ""}`.trim();
+  if (!text) {
+    return <span className="dataset-inline-placeholder">{placeholder}</span>;
+  }
+  return <span className="dataset-reference-doc-tag">{text}</span>;
+}
+
+function referenceContextPartsFromEditor(root: HTMLDivElement): ReferenceContextPart[] {
+  const parts: ReferenceContextPart[] = [];
+  const appendText = (value: string) => {
+    const content = value.replace(/\u200b/g, "");
+    if (!content) {
+      return;
+    }
+    const lastPart = parts[parts.length - 1];
+    if (lastPart?.type === "text") {
+      lastPart.content += content;
+      return;
+    }
+    parts.push({ type: "text", content });
+  };
+  const appendLineBreak = () => {
+    const lastPart = parts[parts.length - 1];
+    if (lastPart?.type === "text" && !lastPart.content.endsWith("\n")) {
+      lastPart.content += "\n";
+    }
+  };
+  const walk = (node: ChildNode) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      appendText(node.textContent || "");
+      return;
+    }
+    if (!(node instanceof HTMLElement)) {
+      return;
+    }
+    if (node.dataset.referenceContextPart === "chunk") {
+      const content = normalizeReferenceContextText(node.dataset.content);
+      if (content) {
+        parts.push({
+          type: "chunk",
+          id: `${node.dataset.id || ""}`.trim(),
+          content,
+        });
+      }
+      return;
+    }
+    if (node.tagName === "BR") {
+      appendText("\n");
+      return;
+    }
+    const isBlock = node.tagName === "DIV" || node.tagName === "P";
+    if (isBlock && parts.length > 0) {
+      appendLineBreak();
+    }
+    node.childNodes.forEach(walk);
+    if (isBlock) {
+      appendLineBreak();
+    }
+  };
+  root.childNodes.forEach(walk);
+  return parts;
+}
+
+function placeCaretAtEnd(element: HTMLElement) {
+  const selection = window.getSelection();
+  if (!selection) {
+    return;
+  }
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function ReferenceContextInlineEditor({
+  value,
+  placeholder,
+  autoFocus,
+  onChange,
+  onBlur,
+  onInsertIndexChange,
+  onRemovePart,
+}: {
+  value: string;
+  placeholder: string;
+  autoFocus?: boolean;
+  onChange: (value: string) => void;
+  onBlur: () => void;
+  onInsertIndexChange: (index?: number) => void;
+  onRemovePart: (index: number) => void;
+}) {
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const editorValue = referenceContextEditorValue(value);
+
+  useEffect(() => {
+    if (autoFocus && editorRef.current) {
+      editorRef.current.focus();
+      placeCaretAtEnd(editorRef.current);
+    }
+  }, [autoFocus]);
+
+  const updateInsertIndex = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const textNode = target.closest<HTMLElement>("[data-reference-context-text-index]");
+    if (!textNode) {
+      return;
+    }
+    const index = Number(textNode.dataset.referenceContextTextIndex);
+    if (Number.isFinite(index)) {
+      onInsertIndexChange(index);
+    }
+  };
+
+  const handleInput = () => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+    const nextValue = serializeReferenceContextValue({
+      parts: referenceContextPartsFromEditor(editor),
+    });
+    editor.classList.toggle("is-empty", !nextValue);
+    onChange(nextValue);
+  };
+
+  const handlePaste = (event: ReactClipboardEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    document.execCommand("insertText", false, event.clipboardData.getData("text/plain"));
+  };
+
+  const partIndexFromElement = (element: HTMLElement | null) => {
+    if (!element) {
+      return undefined;
+    }
+    const partNode = element.closest<HTMLElement>("[data-reference-context-part-index]");
+    const index = Number(partNode?.dataset.referenceContextPartIndex);
+    return Number.isFinite(index) ? index : undefined;
+  };
+
+  const findAdjacentChunkIndex = (forward: boolean) => {
+    const selection = window.getSelection();
+    const editor = editorRef.current;
+    if (!selection || !editor || selection.rangeCount === 0 || !selection.isCollapsed) {
+      return undefined;
+    }
+    const range = selection.getRangeAt(0);
+    let currentNode: Node | null = range.startContainer;
+    if (!editor.contains(currentNode)) {
+      return undefined;
+    }
+    if (currentNode.nodeType === Node.TEXT_NODE) {
+      currentNode = currentNode.parentElement;
+    }
+    if (!(currentNode instanceof HTMLElement)) {
+      return undefined;
+    }
+    const currentIndex = partIndexFromElement(currentNode);
+    if (currentIndex === undefined) {
+      return undefined;
+    }
+    const currentPart = editorValue.parts[currentIndex];
+    if (currentPart?.type === "chunk") {
+      return currentIndex;
+    }
+    if (currentPart?.type !== "text") {
+      return undefined;
+    }
+    const offset = range.startOffset;
+    const textLength = currentPart.content.length;
+    if (!forward && offset > 0) {
+      return undefined;
+    }
+    if (forward && offset < textLength) {
+      return undefined;
+    }
+    const targetIndex = forward ? currentIndex + 1 : currentIndex - 1;
+    return editorValue.parts[targetIndex]?.type === "chunk" ? targetIndex : undefined;
+  };
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Backspace" && event.key !== "Delete") {
+      return;
+    }
+    const chunkIndexToRemove = findAdjacentChunkIndex(event.key === "Delete");
+    if (chunkIndexToRemove === undefined) {
+      return;
+    }
+    event.preventDefault();
+    onRemovePart(chunkIndexToRemove);
+  };
+
+  let chunkIndex = 0;
+  const isEmpty = editorValue.parts.length === 0;
+  return (
+    <div
+      ref={editorRef}
+      className={`dataset-reference-context-editor${isEmpty ? " is-empty" : ""}`}
+      contentEditable
+      suppressContentEditableWarning
+      role="textbox"
+      aria-label={placeholder}
+      data-placeholder={placeholder}
+      onInput={handleInput}
+      onBlur={onBlur}
+      onFocus={(event) => {
+        onInsertIndexChange(0);
+        updateInsertIndex(event.target);
+      }}
+      onKeyUp={(event) => updateInsertIndex(event.target)}
+      onKeyDown={handleKeyDown}
+      onMouseUp={(event) => updateInsertIndex(event.target)}
+      onPaste={handlePaste}
+    >
+      {editorValue.parts.map((part, index) => {
+        if (part.type === "chunk") {
+          chunkIndex += 1;
+          return (
+            <Popover
+              key={`${part.id || index}-${chunkIndex}`}
+              trigger="hover"
+              placement="topLeft"
+              content={
+                <div className="dataset-reference-context-popover">
+                  {part.content}
+                </div>
+              }
+            >
+              <span
+                contentEditable={false}
+                data-reference-context-part="chunk"
+                data-reference-context-part-index={index}
+                data-id={part.id}
+                data-content={part.content}
+                className="dataset-reference-context-chip"
+              >
+                引用片段{chunkIndex}
+                <button
+                  type="button"
+                  className="dataset-reference-context-chip-remove"
+                  aria-label={`删除引用片段${chunkIndex}`}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onRemovePart(index);
+                  }}
+                >
+                  <CloseOutlined />
+                </button>
+              </span>
+            </Popover>
+          );
+        }
+        return (
+          <span
+            key={`text-${index}`}
+            data-reference-context-part-index={index}
+            data-reference-context-text-index={index}
+            className="dataset-reference-context-editor-text"
+          >
+            {part.content || "\u200b"}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function createItemDraft(item?: DatasetItem): DatasetItemFormValues {
   return {
     case_id: item?.case_id || "",
@@ -269,17 +801,28 @@ function mergeHiddenItemFields(
   item: DatasetItem,
   values: DatasetItemFormValues,
 ): DatasetItemFormValues {
+  const currentReferenceDocIDs = joinListField(item.reference_doc_ids);
+  const nextReferenceDocIDs = values.reference_doc_ids || "";
+  const referenceDocChanged =
+    `${values.reference_doc || ""}`.trim() !== `${item.reference_doc || ""}`.trim() ||
+    (Boolean(nextReferenceDocIDs.trim()) &&
+      nextReferenceDocIDs.trim() !== currentReferenceDocIDs.trim());
+
   return {
     ...values,
     case_id: item.case_id || values.case_id,
-    reference_doc_ids: values.reference_doc_ids || joinListField(item.reference_doc_ids),
-    reference_chunk_ids:
-      values.reference_chunk_ids || joinListField(item.reference_chunk_ids),
+    reference_doc_ids: referenceDocChanged
+      ? nextReferenceDocIDs
+      : nextReferenceDocIDs || currentReferenceDocIDs,
+    reference_chunk_ids: referenceDocChanged
+      ? values.reference_chunk_ids || ""
+      : values.reference_chunk_ids || joinListField(item.reference_chunk_ids),
     is_deleted: Boolean(item.is_deleted),
   };
 }
 
 export default function DatasetDetailPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { datasetId = "" } = useParams();
   const [dataset, setDataset] = useState<DatasetListItem | null>(null);
@@ -303,6 +846,20 @@ export default function DatasetDetailPage() {
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<ConfigurableColumnKey[]>(
     DEFAULT_VISIBLE_COLUMN_KEYS,
   );
+  const columnSettingOptions = useMemo(
+    () =>
+      CONFIGURABLE_COLUMN_OPTIONS.map((option) => ({
+        label: t(option.labelKey),
+        value: option.value,
+        disabled: option.disabled,
+      })),
+    [t],
+  );
+  const effectiveVisibleColumnKeys = useMemo(
+    () => normalizeVisibleColumnKeys(visibleColumnKeys),
+    [visibleColumnKeys],
+  );
+  const [headerHeight, setHeaderHeight] = useState(DEFAULT_HEADER_HEIGHT);
   const [rowHeight, setRowHeight] = useState(DEFAULT_ROW_HEIGHT);
   const [documentSearchState, setDocumentSearchState] = useState<
     Record<string, DocumentSearchState>
@@ -323,6 +880,9 @@ export default function DatasetDetailPage() {
   const documentSearchPaginationRequestRef = useRef<Record<string, string>>({});
   const referenceDocumentCacheRef = useRef<Record<string, ReferenceDocumentPreview>>({});
   const [referenceDocumentCacheVersion, setReferenceDocumentCacheVersion] = useState(0);
+  const referenceContextInsertIndexRef = useRef<Record<string, number | undefined>>({});
+  const referenceContextEditingValueRef = useRef<Record<string, string | undefined>>({});
+  const referenceContextEditingDirtyRef = useRef<Record<string, boolean | undefined>>({});
 
   const resetReferenceChunkSelector = useCallback(() => {
     setReferenceChunkSelector({
@@ -383,13 +943,34 @@ export default function DatasetDetailPage() {
     document.addEventListener("mouseup", handleMouseUp);
   }, []);
 
+  const handleHeaderResize = useCallback((startY: number, startHeight: number) => {
+    const handleMouseMove = (event: MouseEvent) => {
+      const nextHeight = Math.min(
+        MAX_HEADER_HEIGHT,
+        Math.max(MIN_HEADER_HEIGHT, Math.round(startHeight + event.clientY - startY)),
+      );
+      setHeaderHeight(nextHeight);
+    };
+    const handleMouseUp = () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.classList.remove("dataset-table-row-is-resizing");
+    };
+
+    document.body.classList.add("dataset-table-row-is-resizing");
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  }, []);
+
   const getHeaderCellProps = useCallback(
     (columnKey: ResizableColumnKey) => ({
       columnKey,
       columnWidth: columnWidths[columnKey],
+      headerHeight,
       onResizeColumn: handleColumnResize,
+      onResizeHeader: handleHeaderResize,
     }) as ResizableHeaderCellProps,
-    [columnWidths, handleColumnResize],
+    [columnWidths, handleColumnResize, handleHeaderResize, headerHeight],
   );
 
   const loadDetail = async () => {
@@ -407,14 +988,12 @@ export default function DatasetDetailPage() {
           page: pagination.current,
           pageSize: pagination.pageSize,
         }),
-        listQuestionTypes().catch(() => []),
+        listDatasetQuestionTypes(datasetId).catch(() => []),
       ]);
       setDataset(datasetDetail);
       setItems(itemList.items);
       setTotal(itemList.total);
-      if (remoteQuestionTypes.length > 0) {
-        setQuestionTypeOptions(remoteQuestionTypes);
-      }
+      setQuestionTypeOptions(remoteQuestionTypes);
     } catch (error: any) {
       message.error(error?.message || "数据集加载失败");
     } finally {
@@ -445,11 +1024,11 @@ export default function DatasetDetailPage() {
   useEffect(() => {
     if (
       activeCell &&
-      !visibleColumnKeys.includes(editableFieldColumnMap[activeCell.field])
+      !effectiveVisibleColumnKeys.includes(editableFieldColumnMap[activeCell.field])
     ) {
       setActiveCell(null);
     }
-  }, [activeCell, visibleColumnKeys]);
+  }, [activeCell, effectiveVisibleColumnKeys]);
 
   const confirmDiscardDirty = () =>
     new Promise<boolean>((resolve) => {
@@ -779,10 +1358,12 @@ export default function DatasetDetailPage() {
         documentPreviewUrl: "",
         segmentGroup: "",
         chunks: [],
-        selectedChunkIds: `${draft.reference_chunk_ids || ""}`
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean),
+        selectedChunkIds: referenceContextChunkIDs(draft.reference_context).length > 0
+          ? referenceContextChunkIDs(draft.reference_context)
+          : `${draft.reference_chunk_ids || ""}`
+            .split(",")
+            .map((item) => item.trim())
+            .filter(Boolean),
       });
 
       try {
@@ -856,9 +1437,24 @@ export default function DatasetDetailPage() {
         return true;
       }
 
-      return false;
+      return Boolean(record.reference_doc_from_knowledge_base);
     },
     [drafts, referenceDocumentCacheVersion],
+  );
+
+  const hasSelectedReferenceChunks = useCallback(
+    (record: DatasetItem) => {
+      const draft = drafts[record.id];
+      if (!draft) {
+        return Boolean(record.reference_chunk_selected);
+      }
+      const draftChunkIds = `${draft.reference_chunk_ids || ""}`
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      return draftChunkIds.length > 0;
+    },
+    [drafts],
   );
 
   const handleToggleReferenceChunk = useCallback((segment: Segment, checked: boolean) => {
@@ -892,28 +1488,42 @@ export default function DatasetDetailPage() {
       return;
     }
 
-    const selectedChunkContent = selectedChunks
-      .map((chunk) => `${chunk.display_content || chunk.content || ""}`.trim())
-      .filter(Boolean)
-      .join("\n\n");
-    const selectedChunkIds = selectedChunks
-      .map((chunk) => `${chunk.segment_id || ""}`.trim())
-      .filter(Boolean)
-      .join(", ");
-
+    const selectedChunkParts = selectedChunks
+      .map((chunk): ReferenceContextChunkPart | null => {
+        const content = normalizeReferenceContextText(`${chunk.display_content || chunk.content || ""}`);
+        if (!content) {
+          return null;
+        }
+        return {
+          type: "chunk",
+          id: `${chunk.segment_id || ""}`.trim(),
+          content,
+        };
+      })
+      .filter((chunk): chunk is ReferenceContextChunkPart => Boolean(chunk));
     setReferenceChunkSelector((current) => ({
       ...current,
       confirming: true,
     }));
 
-    setDrafts((current) => ({
-      ...current,
-      [itemId]: {
-        ...(current[itemId] || createItemDraft(items.find((item) => item.id === itemId))),
-        reference_context: selectedChunkContent,
-        reference_chunk_ids: selectedChunkIds,
-      },
-    }));
+    setDrafts((current) => {
+      const currentDraft = current[itemId] || createItemDraft(items.find((item) => item.id === itemId));
+      const insertIndex = referenceContextInsertIndexRef.current[itemId];
+      const nextReferenceContext = buildReferenceContextWithChunksAtTextPart(
+        referenceContextEditingValueRef.current[itemId] ?? currentDraft.reference_context,
+        selectedChunkParts,
+        insertIndex,
+      );
+      referenceContextEditingValueRef.current[itemId] = nextReferenceContext;
+      return {
+        ...current,
+        [itemId]: {
+          ...currentDraft,
+          reference_context: nextReferenceContext,
+          reference_chunk_ids: referenceContextChunkIDs(nextReferenceContext).join(", "),
+        },
+      };
+    });
     setDirtyItemIds((current) => (current.includes(itemId) ? current : [...current, itemId]));
 
     resetReferenceChunkSelector();
@@ -975,8 +1585,22 @@ export default function DatasetDetailPage() {
   };
 
   const handleAutoSaveItem = async (item: DatasetItem) => {
-    const draft = drafts[item.id] || createItemDraft(item);
-    if (item.id !== NEW_ITEM_ID && !dirtyItemIds.includes(item.id)) {
+    const editingReferenceContext = referenceContextEditingValueRef.current[item.id];
+    const referenceContextEditingDirty = Boolean(referenceContextEditingDirtyRef.current[item.id]);
+    const baseDraft = drafts[item.id] || createItemDraft(item);
+    const draft =
+      editingReferenceContext === undefined
+        ? baseDraft
+        : {
+          ...baseDraft,
+          reference_context: editingReferenceContext,
+          reference_chunk_ids: referenceContextChunkIDs(editingReferenceContext).join(", "),
+        };
+    if (
+      item.id !== NEW_ITEM_ID &&
+      !dirtyItemIds.includes(item.id) &&
+      !referenceContextEditingDirty
+    ) {
       setActiveCell(null);
       return;
     }
@@ -984,6 +1608,10 @@ export default function DatasetDetailPage() {
       setActiveCell(null);
       return;
     }
+    if (editingReferenceContext !== undefined) {
+      delete referenceContextEditingValueRef.current[item.id];
+    }
+    delete referenceContextEditingDirtyRef.current[item.id];
     await handleSaveItem(item.id, draft);
   };
 
@@ -1032,6 +1660,7 @@ export default function DatasetDetailPage() {
     file: File | null,
   ) => {
     await importDatasetItems(datasetId, file, importedItems, result.failedCount);
+    setVisibleColumnKeys(DEFAULT_VISIBLE_COLUMN_KEYS);
     message.success("导入完成");
     await loadDetail();
   };
@@ -1067,10 +1696,14 @@ export default function DatasetDetailPage() {
       <div className="dataset-inline-display-wrapper">
         <button
           type="button"
-          className="dataset-inline-display"
+          className={`dataset-inline-display${field === "reference_context" ? " dataset-reference-context-display" : ""}`}
           onClick={() => setActiveCell({ itemId: record.id, field })}
         >
-          {value || <span className="dataset-inline-placeholder">{placeholder}</span>}
+          {field === "reference_context"
+            ? renderReferenceContextParts(value, placeholder)
+            : field === "reference_doc"
+              ? renderReferenceDocumentTag(value, placeholder)
+            : value || <span className="dataset-inline-placeholder">{placeholder}</span>}
         </button>
         {shouldShowReferenceChunkSelector ? (
           <Button
@@ -1079,7 +1712,7 @@ export default function DatasetDetailPage() {
             className="dataset-reference-chunk-trigger"
             onClick={() => void handleOpenReferenceChunkSelector(record)}
           >
-            选择 chunk
+            {hasSelectedReferenceChunks(record) ? "已选 chunk" : "选择 chunk"}
           </Button>
         ) : null}
       </div>
@@ -1109,6 +1742,54 @@ export default function DatasetDetailPage() {
   const renderReferenceDocumentInput = (record: DatasetItem) => {
     if (activeCell?.itemId !== record.id || activeCell.field !== "reference_doc") {
       return renderCellDisplay(record, "reference_doc", "请输入参考文档");
+    }
+
+    const currentDraft = drafts[record.id];
+    const currentReferenceDoc = `${currentDraft?.reference_doc || ""}`.trim();
+    const selectedReferenceDocIDs = `${currentDraft?.reference_doc_ids || ""}`
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const shouldRenderReferenceDocTag =
+      Boolean(currentReferenceDoc) &&
+      (selectedReferenceDocIDs.length > 0 ||
+        currentReferenceDoc === `${record.reference_doc || ""}`.trim());
+
+    if (shouldRenderReferenceDocTag) {
+      return (
+        <div className="dataset-inline-textarea-wrapper">
+          <span className="dataset-reference-doc-tag dataset-reference-doc-tag-editing">
+            <span className="dataset-reference-doc-tag-text">{currentReferenceDoc}</span>
+            <button
+              type="button"
+              className="dataset-reference-doc-tag-remove"
+              aria-label="删除参考文档"
+              onClick={() => {
+                setDrafts((current) => {
+                  const currentDraft = current[record.id] || createItemDraft(record);
+                  return {
+                    ...current,
+                    [record.id]: {
+                      ...currentDraft,
+                      reference_doc: "",
+                      reference_doc_ids: "",
+                      reference_chunk_ids: "",
+                      reference_context: "",
+                    },
+                  };
+                });
+                delete referenceContextEditingValueRef.current[record.id];
+                delete referenceContextEditingDirtyRef.current[record.id];
+                setDirtyItemIds((current) =>
+                  current.includes(record.id) ? current : [...current, record.id],
+                );
+              }}
+            >
+              <CloseOutlined />
+            </button>
+          </span>
+        </div>
+      );
     }
 
     const searchState = documentSearchState[record.id];
@@ -1168,6 +1849,66 @@ export default function DatasetDetailPage() {
     if (activeCell?.itemId !== record.id || activeCell.field !== field) {
       return renderCellDisplay(record, field, placeholder);
     }
+    if (field === "reference_context") {
+      const currentValue = drafts[record.id]?.reference_context || "";
+      return (
+        <div className="dataset-inline-textarea-wrapper">
+          <ReferenceContextInlineEditor
+            autoFocus
+            value={referenceContextEditingValueRef.current[record.id] ?? currentValue}
+            placeholder={placeholder}
+            onChange={(nextValue) => {
+              referenceContextEditingValueRef.current[record.id] = nextValue;
+              referenceContextEditingDirtyRef.current[record.id] = true;
+            }}
+            onBlur={() => void handleAutoSaveItem(record)}
+            onInsertIndexChange={(index) => {
+              referenceContextInsertIndexRef.current[record.id] = index;
+            }}
+            onRemovePart={(index) => {
+              const baseReferenceContext =
+                referenceContextEditingValueRef.current[record.id] ??
+                drafts[record.id]?.reference_context ??
+                "";
+              const nextReferenceContext = removeReferenceContextPart(
+                baseReferenceContext,
+                index,
+              );
+              referenceContextEditingValueRef.current[record.id] = nextReferenceContext;
+              referenceContextEditingDirtyRef.current[record.id] = true;
+              setDrafts((current) => {
+                const currentDraft = current[record.id] || createItemDraft(record);
+                return {
+                  ...current,
+                  [record.id]: {
+                    ...currentDraft,
+                    reference_context: nextReferenceContext,
+                    reference_chunk_ids: referenceContextChunkIDs(nextReferenceContext).join(", "),
+                  },
+                };
+              });
+              setDirtyItemIds((current) =>
+                current.includes(record.id) ? current : [...current, record.id],
+              );
+            }}
+          />
+          {canSelectReferenceChunks(record) ? (
+            <Button
+              size="small"
+              type="link"
+              className="dataset-reference-chunk-trigger"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onClick={() => void handleOpenReferenceChunkSelector(record)}
+            >
+              {hasSelectedReferenceChunks(record) ? "已选 chunk" : "选择 chunk"}
+            </Button>
+          ) : null}
+        </div>
+      );
+    }
     return (
       <div className="dataset-inline-textarea-wrapper">
         <TextArea
@@ -1179,20 +1920,6 @@ export default function DatasetDetailPage() {
           onChange={(event) => handleDraftChange(record, field, event.target.value)}
           onBlur={() => void handleAutoSaveItem(record)}
         />
-        {field === "reference_context" && canSelectReferenceChunks(record) ? (
-          <Button
-            size="small"
-            type="link"
-            className="dataset-reference-chunk-trigger"
-            onMouseDown={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-            }}
-            onClick={() => void handleOpenReferenceChunkSelector(record)}
-          >
-            选择 chunk
-          </Button>
-        ) : null}
       </div>
     );
   };
@@ -1207,6 +1934,7 @@ export default function DatasetDetailPage() {
         placeholder="问题类型"
         onChange={(value) => handleDraftChange(record, "question_type", value)}
         onBlur={() => void handleAutoSaveItem(record)}
+        options={questionTypeOptions}
       />
     );
   };
@@ -1214,7 +1942,7 @@ export default function DatasetDetailPage() {
   const columns = useMemo<ColumnsType<DatasetItem>>(() => {
     const allColumns: ColumnsType<DatasetItem> = [
       {
-        title: "问题",
+        title: renderRequiredColumnTitle(t(datasetItemFieldI18nKeys.question)),
         dataIndex: "question",
         key: "question",
         width: columnWidths.question,
@@ -1222,7 +1950,7 @@ export default function DatasetDetailPage() {
         render: (_, record) => renderInlineInput(record, "question", "请输入问题"),
       },
       {
-        title: "问题类型",
+        title: renderRequiredColumnTitle(t(datasetItemFieldI18nKeys.question_type)),
         dataIndex: "question_type",
         key: "question_type",
         width: columnWidths.question_type,
@@ -1230,7 +1958,7 @@ export default function DatasetDetailPage() {
         render: (_, record) => renderQuestionTypeCell(record),
       },
       {
-        title: "标准答案",
+        title: renderRequiredColumnTitle(t(datasetItemFieldI18nKeys.ground_truth)),
         dataIndex: "ground_truth",
         key: "ground_truth",
         width: columnWidths.ground_truth,
@@ -1239,7 +1967,7 @@ export default function DatasetDetailPage() {
           renderInlineTextArea(record, "ground_truth", "请输入标准答案"),
       },
       {
-        title: "答案要点",
+        title: t(datasetItemFieldI18nKeys.key_points),
         dataIndex: "key_points",
         key: "key_points",
         width: columnWidths.key_points,
@@ -1248,7 +1976,7 @@ export default function DatasetDetailPage() {
           renderInlineTextArea(record, "key_points", "请输入答案要点"),
       },
       {
-        title: "参考文档",
+        title: t(datasetItemFieldI18nKeys.reference_doc),
         dataIndex: "reference_doc",
         key: "reference_doc",
         width: columnWidths.reference_doc,
@@ -1256,7 +1984,7 @@ export default function DatasetDetailPage() {
         render: (_, record) => renderReferenceDocumentInput(record),
       },
       {
-        title: "参考上下文",
+        title: t(datasetItemFieldI18nKeys.reference_context),
         dataIndex: "reference_context",
         key: "reference_context",
         width: columnWidths.reference_context,
@@ -1265,7 +1993,7 @@ export default function DatasetDetailPage() {
           renderInlineTextArea(record, "reference_context", "请输入参考上下文"),
       },
       {
-        title: "生成依据",
+        title: t(datasetItemFieldI18nKeys.generate_reason),
         dataIndex: "generate_reason",
         key: "generate_reason",
         width: columnWidths.generate_reason,
@@ -1274,7 +2002,16 @@ export default function DatasetDetailPage() {
           renderInlineTextArea(record, "generate_reason", "请输入生成依据"),
       },
       {
-        title: "来源",
+        title: t(datasetItemFieldI18nKeys.is_deleted),
+        dataIndex: "is_deleted",
+        key: "is_deleted",
+        width: columnWidths.is_deleted,
+        onHeaderCell: () => getHeaderCellProps("is_deleted"),
+        render: (value: boolean | undefined) =>
+          value ? t("common.enabled") : t("common.disabled"),
+      },
+      {
+        title: t("datasetManagement.fields.source"),
         dataIndex: "source",
         key: "source",
         width: columnWidths.source,
@@ -1282,7 +2019,7 @@ export default function DatasetDetailPage() {
         render: (value: DatasetItemSource) => <SourceTypeTag source={value} />,
       },
       {
-        title: "更新时间",
+        title: t("datasetManagement.fields.updatedAt"),
         dataIndex: "updated_at",
         key: "updated_at",
         width: columnWidths.updated_at,
@@ -1290,7 +2027,7 @@ export default function DatasetDetailPage() {
         render: (value) => formatDateTime(value),
       },
       {
-        title: "操作",
+        title: t("common.actions"),
         key: "actions",
         width: columnWidths.actions,
         fixed: "right",
@@ -1312,7 +2049,7 @@ export default function DatasetDetailPage() {
       if (column.key === "actions") {
         return true;
       }
-      return visibleColumnKeys.includes(column.key as ConfigurableColumnKey);
+      return effectiveVisibleColumnKeys.includes(column.key as ConfigurableColumnKey);
     });
   }, [
     columnWidths,
@@ -1322,37 +2059,41 @@ export default function DatasetDetailPage() {
     documentSearchState,
     getHeaderCellProps,
     saving,
-    visibleColumnKeys,
+    effectiveVisibleColumnKeys,
+    t,
   ]);
 
   const tableScrollX = useMemo(
     () =>
-      visibleColumnKeys.reduce(
+      effectiveVisibleColumnKeys.reduce(
         (total, columnKey) => total + columnWidths[columnKey],
         columnWidths.actions + 96,
       ),
-    [columnWidths, visibleColumnKeys],
+    [columnWidths, effectiveVisibleColumnKeys],
   );
   const tableStyle = {
+    "--dataset-table-header-height": `${headerHeight}px`,
     "--dataset-table-row-height": `${rowHeight}px`,
   } as CSSProperties;
   const columnSettingsContent = (
     <div className="dataset-column-settings">
       <div className="dataset-column-settings-header">
-        <span>选择展示列</span>
+        <span>{t("datasetManagement.columnSettings.selectColumns")}</span>
         <Button
           type="link"
           size="small"
           onClick={() => setVisibleColumnKeys(DEFAULT_VISIBLE_COLUMN_KEYS)}
         >
-          恢复默认
+          {t("datasetManagement.columnSettings.restoreDefault")}
         </Button>
       </div>
       <Checkbox.Group
         className="dataset-column-settings-options"
-        value={visibleColumnKeys}
-        options={CONFIGURABLE_COLUMN_OPTIONS}
-        onChange={(values) => setVisibleColumnKeys(values as ConfigurableColumnKey[])}
+        value={effectiveVisibleColumnKeys}
+        options={columnSettingOptions}
+        onChange={(values) =>
+          setVisibleColumnKeys(normalizeVisibleColumnKeys(values as ConfigurableColumnKey[]))
+        }
       />
     </div>
   );

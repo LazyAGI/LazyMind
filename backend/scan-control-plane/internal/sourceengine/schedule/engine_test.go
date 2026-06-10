@@ -9,7 +9,7 @@ import (
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
 )
 
-func TestCheckpointScheduleEngineEnqueuesManualRunAndDedupesActiveRun(t *testing.T) {
+func TestCheckpointScheduleEngineEnqueuesManualRunAndAllowsDistinctActiveManualScopes(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -33,12 +33,17 @@ func TestCheckpointScheduleEngineEnqueuesManualRunAndDedupesActiveRun(t *testing
 		t.Fatalf("manual run fields not preserved: %+v", first.Run)
 	}
 
-	second, err := engine.EnqueueManualSync(ctx, ManualSyncRequest{SourceID: "source-1", BindingID: "binding-1"})
+	second, err := engine.EnqueueManualSync(ctx, ManualSyncRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		ScopeType: connector.ScopeTypePartial,
+		ScopeRef:  connector.ScopeRef{"root_object_key": "folder-2"},
+	})
 	if err != nil {
-		t.Fatalf("enqueue duplicate manual sync: %v", err)
+		t.Fatalf("enqueue second manual sync: %v", err)
 	}
-	if second.Created || second.Run.RunID != first.Run.RunID {
-		t.Fatalf("expected active manual run reuse, first=%+v second=%+v", first, second)
+	if !second.Created || second.Run.RunID == first.Run.RunID {
+		t.Fatalf("expected distinct active manual scopes to queue separately, first=%+v second=%+v", first, second)
 	}
 }
 
@@ -502,11 +507,16 @@ func (s *scheduleStore) ListDueSyncCheckpoints(_ context.Context, now time.Time,
 }
 
 func (s *scheduleStore) EnqueueSyncRun(_ context.Context, run store.SyncRun) (store.SyncRun, bool, error) {
-	for _, existing := range s.runs {
-		if existing.BindingID == run.BindingID && existing.BindingGeneration == run.BindingGeneration {
-			switch existing.Status {
-			case store.SyncRunStatusPending, store.SyncRunStatusRunning:
-				return existing, false, nil
+	if existing, ok := s.runs[run.RunID]; ok {
+		return existing, false, nil
+	}
+	if run.TriggerType != TriggerTypeManual {
+		for _, existing := range s.runs {
+			if existing.BindingID == run.BindingID && existing.BindingGeneration == run.BindingGeneration {
+				switch existing.Status {
+				case store.SyncRunStatusPending, store.SyncRunStatusRunning:
+					return existing, false, nil
+				}
 			}
 		}
 	}

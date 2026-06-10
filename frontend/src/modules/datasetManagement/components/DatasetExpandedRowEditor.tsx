@@ -1,8 +1,9 @@
 import { useEffect } from "react";
-import { Button, Form, Input, Select, Space, Typography } from "antd";
+import { Button, Form, Input, Space, Typography } from "antd";
 import type { DatasetItem, DatasetItemFormValues } from "../shared";
-import { questionTypeOptions, sourceLabelMap } from "../shared";
+import { sourceLabelMap } from "../shared";
 import { joinListField } from "../utils/datasetValidation";
+import QuestionTypeSelect from "./QuestionTypeSelect";
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -83,12 +84,7 @@ export default function DatasetExpandedRowEditor({
             label="问题类型"
             rules={[{ required: true, message: "问题类型不能为空" }]}
           >
-            <Select
-              showSearch
-              placeholder="请选择问题类型"
-              options={questionTypeOptions.map((value) => ({ label: value, value }))}
-              optionFilterProp="label"
-            />
+            <QuestionTypeSelect placeholder="请选择问题类型" />
           </Form.Item>
         </div>
 

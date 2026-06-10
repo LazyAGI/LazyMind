@@ -36,10 +36,12 @@ func (r *SQLRepository) EnqueueSyncRun(ctx context.Context, run SyncRun) (SyncRu
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		existing, ok, err := queryActiveSyncRunORM(tx, run.BindingID, run.BindingGeneration)
-		if err != nil || ok {
-			out = existing
-			return err
+		if shouldDedupeActiveSyncRun(run) {
+			existing, ok, err := queryActiveSyncRunORM(tx, run.BindingID, run.BindingGeneration)
+			if err != nil || ok {
+				out = existing
+				return err
+			}
 		}
 		if run.Status == "" {
 			run.Status = SyncRunStatusPending
@@ -52,6 +54,10 @@ func (r *SQLRepository) EnqueueSyncRun(ctx context.Context, run SyncRun) (SyncRu
 		return nil
 	})
 	return out, created, err
+}
+
+func shouldDedupeActiveSyncRun(run SyncRun) bool {
+	return run.TriggerType != "manual"
 }
 
 func (r *SQLRepository) GetSyncRun(ctx context.Context, runID string) (SyncRun, error) {

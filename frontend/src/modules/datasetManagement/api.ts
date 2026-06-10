@@ -247,6 +247,8 @@ function mapEvalSetItemToDatasetItem(item: EvalSetItemResponse): DatasetItem {
     reference_doc: item.reference_doc,
     reference_doc_ids: splitListField(item.reference_doc_ids),
     reference_chunk_ids: splitListField(item.reference_chunk_ids),
+    reference_doc_from_knowledge_base: item.reference_doc_from_knowledge_base,
+    reference_chunk_selected: item.reference_chunk_selected,
     generate_reason: item.generate_reason,
     is_deleted: item.is_deleted,
     source: normalizeItemSource(item.source),
@@ -449,6 +451,20 @@ export async function searchKnowledgeBaseDocuments(
 export async function listQuestionTypes(): Promise<string[]> {
   const response = await evalSetsClient.apiCoreEvalSetsQuestionTypesGet();
   const payload = unwrapPayload(response.data);
+  return (payload.items || [])
+    .map((item) => `${item.value || item.label || ""}`.trim())
+    .filter(Boolean);
+}
+
+export async function listDatasetQuestionTypes(datasetId: string): Promise<string[]> {
+  const normalizedDatasetId = `${datasetId || ""}`.trim();
+  if (!normalizedDatasetId) {
+    return [];
+  }
+  const response = await axiosInstance.get(
+    `/api/core/eval-sets/${encodeURIComponent(normalizedDatasetId)}/question-types`,
+  );
+  const payload = unwrapPayload(response.data as { items?: Array<{ label?: string; value?: string }> });
   return (payload.items || [])
     .map((item) => `${item.value || item.label || ""}`.trim())
     .filter(Boolean);

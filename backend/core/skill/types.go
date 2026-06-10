@@ -37,8 +37,7 @@ type updateSkillRequest struct {
 }
 
 type generateSkillRequest struct {
-	SuggestionIDs []string `json:"suggestion_ids"`
-	UserInstruct  string   `json:"user_instruct"`
+	UserInstruct string `json:"user_instruct"`
 }
 
 type generateSkillResponse struct {

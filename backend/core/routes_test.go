@@ -71,3 +71,25 @@ func TestListDocumentsByDatasetsRouteRegistered(t *testing.T) {
 		t.Fatalf("expected template %q, got %q", want, gotTemplate)
 	}
 }
+
+func TestToolDisableRouteRegistered(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+
+	req := httptest.NewRequest(http.MethodPost, "/tools/bing:disable", nil)
+	var match mux.RouteMatch
+	if !r.Match(req, &match) {
+		t.Fatalf("expected tool disable route to match")
+	}
+
+	gotTemplate, err := match.Route.GetPathTemplate()
+	if err != nil {
+		t.Fatalf("get matched route template: %v", err)
+	}
+	if want := "/tools/{tool_name}:disable"; gotTemplate != want {
+		t.Fatalf("expected template %q, got %q", want, gotTemplate)
+	}
+	if gotName := match.Vars["tool_name"]; gotName != "bing" {
+		t.Fatalf("expected tool_name %q, got %q", "bing", gotName)
+	}
+}

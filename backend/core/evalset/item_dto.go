@@ -3,27 +3,29 @@ package evalset
 import "time"
 
 type EvalSetItemResponse struct {
-	ID                string    `json:"id"`
-	EvalSetID         string    `json:"eval_set_id"`
-	ShardID           string    `json:"shard_id"`
-	CaseID            string    `json:"case_id"`
-	Question          string    `json:"question"`
-	GroundTruth       string    `json:"ground_truth"`
-	QuestionType      string    `json:"question_type"`
-	GenerateReason    string    `json:"generate_reason"`
-	KeyPoints         string    `json:"key_points"`
-	ReferenceChunkIDs string    `json:"reference_chunk_ids"`
-	ReferenceContext  string    `json:"reference_context"`
-	ReferenceDoc      string    `json:"reference_doc"`
-	ReferenceDocIDs   string    `json:"reference_doc_ids"`
-	IsDeleted         bool      `json:"is_deleted"`
-	Source            string    `json:"source"`
-	SourceSessionID   string    `json:"source_session_id"`
-	SourceHistoryID   string    `json:"source_history_id"`
-	CreatedBy         string    `json:"created_by"`
-	CreatedByName     string    `json:"created_by_name"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                            string    `json:"id"`
+	EvalSetID                     string    `json:"eval_set_id"`
+	ShardID                       string    `json:"shard_id"`
+	CaseID                        string    `json:"case_id"`
+	Question                      string    `json:"question"`
+	GroundTruth                   string    `json:"ground_truth"`
+	QuestionType                  string    `json:"question_type"`
+	GenerateReason                string    `json:"generate_reason"`
+	KeyPoints                     string    `json:"key_points"`
+	ReferenceChunkIDs             string    `json:"reference_chunk_ids"`
+	ReferenceContext              string    `json:"reference_context"`
+	ReferenceDoc                  string    `json:"reference_doc"`
+	ReferenceDocIDs               string    `json:"reference_doc_ids"`
+	ReferenceDocFromKnowledgeBase bool      `json:"reference_doc_from_knowledge_base"`
+	ReferenceChunkSelected        bool      `json:"reference_chunk_selected"`
+	IsDeleted                     bool      `json:"is_deleted"`
+	Source                        string    `json:"source"`
+	SourceSessionID               string    `json:"source_session_id"`
+	SourceHistoryID               string    `json:"source_history_id"`
+	CreatedBy                     string    `json:"created_by"`
+	CreatedByName                 string    `json:"created_by_name"`
+	CreatedAt                     time.Time `json:"created_at"`
+	UpdatedAt                     time.Time `json:"updated_at"`
 }
 
 type ListEvalSetItemsResponse struct {

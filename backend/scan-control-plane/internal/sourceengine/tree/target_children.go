@@ -74,7 +74,7 @@ func (e *DefaultTargetTreeEngine) mapTargetPage(ctx context.Context, conn connec
 		if err != nil {
 			return TreeNodePage{}, mapConnectorError(err)
 		}
-		if !req.IncludeFiles && !normalized.IsContainer {
+		if !isTargetDirectoryNode(raw, normalized) {
 			continue
 		}
 		nodes = append(nodes, targetNode(req.ConnectorType, raw, normalized))
@@ -97,4 +97,8 @@ func (e *DefaultTargetTreeEngine) limitForConnector(spec connector.ConnectorSpec
 		limits.DefaultPageSize = limits.MaxPageSize
 	}
 	return limits
+}
+
+func isTargetDirectoryNode(raw connector.RawObject, normalized connector.NormalizedSourceObject) bool {
+	return normalized.IsContainer || raw.Bindable
 }

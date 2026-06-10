@@ -14,6 +14,7 @@ import { Button, Input, message, Tooltip } from "antd";
 import {
   CloseOutlined,
   CommentOutlined,
+  EditOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
 import { debounce } from "lodash";
@@ -47,6 +48,33 @@ import { useTranslation } from "react-i18next";
 const { TextArea } = Input;
 
 const MAX_UPLOAD_FILES = 3;
+
+const PROMPT_SUGGESTIONS = [
+  {
+    key: "persuasive",
+    labelKey: "chat.promptSuggestionPersuasive",
+    descriptionKey: "chat.promptSuggestionPersuasiveDesc",
+    templateKey: "chat.promptSuggestionPersuasiveTemplate",
+  },
+  {
+    key: "structure",
+    labelKey: "chat.promptSuggestionStructure",
+    descriptionKey: "chat.promptSuggestionStructureDesc",
+    templateKey: "chat.promptSuggestionStructureTemplate",
+  },
+  {
+    key: "tone",
+    labelKey: "chat.promptSuggestionTone",
+    descriptionKey: "chat.promptSuggestionToneDesc",
+    templateKey: "chat.promptSuggestionToneTemplate",
+  },
+  {
+    key: "polish",
+    labelKey: "chat.promptSuggestionPolish",
+    descriptionKey: "chat.promptSuggestionPolishDesc",
+    templateKey: "chat.promptSuggestionPolishTemplate",
+  },
+];
 
 function getSuffix(f: { name: string }) {
   return f.name.substring(f.name.lastIndexOf(".")).toLowerCase();
@@ -423,6 +451,12 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     }, [citeMessage, citeMessages]);
     const isSendDisabled =
       disabled || !value?.trim() || isUploading || isStreaming;
+    const shouldShowPromptSuggestions =
+      !disabled && !isStreaming && value.trim().length > 0;
+
+    useEffect(() => {
+      setTimeout(() => onHeightChange?.(), 0);
+    }, [onHeightChange, shouldShowPromptSuggestions]);
 
     const handleSend = () => {
       if (disabled) {
@@ -471,6 +505,22 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       if (sessionId !== undefined) {
         debouncedSaveInput(sessionId, text);
       }
+    };
+
+    const handleApplyPromptSuggestion = (
+      suggestion: (typeof PROMPT_SUGGESTIONS)[number],
+    ) => {
+      const normalizedPrompt = value.trim();
+      if (!normalizedPrompt) {
+        return;
+      }
+      const nextPrompt = t(suggestion.templateKey, { prompt: normalizedPrompt });
+      onChange(nextPrompt);
+      setText(nextPrompt);
+      if (sessionId !== undefined) {
+        debouncedSaveInput(sessionId, nextPrompt);
+      }
+      setTimeout(() => onHeightChange?.(), 0);
     };
 
     const handlePaste = useCallback(
@@ -756,6 +806,33 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
               </div>
             </div>
           </div>
+          {shouldShowPromptSuggestions ? (
+            <div
+              className="prompt-suggestion-panel"
+              aria-label={t("chat.promptSuggestionsAria")}
+            >
+              {PROMPT_SUGGESTIONS.map((suggestion) => (
+                <button
+                  type="button"
+                  className="prompt-suggestion-item"
+                  key={suggestion.key}
+                  onClick={() => handleApplyPromptSuggestion(suggestion)}
+                >
+                  <span className="prompt-suggestion-icon" aria-hidden="true">
+                    <EditOutlined />
+                  </span>
+                  <span className="prompt-suggestion-copy">
+                    <span className="prompt-suggestion-title">
+                      {t(suggestion.labelKey)}
+                    </span>
+                    <span className="prompt-suggestion-description">
+                      {t(suggestion.descriptionKey)}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
         <PromptModal
           ref={promptRef}

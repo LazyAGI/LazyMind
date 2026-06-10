@@ -455,10 +455,6 @@ components:
             properties:
                 conversation:
                     $ref: '#/components/schemas/ConversationItem'
-                history:
-                    items:
-                        $ref: '#/components/schemas/ConversationHistoryItem'
-                    type: array
             type: object
         ConversationFeedbackRequest:
             properties:
@@ -1229,10 +1225,14 @@ components:
                     type: string
                 reference_chunk_ids:
                     type: string
+                reference_chunk_selected:
+                    type: boolean
                 reference_context:
                     type: string
                 reference_doc:
                     type: string
+                reference_doc_from_knowledge_base:
+                    type: boolean
                 reference_doc_ids:
                     type: string
                 shard_id:
@@ -1260,8 +1260,10 @@ components:
                 - question
                 - question_type
                 - reference_chunk_ids
+                - reference_chunk_selected
                 - reference_context
                 - reference_doc
+                - reference_doc_from_knowledge_base
                 - reference_doc_ids
                 - shard_id
                 - source
@@ -2083,6 +2085,8 @@ components:
                     items:
                         type: string
                     type: array
+                reparse_mode:
+                    type: string
                 target_dataset_id:
                     type: string
                 target_path:
@@ -2474,14 +2478,19 @@ components:
                     type: string
                 name:
                     type: string
+                verify:
+                    type: boolean
             required:
                 - base_url
                 - name
+                - verify
             type: object
         createModelProviderGroupOpenAPIResponse:
             properties:
                 base_url:
                     type: string
+                check:
+                    $ref: '#/components/schemas/CheckModelProviderData'
                 id:
                     type: string
                 name:
@@ -2807,12 +2816,22 @@ components:
                         $ref: '#/components/schemas/setSelectedModelOpenAPIItem'
                     type: array
             type: object
-        setSelectedProviderOpenAPIRequest:
+        setSelectedProviderOpenAPIItem:
             properties:
+                category:
+                    type: string
                 group_id:
                     type: string
             required:
+                - category
                 - group_id
+            type: object
+        setSelectedProviderOpenAPIRequest:
+            properties:
+                selections:
+                    items:
+                        $ref: '#/components/schemas/setSelectedProviderOpenAPIItem'
+                    type: array
             type: object
         setSharedProviderOpenAPIRequest:
             properties:
@@ -3669,6 +3688,8 @@ components:
                     type: string
                 id:
                     type: string
+                is_configured:
+                    type: boolean
                 name:
                     type: string
             required:
@@ -3677,6 +3698,7 @@ components:
                 - default_model_provider_id
                 - description
                 - id
+                - is_configured
                 - name
             type: object
         verifiedProviderGroupOpenAPIItem:
@@ -3691,12 +3713,6 @@ components:
                     type: string
                 provider_name:
                     type: string
-                shared_by_id:
-                    type: string
-                shared_by_name:
-                    type: string
-                source:
-                    type: string
                 user_model_provider_id:
                     type: string
             required:
@@ -3707,12 +3723,27 @@ components:
                 - provider_name
                 - user_model_provider_id
             type: object
+        verifiedProviderGroupsOpenAPIResponse:
+            properties:
+                groups:
+                    items:
+                        $ref: '#/components/schemas/verifiedProviderGroupOpenAPIItem'
+                    type: array
+            type: object
         verifiedProviderOpenAPIResponse:
             properties:
-                group:
-                    $ref: '#/components/schemas/verifiedProviderGroupOpenAPIItem'
+                group_name:
+                    type: string
+                provider_name:
+                    type: string
                 ready:
                     type: boolean
+                shared_by_id:
+                    type: string
+                shared_by_name:
+                    type: string
+                source:
+                    type: string
             required:
                 - ready
             type: object
@@ -4026,6 +4057,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /agent/threads/{thread_id}:start
+    /api/core/builtin-skills/{builtin_skill_uid}:enable:
+        post:
+            parameters:
+                - in: path
+                  name: builtin_skill_uid
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /builtin-skills/{builtin_skill_uid}:enable
     /api/core/chat:
         post:
             requestBody:
@@ -4939,6 +4982,11 @@ paths:
     /api/core/datasets/{dataset}/members:search:
         post:
             parameters:
+                - in: query
+                  name: name_prefix
+                  required: false
+                  schema:
+                    type: string
                 - in: path
                   name: dataset
                   required: true
@@ -6105,6 +6153,11 @@ paths:
     /api/core/kb/{kb_id}/acl:
         get:
             parameters:
+                - in: query
+                  name: grantee_type
+                  required: false
+                  schema:
+                    type: string
                 - in: path
                   name: kb_id
                   required: true
@@ -6284,6 +6337,11 @@ paths:
     /api/core/kb/{kb_id}/can:
         get:
             parameters:
+                - in: query
+                  name: action
+                  required: true
+                  schema:
+                    type: string
                 - in: path
                   name: kb_id
                   required: true
@@ -6582,7 +6640,7 @@ paths:
             tags:
                 - model_providers
         post:
-            description: Creates a group (name, base_url, optional api_key) under the given user model provider. model_provider_id is the id from GET /model_providers. The api_key is not returned in the response body.
+            description: Creates a group (name, base_url, optional api_key) under the given user model provider. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -6630,7 +6688,7 @@ paths:
             tags:
                 - model_providers
         patch:
-            description: Updates name, base_url, and optionally api_key for a group. The group is selected by path group_id. Omit api_key or send an empty string to keep the existing API key (e.g. when the UI shows a mask). The api_key is not returned in the response body.
+            description: Updates name, base_url, and optionally api_key for a group. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -6658,6 +6716,39 @@ paths:
             summary: Update model provider connection group
             tags:
                 - model_providers
+    /api/core/model_providers/{model_provider_id}/groups/{group_id}/keys:
+        delete:
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /model_providers/{model_provider_id}/groups/{group_id}/keys
+        post:
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /model_providers/{model_provider_id}/groups/{group_id}/keys
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/models:
         get:
             description: Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models).
@@ -6742,7 +6833,7 @@ paths:
                 - model_providers
     /api/core/model_providers/{model_provider_id}/groups/{group_id}:check:
         post:
-            description: Validates credentials by proxying to the algorithm POST /api/model/check (LAZYRAG_ALGO_SERVICE_URL). Maps provider_name→source, base_url→url, api_key→api_key. The current user identity is injected by the auth gateway from the token. Response data is the algorithm JSON payload.
+            description: Validates credentials. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -6766,7 +6857,7 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/CheckModelProviderData'
-                    description: 'data: success and message from algorithm /api/model/check'
+                    description: 'data: success and message from provider check'
             summary: Check model provider connectivity
             tags:
                 - model_providers
@@ -6808,6 +6899,25 @@ paths:
                 "200":
                     description: OK
             summary: GET /model_providers/models/ready
+    /api/core/model_providers/provider_groups:
+        get:
+            description: Lists verified provider groups owned by the current user for the given non-model category (for example ocr or search). Shared provider groups are intentionally excluded from this selectable list.
+            parameters:
+                - in: query
+                  name: category
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/verifiedProviderGroupsOpenAPIResponse'
+                    description: Current user's verified provider groups
+            summary: List verified provider groups for the current user
+            tags:
+                - model_providers
     /api/core/model_providers/selected_models:
         get:
             description: Returns the current user's selected model for each model_type.
@@ -6859,7 +6969,7 @@ paths:
             tags:
                 - model_providers
         put:
-            description: Upserts the selected provider group for the category derived from the group's parent provider. group_id must belong to the current user.
+            description: 'Upserts selected provider groups by category. Request shape mirrors selected_models: selections contains category and group_id. Send an empty group_id to clear a category selection.'
             requestBody:
                 content:
                     application/json:
@@ -6897,7 +7007,7 @@ paths:
                 - model_providers
     /api/core/model_providers/verified:
         get:
-            description: 'Returns the verified provider group the current user has selected for the given category (e.g. ocr, search). Falls back to any share=true row when the user has no own selection. Response includes source: ''own'' or ''shared''.'
+            description: Checks the current user's selected provider for the given category first, then falls back to a shared provider selection. This endpoint does not return selectable group details.
             parameters:
                 - in: query
                   name: category
@@ -6910,8 +7020,8 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/verifiedProviderOpenAPIResponse'
-                    description: Verified provider group
-            summary: Get verified provider group for a category
+                    description: Provider ready state
+            summary: Check whether a provider category is ready
             tags:
                 - model_providers
     /api/core/model_providers:with_groups:

@@ -270,8 +270,6 @@ func AddWordGroupConflictToGroups(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "add conflict word to groups failed", http.StatusInternalServerError)
 		return
 	}
-
-	notifyVocabReload(r.Context(), userID)
 	common.ReplyOK(w, AddWordGroupConflictToGroupsResponse{
 		Word:                word,
 		GroupIDs:            groupIDs,
@@ -422,8 +420,6 @@ func CreateWordGroupFromConflict(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "create word group from conflict failed", http.StatusInternalServerError)
 		return
 	}
-
-	notifyVocabReload(r.Context(), userID)
 	common.ReplyOK(w, CreateWordGroupFromConflictResponse{
 		CreateWordGroupResponse: CreateWordGroupResponse{
 			TermID:      termID,

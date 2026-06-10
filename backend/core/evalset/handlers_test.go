@@ -163,6 +163,45 @@ func TestCreateEvalSetWritesOwnerACL(t *testing.T) {
 	}
 }
 
+func TestCreateEvalSetRejectsDuplicateNameForSameOwner(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	existing := seedEvalSet(t, db, "eval_set_existing", "owner_1", "", "", time.Now().UTC())
+	if err := db.Model(&orm.EvalSet{}).Where("id = ?", existing.ID).Update("name", "wbc_test").Error; err != nil {
+		t.Fatalf("update existing name: %v", err)
+	}
+
+	rec, req := requestWithUser(http.MethodPost, "/api/core/eval-sets", `{"name":" wbc_test ","dataset_ids":["dataset_1"]}`, "owner_1")
+	CreateEvalSet(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected status 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "dataset name already exists") {
+		t.Fatalf("expected duplicate name message, got %s", rec.Body.String())
+	}
+}
+
+func TestUpdateEvalSetRejectsDuplicateNameForSameOwner(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	now := time.Now().UTC()
+	existing := seedEvalSet(t, db, "eval_set_existing", "owner_1", "", "", now)
+	target := seedEvalSet(t, db, "eval_set_target", "owner_1", "", "", now)
+	if err := db.Model(&orm.EvalSet{}).Where("id = ?", existing.ID).Update("name", "wbc_test").Error; err != nil {
+		t.Fatalf("update existing name: %v", err)
+	}
+
+	rec, req := requestWithUser(http.MethodPatch, "/api/core/eval-sets/eval_set_target", `{"name":"WBC_TEST"}`, "owner_1")
+	req = mux.SetURLVars(req, map[string]string{"eval_set_id": target.ID})
+	UpdateEvalSet(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected status 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "dataset name already exists") {
+		t.Fatalf("expected duplicate name message, got %s", rec.Body.String())
+	}
+}
+
 func TestListEvalSetsOnlyReturnsAccessibleRows(t *testing.T) {
 	db := newEvalSetTestDB(t)
 	now := time.Now().UTC()
@@ -224,6 +263,36 @@ func TestListEvalSetsFiltersByAnyDatasetID(t *testing.T) {
 	}
 	if resp.Total != int64(len(want)) {
 		t.Fatalf("expected total %d, got %d", len(want), resp.Total)
+	}
+}
+
+func TestListEvalSetsKeywordIsCaseInsensitive(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	now := time.Now().UTC()
+	match := seedEvalSet(t, db, "eval_set_qwen", "user_1", "", "", now)
+	if err := db.Model(&orm.EvalSet{}).Where("id = ?", match.ID).Updates(map[string]any{
+		"name":        "Qwen Cases",
+		"description": "Model eval set",
+	}).Error; err != nil {
+		t.Fatalf("update match eval set: %v", err)
+	}
+	skip := seedEvalSet(t, db, "eval_set_other", "user_1", "", "", now.Add(-time.Minute))
+	if err := db.Model(&orm.EvalSet{}).Where("id = ?", skip.ID).Updates(map[string]any{
+		"name":        "Other Cases",
+		"description": "No matching keyword",
+	}).Error; err != nil {
+		t.Fatalf("update skip eval set: %v", err)
+	}
+
+	rec, req := requestWithUser(http.MethodGet, "/api/core/eval-sets?keyword=qwen&page=1&page_size=10", "", "user_1")
+	ListEvalSets(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeOKData[ListEvalSetsResponse](t, rec)
+	if resp.Total != 1 || len(resp.Items) != 1 || resp.Items[0].ID != "eval_set_qwen" {
+		t.Fatalf("expected only qwen eval set, got %#v", resp)
 	}
 }
 

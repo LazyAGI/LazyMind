@@ -9,7 +9,6 @@ import (
 
 	"gorm.io/gorm"
 
-	"lazymind/core/algo"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
@@ -21,17 +20,20 @@ const (
 )
 
 type ManagedStateItem struct {
-	ResourceID                  string `json:"resource_id"`
-	ResourceType                string `json:"resource_type"`
-	Title                       string `json:"title"`
-	Content                     string `json:"content"`
-	ContentSummary              string `json:"content_summary"`
-	HasPendingReviewSuggestions bool   `json:"has_pending_review_suggestions"`
-	SuggestionStatus            string `json:"suggestion_status"`
-	AutoEvo                     bool   `json:"auto_evo"`
-	AutoEvoApplyStatus          string `json:"auto_evo_apply_status"`
-	AutoEvoGeneration           int64  `json:"auto_evo_generation"`
-	AutoEvoError                string `json:"auto_evo_error"`
+	ResourceID                  string  `json:"resource_id"`
+	ResourceType                string  `json:"resource_type"`
+	Title                       string  `json:"title"`
+	Content                     string  `json:"content"`
+	AgentPersona                *string `json:"agent_persona,omitempty"`
+	UserAddress                 *string `json:"user_address,omitempty"`
+	ResponseStyle               *string `json:"response_style,omitempty"`
+	ContentSummary              string  `json:"content_summary"`
+	HasPendingReviewSuggestions bool    `json:"has_pending_review_suggestions"`
+	SuggestionStatus            string  `json:"suggestion_status"`
+	AutoEvo                     bool    `json:"auto_evo"`
+	AutoEvoApplyStatus          string  `json:"auto_evo_apply_status"`
+	AutoEvoGeneration           int64   `json:"auto_evo_generation"`
+	AutoEvoError                string  `json:"auto_evo_error"`
 }
 
 func ListManagedStates(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +108,9 @@ func NewManagedStateItem(resourceType string, row any, suggestionStatus string) 
 		if typed != nil {
 			item.ResourceID = strings.TrimSpace(typed.ID)
 			item.Content = typed.Content
+			item.AgentPersona = stringPtr(typed.AgentPersona)
+			item.UserAddress = stringPtr(typed.UserAddress)
+			item.ResponseStyle = stringPtr(typed.ResponseStyle)
 			item.ContentSummary = ManagedStateSummary(typed.Content)
 			item.AutoEvo = typed.AutoEvo
 			item.AutoEvoApplyStatus = NormalizeAutoEvoApplyStatus(typed.AutoEvoApplyStatus)
@@ -124,6 +129,10 @@ func NewManagedStateItem(resourceType string, row any, suggestionStatus string) 
 		}
 	}
 	return item
+}
+
+func stringPtr(value string) *string {
+	return &value
 }
 
 func LoadManagedSuggestionStatuses(ctx context.Context, db *gorm.DB, userID string) (map[string]string, error) {
@@ -188,40 +197,7 @@ func applyManagedMemoryAutoEvolution(ctx context.Context, db *gorm.DB, row orm.S
 	if len(pending) == 0 {
 		return false, nil
 	}
-	generated, genErr := algo.GenerateMemory(ctx, algo.MemoryGenerateRequest{
-		Content:     row.Content,
-		Suggestions: memoryAlgoSuggestions(pending),
-	})
-	if genErr != nil {
-		return false, genErr
-	}
-	now := time.Now()
-	result := db.WithContext(ctx).Model(&orm.SystemMemory{}).
-		Where("id = ? AND version = ? AND auto_evo = ? AND auto_evo_generation = ?",
-			row.ID, row.Version, true, row.AutoEvoGeneration).
-		Updates(map[string]any{
-			"content":               generated,
-			"content_hash":          HashContent(generated),
-			"version":               row.Version + 1,
-			"draft_content":         "",
-			"draft_source_version":  0,
-			"draft_status":          "",
-			"draft_updated_at":      nil,
-			"auto_evo_apply_status": AutoEvoApplyStatusRunning,
-			"auto_evo_error":        "",
-			"updated_at":            now,
-			"ext":                   WithDraftSuggestionIDs(row.Ext, nil),
-		})
-	if result.Error != nil {
-		return false, result.Error
-	}
-	if result.RowsAffected == 0 {
-		return false, nil
-	}
-	if err := UpdateSuggestionStatus(ctx, db, memorySuggestionIDs(pending), SuggestionStatusApplied); err != nil {
-		return false, err
-	}
-	return true, nil
+	return false, nil
 }
 
 func applyManagedPreferenceAutoEvolution(ctx context.Context, db *gorm.DB, row orm.SystemUserPreference) (bool, error) {
@@ -232,40 +208,7 @@ func applyManagedPreferenceAutoEvolution(ctx context.Context, db *gorm.DB, row o
 	if len(pending) == 0 {
 		return false, nil
 	}
-	generated, genErr := algo.GenerateUserPreference(ctx, algo.MemoryGenerateRequest{
-		Content:     row.Content,
-		Suggestions: prefAlgoSuggestions(pending),
-	})
-	if genErr != nil {
-		return false, genErr
-	}
-	now := time.Now()
-	result := db.WithContext(ctx).Model(&orm.SystemUserPreference{}).
-		Where("id = ? AND version = ? AND auto_evo = ? AND auto_evo_generation = ?",
-			row.ID, row.Version, true, row.AutoEvoGeneration).
-		Updates(map[string]any{
-			"content":               generated,
-			"content_hash":          HashContent(generated),
-			"version":               row.Version + 1,
-			"draft_content":         "",
-			"draft_source_version":  0,
-			"draft_status":          "",
-			"draft_updated_at":      nil,
-			"auto_evo_apply_status": AutoEvoApplyStatusRunning,
-			"auto_evo_error":        "",
-			"updated_at":            now,
-			"ext":                   WithDraftSuggestionIDs(row.Ext, nil),
-		})
-	if result.Error != nil {
-		return false, result.Error
-	}
-	if result.RowsAffected == 0 {
-		return false, nil
-	}
-	if err := UpdateSuggestionStatus(ctx, db, prefSuggestionIDs(pending), SuggestionStatusApplied); err != nil {
-		return false, err
-	}
-	return true, nil
+	return false, nil
 }
 
 func EnsureManagedMemoryAutoEvolutionScheduled(row orm.SystemMemory) error {
@@ -486,34 +429,4 @@ func runManagedPreferenceAutoEvolutionLoop(preferenceID, workerKey string) {
 			}
 		}
 	}
-}
-
-func memorySuggestionIDs(rows []orm.ResourceSuggestion) []string {
-	ids := make([]string, 0, len(rows))
-	for _, row := range rows {
-		if trimmed := strings.TrimSpace(row.ID); trimmed != "" {
-			ids = append(ids, trimmed)
-		}
-	}
-	return ids
-}
-
-func prefSuggestionIDs(rows []orm.ResourceSuggestion) []string {
-	return memorySuggestionIDs(rows)
-}
-
-func memoryAlgoSuggestions(rows []orm.ResourceSuggestion) []algo.Suggestion {
-	result := make([]algo.Suggestion, 0, len(rows))
-	for _, row := range rows {
-		result = append(result, algo.Suggestion{
-			Title:   strings.TrimSpace(row.Title),
-			Content: strings.TrimSpace(row.Content),
-			Reason:  strings.TrimSpace(row.Reason),
-		})
-	}
-	return result
-}
-
-func prefAlgoSuggestions(rows []orm.ResourceSuggestion) []algo.Suggestion {
-	return memoryAlgoSuggestions(rows)
 }

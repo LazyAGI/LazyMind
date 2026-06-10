@@ -57,21 +57,23 @@ const (
 )
 
 type Object struct {
-	Kind            ObjectKind
-	Token           string
-	ParentToken     string
-	SpaceID         string
-	Name            string
-	IsDocument      bool
-	IsContainer     bool
-	HasChildren     bool
-	Revision        string
-	ModifiedUnixSec int64
-	SizeBytes       int64
-	MimeType        string
-	FileExtension   string
-	DriveType       string
-	StableID        string
+	Kind                ObjectKind
+	Token               string
+	ParentToken         string
+	SpaceID             string
+	Name                string
+	IsDocument          bool
+	IsContainer         bool
+	HasChildren         bool
+	Revision            string
+	ModifiedUnixSec     int64
+	SizeBytes           int64
+	MimeType            string
+	FileExtension       string
+	DriveType           string
+	ShortcutTargetType  string
+	ShortcutTargetToken string
+	StableID            string
 }
 
 type ObjectPage struct {

@@ -114,7 +114,7 @@ export LAZYLLM_MINERU_API_KEY=your_mineru_key
 ### Step 2 — Start the stack
 
 ```bash
-make up-build LAZYMIND_OCR_SERVER_TYPE=mineru LAZYMIND_OCR_SERVICE_VARIANT=online
+make up-build
 ```
 
 After startup:
@@ -130,13 +130,31 @@ For environment setup and detailed examples, see [`docs/quick_start.md`](docs/qu
 
 ---
 
+## Testing
+
+The legacy quick test command remains:
+
+```bash
+make test
+```
+
+`make test` uses the Python, Node/npm, and Go tools already available on the host, matching its historical behavior.
+
+For a project-managed host environment that covers the same test scope, use:
+
+```bash
+make test-hermetic
+```
+
+`make test-hermetic` requires `uv`, either `fnm` or `nvm`, and Go `1.24.0`. It creates a repo-local Python 3.11 environment at `.venv-test/`, selects Node 20 through the available Node manager, installs frontend test dependencies with `npm ci`, and runs the same frontend, auth-service, backend/core, and algorithm tests as `make test`.
+
 ## Common Startup Configurations
 
 | Scenario | Command |
 |----------|---------|
 | Standard | `make up` |
-| MinerU OCR | `make up LAZYMIND_OCR_SERVER_TYPE=mineru` |
-| PaddleOCR | `make up LAZYMIND_OCR_SERVER_TYPE=paddleocr` |
+| Deploy MinerU OCR (on-prem) | `make up LAZYMIND_DEPLOY_MINERU=1` |
+| Deploy PaddleOCR (on-prem) | `make up LAZYMIND_DEPLOY_PADDLEOCR=1` |
 | External Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 | Enable store dashboards | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
 

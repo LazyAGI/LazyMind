@@ -51,6 +51,17 @@ RUN pip install --no-cache-dir lazyllm && lazyllm install rag; \
 COPY algorithm/requirements.txt /app/algorithm/requirements.txt
 RUN pip install --no-cache-dir -r algorithm/requirements.txt
 
+# Pre-warm tiktoken encoding cache so the worker never needs to fetch it at
+# runtime (openaipublic.blob.core.windows.net may be unreachable in air-gapped
+# or restricted environments).
+RUN python -c "\
+import os, pathlib; \
+cache = pathlib.Path('/root/.lazyllm/tiktoken'); \
+cache.mkdir(parents=True, exist_ok=True); \
+os.environ['TIKTOKEN_CACHE_DIR'] = str(cache); \
+import tiktoken; tiktoken.get_encoding('gpt2'); \
+print('tiktoken gpt2 cache warmed at', cache)"
+
 
 # Stage: base_code - copy all source code on top of the fully-installed env.
 # Only this stage and its children need to rebuild when code changes.
@@ -102,13 +113,34 @@ COPY backend/core/doc /app/backend/core/doc
 CMD ["python", "backend/core/doc/doc_server.py"]
 
 
+# Stage: opencode_download - fetch the opencode binary in an isolated layer.
+# This stage only depends on OPENCODE_VERSION and GITHUB_PROXY, so the binary
+# is cached independently of any LazyMind / LazyLLM source changes.
+FROM ${DOCKER_MIRROR}python:3.11-slim AS opencode_download
+ARG GITHUB_PROXY
+ARG OPENCODE_VERSION=1.14.28
+RUN set -eu; \
+    apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) ARCH=x64 ;; \
+      arm64) ARCH=arm64 ;; \
+      *) echo "unsupported arch $arch" && exit 1 ;; \
+    esac; \
+    curl -fL "${GITHUB_PROXY}https://github.com/sst/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${ARCH}.tar.gz" \
+      -o /tmp/opencode.tar.gz; \
+    tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin opencode; \
+    chmod 0755 /usr/local/bin/opencode; \
+    rm /tmp/opencode.tar.gz; \
+    opencode --version
+
+
 # Stage: evo - algorithm + opencode binary + evo service.
 FROM algorithm AS evo
 WORKDIR /app
-ARG APT_MIRROR=http://mirrors.aliyun.com/debian
-ARG APT_SECURITY_MIRROR=http://mirrors.aliyun.com/debian-security
-ARG GITHUB_PROXY=https://gh-proxy.com/
-ARG OPENCODE_VERSION=1.14.28
+ARG APT_MIRROR
+ARG APT_SECURITY_MIRROR
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -131,20 +163,8 @@ apt-get update && apt-get install -y --no-install-recommends \
     ripgrep cmake ninja-build git \
 && rm -rf /var/lib/apt/lists/*
 
-# Detect arch inside the container (dpkg) so the binary always matches the base image,
-# regardless of whether BuildKit injects TARGETARCH (legacy builder does not).
-RUN set -eu; \
-  arch="$(dpkg --print-architecture)"; \
-  case "$arch" in \
-    amd64) ARCH=x64 ;; \
-    arm64) ARCH=arm64 ;; \
-    *) echo "unsupported arch $arch" && exit 1 ;; \
-  esac; \
-  curl -fL "${GITHUB_PROXY}https://github.com/sst/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${ARCH}.tar.gz" -o /tmp/opencode.tar.gz; \
-  tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin opencode; \
-  chmod 0755 /usr/local/bin/opencode; \
-  rm /tmp/opencode.tar.gz; \
-  opencode --version
+# Copy the pre-built opencode binary from the isolated download stage.
+COPY --from=opencode_download /usr/local/bin/opencode /usr/local/bin/opencode
 
 COPY evo/requirements.txt /tmp/evo-requirements.txt
 

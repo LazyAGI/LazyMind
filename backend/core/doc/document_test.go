@@ -68,6 +68,8 @@ func newDocumentTestDB(t *testing.T) *orm.DB {
 		&orm.Dataset{},
 		&orm.Document{},
 		&orm.Task{},
+		&orm.DefaultDataset{},
+		&orm.EvalSet{},
 		&readonlyorm.LazyLLMDocRow{},
 		&readonlyorm.LazyLLMDocServiceTaskRow{},
 	); err != nil {
@@ -127,6 +129,50 @@ func TestLoadMergedDocumentsUsesCoreUpdatedAtWhenNewerThanReadonlyBase(t *testin
 	doc := docFromRow(rows[0])
 	if doc.UpdateTime != coreUpdatedAt.Format(time.RFC3339) {
 		t.Fatalf("expected document update_time %q, got %q", coreUpdatedAt.Format(time.RFC3339), doc.UpdateTime)
+	}
+}
+
+func TestBuildTaskResponseDoesNotSucceedBeforeExternalTaskRowExists(t *testing.T) {
+	db := newDocumentTestDB(t)
+	now := time.Date(2026, 5, 2, 10, 30, 0, 0, time.UTC)
+
+	if err := db.Create(&orm.Document{
+		ID:           "doc-core",
+		LazyllmDocID: "doc-lazy",
+		DatasetID:    "dataset-1",
+		DisplayName:  "report.pdf",
+		FileID:       "doc-core",
+		Tags:         []byte(`[]`),
+		Ext:          []byte(`{}`),
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "user-1",
+			CreateUserName: "Alice",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create core document: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/datasets/dataset-1/tasks/task-core", nil)
+	resp := buildTaskResponse(req, orm.Task{
+		ID:            "task-core",
+		LazyllmTaskID: "lazy-task-pending-row",
+		DocID:         "doc-core",
+		DatasetID:     "dataset-1",
+		TaskType:      string(TaskTypeParse),
+		DisplayName:   "report.pdf",
+		Ext:           []byte(`{}`),
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "user-1",
+			CreateUserName: "Alice",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	})
+
+	if resp.TaskState != "WORKING" {
+		t.Fatalf("expected task to keep polling before external row exists, got %+v", resp)
 	}
 }
 

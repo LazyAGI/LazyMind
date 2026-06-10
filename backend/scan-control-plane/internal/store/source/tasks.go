@@ -80,6 +80,18 @@ func (r *SQLRepository) GetParseTask(ctx context.Context, taskID string) (ParseT
 	return r.refsForParseTask(ctx, parseTaskFromORM(model))
 }
 
+func (r *SQLRepository) GetParseTaskByIdempotencyKey(ctx context.Context, idempotencyKey string) (ParseTaskWithRefs, error) {
+	db, err := r.sourceORM(ctx)
+	if err != nil {
+		return ParseTaskWithRefs{}, err
+	}
+	var model ormParseTask
+	if err := db.Where("idempotency_key = ?", idempotencyKey).First(&model).Error; err != nil {
+		return ParseTaskWithRefs{}, mapGORMError(err, ErrCodeTaskNotFound, "parse task not found")
+	}
+	return r.refsForParseTask(ctx, parseTaskFromORM(model))
+}
+
 func (r *SQLRepository) GetParseTaskStats(ctx context.Context, req ParseTaskStatsRequest) (ParseTaskStats, error) {
 	stats := ParseTaskStats{ByStatus: map[string]int64{}, ByAction: map[string]int64{}}
 	db, err := r.sourceORM(ctx)
@@ -298,6 +310,14 @@ func (r *SQLRepository) SaveParseTask(ctx context.Context, parseTask ParseTask) 
 	return r.withORMTx(ctx, func(tx *gorm.DB) error {
 		return updateParseTaskORM(tx, parseTask)
 	})
+}
+
+func (r *SQLRepository) ClearTaskDeadLetter(ctx context.Context, taskID string) error {
+	db, err := r.sourceORM(ctx)
+	if err != nil {
+		return err
+	}
+	return mapSQLConstraint(db.Where("task_id = ?", taskID).Delete(&ormParseTaskDeadLetter{}).Error)
 }
 
 func (r *SQLRepository) SupersedeTask(ctx context.Context, taskID string, reason string) error {

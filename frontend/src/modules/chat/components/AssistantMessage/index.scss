@@ -1,10 +1,10 @@
 .chat-assistant-msg-single-answer-wrap {
   display: flex;
   gap: 14px;
-  align-self: center;
-  width: min(800px, max(350px, 66.67%)) !important;
-  margin-left: auto !important;
-  margin-right: auto !important;
+  align-self: flex-start;
+  width: 100% !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
   box-sizing: border-box;
 
   .chat-avatar {
@@ -34,10 +34,10 @@
 .chat-assistant-msg-multi-answer-wrap {
   display: flex;
   gap: 14px;
-  align-self: center;
-  width: clamp(600px, 100%, 1200px) !important;
-  margin-left: auto !important;
-  margin-right: auto !important;
+  align-self: flex-start;
+  width: 100% !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
   box-sizing: border-box;
 
   .chat-avatar {

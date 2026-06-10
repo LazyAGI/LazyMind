@@ -33,12 +33,30 @@ func TestValidateTargetStableFingerprintAndClientOnly(t *testing.T) {
 		t.Fatalf("expected auth/api clients only, auth=%d drive=%d", auth.calls, api.driveFolderCalls)
 	}
 
+	driveRoot := validateFeishuTarget(t, ctx, conn, TargetTypeDriveFolder, VirtualDriveRootRef)
+	if driveRoot.TargetRef != "drive:folder-root" || driveRoot.TargetFingerprint != "feishu:drive:folder-root" || driveRoot.RootObjectKey != "feishu:drive:folder-root" {
+		t.Fatalf("drive virtual root should normalize to the real drive root target, got %+v", driveRoot)
+	}
+
 	wiki := validateFeishuTarget(t, ctx, conn, TargetTypeWikiNode, "space-1:node-root")
 	if wiki.TargetFingerprint != "feishu:wiki:space-1:node-root" {
 		t.Fatalf("unexpected wiki fingerprint: %+v", wiki)
 	}
 	if wiki.DisplayName != "Wiki Root" {
 		t.Fatalf("wiki target display name should come from metadata, got %+v", wiki)
+	}
+
+	wikiSpace := validateFeishuTarget(t, ctx, conn, TargetTypeWikiNode, "feishu:wiki:space:space-1")
+	if wikiSpace.TargetFingerprint != "feishu:wiki:space:space-1" || wikiSpace.RootObjectKey != "feishu:wiki:space:space-1" {
+		t.Fatalf("unexpected wiki space target identity: %+v", wikiSpace)
+	}
+	if wikiSpace.DisplayName != "Engineering Wiki" {
+		t.Fatalf("wiki space target display name should come from metadata, got %+v", wikiSpace)
+	}
+
+	allWiki := validateFeishuTarget(t, ctx, conn, TargetTypeWikiNode, VirtualWikiSpacesRef)
+	if allWiki.TargetRef != VirtualWikiSpacesRef || allWiki.TargetFingerprint != "feishu:feishu:wiki:spaces" || allWiki.RootObjectKey != "feishu:feishu:wiki:spaces" {
+		t.Fatalf("wiki virtual root should remain an all-spaces binding target, got %+v", allWiki)
 	}
 }
 
@@ -196,25 +214,29 @@ func TestInitialRootsReturnDriveAndWikiVirtualBranches(t *testing.T) {
 		t.Fatalf("expected drive/wiki virtual roots, got %+v", page.Items)
 	}
 	drive := page.Items[0]
-	if !drive.Bindable || drive.BindingTargetType != TargetTypeDriveFolder || drive.BindingTargetRef != "drive:root" {
-		t.Fatalf("drive virtual root should represent the drive root target, got %+v", drive)
+	if !drive.Bindable || drive.BindingTargetType != TargetTypeDriveFolder || drive.BindingTargetRef != VirtualDriveRootRef {
+		t.Fatalf("drive virtual root should be a selectable whole-drive target, got %+v", drive)
 	}
 	wiki := page.Items[1]
-	if wiki.Bindable || wiki.BindingTargetType != "" || wiki.BindingTargetRef != "" {
-		t.Fatalf("wiki virtual root must not be bindable, got %+v", wiki)
+	if !wiki.Bindable || wiki.BindingTargetType != TargetTypeWikiNode || wiki.BindingTargetRef != VirtualWikiSpacesRef {
+		t.Fatalf("wiki virtual root should be a selectable all-wiki target, got %+v", wiki)
 	}
 	if page.Items[0].ObjectRef != VirtualDriveRootRef || page.Items[1].ObjectRef != VirtualWikiSpacesRef {
 		t.Fatalf("unexpected virtual roots: %+v", page.Items)
 	}
 }
 
-func TestDriveVirtualRootListsRootChildrenAndWikiNodeExposesSemanticBindingTargets(t *testing.T) {
+func TestVirtualRootsListWholeDriveAndAllWikiSpaces(t *testing.T) {
 	t.Parallel()
 
-	conn := NewFeishuConnector(&authStub{}, newFeishuAPIStub())
+	api := newFeishuAPIStub()
+	nestedDriveFile := Object{Kind: ObjectKindDriveFile, Token: "file-guide", ParentToken: "folder-guides", Name: "guide.md", IsDocument: true, Revision: "rev-guide", FileExtension: ".md", StableID: "file-guide"}
+	api.driveObjects["file-guide"] = nestedDriveFile
+	api.driveChildren["folder-guides"] = []Object{nestedDriveFile}
+	conn := NewFeishuConnector(&authStub{}, api)
 	drive, err := conn.ListChildren(context.Background(), connector.ListChildrenRequest{
 		TargetType:       TargetTypeDriveFolder,
-		NodeRef:          VirtualDriveRootRef,
+		TargetRef:        VirtualDriveRootRef,
 		AuthConnectionID: "auth-1",
 		PageSize:         10,
 	})
@@ -231,17 +253,99 @@ func TestDriveVirtualRootListsRootChildrenAndWikiNodeExposesSemanticBindingTarge
 		t.Fatalf("drive folder child should expose drive_folder target, got %+v", drive.Items[1])
 	}
 
+	driveNested, err := conn.ListChildren(context.Background(), connector.ListChildrenRequest{
+		TargetType:       TargetTypeDriveFolder,
+		TargetRef:        VirtualDriveRootRef,
+		NodeRef:          "drive:folder-guides",
+		AuthConnectionID: "auth-1",
+		PageSize:         10,
+	})
+	if err != nil {
+		t.Fatalf("list drive nested folder: %v", err)
+	}
+	if got := feishuObjectKeys(driveNested.Items); !sameStrings(got, []string{"feishu:drive:file-guide"}) {
+		t.Fatalf("drive virtual root should allow traversing nested folders, got %+v", driveNested.Items)
+	}
+
 	wiki, err := conn.ListChildren(context.Background(), connector.ListChildrenRequest{
 		TargetType:       TargetTypeWikiNode,
-		NodeRef:          VirtualWikiSpacesRef,
+		TargetRef:        VirtualWikiSpacesRef,
 		AuthConnectionID: "auth-1",
 		PageSize:         10,
 	})
 	if err != nil {
 		t.Fatalf("list wiki spaces: %v", err)
 	}
-	if len(wiki.Items) != 1 || wiki.Items[0].Bindable || wiki.Items[0].ObjectRef != "feishu:wiki:space:space-1" {
-		t.Fatalf("wiki spaces should be virtual containers, got %+v", wiki.Items)
+	if len(wiki.Items) != 1 || !wiki.Items[0].Bindable || wiki.Items[0].BindingTargetType != TargetTypeWikiNode || wiki.Items[0].BindingTargetRef != "feishu:wiki:space:space-1" || wiki.Items[0].ObjectRef != "feishu:wiki:space:space-1" {
+		t.Fatalf("wiki spaces should expose selectable binding targets, got %+v", wiki.Items)
+	}
+
+	wikiRoots, err := conn.ListChildren(context.Background(), connector.ListChildrenRequest{
+		TargetType:       TargetTypeWikiNode,
+		TargetRef:        VirtualWikiSpacesRef,
+		NodeRef:          "feishu:wiki:space:space-1",
+		AuthConnectionID: "auth-1",
+		PageSize:         10,
+	})
+	if err != nil {
+		t.Fatalf("list wiki space root nodes: %v", err)
+	}
+	if got := feishuObjectKeys(wikiRoots.Items); !sameStrings(got, []string{"feishu:wiki:space-1:node-root"}) {
+		t.Fatalf("wiki virtual root should allow traversing a space root, got %v", got)
+	}
+	normalizedWikiRoot, err := conn.MapObject(context.Background(), wikiRoots.Items[0])
+	if err != nil {
+		t.Fatalf("map wiki root node: %v", err)
+	}
+	if normalizedWikiRoot.ParentKey != "feishu:wiki:space:space-1" {
+		t.Fatalf("wiki root nodes should be parented under their wiki space, got %+v", normalizedWikiRoot)
+	}
+
+	wikiChildren, err := conn.ListChildren(context.Background(), connector.ListChildrenRequest{
+		TargetType:       TargetTypeWikiNode,
+		TargetRef:        VirtualWikiSpacesRef,
+		NodeRef:          "wiki:space-1:node-root",
+		AuthConnectionID: "auth-1",
+		PageSize:         10,
+	})
+	if err != nil {
+		t.Fatalf("list wiki root children: %v", err)
+	}
+	if got := feishuObjectKeys(wikiChildren.Items); !sameStrings(got, []string{"feishu:wiki:space-1:node-child"}) {
+		t.Fatalf("wiki virtual root should allow traversing wiki nodes, got %v", got)
+	}
+}
+
+func TestWikiSpaceTargetListsRootNodes(t *testing.T) {
+	t.Parallel()
+
+	conn := NewFeishuConnector(&authStub{}, newFeishuAPIStub())
+	page, err := conn.ListChildren(context.Background(), connector.ListChildrenRequest{
+		TargetType:       TargetTypeWikiNode,
+		TargetRef:        "feishu:wiki:space:space-1",
+		AuthConnectionID: "auth-1",
+		PageSize:         10,
+	})
+	if err != nil {
+		t.Fatalf("list wiki space target: %v", err)
+	}
+	if got := feishuObjectKeys(page.Items); !sameStrings(got, []string{"feishu:wiki:space-1:node-root"}) {
+		t.Fatalf("wiki space target should list root nodes, got %v", got)
+	}
+
+	fetched, err := conn.FetchPage(context.Background(), connector.FetchPageRequest{
+		BindingGeneration: 1,
+		TargetType:        TargetTypeWikiNode,
+		TargetRef:         "feishu:wiki:space:space-1",
+		ScopeType:         connector.ScopeTypeFull,
+		PageSize:          10,
+		AuthConnectionID:  "auth-1",
+	})
+	if err != nil {
+		t.Fatalf("fetch wiki space target: %v", err)
+	}
+	if got := feishuObjectKeys(fetched.Items); !sameStrings(got, []string{"feishu:wiki:space-1:node-root"}) {
+		t.Fatalf("wiki space fetch should list root nodes, got %v", got)
 	}
 }
 
@@ -306,6 +410,35 @@ func TestWikiFetchAndMarkdownExport(t *testing.T) {
 	}
 }
 
+func TestWikiFileNodeKeepsOriginalTypeMetadata(t *testing.T) {
+	t.Parallel()
+
+	conn := NewFeishuConnector(&authStub{}, newFeishuAPIStub())
+	raw := conn.rawObject("auth-1", Object{
+		Kind:          ObjectKindWikiNode,
+		Token:         "node-pdf",
+		SpaceID:       "space-1",
+		Name:          "ALCOHOLDINGS.pdf",
+		IsDocument:    true,
+		Revision:      "1779177086",
+		SizeBytes:     8,
+		MimeType:      "application/pdf",
+		FileExtension: ".pdf",
+		DriveType:     "file",
+		StableID:      "file-1",
+	})
+	normalized, err := conn.MapObject(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("map wiki file node: %v", err)
+	}
+	if normalized.FileExtension != ".pdf" || normalized.MimeType != "application/pdf" || normalized.SizeBytes != 8 {
+		t.Fatalf("wiki file node should keep original metadata, got %+v", normalized)
+	}
+	if normalized.ProviderMeta["file_type"] != "file" || normalized.ProviderMeta["stable_id"] != "file-1" {
+		t.Fatalf("wiki file node provider metadata was not preserved: %+v", normalized.ProviderMeta)
+	}
+}
+
 func TestWikiPartialFetchWithObjectKeyReturnsSelectedNode(t *testing.T) {
 	t.Parallel()
 
@@ -326,6 +459,155 @@ func TestWikiPartialFetchWithObjectKeyReturnsSelectedNode(t *testing.T) {
 	}
 	if got := feishuObjectKeys(page.Items); !sameStrings(got, []string{"feishu:wiki:space-1:node-root"}) {
 		t.Fatalf("partial object fetch should return selected wiki node, got %v", got)
+	}
+}
+
+func TestDrivePartialFetchWithObjectKeyReturnsSelectedFile(t *testing.T) {
+	t.Parallel()
+
+	api := newFeishuAPIStub()
+	conn := NewFeishuConnector(&authStub{}, api)
+	page, err := conn.FetchPage(context.Background(), connector.FetchPageRequest{
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		TargetType:        TargetTypeDriveFolder,
+		TargetRef:         "folder-root",
+		ScopeType:         connector.ScopeTypePartial,
+		ScopeRef:          connector.ScopeRef{"object_key": "feishu:drive:file-a"},
+		PageSize:          10,
+		AuthConnectionID:  "auth-1",
+	})
+	if err != nil {
+		t.Fatalf("partial fetch drive object: %v", err)
+	}
+	if got := feishuObjectKeys(page.Items); !sameStrings(got, []string{"feishu:drive:file-a"}) {
+		t.Fatalf("partial object fetch should return selected drive file, got %v", got)
+	}
+	if len(api.drivePageSizes) != 1 || api.drivePageSizes[0] != 100 || api.driveFolderCalls != 0 {
+		t.Fatalf("drive object fetch should locate the object from target listing, page_sizes=%v folder_calls=%d", api.drivePageSizes, api.driveFolderCalls)
+	}
+}
+
+func TestDrivePartialFetchWithFolderObjectKeyReturnsSelectedFolder(t *testing.T) {
+	t.Parallel()
+
+	api := newFeishuAPIStub()
+	conn := NewFeishuConnector(&authStub{}, api)
+	page, err := conn.FetchPage(context.Background(), connector.FetchPageRequest{
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		TargetType:        TargetTypeDriveFolder,
+		TargetRef:         "folder-root",
+		ScopeType:         connector.ScopeTypePartial,
+		ScopeRef:          connector.ScopeRef{"object_key": "feishu:drive:folder-guides"},
+		PageSize:          10,
+		AuthConnectionID:  "auth-1",
+	})
+	if err != nil {
+		t.Fatalf("partial fetch drive folder object: %v", err)
+	}
+	if got := feishuObjectKeys(page.Items); !sameStrings(got, []string{"feishu:drive:folder-guides"}) {
+		t.Fatalf("partial folder object fetch should return selected folder, got %v", got)
+	}
+	if len(api.drivePageSizes) != 1 || api.driveFolderCalls != 0 {
+		t.Fatalf("folder object fetch should locate the object from target listing, page_sizes=%v folder_calls=%d", api.drivePageSizes, api.driveFolderCalls)
+	}
+}
+
+func TestDrivePartialFetchWithShortcutObjectKeyPreservesTargetMetadata(t *testing.T) {
+	t.Parallel()
+
+	api := newFeishuAPIStub()
+	shortcut := Object{
+		Kind:                ObjectKindDriveFile,
+		Token:               "shortcut-a",
+		ParentToken:         "folder-root",
+		Name:                "Shortcut.pdf",
+		IsDocument:          true,
+		Revision:            "shortcut-rev",
+		DriveType:           "shortcut",
+		ShortcutTargetType:  "file",
+		ShortcutTargetToken: "file-target",
+		StableID:            "shortcut-a",
+	}
+	api.driveChildren["folder-root"] = append(api.driveChildren["folder-root"], shortcut)
+	conn := NewFeishuConnector(&authStub{}, api)
+	page, err := conn.FetchPage(context.Background(), connector.FetchPageRequest{
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		TargetType:        TargetTypeDriveFolder,
+		TargetRef:         "folder-root",
+		ScopeType:         connector.ScopeTypePartial,
+		ScopeRef:          connector.ScopeRef{"object_key": "feishu:drive:shortcut-a"},
+		PageSize:          10,
+		AuthConnectionID:  "auth-1",
+	})
+	if err != nil {
+		t.Fatalf("partial fetch drive shortcut object: %v", err)
+	}
+	if got := feishuObjectKeys(page.Items); !sameStrings(got, []string{"feishu:drive:shortcut-a"}) {
+		t.Fatalf("partial shortcut object fetch should return selected shortcut, got %v", got)
+	}
+	raw := page.Items[0]
+	if !raw.IsDocument || raw.IsContainer || raw.ProviderMeta["file_type"] != "shortcut" || raw.ProviderMeta["shortcut_target_type"] != "file" || raw.ProviderMeta["shortcut_target_token"] != "file-target" {
+		t.Fatalf("shortcut metadata was not preserved: %+v", raw)
+	}
+}
+
+func TestDriveShortcutExportsTargetFile(t *testing.T) {
+	t.Parallel()
+
+	auth := &authStub{}
+	api := newFeishuAPIStub()
+	api.driveObjects["file-target"] = Object{
+		Kind:          ObjectKindDriveFile,
+		Token:         "file-target",
+		Name:          "target.pdf",
+		IsDocument:    true,
+		Revision:      "shortcut-rev",
+		SizeBytes:     7,
+		MimeType:      "application/pdf",
+		FileExtension: ".pdf",
+		DriveType:     "file",
+		StableID:      "file-target",
+	}
+	conn := NewFeishuConnector(auth, api)
+	temp := &feishuTempStoreStub{}
+	conn.UseTempObjectStore(temp)
+
+	raw := conn.rawObject("auth-1", Object{
+		Kind:                ObjectKindDriveFile,
+		Token:               "shortcut-1",
+		Name:                "alias.pdf",
+		IsDocument:          true,
+		Revision:            "shortcut-rev",
+		DriveType:           "shortcut",
+		ShortcutTargetType:  "file",
+		ShortcutTargetToken: "file-target",
+		StableID:            "shortcut-1",
+	})
+	normalized, err := conn.MapObject(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("map shortcut: %v", err)
+	}
+	if normalized.ProviderMeta["shortcut_target_token"] != "file-target" {
+		t.Fatalf("shortcut target metadata was not preserved: %+v", normalized.ProviderMeta)
+	}
+
+	exported, err := conn.ExportObject(context.Background(), connector.ExportObjectRequest{
+		ObjectKey:     normalized.ObjectKey,
+		SourceVersion: normalized.SourceVersion,
+		ExportFormat:  connector.ExportFormatOriginal,
+		ProviderMeta:  normalized.ProviderMeta,
+	})
+	if err != nil {
+		t.Fatalf("export shortcut: %v", err)
+	}
+	if exported.ContentURI != "scan-temp://feishu-1" || temp.objects["feishu-1"] != "drive:file-target" {
+		t.Fatalf("shortcut should export target content, got exported=%+v temp=%+v", exported, temp.objects)
 	}
 }
 
@@ -474,6 +756,7 @@ func newFeishuAPIStub() *feishuAPIStub {
 			"folder-root": {file, alias, folder},
 		},
 		wikiChildren: map[string][]Object{
+			"space-1:":          {wikiRoot},
 			"space-1:node-root": {wikiChild},
 		},
 	}
@@ -483,9 +766,13 @@ func (a *feishuAPIStub) GetDriveRoot(context.Context, string) (Object, error) {
 	return a.GetDriveFolder(context.Background(), "", "folder-root")
 }
 
-func (a *feishuAPIStub) GetDriveFolder(context.Context, string, string) (Object, error) {
+func (a *feishuAPIStub) GetDriveFolder(_ context.Context, _ string, folderToken string) (Object, error) {
 	a.driveFolderCalls++
-	return a.driveObjects["folder-root"], nil
+	object, ok := a.driveObjects[driveFolderToken(folderToken)]
+	if !ok || object.Kind != ObjectKindDriveFolder {
+		return Object{}, connector.NewError(connector.ErrorCodeNotFound, "drive folder not found")
+	}
+	return object, nil
 }
 
 func (a *feishuAPIStub) ListDriveChildren(_ context.Context, _ string, folderToken, cursor string, pageSize int) (ObjectPage, error) {

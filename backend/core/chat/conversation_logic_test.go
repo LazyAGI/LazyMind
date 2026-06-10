@@ -104,10 +104,11 @@ func TestBuildChatRequestBodyKeepsExistingFilters(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
+	memoryContent := "---\nagent_persona: |-\n  严谨助手\nuser_address: |-\n  老师\nresponse_style: |-\n  简洁\n---\n\nmemory-content"
 	ctx := &evolution.ChatResourceContext{
-		AvailableTools:     []string{"all"},
+		DisabledTools:      []string{"bing"},
 		AvailableSkills:    []string{"coding/git-workflow"},
-		Memory:             "memory-content",
+		Memory:             memoryContent,
 		UserPreference:     "preference-content",
 		UsePersonalization: true,
 	}
@@ -119,8 +120,8 @@ func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
 	if got := body["user_id"]; got != "user-1" {
 		t.Fatalf("expected user_id to be forwarded, got %#v", got)
 	}
-	if got, ok := body["available_tools"].([]string); !ok || len(got) != 1 || got[0] != "all" {
-		t.Fatalf("unexpected available_tools: %#v", body["available_tools"])
+	if got, ok := body["disabled_tools"].([]string); !ok || len(got) != 1 || got[0] != "bing" {
+		t.Fatalf("unexpected disabled_tools: %#v", body["disabled_tools"])
 	}
 	if got, ok := body["available_skills"].([]string); !ok || len(got) != 1 || got[0] != "coding/git-workflow" {
 		t.Fatalf("unexpected available_skills: %#v", body["available_skills"])
@@ -128,7 +129,7 @@ func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
 	if _, ok := body["skill_fs_url"]; ok {
 		t.Fatalf("expected skill_fs_url to be omitted")
 	}
-	if got := body["memory"]; got != "memory-content" {
+	if got := body["memory"]; got != memoryContent {
 		t.Fatalf("unexpected memory: %#v", got)
 	}
 	if got := body["user_preference"]; got != "preference-content" {
@@ -144,7 +145,7 @@ func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
 
 func TestBuildChatRequestBodySkipsMemoryAndPreferenceWhenPersonalizationDisabled(t *testing.T) {
 	ctx := &evolution.ChatResourceContext{
-		AvailableTools:     []string{"all"},
+		DisabledTools:      []string{},
 		AvailableSkills:    []string{"coding/git-workflow"},
 		Memory:             "memory-content",
 		UserPreference:     "preference-content",
@@ -418,7 +419,7 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 		"reasoning":       false,
 		"databases":       []any{map[string]any{"name": "db1"}},
 		"enable_thinking": true,
-		"available_tools": []any{"all"},
+		"disabled_tools":  []any{"bing"},
 		"available_skills": []any{
 			"coding/git-workflow",
 		},
@@ -464,8 +465,8 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 	if !req.EnableThinking {
 		t.Fatalf("expected enable_thinking to be true")
 	}
-	if len(req.AvailableTools) != 1 || req.AvailableTools[0] != "all" {
-		t.Fatalf("unexpected available_tools: %#v", req.AvailableTools)
+	if len(req.DisabledTools) != 1 || req.DisabledTools[0] != "bing" {
+		t.Fatalf("unexpected disabled_tools: %#v", req.DisabledTools)
 	}
 	if len(req.AvailableSkills) != 1 || req.AvailableSkills[0] != "coding/git-workflow" {
 		t.Fatalf("unexpected available_skills: %#v", req.AvailableSkills)

@@ -194,6 +194,7 @@ type ExportObjectRequest struct {
 	SourceVersion     string
 	TargetVersionID   string
 	ExportFormat      ExportFormat
+	ProviderOptions   ProviderOptions
 	ProviderMeta      ProviderMeta
 }
 

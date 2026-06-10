@@ -25,11 +25,13 @@ type Store interface {
 	GetObject(ctx context.Context, sourceID, bindingID, objectKey string) (store.SourceObject, error)
 	UpsertDocument(ctx context.Context, document store.Document) (store.Document, error)
 	FindActiveTask(ctx context.Context, sourceID, bindingID, objectKey, targetVersionID, action string) (store.ParseTask, bool, error)
+	GetParseTaskByIdempotencyKey(ctx context.Context, idempotencyKey string) (store.ParseTaskWithRefs, error)
 	CreateParseTask(ctx context.Context, task store.ParseTask) error
 	SaveDocumentState(ctx context.Context, state store.DocumentState) error
 	ListParseTasks(ctx context.Context, req store.ParseTaskListRequest) ([]store.ParseTaskWithRefs, int, error)
 	GetParseTask(ctx context.Context, taskID string) (store.ParseTaskWithRefs, error)
 	SaveParseTask(ctx context.Context, task store.ParseTask) error
+	ClearTaskDeadLetter(ctx context.Context, taskID string) error
 }
 
 type DBTaskPlanner struct {
@@ -165,12 +167,16 @@ func (p *DBTaskPlanner) queueManualSyncs(ctx context.Context, req GenerateReques
 	if p.maxManualObjects > 0 && len(scopes) > p.maxManualObjects {
 		return GenerateResult{}, parseBatchLimitError(p.maxManualObjects, len(scopes), "request_object_ids")
 	}
+	syncReqBase := req
+	if strings.TrimSpace(syncReqBase.RequestID) == "" {
+		syncReqBase.RequestID = p.newID("manual-pull")
+	}
 	result := GenerateResult{RequestedCount: len(scopes), TaskIDs: []string{}}
 	for idx, scope := range scopes {
 		syncReq := sourceengine.TriggerSourceSyncRequest{
 			CallerID:  req.CallerID,
 			TenantID:  req.TenantID,
-			RequestID: syncRequestID(req, scope, idx),
+			RequestID: syncRequestID(syncReqBase, scope, idx),
 			SourceID:  req.SourceID,
 			BindingID: bindingID,
 			ScopeType: scope.scopeType,
@@ -407,6 +413,13 @@ func (p *DBTaskPlanner) generateTasks(ctx context.Context, req GenerateRequest, 
 			result.TaskIDs = append(result.TaskIDs, existing.TaskID)
 			continue
 		}
+		if existing, ok, err := p.restoreFailedTask(ctx, parseTask, docState, document); err != nil {
+			return result, err
+		} else if ok {
+			result.AcceptedCount++
+			result.TaskIDs = append(result.TaskIDs, existing.TaskID)
+			continue
+		}
 		if err := p.store.CreateParseTask(ctx, parseTask); err != nil {
 			if store.ErrorCodeOf(err) == store.ErrCodeIdempotencyKeyReused {
 				result.DuplicateCount++
@@ -426,6 +439,48 @@ func (p *DBTaskPlanner) generateTasks(ctx context.Context, req GenerateRequest, 
 	}
 	slices.Sort(result.TaskIDs)
 	return result, nil
+}
+
+func (p *DBTaskPlanner) restoreFailedTask(ctx context.Context, desired store.ParseTask, state store.DocumentState, document store.Document) (store.ParseTask, bool, error) {
+	item, err := p.store.GetParseTaskByIdempotencyKey(ctx, desired.IdempotencyKey)
+	if err != nil {
+		if store.ErrorCodeOf(err) == store.ErrCodeTaskNotFound || store.ErrorCodeOf(err) == store.ErrCodeNotFound {
+			return store.ParseTask{}, false, nil
+		}
+		return store.ParseTask{}, false, mapStoreError(err)
+	}
+	task := item.Task
+	if task.Status != TaskStatusFailed {
+		return store.ParseTask{}, false, nil
+	}
+	now := p.clock().UTC()
+	task.Status = TaskStatusPending
+	task.SourceVersion = desired.SourceVersion
+	task.TargetVersionID = desired.TargetVersionID
+	task.CoreParentDocumentID = desired.CoreParentDocumentID
+	task.CoreTaskID = ""
+	task.CoreDocumentID = ""
+	task.LeaseOwner = ""
+	task.LeaseUntil = nil
+	task.RetryCount = 0
+	task.NextRunAt = now
+	task.LastError = store.JSON{}
+	task.UpdatedAt = now
+	if err := p.store.SaveParseTask(ctx, task); err != nil {
+		return store.ParseTask{}, false, mapStoreError(err)
+	}
+	if err := p.store.ClearTaskDeadLetter(ctx, task.TaskID); err != nil {
+		return store.ParseTask{}, false, mapStoreError(err)
+	}
+	state.ActiveTaskID = task.TaskID
+	state.ParseQueueState = statepkg.ParseQueueStateQueued
+	state.DocumentID = document.DocumentID
+	state.LastError = store.JSON{}
+	state.UpdatedAt = now
+	if err := p.store.SaveDocumentState(ctx, state); err != nil {
+		return store.ParseTask{}, false, mapStoreError(err)
+	}
+	return task, true, nil
 }
 
 func (p *DBTaskPlanner) ExpediteTasks(ctx context.Context, req ExpediteRequest) (ExpediteResult, error) {

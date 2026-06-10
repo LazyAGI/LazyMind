@@ -1,4 +1,4 @@
-"""vocab/db.py: PostgreSQL helpers for backend-managed vocabulary and chat tables.
+"""PostgreSQL helpers for backend-managed vocabulary and chat tables.
 
 Vocabulary rows are now read from ``core.public.words`` and filtered by
 ``deleted_at IS NULL`` so soft-deleted words are excluded from both vocab
