@@ -89,6 +89,7 @@ import {
   createGlossaryGroupFromConflict,
   createGlossaryAsset,
   getGlossaryAssetDetail,
+  listGlossaryAssetsPage,
   listGlossaryConflicts,
   mergeGlossaryAssets,
   mergeGlossaryConflictAndAddWord,

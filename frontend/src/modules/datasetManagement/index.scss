@@ -237,6 +237,19 @@
     width: 100%;
   }
 
+  .dataset-required-column-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .dataset-required-column-mark {
+    color: #ff4d4f;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+  }
+
   .ant-table-thead > tr > th {
     position: relative;
     padding-top: 0;

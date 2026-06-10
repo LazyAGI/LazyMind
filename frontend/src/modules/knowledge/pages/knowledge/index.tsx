@@ -227,9 +227,9 @@ const Detail = () => {
           },
         ]}
       />
-      <Row gutter={[12, 12]} className="mt-6 w-full flex-1">
-        <Col span={15}>
-          <div className="h-full overflow-hidden">
+      <Row gutter={[12, 12]} className="mt-6 min-h-0 w-full flex-1">
+        <Col span={15} className="min-h-0">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden">
             <FileViewer
               file={previewFile}
               fileName={knowledgeDetail?.display_name || ""}
@@ -237,7 +237,7 @@ const Detail = () => {
             />
           </div>
         </Col>
-        <Col span={9}>
+        <Col span={9} className="min-h-0">
           <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', paddingBottom: '4px' }}>
             {knowledgeDetail && (
               <KnowledgeTabs

@@ -1,7 +1,7 @@
 import type { TFunction } from "i18next";
 
 export type SourceType = "local" | "s3" | "feishu" | "confluence" | "notion";
-export type SourceStatus = "active" | "expired" | "error" | "paused";
+export type SourceStatus = "active" | "expired" | "error" | "paused" | "deleted";
 export type ConnectionState = "connected" | "expired" | "error" | "pending";
 export type SyncMode = "manual" | "scheduled";
 export type ConflictPolicy = "overwrite" | "skip" | "versioned";
@@ -238,6 +238,9 @@ export function normalizeDataSourceStatus(
   status?: string,
   watchEnabled?: boolean,
 ): SourceStatus {
+  if (hasStatusToken(status, ["delete", "deleted", "deleting", "removed"])) {
+    return "deleted";
+  }
   if (
     hasStatusToken(status, [
       "error",
@@ -439,6 +442,9 @@ export function getSourceTypeDescription(type: SourceType, t: TFunction) {
 }
 
 export function getStatusMeta(status: SourceStatus, t: TFunction) {
+  if (status === "deleted") {
+    return { color: "default", text: t("common.delete") };
+  }
   if (status === "active") {
     return { color: "success", text: t("admin.dataSourceStatusActive") };
   }

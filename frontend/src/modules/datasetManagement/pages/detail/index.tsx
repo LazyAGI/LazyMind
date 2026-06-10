@@ -40,9 +40,9 @@ import {
   findKnowledgeBaseDocumentById,
   getDataset,
   importDatasetItems,
+  listDatasetQuestionTypes,
   listDatasetItems,
   type KnowledgeDocumentOption,
-  listQuestionTypes,
   mergeKnowledgeDocumentOptions,
   searchKnowledgeBaseDocuments,
   updateDatasetItem,
@@ -179,6 +179,13 @@ const editableFieldColumnMap: Record<EditableDatasetItemField, ConfigurableColum
   reference_doc: "reference_doc",
   generate_reason: "generate_reason",
 };
+
+const renderRequiredColumnTitle = (title: string) => (
+  <span className="dataset-required-column-title">
+    <span className="dataset-required-column-mark" aria-hidden="true">*</span>
+    {title}
+  </span>
+);
 
 type ResizableHeaderCellProps = ThHTMLAttributes<HTMLTableCellElement> & {
   columnKey?: ResizableColumnKey;
@@ -950,14 +957,12 @@ export default function DatasetDetailPage() {
           page: pagination.current,
           pageSize: pagination.pageSize,
         }),
-        listQuestionTypes().catch(() => []),
+        listDatasetQuestionTypes(datasetId).catch(() => []),
       ]);
       setDataset(datasetDetail);
       setItems(itemList.items);
       setTotal(itemList.total);
-      if (remoteQuestionTypes.length > 0) {
-        setQuestionTypeOptions(remoteQuestionTypes);
-      }
+      setQuestionTypeOptions(remoteQuestionTypes);
     } catch (error: any) {
       message.error(error?.message || "数据集加载失败");
     } finally {
@@ -1897,6 +1902,7 @@ export default function DatasetDetailPage() {
         placeholder="问题类型"
         onChange={(value) => handleDraftChange(record, "question_type", value)}
         onBlur={() => void handleAutoSaveItem(record)}
+        options={questionTypeOptions}
       />
     );
   };
@@ -1904,7 +1910,7 @@ export default function DatasetDetailPage() {
   const columns = useMemo<ColumnsType<DatasetItem>>(() => {
     const allColumns: ColumnsType<DatasetItem> = [
       {
-        title: "问题",
+        title: renderRequiredColumnTitle("问题"),
         dataIndex: "question",
         key: "question",
         width: columnWidths.question,
@@ -1912,7 +1918,7 @@ export default function DatasetDetailPage() {
         render: (_, record) => renderInlineInput(record, "question", "请输入问题"),
       },
       {
-        title: "问题类型",
+        title: renderRequiredColumnTitle("问题类型"),
         dataIndex: "question_type",
         key: "question_type",
         width: columnWidths.question_type,
@@ -1920,7 +1926,7 @@ export default function DatasetDetailPage() {
         render: (_, record) => renderQuestionTypeCell(record),
       },
       {
-        title: "标准答案",
+        title: renderRequiredColumnTitle("标准答案"),
         dataIndex: "ground_truth",
         key: "ground_truth",
         width: columnWidths.ground_truth,

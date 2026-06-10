@@ -456,6 +456,20 @@ export async function listQuestionTypes(): Promise<string[]> {
     .filter(Boolean);
 }
 
+export async function listDatasetQuestionTypes(datasetId: string): Promise<string[]> {
+  const normalizedDatasetId = `${datasetId || ""}`.trim();
+  if (!normalizedDatasetId) {
+    return [];
+  }
+  const response = await axiosInstance.get(
+    `/api/core/eval-sets/${encodeURIComponent(normalizedDatasetId)}/question-types`,
+  );
+  const payload = unwrapPayload(response.data as { items?: Array<{ label?: string; value?: string }> });
+  return (payload.items || [])
+    .map((item) => `${item.value || item.label || ""}`.trim())
+    .filter(Boolean);
+}
+
 export async function listDatasets(keyword?: string): Promise<DatasetListItem[]> {
   const response = await evalSetsClient.apiCoreEvalSetsGet({
     keyword: `${keyword || ""}`.trim() || undefined,

@@ -165,21 +165,22 @@
     width: 100%;
 
     .record-header {
-      gap: 8px;
-      margin-bottom: 4px;
+      gap: 6px;
+      margin-bottom: 2px;
     }
 
     .record-header-top {
       align-items: center;
       justify-content: space-between;
-      padding: 0 8px 4px;
+      padding: 0 6px 2px;
       gap: 8px;
     }
 
     .list-title {
-      font-size: 13px;
+      font-size: 12px;
       color: #9ca3af;
       font-weight: 600;
+      line-height: 18px;
     }
 
     .record-toolbar-actions {
@@ -220,25 +221,25 @@
     .record-list {
       min-height: 0;
       height: auto;
-      padding: 2px 0 0;
+      padding: 0;
     }
 
     .record-groups {
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 4px;
     }
 
     .record-group + .record-group {
-      margin-top: 6px;
-      padding-top: 10px;
-      border-top: 1px solid rgba(15, 23, 42, 0.08);
+      margin-top: 4px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(15, 23, 42, 0.06);
     }
 
     .record-group-title {
-      padding: 0 8px 4px;
-      color: #4b5563;
-      font-size: 13px;
+      padding: 0 6px 3px;
+      color: #6b7280;
+      font-size: 12px;
       font-weight: 700;
       line-height: 18px;
       letter-spacing: 0;
@@ -249,9 +250,9 @@
     }
 
     .record {
-      height: 38px;
-      border-radius: 10px;
-      padding: 8px 6px;
+      height: 32px;
+      border-radius: 8px;
+      padding: 6px;
       color: #374151;
 
       &::before {
@@ -261,21 +262,21 @@
 
       .title {
         width: auto;
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 350;
-        line-height: 18px;
+        line-height: 16px;
       }
 
       .update-time {
         flex: 0 0 auto;
-        margin-left: 8px;
+        margin-left: 6px;
         font-size: 11px;
         line-height: 16px;
         color: #9ca3af;
       }
 
       &:hover {
-        border-radius: 10px;
+        border-radius: 8px;
         background: rgba(15, 23, 42, 0.05);
       }
 
