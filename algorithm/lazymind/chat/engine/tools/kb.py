@@ -503,6 +503,7 @@ class KBToolGroup:
         doc = _DEFAULT_KB_DOCUMENT
         config = lazyllm.globals['agentic_config']
         index_name = resolve_index(group)
+        kw_lower = keyword.lower()
 
         for kb_id in iter_lookup_ids(
             (config.get('filters') or {}).get('kb_id'),
@@ -512,8 +513,6 @@ class KBToolGroup:
             nodes = nodes if isinstance(nodes, list) else []
             if not nodes:
                 continue
-            # Filter by keyword
-            kw_lower = keyword.lower()
             matched = []
             for n in nodes:
                 text = getattr(n, 'text', '') or ''
