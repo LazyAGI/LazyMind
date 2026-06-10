@@ -78,6 +78,7 @@ LABEL io.lazymind.lazyllm_git_sha="${LAZYLLM_GIT_SHA}"
 COPY algorithm/lazyllm /opt/lazyllm
 COPY algorithm/ /app/algorithm/
 RUN rm -rf /app/algorithm/lazyllm
+COPY plugin/plugins/ /app/plugin/plugins/
 
 
 # Stage: algorithm - env + code + runtime config. Used by most services.

@@ -13,6 +13,7 @@ import ChatContainerComponent, {
 import "./index.scss";
 import UIUtils from "@/modules/chat/utils/ui";
 import InitialCard from "@/modules/chat/components/InitialCard";
+import { useActivePluginContextStore } from "@/modules/chat/plugins/activePluginContextStore";
 import { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import { Method, SSE } from "@/modules/chat/utils/sse";
 import {
@@ -207,6 +208,10 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           ? chatConfig.knowledgeBaseId.map((k) => ({ id: k }))
           : [];
 
+    // Capture advance before clearing so the payload includes the correct value.
+    const advance = useActivePluginContextStore.getState().context?.advance ?? false;
+    useActivePluginContextStore.getState().clearAdvance();
+
     return new SSE(CHAT_STREAM_URL, {
       method: Method.POST,
       headers: {
@@ -237,6 +242,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         input,
         create_time: new Date().toISOString(),
         environment_context: buildEnvironmentContext(),
+        advance,
       }),
       callbacks,
     });

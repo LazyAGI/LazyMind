@@ -34,6 +34,18 @@ from lazyllm.tools.tool_config_inject import inject_tool_config
 from lazyllm import AutoModel
 from lazymind.config import config as _cfg
 
+try:
+    from lazymind.chat.plugins.manager import build_plugin_step_tools, build_all_plugin_tools
+    from lazymind.chat.plugins.loader import plugin_loader as _plugin_loader
+    from lazymind.chat.plugins.config import get_db_session_factory as _get_db_session_factory
+    _PLUGIN_ENABLED = True
+except Exception:
+    _PLUGIN_ENABLED = False
+    build_plugin_step_tools = None
+    build_all_plugin_tools = None
+    _plugin_loader = None
+    _get_db_session_factory = None
+
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
 sensitive_filter = SensitiveFilter(SENSITIVE_WORDS_PATH)
 
@@ -68,6 +80,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       model_config: Optional[Dict[str, Any]] = None,
                       tool_config: Optional[Dict[str, Union[str, List[str]]]] = None,
                       trace: Optional[bool] = False,
+                      plugin_context: Optional[Dict[str, Any]] = None,
                       ) -> Union[Dict[str, Any], StreamingResponse]:
     LOG.info(
         f'[ChatServer] [MODEL_CONFIG_RECEIVED] [sid={session_id}] [user_id={user_id or ""}] '
@@ -115,8 +128,41 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     lazyllm.locals._init_sid(sid=session_id)
     inject_model_config(model_config)
     inject_tool_config(tool_config)
+
+    # --- Plugin context injection ---
+    _pctx = plugin_context or {}
+    _plugin_id = _pctx.get('plugin_id', '')
+    _plugin_step = _pctx.get('step', '')
+    _plugin_session_id = _pctx.get('plugin_session_id', '')
+
+    agentic_config.update({
+        'plugin_id': _plugin_id,
+        'plugin_session_id': _plugin_session_id,
+        'plugin_step': _plugin_step,
+        'db_session_factory': _get_db_session_factory() if _PLUGIN_ENABLED and _get_db_session_factory else None,
+    })
+
     lazyllm.globals['agentic_config'] = agentic_config
-    active_configs = filter_tools(DEFAULT_TOOLS, disabled_tools)
+    lazyllm.globals['plugin_event_queue'] = []
+
+    # Unified tool view: default tools + all plugin trigger tools, regardless of session state.
+    all_default_configs = filter_tools(DEFAULT_TOOLS, disabled_tools)
+    lazyllm.globals['default_tools_for_step_agent'] = [c.instance for c in all_default_configs]
+    plugin_trigger_tools = build_all_plugin_tools() if _PLUGIN_ENABLED and build_all_plugin_tools else []
+    agent_tools = [cfg.instance for cfg in all_default_configs] + plugin_trigger_tools
+
+    # Inject plugin scenario + reachable steps into system prompt when a session is active.
+    if _PLUGIN_ENABLED and _plugin_id and _plugin_loader and _plugin_loader.is_loaded(_plugin_id):
+        environment_context = dict(environment_context or {})
+        environment_context['_plugin_scenario'] = _plugin_loader.get_scenario(_plugin_id)
+        environment_context['_plugin_step'] = _plugin_step
+        sm = _plugin_loader.get_state_machine(_plugin_id)
+        environment_context['_plugin_reachable_steps'] = sm.get_reachable_steps(_plugin_step)
+
+    # Signal to system_prompt that plugin trigger tools are present.
+    if plugin_trigger_tools:
+        environment_context = dict(environment_context or {})
+        environment_context['_has_plugins'] = True
     set_trace_context({
         'enabled': bool(trace),
         'trace_id': session_id if trace else None,
@@ -126,7 +172,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         'request_tags': ['handle_chat'],
     })
     runtime_prompt = build_system_prompt(
-        {cfg.name for cfg in active_configs},
+        {cfg.name for cfg in all_default_configs},
         environment_context=environment_context,
         use_memory=resolved_use_memory,
         user_preference=user_preference,
@@ -138,7 +184,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
     react_agent = lazyllm.tools.agent.ReactAgent(
         llm=llm,
-        tools=[cfg.instance for cfg in active_configs],
+        tools=agent_tools,
         max_retries=_cfg['max_retries'],
         stream=True,
         prompt=runtime_prompt,
@@ -157,6 +203,12 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
         try:
             async with rag_sem:
+                # Flush any plugin events queued before the agent runs (e.g. pre-queued mount).
+                pre_events = list(lazyllm.globals.get('plugin_event_queue', []))
+                lazyllm.globals['plugin_event_queue'] = []
+                for ev in pre_events:
+                    yield sse_line({'type': 'plugin_event', 'data': ev})
+
                 helper = lazyllm.module.stream_helper.StreamCallHelper(react_agent, init_sid=False)
                 async for item in helper.astream(query, llm_chat_history=agent_history):
                     for frame in translator.feed(item):
@@ -170,6 +222,12 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                     raise RuntimeError(f'agent failed: {exc}') from exc
 
                 final_result = result
+
+                # Flush plugin events emitted by trigger tools (e.g. mount, step_trigger).
+                post_events = list(lazyllm.globals.get('plugin_event_queue', []))
+                lazyllm.globals['plugin_event_queue'] = []
+                for ev in post_events:
+                    yield sse_line({'type': 'plugin_event', 'data': ev})
 
             for frame in translator.finish(final_result):
                 cost = round(time.time() - start_time, 3)

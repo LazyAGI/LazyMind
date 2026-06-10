@@ -1,6 +1,8 @@
 
 
 import { SSE } from "./sse";
+import { usePluginSessionStore } from "../plugins/pluginSessionStore";
+import type { PluginEvent } from "../plugins/types";
 
 export interface StreamCallbacks {
   message?: (e: CustomEvent) => void;
@@ -94,6 +96,21 @@ class StreamManager {
         }
 
         this.updateStreamState(conversationId, e);
+
+        // Dispatch plugin events to the plugin session store.
+        try {
+          const rawData = (e as any).data;
+          if (typeof rawData === "string" && rawData.trim() !== "[DONE]") {
+            const parsed = JSON.parse(rawData);
+            if (parsed?.type === "plugin_event" && parsed?.data) {
+              usePluginSessionStore.getState().handleEvent(parsed as PluginEvent);
+              return;
+            }
+          }
+        } catch {
+          // Non-plugin frames fall through to the normal message handler.
+        }
+
         if (callbacks.message) {
           callbacks.message(e);
         }

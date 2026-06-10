@@ -1,0 +1,41 @@
+# ---- 状态机 ----
+initial: optimize_prompt
+transitions:
+  optimize_prompt:
+    - to: optimize_prompt
+      condition: "用户对提示词不满意，要求修改优化方向或重新优化"
+    - to: generate_image
+      condition: "提示词优化完成，auto 模式下自动进入生图"
+  generate_image:
+    - to: optimize_prompt
+      condition: "用户对图片不满意，要求修改描述内容或方向，需重新优化提示词"
+    - to: generate_image
+      condition: "用户要求保持描述不变但重新生图"
+
+# ---- 每个 step 的执行 spec ----
+steps:
+  optimize_prompt:
+    prompt: |
+      The user wants to generate an image. Their description: {{user_input}}
+      Optimize this prompt for high-quality image generation:
+      - Make it descriptive and visually specific
+      - Add lighting, style, and composition hints if appropriate
+      When done, call save_step_artifact('optimized_prompt', your_optimized_text).
+    tools: []
+    outputs:
+      - artifact_id: optimized_prompt
+        format: text
+
+  generate_image:
+    prompt: |
+      Generate an image using the optimized prompt: {{optimized_prompt}}
+      Call dalle_generate(prompt) to produce the image.
+      When done, call save_step_artifact('image_url', the_returned_url).
+    tools: [dalle_generate]
+    inputs:
+      - artifact_id: optimized_prompt
+        payload_key: optimized_prompt
+        required: true
+    outputs:
+      - artifact_id: image_url
+        format: url

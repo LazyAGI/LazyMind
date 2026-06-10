@@ -1,0 +1,23 @@
+id: image-plugin
+name: AI 图片生成
+description: 帮助用户生成高质量图片，先优化提示词再生成图片
+
+trigger_description: |
+  Launch image generation when user asks to create, generate, or draw any image,
+  illustration, photo, or visual.
+
+steps:
+  - id: optimize_prompt
+    label: 优化提示词
+    default_mode: auto
+  - id: generate_image
+    label: 生成图片
+    default_mode: auto
+
+tool_scripts:
+  - path: tools.py
+    functions: [dalle_generate]
+
+artifacts:
+  optimized_prompt: { type: text }
+  image_url:        { type: image }

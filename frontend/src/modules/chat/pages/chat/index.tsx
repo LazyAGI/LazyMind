@@ -6,6 +6,7 @@ import {
   Conversation,
   Query,
 } from "@/api/generated/chatbot-client";
+import { useActivePluginContextStore } from "@/modules/chat/plugins/activePluginContextStore";
 
 import ChatContainerComponent, {
   ChatImperativeProps,
@@ -51,6 +52,10 @@ const ChatPage: FC = () => {
       ? []
       : chatConfig?.knowledgeBaseId?.map((id) => ({ id })) || [];
 
+    // Capture advance before clearing so the payload includes the correct value.
+    const advance = useActivePluginContextStore.getState().context?.advance ?? false;
+    useActivePluginContextStore.getState().clearAdvance();
+
     return new SSE(CHAT_STREAM_URL, {
       method: Method.POST,
       headers: {
@@ -76,6 +81,7 @@ const ChatPage: FC = () => {
         stream: true,
         input,
         environment_context: buildEnvironmentContext(),
+        advance,
       }),
       callbacks,
     });

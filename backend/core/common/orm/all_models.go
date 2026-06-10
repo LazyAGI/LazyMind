@@ -48,6 +48,10 @@ func AllModelsForDDL() []interface{} {
 		&UploadedFile{},
 		&Word{},
 		&WordGroupConflict{},
+		&PluginSession{},
+		&PluginSessionStep{},
+		&PluginSessionStepCheckpoint{},
+		&PluginSessionArtifact{},
 	}
 }
 
@@ -95,5 +99,9 @@ func TableNamesForDDL() []string {
 		"uploaded_files",
 		"words",
 		"word_group_conflicts",
+		"plugin_sessions",
+		"plugin_session_steps",
+		"plugin_session_step_checkpoints",
+		"plugin_session_artifacts",
 	}
 }

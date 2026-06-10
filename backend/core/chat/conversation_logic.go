@@ -608,6 +608,7 @@ func handleStreamChat(
 	target chatPersistTarget,
 	dualReply bool,
 	historyExt json.RawMessage,
+	pluginCtx *PluginContext,
 ) {
 	reqCtx := r.Context()
 	flusher, ok := w.(http.Flusher)
@@ -648,6 +649,12 @@ func handleStreamChat(
 	}
 
 	if !dualReply {
+		// Plugin context: hand off to the plugin event loop instead of the normal answer path.
+		if pluginCtx != nil && pluginCtx.PluginID != "" {
+			sender := &httpSSESender{w: w}
+			streamPluginLoop(chatCtx, db, baseURL, *pluginCtx, reqBody, sender, convID)
+			return
+		}
 		streamSingleAnswer(chatCtx, reqCtx, w, flusher, db, rdb, baseURL, reqBody, convID, query, historyID, target, historyExt)
 		return
 	}

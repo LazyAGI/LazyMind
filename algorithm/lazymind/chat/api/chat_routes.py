@@ -88,6 +88,10 @@ async def chat(
             )
         ),
     ] = None,
+    plugin_context: Annotated[
+        Optional[Dict[str, Any]],
+        Body(description='Active plugin session context {plugin_session_id, plugin_id, step, advance}'),
+    ] = None,
 ):
     return await handle_chat(
         query=query,
@@ -107,4 +111,5 @@ async def chat(
         model_config=llm_config,
         tool_config=tool_config,
         trace=trace,
+        plugin_context=plugin_context,
     )

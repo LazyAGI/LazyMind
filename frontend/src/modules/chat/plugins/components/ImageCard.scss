@@ -1,0 +1,78 @@
+.image-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  &__progress {
+    position: relative;
+    height: 6px;
+    background: #e5e7eb;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  &__progress-bar {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    background: #3b82f6;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+  }
+
+  &__progress-label {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: #6b7280;
+  }
+
+  &__skeleton {
+    width: 100%;
+    padding-top: 56.25%;
+    border-radius: 8px;
+    background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s infinite;
+  }
+
+  &__image-wrapper {
+    border-radius: 8px;
+    overflow: hidden;
+    background: #000;
+    line-height: 0;
+  }
+
+  &__image {
+    width: 100%;
+    display: block;
+    border-radius: 8px;
+    max-height: 480px;
+    object-fit: contain;
+  }
+
+  &__prompt {
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 1.5;
+  }
+
+  &__prompt-label {
+    font-weight: 500;
+    color: #374151;
+  }
+
+  &__error {
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 13px;
+  }
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}

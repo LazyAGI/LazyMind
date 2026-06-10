@@ -157,7 +157,12 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if query == "" {
+	// Extract advance flag before enforcing query requirement.
+	// advance=true (user clicked "Continue") may arrive with an empty query.
+	advance, _ := raw["advance"].(bool)
+
+	isPluginAdvance := advance
+	if query == "" && !isPluginAdvance {
 		common.ReplyErr(w, "query required", http.StatusBadRequest)
 		return
 	}
@@ -171,6 +176,26 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	if db == nil {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
 		return
+	}
+
+	// Reconstruct PluginContext from DB — do not trust frontend-supplied plugin fields.
+	// Only the boolean `advance` flag is accepted from the frontend.
+	var pluginCtx *PluginContext
+	if activeSession, err := orm.GetActivePluginSession(db, convID); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("query plugin session failed: %v", err), http.StatusInternalServerError)
+		return
+	} else if activeSession != nil {
+		// Security: ensure this session belongs to the requesting user.
+		if activeSession.CreateUserID != userID {
+			common.ReplyErr(w, "plugin session does not belong to current user", http.StatusForbidden)
+			return
+		}
+		pluginCtx = &PluginContext{
+			PluginSessionID: activeSession.ID,
+			PluginID:        activeSession.PluginID,
+			Step:            activeSession.CurrentStepID,
+			Advance:         advance,
+		}
 	}
 
 	var searchConfigJSON json.RawMessage
@@ -205,6 +230,14 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reqBody := buildChatRequestBody(convID, sessionID, query, upstreamHistories, raw, resourceContext, userID)
+	if pluginCtx != nil {
+		reqBody["plugin_context"] = map[string]any{
+			"plugin_session_id": pluginCtx.PluginSessionID,
+			"plugin_id":         pluginCtx.PluginID,
+			"step":              pluginCtx.Step,
+			// advance is consumed by Go only; not forwarded to Python.
+		}
+	}
 	historyExt := buildChatHistoryExt(raw, query)
 	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), db, userID)
 	if err != nil {
@@ -243,7 +276,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	handleStreamChat(w, r, db, rdb, baseURL, reqBody, convID, query, target, dualReply, historyExt)
+	handleStreamChat(w, r, db, rdb, baseURL, reqBody, convID, query, target, dualReply, historyExt, pluginCtx)
 }
 
 // ResumeChat text POST /api/v1/conversations:resumeChat

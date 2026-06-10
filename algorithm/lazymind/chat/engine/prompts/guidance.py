@@ -116,3 +116,34 @@ TOOL_USE_ENFORCEMENT_GUIDANCE = (
     "Every response should either (a) contain tool calls that make progress, or "
     "(b) deliver a final result."
 )
+
+PLUGIN_ACTIVE_GUIDANCE = (
+    "# Active Plugin Session — CRITICAL RULES\n\n"
+    "You are operating inside an active plugin session. Your ONLY job in this turn "
+    "is to analyze the user's intent and decide which step to trigger next.\n\n"
+    "## Decision protocol\n"
+    "1. Read the Scenario section below to understand what each step does.\n"
+    "2. Match the user's intent to the most appropriate step.\n"
+    "3. Call the corresponding `trigger_<step_id>` tool with a clear `user_input`.\n"
+    "4. **STOP IMMEDIATELY after calling any trigger_* tool.** "
+    "Do NOT output any text after the tool call. Do NOT call any other tools. "
+    "The trigger tool's return value is the end of this turn.\n\n"
+    "## Constraints\n"
+    "- You can ONLY call `trigger_*` tools in this session. No other tools are available.\n"
+    "- If the user's request does not match any step, reply directly in text (no tool call).\n"
+    "- Never attempt to execute steps yourself or describe what a step will do in detail.\n"
+    "- Never call two trigger tools in the same turn.\n"
+)
+
+PLUGIN_TOOLS_GUIDANCE = (
+    "# Plugin Tools\n\n"
+    "You have access to plugin trigger tools (functions named `trigger_<plugin_id>`). "
+    "Each tool's description tells you when to use it.\n\n"
+    "## Rules\n"
+    "- When the user's request matches a plugin's trigger description, call the corresponding "
+    "`trigger_<plugin_id>` tool immediately with a clear `user_input` summarising what the user wants.\n"
+    "- **STOP IMMEDIATELY after calling any `trigger_*` tool.** "
+    "Do NOT output any text after the tool call and do NOT call any other tools in the same turn.\n"
+    "- If the user's request does not match any plugin, answer normally using your other tools.\n"
+    "- Never attempt to execute plugin steps yourself — always delegate via the trigger tool.\n"
+)

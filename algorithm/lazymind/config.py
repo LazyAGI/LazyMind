@@ -114,6 +114,10 @@ config.add('document_processor_url', str, 'http://localhost:8000', 'DOCUMENT_PRO
 config.add('algo_server_port', int, 8000, 'ALGO_SERVER_PORT', description='Algorithm server port.')
 config.add('document_server_port', int, 8000, 'DOCUMENT_SERVER_PORT',
            description='Document server port (fallback for algo_server_port).')
+config.add('plugin_dir', str, '/app/plugin/plugins', 'PLUGIN_DIR',
+           description='Root directory containing plugin sub-directories.')
+config.add('plugin_workspace_base', str, '/data/plugin_workspace', 'PLUGIN_WORKSPACE_BASE',
+           description='Base directory for plugin step execution workspaces.')
 config.add('startup_retry_interval', str, '2', 'STARTUP_RETRY_INTERVAL',
            description='Startup retry interval in seconds.')
 config.add('startup_timeout', str, '0', 'STARTUP_TIMEOUT',

@@ -1,0 +1,67 @@
+.plugin-shell {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+  margin: 8px 0;
+
+  &__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: #f9fafb;
+    border-bottom: 1px solid #e5e7eb;
+    font-weight: 500;
+    font-size: 14px;
+    color: #374151;
+  }
+
+  &__badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 12px;
+    background: #dbeafe;
+    color: #1d4ed8;
+  }
+
+  &__body {
+    padding: 14px;
+  }
+
+  &__waiting {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: #fffbeb;
+    border-top: 1px solid #fde68a;
+    font-size: 13px;
+    color: #92400e;
+  }
+
+  &__continue-btn {
+    margin-left: auto;
+    padding: 4px 14px;
+    border-radius: 6px;
+    border: 1px solid #d97706;
+    background: #fef3c7;
+    color: #92400e;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s;
+
+    &:hover {
+      background: #fde68a;
+    }
+  }
+
+  &__error {
+    margin-top: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 13px;
+  }
+}
