@@ -69,7 +69,7 @@ func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.
 	if len(ctx.AvailableSkills) != 1 || ctx.AvailableSkills[0] != "coding/git-workflow" {
 		t.Fatalf("unexpected available_skills: %#v", ctx.AvailableSkills)
 	}
-	if ctx.Memory != "" || ctx.UserPreference != "" {
+	if ctx.Memory != FormatSystemMemoryForChat(orm.SystemMemory{}) || ctx.UserPreference != "" {
 		t.Fatalf("expected empty user-scoped content, got memory=%q preference=%q", ctx.Memory, ctx.UserPreference)
 	}
 	if !ctx.UsePersonalization {
@@ -80,7 +80,7 @@ func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.
 	if err != nil {
 		t.Fatalf("build second chat resource context: %v", err)
 	}
-	if secondCtx.Memory != "" || secondCtx.UserPreference != "" {
+	if secondCtx.Memory != FormatSystemMemoryForChat(orm.SystemMemory{}) || secondCtx.UserPreference != "" {
 		t.Fatalf("expected empty second user-scoped content, got memory=%q preference=%q", secondCtx.Memory, secondCtx.UserPreference)
 	}
 	if !secondCtx.UsePersonalization {
@@ -128,6 +128,9 @@ func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.
 	if len(memories) != 2 || memories[0].UserID != "u1" || memories[1].UserID != "u2" {
 		t.Fatalf("expected per-user memory rows for u1/u2, got %#v", memories)
 	}
+	if ctx.Memory != FormatSystemMemoryForChat(memories[0]) {
+		t.Fatalf("expected formatted memory context, got %q", ctx.Memory)
+	}
 
 	var prefs []orm.SystemUserPreference
 	if err := db.Order("user_id ASC").Find(&prefs).Error; err != nil {
@@ -135,6 +138,47 @@ func TestBuildChatResourceContextCreatesPerUserResourcesAndSnapshots(t *testing.
 	}
 	if len(prefs) != 2 || prefs[0].UserID != "u1" || prefs[1].UserID != "u2" {
 		t.Fatalf("expected per-user preference rows for u1/u2, got %#v", prefs)
+	}
+}
+
+func TestBuildChatResourceContextFormatsMemoryForChat(t *testing.T) {
+	db := newTestDB(t)
+
+	now := time.Now()
+	memory := orm.SystemMemory{
+		ID:            "memory-1",
+		UserID:        "u1",
+		Content:       "记住用户偏好简洁回答",
+		AgentPersona:  "资深研究助理",
+		UserAddress:   "老师",
+		ResponseStyle: "先结论后解释",
+		Version:       1,
+		UpdatedBy:     "u1",
+		UpdatedByName: "User 1",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	memory.ContentHash = HashSystemMemory(memory)
+	if err := db.Create(&memory).Error; err != nil {
+		t.Fatalf("create memory: %v", err)
+	}
+
+	ctx, err := BuildChatResourceContext(context.Background(), db.DB, "u1", "User 1", "session-memory")
+	if err != nil {
+		t.Fatalf("build chat resource context: %v", err)
+	}
+
+	want := "---\nagent_persona: |-\n  资深研究助理\nuser_address: |-\n  老师\nresponse_style: |-\n  先结论后解释\n---\n\n记住用户偏好简洁回答"
+	if ctx.Memory != want {
+		t.Fatalf("unexpected formatted memory:\n%s", ctx.Memory)
+	}
+
+	var snapshot orm.ResourceSessionSnapshot
+	if err := db.Where("session_id = ? AND resource_type = ?", "session-memory", ResourceTypeMemory).Take(&snapshot).Error; err != nil {
+		t.Fatalf("query memory snapshot: %v", err)
+	}
+	if snapshot.SnapshotHash != HashContent(want) {
+		t.Fatalf("expected snapshot hash to use formatted memory, got %q want %q", snapshot.SnapshotHash, HashContent(want))
 	}
 }
 

@@ -82,6 +82,18 @@ type DefaultPrompt struct {
 
 func (DefaultPrompt) TableName() string { return "default_prompts" }
 
+type UserDisabledTool struct {
+	ID             int64      `gorm:"column:id;primaryKey;autoIncrement"`
+	ToolName       string     `gorm:"column:tool_name;type:varchar(255);not null;uniqueIndex:uk_user_disabled_tools_user_tool,priority:2"`
+	CreateUserID   string     `gorm:"column:create_user_id;type:varchar(255);not null;uniqueIndex:uk_user_disabled_tools_user_tool,priority:1"`
+	CreateUserName string     `gorm:"column:create_user_name;type:varchar(255);not null"`
+	CreatedAt      time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at;not null"`
+	DeletedAt      *time.Time `gorm:"column:deleted_at"`
+}
+
+func (UserDisabledTool) TableName() string { return "user_disabled_tools" }
+
 type MultiAnswersSwitch struct {
 	ID     int32 `gorm:"column:id;primaryKey;autoIncrement"`
 	Status int32 `gorm:"column:status;not null;default:0"`

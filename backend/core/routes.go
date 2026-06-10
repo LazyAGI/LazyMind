@@ -115,6 +115,9 @@ func registerAllRoutes(r *mux.Router) {
 
 	// ----- text -----
 	handleAPI(r, "POST", "/chat", []string{"qa.read"}, chat.Chat)
+	handleAPI(r, "GET", "/tools", []string{"qa.read"}, chat.ListTools)
+	handleAPI(r, "POST", "/tools/{tool_name}:disable", []string{"qa.read"}, chat.DisableTool)
+	handleAPI(r, "POST", "/tools/{tool_name}:enable", []string{"qa.read"}, chat.EnableTool)
 
 	// ----- Agent thread stream -----
 	handleAPI(r, "GET", "/agent/threads", []string{"qa.read"}, agent.ListThreads)
