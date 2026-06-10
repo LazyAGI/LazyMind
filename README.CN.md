@@ -130,6 +130,24 @@ make up-build
 
 ---
 
+## 测试
+
+兼容旧行为的快速测试命令仍然是：
+
+```bash
+make test
+```
+
+`make test` 会继续使用宿主机当前可用的 Python、Node/npm 和 Go 环境。
+
+如果希望使用项目专用的宿主机测试环境，运行：
+
+```bash
+make test-hermetic
+```
+
+`make test-hermetic` 要求宿主机安装 `uv`、`fnm` 或 `nvm`，以及 Go `1.24.0`。它会在仓库内创建 Python 3.11 虚拟环境 `.venv-test/`，通过可用的 Node 版本管理器选择 Node 20，使用 `npm ci` 安装前端测试依赖，并运行与 `make test` 相同范围的 frontend、auth-service、backend/core 和 algorithm 测试。
+
 ## 常用启动配置
 
 | 场景 | 命令 |

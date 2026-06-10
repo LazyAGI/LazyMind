@@ -121,6 +121,20 @@ export const datasetItemFields: DatasetItemField[] = [
   "is_deleted",
 ];
 
+export const datasetItemFieldI18nKeys: Record<DatasetItemField, string> = {
+  case_id: "datasetManagement.fields.caseId",
+  question: "datasetManagement.fields.question",
+  question_type: "datasetManagement.fields.questionType",
+  ground_truth: "datasetManagement.fields.groundTruth",
+  key_points: "datasetManagement.fields.keyPoints",
+  reference_context: "datasetManagement.fields.referenceContext",
+  reference_doc: "datasetManagement.fields.referenceDoc",
+  reference_doc_ids: "datasetManagement.fields.referenceDocIds",
+  reference_chunk_ids: "datasetManagement.fields.referenceChunkIds",
+  generate_reason: "datasetManagement.fields.generateReason",
+  is_deleted: "datasetManagement.fields.isDeleted",
+};
+
 export const requiredDatasetItemFields: DatasetItemField[] = [
   "question",
   "question_type",

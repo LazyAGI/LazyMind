@@ -27,7 +27,7 @@ const (
 
 func (s *Service) PreviewImport(ctx context.Context, fileName, fileType string, data []byte, userID, userName string) (*ImportPreviewResponse, error) {
 	fileType = normalizeImportFileType(fileType, fileName)
-	if fileType != importFileTypeCSV && fileType != importFileTypeJSON {
+	if fileType != importFileTypeCSV && fileType != importFileTypeJSON && fileType != importFileTypeXLSX {
 		return nil, errors.New("unsupported file_type")
 	}
 

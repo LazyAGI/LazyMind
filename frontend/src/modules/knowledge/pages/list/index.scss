@@ -4,3 +4,9 @@
   margin-bottom: 16px;
   min-height: 50px;
 }
+
+.knowledge-list-page {
+  .list-page-table .ant-table-tbody > tr > td {
+    line-height: 1;
+  }
+}

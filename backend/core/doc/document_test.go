@@ -68,6 +68,8 @@ func newDocumentTestDB(t *testing.T) *orm.DB {
 		&orm.Dataset{},
 		&orm.Document{},
 		&orm.Task{},
+		&orm.DefaultDataset{},
+		&orm.EvalSet{},
 		&readonlyorm.LazyLLMDocRow{},
 		&readonlyorm.LazyLLMDocServiceTaskRow{},
 	); err != nil {
