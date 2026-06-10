@@ -33,6 +33,7 @@ import {
   SettingOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   batchDeleteDatasetItems,
   createDatasetItem,
@@ -68,7 +69,11 @@ import type {
   DatasetItemSource,
   DatasetListItem,
 } from "../../shared";
-import { formatDateTime, sourceLabelMap } from "../../shared";
+import {
+  datasetItemFieldI18nKeys,
+  formatDateTime,
+  sourceLabelMap,
+} from "../../shared";
 import {
   joinListField,
   validateRequiredDatasetItem,
@@ -91,7 +96,10 @@ const DEFAULT_COLUMN_WIDTHS = {
   key_points: 220,
   reference_context: 260,
   reference_doc: 160,
+  reference_doc_ids: 180,
+  reference_chunk_ids: 180,
   generate_reason: 220,
+  is_deleted: 120,
   source: 100,
   updated_at: 150,
   actions: 90,
@@ -105,6 +113,8 @@ type EditableDatasetItemField =
   | "key_points"
   | "reference_context"
   | "reference_doc"
+  | "reference_doc_ids"
+  | "reference_chunk_ids"
   | "generate_reason";
 type ActiveEditableCell = {
   itemId: string;
@@ -118,6 +128,11 @@ type DocumentSearchState = {
   totalSize?: number;
 };
 type ConfigurableColumnKey = Exclude<ResizableColumnKey, "actions">;
+const REQUIRED_VISIBLE_COLUMN_KEYS: ConfigurableColumnKey[] = [
+  "question",
+  "question_type",
+  "ground_truth",
+];
 type ReferenceDocumentPreview = {
   datasetId: string;
   documentId: string;
@@ -152,23 +167,31 @@ type ReferenceContextValue = {
 };
 
 const CONFIGURABLE_COLUMN_OPTIONS: Array<{
-  label: string;
+  labelKey: string;
   value: ConfigurableColumnKey;
+  disabled?: boolean;
 }> = [
-  { label: "问题", value: "question" },
-  { label: "问题类型", value: "question_type" },
-  { label: "标准答案", value: "ground_truth" },
-  { label: "答案要点", value: "key_points" },
-  { label: "参考文档", value: "reference_doc" },
-  { label: "参考上下文", value: "reference_context" },
-  { label: "生成依据", value: "generate_reason" },
-  { label: "来源", value: "source" },
-  { label: "更新时间", value: "updated_at" },
+  { labelKey: datasetItemFieldI18nKeys.question, value: "question", disabled: true },
+  { labelKey: datasetItemFieldI18nKeys.question_type, value: "question_type", disabled: true },
+  { labelKey: datasetItemFieldI18nKeys.ground_truth, value: "ground_truth", disabled: true },
+  { labelKey: datasetItemFieldI18nKeys.key_points, value: "key_points" },
+  { labelKey: datasetItemFieldI18nKeys.reference_doc, value: "reference_doc" },
+  { labelKey: datasetItemFieldI18nKeys.reference_context, value: "reference_context" },
+  { labelKey: datasetItemFieldI18nKeys.reference_doc_ids, value: "reference_doc_ids" },
+  { labelKey: datasetItemFieldI18nKeys.reference_chunk_ids, value: "reference_chunk_ids" },
+  { labelKey: datasetItemFieldI18nKeys.generate_reason, value: "generate_reason" },
+  { labelKey: datasetItemFieldI18nKeys.is_deleted, value: "is_deleted" },
+  { labelKey: "datasetManagement.fields.source", value: "source" },
+  { labelKey: "datasetManagement.fields.updatedAt", value: "updated_at" },
 ];
 
-const DEFAULT_VISIBLE_COLUMN_KEYS = CONFIGURABLE_COLUMN_OPTIONS.map(
-  (option) => option.value,
-);
+const DEFAULT_VISIBLE_COLUMN_KEYS = [
+  ...CONFIGURABLE_COLUMN_OPTIONS.map((option) => option.value),
+];
+
+function normalizeVisibleColumnKeys(keys: ConfigurableColumnKey[]) {
+  return Array.from(new Set([...REQUIRED_VISIBLE_COLUMN_KEYS, ...keys]));
+}
 
 const editableFieldColumnMap: Record<EditableDatasetItemField, ConfigurableColumnKey> = {
   question: "question",
@@ -177,6 +200,8 @@ const editableFieldColumnMap: Record<EditableDatasetItemField, ConfigurableColum
   key_points: "key_points",
   reference_context: "reference_context",
   reference_doc: "reference_doc",
+  reference_doc_ids: "reference_doc_ids",
+  reference_chunk_ids: "reference_chunk_ids",
   generate_reason: "generate_reason",
 };
 
@@ -805,6 +830,7 @@ function mergeHiddenItemFields(
 }
 
 export default function DatasetDetailPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { datasetId = "" } = useParams();
   const [dataset, setDataset] = useState<DatasetListItem | null>(null);
@@ -827,6 +853,19 @@ export default function DatasetDetailPage() {
     useState<Record<ResizableColumnKey, number>>(DEFAULT_COLUMN_WIDTHS);
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<ConfigurableColumnKey[]>(
     DEFAULT_VISIBLE_COLUMN_KEYS,
+  );
+  const columnSettingOptions = useMemo(
+    () =>
+      CONFIGURABLE_COLUMN_OPTIONS.map((option) => ({
+        label: t(option.labelKey),
+        value: option.value,
+        disabled: option.disabled,
+      })),
+    [t],
+  );
+  const effectiveVisibleColumnKeys = useMemo(
+    () => normalizeVisibleColumnKeys(visibleColumnKeys),
+    [visibleColumnKeys],
   );
   const [headerHeight, setHeaderHeight] = useState(DEFAULT_HEADER_HEIGHT);
   const [rowHeight, setRowHeight] = useState(DEFAULT_ROW_HEIGHT);
@@ -993,11 +1032,11 @@ export default function DatasetDetailPage() {
   useEffect(() => {
     if (
       activeCell &&
-      !visibleColumnKeys.includes(editableFieldColumnMap[activeCell.field])
+      !effectiveVisibleColumnKeys.includes(editableFieldColumnMap[activeCell.field])
     ) {
       setActiveCell(null);
     }
-  }, [activeCell, visibleColumnKeys]);
+  }, [activeCell, effectiveVisibleColumnKeys]);
 
   const confirmDiscardDirty = () =>
     new Promise<boolean>((resolve) => {
@@ -1629,6 +1668,7 @@ export default function DatasetDetailPage() {
     file: File | null,
   ) => {
     await importDatasetItems(datasetId, file, importedItems, result.failedCount);
+    setVisibleColumnKeys(DEFAULT_VISIBLE_COLUMN_KEYS);
     message.success("导入完成");
     await loadDetail();
   };
@@ -1910,7 +1950,7 @@ export default function DatasetDetailPage() {
   const columns = useMemo<ColumnsType<DatasetItem>>(() => {
     const allColumns: ColumnsType<DatasetItem> = [
       {
-        title: renderRequiredColumnTitle("问题"),
+        title: renderRequiredColumnTitle(t(datasetItemFieldI18nKeys.question)),
         dataIndex: "question",
         key: "question",
         width: columnWidths.question,
@@ -1918,7 +1958,7 @@ export default function DatasetDetailPage() {
         render: (_, record) => renderInlineInput(record, "question", "请输入问题"),
       },
       {
-        title: renderRequiredColumnTitle("问题类型"),
+        title: renderRequiredColumnTitle(t(datasetItemFieldI18nKeys.question_type)),
         dataIndex: "question_type",
         key: "question_type",
         width: columnWidths.question_type,
@@ -1926,7 +1966,7 @@ export default function DatasetDetailPage() {
         render: (_, record) => renderQuestionTypeCell(record),
       },
       {
-        title: renderRequiredColumnTitle("标准答案"),
+        title: renderRequiredColumnTitle(t(datasetItemFieldI18nKeys.ground_truth)),
         dataIndex: "ground_truth",
         key: "ground_truth",
         width: columnWidths.ground_truth,
@@ -1935,7 +1975,7 @@ export default function DatasetDetailPage() {
           renderInlineTextArea(record, "ground_truth", "请输入标准答案"),
       },
       {
-        title: "答案要点",
+        title: t(datasetItemFieldI18nKeys.key_points),
         dataIndex: "key_points",
         key: "key_points",
         width: columnWidths.key_points,
@@ -1944,7 +1984,7 @@ export default function DatasetDetailPage() {
           renderInlineTextArea(record, "key_points", "请输入答案要点"),
       },
       {
-        title: "参考文档",
+        title: t(datasetItemFieldI18nKeys.reference_doc),
         dataIndex: "reference_doc",
         key: "reference_doc",
         width: columnWidths.reference_doc,
@@ -1952,7 +1992,7 @@ export default function DatasetDetailPage() {
         render: (_, record) => renderReferenceDocumentInput(record),
       },
       {
-        title: "参考上下文",
+        title: t(datasetItemFieldI18nKeys.reference_context),
         dataIndex: "reference_context",
         key: "reference_context",
         width: columnWidths.reference_context,
@@ -1961,7 +2001,25 @@ export default function DatasetDetailPage() {
           renderInlineTextArea(record, "reference_context", "请输入参考上下文"),
       },
       {
-        title: "生成依据",
+        title: t(datasetItemFieldI18nKeys.reference_doc_ids),
+        dataIndex: "reference_doc_ids",
+        key: "reference_doc_ids",
+        width: columnWidths.reference_doc_ids,
+        onHeaderCell: () => getHeaderCellProps("reference_doc_ids"),
+        render: (_, record) =>
+          renderInlineInput(record, "reference_doc_ids", "请输入参考文档 ID"),
+      },
+      {
+        title: t(datasetItemFieldI18nKeys.reference_chunk_ids),
+        dataIndex: "reference_chunk_ids",
+        key: "reference_chunk_ids",
+        width: columnWidths.reference_chunk_ids,
+        onHeaderCell: () => getHeaderCellProps("reference_chunk_ids"),
+        render: (_, record) =>
+          renderInlineInput(record, "reference_chunk_ids", "请输入参考片段 ID"),
+      },
+      {
+        title: t(datasetItemFieldI18nKeys.generate_reason),
         dataIndex: "generate_reason",
         key: "generate_reason",
         width: columnWidths.generate_reason,
@@ -1970,7 +2028,16 @@ export default function DatasetDetailPage() {
           renderInlineTextArea(record, "generate_reason", "请输入生成依据"),
       },
       {
-        title: "来源",
+        title: t(datasetItemFieldI18nKeys.is_deleted),
+        dataIndex: "is_deleted",
+        key: "is_deleted",
+        width: columnWidths.is_deleted,
+        onHeaderCell: () => getHeaderCellProps("is_deleted"),
+        render: (value: boolean | undefined) =>
+          value ? t("common.enabled") : t("common.disabled"),
+      },
+      {
+        title: t("datasetManagement.fields.source"),
         dataIndex: "source",
         key: "source",
         width: columnWidths.source,
@@ -1978,7 +2045,7 @@ export default function DatasetDetailPage() {
         render: (value: DatasetItemSource) => <SourceTypeTag source={value} />,
       },
       {
-        title: "更新时间",
+        title: t("datasetManagement.fields.updatedAt"),
         dataIndex: "updated_at",
         key: "updated_at",
         width: columnWidths.updated_at,
@@ -1986,7 +2053,7 @@ export default function DatasetDetailPage() {
         render: (value) => formatDateTime(value),
       },
       {
-        title: "操作",
+        title: t("common.actions"),
         key: "actions",
         width: columnWidths.actions,
         fixed: "right",
@@ -2008,7 +2075,7 @@ export default function DatasetDetailPage() {
       if (column.key === "actions") {
         return true;
       }
-      return visibleColumnKeys.includes(column.key as ConfigurableColumnKey);
+      return effectiveVisibleColumnKeys.includes(column.key as ConfigurableColumnKey);
     });
   }, [
     columnWidths,
@@ -2018,16 +2085,17 @@ export default function DatasetDetailPage() {
     documentSearchState,
     getHeaderCellProps,
     saving,
-    visibleColumnKeys,
+    effectiveVisibleColumnKeys,
+    t,
   ]);
 
   const tableScrollX = useMemo(
     () =>
-      visibleColumnKeys.reduce(
+      effectiveVisibleColumnKeys.reduce(
         (total, columnKey) => total + columnWidths[columnKey],
         columnWidths.actions + 96,
       ),
-    [columnWidths, visibleColumnKeys],
+    [columnWidths, effectiveVisibleColumnKeys],
   );
   const tableStyle = {
     "--dataset-table-header-height": `${headerHeight}px`,
@@ -2036,20 +2104,22 @@ export default function DatasetDetailPage() {
   const columnSettingsContent = (
     <div className="dataset-column-settings">
       <div className="dataset-column-settings-header">
-        <span>选择展示列</span>
+        <span>{t("datasetManagement.columnSettings.selectColumns")}</span>
         <Button
           type="link"
           size="small"
           onClick={() => setVisibleColumnKeys(DEFAULT_VISIBLE_COLUMN_KEYS)}
         >
-          恢复默认
+          {t("datasetManagement.columnSettings.restoreDefault")}
         </Button>
       </div>
       <Checkbox.Group
         className="dataset-column-settings-options"
-        value={visibleColumnKeys}
-        options={CONFIGURABLE_COLUMN_OPTIONS}
-        onChange={(values) => setVisibleColumnKeys(values as ConfigurableColumnKey[])}
+        value={effectiveVisibleColumnKeys}
+        options={columnSettingOptions}
+        onChange={(values) =>
+          setVisibleColumnKeys(normalizeVisibleColumnKeys(values as ConfigurableColumnKey[]))
+        }
       />
     </div>
   );

@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/xuri/excelize/v2"
+	"golang.org/x/text/encoding/simplifiedchinese"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -43,8 +45,8 @@ func TestDownloadCSVImportTemplateFieldOrder(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("expected only header row, got %d rows", len(rows))
 	}
-	if got := strings.Join(rows[0], ","); got != strings.Join(importTemplateFields, ",") {
-		t.Fatalf("unexpected header order:\nwant %v\ngot  %v", importTemplateFields, rows[0])
+	if got := strings.Join(rows[0], ","); got != strings.Join(importDownloadTemplateFields, ",") {
+		t.Fatalf("unexpected header order:\nwant %v\ngot  %v", importDownloadTemplateFields, rows[0])
 	}
 }
 
@@ -61,24 +63,47 @@ func TestDownloadJSONImportTemplate(t *testing.T) {
 	if got := rec.Header().Get("Content-Type"); got != "application/json" {
 		t.Fatalf("expected json content type, got %q", got)
 	}
-	var rows []ImportNormalizedRow
+	var rows []map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&rows); err != nil {
 		t.Fatalf("decode json template: %v", err)
 	}
-	if len(rows) != 1 || rows[0] != (ImportNormalizedRow{}) {
+	if len(rows) != 1 {
 		t.Fatalf("unexpected json template: %#v", rows)
+	}
+	for _, field := range importDownloadTemplateFields {
+		if _, ok := rows[0][field]; !ok {
+			t.Fatalf("expected json template field %q, got %#v", field, rows[0])
+		}
+	}
+	if _, ok := rows[0]["case_id"]; ok {
+		t.Fatalf("json template must not include case_id: %#v", rows[0])
 	}
 }
 
-func TestDownloadXLSXImportTemplateRejected(t *testing.T) {
+func TestDownloadXLSXImportTemplate(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/core/eval-set-import-templates/xlsx", nil)
 	req = mux.SetURLVars(req, map[string]string{"file_type": "xlsx"})
 
 	DownloadImportTemplate(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" {
+		t.Fatalf("expected xlsx content type, got %q", got)
+	}
+	workbook, err := excelize.OpenReader(bytes.NewReader(rec.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("open xlsx template: %v", err)
+	}
+	defer workbook.Close()
+	rows, err := workbook.GetRows(workbook.GetSheetName(0))
+	if err != nil {
+		t.Fatalf("read xlsx template rows: %v", err)
+	}
+	if len(rows) != 1 || strings.Join(rows[0], ",") != strings.Join(importDownloadTemplateFields, ",") {
+		t.Fatalf("unexpected xlsx header:\nwant %v\ngot  %v", importDownloadTemplateFields, rows)
 	}
 }
 
@@ -214,6 +239,27 @@ func TestCSVImportPreviewAcceptsBOM(t *testing.T) {
 	assertImportPreviewStored(t, db, resp)
 }
 
+func TestCSVImportPreviewConvertsGB18030ToUTF8(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	withTempImportDir(t)
+
+	body, err := simplifiedchinese.GB18030.NewEncoder().Bytes([]byte("question,ground_truth,question_type\n问题,标准答案,事实问答\n"))
+	if err != nil {
+		t.Fatalf("encode gb18030 csv: %v", err)
+	}
+	rec, req := multipartImportRequestBytes(t, "gb18030.csv", "csv", body, "user_1")
+	PreviewEvalSetImport(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeOKData[ImportPreviewResponse](t, rec)
+	if resp.ValidRows != 1 || len(resp.PreviewRows) != 1 || resp.PreviewRows[0].Question != "问题" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	assertImportPreviewStored(t, db, resp)
+}
+
 func TestJSONImportPreviewArraySuccess(t *testing.T) {
 	db := newEvalSetTestDB(t)
 	withTempImportDir(t)
@@ -271,17 +317,28 @@ func TestJSONImportPreviewMissingGroundTruth(t *testing.T) {
 	assertImportPreviewStored(t, db, resp)
 }
 
-func TestXLSXImportPreviewRejected(t *testing.T) {
+func TestXLSXImportPreviewSuccess(t *testing.T) {
 	db := newEvalSetTestDB(t)
 	withTempImportDir(t)
 
-	rec, req := multipartImportRequest(t, "items.xlsx", "xlsx", "not parsed", "user_1")
+	content := xlsxImportContent(t, [][]string{
+		importTemplateFields,
+		{"case_1", "reason", "answer", "false", "points", "question", "type", "chunk_1", "context", "doc", "doc_1"},
+	})
+	rec, req := multipartImportRequestBytes(t, "items.xlsx", "xlsx", content, "user_1")
 	PreviewEvalSetImport(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	assertNoImportPreviewState(t, db)
+	resp := decodeOKData[ImportPreviewResponse](t, rec)
+	if resp.FileType != importFileTypeXLSX || resp.ValidRows != 1 || len(resp.PreviewRows) != 1 {
+		t.Fatalf("unexpected xlsx preview response: %#v", resp)
+	}
+	if resp.PreviewRows[0].CaseID != "case_1" || resp.PreviewRows[0].Question != "question" {
+		t.Fatalf("unexpected preview row: %#v", resp.PreviewRows[0])
+	}
+	assertImportPreviewStored(t, db, resp)
 }
 
 func TestSuccessfulImportPreviewWritesNormalizedTempAndRecordOnly(t *testing.T) {
@@ -381,13 +438,18 @@ func TestCleanupExpiredImportPreviews(t *testing.T) {
 
 func multipartImportRequest(t *testing.T, fileName, fileType, content, userID string) (*httptest.ResponseRecorder, *http.Request) {
 	t.Helper()
+	return multipartImportRequestBytes(t, fileName, fileType, []byte(content), userID)
+}
+
+func multipartImportRequestBytes(t *testing.T, fileName, fileType string, content []byte, userID string) (*httptest.ResponseRecorder, *http.Request) {
+	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	part, err := writer.CreateFormFile("file", fileName)
 	if err != nil {
 		t.Fatalf("create form file: %v", err)
 	}
-	if _, err := part.Write([]byte(content)); err != nil {
+	if _, err := part.Write(content); err != nil {
 		t.Fatalf("write form file: %v", err)
 	}
 	if fileType != "" {
@@ -406,6 +468,29 @@ func multipartImportRequest(t *testing.T, fileName, fileType, content, userID st
 		req.Header.Set("X-User-Name", userID+" name")
 	}
 	return httptest.NewRecorder(), req
+}
+
+func xlsxImportContent(t *testing.T, rows [][]string) []byte {
+	t.Helper()
+	workbook := excelize.NewFile()
+	defer workbook.Close()
+	sheet := workbook.GetSheetName(0)
+	for rowIndex, row := range rows {
+		for columnIndex, value := range row {
+			cell, err := excelize.CoordinatesToCellName(columnIndex+1, rowIndex+1)
+			if err != nil {
+				t.Fatalf("cell name: %v", err)
+			}
+			if err := workbook.SetCellValue(sheet, cell, value); err != nil {
+				t.Fatalf("set cell: %v", err)
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := workbook.Write(&buf); err != nil {
+		t.Fatalf("write xlsx: %v", err)
+	}
+	return buf.Bytes()
 }
 
 func withTempImportDir(t *testing.T) string {

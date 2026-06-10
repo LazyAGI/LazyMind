@@ -227,6 +227,36 @@ func TestListEvalSetsFiltersByAnyDatasetID(t *testing.T) {
 	}
 }
 
+func TestListEvalSetsKeywordIsCaseInsensitive(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	now := time.Now().UTC()
+	match := seedEvalSet(t, db, "eval_set_qwen", "user_1", "", "", now)
+	if err := db.Model(&orm.EvalSet{}).Where("id = ?", match.ID).Updates(map[string]any{
+		"name":        "Qwen Cases",
+		"description": "Model eval set",
+	}).Error; err != nil {
+		t.Fatalf("update match eval set: %v", err)
+	}
+	skip := seedEvalSet(t, db, "eval_set_other", "user_1", "", "", now.Add(-time.Minute))
+	if err := db.Model(&orm.EvalSet{}).Where("id = ?", skip.ID).Updates(map[string]any{
+		"name":        "Other Cases",
+		"description": "No matching keyword",
+	}).Error; err != nil {
+		t.Fatalf("update skip eval set: %v", err)
+	}
+
+	rec, req := requestWithUser(http.MethodGet, "/api/core/eval-sets?keyword=qwen&page=1&page_size=10", "", "user_1")
+	ListEvalSets(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeOKData[ListEvalSetsResponse](t, rec)
+	if resp.Total != 1 || len(resp.Items) != 1 || resp.Items[0].ID != "eval_set_qwen" {
+		t.Fatalf("expected only qwen eval set, got %#v", resp)
+	}
+}
+
 func TestGetEvalSetForbiddenWithoutPermission(t *testing.T) {
 	db := newEvalSetTestDB(t)
 	seedEvalSet(t, db, "eval_set_private", "owner_1", "", "", time.Now().UTC())

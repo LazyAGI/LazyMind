@@ -451,6 +451,33 @@ const zhCN = {
     newChat: "新建对话",
   },
 
+  datasetManagement: {
+    fields: {
+      caseId: "Case ID",
+      question: "问题",
+      questionType: "问题类型",
+      groundTruth: "标准答案",
+      keyPoints: "答案要点",
+      referenceContext: "参考上下文",
+      referenceDoc: "参考文档",
+      referenceDocIds: "参考文档 ID",
+      referenceChunkIds: "参考片段 ID",
+      generateReason: "生成依据",
+      isDeleted: "是否删除",
+      source: "来源",
+      updatedAt: "更新时间",
+    },
+    import: {
+      rowNumber: "行号",
+      validationResult: "校验结果",
+      passed: "通过",
+    },
+    columnSettings: {
+      selectColumns: "选择展示列",
+      restoreDefault: "恢复默认",
+    },
+  },
+
   profile: {
     title: "个人信息",
     username: "用户名",

@@ -55,8 +55,8 @@ func (r *Repository) List(ctx context.Context, userID string, groupIDs []string,
 	q = q.Where("("+strings.Join(accessParts, " OR ")+")", accessArgs...)
 
 	if filter.Keyword != "" {
-		like := "%" + filter.Keyword + "%"
-		q = q.Where("(name LIKE ? OR description LIKE ?)", like, like)
+		like := "%" + strings.ToLower(filter.Keyword) + "%"
+		q = q.Where("(LOWER(name) LIKE ? OR LOWER(description) LIKE ?)", like, like)
 	}
 	var rows []orm.EvalSet
 	if err := q.Order("updated_at DESC").Find(&rows).Error; err != nil {
