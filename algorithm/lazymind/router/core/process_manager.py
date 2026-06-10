@@ -250,6 +250,7 @@ class ProcessManager:
         self._procs[port] = proc
         self._port_algo[(self._host, port)] = algo_id
 
+        await self.ensure_instance_registered()
         async with AsyncSessionLocal() as session:
             stmt = _upsert_child_process(
                 instance_id=self._instance_id,
@@ -262,6 +263,14 @@ class ProcessManager:
             await session.commit()
 
         logger.info('Spawned child process for algo=%s port=%d pid=%d', algo_id, port, proc.pid)
+
+    async def ensure_instance_registered(self) -> None:
+        start, end = self._port_range
+        if start > end:
+            return
+        async with AsyncSessionLocal() as session:
+            await session.execute(_upsert_instance(self._instance_id, self._host, os.getpid(), start, end))
+            await session.commit()
 
     async def stop_algorithm(self, algo_id: str) -> None:
         """Terminate all local child processes belonging to `algo_id`."""
@@ -365,7 +374,10 @@ class ProcessManager:
         if timeout < 0:
             timeout = config['router_startup_timeout']
         tasks = [self._wait_until_healthy(p, timeout) for p in ports]
-        await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
+        failed = [port for port, ok in zip(ports, results) if not ok]
+        if failed:
+            raise RuntimeError(f'child process healthcheck failed for ports: {failed}')
 
     # ------------------------------------------------------------------
     # Cleanup

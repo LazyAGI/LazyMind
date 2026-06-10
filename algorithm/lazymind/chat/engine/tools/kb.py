@@ -1,3 +1,4 @@
+import os
 from typing import Any, Dict, List, Optional
 
 import lazyllm
@@ -30,7 +31,21 @@ _MAX_TEXT_LEN = 1200
 _MAX_RESULT_ITEMS = 50
 _DEFAULT_KB_URL = _cfg['agentic_kb_url']
 _DEFAULT_KB_NAME = _cfg['agentic_kb_name']
-_DEFAULT_KB_DOCUMENT = lazyllm.Document(url=f'{_DEFAULT_KB_URL}/_call', name=_DEFAULT_KB_NAME)
+
+
+_DEFAULT_KB_DOCUMENT = None
+
+
+def _get_default_kb_document():
+    global _DEFAULT_KB_DOCUMENT
+    if _DEFAULT_KB_DOCUMENT is not None:
+        return _DEFAULT_KB_DOCUMENT
+    if algo_id := os.getenv('LAZYMIND_ALGO_ID', '').strip():
+        from lazymind.parsing.service.build_document import build_document
+        _DEFAULT_KB_DOCUMENT = build_document(algo_id, serve=False)
+    else:
+        _DEFAULT_KB_DOCUMENT = lazyllm.Document(url=f'{_DEFAULT_KB_URL}/_call', name=_DEFAULT_KB_NAME)
+    return _DEFAULT_KB_DOCUMENT
 
 
 def build_default_retriever_configs() -> List[dict]:
@@ -205,7 +220,7 @@ class KBToolGroup:
         cls = type(self)
         if cls._document is not None:
             return
-        cls._document = _DEFAULT_KB_DOCUMENT
+        cls._document = _get_default_kb_document()
         cls._retrievers = [
             Retriever(cls._document, **cfg)
             for cfg in build_default_retriever_configs()
@@ -291,7 +306,7 @@ class KBToolGroup:
             raise ValueError('node_id is required')
 
         config = lazyllm.globals['agentic_config']
-        doc = _DEFAULT_KB_DOCUMENT
+        doc = _get_default_kb_document()
 
         for kb_id in iter_lookup_ids(
             (config.get('filters') or {}).get('kb_id'),
@@ -369,7 +384,7 @@ class KBToolGroup:
             raise ValueError(f'number range cannot exceed {_MAX_RESULT_ITEMS} nodes')
 
         config = lazyllm.globals['agentic_config']
-        doc = _DEFAULT_KB_DOCUMENT
+        doc = _get_default_kb_document()
 
         for kb_id in iter_lookup_ids(
             (config.get('filters') or {}).get('kb_id'),
@@ -508,7 +523,7 @@ class TempKBToolGroup:
         cls = type(self)
         if cls._tmp_retriever is not None:
             return
-        cls._document = _DEFAULT_KB_DOCUMENT
+        cls._document = _get_default_kb_document()
         cls._tmp_retriever = TempDocRetriever(embed=AutoModel(model=EMBED_MAIN))
         cls._tmp_retriever.add_subretriever('block')
         cls._reranker = (

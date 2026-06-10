@@ -4,12 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .schemas import (
-    WORKER_PROTOCOL_STATUSES,
-    WORKER_REPORT_REQUIRED_FIELDS,
-    symbol_within_primary,
-    worker_report_protocol_shape_errors,
-)
+from .schemas import (WORKER_PROTOCOL_STATUSES, WORKER_REPORT_REQUIRED_FIELDS,
+                      symbol_within_primary, worker_report_protocol_shape_errors)
 
 _REPORT_LIST_FIELDS = ('confirmed_locations', 'rejected_locations', 'files_changed',
                        'touched_symbols', 'local_validation')
@@ -159,11 +155,15 @@ def _patch_report_matches_instruction(report: dict[str, Any], instruction: dict[
     if not primary: return False
     primary_path, primary_symbol = str(primary.get('path') or ''), str(primary.get('symbol_hint') or '')
     edit = report.get('edit_intent') if isinstance(report.get('edit_intent'), dict) else {}
-    candidates = {str(edit.get('target_symbol') or '').rsplit(':', 1)[-1]} | {
-        str(item).rsplit(':', 1)[-1] for item in report.get('touched_symbols') or [] if isinstance(item, str)
+    candidates = {_symbol_token(str(edit.get('target_symbol') or ''))} | {
+        _symbol_token(str(item)) for item in report.get('touched_symbols') or [] if isinstance(item, str)
     }
     if not any(symbol_within_primary(symbol, primary_symbol) for symbol in candidates if symbol): return False
     return primary_path in files
+
+
+def _symbol_token(value: str) -> str:
+    return value.split('(', 1)[0].strip().rsplit(':', 1)[-1].strip()
 
 
 def _prohibited_tools(trace: dict[str, Any]) -> list[str]:
