@@ -96,6 +96,9 @@ const DEFAULT_COLUMN_WIDTHS = {
   key_points: 220,
   reference_context: 260,
   reference_doc: 160,
+  reference_doc_ids: 180,
+  reference_chunk_ids: 180,
+  generate_reason: 220,
   is_deleted: 120,
   source: 100,
   updated_at: 150,
@@ -109,7 +112,10 @@ type EditableDatasetItemField =
   | "ground_truth"
   | "key_points"
   | "reference_context"
-  | "reference_doc";
+  | "reference_doc"
+  | "reference_doc_ids"
+  | "reference_chunk_ids"
+  | "generate_reason";
 type ActiveEditableCell = {
   itemId: string;
   field: EditableDatasetItemField;
@@ -205,6 +211,9 @@ const editableFieldColumnMap: Record<EditableDatasetItemField, ConfigurableColum
   key_points: "key_points",
   reference_context: "reference_context",
   reference_doc: "reference_doc",
+  reference_doc_ids: "reference_doc_ids",
+  reference_chunk_ids: "reference_chunk_ids",
+  generate_reason: "generate_reason",
 };
 
 const renderRequiredColumnTitle = (title: string) => (
