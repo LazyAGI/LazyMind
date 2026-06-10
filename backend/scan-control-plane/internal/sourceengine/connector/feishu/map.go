@@ -45,13 +45,14 @@ func (c *FeishuConnector) rawObject(authConnectionID string, object Object) conn
 
 func isMarkdownExportObject(object Object) bool {
 	if object.Kind == ObjectKindWikiNode && object.IsDocument {
-		return true
+		driveType := normalizedFeishuObjectType(object.DriveType)
+		extension := normalizedFeishuObjectType(object.FileExtension)
+		return isFeishuDocType(driveType) || driveType == "" && (extension == "" || extension == "md" || isFeishuDocType(extension))
 	}
 	if object.Kind != ObjectKindDriveFile || !object.IsDocument {
 		return false
 	}
-	driveType := strings.ToLower(strings.TrimSpace(object.DriveType))
-	return driveType == "doc" || driveType == "docx"
+	return isFeishuDocType(object.DriveType)
 }
 
 func isBindableObject(object Object) bool {

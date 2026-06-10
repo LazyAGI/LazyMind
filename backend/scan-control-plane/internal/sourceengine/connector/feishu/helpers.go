@@ -245,6 +245,19 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func normalizedFeishuObjectType(value string) string {
+	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(value)), ".")
+}
+
+func isFeishuDocType(value string) bool {
+	switch normalizedFeishuObjectType(value) {
+	case "doc", "docx":
+		return true
+	default:
+		return false
+	}
+}
+
 func cloneProviderMeta(meta connector.ProviderMeta) connector.ProviderMeta {
 	if meta == nil {
 		return nil

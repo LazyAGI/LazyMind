@@ -347,6 +347,35 @@ func TestWikiFetchAndMarkdownExport(t *testing.T) {
 	}
 }
 
+func TestWikiFileNodeKeepsOriginalTypeMetadata(t *testing.T) {
+	t.Parallel()
+
+	conn := NewFeishuConnector(&authStub{}, newFeishuAPIStub())
+	raw := conn.rawObject("auth-1", Object{
+		Kind:          ObjectKindWikiNode,
+		Token:         "node-pdf",
+		SpaceID:       "space-1",
+		Name:          "ALCOHOLDINGS.pdf",
+		IsDocument:    true,
+		Revision:      "1779177086",
+		SizeBytes:     8,
+		MimeType:      "application/pdf",
+		FileExtension: ".pdf",
+		DriveType:     "file",
+		StableID:      "file-1",
+	})
+	normalized, err := conn.MapObject(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("map wiki file node: %v", err)
+	}
+	if normalized.FileExtension != ".pdf" || normalized.MimeType != "application/pdf" || normalized.SizeBytes != 8 {
+		t.Fatalf("wiki file node should keep original metadata, got %+v", normalized)
+	}
+	if normalized.ProviderMeta["file_type"] != "file" || normalized.ProviderMeta["stable_id"] != "file-1" {
+		t.Fatalf("wiki file node provider metadata was not preserved: %+v", normalized.ProviderMeta)
+	}
+}
+
 func TestWikiPartialFetchWithObjectKeyReturnsSelectedNode(t *testing.T) {
 	t.Parallel()
 
