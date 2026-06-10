@@ -87,6 +87,10 @@ config.add('skill_fs_url', str, 'remote://skills', 'SKILL_FS_URL', description='
 config.add('opensearch_uri', str, None, 'OPENSEARCH_URI', description='OpenSearch/Elasticsearch URI.')
 config.add('opensearch_user', str, 'admin', 'OPENSEARCH_USER', description='OpenSearch username.')
 config.add('opensearch_password', str, '', 'OPENSEARCH_PASSWORD', description='OpenSearch password.')
+config.add('segment_store_type', str, 'opensearch', 'SEGMENT_STORE_TYPE',
+           description='Segment store type: opensearch, elasticsearch, or SQLiteStore.')
+config.add('sqlite_db_path', str, '/data/lazymind_segments.db', 'SQLITE_DB_PATH',
+           description='SQLite database file path (used when LAZYMIND_SEGMENT_STORE_TYPE=SQLiteStore).')
 config.add('web_search_timeout', int, 10, 'WEB_SEARCH_TIMEOUT', description='Web search request timeout in seconds.')
 config.add('url_fetch_max_length', int, 4000, 'URL_FETCH_MAX_LENGTH',
            description='Maximum readable text length returned by url_fetch.')

@@ -412,7 +412,7 @@ class KBToolGroup:
         size: int = 10,
         sort_by: str = 'score',
     ) -> Dict[str, Any]:
-        """Search a keyword inside one target document in OpenSearch.
+        """Search a keyword inside one target document.
 
         Args:
             keyword: Keyword or phrase to search in ``content``.
@@ -424,7 +424,7 @@ class KBToolGroup:
                 order.
 
         Returns:
-            Matching nodes with content snippets and OpenSearch highlights.
+            Matching nodes with content snippets.
         """
         if not keyword:
             raise ValueError('keyword is required')
@@ -433,6 +433,10 @@ class KBToolGroup:
 
         config = lazyllm.globals['agentic_config']
         size = max(1, min(int(size), _MAX_RESULT_ITEMS))
+
+        if _cfg['segment_store_type'] == 'SQLiteStore':
+            return self._sqlite_keyword_search(keyword, docid, group, phrase, size, sort_by)
+
         text_query = {'match_phrase' if phrase else 'match': {'content': keyword}}
         sort = [{'number': {'order': 'asc'}}] if sort_by == 'number' else [
             {'_score': {'order': 'desc'}},
@@ -492,6 +496,59 @@ class KBToolGroup:
         }
         _annotate_result_citations(result)
         return tool_success('kb_keyword_search', result)
+
+    def _sqlite_keyword_search(
+        self, keyword: str, docid: str, group: str, phrase: bool, size: int, sort_by: str
+    ) -> Dict[str, Any]:
+        doc = _DEFAULT_KB_DOCUMENT
+        config = lazyllm.globals['agentic_config']
+        index_name = resolve_index(group)
+
+        for kb_id in iter_lookup_ids(
+            (config.get('filters') or {}).get('kb_id'),
+            field_name='agentic_config.filters.kb_id',
+        ):
+            nodes = doc.get_nodes(doc_ids=[docid], group=group, kb_id=kb_id)
+            nodes = nodes if isinstance(nodes, list) else []
+            if not nodes:
+                continue
+            # Filter by keyword
+            kw_lower = keyword.lower()
+            matched = []
+            for n in nodes:
+                text = getattr(n, 'text', '') or ''
+                if phrase and kw_lower in text.lower():
+                    matched.append(n)
+                elif not phrase:
+                    # Simple word-level match
+                    if all(w.lower() in text.lower() for w in keyword.split()):
+                        matched.append(n)
+
+            if sort_by == 'number':
+                matched.sort(key=lambda n: (getattr(n, 'number', 0) or 0, getattr(n, 'uid', '') or ''))
+            else:
+                # Score: count keyword occurrences
+                def _score(n):
+                    text = (getattr(n, 'text', '') or '').lower()
+                    return text.count(kw_lower)
+                matched.sort(key=_score, reverse=True)
+
+            matched = matched[:size]
+            result = {
+                'index': index_name,
+                'group': group,
+                'docid': docid,
+                'keyword': keyword,
+                'total': len(matched),
+                'items': [_serialize_doc_node_like(n) for n in matched],
+            }
+            _annotate_result_citations(result)
+            return tool_success('kb_keyword_search', result)
+
+        return tool_success('kb_keyword_search', {
+            'index': index_name, 'group': group, 'docid': docid,
+            'keyword': keyword, 'total': 0, 'items': [],
+        })
 
 
 class TempKBToolGroup:
