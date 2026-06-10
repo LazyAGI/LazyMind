@@ -56,13 +56,23 @@ func isMarkdownExportObject(object Object) bool {
 }
 
 func isBindableObject(object Object) bool {
-	return object.Kind == ObjectKindDriveFolder || object.Kind == ObjectKindWikiSpace || object.Kind == ObjectKindWikiNode
+	return object.Kind == ObjectKindDriveFolder ||
+		object.Kind == ObjectKindWikiSpace ||
+		object.Kind == ObjectKindWikiNode ||
+		(object.Kind == ObjectKindVirtualRoot && (object.Token == VirtualDriveRootRef || object.Token == VirtualWikiSpacesRef))
 }
 
 func bindingTargetType(object Object) connector.TargetType {
 	switch object.Kind {
 	case ObjectKindDriveFolder:
 		return TargetTypeDriveFolder
+	case ObjectKindVirtualRoot:
+		if object.Token == VirtualDriveRootRef {
+			return TargetTypeDriveFolder
+		}
+		if object.Token == VirtualWikiSpacesRef {
+			return TargetTypeWikiNode
+		}
 	case ObjectKindWikiSpace:
 		return TargetTypeWikiNode
 	case ObjectKindWikiNode:

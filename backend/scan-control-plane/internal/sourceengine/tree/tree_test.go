@@ -276,6 +276,47 @@ func TestSourceTreeLiveRootRequestUsesTreeKeyNodeRef(t *testing.T) {
 	}
 }
 
+func TestSourceTreeLiveWikiSpaceNodeRefPreserved(t *testing.T) {
+	t.Parallel()
+
+	spy := &treeConnectorSpy{connectorType: connector.ConnectorType("feishu")}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	repo := newTreeReadRepo()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{{
+		BindingID:        "binding-1",
+		SourceID:         "source-1",
+		TreeKey:          "feishu:feishu:wiki:spaces",
+		ConnectorType:    "feishu",
+		TargetType:       "wiki_node",
+		TargetRef:        "feishu:wiki:spaces",
+		AuthConnectionID: "auth-1",
+		Status:           "ACTIVE",
+	}}
+	engine := NewDBSourceTreeQueryEngine(
+		repo,
+		TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 100, MaxAllCurrentLevelItems: 10},
+		WithSourceTreeConnectorRegistry(registry),
+	)
+
+	_, err = engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		TreeKey:   "feishu:feishu:wiki:spaces",
+		ParentKey: "feishu:wiki:space:space-1",
+		PageSize:  40,
+	})
+	if err != nil {
+		t.Fatalf("list live wiki space children: %v", err)
+	}
+	if len(spy.listRequests) != 1 || spy.listRequests[0].NodeRef != "feishu:wiki:space:space-1" {
+		t.Fatalf("wiki space node_ref should be preserved for connector traversal, got %+v", spy.listRequests)
+	}
+}
+
 func TestSourceTreeLiveWikiRootFallsBackToBindingTargetWhenEmpty(t *testing.T) {
 	t.Parallel()
 

@@ -40,6 +40,16 @@ func (c *FeishuConnector) probeTarget(ctx context.Context, token string, req con
 		}
 		return c.api.GetDriveFolder(ctx, token, folderToken)
 	case TargetTypeWikiNode:
+		if strings.TrimSpace(req.TargetRef) == VirtualWikiSpacesRef {
+			return Object{
+				Kind:        ObjectKindVirtualRoot,
+				Token:       VirtualWikiSpacesRef,
+				Name:        "Wiki",
+				IsContainer: true,
+				HasChildren: true,
+				Revision:    "virtual-wiki",
+			}, nil
+		}
 		spaceID, nodeToken, isSpace, err := parseWikiTarget(req.TargetRef)
 		if err != nil {
 			return Object{}, err

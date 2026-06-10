@@ -18,6 +18,9 @@ func validateTarget(targetType connector.TargetType, targetRef string) error {
 	case TargetTypeDriveFolder:
 		return nil
 	case TargetTypeWikiNode:
+		if strings.TrimSpace(targetRef) == VirtualWikiSpacesRef {
+			return nil
+		}
 		_, _, _, err := parseWikiTarget(targetRef)
 		return err
 	default:
@@ -181,6 +184,9 @@ func parentKeyFor(object Object) string {
 	if object.ParentToken == "" {
 		if object.Kind == ObjectKindWikiSpace {
 			return string(ConnectorType) + ":" + VirtualWikiSpacesRef
+		}
+		if object.Kind == ObjectKindWikiNode && object.SpaceID != "" {
+			return wikiSpaceObjectKey(object.SpaceID)
 		}
 		return ""
 	}

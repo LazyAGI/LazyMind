@@ -33,6 +33,11 @@ func TestValidateTargetStableFingerprintAndClientOnly(t *testing.T) {
 		t.Fatalf("expected auth/api clients only, auth=%d drive=%d", auth.calls, api.driveFolderCalls)
 	}
 
+	driveRoot := validateFeishuTarget(t, ctx, conn, TargetTypeDriveFolder, VirtualDriveRootRef)
+	if driveRoot.TargetRef != "drive:folder-root" || driveRoot.TargetFingerprint != "feishu:drive:folder-root" || driveRoot.RootObjectKey != "feishu:drive:folder-root" {
+		t.Fatalf("drive virtual root should normalize to the real drive root target, got %+v", driveRoot)
+	}
+
 	wiki := validateFeishuTarget(t, ctx, conn, TargetTypeWikiNode, "space-1:node-root")
 	if wiki.TargetFingerprint != "feishu:wiki:space-1:node-root" {
 		t.Fatalf("unexpected wiki fingerprint: %+v", wiki)
@@ -47,6 +52,11 @@ func TestValidateTargetStableFingerprintAndClientOnly(t *testing.T) {
 	}
 	if wikiSpace.DisplayName != "Engineering Wiki" {
 		t.Fatalf("wiki space target display name should come from metadata, got %+v", wikiSpace)
+	}
+
+	allWiki := validateFeishuTarget(t, ctx, conn, TargetTypeWikiNode, VirtualWikiSpacesRef)
+	if allWiki.TargetRef != VirtualWikiSpacesRef || allWiki.TargetFingerprint != "feishu:feishu:wiki:spaces" || allWiki.RootObjectKey != "feishu:feishu:wiki:spaces" {
+		t.Fatalf("wiki virtual root should remain an all-spaces binding target, got %+v", allWiki)
 	}
 }
 
@@ -204,25 +214,29 @@ func TestInitialRootsReturnDriveAndWikiVirtualBranches(t *testing.T) {
 		t.Fatalf("expected drive/wiki virtual roots, got %+v", page.Items)
 	}
 	drive := page.Items[0]
-	if drive.Bindable || drive.BindingTargetType != "" || drive.BindingTargetRef != "" {
-		t.Fatalf("drive virtual root must not be bindable, got %+v", drive)
+	if !drive.Bindable || drive.BindingTargetType != TargetTypeDriveFolder || drive.BindingTargetRef != VirtualDriveRootRef {
+		t.Fatalf("drive virtual root should be a selectable whole-drive target, got %+v", drive)
 	}
 	wiki := page.Items[1]
-	if wiki.Bindable || wiki.BindingTargetType != "" || wiki.BindingTargetRef != "" {
-		t.Fatalf("wiki virtual root must not be bindable, got %+v", wiki)
+	if !wiki.Bindable || wiki.BindingTargetType != TargetTypeWikiNode || wiki.BindingTargetRef != VirtualWikiSpacesRef {
+		t.Fatalf("wiki virtual root should be a selectable all-wiki target, got %+v", wiki)
 	}
 	if page.Items[0].ObjectRef != VirtualDriveRootRef || page.Items[1].ObjectRef != VirtualWikiSpacesRef {
 		t.Fatalf("unexpected virtual roots: %+v", page.Items)
 	}
 }
 
-func TestDriveVirtualRootListsRootChildrenAndWikiNodeExposesSemanticBindingTargets(t *testing.T) {
+func TestVirtualRootsListWholeDriveAndAllWikiSpaces(t *testing.T) {
 	t.Parallel()
 
-	conn := NewFeishuConnector(&authStub{}, newFeishuAPIStub())
+	api := newFeishuAPIStub()
+	nestedDriveFile := Object{Kind: ObjectKindDriveFile, Token: "file-guide", ParentToken: "folder-guides", Name: "guide.md", IsDocument: true, Revision: "rev-guide", FileExtension: ".md", StableID: "file-guide"}
+	api.driveObjects["file-guide"] = nestedDriveFile
+	api.driveChildren["folder-guides"] = []Object{nestedDriveFile}
+	conn := NewFeishuConnector(&authStub{}, api)
 	drive, err := conn.ListChildren(context.Background(), connector.ListChildrenRequest{
 		TargetType:       TargetTypeDriveFolder,
-		NodeRef:          VirtualDriveRootRef,
+		TargetRef:        VirtualDriveRootRef,
 		AuthConnectionID: "auth-1",
 		PageSize:         10,
 	})
@@ -239,9 +253,23 @@ func TestDriveVirtualRootListsRootChildrenAndWikiNodeExposesSemanticBindingTarge
 		t.Fatalf("drive folder child should expose drive_folder target, got %+v", drive.Items[1])
 	}
 
+	driveNested, err := conn.ListChildren(context.Background(), connector.ListChildrenRequest{
+		TargetType:       TargetTypeDriveFolder,
+		TargetRef:        VirtualDriveRootRef,
+		NodeRef:          "drive:folder-guides",
+		AuthConnectionID: "auth-1",
+		PageSize:         10,
+	})
+	if err != nil {
+		t.Fatalf("list drive nested folder: %v", err)
+	}
+	if got := feishuObjectKeys(driveNested.Items); !sameStrings(got, []string{"feishu:drive:file-guide"}) {
+		t.Fatalf("drive virtual root should allow traversing nested folders, got %+v", driveNested.Items)
+	}
+
 	wiki, err := conn.ListChildren(context.Background(), connector.ListChildrenRequest{
 		TargetType:       TargetTypeWikiNode,
-		NodeRef:          VirtualWikiSpacesRef,
+		TargetRef:        VirtualWikiSpacesRef,
 		AuthConnectionID: "auth-1",
 		PageSize:         10,
 	})
@@ -250,6 +278,41 @@ func TestDriveVirtualRootListsRootChildrenAndWikiNodeExposesSemanticBindingTarge
 	}
 	if len(wiki.Items) != 1 || !wiki.Items[0].Bindable || wiki.Items[0].BindingTargetType != TargetTypeWikiNode || wiki.Items[0].BindingTargetRef != "feishu:wiki:space:space-1" || wiki.Items[0].ObjectRef != "feishu:wiki:space:space-1" {
 		t.Fatalf("wiki spaces should expose selectable binding targets, got %+v", wiki.Items)
+	}
+
+	wikiRoots, err := conn.ListChildren(context.Background(), connector.ListChildrenRequest{
+		TargetType:       TargetTypeWikiNode,
+		TargetRef:        VirtualWikiSpacesRef,
+		NodeRef:          "feishu:wiki:space:space-1",
+		AuthConnectionID: "auth-1",
+		PageSize:         10,
+	})
+	if err != nil {
+		t.Fatalf("list wiki space root nodes: %v", err)
+	}
+	if got := feishuObjectKeys(wikiRoots.Items); !sameStrings(got, []string{"feishu:wiki:space-1:node-root"}) {
+		t.Fatalf("wiki virtual root should allow traversing a space root, got %v", got)
+	}
+	normalizedWikiRoot, err := conn.MapObject(context.Background(), wikiRoots.Items[0])
+	if err != nil {
+		t.Fatalf("map wiki root node: %v", err)
+	}
+	if normalizedWikiRoot.ParentKey != "feishu:wiki:space:space-1" {
+		t.Fatalf("wiki root nodes should be parented under their wiki space, got %+v", normalizedWikiRoot)
+	}
+
+	wikiChildren, err := conn.ListChildren(context.Background(), connector.ListChildrenRequest{
+		TargetType:       TargetTypeWikiNode,
+		TargetRef:        VirtualWikiSpacesRef,
+		NodeRef:          "wiki:space-1:node-root",
+		AuthConnectionID: "auth-1",
+		PageSize:         10,
+	})
+	if err != nil {
+		t.Fatalf("list wiki root children: %v", err)
+	}
+	if got := feishuObjectKeys(wikiChildren.Items); !sameStrings(got, []string{"feishu:wiki:space-1:node-child"}) {
+		t.Fatalf("wiki virtual root should allow traversing wiki nodes, got %v", got)
 	}
 }
 

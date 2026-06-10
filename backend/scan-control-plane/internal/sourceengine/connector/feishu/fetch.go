@@ -74,6 +74,16 @@ func (c *FeishuConnector) loadScopedObject(ctx context.Context, token string, re
 		}
 		return c.api.GetDriveFolder(ctx, token, driveFolderToken(nodeRef))
 	case TargetTypeWikiNode:
+		if nodeRef == VirtualWikiSpacesRef {
+			return Object{
+				Kind:        ObjectKindVirtualRoot,
+				Token:       VirtualWikiSpacesRef,
+				Name:        "Wiki",
+				IsContainer: true,
+				HasChildren: true,
+				Revision:    "virtual-wiki",
+			}, nil
+		}
 		if spaceID, ok := wikiSpaceID(nodeRef); ok {
 			return c.getWikiSpace(ctx, token, spaceID)
 		}
