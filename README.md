@@ -130,6 +130,24 @@ For environment setup and detailed examples, see [`docs/quick_start.md`](docs/qu
 
 ---
 
+## Testing
+
+The legacy quick test command remains:
+
+```bash
+make test
+```
+
+`make test` uses the Python, Node/npm, and Go tools already available on the host, matching its historical behavior.
+
+For a project-managed host environment that covers the same test scope, use:
+
+```bash
+make test-hermetic
+```
+
+`make test-hermetic` requires `uv`, either `fnm` or `nvm`, and Go `1.24.0`. It creates a repo-local Python 3.11 environment at `.venv-test/`, selects Node 20 through the available Node manager, installs frontend test dependencies with `npm ci`, and runs the same frontend, auth-service, backend/core, and algorithm tests as `make test`.
+
 ## Common Startup Configurations
 
 | Scenario | Command |

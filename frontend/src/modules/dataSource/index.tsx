@@ -220,6 +220,10 @@ function getDatasetDisplayName(dataset: CoreDataset) {
   return `${dataset.display_name || dataset.name || ""}`.trim();
 }
 
+function isDataSourceManagedDataset(dataset: CoreDataset) {
+  return Boolean(dataset.scan_managed || dataset.scan_source_type);
+}
+
 function loadLocalScanChatEnabled() {
   try {
     return localStorage.getItem(LOCAL_SCAN_CHAT_STORAGE_KEY) === "true";
@@ -357,7 +361,10 @@ async function listKnowledgeBaseNames(client = dataSourceDatasetsApi) {
       pageSize: 200,
     });
     names.push(
-      ...(response.data.datasets || []).map(getDatasetDisplayName).filter(Boolean),
+      ...(response.data.datasets || [])
+        .filter((dataset) => !isDataSourceManagedDataset(dataset))
+        .map(getDatasetDisplayName)
+        .filter(Boolean),
     );
 
     const nextPageToken = response.data.next_page_token || "";
@@ -1690,11 +1697,14 @@ export default function DataSourceManagement() {
         }),
       ]);
       const sourceList = (sourcesResponse.data.items || []) as ScanV2Source[];
+      const visibleSourceList = sourceList.filter(
+        (source) => normalizeDataSourceStatus(source.status) !== "deleted",
+      );
       const previousSourceMap = new Map(
         sources.map((item) => [item.id, item]),
       );
       const nextSources = await Promise.all(
-        sourceList.map(async (source) => {
+        visibleSourceList.map(async (source) => {
           const sourceId = getScanSourceId(source);
           const fallback = previousSourceMap.get(sourceId);
           try {
@@ -2038,7 +2048,9 @@ export default function DataSourceManagement() {
 
   const getKnownKnowledgeBaseNames = () => [
     ...knowledgeBaseNames,
-    ...sources.map((item) => item.knowledgeBase),
+    ...sources
+      .filter((item) => item.status === "active")
+      .map((item) => item.knowledgeBase),
   ];
 
   const resetWizard = () => {
@@ -2701,7 +2713,10 @@ export default function DataSourceManagement() {
             sources.length <= 1 && sourceListPage > 1
               ? sourceListPage - 1
               : sourceListPage;
-          await refreshSources(false, { page: nextPage });
+          await Promise.all([
+            refreshSources(false, { page: nextPage }),
+            refreshKnowledgeBaseNames(),
+          ]);
         } catch (error) {
           message.error(
             getLocalizedErrorMessage(error, t("admin.dataSourceDeleteFailed")) ||

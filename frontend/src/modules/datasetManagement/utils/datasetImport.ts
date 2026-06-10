@@ -167,7 +167,6 @@ export function getMissingRequiredMappings(mapping: FieldMapping) {
 export function createTemplateRows() {
   return [
     {
-      case_id: "case_001",
       question: "如何配置模型供应商？",
       question_type: "操作问答",
       ground_truth: "进入模型供应商页面，新增 API Key，并选择默认模型。",

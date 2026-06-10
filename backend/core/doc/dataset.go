@@ -19,6 +19,8 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/log"
 	corestore "lazymind/core/store"
+
+	"gorm.io/gorm"
 )
 
 // DatasetService text，text。
@@ -1118,20 +1120,90 @@ func DeleteDataset(w http.ResponseWriter, r *http.Request) {
 
 	// 2) text datasets
 	now := time.Now().UTC()
-	ds.DeletedAt = &now
-	ds.UpdatedAt = now
-	if err := corestore.DB().Save(&ds).Error; err != nil {
+	if err := corestore.DB().Transaction(func(tx *gorm.DB) error {
+		ds.DeletedAt = &now
+		ds.UpdatedAt = now
+		if err := tx.Save(&ds).Error; err != nil {
+			return err
+		}
+		if err := cleanupEvalSetDatasetReferences(r.Context(), tx, datasetID, now); err != nil {
+			return err
+		}
+		return tx.
+			Where("create_user_id = ? AND dataset_id = ?", userID, datasetID).
+			Delete(&orm.DefaultDataset{}).Error
+	}); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "delete dataset failed", err), http.StatusInternalServerError)
 		return
 	}
 
-	// 3) textDefaultKnowledge basetext
-	_ = corestore.DB().
-		Where("create_user_id = ? AND dataset_id = ?", userID, datasetID).
-		Delete(&orm.DefaultDataset{}).Error
-
 	w.WriteHeader(http.StatusOK)
 }
+
+func cleanupEvalSetDatasetReferences(ctx context.Context, tx *gorm.DB, datasetID string, now time.Time) error {
+	datasetID = strings.TrimSpace(datasetID)
+	if datasetID == "" {
+		return nil
+	}
+
+	var rows []orm.EvalSet
+	if err := tx.WithContext(ctx).Select("id", "dataset_ids").Find(&rows).Error; err != nil {
+		return err
+	}
+
+	for _, row := range rows {
+		datasetIDs, changed := removeDatasetIDFromEvalSet(row.DatasetIDs, datasetID)
+		if !changed {
+			continue
+		}
+		raw, err := json.Marshal(datasetIDs)
+		if err != nil {
+			return err
+		}
+		if err := tx.WithContext(ctx).Model(&orm.EvalSet{}).
+			Where("id = ?", row.ID).
+			Updates(map[string]any{
+				"dataset_ids": json.RawMessage(raw),
+				"updated_at":  now,
+			}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func removeDatasetIDFromEvalSet(raw json.RawMessage, datasetID string) ([]string, bool) {
+	var ids []string
+	if len(raw) == 0 {
+		return nil, false
+	}
+	if err := json.Unmarshal(raw, &ids); err != nil {
+		return nil, false
+	}
+
+	out := make([]string, 0, len(ids))
+	changed := false
+	seen := map[string]struct{}{}
+	for _, item := range ids {
+		id := strings.TrimSpace(item)
+		if id == "" {
+			changed = true
+			continue
+		}
+		if id == datasetID {
+			changed = true
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			changed = true
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out, changed
+}
+
 func UpdateDataset(w http.ResponseWriter, r *http.Request) {
 	userID := corestore.UserID(r)
 	userName := corestore.UserName(r)

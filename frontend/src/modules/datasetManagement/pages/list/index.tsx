@@ -23,6 +23,7 @@ import { useNavigate } from "react-router-dom";
 import {
   createDataset,
   deleteDataset,
+  getDataset,
   listDatasets,
   listKnowledgeBases,
   updateDataset,
@@ -46,7 +47,9 @@ export default function DatasetListPage() {
   const [loading, setLoading] = useState(false);
   const [formModalOpen, setFormModalOpen] = useState(false);
   const [editingDataset, setEditingDataset] = useState<DatasetListItem | null>(null);
+  const [editingDatasetId, setEditingDatasetId] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [editingLoadingId, setEditingLoadingId] = useState("");
 
   const loadDatasets = async (nextKeyword = keyword) => {
     setLoading(true);
@@ -75,12 +78,28 @@ export default function DatasetListPage() {
 
   const handleOpenCreate = () => {
     setEditingDataset(null);
+    setEditingDatasetId("");
     setFormModalOpen(true);
   };
 
-  const handleOpenEdit = (dataset: DatasetListItem) => {
-    setEditingDataset(dataset);
-    setFormModalOpen(true);
+  const handleOpenEdit = async (dataset: DatasetListItem) => {
+    setEditingLoadingId(dataset.id);
+    try {
+      const detail = await getDataset(dataset.id);
+      setEditingDataset(detail);
+      setEditingDatasetId(detail.id);
+      setFormModalOpen(true);
+    } catch (error: any) {
+      message.error(error?.message || "数据集详情加载失败");
+    } finally {
+      setEditingLoadingId("");
+    }
+  };
+
+  const handleCloseFormModal = () => {
+    setFormModalOpen(false);
+    setEditingDataset(null);
+    setEditingDatasetId("");
   };
 
   const handleDelete = (dataset: DatasetListItem) => {
@@ -101,14 +120,14 @@ export default function DatasetListPage() {
   const handleSubmitDataset = async (values: DatasetFormValues) => {
     setSubmitting(true);
     try {
-      if (editingDataset) {
-        await updateDataset(editingDataset.id, {
+      if (editingDatasetId) {
+        await updateDataset(editingDatasetId, {
           name: values.name,
           description: values.description,
           knowledge_base_ids: values.knowledge_base_ids,
         });
         message.success("数据集已更新");
-        setFormModalOpen(false);
+        handleCloseFormModal();
         await loadDatasets();
         return;
       }
@@ -120,10 +139,10 @@ export default function DatasetListPage() {
       });
 
       message.success("数据集已创建");
-      setFormModalOpen(false);
+      handleCloseFormModal();
       navigate(`/dataset-management/${created.id}`);
-    } catch (error: any) {
-      message.error(error?.message || "保存失败");
+    } catch {
+      // The global axios interceptor already shows the backend error message.
     } finally {
       setSubmitting(false);
     }
@@ -207,6 +226,7 @@ export default function DatasetListPage() {
               type="link"
               size="small"
               icon={<EditOutlined />}
+              loading={editingLoadingId === record.id}
               onClick={() => handleOpenEdit(record)}
             >
               编辑
@@ -224,7 +244,7 @@ export default function DatasetListPage() {
         ),
       },
     ],
-    [navigate],
+    [editingLoadingId, navigate],
   );
 
   return (
@@ -269,12 +289,13 @@ export default function DatasetListPage() {
       </Card>
 
       <DatasetFormModal
+        key={editingDatasetId || "create"}
         open={formModalOpen}
-        mode={editingDataset ? "edit" : "create"}
+        mode={editingDatasetId ? "edit" : "create"}
         dataset={editingDataset}
         knowledgeBases={knowledgeBases}
         submitting={submitting}
-        onCancel={() => setFormModalOpen(false)}
+        onCancel={handleCloseFormModal}
         onSubmit={handleSubmitDataset}
       />
     </div>

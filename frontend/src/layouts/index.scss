@@ -1,7 +1,7 @@
 .main-layout {
   height: 100vh;
   min-height: 100vh;
-  background: #f4f5f8;
+  background: #eef1f6;
   overflow: hidden;
 }
 
@@ -9,11 +9,12 @@
 .main-layout-body {
   min-width: 0;
   min-height: 0;
-  background: #f4f5f8;
+  background: #eef1f6;
 }
 
 .main-layout-content {
   height: 100vh;
+  padding: 8px 8px 8px 0;
   transition: padding 0.24s cubic-bezier(0.4, 0, 0.2, 1);
 
   &.is-sidebar-collapsed {
@@ -23,10 +24,11 @@
 
 .main-layout-body {
   height: 100%;
-  border-radius: 14px;
+  border-radius: 8px;
   background: #ffffff;
   overflow: hidden;
-  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.04);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.05);
   position: relative;
 }
 
@@ -75,7 +77,7 @@
   inset-inline-start: 0;
   top: 0;
   bottom: 0;
-  background: #f4f5f8;
+  background: #eef1f6;
   border-right: 0;
   box-shadow: none;
   will-change: width, min-width, max-width, flex-basis;
@@ -97,10 +99,9 @@
     width: 252px;
     display: flex;
     flex-direction: column;
-    padding: 18px 12px 14px;
-    background:
-      radial-gradient(circle at top right, rgba(22, 119, 255, 0.14), transparent 42%),
-      linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+    padding: 14px 10px 12px;
+    background: #f8fafc;
+    border-right: 1px solid rgba(15, 23, 42, 0.06);
     opacity: 1;
     transform: translateX(0);
     transition:
@@ -111,20 +112,20 @@
 
   .sider-brand-row {
     flex: 0 0 auto;
-    min-height: 42px;
+    min-height: 36px;
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 0 4px 12px;
+    padding: 0 2px 10px;
   }
 
   .sider-brand {
     min-width: 0;
     width: 42px;
     flex: 0 0 42px;
-    height: 42px;
+    height: 36px;
     border: 0;
-    border-radius: 12px;
+    border-radius: 8px;
     background: transparent;
     color: #111827;
     display: inline-flex;
@@ -135,8 +136,8 @@
     text-align: left;
 
     img {
-      width: 36px;
-      height: 36px;
+      width: 32px;
+      height: 32px;
       flex: 0 0 auto;
       object-fit: contain;
     }
@@ -147,13 +148,13 @@
   }
 
   .sider-primary-action {
-    padding: 0 4px 8px;
+    padding: 0 2px 6px;
   }
 
   .sider-new-chat-button.ant-btn {
     width: 100%;
-    height: 40px;
-    border-radius: 12px;
+    height: 36px;
+    border-radius: 8px;
     background: #ffffff;
     color: #111827;
     border: 0;
@@ -161,8 +162,8 @@
     align-items: center;
     justify-content: flex-start;
     gap: 8px;
-    padding-inline: 10px;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    padding-inline: 9px;
+    box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.06);
 
     .ant-btn-icon {
       width: 22px;
@@ -177,7 +178,9 @@
     &:focus-visible {
       background: #ffffff !important;
       color: #1677ff !important;
-      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+      box-shadow:
+        inset 0 0 0 1px rgba(22, 119, 255, 0.18),
+        0 4px 14px rgba(15, 23, 42, 0.06);
     }
   }
 
@@ -185,7 +188,7 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
-    margin: 8px 0 8px;
+    margin: 6px 0 8px;
     padding: 0;
     background: transparent;
     box-shadow: none;
@@ -193,16 +196,16 @@
 
   .sider-module-trigger {
     width: 100%;
-    height: 38px;
+    height: 34px;
     border: 0;
-    border-radius: 10px;
+    border-radius: 8px;
     background: transparent;
     color: #374151;
     display: inline-flex;
     align-items: center;
-    gap: 9px;
-    padding: 0 10px;
-    font-size: 14px;
+    gap: 8px;
+    padding: 0 9px;
+    font-size: 13px;
     font-weight: 500;
     line-height: 1;
     letter-spacing: 0;
@@ -247,17 +250,17 @@
   }
 
   .sider-history-search {
-    padding: 0 4px 12px;
+    padding: 0 2px 10px;
   }
 
   .sider-history-search-input.ant-input-affix-wrapper {
     width: 100%;
-    height: 36px;
+    height: 34px;
     border: 0;
-    border-radius: 10px;
+    border-radius: 8px;
     background: #ffffff;
     color: #111827;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.05);
 
     .ant-input {
       background: transparent;
@@ -283,14 +286,14 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    padding: 0 10px 10px;
+    padding: 0 8px 8px;
   }
 
   .sider-history-title {
     flex: 0 0 auto;
-    padding: 0 12px 8px;
+    padding: 0 8px 6px;
     color: #9ca3af;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     line-height: 20px;
     letter-spacing: 0;
@@ -331,12 +334,12 @@
 }
 
 .sider-inline-toggle {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   flex: 0 0 auto;
   margin-left: auto;
   border: 1px solid rgba(22, 119, 255, 0.16);
-  border-radius: 10px;
+  border-radius: 8px;
   background: #ffffff;
   color: #1677ff;
   display: inline-flex;
@@ -531,6 +534,7 @@
   height: 100%;
   min-height: 0;
   overflow: auto;
+  background: #ffffff;
 }
 
 .main-layout-content.is-sidebar-collapsed {
@@ -555,6 +559,11 @@
     padding-left: 72px;
   }
 
+  .knowledge-detail-page {
+    padding-left: 48px;
+    box-sizing: border-box;
+  }
+
   .memory-page-header {
     padding-left: 48px;
   }
@@ -566,18 +575,18 @@
 
 .sider-bar-bottom {
   margin-top: auto;
-  padding: 12px 8px 0;
+  padding: 10px 6px 0;
   border-top: 1px solid rgba(15, 23, 42, 0.06);
   transition: padding 0.25s ease;
 
   .bottom-item {
-    height: 40px;
-    line-height: 40px;
-    padding: 0 10px;
+    height: 36px;
+    line-height: 36px;
+    padding: 0 9px;
     display: flex;
     align-items: center;
     gap: 10px;
-    border-radius: 10px;
+    border-radius: 8px;
     color: #374151;
     cursor: pointer;
     transition:
@@ -608,7 +617,7 @@
   }
 
   .bottom-icon {
-    font-size: 18px;
+    font-size: 16px;
     color: inherit;
   }
 

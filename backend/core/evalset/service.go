@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	errForbidden       = errors.New("forbidden")
-	errEvalSetNotFound = errors.New("eval set not found")
+	errForbidden         = errors.New("forbidden")
+	errEvalSetNotFound   = errors.New("eval set not found")
+	errDatasetNameExists = errors.New("dataset name already exists")
 )
 
 type Service struct {
