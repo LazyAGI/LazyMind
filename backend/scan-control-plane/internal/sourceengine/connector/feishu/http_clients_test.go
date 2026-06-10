@@ -89,9 +89,6 @@ func TestDefaultFeishuAPIClientDriveAndWikiMapping(t *testing.T) {
 		case "/open-apis/drive/explorer/v2/folder/folder-1/meta":
 			seen["drive_folder_meta"] = "yes"
 			writeFeishuOpenAPIData(t, w, map[string]any{"token": "folder-1", "name": "Folder Meta", "parent_token": "root-token", "edit_time": "1710000000"})
-		case "/open-apis/drive/explorer/v2/file/file-1/meta":
-			seen["drive_file_meta"] = "yes"
-			writeFeishuOpenAPIData(t, w, map[string]any{"file": map[string]any{"file_token": "file-1", "name": "File Meta.pdf", "parent_token": "folder-1", "type": "file", "mime_type": "application/pdf", "file_extension": ".pdf", "size": 7, "revision": "rev-1"}})
 		case "/open-apis/drive/v1/files":
 			seen["drive_cursor"] = r.URL.Query().Get("cursor")
 			seen["drive_page_token"] = r.URL.Query().Get("page_token")
@@ -140,13 +137,6 @@ func TestDefaultFeishuAPIClientDriveAndWikiMapping(t *testing.T) {
 	if folder.Name != "Folder Meta" || folder.Token != "folder-1" || folder.ParentToken != "root-token" {
 		t.Fatalf("drive folder metadata was not mapped: %+v", folder)
 	}
-	file, err := client.GetDriveFile(context.Background(), "user-token", "file-1")
-	if err != nil {
-		t.Fatalf("get drive file: %v", err)
-	}
-	if file.Name != "File Meta.pdf" || file.Token != "file-1" || file.ParentToken != "folder-1" || !file.IsDocument || file.IsContainer {
-		t.Fatalf("drive file metadata was not mapped: %+v", file)
-	}
 	if _, err := client.ListDriveChildren(context.Background(), "user-token", "folder-1", "cursor-1", 50); err != nil {
 		t.Fatalf("list drive children: %v", err)
 	}
@@ -165,7 +155,7 @@ func TestDefaultFeishuAPIClientDriveAndWikiMapping(t *testing.T) {
 	if _, err := client.ExportWikiNodeMarkdown(context.Background(), "user-token", "space-1", "node-1", "wiki-rev"); err != nil {
 		t.Fatalf("export wiki: %v", err)
 	}
-	if seen["drive_cursor"] != "" || seen["drive_page_token"] != "cursor-1" || seen["drive_page_size"] != "50" || seen["drive_folder_token"] != "folder-1" || seen["drive_folder_meta"] != "yes" || seen["drive_file_meta"] != "yes" || seen["wiki_page_token"] != "cursor-2" {
+	if seen["drive_cursor"] != "" || seen["drive_page_token"] != "cursor-1" || seen["drive_page_size"] != "50" || seen["drive_folder_token"] != "folder-1" || seen["drive_folder_meta"] != "yes" || seen["wiki_page_token"] != "cursor-2" {
 		t.Fatalf("pagination query was not mapped: %+v", seen)
 	}
 	if seen["drive_download"] != "yes" || seen["wiki_export"] != "yes" {

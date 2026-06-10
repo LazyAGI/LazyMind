@@ -392,12 +392,12 @@ func TestDrivePartialFetchWithObjectKeyReturnsSelectedFile(t *testing.T) {
 	if got := feishuObjectKeys(page.Items); !sameStrings(got, []string{"feishu:drive:file-a"}) {
 		t.Fatalf("partial object fetch should return selected drive file, got %v", got)
 	}
-	if api.driveFileCalls != 1 || len(api.drivePageSizes) != 0 {
-		t.Fatalf("drive object fetch should use file metadata, file_calls=%d list_calls=%d", api.driveFileCalls, len(api.drivePageSizes))
+	if len(api.drivePageSizes) != 1 || api.drivePageSizes[0] != 100 || api.driveFolderCalls != 0 {
+		t.Fatalf("drive object fetch should locate the object from target listing, page_sizes=%v folder_calls=%d", api.drivePageSizes, api.driveFolderCalls)
 	}
 }
 
-func TestDrivePartialFetchWithFolderObjectKeyFallsBackToFolderMetadata(t *testing.T) {
+func TestDrivePartialFetchWithFolderObjectKeyReturnsSelectedFolder(t *testing.T) {
 	t.Parallel()
 
 	api := newFeishuAPIStub()
@@ -419,8 +419,49 @@ func TestDrivePartialFetchWithFolderObjectKeyFallsBackToFolderMetadata(t *testin
 	if got := feishuObjectKeys(page.Items); !sameStrings(got, []string{"feishu:drive:folder-guides"}) {
 		t.Fatalf("partial folder object fetch should return selected folder, got %v", got)
 	}
-	if api.driveFileCalls != 1 || api.driveFolderCalls != 1 {
-		t.Fatalf("folder object fetch should try file metadata then folder metadata, file_calls=%d folder_calls=%d", api.driveFileCalls, api.driveFolderCalls)
+	if len(api.drivePageSizes) != 1 || api.driveFolderCalls != 0 {
+		t.Fatalf("folder object fetch should locate the object from target listing, page_sizes=%v folder_calls=%d", api.drivePageSizes, api.driveFolderCalls)
+	}
+}
+
+func TestDrivePartialFetchWithShortcutObjectKeyPreservesTargetMetadata(t *testing.T) {
+	t.Parallel()
+
+	api := newFeishuAPIStub()
+	shortcut := Object{
+		Kind:                ObjectKindDriveFile,
+		Token:               "shortcut-a",
+		ParentToken:         "folder-root",
+		Name:                "Shortcut.pdf",
+		IsDocument:          true,
+		Revision:            "shortcut-rev",
+		DriveType:           "shortcut",
+		ShortcutTargetType:  "file",
+		ShortcutTargetToken: "file-target",
+		StableID:            "shortcut-a",
+	}
+	api.driveChildren["folder-root"] = append(api.driveChildren["folder-root"], shortcut)
+	conn := NewFeishuConnector(&authStub{}, api)
+	page, err := conn.FetchPage(context.Background(), connector.FetchPageRequest{
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		TargetType:        TargetTypeDriveFolder,
+		TargetRef:         "folder-root",
+		ScopeType:         connector.ScopeTypePartial,
+		ScopeRef:          connector.ScopeRef{"object_key": "feishu:drive:shortcut-a"},
+		PageSize:          10,
+		AuthConnectionID:  "auth-1",
+	})
+	if err != nil {
+		t.Fatalf("partial fetch drive shortcut object: %v", err)
+	}
+	if got := feishuObjectKeys(page.Items); !sameStrings(got, []string{"feishu:drive:shortcut-a"}) {
+		t.Fatalf("partial shortcut object fetch should return selected shortcut, got %v", got)
+	}
+	raw := page.Items[0]
+	if !raw.IsDocument || raw.IsContainer || raw.ProviderMeta["file_type"] != "shortcut" || raw.ProviderMeta["shortcut_target_type"] != "file" || raw.ProviderMeta["shortcut_target_token"] != "file-target" {
+		t.Fatalf("shortcut metadata was not preserved: %+v", raw)
 	}
 }
 
@@ -594,7 +635,6 @@ type feishuAPIStub struct {
 	drivePageSizes   []int
 	wikiPageSizes    []int
 	driveFolderCalls int
-	driveFileCalls   int
 	downloadCalls    int
 	driveExportCalls int
 }
@@ -639,15 +679,6 @@ func (a *feishuAPIStub) GetDriveFolder(_ context.Context, _ string, folderToken 
 	object, ok := a.driveObjects[driveFolderToken(folderToken)]
 	if !ok || object.Kind != ObjectKindDriveFolder {
 		return Object{}, connector.NewError(connector.ErrorCodeNotFound, "drive folder not found")
-	}
-	return object, nil
-}
-
-func (a *feishuAPIStub) GetDriveFile(_ context.Context, _ string, fileToken string) (Object, error) {
-	a.driveFileCalls++
-	object, ok := a.driveObjects[fileToken]
-	if !ok || object.Kind != ObjectKindDriveFile {
-		return Object{}, connector.NewError(connector.ErrorCodeNotFound, "drive file not found")
 	}
 	return object, nil
 }

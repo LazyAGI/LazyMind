@@ -90,7 +90,7 @@ func (c *FeishuConnector) FetchPage(ctx context.Context, req connector.FetchPage
 	if err := c.validateFetchRequest(req); err != nil {
 		return connector.RawObjectPage{}, err
 	}
-	token, err := c.loadToken(ctx, req.AuthConnectionID, "")
+	token, err := c.loadToken(ctx, req.AuthConnectionID, req.ProviderOptions.String("user_id"))
 	if err != nil {
 		return connector.RawObjectPage{}, err
 	}
@@ -101,7 +101,7 @@ func (c *FeishuConnector) ExportObject(ctx context.Context, req connector.Export
 	if err := ctx.Err(); err != nil {
 		return connector.ExportedObject{}, err
 	}
-	token, err := c.loadToken(ctx, req.ProviderMeta["auth_connection_id"], "")
+	token, err := c.loadToken(ctx, req.ProviderMeta["auth_connection_id"], req.ProviderOptions.String("user_id"))
 	if err != nil {
 		return connector.ExportedObject{}, err
 	}

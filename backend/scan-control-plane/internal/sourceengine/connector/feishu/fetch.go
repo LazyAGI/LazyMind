@@ -70,14 +70,7 @@ func (c *FeishuConnector) loadScopedObject(ctx context.Context, token string, re
 	switch req.TargetType {
 	case TargetTypeDriveFolder:
 		if objectKey := scopedDriveObjectKey(req.ScopeRef); objectKey != "" {
-			object, err := c.api.GetDriveFile(ctx, token, driveFolderToken(objectKey))
-			if err == nil {
-				return object, nil
-			}
-			if isFeishuNotFound(err) {
-				return c.api.GetDriveFolder(ctx, token, driveFolderToken(objectKey))
-			}
-			return Object{}, err
+			return c.findDriveObject(ctx, token, req.TargetRef, objectKey)
 		}
 		return c.api.GetDriveFolder(ctx, token, driveFolderToken(nodeRef))
 	case TargetTypeWikiNode:
@@ -92,6 +85,55 @@ func (c *FeishuConnector) loadScopedObject(ctx context.Context, token string, re
 	default:
 		return Object{}, connector.NewError(connector.ErrorCodeInvalidTarget, "target_type is not supported")
 	}
+}
+
+func (c *FeishuConnector) findDriveObject(ctx context.Context, token, targetRef, objectToken string) (Object, error) {
+	objectToken = strings.TrimSpace(objectToken)
+	if objectToken == "" {
+		return Object{}, connector.NewError(connector.ErrorCodeInvalidArgument, "object_key is required")
+	}
+	rootToken := driveFolderToken(targetRef)
+	if rootToken == objectToken {
+		return c.api.GetDriveFolder(ctx, token, rootToken)
+	}
+	queue := []string{rootToken}
+	seen := map[string]struct{}{}
+	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return Object{}, err
+		}
+		folderToken := queue[0]
+		queue = queue[1:]
+		if _, ok := seen[folderToken]; ok {
+			continue
+		}
+		seen[folderToken] = struct{}{}
+		cursor := ""
+		for {
+			page, err := c.api.ListDriveChildren(ctx, token, folderToken, cursor, c.Spec().MaxPageSize)
+			if err != nil {
+				return Object{}, err
+			}
+			for _, item := range page.Items {
+				if driveObjectMatches(item, objectToken) {
+					return item, nil
+				}
+				if item.Kind == ObjectKindDriveFolder && strings.TrimSpace(item.Token) != "" {
+					queue = append(queue, item.Token)
+				}
+			}
+			if !page.HasMore {
+				break
+			}
+			cursor = page.NextCursor
+		}
+	}
+	return Object{}, connector.NewError(connector.ErrorCodeNotFound, "drive object is not found in target")
+}
+
+func driveObjectMatches(object Object, token string) bool {
+	token = strings.TrimSpace(token)
+	return token != "" && (strings.TrimSpace(object.Token) == token || strings.TrimSpace(object.StableID) == token)
 }
 
 func scopedDriveObjectKey(scopeRef connector.ScopeRef) string {

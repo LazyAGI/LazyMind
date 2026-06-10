@@ -136,19 +136,6 @@ func (c *DefaultFeishuAPIClient) GetDriveFolder(ctx context.Context, token, fold
 	return driveFolderObject(openAPIMapValue(out["folder"], out), folderToken), nil
 }
 
-func (c *DefaultFeishuAPIClient) GetDriveFile(ctx context.Context, token, fileToken string) (Object, error) {
-	fileToken = strings.TrimSpace(fileToken)
-	if fileToken == "" {
-		return Object{}, connector.NewError(connector.ErrorCodeInvalidArgument, "file token is required")
-	}
-	var out map[string]any
-	path := "/drive/explorer/v2/file/" + url.PathEscape(fileToken) + "/meta"
-	if err := doFeishuOpenAPIJSON(ctx, c.httpClient, endpoint(c.baseURL, path, nil), http.MethodGet, token, nil, &out); err != nil {
-		return Object{}, err
-	}
-	return driveObject(openAPIMapValue(out["file"], out), ""), nil
-}
-
 func (c *DefaultFeishuAPIClient) ListDriveChildren(ctx context.Context, token, folderToken, cursor string, pageSize int) (ObjectPage, error) {
 	var out openAPIDriveFiles
 	if err := doFeishuOpenAPIJSON(ctx, c.httpClient, endpoint(c.baseURL, "/drive/v1/files", driveFilesQuery(folderToken, cursor, pageSize)), http.MethodGet, token, nil, &out); err != nil {

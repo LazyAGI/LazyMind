@@ -65,6 +65,7 @@ func (e *DefaultEngine) prepareUpdateBinding(ctx context.Context, callerID strin
 	changedTarget := targetChanged(current, input)
 	if changedTarget {
 		input = completeTargetInput(current, input)
+		input.ProviderOptions = providerOptionsWithActor(input.ProviderOptions, callerID, src.TenantID)
 	}
 	if err := validateBindingInput(input, changedTarget); err != nil {
 		return store.Binding{}, store.SyncCheckpoint{}, store.BindingUpdateCleanup{}, err
