@@ -1240,6 +1240,14 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:  map[int]openAPIResponse{200: resp("Eval set import task", evalset.EvalSetImportTaskResponse{})},
 		},
 		{
+			Method:     "GET",
+			Path:       "/eval-sets/{eval_set_id}/question-types",
+			Summary:    "List eval set question types",
+			Tags:       []string{"eval-set-items"},
+			PathParams: evalset.EvalSetPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Question type options", evalset.QuestionTypeOptionsResponse{})},
+		},
+		{
 			Method:      "GET",
 			Path:        "/eval-sets/{eval_set_id}/items",
 			Summary:     "List eval set items",

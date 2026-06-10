@@ -91,6 +91,18 @@ func (s *Service) ListItems(ctx context.Context, evalSet *orm.EvalSet, filter Li
 	}, nil
 }
 
+func (s *Service) ListEvalSetQuestionTypes(ctx context.Context, evalSet *orm.EvalSet) (*QuestionTypeOptionsResponse, error) {
+	values, err := s.repo.ListEvalSetQuestionTypes(ctx, evalSet.ID, evalSet.ShardID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]QuestionTypeOption, 0, len(values))
+	for _, value := range values {
+		items = append(items, QuestionTypeOption{Value: value, Label: value})
+	}
+	return &QuestionTypeOptionsResponse{Items: items}, nil
+}
+
 func (s *Service) CreateItem(ctx context.Context, evalSetID string, req CreateEvalSetItemRequest, userID, userName string) (*EvalSetItemResponse, error) {
 	normalized, err := normalizeCreateItemRequest(req)
 	if err != nil {
@@ -188,6 +200,17 @@ func (r *Repository) ListItems(ctx context.Context, evalSetID, shardID string, f
 		Limit(filter.PageSize).
 		Find(&rows).Error
 	return rows, total, err
+}
+
+func (r *Repository) ListEvalSetQuestionTypes(ctx context.Context, evalSetID, shardID string) ([]string, error) {
+	var values []string
+	err := r.db.WithContext(ctx).Model(&orm.EvalSetItem{}).
+		Distinct("question_type").
+		Where("shard_id = ? AND eval_set_id = ?", shardID, evalSetID).
+		Where("question_type <> ''").
+		Order("question_type ASC").
+		Pluck("question_type", &values).Error
+	return values, err
 }
 
 func (r *Repository) KnowledgeBaseReferenceDocIDs(ctx context.Context, datasetIDs, documentIDs []string) (map[string]struct{}, error) {

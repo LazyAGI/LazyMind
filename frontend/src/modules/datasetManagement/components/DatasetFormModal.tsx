@@ -44,6 +44,7 @@ export default function DatasetFormModal({
 
   useEffect(() => {
     if (open) {
+      form.resetFields();
       form.setFieldsValue(initialValues);
     } else {
       form.resetFields();

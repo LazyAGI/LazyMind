@@ -1,11 +1,15 @@
 # Built-in permission groups (category.action). Not modifiable at runtime.
 permission_groups:
   - user.read
-  - user.write
   - user.admin   # Owned only by admin role, used for gateway authorization of user/role/group management APIs
   - document.read
   - document.write
   - qa.read
+  - qa.write     # Create/send conversations, manage skills/memory/preference, approve evolution suggestions
+  - model.read   # View model providers, model list, selected models/providers
+  - model.write  # Configure API keys, manage provider groups, set shared models; includes cloud-oauth connections
+  - scan.read    # View data sources, bindings, parse tasks
+  - scan.write   # Create/modify/delete data sources, trigger sync
 
 # Default permission codes for built-in user role (must exist in permission_groups)
 # Design principle: newly registered users can use basic conversation and knowledge-base capabilities by default,
@@ -15,3 +19,8 @@ default_user_role_permissions:
   - document.read
   - document.write
   - qa.read
+  - qa.write
+  - model.read
+  - model.write
+  - scan.read
+  - scan.write

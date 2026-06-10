@@ -1,12 +1,15 @@
 package evalset
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/xuri/excelize/v2"
 
 	"lazymind/core/common"
 	"lazymind/core/store"
@@ -19,17 +22,58 @@ func DownloadImportTemplate(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="eval_set_template.csv"`)
 		writer := csv.NewWriter(w)
-		_ = writer.Write(importTemplateFields)
+		_ = writer.Write(importDownloadTemplateFields)
 		writer.Flush()
 	case importFileTypeJSON:
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Disposition", `attachment; filename="eval_set_template.json"`)
-		_ = json.NewEncoder(w).Encode([]ImportNormalizedRow{{}})
+		_ = json.NewEncoder(w).Encode([]map[string]any{importDownloadTemplateRow()})
 	case importFileTypeXLSX:
-		common.ReplyErr(w, "xlsx template is not supported in phase 1", http.StatusBadRequest)
+		output, err := buildXLSXImportTemplate()
+		if err != nil {
+			common.ReplyErr(w, "build xlsx template failed", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		w.Header().Set("Content-Disposition", `attachment; filename="eval_set_template.xlsx"`)
+		_, _ = w.Write(output)
 	default:
 		common.ReplyErr(w, "unsupported file_type", http.StatusBadRequest)
 	}
+}
+
+func importDownloadTemplateRow() map[string]any {
+	row := make(map[string]any, len(importDownloadTemplateFields))
+	for _, field := range importDownloadTemplateFields {
+		if field == "is_deleted" {
+			row[field] = false
+			continue
+		}
+		row[field] = ""
+	}
+	return row
+}
+
+func buildXLSXImportTemplate() ([]byte, error) {
+	workbook := excelize.NewFile()
+	defer workbook.Close()
+
+	sheet := workbook.GetSheetName(0)
+	for index, field := range importDownloadTemplateFields {
+		cell, err := excelize.CoordinatesToCellName(index+1, 1)
+		if err != nil {
+			return nil, err
+		}
+		if err := workbook.SetCellValue(sheet, cell, field); err != nil {
+			return nil, err
+		}
+	}
+
+	var buf bytes.Buffer
+	if err := workbook.Write(&buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func PreviewEvalSetImport(w http.ResponseWriter, r *http.Request) {
@@ -69,10 +113,7 @@ func PreviewEvalSetImport(w http.ResponseWriter, r *http.Request) {
 	}
 	fileType := normalizeImportFileType(r.FormValue("file_type"), fileName)
 	switch fileType {
-	case importFileTypeCSV, importFileTypeJSON:
-	case importFileTypeXLSX:
-		common.ReplyErr(w, "xlsx import is not supported in phase 1", http.StatusBadRequest)
-		return
+	case importFileTypeCSV, importFileTypeJSON, importFileTypeXLSX:
 	default:
 		common.ReplyErr(w, "unsupported file_type", http.StatusBadRequest)
 		return

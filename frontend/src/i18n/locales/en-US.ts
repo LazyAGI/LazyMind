@@ -476,6 +476,33 @@ const enUS = {
     newChat: "New Chat",
   },
 
+  datasetManagement: {
+    fields: {
+      caseId: "Case ID",
+      question: "Question",
+      questionType: "Question Type",
+      groundTruth: "Ground Truth",
+      keyPoints: "Key Points",
+      referenceContext: "Reference Context",
+      referenceDoc: "Reference Document",
+      referenceDocIds: "Reference Document IDs",
+      referenceChunkIds: "Reference Chunk IDs",
+      generateReason: "Generation Reason",
+      isDeleted: "Deleted",
+      source: "Source",
+      updatedAt: "Updated At",
+    },
+    import: {
+      rowNumber: "Row",
+      validationResult: "Validation",
+      passed: "Passed",
+    },
+    columnSettings: {
+      selectColumns: "Select Columns",
+      restoreDefault: "Restore Default",
+    },
+  },
+
   // Profile
   profile: {
     title: "Profile",

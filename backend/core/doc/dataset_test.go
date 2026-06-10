@@ -30,6 +30,24 @@ func testJSONResponse(status int, body string) *http.Response {
 	}
 }
 
+func testDatasetIDsJSON(t *testing.T, ids ...string) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(ids)
+	if err != nil {
+		t.Fatalf("marshal dataset ids: %v", err)
+	}
+	return raw
+}
+
+func testParseDatasetIDs(t *testing.T, raw json.RawMessage) []string {
+	t.Helper()
+	var ids []string
+	if err := json.Unmarshal(raw, &ids); err != nil {
+		t.Fatalf("parse dataset ids: %v", err)
+	}
+	return ids
+}
+
 func TestListDatasetsKeywordMatchesTags(t *testing.T) {
 	db := newDocumentTestDB(t)
 	if err := db.AutoMigrate(&orm.DefaultDataset{}); err != nil {
@@ -184,6 +202,221 @@ func TestCreateDatasetRejectsReservedDisplayNamePrefixes(t *testing.T) {
 	}
 	if called {
 		t.Fatalf("algo service must not be called for reserved display names")
+	}
+}
+
+func TestCreateDatasetRejectsDuplicateDisplayNameForSameUser(t *testing.T) {
+	db := newDocumentTestDB(t)
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	if err := db.Create(&orm.Dataset{
+		ID:           "ds-existing",
+		KbID:         "kb-existing",
+		DisplayName:  "Duplicate Name",
+		Desc:         "existing",
+		DatasetState: 0,
+		ShareType:    0,
+		Type:         1,
+		Ext:          json.RawMessage(`{}`),
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "user-123",
+			CreateUserName: "Alice",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create existing dataset: %v", err)
+	}
+
+	called := false
+	prevTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		called = true
+		return testJSONResponse(http.StatusInternalServerError, `{"message":"unexpected call"}`), nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = prevTransport })
+	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/datasets", strings.NewReader(`{"display_name":"Duplicate Name"}`))
+	req.Header.Set("X-User-Id", "user-123")
+	req.Header.Set("X-User-Name", "Alice")
+	rec := httptest.NewRecorder()
+
+	CreateDataset(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected status 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "dataset name already exists") {
+		t.Fatalf("expected duplicate name error, got %s", rec.Body.String())
+	}
+	if called {
+		t.Fatalf("algo service must not be called for duplicate dataset names")
+	}
+}
+
+func TestCreateDatasetAllowsSameDisplayNameForDifferentUsers(t *testing.T) {
+	db := newDocumentTestDB(t)
+	if err := db.AutoMigrate(&orm.DefaultDataset{}, &orm.ACLModel{}, &orm.KBModel{}, &orm.VisibilityModel{}); err != nil {
+		t.Fatalf("auto migrate acl tables: %v", err)
+	}
+	acl.InitStore(db)
+	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
+	if err := db.Create(&orm.Dataset{
+		ID:           "ds-existing",
+		KbID:         "kb-existing",
+		DisplayName:  "Shared Name",
+		Desc:         "existing",
+		DatasetState: 0,
+		ShareType:    0,
+		Type:         1,
+		Ext:          json.RawMessage(`{}`),
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "other-user",
+			CreateUserName: "Bob",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create existing dataset: %v", err)
+	}
+
+	prevTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/v1/kbs":
+			return testJSONResponse(http.StatusOK, `{"kb_id":"kb-returned"}`), nil
+		case "/v1/algo/general_algo/groups":
+			return testJSONResponse(http.StatusOK, `{"code":200,"data":[]}`), nil
+		default:
+			t.Errorf("unexpected algo request path %q", r.URL.Path)
+			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+		}
+	})
+	t.Cleanup(func() { http.DefaultTransport = prevTransport })
+	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/datasets?dataset_id=ds_new", strings.NewReader(`{"display_name":"Shared Name","algo":{"algo_id":"general_algo"}}`))
+	req.Header.Set("X-User-Id", "user-123")
+	req.Header.Set("X-User-Name", "Alice")
+	rec := httptest.NewRecorder()
+
+	CreateDataset(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var row orm.Dataset
+	if err := db.First(&row, "id = ?", "ds_new").Error; err != nil {
+		t.Fatalf("query created dataset: %v", err)
+	}
+	if row.DisplayName != "Shared Name" || row.CreateUserID != "user-123" {
+		t.Fatalf("unexpected created dataset: %#v", row)
+	}
+}
+
+func TestDeleteDatasetRemovesEvalSetDatasetReferences(t *testing.T) {
+	db := newDocumentTestDB(t)
+	now := time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC)
+	if err := db.Create(&orm.Dataset{
+		ID:           "ds-delete",
+		KbID:         "kb-delete",
+		DisplayName:  "delete me",
+		DatasetState: 0,
+		ShareType:    0,
+		Type:         1,
+		Ext:          json.RawMessage(`{}`),
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "user-123",
+			CreateUserName: "Alice",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create dataset: %v", err)
+	}
+	evalSets := []orm.EvalSet{
+		{
+			ID:             "eval_set_mixed",
+			Name:           "mixed",
+			DatasetIDs:     testDatasetIDsJSON(t, "ds-delete", "ds-keep"),
+			OwnerID:        "user-123",
+			ShardID:        "eval_shard_test",
+			Status:         "active",
+			CreateUserID:   "user-123",
+			CreateUserName: "Alice",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+		{
+			ID:             "eval_set_only_deleted",
+			Name:           "only deleted",
+			DatasetIDs:     testDatasetIDsJSON(t, "ds-delete"),
+			OwnerID:        "user-123",
+			ShardID:        "eval_shard_test",
+			Status:         "active",
+			CreateUserID:   "user-123",
+			CreateUserName: "Alice",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+		{
+			ID:             "eval_set_unrelated",
+			Name:           "unrelated",
+			DatasetIDs:     testDatasetIDsJSON(t, "ds-other"),
+			OwnerID:        "user-123",
+			ShardID:        "eval_shard_test",
+			Status:         "active",
+			CreateUserID:   "user-123",
+			CreateUserName: "Alice",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}
+	if err := db.Create(&evalSets).Error; err != nil {
+		t.Fatalf("create eval sets: %v", err)
+	}
+
+	prevTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/v1/kbs/kb-delete" {
+			t.Errorf("unexpected algo request %s %q", r.Method, r.URL.Path)
+			return testJSONResponse(http.StatusNotFound, `{"message":"not found"}`), nil
+		}
+		return testJSONResponse(http.StatusOK, `{}`), nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = prevTransport })
+	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/core/datasets/ds-delete", nil)
+	req = mux.SetURLVars(req, map[string]string{"dataset": "ds-delete"})
+	req.Header.Set("X-User-Id", "user-123")
+	rec := httptest.NewRecorder()
+
+	DeleteDataset(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var mixed orm.EvalSet
+	if err := db.First(&mixed, "id = ?", "eval_set_mixed").Error; err != nil {
+		t.Fatalf("query mixed eval set: %v", err)
+	}
+	if got := strings.Join(testParseDatasetIDs(t, mixed.DatasetIDs), ","); got != "ds-keep" {
+		t.Fatalf("expected only kept dataset id, got %q", got)
+	}
+	var onlyDeleted orm.EvalSet
+	if err := db.First(&onlyDeleted, "id = ?", "eval_set_only_deleted").Error; err != nil {
+		t.Fatalf("query only deleted eval set: %v", err)
+	}
+	if got := testParseDatasetIDs(t, onlyDeleted.DatasetIDs); len(got) != 0 {
+		t.Fatalf("expected empty dataset ids, got %#v", got)
+	}
+	var unrelated orm.EvalSet
+	if err := db.First(&unrelated, "id = ?", "eval_set_unrelated").Error; err != nil {
+		t.Fatalf("query unrelated eval set: %v", err)
+	}
+	if got := strings.Join(testParseDatasetIDs(t, unrelated.DatasetIDs), ","); got != "ds-other" {
+		t.Fatalf("expected unrelated eval set unchanged, got %q", got)
 	}
 }
 

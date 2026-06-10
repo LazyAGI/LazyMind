@@ -2,10 +2,8 @@ import {
   Alert,
   Button,
   Card,
-  Col,
   Empty,
   Input,
-  Row,
   Space,
   Table,
   Tag,
@@ -93,6 +91,7 @@ export default function DataSourceDetailView({
   }
 
   const statusMeta = getStatusMeta(detailSource.status, t);
+  const compactLastSync = `${lastSync}`.replace(/^最近同步时间：|^Last sync:\s*/i, "");
 
   return (
     <div className="admin-page data-source-detail-page">
@@ -106,50 +105,57 @@ export default function DataSourceDetailView({
       </Button>
 
       <div className="data-source-detail-header">
-        <Space align="center" size={16} wrap>
-          <Title level={2} className="data-source-detail-title">
-            {detailSource.name}
-          </Title>
-          <Tag color={statusMeta.color} className="data-source-detail-title-tag">
-            {statusMeta.text}
-          </Tag>
-        </Space>
-        <Paragraph className="data-source-detail-description">
-          {t("admin.dataSourceDetailLastSync", { time: lastSync })}
-        </Paragraph>
+        <div className="data-source-detail-title-row">
+          <Space align="center" size={12} wrap>
+            <Title level={2} className="data-source-detail-title">
+              {detailSource.name}
+            </Title>
+            <Tag color={statusMeta.color} className="data-source-detail-title-tag">
+              {statusMeta.text}
+            </Tag>
+          </Space>
+          <Button
+            type="primary"
+            size="large"
+            loading={detailLoading}
+            disabled={detailLoading}
+            onClick={onOpenSyncPicker}
+          >
+            {t("admin.dataSourceDetailSyncNow")}
+          </Button>
+        </div>
       </div>
 
-      <Row gutter={[16, 16]}>
-        <Col xs={24} md={8}>
-          <Card className="data-source-detail-stat-card">
-            <Text className="data-source-detail-stat-label">
-              {t("admin.dataSourceDetailSyncPath")}
-            </Text>
-            <Tooltip title={detailSource.target} placement="topLeft">
-              <div className="data-source-detail-stat-value path">{detailSource.target}</div>
-            </Tooltip>
-          </Card>
-        </Col>
-        <Col xs={24} md={8}>
-          <Card className="data-source-detail-stat-card">
-            <Text className="data-source-detail-stat-label">
-              {t("admin.dataSourceDetailParsedDocs")}
-            </Text>
-            <div className="data-source-detail-stat-value">
-              {documents.length}
-              <span>{t("admin.dataSourceDetailFileUnit")}</span>
-            </div>
-          </Card>
-        </Col>
-        <Col xs={24} md={8}>
-          <Card className="data-source-detail-stat-card">
-            <Text className="data-source-detail-stat-label">
-              {t("admin.dataSourceDetailStorageUsed")}
-            </Text>
-            <div className="data-source-detail-stat-value">{detailSource.storageUsed}</div>
-          </Card>
-        </Col>
-      </Row>
+      <div className="data-source-detail-meta-bar">
+        <div className="data-source-detail-meta-item data-source-detail-meta-path">
+          <Text className="data-source-detail-stat-label">
+            {t("admin.dataSourceDetailSyncPath")}
+          </Text>
+          <Tooltip title={detailSource.target} placement="topLeft">
+            <div className="data-source-detail-stat-value path">{detailSource.target}</div>
+          </Tooltip>
+        </div>
+        <div className="data-source-detail-meta-item">
+          <Text className="data-source-detail-stat-label">
+            {t("admin.dataSourceDetailParsedDocs")}
+          </Text>
+          <div className="data-source-detail-stat-value">
+            {documents.length}
+          </div>
+        </div>
+        <div className="data-source-detail-meta-item">
+          <Text className="data-source-detail-stat-label">
+            {t("admin.dataSourceDetailStorageUsed")}
+          </Text>
+          <div className="data-source-detail-stat-value">{detailSource.storageUsed}</div>
+        </div>
+        <div className="data-source-detail-meta-item">
+          <Text className="data-source-detail-stat-label">
+            {t("admin.dataSourceDetailLastSync", { time: "" }).replace(/[：:]\s*$/, "")}
+          </Text>
+          <div className="data-source-detail-stat-value">{compactLastSync}</div>
+        </div>
+      </div>
 
       {lastOperation ? (
         <Alert
@@ -165,30 +171,20 @@ export default function DataSourceDetailView({
         />
       ) : null}
 
-      <Card
-        className="data-source-detail-doc-card"
-        title={t("admin.dataSourceDetailDocChangeTitle")}
-        extra={
-          <Space wrap>
-            <Button
-              type="primary"
-              loading={detailLoading}
-              disabled={detailLoading}
-              onClick={onOpenSyncPicker}
-            >
-              {t("admin.dataSourceDetailSyncNow")}
-            </Button>
-            <Input
-              allowClear
-              prefix={<SearchOutlined />}
-              placeholder={t("admin.dataSourceDetailSearchDocPlaceholder")}
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-              className="data-source-detail-search"
-            />
-          </Space>
-        }
-      >
+      <section className="data-source-detail-doc-card">
+        <div className="data-source-detail-doc-toolbar">
+          <Title level={4} className="data-source-detail-section-title">
+            {t("admin.dataSourceDetailDocChangeTitle")}
+          </Title>
+          <Input
+            allowClear
+            prefix={<SearchOutlined />}
+            placeholder={t("admin.dataSourceDetailSearchDocPlaceholder")}
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+            className="data-source-detail-search"
+          />
+        </div>
         <Table<DocumentStatusRow>
           rowKey="id"
           columns={columns}
@@ -197,9 +193,9 @@ export default function DataSourceDetailView({
           pagination={{ pageSize: 8, showSizeChanger: false }}
           className="admin-page-table data-source-detail-table"
           locale={{ emptyText: t("admin.dataSourceDetailNoDocStatus") }}
-          scroll={{ x: 1520, y: "max(280px, calc(100vh - 720px))" }}
+          scroll={{ x: 1120, y: "max(320px, calc(100vh - 420px))" }}
         />
-      </Card>
+      </section>
 
       {syncPickerModal}
     </div>

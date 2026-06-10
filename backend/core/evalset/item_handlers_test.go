@@ -169,6 +169,36 @@ func TestListEvalSetItemsFiltersBySourceAndQuestionType(t *testing.T) {
 	}
 }
 
+func TestListEvalSetQuestionTypesReturnsCurrentEvalSetDistinctTypes(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	seedEvalSet(t, db, "eval_set_question_types", "user_1", "", "", time.Now().UTC())
+	seedEvalSet(t, db, "eval_set_question_types_other", "user_1", "", "", time.Now().UTC())
+	seedEvalSetItem(t, db, orm.EvalSetItem{ID: "eval_item_type_b", EvalSetID: "eval_set_question_types", QuestionType: "B"})
+	seedEvalSetItem(t, db, orm.EvalSetItem{ID: "eval_item_type_a", EvalSetID: "eval_set_question_types", QuestionType: "A"})
+	seedEvalSetItem(t, db, orm.EvalSetItem{ID: "eval_item_type_a_duplicate", EvalSetID: "eval_set_question_types", QuestionType: "A"})
+	seedEvalSetItem(t, db, orm.EvalSetItem{ID: "eval_item_type_other", EvalSetID: "eval_set_question_types_other", QuestionType: "C"})
+
+	rec, req := requestWithUser(http.MethodGet, "/api/core/eval-sets/eval_set_question_types/question-types", "", "user_1")
+	req = mux.SetURLVars(req, map[string]string{"eval_set_id": "eval_set_question_types"})
+	ListEvalSetQuestionTypes(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeOKData[QuestionTypeOptionsResponse](t, rec)
+	got := make([]string, 0, len(resp.Items))
+	for _, item := range resp.Items {
+		got = append(got, item.Value)
+		if item.Value != item.Label {
+			t.Fatalf("expected matching value and label, got %#v", item)
+		}
+	}
+	want := []string{"A", "B"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("expected question types %v, got %v", want, got)
+	}
+}
+
 func TestListEvalSetItemsMarksKnowledgeBaseReferenceDocAndChunkSelection(t *testing.T) {
 	db := newEvalSetTestDB(t)
 	now := time.Now().UTC()
