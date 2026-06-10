@@ -4899,6 +4899,34 @@ export default function MemoryManagement() {
         />
       ),
     },
+    {
+      title: t("admin.memoryToolStatus"),
+      dataIndex: "isEnabled",
+      key: "status",
+      width: 120,
+      render: (value: boolean) => (
+        <Tag color={value ? "success" : "default"}>
+          {value ? t("common.enabled") : t("common.disabled")}
+        </Tag>
+      ),
+    },
+    {
+      title: t("common.actions"),
+      key: "actions",
+      width: 140,
+      render: (_value, record) => (
+        <Switch
+          checked={Boolean(record.isEnabled)}
+          checkedChildren={t("common.enabled")}
+          disabled={Boolean(record.readonly)}
+          loading={toolActionLoading.has(record.id)}
+          unCheckedChildren={t("common.disabled")}
+          onChange={(checked) => {
+            void handleToggleTool(record, checked);
+          }}
+        />
+      ),
+    },
   ];
 
   const experienceColumns: ColumnsType<ExperienceAsset> = [
