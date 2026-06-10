@@ -44,3 +44,27 @@ def test_translator_rewrites_citations_registered_by_tools():
 
     final_frames = translator.finish('')
     assert final_frames[-1]['sources'][0]['index'] == '1.1'
+
+
+def test_translator_counts_tool_call_turns_not_individual_calls():
+    translator = AgentEventFrameTranslator(query='q')
+
+    translator.feed({'tag': 'tool_calls', 'tool_calls': []})
+    assert translator.tool_call_turns == 0
+
+    translator.feed({
+        'tag': 'tool_calls',
+        'tool_calls': [
+            {'id': 'call-1', 'function': {'name': 'kb_search', 'arguments': {'query': 'q'}}},
+            {'id': 'call-2', 'function': {'name': 'calculator', 'arguments': {'exp': '1+1'}}},
+        ],
+    })
+    assert translator.tool_call_turns == 1
+
+    translator.feed({
+        'tag': 'tool_calls',
+        'tool_calls': [
+            {'id': 'call-3', 'function': {'name': 'web_search', 'arguments': {'query': 'q'}}},
+        ],
+    })
+    assert translator.tool_call_turns == 2

@@ -12,9 +12,8 @@ import {
   SearchOutlined,
   UpOutlined,
 } from "@ant-design/icons";
-import { AgentAppsAuth } from "@/components/auth";
-import { BASE_URL, axiosInstance, getLocalizedErrorMessage } from "@/components/request";
-import type { RawAxiosRequestConfig } from "axios";
+import { getLocalizedErrorMessage } from "@/components/request";
+import { modelProvidersApi, unwrapModelProviderData } from "../api";
 import "../index.scss";
 
 type ModelCapability =
@@ -82,7 +81,7 @@ interface VerifyGroupModalState {
 }
 
 interface VerifyGroupFormValues {
-  apiKey: string;
+  apiKey?: string;
 }
 
 interface CustomModelModalState {
@@ -288,12 +287,6 @@ function getLocalizedProviderDescription(
   return translatedDescription || fallbackDescription || fallbacks.providerDescription;
 }
 
-interface ApiEnvelope<T> {
-  code?: number;
-  message?: string;
-  data?: T;
-}
-
 interface ApiProvider {
   id: string;
   name: string;
@@ -322,40 +315,6 @@ interface ApiModel {
   name: string;
   model_type?: string;
   is_default?: boolean;
-}
-
-function getApiBaseUrl() {
-  return `${BASE_URL || window.location.origin}/api/core`;
-}
-
-function getRequestHeaders() {
-  return {
-    "Content-Type": "application/json",
-    ...AgentAppsAuth.getAuthHeaders(),
-  };
-}
-
-function unwrapResponse<T>(payload: ApiEnvelope<T> | T): T {
-  if (payload && typeof payload === "object" && "data" in payload) {
-    return (payload as ApiEnvelope<T>).data as T;
-  }
-  return payload as T;
-}
-
-async function modelProviderRequest<T>(
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
-  path: string,
-  data?: unknown,
-  options?: RawAxiosRequestConfig
-) {
-  const response = await axiosInstance.request<ApiEnvelope<T> | T>({
-    method,
-    url: `${getApiBaseUrl()}${path}`,
-    data,
-    headers: getRequestHeaders(),
-    ...options,
-  });
-  return unwrapResponse<T>(response.data);
 }
 
 function mapApiProvider(provider: ApiProvider, fallbacks: ModelProviderFallbacks): ProviderOption {
@@ -503,14 +462,6 @@ function isDefaultProviderBaseUrl(provider: Pick<ProviderOption, "baseUrl">, bas
   return normalizeFormText(baseUrl) === normalizeFormText(provider.baseUrl);
 }
 
-function getModelProvidersPath(keyword?: string) {
-  const normalizedKeyword = keyword?.trim();
-  if (!normalizedKeyword) {
-    return "/model_providers";
-  }
-  return `/model_providers?${new URLSearchParams({ keyword: normalizedKeyword }).toString()}`;
-}
-
 export default function ModelProviderPage() {
   const { t, i18n } = useTranslation();
   const [providerConfigForm] = Form.useForm<ProviderConfigFormValues>();
@@ -549,10 +500,10 @@ export default function ModelProviderPage() {
   const apiKeyRequired = !!configProvider && !baseUrlChanged;
 
   const fetchProviderOptions = useCallback(async (searchKeyword = "") => {
-    const providerData = await modelProviderRequest<{ providers?: ApiProvider[] }>(
-      "GET",
-      getModelProvidersPath(searchKeyword)
-    );
+    const providerResponse = await modelProvidersApi.apiCoreModelProvidersGet({
+      keyword: searchKeyword.trim() || undefined,
+    });
+    const providerData = unwrapModelProviderData<{ providers?: ApiProvider[] }>(providerResponse.data);
     return (providerData.providers || []).map((provider) => mapApiProvider(provider, localizedFallbacks));
   }, [localizedFallbacks]);
 
@@ -586,16 +537,17 @@ export default function ModelProviderPage() {
       const providers = await fetchProviderOptions();
       setProviderOptions(providers);
 
-      const withGroupsData = await modelProviderRequest<{ providers?: ApiProvider[] }>("GET", "/model_providers:with_groups");
+      const withGroupsResponse = await modelProvidersApi.apiCoreModelProvidersWithGroupsGet();
+      const withGroupsData = unwrapModelProviderData<{ providers?: ApiProvider[] }>(withGroupsResponse.data);
       const addedIds = new Set((withGroupsData.providers || []).map((provider) => provider.id));
       const addedProviders = await Promise.all(
         providers
           .filter((provider) => addedIds.has(provider.id))
           .map(async (provider): Promise<AddedProvider> => {
-            const groupData = await modelProviderRequest<{ groups?: ApiGroup[] }>(
-              "GET",
-              `/model_providers/${encodeURIComponent(provider.id)}/groups`
-            );
+            const groupResponse = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGet({
+              modelProviderId: provider.id,
+            });
+            const groupData = unwrapModelProviderData<{ groups?: ApiGroup[] }>(groupResponse.data);
             const groups = (groupData.groups || []).map((group) => mapApiGroup(provider, group, []));
             return { ...provider, groups };
           })
@@ -689,19 +641,19 @@ export default function ModelProviderPage() {
       const payload = {
         name: groupName || configProvider.name,
         base_url: baseUrl,
+        verify: false,
         ...(apiKey ? { api_key: apiKey } : {}),
       };
       const savedGroup = activeConfigModal.group
-        ? await modelProviderRequest<ApiGroup>(
-            "PATCH",
-            `/model_providers/${encodeURIComponent(configProvider.id)}/groups/${encodeURIComponent(activeConfigModal.group.id)}`,
-            payload
-          )
-        : await modelProviderRequest<ApiGroup>(
-            "POST",
-            `/model_providers/${encodeURIComponent(configProvider.id)}/groups`,
-            payload
-          );
+        ? unwrapModelProviderData<ApiGroup>((await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch({
+            modelProviderId: configProvider.id,
+            groupId: activeConfigModal.group.id,
+            updateModelProviderGroupOpenAPIRequest: payload,
+          })).data)
+        : unwrapModelProviderData<ApiGroup>((await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsPost({
+            modelProviderId: configProvider.id,
+            createModelProviderGroupOpenAPIRequest: payload,
+          })).data);
       const nextGroup = mapApiGroup(
         configProvider,
         {
@@ -747,7 +699,7 @@ export default function ModelProviderPage() {
     openProviderConfig(provider);
   };
 
-  const verifyProviderGroup = async (providerId: string, groupId: string, apiKey: string) => {
+  const verifyProviderGroup = async (providerId: string, groupId: string, apiKey?: string) => {
     const verifyKey = `${providerId}:${groupId}`;
     if (verifyingGroupIds[verifyKey]) {
       return;
@@ -760,21 +712,26 @@ export default function ModelProviderPage() {
       if (!provider || !group) {
         return;
       }
-      if (!apiKey) {
+      if (!apiKey && !group.apiKeyConfigured) {
         message.warning(t("modelProvider.message.fillApiKeyBeforeVerify"));
         return;
       }
 
-      const checkResult = await modelProviderRequest<CheckModelProviderResult>(
-        "POST",
-        `/model_providers/${encodeURIComponent(provider.id)}/groups/${encodeURIComponent(group.id)}:check`,
+      const payload = {
+        provider_name: provider.name,
+        base_url: group.baseUrl,
+        api_key: apiKey || "",
+        dry_run: false,
+      };
+      const checkResponse = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPost(
         {
-          provider_name: provider.name,
-          base_url: group.baseUrl,
-          api_key: apiKey,
+          modelProviderId: provider.id,
+          groupId: group.id,
+          checkModelProviderOpenAPIRequest: payload,
         },
-        { timeout: 3 * 60 * 1000 }
+        { timeout: 3 * 60 * 1000 },
       );
+      const checkResult = unwrapModelProviderData<CheckModelProviderResult>(checkResponse.data);
       const isVerified = checkResult?.success === true;
       setAddedProviderList((current) =>
         current.map((provider) =>
@@ -845,7 +802,10 @@ export default function ModelProviderPage() {
     }
 
     try {
-      await modelProviderRequest("DELETE", `/model_providers/${encodeURIComponent(providerId)}/groups/${encodeURIComponent(group.id)}`);
+      await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdDelete({
+        modelProviderId: providerId,
+        groupId: group.id,
+      });
       setAddedProviderList((current) =>
         current
           .map((item) =>
@@ -873,7 +833,10 @@ export default function ModelProviderPage() {
     try {
       await Promise.all(
         provider.groups.map((group) =>
-          modelProviderRequest("DELETE", `/model_providers/${encodeURIComponent(provider.id)}/groups/${encodeURIComponent(group.id)}`)
+          modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdDelete({
+            modelProviderId: provider.id,
+            groupId: group.id,
+          })
         )
       );
       setAddedProviderList((current) => current.filter((item) => item.id !== provider.id));
@@ -905,10 +868,11 @@ export default function ModelProviderPage() {
 
     setLoadingGroupModelIds((current) => ({ ...current, [groupKey]: true }));
     try {
-      const modelData = await modelProviderRequest<{ models?: ApiModel[] }>(
-        "GET",
-        `/model_providers/${encodeURIComponent(provider.id)}/groups/${encodeURIComponent(group.id)}/models`
-      );
+      const modelResponse = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGet({
+        modelProviderId: provider.id,
+        groupId: group.id,
+      });
+      const modelData = unwrapModelProviderData<{ models?: ApiModel[] }>(modelResponse.data);
       const nextGroup = mapApiGroup(provider, group, modelData.models || []);
       setAddedProviderList((current) =>
         current.map((item) =>
@@ -979,14 +943,14 @@ export default function ModelProviderPage() {
     }
 
     try {
-      const createdModel = await modelProviderRequest<ApiModel>(
-        "POST",
-        `/model_providers/${encodeURIComponent(provider.id)}/groups/${encodeURIComponent(group.id)}/models`,
-        {
+      const createdModel = unwrapModelProviderData<ApiModel>((await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPost({
+        modelProviderId: provider.id,
+        groupId: group.id,
+        addModelProviderGroupModelOpenAPIRequest: {
           name: values.name.trim(),
           model_type: modelTypeByCapability[values.capability],
-        }
-      );
+        },
+      })).data);
       const nextModel: ProviderModel = {
         id: createdModel.id,
         name: createdModel.name,
@@ -1020,10 +984,11 @@ export default function ModelProviderPage() {
 
   const deleteCustomModel = async (providerId: string, groupId: string, model: ProviderModel) => {
     try {
-      await modelProviderRequest(
-        "DELETE",
-        `/model_providers/${encodeURIComponent(providerId)}/groups/${encodeURIComponent(groupId)}/models/${encodeURIComponent(model.id)}`
-      );
+      await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete({
+        modelProviderId: providerId,
+        groupId,
+        modelId: model.id,
+      });
       setAddedProviderList((current) =>
         current.map((provider) =>
           provider.id === providerId
@@ -1407,12 +1372,19 @@ export default function ModelProviderPage() {
             </div>
           ) : null}
           <Form.Item
-            extra={t("modelProvider.verifyApiKeyExtra")}
+            extra={
+              verifyGroupModal?.group.apiKeyConfigured
+                ? t("modelProvider.verifyConfiguredApiKeyExtra")
+                : t("modelProvider.verifyApiKeyExtra")
+            }
             label="API Key"
             name="apiKey"
             normalize={(value: string | undefined) => value?.trim()}
             rules={[
-              { required: true, message: t("modelProvider.validation.apiKeyRequired") },
+              {
+                required: !verifyGroupModal?.group.apiKeyConfigured,
+                message: t("modelProvider.validation.apiKeyRequired"),
+              },
               { max: 512, message: t("modelProvider.validation.apiKeyMax") },
               {
                 validator: (_, value?: string) =>

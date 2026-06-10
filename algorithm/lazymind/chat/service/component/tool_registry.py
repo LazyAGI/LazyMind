@@ -42,6 +42,27 @@ SKILL_TOOL_GROUP = ToolGroupConfig(
     instance=None,
 )
 
+_ALWAYS_ACTIVE_TOOL_GROUPS = {
+    'kb',
+    'temp_kb',
+    'calculator',
+    'wikipedia',
+    'arxiv',
+    'url_fetch',
+    'multimodal',
+    'vocab_learn',
+    'memory_editor',
+    'skill_editor',
+}
+
+_CONFIG_CHECK_TOOL_GROUPS = {
+    'sciverse',
+    'google',
+    'bing',
+    'bocha',
+    'feishu',
+}
+
 
 DEFAULT_TOOLS: list[ToolGroupConfig] = [
     ToolGroupConfig(
@@ -180,6 +201,14 @@ _SKILL_METHODS = [
 ]
 
 
+def _tool_group_active_for_listing(cfg: ToolGroupConfig) -> bool:
+    if cfg.name in _ALWAYS_ACTIVE_TOOL_GROUPS:
+        return True
+    if cfg.name in _CONFIG_CHECK_TOOL_GROUPS:
+        return group_is_active(cfg)
+    return True
+
+
 def get_all_tool_groups() -> list[dict]:
     result = []
     for cfg in DEFAULT_TOOLS:
@@ -190,7 +219,7 @@ def get_all_tool_groups() -> list[dict]:
             'description': cfg.description,
             'methods': methods,
             'can_disable': True,
-            'active': group_is_active(cfg),
+            'active': _tool_group_active_for_listing(cfg),
         })
     result.append({
         'name': SKILL_TOOL_GROUP.name,
@@ -215,11 +244,12 @@ def group_is_active(cfg: ToolGroupConfig) -> bool:
 
 def filter_tools(
     configs: list[ToolGroupConfig],
-    available_tools: list[str] | None = None,
+    disabled_tools: list[str] | None = None,
 ) -> list[ToolGroupConfig]:
+    disabled = set(disabled_tools or [])
     result = []
     for cfg in configs:
-        if available_tools is not None and cfg.name not in available_tools:
+        if cfg.name in disabled:
             continue
         if not group_is_active(cfg):
             continue

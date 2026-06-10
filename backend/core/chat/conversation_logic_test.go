@@ -105,7 +105,7 @@ func TestBuildChatRequestBodyKeepsExistingFilters(t *testing.T) {
 
 func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
 	ctx := &evolution.ChatResourceContext{
-		AvailableTools:     []string{"all"},
+		DisabledTools:      []string{"bing"},
 		AvailableSkills:    []string{"coding/git-workflow"},
 		Memory:             "memory-content",
 		UserPreference:     "preference-content",
@@ -119,8 +119,8 @@ func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
 	if got := body["user_id"]; got != "user-1" {
 		t.Fatalf("expected user_id to be forwarded, got %#v", got)
 	}
-	if got, ok := body["available_tools"].([]string); !ok || len(got) != 1 || got[0] != "all" {
-		t.Fatalf("unexpected available_tools: %#v", body["available_tools"])
+	if got, ok := body["disabled_tools"].([]string); !ok || len(got) != 1 || got[0] != "bing" {
+		t.Fatalf("unexpected disabled_tools: %#v", body["disabled_tools"])
 	}
 	if got, ok := body["available_skills"].([]string); !ok || len(got) != 1 || got[0] != "coding/git-workflow" {
 		t.Fatalf("unexpected available_skills: %#v", body["available_skills"])
@@ -144,7 +144,7 @@ func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
 
 func TestBuildChatRequestBodySkipsMemoryAndPreferenceWhenPersonalizationDisabled(t *testing.T) {
 	ctx := &evolution.ChatResourceContext{
-		AvailableTools:     []string{"all"},
+		DisabledTools:      []string{},
 		AvailableSkills:    []string{"coding/git-workflow"},
 		Memory:             "memory-content",
 		UserPreference:     "preference-content",
@@ -418,7 +418,7 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 		"reasoning":       false,
 		"databases":       []any{map[string]any{"name": "db1"}},
 		"enable_thinking": true,
-		"available_tools": []any{"all"},
+		"disabled_tools":  []any{"bing"},
 		"available_skills": []any{
 			"coding/git-workflow",
 		},
@@ -464,8 +464,8 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 	if !req.EnableThinking {
 		t.Fatalf("expected enable_thinking to be true")
 	}
-	if len(req.AvailableTools) != 1 || req.AvailableTools[0] != "all" {
-		t.Fatalf("unexpected available_tools: %#v", req.AvailableTools)
+	if len(req.DisabledTools) != 1 || req.DisabledTools[0] != "bing" {
+		t.Fatalf("unexpected disabled_tools: %#v", req.DisabledTools)
 	}
 	if len(req.AvailableSkills) != 1 || req.AvailableSkills[0] != "coding/git-workflow" {
 		t.Fatalf("unexpected available_skills: %#v", req.AvailableSkills)

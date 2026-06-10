@@ -202,6 +202,8 @@ func replyServiceError(w http.ResponseWriter, err error, fallback string) {
 		common.ReplyErr(w, "eval set not found", http.StatusNotFound)
 	case errors.Is(err, errEvalSetItemNotFound):
 		common.ReplyErr(w, "eval set item not found", http.StatusNotFound)
+	case errors.Is(err, errDatasetNameExists):
+		common.ReplyErr(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, errNoItemSelected):
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 	case strings.Contains(err.Error(), "required"),

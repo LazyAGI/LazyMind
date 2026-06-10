@@ -69,7 +69,7 @@ const SegmentCard = (props: IProps) => {
       key={segment.segment_id}
     >
       {showNumber && (
-        <div className="segment-number">
+        <div className="segment-number" onClick={onOpenDetail}>
           #{segment.number}
         </div>
       )}

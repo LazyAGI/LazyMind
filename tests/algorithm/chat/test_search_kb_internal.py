@@ -1,21 +1,12 @@
-import sys
-import types
 from importlib import import_module
 
-
-def _stub_vocab():
-    if "lazymind.review.service.registry" not in sys.modules:
-        stub = types.ModuleType("lazymind.review.service.registry")
-        stub.get_vocab_manager = lambda user_id: (lambda q: q)
-        sys.modules["lazymind.review.service.registry"] = stub
-
-
-_stub_vocab()
 
 search_kb_mod = import_module("lazymind.chat.engine.tools.algo.search_kb")
 
 
-def test_search_text_uses_tmp_retriever_without_reranker():
+def test_search_text_uses_tmp_retriever_without_reranker(monkeypatch):
+    monkeypatch.setattr(search_kb_mod, "get_vocab_manager", lambda user_id: (lambda q: q))
+
     class DummyNode:
         def __init__(self, score):
             self.score = score
@@ -41,6 +32,7 @@ def test_search_text_uses_tmp_retriever_without_reranker():
 
 def test_search_text_uses_kb_retrievers_with_filters(monkeypatch):
     captured = {}
+    monkeypatch.setattr(search_kb_mod, "get_vocab_manager", lambda user_id: (lambda q: q))
 
     class DummyNode:
         def __init__(self):

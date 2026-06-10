@@ -10,6 +10,16 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/japanese"
+	"golang.org/x/text/encoding/korean"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/encoding/traditionalchinese"
+	"golang.org/x/text/encoding/unicode"
+	"golang.org/x/text/transform"
+
+	"github.com/xuri/excelize/v2"
 )
 
 const (
@@ -23,6 +33,19 @@ const (
 
 var importTemplateFields = []string{
 	"case_id",
+	"generate_reason",
+	"ground_truth",
+	"is_deleted",
+	"key_points",
+	"question",
+	"question_type",
+	"reference_chunk_ids",
+	"reference_context",
+	"reference_doc",
+	"reference_doc_ids",
+}
+
+var importDownloadTemplateFields = []string{
 	"generate_reason",
 	"ground_truth",
 	"is_deleted",
@@ -63,13 +86,12 @@ func (e *importValidationError) Error() string {
 }
 
 func parseImportRows(fileType string, data []byte) (*importParseResult, error) {
-	data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
-	if !utf8.Valid(data) {
-		return nil, newImportValidationError([]ImportValidationErrorDetail{{
-			Row:    0,
-			Column: "",
-			Reason: "文件必须是 UTF-8",
-		}}, false)
+	if fileType != importFileTypeXLSX {
+		normalized, err := normalizeTextImportData(data)
+		if err != nil {
+			return nil, err
+		}
+		data = normalized
 	}
 
 	switch fileType {
@@ -77,8 +99,43 @@ func parseImportRows(fileType string, data []byte) (*importParseResult, error) {
 		return parseCSVImportRows(data)
 	case importFileTypeJSON:
 		return parseJSONImportRows(data)
+	case importFileTypeXLSX:
+		return parseXLSXImportRows(data)
 	default:
 		return nil, errors.New("unsupported file_type")
+	}
+}
+
+func normalizeTextImportData(data []byte) ([]byte, error) {
+	data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
+	if utf8.Valid(data) {
+		return data, nil
+	}
+
+	for _, decoder := range textImportDecoders() {
+		decoded, err := io.ReadAll(transform.NewReader(bytes.NewReader(data), decoder.NewDecoder()))
+		if err == nil && utf8.Valid(decoded) {
+			return decoded, nil
+		}
+	}
+
+	return nil, newImportValidationError([]ImportValidationErrorDetail{{
+		Row:    0,
+		Column: "",
+		Reason: "文件编码无法转换为 UTF-8",
+	}}, false)
+}
+
+func textImportDecoders() []encoding.Encoding {
+	return []encoding.Encoding{
+		unicode.UTF16(unicode.LittleEndian, unicode.ExpectBOM),
+		unicode.UTF16(unicode.BigEndian, unicode.ExpectBOM),
+		simplifiedchinese.GB18030,
+		simplifiedchinese.GBK,
+		traditionalchinese.Big5,
+		japanese.ShiftJIS,
+		japanese.EUCJP,
+		korean.EUCKR,
 	}
 }
 
@@ -241,6 +298,101 @@ func parseJSONImportRows(data []byte) (*importParseResult, error) {
 		rowErrors = append(rowErrors, requiredImportErrors(rowNumber, row)...)
 		if len(rowErrors) > 0 {
 			result.addInvalidRow(rowNumber, originalValues, valuesByHeader(result.invalidCSVHeader, originalValues), rowErrors)
+			continue
+		}
+		result.rows = append(result.rows, row)
+		if len(result.rows) > importMaxRows() {
+			return nil, newImportValidationError([]ImportValidationErrorDetail{{
+				Row:    rowNumber,
+				Column: "",
+				Reason: fmt.Sprintf("valid rows exceeds %d", importMaxRows()),
+			}}, false)
+		}
+	}
+	return result, nil
+}
+
+func parseXLSXImportRows(data []byte) (*importParseResult, error) {
+	workbook, err := excelize.OpenReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, newImportValidationError([]ImportValidationErrorDetail{{
+			Row:    0,
+			Column: "",
+			Reason: "XLSX 解析失败: " + err.Error(),
+		}}, false)
+	}
+	defer workbook.Close()
+
+	sheets := workbook.GetSheetList()
+	if len(sheets) == 0 {
+		return nil, newImportValidationError([]ImportValidationErrorDetail{{
+			Row:    1,
+			Column: "",
+			Reason: "sheet required",
+		}}, false)
+	}
+
+	rows, err := workbook.GetRows(sheets[0])
+	if err != nil {
+		return nil, newImportValidationError([]ImportValidationErrorDetail{{
+			Row:    0,
+			Column: "",
+			Reason: "XLSX 解析失败: " + err.Error(),
+		}}, false)
+	}
+	if len(rows) == 0 {
+		return nil, newImportValidationError([]ImportValidationErrorDetail{{
+			Row:    1,
+			Column: "",
+			Reason: "header required",
+		}}, false)
+	}
+
+	header := rows[0]
+	collector := newImportErrorCollector()
+	headerIndex := map[string]int{}
+	for i, raw := range header {
+		name := strings.TrimSpace(strings.TrimPrefix(raw, "\ufeff"))
+		if name == "" {
+			continue
+		}
+		if _, exists := headerIndex[name]; exists {
+			collector.add(1, name, "header 重复")
+			continue
+		}
+		headerIndex[name] = i
+	}
+	for _, field := range importRequiredFields {
+		if _, ok := headerIndex[field]; !ok {
+			collector.add(1, field, field+" header 缺失")
+		}
+	}
+	if collector.hasErrors() {
+		return nil, collector.validationError()
+	}
+
+	result := &importParseResult{
+		rows:             make([]ImportNormalizedRow, 0),
+		invalidCSVHeader: cleanedCSVHeader(header),
+	}
+	for index, record := range rows[1:] {
+		result.totalRows++
+		rowNumber := index + 2
+		values := csvImportValues(record, headerIndex)
+		if importValuesEmpty(values) {
+			result.emptyRows++
+			continue
+		}
+
+		row, err := normalizedRowFromValues(values)
+		rowErrors := make([]ImportValidationErrorDetail, 0, len(importRequiredFields)+1)
+		if err != nil {
+			rowErrors = append(rowErrors, ImportValidationErrorDetail{Row: rowNumber, Column: "is_deleted", Reason: err.Error()})
+			row = rowFromValuesWithoutBool(values)
+		}
+		rowErrors = append(rowErrors, requiredImportErrors(rowNumber, row)...)
+		if len(rowErrors) > 0 {
+			result.addInvalidRow(rowNumber, csvValuesByHeader(result.invalidCSVHeader, record), record, rowErrors)
 			continue
 		}
 		result.rows = append(result.rows, row)

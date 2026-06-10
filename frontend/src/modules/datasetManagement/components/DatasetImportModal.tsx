@@ -10,12 +10,17 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { InboxOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import type {
   DatasetImportResultState,
   DatasetImportRow,
   DatasetItem,
   DatasetItemField,
   ImportStep,
+} from "../shared";
+import {
+  datasetItemFieldI18nKeys,
+  datasetItemFields,
 } from "../shared";
 import DatasetTemplateDownload from "./DatasetTemplateDownload";
 import {
@@ -45,6 +50,14 @@ const fieldLabels: Record<DatasetItemField, string> = {
   generate_reason: "生成依据",
   is_deleted: "是否删除",
 };
+const hiddenImportPreviewFields = new Set<DatasetItemField>([
+  "case_id",
+  "reference_doc_ids",
+  "reference_chunk_ids",
+]);
+const visibleImportPreviewFields = datasetItemFields.filter(
+  (field) => !hiddenImportPreviewFields.has(field),
+);
 
 interface DatasetImportModalProps {
   open: boolean;
@@ -63,6 +76,7 @@ export default function DatasetImportModal({
   onCancel,
   onImported,
 }: DatasetImportModalProps) {
+  const { t } = useTranslation();
   const [step, setStep] = useState<ImportStep>("selectFile");
   const [file, setFile] = useState<File | null>(null);
   const [previewRows, setPreviewRows] = useState<DatasetImportRow[]>([]);
@@ -111,7 +125,7 @@ export default function DatasetImportModal({
       const mapping = createAutoFieldMapping(fields);
       const missing = getMissingRequiredMappings(mapping);
       if (missing.length > 0) {
-        message.error(`必填字段未识别：${missing.map((field) => fieldLabels[field]).join("、")}`);
+        message.error(`必填字段未识别：${missing.map((field) => t(datasetItemFieldI18nKeys[field], fieldLabels[field])).join("、")}`);
         return;
       }
       setPreviewRows(buildImportPreview(rows, mapping));
@@ -148,29 +162,29 @@ export default function DatasetImportModal({
   };
 
   const previewColumns: ColumnsType<DatasetImportRow> = [
-    { title: "行号", dataIndex: "rowIndex", width: 80 },
-    {
-      title: "question",
-      render: (_, row) => row.normalized.question || "-",
+    { title: t("datasetManagement.import.rowNumber"), dataIndex: "rowIndex", width: 80 },
+    ...visibleImportPreviewFields.map((field) => ({
+      title: t(datasetItemFieldI18nKeys[field]),
+      render: (_: unknown, row: DatasetImportRow) => {
+        const value = row.normalized[field];
+        if (Array.isArray(value)) {
+          return value.length > 0 ? value.join(", ") : "-";
+        }
+        if (typeof value === "boolean") {
+          return value ? t("common.enabled") : t("common.disabled");
+        }
+        return `${value || ""}`.trim() || "-";
+      },
       ellipsis: true,
-    },
+      width: field === "question_type" || field === "is_deleted" ? 140 : 200,
+    })),
     {
-      title: "question_type",
-      render: (_, row) => row.normalized.question_type || "-",
-      width: 150,
-    },
-    {
-      title: "ground_truth",
-      render: (_, row) => row.normalized.ground_truth || "-",
-      ellipsis: true,
-    },
-    {
-      title: "校验结果",
+      title: t("datasetManagement.import.validationResult"),
       render: (_, row) =>
         row.errors.length > 0 ? (
           <span className="dataset-import-error-text">{row.errors.join("；")}</span>
         ) : (
-          <span className="dataset-import-success-text">通过</span>
+          <span className="dataset-import-success-text">{t("datasetManagement.import.passed")}</span>
         ),
       width: 220,
     },
@@ -269,6 +283,7 @@ export default function DatasetImportModal({
             columns={previewColumns}
             dataSource={visiblePreviewRows}
             pagination={{ pageSize: 6 }}
+            scroll={{ x: 2600 }}
           />
         </div>
       ) : null}

@@ -1,7 +1,6 @@
 package wordgroup
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -124,7 +123,6 @@ func ApplyWordGroupAction(w http.ResponseWriter, r *http.Request) {
 		replyApplyError(w, err)
 		return
 	}
-	notifyVocabReloadAfterApply(r.Context(), prepared)
 	common.ReplyOK(w, ApplyWordGroupActionBatchResponse{Results: prepared.Responses})
 }
 
@@ -368,24 +366,6 @@ func replyApplyError(w http.ResponseWriter, err error) {
 		common.ReplyErr(w, "target group not found", http.StatusNotFound)
 	default:
 		common.ReplyErr(w, "apply word group action failed", http.StatusInternalServerError)
-	}
-}
-
-// notifyVocabReloadAfterApply collects user IDs from creates and adds, dedupes, then notifies chat once per user.
-func notifyVocabReloadAfterApply(ctx context.Context, prepared preparedApplyActions) {
-	seen := make(map[string]struct{})
-	for i := range prepared.Creates {
-		if uid := strings.TrimSpace(prepared.Creates[i].CreateUserID); uid != "" {
-			seen[uid] = struct{}{}
-		}
-	}
-	for i := range prepared.Adds {
-		if uid := strings.TrimSpace(prepared.Adds[i].UserID); uid != "" {
-			seen[uid] = struct{}{}
-		}
-	}
-	for uid := range seen {
-		notifyVocabReload(ctx, uid)
 	}
 }
 

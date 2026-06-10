@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from core.deps import current_user, require_internal_service_token
+from core.rbac import permission_required
 from models import User
 from schemas.cloud_oauth import (
     CloudConnectionCreateBody,
@@ -25,6 +26,7 @@ router = APIRouter(prefix='/v1/cloud', tags=['cloud-oauth'])
 
 
 @router.post('/{provider}/connections', response_model=CloudConnectionCreateResponse)
+@permission_required('model.write')
 def create_connection(
     provider: str,
     body: CloudConnectionCreateBody,
@@ -42,6 +44,7 @@ def create_connection(
 
 
 @router.get('/{provider}/oauth/app-credentials', response_model=CloudOAuthAppCredentialResponse)
+@permission_required('model.write')
 def get_oauth_app_credentials(
     provider: str,
     user: User = Depends(current_user),  # noqa: B008
@@ -53,6 +56,7 @@ def get_oauth_app_credentials(
 
 
 @router.put('/{provider}/oauth/app-credentials', response_model=CloudOAuthAppCredentialResponse)
+@permission_required('model.write')
 def save_oauth_app_credentials(
     provider: str,
     body: CloudOAuthAppCredentialBody,
@@ -68,6 +72,7 @@ def save_oauth_app_credentials(
 
 
 @router.delete('/{provider}/oauth/app-credentials', response_model=CloudOAuthAppCredentialResponse)
+@permission_required('model.write')
 def delete_oauth_app_credentials(
     provider: str,
     user: User = Depends(current_user),  # noqa: B008
@@ -79,6 +84,7 @@ def delete_oauth_app_credentials(
 
 
 @router.post('/{provider}/oauth/authorize-url', response_model=CloudOAuthAuthorizeURLResponse)
+@permission_required('model.write')
 def oauth_authorize_url(
     provider: str,
     body: CloudOAuthAuthorizeURLBody,
@@ -100,6 +106,7 @@ def oauth_authorize_url(
 
 
 @router.post('/{provider}/oauth/callback', response_model=CloudOAuthCallbackResponse)
+@permission_required('model.write')
 def oauth_callback(
     provider: str,
     body: CloudOAuthCallbackBody,
@@ -117,6 +124,7 @@ def oauth_callback(
 
 
 @router.get('/connections', response_model=CloudConnectionListResponse)
+@permission_required('model.read')
 def list_connections(
     provider: str | None = None,
     auth_mode: str | None = None,
@@ -132,6 +140,7 @@ def list_connections(
 
 
 @router.get('/connections/{connection_id}', response_model=CloudConnectionResponse)
+@permission_required('model.read')
 def get_connection(
     connection_id: str,
     user: User = Depends(current_user),  # noqa: B008
@@ -140,6 +149,7 @@ def get_connection(
 
 
 @router.delete('/connections/{connection_id}', response_model=CloudConnectionDeleteResponse)
+@permission_required('model.write')
 def delete_connection(
     connection_id: str,
     user: User = Depends(current_user),  # noqa: B008
@@ -148,6 +158,7 @@ def delete_connection(
 
 
 @router.put('/connections/{connection_id}', response_model=CloudConnectionResponse)
+@permission_required('model.write')
 def update_connection(
     connection_id: str,
     body: CloudConnectionUpdateBody,
@@ -173,6 +184,7 @@ def update_connection(
 
 
 @router.patch('/connections/{connection_id}', response_model=CloudConnectionResponse)
+@permission_required('model.write')
 def patch_connection(
     connection_id: str,
     body: CloudConnectionUpdateBody,

@@ -1,4 +1,4 @@
-import { Select } from "antd";
+import { AutoComplete } from "antd";
 import { questionTypeOptions } from "../shared";
 
 interface QuestionTypeSelectProps {
@@ -18,19 +18,19 @@ export default function QuestionTypeSelect({
   allowClear,
   options,
 }: QuestionTypeSelectProps) {
-  const resolvedOptions =
-    options && options.length > 0 ? options : questionTypeOptions;
+  const resolvedOptions = options ? options : questionTypeOptions;
 
   return (
-    <Select
+    <AutoComplete
       allowClear={allowClear}
-      showSearch
       value={value}
-      onChange={onChange}
+      onChange={(nextValue) => onChange?.(nextValue)}
       onBlur={onBlur}
       placeholder={placeholder}
       options={resolvedOptions.map((item) => ({ label: item, value: item }))}
-      optionFilterProp="label"
+      filterOption={(inputValue, option) =>
+        `${option?.label || ""}`.toLowerCase().includes(inputValue.toLowerCase())
+      }
     />
   );
 }

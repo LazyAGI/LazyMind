@@ -11,17 +11,15 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  position: relative;
 
   .segment-number {
-    position: absolute;
-    left: 12px;
-    top: 10px;
+    flex: 0 0 auto;
+    padding: 10px 12px 4px;
     color: #8d9ab2;
     font-size: 13px;
     line-height: 18px;
-    z-index: 1;
-    pointer-events: none;
+    background-color: #fff;
+    cursor: pointer;
   }
 
   &:hover {
@@ -81,20 +79,16 @@
 
   .contentReadOnly,
   .contentWithNumber:not(.contentReadOnly) {
-    padding: 32px 12px 10px;
     overflow-y: auto !important;
     overflow-x: hidden;
   }
 
-  .contentWithNumber:not(.contentReadOnly) {
-    padding-bottom: 0;
+  .contentReadOnly {
+    padding: 10px 12px;
   }
 
-  &.segmentCard-no-number {
-    .contentReadOnly,
-    .contentWithNumber:not(.contentReadOnly) {
-      padding-top: 10px;
-    }
+  .contentWithNumber:not(.contentReadOnly) {
+    padding: 0 12px;
   }
 
   .contentInner {

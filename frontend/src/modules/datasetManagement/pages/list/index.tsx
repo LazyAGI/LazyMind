@@ -23,17 +23,14 @@ import { useNavigate } from "react-router-dom";
 import {
   createDataset,
   deleteDataset,
-  importDatasetItems,
+  getDataset,
   listDatasets,
   listKnowledgeBases,
   updateDataset,
 } from "../../api";
 import DatasetFormModal from "../../components/DatasetFormModal";
-import DatasetImportModal from "../../components/DatasetImportModal";
 import type {
   DatasetFormValues,
-  DatasetImportResultState,
-  DatasetItem,
   DatasetListItem,
   KnowledgeBaseOption,
 } from "../../shared";
@@ -50,10 +47,9 @@ export default function DatasetListPage() {
   const [loading, setLoading] = useState(false);
   const [formModalOpen, setFormModalOpen] = useState(false);
   const [editingDataset, setEditingDataset] = useState<DatasetListItem | null>(null);
+  const [editingDatasetId, setEditingDatasetId] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [importModalOpen, setImportModalOpen] = useState(false);
-  const [uploadCreateDataset, setUploadCreateDataset] = useState<DatasetListItem | null>(null);
-  const [uploadCreateFile, setUploadCreateFile] = useState<File | null>(null);
+  const [editingLoadingId, setEditingLoadingId] = useState("");
 
   const loadDatasets = async (nextKeyword = keyword) => {
     setLoading(true);
@@ -82,12 +78,28 @@ export default function DatasetListPage() {
 
   const handleOpenCreate = () => {
     setEditingDataset(null);
+    setEditingDatasetId("");
     setFormModalOpen(true);
   };
 
-  const handleOpenEdit = (dataset: DatasetListItem) => {
-    setEditingDataset(dataset);
-    setFormModalOpen(true);
+  const handleOpenEdit = async (dataset: DatasetListItem) => {
+    setEditingLoadingId(dataset.id);
+    try {
+      const detail = await getDataset(dataset.id);
+      setEditingDataset(detail);
+      setEditingDatasetId(detail.id);
+      setFormModalOpen(true);
+    } catch (error: any) {
+      message.error(error?.message || "数据集详情加载失败");
+    } finally {
+      setEditingLoadingId("");
+    }
+  };
+
+  const handleCloseFormModal = () => {
+    setFormModalOpen(false);
+    setEditingDataset(null);
+    setEditingDatasetId("");
   };
 
   const handleDelete = (dataset: DatasetListItem) => {
@@ -108,14 +120,14 @@ export default function DatasetListPage() {
   const handleSubmitDataset = async (values: DatasetFormValues) => {
     setSubmitting(true);
     try {
-      if (editingDataset) {
-        await updateDataset(editingDataset.id, {
+      if (editingDatasetId) {
+        await updateDataset(editingDatasetId, {
           name: values.name,
           description: values.description,
           knowledge_base_ids: values.knowledge_base_ids,
         });
         message.success("数据集已更新");
-        setFormModalOpen(false);
+        handleCloseFormModal();
         await loadDatasets();
         return;
       }
@@ -126,45 +138,13 @@ export default function DatasetListPage() {
         knowledge_base_ids: values.knowledge_base_ids,
       });
 
-      if (values.create_method === "upload") {
-        const selectedFile = values.uploadFile?.[0]?.originFileObj as File | undefined;
-        setUploadCreateDataset(created);
-        setUploadCreateFile(selectedFile || null);
-        setFormModalOpen(false);
-        setImportModalOpen(true);
-        await loadDatasets();
-        return;
-      }
-
       message.success("数据集已创建");
-      setFormModalOpen(false);
+      handleCloseFormModal();
       navigate(`/dataset-management/${created.id}`);
-    } catch (error: any) {
-      message.error(error?.message || "保存失败");
+    } catch {
+      // The global axios interceptor already shows the backend error message.
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleImported = async (
-    items: Array<Partial<DatasetItem>>,
-    result: DatasetImportResultState,
-    file: File | null,
-  ) => {
-    if (!uploadCreateDataset) {
-      return;
-    }
-    await importDatasetItems(uploadCreateDataset.id, file, items, result.failedCount);
-    await loadDatasets();
-  };
-
-  const handleCloseImport = () => {
-    const target = uploadCreateDataset;
-    setImportModalOpen(false);
-    setUploadCreateDataset(null);
-    setUploadCreateFile(null);
-    if (target) {
-      navigate(`/dataset-management/${target.id}`);
     }
   };
 
@@ -246,6 +226,7 @@ export default function DatasetListPage() {
               type="link"
               size="small"
               icon={<EditOutlined />}
+              loading={editingLoadingId === record.id}
               onClick={() => handleOpenEdit(record)}
             >
               编辑
@@ -263,7 +244,7 @@ export default function DatasetListPage() {
         ),
       },
     ],
-    [navigate],
+    [editingLoadingId, navigate],
   );
 
   return (
@@ -308,20 +289,14 @@ export default function DatasetListPage() {
       </Card>
 
       <DatasetFormModal
+        key={editingDatasetId || "create"}
         open={formModalOpen}
-        mode={editingDataset ? "edit" : "create"}
+        mode={editingDatasetId ? "edit" : "create"}
         dataset={editingDataset}
         knowledgeBases={knowledgeBases}
         submitting={submitting}
-        onCancel={() => setFormModalOpen(false)}
+        onCancel={handleCloseFormModal}
         onSubmit={handleSubmitDataset}
-      />
-
-      <DatasetImportModal
-        open={importModalOpen}
-        initialFile={uploadCreateFile}
-        onCancel={handleCloseImport}
-        onImported={handleImported}
       />
     </div>
   );

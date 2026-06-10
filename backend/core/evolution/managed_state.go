@@ -9,7 +9,6 @@ import (
 
 	"gorm.io/gorm"
 
-	"lazymind/core/algo"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
@@ -188,40 +187,7 @@ func applyManagedMemoryAutoEvolution(ctx context.Context, db *gorm.DB, row orm.S
 	if len(pending) == 0 {
 		return false, nil
 	}
-	generated, genErr := algo.GenerateMemory(ctx, algo.MemoryGenerateRequest{
-		Content:     row.Content,
-		Suggestions: memoryAlgoSuggestions(pending),
-	})
-	if genErr != nil {
-		return false, genErr
-	}
-	now := time.Now()
-	result := db.WithContext(ctx).Model(&orm.SystemMemory{}).
-		Where("id = ? AND version = ? AND auto_evo = ? AND auto_evo_generation = ?",
-			row.ID, row.Version, true, row.AutoEvoGeneration).
-		Updates(map[string]any{
-			"content":               generated,
-			"content_hash":          HashContent(generated),
-			"version":               row.Version + 1,
-			"draft_content":         "",
-			"draft_source_version":  0,
-			"draft_status":          "",
-			"draft_updated_at":      nil,
-			"auto_evo_apply_status": AutoEvoApplyStatusRunning,
-			"auto_evo_error":        "",
-			"updated_at":            now,
-			"ext":                   WithDraftSuggestionIDs(row.Ext, nil),
-		})
-	if result.Error != nil {
-		return false, result.Error
-	}
-	if result.RowsAffected == 0 {
-		return false, nil
-	}
-	if err := UpdateSuggestionStatus(ctx, db, memorySuggestionIDs(pending), SuggestionStatusApplied); err != nil {
-		return false, err
-	}
-	return true, nil
+	return false, nil
 }
 
 func applyManagedPreferenceAutoEvolution(ctx context.Context, db *gorm.DB, row orm.SystemUserPreference) (bool, error) {
@@ -232,40 +198,7 @@ func applyManagedPreferenceAutoEvolution(ctx context.Context, db *gorm.DB, row o
 	if len(pending) == 0 {
 		return false, nil
 	}
-	generated, genErr := algo.GenerateUserPreference(ctx, algo.MemoryGenerateRequest{
-		Content:     row.Content,
-		Suggestions: prefAlgoSuggestions(pending),
-	})
-	if genErr != nil {
-		return false, genErr
-	}
-	now := time.Now()
-	result := db.WithContext(ctx).Model(&orm.SystemUserPreference{}).
-		Where("id = ? AND version = ? AND auto_evo = ? AND auto_evo_generation = ?",
-			row.ID, row.Version, true, row.AutoEvoGeneration).
-		Updates(map[string]any{
-			"content":               generated,
-			"content_hash":          HashContent(generated),
-			"version":               row.Version + 1,
-			"draft_content":         "",
-			"draft_source_version":  0,
-			"draft_status":          "",
-			"draft_updated_at":      nil,
-			"auto_evo_apply_status": AutoEvoApplyStatusRunning,
-			"auto_evo_error":        "",
-			"updated_at":            now,
-			"ext":                   WithDraftSuggestionIDs(row.Ext, nil),
-		})
-	if result.Error != nil {
-		return false, result.Error
-	}
-	if result.RowsAffected == 0 {
-		return false, nil
-	}
-	if err := UpdateSuggestionStatus(ctx, db, prefSuggestionIDs(pending), SuggestionStatusApplied); err != nil {
-		return false, err
-	}
-	return true, nil
+	return false, nil
 }
 
 func EnsureManagedMemoryAutoEvolutionScheduled(row orm.SystemMemory) error {
@@ -486,34 +419,4 @@ func runManagedPreferenceAutoEvolutionLoop(preferenceID, workerKey string) {
 			}
 		}
 	}
-}
-
-func memorySuggestionIDs(rows []orm.ResourceSuggestion) []string {
-	ids := make([]string, 0, len(rows))
-	for _, row := range rows {
-		if trimmed := strings.TrimSpace(row.ID); trimmed != "" {
-			ids = append(ids, trimmed)
-		}
-	}
-	return ids
-}
-
-func prefSuggestionIDs(rows []orm.ResourceSuggestion) []string {
-	return memorySuggestionIDs(rows)
-}
-
-func memoryAlgoSuggestions(rows []orm.ResourceSuggestion) []algo.Suggestion {
-	result := make([]algo.Suggestion, 0, len(rows))
-	for _, row := range rows {
-		result = append(result, algo.Suggestion{
-			Title:   strings.TrimSpace(row.Title),
-			Content: strings.TrimSpace(row.Content),
-			Reason:  strings.TrimSpace(row.Reason),
-		})
-	}
-	return result
-}
-
-func prefAlgoSuggestions(rows []orm.ResourceSuggestion) []algo.Suggestion {
-	return memoryAlgoSuggestions(rows)
 }

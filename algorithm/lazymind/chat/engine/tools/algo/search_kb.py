@@ -6,7 +6,7 @@ from lazyllm.tools.rag.rank_fusion.reciprocal_rank_fusion import RRFFusion
 
 from lazymind.chat.engine.tools.algo.kb_adaptive_topk import AdaptiveKComponent
 from lazymind.chat.engine.tools.algo.kb_context_expansion import ContextExpansionComponent
-from lazymind.review.service.registry import get_vocab_manager
+from lazymind.chat.engine.tools.infra import get_vocab_manager
 
 
 def _adaptive_get_token_len(n: Any) -> int:

@@ -320,8 +320,17 @@ func buildBaseURLPresets(row orm.UserModelProvider) []baseURLPresetItem {
 }
 
 func configuredLocalMinerUBaseURL() string {
-	if strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_OCR_SERVER_TYPE"))) != "mineru" {
+	if !isEnvEnabled("LAZYMIND_DEPLOY_MINERU") {
 		return ""
 	}
-	return strings.TrimSpace(os.Getenv("LAZYMIND_OCR_SERVER_URL"))
+	return "http://mineru:8000/api/v1/pdf_parse"
+}
+
+func isEnvEnabled(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }

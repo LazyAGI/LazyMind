@@ -42,6 +42,23 @@ from .vocab_support import (
     summarize_vocab_candidate_for_log,
     summarize_vocab_suggestion_for_log,
 )
+from .vocab_db import (
+    fetch_chat_histories_for_session,
+    fetch_vocab_groups_for_user_id,
+)
+from .vocab_manager import (
+    VocabManager,
+)
+from .vocab_planning import (
+    ActionPlanningModule,
+    ChatHistoryRecord,
+    SynonymCandidate,
+    VocabEvolutionRequest,
+)
+from .vocab_registry import (
+    clear_vocab_registry,
+    get_vocab_manager,
+)
 from .tool_runtime import (
     handle_tool_errors,
     tool_error,
@@ -51,12 +68,21 @@ from .tool_runtime import (
 
 __all__ = [
     'Suggestion',
+    'ActionPlanningModule',
+    'ChatHistoryRecord',
+    'SynonymCandidate',
     'VocabSuggestion',
+    'VocabEvolutionRequest',
+    'VocabManager',
     'build_skill_identity',
+    'clear_vocab_registry',
     'dedupe_vocab_values_keep_order',
     'dump_suggestion',
     'dump_vocab_suggestion',
+    'fetch_chat_histories_for_session',
     'fetch_url_content',
+    'fetch_vocab_groups_for_user_id',
+    'get_vocab_manager',
     'handle_tool_errors',
     'is_writable_skill_source',
     'list_all_skill_entries',

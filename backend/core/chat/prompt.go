@@ -9,8 +9,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"lazymind/core/algo"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/modelconfig"
 	corestore "lazymind/core/store"
 )
 
@@ -113,6 +115,49 @@ func CreatePrompt(w http.ResponseWriter, r *http.Request) {
 		"display_name": p.Name,
 		"is_default":   false,
 	})
+}
+
+func PolishPrompt(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Content      string `json:"content"`
+		UserInstruct string `json:"user_instruct"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
+		return
+	}
+	content := strings.TrimSpace(body.Content)
+	userInstruct := strings.TrimSpace(body.UserInstruct)
+	if content == "" || userInstruct == "" {
+		common.ReplyErr(w, "content and user_instruct required", http.StatusBadRequest)
+		return
+	}
+
+	userID := corestore.UserID(r)
+	if userID == "" {
+		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
+		return
+	}
+	db := corestore.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	llmConfig, err := modelconfig.LoadLLMConfig(r.Context(), db, userID)
+	if err != nil {
+		common.ReplyErr(w, "load llm config failed", http.StatusInternalServerError)
+		return
+	}
+	polished, err := algo.GeneratePolish(r.Context(), algo.PolishGenerateRequest{
+		Content:      content,
+		UserInstruct: userInstruct,
+		LLMConfig:    llmConfig,
+	})
+	if err != nil {
+		common.ReplyErr(w, "prompt polish failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	writePromptJSON(w, http.StatusOK, map[string]any{"content": polished})
 }
 
 // UpdatePrompt text PATCH /api/v1/prompts/{name}

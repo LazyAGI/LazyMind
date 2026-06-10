@@ -39,7 +39,7 @@ const (
 )
 
 type ChatResourceContext struct {
-	AvailableTools     []string
+	DisabledTools      []string
 	AvailableSkills    []string
 	Memory             string
 	UserPreference     string

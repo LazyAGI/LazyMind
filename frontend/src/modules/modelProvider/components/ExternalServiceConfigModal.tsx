@@ -9,9 +9,13 @@ import {
   PlusOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { BASE_URL, axiosInstance, getLocalizedErrorMessage } from "@/components/request";
-import { AgentAppsAuth } from "@/components/auth";
-import type { RawAxiosRequestConfig } from "axios";
+import { getLocalizedErrorMessage } from "@/components/request";
+import {
+  modelProvidersApi,
+  modelProvidersDefaultApi,
+  unwrapModelProviderData,
+  withModelProviderJsonOptions,
+} from "../api";
 
 import "../index.scss";
 
@@ -38,10 +42,6 @@ export interface ExternalServiceConfigModalService {
   }>;
 }
 
-interface ApiEnvelope<T> {
-  data?: T;
-}
-
 interface ApiExternalGroup {
   id: string;
   api_key?: string;
@@ -65,42 +65,29 @@ interface ExternalServiceConfigModalProps {
   onChanged?: () => void;
 }
 
-function unwrapResponse<T>(payload: ApiEnvelope<T> | T): T {
-  if (payload && typeof payload === "object" && "data" in payload) {
-    return (payload as ApiEnvelope<T>).data as T;
-  }
-  return payload as T;
-}
-
-function getApiBaseUrl() {
-  return `${BASE_URL || window.location.origin}/api/core`;
-}
-
-function getRequestHeaders() {
-  return {
-    "Content-Type": "application/json",
-    ...AgentAppsAuth.getAuthHeaders(),
-  };
-}
-
-async function modelProviderRequest<T>(
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
-  path: string,
-  data?: unknown,
-  options?: RawAxiosRequestConfig
-) {
-  const response = await axiosInstance.request<ApiEnvelope<T> | T>({
-    method,
-    url: `${getApiBaseUrl()}${path}`,
-    data,
-    headers: getRequestHeaders(),
-    ...options,
-  });
-  return unwrapResponse<T>(response.data);
-}
-
 function normalizeProviderName(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function validateHttpBaseUrl(value?: string) {
+  const normalizedValue = (value || "").trim();
+  if (!normalizedValue) {
+    return false;
+  }
+  try {
+    const parsedUrl = new URL(normalizedValue);
+    return parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isFormValidationError(error: unknown) {
+  return (
+    !!error &&
+    typeof error === "object" &&
+    Array.isArray((error as { errorFields?: unknown[] }).errorFields)
+  );
 }
 
 function isGoogleCustomSearch(service?: ExternalServiceConfigModalService | null) {
@@ -179,11 +166,11 @@ export default function ExternalServiceConfigModal({
     setVisibleKeys(new Set());
     setGroup(null);
 
-    void modelProviderRequest<{ groups?: ApiExternalGroup[] }>(
-      "GET",
-      `/model_providers/${encodeURIComponent(service.key)}/groups`
-    )
-      .then((groupData) => {
+    void modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGet({
+      modelProviderId: service.key,
+    })
+      .then((response) => {
+        const groupData = unwrapModelProviderData<{ groups?: ApiExternalGroup[] }>(response.data);
         const nextGroup = (groupData.groups || [])[0] || null;
         setGroup(nextGroup);
         const rawKey = nextGroup?.api_key || "";
@@ -259,27 +246,39 @@ export default function ExternalServiceConfigModal({
           api_key: apiKey,
           verify: true,
         };
-        const savedGroup = await modelProviderRequest<SaveExternalGroupResponse>(
-          "POST",
-          `/model_providers/${encodeURIComponent(service.key)}/groups`,
-          payload,
-          { timeout: 3 * 60 * 1000 }
-        );
+        const savedGroup = unwrapModelProviderData<SaveExternalGroupResponse>((await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsPost(
+          {
+            modelProviderId: service.key,
+            createModelProviderGroupOpenAPIRequest: payload as {
+              api_key?: string;
+              base_url: string;
+              name: string;
+              verify: boolean;
+            },
+          },
+          { timeout: 3 * 60 * 1000 },
+        )).data);
         if (savedGroup.check && savedGroup.check.success !== true) {
           message.error(getCheckFailureMessage(savedGroup.check) || t("modelProvider.external.checkFailed"));
           return;
         }
         setGroup(savedGroup);
         setKeyList([apiKey]);
-        await modelProviderRequest("PUT", "/model_providers/selected_providers", {
-          selections: [{ category: getServiceProviderCategory(service), group_id: savedGroup.id }],
+        await modelProvidersApi.apiCoreModelProvidersSelectedProvidersPut({
+          setSelectedProviderOpenAPIRequest: {
+            selections: [{ category: getServiceProviderCategory(service), group_id: savedGroup.id }],
+          },
         });
       } else {
-        await modelProviderRequest(
-          "POST",
-          `/model_providers/${encodeURIComponent(service.key)}/groups/${encodeURIComponent(group.id)}/keys`,
-          { api_key: apiKey },
-          { timeout: 3 * 60 * 1000 }
+        await modelProvidersDefaultApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysPost(
+          {
+            modelProviderId: service.key,
+            groupId: group.id,
+          },
+          withModelProviderJsonOptions({
+            data: { api_key: apiKey },
+            timeout: 3 * 60 * 1000,
+          }),
         );
         setKeyList((prev) => [...prev, apiKey]);
       }
@@ -287,6 +286,9 @@ export default function ExternalServiceConfigModal({
       setNewKeyEngineId("");
       onChanged?.();
     } catch (error) {
+      if (isFormValidationError(error)) {
+        return;
+      }
       message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
     } finally {
       setAddingKey(false);
@@ -296,10 +298,12 @@ export default function ExternalServiceConfigModal({
   async function handleRemoveKey(targetKey: string) {
     if (!service || !group) return;
     try {
-      await modelProviderRequest(
-        "DELETE",
-        `/model_providers/${encodeURIComponent(service.key)}/groups/${encodeURIComponent(group.id)}/keys`,
-        { api_key: targetKey }
+      await modelProvidersDefaultApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysDelete(
+        {
+          modelProviderId: service.key,
+          groupId: group.id,
+        },
+        withModelProviderJsonOptions({ data: { api_key: targetKey } }),
       );
       setKeyList((prev) => prev.filter((key) => key !== targetKey));
       onChanged?.();
@@ -314,7 +318,7 @@ export default function ExternalServiceConfigModal({
       destroyOnClose
       footer={[
         <Button key="close" onClick={handleClose}>
-          {t("common.close")}
+          {t("modelProvider.external.saveConfig")}
         </Button>,
       ]}
       onCancel={handleClose}
@@ -344,7 +348,12 @@ export default function ExternalServiceConfigModal({
                 normalize={(value: string | undefined) => value?.trim()}
                 rules={[
                   { required: true, message: t("modelProvider.validation.baseUrlRequired") },
-                  { type: "url", message: t("modelProvider.validation.baseUrlInvalid") },
+                  {
+                    validator: (_, value?: string) =>
+                      validateHttpBaseUrl(value)
+                        ? Promise.resolve()
+                        : Promise.reject(new Error(t("modelProvider.validation.baseUrlInvalid"))),
+                  },
                   { max: 512, message: t("modelProvider.validation.baseUrlMax") },
                 ]}
               >
