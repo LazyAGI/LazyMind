@@ -26,8 +26,36 @@ export type EvoStageActivity = {
   detail: string;
   time: string;
   tone: "normal" | "progress" | "checkpoint" | "auto" | "message" | "error";
+  flowKind?: string;
   artifactKind?: WorkflowResultKind;
+  artifactId?: string;
   artifactLabel?: string;
+};
+
+export type EvoCaseProgressStep = {
+  key: string;
+  label: string;
+  status: StepStatus;
+};
+
+export type EvoCaseProgressItem = {
+  caseId: string;
+  title: string;
+  completed: number;
+  total: number;
+  status: StepStatus;
+  steps: EvoCaseProgressStep[];
+  artifactKind: WorkflowResultKind;
+  artifactId?: string;
+  artifactLabel: string;
+  updatedAt?: string;
+};
+
+export type EvoCaseProgressGroup = {
+  stage: Extract<ThreadEventStage, "dataset" | "eval" | "analysis" | "abtest">;
+  title: string;
+  pageSize: number;
+  cases: EvoCaseProgressItem[];
 };
 
 export type EvoStageOverviewItem = {
@@ -46,8 +74,9 @@ export type EvoProcessDashboard = {
   recentActivities: EvoStageActivity[];
   recentActivityTotal: number;
   checkpoint?: CheckpointWaitPrompt;
-  opencodeActivities: EvoStageActivity[];
   cutoverActivities: EvoStageActivity[];
+  cutoverCompleted: boolean;
+  caseProgressGroups: EvoCaseProgressGroup[];
 };
 
 export type WorkflowProgressPhaseSnapshot = WorkflowProgressSnapshot & {
@@ -199,6 +228,7 @@ export type ChatStreamDeltaKind = "thinking" | "answer";
 export type CheckpointWaitPrompt = {
   message: string;
   kind?: "checkpoint" | "failure";
+  checkpointKind?: string;
   completedStage?: ThreadEventStage;
   completedStageLabel?: string;
   nextOperationLabel?: string;
@@ -206,59 +236,6 @@ export type CheckpointWaitPrompt = {
   command: string;
   taskId?: string;
   datasetId?: string;
-};
-
-export type AnalysisHypothesisItem = {
-  id: string;
-  claim: string;
-  category?: string;
-  confidence?: number;
-  investigationPaths: string[];
-  verdict?: string;
-  refinedClaim?: string;
-  suggestedAction?: string;
-  agent?: string;
-};
-
-export type AnalysisAgentItem = {
-  agent: string;
-  rounds?: number;
-  toolCallCount: number;
-  tools: Array<{ name: string; count: number }>;
-  verdict?: string;
-  confidence?: number;
-  hypothesisId?: string;
-};
-
-export type AnalysisTimelineItem = {
-  key: string;
-  title: string;
-  detail: string;
-  time?: string;
-};
-
-export type AnalysisRunSummary = {
-  status: StepStatus;
-  hypothesisCount: number;
-  agentCount: number;
-  completedAgentCount: number;
-  toolCallCount: number;
-  iterationCount?: number;
-  converged?: boolean;
-  crossStepNarrative?: string;
-  hypotheses: AnalysisHypothesisItem[];
-  agents: AnalysisAgentItem[];
-  timeline: AnalysisTimelineItem[];
-};
-
-export type ApplyRunSummary = {
-  status: StepStatus;
-  roundCount?: number;
-  changedFileCount: number;
-  changedFiles: string[];
-  testStatusText?: string;
-  commitSha?: string;
-  timeline: AnalysisTimelineItem[];
 };
 
 export type WorkflowResultKind = "datasets" | "eval-reports" | "analysis-reports" | "diffs" | "abtests";
@@ -299,6 +276,7 @@ export const FIXED_EVAL_SET = "__none__";
 export const FIXED_EXTRA_EVAL_STRATEGY: ExtraEvalStrategy = "generate";
 export const DEFAULT_EVAL_CASE_COUNT = 100;
 export const AGENT_API_BASE = `${BASE_URL}/api/core/agent`;
+export const EVO_API_BASE = `${BASE_URL}/api/evo/v1/evo`;
 export const SELF_EVOLUTION_LAST_THREAD_STORAGE_KEY = "lazymind:self-evolution:last-thread";
 export const DEPRECATED_SELF_EVOLUTION_THREAD_HISTORY_STORAGE_KEY = "lazymind:self-evolution:thread-history";
 
@@ -307,7 +285,7 @@ export const workflowResultLabels: Record<WorkflowResultKind, string> = {
   "eval-reports": "评测报告",
   "analysis-reports": "分析报告",
   diffs: "代码 diff 结果",
-  abtests: "A/B 测试结果",
+  abtests: "ABTest 详情",
 };
 
 export function getSelfEvolutionWorkflowImageSrc(language?: string) {
@@ -456,6 +434,8 @@ const stepStageMap: Record<WorkflowStepId, ThreadEventStage> = {
 export const checkpointCommandText = "继续执行";
 
 export const terminalThreadEventTypes = new Set(["done", "thread.done", "thread.stop", "intent.done"]);
+export const failedThreadEventTypes = new Set(["error", "thread.error", "intent.error", "USER_ACTIVE_THREAD_EXISTS"]);
+const inactiveTerminalThreadStatuses = new Set(["cancelled", "canceled", "ended", "failed", "error"]);
 
 export const eventActionLabels: Record<string, string> = {
   start: "开始",
@@ -702,6 +682,36 @@ export function createThreadRestoreWorkflowRuntimeState(): WorkflowRuntimeState 
     "code-optimize": { status: "pending" },
     "ab-test": { status: "pending" },
   };
+}
+
+export function createCheckpointRestoreWorkflowRuntimeState(checkpoint: CheckpointWaitPrompt | undefined): WorkflowRuntimeState {
+  const state = createThreadRestoreWorkflowRuntimeState();
+  if (!checkpoint?.completedStage) {
+    return state;
+  }
+
+  const currentStepId = stageStepMap[checkpoint.completedStage];
+  const currentStepIndex = getWorkflowStepIndex(currentStepId);
+  workflowStepOrder.forEach((stepId, index) => {
+    if (index < currentStepIndex) {
+      state[stepId] = { status: "done", progress: getCompletedProgressSnapshot() };
+    }
+  });
+
+  state[currentStepId] = {
+    status: "paused",
+    runtimeText: checkpoint.message,
+    progress: getCompletedProgressSnapshot(),
+  };
+  if (currentStepId === "px-report") {
+    const progressPhases = getCompletedEvalProgressPhases();
+    state[currentStepId] = {
+      ...state[currentStepId],
+      progress: getEvalOverallProgressSnapshot(progressPhases),
+      progressPhases,
+    };
+  }
+  return state;
 }
 
 export function createWorkflowRuntimeStateForMode(mode: EvolutionMode): WorkflowRuntimeState {
@@ -1462,42 +1472,146 @@ export function getRuntimeProgressStatusLabel(action: string | undefined) {
 }
 
 function getOperationRunId(payload: Record<string, unknown> | undefined) {
-  return getStringField(getEventPayloadData(payload), ["operation_run_id"]) || getStringField(payload, ["operation_run_id"]);
+  const data = getEventPayloadData(payload);
+  return getStringField(data, ["operation_run_id"]) || getStringField(getNestedRecordField(data, ["after"]) || getNestedRecordField(data, ["before"]), ["operation_run_id"]) ||
+    getStringField(payload, ["operation_run_id"]);
 }
 
-function getOperationCaseProgress(operationRunId: string | undefined): { current: number; total?: number } | undefined {
-  const match = operationRunId?.match(/\.case_(\d+)$/);
-  if (!match) {
-    return undefined;
+function getEventFlowKind(payload: Record<string, unknown> | undefined) {
+  const data = getEventPayloadData(payload);
+  const value = getStringField(data, ["flow_kind"]) || getStringField(payload, ["flow_kind"]);
+  return ({
+    load_corpus: "dataset.load_corpus",
+    build_corpus_snapshot: "dataset.build_corpus_snapshot",
+    "dataset_gen.load_corpus": "dataset.load_corpus",
+    "dataset_gen.build_corpus_snapshot": "dataset.build_corpus_snapshot",
+    prepare_case: "dataset_gen.prepare_case",
+    generate_case: "dataset_gen.generate_case",
+    assemble: "dataset.assemble",
+    "dataset_gen.assemble": "dataset.assemble",
+  } as Record<string, string>)[value || ""] || value;
+}
+
+function getEventCaseId(payload: Record<string, unknown> | undefined) {
+  const data = getEventPayloadData(payload);
+  return getStringField(data, ["case_id"]) || getStringField(payload, ["case_id"]);
+}
+
+function getEventCaseProgress(payload: Record<string, unknown> | undefined): { current: number; total?: number } | undefined {
+  const data = getEventPayloadData(payload);
+  const current = getNumberField(data, ["case_index"]) ?? getNumberField(payload, ["case_index"]);
+  return typeof current === "number" ? { current } : undefined;
+}
+
+function getEventArtifactId(payload: Record<string, unknown> | undefined) {
+  const data = getEventPayloadData(payload);
+  const detail = getNestedRecordField(data, ["detail"]) || getStructuredRecordField(data, ["detail"]);
+  return getStringField(data, ["artifact_id", "writes_artifact_id"]) ||
+    getStringField(detail, ["artifact_id", "writes_artifact_id"]) ||
+    getStringField(payload, ["artifact_id", "writes_artifact_id"]);
+}
+
+function getEventDetailField(payload: Record<string, unknown> | undefined, keys: string[]) {
+  const data = getEventPayloadData(payload);
+  const detail = getNestedRecordField(data, ["detail"]) || getStructuredRecordField(data, ["detail"]);
+  return getStringField(data, keys) || getStringField(detail, keys) || getStringField(payload, keys);
+}
+
+function getPayloadCaseTotal(eventData: Record<string, unknown> | undefined) {
+  const detail = getNestedRecordField(eventData, ["detail"]) || getStructuredRecordField(eventData, ["detail"]);
+  return getNumberField(eventData, ["total", "num_cases", "case_count", "count"]) ||
+    getNumberField(detail, ["total", "num_cases", "case_count", "count"]);
+}
+
+function createSegmentProgressSnapshot(
+  label: string,
+  base: number,
+  span: number,
+  action: string | undefined,
+  rank: number,
+  current?: number,
+  total?: number,
+): WorkflowProgressSnapshot {
+  const operationPercent =
+    typeof current === "number" && typeof total === "number" && total > 0
+      ? (current / total) * 100
+      : typeof current === "number"
+        ? 0
+      : isActionKind(action, "finish")
+        ? 100
+        : 0;
+  return {
+    statusText: isActionKind(action, "finish") ? `${label}已完成` : `${label}中`,
+    percent: clampPercent(base + (span * operationPercent) / 100),
+    rank: rank + (current || 0),
+  };
+}
+
+function getAbtestWorkflowProgressSnapshot(
+  action: string | undefined,
+  payload: Record<string, unknown> | undefined,
+): WorkflowProgressSnapshot | undefined {
+  const eventData = getEventPayloadData(payload);
+  const flowKind = getEventFlowKind(payload);
+  const operationProgress = getEventCaseProgress(payload);
+  const caseTotal = getPayloadCaseTotal(eventData) || operationProgress?.total;
+  const artifactId = getEventArtifactId(payload);
+  const decision = getEventDetailField(payload, ["decision_status"]);
+
+  if (flowKind === "eval.rag_answer" && getEventCaseId(payload)) {
+    return createSegmentProgressSnapshot("候选回答生成", 8, 40, action, 100, operationProgress?.current, caseTotal);
   }
-  const current = Number(match[1]);
-  return Number.isFinite(current) ? { current } : undefined;
+  if (flowKind === "eval.judge_answer" && getEventCaseId(payload)) {
+    return createSegmentProgressSnapshot("候选结果评测", 48, 40, action, 300, operationProgress?.current, caseTotal);
+  }
+  if (flowKind === "eval.aggregate" || artifactId === "candidate_eval_report") {
+    return createSegmentProgressSnapshot("候选评测汇总", 88, 4, isActionKind(action, "finish") ? "progress" : action, 500);
+  }
+  if (flowKind === "abtest.candidate_service.start") {
+    return createSegmentProgressSnapshot("候选服务启动", 0, 8, action, 50);
+  }
+  if (flowKind === "abtest.candidate_service.stop") {
+    return {
+      statusText: isActionKind(action, "finish") ? "候选服务回收已完成" : "候选服务回收中",
+      percent: isActionKind(action, "finish") ? 100 : 98,
+      rank: 750,
+    };
+  }
+  if (decision) {
+    return {
+      statusText: decision.toLowerCase() === "accept" ? "候选通过切流门槛" : "候选未通过切流门槛",
+      percent: 96,
+      rank: 650,
+    };
+  }
+  if (flowKind === "abtest.compare") {
+    return createSegmentProgressSnapshot("A/B 对照决策", 92, 4, action, 600);
+  }
+  if (flowKind === "abtest.candidate_cutover" || artifactId === "candidate_algorithm_cutover") {
+    return {
+      statusText: isActionKind(action, "finish") ? "候选算法切流已完成" : "等待确认切流",
+      percent: isActionKind(action, "finish") ? 100 : 96,
+      rank: 700,
+    };
+  }
+
+  return undefined;
 }
 
-const datasetOperationSegments = [
-  { test: /dataset_corpus/, label: "准备语料", base: 0, span: 35, rank: 15 },
-  { test: /load_corpus|scan_documents|corpus_load/, label: "加载语料", base: 0, span: 18, rank: 10 },
-  { test: /build_corpus_snapshot|read_segments|corpus_snapshot/, label: "构建语料快照", base: 18, span: 17, rank: 20 },
-  { test: /prepare_case|case_preparation|select_candidates/, label: "准备样本", base: 35, span: 20, rank: 30 },
-  { test: /generate_case|dataset_case/, label: "生成样本", base: 55, span: 25, rank: 40 },
-  { test: /assemble_dataset|assemble|eval_dataset/, label: "组装数据集", base: 80, span: 20, rank: 50 },
-] as const;
-
-function getDatasetOperationSegment(operationRunId: string | undefined, phase: string | undefined, message: string | undefined) {
-  const normalized = [operationRunId, phase, message].filter(Boolean).join(" ").toLowerCase();
-  return datasetOperationSegments.find((item) => item.test.test(normalized));
-}
+const datasetOperationSegments = {
+  "dataset.load_corpus": { label: "加载语料", base: 0, span: 18, rank: 10 },
+  "dataset.build_corpus_snapshot": { label: "构建语料快照", base: 18, span: 17, rank: 20 },
+  "dataset_gen.prepare_case": { label: "准备样本", base: 35, span: 20, rank: 30 },
+  "dataset_gen.generate_case": { label: "生成样本", base: 55, span: 25, rank: 40 },
+  "dataset.assemble": { label: "组装数据集", base: 80, span: 20, rank: 50 },
+} as const;
 
 function getDatasetWorkflowProgressSnapshot(
   action: string | undefined,
   payload: Record<string, unknown> | undefined,
 ): WorkflowProgressSnapshot | undefined {
   const eventData = getEventPayloadData(payload);
-  const operationRunId = getOperationRunId(payload);
-  const phase =
-    getStringField(eventData, ["phase", "task", "task_type", "step", "name", "kind", "type", "event"]) ||
-    getStringField(eventData, ["stage"]);
-  const segment = getDatasetOperationSegment(operationRunId, phase, getStringField(eventData, ["message"]));
+  const segment = datasetOperationSegments[getEventFlowKind(payload) as keyof typeof datasetOperationSegments];
   if (!segment) {
     if (isActionKind(action, "finish")) {
       return getStringField(eventData, ["stage"]) === "dataset" ? getCompletedProgressSnapshot() : undefined;
@@ -1505,7 +1619,7 @@ function getDatasetWorkflowProgressSnapshot(
     return undefined;
   }
 
-  const operationProgress = getOperationCaseProgress(operationRunId);
+  const operationProgress = getEventCaseProgress(payload);
   const current =
     getNumberField(eventData, ["current", "completed", "done", "processed"]) ??
     operationProgress?.current;
@@ -1988,10 +2102,7 @@ export function buildDatasetEventDisplayText(
   payload: Record<string, unknown> | undefined,
 ) {
   const eventData = getEventPayloadData(payload);
-  const operationRunId = getOperationRunId(payload);
-  const phase = getStringField(eventData, ["phase", "task", "task_type", "step", "name", "kind", "type", "event"]);
-  const sourceStage = getStringField(eventData, ["stage"]);
-  const operationSegment = getDatasetOperationSegment(operationRunId, phase || sourceStage, getStringField(eventData, ["message"]));
+  const operationSegment = datasetOperationSegments[getEventFlowKind(payload) as keyof typeof datasetOperationSegments];
   const current = getNumberField(eventData, ["current", "completed", "done", "processed"]);
   const total = getNumberField(eventData, ["total", "num_cases", "cases", "count"]);
   const countText =
@@ -2071,14 +2182,40 @@ export function buildEvalEventDisplayText(
 
 export function buildAbtestEventDisplayText(action: string | undefined, payload?: Record<string, unknown>) {
   const eventData = getEventPayloadData(payload);
-  const phase = getStringField(eventData, ["phase", "task", "task_type", "step", "name", "kind", "type", "event"]);
-  if (phase === "abtest_cutover" || phase === "candidate_cutover") {
+  const flowKind = getEventFlowKind(payload);
+  const operationProgress = getEventCaseProgress(payload);
+  const caseTotal = getPayloadCaseTotal(eventData) || operationProgress?.total;
+  const status = getStringField(eventData, ["status"]);
+  const decision = getEventDetailField(payload, ["decision_status"]);
+  const caseText = operationProgress?.current
+    ? `，case ${operationProgress.current}${caseTotal ? `/${caseTotal}` : ""}`
+    : "";
+  if (flowKind === "eval.rag_answer" && getEventCaseId(payload)) {
+    return `候选版本正在生成回答${caseText}。`;
+  }
+  if (flowKind === "eval.judge_answer" && getEventCaseId(payload)) {
+    return `候选版本正在接受实际评测${caseText}。`;
+  }
+  if (flowKind === "eval.aggregate" || getEventArtifactId(payload) === "candidate_eval_report") {
+    return isActionKind(action, "finish") ? "候选评测报告已汇总完成。" : "正在汇总候选评测报告。";
+  }
+  if (flowKind === "abtest.candidate_cutover") {
     return isActionKind(action, "finish") ? "候选算法切流已完成。" : "正在准备候选算法切流，需用户确认后推进。";
   }
-  if (phase === "candidate_service_start" || phase === "candidate_service") {
+  if (flowKind === "abtest.candidate_service.stop") {
+    return status === "success" || isActionKind(action, "finish")
+      ? "候选服务已停止，候选版本未切流。"
+      : "正在停止候选服务，回收未通过的候选版本。";
+  }
+  if (flowKind === "abtest.candidate_service.start") {
     return isActionKind(action, "finish") ? "候选服务已就绪，可用于 A/B 对照。" : "正在启动候选服务。";
   }
-  if (phase === "abtest_compare" || phase === "compare") {
+  if (decision) {
+    return decision === "accept"
+      ? "A/B 对照决策完成：候选版本通过切流门槛。"
+      : "A/B 对照决策完成：候选版本未通过切流门槛。";
+  }
+  if (flowKind === "abtest.compare") {
     return isActionKind(action, "finish") ? "A/B 对照评测已完成，正在整理决策结果。" : "正在执行 A/B 对照评测。";
   }
   if (action === "start") {
@@ -2107,12 +2244,16 @@ export function getWorkflowProgressSnapshot(
     return getDatasetWorkflowProgressSnapshot(action, payload);
   }
 
+  if (stage === "abtest") {
+    return getAbtestWorkflowProgressSnapshot(action, payload);
+  }
+
   const eventData = getEventPayloadData(payload);
   const evalPhase = stage === "eval" ? getEvalPayloadPhase(action, type, payload) : undefined;
   const progressData = stage === "eval" ? getEvalPhasePayloadData(payload, evalPhase) : eventData;
   const operationRunId = getOperationRunId(payload);
   const isEvalOperationScoped = stage === "eval" && Boolean(operationRunId);
-  const operationProgress = getOperationCaseProgress(operationRunId);
+  const operationProgress = getEventCaseProgress(payload);
   const current = getNumberField(progressData, ["current", "completed", "done", "processed"]) ?? operationProgress?.current;
   const total = getNumberField(progressData, ["total", "num_cases", "cases", "count"]) ?? operationProgress?.total;
   const explicitPercent = getNumberField(progressData, ["percent", "percentage", "progress"]);
@@ -2136,7 +2277,7 @@ export function getWorkflowProgressSnapshot(
     return undefined;
   }
 
-  const rank = operationProgress?.current ?? (operationRunId?.startsWith("dataset.assemble") ? current : undefined);
+  const rank = operationProgress?.current ?? (getEventFlowKind(payload) === "dataset.assemble" ? current : undefined);
   return {
     statusText: rank ? "进行中" : stage === "eval" ? getEvalProgressStatusLabel(action, evalPhase) : getRuntimeProgressStatusLabel(action),
     percent: clampPercent(percent),
@@ -2144,9 +2285,25 @@ export function getWorkflowProgressSnapshot(
   };
 }
 
-function isStepFinishEvent(event: Pick<NormalizedThreadEvent, "action" | "progressPhase" | "payload" | "stage">) {
+function isAbtestStageCompleteEvent(event: Pick<NormalizedThreadEvent, "action" | "progress" | "payload" | "stage">) {
+  if (event.stage !== "abtest" || !isActionKind(event.action, "finish")) {
+    return false;
+  }
+  return getEventArtifactId(event.payload) === "abtest_comparison" ||
+    getEventArtifactId(event.payload) === "candidate_algorithm_cutover" ||
+    getEventFlowKind(event.payload) === "abtest.candidate_cutover";
+}
+
+function isIntentSidecarOperation(event: Pick<NormalizedThreadEvent, "payload">) {
+  return (getOperationRunId(event.payload) || "").startsWith("intent.");
+}
+
+function isStepFinishEvent(event: Pick<NormalizedThreadEvent, "action" | "progress" | "progressPhase" | "payload" | "stage">) {
   if (!isActionKind(event.action, "finish")) {
     return false;
+  }
+  if (isAbtestStageCompleteEvent(event)) {
+    return true;
   }
   if (getOperationRunId(event.payload)) {
     return false;
@@ -2167,6 +2324,7 @@ export function toThreadEventStage(value: unknown): ThreadEventStage | undefined
     dataset_gen: "dataset",
     dataset: "dataset",
     eval: "eval",
+    candidate_eval: "abtest",
     run: "analysis",
     analysis: "analysis",
     apply: "repair",
@@ -2245,6 +2403,8 @@ export function buildCheckpointWaitPrompt(payload: Record<string, unknown> | und
   const eventData = getEventPayloadData(payload);
   const nextOperation = getNestedRecordField(eventData, ["next_op", "nextOperation", "next"]);
   const nextOperationName = getStringField(nextOperation, ["op", "operation", "name"]);
+  const checkpointKind = getStringField(eventData, ["checkpoint_kind", "checkpointKind"]) ||
+    getStringField(payload, ["checkpoint_kind", "checkpointKind"]);
   const artifacts = getNestedRecordField(eventData, ["artifacts", "result", "data"]);
   const messageText =
     getStringField(eventData, ["message", "text", "content"]) ||
@@ -2263,12 +2423,15 @@ export function buildCheckpointWaitPrompt(payload: Record<string, unknown> | und
     getStringField(eventData, ["next_stage", "nextStage"]) ||
       getStringField(artifacts, ["next_stage", "nextStage"]),
   ) || getNextStageFromOperation(nextOperationName);
-  const command = /candidate[_-]?cutover|切流/i.test(`${nextOperationName} ${messageText}`)
+  const command = checkpointKind === "manual_cutover"
     ? "确认切流"
-    : checkpointCommandText;
+    : checkpointKind === "intent_confirmation"
+      ? "确认"
+      : checkpointCommandText;
 
   return {
     kind: "checkpoint",
+    checkpointKind,
     message: sanitizeCheckpointMessage(messageText, completedStageLabel, nextOperationLabel),
     completedStage,
     completedStageLabel,
@@ -2617,9 +2780,9 @@ export function buildAbSummaryReports(payload: unknown): AbSummaryReport[] {
     .reduce<AbSummaryReport[]>((reports, record, index) => {
       const dataRecord = getNestedRecordField(record, ["data"]) || record;
       const summary =
-        getStructuredRecordField(record, ["summary"]) ||
-        getNestedRecordField(record, ["summary"]) ||
-        (getNestedRecordField(record, ["metrics"]) ? dataRecord : undefined);
+        getStructuredRecordField(dataRecord, ["summary"]) ||
+        getNestedRecordField(dataRecord, ["summary"]) ||
+        (getNestedRecordField(dataRecord, ["metrics"]) ? dataRecord : undefined);
       if (!summary) {
         return reports;
       }
@@ -2682,11 +2845,23 @@ export function buildAbSummaryReports(payload: unknown): AbSummaryReport[] {
       const guardMetrics = (getStructuredArrayField(policy, ["guard_metrics"]) || []).filter(
         (item): item is string => typeof item === "string" && item.trim().length > 0,
       );
+      const reportId =
+        getStringField(dataRecord, ["abtest_id", "id", "task_id"]) ||
+        getStringField(record, ["abtest_id", "id", "task_id"]) ||
+        `abtest-${index + 1}`;
+      const markdown =
+        getResultStringField(dataRecord, ["markdown", "report", "content", "text"]) ||
+        getResultStringField(record, ["markdown", "report", "content", "text"]);
+      const verdict =
+        getStringField(summary, ["verdict"]) ||
+        getStringField(decision, ["status"]) ||
+        getResultStringField(dataRecord, ["verdict"]) ||
+        getResultStringField(record, ["verdict"]);
 
       reports.push({
-        id: getStringField(record, ["abtest_id", "id", "task_id"]) || `abtest-${index + 1}`,
-        markdown: getResultStringField(record, ["markdown", "report", "content", "text"]),
-        verdict: getStringField(summary, ["verdict"]) || getStringField(decision, ["status"]) || getResultStringField(record, ["verdict"]),
+        id: reportId,
+        markdown,
+        verdict,
         alignedCases: getNumberField(summary, ["aligned_cases", "case_count"]) || caseDeltas.length || undefined,
         reasons,
         metricRows,
@@ -2758,6 +2933,18 @@ export function isTerminalThreadEvent(type: string) {
   return terminalThreadEventTypes.has(type);
 }
 
+export function isFailedThreadEvent(type: string) {
+  return failedThreadEventTypes.has(type);
+}
+
+export function isInactiveTerminalThreadEvent(event: NormalizedThreadEvent) {
+  if (!isTerminalThreadEvent(event.type)) {
+    return false;
+  }
+  const status = getStringField(event.payload, ["status"]);
+  return Boolean(status && inactiveTerminalThreadStatuses.has(status.toLowerCase()));
+}
+
 export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadEvent {
   const payload = parseThreadEventPayload(frame.data);
   const eventEnvelope = getThreadEventPayloadEnvelope(payload);
@@ -2766,7 +2953,9 @@ export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadE
   const [typeStage, ...actionParts] = eventType.split(".");
   const isCheckpointEvent = eventType.startsWith("checkpoint.");
   const isAutoOperatorEvent = eventType.startsWith("autooperator.");
+  const operationRunId = getOperationRunId(payload);
   const stageFromPayload =
+    (operationRunId?.startsWith("candidate_eval.") ? "abtest" : undefined) ||
     toThreadEventStage(payload?.stage) ||
     toThreadEventStage(eventEnvelope?.stage);
   const stage = isCheckpointEvent ? undefined : stageFromPayload || (isAutoOperatorEvent ? undefined : toThreadEventStage(typeStage));
@@ -2820,6 +3009,21 @@ export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadE
       type,
       payload,
       displayText: "事件流已结束，线程停止信号已收到。",
+    };
+  }
+
+  if (isFailedThreadEvent(frame.eventName) || isFailedThreadEvent(type)) {
+    const errorText = content || "消息处理失败，请稍后重试。";
+    return {
+      key,
+      timestamp,
+      sequence,
+      taskId,
+      type,
+      role: "assistant",
+      content: errorText,
+      payload,
+      displayText: errorText,
     };
   }
 
@@ -3034,6 +3238,10 @@ export function buildWorkflowStepRuntimeFromEvents(events: NormalizedThreadEvent
   };
 
   events.forEach((event) => {
+    if (snapshot.status === "done" && isIntentSidecarOperation(event)) {
+      return;
+    }
+
     if (event.stage === "eval") {
       snapshot.progressPhases = updateEvalProgressPhases(
         snapshot.progressPhases,
@@ -3153,7 +3361,7 @@ function eventActivityTone(event: NormalizedThreadEvent): EvoStageActivity["tone
 
 function eventActivityTitle(event: NormalizedThreadEvent) {
   if (event.type.startsWith("autooperator.")) {
-    return "AutoOperator";
+    return "自动处理记录";
   }
   if (event.type === "checkpoint.wait") {
     return "等待确认";
@@ -3188,11 +3396,51 @@ function formatOperationRunId(operationRunId: string) {
   return name.replace(/\bcase\.(\d+)/, "case $1");
 }
 
+const repairAnalysisArtifactPrefixes = [
+  "repair_loop_plan",
+  "repair_evidence_packet",
+  "fault_localization",
+  "diagnostic_probe_plan",
+  "diagnostic_probe_result",
+  "repair_diagnosis",
+  "opencode_instruction",
+  "opencode_explore_instruction",
+  "opencode_patch_instruction",
+  "opencode_no_patch_instruction",
+];
+
+const repairExecutionArtifactPrefixes = [
+  "opencode_probe_trace",
+  "opencode_patch_trace",
+  "opencode_worker_report",
+  "opencode_patch_worker_report",
+  "opencode_probe_worker_report",
+  "opencode_no_patch_worker_report",
+  "repair_hypothesis",
+  "repair_plan",
+  "opencode_run_trace",
+  "code_patch_candidate",
+  "candidate_service",
+  "candidate_service_run",
+  "repair_evaluation",
+  "patch_correctness_assessment",
+  "patch_critique",
+  "branch_decision",
+  "repair_branch_state_before",
+  "repair_branch_state_after",
+  "repair_state_transition",
+  "candidate_classification_report",
+  "repair_loop_decision",
+  "repair_loop_memory",
+  "repair_loop_state",
+  "verified_repair",
+];
+
 function getActivityArtifactKind(event: NormalizedThreadEvent): WorkflowResultKind | undefined {
   if (!event.stage || event.type === "checkpoint.created") {
     return undefined;
   }
-  if (event.action === "finish" || event.checkpointWait) {
+  if (event.checkpointWait) {
     return stageResultKindMap[event.stage];
   }
   const eventData = getEventPayloadData(event.payload);
@@ -3201,25 +3449,40 @@ function getActivityArtifactKind(event: NormalizedThreadEvent): WorkflowResultKi
     getStringField(detail, ["artifact_id", "writes_artifact_id"]) ||
     getStringField(eventData, ["artifact_id", "writes_artifact_id", "current_item"]) ||
     getOperationRunId(event.payload);
-  return artifactId ? stageResultKindMap[event.stage] : undefined;
+  const finalArtifactIds: Record<ThreadEventStage, string[]> = {
+    dataset: ["eval_dataset"],
+    eval: ["eval_report", "candidate_eval_report"],
+    analysis: ["classification_report", "repair_loop_plan"],
+    repair: ["verified_repair", "repair_loop_agent", "candidate_workspace"],
+    abtest: ["abtest_comparison", "candidate_algorithm_cutover"],
+  };
+  const repairArtifactId = artifactId || "";
+  const isRepairAnalysisArtifact = event.stage === "repair" && repairArtifactId.length > 0 &&
+    repairAnalysisArtifactPrefixes.some((prefix) => repairArtifactId === prefix || repairArtifactId.startsWith(`${prefix}_`));
+  if (isRepairAnalysisArtifact) {
+    return "analysis-reports";
+  }
+  const isRepairExecutionArtifact = event.stage === "repair" && repairArtifactId.length > 0 &&
+    repairExecutionArtifactPrefixes.some((prefix) => repairArtifactId === prefix || repairArtifactId.startsWith(`${prefix}_`));
+  return artifactId && (finalArtifactIds[event.stage].includes(artifactId) || isRepairExecutionArtifact)
+    ? stageResultKindMap[event.stage]
+    : undefined;
 }
 
-function getActivityArtifactLabel(event: NormalizedThreadEvent, artifactKind: WorkflowResultKind | undefined) {
+function getActivityArtifactLabel(artifactKind: WorkflowResultKind | undefined) {
   if (!artifactKind) {
     return undefined;
   }
-  const eventData = getEventPayloadData(event.payload);
-  const detail = getNestedRecordField(eventData, ["detail"]) || getStructuredRecordField(eventData, ["detail"]);
-  const artifactId =
-    getStringField(detail, ["artifact_id", "writes_artifact_id"]) ||
-    getStringField(eventData, ["artifact_id", "writes_artifact_id", "current_item"]);
-  return artifactId ? `查看 ${artifactId}` : `查看${workflowResultLabels[artifactKind]}`;
+  return `查看${workflowResultLabels[artifactKind]}`;
 }
 
 function buildEventActivity(event: NormalizedThreadEvent): EvoStageActivity {
   const progressText = event.progress ? `${event.progress.statusText} ${event.progress.percent}%` : "";
-  const detail = event.displayText || event.content || progressText || compactPayloadForDisplay(event.payload) || event.type;
+  const stageProgressText = event.stage === "abtest" ? progressText : "";
+  const detail = event.displayText || stageProgressText || event.content || progressText || compactPayloadForDisplay(event.payload) || event.type;
   const artifactKind = getActivityArtifactKind(event);
+  const artifactId = getEventArtifactId(event.payload);
+  const flowKind = getEventFlowKind(event.payload);
   return {
     key: event.key,
     stage: event.stage,
@@ -3227,15 +3490,165 @@ function buildEventActivity(event: NormalizedThreadEvent): EvoStageActivity {
     detail,
     time: formatThreadTime(event.timestamp),
     tone: eventActivityTone(event),
+    flowKind,
     artifactKind,
-    artifactLabel: getActivityArtifactLabel(event, artifactKind),
+    artifactId,
+    artifactLabel: getActivityArtifactLabel(artifactKind),
   };
 }
 
 function stageProgressFromEvents(events: NormalizedThreadEvent[], stage: ThreadEventStage) {
   return getLastItem(
-    events.filter((event) => event.stage === stage && event.progress && !(stage === "eval" && getOperationRunId(event.payload))),
+    events.filter((event) => event.stage === stage && event.progress &&
+      !(stage === "eval" && ["eval.rag_answer", "eval.judge_answer"].includes(getEventFlowKind(event.payload) || ""))),
   )?.progress;
+}
+
+type CaseProgressState = {
+  caseId: string;
+  steps: Record<string, StepStatus>;
+  artifactId?: string;
+  updatedAt?: string;
+};
+
+const datasetCaseSteps = ["load_corpus", "build_snapshot", "plan", "generate", "assemble"] as const;
+const evalCaseSteps = ["rag", "judge"] as const;
+const analysisCaseSteps = ["coarse", "fine"] as const;
+const caseStepLabels: Record<string, string> = {
+  load_corpus: "load_corpus",
+  build_snapshot: "build_snapshot",
+  plan: "plan",
+  generate: "generate",
+  assemble: "assemble",
+  rag: "RAG",
+  judge: "judge",
+  coarse: "coarse",
+  fine: "fine",
+};
+
+function getCaseProgressActionStatus(event: NormalizedThreadEvent): StepStatus | undefined {
+  const eventData = getEventPayloadData(event.payload);
+  const after = getNestedRecordField(eventData, ["after"]);
+  const status = getStringField(eventData, ["status"]) || getStringField(after, ["status"]);
+  if (event.action === "finish" || status === "success" || status === "ended" || status === "skipped") {
+    return "done";
+  }
+  if (event.action === "failed" || status === "failed") {
+    return "failed";
+  }
+  if (event.action === "pause" || status === "checkpointed") {
+    return "paused";
+  }
+  if (event.action === "cancel" || status === "cancelled") {
+    return "canceled";
+  }
+  if (event.action === "progress" || status === "running") {
+    return "running";
+  }
+  return undefined;
+}
+
+function updateCaseStep(
+  cases: Map<string, CaseProgressState>, caseId: string, step: string,
+  status: StepStatus | undefined, updatedAt?: string, artifactId?: string,
+) {
+  if (!status) {
+    return;
+  }
+  const item = cases.get(caseId) || { caseId, steps: {} };
+  const previous = item.steps[step];
+  if (previous !== "done" || status === "done") {
+    item.steps[step] = status;
+  }
+  item.artifactId = artifactId || item.artifactId;
+  item.updatedAt = updatedAt || item.updatedAt;
+  cases.set(caseId, item);
+}
+
+function getOperationCaseId(payload: Record<string, unknown> | undefined) {
+  return getEventCaseId(payload) || getStringField(getEventPayloadData(payload), ["current_item"]);
+}
+
+function applyGlobalDatasetStep(cases: Map<string, CaseProgressState>, step: string, status: StepStatus | undefined, updatedAt?: string, artifactId?: string) {
+  cases.forEach((item) => updateCaseStep(cases, item.caseId, step, status, updatedAt, artifactId));
+}
+
+function buildCaseItem(item: CaseProgressState, steps: readonly string[], artifactKind: WorkflowResultKind, artifactId: string | undefined, artifactLabel: string): EvoCaseProgressItem {
+  const builtSteps = steps.map((key) => ({ key, label: caseStepLabels[key] || key, status: item.steps[key] || "pending" }));
+  const completed = builtSteps.filter((step) => step.status === "done").length;
+  const status: StepStatus = completed === builtSteps.length ? "done" :
+    builtSteps.some((step) => step.status === "failed") ? "failed" :
+      builtSteps.some((step) => step.status === "canceled") ? "canceled" :
+        builtSteps.some((step) => step.status === "paused") ? "paused" :
+          builtSteps.some((step) => step.status === "running" || step.status === "done") ? "running" : "pending";
+  return { caseId: item.caseId, title: item.caseId.replace(/^case_0*/, "Case "), completed, total: builtSteps.length, status, steps: builtSteps, artifactKind, artifactId, artifactLabel, updatedAt: item.updatedAt };
+}
+
+const areCaseStepsDone = (item: CaseProgressState, steps: readonly string[]) => steps.every((step) => item.steps[step] === "done");
+
+function sortCaseItems(a: EvoCaseProgressItem, b: EvoCaseProgressItem) {
+  const left = Number(a.caseId.match(/\d+/)?.[0] || 0);
+  const right = Number(b.caseId.match(/\d+/)?.[0] || 0);
+  return left - right || a.caseId.localeCompare(b.caseId);
+}
+
+function buildCaseProgressGroups(events: NormalizedThreadEvent[]): EvoCaseProgressGroup[] {
+  const datasetCases = new Map<string, CaseProgressState>();
+  const evalCases = new Map<string, CaseProgressState>();
+  const analysisCases = new Map<string, CaseProgressState>();
+  const abtestCases = new Map<string, CaseProgressState>();
+  const datasetGlobal: Record<string, StepStatus | undefined> = {};
+  events.forEach((event) => {
+    const operationRunId = getOperationRunId(event.payload);
+    const flowKind = getEventFlowKind(event.payload);
+    const artifactId = getEventArtifactId(event.payload);
+    const status = getCaseProgressActionStatus(event);
+    if (!operationRunId || !status) {
+      return;
+    }
+    const caseId = getOperationCaseId(event.payload);
+    if (flowKind === "dataset.load_corpus") {
+      datasetGlobal.load_corpus = status;
+      applyGlobalDatasetStep(datasetCases, "load_corpus", status, event.timestamp);
+    } else if (flowKind === "dataset.build_corpus_snapshot") {
+      datasetGlobal.build_snapshot = status;
+      applyGlobalDatasetStep(datasetCases, "build_snapshot", status, event.timestamp);
+    } else if (caseId && flowKind === "dataset.assemble" && status === "running") {
+      updateCaseStep(datasetCases, caseId, "assemble", "done", event.timestamp);
+    } else if (flowKind === "dataset.assemble") {
+      datasetGlobal.assemble = status;
+      applyGlobalDatasetStep(datasetCases, "assemble", status, event.timestamp);
+    } else if (caseId && flowKind === "dataset_gen.prepare_case") {
+      Object.entries(datasetGlobal).forEach(([step, value]) => updateCaseStep(datasetCases, caseId, step, value, event.timestamp));
+      updateCaseStep(datasetCases, caseId, "plan", status, event.timestamp, artifactId);
+    } else if (caseId && flowKind === "dataset_gen.generate_case") {
+      Object.entries(datasetGlobal).forEach(([step, value]) => updateCaseStep(datasetCases, caseId, step, value, event.timestamp));
+      updateCaseStep(datasetCases, caseId, "generate", status, event.timestamp, artifactId);
+    } else if (caseId && event.stage === "eval" && flowKind === "eval.rag_answer" && !operationRunId.startsWith("candidate_eval.")) {
+      updateCaseStep(evalCases, caseId, "rag", status, event.timestamp, artifactId);
+    } else if (caseId && event.stage === "eval" && flowKind === "eval.judge_answer" && !operationRunId.startsWith("candidate_eval.")) {
+      updateCaseStep(evalCases, caseId, "judge", status, event.timestamp, artifactId);
+    } else if (caseId && operationRunId.startsWith("candidate_eval.") && flowKind === "eval.rag_answer") {
+      updateCaseStep(abtestCases, caseId, "rag", status, event.timestamp, artifactId);
+    } else if (caseId && operationRunId.startsWith("candidate_eval.") && flowKind === "eval.judge_answer") {
+      updateCaseStep(abtestCases, caseId, "judge", status, event.timestamp, artifactId);
+    } else if (caseId && flowKind === "analysis.coarse_classify") {
+      updateCaseStep(analysisCases, caseId, "coarse", status, event.timestamp, artifactId);
+    } else if (caseId && flowKind === "analysis.fine_classify") {
+      updateCaseStep(analysisCases, caseId, "fine", status, event.timestamp, artifactId);
+    } else if (caseId && event.stage === "abtest" && flowKind === "eval.rag_answer") {
+      updateCaseStep(abtestCases, caseId, "rag", status, event.timestamp, artifactId);
+    } else if (caseId && event.stage === "abtest" && flowKind === "eval.judge_answer") {
+      updateCaseStep(abtestCases, caseId, "judge", status, event.timestamp, artifactId);
+    }
+  });
+  const groups: EvoCaseProgressGroup[] = [
+    { stage: "dataset", title: "Step 1 · 数据集 case", pageSize: 10, cases: Array.from(datasetCases.values()).map((item) => buildCaseItem(item, datasetCaseSteps, "datasets", areCaseStepsDone(item, datasetCaseSteps) ? item.artifactId : undefined, "查看该 case 详情")).sort(sortCaseItems) },
+    { stage: "eval", title: "Step 2 · 评测 case", pageSize: 10, cases: Array.from(evalCases.values()).map((item) => buildCaseItem(item, evalCaseSteps, "eval-reports", areCaseStepsDone(item, evalCaseSteps) ? item.artifactId : undefined, "查看该 case 结果")).sort(sortCaseItems) },
+    { stage: "analysis", title: "Step 3 · 分析 case", pageSize: 10, cases: Array.from(analysisCases.values()).map((item) => buildCaseItem(item, analysisCaseSteps, "analysis-reports", areCaseStepsDone(item, analysisCaseSteps) ? item.artifactId : undefined, "查看该 case 分类")).sort(sortCaseItems) },
+    { stage: "abtest", title: "Step 5 · ABTest case", pageSize: 10, cases: Array.from(abtestCases.values()).map((item) => buildCaseItem(item, evalCaseSteps, "abtests", areCaseStepsDone(item, evalCaseSteps) ? item.artifactId : undefined, "查看该 case 对照")).sort(sortCaseItems) },
+  ];
+  return groups.filter((group) => group.cases.length > 0);
 }
 
 function shouldShowProcessActivity(event: NormalizedThreadEvent) {
@@ -3245,14 +3658,15 @@ function shouldShowProcessActivity(event: NormalizedThreadEvent) {
   return Boolean(event.displayText || event.content || event.progress || event.checkpointWait || event.type.startsWith("autooperator."));
 }
 
-function isOpencodeActivity(item: EvoStageActivity) {
-  const text = `${item.title} ${item.detail}`.toLowerCase();
-  return item.stage === "repair" && /opencode|repair loop|修复循环|候选补丁|代码修改/.test(text);
+function isCutoverActivity(item: EvoStageActivity) {
+  return item.stage === "abtest" && item.artifactId === "candidate_algorithm_cutover";
 }
 
-function isCutoverActivity(item: EvoStageActivity) {
-  const text = `${item.title} ${item.detail}`.toLowerCase();
-  return item.stage === "abtest" && /cutover|切流|candidate service|候选服务|候选算法/.test(text);
+function isCutoverCompletedEvent(event: NormalizedThreadEvent) {
+  return event.stage === "abtest" &&
+    (getEventFlowKind(event.payload) === "abtest.candidate_cutover" ||
+      getEventArtifactId(event.payload) === "candidate_algorithm_cutover") &&
+    (isActionKind(event.action, "finish") || event.progress?.percent === 100);
 }
 
 export function buildEvoProcessDashboard(
@@ -3261,15 +3675,22 @@ export function buildEvoProcessDashboard(
   includeFirstStep: boolean,
 ): EvoProcessDashboard {
   const sortedEvents = dedupeNormalizedEvents(events);
-  const checkpoint = getPendingCheckpointWaitPrompt(sortedEvents);
+  const cutoverCompleted = sortedEvents.some(isCutoverCompletedEvent);
+  const hasInactiveTerminalEvent = sortedEvents.some(isInactiveTerminalThreadEvent);
+  const checkpoint = cutoverCompleted || hasInactiveTerminalEvent ? undefined : getPendingCheckpointWaitPrompt(sortedEvents);
+  const visibleStepsById = new Map(
+    buildVisibleWorkflowSteps(sortedEvents, runtimeState, includeFirstStep).map((step) => [step.id, step]),
+  );
   const runtimeSteps = workflowStepDefinitions.map((definition) =>
-    createWorkflowStepFromRuntime(definition.id, runtimeState),
+    visibleStepsById.get(definition.id) || createWorkflowStepFromRuntime(definition.id, runtimeState),
   );
   const hasStageEvents = sortedEvents.some((event) => event.stage);
   const overview = runtimeSteps.map((step) => {
     const stage = stepStageMap[step.id];
     const stageEvents = sortedEvents.filter((event) => event.stage === stage);
-    const status: StepStatus = checkpoint?.completedStage === stage
+    const status: StepStatus = cutoverCompleted
+      ? "done"
+      : checkpoint?.completedStage === stage
       ? "paused"
       : includeFirstStep && !hasStageEvents && step.id === "dataset"
         ? "running"
@@ -3278,7 +3699,9 @@ export function buildEvoProcessDashboard(
       step: {
         ...step,
         status,
-        progress: step.progress || stageProgressFromEvents(sortedEvents, stage),
+        progress: cutoverCompleted
+          ? { ...getCompletedProgressSnapshot(), statusText: stage === "abtest" ? "候选算法切流已完成" : "已完成" }
+          : step.progress || stageProgressFromEvents(sortedEvents, stage),
       },
       stage,
       eventCount: stageEvents.length,
@@ -3287,14 +3710,14 @@ export function buildEvoProcessDashboard(
   });
   const visibleActivityEvents = sortedEvents.filter(shouldShowProcessActivity);
   const activities = visibleActivityEvents.map(buildEventActivity);
-  const latestStage = checkpoint?.completedStage || getLastItem(visibleActivityEvents.filter((event) => event.stage))?.stage;
+  const caseProgressGroups = buildCaseProgressGroups(sortedEvents);
+  const latestStage = cutoverCompleted ? "abtest" : checkpoint?.completedStage || getLastItem(visibleActivityEvents.filter((event) => event.stage))?.stage;
   const activeOverview =
     (latestStage ? overview.find((item) => item.stage === latestStage) : undefined) ||
     overview.find((item) => ["running", "paused", "failed"].includes(item.step.status)) ||
     overview.find((item) => item.step.status === "pending") ||
     getLastItem(overview);
   const recentActivities = activities.slice().reverse();
-  const opencodeActivities = activities.filter(isOpencodeActivity).slice(-3).reverse();
   const cutoverActivities = activities.filter(isCutoverActivity).slice(-3).reverse();
   return {
     overview,
@@ -3305,369 +3728,18 @@ export function buildEvoProcessDashboard(
     recentActivities,
     recentActivityTotal: visibleActivityEvents.length,
     checkpoint,
-    opencodeActivities,
     cutoverActivities,
-  };
-}
-
-export function buildAnalysisRunSummary(events: NormalizedThreadEvent[]): AnalysisRunSummary | undefined {
-  const runEvents = events.filter((item) => item.stage === "analysis");
-  if (runEvents.length === 0) {
-    return undefined;
-  }
-
-  const groupedByTask = new Map<string, NormalizedThreadEvent[]>();
-  runEvents.forEach((event, index) => {
-    const groupKey = event.taskId || `run-${index}`;
-    const current = groupedByTask.get(groupKey) || [];
-    current.push(event);
-    groupedByTask.set(groupKey, current);
-  });
-
-  const runEventGroups: NormalizedThreadEvent[][] = Array.from(groupedByTask.values())
-    .map((group) => group.sort(compareNormalizedThreadEvents))
-    .sort((a, b) => compareNormalizedThreadEvents(a[a.length - 1], b[b.length - 1]));
-  const latestRunEvents: NormalizedThreadEvent[] = getLastItem(runEventGroups) || [];
-
-  if (latestRunEvents.length === 0) {
-    return undefined;
-  }
-
-  let status: StepStatus = "running";
-  let iterationCount: number | undefined;
-  let converged: boolean | undefined;
-  let crossStepNarrative: string | undefined;
-
-  const timeline: AnalysisTimelineItem[] = [];
-  const hypothesesMap = new Map<string, AnalysisHypothesisItem>();
-  const agentsMap = new Map<
-    string,
-    {
-      rounds?: number;
-      toolCounts: Map<string, number>;
-      verdict?: string;
-      confidence?: number;
-      hypothesisId?: string;
-    }
-  >();
-
-  const appendTimeline = (key: string, title: string, detail: string, time?: string) => {
-    if (!detail) {
-      return;
-    }
-    const alreadyExists = timeline.some((item) => item.key === key);
-    if (!alreadyExists) {
-      timeline.push({ key, title, detail, time });
-    }
-  };
-
-  latestRunEvents.forEach((event) => {
-    const eventData = getEventPayloadData(event.payload);
-
-    if (event.action === "start") {
-      status = "running";
-      appendTimeline("start", "启动分析", "系统已创建分析任务，开始生成调查方向。", event.timestamp);
-    }
-
-    if (event.action === "pause") {
-      status = "paused";
-    }
-
-    if (event.action === "cancel") {
-      status = "canceled";
-      appendTimeline("cancel", "分析中断", "本轮分析已取消，未继续推进后续动作。", event.timestamp);
-    }
-
-    if (event.action === "finish") {
-      status = "done";
-      appendTimeline("finish", "生成报告", "问题归因已完成，分析报告可以展开查看。", event.timestamp);
-    }
-
-    if (event.type === "run.indexer.result" || event.type === "analysis.indexer.result") {
-      const resultRecord =
-        getNestedRecordField(eventData, ["result"]) || getStructuredRecordField(eventData, ["summary"]);
-      const hypotheses = getStructuredArrayField(resultRecord, ["hypotheses"]) || [];
-      hypotheses.forEach((item) => {
-        if (!isRecord(item)) {
-          return;
-        }
-        const id = getStringField(item, ["id"]) || `H${hypothesesMap.size + 1}`;
-        const claim = getStringField(item, ["claim"]) || "待补充调查说明";
-        const category = getStringField(item, ["category"]);
-        const confidence = getNumberField(item, ["confidence"]);
-        const investigationPaths =
-          (getStructuredArrayField(item, ["investigation_paths"]) || [])
-            .filter((path): path is string => typeof path === "string" && path.trim().length > 0)
-            .map((path) => path.trim()) || [];
-
-        hypothesesMap.set(id, {
-          id,
-          claim,
-          category,
-          confidence,
-          investigationPaths,
-        });
-      });
-
-      crossStepNarrative = getStringField(resultRecord, ["cross_step_narrative"]) || crossStepNarrative;
-      appendTimeline(
-        "indexer",
-        "生成调查方向",
-        hypotheses.length > 0
-          ? `已整理出 ${hypotheses.length} 条优先调查项，进入子代理取证阶段。`
-          : "已完成首轮扫描，正在准备调查项。",
-        event.timestamp,
-      );
-    }
-
-    if (event.type === "run.conductor.result" || event.type === "analysis.conductor.result") {
-      const resultRecord =
-        getNestedRecordField(eventData, ["result"]) || getStructuredRecordField(eventData, ["summary"]);
-      const nextIteration = getNumberField(eventData, ["iteration"]) ?? getNumberField(resultRecord, ["iterations"]);
-      if (typeof nextIteration === "number") {
-        iterationCount = nextIteration;
-      }
-      if (resultRecord?.converged === true) {
-        converged = true;
-        appendTimeline(
-          "conductor-final",
-          "完成编排",
-          typeof iterationCount === "number"
-            ? `分析在第 ${iterationCount} 轮后收敛，等待输出最终报告。`
-            : "分析已收敛，等待输出最终报告。",
-          event.timestamp,
-        );
-      } else if (typeof nextIteration === "number") {
-        appendTimeline(
-          "conductor-iteration",
-          "分配调查任务",
-          `已完成第 ${nextIteration} 轮任务编排，持续派发子代理调查。`,
-          event.timestamp,
-        );
-      }
-    }
-
-    if (event.type === "run.tool.used" || event.type === "analysis.tool.used") {
-      const agent = getStringField(eventData, ["agent"]);
-      const tool = getStringField(eventData, ["tool"]) || "tool";
-      if (!agent) {
-        return;
-      }
-      const agentSummary =
-        agentsMap.get(agent) ||
-        {
-          toolCounts: new Map<string, number>(),
-        };
-      agentSummary.toolCounts.set(tool, (agentSummary.toolCounts.get(tool) || 0) + 1);
-      agentsMap.set(agent, agentSummary);
-    }
-
-    if (event.type === "run.researcher.result" || event.type === "analysis.researcher.result") {
-      const agent = getStringField(eventData, ["agent"]);
-      if (!agent) {
-        return;
-      }
-
-      const agentSummary =
-        agentsMap.get(agent) ||
-        {
-          toolCounts: new Map<string, number>(),
-        };
-      agentSummary.rounds = getNumberField(eventData, ["rounds"]) || agentSummary.rounds;
-
-      const resultRecord = getStructuredRecordField(eventData, ["result_summary"]);
-      const hypothesisId = getStringField(resultRecord, ["hypothesis_id"]);
-      const verdict = getStringField(resultRecord, ["verdict"]);
-      const confidence = getNumberField(resultRecord, ["confidence"]);
-      const refinedClaim = getStringField(resultRecord, ["refined_claim"]);
-      const suggestedAction = getStringField(resultRecord, ["suggested_action"]);
-
-      agentSummary.verdict = verdict || agentSummary.verdict;
-      agentSummary.confidence = confidence ?? agentSummary.confidence;
-      agentSummary.hypothesisId = hypothesisId || agentSummary.hypothesisId;
-      agentsMap.set(agent, agentSummary);
-
-      if (hypothesisId) {
-        const existingHypothesis = hypothesesMap.get(hypothesisId);
-        const fallbackClaim = getStringField(resultRecord, ["refined_claim"]) || "已返回调查结论";
-        hypothesesMap.set(hypothesisId, {
-          id: hypothesisId,
-          claim: existingHypothesis?.claim || fallbackClaim,
-          category: existingHypothesis?.category,
-          confidence: confidence ?? existingHypothesis?.confidence,
-          investigationPaths: existingHypothesis?.investigationPaths || [],
-          verdict: verdict || existingHypothesis?.verdict,
-          refinedClaim: refinedClaim || existingHypothesis?.refinedClaim,
-          suggestedAction: suggestedAction || existingHypothesis?.suggestedAction,
-          agent,
-        });
-      }
-
-      appendTimeline(
-        "researcher-result",
-        "回收调查结论",
-        hypothesisId
-          ? `${formatAnalysisAgentName(agent)} 已完成 ${hypothesisId} 的调查并返回结论。`
-          : `${formatAnalysisAgentName(agent)} 已返回一条调查结论。`,
-        event.timestamp,
-      );
-    }
-  });
-
-  const agents = Array.from(agentsMap.entries())
-    .map(([agent, item]) => ({
-      agent,
-      rounds: item.rounds,
-      toolCallCount: Array.from(item.toolCounts.values()).reduce((sum, count) => sum + count, 0),
-      tools: Array.from(item.toolCounts.entries())
-        .map(([name, count]) => ({ name, count }))
-        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "zh-CN")),
-      verdict: item.verdict,
-      confidence: item.confidence,
-      hypothesisId: item.hypothesisId,
-    }))
-    .sort((a, b) => {
-      if (Boolean(a.verdict) !== Boolean(b.verdict)) {
-        return a.verdict ? -1 : 1;
-      }
-      return a.agent.localeCompare(b.agent, "zh-CN", { numeric: true });
-    });
-
-  const hypotheses = Array.from(hypothesesMap.values()).sort((a, b) =>
-    a.id.localeCompare(b.id, "zh-CN", { numeric: true }),
-  );
-
-  return {
-    status,
-    hypothesisCount: hypotheses.length,
-    agentCount: agents.length,
-    completedAgentCount: agents.filter((item) => Boolean(item.verdict)).length,
-    toolCallCount: agents.reduce((sum, item) => sum + item.toolCallCount, 0),
-    iterationCount,
-    converged,
-    crossStepNarrative,
-    hypotheses,
-    agents,
-    timeline: timeline.sort((a, b) => {
-      if (a.time && b.time) {
-        return new Date(a.time).getTime() - new Date(b.time).getTime();
-      }
-      return a.key.localeCompare(b.key, "zh-CN", { numeric: true });
-    }),
-  };
-}
-
-export function buildApplyRunSummary(events: NormalizedThreadEvent[]): ApplyRunSummary | undefined {
-  const applyEvents = events.filter((item) => item.stage === "repair");
-  if (applyEvents.length === 0) {
-    return undefined;
-  }
-
-  const groupedByTask = new Map<string, NormalizedThreadEvent[]>();
-  applyEvents.forEach((event, index) => {
-    const groupKey = event.taskId || `apply-${index}`;
-    const current = groupedByTask.get(groupKey) || [];
-    current.push(event);
-    groupedByTask.set(groupKey, current);
-  });
-
-  const applyEventGroups: NormalizedThreadEvent[][] = Array.from(groupedByTask.values())
-    .map((group) => group.sort(compareNormalizedThreadEvents))
-    .sort((a, b) => compareNormalizedThreadEvents(a[a.length - 1], b[b.length - 1]));
-  const latestApplyEvents: NormalizedThreadEvent[] = getLastItem(applyEventGroups) || [];
-
-  if (latestApplyEvents.length === 0) {
-    return undefined;
-  }
-
-  let status: StepStatus = "running";
-  let roundCount: number | undefined;
-  let testStatusText: string | undefined;
-  let commitSha: string | undefined;
-  const changedFiles = new Set<string>();
-  const timeline: AnalysisTimelineItem[] = [];
-
-  const appendTimeline = (key: string, title: string, detail: string, time?: string) => {
-    if (!detail) {
-      return;
-    }
-    const timelineKey = `${key}-${time || "no-time"}-${title}`;
-    const alreadyExists = timeline.some((item) => item.key === timelineKey);
-    if (!alreadyExists) {
-      timeline.push({ key: timelineKey, title, detail, time });
-    }
-  };
-
-  latestApplyEvents.forEach((event) => {
-    const eventData = getEventPayloadData(event.payload);
-
-    if (event.action === "start") {
-      status = "running";
-      appendTimeline("apply-start", "启动优化", "系统已根据分析结论开始生成候选改动。", event.timestamp);
-    }
-
-    if (event.type === "apply.round.diff" || event.type === "repair.round.diff") {
-      const round = getNumberField(eventData, ["round"]);
-      if (typeof round === "number") {
-        roundCount = round;
-      }
-      const files = (getStructuredArrayField(eventData, ["files_changed"]) || []).filter(
-        (item): item is string => typeof item === "string" && item.trim().length > 0,
-      );
-      files.forEach((file) => changedFiles.add(file));
-
-      const diffSummary = getStringField(eventData, ["diff_summary"]);
-      if (diffSummary?.includes("tests passed")) {
-        testStatusText = "测试已通过";
-      } else if (diffSummary?.includes("tests not run")) {
-        testStatusText = "尚未执行测试";
-      } else if (diffSummary?.includes("tests failed")) {
-        testStatusText = "测试未通过";
-      }
-
-      commitSha = getStringField(eventData, ["commit_sha"]) || commitSha;
-      appendTimeline(
-        typeof round === "number" ? `apply-diff-round-${round}` : `apply-diff-${event.key}`,
-        "生成候选改动",
-        typeof round === "number"
-          ? `已完成第 ${round} 轮改动草案，当前涉及 ${files.length} 个文件。`
-          : `已生成一轮改动草案，当前涉及 ${files.length} 个文件。`,
-        event.timestamp,
-      );
-    }
-
-    if (event.action === "finish") {
-      status = "done";
-      appendTimeline("apply-finish", "完成候选版本", "候选优化版本已准备完成，可继续查看代码差异。", event.timestamp);
-    }
-
-    if (event.action === "cancel") {
-      status = "canceled";
-    }
-
-    if (event.action === "failed") {
-      status = "failed";
-      appendTimeline("apply-failed", "优化失败", event.displayText || "代码修改没有执行成功。", event.timestamp);
-    }
-  });
-
-  return {
-    status,
-    roundCount,
-    changedFileCount: changedFiles.size,
-    changedFiles: Array.from(changedFiles).sort((a, b) => a.localeCompare(b, "zh-CN", { numeric: true })),
-    testStatusText,
-    commitSha,
-    timeline: timeline.sort((a, b) => {
-      if (a.time && b.time) {
-        return new Date(a.time).getTime() - new Date(b.time).getTime();
-      }
-      return a.key.localeCompare(b.key, "zh-CN", { numeric: true });
-    }),
+    cutoverCompleted,
+    caseProgressGroups,
   };
 }
 
 export function getPendingCheckpointWaitPrompt(events: NormalizedThreadEvent[]) {
+  const hasInactiveTerminalEvent = events.some(isInactiveTerminalThreadEvent);
+  if (hasInactiveTerminalEvent) {
+    return undefined;
+  }
+
   const checkpointEvents = events
     .filter((event) => event.type === "checkpoint.wait" && event.checkpointWait)
     .sort(compareNormalizedThreadEvents);
@@ -3689,6 +3761,9 @@ export function getPendingCheckpointWaitPrompt(events: NormalizedThreadEvent[]) 
       event.type === "checkpoint.cancel"
     ) {
       return true;
+    }
+    if (event.type.startsWith("autooperator.")) {
+      return false;
     }
     if (nextStage && event.stage === nextStage) {
       return true;
@@ -3740,6 +3815,10 @@ export function reduceWorkflowRuntimeState(
   });
 
   const current = next[stepId];
+  if (current.status === "done" && isIntentSidecarOperation(event)) {
+    return next;
+  }
+
   if (event.stage === "eval") {
     current.progressPhases = updateEvalProgressPhases(
       current.progressPhases,
@@ -3784,6 +3863,13 @@ export function reduceWorkflowRuntimeState(
   }
   current.runtimeText = event.progress ? undefined : event.displayText;
   return next;
+}
+
+export function reduceWorkflowRuntimeStateFromEvents(
+  prev: WorkflowRuntimeState,
+  events: NormalizedThreadEvent[],
+): WorkflowRuntimeState {
+  return dedupeNormalizedEvents(events).reduce(reduceWorkflowRuntimeState, prev);
 }
 
 export function getThreadTitleFromHistoryPayload(payload: ThreadRestorePayload) {

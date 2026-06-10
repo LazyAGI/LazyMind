@@ -11,7 +11,6 @@ from .models import (
     OperationRunSnapshot,
     OperationRunStatus,
     OperationSpec,
-    RerunPlan,
     ScheduleBlocker,
     ScheduleState,
 )
@@ -27,7 +26,6 @@ __all__ = [
     'OperationRunSnapshot',
     'OperationRunStatus',
     'OperationSpec',
-    'RerunPlan',
     'ScheduleBlocker',
     'ScheduleState',
 ]

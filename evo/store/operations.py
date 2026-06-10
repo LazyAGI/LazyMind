@@ -16,19 +16,17 @@ class StoreOperationRunObserver:
     def on_operation_run_change(self, change: OperationRunChange) -> None:
         operation_run_id = change.after.operation_run_id
         event_type = f'operation.{change.kind}'
-        event_payload = {
-            'before': asdict(change.before) if change.before else None,
-            'after': asdict(change.after),
-            'reason': change.reason,
-        }
+        event_payload = {'before': asdict(change.before) if change.before else None,
+                         'after': asdict(change.after), 'reason': change.reason}
         self.store.append_event(Event(event_type, self.run_id, event_payload))
         operation = self._read_operation(operation_run_id)
         operation.update(asdict(change.after))
         operation[f'{change.kind}_at'] = _now()
-        if change.reason:
-            operation['last_change_reason'] = change.reason
+        if change.reason: operation['last_change_reason'] = change.reason
         self.store.write_operation(self.run_id, operation_run_id, operation)
-        _rebuild_frontend_state(self.store, self.run_id)
+        from ..projections import rebuild_frontend_state
+
+        rebuild_frontend_state(self.store, self.run_id)
 
     def _read_operation(self, operation_run_id: str) -> dict:
         try:
@@ -39,9 +37,3 @@ class StoreOperationRunObserver:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _rebuild_frontend_state(store: EvoStore, run_id: str) -> None:
-    from ..projections import rebuild_frontend_state
-
-    rebuild_frontend_state(store, run_id)

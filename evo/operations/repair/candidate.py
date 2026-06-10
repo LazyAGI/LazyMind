@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import suppress
 import json
 import os
 import shlex
@@ -76,6 +77,9 @@ def candidate_params(*, run_root: Path, dataset_name: str, overrides: dict[str, 
             'candidate_chat_url': f'http://127.0.0.1:{port}/api/chat/stream',
             'dataset_name': dataset_name,
             'opencode_container': os.getenv('EVO_FLOW_OPENCODE_CONTAINER') or default_opencode_container(),
+            # Verification is mandatory for patch acceptance; default to a syntax-level
+            # check of the patched package, overridable with project-specific commands.
+            'verification_commands': ['python -m compileall -q lazymind'],
             'repair_scope': default_repair_scope()} | params
 
 
@@ -93,8 +97,7 @@ def start_candidate_process(ctx, workspace, command, chat_url, health_url, log_p
     ctx.register_cancel_callback(lambda: terminate_pid(proc.pid))
     try:
         wait_health(health_url, proc=proc, timeout_s=timeout_s)
-        if proc.poll() is not None:
-            raise RuntimeError('candidate service exited after healthcheck')
+        if proc.poll() is not None: raise RuntimeError('candidate service exited after healthcheck')
     except Exception:
         terminate_pid(proc.pid)
         raise
@@ -104,8 +107,7 @@ def start_candidate_process(ctx, workspace, command, chat_url, health_url, log_p
 
 def prepare_candidate_workspace(workspace: Path, source: Path) -> Path:
     workspace, source = workspace.resolve(), source.resolve()
-    if not workspace.exists():
-        copy_source_tree(source, workspace)
+    if not workspace.exists(): copy_source_tree(source, workspace)
     if not _is_algorithm_dir(workspace):
         raise RuntimeError(f'candidate_workdir is not LazyMind algorithm dir: {workspace}')
     ensure_git_baseline(workspace)
@@ -116,34 +118,29 @@ def cleanup_candidate_artifacts(run_dir: Path) -> None:
     run_dir = run_dir.resolve()
     manifests = sorted((run_dir / 'artifacts' / 'manifests').glob('candidate_*.json'))
     for cutover in _payloads(run_dir, manifests, 'CandidateAlgorithmCutover'):
-        disable_candidate_algorithm(cutover)
+        _cleanup_step(disable_candidate_algorithm, cutover)
     for service in _payloads(run_dir, manifests, 'CandidateServiceRun'):
-        terminate_pid(int((service.get('process') or {}).get('pid') or 0))
+        _cleanup_step(terminate_pid, int((service.get('process') or {}).get('pid') or 0))
     for workspace in _payloads(run_dir, manifests, 'CandidateWorkspace'):
         path = Path(str(workspace.get('workspace_ref') or '')).resolve()
-        if path.exists() and path != run_dir and run_dir in path.parents:
-            shutil.rmtree(path)
+        if path.exists() and path != run_dir and run_dir in path.parents: _cleanup_step(shutil.rmtree, path)
+
+
+def _cleanup_step(fn, *args) -> None:
+    with suppress(Exception):
+        fn(*args)
 
 
 def default_repair_scope() -> dict[str, Any]:
-    return {'allowed_roots': ['lazymind/chat'],
-            'seed_files': ['lazymind/chat/service/chat_service.py',
-                           'lazymind/chat/engine/tools/algo/kb_adaptive_topk.py',
-                           'lazymind/chat/engine/tools/kb.py'],
+    return {'allowed_roots': ['lazymind/chat'], 'seed_files': [],
             'blocked_roots': ['tests', '.git', 'lazyllm'], 'allow_new_files': True}
 
 
 def default_algorithm_dir() -> Path:
     here = Path(__file__).resolve()
-    for path in (
-        Path('/app/algorithm'),
-        Path.cwd() / 'algorithm',
-        Path.cwd().parent / 'LazyRAG' / 'algorithm',
-        here.parents[4] / 'LazyRAG' / 'algorithm',
-        Path.cwd().parent / 'algorithm',
-    ):
-        if _is_algorithm_dir(path):
-            return path
+    for path in (Path('/app/algorithm'), Path.cwd() / 'algorithm', Path.cwd().parent / 'LazyRAG' / 'algorithm',
+                 here.parents[4] / 'LazyRAG' / 'algorithm', Path.cwd().parent / 'algorithm'):
+        if _is_algorithm_dir(path): return path
     return Path.cwd().parent / 'algorithm'
 
 
@@ -155,22 +152,19 @@ def copy_source_tree(source: Path, target: Path) -> None:
     if not _is_algorithm_dir(source):
         raise RuntimeError(f'candidate source is not LazyMind algorithm dir: {source}')
     target.mkdir(parents=True, exist_ok=True)
+    ignore = shutil.ignore_patterns('.git', '.evo_repair_logs', '__pycache__', '*.pyc')
     for name in COPY_DIRS:
-        if (source / name).exists():
-            shutil.copytree(source / name, target / name, ignore=_ignore())
+        if (source / name).exists(): shutil.copytree(source / name, target / name, ignore=ignore)
     for name in COPY_FILES:
-        if (source / name).exists():
-            shutil.copy2(source / name, target / name)
+        if (source / name).exists(): shutil.copy2(source / name, target / name)
     normalize_candidate_config(target / 'config.py')
 
 
 def normalize_candidate_config(path: Path) -> None:
-    if not path.exists():
-        return
+    if not path.exists(): return
     text = path.read_text(encoding='utf-8')
     updated = text.replace(OLD_CONFIG, NEW_CONFIG)
-    if updated != text:
-        path.write_text(updated, encoding='utf-8')
+    if updated != text: path.write_text(updated, encoding='utf-8')
 
 
 def ensure_git_baseline(workspace: Path) -> None:
@@ -190,8 +184,7 @@ def wait_health(url: str, *, proc: subprocess.Popen | None = None, timeout_s: in
             raise RuntimeError(f'candidate service exited with code {proc.returncode}')
         try:
             with urllib.request.urlopen(url, timeout=3) as response:
-                if 200 <= response.status < 300:
-                    return
+                if 200 <= response.status < 300: return
                 last = f'HTTP {response.status}'
         except Exception as exc:
             last = str(exc)
@@ -200,14 +193,12 @@ def wait_health(url: str, *, proc: subprocess.Popen | None = None, timeout_s: in
 
 
 def terminate_pid(pid: int, grace_s: float = 10.0) -> bool:
-    if pid <= 0 or not _alive(pid):
-        return False
+    if pid <= 0 or not _alive(pid): return False
     try:
         os.kill(pid, 15)
         deadline = time.time() + grace_s
         while time.time() < deadline:
-            if not _alive(pid):
-                return True
+            if not _alive(pid): return True
             time.sleep(0.2)
         os.kill(pid, 9)
         return True
@@ -238,13 +229,8 @@ def _out(ctx, payload, schema, phase, message) -> OperationOutput:
 
 def _workspace(ctx: OperationContext) -> Path:
     ref = str(ctx.params.get('candidate_workspace_ref') or '')
-    if ref:
-        return Path(str(ctx.artifact_graph.get(ArtifactRef.parse(ref)).get('workspace_ref') or '')).resolve()
+    if ref: return Path(str(ctx.artifact_graph.get(ArtifactRef.parse(ref)).get('workspace_ref') or '')).resolve()
     return Path(str(ctx.params.get('candidate_workdir') or '')).resolve()
-
-
-def _ignore():
-    return shutil.ignore_patterns('.git', '.evo_repair_logs', '__pycache__', '*.pyc')
 
 
 def _is_algorithm_dir(path: Path) -> bool:
@@ -263,9 +249,8 @@ def _payloads(run_dir: Path, manifests: list[Path], schema_name: str) -> list[di
     out = []
     for path in manifests:
         manifest = json.loads(path.read_text(encoding='utf-8'))
-        if manifest.get('schema_name') != schema_name:
-            continue
+        if manifest.get('schema_name') != schema_name: continue
         for version in manifest.get('versions') or []:
             payload = run_dir / str(version.get('payload_ref') or '')
-            out.extend([json.loads(payload.read_text(encoding='utf-8'))] if payload.exists() else [])
+            if payload.exists(): out.append(json.loads(payload.read_text(encoding='utf-8')))
     return out

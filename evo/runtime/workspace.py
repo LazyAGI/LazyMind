@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from ..ids import validate_id
+from .. import validate_id
 
 
 class DraftWorkspace:
@@ -18,11 +18,7 @@ class DraftWorkspace:
         return self.root / operation_run_id
 
     def prepare(self, operation_run_id: str) -> Path:
-        path = self.dir_for(operation_run_id)
-        if path.exists():
-            shutil.rmtree(path)
-        path.mkdir(parents=True)
-        return path
+        return self._fresh_dir(self.dir_for(operation_run_id))
 
     def write_json(self, operation_run_id: str, name: str, data: Any) -> Path:
         path = self.dir_for(operation_run_id) / name
@@ -31,11 +27,13 @@ class DraftWorkspace:
         return path
 
     def prepare_tx(self, operation_run_id: str) -> Path:
-        tx_dir = self.dir_for(operation_run_id) / 'tx'
-        if tx_dir.exists():
-            shutil.rmtree(tx_dir)
-        tx_dir.mkdir(parents=True)
-        return tx_dir
+        return self._fresh_dir(self.dir_for(operation_run_id) / 'tx')
 
     def discard(self, operation_run_id: str) -> None:
         shutil.rmtree(self.dir_for(operation_run_id), ignore_errors=True)
+
+    @staticmethod
+    def _fresh_dir(path: Path) -> Path:
+        if path.exists(): shutil.rmtree(path)
+        path.mkdir(parents=True)
+        return path

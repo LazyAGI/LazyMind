@@ -19,10 +19,6 @@ class StoreProgressReporter:
             operation = {'operation_run_id': operation_run_id, 'status': 'running'}
         operation['progress'] = progress.to_dict()
         self.store.write_operation(self.run_id, operation_run_id, operation)
-        _rebuild_frontend_state(self.store, self.run_id)
+        from ..projections import rebuild_frontend_state_throttled
 
-
-def _rebuild_frontend_state(store: EvoStore, run_id: str) -> None:
-    from ..projections import rebuild_frontend_state
-
-    rebuild_frontend_state(store, run_id)
+        rebuild_frontend_state_throttled(self.store, self.run_id)

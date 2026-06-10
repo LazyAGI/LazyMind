@@ -13,6 +13,7 @@ class Event:
     payload: dict[str, Any] = field(default_factory=dict)
     event_id: str = field(default_factory=lambda: uuid4().hex)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    sequence: int = 0
 
 
 @dataclass(frozen=True)

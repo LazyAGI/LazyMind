@@ -24,6 +24,9 @@ export type SelfEvolutionHistoryEntry = {
 export type SelfEvolutionCheckpointPrompt = {
   message: string;
   kind?: "checkpoint" | "failure";
+  checkpointKind?: string;
+  completedStageLabel?: string;
+  nextOperationLabel?: string;
   command: string;
 };
 

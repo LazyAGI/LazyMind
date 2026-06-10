@@ -4,19 +4,12 @@ from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 from ..artifacts.models import ArtifactRef
-from ..ids import validate_id
+from .. import validate_id
 
 OperationRunStatus = Literal['pending', 'running', 'checkpointed', 'ended']
-OperationRunChangeKind = Literal[
-    'created',
-    'started',
-    'checkpointed',
-    'ended',
-    'reset',
-    'superseded',
-    'dependencies_updated',
-    'inputs_bound',
-]
+WritePolicy = Literal['single', 'versioned']
+OperationRunChangeKind = Literal['created', 'started', 'checkpointed', 'ended', 'reset', 'superseded',
+                                 'dependencies_updated', 'inputs_bound']
 
 
 @dataclass(frozen=True, order=True)
@@ -46,13 +39,20 @@ class OperationSpec:
     flow_tag: str = ''
     stage_tag: str = ''
     depends_on: list[str] = field(default_factory=list)
+    required_artifact_refs: list[ArtifactRef] = field(default_factory=list)
     required_artifact_ids: list[str] = field(default_factory=list)
     required_artifact_sets: list[ArtifactSetRequirement] = field(default_factory=list)
+    write_policy: WritePolicy = 'single'
     tags: dict[str, str] = field(default_factory=dict)
     params: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         validate_id(self.operation_id, 'operation_id')
+        if self.write_policy not in {'single', 'versioned'}:
+            raise ValueError(f'invalid write_policy: {self.write_policy!r}')
+        for artifact_ref in self.required_artifact_refs:
+            if not isinstance(artifact_ref, ArtifactRef):
+                raise TypeError('required_artifact_refs must contain ArtifactRef values')
         for artifact_id in self.required_artifact_ids:
             validate_id(artifact_id, 'artifact_id')
 
@@ -71,13 +71,6 @@ class OperationRun:
     superseded_by: OperationRunRef | None = None
     supersede_reason: str = ''
     outcome: str = ''
-
-
-@dataclass(frozen=True)
-class RerunPlan:
-    changed_refs: set[ArtifactRef]
-    impacted_refs: set[ArtifactRef]
-    operation_refs: list[OperationRunRef]
 
 
 @dataclass(frozen=True)
@@ -118,8 +111,10 @@ class OperationRunSnapshot:
     outcome: str = ''
     tags: dict[str, str] = field(default_factory=dict)
     params: dict = field(default_factory=dict)
+    required_artifact_refs: list[str] = field(default_factory=list)
     required_artifact_ids: list[str] = field(default_factory=list)
     required_artifact_sets: list[dict] = field(default_factory=list)
+    write_policy: WritePolicy = 'single'
 
 
 @dataclass(frozen=True)
@@ -131,4 +126,5 @@ class OperationRunChange:
 
 
 class OperationRunObserver(Protocol):
-    def on_operation_run_change(self, change: OperationRunChange) -> None: ...
+    def on_operation_run_change(self, change: OperationRunChange) -> None:
+        ...

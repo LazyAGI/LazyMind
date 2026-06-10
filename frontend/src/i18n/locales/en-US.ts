@@ -2127,7 +2127,7 @@ const enUS = {
     autoInteractionStatus: "Automatic processing is running. The system will proceed through the workflow and show process messages above.",
     retrying: "Retrying...",
     continuing: "Continuing...",
-    checkpointInputPlaceholder: "Type \"continue\" or add instructions for this checkpoint.",
+    checkpointInputPlaceholder: "Type \"{{command}}\" or add instructions for this checkpoint.",
     inputPlaceholder: "Continue with an instruction, for example: expand dataset samples first, then enter evaluation.",
     inputAria: "Continue entering self-evolution instructions",
     sendingMessage: "Sending message",

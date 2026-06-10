@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from ..ids import validate_id
+from .. import validate_id
 
 ArtifactStatus = Literal['active', 'stale', 'archived']
 ArtifactRole = Literal['operation_output', 'audit', 'external_input']
@@ -16,8 +16,7 @@ class ArtifactRef:
 
     def __post_init__(self) -> None:
         validate_id(self.artifact_id, 'artifact_id')
-        if self.version < 1:
-            raise ValueError(f'invalid artifact version: {self.version}')
+        if self.version < 1: raise ValueError(f'invalid artifact version: {self.version}')
 
     def __str__(self) -> str:
         return f'{self.artifact_id}@v{self.version}'
@@ -55,18 +54,9 @@ class ArtifactDraft:
 
     def __post_init__(self) -> None:
         validate_id(self.artifact_id, 'artifact_id')
-        if self.producer_operation_run_id:
-            validate_id(self.producer_operation_run_id, 'producer_operation_run_id')
+        if self.producer_operation_run_id: validate_id(self.producer_operation_run_id, 'producer_operation_run_id')
         if self.role not in {'operation_output', 'audit', 'external_input'}:
             raise ValueError(f'invalid artifact role: {self.role!r}')
-
-
-@dataclass(frozen=True)
-class ArtifactPatch:
-    base_ref: ArtifactRef
-    payload: Any
-    producer_operation_run_id: str
-    fragments: list[ArtifactFragment] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

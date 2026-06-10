@@ -1,15 +1,5 @@
-"""Dataset step operations."""
+from .load import BuildCorpusSnapshotOperation, LoadCorpusOperation
+from .prepare import AssembleDatasetOperation, GenerateDatasetCaseOperation, PrepareDatasetCaseOperation
 
-from .assemble import AssembleDatasetOperation
-from .build_snapshot import BuildCorpusSnapshotOperation
-from .generate import GenerateDatasetCaseOperation
-from .load import LoadCorpusOperation
-from .prepare import PrepareDatasetCaseOperation
-
-__all__ = [
-    'AssembleDatasetOperation',
-    'BuildCorpusSnapshotOperation',
-    'GenerateDatasetCaseOperation',
-    'LoadCorpusOperation',
-    'PrepareDatasetCaseOperation',
-]
+__all__ = ['AssembleDatasetOperation', 'BuildCorpusSnapshotOperation', 'GenerateDatasetCaseOperation',
+           'LoadCorpusOperation', 'PrepareDatasetCaseOperation']

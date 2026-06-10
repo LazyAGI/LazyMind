@@ -41,6 +41,7 @@ class CallRecord:
     reused_from_call_id: str = ''
     reused_from_operation_run_id: str = ''
     record_ref: str = ''
+    sequence: int = 0
 
 
 @dataclass(frozen=True)
@@ -54,17 +55,10 @@ class OperationProgress:
     detail: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        data = {
-            'phase': self.phase,
-            'status': self.status,
-            'message': self.message,
-            'current_item': self.current_item,
-            'detail': self.detail,
-        }
-        if self.done is not None:
-            data['done'] = self.done
-        if self.total is not None:
-            data['total'] = self.total
+        data = {'phase': self.phase, 'status': self.status, 'message': self.message,
+                'current_item': self.current_item, 'detail': self.detail}
+        if self.done is not None: data['done'] = self.done
+        if self.total is not None: data['total'] = self.total
         return data
 
 
@@ -83,61 +77,65 @@ class OperationContext:
     cancel_callback_registrar: Callable[[Callable[[], None]], None] = lambda callback: None
 
     def check_interrupt(self) -> None:
-        if self.interrupt_requested():
-            raise OperationInterrupted(self.operation_run_id)
-
-    def request_cancel(self) -> None:
-        self.cancel_requested()
+        if self.interrupt_requested(): raise OperationInterrupted(self.operation_run_id)
 
     def register_cancel_callback(self, callback: Callable[[], None]) -> None:
         self.cancel_callback_registrar(callback)
 
-    def report_progress(self, *, phase: str, message: str = '', status: str = 'running', current_item: str = '',
-                         done: int | None = None, total: int | None = None, detail: dict[str, Any] | None = None,
-                         ) -> None:
-        if self.progress_reporter is None:
-            return
+    def report_progress(
+        self, *, phase: str, message: str = '', status: str = 'running', current_item: str = '',
+        done: int | None = None, total: int | None = None, detail: dict[str, Any] | None = None,
+    ) -> None:
+        if self.progress_reporter is None: return
         self.progress_reporter.report(
             self.operation_run_id,
-            OperationProgress(
-                phase=phase,
-                message=message,
-                status=status,
-                current_item=current_item,
-                done=done,
-                total=total,
-                detail=detail or {},
-            ),
+            OperationProgress(phase=phase, message=message, status=status, current_item=current_item,
+                              done=done, total=total, detail=detail or {}),
         )
 
 
 class CallRecorder(Protocol):
-    def record(self, adapter_type: str, request: Any, response: Any = None, *, phase: str = '', item_ref: str = '',
-               status: CallStatus = 'succeeded', idempotency_key: str = '', idempotency_scope: str = 'operation',
-               error: dict[str, Any] | None = None,
-            ) -> CallRecord: ...
+    def record(
+        self, adapter_type: str, request: Any, response: Any = None, *, phase: str = '', item_ref: str = '',
+        status: CallStatus = 'succeeded', idempotency_key: str = '', idempotency_scope: str = 'operation',
+        error: dict[str, Any] | None = None,
+    ) -> CallRecord:
+        ...
 
-    def succeeded(self, idempotency_key: str, *, idempotency_scope: str = 'operation') -> CallRecord | None: ...
+    def succeeded(self, idempotency_key: str, *, idempotency_scope: str = 'operation') -> CallRecord | None:
+        ...
 
 
 class ProgressReporter(Protocol):
-    def report(self, operation_run_id: str, progress: OperationProgress) -> None: ...
+    def report(self, operation_run_id: str, progress: OperationProgress) -> None:
+        ...
 
 
 class RunLifecycle(Protocol):
-    def mark_running(self, **extra: Any) -> None: ...
-    def block_dispatch(self, reason: str, **extra: Any) -> None: ...
-    def open_dispatch(self, **extra: Any) -> None: ...
-    def mark_ended(self, *, outcome: str = 'success', **extra: Any) -> None: ...
-    def can_dispatch(self) -> bool: ...
+    def mark_running(self, **extra: Any) -> None:
+        ...
+
+    def block_dispatch(self, reason: str, **extra: Any) -> None:
+        ...
+
+    def open_dispatch(self, **extra: Any) -> None:
+        ...
+
+    def mark_ended(self, *, outcome: str = 'success', **extra: Any) -> None:
+        ...
+
+    def can_dispatch(self) -> bool:
+        ...
 
 
 class DispatchGate(Protocol):
-    def can_dispatch(self, run_id: str) -> bool: ...
+    def can_dispatch(self, run_id: str) -> bool:
+        ...
 
 
 class OperationExecutor(Protocol):
-    def execute(self, ctx: OperationContext) -> OperationOutput: ...
+    def execute(self, ctx: OperationContext) -> OperationOutput:
+        ...
 
 
 class OperationInterrupted(Exception):

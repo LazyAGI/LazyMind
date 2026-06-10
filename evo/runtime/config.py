@@ -15,15 +15,14 @@ def load_core_model_config() -> dict[str, Any]:
 
     path = Path(get_config_path())
     raw = load_model_config(str(path), expand_env=True)
-    if _is_dynamic_roles(raw):
+    if any(isinstance(cfg, dict) and cfg.get('source') == 'dynamic' for cfg in raw.values()):
         raw = load_model_config(str(path.with_name(f'runtime_models.{_ROLE_DEFAULTS["dynamic"]}.yaml')),
                                 expand_env=True)
     return {role: cfg for role, cfg in ((role, _role_config(role, entries)) for role, entries in raw.items()) if cfg}
 
 
 def activate_model_config(model_config: dict[str, Any] | None, *, session_id: str | None = None) -> bool:
-    if not model_config:
-        return False
+    if not model_config: return False
     _ensure_lazymind_runtime()
     import lazyllm
     from lazymind.model_config import inject_model_config
@@ -63,8 +62,7 @@ class _ConfiguredRoleModel:
 
 def _ensure_lazymind_runtime() -> None:
     root = _algorithm_root()
-    if root is None:
-        return
+    if root is None: return
     desired = root / 'lazyllm' / 'lazyllm'
     for finder in list(sys.meta_path):
         known = getattr(finder, 'known_source_files', None)
@@ -82,8 +80,7 @@ def _ensure_lazymind_runtime() -> None:
 def _algorithm_root() -> Path | None:
     local = Path(__file__).resolve().parents[3] / 'LazyRAG' / 'algorithm'
     for root in (local, Path('/app/algorithm')):
-        if (root / 'lazymind').exists() and (root / 'lazyllm' / 'lazyllm').exists():
-            return root
+        if (root / 'lazymind').exists() and (root / 'lazyllm' / 'lazyllm').exists(): return root
     return None
 
 
@@ -98,14 +95,9 @@ def _role_type(role_config: Any) -> str:
     return str(value or 'llm')
 
 
-def _is_dynamic_roles(raw: dict[str, Any]) -> bool:
-    return any(isinstance(cfg, dict) and cfg.get('source') == 'dynamic' for cfg in raw.values())
-
-
 def _role_config(role: str, entries: Any) -> dict[str, Any]:
     entry = entries[0] if isinstance(entries, list) and entries else entries
-    if not isinstance(entry, dict):
-        return {}
+    if not isinstance(entry, dict): return {}
     source = str(entry.get('source') or '').strip().lower()
     cfg = {
         'source': source,
@@ -121,7 +113,3 @@ def _role_config(role: str, entries: Any) -> dict[str, Any]:
 def _source_api_key(source: str) -> str:
     key = source.upper().replace('-', '_')
     return os.getenv(f'LAZYLLM_{key}_API_KEY') or os.getenv(f'{key}_API_KEY') or ''
-
-
-def _bool(value: Any) -> bool:
-    return value.strip().lower() not in ('false', '0', 'no', '') if isinstance(value, str) else bool(value)

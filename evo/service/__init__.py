@@ -1,3 +1,3 @@
-from .api import create_app, get_app
+from ..runtime import load_core_model_config
 
-__all__ = ['create_app', 'get_app']
+__all__ = ['load_core_model_config']

@@ -1,31 +1,48 @@
 from __future__ import annotations
 
-from ...artifacts import ArtifactDraft, ArtifactRef
+from ...artifacts import ArtifactDraft, ArtifactRef, validate_artifact_payload
+from ...projections import rebuild_frontend_state
 from ...runtime import AdapterCall, OperationContext, OperationOutput
 from ...store import EvoStore
+from ..dataset.utils import validate_case_id
+
+_PATCH_STR_FIELDS = {'question', 'answer', 'question_type', 'difficulty', 'grading_guidance'}
+_PATCH_LIST_FIELDS = {'reference_context', 'reference_doc', 'reference_doc_ids', 'reference_chunk_ids'}
 
 
 class PatchArtifactOperation:
     def execute(self, ctx: OperationContext) -> OperationOutput:
         ref = _single(ctx)
-        return _out(ctx, ref.artifact_id, ctx.artifact_graph.schema_name(ref), ctx.params['payload'], [ref])
+        schema = ctx.artifact_graph.schema_name(ref)
+        if schema != 'DatasetCase':
+            raise ValueError(f'PatchArtifactOperation only supports DatasetCase typed patches: {schema}')
+        payload = {**ctx.artifact_graph.get(ref), **_dataset_case_patch(ctx.params), 'source_case_ref': str(ref)}
+        validate_artifact_payload('DatasetCase', payload)
+        return _out(ctx, ref.artifact_id, schema, payload, [ref])
 
 
 class RegenerateDatasetCaseOperation:
     def execute(self, ctx: OperationContext) -> OperationOutput:
-        case_id = ctx.params['case_id']
-        payload = {'id': case_id, 'question': ctx.params['question'], 'answer': ctx.params['answer'],
-                   'question_type': ctx.params.get('question_type', ''),
-                   'source_message_id': ctx.params.get('source_message_id', '')}
-        return _out(ctx, case_id, 'DatasetCase', payload, list(ctx.input_refs))
+        ref = _single(ctx)
+        if ctx.artifact_graph.schema_name(ref) != 'DatasetCase':
+            raise ValueError(f'artifact is not DatasetCase: {ref}')
+        case_id = validate_case_id(str(ctx.params['case_id']))
+        base = ctx.artifact_graph.get(ref)
+        if str(base.get('id') or '') != case_id:
+            raise ValueError(f'{ref} payload id mismatch: {base.get("id")} != {case_id}')
+        payload = {
+            **base, 'id': case_id, 'question': ctx.params['question'], 'answer': ctx.params['answer'],
+            'question_type': ctx.params.get('question_type') or base.get('question_type', ''),
+            'source_message_id': ctx.params.get('source_message_id', ''), 'source_case_ref': str(ref),
+        }
+        validate_artifact_payload('DatasetCase', payload)
+        return _out(ctx, case_id, 'DatasetCase', payload, [ref])
 
 
 class RejudgeCaseOperation:
     def execute(self, ctx: OperationContext) -> OperationOutput:
-        ref = _single(ctx)
-        return _out(ctx, f'judge_{ref.artifact_id}', 'JudgeResult', {
-            'case_ref': str(ref), 'score': ctx.params['score'], 'rationale': ctx.params.get('rationale', ''),
-        }, [ref])
+        raise ValueError(
+            'rejudge_case cannot create a valid JudgeResult without a bound RagAnswer; use judge_answer_case')
 
 
 class RedirectResearchOperation:
@@ -41,8 +58,7 @@ class ReadArtifactQueryOperation:
     def execute(self, ctx: OperationContext) -> OperationOutput:
         if not ctx.input_refs and ctx.params.get('artifact_ref'):
             ref = str(ctx.params['artifact_ref'])
-            answer = {'status': 'missing', 'artifact_ref': ref, 'message': 'artifact not found'}
-            return _answer(ctx, [ref], answer, [])
+            return _answer(ctx, [ref], {'status': 'missing', 'artifact_ref': ref, 'message': 'artifact not found'}, [])
         payloads = [ctx.artifact_graph.get(ref) for ref in ctx.input_refs]
         return _answer(ctx, [str(ref) for ref in ctx.input_refs], payloads[0] if len(payloads) == 1 else payloads,
                        list(ctx.input_refs))
@@ -63,7 +79,8 @@ class ReadRunStatusQueryOperation:
 
     def execute(self, ctx: OperationContext) -> OperationOutput:
         run_id = ctx.params.get('run_id') or ctx.run_id
-        return _answer(ctx, [f'run:{run_id}'], self.store.read_json(self.store.run_dir(run_id) / 'run.json'))
+        projection = rebuild_frontend_state(self.store, run_id, write=True)
+        return _answer(ctx, [f'run:{run_id}'], {**(projection.get('run') or {}), 'projection': projection})
 
 
 class RespondToUserOperation:
@@ -85,9 +102,19 @@ class IntentParseOperation:
 
 
 def _single(ctx: OperationContext) -> ArtifactRef:
-    if len(ctx.input_refs) != 1:
-        raise ValueError('operation requires exactly one input artifact')
+    if len(ctx.input_refs) != 1: raise ValueError('operation requires exactly one input artifact')
     return ctx.input_refs[0]
+
+
+def _dataset_case_patch(params: dict) -> dict:
+    patch = {key: params[key] for key in _PATCH_STR_FIELDS | _PATCH_LIST_FIELDS if key in params}
+    if not patch: raise ValueError('DatasetCase patch must include at least one typed field')
+    for key in _PATCH_STR_FIELDS & patch.keys():
+        if not isinstance(patch[key], str): raise ValueError(f'DatasetCase patch field {key} must be str')
+    for key in _PATCH_LIST_FIELDS & patch.keys():
+        if not isinstance(patch[key], list) or not all(isinstance(item, str) for item in patch[key]):
+            raise ValueError(f'DatasetCase patch field {key} must be list[str]')
+    return patch
 
 
 def _out(ctx: OperationContext, artifact_id: str, schema: str, payload, refs) -> OperationOutput:
