@@ -1058,7 +1058,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 8px 10px;
   border-radius: 12px;
   background: #ffffff;
   border: 1px solid #dbeafe;
@@ -1086,7 +1086,7 @@
 }
 
 .data-source-schedule-inline-weekdays-item.ant-form-item {
-  flex: 1 1 100%;
+  flex: 0 0 auto;
 
   .ant-form-item-explain-error {
     margin-top: 8px;
@@ -1103,8 +1103,10 @@
 
 .data-source-schedule-weekdays.ant-checkbox-group {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-wrap: nowrap;
+  gap: 3px;
+  max-width: 100%;
+  overflow-x: auto;
 
   .ant-checkbox-wrapper {
     margin-inline-start: 0;
@@ -1120,34 +1122,41 @@
   }
 
   .ant-checkbox-wrapper-checked .data-source-schedule-weekday-pill {
-    border-color: #1677ff;
-    background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
-    color: #175cd3;
-    box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.12);
+    border-color: #3d7edb;
+    background: #3d7edb;
+    color: #ffffff;
+    box-shadow: none;
   }
 
   .ant-checkbox-wrapper:hover .data-source-schedule-weekday-pill {
-    border-color: #98c5ff;
-    background: #f8fbff;
+    border-color: #a3a3a3;
+    background: #a3a3a3;
+    color: #ffffff;
+  }
+
+  .ant-checkbox-wrapper-checked:hover .data-source-schedule-weekday-pill {
+    border-color: #3d7edb;
+    background: #3d7edb;
   }
 }
 
 .data-source-schedule-weekday-pill {
-  min-height: 30px;
-  padding: 0 12px;
+  width: 34px;
+  height: 28px;
+  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #d0d5dd;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #344054;
-  font-size: 12px;
-  font-weight: 500;
+  border: 1px solid #a3a3a3;
+  border-radius: 5px;
+  background: #a3a3a3;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
   transition:
     border-color 0.2s ease,
     background 0.2s ease,
-    box-shadow 0.2s ease,
     color 0.2s ease;
 }
 

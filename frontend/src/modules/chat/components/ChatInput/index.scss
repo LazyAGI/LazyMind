@@ -410,6 +410,23 @@
         transform: translateY(-1px);
       }
 
+      &:disabled {
+        cursor: not-allowed;
+        color: #8d9ab2;
+        transform: none;
+      }
+
+      &:disabled:hover {
+        background: rgba(255, 255, 255, 0.42);
+        box-shadow: none;
+        color: #8d9ab2;
+      }
+
+      &.is-loading {
+        background: rgba(239, 246, 255, 0.84);
+        color: #0b70e7;
+      }
+
       &:focus-visible {
         position: relative;
         z-index: 1;

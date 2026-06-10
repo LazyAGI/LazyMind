@@ -376,7 +376,7 @@ func manualPaths() map[string]any {
 		"/temp/uploads/{upload_id}:complete":            map[string]any{"post": op("Complete temp upload", nil, jsonBody(refSchema("CompleteUploadRequest"), false), response(200, "Complete uploadtext", refSchema("CompleteUploadResponse")))},
 		"/temp/uploads/{upload_id}:abort":               map[string]any{"post": op("Abort temp upload", nil, jsonBody(refSchema("AbortUploadRequest"), false), response(200, "Abort uploadtext", refSchema("AbortUploadResponse")))},
 		"/prompts": map[string]any{
-			"get":  op("Prompt list", queryParams(param("query", "page_size", false, intSchema()), param("query", "page_token", false, strSchema())), nil, response(200, "Prompt list", refSchema("PromptListResponse"))),
+			"get":  op("Prompt list", queryParams(param("query", "page_size", false, intSchema()), param("query", "page_token", false, strSchema()), param("query", "keyword", false, strSchema())), nil, response(200, "Prompt list", refSchema("PromptListResponse"))),
 			"post": op("Create prompt", nil, jsonBody(refSchema("PromptRequest"), true), response(200, "Created prompt", refSchema("PromptItem"))),
 		},
 		"/prompts:polish": map[string]any{"post": op("Polish prompt", nil, jsonBody(refSchema("PromptPolishRequest"), true), response(200, "Polished prompt", refSchema("PromptPolishResponse")))},

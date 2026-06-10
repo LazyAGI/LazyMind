@@ -145,7 +145,6 @@ import {
   inferSkillFileExt,
   initialChangeProposals,
   initialSkills,
-  initialTools,
   isMarkdownSkillFile,
   isSkillShareActionable,
   isSkillUpdatePending,
@@ -162,6 +161,11 @@ import {
   SKILL_TAG_MAX_COUNT,
   skillUploadAccept,
 } from "./shared";
+import {
+  disableTool,
+  enableTool,
+  listToolAssets,
+} from "./toolApi";
 
 import "./index.scss";
 
@@ -253,7 +257,9 @@ export default function MemoryManagement() {
   })();
   const [activeTab, setActiveTab] = useState<MemoryTab>(routeMemoryTab);
   const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
-  const [toolAssets] = useState<StructuredAsset[]>(initialTools);
+  const [toolAssets, setToolAssets] = useState<StructuredAsset[]>([]);
+  const [toolLoading, setToolLoading] = useState(false);
+  const [toolActionLoading, setToolActionLoading] = useState<Set<string>>(new Set());
   const [skillAssets, setSkillAssets] = useState<StructuredAsset[]>(initialSkills);
   const [skillLoading, setSkillLoading] = useState(false);
   const [skillAutoEvoLoading, setSkillAutoEvoLoading] = useState<Set<string>>(new Set());
@@ -702,6 +708,53 @@ export default function MemoryManagement() {
     }
   }, [category, skillKeyword, skillListPage, skillListPageSize, tag]);
 
+  const refreshToolAssets = useCallback(async () => {
+    setToolLoading(true);
+
+    try {
+      const records = await listToolAssets();
+      setToolAssets(records);
+    } catch (error) {
+      console.error("Load tool assets failed:", error);
+    } finally {
+      setToolLoading(false);
+    }
+  }, []);
+
+  const handleToggleTool = useCallback(
+    async (record: StructuredAsset, checked: boolean) => {
+      const toolName = record.id;
+      if (!toolName || record.readonly) {
+        return;
+      }
+
+      setToolActionLoading((previous) => new Set(previous).add(toolName));
+
+      try {
+        if (checked) {
+          await enableTool(toolName);
+        } else {
+          await disableTool(toolName);
+        }
+        await refreshToolAssets();
+        message.success(
+          checked
+            ? t("admin.memoryToolEnableSuccess")
+            : t("admin.memoryToolDisableSuccess"),
+        );
+      } catch (error) {
+        console.error("Toggle tool failed:", error);
+      } finally {
+        setToolActionLoading((previous) => {
+          const next = new Set(previous);
+          next.delete(toolName);
+          return next;
+        });
+      }
+    },
+    [refreshToolAssets, t],
+  );
+
   const refreshGlossaryAssets = useCallback(
     async (options?: {
       keyword?: string;
@@ -1040,6 +1093,14 @@ export default function MemoryManagement() {
     skillRouteItemId,
     tag,
   ]);
+
+  useEffect(() => {
+    if (routeMemoryTab !== "tools") {
+      return;
+    }
+
+    void refreshToolAssets();
+  }, [refreshToolAssets, routeMemoryTab]);
 
   useEffect(() => {
     const shouldRefreshExperience =
@@ -4792,6 +4853,34 @@ export default function MemoryManagement() {
       key: "content",
       render: (value: string) => value,
     },
+    {
+      title: t("admin.memoryToolStatus"),
+      dataIndex: "isEnabled",
+      key: "status",
+      width: 120,
+      render: (value: boolean) => (
+        <Tag color={value ? "success" : "default"}>
+          {value ? t("common.enabled") : t("common.disabled")}
+        </Tag>
+      ),
+    },
+    {
+      title: t("common.actions"),
+      key: "actions",
+      width: 140,
+      render: (_value, record) => (
+        <Switch
+          checked={Boolean(record.isEnabled)}
+          checkedChildren={t("common.enabled")}
+          disabled={Boolean(record.readonly)}
+          loading={toolActionLoading.has(record.id)}
+          unCheckedChildren={t("common.disabled")}
+          onChange={(checked) => {
+            void handleToggleTool(record, checked);
+          }}
+        />
+      ),
+    },
   ];
 
   const experienceColumns: ColumnsType<ExperienceAsset> = [
@@ -5143,6 +5232,7 @@ export default function MemoryManagement() {
     filteredStructuredItems,
     genericColumns,
     toolColumns,
+    toolLoading,
     isReviewRouteRequested,
     isGlossaryRouteRequested,
     reviewRouteTab,

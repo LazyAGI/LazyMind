@@ -85,6 +85,7 @@ export default function MemoryManagementListPage() {
     filteredStructuredItems,
     genericColumns,
     toolColumns,
+    toolLoading,
   } = useMemoryManagementOutletContext();
 
   const activeListTotal = useMemo(() => {
@@ -316,7 +317,7 @@ export default function MemoryManagementListPage() {
             placeholder={t("admin.memorySearchPlaceholder")}
             className="memory-filter-search"
           />
-          {activeTab === "tools" || activeTab === "skills" ? (
+          {activeTab === "skills" ? (
             <>
               <Select
                 allowClear
@@ -329,19 +330,17 @@ export default function MemoryManagementListPage() {
                 className="memory-filter-select"
                 onChange={(value) => setCategory(value)}
               />
-              {activeTab === "skills" ? (
-                <Select
-                  allowClear
-                  value={tag}
-                  placeholder={t("admin.memoryAllTags")}
-                  options={availableTags.map((item: string) => ({
-                    label: item,
-                    value: item,
-                  }))}
-                  className="memory-filter-select"
-                  onChange={(value) => setTag(value)}
-                />
-              ) : null}
+              <Select
+                allowClear
+                value={tag}
+                placeholder={t("admin.memoryAllTags")}
+                options={availableTags.map((item: string) => ({
+                  label: item,
+                  value: item,
+                }))}
+                className="memory-filter-select"
+                onChange={(value) => setTag(value)}
+              />
             </>
           ) : activeTab === "glossary" ? (
             <Select
@@ -403,7 +402,13 @@ export default function MemoryManagementListPage() {
           <Table<StructuredAsset>
             className="admin-page-table memory-table"
             rowKey="id"
-            loading={activeTab === "skills" ? skillLoading : false}
+            loading={
+              activeTab === "skills"
+                ? skillLoading
+                : activeTab === "tools"
+                  ? toolLoading
+                  : false
+            }
             dataSource={activeTab === "skills" ? filteredSkillTree : filteredStructuredItems}
             columns={activeTab === "tools" ? toolColumns : genericColumns}
             rowClassName={(record) =>
