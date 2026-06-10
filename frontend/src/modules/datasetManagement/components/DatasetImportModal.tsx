@@ -50,7 +50,14 @@ const fieldLabels: Record<DatasetItemField, string> = {
   generate_reason: "生成依据",
   is_deleted: "是否删除",
 };
-const visibleImportPreviewFields = datasetItemFields.filter((field) => field !== "case_id");
+const hiddenImportPreviewFields = new Set<DatasetItemField>([
+  "case_id",
+  "reference_doc_ids",
+  "reference_chunk_ids",
+]);
+const visibleImportPreviewFields = datasetItemFields.filter(
+  (field) => !hiddenImportPreviewFields.has(field),
+);
 
 interface DatasetImportModalProps {
   open: boolean;

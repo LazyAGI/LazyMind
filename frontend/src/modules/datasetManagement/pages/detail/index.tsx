@@ -96,8 +96,6 @@ const DEFAULT_COLUMN_WIDTHS = {
   key_points: 220,
   reference_context: 260,
   reference_doc: 160,
-  reference_doc_ids: 180,
-  reference_chunk_ids: 180,
   generate_reason: 220,
   is_deleted: 120,
   source: 100,
@@ -113,8 +111,6 @@ type EditableDatasetItemField =
   | "key_points"
   | "reference_context"
   | "reference_doc"
-  | "reference_doc_ids"
-  | "reference_chunk_ids"
   | "generate_reason";
 type ActiveEditableCell = {
   itemId: string;
@@ -177,8 +173,6 @@ const CONFIGURABLE_COLUMN_OPTIONS: Array<{
   { labelKey: datasetItemFieldI18nKeys.key_points, value: "key_points" },
   { labelKey: datasetItemFieldI18nKeys.reference_doc, value: "reference_doc" },
   { labelKey: datasetItemFieldI18nKeys.reference_context, value: "reference_context" },
-  { labelKey: datasetItemFieldI18nKeys.reference_doc_ids, value: "reference_doc_ids" },
-  { labelKey: datasetItemFieldI18nKeys.reference_chunk_ids, value: "reference_chunk_ids" },
   { labelKey: datasetItemFieldI18nKeys.generate_reason, value: "generate_reason" },
   { labelKey: datasetItemFieldI18nKeys.is_deleted, value: "is_deleted" },
   { labelKey: "datasetManagement.fields.source", value: "source" },
@@ -200,8 +194,6 @@ const editableFieldColumnMap: Record<EditableDatasetItemField, ConfigurableColum
   key_points: "key_points",
   reference_context: "reference_context",
   reference_doc: "reference_doc",
-  reference_doc_ids: "reference_doc_ids",
-  reference_chunk_ids: "reference_chunk_ids",
   generate_reason: "generate_reason",
 };
 
@@ -1999,24 +1991,6 @@ export default function DatasetDetailPage() {
         onHeaderCell: () => getHeaderCellProps("reference_context"),
         render: (_, record) =>
           renderInlineTextArea(record, "reference_context", "请输入参考上下文"),
-      },
-      {
-        title: t(datasetItemFieldI18nKeys.reference_doc_ids),
-        dataIndex: "reference_doc_ids",
-        key: "reference_doc_ids",
-        width: columnWidths.reference_doc_ids,
-        onHeaderCell: () => getHeaderCellProps("reference_doc_ids"),
-        render: (_, record) =>
-          renderInlineInput(record, "reference_doc_ids", "请输入参考文档 ID"),
-      },
-      {
-        title: t(datasetItemFieldI18nKeys.reference_chunk_ids),
-        dataIndex: "reference_chunk_ids",
-        key: "reference_chunk_ids",
-        width: columnWidths.reference_chunk_ids,
-        onHeaderCell: () => getHeaderCellProps("reference_chunk_ids"),
-        render: (_, record) =>
-          renderInlineInput(record, "reference_chunk_ids", "请输入参考片段 ID"),
       },
       {
         title: t(datasetItemFieldI18nKeys.generate_reason),
