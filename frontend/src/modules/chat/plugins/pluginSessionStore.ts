@@ -7,6 +7,8 @@ interface PluginSessionStore {
   handleEvent: (event: PluginEvent) => void;
   getSession: (sessionId: string) => PluginSessionState | undefined;
   clearSession: (sessionId: string) => void;
+  /** Restore a plugin session from persisted history (no SSE, artifacts already known). */
+  restoreSession: (sessionId: string, pluginId: string, artifacts: Record<string, unknown>) => void;
 }
 
 export const usePluginSessionStore = create<PluginSessionStore>((set, get) => ({
@@ -169,5 +171,22 @@ export const usePluginSessionStore = create<PluginSessionStore>((set, get) => ({
       const { [sessionId]: _, ...rest } = state.sessions;
       return { sessions: rest };
     });
+  },
+
+  restoreSession: (sessionId, pluginId, artifacts) => {
+    set((state) => ({
+      sessions: {
+        ...state.sessions,
+        [sessionId]: {
+          sessionId,
+          pluginId,
+          currentStep: '',
+          artifacts,
+          stepProgress: null,
+          isWaiting: false,
+          stepError: null,
+        },
+      },
+    }));
   },
 }));

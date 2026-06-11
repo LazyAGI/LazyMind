@@ -17,7 +17,9 @@ def save_step_artifact(artifact_id: str, value: Any) -> str:
     """
     workspace = lazyllm.globals.get('agentic_config', {}).get('step_workspace', '')
     stored_value = _maybe_copy_to_workspace(value, artifact_id, workspace)
-    lazyllm.globals.get('plugin_event_queue', []).append(
+    _queue = lazyllm.globals.get('agentic_config', {}).get('plugin_event_queue') \
+        or lazyllm.globals.get('plugin_event_queue', [])
+    _queue.append(
         {'type': 'artifact', 'artifact_id': artifact_id, 'value': stored_value}
     )
     return f'Artifact {artifact_id!r} saved.'
@@ -31,7 +33,9 @@ def save_step_checkpoint(data: dict) -> str:
     """
     workspace = lazyllm.globals.get('agentic_config', {}).get('step_workspace', '')
     stored_data = _normalize_checkpoint_data(data, workspace)
-    lazyllm.globals.get('plugin_event_queue', []).append(
+    _queue = lazyllm.globals.get('agentic_config', {}).get('plugin_event_queue') \
+        or lazyllm.globals.get('plugin_event_queue', [])
+    _queue.append(
         {'type': 'checkpoint', 'value': stored_data}
     )
     count = data.get('completed_count', 0)

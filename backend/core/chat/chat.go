@@ -55,6 +55,7 @@ type LazyChatRequest struct {
 	EnvironmentContext map[string]any  `json:"environment_context,omitempty"`
 	LLMConfig          map[string]any  `json:"llm_config,omitempty"`
 	ToolConfig         map[string]any  `json:"tool_config,omitempty"`
+	PluginContext      map[string]any  `json:"plugin_context,omitempty"`
 }
 
 // LazyChatData text data text。
@@ -192,13 +193,15 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 		scanner.Buffer(nil, 512*1024)
 		for scanner.Scan() && ctx.Err() == nil {
 			text := strings.TrimSpace(scanner.Text())
-			if text == "" {
+			if text == "" || text == "data: [DONE]" || text == "[DONE]" {
 				continue
 			}
+			// Strip the SSE "data: " prefix before attempting JSON parse.
+			jsonText := strings.TrimPrefix(text, "data: ")
 			data := &LazyStreamData{}
 			var streamResp LazyChatResponse
-			if err := json.Unmarshal([]byte(text), &streamResp); err != nil {
-				data.RawText = text
+			if err := json.Unmarshal([]byte(jsonText), &streamResp); err != nil {
+				data.RawText = text // keep original (with "data: " prefix) for plugin_event detection
 			} else {
 				data.Resp = &streamResp
 			}
@@ -218,7 +221,10 @@ type UpstreamStreamChunk struct {
 	Think         string `json:"think"`
 	Status        string `json:"status"`
 	Sources       []any  `json:"sources"`
-	ReasoningText string `json:"reasoning_text"` // text think
+	ReasoningText string `json:"reasoning_text"`
+	// RawPluginEvent carries the original JSON payload for plugin_event frames
+	// that arrive from Python as raw SSE lines (not structured chat responses).
+	RawPluginEvent string `json:"raw_plugin_event,omitempty"`
 }
 
 type upstreamStreamLine struct {
@@ -299,6 +305,10 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 		if len(tc) > 0 {
 			req.ToolConfig = tc
 		}
+	}
+	// Pass plugin_context through so Python knows which plugin/step is active.
+	if pc, ok := body["plugin_context"].(map[string]any); ok && len(pc) > 0 {
+		req.PluginContext = pc
 	}
 	return req
 }
@@ -404,7 +414,15 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 				continue
 			}
 			if d.Resp == nil {
-				// textFailedtext RawText：text，text，text
+				// Pass through plugin_event frames so streamSingleAnswer can forward them.
+				raw := strings.TrimPrefix(strings.TrimSpace(d.RawText), "data: ")
+				if strings.Contains(raw, `"plugin_event"`) {
+					select {
+					case out <- UpstreamStreamChunk{RawPluginEvent: raw}:
+					case <-ctx.Done():
+						return
+					}
+				}
 				continue
 			}
 			chunk := UpstreamStreamChunk{

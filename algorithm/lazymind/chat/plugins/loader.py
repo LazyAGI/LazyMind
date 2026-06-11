@@ -34,8 +34,14 @@ class StateMachine:
         # Empty from_step means the session just started; all declared steps are reachable.
         if not from_step:
             return list(self._step_ids)
+        # BFS over transition edges, starting from the *successors* of from_step
+        # (not from_step itself, which has already completed).
         visited: set[str] = set()
-        queue = [from_step]
+        queue: list[str] = [
+            edge.get('to', '')
+            for edge in self._transitions.get(from_step, [])
+            if edge.get('to')
+        ]
         while queue:
             current = queue.pop(0)
             if current in visited:

@@ -154,6 +154,9 @@ func streamPluginLoop(
 			stepTrigger.PluginID, stepTrigger.StepID,
 			stepComplete.ResultSummary, freshArtifacts, turn+1)
 		currentReqBody = injectDriverJudgmentIntoReqBody(currentReqBody, judgment)
+		// Advance plugin_context.step so Python knows which step just completed,
+		// allowing get_reachable_steps to return the *next* step rather than the same one.
+		currentReqBody = advancePluginContextStep(currentReqBody, stepTrigger.StepID)
 	}
 
 	_ = sseSender.Send([]byte("[DONE]"))
@@ -374,6 +377,19 @@ func streamStepTurn(
 }
 
 // ---- Helpers ----
+
+// advancePluginContextStep updates the plugin_context.step field in a cloned reqBody
+// to reflect the step that just completed. Python uses this to compute reachable steps
+// for the next ChatAgent turn, preventing re-triggering of the same step.
+func advancePluginContextStep(reqBody map[string]any, completedStepID string) map[string]any {
+	clone := cloneReqBody(reqBody)
+	if pc, ok := clone["plugin_context"].(map[string]any); ok {
+		pc["step"] = completedStepID
+		pc["advance"] = true
+		clone["plugin_context"] = pc
+	}
+	return clone
+}
 
 func overrideUserMessage(reqBody map[string]any, msg string) map[string]any {
 	clone := cloneReqBody(reqBody)

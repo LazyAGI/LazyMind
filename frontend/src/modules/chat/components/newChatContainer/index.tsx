@@ -36,6 +36,7 @@ import ChatInput, {
 import { ChatConfig } from "../ChatConfigs";
 import { allowedImageTypes } from "../ImageUpload";
 import { streamManager } from "@/modules/chat/utils/StreamManager";
+import type { StreamCallbacks } from "@/modules/chat/utils/StreamManager";
 import { useModelSelectionStore } from "@/modules/chat/store/modelSelection";
 import type { PreferenceType } from "../MultiAnswerDisplay";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
@@ -406,10 +407,13 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       } else {
         sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
       }
-      const callbacks: Record<string, (e: CustomEvent) => void> = {
+      const callbacks: StreamCallbacks = {
         message: (e) => onMessage(e),
         error: (e) => onError(e),
         timeout: (e) => onTimeout(e),
+        pluginMount: (pluginSessionId) => {
+          updateAssistantMessage({ plugin_session_id: pluginSessionId });
+        },
       };
 
       const sse = onOpenSSE(input, action, {});
@@ -453,10 +457,13 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       setIS_STREAMING(true);
       currentConversationIdRef.current = conversationId;
 
-      const callbacks: Record<string, (e: CustomEvent) => void> = {
+      const callbacks: StreamCallbacks = {
         message: (e) => onMessage(e),
         error: (e) => onError(e),
         timeout: (e) => onTimeout(e),
+        pluginMount: (pluginSessionId) => {
+          updateAssistantMessage({ plugin_session_id: pluginSessionId });
+        },
       };
       const sse = onOpenResumeSSE(conversationId, {});
       sseRef.current = sse;

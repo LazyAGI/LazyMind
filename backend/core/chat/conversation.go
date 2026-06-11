@@ -799,15 +799,18 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		}
 	}
 	var input any
+	var pluginSessionID string
 	if len(h.Ext) > 0 {
 		var ext struct {
-			Input any `json:"input"`
+			Input           any    `json:"input"`
+			PluginSessionID string `json:"plugin_session_id"`
 		}
 		if err := json.Unmarshal(h.Ext, &ext); err == nil {
 			input = ext.Input
+			pluginSessionID = ext.PluginSessionID
 		}
 	}
-	return map[string]any{
+	item := map[string]any{
 		"seq":             h.Seq,
 		"query":           h.RawContent,
 		"result":          stripThinkTags(stripToolTags(h.Result)),
@@ -819,6 +822,10 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		"expected_answer": h.ExpectedAnswer,
 		"create_time":     h.CreateTime.UTC().Format(time.RFC3339),
 	}
+	if pluginSessionID != "" {
+		item["plugin_session_id"] = pluginSessionID
+	}
+	return item
 }
 
 func conversationHistoryResponseItems(histories []orm.ChatHistory) []map[string]any {
@@ -1295,4 +1302,43 @@ func SetMultiAnswersSwitchStatus(w http.ResponseWriter, r *http.Request) {
 		db.Model(&row).Updates(map[string]any{"status": body.Status, "updated_at": now})
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{"status": body.Status})
+}
+
+// GetPluginSessionArtifacts GET /api/v1/plugin-sessions/{session_id}:artifacts
+// Returns the stored artifacts snapshot for a plugin session.
+func GetPluginSessionArtifacts(w http.ResponseWriter, r *http.Request) {
+	sessionID := common.PathVar(r, "session_id")
+	if sessionID == "" {
+		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
+		return
+	}
+	userID := store.UserID(r)
+	if userID == "" {
+		userID = "0"
+	}
+	db := store.DB()
+	session, err := orm.GetPluginSession(db, sessionID)
+	if err != nil {
+		common.ReplyErr(w, fmt.Sprintf("plugin session not found: %v", err), http.StatusNotFound)
+		return
+	}
+	// Ownership check.
+	if session.CreateUserID != userID {
+		common.ReplyErr(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	// meta already contains the latest artifact snapshot (kept in sync by UpsertPluginArtifact).
+	var artifacts map[string]interface{}
+	if len(session.Meta) > 0 {
+		if err := json.Unmarshal(session.Meta, &artifacts); err != nil {
+			artifacts = map[string]interface{}{}
+		}
+	} else {
+		artifacts = map[string]interface{}{}
+	}
+	writeConversationJSON(w, http.StatusOK, map[string]any{
+		"plugin_session_id": session.ID,
+		"plugin_id":         session.PluginID,
+		"artifacts":         artifacts,
+	})
 }

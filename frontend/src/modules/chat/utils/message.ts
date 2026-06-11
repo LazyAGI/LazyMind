@@ -166,6 +166,10 @@ export function buildChatMessageListFromHistory(
       feed_back: record.feed_back,
       thinking_time_s: record.thinking_time_s,
     };
+    // Preserve plugin session association for history recovery.
+    if ((record as any).plugin_session_id) {
+      assistantMessage.plugin_session_id = (record as any).plugin_session_id;
+    }
 
     if (enableMultipleAnswers && record.second_result && record.second_id) {
       assistantMessage.answers = [

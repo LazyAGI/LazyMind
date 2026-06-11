@@ -179,6 +179,15 @@ export function ChatServiceApi() {
         options,
       ) as Promise<AxiosResponse<ConversationHistoryListResponse>>;
     },
+    getPluginSessionArtifacts(
+      sessionId: string,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.get<{ plugin_session_id: string; plugin_id: string; artifacts: Record<string, unknown> }>(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}:artifacts`,
+        options,
+      );
+    },
     conversationServiceBatchChat(
       requestParameters: ConversationServiceApiConversationServiceBatchChatRequest,
       options?: RawAxiosRequestConfig,

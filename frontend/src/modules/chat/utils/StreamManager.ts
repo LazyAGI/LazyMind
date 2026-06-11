@@ -8,6 +8,8 @@ export interface StreamCallbacks {
   message?: (e: CustomEvent) => void;
   error?: (e: CustomEvent) => void;
   timeout?: (e: CustomEvent) => void;
+  /** Called when a plugin mount event is received, with the plugin_session_id. */
+  pluginMount?: (pluginSessionId: string) => void;
 }
 
 export interface StreamState {
@@ -104,6 +106,11 @@ class StreamManager {
             const parsed = JSON.parse(rawData);
             if (parsed?.type === "plugin_event" && parsed?.data) {
               usePluginSessionStore.getState().handleEvent(parsed as PluginEvent);
+              // Notify the caller when a plugin session is mounted so it can
+              // attach the plugin_session_id to the current assistant message.
+              if (parsed.data?.type === "mount" && parsed.data?.plugin_session_id) {
+                callbacks.pluginMount?.(parsed.data.plugin_session_id as string);
+              }
               return;
             }
           }

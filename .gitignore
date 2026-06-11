@@ -1,6 +1,7 @@
 backend/auth-service/api_permissions.json
 .vscode/settings.json
 backend/core/core
+backend/core/lazymind-core
 .env
 
 .flake8-python.path
@@ -101,3 +102,6 @@ api/backend/auth-service/openapi.yml
 api/backend/auth-service/swagger.json
 api/backend/core/openapi.yml
 api/backend/core/swagger.json
+backend/core/swagger.json
+backend/core/docs/swagger.json
+backend/core/openapi.json

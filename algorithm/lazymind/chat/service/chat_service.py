@@ -142,8 +142,16 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         'db_session_factory': _get_db_session_factory() if _PLUGIN_ENABLED and _get_db_session_factory else None,
     })
 
+    # Use a single shared list object for plugin events. Store the reference in
+    # agentic_config so tool functions running in a different asyncio task can
+    # append to the *same* list (lazyllm.globals is task-local and cannot be
+    # shared across asyncio tasks).
+    plugin_event_queue: list = []
+    agentic_config['plugin_event_queue'] = plugin_event_queue
+
     lazyllm.globals['agentic_config'] = agentic_config
-    lazyllm.globals['plugin_event_queue'] = []
+    # Keep lazyllm.globals pointing at the same list object for any legacy readers.
+    lazyllm.globals['plugin_event_queue'] = plugin_event_queue
 
     # Unified tool view: default tools + all plugin trigger tools, regardless of session state.
     all_default_configs = filter_tools(DEFAULT_TOOLS, disabled_tools)
@@ -203,9 +211,12 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
         try:
             async with rag_sem:
-                # Flush any plugin events queued before the agent runs (e.g. pre-queued mount).
-                pre_events = list(lazyllm.globals.get('plugin_event_queue', []))
-                lazyllm.globals['plugin_event_queue'] = []
+                # Use the shared list from agentic_config (works across asyncio tasks).
+                shared_queue: list = agentic_config.get('plugin_event_queue', [])
+
+                # Flush any plugin events queued before the agent runs.
+                pre_events = list(shared_queue)
+                del shared_queue[:]
                 for ev in pre_events:
                     yield sse_line({'type': 'plugin_event', 'data': ev})
 
@@ -224,8 +235,8 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                 final_result = result
 
                 # Flush plugin events emitted by trigger tools (e.g. mount, step_trigger).
-                post_events = list(lazyllm.globals.get('plugin_event_queue', []))
-                lazyllm.globals['plugin_event_queue'] = []
+                post_events = list(shared_queue)
+                del shared_queue[:]
                 for ev in post_events:
                     yield sse_line({'type': 'plugin_event', 'data': ev})
 

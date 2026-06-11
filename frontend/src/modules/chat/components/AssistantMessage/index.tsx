@@ -23,6 +23,7 @@ import { AgentAppsAuth } from "@/components/auth";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
+import { usePluginSessionStore, PluginRenderer } from "@/modules/chat/plugins";
 
 const BotAvatarIcon = new URL(
   "../../assets/images/bot_avatar.png",
@@ -162,6 +163,10 @@ const AssistantMessage = (props: any) => {
     localFeedbackType: item?.feed_back,
     targetHistoryId: undefined,
   });
+
+  const pluginSession = usePluginSessionStore((state) =>
+    item?.plugin_session_id ? state.sessions[item.plugin_session_id] : undefined,
+  );
 
   useEffect(() => {
     dispatch({ type: "SYNC_FROM_SERVER", feedbackType: item?.feed_back });
@@ -894,6 +899,8 @@ const AssistantMessage = (props: any) => {
             ChatConversationsResponseFinishReasonEnum.FinishReasonStop &&
             !item.onboardingInfo &&
             renderFooter()}
+
+          {pluginSession && <PluginRenderer session={pluginSession} />}
         </div>
         {index === length - 1 && renderBottom()}
       </div>

@@ -408,3 +408,33 @@ func parsePluginEventFromSSELine(line string) *PluginEvent {
 	}
 	return &ev
 }
+
+// ---- recordingSSESender ----
+
+// recordingSSESender wraps httpSSESender and collects plain-text delta content
+// from non-plugin SSE frames. This allows the caller to persist the full response
+// to ChatHistory even when using streamChatTurn (which streams directly to w).
+type recordingSSESender struct {
+	httpSSESender
+	buf strings.Builder
+}
+
+func newRecordingSSESender(w http.ResponseWriter) *recordingSSESender {
+	return &recordingSSESender{httpSSESender: httpSSESender{w: w}}
+}
+
+func (r *recordingSSESender) Send(data []byte) error {
+	// Try to extract delta text from the SSE payload for recording.
+	if len(data) > 0 && data[0] == '{' {
+		var obj struct {
+			Delta string `json:"delta"`
+		}
+		if json.Unmarshal(data, &obj) == nil && obj.Delta != "" {
+			r.buf.WriteString(obj.Delta)
+		}
+	}
+	return r.httpSSESender.Send(data)
+}
+
+// RecordedText returns the accumulated text deltas received so far.
+func (r *recordingSSESender) RecordedText() string { return r.buf.String() }

@@ -101,7 +101,11 @@ def trigger_plugin_step(step_id: str, user_input: str) -> str:
         sm = plugin_loader.get_state_machine(plugin_id)
         reachable_step_count = max(1, len(sm.get_reachable_steps(step_id)))
 
-    lazyllm.globals.get('plugin_event_queue', []).append({
+    # Use the shared queue from agentic_config (works across asyncio tasks).
+    # Fall back to lazyllm.globals for compatibility.
+    _queue = lazyllm.globals.get('agentic_config', {}).get('plugin_event_queue') \
+        or lazyllm.globals.get('plugin_event_queue', [])
+    _queue.append({
         'type': 'step_trigger',
         'plugin_id': plugin_id,
         'plugin_session_id': plugin_session_id,
@@ -129,7 +133,8 @@ def _launch_plugin(plugin_id: str, user_input: str) -> str:
     agentic_cfg['plugin_id'] = plugin_id
     lazyllm.globals['agentic_config'] = agentic_cfg
 
-    queue = lazyllm.globals.get('plugin_event_queue', [])
+    # Use the shared queue from agentic_config (works across asyncio tasks).
+    queue = agentic_cfg.get('plugin_event_queue') or lazyllm.globals.get('plugin_event_queue', [])
 
     # mount event — Go creates the session record and replaces the placeholder ID.
     queue.append({
@@ -198,7 +203,8 @@ def build_all_plugin_tools() -> list[Callable]:
 def build_plugin_step_tools(plugin_id: str, current_step: str) -> list[Callable]:
     """Build trigger_<step_id> callable tools for ChatAgent.
 
-    Returns one tool per reachable step from current_step (including self for retry).
+    Returns one tool per step reachable *after* current_step (successors only,
+    not current_step itself, which has already been executed).
     """
     if not plugin_id or not plugin_loader.is_loaded(plugin_id):
         return []
@@ -208,6 +214,10 @@ def build_plugin_step_tools(plugin_id: str, current_step: str) -> list[Callable]
 
     tools: list[Callable] = []
     for step_id in reachable_steps:
+        # Never expose the current step as a triggerable tool; re-execution of the same
+        # step must be decided by the DriverAgent (Go side), not by ChatAgent itself.
+        if current_step and step_id == current_step:
+            continue
         def make_trigger(sid: str) -> Callable:
             def trigger(user_input: str) -> str:
                 """Trigger plugin step execution.

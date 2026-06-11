@@ -1,4 +1,4 @@
-import { FC, type ReactNode, useRef, useState, useEffect } from "react";
+import { FC, type ReactNode, useRef, useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { message } from "antd";
 import { AgentAppsAuth } from "@/components/auth";
@@ -14,6 +14,7 @@ import "./index.scss";
 import UIUtils from "@/modules/chat/utils/ui";
 import InitialCard from "@/modules/chat/components/InitialCard";
 import { useActivePluginContextStore } from "@/modules/chat/plugins/activePluginContextStore";
+import { usePluginSessionStore } from "@/modules/chat/plugins/pluginSessionStore";
 import { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import { Method, SSE } from "@/modules/chat/utils/sse";
 import {
@@ -76,8 +77,36 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   const { pendingMessage, clearPendingMessage } = useChatMessageStore();
   const { getModelSelection, setModelSelection } = useModelSelectionStore();
+  const restorePluginSessions = usePluginSessionStore((s) => s.restoreSession);
 
   const chatRef = useRef<ChatImperativeProps>(null);
+
+  /**
+   * After loading a history list, find any assistant messages that carry a
+   * plugin_session_id and fetch their artifacts from the backend so the
+   * PluginRenderer can display them without a live SSE stream.
+   */
+  const restorePluginSessionsFromHistory = useCallback(
+    (list: any[]) => {
+      list.forEach((msg) => {
+        if (msg.role !== 'assistant' && msg.role !== 'ASSISTANT') return;
+        const sessionId: string | undefined = msg.plugin_session_id;
+        if (!sessionId) return;
+        // Already restored — skip to avoid redundant fetches.
+        if (usePluginSessionStore.getState().sessions[sessionId]) return;
+        ChatServiceApi()
+          .getPluginSessionArtifacts(sessionId)
+          .then((res) => {
+            const { plugin_id, artifacts } = res.data;
+            restorePluginSessions(sessionId, plugin_id, artifacts ?? {});
+          })
+          .catch(() => {
+            // Silently ignore — the message will just show without a plugin card.
+          });
+      });
+    },
+    [restorePluginSessions],
+  );
 
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
@@ -176,6 +205,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           isGenerating,
         });
         chatRef.current?.replaceMessageList(resolvedId, list);
+        restorePluginSessionsFromHistory(list);
         if (isGenerating) {
           chatRef.current?.openResumeSSE?.(resolvedId);
         } else {
@@ -320,6 +350,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           conversation?.conversation_id || "",
           list,
         );
+        restorePluginSessionsFromHistory(list);
       })
       .finally(() => {
         setIsRestoringConversation(false);

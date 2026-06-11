@@ -259,11 +259,22 @@ func checkInput(raw map[string]any) bool {
 }
 
 func buildChatHistoryExt(raw map[string]any, query string) json.RawMessage {
+	return buildChatHistoryExtWithPlugin(raw, query, "")
+}
+
+func buildChatHistoryExtWithPlugin(raw map[string]any, query, pluginSessionID string) json.RawMessage {
 	input := chatHistoryInput(raw, query)
-	if input == nil {
+	payload := map[string]any{}
+	if input != nil {
+		payload["input"] = input
+	}
+	if pluginSessionID != "" {
+		payload["plugin_session_id"] = pluginSessionID
+	}
+	if len(payload) == 0 {
 		return nil
 	}
-	b, err := json.Marshal(map[string]any{"input": input})
+	b, err := json.Marshal(payload)
 	if err != nil {
 		return nil
 	}
@@ -652,10 +663,53 @@ func handleStreamChat(
 		// Plugin context: hand off to the plugin event loop instead of the normal answer path.
 		if pluginCtx != nil && pluginCtx.PluginID != "" {
 			sender := &httpSSESender{w: w}
+			pluginExt := buildChatHistoryExtWithPlugin(reqBody, query, pluginCtx.PluginSessionID)
 			streamPluginLoop(chatCtx, db, baseURL, *pluginCtx, reqBody, sender, convID)
+			// Persist a ChatHistory record so the plugin session can be recovered on reload.
+			now := time.Now()
+			if !target.IsRegeneration {
+				_ = db.Create(&orm.ChatHistory{
+					ID:             historyID,
+					Seq:            target.Seq,
+					ConversationID: convID,
+					RawContent:     query,
+					Content:        query,
+					Result:         "",
+					Ext:            pluginExt,
+					TimeMixin:      orm.TimeMixin{CreateTime: now, UpdateTime: now},
+				}).Error
+				db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
+			} else {
+				_ = db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
+					"ext":         pluginExt,
+					"update_time": now,
+				}).Error
+			}
+			db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
 			return
 		}
-		streamSingleAnswer(chatCtx, reqCtx, w, flusher, db, rdb, baseURL, reqBody, convID, query, historyID, target, historyExt)
+		// No pre-existing plugin session: use streamSingleAnswer (correct SSE format for the
+		// frontend) which now passes plugin_event frames through. If the LLM boots a plugin
+		// (mount + step_trigger), we enter the plugin loop after the chat turn finishes.
+		sender := &httpSSESender{w: w}
+		bootstrapSessionID := streamSingleAnswer(chatCtx, reqCtx, w, flusher, db, rdb, baseURL, reqBody, convID, query, historyID, target, historyExt)
+		if bootstrapSessionID != "" {
+			// Update the ChatHistory ext to include the plugin_session_id.
+			pluginExt := buildChatHistoryExtWithPlugin(reqBody, query, bootstrapSessionID)
+			_ = db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Update("ext", pluginExt).Error
+			// Plugin was bootstrapped by the LLM this turn; run the first step now.
+			sessionRec, err2 := orm.GetPluginSession(db, bootstrapSessionID)
+			if err2 == nil && sessionRec != nil {
+				pctx := PluginContext{
+					PluginSessionID: sessionRec.ID,
+					PluginID:        sessionRec.PluginID,
+					Step:            sessionRec.CurrentStepID,
+					Advance:         false,
+				}
+				streamPluginLoop(chatCtx, db, baseURL, pctx, reqBody, sender, convID)
+			}
+			_ = sender.Send([]byte("[DONE]"))
+		}
 		return
 	}
 	streamDualAnswer(chatCtx, reqCtx, w, flusher, db, rdb, baseURL, reqBody, convID, query, historyID, secondaryHistoryID, target, historyExt)
@@ -672,7 +726,7 @@ func streamSingleAnswer(
 	convID, query, historyID string,
 	target chatPersistTarget,
 	historyExt json.RawMessage,
-) {
+) string { // returns bootstrap plugin_session_id if plugin was launched, else ""
 	seq := target.Seq
 	ch, err := StreamChatUpstream(chatCtx, baseURL, reqBody)
 	if err != nil {
@@ -691,12 +745,13 @@ func streamSingleAnswer(
 			ReasoningContent:  "",
 			ThinkingDurationS: 0,
 		})
-		return
+		return ""
 	}
 	var fullText string
 	var pendingThink string
 	var fullResult string
 	var sources []any
+	var bootstrapPluginSessionID string
 	thinkStart := time.Now()
 	// text：textConversation/text，finish_reason text UNSPECIFIED
 	writeSSEChunk(w, flusher, &ChatChunkResponse{
@@ -712,6 +767,44 @@ func streamSingleAnswer(
 		ThinkingDurationS: 0,
 	})
 	for d := range ch {
+		// Plugin bootstrap: forward the raw plugin_event frame to the frontend and
+		// extract the session_id from mount events so we can enter the plugin loop after.
+		if d.RawPluginEvent != "" {
+			// Parse the event to handle mount specially (assign real session ID).
+			ev := parsePluginEventFromSSELine("data: " + d.RawPluginEvent)
+			if ev != nil && ev.Type == "mount" && db != nil && bootstrapPluginSessionID == "" {
+				realSessionID := newPluginID()
+				userID, _ := reqBody["user_id"].(string)
+				newSession := &orm.PluginSession{
+					ID:             realSessionID,
+					PluginID:       ev.PluginID,
+					ConversationID: convID,
+					CreateUserID:   userID,
+				}
+				_ = orm.CreatePluginSession(db, newSession)
+				ev.PluginSessionID = realSessionID
+				bootstrapPluginSessionID = realSessionID
+				// Forward with real session ID.
+				b, _ := json.Marshal(map[string]interface{}{"type": "plugin_event", "data": ev})
+				frame := append([]byte("data: "), b...)
+				frame = append(frame, '\n', '\n')
+				_, _ = w.Write(frame)
+				flusher.Flush()
+			} else if ev != nil && ev.Type == "step_trigger" && bootstrapPluginSessionID != "" {
+				// Update session CurrentStepID so streamPluginLoop knows which step to run.
+				ev.PluginSessionID = bootstrapPluginSessionID
+				_ = db.Model(&orm.PluginSession{}).
+					Where("id = ?", bootstrapPluginSessionID).
+					Update("current_step_id", ev.StepID).Error
+				// Do not forward step_trigger to frontend.
+			} else {
+				// Non-mount plugin events: forward as-is.
+				frame := []byte("data: " + d.RawPluginEvent + "\n\n")
+				_, _ = w.Write(frame)
+				flusher.Flush()
+			}
+			continue
+		}
 		if d.ReasoningText != "" {
 			pendingThink += d.ReasoningText
 			continue
@@ -786,7 +879,10 @@ func streamSingleAnswer(
 	if !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
-	if reqCtx.Err() == nil {
+	// Only send FINISH_REASON_STOP when no plugin was bootstrapped.
+	// If a plugin was launched, the caller (handleStreamChat) will run the plugin
+	// loop and send [DONE] itself.
+	if bootstrapPluginSessionID == "" && reqCtx.Err() == nil {
 		// text：message text，finish_reason text STOP
 		writeSSEChunk(w, flusher, &ChatChunkResponse{
 			ConversationID:  convID,
@@ -804,6 +900,7 @@ func streamSingleAnswer(
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()
 	}
+	return bootstrapPluginSessionID
 }
 
 func streamDualAnswer(
