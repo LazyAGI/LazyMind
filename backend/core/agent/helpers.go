@@ -102,6 +102,18 @@ func threadResultsURL(threadID, resultKind string) string {
 	)
 }
 
+func threadResultTraceURL(threadID, traceID string) string {
+	return common.JoinURL(
+		agentServiceEndpoint(),
+		"/v1/evo/threads/"+url.PathEscape(threadID)+"/results/traces/"+url.PathEscape(traceID),
+	)
+}
+
+func threadResultTraceCompareURL(threadID, aTraceID, bTraceID string) string {
+	base := common.JoinURL(agentServiceEndpoint(), "/v1/evo/threads/"+url.PathEscape(threadID)+"/results/traces-compare")
+	return base + "?a=" + url.QueryEscape(aTraceID) + "&b=" + url.QueryEscape(bTraceID)
+}
+
 func reportContentURL(reportID, format string) string {
 	base := common.JoinURL(agentServiceEndpoint(), "/v1/evo/reports/"+url.PathEscape(reportID)+"/content")
 	if strings.TrimSpace(format) == "" {
