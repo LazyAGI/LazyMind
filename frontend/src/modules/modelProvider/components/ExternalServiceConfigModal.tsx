@@ -207,22 +207,39 @@ export default function ExternalServiceConfigModal({
     });
   }
 
+  async function writeTextToClipboard(text: string) {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.readOnly = true;
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    let copied = false;
+    try {
+      if (typeof document.execCommand === "function") {
+        copied = document.execCommand("copy");
+      }
+    } finally {
+      document.body.removeChild(textarea);
+    }
+    if (copied) {
+      return;
+    }
+
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    throw new Error("Copy command failed");
+  }
+
   async function copyKeyToClipboard(key: string) {
     try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(key);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = key;
-        textarea.style.position = "fixed";
-        textarea.style.left = "-9999px";
-        document.body.appendChild(textarea);
-        textarea.focus();
-        textarea.select();
-        const copied = document.execCommand("copy");
-        document.body.removeChild(textarea);
-        if (!copied) throw new Error("Copy command failed");
-      }
+      await writeTextToClipboard(key);
       message.success(t("common.copySuccess"));
     } catch {
       message.error(t("common.copyFailedManual"));

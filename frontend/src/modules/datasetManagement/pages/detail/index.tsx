@@ -96,7 +96,6 @@ const DEFAULT_COLUMN_WIDTHS = {
   key_points: 220,
   reference_context: 260,
   reference_doc: 160,
-  generate_reason: 220,
   is_deleted: 120,
   source: 100,
   updated_at: 150,
@@ -110,8 +109,7 @@ type EditableDatasetItemField =
   | "ground_truth"
   | "key_points"
   | "reference_context"
-  | "reference_doc"
-  | "generate_reason";
+  | "reference_doc";
 type ActiveEditableCell = {
   itemId: string;
   field: EditableDatasetItemField;
@@ -123,7 +121,7 @@ type DocumentSearchState = {
   nextPageToken?: string;
   totalSize?: number;
 };
-type ConfigurableColumnKey = Exclude<ResizableColumnKey, "actions">;
+type ConfigurableColumnKey = Exclude<ResizableColumnKey, "actions" | "is_deleted">;
 const REQUIRED_VISIBLE_COLUMN_KEYS: ConfigurableColumnKey[] = [
   "question",
   "question_type",
@@ -173,8 +171,6 @@ const CONFIGURABLE_COLUMN_OPTIONS: Array<{
   { labelKey: datasetItemFieldI18nKeys.key_points, value: "key_points" },
   { labelKey: datasetItemFieldI18nKeys.reference_doc, value: "reference_doc" },
   { labelKey: datasetItemFieldI18nKeys.reference_context, value: "reference_context" },
-  { labelKey: datasetItemFieldI18nKeys.generate_reason, value: "generate_reason" },
-  { labelKey: datasetItemFieldI18nKeys.is_deleted, value: "is_deleted" },
   { labelKey: "datasetManagement.fields.source", value: "source" },
   { labelKey: "datasetManagement.fields.updatedAt", value: "updated_at" },
 ];
@@ -194,7 +190,6 @@ const editableFieldColumnMap: Record<EditableDatasetItemField, ConfigurableColum
   key_points: "key_points",
   reference_context: "reference_context",
   reference_doc: "reference_doc",
-  generate_reason: "generate_reason",
 };
 
 const renderRequiredColumnTitle = (title: string) => (
@@ -1991,24 +1986,6 @@ export default function DatasetDetailPage() {
         onHeaderCell: () => getHeaderCellProps("reference_context"),
         render: (_, record) =>
           renderInlineTextArea(record, "reference_context", "请输入参考上下文"),
-      },
-      {
-        title: t(datasetItemFieldI18nKeys.generate_reason),
-        dataIndex: "generate_reason",
-        key: "generate_reason",
-        width: columnWidths.generate_reason,
-        onHeaderCell: () => getHeaderCellProps("generate_reason"),
-        render: (_, record) =>
-          renderInlineTextArea(record, "generate_reason", "请输入生成依据"),
-      },
-      {
-        title: t(datasetItemFieldI18nKeys.is_deleted),
-        dataIndex: "is_deleted",
-        key: "is_deleted",
-        width: columnWidths.is_deleted,
-        onHeaderCell: () => getHeaderCellProps("is_deleted"),
-        render: (value: boolean | undefined) =>
-          value ? t("common.enabled") : t("common.disabled"),
       },
       {
         title: t("datasetManagement.fields.source"),

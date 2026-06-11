@@ -1,6 +1,9 @@
 package modelprovider
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -9,7 +12,9 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/store"
 )
 
 func setupListProviderTestDB(t *testing.T) *gorm.DB {
@@ -29,6 +34,66 @@ func setupListProviderTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
+}
+
+func TestListUserProvidersKeywordIsCaseInsensitive(t *testing.T) {
+	db := setupListProviderTestDB(t)
+	store.Init(db, db, nil)
+
+	now := time.Now()
+	rows := []orm.DefaultModelProvider{
+		{
+			ID:          "default-qwen",
+			Name:        "Qwen",
+			Description: "Qwen provider",
+			BaseURL:     "https://dashscope.aliyuncs.com/",
+			Category:    defaultProviderCategory,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+		{
+			ID:          "default-openai",
+			Name:        "OpenAI",
+			Description: "OpenAI provider",
+			BaseURL:     "https://api.openai.com/v1/",
+			Category:    defaultProviderCategory,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("create default providers: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/model_providers?keyword=qwen", nil)
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+
+	ListUserProviders(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var payload common.APIResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	data, ok := payload.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected response data: %#v", payload.Data)
+	}
+	providers, ok := data["providers"].([]any)
+	if !ok {
+		t.Fatalf("unexpected providers: %#v", data["providers"])
+	}
+	if len(providers) != 1 {
+		t.Fatalf("expected 1 provider, got %d: %#v", len(providers), providers)
+	}
+	provider, ok := providers[0].(map[string]any)
+	if !ok || provider["name"] != "Qwen" {
+		t.Fatalf("expected Qwen provider, got %#v", providers[0])
+	}
 }
 
 func TestBuildListItemsReturnsConfigurationFlagFromVerifiedGroups(t *testing.T) {

@@ -7,6 +7,7 @@
   overflow: hidden;
   align-items: center;
   background: #ffffff;
+  overflow: hidden;
 
   position: relative;
 
@@ -107,6 +108,61 @@
           margin-bottom: 4px;
           color: #2f73d8;
           cursor: help;
+        }
+
+        .chat-user-citation-preview {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          align-self: flex-end;
+          min-width: 36px;
+          min-height: 36px;
+          margin-bottom: 2px;
+          border: 0;
+          border-radius: 10px;
+          background: rgba(245, 247, 250, 0.94);
+          color: rgba(79, 86, 98, 0.62);
+          box-shadow: 0 6px 18px rgba(31, 41, 55, 0.08);
+          cursor: default;
+          font: inherit;
+          opacity: 1;
+          padding: 0;
+          transition:
+            opacity 0.5s ease,
+            background-color 0.2s ease,
+            color 0.2s ease,
+            box-shadow 0.2s ease;
+
+          &.is-expanded {
+            justify-content: flex-start;
+            max-width: min(360px, 60vw);
+            padding: 8px 10px;
+            gap: 8px;
+            color: #5f6b7a;
+          }
+
+          &.is-hiding {
+            opacity: 0.18;
+          }
+        }
+
+        .chat-user-citation-preview-icon {
+          font-size: 18px;
+          flex: 0 0 auto;
+        }
+
+        .chat-user-citation-preview-content {
+          display: flex;
+          min-width: 0;
+          flex-direction: column;
+          gap: 6px;
+        }
+
+        .chat-user-citation-preview-item {
+          color: #475467;
+          font-size: 12px;
+          line-height: 1.55;
+          word-break: break-word;
         }
 
         .chat-user-edit-wrap {

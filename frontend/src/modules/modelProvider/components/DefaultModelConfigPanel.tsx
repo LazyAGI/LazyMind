@@ -874,6 +874,10 @@ export default function DefaultModelConfigPanel() {
   ) => {
     const value = selectedModels[capability];
     if (!value) {
+      if (!share) {
+        setShareStatus((current) => ({ ...current, [capability]: false }));
+        return;
+      }
       message.warning(t("modelProvider.noModelSelectedForShare"));
       return;
     }
@@ -909,6 +913,9 @@ export default function DefaultModelConfigPanel() {
       ...current,
       [capability]: value,
     }));
+    if (!value) {
+      setShareStatus((current) => ({ ...current, [capability]: false }));
+    }
     void saveSelectedModel(capability, value)
       .then((response) => {
         (response.selections || []).forEach((selection) => {
