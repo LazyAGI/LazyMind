@@ -470,6 +470,7 @@ class EvoMessageHub:
             return _sse(event, {'thread_id': thread_id, 'message_id': message_id, **data})
 
         yield emit('intent_start', {})
+        yield emit('thinking_delta', {'delta': '正在分析你的消息并读取当前线程状态。'})
         try:
             result = await asyncio.to_thread(self.post_message, thread_id, {**payload, 'message_id': message_id})
             for chunk in _chunks(result['reply']):

@@ -1098,7 +1098,7 @@ class EvoFlowService:
         run_id = str(target.get('run_id') or params.get('run_id') or self.run_id)
         target_refs = [f'run:{run_id}']
         if result.action == 'read_run_status_query':
-            answer = read_run_status_query_answer(self.store, run_id, write=False)
+            answer = _live_run_status_answer(read_run_status_query_answer(self.store, run_id, write=False))
         elif result.action == 'explain_run_failure_query':
             stage = str(params.get('stage') or target.get('stage') or '').strip()
             answer = explain_run_failure_query_answer(self.store, self.artifacts, run_id, stage)
@@ -1231,6 +1231,43 @@ def _completed(message_id: str, result, outputs: list[OperationResult]) -> dict[
 def _first_intent(raw: dict[str, Any]) -> dict[str, Any]:
     intents = raw.get('intents') if isinstance(raw, dict) else None
     return dict(intents[0]) if isinstance(intents, list) and intents and isinstance(intents[0], dict) else {}
+
+
+def _live_run_status_answer(answer: dict[str, Any]) -> dict[str, Any]:
+    projection = dict(answer.get('projection') or {})
+    operations = list(projection.get('operations') or [])
+    active = [_operation_status_row(item) for item in operations
+              if str(item.get('status') or '') in {'pending', 'running', 'checkpointed'}]
+    return {
+        'run': projection.get('run') or {key: value for key, value in answer.items() if key != 'projection'},
+        'built_at': projection.get('built_at'),
+        'source_event_count': projection.get('source_event_count'),
+        'operation_counts': _operation_counts(operations),
+        'active_operations': active[-20:],
+        'recent_operations': [_operation_status_row(item) for item in operations[-20:]],
+        'blockers': projection.get('blockers') or [],
+        'latest_artifacts': projection.get('latest_artifacts') or {},
+    }
+
+
+def _operation_counts(operations: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in operations:
+        key = str(item.get('outcome') or item.get('status') or 'unknown')
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _operation_status_row(operation: dict[str, Any]) -> dict[str, Any]:
+    return {
+        'operation_run_id': operation.get('operation_run_id'),
+        'operation_type': operation.get('operation_type'),
+        'status': operation.get('status'),
+        'outcome': operation.get('outcome'),
+        'flow_tag': operation.get('flow_tag'),
+        'stage_tag': operation.get('stage_tag'),
+        'progress': operation.get('progress') or {},
+    }
 
 
 def result_dict(result: FlowMessageResult) -> dict[str, Any]:
