@@ -65,7 +65,7 @@ config.add('model_config_path', str, 'dynamic', 'MODEL_CONFIG_PATH',
                'dynamic': str(_COMMON_DIR / 'runtime_models.yaml'),
            },
            post_action=_model_config_path_post_action)
-config.add('lazymind_algo_id', str, 'general_algo', 'LAZYMIND_ALGO_ID', description='LazyMind algorithm ID.')
+config.add('algo_id', str, 'general_algo', 'ALGO_ID', description='LazyMind algorithm ID.')
 
 # ---------------------------------------------------------------------------
 # Tracing / observability
