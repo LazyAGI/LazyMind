@@ -11,11 +11,13 @@ import (
 )
 
 type exportTarget struct {
-	kind      ObjectKind
-	token     string
-	spaceID   string
-	driveType string
-	objectKey string
+	kind                ObjectKind
+	token               string
+	spaceID             string
+	driveType           string
+	shortcutTargetType  string
+	shortcutTargetToken string
+	objectKey           string
 }
 
 func (c *FeishuConnector) locateObject(req connector.ExportObjectRequest) (exportTarget, error) {
@@ -28,11 +30,13 @@ func (c *FeishuConnector) locateObject(req connector.ExportObjectRequest) (expor
 		token = req.ObjectKey
 	}
 	target := exportTarget{
-		kind:      kind,
-		token:     token,
-		spaceID:   req.ProviderMeta["space_id"],
-		driveType: strings.ToLower(strings.TrimSpace(req.ProviderMeta["file_type"])),
-		objectKey: req.ObjectKey,
+		kind:                kind,
+		token:               token,
+		spaceID:             req.ProviderMeta["space_id"],
+		driveType:           strings.ToLower(strings.TrimSpace(req.ProviderMeta["file_type"])),
+		shortcutTargetType:  strings.ToLower(strings.TrimSpace(req.ProviderMeta["shortcut_target_type"])),
+		shortcutTargetToken: strings.TrimSpace(req.ProviderMeta["shortcut_target_token"]),
+		objectKey:           req.ObjectKey,
 	}
 	switch kind {
 	case ObjectKindDriveFile:
@@ -58,10 +62,19 @@ func (c *FeishuConnector) locateObject(req connector.ExportObjectRequest) (expor
 func (c *FeishuConnector) exportToTempURI(ctx context.Context, token string, target exportTarget, req connector.ExportObjectRequest) (ExportedContent, error) {
 	switch target.kind {
 	case ObjectKindDriveFile:
-		if target.driveType == "docx" || target.driveType == "doc" {
-			return c.api.ExportDriveDocumentMarkdown(ctx, token, target.token, req.SourceVersion)
+		driveType := target.driveType
+		driveToken := target.token
+		if driveType == "shortcut" {
+			if target.shortcutTargetToken == "" {
+				return ExportedContent{}, connector.NewError(connector.ErrorCodeUnsupported, "drive shortcut target is missing")
+			}
+			driveType = target.shortcutTargetType
+			driveToken = target.shortcutTargetToken
 		}
-		return c.api.DownloadDriveFile(ctx, token, target.token, req.SourceVersion)
+		if driveType == "docx" || driveType == "doc" {
+			return c.api.ExportDriveDocumentMarkdown(ctx, token, driveToken, req.SourceVersion)
+		}
+		return c.api.DownloadDriveFile(ctx, token, driveToken, req.SourceVersion)
 	case ObjectKindWikiNode:
 		return c.api.ExportWikiNodeMarkdown(ctx, token, target.spaceID, target.token, req.SourceVersion)
 	default:

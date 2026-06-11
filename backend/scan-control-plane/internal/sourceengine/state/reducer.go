@@ -328,14 +328,23 @@ func (r *DBStateReducer) ApplyTaskFailure(ctx context.Context, input TaskFailure
 		return err
 	}
 	if current.ActiveTaskID == input.Task.TaskID {
-		current.ParseQueueState = ParseQueueStateFailed
-		current.LastError = store.JSON{"code": input.ErrorCode, "message": input.Message}
 		now := input.FailedAt
 		if now.IsZero() {
 			now = r.clock()
 		}
+		current.ParseQueueState = ParseQueueStateFailed
+		current.LastError = store.JSON{"code": input.ErrorCode, "message": input.Message}
 		current.UpdatedAt = now
-		return r.store.SaveDocumentState(ctx, current)
+		if err := r.store.SaveDocumentState(ctx, current); err != nil {
+			return err
+		}
+		document, err := r.store.GetDocument(ctx, input.Task.SourceID, input.Task.BindingID, input.Task.ObjectKey)
+		if err != nil {
+			return err
+		}
+		document.ParseStatus = "FAILED"
+		document.UpdatedAt = now
+		return r.store.UpdateDocument(ctx, document)
 	}
 	return nil
 }

@@ -104,10 +104,11 @@ func TestBuildChatRequestBodyKeepsExistingFilters(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
+	memoryContent := "---\nagent_persona: |-\n  严谨助手\nuser_address: |-\n  老师\nresponse_style: |-\n  简洁\n---\n\nmemory-content"
 	ctx := &evolution.ChatResourceContext{
 		DisabledTools:      []string{"bing"},
 		AvailableSkills:    []string{"coding/git-workflow"},
-		Memory:             "memory-content",
+		Memory:             memoryContent,
 		UserPreference:     "preference-content",
 		UsePersonalization: true,
 	}
@@ -128,7 +129,7 @@ func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
 	if _, ok := body["skill_fs_url"]; ok {
 		t.Fatalf("expected skill_fs_url to be omitted")
 	}
-	if got := body["memory"]; got != "memory-content" {
+	if got := body["memory"]; got != memoryContent {
 		t.Fatalf("unexpected memory: %#v", got)
 	}
 	if got := body["user_preference"]; got != "preference-content" {

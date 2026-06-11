@@ -33,10 +33,10 @@ func TestTargetTreeListChildrenUsesConnectorAndDoesNotUseFallbackOrStore(t *test
 	if len(spy.listRequests) != 1 || len(spy.mapObjects) != 2 {
 		t.Fatalf("expected connector list and map calls, list=%d map=%d", len(spy.listRequests), len(spy.mapObjects))
 	}
-	if len(page.Items) != 2 {
-		t.Fatalf("expected current page nodes only, got %+v", page.Items)
+	if len(page.Items) != 1 {
+		t.Fatalf("expected target directory tree to hide files, got %+v", page.Items)
 	}
-	if page.Items[0].ObjectKey != "folder-1" || page.Items[1].ObjectKey != "doc-1" {
+	if page.Items[0].ObjectKey != "folder-1" {
 		t.Fatalf("unexpected target tree nodes: %+v", page.Items)
 	}
 	if fallback.called {
@@ -69,8 +69,11 @@ func TestTargetTreeAllCurrentLevelPullsPagesWithoutWritingBusinessTables(t *test
 	if len(spy.listRequests) != 2 {
 		t.Fatalf("expected connector pagination, got %d requests", len(spy.listRequests))
 	}
-	if !page.ListComplete || page.HasMore || len(page.Items) != 3 {
-		t.Fatalf("expected complete current-level page, got %+v", page)
+	if !page.ListComplete || page.HasMore || len(page.Items) != 2 {
+		t.Fatalf("expected complete current-level directory page, got %+v", page)
+	}
+	if page.Items[0].ObjectKey != "folder-1" || page.Items[1].ObjectKey != "page-1" {
+		t.Fatalf("target directory tree should keep containers and hide files, got %+v", page.Items)
 	}
 }
 
@@ -270,6 +273,47 @@ func TestSourceTreeLiveRootRequestUsesTreeKeyNodeRef(t *testing.T) {
 	}
 	if len(spy.listRequests) != 1 || spy.listRequests[0].NodeRef != "wiki:space-1:node-root" {
 		t.Fatalf("live root request should pass tree_key as provider node_ref, got %+v", spy.listRequests)
+	}
+}
+
+func TestSourceTreeLiveWikiSpaceNodeRefPreserved(t *testing.T) {
+	t.Parallel()
+
+	spy := &treeConnectorSpy{connectorType: connector.ConnectorType("feishu")}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	repo := newTreeReadRepo()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{{
+		BindingID:        "binding-1",
+		SourceID:         "source-1",
+		TreeKey:          "feishu:feishu:wiki:spaces",
+		ConnectorType:    "feishu",
+		TargetType:       "wiki_node",
+		TargetRef:        "feishu:wiki:spaces",
+		AuthConnectionID: "auth-1",
+		Status:           "ACTIVE",
+	}}
+	engine := NewDBSourceTreeQueryEngine(
+		repo,
+		TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 100, MaxAllCurrentLevelItems: 10},
+		WithSourceTreeConnectorRegistry(registry),
+	)
+
+	_, err = engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		TreeKey:   "feishu:feishu:wiki:spaces",
+		ParentKey: "feishu:wiki:space:space-1",
+		PageSize:  40,
+	})
+	if err != nil {
+		t.Fatalf("list live wiki space children: %v", err)
+	}
+	if len(spy.listRequests) != 1 || spy.listRequests[0].NodeRef != "feishu:wiki:space:space-1" {
+		t.Fatalf("wiki space node_ref should be preserved for connector traversal, got %+v", spy.listRequests)
 	}
 }
 

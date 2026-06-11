@@ -252,6 +252,102 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 	}
 }
 
+func TestOpenAPISpecIncludesMemoryMetadataFields(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+
+	components, ok := spec["components"].(map[string]any)
+	if !ok {
+		t.Fatalf("components missing in openapi spec")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		t.Fatalf("schemas missing in openapi spec")
+	}
+
+	schemaProperties := func(schemaName string) map[string]any {
+		t.Helper()
+		schema, ok := schemas[schemaName].(map[string]any)
+		if !ok {
+			t.Fatalf("schema %s missing", schemaName)
+		}
+		properties, ok := schema["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("schema %s properties missing", schemaName)
+		}
+		return properties
+	}
+
+	memoryRequestProps := schemaProperties("memoryUpsertOpenAPIRequest")
+	for _, name := range []string{"content", "agent_persona", "user_address", "response_style", "auto_evo"} {
+		if _, ok := memoryRequestProps[name]; !ok {
+			t.Fatalf("memoryUpsertOpenAPIRequest expected property %q", name)
+		}
+	}
+
+	preferenceRequestProps := schemaProperties("managedStateUpsertOpenAPIRequest")
+	for _, name := range []string{"agent_persona", "user_address", "response_style"} {
+		if _, ok := preferenceRequestProps[name]; ok {
+			t.Fatalf("managedStateUpsertOpenAPIRequest has memory-only property %q", name)
+		}
+	}
+
+	memoryResponseProps := schemaProperties("managedStateOpenAPIResponse")
+	for _, name := range []string{"agent_persona", "user_address", "response_style"} {
+		if _, ok := memoryResponseProps[name]; !ok {
+			t.Fatalf("managedStateOpenAPIResponse expected property %q", name)
+		}
+	}
+
+	paths, ok := spec["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("paths missing in openapi spec")
+	}
+	assertRequestSchemaRef := func(path, method, wantRef string) {
+		t.Helper()
+		pathItem, ok := paths[path].(map[string]any)
+		if !ok {
+			t.Fatalf("path missing from openapi spec: %s", path)
+		}
+		op, ok := pathItem[method].(map[string]any)
+		if !ok {
+			t.Fatalf("operation missing from openapi spec: %s %s", method, path)
+		}
+		requestBody, ok := op["requestBody"].(map[string]any)
+		if !ok {
+			t.Fatalf("requestBody missing for %s %s", method, path)
+		}
+		content, ok := requestBody["content"].(map[string]any)
+		if !ok {
+			t.Fatalf("requestBody content missing for %s %s", method, path)
+		}
+		jsonContent, ok := content["application/json"].(map[string]any)
+		if !ok {
+			t.Fatalf("application/json requestBody missing for %s %s", method, path)
+		}
+		schema, ok := jsonContent["schema"].(map[string]any)
+		if !ok {
+			t.Fatalf("requestBody schema missing for %s %s", method, path)
+		}
+		if got, _ := schema["$ref"].(string); got != wantRef {
+			t.Fatalf("requestBody schema ref for %s %s = %q, want %q", method, path, got, wantRef)
+		}
+	}
+
+	assertRequestSchemaRef("/api/core/memory", "put", "#/components/schemas/memoryUpsertOpenAPIRequest")
+	assertRequestSchemaRef("/api/core/user-preference", "put", "#/components/schemas/managedStateUpsertOpenAPIRequest")
+}
+
 func TestOpenAPISpecCoversEvalSetOperations(t *testing.T) {
 	r := mux.NewRouter()
 	registerAllRoutes(r)
@@ -459,6 +555,93 @@ func TestOpenAPISpecIncludesListDocumentsByDatasets(t *testing.T) {
 	for _, name := range []string{"dataset_ids", "keyword", "page_size", "page_token"} {
 		if _, ok := properties[name]; !ok {
 			t.Fatalf("ListDatasetDocumentsRequest expected property %q", name)
+		}
+	}
+}
+
+func TestOpenAPISpecIncludesToolOperations(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	paths, ok := spec["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("paths missing in openapi spec")
+	}
+
+	cases := []struct {
+		method       string
+		path         string
+		expectParams bool
+	}{
+		{"get", "/api/core/tools", false},
+		{"post", "/api/core/tools/{tool_name}:disable", true},
+		{"post", "/api/core/tools/{tool_name}:enable", true},
+	}
+	for _, tc := range cases {
+		pathItem, ok := paths[tc.path].(map[string]any)
+		if !ok {
+			t.Fatalf("path missing from openapi spec: %s", tc.path)
+		}
+		op, ok := pathItem[tc.method].(map[string]any)
+		if !ok {
+			t.Fatalf("operation missing from openapi spec: %s %s", tc.method, tc.path)
+		}
+		tags, ok := op["tags"].([]any)
+		if !ok || len(tags) == 0 || tags[0] != "tools" {
+			t.Fatalf("expected tools tag for %s %s, got %#v", tc.method, tc.path, op["tags"])
+		}
+		responses, ok := op["responses"].(map[string]any)
+		if !ok {
+			t.Fatalf("responses missing for %s %s", tc.method, tc.path)
+		}
+		resp200, ok := responses["200"].(map[string]any)
+		if !ok {
+			t.Fatalf("200 response missing for %s %s", tc.method, tc.path)
+		}
+		content, ok := resp200["content"].(map[string]any)
+		if !ok || len(content) == 0 {
+			t.Fatalf("response schema missing for %s %s", tc.method, tc.path)
+		}
+		if tc.expectParams {
+			params, ok := op["parameters"].([]any)
+			if !ok || len(params) == 0 {
+				t.Fatalf("parameters missing for %s %s", tc.method, tc.path)
+			}
+			param, ok := params[0].(map[string]any)
+			if !ok || param["name"] != "tool_name" || param["in"] != "path" {
+				t.Fatalf("expected tool_name path parameter for %s %s, got %#v", tc.method, tc.path, params)
+			}
+		}
+	}
+
+	components, ok := spec["components"].(map[string]any)
+	if !ok {
+		t.Fatalf("components missing in openapi spec")
+	}
+	schemas, ok := components["schemas"].(map[string]any)
+	if !ok {
+		t.Fatalf("schemas missing in openapi spec")
+	}
+	groupSchema, ok := schemas["toolGroupOpenAPIResponse"].(map[string]any)
+	if !ok {
+		t.Fatalf("toolGroupOpenAPIResponse schema missing")
+	}
+	properties, ok := groupSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("toolGroupOpenAPIResponse properties missing")
+	}
+	for _, name := range []string{"name", "can_disable", "active", "disabled"} {
+		if _, ok := properties[name]; !ok {
+			t.Fatalf("toolGroupOpenAPIResponse expected property %q", name)
 		}
 	}
 }

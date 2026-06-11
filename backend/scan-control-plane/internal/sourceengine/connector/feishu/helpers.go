@@ -18,7 +18,10 @@ func validateTarget(targetType connector.TargetType, targetRef string) error {
 	case TargetTypeDriveFolder:
 		return nil
 	case TargetTypeWikiNode:
-		_, _, err := parseWikiTarget(targetRef)
+		if strings.TrimSpace(targetRef) == VirtualWikiSpacesRef {
+			return nil
+		}
+		_, _, _, err := parseWikiTarget(targetRef)
 		return err
 	default:
 		return connector.NewError(connector.ErrorCodeInvalidTarget, "target_type is not supported")
@@ -72,15 +75,18 @@ func driveFolderToken(ref string) string {
 	return ref
 }
 
-func parseWikiTarget(ref string) (string, string, error) {
+func parseWikiTarget(ref string) (string, string, bool, error) {
+	if spaceID, ok := wikiSpaceID(ref); ok {
+		return spaceID, "", true, nil
+	}
 	spaceID, nodeToken, err := wikiNode(ref)
 	if err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 	if spaceID == "" || nodeToken == "" {
-		return "", "", connector.NewError(connector.ErrorCodeInvalidArgument, "wiki target_ref must include space_id and node_token")
+		return "", "", false, connector.NewError(connector.ErrorCodeInvalidArgument, "wiki target_ref must include space_id and node_token")
 	}
-	return spaceID, nodeToken, nil
+	return spaceID, nodeToken, false, nil
 }
 
 func wikiNode(ref string) (string, string, error) {
@@ -93,12 +99,17 @@ func wikiNode(ref string) (string, string, error) {
 }
 
 func wikiSpaceID(ref string) (string, bool) {
-	const prefix = "feishu:wiki:space:"
-	if !strings.HasPrefix(ref, prefix) {
-		return "", false
-	}
-	spaceID := strings.TrimSpace(strings.TrimPrefix(ref, prefix))
+	spaceID := wikiSpaceIDFromRef(ref)
 	return spaceID, spaceID != ""
+}
+
+func wikiSpaceIDFromRef(ref string) string {
+	const prefix = "feishu:wiki:space:"
+	ref = strings.TrimSpace(ref)
+	if !strings.HasPrefix(ref, prefix) {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(ref, prefix))
 }
 
 func virtualRootPage(cursor string, pageSize int) (ObjectPage, error) {
@@ -161,7 +172,7 @@ func objectKeyFor(object Object) string {
 		return string(ConnectorType) + ":" + object.Token
 	}
 	if object.Kind == ObjectKindWikiSpace {
-		return fmt.Sprintf("%s:wiki:space:%s", ConnectorType, object.SpaceID)
+		return wikiSpaceObjectKey(object.SpaceID)
 	}
 	if object.Kind == ObjectKindWikiNode {
 		return wikiObjectKey(object.SpaceID, object.Token)
@@ -173,6 +184,9 @@ func parentKeyFor(object Object) string {
 	if object.ParentToken == "" {
 		if object.Kind == ObjectKindWikiSpace {
 			return string(ConnectorType) + ":" + VirtualWikiSpacesRef
+		}
+		if object.Kind == ObjectKindWikiNode && object.SpaceID != "" {
+			return wikiSpaceObjectKey(object.SpaceID)
 		}
 		return ""
 	}
@@ -191,6 +205,10 @@ func driveObjectKey(token string) string {
 
 func wikiObjectKey(spaceID, nodeToken string) string {
 	return fmt.Sprintf("%s:wiki:%s:%s", ConnectorType, spaceID, nodeToken)
+}
+
+func wikiSpaceObjectKey(spaceID string) string {
+	return fmt.Sprintf("%s:wiki:space:%s", ConnectorType, spaceID)
 }
 
 func scopeNodeRef(scopeRef connector.ScopeRef) string {
@@ -231,6 +249,19 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func normalizedFeishuObjectType(value string) string {
+	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(value)), ".")
+}
+
+func isFeishuDocType(value string) bool {
+	switch normalizedFeishuObjectType(value) {
+	case "doc", "docx":
+		return true
+	default:
+		return false
+	}
 }
 
 func cloneProviderMeta(meta connector.ProviderMeta) connector.ProviderMeta {

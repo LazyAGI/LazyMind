@@ -126,6 +126,7 @@ var errorCatalog = map[string]*AppError{
 	"child skill only supports content/file_ext/auto_evo updates": NewAppError(http.StatusBadRequest, 2000806, "child skill only supports content/file_ext/auto_evo updates"),
 	"children is not allowed when creating child skill":           NewAppError(http.StatusBadRequest, 2000807, "children is not allowed when creating child skill"),
 	"content exceeds 1500 characters after removing whitespace":   NewAppError(http.StatusBadRequest, 2000808, "content exceeds 1500 characters after removing whitespace"),
+	"content or memory metadata required":                         NewAppError(http.StatusBadRequest, 2001200, "content or memory metadata required"),
 	"content required":                                            NewAppError(http.StatusBadRequest, 2000809, "content required"),
 	"conversation_ids required":                                   NewAppError(http.StatusBadRequest, 2000810, "conversation_ids required"),
 	"create_user_id is required":                                  NewAppError(http.StatusBadRequest, 2000811, "create_user_id is required"),

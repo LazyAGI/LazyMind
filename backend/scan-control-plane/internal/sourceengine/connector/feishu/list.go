@@ -66,16 +66,16 @@ func (c *FeishuConnector) listProviderPage(ctx context.Context, token string, ta
 	}
 	switch targetType {
 	case TargetTypeDriveFolder:
-		if nodeRef == VirtualDriveRootRef {
+		if nodeRef == VirtualDriveRootRef || nodeRef == "" && targetRef == VirtualDriveRootRef {
 			return c.listDriveRootChildren(ctx, token, cursor, pageSize)
 		}
 		folderToken := driveFolderToken(firstNonEmpty(nodeRef, targetRef))
 		return c.api.ListDriveChildren(ctx, token, folderToken, cursor, pageSize)
 	case TargetTypeWikiNode:
-		if nodeRef == VirtualWikiSpacesRef {
+		if nodeRef == VirtualWikiSpacesRef || nodeRef == "" && targetRef == VirtualWikiSpacesRef {
 			return c.api.ListWikiSpaces(ctx, token, cursor, pageSize)
 		}
-		if spaceID, ok := wikiSpaceID(nodeRef); ok {
+		if spaceID, ok := wikiSpaceID(firstNonEmpty(nodeRef, targetRef)); ok {
 			return c.api.ListWikiChildren(ctx, token, spaceID, "", cursor, pageSize)
 		}
 		spaceID, nodeToken, err := wikiNode(firstNonEmpty(nodeRef, targetRef))

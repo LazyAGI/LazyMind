@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"path"
@@ -149,7 +150,7 @@ func (c *DefaultFeishuAPIClient) DownloadDriveFile(ctx context.Context, token, f
 	if err != nil {
 		return ExportedContent{}, err
 	}
-	return ExportedContent{Content: body, ExportedVersion: expectedVersion}, nil
+	return ExportedContent{Content: body, SizeBytes: int64(len(body)), ExportedVersion: expectedVersion}, nil
 }
 
 func (c *DefaultFeishuAPIClient) ExportDriveDocumentMarkdown(ctx context.Context, token, docToken, expectedVersion string) (ExportedContent, error) {
@@ -207,11 +208,25 @@ func (c *DefaultFeishuAPIClient) ExportWikiNodeMarkdown(ctx context.Context, tok
 	if err != nil {
 		return ExportedContent{}, err
 	}
-	objType := strings.ToLower(strings.TrimSpace(node.FileExtension))
+	objType := normalizedFeishuObjectType(firstNonEmpty(node.DriveType, node.FileExtension))
 	objToken := firstNonEmpty(node.StableID, node.Token)
-	if objType == ".doc" {
-		objType = "doc"
-	} else if objType == ".docx" || objType == "" {
+	if !isFeishuDocType(objType) && objType != "" && objType != "md" {
+		exported, err := c.DownloadDriveFile(ctx, token, objToken, expectedVersion)
+		if err != nil {
+			return ExportedContent{}, err
+		}
+		if exported.MimeType == "" {
+			exported.MimeType = node.MimeType
+		}
+		if exported.FileExtension == "" {
+			exported.FileExtension = node.FileExtension
+		}
+		if exported.SizeBytes == 0 {
+			exported.SizeBytes = node.SizeBytes
+		}
+		return exported, nil
+	}
+	if objType == "" || objType == "md" {
 		objType = "docx"
 	}
 	content, err := c.rawContent(ctx, token, objType, objToken)
@@ -447,10 +462,11 @@ func driveObjectPage(data openAPIDriveFiles, parentToken string) ObjectPage {
 }
 
 func driveObject(item map[string]any, parentToken string) Object {
-	token := openAPIString(item["token"])
+	token := firstNonEmpty(openAPIString(item["token"]), openAPIString(item["file_token"]))
 	name := firstNonEmpty(openAPIString(item["name"]), token)
 	rawType := strings.ToLower(firstNonEmpty(openAPIString(item["type"]), openAPIString(item["file_type"])))
 	isFolder := rawType == "folder"
+	shortcutInfo, _ := item["shortcut_info"].(map[string]any)
 	modified := openAPIInt64(firstNonEmpty(
 		openAPIString(item["modified_time"]),
 		openAPIString(item["edit_time"]),
@@ -470,18 +486,20 @@ func driveObject(item map[string]any, parentToken string) Object {
 		token,
 	)
 	object := Object{
-		Kind:            ObjectKindDriveFile,
-		Token:           token,
-		ParentToken:     strings.TrimSpace(parentToken),
-		Name:            name,
-		IsDocument:      true,
-		Revision:        revision,
-		ModifiedUnixSec: modified,
-		SizeBytes:       openAPIInt64(item["size"]),
-		MimeType:        openAPIString(item["mime_type"]),
-		FileExtension:   openAPIString(item["file_extension"]),
-		DriveType:       rawType,
-		StableID:        token,
+		Kind:                ObjectKindDriveFile,
+		Token:               token,
+		ParentToken:         firstNonEmpty(strings.TrimSpace(parentToken), openAPIString(item["parent_token"]), openAPIString(item["parent_folder_token"])),
+		Name:                name,
+		IsDocument:          true,
+		Revision:            revision,
+		ModifiedUnixSec:     modified,
+		SizeBytes:           openAPIInt64(item["size"]),
+		MimeType:            openAPIString(item["mime_type"]),
+		FileExtension:       openAPIString(item["file_extension"]),
+		DriveType:           rawType,
+		ShortcutTargetType:  strings.ToLower(openAPIString(shortcutInfo["target_type"])),
+		ShortcutTargetToken: openAPIString(shortcutInfo["target_token"]),
+		StableID:            token,
 	}
 	if isFolder {
 		object.Kind = ObjectKindDriveFolder
@@ -535,6 +553,12 @@ func wikiNodeObject(node map[string]any, spaceID, fallbackToken string) Object {
 	objType := strings.ToLower(openAPIString(node["obj_type"]))
 	objToken := openAPIString(node["obj_token"])
 	hasChild := openAPIBool(node["has_child"])
+	name := firstNonEmpty(openAPIString(node["title"]), openAPIString(node["node_title"]), openAPIString(node["name"]), openAPIString(node["obj_name"]), nodeToken)
+	fileExtension := wikiNodeFileExtension(name, objType, node)
+	mimeType := ""
+	if !isFeishuDocType(objType) {
+		mimeType = wikiNodeMimeType(fileExtension, node)
+	}
 	modified := openAPIInt64(firstNonEmpty(
 		openAPIString(node["obj_edit_time"]),
 		openAPIString(node["update_time"]),
@@ -548,15 +572,41 @@ func wikiNodeObject(node map[string]any, spaceID, fallbackToken string) Object {
 		Token:           nodeToken,
 		ParentToken:     openAPIString(node["parent_node_token"]),
 		SpaceID:         resolvedSpaceID,
-		Name:            firstNonEmpty(openAPIString(node["title"]), openAPIString(node["node_title"]), openAPIString(node["name"]), openAPIString(node["obj_name"]), nodeToken),
+		Name:            name,
 		IsDocument:      true,
 		IsContainer:     hasChild || objType == "folder" || objType == "wiki" || objType == "space",
 		HasChildren:     hasChild,
 		Revision:        firstNonEmpty(openAPIString(node["obj_edit_time"]), openAPIString(node["update_time"]), openAPIString(node["edit_time"]), nodeToken),
 		ModifiedUnixSec: modified,
-		FileExtension:   "." + firstNonEmpty(objType, "docx"),
+		SizeBytes:       openAPIInt64(firstNonEmpty(openAPIString(node["size"]), openAPIString(node["obj_size"]), openAPIString(node["file_size"]))),
+		MimeType:        mimeType,
+		FileExtension:   fileExtension,
+		DriveType:       objType,
 		StableID:        objToken,
 	}
+}
+
+func wikiNodeFileExtension(name, objType string, node map[string]any) string {
+	if extension := openAPIString(node["file_extension"]); extension != "" {
+		if strings.HasPrefix(extension, ".") {
+			return extension
+		}
+		return "." + extension
+	}
+	if objType == "file" {
+		return path.Ext(name)
+	}
+	if objType == "" {
+		return ".docx"
+	}
+	return "." + objType
+}
+
+func wikiNodeMimeType(fileExtension string, node map[string]any) string {
+	if mimeType := openAPIString(node["mime_type"]); mimeType != "" {
+		return mimeType
+	}
+	return mime.TypeByExtension(fileExtension)
 }
 
 func openAPIMapValue(v any, fallback map[string]any) map[string]any {

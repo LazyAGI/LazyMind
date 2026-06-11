@@ -16,13 +16,16 @@ type managedStateListAPITestResponse struct {
 	Message string `json:"message"`
 	Data    struct {
 		Items []struct {
-			ResourceID                  string `json:"resource_id"`
-			ResourceType                string `json:"resource_type"`
-			Title                       string `json:"title"`
-			Content                     string `json:"content"`
-			ContentSummary              string `json:"content_summary"`
-			HasPendingReviewSuggestions bool   `json:"has_pending_review_suggestions"`
-			SuggestionStatus            string `json:"suggestion_status"`
+			ResourceID                  string  `json:"resource_id"`
+			ResourceType                string  `json:"resource_type"`
+			Title                       string  `json:"title"`
+			Content                     string  `json:"content"`
+			AgentPersona                *string `json:"agent_persona"`
+			UserAddress                 *string `json:"user_address"`
+			ResponseStyle               *string `json:"response_style"`
+			ContentSummary              string  `json:"content_summary"`
+			HasPendingReviewSuggestions bool    `json:"has_pending_review_suggestions"`
+			SuggestionStatus            string  `json:"suggestion_status"`
 		} `json:"items"`
 	} `json:"data"`
 }
@@ -37,13 +40,16 @@ func TestListManagedStatesReturnsDefaultsAndUserScopedRows(t *testing.T) {
 		ID:            "memory-1",
 		UserID:        "u1",
 		Content:       "倾向于先结论后论证，遇到风险点时优先列出明确建议。",
-		ContentHash:   HashContent("倾向于先结论后论证，遇到风险点时优先列出明确建议。"),
+		AgentPersona:  "严谨助手",
+		UserAddress:   "老师",
+		ResponseStyle: "先结论后论证",
 		Version:       1,
 		UpdatedBy:     "u1",
 		UpdatedByName: "User 1",
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
+	memory.ContentHash = HashSystemMemory(memory)
 	if err := db.Create(&memory).Error; err != nil {
 		t.Fatalf("create memory: %v", err)
 	}
@@ -110,6 +116,9 @@ func TestListManagedStatesReturnsDefaultsAndUserScopedRows(t *testing.T) {
 	if memoryItem.ContentSummary == "" {
 		t.Fatalf("expected memory content summary")
 	}
+	if stringValue(memoryItem.AgentPersona) != "严谨助手" || stringValue(memoryItem.UserAddress) != "老师" || stringValue(memoryItem.ResponseStyle) != "先结论后论证" {
+		t.Fatalf("unexpected memory metadata: %#v", memoryItem)
+	}
 	if !memoryItem.HasPendingReviewSuggestions {
 		t.Fatalf("expected memory item to show pending review suggestions")
 	}
@@ -141,4 +150,11 @@ func TestListManagedStatesReturnsDefaultsAndUserScopedRows(t *testing.T) {
 	if preferenceCount != 0 {
 		t.Fatalf("expected list endpoint to not create missing preference row, got %d", preferenceCount)
 	}
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }

@@ -402,6 +402,34 @@ type exportConversationFilePathParams struct {
 	FileID string `path:"file_id"`
 }
 
+type toolPathParams struct {
+	ToolName string `path:"tool_name"`
+}
+
+type toolMethodOpenAPIResponse struct {
+	Name    string `json:"name"`
+	Summary string `json:"summary,omitempty"`
+}
+
+type toolGroupOpenAPIResponse struct {
+	Name        string                      `json:"name"`
+	Label       string                      `json:"label,omitempty"`
+	Description string                      `json:"description,omitempty"`
+	Methods     []toolMethodOpenAPIResponse `json:"methods,omitempty"`
+	CanDisable  bool                        `json:"can_disable"`
+	Active      bool                        `json:"active"`
+	Disabled    bool                        `json:"disabled"`
+}
+
+type toolListOpenAPIResponse struct {
+	ToolGroups []toolGroupOpenAPIResponse `json:"tool_groups"`
+}
+
+type toolStateOpenAPIResponse struct {
+	Name     string `json:"name"`
+	Disabled bool   `json:"disabled"`
+}
+
 type agentFileContentOpenAPIRequest struct {
 	Path string `json:"path"`
 }
@@ -1013,23 +1041,34 @@ type systemSuggestionOpenAPIRequest struct {
 	Suggestions []suggestionPayloadOpenAPIRequest `json:"suggestions"`
 }
 
+type memoryUpsertOpenAPIRequest struct {
+	Content       string `json:"content,omitempty"`
+	AgentPersona  string `json:"agent_persona,omitempty"`
+	UserAddress   string `json:"user_address,omitempty"`
+	ResponseStyle string `json:"response_style,omitempty"`
+	AutoEvo       *bool  `json:"auto_evo,omitempty"`
+}
+
 type managedStateUpsertOpenAPIRequest struct {
 	Content string `json:"content"`
 	AutoEvo *bool  `json:"auto_evo,omitempty"`
 }
 
 type managedStateOpenAPIResponse struct {
-	ResourceID                  string `json:"resource_id"`
-	ResourceType                string `json:"resource_type"`
-	Title                       string `json:"title"`
-	Content                     string `json:"content"`
-	ContentSummary              string `json:"content_summary"`
-	HasPendingReviewSuggestions bool   `json:"has_pending_review_suggestions"`
-	SuggestionStatus            string `json:"suggestion_status"`
-	AutoEvo                     bool   `json:"auto_evo"`
-	AutoEvoApplyStatus          string `json:"auto_evo_apply_status"`
-	AutoEvoGeneration           int64  `json:"auto_evo_generation"`
-	AutoEvoError                string `json:"auto_evo_error"`
+	ResourceID                  string  `json:"resource_id"`
+	ResourceType                string  `json:"resource_type"`
+	Title                       string  `json:"title"`
+	Content                     string  `json:"content"`
+	AgentPersona                *string `json:"agent_persona,omitempty"`
+	UserAddress                 *string `json:"user_address,omitempty"`
+	ResponseStyle               *string `json:"response_style,omitempty"`
+	ContentSummary              string  `json:"content_summary"`
+	HasPendingReviewSuggestions bool    `json:"has_pending_review_suggestions"`
+	SuggestionStatus            string  `json:"suggestion_status"`
+	AutoEvo                     bool    `json:"auto_evo"`
+	AutoEvoApplyStatus          string  `json:"auto_evo_apply_status"`
+	AutoEvoGeneration           int64   `json:"auto_evo_generation"`
+	AutoEvoError                string  `json:"auto_evo_error"`
 }
 
 type managedStateListOpenAPIResponse struct {
@@ -1911,7 +1950,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Path:        "/memory",
 			Summary:     "Upsert managed memory",
 			Tags:        []string{"memory"},
-			RequestBody: jsonBodyOf(managedStateUpsertOpenAPIRequest{}, true),
+			RequestBody: jsonBodyOf(memoryUpsertOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Managed memory item", managedStateOpenAPIResponse{})},
 		},
 		{
@@ -1987,6 +2026,29 @@ func registeredCoreOperations() []openAPIOperation {
 			Summary:   "Discard user preference draft",
 			Tags:      []string{"preferences"},
 			Responses: map[int]openAPIResponse{200: resp("Discarded user preference draft", systemDiscardOpenAPIResponse{})},
+		},
+		{
+			Method:    "GET",
+			Path:      "/tools",
+			Summary:   "Tool list",
+			Tags:      []string{"tools"},
+			Responses: map[int]openAPIResponse{200: resp("Tool list", toolListOpenAPIResponse{})},
+		},
+		{
+			Method:     "POST",
+			Path:       "/tools/{tool_name}:disable",
+			Summary:    "Disable tool",
+			Tags:       []string{"tools"},
+			PathParams: toolPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Tool disabled", toolStateOpenAPIResponse{})},
+		},
+		{
+			Method:     "POST",
+			Path:       "/tools/{tool_name}:enable",
+			Summary:    "Enable tool",
+			Tags:       []string{"tools"},
+			PathParams: toolPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Tool enabled", toolStateOpenAPIResponse{})},
 		},
 		{
 			Method:      "POST",
