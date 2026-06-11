@@ -21,7 +21,7 @@ from evo.artifact_runtime import ArtifactKey, ArtifactRef
 from evo.message_intent import MessageSessionStore
 from evo.message_intent.planner import LazyLLMPlannerClient, StructuredJSONNextIntentPlanner
 from evo.message_intent.service import MessageIntentService
-from evo.traces import build_trace_compare_view, build_trace_detail_view
+from evo.projections.traces import build_trace_compare_view, build_trace_detail_view
 
 BODY_REQUIRED = Body(...)
 BODY_DEFAULT = Body(default_factory=dict)
@@ -555,6 +555,12 @@ class EvoMessageHub:
             'schema': record.value.schema,
             'data': record.value.payload,
         }
+
+    def _thread_artifact_payload(self, thread_id: str, artifact_id: str) -> Any:
+        row = self._artifact_runtime_row(thread_id, artifact_id)
+        if row is None:
+            raise KeyError(artifact_id)
+        return row.get('data')
 
     def _find_artifact(self, artifact_id: str) -> tuple[str, str]:
         for meta in self.list_threads():
