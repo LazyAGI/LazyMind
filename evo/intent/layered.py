@@ -164,7 +164,7 @@ def _intent_from_task(request: IntentRequest, item: dict, capability: dict, bind
         **{key: value for key, value in semantic_params.items() if key not in system['consumed_semantic']},
         **system['params'],
     }
-    if capability_id.startswith('read_'):
+    if capability_id.startswith('read_') or capability_id.endswith('_query'):
         kind = 'query'
     elif capability.get('task_type') == 'control_task':
         kind = 'flow_control'

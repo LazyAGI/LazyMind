@@ -21,6 +21,9 @@ from evo.checkpoints.manager import _lifecycle_payload
 from evo.checkpoints.models import RESUME_FROM_SNAPSHOT, RESUME_WITH_INTERVENTIONS
 from evo.projections import rebuild_frontend_state
 from evo.service.flow import EvoFlowService, FlowMessageResult, TARGET_MEAN_DELTA, result_dict
+from evo.service.interventions import ContinuationPolicyResolver, InterventionCoordinator
+from evo.service.message_engine import MessageExecutionEngine
+from evo.service.response import ModelResponseSynthesizer
 from evo.store import Event, StoreRunLifecycle
 
 BODY_REQUIRED = Body(...)
@@ -35,13 +38,6 @@ STAGE_MAP = {
     'candidate_service_start': 'abtest', 'candidate_service_stop': 'abtest', 'abtest_compare': 'abtest',
     'candidate_cutover': 'abtest',
 }
-RUN_STATUS_STAGES = (
-    ('dataset', '数据集生成', ('eval_dataset', 'corpus_snapshot')),
-    ('eval', '执行评测', ('eval_report',)),
-    ('analysis', '错误分析', ('classification_report', 'repair_loop_plan')),
-    ('repair', '代码优化', ('verified_repair', 'opencode_run_trace_attempt_1')),
-    ('abtest', 'ABTest 和切流', ('abtest_comparison', 'candidate_algorithm_cutover')),
-)
 RESULT_ARTIFACT_IDS = {
     'datasets': ('eval_dataset',),
     'eval-reports': ('eval_report', 'candidate_eval_report'),
@@ -96,31 +92,28 @@ class CheckpointMessageController:
             if parent and parent.checkpoint_kind == 'stage_gate' and service.confirmation_succeeded(result):
                 input_policy = _default_resume_input_policy(parent, input_policy)
                 self.hub._apply_confirmed_intent_at_stage_gate(thread_id, service, parent, input_policy)
-                reply = '修改已应用，测试集已更新。点击「继续执行」进入评测阶段。'
+                reply = self.hub._result_reply(thread_id, service, result, '')
             else:
                 self.hub._cache_active_checkpoint(thread_id, service) if parent else self.hub._clear_stage_checkpoint(
                     thread_id)
-                reply = self.hub._result_reply(thread_id, service, result)
+                reply = self.hub._result_reply(thread_id, service, result, '')
         elif result.action == 'resume_checkpointed':
             if checkpoint.is_manual_cutover:
-                reply = '候选算法切流需要前端调用继续接口并显式确认切流。'
+                reply = self.hub._result_reply(thread_id, service, result, '')
                 return self._reply(thread_id, message_id, reply, result, requires_confirmation=True,
                                    confirmation_checkpoint_id=checkpoint.checkpoint_id)
             input_policy = _default_resume_input_policy(checkpoint, input_policy)
             resumed_checkpoint = self.hub._resume_stage_checkpoint(thread_id, service, checkpoint, 'message',
                                                                    input_policy)
             result = _stage_checkpoint_resumed_result(message_id, checkpoint, input_policy)
-            reply = f'已继续：{checkpoint.next_stage or "下一阶段"}。' if resumed_checkpoint \
-                else '已应用排队干预，当前操作需要确认。'
+            reply = self.hub._result_reply(thread_id, service, result, '')
         elif _completed_manual_cutover(checkpoint, result, service):
             input_policy = _default_resume_input_policy(checkpoint, input_policy)
             resumed_checkpoint = self.hub._resume_stage_checkpoint(thread_id, service, checkpoint, 'message',
                                                                    input_policy)
-            reply = '已完成候选算法切流，正在收尾当前流程。' if resumed_checkpoint \
-                else '已完成候选算法切流，但排队干预需要确认。'
+            reply = self.hub._result_reply(thread_id, service, result, '')
         else:
-            reply = self.hub._result_reply(thread_id, service, result)
-            if result.action != 'read_run_status_query': reply += ' 当前仍在 checkpoint，已记录这条干预。'
+            reply = self.hub._result_reply(thread_id, service, result, '')
         if result.requires_confirmation: self.hub._cache_active_checkpoint(thread_id, service)
         checkpoint_requires_confirmation = (checkpoint.is_manual_cutover and not resumed_checkpoint
                                             and not _completed_manual_cutover(checkpoint, result, service))
@@ -287,22 +280,6 @@ class ThreadDispatchGate:
         return status not in {'paused', 'cancelled', 'deleting'}
 
 
-class ContinuationPolicyResolver:
-    @staticmethod
-    def resolve(payload: dict[str, Any] | None = None, checkpoint: CheckpointState | None = None) -> str:
-        del checkpoint
-        payload = payload or {}
-        value = str(payload.get('input_policy') or '').strip()
-        if not value and payload.get('restart_from_snapshot'):
-            value = RESUME_FROM_SNAPSHOT
-        if not value:
-            value = RESUME_WITH_INTERVENTIONS
-        if value not in {RESUME_FROM_SNAPSHOT, RESUME_WITH_INTERVENTIONS}:
-            expected = f'{RESUME_WITH_INTERVENTIONS} or {RESUME_FROM_SNAPSHOT}'
-            raise HTTPException(400, f'bad input_policy {value!r}; expected {expected}')
-        return value
-
-
 class EvoMessageHub:
     def __init__(self, base_dir: Path):
         self.base_dir = base_dir
@@ -313,6 +290,9 @@ class EvoMessageHub:
         self._queued_messages: dict[str, list[dict[str, Any]]] = {}
         self._lock = threading.RLock()
         self._checkpoint_messages = CheckpointMessageController(self)
+        self._interventions = InterventionCoordinator(self, RUN_ID)
+        self._message_engine = MessageExecutionEngine(self)
+        self._response_synth = ModelResponseSynthesizer()
 
     def create_thread(self, payload: dict[str, Any]) -> dict:
         mode = str(payload.get('mode') or 'interactive').strip()
@@ -389,147 +369,23 @@ class EvoMessageHub:
         return 'eval'
 
     def pause(self, thread_id: str) -> dict:
-        service = self._service(thread_id)
-        StoreRunLifecycle(service.store, RUN_ID).mark_paused(thread_id=thread_id)
-        self._update_meta(thread_id, status='paused', updated_at=time.time())
-        for ref in service.graph.run_refs({'running'}):
-            service.runtime.request_interrupt(ref)
-        task = self._tasks.get(thread_id)
-        if task and task.is_alive():
-            task.join(timeout=5)
-        if not (task and task.is_alive()):
-            self._checkpoint_orphaned_running_operations(service)
-        return {'status': 'paused', 'thread_id': thread_id}
+        return self._interventions.pause(thread_id)
 
     def _checkpoint_orphaned_running_operations(self, service: EvoFlowService) -> None:
         for ref in service.graph.run_refs({'running'}):
             service.graph.checkpoint_run(ref)
 
     def cancel(self, thread_id: str) -> dict:
-        service = self._service(thread_id)
-        for ref in service.graph.run_refs({'running'}):
-            service.runtime.request_interrupt(ref)
-        self._queued_messages.pop(thread_id, None)
-        service.checkpoints.cancel_active(RUN_ID, thread_id=thread_id)
-        StoreRunLifecycle(service.store, RUN_ID).mark_cancelled(thread_id=thread_id)
-        self._update_meta(thread_id, status='cancelled', pending_checkpoint=None, updated_at=time.time())
-        event = self._checkpoint_events.get(thread_id)
-        if event: event.set()
-        return {'status': 'cancelled', 'thread_id': thread_id}
+        return self._interventions.cancel(thread_id)
 
     def retry(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
-        return self.continue_thread(thread_id, payload)
+        return self._interventions.retry(thread_id, payload)
 
     def continue_thread(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
-        payload = payload or {}
-        self._meta(thread_id)
-        if self._task_alive(thread_id):
-            return {'status': 'running', 'thread_id': thread_id, 'resumed': False, 'block_reason': 'flow_busy'}
-        if not self._has_run(thread_id) and thread_id not in self._services:
-            raise HTTPException(409, 'thread has no flow to continue')
-        service = self._service(thread_id)
-        checkpoint = self._stage_checkpoint(thread_id)
-        if checkpoint and checkpoint.is_intent_confirmation and not payload.get('confirm_intent'):
-            return {'status': 'waiting_checkpoint', 'thread_id': thread_id, 'resumed': False,
-                    'block_reason': 'intent_confirmation_required'}
-        if checkpoint and checkpoint.is_manual_cutover and not payload.get('confirm_cutover'):
-            return {'status': 'waiting_checkpoint', 'thread_id': thread_id, 'resumed': False,
-                    'block_reason': 'manual_cutover_confirmation_required'}
-
-        policy = ContinuationPolicyResolver.resolve(payload, checkpoint)
-        if checkpoint and checkpoint.is_intent_confirmation:
-            result = self._execute_intent_confirmation(
-                thread_id, service, checkpoint, str(payload.get('message_id') or f'continue_{uuid.uuid4().hex[:8]}'),
-                input_policy=policy,
-            )
-            return {'status': self.flow_status(thread_id)['status'], 'thread_id': thread_id,
-                    'resumed': bool(result.raw.get('parent_resumed', False)),
-                    'intent_applied': bool(result.raw.get('intent_applied', False)),
-                    'action': result.action}
-        if checkpoint and checkpoint.is_manual_cutover:
-            result = self._confirm_manual_cutover(
-                thread_id, service, checkpoint, str(payload.get('message_id') or f'continue_{uuid.uuid4().hex[:8]}'),
-                policy,
-            )
-            return {'status': self.flow_status(thread_id)['status'], 'thread_id': thread_id, 'resumed': True,
-                    'action': result.action, 'input_policy': policy}
-        if checkpoint:
-            resumed = self._resume_stage_checkpoint(thread_id, service, checkpoint, 'continue', policy)
-            return {'status': self.flow_status(thread_id)['status'], 'thread_id': thread_id, 'resumed': resumed,
-                    'input_policy': policy, 'next_stage': checkpoint.next_stage}
-
-        if service.graph.run_refs({'checkpointed'}):
-            service.resume_checkpointed(input_policy=policy, dispatch=False)
-            self._update_meta(thread_id, status='running', pending_checkpoint=None, updated_at=time.time())
-            self._start_flow_task_locked(thread_id, self._resume_start_stage(thread_id))
-            return {'status': 'running', 'thread_id': thread_id, 'resumed': True, 'input_policy': policy}
-
-        if str(self._meta(thread_id).get('status') or '') == 'paused':
-            self._update_meta(thread_id, status='running', pending_checkpoint=None, updated_at=time.time())
-            self._start_flow_task_locked(thread_id, self._resume_start_stage(thread_id))
-            return {'status': 'running', 'thread_id': thread_id, 'resumed': True}
-
-        raise HTTPException(409, 'thread has no checkpoint or paused work to continue')
+        return self._interventions.continue_thread(thread_id, payload)
 
     def post_message(self, thread_id: str, payload: dict[str, Any]) -> dict:
-        content = str(payload.get('content') or payload.get('message') or '').strip()
-        if not content: raise HTTPException(400, 'message content required')
-        message_id = str(payload.get('message_id') or f'msg_{thread_id}_{uuid.uuid4().hex[:8]}')
-        self._append_message(thread_id, 'user', content)
-        task_alive = self._task_alive(thread_id)
-        checkpoint = self._stage_checkpoint(thread_id)
-        if checkpoint:
-            service = self._service(thread_id)
-            return self._checkpoint_messages.handle(thread_id, service, checkpoint, message_id, content, payload)
-        if task_alive:
-            service = self._service(thread_id)
-            result = self._preview_message(thread_id, service, message_id, content, payload)
-            if result.action == 'read_run_status_query':
-                return self._message_response(thread_id, message_id, self._result_reply(thread_id, service, result),
-                                              result)
-            if self._pause_running_for_message(thread_id, service):
-                self._update_meta(thread_id, status='running', updated_at=time.time())
-                result = service.send_message(message_id, content,
-                                              allowed_capabilities=payload.get('allowed_capabilities'),
-                                              dispatch=bool(payload.get('dispatch', True)),
-                                              max_dispatch=int(payload.get('max_dispatch') or 1))
-                if result.action == 'resume_checkpointed':
-                    self._start_resumed_dispatch(thread_id)
-                elif not result.requires_confirmation:
-                    self._start_resumed_dispatch(thread_id)
-                return self._message_response(thread_id, message_id, self._result_reply(thread_id, service, result),
-                                              result)
-            self._queued_messages.setdefault(thread_id, []).append({
-                'message_id': message_id, 'content': content,
-                'allowed_capabilities': payload.get('allowed_capabilities'),
-                'dispatch': bool(payload.get('dispatch', True)),
-                'max_dispatch': int(payload.get('max_dispatch') or 1), 'action': result.action,
-            })
-            return self._message_response(
-                thread_id, message_id, '已收到你的消息，当前运行任务正在进入 checkpoint；状态就绪后会优先处理这条消息。',
-                FlowMessageResult(message_id, result.raw, result.action, result.operation_refs, [], skipped=True),
-                requires_confirmation=False, confirmation_checkpoint_id='',
-                result_payload=_queued_preview_result_dict(result),
-            )
-        dispatch = bool(payload.get('dispatch', True))
-        had_run = self._has_run(thread_id)
-        service = self._service(thread_id)
-        if not had_run: service.plan_full_flow()
-        checkpoint = self._stage_checkpoint(thread_id)
-        if checkpoint:
-            return self._checkpoint_messages.handle(thread_id, service, checkpoint, message_id, content, payload)
-        resume_stage = self._stalled_resume_stage(thread_id)
-        result = self._preview_message(thread_id, service, message_id, content, payload) if not dispatch else (
-            service.send_message(message_id, content, allowed_capabilities=payload.get('allowed_capabilities'),
-                                 dispatch=True, max_dispatch=int(payload.get('max_dispatch') or 1))
-        )
-        if result.action == 'resume_checkpointed' and resume_stage:
-            self._start_resume_stage(thread_id, service, resume_stage, 'message')
-            reply = f'已继续：{resume_stage}。'
-        else:
-            if result.action == 'resume_checkpointed': self._start_resumed_dispatch(thread_id)
-            reply = self._result_reply(thread_id, service, result)
-        return self._message_response(thread_id, message_id, reply, result)
+        return self._message_engine.handle_message(thread_id, payload)
 
     def _start_resumed_dispatch(self, thread_id: str) -> None:
         """resume_checkpointed only closes the checkpoint; dispatch runs in a flow task."""
@@ -537,6 +393,31 @@ class EvoMessageHub:
             if self._task_alive(thread_id): return
             self._update_meta(thread_id, status='running', updated_at=time.time())
             self._start_flow_task_locked(thread_id, self._resume_start_stage(thread_id))
+
+    def _should_start_resumed_dispatch(self, result: FlowMessageResult) -> bool:
+        if result.requires_confirmation: return False
+        if result.action == 'resume_checkpointed': return True
+        passive = {
+            'ask_clarification', 'reject', 'no_operations', 'respond_to_user',
+            'read_run_status_query', 'explain_run_failure_query', 'read_artifact_query', 'read_operation_query',
+            'pause_thread', 'cancel_thread',
+            'cancel_operation', 'cancel_running_operation', 'retry_operation',
+        }
+        return bool(result.operation_refs) and result.action not in passive
+
+    def _preview_response(self, thread_id: str, message_id: str, result: FlowMessageResult, *,
+                          requires_confirmation: bool | None = None,
+                          confirmation_checkpoint_id: str | None = None,
+                          result_payload: dict[str, Any] | None = None) -> dict:
+        self._update_meta(thread_id, status=self.flow_status(thread_id)['status'], updated_at=time.time())
+        return {
+            'intent_id': message_id, 'reply': '', 'thinking': '',
+            'requires_confirm': result.requires_confirmation if requires_confirmation is None
+            else requires_confirmation,
+            'confirmation_checkpoint_id': result.confirmation_checkpoint_id if confirmation_checkpoint_id is None
+            else confirmation_checkpoint_id,
+            'preview': _preview(result), 'warnings': [], 'result': result_payload or result_dict(result),
+        }
 
     def _pause_running_for_message(self, thread_id: str, service: EvoFlowService) -> bool:
         StoreRunLifecycle(service.store, RUN_ID).mark_paused(thread_id=thread_id, reason='message_preemption')
@@ -548,6 +429,9 @@ class EvoMessageHub:
         if task and task.is_alive():
             task.join(timeout=5)
         if task and task.is_alive():
+            StoreRunLifecycle(service.store, RUN_ID).mark_running(thread_id=thread_id,
+                                                                  reason='message_preemption_timeout')
+            self._update_meta(thread_id, status='running', updated_at=time.time())
             return False
         self._checkpoint_orphaned_running_operations(service)
         return True
@@ -566,10 +450,11 @@ class EvoMessageHub:
             'preview': _preview(result), 'warnings': [], 'result': result_payload or result_dict(result),
         }
 
-    def _result_reply(self, thread_id: str, service: EvoFlowService, result: FlowMessageResult) -> str:
-        if result.action == 'read_run_status_query':
-            return _run_status_reply(thread_id, service, self.flow_status(thread_id), self._meta(thread_id))
-        return _intent_answer(service, result) or _reply(result)
+    def _result_reply(self, thread_id: str, service: EvoFlowService, result: FlowMessageResult,
+                      user_message: str) -> str:
+        return self._response_synth.synthesize(service, thread_id=thread_id, message_id=result.message_id,
+                                               user_message=user_message, result=result,
+                                               flow_status=self.flow_status(thread_id))
 
     async def post_message_stream(self, thread_id: str, payload: dict[str, Any]):
         message_id = str(payload.get('message_id') or f'msg_{thread_id}_{uuid.uuid4().hex[:8]}')
@@ -738,27 +623,39 @@ class EvoMessageHub:
         queued = self._apply_queued_messages(thread_id, service)
         if queued.blocked and queued.confirmation_result:
             self._cache_active_checkpoint(thread_id, service)
-            self._append_message(thread_id, 'assistant',
-                                 f'AutoOperator 已应用前端干预：{queued.confirmation_result.action}，等待用户确认。')
+            self._append_model_message(thread_id, service, queued.confirmation_result, 'autooperator_intervention')
             return False
-        message = f'AutoOperator 已分析 {checkpoint.stage} checkpoint，继续执行。'
         service.store.append_event(Event('autooperator.analysis', RUN_ID, {
             'checkpoint_id': checkpoint.checkpoint_id, 'stage': checkpoint.stage,
-            'next_stage': checkpoint.next_stage, 'message': message,
+            'next_stage': checkpoint.next_stage,
         }))
-        self._append_message(thread_id, 'assistant', message)
+        self._append_model_message(
+            thread_id, service,
+            FlowMessageResult(f'auto_{checkpoint.checkpoint_id}', {'checkpoint': checkpoint.frontend_payload()},
+                              'autooperator_continue'),
+            'autooperator_continue',
+        )
         # AutoOperator always adopts interventions: queued frontend edits were just applied above.
         self._resume_stage_checkpoint(thread_id, service, checkpoint, 'autooperator', RESUME_WITH_INTERVENTIONS)
         return True
 
     def _auto_hold_stage(self, thread_id: str, service: EvoFlowService, checkpoint: CheckpointState) -> None:
         self._hold_queued_messages(thread_id, service)
-        message = 'AutoOperator 已完成 ABTest 分析，候选算法切流需要用户确认。'
         service.store.append_event(Event('autooperator.analysis', RUN_ID, {
             'checkpoint_id': checkpoint.checkpoint_id, 'stage': checkpoint.stage,
-            'next_stage': checkpoint.next_stage, 'message': message,
+            'next_stage': checkpoint.next_stage,
         }))
-        self._append_message(thread_id, 'assistant', message)
+        self._append_model_message(
+            thread_id, service,
+            FlowMessageResult(f'auto_{checkpoint.checkpoint_id}', {'checkpoint': checkpoint.frontend_payload()},
+                              'autooperator_hold'),
+            'autooperator_hold',
+        )
+
+    def _append_model_message(self, thread_id: str, service: EvoFlowService, result: FlowMessageResult,
+                              user_message: str) -> None:
+        self._append_message(thread_id, 'assistant',
+                             self._result_reply(thread_id, service, result, user_message))
 
     def _hold_queued_messages(self, thread_id: str, service: EvoFlowService) -> None:
         for item in self._queued_messages.pop(thread_id, []):
@@ -978,7 +875,7 @@ class EvoMessageHub:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         if inputs != raw_inputs: self._update_meta(thread_id, inputs=inputs, updated_at=time.time())
-        return {'run_root': run_root, 'run_id': RUN_ID, 'dataset_id': _dataset_id(inputs),
+        return {'run_root': run_root, 'run_id': RUN_ID, 'thread_id': thread_id, 'dataset_id': _dataset_id(inputs),
                 'target_chat_url': str(inputs['target_chat_url']),
                 'candidate_chat_url': str(inputs.get('candidate_chat_url') or ''),
                 'router_admin_url': str(inputs.get('router_admin_url') or ''),
@@ -1182,110 +1079,6 @@ def _intent_label(action: str) -> str:
     return labels.get(action, action.replace('_', ' '))
 
 
-def _reply(result) -> str:
-    fixed = {'ask_clarification': '我还需要你补充一点信息，才能继续规划下一步。',
-             'no_operations': '收到，这条消息不需要新增自进化操作。',
-             'reject': '这条消息超出了当前 checkpoint 允许的能力边界，请调整后重试。',
-             'resume_checkpointed': '已收到继续确认，正在恢复 checkpoint 后续流程。'}
-    if result.action in fixed: return fixed[result.action]
-    status = '已完成' if result.results else '已识别'
-    return f'{status}意图：{_intent_label(str(result.action))}。'
-
-
-def _intent_answer(service: EvoFlowService, result: FlowMessageResult) -> str:
-    for op_result in result.results:
-        for ref in op_result.output_refs:
-            try:
-                payload = service.artifacts.get(ref)
-            except (KeyError, FileNotFoundError):
-                continue
-            answer = payload.get('answer') if isinstance(payload, dict) else ''
-            if isinstance(answer, str) and answer.strip(): return answer.strip()
-    return ''
-
-
-def _run_status_reply(thread_id: str, service: EvoFlowService, flow_status: dict[str, Any],
-                      meta: dict[str, Any]) -> str:
-    run_dir = service.store.run_dir(RUN_ID)
-    projection = _read_json(run_dir / 'projections' / 'current.json')
-    run = _read_json(run_dir / 'run.json')
-    operations = _read_json(run_dir / 'operations.json')
-    latest = projection.get('latest_artifacts') or {}
-    progress = projection.get('progress') or {}
-    events = _stored_events(run_dir)
-    checkpoint = flow_status.get('pending_checkpoint')
-    status = str(flow_status.get('status') or meta.get('status') or run.get('status') or 'idle')
-    status = str(meta.get('status')) if str(meta.get('status') or '') in {'cancelled', 'failed', 'paused'} else status
-    stages = [_stage_summary(stage, label, artifacts, operations, latest, progress, events, checkpoint)
-              for stage, label, artifacts in RUN_STATUS_STAGES]
-    current = next((item for item in stages if item['state'] in {'running', 'waiting', 'failed'}), None)
-    current = current or next((item for item in stages if item['state'] == 'pending'), stages[-1])
-    lines = [f'当前线程 {thread_id}：{_thread_status_label(status)}，当前阶段：{current["label"]} - {current["text"]}。']
-    if status == 'cancelled': lines.append('线程已取消，当前不会继续推进；下面是取消前已经完成和未开始的部分。')
-    if checkpoint: lines.append(_checkpoint_line(checkpoint))
-    lines.append('阶段状态：')
-    lines.extend(f'- {item["label"]}: {item["text"]}{item["detail"]}' for item in stages)
-    return '\n'.join(lines)
-
-
-def _stage_summary(stage: str, label: str, artifacts: tuple[str, ...], operations: dict, latest: dict, progress: dict,
-                   events: list[Event], checkpoint: dict | None) -> dict[str, str]:
-    stage_ops = [row for row in operations.values() if isinstance(row, dict) and _operation_stage(row) == stage]
-    flow_state = _latest_flow_stage_status(events, stage)
-    state = _stage_state(stage, artifacts, stage_ops, latest, flow_state, checkpoint)
-    detail = _stage_detail(stage, artifacts, latest, progress, stage_ops, checkpoint)
-    return {'label': label, 'state': state, 'text': _stage_state_label(state, flow_state), 'detail': detail}
-
-
-def _stage_state(stage: str, artifacts: tuple[str, ...], operations: list[dict], latest: dict, flow_state: str,
-                 checkpoint: dict | None) -> str:
-    if checkpoint and STAGE_MAP.get(str(checkpoint.get('next_stage') or '')) == stage: return 'waiting'
-    if any(str(op.get('outcome') or op.get('status')) == 'failed' for op in operations) or flow_state == 'failed':
-        return 'failed'
-    if any(str(op.get('status') or '') == 'running' for op in operations) or flow_state == 'running': return 'running'
-    if any(artifact in latest for artifact in artifacts) or flow_state in {'success', 'skipped'}: return 'done'
-    return 'pending'
-
-
-def _stage_detail(stage: str, artifacts: tuple[str, ...], latest: dict, progress: dict, operations: list[dict],
-                  checkpoint: dict | None) -> str:
-    if stage == 'dataset' and 'eval_dataset' in latest:
-        payload = progress.get('dataset.assemble') if isinstance(progress, dict) else {}
-        total = (payload or {}).get('total') or (payload or {}).get('done')
-        return f'，已生成 {total} 条样本' if total else '，数据集已生成'
-    if stage == 'repair':
-        if any(key in latest for key in {'verified_repair', 'repair_loop_agent'}): return '，opencode 执行轨迹已生成'
-        return '，opencode 尚未开始' if not operations else ''
-    if stage == 'abtest':
-        if 'candidate_algorithm_cutover' in latest: return '，候选算法已切流'
-        if checkpoint and checkpoint.get('checkpoint_kind') == 'manual_cutover': return '，等待用户确认切流'
-        return '，ABTest 结果已生成' if 'abtest_comparison' in latest else ''
-    ready = next((artifact for artifact in artifacts if artifact in latest), '')
-    return f'，产物 {ready} 已生成' if ready else ''
-
-
-def _operation_stage(operation: dict[str, Any]) -> str | None:
-    oid = str(operation.get('operation_id') or operation.get('operation_run_id') or '')
-    return None if oid.startswith('intent.') else _stage_from_operation(operation)
-
-
-def _latest_flow_stage_status(events: list[Event], stage: str) -> str:
-    status = ''
-    for event in events:
-        payload = event.payload or {}
-        if event.event_type == 'evo_flow.progress' and STAGE_MAP.get(str(payload.get('stage') or '')) == stage:
-            status = str(payload.get('status') or status)
-    return status
-
-
-def _checkpoint_line(checkpoint: dict) -> str:
-    next_op = checkpoint.get('next_op') or {}
-    op = next_op.get('op') if isinstance(next_op, dict) else next_op
-    next_stage = STAGE_MAP.get(str(checkpoint.get('next_stage') or '')) or str(checkpoint.get('next_stage') or '')
-    next_label = next((label for stage, label, _ in RUN_STATUS_STAGES if stage == next_stage), next_stage or '下一阶段')
-    return f'待确认：{checkpoint.get("message") or "等待确认是否继续"} 下一步是 {next_label}{f" ({op})" if op else ""}。'
-
-
 def _completed_manual_cutover(checkpoint: CheckpointState, result: FlowMessageResult,
                               service: EvoFlowService) -> bool:
     if not checkpoint.is_manual_cutover or result.action != 'cutover_candidate_algorithm': return False
@@ -1317,16 +1110,6 @@ def _blocked_operations_stage(checkpoint: CheckpointState) -> str:
         stage = STAGE_MAP.get(str(operation).split('.', 1)[0])
         if stage: return stage
     return ''
-
-
-def _thread_status_label(status: str) -> str:
-    return {'running': '运行中', 'waiting_checkpoint': '等待确认', 'cancelled': '已取消', 'ended': '已完成',
-            'failed': '失败', 'paused': '已暂停', 'idle': '空闲'}.get(status, status)
-
-
-def _stage_state_label(state: str, flow_state: str) -> str:
-    if state == 'done': return '已完成' if flow_state != 'skipped' else '已跳过'
-    return {'running': '进行中', 'waiting': '等待确认', 'failed': '失败', 'pending': '未开始'}.get(state, state)
 
 
 def _checkpoint_stage(stage: str) -> str:
@@ -1366,13 +1149,6 @@ def _stage_from_operation(payload: dict[str, Any]) -> str | None:
 def _preview(result) -> list[dict]:
     return [{'op': ref, 'intent': result.action, 'humanized': _intent_label(result.action), 'safety': 'normal',
              'params_summary': {}} for ref in result.operation_refs]
-
-
-def _queued_preview_result_dict(result: FlowMessageResult) -> dict[str, Any]:
-    data = result_dict(result)
-    data['requires_confirmation'] = False
-    data['confirmation_checkpoint_id'] = ''
-    return data
 
 
 def _preview_copy_ignore(path: str, names: list[str]) -> set[str]:

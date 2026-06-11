@@ -66,6 +66,7 @@ def step_capabilities(*, run_id: str = '', dataset_id: str = '', eval_dataset_re
                       candidate_workspace_ref: str = 'candidate_workspace@v1',
                       repair_loop_plan_ref: str = 'repair_loop_plan@v1', verified_repair_ref: str = '',
                       target_chat_url: str = '', router_admin_url: str = '', running_operation_id: str = '',
+                      thread_id: str = '', current_stage: str = '',
                       loop_system_params: dict[str, Any] | None = None) -> list[CapabilitySpec]:
     ctx = dict(locals())
     ctx.update(bad_case_ids=bad_case_ids or [], loop_system_params=loop_system_params or {},
@@ -94,9 +95,18 @@ def _defs() -> dict[str, list[dict[str, Any]]]:
              'system': {'operation_run_id': {'source': 'message_operation_id'}},
              'params': QUERY_ID | {'operation_run_id': STR}, 'required': ['query_intent_id', 'operation_run_id'],
              'effects': ['read_operation_status']},
+            {'id': 'explain_run_failure_query', 'op': 'ExplainRunFailureQueryOperation', 'writes': 'IntentAnswer',
+             'title': '分析流程失败原因',
+             'desc': '收集 run、events、operations、eval_report 和 call records，回答用户询问为什么失败。',
+             'use': ['用户询问为什么执行失败、评测为什么失败、失败原因、chat call failed、timeout、403、质量门禁失败'],
+             'avoid': ['用户只询问当前进度、现在到哪一步、或要求重试/取消'],
+             'semantic': {'stage': STR},
+             'system': {'run_id': {'source': 'ctx', 'key': 'run_id'}},
+             'params': QUERY_ID | {'run_id': STR, 'stage': STR}, 'required': ['query_intent_id', 'run_id'],
+             'effects': ['read_failure_evidence']},
             {'id': 'read_run_status_query', 'op': 'ReadRunStatusQueryOperation', 'writes': 'IntentAnswer',
              'title': '查看当前流程进度', 'desc': '读取当前 run 的整体状态和进度。',
-             'use': ['用户询问当前进度、现在执行到哪里、到哪一步、整体流程状态，包含重复查询'], 'avoid': ['用户询问单个 operation 或 artifact 内容'],
+             'use': ['用户询问当前进度、现在执行到哪里、到哪一步、整体流程状态，包含重复查询'], 'avoid': ['用户询问单个 operation、artifact 内容或失败原因'],
              'system': {'run_id': {'source': 'ctx', 'key': 'run_id'}}, 'params': QUERY_ID | {'run_id': STR},
              'required': ['query_intent_id', 'run_id'], 'effects': ['read_run_status']},
             _case_read('read_coarse_artifact_query', '查看粗分结果', 'CaseCoarseClassification',
@@ -109,6 +119,12 @@ def _defs() -> dict[str, list[dict[str, Any]]]:
              'params': QUERY_ID | {'answer': STR}, 'required': ['query_intent_id', 'answer'],
              'effects': ['write_intent_answer'], 'task_type': 'chat_task'},
         ], 'control': [
+            _thread_control('pause_thread', '暂停线程',
+                            '用户要求暂停当前 self-evolution 线程，保留 checkpoint 和已完成结果'),
+            _thread_control('cancel_thread', '取消线程',
+                            '用户要求取消、终止或停止当前 self-evolution 线程；当用户只说“取消/停止/终止”且没有明确 operation id 时，选择这个能力'),
+            _thread_control('retry_thread', '重试线程',
+                            '用户要求重试当前失败或暂停的 self-evolution 线程'),
             _control('retry_operation', '重试 operation', '用户要求重试某个 operation 或重新跑失败步骤'),
             _control('cancel_operation', '取消 operation', '用户要求停止、取消或打断当前 operation'),
             _control('cancel_running_operation', '取消当前运行 operation',
@@ -327,9 +343,21 @@ def _case_read(capability_id: str, title: str, schema: str, template: str) -> di
 
 def _control(capability_id: str, title: str, use: str, *, source: str = 'message_operation_id') -> dict[str, Any]:
     return {'id': capability_id, 'title': title, 'desc': '只确认用户控制意图；真正执行由 runtime/graph 控制层完成。',
-            'use': [use], 'avoid': ['用户要求创建业务产物'], 'system': {'operation_run_id': {'source': source}},
+            'use': [use], 'avoid': ['用户要求创建业务产物', '用户没有明确指定 operation id 且只是想取消/暂停/重试当前线程'],
+            'system': {'operation_run_id': {'source': source}},
             'params': {'operation_run_id': STR}, 'required': ['operation_run_id'],
             'effects': ['control_operation'], 'task_type': 'control_task', 'risk': 'medium'}
+
+
+def _thread_control(capability_id: str, title: str, use: str) -> dict[str, Any]:
+    return {'id': capability_id, 'title': title,
+            'desc': '只确认用户的线程级控制意图；真正执行由 runtime/graph/checkpoint 控制层完成。',
+            'use': [use], 'avoid': ['用户要求创建或修改业务产物'],
+            'system': {'thread_id': {'source': 'ctx', 'key': 'thread_id'},
+                       'run_id': {'source': 'ctx', 'key': 'run_id'}},
+            'params': {'thread_id': STR, 'run_id': STR},
+            'required': ['thread_id'], 'effects': ['thread_control'],
+            'task_type': 'control_task', 'risk': 'medium'}
 
 
 def _repair_loop(capability_id: str, title: str, use: str) -> dict[str, Any]:

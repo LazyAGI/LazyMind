@@ -83,6 +83,29 @@ class ReadRunStatusQueryOperation:
         return _answer(ctx, [f'run:{run_id}'], {**(projection.get('run') or {}), 'projection': projection})
 
 
+class ExplainRunFailureQueryOperation:
+    def __init__(self, store: EvoStore):
+        self.store = store
+
+    def execute(self, ctx: OperationContext) -> OperationOutput:
+        run_id = ctx.params.get('run_id') or ctx.run_id
+        stage = str(ctx.params.get('stage') or '').strip()
+        run_dir = self.store.run_dir(run_id)
+        operations = self.store.list_operations(run_id)
+        events = [event.__dict__ for event in self.store.read_events(run_id)[-80:]]
+        failed_ops = [row for row in operations if _failed_operation(row, stage)]
+        evidence = {
+            'run': self.store.read_json(run_dir / 'run.json') if (run_dir / 'run.json').exists() else {},
+            'stage': stage,
+            'failed_operations': failed_ops[-30:],
+            'recent_failure_events': [event for event in events if _failure_event(event, stage)][-30:],
+            'eval_report': _latest_payload(ctx, 'eval_report'),
+            'recent_calls': [_call_row(record) for record in self.store.read_calls(run_id)[-50:]],
+        }
+        return _answer(ctx, [f'run:{run_id}', *(str(op.get('operation_run_id')) for op in failed_ops[-10:])],
+                       evidence)
+
+
 class RespondToUserOperation:
     def execute(self, ctx: OperationContext) -> OperationOutput:
         return _answer(ctx, [], ctx.params['answer'])
@@ -125,3 +148,31 @@ def _answer(ctx: OperationContext, refs: list[str], answer, input_refs: list[Art
     payload = {'source_message_id': ctx.params.get('source_message_id', ''),
                'query_intent_id': ctx.params['query_intent_id'], 'target_refs': refs, 'answer': answer}
     return _out(ctx, f"intent_answer_{ctx.params['query_intent_id']}", 'IntentAnswer', payload, input_refs or [])
+
+
+def _failed_operation(row: dict, stage: str) -> bool:
+    if str(row.get('outcome') or row.get('status') or '') != 'failed': return False
+    if not stage: return True
+    return stage in {str(row.get('flow_tag') or ''), str(row.get('stage_tag') or ''),
+                     str((row.get('tags') or {}).get('evo_step') or '')}
+
+
+def _failure_event(event: dict, stage: str) -> bool:
+    text = f"{event.get('event_type', '')} {event.get('payload', {})}"
+    if not any(token in text.lower() for token in ('fail', 'error', 'exception', 'timeout', '403')): return False
+    return not stage or stage in text
+
+
+def _latest_payload(ctx: OperationContext, artifact_id: str):
+    try:
+        return ctx.artifact_graph.get(ctx.artifact_graph.latest_ref(artifact_id))
+    except Exception as exc:
+        return {'missing': artifact_id, 'error': str(exc)}
+
+
+def _call_row(record) -> dict:
+    row = record.__dict__.copy()
+    for key in ('request', 'response'):
+        value = row.get(key)
+        if isinstance(value, str) and len(value) > 4000: row[key] = value[:4000] + '...<truncated>'
+    return row

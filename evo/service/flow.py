@@ -20,9 +20,10 @@ from ..operations.analysis import (AssembleClassificationReportOperation, CaseCo
 from ..operations.dataset import (AssembleDatasetOperation, BuildCorpusSnapshotOperation, GenerateDatasetCaseOperation,
                                   LoadCorpusOperation, PrepareDatasetCaseOperation)
 from ..operations.eval import EvalAggregateOperation, JudgeAnswerOperation, RagAnswerOperation
-from ..operations.intent import (IntentParseOperation, PatchArtifactOperation, ReadArtifactQueryOperation,
-                                 ReadOperationQueryOperation, ReadRunStatusQueryOperation, RedirectResearchOperation,
-                                 RegenerateDatasetCaseOperation, RejudgeCaseOperation, RespondToUserOperation)
+from ..operations.intent import (ExplainRunFailureQueryOperation, IntentParseOperation, PatchArtifactOperation,
+                                 ReadArtifactQueryOperation, ReadOperationQueryOperation, ReadRunStatusQueryOperation,
+                                 RedirectResearchOperation, RegenerateDatasetCaseOperation, RejudgeCaseOperation,
+                                 RespondToUserOperation)
 from ..operations.repair import (BuildRepairLoopPlanOperation, PrepareCandidateWorkspaceOperation,
                                  RepairLoopAgentOperation, StartCandidateServiceOperation,
                                  StopCandidateServiceOperation, candidate_params, cleanup_candidate_artifacts)
@@ -66,11 +67,12 @@ class EvoFlowService:
         return service
 
     def _setup(self, *, run_root: Path | str, run_id: str = 'run_1', dataset_id: str, target_chat_url: str,
+               thread_id: str = '',
                candidate_chat_url: str = '', router_admin_url: str = '', case_count: int = 20, max_workers: int = 2,
                model_config: dict[str, Any] | None = None, dispatch_gate: DispatchGate | None = None,
                recover: bool = False) -> None:
         self.run_root = Path(run_root)
-        self.run_id, self.dataset_id = run_id, dataset_id
+        self.run_id, self.thread_id, self.dataset_id = run_id, thread_id, dataset_id
         self.target_chat_url, self.candidate_chat_url = target_chat_url, candidate_chat_url
         self.router_admin_url = router_admin_url
         self.case_count, self.max_workers = int(case_count), int(max_workers)
@@ -506,10 +508,12 @@ class EvoFlowService:
         result = IntentHarness(self.store, self.run_id, checkpoint, LayeredIntentParser(raw), self.registry,
                                self.factory).handle(
             IntentRequest(message_id, message, checkpoint.checkpoint_id, message_ref, parse_artifact_ref))
+        result_raw = {'next_task': parse_next_task(raw), 'intents': [asdict(intent) for intent in result.intents],
+                      'reasons': list(result.reasons), 'issues': [asdict(issue) for issue in result.issues]}
         operation_refs = [str(proposal.operation_ref) for proposal in result.proposals]
         if result.action != 'propose_operations':
             self._remember(_completed(message_id, result, []))
-            return FlowMessageResult(message_id, {'next_task': parse_next_task(raw)}, result.action, operation_refs)
+            return FlowMessageResult(message_id, result_raw, result.action, operation_refs)
         confirmation_checkpoint_id = _confirmation_checkpoint_id(result.proposals)
         if confirmation_checkpoint_id:
             self.checkpoints.block_intent_confirmation(
@@ -518,21 +522,21 @@ class EvoFlowService:
                 as_child=scope is MessageExecutionScope.CHECKPOINT,
             )
             self._remember(_completed(message_id, result, []))
-            return FlowMessageResult(message_id, {'next_task': parse_next_task(raw)}, result.intents[0].action,
+            return FlowMessageResult(message_id, result_raw, result.intents[0].action,
                                      operation_refs, [], True, True, confirmation_checkpoint_id)
         outputs, skipped = self._apply_control(result, message_id, dispatch=dispatch, max_dispatch=max_dispatch)
         if dispatch and not skipped:
-            if scope is MessageExecutionScope.CHECKPOINT:
-                if result.intents[0].action != 'read_run_status_query':
-                    raise RuntimeError('checkpoint message execution requires confirmation')
+            if result.intents[0].action in {'read_run_status_query', 'explain_run_failure_query'}:
                 outputs = self.run_checkpoint_query([proposal.operation_ref for proposal in result.proposals])
+            elif scope is MessageExecutionScope.CHECKPOINT:
+                if result.intents[0].action not in {'read_run_status_query', 'explain_run_failure_query'}:
+                    raise RuntimeError('checkpoint message execution requires confirmation')
             else:
                 outputs = self._run_root_refs([proposal.operation_ref for proposal in result.proposals], message_id,
                                               max_dispatch=max_dispatch)
         self.refresh_context()
         self._remember(_completed(message_id, result, outputs))
-        return FlowMessageResult(message_id, {'next_task': parse_next_task(raw)}, result.intents[0].action,
-                                 operation_refs, outputs, skipped)
+        return FlowMessageResult(message_id, result_raw, result.intents[0].action, operation_refs, outputs, skipped)
 
     def dispatch(self, operation_ref: OperationRunRef | None = None, *, message_id: str = 'msg_dispatch',
                  max_dispatch: int | None = None) -> list[OperationResult]:
@@ -769,6 +773,7 @@ class EvoFlowService:
             'CaseFineClassificationOperation': CaseFineClassificationOperation(self.llm),
             'RepairLoopAgentOperation': RepairLoopAgentOperation(self.llm, self.model_config),
             'IntentParseOperation': IntentParseOperation(self.llm),
+            'ExplainRunFailureQueryOperation': ExplainRunFailureQueryOperation(self.store),
             'ReadOperationQueryOperation': ReadOperationQueryOperation(self.store),
             'ReadRunStatusQueryOperation': ReadRunStatusQueryOperation(self.store),
         })
@@ -799,8 +804,18 @@ class EvoFlowService:
             candidate_workspace_ref=_latest_or(self.artifacts, 'candidate_workspace'),
             bad_case_ids=self.bad_case_ids, target_chat_url=self.target_chat_url,
             router_admin_url=self.router_admin_url, running_operation_id=str(running[-1]) if running else '',
+            thread_id=self.thread_id, current_stage=self._current_stage(),
             loop_system_params=self.loop_system_params,
         ))
+
+    def _current_stage(self) -> str:
+        active = self.checkpoints.active_checkpoint(self.run_id)
+        if active and active.stage: return active.stage
+        refs = self.graph.run_refs({'running', 'checkpointed', 'failed'})
+        if refs:
+            run = self.graph.get_run(refs[-1])
+            return run.spec.stage_tag or run.spec.flow_tag
+        return ''
 
     def _dataset_specs(self) -> list[OperationSpec]:
         return [
@@ -899,7 +914,8 @@ class EvoFlowService:
                        max_dispatch: int | None) -> tuple[list[OperationResult], bool]:
         if not result.intents: return [], False
         intent = result.intents[0]
-        if intent.action not in {'retry_operation', 'cancel_operation', 'cancel_running_operation',
+        if intent.action not in {'pause_thread', 'cancel_thread', 'retry_thread',
+                                 'retry_operation', 'cancel_operation', 'cancel_running_operation',
                                  'resume_checkpointed'}:
             return [], False
         for proposal in result.proposals:
@@ -911,6 +927,12 @@ class EvoFlowService:
             if policy not in {RESUME_FROM_SNAPSHOT, RESUME_WITH_INTERVENTIONS}:
                 raise ValueError(f'unsupported checkpoint resume input policy: {policy}')
             return self.resume_checkpointed(input_policy=policy, dispatch=False), True
+        if intent.action == 'pause_thread':
+            return self._pause_thread_control(message_id), True
+        if intent.action == 'cancel_thread':
+            return self._cancel_thread_control(message_id), True
+        if intent.action == 'retry_thread':
+            return self._retry_thread_control(message_id, dispatch=dispatch, max_dispatch=max_dispatch), True
         if intent.action == 'retry_operation':
             refs = self.graph.retry_with_downstream(OperationRunRef(str(intent.params['operation_run_id'])),
                                                     source_message_id=message_id)
@@ -928,6 +950,42 @@ class EvoFlowService:
         self.runtime.request_interrupt(ref)
         return [self.runtime.settle_running(ref)], True
 
+    def _pause_thread_control(self, message_id: str) -> list[OperationResult]:
+        for ref in self.graph.run_refs({'running'}):
+            self.runtime.request_interrupt(ref)
+        outputs = [self.runtime.settle_running(ref) for ref in self.graph.run_refs({'running'})]
+        StoreRunLifecycle(self.store, self.run_id).mark_paused(thread_id=self.thread_id, reason='user_intervention')
+        self.store.append_event(Event('thread_control.paused', self.run_id, {
+            'message_id': message_id, 'thread_id': self.thread_id, 'operation_count': len(outputs),
+        }))
+        return outputs
+
+    def _cancel_thread_control(self, message_id: str) -> list[OperationResult]:
+        for ref in self.graph.run_refs({'running'}):
+            self.runtime.request_interrupt(ref)
+        outputs = [self.runtime.settle_running(ref) for ref in self.graph.run_refs({'running'})]
+        self.checkpoints.cancel_active(self.run_id, thread_id=self.thread_id)
+        StoreRunLifecycle(self.store, self.run_id).mark_cancelled(thread_id=self.thread_id)
+        self.store.append_event(Event('thread_control.cancelled', self.run_id, {
+            'message_id': message_id, 'thread_id': self.thread_id, 'operation_count': len(outputs),
+        }))
+        return outputs
+
+    def _retry_thread_control(self, message_id: str, *, dispatch: bool,
+                              max_dispatch: int | None) -> list[OperationResult]:
+        all_checkpointed = self.graph.run_refs({'checkpointed'})
+        checkpointed = [ref for ref in all_checkpointed
+                        if not str(ref).startswith('message.response.')]
+        if all_checkpointed and not checkpointed:
+            self.checkpoints.cancel_active(self.run_id, thread_id=self.thread_id)
+        if checkpointed:
+            return self.resume_checkpointed(input_policy=RESUME_WITH_INTERVENTIONS, dispatch=False)
+        refs = self.graph.retry_with_downstream(
+            self._latest_failed_operation_refs()[0], source_message_id=message_id,
+        ) if self._latest_failed_operation_refs() else []
+        if not dispatch or not refs: return [OperationResult(str(ref), [], 'pending') for ref in refs]
+        return self._run_root_refs(refs, message_id, max_dispatch=max_dispatch or 1)
+
     def _run_root_refs(self, refs: list[OperationRunRef], message_id: str, *,
                        max_dispatch: int | None = 1) -> list[OperationResult]:
         old_limit, old_workers = self.runtime.max_dispatch, self.runtime.max_workers
@@ -944,7 +1002,9 @@ class EvoFlowService:
 
     def run_checkpoint_query(self, refs: list[OperationRunRef]) -> list[OperationResult]:
         for ref in refs:
-            if self.graph.get_run(ref).spec.operation_type != 'ReadRunStatusQueryOperation':
+            if self.graph.get_run(ref).spec.operation_type not in {
+                'ReadRunStatusQueryOperation', 'ExplainRunFailureQueryOperation',
+            }:
                 raise RuntimeError(f'checkpoint query cannot run mutable operation: {ref}')
         return self.runtime.run_scoped(refs, mode=ScopedExecutionMode.PRESERVE_CHECKPOINT)
 

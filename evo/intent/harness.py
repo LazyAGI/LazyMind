@@ -258,10 +258,13 @@ class IntentHarness:
         params = {'query_intent_id': intent.intent_id}
         if capability_id == 'read_operation_query':
             params['operation_run_id'] = intent.target.get('operation_run_id', '')
-        if capability_id == 'read_run_status_query': params['run_id'] = intent.target.get('run_id', '')
+        if capability_id in {'read_run_status_query', 'explain_run_failure_query'}:
+            params['run_id'] = intent.target.get('run_id', '')
+            if capability_id == 'explain_run_failure_query':
+                params['stage'] = intent.params.get('stage') or intent.target.get('stage') or ''
         issues = validate_params(intent.intent_id, params, allowed[capability_id].get('params_schema', {}))
         if issues: return issues
-        if capability_id == 'read_run_status_query':
+        if capability_id in {'read_run_status_query', 'explain_run_failure_query'}:
             run_id = str(intent.target.get('run_id') or self.run_id)
             if not (self.store.run_dir(run_id) / 'run.json').exists():
                 return [_clarify(intent.intent_id, 'unknown_run', f'unknown run target: {run_id}')]
@@ -308,7 +311,8 @@ class IntentHarness:
             if intent.kind == 'query' and operation_type == 'ReadArtifactQueryOperation':
                 require_target = not bool(target.get('operation_run_id'))
                 issues.extend(self._normalize_artifact_targets(intent, target, require_target=require_target))
-            elif intent.kind == 'query' and capability_id == 'read_run_status_query' and not target.get('run_id'):
+            elif intent.kind == 'query' and capability_id in {'read_run_status_query', 'explain_run_failure_query'} \
+                    and not target.get('run_id'):
                 target['run_id'] = self.run_id
             elif intent.kind in MUTATION_KINDS and target.get('capability_id') in allowed:
                 capability = allowed[target['capability_id']]
