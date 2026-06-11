@@ -118,6 +118,7 @@ export type SelfEvolutionWorkbenchViewProps = {
   onOpenHistorySessionModal: () => void;
   onPromptChange: (value: string) => void;
   onSend: (command?: string) => void;
+  onConfirmIntentCheckpoint: () => void;
   onOpenArtifact: (kind: WorkflowResultKind) => void;
   onOpenCaseArtifact: (kind: WorkflowResultKind, artifactId: string, title: string) => void;
   onWorkbenchTabChange: (tab?: SelfEvolutionWorkbenchTab) => void;
@@ -175,6 +176,7 @@ export function SelfEvolutionWorkbenchView({
   onOpenHistorySessionModal,
   onPromptChange,
   onSend,
+  onConfirmIntentCheckpoint,
   onOpenArtifact,
   onOpenCaseArtifact,
   onWorkbenchTabChange,
@@ -199,6 +201,7 @@ export function SelfEvolutionWorkbenchView({
   const isCutoverDecision = Boolean(
     !processDashboard.cutoverCompleted && checkpointDecisionPrompt?.checkpointKind === "manual_cutover",
   );
+  const isIntentConfirmation = checkpointDecisionPrompt?.checkpointKind === "intent_confirmation";
   const shouldShowCutoverCard = displayStage === "abtest" && (isCutoverDecision || processDashboard.cutoverCompleted);
   const checkpointDecisionDesc =
     checkpointDecisionPrompt?.nextOperationLabel
@@ -788,7 +791,11 @@ export function SelfEvolutionWorkbenchView({
                         onClick={(event) => {
                           event.stopPropagation();
                           if (checkpointDecisionPrompt.command) {
-                            onSend(checkpointDecisionPrompt.command);
+                            if (isIntentConfirmation) {
+                              onConfirmIntentCheckpoint();
+                            } else {
+                              onSend(checkpointDecisionPrompt.command);
+                            }
                           }
                         }}
                       >

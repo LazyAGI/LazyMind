@@ -2295,7 +2295,11 @@ function isAbtestStageCompleteEvent(event: Pick<NormalizedThreadEvent, "action" 
 }
 
 function isIntentSidecarOperation(event: Pick<NormalizedThreadEvent, "payload">) {
-  return (getOperationRunId(event.payload) || "").startsWith("intent.");
+  const operationRunId = getOperationRunId(event.payload) || "";
+  return (
+    operationRunId.startsWith("intent.") ||
+    operationRunId.startsWith("dataset.assemble.intervention.")
+  );
 }
 
 function isStepFinishEvent(event: Pick<NormalizedThreadEvent, "action" | "progress" | "progressPhase" | "payload" | "stage">) {
@@ -2373,6 +2377,19 @@ export function formatCheckpointOperation(value: string | undefined) {
   return [stageLabel, actionLabel].filter(Boolean).join(" · ");
 }
 
+function formatCheckpointCapability(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+
+  return {
+    patch_dataset_case: "修改数据集样本",
+    regenerate_dataset_case: "重写数据集样本",
+    prepare_dataset_case: "准备评测样本",
+    generate_dataset_case: "生成评测样本",
+  }[value] ?? value.replace(/_/g, " ");
+}
+
 export function sanitizeCheckpointMessage(
   value: string,
   completedStageLabel: string | undefined,
@@ -2405,6 +2422,10 @@ export function buildCheckpointWaitPrompt(payload: Record<string, unknown> | und
   const nextOperationName = getStringField(nextOperation, ["op", "operation", "name"]);
   const checkpointKind = getStringField(eventData, ["checkpoint_kind", "checkpointKind"]) ||
     getStringField(payload, ["checkpoint_kind", "checkpointKind"]);
+  const capabilityLabel = formatCheckpointCapability(
+    getStringField(eventData, ["capability_id", "capabilityId"]) ||
+      getStringField(payload, ["capability_id", "capabilityId"]),
+  );
   const artifacts = getNestedRecordField(eventData, ["artifacts", "result", "data"]);
   const messageText =
     getStringField(eventData, ["message", "text", "content"]) ||
@@ -2426,13 +2447,16 @@ export function buildCheckpointWaitPrompt(payload: Record<string, unknown> | und
   const command = checkpointKind === "manual_cutover"
     ? "确认切流"
     : checkpointKind === "intent_confirmation"
-      ? "确认"
+      ? "确认执行"
       : checkpointCommandText;
+  const checkpointMessage = checkpointKind === "intent_confirmation"
+    ? `已准备好执行${capabilityLabel ? `「${capabilityLabel}」` : "本次修改"}，确认后将应用这条干预。`
+    : sanitizeCheckpointMessage(messageText, completedStageLabel, nextOperationLabel);
 
   return {
     kind: "checkpoint",
     checkpointKind,
-    message: sanitizeCheckpointMessage(messageText, completedStageLabel, nextOperationLabel),
+    message: checkpointMessage,
     completedStage,
     completedStageLabel,
     nextOperationLabel,

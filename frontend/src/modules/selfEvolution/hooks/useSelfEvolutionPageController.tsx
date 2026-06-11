@@ -2168,6 +2168,65 @@ export function SelfEvolutionPageController({
     appendSystemMessage("请先启动自进化流程，再通过 message 干预运行中的 thread。", activeSessionId);
   };
 
+  const onConfirmIntentCheckpoint = async () => {
+    const activeThreadId = activeSession?.threadId || routeThreadId;
+    if (!activeThreadId) {
+      appendSystemMessage("请先启动自进化流程，再确认执行修改。", activeSessionId);
+      return;
+    }
+
+    appendMessageToSession(
+      activeSessionId,
+      {
+        id: `user-confirm-intent-${Date.now()}`,
+        role: "user",
+        content: "确认执行",
+        time: getTimeLabel(),
+      },
+    );
+    setIsSendingMessage(true);
+    setIsPlanningNextStep(true);
+    try {
+      const response = await axiosInstance.post(
+        `${EVO_API_BASE}/threads/${encodeURIComponent(activeThreadId)}/continue`,
+        { confirm_intent: true },
+      );
+      const responsePayload = isRecord(response.data) ? response.data : {};
+      const intentApplied = responsePayload.intent_applied === true;
+      if (responsePayload.resumed === false && !intentApplied) {
+        const blockReason = getStringField(responsePayload, ["block_reason", "blockReason"]);
+        throw new Error(
+          blockReason === "flow_busy"
+            ? "当前流程仍在处理上一条请求，请稍后再确认执行。"
+            : "确认执行未生效，请稍后重试。",
+        );
+      }
+      appendMessageToSession(
+        activeSessionId,
+        {
+          id: `assistant-confirm-intent-${Date.now()}`,
+          role: "assistant",
+          content: intentApplied
+            ? "修改已应用，测试集已更新。点击「继续执行」进入评测阶段。"
+            : "已确认执行，正在应用这条修改。",
+          time: getTimeLabel(),
+        },
+        { dedupeLast: true },
+      );
+      void restoreThreadEventsSnapshot(activeThreadId);
+      subscribeThreadEvents(activeThreadId, activeSessionId);
+    } catch (error) {
+      appendSystemMessage(
+        getLocalizedErrorMessage(error, "确认执行失败，请稍后重试。") ||
+          "确认执行失败，请稍后重试。",
+        activeSessionId,
+      );
+    } finally {
+      setIsSendingMessage(false);
+      setIsPlanningNextStep(false);
+    }
+  };
+
   const onStartSession = async () => {
     if (isStartingSession) {
       return;
@@ -4227,6 +4286,7 @@ export function SelfEvolutionPageController({
           onOpenHistorySessionModal,
           onPromptChange: setPrompt,
           onSend: (command) => void onSend(command),
+          onConfirmIntentCheckpoint: () => void onConfirmIntentCheckpoint(),
           onOpenArtifact: openWorkflowArtifact,
           onOpenCaseArtifact: openCaseArtifact,
           onWorkbenchTabChange: handleWorkbenchTabChange,

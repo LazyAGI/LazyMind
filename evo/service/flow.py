@@ -66,7 +66,7 @@ class EvoFlowService:
         return service
 
     def _setup(self, *, run_root: Path | str, run_id: str = 'run_1', dataset_id: str, target_chat_url: str,
-               candidate_chat_url: str = '', router_admin_url: str = '', case_count: int = 20, max_workers: int = 4,
+               candidate_chat_url: str = '', router_admin_url: str = '', case_count: int = 20, max_workers: int = 2,
                model_config: dict[str, Any] | None = None, dispatch_gate: DispatchGate | None = None,
                recover: bool = False) -> None:
         self.run_root = Path(run_root)

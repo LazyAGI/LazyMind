@@ -17,6 +17,7 @@ from sse_starlette.sse import EventSourceResponse
 from evo import normalize_chat_stream_url, normalize_http_origin, validate_id
 from evo.artifacts import ArtifactRef
 from evo.checkpoints import CheckpointState, checkpoint_state_from_run, frontend_checkpoint_from_run
+from evo.checkpoints.manager import _lifecycle_payload
 from evo.checkpoints.models import RESUME_FROM_SNAPSHOT, RESUME_WITH_INTERVENTIONS
 from evo.projections import rebuild_frontend_state
 from evo.service.flow import EvoFlowService, FlowMessageResult, TARGET_MEAN_DELTA, result_dict
@@ -94,10 +95,8 @@ class CheckpointMessageController:
             parent = service.checkpoints.active_checkpoint(RUN_ID)
             if parent and parent.checkpoint_kind == 'stage_gate' and service.confirmation_succeeded(result):
                 input_policy = _default_resume_input_policy(parent, input_policy)
-                resumed_checkpoint = self.hub._resume_stage_checkpoint(thread_id, service, parent, 'message',
-                                                                       input_policy)
-                reply = f'已确认并继续：{parent.next_stage or "下一阶段"}。' if resumed_checkpoint \
-                    else '已确认操作，但当前操作需要继续确认。'
+                self.hub._apply_confirmed_intent_at_stage_gate(thread_id, service, parent, input_policy)
+                reply = '修改已应用，测试集已更新。点击「继续执行」进入评测阶段。'
             else:
                 self.hub._cache_active_checkpoint(thread_id, service) if parent else self.hub._clear_stage_checkpoint(
                     thread_id)
@@ -444,7 +443,8 @@ class EvoMessageHub:
                 input_policy=policy,
             )
             return {'status': self.flow_status(thread_id)['status'], 'thread_id': thread_id,
-                    'resumed': bool(result.raw.get('parent_resumed', True)),
+                    'resumed': bool(result.raw.get('parent_resumed', False)),
+                    'intent_applied': bool(result.raw.get('intent_applied', False)),
                     'action': result.action}
         if checkpoint and checkpoint.is_manual_cutover:
             result = self._confirm_manual_cutover(
@@ -822,6 +822,18 @@ class EvoMessageHub:
         self._update_meta(thread_id, pending_checkpoint=service.checkpoints.frontend_checkpoint(RUN_ID),
                           status='waiting_checkpoint', updated_at=time.time())
 
+    def _apply_confirmed_intent_at_stage_gate(self, thread_id: str, service: EvoFlowService,
+                                              parent: CheckpointState, input_policy: str) -> None:
+        service.apply_stage_interventions(parent.checkpoint_id, input_policy)
+        run_path = service.store.run_dir(RUN_ID) / 'run.json'
+        run_data = service.store.read_json(run_path) if run_path.exists() else {}
+        lifecycle = StoreRunLifecycle(service.store, RUN_ID)
+        if run_data.get('status') == 'ended':
+            lifecycle.mark_running()
+        if service.checkpoints.active_checkpoint(RUN_ID) is None:
+            lifecycle.block_dispatch('checkpoint_wait', **_lifecycle_payload(parent.frontend_payload()))
+        self._cache_active_checkpoint(thread_id, service)
+
     def _confirm_manual_cutover(self, thread_id: str, service: EvoFlowService, checkpoint: CheckpointState | None,
                                 message_id: str, input_policy: str) -> FlowMessageResult:
         with self._lock:
@@ -845,9 +857,9 @@ class EvoMessageHub:
         result = service.confirm_checkpoint(checkpoint.checkpoint_id, message_id)
         parent = service.checkpoints.active_checkpoint(RUN_ID)
         if parent and parent.checkpoint_kind == 'stage_gate' and service.confirmation_succeeded(result):
-            # Continue the parent stage with the policy already resolved by the caller.
-            result.raw['parent_resumed'] = self._resume_stage_checkpoint(thread_id, service, parent, 'message',
-                                                                         input_policy)
+            self._apply_confirmed_intent_at_stage_gate(thread_id, service, parent, input_policy)
+            result.raw['parent_resumed'] = False
+            result.raw['intent_applied'] = True
         elif parent:
             result.raw['parent_resumed'] = False
             self._cache_active_checkpoint(thread_id, service)
@@ -971,7 +983,7 @@ class EvoMessageHub:
                 'candidate_chat_url': str(inputs.get('candidate_chat_url') or ''),
                 'router_admin_url': str(inputs.get('router_admin_url') or ''),
                 'case_count': int(inputs.get('num_cases') or os.getenv('EVO_FLOW_CASE_COUNT', '20')),
-                'max_workers': int(inputs.get('max_workers') or os.getenv('EVO_FLOW_WORKERS', '4')),
+                'max_workers': int(inputs.get('max_workers') or os.getenv('EVO_FLOW_WORKERS', '2')),
                 'model_config': meta.get('model_config') or None,
                 'dispatch_gate': ThreadDispatchGate(self, thread_id)}
 
@@ -1121,7 +1133,7 @@ def _normalize_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
     normalized['num_cases'] = _bounded_positive_int(_case_count_value(normalized), 'num_cases',
                                                     MAX_CREATE_THREAD_CASES)
     normalized.pop('case_count', None)
-    max_workers = inputs['max_workers'] if 'max_workers' in inputs else os.getenv('EVO_FLOW_WORKERS', '4')
+    max_workers = inputs['max_workers'] if 'max_workers' in inputs else os.getenv('EVO_FLOW_WORKERS', '2')
     normalized['max_workers'] = _bounded_positive_int(max_workers, 'max_workers', MAX_CREATE_THREAD_WORKERS)
     return normalized
 

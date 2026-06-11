@@ -115,7 +115,7 @@ def _case_ref(dataset: dict[str, Any], case_id: str) -> ArtifactRef:
     return ArtifactRef.parse(str(case_refs[case_ids.index(case_id)]))
 
 
-def _call_chat(ctx: OperationContext, target_url: str, payload: dict[str, Any], timeout_s: float = 180) -> dict:
+def _call_chat(ctx: OperationContext, target_url: str, payload: dict[str, Any], timeout_s: float = 300) -> dict:
     encoded = json.dumps({k: v for k, v in payload.items() if v is not None}, ensure_ascii=False).encode('utf-8')
     req = urllib.request.Request(target_url, data=encoded, method='POST',
                                  headers={'Content-Type': 'application/json', 'Accept': 'text/event-stream'})
