@@ -144,7 +144,8 @@ def _query_params(intent: AtomicIntent) -> dict:
         return {'operation_run_id': intent.target.get('operation_run_id', '')}
     if capability_id == 'read_run_status_query': return {'run_id': intent.target.get('run_id', '')}
     if capability_id == 'explain_run_failure_query':
-        return {'run_id': intent.target.get('run_id', ''), 'stage': intent.params.get('stage') or ''}
+        return {'run_id': intent.target.get('run_id', ''),
+                'stage': intent.params.get('stage') or intent.params.get('stage_hint') or ''}
     if capability_id in ARTIFACT_QUERY_CAPABILITIES:
         ref = _artifact_ref(intent)
         return {'artifact_ref': str(ref)} if ref is not None else {}

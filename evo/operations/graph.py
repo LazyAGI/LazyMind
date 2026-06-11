@@ -257,6 +257,14 @@ class OperationGraph:
             if old_run.status != 'ended' or old_run.superseded_by: continue
             self.supersede(new_run.parent, new_ref, reason)
 
+    def mark_obsolete_failure(self, ref: OperationRunRef, *, reason: str) -> None:
+        run = self.get_run(ref)
+        if run.status != 'ended' or run.outcome in _DONE_OUTCOMES: return
+        before = self._snapshot(run)
+        run.outcome = 'superseded'
+        run.supersede_reason = reason
+        self._emit(OperationRunChange('superseded', before, self._snapshot(run), reason=reason))
+
     def end_run(self, ref: OperationRunRef, outputs: list[ArtifactRef], *, outcome: str = 'success') -> None:
         run = self.get_run(ref)
         before = self._snapshot(run)

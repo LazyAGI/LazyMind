@@ -15,7 +15,7 @@ from fastapi import Body, FastAPI, HTTPException, Request, Response
 from sse_starlette.sse import EventSourceResponse
 
 from evo import normalize_chat_stream_url, normalize_http_origin, validate_id
-from evo.artifacts import ArtifactRef
+from evo.artifacts import ArtifactGraph, ArtifactRef
 from evo.checkpoints import CheckpointState, checkpoint_state_from_run, frontend_checkpoint_from_run
 from evo.checkpoints.manager import _lifecycle_payload
 from evo.checkpoints.models import RESUME_FROM_SNAPSHOT, RESUME_WITH_INTERVENTIONS
@@ -307,14 +307,15 @@ class EvoMessageHub:
                 'created_at': now, 'updated_at': now}
         self._write_meta(thread_id, meta)
         if mode == 'auto' and payload.get('start_auto'): self.start(thread_id, payload)
-        return meta
+        return _public_thread_meta(meta)
 
     def list_threads(self) -> list[dict]:
         rows = [_read_json(path) for path in self.threads_dir.glob('*/thread.json')]
-        return sorted([row for row in rows if row], key=lambda row: row.get('updated_at') or 0, reverse=True)
+        return sorted([_public_thread_meta(row) for row in rows if row],
+                      key=lambda row: row.get('updated_at') or 0, reverse=True)
 
     def get_thread(self, thread_id: str) -> dict:
-        return self._meta(thread_id)
+        return _public_thread_meta(self._meta(thread_id))
 
     def delete_thread(self, thread_id: str) -> dict:
         self._meta(thread_id)
@@ -401,7 +402,7 @@ class EvoMessageHub:
             'ask_clarification', 'reject', 'no_operations', 'respond_to_user',
             'read_run_status_query', 'explain_run_failure_query', 'read_artifact_query', 'read_operation_query',
             'pause_thread', 'cancel_thread',
-            'cancel_operation', 'cancel_running_operation', 'retry_operation',
+            'cancel_operation', 'cancel_running_operation', 'retry_operation', 'retry_stage',
         }
         return bool(result.operation_refs) and result.action not in passive
 
@@ -435,6 +436,12 @@ class EvoMessageHub:
             return False
         self._checkpoint_orphaned_running_operations(service)
         return True
+
+    def _restore_interactive_for_message(self, thread_id: str) -> None:
+        meta = self._meta(thread_id)
+        if str(meta.get('status') or '') != 'cancelled':
+            return
+        self._update_meta(thread_id, status='idle', pending_checkpoint=None, updated_at=time.time())
 
     def _message_response(self, thread_id: str, message_id: str, reply: str, result: FlowMessageResult, *,
                           requires_confirmation: bool | None = None, confirmation_checkpoint_id: str | None = None,
@@ -1188,6 +1195,23 @@ def _write_json(path: Path, data: dict) -> None:
     tmp.replace(path)
 
 
+_SENSITIVE_META_KEYS = {'api_key', 'authorization', 'password', 'secret', 'token'}
+
+
+def _public_thread_meta(meta: dict[str, Any]) -> dict[str, Any]:
+    return _redact_sensitive_meta(meta)
+
+
+def _redact_sensitive_meta(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _redact_sensitive_meta(item)
+                for key, item in value.items()
+                if key.lower() not in _SENSITIVE_META_KEYS}
+    if isinstance(value, list):
+        return [_redact_sensitive_meta(item) for item in value]
+    return value
+
+
 def _flow_status_row(thread_id: str, status: str, active_task_ids: list[str], *,
                      latest_abtest_status: str | None = None, report_ready: bool = False,
                      pending_checkpoint: dict | None = None) -> dict:
@@ -1206,9 +1230,10 @@ def _lifecycle_flow_status(thread_id: str, run_dir: Path, projection: dict[str, 
     pending_checkpoint = frontend_checkpoint_from_run(run)
     if status == 'running' and not active_task_ids:
         status, pending_checkpoint = _stalled_running_status(run_dir, projection, pending_checkpoint)
-    # RunLifecycle (run.json) is the single source of run status; thread meta only
-    # tracks the deletion intent, which never reaches the lifecycle.
-    if meta_status == 'deleting': status = 'deleting'
+    # Thread-level terminal intents can supersede a persisted checkpoint that
+    # should no longer be actionable from the frontend.
+    if meta_status in {'cancelled', 'deleting'}:
+        status, pending_checkpoint = meta_status, None
     decision = _artifact_decision(run_dir, 'abtest_comparison') if 'abtest_comparison' in latest else {}
     return _flow_status_row(thread_id, status, active_task_ids if status == 'running' else [],
                             latest_abtest_status=decision.get('status'),
@@ -1217,10 +1242,21 @@ def _lifecycle_flow_status(thread_id: str, run_dir: Path, projection: dict[str, 
 
 
 def _eval_report_ready(run_dir: Path, latest: dict[str, Any]) -> bool:
-    if 'eval_report' not in latest:
+    ref_text = str(latest.get('eval_report') or '')
+    if not ref_text: return False
+    try:
+        graph = ArtifactGraph(run_dir)
+        ref = ArtifactRef.parse(ref_text)
+        metadata = graph.version_metadata(ref)
+        report = graph.get(ref)
+    except Exception:
         return False
-    aggregate = _read_json(run_dir / 'operations.json').get('eval.aggregate', {})
-    return aggregate.get('status') == 'ended' and aggregate.get('outcome') == 'success'
+    producer = str(metadata.get('producer_operation_run_id') or '')
+    if not producer: return False
+    operation = _read_json(run_dir / 'operations.json').get(producer, {})
+    checks = report.get('checks') or {}
+    return (operation.get('status') == 'ended' and operation.get('outcome') == 'success'
+            and checks.get('ready') is not False)
 
 
 def _lifecycle_status(run: dict[str, Any]) -> str:

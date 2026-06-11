@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import validate_id
+from ..internal_ids import is_synthetic_operation
 from .models import (ArtifactDiff, ArtifactDraft, ArtifactFragment,
                      ArtifactRef, ArtifactValidationReport, DiffEntry, ImpactReport, SnapshotRef)
 from .schema import validate_artifact_payload
@@ -208,6 +209,7 @@ class ArtifactGraph:
         return self._read_json(path) if path.exists() else {}
 
     def _append_index(self, ref: ArtifactRef, producer_operation_run_id: str, input_refs: list[ArtifactRef]) -> None:
+        if is_synthetic_operation(producer_operation_run_id): return
         upstream = self._read_index('upstream_by_artifact.json')
         downstream = self._read_index('downstream_by_artifact.json')
         produced = self._read_index('artifacts_by_producer.json')
@@ -224,12 +226,14 @@ class ArtifactGraph:
         for manifest_path in sorted(self.manifest_dir.glob('*.json')):
             manifest = self._read_json(manifest_path)
             for version in manifest['versions']:
+                producer = str(version['producer_operation_run_id'])
+                if is_synthetic_operation(producer): continue
                 ref = ArtifactRef(manifest['artifact_id'], int(version['version']))
                 parents = list(version.get('input_refs') or [])
                 upstream[str(ref)] = parents
                 for parent in parents:
                     downstream.setdefault(parent, []).append(str(ref))
-                produced.setdefault(version['producer_operation_run_id'], []).append(str(ref))
+                produced.setdefault(producer, []).append(str(ref))
         self._write_indexes(upstream, downstream, produced)
 
     def _write_indexes(self, upstream: dict, downstream: dict, produced: dict) -> None:

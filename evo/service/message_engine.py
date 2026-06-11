@@ -6,7 +6,6 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from ..operations import OperationRunRef
 from .flow import EvoFlowService, FlowMessageResult
 
 
@@ -19,6 +18,7 @@ class MessageExecutionEngine:
         if not content: raise HTTPException(400, 'message content required')
         message_id = str(payload.get('message_id') or f'msg_{thread_id}_{uuid.uuid4().hex[:8]}')
         self.hub._append_message(thread_id, 'user', content)
+        self.hub._restore_interactive_for_message(thread_id)
         task_alive = self.hub._task_alive(thread_id)
         checkpoint = self.hub._stage_checkpoint(thread_id)
         if checkpoint:
@@ -32,13 +32,8 @@ class MessageExecutionEngine:
                                 payload: dict[str, Any]) -> dict:
         service = self.hub._service(thread_id)
         result = self.hub._preview_message(thread_id, service, message_id, content, payload)
-        if result.action in {'read_run_status_query', 'explain_run_failure_query'}:
-            result = service.send_message(message_id, content, allowed_capabilities=payload.get('allowed_capabilities'),
-                                          dispatch=False, max_dispatch=int(payload.get('max_dispatch') or 1))
-            outputs = service.run_checkpoint_query([OperationRunRef(ref) for ref in result.operation_refs])
-            result = FlowMessageResult(message_id, result.raw, result.action, result.operation_refs, outputs,
-                                       result.skipped, result.requires_confirmation,
-                                       result.confirmation_checkpoint_id)
+        if result.action in {'read_run_status_query', 'explain_run_failure_query', 'read_operation_query'}:
+            result = service.live_read_query_result(result)
             return self.hub._message_response(thread_id, message_id,
                                               self.hub._result_reply(thread_id, service, result, content), result)
         if self.hub._pause_running_for_message(thread_id, service):

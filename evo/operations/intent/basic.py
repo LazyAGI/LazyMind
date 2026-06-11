@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from ...artifacts import ArtifactDraft, ArtifactRef, validate_artifact_payload
+from ...artifacts import ArtifactDraft, ArtifactGraph, ArtifactRef, validate_artifact_payload
+from ...internal_ids import stage_group
 from ...projections import rebuild_frontend_state
 from ...runtime import AdapterCall, OperationContext, OperationOutput
 from ...store import EvoStore
@@ -70,7 +71,7 @@ class ReadOperationQueryOperation:
 
     def execute(self, ctx: OperationContext) -> OperationOutput:
         oid = ctx.params['operation_run_id']
-        return _answer(ctx, [f'operation:{oid}'], self.store.read_operation(ctx.run_id, oid))
+        return _answer(ctx, [f'operation:{oid}'], read_operation_query_answer(self.store, ctx.run_id, oid))
 
 
 class ReadRunStatusQueryOperation:
@@ -79,8 +80,7 @@ class ReadRunStatusQueryOperation:
 
     def execute(self, ctx: OperationContext) -> OperationOutput:
         run_id = ctx.params.get('run_id') or ctx.run_id
-        projection = rebuild_frontend_state(self.store, run_id, write=True)
-        return _answer(ctx, [f'run:{run_id}'], {**(projection.get('run') or {}), 'projection': projection})
+        return _answer(ctx, [f'run:{run_id}'], read_run_status_query_answer(self.store, run_id, write=True))
 
 
 class ExplainRunFailureQueryOperation:
@@ -90,20 +90,35 @@ class ExplainRunFailureQueryOperation:
     def execute(self, ctx: OperationContext) -> OperationOutput:
         run_id = ctx.params.get('run_id') or ctx.run_id
         stage = str(ctx.params.get('stage') or '').strip()
-        run_dir = self.store.run_dir(run_id)
-        operations = self.store.list_operations(run_id)
-        events = [event.__dict__ for event in self.store.read_events(run_id)[-80:]]
-        failed_ops = [row for row in operations if _failed_operation(row, stage)]
-        evidence = {
-            'run': self.store.read_json(run_dir / 'run.json') if (run_dir / 'run.json').exists() else {},
-            'stage': stage,
-            'failed_operations': failed_ops[-30:],
-            'recent_failure_events': [event for event in events if _failure_event(event, stage)][-30:],
-            'eval_report': _latest_payload(ctx, 'eval_report'),
-            'recent_calls': [_call_row(record) for record in self.store.read_calls(run_id)[-50:]],
-        }
+        evidence = explain_run_failure_query_answer(self.store, ctx.artifact_graph, run_id, stage)
+        failed_ops = evidence['failed_operations']
         return _answer(ctx, [f'run:{run_id}', *(str(op.get('operation_run_id')) for op in failed_ops[-10:])],
                        evidence)
+
+
+def read_operation_query_answer(store: EvoStore, run_id: str, operation_run_id: str) -> dict:
+    return store.read_operation(run_id, operation_run_id)
+
+
+def read_run_status_query_answer(store: EvoStore, run_id: str, *, write: bool = False) -> dict:
+    projection = rebuild_frontend_state(store, run_id, write=write)
+    return {**(projection.get('run') or {}), 'projection': projection}
+
+
+def explain_run_failure_query_answer(store: EvoStore, artifact_graph: ArtifactGraph, run_id: str,
+                                     stage: str = '') -> dict:
+    run_dir = store.run_dir(run_id)
+    operations = store.list_operations(run_id)
+    events = [event.__dict__ for event in store.read_events(run_id)[-80:]]
+    failed_ops = [row for row in operations if _failed_operation(row, stage)]
+    return {
+        'run': store.read_json(run_dir / 'run.json') if (run_dir / 'run.json').exists() else {},
+        'stage': stage,
+        'failed_operations': failed_ops[-30:],
+        'recent_failure_events': [event for event in events if _failure_event(event, stage)][-30:],
+        'eval_report': _latest_payload(artifact_graph, 'eval_report'),
+        'recent_calls': [_call_row(record) for record in store.read_calls(run_id)[-50:]],
+    }
 
 
 class RespondToUserOperation:
@@ -153,8 +168,12 @@ def _answer(ctx: OperationContext, refs: list[str], answer, input_refs: list[Art
 def _failed_operation(row: dict, stage: str) -> bool:
     if str(row.get('outcome') or row.get('status') or '') != 'failed': return False
     if not stage: return True
-    return stage in {str(row.get('flow_tag') or ''), str(row.get('stage_tag') or ''),
-                     str((row.get('tags') or {}).get('evo_step') or '')}
+    tags = row.get('tags') or {}
+    return stage in {
+        stage_group(str(row.get('flow_tag') or '')),
+        stage_group(str(row.get('stage_tag') or '')),
+        stage_group(str(tags.get('evo_step') or '')),
+    }
 
 
 def _failure_event(event: dict, stage: str) -> bool:
@@ -163,9 +182,9 @@ def _failure_event(event: dict, stage: str) -> bool:
     return not stage or stage in text
 
 
-def _latest_payload(ctx: OperationContext, artifact_id: str):
+def _latest_payload(artifact_graph: ArtifactGraph, artifact_id: str):
     try:
-        return ctx.artifact_graph.get(ctx.artifact_graph.latest_ref(artifact_id))
+        return artifact_graph.get(artifact_graph.latest_ref(artifact_id))
     except Exception as exc:
         return {'missing': artifact_id, 'error': str(exc)}
 

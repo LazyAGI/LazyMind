@@ -6,10 +6,12 @@ from typing import Any
 from .models import CapabilitySpec
 
 STR = {'type': 'string', 'minLength': 1}
+OPT_STR = {'type': 'string'}
 ARR = {'type': 'array', 'items': STR}
 INT = {'type': 'integer'}
 NUM = {'type': 'number'}
 RESUME_POLICY = {'type': 'string', 'enum': ['resume_from_snapshot', 'resume_with_interventions']}
+STAGE_HINT = {'type': 'string'}
 CASE = {'source': 'source_span_mention', 'case_id_format': 'zero4'}
 QUERY_ID = {'query_intent_id': STR}
 CASE_TYPES = ['single_hop', 'single_doc_multi_hop', 'multi_doc_multi_hop', 'table_list', 'formula']
@@ -100,9 +102,10 @@ def _defs() -> dict[str, list[dict[str, Any]]]:
              'desc': '收集 run、events、operations、eval_report 和 call records，回答用户询问为什么失败。',
              'use': ['用户询问为什么执行失败、评测为什么失败、失败原因、chat call failed、timeout、403、质量门禁失败'],
              'avoid': ['用户只询问当前进度、现在到哪一步、或要求重试/取消'],
-             'semantic': {'stage': STR},
+             'semantic': {'stage_hint': STAGE_HINT},
              'system': {'run_id': {'source': 'ctx', 'key': 'run_id'}},
-             'params': QUERY_ID | {'run_id': STR, 'stage': STR}, 'required': ['query_intent_id', 'run_id'],
+             'params': QUERY_ID | {'run_id': STR, 'stage': OPT_STR, 'stage_hint': STAGE_HINT},
+             'required': ['query_intent_id', 'run_id'],
              'effects': ['read_failure_evidence']},
             {'id': 'read_run_status_query', 'op': 'ReadRunStatusQueryOperation', 'writes': 'IntentAnswer',
              'title': '查看当前流程进度', 'desc': '读取当前 run 的整体状态和进度。',
@@ -124,8 +127,19 @@ def _defs() -> dict[str, list[dict[str, Any]]]:
             _thread_control('cancel_thread', '取消线程',
                             '用户要求取消、终止或停止当前 self-evolution 线程；当用户只说“取消/停止/终止”且没有明确 operation id 时，选择这个能力'),
             _thread_control('retry_thread', '重试线程',
-                            '用户要求重试当前失败或暂停的 self-evolution 线程'),
-            _control('retry_operation', '重试 operation', '用户要求重试某个 operation 或重新跑失败步骤'),
+                            '用户要求重试当前失败或暂停的 self-evolution 线程；当用户只说“重试”且没有明确 operation id 时，选择这个能力'),
+            {'id': 'retry_stage', 'title': '重试流程阶段',
+             'desc': '用户按业务大步骤重试 self-evolution 阶段；stage 由 evo 根据消息语义和运行状态绑定。',
+             'use': ['用户要求重试某个大步骤，例如重试评测步骤、重新执行 step2、重新跑当前失败阶段'],
+             'avoid': ['用户明确给出了 operation id，应走 retry_operation；用户要求创建业务产物'],
+             'semantic': {'stage_hint': STAGE_HINT},
+             'system': {'thread_id': {'source': 'ctx', 'key': 'thread_id'},
+                        'run_id': {'source': 'ctx', 'key': 'run_id'},
+                        'stage': {'source': 'ctx', 'key': 'current_stage'}},
+             'params': {'thread_id': STR, 'run_id': STR, 'stage': OPT_STR, 'stage_hint': STAGE_HINT},
+             'required': ['thread_id'], 'effects': ['thread_control', 'retry_stage'],
+             'task_type': 'control_task', 'risk': 'medium'},
+            _control('retry_operation', '重试 operation', '用户明确要求重试某个 operation id'),
             _control('cancel_operation', '取消 operation', '用户要求停止、取消或打断当前 operation'),
             _control('cancel_running_operation', '取消当前运行 operation',
                      '用户要求取消当前正在运行的 task/opencode/repair，不给出 operation id', source='current_operation_id'),

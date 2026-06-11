@@ -6,6 +6,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any
 
+from ..internal_ids import is_synthetic_operation
 from ..store import EvoStore
 from .models import CallView, OperationView, PipelineStageView, PipelineView
 
@@ -98,7 +99,8 @@ def _event_line_count(store: EvoStore, run_id: str) -> int:
 
 
 def _operations(store: EvoStore, run_id: str) -> list[dict[str, Any]]:
-    return [_operation_for_view(operation) for operation in store.list_operations(run_id)]
+    return [_operation_for_view(operation) for operation in store.list_operations(run_id)
+            if not is_synthetic_operation(operation)]
 
 
 def _operation_for_view(operation: dict[str, Any]) -> dict[str, Any]:
@@ -111,6 +113,7 @@ def _operation_for_view(operation: dict[str, Any]) -> dict[str, Any]:
     elif status and 'status' in progress: progress['status'] = status
     operation['progress'] = progress
     return operation
+
 
 
 def _can_dispatch(run: dict[str, Any]) -> bool:
@@ -129,7 +132,8 @@ def _latest_artifacts(store: EvoStore, run_id: str) -> dict[str, str]:
         version = int(manifest.get('latest_version', 0))
         version_meta = next((item for item in manifest.get('versions', [])
                              if int(item.get('version', 0)) == version), {})
-        if version and version_meta.get('role', 'operation_output') == 'operation_output':
+        if (version and version_meta.get('role', 'operation_output') == 'operation_output'
+                and not is_synthetic_operation(str(version_meta.get('producer_operation_run_id') or ''))):
             latest[artifact_id] = f'{artifact_id}@v{version}'
     return latest
 

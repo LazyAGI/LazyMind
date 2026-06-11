@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from ..artifacts import ArtifactDraft, ArtifactRef
+from ..internal_ids import is_synthetic_operation
 from ..runtime import CallRecord
 from ..runtime.models import CallStatus
 from .models import Event
@@ -124,6 +125,7 @@ def _append_event(store: EvoStore, run_id: str, record: CallRecord) -> None:
 
 
 def _update_operation(store: EvoStore, run_id: str, operation_run_id: str, record: CallRecord) -> None:
+    if is_synthetic_operation(operation_run_id): return
     try:
         operation = store.read_operation(run_id, operation_run_id)
     except FileNotFoundError:
@@ -141,6 +143,7 @@ def _update_operation(store: EvoStore, run_id: str, operation_run_id: str, recor
     from ..projections import rebuild_frontend_state_throttled
 
     rebuild_frontend_state_throttled(store, run_id)
+
 
 
 def _audited_adapter_type(adapter_type: str) -> bool:

@@ -14,6 +14,7 @@ from typing import Any, Callable
 from ..artifacts import ArtifactDraft, ArtifactFragment, ArtifactGraph, ArtifactRef
 from ..artifacts.graph import _lock_file, _unlock_file
 from .. import validate_id
+from ..internal_ids import is_synthetic_operation
 from ..operations import OperationGraph, OperationRunSnapshot
 from ..runtime.models import CallRecord
 from .models import Event, RecoveryReport
@@ -160,6 +161,7 @@ class EvoStore:
     def restore_operation_graph(self, run_id: str) -> OperationGraph:
         graph = OperationGraph()
         for data in self._operation_records(run_id).values():
+            if is_synthetic_operation(data): continue
             graph.restore_run(_operation_snapshot(data))
         return graph
 
@@ -167,7 +169,8 @@ class EvoStore:
         validate_id(run_id, 'run_id')
         run_dir = self.run_dir(run_id)
         running_operations = [str(data.get('operation_run_id') or operation_id) for operation_id, data
-                              in self._operation_records(run_id).items() if data.get('status') == 'running']
+                              in self._operation_records(run_id).items()
+                              if data.get('status') == 'running' and not is_synthetic_operation(data)]
         self.rebuild_indexes(run_id)
         self._finalize_pending_commit_txs(run_id)
         self._checkpoint_running_operations(run_id)
@@ -262,6 +265,13 @@ class EvoStore:
 
     def _checkpoint_running_operations(self, run_id: str) -> None:
         for operation_id, data in self._operation_records(run_id).items():
+            if is_synthetic_operation(data):
+                if data.get('status') in {'running', 'checkpointed'}:
+                    data['status'] = 'ended'
+                    data['outcome'] = data.get('outcome') or 'success'
+                    data['ended_at'] = _now()
+                    self.write_operation(run_id, operation_id, data)
+                continue
             if data.get('status') != 'running': continue
             data['status'] = 'checkpointed'
             data['checkpointed_at'] = _now()
@@ -329,6 +339,7 @@ class EvoStore:
                 if version.get('role', 'operation_output') != 'operation_output': continue
                 producer = version.get('producer_operation_run_id', '')
                 if not producer: continue
+                if is_synthetic_operation(str(producer)): continue
                 ref = '{}@v{}'.format(artifact_id, int(version['version']))
                 try:
                     operation = self.read_operation(run_id, producer)
@@ -349,7 +360,6 @@ def _now() -> str:
 def _has_dispatch_block(run: dict[str, Any]) -> bool:
     return any(run.get(key) for key in ('dispatch_block_reason', 'blocked_operations', 'root_blockers',
                                         'impacted_blockers'))
-
 
 @contextmanager
 def _file_lock(path: Path):

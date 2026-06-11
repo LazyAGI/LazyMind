@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ..internal_ids import is_synthetic_operation
 from ..runtime import OperationProgress
 from .models import Event
 from .store import EvoStore
@@ -11,6 +12,7 @@ class StoreProgressReporter:
         self.run_id = run_id
 
     def report(self, operation_run_id: str, progress: OperationProgress) -> None:
+        if is_synthetic_operation(operation_run_id): return
         payload = {'operation_run_id': operation_run_id, **progress.to_dict()}
         self.store.append_event(Event('operation.progress', self.run_id, payload))
         try:

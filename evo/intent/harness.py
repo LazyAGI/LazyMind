@@ -15,6 +15,7 @@ from .models import (
     AtomicIntent, CapabilitySpec, IntentDecisionAction, IntentHarnessResult, IntentKind, IntentParser, IntentPlan,
     IntentRequest, OperationProposal, ValidationIssue, validate_params,
 )
+from .resolver import EvoTargetResolver
 
 MISSING_TARGET_PROPOSAL_CAPABILITIES = {
     'fine_classify_case', 'build_repair_loop_plan', 'start_repair_loop', 'continue_repair_loop'}
@@ -178,6 +179,10 @@ class IntentHarness:
     def _pipeline(self, request: IntentRequest, intents: list[AtomicIntent],
                   capabilities: list[dict]) -> IntentHarnessResult:
         intents, issues = self._normalize_intents(intents, capabilities)
+        if not issues:
+            intents, issues = EvoTargetResolver(
+                store=self.store, run_id=self.run_id, graph=self.operation_factory.operation_graph,
+            ).resolve(request, intents, {capability['capability_id']: capability for capability in capabilities})
         issues = issues or self._precompile_issues(intents, capabilities)
         if issues: return _issue_result(intents, issues)
         compilation = compile_intents(request, intents)
@@ -217,7 +222,8 @@ class IntentHarness:
             if intent.kind == 'query': issues.extend(self._query_issues(intent, allowed))
             if intent.kind == 'chat': issues.extend(self._chat_issues(intent, allowed))
             if intent.kind in MUTATION_KINDS:
-                issues.extend(self._mutation_issues(intent, allowed))
+                issues.extend(self._control_issues(intent, allowed) if intent.kind == 'flow_control'
+                              else self._mutation_issues(intent, allowed))
                 artifact_id = _artifact_id(intent)
                 if artifact_id: writers_by_artifact.setdefault(artifact_id, []).append(intent)
         conditional_ids = {item.intent_id for item in intents if item.kind == 'conditional'}
@@ -252,6 +258,23 @@ class IntentHarness:
         issues.extend(validate_params(iid, intent.params, allowed[capability_id].get('params_schema', {})))
         return issues
 
+    def _control_issues(self, intent: AtomicIntent, allowed: dict[str, dict]) -> list[ValidationIssue]:
+        capability_id = str(intent.target.get('capability_id') or intent.action or '')
+        if not capability_id:
+            return [_clarify(intent.intent_id, 'missing_capability', '无法确定要执行的控制动作')]
+        if capability_id not in allowed: return [self._not_allowed(intent, capability_id)]
+        issues = validate_params(intent.intent_id, intent.params, allowed[capability_id].get('params_schema', {}))
+        internal_missing = {'operation_run_id', 'run_id', 'thread_id', 'stage'}
+        visible = [issue for issue in issues if not (
+            issue.code == 'missing_required_param' and any(name in issue.message for name in internal_missing)
+        )]
+        if visible: return visible
+        if capability_id in {'retry_operation', 'cancel_operation', 'cancel_running_operation'} \
+                and not intent.params.get('operation_run_id'):
+            return [_clarify(intent.intent_id, 'control_target_unavailable',
+                             '当前运行状态里没有可匹配的具体操作，请说明要控制当前步骤还是整个流程。')]
+        return []
+
     def _query_issues(self, intent: AtomicIntent, allowed: dict[str, dict]) -> list[ValidationIssue]:
         capability_id = _query_capability_id(intent)
         if capability_id not in allowed: return [self._not_allowed(intent, capability_id)]
@@ -261,7 +284,8 @@ class IntentHarness:
         if capability_id in {'read_run_status_query', 'explain_run_failure_query'}:
             params['run_id'] = intent.target.get('run_id', '')
             if capability_id == 'explain_run_failure_query':
-                params['stage'] = intent.params.get('stage') or intent.target.get('stage') or ''
+                stage = intent.params.get('stage') or intent.target.get('stage') or ''
+                if stage: params['stage'] = stage
         issues = validate_params(intent.intent_id, params, allowed[capability_id].get('params_schema', {}))
         if issues: return issues
         if capability_id in {'read_run_status_query', 'explain_run_failure_query'}:
