@@ -74,8 +74,13 @@ class CheckpointMessageController:
         input_policy = _resume_input_policy(payload)
         allowed_capabilities = payload.get('allowed_capabilities')
         if checkpoint.is_manual_cutover:
-            allowed = list(allowed_capabilities) if isinstance(allowed_capabilities, list) else service.registry.capability_ids()
-            allowed_capabilities = [capability for capability in allowed if capability != 'cutover_candidate_algorithm']
+            allowed = (
+                list(allowed_capabilities) if isinstance(allowed_capabilities, list)
+                else service.registry.capability_ids()
+            )
+            allowed_capabilities = [
+                capability for capability in allowed if capability != 'cutover_candidate_algorithm'
+            ]
         result = service.send_checkpoint_message(
             message_id, content, allowed_capabilities=allowed_capabilities,
             dispatch=bool(payload.get('dispatch', True)), max_dispatch=int(payload.get('max_dispatch') or 1),
@@ -833,8 +838,10 @@ class EvoMessageHub:
                 return self._manual_cutover_result(message_id, already_done=False)
         raise RuntimeError('manual cutover confirmation requires an active checkpoint')
 
-    def _execute_intent_confirmation(self, thread_id: str, service: EvoFlowService, checkpoint: CheckpointState,
-                                     message_id: str, input_policy: str = RESUME_WITH_INTERVENTIONS) -> FlowMessageResult:
+    def _execute_intent_confirmation(
+        self, thread_id: str, service: EvoFlowService, checkpoint: CheckpointState,
+        message_id: str, input_policy: str = RESUME_WITH_INTERVENTIONS,
+    ) -> FlowMessageResult:
         result = service.confirm_checkpoint(checkpoint.checkpoint_id, message_id)
         parent = service.checkpoints.active_checkpoint(RUN_ID)
         if parent and parent.checkpoint_kind == 'stage_gate' and service.confirmation_succeeded(result):

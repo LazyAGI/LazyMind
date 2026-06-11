@@ -115,11 +115,14 @@ class OperationGraph:
 
     def ready_runs(self) -> list[OperationRunRef]:
         ready: list[OperationRunRef] = []
-        for ref in self._topological_run_refs():
+        ordered = self._topological_run_refs()
+        order = {ref: index for index, ref in enumerate(ordered)}
+        depths: dict[OperationRunRef, int] = {}
+        for ref in ordered:
             run = self._runs[ref]
             if run.status != 'pending' or run.superseded_by: continue
             if self._dependencies_satisfied(run) and self._required_artifacts_available(run): ready.append(ref)
-        return ready
+        return sorted(ready, key=lambda ref: (-self._dependency_depth(ref, depths), order[ref]))
 
     def can_run(self, ref: OperationRunRef) -> bool:
         run = self.get_run(ref)
@@ -512,6 +515,12 @@ class OperationGraph:
         ordered = _topological_order(selected, lambda ref: self._runs[ref].depends_on)
         if len(ordered) != len(selected): raise ValueError('operation runs must be a DAG')
         return ordered
+
+    def _dependency_depth(self, ref: OperationRunRef, memo: dict[OperationRunRef, int]) -> int:
+        if ref in memo: return memo[ref]
+        run = self.get_run(ref)
+        memo[ref] = 0 if not run.depends_on else 1 + max(self._dependency_depth(dep, memo) for dep in run.depends_on)
+        return memo[ref]
 
 
 def _topological_order(nodes: list, parents_of: Callable[[Any], Iterable]) -> list:

@@ -26,7 +26,8 @@ from ..operations.intent import (IntentParseOperation, PatchArtifactOperation, R
 from ..operations.repair import (BuildRepairLoopPlanOperation, PrepareCandidateWorkspaceOperation,
                                  RepairLoopAgentOperation, StartCandidateServiceOperation,
                                  StopCandidateServiceOperation, candidate_params, cleanup_candidate_artifacts)
-from ..runtime import DispatchGate, OperationResult, OperationRuntime, ScopedExecutionMode, evo_llm, load_core_model_config
+from ..runtime import (DispatchGate, OperationResult, OperationRuntime, ScopedExecutionMode, evo_llm,
+                       load_core_model_config)
 from ..store import (Event, EvoStore, CompactStoreCallRecorder, StoreOperationRunObserver, StoreProgressReporter,
                      StoreRunLifecycle)
 
@@ -134,6 +135,7 @@ class EvoFlowService:
             eval_dataset_ref = self.artifacts.latest_ref('eval_dataset')
         if start <= 1 and (not _artifact_field_matches(self.artifacts, 'eval_report', 'eval_dataset_ref',
                                                        eval_dataset_ref) or not self._eval_report_ready()):
+            self._flow_progress('eval', 'running', 'eval preparing operation graph')
             self.create_eval_runs(eval_dataset_ref)
             out['eval'] = self._dispatch_stage('eval', 'msg_flow_eval', ['eval_report'])
             self._require_eval_report_ready()
