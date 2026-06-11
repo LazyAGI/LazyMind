@@ -185,6 +185,13 @@ const stageArtifactKindMap: Record<string, WorkflowResultKind> = {
   repair: "diffs",
   abtest: "abtests",
 };
+const artifactStepIdMap: Record<WorkflowResultKind, ArtifactPanelItem["stepId"]> = {
+  datasets: "dataset",
+  "eval-reports": "px-report",
+  "analysis-reports": "analysis",
+  diffs: "code-optimize",
+  abtests: "ab-test",
+};
 const legacyPlanningThinkingText = "正在理解你的请求并规划下一步。";
 
 const finalResultMetricLabels: Record<string, string> = {
