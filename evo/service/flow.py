@@ -26,7 +26,7 @@ from ..operations.intent import (IntentParseOperation, PatchArtifactOperation, R
 from ..operations.repair import (BuildRepairLoopPlanOperation, PrepareCandidateWorkspaceOperation,
                                  RepairLoopAgentOperation, StartCandidateServiceOperation,
                                  StopCandidateServiceOperation, candidate_params, cleanup_candidate_artifacts)
-from ..runtime import OperationResult, OperationRuntime, ScopedExecutionMode, evo_llm, load_core_model_config
+from ..runtime import DispatchGate, OperationResult, OperationRuntime, ScopedExecutionMode, evo_llm, load_core_model_config
 from ..store import (Event, EvoStore, CompactStoreCallRecorder, StoreOperationRunObserver, StoreProgressReporter,
                      StoreRunLifecycle)
 
@@ -66,12 +66,14 @@ class EvoFlowService:
 
     def _setup(self, *, run_root: Path | str, run_id: str = 'run_1', dataset_id: str, target_chat_url: str,
                candidate_chat_url: str = '', router_admin_url: str = '', case_count: int = 20, max_workers: int = 4,
-               model_config: dict[str, Any] | None = None, recover: bool = False) -> None:
+               model_config: dict[str, Any] | None = None, dispatch_gate: DispatchGate | None = None,
+               recover: bool = False) -> None:
         self.run_root = Path(run_root)
         self.run_id, self.dataset_id = run_id, dataset_id
         self.target_chat_url, self.candidate_chat_url = target_chat_url, candidate_chat_url
         self.router_admin_url = router_admin_url
         self.case_count, self.max_workers = int(case_count), int(max_workers)
+        self.dispatch_gate = dispatch_gate
         self.model_config = load_core_model_config() | (model_config or {})
         self.llm = evo_llm(self.model_config)
         self.store = EvoStore(self.run_root / 'store')
@@ -118,7 +120,7 @@ class EvoFlowService:
         if leftover:
             self.checkpoints.resume_operation_runs(
                 self.run_id, self.graph, leftover, checkpoint_id='operation_checkpointed',
-                input_policy=RESUME_FROM_SNAPSHOT, old_refs_for=self._operation_input_refs,
+                input_policy=RESUME_WITH_INTERVENTIONS, old_refs_for=self._operation_input_refs,
             )
         if start == 0:
             self.plan_dataset()
@@ -172,7 +174,7 @@ class EvoFlowService:
                 if loop_status == 'checkpointed':
                     # Interrupted loop: resume the existing run so it continues from the
                     # last persisted attempt instead of registering a second versioned writer.
-                    out['repair_loop'] = self.resume_checkpointed(input_policy=RESUME_FROM_SNAPSHOT)
+                    out['repair_loop'] = self.resume_checkpointed(input_policy=RESUME_WITH_INTERVENTIONS)
                 else:
                     if loop_status != 'pending':
                         self.create_repair_loop_run(loop_system_params=self.loop_system_params,
@@ -551,11 +553,6 @@ class EvoFlowService:
     def _run_checkpoint_parse(self, operation_ref: OperationRunRef) -> OperationResult:
         return self.runtime.run_scoped([operation_ref], mode=ScopedExecutionMode.PRESERVE_CHECKPOINT)[0]
 
-    def pause(self, operation_ref: OperationRunRef | str) -> OperationResult:
-        operation_ref = operation_ref if isinstance(operation_ref, OperationRunRef) else OperationRunRef(operation_ref)
-        self.runtime.request_interrupt(operation_ref)
-        return self.runtime.settle_running(operation_ref)
-
     def resume_checkpointed(self, *, input_policy: str, dispatch: bool = True) -> list[OperationResult]:
         if input_policy not in {RESUME_FROM_SNAPSHOT, RESUME_WITH_INTERVENTIONS}:
             raise ValueError(f'unsupported checkpoint resume input policy: {input_policy}')
@@ -658,9 +655,11 @@ class EvoFlowService:
         if (spec.get('tags') or {}).get('writes_artifact_id'): spec['write_policy'] = 'versioned'
         active = self.graph.active_run_for(operation_id)
         if active is not None:
-            status = self.graph.get_run(active).status
+            run = self.graph.get_run(active)
+            status = run.status
             if status == 'checkpointed': self.graph.reset_run(active)
             if status in {'pending', 'running', 'checkpointed'}: return active
+            if status == 'ended' and run.outcome == 'success': return active
         return self.graph.create_run(
             OperationSpec(operation_id, operation_type, **spec), inputs=list(inputs or []), depends_on=run_depends_on
         )
@@ -776,7 +775,8 @@ class EvoFlowService:
             draft_root=self.store.run_dir(self.run_id) / 'tmp' / 'drafts',
             progress_reporter=StoreProgressReporter(self.store, self.run_id),
             call_recorder_factory=lambda op_id: CompactStoreCallRecorder(self.store, self.run_id, op_id),
-            run_lifecycle=StoreRunLifecycle(self.store, self.run_id), max_dispatch=500, max_workers=self.max_workers,
+            run_lifecycle=StoreRunLifecycle(self.store, self.run_id), dispatch_gate=self.dispatch_gate,
+            max_dispatch=500, max_workers=self.max_workers,
         )
 
     def _registry(self) -> CapabilityRegistry:
@@ -905,9 +905,9 @@ class EvoFlowService:
             self.graph.end_run(proposal.operation_ref, [], outcome='success')
         if intent.action == 'resume_checkpointed':
             if not self.graph.run_refs({'checkpointed'}): return [], True
-            policy = str(intent.params.get('input_policy') or '')
+            policy = str(intent.params.get('input_policy') or RESUME_WITH_INTERVENTIONS)
             if policy not in {RESUME_FROM_SNAPSHOT, RESUME_WITH_INTERVENTIONS}:
-                raise ValueError('resume_checkpointed requires explicit input_policy')
+                raise ValueError(f'unsupported checkpoint resume input policy: {policy}')
             return self.resume_checkpointed(input_policy=policy, dispatch=False), True
         if intent.action == 'retry_operation':
             refs = self.graph.retry_with_downstream(OperationRunRef(str(intent.params['operation_run_id'])),

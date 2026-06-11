@@ -89,8 +89,10 @@ class StoreRunLifecycle:
         data.update({'status': status, **extra})
         if status == 'running':
             data.setdefault('started_at', _now())
-            data.pop('outcome', None)
-            data.pop('ended_at', None)
+            _drop_fields(data, ('outcome', 'ended_at', 'cancelled_at', 'paused_at', 'failed_at',
+                                'error_type', 'message'))
+        if status == 'paused':
+            _drop_fields(data, ('outcome', 'ended_at', 'cancelled_at', 'failed_at', 'error_type', 'message'))
         if (status == 'running' and clear_dispatch_block) or status in {'ended', 'cancelled', 'failed'}:
             _drop_fields(data, _CHECKPOINT_FIELDS)
         if data.get('status') == status and all(data.get(key) == value for key, value in extra.items()):

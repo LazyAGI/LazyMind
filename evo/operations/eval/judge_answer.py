@@ -43,7 +43,7 @@ class JudgeAnswerOperation:
             error = rag.get('chat_error') if isinstance(rag.get('chat_error'), dict) else {}
             reason = f"{error.get('type') or 'ChatError'}: {error.get('message') or 'RAG call failed'}"[:100]
             scores = {'answer_correctness': 0.0, 'faithfulness': 0.0, 'is_correct': False, 'reason': reason,
-                      'defect': 'candidate chat call failed; no quality scoring performed'[:80]}
+                      'defect': 'chat call failed; no quality scoring performed'[:80]}
             payload = self._result(ctx, policy, dataset_ref, case_ref, rag_ref, case_id,
                                    str(rag.get('trace_id') or ''), scores, 0.0, 0.0, 'failed', 'infra_failure', [])
             progress(ctx, 'judge_answer', 'success', 'RAG call failed; judge recorded infra failure without scoring',
