@@ -114,28 +114,28 @@ def build_system_prompt(
     # Plugin active guidance takes priority over generic tool guidance when session is live.
     plugin_prompt = _build_plugin_context_prompt(environment_context)
     if plugin_prompt:
-        prompt_parts.append(plugin_prompt)
-    else:
-        tool_guidance: list[str] = []
-        if 'vocab_learn' in active_groups:
-            tool_guidance.append(VOCAB_GUIDANCE)
-        if 'memory_editor' in active_groups and use_memory:
-            tool_guidance.append(MEMORY_GUIDANCE)
-        if 'skill_editor' in active_groups:
-            tool_guidance.append(SKILLS_GUIDANCE)
-        if tool_guidance:
-            prompt_parts.append(' '.join(tool_guidance))
-        if active_groups:
-            prompt_parts.append(TOOL_CALL_STATUS_GUIDANCE)
-        if 'kb' in active_groups or 'temp_kb' in active_groups:
-            prompt_parts.append(SEARCH_GUIDANCE)
-        if files:
-            prompt_parts.append(IMAGE_REFERENCE_MARKDOWN_GUIDANCE)
-        if 'multimodal' in active_groups:
-            prompt_parts.append(VISION_EXTRACTOR_GUIDANCE)
-        # Always include plugin tool guidance when plugin triggers are present.
-        ctx = environment_context or {}
-        if ctx.get('_has_plugins'):
-            prompt_parts.append(PLUGIN_TOOLS_GUIDANCE)
+        return '\n\n'.join(prompt_parts + [plugin_prompt])
+
+    tool_guidance: list[str] = []
+    if 'vocab_learn' in active_groups:
+        tool_guidance.append(VOCAB_GUIDANCE)
+    if 'memory_editor' in active_groups and use_memory:
+        tool_guidance.append(MEMORY_GUIDANCE)
+    if 'skill_editor' in active_groups:
+        tool_guidance.append(SKILLS_GUIDANCE)
+    if tool_guidance:
+        prompt_parts.append(' '.join(tool_guidance))
+    if active_groups:
+        prompt_parts.append(TOOL_CALL_STATUS_GUIDANCE)
+    if 'kb' in active_groups or 'temp_kb' in active_groups:
+        prompt_parts.append(SEARCH_GUIDANCE)
+    if files:
+        prompt_parts.append(IMAGE_REFERENCE_MARKDOWN_GUIDANCE)
+    if 'multimodal' in active_groups:
+        prompt_parts.append(VISION_EXTRACTOR_GUIDANCE)
+    # Always include plugin tool guidance when plugin triggers are present.
+    ctx = environment_context or {}
+    if ctx.get('_has_plugins'):
+        prompt_parts.append(PLUGIN_TOOLS_GUIDANCE)
 
     return '\n\n'.join(prompt_parts)
