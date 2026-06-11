@@ -100,6 +100,7 @@ import {
   getSyncModeLabel,
   normalizeDataSourceConnectionState,
   normalizeDataSourceStatus,
+  resolveStorageUsed,
 } from "./shared";
 import {
   createScanRequestId,
@@ -1526,7 +1527,7 @@ export default function DataSourceManagement() {
     const addCount = summary?.new_count ?? fallback?.addCount ?? 0;
     const deleteCount = summary?.deleted_count ?? fallback?.deleteCount ?? 0;
     const changeCount = summary?.modified_count ?? fallback?.changeCount ?? 0;
-    const storageUsed = fallback?.storageUsed || "0 B";
+    const storageUsed = resolveStorageUsed(summary, fallback?.storageUsed);
 
     if (isFeishuSource) {
       const bindingTargetTypes = getFeishuBindingTargetTypes(bindings);

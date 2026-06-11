@@ -10,14 +10,74 @@ export type ExtraEvalStrategy = "skip" | "generate";
 export type WorkflowStepId = "dataset" | "px-report" | "analysis" | "code-optimize" | "ab-test";
 export type StepStatus = "running" | "pending" | "done" | "paused" | "canceled" | "failed";
 export type ChatRole = "user" | "assistant";
-export type ThreadEventStage = "dataset_gen" | "eval" | "run" | "apply" | "abtest";
+export type ThreadEventStage = "dataset" | "eval" | "analysis" | "repair" | "abtest";
 
 export type WorkflowProgressSnapshot = {
   statusText: string;
   percent: number;
+  rank?: number;
 };
 
 export type WorkflowProgressPhaseId = "rag" | "judge";
+export type EvoStageActivity = {
+  key: string;
+  stage?: ThreadEventStage;
+  title: string;
+  detail: string;
+  time: string;
+  tone: "normal" | "progress" | "checkpoint" | "auto" | "message" | "error";
+  flowKind?: string;
+  artifactKind?: WorkflowResultKind;
+  artifactId?: string;
+  artifactLabel?: string;
+};
+
+export type EvoCaseProgressStep = {
+  key: string;
+  label: string;
+  status: StepStatus;
+};
+
+export type EvoCaseProgressItem = {
+  caseId: string;
+  title: string;
+  completed: number;
+  total: number;
+  status: StepStatus;
+  steps: EvoCaseProgressStep[];
+  artifactKind: WorkflowResultKind;
+  artifactId?: string;
+  artifactLabel: string;
+  updatedAt?: string;
+};
+
+export type EvoCaseProgressGroup = {
+  stage: Extract<ThreadEventStage, "dataset" | "eval" | "analysis" | "abtest">;
+  title: string;
+  pageSize: number;
+  cases: EvoCaseProgressItem[];
+};
+
+export type EvoStageOverviewItem = {
+  step: WorkflowStep;
+  stage: ThreadEventStage;
+  eventCount: number;
+  latestActivity?: EvoStageActivity;
+};
+
+export type EvoProcessDashboard = {
+  overview: EvoStageOverviewItem[];
+  activeStage?: ThreadEventStage;
+  activeStep?: WorkflowStep;
+  activeProgress?: WorkflowProgressSnapshot;
+  activeProgressPhases?: WorkflowProgressPhaseSnapshot[];
+  recentActivities: EvoStageActivity[];
+  recentActivityTotal: number;
+  checkpoint?: CheckpointWaitPrompt;
+  cutoverActivities: EvoStageActivity[];
+  cutoverCompleted: boolean;
+  caseProgressGroups: EvoCaseProgressGroup[];
+};
 
 export type WorkflowProgressPhaseSnapshot = WorkflowProgressSnapshot & {
   id: WorkflowProgressPhaseId;
@@ -91,6 +151,8 @@ export type HistorySessionEntry = {
   messageCount?: number;
   status?: string;
   source: "thread" | "local";
+  isCurrent?: boolean;
+  isPreviewing?: boolean;
 };
 
 export type NewSessionDraft = {
@@ -112,6 +174,8 @@ export type KnowledgeBaseOption = {
 };
 
 export type AgentThreadCreateResponse = {
+  id?: string;
+  thread_id?: string;
   data?: {
     upstream?: {
       id?: string;
@@ -164,65 +228,14 @@ export type ChatStreamDeltaKind = "thinking" | "answer";
 export type CheckpointWaitPrompt = {
   message: string;
   kind?: "checkpoint" | "failure";
+  checkpointKind?: string;
+  completedStage?: ThreadEventStage;
   completedStageLabel?: string;
   nextOperationLabel?: string;
   nextStage?: ThreadEventStage;
   command: string;
   taskId?: string;
   datasetId?: string;
-};
-
-export type AnalysisHypothesisItem = {
-  id: string;
-  claim: string;
-  category?: string;
-  confidence?: number;
-  investigationPaths: string[];
-  verdict?: string;
-  refinedClaim?: string;
-  suggestedAction?: string;
-  agent?: string;
-};
-
-export type AnalysisAgentItem = {
-  agent: string;
-  rounds?: number;
-  toolCallCount: number;
-  tools: Array<{ name: string; count: number }>;
-  verdict?: string;
-  confidence?: number;
-  hypothesisId?: string;
-};
-
-export type AnalysisTimelineItem = {
-  key: string;
-  title: string;
-  detail: string;
-  time?: string;
-};
-
-export type AnalysisRunSummary = {
-  status: StepStatus;
-  hypothesisCount: number;
-  agentCount: number;
-  completedAgentCount: number;
-  toolCallCount: number;
-  iterationCount?: number;
-  converged?: boolean;
-  crossStepNarrative?: string;
-  hypotheses: AnalysisHypothesisItem[];
-  agents: AnalysisAgentItem[];
-  timeline: AnalysisTimelineItem[];
-};
-
-export type ApplyRunSummary = {
-  status: StepStatus;
-  roundCount?: number;
-  changedFileCount: number;
-  changedFiles: string[];
-  testStatusText?: string;
-  commitSha?: string;
-  timeline: AnalysisTimelineItem[];
 };
 
 export type WorkflowResultKind = "datasets" | "eval-reports" | "analysis-reports" | "diffs" | "abtests";
@@ -263,6 +276,7 @@ export const FIXED_EVAL_SET = "__none__";
 export const FIXED_EXTRA_EVAL_STRATEGY: ExtraEvalStrategy = "generate";
 export const DEFAULT_EVAL_CASE_COUNT = 100;
 export const AGENT_API_BASE = `${BASE_URL}/api/core/agent`;
+export const EVO_API_BASE = `${BASE_URL}/api/evo/v1/evo`;
 export const SELF_EVOLUTION_LAST_THREAD_STORAGE_KEY = "lazymind:self-evolution:last-thread";
 export const DEPRECATED_SELF_EVOLUTION_THREAD_HISTORY_STORAGE_KEY = "lazymind:self-evolution:thread-history";
 
@@ -271,7 +285,7 @@ export const workflowResultLabels: Record<WorkflowResultKind, string> = {
   "eval-reports": "评测报告",
   "analysis-reports": "分析报告",
   diffs: "代码 diff 结果",
-  abtests: "A/B 测试结果",
+  abtests: "ABTest 详情",
 };
 
 export function getSelfEvolutionWorkflowImageSrc(language?: string) {
@@ -374,25 +388,54 @@ export const pxMetricMeta: Array<{ key: PxMetricKey; label: string; color: strin
   { key: "doc_recall", label: "文档召回", color: "#7048e8" },
 ];
 
+const pxMetricFieldAliases: Record<PxMetricKey, string[]> = {
+  answer_correctness: ["answer_correctness", "answer_correctness_avg", "correct_rate"],
+  faithfulness: ["faithfulness", "faithfulness_avg"],
+  context_recall: ["context_recall", "context_recall_avg"],
+  doc_recall: ["doc_recall", "doc_recall_avg"],
+};
+
+function getMetricFieldNumber(payload: Record<string, unknown> | undefined, key: PxMetricKey, fallback = 0) {
+  return clampScore(getNumberField(payload, pxMetricFieldAliases[key]) ?? fallback);
+}
+
 export const stageStepMap: Record<ThreadEventStage, WorkflowStepId> = {
-  dataset_gen: "dataset",
+  dataset: "dataset",
   eval: "px-report",
-  run: "analysis",
-  apply: "code-optimize",
+  analysis: "analysis",
+  repair: "code-optimize",
   abtest: "ab-test",
 };
 
 export const stageLabels: Record<ThreadEventStage, string> = {
-  dataset_gen: "生成评测集",
+  dataset: "生成数据集",
   eval: "执行评测",
-  run: "执行分析",
-  apply: "代码修改",
-  abtest: "ABTest",
+  analysis: "问题分析",
+  repair: "代码修改",
+  abtest: "ABTest 与切流",
+};
+
+const stageResultKindMap: Record<ThreadEventStage, WorkflowResultKind> = {
+  dataset: "datasets",
+  eval: "eval-reports",
+  analysis: "analysis-reports",
+  repair: "diffs",
+  abtest: "abtests",
+};
+
+const stepStageMap: Record<WorkflowStepId, ThreadEventStage> = {
+  dataset: "dataset",
+  "px-report": "eval",
+  analysis: "analysis",
+  "code-optimize": "repair",
+  "ab-test": "abtest",
 };
 
 export const checkpointCommandText = "继续执行";
 
 export const terminalThreadEventTypes = new Set(["done", "thread.done", "thread.stop", "intent.done"]);
+export const failedThreadEventTypes = new Set(["error", "thread.error", "intent.error", "USER_ACTIVE_THREAD_EXISTS"]);
+const inactiveTerminalThreadStatuses = new Set(["cancelled", "canceled", "ended", "failed", "error"]);
 
 export const eventActionLabels: Record<string, string> = {
   start: "开始",
@@ -430,23 +473,23 @@ export const workflowStepDefinitions: Omit<WorkflowStep, "status" | "runtimeText
   },
   {
     id: "px-report",
-    title: "Step 2 · 评测报告",
-    desc: "基于数据集生成首轮评测报告，建立效果基线。",
+    title: "Step 2 · 执行评测",
+    desc: "基于数据集执行 RAG 评测和 judge 评分，建立效果基线。",
   },
   {
     id: "analysis",
-    title: "Step 3 · 分析报告",
+    title: "Step 3 · 问题分析",
     desc: "自动分析误答样本，产出问题归因和优先级建议。",
   },
   {
     id: "code-optimize",
-    title: "Step 4 · 代码优化",
-    desc: "根据分析结论给出可执行改造项，形成优化清单。",
+    title: "Step 4 · 代码修改",
+    desc: "展示 repair/opencode 的补丁生成、验证和优化 diff。",
   },
   {
     id: "ab-test",
-    title: "Step 5 · A/B 测试",
-    desc: "执行对照实验并上传新评测报告，确认优化收益。",
+    title: "Step 5 · ABTest 与切流",
+    desc: "执行对照实验并在用户确认后推进候选服务切流。",
   },
 ];
 
@@ -559,23 +602,55 @@ export const buildPxCategoryMetricAveragesFromReport = (payload: unknown): PxCat
     : isRecord(payload)
       ? payload
       : undefined;
+  const reportRecord = getNestedRecordField(sourceRecord, ["data"]) || sourceRecord;
 
   const caseDetailSummary =
-    getStructuredRecordField(sourceRecord, ["case_details_summary"]) ||
-    getNestedRecordField(sourceRecord, ["case_details_summary"]);
+    getStructuredRecordField(reportRecord, ["case_details_summary"]) ||
+    getNestedRecordField(reportRecord, ["case_details_summary"]);
   const questionTypes = (getStructuredArrayField(caseDetailSummary, ["question_types"]) || []).filter(
     (item): item is EvalQuestionTypeSummary => isRecord(item),
   );
 
-  return questionTypes
-    .map((item, index) => ({
-      category: getQuestionTypeDisplayName(item, index),
-      caseCount: typeof item.count === "number" ? item.count : 0,
+  if (questionTypes.length > 0) {
+    return questionTypes
+      .map((item, index) => ({
+        category: getQuestionTypeDisplayName(item, index),
+        caseCount: typeof item.count === "number" ? item.count : 0,
+        metrics: {
+          answer_correctness: clampScore(Number(item.averages?.answer_correctness ?? 0)),
+          faithfulness: clampScore(Number(item.averages?.faithfulness ?? 0)),
+          context_recall: clampScore(Number(item.averages?.context_recall ?? 0)),
+          doc_recall: clampScore(Number(item.averages?.doc_recall ?? 0)),
+        },
+      }))
+      .sort((a, b) => a.category.localeCompare(b.category, "zh-CN", { numeric: true }));
+  }
+
+  const metricsRecord = getNestedRecordField(reportRecord, ["metrics"]);
+  if (metricsRecord) {
+    return [{
+      category: "总体",
+      caseCount: getNumberField(reportRecord, ["total", "total_cases", "case_count"]) || 0,
       metrics: {
-        answer_correctness: clampScore(Number(item.averages?.answer_correctness ?? 0)),
-        faithfulness: clampScore(Number(item.averages?.faithfulness ?? 0)),
-        context_recall: clampScore(Number(item.averages?.context_recall ?? 0)),
-        doc_recall: clampScore(Number(item.averages?.doc_recall ?? 0)),
+        answer_correctness: getMetricFieldNumber(metricsRecord, "answer_correctness"),
+        faithfulness: getMetricFieldNumber(metricsRecord, "faithfulness"),
+        context_recall: getMetricFieldNumber(metricsRecord, "context_recall"),
+        doc_recall: getMetricFieldNumber(metricsRecord, "doc_recall"),
+      },
+    }];
+  }
+
+  const byQuestionType = getNestedRecordField(reportRecord, ["by_question_type"]);
+  return Object.entries(byQuestionType || {})
+    .filter((entry): entry is [string, Record<string, unknown>] => isRecord(entry[1]))
+    .map(([category, item]) => ({
+      category,
+      caseCount: getNumberField(item, ["total", "count", "case_count"]) || 0,
+      metrics: {
+        answer_correctness: getMetricFieldNumber(item, "answer_correctness"),
+        faithfulness: getMetricFieldNumber(item, "faithfulness"),
+        context_recall: getMetricFieldNumber(item, "context_recall"),
+        doc_recall: getMetricFieldNumber(item, "doc_recall"),
       },
     }))
     .sort((a, b) => a.category.localeCompare(b.category, "zh-CN", { numeric: true }));
@@ -607,6 +682,40 @@ export function createThreadRestoreWorkflowRuntimeState(): WorkflowRuntimeState 
     "code-optimize": { status: "pending" },
     "ab-test": { status: "pending" },
   };
+}
+
+export function createCheckpointRestoreWorkflowRuntimeState(checkpoint: CheckpointWaitPrompt | undefined): WorkflowRuntimeState {
+  const state = createThreadRestoreWorkflowRuntimeState();
+  if (!checkpoint?.completedStage) {
+    return state;
+  }
+
+  const currentStepId = stageStepMap[checkpoint.completedStage];
+  const currentStepIndex = getWorkflowStepIndex(currentStepId);
+  workflowStepOrder.forEach((stepId, index) => {
+    if (index < currentStepIndex) {
+      state[stepId] = { status: "done", progress: getCompletedProgressSnapshot() };
+    }
+  });
+
+  state[currentStepId] = {
+    status: "paused",
+    runtimeText: checkpoint.message,
+    progress: getCompletedProgressSnapshot(),
+  };
+  if (currentStepId === "px-report") {
+    const progressPhases = getCompletedEvalProgressPhases();
+    state[currentStepId] = {
+      ...state[currentStepId],
+      progress: getEvalOverallProgressSnapshot(progressPhases),
+      progressPhases,
+    };
+  }
+  return state;
+}
+
+export function createWorkflowRuntimeStateForMode(mode: EvolutionMode): WorkflowRuntimeState {
+  return mode === "auto" ? createInitialWorkflowRuntimeState() : createThreadRestoreWorkflowRuntimeState();
 }
 
 export function createInitialWorkflowResultsState(): WorkflowResultsState {
@@ -701,7 +810,7 @@ export function isEmptyResultPayload(value: unknown) {
     return value.trim().length === 0;
   }
   if (Array.isArray(value)) {
-    return value.length === 0;
+    return value.length === 0 || value.every(isEmptyResultPayload);
   }
   if (isRecord(value)) {
     const nestedItems = getResultItems(value);
@@ -724,6 +833,15 @@ export function stringifyResultPayload(value: unknown) {
 export function getResultStringField(value: unknown, keys: string[]): string | undefined {
   if (typeof value === "string" && value.trim()) {
     return value.trim();
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const result = getResultStringField(item, keys);
+      if (result) {
+        return result;
+      }
+    }
+    return undefined;
   }
   if (!isRecord(value)) {
     return undefined;
@@ -1045,6 +1163,9 @@ export function normalizeThreadListPayload(payload: unknown): ThreadHistoryEntry
 }
 
 export function getDialogueEventAgentLabel(event: NormalizedThreadEvent) {
+  if (event.type.startsWith("autooperator.")) {
+    return "AutoOperator";
+  }
   if (event.type === "message.user") {
     return "模拟用户";
   }
@@ -1056,11 +1177,11 @@ export function getDialogueEventAgentLabel(event: NormalizedThreadEvent) {
 
 export function buildAutoInteractionMessagesFromEvents(events: NormalizedThreadEvent[]): ChatMessage[] {
   return dedupeNormalizedEvents(events)
-    .filter((event) => event.role && event.content && getDialogueEventAgentLabel(event))
+    .filter((event) => getDialogueEventAgentLabel(event) && (event.content || event.displayText))
     .map((event) => ({
       id: `event-chat-${event.key}`,
-      role: event.role as ChatRole,
-      content: event.content || "",
+      role: event.role || "assistant",
+      content: event.content || event.displayText || "",
       time: formatThreadTime(event.timestamp),
       sortTime:
         getThreadTimeSortValue(event.timestamp) ||
@@ -1350,6 +1471,186 @@ export function getRuntimeProgressStatusLabel(action: string | undefined) {
   return "进行中";
 }
 
+function getOperationRunId(payload: Record<string, unknown> | undefined) {
+  const data = getEventPayloadData(payload);
+  return getStringField(data, ["operation_run_id"]) || getStringField(getNestedRecordField(data, ["after"]) || getNestedRecordField(data, ["before"]), ["operation_run_id"]) ||
+    getStringField(payload, ["operation_run_id"]);
+}
+
+function getEventFlowKind(payload: Record<string, unknown> | undefined) {
+  const data = getEventPayloadData(payload);
+  const value = getStringField(data, ["flow_kind"]) || getStringField(payload, ["flow_kind"]);
+  return ({
+    load_corpus: "dataset.load_corpus",
+    build_corpus_snapshot: "dataset.build_corpus_snapshot",
+    "dataset_gen.load_corpus": "dataset.load_corpus",
+    "dataset_gen.build_corpus_snapshot": "dataset.build_corpus_snapshot",
+    prepare_case: "dataset_gen.prepare_case",
+    generate_case: "dataset_gen.generate_case",
+    assemble: "dataset.assemble",
+    "dataset_gen.assemble": "dataset.assemble",
+  } as Record<string, string>)[value || ""] || value;
+}
+
+function getEventCaseId(payload: Record<string, unknown> | undefined) {
+  const data = getEventPayloadData(payload);
+  return getStringField(data, ["case_id"]) || getStringField(payload, ["case_id"]);
+}
+
+function getEventCaseProgress(payload: Record<string, unknown> | undefined): { current: number; total?: number } | undefined {
+  const data = getEventPayloadData(payload);
+  const current = getNumberField(data, ["case_index"]) ?? getNumberField(payload, ["case_index"]);
+  return typeof current === "number" ? { current } : undefined;
+}
+
+function getEventArtifactId(payload: Record<string, unknown> | undefined) {
+  const data = getEventPayloadData(payload);
+  const detail = getNestedRecordField(data, ["detail"]) || getStructuredRecordField(data, ["detail"]);
+  return getStringField(data, ["artifact_id", "writes_artifact_id"]) ||
+    getStringField(detail, ["artifact_id", "writes_artifact_id"]) ||
+    getStringField(payload, ["artifact_id", "writes_artifact_id"]);
+}
+
+function getEventDetailField(payload: Record<string, unknown> | undefined, keys: string[]) {
+  const data = getEventPayloadData(payload);
+  const detail = getNestedRecordField(data, ["detail"]) || getStructuredRecordField(data, ["detail"]);
+  return getStringField(data, keys) || getStringField(detail, keys) || getStringField(payload, keys);
+}
+
+function getPayloadCaseTotal(eventData: Record<string, unknown> | undefined) {
+  const detail = getNestedRecordField(eventData, ["detail"]) || getStructuredRecordField(eventData, ["detail"]);
+  return getNumberField(eventData, ["total", "num_cases", "case_count", "count"]) ||
+    getNumberField(detail, ["total", "num_cases", "case_count", "count"]);
+}
+
+function createSegmentProgressSnapshot(
+  label: string,
+  base: number,
+  span: number,
+  action: string | undefined,
+  rank: number,
+  current?: number,
+  total?: number,
+): WorkflowProgressSnapshot {
+  const operationPercent =
+    typeof current === "number" && typeof total === "number" && total > 0
+      ? (current / total) * 100
+      : typeof current === "number"
+        ? 0
+      : isActionKind(action, "finish")
+        ? 100
+        : 0;
+  return {
+    statusText: isActionKind(action, "finish") ? `${label}已完成` : `${label}中`,
+    percent: clampPercent(base + (span * operationPercent) / 100),
+    rank: rank + (current || 0),
+  };
+}
+
+function getAbtestWorkflowProgressSnapshot(
+  action: string | undefined,
+  payload: Record<string, unknown> | undefined,
+): WorkflowProgressSnapshot | undefined {
+  const eventData = getEventPayloadData(payload);
+  const flowKind = getEventFlowKind(payload);
+  const operationProgress = getEventCaseProgress(payload);
+  const caseTotal = getPayloadCaseTotal(eventData) || operationProgress?.total;
+  const artifactId = getEventArtifactId(payload);
+  const decision = getEventDetailField(payload, ["decision_status"]);
+
+  if (flowKind === "eval.rag_answer" && getEventCaseId(payload)) {
+    return createSegmentProgressSnapshot("候选回答生成", 8, 40, action, 100, operationProgress?.current, caseTotal);
+  }
+  if (flowKind === "eval.judge_answer" && getEventCaseId(payload)) {
+    return createSegmentProgressSnapshot("候选结果评测", 48, 40, action, 300, operationProgress?.current, caseTotal);
+  }
+  if (flowKind === "eval.aggregate" || artifactId === "candidate_eval_report") {
+    return createSegmentProgressSnapshot("候选评测汇总", 88, 4, isActionKind(action, "finish") ? "progress" : action, 500);
+  }
+  if (flowKind === "abtest.candidate_service.start") {
+    return createSegmentProgressSnapshot("候选服务启动", 0, 8, action, 50);
+  }
+  if (flowKind === "abtest.candidate_service.stop") {
+    return {
+      statusText: isActionKind(action, "finish") ? "候选服务回收已完成" : "候选服务回收中",
+      percent: isActionKind(action, "finish") ? 100 : 98,
+      rank: 750,
+    };
+  }
+  if (decision) {
+    return {
+      statusText: decision.toLowerCase() === "accept" ? "候选通过切流门槛" : "候选未通过切流门槛",
+      percent: 96,
+      rank: 650,
+    };
+  }
+  if (flowKind === "abtest.compare") {
+    return createSegmentProgressSnapshot("A/B 对照决策", 92, 4, action, 600);
+  }
+  if (flowKind === "abtest.candidate_cutover" || artifactId === "candidate_algorithm_cutover") {
+    return {
+      statusText: isActionKind(action, "finish") ? "候选算法切流已完成" : "等待确认切流",
+      percent: isActionKind(action, "finish") ? 100 : 96,
+      rank: 700,
+    };
+  }
+
+  return undefined;
+}
+
+const datasetOperationSegments = {
+  "dataset.load_corpus": { label: "加载语料", base: 0, span: 18, rank: 10 },
+  "dataset.build_corpus_snapshot": { label: "构建语料快照", base: 18, span: 17, rank: 20 },
+  "dataset_gen.prepare_case": { label: "准备样本", base: 35, span: 20, rank: 30 },
+  "dataset_gen.generate_case": { label: "生成样本", base: 55, span: 25, rank: 40 },
+  "dataset.assemble": { label: "组装数据集", base: 80, span: 20, rank: 50 },
+} as const;
+
+function getDatasetWorkflowProgressSnapshot(
+  action: string | undefined,
+  payload: Record<string, unknown> | undefined,
+): WorkflowProgressSnapshot | undefined {
+  const eventData = getEventPayloadData(payload);
+  const segment = datasetOperationSegments[getEventFlowKind(payload) as keyof typeof datasetOperationSegments];
+  if (!segment) {
+    if (isActionKind(action, "finish")) {
+      return getStringField(eventData, ["stage"]) === "dataset" ? getCompletedProgressSnapshot() : undefined;
+    }
+    return undefined;
+  }
+
+  const operationProgress = getEventCaseProgress(payload);
+  const current =
+    getNumberField(eventData, ["current", "completed", "done", "processed"]) ??
+    operationProgress?.current;
+  const total = getNumberField(eventData, ["total", "num_cases", "cases", "count"]);
+  const explicitPercent = getNumberField(eventData, ["percent", "percentage", "progress"]);
+  const operationPercent =
+    typeof explicitPercent === "number"
+      ? explicitPercent
+      : typeof current === "number" && typeof total === "number" && total > 0
+        ? (current / total) * 100
+        : isActionKind(action, "finish")
+          ? 100
+          : isActionKind(action, "start")
+            ? 0
+            : undefined;
+
+  if (typeof operationPercent !== "number") {
+    return {
+      statusText: `${segment.label}进行中`,
+      percent: segment.base,
+      rank: segment.rank,
+    };
+  }
+
+  return {
+    statusText: isActionKind(action, "finish") ? `${segment.label}已完成` : `${segment.label}进行中`,
+    percent: clampPercent(segment.base + (segment.span * operationPercent) / 100),
+    rank: segment.rank,
+  };
+}
+
 type EvalPayloadPhase = WorkflowProgressPhaseId;
 
 function normalizePhaseText(value: unknown) {
@@ -1436,6 +1737,19 @@ function updateProgressStatusText(
   return progress ? { ...progress, statusText } : progress;
 }
 
+function mergeProgressSnapshot(
+  current: WorkflowProgressSnapshot | undefined,
+  next: WorkflowProgressSnapshot | undefined,
+): WorkflowProgressSnapshot | undefined {
+  if (!next || !current) {
+    return next || current;
+  }
+  if ((next.rank ?? -1) < (current.rank ?? -1)) {
+    return current;
+  }
+  return next.percent < current.percent && next.statusText === current.statusText ? current : next;
+}
+
 const evalProgressPhaseDefinitions: Record<WorkflowProgressPhaseId, Omit<WorkflowProgressPhaseSnapshot, "statusText" | "percent">> = {
   rag: {
     id: "rag",
@@ -1474,13 +1788,28 @@ function getCompletedEvalProgressPhases(): WorkflowProgressPhaseSnapshot[] {
   ];
 }
 
+function getEvalOverallProgressSnapshot(phases: WorkflowProgressPhaseSnapshot[] | undefined): WorkflowProgressSnapshot | undefined {
+  if (!phases?.length) {
+    return undefined;
+  }
+  const activePhase =
+    phases.find((item) => item.statusText.endsWith("中")) ||
+    phases.find((item) => item.percent > 0 && item.percent < 100) ||
+    phases.find((item) => item.percent < 100);
+  return {
+    statusText: phases.every((item) => item.percent >= 100) ? "已完成" : activePhase?.statusText || "进行中",
+    percent: clampPercent(phases.reduce((sum, item) => sum + item.percent, 0) / phases.length),
+  };
+}
+
 function updateEvalProgressPhases(
   current: WorkflowProgressPhaseSnapshot[] | undefined,
   phase: WorkflowProgressPhaseId | undefined,
   progress: WorkflowProgressSnapshot | undefined,
   action: string | undefined,
+  isOperationScoped = false,
 ): WorkflowProgressPhaseSnapshot[] {
-  if (isActionKind(action, "finish") && (!phase || phase === "judge")) {
+  if (isActionKind(action, "finish") && !isOperationScoped && (!phase || phase === "judge")) {
     return getCompletedEvalProgressPhases();
   }
 
@@ -1498,7 +1827,7 @@ function updateEvalProgressPhases(
   const currentPhase = next.find((item) => item.id === phase);
   const progressSnapshot = progress || {
     statusText: getEvalProgressStatusLabel(action, phase),
-    percent: isActionKind(action, "finish") ? 100 : currentPhase?.percent ?? 0,
+    percent: isActionKind(action, "finish") && !isOperationScoped ? 100 : currentPhase?.percent ?? 0,
   };
 
   return next.map((item) => {
@@ -1707,9 +2036,34 @@ export function buildApplyEventDisplayText(
   payload: Record<string, unknown> | undefined,
 ) {
   const eventData = getEventPayloadData(payload);
+  const phase = getStringField(eventData, ["phase", "task", "task_type", "step", "name", "kind", "type", "event"]);
+  const detail = getNestedRecordField(eventData, ["detail"]) || getStructuredRecordField(eventData, ["detail"]);
+  const attempt = getNumberField(eventData, ["attempt"]) ?? getNumberField(detail, ["attempt"]);
+  const failure = getStringField(detail, ["failure", "failure_summary"]);
+
+  if (phase === "repair_loop") {
+    if (isActionKind(action, "finish")) {
+      const decision = getStringField(detail, ["decision"]) || "完成";
+      return `修复循环已结束，结果：${decision}。`;
+    }
+    return typeof attempt === "number" ? `修复循环正在执行第 ${attempt} 轮。` : "修复循环正在运行。";
+  }
+
+  if (phase === "opencode") {
+    return typeof attempt === "number" ? `opencode 正在执行第 ${attempt} 轮代码修改。` : "opencode 正在生成候选改动。";
+  }
+
+  if (phase === "repair_patch") {
+    const status = isActionKind(action, "failed") ? "未通过" : "已生成";
+    return failure ? `候选补丁${status}：${failure}。` : `候选补丁${status}，正在等待验证。`;
+  }
+
+  if (phase === "repair_candidate_service" || phase === "candidate_service") {
+    return isActionKind(action, "finish") ? "候选服务已启动并可用于验证。" : "候选服务正在启动，用于真实评测验证。";
+  }
 
   if (action === "start") {
-    return "已启动代码优化，正在生成候选改动。";
+    return "已启动代码修改，正在生成候选改动。";
   }
 
   if (type === "apply.round.diff") {
@@ -1733,11 +2087,11 @@ export function buildApplyEventDisplayText(
   }
 
   if (action === "finish") {
-    return "候选优化版本已准备完成，可查看代码改动结果。";
+    return "候选修改版本已准备完成，可查看代码改动结果。";
   }
 
   if (action === "cancel") {
-    return "代码优化已取消，当前候选版本未继续推进。";
+    return "代码修改已取消，当前候选版本未继续推进。";
   }
 
   return undefined;
@@ -1748,6 +2102,7 @@ export function buildDatasetEventDisplayText(
   payload: Record<string, unknown> | undefined,
 ) {
   const eventData = getEventPayloadData(payload);
+  const operationSegment = datasetOperationSegments[getEventFlowKind(payload) as keyof typeof datasetOperationSegments];
   const current = getNumberField(eventData, ["current", "completed", "done", "processed"]);
   const total = getNumberField(eventData, ["total", "num_cases", "cases", "count"]);
   const countText =
@@ -1761,6 +2116,9 @@ export function buildDatasetEventDisplayText(
     return "已启动数据集生成，正在准备评测样本。";
   }
   if (isActionKind(action, "finish")) {
+    if (operationSegment && operationSegment.base + operationSegment.span < 100) {
+      return `${operationSegment.label}已完成，继续等待后续数据集操作。`;
+    }
     return "数据集生成已完成，可下载查看结果。";
   }
   if (isActionKind(action, "cancel")) {
@@ -1769,7 +2127,9 @@ export function buildDatasetEventDisplayText(
   if (isActionKind(action, "pause")) {
     return "数据集生成已暂停，等待继续执行。";
   }
-  return `数据集生成正在执行${countText}。`;
+  return operationSegment
+    ? `${operationSegment.label}正在执行${countText}。`
+    : `数据集生成正在执行${countText}。`;
 }
 
 export function buildEvalEventDisplayText(
@@ -1820,7 +2180,44 @@ export function buildEvalEventDisplayText(
   return undefined;
 }
 
-export function buildAbtestEventDisplayText(action: string | undefined) {
+export function buildAbtestEventDisplayText(action: string | undefined, payload?: Record<string, unknown>) {
+  const eventData = getEventPayloadData(payload);
+  const flowKind = getEventFlowKind(payload);
+  const operationProgress = getEventCaseProgress(payload);
+  const caseTotal = getPayloadCaseTotal(eventData) || operationProgress?.total;
+  const status = getStringField(eventData, ["status"]);
+  const decision = getEventDetailField(payload, ["decision_status"]);
+  const caseText = operationProgress?.current
+    ? `，case ${operationProgress.current}${caseTotal ? `/${caseTotal}` : ""}`
+    : "";
+  if (flowKind === "eval.rag_answer" && getEventCaseId(payload)) {
+    return `候选版本正在生成回答${caseText}。`;
+  }
+  if (flowKind === "eval.judge_answer" && getEventCaseId(payload)) {
+    return `候选版本正在接受实际评测${caseText}。`;
+  }
+  if (flowKind === "eval.aggregate" || getEventArtifactId(payload) === "candidate_eval_report") {
+    return isActionKind(action, "finish") ? "候选评测报告已汇总完成。" : "正在汇总候选评测报告。";
+  }
+  if (flowKind === "abtest.candidate_cutover") {
+    return isActionKind(action, "finish") ? "候选算法切流已完成。" : "正在准备候选算法切流，需用户确认后推进。";
+  }
+  if (flowKind === "abtest.candidate_service.stop") {
+    return status === "success" || isActionKind(action, "finish")
+      ? "候选服务已停止，候选版本未切流。"
+      : "正在停止候选服务，回收未通过的候选版本。";
+  }
+  if (flowKind === "abtest.candidate_service.start") {
+    return isActionKind(action, "finish") ? "候选服务已就绪，可用于 A/B 对照。" : "正在启动候选服务。";
+  }
+  if (decision) {
+    return decision === "accept"
+      ? "A/B 对照决策完成：候选版本通过切流门槛。"
+      : "A/B 对照决策完成：候选版本未通过切流门槛。";
+  }
+  if (flowKind === "abtest.compare") {
+    return isActionKind(action, "finish") ? "A/B 对照评测已完成，正在整理决策结果。" : "正在执行 A/B 对照评测。";
+  }
   if (action === "start") {
     return "已启动 A/B 测试，正在基于同一批样本执行对照评测。";
   }
@@ -1839,44 +2236,86 @@ export function getWorkflowProgressSnapshot(
   payload: Record<string, unknown> | undefined,
   type?: string,
 ): WorkflowProgressSnapshot | undefined {
-  if (stage !== "dataset_gen" && stage !== "eval" && stage !== "abtest") {
+  if (stage !== "dataset" && stage !== "eval" && stage !== "abtest") {
     return undefined;
+  }
+
+  if (stage === "dataset") {
+    return getDatasetWorkflowProgressSnapshot(action, payload);
+  }
+
+  if (stage === "abtest") {
+    return getAbtestWorkflowProgressSnapshot(action, payload);
   }
 
   const eventData = getEventPayloadData(payload);
   const evalPhase = stage === "eval" ? getEvalPayloadPhase(action, type, payload) : undefined;
   const progressData = stage === "eval" ? getEvalPhasePayloadData(payload, evalPhase) : eventData;
-  const current = getNumberField(progressData, ["current", "completed", "done", "processed"]);
-  const total = getNumberField(progressData, ["total", "num_cases", "cases", "count"]);
+  const operationRunId = getOperationRunId(payload);
+  const isEvalOperationScoped = stage === "eval" && Boolean(operationRunId);
+  const operationProgress = getEventCaseProgress(payload);
+  const current = getNumberField(progressData, ["current", "completed", "done", "processed"]) ?? operationProgress?.current;
+  const total = getNumberField(progressData, ["total", "num_cases", "cases", "count"]) ?? operationProgress?.total;
   const explicitPercent = getNumberField(progressData, ["percent", "percentage", "progress"]);
   const hasProgressValue =
     typeof explicitPercent === "number" ||
     (typeof current === "number" && typeof total === "number" && total > 0);
   const percent =
-    isActionKind(action, "finish")
-      ? 100
-      : isActionKind(action, "start")
-        ? typeof explicitPercent === "number"
-          ? explicitPercent
-          : typeof current === "number" && typeof total === "number" && total > 0
-            ? (current / total) * 100
-            : hasProgressValue
-              ? 0
-              : undefined
-        : typeof explicitPercent === "number"
-          ? explicitPercent
-          : typeof current === "number" && typeof total === "number" && total > 0
-            ? (current / total) * 100
+    typeof explicitPercent === "number"
+      ? explicitPercent
+      : typeof current === "number" && typeof total === "number" && total > 0
+        ? (current / total) * 100
+        : isActionKind(action, "finish")
+          ? isEvalOperationScoped
+            ? undefined
+            : 100
+          : isActionKind(action, "start") && hasProgressValue
+            ? 0
             : undefined;
 
   if (typeof percent !== "number") {
     return undefined;
   }
 
+  const rank = operationProgress?.current ?? (getEventFlowKind(payload) === "dataset.assemble" ? current : undefined);
   return {
-    statusText: stage === "eval" ? getEvalProgressStatusLabel(action, evalPhase) : getRuntimeProgressStatusLabel(action),
+    statusText: rank ? "进行中" : stage === "eval" ? getEvalProgressStatusLabel(action, evalPhase) : getRuntimeProgressStatusLabel(action),
     percent: clampPercent(percent),
+    rank,
   };
+}
+
+function isAbtestStageCompleteEvent(event: Pick<NormalizedThreadEvent, "action" | "progress" | "payload" | "stage">) {
+  if (event.stage !== "abtest" || !isActionKind(event.action, "finish")) {
+    return false;
+  }
+  return getEventArtifactId(event.payload) === "abtest_comparison" ||
+    getEventArtifactId(event.payload) === "candidate_algorithm_cutover" ||
+    getEventFlowKind(event.payload) === "abtest.candidate_cutover";
+}
+
+function isIntentSidecarOperation(event: Pick<NormalizedThreadEvent, "payload">) {
+  const operationRunId = getOperationRunId(event.payload) || "";
+  return (
+    operationRunId.startsWith("intent.") ||
+    operationRunId.startsWith("dataset.assemble.intervention.")
+  );
+}
+
+function isStepFinishEvent(event: Pick<NormalizedThreadEvent, "action" | "progress" | "progressPhase" | "payload" | "stage">) {
+  if (!isActionKind(event.action, "finish")) {
+    return false;
+  }
+  if (isAbtestStageCompleteEvent(event)) {
+    return true;
+  }
+  if (getOperationRunId(event.payload)) {
+    return false;
+  }
+  if (event.stage === "dataset" && getStringField(getEventPayloadData(event.payload), ["stage"]) === "dataset_corpus") {
+    return false;
+  }
+  return event.stage === "eval" ? !event.progressPhase || event.progressPhase === "judge" : true;
 }
 
 export function toThreadEventStage(value: unknown): ThreadEventStage | undefined {
@@ -1885,11 +2324,17 @@ export function toThreadEventStage(value: unknown): ThreadEventStage | undefined
   }
 
   const normalized = value.trim();
-  if (normalized === "dataset_gen" || normalized === "eval" || normalized === "run" || normalized === "apply" || normalized === "abtest") {
-    return normalized;
-  }
-
-  return undefined;
+  return {
+    dataset_gen: "dataset",
+    dataset: "dataset",
+    eval: "eval",
+    candidate_eval: "abtest",
+    run: "analysis",
+    analysis: "analysis",
+    apply: "repair",
+    repair: "repair",
+    abtest: "abtest",
+  }[normalized] as ThreadEventStage | undefined;
 }
 
 export function getStageLabel(value: unknown) {
@@ -1919,8 +2364,30 @@ export function formatCheckpointOperation(value: string | undefined) {
 
   const [operationStage, ...operationParts] = value.split(".");
   const stageLabel = getStageLabel(operationStage);
-  const actionLabel = operationParts.length > 0 ? operationParts.join(".") : "";
+  const rawAction = operationParts.join(".");
+  const actionLabel =
+    {
+      "": "",
+      run: "",
+      loop: "",
+      candidate_cutover: "候选算法切流",
+      "candidate_service.start": "候选服务启动",
+      "candidate_service.stop": "候选服务停止",
+    }[rawAction] ?? rawAction.replace(/_/g, " ");
   return [stageLabel, actionLabel].filter(Boolean).join(" · ");
+}
+
+function formatCheckpointCapability(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+
+  return {
+    patch_dataset_case: "修改数据集样本",
+    regenerate_dataset_case: "重写数据集样本",
+    prepare_dataset_case: "准备评测样本",
+    generate_dataset_case: "生成评测样本",
+  }[value] ?? value.replace(/_/g, " ");
 }
 
 export function sanitizeCheckpointMessage(
@@ -1953,6 +2420,12 @@ export function buildCheckpointWaitPrompt(payload: Record<string, unknown> | und
   const eventData = getEventPayloadData(payload);
   const nextOperation = getNestedRecordField(eventData, ["next_op", "nextOperation", "next"]);
   const nextOperationName = getStringField(nextOperation, ["op", "operation", "name"]);
+  const checkpointKind = getStringField(eventData, ["checkpoint_kind", "checkpointKind"]) ||
+    getStringField(payload, ["checkpoint_kind", "checkpointKind"]);
+  const capabilityLabel = formatCheckpointCapability(
+    getStringField(eventData, ["capability_id", "capabilityId"]) ||
+      getStringField(payload, ["capability_id", "capabilityId"]),
+  );
   const artifacts = getNestedRecordField(eventData, ["artifacts", "result", "data"]);
   const messageText =
     getStringField(eventData, ["message", "text", "content"]) ||
@@ -1962,15 +2435,33 @@ export function buildCheckpointWaitPrompt(payload: Record<string, unknown> | und
     getStringField(eventData, ["completed_flow", "completed_stage", "stage"]) ||
       getStringField(artifacts, ["completed_flow", "stage"]),
   );
+  const completedStage = toThreadEventStage(
+    getStringField(eventData, ["completed_flow", "completed_stage", "stage"]) ||
+      getStringField(artifacts, ["completed_flow", "stage"]),
+  );
   const nextOperationLabel = formatCheckpointOperation(nextOperationName);
+  const nextStage = toThreadEventStage(
+    getStringField(eventData, ["next_stage", "nextStage"]) ||
+      getStringField(artifacts, ["next_stage", "nextStage"]),
+  ) || getNextStageFromOperation(nextOperationName);
+  const command = checkpointKind === "manual_cutover"
+    ? "确认切流"
+    : checkpointKind === "intent_confirmation"
+      ? "确认执行"
+      : checkpointCommandText;
+  const checkpointMessage = checkpointKind === "intent_confirmation"
+    ? `已准备好执行${capabilityLabel ? `「${capabilityLabel}」` : "本次修改"}，确认后将应用这条干预。`
+    : sanitizeCheckpointMessage(messageText, completedStageLabel, nextOperationLabel);
 
   return {
     kind: "checkpoint",
-    message: sanitizeCheckpointMessage(messageText, completedStageLabel, nextOperationLabel),
+    checkpointKind,
+    message: checkpointMessage,
+    completedStage,
     completedStageLabel,
     nextOperationLabel,
-    nextStage: getNextStageFromOperation(nextOperationName),
-    command: checkpointCommandText,
+    nextStage,
+    command,
     taskId:
       getStringField(eventData, ["completed_task_id", "task_id"]) ||
       getStringField(artifacts, ["task_id"]),
@@ -1978,7 +2469,7 @@ export function buildCheckpointWaitPrompt(payload: Record<string, unknown> | und
 }
 
 export function isTerminalAbtestCheckpoint(prompt: CheckpointWaitPrompt | undefined) {
-  return prompt?.completedStageLabel === stageLabels.abtest && !prompt.nextStage;
+  return prompt?.completedStage === "abtest" && !prompt.nextStage;
 }
 
 export function buildFailureRetryPrompt(
@@ -2029,9 +2520,49 @@ export function compactPayloadForDisplay(payload: Record<string, unknown> | unde
     return "";
   }
 
+  const eventData = getEventPayloadData(payload);
+  const status = getStringField(eventData, ["status"]);
+  const phase = getStringField(eventData, ["phase", "stage", "task", "task_type", "step", "name", "kind", "type", "event"]);
+  const operationRunId = getOperationRunId(payload);
+  const currentItem = getStringField(eventData, ["current_item", "item_ref", "case_id", "artifact_id"]);
+  const detailRecord = getNestedRecordField(eventData, ["detail"]) || getStructuredRecordField(eventData, ["detail"]);
+  const metrics = [
+    getNumberField(eventData, ["current", "completed", "done", "processed"]) !== undefined &&
+    getNumberField(eventData, ["total", "num_cases", "cases", "count"]) !== undefined
+      ? `进度 ${getNumberField(eventData, ["current", "completed", "done", "processed"])}/${getNumberField(eventData, ["total", "num_cases", "cases", "count"])}`
+      : "",
+    getStringField(detailRecord, ["artifact_id"]) ? `产物 ${getStringField(detailRecord, ["artifact_id"])}` : "",
+    currentItem ? `当前 ${currentItem}` : "",
+  ].filter(Boolean);
+  const structured = [
+    operationRunId ? formatOperationRunId(operationRunId) : phase,
+    status,
+    ...metrics,
+  ].filter(Boolean);
+  if (structured.length > 0) {
+    return structured.join(" · ");
+  }
+
   const entries = Object.entries(payload).filter(
     ([key, value]) =>
-      !["type", "event", "event_name", "kind", "stage", "action", "message", "content", "text", "reply", "thought"].includes(key) &&
+      ![
+        "type",
+        "event",
+        "event_name",
+        "kind",
+        "stage",
+        "action",
+        "message",
+        "content",
+        "text",
+        "reply",
+        "thought",
+        "seq",
+        "event_id",
+        "created_at",
+        "checkpoint_id",
+        "payload",
+      ].includes(key) &&
       value !== undefined &&
       value !== null &&
       value !== "",
@@ -2040,12 +2571,15 @@ export function compactPayloadForDisplay(payload: Record<string, unknown> | unde
     return "";
   }
 
-  const compactPayload = Object.fromEntries(entries);
-  try {
-    return JSON.stringify(compactPayload);
-  } catch {
-    return "";
-  }
+  return entries.slice(0, 4).map(([key, value]) => {
+    if (Array.isArray(value)) {
+      return `${key} ${value.length} 项`;
+    }
+    if (isRecord(value)) {
+      return `${key} 已更新`;
+    }
+    return `${key} ${String(value).slice(0, 80)}`;
+  }).join(" · ");
 }
 
 export function getDiffLineType(line: string) {
@@ -2255,7 +2789,7 @@ export function formatAbMetricLabel(metric: string) {
 
 export function getAbtestResultRecords(value: unknown): Record<string, unknown>[] {
   if (Array.isArray(value)) {
-    return value.filter((item): item is Record<string, unknown> => isRecord(item));
+    return value.filter((item): item is Record<string, unknown> => isRecord(item) && Object.keys(item).length > 0);
   }
   if (!isRecord(value)) {
     return [];
@@ -2268,18 +2802,38 @@ export function getAbtestResultRecords(value: unknown): Record<string, unknown>[
 export function buildAbSummaryReports(payload: unknown): AbSummaryReport[] {
   return getAbtestResultRecords(payload)
     .reduce<AbSummaryReport[]>((reports, record, index) => {
+      const dataRecord = getNestedRecordField(record, ["data"]) || record;
       const summary =
-        getStructuredRecordField(record, ["summary"]) ||
-        getNestedRecordField(record, ["summary"]) ||
-        (isRecord(record.metrics) ? record : undefined);
+        getStructuredRecordField(dataRecord, ["summary"]) ||
+        getNestedRecordField(dataRecord, ["summary"]) ||
+        (getNestedRecordField(dataRecord, ["metrics"]) ? dataRecord : undefined);
       if (!summary) {
         return reports;
       }
 
       const metricsRecord =
         getStructuredRecordField(summary, ["metrics"]) || getNestedRecordField(summary, ["metrics"]);
-      const metricRows = metricsRecord
-        ? Object.entries(metricsRecord)
+      const baselineMetrics = getNestedRecordField(metricsRecord, ["baseline"]);
+      const candidateMetrics = getNestedRecordField(metricsRecord, ["candidate"]);
+      const deltaMetrics = getNestedRecordField(metricsRecord, ["delta"]);
+      const caseDeltas = (getStructuredArrayField(summary, ["case_deltas"]) || []).filter(
+        (item): item is Record<string, unknown> => isRecord(item),
+      );
+      const improvedCount = caseDeltas.filter((item) => getStringField(item, ["outcome"]) === "improved").length;
+      const metricRows = baselineMetrics && candidateMetrics
+        ? pxMetricMeta.map((metric) => ({
+          key: metric.key,
+          metric: metric.key,
+          metricLabel: metric.label,
+          meanA: getMetricFieldNumber(baselineMetrics, metric.key),
+          meanB: getMetricFieldNumber(candidateMetrics, metric.key),
+          deltaMean: getNumberField(deltaMetrics, pxMetricFieldAliases[metric.key]) ?? getMetricFieldNumber(candidateMetrics, metric.key) - getMetricFieldNumber(baselineMetrics, metric.key),
+          winRateB: caseDeltas.length ? improvedCount / caseDeltas.length : 0,
+          signP: null,
+          n: caseDeltas.length || getNumberField(summary, ["case_count"]),
+        }))
+        : metricsRecord
+          ? Object.entries(metricsRecord)
             .filter((entry): entry is [string, Record<string, unknown>] => isRecord(entry[1]))
             .map(([metric, item]) => ({
               key: metric,
@@ -2292,20 +2846,21 @@ export function buildAbSummaryReports(payload: unknown): AbSummaryReport[] {
               signP: item.sign_p === null || item.sign_p === undefined ? null : toFiniteNumber(item.sign_p),
               n: getNumberField(item, ["n"]),
             }))
-        : [];
+          : [];
 
-      const topDiffRows = (getStructuredArrayField(summary, ["top_diff_cases"]) || [])
+      const topDiffRows = (getStructuredArrayField(summary, ["top_diff_cases"]) || caseDeltas)
         .filter((item): item is Record<string, unknown> => isRecord(item))
         .map((item, rowIndex) => ({
           key: getStringField(item, ["case_key", "case_id", "id"]) || `case-${rowIndex + 1}`,
           caseKey: getStringField(item, ["case_key", "case_id", "id"]) || `case-${rowIndex + 1}`,
-          a: toFiniteNumber(item.a),
-          b: toFiniteNumber(item.b),
-          delta: toFiniteNumber(item.delta),
+          a: getMetricFieldNumber(getNestedRecordField(item, ["before"]) || item, "answer_correctness"),
+          b: getMetricFieldNumber(getNestedRecordField(item, ["after"]) || item, "answer_correctness"),
+          delta: getNumberField(getNestedRecordField(item, ["delta"]) || item, pxMetricFieldAliases.answer_correctness) ?? 0,
         }));
 
       const policy = getStructuredRecordField(summary, ["policy"]) || getNestedRecordField(summary, ["policy"]);
-      const reasons = (getStructuredArrayField(summary, ["reasons"]) || []).filter(
+      const decision = getNestedRecordField(summary, ["decision"]);
+      const reasons = (getStructuredArrayField(summary, ["reasons"]) || getStructuredArrayField(decision, ["reasons"]) || []).filter(
         (item): item is string => typeof item === "string" && item.trim().length > 0,
       );
       const missingMetrics = (getStructuredArrayField(summary, ["missing_metrics"]) || []).filter(
@@ -2314,17 +2869,29 @@ export function buildAbSummaryReports(payload: unknown): AbSummaryReport[] {
       const guardMetrics = (getStructuredArrayField(policy, ["guard_metrics"]) || []).filter(
         (item): item is string => typeof item === "string" && item.trim().length > 0,
       );
+      const reportId =
+        getStringField(dataRecord, ["abtest_id", "id", "task_id"]) ||
+        getStringField(record, ["abtest_id", "id", "task_id"]) ||
+        `abtest-${index + 1}`;
+      const markdown =
+        getResultStringField(dataRecord, ["markdown", "report", "content", "text"]) ||
+        getResultStringField(record, ["markdown", "report", "content", "text"]);
+      const verdict =
+        getStringField(summary, ["verdict"]) ||
+        getStringField(decision, ["status"]) ||
+        getResultStringField(dataRecord, ["verdict"]) ||
+        getResultStringField(record, ["verdict"]);
 
       reports.push({
-        id: getStringField(record, ["abtest_id", "id", "task_id"]) || `abtest-${index + 1}`,
-        markdown: getResultStringField(record, ["markdown", "report", "content", "text"]),
-        verdict: getStringField(summary, ["verdict"]) || getResultStringField(record, ["verdict"]),
-        alignedCases: getNumberField(summary, ["aligned_cases"]),
+        id: reportId,
+        markdown,
+        verdict,
+        alignedCases: getNumberField(summary, ["aligned_cases", "case_count"]) || caseDeltas.length || undefined,
         reasons,
         metricRows,
         topDiffRows,
         missingMetrics,
-        primaryMetric: getStringField(policy, ["primary_metric"]),
+        primaryMetric: getStringField(policy, ["primary_metric"]) || getStringField(decision, ["primary_metric"]),
         guardMetrics,
       });
       return reports;
@@ -2390,6 +2957,18 @@ export function isTerminalThreadEvent(type: string) {
   return terminalThreadEventTypes.has(type);
 }
 
+export function isFailedThreadEvent(type: string) {
+  return failedThreadEventTypes.has(type);
+}
+
+export function isInactiveTerminalThreadEvent(event: NormalizedThreadEvent) {
+  if (!isTerminalThreadEvent(event.type)) {
+    return false;
+  }
+  const status = getStringField(event.payload, ["status"]);
+  return Boolean(status && inactiveTerminalThreadStatuses.has(status.toLowerCase()));
+}
+
 export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadEvent {
   const payload = parseThreadEventPayload(frame.data);
   const eventEnvelope = getThreadEventPayloadEnvelope(payload);
@@ -2397,12 +2976,17 @@ export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadE
   const eventType = payloadType || (frame.eventName !== "message" ? frame.eventName : "");
   const [typeStage, ...actionParts] = eventType.split(".");
   const isCheckpointEvent = eventType.startsWith("checkpoint.");
+  const isAutoOperatorEvent = eventType.startsWith("autooperator.");
+  const operationRunId = getOperationRunId(payload);
   const stageFromPayload =
+    (operationRunId?.startsWith("candidate_eval.") ? "abtest" : undefined) ||
     toThreadEventStage(payload?.stage) ||
     toThreadEventStage(eventEnvelope?.stage);
-  const stage = isCheckpointEvent ? undefined : stageFromPayload || toThreadEventStage(typeStage);
+  const stage = isCheckpointEvent ? undefined : stageFromPayload || (isAutoOperatorEvent ? undefined : toThreadEventStage(typeStage));
   const action = isCheckpointEvent
     ? actionParts.join(".") || undefined
+    : isAutoOperatorEvent
+      ? actionParts.join(".") || undefined
     : getStringField(payload, ["action"]) ||
       getStringField(eventEnvelope, ["action"]) ||
       (stage && actionParts.length > 0
@@ -2410,7 +2994,7 @@ export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadE
         : stage && eventType && !toThreadEventStage(eventType) && eventType !== "message"
           ? eventType
           : undefined);
-  const type = isCheckpointEvent ? eventType : stage && action ? `${stage}.${action}` : eventType || "message";
+  const type = isCheckpointEvent || isAutoOperatorEvent ? eventType : stage && action ? `${stage}.${action}` : eventType || "message";
   const role = type === "message.user" ? "user" : type === "message.assistant" ? "assistant" : undefined;
   const content = getThreadEventContentFromPayload(payload) || (!payload ? frame.data.trim() : undefined);
   const timestamp =
@@ -2423,12 +3007,16 @@ export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadE
     getStringField(eventEnvelope, ["task_id"]) ||
     getStringField(getEventPayloadData(payload), ["task_id", "run_id"]) ||
     undefined;
+  const messageEventId =
+    getStringField(payload, ["message_id", "messageId", "intent_id", "intentId"]) ||
+    getStringField(eventEnvelope, ["message_id", "messageId", "intent_id", "intentId"]) ||
+    undefined;
   const key =
     frame.id ||
     [
       getStringField(payload, ["thread_id"]) || getStringField(eventEnvelope, ["thread_id"]),
       typeof sequence === "number" ? String(sequence) : "",
-      taskId,
+      taskId || messageEventId,
       type,
       timestamp,
     ]
@@ -2445,6 +3033,21 @@ export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadE
       type,
       payload,
       displayText: "事件流已结束，线程停止信号已收到。",
+    };
+  }
+
+  if (isFailedThreadEvent(frame.eventName) || isFailedThreadEvent(type)) {
+    const errorText = content || "消息处理失败，请稍后重试。";
+    return {
+      key,
+      timestamp,
+      sequence,
+      taskId,
+      type,
+      role: "assistant",
+      content: errorText,
+      payload,
+      displayText: errorText,
     };
   }
 
@@ -2506,6 +3109,28 @@ export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadE
     };
   }
 
+  if (type === "checkpoint.created" || type === "checkpoint.continue" || type === "checkpoint.cancel") {
+    const checkpointId = getStringField(payload, ["checkpoint_id"]);
+    const displayText =
+      type === "checkpoint.created"
+        ? checkpointId
+          ? `已保存流程 checkpoint：${checkpointId}。`
+          : "已保存流程 checkpoint。"
+        : type === "checkpoint.cancel"
+          ? "用户已终止当前 checkpoint。"
+          : "用户已确认继续执行。";
+    return {
+      key,
+      timestamp,
+      sequence,
+      taskId,
+      type,
+      payload,
+      content: displayText,
+      displayText,
+    };
+  }
+
   if (action === "failed") {
     const checkpointWait = buildFailureRetryPrompt(stage, payload);
     return {
@@ -2540,12 +3165,12 @@ export function normalizeThreadEvent(frame: ThreadEventFrame): NormalizedThreadE
   const actionLabel = action ? eventActionLabels[action] || action : "事件更新";
   const detail = content || compactPayloadForDisplay(payload);
   const displayText =
-    (stage === "dataset_gen" && buildDatasetEventDisplayText(action, payload)) ||
-    (stage === "run" && buildAnalysisEventDisplayText(action, type, payload)) ||
-    (stage === "apply" && buildApplyEventDisplayText(action, type, payload)) ||
+    (stage === "dataset" && buildDatasetEventDisplayText(action, payload)) ||
+    (stage === "analysis" && buildAnalysisEventDisplayText(action, type, payload)) ||
+    (stage === "repair" && buildApplyEventDisplayText(action, type, payload)) ||
     (stage === "eval" && buildEvalEventDisplayText(action, type, payload)) ||
-    (stage === "abtest" && buildAbtestEventDisplayText(action)) ||
-    (stage === "dataset_gen" && "数据集生成正在执行。") ||
+    (stage === "abtest" && buildAbtestEventDisplayText(action, payload)) ||
+    (stage === "dataset" && "数据集生成正在执行。") ||
     (detail ? `${stageLabels[stage]}：${actionLabel}，${detail}` : `${stageLabels[stage]}：${actionLabel}`);
   const progress = getWorkflowProgressSnapshot(stage, action, payload, type);
   const progressPhase = stage === "eval" ? getEvalPayloadPhase(action, type, payload) : undefined;
@@ -2598,6 +3223,10 @@ export function dedupeNormalizedEvents(events: NormalizedThreadEvent[]) {
   return Array.from(new Map(events.map((item) => [getNormalizedEventDedupeKey(item), item])).values()).sort(compareNormalizedThreadEvents);
 }
 
+function getLastItem<T>(items: T[]): T | undefined {
+  return items.length ? items[items.length - 1] : undefined;
+}
+
 export function getWorkflowStepIndex(stepId: WorkflowStepId | undefined) {
   if (!stepId) {
     return -1;
@@ -2617,7 +3246,7 @@ export function createWorkflowStepFromRuntime(
     renderKey,
     status: runtime.status,
     runtimeText: runtime.runtimeText,
-    progress: runtime.progress,
+    progress: runtime.progress || (stepId === "px-report" ? getEvalOverallProgressSnapshot(runtime.progressPhases) : undefined),
     progressPhases: runtime.progressPhases,
   };
 }
@@ -2633,25 +3262,28 @@ export function buildWorkflowStepRuntimeFromEvents(events: NormalizedThreadEvent
   };
 
   events.forEach((event) => {
+    if (snapshot.status === "done" && isIntentSidecarOperation(event)) {
+      return;
+    }
+
     if (event.stage === "eval") {
       snapshot.progressPhases = updateEvalProgressPhases(
         snapshot.progressPhases,
         event.progressPhase,
         event.progress,
         event.action,
+        Boolean(getOperationRunId(event.payload)),
       );
-      snapshot.progress = undefined;
+      snapshot.progress = getEvalOverallProgressSnapshot(snapshot.progressPhases);
     }
 
-    const isFinished =
-      event.stage === "eval"
-        ? isActionKind(event.action, "finish") && (!event.progressPhase || event.progressPhase === "judge")
-        : event.action === "finish";
+    const isFinished = isStepFinishEvent(event);
 
     if (isFinished) {
       snapshot.status = "done";
       if (event.stage === "eval") {
         snapshot.progressPhases = getCompletedEvalProgressPhases();
+        snapshot.progress = getEvalOverallProgressSnapshot(snapshot.progressPhases);
       } else {
         snapshot.progress = event.progress || getCompletedProgressSnapshot();
       }
@@ -2662,16 +3294,18 @@ export function buildWorkflowStepRuntimeFromEvents(events: NormalizedThreadEvent
     } else if (event.action === "pause") {
       snapshot.status = "paused";
       if (event.stage !== "eval") {
-        snapshot.progress =
-          event.progress ||
-          updateProgressStatusText(snapshot.progress, getRuntimeProgressStatusLabel(event.action));
+        snapshot.progress = mergeProgressSnapshot(
+          snapshot.progress,
+          event.progress || updateProgressStatusText(snapshot.progress, getRuntimeProgressStatusLabel(event.action)),
+        );
       }
     } else {
       snapshot.status = "running";
       if (event.stage !== "eval") {
-        snapshot.progress =
-          event.progress ||
-          updateProgressStatusText(snapshot.progress, getRuntimeProgressStatusLabel(event.action));
+        snapshot.progress = mergeProgressSnapshot(
+          snapshot.progress,
+          event.progress || updateProgressStatusText(snapshot.progress, getRuntimeProgressStatusLabel(event.action)),
+        );
       }
     }
     snapshot.runtimeText = event.progress ? undefined : event.displayText;
@@ -2681,6 +3315,7 @@ export function buildWorkflowStepRuntimeFromEvents(events: NormalizedThreadEvent
     snapshot.status = "done";
     if (snapshot.progressPhases) {
       snapshot.progressPhases = getCompletedEvalProgressPhases();
+      snapshot.progress = getEvalOverallProgressSnapshot(snapshot.progressPhases);
     } else {
       snapshot.progress = getCompletedProgressSnapshot();
     }
@@ -2689,6 +3324,7 @@ export function buildWorkflowStepRuntimeFromEvents(events: NormalizedThreadEvent
   if (snapshot.status === "done") {
     if (snapshot.progressPhases) {
       snapshot.progressPhases = getCompletedEvalProgressPhases();
+      snapshot.progress = getEvalOverallProgressSnapshot(snapshot.progressPhases);
     } else {
       snapshot.progress = getCompletedProgressSnapshot();
     }
@@ -2713,7 +3349,7 @@ export function buildVisibleWorkflowSteps(
       return;
     }
     const stepId = stageStepMap[event.stage];
-    const latestGroup = groups.at(-1);
+    const latestGroup = getLastItem(groups);
     if (latestGroup?.stepId === stepId) {
       latestGroup.events.push(event);
       return;
@@ -2731,370 +3367,407 @@ export function buildVisibleWorkflowSteps(
   });
 }
 
-export function buildAnalysisRunSummary(events: NormalizedThreadEvent[]): AnalysisRunSummary | undefined {
-  const runEvents = events.filter((item) => item.stage === "run");
-  if (runEvents.length === 0) {
+function eventActivityTone(event: NormalizedThreadEvent): EvoStageActivity["tone"] {
+  if (event.type.startsWith("autooperator.")) {
+    return "auto";
+  }
+  if (event.type.startsWith("checkpoint.")) {
+    return "checkpoint";
+  }
+  if (event.type.startsWith("message.") || event.type.startsWith("intent.")) {
+    return "message";
+  }
+  if (event.action === "failed") {
+    return "error";
+  }
+  return event.progress ? "progress" : "normal";
+}
+
+function eventActivityTitle(event: NormalizedThreadEvent) {
+  if (event.type.startsWith("autooperator.")) {
+    return "自动处理记录";
+  }
+  if (event.type === "checkpoint.wait") {
+    return "等待确认";
+  }
+  if (event.type === "checkpoint.continue") {
+    return "继续执行";
+  }
+  if (event.type === "checkpoint.cancel") {
+    return "终止流程";
+  }
+  if (event.type === "message.user") {
+    return "前端干预";
+  }
+  if (event.type === "message.assistant" || event.type.startsWith("intent.")) {
+    return "意图处理";
+  }
+  const operationRunId = getOperationRunId(event.payload);
+  if (operationRunId) {
+    return formatOperationRunId(operationRunId);
+  }
+  return event.stage ? stageLabels[event.stage] : event.type;
+}
+
+function formatOperationRunId(operationRunId: string) {
+  const name = operationRunId
+    .replace(/^dataset\./, "dataset · ")
+    .replace(/^eval\./, "eval · ")
+    .replace(/^analysis\./, "analysis · ")
+    .replace(/^repair\./, "repair · ")
+    .replace(/^abtest\./, "abtest · ")
+    .replace(/_/g, " ");
+  return name.replace(/\bcase\.(\d+)/, "case $1");
+}
+
+const repairAnalysisArtifactPrefixes = [
+  "repair_loop_plan",
+  "repair_evidence_packet",
+  "fault_localization",
+  "diagnostic_probe_plan",
+  "diagnostic_probe_result",
+  "repair_diagnosis",
+  "opencode_instruction",
+  "opencode_explore_instruction",
+  "opencode_patch_instruction",
+  "opencode_no_patch_instruction",
+];
+
+const repairExecutionArtifactPrefixes = [
+  "opencode_probe_trace",
+  "opencode_patch_trace",
+  "opencode_worker_report",
+  "opencode_patch_worker_report",
+  "opencode_probe_worker_report",
+  "opencode_no_patch_worker_report",
+  "repair_hypothesis",
+  "repair_plan",
+  "opencode_run_trace",
+  "code_patch_candidate",
+  "candidate_service",
+  "candidate_service_run",
+  "repair_evaluation",
+  "patch_correctness_assessment",
+  "patch_critique",
+  "branch_decision",
+  "repair_branch_state_before",
+  "repair_branch_state_after",
+  "repair_state_transition",
+  "candidate_classification_report",
+  "repair_loop_decision",
+  "repair_loop_memory",
+  "repair_loop_state",
+  "verified_repair",
+];
+
+function getActivityArtifactKind(event: NormalizedThreadEvent): WorkflowResultKind | undefined {
+  if (!event.stage || event.type === "checkpoint.created") {
     return undefined;
   }
-
-  const groupedByTask = new Map<string, NormalizedThreadEvent[]>();
-  runEvents.forEach((event, index) => {
-    const groupKey = event.taskId || `run-${index}`;
-    const current = groupedByTask.get(groupKey) || [];
-    current.push(event);
-    groupedByTask.set(groupKey, current);
-  });
-
-  const latestRunEvents =
-    Array.from(groupedByTask.values())
-      .map((group) => group.sort(compareNormalizedThreadEvents))
-      .sort((a, b) => compareNormalizedThreadEvents(a[a.length - 1], b[b.length - 1]))
-      .at(-1) || [];
-
-  if (latestRunEvents.length === 0) {
-    return undefined;
+  if (event.checkpointWait) {
+    return stageResultKindMap[event.stage];
   }
-
-  let status: StepStatus = "running";
-  let iterationCount: number | undefined;
-  let converged: boolean | undefined;
-  let crossStepNarrative: string | undefined;
-
-  const timeline: AnalysisTimelineItem[] = [];
-  const hypothesesMap = new Map<string, AnalysisHypothesisItem>();
-  const agentsMap = new Map<
-    string,
-    {
-      rounds?: number;
-      toolCounts: Map<string, number>;
-      verdict?: string;
-      confidence?: number;
-      hypothesisId?: string;
-    }
-  >();
-
-  const appendTimeline = (key: string, title: string, detail: string, time?: string) => {
-    if (!detail) {
-      return;
-    }
-    const alreadyExists = timeline.some((item) => item.key === key);
-    if (!alreadyExists) {
-      timeline.push({ key, title, detail, time });
-    }
+  const eventData = getEventPayloadData(event.payload);
+  const detail = getNestedRecordField(eventData, ["detail"]) || getStructuredRecordField(eventData, ["detail"]);
+  const artifactId =
+    getStringField(detail, ["artifact_id", "writes_artifact_id"]) ||
+    getStringField(eventData, ["artifact_id", "writes_artifact_id", "current_item"]) ||
+    getOperationRunId(event.payload);
+  const finalArtifactIds: Record<ThreadEventStage, string[]> = {
+    dataset: ["eval_dataset"],
+    eval: ["eval_report", "candidate_eval_report"],
+    analysis: ["classification_report", "repair_loop_plan"],
+    repair: ["verified_repair", "repair_loop_agent", "candidate_workspace"],
+    abtest: ["abtest_comparison", "candidate_algorithm_cutover"],
   };
+  const repairArtifactId = artifactId || "";
+  const isRepairAnalysisArtifact = event.stage === "repair" && repairArtifactId.length > 0 &&
+    repairAnalysisArtifactPrefixes.some((prefix) => repairArtifactId === prefix || repairArtifactId.startsWith(`${prefix}_`));
+  if (isRepairAnalysisArtifact) {
+    return "analysis-reports";
+  }
+  const isRepairExecutionArtifact = event.stage === "repair" && repairArtifactId.length > 0 &&
+    repairExecutionArtifactPrefixes.some((prefix) => repairArtifactId === prefix || repairArtifactId.startsWith(`${prefix}_`));
+  return artifactId && (finalArtifactIds[event.stage].includes(artifactId) || isRepairExecutionArtifact)
+    ? stageResultKindMap[event.stage]
+    : undefined;
+}
 
-  latestRunEvents.forEach((event) => {
-    const eventData = getEventPayloadData(event.payload);
+function getActivityArtifactLabel(artifactKind: WorkflowResultKind | undefined) {
+  if (!artifactKind) {
+    return undefined;
+  }
+  return `查看${workflowResultLabels[artifactKind]}`;
+}
 
-    if (event.action === "start") {
-      status = "running";
-      appendTimeline("start", "启动分析", "系统已创建分析任务，开始生成调查方向。", event.timestamp);
-    }
-
-    if (event.action === "pause") {
-      status = "paused";
-    }
-
-    if (event.action === "cancel") {
-      status = "canceled";
-      appendTimeline("cancel", "分析中断", "本轮分析已取消，未继续推进后续动作。", event.timestamp);
-    }
-
-    if (event.action === "finish") {
-      status = "done";
-      appendTimeline("finish", "生成报告", "问题归因已完成，分析报告可以展开查看。", event.timestamp);
-    }
-
-    if (event.type === "run.indexer.result") {
-      const resultRecord =
-        getNestedRecordField(eventData, ["result"]) || getStructuredRecordField(eventData, ["summary"]);
-      const hypotheses = getStructuredArrayField(resultRecord, ["hypotheses"]) || [];
-      hypotheses.forEach((item) => {
-        if (!isRecord(item)) {
-          return;
-        }
-        const id = getStringField(item, ["id"]) || `H${hypothesesMap.size + 1}`;
-        const claim = getStringField(item, ["claim"]) || "待补充调查说明";
-        const category = getStringField(item, ["category"]);
-        const confidence = getNumberField(item, ["confidence"]);
-        const investigationPaths =
-          (getStructuredArrayField(item, ["investigation_paths"]) || [])
-            .filter((path): path is string => typeof path === "string" && path.trim().length > 0)
-            .map((path) => path.trim()) || [];
-
-        hypothesesMap.set(id, {
-          id,
-          claim,
-          category,
-          confidence,
-          investigationPaths,
-        });
-      });
-
-      crossStepNarrative = getStringField(resultRecord, ["cross_step_narrative"]) || crossStepNarrative;
-      appendTimeline(
-        "indexer",
-        "生成调查方向",
-        hypotheses.length > 0
-          ? `已整理出 ${hypotheses.length} 条优先调查项，进入子代理取证阶段。`
-          : "已完成首轮扫描，正在准备调查项。",
-        event.timestamp,
-      );
-    }
-
-    if (event.type === "run.conductor.result") {
-      const resultRecord =
-        getNestedRecordField(eventData, ["result"]) || getStructuredRecordField(eventData, ["summary"]);
-      const nextIteration = getNumberField(eventData, ["iteration"]) ?? getNumberField(resultRecord, ["iterations"]);
-      if (typeof nextIteration === "number") {
-        iterationCount = nextIteration;
-      }
-      if (resultRecord?.converged === true) {
-        converged = true;
-        appendTimeline(
-          "conductor-final",
-          "完成编排",
-          typeof iterationCount === "number"
-            ? `分析在第 ${iterationCount} 轮后收敛，等待输出最终报告。`
-            : "分析已收敛，等待输出最终报告。",
-          event.timestamp,
-        );
-      } else if (typeof nextIteration === "number") {
-        appendTimeline(
-          "conductor-iteration",
-          "分配调查任务",
-          `已完成第 ${nextIteration} 轮任务编排，持续派发子代理调查。`,
-          event.timestamp,
-        );
-      }
-    }
-
-    if (event.type === "run.tool.used") {
-      const agent = getStringField(eventData, ["agent"]);
-      const tool = getStringField(eventData, ["tool"]) || "tool";
-      if (!agent) {
-        return;
-      }
-      const agentSummary =
-        agentsMap.get(agent) ||
-        {
-          toolCounts: new Map<string, number>(),
-        };
-      agentSummary.toolCounts.set(tool, (agentSummary.toolCounts.get(tool) || 0) + 1);
-      agentsMap.set(agent, agentSummary);
-    }
-
-    if (event.type === "run.researcher.result") {
-      const agent = getStringField(eventData, ["agent"]);
-      if (!agent) {
-        return;
-      }
-
-      const agentSummary =
-        agentsMap.get(agent) ||
-        {
-          toolCounts: new Map<string, number>(),
-        };
-      agentSummary.rounds = getNumberField(eventData, ["rounds"]) || agentSummary.rounds;
-
-      const resultRecord = getStructuredRecordField(eventData, ["result_summary"]);
-      const hypothesisId = getStringField(resultRecord, ["hypothesis_id"]);
-      const verdict = getStringField(resultRecord, ["verdict"]);
-      const confidence = getNumberField(resultRecord, ["confidence"]);
-      const refinedClaim = getStringField(resultRecord, ["refined_claim"]);
-      const suggestedAction = getStringField(resultRecord, ["suggested_action"]);
-
-      agentSummary.verdict = verdict || agentSummary.verdict;
-      agentSummary.confidence = confidence ?? agentSummary.confidence;
-      agentSummary.hypothesisId = hypothesisId || agentSummary.hypothesisId;
-      agentsMap.set(agent, agentSummary);
-
-      if (hypothesisId) {
-        const existingHypothesis = hypothesesMap.get(hypothesisId);
-        const fallbackClaim = getStringField(resultRecord, ["refined_claim"]) || "已返回调查结论";
-        hypothesesMap.set(hypothesisId, {
-          id: hypothesisId,
-          claim: existingHypothesis?.claim || fallbackClaim,
-          category: existingHypothesis?.category,
-          confidence: confidence ?? existingHypothesis?.confidence,
-          investigationPaths: existingHypothesis?.investigationPaths || [],
-          verdict: verdict || existingHypothesis?.verdict,
-          refinedClaim: refinedClaim || existingHypothesis?.refinedClaim,
-          suggestedAction: suggestedAction || existingHypothesis?.suggestedAction,
-          agent,
-        });
-      }
-
-      appendTimeline(
-        "researcher-result",
-        "回收调查结论",
-        hypothesisId
-          ? `${formatAnalysisAgentName(agent)} 已完成 ${hypothesisId} 的调查并返回结论。`
-          : `${formatAnalysisAgentName(agent)} 已返回一条调查结论。`,
-        event.timestamp,
-      );
-    }
-  });
-
-  const agents = Array.from(agentsMap.entries())
-    .map(([agent, item]) => ({
-      agent,
-      rounds: item.rounds,
-      toolCallCount: Array.from(item.toolCounts.values()).reduce((sum, count) => sum + count, 0),
-      tools: Array.from(item.toolCounts.entries())
-        .map(([name, count]) => ({ name, count }))
-        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "zh-CN")),
-      verdict: item.verdict,
-      confidence: item.confidence,
-      hypothesisId: item.hypothesisId,
-    }))
-    .sort((a, b) => {
-      if (Boolean(a.verdict) !== Boolean(b.verdict)) {
-        return a.verdict ? -1 : 1;
-      }
-      return a.agent.localeCompare(b.agent, "zh-CN", { numeric: true });
-    });
-
-  const hypotheses = Array.from(hypothesesMap.values()).sort((a, b) =>
-    a.id.localeCompare(b.id, "zh-CN", { numeric: true }),
-  );
-
+function buildEventActivity(event: NormalizedThreadEvent): EvoStageActivity {
+  const progressText = event.progress ? `${event.progress.statusText} ${event.progress.percent}%` : "";
+  const stageProgressText = event.stage === "abtest" ? progressText : "";
+  const detail = event.displayText || stageProgressText || event.content || progressText || compactPayloadForDisplay(event.payload) || event.type;
+  const artifactKind = getActivityArtifactKind(event);
+  const artifactId = getEventArtifactId(event.payload);
+  const flowKind = getEventFlowKind(event.payload);
   return {
-    status,
-    hypothesisCount: hypotheses.length,
-    agentCount: agents.length,
-    completedAgentCount: agents.filter((item) => Boolean(item.verdict)).length,
-    toolCallCount: agents.reduce((sum, item) => sum + item.toolCallCount, 0),
-    iterationCount,
-    converged,
-    crossStepNarrative,
-    hypotheses,
-    agents,
-    timeline: timeline.sort((a, b) => {
-      if (a.time && b.time) {
-        return new Date(a.time).getTime() - new Date(b.time).getTime();
-      }
-      return a.key.localeCompare(b.key, "zh-CN", { numeric: true });
-    }),
+    key: event.key,
+    stage: event.stage,
+    title: eventActivityTitle(event),
+    detail,
+    time: formatThreadTime(event.timestamp),
+    tone: eventActivityTone(event),
+    flowKind,
+    artifactKind,
+    artifactId,
+    artifactLabel: getActivityArtifactLabel(artifactKind),
   };
 }
 
-export function buildApplyRunSummary(events: NormalizedThreadEvent[]): ApplyRunSummary | undefined {
-  const applyEvents = events.filter((item) => item.stage === "apply");
-  if (applyEvents.length === 0) {
-    return undefined;
+function stageProgressFromEvents(events: NormalizedThreadEvent[], stage: ThreadEventStage) {
+  return getLastItem(
+    events.filter((event) => event.stage === stage && event.progress &&
+      !(stage === "eval" && ["eval.rag_answer", "eval.judge_answer"].includes(getEventFlowKind(event.payload) || ""))),
+  )?.progress;
+}
+
+type CaseProgressState = {
+  caseId: string;
+  steps: Record<string, StepStatus>;
+  artifactId?: string;
+  updatedAt?: string;
+};
+
+const datasetCaseSteps = ["load_corpus", "build_snapshot", "plan", "generate", "assemble"] as const;
+const evalCaseSteps = ["rag", "judge"] as const;
+const analysisCaseSteps = ["coarse", "fine"] as const;
+const caseStepLabels: Record<string, string> = {
+  load_corpus: "load_corpus",
+  build_snapshot: "build_snapshot",
+  plan: "plan",
+  generate: "generate",
+  assemble: "assemble",
+  rag: "RAG",
+  judge: "judge",
+  coarse: "coarse",
+  fine: "fine",
+};
+
+function getCaseProgressActionStatus(event: NormalizedThreadEvent): StepStatus | undefined {
+  const eventData = getEventPayloadData(event.payload);
+  const after = getNestedRecordField(eventData, ["after"]);
+  const status = getStringField(eventData, ["status"]) || getStringField(after, ["status"]);
+  if (event.action === "finish" || status === "success" || status === "ended" || status === "skipped") {
+    return "done";
   }
-
-  const groupedByTask = new Map<string, NormalizedThreadEvent[]>();
-  applyEvents.forEach((event, index) => {
-    const groupKey = event.taskId || `apply-${index}`;
-    const current = groupedByTask.get(groupKey) || [];
-    current.push(event);
-    groupedByTask.set(groupKey, current);
-  });
-
-  const latestApplyEvents =
-    Array.from(groupedByTask.values())
-      .map((group) => group.sort(compareNormalizedThreadEvents))
-      .sort((a, b) => compareNormalizedThreadEvents(a[a.length - 1], b[b.length - 1]))
-      .at(-1) || [];
-
-  if (latestApplyEvents.length === 0) {
-    return undefined;
+  if (event.action === "failed" || status === "failed") {
+    return "failed";
   }
+  if (event.action === "pause" || status === "checkpointed") {
+    return "paused";
+  }
+  if (event.action === "cancel" || status === "cancelled") {
+    return "canceled";
+  }
+  if (event.action === "progress" || status === "running") {
+    return "running";
+  }
+  return undefined;
+}
 
-  let status: StepStatus = "running";
-  let roundCount: number | undefined;
-  let testStatusText: string | undefined;
-  let commitSha: string | undefined;
-  const changedFiles = new Set<string>();
-  const timeline: AnalysisTimelineItem[] = [];
+function updateCaseStep(
+  cases: Map<string, CaseProgressState>, caseId: string, step: string,
+  status: StepStatus | undefined, updatedAt?: string, artifactId?: string,
+) {
+  if (!status) {
+    return;
+  }
+  const item = cases.get(caseId) || { caseId, steps: {} };
+  const previous = item.steps[step];
+  if (previous !== "done" || status === "done") {
+    item.steps[step] = status;
+  }
+  item.artifactId = artifactId || item.artifactId;
+  item.updatedAt = updatedAt || item.updatedAt;
+  cases.set(caseId, item);
+}
 
-  const appendTimeline = (key: string, title: string, detail: string, time?: string) => {
-    if (!detail) {
+function getOperationCaseId(payload: Record<string, unknown> | undefined) {
+  return getEventCaseId(payload) || getStringField(getEventPayloadData(payload), ["current_item"]);
+}
+
+function applyGlobalDatasetStep(cases: Map<string, CaseProgressState>, step: string, status: StepStatus | undefined, updatedAt?: string, artifactId?: string) {
+  cases.forEach((item) => updateCaseStep(cases, item.caseId, step, status, updatedAt, artifactId));
+}
+
+function buildCaseItem(item: CaseProgressState, steps: readonly string[], artifactKind: WorkflowResultKind, artifactId: string | undefined, artifactLabel: string): EvoCaseProgressItem {
+  const builtSteps = steps.map((key) => ({ key, label: caseStepLabels[key] || key, status: item.steps[key] || "pending" }));
+  const completed = builtSteps.filter((step) => step.status === "done").length;
+  const status: StepStatus = completed === builtSteps.length ? "done" :
+    builtSteps.some((step) => step.status === "failed") ? "failed" :
+      builtSteps.some((step) => step.status === "canceled") ? "canceled" :
+        builtSteps.some((step) => step.status === "paused") ? "paused" :
+          builtSteps.some((step) => step.status === "running" || step.status === "done") ? "running" : "pending";
+  return { caseId: item.caseId, title: item.caseId.replace(/^case_0*/, "Case "), completed, total: builtSteps.length, status, steps: builtSteps, artifactKind, artifactId, artifactLabel, updatedAt: item.updatedAt };
+}
+
+const areCaseStepsDone = (item: CaseProgressState, steps: readonly string[]) => steps.every((step) => item.steps[step] === "done");
+
+function sortCaseItems(a: EvoCaseProgressItem, b: EvoCaseProgressItem) {
+  const left = Number(a.caseId.match(/\d+/)?.[0] || 0);
+  const right = Number(b.caseId.match(/\d+/)?.[0] || 0);
+  return left - right || a.caseId.localeCompare(b.caseId);
+}
+
+function buildCaseProgressGroups(events: NormalizedThreadEvent[]): EvoCaseProgressGroup[] {
+  const datasetCases = new Map<string, CaseProgressState>();
+  const evalCases = new Map<string, CaseProgressState>();
+  const analysisCases = new Map<string, CaseProgressState>();
+  const abtestCases = new Map<string, CaseProgressState>();
+  const datasetGlobal: Record<string, StepStatus | undefined> = {};
+  events.forEach((event) => {
+    const operationRunId = getOperationRunId(event.payload);
+    const flowKind = getEventFlowKind(event.payload);
+    const artifactId = getEventArtifactId(event.payload);
+    const status = getCaseProgressActionStatus(event);
+    if (!operationRunId || !status) {
       return;
     }
-    const timelineKey = `${key}-${time || "no-time"}-${title}`;
-    const alreadyExists = timeline.some((item) => item.key === timelineKey);
-    if (!alreadyExists) {
-      timeline.push({ key: timelineKey, title, detail, time });
-    }
-  };
-
-  latestApplyEvents.forEach((event) => {
-    const eventData = getEventPayloadData(event.payload);
-
-    if (event.action === "start") {
-      status = "running";
-      appendTimeline("apply-start", "启动优化", "系统已根据分析结论开始生成候选改动。", event.timestamp);
-    }
-
-    if (event.type === "apply.round.diff") {
-      const round = getNumberField(eventData, ["round"]);
-      if (typeof round === "number") {
-        roundCount = round;
-      }
-      const files = (getStructuredArrayField(eventData, ["files_changed"]) || []).filter(
-        (item): item is string => typeof item === "string" && item.trim().length > 0,
-      );
-      files.forEach((file) => changedFiles.add(file));
-
-      const diffSummary = getStringField(eventData, ["diff_summary"]);
-      if (diffSummary?.includes("tests passed")) {
-        testStatusText = "测试已通过";
-      } else if (diffSummary?.includes("tests not run")) {
-        testStatusText = "尚未执行测试";
-      } else if (diffSummary?.includes("tests failed")) {
-        testStatusText = "测试未通过";
-      }
-
-      commitSha = getStringField(eventData, ["commit_sha"]) || commitSha;
-      appendTimeline(
-        typeof round === "number" ? `apply-diff-round-${round}` : `apply-diff-${event.key}`,
-        "生成候选改动",
-        typeof round === "number"
-          ? `已完成第 ${round} 轮改动草案，当前涉及 ${files.length} 个文件。`
-          : `已生成一轮改动草案，当前涉及 ${files.length} 个文件。`,
-        event.timestamp,
-      );
-    }
-
-    if (event.action === "finish") {
-      status = "done";
-      appendTimeline("apply-finish", "完成候选版本", "候选优化版本已准备完成，可继续查看代码差异。", event.timestamp);
-    }
-
-    if (event.action === "cancel") {
-      status = "canceled";
-    }
-
-    if (event.action === "failed") {
-      status = "failed";
-      appendTimeline("apply-failed", "优化失败", event.displayText || "代码修改没有执行成功。", event.timestamp);
+    const caseId = getOperationCaseId(event.payload);
+    if (flowKind === "dataset.load_corpus") {
+      datasetGlobal.load_corpus = status;
+      applyGlobalDatasetStep(datasetCases, "load_corpus", status, event.timestamp);
+    } else if (flowKind === "dataset.build_corpus_snapshot") {
+      datasetGlobal.build_snapshot = status;
+      applyGlobalDatasetStep(datasetCases, "build_snapshot", status, event.timestamp);
+    } else if (caseId && flowKind === "dataset.assemble" && status === "running") {
+      updateCaseStep(datasetCases, caseId, "assemble", "done", event.timestamp);
+    } else if (flowKind === "dataset.assemble") {
+      datasetGlobal.assemble = status;
+      applyGlobalDatasetStep(datasetCases, "assemble", status, event.timestamp);
+    } else if (caseId && flowKind === "dataset_gen.prepare_case") {
+      Object.entries(datasetGlobal).forEach(([step, value]) => updateCaseStep(datasetCases, caseId, step, value, event.timestamp));
+      updateCaseStep(datasetCases, caseId, "plan", status, event.timestamp, artifactId);
+    } else if (caseId && flowKind === "dataset_gen.generate_case") {
+      Object.entries(datasetGlobal).forEach(([step, value]) => updateCaseStep(datasetCases, caseId, step, value, event.timestamp));
+      updateCaseStep(datasetCases, caseId, "generate", status, event.timestamp, artifactId);
+    } else if (caseId && event.stage === "eval" && flowKind === "eval.rag_answer" && !operationRunId.startsWith("candidate_eval.")) {
+      updateCaseStep(evalCases, caseId, "rag", status, event.timestamp, artifactId);
+    } else if (caseId && event.stage === "eval" && flowKind === "eval.judge_answer" && !operationRunId.startsWith("candidate_eval.")) {
+      updateCaseStep(evalCases, caseId, "judge", status, event.timestamp, artifactId);
+    } else if (caseId && operationRunId.startsWith("candidate_eval.") && flowKind === "eval.rag_answer") {
+      updateCaseStep(abtestCases, caseId, "rag", status, event.timestamp, artifactId);
+    } else if (caseId && operationRunId.startsWith("candidate_eval.") && flowKind === "eval.judge_answer") {
+      updateCaseStep(abtestCases, caseId, "judge", status, event.timestamp, artifactId);
+    } else if (caseId && flowKind === "analysis.coarse_classify") {
+      updateCaseStep(analysisCases, caseId, "coarse", status, event.timestamp, artifactId);
+    } else if (caseId && flowKind === "analysis.fine_classify") {
+      updateCaseStep(analysisCases, caseId, "fine", status, event.timestamp, artifactId);
+    } else if (caseId && event.stage === "abtest" && flowKind === "eval.rag_answer") {
+      updateCaseStep(abtestCases, caseId, "rag", status, event.timestamp, artifactId);
+    } else if (caseId && event.stage === "abtest" && flowKind === "eval.judge_answer") {
+      updateCaseStep(abtestCases, caseId, "judge", status, event.timestamp, artifactId);
     }
   });
+  const groups: EvoCaseProgressGroup[] = [
+    { stage: "dataset", title: "Step 1 · 数据集 case", pageSize: 10, cases: Array.from(datasetCases.values()).map((item) => buildCaseItem(item, datasetCaseSteps, "datasets", areCaseStepsDone(item, datasetCaseSteps) ? item.artifactId : undefined, "查看该 case 详情")).sort(sortCaseItems) },
+    { stage: "eval", title: "Step 2 · 评测 case", pageSize: 10, cases: Array.from(evalCases.values()).map((item) => buildCaseItem(item, evalCaseSteps, "eval-reports", areCaseStepsDone(item, evalCaseSteps) ? item.artifactId : undefined, "查看该 case 结果")).sort(sortCaseItems) },
+    { stage: "analysis", title: "Step 3 · 分析 case", pageSize: 10, cases: Array.from(analysisCases.values()).map((item) => buildCaseItem(item, analysisCaseSteps, "analysis-reports", areCaseStepsDone(item, analysisCaseSteps) ? item.artifactId : undefined, "查看该 case 分类")).sort(sortCaseItems) },
+    { stage: "abtest", title: "Step 5 · ABTest case", pageSize: 10, cases: Array.from(abtestCases.values()).map((item) => buildCaseItem(item, evalCaseSteps, "abtests", areCaseStepsDone(item, evalCaseSteps) ? item.artifactId : undefined, "查看该 case 对照")).sort(sortCaseItems) },
+  ];
+  return groups.filter((group) => group.cases.length > 0);
+}
 
+function shouldShowProcessActivity(event: NormalizedThreadEvent) {
+  if (event.type === "checkpoint.created" || isTerminalThreadEvent(event.type)) {
+    return false;
+  }
+  return Boolean(event.displayText || event.content || event.progress || event.checkpointWait || event.type.startsWith("autooperator."));
+}
+
+function isCutoverActivity(item: EvoStageActivity) {
+  return item.stage === "abtest" && item.artifactId === "candidate_algorithm_cutover";
+}
+
+function isCutoverCompletedEvent(event: NormalizedThreadEvent) {
+  return event.stage === "abtest" &&
+    (getEventFlowKind(event.payload) === "abtest.candidate_cutover" ||
+      getEventArtifactId(event.payload) === "candidate_algorithm_cutover") &&
+    (isActionKind(event.action, "finish") || event.progress?.percent === 100);
+}
+
+export function buildEvoProcessDashboard(
+  events: NormalizedThreadEvent[],
+  runtimeState: WorkflowRuntimeState,
+  includeFirstStep: boolean,
+): EvoProcessDashboard {
+  const sortedEvents = dedupeNormalizedEvents(events);
+  const cutoverCompleted = sortedEvents.some(isCutoverCompletedEvent);
+  const hasInactiveTerminalEvent = sortedEvents.some(isInactiveTerminalThreadEvent);
+  const checkpoint = cutoverCompleted || hasInactiveTerminalEvent ? undefined : getPendingCheckpointWaitPrompt(sortedEvents);
+  const visibleStepsById = new Map(
+    buildVisibleWorkflowSteps(sortedEvents, runtimeState, includeFirstStep).map((step) => [step.id, step]),
+  );
+  const runtimeSteps = workflowStepDefinitions.map((definition) =>
+    visibleStepsById.get(definition.id) || createWorkflowStepFromRuntime(definition.id, runtimeState),
+  );
+  const hasStageEvents = sortedEvents.some((event) => event.stage);
+  const overview = runtimeSteps.map((step) => {
+    const stage = stepStageMap[step.id];
+    const stageEvents = sortedEvents.filter((event) => event.stage === stage);
+    const status: StepStatus = cutoverCompleted
+      ? "done"
+      : checkpoint?.completedStage === stage
+      ? "paused"
+      : includeFirstStep && !hasStageEvents && step.id === "dataset"
+        ? "running"
+        : step.status;
+    return {
+      step: {
+        ...step,
+        status,
+        progress: cutoverCompleted
+          ? { ...getCompletedProgressSnapshot(), statusText: stage === "abtest" ? "候选算法切流已完成" : "已完成" }
+          : step.progress || stageProgressFromEvents(sortedEvents, stage),
+      },
+      stage,
+      eventCount: stageEvents.length,
+      latestActivity: stageEvents.length ? buildEventActivity(stageEvents[stageEvents.length - 1]) : undefined,
+    };
+  });
+  const visibleActivityEvents = sortedEvents.filter(shouldShowProcessActivity);
+  const activities = visibleActivityEvents.map(buildEventActivity);
+  const caseProgressGroups = buildCaseProgressGroups(sortedEvents);
+  const latestStage = cutoverCompleted ? "abtest" : checkpoint?.completedStage || getLastItem(visibleActivityEvents.filter((event) => event.stage))?.stage;
+  const activeOverview =
+    (latestStage ? overview.find((item) => item.stage === latestStage) : undefined) ||
+    overview.find((item) => ["running", "paused", "failed"].includes(item.step.status)) ||
+    overview.find((item) => item.step.status === "pending") ||
+    getLastItem(overview);
+  const recentActivities = activities.slice().reverse();
+  const cutoverActivities = activities.filter(isCutoverActivity).slice(-3).reverse();
   return {
-    status,
-    roundCount,
-    changedFileCount: changedFiles.size,
-    changedFiles: Array.from(changedFiles).sort((a, b) => a.localeCompare(b, "zh-CN", { numeric: true })),
-    testStatusText,
-    commitSha,
-    timeline: timeline.sort((a, b) => {
-      if (a.time && b.time) {
-        return new Date(a.time).getTime() - new Date(b.time).getTime();
-      }
-      return a.key.localeCompare(b.key, "zh-CN", { numeric: true });
-    }),
+    overview,
+    activeStage: activeOverview?.stage,
+    activeStep: activeOverview?.step,
+    activeProgress: activeOverview?.step.progress,
+    activeProgressPhases: activeOverview?.step.progressPhases,
+    recentActivities,
+    recentActivityTotal: visibleActivityEvents.length,
+    checkpoint,
+    cutoverActivities,
+    cutoverCompleted,
+    caseProgressGroups,
   };
 }
 
 export function getPendingCheckpointWaitPrompt(events: NormalizedThreadEvent[]) {
-  const latestCheckpointEvent = events
+  const hasInactiveTerminalEvent = events.some(isInactiveTerminalThreadEvent);
+  if (hasInactiveTerminalEvent) {
+    return undefined;
+  }
+
+  const checkpointEvents = events
     .filter((event) => event.type === "checkpoint.wait" && event.checkpointWait)
-    .sort(compareNormalizedThreadEvents)
-    .at(-1);
+    .sort(compareNormalizedThreadEvents);
+  const latestCheckpointEvent = getLastItem(checkpointEvents);
 
   if (!latestCheckpointEvent?.checkpointWait) {
     return undefined;
@@ -3112,6 +3785,9 @@ export function getPendingCheckpointWaitPrompt(events: NormalizedThreadEvent[]) 
       event.type === "checkpoint.cancel"
     ) {
       return true;
+    }
+    if (event.type.startsWith("autooperator.")) {
+      return false;
     }
     if (nextStage && event.stage === nextStage) {
       return true;
@@ -3163,25 +3839,28 @@ export function reduceWorkflowRuntimeState(
   });
 
   const current = next[stepId];
+  if (current.status === "done" && isIntentSidecarOperation(event)) {
+    return next;
+  }
+
   if (event.stage === "eval") {
     current.progressPhases = updateEvalProgressPhases(
       current.progressPhases,
       event.progressPhase,
       event.progress,
       action,
+      Boolean(getOperationRunId(event.payload)),
     );
-    current.progress = undefined;
+    current.progress = getEvalOverallProgressSnapshot(current.progressPhases);
   }
 
-  const isFinished =
-    event.stage === "eval"
-      ? isActionKind(action, "finish") && (!event.progressPhase || event.progressPhase === "judge")
-      : action === "finish";
+  const isFinished = isStepFinishEvent(event);
 
   if (isFinished) {
     current.status = "done";
     if (event.stage === "eval") {
       current.progressPhases = getCompletedEvalProgressPhases();
+      current.progress = getEvalOverallProgressSnapshot(current.progressPhases);
     } else {
       current.progress = event.progress || getCompletedProgressSnapshot();
     }
@@ -3192,20 +3871,29 @@ export function reduceWorkflowRuntimeState(
   } else if (action === "pause") {
     current.status = "paused";
     if (event.stage !== "eval") {
-      current.progress =
-        event.progress ||
-        updateProgressStatusText(current.progress, getRuntimeProgressStatusLabel(action));
+      current.progress = mergeProgressSnapshot(
+        current.progress,
+        event.progress || updateProgressStatusText(current.progress, getRuntimeProgressStatusLabel(action)),
+      );
     }
   } else {
     current.status = "running";
     if (event.stage !== "eval") {
-      current.progress =
-        event.progress ||
-        updateProgressStatusText(current.progress, getRuntimeProgressStatusLabel(action));
+      current.progress = mergeProgressSnapshot(
+        current.progress,
+        event.progress || updateProgressStatusText(current.progress, getRuntimeProgressStatusLabel(action)),
+      );
     }
   }
   current.runtimeText = event.progress ? undefined : event.displayText;
   return next;
+}
+
+export function reduceWorkflowRuntimeStateFromEvents(
+  prev: WorkflowRuntimeState,
+  events: NormalizedThreadEvent[],
+): WorkflowRuntimeState {
+  return dedupeNormalizedEvents(events).reduce(reduceWorkflowRuntimeState, prev);
 }
 
 export function getThreadTitleFromHistoryPayload(payload: ThreadRestorePayload) {

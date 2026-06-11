@@ -26,8 +26,4 @@ if [ ! -f "$OC_DATA_DIR/auth.json" ]; then
   fi
 fi
 
-if [ "${LAZYMIND_EVO_BOOTSTRAP_PIP_INSTALL:-0}" = "1" ] && [ -f /app/evo/requirements.txt ]; then
-  pip install -r /app/evo/requirements.txt
-fi
-
 exec uvicorn evo.service.api:get_app --factory --host 0.0.0.0 --port "${LAZYMIND_EVO_API_PORT:-8047}"

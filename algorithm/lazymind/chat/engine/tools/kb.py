@@ -29,8 +29,7 @@ from lazymind.model_config import get_dynamic_role_slot_map
 _MAX_TEXT_LEN = 1200
 _MAX_RESULT_ITEMS = 50
 _DEFAULT_KB_URL = _cfg['agentic_kb_url']
-_DEFAULT_KB_NAME = _cfg['agentic_kb_name']
-_DEFAULT_KB_DOCUMENT = lazyllm.Document(url=f'{_DEFAULT_KB_URL}/_call', name=_DEFAULT_KB_NAME)
+_DEFAULT_KB_DOCUMENT = lazyllm.Document(url=f'{_DEFAULT_KB_URL}/_call', name=_cfg['algo_id'])
 
 
 def build_default_retriever_configs() -> List[dict]:

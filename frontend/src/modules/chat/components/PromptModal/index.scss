@@ -21,49 +21,16 @@
     flex-direction: column;
   }
 
-  .prompt-modal-tabs {
+  .prompt-list-content {
     min-height: 0;
     flex: 1;
-    display: flex;
-    flex-direction: column;
-
-    .ant-tabs-nav {
-      margin-bottom: clamp(10px, 1.2vh, 16px);
-      flex-shrink: 0;
-    }
-
-    .ant-tabs-content-holder {
-      min-height: 0;
-      flex: 1;
-      overflow: hidden;
-    }
-
-    .ant-tabs-content {
-      min-height: 0;
-      height: 100%;
-    }
-
-    .ant-tabs-tab {
-      padding: 8px 0;
-    }
-
-    .ant-tabs-tabpane {
-      min-height: 0;
-      height: 100%;
-    }
-
-    .ant-tabs-tabpane-active {
-      display: flex;
-      flex-direction: column;
-    }
-  }
-
-  .prompt-tab-content {
     display: flex;
     flex-direction: column;
     gap: clamp(10px, 1.4vh, 16px);
-    min-height: 0;
-    flex: 1;
+  }
+
+  .prompt-search {
+    flex-shrink: 0;
   }
 
   .prompt-add-card {
@@ -103,6 +70,10 @@
     &::-webkit-scrollbar {
       display: none;
     }
+  }
+
+  .prompt-empty {
+    margin: auto;
   }
 
   .prompt-item {

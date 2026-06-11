@@ -543,6 +543,29 @@ export function formatBytes(bytes?: number) {
   return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+export function resolveStorageUsed(
+  summary?: Record<string, any>,
+  fallback?: string,
+) {
+  const bytes =
+    summary?.storage_bytes ??
+    summary?.storageBytes ??
+    summary?.storage_used_bytes ??
+    summary?.storageUsedBytes;
+
+  if (typeof bytes === "number") {
+    return formatBytes(bytes);
+  }
+
+  const parsedBytes =
+    typeof bytes === "string" && bytes.trim() ? Number(bytes) : Number.NaN;
+  if (Number.isFinite(parsedBytes)) {
+    return formatBytes(parsedBytes);
+  }
+
+  return fallback || "0 B";
+}
+
 // Source/sync state helpers below.
 
 const VALID_SOURCE_STATES: ReadonlyArray<SourceStateValue> = [

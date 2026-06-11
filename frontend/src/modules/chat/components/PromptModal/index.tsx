@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useState, useEffect, useMemo } from "react";
-import { Modal, Button, Input, Divider, Form, message, Tag, Tabs } from "antd";
+import { Modal, Button, Input, Divider, Empty, Form, message, Tag } from "antd";
 import { useTranslation } from "react-i18next";
 import {
   DeleteOutlined,
@@ -7,6 +7,7 @@ import {
   PlusOutlined,
   PushpinFilled,
   PushpinOutlined,
+  SearchOutlined,
 } from "@ant-design/icons";
 import { PromptServiceApi } from "@/modules/chat/utils/request";
 import "./index.scss";
@@ -31,6 +32,17 @@ export interface PromptImperativeProps {
 const { TextArea } = Input;
 
 const PRESET_PROMPT_IDS = ["preset-1", "preset-2", "preset-3"] as const;
+type PresetPrompt = {
+  id: string;
+  display_name: string;
+  content: string;
+  isPreset: true;
+};
+type PromptListItem = Prompt | PresetPrompt;
+
+function isPresetPrompt(prompt: PromptListItem): prompt is PresetPrompt {
+  return "isPreset" in prompt && prompt.isPreset === true;
+};
 
 const PromptModal = forwardRef<PromptImperativeProps, ForwardProps>(
   ({ onSelectPrompt }, ref) => {
@@ -50,7 +62,7 @@ const PromptModal = forwardRef<PromptImperativeProps, ForwardProps>(
     const [addModalVisible, setAddModalVisible] = useState(false);
     const [isEdit, setIsEdit] = useState(false);
     const [editPromptId, setEditPromptId] = useState<string | undefined>("");
-    const [activeTab, setActiveTab] = useState("custom");
+    const [searchKeyword, setSearchKeyword] = useState("");
 
     const [form] = Form.useForm();
 
@@ -64,18 +76,21 @@ const PromptModal = forwardRef<PromptImperativeProps, ForwardProps>(
       onOpen,
     }));
 
-    function fetchPromptList() {
+    function fetchPromptList(keyword = searchKeyword) {
       PromptServiceApi()
-        .promptServiceListPrompts({ pageSize: 9999 })
+        .promptServiceListPrompts({
+          pageSize: 9999,
+          keyword: keyword.trim() || undefined,
+        })
         .then((res) => {
           setPromptList(res.data.prompts ? [...res.data?.prompts] : []);
         });
     }
 
     function onOpen() {
-      setActiveTab("custom");
       setVisible(true);
-      fetchPromptList();
+      setSearchKeyword("");
+      fetchPromptList("");
     }
 
     function showAddPromptModal(prompt?: Prompt) {
@@ -187,14 +202,51 @@ const PromptModal = forwardRef<PromptImperativeProps, ForwardProps>(
       return null;
     }
 
-    const renderCustomTab = () => (
-      <div className="prompt-tab-content">
+    const filteredPresetPrompts = useMemo(() => {
+      const normalizedKeyword = searchKeyword.trim().toLowerCase();
+      if (!normalizedKeyword) {
+        return presetPrompts;
+      }
+      return presetPrompts.filter((prompt) =>
+        [prompt.display_name, prompt.content]
+          .join("\n")
+          .toLowerCase()
+          .includes(normalizedKeyword),
+      );
+    }, [presetPrompts, searchKeyword]);
+
+    const mergedPromptList: PromptListItem[] = useMemo(
+      () => [...promptList, ...filteredPresetPrompts],
+      [filteredPresetPrompts, promptList],
+    );
+
+    const renderPromptList = () => (
+      <div className="prompt-list-content">
+        <Input
+          allowClear
+          className="prompt-search"
+          placeholder={t("chat.searchPromptPlaceholder")}
+          prefix={<SearchOutlined />}
+          value={searchKeyword}
+          onChange={(event) => {
+            const nextKeyword = event.target.value;
+            setSearchKeyword(nextKeyword);
+            fetchPromptList(nextKeyword);
+          }}
+        />
         <div className="prompt-add-card" onClick={() => showAddPromptModal()}>
           <PlusOutlined className="prompt-add-icon" />
           <span className="prompt-add-text">{t("chat.newTemplate")}</span>
         </div>
         <div className="prompt-list">
-          {promptList.map((prompt, index) => (
+          {mergedPromptList.length === 0 ? (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={t("chat.noPromptMatched")}
+              className="prompt-empty"
+            />
+          ) : null}
+          {mergedPromptList.map((prompt, index) => (
             <div key={prompt.id} className="prompt-item">
               <div className="prompt-title">
                 <div className="prompt-name">
@@ -202,17 +254,25 @@ const PromptModal = forwardRef<PromptImperativeProps, ForwardProps>(
                   <span className="prompt-name-text">
                     {prompt.display_name}
                   </span>
-                  {renderDefaultItem(prompt, true, prompt.is_default ?? false)}
+                  {isPresetPrompt(prompt) ? (
+                    <Tag color="geekblue">{t("chat.preset")}</Tag>
+                  ) : (
+                    renderDefaultItem(prompt, true, prompt.is_default ?? false)
+                  )}
                 </div>
                 <div className="prompt-actions">
-                  <EditOutlined
-                    className="clickable-icon"
-                    onClick={() => showAddPromptModal(prompt)}
-                  />
-                  <DeleteOutlined
-                    className="clickable-icon"
-                    onClick={() => deletePrompt(prompt.id)}
-                  />
+                  {isPresetPrompt(prompt) ? null : (
+                    <>
+                      <EditOutlined
+                        className="clickable-icon"
+                        onClick={() => showAddPromptModal(prompt)}
+                      />
+                      <DeleteOutlined
+                        className="clickable-icon"
+                        onClick={() => deletePrompt(prompt.id)}
+                      />
+                    </>
+                  )}
                   <Button
                     type="link"
                     onClick={() => selectPrompt(prompt.content)}
@@ -230,49 +290,6 @@ const PromptModal = forwardRef<PromptImperativeProps, ForwardProps>(
         </div>
       </div>
     );
-
-    const renderPresetTab = () => (
-      <div className="prompt-tab-content">
-        <div className="prompt-list">
-          {presetPrompts.map((prompt) => (
-            <div key={prompt.id} className="prompt-item">
-              <div className="prompt-title">
-                <div className="prompt-name">
-                  <Tag color="geekblue">{t("chat.preset")}</Tag>
-                  <span className="prompt-name-text">
-                    {prompt.display_name}
-                  </span>
-                </div>
-                <div className="prompt-actions">
-                  <Button
-                    type="link"
-                    onClick={() => selectPrompt(prompt.content)}
-                    style={{ padding: 0 }}
-                  >
-                    {t("chat.use")}
-                  </Button>
-                </div>
-              </div>
-              <Divider style={{ margin: "3px 0" }} />
-              <span className="prompt-content">{prompt.content}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-
-    const tabItems = [
-      {
-        key: "custom",
-        label: t("chat.customTemplate"),
-        children: renderCustomTab(),
-      },
-      {
-        key: "preset",
-        label: t("chat.presetTemplate"),
-        children: renderPresetTab(),
-      },
-    ];
 
     return (
       <>
@@ -292,12 +309,7 @@ const PromptModal = forwardRef<PromptImperativeProps, ForwardProps>(
           ]}
         >
           <div className="prompt-modal-container">
-            <Tabs
-              activeKey={activeTab}
-              onChange={setActiveTab}
-              items={tabItems}
-              className="prompt-modal-tabs"
-            />
+            {renderPromptList()}
           </div>
         </Modal>
         <Modal

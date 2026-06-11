@@ -266,7 +266,7 @@ export function AbTestWorkflowStep({
           key: "ab-test-preview",
           label: (
             <span className="self-evolution-dataset-collapse-label">
-              <span>查看 A/B 测试结果</span>
+              <span>查看 ABTest 详情</span>
               <a
                 className="self-evolution-dataset-download-link"
                 href={href || undefined}

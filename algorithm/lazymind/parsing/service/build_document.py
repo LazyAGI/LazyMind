@@ -162,7 +162,7 @@ def drop_lazyllm_tables() -> None:
         LOG.error(f'[build_document] Failed to drop lazyllm tables: {e}')
 
 
-def build_document() -> Document:
+def build_document(algo_id: str = ALGO_ID, *, serve: bool = True) -> Document:
     processor_url = _cfg['document_processor_url']
     server_port = get_algo_server_port()
     embed = {k: AutoModel(model=k) for k in EMBED_KEYS}
@@ -174,7 +174,7 @@ def build_document() -> Document:
 
     docs = Document(
         dataset_path=None,
-        name=ALGO_ID,
+        name=algo_id,
         embed=embed,
         manager=processor,
         doc_fields=[],
@@ -210,8 +210,14 @@ def build_document() -> Document:
     docs.activate_group('block', embed_keys=[EMBED_MAIN])
     docs.activate_group('line', embed_keys=[EMBED_MAIN])
     docs.activate_group('doc-summary', embed_keys=[EMBED_MAIN])
-    docs._manager._kbs = lazyllm.ServerModule(
-        _quiet_trace(docs._manager._kbs),
-        port=server_port,
-    )
+    if serve:
+        docs._manager._kbs = lazyllm.ServerModule(_quiet_trace(docs._manager._kbs), port=server_port)
     return docs
+
+
+def register_parser_algorithm(algo_id: str) -> None:
+    build_document(algo_id, serve=False).start()
+
+
+def drop_parser_algorithm(algo_id: str) -> None:
+    DocumentProcessor(url=_cfg['document_processor_url']).drop_algorithm(algo_id)

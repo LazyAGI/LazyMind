@@ -190,6 +190,7 @@ class HealthChecker:
                 logger.warning('Heartbeat update failed: %s', exc)
 
     async def _update_heartbeat(self) -> None:
+        await self._pm.ensure_instance_registered()
         now = datetime.now(timezone.utc)
         async with AsyncSessionLocal() as session:
             await session.execute(

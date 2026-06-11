@@ -114,6 +114,11 @@ func DeleteThreadHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var upstreamDelete map[string]any
+	if err := common.ApiDelete(r.Context(), threadDeleteURL(threadID), forwardedUpstreamHeaders(r), &upstreamDelete, 30*time.Second); err != nil {
+		common.ReplyErrWithData(w, "delete upstream thread failed", map[string]any{"detail": err.Error()}, http.StatusBadGateway)
+		return
+	}
 	result, err := deleteThreadHistory(db, threadID)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "delete thread history failed", err), http.StatusInternalServerError)
@@ -122,6 +127,7 @@ func DeleteThreadHistory(w http.ResponseWriter, r *http.Request) {
 	if cancelRequested {
 		result["cancel_requested"] = true
 	}
+	result["upstream"] = upstreamDelete
 	common.ReplyOK(w, result)
 }
 
@@ -239,9 +245,17 @@ func deleteThreadHistory(db *gorm.DB, threadID string) (map[string]any, error) {
 			threadDeleted = deleted.RowsAffected
 		}
 
+		var activeDeleted int64
+		if deleted := tx.Where("thread_id = ?", threadID).Delete(&orm.AgentUserActiveThread{}); deleted.Error != nil {
+			return deleted.Error
+		} else {
+			activeDeleted = deleted.RowsAffected
+		}
+
 		result["deleted_records"] = recordDeleted
 		result["deleted_rounds"] = roundDeleted
 		result["deleted_threads"] = threadDeleted
+		result["deleted_active_threads"] = activeDeleted
 		return nil
 	})
 	if err != nil {

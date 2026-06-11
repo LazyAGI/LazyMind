@@ -41,6 +41,16 @@ import {
 const { Paragraph, Text } = Typography;
 
 const SCHEDULE_WEEKDAYS = ["1", "2", "3", "4", "5", "6", "7"];
+const SCHEDULE_WEEKDAY_DISPLAY_ORDER = ["7", "1", "2", "3", "4", "5", "6"];
+const SCHEDULE_WEEKDAY_SHORT_LABELS: Record<string, string> = {
+  "1": "一",
+  "2": "二",
+  "3": "三",
+  "4": "四",
+  "5": "五",
+  "6": "六",
+  "7": "日",
+};
 const SCHEDULE_WORKDAYS = ["1", "2", "3", "4", "5"];
 const SCHEDULE_WEEKENDS = ["6", "7"];
 
@@ -63,6 +73,54 @@ function toggleShortcutWeekdays(
   target: string[],
 ) {
   return isSameWeekdaySet(current, target) ? [] : target;
+}
+
+type CollapsibleTreeNode = DataNode & {
+  value?: string | number;
+  children?: CollapsibleTreeNode[];
+};
+
+function normalizeTreeSelectValues(value: unknown) {
+  const values = Array.isArray(value) ? value : value ? [value] : [];
+  return values.map((item) => `${item || ""}`.trim()).filter(Boolean);
+}
+
+function collectDescendantValues(
+  nodes: CollapsibleTreeNode[] | undefined,
+  descendantValues: Set<string>,
+) {
+  nodes?.forEach((node) => {
+    const nodeValue = `${node.value || ""}`.trim();
+    if (nodeValue) {
+      descendantValues.add(nodeValue);
+    }
+    collectDescendantValues(node.children, descendantValues);
+  });
+}
+
+function collapseSelectedTreeValues(
+  value: unknown,
+  treeData: CollapsibleTreeNode[],
+) {
+  const values = normalizeTreeSelectValues(value);
+  const selectedValues = new Set(values);
+  const descendantValues = new Set<string>();
+
+  const visit = (nodes: CollapsibleTreeNode[]) => {
+    nodes.forEach((node) => {
+      const nodeValue = `${node.value || ""}`.trim();
+      if (nodeValue && selectedValues.has(nodeValue)) {
+        collectDescendantValues(node.children, descendantValues);
+        return;
+      }
+      if (node.children) {
+        visit(node.children);
+      }
+    });
+  };
+
+  visit(treeData);
+  return values.filter((item) => !descendantValues.has(item));
 }
 
 export type LocalPathSelectOption = DataNode & {
@@ -372,6 +430,9 @@ export default function DataSourceWizardModal({
                   <Form.Item
                     label={t("admin.dataSourceAccessPath")}
                     name="path"
+                    getValueFromEvent={(value) =>
+                      collapseSelectedTreeValues(value, localPathOptions)
+                    }
                     rules={[
                       {
                         validator: (_rule, value) => {
@@ -402,6 +463,7 @@ export default function DataSourceWizardModal({
                       treeData={localPathOptions}
                       treeDefaultExpandAll={false}
                       treeLine
+                      showCheckedStrategy={TreeSelect.SHOW_PARENT}
                       styles={{
                         popup: { root: { maxHeight: 360, overflow: "auto" } },
                       }}
@@ -430,6 +492,9 @@ export default function DataSourceWizardModal({
                   <Form.Item
                     label={t("admin.dataSourceFeishuSpace")}
                     name="target"
+                    getValueFromEvent={(value) =>
+                      collapseSelectedTreeValues(value, feishuTargetTreeData)
+                    }
                     rules={[
                       {
                         validator: (_rule, value) => {
@@ -459,6 +524,7 @@ export default function DataSourceWizardModal({
                       treeData={feishuTargetTreeData}
                       treeDefaultExpandAll={false}
                       treeLine
+                      showCheckedStrategy={TreeSelect.SHOW_PARENT}
                       styles={{
                         popup: { root: { maxHeight: 360, overflow: "auto" } },
                       }}
@@ -564,6 +630,9 @@ export default function DataSourceWizardModal({
                         </Space>
                       </div>
                       <div className="data-source-schedule-inline-sentence">
+                        <Text className="data-source-schedule-inline-prefix">
+                          请选择你的同步日期
+                        </Text>
                         <Form.Item
                           name="scheduleWeekdays"
                           className="data-source-schedule-inline-weekdays-item"
@@ -575,16 +644,16 @@ export default function DataSourceWizardModal({
                           ]}
                         >
                           <Checkbox.Group className="data-source-schedule-weekdays">
-                            {SCHEDULE_WEEKDAYS.map((day) => (
+                            {SCHEDULE_WEEKDAY_DISPLAY_ORDER.map((day) => (
                               <Checkbox key={day} value={day}>
                                 <span className="data-source-schedule-weekday-pill">
-                                  {t(`admin.dataSourceScheduleWeekday${day}`)}
+                                  {SCHEDULE_WEEKDAY_SHORT_LABELS[day]}
                                 </span>
                               </Checkbox>
                             ))}
                           </Checkbox.Group>
                         </Form.Item>
-                        <Text className="data-source-schedule-inline-connector">将在</Text>
+                        <Text className="data-source-schedule-inline-connector">将于</Text>
                         <Form.Item
                           name="scheduleTime"
                           className="data-source-schedule-inline-time-item"

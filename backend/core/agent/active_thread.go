@@ -140,6 +140,12 @@ func tryEnsureUserCanActivateThread(ctx context.Context, db *gorm.DB, r *http.Re
 
 	flowStatus, flowErr := fetchThreadFlowStatus(ctx, r, activeThreadID)
 	if flowErr != nil {
+		if isThreadFlowNotFound(flowErr) {
+			if err := activateUserThread(db, userID, targetThreadID, now); err != nil {
+				return false, err
+			}
+			return false, nil
+		}
 		return false, &userActiveThreadError{
 			message:    "active thread status unknown",
 			statusCode: http.StatusConflict,
@@ -216,6 +222,12 @@ func tryReserveUserActiveThreadCreation(ctx context.Context, db *gorm.DB, r *htt
 
 	flowStatus, flowErr := fetchThreadFlowStatus(ctx, r, threadID)
 	if flowErr != nil {
+		if isThreadFlowNotFound(flowErr) {
+			if err := markUserActiveThreadFinished(db, threadID); err != nil {
+				return nil, false, err
+			}
+			return nil, true, nil
+		}
 		return nil, false, &userActiveThreadError{
 			message:    "active thread status unknown",
 			statusCode: http.StatusConflict,
@@ -393,6 +405,11 @@ func isThreadFlowRunning(flowStatus *threadFlowStatusResponse) bool {
 		return true
 	}
 	return len(flowStatus.ActiveTaskIDs) > 0
+}
+
+func isThreadFlowNotFound(err error) bool {
+	var httpErr *common.HTTPError
+	return errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound
 }
 
 func replyUserActiveThreadError(w http.ResponseWriter, err error) {

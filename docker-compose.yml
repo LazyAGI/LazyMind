@@ -70,6 +70,10 @@ x-upload-paths: &upload-paths
 # per-OS default; ECS_01 should override this to /tmp/test_watch.
 x-file-watcher-watch-host-dir: &file-watcher-watch-host-dir ${LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR:-${HOME}}
 
+# Local lazyllm source -> /opt/lazyllm (edit on host, docker compose restart; no image rebuild).
+x-lazyllm-src-mount: &lazyllm-src-mount ./algorithm/lazyllm:/opt/lazyllm
+x-algorithm-src-mount: &algorithm-src-mount ./algorithm:/app/algorithm:ro
+
 x-runtime-home: &runtime-home
   LAZYMIND_HOME: /tmp/.lazyllm_rag
 
@@ -648,6 +652,11 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
+      - ./data/evo:/var/lib/lazymind/evo:ro
+      - *algorithm-src-mount
+      - *lazyllm-src-mount
+      # Router mode: mount algorithm source so child processes can load different versions.
+      - ./algorithm/lazymind:/opt/lazymind
     healthcheck:
       test: ['CMD-SHELL', 'curl -sf http://localhost:8046/health || exit 1']
       interval: 10s
@@ -661,6 +670,7 @@ services:
       LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
       LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
       LAZYMIND_MOUNT_BASE_DIR: /var/lib/lazymind/uploads
+      LAZYMIND_AGENTIC_WORKSPACE: /tmp/.lazyllm_rag/agent_workspace
       LAZYMIND_USE_INNER_MODEL: "true"
       LAZYMIND_MAX_CONCURRENCY: ${LAZYMIND_MAX_CONCURRENCY:-10}
       LAZYMIND_LLM_PRIORITY: ${LAZYMIND_LLM_PRIORITY:-0}
@@ -678,9 +688,7 @@ services:
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
       LAZYMIND_CORE_SERVICE_URL: http://core:8000
       LAZYMIND_WORD_GROUP_APPLY_URL: ""
-      # Router mode: set LAZYMIND_ENABLE_ROUTER=true to enable multi-algorithm AB routing.
-      # Defaults to false for full backward compatibility with the original chat service.
-      LAZYMIND_ENABLE_ROUTER: ${LAZYMIND_ENABLE_ROUTER:-false}
+      LAZYMIND_ENABLE_ROUTER: ${LAZYMIND_ENABLE_ROUTER:-true}
       LAZYMIND_ROUTER_PORT_POOL_START: 18000
       LAZYMIND_ROUTER_PORT_POOL_END: 18999
       LAZYMIND_ROUTER_PORTS_PER_INSTANCE: 100
@@ -708,7 +716,6 @@ services:
       LAZYMIND_EVO_API_PORT: "8047"
       LAZYMIND_EVO_BASE_DIR: /var/lib/lazymind/evo
       LAZYMIND_EVO_CHAT_SOURCE: /app/algorithm/lazymind/chat
-      LAZYMIND_EVO_CODE_MAP: /app/evo/code_map.json
       LAZYMIND_EVO_CODE_BINARY: /usr/local/bin/opencode
       LAZYMIND_EVO_CODE_PROVIDER: ${LAZYMIND_EVO_CODE_PROVIDER:-qwen}
       LAZYMIND_EVO_CODE_MODEL: ${LAZYMIND_EVO_CODE_MODEL:-qwen3-max}
@@ -719,16 +726,21 @@ services:
       LAZYMIND_EVO_LLM_ROLE: evo_llm
       LAZYMIND_EVO_KB_BASE_URL: http://doc-server:8000
       LAZYMIND_EVO_CHUNK_BASE_URL: http://doc-server:8000
-      LAZYMIND_EVO_TARGET_CHAT_URL: http://chat:8046/api/chat
+      LAZYMIND_EVO_TARGET_CHAT_URL: http://chat:8046/api/chat/stream
+      LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
+      LAZYMIND_MILVUS_URI: ${LAZYMIND_MILVUS_URI:-http://milvus:19530}
+      LAZYMIND_OPENSEARCH_URI: ${LAZYMIND_OPENSEARCH_URI:-https://opensearch:9200}
+      LAZYMIND_OPENSEARCH_USER: ${LAZYMIND_OPENSEARCH_USER:-admin}
+      LAZYMIND_OPENSEARCH_PASSWORD: ${LAZYMIND_OPENSEARCH_PASSWORD:-LazyRAG_OpenSearch123!}
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
       LAZYLLM_INIT_DOC: 1
       PYTHONPATH: /app/algorithm/lazyllm:/opt/lazyllm:/app/algorithm
-      <<: [*runtime-home, *trace-config, *proxy-env, *llm-api-keys]
+      <<: [*runtime-home, *trace-config, *proxy-env, *db-conn, *upload-paths, *ocr-env, *llm-api-keys]
     volumes:
       - ./data/evo:/var/lib/lazymind/evo
       - ./data/traces:/var/lib/lazymind/traces
       - ./data/core/uploads:/var/lib/lazymind/uploads:ro
-      - ./algorithm:/app/algorithm:ro
+      - *algorithm-src-mount
       - ./evo:/app/evo:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8047/healthz || exit 1"]
