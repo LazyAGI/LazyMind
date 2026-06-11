@@ -11,6 +11,18 @@ import (
 	"time"
 )
 
+type HTTPError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *HTTPError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
+
 // ApiGet text HTTP GET(JSON) text。
 func ApiGet(ctx context.Context, url string, header map[string]string, response any, timeout time.Duration) error {
 	return do(ctx, url, http.MethodGet, nil, header, response, timeout)
@@ -59,7 +71,10 @@ func do(ctx context.Context, url, method string, body any, header map[string]str
 		return fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("%s", summarizeExternalErrorMessage(respBytes))
+		return &HTTPError{
+			StatusCode: resp.StatusCode,
+			Message:    summarizeExternalErrorMessage(respBytes),
+		}
 	}
 	if response == nil {
 		return nil
