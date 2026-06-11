@@ -35,6 +35,7 @@ wget-log
 .worktrees/
 .codex-gocache/
 .codex-gomodcache/
+.reasonix
 
 # docs
 lazyllm_chroma/
@@ -80,6 +81,7 @@ build*
 lazyllm_cpp.egg-info/
 !build*.sh
 !build_document.py
+!builder.py
 
 .venv/
 .venv-test/

@@ -88,6 +88,16 @@ async def chat(
             )
         ),
     ] = None,
+    mcp_config: Annotated[
+        Optional[List[Dict[str, Any]]],
+        Body(
+            description=(
+                'Per-request MCP server configuration. Each item: '
+                '{id, name, transport, url, headers, allowed_tools, timeout}. '
+                'headers contains decrypted real credentials and is discarded after the request.'
+            )
+        ),
+    ] = None,
 ):
     return await handle_chat(
         query=query,
@@ -106,5 +116,6 @@ async def chat(
         user_id=(user_id or '').strip(),
         model_config=llm_config,
         tool_config=tool_config,
+        mcp_config=mcp_config,
         trace=trace,
     )

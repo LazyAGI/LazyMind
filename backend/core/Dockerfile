@@ -1,5 +1,5 @@
 ARG DOCKER_MIRROR=docker.m.daocloud.io/library/
-FROM ${DOCKER_MIRROR}golang:1.24.6 AS build
+FROM ${DOCKER_MIRROR}golang:1.25.11 AS build
 WORKDIR /app
 
 ARG GOPROXY=https://goproxy.cn,direct
