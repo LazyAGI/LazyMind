@@ -7,8 +7,9 @@ import {
   useCallback,
   ReactNode,
 } from "react";
-import { Spin, Flex, message } from "antd";
+import { Spin, Flex, Tooltip, message } from "antd";
 import {
+  CommentOutlined,
   DoubleRightOutlined,
   DownOutlined,
   UpOutlined,
@@ -1304,6 +1305,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
     function renderText(item: any, uniqueKey?: string) {
       const thinkingKey = uniqueKey || item.history_id || item.id || "default";
       const isCollapsed = thinkingCollapseMap.get(thinkingKey) || false;
+      const citeMessageList =
+        item.role === RoleTypes.USER ? getCiteMessages(item) : [];
 
       const toggleCollapse = () => {
         setThinkingCollapseMap((prev) => {
@@ -1316,6 +1319,25 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
         <Flex vertical>
           {item.images && <ChatImages images={item.images} />}
           {item.files && <ChatFiles files={item.files} />}
+          {citeMessageList.length > 0 ? (
+            <Tooltip
+              placement="topRight"
+              overlayClassName="chat-user-citation-tooltip"
+              title={
+                <div className="chat-user-citation-tooltip-content">
+                  {citeMessageList.map((citeMessage, index) => (
+                    <div className="chat-user-citation-tooltip-item" key={`${index}-${citeMessage}`}>
+                      {citeMessage}
+                    </div>
+                  ))}
+                </div>
+              }
+            >
+              <span className="chat-user-citation-icon" aria-label={t("chat.cite")}>
+                <CommentOutlined />
+              </span>
+            </Tooltip>
+          ) : null}
           {item.reasoning_content && (
             <>
               <div className="chat-think-status" onClick={toggleCollapse}>
