@@ -4,13 +4,16 @@ import logging
 from typing import AsyncIterator
 
 import httpx
-from fastapi import Request
+from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
 
 # Shared async client with no timeout (streaming responses can be arbitrarily long)
 _client = httpx.AsyncClient(timeout=None)
+
+# Errors that indicate the target host is unreachable or the connection was rejected.
+_CONNECT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError)
 
 
 class StreamProxy:
@@ -43,7 +46,11 @@ class StreamProxy:
             content=body,
         )
 
-        resp = await _client.send(req, stream=True)
+        try:
+            resp = await _client.send(req, stream=True)
+        except _CONNECT_ERRORS as exc:
+            logger.warning('StreamProxy connect error to %s: %s', target_base_url, exc)
+            raise HTTPException(status_code=503, detail=f'Upstream unreachable: {exc}') from exc
 
         # Build response headers; inject tracing headers
         response_headers = dict(resp.headers)

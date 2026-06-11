@@ -75,6 +75,7 @@ func streamPluginLoop(
 
 	for turn := 0; turn < maxAutoTurns; turn++ {
 		// 1. Call ChatAgent for this turn.
+		injectPluginContext(currentReqBody, pctx, pctx.Step)
 		stepTrigger, mountNumSteps, updatedSessionID, err := streamChatTurn(ctx, pythonBaseURL, currentReqBody, sseSender, db, pctx.PluginSessionID, convID, userID)
 		if updatedSessionID != pctx.PluginSessionID {
 			// First mount assigned a real session ID; update pctx for all subsequent calls.
@@ -90,6 +91,8 @@ func streamPluginLoop(
 			maxAutoTurns = maxAutoTurnsPerStep * numSteps
 		}
 		if err != nil || stepTrigger == nil {
+			fmt.Printf("[Plugin] streamChatTurn returned nil stepTrigger err=%v session=%s\n",
+				err, pctx.PluginSessionID)
 			break // Natural end of conversation or error.
 		}
 
@@ -134,9 +137,10 @@ func streamPluginLoop(
 			LastHeartbeat: time.Now(),
 			WorkspacePath: workspacePath,
 		}
-		_ = orm.InsertPluginSessionStep(db, stepRec)
-
-		// Emit step_change to frontend.
+		if err := orm.InsertPluginSessionStep(db, stepRec); err != nil {
+			fmt.Printf("[Plugin] InsertPluginSessionStep failed session=%s step=%s err=%v\n",
+				pctx.PluginSessionID, stepTrigger.StepID, err)
+		}
 		_ = sseSender.SendEvent("plugin_event", buildStepChangeEvent(pctx.PluginSessionID, stepTrigger.StepID))
 
 		// 5. Run StepAgent — Python queries artifacts/checkpoint/previous_summary autonomously.
@@ -159,8 +163,11 @@ func streamPluginLoop(
 
 		// 5a. Auto mode: call DriverAgent, inject judgment, continue.
 		// Python queries artifacts autonomously inside /api/plugin/driver.
+		// Update pctx.Step so next turn's plugin_context.current_step_id is fresh.
+		pctx.Step = stepTrigger.StepID
+		llmCfgForDriver, _ := currentReqBody["llm_config"].(map[string]interface{})
 		judgment, _ := CallPluginDriver(ctx, pythonBaseURL,
-			stepTrigger.PluginSessionID, stepComplete.ResultSummary)
+			stepTrigger.PluginSessionID, stepComplete.ResultSummary, llmCfgForDriver)
 		currentReqBody = injectDriverJudgmentIntoReqBody(currentReqBody, judgment)
 	}
 
@@ -174,6 +181,140 @@ func streamPluginLoop(
 
 // runInterruptedStep resumes an interrupted step directly (skip ChatAgent).
 // Python queries checkpoint, artifacts, and workspace path autonomously.
+// streamPluginLoopFromTrigger is the cold-start fast path: the first step_trigger
+// was captured during the initial ChatAgent turn so there is no need for a second
+// ChatAgent turn (advance_step). The first iteration executes firstTrigger directly;
+// subsequent iterations (auto-mode multi-step) behave like streamPluginLoop.
+func streamPluginLoopFromTrigger(
+	ctx context.Context,
+	db *gorm.DB,
+	pythonBaseURL string,
+	pctx PluginContext,
+	firstTrigger *StepTriggerInfo,
+	reqBody map[string]any,
+	sseSender SSESender,
+	convID string,
+) {
+	userID, _ := reqBody["user_id"].(string)
+	numSteps := max(1, countSteps(db, pctx.PluginSessionID))
+	maxAutoTurns := maxAutoTurnsPerStep * numSteps
+	stepAttemptCount := make(map[string]int)
+	currentReqBody := cloneReqBody(reqBody)
+
+	for turn := 0; turn < maxAutoTurns; turn++ {
+		var stepTrigger *StepTriggerInfo
+
+		if turn == 0 {
+			// First iteration: use the pre-captured trigger — skip streamChatTurn entirely.
+			stepTrigger = firstTrigger
+		} else {
+			// Subsequent iterations: inject current plugin context so ChatAgent gets
+			// advance_step tool and knows which plugin/step is active.
+			injectPluginContext(currentReqBody, pctx, pctx.Step)
+			// Subsequent iterations: normal ChatAgent turn.
+			var mountNumSteps int
+			var updatedSessionID string
+			var err error
+			stepTrigger, mountNumSteps, updatedSessionID, err = streamChatTurn(
+				ctx, pythonBaseURL, currentReqBody, sseSender, db, pctx.PluginSessionID, convID, userID,
+			)
+			if updatedSessionID != pctx.PluginSessionID {
+				pctx.PluginSessionID = updatedSessionID
+			}
+			if mountNumSteps > 0 {
+				numSteps = mountNumSteps
+				maxAutoTurns = maxAutoTurnsPerStep * numSteps
+			}
+			if err != nil || stepTrigger == nil {
+				fmt.Printf("[Plugin] streamPluginLoopFromTrigger: streamChatTurn returned nil "+
+					"stepTrigger err=%v session=%s\n", err, pctx.PluginSessionID)
+				break
+			}
+		}
+
+		// Per-step retry limit check (auto mode only).
+		if stepTrigger.StepMode == "auto" {
+			stepAttemptCount[stepTrigger.StepID]++
+			reachable := max(1, stepTrigger.ReachableStepCount)
+			maxRetries := max(1, int(math.Floor(float64(maxAutoTurns-turn)/float64(reachable)*1.5)))
+			if stepAttemptCount[stepTrigger.StepID] > maxRetries {
+				_ = sseSender.SendEvent("plugin_event", map[string]interface{}{
+					"type":              "step_error",
+					"plugin_session_id": pctx.PluginSessionID,
+					"step_id":           stepTrigger.StepID,
+					"error":             fmt.Sprintf("step %q exceeded max retries (%d)", stepTrigger.StepID, maxRetries),
+				})
+				break
+			}
+		}
+
+		// Defensive dependency check.
+		if depErr := checkStepDependencies(db, stepTrigger); depErr != nil {
+			_ = sseSender.SendEvent("plugin_event", map[string]interface{}{
+				"type":              "step_error",
+				"plugin_session_id": pctx.PluginSessionID,
+				"step_id":           stepTrigger.StepID,
+				"error":             depErr.Error(),
+			})
+			break
+		}
+
+		// Create step execution record.
+		stepExecID := newConversationID()
+		workspacePath := buildWorkspacePath(pctx.PluginSessionID, stepExecID)
+		_ = os.MkdirAll(workspacePath, 0755)
+
+		stepRec := &orm.PluginSessionStep{
+			ID:            stepExecID,
+			SessionID:     pctx.PluginSessionID,
+			Step:          stepTrigger.StepID,
+			StepMode:      stepTrigger.StepMode,
+			StepStatus:    "running",
+			LastHeartbeat: time.Now(),
+			WorkspacePath: workspacePath,
+		}
+		if err := orm.InsertPluginSessionStep(db, stepRec); err != nil {
+			fmt.Printf("[Plugin] streamPluginLoopFromTrigger: InsertPluginSessionStep failed "+
+				"session=%s step=%s err=%v\n", pctx.PluginSessionID, stepTrigger.StepID, err)
+		}
+		_ = sseSender.SendEvent("plugin_event", buildStepChangeEvent(pctx.PluginSessionID, stepTrigger.StepID))
+
+		// Run StepAgent.
+		llmConfig, _ := currentReqBody["llm_config"].(map[string]interface{})
+		session, _ := orm.GetPluginSession(db, pctx.PluginSessionID)
+		fmt.Printf("[Plugin] streamPluginLoopFromTrigger: calling streamStepTurn turn=%d step=%s session=%s\n",
+			turn, stepTrigger.StepID, pctx.PluginSessionID)
+		stepComplete := streamStepTurn(ctx, pythonBaseURL, stepTrigger, stepExecID,
+			llmConfig, db, session, sseSender)
+
+		if stepComplete == nil {
+			fmt.Printf("[Plugin] streamPluginLoopFromTrigger: streamStepTurn nil turn=%d step=%s session=%s\n",
+				turn, stepTrigger.StepID, pctx.PluginSessionID)
+			break
+		}
+
+		if stepTrigger.StepMode == "human" {
+			_ = sseSender.SendEvent("plugin_event",
+				buildStepWaitingEvent(pctx.PluginSessionID, stepTrigger.StepID))
+			_ = sseSender.Send([]byte("[DONE]"))
+			return
+		}
+
+		// Auto mode: call DriverAgent, inject judgment, continue.
+		// Update pctx.Step so next turn's plugin_context.current_step_id is fresh.
+		pctx.Step = stepTrigger.StepID
+		llmCfgForDriver, _ := currentReqBody["llm_config"].(map[string]interface{})
+		judgment, _ := CallPluginDriver(ctx, pythonBaseURL,
+			stepTrigger.PluginSessionID, stepComplete.ResultSummary, llmCfgForDriver)
+		currentReqBody = injectDriverJudgmentIntoReqBody(currentReqBody, judgment)
+	}
+
+	if pctx.PluginSessionID != "" && db != nil {
+		_ = orm.DeactivatePluginSession(db, pctx.PluginSessionID)
+	}
+
+	_ = sseSender.Send([]byte("[DONE]"))
+}
 func runInterruptedStep(
 	ctx context.Context,
 	db *gorm.DB,
@@ -196,15 +337,17 @@ func runInterruptedStep(
 		LastHeartbeat: time.Now(),
 		WorkspacePath: workspacePath,
 	}
-	_ = orm.InsertPluginSessionStep(db, stepRec)
+	if err := orm.InsertPluginSessionStep(db, stepRec); err != nil {
+		fmt.Printf("[Plugin] runInterruptedStep InsertPluginSessionStep failed session=%s step=%s err=%v\n",
+			pctx.PluginSessionID, pctx.Step, err)
+	}
 
 	_ = sseSender.SendEvent("plugin_event", buildStepChangeEvent(pctx.PluginSessionID, pctx.Step))
 
 	trigger := &StepTriggerInfo{
-		PluginSessionID: pctx.PluginSessionID,
-		PluginID:        pctx.PluginID,
-		StepID:          pctx.Step,
-		StepMode:        lastRec.StepMode,
+		PluginID: pctx.PluginID,
+		StepID:   pctx.Step,
+		StepMode: lastRec.StepMode,
 	}
 	session, _ := orm.GetPluginSession(db, pctx.PluginSessionID)
 	streamStepTurn(ctx, pythonBaseURL, trigger, stepExecID, llmConfig, db, session, sseSender)
@@ -294,7 +437,10 @@ func streamChatTurn(
 				if stepTrigger.PluginSessionID == "" {
 					stepTrigger.PluginSessionID = pluginSessionID
 				}
-				// Do not forward step_trigger to frontend.
+				// First step_trigger is enough — break immediately so Go can start
+				// executing the step without waiting for Python's full agent loop
+				// (which may keep calling advance_step for subsequent steps).
+				break
 			}
 			continue
 		}
@@ -344,6 +490,11 @@ func streamStepTurn(
 		return nil
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Printf("[Plugin] /api/plugin/step returned %d: %s\n", resp.StatusCode, string(body))
+		return nil
+	}
 
 	var stepComplete *StepCompleteInfo
 	scanner := bufio.NewScanner(resp.Body)
@@ -429,14 +580,20 @@ func overrideUserMessage(reqBody map[string]any, msg string) map[string]any {
 
 func injectDriverJudgmentIntoReqBody(reqBody map[string]any, judgment string) map[string]any {
 	clone := cloneReqBody(reqBody)
-	hist, _ := clone["history"].([]any)
-	hist = append(hist, map[string]any{"role": "user", "content": judgment})
-	clone["history"] = hist
-	// Do NOT also set query: Python's handle_chat uses query as the current-turn input
-	// and appends it to history internally. Setting both would produce two identical
-	// user messages in the context window.
-	// The judgment already appears as the last history entry; the agent will pick it up.
-	clone["query"] = ""
+
+	// Build a minimal history so the second-turn ChatAgent has context:
+	// the original user query as the first message, so the LLM knows it is
+	// inside an image-generation (or other plugin) flow and must call advance_step.
+	originalQuery, _ := clone["query"].(string)
+	if originalQuery != "" {
+		existingHist, _ := clone["history"].([]any)
+		newEntry := map[string]any{"role": "user", "content": originalQuery}
+		clone["history"] = append(existingHist, newEntry)
+	}
+
+	// Use judgment as the current-turn query so ReactAgent receives a non-empty input
+	// and calls advance_step.
+	clone["query"] = judgment
 	return clone
 }
 
@@ -445,6 +602,17 @@ func cloneReqBody(src map[string]any) map[string]any {
 	var clone map[string]any
 	_ = json.Unmarshal(b, &clone)
 	return clone
+}
+
+// injectPluginContext writes the current plugin session state into reqBody["plugin_context"]
+// so that each ChatAgent turn knows which plugin/step is active and gets the advance_step tool.
+func injectPluginContext(reqBody map[string]any, pctx PluginContext, currentStepID string) {
+	pc := map[string]any{
+		"plugin_id":         pctx.PluginID,
+		"plugin_session_id": pctx.PluginSessionID,
+		"current_step_id":   currentStepID,
+	}
+	reqBody["plugin_context"] = pc
 }
 
 func buildWorkspacePath(sessionID, stepExecID string) string {

@@ -15,6 +15,15 @@ export const PluginShell: React.FC<PluginShellProps> = ({
   children,
 }) => {
   const requestAdvance = useActivePluginContextStore((s) => s.requestAdvance);
+  const contextSessionId = useActivePluginContextStore((s) => s.context?.plugin_session_id);
+
+  // Guard against stale "Continue" buttons (e.g. in history messages) firing
+  // the advance signal for the wrong session.
+  const handleContinue = () => {
+    if (contextSessionId === session.sessionId) {
+      requestAdvance();
+    }
+  };
 
   return (
     <div className='plugin-shell' role='region' aria-label={title ?? 'Plugin'}>
@@ -32,7 +41,7 @@ export const PluginShell: React.FC<PluginShellProps> = ({
           <span>等待您的指令</span>
           <button
             className='plugin-shell__continue-btn'
-            onClick={requestAdvance}
+            onClick={handleContinue}
             type='button'
           >
             继续

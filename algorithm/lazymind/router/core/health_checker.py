@@ -128,7 +128,7 @@ class HealthChecker:
 
             # Evict from registry immediately on first failure so no traffic is
             # sent to a potentially-dead instance while we wait for the threshold.
-            self._registry.evict_instance(resolve_host(), port)
+            self._registry.evict_instance_by_addr(resolve_host(), port)
 
             if count >= config['router_health_max_failures']:
                 await self._update_child_status(port, 'unhealthy', failures=count)

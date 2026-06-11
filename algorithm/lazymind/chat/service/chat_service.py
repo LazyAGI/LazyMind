@@ -34,6 +34,7 @@ from lazyllm.tools.tool_config_inject import inject_tool_config
 from lazyllm import AutoModel
 from lazymind.config import config as _cfg
 from lazymind.chat.plugins import PluginMiddleware as _PluginMiddleware
+from lazymind.chat.plugins.loader import plugin_loader as _plugin_loader
 
 
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
@@ -78,7 +79,12 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     )
     start_time = time.time()
     priority = priority or LAZYMIND_LLM_PRIORITY
-    sensitive_word = check_sensitive_content(query)
+
+    # Skip sensitive-word filtering for plugin loop internal turns.
+    # When plugin_context is present the query is a DriverAgent judgment (system-generated),
+    # not user input, so it must not be blocked by the content filter.
+    is_plugin_turn = bool(plugin_context and plugin_context.get('plugin_session_id'))
+    sensitive_word = None if is_plugin_turn else check_sensitive_content(query)
     if sensitive_word:
         cost = round(time.time() - start_time, 3)
         LOG.warning(
@@ -121,7 +127,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
     lazyllm.globals['agentic_config'] = agentic_config
 
-    plugin_mw = _PluginMiddleware(plugin_context, agentic_config)
+    plugin_mw = await _PluginMiddleware.create(plugin_context, agentic_config)
 
     all_default_configs = filter_tools(DEFAULT_TOOLS, disabled_tools)
     lazyllm.globals['default_tools_for_step_agent'] = [c.instance for c in all_default_configs]
@@ -148,6 +154,12 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
     llm = AutoModel(model='llm')
 
+    # When inside a plugin session (advance_step turn), disable force_summarize so
+    # the agent MUST call advance_step and cannot short-circuit with plain text.
+    in_plugin_session = bool(
+        plugin_context and plugin_context.get('plugin_session_id')
+    )
+
     react_agent = lazyllm.tools.agent.ReactAgent(
         llm=llm,
         tools=agent_tools,
@@ -160,9 +172,14 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         fs=FS,
         skills_dir=_cfg['skill_fs_url'],
         enable_builtin_tools=False,
-        force_summarize=True,
+        force_summarize=not in_plugin_session,
         force_summarize_context=query,
     )
+    # Declare plugin-related tools as terminal so the ReAct loop stops immediately
+    # after triggering a step — both cold-start launchers and the in-session advance_step.
+    stop_tool_names = [f'trigger_{pid}' for pid in _plugin_loader.list_plugin_ids()]
+    stop_tool_names.append('advance_step')
+    react_agent.set_stop_tools(stop_tool_names)
 
     async def event_stream() -> Any:
         final_result: Any = None
@@ -183,13 +200,62 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                     result = helper.future.result()
                 except Exception as exc:
                     LOG.exception('[ChatServer] agent failed')
+                    # Flush any plugin events queued by tools before the crash.
+                    # Ensures mount/step_trigger reach Go even when agent errors out
+                    # (e.g. malformed second tool call with empty name).
+                    flushed_events: list = []
+                    async for ev in plugin_mw.iter_pending_events():
+                        flushed_events.append(ev)
+                        yield sse_line({'type': 'plugin_event', 'data': ev})
+                    # If a plugin was successfully launched (mount event present), suppress
+                    # the agent error — Go will take over the plugin execution loop.
+                    if any(ev.get('type') == 'mount' for ev in flushed_events):
+                        LOG.warning(
+                            '[ChatServer] agent error suppressed after plugin mount: %s', exc
+                        )
+                        return  # Go takes over; no further SSE frames needed from Python
                     raise RuntimeError(f'agent failed: {exc}') from exc
 
                 final_result = result
 
                 # Flush plugin events emitted by trigger tools (e.g. mount, step_trigger).
+                flushed_plugin_events = []
                 async for ev in plugin_mw.iter_pending_events():
+                    flushed_plugin_events.append(ev)
                     yield sse_line({'type': 'plugin_event', 'data': ev})
+
+                # Fallback: if we are inside a plugin session and the LLM skipped
+                # calling advance_step (e.g. reasoning/thinking mode produced plain text),
+                # synthesize a step_trigger so Go can continue the plugin loop.
+                if in_plugin_session and not any(
+                    ev.get('type') == 'step_trigger' for ev in flushed_plugin_events
+                ):
+                    pctx_data = plugin_context or {}
+                    p_id = agentic_config.get('plugin_id', '') or pctx_data.get('plugin_id', '')
+                    p_session = agentic_config.get('plugin_session_id', '') or pctx_data.get('plugin_session_id', '')
+                    p_step = agentic_config.get('plugin_step', '') or pctx_data.get('current_step_id', '')
+                    if p_id and p_session and p_step:
+                        LOG.warning(
+                            '[ChatServer] plugin turn produced no step_trigger '
+                            '(LLM likely used reasoning mode); synthesizing fallback '
+                            'step_trigger for step=%r session=%r', p_step, p_session,
+                        )
+                        # Use the LLM's plain-text output as user_input if available,
+                        # otherwise fall back to the original user query.
+                        fallback_user_input = (
+                            str(final_result).strip() if final_result else query
+                        ) or query
+                        fallback_trigger = {
+                            'type': 'step_trigger',
+                            'plugin_id': p_id,
+                            'plugin_session_id': p_session,
+                            'step_id': p_step,
+                            'step_mode': 'auto',
+                            'user_input': fallback_user_input,
+                            'inputs': [],
+                            'reachable_step_count': 1,
+                        }
+                        yield sse_line({'type': 'plugin_event', 'data': fallback_trigger})
 
             for frame in translator.finish(final_result):
                 cost = round(time.time() - start_time, 3)

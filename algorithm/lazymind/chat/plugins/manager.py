@@ -110,9 +110,9 @@ def trigger_plugin_step(step_id: str, user_input: str) -> str:
         reachable_step_count = max(1, len(sm.get_reachable_steps(step_id)))
 
     # Use the shared queue from agentic_config (works across asyncio tasks).
-    # Fall back to lazyllm.globals for compatibility.
-    _queue = lazyllm.globals.get('agentic_config', {}).get('plugin_event_queue') \
-        or lazyllm.globals.get('plugin_event_queue', [])
+    # Explicit None check — an empty list is a valid (just-created) queue, not a missing one.
+    _cfg_queue = lazyllm.globals.get('agentic_config', {}).get('plugin_event_queue')
+    _queue = _cfg_queue if _cfg_queue is not None else lazyllm.globals.get('plugin_event_queue', [])
     _queue.append({
         'type': 'step_trigger',
         'plugin_id': plugin_id,
@@ -123,11 +123,23 @@ def trigger_plugin_step(step_id: str, user_input: str) -> str:
         'inputs': inputs,
         'reachable_step_count': reachable_step_count,
     })
-    return f'Step {step_id!r} has been triggered. Stop here and do not output any further text.'
+    # Return a sentinel that stops the ReAct loop immediately.
+    # LAZYLLM_RESULT_BREAK (if available) is the official way to halt agent iteration;
+    # the plain-text fallback is picked up by the force_summarize path.
+    try:
+        from lazyllm.tools.agent.tool_manager import LAZYLLM_RESULT_BREAK  # type: ignore
+        return LAZYLLM_RESULT_BREAK
+    except ImportError:
+        pass
+    return f'[DONE] Step {step_id!r} has been queued for execution. Do not call any more tools.'
 
 
 def _launch_plugin(plugin_id: str, user_input: str) -> str:
-    """Cold-start a plugin: emit mount + step_trigger(initial_step) in one shot."""
+    """Cold-start a plugin: emit mount + step_trigger(initial_step) in one shot.
+
+    Reads the state machine and scenario document so the trigger carries the
+    same contextual richness as an advance_step call made by the ChatAgent.
+    """
     initial_step = plugin_loader.get_initial_step(plugin_id)
     if not initial_step:
         return f'Error: plugin {plugin_id!r} has no initial step defined.'
@@ -137,8 +149,10 @@ def _launch_plugin(plugin_id: str, user_input: str) -> str:
     plugin_session_id = lazyllm.globals.get('agentic_config', {}).get('plugin_session_id', '')
 
     # Use the shared queue from agentic_config (works across asyncio tasks).
+    # Explicit None check — an empty list is a valid (just-created) queue, not a missing one.
     agentic_cfg = lazyllm.globals.get('agentic_config', {})
-    queue = agentic_cfg.get('plugin_event_queue') or lazyllm.globals.get('plugin_event_queue', [])
+    _launch_queue = agentic_cfg.get('plugin_event_queue')
+    queue = _launch_queue if _launch_queue is not None else lazyllm.globals.get('plugin_event_queue', [])
 
     # mount event — Go creates the session record and replaces the placeholder ID.
     queue.append({
@@ -154,8 +168,16 @@ def _launch_plugin(plugin_id: str, user_input: str) -> str:
          if s.get('id') == initial_step),
         'human',
     )
+
+    # Read state machine and scenario so Go / StepAgent have the same context
+    # that would normally be gathered during the (now-skipped) second ChatAgent turn.
     sm = plugin_loader.get_state_machine(plugin_id)
     reachable_step_count = max(1, len(sm.get_reachable_steps(initial_step)))
+    scenario = plugin_loader.get_scenario(plugin_id)
+
+    # inputs for the initial step: cold-start has no predecessors.
+    step_config = plugin_loader.get_step_config(plugin_id, initial_step)
+    inputs = step_config.get('inputs', [])
 
     queue.append({
         'type': 'step_trigger',
@@ -164,11 +186,14 @@ def _launch_plugin(plugin_id: str, user_input: str) -> str:
         'step_id': initial_step,
         'step_mode': step_mode,
         'user_input': user_input.strip(),
-        'inputs': [],
+        'inputs': inputs,
         'reachable_step_count': reachable_step_count,
+        # Scenario summary gives StepAgent the same context it would get from the
+        # second ChatAgent turn.  Truncated to avoid payload bloat.
+        'scenario_summary': scenario[:500] if scenario else '',
     })
 
-    return f'Plugin {plugin_id!r} launched. Stop here and do not output any further text.'
+    return f'Plugin {plugin_id!r} launched.'
 
 
 def build_all_plugin_tools() -> list[Callable]:
@@ -204,7 +229,11 @@ def build_all_plugin_tools() -> list[Callable]:
     return tools
 
 
-def build_advance_step_tool(plugin_id: str, current_step: str) -> list[Callable]:
+def build_advance_step_tool(
+    plugin_id: str,
+    current_step: str,
+    agentic_config: dict | None = None,
+) -> list[Callable]:
     """Build a single advance_step tool for an active plugin session.
 
     When a plugin session is live (plugin_id is set), ChatAgent exposes exactly
@@ -215,6 +244,14 @@ def build_advance_step_tool(plugin_id: str, current_step: str) -> list[Callable]
 
     Returns a one-element list so the call-site can use the same
     `agent_tools += result` pattern as build_all_plugin_tools().
+
+    Args:
+        plugin_id: Active plugin ID.
+        current_step: The step the session is currently on.
+        agentic_config: The live agentic_config dict from handle_chat. When
+            provided, advance_step writes events directly into its
+            plugin_event_queue, bypassing lazyllm.globals (which is
+            task-local and unreachable from asyncio tool sub-tasks).
     """
     if not plugin_id or not plugin_loader.is_loaded(plugin_id):
         return []
@@ -271,6 +308,23 @@ def build_advance_step_tool(plugin_id: str, current_step: str) -> list[Callable]
             step_id: The step to trigger (must be a reachable step).
             user_input: Description of what the user wants for this step.
         """
+        # When agentic_config is captured at build time, write the event directly
+        # into its plugin_event_queue. This bypasses lazyllm.globals which is
+        # task-local and unavailable inside asyncio sub-tasks that execute tools.
+        if agentic_config is not None:
+            cfg_queue = agentic_config.get('plugin_event_queue')
+            if cfg_queue is not None:
+                # Temporarily shadow lazyllm.globals so trigger_plugin_step writes
+                # to the correct queue even when running in a sub-task.
+                prev = lazyllm.globals.get('agentic_config')
+                lazyllm.globals['agentic_config'] = agentic_config
+                try:
+                    return trigger_plugin_step(step_id, user_input)
+                finally:
+                    if prev is None:
+                        lazyllm.globals.pop('agentic_config', None)
+                    else:
+                        lazyllm.globals['agentic_config'] = prev
         return trigger_plugin_step(step_id, user_input)
 
     advance_step.__doc__ = doc

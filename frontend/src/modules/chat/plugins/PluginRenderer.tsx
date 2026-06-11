@@ -1,18 +1,32 @@
 import React from 'react';
 import type { PluginSessionState } from './types';
-import { PLUGIN_REGISTRY } from './registry';
+import { getPluginComponent } from './registry';
 import { PluginShell } from './components/PluginShell';
 
 interface PluginRendererProps {
   session: PluginSessionState;
 }
 
-export const PluginRenderer: React.FC<PluginRendererProps> = ({ session }) => {
-  const PluginView = PLUGIN_REGISTRY[session.pluginId];
+/** Fallback view for plugins that have no registered component. */
+const GenericPluginView: React.FC<{ session: PluginSessionState }> = ({ session }) => (
+  <div className='plugin-generic'>
+    <p>
+      <strong>Step:</strong> {session.currentStep || '—'}
+    </p>
+    {session.stepProgress && (
+      <p>{session.stepProgress.message}</p>
+    )}
+    {session.stepError && (
+      <p className='plugin-generic__error' role='alert'>{session.stepError}</p>
+    )}
+    {session.isWaiting && (
+      <p>Waiting for user confirmation…</p>
+    )}
+  </div>
+);
 
-  if (!PluginView) {
-    return null;
-  }
+export const PluginRenderer: React.FC<PluginRendererProps> = ({ session }) => {
+  const PluginView = getPluginComponent(session.pluginId) ?? GenericPluginView;
 
   return (
     <PluginShell session={session} title={session.pluginId}>

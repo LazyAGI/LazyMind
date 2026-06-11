@@ -49,6 +49,7 @@ class PluginStepRequest(BaseModel):
 class PluginDriverRequest(BaseModel):
     plugin_session_id: str
     step_result: str = ''
+    llm_config: Optional[Dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +120,9 @@ async def run_plugin_step(request: PluginStepRequest):
         'step_checkpoint': checkpoint,
     }
     lazyllm.globals['agentic_config'] = agentic_config
-    lazyllm.globals['plugin_event_queue'] = []
+    _eq: list = []
+    lazyllm.globals['plugin_event_queue'] = _eq
+    agentic_config['plugin_event_queue'] = _eq   # keep in sync
 
     try:
         from lazyllm import AutoModel
@@ -146,12 +149,6 @@ async def run_plugin_step(request: PluginStepRequest):
             import lazyllm.module.stream_helper as _sh
             helper = _sh.StreamCallHelper(agent, init_sid=False)
 
-            # BUG-1 fix: use a stable list reference instead of reassigning
-            # lazyllm.globals['plugin_event_queue'] to a new list each time.
-            # Reassigning breaks the reference held by tool functions (save_step_artifact,
-            # save_step_checkpoint), causing their appends to go into an orphaned list.
-            # We drain the list in-place with del queue[:] so the tools always
-            # append to the same object.
             event_queue: list = lazyllm.globals.get('plugin_event_queue', [])
             if not isinstance(event_queue, list):
                 event_queue = []
@@ -177,6 +174,31 @@ async def run_plugin_step(request: PluginStepRequest):
             for ev in _drain_and_yield():
                 all_artifact_events.append(ev)
                 yield f'data: {json.dumps(ev, ensure_ascii=False)}\n\n'
+
+            # Fallback: if the LLM skipped tool calls (e.g. in thinking/reasoning mode
+            # it reasoned internally and returned plain text), auto-save declared outputs.
+            saved_artifact_ids = {
+                ev['artifact_id']
+                for ev in all_artifact_events
+                if isinstance(ev, dict) and ev.get('type') == 'artifact'
+            }
+            declared_outputs = step_config.get('outputs', [])
+            try:
+                llm_text = str(helper.future.result() or '').strip()
+            except Exception:
+                llm_text = ''
+            for output in declared_outputs:
+                artifact_id = output.get('artifact_id', '')
+                if artifact_id and artifact_id != 'step_summary' and artifact_id not in saved_artifact_ids:
+                    logger.warning(
+                        'StepAgent did not call save_step_artifact(%r); '
+                        'using LLM text output as fallback artifact.',
+                        artifact_id,
+                    )
+                    value = llm_text or f'(no output from step {step_id})'
+                    fallback_ev = {'type': 'artifact', 'artifact_id': artifact_id, 'value': value}
+                    all_artifact_events.append(fallback_ev)
+                    yield f'data: {json.dumps(fallback_ev, ensure_ascii=False)}\n\n'
 
             # Build fresh_artifacts from the initial DB snapshot plus every artifact
             # event emitted during this execution (all batches, not just the last one).
@@ -228,6 +250,14 @@ async def run_plugin_driver(request: PluginDriverRequest):
     plugin_id = info['plugin_id']
     step_id = info['step_id']
     attempt = load_attempt_count(request.plugin_session_id, step_id)
+
+    # Use plugin_session_id as the lazyllm session scope — same pattern as run_plugin_step.
+    driver_sid = f'driver-{request.plugin_session_id}'
+    lazyllm.globals._init_sid(sid=driver_sid)
+    lazyllm.locals._init_sid(sid=driver_sid)
+
+    from lazymind.model_config import inject_model_config as _inject_mc
+    _inject_mc(request.llm_config)
 
     try:
         from lazyllm import AutoModel

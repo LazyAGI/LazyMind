@@ -309,6 +309,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   function loadConversation(conversationId: string) {
     setIsRestoringConversation(true);
+    // Clear any lingering plugin context from the previous session so the
+    // advance flag does not accidentally bleed into the newly loaded session.
+    useActivePluginContextStore.getState().clearContext();
     ChatServiceApi()
       .conversationServiceGetConversationDetail({
         conversation: conversationId,

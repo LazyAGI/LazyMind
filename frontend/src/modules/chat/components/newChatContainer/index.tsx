@@ -910,10 +910,13 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
 
       if (id && streamManager.hasActiveStream(id)) {
         activeStreamRef.current = true;
-        const callbacks: Record<string, (event: CustomEvent) => void> = {
+        const callbacks: StreamCallbacks = {
           message: (event) => onMessage(event),
           error: (event) => onError(event),
           timeout: (event) => onTimeout(event),
+          pluginMount: (pluginSessionId: string) => {
+            updateAssistantMessage({ plugin_session_id: pluginSessionId });
+          },
         };
         streamManager.restoreStreamCallbacks(id, callbacks);
 

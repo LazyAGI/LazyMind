@@ -83,10 +83,20 @@ class GlobalRegistry:
     # Query
     # ------------------------------------------------------------------
 
-    def get_healthy_instance(self, algorithm_id: str) -> Optional[ChildProcessInfo]:
-        """Return the next healthy instance for `algorithm_id` using round-robin."""
+    def get_healthy_instance(
+        self, algorithm_id: str, exclude: set[str] | None = None
+    ) -> Optional[ChildProcessInfo]:
+        """Return the next healthy instance for `algorithm_id` using round-robin.
+
+        Args:
+            algorithm_id: Target algorithm.
+            exclude: Set of instance_ids to skip (e.g. recently failed ones).
+        """
         instances = self._global_instances.get(algorithm_id, [])
-        healthy = [i for i in instances if i.status == 'healthy']
+        healthy = [
+            i for i in instances
+            if i.status == 'healthy' and (not exclude or i.instance_id not in exclude)
+        ]
         if not healthy:
             return None
         cursor = self._rr_cursors.get(algorithm_id, 0)
@@ -100,8 +110,23 @@ class GlobalRegistry:
     def get_all_algorithms(self) -> list[str]:
         return list(self._global_instances.keys())
 
-    def evict_instance(self, host: str, port: int) -> None:
-        """Immediately remove a specific (host, port) from the in-memory cache.
+    def evict_instance(self, instance_id: str) -> None:
+        """Immediately remove a specific instance from the in-memory cache by instance_id.
+
+        Called on connect errors so no further traffic is sent to an unreachable instance.
+        """
+        changed = False
+        for algo_id, instances in list(self._global_instances.items()):
+            filtered = [i for i in instances if i.instance_id != instance_id]
+            if len(filtered) != len(instances):
+                self._global_instances[algo_id] = filtered
+                changed = True
+                logger.info('Evicted unreachable instance %s from registry', instance_id)
+        if changed:
+            self._rr_cursors.clear()
+
+    def evict_instance_by_addr(self, host: str, port: int) -> None:
+        """Remove a specific (host, port) from the in-memory cache.
 
         Called by HealthChecker as soon as a child process is found unhealthy,
         so no traffic is sent to it while it is being restarted.

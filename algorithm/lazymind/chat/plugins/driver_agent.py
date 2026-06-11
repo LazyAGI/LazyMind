@@ -32,7 +32,7 @@ def evaluate_step(
         driver_md = driver_md + '\n\n---\n## Scenario context\n' + scenario_md
 
     artifacts_summary = '\n'.join(
-        f'- {k}: {str(v)[:100]}' for k, v in (artifacts or {}).items() if v is not None
+        f'- {k}: {str(v)}' for k, v in (artifacts or {}).items() if v is not None
     )
     prompt = (
         driver_md

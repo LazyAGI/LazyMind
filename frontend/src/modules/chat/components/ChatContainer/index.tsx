@@ -37,6 +37,7 @@ import ChatImages, { ChatImage } from "../ChatImages";
 import ChatFiles, { ChatFile } from "../ChatFiles";
 import BatchChatComponent, { BatchChatImperativeProps } from "../BatchChat";
 import { streamManager } from "@/modules/chat/utils/StreamManager";
+import type { StreamCallbacks } from "@/modules/chat/utils/StreamManager";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
@@ -741,10 +742,13 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
 
       if (id && streamManager.hasActiveStream(id)) {
         activeStreamRef.current = true;
-        const callbacks: Record<string, (event: CustomEvent) => void> = {
+        const callbacks: StreamCallbacks = {
           message: (event) => onMessage(event),
           error: (event) => onError(event),
           timeout: (event) => onTimeout(event),
+          pluginMount: (pluginSessionId: string) => {
+            updateAssistantMessage({ plugin_session_id: pluginSessionId });
+          },
         };
         streamManager.restoreStreamCallbacks(id, callbacks);
 

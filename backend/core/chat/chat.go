@@ -199,11 +199,18 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 			// Strip the SSE "data: " prefix before attempting JSON parse.
 			jsonText := strings.TrimPrefix(text, "data: ")
 			data := &LazyStreamData{}
-			var streamResp LazyChatResponse
-			if err := json.Unmarshal([]byte(jsonText), &streamResp); err != nil {
-				data.RawText = text // keep original (with "data: " prefix) for plugin_event detection
+			// Plugin event frames must be detected before attempting LazyChatResponse
+			// unmarshal: {"type":"plugin_event",...} is valid JSON and would be silently
+			// consumed as an empty LazyChatResponse, losing the event entirely.
+			if strings.Contains(jsonText, `"plugin_event"`) {
+				data.RawText = text // keep original (with "data: " prefix) for downstream plugin handling
 			} else {
-				data.Resp = &streamResp
+				var streamResp LazyChatResponse
+				if err := json.Unmarshal([]byte(jsonText), &streamResp); err != nil {
+					data.RawText = text
+				} else {
+					data.Resp = &streamResp
+				}
 			}
 			select {
 			case dataChan <- data:

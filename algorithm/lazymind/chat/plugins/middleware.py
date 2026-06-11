@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, AsyncIterator, Dict, List, Optional
 
@@ -23,7 +24,7 @@ class PluginMiddleware:
     - Render plugin guidance text for system prompt (plugin_prompt str).
 
     handle_chat only needs to:
-      1. Construct PluginMiddleware(plugin_context, agentic_config)
+      1. Await PluginMiddleware.create(plugin_context, agentic_config)
       2. Append mw.extra_tools to the agent tool list.
       3. Pass mw.plugin_prompt to build_system_prompt.
       4. Call `async for ev in mw.iter_pending_events()` before and after the agent run.
@@ -33,12 +34,13 @@ class PluginMiddleware:
         self,
         plugin_context: Optional[Dict[str, Any]],
         agentic_config: Dict[str, Any],
+        plugin_id: str,
+        plugin_step: str,
+        execution_path: list,
     ) -> None:
+        """Internal constructor — use PluginMiddleware.create() from async contexts."""
         pctx = plugin_context or {}
         plugin_session_id = pctx.get('plugin_session_id', '')
-
-        # Resolve plugin_id and current_step from DB using plugin_session_id as the sole key.
-        plugin_id, plugin_step = self._resolve_plugin_info(plugin_session_id)
 
         # Shared event queue — a plain list so tool functions in a separate
         # asyncio task can append to the same object (lazyllm.globals is
@@ -57,9 +59,8 @@ class PluginMiddleware:
         lazyllm.globals['plugin_event_queue'] = event_queue
 
         self._queue = event_queue
-        self.extra_tools = self._build_tools(plugin_id, plugin_step)
+        self.extra_tools = self._build_tools(plugin_id, plugin_step, agentic_config)
 
-        execution_path = self._load_execution_path(plugin_id, plugin_session_id)
         self.plugin_prompt = self._render_plugin_prompt(
             plugin_id, plugin_step, execution_path,
         )
@@ -68,13 +69,32 @@ class PluginMiddleware:
         # skipping the standard tool guidance sections.
         self.has_plugin_tools = bool(not plugin_id and self.extra_tools)
 
+    @classmethod
+    async def create(
+        cls,
+        plugin_context: Optional[Dict[str, Any]],
+        agentic_config: Dict[str, Any],
+    ) -> 'PluginMiddleware':
+        """Async factory — offloads all blocking DB lookups to a thread pool so the
+        asyncio event loop is not stalled during SQLAlchemy queries."""
+        pctx = plugin_context or {}
+        plugin_session_id = pctx.get('plugin_session_id', '')
+        loop = asyncio.get_event_loop()
+        plugin_id, plugin_step = await loop.run_in_executor(
+            None, cls._resolve_plugin_info, plugin_session_id,
+        )
+        execution_path = await loop.run_in_executor(
+            None, cls._load_execution_path_static, plugin_id, plugin_session_id,
+        )
+        return cls(plugin_context, agentic_config, plugin_id, plugin_step, execution_path)
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _build_tools(self, plugin_id: str, plugin_step: str) -> List[Any]:
+    def _build_tools(self, plugin_id: str, plugin_step: str, agentic_config: dict | None = None) -> List[Any]:
         if plugin_id:
-            return build_advance_step_tool(plugin_id, plugin_step)
+            return build_advance_step_tool(plugin_id, plugin_step, agentic_config)
         return build_all_plugin_tools()
 
     @staticmethod
@@ -85,10 +105,15 @@ class PluginMiddleware:
         Logs a warning when the DB query fails.
         """
         if not plugin_session_id:
+            logger.info('[PluginMiddleware._resolve_plugin_info] empty session_id → cold-start')
             return '', ''
         info = load_plugin_info(plugin_session_id)
         plugin_id = info.get('plugin_id', '')
         step_id = info.get('step_id', '')
+        logger.info(
+            '[PluginMiddleware._resolve_plugin_info] session=%r → plugin_id=%r step_id=%r',
+            plugin_session_id, plugin_id, step_id,
+        )
         if not plugin_id:
             logger.warning(
                 '[PluginMiddleware] Could not resolve plugin_id for session %r '
@@ -97,8 +122,10 @@ class PluginMiddleware:
             )
         return plugin_id, step_id
 
-    def _load_execution_path(self, plugin_id: str, plugin_session_id: str) -> list:
-        """Load the execution path from DB. Returns [] on failure."""
+    @staticmethod
+    def _load_execution_path_static(plugin_id: str, plugin_session_id: str) -> list:
+        """Load the execution path from DB. Returns [] on failure.
+        Static so it can be called directly via run_in_executor without a bound self."""
         if not plugin_id or not plugin_session_id:
             return []
         try:

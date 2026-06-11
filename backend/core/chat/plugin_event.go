@@ -120,7 +120,15 @@ func handlePluginEvent(
 	switch event.Type {
 
 	case "mount":
+		// mount events are handled by the callers (scanChatAgentStream /
+		// conversation_logic bootstrap) which have access to convID and userID.
+		// Reaching this branch means handlePluginEvent was called with a mount
+		// event directly — that should not happen in normal flow.
+		// Create the session defensively but log a warning so the gap is visible.
 		if db != nil && session == nil {
+			fmt.Printf("[Core] [WARN] handlePluginEvent: unexpected mount event "+
+				"(plugin_id=%s session=%s) — ConversationID and CreateUserID will be empty\n",
+				event.PluginID, event.PluginSessionID)
 			newSession := &orm.PluginSession{
 				ID:       event.PluginSessionID,
 				PluginID: event.PluginID,
@@ -220,9 +228,10 @@ func handlePluginEvent(
 	return nil, nil, nil
 }
 
-// newPluginID generates a UUID-like ID for new plugin records.
+// newPluginID generates a UUID for new plugin session/artifact records.
+// Uses a plain UUID (no prefix) to stay within VARCHAR(36) column limits.
 func newPluginID() string {
-	return "ps-" + newConversationID()
+	return newConversationID()
 }
 
 // ---- DriverAgent caller ----
@@ -234,10 +243,14 @@ func CallPluginDriver(
 	ctx context.Context,
 	pythonBaseURL string,
 	pluginSessionID, stepResult string,
+	llmConfig map[string]interface{},
 ) (string, error) {
 	payload := map[string]interface{}{
 		"plugin_session_id": pluginSessionID,
 		"step_result":       stepResult,
+	}
+	if len(llmConfig) > 0 {
+		payload["llm_config"] = llmConfig
 	}
 	b, _ := json.Marshal(payload)
 

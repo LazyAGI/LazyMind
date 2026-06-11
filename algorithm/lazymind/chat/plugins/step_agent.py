@@ -257,15 +257,18 @@ def create_step_agent(
     builtin_tools = _build_builtin_tools()
     tools = _resolve_step_tools(step_config, default_tools, builtin_tools)
 
-    from lazymind.config import config as _cfg
     agent = lazyllm.tools.agent.ReactAgent(
         llm=llm,
         tools=tools,
-        max_retries=_cfg.get('max_retries', 20),
+        max_retries=20,
         stream=True,
         prompt=prompt,
         enable_builtin_tools=False,
-        force_summarize=True,
+        force_summarize=False,
         force_summarize_context='',
     )
+    # save_step_artifact is the canonical "I'm done" signal for a step.
+    # Marking it as a stop_tool ensures the ReAct loop halts immediately
+    # after the LLM calls it, rather than continuing to generate text.
+    agent.set_stop_tools(['save_step_artifact'])
     return agent

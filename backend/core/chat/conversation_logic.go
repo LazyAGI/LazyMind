@@ -692,7 +692,7 @@ func handleStreamChat(
 		// frontend) which now passes plugin_event frames through. If the LLM boots a plugin
 		// (mount + step_trigger), we enter the plugin loop after the chat turn finishes.
 		sender := &httpSSESender{w: w}
-		bootstrapSessionID := streamSingleAnswer(chatCtx, reqCtx, w, flusher, db, rdb, baseURL, reqBody, convID, query, historyID, target, historyExt)
+		bootstrapSessionID, bootstrapTrigger := streamSingleAnswer(chatCtx, reqCtx, w, flusher, db, rdb, baseURL, reqBody, convID, query, historyID, target, historyExt)
 		if bootstrapSessionID != "" {
 			// Update the ChatHistory ext to include the plugin_session_id.
 			pluginExt := buildChatHistoryExtWithPlugin(reqBody, query, bootstrapSessionID)
@@ -700,13 +700,25 @@ func handleStreamChat(
 			// Plugin was bootstrapped by the LLM this turn; run the first step now.
 			sessionRec, err2 := orm.GetPluginSession(db, bootstrapSessionID)
 			if err2 == nil && sessionRec != nil {
+				fmt.Printf("[Plugin] bootstrap ok session=%s plugin=%s step=%q\n",
+					sessionRec.ID, sessionRec.PluginID, sessionRec.CurrentStepID)
 				pctx := PluginContext{
 					PluginSessionID: sessionRec.ID,
 					PluginID:        sessionRec.PluginID,
 					Step:            sessionRec.CurrentStepID,
 					Advance:         false,
 				}
-				streamPluginLoop(chatCtx, db, baseURL, pctx, reqBody, sender, convID)
+				// Use a detached context so the plugin loop is not cancelled when the
+				// HTTP request context ends (e.g. frontend closes the SSE connection
+				// after seeing an empty ChatAgent response on the cold-start path).
+				pluginCtx, pluginCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+				defer pluginCancel()
+				if bootstrapTrigger != nil {
+					streamPluginLoopFromTrigger(pluginCtx, db, baseURL, pctx,
+						bootstrapTrigger, reqBody, sender, convID)
+				} else {
+					streamPluginLoop(pluginCtx, db, baseURL, pctx, reqBody, sender, convID)
+				}
 			}
 			_ = sender.Send([]byte("[DONE]"))
 		}
@@ -726,7 +738,7 @@ func streamSingleAnswer(
 	convID, query, historyID string,
 	target chatPersistTarget,
 	historyExt json.RawMessage,
-) string { // returns bootstrap plugin_session_id if plugin was launched, else ""
+) (string, *StepTriggerInfo) { // returns (bootstrap plugin_session_id, cached step_trigger) if plugin was launched
 	seq := target.Seq
 	ch, err := StreamChatUpstream(chatCtx, baseURL, reqBody)
 	if err != nil {
@@ -745,13 +757,14 @@ func streamSingleAnswer(
 			ReasoningContent:  "",
 			ThinkingDurationS: 0,
 		})
-		return ""
+		return "", nil
 	}
 	var fullText string
 	var pendingThink string
 	var fullResult string
 	var sources []any
 	var bootstrapPluginSessionID string
+	var bootstrapStepTrigger *StepTriggerInfo
 	thinkStart := time.Now()
 	// text：textConversation/text，finish_reason text UNSPECIFIED
 	writeSSEChunk(w, flusher, &ChatChunkResponse{
@@ -796,6 +809,18 @@ func streamSingleAnswer(
 				_ = db.Model(&orm.PluginSession{}).
 					Where("id = ?", bootstrapPluginSessionID).
 					Update("current_step_id", ev.StepID).Error
+				// Cache the trigger so handleStreamChat can skip the second ChatAgent turn.
+				if bootstrapStepTrigger == nil {
+					bootstrapStepTrigger = &StepTriggerInfo{
+						PluginSessionID:    bootstrapPluginSessionID,
+						PluginID:           ev.PluginID,
+						StepID:             ev.StepID,
+						StepMode:           ev.StepMode,
+						UserInput:          ev.UserInput,
+						Inputs:             ev.Inputs,
+						ReachableStepCount: ev.ReachableStepCount,
+					}
+				}
 				// Do not forward step_trigger to frontend.
 			} else {
 				// Non-mount plugin events: forward as-is.
@@ -900,7 +925,7 @@ func streamSingleAnswer(
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()
 	}
-	return bootstrapPluginSessionID
+	return bootstrapPluginSessionID, bootstrapStepTrigger
 }
 
 func streamDualAnswer(
