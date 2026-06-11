@@ -5,7 +5,6 @@ from .guidance import (
     DEFAULT_SYSTEM_PROMPT,
     IMAGE_REFERENCE_MARKDOWN_GUIDANCE,
     MEMORY_GUIDANCE,
-    PLUGIN_ACTIVE_GUIDANCE,
     PLUGIN_TOOLS_GUIDANCE,
     SEARCH_GUIDANCE,
     SKILLS_GUIDANCE,
@@ -50,46 +49,12 @@ def _build_attached_files_prompt(files: list | None = None) -> str:
     return '\n'.join(lines) + '\n\n' + ATTACHED_FILES_GUIDANCE
 
 
-def _build_plugin_context_prompt(environment_context: dict | None = None) -> str:
-    """Build the PLUGIN_ACTIVE_GUIDANCE block when a plugin session is active."""
-    ctx = environment_context or {}
-    plugin_scenario = ctx.get('_plugin_scenario', '')
-    plugin_step = ctx.get('_plugin_step', '')
-    reachable_steps = ctx.get('_plugin_reachable_steps', [])
-    steps_context = ctx.get('_steps_context', [])
-
-    if not plugin_scenario:
-        return ''
-
-    parts = [PLUGIN_ACTIVE_GUIDANCE]
-    parts.append('\n## Scenario\n' + plugin_scenario.strip())
-
-    if reachable_steps:
-        steps_str = ', '.join(f'`{s}`' for s in reachable_steps)
-        parts.append(f'\n## Available steps\n{steps_str}')
-
-    if plugin_step:
-        parts.append(f'\n## Current step\n{plugin_step}')
-
-    if steps_context:
-        lines = []
-        for entry in steps_context:
-            step_id = entry.get('step_id', '')
-            status = entry.get('status', '')
-            summary = entry.get('summary', '')
-            if summary:
-                lines.append(f'- {step_id} ({status}): {summary}')
-            else:
-                lines.append(f'- {step_id} ({status})')
-        parts.append('\n## Session progress\n' + '\n'.join(lines))
-
-    return '\n'.join(parts)
-
-
 def build_system_prompt(
     active_groups: set[str],
     *,
     environment_context: dict | None = None,
+    plugin_prompt: str | None = None,
+    has_plugin_tools: bool = False,
     use_memory: bool = True,
     user_preference: str | None = None,
     memory: str | None = None,
@@ -111,8 +76,9 @@ def build_system_prompt(
         if isinstance(memory, str) and memory.strip():
             prompt_parts.append(f'## Agent Working Memory\n{memory.strip()}')
 
-    # Plugin active guidance takes priority over generic tool guidance when session is live.
-    plugin_prompt = _build_plugin_context_prompt(environment_context)
+    # Plugin guidance is pre-rendered by PluginMiddleware. When present, return
+    # early — PLUGIN_ACTIVE_GUIDANCE already contains step routing instructions
+    # and supersedes the generic tool guidance below.
     if plugin_prompt:
         return '\n\n'.join(prompt_parts + [plugin_prompt])
 
@@ -133,9 +99,7 @@ def build_system_prompt(
         prompt_parts.append(IMAGE_REFERENCE_MARKDOWN_GUIDANCE)
     if 'multimodal' in active_groups:
         prompt_parts.append(VISION_EXTRACTOR_GUIDANCE)
-    # Always include plugin tool guidance when plugin triggers are present.
-    ctx = environment_context or {}
-    if ctx.get('_has_plugins'):
+    if has_plugin_tools:
         prompt_parts.append(PLUGIN_TOOLS_GUIDANCE)
 
     return '\n\n'.join(prompt_parts)

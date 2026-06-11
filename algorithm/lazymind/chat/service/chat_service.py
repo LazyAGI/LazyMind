@@ -121,8 +121,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
     lazyllm.globals['agentic_config'] = agentic_config
 
-    plugin_mw = _PluginMiddleware(plugin_context, agentic_config, environment_context)
-    environment_context = plugin_mw.environment_context
+    plugin_mw = _PluginMiddleware(plugin_context, agentic_config)
 
     all_default_configs = filter_tools(DEFAULT_TOOLS, disabled_tools)
     lazyllm.globals['default_tools_for_step_agent'] = [c.instance for c in all_default_configs]
@@ -139,6 +138,8 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     runtime_prompt = build_system_prompt(
         {cfg.name for cfg in all_default_configs},
         environment_context=environment_context,
+        plugin_prompt=plugin_mw.plugin_prompt,
+        has_plugin_tools=plugin_mw.has_plugin_tools,
         use_memory=resolved_use_memory,
         user_preference=user_preference,
         memory=memory,

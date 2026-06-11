@@ -8,6 +8,7 @@ import lazyllm
 from .loader import plugin_loader
 from .config import get_db_session_factory
 from .manager import build_advance_step_tool, build_all_plugin_tools
+from lazymind.chat.engine.prompts.guidance import PLUGIN_ACTIVE_GUIDANCE
 
 logger = logging.getLogger(__name__)
 
@@ -19,12 +20,12 @@ class PluginMiddleware:
     - Unpack plugin_context and write plugin fields into agentic_config.
     - Create and wire the shared plugin_event_queue.
     - Build the extra tool list (advance_step or all cold-start triggers).
-    - Inject plugin fields into environment_context for system prompt rendering.
+    - Render plugin guidance text for system prompt (plugin_prompt str).
 
     handle_chat only needs to:
-      1. Construct PluginMiddleware(plugin_context, agentic_config, environment_context)
+      1. Construct PluginMiddleware(plugin_context, agentic_config)
       2. Append mw.extra_tools to the agent tool list.
-      3. Use mw.environment_context as the updated environment_context.
+      3. Pass mw.plugin_prompt to build_system_prompt.
       4. Call `async for ev in mw.iter_pending_events()` before and after the agent run.
     """
 
@@ -32,7 +33,6 @@ class PluginMiddleware:
         self,
         plugin_context: Optional[Dict[str, Any]],
         agentic_config: Dict[str, Any],
-        environment_context: Optional[Dict[str, Any]],
     ) -> None:
         pctx = plugin_context or {}
         plugin_id = pctx.get('plugin_id', '')
@@ -58,9 +58,13 @@ class PluginMiddleware:
 
         self._queue = event_queue
         self.extra_tools = self._build_tools(plugin_id, plugin_step)
-        self.environment_context = self._build_env_context(
-            environment_context, plugin_id, plugin_step, steps_context,
+        self.plugin_prompt = self._render_plugin_prompt(
+            plugin_id, plugin_step, steps_context,
         )
+        # True when cold-start trigger tools are present but no session is active.
+        # build_system_prompt appends PLUGIN_TOOLS_GUIDANCE in this case without
+        # skipping the standard tool guidance sections.
+        self.has_plugin_tools = bool(not plugin_id and self.extra_tools)
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -71,27 +75,43 @@ class PluginMiddleware:
             return build_advance_step_tool(plugin_id, plugin_step)
         return build_all_plugin_tools()
 
-    def _build_env_context(
+    def _render_plugin_prompt(
         self,
-        base: Optional[Dict[str, Any]],
         plugin_id: str,
         plugin_step: str,
         steps_context: list,
-    ) -> Dict[str, Any]:
-        ctx = dict(base or {})
+    ) -> str:
+        """Render PLUGIN_ACTIVE_GUIDANCE for an active session. Returns '' otherwise."""
+        if not plugin_id or not plugin_loader.is_loaded(plugin_id):
+            return ''
 
-        if self.extra_tools:
-            ctx['_has_plugins'] = True
+        sm = plugin_loader.get_state_machine(plugin_id)
+        scenario = plugin_loader.get_scenario(plugin_id)
+        reachable_steps = sm.get_reachable_steps(plugin_step)
 
-        if plugin_id and plugin_loader.is_loaded(plugin_id):
-            ctx['_plugin_scenario'] = plugin_loader.get_scenario(plugin_id)
-            ctx['_plugin_step'] = plugin_step
-            sm = plugin_loader.get_state_machine(plugin_id)
-            ctx['_plugin_reachable_steps'] = sm.get_reachable_steps(plugin_step)
-            if steps_context:
-                ctx['_steps_context'] = steps_context
+        parts = [PLUGIN_ACTIVE_GUIDANCE]
+        parts.append('\n## Scenario\n' + scenario.strip())
 
-        return ctx
+        if reachable_steps:
+            steps_str = ', '.join(f'`{s}`' for s in reachable_steps)
+            parts.append(f'\n## Available steps\n{steps_str}')
+
+        if plugin_step:
+            parts.append(f'\n## Current step\n{plugin_step}')
+
+        if steps_context:
+            lines = []
+            for entry in steps_context:
+                step_id = entry.get('step_id', '')
+                status = entry.get('status', '')
+                summary = entry.get('summary', '')
+                if summary:
+                    lines.append(f'- {step_id} ({status}): {summary}')
+                else:
+                    lines.append(f'- {step_id} ({status})')
+            parts.append('\n## Session progress\n' + '\n'.join(lines))
+
+        return '\n'.join(parts)
 
     # ------------------------------------------------------------------
     # Async event drain — call before and after agent execution
@@ -103,3 +123,20 @@ class PluginMiddleware:
         del self._queue[:]
         for ev in pending:
             yield ev
+
+
+class _NoopPluginMiddleware:
+    """Fallback used when the plugin package is unavailable."""
+
+    def __init__(
+        self,
+        plugin_context: Any = None,
+        agentic_config: Any = None,
+    ) -> None:
+        self.extra_tools: List[Any] = []
+        self.plugin_prompt: str = ''
+        self.has_plugin_tools: bool = False
+
+    async def iter_pending_events(self) -> AsyncIterator[Dict[str, Any]]:
+        return
+        yield  # make this an async generator
