@@ -356,9 +356,7 @@ class EvoMessageHub:
         return {'thread_id': thread_id, 'messages': _read_messages(self._thread_dir(thread_id) / 'messages.jsonl')}
 
     def start(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
-        meta = self._meta(thread_id)
-        if meta.get('mode') != 'auto' and not (payload or {}).get('force_auto'):
-            return {'status': str(meta.get('status') or 'idle'), 'thread_id': thread_id, 'task_id': thread_id}
+        self._meta(thread_id)
         with self._lock:
             checkpoint = self._stage_checkpoint(thread_id)
             if checkpoint:

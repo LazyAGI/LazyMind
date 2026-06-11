@@ -109,6 +109,9 @@ def settle_lifecycle(lifecycle: Any, state: Any, *, mark_running_when_idle: bool
     if state.complete:
         lifecycle.mark_ended(outcome='success')
         return
+    if state.ready or state.running:
+        lifecycle.mark_running()
+        return
     if state.checkpointed:
         lifecycle.block_dispatch('checkpointed', blocked_operations=[str(ref) for ref in state.checkpointed])
         return
