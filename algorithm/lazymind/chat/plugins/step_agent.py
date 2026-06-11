@@ -106,7 +106,8 @@ def _normalize_checkpoint_data(data: dict, workspace: str) -> dict:
 # ---- Prompt rendering ----
 
 def _render_step_prompt(step_config: dict, artifacts: dict,
-                        checkpoint: dict | None) -> str:
+                        checkpoint: dict | None,
+                        previous_summary: str = '') -> str:
     prompt_template = step_config.get('prompt', '')
     # Replace {{artifact_id}} template variables.
     for key, val in (artifacts or {}).items():
@@ -118,6 +119,16 @@ def _render_step_prompt(step_config: dict, artifacts: dict,
     prompt_template = re.sub(r'\{\{[a-zA-Z_][a-zA-Z0-9_]*\}\}', '', prompt_template)
 
     parts = [prompt_template.rstrip()]
+
+    # When re-doing a step, inject the previous result + user feedback as context.
+    if previous_summary and previous_summary.strip():
+        redo_block = (
+            '\n\n## Previous attempt result\n'
+            f'{previous_summary.strip()}\n'
+            'The user was not satisfied with the above result. '
+            "Take the user's new instructions (user_input) into account and produce an improved result."
+        )
+        parts.append(redo_block)
 
     if checkpoint:
         completed = checkpoint.get('completed_count', 0)
@@ -220,9 +231,11 @@ def create_step_agent(
     default_tools: list,
     llm: Any,
     step_exec_id: str = '',
+    previous_summary: str = '',
 ) -> Any:
     """Build and return a ReactAgent configured for this step execution."""
-    prompt = _render_step_prompt(step_config, artifacts or {}, checkpoint or {})
+    prompt = _render_step_prompt(step_config, artifacts or {}, checkpoint or {},
+                                 previous_summary=previous_summary)
     builtin_tools = _build_builtin_tools()
     tools = _resolve_step_tools(step_config, default_tools, builtin_tools)
 

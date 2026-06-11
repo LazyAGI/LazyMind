@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any, Dict, Optional
 
 import lazyllm
@@ -18,30 +19,51 @@ try:
     from lazymind.chat.plugins.step_agent import create_step_agent, call_summary_func
     from lazymind.chat.plugins.driver_agent import evaluate_step
     from lazymind.chat.plugins.validator import validate_all
+    from lazymind.chat.plugins.config import (
+        load_step_artifacts,
+        load_step_checkpoint,
+        load_previous_step_summary,
+        load_plugin_info,
+        load_attempt_count,
+        PLUGIN_WORKSPACE_BASE,
+    )
     _PLUGIN_ENABLED = True
 except Exception as exc:
     logger.error('Plugin system failed to initialize: %s', exc)
     _PLUGIN_ENABLED = False
 
 
+# ---------------------------------------------------------------------------
+# Request models — Go passes only control identifiers.
+# Python resolves all business data (plugin_id, step_id, artifacts, etc.)
+# autonomously from the DB using plugin_session_id as the sole lookup key.
+# ---------------------------------------------------------------------------
+
 class PluginStepRequest(BaseModel):
-    plugin_id: str
-    step_id: str
+    plugin_session_id: str
     step_exec_id: str
-    plugin_session_id: str = ''
-    step_workspace: str = ''
     user_input: str = ''
-    artifacts: Optional[Dict[str, Any]] = None
-    checkpoint: Optional[Dict[str, Any]] = None
+    llm_config: Optional[Dict[str, Any]] = None
 
 
 class PluginDriverRequest(BaseModel):
-    plugin_id: str
-    step_id: str
+    plugin_session_id: str
     step_result: str = ''
-    artifacts: Optional[Dict[str, Any]] = None
-    attempt: int = 1
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_step_workspace(plugin_session_id: str, step_exec_id: str) -> str:
+    """Compute the workspace path using the same convention as Go."""
+    base = os.environ.get('PLUGIN_WORKSPACE_BASE', PLUGIN_WORKSPACE_BASE)
+    return os.path.join(base, plugin_session_id, step_exec_id)
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
 
 @router.post('/api/plugin/step', summary='Execute a plugin step via StepAgent (SSE)')
 async def run_plugin_step(request: PluginStepRequest):
@@ -50,23 +72,53 @@ async def run_plugin_step(request: PluginStepRequest):
             yield f'data: {json.dumps({"type": "step_error", "error": "plugin system disabled"})}\n\n'
         return StreamingResponse(err(), media_type='text/event-stream')
 
-    step_config = plugin_loader.get_step_config(request.plugin_id, request.step_id)
-    plugin_tools = plugin_loader.get_plugin_tools(request.plugin_id)
+    # Resolve plugin_id and step_id from the session record.
+    info = load_plugin_info(request.plugin_session_id)
+    plugin_id = info['plugin_id']
+    step_id = info['step_id']
 
-    # Build default tools directly from the canonical list; never rely on a cross-request global.
+    if not plugin_id or not step_id:
+        err_msg = f'Cannot resolve plugin_id/step_id for session {request.plugin_session_id!r}'
+
+        async def missing_err():
+            yield f'data: {json.dumps({"type": "step_error", "error": err_msg})}\n\n'
+        return StreamingResponse(missing_err(), media_type='text/event-stream')
+
+    step_config = plugin_loader.get_step_config(plugin_id, step_id)
+    plugin_tools = plugin_loader.get_plugin_tools(plugin_id)
+
+    # Build default tools from the canonical list; never rely on a cross-request global.
     try:
         from lazymind.chat.service.component import DEFAULT_TOOLS, filter_tools
         default_tools = [cfg.instance for cfg in filter_tools(DEFAULT_TOOLS, [])]
     except Exception:
         default_tools = []
 
-    lazyllm.globals['agentic_config'] = {
-        'plugin_id': request.plugin_id,
+    # Use step_exec_id as the lazyllm session ID — unique per execution,
+    # never collides with the parent chat session_id.
+    step_sid = f'step-{request.step_exec_id}'
+    lazyllm.globals._init_sid(sid=step_sid)
+    lazyllm.locals._init_sid(sid=step_sid)
+
+    from lazymind.model_config import inject_model_config as _inject_mc
+    _inject_mc(request.llm_config)
+
+    # Derive workspace path using the same convention as Go.
+    step_workspace = _resolve_step_workspace(request.plugin_session_id, request.step_exec_id)
+
+    # Query all business data from DB.
+    artifacts = load_step_artifacts(request.plugin_session_id)
+    checkpoint = load_step_checkpoint(request.plugin_session_id, step_id)
+    previous_summary = load_previous_step_summary(request.plugin_session_id, step_id)
+
+    agentic_config = {
+        'plugin_id': plugin_id,
         'plugin_session_id': request.plugin_session_id,
         'step_exec_id': request.step_exec_id,
-        'step_workspace': request.step_workspace,
-        'step_checkpoint': request.checkpoint or {},
+        'step_workspace': step_workspace,
+        'step_checkpoint': checkpoint,
     }
+    lazyllm.globals['agentic_config'] = agentic_config
     lazyllm.globals['plugin_event_queue'] = []
 
     try:
@@ -81,11 +133,12 @@ async def run_plugin_step(request: PluginStepRequest):
 
     agent = create_step_agent(
         step_config=step_config,
-        artifacts=request.artifacts or {},
-        checkpoint=request.checkpoint or {},
+        artifacts=artifacts,
+        checkpoint=checkpoint,
         default_tools=default_tools + plugin_tools,
         llm=llm,
         step_exec_id=request.step_exec_id,
+        previous_summary=previous_summary,
     )
 
     async def event_stream():
@@ -93,45 +146,37 @@ async def run_plugin_step(request: PluginStepRequest):
             import lazyllm.module.stream_helper as _sh
             helper = _sh.StreamCallHelper(agent, init_sid=False)
             async for _chunk in helper.astream(request.user_input or ''):
-                # Flush any events emitted by tools during this step (e.g. checkpoint, artifact).
                 queued = list(lazyllm.globals.get('plugin_event_queue', []))
                 if queued:
                     lazyllm.globals['plugin_event_queue'] = []
                     for ev in queued:
                         yield f'data: {json.dumps(ev, ensure_ascii=False)}\n\n'
 
-            # Final flush + step_complete.
             final_queued = list(lazyllm.globals.get('plugin_event_queue', []))
             lazyllm.globals['plugin_event_queue'] = []
             for ev in final_queued:
                 yield f'data: {json.dumps(ev, ensure_ascii=False)}\n\n'
 
-            # If the step has a summary_func, call it now with the latest artifacts
-            # and emit the result as a synthetic artifact event. This runs after all
-            # LLM output is done, so it is guaranteed to be the final step_summary value.
-            fresh_artifacts = dict(request.artifacts or {})
-            # Merge any artifacts emitted during this step execution.
+            # Run summary_func after all LLM output, merging in-step artifact events.
+            fresh_artifacts = dict(artifacts)
             for ev in final_queued:
                 if isinstance(ev, dict) and ev.get('type') == 'artifact':
                     fresh_artifacts[ev['artifact_id']] = ev['value']
             summary = call_summary_func(step_config, fresh_artifacts)
             if summary:
-                summary_ev = {
-                    'type': 'artifact',
-                    'artifact_id': 'step_summary',
-                    'value': summary,
-                }
-                yield f'data: {json.dumps(summary_ev, ensure_ascii=False)}\n\n'
+                ev = {'type': 'artifact', 'artifact_id': 'step_summary', 'value': summary}
+                yield f'data: {json.dumps(ev, ensure_ascii=False)}\n\n'
 
             result_text = helper.result if hasattr(helper, 'result') else ''
-            step_complete = {
+            ev = {
                 'type': 'step_complete',
                 'step_exec_id': request.step_exec_id,
                 'result_summary': str(result_text)[:300],
             }
-            yield f'data: {json.dumps(step_complete, ensure_ascii=False)}\n\n'
+            yield f'data: {json.dumps(ev, ensure_ascii=False)}\n\n'
         except Exception as exc:
-            logger.exception('StepAgent execution failed for step %s', request.step_id)
+            logger.exception('StepAgent execution failed for session %s step %s',
+                             request.plugin_session_id, step_id)
             yield f'data: {json.dumps({"type": "step_error", "error": str(exc)})}\n\n'
 
     return StreamingResponse(event_stream(), media_type='text/event-stream')
@@ -142,18 +187,25 @@ async def run_plugin_driver(request: PluginDriverRequest):
     if not _PLUGIN_ENABLED:
         return {'judgment': 'Step completed. Proceed.'}
 
+    info = load_plugin_info(request.plugin_session_id)
+    plugin_id = info['plugin_id']
+    step_id = info['step_id']
+    attempt = load_attempt_count(request.plugin_session_id, step_id)
+
     try:
         from lazyllm import AutoModel
         llm = AutoModel(model='llm')
     except Exception:
         llm = None
 
+    artifacts = load_step_artifacts(request.plugin_session_id)
+
     judgment = evaluate_step(
-        plugin_id=request.plugin_id,
-        step_id=request.step_id,
+        plugin_id=plugin_id,
+        step_id=step_id,
         step_result=request.step_result,
-        artifacts=request.artifacts or {},
-        attempt=request.attempt,
+        artifacts=artifacts,
+        attempt=attempt,
         llm=llm,
     )
     return {'judgment': judgment}
@@ -165,7 +217,6 @@ async def validate_plugin(plugin_id: str):
         return {'is_valid': False, 'errors': ['plugin system disabled'], 'warnings': [], 'infos': []}
 
     from lazymind.chat.plugins.config import PLUGIN_DIR
-    import os
     plugin_dir = os.path.join(PLUGIN_DIR, plugin_id)
     if not os.path.isdir(plugin_dir):
         return {

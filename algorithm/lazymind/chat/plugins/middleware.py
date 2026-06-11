@@ -6,7 +6,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 import lazyllm
 
 from .loader import plugin_loader
-from .config import get_db_session_factory
+from .config import get_db_session_factory, load_execution_path, load_plugin_info
 from .manager import build_advance_step_tool, build_all_plugin_tools
 from lazymind.chat.engine.prompts.guidance import PLUGIN_ACTIVE_GUIDANCE
 
@@ -35,10 +35,10 @@ class PluginMiddleware:
         agentic_config: Dict[str, Any],
     ) -> None:
         pctx = plugin_context or {}
-        plugin_id = pctx.get('plugin_id', '')
-        plugin_step = pctx.get('step', '')
         plugin_session_id = pctx.get('plugin_session_id', '')
-        steps_context = pctx.get('steps_context', [])
+
+        # Resolve plugin_id and current_step from DB using plugin_session_id as the sole key.
+        plugin_id, plugin_step = self._resolve_plugin_info(plugin_session_id)
 
         # Shared event queue — a plain list so tool functions in a separate
         # asyncio task can append to the same object (lazyllm.globals is
@@ -58,8 +58,10 @@ class PluginMiddleware:
 
         self._queue = event_queue
         self.extra_tools = self._build_tools(plugin_id, plugin_step)
+
+        execution_path = self._load_execution_path(plugin_id, plugin_session_id)
         self.plugin_prompt = self._render_plugin_prompt(
-            plugin_id, plugin_step, steps_context,
+            plugin_id, plugin_step, execution_path,
         )
         # True when cold-start trigger tools are present but no session is active.
         # build_system_prompt appends PLUGIN_TOOLS_GUIDANCE in this case without
@@ -75,15 +77,53 @@ class PluginMiddleware:
             return build_advance_step_tool(plugin_id, plugin_step)
         return build_all_plugin_tools()
 
+    @staticmethod
+    def _resolve_plugin_info(plugin_session_id: str) -> tuple[str, str]:
+        """Query plugin_id and current_step_id from DB.
+
+        Returns ('', '') when session_id is empty (cold-start / no active session).
+        Logs a warning when the DB query fails.
+        """
+        if not plugin_session_id:
+            return '', ''
+        info = load_plugin_info(plugin_session_id)
+        plugin_id = info.get('plugin_id', '')
+        step_id = info.get('step_id', '')
+        if not plugin_id:
+            logger.warning(
+                '[PluginMiddleware] Could not resolve plugin_id for session %r '
+                '(session may not exist yet)',
+                plugin_session_id,
+            )
+        return plugin_id, step_id
+
+    def _load_execution_path(self, plugin_id: str, plugin_session_id: str) -> list:
+        """Load the execution path from DB. Returns [] on failure."""
+        if not plugin_id or not plugin_session_id:
+            return []
+        try:
+            return load_execution_path(plugin_session_id)
+        except Exception as exc:
+            logger.warning(
+                '[Plugin %s] Failed to load execution_path from DB (%s)',
+                plugin_id, exc,
+            )
+            return []
+
     def _render_plugin_prompt(
         self,
         plugin_id: str,
         plugin_step: str,
-        steps_context: list,
+        execution_path: list,
     ) -> str:
         """Render PLUGIN_ACTIVE_GUIDANCE for an active session. Returns '' otherwise."""
         if not plugin_id or not plugin_loader.is_loaded(plugin_id):
             return ''
+        if not execution_path:
+            logger.warning(
+                '[Plugin %s] execution_path is empty; ChatAgent will have no history context',
+                plugin_id,
+            )
 
         sm = plugin_loader.get_state_machine(plugin_id)
         scenario = plugin_loader.get_scenario(plugin_id)
@@ -99,9 +139,9 @@ class PluginMiddleware:
         if plugin_step:
             parts.append(f'\n## Current step\n{plugin_step}')
 
-        if steps_context:
+        if execution_path:
             lines = []
-            for entry in steps_context:
+            for entry in execution_path:
                 step_id = entry.get('step_id', '')
                 status = entry.get('status', '')
                 summary = entry.get('summary', '')
@@ -109,7 +149,7 @@ class PluginMiddleware:
                     lines.append(f'- {step_id} ({status}): {summary}')
                 else:
                     lines.append(f'- {step_id} ({status})')
-            parts.append('\n## Session progress\n' + '\n'.join(lines))
+            parts.append('\n## Execution path (chronological)\n' + '\n'.join(lines))
 
         return '\n'.join(parts)
 

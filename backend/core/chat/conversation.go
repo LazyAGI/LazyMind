@@ -232,10 +232,8 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	reqBody := buildChatRequestBody(convID, sessionID, query, upstreamHistories, raw, resourceContext, userID)
 	if pluginCtx != nil {
 		reqBody["plugin_context"] = map[string]any{
+			// Python resolves plugin_id and current_step autonomously from the DB.
 			"plugin_session_id": pluginCtx.PluginSessionID,
-			"plugin_id":         pluginCtx.PluginID,
-			"step":              pluginCtx.Step,
-			// advance is consumed by Go only; not forwarded to Python.
 		}
 	}
 	historyExt := buildChatHistoryExt(raw, query)

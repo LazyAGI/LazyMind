@@ -228,20 +228,16 @@ func newPluginID() string {
 // ---- DriverAgent caller ----
 
 // CallPluginDriver posts a request to /api/plugin/driver and returns the judgment text.
+// Python resolves plugin_id, step_id, artifacts, and attempt count autonomously from the DB.
 // On any error, returns a safe fallback string and does not propagate the error.
 func CallPluginDriver(
 	ctx context.Context,
 	pythonBaseURL string,
-	pluginID, stepID, stepResult string,
-	artifacts map[string]interface{},
-	attempt int,
+	pluginSessionID, stepResult string,
 ) (string, error) {
 	payload := map[string]interface{}{
-		"plugin_id":   pluginID,
-		"step_id":     stepID,
-		"step_result": stepResult,
-		"artifacts":   artifacts,
-		"attempt":     attempt,
+		"plugin_session_id": pluginSessionID,
+		"step_result":       stepResult,
 	}
 	b, _ := json.Marshal(payload)
 

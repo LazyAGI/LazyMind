@@ -55,21 +55,20 @@ func streamPluginLoop(
 				_ = sseSender.Send([]byte("[DONE]"))
 				return
 
-			case "interrupted":
-				// Restore from checkpoint; skip ChatAgent for this step.
-				runInterruptedStep(ctx, db, pythonBaseURL, pctx, lastRec, sseSender)
-				_ = sseSender.Send([]byte("[DONE]"))
-				return
+		case "interrupted":
+			// Restore from checkpoint; skip ChatAgent for this step.
+			llmCfg, _ := currentReqBody["llm_config"].(map[string]interface{})
+			runInterruptedStep(ctx, db, pythonBaseURL, pctx, lastRec, llmCfg, sseSender)
+			_ = sseSender.Send([]byte("[DONE]"))
+			return
 
-			default:
-				// Step is done; synthesize message for ChatAgent to decide next step.
-				syntheticMsg := fmt.Sprintf(
-					"Step %q completed. User confirmed to proceed. Please trigger the next appropriate step.",
-					pctx.Step,
-				)
-				currentReqBody = overrideUserMessage(currentReqBody, syntheticMsg)
-				// Inject step summaries so ChatAgent has semantic context for the decision.
-				currentReqBody = injectStepsContext(currentReqBody, db, pctx.PluginSessionID)
+		default:
+			// Step is done; synthesize message for ChatAgent to decide next step.
+			syntheticMsg := fmt.Sprintf(
+				"Step %q completed. User confirmed to proceed. Please trigger the next appropriate step.",
+				pctx.Step,
+			)
+			currentReqBody = overrideUserMessage(currentReqBody, syntheticMsg)
 			}
 		}
 	}
@@ -112,7 +111,7 @@ func streamPluginLoop(
 
 		// 3. Create step execution record.
 		stepExecID := newConversationID()
-		workspacePath := buildWorkspacePath(pythonBaseURL, pctx.PluginSessionID, stepExecID)
+		workspacePath := buildWorkspacePath(pctx.PluginSessionID, stepExecID)
 		_ = os.MkdirAll(workspacePath, 0755)
 
 		stepRec := &orm.PluginSessionStep{
@@ -129,57 +128,47 @@ func streamPluginLoop(
 		// Emit step_change to frontend.
 		_ = sseSender.SendEvent("plugin_event", buildStepChangeEvent(pctx.PluginSessionID, stepTrigger.StepID))
 
-		// 4. Load checkpoint and artifacts.
-		checkpoint, _ := orm.LoadLatestCheckpoint(db, pctx.PluginSessionID, stepTrigger.StepID)
-		artifacts, _ := orm.LoadPluginSessionArtifacts(db, pctx.PluginSessionID)
-
-		// 5. Run StepAgent.
+		// 4. Run StepAgent — Python queries artifacts/checkpoint/previous_summary autonomously.
+		llmConfig, _ := currentReqBody["llm_config"].(map[string]interface{})
 		session, _ := orm.GetPluginSession(db, pctx.PluginSessionID)
 		stepComplete := streamStepTurn(ctx, pythonBaseURL, stepTrigger, stepExecID,
-			workspacePath, artifacts, checkpoint, db, session, sseSender)
+			llmConfig, db, session, sseSender)
 
 		if stepComplete == nil {
 			break
 		}
 
 		if stepTrigger.StepMode == "human" {
-			// 6b. Human mode: emit step_waiting and end this SSE stream.
+			// 5b. Human mode: emit step_waiting and end this SSE stream.
 			_ = sseSender.SendEvent("plugin_event",
 				buildStepWaitingEvent(pctx.PluginSessionID, stepTrigger.StepID))
 			_ = sseSender.Send([]byte("[DONE]"))
 			return
 		}
 
-		// 6a. Auto mode: call DriverAgent, inject judgment, continue.
-		freshArtifacts, _ := orm.LoadPluginSessionArtifacts(db, pctx.PluginSessionID)
+		// 5a. Auto mode: call DriverAgent, inject judgment, continue.
+		// Python queries artifacts autonomously inside /api/plugin/driver.
 		judgment, _ := CallPluginDriver(ctx, pythonBaseURL,
-			stepTrigger.PluginID, stepTrigger.StepID,
-			stepComplete.ResultSummary, freshArtifacts, turn+1)
+			stepTrigger.PluginSessionID, stepComplete.ResultSummary)
 		currentReqBody = injectDriverJudgmentIntoReqBody(currentReqBody, judgment)
-		// Advance plugin_context.step so Python knows which step just completed,
-		// allowing get_reachable_steps to return the *next* step rather than the same one.
-		currentReqBody = advancePluginContextStep(currentReqBody, stepTrigger.StepID)
-		// Inject fresh step summaries so ChatAgent can make an informed decision
-		// without reading the full conversation history.
-		currentReqBody = injectStepsContext(currentReqBody, db, pctx.PluginSessionID)
 	}
 
 	_ = sseSender.Send([]byte("[DONE]"))
 }
 
 // runInterruptedStep resumes an interrupted step directly (skip ChatAgent).
+// Python queries checkpoint, artifacts, and workspace path autonomously.
 func runInterruptedStep(
 	ctx context.Context,
 	db *gorm.DB,
 	pythonBaseURL string,
 	pctx PluginContext,
 	lastRec *orm.PluginSessionStep,
+	llmConfig map[string]interface{},
 	sseSender SSESender,
 ) {
-	checkpoint, _ := orm.LoadLatestCheckpoint(db, pctx.PluginSessionID, pctx.Step)
-	artifacts, _ := orm.LoadPluginSessionArtifacts(db, pctx.PluginSessionID)
 	stepExecID := newConversationID()
-	workspacePath := buildWorkspacePath(pythonBaseURL, pctx.PluginSessionID, stepExecID)
+	workspacePath := buildWorkspacePath(pctx.PluginSessionID, stepExecID)
 	_ = os.MkdirAll(workspacePath, 0755)
 
 	stepRec := &orm.PluginSessionStep{
@@ -202,8 +191,7 @@ func runInterruptedStep(
 		StepMode:        lastRec.StepMode,
 	}
 	session, _ := orm.GetPluginSession(db, pctx.PluginSessionID)
-	streamStepTurn(ctx, pythonBaseURL, trigger, stepExecID, workspacePath,
-		artifacts, checkpoint, db, session, sseSender)
+	streamStepTurn(ctx, pythonBaseURL, trigger, stepExecID, llmConfig, db, session, sseSender)
 }
 
 // streamChatTurn calls the Python /api/chat/stream endpoint for one turn.
@@ -305,25 +293,25 @@ func streamChatTurn(
 }
 
 // streamStepTurn calls /api/plugin/step and processes the resulting SSE stream.
+// Python resolves plugin_id, step_id, workspace path, artifacts, checkpoint, and
+// previous_summary autonomously from the DB using plugin_session_id.
 func streamStepTurn(
 	ctx context.Context,
 	pythonBaseURL string,
 	trigger *StepTriggerInfo,
-	stepExecID, workspacePath string,
-	artifacts, checkpoint map[string]interface{},
+	stepExecID string,
+	llmConfig map[string]interface{},
 	db *gorm.DB,
 	session *orm.PluginSession,
 	sseSender SSESender,
 ) *StepCompleteInfo {
 	payload := map[string]interface{}{
-		"plugin_id":         trigger.PluginID,
-		"step_id":           trigger.StepID,
-		"step_exec_id":      stepExecID,
 		"plugin_session_id": trigger.PluginSessionID,
-		"step_workspace":    workspacePath,
+		"step_exec_id":      stepExecID,
 		"user_input":        trigger.UserInput,
-		"artifacts":         artifacts,
-		"checkpoint":        checkpoint,
+	}
+	if llmConfig != nil {
+		payload["llm_config"] = llmConfig
 	}
 	b, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -383,39 +371,6 @@ func streamStepTurn(
 
 // ---- Helpers ----
 
-// advancePluginContextStep updates the plugin_context.step field in a cloned reqBody
-// to reflect the step that just completed. Python uses this to compute reachable steps
-// for the next ChatAgent turn, preventing re-triggering of the same step.
-// It also injects a fresh steps_context summary fetched from the database.
-func advancePluginContextStep(reqBody map[string]any, completedStepID string) map[string]any {
-	clone := cloneReqBody(reqBody)
-	if pc, ok := clone["plugin_context"].(map[string]any); ok {
-		pc["step"] = completedStepID
-		pc["advance"] = true
-		clone["plugin_context"] = pc
-	}
-	return clone
-}
-
-// injectStepsContext fetches step summaries from the DB and writes them into
-// plugin_context.steps_context so ChatAgent can make an informed next-step decision
-// without reading the full conversation history.
-func injectStepsContext(reqBody map[string]any, db *gorm.DB, sessionID string) map[string]any {
-	if db == nil || sessionID == "" {
-		return reqBody
-	}
-	entries, err := orm.LoadStepsContext(db, sessionID)
-	if err != nil || len(entries) == 0 {
-		return reqBody
-	}
-	clone := cloneReqBody(reqBody)
-	if pc, ok := clone["plugin_context"].(map[string]any); ok {
-		pc["steps_context"] = entries
-		clone["plugin_context"] = pc
-	}
-	return clone
-}
-
 func overrideUserMessage(reqBody map[string]any, msg string) map[string]any {
 	clone := cloneReqBody(reqBody)
 	clone["query"] = msg
@@ -467,7 +422,7 @@ func cloneReqBody(src map[string]any) map[string]any {
 	return clone
 }
 
-func buildWorkspacePath(pythonBaseURL, sessionID, stepExecID string) string {
+func buildWorkspacePath(sessionID, stepExecID string) string {
 	base := os.Getenv("PLUGIN_WORKSPACE_BASE")
 	if base == "" {
 		base = "/data/plugin_workspace"

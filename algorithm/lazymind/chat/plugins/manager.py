@@ -5,7 +5,7 @@ from typing import Callable
 
 import lazyllm
 
-from .loader import plugin_loader
+from .loader import plugin_loader, StateMachine
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,14 @@ def trigger_plugin_step(step_id: str, user_input: str) -> str:
 
     if plugin_id and plugin_loader.is_loaded(plugin_id):
         sm = plugin_loader.get_state_machine(plugin_id)
+        # Treat an unknown / empty current_step as a hard error for StateMachine plugins
+        # (state.yml present). Only LegacyStateMachine tolerates a missing current_step.
+        if isinstance(sm, StateMachine) and not current_step:
+            return (
+                'Error: current_step is unknown — the session state was not propagated correctly. '
+                'Cannot validate reachability. Please do not call advance_step until the session '
+                'state is restored.'
+            )
         if not sm.is_reachable(current_step, step_id):
             reachable = sm.get_reachable_steps(current_step)
             return (f'Error: step {step_id!r} is not reachable from {current_step!r}. '
@@ -140,7 +148,7 @@ def _launch_plugin(plugin_id: str, user_input: str) -> str:
     queue.append({
         'type': 'mount',
         'plugin_id': plugin_id,
-        'plugin_session_id': plugin_session_id or 'ps-placeholder',
+        'plugin_session_id': plugin_session_id,
         'num_steps': num_steps,
     })
 
@@ -156,7 +164,7 @@ def _launch_plugin(plugin_id: str, user_input: str) -> str:
     queue.append({
         'type': 'step_trigger',
         'plugin_id': plugin_id,
-        'plugin_session_id': plugin_session_id or 'ps-placeholder',
+        'plugin_session_id': plugin_session_id,
         'step_id': initial_step,
         'step_mode': step_mode,
         'user_input': user_input.strip(),
@@ -216,6 +224,32 @@ def build_advance_step_tool(plugin_id: str, current_step: str) -> list[Callable]
         return []
 
     sm = plugin_loader.get_state_machine(plugin_id)
+
+    # For StateMachine plugins (state.yml present), an empty current_step means the
+    # session state was not propagated — expose no reachable steps and warn the LLM.
+    if isinstance(sm, StateMachine) and not current_step:
+        doc = (
+            'ERROR: session state is missing (current_step is unknown). '
+            'Do NOT call this tool. Inform the user that the session state could not be '
+            'restored and ask them to retry.'
+        )
+
+        def advance_step_blocked(step_id: str, user_input: str) -> str:
+            """Advance the active plugin session to the next step (currently blocked).
+
+            Args:
+                step_id: The step to trigger.
+                user_input: Description of what the user wants for this step.
+            """
+            return (
+                'Error: current_step is unknown — the session state was not propagated correctly. '
+                'Cannot validate reachability. Please do not call advance_step until the session '
+                'state is restored.'
+            )
+
+        advance_step_blocked.__doc__ = doc
+        return [advance_step_blocked]
+
     reachable_steps = sm.get_reachable_steps(current_step)
     # Exclude current step from the reachable list exposed to the LLM.
     if current_step:
