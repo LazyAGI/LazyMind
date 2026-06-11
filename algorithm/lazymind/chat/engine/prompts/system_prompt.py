@@ -56,6 +56,7 @@ def _build_plugin_context_prompt(environment_context: dict | None = None) -> str
     plugin_scenario = ctx.get('_plugin_scenario', '')
     plugin_step = ctx.get('_plugin_step', '')
     reachable_steps = ctx.get('_plugin_reachable_steps', [])
+    steps_context = ctx.get('_steps_context', [])
 
     if not plugin_scenario:
         return ''
@@ -64,11 +65,23 @@ def _build_plugin_context_prompt(environment_context: dict | None = None) -> str
     parts.append('\n## Scenario\n' + plugin_scenario.strip())
 
     if reachable_steps:
-        steps_str = ', '.join(f'`trigger_{s}`' for s in reachable_steps)
-        parts.append(f'\n## Available trigger tools\n{steps_str}')
+        steps_str = ', '.join(f'`{s}`' for s in reachable_steps)
+        parts.append(f'\n## Available steps\n{steps_str}')
 
     if plugin_step:
         parts.append(f'\n## Current step\n{plugin_step}')
+
+    if steps_context:
+        lines = []
+        for entry in steps_context:
+            step_id = entry.get('step_id', '')
+            status = entry.get('status', '')
+            summary = entry.get('summary', '')
+            if summary:
+                lines.append(f'- {step_id} ({status}): {summary}')
+            else:
+                lines.append(f'- {step_id} ({status})')
+        parts.append('\n## Session progress\n' + '\n'.join(lines))
 
     return '\n'.join(parts)
 

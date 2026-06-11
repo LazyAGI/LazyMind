@@ -218,3 +218,83 @@ func LoadPluginSessionArtifacts(db *gorm.DB, sessionID string) (map[string]inter
 	}
 	return result, nil
 }
+
+// StepContextEntry summarises one step execution for the ChatAgent decision context.
+// Go builds this from artifacts + checkpoint; the LLM never sees raw artifact values.
+type StepContextEntry struct {
+	StepID  string `json:"step_id"`
+	Status  string `json:"status"`  // done | interrupted | failed
+	Summary string `json:"summary"` // step_summary artifact, or checkpoint fallback
+}
+
+// LoadStepsContext returns one StepContextEntry per distinct step that has been
+// executed in the session (most recent attempt only).
+// Summary is filled from the step_summary artifact when available; otherwise
+// it falls back to a structured string built from the latest checkpoint fields.
+func LoadStepsContext(db *gorm.DB, sessionID string) ([]StepContextEntry, error) {
+	// Fetch the latest execution record for each distinct step.
+	type stepRow struct {
+		ID         string
+		Step       string
+		StepStatus string
+	}
+	var rows []stepRow
+	if err := db.Raw(`
+		SELECT DISTINCT ON (step) id, step, step_status
+		FROM plugin_session_steps
+		WHERE session_id = ?
+		ORDER BY step, created_at DESC
+	`, sessionID).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	// Load all step_summary artifacts for the session up front (one query).
+	var summaryRows []PluginSessionArtifact
+	if err := db.Where("session_id = ? AND artifact_id = 'step_summary'", sessionID).
+		Order("created_at DESC").
+		Find(&summaryRows).Error; err != nil {
+		return nil, err
+	}
+	// Map step_exec_id -> summary string (newest artifact wins per step).
+	summaryByExecID := make(map[string]string)
+	for _, row := range summaryRows {
+		if _, seen := summaryByExecID[row.StepExecID]; seen {
+			continue
+		}
+		var val interface{}
+		if err := json.Unmarshal(row.Value, &val); err == nil {
+			summaryByExecID[row.StepExecID] = fmt.Sprintf("%v", val)
+		}
+	}
+
+	entries := make([]StepContextEntry, 0, len(rows))
+	for _, r := range rows {
+		entry := StepContextEntry{
+			StepID: r.Step,
+			Status: r.StepStatus,
+		}
+
+		if s, ok := summaryByExecID[r.ID]; ok {
+			entry.Summary = s
+		} else if r.StepStatus == "interrupted" || r.StepStatus == "running" {
+			// Fallback: build summary from latest checkpoint fields.
+			var cp PluginSessionStepCheckpoint
+			err := db.Where("step_exec_id = ?", r.ID).
+				Order("sequence DESC").
+				Limit(1).
+				First(&cp).Error
+			if err == nil && (cp.CompletedCount > 0 || cp.TotalCount > 0) {
+				entry.Summary = fmt.Sprintf("interrupted, completed %d/%d",
+					cp.CompletedCount, cp.TotalCount)
+				if cp.PhaseNote != "" {
+					entry.Summary += fmt.Sprintf(", phase: %s", cp.PhaseNote)
+				}
+			} else {
+				entry.Summary = "interrupted"
+			}
+		}
+
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}

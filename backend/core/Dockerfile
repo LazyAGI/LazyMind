@@ -8,6 +8,7 @@ ENV GOPROXY=${GOPROXY} \
     GOSUMDB=${GOSUMDB}
 
 COPY core/ ./
+RUN mkdir -p docs && touch docs/swagger.json
 RUN CGO_ENABLED=0 go build -o /core .
 
 FROM ${DOCKER_MIRROR}alpine:3.19

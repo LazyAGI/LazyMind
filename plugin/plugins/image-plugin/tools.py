@@ -22,3 +22,21 @@ def dalle_generate(prompt: str) -> str:
     # Return a fixed placeholder image so the rest of the plugin flow works end-to-end.
     _ = prompt  # accepted but not used until a real model is wired in
     return _PLACEHOLDER_IMAGE_URL
+
+
+# ---- summary_func examples ----
+# summary_func receives the full artifacts dict and must return a non-empty string.
+# The framework calls this deterministically after the step completes and writes
+# the result as the step_summary artifact, bypassing LLM extraction.
+
+def summarize_generate_image(artifacts: dict) -> str:
+    """Deterministic summary for the generate_image step.
+
+    Reads the image_url artifact produced by dalle_generate and formats a
+    one-sentence summary that includes the URL so the decision layer can log
+    or display it without re-reading the full artifact.
+    """
+    url = artifacts.get('image_url', '')
+    if url:
+        return f'Image generated successfully. URL: {url}'
+    return 'Image generation completed (no URL returned).'

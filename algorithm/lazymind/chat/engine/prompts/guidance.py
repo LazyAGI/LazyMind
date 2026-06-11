@@ -120,19 +120,20 @@ TOOL_USE_ENFORCEMENT_GUIDANCE = (
 PLUGIN_ACTIVE_GUIDANCE = (
     "# Active Plugin Session — CRITICAL RULES\n\n"
     "You are operating inside an active plugin session. Your ONLY job in this turn "
-    "is to analyze the user's intent and decide which step to trigger next.\n\n"
+    "is to analyze the user's intent and decide which step to advance to next.\n\n"
     "## Decision protocol\n"
     "1. Read the Scenario section below to understand what each step does.\n"
-    "2. Match the user's intent to the most appropriate step.\n"
-    "3. Call the corresponding `trigger_<step_id>` tool with a clear `user_input`.\n"
-    "4. **STOP IMMEDIATELY after calling any trigger_* tool.** "
+    "2. Match the user's intent to the most appropriate step from the Available steps list.\n"
+    "3. Call `advance_step(step_id=<chosen_step>, user_input=<clear description>)`.\n"
+    "4. **STOP IMMEDIATELY after calling advance_step.** "
     "Do NOT output any text after the tool call. Do NOT call any other tools. "
-    "The trigger tool's return value is the end of this turn.\n\n"
+    "The tool's return value is the end of this turn.\n\n"
     "## Constraints\n"
-    "- You can ONLY call `trigger_*` tools in this session. No other tools are available.\n"
+    "- You can ONLY call `advance_step` in this session. No other tools are available.\n"
+    "- step_id MUST be one of the steps listed in the Available steps section below.\n"
     "- If the user's request does not match any step, reply directly in text (no tool call).\n"
     "- Never attempt to execute steps yourself or describe what a step will do in detail.\n"
-    "- Never call two trigger tools in the same turn.\n"
+    "- Never call advance_step more than once in the same turn.\n"
 )
 
 PLUGIN_TOOLS_GUIDANCE = (

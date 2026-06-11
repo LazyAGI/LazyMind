@@ -156,6 +156,7 @@ class PluginLoader:
             logger.warning('Plugin %s loaded in legacy mode (no state.yml)', plugin_id)
 
         tools = self._load_tools(plugin_id, plugin_dir, plugin_yaml)
+        step_specs = self._resolve_step_summary_funcs(plugin_id, plugin_dir, step_specs)
 
         self._plugins[plugin_id] = {
             'plugin_yaml': plugin_yaml,
@@ -190,6 +191,69 @@ class PluginLoader:
                     continue
                 tools.append(fn)
         return tools
+
+    def _resolve_step_summary_funcs(
+        self, plugin_id: str, plugin_dir: str, step_specs: dict[str, dict]
+    ) -> dict[str, dict]:
+        """Resolve summary_func strings in step_specs into callable objects.
+
+        summary_func format: "<script_basename_without_py>.<function_name>"
+        e.g. "tools.summarize_generate_image" resolves to tools.py -> summarize_generate_image.
+
+        The resolved callable is stored under the key '_summary_func' in the spec dict
+        (underscore-prefixed to distinguish it from raw YAML data).
+        The original string value is left in place as 'summary_func' for reference.
+        """
+        resolved: dict[str, dict] = {}
+        for step_id, spec in step_specs.items():
+            spec = dict(spec)
+            func_ref = spec.get('summary_func', '').strip()
+            if not func_ref:
+                resolved[step_id] = spec
+                continue
+
+            parts = func_ref.rsplit('.', 1)
+            if len(parts) != 2:
+                logger.warning(
+                    '[Plugin %s] step %r: summary_func %r must be "module.function"',
+                    plugin_id, step_id, func_ref,
+                )
+                resolved[step_id] = spec
+                continue
+
+            module_name, fn_name = parts
+            script_path = os.path.join(plugin_dir, f'{module_name}.py')
+            if not os.path.exists(script_path):
+                logger.warning(
+                    '[Plugin %s] step %r: summary_func script not found: %s',
+                    plugin_id, step_id, script_path,
+                )
+                resolved[step_id] = spec
+                continue
+
+            try:
+                mod_spec = importlib.util.spec_from_file_location(
+                    f'plugin_{plugin_id}_{module_name}', script_path
+                )
+                mod = importlib.util.module_from_spec(mod_spec)
+                mod_spec.loader.exec_module(mod)
+                fn = getattr(mod, fn_name, None)
+                if fn is None or not callable(fn):
+                    logger.warning(
+                        '[Plugin %s] step %r: summary_func %r not found or not callable',
+                        plugin_id, step_id, func_ref,
+                    )
+                else:
+                    spec['_summary_func'] = fn
+                    logger.info('[Plugin %s] step %r: summary_func %r loaded', plugin_id, step_id, func_ref)
+            except Exception as exc:
+                logger.warning(
+                    '[Plugin %s] step %r: failed to load summary_func %r: %s',
+                    plugin_id, step_id, func_ref, exc,
+                )
+
+            resolved[step_id] = spec
+        return resolved
 
     # ---- Public query API ----
 

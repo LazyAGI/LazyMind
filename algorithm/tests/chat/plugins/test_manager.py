@@ -1,4 +1,4 @@
-"""Unit tests for plugins/manager.py (trigger tool + build_plugin_step_tools)"""
+"""Unit tests for plugins/manager.py"""
 from __future__ import annotations
 
 import os
@@ -99,20 +99,6 @@ def test_trigger_tool_does_not_invoke_step_agent():
             with patch('lazymind.chat.plugins.step_agent.create_step_agent') as mock_agent:
                 trigger_plugin_step('step_a', 'test')
                 mock_agent.assert_not_called()
-
-
-def test_build_plugin_step_tools_returns_reachable_steps():
-    with tempfile.TemporaryDirectory() as root:
-        _setup_loader_with_plugin(root)
-        from lazymind.chat.plugins.loader import PluginLoader
-        loader = PluginLoader(root)
-        loader.load_all()
-        with patch('lazymind.chat.plugins.manager.plugin_loader', loader):
-            from lazymind.chat.plugins.manager import build_plugin_step_tools
-            tools = build_plugin_step_tools('test-plugin', 'step_a')
-            tool_names = {t.__name__ for t in tools}
-            assert 'trigger_step_a' in tool_names
-            assert 'trigger_step_b' in tool_names
 
 
 def test_trigger_plugin_unreachable_step_returns_error_string():

@@ -68,6 +68,8 @@ func streamPluginLoop(
 					pctx.Step,
 				)
 				currentReqBody = overrideUserMessage(currentReqBody, syntheticMsg)
+				// Inject step summaries so ChatAgent has semantic context for the decision.
+				currentReqBody = injectStepsContext(currentReqBody, db, pctx.PluginSessionID)
 			}
 		}
 	}
@@ -157,6 +159,9 @@ func streamPluginLoop(
 		// Advance plugin_context.step so Python knows which step just completed,
 		// allowing get_reachable_steps to return the *next* step rather than the same one.
 		currentReqBody = advancePluginContextStep(currentReqBody, stepTrigger.StepID)
+		// Inject fresh step summaries so ChatAgent can make an informed decision
+		// without reading the full conversation history.
+		currentReqBody = injectStepsContext(currentReqBody, db, pctx.PluginSessionID)
 	}
 
 	_ = sseSender.Send([]byte("[DONE]"))
@@ -381,11 +386,31 @@ func streamStepTurn(
 // advancePluginContextStep updates the plugin_context.step field in a cloned reqBody
 // to reflect the step that just completed. Python uses this to compute reachable steps
 // for the next ChatAgent turn, preventing re-triggering of the same step.
+// It also injects a fresh steps_context summary fetched from the database.
 func advancePluginContextStep(reqBody map[string]any, completedStepID string) map[string]any {
 	clone := cloneReqBody(reqBody)
 	if pc, ok := clone["plugin_context"].(map[string]any); ok {
 		pc["step"] = completedStepID
 		pc["advance"] = true
+		clone["plugin_context"] = pc
+	}
+	return clone
+}
+
+// injectStepsContext fetches step summaries from the DB and writes them into
+// plugin_context.steps_context so ChatAgent can make an informed next-step decision
+// without reading the full conversation history.
+func injectStepsContext(reqBody map[string]any, db *gorm.DB, sessionID string) map[string]any {
+	if db == nil || sessionID == "" {
+		return reqBody
+	}
+	entries, err := orm.LoadStepsContext(db, sessionID)
+	if err != nil || len(entries) == 0 {
+		return reqBody
+	}
+	clone := cloneReqBody(reqBody)
+	if pc, ok := clone["plugin_context"].(map[string]any); ok {
+		pc["steps_context"] = entries
 		clone["plugin_context"] = pc
 	}
 	return clone

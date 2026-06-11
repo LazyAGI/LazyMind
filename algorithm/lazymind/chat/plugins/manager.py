@@ -200,42 +200,46 @@ def build_all_plugin_tools() -> list[Callable]:
     return tools
 
 
-def build_plugin_step_tools(plugin_id: str, current_step: str) -> list[Callable]:
-    """Build trigger_<step_id> callable tools for ChatAgent.
+def build_advance_step_tool(plugin_id: str, current_step: str) -> list[Callable]:
+    """Build a single advance_step tool for an active plugin session.
 
-    Returns one tool per step reachable *after* current_step (successors only,
-    not current_step itself, which has already been executed).
+    When a plugin session is live (plugin_id is set), ChatAgent exposes exactly
+    one tool instead of one-tool-per-step.  The step_id is a free-form string
+    argument, but the docstring enumerates the currently reachable steps so the
+    LLM has an explicit enum-like constraint without requiring dynamic schema
+    generation.
+
+    Returns a one-element list so the call-site can use the same
+    `agent_tools += result` pattern as build_all_plugin_tools().
     """
     if not plugin_id or not plugin_loader.is_loaded(plugin_id):
         return []
 
     sm = plugin_loader.get_state_machine(plugin_id)
     reachable_steps = sm.get_reachable_steps(current_step)
+    # Exclude current step from the reachable list exposed to the LLM.
+    if current_step:
+        reachable_steps = [s for s in reachable_steps if s != current_step]
 
-    tools: list[Callable] = []
-    for step_id in reachable_steps:
-        # Never expose the current step as a triggerable tool; re-execution of the same
-        # step must be decided by the DriverAgent (Go side), not by ChatAgent itself.
-        if current_step and step_id == current_step:
-            continue
-        def make_trigger(sid: str) -> Callable:
-            def trigger(user_input: str) -> str:
-                """Trigger plugin step execution.
+    reachable_str = ', '.join(f'"{s}"' for s in reachable_steps) if reachable_steps else '(none)'
 
-                Args:
-                    user_input: Description of what the user wants for this step.
-                """
-                return trigger_plugin_step(sid, user_input)
+    doc = (
+        f'Advance the active plugin session to the next step.\n\n'
+        f'Reachable steps right now: {reachable_str}\n\n'
+        'Args:\n'
+        '    step_id: The step to trigger. Must be one of the reachable steps listed above.\n'
+        '    user_input: Clear description of what the user wants for this step.\n\n'
+        'Call this tool once and stop immediately after. Do not call any other tool in the same turn.'
+    )
 
-            trigger.__name__ = f'trigger_{sid}'
-            trigger.__qualname__ = f'trigger_{sid}'
-            trigger.__doc__ = (
-                f'Trigger the {sid} step. '
-                'Call when the user intent matches this step. '
-                'Provide user_input as a description of what the user wants.'
-            )
-            return trigger
+    def advance_step(step_id: str, user_input: str) -> str:
+        """Advance the active plugin session to the next step.
 
-        tools.append(make_trigger(step_id))
+        Args:
+            step_id: The step to trigger (must be a reachable step).
+            user_input: Description of what the user wants for this step.
+        """
+        return trigger_plugin_step(step_id, user_input)
 
-    return tools
+    advance_step.__doc__ = doc
+    return [advance_step]

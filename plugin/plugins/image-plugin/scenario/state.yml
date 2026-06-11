@@ -21,6 +21,7 @@ steps:
       - Make it descriptive and visually specific
       - Add lighting, style, and composition hints if appropriate
       When done, call save_step_artifact('optimized_prompt', your_optimized_text).
+    summary_hint: "State the core subject and style of the optimized prompt in one sentence."
     tools: []
     outputs:
       - artifact_id: optimized_prompt
@@ -31,6 +32,7 @@ steps:
       Generate an image using the optimized prompt: {{optimized_prompt}}
       Call dalle_generate(prompt) to produce the image.
       When done, call save_step_artifact('image_url', the_returned_url).
+    summary_func: "tools.summarize_generate_image"
     tools: [dalle_generate]
     inputs:
       - artifact_id: optimized_prompt

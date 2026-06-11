@@ -15,7 +15,7 @@ router = APIRouter()
 
 try:
     from lazymind.chat.plugins.loader import plugin_loader
-    from lazymind.chat.plugins.step_agent import create_step_agent
+    from lazymind.chat.plugins.step_agent import create_step_agent, call_summary_func
     from lazymind.chat.plugins.driver_agent import evaluate_step
     from lazymind.chat.plugins.validator import validate_all
     _PLUGIN_ENABLED = True
@@ -105,6 +105,23 @@ async def run_plugin_step(request: PluginStepRequest):
             lazyllm.globals['plugin_event_queue'] = []
             for ev in final_queued:
                 yield f'data: {json.dumps(ev, ensure_ascii=False)}\n\n'
+
+            # If the step has a summary_func, call it now with the latest artifacts
+            # and emit the result as a synthetic artifact event. This runs after all
+            # LLM output is done, so it is guaranteed to be the final step_summary value.
+            fresh_artifacts = dict(request.artifacts or {})
+            # Merge any artifacts emitted during this step execution.
+            for ev in final_queued:
+                if isinstance(ev, dict) and ev.get('type') == 'artifact':
+                    fresh_artifacts[ev['artifact_id']] = ev['value']
+            summary = call_summary_func(step_config, fresh_artifacts)
+            if summary:
+                summary_ev = {
+                    'type': 'artifact',
+                    'artifact_id': 'step_summary',
+                    'value': summary,
+                }
+                yield f'data: {json.dumps(summary_ev, ensure_ascii=False)}\n\n'
 
             result_text = helper.result if hasattr(helper, 'result') else ''
             step_complete = {

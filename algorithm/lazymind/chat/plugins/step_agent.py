@@ -30,6 +30,13 @@ def save_step_checkpoint(data: dict) -> str:
 
     data keys: completed_count (int), total_count (int),
                partial_results (list), phase_note (str)
+
+    TODO: Currently performs a full overwrite of the checkpoint on every call.
+    For large partial_results lists this means the payload grows unboundedly and
+    the last write wins (earlier partial items are duplicated or lost on retry).
+    Future improvement: switch to an append/patch model where only the delta
+    (new partial_results slice + updated counts) is sent, and the Go/DB layer
+    merges it into the existing checkpoint record.
     """
     workspace = lazyllm.globals.get('agentic_config', {}).get('step_workspace', '')
     stored_data = _normalize_checkpoint_data(data, workspace)
@@ -129,9 +136,35 @@ def _render_step_prompt(step_config: dict, artifacts: dict,
             )
             parts.append(resume_block)
 
+    has_summary_func = callable(step_config.get('_summary_func'))
+
+    if has_summary_func:
+        # summary_func is registered: the framework will generate step_summary
+        # deterministically after this step completes. Do NOT ask the LLM to write it.
+        step_summary_instruction = (
+            '  NOTE: step_summary will be generated automatically by the framework after\n'
+            '  this step finishes. You do NOT need to call save_step_artifact("step_summary", ...).'
+        )
+    else:
+        summary_hint = step_config.get('summary_hint', '').strip()
+        if summary_hint:
+            summary_guidance = f'  Specifically: {summary_hint}'
+        else:
+            summary_guidance = (
+                '  Include counts, key outcomes, or branching flags'
+                ' (e.g. "Draft generated with 100 sub-questions pending.", "Image generated successfully.").'
+            )
+        step_summary_instruction = (
+            '  REQUIRED: always call save_step_artifact("step_summary", "<one concise sentence>") as the\n'
+            '  LAST artifact before finishing. The framework uses this summary to route the next step.\n'
+            + summary_guidance
+        )
+
     builtin_instructions = (
         '\n\n## Built-in tools (always available)\n'
-        '- save_step_artifact(artifact_id, value): call when the step is fully complete to save the output.\n'
+        'These tools are injected by the framework and must not be redeclared in the step prompt.\n'
+        '- save_step_artifact(artifact_id, value): persist a named output when the step is fully complete.\n'
+        + step_summary_instruction + '\n'
         '- save_step_checkpoint(data): call periodically to save progress'
         ' (completed_count, total_count, phase_note, partial_results).\n'
         '- get_checkpoint_details(item_range): fetch prior partial_results by range e.g. "0-9".'
@@ -139,6 +172,26 @@ def _render_step_prompt(step_config: dict, artifacts: dict,
     parts.append(builtin_instructions)
 
     return '\n'.join(parts)
+
+
+def call_summary_func(step_config: dict, artifacts: dict) -> str | None:
+    """Invoke the step's summary_func (if registered) and return the summary string.
+
+    The function receives the full artifacts dict and must return a non-empty string.
+    Returns None if no summary_func is registered or if the call fails.
+    """
+    fn = step_config.get('_summary_func')
+    if not callable(fn):
+        return None
+    try:
+        result = fn(artifacts or {})
+        if isinstance(result, str) and result.strip():
+            return result.strip()
+        lazyllm.LOG.warning(f'summary_func returned non-string or empty value: {result}')
+        return None
+    except Exception as exc:
+        lazyllm.LOG.warning(f'summary_func raised an exception: {exc}')
+        return None
 
 
 def _resolve_step_tools(step_config: dict, default_tools: list,
