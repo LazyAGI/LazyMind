@@ -86,7 +86,7 @@ class CheckpointMessageController:
                content: str, payload: dict[str, Any]) -> dict:
         if checkpoint.is_intent_confirmation:
             return self._handle_intent_confirmation(thread_id, service, checkpoint, message_id, content)
-        input_policy = _resume_input_policy(payload)
+        input_policy = _resume_input_policy(payload, content)
         if checkpoint.is_manual_cutover and _cutover_confirmation(content):
             if not input_policy: return self._resume_policy_required(thread_id, message_id, checkpoint)
             result = self.hub._confirm_manual_cutover(thread_id, service, checkpoint, message_id, input_policy)
@@ -97,6 +97,7 @@ class CheckpointMessageController:
             return self._reply(thread_id, message_id, '候选算法切流需要显式确认；请发送“确认切流”后继续。', result,
                                requires_confirmation=True, confirmation_checkpoint_id=checkpoint.checkpoint_id)
         if not checkpoint.is_manual_cutover and _resume_confirmation(content):
+            input_policy = _stage_resume_input_policy(checkpoint, input_policy)
             if not input_policy: return self._resume_policy_required(thread_id, message_id, checkpoint)
             resumed = self.hub._resume_stage_checkpoint(thread_id, service, checkpoint, 'message', input_policy)
             result = _stage_checkpoint_resumed_result(message_id, checkpoint, input_policy)
@@ -126,6 +127,7 @@ class CheckpointMessageController:
         if checkpoint.is_manual_cutover and result.action in {'resume_checkpointed', 'cutover_candidate_algorithm'}:
             reply = '候选算法切流需要显式确认；请发送“确认切流”后继续。'
         elif result.action == 'resume_checkpointed':
+            input_policy = _stage_resume_input_policy(checkpoint, input_policy)
             if not input_policy: return self._resume_policy_required(thread_id, message_id, checkpoint)
             resumed_checkpoint = self.hub._resume_stage_checkpoint(thread_id, service, checkpoint, 'message',
                                                                    input_policy)
@@ -1196,12 +1198,28 @@ def _completed_manual_cutover(checkpoint: CheckpointState, result: FlowMessageRe
     return cutover_done and any(ref.status in {'ended', 'success'} for ref in result.results)
 
 
-def _resume_input_policy(payload: dict[str, Any]) -> str:
+def _resume_input_policy(payload: dict[str, Any], message: str = '') -> str:
     value = str(payload.get('input_policy') or '').strip()
+    if not value:
+        normalized = _normalized_confirmation(message)
+        if normalized in {'使用checkpoint期间的干预', '使用期间的干预', '使用干预', '采用干预',
+                          'resumewithinterventions'}:
+            value = RESUME_WITH_INTERVENTIONS
+        elif normalized in {'沿用checkpoint快照', '使用checkpoint快照', '沿用快照', '使用快照',
+                            'resumefromsnapshot'}:
+            value = RESUME_FROM_SNAPSHOT
     if value and value not in {RESUME_FROM_SNAPSHOT, RESUME_WITH_INTERVENTIONS}:
         expected = f'{RESUME_WITH_INTERVENTIONS} or {RESUME_FROM_SNAPSHOT}'
         raise HTTPException(400, f'bad input_policy {value!r}; expected {expected}')
     return value
+
+
+def _stage_resume_input_policy(checkpoint: CheckpointState, input_policy: str) -> str:
+    if input_policy:
+        return input_policy
+    if checkpoint.checkpoint_kind == 'stage_gate' and checkpoint.dispatch_block_reason == 'checkpoint_wait':
+        return RESUME_WITH_INTERVENTIONS
+    return ''
 
 
 def _resume_policy_required_result(message_id: str, checkpoint: CheckpointState) -> FlowMessageResult:
