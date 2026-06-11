@@ -190,6 +190,7 @@ export interface ChatFileList {
 export interface ChatInputImperativeProps {
   clearFiles: () => void;
   element: HTMLDivElement | null;
+  focus: () => void;
   uploadFiles: (files: File[]) => void;
 }
 
@@ -250,6 +251,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const promptRef = useRef<PromptImperativeProps>(null);
     const batchChatRef = useRef<BatchChatImperativeProps | null>(null);
     const innerRef = useRef<HTMLDivElement>(null);
+    const textAreaRef = useRef<any>(null);
     const isComposingRef = useRef(false);
     const [isUploading, setIsUploading] = useState(false);
     const [polishingSuggestionKey, setPolishingSuggestionKey] = useState<string | null>(null);
@@ -292,6 +294,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           clearPendingMessage();
         },
         element: innerRef.current,
+        focus: () => {
+          textAreaRef.current?.focus?.();
+        },
         uploadFiles: (files: File[]) => {
           if (disabled) {
             if (disabledReason) {
@@ -723,6 +728,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 </div>
               )}
               <TextArea
+                ref={textAreaRef}
                 autoSize={{ minRows: 2, maxRows: 5 }}
                 className="message-input"
                 placeholder={

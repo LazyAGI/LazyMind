@@ -84,6 +84,12 @@ export function getCitationFromText(text?: string) {
   return text?.match(CITE_MESSAGE_PATTERN)?.[1]?.trim() || "";
 }
 
+export function getCitationsFromText(text?: string) {
+  return Array.from((text || "").matchAll(CITE_MESSAGE_GLOBAL_PATTERN))
+    .map((match) => match[1]?.trim())
+    .filter(Boolean);
+}
+
 export function stripCitationFromText(text?: string) {
   return (text || "").replace(CITE_MESSAGE_GLOBAL_PATTERN, "").trim();
 }
@@ -117,6 +123,7 @@ export function buildChatMessageListFromHistory(
       return inputType === "text" && !!input.text;
     });
     const rawQuery = record.query || textInput?.text || "";
+    const citeMessages = getCitationsFromText(rawQuery);
     const displayQuery = stripCitations
       ? stripCitationFromText(rawQuery)
       : rawQuery;
@@ -125,6 +132,8 @@ export function buildChatMessageListFromHistory(
       role: RoleTypes.USER,
       delta: displayQuery,
       display_delta: displayQuery,
+      cite_message: citeMessages.join("\n\n"),
+      cite_messages: citeMessages,
       images: normalizedInputs
         ?.filter((input) => input.input_type === "image")
         .map((image) => ({
