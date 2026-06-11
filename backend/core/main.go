@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"gopkg.in/yaml.v3"
@@ -169,6 +170,23 @@ func main() {
 
 	// text/PrompttextInitialize（DB + Redis）。DB text ACL text；Redis textConversationtext/text/text。
 	store.Init(db.DB, readonlyDB.DB, store.MustRedisFromEnv())
+
+	// Mark running steps whose heartbeat is stale as interrupted so they can be
+	// resumed on the next advance request.  This recovers from process crashes.
+	{
+		staleThreshold := 5 * time.Minute
+		if s := strings.TrimSpace(os.Getenv("PLUGIN_STALE_STEP_THRESHOLD")); s != "" {
+			if d, err := time.ParseDuration(s); err == nil {
+				staleThreshold = d
+			}
+		}
+		if markErr := orm.MarkStaleRunningStepsInterrupted(db.DB, staleThreshold); markErr != nil {
+			log.Logger.Warn().Err(markErr).Msg("mark stale plugin steps failed")
+		} else {
+			log.Logger.Info().Dur("threshold", staleThreshold).Msg("stale plugin steps marked interrupted")
+		}
+	}
+
 	evalset.RegisterAsyncJobs()
 	asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
 	asyncjob.Start(context.Background(), store.DB(), asyncjob.Options{

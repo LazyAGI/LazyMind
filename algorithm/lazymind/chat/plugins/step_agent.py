@@ -28,15 +28,18 @@ def save_step_artifact(artifact_id: str, value: Any) -> str:
 def save_step_checkpoint(data: dict) -> str:
     """Persist intermediate progress. Call every ~10 items or at major milestones.
 
-    data keys: completed_count (int), total_count (int),
-               partial_results (list), phase_note (str)
+    data keys:
+      completed_count (int)     – number of items processed so far
+      total_count (int)         – total items to process
+      partial_results (list)    – ONLY the NEW items since the last checkpoint call
+                                  (delta, not cumulative). The framework accumulates
+                                  all deltas so get_checkpoint_details always returns
+                                  the full history.
+      phase_note (str)          – optional free-text status note
 
-    TODO: Currently performs a full overwrite of the checkpoint on every call.
-    For large partial_results lists this means the payload grows unboundedly and
-    the last write wins (earlier partial items are duplicated or lost on retry).
-    Future improvement: switch to an append/patch model where only the delta
-    (new partial_results slice + updated counts) is sent, and the Go/DB layer
-    merges it into the existing checkpoint record.
+    Each call sends only the incremental partial_results slice. Do NOT pass the
+    full accumulated list on every call — that causes unbounded payload growth and
+    duplicated data in the database.
     """
     workspace = lazyllm.globals.get('agentic_config', {}).get('step_workspace', '')
     stored_data = _normalize_checkpoint_data(data, workspace)
@@ -45,6 +48,21 @@ def save_step_checkpoint(data: dict) -> str:
     _queue.append(
         {'type': 'checkpoint', 'value': stored_data}
     )
+
+    # Also accumulate partial_results into the in-memory step_checkpoint so that
+    # get_checkpoint_details can serve the merged history without a DB round-trip.
+    agentic_cfg = lazyllm.globals.get('agentic_config', {})
+    mem_checkpoint = agentic_cfg.get('step_checkpoint')
+    if isinstance(mem_checkpoint, dict):
+        existing = mem_checkpoint.get('partial_results', [])
+        delta = stored_data.get('partial_results', [])
+        if delta:
+            mem_checkpoint['partial_results'] = existing + delta
+        mem_checkpoint['completed_count'] = stored_data.get('completed_count', 0)
+        mem_checkpoint['total_count'] = stored_data.get('total_count', 0)
+        if stored_data.get('phase_note'):
+            mem_checkpoint['phase_note'] = stored_data['phase_note']
+
     count = data.get('completed_count', 0)
     total = data.get('total_count', 0)
     return f'Checkpoint: {count}/{total} done.'

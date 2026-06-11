@@ -23,11 +23,12 @@ func GetPluginSession(db *gorm.DB, sessionID string) (*PluginSession, error) {
 	return &s, nil
 }
 
-// GetActivePluginSession returns the most recent plugin session for a conversation.
-// Returns nil, nil when no session exists (not an error condition).
-func GetActivePluginSession(db *gorm.DB, conversationID string) (*PluginSession, error) {
+// GetActivePluginSession returns the most recent active plugin session for a conversation
+// that belongs to the specified user.
+// Returns nil, nil when no active session exists (not an error condition).
+func GetActivePluginSession(db *gorm.DB, conversationID string, userID string) (*PluginSession, error) {
 	var s PluginSession
-	err := db.Where("conversation_id = ?", conversationID).
+	err := db.Where("conversation_id = ? AND is_active = ? AND create_user_id = ?", conversationID, true, userID).
 		Order("created_at DESC").
 		Limit(1).
 		First(&s).Error
@@ -38,6 +39,17 @@ func GetActivePluginSession(db *gorm.DB, conversationID string) (*PluginSession,
 		return nil, err
 	}
 	return &s, nil
+}
+
+// DeactivatePluginSession marks a plugin session as finished so it is no longer
+// returned by GetActivePluginSession.
+func DeactivatePluginSession(db *gorm.DB, sessionID string) error {
+	return db.Model(&PluginSession{}).
+		Where("id = ?", sessionID).
+		Updates(map[string]interface{}{
+			"is_active":  false,
+			"updated_at": time.Now(),
+		}).Error
 }
 
 // UpdateCurrentStep updates the current_step_id field of a plugin session.
@@ -128,6 +140,9 @@ func MarkStaleRunningStepsInterrupted(db *gorm.DB, staleThreshold time.Duration)
 }
 
 // InsertPluginCheckpoint saves a step checkpoint.
+// partial_results in the incoming record is treated as a DELTA (new items only).
+// The function reads the previous checkpoint's partial_results, appends the delta,
+// and stores the merged list so that the latest row always contains the full history.
 // The sequence is automatically set to max(current) + 1 for the given step_exec_id.
 func InsertPluginCheckpoint(db *gorm.DB, cp *PluginSessionStepCheckpoint) error {
 	var maxSeq int
@@ -136,6 +151,22 @@ func InsertPluginCheckpoint(db *gorm.DB, cp *PluginSessionStepCheckpoint) error 
 		Select("COALESCE(MAX(sequence), 0)").
 		Scan(&maxSeq)
 	cp.Sequence = maxSeq + 1
+
+	// Merge delta partial_results with the previous checkpoint row's partial_results.
+	if len(cp.PartialResults) > 0 && maxSeq > 0 {
+		var prev PluginSessionStepCheckpoint
+		if err := db.Where("step_exec_id = ? AND sequence = ?", cp.StepExecID, maxSeq).
+			First(&prev).Error; err == nil && len(prev.PartialResults) > 0 {
+			var existing []interface{}
+			var delta []interface{}
+			if json.Unmarshal(prev.PartialResults, &existing) == nil &&
+				json.Unmarshal(cp.PartialResults, &delta) == nil {
+				merged, _ := json.Marshal(append(existing, delta...))
+				cp.PartialResults = merged
+			}
+		}
+	}
+
 	return db.Create(cp).Error
 }
 

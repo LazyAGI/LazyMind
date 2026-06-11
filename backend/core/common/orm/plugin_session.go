@@ -8,6 +8,7 @@ import (
 // PluginSession represents a plugin session tied to a conversation.
 // One session is created per plugin invocation; it tracks the current step
 // and a snapshot of all artifact values for page-refresh recovery.
+// IsActive is false once the session finishes (plugin loop exits normally or on error).
 type PluginSession struct {
 	ID             string          `gorm:"primaryKey;column:id"`
 	ConversationID string          `gorm:"column:conversation_id"`
@@ -16,6 +17,7 @@ type PluginSession struct {
 	CurrentStepID  string          `gorm:"column:current_step_id"`
 	Meta           json.RawMessage `gorm:"column:meta;type:jsonb"`
 	CreateUserID   string          `gorm:"column:create_user_id"`
+	IsActive       bool            `gorm:"column:is_active;default:true"`
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }

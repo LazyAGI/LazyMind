@@ -55,20 +55,20 @@ func streamPluginLoop(
 				_ = sseSender.Send([]byte("[DONE]"))
 				return
 
-		case "interrupted":
-			// Restore from checkpoint; skip ChatAgent for this step.
-			llmCfg, _ := currentReqBody["llm_config"].(map[string]interface{})
-			runInterruptedStep(ctx, db, pythonBaseURL, pctx, lastRec, llmCfg, sseSender)
-			_ = sseSender.Send([]byte("[DONE]"))
-			return
+			case "interrupted":
+				// Restore from checkpoint; skip ChatAgent for this step.
+				llmCfg, _ := currentReqBody["llm_config"].(map[string]interface{})
+				runInterruptedStep(ctx, db, pythonBaseURL, pctx, lastRec, llmCfg, sseSender)
+				_ = sseSender.Send([]byte("[DONE]"))
+				return
 
-		default:
-			// Step is done; synthesize message for ChatAgent to decide next step.
-			syntheticMsg := fmt.Sprintf(
-				"Step %q completed. User confirmed to proceed. Please trigger the next appropriate step.",
-				pctx.Step,
-			)
-			currentReqBody = overrideUserMessage(currentReqBody, syntheticMsg)
+			default:
+				// Step is done; synthesize message for ChatAgent to decide next step.
+				syntheticMsg := fmt.Sprintf(
+					"Step %q completed. User confirmed to proceed. Please trigger the next appropriate step.",
+					pctx.Step,
+				)
+				currentReqBody = overrideUserMessage(currentReqBody, syntheticMsg)
 			}
 		}
 	}
@@ -109,7 +109,18 @@ func streamPluginLoop(
 			}
 		}
 
-		// 3. Create step execution record.
+		// 3. Defensive dependency check (Go-side guard; Python already validated).
+		if depErr := checkStepDependencies(db, stepTrigger); depErr != nil {
+			_ = sseSender.SendEvent("plugin_event", map[string]interface{}{
+				"type":              "step_error",
+				"plugin_session_id": pctx.PluginSessionID,
+				"step_id":           stepTrigger.StepID,
+				"error":             depErr.Error(),
+			})
+			break
+		}
+
+		// 4. Create step execution record.
 		stepExecID := newConversationID()
 		workspacePath := buildWorkspacePath(pctx.PluginSessionID, stepExecID)
 		_ = os.MkdirAll(workspacePath, 0755)
@@ -128,7 +139,7 @@ func streamPluginLoop(
 		// Emit step_change to frontend.
 		_ = sseSender.SendEvent("plugin_event", buildStepChangeEvent(pctx.PluginSessionID, stepTrigger.StepID))
 
-		// 4. Run StepAgent — Python queries artifacts/checkpoint/previous_summary autonomously.
+		// 5. Run StepAgent — Python queries artifacts/checkpoint/previous_summary autonomously.
 		llmConfig, _ := currentReqBody["llm_config"].(map[string]interface{})
 		session, _ := orm.GetPluginSession(db, pctx.PluginSessionID)
 		stepComplete := streamStepTurn(ctx, pythonBaseURL, stepTrigger, stepExecID,
@@ -151,6 +162,11 @@ func streamPluginLoop(
 		judgment, _ := CallPluginDriver(ctx, pythonBaseURL,
 			stepTrigger.PluginSessionID, stepComplete.ResultSummary)
 		currentReqBody = injectDriverJudgmentIntoReqBody(currentReqBody, judgment)
+	}
+
+	// Mark session as finished so the next user message is treated as a normal chat.
+	if pctx.PluginSessionID != "" && db != nil {
+		_ = orm.DeactivatePluginSession(db, pctx.PluginSessionID)
 	}
 
 	_ = sseSender.Send([]byte("[DONE]"))
@@ -350,6 +366,15 @@ func streamStepTurn(
 		// Update heartbeat on each event.
 		if db != nil {
 			_ = orm.UpdateStepHeartbeat(db, stepExecID)
+		}
+
+		// StepAgent must not emit step_trigger events; doing so would clobber
+		// current_step_id in the DB and confuse the outer plugin loop.
+		// Drop such events with a warning rather than delegating to handlePluginEvent.
+		if ev.Type == "step_trigger" {
+			fmt.Printf("[Core] [WARN] streamStepTurn: StepAgent emitted unexpected step_trigger "+
+				"(step_id=%s session=%s) — ignored\n", ev.StepID, ev.PluginSessionID)
+			continue
 		}
 
 		_, complete, _ := handlePluginEvent(ev, db, sseSender, session, stepExecID)

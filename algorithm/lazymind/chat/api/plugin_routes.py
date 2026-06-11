@@ -145,24 +145,61 @@ async def run_plugin_step(request: PluginStepRequest):
         try:
             import lazyllm.module.stream_helper as _sh
             helper = _sh.StreamCallHelper(agent, init_sid=False)
-            async for _chunk in helper.astream(request.user_input or ''):
-                queued = list(lazyllm.globals.get('plugin_event_queue', []))
-                if queued:
-                    lazyllm.globals['plugin_event_queue'] = []
-                    for ev in queued:
-                        yield f'data: {json.dumps(ev, ensure_ascii=False)}\n\n'
 
-            final_queued = list(lazyllm.globals.get('plugin_event_queue', []))
-            lazyllm.globals['plugin_event_queue'] = []
-            for ev in final_queued:
+            # BUG-1 fix: use a stable list reference instead of reassigning
+            # lazyllm.globals['plugin_event_queue'] to a new list each time.
+            # Reassigning breaks the reference held by tool functions (save_step_artifact,
+            # save_step_checkpoint), causing their appends to go into an orphaned list.
+            # We drain the list in-place with del queue[:] so the tools always
+            # append to the same object.
+            event_queue: list = lazyllm.globals.get('plugin_event_queue', [])
+            if not isinstance(event_queue, list):
+                event_queue = []
+            lazyllm.globals['plugin_event_queue'] = event_queue
+
+            # BUG-2 fix: accumulate artifact events from ALL flush batches so that
+            # summary_func receives the complete artifact set, not just the last batch.
+            all_artifact_events: list = []
+
+            def _drain_and_yield():
+                """Drain event_queue in-place; return snapshot for caller to yield."""
+                batch = list(event_queue)
+                del event_queue[:]
+                return batch
+
+            async for _chunk in helper.astream(request.user_input or ''):
+                batch = _drain_and_yield()
+                for ev in batch:
+                    all_artifact_events.append(ev)
+                    yield f'data: {json.dumps(ev, ensure_ascii=False)}\n\n'
+
+            # Final drain after the agent finishes.
+            for ev in _drain_and_yield():
+                all_artifact_events.append(ev)
                 yield f'data: {json.dumps(ev, ensure_ascii=False)}\n\n'
 
-            # Run summary_func after all LLM output, merging in-step artifact events.
+            # Build fresh_artifacts from the initial DB snapshot plus every artifact
+            # event emitted during this execution (all batches, not just the last one).
             fresh_artifacts = dict(artifacts)
-            for ev in final_queued:
+            for ev in all_artifact_events:
                 if isinstance(ev, dict) and ev.get('type') == 'artifact':
                     fresh_artifacts[ev['artifact_id']] = ev['value']
+
             summary = call_summary_func(step_config, fresh_artifacts)
+            # BUG-9 fix: if summary_func was registered but failed (returns None),
+            # fall back to the LLM result text so step_summary is never absent.
+            # Without a step_summary the execution_path in ChatAgent's context will
+            # have a blank entry for this step, degrading routing decisions.
+            if not summary:
+                # Check whether step_summary was already emitted by the LLM itself.
+                llm_emitted = any(
+                    isinstance(ev, dict) and ev.get('type') == 'artifact'
+                    and ev.get('artifact_id') == 'step_summary'
+                    for ev in all_artifact_events
+                )
+                if not llm_emitted:
+                    result_text = helper.result if hasattr(helper, 'result') else ''
+                    summary = str(result_text).strip()[:200] or f'Step {step_id} completed.'
             if summary:
                 ev = {'type': 'artifact', 'artifact_id': 'step_summary', 'value': summary}
                 yield f'data: {json.dumps(ev, ensure_ascii=False)}\n\n'

@@ -136,12 +136,8 @@ def _launch_plugin(plugin_id: str, user_input: str) -> str:
     num_steps = len(plugin_yaml.get('steps', []))
     plugin_session_id = lazyllm.globals.get('agentic_config', {}).get('plugin_session_id', '')
 
-    # Write plugin_id into agentic_config so hot-path trigger tools pick it up.
-    agentic_cfg = lazyllm.globals.get('agentic_config', {})
-    agentic_cfg['plugin_id'] = plugin_id
-    lazyllm.globals['agentic_config'] = agentic_cfg
-
     # Use the shared queue from agentic_config (works across asyncio tasks).
+    agentic_cfg = lazyllm.globals.get('agentic_config', {})
     queue = agentic_cfg.get('plugin_event_queue') or lazyllm.globals.get('plugin_event_queue', [])
 
     # mount event — Go creates the session record and replaces the placeholder ID.
@@ -251,9 +247,11 @@ def build_advance_step_tool(plugin_id: str, current_step: str) -> list[Callable]
         return [advance_step_blocked]
 
     reachable_steps = sm.get_reachable_steps(current_step)
-    # Exclude current step from the reachable list exposed to the LLM.
-    if current_step:
-        reachable_steps = [s for s in reachable_steps if s != current_step]
+    # Include current_step so the LLM can trigger a retry of the same step
+    # when the user wants to redo it with new instructions.
+    # Deduplicate while preserving order: current_step first, then successors.
+    if current_step and current_step not in reachable_steps:
+        reachable_steps = [current_step] + reachable_steps
 
     reachable_str = ', '.join(f'"{s}"' for s in reachable_steps) if reachable_steps else '(none)'
 

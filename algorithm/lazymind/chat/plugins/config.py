@@ -173,8 +173,12 @@ def load_step_artifacts(session_id: str) -> dict:
 
 
 def load_step_checkpoint(session_id: str, step_id: str) -> dict:
-    """Return the latest checkpoint for the most recent running/interrupted execution
+    """Return the latest checkpoint for the most recent *interrupted* execution
     of the given step. Returns {} when none exists (first run or step never interrupted).
+
+    Note: intentionally excludes 'running' status. Go inserts a new 'running' record
+    before calling /api/plugin/step, so querying 'running' would find the brand-new
+    empty record rather than the previous interrupted one with actual checkpoint data.
     """
     engine = _get_plugin_db_engine()
     if not engine or not session_id or not step_id:
@@ -186,7 +190,7 @@ def load_step_checkpoint(session_id: str, step_id: str) -> dict:
                 text(
                     'SELECT id FROM plugin_session_steps '
                     'WHERE session_id = :sid AND step = :step '
-                    "AND step_status IN ('running', 'interrupted') "
+                    "AND step_status = 'interrupted' "
                     'ORDER BY created_at DESC LIMIT 1'
                 ),
                 {'sid': session_id, 'step': step_id},

@@ -181,15 +181,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	// Reconstruct PluginContext from DB — do not trust frontend-supplied plugin fields.
 	// Only the boolean `advance` flag is accepted from the frontend.
 	var pluginCtx *PluginContext
-	if activeSession, err := orm.GetActivePluginSession(db, convID); err != nil {
+	if activeSession, err := orm.GetActivePluginSession(db, convID, userID); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("query plugin session failed: %v", err), http.StatusInternalServerError)
 		return
 	} else if activeSession != nil {
-		// Security: ensure this session belongs to the requesting user.
-		if activeSession.CreateUserID != userID {
-			common.ReplyErr(w, "plugin session does not belong to current user", http.StatusForbidden)
-			return
-		}
 		pluginCtx = &PluginContext{
 			PluginSessionID: activeSession.ID,
 			PluginID:        activeSession.PluginID,
