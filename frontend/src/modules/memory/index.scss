@@ -2578,6 +2578,25 @@
   }
 }
 
+.memory-skill-detail-editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.memory-skill-detail-textarea.ant-input {
+  min-height: 460px !important;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #475467;
+  line-height: 1.8;
+  padding: 0;
+  resize: vertical;
+}
+
 .memory-experience-detail-content {
   border-top: 1px solid #e7edf4;
   padding: 18px;
