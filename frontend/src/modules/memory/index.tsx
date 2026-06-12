@@ -4831,6 +4831,24 @@ export default function MemoryManagement() {
     },
   ];
 
+  const renderToolTwoLineText = (value?: string) =>
+    value ? (
+      <Tooltip
+        title={<div className="memory-text-popover-content">{value}</div>}
+        overlayClassName="memory-text-popover"
+        placement="topLeft"
+        trigger="hover"
+      >
+        <div className="memory-tool-two-line-text" title={value}>
+          {value}
+        </div>
+      </Tooltip>
+    ) : (
+      <div className="memory-tool-two-line-text" title={value}>
+        {value}
+      </div>
+    );
+
   const toolColumns: ColumnsType<StructuredAsset> = [
     {
       title: t("admin.memoryToolName"),
@@ -4845,13 +4863,41 @@ export default function MemoryManagement() {
       title: t("admin.memoryDescription"),
       dataIndex: "description",
       key: "description",
-      render: (value: string) => value,
+      render: (value: string) => renderToolTwoLineText(value),
     },
     {
       title: t("admin.memoryTypicalUsage"),
       dataIndex: "content",
       key: "content",
-      render: (value: string) => value,
+      render: (value: string) => renderToolTwoLineText(value),
+    },
+    {
+      title: t("admin.memoryToolStatus"),
+      dataIndex: "isEnabled",
+      key: "status",
+      width: 120,
+      render: (value: boolean) => (
+        <Tag color={value ? "success" : "default"}>
+          {value ? t("common.enabled") : t("common.disabled")}
+        </Tag>
+      ),
+    },
+    {
+      title: t("common.actions"),
+      key: "actions",
+      width: 140,
+      render: (_value, record) => (
+        <Switch
+          checked={Boolean(record.isEnabled)}
+          checkedChildren={t("common.enabled")}
+          disabled={Boolean(record.readonly)}
+          loading={toolActionLoading.has(record.id)}
+          unCheckedChildren={t("common.disabled")}
+          onChange={(checked) => {
+            void handleToggleTool(record, checked);
+          }}
+        />
+      ),
     },
     {
       title: t("admin.memoryToolStatus"),

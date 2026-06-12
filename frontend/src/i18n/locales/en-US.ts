@@ -32,6 +32,8 @@ const enUS = {
     requestError: "An error occurred while processing the request",
     enabled: "Enabled",
     disabled: "Disabled",
+    copySuccess: "Copied",
+    copyFailedManual: "Copy failed. Please copy manually.",
   },
 
   // Auth

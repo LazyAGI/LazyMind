@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Input, Space, Tooltip } from "antd";
 import {
   CloseOutlined,
@@ -62,6 +62,103 @@ function getCiteMessages(message?: { cite_message?: string; cite_messages?: stri
   return splitCiteMessages(message?.cite_message);
 }
 
+function UserCitationPreview({ citeMessages }: { citeMessages: string[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const [isHiding, setIsHiding] = useState(false);
+  const hideTimerRef = useRef<number | null>(null);
+
+  const clearHideTimer = () => {
+    if (hideTimerRef.current) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  };
+
+  const showCitation = () => {
+    clearHideTimer();
+    setIsHiding(false);
+    setExpanded(true);
+  };
+
+  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (event.detail >= 2) {
+      showCitation();
+    }
+  };
+
+  const handleMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (event.detail >= 2) {
+      showCitation();
+    }
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      showCitation();
+    }
+  };
+
+  const handleMouseEnter = () => {
+    if (!expanded) {
+      return;
+    }
+    clearHideTimer();
+    setIsHiding(false);
+  };
+
+  const handleMouseLeave = () => {
+    if (!expanded) {
+      return;
+    }
+    clearHideTimer();
+    setIsHiding(true);
+    hideTimerRef.current = window.setTimeout(() => {
+      setExpanded(false);
+      setIsHiding(false);
+      hideTimerRef.current = null;
+    }, 500);
+  };
+
+  const primaryCiteMessage = citeMessages[0] || "";
+
+  useEffect(() => clearHideTimer, []);
+
+  return (
+    <button
+      type="button"
+      className={`chat-user-citation-preview${expanded ? " is-expanded" : ""}${
+        isHiding ? " is-hiding" : ""
+      }`}
+      onClick={handleClick}
+      onDoubleClick={showCitation}
+      onMouseDown={handleMouseDown}
+      onKeyDown={handleKeyDown}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      onPointerEnter={handleMouseEnter}
+      onPointerLeave={handleMouseLeave}
+      title={expanded ? "" : primaryCiteMessage}
+      aria-label={primaryCiteMessage}
+    >
+      {!expanded ? (
+        <CommentOutlined className="chat-user-citation-preview-icon" />
+      ) : (
+        <div className="chat-user-citation-preview-content">
+          {citeMessages.map((citeMessage, citeIndex) => (
+            <div
+              className="chat-user-citation-preview-item"
+              key={`${citeIndex}-${citeMessage}`}
+            >
+              {citeMessage}
+            </div>
+          ))}
+        </div>
+      )}
+    </button>
+  );
+}
+
 const MessageList: React.FC<MessageListProps> = ({
   messageList,
   initialCard,
@@ -112,6 +209,9 @@ const MessageList: React.FC<MessageListProps> = ({
           </div>
         )}
         <div className={`user-wrap ${isEditing ? "editing" : ""}`}>
+          {!isEditing && citeMessageList.length > 0 ? (
+            <UserCitationPreview citeMessages={citeMessageList} />
+          ) : null}
           <div className="chat-user">
             {isEditing ? (
               <div className="chat-user-edit-wrap">

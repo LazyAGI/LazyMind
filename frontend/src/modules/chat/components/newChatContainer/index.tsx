@@ -1593,6 +1593,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
             isChatContent={true}
             showHistoryList={showHistoryList}
             showHistoryButton={showHistoryButton}
+            showPromptSuggestions={false}
             openNewChat={createNewChat}
             ref={chatInputRef}
             onHeightChange={handleInputHeightChange}

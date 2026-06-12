@@ -158,6 +158,7 @@ interface ChatInputProps {
   isChatContent: boolean;
   showHistoryList?: boolean;
   showHistoryButton?: boolean;
+  showPromptSuggestions?: boolean;
   setIsChatContent?: (isChatContent: boolean) => void;
   onHeightChange?: () => void;
   chatConfig?: ChatConfig;
@@ -227,6 +228,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       isChatContent,
       showHistoryList,
       showHistoryButton = true,
+      showPromptSuggestions = true,
       onHeightChange,
       setIsChatContent,
       chatConfig,
@@ -461,7 +463,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const isSendDisabled =
       disabled || isPromptPolishing || !value?.trim() || isUploading || isStreaming;
     const shouldShowPromptSuggestions =
-      !disabled && !isStreaming && value.trim().length > 0;
+      showPromptSuggestions && !disabled && !isStreaming && value.trim().length > 0;
 
     useEffect(() => {
       setTimeout(() => onHeightChange?.(), 0);
