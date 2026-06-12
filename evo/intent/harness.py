@@ -722,7 +722,7 @@ def _cap_field(capability: Any, key: str) -> Any:
 
 def _writes_artifact_id(capability: Any, plan: IntentPlan, *, use_required: bool = False) -> str:
     writable_schema = _cap_field(capability, 'writable_artifact_schema') or ''
-    if not writable_schema or writable_schema in {'IntentAnswer', 'JudgeResult'}: return ''
+    if not writable_schema or writable_schema == 'IntentAnswer': return ''
     if plan.params.get('output_id'): return str(plan.params['output_id'])
     template = _operation_template(capability)
     if template.get('tags', {}).get('writes_artifact_id'): return str(template['tags']['writes_artifact_id'])

@@ -63,12 +63,15 @@ class GraphParamBinder:
             source = spec_dict.get('source', spec)
             ordinal = _ordinal(text)
             case_id = _case_id(text, spec_dict.get('case_id_format', 'zero4'))
+            case_ids = _case_ids(text, spec_dict.get('case_id_format', 'zero4'))
             if name in params or name in target: continue
             value = _template_value(spec_dict.get('template', ''), case_id, ordinal)
             if value:
                 _bind_system_value(target, params, name, value)
             elif source == 'message_case_id' and case_id:
                 _bind_system_value(target, params, name, case_id)
+            elif source == 'message_case_ids' and case_ids:
+                _bind_system_value(target, params, name, case_ids)
             elif source == 'message_case_index' and ordinal:
                 _bind_system_value(target, params, name, ordinal - 1)
             elif source == 'source_span_mention' and spec_dict.get('type') == 'dataset_row_ordinal' and ordinal:
@@ -108,7 +111,8 @@ class GraphParamBinder:
         return {'target': target, 'params': params, 'consumed_semantic': consumed}
 
 
-def layered_intent_prompt(message: str, capabilities: list[dict], completed_tasks: list[dict] | None = None) -> str:
+def layered_intent_prompt(message: str, capabilities: list[dict], completed_tasks: list[dict] | None = None,
+                          conversation_context: dict | None = None) -> str:
     routing = [
         {
             key: cap.get(key, {} if key == 'semantic_schema' else None)
@@ -122,22 +126,24 @@ def layered_intent_prompt(message: str, capabilities: list[dict], completed_task
     ]
     schema = (
         '{{"next_task":{{"type":"execute_task|ask_clarification|respond_only|stop",'
-        '"capability_id":"...","source_spans":[{{"text":"原文片段"}}],"semantic_params":{{}}}}}}'
+        '"capability_id":"...","source_spans":[{{"text":"原文片段"}}],"semantic_params":{{}},'
+        '"remaining_message":"执行当前 task 后还没处理的用户请求"}}}}}'
     )
     return f"""
 你是 LazyMind evo 的 next-task parser。只输出一个 JSON 对象，不要 markdown。
 
 目标：
-- 每条用户消息都要独立解析，只选择当前消息最应该执行的一个 task。
+- 只选择当前消息最应该执行的一个原子 task，复杂消息剩余部分放入 remaining_message，下一轮继续解析。
 - 输出 capability_id、source_spans、semantic_params。
 - source_spans 必须是最小原文片段，并包含绑定当前 task 目标所需的信息。
+- remaining_message 只能包含当前 task 未处理的用户请求；没有剩余任务时输出空字符串。
 - semantic_params 只能来自所选 capability 的 semantic_schema，只表达用户语义输入。
 - system_param_contract 是系统/runtime 绑定的 operation 参数，不能放进 semantic_params。
 - 保留第几条、case_id、artifact_ref、operation_run_id 线索，缺 ref 时继续执行而不是澄清。
 - schema.required 没列出的语义字段不要强制澄清，直接省略。
 - 如果所选 capability 的 semantic_schema 是空对象，semantic_params 必须输出空对象 {{}}。
 - 不要输出 system params，例如 artifact_ref、input_refs、operation_id、case_id、*_ref、*_url、workdir。
-- 已完成任务只是历史上下文，不表示当前消息已被满足。
+- 已完成任务和 conversation_context 都只是历史上下文，不表示当前消息已被满足。
 - 用户再次询问进度、状态、到哪里了、产物或 operation 时，仍要选择对应 read capability。
 - 条件依赖当前状态但已完成任务没有结果时，先选择状态查询 task，不要猜测条件分支。
 - 只有用户明确表示停止、结束或不需要更多操作时，才输出 stop。
@@ -150,6 +156,9 @@ def layered_intent_prompt(message: str, capabilities: list[dict], completed_task
 
 已完成任务:
 {json.dumps(completed_tasks or [], ensure_ascii=False, indent=2, sort_keys=True)}
+
+conversation_context:
+{json.dumps(conversation_context or {}, ensure_ascii=False, indent=2, sort_keys=True)}
 
 用户消息:
 {message}
@@ -225,6 +234,18 @@ def parse_next_task(raw: str | dict) -> dict:
     return data['next_task']
 
 
+def remaining_message(raw: str | dict, message: str) -> str:
+    item = parse_next_task(raw)
+    if 'remaining_message' in item:
+        return str(item.get('remaining_message') or '').strip()
+    out = str(message or '')
+    for span in item.get('source_spans') or []:
+        text = str(span.get('text') or '') if isinstance(span, dict) else ''
+        if text and text in out:
+            out = out.replace(text, '', 1)
+    return _clean_remaining(out) if out != message else ''
+
+
 def _loads(raw: str | dict) -> Any:
     if not isinstance(raw, str): return raw
     text = raw.strip()
@@ -244,6 +265,10 @@ def _loads(raw: str | dict) -> Any:
             continue
         if isinstance(data, dict) and 'next_task' in data: return data
     return json.loads(text)
+
+
+def _clean_remaining(text: str) -> str:
+    return re.sub(r'^[，,。；;、\s]+|[，,。；;、\s]+$', '', text).strip()
 
 
 def _intent_id(item: dict, capability_id: str) -> str:
@@ -275,6 +300,16 @@ def _case_id(text: str, case_id_format: str = 'zero4') -> str:
     if match: return _format_case_id(int(match.group(1)), case_id_format)
     match = re.search(r'第\s*([0-9一二三四五六七八九十百]+)\s*(?:条|个)?', text)
     return _format_case_id(_cn_int(match.group(1)), case_id_format) if match else ''
+
+
+def _case_ids(text: str, case_id_format: str = 'zero4') -> list[str]:
+    number = r'[0-9一二三四五六七八九十百]{1,4}'
+    numbers = [match.group(1) for match in re.finditer(r'case[_ -]?(\d{1,4})', text, re.I)]
+    for match in re.finditer(rf'(?:测例|样本)\s*({number}(?:\s*[,，、和及]\s*{number})*)', text):
+        numbers.extend(re.findall(number, match.group(1)))
+    numbers.extend(match.group(1) for match in re.finditer(rf'第\s*({number})\s*(?:条|个)', text))
+    case_ids = [_format_case_id(_cn_int(raw), case_id_format) for raw in numbers if _cn_int(raw)]
+    return list(dict.fromkeys(case_ids))
 
 
 def _format_case_id(number: int, case_id_format: str) -> str:

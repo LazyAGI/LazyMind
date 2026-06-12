@@ -234,19 +234,30 @@ class OperationGraph:
 
     def retry_with_downstream(self, ref: OperationRunRef, *, source_message_id: str | None = None,
                               spec_overrides: dict[str, OperationSpec] | None = None) -> list[OperationRunRef]:
+        return self.retry_with_downstream_many([ref], source_message_id=source_message_id,
+                                               spec_overrides=spec_overrides)
+
+    def retry_with_downstream_many(self, refs: list[OperationRunRef], *, source_message_id: str | None = None,
+                                   spec_overrides: dict[str, OperationSpec] | None = None) -> list[OperationRunRef]:
         spec_overrides = spec_overrides or {}
+        roots = list(dict.fromkeys(refs))
+        retry_set = set(roots)
+        for ref in roots:
+            retry_set.update(self._active_downstream_refs(ref))
         replacements: list[tuple[OperationRunRef, OperationRunRef]] = []
-        for old_ref in [ref, *self._active_downstream_refs(ref)]:
+        runnable: list[OperationRunRef] = []
+        for old_ref in self._retry_closure_order(retry_set):
             old_run = self.get_run(old_ref)
             if old_run.status in {'pending', 'checkpointed'} and not old_run.output_refs:
                 for old, new in replacements:
                     if old in old_run.depends_on: self.replace_dependency(old, new, old_ref)
                     else: self._refresh_inputs_for_replaced_dependency(old_run, old, new, add_dependency=True)
+                runnable.append(old_ref)
                 continue
             new_ref = self._create_retry_run(old_ref, replacements, source_message_id=source_message_id,
                                              spec_override=spec_overrides.get(str(old_ref)))
             replacements.append((old_ref, new_ref))
-        return [new for _, new in replacements]
+        return [*runnable, *[new for _, new in replacements]]
 
     def settle_retry_replacements(self, replacements: list[OperationRunRef], *,
                                   reason: str = 'retry succeeded') -> None:
@@ -433,16 +444,16 @@ class OperationGraph:
         return parents
 
     def _active_downstream_refs(self, ref: OperationRunRef) -> list[OperationRunRef]:
-        target_outputs = {output.artifact_id for output in self.get_run(ref).output_refs}
         downstream: set[OperationRunRef] = set()
         queue = deque([ref])
         while queue:
             current = queue.popleft()
+            current_outputs = self._writer_artifact_ids(self.get_run(current))
             for candidate_ref in self._topological_run_refs():
                 if candidate_ref == ref or candidate_ref in downstream: continue
                 candidate = self.get_run(candidate_ref)
                 if candidate.superseded_by: continue
-                if not self._depends_on_or_uses(candidate, current, target_outputs): continue
+                if not self._depends_on_or_uses(candidate, current, current_outputs): continue
                 downstream.add(candidate_ref)
                 queue.append(candidate_ref)
         return self._topological_run_refs(downstream)
@@ -451,6 +462,18 @@ class OperationGraph:
         if parent_ref in run.depends_on: return True
         if parent_output_ids and any(ref.artifact_id in parent_output_ids for ref in run.input_refs): return True
         return bool(parent_output_ids & set(run.spec.required_artifact_ids))
+
+    def _retry_closure_order(self, refs: set[OperationRunRef]) -> list[OperationRunRef]:
+        selected = [ref for ref in self._topological_run_refs() if ref in refs]
+
+        def parents_of(ref: OperationRunRef) -> list[OperationRunRef]:
+            run = self.get_run(ref)
+            return [candidate for candidate in selected if candidate != ref
+                    and self._depends_on_or_uses(run, candidate, self._writer_artifact_ids(self.get_run(candidate)))]
+
+        ordered = _topological_order(selected, parents_of)
+        if len(ordered) != len(selected): raise ValueError('operation retry closure must be a DAG')
+        return ordered
 
     def _dependencies_satisfied(self, run: OperationRun) -> bool:
         return all(self.get_run(dep).status == 'ended' and self.get_run(dep).outcome in _DONE_OUTCOMES

@@ -35,6 +35,18 @@ def normalize_chat_stream_url(url: str, field: str) -> str:
         else f'{parsed.scheme}://{netloc}{parsed.path}'
 
 
+def normalize_chat_target_url(url: str, field: str) -> str:
+    parsed, netloc = _parse_http_url(url, field)
+    allowed = {'/conversations:chat', '/api/core/conversations:chat', '/api/chat', '/api/chat/stream'}
+    if _has_url_delimiter(url, parsed) or parsed.path not in allowed:
+        raise ValueError(f'{field} must be a core conversations:chat or chat stream endpoint')
+    if parsed.path == '/api/chat':
+        path = '/api/chat/stream'
+    else:
+        path = parsed.path
+    return f'{parsed.scheme}://{netloc}{path}'
+
+
 def normalize_http_origin(url: str, field: str) -> str:
     parsed, netloc = _parse_http_url(url, field)
     if _has_url_delimiter(url, parsed) or parsed.path not in {'', '/'}:

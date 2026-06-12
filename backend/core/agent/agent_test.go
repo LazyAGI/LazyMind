@@ -806,6 +806,13 @@ func TestBuildReplayFrameForMessageOmitsSSEIDAndUsesDataOnly(t *testing.T) {
 	}
 }
 
+func TestMessageAnswerDeltaDoesNotBecomeTaskID(t *testing.T) {
+	payload := parseJSONValue(`{"type":"answer_delta","delta":"long assistant answer"}`)
+	if got := extractStringByExactKeys(payload, "task_id", "current_task_id"); got != "" {
+		t.Fatalf("answer delta must not be used as task id: %q", got)
+	}
+}
+
 func TestShouldSkipStreamRecordSkipsMessageHeartbeatAndEmptyData(t *testing.T) {
 	cases := []orm.AgentThreadRecord{
 		{StreamKind: streamKindMessage, EventName: "heartbeat", PayloadText: `{}`, RawFrame: "event: heartbeat\ndata: {}"},

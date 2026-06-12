@@ -726,7 +726,7 @@ services:
       LAZYMIND_EVO_LLM_ROLE: evo_llm
       LAZYMIND_EVO_KB_BASE_URL: http://doc-server:8000
       LAZYMIND_EVO_CHUNK_BASE_URL: http://doc-server:8000
-      LAZYMIND_EVO_TARGET_CHAT_URL: http://chat:8046/api/chat/stream
+      LAZYMIND_EVO_CORE_CHAT_URL: http://core:8000/conversations:chat
       LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
       LAZYMIND_MILVUS_URI: ${LAZYMIND_MILVUS_URI:-http://milvus:19530}
       LAZYMIND_OPENSEARCH_URI: ${LAZYMIND_OPENSEARCH_URI:-https://opensearch:9200}

@@ -198,7 +198,11 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	db.Where("conversation_id = ?", convID).Order("seq ASC").Find(&histories)
 	target := resolvePersistTarget(histories, raw, seq)
 	upstreamHistories := historiesForUpstream(histories, target)
-	sessionID := upstreamSessionID(convID)
+	sessionID, _ := raw["session_id"].(string)
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		sessionID = upstreamSessionID(convID)
+	}
 	resourceContext, err := evolution.BuildChatResourceContext(r.Context(), db, userID, userName, sessionID)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "build chat resource context failed", err), http.StatusInternalServerError)

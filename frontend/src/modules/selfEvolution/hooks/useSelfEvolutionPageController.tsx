@@ -1097,6 +1097,11 @@ export function SelfEvolutionPageController({
   );
   const openWorkflowArtifact = useCallback(
     (kind: WorkflowResultKind) => {
+      const step = workflowSteps.find((candidate) => candidate.id === artifactStepIdMap[kind]);
+      if (step && step.status !== "done") {
+        message.info(`${step.title}仍在执行，完成后可查看结果。`, 2);
+        return;
+      }
       setCaseArtifact(undefined);
       setActiveWorkbenchTab("artifacts");
       setActiveArtifactKind(kind);
@@ -1108,7 +1113,7 @@ export function SelfEvolutionPageController({
       setCollapsedArtifactSections((prev) => ({ ...prev, [artifactStepIdMap[kind]]: false }));
       void fetchWorkflowResult(kind, { force: true });
     },
-    [fetchWorkflowResult],
+    [fetchWorkflowResult, workflowSteps],
   );
 
   const openCaseArtifact = useCallback(
@@ -4105,19 +4110,12 @@ export function SelfEvolutionPageController({
                   {section.items.map((item) => {
                     const isActive = item.kind === activeArtifactItem?.kind;
                     const stepStatus = workflowSteps.find((candidate) => candidate.id === item.stepId)?.status || "pending";
-                    const canOpenArtifact = stepStatus === "done";
                     return (
                       <button
                         key={item.kind}
                         type="button"
                         className={`self-evolution-artifact-item${isActive ? " is-active" : ""}`}
-                        onClick={() => {
-                          if (!canOpenArtifact) {
-                            message.info(`${item.title}尚未生成完整产物，可在 Case 进度中查看已完成的单 case 结果。`, 2);
-                            return;
-                          }
-                          openWorkflowArtifact(item.kind);
-                        }}
+                        onClick={() => openWorkflowArtifact(item.kind)}
                       >
                         <span className="self-evolution-artifact-item-title">{item.title}</span>
                         <span className="self-evolution-artifact-item-desc">{item.desc}</span>

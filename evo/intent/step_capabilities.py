@@ -35,6 +35,14 @@ PATCH_SEMANTIC = {
     'question': STR, 'answer': STR, 'question_type': REGEN_TYPE, 'difficulty': DIFFICULTY, 'grading_guidance': STR,
     'reference_context': ARR, 'reference_doc': ARR, 'reference_doc_ids': ARR, 'reference_chunk_ids': ARR,
 }
+JUDGE_PATCH_SEMANTIC = {
+    'answer_correctness': NUM, 'faithfulness': NUM, 'doc_recall': NUM, 'context_recall': NUM,
+    'is_correct': {'type': 'boolean'}, 'quality_label': STR, 'failure_type': STR, 'reason': STR, 'defect': STR,
+}
+CLASSIFICATION_PATCH_SEMANTIC = {
+    'coarse_category': STR, 'fine_category': STR, 'confidence': STR, 'reason': STR,
+    'classification_method': STR, 'missing_evidence': ARR,
+}
 LOOP_FIELDS = {
     name: STR for name in ('candidate_workdir', 'candidate_service_command', 'candidate_healthcheck_url',
                            'candidate_chat_url', 'dataset_name', 'opencode_container')
@@ -140,6 +148,14 @@ def _defs() -> dict[str, list[dict[str, Any]]]:
              'required': ['thread_id'], 'effects': ['thread_control', 'retry_stage'],
              'task_type': 'control_task', 'risk': 'medium'},
             _control('retry_operation', '重试 operation', '用户明确要求重试某个 operation id'),
+            {'id': 'retry_dataset_cases', 'title': '重试指定测例生成',
+             'desc': '用户要求重新生成或重试指定测例编号时，重试对应 dataset case 生成根节点并传播下游影响。',
+             'use': ['用户要求重新生成、重跑、重试一个或多个测例/case，但没有提供完整 question/answer'],
+             'avoid': ['用户提供完整 question/answer 要直接覆盖样本，应走 regenerate_dataset_case；用户要求重跑整个阶段，应走 retry_stage'],
+             'system': {'target_case_ids': {'source': 'message_case_ids', 'case_id_format': 'zero4'}},
+             'params': {'target_case_ids': ARR}, 'required': ['target_case_ids'],
+             'effects': ['thread_control', 'retry_dataset_cases'],
+             'task_type': 'control_task', 'risk': 'medium'},
             _control('cancel_operation', '取消 operation', '用户要求停止、取消或打断当前 operation'),
             _control('cancel_running_operation', '取消当前运行 operation',
                      '用户要求取消当前正在运行的 task/opencode/repair，不给出 operation id', source='current_operation_id'),
@@ -148,6 +164,28 @@ def _defs() -> dict[str, list[dict[str, Any]]]:
              'use': ['用户明确确认继续当前 checkpoint、继续执行下一阶段、恢复暂停后的后续流程'], 'avoid': ['用户只是询问进度、描述希望稍后继续、或同时提出新的业务修改要求'],
              'semantic': {'input_policy': RESUME_POLICY}, 'params': {'input_policy': RESUME_POLICY},
              'effects': ['resume_checkpoint'], 'task_type': 'control_task', 'risk': 'medium'},
+            {'id': 'ensure_stage', 'title': '执行指定流程阶段',
+             'desc': '用户要求执行或继续到某个业务 step；由 canonical flow graph 检查前置产物和 freshness。',
+             'use': ['用户要求执行 step1/step2/step3/step4/step5、进入某阶段、从当前进度继续到某阶段'],
+             'avoid': ['用户明确要求重跑或重新生成，应走 restart_from_stage/retry_stage；用户只是询问进度'],
+             'semantic': {'stage_hint': STAGE_HINT},
+             'system': {'thread_id': {'source': 'ctx', 'key': 'thread_id'},
+                        'run_id': {'source': 'ctx', 'key': 'run_id'},
+                        'stage': {'source': 'ctx', 'key': 'current_stage'}},
+             'params': {'thread_id': STR, 'run_id': STR, 'stage': OPT_STR, 'stage_hint': STAGE_HINT},
+             'required': ['thread_id'], 'effects': ['flow_stage_control', 'ensure_stage'],
+             'task_type': 'control_task', 'risk': 'medium'},
+            {'id': 'restart_from_stage', 'title': '从指定阶段重新执行',
+             'desc': '用户要求重跑某个业务 step 或从某阶段重新执行；由 flow service 选择 stage root 并通过 graph 传播下游影响。',
+             'use': ['用户要求重新执行 step1/step2/step3/step4/step5、重跑某阶段、从某阶段开始重做'],
+             'avoid': ['用户明确给出 operation id，应走 retry_operation；用户只是继续当前 checkpoint'],
+             'semantic': {'stage_hint': STAGE_HINT},
+             'system': {'thread_id': {'source': 'ctx', 'key': 'thread_id'},
+                        'run_id': {'source': 'ctx', 'key': 'run_id'},
+                        'stage': {'source': 'ctx', 'key': 'current_stage'}},
+             'params': {'thread_id': STR, 'run_id': STR, 'stage': OPT_STR, 'stage_hint': STAGE_HINT},
+             'required': ['thread_id'], 'effects': ['flow_stage_control', 'restart_from_stage'],
+             'task_type': 'control_task', 'risk': 'medium'},
             {'id': 'redirect_research', 'op': 'RedirectResearchOperation', 'writes': 'ResearchRedirect',
              'title': '调整研究方向', 'desc': '把用户给出的研究员 id 和新指令写成 ResearchRedirect artifact。',
              'use': ['用户要求把研究、分析或搜索方向交给某个 researcher 调整'], 'avoid': ['用户要求修改数据集、评测或 repair 代码'],
@@ -257,6 +295,16 @@ def _defs() -> dict[str, list[dict[str, Any]]]:
                         'report_id': _const('eval_report')},
              'params': {'eval_dataset_ref': STR, 'report_id': STR}, 'required': ['eval_dataset_ref', 'report_id'],
              'flow': 'eval', 'stage': 'aggregate', 'requires': ['eval_dataset'], 'effects': ['write_eval_report']},
+            {'id': 'patch_judge_result', 'op': 'PatchJudgeResultOperation', 'target': 'JudgeResult',
+             'writes': 'JudgeResult', 'title': '修正评测结果',
+             'desc': '按白名单字段修正某个 JudgeResult，后续 eval report/analysis/abtest 通过 graph impact 重建。',
+             'use': ['用户明确指出某个 case 的评测分数、正确性、失败类型或原因误判，需要修正评测结果'],
+             'avoid': ['用户要求重新调用 RAG 或重新 judge，应走评测重跑；用户要求直接改 ABTest 结论'],
+             'semantic': dict(JUDGE_PATCH_SEMANTIC),
+             'system': {'artifact_ref': _case_template('judge_result_{case_id}@v1')},
+             'params': dict(JUDGE_PATCH_SEMANTIC), 'required': [], 'flow': 'intent', 'stage': 'patch_judge_result',
+             'effects': ['write_judge_result', 'invalidates_downstream_eval'], 'risk': 'medium',
+             'cross_stage_policy': 'allowed_with_runtime_confirmation'},
         ], 'analysis': [
             {'id': 'coarse_classify_case', 'op': 'CaseCoarseClassificationOperation', 'target': 'EvalReport',
              'writes': 'CaseCoarseClassification', 'title': '粗分 badcase',
@@ -290,6 +338,16 @@ def _defs() -> dict[str, list[dict[str, Any]]]:
              'required': ['eval_report_ref', 'fine_classification_refs', 'output_id'], 'flow': 'analysis',
              'stage': 'classification_report', 'requires': {'source': 'classification_report_requires'},
              'effects': ['write_classification_report']},
+            {'id': 'patch_fine_classification', 'op': 'PatchClassificationOperation',
+             'target': 'CaseFineClassification', 'writes': 'CaseFineClassification', 'title': '修正细分分析结果',
+             'desc': '按白名单字段修正某个 CaseFineClassification，后续 classification report 通过 graph impact 重建。',
+             'use': ['用户明确指出某个 case 的细分类别、原因、置信度误判，需要修改分析结果'],
+             'avoid': ['用户要求重新分析，应走 classify rerun；用户要求修改评测分数，应走 patch_judge_result'],
+             'semantic': dict(CLASSIFICATION_PATCH_SEMANTIC),
+             'system': {'artifact_ref': _case_template('case_fine_classification_{case_id}@v1')},
+             'params': dict(CLASSIFICATION_PATCH_SEMANTIC), 'required': [], 'flow': 'intent',
+             'stage': 'patch_fine_classification', 'effects': ['write_case_fine_classification'],
+             'risk': 'medium', 'cross_stage_policy': 'allowed_with_runtime_confirmation'},
         ], 'abtest': [
             {'id': 'compare_abtest_result', 'op': 'CompareABTestOperation', 'targets': ['EvalReport'],
              'writes': 'ABTestComparison', 'title': '对比 ABTest 结果',
@@ -427,6 +485,7 @@ def _resolve_system(spec: Any, ctx: dict[str, Any]) -> dict[str, Any]:
         return _const([f'case_fine_classification_{case_id}@v1' for case_id in ctx['bad_case_ids']])
     if source == 'current_operation_id': return {'source': source, 'value': ctx.get('running_operation_id', '')}
     if source in {'constant', 'message_artifact_ref', 'message_artifact_id', 'message_operation_id',
+                  'message_case_ids',
                   'source_span_mention'}:
         return spec
     raise ValueError(f'unsupported capability system source: {source}')

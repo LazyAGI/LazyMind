@@ -1,6 +1,10 @@
 """OperationGraph infrastructure."""
 
 from .graph import OperationGraph
+from .flow_graph import (
+    FlowGraphDefinition,
+    downstream_rebuild_roots,
+)
 from .models import (
     ArtifactSetRequirement,
     OperationRun,
@@ -17,6 +21,7 @@ from .models import (
 
 __all__ = [
     'ArtifactSetRequirement',
+    'FlowGraphDefinition',
     'OperationGraph',
     'OperationRun',
     'OperationRunChange',
@@ -28,4 +33,5 @@ __all__ = [
     'OperationSpec',
     'ScheduleBlocker',
     'ScheduleState',
+    'downstream_rebuild_roots',
 ]

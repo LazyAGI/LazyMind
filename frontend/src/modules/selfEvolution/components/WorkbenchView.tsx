@@ -347,7 +347,7 @@ export function SelfEvolutionWorkbenchView({
             </div>
             <div className="self-evolution-process-step-meta">
               <span>{getStepStatusLabel(item.step.status)}</span>
-              <strong>{item.eventCount ? `${item.eventCount} 个事件` : getStepStatusLabel(item.step.status)}</strong>
+              <strong>{item.eventCount ? `${item.eventCount} 个任务` : getStepStatusLabel(item.step.status)}</strong>
             </div>
             <Paragraph className="self-evolution-process-step-detail">
               {stepDetail}

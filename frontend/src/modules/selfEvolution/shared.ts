@@ -1826,7 +1826,9 @@ function updateEvalProgressPhases(
 
   const currentPhase = next.find((item) => item.id === phase);
   const progressSnapshot = progress || {
-    statusText: getEvalProgressStatusLabel(action, phase),
+    statusText: isActionKind(action, "finish") && isOperationScoped
+      ? `${getEvalPhaseLabel(phase)}中`
+      : getEvalProgressStatusLabel(action, phase),
     percent: isActionKind(action, "finish") && !isOperationScoped ? 100 : currentPhase?.percent ?? 0,
   };
 
@@ -3693,6 +3695,47 @@ function isCutoverCompletedEvent(event: NormalizedThreadEvent) {
     (isActionKind(event.action, "finish") || event.progress?.percent === 100);
 }
 
+function getStageLogicalTaskCount(events: NormalizedThreadEvent[], stage: ThreadEventStage) {
+  const keys = new Set<string>();
+  events.forEach((event) => {
+    const payload = event.payload;
+    const operationRefs = getStructuredArrayField(payload, ["operation_refs"]);
+    operationRefs?.forEach((item) => {
+      if (typeof item !== "string") {
+        return;
+      }
+      const flowKind = operationFlowKindFromRef(item);
+      if (stage === "eval" && flowKind !== "eval.rag_answer" && flowKind !== "eval.judge_answer") {
+        return;
+      }
+      keys.add(item);
+    });
+    const operationRunId = getOperationRunId(payload);
+    if (!operationRunId) {
+      return;
+    }
+    const flowKind = getEventFlowKind(payload) || operationFlowKindFromRef(operationRunId);
+    if (stage === "eval" && flowKind !== "eval.rag_answer" && flowKind !== "eval.judge_answer") {
+      return;
+    }
+    keys.add(operationRunId);
+  });
+  return keys.size || events.length;
+}
+
+function operationFlowKindFromRef(ref: string) {
+  if (/^(?:eval|eval_retry_\d+)\.rag\./.test(ref)) {
+    return "eval.rag_answer";
+  }
+  if (/^(?:eval|eval_retry_\d+)\.judge\./.test(ref)) {
+    return "eval.judge_answer";
+  }
+  if (/^(?:eval|eval_retry_\d+)\.aggregate$/.test(ref)) {
+    return "eval.aggregate";
+  }
+  return "";
+}
+
 export function buildEvoProcessDashboard(
   events: NormalizedThreadEvent[],
   runtimeState: WorkflowRuntimeState,
@@ -3728,7 +3771,7 @@ export function buildEvoProcessDashboard(
           : step.progress || stageProgressFromEvents(sortedEvents, stage),
       },
       stage,
-      eventCount: stageEvents.length,
+      eventCount: getStageLogicalTaskCount(stageEvents, stage),
       latestActivity: stageEvents.length ? buildEventActivity(stageEvents[stageEvents.length - 1]) : undefined,
     };
   });

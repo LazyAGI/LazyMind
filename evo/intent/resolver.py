@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
+from ..artifacts import ArtifactRef
 from ..internal_ids import is_synthetic_operation, latest_failed_stage_from_events, stage_group
 from ..operations import OperationGraph
 from ..store import EvoStore
@@ -52,6 +53,7 @@ class EvoTargetResolver:
     def _resolve_one(self, request: IntentRequest, intent: AtomicIntent,
                      allowed: dict[str, dict]) -> AtomicIntent | None:
         capability_id = str(intent.target.get('capability_id') or intent.action or '')
+        intent = self._bind_latest_artifact_ref(intent)
         if capability_id == 'read_run_status_query' and self._asks_for_failure(request.message):
             capability_id = 'explain_run_failure_query'
             intent = self._retarget(intent, capability_id, kind='query')
@@ -85,12 +87,30 @@ class EvoTargetResolver:
             stage = self._stage_hint(request.message, intent) or self._latest_failed_stage() or self._current_stage()
             return self._with_stage(intent, stage) if stage else None
 
+        if capability_id in {'ensure_stage', 'restart_from_stage'}:
+            stage = self._stage_hint(request.message, intent) or self._current_stage()
+            return self._with_stage(intent, stage) if stage else None
+
         if capability_id in {'cancel_operation', 'cancel_running_operation'} and not self._operation_ref(intent):
             if 'cancel_thread' in allowed:
                 return self._retarget(intent, 'cancel_thread', kind='flow_control')
             return None
 
         return intent
+
+    def _bind_latest_artifact_ref(self, intent: AtomicIntent) -> AtomicIntent:
+        raw = intent.target.get('artifact_ref')
+        if not raw: return intent
+        if not isinstance(raw, ArtifactRef) and '@v' not in str(raw): return intent
+        ref = raw if isinstance(raw, ArtifactRef) else ArtifactRef.parse(str(raw))
+        try:
+            latest = self.store.artifact_graph(self.run_id).latest_ref(ref.artifact_id)
+        except KeyError:
+            return intent
+        if latest == ref: return intent
+        target = dict(intent.target)
+        target['artifact_ref'] = str(latest)
+        return replace(intent, target=target)
 
     def _bind_failure_query(self, request: IntentRequest, intent: AtomicIntent) -> AtomicIntent:
         stage = self._stage_hint(request.message, intent) or self._latest_failed_stage() or self._current_stage()
