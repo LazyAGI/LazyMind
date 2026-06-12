@@ -60,7 +60,6 @@ def _view_node(node: ExecutionStep) -> TraceNodeView:
         status=node.status,
         start_time=node.start_time,
         end_time=node.end_time,
-        latency=_latency(node.start_time, node.end_time),
         input=normalize_io(raw_data.input if raw_data else None, node=node, direction='input'),
         output=normalize_io(raw_data.output if raw_data else None, node=node, direction='output'),
         metadata=_node_metadata(node),
@@ -131,8 +130,3 @@ def _node_metadata(node: ExecutionStep) -> dict[str, Any]:
         metadata['error_message'] = node.error_message
     return drop_empty(metadata)
 
-
-def _latency(start_time: float | None, end_time: float | None) -> float | None:
-    if start_time is None or end_time is None:
-        return None
-    return end_time - start_time
