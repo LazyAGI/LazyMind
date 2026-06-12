@@ -56,7 +56,6 @@ class TraceNodeView:
     status: str
     start_time: float
     end_time: float | None
-    latency: float | None
     input: TraceIOView
     output: TraceIOView
     metadata: dict[str, Any] = field(default_factory=dict)
