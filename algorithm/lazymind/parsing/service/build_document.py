@@ -34,25 +34,24 @@ def _build_store_config(index_kwargs):
         raise ValueError('LAZYMIND_MILVUS_URI is required')
 
     store_type = _cfg['segment_store_type']
+    uri_or_path = _cfg['segment_store_uri_or_path']
     if store_type == 'SQLiteStore':
-        segment_store = {
-            'type': 'SQLiteStore',
-            'kwargs': {'db_path': _cfg['sqlite_db_path']},
-        }
+        if not uri_or_path:
+            raise ValueError('LAZYMIND_SEGMENT_STORE_URI_OR_PATH is required for SQLite segment store')
+        segment_store = {'type': 'SQLiteStore', 'kwargs': {'db_path': uri_or_path}}
     elif store_type == 'opensearch':
-        opensearch_uri = _cfg['opensearch_uri']
-        if not opensearch_uri:
-            raise ValueError('LAZYMIND_OPENSEARCH_URI is required for opensearch segment store')
+        if not uri_or_path:
+            raise ValueError('LAZYMIND_SEGMENT_STORE_URI_OR_PATH is required for OpenSearch segment store')
         segment_store = {
             'type': store_type,
             'kwargs': {
-                'uris': opensearch_uri,
+                'uris': uri_or_path,
                 'client_kwargs': {
                     'http_compress': True,
                     'use_ssl': True,
                     'verify_certs': False,
-                    'user': _cfg['opensearch_user'],
-                    'password': _cfg['opensearch_password'] or 'LazyRAG_OpenSearch123!',
+                    'user': _cfg['segment_store_user'],
+                    'password': _cfg['segment_store_password'],
                 },
             },
         }

@@ -4,9 +4,9 @@ import requests
 
 from lazymind.config import config as _cfg
 
-_DEFAULT_ES_URL = _cfg['opensearch_uri'] or 'https://opensearch:9200'
-_DEFAULT_ES_USER = _cfg['opensearch_user']
-_DEFAULT_ES_PASSWORD = _cfg['opensearch_password'] or 'LazyRAG_OpenSearch123!'
+_DEFAULT_ES_URL = _cfg['segment_store_uri_or_path']
+_DEFAULT_ES_USER = _cfg['segment_store_user']
+_DEFAULT_ES_PASSWORD = _cfg['segment_store_password']
 
 
 def _normalize_es_url(url: Optional[str]) -> str:
