@@ -115,7 +115,6 @@ def _operation_for_view(operation: dict[str, Any]) -> dict[str, Any]:
     return operation
 
 
-
 def _can_dispatch(run: dict[str, Any]) -> bool:
     return run.get('status') == 'running' and not any(
         run.get(key) for key in ('dispatch_block_reason', 'blocked_operations', 'root_blockers', 'impacted_blockers')

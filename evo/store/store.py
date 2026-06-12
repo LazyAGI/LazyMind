@@ -361,6 +361,7 @@ def _has_dispatch_block(run: dict[str, Any]) -> bool:
     return any(run.get(key) for key in ('dispatch_block_reason', 'blocked_operations', 'root_blockers',
                                         'impacted_blockers'))
 
+
 @contextmanager
 def _file_lock(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)

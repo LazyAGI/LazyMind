@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any
 
 from ..artifacts import ArtifactRef
 from ..internal_ids import is_synthetic_operation, latest_failed_stage_from_events, stage_group
@@ -171,4 +170,3 @@ class EvoTargetResolver:
     def _retarget(intent: AtomicIntent, capability_id: str, *, kind: str) -> AtomicIntent:
         target = {**intent.target, 'capability_id': capability_id}
         return replace(intent, kind=kind, action=capability_id, target=target)
-

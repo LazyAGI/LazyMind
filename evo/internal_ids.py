@@ -6,7 +6,12 @@ SYNTHETIC_OPERATION_PREFIX = 'message.response.'
 
 
 def is_synthetic_operation(value: Any) -> bool:
-    operation_id = value if isinstance(value, str) else (value.get('operation_run_id') if isinstance(value, dict) else '')
+    if isinstance(value, str):
+        operation_id = value
+    elif isinstance(value, dict):
+        operation_id = value.get('operation_run_id')
+    else:
+        operation_id = ''
     return str(operation_id or '').startswith(SYNTHETIC_OPERATION_PREFIX)
 
 

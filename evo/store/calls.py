@@ -145,7 +145,6 @@ def _update_operation(store: EvoStore, run_id: str, operation_run_id: str, recor
     rebuild_frontend_state_throttled(store, run_id)
 
 
-
 def _audited_adapter_type(adapter_type: str) -> bool:
     return adapter_type in AUDITED_ADAPTER_TYPES or adapter_type.startswith(AUDITED_ADAPTER_PREFIXES)
 
