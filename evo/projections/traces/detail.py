@@ -164,7 +164,8 @@ def _agent_round_count(root: ExecutionStep | None) -> int:
         in_agent = in_agent or semantic_type == SemanticType.AGENT
         if in_agent and semantic_type in (SemanticType.TOOL, SemanticType.RETRIEVER, SemanticType.RERANK):
             return 0
-        return int(in_agent and semantic_type == SemanticType.LLM) + sum(visit(child, in_agent) for child in node.children)
+        is_agent_llm = int(in_agent and semantic_type == SemanticType.LLM)
+        return is_agent_llm + sum(visit(child, in_agent) for child in node.children)
 
     return visit(root, False) if root else 0
 

@@ -129,4 +129,3 @@ def _node_metadata(node: ExecutionStep) -> dict[str, Any]:
     if node.error_message:
         metadata['error_message'] = node.error_message
     return drop_empty(metadata)
-
