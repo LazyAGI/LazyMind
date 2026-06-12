@@ -688,13 +688,15 @@ Use Markdown in the "content" field. The content is the entire `SKILL.md` file, 
 
 Required structure:
 - YAML frontmatter delimited by `---`
-- `name` and `description` fields in frontmatter
+- `name`, `category`, and `description` fields in frontmatter
 - Markdown instructions after the closing `---`
 
 Frontmatter requirements:
 - `name` must be lowercase letters, numbers, and hyphens only
 - `name` must be no more than 64 characters
 - `name` must not start or end with a hyphen
+- `category` must be a concise lowercase classification for the skill, such as `research`, `coding`, `writing`, `data-analysis`, `tool-use`, `planning`, `debugging`, `review`, or `general`
+- `category` must describe the reusable task family, not the source trajectory, user, project, or implementation detail
 - `description` must state when to use the skill and what reusable capability it provides
 - keep frontmatter concise; do not put trajectory history in metadata
 
@@ -736,19 +738,26 @@ Return ONLY valid JSON.
 
 {{
   "skill_name": "...",
+  "category": "...",
   "applicable_scenario": "...",
   "content": "..."
 }}
 
 # Field Requirements
 
+## category
+The same category value used in the SKILL.md YAML frontmatter.
+Choose the most specific reusable task family that fits the skill, using lowercase words and hyphens.
+Use `general` only when no more informative category applies.
+
 ## content
 A complete SKILL.md-style Markdown document.
 
 The content must:
 - be the full content of a valid `SKILL.md` file
-- start with YAML frontmatter containing at least `name` and `description`
+- start with YAML frontmatter containing at least `name`, `category`, and `description`
 - use a portable skill name that follows lowercase hyphenated naming rules
+- keep the top-level JSON `category` and frontmatter `category` identical
 - preserve the outline's procedure order
 - synthesize guidelines into natural step guidance
 - include recovery advice where failure patterns imply a branch
