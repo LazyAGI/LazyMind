@@ -1357,8 +1357,8 @@ const zhCN = {
       "当前暂无有效飞书认证，点击后填写 App ID / App Secret 并授权。",
     dataSourceSelectFeishuAuthTitle: "选择飞书认证",
     dataSourceSelectFeishuAuthIntro: "选择一个有效认证后继续配置飞书知识源。",
-    dataSourceAssetSearchPlaceholder: "搜索数据源、知识库",
-    dataSourceAssetNoResultTitle: "没有匹配的数据资产",
+    dataSourceAssetSearchPlaceholder: "请输入数据源名称",
+    dataSourceAssetNoResultTitle: "没有匹配的数据源",
     dataSourceAssetNoResultDesc: "调整搜索关键词或健康筛选后再试。",
     dataSourceAccessAlertTitle: "知识源接入",
     dataSourceAccessAlertDesc:
