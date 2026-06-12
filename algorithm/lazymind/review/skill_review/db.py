@@ -32,23 +32,39 @@ def read_session(
     end_time: datetime,
     user_ids: Optional[list[str]] = None,
 ) -> list[dict[str, Any]]:
-    """Read chat history rows in [start_time, end_time] by chat_histories.update_time."""
     normalized_user_ids = [str(item).strip() for item in (user_ids or []) if str(item).strip()]
-    where = 'ch.update_time >= :start_time AND ch.update_time <= :end_time'
-    params: dict[str, Any] = {'start_time': start_time, 'end_time': end_time}
+
+    params: dict[str, Any] = {
+        'start_time': start_time,
+        'end_time': end_time,
+    }
+
+    user_filter = ''
     if normalized_user_ids:
-        where += ' AND c.create_user_id = ANY(:user_ids)'
+        user_filter = 'AND c.create_user_id = ANY(:user_ids)'
         params['user_ids'] = normalized_user_ids
 
     query = text(
-        'SELECT ch.*, c.create_user_id'
-        ' FROM chat_histories ch'
-        ' LEFT JOIN conversations c ON ch.conversation_id = c.id'
-        f' WHERE {where}'
-        ' ORDER BY ch.update_time ASC'
+        f"""
+        WITH updated_sessions AS (
+            SELECT DISTINCT ch.conversation_id
+            FROM chat_histories ch
+            JOIN conversations c ON ch.conversation_id = c.id
+            WHERE ch.update_time >= :start_time
+              AND ch.update_time < :end_time
+              {user_filter}
+        )
+        SELECT ch.*, c.create_user_id
+        FROM chat_histories ch
+        JOIN updated_sessions us ON ch.conversation_id = us.conversation_id
+        JOIN conversations c ON ch.conversation_id = c.id
+        ORDER BY ch.conversation_id ASC, ch.create_time ASC
+        """
     )
+
     with _get_app_conn().connect() as conn:
         rows = conn.execute(query, params).mappings().all()
+
     return _convert_history([_jsonable_value(dict(row)) for row in rows])
 
 
