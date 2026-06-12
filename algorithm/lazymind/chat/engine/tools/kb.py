@@ -437,8 +437,8 @@ class KBToolGroup:
         index_name = resolve_index(group)
         size = max(1, min(int(size), _MAX_RESULT_ITEMS))
         doc = _DEFAULT_KB_DOCUMENT
-        LOG.info(f'[kb_keyword_search] keyword={keyword!r} docid={docid!r} group={group!r} '
-                 f'phrase={phrase} sort_by={sort_by!r} size={size}')
+        LOG.info(f'[kb_keyword_search] store={_cfg["segment_store_type"]!r} keyword={keyword!r} docid={docid!r} '
+                 f'group={group!r} phrase={phrase} sort_by={sort_by!r} size={size}')
 
         for kb_id in iter_lookup_ids(
             (config.get('filters') or {}).get('kb_id'),
