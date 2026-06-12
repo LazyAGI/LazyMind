@@ -1256,7 +1256,7 @@
   position: relative;
   display: grid;
   gap: 10px;
-  grid-template-columns: clamp(220px, 16vw, 300px) minmax(520px, 1fr) clamp(280px, 19vw, 340px);
+  grid-template-columns: clamp(220px, 16vw, 300px) minmax(520px, 1fr);
 }
 
 .self-evolution-workbench-nav,
@@ -1283,8 +1283,8 @@
 }
 
 .self-evolution-workbench-rail {
-  display: grid;
-  grid-template-rows: minmax(220px, 42%) minmax(300px, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   overflow: hidden;
   overscroll-behavior: contain;
@@ -1442,7 +1442,8 @@
 }
 
 .self-evolution-rail-section.is-artifacts {
-  min-height: 300px;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .self-evolution-rail-section-head {
@@ -3685,6 +3686,19 @@
   padding: 2px 6px 8px 26px;
 }
 
+#self-evolution-workbench-sidebar-processes.self-evolution-workbench-accordion-body {
+  gap: 0;
+  padding: 0;
+
+  > .self-evolution-artifact-sidebar.is-navigation {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding: 0;
+    gap: 0;
+  }
+}
+
 .self-evolution-message-nav-card {
   border: 1px solid #dbe8f9;
   border-radius: 7px;
@@ -4091,6 +4105,14 @@
   gap: 6px;
 }
 
+.self-evolution-artifact-empty.ant-typography {
+  margin: 0;
+  padding: 10px;
+  color: #6f86a3;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .self-evolution-artifact-drawer {
   position: absolute;
   z-index: 30;
@@ -4151,7 +4173,7 @@
 
 @media (max-width: 1280px) {
   .self-evolution-workbench {
-    grid-template-columns: clamp(200px, 18vw, 260px) minmax(420px, 1fr) clamp(280px, 26vw, 340px);
+    grid-template-columns: clamp(200px, 18vw, 260px) minmax(420px, 1fr);
   }
 }
 
@@ -4258,31 +4280,33 @@
 .self-evolution-artifact-item {
   width: 100%;
   min-width: 0;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
+  border: 1px solid #dce8f7;
+  border-radius: 8px;
+  background: #ffffff;
   color: #284664;
   cursor: pointer;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px;
-  padding: 7px 8px;
+  padding: 9px 10px;
   text-align: left;
 
   &:hover,
   &:focus-visible {
     background: #f2f8ff;
+    border-color: #9bc3f2;
     outline: none;
   }
 
   &.is-active {
-    border-color: transparent;
+    border-color: #8ebeff;
     background: #eaf4ff;
-    box-shadow: inset 2px 0 0 #1e6dde;
+    box-shadow: inset 3px 0 0 #1e6dde;
   }
 }
 
 .self-evolution-artifact-item-title {
+  min-width: 0;
   overflow: hidden;
   font-size: 12px;
   font-weight: 800;
@@ -4293,12 +4317,21 @@
 
 .self-evolution-artifact-item-desc,
 .self-evolution-artifact-detail-head span {
+  min-width: 0;
   color: #6b84a2;
   font-size: 11px;
   line-height: 1.35;
 }
 
+.self-evolution-artifact-item-desc {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .self-evolution-artifact-item-status {
+  align-self: start;
   width: fit-content;
   border: 1px solid #d3e3f6;
   border-radius: 999px;

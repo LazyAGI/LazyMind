@@ -6,7 +6,6 @@ import {
   CloseOutlined,
   ClockCircleFilled,
   DownOutlined,
-  FileTextOutlined,
   HistoryOutlined,
   PlusOutlined,
 } from "@ant-design/icons";
@@ -36,14 +35,6 @@ const { Paragraph, Text, Title } = Typography;
 type SelfEvolutionSessionSummary = {
   id: string;
   title: string;
-};
-
-const completedStepDetails: Record<string, string> = {
-  dataset: "数据集已生成并写入本轮自进化流程。",
-  eval: "评测已完成，基线结果已用于后续分析。",
-  analysis: "错误分析已完成，归因与修复优先级已生成。",
-  repair: "代码优化阶段已完成，候选改动已进入对照验证。",
-  abtest: "ABTest 已完成，结论已写入最终结果。",
 };
 
 const activeStageTitles: Record<string, string> = {
@@ -110,6 +101,7 @@ export type SelfEvolutionWorkbenchViewProps = {
   onRetryRestoreThread: () => void;
   onCloseSession: (sessionId: string) => void;
   onSelectHistorySession: (entry: SelfEvolutionHistoryEntry) => void;
+  onEnterHistorySession: (entry: SelfEvolutionHistoryEntry) => void;
   onDeleteHistorySession: (
     entry: SelfEvolutionHistoryEntry,
     event: MouseEvent<HTMLElement>,
@@ -172,6 +164,7 @@ export function SelfEvolutionWorkbenchView({
   onRetryRestoreThread,
   onCloseSession,
   onSelectHistorySession,
+  onEnterHistorySession,
   onDeleteHistorySession,
   onCreateSession,
   onOpenHistorySessionModal,
@@ -197,7 +190,7 @@ export function SelfEvolutionWorkbenchView({
   const activeStageOverview = displayStage ? processDashboard.overview.find((item) => item.stage === displayStage) : undefined;
   const activeStageLabel =
     displayStage
-      ? activeStageTitles[displayStage] || activeStageOverview?.step.title
+      ? activeStageTitles[displayStage] || activeStageOverview?.step.title || activeStepText
       : activeStepText;
   const checkpointDecisionPrompt = processDashboard.checkpoint || displayedCheckpointWaitPrompt;
   const isCutoverDecision = Boolean(
@@ -317,58 +310,9 @@ export function SelfEvolutionWorkbenchView({
       </div>
     </section>
   );
-  const renderProcessOverview = () => (
-    <div className="self-evolution-process-overview">
-      {processDashboard.overview.map((item) => {
-        const stepDetail = isReadOnlyEnded && item.step.status === "done"
-          ? completedStepDetails[item.stage] || "该阶段已完成。"
-          : item.stage === "abtest"
-          ? item.step.progress?.statusText || completedStepDetails[item.stage] || item.step.desc
-          : item.latestActivity?.detail || item.step.progress?.statusText || item.step.runtimeText || item.step.desc;
-        return (
-          <div
-            role="button"
-            tabIndex={0}
-            key={item.step.id}
-            className={`self-evolution-process-step is-${item.step.status}${displayStage === item.stage ? " is-active" : ""}`}
-            onClick={() => setSelectedStage(item.stage)}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter" && event.key !== " ") return;
-              event.preventDefault();
-              setSelectedStage(item.stage);
-            }}
-          >
-            <div className="self-evolution-process-step-head">
-              <span className="self-evolution-process-step-icon">
-                {item.step.status === "done" && <CheckCircleFilled />}
-                {(item.step.status === "running" || item.step.status === "paused") && <ClockCircleFilled />}
-                {item.step.status === "pending" && <FileTextOutlined />}
-                {(item.step.status === "failed" || item.step.status === "canceled") && <CloseOutlined />}
-              </span>
-              <span className="self-evolution-process-step-title">{activeStageTitles[item.stage] || item.step.title.replace(/^Step\s+\d+\s+·\s+/, "")}</span>
-            </div>
-            <div className="self-evolution-process-step-meta">
-              <span>{getStepStatusLabel(item.step.status)}</span>
-              <strong>{item.eventCount ? `${item.eventCount} 个事件` : getStepStatusLabel(item.step.status)}</strong>
-            </div>
-            <Paragraph className="self-evolution-process-step-detail">
-              {stepDetail}
-            </Paragraph>
-            {item.latestActivity?.artifactKind && item.step.status === "done" && (
-              <button
-                type="button"
-                className="self-evolution-process-step-action"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onOpenArtifact(item.latestActivity!.artifactKind!);
-                }}
-              >
-                {item.latestActivity.artifactLabel || "查看产物"}
-              </button>
-            )}
-          </div>
-        );
-      })}
+  const renderStageNavigationPanel = () => (
+    <div className="self-evolution-artifact-sidebar is-navigation">
+      {artifactNavigationPanel}
     </div>
   );
   const renderActivityRows = (activities: EvoProcessDashboard["recentActivities"], emptyText: string) => (
@@ -549,8 +493,9 @@ export function SelfEvolutionWorkbenchView({
   );
   const renderWorkbenchNavigationPanel = () => (
     <div className="self-evolution-workbench-accordion">
-      {renderSidebarSection("processes", "历史对话", "查看和切换所有自进化对话", renderHistoryNavigationPanel())}
+      {renderSidebarSection("history", "历史对话", "查看和切换所有自进化对话", renderHistoryNavigationPanel())}
       {renderSidebarSection("messages", "交互处理", "当前会话与消息入口", renderMessagesNavigationPanel())}
+      {renderSidebarSection("processes", "阶段概览", activeStageLabel, renderStageNavigationPanel())}
     </div>
   );
   return (
@@ -716,6 +661,8 @@ export function SelfEvolutionWorkbenchView({
                   </div>
                 )}
 
+                {isReadOnlyEnded && renderFinalResultCard()}
+
                 {!isReadOnlyEnded && (
                   <div className="self-evolution-process-activity">
                     <div className="self-evolution-process-activity-head">
@@ -822,25 +769,6 @@ export function SelfEvolutionWorkbenchView({
           </div>
         </main>
 
-        <aside className="self-evolution-workbench-rail" aria-label="进度与产物">
-          <section className="self-evolution-rail-section">
-            <div className="self-evolution-rail-section-head">
-              <Text>阶段概览</Text>
-              <span>{activeStageLabel}</span>
-            </div>
-            {renderProcessOverview()}
-          </section>
-          <section className="self-evolution-rail-section is-artifacts">
-            <div className="self-evolution-rail-section-head">
-              <Text>本次产物</Text>
-              <span>点击后从右侧展开详情</span>
-            </div>
-            <div className="self-evolution-artifact-sidebar">
-              {artifactNavigationPanel}
-            </div>
-          </section>
-        </aside>
-
         {isArtifactPanelOpen && (
           <section className="self-evolution-artifact-drawer" aria-label="产物详情抽屉">
             <div className="self-evolution-artifact-drawer-head">
@@ -864,6 +792,7 @@ export function SelfEvolutionWorkbenchView({
           onCancel={onCloseHistorySessionModal}
           onRetry={onRetryThreadHistoryList}
           onSelectHistorySession={onSelectHistorySession}
+          onEnterHistorySession={onEnterHistorySession}
           onDeleteHistorySession={onDeleteHistorySession}
         />
 

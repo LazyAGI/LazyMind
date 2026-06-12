@@ -186,13 +186,6 @@ const stageArtifactKindMap: Record<string, WorkflowResultKind> = {
   abtest: "abtests",
 };
 const legacyPlanningThinkingText = "正在理解你的请求并规划下一步。";
-const artifactStepIdMap: Record<WorkflowResultKind, WorkflowStep["id"]> = {
-  datasets: "dataset",
-  "eval-reports": "px-report",
-  "analysis-reports": "analysis",
-  diffs: "code-optimize",
-  abtests: "ab-test",
-};
 
 const finalResultMetricLabels: Record<string, string> = {
   answer_correctness: "答案正确性",
@@ -288,7 +281,6 @@ export function SelfEvolutionPageController({
   const [historyPreviewMessages, setHistoryPreviewMessages] = useState<ChatMessage[]>([]);
   const [historyPreviewError, setHistoryPreviewError] = useState("");
   const [isLoadingHistoryPreview, setIsLoadingHistoryPreview] = useState(false);
-  const [collapsedArtifactSections, setCollapsedArtifactSections] = useState<Record<string, boolean>>({});
   const [workflowRuntimeState, setWorkflowRuntimeState] = useState<WorkflowRuntimeState>(
     createInitialWorkflowRuntimeState,
   );
@@ -1097,14 +1089,13 @@ export function SelfEvolutionPageController({
   const openWorkflowArtifact = useCallback(
     (kind: WorkflowResultKind) => {
       setCaseArtifact(undefined);
-      setActiveWorkbenchTab("artifacts");
+      setActiveWorkbenchTab("processes");
       setActiveArtifactKind(kind);
       setIsArtifactPanelOpen(true);
       setPreviewHistoryKey(undefined);
       setHistoryPreviewTitle("");
       setHistoryPreviewMessages([]);
       setHistoryPreviewError("");
-      setCollapsedArtifactSections((prev) => ({ ...prev, [artifactStepIdMap[kind]]: false }));
       void fetchWorkflowResult(kind, { force: true });
     },
     [fetchWorkflowResult],
@@ -1116,14 +1107,13 @@ export function SelfEvolutionPageController({
         message.warning("当前没有可用线程 ID，无法请求 case 结果。", 2);
         return;
       }
-      setActiveWorkbenchTab("artifacts");
+      setActiveWorkbenchTab("processes");
       setActiveArtifactKind(kind);
       setIsArtifactPanelOpen(true);
       setPreviewHistoryKey(undefined);
       setHistoryPreviewTitle("");
       setHistoryPreviewMessages([]);
       setHistoryPreviewError("");
-      setCollapsedArtifactSections((prev) => ({ ...prev, [artifactStepIdMap[kind]]: false }));
       setCaseArtifact({ kind, artifactId, title, loading: true });
       try {
         const response = await axiosInstance.get(`${AGENT_API_BASE}/threads/${encodeURIComponent(activeThreadId)}/artifacts/${encodeURIComponent(artifactId)}`);
@@ -4039,19 +4029,14 @@ export function SelfEvolutionPageController({
   ];
 
   const activeArtifactItem = artifactItems.find((item) => item.kind === activeArtifactKind);
-  const artifactSections = artifactItems.map((item) => {
-    const step = workflowSteps.find((candidate) => candidate.id === item.stepId);
-    return {
-      id: item.stepId,
-      title: step?.title || item.sectionTitle,
-      desc: step?.status === "done" ? item.sectionDesc : step?.runtimeText || item.sectionDesc,
-      status: step?.status || "pending",
-      items: [item],
-    };
-  });
+  const visibleArtifactItems = artifactItems.filter((item) =>
+    workflowSteps.some((step) => step.id === item.stepId),
+  );
+  const getArtifactStep = (item: ArtifactPanelItem) =>
+    workflowSteps.find((step) => step.id === item.stepId);
   const getArtifactStatusLabel = (item: ArtifactPanelItem) => {
     const state = workflowResults[item.kind];
-    const step = workflowSteps.find((candidate) => candidate.id === item.stepId);
+    const step = getArtifactStep(item);
     if (state.loading) {
       return "加载中";
     }
@@ -4065,74 +4050,47 @@ export function SelfEvolutionPageController({
   };
   const renderArtifactNavigationPanel = () => (
     <>
-        {artifactSections.map((section) => {
-          const isCollapsed = activeWorkbenchTab !== "artifacts" || (collapsedArtifactSections[section.id] ?? true);
-          const isSectionActive = activeArtifactItem
-            ? section.items.some((item) => item.kind === activeArtifactItem.kind)
-            : false;
+      {visibleArtifactItems.length === 0 ? (
+        <Paragraph className="self-evolution-artifact-empty">
+          启动后会按执行进度显示产物。
+        </Paragraph>
+      ) : (
+        visibleArtifactItems.map((item) => {
+          const step = getArtifactStep(item);
+          const stepStatus = step?.status || "pending";
+          const isActive = item.kind === activeArtifactItem?.kind;
+          const resultState = workflowResults[item.kind];
+          const hasLoadedArtifact = resultState.loaded && !isEmptyResultPayload(resultState.data);
+          const canOpenArtifact = stepStatus === "done" || hasLoadedArtifact;
+
           return (
-            <section
-              key={section.id}
-              className={`self-evolution-artifact-section${isSectionActive ? " is-active" : ""}`}
+            <button
+              key={item.kind}
+              type="button"
+              className={`self-evolution-artifact-item${isActive ? " is-active" : ""}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (!canOpenArtifact) {
+                  message.info(`${item.title}尚未生成完整产物。`, 2);
+                  return;
+                }
+                openWorkflowArtifact(item.kind);
+              }}
             >
-              <button
-                type="button"
-                className="self-evolution-artifact-section-toggle"
-                onClick={() => {
-                  setActiveWorkbenchTab("artifacts");
-                  setCollapsedArtifactSections((prev) => ({
-                    ...prev,
-                    [section.id]: activeWorkbenchTab === "artifacts" ? !(prev[section.id] ?? true) : false,
-                  }));
-                }}
-                aria-expanded={!isCollapsed}
-                aria-controls={`self-evolution-artifact-section-${section.id}`}
-              >
-                <DownOutlined />
-                <span className="self-evolution-artifact-section-copy">
-                  <span className="self-evolution-artifact-section-title">{section.title}</span>
-                  <span className="self-evolution-artifact-section-desc">{section.desc}</span>
-                </span>
-                <span className={`self-evolution-artifact-item-status is-${section.status}`}>
-                  {localizedGetStepStatusLabel(section.status)}
-                </span>
-              </button>
-              {!isCollapsed && (
-                <div
-                  id={`self-evolution-artifact-section-${section.id}`}
-                  className="self-evolution-artifact-section-body"
-                >
-                  {section.items.map((item) => {
-                    const isActive = item.kind === activeArtifactItem?.kind;
-                    const stepStatus = workflowSteps.find((candidate) => candidate.id === item.stepId)?.status || "pending";
-                    const canOpenArtifact = stepStatus === "done";
-                    return (
-                      <button
-                        key={item.kind}
-                        type="button"
-                        className={`self-evolution-artifact-item${isActive ? " is-active" : ""}`}
-                        onClick={() => {
-                          if (!canOpenArtifact) {
-                            message.info(`${item.title}尚未生成完整产物，可在 Case 进度中查看已完成的单 case 结果。`, 2);
-                            return;
-                          }
-                          openWorkflowArtifact(item.kind);
-                        }}
-                      >
-                        <span className="self-evolution-artifact-item-title">{item.title}</span>
-                        <span className="self-evolution-artifact-item-desc">{item.desc}</span>
-                        <span className={`self-evolution-artifact-item-status is-${stepStatus}`}>
-                          {getArtifactStatusLabel(item)}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
+              <span className="self-evolution-artifact-item-title">
+                {step?.title || item.sectionTitle}
+              </span>
+              <span className="self-evolution-artifact-item-desc">
+                {item.sectionDesc}
+              </span>
+              <span className={`self-evolution-artifact-item-status is-${stepStatus}`}>
+                {getArtifactStatusLabel(item)}
+              </span>
+            </button>
           );
-        })}
-      </>
+        })
+      )}
+    </>
   );
   const renderCaseArtifactPreview = () => {
     if (!caseArtifact) {
@@ -4231,6 +4189,7 @@ export function SelfEvolutionPageController({
           onCancel: () => setIsHistorySessionModalOpen(false),
           onRetry: () => void fetchThreadHistoryList(),
           onSelectHistorySession,
+          onEnterHistorySession: enterHistorySession,
           onDeleteHistorySession,
         },
         workbenchViewProps: {
@@ -4281,6 +4240,7 @@ export function SelfEvolutionPageController({
           },
           onCloseSession,
           onSelectHistorySession,
+          onEnterHistorySession: enterHistorySession,
           onDeleteHistorySession,
           onCreateSession,
           onOpenHistorySessionModal,
