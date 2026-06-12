@@ -47,17 +47,15 @@ def read_session(
     query = text(
         f"""
         WITH updated_sessions AS (
-            SELECT DISTINCT ch.conversation_id
-            FROM chat_histories ch
-            JOIN conversations c ON ch.conversation_id = c.id
-            WHERE ch.update_time >= :start_time
-              AND ch.update_time < :end_time
+            SELECT c.id AS conversation_id, c.create_user_id
+            FROM conversations c
+            WHERE c.updated_at >= :start_time
+              AND c.updated_at < :end_time
               {user_filter}
         )
-        SELECT ch.*, c.create_user_id
+        SELECT ch.*, us.create_user_id
         FROM chat_histories ch
         JOIN updated_sessions us ON ch.conversation_id = us.conversation_id
-        JOIN conversations c ON ch.conversation_id = c.id
         ORDER BY ch.conversation_id ASC, ch.create_time ASC
         """
     )
