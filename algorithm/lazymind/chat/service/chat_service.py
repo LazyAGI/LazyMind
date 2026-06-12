@@ -235,27 +235,48 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                     p_session = agentic_config.get('plugin_session_id', '') or pctx_data.get('plugin_session_id', '')
                     p_step = agentic_config.get('plugin_step', '') or pctx_data.get('current_step_id', '')
                     if p_id and p_session and p_step:
-                        LOG.warning(
-                            '[ChatServer] plugin turn produced no step_trigger '
-                            '(LLM likely used reasoning mode); synthesizing fallback '
-                            'step_trigger for step=%r session=%r', p_step, p_session,
-                        )
-                        # Use the LLM's plain-text output as user_input if available,
-                        # otherwise fall back to the original user query.
-                        fallback_user_input = (
-                            str(final_result).strip() if final_result else query
-                        ) or query
-                        fallback_trigger = {
-                            'type': 'step_trigger',
-                            'plugin_id': p_id,
-                            'plugin_session_id': p_session,
-                            'step_id': p_step,
-                            'step_mode': 'auto',
-                            'user_input': fallback_user_input,
-                            'inputs': [],
-                            'reachable_step_count': 1,
-                        }
-                        yield sse_line({'type': 'plugin_event', 'data': fallback_trigger})
+                        # Try to advance to the next reachable step instead of repeating
+                        # the current one.  This handles the case where the LLM produced a
+                        # plain-text "advance_step(...)" call rather than an actual tool call.
+                        from lazymind.chat.plugins.loader import plugin_loader
+                        next_step = None  # None means "no reachable step found"
+                        if plugin_loader.is_loaded(p_id):
+                            sm = plugin_loader.get_state_machine(p_id)
+                            if sm is not None:
+                                reachable = sm.get_reachable_steps(p_step)
+                                if reachable:
+                                    next_step = reachable[0]
+                        if next_step is None:
+                            # Current step is the terminal step — no fallback needed.
+                            # Go's plugin loop will exit when streamChatTurn returns nil.
+                            LOG.warning(
+                                '[ChatServer] plugin turn produced no step_trigger and '
+                                'step=%r has no reachable successors; plugin session will end.',
+                                p_step,
+                            )
+                        else:
+                            LOG.warning(
+                                '[ChatServer] plugin turn produced no step_trigger '
+                                '(LLM likely used reasoning mode); synthesizing fallback '
+                                'step_trigger for step=%r → next=%r session=%r',
+                                p_step, next_step, p_session,
+                            )
+                            # Use the LLM's plain-text output as user_input if available,
+                            # otherwise fall back to the original user query.
+                            fallback_user_input = (
+                                str(final_result).strip() if final_result else query
+                            ) or query
+                            fallback_trigger = {
+                                'type': 'step_trigger',
+                                'plugin_id': p_id,
+                                'plugin_session_id': p_session,
+                                'step_id': next_step,
+                                'step_mode': 'auto',
+                                'user_input': fallback_user_input,
+                                'inputs': [],
+                                'reachable_step_count': 1,
+                            }
+                            yield sse_line({'type': 'plugin_event', 'data': fallback_trigger})
 
             for frame in translator.finish(final_result):
                 cost = round(time.time() - start_time, 3)

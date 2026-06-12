@@ -76,6 +76,12 @@ func streamPluginLoop(
 	for turn := 0; turn < maxAutoTurns; turn++ {
 		// 1. Call ChatAgent for this turn.
 		injectPluginContext(currentReqBody, pctx, pctx.Step)
+		// Use a fresh session_id each turn so lazyllm globals don't carry over stale state.
+		convIDRaw0, _ := currentReqBody["conversation_id"].(string)
+		if convIDRaw0 == "" {
+			convIDRaw0 = convID
+		}
+		currentReqBody["session_id"] = upstreamSessionID(convIDRaw0)
 		stepTrigger, mountNumSteps, updatedSessionID, err := streamChatTurn(ctx, pythonBaseURL, currentReqBody, sseSender, db, pctx.PluginSessionID, convID, userID)
 		if updatedSessionID != pctx.PluginSessionID {
 			// First mount assigned a real session ID; update pctx for all subsequent calls.
@@ -168,6 +174,14 @@ func streamPluginLoop(
 		llmCfgForDriver, _ := currentReqBody["llm_config"].(map[string]interface{})
 		judgment, _ := CallPluginDriver(ctx, pythonBaseURL,
 			stepTrigger.PluginSessionID, stepComplete.ResultSummary, llmCfgForDriver)
+
+		// If DriverAgent signals "DONE", the plugin workflow is complete — no more turns needed.
+		if strings.HasPrefix(strings.TrimSpace(judgment), "DONE") {
+			fmt.Printf("[Plugin] streamPluginLoopFromTrigger: DriverAgent signaled DONE after step=%s session=%s\n",
+				stepTrigger.StepID, pctx.PluginSessionID)
+			break
+		}
+
 		currentReqBody = injectDriverJudgmentIntoReqBody(currentReqBody, judgment)
 	}
 
@@ -211,6 +225,13 @@ func streamPluginLoopFromTrigger(
 			// Subsequent iterations: inject current plugin context so ChatAgent gets
 			// advance_step tool and knows which plugin/step is active.
 			injectPluginContext(currentReqBody, pctx, pctx.Step)
+			// Use a fresh session_id for each ChatAgent turn so lazyllm globals
+			// do not carry over stale state from a previous turn with the same id.
+			convIDRaw, _ := currentReqBody["conversation_id"].(string)
+			if convIDRaw == "" {
+				convIDRaw = convID
+			}
+			currentReqBody["session_id"] = upstreamSessionID(convIDRaw)
 			// Subsequent iterations: normal ChatAgent turn.
 			var mountNumSteps int
 			var updatedSessionID string
@@ -306,6 +327,14 @@ func streamPluginLoopFromTrigger(
 		llmCfgForDriver, _ := currentReqBody["llm_config"].(map[string]interface{})
 		judgment, _ := CallPluginDriver(ctx, pythonBaseURL,
 			stepTrigger.PluginSessionID, stepComplete.ResultSummary, llmCfgForDriver)
+
+		// If DriverAgent signals "DONE", the plugin workflow is complete.
+		if strings.HasPrefix(strings.TrimSpace(judgment), "DONE") {
+			fmt.Printf("[Plugin] streamPluginLoopFromTrigger: DriverAgent signaled DONE after step=%s session=%s\n",
+				stepTrigger.StepID, pctx.PluginSessionID)
+			break
+		}
+
 		currentReqBody = injectDriverJudgmentIntoReqBody(currentReqBody, judgment)
 	}
 
@@ -391,7 +420,8 @@ func streamChatTurn(
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1 MB per line
 	for scanner.Scan() {
 		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
+		// Accept both SSE "data: {...}" format and bare JSON lines (Python's sse_line format).
+		if !strings.HasPrefix(line, "data: ") && !strings.HasPrefix(line, "{") {
 			continue
 		}
 		data := strings.TrimPrefix(line, "data: ")
@@ -436,6 +466,18 @@ func streamChatTurn(
 				}
 				if stepTrigger.PluginSessionID == "" {
 					stepTrigger.PluginSessionID = pluginSessionID
+				}
+				// Update current_step_id in DB so Python middleware knows which step is active.
+				if db != nil && stepTrigger.PluginSessionID != "" && stepTrigger.StepID != "" {
+					_ = orm.UpdateCurrentStep(db, stepTrigger.PluginSessionID, stepTrigger.StepID)
+				}
+				// Also emit a step_change event so the frontend stays in sync.
+				if sseSender != nil {
+					_ = sseSender.SendEvent("plugin_event", map[string]interface{}{
+						"type":              "step_change",
+						"plugin_session_id": stepTrigger.PluginSessionID,
+						"step_id":           stepTrigger.StepID,
+					})
 				}
 				// First step_trigger is enough — break immediately so Go can start
 				// executing the step without waiting for Python's full agent loop
@@ -501,7 +543,8 @@ func streamStepTurn(
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1 MB per line
 	for scanner.Scan() {
 		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
+		// Accept both SSE "data: {...}" format and bare JSON lines (Python's sse_line format).
+		if !strings.HasPrefix(line, "data: ") && !strings.HasPrefix(line, "{") {
 			continue
 		}
 		data := strings.TrimPrefix(line, "data: ")

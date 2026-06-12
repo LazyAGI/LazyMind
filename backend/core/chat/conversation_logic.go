@@ -662,31 +662,38 @@ func handleStreamChat(
 	if !dualReply {
 		// Plugin context: hand off to the plugin event loop instead of the normal answer path.
 		if pluginCtx != nil && pluginCtx.PluginID != "" {
-			sender := &httpSSESender{w: w}
-			pluginExt := buildChatHistoryExtWithPlugin(reqBody, query, pluginCtx.PluginSessionID)
-			streamPluginLoop(chatCtx, db, baseURL, *pluginCtx, reqBody, sender, convID)
-			// Persist a ChatHistory record so the plugin session can be recovered on reload.
-			now := time.Now()
-			if !target.IsRegeneration {
-				_ = db.Create(&orm.ChatHistory{
-					ID:             historyID,
-					Seq:            target.Seq,
-					ConversationID: convID,
-					RawContent:     query,
-					Content:        query,
-					Result:         "",
-					Ext:            pluginExt,
-					TimeMixin:      orm.TimeMixin{CreateTime: now, UpdateTime: now},
-				}).Error
-				db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
-			} else {
-				_ = db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
-					"ext":         pluginExt,
-					"update_time": now,
-				}).Error
-			}
-			db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
-			return
+		sender := &httpSSESender{w: w}
+		pluginExt := buildChatHistoryExtWithPlugin(reqBody, query, pluginCtx.PluginSessionID)
+		streamPluginLoop(chatCtx, db, baseURL, *pluginCtx, reqBody, sender, convID)
+		// Persist a ChatHistory record so the plugin session can be recovered on reload.
+		now := time.Now()
+		if !target.IsRegeneration {
+			_ = db.Create(&orm.ChatHistory{
+				ID:             historyID,
+				Seq:            target.Seq,
+				ConversationID: convID,
+				RawContent:     query,
+				Content:        query,
+				Result:         "",
+				Ext:            pluginExt,
+				TimeMixin:      orm.TimeMixin{CreateTime: now, UpdateTime: now},
+			}).Error
+			db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
+		} else {
+			_ = db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
+				"ext":         pluginExt,
+				"update_time": now,
+			}).Error
+		}
+		db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
+		// Send FINISH_REASON_STOP so the frontend knows the message is complete.
+		writeSSEChunk(w, flusher, map[string]any{
+			"conversation_id": convID,
+			"seq":             target.Seq,
+			"finish_reason":   "FINISH_REASON_STOP",
+			"history_id":      historyID,
+		})
+		return
 		}
 		// No pre-existing plugin session: use streamSingleAnswer (correct SSE format for the
 		// frontend) which now passes plugin_event frames through. If the LLM boots a plugin
@@ -713,14 +720,21 @@ func handleStreamChat(
 				// after seeing an empty ChatAgent response on the cold-start path).
 				pluginCtx, pluginCancel := context.WithTimeout(context.Background(), 30*time.Minute)
 				defer pluginCancel()
-				if bootstrapTrigger != nil {
-					streamPluginLoopFromTrigger(pluginCtx, db, baseURL, pctx,
-						bootstrapTrigger, reqBody, sender, convID)
-				} else {
-					streamPluginLoop(pluginCtx, db, baseURL, pctx, reqBody, sender, convID)
-				}
+			if bootstrapTrigger != nil {
+				streamPluginLoopFromTrigger(pluginCtx, db, baseURL, pctx,
+					bootstrapTrigger, reqBody, sender, convID)
+			} else {
+				streamPluginLoop(pluginCtx, db, baseURL, pctx, reqBody, sender, convID)
 			}
-			_ = sender.Send([]byte("[DONE]"))
+		}
+		// Send FINISH_REASON_STOP so the frontend knows the message is complete.
+		writeSSEChunk(w, flusher, map[string]any{
+			"conversation_id": convID,
+			"seq":             target.Seq,
+			"finish_reason":   "FINISH_REASON_STOP",
+			"history_id":      historyID,
+		})
+		_ = sender.Send([]byte("[DONE]"))
 		}
 		return
 	}

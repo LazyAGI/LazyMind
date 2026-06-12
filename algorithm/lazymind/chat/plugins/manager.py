@@ -284,11 +284,17 @@ def build_advance_step_tool(
         return [advance_step_blocked]
 
     reachable_steps = sm.get_reachable_steps(current_step)
-    # Include current_step so the LLM can trigger a retry of the same step
-    # when the user wants to redo it with new instructions.
-    # Deduplicate while preserving order: current_step first, then successors.
-    if current_step and current_step not in reachable_steps:
+    # Include current_step (for retry) only when it has successors — i.e. it is not
+    # the terminal step.  For the terminal step reachable_steps is empty, and adding
+    # current_step back would cause the LLM to re-execute the same step in a loop.
+    has_successors = bool(reachable_steps)
+    if current_step and current_step not in reachable_steps and has_successors:
         reachable_steps = [current_step] + reachable_steps
+
+    # Terminal step: no advance_step tool — Go's plugin loop will exit cleanly when
+    # streamChatTurn returns nil (no step_trigger produced).
+    if not reachable_steps:
+        return []
 
     reachable_str = ', '.join(f'"{s}"' for s in reachable_steps) if reachable_steps else '(none)'
 
