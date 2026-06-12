@@ -6,7 +6,9 @@
 
 **依赖关系**：无前置依赖，M1 是整个插件系统的起点。
 
-**验收标准（一句话）**：用户发送「生成一只戴帽子的猫」→ ChatAgent 触发 optimize_prompt → Go 调用 StepAgent 执行 → StepAgent 保存 artifact → Go 调用 DriverAgent 评判（auto 模式）→ ChatAgent 触发 generate_image → Go 调用 StepAgent 执行 → 前端弹出图片卡片；scenario 文件启动时校验通过并正确注入 agent context；checkpoint 写入 DB 并在重试时恢复；human 模式下等待用户输入后继续。
+**验收标准（一句话）**：用户发送「生成一只戴帽子的猫」→ ChatAgent 冷启动 `trigger_image-plugin`（mount + step_trigger 一次完成）→ Go 直接调用 StepAgent 执行 optimize_prompt → DriverAgent 评判 → ChatAgent `advance_step` 触发 generate_image → StepAgent 保存 image_url → DriverAgent 返回 DONE 结束 loop → 前端弹出图片卡片；scenario 文件启动时校验通过并正确注入 agent context；checkpoint 写入 DB 并在重试时恢复；human 模式下等待用户输入后继续。
+
+**当前落地状态（2026-06-12）**：后端 curl 端到端已通（`optimize_prompt → generate_image → DONE`）；前端 plugin 卡片展示仍待验证。详见 [十四、落地记录与计划偏差](#十四落地记录与计划偏差2026-06-11--2026-06-12)。
 
 ---
 
@@ -23,6 +25,8 @@
 - **Go 是唯一 Orchestrator**：负责调度 ChatAgent、StepAgent、DriverAgent，驱动多轮循环，写入所有持久化数据。
 - **Python 侧全部为无状态单次调用**：每个 API 端点接收上下文参数、执行、返回结果，无跨请求状态。
 - **ChatAgent 是决策者**：分析用户意图，决定触发哪个 step，通过 `step_trigger` 事件通知 Go；**不直接调用 StepAgent**。
+- **冷启动合并（已落地）**：无活跃 plugin session 时，ChatAgent 调用 `trigger_<plugin_id>` 一次性发出 `mount` + `step_trigger`；Go 缓存该 trigger 并走 `streamPluginLoopFromTrigger` 冷启动快路径，**跳过第二轮 ChatAgent** 直接执行首个 step。
+- **会话内推进（已落地）**：有活跃 plugin session 时，ChatAgent 仅暴露单一 `advance_step(step_id, user_input)` 工具（非原计划的 per-step `trigger_<step_id>`）；终端 step 不提供 `advance_step`，由 DriverAgent 返回 `DONE` 结束 loop。
 - **StepAgent 是执行者**：由 Go 直接调用（`/api/plugin/step` SSE 端点），接收完整上下文（step_spec、artifacts、checkpoint、step_exec_id），通过 SSE 流返回事件。
 - **DriverAgent 是评判者**：auto 模式下 step 完成后由 Go 调用，输出自然语言评判，不调用任何工具。
 
@@ -92,11 +96,16 @@ Go 通过查询 `plugin_session_steps WHERE step=pctx.Step ORDER BY created_at D
 4. **不使用 driver.md** 作为 guidance（driver.md 始终只给 DriverAgent）。
 5. 产生 warning：`Plugin {id} loaded in legacy mode (no state.yml)`。
 
-### 1.6 ChatAgent trigger 工具的语义
+### 1.6 ChatAgent 工具语义（冷启动 vs 会话内）
 
-**trigger 工具是「决策+校验+信号」工具，不是执行工具。**
+**两类工具，均为「决策+校验+信号」，不执行 StepAgent。**
 
-ChatAgent 调用 `trigger_<step_id>(user_input=...)` 时，工具函数内部执行两层校验后再发出信号：
+| 场景 | 工具 | 行为 |
+| ---- | ---- | ---- |
+| 无活跃 session（冷启动） | `trigger_<plugin_id>(user_input)` | 一次性 emit `mount` + `step_trigger(initial_step)` |
+| 有活跃 session（推进） | `advance_step(step_id, user_input)` | emit 单个 `step_trigger`；终端 step 不提供此工具 |
+
+`advance_step` / `trigger_<plugin_id>` 内部均调用 `trigger_plugin_step()`，执行两层校验后再发出信号：
 
 1. **格式校验**（Python 层，不需要 DB）：step_id 是否在状态机可达 step 中；user_input 是否非空。
 2. **依赖状态校验**（Python 层，查 DB）：从 `lazyllm.globals['agentic_config']['db_session_factory']` 获取 DB 连接，查询依赖 artifact 的实际状态，按 required/optional 语义判断是否满足。
@@ -109,6 +118,17 @@ Go 收到 `step_trigger` 事件后负责创建 DB 记录并调用 StepAgent。Ch
 
 曾考虑让 ChatAgent 内部直接调用 StepAgent，最终放弃——Go 作为唯一 Orchestrator 职责更清晰，且 Go 能在调 StepAgent 前预先完成 DB 初始化（生成 step_exec_id）。
 
+**ReactAgent 终端工具（落地新增）**：
+
+- `chat_service.py` 对 `trigger_<plugin_id>` 和 `advance_step` 调用 `react_agent.set_stop_tools(...)`，工具调用成功后 ReAct 循环**立即停止**，不再进入 summarize。
+- LazyLLM `ReactAgent` 新增 `set_stop_tools()` / `stop_condition` 支持（`algorithm/lazyllm/lazyllm/tools/agent/reactAgent.py`）。
+- StepAgent 侧对 `save_step_artifact` 同样设置 `set_stop_tools`，保存 artifact 后即结束。
+
+**LLM 未调用工具时的 fallback（落地新增）**：
+
+- 当 LLM 在 plugin 推进轮只输出纯文本（如 reasoning 模式）而未调用 `advance_step` 时，`chat_service.py` 会**合成 fallback `step_trigger`**，自动选取 `get_reachable_steps()[0]` 作为下一步。
+- 终端 step 不合成 fallback，避免死循环。
+
 ### 1.7 DriverAgent 语义
 
 **DriverAgent 是「评判者」而非「执行者」**：输出自然语言评判，不调用任何工具，不主动触发下一步。评判结果由 Go 以 `role: user` 注入下一轮 chat，ChatAgent 根据评判决定触发哪个 step。
@@ -118,6 +138,11 @@ Go 收到 `step_trigger` 事件后负责创建 DB 记录并调用 StepAgent。Ch
 - `driver.md` **不存在**：该插件**禁止使用 auto 模式**。plugin_loader 在加载时检查：若插件任一 step 的 `default_mode` 为 `auto` 且 `driver.md` 不存在，则产生 **error**（阻止加载）。插件作者必须要么提供 `driver.md`，要么将所有 step 改为 `human` 模式。
 - `driver.md` **存在但字数 < 3000**：`evaluate_step()` 在调用 LLM 前，自动在 prompt 末尾追加完整 `scenario.md` 内容，补充 DriverAgent 的场景语境。
 - `driver.md` **存在且字数 ≥ 3000**：直接使用 `driver.md`，不追加 scenario.md。
+
+**DriverAgent 裁决词扩展（落地偏差）**：
+
+- 原设计仅 PASS / RETRY / FAIL；落地后增加 **`DONE`** 语义：当末步成功且无需继续时，DriverAgent 以 `DONE` 开头输出裁决，Go `streamPluginLoop` 检测到后**立即结束 auto loop**，不再调用 ChatAgent。
+- 原因：`image-plugin` 的 `generate_image` 在 state.yml 中**非严格终端**（可回退 `optimize_prompt`），不能仅靠「无后继 step」判断流程结束。
 
 ### 1.8 可选依赖语义（Go 层执行）
 
@@ -151,10 +176,11 @@ sequenceDiagram
     CA-->>Go: SSE: mount{plugin_session_id=ps-placeholder, plugin_id=image-plugin}
     Go->>DB: INSERT plugin_sessions → 真实 id=ps-001
     Go-->>FE: 转发 mount event (替换为真实 id)
-    CA-->>Go: SSE: step_trigger{step=optimize_prompt, mode=auto, user_input=...}
-    Note over Go: ChatAgent SSE 流结束
+    CA-->>Go: SSE: mount + step_trigger{step=optimize_prompt, mode=auto, user_input=...}
+    Note over Go: ChatAgent SSE 流结束；冷启动快路径缓存 bootstrapStepTrigger
 
     Go->>DB: INSERT plugin_session_steps(id=exec-1, step=optimize_prompt, status=running)
+    Note over Go: streamPluginLoopFromTrigger 跳过第二轮 ChatAgent，直接执行 step
     Go->>SA: POST /api/plugin/step {step_exec_id=exec-1, artifacts={}, ...}（SSE）
     SA-->>Go: SSE: progress{value=0.3, message="优化中..."}
     Go-->>FE: 转发 progress
@@ -181,11 +207,9 @@ sequenceDiagram
     Go->>DB: UPDATE plugin_session_steps SET status=done WHERE id=exec-2
 
     Go->>DA: POST /api/plugin/driver
-    DA-->>Go: {"judgment": "图片生成成功，流程完成"}
+    DA-->>Go: {"judgment": "DONE — 图片生成成功，流程完成"}
 
-    Go->>CA: POST /api/chat_stream (Turn 3, + judgment)
-    CA-->>Go: SSE: 最终回复文字（无 step_trigger）
-    Go-->>FE: 流式转发文字
+    Note over Go: judgment 以 DONE 开头 → 结束 auto loop，不再调 ChatAgent
     Go-->>FE: data: [DONE]
 ```
 
@@ -554,17 +578,24 @@ PLUGIN_WORKSPACE_BASE: str = config.get('plugin_workspace_base', '/data/plugin_w
 
 ### 4.5 事件队列约定
 
-Python 侧不需要 `PluginEventBus` 类。builtin tools 和 trigger 工具直接向 `lazyllm.globals['plugin_event_queue']` 追加 dict：
+Python 侧不需要 `PluginEventBus` 类。事件通过 **`agentic_config['plugin_event_queue']` 共享 list** 传递（由 `PluginMiddleware` 创建），而非仅依赖 `lazyllm.globals`（globals 在 asyncio 子任务间不可共享）。
 
 ```python
-# 通用写法，在 builtin tools / trigger 工具中使用
-lazyllm.globals.setdefault('plugin_event_queue', []).append({'type': '...', ...})
+# PluginMiddleware 创建共享队列
+event_queue: list = []
+agentic_config['plugin_event_queue'] = event_queue
+lazyllm.globals['plugin_event_queue'] = event_queue  # 兼容 legacy 读取
+
+# builtin tools / trigger 工具写入（注意：空 list 是合法队列，不能用 or []）
+_cfg_queue = lazyllm.globals.get('agentic_config', {}).get('plugin_event_queue')
+_queue = _cfg_queue if _cfg_queue is not None else lazyllm.globals.get('plugin_event_queue', [])
+_queue.append({'type': '...', ...})
 ```
 
 队列在两处 flush：
 
-- **ChatAgent SSE**：`event_translator.py` 在流结束时遍历队列，以 `plugin_event` 字段写入 SSE。
-- **StepAgent SSE（`/api/plugin/step`）**：端点在 agent 执行完成后遍历队列，逐条写入 SSE 流。
+- **ChatAgent SSE**：`PluginMiddleware.iter_pending_events()` + `event_translator.py` 在流结束时遍历队列，以 `plugin_event` 字段写入 SSE。
+- **StepAgent SSE（`/api/plugin/step`）**：端点在 agent 执行完成后遍历队列，逐条写入 SSE 流；**不得**用 `queue = []` 重建 list（会丢失引用）。
 
 ### 4.6 plugins/step_agent.py — StepAgent 工厂
 
@@ -624,13 +655,15 @@ def get_checkpoint_details(item_range: str) -> list:
 
 ### 4.7 plugins/manager.py
 
-`**build_plugin_step_tools(plugin_id, current_step) -> list**`：
+**工具构建（落地后的实际 API，与原计划 per-step `trigger_<step_id>` 不同）**：
 
-- 查询 StateMachine 获取从 `current_step` 可达的所有 step（含自身，支持重试）。
-- 为每个 step 生成 `trigger_<step_id>(user_input: str) -> str` 可调用工具。
-- `chat_service.py` 将此列表作为外层 ReactAgent 的**全部**工具（plugin 模式下工具隔离）。
+| 函数 | 场景 | 返回 |
+| ---- | ---- | ---- |
+| `build_all_plugin_tools()` | 冷启动（无活跃 session） | 每个已加载插件一个 `trigger_<plugin_id>` |
+| `build_advance_step_tool(plugin_id, current_step)` | 会话内推进 | 单一 `advance_step(step_id, user_input)`；终端 step 返回 `[]` |
+| `_launch_plugin(plugin_id, user_input)` | 冷启动内部实现 | emit `mount` + `step_trigger(initial_step)` |
 
-`**trigger_plugin_step(step_id, user_input) -> str`**（trigger 工具的内部实现）：
+`**trigger_plugin_step(step_id, user_input) -> str`**（`advance_step` 与冷启动 trigger 的共享内部实现）：
 
 ```python
 def trigger_plugin_step(step_id: str, user_input: str) -> str:
@@ -735,38 +768,31 @@ def evaluate_step(plugin_id: str, step_id: str, step_result: str,
         return f'Driver evaluation failed ({e}). Proceeding.'
 ```
 
-### 4.9 service/chat_service.py 集成改动
+### 4.9 plugins/middleware.py + service/chat_service.py 集成
 
-新增 `plugin_context: Optional[Dict]` 参数（由 Go 透传，仅含会话身份字段，不含 artifacts/checkpoint）：
+**PluginMiddleware（落地新增）**：封装 plugin 注入逻辑，`handle_chat` 通过 async factory 创建：
 
 ```python
-_pctx = plugin_context or {}
+# chat_service.py 核心集成
+mw = await PluginMiddleware.create(plugin_context, agentic_config)
+agent_tools += mw.extra_tools          # 冷启动 trigger_* 或会话内 advance_step
+plugin_prompt = mw.plugin_prompt       # 注入 system prompt
 
-# 1. 工具隔离：plugin session 活跃时外层 Agent 只见 trigger 工具
-if _pctx.get('plugin_session_id') and _pctx.get('plugin_id'):
-    outer_tools = build_plugin_step_tools(
-        plugin_id=_pctx['plugin_id'],
-        current_step=_pctx.get('step', ''),
-    )
-    lazyllm.globals['default_tools_for_step_agent'] = all_default_tools
-else:
-    outer_tools = all_default_tools
+# plugin 推进轮禁用 force_summarize，强制 LLM 调用 advance_step
+react_agent.set_stop_tools(['advance_step'] + stop_tool_names)
 
-# 2. agentic_config 注入 plugin 字段（ChatAgent 只需知道身份，不需要 artifacts/checkpoint）
-#    db_session_factory 供 trigger 工具内部做依赖状态校验
-agentic_config.update({
-    'plugin_id':           _pctx.get('plugin_id', ''),
-    'plugin_session_id':   _pctx.get('plugin_session_id', ''),
-    'plugin_step':         _pctx.get('step', ''),
-    'db_session_factory':  get_db_session_factory(),  # 只读 DB session 工厂，trigger 工具使用
-})
+# LLM 未调用工具时合成 fallback step_trigger（终端 step 除外）
+async for ev in mw.iter_pending_events():
+    yield ev
+```
 
-# 3. scenario context 注入 environment_context
-environment_context = _inject_plugin_scenario_context(environment_context, _pctx)
+`PluginMiddleware.create()` 将阻塞 DB 查询（`load_plugin_info` / `load_execution_path`）offload 到 `run_in_executor`，避免阻塞 asyncio 事件循环。
 
-# 4. force_summarize_context：plugin 活跃时追加 REMINDER
-if _pctx.get('plugin_id'):
-    force_summarize_ctx = query + f'\n\n[REMINDER] Plugin {pid!r} is active at step {step!r}.'
+**plugin_context 仍由 Go 透传**（仅含会话身份字段，不含 artifacts/checkpoint）：
+
+```python
+# Go 每轮 ChatAgent 调用前通过 injectPluginContext() 写入
+{ "plugin_session_id": "ps-001", "plugin_id": "image-plugin", "step": "optimize_prompt", "advance": false }
 ```
 
 **plugin_context 结构**（前端 → Go → ChatAgent）：
@@ -781,7 +807,7 @@ artifacts 和 checkpoint 由 Go 从 DB 加载后直接传给 StepAgent（`/api/p
 
 `**PLUGIN_ACTIVE_GUIDANCE**`（guidance.py 新增）：描述 active plugin session 约束，包含 scenario block、可达 step 列表、决策协议。其中必须包含以下强约束：
 
-> **调用任何 trigger_\* 工具后，你必须立即停止。不得在工具调用之后输出任何文字，不得调用其他任何工具。trigger 工具的返回值即为本轮响应的终点。**
+> **调用 `advance_step` 后，你必须立即停止。不得在工具调用之后输出任何文字，不得调用其他任何工具。advance_step 的返回值即为本轮响应的终点。**
 
 `**_build_plugin_context_prompt(environment_context)**`（system_prompt.py 新增）：
 
@@ -946,9 +972,23 @@ type StepCompleteInfo struct {
 
 - POST `/api/plugin/driver`；失败时返回 fallback 字符串，不中断 loop。
 
-### 6.2 backend/core/chat/conversation_logic.go — 完整 Event Loop
+### 6.2 backend/core/chat/plugin_loop.go + conversation_logic.go — 完整 Event Loop
 
-`streamSingleAnswer()` 实现完整 plugin auto/human 循环：
+**冷启动入口（conversation_logic.go）**：
+
+```
+streamSingleAnswer() → 检测 mount + step_trigger（bootstrapStepTrigger）
+  → streamPluginLoopFromTrigger()   # 首轮直接执行 step，跳过第二轮 ChatAgent
+  → 或 streamPluginLoop()           # 常规多轮推进
+```
+
+**`streamPluginLoopFromTrigger()`（落地新增）**：接收冷启动缓存的 `StepTriggerInfo`，第一轮直接 `streamStepTurn`，后续轮次与 `streamPluginLoop` 相同（ChatAgent → step → Driver → …）。
+
+**`injectPluginContext(reqBody, pctx, currentStepID)`（落地新增）**：每轮 ChatAgent 调用前将 `plugin_context` 写入 `reqBody`，确保多轮 loop 中 LLM 始终拿到 `advance_step` 工具和当前 step。
+
+**`upstreamSessionID(convID)`（落地新增）**：每轮 ChatAgent 使用独立 `session_id`（`{convID}-plugin-{turn}`），避免 lazyllm globals 跨轮污染。
+
+`streamPluginLoop()` 实现完整 plugin auto/human 循环：
 
 ```
 streamSingleAnswer(ctx, req, sseSender):
@@ -1039,6 +1079,8 @@ streamSingleAnswer(ctx, req, sseSender):
             // 7a. auto 模式：调用 DriverAgent，注入评判，继续循环
             artifacts = LoadPluginSessionArtifacts(db, stepTrigger.PluginSessionID)
             judgment, _ = CallPluginDriver(ctx, stepComplete, artifacts, turn+1)
+            if strings.HasPrefix(strings.TrimSpace(judgment), "DONE"):
+                break   // 全流程完成，不再调 ChatAgent
             currentReqBody = InjectDriverJudgment(currentReqBody, judgment)
             // 继续下一轮
 
@@ -1056,8 +1098,10 @@ streamSingleAnswer(ctx, req, sseSender):
 
 - 发起 `POST /api/chat_stream` SSE 流。
 - 处理每个 chunk：plugin_event → `handlePluginEvent()`；text delta → 转发前端。
-- `step_trigger` 事件 → 存入 result 返回给 caller，不转发前端；**此后收到的所有文字 delta 均丢弃**（不转发前端）。
+- **SSE 解析兼容裸 JSON**：除 `data: {...}` 外，也接受无 `data:` 前缀的 `{...}` 行（Python 侧 `plugin_event` 帧格式）。
+- `step_trigger` 事件 → 存入 result 返回给 caller，不转发前端；**同时 `UpdateCurrentStep(db)`**；此后收到的所有文字 delta 均丢弃。
 - `mount` 事件 → 创建 DB 记录，转发前端（含真实 session_id）。
+- StepAgent 误发的 `step_trigger` 在 `streamStepTurn` 中丢弃并 WARN。
 
 `**streamStepTurn(ctx, trigger, stepExecID, workspacePath, artifacts, checkpoint, sseSender) -> *StepCompleteInfo**`：
 
@@ -1113,9 +1157,11 @@ WHERE session_id = ? AND artifact_id = ?
 
 `**LoadLatestCheckpoint(db, sessionID, stepID) -> map[string]interface{}**`：
 
-- 查 `plugin_session_steps`：找最近一条 `session_id=? AND step=? AND step_status='running'`。
+- 查 `plugin_session_steps`：找最近一条 `session_id=? AND step=? AND step_status IN ('running','interrupted')`。
+- **不查 `done` 记录**（落地修复：避免新 step 执行误命中刚插入的 `running` 记录导致 checkpoint 为空）。
 - 若找到，查 `plugin_session_step_checkpoints`：该 step_exec_id 的最大 sequence 记录。
 - 返回 `{completed_count, total_count, partial_results, phase_note}`，若无则返回 `{}`。
+- checkpoint 写入采用 **delta 语义**：StepAgent `save_step_checkpoint` 只发增量字段，Go 侧 merge 后落库。
 
 `**LoadPluginSessionArtifacts(db, sessionID) -> map[string]interface{}**`：
 
@@ -1146,15 +1192,19 @@ CREATE TABLE plugin_sessions (
     plugin_id        VARCHAR(64)  NOT NULL,
     current_step_id  VARCHAR(64),                    -- 当前 step_id 字符串
     meta             JSONB        NOT NULL DEFAULT '{}',  -- artifact 最新值快照
+    is_active        BOOLEAN      NOT NULL DEFAULT TRUE,  -- 落地新增：流程结束后标 false
     create_user_id   VARCHAR(255),
     created_at       TIMESTAMP    NOT NULL DEFAULT NOW(),
     updated_at       TIMESTAMP    NOT NULL DEFAULT NOW()
 );
 CREATE INDEX idx_plugin_sessions_conversation ON plugin_sessions(conversation_id);
+CREATE INDEX idx_plugin_sessions_active ON plugin_sessions(conversation_id, is_active);  -- 落地新增
 CREATE INDEX idx_plugin_sessions_user ON plugin_sessions(create_user_id);
 ```
 
 `meta` JSONB 是所有 artifact 的最新值快照，用于页面刷新时恢复展示。每次 `UpsertPluginArtifact` 时同步更新。
+
+**`is_active` 语义（落地新增）**：`GetActivePluginSession` 仅查 `is_active=true` 且 `create_user_id` 匹配的记录；plugin 流程结束或用户发起普通对话时 `DeactivatePluginSession`，避免已完成 session 被误复用。
 
 ### 7.2 plugin_session_steps
 
@@ -1350,7 +1400,7 @@ clearContext()      // 插件关闭时清除
 - `**PluginRenderer.tsx**`：根据 `plugin_id` 从 `registry.ts` 选择渲染组件，挂载在消息列表中。
 - `**PluginShell.tsx/scss**`：通用容器（标题、主内容区、loading 态、error 态、human 模式"等待输入"提示）。
 - `**ImageCard.tsx/scss**`：图片 + optimized_prompt 展示。
-- `**registry.ts**`：`{ 'image-plugin': ImagePluginView }` 注册映射。
+- `**registry.ts**`：`Map` + `registerPlugin()` 动态注册（落地改造，非静态 `PLUGIN_REGISTRY`）；未注册插件降级到 `GenericPluginView`。
 - `**StreamManager.ts**`：解析 SSE 中 `plugin_event` 字段，派发到 `pluginSessionStore`。
 - `**types.ts**`：`PluginEvent`、`PluginSession`、`PluginSessionState` TypeScript 类型。
 
@@ -1397,19 +1447,19 @@ sequenceDiagram
     participant Go as Go网关
     participant Chat as chat_service.py
     participant OuterAgent as 外层ReactAgent
-    participant TriggerTool as trigger_<step_id>工具
+    participant TriggerTool as trigger_<plugin_id> 或 advance_step
     participant GoStepCall as Go → /api/plugin/step
     participant StepAgent as StepAgent(ReactAgent)
 
     FE->>Go: POST /chat/stream { query, plugin_context }
-    Go->>Chat: 透传 plugin_context
-    Chat->>Chat: 工具隔离 → outer_tools = [trigger_optimize_prompt, trigger_generate_image]
-    Chat->>Chat: agentic_config 注入 plugin 字段
-    Chat->>Chat: build_system_prompt 渲染 scenario + 可达 step + PLUGIN_ACTIVE_GUIDANCE
-    Chat->>OuterAgent: ReactAgent(tools=[trigger_*])
-    OuterAgent->>TriggerTool: trigger_optimize_prompt(user_input='...')
-    TriggerTool->>TriggerTool: append step_trigger dict to plugin_event_queue
-    TriggerTool-->>OuterAgent: 'Step triggered.'
+    Go->>Chat: 透传 plugin_context（injectPluginContext 每轮刷新）
+    Chat->>Chat: PluginMiddleware → 冷启动 [trigger_image-plugin] 或会话内 [advance_step]
+    Chat->>Chat: set_stop_tools → 工具调用后立即停止 ReAct 循环
+    Chat->>Chat: build_system_prompt 渲染 scenario + PLUGIN_ACTIVE_GUIDANCE
+    Chat->>OuterAgent: ReactAgent(tools=[trigger_* 或 advance_step])
+    OuterAgent->>TriggerTool: trigger_image-plugin(user_input='...') 或 advance_step(step_id, user_input)
+    TriggerTool->>TriggerTool: append mount + step_trigger 或 step_trigger to plugin_event_queue
+    TriggerTool-->>OuterAgent: LAZYLLM_RESULT_BREAK / stop
     OuterAgent-->>Go: SSE stream（event_translator flush plugin_event_queue）
     Note over Go: 检测到 step_trigger
     Go->>Go: checkStepDependencies（使用 inputs 字段）
@@ -1430,8 +1480,8 @@ sequenceDiagram
 
 | 场景                | 外层 ReactAgent 工具                      |
 | ----------------- | ------------------------------------- |
-| 无 plugin session  | 全量默认工具                                |
-| plugin session 活跃 | 仅 `trigger_<step>` 工具（按状态机可达 step 生成） |
+| 无 plugin session  | 全量默认工具 + 各插件 `trigger_<plugin_id>` 冷启动工具 |
+| plugin session 活跃 | 仅 `advance_step`（终端 step 时不提供） |
 
 
 
@@ -1467,10 +1517,13 @@ sequenceDiagram
 
 ### 模块四：三角色核心
 
-- `plugins/step_agent.py`：`create_step_agent` + `_render_step_prompt`（含 checkpoint 注入）+ `_resolve_step_tools` + builtin tools（`save_step_artifact` / `save_step_checkpoint` / `get_checkpoint_details`，直接写 `plugin_event_queue`）
+- `plugins/step_agent.py`：`create_step_agent` + `_render_step_prompt`（含 checkpoint 注入）+ `_resolve_step_tools` + builtin tools + `set_stop_tools(['save_step_artifact'])`
 - `plugins/driver_agent.py`：`evaluate_step()`
-- `plugins/manager.py`：`build_plugin_step_tools` + `trigger_plugin_step`（signal only，不执行 StepAgent，携带 inputs 字段）
-- `service/chat_service.py`：plugin_context 参数 + 工具隔离 + agentic_config 注入（仅身份字段）
+- `plugins/manager.py`：`build_all_plugin_tools` + `build_advance_step_tool` + `_launch_plugin` + `trigger_plugin_step`（signal only）
+- `plugins/middleware.py`：**落地新增** — `PluginMiddleware` async factory + 共享 event queue + 工具/prompt 注入
+- `plugins/config.py`：**落地新增** — `load_plugin_info` / `load_execution_path` / DB session factory
+- `service/chat_service.py`：PluginMiddleware 集成 + `set_stop_tools` + fallback step_trigger 合成
+- `algorithm/lazyllm/.../reactAgent.py`：**落地改造** — `set_stop_tools()` / `stop_condition`
 
 ### 模块五：Prompt 注入
 
@@ -1490,19 +1543,23 @@ sequenceDiagram
 ### 模块七：Go Event Loop
 
 - `backend/core/chat/plugin_event.go`：`PluginEvent` / `StepTriggerInfo` / `StepCompleteInfo` / `handlePluginEvent` / `CallPluginDriver`
+- `backend/core/chat/plugin_loop.go`：**落地新增/集中** — `streamPluginLoop` / `streamPluginLoopFromTrigger` / `injectPluginContext` / `runInterruptedStep`
 - `backend/core/chat/conversation_logic.go`：
-  - `streamSingleAnswer`（完整 auto/human loop）
-  - `streamChatTurn`（单轮 ChatAgent，返回 StepTriggerInfo）
+  - `streamSingleAnswer`（冷启动检测 `bootstrapStepTrigger`）
+  - `upstreamSessionID`（每轮独立 session_id）
+  - `streamChatTurn`（单轮 ChatAgent，返回 StepTriggerInfo，兼容裸 JSON SSE）
   - `streamStepTurn`（调用 /api/plugin/step，处理 step events）
-  - `checkStepDependencies`
-  - `InjectDriverJudgment`
+  - `checkStepDependencies`（**已接通**，创建 step 前调用）
+  - `InjectDriverJudgment` + DONE 检测
   - `stepWaitingEvent`（human 模式生成 step_waiting 事件）
+- `backend/core/migrations/20260611100000_add_plugin_session_is_active`：**落地新增**
+- `backend/core/main.go`：启动时扫描 stale `running` → `interrupted`
 
 ### 模块八：图片插件示例文件
 
 - `plugin/plugins/image-plugin/plugin.yaml`
 - `plugin/plugins/image-plugin/scenario/state.yml`
-- `plugin/plugins/image-plugin/scenario/scenario.md`（使用 `trigger_optimize_prompt` / `trigger_generate_image`）
+- `plugin/plugins/image-plugin/scenario/scenario.md`（**待更新**：当前仍写 `trigger_<step_id>`，应改为 `advance_step(step_id=...)` 语义）
 - `plugin/plugins/image-plugin/scenario/driver.md`
 - `plugin/plugins/image-plugin/tools.py`（`dalle_generate` 纯函数）
 - `plugin/plugins/image-plugin/frontend/index.tsx`（ImagePluginView）
@@ -1517,17 +1574,21 @@ sequenceDiagram
 - `plugins/PluginRenderer.tsx`
 - `plugins/components/PluginShell.tsx/scss`（含 human 模式等待 UI）
 - `plugins/components/ImageCard.tsx/scss`
-- `plugins/registry.ts`
+- `plugins/registry.ts`（动态 `registerPlugin` + `GenericPluginView` 降级）
 - `chat/components/MessageList.tsx`：挂载 PluginRenderer
+- `chat/components/ChatContainer` + `newChatContainer`：Resume 路径补 `pluginMount` 回调
+- `chat/pages/chatLayout`：`loadConversation` 时 `clearContext` 防 advance 串会话
+- `StreamManager.ts`：Resume 路径拦截 `plugin_event`
 
 ### 模块十：联调与验收
 
-- 端到端联调（auto 模式多轮）
+- ✅ 后端 curl 端到端（auto 模式：`optimize_prompt → generate_image → DONE`）
+- ⏳ 前端端到端展示（后端已通，前端 plugin_event / pluginMount 绑定仍待验证）
 - human 模式联调（step_waiting → 用户输入 → 继续）
 - checkpoint 写入与恢复联调
 - 依赖校验拦截联调
 - 降级模式联调（无 state.yml 插件）
-- 单元测试补全
+- 单元测试补全（`test_manager.py` 部分已更新）
 
 ---
 
@@ -1564,10 +1625,11 @@ def test_is_legacy_mode_returns_true_without_state_yml()
 **manager.py**
 
 ```python
-def test_trigger_tool_appends_step_trigger_to_event_queue()
-def test_trigger_tool_step_trigger_event_contains_inputs_field()
-def test_trigger_tool_does_not_invoke_step_agent()
-def test_build_plugin_step_tools_returns_reachable_steps()
+def test_advance_step_appends_step_trigger_to_event_queue()
+def test_advance_step_step_trigger_event_contains_inputs_field()
+def test_advance_step_does_not_invoke_step_agent()
+def test_build_advance_step_tool_returns_single_tool_with_reachable_steps()
+def test_launch_plugin_emits_mount_and_step_trigger()
 def test_trigger_plugin_unreachable_step_returns_error_string()
 def test_trigger_plugin_empty_user_input_returns_error_string()          # 空 user_input → 报错
 def test_trigger_plugin_required_artifact_never_run_returns_error()      # required 依赖从未执行 → 报错
@@ -1697,7 +1759,8 @@ GET  /api/plugin/list               → {"plugins": [...]}
 | 验收项                                | 验收方式        | 通过标准                                               |
 | ---------------------------------- | ----------- | -------------------------------------------------- |
 | 图片生成端到端（auto 模式两步）                 | E2E         | 图片卡片出现，刷新后保留                                       |
-| Go auto-drive loop 多轮驱动            | Go 日志       | ≥2 轮 driver judgment 日志                            |
+| Go auto-drive loop 多轮驱动            | Go 日志 / curl | ≥1 轮 driver judgment；末步 DONE 结束 loop              |
+| 冷启动合并（mount+step 一次完成）           | curl 日志     | `streamPluginLoopFromTrigger` 跳过第二轮 ChatAgent        |
 | Scenario 启动时校验通过                   | 启动日志        | image-plugin 成功加载，无 error                          |
 | state.yml 与 scenario.md 一致性检查      | 单测/日志       | 不一致时产生 warning，仍加载                                 |
 | 降级模式（无 state.yml）正常加载              | 单测          | legacy_mode=true，driver.md 未注入 StepAgent prompt    |
@@ -1719,11 +1782,126 @@ GET  /api/plugin/list               → {"plugins": [...]}
 
 1. `**step_exec_id` 由 Go 生成，Python 透传**：Go 在调用 `/api/plugin/step` 前创建 `plugin_session_steps` 记录，`step_exec_id` 作为请求参数传入 Python。Python builtin tools 从 `lazyllm.globals['agentic_config']['step_exec_id']` 读取，不自行生成。
 2. `**step_trigger` 事件的时序**：ChatAgent 在 SSE 流末尾 emit `step_trigger` 事件。Go 在 ChatAgent SSE 流**完整结束后**处理 step_trigger，再调用 StepAgent。`event_translator.py` 必须确保在 SSE 流末尾 flush 所有事件，包括 step_trigger。
-3. **checkpoint 的恢复语义**：`LoadLatestCheckpoint` 查找同一 session 中最后一条 `step=X AND status='running'` 的记录的最新 checkpoint。若无 running 状态的历史 step（即首次执行），checkpoint={}，StepAgent 从头开始。
+3. **checkpoint 的恢复语义**：`LoadLatestCheckpoint` 查找同一 session 中最后一条 `step=X AND status IN ('running','interrupted')` 的记录的最新 checkpoint。**不查 `done` 记录**（避免新执行误命中刚插入的 running 行）。若无匹配记录（首次执行），checkpoint={}，StepAgent 从头开始。checkpoint 写入为 delta 语义，Go 侧 merge 后落库。
 4. **artifact 最新值语义**：同一 artifact_id 可能被多次写入（step 重试时）。`LoadPluginSessionArtifacts` 按 `created_at` DESC 取最新一条。`plugin_sessions.meta` 在每次 `UpsertPluginArtifact` 时同步更新，供页面刷新时恢复展示。
 5. **auto-drive loop 与前端 SSE 稳定性**：Go 在同一 SSE 连接上最多 10 轮，总耗时可能较长。确认 frontend/nginx SSE 超时配置 ≥ 5 分钟。
 6. `**advance=true` 的两种语义由 Go 通过 DB 区分**：Go 查 `plugin_session_steps` 找 `step=pctx.Step` 的最近一条记录：若 `status='running'`（step 被中断）→ 直接加载 checkpoint 恢复执行同一 step，跳过 ChatAgent（step 已确定）；若 `status='done'`（step 已完成）→ 构造合成消息调用 ChatAgent，由 ChatAgent 结合 scenario.md 和状态转移决定下一 step。前者是恢复执行，后者是推进决策，语义不同，Go 不实现状态机逻辑。
 7. **Step 文件工作区完全隔离**：每次 step 执行（含重试）分配独立目录 `{base}/{user_id}/{session_id}/{step_exec_id}/`。同一 step 多次执行互不干扰——重试时生成新 `step_exec_id` 即得到新目录。Python builtin tools 从 `agentic_config['step_workspace']` 读取路径，模型层不感知路径规则。`plugin_session_artifacts.value` 对文件类型存该目录下的路径，对文本/URL 存原始值。目录由 Go 在 `InsertPluginSessionStep` 时预创建（`os.MkdirAll`），Python 可直接写文件，无需判断目录是否存在。
 8. **降级模式插件的状态机无限制**：`LegacyStateMachine.is_reachable()` 始终返回 true，step 间无转移限制。这是有意的向后兼容行为，使用者应尽快为旧插件补充 state.yml。
 9. **`running` 与 `interrupted` 的区分**：Go 在 `streamStepTurn` 执行期间，每收到一个 StepAgent SSE 事件就 UPDATE `last_heartbeat`。服务启动时，扫描 `step_status='running' AND last_heartbeat < NOW() - interval '5 minutes'` 的记录，批量标为 `interrupted`。前端收到 `advance=true` 时，Go 先检查心跳时间：活跃（未超时）的 `running` 记录直接返回"仍在执行中，请等待"；超时的 `running` 不会出现（已在启动时标为 `interrupted`）；`interrupted` 记录走 checkpoint 恢复路径。
+10. **`is_active` 与 session 复用**：`GetActivePluginSession` 必须同时过滤 `is_active=true` 和 `create_user_id`。plugin 流程结束后 deactivate，防止普通对话误入 plugin 模式。
+11. **每轮 ChatAgent 独立 `session_id`**：`upstreamSessionID` 生成 `{convID}-plugin-{turn}`，避免 lazyllm globals 跨轮污染导致工具/队列错乱。
+12. **LazyLLM 框架改动需 volume 挂载**：`reactAgent.py` 的 `set_stop_tools` 改动在本地 lazyllm 源码中，`docker-compose.yml` 需挂载 `algorithm/lazyllm` 卷，否则容器内仍是旧版。
+
+---
+
+## 十四、落地记录与计划偏差（2026-06-11 ~ 2026-06-12）
+
+> 本节记录 M1 首次编码落地后的实际状态，对照原方案标注偏差与已修复问题。基线提交：`bbd0945 plugin milestone-1`；后续修复提交：`045d8d9` / `bc119ec` / `optimize` 系列。
+
+### 14.1 模块完成度
+
+
+| 模块 | 状态 | 备注 |
+| ---- | ---- | ---- |
+| Docker & 工程基础 | ✅ | build context 改根目录，plugin 目录 COPY 进镜像 |
+| 数据层 4 张表 | ✅ | 落地时发现子表 migration 未执行，已补建 + `is_active` 迁移 |
+| Python 基建（loader/validator） | ✅ | |
+| PluginMiddleware | ✅ | **原计划无此模块**，落地新增 |
+| 三角色核心（Chat/Step/Driver） | ✅ | 工具模型与原计划不同（见 14.2） |
+| Python API 端点 | ✅ | `/api/plugin/step` SSE + driver + validate + list |
+| Go Event Loop | ✅ | `plugin_loop.go` 集中实现；冷启动快路径已通 |
+| image-plugin 示例 | ✅ | driver.md 增加 DONE 语义 |
+| 前端 plugin 卡片 | ⏳ | registry/Store/Shell 已改；端到端展示待验证 |
+| 单元测试 | ⏳ | `test_manager.py` 部分更新，其余待补 |
+| E2E curl 验收 | ✅ | `optimize_prompt → generate_image → DONE` 后端已通 |
+
+### 14.2 相对原方案的主要架构偏差
+
+
+| # | 原方案 | 实际落地 | 原因 |
+| - | ------ | -------- | ---- |
+| 1 | 冷启动：mount → Go loop → 再 ChatAgent advance | `trigger_<plugin_id>` 一次 emit mount+step_trigger；`streamPluginLoopFromTrigger` 跳过第二轮 ChatAgent | 减少一轮 RTT，改善首屏响应 |
+| 2 | 会话内：per-step `trigger_<step_id>` 工具 | 单一 `advance_step(step_id, user_input)` | 工具数不随 step 数膨胀；docstring 枚举可达 step |
+| 3 | ReactAgent 标准 ReAct 至 summarize | `set_stop_tools` 工具调用后立即停止 | trigger/advance 后不应再输出文字 |
+| 4 | Driver 裁决 PASS/RETRY/FAIL | 增加 **DONE** 结束全流程 | `generate_image` 非严格终端（可回退 optimize_prompt） |
+| 5 | `advance_step` 排除 current_step | 有后继时允许重试 current_step；**终端 step 不提供工具** | 支持 step 重试 + 防死循环 |
+| 6 | LLM 必须 function call 推进 | `chat_service` 合成 fallback step_trigger | reasoning 模式常只输出文本不调工具 |
+| 7 | checkpoint 全量覆盖 | delta 写入 + Go merge | 减少 payload，支持增量保存 |
+| 8 | `LoadLatestCheckpoint` 查 running | 查 `running OR interrupted`，**排除 done** | 修复新 step 误命中刚插入 running 行 |
+| 9 | `GetActivePluginSession` 按 conversation 查最新 | 加 `is_active` + `create_user_id` 过滤 | 防已完成 session 被复用 |
+| 10 | 静态 `PLUGIN_REGISTRY` | `Map` + `registerPlugin()` + GenericPluginView | 新插件无需改核心代码 |
+| 11 | chat_service 直接注入 plugin 逻辑 | 抽离 `PluginMiddleware` async factory | DB 查询 offload + 队列共享 |
+| 12 | 事件队列用 `lazyllm.globals` | `agentic_config['plugin_event_queue']` 共享 list | asyncio 子任务间 globals 不可共享 |
+
+### 14.3 联调期间修复的问题清单
+
+**算法 / Python**
+
+| 问题 | 修复 |
+| ---- | ---- |
+| `plugin_event_queue` 用 `or []` 把空 list 当缺失 | 显式 `is not None` 检查 |
+| StepAgent 端点 `queue = []` 重建 list 丢事件 | 稳定 list 引用 + `del queue[:]` |
+| `summary_func` 只看最后一批 artifact | `all_artifact_events` 累积全量 |
+| `summary_func` 失败无 step_summary | result 文本 fallback |
+| PluginMiddleware 同步 DB 阻塞事件循环 | `create()` + `run_in_executor` |
+| Resume 路径无 plugin 事件拦截 | `StreamManager.restoreStreamCallbacks` 补拦截 |
+| DriverAgent 缺 `llm_config` / sid | 与 step 同模式注入 |
+| `_launch_plugin` 污染 `agentic_config` | 只写 event queue，不改全局 config |
+| StepAgent 误发 `step_trigger` | Go `streamStepTurn` 丢弃并 WARN |
+
+**Go 后端**
+
+| 问题 | 修复 |
+| ---- | ---- |
+| `checkStepDependencies` 从未被调用 | `plugin_loop` 创建 step 前调用 |
+| `GetActivePluginSession` 无 user 过滤 | 加 `create_user_id` |
+| 已完成 session 被普通 chat 复用 | `is_active` + `DeactivatePluginSession` |
+| mount 产生孤立 session（ChatAgent 中断） | 检测无 step_trigger 时 deactivate |
+| 冷启动后多轮 loop 无 `plugin_context` | `injectPluginContext()` 每轮刷新 |
+| SSE 只认 `data: ` 前缀 | 同时接受裸 `{...}` JSON 行 |
+| `streamChatTurn` 收到 step_trigger 未更新 current_step | 加 `UpdateCurrentStep` |
+| 多轮 ChatAgent 复用 session_id 致 globals 污染 | `upstreamSessionID` 每轮新 ID |
+| `lazyStreamHandler` 丢 `plugin_event` RawText | 修复 JSON 解析路径 |
+| Driver 无法表达流程结束 | DONE 检测 + break loop |
+
+**前端**
+
+| 问题 | 修复 |
+| ---- | ---- |
+| `loadConversation` 未 `clearContext`，advance 串会话 | `chatLayout` 切换对话时清理 |
+| Resume 路径缺 `pluginMount` 回调 | `ChatContainer` / `newChatContainer` 补注册 |
+| `PluginShell` 继续按钮无 session 校验 | 校验 `activePluginContext.sessionId` |
+| `registry.ts` 写死插件列表 | 动态 `registerPlugin` + 降级 UI |
+
+**数据库 / 环境**
+
+| 问题 | 修复 |
+| ---- | ---- |
+| `plugin_session_steps` 等子表 migration 未执行 | 补建三张表 + 确认 migration 链路 |
+| Router 子进程 DB 注册导致 503 | 健康检查 / 注册逻辑调整（环境相关） |
+
+### 14.4 仍待完成 / 已知风险
+
+1. **前端端到端**：后端 curl 已通，但用户反馈前端展示仍有问题（`pluginMount` / `plugin_session_id` 绑定、`finish_reason` 等）。
+2. **补丁密度高**：fallback step_trigger、DONE、terminal step 抑制等逻辑叠加，需持续回归。
+3. **LazyLLM 框架改动依赖 volume**：未挂载本地 lazyllm 时 `set_stop_tools` 不生效。
+4. **SubAgent 能力**：对话中已讨论方案（`sub_agent_*` 事件 + 任务中心），**不在 M1 范围**，尚未实现。
+5. **单元测试覆盖不足**：manager/loader/Go CRUD 大量测试用例仍待补全。
+6. **scenario.md 与工具 API 不一致**：`image-plugin/scenario/scenario.md` 仍引用 `trigger_optimize_prompt` 等旧工具名，需改为 `advance_step(step_id=...)` 或 `trigger_image-plugin`。
+
+### 14.5 关键代码入口（落地后）
+
+
+| 职责 | 文件 |
+| ---- | ---- |
+| 冷启动工具 + advance_step | `algorithm/lazymind/chat/plugins/manager.py` |
+| Plugin 注入中间件 | `algorithm/lazymind/chat/plugins/middleware.py` |
+| ChatAgent 集成 + fallback | `algorithm/lazymind/chat/service/chat_service.py` |
+| StepAgent 工厂 | `algorithm/lazymind/chat/plugins/step_agent.py` |
+| Go plugin 主循环 | `backend/core/chat/plugin_loop.go` |
+| 冷启动入口 | `backend/core/chat/conversation_logic.go` |
+| 前端 plugin 状态 | `frontend/src/modules/chat/plugins/pluginSessionStore.ts` |
+| 前端动态注册 | `frontend/src/modules/chat/plugins/registry.ts` |
+| 示例插件 | `plugin/plugins/image-plugin/` |
 
