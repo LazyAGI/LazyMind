@@ -41,7 +41,7 @@ const defaultProviderCategory = "model"
 // ListUserProviders returns the current user's model providers. Missing catalog
 // rows are copied from default_model_providers on each request (incremental sync).
 // Query params: category (default model when omitted), exclude_category,
-// keyword — substring match on name (SQL LIKE).
+// keyword — case-insensitive substring match on name.
 func ListUserProviders(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	if db == nil {
@@ -79,7 +79,7 @@ func ListUserProviders(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if keyword != "" {
-		q = q.Where("name LIKE ?", "%"+keyword+"%")
+		q = q.Where("LOWER(name) LIKE ?", "%"+strings.ToLower(keyword)+"%")
 	}
 
 	var rows []orm.UserModelProvider

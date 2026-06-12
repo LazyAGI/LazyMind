@@ -1,6 +1,11 @@
-import React, { useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Input, Space, Tooltip } from "antd";
-import { CopyOutlined, EditOutlined } from "@ant-design/icons";
+import {
+  CloseOutlined,
+  CommentOutlined,
+  CopyOutlined,
+  EditOutlined,
+} from "@ant-design/icons";
 import { RoleTypes } from "@/modules/chat/constants/common";
 import AssistantMessage from "../../AssistantMessage";
 import type { PreferenceType } from "../../MultiAnswerDisplay";
@@ -21,12 +26,137 @@ interface MessageListProps {
   onPreferenceSelect?: (preference: PreferenceType, sessionId?: string) => void;
   editingUserMessageIndex?: number | null;
   editingUserMessageText?: string;
+  editingUserMessageCites?: string[];
   onUserMessageEditTextChange?: (value: string) => void;
+  onRemoveEditingUserMessageCite?: (index: number) => void;
   onStartEditUserMessage?: (item: any, index: number) => void;
   onCancelEditUserMessage?: () => void;
   onResendEditedUserMessage?: (index: number, value: string) => void;
   onCopyUserMessage?: (item: any) => void;
   onCiteMessage?: (text: string) => void;
+}
+
+function splitCiteMessages(citeMessage?: string) {
+  return (citeMessage || "")
+    .split(/\n{2,}/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getCiteMessages(message?: { cite_message?: string; cite_messages?: string[] }) {
+  if (Array.isArray(message?.cite_messages)) {
+    return message.cite_messages.map((item) => item.trim()).filter(Boolean);
+  }
+  const textInput = (message as any)?.inputs?.find((input: any) => {
+    const inputType = input?.input_type || "text";
+    return inputType === "text" && typeof input?.text === "string";
+  });
+  const inputCites = Array.from(
+    `${textInput?.text || ""}`.matchAll(/<cite_message>([\s\S]*?)<\/cite_message>/gi),
+  )
+    .map((match) => match[1]?.trim())
+    .filter(Boolean);
+  if (inputCites.length > 0) {
+    return inputCites;
+  }
+  return splitCiteMessages(message?.cite_message);
+}
+
+function UserCitationPreview({ citeMessages }: { citeMessages: string[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const [isHiding, setIsHiding] = useState(false);
+  const hideTimerRef = useRef<number | null>(null);
+
+  const clearHideTimer = () => {
+    if (hideTimerRef.current) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  };
+
+  const showCitation = () => {
+    clearHideTimer();
+    setIsHiding(false);
+    setExpanded(true);
+  };
+
+  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (event.detail >= 2) {
+      showCitation();
+    }
+  };
+
+  const handleMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (event.detail >= 2) {
+      showCitation();
+    }
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      showCitation();
+    }
+  };
+
+  const handleMouseEnter = () => {
+    if (!expanded) {
+      return;
+    }
+    clearHideTimer();
+    setIsHiding(false);
+  };
+
+  const handleMouseLeave = () => {
+    if (!expanded) {
+      return;
+    }
+    clearHideTimer();
+    setIsHiding(true);
+    hideTimerRef.current = window.setTimeout(() => {
+      setExpanded(false);
+      setIsHiding(false);
+      hideTimerRef.current = null;
+    }, 500);
+  };
+
+  const primaryCiteMessage = citeMessages[0] || "";
+
+  useEffect(() => clearHideTimer, []);
+
+  return (
+    <button
+      type="button"
+      className={`chat-user-citation-preview${expanded ? " is-expanded" : ""}${
+        isHiding ? " is-hiding" : ""
+      }`}
+      onClick={handleClick}
+      onDoubleClick={showCitation}
+      onMouseDown={handleMouseDown}
+      onKeyDown={handleKeyDown}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      onPointerEnter={handleMouseEnter}
+      onPointerLeave={handleMouseLeave}
+      title={expanded ? "" : primaryCiteMessage}
+      aria-label={primaryCiteMessage}
+    >
+      {!expanded ? (
+        <CommentOutlined className="chat-user-citation-preview-icon" />
+      ) : (
+        <div className="chat-user-citation-preview-content">
+          {citeMessages.map((citeMessage, citeIndex) => (
+            <div
+              className="chat-user-citation-preview-item"
+              key={`${citeIndex}-${citeMessage}`}
+            >
+              {citeMessage}
+            </div>
+          ))}
+        </div>
+      )}
+    </button>
+  );
 }
 
 const MessageList: React.FC<MessageListProps> = ({
@@ -43,7 +173,9 @@ const MessageList: React.FC<MessageListProps> = ({
   onPreferenceSelect,
   editingUserMessageIndex = null,
   editingUserMessageText = "",
+  editingUserMessageCites = [],
   onUserMessageEditTextChange,
+  onRemoveEditingUserMessageCite,
   onStartEditUserMessage,
   onCancelEditUserMessage,
   onResendEditedUserMessage,
@@ -65,6 +197,9 @@ const MessageList: React.FC<MessageListProps> = ({
   const renderUser = (item: any, index: number) => {
     const isLastUserMessage = index === lastUserIndex;
     const isEditing = editingUserMessageIndex === index;
+    const citeMessageList = isEditing
+      ? editingUserMessageCites
+      : getCiteMessages(item);
 
     return (
       <div className="user-message-row">
@@ -74,9 +209,40 @@ const MessageList: React.FC<MessageListProps> = ({
           </div>
         )}
         <div className={`user-wrap ${isEditing ? "editing" : ""}`}>
+          {!isEditing && citeMessageList.length > 0 ? (
+            <UserCitationPreview citeMessages={citeMessageList} />
+          ) : null}
           <div className="chat-user">
             {isEditing ? (
               <div className="chat-user-edit-wrap">
+                {citeMessageList.length > 0 ? (
+                  <div className="chat-user-edit-citation-list">
+                    {citeMessageList.map((citeMessage, citeIndex) => (
+                      <div
+                        className="chat-user-edit-citation"
+                        key={`${citeIndex}-${citeMessage}`}
+                      >
+                        <CommentOutlined className="chat-user-edit-citation-icon" />
+                        <Tooltip
+                          title={citeMessage}
+                          placement="topLeft"
+                          overlayClassName="chat-user-citation-tooltip"
+                        >
+                          <span className="chat-user-edit-citation-text">
+                            {citeMessage}
+                          </span>
+                        </Tooltip>
+                        <Button
+                          type="text"
+                          size="small"
+                          className="chat-user-edit-citation-close"
+                          icon={<CloseOutlined />}
+                          onClick={() => onRemoveEditingUserMessageCite?.(citeIndex)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 <Input.TextArea
                   value={editingUserMessageText}
                   autoSize={{ minRows: 2, maxRows: 6 }}

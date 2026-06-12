@@ -208,6 +208,9 @@ func liveSourceNodeRef(req SourceTreeChildrenRequest, binding store.Binding) str
 
 func normalizeLiveSourceNodeRef(value string, binding store.Binding) string {
 	value = normalizeSourceNodeKey(value, binding)
+	if binding.ConnectorType == "feishu" && strings.HasPrefix(value, "feishu:wiki:space:") {
+		return value
+	}
 	if binding.ConnectorType == "feishu" && strings.HasPrefix(value, "feishu:") {
 		return strings.TrimPrefix(value, "feishu:")
 	}

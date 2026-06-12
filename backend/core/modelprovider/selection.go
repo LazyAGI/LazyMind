@@ -413,7 +413,13 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Static-source roles do not require a user selection — they are always ready.
-	isDynamic, _ := FetchRoleIsDynamic(r.Context(), modelType)
+	// A failure to reach the algorithm service is a deployment bug; surface it as
+	// 502 Bad Gateway rather than silently returning ready=false.
+	isDynamic, err := FetchRoleIsDynamic(r.Context(), modelType)
+	if err != nil {
+		common.ReplyErr(w, "algorithm service unavailable: cannot determine model source", http.StatusBadGateway)
+		return
+	}
 	if !isDynamic {
 		common.ReplyOK(w, modelReadyResponse{Ready: true, Source: "static"})
 		return
@@ -506,8 +512,19 @@ func countValidModelSelection(ctx context.Context, db *gorm.DB, userID, modelTyp
 }
 
 // IsModelReady checks whether a model of the given model_type is available for the user.
-// It first checks the user's own valid selection, then falls back to any valid share=true row.
+// Static-source roles (non-dynamic yaml entries) are always ready without a DB selection.
+// For dynamic roles it first checks the user's own valid selection, then falls back to any
+// valid share=true row.
+// An error is returned when the algorithm service is unreachable — callers should surface
+// this as a 502 rather than treating it as "not ready".
 func IsModelReady(ctx context.Context, db *gorm.DB, userID, modelType string) (bool, error) {
+	isDynamic, err := FetchRoleIsDynamic(ctx, modelType)
+	if err != nil {
+		return false, err
+	}
+	if !isDynamic {
+		return true, nil
+	}
 	ownCount, err := countValidModelSelection(ctx, db, userID, modelType, false)
 	if err != nil {
 		return false, err

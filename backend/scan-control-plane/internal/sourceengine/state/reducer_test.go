@@ -126,6 +126,90 @@ func TestReduceMissingDeltaAndWatchOnlyDeleteCoveredKeys(t *testing.T) {
 	}
 }
 
+func TestApplyTaskFailureMarksDocumentFailed(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	repo := newReducerStore()
+	repo.states["doc"] = documentState("doc", now)
+	state := repo.states["doc"]
+	state.ActiveTaskID = "task-1"
+	state.ParseQueueState = ParseQueueStateQueued
+	repo.states["doc"] = state
+	repo.documents["doc"] = store.Document{
+		DocumentID:  "document-1",
+		SourceID:    "source-1",
+		BindingID:   "binding-1",
+		ObjectKey:   "doc",
+		ParseStatus: "SUCCEEDED",
+		UpdatedAt:   now,
+	}
+	reducer := NewDBStateReducer(repo, WithClock(func() time.Time { return now }))
+
+	err := reducer.ApplyTaskFailure(ctx, TaskFailureInput{
+		Task: store.ParseTask{
+			TaskID:            "task-1",
+			SourceID:          "source-1",
+			BindingID:         "binding-1",
+			BindingGeneration: 1,
+			ObjectKey:         "doc",
+		},
+		ErrorCode: "PARSE_FAILED",
+		Message:   "bad file",
+		FailedAt:  now,
+	})
+	if err != nil {
+		t.Fatalf("apply task failure: %v", err)
+	}
+	if got := repo.states["doc"]; got.ParseQueueState != ParseQueueStateFailed || got.LastError["code"] != "PARSE_FAILED" {
+		t.Fatalf("document state did not record failure: %+v", got)
+	}
+	if got := repo.documents["doc"]; got.ParseStatus != "FAILED" {
+		t.Fatalf("document parse status should be failed, got %+v", got)
+	}
+}
+
+func TestApplyTaskFailureIgnoresReplacedTask(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	repo := newReducerStore()
+	repo.states["doc"] = documentState("doc", now)
+	state := repo.states["doc"]
+	state.ActiveTaskID = "task-current"
+	state.ParseQueueState = ParseQueueStateQueued
+	repo.states["doc"] = state
+	repo.documents["doc"] = store.Document{
+		DocumentID:  "document-1",
+		SourceID:    "source-1",
+		BindingID:   "binding-1",
+		ObjectKey:   "doc",
+		ParseStatus: "PENDING",
+		UpdatedAt:   now,
+	}
+	reducer := NewDBStateReducer(repo, WithClock(func() time.Time { return now }))
+
+	err := reducer.ApplyTaskFailure(ctx, TaskFailureInput{
+		Task: store.ParseTask{
+			TaskID:            "task-old",
+			SourceID:          "source-1",
+			BindingID:         "binding-1",
+			BindingGeneration: 1,
+			ObjectKey:         "doc",
+		},
+		ErrorCode: "PARSE_FAILED",
+		Message:   "old task failed",
+		FailedAt:  now,
+	})
+	if err != nil {
+		t.Fatalf("apply task failure: %v", err)
+	}
+	if got := repo.states["doc"]; got.ParseQueueState != ParseQueueStateQueued || len(got.LastError) != 0 {
+		t.Fatalf("replaced task should not change state: %+v", got)
+	}
+	if got := repo.documents["doc"]; got.ParseStatus != "PENDING" {
+		t.Fatalf("replaced task should not change document status: %+v", got)
+	}
+}
+
 type reducerStore struct {
 	objects   map[string]store.SourceObject
 	states    map[string]store.DocumentState

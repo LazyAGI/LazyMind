@@ -112,15 +112,15 @@
 
 .memory-tab-card {
   border: 1px solid #e5eaf2;
-  border-radius: 20px;
+  border-radius: 16px;
   background:
     radial-gradient(circle at top right, rgba(22, 119, 255, 0.14), transparent 38%),
     linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
-  min-height: clamp(82px, 12vh, 144px);
-  padding: clamp(14px, 1.8vh, 20px);
+  min-height: clamp(68px, 7vh, 88px);
+  padding: clamp(10px, 1.2vh, 14px) 16px;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
   text-align: left;
   cursor: pointer;
   transition:
@@ -140,35 +140,35 @@
 }
 
 .memory-tab-icon {
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 14px;
+  border-radius: 12px;
   background: #eef4ff;
   color: #1677ff;
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .memory-tab-copy {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   flex: 1;
 
   strong {
     color: #101828;
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 700;
   }
 
   span {
     color: #667085;
     font-size: 13px;
-    line-height: 1.5;
+    line-height: 1.35;
   }
 }
 
@@ -504,6 +504,19 @@
   color: #101828;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-weight: 700;
+}
+
+.memory-tool-two-line-text {
+  color: #475467;
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+  display: -webkit-box;
+  max-height: calc(13px * 1.6 * 2);
+  line-clamp: 2;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .memory-tag-group {
@@ -1723,6 +1736,16 @@
   background:
     radial-gradient(circle at top right, rgba(22, 119, 255, 0.14), transparent 40%),
     linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+
+  .detail-page-description {
+    color: inherit;
+  }
+}
+
+.memory-skill-detail-header-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .memory-experience-detail-layout {
@@ -1760,13 +1783,13 @@
 
 .memory-skill-detail-card {
   border: 1px solid #e1e8f0;
-  border-radius: 18px;
+  border-radius: 14px;
   background: #fff;
-  padding: 20px 20px 18px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05);
+  gap: 14px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
 }
 
 .memory-experience-detail-card {
@@ -1834,15 +1857,14 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   flex-wrap: wrap;
-  padding-bottom: 2px;
 
   .memory-skill-detail-title-copy {
     flex: 1;
     min-width: min(380px, 100%);
-    border-radius: 12px;
-    padding: 8px 10px;
+    border-radius: 10px;
+    padding: 2px 4px;
     transition:
       background-color 0.2s ease,
       box-shadow 0.2s ease;
@@ -1860,18 +1882,23 @@
   h3 {
     margin: 0;
     color: #101828;
-    font-size: 42px;
+    font-size: 22px;
     font-weight: 700;
-    line-height: 1.22;
-    letter-spacing: -0.02em;
+    line-height: 1.32;
+    letter-spacing: 0;
+    overflow-wrap: anywhere;
   }
 
   p {
-    margin: 10px 0 0;
-    max-width: 840px;
+    margin: 6px 0 0;
+    max-width: 760px;
     color: #667085;
-    font-size: 22px;
-    line-height: 1.7;
+    font-size: 14px;
+    line-height: 1.6;
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
   }
 }
 
@@ -1895,12 +1922,12 @@
 }
 
 .memory-skill-detail-title-input.ant-input {
-  height: 48px;
-  font-size: 34px;
+  height: 36px;
+  font-size: 20px;
   font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: -0.02em;
-  padding: 6px 12px;
+  line-height: 1.3;
+  letter-spacing: 0;
+  padding: 4px 10px;
 }
 
 .memory-skill-detail-title-trigger {
@@ -1934,9 +1961,9 @@
   border: 1px solid #c9d7ea;
   background: #fff;
   box-shadow: none;
-  font-size: 20px;
+  font-size: 14px;
   line-height: 1.6;
-  padding: 10px 12px;
+  padding: 8px 10px;
 
   &:hover,
   &:focus,
@@ -1989,8 +2016,8 @@
   .ant-tag {
     margin-inline-end: 0;
     border-radius: 999px;
-    padding: 4px 12px;
-    font-size: 13px;
+    padding: 2px 10px;
+    font-size: 12px;
   }
 }
 
@@ -2042,11 +2069,7 @@
   color: #475467;
   line-height: 1.8;
   word-break: break-word;
-  max-height: calc(100vh - 330px);
-  max-height: calc(100dvh - 330px);
   min-height: 460px;
-  overflow: auto;
-  scrollbar-gutter: stable;
 
   pre {
     margin: 0;
@@ -2124,11 +2147,11 @@
     }
 
     h3 {
-      font-size: 32px;
+      font-size: 20px;
     }
 
     p {
-      font-size: 18px;
+      font-size: 14px;
     }
   }
 

@@ -16,7 +16,8 @@ type preparedBinding struct {
 	checkpoint store.SyncCheckpoint
 }
 
-func (e *DefaultEngine) prepareCreateBinding(ctx context.Context, sourceID, datasetID, callerID, requestID string, bindingIndex int, input BindingInput, now time.Time) (preparedBinding, error) {
+func (e *DefaultEngine) prepareCreateBinding(ctx context.Context, sourceID, datasetID, sourceName, callerID, tenantID, requestID string, bindingIndex int, input BindingInput, now time.Time) (preparedBinding, error) {
+	input.ProviderOptions = providerOptionsWithActor(input.ProviderOptions, callerID, tenantID)
 	if err := validateBindingInput(input, true); err != nil {
 		return preparedBinding{}, err
 	}
@@ -24,10 +25,7 @@ func (e *DefaultEngine) prepareCreateBinding(ctx context.Context, sourceID, data
 	if err != nil {
 		return preparedBinding{}, err
 	}
-	displayName := strings.TrimSpace(input.DisplayName)
-	if displayName == "" {
-		displayName = normalized.DisplayName
-	}
+	displayName := bindingRootDisplayName(input.DisplayName, sourceName, normalized)
 	if input.BindingID == "" {
 		input.BindingID = e.newID("binding")
 	}
@@ -73,6 +71,23 @@ func (e *DefaultEngine) defaultDatasetAlgoRef() *coreclient.DatasetAlgo {
 func (e *DefaultEngine) createCoreFolder(ctx context.Context, req coreclient.CreateBindingRootDocumentRequest) (string, error) {
 	resp, err := e.core.CreateBindingRootDocument(ctx, req)
 	return resp.DocumentID, err
+}
+
+func bindingRootDisplayName(explicit, sourceName string, target connector.NormalizedTarget) string {
+	if name := strings.TrimSpace(explicit); name != "" {
+		return name
+	}
+	if isSingleFileTarget(target) {
+		if name := strings.TrimSpace(sourceName); name != "" {
+			return name
+		}
+	}
+	return strings.TrimSpace(target.DisplayName)
+}
+
+func isSingleFileTarget(target connector.NormalizedTarget) bool {
+	meta := target.ProviderMeta
+	return meta["kind"] == "wiki_node" && meta["file_type"] == "file"
 }
 
 func (e *DefaultEngine) deleteCoreFolder(ctx context.Context, datasetID, folderID, callerID string) error {
@@ -146,6 +161,16 @@ func (e *DefaultEngine) newBinding(sourceID, folderID, displayName string, input
 		CreatedAt:              now,
 		UpdatedAt:              now,
 	}
+}
+
+func providerOptionsWithActor(options map[string]any, userID, tenantID string) map[string]any {
+	out := make(map[string]any, len(options)+2)
+	for key, value := range options {
+		out[key] = value
+	}
+	out["user_id"] = userID
+	out["tenant_id"] = tenantID
+	return out
 }
 
 func effectiveAgentID(input string, target connector.NormalizedTarget) string {

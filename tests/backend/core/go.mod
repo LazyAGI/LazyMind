@@ -1,6 +1,6 @@
 module lazymind-core-tests
 
-go 1.24.0
+go 1.25
 
 replace lazymind/core => ../../../backend/core
 

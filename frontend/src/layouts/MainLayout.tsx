@@ -8,6 +8,7 @@ import {
   AppstoreOutlined,
   DatabaseOutlined,
   ApiOutlined,
+  ApartmentOutlined,
   UserOutlined,
   TeamOutlined,
   GlobalOutlined,
@@ -145,7 +146,7 @@ export default function MainLayout() {
     {
       key: "/data-sources",
       label: t("layout.dataSourceManagement"),
-      icon: <DatabaseOutlined />,
+      icon: <ApartmentOutlined />,
     },
     {
       key: "/dataset-management",
@@ -165,7 +166,7 @@ export default function MainLayout() {
       label: t("layout.memoryManagement"),
       icon: <AppstoreOutlined />,
     },
-    ...(isAdminUser && developerActive && !hideEvo
+    ...(!hideEvo
       ? [
           {
             key: "/self-evolution",
@@ -251,10 +252,10 @@ export default function MainLayout() {
   }, [developerActive, isAdminUser]);
 
   useEffect(() => {
-    if (pathname.startsWith("/self-evolution") && (hideEvo || !isAdminUser || !developerActive)) {
+    if (pathname.startsWith("/self-evolution") && hideEvo) {
       navigate("/agent/chat", { replace: true });
     }
-  }, [pathname, isAdminUser, developerActive, navigate, hideEvo]);
+  }, [pathname, navigate, hideEvo]);
 
   useEffect(() => {
     if (!pathname.startsWith("/agent/chat")) {

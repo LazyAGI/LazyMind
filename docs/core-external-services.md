@@ -29,7 +29,7 @@
 | Chat / Generation 服务 | `LAZYMIND_CHAT_SERVICE_URL` | `http://chat:8046` | `http://chat:8046` | 对话、流式对话、技能/记忆/偏好生成、模型连通性检查 |
 | Algorithm / KB 服务 | `LAZYMIND_ALGO_SERVICE_URL` | `http://10.119.24.129:8850` | `http://lazyllm-doc-server:8000` | 算法列表、算法分组、KB 创建/更新/删除、chunk 查询 |
 | Document 服务 | `LAZYMIND_DOCUMENT_SERVICE_URL` | 回退到 `LAZYMIND_ALGO_SERVICE_URL` | `http://lazyllm-doc-server:8000` | 文档 add/reparse/transfer/delete、任务取消 |
-| Evo Service | `LAZYMIND_EVO_SERVICE_URL` | `http://host.docker.internal:8048` | `http://evo-api:8048` | Agent 线程、自进化流程、结果、报告和 diff 代理 |
+| Evo Service | `LAZYMIND_EVO_SERVICE_URL` | `http://host.docker.internal:8048` | `http://evo-api:8047` | Agent 线程、自进化流程、结果、报告和 diff 代理 |
 
 ## 服务明细
 
@@ -83,14 +83,14 @@ LAZYMIND_DOCUMENT_SERVICE_URL: ${LAZYMIND_DOCUMENT_SERVICE_URL:-http://lazyllm-d
 
 ### 4. Evo Service
 
-基础 URL 来自 `LAZYMIND_EVO_SERVICE_URL`，代码默认 `http://host.docker.internal:8048`，docker-compose 默认 `http://evo-api:8048`。
+基础 URL 来自 `LAZYMIND_EVO_SERVICE_URL`，代码默认 `http://host.docker.internal:8048`，docker-compose 默认 `http://evo-api:8047`。
 
 Core 调用的端点:
 
 | 方法 | 路径 | 用途 | 触发模块 |
 | --- | --- | --- | --- |
 | POST | `/v1/evo/threads` | 创建 agent/evo 线程 | `agent/handlers.go` |
-| GET | `/v1/evo/threads/statuse` | 批量查询线程状态 | `agent/helpers.go`, `agent/handlers.go` |
+| GET | `/v1/evo/threads/statuses` | 批量查询线程状态 | `agent/helpers.go`, `agent/handlers.go` |
 | POST | `/v1/evo/threads/{thread_id}/messages` | 消息 SSE 流 | `agent/messages.go` |
 | GET | `/v1/evo/threads/{thread_id}/events` | 事件 SSE 流 | `agent/handlers.go` |
 | GET | `/v1/evo/threads/{thread_id}/flow-status` | 查询流程状态 | `agent/handlers.go`, `agent/rounds.go` |
@@ -102,7 +102,7 @@ Core 调用的端点:
 | GET | `/v1/evo/reports/{report_id}/content` | 获取报告内容 | `agent/handlers.go` |
 | GET | `/v1/evo/diffs/{apply_id}/{filename}` | 获取 diff 内容 | `agent/handlers.go` |
 
-注意: 批量状态端点代码中路径为 `/v1/evo/threads/statuse`，不是 `status` 或 `statuses`。
+注意: 批量状态端点路径为 `/v1/evo/threads/statuses`。
 
 ## 运行期依赖关系简图
 

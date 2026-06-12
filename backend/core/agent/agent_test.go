@@ -74,7 +74,15 @@ func newAgentTestDB(t *testing.T) *orm.DB {
 	if err != nil {
 		t.Fatalf("connect sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&orm.AgentThread{}, &orm.AgentUserActiveThread{}, &orm.AgentThreadRecord{}, &orm.AgentThreadRound{}); err != nil {
+	if err := db.AutoMigrate(
+		&orm.AgentThread{},
+		&orm.AgentUserActiveThread{},
+		&orm.AgentThreadRecord{},
+		&orm.AgentThreadRound{},
+		&orm.UserSelectedModel{},
+		&orm.UserModelProviderGroupModel{},
+		&orm.UserModelProviderGroup{},
+	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
 	return db
@@ -1356,6 +1364,16 @@ func TestDeleteThreadHistoryRemovesThreadRoundsAndRecords(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("create record: %v", err)
 	}
+	if err := db.DB.Create(&orm.AgentUserActiveThread{
+		UserID:     "u1",
+		ThreadID:   "thr_1",
+		Status:     userActiveThreadStatusActive,
+		LeaseUntil: now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}).Error; err != nil {
+		t.Fatalf("create active thread: %v", err)
+	}
 
 	result, err := deleteThreadHistory(db.DB, "thr_1")
 	if err != nil {
@@ -1369,6 +1387,9 @@ func TestDeleteThreadHistoryRemovesThreadRoundsAndRecords(t *testing.T) {
 	}
 	if result["deleted_records"] != int64(1) {
 		t.Fatalf("expected deleted_records=1, got %#v", result["deleted_records"])
+	}
+	if result["deleted_active_threads"] != int64(1) {
+		t.Fatalf("expected deleted_active_threads=1, got %#v", result["deleted_active_threads"])
 	}
 }
 
@@ -1404,6 +1425,8 @@ func TestDeleteThreadHistoryCancelsRunningFlowBeforeDeleting(t *testing.T) {
 			})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/evo/threads/thr_1/cancel":
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "cancelled"})
+		case r.Method == http.MethodDelete && r.URL.Path == "/v1/evo/threads/thr_1":
+			_ = json.NewEncoder(w).Encode(map[string]any{"deleted_run": true, "deleted_thread": true})
 		default:
 			http.Error(w, "unexpected request", http.StatusNotFound)
 		}
@@ -1426,6 +1449,7 @@ func TestDeleteThreadHistoryCancelsRunningFlowBeforeDeleting(t *testing.T) {
 	wantCalls := []string{
 		"GET /v1/evo/threads/thr_1/flow-status",
 		"POST /v1/evo/threads/thr_1/cancel",
+		"DELETE /v1/evo/threads/thr_1",
 	}
 	if fmt.Sprint(gotCalls) != fmt.Sprint(wantCalls) {
 		t.Fatalf("unexpected upstream calls: want %v got %v", wantCalls, gotCalls)
@@ -1458,6 +1482,10 @@ func TestDeleteThreadHistoryDoesNotCancelEndedFlow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/v1/evo/threads/thr_1/flow-status" {
 			_ = json.NewEncoder(w).Encode(threadFlowStatusResponse{ThreadID: "thr_1", Status: "ended"})
+			return
+		}
+		if r.Method == http.MethodDelete && r.URL.Path == "/v1/evo/threads/thr_1" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"deleted_run": true, "deleted_thread": true})
 			return
 		}
 		http.Error(w, "unexpected request", http.StatusNotFound)
@@ -1968,6 +1996,46 @@ func TestReserveUserActiveThreadCreationReplacesEndedThread(t *testing.T) {
 	}
 	if active.Status != userActiveThreadStatusCreating || active.ThreadID != "" {
 		t.Fatalf("expected new creating placeholder after ended thread, got %#v", active)
+	}
+}
+
+func TestReserveUserActiveThreadCreationReplacesMissingThread(t *testing.T) {
+	db := newAgentTestDB(t)
+	now := time.Now().UTC()
+	if err := db.DB.Create(&orm.AgentUserActiveThread{
+		UserID:     "u1",
+		ThreadID:   "thr_missing",
+		Status:     userActiveThreadStatusActive,
+		LeaseUntil: now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}).Error; err != nil {
+		t.Fatalf("seed active thread: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/v1/evo/threads/thr_missing/flow-status") {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		http.Error(w, `{"detail":"thread thr_missing not found"}`, http.StatusNotFound)
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", server.URL)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/agent/threads", strings.NewReader(`{}`))
+	req.Header.Set("X-User-Id", "u1")
+	guard, err := reserveUserActiveThreadCreation(context.Background(), db.DB, req)
+	if err != nil {
+		t.Fatalf("reserveUserActiveThreadCreation returned error: %v", err)
+	}
+	defer guard.Abort(db.DB)
+
+	var active orm.AgentUserActiveThread
+	if err := db.DB.Where("user_id = ?", "u1").First(&active).Error; err != nil {
+		t.Fatalf("load active thread placeholder: %v", err)
+	}
+	if active.Status != userActiveThreadStatusCreating || active.ThreadID != "" {
+		t.Fatalf("expected new creating placeholder after missing thread, got %#v", active)
 	}
 }
 

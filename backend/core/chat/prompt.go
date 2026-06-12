@@ -299,6 +299,7 @@ func ListPrompts(w http.ResponseWriter, r *http.Request) {
 			start = n
 		}
 	}
+	keyword := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("keyword")))
 
 	var dps []orm.DefaultPrompt
 	_ = corestore.DB().Where("create_user_id = ?", userID).Find(&dps).Error
@@ -308,7 +309,12 @@ func ListPrompts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var ps []orm.Prompt
-	if err := corestore.DB().Where("create_user_id = ?", userID).Order("created_at desc").Find(&ps).Error; err != nil {
+	query := corestore.DB().Where("create_user_id = ?", userID)
+	if keyword != "" {
+		likeKeyword := "%" + keyword + "%"
+		query = query.Where("LOWER(name) LIKE ? OR LOWER(content) LIKE ?", likeKeyword, likeKeyword)
+	}
+	if err := query.Order("created_at desc").Find(&ps).Error; err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "list failed", err), http.StatusInternalServerError)
 		return
 	}

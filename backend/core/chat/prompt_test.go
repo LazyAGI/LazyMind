@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"lazymind/core/common/orm"
 	corestore "lazymind/core/store"
@@ -84,5 +85,61 @@ func TestPolishPromptCallsRewrite(t *testing.T) {
 	}
 	if resp["content"] != "polished prompt" {
 		t.Fatalf("unexpected response: %#v", resp)
+	}
+}
+
+func TestListPromptsFiltersByKeyword(t *testing.T) {
+	db := newPromptTestDB(t)
+	corestore.Init(db.DB, nil, nil)
+	t.Cleanup(func() { corestore.Init(nil, nil, nil) })
+
+	now := time.Now().UTC()
+	prompts := []orm.Prompt{
+		{
+			ID:      "p_alpha",
+			Name:    "Alpha Summary",
+			Content: "Summarize weekly operation notes.",
+			BaseModel: orm.BaseModel{
+				CreateUserID: "u1",
+				CreatedAt:    now,
+				UpdatedAt:    now,
+			},
+		},
+		{
+			ID:      "p_beta",
+			Name:    "Beta Draft",
+			Content: "Write a launch announcement.",
+			BaseModel: orm.BaseModel{
+				CreateUserID: "u1",
+				CreatedAt:    now.Add(-time.Minute),
+				UpdatedAt:    now.Add(-time.Minute),
+			},
+		},
+	}
+	if err := db.Create(&prompts).Error; err != nil {
+		t.Fatalf("seed prompts: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/prompts?keyword=summary", nil)
+	req.Header.Set("X-User-Id", "u1")
+	rec := httptest.NewRecorder()
+
+	ListPrompts(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Prompts []map[string]any `json:"prompts"`
+		Total   int64            `json:"total"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Total != 1 || len(resp.Prompts) != 1 {
+		t.Fatalf("expected one filtered prompt, got total=%d prompts=%#v", resp.Total, resp.Prompts)
+	}
+	if resp.Prompts[0]["id"] != "p_alpha" {
+		t.Fatalf("expected p_alpha, got %#v", resp.Prompts[0])
 	}
 }

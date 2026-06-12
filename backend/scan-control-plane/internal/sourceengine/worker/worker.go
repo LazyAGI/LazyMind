@@ -239,6 +239,7 @@ func (w *DefaultParseWorker) exportObject(ctx context.Context, exec executionCon
 		SourceVersion:     exec.task.SourceVersion,
 		TargetVersionID:   exec.task.TargetVersionID,
 		ExportFormat:      connector.ExportFormatOriginal,
+		ProviderOptions:   connectorOptions(exec.binding.ProviderOptions),
 		ProviderMeta:      connectorMeta(exec.object.ProviderMeta),
 	})
 	if err != nil {
@@ -397,6 +398,17 @@ func isSupersedeError(err error) bool {
 	}
 	code, ok := connector.ErrorCodeOf(err)
 	return ok && code == connector.ErrorCodeVersionMismatch
+}
+
+func connectorOptions(in store.JSON) connector.ProviderOptions {
+	if in == nil {
+		return nil
+	}
+	out := make(connector.ProviderOptions, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 func connectorMeta(in store.JSON) connector.ProviderMeta {

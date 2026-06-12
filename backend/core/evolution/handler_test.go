@@ -69,13 +69,13 @@ func TestListSuggestionsSupportsEvolutionAndResourceFilters(t *testing.T) {
 		ID:            "memory-1",
 		UserID:        "u1",
 		Content:       "",
-		ContentHash:   HashContent(""),
 		Version:       1,
 		UpdatedBy:     "system",
 		UpdatedByName: "system",
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
+	memory.ContentHash = HashSystemMemory(memory)
 	preference := orm.SystemUserPreference{
 		ID:            "preference-1",
 		UserID:        "u2",
@@ -256,13 +256,13 @@ func TestListSuggestionsSupportsEvolutionIDFilters(t *testing.T) {
 		ID:            "memory-1",
 		UserID:        "u1",
 		Content:       "",
-		ContentHash:   HashContent(""),
 		Version:       1,
 		UpdatedBy:     "system",
 		UpdatedByName: "system",
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
+	memory.ContentHash = HashSystemMemory(memory)
 	preference := orm.SystemUserPreference{
 		ID:            "preference-1",
 		UserID:        "u2",

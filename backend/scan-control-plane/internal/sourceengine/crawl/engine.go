@@ -16,6 +16,10 @@ type BindingReader interface {
 	GetBinding(ctx context.Context, sourceID, bindingID string) (store.Binding, error)
 }
 
+type SourceReader interface {
+	GetSource(ctx context.Context, sourceID string) (store.Source, error)
+}
+
 type ObjectWriter interface {
 	UpsertObjects(ctx context.Context, objects []store.SourceObject) error
 }
@@ -131,6 +135,13 @@ func (e *DefaultCrawlEngine) loadRunContext(ctx context.Context, claim BindingRu
 	}
 	if binding.Status != "" && binding.Status != BindingStatusActive {
 		return runContext{}, inactiveBindingResult(result, claim.ScopeType), false, nil
+	}
+	if reader, ok := e.bindings.(SourceReader); ok {
+		source, err := reader.GetSource(ctx, claim.SourceID)
+		if err != nil {
+			return runContext{}, result, false, err
+		}
+		binding.ProviderOptions = providerOptionsWithRunActor(binding.ProviderOptions, source.CreatedBy, source.TenantID)
 	}
 	conn, err := e.registry.Get(connector.ConnectorType(binding.ConnectorType))
 	if err != nil {
@@ -527,6 +538,20 @@ func providerOptions(in store.JSON) connector.ProviderOptions {
 	out := make(connector.ProviderOptions, len(in))
 	for key, value := range in {
 		out[key] = value
+	}
+	return out
+}
+
+func providerOptionsWithRunActor(options store.JSON, userID, tenantID string) store.JSON {
+	out := store.CloneJSON(options)
+	if out == nil {
+		out = store.JSON{}
+	}
+	if userID != "" {
+		out["user_id"] = userID
+	}
+	if tenantID != "" {
+		out["tenant_id"] = tenantID
 	}
 	return out
 }

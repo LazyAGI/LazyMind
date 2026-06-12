@@ -36,6 +36,8 @@ import {
   DefaultApiFactory as CoreDefaultApiFactory,
   type ConversationHistoryListResponse,
   type DefaultApiApiCoreConversationsNameHistoryGetRequest,
+  type DefaultApiApiCorePromptsPolishPostRequest,
+  type PromptPolishResponse,
 } from "@/api/generated/core-client";
 import {
   type AllDocumentCreatorsResponse,
@@ -62,6 +64,11 @@ const coreDefaultClient = CoreDefaultApiFactory(
   BASE_URL,
   axiosInstance,
 );
+
+type PromptListRequestWithKeyword =
+  PromptServiceApiPromptServiceListPromptsRequest & {
+    keyword?: string;
+  };
 
 export const CHAT_STREAM_URL = `${coreApiBaseUrl}/conversations:chat`;
 export const CHAT_RESUME_STREAM_URL = `${coreApiBaseUrl}/conversations:resumeChat`;
@@ -214,7 +221,7 @@ export function ChatServiceApi() {
 export function PromptServiceApi() {
   return {
     promptServiceListPrompts(
-      requestParameters: PromptServiceApiPromptServiceListPromptsRequest = {},
+      requestParameters: PromptListRequestWithKeyword = {},
       options?: RawAxiosRequestConfig,
     ) {
       return axiosInstance.get<ListPromptsResponse>(`${coreApiBaseUrl}/prompts`, {
@@ -223,6 +230,7 @@ export function PromptServiceApi() {
           ...(options?.params ?? {}),
           page_size: requestParameters.pageSize,
           page_token: requestParameters.pageToken,
+          keyword: requestParameters.keyword,
         },
       });
     },
@@ -283,6 +291,15 @@ export function PromptServiceApi() {
         requestParameters.unsetDefaultPromptRequest,
         withJsonOptions(options),
       );
+    },
+    promptServicePolishPrompt(
+      requestParameters: DefaultApiApiCorePromptsPolishPostRequest,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return coreDefaultClient.apiCorePromptsPolishPost(
+        requestParameters,
+        options,
+      ) as Promise<AxiosResponse<PromptPolishResponse>>;
     },
   };
 }

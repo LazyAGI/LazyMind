@@ -66,8 +66,9 @@ type roleTypeInfo struct {
 // Key: role string, Value: roleTypeInfo
 var roleTypeCache sync.Map
 
-// fetchRoleTypeInfo calls /api/model/role_type and caches the result.
-// On any error the zero value is returned so callers can decide their own fallback.
+// fetchRoleTypeInfo calls /api/model/role_type and caches the result permanently.
+// The yaml config does not change at runtime so a successful result never expires.
+// On error the zero value is returned and nothing is cached so the next call retries.
 func fetchRoleTypeInfo(ctx context.Context, role string) (roleTypeInfo, error) {
 	if v, ok := roleTypeCache.Load(role); ok {
 		return v.(roleTypeInfo), nil
@@ -82,15 +83,17 @@ func fetchRoleTypeInfo(ctx context.Context, role string) (roleTypeInfo, error) {
 	return info, nil
 }
 
-// FetchRoleIsDynamic returns whether the given model_type role is source=dynamic in the runtime
-// config yaml.  Results are permanently cached since the yaml does not change at runtime.
-// Returns (true, nil) on any fetch error so that the caller falls back to the normal DB path.
+// FetchRoleIsDynamic returns whether the given model_type role is source=dynamic in the
+// runtime config yaml, as reported by the algorithm service.
+// Results are permanently cached since the yaml does not change at runtime.
+// An error is returned as-is — the algorithm service being unreachable is a
+// deployment bug, not a condition to silently paper over with a fallback.
 func FetchRoleIsDynamic(ctx context.Context, role string) (bool, error) {
 	info, err := fetchRoleTypeInfo(ctx, role)
 	if err != nil {
-		log.Logger.Warn().Err(err).Str("role", role).
-			Msg("role_type fetch failed; assuming dynamic=true")
-		return true, err
+		log.Logger.Error().Err(err).Str("role", role).
+			Msg("role_type fetch failed: algorithm service unreachable")
+		return false, err
 	}
 	return info.IsDynamic, nil
 }

@@ -76,6 +76,10 @@ func threadActionURL(threadID, action string) string {
 	)
 }
 
+func threadDeleteURL(threadID string) string {
+	return common.JoinURL(agentServiceEndpoint(), "/v1/evo/threads/"+url.PathEscape(threadID))
+}
+
 func threadFlowStatusURL(threadID string) string {
 	return common.JoinURL(agentServiceEndpoint(), "/v1/evo/threads/"+url.PathEscape(threadID)+"/flow-status")
 }

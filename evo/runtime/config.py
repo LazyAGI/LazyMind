@@ -1,226 +1,115 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
+
+import os
+import sys
 from pathlib import Path
-from typing import Literal
-from algorithm.config import config
-from evo.runtime.code_config import CodeAccessConfig, load_code_access
+from typing import Any
 
-EVO_LLM_HTTP_TIMEOUT_S = 300
-EVO_LLM_PRODUCER_TIMEOUT_S = 600.0
-EVO_BADCASE_SCORE_FIELD = 'answer_correctness'
-EVO_DATASETGEN_MAX_WORKERS = 5
-EVO_EVAL_MAX_WORKERS = 3
-EVO_EVAL_RAG_MAX_WORKERS = 6
-EVO_EVAL_JUDGE_MAX_WORKERS = 3
-EVO_EVAL_JUDGE_TIMEOUT_S = 30.0
-EVO_EVAL_JUDGE_MAX_RETRIES = 1
-EVO_KB_BASE_URL = 'http://doc-server:8000'
-EVO_CHUNK_BASE_URL = 'http://doc-server:8000'
-EVO_TARGET_CHAT_URL = 'http://chat:8046/api/chat/stream'
-EVO_CANDIDATE_CHAT_HEALTH_PATH = '/health'
-EVO_CANDIDATE_CHAT_STARTUP_TIMEOUT_S = 120.0
-EVO_EVENT_MAX_INLINE_CHARS = 60000
-EVO_MAX_SCHEMA_FAILURES = 3
-EVO_RAG_MAX_RETRIES = 3
-EVO_RAG_RETRY_BACKOFF_S = 2.0
-EVO_RAG_TIMEOUT_S = 120
-EVO_NODE_HTTP_TIMEOUT_S = 20.0
-EVO_NODE_HTTP_MAX_PAGES = 5
-EVO_NODE_HTTP_DIRECT = False
+_ROLE_DEFAULTS = {'dynamic': 'online'}
 
 
-@dataclass(frozen=True)
-class ModelGovernanceConfig:
-    rate_limit_per_sec: float = 10.0
-    burst: int = 15
-    cache_size: int = 128
-    max_retries: int = 3
-    retry_base_seconds: float = 1.0
-    use_cache: bool = True
-    on_failure: Literal['raise', 'disable'] = 'raise'
-    producer_timeout_s: float = 600.0
-    http_timeout_s: int = 300
+def load_core_model_config() -> dict[str, Any]:
+    """Return LazyMind runtime model config for per-request dynamic injection."""
+    _ensure_lazymind_runtime()
+    from lazymind.model_config import get_config_path, load_model_config
+
+    path = Path(get_config_path())
+    raw = load_model_config(str(path), expand_env=True)
+    if any(isinstance(cfg, dict) and cfg.get('source') == 'dynamic' for cfg in raw.values()):
+        raw = load_model_config(str(path.with_name(f'runtime_models.{_ROLE_DEFAULTS["dynamic"]}.yaml')),
+                                expand_env=True)
+    return {role: cfg for role, cfg in ((role, _role_config(role, entries)) for role, entries in raw.items()) if cfg}
 
 
-def _default_llm_governance() -> ModelGovernanceConfig:
-    return ModelGovernanceConfig(
-        on_failure='raise',
-        http_timeout_s=EVO_LLM_HTTP_TIMEOUT_S,
-        producer_timeout_s=EVO_LLM_PRODUCER_TIMEOUT_S,
-    )
+def activate_model_config(model_config: dict[str, Any] | None, *, session_id: str | None = None) -> bool:
+    if not model_config: return False
+    _ensure_lazymind_runtime()
+    import lazyllm
+    from lazymind.model_config import inject_model_config
+
+    if session_id is not None:
+        lazyllm.globals._init_sid(sid=session_id)
+        lazyllm.locals._init_sid(sid=session_id)
+    inject_model_config(model_config)
+    return True
 
 
-def _default_embed_governance() -> ModelGovernanceConfig:
-    return ModelGovernanceConfig(
-        rate_limit_per_sec=20.0,
-        burst=30,
-        cache_size=512,
-        max_retries=3,
-        retry_base_seconds=2.0,
-        on_failure='disable',
-    )
+def evo_llm(model_config: dict[str, Any] | None = None):
+    _ensure_lazymind_runtime()
+    from lazyllm import AutoModel
+
+    role = os.getenv('LAZYMIND_EVO_LLM_ROLE') or 'evo_llm'
+    config = model_config or load_core_model_config()
+    activate_model_config(config)
+    module = AutoModel(source='dynamic', dynamic_auth=True, type=_role_type(config.get(role)), name=role) \
+        if _dynamic_role_slot(role) else AutoModel(model=role)
+    return _ConfiguredRoleModel(role, config, module)
 
 
-@dataclass(frozen=True)
-class AnalysisConfig:
-    badcase_score_field: str = 'answer_correctness'
-    cluster_method: str = 'hdbscan'
-    cluster_min_size: int | None = None
-    enable_embed_features: bool = False
+class _ConfiguredRoleModel:
+    def __init__(self, role: str, model_config: dict[str, Any], module: Any):
+        self.role = role
+        self.model_config = model_config
+        self.module = module
+
+    def __call__(self, *args: Any, **kwargs: Any):
+        activate_model_config(self.model_config)
+        return self.module(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.module, name)
 
 
-@dataclass(frozen=True)
-class EvoModelConfig:
-    llm_role: str = 'evo_llm'
-    embed_role: str = 'embed_main'
-    auto_user_role: str = 'evo_llm'
+def _ensure_lazymind_runtime() -> None:
+    root = _algorithm_root()
+    if root is None: return
+    desired = root / 'lazyllm' / 'lazyllm'
+    for finder in list(sys.meta_path):
+        known = getattr(finder, 'known_source_files', None)
+        if isinstance(known, dict) and str(known.get('lazyllm') or '').startswith(str(root.parents[1] / 'LazyLLM')):
+            sys.meta_path.remove(finder)
+    loaded = getattr(sys.modules.get('lazyllm'), '__file__', '')
+    if loaded and not str(loaded).startswith(str(desired)):
+        for name in [name for name in sys.modules if name == 'lazyllm' or name.startswith('lazyllm.')]:
+            sys.modules.pop(name, None)
+    for path in (root / 'lazyllm', root):
+        if path.exists() and str(path) not in sys.path:
+            sys.path.insert(0, str(path))
 
 
-@dataclass(frozen=True)
-class StorageConfig:
-    base_dir: Path
-
-    @property
-    def work_dir(self) -> Path:
-        return self.base_dir / 'work'
-
-    @property
-    def runs_dir(self) -> Path:
-        return self.work_dir / 'runs'
-
-    @property
-    def applies_dir(self) -> Path:
-        return self.work_dir / 'applies'
-
-    @property
-    def reports_dir(self) -> Path:
-        return self.work_dir / 'reports'
-
-    @property
-    def diffs_dir(self) -> Path:
-        return self.work_dir / 'diffs'
-
-    @property
-    def opencode_dir(self) -> Path:
-        return self.work_dir / 'opencode'
-
-    @property
-    def git_dir(self) -> Path:
-        return self.work_dir / 'git'
-
-    @property
-    def state_db_path(self) -> Path:
-        return self.base_dir / 'state'
-
-    def ensure(self) -> None:
-        self.base_dir.mkdir(parents=True, exist_ok=True)
+def _algorithm_root() -> Path | None:
+    local = Path(__file__).resolve().parents[3] / 'LazyRAG' / 'algorithm'
+    for root in (local, Path('/app/algorithm')):
+        if (root / 'lazymind').exists() and (root / 'lazyllm' / 'lazyllm').exists(): return root
+    return None
 
 
-@dataclass(frozen=True)
-class DatasetGenConfig:
-    kb_base_url: str = 'http://localhost:8055'
-    chunk_base_url: str = 'http://localhost:8055'
-    max_workers: int = 5
-    task_settings: dict = field(
-        default_factory=lambda: {
-            'single_hop': {'num': 10},
-            'multi_hop': {'num': 10},
-            'table': {'num': 10},
-            'list': {'num': 10},
-        }
-    )
+def _dynamic_role_slot(role: str) -> str:
+    from lazymind.model_config import get_dynamic_role_slot_map
+
+    return get_dynamic_role_slot_map().get(role, '')
 
 
-@dataclass(frozen=True)
-class EvalRunConfig:
-    provider: str = ''
-    base_url: str = ''
-    token: str = ''
-    mock_path: str = ''
-    target_chat_url: str = ''
+def _role_type(role_config: Any) -> str:
+    value = role_config.get('type') if isinstance(role_config, dict) else ''
+    return str(value or 'llm')
 
 
-@dataclass(frozen=True)
-class EvoConfig:
-    data_dir: Path
-    storage: StorageConfig
-    default_judge_path: Path
-    default_trace_path: Path
-    chat_source: Path = Path('/app/algorithm/chat')
-    code_access: CodeAccessConfig = field(default_factory=CodeAccessConfig)
-    analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
-    llm: ModelGovernanceConfig = field(default_factory=_default_llm_governance)
-    embed: ModelGovernanceConfig = field(default_factory=_default_embed_governance)
-    model_config: EvoModelConfig = field(default_factory=EvoModelConfig)
-    dataset_gen: DatasetGenConfig = field(default_factory=DatasetGenConfig)
-    eval_run: EvalRunConfig = field(default_factory=EvalRunConfig)
-    profile: str = 'dev'
-
-    @property
-    def badcase_score_field(self) -> str:
-        return self.analysis.badcase_score_field
-
-    @property
-    def cluster_method(self) -> str:
-        return self.analysis.cluster_method
-
-    @property
-    def cluster_min_size(self) -> int | None:
-        return self.analysis.cluster_min_size
-
-    @property
-    def enable_embed_features(self) -> bool:
-        return self.analysis.enable_embed_features
+def _role_config(role: str, entries: Any) -> dict[str, Any]:
+    entry = entries[0] if isinstance(entries, list) and entries else entries
+    if not isinstance(entry, dict): return {}
+    source = str(entry.get('source') or '').strip().lower()
+    cfg = {
+        'source': source,
+        'model': entry.get('model') or entry.get('name'),
+        'base_url': entry.get('base_url') or entry.get('url'),
+        'type': entry.get('type'),
+        'skip_auth': entry.get('skip_auth'),
+        'api_key': entry.get('api_key') or _source_api_key(source),
+    }
+    return {key: value for key, value in cfg.items() if value not in (None, '')}
 
 
-def load_config(
-    *,
-    data_dir: Path | None = None,
-    base_dir: Path | None = None,
-    badcase_score_field: str | None = None,
-    code_map_path: Path | None = None,
-) -> EvoConfig:
-    evo_root = Path(__file__).resolve().parent.parent
-    project_root = evo_root.parent
-    data_dir = Path(data_dir or config['evo_data_dir'] or (evo_root / 'data'))
-    base_dir = Path(base_dir or config['evo_base_dir'] or (project_root / 'data' / 'evo'))
-    score_field = badcase_score_field or EVO_BADCASE_SCORE_FIELD
-    if code_map_path is None:
-        code_map_path = Path(config['evo_code_map'] or (evo_root / 'code_map.json'))
-    code_access = load_code_access(code_map_path)
-    judge_path = data_dir / 'eval_mock.json'
-    model_config = EvoModelConfig(
-        llm_role=config['evo_llm_role'],
-        embed_role='embed_main',
-        auto_user_role=config['evo_auto_user_role'],
-    )
-    storage = StorageConfig(base_dir=base_dir)
-    storage.ensure()
-    analysis = AnalysisConfig(
-        badcase_score_field=score_field,
-        enable_embed_features=False,
-    )
-    chat_source = Path(config['evo_chat_source'] or '/app/algorithm/chat')
-    dataset_gen = DatasetGenConfig(
-        kb_base_url=EVO_KB_BASE_URL,
-        chunk_base_url=EVO_CHUNK_BASE_URL,
-        max_workers=EVO_DATASETGEN_MAX_WORKERS,
-    )
-    eval_run = EvalRunConfig(
-        target_chat_url=EVO_TARGET_CHAT_URL,
-    )
-    profile = 'dev'
-    cfg = EvoConfig(
-        data_dir=data_dir,
-        storage=storage,
-        default_judge_path=judge_path,
-        default_trace_path=data_dir / 'trace_mock.json',
-        chat_source=chat_source,
-        code_access=code_access,
-        analysis=analysis,
-        model_config=model_config,
-        dataset_gen=dataset_gen,
-        eval_run=eval_run,
-        profile=profile,
-    )
-    return cfg
+def _source_api_key(source: str) -> str:
+    key = source.upper().replace('-', '_')
+    return os.getenv(f'LAZYLLM_{key}_API_KEY') or os.getenv(f'{key}_API_KEY') or ''

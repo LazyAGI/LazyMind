@@ -855,6 +855,7 @@ export interface ManagedStateListOpenAPIResponse {
     'items'?: Array<ManagedStateOpenAPIResponse>;
 }
 export interface ManagedStateOpenAPIResponse {
+    'agent_persona'?: string;
     'auto_evo': boolean;
     'auto_evo_apply_status': string;
     'auto_evo_error': string;
@@ -864,12 +865,21 @@ export interface ManagedStateOpenAPIResponse {
     'has_pending_review_suggestions': boolean;
     'resource_id': string;
     'resource_type': string;
+    'response_style'?: string;
     'suggestion_status': string;
     'title': string;
+    'user_address'?: string;
 }
 export interface ManagedStateUpsertOpenAPIRequest {
     'auto_evo'?: boolean;
     'content': string;
+}
+export interface MemoryUpsertOpenAPIRequest {
+    'agent_persona'?: string;
+    'auto_evo'?: boolean;
+    'content'?: string;
+    'response_style'?: string;
+    'user_address'?: string;
 }
 export interface MergeAndAddWordRequest {
     'group_ids'?: Array<string>;
@@ -927,6 +937,13 @@ export interface PromptListResponse {
 export interface PromptPatchRequest {
     'content'?: string;
     'display_name'?: string;
+}
+export interface PromptPolishRequest {
+    'content': string;
+    'user_instruct': string;
+}
+export interface PromptPolishResponse {
+    'content'?: string;
 }
 export interface PromptRequest {
     'content': string;
@@ -1115,7 +1132,6 @@ export interface SkillDraftPreviewOpenAPIResponse {
     'skill_id': string;
 }
 export interface SkillGenerateOpenAPIRequest {
-    'suggestion_ids'?: Array<string>;
     'user_instruct': string;
 }
 export interface SkillGenerateOpenAPIResponse {
@@ -1343,7 +1359,6 @@ export interface SystemGenerateOpenAPIResponse {
     'draft_content': string;
     'draft_source_version': number;
     'draft_status': string;
-    'suggestion_ids'?: Array<string>;
 }
 export interface SystemSuggestionOpenAPIRequest {
     'session_id': string;
@@ -1413,6 +1428,46 @@ export interface TaskResponse {
     'task_info'?: TaskInfo;
     'task_state': string;
     'task_type'?: string;
+}
+export interface ToolGroup {
+    'active'?: boolean;
+    'can_disable'?: boolean;
+    'description'?: string;
+    'disabled'?: boolean;
+    'label'?: string;
+    'methods'?: Array<ToolMethod>;
+    'name'?: string;
+}
+export interface ToolGroupOpenAPIResponse {
+    'active': boolean;
+    'can_disable': boolean;
+    'description'?: string;
+    'disabled': boolean;
+    'label'?: string;
+    'methods'?: Array<ToolMethodOpenAPIResponse>;
+    'name': string;
+}
+export interface ToolListOpenAPIResponse {
+    'tool_groups'?: Array<ToolGroupOpenAPIResponse>;
+}
+export interface ToolListResponse {
+    'tool_groups'?: Array<ToolGroup>;
+}
+export interface ToolMethod {
+    'name'?: string;
+    'summary'?: string;
+}
+export interface ToolMethodOpenAPIResponse {
+    'name': string;
+    'summary'?: string;
+}
+export interface ToolStateOpenAPIResponse {
+    'disabled': boolean;
+    'name': string;
+}
+export interface ToolStateResponse {
+    'disabled'?: boolean;
+    'name'?: string;
 }
 export interface TransferBinding {
     'display_name'?: string;
@@ -5688,6 +5743,41 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          * 
+         * @summary Polish prompt
+         * @param {PromptPolishRequest} promptPolishRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePromptsPolishPost: async (promptPolishRequest: PromptPolishRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'promptPolishRequest' is not null or undefined
+            assertParamExists('apiCorePromptsPolishPost', 'promptPolishRequest', promptPolishRequest)
+            const localVarPath = `/api/core/prompts:polish`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(promptPolishRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary Create prompt
          * @param {PromptRequest} promptRequest 
          * @param {*} [options] Override http request option.
@@ -7175,6 +7265,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @summary Polish prompt
+         * @param {PromptPolishRequest} promptPolishRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePromptsPolishPost(promptPolishRequest: PromptPolishRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PromptPolishResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePromptsPolishPost(promptPolishRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePromptsPolishPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
          * @summary Create prompt
          * @param {PromptRequest} promptRequest 
          * @param {*} [options] Override http request option.
@@ -8157,6 +8260,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          * 
+         * @summary Polish prompt
+         * @param {DefaultApiApiCorePromptsPolishPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePromptsPolishPost(requestParameters: DefaultApiApiCorePromptsPolishPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PromptPolishResponse> {
+            return localVarFp.apiCorePromptsPolishPost(requestParameters.promptPolishRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
          * @summary Create prompt
          * @param {DefaultApiApiCorePromptsPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -8870,6 +8983,13 @@ export interface DefaultApiApiCorePromptsNameSetDefaultPostRequest {
  */
 export interface DefaultApiApiCorePromptsNameUnsetDefaultPostRequest {
     readonly name: string
+}
+
+/**
+ * Request parameters for apiCorePromptsPolishPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCorePromptsPolishPostRequest {
+    readonly promptPolishRequest: PromptPolishRequest
 }
 
 /**
@@ -9853,6 +9973,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCorePromptsNameUnsetDefaultPost(requestParameters: DefaultApiApiCorePromptsNameUnsetDefaultPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCorePromptsNameUnsetDefaultPost(requestParameters.name, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Polish prompt
+     * @param {DefaultApiApiCorePromptsPolishPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePromptsPolishPost(requestParameters: DefaultApiApiCorePromptsPolishPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCorePromptsPolishPost(requestParameters.promptPolishRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -12871,13 +13002,13 @@ export const MemoryApiAxiosParamCreator = function (configuration?: Configuratio
         /**
          * 
          * @summary Upsert managed memory
-         * @param {ManagedStateUpsertOpenAPIRequest} managedStateUpsertOpenAPIRequest 
+         * @param {MemoryUpsertOpenAPIRequest} memoryUpsertOpenAPIRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemoryPut: async (managedStateUpsertOpenAPIRequest: ManagedStateUpsertOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'managedStateUpsertOpenAPIRequest' is not null or undefined
-            assertParamExists('apiCoreMemoryPut', 'managedStateUpsertOpenAPIRequest', managedStateUpsertOpenAPIRequest)
+        apiCoreMemoryPut: async (memoryUpsertOpenAPIRequest: MemoryUpsertOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'memoryUpsertOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreMemoryPut', 'memoryUpsertOpenAPIRequest', memoryUpsertOpenAPIRequest)
             const localVarPath = `/api/core/memory`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -12896,7 +13027,7 @@ export const MemoryApiAxiosParamCreator = function (configuration?: Configuratio
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(managedStateUpsertOpenAPIRequest, localVarRequestOptions, configuration)
+            localVarRequestOptions.data = serializeDataIfNeeded(memoryUpsertOpenAPIRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -12999,12 +13130,12 @@ export const MemoryApiFp = function(configuration?: Configuration) {
         /**
          * 
          * @summary Upsert managed memory
-         * @param {ManagedStateUpsertOpenAPIRequest} managedStateUpsertOpenAPIRequest 
+         * @param {MemoryUpsertOpenAPIRequest} memoryUpsertOpenAPIRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreMemoryPut(managedStateUpsertOpenAPIRequest: ManagedStateUpsertOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ManagedStateOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryPut(managedStateUpsertOpenAPIRequest, options);
+        async apiCoreMemoryPut(memoryUpsertOpenAPIRequest: MemoryUpsertOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ManagedStateOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryPut(memoryUpsertOpenAPIRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['MemoryApi.apiCoreMemoryPut']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -13076,7 +13207,7 @@ export const MemoryApiFactory = function (configuration?: Configuration, basePat
          * @throws {RequiredError}
          */
         apiCoreMemoryPut(requestParameters: MemoryApiApiCoreMemoryPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<ManagedStateOpenAPIResponse> {
-            return localVarFp.apiCoreMemoryPut(requestParameters.managedStateUpsertOpenAPIRequest, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreMemoryPut(requestParameters.memoryUpsertOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -13102,7 +13233,7 @@ export interface MemoryApiApiCoreMemoryGeneratePostRequest {
  * Request parameters for apiCoreMemoryPut operation in MemoryApi.
  */
 export interface MemoryApiApiCoreMemoryPutRequest {
-    readonly managedStateUpsertOpenAPIRequest: ManagedStateUpsertOpenAPIRequest
+    readonly memoryUpsertOpenAPIRequest: MemoryUpsertOpenAPIRequest
 }
 
 /**
@@ -13165,7 +13296,7 @@ export class MemoryApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreMemoryPut(requestParameters: MemoryApiApiCoreMemoryPutRequest, options?: RawAxiosRequestConfig) {
-        return MemoryApiFp(this.configuration).apiCoreMemoryPut(requestParameters.managedStateUpsertOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+        return MemoryApiFp(this.configuration).apiCoreMemoryPut(requestParameters.memoryUpsertOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -18104,6 +18235,250 @@ export class TasksApi extends BaseAPI {
      */
     public apiCoreDatasetsDatasetUploadsUploadIdPartsPartNumberPut(requestParameters: TasksApiApiCoreDatasetsDatasetUploadsUploadIdPartsPartNumberPutRequest, options?: RawAxiosRequestConfig) {
         return TasksApiFp(this.configuration).apiCoreDatasetsDatasetUploadsUploadIdPartsPartNumberPut(requestParameters.dataset, requestParameters.uploadId, requestParameters.partNumber, requestParameters.body, options).then((request) => request(this.axios, this.basePath));
+    }
+}
+
+
+
+/**
+ * ToolsApi - axios parameter creator
+ */
+export const ToolsApiAxiosParamCreator = function (configuration?: Configuration) {
+    return {
+        /**
+         * 
+         * @summary Tool list
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreToolsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/tools`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary Disable tool
+         * @param {string} toolName 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreToolsToolNameDisablePost: async (toolName: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'toolName' is not null or undefined
+            assertParamExists('apiCoreToolsToolNameDisablePost', 'toolName', toolName)
+            const localVarPath = `/api/core/tools/{tool_name}:disable`
+                .replace(`{${"tool_name"}}`, encodeURIComponent(String(toolName)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary Enable tool
+         * @param {string} toolName 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreToolsToolNameEnablePost: async (toolName: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'toolName' is not null or undefined
+            assertParamExists('apiCoreToolsToolNameEnablePost', 'toolName', toolName)
+            const localVarPath = `/api/core/tools/{tool_name}:enable`
+                .replace(`{${"tool_name"}}`, encodeURIComponent(String(toolName)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+    }
+};
+
+/**
+ * ToolsApi - functional programming interface
+ */
+export const ToolsApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = ToolsApiAxiosParamCreator(configuration)
+    return {
+        /**
+         * 
+         * @summary Tool list
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreToolsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ToolListOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreToolsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ToolsApi.apiCoreToolsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary Disable tool
+         * @param {string} toolName 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreToolsToolNameDisablePost(toolName: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ToolStateOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreToolsToolNameDisablePost(toolName, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ToolsApi.apiCoreToolsToolNameDisablePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary Enable tool
+         * @param {string} toolName 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreToolsToolNameEnablePost(toolName: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ToolStateOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreToolsToolNameEnablePost(toolName, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ToolsApi.apiCoreToolsToolNameEnablePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+    }
+};
+
+/**
+ * ToolsApi - factory interface
+ */
+export const ToolsApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = ToolsApiFp(configuration)
+    return {
+        /**
+         * 
+         * @summary Tool list
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreToolsGet(options?: RawAxiosRequestConfig): AxiosPromise<ToolListOpenAPIResponse> {
+            return localVarFp.apiCoreToolsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary Disable tool
+         * @param {ToolsApiApiCoreToolsToolNameDisablePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreToolsToolNameDisablePost(requestParameters: ToolsApiApiCoreToolsToolNameDisablePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ToolStateOpenAPIResponse> {
+            return localVarFp.apiCoreToolsToolNameDisablePost(requestParameters.toolName, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary Enable tool
+         * @param {ToolsApiApiCoreToolsToolNameEnablePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreToolsToolNameEnablePost(requestParameters: ToolsApiApiCoreToolsToolNameEnablePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ToolStateOpenAPIResponse> {
+            return localVarFp.apiCoreToolsToolNameEnablePost(requestParameters.toolName, options).then((request) => request(axios, basePath));
+        },
+    };
+};
+
+/**
+ * Request parameters for apiCoreToolsToolNameDisablePost operation in ToolsApi.
+ */
+export interface ToolsApiApiCoreToolsToolNameDisablePostRequest {
+    readonly toolName: string
+}
+
+/**
+ * Request parameters for apiCoreToolsToolNameEnablePost operation in ToolsApi.
+ */
+export interface ToolsApiApiCoreToolsToolNameEnablePostRequest {
+    readonly toolName: string
+}
+
+/**
+ * ToolsApi - object-oriented interface
+ */
+export class ToolsApi extends BaseAPI {
+    /**
+     * 
+     * @summary Tool list
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreToolsGet(options?: RawAxiosRequestConfig) {
+        return ToolsApiFp(this.configuration).apiCoreToolsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Disable tool
+     * @param {ToolsApiApiCoreToolsToolNameDisablePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreToolsToolNameDisablePost(requestParameters: ToolsApiApiCoreToolsToolNameDisablePostRequest, options?: RawAxiosRequestConfig) {
+        return ToolsApiFp(this.configuration).apiCoreToolsToolNameDisablePost(requestParameters.toolName, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Enable tool
+     * @param {ToolsApiApiCoreToolsToolNameEnablePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreToolsToolNameEnablePost(requestParameters: ToolsApiApiCoreToolsToolNameEnablePostRequest, options?: RawAxiosRequestConfig) {
+        return ToolsApiFp(this.configuration).apiCoreToolsToolNameEnablePost(requestParameters.toolName, options).then((request) => request(this.axios, this.basePath));
     }
 }
 

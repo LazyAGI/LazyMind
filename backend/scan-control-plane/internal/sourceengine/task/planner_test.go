@@ -94,6 +94,95 @@ func TestGenerateTasksReusesActiveTask(t *testing.T) {
 	}
 }
 
+func TestGenerateTasksRestoresFailedTaskForSameVersion(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	restoreAt := now.Add(time.Hour)
+	leaseUntil := now.Add(time.Minute)
+	repo := newPlannerStore(now)
+	repo.objects["doc"] = sourceObject("doc", true)
+	state := documentState("doc", statepkg.SourceStateNew, true, now)
+	state.ParseQueueState = statepkg.ParseQueueStateFailed
+	state.ActiveTaskID = "task-failed"
+	state.DocumentID = "document-1"
+	state.LastError = store.JSON{"code": "PARSE_FAILED", "message": "bad file"}
+	repo.states["doc"] = state
+	repo.docs["doc"] = store.Document{
+		DocumentID:       "document-1",
+		TenantID:         "tenant-1",
+		SourceID:         "source-1",
+		BindingID:        "binding-1",
+		ObjectKey:        "doc",
+		CurrentVersionID: "",
+		SourceVersion:    "v1",
+		DisplayName:      "doc",
+		ParseStatus:      TaskStatusFailed,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	failed := store.ParseTask{
+		TaskID:               "task-failed",
+		TenantID:             "tenant-1",
+		SourceID:             "source-1",
+		BindingID:            "binding-1",
+		BindingGeneration:    1,
+		ObjectKey:            "doc",
+		DocumentID:           "document-1",
+		TaskAction:           TaskActionCreate,
+		TargetVersionID:      "v1",
+		SourceVersion:        "v1",
+		CoreParentDocumentID: "core-folder-old",
+		Status:               TaskStatusFailed,
+		CoreTaskID:           "core-task-old",
+		CoreDocumentID:       "core-document-old",
+		LeaseOwner:           "worker-old",
+		LeaseUntil:           &leaseUntil,
+		RetryCount:           3,
+		NextRunAt:            now.Add(24 * time.Hour),
+		LastError:            store.JSON{"reason": "parse failed"},
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}
+	failed.IdempotencyKey = IdempotencyKey(failed)
+	repo.tasks[failed.TaskID] = failed
+	repo.deadLetters[failed.TaskID] = true
+	planner := NewDBTaskPlanner(repo, WithClock(func() time.Time { return restoreAt }), WithIDGenerator(repo.nextID))
+
+	result, err := planner.GenerateTasks(ctx, GenerateRequest{
+		SourceID:   "source-1",
+		BindingID:  "binding-1",
+		ObjectKeys: []string{"doc"},
+	})
+	if err != nil {
+		t.Fatalf("generate tasks: %v", err)
+	}
+	if result.AcceptedCount != 1 || result.DuplicateCount != 0 || len(result.TaskIDs) != 1 || result.TaskIDs[0] != failed.TaskID {
+		t.Fatalf("expected failed task restored, got %+v", result)
+	}
+	if len(repo.tasks) != 1 {
+		t.Fatalf("restore should not create a new task, tasks=%d", len(repo.tasks))
+	}
+	restored := repo.tasks[failed.TaskID]
+	if restored.Status != TaskStatusPending || !restored.NextRunAt.Equal(restoreAt) || restored.LeaseOwner != "" || restored.LeaseUntil != nil {
+		t.Fatalf("failed task was not made immediately claimable: %+v", restored)
+	}
+	if restored.CoreTaskID != "" || restored.CoreDocumentID != "" || restored.RetryCount != 0 {
+		t.Fatalf("restore should clear retry/core ids for a fresh submission: %+v", restored)
+	}
+	if len(restored.LastError) != 0 || repo.deadLetters[failed.TaskID] {
+		t.Fatalf("restore should clear task error and dead letter: task=%+v deadLetter=%v", restored, repo.deadLetters[failed.TaskID])
+	}
+	savedState := repo.states["doc"]
+	if savedState.ActiveTaskID != failed.TaskID || savedState.ParseQueueState != statepkg.ParseQueueStateQueued || savedState.DocumentID != "document-1" || len(savedState.LastError) != 0 {
+		t.Fatalf("state was not linked to restored task: %+v", savedState)
+	}
+	if got := repo.docs["doc"]; got.ParseStatus != DocumentParseStatusPending {
+		t.Fatalf("document should be pending after restore upsert, got %+v", got)
+	}
+}
+
 func TestGenerateTasksRejectsManualRequestOverObjectLimit(t *testing.T) {
 	t.Parallel()
 
@@ -201,6 +290,48 @@ func TestGenerateTasksQueuesManualSyncForTreeNodeKey(t *testing.T) {
 	call := syncer.calls[0]
 	if call.ScopeType != "partial" || call.ScopeRef["object_key"] != "local_fs:agent-1:path:/workspace/docs/111.txt" {
 		t.Fatalf("tree node key should be converted to object_key scope: %+v", call)
+	}
+}
+
+func TestGenerateTasksUsesFreshManualRequestIDWhenClientOmitsRequestID(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	repo := newPlannerStore(now)
+	syncer := &manualSyncSchedulerStub{}
+	planner := NewDBTaskPlanner(
+		repo,
+		WithClock(func() time.Time { return now }),
+		WithIDGenerator(repo.nextID),
+		WithManualSyncScheduler(syncer),
+	)
+	req := GenerateRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		Mode:      "partial",
+		Scopes: []GenerateScope{{
+			ObjectKey:  "feishu:drive:file-a",
+			IsDocument: true,
+		}},
+	}
+
+	first, err := planner.GenerateTasks(ctx, req)
+	if err != nil {
+		t.Fatalf("generate first manual sync: %v", err)
+	}
+	second, err := planner.GenerateTasks(ctx, req)
+	if err != nil {
+		t.Fatalf("generate second manual sync: %v", err)
+	}
+	if len(syncer.calls) != 2 {
+		t.Fatalf("expected two sync calls, got %+v", syncer.calls)
+	}
+	if syncer.calls[0].RequestID == syncer.calls[1].RequestID {
+		t.Fatalf("manual sync without client request_id should not reuse request id: %q", syncer.calls[0].RequestID)
+	}
+	if len(first.RunIDs) != 1 || len(second.RunIDs) != 1 || first.RunIDs[0] == second.RunIDs[0] {
+		t.Fatalf("manual sync without client request_id should queue distinct runs, first=%+v second=%+v", first, second)
 	}
 }
 
@@ -421,15 +552,16 @@ func TestRetryTaskClearsCoreIDsAndReturnsPendingClaimableTask(t *testing.T) {
 }
 
 type plannerStore struct {
-	source  store.Source
-	binding store.Binding
-	run     store.SyncRun
-	objects map[string]store.SourceObject
-	states  map[string]store.DocumentState
-	docs    map[string]store.Document
-	tasks   map[string]store.ParseTask
-	now     time.Time
-	next    int
+	source      store.Source
+	binding     store.Binding
+	run         store.SyncRun
+	objects     map[string]store.SourceObject
+	states      map[string]store.DocumentState
+	docs        map[string]store.Document
+	tasks       map[string]store.ParseTask
+	deadLetters map[string]bool
+	now         time.Time
+	next        int
 }
 
 type manualSyncSchedulerStub struct {
@@ -485,11 +617,12 @@ func newPlannerStore(now time.Time) *plannerStore {
 			StartedAt:         now,
 			FinishedAt:        &now,
 		},
-		objects: map[string]store.SourceObject{},
-		states:  map[string]store.DocumentState{},
-		docs:    map[string]store.Document{},
-		tasks:   map[string]store.ParseTask{},
-		now:     now,
+		objects:     map[string]store.SourceObject{},
+		states:      map[string]store.DocumentState{},
+		docs:        map[string]store.Document{},
+		tasks:       map[string]store.ParseTask{},
+		deadLetters: map[string]bool{},
+		now:         now,
 	}
 }
 
@@ -570,6 +703,15 @@ func (s *plannerStore) FindActiveTask(_ context.Context, sourceID, bindingID, ob
 	return store.ParseTask{}, false, nil
 }
 
+func (s *plannerStore) GetParseTaskByIdempotencyKey(_ context.Context, idempotencyKey string) (store.ParseTaskWithRefs, error) {
+	for _, task := range s.tasks {
+		if task.IdempotencyKey == idempotencyKey {
+			return store.ParseTaskWithRefs{Task: task}, nil
+		}
+	}
+	return store.ParseTaskWithRefs{}, store.NewStoreError(store.ErrCodeTaskNotFound, "parse task not found")
+}
+
 func (s *plannerStore) CreateParseTask(_ context.Context, task store.ParseTask) error {
 	for _, existing := range s.tasks {
 		if existing.IdempotencyKey == task.IdempotencyKey {
@@ -609,6 +751,11 @@ func (s *plannerStore) GetParseTask(_ context.Context, taskID string) (store.Par
 
 func (s *plannerStore) SaveParseTask(_ context.Context, task store.ParseTask) error {
 	s.tasks[task.TaskID] = task
+	return nil
+}
+
+func (s *plannerStore) ClearTaskDeadLetter(_ context.Context, taskID string) error {
+	delete(s.deadLetters, taskID)
 	return nil
 }
 

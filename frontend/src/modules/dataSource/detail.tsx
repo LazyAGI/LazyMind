@@ -39,6 +39,7 @@ import {
   normalizeDataSourceParseStatus,
   normalizeDataSourceStatus,
   normalizePendingAction,
+  resolveStorageUsed,
   resolveSourceState,
   resolveSyncState,
 } from "./shared";
@@ -386,7 +387,7 @@ function buildDetailSummaryFromSource(
     addCount: summary?.new_count || 0,
     deleteCount: summary?.deleted_count || 0,
     changeCount: summary?.modified_count || 0,
-    storageUsed: "0 B",
+    storageUsed: resolveStorageUsed(summary),
     documents,
     scanManaged: true,
     tenantId: source.tenant_id,

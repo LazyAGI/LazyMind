@@ -140,8 +140,12 @@ func TestDefaultFeishuAPIClientDriveAndWikiMapping(t *testing.T) {
 	if _, err := client.ListDriveChildren(context.Background(), "user-token", "folder-1", "cursor-1", 50); err != nil {
 		t.Fatalf("list drive children: %v", err)
 	}
-	if _, err := client.DownloadDriveFile(context.Background(), "user-token", "file-1", "rev-1"); err != nil {
+	downloaded, err := client.DownloadDriveFile(context.Background(), "user-token", "file-1", "rev-1")
+	if err != nil {
 		t.Fatalf("download drive file: %v", err)
+	}
+	if downloaded.SizeBytes != int64(len("drive-bytes")) {
+		t.Fatalf("download should expose content size, got %+v", downloaded)
 	}
 	if _, err := client.ListWikiSpaces(context.Background(), "user-token", "cursor-2", 25); err != nil {
 		t.Fatalf("list wiki spaces: %v", err)
@@ -160,6 +164,61 @@ func TestDefaultFeishuAPIClientDriveAndWikiMapping(t *testing.T) {
 	}
 	if seen["drive_download"] != "yes" || seen["wiki_export"] != "yes" {
 		t.Fatalf("export APIs were not called: %+v", seen)
+	}
+}
+
+func TestDefaultFeishuAPIClientExportsWikiFileNodeWithDriveDownload(t *testing.T) {
+	t.Parallel()
+
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/open-apis/wiki/v2/spaces/get_node":
+			writeFeishuOpenAPIData(t, w, map[string]any{"node": map[string]any{
+				"space_id":   "space-1",
+				"node_token": "node-1",
+				"title":      "ALCOHOLDINGS.pdf",
+				"obj_type":   "file",
+				"obj_token":  "file-1",
+			}})
+		case "/open-apis/drive/v1/files/file-1/download":
+			_, _ = w.Write([]byte("%PDF-1.7"))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := newHTTPFeishuAPITestClient(t, server.URL)
+	exported, err := client.ExportWikiNodeMarkdown(context.Background(), "user-token", "space-1", "node-1", "wiki-rev")
+	if err != nil {
+		t.Fatalf("export wiki file node: %v", err)
+	}
+	if string(exported.Content) != "%PDF-1.7" || exported.SizeBytes != int64(len("%PDF-1.7")) || exported.FileExtension != ".pdf" || exported.MimeType != "application/pdf" || exported.ExportedVersion != "wiki-rev" {
+		t.Fatalf("unexpected wiki file export: %+v", exported)
+	}
+	if len(paths) != 2 || paths[0] != "/open-apis/wiki/v2/spaces/get_node" || paths[1] != "/open-apis/drive/v1/files/file-1/download" {
+		t.Fatalf("unexpected request sequence: %v", paths)
+	}
+}
+
+func TestDriveObjectMapsShortcutTargetMetadata(t *testing.T) {
+	t.Parallel()
+
+	obj := driveObject(map[string]any{
+		"type":     "shortcut",
+		"token":    "shortcut-1",
+		"name":     "alias.pdf",
+		"revision": "rev-1",
+		"shortcut_info": map[string]any{
+			"target_type":  "file",
+			"target_token": "file-target",
+		},
+	}, "folder-1")
+
+	if obj.DriveType != "shortcut" || obj.ShortcutTargetType != "file" || obj.ShortcutTargetToken != "file-target" {
+		t.Fatalf("shortcut target metadata was not mapped: %+v", obj)
 	}
 }
 

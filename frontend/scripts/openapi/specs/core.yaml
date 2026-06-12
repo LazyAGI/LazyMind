@@ -1824,6 +1824,21 @@ components:
                 display_name:
                     type: string
             type: object
+        PromptPolishRequest:
+            properties:
+                content:
+                    type: string
+                user_instruct:
+                    type: string
+            required:
+                - content
+                - user_instruct
+            type: object
+        PromptPolishResponse:
+            properties:
+                content:
+                    type: string
+            type: object
         PromptRequest:
             properties:
                 content:
@@ -2148,6 +2163,46 @@ components:
                     type: string
             required:
                 - task_state
+            type: object
+        ToolGroup:
+            properties:
+                active:
+                    type: boolean
+                can_disable:
+                    type: boolean
+                description:
+                    type: string
+                disabled:
+                    type: boolean
+                label:
+                    type: string
+                methods:
+                    items:
+                        $ref: '#/components/schemas/ToolMethod'
+                    type: array
+                name:
+                    type: string
+            type: object
+        ToolListResponse:
+            properties:
+                tool_groups:
+                    items:
+                        $ref: '#/components/schemas/ToolGroup'
+                    type: array
+            type: object
+        ToolMethod:
+            properties:
+                name:
+                    type: string
+                summary:
+                    type: string
+            type: object
+        ToolStateResponse:
+            properties:
+                disabled:
+                    type: boolean
+                name:
+                    type: string
             type: object
         TransferBinding:
             properties:
@@ -2661,6 +2716,8 @@ components:
             type: object
         managedStateOpenAPIResponse:
             properties:
+                agent_persona:
+                    type: string
                 auto_evo:
                     type: boolean
                 auto_evo_apply_status:
@@ -2680,9 +2737,13 @@ components:
                     type: string
                 resource_type:
                     type: string
+                response_style:
+                    type: string
                 suggestion_status:
                     type: string
                 title:
+                    type: string
+                user_address:
                     type: string
             required:
                 - auto_evo
@@ -2705,6 +2766,19 @@ components:
                     type: string
             required:
                 - content
+            type: object
+        memoryUpsertOpenAPIRequest:
+            properties:
+                agent_persona:
+                    type: string
+                auto_evo:
+                    type: boolean
+                content:
+                    type: string
+                response_style:
+                    type: string
+                user_address:
+                    type: string
             type: object
         personalizationSettingOpenAPIRequest:
             properties:
@@ -3073,10 +3147,6 @@ components:
             type: object
         skillGenerateOpenAPIRequest:
             properties:
-                suggestion_ids:
-                    items:
-                        type: string
-                    type: array
                 user_instruct:
                     type: string
             required:
@@ -3637,10 +3707,6 @@ components:
                     type: integer
                 draft_status:
                     type: string
-                suggestion_ids:
-                    items:
-                        type: string
-                    type: array
             required:
                 - draft_content
                 - draft_source_version
@@ -3656,6 +3722,56 @@ components:
                     type: array
             required:
                 - session_id
+            type: object
+        toolGroupOpenAPIResponse:
+            properties:
+                active:
+                    type: boolean
+                can_disable:
+                    type: boolean
+                description:
+                    type: string
+                disabled:
+                    type: boolean
+                label:
+                    type: string
+                methods:
+                    items:
+                        $ref: '#/components/schemas/toolMethodOpenAPIResponse'
+                    type: array
+                name:
+                    type: string
+            required:
+                - active
+                - can_disable
+                - disabled
+                - name
+            type: object
+        toolListOpenAPIResponse:
+            properties:
+                tool_groups:
+                    items:
+                        $ref: '#/components/schemas/toolGroupOpenAPIResponse'
+                    type: array
+            type: object
+        toolMethodOpenAPIResponse:
+            properties:
+                name:
+                    type: string
+                summary:
+                    type: string
+            required:
+                - name
+            type: object
+        toolStateOpenAPIResponse:
+            properties:
+                disabled:
+                    type: boolean
+                name:
+                    type: string
+            required:
+                - disabled
+                - name
             type: object
         updateModelProviderGroupOpenAPIRequest:
             properties:
@@ -3847,6 +3963,11 @@ paths:
                     type: integer
                 - in: query
                   name: page_token
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: keyword
                   required: false
                   schema:
                     type: string
@@ -6507,7 +6628,7 @@ paths:
                 content:
                     application/json:
                         schema:
-                            $ref: '#/components/schemas/managedStateUpsertOpenAPIRequest'
+                            $ref: '#/components/schemas/memoryUpsertOpenAPIRequest'
                 required: true
             responses:
                 "200":
@@ -7200,6 +7321,22 @@ paths:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Unset successfully
             summary: Unset default prompt
+    /api/core/prompts:polish:
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PromptPolishRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PromptPolishResponse'
+                    description: Polished prompt
+            summary: Polish prompt
     /api/core/remote-fs/content:
         get:
             responses:
@@ -7774,6 +7911,54 @@ paths:
             summary: Initialize temp multipart upload
             tags:
                 - uploads
+    /api/core/tools:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/toolListOpenAPIResponse'
+                    description: Tool list
+            summary: Tool list
+            tags:
+                - tools
+    /api/core/tools/{tool_name}:disable:
+        post:
+            parameters:
+                - in: path
+                  name: tool_name
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/toolStateOpenAPIResponse'
+                    description: Tool disabled
+            summary: Disable tool
+            tags:
+                - tools
+    /api/core/tools/{tool_name}:enable:
+        post:
+            parameters:
+                - in: path
+                  name: tool_name
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/toolStateOpenAPIResponse'
+                    description: Tool enabled
+            summary: Enable tool
+            tags:
+                - tools
     /api/core/upload_files:
         post:
             description: Proxies to parsing service. Multipart form with files.

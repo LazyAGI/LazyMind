@@ -45,30 +45,36 @@ func (c *FeishuConnector) rawObject(authConnectionID string, object Object) conn
 
 func isMarkdownExportObject(object Object) bool {
 	if object.Kind == ObjectKindWikiNode && object.IsDocument {
-		return true
+		driveType := normalizedFeishuObjectType(object.DriveType)
+		extension := normalizedFeishuObjectType(object.FileExtension)
+		return isFeishuDocType(driveType) || driveType == "" && (extension == "" || extension == "md" || isFeishuDocType(extension))
 	}
 	if object.Kind != ObjectKindDriveFile || !object.IsDocument {
 		return false
 	}
-	driveType := strings.ToLower(strings.TrimSpace(object.DriveType))
-	return driveType == "doc" || driveType == "docx"
+	return isFeishuDocType(object.DriveType)
 }
 
 func isBindableObject(object Object) bool {
-	if object.Kind == ObjectKindVirtualRoot {
-		return object.Token == VirtualDriveRootRef
-	}
-	return object.Kind == ObjectKindDriveFolder || object.Kind == ObjectKindWikiNode
+	return object.Kind == ObjectKindDriveFolder ||
+		object.Kind == ObjectKindWikiSpace ||
+		object.Kind == ObjectKindWikiNode ||
+		(object.Kind == ObjectKindVirtualRoot && (object.Token == VirtualDriveRootRef || object.Token == VirtualWikiSpacesRef))
 }
 
 func bindingTargetType(object Object) connector.TargetType {
 	switch object.Kind {
+	case ObjectKindDriveFolder:
+		return TargetTypeDriveFolder
 	case ObjectKindVirtualRoot:
 		if object.Token == VirtualDriveRootRef {
 			return TargetTypeDriveFolder
 		}
-	case ObjectKindDriveFolder:
-		return TargetTypeDriveFolder
+		if object.Token == VirtualWikiSpacesRef {
+			return TargetTypeWikiNode
+		}
+	case ObjectKindWikiSpace:
+		return TargetTypeWikiNode
 	case ObjectKindWikiNode:
 		return TargetTypeWikiNode
 	default:
@@ -80,9 +86,6 @@ func bindingTargetType(object Object) connector.TargetType {
 func bindingTargetRef(object Object) string {
 	if !isBindableObject(object) {
 		return ""
-	}
-	if object.Kind == ObjectKindVirtualRoot && object.Token == VirtualDriveRootRef {
-		return "drive:root"
 	}
 	return targetRefFor(object)
 }
@@ -99,6 +102,12 @@ func (c *FeishuConnector) buildObjectKey(raw connector.RawObject) (string, error
 			return "", connector.NewError(connector.ErrorCodeInvalidArgument, "drive token is required")
 		}
 		return driveObjectKey(token), nil
+	case ObjectKindWikiSpace:
+		spaceID := firstNonEmpty(raw.ProviderMeta["space_id"], wikiSpaceIDFromRef(raw.ObjectRef))
+		if spaceID == "" {
+			return "", connector.NewError(connector.ErrorCodeInvalidArgument, "wiki space_id is required")
+		}
+		return wikiSpaceObjectKey(spaceID), nil
 	case ObjectKindWikiNode:
 		spaceID := raw.ProviderMeta["space_id"]
 		nodeToken := firstNonEmpty(raw.ProviderMeta["token"], raw.ObjectRef)
@@ -179,6 +188,12 @@ func providerMeta(authConnectionID string, object Object) connector.ProviderMeta
 	}
 	if object.DriveType != "" {
 		meta["file_type"] = object.DriveType
+	}
+	if object.ShortcutTargetType != "" {
+		meta["shortcut_target_type"] = object.ShortcutTargetType
+	}
+	if object.ShortcutTargetToken != "" {
+		meta["shortcut_target_token"] = object.ShortcutTargetToken
 	}
 	return meta
 }

@@ -1,6 +1,6 @@
 import { type ChangeEvent, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { Input, Typography } from "antd";
-import { ClockCircleFilled, MessageOutlined } from "@ant-design/icons";
+import { MessageOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import {
   type SelfEvolutionChatMessage,
@@ -8,6 +8,8 @@ import {
 } from "./types";
 
 const { Paragraph, Text } = Typography;
+const legacyPlanningThinkingText = "正在理解你的请求并规划下一步。";
+const hiddenStatusMessagePrefixes = ["已解析意图：", "正在处理意图："];
 
 type ChatMessageStreamProps = {
   isAutoInteractionActive: boolean;
@@ -21,6 +23,9 @@ export function ChatMessageStream({
   streamRef,
 }: ChatMessageStreamProps) {
   const { t } = useTranslation();
+  const visibleMessages = messages
+    .map((item) => ({ ...item, content: item.content.replaceAll(legacyPlanningThinkingText, "").trim() }))
+    .filter((item) => item.content && !hiddenStatusMessagePrefixes.some((prefix) => item.content.startsWith(prefix)));
   return (
     <div
       ref={streamRef}
@@ -28,9 +33,13 @@ export function ChatMessageStream({
       aria-live="polite"
       aria-label={t("selfEvolutionRun.chatStreamAria")}
     >
-      {messages.length > 0 ? (
-        messages.map((item) => (
-          <article key={item.id} className={`self-evolution-bubble is-${item.role}`}>
+      {visibleMessages.length > 0 ? (
+        visibleMessages.map((item) => (
+          <article
+            key={item.id}
+            className={`self-evolution-bubble is-${item.role}`}
+            data-self-evolution-message-id={item.id}
+          >
             {item.agentLabel && (
               <Text className="self-evolution-bubble-agent-label">{item.agentLabel}</Text>
             )}
@@ -61,6 +70,8 @@ export function AutoInteractionStatus() {
 
 type ChatComposerProps = {
   activeStepText: string;
+  isAutoMode: boolean;
+  isReadOnlyEnded?: boolean;
   isSendingMessage: boolean;
   pendingCheckpointWaitPrompt?: SelfEvolutionCheckpointPrompt;
   prompt: string;
@@ -72,6 +83,8 @@ type ChatComposerProps = {
 
 export function ChatComposer({
   activeStepText,
+  isAutoMode,
+  isReadOnlyEnded,
   isSendingMessage,
   pendingCheckpointWaitPrompt,
   prompt,
@@ -90,6 +103,9 @@ export function ChatComposer({
       return;
     }
     event.preventDefault();
+    if (isSendingMessage) {
+      return;
+    }
     if (prompt.trim()) {
       onSend();
     }
@@ -97,37 +113,8 @@ export function ChatComposer({
   const isCheckpointWaiting = Boolean(pendingCheckpointWaitPrompt);
 
   return (
-    <div className="self-evolution-chat-composer">
-      {pendingCheckpointWaitPrompt && (
-        <div
-          className={`self-evolution-checkpoint-wait${
-            pendingCheckpointWaitPrompt.kind === "failure" ? " is-failure" : ""
-          }`}
-          role="status"
-          aria-live="polite"
-        >
-          <div className="self-evolution-checkpoint-wait-icon">
-            <ClockCircleFilled />
-          </div>
-          <div className="self-evolution-checkpoint-wait-content">
-            <Paragraph className="self-evolution-checkpoint-wait-message">
-              {pendingCheckpointWaitPrompt.message}
-            </Paragraph>
-          </div>
-          <button
-            type="button"
-            className="self-evolution-checkpoint-wait-command"
-            onClick={() => onSend(pendingCheckpointWaitPrompt.command)}
-            disabled={isSendingMessage}
-          >
-            {isSendingMessage
-              ? pendingCheckpointWaitPrompt.command === t("selfEvolutionRun.retry")
-                ? t("selfEvolutionRun.retrying")
-                : t("selfEvolutionRun.continuing")
-              : pendingCheckpointWaitPrompt.command}
-          </button>
-        </div>
-      )}
+    <div className={`self-evolution-chat-composer${isAutoMode ? " is-auto" : ""}`}>
+      {isAutoMode && !isReadOnlyEnded && <AutoInteractionStatus />}
 
       <Input.TextArea
         value={prompt}
@@ -136,7 +123,7 @@ export function ChatComposer({
         className="self-evolution-chatlike-input"
         placeholder={
           isCheckpointWaiting
-            ? t("selfEvolutionRun.checkpointInputPlaceholder")
+            ? t("selfEvolutionRun.checkpointInputPlaceholder", { command: pendingCheckpointWaitPrompt?.command || "继续执行" })
             : t("selfEvolutionRun.inputPlaceholder")
         }
         aria-label={t("selfEvolutionRun.inputAria")}

@@ -93,6 +93,86 @@ func TestCreateSourcePersistsTargetsInBindingsOnly(t *testing.T) {
 	}
 }
 
+func TestCreateSourceUsesSourceNameForSingleFileBindingRoot(t *testing.T) {
+	t.Parallel()
+
+	now := fixedSourceTestTime()
+	repo := newSourceEngineRepoStub()
+	core := &sourceCoreSpy{}
+	spy := &sourceSpyConnector{
+		target: connector.NormalizedTarget{
+			TargetType:        spyTargetType,
+			TargetRef:         "wiki:space-1:node-pdf",
+			TargetFingerprint: "feishu:wiki:space-1:node-pdf",
+			DisplayName:       "ALCOHOLDINGS.pdf",
+			ProviderMeta:      connector.ProviderMeta{"kind": "wiki_node", "file_type": "file"},
+			RootObjectKey:     "feishu:wiki:space-1:node-pdf",
+		},
+	}
+	engine := newTestSourceEngine(t, repo, core, spy, now)
+
+	resp, err := engine.CreateSource(context.Background(), CreateSourceRequest{
+		CallerID:  "user-1",
+		TenantID:  "tenant-1",
+		RequestID: "request-1",
+		Name:      "132",
+		Bindings: []BindingInput{{
+			ConnectorType: spyConnectorType,
+			TargetType:    spyTargetType,
+			TargetRef:     "wiki:space-1:node-pdf",
+			SyncMode:      SyncModeManual,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	if len(core.folderRequests) != 1 || core.folderRequests[0].Name != "132" {
+		t.Fatalf("single-file binding root should use source name, got %+v", core.folderRequests)
+	}
+	if len(resp.Bindings) != 1 || resp.Bindings[0].CoreParentDocumentName != "132" {
+		t.Fatalf("binding should keep the core parent name, got %+v", resp.Bindings)
+	}
+}
+
+func TestCreateSourceKeepsExplicitSingleFileBindingRootName(t *testing.T) {
+	t.Parallel()
+
+	now := fixedSourceTestTime()
+	repo := newSourceEngineRepoStub()
+	core := &sourceCoreSpy{}
+	spy := &sourceSpyConnector{
+		target: connector.NormalizedTarget{
+			TargetType:        spyTargetType,
+			TargetRef:         "wiki:space-1:node-pdf",
+			TargetFingerprint: "feishu:wiki:space-1:node-pdf",
+			DisplayName:       "ALCOHOLDINGS.pdf",
+			ProviderMeta:      connector.ProviderMeta{"kind": "wiki_node", "file_type": "file"},
+			RootObjectKey:     "feishu:wiki:space-1:node-pdf",
+		},
+	}
+	engine := newTestSourceEngine(t, repo, core, spy, now)
+
+	_, err := engine.CreateSource(context.Background(), CreateSourceRequest{
+		CallerID:  "user-1",
+		TenantID:  "tenant-1",
+		RequestID: "request-1",
+		Name:      "132",
+		Bindings: []BindingInput{{
+			ConnectorType: spyConnectorType,
+			TargetType:    spyTargetType,
+			TargetRef:     "wiki:space-1:node-pdf",
+			DisplayName:   "Reports",
+			SyncMode:      SyncModeManual,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	if len(core.folderRequests) != 1 || core.folderRequests[0].Name != "Reports" {
+		t.Fatalf("explicit binding root name should be kept, got %+v", core.folderRequests)
+	}
+}
+
 func TestCreateSourcePreservesStructuredProviderOptions(t *testing.T) {
 	t.Parallel()
 
@@ -509,6 +589,56 @@ func TestUpdateBindingTargetChangeKeepsExistingTargetFieldsAndIncrementsGenerati
 	}
 	if !repo.lastCleanup.ClearIndexedState || repo.lastCleanup.OldCoreParentDocumentID != "folder-old" {
 		t.Fatalf("target change cleanup was not requested: %+v", repo.lastCleanup)
+	}
+}
+
+func TestUpdateBindingTargetChangeKeepsExistingDisplayNameForSingleFileTarget(t *testing.T) {
+	t.Parallel()
+
+	now := fixedSourceTestTime()
+	repo := newSourceEngineRepoStub()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1", Name: "132", CreatedBy: "user-1", DatasetID: "dataset-1", Status: SourceStatusActive, CreatedAt: now, UpdatedAt: now}
+	repo.bindings["source-1"] = []store.Binding{{
+		BindingID:              "binding-1",
+		SourceID:               "source-1",
+		ConnectorType:          string(spyConnectorType),
+		TargetType:             string(spyTargetType),
+		TargetRef:              "old",
+		TargetFingerprint:      "fp-old",
+		TreeKey:                "root-old",
+		BindingGeneration:      3,
+		CoreParentDocumentID:   "folder-old",
+		CoreParentDocumentName: "Reports",
+		SyncMode:               SyncModeManual,
+		Status:                 BindingStatusActive,
+		CreatedAt:              now,
+		UpdatedAt:              now,
+	}}
+	core := &sourceCoreSpy{}
+	spy := &sourceSpyConnector{
+		target: connector.NormalizedTarget{
+			TargetType:        spyTargetType,
+			TargetRef:         "wiki:space-1:node-pdf",
+			TargetFingerprint: "feishu:wiki:space-1:node-pdf",
+			DisplayName:       "ALCOHOLDINGS.pdf",
+			ProviderMeta:      connector.ProviderMeta{"kind": "wiki_node", "file_type": "file"},
+			RootObjectKey:     "feishu:wiki:space-1:node-pdf",
+		},
+	}
+	engine := newTestSourceEngine(t, repo, core, spy, now)
+
+	resp, err := engine.UpdateBinding(context.Background(), "user-1", "source-1", "binding-1", BindingInput{
+		TargetRef: "wiki:space-1:node-pdf",
+		SyncMode:  SyncModeManual,
+	})
+	if err != nil {
+		t.Fatalf("update binding: %v", err)
+	}
+	if len(core.folderRequests) != 1 || core.folderRequests[0].Name != "Reports" {
+		t.Fatalf("single-file target update should keep existing binding name, got %+v", core.folderRequests)
+	}
+	if resp.Binding.CoreParentDocumentName != "Reports" {
+		t.Fatalf("binding response should keep existing display name, got %+v", resp.Binding)
 	}
 }
 

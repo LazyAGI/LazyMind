@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"context"
+	"strings"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 )
@@ -24,6 +25,9 @@ func (c *FeishuConnector) fetchOnePage(ctx context.Context, token string, req co
 	case connector.ScopeTypeFull:
 		return c.fetchListPage(ctx, token, req)
 	case connector.ScopeTypePartial:
+		if req.TargetType == TargetTypeDriveFolder && scopedDriveObjectKey(req.ScopeRef) != "" {
+			return c.fetchWatchObject(ctx, token, req)
+		}
 		if req.TargetType == TargetTypeWikiNode && scopeNodeRef(req.ScopeRef) != "" {
 			return c.fetchWatchObject(ctx, token, req)
 		}
@@ -65,8 +69,24 @@ func (c *FeishuConnector) loadScopedObject(ctx context.Context, token string, re
 	}
 	switch req.TargetType {
 	case TargetTypeDriveFolder:
+		if objectKey := scopedDriveObjectKey(req.ScopeRef); objectKey != "" {
+			return c.findDriveObject(ctx, token, req.TargetRef, objectKey)
+		}
 		return c.api.GetDriveFolder(ctx, token, driveFolderToken(nodeRef))
 	case TargetTypeWikiNode:
+		if nodeRef == VirtualWikiSpacesRef {
+			return Object{
+				Kind:        ObjectKindVirtualRoot,
+				Token:       VirtualWikiSpacesRef,
+				Name:        "Wiki",
+				IsContainer: true,
+				HasChildren: true,
+				Revision:    "virtual-wiki",
+			}, nil
+		}
+		if spaceID, ok := wikiSpaceID(nodeRef); ok {
+			return c.getWikiSpace(ctx, token, spaceID)
+		}
 		spaceID, nodeToken, err := wikiNode(nodeRef)
 		if err != nil {
 			return Object{}, err
@@ -75,4 +95,61 @@ func (c *FeishuConnector) loadScopedObject(ctx context.Context, token string, re
 	default:
 		return Object{}, connector.NewError(connector.ErrorCodeInvalidTarget, "target_type is not supported")
 	}
+}
+
+func (c *FeishuConnector) findDriveObject(ctx context.Context, token, targetRef, objectToken string) (Object, error) {
+	objectToken = strings.TrimSpace(objectToken)
+	if objectToken == "" {
+		return Object{}, connector.NewError(connector.ErrorCodeInvalidArgument, "object_key is required")
+	}
+	rootToken := driveFolderToken(targetRef)
+	if rootToken == objectToken {
+		return c.api.GetDriveFolder(ctx, token, rootToken)
+	}
+	queue := []string{rootToken}
+	seen := map[string]struct{}{}
+	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return Object{}, err
+		}
+		folderToken := queue[0]
+		queue = queue[1:]
+		if _, ok := seen[folderToken]; ok {
+			continue
+		}
+		seen[folderToken] = struct{}{}
+		cursor := ""
+		for {
+			page, err := c.api.ListDriveChildren(ctx, token, folderToken, cursor, c.Spec().MaxPageSize)
+			if err != nil {
+				return Object{}, err
+			}
+			for _, item := range page.Items {
+				if driveObjectMatches(item, objectToken) {
+					return item, nil
+				}
+				if item.Kind == ObjectKindDriveFolder && strings.TrimSpace(item.Token) != "" {
+					queue = append(queue, item.Token)
+				}
+			}
+			if !page.HasMore {
+				break
+			}
+			cursor = page.NextCursor
+		}
+	}
+	return Object{}, connector.NewError(connector.ErrorCodeNotFound, "drive object is not found in target")
+}
+
+func driveObjectMatches(object Object, token string) bool {
+	token = strings.TrimSpace(token)
+	return token != "" && (strings.TrimSpace(object.Token) == token || strings.TrimSpace(object.StableID) == token)
+}
+
+func scopedDriveObjectKey(scopeRef connector.ScopeRef) string {
+	objectKey := strings.TrimSpace(scopeRef["object_key"])
+	if strings.HasPrefix(objectKey, string(ConnectorType)+":drive:") {
+		return strings.TrimPrefix(objectKey, string(ConnectorType)+":drive:")
+	}
+	return ""
 }

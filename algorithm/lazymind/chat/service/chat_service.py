@@ -17,7 +17,7 @@ from lazymind.chat.engine.prompts import build_system_prompt
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
     DEFAULT_TOOLS,
-    filter_tools,
+    build_agent_tools,
     normalize_history_for_agent,
 )
 from lazymind.chat.service.utils import (
@@ -32,6 +32,7 @@ from lazyllm.tools.fs.client import FS
 from lazymind.model_config import inject_model_config, summarize_model_config_for_log
 from lazyllm.tools.tool_config_inject import inject_tool_config
 from lazyllm import AutoModel
+from lazyllm.tools.mcp.client import MCPClient
 from lazymind.config import config as _cfg
 
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
@@ -56,6 +57,36 @@ def check_sensitive_content(
     return sensitive_word if has_sensitive else None
 
 
+def _build_mcp_tools(mcp_config: List[Dict[str, Any]]) -> list:
+    """Build MCP tool list from mcp_config. Skip individual servers on failure with a warning."""
+    tools = []
+    for server in mcp_config:
+        url = server.get('url')
+        if not url:
+            LOG.warning(
+                f"[MCP] skipped server {server.get('name')}: missing 'url' field"
+            )
+            continue
+        try:
+            client = MCPClient(
+                command_or_url=url,
+                headers=server.get('headers'),
+                timeout=server.get('timeout', 5),
+                transport=server.get('transport', 'auto'),
+            )
+            allowed = server.get('allowed_tools') or None
+            mcp_tools = client.get_tools(allowed_tools=allowed)
+            tools.extend(mcp_tools)
+            LOG.info(
+                f"[MCP] loaded {len(mcp_tools)} tools from {server.get('name')}"
+            )
+        except Exception as e:
+            LOG.warning(
+                f"[MCP] failed to connect {server.get('name')}: {e}"
+            )
+    return tools
+
+
 async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       session_id: str, filters: Optional[Dict[str, Any]],
                       files: Optional[List[str]],
@@ -67,6 +98,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       user_id: Optional[str] = None,
                       model_config: Optional[Dict[str, Any]] = None,
                       tool_config: Optional[Dict[str, Union[str, List[str]]]] = None,
+                      mcp_config: Optional[List[Dict[str, Any]]] = None,
                       trace: Optional[bool] = False,
                       ) -> Union[Dict[str, Any], StreamingResponse]:
     LOG.info(
@@ -116,7 +148,11 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     inject_model_config(model_config)
     inject_tool_config(tool_config)
     lazyllm.globals['agentic_config'] = agentic_config
-    active_configs = filter_tools(DEFAULT_TOOLS, disabled_tools)
+    disabled = set(disabled_tools or [])
+    active_configs = [cfg for cfg in DEFAULT_TOOLS if cfg.name not in disabled]
+    agent_tools = build_agent_tools(active_configs)
+    mcp_tools = _build_mcp_tools(mcp_config) if mcp_config else []
+    all_tools = agent_tools + mcp_tools
     set_trace_context({
         'enabled': bool(trace),
         'trace_id': session_id if trace else None,
@@ -138,7 +174,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
     react_agent = lazyllm.tools.agent.ReactAgent(
         llm=llm,
-        tools=[cfg.instance for cfg in active_configs],
+        tools=all_tools,
         max_retries=_cfg['max_retries'],
         stream=True,
         prompt=runtime_prompt,

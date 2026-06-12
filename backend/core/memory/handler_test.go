@@ -21,11 +21,14 @@ type upsertMemoryAPITestResponse struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Data    struct {
-		ResourceID     string `json:"resource_id"`
-		ResourceType   string `json:"resource_type"`
-		Title          string `json:"title"`
-		Content        string `json:"content"`
-		ContentSummary string `json:"content_summary"`
+		ResourceID     string  `json:"resource_id"`
+		ResourceType   string  `json:"resource_type"`
+		Title          string  `json:"title"`
+		Content        string  `json:"content"`
+		AgentPersona   *string `json:"agent_persona"`
+		UserAddress    *string `json:"user_address"`
+		ResponseStyle  *string `json:"response_style"`
+		ContentSummary string  `json:"content_summary"`
 	} `json:"data"`
 }
 
@@ -185,6 +188,99 @@ func TestUpsertPreservesMemoryAutoEvoWhenOmitted(t *testing.T) {
 	}
 	if updated.Content != "第二版记忆内容" {
 		t.Fatalf("unexpected updated content: %q", updated.Content)
+	}
+}
+
+func TestUpsertPartiallyUpdatesMemoryMetadata(t *testing.T) {
+	db := newMemoryTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	createReq := httptest.NewRequest(http.MethodPut, "/api/core/memory", strings.NewReader(`{"content":"长期记忆","agent_persona":"严谨助手","user_address":"老师","response_style":"先结论后解释"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("X-User-Id", "u1")
+	createReq.Header.Set("X-User-Name", "User 1")
+	createRec := httptest.NewRecorder()
+
+	Upsert(createRec, createReq)
+
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", createRec.Code, createRec.Body.String())
+	}
+	var createResp upsertMemoryAPITestResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if stringValue(createResp.Data.AgentPersona) != "严谨助手" || stringValue(createResp.Data.UserAddress) != "老师" || stringValue(createResp.Data.ResponseStyle) != "先结论后解释" {
+		t.Fatalf("unexpected metadata in create response: %#v", createResp.Data)
+	}
+
+	var created orm.SystemMemory
+	if err := db.Where("user_id = ?", "u1").Take(&created).Error; err != nil {
+		t.Fatalf("query created memory: %v", err)
+	}
+	if created.ContentHash != evolution.HashSystemMemory(created) {
+		t.Fatalf("expected metadata-aware content hash, got %q", created.ContentHash)
+	}
+
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/core/memory", strings.NewReader(`{"user_address":"同学"}`))
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateReq.Header.Set("X-User-Id", "u1")
+	updateReq.Header.Set("X-User-Name", "User 1")
+	updateRec := httptest.NewRecorder()
+
+	Upsert(updateRec, updateReq)
+
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", updateRec.Code, updateRec.Body.String())
+	}
+	var updateResp upsertMemoryAPITestResponse
+	if err := json.Unmarshal(updateRec.Body.Bytes(), &updateResp); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if updateResp.Data.Content != "长期记忆" || stringValue(updateResp.Data.AgentPersona) != "严谨助手" || stringValue(updateResp.Data.UserAddress) != "同学" || stringValue(updateResp.Data.ResponseStyle) != "先结论后解释" {
+		t.Fatalf("unexpected metadata in update response: %#v", updateResp.Data)
+	}
+
+	var updated orm.SystemMemory
+	if err := db.Where("user_id = ?", "u1").Take(&updated).Error; err != nil {
+		t.Fatalf("query updated memory: %v", err)
+	}
+	if updated.Content != created.Content || updated.AgentPersona != created.AgentPersona || updated.ResponseStyle != created.ResponseStyle {
+		t.Fatalf("expected omitted fields preserved, got %#v", updated)
+	}
+	if updated.UserAddress != "同学" {
+		t.Fatalf("expected user_address update, got %q", updated.UserAddress)
+	}
+	if updated.Version != created.Version+1 {
+		t.Fatalf("expected metadata update to bump version, got %d from %d", updated.Version, created.Version)
+	}
+	if updated.ContentHash != evolution.HashSystemMemory(updated) || updated.ContentHash == created.ContentHash {
+		t.Fatalf("expected metadata-aware content hash to change, created=%q updated=%q", created.ContentHash, updated.ContentHash)
+	}
+}
+
+func TestUpsertAllowsMetadataOnlyCreate(t *testing.T) {
+	db := newMemoryTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	req := httptest.NewRequest(http.MethodPut, "/api/core/memory", strings.NewReader(`{"agent_persona":"严谨助手"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", "u1")
+	rec := httptest.NewRecorder()
+
+	Upsert(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var created orm.SystemMemory
+	if err := db.Where("user_id = ?", "u1").Take(&created).Error; err != nil {
+		t.Fatalf("query created memory: %v", err)
+	}
+	if created.Content != "" || created.AgentPersona != "严谨助手" {
+		t.Fatalf("unexpected metadata-only created memory: %#v", created)
 	}
 }
 
@@ -633,4 +729,11 @@ func TestDiscardKeepsAcceptedSuggestionVisibleForRegeneration(t *testing.T) {
 	if updated.Status != evolution.SuggestionStatusAccepted {
 		t.Fatalf("expected suggestion to remain accepted after discard, got %q", updated.Status)
 	}
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
