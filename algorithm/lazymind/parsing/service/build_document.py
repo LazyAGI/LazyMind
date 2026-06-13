@@ -32,9 +32,32 @@ def _build_store_config(index_kwargs):
     milvus_uri = _cfg['milvus_uri']
     if not milvus_uri:
         raise ValueError('LAZYMIND_MILVUS_URI is required')
-    opensearch_uri = _cfg['opensearch_uri']
-    if not opensearch_uri:
-        raise ValueError('LAZYMIND_OPENSEARCH_URI is required')
+
+    store_type = _cfg['segment_store_type']
+    uri_or_path = _cfg['segment_store_uri_or_path']
+    if store_type == 'SQLiteStore':
+        if not uri_or_path:
+            raise ValueError('LAZYMIND_SEGMENT_STORE_URI_OR_PATH is required for SQLite segment store')
+        segment_store = {'type': 'SQLiteStore', 'kwargs': {'db_path': uri_or_path}}
+    elif store_type == 'opensearch':
+        if not uri_or_path:
+            raise ValueError('LAZYMIND_SEGMENT_STORE_URI_OR_PATH is required for OpenSearch segment store')
+        segment_store = {
+            'type': store_type,
+            'kwargs': {
+                'uris': uri_or_path,
+                'client_kwargs': {
+                    'http_compress': True,
+                    'use_ssl': True,
+                    'verify_certs': False,
+                    'user': _cfg['segment_store_user'],
+                    'password': _cfg['segment_store_password'],
+                },
+            },
+        }
+    else:
+        raise ValueError(f'Unsupported segment store type: {store_type!r}')
+
     return {
         'vector_store': {
             'type': 'milvus',
@@ -43,19 +66,7 @@ def _build_store_config(index_kwargs):
                 'index_kwargs': index_kwargs,
             },
         },
-        'segment_store': {
-            'type': 'opensearch',
-            'kwargs': {
-                'uris': opensearch_uri,
-                'client_kwargs': {
-                    'http_compress': True,
-                    'use_ssl': True,
-                    'verify_certs': False,
-                    'user': _cfg['opensearch_user'],
-                    'password': _cfg['opensearch_password'] or 'LazyRAG_OpenSearch123!',
-                },
-            },
-        },
+        'segment_store': segment_store,
     }
 
 
@@ -83,7 +94,7 @@ def reset_stores() -> None:
     '''
     import re
     from lazyllm import LOG
-    from lazyllm.tools.rag.store import MilvusStore, OpenSearchStore
+    from lazyllm.tools.rag.store import MilvusStore, OpenSearchStore, SQLiteStore
 
     LOG.warning(f'[build_document] Clearing vector/segment stores for algo "{ALGO_ID}"')
 
@@ -96,7 +107,8 @@ def reset_stores() -> None:
     store_conf = _build_store_config(EMBED_INDEX_KWARGS)
 
     milvus_cfg = (store_conf.get('vector_store') or {}).get('kwargs', {})
-    opensearch_cfg = (store_conf.get('segment_store') or {}).get('kwargs', {})
+    seg_cfg = (store_conf.get('segment_store') or {}).get('kwargs', {})
+    seg_type = (store_conf.get('segment_store') or {}).get('type', '')
 
     if milvus_cfg.get('uri'):
         milvus = MilvusStore(**{k: v for k, v in milvus_cfg.items() if k != 'index_kwargs'})
@@ -104,8 +116,13 @@ def reset_stores() -> None:
             milvus.delete(_col(group))
         LOG.warning(f'[build_document] Milvus collections dropped for algo "{ALGO_ID}"')
 
-    if opensearch_cfg.get('uris'):
-        opensearch = OpenSearchStore(**opensearch_cfg)
+    if seg_type == 'SQLiteStore' and seg_cfg.get('db_path'):
+        sqlite = SQLiteStore(**seg_cfg)
+        for group in activated_groups:
+            sqlite.delete(_col(group))
+        LOG.warning(f'[build_document] SQLite collections dropped for algo "{ALGO_ID}"')
+    elif seg_cfg.get('uris'):
+        opensearch = OpenSearchStore(**seg_cfg)
         for group in activated_groups:
             opensearch.delete(_col(group))
         LOG.warning(f'[build_document] OpenSearch indices dropped for algo "{ALGO_ID}"')

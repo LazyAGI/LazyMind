@@ -526,6 +526,7 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
+      - sqlite-data:/data/sqlite
     environment:
       LAZYMIND_DOCUMENT_PROCESSOR_PORT: "8000"
       <<: [*runtime-home, *db-conn, *upload-paths, *llm-api-keys, *ocr-env, *trace-config]
@@ -562,6 +563,7 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
+      - sqlite-data:/data/sqlite
     environment:
       LAZYMIND_DOCUMENT_WORKER_PORT: "8001"
       LAZYMIND_DOCUMENT_WORKER_NUM_WORKERS: "1"
@@ -607,6 +609,7 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
+      - sqlite-data:/data/sqlite
     healthcheck:
       test: ['CMD-SHELL', 'python -m lazymind.parsing.service.healthcheck']
       interval: 15s
@@ -622,9 +625,10 @@ services:
       LAZYLLM_ALGO_REGISTER_POLICY: ${LAZYLLM_ALGO_REGISTER_POLICY:-}
       LAZYMIND_USE_INNER_MODEL: "true"
       LAZYMIND_MILVUS_URI: ${LAZYMIND_MILVUS_URI:-http://milvus:19530}
-      LAZYMIND_OPENSEARCH_URI: ${LAZYMIND_OPENSEARCH_URI:-https://opensearch:9200}
-      LAZYMIND_OPENSEARCH_USER: ${LAZYMIND_OPENSEARCH_USER:-admin}
-      LAZYMIND_OPENSEARCH_PASSWORD: ${LAZYMIND_OPENSEARCH_PASSWORD:-LazyRAG_OpenSearch123!}
+      LAZYMIND_SEGMENT_STORE_TYPE: ${LAZYMIND_SEGMENT_STORE_TYPE:-opensearch}
+      LAZYMIND_SEGMENT_STORE_URI_OR_PATH: ${LAZYMIND_SEGMENT_STORE_URI_OR_PATH:-https://opensearch:9200}
+      LAZYMIND_SEGMENT_STORE_USER: ${LAZYMIND_SEGMENT_STORE_USER:-admin}
+      LAZYMIND_SEGMENT_STORE_PASSWORD: ${LAZYMIND_SEGMENT_STORE_PASSWORD:-LazyRAG_OpenSearch123!}
       LAZYMIND_RESET_ALGO_ON_STARTUP: ${LAZYMIND_RESET_ALGO_ON_STARTUP:-false}
       LAZYMIND_RESET_ALL_ON_STARTUP: ${LAZYMIND_RESET_ALL_ON_STARTUP:-false}
     command: ["python", "-m", "lazymind.parsing.app"]
@@ -668,6 +672,8 @@ services:
       # as one API surface from the chat container.
       LAZYMIND_DOCUMENT_SERVER_URL: http://parsing:8000,general_algo
       LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
+      LAZYMIND_SEGMENT_STORE_TYPE: ${LAZYMIND_SEGMENT_STORE_TYPE:-opensearch}
+      LAZYMIND_SEGMENT_STORE_URI_OR_PATH: ${LAZYMIND_SEGMENT_STORE_URI_OR_PATH:-https://opensearch:9200}
       LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
       LAZYMIND_MOUNT_BASE_DIR: /var/lib/lazymind/uploads
       LAZYMIND_AGENTIC_WORKSPACE: /tmp/.lazyllm_rag/agent_workspace
@@ -836,7 +842,7 @@ services:
       - discovery.type=single-node
       - bootstrap.memory_lock=true
       - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${LAZYMIND_OPENSEARCH_PASSWORD:-LazyRAG_OpenSearch123!}
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${LAZYMIND_SEGMENT_STORE_PASSWORD:-LazyRAG_OpenSearch123!}
     ulimits:
       memlock:
         soft: -1
@@ -875,3 +881,4 @@ volumes:
   milvus-minio:
   milvus-data:
   opensearch-data:
+  sqlite-data:

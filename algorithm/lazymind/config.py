@@ -85,9 +85,14 @@ config.add('core_api_timeout', int, 30, 'CORE_API_TIMEOUT', description='Core AP
 config.add('agentic_kb_name', str, 'general_algo', 'AGENTIC_KB_NAME',
            description='Default knowledge base name for agentic.')
 config.add('skill_fs_url', str, 'remote://skills', 'SKILL_FS_URL', description='Skill filesystem URL.')
-config.add('opensearch_uri', str, None, 'OPENSEARCH_URI', description='OpenSearch/Elasticsearch URI.')
-config.add('opensearch_user', str, 'admin', 'OPENSEARCH_USER', description='OpenSearch username.')
-config.add('opensearch_password', str, '', 'OPENSEARCH_PASSWORD', description='OpenSearch password.')
+config.add('segment_store_type', str, 'opensearch', 'SEGMENT_STORE_TYPE',
+           description='Segment store type: opensearch, elasticsearch, or SQLiteStore.')
+config.add('segment_store_uri_or_path', str, 'https://opensearch:9200', 'SEGMENT_STORE_URI_OR_PATH',
+           description='Segment store URI (OpenSearch/Elasticsearch) or file path (SQLite).')
+config.add('segment_store_user', str, 'admin', 'SEGMENT_STORE_USER',
+           description='Segment store username (OpenSearch/Elasticsearch only).')
+config.add('segment_store_password', str, 'LazyRAG_OpenSearch123!', 'SEGMENT_STORE_PASSWORD',
+           description='Segment store password (OpenSearch/Elasticsearch only).')
 config.add('web_search_timeout', int, 10, 'WEB_SEARCH_TIMEOUT', description='Web search request timeout in seconds.')
 config.add('url_fetch_max_length', int, 4000, 'URL_FETCH_MAX_LENGTH',
            description='Maximum readable text length returned by url_fetch.')

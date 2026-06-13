@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional
 
 import lazyllm
-from lazyllm import AutoModel
+from lazyllm import AutoModel, LOG
 from lazyllm.tools.rag import Reranker, Retriever, TempDocRetriever
 
 from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
@@ -13,9 +13,7 @@ from lazymind.chat.engine.tools._utils import (
 )
 from lazymind.chat.engine.tools.algo import search_kb
 from lazymind.chat.engine.tools.infra import (
-    opensearch_search,
     resolve_index,
-    term_filter,
 )
 from lazymind.chat.service.utils import (
     annotate_citations,
@@ -123,22 +121,26 @@ def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
     return serialized
 
 
-def _source_to_result(hit: Dict[str, Any]) -> Dict[str, Any]:
-    src = hit.get('_source') or {}
-    meta = parse_json_dict(src.get('meta'))
-    global_meta = parse_json_dict(src.get('global_meta'))
+def _store_dict_to_result(d: Dict[str, Any]) -> Dict[str, Any]:
+    meta = d.get('meta', {})
+    if isinstance(meta, str):
+        meta = parse_json_dict(meta)
+    global_meta = d.get('global_meta', {})
+    if isinstance(global_meta, str):
+        global_meta = parse_json_dict(global_meta)
     return {
-        'uid': src.get('uid') or hit.get('_id'),
-        'number': src.get('number'),
-        'group': src.get('group'),
-        'parent': src.get('parent'),
-        'docid': src.get('doc_id') or global_meta.get('docid'),
-        'kb_id': src.get('kb_id') or global_meta.get('kb_id'),
-        'score': hit.get('_score'),
-        'text': truncate_text(src.get('content'), _MAX_TEXT_LEN),
+        'uid': d.get('uid'),
+        'number': d.get('number'),
+        'group': d.get('group'),
+        'parent': d.get('parent'),
+        'score': d.get('score'),
+        'text': truncate_text(d.get('content', '') or '', _MAX_TEXT_LEN),
+        'docid': d.get('doc_id') or global_meta.get('docid'),
+        'kb_id': d.get('kb_id') or global_meta.get('kb_id'),
+        'file_name': global_meta.get('file_name'),
         'metadata': meta,
         'global_metadata': global_meta,
-        'highlight': hit.get('highlight', {}).get('content', []),
+        'highlights': d.get('highlights', []),
     }
 
 
@@ -411,7 +413,7 @@ class KBToolGroup:
         size: int = 10,
         sort_by: str = 'score',
     ) -> Dict[str, Any]:
-        """Search a keyword inside one target document in OpenSearch.
+        """Search a keyword inside one target document.
 
         Args:
             keyword: Keyword or phrase to search in ``content``.
@@ -423,7 +425,7 @@ class KBToolGroup:
                 order.
 
         Returns:
-            Matching nodes with content snippets and OpenSearch highlights.
+            Matching nodes with content snippets.
         """
         if not keyword:
             raise ValueError('keyword is required')
@@ -431,66 +433,39 @@ class KBToolGroup:
             raise ValueError('docid is required')
 
         config = lazyllm.globals['agentic_config']
-        size = max(1, min(int(size), _MAX_RESULT_ITEMS))
-        text_query = {'match_phrase' if phrase else 'match': {'content': keyword}}
-        sort = [{'number': {'order': 'asc'}}] if sort_by == 'number' else [
-            {'_score': {'order': 'desc'}},
-            {'number': {'order': 'asc'}},
-        ]
         index_name = resolve_index(group)
+        size = max(1, min(int(size), _MAX_RESULT_ITEMS))
+        doc = _DEFAULT_KB_DOCUMENT
+        LOG.info(f'[kb_keyword_search] store={_cfg["segment_store_type"]!r} keyword={keyword!r} docid={docid!r} '
+                 f'group={group!r} phrase={phrase} sort_by={sort_by!r} size={size}')
+
         for kb_id in iter_lookup_ids(
             (config.get('filters') or {}).get('kb_id'),
             field_name='agentic_config.filters.kb_id',
         ):
-            filters = [term_filter('doc_id', docid)]
-            if kb_id:
-                filters.insert(0, term_filter('kb_id', kb_id))
-            body = {
-                'size': size,
-                '_source': [
-                    'uid', 'doc_id', 'kb_id', 'group', 'content', 'meta',
-                    'global_meta', 'type', 'number', 'parent',
-                ],
-                'query': {
-                    'bool': {
-                        'filter': filters,
-                        'must': [text_query],
-                    }
-                },
-                'sort': sort,
-                'highlight': {
-                    'fields': {
-                        'content': {
-                            'fragment_size': 180,
-                            'number_of_fragments': 3,
-                        }
-                    }
-                },
-            }
-            hits = opensearch_search(index_name, body).get('hits', {}).get('hits', [])
-            if not hits:
+            LOG.info(f'[kb_keyword_search] trying kb_id={kb_id!r}')
+            nodes = doc.keyword_search(
+                group=group, keyword=keyword, doc_id=docid,
+                kb_id=kb_id, phrase=phrase, sort_by=sort_by, size=size,
+            )
+            LOG.info(f'[kb_keyword_search] doc.keyword_search returned {len(nodes)} nodes')
+            if not nodes:
                 continue
             result = {
                 'index': index_name,
                 'group': group,
                 'docid': docid,
                 'keyword': keyword,
-                'total': len(hits),
-                'items': [_source_to_result(hit) for hit in hits],
+                'total': len(nodes),
+                'items': [_store_dict_to_result(n) for n in nodes],
             }
             _annotate_result_citations(result)
             return tool_success('kb_keyword_search', result)
 
-        result = {
-            'index': index_name,
-            'group': group,
-            'docid': docid,
-            'keyword': keyword,
-            'total': 0,
-            'items': [],
-        }
-        _annotate_result_citations(result)
-        return tool_success('kb_keyword_search', result)
+        return tool_success('kb_keyword_search', {
+            'index': index_name, 'group': group, 'docid': docid,
+            'keyword': keyword, 'total': 0, 'items': [],
+        })
 
 
 class TempKBToolGroup:
