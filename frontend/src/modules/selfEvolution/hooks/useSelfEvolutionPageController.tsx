@@ -30,13 +30,15 @@ import { axiosInstance, getLocalizedErrorMessage } from "@/components/request";
 import type { AxiosError } from "axios";
 import { type HistorySessionModalProps } from "../components/HistorySessions";
 import { type SelfEvolutionHomeViewProps } from "../components/LaunchViews";
-import { type SelfEvolutionFinalResultSummary, type SelfEvolutionWorkbenchViewProps } from "../components/WorkbenchView";
+import { normalizeTraceObservation, TraceObservationView } from "../components/TraceObservationView";
+import { type SelfEvolutionFinalResultSummary, type SelfEvolutionObservationKind, type SelfEvolutionWorkbenchViewProps } from "../components/WorkbenchView";
 import { type SelfEvolutionWorkbenchTab } from "../components/types";
 import "../index.scss";
 import {
   EvolutionMode,
   ExtraEvalStrategy,
   WorkflowStep,
+  StepStatus,
   ChatMessage,
   ChatSession,
   ThreadHistoryEntry,
@@ -134,6 +136,7 @@ import {
   getThreadTitleFromPayload,
   getThreadKnowledgeBaseId,
   getThreadModeFromPayload,
+  getTerminalFlowStepStatus,
 } from "../shared";
 const { Paragraph, Text } = Typography;
 
@@ -295,6 +298,7 @@ export function SelfEvolutionPageController({
     createInitialWorkflowResultsState,
   );
   const [liveCheckpointWaitPrompt, setLiveCheckpointWaitPrompt] = useState<CheckpointWaitPrompt>();
+  const [terminalFlowStepStatus, setTerminalFlowStepStatus] = useState<StepStatus>();
   const [diffArtifactContent, setDiffArtifactContent] = useState<DiffArtifactContentState>({
     loading: false,
     key: "",
@@ -437,21 +441,31 @@ export function SelfEvolutionPageController({
   const isNewSessionStepThreeDone = Boolean(newSessionDraft.extraEvalStrategy);
   const isNewSessionStepFourDone = Boolean(newSessionDraft.mode);
   const workflowSteps = useMemo<WorkflowStep[]>(
-    () => buildVisibleWorkflowSteps(threadEvents, workflowRuntimeState, isWorkbenchVisible),
-    [isWorkbenchVisible, threadEvents, workflowRuntimeState],
+    () => buildVisibleWorkflowSteps(
+      threadEvents,
+      workflowRuntimeState,
+      isWorkbenchVisible,
+      terminalFlowStepStatus,
+    ),
+    [isWorkbenchVisible, terminalFlowStepStatus, threadEvents, workflowRuntimeState],
   );
   const processDashboard = useMemo(
-    () => buildEvoProcessDashboard(threadEvents, workflowRuntimeState, isWorkbenchVisible),
-    [isWorkbenchVisible, threadEvents, workflowRuntimeState],
+    () => buildEvoProcessDashboard(
+      threadEvents,
+      workflowRuntimeState,
+      isWorkbenchVisible,
+      terminalFlowStepStatus,
+    ),
+    [isWorkbenchVisible, terminalFlowStepStatus, threadEvents, workflowRuntimeState],
   );
   const pendingCheckpointWaitPrompt = useMemo(
     () => {
-      if (threadEvents.some(isInactiveTerminalThreadEvent)) {
+      if (terminalFlowStepStatus || threadEvents.some(isInactiveTerminalThreadEvent)) {
         return undefined;
       }
       return liveCheckpointWaitPrompt || getPendingCheckpointWaitPrompt(threadEvents);
     },
-    [liveCheckpointWaitPrompt, threadEvents],
+    [liveCheckpointWaitPrompt, terminalFlowStepStatus, threadEvents],
   );
   const isSendDisabled = !prompt.trim() || isSendingMessage;
   const activeStepText = useMemo(() => {
@@ -482,6 +496,10 @@ export function SelfEvolutionPageController({
   }, []);
   const fetchedPxCategoryMetricAverages = useMemo<PxCategoryMetricAverage[]>(
     () => buildPxCategoryMetricAveragesFromReport(workflowResults["eval-reports"].data),
+    [workflowResults["eval-reports"].data],
+  );
+  const evalTraceObservation = useMemo(
+    () => normalizeTraceObservation(workflowResults["eval-reports"].data),
     [workflowResults["eval-reports"].data],
   );
   const datasetArtifactData = useMemo(() => {
@@ -615,6 +633,10 @@ export function SelfEvolutionPageController({
   );
   const abSummaryReports = useMemo<AbSummaryReport[]>(
     () => buildAbSummaryReports(workflowResults.abtests.data),
+    [workflowResults.abtests.data],
+  );
+  const abTraceObservation = useMemo(
+    () => normalizeTraceObservation(workflowResults.abtests.data),
     [workflowResults.abtests.data],
   );
   const abCategoryComparisons = useMemo<AbCategoryComparison[]>(
@@ -1098,7 +1120,8 @@ export function SelfEvolutionPageController({
       const step = workflowSteps.find((candidate) => candidate.id === artifactStepIdMap[kind]);
       const resultState = workflowResults[kind];
       const hasLoadedArtifact = resultState.loaded && !isEmptyResultPayload(resultState.data);
-      if (step && step.status !== "done" && !hasLoadedArtifact) {
+      const isObservationKind = kind === "eval-reports" || kind === "abtests";
+      if (step && step.status !== "done" && !hasLoadedArtifact && !isObservationKind) {
         message.info(`${step.title}仍在执行，完成后可查看结果。`, 2);
         return;
       }
@@ -1113,6 +1136,17 @@ export function SelfEvolutionPageController({
       void fetchWorkflowResult(kind, { force: true });
     },
     [fetchWorkflowResult, workflowResults, workflowSteps],
+  );
+
+  const openObservationPage = useCallback(
+    (kind: SelfEvolutionObservationKind) => {
+      if (!activeThreadId) {
+        message.warning("当前没有可用线程 ID，无法查看观测结果。", 2);
+        return;
+      }
+      navigate(`/self-evolution/detail/${encodeURIComponent(activeThreadId)}/observation/${kind}`);
+    },
+    [activeThreadId, navigate],
   );
 
   const openCaseArtifact = useCallback(
@@ -1433,6 +1467,7 @@ export function SelfEvolutionPageController({
 
   const replaceThreadEvents = (events: NormalizedThreadEvent[]) => {
     threadEventsRef.current = events;
+    setTerminalFlowStepStatus(undefined);
     setLiveCheckpointWaitPrompt(undefined);
     setThreadEvents(events);
   };
@@ -2010,7 +2045,12 @@ export function SelfEvolutionPageController({
       const pendingCheckpoint = flowPendingCheckpoint || (isRecord(threadPayload)
         ? getNestedRecordField(threadPayload, ["pending_checkpoint", "pendingCheckpoint"])
         : undefined);
-      if (pendingCheckpoint) {
+      const nextTerminalFlowStepStatus = getTerminalFlowStepStatus(restoredFlowStatus);
+      setTerminalFlowStepStatus(nextTerminalFlowStepStatus);
+      if (nextTerminalFlowStepStatus) {
+        setLiveCheckpointWaitPrompt(undefined);
+      }
+      if (!nextTerminalFlowStepStatus && pendingCheckpoint) {
         const checkpointEvent = normalizeThreadEvent({
           id: `restore-checkpoint-${threadId}-${getStringField(pendingCheckpoint, ["checkpoint_id", "id"]) || "latest"}`,
           eventName: "checkpoint.wait",
@@ -3335,6 +3375,8 @@ export function SelfEvolutionPageController({
         renderWorkflowResultPayload("eval-reports")
       ) : workflowResults["eval-reports"].error ? (
         renderWorkflowResultPayload("eval-reports")
+      ) : evalTraceObservation && pxReportCategoryMetrics.length === 0 ? (
+        <TraceObservationView observation={evalTraceObservation} title="Agentic RAG 观测详情" />
       ) : (
         <>
       <div className="self-evolution-px-report-head">
@@ -3950,6 +3992,8 @@ export function SelfEvolutionPageController({
       <section className="self-evolution-ab-report" aria-label="A/B 对比展示">
         {workflowResults.abtests.loading || workflowResults.abtests.error ? (
           renderWorkflowResultPayload("abtests")
+        ) : workflowResults.abtests.loaded && abTraceObservation && abSummaryReports.length === 0 ? (
+          <TraceObservationView observation={abTraceObservation} title="Case A/B Trace 对比" />
         ) : workflowResults.abtests.loaded && abSummaryReports.length > 0 ? (
           <>
             <div className="self-evolution-ab-head">
@@ -4062,8 +4106,49 @@ export function SelfEvolutionPageController({
     }
     return localizedGetStepStatusLabel(step?.status || "pending");
   };
+  const observationEntryItems = artifactItems.filter((item): item is ArtifactPanelItem & { kind: "eval-reports" | "abtests" } =>
+    item.kind === "eval-reports" || item.kind === "abtests",
+  );
   const renderArtifactNavigationPanel = () => (
     <>
+      <section className="self-evolution-observation-entry-panel" aria-label="观测查看入口">
+        <div className="self-evolution-observation-entry-head">
+          <Text>观测入口</Text>
+          <span>Trace / A-B</span>
+        </div>
+        <div className="self-evolution-observation-entry-list">
+          {observationEntryItems.map((item) => {
+            const isActive = item.kind === activeArtifactItem?.kind;
+            const resultState = workflowResults[item.kind];
+            const stateLabel = resultState.loading
+              ? "加载中"
+              : resultState.error
+                ? "可重试"
+                : resultState.loaded
+                  ? isEmptyResultPayload(resultState.data)
+                    ? "暂无数据"
+                    : "已加载"
+                  : "点击查看";
+            return (
+              <button
+                key={`observation-${item.kind}`}
+                type="button"
+                className={`self-evolution-observation-entry${isActive ? " is-active" : ""}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openObservationPage(item.kind === "eval-reports" ? "eval" : "abtest");
+                }}
+              >
+                <span>
+                  <strong>{item.kind === "eval-reports" ? "Step 2 · 观测详情" : "Step 5 · A/B 观测"}</strong>
+                  <em>{item.kind === "eval-reports" ? "Agentic RAG Trace 链路" : "Case A/B Trace 对比"}</em>
+                </span>
+                <i>{stateLabel}</i>
+              </button>
+            );
+          })}
+        </div>
+      </section>
       {visibleArtifactItems.length === 0 ? (
         <Paragraph className="self-evolution-artifact-empty">
           启动后会按执行进度显示产物。
@@ -4126,6 +4211,15 @@ export function SelfEvolutionPageController({
             重试
           </button>
         </div>
+      );
+    }
+    const traceObservation = normalizeTraceObservation(caseArtifact.data);
+    if (traceObservation) {
+      return (
+        <TraceObservationView
+          observation={traceObservation}
+          title={traceObservation.kind === "compare" ? `${caseArtifact.title} · A/B Trace 对比` : `${caseArtifact.title} · 观测详情`}
+        />
       );
     }
     return (
@@ -4263,6 +4357,7 @@ export function SelfEvolutionPageController({
           onConfirmIntentCheckpoint: () => void onConfirmIntentCheckpoint(),
           onContinueCheckpoint: (command?: string) => void onContinueCheckpoint(command),
           onOpenArtifact: openWorkflowArtifact,
+          onOpenObservation: openObservationPage,
           onOpenCaseArtifact: openCaseArtifact,
           onWorkbenchTabChange: handleWorkbenchTabChange,
           onCloseArtifactPanel: closeArtifactPanel,

@@ -59,6 +59,8 @@ export type SelfEvolutionFinalResultSummary = {
   reasons: string[];
 };
 
+export type SelfEvolutionObservationKind = "eval" | "abtest";
+
 export type SelfEvolutionWorkbenchViewProps = {
   processDashboard: EvoProcessDashboard;
   finalResultSummary?: SelfEvolutionFinalResultSummary;
@@ -113,6 +115,7 @@ export type SelfEvolutionWorkbenchViewProps = {
   onConfirmIntentCheckpoint: () => void;
   onContinueCheckpoint: (command?: string) => void;
   onOpenArtifact: (kind: WorkflowResultKind) => void;
+  onOpenObservation: (kind: SelfEvolutionObservationKind) => void;
   onOpenCaseArtifact: (kind: WorkflowResultKind, artifactId: string, title: string) => void;
   onWorkbenchTabChange: (tab?: SelfEvolutionWorkbenchTab) => void;
   onCloseArtifactPanel: () => void;
@@ -173,6 +176,7 @@ export function SelfEvolutionWorkbenchView({
   onConfirmIntentCheckpoint,
   onContinueCheckpoint,
   onOpenArtifact,
+  onOpenObservation,
   onOpenCaseArtifact,
   onWorkbenchTabChange,
   onCloseArtifactPanel,
@@ -498,6 +502,91 @@ export function SelfEvolutionWorkbenchView({
       {renderSidebarSection("processes", "阶段概览", activeStageLabel, renderStageNavigationPanel())}
     </div>
   );
+  const renderInteractionFeed = () => isReadOnlyEnded ? (
+    <details
+      className="self-evolution-workbench-chat-feed is-ended"
+      open={isEndedChatOpen}
+      onToggle={(event) => setIsEndedChatOpen(event.currentTarget.open)}
+    >
+      <summary>
+        <span>
+          <Text>交互记录</Text>
+        </span>
+        <strong>{displayedMessages.length ? `${displayedMessages.length} 条消息` : "暂无消息"}</strong>
+        <DownOutlined />
+      </summary>
+      {isEndedChatOpen && (
+        <div className="self-evolution-workbench-tab-body">
+          <ChatMessageStream
+            isAutoInteractionActive={isAutoInteractionActive}
+            messages={displayedMessages}
+            streamRef={chatStreamRef}
+          />
+        </div>
+      )}
+    </details>
+  ) : (
+    <div className={`self-evolution-workbench-chat-feed is-collapsible${isInteractionChatOpen ? " is-open" : ""}`}>
+      <button
+        type="button"
+        className="self-evolution-workbench-chat-summary"
+        onClick={() => setIsInteractionChatOpen((prev) => !prev)}
+        aria-expanded={isInteractionChatOpen}
+      >
+        <span>
+          <Text>交互处理</Text>
+        </span>
+        {isPlanningNextStep && <em className="self-evolution-planning-pulse">正在计划下一步</em>}
+        <strong>{displayedMessages.length ? `${displayedMessages.length} 条消息` : "等待消息"}</strong>
+        <em>{isInteractionChatOpen ? "收起" : "查看详情"}</em>
+        <DownOutlined />
+      </button>
+      <div className="self-evolution-workbench-tab-body">
+        <ChatMessageStream
+          isAutoInteractionActive={isAutoInteractionActive}
+          messages={visibleInteractionMessages}
+          streamRef={chatStreamRef}
+        />
+      </div>
+    </div>
+  );
+  const renderMainComposer = () => (
+    <div className="self-evolution-main-composer">
+      {checkpointDecisionPrompt && !shouldShowCutoverCard && (
+        <div className="self-evolution-composer-checkpoint">
+          <span>{checkpointDecisionDesc}</span>
+          <button
+            type="button"
+            disabled={!checkpointDecisionPrompt.command || isSendingMessage}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (checkpointDecisionPrompt.command) {
+                if (isIntentConfirmation) {
+                  onConfirmIntentCheckpoint();
+                } else {
+                  onContinueCheckpoint(checkpointDecisionPrompt.command);
+                }
+              }
+            }}
+          >
+            {checkpointDecisionPrompt.command || "继续执行"}
+          </button>
+        </div>
+      )}
+      <ChatComposer
+        activeStepText={activeStepText}
+        isAutoMode={isAutoMode}
+        isReadOnlyEnded={isReadOnlyEnded}
+        isSendingMessage={isSendingMessage}
+        pendingCheckpointWaitPrompt={displayedCheckpointWaitPrompt}
+        prompt={prompt}
+        onPromptChange={onPromptChange}
+        onSend={onSend}
+        renderKnowledgeAndModeTools={renderKnowledgeAndModeTools}
+        renderSendButton={renderSendButton}
+      />
+    </div>
+  );
   return (
     <div className="self-evolution-session-page">
       <div className="self-evolution-workbench">
@@ -557,6 +646,26 @@ export function SelfEvolutionWorkbenchView({
                         {activeStageStatus}
                       </span>
                     </div>
+                  </div>
+                  <div className="self-evolution-process-observation-actions" aria-label="观测查看入口">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenObservation("eval");
+                      }}
+                    >
+                      Step 2 观测
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenObservation("abtest");
+                      }}
+                    >
+                      Step 5 A/B
+                    </button>
                   </div>
                   {shouldShowCutoverCard && (
                     <div className="self-evolution-cutover-decision" aria-label="ABTest 切流确认">
@@ -681,93 +790,18 @@ export function SelfEvolutionWorkbenchView({
                   </div>
                 )}
 
-                {isReadOnlyEnded ? (
-                  <details
-                    className="self-evolution-workbench-chat-feed is-ended"
-                    open={isEndedChatOpen}
-                    onToggle={(event) => setIsEndedChatOpen(event.currentTarget.open)}
-                  >
-                    <summary>
-                      <span>
-                        <Text>交互记录</Text>
-                      </span>
-                      <strong>{displayedMessages.length ? `${displayedMessages.length} 条消息` : "暂无消息"}</strong>
-                      <DownOutlined />
-                    </summary>
-                    {isEndedChatOpen && (
-                      <div className="self-evolution-workbench-tab-body">
-                        <ChatMessageStream
-                          isAutoInteractionActive={isAutoInteractionActive}
-                          messages={displayedMessages}
-                          streamRef={chatStreamRef}
-                        />
-                      </div>
-                    )}
-                  </details>
-                ) : (
-                  <div className={`self-evolution-workbench-chat-feed is-collapsible${isInteractionChatOpen ? " is-open" : ""}`}>
-                    <button
-                      type="button"
-                      className="self-evolution-workbench-chat-summary"
-                      onClick={() => setIsInteractionChatOpen((prev) => !prev)}
-                      aria-expanded={isInteractionChatOpen}
-                    >
-                      <span>
-                        <Text>交互处理</Text>
-                      </span>
-                      {isPlanningNextStep && <em className="self-evolution-planning-pulse">正在计划下一步</em>}
-                      <strong>{displayedMessages.length ? `${displayedMessages.length} 条消息` : "等待消息"}</strong>
-                      <em>{isInteractionChatOpen ? "收起" : "查看详情"}</em>
-                      <DownOutlined />
-                    </button>
-                    <div className="self-evolution-workbench-tab-body">
-                      <ChatMessageStream
-                        isAutoInteractionActive={isAutoInteractionActive}
-                        messages={visibleInteractionMessages}
-                        streamRef={chatStreamRef}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                <div className="self-evolution-main-composer">
-                  {checkpointDecisionPrompt && !shouldShowCutoverCard && (
-                    <div className="self-evolution-composer-checkpoint">
-                      <span>{checkpointDecisionDesc}</span>
-                      <button
-                        type="button"
-                        disabled={!checkpointDecisionPrompt.command || isSendingMessage}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          if (checkpointDecisionPrompt.command) {
-                            if (isIntentConfirmation) {
-                              onConfirmIntentCheckpoint();
-                            } else {
-                              onContinueCheckpoint(checkpointDecisionPrompt.command);
-                            }
-                          }
-                        }}
-                      >
-                        {checkpointDecisionPrompt.command || "继续执行"}
-                      </button>
-                    </div>
-                  )}
-                  <ChatComposer
-                    activeStepText={activeStepText}
-                    isAutoMode={isAutoMode}
-                    isReadOnlyEnded={isReadOnlyEnded}
-                    isSendingMessage={isSendingMessage}
-                    pendingCheckpointWaitPrompt={displayedCheckpointWaitPrompt}
-                    prompt={prompt}
-                    onPromptChange={onPromptChange}
-                    onSend={onSend}
-                    renderKnowledgeAndModeTools={renderKnowledgeAndModeTools}
-                    renderSendButton={renderSendButton}
-                  />
-                </div>
               </div>
           </div>
         </main>
+
+        <aside
+          className="self-evolution-interaction-column"
+          aria-label="问答和交互处理"
+          onClick={isArtifactPanelOpen ? onCloseArtifactPanel : undefined}
+        >
+          {renderInteractionFeed()}
+          {renderMainComposer()}
+        </aside>
 
         {isArtifactPanelOpen && (
           <section className="self-evolution-artifact-drawer" aria-label="产物详情抽屉">
