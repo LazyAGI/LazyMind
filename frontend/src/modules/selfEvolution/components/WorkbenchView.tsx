@@ -648,18 +648,18 @@ export function SelfEvolutionWorkbenchView({
                       </span>
                     </div>
                   </div>
-                  {displayStage === "eval" && (
+                  {(displayStage === "eval" || displayStage === "abtest") && (
                     <div className="self-evolution-process-observation-actions" aria-label="观测查看入口">
                       <button
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          onOpenObservation("eval");
+                          onOpenObservation(displayStage === "abtest" ? "abtest" : "eval");
                         }}
-                        aria-label="进入 Step 2 观测"
+                        aria-label={displayStage === "abtest" ? "进入 Step 5 A/B 观测" : "进入 Step 2 观测"}
                       >
                         <EyeOutlined />
-                        Step 2 观测
+                        {displayStage === "abtest" ? "Step 5 A/B" : "Step 2 观测"}
                       </button>
                     </div>
                   )}
