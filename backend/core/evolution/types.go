@@ -58,13 +58,6 @@ type RecordedSuggestion struct {
 	InvalidReason string `json:"invalid_reason,omitempty"`
 }
 
-func ManagedSuggestionStatus(hasPendingReviewSuggestions bool) string {
-	if hasPendingReviewSuggestions {
-		return SuggestionStatusPendingReview
-	}
-	return SuggestionStatusNone
-}
-
 func AcceptedSuggestionStatuses() []string {
 	return []string{SuggestionStatusAccepted}
 }

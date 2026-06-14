@@ -89,3 +89,4 @@ class AuthorizeBody(BaseModel):
 
 class AuthorizeResponse(BaseModel):
     allowed: bool
+    role: str | None = None

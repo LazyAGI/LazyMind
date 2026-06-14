@@ -225,6 +225,23 @@ type ormAgent struct {
 
 func (ormAgent) TableName() string { return "agents" }
 
+type ormAgentCommand struct {
+	CommandID    string `gorm:"column:command_id;primaryKey"`
+	AgentID      string `gorm:"column:agent_id"`
+	CommandType  string `gorm:"column:command_type"`
+	Payload      JSON   `gorm:"column:payload_json;type:jsonb"`
+	Status       string `gorm:"column:status"`
+	AttemptCount int64  `gorm:"column:attempt_count"`
+	NextRetryAt  *time.Time
+	AckedAt      *time.Time
+	LastError    JSON `gorm:"column:last_error;type:jsonb"`
+	Result       JSON `gorm:"column:result_json;type:jsonb"`
+	CreatedAt    time.Time
+	DispatchedAt *time.Time
+}
+
+func (ormAgentCommand) TableName() string { return "agent_commands" }
+
 type ormParseTaskDeadLetter struct {
 	DeadLetterID      string `gorm:"column:dead_letter_id;primaryKey"`
 	TaskID            string `gorm:"column:task_id"`

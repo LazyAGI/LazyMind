@@ -292,6 +292,7 @@ type SourceRepository interface {
 	RecordSyncJobError(ctx context.Context, sourceID, bindingID string, generation int64, lastError store.JSON, now time.Time) error
 	DeleteBinding(ctx context.Context, sourceID, bindingID string, deletedAt time.Time) (store.BindingDeleteResult, error)
 	GetSourceSummary(ctx context.Context, req store.SourceSummaryRequest) (store.SourceSummary, error)
+	CreateAgentCommand(ctx context.Context, command store.AgentCommand) error
 }
 
 type ScheduleEngine interface {

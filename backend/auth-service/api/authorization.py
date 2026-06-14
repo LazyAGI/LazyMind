@@ -121,9 +121,9 @@ def authorize(body: AuthorizeBody, request: Request):
     if user.disabled:
         raise_error(ErrorCodes.USER_DISABLED)
     if user.role.name == BUILTIN_ADMIN_ROLE:
-        return {'allowed': True}
+        return {'allowed': True, 'role': user.role.name}
     from core.permissions import get_effective_permission_codes
     effective = get_effective_permission_codes(user)
     if effective & set(required):
-        return {'allowed': True}
+        return {'allowed': True, 'role': user.role.name}
     raise_error(ErrorCodes.FORBIDDEN)

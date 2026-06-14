@@ -10,6 +10,7 @@ import (
 type Actor struct {
 	UserID   string
 	TenantID string
+	Role     string
 }
 
 type BindingTargetRequest struct {

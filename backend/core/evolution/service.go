@@ -16,6 +16,7 @@ import (
 
 	"lazymind/core/common/orm"
 	appLog "lazymind/core/log"
+	"lazymind/core/resourcechange"
 )
 
 type SkillState struct {
@@ -121,9 +122,6 @@ func EnsureSystemMemory(ctx context.Context, db *gorm.DB, userID, userName strin
 		ID:            newUUID(),
 		UserID:        userID,
 		Content:       firstNonEmpty(seed.Content, ""),
-		AgentPersona:  seed.AgentPersona,
-		UserAddress:   seed.UserAddress,
-		ResponseStyle: seed.ResponseStyle,
 		Version:       maxInt64(1, seed.Version),
 		AutoEvo:       true,
 		UpdatedBy:     firstNonEmpty(userID, seed.UpdatedBy, "system"),
@@ -132,7 +130,19 @@ func EnsureSystemMemory(ctx context.Context, db *gorm.DB, userID, userName strin
 		UpdatedAt:     now,
 	}
 	row.ContentHash = HashSystemMemory(row)
-	if err := tx.Create(&row).Error; err != nil {
+	if err := resourcechange.CreateModel(ctx, tx, &row, resourcechange.ContentChange{
+		ResourceType:  orm.ResourceUpdateResourceTypeMemory,
+		ResourceID:    row.ID,
+		UserID:        userID,
+		FromVersion:   0,
+		ToVersion:     row.Version,
+		BeforeContent: "",
+		AfterContent:  row.Content,
+		Source: resourcechange.Source{
+			ChangeSource: resourcechange.ChangeSourceInternalDirect,
+			ChangedAt:    now,
+		},
+	}); err != nil {
 		return nil, err
 	}
 	appLog.Logger.Info().
@@ -150,8 +160,9 @@ func EnsureSystemUserPreference(ctx context.Context, db *gorm.DB, userID, userNa
 	userName = strings.TrimSpace(userName)
 	err := tx.Where("user_id = ?", userID).Order("created_at ASC").Take(&row).Error
 	if err == nil {
-		if strings.TrimSpace(row.ContentHash) == "" {
-			row.ContentHash = HashContent(row.Content)
+		expectedHash := HashSystemUserPreference(row)
+		if strings.TrimSpace(row.ContentHash) != expectedHash {
+			row.ContentHash = expectedHash
 			row.UpdatedAt = time.Now()
 			if saveErr := tx.Model(&orm.SystemUserPreference{}).Where("id = ?", row.ID).Updates(map[string]any{
 				"content_hash": row.ContentHash,
@@ -179,7 +190,9 @@ func EnsureSystemUserPreference(ctx context.Context, db *gorm.DB, userID, userNa
 		ID:            newUUID(),
 		UserID:        userID,
 		Content:       firstNonEmpty(seed.Content, ""),
-		ContentHash:   firstNonEmpty(strings.TrimSpace(seed.ContentHash), HashContent(seed.Content)),
+		AgentPersona:  seed.AgentPersona,
+		UserAddress:   seed.UserAddress,
+		ResponseStyle: seed.ResponseStyle,
 		Version:       maxInt64(1, seed.Version),
 		AutoEvo:       true,
 		UpdatedBy:     firstNonEmpty(userID, seed.UpdatedBy, "system"),
@@ -187,7 +200,20 @@ func EnsureSystemUserPreference(ctx context.Context, db *gorm.DB, userID, userNa
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
-	if err := tx.Create(&row).Error; err != nil {
+	row.ContentHash = HashSystemUserPreference(row)
+	if err := resourcechange.CreateModel(ctx, tx, &row, resourcechange.ContentChange{
+		ResourceType:  orm.ResourceUpdateResourceTypeUserPreference,
+		ResourceID:    row.ID,
+		UserID:        userID,
+		FromVersion:   0,
+		ToVersion:     row.Version,
+		BeforeContent: "",
+		AfterContent:  row.Content,
+		Source: resourcechange.Source{
+			ChangeSource: resourcechange.ChangeSourceInternalDirect,
+			ChangedAt:    now,
+		},
+	}); err != nil {
 		return nil, err
 	}
 	appLog.Logger.Info().
@@ -240,7 +266,7 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 			UserID:       userID,
 			ResourceType: ResourceTypeUserPreference,
 			ResourceKey:  SystemResourceKey(ResourceTypeUserPreference),
-			SnapshotHash: firstNonEmpty(pref.ContentHash, HashContent(pref.Content)),
+			SnapshotHash: firstNonEmpty(pref.ContentHash, HashSystemUserPreference(*pref)),
 			CreatedAt:    now,
 		},
 	)
@@ -279,7 +305,7 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 		DisabledTools:      []string{},
 		AvailableSkills:    availableSkills,
 		Memory:             FormatSystemMemoryForChat(*mem),
-		UserPreference:     pref.Content,
+		UserPreference:     FormatSystemUserPreferenceForChat(*pref),
 		UsePersonalization: usePersonalization,
 	}
 	appLog.Logger.Info().

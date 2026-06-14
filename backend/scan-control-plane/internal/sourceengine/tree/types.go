@@ -78,8 +78,11 @@ type TargetTreeSearchRequest struct {
 	AgentID          string                  `json:"agent_id,omitempty"`
 	AuthConnectionID string                  `json:"auth_connection_id,omitempty"`
 	ProviderOptions  map[string]any          `json:"provider_options,omitempty"`
+	IncludeFiles     bool                    `json:"include_files,omitempty"`
+	ListMode         string                  `json:"list_mode,omitempty"`
 	PageSize         int                     `json:"page_size,omitempty"`
 	Cursor           string                  `json:"cursor,omitempty"`
+	MaxItems         int                     `json:"max_items,omitempty"`
 }
 
 type SourceTreeChildrenRequest struct {
@@ -109,8 +112,10 @@ type SourceTreeSearchRequest struct {
 	IncludeDocuments  bool     `json:"include_documents"`
 	IncludeContainers bool     `json:"include_containers"`
 	StateFilter       []string `json:"state_filter,omitempty"`
+	ListMode          string   `json:"list_mode,omitempty"`
 	PageSize          int      `json:"page_size,omitempty"`
 	Cursor            string   `json:"cursor,omitempty"`
+	MaxItems          int      `json:"max_items,omitempty"`
 }
 
 type SourceDocumentListRequest struct {
@@ -124,31 +129,32 @@ type SourceDocumentListRequest struct {
 }
 
 type SourceDocumentItem struct {
-	DocumentID      string         `json:"document_id,omitempty"`
-	SourceID        string         `json:"source_id"`
-	BindingID       string         `json:"binding_id"`
-	ObjectKey       string         `json:"object_key"`
-	DisplayName     string         `json:"display_name"`
-	Name            string         `json:"name,omitempty"`
-	Path            string         `json:"path,omitempty"`
-	Directory       string         `json:"directory,omitempty"`
-	FileType        string         `json:"file_type,omitempty"`
-	SizeBytes       int64          `json:"size_bytes"`
-	SourceVersion   string         `json:"source_version,omitempty"`
-	BaselineVersion string         `json:"baseline_version,omitempty"`
-	SourceState     string         `json:"source_state,omitempty"`
-	SyncState       string         `json:"sync_state,omitempty"`
-	PendingAction   string         `json:"pending_action,omitempty"`
-	ParseQueueState string         `json:"parse_queue_state,omitempty"`
-	ParseStatus     string         `json:"parse_status,omitempty"`
-	ParseState      string         `json:"parse_state,omitempty"`
-	HasUpdate       bool           `json:"has_update,omitempty"`
-	UpdateType      string         `json:"update_type,omitempty"`
-	UpdateDesc      string         `json:"update_desc,omitempty"`
-	CoreDocumentID  string         `json:"core_document_id,omitempty"`
-	ModifiedAt      *time.Time     `json:"modified_at,omitempty"`
-	LastSyncedAt    *time.Time     `json:"last_synced_at,omitempty"`
-	LastError       map[string]any `json:"last_error,omitempty"`
+	DocumentID       string         `json:"document_id,omitempty"`
+	SourceID         string         `json:"source_id"`
+	BindingID        string         `json:"binding_id"`
+	ObjectKey        string         `json:"object_key"`
+	DisplayName      string         `json:"display_name"`
+	Name             string         `json:"name,omitempty"`
+	Path             string         `json:"path,omitempty"`
+	Directory        string         `json:"directory,omitempty"`
+	FileType         string         `json:"file_type,omitempty"`
+	SizeBytes        int64          `json:"size_bytes"`
+	SourceVersion    string         `json:"source_version,omitempty"`
+	BaselineVersion  string         `json:"baseline_version,omitempty"`
+	SourceState      string         `json:"source_state,omitempty"`
+	SyncState        string         `json:"sync_state,omitempty"`
+	PendingAction    string         `json:"pending_action,omitempty"`
+	ParseQueueState  string         `json:"parse_queue_state,omitempty"`
+	ParseStatus      string         `json:"parse_status,omitempty"`
+	ParseState       string         `json:"parse_state,omitempty"`
+	HasUpdate        bool           `json:"has_update,omitempty"`
+	UpdateType       string         `json:"update_type,omitempty"`
+	UpdateDesc       string         `json:"update_desc,omitempty"`
+	CoreDocumentID   string         `json:"core_document_id,omitempty"`
+	ModifiedAt       *time.Time     `json:"modified_at,omitempty"`
+	SourceModifiedAt *time.Time     `json:"source_modified_at,omitempty"`
+	LastSyncedAt     *time.Time     `json:"last_synced_at,omitempty"`
+	LastError        map[string]any `json:"last_error,omitempty"`
 }
 
 type SourceDocumentListResponse struct {

@@ -1,8 +1,10 @@
 package fs
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"go.uber.org/zap"
@@ -34,5 +36,24 @@ func TestWatcherEventObjectKeyMatchesLocalFSConnectorPathKey(t *testing.T) {
 	want := "local_fs:agent-1:path:/workspace/docs/a.md"
 	if got != want {
 		t.Fatalf("object key = %q, want %q", got, want)
+	}
+}
+
+func TestFileEventOccurredAtUsesFileModTime(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "doc.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	want := time.Date(2026, 6, 13, 10, 11, 12, 0, time.UTC)
+	if err := os.Chtimes(path, want, want); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	got := fileEventOccurredAt(path)
+
+	if !got.Equal(want) {
+		t.Fatalf("occurred_at = %v, want file mtime %v", got, want)
 	}
 }

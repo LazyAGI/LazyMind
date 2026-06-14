@@ -72,6 +72,7 @@ type LazyChatRequest struct {
 	Mode               string          `json:"mode,omitempty"`
 	HasSubagents       bool            `json:"has_subagents"`
 	ConversationID     string          `json:"conversation_id,omitempty"`
+	MCPConfig          []any           `json:"mcp_config,omitempty"`
 }
 
 // LazyChatData text data text。
@@ -82,6 +83,7 @@ type LazyChatData struct {
 	ReasoningText string            `json:"think"`
 	TaskCreated   *TaskCreatedEvent `json:"task_created,omitempty"`
 	Heartbeat     bool              `json:"heartbeat,omitempty"`
+	ToolCallTurns int64             `json:"tool_call_turns"`
 }
 
 // TaskCreatedEvent is emitted by create_subagent (via translator) on the main SSE.
@@ -255,6 +257,7 @@ type UpstreamStreamChunk struct {
 	ReasoningText string            `json:"reasoning_text"` // text think
 	TaskCreated   *TaskCreatedEvent `json:"task_created,omitempty"`
 	Heartbeat     bool              `json:"heartbeat,omitempty"`
+	ToolCallTurns int64             `json:"tool_call_turns"`
 }
 
 type upstreamStreamLine struct {
@@ -343,6 +346,14 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 		}
 		if len(tc) > 0 {
 			req.ToolConfig = tc
+		}
+	}
+	if mcpConfig, ok := body["mcp_config"].([]any); ok {
+		req.MCPConfig = mcpConfig
+	} else if mcpConfigAny, ok := body["mcp_config"].([]map[string]any); ok {
+		req.MCPConfig = make([]any, 0, len(mcpConfigAny))
+		for _, item := range mcpConfigAny {
+			req.MCPConfig = append(req.MCPConfig, item)
 		}
 	}
 	return req
@@ -460,6 +471,7 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 				ReasoningText: d.Resp.Data.ReasoningText,
 				TaskCreated:   d.Resp.Data.TaskCreated,
 				Heartbeat:     d.Resp.Data.Heartbeat,
+				ToolCallTurns: d.Resp.Data.ToolCallTurns,
 			}
 			select {
 			case out <- chunk:

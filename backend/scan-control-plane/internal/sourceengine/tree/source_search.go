@@ -11,6 +11,9 @@ func (e *DBSourceTreeQueryEngine) Search(ctx context.Context, req SourceTreeSear
 	if strings.TrimSpace(req.Keyword) == "" {
 		return TreeNodePage{}, NewError(ErrCodeInvalidRequest, "keyword is required")
 	}
+	if err := validateSearchListMode(req.ListMode); err != nil {
+		return TreeNodePage{}, err
+	}
 	req = defaultSourceTreeSearchIncludes(req)
 	if _, err := e.repo.GetSource(ctx, req.SourceID); err != nil {
 		return TreeNodePage{}, mapStoreError(err)

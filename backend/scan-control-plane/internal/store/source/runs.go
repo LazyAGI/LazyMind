@@ -57,7 +57,14 @@ func (r *SQLRepository) EnqueueSyncRun(ctx context.Context, run SyncRun) (SyncRu
 }
 
 func shouldDedupeActiveSyncRun(run SyncRun) bool {
-	return run.TriggerType != "manual"
+	if run.TriggerType == "manual" || isWatchEventRun(run) {
+		return false
+	}
+	return true
+}
+
+func isWatchEventRun(run SyncRun) bool {
+	return run.TriggerType == "watch" && run.ScopeType == "watch_event"
 }
 
 func (r *SQLRepository) GetSyncRun(ctx context.Context, runID string) (SyncRun, error) {

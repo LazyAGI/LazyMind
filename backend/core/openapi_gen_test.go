@@ -144,6 +144,8 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		{"post", "/api/core/user-preference:generate", true, false, true},
 		{"post", "/api/core/user-preference:confirm", false, false, true},
 		{"post", "/api/core/user-preference:discard", false, false, true},
+		{"get", "/api/core/resource-versions", false, true, true},
+		{"get", "/api/core/resource-versions/{version_id}", false, true, true},
 		{"get", "/api/core/agent/threads", false, true, true},
 		{"get", "/api/core/conversations/{name}:history", false, true, true},
 	}
@@ -252,7 +254,7 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 	}
 }
 
-func TestOpenAPISpecIncludesMemoryMetadataFields(t *testing.T) {
+func TestOpenAPISpecAssignsMetadataFieldsToUserPreference(t *testing.T) {
 	r := mux.NewRouter()
 	registerAllRoutes(r)
 
@@ -289,16 +291,21 @@ func TestOpenAPISpecIncludesMemoryMetadataFields(t *testing.T) {
 	}
 
 	memoryRequestProps := schemaProperties("memoryUpsertOpenAPIRequest")
-	for _, name := range []string{"content", "agent_persona", "user_address", "response_style", "auto_evo"} {
+	for _, name := range []string{"content", "auto_evo"} {
 		if _, ok := memoryRequestProps[name]; !ok {
 			t.Fatalf("memoryUpsertOpenAPIRequest expected property %q", name)
 		}
 	}
+	for _, name := range []string{"agent_persona", "user_address", "response_style"} {
+		if _, ok := memoryRequestProps[name]; ok {
+			t.Fatalf("memoryUpsertOpenAPIRequest has user_preference-only property %q", name)
+		}
+	}
 
 	preferenceRequestProps := schemaProperties("managedStateUpsertOpenAPIRequest")
-	for _, name := range []string{"agent_persona", "user_address", "response_style"} {
-		if _, ok := preferenceRequestProps[name]; ok {
-			t.Fatalf("managedStateUpsertOpenAPIRequest has memory-only property %q", name)
+	for _, name := range []string{"content", "agent_persona", "user_address", "response_style", "auto_evo"} {
+		if _, ok := preferenceRequestProps[name]; !ok {
+			t.Fatalf("managedStateUpsertOpenAPIRequest expected property %q", name)
 		}
 	}
 
@@ -642,6 +649,111 @@ func TestOpenAPISpecIncludesToolOperations(t *testing.T) {
 	for _, name := range []string{"name", "can_disable", "active", "disabled"} {
 		if _, ok := properties[name]; !ok {
 			t.Fatalf("toolGroupOpenAPIResponse expected property %q", name)
+		}
+	}
+}
+
+func TestOpenAPISpecIncludesMCPOperations(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	paths, ok := spec["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("paths missing in openapi spec")
+	}
+
+	cases := []struct {
+		method      string
+		path        string
+		requestRef  string
+		responseRef string
+		hasIDParam  bool
+	}{
+		{"get", "/api/core/mcp_servers", "", "#/components/schemas/ListServersResponse", false},
+		{"post", "/api/core/mcp_servers", "#/components/schemas/CreateServerRequest", "#/components/schemas/ServerResponse", false},
+		{"get", "/api/core/mcp_servers/{id}", "", "#/components/schemas/ServerResponse", true},
+		{"patch", "/api/core/mcp_servers/{id}", "#/components/schemas/UpdateServerRequest", "#/components/schemas/ServerResponse", true},
+		{"delete", "/api/core/mcp_servers/{id}", "", "#/components/schemas/mcpDeleteServerOpenAPIResponse", true},
+		{"post", "/api/core/mcp_servers/{id}:check", "", "#/components/schemas/CheckResponse", true},
+		{"post", "/api/core/mcp_servers/{id}:discover", "", "#/components/schemas/DiscoverResponse", true},
+		{"put", "/api/core/mcp_servers/{id}/tools", "#/components/schemas/UpdateToolsRequest", "#/components/schemas/ServerResponse", true},
+	}
+
+	for _, tc := range cases {
+		pathItem, ok := paths[tc.path].(map[string]any)
+		if !ok {
+			t.Fatalf("path missing from openapi spec: %s", tc.path)
+		}
+		op, ok := pathItem[tc.method].(map[string]any)
+		if !ok {
+			t.Fatalf("operation missing from openapi spec: %s %s", tc.method, tc.path)
+		}
+		tags, ok := op["tags"].([]any)
+		if !ok || len(tags) == 0 || tags[0] != "mcp_servers" {
+			t.Fatalf("expected mcp_servers tag for %s %s, got %#v", tc.method, tc.path, op["tags"])
+		}
+		if tc.hasIDParam {
+			params, ok := op["parameters"].([]any)
+			if !ok || len(params) == 0 {
+				t.Fatalf("parameters missing for %s %s", tc.method, tc.path)
+			}
+			param, ok := params[0].(map[string]any)
+			if !ok || param["name"] != "id" || param["in"] != "path" || param["required"] != true {
+				t.Fatalf("expected id path parameter for %s %s, got %#v", tc.method, tc.path, params)
+			}
+		}
+		if tc.requestRef != "" {
+			requestBody, ok := op["requestBody"].(map[string]any)
+			if !ok {
+				t.Fatalf("requestBody missing for %s %s", tc.method, tc.path)
+			}
+			content, ok := requestBody["content"].(map[string]any)
+			if !ok {
+				t.Fatalf("requestBody content missing for %s %s", tc.method, tc.path)
+			}
+			jsonContent, ok := content["application/json"].(map[string]any)
+			if !ok {
+				t.Fatalf("application/json requestBody missing for %s %s", tc.method, tc.path)
+			}
+			schema, ok := jsonContent["schema"].(map[string]any)
+			if !ok {
+				t.Fatalf("requestBody schema missing for %s %s", tc.method, tc.path)
+			}
+			if got, _ := schema["$ref"].(string); got != tc.requestRef {
+				t.Fatalf("requestBody schema ref for %s %s = %q, want %q", tc.method, tc.path, got, tc.requestRef)
+			}
+		}
+		responses, ok := op["responses"].(map[string]any)
+		if !ok {
+			t.Fatalf("responses missing for %s %s", tc.method, tc.path)
+		}
+		resp200, ok := responses["200"].(map[string]any)
+		if !ok {
+			t.Fatalf("200 response missing for %s %s", tc.method, tc.path)
+		}
+		content, ok := resp200["content"].(map[string]any)
+		if !ok {
+			t.Fatalf("response content missing for %s %s", tc.method, tc.path)
+		}
+		jsonContent, ok := content["application/json"].(map[string]any)
+		if !ok {
+			t.Fatalf("application/json response missing for %s %s", tc.method, tc.path)
+		}
+		schema, ok := jsonContent["schema"].(map[string]any)
+		if !ok {
+			t.Fatalf("response schema missing for %s %s", tc.method, tc.path)
+		}
+		if got, _ := schema["$ref"].(string); got != tc.responseRef {
+			t.Fatalf("response schema ref for %s %s = %q, want %q", tc.method, tc.path, got, tc.responseRef)
 		}
 	}
 }

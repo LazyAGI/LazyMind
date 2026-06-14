@@ -49,6 +49,8 @@ type generateSkillResponse struct {
 
 type draftPreviewResponse struct {
 	SkillID            string `json:"skill_id"`
+	ReviewResultID     string `json:"review_result_id"`
+	ReviewStatus       string `json:"review_status"`
 	DraftStatus        string `json:"draft_status"`
 	DraftSourceVersion int64  `json:"draft_source_version"`
 	CurrentContent     string `json:"current_content"`

@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/lazymind/scan_control_plane/internal/access"
 	sourceengine "github.com/lazymind/scan_control_plane/internal/sourceengine/source"
@@ -27,6 +28,10 @@ func (h *Handler) createSource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, invalidJSON(err))
 		return
 	}
+	if err := requireLocalSourceAdmin(actor, req.Bindings, req.SourceOptions); err != nil {
+		writeError(w, err)
+		return
+	}
 	req.CallerID = actor.UserID
 	req.TenantID = actor.TenantID
 	if err := h.checkBindingTargetInputs(r, actor, "", req.Bindings); err != nil {
@@ -39,6 +44,51 @@ func (h *Handler) createSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+func isAdminActor(actor access.Actor) bool {
+	normalizedRole := strings.ToLower(strings.TrimSpace(actor.Role))
+	switch normalizedRole {
+	case "system-admin", "system_admin", "admin":
+		return true
+	default:
+		return strings.HasSuffix(normalizedRole, ".admin")
+	}
+}
+
+func requireLocalSourceAdmin(actor access.Actor, bindings []sourceengine.BindingInput, sourceOptions map[string]any) error {
+	if !touchesLocalSource(bindings, sourceOptions) || isAdminActor(actor) {
+		return nil
+	}
+	return access.NewError(access.ErrCodeForbidden, "local data sources can only be created by administrators")
+}
+
+func touchesLocalSource(bindings []sourceengine.BindingInput, sourceOptions map[string]any) bool {
+	if sourceType, ok := stringMapValue(sourceOptions, "source_type"); ok && strings.EqualFold(sourceType, "local") {
+		return true
+	}
+	for _, binding := range bindings {
+		if strings.EqualFold(string(binding.ConnectorType), "local_fs") || strings.EqualFold(string(binding.TargetType), "local_path") {
+			return true
+		}
+	}
+	return false
+}
+
+func stringMapValue(values map[string]any, key string) (string, bool) {
+	if len(values) == 0 {
+		return "", false
+	}
+	value, ok := values[key]
+	if !ok {
+		return "", false
+	}
+	text, ok := value.(string)
+	if !ok {
+		return "", false
+	}
+	text = strings.TrimSpace(text)
+	return text, text != ""
 }
 
 func (h *Handler) listSources(w http.ResponseWriter, r *http.Request) {
@@ -181,6 +231,10 @@ func (h *Handler) updateSource(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	if err := requireLocalSourceAdmin(actor, req.Bindings, req.SourceOptions); err != nil {
+		writeError(w, err)
+		return
+	}
 	if err := h.checkBindingTargetInputs(r, actor, sourceID, req.Bindings); err != nil {
 		writeError(w, err)
 		return
@@ -236,6 +290,10 @@ func (h *Handler) createSourceBinding(w http.ResponseWriter, r *http.Request) {
 		writeError(w, invalidJSON(err))
 		return
 	}
+	if err := requireLocalSourceAdmin(actor, []sourceengine.BindingInput{req}, nil); err != nil {
+		writeError(w, err)
+		return
+	}
 	if err := h.checkBindingTargetInputs(r, actor, sourceID, []sourceengine.BindingInput{req}); err != nil {
 		writeError(w, err)
 		return
@@ -267,6 +325,10 @@ func (h *Handler) updateSourceBinding(w http.ResponseWriter, r *http.Request) {
 	var req sourceengine.BindingInput
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, invalidJSON(err))
+		return
+	}
+	if err := requireLocalSourceAdmin(actor, []sourceengine.BindingInput{req}, nil); err != nil {
+		writeError(w, err)
 		return
 	}
 	if err := h.checkBindingTargetInputs(r, actor, sourceID, []sourceengine.BindingInput{req}); err != nil {

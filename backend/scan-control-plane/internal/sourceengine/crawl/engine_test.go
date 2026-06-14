@@ -218,6 +218,75 @@ func TestCrawlEngineFullIndexesDualRoleBindingRootDocument(t *testing.T) {
 	assertCrawlState(t, repo.reducer, "root", "NEW", "CREATE")
 }
 
+func TestCrawlEnginePartialContainerRecursesChildren(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := crawlTestTime()
+	repo := newCrawlTestRepo(now)
+	conn := newCrawlTreeConnector(false, false, nil)
+	engine := newCrawlTestEngine(t, repo, conn, now)
+
+	result, err := engine.Run(ctx, BindingRunClaim{
+		RunID:             "run-partial-folder",
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		ScopeType:         connector.ScopeTypePartial,
+		ScopeRef:          connector.ScopeRef{"object_key": "folder-1", "node_ref": "folder-1", "subtree_root": "folder-1"},
+	})
+	if err != nil || result.Status != RunStatusSucceeded {
+		t.Fatalf("partial subtree result=%+v err=%v", result, err)
+	}
+	if conn.fetchCalls != 0 || !slices.Equal(conn.listNodes, []string{"folder-1"}) {
+		t.Fatalf("container partial sync should traverse children without single-object fetch, fetches=%d lists=%v", conn.fetchCalls, conn.listNodes)
+	}
+	if _, ok := repo.objects["folder-1"]; ok {
+		t.Fatalf("ordinary container itself should not be indexed by subtree sync: %+v", repo.objects["folder-1"])
+	}
+	if _, ok := repo.objects["doc-1"]; !ok {
+		t.Fatalf("ordinary container subtree should index child document, objects=%+v", repo.objects)
+	}
+	assertCrawlState(t, repo.reducer, "doc-1", "NEW", "CREATE")
+}
+
+func TestCrawlEnginePartialDualRoleContainerIncludesSelfAndChildren(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := crawlTestTime()
+	repo := newCrawlTestRepo(now)
+	repo.binding.ConnectorType = string(crawlDualRoleConnectorType)
+	conn := newCrawlTreeConnector(false, false, nil)
+	conn.connectorType = crawlDualRoleConnectorType
+	conn.dualRole = true
+	conn.fetchItems = []connector.RawObject{docRaw("folder-1", "root", "folder-v1")}
+	engine := newCrawlTestEngine(t, repo, conn, now)
+
+	result, err := engine.Run(ctx, BindingRunClaim{
+		RunID:             "run-partial-wiki-parent",
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		ScopeType:         connector.ScopeTypePartial,
+		ScopeRef:          connector.ScopeRef{"object_key": "folder-1", "node_ref": "folder-1", "subtree_root": "folder-1"},
+	})
+	if err != nil || result.Status != RunStatusSucceeded {
+		t.Fatalf("partial dual-role subtree result=%+v err=%v", result, err)
+	}
+	if conn.fetchCalls != 1 || !slices.Equal(conn.fetchScopes, []connector.ScopeType{connector.ScopeTypeWatchEvent}) || !slices.Equal(conn.listNodes, []string{"folder-1"}) {
+		t.Fatalf("dual-role partial sync should fetch parent then traverse children, fetches=%d scopes=%v lists=%v", conn.fetchCalls, conn.fetchScopes, conn.listNodes)
+	}
+	if _, ok := repo.objects["folder-1"]; !ok {
+		t.Fatalf("dual-role parent document should be indexed, objects=%+v", repo.objects)
+	}
+	if _, ok := repo.objects["doc-1"]; !ok {
+		t.Fatalf("dual-role parent subtree should index child document, objects=%+v", repo.objects)
+	}
+	assertCrawlState(t, repo.reducer, "folder-1", "NEW", "CREATE")
+	assertCrawlState(t, repo.reducer, "doc-1", "NEW", "CREATE")
+}
+
 func TestCrawlEnginePermissionDeniedMarksBindingErrorWithoutDeleting(t *testing.T) {
 	t.Parallel()
 
@@ -467,6 +536,7 @@ type crawlTreeConnector struct {
 	delta         bool
 	dualRole      bool
 	deltaItems    []connector.RawObject
+	fetchItems    []connector.RawObject
 	fetchErr      error
 	fetchCalls    int
 	fetchScopes   []connector.ScopeType
@@ -531,6 +601,9 @@ func (c *crawlTreeConnector) FetchPage(_ context.Context, req connector.FetchPag
 		return connector.RawObjectPage{Items: c.deltaItems, Watermark: "delta-2"}, nil
 	}
 	if req.ScopeType == connector.ScopeTypePartial || req.ScopeType == connector.ScopeTypeWatchEvent {
+		if c.fetchItems != nil {
+			return connector.RawObjectPage{Items: c.fetchItems}, nil
+		}
 		if c.deltaItems != nil {
 			return connector.RawObjectPage{Items: c.deltaItems}, nil
 		}

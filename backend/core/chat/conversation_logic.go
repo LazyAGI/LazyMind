@@ -17,6 +17,8 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/log"
+	"lazymind/core/resourceupdate"
 	"lazymind/core/subagent"
 )
 
@@ -31,12 +33,44 @@ func shouldEmitStreamFrame(delta string, sources []any) bool {
 	return delta != "" || len(sources) > 0
 }
 
+func userIDFromChatRequestBody(reqBody map[string]any) string {
+	userID, _ := reqBody["user_id"].(string)
+	return strings.TrimSpace(userID)
+}
+
+func recordConversationIdleAfterPersist(ctx context.Context, db *gorm.DB, rdb *redis.Client, convID, userID, historyID string, at time.Time, query, answer string) {
+	if db == nil || rdb == nil {
+		return
+	}
+	if err := resourceupdate.RecordConversationIdleMessage(ctx, db, rdb, resourceupdate.ConversationIdleRecord{
+		SessionID:      convID,
+		UserID:         userID,
+		LastMessageID:  historyID,
+		LastActivityAt: at,
+		UserContent:    query,
+		AssistantText:  answer,
+	}); err != nil {
+		log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("record conversation idle event failed")
+	}
+}
+
 func marshalRetrievalResult(sources []any) json.RawMessage {
 	payload, err := json.Marshal(map[string]any{"sources": sources})
 	if err != nil {
 		return nil
 	}
 	return payload
+}
+
+func nonNegativeToolCallTurns(v int64) int {
+	if v < 0 {
+		return 0
+	}
+	maxInt := int(^uint(0) >> 1)
+	if v > int64(maxInt) {
+		return maxInt
+	}
+	return int(v)
 }
 
 // newID text history text ID。
@@ -519,12 +553,14 @@ func handleNonStreamChat(
 	_ = json.Unmarshal(respBytes, &pyResp)
 	answer := ""
 	rawAnswer := ""
+	var toolCallTurns int
 	var sources []any
 	if pyResp.Code == 200 && len(pyResp.Data) > 0 {
 		var data struct {
-			Text    string `json:"text"`
-			Think   string `json:"think"`
-			Sources []any  `json:"sources"`
+			Text          string `json:"text"`
+			Think         string `json:"think"`
+			Sources       []any  `json:"sources"`
+			ToolCallTurns int64  `json:"tool_call_turns"`
 		}
 		if json.Unmarshal(pyResp.Data, &data) == nil {
 			if data.Think != "" {
@@ -534,6 +570,7 @@ func handleNonStreamChat(
 			}
 			answer = strings.TrimSpace(stripToolTags(data.Text))
 			sources = data.Sources
+			toolCallTurns = nonNegativeToolCallTurns(data.ToolCallTurns)
 		}
 		if rawAnswer == "" {
 			rawAnswer = strings.TrimSpace(string(pyResp.Data))
@@ -560,6 +597,7 @@ func handleNonStreamChat(
 		RetrievalResult: retrievalResult,
 		Content:         query,
 		Result:          rawAnswer,
+		ToolCallTurns:   toolCallTurns,
 		FeedBack:        0,
 		Reason:          "",
 		ExpectedAnswer:  "",
@@ -573,6 +611,7 @@ func handleNonStreamChat(
 			"raw_content":      query,
 			"content":          query,
 			"result":           rawAnswer,
+			"tool_call_turns":  toolCallTurns,
 			"retrieval_result": retrievalResult,
 			"feed_back":        0,
 			"reason":           "",
@@ -595,6 +634,7 @@ func handleNonStreamChat(
 	db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
 	if !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
+		recordConversationIdleAfterPersist(context.Background(), db, rdb, convID, userIDFromChatRequestBody(reqBody), historyID, now, query, answer)
 	}
 	common.ReplyOK(w, map[string]any{
 		"conversation_id": convID,
@@ -698,6 +738,7 @@ func streamSingleAnswer(
 	var fullText string
 	var pendingThink string
 	var fullResult string
+	var toolCallTurns int
 	var sources []any
 	thinkStart := time.Now()
 	// text：textConversation/text，finish_reason text UNSPECIFIED
@@ -730,6 +771,9 @@ func streamSingleAnswer(
 		}
 		if d.Heartbeat {
 			continue
+		}
+		if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > toolCallTurns {
+			toolCallTurns = next
 		}
 		if d.ReasoningText != "" {
 			pendingThink += d.ReasoningText
@@ -772,21 +816,27 @@ func streamSingleAnswer(
 	if pendingThink != "" {
 		fullResult += "<think>" + pendingThink + "</think>"
 	}
+	persisted := false
 	if target.IsRegeneration && target.Existing != nil {
-		_ = db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
+		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
 			"seq":              seq,
 			"raw_content":      query,
 			"content":          query,
 			"result":           fullResult,
+			"tool_call_turns":  toolCallTurns,
 			"retrieval_result": retrievalResult,
 			"feed_back":        0,
 			"reason":           "",
 			"expected_answer":  "",
 			"ext":              historyExt,
 			"update_time":      now,
-		}).Error
+		}).Error; err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("failed to update stream chat history")
+		} else {
+			persisted = true
+		}
 	} else {
-		_ = db.Create(&orm.ChatHistory{
+		if err := db.Create(&orm.ChatHistory{
 			ID:              historyID,
 			Seq:             seq,
 			ConversationID:  convID,
@@ -794,16 +844,24 @@ func streamSingleAnswer(
 			RetrievalResult: retrievalResult,
 			Content:         query,
 			Result:          fullResult,
+			ToolCallTurns:   toolCallTurns,
 			Ext:             historyExt,
 			TimeMixin:       orm.TimeMixin{CreateTime: now, UpdateTime: now},
-		}).Error
+		}).Error; err != nil {
+			log.Logger.Warn().Err(err).Str("conversation_id", convID).Str("history_id", historyID).Msg("failed to save stream chat history")
+		} else {
+			persisted = true
+		}
 	}
 	if rdb != nil {
 		_ = setChatStatus(context.Background(), rdb, convID, historyID, "completed", stripToolTags(fullText))
 	}
-	db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
-	if !target.IsRegeneration {
+	if persisted {
+		db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
+	}
+	if persisted && !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
+		recordConversationIdleAfterPersist(context.Background(), db, rdb, convID, userIDFromChatRequestBody(reqBody), historyID, now, query, stripToolTags(fullText))
 	}
 	if reqCtx.Err() == nil {
 		// text：message text，finish_reason text STOP
@@ -867,6 +925,7 @@ func streamDualAnswer(
 	var primaryText, secondaryText string
 	var primaryResult, secondaryResult string
 	var primaryPendingThink, secondaryPendingThink string
+	var primaryToolCallTurns, secondaryToolCallTurns int
 	primaryDone := primaryCh == nil
 	secondaryDone := secondaryCh == nil
 	var writeMu sync.Mutex
@@ -937,11 +996,17 @@ func streamDualAnswer(
 				primaryDone = true
 				continue
 			}
+			if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > primaryToolCallTurns {
+				primaryToolCallTurns = next
+			}
 			appendPrimary(d.Text, d.ReasoningText, d.Sources)
 		case d, ok := <-secondaryCh:
 			if !ok {
 				secondaryDone = true
 				continue
+			}
+			if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > secondaryToolCallTurns {
+				secondaryToolCallTurns = next
 			}
 			appendSecondary(d.Text, d.ReasoningText, d.Sources)
 		case <-reqCtx.Done():
@@ -953,6 +1018,9 @@ func streamDualAnswer(
 						primaryDone = true
 						primaryCh = nil
 					} else {
+						if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > primaryToolCallTurns {
+							primaryToolCallTurns = next
+						}
 						if d.ReasoningText != "" {
 							primaryPendingThink += d.ReasoningText
 							continue
@@ -979,6 +1047,9 @@ func streamDualAnswer(
 						secondaryDone = true
 						secondaryCh = nil
 					} else {
+						if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > secondaryToolCallTurns {
+							secondaryToolCallTurns = next
+						}
 						if d.ReasoningText != "" {
 							secondaryPendingThink += d.ReasoningText
 							continue
@@ -1015,13 +1086,15 @@ dualPersist:
 	}
 	_ = db.Create(&orm.MultiAnswersChatHistory{
 		ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: primaryResult,
-		Ext:       historyExt,
-		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+		ToolCallTurns: primaryToolCallTurns,
+		Ext:           historyExt,
+		TimeMixin:     orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}).Error
 	_ = db.Create(&orm.MultiAnswersChatHistory{
 		ID: secondaryHistoryID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: secondaryResult,
-		Ext:       historyExt,
-		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+		ToolCallTurns: secondaryToolCallTurns,
+		Ext:           historyExt,
+		TimeMixin:     orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}).Error
 	if rdb != nil {
 		_ = setChatStatus(context.Background(), rdb, convID, historyID, "completed", stripToolTags(primaryText))

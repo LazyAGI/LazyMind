@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gorilla/mux"
@@ -50,6 +51,46 @@ func TestSkillDraftPreviewRouteWinsOverGenericSkillRoute(t *testing.T) {
 	}
 	if gotID := match.Vars["skill_id"]; gotID != "skill-306c5b7b" {
 		t.Fatalf("expected skill_id %q, got %q", "skill-306c5b7b", gotID)
+	}
+}
+
+func TestReviewResultActionRoutesRegistered(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+
+	cases := []struct {
+		method string
+		path   string
+		want   string
+		id     string
+	}{
+		{http.MethodPost, "/skill-review-results/review-1:accept", "/skill-review-results/{review_result_id}:accept", "review-1"},
+		{http.MethodPost, "/skill-review-results/review-1:reject", "/skill-review-results/{review_result_id}:reject", "review-1"},
+		{http.MethodPost, "/memory-review-results/review-2:accept", "/memory-review-results/{review_result_id}:accept", "review-2"},
+		{http.MethodGet, "/evolution/tasks/task-1", "/evolution/tasks/{task_id}", "task-1"},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		var match mux.RouteMatch
+		if !r.Match(req, &match) {
+			t.Fatalf("expected route to match %s %s", tc.method, tc.path)
+		}
+		gotTemplate, err := match.Route.GetPathTemplate()
+		if err != nil {
+			t.Fatalf("get matched route template: %v", err)
+		}
+		if gotTemplate != tc.want {
+			t.Fatalf("expected template %q, got %q", tc.want, gotTemplate)
+		}
+		if strings.Contains(tc.want, "task_id") {
+			if got := match.Vars["task_id"]; got != tc.id {
+				t.Fatalf("expected task_id %q, got %q", tc.id, got)
+			}
+			continue
+		}
+		if got := match.Vars["review_result_id"]; got != tc.id {
+			t.Fatalf("expected review_result_id %q, got %q", tc.id, got)
+		}
 	}
 }
 

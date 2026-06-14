@@ -9,9 +9,6 @@ type SystemMemory struct {
 	ID                 string          `gorm:"column:id;type:varchar(36);primaryKey"`
 	UserID             string          `gorm:"column:user_id;type:varchar(255);not null;default:'';uniqueIndex:uk_system_memories_user_id"`
 	Content            string          `gorm:"column:content;type:text;not null;default:''"`
-	AgentPersona       string          `gorm:"column:agent_persona;type:text;not null;default:''"`
-	UserAddress        string          `gorm:"column:user_address;type:text;not null;default:''"`
-	ResponseStyle      string          `gorm:"column:response_style;type:text;not null;default:''"`
 	ContentHash        string          `gorm:"column:content_hash;type:varchar(64);not null;default:''"`
 	Version            int64           `gorm:"column:version;not null;default:1"`
 	DraftContent       string          `gorm:"column:draft_content;type:text"`

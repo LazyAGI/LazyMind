@@ -15,6 +15,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/mcp"
 	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 )
@@ -153,6 +154,15 @@ func applyChatRuntimeConfigs(ctx context.Context, db *gorm.DB, userID string, bo
 		body["tool_config"] = toolConfig
 	}
 	return nil
+}
+
+func applyMCPRuntimeConfig(ctx context.Context, db *gorm.DB, userID string, body map[string]any) {
+	mcpConfig, err := mcp.LoadRuntimeConfig(ctx, db, userID)
+	if err != nil {
+		fmt.Printf("[Core] [MCP_CONFIG] failed to load for user %s: %v\n", userID, err)
+	} else if len(mcpConfig) > 0 {
+		body["mcp_config"] = mcpConfig
+	}
 }
 
 func loadChatToolConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {

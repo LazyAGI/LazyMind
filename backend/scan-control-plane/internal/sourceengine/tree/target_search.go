@@ -11,6 +11,9 @@ func (e *DefaultTargetTreeEngine) Search(ctx context.Context, req TargetTreeSear
 	if strings.TrimSpace(req.Keyword) == "" {
 		return TreeNodePage{}, NewError(ErrCodeInvalidRequest, "keyword is required")
 	}
+	if err := validateSearchListMode(req.ListMode); err != nil {
+		return TreeNodePage{}, err
+	}
 	conn, err := e.registry.Get(req.ConnectorType)
 	if err != nil {
 		return TreeNodePage{}, mapConnectorError(err)

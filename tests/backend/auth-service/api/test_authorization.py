@@ -140,7 +140,7 @@ def test_authorize_checks_bearer_token_and_effective_permissions(monkeypatch):
     )
 
     assert isinstance(result, dict)
-    assert result == {'allowed': True}
+    assert result == {'allowed': True, 'role': 'member'}
 
 
 def test_authorize_allows_builtin_admin_without_permission_match(monkeypatch):
@@ -154,7 +154,7 @@ def test_authorize_allows_builtin_admin_without_permission_match(monkeypatch):
     assert authorization_api.authorize(
         AuthorizeBody(method='DELETE', path='/api/user'),
         _request({'authorization': 'token-value'}),
-    ) == {'allowed': True}
+    ) == {'allowed': True, 'role': authorization_api.BUILTIN_ADMIN_ROLE}
 
 
 def test_authorize_rejects_missing_token_disabled_user_and_missing_permission(monkeypatch):
