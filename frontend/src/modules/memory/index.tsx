@@ -508,6 +508,7 @@ export default function MemoryManagement() {
   const glossaryRequestIdRef = useRef(0);
   const glossaryConflictRequestIdRef = useRef(0);
   const backendSuggestionLoadMoreRequestIdRef = useRef(0);
+  const confirmedDraftProposalIdsRef = useRef<Set<string>>(new Set());
   const activeProposalFieldChangesRef = useRef<ProposalFieldChange[]>([]);
 
   const tabMeta: Record<
@@ -2036,6 +2037,12 @@ export default function MemoryManagement() {
       (activeProposal.tab === "skills" || activeProposal.tab === "experience") &&
       activeProposal.backendSuggestions
     ) {
+      if (confirmedDraftProposalIdsRef.current.has(activeProposal.id)) {
+        return () => {
+          ignore = true;
+        };
+      }
+
       const isSkillProposal = activeProposal.tab === "skills";
       setActiveReviewStep(1);
       if (activeProposal.backendDraftPreview) {
@@ -3691,15 +3698,16 @@ export default function MemoryManagement() {
           ? t("admin.memorySkillDraftConfirmSuccess")
           : t("admin.memoryPreferenceDraftConfirmSuccess"),
       );
+      confirmedDraftProposalIdsRef.current.add(activeProposal.id);
+      setChangeProposals((previous) =>
+        previous.filter((item) => item.id !== activeProposal.id),
+      );
+      setActiveProposalId(undefined);
       if (activeProposal.tab === "skills") {
         await refreshSkillAssets({ preserveChangeProposals: true });
       } else {
         await refreshExperienceAssets({ silent: true });
       }
-      setChangeProposals((previous) =>
-        previous.filter((item) => item.id !== activeProposal.id),
-      );
-      setActiveProposalId(undefined);
       navigateToMemoryList(activeProposal.tab);
     } catch (error) {
       console.error("Confirm managed draft failed:", error);
