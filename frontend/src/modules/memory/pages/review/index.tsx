@@ -27,7 +27,6 @@ export default function MemoryReviewPage() {
     goToReviewPreview,
     closeChangeReview,
     backendDraftSubmitting,
-    discardBackendDraftAndReturn,
     backendDraftLoading,
     approvedBackendSuggestionIds,
     isAnyBackendSuggestionMutating,
@@ -53,6 +52,7 @@ export default function MemoryReviewPage() {
     setBackendSuggestionSelected,
     submitBackendSuggestionDecision,
     backendDraftDiffLines,
+    backendDraftReady,
     qaQuestionDraft,
     setQaQuestionDraft,
     handleReviewQuestionKeyDown,
@@ -215,11 +215,15 @@ export default function MemoryReviewPage() {
 
   if (activeProposal && isBackendSuggestionReviewMode) {
     const canPreviewBackendDraft = Boolean(activeProposal.backendSuggestions);
+    const isDraftPreviewOnly =
+      (activeProposal.tab === "skills" || activeProposal.tab === "experience") &&
+      canPreviewBackendDraft;
+    const effectiveReviewStep = isDraftPreviewOnly ? 1 : activeReviewStep;
 
     return (
       <div
         className={`memory-review-page ${
-          activeReviewStep === 0 ? "is-step-choose" : "is-step-preview"
+          effectiveReviewStep === 0 ? "is-step-choose" : "is-step-preview"
         }`}
       >
         <div className="memory-review-workspace">
@@ -228,35 +232,33 @@ export default function MemoryReviewPage() {
               <h3>{t("admin.memoryDiffDialogTitle")}</h3>
               {canPreviewBackendDraft ? (
                 <Steps
-                  current={activeReviewStep}
+                  current={isDraftPreviewOnly ? 0 : activeReviewStep}
                   className="memory-review-steps"
-                  onChange={(nextStep) => {
-                    if (nextStep === 0) {
-                      goToReviewChoose();
-                      return;
-                    }
-                    goToReviewPreview();
-                  }}
-                  items={[
-                    { title: t("admin.memoryDiffStepChooseTitle") },
-                    { title: t("admin.memoryDiffStepPreviewTitle") },
-                  ]}
+                  onChange={
+                    isDraftPreviewOnly
+                      ? undefined
+                      : (nextStep) => {
+                          if (nextStep === 0) {
+                            goToReviewChoose();
+                            return;
+                          }
+                          goToReviewPreview();
+                        }
+                  }
+                  items={
+                    isDraftPreviewOnly
+                      ? [{ title: t("admin.memoryDiffStepPreviewTitle") }]
+                      : [
+                          { title: t("admin.memoryDiffStepChooseTitle") },
+                          { title: t("admin.memoryDiffStepPreviewTitle") },
+                        ]
+                  }
                 />
               ) : null}
             </div>
             <Space wrap>
               <Button onClick={closeChangeReview}>{t("common.close")}</Button>
-              {canPreviewBackendDraft && activeReviewStep === 1 ? (
-                <Button
-                  danger
-                  loading={backendDraftSubmitting === "discard"}
-                  disabled={backendDraftSubmitting === "confirm"}
-                  onClick={discardBackendDraftAndReturn}
-                >
-                  {t("admin.memoryDiffDiscardDraftAndBack")}
-                </Button>
-              ) : null}
-              {canPreviewBackendDraft && activeReviewStep === 0 ? (
+              {canPreviewBackendDraft && !isDraftPreviewOnly && activeReviewStep === 0 ? (
                 <Button
                   type="primary"
                   loading={backendDraftLoading}
@@ -266,11 +268,15 @@ export default function MemoryReviewPage() {
                   {t("admin.memoryDiffStepNext")}
                 </Button>
               ) : null}
-              {canPreviewBackendDraft && activeReviewStep === 1 ? (
+              {canPreviewBackendDraft && effectiveReviewStep === 1 ? (
                 <Button
                   type="primary"
                   loading={backendDraftSubmitting === "confirm"}
-                  disabled={backendDraftSubmitting === "discard" || backendDraftLoading}
+                  disabled={
+                    backendDraftSubmitting === "discard" ||
+                    backendDraftLoading ||
+                    !backendDraftReady
+                  }
                   onClick={() => void confirmBackendDraft()}
                 >
                   {t("admin.memoryPreferenceDraftConfirm")}
@@ -283,15 +289,19 @@ export default function MemoryReviewPage() {
             showIcon
             message={
               canPreviewBackendDraft
-                ? activeReviewStep === 0
-                  ? t("admin.memoryDiffBackendChooseHint")
+                ? effectiveReviewStep === 0
+                  ? isDraftPreviewOnly
+                    ? activeProposal.tab === "skills"
+                      ? t("admin.memoryDiffSkillDraftPreviewHint")
+                      : t("admin.memoryDiffMemoryDraftPreviewHint")
+                    : t("admin.memoryDiffBackendChooseHint")
                   : activeProposal.tab === "skills"
                     ? t("admin.memoryDiffSkillDraftPreviewHint")
                     : t("admin.memoryDiffMemoryDraftPreviewHint")
                 : t("admin.memoryDiffBackendFallbackHint")
             }
           />
-          {activeReviewStep === 0 || !canPreviewBackendDraft ? (
+          {!isDraftPreviewOnly && (activeReviewStep === 0 || !canPreviewBackendDraft) ? (
             <div className="memory-review-grid memory-review-grid-step-choose">
               <div className="memory-review-column">
                 <div className="memory-diff-raw-card">
