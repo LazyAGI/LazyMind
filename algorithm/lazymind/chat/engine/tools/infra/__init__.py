@@ -2,6 +2,7 @@
 
 from .core_api_client import (
     post_core_api,
+    get_core_api,
 )
 from .calculator_eval import (
     safe_evaluate_expression,
@@ -82,6 +83,7 @@ __all__ = [
     'fetch_chat_histories_for_session',
     'fetch_url_content',
     'fetch_vocab_groups_for_user_id',
+    'get_core_api',
     'get_vocab_manager',
     'handle_tool_errors',
     'is_writable_skill_source',

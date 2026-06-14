@@ -73,6 +73,33 @@ type PromptListRequestWithKeyword =
 export const CHAT_STREAM_URL = `${coreApiBaseUrl}/conversations:chat`;
 export const CHAT_RESUME_STREAM_URL = `${coreApiBaseUrl}/conversations:resumeChat`;
 
+// SubAgent Task Center endpoints.
+export const taskStreamUrl = (taskId: string) =>
+  `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}:stream`;
+
+export function TaskServiceApi() {
+  return {
+    listConversationTasks(conversationId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/tasks`,
+        options,
+      );
+    },
+    getTaskDetail(taskId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}`,
+        options,
+      );
+    },
+    getTaskArtifacts(taskId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}/artifacts`,
+        options,
+      );
+    },
+  };
+}
+
 function withJsonOptions(
   options: RawAxiosRequestConfig = {},
 ): RawAxiosRequestConfig {

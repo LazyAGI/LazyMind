@@ -41,6 +41,7 @@ import { useModelSelectionStore } from "@/modules/chat/store/modelSelection";
 import type { PreferenceType } from "../MultiAnswerDisplay";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
+import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import { CHAT_RESUME_CONVERSATION_KEY } from "@/modules/chat/constants/chat";
 import { useTranslation } from "react-i18next";
 import { getRegenerationInputs } from "@/modules/chat/utils/message";
@@ -511,6 +512,21 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       const result = UIUtils.jsonParser(e.data)?.result;
       if (!result) {
         return;
+      }
+
+      if (result.task_created && result.task_created.task_id) {
+        const convId =
+          result.conversation_id || currentConversationIdRef.current || "";
+        const tc = result.task_created;
+        const taskStore = useTaskCenterStore.getState();
+        taskStore.upsertTask(convId, {
+          task_id: tc.task_id,
+          title: tc.title,
+          agent_type: tc.agent_type,
+          mode: tc.mode,
+          status: tc.status || "pending",
+        });
+        taskStore.subscribeTask(convId, tc.task_id);
       }
 
       const messageConversationId = result.conversation_id || "";

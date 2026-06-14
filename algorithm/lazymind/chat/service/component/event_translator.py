@@ -76,6 +76,15 @@ class AgentEventFrameTranslator:
     def feed(self, event: Any) -> list[dict[str, Any]]:
         frames: list[dict[str, Any]] = []
         event_type = str(event.get('tag', '') or '')
+        if event_type == 'task_created':
+            task_created = {k: v for k, v in event.items() if k != 'tag'}
+            frames.append(_stream_frame(extra={'task_created': task_created}))
+            return frames
+
+        if event_type == 'heartbeat':
+            frames.append(_stream_frame(extra={'heartbeat': True}))
+            return frames
+
         if event_type == 'think':
             delta = str(event.get('delta', '') or '')
             if delta:

@@ -87,6 +87,27 @@ def _build_mcp_tools(mcp_config: List[Dict[str, Any]]) -> list:
     return tools
 
 
+def _build_subagent_chat_tools(has_subagents: bool) -> list:
+    """Assemble ChatAgent SubAgent tools. create_subagent is always available; query tools
+    are registered only when the conversation already has SubAgent tasks."""
+    from lazymind.chat.engine.tools.subagent_chat_tools import (
+        create_subagent,
+        get_subagent_artifacts,
+        get_subagent_status,
+        list_subagent_artifacts,
+        list_subagents,
+    )
+    tools = [create_subagent]
+    if has_subagents:
+        tools.extend([
+            list_subagents,
+            get_subagent_status,
+            list_subagent_artifacts,
+            get_subagent_artifacts,
+        ])
+    return tools
+
+
 async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       session_id: str, filters: Optional[Dict[str, Any]],
                       files: Optional[List[str]],
@@ -96,6 +117,9 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       user_preference: Optional[str], use_memory: Optional[bool],
                       environment_context: Optional[Dict[str, Any]] = None,
                       user_id: Optional[str] = None,
+                      conversation_id: Optional[str] = None,
+                      mode: Optional[str] = 'auto',
+                      has_subagents: Optional[bool] = False,
                       model_config: Optional[Dict[str, Any]] = None,
                       tool_config: Optional[Dict[str, Union[str, List[str]]]] = None,
                       mcp_config: Optional[List[Dict[str, Any]]] = None,
@@ -142,6 +166,9 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         'user_id': user_id or '',
         'use_memory': resolved_use_memory,
         'citation_state': translator.citation_state,
+        'mode': mode if mode in ('auto', 'manual') else 'auto',
+        'has_subagents': bool(has_subagents),
+        'conversation_id': (conversation_id or '').strip(),
     }
     lazyllm.globals._init_sid(sid=session_id)
     lazyllm.locals._init_sid(sid=session_id)
@@ -151,8 +178,9 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     disabled = set(disabled_tools or [])
     active_configs = [cfg for cfg in DEFAULT_TOOLS if cfg.name not in disabled]
     agent_tools = build_agent_tools(active_configs)
+    subagent_tools = _build_subagent_chat_tools(bool(has_subagents))
     mcp_tools = _build_mcp_tools(mcp_config) if mcp_config else []
-    all_tools = agent_tools + mcp_tools
+    all_tools = agent_tools + subagent_tools + mcp_tools
     set_trace_context({
         'enabled': bool(trace),
         'trace_id': session_id if trace else None,

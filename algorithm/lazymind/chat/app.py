@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from lazymind.chat.api import chat_routes, health_routes, model_check_routes, model_features_routes
+from lazymind.chat.api import chat_routes, health_routes, model_check_routes, model_features_routes, subagent_routes
 from lazymind.rewrite.api import rewrite_routes
 from lazymind.review.api import skill_review_routes
 
@@ -16,6 +16,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_routes.router)
     app.include_router(chat_routes.router)
+    app.include_router(subagent_routes.router)
     app.include_router(rewrite_routes.router)
     app.include_router(skill_review_routes.router)
     app.include_router(model_features_routes.router)

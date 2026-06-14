@@ -33,6 +33,8 @@ import {
 } from "@/modules/chat/constants/chat";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
+import TaskCenter from "@/modules/chat/components/TaskCenter";
+import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 interface IChatLayoutProps {
   setIsChatContent: (isChatContent: boolean) => void;
   initchatConfig: ChatConfig;
@@ -77,6 +79,19 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const { getModelSelection, setModelSelection } = useModelSelectionStore();
 
   const chatRef = useRef<ChatImperativeProps>(null);
+
+  const tasks = useTaskCenterStore((s) =>
+    sessionId ? s.tasksByConversation[sessionId] ?? [] : [],
+  );
+  const loadConversationTasks = useTaskCenterStore(
+    (s) => s.loadConversationTasks,
+  );
+
+  useEffect(() => {
+    if (sessionId) {
+      loadConversationTasks(sessionId);
+    }
+  }, [sessionId, loadConversationTasks]);
 
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
@@ -235,6 +250,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         // enable_thinking: think ? true : false,
         stream: true,
         input,
+        mode: "auto",
         create_time: new Date().toISOString(),
         environment_context: buildEnvironmentContext(),
       }),
@@ -458,6 +474,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         disabledDescription={chatDisabledDescription}
         disabledAction={chatDisabledAction}
       />
+      {tasks.length > 0 && (
+        <div className="right-box">
+          <TaskCenter tasks={tasks} />
+        </div>
+      )}
     </div>
   );
 };
