@@ -9,6 +9,8 @@ from lazyllm import LOG, AutoModel
 
 from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
+from lazymind.chat.engine.agent_core import build_react_agent, drive_agent
+from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 
 from .context import SubAgentContext, set_context
 from .db import SubAgentDB
@@ -76,7 +78,12 @@ async def run_subagent_stream(
     resume: bool = False,
     model_config: Optional[Dict[str, Any]] = None,
 ):
-    """Async generator yielding Task SSE lines (task_start / progress / artifact / done / error)."""
+    """Async generator yielding Task SSE lines.
+
+    Events: task_start / progress / text / think / artifact / done / error.
+    text and think frames come from AgentEventFrameTranslator (same as ChatAgent),
+    giving a unified LLM output representation across both agent types.
+    """
     start_time = time.time()
     db: Optional[SubAgentDB] = None
     emitted: List[Dict[str, Any]] = []
@@ -122,13 +129,9 @@ async def run_subagent_stream(
         yield _sse({'type': 'task_start', 'task_id': task_id})
 
         llm = AutoModel(model='llm')
-        agent = lazyllm.tools.agent.ReactAgent(
+        agent = build_react_agent(
             llm=llm,
             tools=_build_subagent_tools(None),
-            max_retries=_cfg['max_retries'],
-            stream=True,
-            enable_builtin_tools=False,
-            force_summarize=True,
             force_summarize_context=ctx.objective,
         )
 
@@ -138,40 +141,46 @@ async def run_subagent_stream(
         yield _sse({'type': 'progress', 'task_id': task_id, 'progress': progress,
                     'current_phase': '恢复执行...' if resume else '开始执行...'})
 
-        helper = lazyllm.module.stream_helper.StreamCallHelper(agent, init_sid=False)
+        # translator unifies text/think output with ChatAgent frame semantics.
+        translator = AgentEventFrameTranslator(query=ctx.objective)
         final_result: Any = None
-        astream_kwargs: Dict[str, Any] = {}
-        if resume_history:
-            astream_kwargs['llm_chat_history'] = resume_history
-        async for item in helper.astream(_objective_prompt(ctx), **astream_kwargs):
-            tag = item.get('tag')
-            if tag in ('tool_calls', 'tool_results'):
-                _persist_step(ctx, step_seq, item)
-                step_seq += 1
-                # Drain any artifact events the tool produced synchronously.
-                while emitted:
-                    ev = emitted.pop(0)
-                    ev['task_id'] = task_id
-                    yield _sse(ev)
-                if tag == 'tool_results' and progress < 90:
-                    progress = min(90, progress + 15)
-                    yield _sse({'type': 'progress', 'task_id': task_id, 'progress': progress,
-                                'current_phase': '执行中...'})
 
-        try:
-            final_result = helper.future.result()
-        except Exception as exc:  # noqa: BLE001
-            LOG.exception('[SubAgent] agent failed')
-            yield _sse({'type': 'error', 'task_id': task_id, 'status': 'failed',
-                        'message': f'agent failed: {exc}'})
-            yield 'data: [DONE]\n\n'
-            return
+        async for kind, payload in drive_agent(agent, _objective_prompt(ctx), history=resume_history):
+            if kind == 'event':
+                item = payload
+                tag = item.get('tag')
+                # Persist tool steps for resume / breakpoint recovery.
+                if tag in ('tool_calls', 'tool_results'):
+                    _persist_step(ctx, step_seq, item)
+                    step_seq += 1
+                    # Drain artifact events emitted synchronously by tools.
+                    while emitted:
+                        ev = emitted.pop(0)
+                        ev['task_id'] = task_id
+                        yield _sse(ev)
+                    if tag == 'tool_results' and progress < 90:
+                        progress = min(90, progress + 15)
+                        yield _sse({'type': 'progress', 'task_id': task_id, 'progress': progress,
+                                    'current_phase': '执行中...'})
+                # Translate all events (text/think/tool_calls/tool_results) via shared translator.
+                for frame in translator.feed(item):
+                    ev_type = 'think' if frame.get('think') else 'text'
+                    yield _sse({'type': ev_type, 'task_id': task_id,
+                                'think': frame.get('think'), 'text': frame.get('text')})
+            else:  # 'final' -- drive_agent propagates future exceptions before yielding this.
+                final_result = payload
 
         # Drain remaining artifact events.
         while emitted:
             ev = emitted.pop(0)
             ev['task_id'] = task_id
             yield _sse(ev)
+
+        # Flush any buffered text/think from translator (e.g. citation scanning remainder).
+        for frame in translator.finish(final_result):
+            ev_type = 'think' if frame.get('think') else 'text'
+            yield _sse({'type': ev_type, 'task_id': task_id,
+                        'think': frame.get('think'), 'text': frame.get('text')})
 
         # Completeness check: every declared output key must have at least one artifact.
         saved = set(ctx.saved_keys())
