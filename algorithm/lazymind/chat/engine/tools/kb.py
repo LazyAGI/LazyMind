@@ -225,7 +225,7 @@ class KBToolGroup:
     @handle_tool_errors
     def kb_search(
         self,
-        query: str,
+        queries: List[str],
         retriever_topk: Optional[int] = None,
         rerank_topk: Optional[int] = None,
         k_max: Optional[int] = None,
@@ -234,15 +234,17 @@ class KBToolGroup:
     ) -> Any:
         """Search the knowledge base and return text and image retrieval results.
 
-        Text retrieval and image retrieval run simultaneously. The final result
-        is the concatenation of text nodes and image nodes.
+        Each query is independently retrieved and reranked, then results are
+        merged (deduplicated by uid, keeping the highest relevance_score) and
+        trimmed by adaptive-k. Images are also retrieved per query, merged, and
+        capped at *image_topk*.
 
         Args:
-            query: Natural language query text used for retrieval.
+            queries: List of natural language queries for retrieval.
             retriever_topk: Candidate count used by each retriever route before
-                fusion. Defaults to 20.
+                fusion (per query). Defaults to 20.
             rerank_topk: Number of nodes the reranker keeps before adaptive-k
-                trimming. Defaults to 20.
+                trimming (per query). Defaults to 20.
             k_max: Hard upper bound on the adaptive-k stage. Defaults to 10.
             image_topk: Top-k for the image retrieval branch. Defaults to 3.
             filters: Metadata filters for retrieval, e.g.
@@ -252,7 +254,7 @@ class KBToolGroup:
         self._ensure_search_runtime()
 
         payload = {
-            'query': query,
+            'queries': queries,
             'filters': filters or agentic_config.get('filters') or {},
             'files': [],
             'user_id': agentic_config.get('user_id', ''),
@@ -494,7 +496,7 @@ class TempKBToolGroup:
     @handle_tool_errors
     def kb_tmp_search(
         self,
-        query: str,
+        queries: List[str],
         retriever_topk: Optional[int] = None,
         rerank_topk: Optional[int] = None,
         k_max: Optional[int] = None,
@@ -502,12 +504,15 @@ class TempKBToolGroup:
     ) -> Any:
         """Search temporary uploaded files with the temporary document retriever.
 
+        Each query is independently retrieved and reranked, then results are
+        merged and deduplicated by uid before adaptive-k trimming.
+
         Args:
-            query: Natural language query text used for retrieval.
-            retriever_topk: Candidate count used by the temporary retriever.
-                Defaults to 20.
+            queries: List of natural language queries for retrieval.
+            retriever_topk: Candidate count used by the temporary retriever
+                (per query). Defaults to 20.
             rerank_topk: Number of nodes the reranker keeps before adaptive-k
-                trimming. Defaults to 20.
+                trimming (per query). Defaults to 20.
             k_max: Hard upper bound on the adaptive-k stage. Defaults to 10.
             files: Optional list of temporary file IDs. Defaults to the current
                 request's ``agentic_config.files``.
@@ -515,7 +520,7 @@ class TempKBToolGroup:
         agentic_config = lazyllm.globals['agentic_config']
         self._ensure_search_runtime()
         payload = {
-            'query': query,
+            'queries': queries,
             'filters': {},
             'files': files,
             'user_id': agentic_config.get('user_id', ''),

@@ -49,6 +49,7 @@ def test_kb_search_core_flow(monkeypatch):
 
     monkeypatch.setattr(kb, 'search_kb', fake_search_kb)
     monkeypatch.setattr(kb.KBToolGroup, '_ensure_search_runtime', lambda self: None)
+    monkeypatch.setattr(kb.KBToolGroup, '_document', kb._DEFAULT_KB_DOCUMENT)
     monkeypatch.setattr(kb.KBToolGroup, '_retrievers', ['retriever'])
     monkeypatch.setattr(kb.KBToolGroup, '_reranker', 'reranker')
     monkeypatch.setattr(kb.KBToolGroup, '_image_retriever', 'image-retriever')
@@ -58,13 +59,13 @@ def test_kb_search_core_flow(monkeypatch):
         'user_id': 'user-007',
     }
     try:
-        result = kb.KBToolGroup().kb_search(SEED_KEYWORD)
+        result = kb.KBToolGroup().kb_search([SEED_KEYWORD])
     finally:
         kb.lazyllm.globals['agentic_config'] = original_config or {}
 
     assert captured == {
         'payload': {
-            'query': SEED_KEYWORD,
+            'queries': [SEED_KEYWORD],
             'filters': {'kb_id': DEFAULT_AGENTIC_CONFIG['kb_id']},
             'files': [],
             'user_id': 'user-007',
@@ -105,18 +106,19 @@ def test_kb_tmp_search_core_flow(monkeypatch):
 
     monkeypatch.setattr(kb, 'search_kb', fake_search_kb)
     monkeypatch.setattr(kb.TempKBToolGroup, '_ensure_search_runtime', lambda self: None)
+    monkeypatch.setattr(kb.TempKBToolGroup, '_document', kb._DEFAULT_KB_DOCUMENT)
     monkeypatch.setattr(kb.TempKBToolGroup, '_tmp_retriever', 'tmp-retriever')
     monkeypatch.setattr(kb.TempKBToolGroup, '_reranker', 'reranker')
     original_config = kb.lazyllm.globals.get('agentic_config')
     kb.lazyllm.globals['agentic_config'] = {'user_id': 'user-007'}
     try:
-        result = kb.TempKBToolGroup().kb_tmp_search(SEED_KEYWORD, files=['tmp-a.md'])
+        result = kb.TempKBToolGroup().kb_tmp_search([SEED_KEYWORD], files=['tmp-a.md'])
     finally:
         kb.lazyllm.globals['agentic_config'] = original_config or {}
 
     assert captured == {
         'payload': {
-            'query': SEED_KEYWORD,
+            'queries': [SEED_KEYWORD],
             'filters': {},
             'files': ['tmp-a.md'],
             'user_id': 'user-007',

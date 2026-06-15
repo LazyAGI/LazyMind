@@ -21,6 +21,17 @@ def _pass_through_rerank(nodes):
     return nodes
 
 
+def _merge_and_deduplicate(node_lists: List[List[Any]]) -> List[Any]:
+    seen = {}
+    for nodes in node_lists:
+        for n in nodes:
+            uid = getattr(n, 'uid', None) or id(n)
+            score = getattr(n, 'relevance_score', 0.0) or 0.0
+            if uid not in seen or score > (getattr(seen[uid], 'relevance_score', 0.0) or 0.0):
+                seen[uid] = n
+    return sorted(seen.values(), key=lambda n: getattr(n, 'relevance_score', 0.0) or 0.0, reverse=True)
+
+
 def search_text(
     payload: dict,
     *,
@@ -32,24 +43,32 @@ def search_text(
     adaptive_k: AdaptiveKComponent,
     ctx_expand: ContextExpansionComponent,
 ):
-    query = get_vocab_manager(payload['user_id'])(payload['query'])
+    queries = payload['queries']
     files = (payload or {}).get('files')
-    if files:
-        if tmp_retriever is None:
-            raise ValueError('tmp_retriever is required when payload.files is set')
-        nodes = tmp_retriever(files, query, topk=retriever_topk)
-    else:
-        filters = payload.get('filters') or {}
-        nodes = tuple(
-            result for result in (
-                retriever(query, filters=filters, topk=retriever_topk) for retriever in retrievers
-            ) if result
-        )
-        nodes = RRFFusion(top_k=50)(nodes)
+    all_nodes: List[Any] = []
 
-    nodes = reranker(nodes, query=query, topk=rerank_topk) if reranker is not None else _pass_through_rerank(nodes)
-    nodes = adaptive_k(nodes)
-    return ctx_expand(nodes)
+    for query in queries:
+        expanded_query = get_vocab_manager(payload['user_id'])(query)
+        if files:
+            if tmp_retriever is None:
+                raise ValueError('tmp_retriever is required when payload.files is set')
+            nodes = tmp_retriever(files, expanded_query, topk=retriever_topk)
+        else:
+            filters = payload.get('filters') or {}
+            nodes = tuple(
+                result for result in (
+                    retriever(expanded_query, filters=filters, topk=retriever_topk)
+                    for retriever in retrievers
+                ) if result
+            )
+            nodes = RRFFusion(top_k=50)(nodes)
+
+        nodes = reranker(nodes, query=expanded_query, topk=rerank_topk) if reranker else _pass_through_rerank(nodes)
+        all_nodes.append(nodes)
+
+    merged = _merge_and_deduplicate(all_nodes)
+    merged = adaptive_k(merged)
+    return ctx_expand(merged)
 
 
 def search_kb(
@@ -96,5 +115,16 @@ def search_kb(
     if (payload or {}).get('files'):
         return text_nodes
 
-    image_nodes = image_retriever(payload['query'], filters=payload.get('filters') or {}, topk=image_topk)
-    return list(text_nodes or []) + list(image_nodes or [])
+    queries = payload['queries']
+    all_image_nodes: List[Any] = []
+    filters = payload.get('filters') or {}
+    for query in queries:
+        image_nodes = image_retriever(query, filters=filters, topk=image_topk)
+        if image_nodes:
+            if isinstance(image_nodes, (list, tuple)):
+                all_image_nodes.append(list(image_nodes))
+            else:
+                all_image_nodes.append([image_nodes])
+
+    merged_images = _merge_and_deduplicate(all_image_nodes)
+    return list(text_nodes or []) + merged_images[:image_topk]
