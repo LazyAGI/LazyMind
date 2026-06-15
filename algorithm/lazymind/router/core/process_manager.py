@@ -242,6 +242,12 @@ class ProcessManager:
         code_parent = str(os.path.dirname(os.path.dirname(code_path.rstrip('/'))))
         existing_pp = env.get('PYTHONPATH', '')
         env['PYTHONPATH'] = f'{code_parent}:{existing_pp}' if existing_pp else code_parent
+        # Child processes are plain chat servers behind the router proxy. Force router mode
+        # off so they mount chat_routes (/api/chat/stream); otherwise the proxy would forward
+        # to a child that has no chat route and get a 404. They only serve proxied request
+        # types (chat/subagent); the main process serves the stateless shared endpoints.
+        env['LAZYMIND_ENABLE_ROUTER'] = 'false'
+        env['LAZYMIND_ROUTER_CHILD_PROXIED_ONLY'] = 'true'
         if extra_env:
             env.update(extra_env)
 
