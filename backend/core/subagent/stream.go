@@ -70,12 +70,19 @@ func StreamTask(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
-	// 1. DB snapshot: task_start + history progress + history artifacts.
+	// 1. DB snapshot: task_start + history progress + history artifacts + history steps.
 	writeTaskSSE(w, flusher, TaskEvent{Type: "task_start", TaskID: taskID})
 	writeTaskSSE(w, flusher, TaskEvent{
 		Type: "progress", TaskID: taskID,
 		Progress: t.ProgressPct, CurrentPhase: t.CurrentPhase, EstimatedSec: t.EstimatedSec,
 	})
+	steps, _ := LoadSteps(ctx, db, taskID)
+	for i := range steps {
+		ev := stepToTaskEvent(taskID, &steps[i])
+		if ev != nil {
+			writeTaskSSE(w, flusher, *ev)
+		}
+	}
 	arts, _ := LoadArtifacts(ctx, db, taskID)
 	for i := range arts {
 		writeTaskSSE(w, flusher, TaskEvent{
@@ -108,6 +115,54 @@ func emitTerminal(w http.ResponseWriter, flusher http.Flusher, taskID, status, s
 		return
 	}
 	writeTaskSSE(w, flusher, TaskEvent{Type: "error", TaskID: taskID, Status: status, Message: summary})
+}
+
+// stepToTaskEvent converts a persisted step back to a TaskEvent for the DB snapshot replay.
+// Returns nil for step roles that have no frontend representation.
+func stepToTaskEvent(taskID string, s *orm.SubAgentStep) *TaskEvent {
+	switch s.Role {
+	case "text":
+		var c struct {
+			Content string `json:"content"`
+		}
+		_ = json.Unmarshal(s.Content, &c)
+		if c.Content == "" {
+			return nil
+		}
+		return &TaskEvent{Type: "text", TaskID: taskID, Text: c.Content}
+	case "think":
+		var c struct {
+			Content string `json:"content"`
+		}
+		_ = json.Unmarshal(s.Content, &c)
+		if c.Content == "" {
+			return nil
+		}
+		return &TaskEvent{Type: "think", TaskID: taskID, Think: c.Content}
+	case "assistant", "tool":
+		// assistant step content: {"tool_calls": [...], "text": ""}
+		// tool step content: {"tool_results": [...]}
+		// Extract the inner array and forward it.
+		if s.Role == "assistant" {
+			var c struct {
+				ToolCalls json.RawMessage `json:"tool_calls"`
+			}
+			_ = json.Unmarshal(s.Content, &c)
+			if len(c.ToolCalls) == 0 {
+				return nil
+			}
+			return &TaskEvent{Type: "tool_calls", TaskID: taskID, ToolCalls: c.ToolCalls}
+		}
+		var c struct {
+			ToolResults json.RawMessage `json:"tool_results"`
+		}
+		_ = json.Unmarshal(s.Content, &c)
+		if len(c.ToolResults) == 0 {
+			return nil
+		}
+		return &TaskEvent{Type: "tool_results", TaskID: taskID, ToolResults: c.ToolResults}
+	}
+	return nil
 }
 
 // tailRedisStream tails the Redis event LIST from current end until a terminal event arrives.

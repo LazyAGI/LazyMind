@@ -142,29 +142,17 @@ def create_subagent(
 
 
 def _forward_subagent_events(task_id: str, offset: int) -> int:
-    """Fetch new text/think events from Go Redis stream and forward to ChatAgent via _write_agent_data.
+    """Advance the event offset without forwarding anything to the ChatAgent stream.
 
-    Returns the next offset to use on the following call.
+    SubAgent text/think output is displayed in the Task Center panel (right sidebar),
+    not in the main Chat stream. This function only advances the offset so the caller
+    can track progress without duplicating SubAgent output into the Chat conversation.
     """
     try:
         data = get_core_api(f'/internal/subagent/tasks/{task_id}/events?from={offset}') or {}
     except Exception:
         return offset
-    events = data.get('events') or []
-    next_offset = int(data.get('next_from') or offset + len(events))
-    for ev in events:
-        if not isinstance(ev, dict):
-            continue
-        ev_type = str(ev.get('type') or '')
-        if ev_type == 'text':
-            text = str(ev.get('text') or '')
-            if text:
-                _write_agent_data('subagent_text', task_id=task_id, text=text)
-        elif ev_type == 'think':
-            think = str(ev.get('think') or '')
-            if think:
-                _write_agent_data('subagent_think', task_id=task_id, think=think)
-    return next_offset
+    return int(data.get('next_from') or offset + len(data.get('events') or []))
 
 
 def _describe_artifact(a: Dict[str, Any]) -> str:

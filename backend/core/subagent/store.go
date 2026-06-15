@@ -223,3 +223,13 @@ func MarkInterrupted(ctx context.Context, db *gorm.DB, maxAge time.Duration) (in
 func IsNotFound(err error) bool {
 	return errors.Is(err, gorm.ErrRecordNotFound)
 }
+
+// LoadSteps returns all steps for a task ordered by seq ascending.
+func LoadSteps(ctx context.Context, db *gorm.DB, taskID string) ([]orm.SubAgentStep, error) {
+	var steps []orm.SubAgentStep
+	err := db.WithContext(ctx).
+		Where("task_id = ?", taskID).
+		Order("seq asc").
+		Find(&steps).Error
+	return steps, err
+}

@@ -31,6 +31,13 @@ type taskDTO struct {
 	CreatedAt          time.Time       `json:"created_at"`
 	UpdatedAt          time.Time       `json:"updated_at"`
 	Artifacts          []artifactDTO   `json:"artifacts,omitempty"`
+	Steps              []stepDTO       `json:"steps,omitempty"`
+}
+
+type stepDTO struct {
+	Seq     int             `json:"seq"`
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
 }
 
 type artifactDTO struct {
@@ -73,6 +80,14 @@ func toArtifactDTO(a *orm.SubAgentArtifact) artifactDTO {
 	}
 }
 
+func toStepDTO(s *orm.SubAgentStep) stepDTO {
+	return stepDTO{
+		Seq:     s.Seq,
+		Role:    s.Role,
+		Content: normalizeJSON(s.Content, "{}"),
+	}
+}
+
 // ListConversationTasks handles GET /conversations/{conversation_id}/tasks.
 func ListConversationTasks(w http.ResponseWriter, r *http.Request) {
 	convID := common.PathVar(r, "conversation_id")
@@ -97,6 +112,10 @@ func ListConversationTasks(w http.ResponseWriter, r *http.Request) {
 		arts, _ := LoadArtifacts(ctx, db, tasks[i].ID)
 		for j := range arts {
 			dto.Artifacts = append(dto.Artifacts, toArtifactDTO(&arts[j]))
+		}
+		steps, _ := LoadSteps(ctx, db, tasks[i].ID)
+		for j := range steps {
+			dto.Steps = append(dto.Steps, toStepDTO(&steps[j]))
 		}
 		out = append(out, dto)
 	}

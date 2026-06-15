@@ -52,6 +52,12 @@ type TaskEvent struct {
 	Status       string          `json:"status,omitempty"`
 	Summary      string          `json:"summary,omitempty"`
 	Message      string          `json:"message,omitempty"`
+	// Tool step events forwarded from SubAgent runner for frontend display.
+	ToolCalls   json.RawMessage `json:"tool_calls,omitempty"`
+	ToolResults json.RawMessage `json:"tool_results,omitempty"`
+	// Text / think streaming content.
+	Text  string `json:"text,omitempty"`
+	Think string `json:"think,omitempty"`
 }
 
 // algoServiceURL resolves the algorithm chat-service base URL (same host as /api/chat/stream).

@@ -177,6 +177,9 @@ async def run_subagent_stream(
         # translator unifies text/think output with ChatAgent frame semantics.
         translator = AgentEventFrameTranslator(query=ctx.objective)
         final_result: Any = None
+        # Accumulate streaming text/think chunks; flush to DB when a tool step follows or at end.
+        _pending_text: str = ''
+        _pending_think: str = ''
 
         async for kind, payload in drive_agent(agent, _objective_prompt(ctx), history=resume_history):
             if kind == 'event':
@@ -184,8 +187,42 @@ async def run_subagent_stream(
                 tag = item.get('tag')
                 # Persist tool steps for resume / breakpoint recovery.
                 if tag in ('tool_calls', 'tool_results'):
+                    # Flush accumulated text/think as a single step before tool call.
+                    if _pending_think:
+                        ctx.db.append_step(task_id, step_seq, 'think', {'content': _pending_think})
+                        step_seq += 1
+                        _pending_think = ''
+                    if _pending_text:
+                        ctx.db.append_step(task_id, step_seq, 'text', {'content': _pending_text})
+                        step_seq += 1
+                        _pending_text = ''
                     _persist_step(ctx, step_seq, item)
                     step_seq += 1
+                    # Forward tool steps as SSE events so the frontend can render them.
+                    if tag == 'tool_calls':
+                        calls = [
+                            {
+                                'id': tc.get('id', ''),
+                                'name': tc.get('name') or (tc.get('function') or {}).get('name', ''),
+                                'args': tc.get('args') or (tc.get('function') or {}).get('arguments', {}),
+                            }
+                            for tc in (item.get('tool_calls') or [])
+                            if isinstance(tc, dict)
+                        ]
+                        if calls:
+                            yield _sse({'type': 'tool_calls', 'task_id': task_id, 'tool_calls': calls})
+                    elif tag == 'tool_results':
+                        results = [
+                            {
+                                'id': tr.get('id', ''),
+                                'name': tr.get('name', ''),
+                                'result': str(tr.get('result', tr.get('content', '')))[:2000],
+                            }
+                            for tr in (item.get('tool_results') or [])
+                            if isinstance(tr, dict)
+                        ]
+                        if results:
+                            yield _sse({'type': 'tool_results', 'task_id': task_id, 'tool_results': results})
                     # Drain artifact events emitted synchronously by tools.
                     while emitted:
                         ev = emitted.pop(0)
@@ -200,8 +237,21 @@ async def run_subagent_stream(
                     ev_type = 'think' if frame.get('think') else 'text'
                     yield _sse({'type': ev_type, 'task_id': task_id,
                                 'think': frame.get('think'), 'text': frame.get('text')})
+                    if ev_type == 'think':
+                        _pending_think += frame.get('think') or ''
+                    else:
+                        _pending_text += frame.get('text') or ''
             else:  # 'final' -- drive_agent propagates future exceptions before yielding this.
                 final_result = payload
+                # Flush any remaining accumulated text/think as the final step.
+                if _pending_think:
+                    ctx.db.append_step(task_id, step_seq, 'think', {'content': _pending_think})
+                    step_seq += 1
+                    _pending_think = ''
+                if _pending_text:
+                    ctx.db.append_step(task_id, step_seq, 'text', {'content': _pending_text})
+                    step_seq += 1
+                    _pending_text = ''
 
         # Drain remaining artifact events.
         while emitted:

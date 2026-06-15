@@ -8,12 +8,16 @@ import {
   FileTextOutlined,
   DownOutlined,
   RightOutlined,
+  ApiOutlined,
+  CheckOutlined,
 } from "@ant-design/icons";
 
 import {
   SubAgentTask,
   TaskArtifact,
   TaskLogEntry,
+  ToolCallItem,
+  ToolResultItem,
   TaskStatus,
 } from "@/modules/chat/store/taskCenter";
 import { resolveCoreAssetUrl } from "@/modules/knowledge/utils/imageUrl";
@@ -67,29 +71,97 @@ function CollapsibleSection({
   );
 }
 
-function ExecutionLog({ log }: { log: TaskLogEntry[] }) {
+function ToolCallRow({ call }: { call: ToolCallItem }) {
+  const [open, setOpen] = useState(false);
+  const argsStr = useMemo(() => {
+    try {
+      const obj = typeof call.args === "string" ? JSON.parse(call.args) : call.args;
+      return JSON.stringify(obj, null, 2);
+    } catch {
+      return String(call.args ?? "");
+    }
+  }, [call.args]);
+  return (
+    <div className="task-tool-call">
+      <button
+        type="button"
+        className="task-tool-call-header"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <ApiOutlined className="task-tool-call-icon" />
+        <span className="task-tool-call-name">{call.name}</span>
+        <span className="task-tool-call-arrow">{open ? <DownOutlined /> : <RightOutlined />}</span>
+      </button>
+      {open && argsStr && (
+        <pre className="task-tool-call-args">{argsStr}</pre>
+      )}
+    </div>
+  );
+}
+
+function ToolResultRow({ result }: { result: ToolResultItem }) {
+  const [open, setOpen] = useState(false);
+  const preview = useMemo(() => {
+    const s = String(result.result ?? "");
+    return s.length > 120 ? s.slice(0, 120) + "…" : s;
+  }, [result.result]);
+  return (
+    <div className="task-tool-result">
+      <button
+        type="button"
+        className="task-tool-result-header"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <CheckOutlined className="task-tool-result-icon" />
+        <span className="task-tool-result-name">{result.name}</span>
+        {!open && <span className="task-tool-result-preview">{preview}</span>}
+        <span className="task-tool-result-arrow">{open ? <DownOutlined /> : <RightOutlined />}</span>
+      </button>
+      {open && (
+        <pre className="task-tool-result-body">{String(result.result ?? "")}</pre>
+      )}
+    </div>
+  );
+}
+
+function ExecutionLog({ log, isRunning }: { log: TaskLogEntry[]; isRunning: boolean }) {
   const { t } = useTranslation();
   if (!log || log.length === 0) return null;
-  const merged = log.reduce<{ type: "text" | "think"; content: string }[]>(
-    (acc, entry) => {
-      const last = acc[acc.length - 1];
-      if (last && last.type === entry.type) {
-        return [...acc.slice(0, -1), { ...last, content: last.content + entry.content }];
-      }
-      return [...acc, { ...entry }];
-    },
-    [],
-  );
   return (
-    <CollapsibleSection title={t("taskCenter.executionProcess")} defaultOpen={false}>
+    <CollapsibleSection
+      title={t("taskCenter.executionProcess")}
+      defaultOpen={isRunning}
+    >
       <div className="task-execution-log">
-        {merged.map((entry, i) =>
-          entry.type === "think" ? (
-            <div key={i} className="task-log-think">{entry.content}</div>
-          ) : (
-            <div key={i} className="task-log-text">{entry.content}</div>
-          ),
-        )}
+        {log.map((entry, i) => {
+          if (entry.type === "think") {
+            return <div key={i} className="task-log-think">{entry.content}</div>;
+          }
+          if (entry.type === "text") {
+            return <div key={i} className="task-log-text">{entry.content}</div>;
+          }
+          if (entry.type === "tool_calls") {
+            return (
+              <div key={i} className="task-log-tool-calls">
+                {(entry.tool_calls ?? []).map((call, j) => (
+                  <ToolCallRow key={`${i}-${j}`} call={call} />
+                ))}
+              </div>
+            );
+          }
+          if (entry.type === "tool_results") {
+            return (
+              <div key={i} className="task-log-tool-results">
+                {(entry.tool_results ?? []).map((result, j) => (
+                  <ToolResultRow key={`${i}-${j}`} result={result} />
+                ))}
+              </div>
+            );
+          }
+          return null;
+        })}
       </div>
     </CollapsibleSection>
   );
@@ -215,6 +287,7 @@ function TaskCard({ task }: { task: SubAgentTask }) {
       </div>
       {!collapsed && (
         <>
+          {isRunning && (
           <Progress
             percent={task.progress_pct}
             size="small"
@@ -227,6 +300,7 @@ function TaskCard({ task }: { task: SubAgentTask }) {
             }
             showInfo
           />
+          )}
           {isRunning && task.current_phase && (
             <div className="task-card-phase">
               <Tooltip title={task.current_phase}>
@@ -237,7 +311,7 @@ function TaskCard({ task }: { task: SubAgentTask }) {
               ) : null}
             </div>
           )}
-          <ExecutionLog log={task.execution_log} />
+          <ExecutionLog log={task.execution_log} isRunning={isRunning} />
           <ArtifactGrid artifacts={task.artifacts} />
         </>
       )}

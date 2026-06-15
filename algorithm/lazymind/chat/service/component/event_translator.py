@@ -128,15 +128,6 @@ class AgentEventFrameTranslator:
                 ]
                 frames.append(_stream_frame(text=''.join(parts)))
 
-        if event_type == 'subagent_text':
-            text = str(event.get('text') or '')
-            if text:
-                for has_text, frame in _iter_scanned_text_frames(
-                    self.text_scanner.feed(text), self.citation_state,
-                ):
-                    self.streamed_text = self.streamed_text or has_text
-                    frames.append(frame)
-
         if event_type == 'subagent_think':
             think = str(event.get('think') or '')
             if think:

@@ -274,3 +274,92 @@
     }
   }
 }
+
+// ── Tool call / result rows ────────────────────────────────────────────────────
+.task-tool-call,
+.task-tool-result {
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.task-tool-call-header,
+.task-tool-result-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: #f5f7fa;
+  border: 1px solid #e6ecf3;
+  border-radius: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #3a4553;
+  text-align: left;
+  transition: background 0.12s;
+
+  &:hover {
+    background: #eef2f9;
+  }
+}
+
+.task-tool-call-icon {
+  color: #2f6bff;
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.task-tool-result-icon {
+  color: #16a34a;
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.task-tool-call-name,
+.task-tool-result-name {
+  font-weight: 600;
+  color: #1f2733;
+  flex-shrink: 0;
+}
+
+.task-tool-result-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #6b7787;
+  font-size: 11px;
+}
+
+.task-tool-call-arrow,
+.task-tool-result-arrow {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: #8c98a8;
+}
+
+.task-tool-call-args,
+.task-tool-result-body {
+  margin: 4px 0 0 0;
+  padding: 6px 8px;
+  background: #f8fafc;
+  border: 1px solid #e6ecf3;
+  border-radius: 0 0 6px 6px;
+  font-size: 11px;
+  color: #3a4553;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.task-log-tool-calls,
+.task-log-tool-results {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}

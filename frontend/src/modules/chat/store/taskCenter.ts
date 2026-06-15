@@ -19,9 +19,25 @@ export interface TaskArtifact {
   value: any;
 }
 
+export interface ToolCallItem {
+  id: string;
+  name: string;
+  args: any;
+}
+
+export interface ToolResultItem {
+  tool_call_id: string;
+  name: string;
+  result: string;
+}
+
 export interface TaskLogEntry {
-  type: "text" | "think";
+  type: "text" | "think" | "tool_calls" | "tool_results";
   content: string;
+  // For tool_calls type
+  tool_calls?: ToolCallItem[];
+  // For tool_results type
+  tool_results?: ToolResultItem[];
 }
 
 export interface SubAgentTask {
@@ -66,6 +82,40 @@ interface TaskCenterStore {
   unsubscribeTask: (taskId: string) => void;
   loadConversationTasks: (conversationId: string) => Promise<void>;
   reset: (conversationId: string) => void;
+}
+
+// Convert persisted sub_agent_steps rows back to TaskLogEntry[] for display.
+function stepsToExecutionLog(steps: any[]): TaskLogEntry[] {
+  if (!steps || steps.length === 0) return [];
+  return steps.flatMap((s): TaskLogEntry[] => {
+    const role: string = s.role ?? "";
+    const content = s.content ?? {};
+    if (role === "think") {
+      const text: string = content.content ?? "";
+      return text ? [{ type: "think", content: text }] : [];
+    }
+    if (role === "text") {
+      const text: string = content.content ?? "";
+      return text ? [{ type: "text", content: text }] : [];
+    }
+    if (role === "assistant") {
+      const calls: ToolCallItem[] = (content.tool_calls ?? []).map((tc: any) => ({
+        id: tc.id ?? "",
+        name: tc.name ?? (tc.function?.name ?? ""),
+        args: tc.args ?? tc.function?.arguments ?? {},
+      }));
+      return calls.length > 0 ? [{ type: "tool_calls", content: "", tool_calls: calls }] : [];
+    }
+    if (role === "tool") {
+      const results: ToolResultItem[] = (content.tool_results ?? []).map((tr: any) => ({
+        tool_call_id: tr.id ?? tr.tool_call_id ?? "",
+        name: tr.name ?? "",
+        result: tr.result ?? tr.content ?? "",
+      }));
+      return results.length > 0 ? [{ type: "tool_results", content: "", tool_results: results }] : [];
+    }
+    return [];
+  });
 }
 
 export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
@@ -178,6 +228,34 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           }
           break;
         }
+        case "tool_calls": {
+          const calls: ToolCallItem[] = (event.tool_calls ?? []).map((tc: any) => ({
+            id: tc.id ?? tc.tool_call_id ?? "",
+            name: tc.name ?? tc.function?.name ?? "",
+            args: tc.args ?? tc.function?.arguments ?? {},
+          }));
+          if (calls.length > 0) {
+            task.execution_log = [
+              ...(task.execution_log ?? []),
+              { type: "tool_calls", content: "", tool_calls: calls },
+            ];
+          }
+          break;
+        }
+        case "tool_results": {
+          const results: ToolResultItem[] = (event.tool_results ?? []).map((tr: any) => ({
+            tool_call_id: tr.id ?? tr.tool_call_id ?? "",
+            name: tr.name ?? "",
+            result: tr.result ?? tr.content ?? "",
+          }));
+          if (results.length > 0) {
+            task.execution_log = [
+              ...(task.execution_log ?? []),
+              { type: "tool_results", content: "", tool_results: results },
+            ];
+          }
+          break;
+        }
         default:
           return state;
       }
@@ -263,7 +341,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           summary: t.summary,
           output_artifact_keys: t.output_artifact_keys,
           artifacts: t.artifacts ?? [],
-          execution_log: [],
+          execution_log: stepsToExecutionLog(t.steps ?? []),
         });
         if (!TERMINAL.includes(t.status)) {
           get().subscribeTask(conversationId, t.task_id);
