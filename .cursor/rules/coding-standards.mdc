@@ -22,6 +22,10 @@ alwaysApply: true
 
 - use gofmt after modifying
 
+## Submodule
+
+- Modidy `algorithm/lazyllm` directly when you need to modify lazyllm. **DO NOT** modify `site-pickages`
+
 ## 模拟前端 Chat 请求（端到端调试）
 
 用于验证完整链路（Go 落库 → Python 工具执行 → `task_created` 事件回传）时，优先从 **Go core 入口** 发请求，而不是直接打 Python chat 服务。

@@ -42,16 +42,28 @@ type MultiAnswerInfo struct {
 }
 
 type ChatChunkResponse struct {
-	ConversationID    string   `json:"conversation_id"`
-	Seq               int32    `json:"seq"`
-	Message           string   `json:"message"`
-	Delta             string   `json:"delta"`
-	FinishReason      string   `json:"finish_reason"`
-	HistoryID         string   `json:"history_id"`
-	Sources           []any    `json:"sources,omitempty"`
-	PromptQuestions   []string `json:"prompt_questions,omitempty"`
-	ReasoningContent  string   `json:"reasoning_content,omitempty"`
-	ThinkingDurationS int64    `json:"thinking_duration_s,omitempty"`
+	ConversationID    string             `json:"conversation_id"`
+	Seq               int32              `json:"seq"`
+	Message           string             `json:"message"`
+	Delta             string             `json:"delta"`
+	FinishReason      string             `json:"finish_reason"`
+	HistoryID         string             `json:"history_id"`
+	Sources           []any              `json:"sources,omitempty"`
+	PromptQuestions   []string           `json:"prompt_questions,omitempty"`
+	ReasoningContent  string             `json:"reasoning_content,omitempty"`
+	ThinkingDurationS int64              `json:"thinking_duration_s,omitempty"`
+	TaskCreated       *TaskCreatedNotice `json:"task_created,omitempty"`
+}
+
+// TaskCreatedNotice notifies the frontend (main SSE) that a SubAgent task was created,
+// so it can subscribe to the corresponding Task SSE stream.
+type TaskCreatedNotice struct {
+	TaskID            string `json:"task_id"`
+	Title             string `json:"title"`
+	AgentType         string `json:"agent_type"`
+	Mode              string `json:"mode"`
+	Status            string `json:"status"`
+	SeqInConversation int    `json:"seq_in_conversation"`
 }
 
 func chatStatusKey(conversationID string) string {

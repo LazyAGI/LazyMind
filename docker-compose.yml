@@ -305,6 +305,7 @@ services:
       - ./api/backend:/openapi-export
       - ./data/evo:/var/lib/lazymind/evo
       - ./data/core/uploads:/var/lib/lazymind/uploads
+      - ./data/subagent:/data/subagent
       - ./skills:/skills:ro
     expose:
       - "8000"
@@ -312,6 +313,8 @@ services:
       <<: *core-env
       MIGRATIONS_DIR: /migrations
       LAZYMIND_ALGO_SERVICE_URL: http://lazyllm-doc-server:8000
+      LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
+      LAZYMIND_SUBAGENT_DB_DSN: ${ACL_DB_DSN}
       LAZYMIND_READONLY_VALIDATE: "0"
       LAZYMIND_READONLY_DB_DRIVER: postgres
       LAZYMIND_READONLY_DB_DSN: "host=db user=app password=app dbname=app port=5432 sslmode=disable TimeZone=UTC"
@@ -340,7 +343,7 @@ services:
         condition: service_healthy
 
   core-dev:
-    image: golang:1.25.11-alpine
+    image: ${DOCKER_MIRROR:-docker.m.daocloud.io/library/}golang:1.25.11-alpine
     working_dir: /app
     command: ["sleep", "infinity"]
     volumes:
@@ -658,6 +661,7 @@ services:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
       - ./data/evo:/var/lib/lazymind/evo:ro
+      - ./data/subagent:/data/subagent
       - *algorithm-src-mount
       - *lazyllm-src-mount
       # Router mode: mount algorithm source so child processes can load different versions.
@@ -678,6 +682,7 @@ services:
       LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
       LAZYMIND_MOUNT_BASE_DIR: /var/lib/lazymind/uploads
       LAZYMIND_AGENTIC_WORKSPACE: /tmp/.lazyllm_rag/agent_workspace
+      LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
       LAZYMIND_USE_INNER_MODEL: "true"
       LAZYMIND_MAX_CONCURRENCY: ${LAZYMIND_MAX_CONCURRENCY:-10}
       LAZYMIND_LLM_PRIORITY: ${LAZYMIND_LLM_PRIORITY:-0}

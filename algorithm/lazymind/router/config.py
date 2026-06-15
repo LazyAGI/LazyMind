@@ -6,10 +6,6 @@ from functools import lru_cache
 
 from lazymind.config import config
 
-# Router toggle
-config.add('enable_router', bool, False, 'ENABLE_ROUTER',
-           description='Enable router mode. When false, app.py falls back to the original chat service.')
-
 # Port pool
 config.add('router_port_pool_start', int, 18000, 'ROUTER_PORT_POOL_START',
            description='Start of port range for child process instances.')

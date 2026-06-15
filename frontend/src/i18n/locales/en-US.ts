@@ -774,6 +774,20 @@ const enUS = {
     other: "Other",
   },
 
+  taskCenter: {
+    title: "Task Center",
+    panelTitle: "SubAgent",
+    running: "Running",
+    history: "History",
+    artifacts: "Artifacts",
+    executionProcess: "Execution Process",
+    empty: "No tasks",
+    statusSucceeded: "Done",
+    statusFailed: "Failed",
+    statusRunning: "In progress",
+    statusInterrupted: "Interrupted",
+  },
+
   // Knowledge Base
   knowledge: {
     list: "Knowledge Base List",

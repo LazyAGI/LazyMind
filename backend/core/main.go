@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"gopkg.in/yaml.v3"
@@ -23,6 +24,7 @@ import (
 	"lazymind/core/modelprovider"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/store"
+	"lazymind/core/subagent"
 )
 
 //go:embed docs.html
@@ -183,6 +185,13 @@ func main() {
 	resourceupdate.LogStartup(resourceUpdateEnabled)
 	if resourceUpdateEnabled {
 		resourceupdate.Start(context.Background(), store.DB(), store.Redis(), resourceupdate.DefaultConfig())
+	}
+
+	// Mark stale running SubAgent tasks (no heartbeat for >5m) as interrupted on startup.
+	if n, err := subagent.MarkInterrupted(context.Background(), store.DB(), 5*time.Minute); err != nil {
+		log.Logger.Warn().Err(err).Msg("mark interrupted subagent tasks failed")
+	} else if n > 0 {
+		log.Logger.Info().Int64("count", n).Msg("marked stale subagent tasks as interrupted")
 	}
 
 	r := mux.NewRouter()

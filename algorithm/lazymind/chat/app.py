@@ -3,21 +3,37 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from lazymind.config import config
-from lazymind.chat.api import chat_routes, health_routes, model_check_routes, model_features_routes
+from lazymind.chat.api import (
+    chat_routes,
+    health_routes,
+    model_check_routes,
+    model_features_routes,
+    subagent_routes,
+)
 from lazymind.rewrite.api import rewrite_routes
 from lazymind.review.api import skill_review_routes
 
 
 def register_chat_routers(app: FastAPI) -> FastAPI:
+    # health is always available for liveness probes.
     app.include_router(health_routes.router)
-    # In router mode, chat requests are forwarded by the proxy layer instead of
-    # being served directly, so chat_routes must not be mounted here.
+
+    # chat / subagent are the request types that the router dispatches to child
+    # processes. In router mode the main process exposes proxy versions instead,
+    # so it must not mount them directly; child processes (enable_router=false)
+    # mount them to do the real work.
     if not config['enable_router']:
         app.include_router(chat_routes.router)
-    app.include_router(rewrite_routes.router)
-    app.include_router(skill_review_routes.router)
-    app.include_router(model_features_routes.router)
-    app.include_router(model_check_routes.router)
+        app.include_router(subagent_routes.router)
+
+    # Router-only child processes act purely as chat/subagent executors behind
+    # the proxy. The stateless shared endpoints below are served by the main
+    # process directly, so they are skipped on those children.
+    if not config['router_child_proxied_only']:
+        app.include_router(rewrite_routes.router)
+        app.include_router(skill_review_routes.router)
+        app.include_router(model_features_routes.router)
+        app.include_router(model_check_routes.router)
     return app
 
 

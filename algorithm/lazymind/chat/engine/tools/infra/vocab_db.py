@@ -78,14 +78,14 @@ def _dsn_to_sqlalchemy_url(dsn: str) -> str:
         port = int(parts['port']) if parts.get('port') else 5432
     except ValueError as exc:
         raise ValueError('invalid database port') from exc
-    return str(URL.create(
+    return URL.create(
         'postgresql+psycopg2',
         username=parts.get('user') or None,
         password=parts.get('password') or None,
         host=parts['host'],
         port=port,
         database=database,
-    ))
+    ).render_as_string(hide_password=False)
 
 
 def _normalize_pg_url(url: Optional[str] = None, dsn: Optional[str] = None) -> str:

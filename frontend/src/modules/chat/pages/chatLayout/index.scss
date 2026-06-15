@@ -84,6 +84,24 @@
     flex-direction: column;
     background-color: var(--coldgrey-1);
     gap: 16px;
+    position: relative;
+
+    .right-box-resize-handle {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 5px;
+      height: 100%;
+      cursor: col-resize;
+      z-index: 20;
+      background: transparent;
+      transition: background 0.15s;
+
+      &:hover,
+      &:active {
+        background: rgba(47, 107, 255, 0.18);
+      }
+    }
 
     .title {
       color: var(--color-text);
@@ -92,6 +110,47 @@
       font-style: normal;
       font-weight: 600;
       line-height: 22px;
+    }
+  }
+
+  .task-panel-restore-btn {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 28px;
+    padding: 14px 0;
+    background: var(--coldgrey-1, #f5f7fa);
+    border: 1px solid #dfe6ef;
+    border-right: none;
+    border-radius: 8px 0 0 8px;
+    cursor: pointer;
+    color: #6b7787;
+    font-size: 12px;
+    transition: background 0.15s, color 0.15s;
+    z-index: 10;
+
+    &:hover {
+      background: #eef3ff;
+      color: #2f6bff;
+    }
+
+    .task-panel-restore-icon {
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .task-panel-restore-label {
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
     }
   }
 
