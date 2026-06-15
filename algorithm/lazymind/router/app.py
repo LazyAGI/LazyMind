@@ -13,15 +13,16 @@ logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
-    # Build on top of the chat app so that all chat-side routers (health,
-    # rewrite, skill_review, model_features, model_check) are always mounted.
-    from lazymind.chat.app import create_app as create_chat_app
+    if not config['enable_router']:
+        # Fallback mode: behave exactly like the original chat service
+        from lazymind.chat.app import create_app as create_chat_app
+        return create_chat_app()
 
-    app = create_chat_app()
-    return _create_router_app(app) if config['enable_router'] else app
+    # Router mode
+    return _create_router_app()
 
 
-def _create_router_app(app: FastAPI) -> FastAPI:
+def _create_router_app() -> FastAPI:
     from lazymind.router.db.client import get_engine
     from lazymind.router.db.models import Base
     from lazymind.router.core.process_manager import get_process_manager
@@ -34,10 +35,17 @@ def _create_router_app(app: FastAPI) -> FastAPI:
         yield
         await _shutdown(get_process_manager)
 
-    # The app was already constructed by create_chat_app(), so we cannot pass
-    # lifespan via the FastAPI() constructor. Attach it afterwards instead. The
-    # chat app has no lifespan of its own, so overriding here is safe.
-    app.router.lifespan_context = lifespan
+    app = FastAPI(
+        title='LazyMind API',
+        description='Knowledge-base-backed conversational and routing API service',
+        version='1.0.0',
+        lifespan=lifespan,
+    )
+
+    # Mount all chat-side routers (health, rewrite, skill_review, model_features,
+    # model_check) so they stay available in router mode.
+    from lazymind.chat.app import register_chat_routers
+    register_chat_routers(app)
 
     from lazymind.router.api import (
         proxy_routes,

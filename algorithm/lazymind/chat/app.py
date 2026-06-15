@@ -8,13 +8,7 @@ from lazymind.rewrite.api import rewrite_routes
 from lazymind.review.api import skill_review_routes
 
 
-def create_app() -> FastAPI:
-    app = FastAPI(
-        title='LazyMind API',
-        description='Knowledge-base-backed conversational and routing API service',
-        version='1.0.0',
-    )
-
+def register_chat_routers(app: FastAPI) -> FastAPI:
     app.include_router(health_routes.router)
     # In router mode, chat requests are forwarded by the proxy layer instead of
     # being served directly, so chat_routes must not be mounted here.
@@ -25,6 +19,15 @@ def create_app() -> FastAPI:
     app.include_router(model_features_routes.router)
     app.include_router(model_check_routes.router)
     return app
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title='LazyMind API',
+        description='Knowledge-base-backed conversational and routing API service',
+        version='1.0.0',
+    )
+    return register_chat_routers(app)
 
 
 app = create_app()
