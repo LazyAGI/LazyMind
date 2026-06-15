@@ -14,8 +14,92 @@ alwaysApply: true
 
 - Prefer **single quotes** (`'`) for strings when both are valid.
 - Example: `msg = 'hello'` not `msg = "hello"`.
+- exec `make lint` after coding, run `source /Users/macro/lazyllm/bin/activate` if environment is not ready
+- add `${PROJECT_ROOT_DIR}/algorigtm/lazyllm` to `PYTHONPATH` env variable
 
 
 ## Go
 
 - use gofmt after modifying
+
+## 模拟前端 Chat 请求（端到端调试）
+
+用于验证完整链路（Go 落库 → Python 工具执行 → `task_created` 事件回传）时，优先从 **Go core 入口** 发请求，而不是直接打 Python chat 服务。
+
+### 请求链路
+
+```
+前端 SSE POST
+  → Kong (/api/core/conversations:chat，strip 前缀后为 /conversations:chat)
+    → rbac-auth 插件校验 Authorization + qa.write 权限
+    → 注入 X-User-Id / X-User-Name
+  → Go core:8000  ChatConversations
+    → ensureConversation（会话落库）
+    → applyChatRuntimeConfigs（从 DB 加载 llm_config / tool_config）
+    → StreamChatUpstream → Python chat /api/chat/stream
+      → 执行 create_subagent 等工具，产生 task_created
+    → SSE 回传：data: {"result":{...}}\n\n
+```
+
+关键代码位置：
+
+- 前端 URL：`frontend/src/modules/chat/utils/request.ts` → `CHAT_STREAM_URL = ${BASE_URL}/api/core/conversations:chat`
+- 前端 payload：`frontend/src/modules/chat/pages/chatLayout/index.tsx` 中 `openSSE`
+- Kong 路由：`kong.yml` → core-service，`/api/core` strip 后转发到 `http://core:8000`
+- Go 入口：`backend/core/routes.go` → `POST /conversations:chat`（权限标注 `qa.write`，实际 RBAC 在 Kong 层）
+- 用户身份：`backend/core/store/context.go` → 读取 `X-User-Id` 请求头（**不读 body 中的 user_id**）
+- 上游调用：`backend/core/chat/chat.go` → `StreamChatUpstream` → `/api/chat/stream`
+- llm_config：前端**不传**，core 在 `applyChatRuntimeConfigs` 中按 `X-User-Id` 从 DB 自动加载（日志标记 `[LLM_CONFIG_LOADED]`）
+
+### 三种测试方式对比
+
+| 方式 | 入口 | 优点 | 缺点 |
+|------|------|------|------|
+| **推荐：容器内直连 core** | `http://core:8000/conversations:chat` | 跳过 Kong RBAC；覆盖 Go 落库 + subagent 全链路 | 需 `docker exec` 进容器 |
+| 经 Kong 模拟前端 | `http://kong/api/core/conversations:chat` | 最接近真实前端 | 需有效 Bearer token + `qa.write` 权限 |
+| 直连 Python chat | `http://chat:8046/api/chat/stream` | 最快验证工具逻辑 | **绕过** Go 落库与 `task_created` 事件记录 |
+
+### 推荐：容器内 curl 模拟
+
+在 core 容器内执行（绕过 Kong，只需 `X-User-Id`）：
+
+```bash
+curl -N -X POST http://localhost:8000/conversations:chat \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: text/event-stream' \
+  -H 'X-User-Id: <真实用户ID>' \
+  -d '{
+    "query": "你的测试问题",
+    "conversation_id": "<会话ID，可新建>",
+    "stream": true,
+    "mode": "auto",
+    "action": "CHAT_ACTION_NEXT",
+    "input": [{"input_type": "text", "text": "你的测试问题"}]
+  }'
+```
+
+说明：
+
+- `llm_config` **无需手动传入**，core 会根据 `X-User-Id` 自动加载该用户的模型配置。
+- `conversation_id` 可省略，core 会自动生成；也可复用已有会话或日志中的 ID。
+- 响应为 SSE 流，每帧格式：`data: {"result":{...}}\n\n`。
+- 若请求体含 `kb_id` / `dataset_id`，core 会在 handler 内做 ACL 校验（`extractMessageForACL`），直连时需确保该用户有对应资源读权限。
+
+### 经 Kong 模拟前端（需认证）
+
+```bash
+curl -N -X POST http://<kong-host>/api/core/conversations:chat \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: text/event-stream' \
+  -H 'Authorization: Bearer <token>' \
+  -H 'X-User-Id: <用户ID>' \
+  -d '<同上 payload>'
+```
+
+前端实际还会附带 `X-Tenant-ID`（见 `frontend/src/components/auth.ts`），Kong rbac-auth 插件负责完整鉴权。
+
+### 调试提示
+
+- 查看 core 日志关键字：`[CHAT_REQUEST]`、`[LLM_CONFIG_LOADED]`
+- 验证 subagent：确认 SSE 流中出现 `task_created` 字段，并检查 DB 中 task 记录
+- 不要直接测 `/api/chat/stream` 来验证 subagent 落库链路——那会跳过 Go 层的会话持久化与 task 事件转发

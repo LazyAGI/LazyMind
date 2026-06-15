@@ -36,20 +36,23 @@ def _create_router_app() -> FastAPI:
         await _shutdown(get_process_manager)
 
     app = FastAPI(
-        title='LazyMind Router API',
-        description='Multi-algorithm router with AB testing and transparent proxy',
+        title='LazyMind API',
+        description='Knowledge-base-backed conversational and routing API service',
         version='1.0.0',
         lifespan=lifespan,
     )
 
+    # Mount all chat-side routers (health, rewrite, skill_review, model_features,
+    # model_check) so they stay available in router mode.
+    from lazymind.chat.app import register_chat_routers
+    register_chat_routers(app)
+
     from lazymind.router.api import (
-        health_routes,
         proxy_routes,
         algorithm_routes,
         strategy_routes,
         diagnostics_routes,
     )
-    app.include_router(health_routes.router)
     app.include_router(proxy_routes.router)
     app.include_router(algorithm_routes.router)
     app.include_router(strategy_routes.router)
