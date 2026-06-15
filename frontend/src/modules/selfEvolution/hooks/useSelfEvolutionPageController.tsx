@@ -160,6 +160,17 @@ type AnalysisCasePreviewRow = {
   quality: string;
 };
 
+type PxCaseDetailRow = {
+  key: string;
+  caseId: string;
+  question: string;
+  score: string;
+  failureType: string;
+  defect: string;
+  reason: string;
+  traceId: string;
+};
+
 type ArtifactPanelItem = {
   kind: WorkflowResultKind;
   stepId: WorkflowStep["id"];
@@ -577,6 +588,87 @@ export function SelfEvolutionPageController({
       pxReportCategoryMetrics.reduce((total, item) => total + item.caseCount, 0)
     );
   }, [pxReportCategoryMetrics, workflowResults]);
+  const pxCaseDetailRows = useMemo<PxCaseDetailRow[]>(() => {
+    const sourceRecord = Array.isArray(workflowResults["eval-reports"].data)
+      ? (workflowResults["eval-reports"].data.find((item): item is Record<string, unknown> => isRecord(item)) ??
+        undefined)
+      : isRecord(workflowResults["eval-reports"].data)
+        ? workflowResults["eval-reports"].data
+        : undefined;
+    const reportRecord = getStructuredRecordField(sourceRecord, ["data"]) || getNestedRecordField(sourceRecord, ["data"]) || sourceRecord;
+    const caseRecords = [
+      ...(getStructuredArrayField(reportRecord, ["bad_cases"]) || []),
+      ...(getStructuredArrayField(reportRecord, ["badcases"]) || []),
+      ...(getStructuredArrayField(reportRecord, ["badcase_list"]) || []),
+      ...(getStructuredArrayField(reportRecord, ["cases"]) || []),
+      ...(getStructuredArrayField(reportRecord, ["rows"]) || []),
+      ...(getStructuredArrayField(reportRecord, ["records"]) || []),
+      ...(getStructuredArrayField(reportRecord, ["items"]) || []),
+    ].filter(isRecord);
+    const seen = new Set<string>();
+
+    return caseRecords.flatMap((item, index): PxCaseDetailRow[] => {
+      const caseId = getStringField(item, ["case_id", "caseId", "case", "id"]) || `case-${index + 1}`;
+      if (seen.has(caseId)) {
+        return [];
+      }
+      seen.add(caseId);
+      const score = getNumberField(item, ["score", "metric_score", "answer_correctness", "value"]);
+
+      return [{
+        key: caseId,
+        caseId,
+        question: getStringField(item, ["query", "question", "prompt"]) || "-",
+        score: typeof score === "number" ? score.toFixed(2) : "-",
+        failureType: getStringField(item, ["failure_type", "failure_reason", "fail_reason", "category"]) || "-",
+        defect: getStringField(item, ["defect"]) || "-",
+        reason: getStringField(item, ["reason", "failure_detail"]) || "-",
+        traceId: getStringField(item, ["trace_id", "traceId"]) || "-",
+      }];
+    });
+  }, [workflowResults]);
+  const pxCaseDetailColumns = useMemo<ColumnsType<PxCaseDetailRow>>(
+    () => [
+      { title: "Case", dataIndex: "caseId", key: "caseId", width: 126 },
+      {
+        title: "问题",
+        dataIndex: "question",
+        key: "question",
+        width: 360,
+        render: (value: string) => <span className="self-evolution-table-ellipsis" title={value}>{value}</span>,
+      },
+      { title: "Score", dataIndex: "score", key: "score", width: 96 },
+      {
+        title: "失败类型",
+        dataIndex: "failureType",
+        key: "failureType",
+        width: 150,
+        render: (value: string) => <span className="self-evolution-table-ellipsis" title={value}>{value}</span>,
+      },
+      {
+        title: "Defect",
+        dataIndex: "defect",
+        key: "defect",
+        width: 260,
+        render: (value: string) => <span className="self-evolution-table-ellipsis" title={value}>{value}</span>,
+      },
+      {
+        title: "Reason",
+        dataIndex: "reason",
+        key: "reason",
+        width: 420,
+        render: (value: string) => <span className="self-evolution-table-ellipsis" title={value}>{value}</span>,
+      },
+      {
+        title: "Trace",
+        dataIndex: "traceId",
+        key: "traceId",
+        width: 170,
+        render: (value: string) => <span className="self-evolution-table-ellipsis" title={value}>{value}</span>,
+      },
+    ],
+    [],
+  );
   const analysisArtifactItems = useMemo(
     () => getResultItems(workflowResults["analysis-reports"].data).filter(isRecord),
     [workflowResults["analysis-reports"].data],
@@ -3338,37 +3430,6 @@ export function SelfEvolutionPageController({
     );
   };
 
-  const renderPxCategorySummaryGrid = (categoryMetrics: PxCategoryMetricAverage[]) => (
-    <div className="self-evolution-px-summary-grid" aria-label="问题类别指标概览">
-      {categoryMetrics.map((item) => (
-        <article key={item.category} className="self-evolution-px-summary-card">
-          <div className="self-evolution-px-summary-card-head">
-            <div className="self-evolution-px-summary-card-title-group">
-              <span className="self-evolution-px-summary-card-icon" aria-hidden>
-                {item.category.slice(0, 1)}
-              </span>
-              <div className="self-evolution-px-summary-card-copy">
-                <strong>{item.category}</strong>
-                <span>{`${item.caseCount} 条样本`}</span>
-              </div>
-            </div>
-          </div>
-          <div className="self-evolution-px-summary-metrics">
-            {pxMetricMeta.map((metric) => (
-              <div key={`${item.category}-${metric.key}`} className="self-evolution-px-summary-metric-row">
-                <span className="self-evolution-px-summary-metric-label">
-                  <span className="self-evolution-px-legend-dot" style={{ backgroundColor: metric.color }} />
-                  {metric.label}
-                </span>
-                <strong>{formatPercent(item.metrics[metric.key])}</strong>
-              </div>
-            ))}
-          </div>
-        </article>
-      ))}
-    </div>
-  );
-
   const renderPxReportPreview = () => (
     <section className="self-evolution-px-report" aria-label="评测报告指标展示">
       {workflowResults["eval-reports"].loading ? (
@@ -3381,7 +3442,18 @@ export function SelfEvolutionPageController({
         <>
       <div className="self-evolution-px-report-head">
         <Text>按问题类别聚合四项指标均值</Text>
-        <Text>{`样本数 ${pxReportTotalCases}，分类数 ${pxReportCategoryMetrics.length}`}</Text>
+        <div className="self-evolution-px-report-actions">
+          <Text>{`样本数 ${pxReportTotalCases}，分类数 ${pxReportCategoryMetrics.length}`}</Text>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              openObservationPage("eval");
+            }}
+          >
+            进入观测
+          </button>
+        </div>
       </div>
 
       {pxReportCategoryMetrics.length === 0 ? (
@@ -3414,7 +3486,25 @@ export function SelfEvolutionPageController({
           </div>
         </div>
       )}
-      {renderPxCategorySummaryGrid(pxReportCategoryMetrics)}
+      <div className="self-evolution-px-case-section">
+        <div className="self-evolution-px-case-section-head">
+          <Text>数据列表</Text>
+          <Text>{`${pxCaseDetailRows.length} 条`}</Text>
+        </div>
+        {pxCaseDetailRows.length === 0 ? (
+          <Paragraph className="self-evolution-px-empty">当前报告无可展示的数据列表。</Paragraph>
+        ) : (
+          <Table<PxCaseDetailRow>
+            className="self-evolution-px-case-table"
+            size="small"
+            rowKey="key"
+            columns={pxCaseDetailColumns}
+            dataSource={pxCaseDetailRows}
+            pagination={false}
+            scroll={{ x: 1582, y: 280 }}
+          />
+        )}
+      </div>
         </>
       )}
     </section>
@@ -4106,49 +4196,8 @@ export function SelfEvolutionPageController({
     }
     return localizedGetStepStatusLabel(step?.status || "pending");
   };
-  const observationEntryItems = artifactItems.filter((item): item is ArtifactPanelItem & { kind: "eval-reports" | "abtests" } =>
-    item.kind === "eval-reports" || item.kind === "abtests",
-  );
   const renderArtifactNavigationPanel = () => (
     <>
-      <section className="self-evolution-observation-entry-panel" aria-label="观测查看入口">
-        <div className="self-evolution-observation-entry-head">
-          <Text>观测入口</Text>
-          <span>Trace / A-B</span>
-        </div>
-        <div className="self-evolution-observation-entry-list">
-          {observationEntryItems.map((item) => {
-            const isActive = item.kind === activeArtifactItem?.kind;
-            const resultState = workflowResults[item.kind];
-            const stateLabel = resultState.loading
-              ? "加载中"
-              : resultState.error
-                ? "可重试"
-                : resultState.loaded
-                  ? isEmptyResultPayload(resultState.data)
-                    ? "暂无数据"
-                    : "已加载"
-                  : "点击查看";
-            return (
-              <button
-                key={`observation-${item.kind}`}
-                type="button"
-                className={`self-evolution-observation-entry${isActive ? " is-active" : ""}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  openObservationPage(item.kind === "eval-reports" ? "eval" : "abtest");
-                }}
-              >
-                <span>
-                  <strong>{item.kind === "eval-reports" ? "Step 2 · 观测详情" : "Step 5 · A/B 观测"}</strong>
-                  <em>{item.kind === "eval-reports" ? "Agentic RAG Trace 链路" : "Case A/B Trace 对比"}</em>
-                </span>
-                <i>{stateLabel}</i>
-              </button>
-            );
-          })}
-        </div>
-      </section>
       {visibleArtifactItems.length === 0 ? (
         <Paragraph className="self-evolution-artifact-empty">
           启动后会按执行进度显示产物。

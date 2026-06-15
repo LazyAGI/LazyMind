@@ -184,6 +184,8 @@ export default function MainLayout() {
     pathname.startsWith("/lib/knowledge/detail") ||
     pathname.startsWith("/memory-management") ||
     pathname.startsWith("/self-evolution");
+  const isSelfEvolutionObservationPage =
+    pathname.startsWith("/self-evolution/detail/") && pathname.includes("/observation/");
   const contentClassName = [
     "main-layout-content",
     isMenuCollapsed ? "is-sidebar-collapsed" : "",
@@ -798,7 +800,7 @@ export default function MainLayout() {
       </Sider>
       <Layout className={contentClassName}>
         <Content className="main-layout-body">
-          {isMenuCollapsed ? (
+          {isMenuCollapsed && !isSelfEvolutionObservationPage ? (
             <button
               type="button"
               className="main-menu-restore-button"

@@ -8,17 +8,21 @@ import {
   ClockCircleOutlined,
   FileSearchOutlined,
   FileTextOutlined,
+  MenuUnfoldOutlined,
   ReloadOutlined,
   SearchOutlined,
   ThunderboltOutlined,
   WarningOutlined,
 } from "@ant-design/icons";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { axiosInstance, getLocalizedErrorMessage } from "@/components/request";
 import {
   AGENT_API_BASE,
+  EVO_API_BASE,
   getNumberField,
   getStringField,
+  getStructuredArrayField,
+  getStructuredRecordField,
   isCanceledRequest,
   isEmptyResultPayload,
   isRecord,
@@ -38,6 +42,32 @@ const { Paragraph, Text, Title } = Typography;
 
 type ObservationResultKind = Extract<WorkflowResultKind, "eval-reports" | "abtests">;
 type TraceNode = TraceDetailObservation["root"];
+
+type ObservationPageLayoutContext = {
+  isMenuCollapsed?: boolean;
+  toggleMenu?: () => void;
+};
+
+type ObservationHeaderControlsProps = {
+  isMenuCollapsed?: boolean;
+  toggleMenu?: () => void;
+  onBack: () => void;
+};
+
+function ObservationHeaderControls({
+  isMenuCollapsed,
+  toggleMenu,
+  onBack,
+}: ObservationHeaderControlsProps) {
+  return (
+    <div className="self-evolution-observation-head-controls">
+      {isMenuCollapsed && toggleMenu ? (
+        <Button type="text" icon={<MenuUnfoldOutlined />} onClick={toggleMenu} aria-label="展开菜单" title="展开菜单" />
+      ) : null}
+      <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack}>返回</Button>
+    </div>
+  );
+}
 
 type ObservationRouteParams = {
   threadId?: string;
@@ -61,7 +91,10 @@ type CsvBadcaseRow = {
   score: number;
   failureType: string;
   failureTone: "red" | "orange" | "blue";
+  defect: string;
+  reason: string;
   mode: string;
+  traceId: string;
   traceStatus: string;
   failureReason: string;
   tracePayload?: unknown;
@@ -127,7 +160,10 @@ const fallbackBadcaseRows: CsvBadcaseRow[] = [
     score: 0.55,
     failureType: "生成偏差",
     failureTone: "red",
+    defect: "遗漏管理员代操作流程。",
+    reason: "生成答案覆盖了部分步骤，但遗漏管理员代操作流程。",
     mode: "Agentic RAG",
+    traceId: "d862fb1f6aa34a7fb2faea3c0a8e1001",
     traceStatus: "已关联",
     failureReason: "生成答案覆盖了部分步骤，但遗漏管理员代操作流程。",
     tracePayload: traceDetailFixture,
@@ -140,7 +176,10 @@ const fallbackBadcaseRows: CsvBadcaseRow[] = [
     score: 0.42,
     failureType: "召回不足",
     failureTone: "orange",
+    defect: "未包含关键流程与材料要求。",
+    reason: "召回不足：检索到的文档数量过少，未包含关键流程与材料要求。",
     mode: "Agentic RAG",
+    traceId: "9274879f971f4c819ffc1151000cb82c",
     traceStatus: "已关联",
     failureReason: "召回不足：检索到的文档数量过少，未包含关键流程与材料要求。",
     tracePayload: traceDetailFixture,
@@ -153,7 +192,10 @@ const fallbackBadcaseRows: CsvBadcaseRow[] = [
     score: 0.61,
     failureType: "上下文缺失",
     failureTone: "blue",
+    defect: "缺少格式、大小、错误日志等上下文。",
+    reason: "回答可用但缺少格式、大小、错误日志等上下文。",
     mode: "Agentic RAG",
+    traceId: "94cc5c498a534d179ea60ba7c4b93955",
     traceStatus: "已关联",
     failureReason: "回答可用但缺少格式、大小、错误日志等上下文。",
     tracePayload: traceDetailFixture,
@@ -415,13 +457,25 @@ function buildFlowRows(detail: TraceDetailObservation): FlowRow[] {
   });
 }
 
+function getBadcaseSourceRecords(value: unknown): Record<string, unknown>[] {
+  const rawSources = Array.isArray(value) ? value : [value];
+  return rawSources.filter(isRecord).flatMap((item) => {
+    const dataRecord = getStructuredRecordField(item, ["data"]);
+    return dataRecord ? [dataRecord, item] : [item];
+  });
+}
+
 function normalizeBadcaseRows(value: unknown): CsvBadcaseRow[] {
-  const candidateRows = isRecord(value)
-    ? (["badcases", "badcase_list", "cases", "rows", "records", "items"] as const)
-      .flatMap((key) => Array.isArray(value[key]) ? value[key] : [])
-    : Array.isArray(value)
-      ? value
-      : [];
+  const candidateRows = getBadcaseSourceRecords(value)
+    .flatMap((item) => [
+      ...(getStructuredArrayField(item, ["bad_cases"]) || []),
+      ...(getStructuredArrayField(item, ["badcases"]) || []),
+      ...(getStructuredArrayField(item, ["badcase_list"]) || []),
+      ...(getStructuredArrayField(item, ["cases"]) || []),
+      ...(getStructuredArrayField(item, ["rows"]) || []),
+      ...(getStructuredArrayField(item, ["records"]) || []),
+      ...(getStructuredArrayField(item, ["items"]) || []),
+    ]);
   const rows = candidateRows.filter(isRecord).map((item, index): CsvBadcaseRow => {
     const score = getNumberField(item, ["score", "metric_score", "answer_correctness", "value"]) ?? 0;
     const failureType = getStringField(item, ["failure_type", "failure_reason", "fail_reason", "category"]) || "待分析";
@@ -433,7 +487,10 @@ function normalizeBadcaseRows(value: unknown): CsvBadcaseRow[] {
       score,
       failureType,
       failureTone: score < 0.5 ? "orange" : score < 0.6 ? "red" : "blue",
+      defect: getStringField(item, ["defect"]) || "-",
+      reason: getStringField(item, ["reason", "failure_detail"]) || failureType,
       mode: getStringField(item, ["mode", "execution_mode"]) || "Agentic RAG",
+      traceId: getStringField(item, ["trace_id", "traceId"]) || "-",
       traceStatus: getStringField(item, ["trace_status", "traceStatus"]) || "已关联",
       failureReason: getStringField(item, ["failure_detail", "failure_reason", "fail_reason", "reason"]) || failureType,
       tracePayload: item.trace || item.observation || item.trace_detail,
@@ -554,13 +611,6 @@ function EvalReportPanel({
   const columns: ColumnsType<CsvBadcaseRow> = [
     { title: "Case", dataIndex: "caseId", key: "caseId", width: 104 },
     {
-      title: "Query",
-      dataIndex: "query",
-      key: "query",
-      width: 260,
-      render: (value: string) => <span className="self-evolution-table-ellipsis" title={value}>{value}</span>,
-    },
-    {
       title: "Score",
       dataIndex: "score",
       key: "score",
@@ -574,23 +624,26 @@ function EvalReportPanel({
       width: 110,
       render: (value: string, row) => <Tag className={`self-evolution-eval-reason is-${row.failureTone}`}>{value}</Tag>,
     },
-    { title: "执行模式", dataIndex: "mode", key: "mode", width: 128 },
     {
-      title: "Trace",
-      dataIndex: "traceStatus",
-      key: "traceStatus",
-      width: 88,
-      render: (value: string) => <Tag color="success">{value}</Tag>,
+      title: "Defect",
+      dataIndex: "defect",
+      key: "defect",
+      width: 230,
+      render: (value: string) => <span className="self-evolution-table-ellipsis" title={value}>{value}</span>,
     },
     {
-      title: "操作",
-      key: "action",
-      width: 104,
-      render: (_, row) => (
-        <Button size="small" type={row.caseId === selectedCaseId ? "primary" : "default"} onClick={() => onSelectCase(row.caseId)}>
-          查看 trace
-        </Button>
-      ),
+      title: "Reason",
+      dataIndex: "reason",
+      key: "reason",
+      width: 360,
+      render: (value: string) => <span className="self-evolution-table-ellipsis" title={value}>{value}</span>,
+    },
+    {
+      title: "Trace",
+      dataIndex: "traceId",
+      key: "traceId",
+      width: 170,
+      render: (value: string) => <span className="self-evolution-table-ellipsis" title={value}>{value}</span>,
     },
   ];
 
@@ -612,7 +665,7 @@ function EvalReportPanel({
       <div className="self-evolution-eval-badcase-panel">
         <div className="self-evolution-eval-section-title">
           <Text strong>Badcase 列表</Text>
-          <span>来自第二步评测 CSV</span>
+          <span>来自 eval_report.data.bad_cases</span>
         </div>
         <div className="self-evolution-eval-filter-row">
           <label>
@@ -639,9 +692,9 @@ function EvalReportPanel({
           rowKey="caseId"
           columns={columns}
           dataSource={rows}
-          pagination={{ pageSize: 3, size: "small", showSizeChanger: false }}
+          pagination={false}
           rowClassName={(row) => row.caseId === selectedCaseId ? "is-selected" : ""}
-          scroll={{ x: 900 }}
+          scroll={{ x: 1052 }}
           onRow={(row) => ({
             onClick: () => onSelectCase(row.caseId),
           })}
@@ -666,6 +719,10 @@ function EvalReportPanel({
             </dd>
             <dt>失败原因</dt>
             <dd>{selectedRow.failureReason}</dd>
+            <dt>Defect</dt>
+            <dd>{selectedRow.defect}</dd>
+            <dt>Reason</dt>
+            <dd>{selectedRow.reason}</dd>
           </dl>
           <div className="self-evolution-eval-case-actions">
             <Button type="primary">查看智能链路</Button>
@@ -876,6 +933,8 @@ function EvalObservationDashboard({
   threadId,
   onBack,
   onReload,
+  isMenuCollapsed,
+  toggleMenu,
 }: {
   data: unknown;
   notice?: string;
@@ -884,15 +943,21 @@ function EvalObservationDashboard({
   threadId?: string;
   onBack: () => void;
   onReload: () => void;
+  isMenuCollapsed?: boolean;
+  toggleMenu?: () => void;
 }) {
   const rows = useMemo(() => normalizeBadcaseRows(data), [data]);
-  const [selectedCaseId, setSelectedCaseId] = useState(rows[1]?.caseId || rows[0]?.caseId || "");
+  const [selectedCaseId, setSelectedCaseId] = useState(rows[0]?.caseId || "");
+  const [traceState, setTraceState] = useState<{
+    loading: boolean;
+    data?: unknown;
+    error?: string;
+    traceId?: string;
+  }>({ loading: false });
   const selectedRow = rows.find((item) => item.caseId === selectedCaseId) || rows[0];
   const selectedObservation = useMemo(() => {
-    const rowObservation = normalizeTraceObservation(selectedRow?.tracePayload);
-    if (rowObservation) return rowObservation;
-    return normalizeTraceObservation(data) || normalizeTraceObservation(traceDetailFixture);
-  }, [data, selectedRow]);
+    return normalizeTraceObservation(traceState.data) || normalizeTraceObservation(selectedRow?.tracePayload) || normalizeTraceObservation(traceDetailFixture);
+  }, [selectedRow, traceState.data]);
   const detail = getPrimaryObservation(selectedObservation);
 
   useEffect(() => {
@@ -901,11 +966,57 @@ function EvalObservationDashboard({
     }
   }, [rows, selectedCaseId]);
 
+  useEffect(() => {
+    const traceId = selectedRow?.traceId;
+    if (!threadId || !traceId || traceId === "-") {
+      setTraceState({ loading: false, data: undefined, error: traceId ? undefined : "当前 Badcase 未提供 trace_id。" });
+      return;
+    }
+
+    const controller = new AbortController();
+    setTraceState({ loading: true, data: undefined, error: undefined, traceId });
+
+    axiosInstance
+      .get(`${EVO_API_BASE}/threads/${encodeURIComponent(threadId)}/results/traces/${encodeURIComponent(traceId)}`, {
+        signal: controller.signal,
+      })
+      .then((response) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        if (isEmptyResultPayload(response.data)) {
+          setTraceState({
+            loading: false,
+            data: traceDetailFixture,
+            error: "当前 trace 接口暂无数据，先展示样例观测详情。",
+            traceId,
+          });
+          return;
+        }
+        setTraceState({ loading: false, data: response.data, error: undefined, traceId });
+      })
+      .catch((error) => {
+        if (isCanceledRequest(error) || controller.signal.aborted) {
+          return;
+        }
+        setTraceState({
+          loading: false,
+          data: traceDetailFixture,
+          error: `观测详情加载失败，已回退到样例数据。${getLocalizedErrorMessage(error, "请稍后重试。")}`,
+          traceId,
+        });
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [selectedRow?.traceId, threadId]);
+
   return (
     <div className="self-evolution-eval-dashboard">
       <header className="self-evolution-eval-dashboard-head">
-        <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack}>返回</Button>
-        <div>
+        <ObservationHeaderControls isMenuCollapsed={isMenuCollapsed} toggleMenu={toggleMenu} onBack={onBack} />
+        <div className="self-evolution-eval-dashboard-head-right">
           {threadId && <Tag>{`thread ${threadId}`}</Tag>}
           {isFallback && <Tag color="gold">样例数据</Tag>}
           <Button icon={<ReloadOutlined />} loading={loading} onClick={onReload}>刷新</Button>
@@ -914,8 +1025,18 @@ function EvalObservationDashboard({
       {notice && !loading && <Alert type="warning" showIcon message={notice} />}
       <div className="self-evolution-eval-dashboard-grid">
         <EvalReportPanel rows={rows} selectedCaseId={selectedCaseId} onSelectCase={setSelectedCaseId} />
-        {detail && selectedRow ? (
-          <EvalTracePanel detail={detail} selectedRow={selectedRow} />
+        {selectedRow ? (
+          traceState.loading ? (
+            <section className="self-evolution-eval-trace-card" aria-label="Agentic RAG 观测详情">
+              <Spin />
+            </section>
+          ) : detail ? (
+            <EvalTracePanel detail={detail} selectedRow={selectedRow} />
+          ) : (
+            <section className="self-evolution-eval-trace-card">
+              <Empty description={traceState.error || "当前 Badcase 暂无观测详情"} />
+            </section>
+          )
         ) : (
           <section className="self-evolution-eval-trace-card">
             <Empty description="当前 Badcase 暂无观测详情" />
@@ -1252,6 +1373,8 @@ function AbtestObservationDashboard({
   threadId,
   onBack,
   onReload,
+  isMenuCollapsed,
+  toggleMenu,
 }: {
   data: unknown;
   notice?: string;
@@ -1260,6 +1383,8 @@ function AbtestObservationDashboard({
   threadId?: string;
   onBack: () => void;
   onReload: () => void;
+  isMenuCollapsed?: boolean;
+  toggleMenu?: () => void;
 }) {
   const rows = useMemo(() => normalizeAbCaseRows(data), [data]);
   const observation = useMemo(() => normalizeTraceObservation(data) || normalizeTraceObservation(traceCompareFixture), [data]);
@@ -1276,8 +1401,8 @@ function AbtestObservationDashboard({
   return (
     <div className="self-evolution-abtest-dashboard">
       <header className="self-evolution-eval-dashboard-head">
-        <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack}>返回</Button>
-        <div>
+        <ObservationHeaderControls isMenuCollapsed={isMenuCollapsed} toggleMenu={toggleMenu} onBack={onBack} />
+        <div className="self-evolution-eval-dashboard-head-right">
           {threadId && <Tag>{`thread ${threadId}`}</Tag>}
           {isFallback && <Tag color="gold">样例数据</Tag>}
           <Button icon={<ReloadOutlined />} loading={loading} onClick={onReload}>刷新</Button>
@@ -1312,6 +1437,7 @@ function AbtestObservationDashboard({
 export function SelfEvolutionObservationPage() {
   const navigate = useNavigate();
   const { threadId, kind } = useParams<ObservationRouteParams>();
+  const { isMenuCollapsed, toggleMenu } = useOutletContext<ObservationPageLayoutContext>();
   const resultKind = normalizeObservationKind(kind);
   const [reloadToken, setReloadToken] = useState(0);
   const [state, setState] = useState<ObservationPageState>({ loading: false, loaded: false });
@@ -1387,6 +1513,8 @@ export function SelfEvolutionObservationPage() {
         threadId={threadId}
         onBack={backToDetail}
         onReload={reload}
+        isMenuCollapsed={isMenuCollapsed}
+        toggleMenu={toggleMenu}
       />
     );
   }
@@ -1401,6 +1529,8 @@ export function SelfEvolutionObservationPage() {
         threadId={threadId}
         onBack={backToDetail}
         onReload={reload}
+        isMenuCollapsed={isMenuCollapsed}
+        toggleMenu={toggleMenu}
       />
     );
   }
@@ -1409,7 +1539,7 @@ export function SelfEvolutionObservationPage() {
     <div className="self-evolution-observation-page">
       <header className="self-evolution-observation-page-head">
         <div className="self-evolution-observation-page-title">
-          <Button type="text" icon={<ArrowLeftOutlined />} onClick={backToDetail}>返回</Button>
+          <ObservationHeaderControls isMenuCollapsed={isMenuCollapsed} toggleMenu={toggleMenu} onBack={backToDetail} />
           <div>
             <Title level={3}>Step 5 · A/B 观测</Title>
             <Paragraph>Case A/B Trace 对比与结构化数据表</Paragraph>

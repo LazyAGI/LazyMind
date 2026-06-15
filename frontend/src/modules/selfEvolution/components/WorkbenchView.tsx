@@ -6,6 +6,7 @@ import {
   CloseOutlined,
   ClockCircleFilled,
   DownOutlined,
+  EyeOutlined,
   HistoryOutlined,
   PlusOutlined,
 } from "@ant-design/icons";
@@ -647,26 +648,21 @@ export function SelfEvolutionWorkbenchView({
                       </span>
                     </div>
                   </div>
-                  <div className="self-evolution-process-observation-actions" aria-label="观测查看入口">
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onOpenObservation("eval");
-                      }}
-                    >
-                      Step 2 观测
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onOpenObservation("abtest");
-                      }}
-                    >
-                      Step 5 A/B
-                    </button>
-                  </div>
+                  {displayStage === "eval" && (
+                    <div className="self-evolution-process-observation-actions" aria-label="观测查看入口">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenObservation("eval");
+                        }}
+                        aria-label="进入 Step 2 观测"
+                      >
+                        <EyeOutlined />
+                        Step 2 观测
+                      </button>
+                    </div>
+                  )}
                   {shouldShowCutoverCard && (
                     <div className="self-evolution-cutover-decision" aria-label="ABTest 切流确认">
                       <div className="self-evolution-cutover-decision-head">
