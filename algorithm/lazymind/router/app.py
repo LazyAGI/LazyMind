@@ -13,16 +13,15 @@ logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
-    if not config['enable_router']:
-        # Fallback mode: behave exactly like the original chat service
-        from lazymind.chat.app import create_app as create_chat_app
-        return create_chat_app()
+    # Build on top of the chat app so that all chat-side routers (health,
+    # rewrite, skill_review, model_features, model_check) are always mounted.
+    from lazymind.chat.app import create_app as create_chat_app
 
-    # Router mode
-    return _create_router_app()
+    app = create_chat_app()
+    return _create_router_app(app) if config['enable_router'] else app
 
 
-def _create_router_app() -> FastAPI:
+def _create_router_app(app: FastAPI) -> FastAPI:
     from lazymind.router.db.client import get_engine
     from lazymind.router.db.models import Base
     from lazymind.router.core.process_manager import get_process_manager
@@ -35,21 +34,17 @@ def _create_router_app() -> FastAPI:
         yield
         await _shutdown(get_process_manager)
 
-    app = FastAPI(
-        title='LazyMind Router API',
-        description='Multi-algorithm router with AB testing and transparent proxy',
-        version='1.0.0',
-        lifespan=lifespan,
-    )
+    # The app was already constructed by create_chat_app(), so we cannot pass
+    # lifespan via the FastAPI() constructor. Attach it afterwards instead. The
+    # chat app has no lifespan of its own, so overriding here is safe.
+    app.router.lifespan_context = lifespan
 
     from lazymind.router.api import (
-        health_routes,
         proxy_routes,
         algorithm_routes,
         strategy_routes,
         diagnostics_routes,
     )
-    app.include_router(health_routes.router)
     app.include_router(proxy_routes.router)
     app.include_router(algorithm_routes.router)
     app.include_router(strategy_routes.router)
