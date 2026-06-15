@@ -57,11 +57,18 @@ def _objective_prompt(ctx: SubAgentContext) -> str:
     if ctx.input_artifact_keys:
         lines.append(f'Input artifact keys you may read: {", ".join(ctx.input_artifact_keys)}')
     lines.append(
-        'You MUST produce the following output artifacts via save_artifact before finishing: '
+        'You MUST call save_artifact for EACH of the following keys before you finish — '
+        'do NOT skip this step even if you have already written the results in plain text: '
         + ', '.join(ctx.output_artifact_keys)
     )
     lines.append(
-        'When all required artifacts are saved, write a final summary that contains the '
+        'IMPORTANT: Writing results in your reply text does NOT count as saving an artifact. '
+        'You must explicitly call save_artifact(key=..., value=...) for every required key. '
+        'The task is considered INCOMPLETE and will be marked as FAILED if any required artifact '
+        'key is missing. Do not write a final summary until all save_artifact calls are done.'
+    )
+    lines.append(
+        'After all required artifacts are saved, write a final summary that contains the '
         'actual results and key findings — not only a reference to the artifacts. '
         'For example, if you searched for information, include the information itself. '
         'The summary must be self-contained and directly usable by the caller without '
@@ -271,6 +278,7 @@ async def run_subagent_stream(
                 saved_keys=list(saved),
                 missing_keys=missing,
                 force_result=final_result,
+                ctx=ctx,
             )
             cost = round(time.time() - start_time, 3)
             if is_ok:
@@ -366,11 +374,16 @@ def _evaluate_completion(
     saved_keys: List[str],
     missing_keys: List[str],
     force_result: Any,
+    ctx: Optional[Any] = None,
 ) -> tuple:
     """Ask the LLM to judge whether the SubAgent substantively completed the objective.
 
     Returns (is_succeeded: bool, summary: str).
     The summary must contain actual findings/results, not references to artifacts.
+
+    If the LLM judges YES and ctx is provided, the final output is auto-saved as a
+    text artifact for each missing key so the task is not penalised for a missing
+    save_artifact call when the content is clearly present in the final output.
     """
     trace = _steps_to_trace(steps)
     force_text = str(force_result or '').strip()
@@ -378,7 +391,8 @@ def _evaluate_completion(
     missing_str = ', '.join(missing_keys) if missing_keys else '（无）'
 
     prompt_lines = [
-        'You are reviewing the execution of an autonomous SubAgent that may have stopped early.',
+        'You are reviewing the execution of an autonomous SubAgent that stopped without '
+        'calling save_artifact for all required output keys.',
         '',
         f'Original objective: {objective}',
         f'Required artifact keys: {missing_str or saved_str}',
@@ -389,14 +403,21 @@ def _evaluate_completion(
         trace,
     ]
     if force_text:
-        prompt_lines += ['', f'Agent final output (may be incomplete): {force_text[:1000]}']
+        prompt_lines += ['', f'Agent final output: {force_text[:2000]}']
     prompt_lines += [
+        '',
+        'Evaluation rules:',
+        '- Answer YES if the agent gathered and delivered the information needed to satisfy '
+        'the objective, even if it forgot to call save_artifact. The final output text counts '
+        'as evidence of completion.',
+        '- Answer NO only if the agent clearly failed to obtain the required information '
+        '(e.g. all tool calls errored out, or the output is empty / irrelevant).',
         '',
         'Based on the above, answer TWO things:',
         '1. Did the SubAgent substantively achieve the objective? Reply YES or NO on the first line.',
         '2. Write a self-contained summary of what was actually accomplished (include key findings, '
         'data, or results inline — not references to artifacts). '
-        'If nothing useful was accomplished, briefly explain what went wrong and what steps were taken.',
+        'If nothing useful was accomplished, briefly explain what went wrong.',
     ]
     eval_prompt = '\n'.join(prompt_lines)
 
@@ -411,6 +432,23 @@ def _evaluate_completion(
         is_succeeded = first_line.startswith('YES')
         rest = text[len(text.split('\n')[0]):].strip() if '\n' in text else text
         summary = rest if rest else text
+
+        # Auto-save final output as text artifacts for each missing key when the
+        # LLM judges the task as succeeded. This recovers from models that forget
+        # to call save_artifact but include the results in their final reply.
+        if is_succeeded and ctx is not None and force_text and missing_keys:
+            content = summary if summary else force_text
+            for key in missing_keys:
+                try:
+                    seq = ctx.next_artifact_seq(key)
+                    ctx.record_local_artifact(key, 'text', {'text': content}, seq)
+                    ctx.db.save_artifact(ctx.task_id, key, 'text', {'text': content}, seq)
+                    ctx.emit({'type': 'artifact', 'artifact_key': key,
+                              'content_type': 'text', 'seq': seq, 'value': {'text': content}})
+                    LOG.info(f'[SubAgent] auto-saved missing artifact key={key!r} for task={ctx.task_id}')
+                except Exception as save_err:
+                    LOG.warning(f'[SubAgent] auto-save artifact key={key!r} failed: {save_err}')
+
         return is_succeeded, summary
     except Exception as e:
         LOG.warning(f'[SubAgent] _evaluate_completion LLM call failed: {e}')

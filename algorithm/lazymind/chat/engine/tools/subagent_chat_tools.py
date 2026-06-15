@@ -6,7 +6,8 @@ from typing import Any, Dict, List, Optional
 
 import lazyllm
 
-from lazymind.chat.engine.tools.infra import get_core_api, handle_tool_errors, tool_success
+from lazymind.chat.engine.subagent.db import TaskQueryDB
+from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
 from lazyllm.tools.agent.base import _write_agent_data
 
 # How often to emit a heartbeat while polling in auto mode (seconds).
@@ -48,7 +49,7 @@ def create_subagent(
 
     Args:
         agent_type (str): The kind of SubAgent, e.g. 'image_generation', 'research'.
-        title (str): A short human-readable task title, e.g. '生图'.
+        title (str): A short human-readable task title, e.g. 'generate image'.
         objective (str): A clear description of what the SubAgent must accomplish.
         params (dict): Optional parameters for the task, e.g. {"count": 4}.
         input_artifact_keys (list): Artifact keys this SubAgent may read from prior tasks.
@@ -91,15 +92,13 @@ def create_subagent(
     if mode == 'auto':
         last_heartbeat = time.time()
         status_row: Dict[str, Any] = {}
-        event_offset: int = 0
+        db = TaskQueryDB()
         while True:
             try:
-                status_row = get_core_api(f'/internal/subagent/tasks/{task_id}') or {}
+                status_row = db.get_task_status(task_id) or {}
             except Exception:
                 status_row = {}
             status = str(status_row.get('status') or '')
-            # Forward any new text/think frames from the SubAgent to the ChatAgent stream.
-            event_offset = _forward_subagent_events(task_id, event_offset)
             if status in _TERMINAL:
                 break
             now = time.time()
@@ -118,47 +117,33 @@ def create_subagent(
                 arts_lines = [_describe_artifact(a) for a in artifacts]
                 arts_text = '\n'.join(arts_lines)
                 msg = (
-                    f"任务'{title}'已完成。"
-                    + (f'摘要：{summary}\n' if summary else '')
-                    + f'产出物：\n{arts_text}'
+                    f"Task '{title}' completed."
+                    + (f' Summary: {summary}\n' if summary else '')
+                    + f'Artifacts:\n{arts_text}'
                 )
             else:
                 msg = (
-                    f"任务'{title}'已完成。"
-                    + (f'摘要：{summary}' if summary
-                       else f"产出 key：{', '.join(output_artifact_keys) or '（无）'}。")
+                    f"Task '{title}' completed."
+                    + (f' Summary: {summary}' if summary
+                       else f" Output keys: {', '.join(output_artifact_keys) or '(none)'}.")
                 )
             result['message'] = msg
         else:
             phase = status_row.get('current_phase') or status_row.get('status')
             summary = str(status_row.get('summary') or '').strip()
             resume_hint = (
-                f"如需继续，请调用 create_subagent(title='{title}', resume=True, ...) 以从断点恢复。"
+                f"To resume, call create_subagent(title='{title}', resume=True, ...) to continue from the last step."
             )
             if summary:
-                msg = f"任务'{title}'未完全成功：\n{summary}\n{resume_hint}"
+                msg = f"Task '{title}' did not fully succeed:\n{summary}\n{resume_hint}"
             else:
-                msg = f"任务'{title}'执行失败：{phase or status_row.get('status')}。{resume_hint}"
+                msg = f"Task '{title}' failed: {phase or status_row.get('status')}. {resume_hint}"
             result = {'status': 'failed', 'message': msg, 'summary': summary}
         return tool_success('create_subagent', result)
 
     # manual: return immediately; Go runs the SubAgent in the background.
-    msg = f"任务'{title}'已开始后台执行。可通过 get_subagent_status('{title}') 查询进度。"
+    msg = f"Task '{title}' started in the background. Use get_subagent_status('{title}') to check progress."
     return tool_success('create_subagent', {'status': 'ok', 'message': msg})
-
-
-def _forward_subagent_events(task_id: str, offset: int) -> int:
-    """Advance the event offset without forwarding anything to the ChatAgent stream.
-
-    SubAgent text/think output is displayed in the Task Center panel (right sidebar),
-    not in the main Chat stream. This function only advances the offset so the caller
-    can track progress without duplicating SubAgent output into the Chat conversation.
-    """
-    try:
-        data = get_core_api(f'/internal/subagent/tasks/{task_id}/events?from={offset}') or {}
-    except Exception:
-        return offset
-    return int(data.get('next_from') or offset + len(data.get('events') or []))
 
 
 def _describe_artifact(a: Dict[str, Any]) -> str:
@@ -174,34 +159,34 @@ def _describe_artifact(a: Dict[str, Any]) -> str:
             value = {'text': value}
 
     source = value.get('_source_tool') or ''
-    source_prefix = f'通过 {source} ' if source else ''
+    source_prefix = f'via {source} ' if source else ''
 
     if ct == 'text':
         text = str(value.get('text') or '')
         length = len(text)
-        return f'  {source_prefix}得到文本（{length} 字符），存放在 key={key}'
+        return f'  {source_prefix}text ({length} chars) stored at key={key}'
     if ct == 'json':
         data = value.get('data')
         if isinstance(data, dict):
-            detail = f'JSON 对象，顶层 key：{", ".join(list(data.keys())[:8])}'
+            detail = f'JSON object, top-level keys: {", ".join(list(data.keys())[:8])}'
         elif isinstance(data, list):
-            detail = f'JSON 数组，共 {len(data)} 条'
+            detail = f'JSON array, {len(data)} items'
         else:
-            detail = 'JSON 数据'
-        return f'  {source_prefix}得到 {detail}，存放在 key={key}'
+            detail = 'JSON data'
+        return f'  {source_prefix}{detail} stored at key={key}'
     if ct == 'image':
         path = str(value.get('path') or '')
-        name = path.split('/')[-1] if path else '未知'
-        return f'  {source_prefix}得到图片（{name}），存放在 key={key}'
+        name = path.split('/')[-1] if path else 'unknown'
+        return f'  {source_prefix}image ({name}) stored at key={key}'
     if ct == 'file':
         filename = value.get('filename') or ''
         size = value.get('size') or 0
         size_str = f'{size // 1024} KB' if size >= 1024 else f'{size} B'
-        return f'  {source_prefix}得到文件 {filename}（{size_str}），存放在 key={key}'
+        return f'  {source_prefix}file {filename} ({size_str}) stored at key={key}'
     if ct == 'file_list':
         paths = value.get('paths') or []
-        return f'  {source_prefix}得到 {len(paths)} 个文件，存放在 key={key}'
-    return f'  [{key}]（{ct}），存放在 key={key}'
+        return f'  {source_prefix}{len(paths)} files stored at key={key}'
+    return f'  [{key}] ({ct}) stored at key={key}'
 
 
 def _fetch_task_artifacts(task_id: str) -> List[Dict[str, Any]]:
@@ -220,18 +205,16 @@ def _list_conversation_tasks() -> List[Dict[str, Any]]:
     if not conv_id:
         return []
     try:
-        data = get_core_api(f'/conversations/{conv_id}/tasks') or {}
+        return TaskQueryDB().list_tasks_by_conversation(conv_id)
     except Exception:
         return []
-    tasks = data.get('tasks')
-    return tasks if isinstance(tasks, list) else []
 
 
 def _resolve_task(task_ref: str, tasks: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     ref = str(task_ref or '').strip()
     if not ref:
         return None
-    # "第N个" / "第N步"
+    # Chinese ordinal reference, e.g. "第N个" / "第N步" (task index by position)
     import re
     m = re.search(r'第\s*(\d+)\s*[个步]', ref)
     if m:
@@ -269,12 +252,12 @@ def list_subagents(status: Optional[str] = None) -> Dict[str, Any]:
         tasks = [t for t in tasks if str(t.get('status') or '') == status]
     lines = []
     for t in tasks:
-        line = f"{t.get('seq_in_conversation')}. {t.get('title')}（{t.get('agent_type')}, {t.get('status')}"
+        line = f"{t.get('seq_in_conversation')}. {t.get('title')} ({t.get('agent_type')}, {t.get('status')}"
         if str(t.get('status')) == 'running':
             line += f", {t.get('progress_pct', 0)}%"
-        line += '）'
+        line += ')'
         lines.append(line)
-    msg = '\n'.join(lines) if lines else '当前对话暂无 SubAgent 任务。'
+    msg = '\n'.join(lines) if lines else 'No SubAgent tasks in the current conversation.'
     return tool_success('list_subagents', {'status': 'ok', 'message': msg, 'tasks': tasks})
 
 
@@ -283,24 +266,21 @@ def get_subagent_status(task_ref: str) -> Dict[str, Any]:
     """Get the status of a SubAgent task.
 
     Args:
-        task_ref (str): A task reference: title, "第N个", or the agent type name.
-
-    Returns:
-        A status summary including progress and current phase.
+        task_ref (str): A task reference: title, "task N" (e.g. "第N个"), or the agent type name.
     """
     tasks = _list_conversation_tasks()
     task = _resolve_task(task_ref, tasks)
     if not task:
-        return tool_success('get_subagent_status', {'status': 'empty', 'message': f'未找到任务：{task_ref}'})
+        return tool_success('get_subagent_status', {'status': 'empty', 'message': f'Task not found: {task_ref}'})
     msg = (
-        f"{task.get('title')}（{task.get('status')}）：已完成 {task.get('progress_pct', 0)}%"
+        f"{task.get('title')} ({task.get('status')}): {task.get('progress_pct', 0)}% complete"
     )
     phase = task.get('current_phase')
     if phase:
-        msg += f'，{phase}'
+        msg += f', {phase}'
     eta = task.get('estimated_sec')
     if eta:
-        msg += f'，预计还需 {eta} 秒。'
+        msg += f', estimated {eta}s remaining.'
     return tool_success('get_subagent_status', {'status': 'ok', 'message': msg, 'task': task})
 
 
@@ -309,7 +289,7 @@ def list_subagent_artifacts(task_ref: str) -> Dict[str, Any]:
     """List the artifact keys produced by a SubAgent task.
 
     Args:
-        task_ref (str): A task reference: title, "第N个", or the agent type name.
+        task_ref (str): A task reference: title, "task N" (e.g. "第N个"), or the agent type name.
 
     Returns:
         A summary of artifact keys and their content types.
@@ -317,13 +297,13 @@ def list_subagent_artifacts(task_ref: str) -> Dict[str, Any]:
     tasks = _list_conversation_tasks()
     task = _resolve_task(task_ref, tasks)
     if not task:
-        return tool_success('list_subagent_artifacts', {'status': 'empty', 'message': f'未找到任务：{task_ref}'})
+        return tool_success('list_subagent_artifacts', {'status': 'empty', 'message': f'Task not found: {task_ref}'})
     arts = task.get('artifacts') or []
     summary: Dict[str, str] = {}
     for a in arts:
         summary[a.get('artifact_key')] = a.get('content_type')
-    parts = [f'{k}（{v}）' for k, v in summary.items()]
-    msg = f"{task.get('title')}任务共有 {len(summary)} 个成果：" + ('、'.join(parts) if parts else '（无）')
+    parts = [f'{k} ({v})' for k, v in summary.items()]
+    msg = f"Task '{task.get('title')}' has {len(summary)} artifact(s): " + (', '.join(parts) if parts else '(none)')
     return tool_success('list_subagent_artifacts', {'status': 'ok', 'message': msg, 'keys': summary})
 
 
@@ -332,7 +312,7 @@ def get_subagent_artifacts(task_ref: str, keys: Optional[List[str]] = None) -> D
     """Get the artifacts produced by a SubAgent task.
 
     Args:
-        task_ref (str): A task reference: title, "第N个", or the agent type name.
+        task_ref (str): A task reference: title, "task N" (e.g. "第N个"), or the agent type name.
         keys (list): Optional list of artifact keys to fetch; omit to return all.
 
     Returns:
@@ -341,7 +321,7 @@ def get_subagent_artifacts(task_ref: str, keys: Optional[List[str]] = None) -> D
     tasks = _list_conversation_tasks()
     task = _resolve_task(task_ref, tasks)
     if not task:
-        return tool_success('get_subagent_artifacts', {'status': 'empty', 'message': f'未找到任务：{task_ref}'})
+        return tool_success('get_subagent_artifacts', {'status': 'empty', 'message': f'Task not found: {task_ref}'})
     arts = task.get('artifacts') or []
     if keys:
         keyset = set(keys)
