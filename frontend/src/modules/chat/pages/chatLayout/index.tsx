@@ -74,6 +74,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     initchatConfig || {},
   );
   const [knowledgeRefreshKey, setKnowledgeRefreshKey] = useState(0);
+  const [isTaskPanelCollapsed, setIsTaskPanelCollapsed] = useState(false);
   const [isRestoringConversation, setIsRestoringConversation] = useState(() => {
     try {
       return Boolean(sessionStorage.getItem(CHAT_RESUME_CONVERSATION_KEY));
@@ -481,9 +482,23 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         disabledDescription={chatDisabledDescription}
         disabledAction={chatDisabledAction}
       />
-      {tasks.length > 0 && (
+      {tasks.length > 0 && isTaskPanelCollapsed && (
+        <button
+          type="button"
+          className="task-panel-restore-btn"
+          onClick={() => setIsTaskPanelCollapsed(false)}
+          title="展开 SubAgent 面板"
+        >
+          <span className="task-panel-restore-icon">&#8249;</span>
+          <span className="task-panel-restore-label">SubAgent ({tasks.length})</span>
+        </button>
+      )}
+      {tasks.length > 0 && !isTaskPanelCollapsed && (
         <div className="right-box">
-          <TaskCenter tasks={tasks} />
+          <TaskCenter
+            tasks={tasks}
+            onClose={() => setIsTaskPanelCollapsed(true)}
+          />
         </div>
       )}
     </div>

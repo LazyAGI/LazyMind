@@ -88,12 +88,15 @@ def create_subagent(
     if mode == 'auto':
         last_heartbeat = time.time()
         status_row: Dict[str, Any] = {}
+        event_offset: int = 0
         while True:
             try:
                 status_row = get_core_api(f'/internal/subagent/tasks/{task_id}') or {}
             except Exception:
                 status_row = {}
             status = str(status_row.get('status') or '')
+            # Forward any new text/think frames from the SubAgent to the ChatAgent stream.
+            event_offset = _forward_subagent_events(task_id, event_offset)
             if status in _TERMINAL:
                 break
             now = time.time()
@@ -103,18 +106,118 @@ def create_subagent(
             time.sleep(_POLL_INTERVAL)
 
         if status_row.get('status') == 'succeeded':
-            msg = (
-                f"任务'{title}'已完成。产出 key：{', '.join(output_artifact_keys) or '（无）'}。"
-                f"如需完整内容可调用 get_subagent_artifacts('{title}')。"
-            )
+            summary = str(status_row.get('summary') or '').strip()
+            artifacts = _fetch_task_artifacts(task_id)
+            result: Dict[str, Any] = {'status': 'ok', 'artifacts': artifacts}
+            if summary:
+                result['summary'] = summary
+            if artifacts:
+                arts_lines = [_describe_artifact(a) for a in artifacts]
+                arts_text = '\n'.join(arts_lines)
+                msg = (
+                    f"任务'{title}'已完成。"
+                    + (f'摘要：{summary}\n' if summary else '')
+                    + f'产出物：\n{arts_text}'
+                )
+            else:
+                msg = (
+                    f"任务'{title}'已完成。"
+                    + (f'摘要：{summary}' if summary
+                       else f"产出 key：{', '.join(output_artifact_keys) or '（无）'}。")
+                )
+            result['message'] = msg
         else:
-            phase = status_row.get('current_phase') or status_row.get('summary') or status_row.get('status')
-            msg = f"任务'{title}'执行失败：{phase}"
-        return tool_success('create_subagent', {'status': 'ok', 'message': msg})
+            phase = status_row.get('current_phase') or status_row.get('status')
+            summary = str(status_row.get('summary') or '').strip()
+            if summary:
+                msg = f"任务'{title}'未完全成功：\n{summary}"
+            else:
+                msg = f"任务'{title}'执行失败：{phase or status_row.get('status')}"
+            result = {'status': 'failed', 'message': msg, 'summary': summary}
+        return tool_success('create_subagent', result)
 
     # manual: return immediately; Go runs the SubAgent in the background.
     msg = f"任务'{title}'已开始后台执行。可通过 get_subagent_status('{title}') 查询进度。"
     return tool_success('create_subagent', {'status': 'ok', 'message': msg})
+
+
+def _forward_subagent_events(task_id: str, offset: int) -> int:
+    """Fetch new text/think events from Go Redis stream and forward to ChatAgent via _write_agent_data.
+
+    Returns the next offset to use on the following call.
+    """
+    try:
+        data = get_core_api(f'/internal/subagent/tasks/{task_id}/events?from={offset}') or {}
+    except Exception:
+        return offset
+    events = data.get('events') or []
+    next_offset = int(data.get('next_from') or offset + len(events))
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        ev_type = str(ev.get('type') or '')
+        if ev_type == 'text':
+            text = str(ev.get('text') or '')
+            if text:
+                _write_agent_data('subagent_text', task_id=task_id, text=text)
+        elif ev_type == 'think':
+            think = str(ev.get('think') or '')
+            if think:
+                _write_agent_data('subagent_think', task_id=task_id, think=think)
+    return next_offset
+
+
+def _describe_artifact(a: Dict[str, Any]) -> str:
+    """Return a one-line human-readable description of an artifact for the ChatAgent."""
+    key = a.get('artifact_key') or '?'
+    ct = a.get('content_type') or 'text'
+    value = a.get('value') or {}
+    if isinstance(value, str):
+        try:
+            import json as _json
+            value = _json.loads(value)
+        except Exception:
+            value = {'text': value}
+
+    source = value.get('_source_tool') or ''
+    source_prefix = f'通过 {source} ' if source else ''
+
+    if ct == 'text':
+        text = str(value.get('text') or '')
+        length = len(text)
+        return f'  {source_prefix}得到文本（{length} 字符），存放在 key={key}'
+    if ct == 'json':
+        data = value.get('data')
+        if isinstance(data, dict):
+            detail = f'JSON 对象，顶层 key：{", ".join(list(data.keys())[:8])}'
+        elif isinstance(data, list):
+            detail = f'JSON 数组，共 {len(data)} 条'
+        else:
+            detail = 'JSON 数据'
+        return f'  {source_prefix}得到 {detail}，存放在 key={key}'
+    if ct == 'image':
+        path = str(value.get('path') or '')
+        name = path.split('/')[-1] if path else '未知'
+        return f'  {source_prefix}得到图片（{name}），存放在 key={key}'
+    if ct == 'file':
+        filename = value.get('filename') or ''
+        size = value.get('size') or 0
+        size_str = f'{size // 1024} KB' if size >= 1024 else f'{size} B'
+        return f'  {source_prefix}得到文件 {filename}（{size_str}），存放在 key={key}'
+    if ct == 'file_list':
+        paths = value.get('paths') or []
+        return f'  {source_prefix}得到 {len(paths)} 个文件，存放在 key={key}'
+    return f'  [{key}]（{ct}），存放在 key={key}'
+
+
+def _fetch_task_artifacts(task_id: str) -> List[Dict[str, Any]]:
+    """Fetch artifacts for a task by scanning the conversation task list."""
+    tasks = _list_conversation_tasks()
+    for t in tasks:
+        if str(t.get('task_id') or t.get('id') or '') == task_id:
+            arts = t.get('artifacts') or []
+            return list(arts) if isinstance(arts, list) else []
+    return []
 
 
 def _list_conversation_tasks() -> List[Dict[str, Any]]:

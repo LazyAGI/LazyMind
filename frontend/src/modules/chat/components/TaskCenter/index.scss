@@ -15,6 +15,24 @@
       font-weight: 600;
       color: var(--coldgrey-9, #1f2733);
     }
+
+    .task-center-close-btn {
+      background: none;
+      border: none;
+      padding: 4px 6px;
+      cursor: pointer;
+      color: #8c98a8;
+      font-size: 13px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      transition: background 0.15s, color 0.15s;
+
+      &:hover {
+        background: #f0f4fa;
+        color: #2f6bff;
+      }
+    }
   }
 
   .ant-tabs {
@@ -42,18 +60,107 @@
   }
 }
 
+// ── Collapsible section (执行过程 / 产出) ────────────────────────────────────
+.task-section {
+  margin-top: 8px;
+
+  .task-section-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    background: none;
+    border: none;
+    padding: 2px 0;
+    cursor: pointer;
+    color: #6b7787;
+    font-size: 12px;
+
+    &:hover {
+      color: #2f6bff;
+    }
+
+    .task-section-icon {
+      font-size: 10px;
+      flex-shrink: 0;
+    }
+
+    .task-section-title {
+      font-size: 12px;
+    }
+  }
+
+  .task-section-body {
+    margin-top: 4px;
+  }
+}
+
+// ── Execution log ─────────────────────────────────────────────────────────────
+.task-execution-log {
+  border-left: 2px solid #e6ecf3;
+  padding-left: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  .task-log-text {
+    font-size: 12px;
+    color: #3a4553;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+  }
+
+  .task-log-think {
+    font-size: 11px;
+    color: #8c98a8;
+    font-style: italic;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+  }
+}
+
+// ── Task card ─────────────────────────────────────────────────────────────────
 .task-card {
   border: 1px solid #e6ecf3;
   border-radius: 10px;
   padding: 12px;
   background: #fff;
+  transition: box-shadow 0.15s ease;
+
+  &:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  }
+
+  &.task-card-collapsed {
+    padding-bottom: 12px;
+  }
 
   .task-card-header {
     display: flex;
     align-items: center;
     gap: 6px;
     margin-bottom: 8px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+
+    .task-card-collapse-btn {
+      flex-shrink: 0;
+      background: none;
+      border: none;
+      padding: 0 2px;
+      cursor: pointer;
+      color: #8c98a8;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+
+      &:hover {
+        color: #2f6bff;
+      }
+    }
 
     .task-card-title {
       font-weight: 600;
@@ -72,6 +179,7 @@
       background: #eef3ff;
       border-radius: 4px;
       padding: 1px 6px;
+      flex-shrink: 0;
     }
   }
 
@@ -96,11 +204,13 @@
   }
 }
 
+// ── Task status badge ─────────────────────────────────────────────────────────
 .task-status {
   display: inline-flex;
   align-items: center;
   gap: 3px;
   font-size: 12px;
+  flex-shrink: 0;
 
   &.task-status-success {
     color: #16a34a;
@@ -113,19 +223,13 @@
   }
 }
 
-.task-artifacts {
-  margin-top: 10px;
-
-  .task-artifacts-title {
-    font-size: 12px;
-    color: #6b7787;
-    margin-bottom: 6px;
-  }
-
+// ── Artifacts ─────────────────────────────────────────────────────────────────
+.task-artifacts-inner {
   .task-artifacts-grid {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+    margin-bottom: 6px;
   }
 
   .task-artifact-thumb {

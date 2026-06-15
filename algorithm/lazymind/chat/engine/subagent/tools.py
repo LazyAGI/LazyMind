@@ -45,7 +45,8 @@ def _build_artifact_value(value: Any, content_type: str) -> Dict[str, Any]:
 
 
 @handle_tool_errors
-def save_artifact(key: str, value: Any, content_type: str = 'text') -> Dict[str, Any]:
+def save_artifact(key: str, value: Any, content_type: str = 'text',
+                  source_tool: Optional[str] = None) -> Dict[str, Any]:
     """Save an output artifact produced by this SubAgent.
 
     File-type values must be local absolute paths; the framework copies them into the
@@ -58,6 +59,8 @@ def save_artifact(key: str, value: Any, content_type: str = 'text') -> Dict[str,
         value (Any): The artifact value. For text: a string. For json: a dict/list.
             For image/file: a local absolute path. For file_list: a list of absolute paths.
         content_type (str): One of text, json, image, file, file_list. Default text.
+        source_tool (str): Optional name of the tool that produced this artifact,
+            e.g. 'web_search', 'wikipedia', 'image_generation'. Used for display only.
 
     Returns:
         A confirmation that the artifact was saved.
@@ -65,6 +68,8 @@ def save_artifact(key: str, value: Any, content_type: str = 'text') -> Dict[str,
     ctx = require_context()
     ct = content_type if content_type in _CONTENT_TYPES else 'text'
     built = _build_artifact_value(value, ct)
+    if source_tool:
+        built['_source_tool'] = str(source_tool)
     seq = ctx.next_artifact_seq(key)
     ctx.record_local_artifact(key, ct, built, seq)
     ctx.emit({

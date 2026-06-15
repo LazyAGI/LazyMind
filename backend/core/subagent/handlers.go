@@ -3,6 +3,7 @@ package subagent
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"lazymind/core/common"
@@ -151,6 +152,35 @@ func GetTaskArtifacts(w http.ResponseWriter, r *http.Request) {
 		out = append(out, toArtifactDTO(&arts[i]))
 	}
 	common.ReplyOK(w, map[string]any{"artifacts": out})
+}
+
+// InternalGetTaskEvents handles GET /internal/subagent/tasks/{task_id}/events?from={offset}
+// for Python auto polling. Returns a batch of raw task stream events from the given offset.
+// The caller increments the offset by the number of events returned to paginate forward.
+func InternalGetTaskEvents(w http.ResponseWriter, r *http.Request) {
+	taskID := common.PathVar(r, "task_id")
+	if taskID == "" {
+		common.ReplyErr(w, "task_id required", http.StatusBadRequest)
+		return
+	}
+	from := int64(0)
+	if s := r.URL.Query().Get("from"); s != "" {
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
+			from = n
+		}
+	}
+	rdb := store.Redis()
+	ctx := r.Context()
+	raws, err := StreamEventsFrom(ctx, rdb, taskID, from)
+	if err != nil {
+		common.ReplyErr(w, "read events failed", http.StatusInternalServerError)
+		return
+	}
+	events := make([]json.RawMessage, 0, len(raws))
+	for _, raw := range raws {
+		events = append(events, json.RawMessage(raw))
+	}
+	common.ReplyOK(w, map[string]any{"events": events, "next_from": from + int64(len(raws))})
 }
 
 // InternalGetTaskStatus handles GET /internal/subagent/tasks/{task_id} for Python auto polling.

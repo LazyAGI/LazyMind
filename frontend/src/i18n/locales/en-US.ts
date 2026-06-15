@@ -777,6 +777,7 @@ const enUS = {
     running: "Running",
     history: "History",
     artifacts: "Artifacts",
+    executionProcess: "Execution Process",
     empty: "No tasks",
     statusSucceeded: "Done",
     statusFailed: "Failed",

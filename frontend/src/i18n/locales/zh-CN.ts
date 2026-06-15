@@ -743,6 +743,7 @@ const zhCN = {
     running: "执行中",
     history: "历史任务",
     artifacts: "产出",
+    executionProcess: "执行过程",
     empty: "暂无任务",
     statusSucceeded: "已完成",
     statusFailed: "失败",

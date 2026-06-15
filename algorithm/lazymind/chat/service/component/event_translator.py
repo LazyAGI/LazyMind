@@ -127,6 +127,21 @@ class AgentEventFrameTranslator:
                     for tr in tool_results
                 ]
                 frames.append(_stream_frame(text=''.join(parts)))
+
+        if event_type == 'subagent_text':
+            text = str(event.get('text') or '')
+            if text:
+                for has_text, frame in _iter_scanned_text_frames(
+                    self.text_scanner.feed(text), self.citation_state,
+                ):
+                    self.streamed_text = self.streamed_text or has_text
+                    frames.append(frame)
+
+        if event_type == 'subagent_think':
+            think = str(event.get('think') or '')
+            if think:
+                frames.append(_stream_frame(think=think))
+
         return frames
 
     def flush(self) -> list[dict[str, Any]]:

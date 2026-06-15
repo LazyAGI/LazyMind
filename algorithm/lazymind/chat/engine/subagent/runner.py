@@ -66,7 +66,13 @@ def _objective_prompt(ctx: SubAgentContext) -> str:
         'You MUST produce the following output artifacts via save_artifact before finishing: '
         + ', '.join(ctx.output_artifact_keys)
     )
-    lines.append('When all required artifacts are saved, output a short final summary.')
+    lines.append(
+        'When all required artifacts are saved, write a final summary that contains the '
+        'actual results and key findings — not only a reference to the artifacts. '
+        'For example, if you searched for information, include the information itself. '
+        'The summary must be self-contained and directly usable by the caller without '
+        'opening any artifact.'
+    )
     return '\n'.join(lines)
 
 
@@ -213,8 +219,23 @@ async def run_subagent_stream(
         saved = set(ctx.saved_keys())
         missing = [k for k in output_keys if k not in saved]
         if missing:
-            yield _sse({'type': 'error', 'task_id': task_id, 'status': 'failed',
-                        'message': f'缺少 artifact: {", ".join(missing)}'})
+            steps = db.load_steps(task_id)
+            is_ok, eval_summary = _evaluate_completion(
+                llm=llm,
+                objective=ctx.objective,
+                steps=steps,
+                saved_keys=list(saved),
+                missing_keys=missing,
+                force_result=final_result,
+            )
+            cost = round(time.time() - start_time, 3)
+            if is_ok:
+                yield _sse({'type': 'done', 'task_id': task_id, 'status': 'succeeded',
+                            'summary': eval_summary, 'cost': cost})
+            else:
+                yield _sse({'type': 'error', 'task_id': task_id, 'status': 'failed',
+                            'summary': eval_summary,
+                            'message': f'缺少 artifact: {", ".join(missing)}。{eval_summary}'})
             yield 'data: [DONE]\n\n'
             return
 
@@ -225,7 +246,16 @@ async def run_subagent_stream(
         yield 'data: [DONE]\n\n'
     except Exception as exc:  # noqa: BLE001
         LOG.exception('[SubAgent] run failed')
-        yield _sse({'type': 'error', 'task_id': task_id, 'status': 'failed', 'message': str(exc)})
+        exc_summary = str(exc)
+        if db is not None:
+            try:
+                steps = db.load_steps(task_id)
+                trace = _steps_to_trace(steps)
+                exc_summary = f'异常：{exc}\n执行路径：\n{trace}'
+            except Exception:
+                pass
+        yield _sse({'type': 'error', 'task_id': task_id, 'status': 'failed',
+                    'summary': exc_summary, 'message': exc_summary})
         yield 'data: [DONE]\n\n'
     finally:
         if db is not None:
@@ -260,10 +290,87 @@ def _coerce_dict(value: Any) -> Dict[str, Any]:
 
 def _result_summary(result: Any, output_keys: List[str]) -> str:
     if isinstance(result, str) and result.strip():
-        return result.strip()[:500]
+        return result.strip()
     if output_keys:
         return f'已完成，产出：{", ".join(output_keys)}'
     return '已完成'
+
+
+def _steps_to_trace(steps: List[Dict[str, Any]]) -> str:
+    """Convert persisted steps into a compact execution trace string for LLM review."""
+    lines: List[str] = []
+    for s in steps:
+        role = s.get('role', '')
+        content = s.get('content') or {}
+        if role == 'assistant':
+            calls = content.get('tool_calls') or []
+            names = ', '.join(tc.get('name', '?') for tc in calls) if calls else '（无工具调用）'
+            lines.append(f'[assistant] called: {names}')
+        elif role == 'tool':
+            results = content.get('tool_results') or []
+            for r in results:
+                name = r.get('name', '?')
+                res = str(r.get('result', ''))[:300]
+                lines.append(f'[tool:{name}] {res}')
+    return '\n'.join(lines) if lines else '（无步骤记录）'
+
+
+def _evaluate_completion(
+    llm: Any,
+    objective: str,
+    steps: List[Dict[str, Any]],
+    saved_keys: List[str],
+    missing_keys: List[str],
+    force_result: Any,
+) -> tuple:
+    """Ask the LLM to judge whether the SubAgent substantively completed the objective.
+
+    Returns (is_succeeded: bool, summary: str).
+    The summary must contain actual findings/results, not references to artifacts.
+    """
+    trace = _steps_to_trace(steps)
+    force_text = str(force_result or '').strip()
+    saved_str = ', '.join(saved_keys) if saved_keys else '（无）'
+    missing_str = ', '.join(missing_keys) if missing_keys else '（无）'
+
+    prompt_lines = [
+        'You are reviewing the execution of an autonomous SubAgent that may have stopped early.',
+        '',
+        f'Original objective: {objective}',
+        f'Required artifact keys: {missing_str or saved_str}',
+        f'Actually saved artifact keys: {saved_str}',
+        f'Missing artifact keys: {missing_str}',
+        '',
+        'Execution trace (tool calls and results):',
+        trace,
+    ]
+    if force_text:
+        prompt_lines += ['', f'Agent final output (may be incomplete): {force_text[:1000]}']
+    prompt_lines += [
+        '',
+        'Based on the above, answer TWO things:',
+        '1. Did the SubAgent substantively achieve the objective? Reply YES or NO on the first line.',
+        '2. Write a self-contained summary of what was actually accomplished (include key findings, '
+        'data, or results inline — not references to artifacts). '
+        'If nothing useful was accomplished, briefly explain what went wrong and what steps were taken.',
+    ]
+    eval_prompt = '\n'.join(prompt_lines)
+
+    try:
+        summarize_llm = llm.share(stream=False)
+        resp = summarize_llm(eval_prompt)
+        text = resp if isinstance(resp, str) else (
+            resp.get('content', '') if isinstance(resp, dict) else ''
+        )
+        text = (text or '').strip()
+        first_line = text.split('\n')[0].strip().upper()
+        is_succeeded = first_line.startswith('YES')
+        rest = text[len(text.split('\n')[0]):].strip() if '\n' in text else text
+        summary = rest if rest else text
+        return is_succeeded, summary
+    except Exception as e:
+        LOG.warning(f'[SubAgent] _evaluate_completion LLM call failed: {e}')
+        return False, f'执行中断，已完成步骤数：{len(steps)}，缺少产出：{missing_str}'
 
 
 def _rebuild_history_from_steps(db: SubAgentDB, task_id: str) -> List[Dict[str, Any]]:

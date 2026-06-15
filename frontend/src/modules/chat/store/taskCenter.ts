@@ -19,6 +19,11 @@ export interface TaskArtifact {
   value: any;
 }
 
+export interface TaskLogEntry {
+  type: "text" | "think";
+  content: string;
+}
+
 export interface SubAgentTask {
   task_id: string;
   conversation_id?: string;
@@ -32,6 +37,7 @@ export interface SubAgentTask {
   summary?: string;
   output_artifact_keys?: string[];
   artifacts: TaskArtifact[];
+  execution_log: TaskLogEntry[];
 }
 
 const TERMINAL: TaskStatus[] = [
@@ -98,6 +104,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             summary: task.summary,
             output_artifact_keys: task.output_artifact_keys,
             artifacts: task.artifacts ?? [],
+            execution_log: task.execution_log ?? [],
             conversation_id: conversationId,
           },
         ];
@@ -151,6 +158,26 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           task.status = (event.status as TaskStatus) ?? "failed";
           task.summary = event.message ?? task.summary;
           break;
+        case "text": {
+          const textContent = event.text ?? "";
+          if (textContent) {
+            task.execution_log = [
+              ...(task.execution_log ?? []),
+              { type: "text", content: textContent },
+            ];
+          }
+          break;
+        }
+        case "think": {
+          const thinkContent = event.think ?? "";
+          if (thinkContent) {
+            task.execution_log = [
+              ...(task.execution_log ?? []),
+              { type: "think", content: thinkContent },
+            ];
+          }
+          break;
+        }
         default:
           return state;
       }
@@ -236,6 +263,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           summary: t.summary,
           output_artifact_keys: t.output_artifact_keys,
           artifacts: t.artifacts ?? [],
+          execution_log: [],
         });
         if (!TERMINAL.includes(t.status)) {
           get().subscribeTask(conversationId, t.task_id);
