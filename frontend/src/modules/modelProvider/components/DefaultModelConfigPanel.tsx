@@ -212,6 +212,21 @@ const moduleConfigs: ModuleConfig[] = [
     subtitleKey: "modelProvider.module.rerankSubtitle",
   },
   {
+    key: "stt",
+    titleKey: "modelProvider.module.asrTitle",
+    subtitleKey: "modelProvider.module.asrSubtitle",
+  },
+  {
+    key: "text2image",
+    titleKey: "modelProvider.module.textToImageTitle",
+    subtitleKey: "modelProvider.module.textToImageSubtitle",
+  },
+  {
+    key: "image_editing",
+    titleKey: "modelProvider.module.imageEditingTitle",
+    subtitleKey: "modelProvider.module.imageEditingSubtitle",
+  },
+  {
     key: "evo_llm",
     titleKey: "modelProvider.module.selfEvolutionTitle",
     subtitleKey: "modelProvider.module.selfEvolutionSubtitle",

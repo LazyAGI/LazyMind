@@ -53,6 +53,7 @@ export interface ExperienceAsset extends BaseAsset {
   hasPendingReviewSuggestions?: boolean;
   responseStyle?: string;
   resourceType?: string;
+  reviewStatus?: string;
   suggestionStatus?: string;
   userAddress?: string;
 }

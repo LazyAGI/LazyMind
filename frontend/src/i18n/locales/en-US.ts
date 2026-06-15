@@ -109,6 +109,8 @@ const enUS = {
       ttsSubtitle: "Reads answers aloud for voice output scenarios.",
       textToImageTitle: "Text to Image",
       textToImageSubtitle: "Generates images from prompts for creation and visualization.",
+      imageEditingTitle: "Image Editing",
+      imageEditingSubtitle: "Edits existing images from prompts for targeted changes and visual adjustments.",
       selfEvolutionTitle: "LLM (Self-evolution)",
       selfEvolutionSubtitle: "Used for memory extraction, strategy reflection, and system self-evolution tasks.",
       cloudParsingServiceTitle: "Cloud Parsing Service",
