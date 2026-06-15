@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Image, Progress, Tabs, Tooltip } from "antd";
 import {
@@ -41,6 +41,16 @@ function imageUrlOf(value: any): string {
   if (value.url) return value.url;
   if (value.path) return resolveCoreAssetUrl(value.path);
   return "";
+}
+
+// Strip lazyllm tool-call/result XML tags from think content, keeping only the pure reasoning text.
+function cleanThinkContent(raw: string): string {
+  return raw
+    .replace(/<tp\b[^>]*>([\s\S]*?)<\/tp>/g, "$1")
+    .replace(/<trp\b[^>]*>([\s\S]*?)<\/trp>/g, "$1")
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "")
+    .replace(/<tool_result>[\s\S]*?<\/tool_result>/g, "")
+    .trim();
 }
 
 function CollapsibleSection({
@@ -137,10 +147,14 @@ function ExecutionLog({ log, isRunning }: { log: TaskLogEntry[]; isRunning: bool
       <div className="task-execution-log">
         {log.map((entry, i) => {
           if (entry.type === "think") {
-            return <div key={i} className="task-log-think">{entry.content}</div>;
+            const cleaned = cleanThinkContent(entry.content);
+            if (!cleaned) return null;
+            return <div key={i} className="task-log-think">{cleaned}</div>;
           }
           if (entry.type === "text") {
-            return <div key={i} className="task-log-text">{entry.content}</div>;
+            const cleaned = cleanThinkContent(entry.content);
+            if (!cleaned) return null;
+            return <div key={i} className="task-log-text">{cleaned}</div>;
           }
           if (entry.type === "tool_calls") {
             return (
@@ -268,9 +282,36 @@ function StatusBadge({ status }: { status: TaskStatus }) {
 
 function TaskCard({ task }: { task: SubAgentTask }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [cardHeight, setCardHeight] = useState<number>(0);
+  const cardDragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const { t } = useTranslation();
   const isRunning = RUNNING_STATUSES.includes(task.status);
+
+  const onCardResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const card = (e.currentTarget as HTMLElement).parentElement;
+    if (!card) return;
+    cardDragRef.current = { startY: e.clientY, startH: card.offsetHeight };
+    const onMove = (me: MouseEvent) => {
+      if (!cardDragRef.current) return;
+      const delta = me.clientY - cardDragRef.current.startY;
+      const next = Math.max(80, cardDragRef.current.startH + delta);
+      setCardHeight(next);
+    };
+    const onUp = () => {
+      cardDragRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, []);
+
   return (
-    <div className={`task-card ${collapsed ? "task-card-collapsed" : ""}`}>
+    <div
+      className={`task-card ${collapsed ? "task-card-collapsed" : ""}`}
+      style={cardHeight && !collapsed ? { height: cardHeight, overflow: 'hidden', display: 'flex', flexDirection: 'column' } : undefined}
+    >
       <div className="task-card-header">
         <button
           type="button"
@@ -282,7 +323,7 @@ function TaskCard({ task }: { task: SubAgentTask }) {
           {collapsed ? <RightOutlined /> : <DownOutlined />}
         </button>
         <span className="task-card-title">{task.title}</span>
-        <span className="task-card-tag">SubAgent</span>
+        <span className="task-card-tag">{t("taskCenter.panelTitle")}</span>
         <StatusBadge status={task.status} />
       </div>
       {!collapsed && (
@@ -314,6 +355,9 @@ function TaskCard({ task }: { task: SubAgentTask }) {
           <ExecutionLog log={task.execution_log} isRunning={isRunning} />
           <ArtifactGrid artifacts={task.artifacts} />
         </>
+      )}
+      {!collapsed && (
+        <div className="task-card-resize-handle" onMouseDown={onCardResizeStart} />
       )}
     </div>
   );
@@ -369,14 +413,14 @@ const TaskCenter = (props: Props) => {
     <div className="task-center">
       <div className="task-center-header">
         <span className="task-center-title">
-          SubAgent ({tasks.length})
+          {t("taskCenter.panelTitle")}
         </span>
         {onClose && (
           <button
             type="button"
             className="task-center-close-btn"
             onClick={onClose}
-            title="折叠 SubAgent 面板"
+            title={t("taskCenter.panelTitle")}
           >
             <RightOutlined />
           </button>

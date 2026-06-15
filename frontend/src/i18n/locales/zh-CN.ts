@@ -740,6 +740,7 @@ const zhCN = {
 
   taskCenter: {
     title: "任务中心",
+    panelTitle: "子任务",
     running: "执行中",
     history: "历史任务",
     artifacts: "产出",

@@ -774,6 +774,7 @@ const enUS = {
 
   taskCenter: {
     title: "Task Center",
+    panelTitle: "SubAgent",
     running: "Running",
     history: "History",
     artifacts: "Artifacts",

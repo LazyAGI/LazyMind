@@ -84,6 +84,24 @@
     flex-direction: column;
     background-color: var(--coldgrey-1);
     gap: 16px;
+    position: relative;
+
+    .right-box-resize-handle {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 5px;
+      height: 100%;
+      cursor: col-resize;
+      z-index: 20;
+      background: transparent;
+      transition: background 0.15s;
+
+      &:hover,
+      &:active {
+        background: rgba(47, 107, 255, 0.18);
+      }
+    }
 
     .title {
       color: var(--color-text);
