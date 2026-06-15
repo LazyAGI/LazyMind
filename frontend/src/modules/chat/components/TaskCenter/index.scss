@@ -1,0 +1,401 @@
+.task-center {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+
+  .task-center-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 12px;
+
+    .task-center-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--coldgrey-9, #1f2733);
+    }
+
+    .task-center-close-btn {
+      background: none;
+      border: none;
+      padding: 4px 6px;
+      cursor: pointer;
+      color: #8c98a8;
+      font-size: 13px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      transition: background 0.15s, color 0.15s;
+
+      &:hover {
+        background: #f0f4fa;
+        color: #2f6bff;
+      }
+    }
+  }
+
+  .ant-tabs {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .ant-tabs-content-holder {
+    overflow-y: auto;
+  }
+
+  .task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .task-empty {
+    color: var(--coldgrey-5, #8c98a8);
+    font-size: 13px;
+    text-align: center;
+    padding: 24px 0;
+  }
+}
+
+// ── Collapsible section (执行过程 / 产出) ────────────────────────────────────
+.task-section {
+  margin-top: 8px;
+
+  .task-section-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    background: none;
+    border: none;
+    padding: 2px 0;
+    cursor: pointer;
+    color: #6b7787;
+    font-size: 12px;
+
+    &:hover {
+      color: #2f6bff;
+    }
+
+    .task-section-icon {
+      font-size: 10px;
+      flex-shrink: 0;
+    }
+
+    .task-section-title {
+      font-size: 12px;
+    }
+  }
+
+  .task-section-body {
+    margin-top: 4px;
+  }
+}
+
+// ── Execution log ─────────────────────────────────────────────────────────────
+.task-execution-log {
+  border-left: 2px solid #e6ecf3;
+  padding-left: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  .task-log-text {
+    font-size: 12px;
+    color: #3a4553;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+  }
+
+  .task-log-think {
+    font-size: 11px;
+    color: #8c98a8;
+    font-style: italic;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+  }
+}
+
+// ── Task card ─────────────────────────────────────────────────────────────────
+.task-card {
+  border: 1px solid #e6ecf3;
+  border-radius: 10px;
+  padding: 12px;
+  background: #fff;
+  transition: box-shadow 0.15s ease;
+  position: relative;
+
+  &:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  }
+
+  &.task-card-collapsed {
+    padding-bottom: 12px;
+  }
+
+  // When max-height is user-set (resize), the body scrolls.
+  &[style*="max-height"] > :not(.task-card-header):not(.task-card-resize-handle) {
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .task-card-resize-handle {
+    position: absolute;
+    bottom: 0;
+    left: 12px;
+    right: 12px;
+    height: 6px;
+    cursor: row-resize;
+    border-radius: 0 0 10px 10px;
+    background: transparent;
+    transition: background 0.15s;
+    z-index: 10;
+
+    &:hover,
+    &:active {
+      background: rgba(47, 107, 255, 0.15);
+    }
+
+    &::after {
+      content: '';
+      display: block;
+      margin: 2px auto 0;
+      width: 32px;
+      height: 3px;
+      border-radius: 2px;
+      background: #d0d8e4;
+    }
+  }
+
+  .task-card-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    flex-wrap: nowrap;
+
+    .task-card-collapse-btn {
+      flex-shrink: 0;
+      background: none;
+      border: none;
+      padding: 0 2px;
+      cursor: pointer;
+      color: #8c98a8;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+
+      &:hover {
+        color: #2f6bff;
+      }
+    }
+
+    .task-card-title {
+      font-weight: 600;
+      font-size: 13px;
+      color: #1f2733;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .task-card-tag {
+      font-size: 11px;
+      color: #2f6bff;
+      background: #eef3ff;
+      border-radius: 4px;
+      padding: 1px 6px;
+      flex-shrink: 0;
+    }
+  }
+
+  .task-card-phase {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #6b7787;
+    margin-top: 4px;
+    gap: 8px;
+
+    > span:first-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .task-card-eta {
+      flex-shrink: 0;
+    }
+  }
+}
+
+// ── Task status badge ─────────────────────────────────────────────────────────
+.task-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  flex-shrink: 0;
+
+  &.task-status-success {
+    color: #16a34a;
+  }
+  &.task-status-failed {
+    color: #ef4444;
+  }
+  &.task-status-running {
+    color: #2f6bff;
+  }
+}
+
+// ── Artifacts ─────────────────────────────────────────────────────────────────
+.task-artifacts-inner {
+  .task-artifacts-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+
+  .task-artifact-thumb {
+    object-fit: cover;
+    border-radius: 6px;
+  }
+
+  .task-artifact-file {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #1f2733;
+    padding: 4px 0;
+
+    .task-artifact-file-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  .task-artifact-text {
+    border: 1px solid #eef2f7;
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin-top: 6px;
+
+    .task-artifact-text-key {
+      font-size: 11px;
+      color: #8c98a8;
+      margin-bottom: 2px;
+    }
+
+    .task-artifact-text-body {
+      font-size: 12px;
+      color: #1f2733;
+      max-height: 120px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  }
+}
+
+// ── Tool call / result rows ────────────────────────────────────────────────────
+.task-tool-call,
+.task-tool-result {
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.task-tool-call-header,
+.task-tool-result-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: #f5f7fa;
+  border: 1px solid #e6ecf3;
+  border-radius: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #3a4553;
+  text-align: left;
+  transition: background 0.12s;
+
+  &:hover {
+    background: #eef2f9;
+  }
+}
+
+.task-tool-call-icon {
+  color: #2f6bff;
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.task-tool-result-icon {
+  color: #16a34a;
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.task-tool-call-name,
+.task-tool-result-name {
+  font-weight: 600;
+  color: #1f2733;
+  flex-shrink: 0;
+}
+
+.task-tool-result-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #6b7787;
+  font-size: 11px;
+}
+
+.task-tool-call-arrow,
+.task-tool-result-arrow {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: #8c98a8;
+}
+
+.task-tool-call-args,
+.task-tool-result-body {
+  margin: 4px 0 0 0;
+  padding: 6px 8px;
+  background: #f8fafc;
+  border: 1px solid #e6ecf3;
+  border-radius: 0 0 6px 6px;
+  font-size: 11px;
+  color: #3a4553;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.task-log-tool-calls,
+.task-log-tool-results {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}

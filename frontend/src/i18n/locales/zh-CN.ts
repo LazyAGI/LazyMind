@@ -740,6 +740,20 @@ const zhCN = {
     other: "其它",
   },
 
+  taskCenter: {
+    title: "任务中心",
+    panelTitle: "子任务",
+    running: "执行中",
+    history: "历史任务",
+    artifacts: "产出",
+    executionProcess: "执行过程",
+    empty: "暂无任务",
+    statusSucceeded: "已完成",
+    statusFailed: "失败",
+    statusRunning: "进行中",
+    statusInterrupted: "已中断",
+  },
+
   knowledge: {
     list: "知识库列表",
     create: "创建知识库",

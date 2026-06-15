@@ -28,7 +28,17 @@ async def _parse_algo_id(request: Request) -> Optional[str]:
 @router.post('/api/chat/stream', summary='Proxy: streaming chat (router mode)')
 async def proxy_chat_stream(request: Request):
     caller_algo_id = await _parse_algo_id(request)
+    return await _select_and_forward(request, caller_algo_id)
 
+
+@router.post('/api/subagent/run', summary='Proxy: SubAgent execution (router mode)')
+async def proxy_subagent_run(request: Request):
+    # SubAgent requests carry no algorithm_id; let the AB router resolve the default.
+    caller_algo_id = await _parse_algo_id(request)
+    return await _select_and_forward(request, caller_algo_id)
+
+
+async def _select_and_forward(request: Request, caller_algo_id: Optional[str]):
     ab_router = get_ab_router()
     algorithm_id = await ab_router.select_algorithm(caller_algo_id)
 

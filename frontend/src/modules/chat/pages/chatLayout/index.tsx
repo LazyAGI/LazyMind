@@ -1,4 +1,4 @@
-import { FC, type ReactNode, useRef, useState, useEffect } from "react";
+import { FC, type ReactNode, useRef, useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { message } from "antd";
 import { AgentAppsAuth } from "@/components/auth";
@@ -33,6 +33,15 @@ import {
 } from "@/modules/chat/constants/chat";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
+import TaskCenter from "@/modules/chat/components/TaskCenter";
+import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
+import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
+
+// Stable empty reference to avoid returning a fresh array from the zustand
+// selector on every render, which (with useSyncExternalStore) would trigger an
+// infinite re-render loop (React error #185).
+const EMPTY_TASKS: SubAgentTask[] = [];
+
 interface IChatLayoutProps {
   setIsChatContent: (isChatContent: boolean) => void;
   initchatConfig: ChatConfig;
@@ -65,6 +74,29 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     initchatConfig || {},
   );
   const [knowledgeRefreshKey, setKnowledgeRefreshKey] = useState(0);
+  const [isTaskPanelCollapsed, setIsTaskPanelCollapsed] = useState(false);
+  const [panelWidth, setPanelWidth] = useState<number>(0); // 0 = use CSS default
+  const panelDragRef = useRef<{ startX: number; startW: number } | null>(null);
+
+  const onPanelResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const panel = (e.currentTarget as HTMLElement).parentElement;
+    if (!panel) return;
+    panelDragRef.current = { startX: e.clientX, startW: panel.offsetWidth };
+    const onMove = (me: MouseEvent) => {
+      if (!panelDragRef.current) return;
+      const delta = panelDragRef.current.startX - me.clientX;
+      const next = Math.max(260, Math.min(700, panelDragRef.current.startW + delta));
+      setPanelWidth(next);
+    };
+    const onUp = () => {
+      panelDragRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, []);
   const [isRestoringConversation, setIsRestoringConversation] = useState(() => {
     try {
       return Boolean(sessionStorage.getItem(CHAT_RESUME_CONVERSATION_KEY));
@@ -77,6 +109,29 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const { getModelSelection, setModelSelection } = useModelSelectionStore();
 
   const chatRef = useRef<ChatImperativeProps>(null);
+
+  const tasks = useTaskCenterStore((s) =>
+    sessionId ? s.tasksByConversation[sessionId] ?? EMPTY_TASKS : EMPTY_TASKS,
+  );
+  const loadConversationTasks = useTaskCenterStore(
+    (s) => s.loadConversationTasks,
+  );
+
+  useEffect(() => {
+    if (sessionId) {
+      loadConversationTasks(sessionId);
+    }
+  }, [sessionId, loadConversationTasks]);
+
+  // Auto-expand the task panel the first time a SubAgent task appears in the current session.
+  const prevTasksLengthRef = useRef(0);
+  useEffect(() => {
+    const prev = prevTasksLengthRef.current;
+    prevTasksLengthRef.current = tasks.length;
+    if (prev === 0 && tasks.length > 0) {
+      setIsTaskPanelCollapsed(false);
+    }
+  }, [tasks.length]);
 
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
@@ -235,6 +290,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         // enable_thinking: think ? true : false,
         stream: true,
         input,
+        mode: "auto",
         create_time: new Date().toISOString(),
         environment_context: buildEnvironmentContext(),
       }),
@@ -259,19 +315,20 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     });
   }
 
-  function setConversationId(id: string) {
-    if (id === sessionId) {
-      return;
-    }
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
+
+  const setConversationId = useCallback((id: string) => {
+    if (id === sessionIdRef.current) return;
     setSessionId(id);
     window.dispatchEvent(
       new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {
         detail: { conversationId: id, source: "chat" },
       }),
     );
-  }
+  }, []);
 
-  function loadConversation(conversationId: string) {
+  const loadConversation = useCallback((conversationId: string) => {
     setIsRestoringConversation(true);
     ChatServiceApi()
       .conversationServiceGetConversationDetail({
@@ -286,10 +343,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       )
       .then(({ detailRes, historyRes }) => {
         const conversation = detailRes.data.conversation;
+        const resolvedId = conversation?.conversation_id || conversationId;
         const tempData = {
           knowledgeBaseId: conversation?.search_config?.dataset_list
-            ?.map((dataset) => dataset.id)
-            .filter((id) => !!id),
+            ?.map((dataset: any) => dataset.id)
+            .filter((id: string) => !!id),
           creators: conversation?.search_config?.creators,
           tags: conversation?.search_config?.tags,
           databaseBaseId: conversation?.search_config?.database_ids?.[0],
@@ -301,24 +359,22 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         const modelSelection = parseModelSelectionFromModels(
           (conversation as any)?.models,
         );
-        if (conversation?.conversation_id) {
-          setModelSelection(conversation.conversation_id, modelSelection);
+        if (resolvedId) {
+          setModelSelection(resolvedId, modelSelection);
         }
 
-        // Reset messages.
+        setConversationId(resolvedId);
+
         const history = historyRes.data.history;
         const list = buildChatMessageListFromHistory(history, {
           fallbackCreateTime: "xxx-xxx-xxx",
         });
-        chatRef.current?.replaceMessageList(
-          conversation?.conversation_id || "",
-          list,
-        );
+        chatRef.current?.replaceMessageList(resolvedId, list);
       })
       .finally(() => {
         setIsRestoringConversation(false);
       });
-  }
+  }, [setConversationId, setChatConfigFn, setModelSelection]);
 
   useEffect(() => {
     const handleConversationSelect = (event: Event) => {
@@ -351,7 +407,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         handleConversationSelect,
       );
     };
-  }, [sessionId, setIsChatContent]);
+  }, [sessionId, setIsChatContent, loadConversation]);
 
   function parseErrorData(data: string) {
     const dataObject = UIUtils.jsonParser(data) || {};
@@ -458,6 +514,29 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         disabledDescription={chatDisabledDescription}
         disabledAction={chatDisabledAction}
       />
+      {tasks.length > 0 && isTaskPanelCollapsed && (
+        <button
+          type="button"
+          className="task-panel-restore-btn"
+          onClick={() => setIsTaskPanelCollapsed(false)}
+          title={t("taskCenter.panelTitle")}
+        >
+          <span className="task-panel-restore-icon">&#8249;</span>
+          <span className="task-panel-restore-label">{t("taskCenter.panelTitle")} ({tasks.length})</span>
+        </button>
+      )}
+      {tasks.length > 0 && !isTaskPanelCollapsed && (
+        <div
+          className="right-box"
+          style={panelWidth ? { width: panelWidth, minWidth: panelWidth } : undefined}
+        >
+          <div className="right-box-resize-handle" onMouseDown={onPanelResizeStart} />
+          <TaskCenter
+            sessionId={sessionId}
+            onClose={() => setIsTaskPanelCollapsed(true)}
+          />
+        </div>
+      )}
     </div>
   );
 };

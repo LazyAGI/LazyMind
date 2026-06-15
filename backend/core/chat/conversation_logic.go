@@ -19,6 +19,7 @@ import (
 	"lazymind/core/evolution"
 	"lazymind/core/log"
 	"lazymind/core/resourceupdate"
+	"lazymind/core/subagent"
 )
 
 const (
@@ -35,6 +36,13 @@ func shouldEmitStreamFrame(delta string, sources []any) bool {
 func userIDFromChatRequestBody(reqBody map[string]any) string {
 	userID, _ := reqBody["user_id"].(string)
 	return strings.TrimSpace(userID)
+}
+
+func llmConfigFromBody(reqBody map[string]any) map[string]any {
+	if cfg, ok := reqBody["llm_config"].(map[string]any); ok && len(cfg) > 0 {
+		return cfg
+	}
+	return nil
 }
 
 func recordConversationIdleAfterPersist(ctx context.Context, db *gorm.DB, rdb *redis.Client, convID, userID, historyID string, at time.Time, query, answer string) {
@@ -403,9 +411,16 @@ func buildChatRequestBody(convID, sessionID, query string, histories []orm.ChatH
 		sessionID = upstreamSessionID(convID)
 	}
 	useMemory := resolveUseMemory(raw, resourceContext)
+	mode := "auto"
+	if m, ok := raw["mode"].(string); ok && strings.TrimSpace(m) != "" {
+		if m = strings.TrimSpace(m); m == "auto" || m == "manual" {
+			mode = m
+		}
+	}
 	body := map[string]any{
 		"query":           query,
 		"session_id":      sessionID,
+		"conversation_id": convID,
 		"history":         buildHistoryMessages(histories),
 		"filters":         raw["filters"],
 		"files":           filePathsForUpstreamChat(raw),
@@ -416,6 +431,7 @@ func buildChatRequestBody(convID, sessionID, query string, histories []orm.ChatH
 		"enable_thinking": raw["enable_thinking"],
 		"use_memory":      useMemory,
 		"user_id":         strings.TrimSpace(userID),
+		"mode":            mode,
 	}
 	if environmentContext, ok := raw["environment_context"].(map[string]any); ok {
 		body["environment_context"] = environmentContext
@@ -746,6 +762,23 @@ func streamSingleAnswer(
 		ThinkingDurationS: 0,
 	})
 	for d := range ch {
+		if d.TaskCreated != nil {
+			userIDForTask, _ := reqBody["user_id"].(string)
+			notice := handleTaskCreated(chatCtx, db, rdb, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody))
+			if notice != nil && reqCtx.Err() == nil {
+				writeSSEChunk(w, flusher, &ChatChunkResponse{
+					ConversationID: convID,
+					Seq:            int32(seq),
+					HistoryID:      historyID,
+					FinishReason:   "FINISH_REASON_UNSPECIFIED",
+					TaskCreated:    notice,
+				})
+			}
+			continue
+		}
+		if d.Heartbeat {
+			continue
+		}
 		if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > toolCallTurns {
 			toolCallTurns = next
 		}
@@ -1083,5 +1116,106 @@ dualPersist:
 		writeSSEChunk(w, flusher, map[string]any{"finish_reason": "FINISH_REASON_STOP", "history_id": secondaryHistoryID})
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()
+	}
+}
+
+// handleTaskCreated persists a SubAgent task record (allocating seq in a transaction),
+// seeds the Redis status snapshot, launches the SubAgent runner goroutine, and returns
+// a notice for the main SSE so the frontend can subscribe to the Task SSE stream.
+func handleTaskCreated(
+	chatCtx context.Context,
+	db *gorm.DB,
+	rdb *redis.Client,
+	convID, historyID, userID string,
+	ev *TaskCreatedEvent,
+	llmConfig map[string]any,
+) *TaskCreatedNotice {
+	if ev == nil || strings.TrimSpace(ev.TaskID) == "" {
+		return nil
+	}
+	mode := ev.Mode
+	if mode != "auto" && mode != "manual" {
+		mode = "auto"
+	}
+	paramsJSON, _ := json.Marshal(ev.Params)
+	inputKeysJSON, _ := json.Marshal(ev.InputArtifactKeys)
+	outputKeysJSON, _ := json.Marshal(ev.OutputArtifactKeys)
+	workspacePath := subagent.WorkspacePath(userID, ev.TaskID)
+
+	// Resume path: reuse an existing task record (e.g. interrupted) instead of creating a new one.
+	if ev.Resume {
+		existing, getErr := subagent.GetTask(chatCtx, db, ev.TaskID)
+		if getErr == nil && existing != nil {
+			_ = subagent.UpdateStatus(chatCtx, db, existing.ID, subagent.StatusRunning)
+			_ = subagent.WriteStatus(chatCtx, rdb, existing.ID, map[string]any{
+				"status": subagent.StatusRunning, "progress": existing.ProgressPct,
+			})
+			go subagent.Run(context.Background(), db, rdb, subagent.RunRequest{
+				TaskID:             existing.ID,
+				AgentType:          existing.AgentType,
+				Objective:          existing.Objective,
+				Params:             ev.Params,
+				InputArtifactKeys:  ev.InputArtifactKeys,
+				OutputArtifactKeys: ev.OutputArtifactKeys,
+				WorkspacePath:      existing.WorkspacePath,
+				Tools:              ev.Tools,
+				DBDSN:              subagent.DBDSN(),
+				Resume:             true,
+				LLMConfig:          llmConfig,
+			})
+			return &TaskCreatedNotice{
+				TaskID:            existing.ID,
+				Title:             existing.Title,
+				AgentType:         existing.AgentType,
+				Mode:              existing.Mode,
+				Status:            subagent.StatusRunning,
+				SeqInConversation: existing.SeqInConversation,
+			}
+		}
+	}
+
+	task, err := subagent.CreateTask(chatCtx, db, subagent.CreateTaskInput{
+		TaskID:             ev.TaskID,
+		ConversationID:     convID,
+		TriggerHistoryID:   historyID,
+		AgentType:          ev.AgentType,
+		Title:              ev.Title,
+		Objective:          ev.Objective,
+		Mode:               mode,
+		Params:             paramsJSON,
+		InputArtifactKeys:  inputKeysJSON,
+		OutputArtifactKeys: outputKeysJSON,
+		WorkspacePath:      workspacePath,
+		CreateUserID:       strings.TrimSpace(userID),
+	})
+	if err != nil {
+		fmt.Println("[Core] [SUBAGENT_CREATE_TASK_FAILED] err=", err)
+		return nil
+	}
+	_ = subagent.WriteStatus(chatCtx, rdb, task.ID, map[string]any{
+		"status": subagent.StatusPending, "progress": 0,
+	})
+
+	go subagent.Run(context.Background(), db, rdb, subagent.RunRequest{
+		TaskID:             task.ID,
+		AgentType:          ev.AgentType,
+		Objective:          ev.Objective,
+		Params:             ev.Params,
+		InputArtifactKeys:  ev.InputArtifactKeys,
+		OutputArtifactKeys: ev.OutputArtifactKeys,
+		WorkspacePath:      workspacePath,
+		Tools:              ev.Tools,
+		DBDSN:              subagent.DBDSN(),
+		Resume:             false,
+		LLMConfig:          llmConfig,
+	})
+
+	return &TaskCreatedNotice{
+		TaskID:            task.ID,
+		Title:             task.Title,
+		AgentType:         task.AgentType,
+		Mode:              task.Mode,
+		Status:            task.Status,
+		SeqInConversation: task.SeqInConversation,
 	}
 }

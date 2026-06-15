@@ -71,14 +71,14 @@ def postgres_dsn_to_sqlalchemy_url(
         port = int(parts['port']) if parts.get('port') else 5432
     except ValueError as exc:
         raise ValueError('invalid database port') from exc
-    return str(URL.create(
+    return URL.create(
         f'postgresql+{driver}',
         username=parts.get('user') or None,
         password=parts.get('password') or None,
         host=parts['host'],
         port=port,
         database=database,
-    ))
+    ).render_as_string(hide_password=False)
 
 
 def normalize_postgres_connection_url(
