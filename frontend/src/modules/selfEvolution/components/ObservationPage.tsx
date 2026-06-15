@@ -5,7 +5,6 @@ import {
   AimOutlined,
   ArrowLeftOutlined,
   CheckCircleOutlined,
-  ClockCircleOutlined,
   FileSearchOutlined,
   FileTextOutlined,
   MenuUnfoldOutlined,
@@ -606,7 +605,6 @@ function EvalReportPanel({
       <div className="self-evolution-eval-metric-grid">
         <MetricCard icon={<AimOutlined />} label="准确率" value="-" tone="blue" />
         <MetricCard icon={<WarningOutlined />} label="Badcase" value="-" tone="red" />
-        <MetricCard icon={<ClockCircleOutlined />} label="平均耗时" value="-" tone="green" />
         <MetricCard icon={<ThunderboltOutlined />} label="Trace 覆盖率" value="-" tone="purple" />
       </div>
       <div className="self-evolution-eval-badcase-panel">
