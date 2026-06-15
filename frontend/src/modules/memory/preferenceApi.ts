@@ -24,6 +24,7 @@ interface ManagedStateItem {
   response_style?: string;
   resource_id?: string;
   resource_type?: string;
+  review_status?: string;
   suggestion_status?: string;
   title?: string;
   user_address?: string;
@@ -41,6 +42,7 @@ export interface PreferenceAssetRecord {
   hasPendingReviewSuggestions?: boolean;
   responseStyle?: string;
   resourceType?: string;
+  reviewStatus?: string;
   summary?: string;
   suggestionStatus?: string;
   userAddress?: string;
@@ -459,6 +461,12 @@ const normalizeManagedPreference = (item: ManagedStateItem): PreferenceAssetReco
     item.has_pending_review_suggestions,
     false,
   );
+  const reviewStatus = toStringValue(
+    item.review_status ||
+      item.suggestion_status ||
+      (hasPendingReviewSuggestions ? "pending" : ""),
+    "",
+  );
   const suggestionStatus = toStringValue(item.suggestion_status, "");
 
   if (!id && !title && !content) {
@@ -486,6 +494,7 @@ const normalizeManagedPreference = (item: ManagedStateItem): PreferenceAssetReco
     agentPersona: agentPersona || parsed.agentPersona,
     userAddress: userAddress || parsed.userAddress,
     responseStyle: responseStyle || parsed.responseStyle,
+    reviewStatus,
     suggestionStatus,
     autoEvoApplyStatus: toStringValue(item.auto_evo_apply_status, ""),
     autoEvoGeneration: toNumberValue(item.auto_evo_generation, 0),

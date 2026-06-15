@@ -195,6 +195,8 @@ const isReviewableSuggestionStatus = (status?: string) => {
   const normalized = String(status || "").trim().toLowerCase();
   return normalized === "pending";
 };
+const isPendingReviewStatus = (status?: string) =>
+  ["pending", "padding"].includes(String(status || "").trim().toLowerCase());
 const isSkillRemoveSuggestion = (suggestion: EvolutionSuggestionRecord) =>
   String(suggestion.action || "").trim().toLowerCase() === "remove";
 const normalizeAutoEvoApplyStatus = (status?: string) =>
@@ -687,6 +689,7 @@ export default function MemoryManagement() {
             autoEvoGeneration: item.autoEvoGeneration,
             autoEvoError: item.autoEvoError,
             resourceType: item.resourceType,
+            reviewStatus: item.reviewStatus,
             suggestionStatus: item.suggestionStatus,
             userAddress: item.userAddress,
           })),
@@ -5917,9 +5920,7 @@ export default function MemoryManagement() {
       key: "actions",
       width: 210,
       render: (_value, record) => {
-        const pendingProposal = getPendingProposal("experience", record.id);
-        const hasReviewableDraft = hasDraftPreviewStatus(record);
-        const canReviewChange = Boolean(pendingProposal) || hasReviewableDraft;
+        const canReviewChange = isPendingReviewStatus(record.reviewStatus);
         const reviewTooltip = canReviewChange
           ? t("admin.memoryDiffReviewAction")
           : t("admin.memoryDiffNoPending");

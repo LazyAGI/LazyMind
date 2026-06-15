@@ -107,6 +107,8 @@ const zhCN = {
       ttsSubtitle: "将回答播报为语音，支撑语音输出场景。",
       textToImageTitle: "文生图",
       textToImageSubtitle: "根据文本生成图片，用于创作与可视化扩展。",
+      imageEditingTitle: "图像编辑",
+      imageEditingSubtitle: "根据提示词编辑已有图片，用于局部修改与视觉内容调整。",
       selfEvolutionTitle: "大模型（自进化）",
       selfEvolutionSubtitle: "用于记忆抽取、策略反思与系统自进化任务。",
       cloudParsingServiceTitle: "云解析服务",
