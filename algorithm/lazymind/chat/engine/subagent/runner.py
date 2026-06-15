@@ -7,14 +7,38 @@ from typing import Any, Dict, List, Optional
 import lazyllm
 from lazyllm import LOG, AutoModel
 
-from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
 from lazymind.chat.engine.agent_core import build_react_agent, drive_agent
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 
+from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, build_agent_tools
+
 from .context import SubAgentContext, set_context
 from .db import SubAgentDB
 from . import tools as subagent_tools
+
+# Default ChatAgent tool groups enabled per SubAgent agent_type when create_subagent
+# does not pass an explicit tools list.
+_AGENT_TYPE_DEFAULT_TOOL_NAMES: Dict[str, List[str]] = {
+    'research': ['web_search', 'url_fetch', 'wikipedia'],
+}
+
+
+def _resolve_subagent_tool_names(
+    explicit: Optional[List[str]],
+    agent_type: str,
+) -> List[str]:
+    if explicit:
+        return [str(name).strip() for name in explicit if str(name).strip()]
+    return list(_AGENT_TYPE_DEFAULT_TOOL_NAMES.get(str(agent_type or '').strip(), []))
+
+
+def _build_runtime_tools(tool_names: List[str]) -> List[Any]:
+    if not tool_names:
+        return []
+    name_set = set(tool_names)
+    configs = [cfg for cfg in DEFAULT_TOOLS if cfg.name in name_set]
+    return build_agent_tools(configs)
 
 
 def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
@@ -77,6 +101,8 @@ async def run_subagent_stream(
     db_dsn: str,
     resume: bool = False,
     model_config: Optional[Dict[str, Any]] = None,
+    agent_type: Optional[str] = None,
+    tools: Optional[List[str]] = None,
 ):
     """Async generator yielding Task SSE lines.
 
@@ -129,9 +155,10 @@ async def run_subagent_stream(
         yield _sse({'type': 'task_start', 'task_id': task_id})
 
         llm = AutoModel(model='llm')
+        runtime_tool_names = _resolve_subagent_tool_names(tools, str(agent_type or task.get('agent_type') or ''))
         agent = build_react_agent(
             llm=llm,
-            tools=_build_subagent_tools(None),
+            tools=_build_subagent_tools(_build_runtime_tools(runtime_tool_names)),
             force_summarize_context=ctx.objective,
         )
 

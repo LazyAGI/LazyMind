@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -42,13 +41,16 @@ type CreateTaskInput struct {
 	CreateUserID       string
 }
 
-func withUpdateLock(db *gorm.DB) *gorm.DB {
-	switch db.Dialector.Name() {
-	case "postgres", "mysql":
-		return db.Clauses(clause.Locking{Strength: "UPDATE"})
-	default:
-		return db
+// lockConversationSeq serializes seq_in_conversation allocation per conversation.
+// PostgreSQL forbids FOR UPDATE together with aggregate functions (MAX), so we take a
+// transaction-scoped advisory lock keyed by conversation_id instead. The lock is released
+// automatically when the transaction commits or rolls back. Other dialects (e.g. SQLite in
+// tests) run serially, so this is a no-op there; uq_sat_conv_seq remains the final safeguard.
+func lockConversationSeq(tx *gorm.DB, conversationID string) error {
+	if tx.Dialector.Name() == "postgres" {
+		return tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", conversationID).Error
 	}
+	return nil
 }
 
 func normalizeJSON(raw json.RawMessage, fallback string) json.RawMessage {
@@ -63,8 +65,11 @@ func CreateTask(ctx context.Context, db *gorm.DB, in CreateTaskInput) (*orm.SubA
 	now := time.Now().UTC()
 	var task *orm.SubAgentTask
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockConversationSeq(tx, in.ConversationID); err != nil {
+			return err
+		}
 		var maxSeq int
-		row := withUpdateLock(tx).Model(&orm.SubAgentTask{}).
+		row := tx.Model(&orm.SubAgentTask{}).
 			Select("COALESCE(MAX(seq_in_conversation), 0)").
 			Where("conversation_id = ?", in.ConversationID)
 		if err := row.Scan(&maxSeq).Error; err != nil {

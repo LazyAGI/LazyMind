@@ -38,6 +38,13 @@ func userIDFromChatRequestBody(reqBody map[string]any) string {
 	return strings.TrimSpace(userID)
 }
 
+func llmConfigFromBody(reqBody map[string]any) map[string]any {
+	if cfg, ok := reqBody["llm_config"].(map[string]any); ok && len(cfg) > 0 {
+		return cfg
+	}
+	return nil
+}
+
 func recordConversationIdleAfterPersist(ctx context.Context, db *gorm.DB, rdb *redis.Client, convID, userID, historyID string, at time.Time, query, answer string) {
 	if db == nil || rdb == nil {
 		return
@@ -757,7 +764,7 @@ func streamSingleAnswer(
 	for d := range ch {
 		if d.TaskCreated != nil {
 			userIDForTask, _ := reqBody["user_id"].(string)
-			notice := handleTaskCreated(chatCtx, db, rdb, convID, historyID, userIDForTask, d.TaskCreated)
+			notice := handleTaskCreated(chatCtx, db, rdb, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody))
 			if notice != nil && reqCtx.Err() == nil {
 				writeSSEChunk(w, flusher, &ChatChunkResponse{
 					ConversationID: convID,
@@ -1121,6 +1128,7 @@ func handleTaskCreated(
 	rdb *redis.Client,
 	convID, historyID, userID string,
 	ev *TaskCreatedEvent,
+	llmConfig map[string]any,
 ) *TaskCreatedNotice {
 	if ev == nil || strings.TrimSpace(ev.TaskID) == "" {
 		return nil
@@ -1153,6 +1161,7 @@ func handleTaskCreated(
 				Tools:              ev.Tools,
 				DBDSN:              subagent.DBDSN(),
 				Resume:             true,
+				LLMConfig:          llmConfig,
 			})
 			return &TaskCreatedNotice{
 				TaskID:            existing.ID,
@@ -1198,6 +1207,7 @@ func handleTaskCreated(
 		Tools:              ev.Tools,
 		DBDSN:              subagent.DBDSN(),
 		Resume:             false,
+		LLMConfig:          llmConfig,
 	})
 
 	return &TaskCreatedNotice{

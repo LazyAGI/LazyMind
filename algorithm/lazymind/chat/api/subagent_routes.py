@@ -6,7 +6,6 @@ from fastapi import APIRouter, Body
 from fastapi.responses import StreamingResponse
 
 from lazymind.chat.engine.subagent.runner import run_subagent_stream
-from lazymind.model_config import inject_model_config
 
 router = APIRouter()
 
@@ -37,6 +36,8 @@ async def run_subagent(
             db_dsn=db_dsn,
             resume=bool(resume),
             model_config=llm_config,
+            agent_type=agent_type,
+            tools=tools,
         ),
         media_type='text/event-stream',
     )

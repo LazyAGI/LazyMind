@@ -17,9 +17,8 @@ provides:
 """
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Callable, List, Optional, Tuple, Union
+from typing import Any, AsyncIterator, List, Optional, Tuple, Union
 
-import lazyllm
 import lazyllm.module.stream_helper as _sh
 import lazyllm.tools.agent as _agent_mod
 from lazymind.config import config as _cfg

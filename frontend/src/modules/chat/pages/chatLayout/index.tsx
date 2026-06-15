@@ -35,6 +35,13 @@ import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
 import TaskCenter from "@/modules/chat/components/TaskCenter";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
+import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
+
+// Stable empty reference to avoid returning a fresh array from the zustand
+// selector on every render, which (with useSyncExternalStore) would trigger an
+// infinite re-render loop (React error #185).
+const EMPTY_TASKS: SubAgentTask[] = [];
+
 interface IChatLayoutProps {
   setIsChatContent: (isChatContent: boolean) => void;
   initchatConfig: ChatConfig;
@@ -81,7 +88,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const chatRef = useRef<ChatImperativeProps>(null);
 
   const tasks = useTaskCenterStore((s) =>
-    sessionId ? s.tasksByConversation[sessionId] ?? [] : [],
+    sessionId ? s.tasksByConversation[sessionId] ?? EMPTY_TASKS : EMPTY_TASKS,
   );
   const loadConversationTasks = useTaskCenterStore(
     (s) => s.loadConversationTasks,

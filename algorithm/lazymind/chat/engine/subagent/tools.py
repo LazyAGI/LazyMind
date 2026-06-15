@@ -60,7 +60,7 @@ def save_artifact(key: str, value: Any, content_type: str = 'text') -> Dict[str,
         content_type (str): One of text, json, image, file, file_list. Default text.
 
     Returns:
-        str: A confirmation that the artifact was saved.
+        A confirmation that the artifact was saved.
     """
     ctx = require_context()
     ct = content_type if content_type in _CONTENT_TYPES else 'text'
@@ -87,7 +87,7 @@ def get_artifact(key: str, task_ref: Optional[str] = None) -> Dict[str, Any]:
             reads the latest artifact with this key from the current task.
 
     Returns:
-        str: The artifact content (text, file path, or JSON description).
+        The artifact content (text, file path, or JSON description).
     """
     ctx = require_context()
     rows = ctx.local_artifacts(keys=[key]) or ctx.db.load_artifacts(ctx.task_id, keys=[key])
@@ -104,13 +104,13 @@ def list_artifacts(task_ref: Optional[str] = None) -> Dict[str, Any]:
         task_ref (str): Optional task reference; when omitted lists artifacts of the current task.
 
     Returns:
-        str: A summary of available artifact keys and their content types.
+        A summary of available artifact keys and their content types.
     """
     ctx = require_context()
     rows = ctx.local_artifacts() or ctx.db.load_artifacts(ctx.task_id)
     summary: Dict[str, str] = {}
     for r in rows:
         summary[r['artifact_key']] = r['content_type']
-    parts = [f"{k} ({v})" for k, v in summary.items()]
+    parts = [f'{k} ({v})' for k, v in summary.items()]
     msg = '可用成果：' + ('、'.join(parts) if parts else '（暂无）')
     return tool_success('list_artifacts', {'status': 'ok', 'keys': summary, 'message': msg})

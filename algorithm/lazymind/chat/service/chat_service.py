@@ -223,8 +223,9 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                         for frame in translator.feed(payload):
                             cost = round(time.time() - start_time, 3)
                             yield log_and_emit_frame(frame, cost, query, session_id, tag='FEED')
-                    else:  # 'final' -- payload is already the resolved result value;
-                           # if future.result() raised, drive_agent propagated it before yielding.
+                    else:
+                        # 'final' -- payload is already the resolved result value;
+                        # if future.result() raised, drive_agent propagated it before yielding.
                         final_result = payload
 
             for frame in translator.finish(final_result):

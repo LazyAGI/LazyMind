@@ -35,6 +35,7 @@ type RunRequest struct {
 	Tools              []string       `json:"tools,omitempty"`
 	DBDSN              string         `json:"db_dsn"`
 	Resume             bool           `json:"resume"`
+	LLMConfig          map[string]any `json:"llm_config,omitempty"`
 }
 
 // TaskEvent is one event emitted by the SubAgent SSE stream.

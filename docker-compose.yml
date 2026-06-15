@@ -343,7 +343,7 @@ services:
         condition: service_healthy
 
   core-dev:
-    image: golang:1.25.11-alpine
+    image: ${DOCKER_MIRROR:-docker.m.daocloud.io/library/}golang:1.25.11-alpine
     working_dir: /app
     command: ["sleep", "infinity"]
     volumes:

@@ -57,8 +57,8 @@ def create_subagent(
         resume (bool): When True, resume the interrupted task whose title matches `title`.
 
     Returns:
-        str: In auto mode, a summary after the SubAgent finishes. In manual mode, an immediate
-            acknowledgement that the task is running in the background.
+        In auto mode, a summary after the SubAgent finishes. In manual mode, an immediate
+        acknowledgement that the task is running in the background.
     """
     mode = _mode()
     params = params or {}
@@ -165,7 +165,7 @@ def list_subagents(status: Optional[str] = None) -> Dict[str, Any]:
         status (str): Optional filter: pending / running / succeeded / failed / interrupted.
 
     Returns:
-        str: A natural-language list of tasks with their status and progress.
+        A natural-language list of tasks with their status and progress.
     """
     tasks = _list_conversation_tasks()
     if status:
@@ -189,21 +189,21 @@ def get_subagent_status(task_ref: str) -> Dict[str, Any]:
         task_ref (str): A task reference: title, "第N个", or the agent type name.
 
     Returns:
-        str: A status summary including progress and current phase.
+        A status summary including progress and current phase.
     """
     tasks = _list_conversation_tasks()
     task = _resolve_task(task_ref, tasks)
     if not task:
-        return tool_success('get_subagent_status', {'status': 'empty', 'message': f"未找到任务：{task_ref}"})
+        return tool_success('get_subagent_status', {'status': 'empty', 'message': f'未找到任务：{task_ref}'})
     msg = (
         f"{task.get('title')}（{task.get('status')}）：已完成 {task.get('progress_pct', 0)}%"
     )
     phase = task.get('current_phase')
     if phase:
-        msg += f"，{phase}"
+        msg += f'，{phase}'
     eta = task.get('estimated_sec')
     if eta:
-        msg += f"，预计还需 {eta} 秒。"
+        msg += f'，预计还需 {eta} 秒。'
     return tool_success('get_subagent_status', {'status': 'ok', 'message': msg, 'task': task})
 
 
@@ -215,17 +215,17 @@ def list_subagent_artifacts(task_ref: str) -> Dict[str, Any]:
         task_ref (str): A task reference: title, "第N个", or the agent type name.
 
     Returns:
-        str: A summary of artifact keys and their content types.
+        A summary of artifact keys and their content types.
     """
     tasks = _list_conversation_tasks()
     task = _resolve_task(task_ref, tasks)
     if not task:
-        return tool_success('list_subagent_artifacts', {'status': 'empty', 'message': f"未找到任务：{task_ref}"})
+        return tool_success('list_subagent_artifacts', {'status': 'empty', 'message': f'未找到任务：{task_ref}'})
     arts = task.get('artifacts') or []
     summary: Dict[str, str] = {}
     for a in arts:
         summary[a.get('artifact_key')] = a.get('content_type')
-    parts = [f"{k}（{v}）" for k, v in summary.items()]
+    parts = [f'{k}（{v}）' for k, v in summary.items()]
     msg = f"{task.get('title')}任务共有 {len(summary)} 个成果：" + ('、'.join(parts) if parts else '（无）')
     return tool_success('list_subagent_artifacts', {'status': 'ok', 'message': msg, 'keys': summary})
 
@@ -239,12 +239,12 @@ def get_subagent_artifacts(task_ref: str, keys: Optional[List[str]] = None) -> D
         keys (list): Optional list of artifact keys to fetch; omit to return all.
 
     Returns:
-        str: A structured description of each artifact (file paths or text summaries).
+        A structured description of each artifact (file paths or text summaries).
     """
     tasks = _list_conversation_tasks()
     task = _resolve_task(task_ref, tasks)
     if not task:
-        return tool_success('get_subagent_artifacts', {'status': 'empty', 'message': f"未找到任务：{task_ref}"})
+        return tool_success('get_subagent_artifacts', {'status': 'empty', 'message': f'未找到任务：{task_ref}'})
     arts = task.get('artifacts') or []
     if keys:
         keyset = set(keys)
