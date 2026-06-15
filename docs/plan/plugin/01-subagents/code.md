@@ -18,43 +18,65 @@
 
 要点：
 
-- `task_id` 由工具内部 `uuid.uuid4()` 生成。
+- `task_id` 由工具内部 `uuid.uuid4()` 生成；`resume=True` 时若能通过标题找到已有任务，则复用其 task_id。
 - 通过 `_write_agent_data('task_created', ...)` 写入 `FileSystemQueue`，经 `StreamCallHelper` 的 drain 循环 + translator 翻译后到达 Go。即使工具阻塞轮询，事件仍能实时送出（子线程经 `globals._init_sid(sid)` 继承主请求 sid，与 drain 共用同一队列桶）。
-- auto 分支轮询 **core 内部 HTTP 端点**感知终态（不直连 core 业务库）；轮询期间周期性发 `heartbeat` 保活主连接。
+- auto 分支通过 **`TaskQueryDB` 直接查询 `sub_agent_tasks` 表**感知终态（不走 HTTP）；轮询期间每 15s 发 `heartbeat` 保活主连接。
+- auto 成功时返回摘要 + artifacts 描述；失败时返回含 resume hint 的错误信息。
 
 ```python
-def create_subagent(agent_type, title, objective, params,
-                    input_artifact_keys, output_artifact_keys, tools=None):
-    task_id = str(uuid.uuid4())
+def create_subagent(agent_type, title, objective, params=None,
+                    input_artifact_keys=None, output_artifact_keys=None,
+                    tools=None, resume=False):
     mode = lazyllm.globals['agentic_config']['mode']
+    params = params or {}
+    input_artifact_keys = input_artifact_keys or []
+    output_artifact_keys = output_artifact_keys or []
+
+    task_id = str(uuid.uuid4())
+    if resume:
+        # 复用已有任务的 task_id（通过标题解析）
+        existing = _resolve_task(title, _list_conversation_tasks())
+        if existing and existing.get('task_id'):
+            task_id = str(existing['task_id'])
 
     # 1. 写 task_created → FileSystemQueue → astream drain → translator → 主 SSE → Go
-    _write_agent_data('task_created', task_id=task_id,
-                      title=title, agent_type=agent_type,
-                      objective=objective, params=params,
-                      input_artifact_keys=input_artifact_keys,
+    _write_agent_data('task_created', task_id=task_id, title=title,
+                      agent_type=agent_type, mode=mode, objective=objective,
+                      params=params, input_artifact_keys=input_artifact_keys,
                       output_artifact_keys=output_artifact_keys,
-                      tools=tools or [], mode=mode)
+                      tools=tools or [], resume=bool(resume))
 
     if mode == 'auto':
-        # 2. 轮询 core 内部状态端点等待 SubAgent 终态；每 ~15s 发心跳保活主连接
+        # 2. 通过 TaskQueryDB 直接轮询 sub_agent_tasks 等待 SubAgent 终态；每 15s 发心跳保活
+        last_heartbeat = time.time()
+        status_row = {}
+        db = TaskQueryDB()
         while True:
-            row = get_core_api(f'/internal/subagent/tasks/{task_id}')
-            if row and row['status'] in ('succeeded', 'failed', 'interrupted'):
+            status_row = db.get_task_status(task_id) or {}
+            if status_row.get('status') in ('succeeded', 'failed', 'interrupted', 'canceled'):
                 break
-            maybe_emit_heartbeat()      # _write_agent_data('heartbeat')
+            if time.time() - last_heartbeat >= 15:
+                _write_agent_data('heartbeat')
+                last_heartbeat = time.time()
             time.sleep(2)
+
         # 3. 拼装摘要返回给 ReactAgent
-        if row['status'] == 'succeeded':
-            return (f"任务'{title}'已完成。产出 key：{', '.join(output_artifact_keys)}。"
-                    f"如需完整内容可调用 get_subagent_artifacts('{title}')。")
-        return f"任务'{title}'执行失败：{row.get('current_phase') or row['status']}"
+        if status_row.get('status') == 'succeeded':
+            summary = status_row.get('summary', '')
+            artifacts = _fetch_task_artifacts(task_id)
+            arts_text = '\n'.join(_describe_artifact(a) for a in artifacts)
+            return f"Task '{title}' completed." + (f' Summary: {summary}\n' if summary else '') \
+                   + (f'Artifacts:\n{arts_text}' if artifacts else
+                      f" Output keys: {', '.join(output_artifact_keys) or '(none)'}.")
+        phase = status_row.get('current_phase') or status_row.get('status')
+        return (f"Task '{title}' failed: {phase}. "
+                f"To resume, call create_subagent(title='{title}', resume=True, ...) to continue from the last step.")
 
     # manual：不等待，Go 在主 SSE 关闭后后台调 /api/subagent/run
-    return f"任务'{title}'已开始后台执行。可通过 get_subagent_status('{title}') 查询进度。"
+    return f"Task '{title}' started in the background. Use get_subagent_status('{title}') to check progress."
 ```
 
-> `get_core_api` 复用 `core_api_client` 模式调 `GET /internal/subagent/tasks/{task_id}`，该端点优先读 `rag/subagent/status:{task_id}`，miss 回落查 `sub_agent_tasks`。
+> `TaskQueryDB` 从环境变量 `LAZYMIND_CORE_DATABASE_URL` / `ACL_DB_DSN` 取连接串，全局单例，无需 DSN 参数传入。
 
 ---
 
@@ -74,11 +96,12 @@ def create_subagent(agent_type, title, objective, params,
   "params":               {"count": 4},
   "input_artifact_keys":  ["optimized_prompt"],
   "output_artifact_keys": ["images"],
-  "tools":                ["image_gen_api"]
+  "tools":                ["image_gen_api"],
+  "resume":               false
 }
 ```
 
-`tools` 可选，不传则加载 agent_type 默认工具集。
+`tools` 可选，不传则加载 agent_type 默认工具集。`resume=true` 时 Go 调 `/api/subagent/run` 时透传 `resume` 字段。
 
 ---
 
@@ -86,18 +109,22 @@ def create_subagent(agent_type, title, objective, params,
 
 ## C3. Task SSE 事件格式
 
-走 Redis `rag/subagent/stream:{task_id}`，由 Go 转发给前端 Task Center。
+走 Redis `rag/subagent/stream:{task_id}`，由 Go 转发给前端 Task Center。SubAgent 框架（`run_subagent_stream`）产出以下事件类型：
 
 ```json
-{"type": "task_start",  "task_id": "..."}
-{"type": "progress",    "progress": 40, "current_phase": "已完成第1张，生成第2张...", "estimated_sec": 30}
-{"type": "artifact",    "artifact_key": "images", "content_type": "image", "seq": 2,
+{"type": "task_start",    "task_id": "..."}
+{"type": "progress",      "task_id": "...", "progress": 40, "current_phase": "已完成第1张，生成第2张...", "estimated_sec": 30}
+{"type": "text",          "task_id": "...", "text": "正在分析任务要求..."}
+{"type": "think",         "task_id": "...", "think": "（LLM 推理过程）"}
+{"type": "tool_calls",    "task_id": "...", "tool_calls": [{"id": "call_xxx", "name": "image_gen_api", "args": {...}}]}
+{"type": "tool_results",  "task_id": "...", "tool_results": [{"id": "call_xxx", "name": "image_gen_api", "result": "..."}]}
+{"type": "artifact",      "task_id": "...", "artifact_key": "images", "content_type": "image", "seq": 2,
  "value": {"url": "https://cdn.../img2.png", "path": "images/image_2.png"}}
-{"type": "done",        "status": "succeeded", "summary": "已生成4张图片"}
-{"type": "error",       "status": "failed",    "message": "缺少 artifact: style_keywords"}
+{"type": "done",          "task_id": "...", "status": "succeeded", "summary": "已生成4张图片", "cost": 12.3}
+{"type": "error",         "task_id": "...", "status": "failed",    "message": "缺少 artifact: style_keywords"}
 ```
 
-同一 `artifact_key` 可多次 emit（`seq` 递增），前端按 `(key, seq)` 去重并逐条追加；具体条数事先不确定。
+同一 `artifact_key` 可多次 emit（`seq` 递增），前端按 `(key, seq)` 去重并逐条追加；具体条数事先不确定。`text`/`think`/`tool_calls`/`tool_results` 帧与 ChatAgent 主 SSE 帧语义对称，供前端 Task Center 面板展示执行过程。
 
 ---
 
@@ -115,17 +142,21 @@ func onUpstreamChunk(d UpstreamStreamChunk, sseSender SSESender) {
         task := createTaskRecord(db, d.TaskCreated, seq)
         writeRedisStatus(rdb, task.ID, "pending")
         sseSender.ForwardTaskCreated(task)            // 通知前端（主 SSE）
-        go runSubAgent(task)                          // 立即启动 SubAgent（独立 goroutine）
+        go runSubAgent(task, d.TaskCreated.Resume)    // 立即启动 SubAgent（独立 goroutine）
         return
     }
     sseSender.ForwardChunk(d)                          // text / think / sources 照常透传
 }
 
 // 启动 SubAgent（auto / manual 共用同一逻辑）
-func runSubAgent(task SubAgentTask) {
+func runSubAgent(task SubAgentTask, resume bool) {
     // sid=task_id 获得独立队列桶；下发 db_dsn；使用更长的超时
+    // 注意：objective / params / artifact_keys / workspace_path 由框架从 DB 读取，无需重传
     resp := httpPost("/api/subagent/run", SubAgentRunReq{
-        TaskID: task.ID, DBDSN: dsn(), Resume: false,
+        TaskID:      task.ID,
+        DBDSN:       dsn(),
+        Resume:      resume,
+        ModelConfig: task.ModelConfig, // Go 透传用户模型配置（可选）
     })
     for event := range resp.SSE {
         routeToTaskSSE(db, rdb, event)
@@ -144,8 +175,10 @@ func routeToTaskSSE(db, rdb, ev TaskEvent) {
     case "artifact":
         saveArtifact(db, ev.TaskID, ev)               // 落 sub_agent_artifacts
         writeRedis(rdb, ev.TaskID, ev)
+    case "text", "think", "tool_calls", "tool_results":
+        writeRedis(rdb, ev.TaskID, ev)                // 仅推 Redis，不落 DB（展示用）
     case "done", "error":
-        updateTaskFinalStatus(db, ev.TaskID, ev.Status)
+        updateTaskFinalStatus(db, ev.TaskID, ev.Status, ev.Summary)
         writeRedis(rdb, ev.TaskID, ev)
     }
     // 执行步骤由 Python SubAgent 框架直接写 sub_agent_steps，Go 不处理
