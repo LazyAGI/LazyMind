@@ -104,6 +104,17 @@ async def chat(
             )
         ),
     ] = None,
+    plugin_context: Annotated[
+        Optional[Dict[str, Any]],
+        Body(
+            description=(
+                'Active plugin session context injected by Go. '
+                'Fields: session_id, plugin_id, current_step, advance. '
+                'When present with session_id, only advance_step is injected; '
+                'when absent or empty, cold-start trigger tools are injected.'
+            )
+        ),
+    ] = None,
 ):
     return await handle_chat(
         query=query,
@@ -127,4 +138,5 @@ async def chat(
         tool_config=tool_config,
         mcp_config=mcp_config,
         trace=trace,
+        plugin_context=plugin_context,
     )

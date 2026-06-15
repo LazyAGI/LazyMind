@@ -1,0 +1,444 @@
+// Package plugin EventLoop handles plugin_step task lifecycle on the Go side.
+// It extends handleTaskCreated in chat/conversation_logic.go to process
+// agent_type='plugin_step' events with Plugin-specific session management.
+package plugin
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
+
+	"lazymind/core/common"
+	"lazymind/core/common/orm"
+	"lazymind/core/subagent"
+)
+
+// defaultMode returns the configured plugin advance mode (auto|manual).
+// Defaults to "auto" when unset.
+func defaultMode() string {
+	v := strings.TrimSpace(os.Getenv("LAZYMIND_PLUGIN_MODE"))
+	if v == "manual" {
+		return "manual"
+	}
+	return "auto"
+}
+
+// PluginStepParams are the task_created.params fields for plugin_step agent type.
+type PluginStepParams struct {
+	PluginID    string `json:"plugin_id"`
+	StepID      string `json:"step_id"`
+	SessionID   string `json:"session_id"`
+	UserInput   string `json:"user_input"`
+	IsColdStart bool   `json:"is_cold_start"`
+}
+
+// asMap serialises the params into the generic map expected by subagent.RunRequest.Params.
+func (p PluginStepParams) asMap() map[string]any {
+	return map[string]any{
+		"plugin_id":     p.PluginID,
+		"step_id":       p.StepID,
+		"session_id":    p.SessionID,
+		"user_input":    p.UserInput,
+		"is_cold_start": p.IsColdStart,
+	}
+}
+
+// PluginChatContext carries plugin identifiers threaded through the SubAgent event loop.
+type PluginChatContext struct {
+	SessionID string
+	PluginID  string
+	StepID    string
+	ConvID    string
+	UserID    string
+	HistoryID string // TriggerHistoryID from the chat turn that started the session
+}
+
+// HandlePluginStepCreated processes a task_created event for agent_type='plugin_step'.
+// It either creates (cold start) or resumes an existing plugin session,
+// persists the sub_agent_task + plugin_session_step records,
+// and launches the SubAgent goroutine.
+// Returns (sessionID, taskID, error).
+func HandlePluginStepCreated(
+	ctx context.Context,
+	db *gorm.DB,
+	rdb *redis.Client,
+	convID, historyID, userID string,
+	taskID, title, objective string,
+	params PluginStepParams,
+	inputKeys, outputKeys []string,
+	tools []string,
+	llmConfig map[string]any,
+) (sessionID string, returnedTaskID string, err error) {
+	pluginID := params.PluginID
+	stepID := params.StepID
+	isCold := params.IsColdStart
+	returnedTaskID = taskID
+
+	if isCold {
+		existing, gErr := GetActiveSession(ctx, db, convID)
+		if gErr != nil {
+			return "", "", fmt.Errorf("plugin: check active session: %w", gErr)
+		}
+		if existing != nil {
+			return "", "", fmt.Errorf("plugin: active session already exists (id=%s)", existing.ID)
+		}
+		psID := "ps_" + common.GenerateID()
+		_, sErr := CreateSession(ctx, db, CreateSessionInput{
+			SessionID:        psID,
+			ConversationID:   convID,
+			PluginID:         pluginID,
+			TriggerHistoryID: historyID,
+			CurrentStepID:    stepID,
+			CreateUserID:     userID,
+		})
+		if sErr != nil {
+			return "", "", fmt.Errorf("plugin: create session: %w", sErr)
+		}
+		sessionID = psID
+	} else {
+		sessionID = params.SessionID
+		if sessionID == "" {
+			return "", "", fmt.Errorf("plugin: session_id required for non-cold-start step")
+		}
+		if uErr := UpdateSessionCurrentStep(ctx, db, sessionID, stepID); uErr != nil {
+			fmt.Printf("[Plugin] failed to update current_step: %v\n", uErr)
+		}
+	}
+
+	// Inject artifacts from previous steps into objective.
+	enrichedObjective := injectArtifacts(ctx, db, sessionID, objective)
+
+	// Create sub_agent_tasks record.
+	rawParams, _ := json.Marshal(map[string]any{
+		"plugin_id":     pluginID,
+		"step_id":       stepID,
+		"session_id":    sessionID,
+		"user_input":    params.UserInput,
+		"is_cold_start": isCold,
+	})
+	inputJSON, _ := json.Marshal(inputKeys)
+	outputJSON, _ := json.Marshal(outputKeys)
+	task, cErr := subagent.CreateTask(ctx, db, subagent.CreateTaskInput{
+		TaskID:             taskID,
+		ConversationID:     convID,
+		TriggerHistoryID:   historyID,
+		AgentType:          "plugin_step",
+		Title:              pluginID + ":" + stepID,
+		Objective:          enrichedObjective,
+		Mode:               "manual",
+		Params:             rawParams,
+		InputArtifactKeys:  inputJSON,
+		OutputArtifactKeys: outputJSON,
+		WorkspacePath:      subagent.WorkspacePath(userID, taskID),
+		CreateUserID:       userID,
+	})
+	if cErr != nil {
+		return "", sessionID, fmt.Errorf("plugin: create sub_agent_task: %w", cErr)
+	}
+
+	// Create plugin_session_steps record.
+	attempt, _ := NextAttempt(ctx, db, sessionID, stepID)
+	if _, stepErr := CreateSessionStep(ctx, db, sessionID, stepID, task.ID, attempt); stepErr != nil {
+		fmt.Printf("[Plugin] failed to create session step: %v\n", stepErr)
+	}
+
+	// Seed Redis status.
+	_ = subagent.WriteStatus(ctx, rdb, task.ID, map[string]any{
+		"status": subagent.StatusPending, "progress": 0,
+	})
+
+	// Launch SubAgent goroutine.
+	go subagent.Run(context.Background(), db, rdb, subagent.RunRequest{
+		TaskID:    task.ID,
+		AgentType: "plugin_step",
+		Objective: enrichedObjective,
+		Params: map[string]any{
+			"plugin_id":  pluginID,
+			"step_id":    stepID,
+			"session_id": sessionID,
+		},
+		InputArtifactKeys:  inputKeys,
+		OutputArtifactKeys: outputKeys,
+		WorkspacePath:      task.WorkspacePath,
+		Tools:              tools,
+		DBDSN:              subagent.DBDSN(),
+		Resume:             false,
+		LLMConfig:          llmConfig,
+	})
+
+	return sessionID, task.ID, nil
+}
+
+// injectArtifacts replaces {{artifact_id}} placeholders in objective with artifact text values
+// from prior succeeded plugin session steps. Falls back to the original objective on any error.
+func injectArtifacts(ctx context.Context, db *gorm.DB, sessionID, objective string) string {
+	if !strings.Contains(objective, "{{") {
+		return objective
+	}
+	steps, err := ListSteps(ctx, db, sessionID)
+	if err != nil || len(steps) == 0 {
+		return objective
+	}
+	taskIDs := make([]string, 0, len(steps))
+	for _, s := range steps {
+		if s.Status == StepStatusSucceeded {
+			taskIDs = append(taskIDs, s.TaskID)
+		}
+	}
+	if len(taskIDs) == 0 {
+		return objective
+	}
+	var artifacts []orm.SubAgentArtifact
+	if err := db.WithContext(ctx).
+		Where("task_id IN ?", taskIDs).
+		Order("task_id, artifact_key, seq ASC").
+		Find(&artifacts).Error; err != nil {
+		return objective
+	}
+	result := objective
+	for _, a := range artifacts {
+		var v map[string]any
+		if json.Unmarshal(a.Value, &v) == nil {
+			var textVal string
+			if t, ok := v["text"].(string); ok {
+				textVal = t
+			} else if u, ok := v["url"].(string); ok {
+				textVal = u
+			}
+			if textVal != "" {
+				result = strings.ReplaceAll(result, "{{"+a.ArtifactKey+"}}", textVal)
+			}
+		}
+	}
+	return result
+}
+
+// OnSubAgentDone is called when a plugin_step task reaches terminal status.
+// It mirrors the step status and handles auto/manual advance logic.
+func OnSubAgentDone(
+	ctx context.Context,
+	db *gorm.DB,
+	rdb *redis.Client,
+	taskID, status, summary string,
+	onSSE func(eventType string, payload map[string]any),
+	pctx *PluginChatContext,
+) {
+	_ = UpdateStepStatus(ctx, db, taskID, status)
+
+	if status != subagent.StatusSucceeded {
+		if pctx != nil {
+			_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusFailed)
+			onSSE("plugin_error", map[string]any{
+				"session_id": pctx.SessionID,
+				"step_id":    pctx.StepID,
+				"message":    summary,
+			})
+		}
+		return
+	}
+
+	if pctx == nil {
+		return
+	}
+
+	if defaultMode() == "auto" {
+		go advanceAutoMode(ctx, db, rdb, summary, onSSE, pctx)
+	} else {
+		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+		onSSE("step_waiting", map[string]any{
+			"session_id": pctx.SessionID,
+			"step_id":    pctx.StepID,
+		})
+	}
+}
+
+// advanceAutoMode calls DriverAgent and either triggers a new ChatAgent turn or ends the session.
+func advanceAutoMode(
+	ctx context.Context,
+	db *gorm.DB,
+	rdb *redis.Client,
+	summary string,
+	onSSE func(string, map[string]any),
+	pctx *PluginChatContext,
+) {
+	verdict, reason := callDriverAgent(pctx.PluginID, pctx.StepID, summary, pctx.SessionID)
+	switch verdict {
+	case "DONE":
+		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusCompleted)
+		onSSE("plugin_completed", map[string]any{
+			"session_id": pctx.SessionID,
+			"plugin_id":  pctx.PluginID,
+		})
+	case "FAIL":
+		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusFailed)
+		onSSE("plugin_error", map[string]any{
+			"session_id": pctx.SessionID,
+			"step_id":    pctx.StepID,
+			"message":    reason,
+		})
+	default: // PASS, RETRY
+		syntheticMsg := buildSyntheticMessage(verdict, pctx.StepID, reason)
+		go triggerNextChatTurn(pctx.ConvID, pctx.SessionID, pctx.PluginID, pctx.StepID,
+			pctx.UserID, syntheticMsg)
+	}
+}
+
+// buildSyntheticMessage produces the synthetic user message for ChatAgent on auto-advance.
+func buildSyntheticMessage(verdict, stepID, reason string) string {
+	r := strings.TrimSpace(reason)
+	switch verdict {
+	case "RETRY":
+		return fmt.Sprintf("Step %s result unsatisfactory. %s Retry.", stepID, r)
+	default:
+		return fmt.Sprintf("Step %s completed. %s Proceed.", stepID, r)
+	}
+}
+
+// triggerNextChatTurn sends a synthetic POST /conversations:chat to Go core to trigger
+// the next ChatAgent round. This ensures history persistence, applyChatRuntimeConfigs,
+// and all other Go-side pipeline steps run exactly as in a real user turn.
+func triggerNextChatTurn(
+	convID, sessionID, pluginID, currentStep, userID, syntheticMsg string,
+) {
+	coreURL := common.CoreSelfEndpoint() + "/conversations:chat"
+	reqBody := map[string]any{
+		"query":           syntheticMsg,
+		"conversation_id": convID,
+		"stream":          false,
+		"mode":            "auto",
+		"input":           []map[string]any{{"input_type": "text", "text": syntheticMsg}},
+		"plugin_context": map[string]any{
+			"session_id":   sessionID,
+			"plugin_id":    pluginID,
+			"current_step": currentStep,
+			"advance":      false,
+		},
+	}
+	body, _ := json.Marshal(reqBody)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, coreURL, bytes.NewReader(body))
+	if err != nil {
+		fmt.Printf("[Plugin] triggerNextChatTurn: build request: %v\n", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", userID)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Printf("[Plugin] triggerNextChatTurn: send request: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+	// Drain response body to allow connection reuse.
+	buf := make([]byte, 4096)
+	for {
+		if _, err := resp.Body.Read(buf); err != nil {
+			break
+		}
+	}
+}
+
+// OnArtifactEvent is called when a plugin_step SubAgent emits an artifact event.
+// It checks slot binding and writes plugin_slot_revisions if the artifact is bound.
+func OnArtifactEvent(
+	ctx context.Context,
+	db *gorm.DB,
+	taskID, artifactKey string,
+	pctx *PluginChatContext,
+) {
+	if pctx == nil {
+		return
+	}
+	slotID, cardinality := resolveSlotBinding(pctx.PluginID, artifactKey)
+	if slotID == "" {
+		return
+	}
+	attempt := 1
+	step, _ := GetLatestStep(ctx, db, pctx.SessionID, pctx.StepID)
+	if step != nil {
+		attempt = step.Attempt
+	}
+	if _, err := WriteSlotRevision(ctx, db,
+		pctx.SessionID, slotID, artifactKey, pctx.StepID, attempt, cardinality); err != nil {
+		fmt.Printf("[Plugin] WriteSlotRevision failed: %v\n", err)
+	}
+}
+
+// resolveSlotBinding looks up (slotID, cardinality) for an artifact key from the Python plugin API.
+func resolveSlotBinding(pluginID, artifactKey string) (slotID, cardinality string) {
+	endpoint := common.ChatServiceEndpoint()
+	url := fmt.Sprintf("%s/api/plugin/slot-binding?plugin_id=%s&artifact_key=%s",
+		endpoint, pluginID, artifactKey)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", ""
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", ""
+	}
+	var result struct {
+		SlotID      string `json:"slot_id"`
+		Cardinality string `json:"cardinality"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&result) != nil {
+		return "", ""
+	}
+	return result.SlotID, result.Cardinality
+}
+
+// callDriverAgent posts to the Python DriverAgent endpoint and returns (verdict, reason).
+// On any error defaults to ("PASS", "").
+func callDriverAgent(pluginID, stepID, stepResult, sessionID string) (verdict, reason string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	reqBody := map[string]any{
+		"plugin_id":   pluginID,
+		"step_id":     stepID,
+		"step_result": stepResult,
+		"session_id":  sessionID,
+	}
+	body, _ := json.Marshal(reqBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, driverEndpoint(), bytes.NewReader(body))
+	if err != nil {
+		return "PASS", ""
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "PASS", ""
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Verdict string `json:"verdict"`
+		Reason  string `json:"reason"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&result) != nil {
+		return "PASS", ""
+	}
+	v := strings.ToUpper(strings.TrimSpace(result.Verdict))
+	if v != "PASS" && v != "RETRY" && v != "DONE" && v != "FAIL" {
+		return "PASS", result.Reason
+	}
+	return v, result.Reason
+}
+
+// driverEndpoint returns the DriverAgent URL.
+func driverEndpoint() string {
+	return common.ChatServiceEndpoint() + "/api/plugin/driver"
+}

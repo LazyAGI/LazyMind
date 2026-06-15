@@ -53,6 +53,18 @@ type ChatChunkResponse struct {
 	ReasoningContent  string             `json:"reasoning_content,omitempty"`
 	ThinkingDurationS int64              `json:"thinking_duration_s,omitempty"`
 	TaskCreated       *TaskCreatedNotice `json:"task_created,omitempty"`
+	// PluginEvent carries plugin lifecycle notifications (step_waiting, plugin_completed, plugin_error).
+	// Emitted out-of-band by the plugin EventLoop after the original chat SSE has closed.
+	PluginEvent *PluginEventNotice `json:"plugin_event,omitempty"`
+}
+
+// PluginEventNotice is sent on the main conversation SSE for plugin lifecycle transitions.
+type PluginEventNotice struct {
+	EventType string `json:"event_type"` // step_waiting | plugin_completed | plugin_error
+	SessionID string `json:"session_id"`
+	PluginID  string `json:"plugin_id,omitempty"`
+	StepID    string `json:"step_id,omitempty"`
+	Message   string `json:"message,omitempty"`
 }
 
 // TaskCreatedNotice notifies the frontend (main SSE) that a SubAgent task was created,
@@ -64,6 +76,8 @@ type TaskCreatedNotice struct {
 	Mode              string `json:"mode"`
 	Status            string `json:"status"`
 	SeqInConversation int    `json:"seq_in_conversation"`
+	// PluginSessionID is set when the task is a Plugin Step (agent_type='plugin_step').
+	PluginSessionID string `json:"plugin_session_id,omitempty"`
 }
 
 func chatStatusKey(conversationID string) string {
@@ -244,4 +258,21 @@ func getMultiAnswerInfo(ctx context.Context, rdb *redis.Client, conversationID, 
 		return nil, err
 	}
 	return &info, nil
+}
+
+// AppendConversationPluginEvent appends a plugin lifecycle event to the most-recent
+// open chat SSE stream for the conversation. historyID is the TriggerHistoryID from
+// the plugin session (i.e. the chat turn that triggered the plugin).
+// This function is exported so the plugin package can call it without circular imports.
+func AppendConversationPluginEvent(ctx context.Context, rdb *redis.Client, conversationID, historyID string, ev *PluginEventNotice) error {
+	if rdb == nil || conversationID == "" || historyID == "" || ev == nil {
+		return nil
+	}
+	chunk := &ChatChunkResponse{
+		ConversationID: conversationID,
+		HistoryID:      historyID,
+		FinishReason:   "FINISH_REASON_UNSPECIFIED",
+		PluginEvent:    ev,
+	}
+	return appendChatChunk(ctx, rdb, conversationID, historyID, chunk)
 }

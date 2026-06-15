@@ -18,6 +18,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	"lazymind/core/log"
+	"lazymind/core/plugin"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/subagent"
 )
@@ -435,6 +436,10 @@ func buildChatRequestBody(convID, sessionID, query string, histories []orm.ChatH
 	}
 	if environmentContext, ok := raw["environment_context"].(map[string]any); ok {
 		body["environment_context"] = environmentContext
+	}
+	// Propagate plugin_context so Python ChatAgent receives the active session info.
+	if pc, ok := raw["plugin_context"].(map[string]any); ok && len(pc) > 0 {
+		body["plugin_context"] = pc
 	}
 	if resourceContext != nil {
 		body["disabled_tools"] = resourceContext.DisabledTools
@@ -1133,6 +1138,11 @@ func handleTaskCreated(
 	if ev == nil || strings.TrimSpace(ev.TaskID) == "" {
 		return nil
 	}
+
+	// Plugin Step path — handled separately.
+	if ev.AgentType == "plugin_step" {
+		return handlePluginStepCreated(chatCtx, db, rdb, convID, historyID, userID, ev, llmConfig)
+	}
 	mode := ev.Mode
 	if mode != "auto" && mode != "manual" {
 		mode = "auto"
@@ -1217,5 +1227,68 @@ func handleTaskCreated(
 		Mode:              task.Mode,
 		Status:            task.Status,
 		SeqInConversation: task.SeqInConversation,
+	}
+}
+
+// handlePluginStepCreated processes a task_created event for agent_type='plugin_step'.
+// It delegates to the plugin package EventLoop to manage session/step lifecycle.
+func handlePluginStepCreated(
+	ctx context.Context,
+	db *gorm.DB,
+	rdb *redis.Client,
+	convID, historyID, userID string,
+	ev *TaskCreatedEvent,
+	llmConfig map[string]any,
+) *TaskCreatedNotice {
+	// Parse PluginStepParams from ev.Params.
+	var params plugin.PluginStepParams
+	if ev.Params != nil {
+		if pid, ok := ev.Params["plugin_id"].(string); ok {
+			params.PluginID = pid
+		}
+		if sid, ok := ev.Params["step_id"].(string); ok {
+			params.StepID = sid
+		}
+		if sessID, ok := ev.Params["session_id"].(string); ok {
+			params.SessionID = sessID
+		}
+		if ui, ok := ev.Params["user_input"].(string); ok {
+			params.UserInput = ui
+		}
+		if cold, ok := ev.Params["is_cold_start"].(bool); ok {
+			params.IsColdStart = cold
+		}
+	}
+	if params.PluginID == "" || params.StepID == "" {
+		fmt.Println("[Core] [PLUGIN_STEP_INVALID_PARAMS] plugin_id or step_id missing")
+		return nil
+	}
+
+	sessionID, taskID, err := plugin.HandlePluginStepCreated(
+		ctx, db, rdb, convID, historyID, userID,
+		ev.TaskID, ev.Title, ev.Objective,
+		params,
+		ev.InputArtifactKeys, ev.OutputArtifactKeys, ev.Tools,
+		llmConfig,
+	)
+	if err != nil {
+		fmt.Printf("[Core] [PLUGIN_STEP_FAILED] err=%v\n", err)
+		return nil
+	}
+
+	// Fetch the created task for the notice.
+	task, getErr := subagent.GetTask(ctx, db, taskID)
+	if getErr != nil {
+		fmt.Printf("[Core] [PLUGIN_STEP_GET_TASK_FAILED] err=%v\n", getErr)
+		return nil
+	}
+	return &TaskCreatedNotice{
+		TaskID:            task.ID,
+		Title:             task.Title,
+		AgentType:         "plugin_step",
+		Mode:              "manual",
+		Status:            task.Status,
+		SeqInConversation: task.SeqInConversation,
+		PluginSessionID:   sessionID,
 	}
 }

@@ -158,6 +158,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       tool_config: Optional[Dict[str, Union[str, List[str]]]] = None,
                       mcp_config: Optional[List[Dict[str, Any]]] = None,
                       trace: Optional[bool] = False,
+                      plugin_context: Optional[Dict[str, Any]] = None,
                       ) -> Union[Dict[str, Any], StreamingResponse]:
     LOG.info(
         f'[ChatServer] [MODEL_CONFIG_RECEIVED] [sid={session_id}] [user_id={user_id or ""}] '
@@ -204,6 +205,51 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         'has_subagents': bool(has_subagents),
         'conversation_id': (conversation_id or '').strip(),
     }
+
+    # Plugin context injection
+    plugin_tools: list = []
+    plugin_system_prompt = ''
+    plugin_stop_tools: list = []
+
+    if plugin_context and isinstance(plugin_context, dict):
+        from lazymind.chat.plugin import plugin_loader, plugin_manager
+        p_session_id = plugin_context.get('session_id', '')
+        p_plugin_id = plugin_context.get('plugin_id', '')
+        p_current_step = plugin_context.get('current_step', '')
+
+        if p_session_id and p_plugin_id:
+            # Active session: inject advance_step only
+            agentic_config.update({
+                'plugin_id': p_plugin_id,
+                'plugin_session_id': p_session_id,
+                'plugin_step': p_current_step,
+            })
+            sm = plugin_loader.get_state_machine(p_plugin_id)
+            reachable = sm.get_reachable_steps(p_current_step) if sm else []
+            if reachable:
+                plugin_tools = [plugin_manager.build_advance_step_tool(p_plugin_id, p_current_step)]
+                plugin_stop_tools = ['advance_step']
+            plugin_system_prompt = plugin_loader.get_scenario(p_plugin_id)
+        else:
+            # Cold start: inject all trigger_<plugin_id> tools
+            plugin_tools = plugin_manager.build_cold_start_tools()
+            plugin_stop_tools = [t.__name__ for t in plugin_tools]
+            if plugin_tools:
+                scenarios = []
+                for spec in (plugin_loader._registry or {}).values():
+                    scenarios.append(plugin_loader.get_scenario(spec.plugin_id))
+                plugin_system_prompt = '\n\n---\n\n'.join(s for s in scenarios if s)
+    else:
+        # No plugin context at all: inject cold-start triggers
+        from lazymind.chat.plugin import plugin_loader, plugin_manager
+        if plugin_loader._registry:
+            plugin_tools = plugin_manager.build_cold_start_tools()
+            plugin_stop_tools = [t.__name__ for t in plugin_tools]
+            scenarios = []
+            for spec in (plugin_loader._registry or {}).values():
+                scenarios.append(plugin_loader.get_scenario(spec.plugin_id))
+            plugin_system_prompt = '\n\n---\n\n'.join(s for s in scenarios if s)
+
     lazyllm.globals._init_sid(sid=session_id)
     lazyllm.locals._init_sid(sid=session_id)
     inject_model_config(model_config)
@@ -214,7 +260,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     agent_tools = build_agent_tools(active_configs)
     subagent_tools = _build_subagent_chat_tools(bool(has_subagents))
     mcp_tools = _build_mcp_tools(mcp_config) if mcp_config else []
-    all_tools = agent_tools + subagent_tools + mcp_tools
+    all_tools = agent_tools + subagent_tools + plugin_tools + mcp_tools
     set_trace_context({
         'enabled': bool(trace),
         'trace_id': session_id if trace else None,
@@ -231,6 +277,8 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         memory=memory,
         files=resolved_files,
     )
+    if plugin_system_prompt:
+        runtime_prompt = runtime_prompt + '\n\n' + plugin_system_prompt
 
     llm = AutoModel(model='llm')
 
@@ -245,6 +293,11 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         fs=FS,
         skills_dir=_cfg['skill_fs_url'],
     )
+    if plugin_stop_tools:
+        try:
+            react_agent.set_stop_tools(plugin_stop_tools)
+        except Exception:
+            pass
 
     async def event_stream() -> Any:
         final_result: Any = None

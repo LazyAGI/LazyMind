@@ -527,6 +527,13 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
           status: tc.status || "pending",
         });
         taskStore.subscribeTask(convId, tc.task_id);
+
+        // If this is a plugin_step, refresh the plugin session for the conversation.
+        if (tc.agent_type === "plugin_step" && tc.plugin_session_id) {
+          import("@/modules/chat/store/pluginPanel").then(({ usePluginStore }) => {
+            usePluginStore.getState().loadActiveSession(convId);
+          });
+        }
       }
 
       const messageConversationId = result.conversation_id || "";

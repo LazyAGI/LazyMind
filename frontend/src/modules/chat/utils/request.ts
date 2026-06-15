@@ -100,6 +100,50 @@ export function TaskServiceApi() {
   };
 }
 
+// Plugin Session API.
+export function PluginSessionApi() {
+  return {
+    getActiveSession(conversationId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/plugin-sessions:active`,
+        options,
+      );
+    },
+    listSessions(conversationId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/plugin-sessions`,
+        options,
+      );
+    },
+    getSession(sessionId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}`,
+        options,
+      );
+    },
+    getSlots(sessionId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots`,
+        options,
+      );
+    },
+    patchSlot(sessionId: string, slotId: string, selectedRevision: number, options?: RawAxiosRequestConfig) {
+      return axiosInstance.patch(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}`,
+        { selected_revision: selectedRevision },
+        options,
+      );
+    },
+    advanceSession(sessionId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}:advance`,
+        {},
+        options,
+      );
+    },
+  };
+}
+
 function withJsonOptions(
   options: RawAxiosRequestConfig = {},
 ): RawAxiosRequestConfig {

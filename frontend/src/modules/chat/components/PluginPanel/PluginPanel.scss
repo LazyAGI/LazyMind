@@ -1,0 +1,219 @@
+.plugin-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: var(--color-bg-secondary, #f8f9fa);
+  border: 1px solid var(--color-border, #e9ecef);
+  min-height: 64px;
+  transition: border-color 0.2s;
+
+  &--active {
+    border-color: var(--color-primary, #1677ff);
+  }
+
+  &--failed {
+    border-color: var(--color-error, #ff4d4f);
+  }
+
+  &--completed {
+    border-color: var(--color-success, #52c41a);
+  }
+
+  &--loading {
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+
+  &__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__title {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--color-text-primary, #212529);
+    flex: 1;
+  }
+
+  &__status {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 100px;
+    font-weight: 500;
+
+    &--active { background: #e6f4ff; color: #0958d9; }
+    &--completed { background: #f6ffed; color: #389e0d; }
+    &--failed { background: #fff2f0; color: #cf1322; }
+    &--waiting { background: #fff7e6; color: #d46b08; }
+  }
+
+  &__tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--color-border, #e9ecef);
+    padding-bottom: 8px;
+  }
+
+  &__tab {
+    padding: 4px 12px;
+    border: none;
+    background: transparent;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--color-text-secondary, #495057);
+    transition: background 0.15s;
+
+    &:hover { background: var(--color-bg-hover, #e9ecef); }
+
+    &--active {
+      background: var(--color-primary-light, #e6f4ff);
+      color: var(--color-primary, #1677ff);
+      font-weight: 500;
+    }
+  }
+
+  &__body {
+    flex: 1;
+    min-height: 0;
+  }
+
+  &__auto-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  &__slot-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  &__slot-label {
+    font-size: 11px;
+    color: var(--color-text-tertiary, #868e96);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  &__slot-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  &__named-slot {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+
+  &__slot-placeholder {
+    height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-bg-hover, #f1f3f5);
+    border-radius: 6px;
+    color: var(--color-text-tertiary, #868e96);
+    font-size: 20px;
+  }
+
+  &__tab-content {
+    padding-top: 12px;
+  }
+
+  &__empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    color: var(--color-text-tertiary, #868e96);
+    font-size: 13px;
+  }
+}
+
+// Slot component styles
+.plugin-slot {
+  border-radius: 6px;
+  overflow: hidden;
+
+  &--text {
+    padding: 8px 12px;
+    background: var(--color-bg-primary, #fff);
+    border: 1px solid var(--color-border, #e9ecef);
+    border-radius: 6px;
+  }
+
+  &__text {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--color-text-primary, #212529);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  &--image {
+    max-width: 100%;
+  }
+
+  &__image {
+    display: block;
+    max-width: 100%;
+    border-radius: 6px;
+    object-fit: contain;
+  }
+
+  &--file {
+    padding: 8px 12px;
+    background: var(--color-bg-primary, #fff);
+    border: 1px solid var(--color-border, #e9ecef);
+    border-radius: 6px;
+  }
+
+  &__file-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    color: var(--color-primary, #1677ff);
+    font-size: 13px;
+  }
+
+  &__file-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__file-size {
+    font-size: 11px;
+    color: var(--color-text-tertiary, #868e96);
+  }
+
+  &--empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    background: var(--color-bg-hover, #f1f3f5);
+  }
+
+  &__placeholder {
+    color: var(--color-text-tertiary, #868e96);
+    font-size: 12px;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}

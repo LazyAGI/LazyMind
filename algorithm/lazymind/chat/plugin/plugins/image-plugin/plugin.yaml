@@ -1,0 +1,25 @@
+id: image-plugin
+name: AI Image Generation
+description: Generate high-quality images from natural language descriptions. First optimizes the prompt, then calls an image generation model.
+
+steps:
+  - id: optimize_prompt
+    label: Optimize Prompt
+
+  - id: generate_image
+    label: Generate Image
+
+ui:
+  tabs:
+    - id: result
+      label: Result
+      slots:
+        - id: image_output
+          label: Generated Image
+          type: image
+          cardinality: single
+
+        - id: prompt_used
+          label: Prompt Used
+          type: text
+          cardinality: single

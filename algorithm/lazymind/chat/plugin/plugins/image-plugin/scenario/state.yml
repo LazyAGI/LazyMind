@@ -1,0 +1,59 @@
+initial: __start__
+
+transitions:
+  __start__:
+    - to: optimize_prompt
+  optimize_prompt:
+    - to: generate_image
+    - to: optimize_prompt   # retry path
+  generate_image:
+    - to: __end__
+    - to: generate_image    # retry path
+
+steps:
+  optimize_prompt:
+    label: Optimize Prompt
+    prompt: |
+      You are a professional image generation prompt engineer.
+
+      The user wants to generate an image with the following description:
+      {{user_input}}
+
+      Your task:
+      1. Expand and enrich the description with visual details (style, lighting, composition, etc.).
+      2. Write a concise, high-quality English image generation prompt (max 200 words).
+      3. Save the result as an artifact using save_artifact(key='optimized_prompt', content_type='text', value=<prompt>).
+
+      Do not generate any other output. After saving the artifact, stop.
+    tools:
+      - save_artifact
+    outputs:
+      - artifact_id: optimized_prompt
+        slot_id: prompt_used
+    acceptance_criteria: |
+      The optimized_prompt artifact must be saved and contain an English image prompt
+      with at least 20 words and no more than 200 words.
+
+  generate_image:
+    label: Generate Image
+    prompt: |
+      You are an image generation agent.
+
+      Use the following optimized prompt to generate an image:
+      {{optimized_prompt}}
+
+      Steps:
+      1. Call the image generation tool with the above prompt.
+      2. Save the resulting image URL using save_artifact(key='image_url', content_type='image', value=<url>).
+      3. Stop after saving.
+    tools:
+      - save_artifact
+      - generate_image_tool
+    inputs:
+      - artifact_id: optimized_prompt
+        required: true
+    outputs:
+      - artifact_id: image_url
+        slot_id: image_output
+    acceptance_criteria: |
+      The image_url artifact must be saved and contain a valid URL starting with http(s)://.

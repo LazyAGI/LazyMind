@@ -15,6 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"lazymind/core/acl"
 	"lazymind/core/asyncjob"
+	"lazymind/core/chat"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
@@ -22,9 +23,12 @@ import (
 	"lazymind/core/log"
 	"lazymind/core/migrate"
 	"lazymind/core/modelprovider"
+	"lazymind/core/plugin"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+
+	"github.com/redis/go-redis/v9"
 )
 
 //go:embed docs.html
@@ -193,6 +197,31 @@ func main() {
 	} else if n > 0 {
 		log.Logger.Info().Int64("count", n).Msg("marked stale subagent tasks as interrupted")
 	}
+
+	// Register plugin lifecycle hooks into the subagent EventHooks.
+	plugin.RegisterSubAgentHooks()
+	// Wire the conversation SSE hook so plugin events reach the frontend main SSE.
+	subagent.EventHooks.RegisterConversationEventHook(
+		func(ctx context.Context, rdb *redis.Client, convID, historyID, eventType string, payload map[string]any) {
+			ev := &chat.PluginEventNotice{
+				EventType: eventType,
+			}
+			if s, ok := payload["session_id"].(string); ok {
+				ev.SessionID = s
+			}
+			if s, ok := payload["plugin_id"].(string); ok {
+				ev.PluginID = s
+			}
+			if s, ok := payload["step_id"].(string); ok {
+				ev.StepID = s
+			}
+			if s, ok := payload["message"].(string); ok {
+				ev.Message = s
+			}
+			_ = chat.AppendConversationPluginEvent(ctx, rdb, convID, historyID, ev)
+		},
+	)
+	log.Logger.Info().Msg("plugin subagent hooks registered")
 
 	r := mux.NewRouter()
 	r.UseEncodedPath()
