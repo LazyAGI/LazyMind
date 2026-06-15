@@ -138,7 +138,18 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
       let next: SubAgentTask[];
       if (idx >= 0) {
         next = list.slice();
-        next[idx] = { ...next[idx], ...task };
+        const current = next[idx];
+        const incoming = { ...current, ...task };
+        // Prefer the longer execution_log: DB snapshots only have completed steps,
+        // while the live SSE stream may have buffered more content in memory.
+        if (
+          current.execution_log &&
+          task.execution_log &&
+          current.execution_log.length > task.execution_log.length
+        ) {
+          incoming.execution_log = current.execution_log;
+        }
+        next[idx] = incoming;
       } else {
         next = [
           ...list,

@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, useCallback } from "react";
+import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Image, Progress, Tabs, Tooltip } from "antd";
 import {
@@ -19,14 +19,17 @@ import {
   ToolCallItem,
   ToolResultItem,
   TaskStatus,
+  useTaskCenterStore,
 } from "@/modules/chat/store/taskCenter";
 import { resolveCoreAssetUrl } from "@/modules/knowledge/utils/imageUrl";
 import "./index.scss";
 
 interface Props {
-  tasks: SubAgentTask[];
+  sessionId: string;
   onClose?: () => void;
 }
+
+const EMPTY_TASKS: SubAgentTask[] = [];
 
 const RUNNING_STATUSES: TaskStatus[] = ["pending", "running"];
 const HISTORY_STATUSES: TaskStatus[] = [
@@ -63,6 +66,10 @@ function CollapsibleSection({
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  // Auto-expand when defaultOpen flips to true (e.g. task transitions pending→running).
+  useEffect(() => {
+    if (defaultOpen) setOpen(true);
+  }, [defaultOpen]);
   return (
     <div className="task-section">
       <button
@@ -112,9 +119,15 @@ function ToolCallRow({ call }: { call: ToolCallItem }) {
 
 function ToolResultRow({ result }: { result: ToolResultItem }) {
   const [open, setOpen] = useState(false);
-  const preview = useMemo(() => {
-    const s = String(result.result ?? "");
-    return s.length > 120 ? s.slice(0, 120) + "…" : s;
+  const bodyText = useMemo(() => {
+    const r = result.result;
+    if (r === null || r === undefined) return "";
+    if (typeof r === "string") return r;
+    try {
+      return JSON.stringify(r, null, 2);
+    } catch {
+      return String(r);
+    }
   }, [result.result]);
   return (
     <div className="task-tool-result">
@@ -126,11 +139,10 @@ function ToolResultRow({ result }: { result: ToolResultItem }) {
       >
         <CheckOutlined className="task-tool-result-icon" />
         <span className="task-tool-result-name">{result.name}</span>
-        {!open && <span className="task-tool-result-preview">{preview}</span>}
         <span className="task-tool-result-arrow">{open ? <DownOutlined /> : <RightOutlined />}</span>
       </button>
-      {open && (
-        <pre className="task-tool-result-body">{String(result.result ?? "")}</pre>
+      {open && bodyText && (
+        <pre className="task-tool-result-body">{bodyText}</pre>
       )}
     </div>
   );
@@ -139,13 +151,24 @@ function ToolResultRow({ result }: { result: ToolResultItem }) {
 function ExecutionLog({ log, isRunning }: { log: TaskLogEntry[]; isRunning: boolean }) {
   const { t } = useTranslation();
   if (!log || log.length === 0) return null;
+
+  // Merge consecutive same-type text/think entries to avoid per-token line breaks during streaming.
+  const mergedLog = log.reduce<TaskLogEntry[]>((acc, entry) => {
+    const prev = acc[acc.length - 1];
+    if (prev && (entry.type === "text" || entry.type === "think") && prev.type === entry.type) {
+      acc[acc.length - 1] = { ...prev, content: prev.content + entry.content };
+      return acc;
+    }
+    return [...acc, entry];
+  }, []);
+
   return (
     <CollapsibleSection
       title={t("taskCenter.executionProcess")}
       defaultOpen={isRunning}
     >
       <div className="task-execution-log">
-        {log.map((entry, i) => {
+        {mergedLog.map((entry, i) => {
           if (entry.type === "think") {
             const cleaned = cleanThinkContent(entry.content);
             if (!cleaned) return null;
@@ -310,7 +333,7 @@ function TaskCard({ task }: { task: SubAgentTask }) {
   return (
     <div
       className={`task-card ${collapsed ? "task-card-collapsed" : ""}`}
-      style={cardHeight && !collapsed ? { height: cardHeight, overflow: 'hidden', display: 'flex', flexDirection: 'column' } : undefined}
+      style={cardHeight && !collapsed ? { maxHeight: cardHeight, overflow: 'hidden', display: 'flex', flexDirection: 'column' } : undefined}
     >
       <div className="task-card-header">
         <button
@@ -364,8 +387,12 @@ function TaskCard({ task }: { task: SubAgentTask }) {
 }
 
 const TaskCenter = (props: Props) => {
-  const { tasks, onClose } = props;
+  const { sessionId, onClose } = props;
   const { t } = useTranslation();
+
+  const tasks = useTaskCenterStore((s) =>
+    sessionId ? s.tasksByConversation[sessionId] ?? EMPTY_TASKS : EMPTY_TASKS,
+  );
 
   const runningTasks = useMemo(
     () => tasks.filter((t) => RUNNING_STATUSES.includes(t.status)),

@@ -140,8 +140,8 @@
     padding-bottom: 12px;
   }
 
-  // When height is user-set (resize), the body scrolls.
-  &[style*="height"] > :not(.task-card-header):not(.task-card-resize-handle) {
+  // When max-height is user-set (resize), the body scrolls.
+  &[style*="max-height"] > :not(.task-card-header):not(.task-card-resize-handle) {
     overflow-y: auto;
     flex: 1;
     min-height: 0;

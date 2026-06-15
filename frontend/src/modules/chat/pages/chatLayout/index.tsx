@@ -532,7 +532,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         >
           <div className="right-box-resize-handle" onMouseDown={onPanelResizeStart} />
           <TaskCenter
-            tasks={tasks}
+            sessionId={sessionId}
             onClose={() => setIsTaskPanelCollapsed(true)}
           />
         </div>

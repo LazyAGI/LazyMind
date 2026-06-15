@@ -54,7 +54,10 @@ def create_subagent(
         input_artifact_keys (list): Artifact keys this SubAgent may read from prior tasks.
         output_artifact_keys (list): Artifact keys this SubAgent must produce (fixed declaration).
         tools (list): Optional explicit tool names; defaults to the agent_type tool set.
-        resume (bool): When True, resume the interrupted task whose title matches `title`.
+        resume (bool): Set to True when the user explicitly asks to continue or retry a
+            FAILED or interrupted task. Pass the failed task's title so the agent can locate
+            and resume it from its last saved step. Do NOT create a new task if the user says
+            "continue" or "retry" — always pass resume=True with the original title instead.
 
     Returns:
         In auto mode, a summary after the SubAgent finishes. In manual mode, an immediate
@@ -129,10 +132,13 @@ def create_subagent(
         else:
             phase = status_row.get('current_phase') or status_row.get('status')
             summary = str(status_row.get('summary') or '').strip()
+            resume_hint = (
+                f"如需继续，请调用 create_subagent(title='{title}', resume=True, ...) 以从断点恢复。"
+            )
             if summary:
-                msg = f"任务'{title}'未完全成功：\n{summary}"
+                msg = f"任务'{title}'未完全成功：\n{summary}\n{resume_hint}"
             else:
-                msg = f"任务'{title}'执行失败：{phase or status_row.get('status')}"
+                msg = f"任务'{title}'执行失败：{phase or status_row.get('status')}。{resume_hint}"
             result = {'status': 'failed', 'message': msg, 'summary': summary}
         return tool_success('create_subagent', result)
 

@@ -17,27 +17,19 @@ from .context import SubAgentContext, set_context
 from .db import SubAgentDB
 from . import tools as subagent_tools
 
-# Default ChatAgent tool groups enabled per SubAgent agent_type when create_subagent
-# does not pass an explicit tools list.
-_AGENT_TYPE_DEFAULT_TOOL_NAMES: Dict[str, List[str]] = {
-    'research': ['web_search', 'url_fetch', 'wikipedia'],
-}
 
+def _resolve_runtime_tools(explicit: Optional[List[str]]) -> List[Any]:
+    """Build the runtime tool list for a SubAgent.
 
-def _resolve_subagent_tool_names(
-    explicit: Optional[List[str]],
-    agent_type: str,
-) -> List[str]:
+    If explicit tool names are provided, use only those (looked up from DEFAULT_TOOLS).
+    Otherwise fall back to all DEFAULT_TOOLS, giving the SubAgent the same tool set
+    as ChatAgent minus the subagent-management tools.
+    """
     if explicit:
-        return [str(name).strip() for name in explicit if str(name).strip()]
-    return list(_AGENT_TYPE_DEFAULT_TOOL_NAMES.get(str(agent_type or '').strip(), []))
-
-
-def _build_runtime_tools(tool_names: List[str]) -> List[Any]:
-    if not tool_names:
-        return []
-    name_set = set(tool_names)
-    configs = [cfg for cfg in DEFAULT_TOOLS if cfg.name in name_set]
+        name_set = {str(n).strip() for n in explicit if str(n).strip()}
+        configs = [cfg for cfg in DEFAULT_TOOLS if cfg.name in name_set]
+    else:
+        configs = list(DEFAULT_TOOLS)
     return build_agent_tools(configs)
 
 
@@ -55,6 +47,8 @@ def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
 def _objective_prompt(ctx: SubAgentContext) -> str:
     lines = [
         'You are an autonomous SubAgent. Complete the objective below using the available tools.',
+        'You are NOT allowed to spawn or create sub-agents or delegate tasks to other agents. '
+        'Only use the tools explicitly listed in your tool set.',
         '',
         f'Objective: {ctx.objective}',
     ]
@@ -161,10 +155,10 @@ async def run_subagent_stream(
         yield _sse({'type': 'task_start', 'task_id': task_id})
 
         llm = AutoModel(model='llm')
-        runtime_tool_names = _resolve_subagent_tool_names(tools, str(agent_type or task.get('agent_type') or ''))
+        runtime_tools = _resolve_runtime_tools(tools)
         agent = build_react_agent(
             llm=llm,
-            tools=_build_subagent_tools(_build_runtime_tools(runtime_tool_names)),
+            tools=_build_subagent_tools(runtime_tools),
             force_summarize_context=ctx.objective,
         )
 
@@ -429,6 +423,10 @@ def _rebuild_history_from_steps(db: SubAgentDB, task_id: str) -> List[Dict[str, 
     Validates tool_call_id pairing: every assistant tool_call must have a matching tool result.
     A tool step whose result has no preceding assistant tool_call id (orphan) is discarded, and
     replay stops at the last complete assistant boundary.
+
+    Also validates that every tool_call's function.arguments is valid JSON.  If any arguments
+    field is malformed (e.g. persisted from a truncated stream), the offending assistant message
+    and everything after it are dropped so the model never receives corrupt history.
     """
     steps = db.load_steps(task_id)
     history: List[Dict[str, Any]] = []
@@ -438,6 +436,19 @@ def _rebuild_history_from_steps(db: SubAgentDB, task_id: str) -> List[Dict[str, 
         content = step.get('content') or {}
         if role == 'assistant':
             tool_calls = content.get('tool_calls') or []
+            # Validate function.arguments JSON before appending.
+            for tc in tool_calls:
+                args = (tc.get('function') or {}).get('arguments') or tc.get('args')
+                if args and isinstance(args, str):
+                    try:
+                        json.loads(args)
+                    except (ValueError, TypeError):
+                        # Corrupt arguments: stop replay at the last clean boundary.
+                        LOG.warning(
+                            f'[SubAgent] resume: dropping corrupt tool_call '
+                            f'(task={task_id}, name={(tc.get("function") or {}).get("name")})'
+                        )
+                        return history
             pending_ids = {tc.get('id') for tc in tool_calls if tc.get('id')}
             history.append({
                 'role': 'assistant',
