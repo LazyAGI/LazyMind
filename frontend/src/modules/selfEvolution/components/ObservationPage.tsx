@@ -35,7 +35,6 @@ import {
   type TraceObservation,
 } from "./TraceObservationView";
 import traceCompareFixture from "../fixtures/evo_trace_compare_result.json";
-import traceDetailFixture from "../fixtures/evo_trace_detail_result.json";
 import "../index.scss";
 
 const { Paragraph, Text, Title } = Typography;
@@ -146,61 +145,9 @@ const observationKindMap: Record<string, ObservationResultKind> = {
   abtests: "abtests",
 };
 
-const fallbackObservationData: Record<ObservationResultKind, unknown> = {
-  "eval-reports": traceDetailFixture,
+const fallbackObservationData: Partial<Record<ObservationResultKind, unknown>> = {
   abtests: traceCompareFixture,
 };
-
-const fallbackBadcaseRows: CsvBadcaseRow[] = [
-  {
-    caseId: "case-019",
-    query: "如何重置管理员密码?",
-    reference: "管理员可通过账号安全页重置密码，也可以由系统管理员在用户管理中发起重置。",
-    answer: "进入设置后选择账号安全，验证身份后即可重置密码。",
-    score: 0.55,
-    failureType: "生成偏差",
-    failureTone: "red",
-    defect: "遗漏管理员代操作流程。",
-    reason: "生成答案覆盖了部分步骤，但遗漏管理员代操作流程。",
-    mode: "Agentic RAG",
-    traceId: "d862fb1f6aa34a7fb2faea3c0a8e1001",
-    traceStatus: "已关联",
-    failureReason: "生成答案覆盖了部分步骤，但遗漏管理员代操作流程。",
-    tracePayload: traceDetailFixture,
-  },
-  {
-    caseId: "case-083",
-    query: "如何申请发票抬头变更?",
-    reference: "发票抬头变更需提供：营业执照、新抬头信息、变更说明、盖章申请表，发送至财务邮箱，3 个工作日内生效。",
-    answer: "发票抬头变更需联系财务，由财务进行处理，一般 1-2 个工作日可以完成。",
-    score: 0.42,
-    failureType: "召回不足",
-    failureTone: "orange",
-    defect: "未包含关键流程与材料要求。",
-    reason: "召回不足：检索到的文档数量过少，未包含关键流程与材料要求。",
-    mode: "Agentic RAG",
-    traceId: "9274879f971f4c819ffc1151000cb82c",
-    traceStatus: "已关联",
-    failureReason: "召回不足：检索到的文档数量过少，未包含关键流程与材料要求。",
-    tracePayload: traceDetailFixture,
-  },
-  {
-    caseId: "case-104",
-    query: "上传失败如何处理?",
-    reference: "上传失败时请检查文件格式、大小和网络状态；若仍失败，可下载错误日志提交工单。",
-    answer: "请检查网络后重新上传，如仍失败请联系技术支持。",
-    score: 0.61,
-    failureType: "上下文缺失",
-    failureTone: "blue",
-    defect: "缺少格式、大小、错误日志等上下文。",
-    reason: "回答可用但缺少格式、大小、错误日志等上下文。",
-    mode: "Agentic RAG",
-    traceId: "94cc5c498a534d179ea60ba7c4b93955",
-    traceStatus: "已关联",
-    failureReason: "回答可用但缺少格式、大小、错误日志等上下文。",
-    tracePayload: traceDetailFixture,
-  },
-];
 
 const fallbackAbCaseRows: AbCaseRow[] = [
   {
@@ -401,7 +348,7 @@ function getNodeTitle(node: TraceNode) {
   return node.name;
 }
 
-function renderPayloadBlock(label: string, payload?: TraceNode["input"]) {
+function renderPayloadBlock(label: string, payload?: { summary?: string; data?: unknown }) {
   if (!payload?.summary && payload?.data === undefined) {
     return <Paragraph className="self-evolution-eval-empty">暂无{label}数据。</Paragraph>;
   }
@@ -496,7 +443,7 @@ function normalizeBadcaseRows(value: unknown): CsvBadcaseRow[] {
       tracePayload: item.trace || item.observation || item.trace_detail,
     };
   });
-  return rows.length ? rows : fallbackBadcaseRows;
+  return rows;
 }
 
 function normalizeAbCaseRows(value: unknown): AbCaseRow[] {
@@ -652,15 +599,15 @@ function EvalReportPanel({
       <div className="self-evolution-eval-report-head">
         <div>
           <Title level={3}>评测报告详情</Title>
-          <Text>报告 ID：report-20260511-01</Text>
-          <Text>数据集：客服知识库回归集 · 样本数 120 · Badcase 18</Text>
+          <Text>报告 ID：-</Text>
+          <Text>数据集：- · 样本数 - · Badcase -</Text>
         </div>
       </div>
       <div className="self-evolution-eval-metric-grid">
-        <MetricCard icon={<AimOutlined />} label="准确率" value="82.4%" tone="blue" />
-        <MetricCard icon={<WarningOutlined />} label="Badcase" value="18" tone="red" />
-        <MetricCard icon={<ClockCircleOutlined />} label="平均耗时" value="6.8s" tone="green" />
-        <MetricCard icon={<ThunderboltOutlined />} label="Trace 覆盖率" value="96%" tone="purple" />
+        <MetricCard icon={<AimOutlined />} label="准确率" value="-" tone="blue" />
+        <MetricCard icon={<WarningOutlined />} label="Badcase" value="-" tone="red" />
+        <MetricCard icon={<ClockCircleOutlined />} label="平均耗时" value="-" tone="green" />
+        <MetricCard icon={<ThunderboltOutlined />} label="Trace 覆盖率" value="-" tone="purple" />
       </div>
       <div className="self-evolution-eval-badcase-panel">
         <div className="self-evolution-eval-section-title">
@@ -806,7 +753,6 @@ function TraceInspectorPanel({
   const docs = getTraceDocs(node);
   const metadata = node?.metadata || {};
   const inputData = getNodeDataRecord(node?.input);
-  const outputData = getNodeDataRecord(node?.output);
 
   if (!node) {
     return (
@@ -843,22 +789,10 @@ function TraceInspectorPanel({
         </div>
         <div className="self-evolution-eval-inspector-section">
           <h4>2. 输入</h4>
-          <div className="self-evolution-eval-kv-grid">
-            <span><em>case_query</em><strong title={selectedRow.query}>{selectedRow.query}</strong></span>
-            <span><em>top_k</em><strong>{getDisplayText(findRecordValue(inputData, ["topk", "top_k"]))}</strong></span>
-            <span><em>retrieval_mode</em><strong>{getDisplayText(findRecordValue(inputData, ["retrieval_mode", "mode", "strategy"]))}</strong></span>
-            <span><em>filters</em><strong>{getDisplayText(findRecordValue(inputData, ["filters", "filter", "where"]))}</strong></span>
-          </div>
-          {renderPayloadBlock("输入", node.input)}
+          {renderPayloadBlock("输入", node.input?.summary || inputData !== undefined ? { summary: node.input?.summary, data: inputData } : undefined)}
         </div>
         <div className="self-evolution-eval-inspector-section">
           <h4>3. 输出</h4>
-          <div className="self-evolution-eval-kv-grid">
-            <span><em>returned_docs</em><strong>{docs.length}</strong></span>
-            <span><em>max_score</em><strong>{docs[0]?.score?.toFixed(2) || "-"}</strong></span>
-            <span><em>elapsed_ms</em><strong>{node.latencyMs ? Math.round(node.latencyMs) : "-"}</strong></span>
-            <span><em>error</em><strong>{getDisplayText(findRecordValue(outputData, ["error", "message"]))}</strong></span>
-          </div>
           {renderPayloadBlock("输出", node.output)}
         </div>
         <div className="self-evolution-eval-inspector-section">
@@ -929,20 +863,16 @@ function EvalObservationDashboard({
   data,
   notice,
   isFallback,
-  loading,
   threadId,
   onBack,
-  onReload,
   isMenuCollapsed,
   toggleMenu,
 }: {
   data: unknown;
   notice?: string;
   isFallback?: boolean;
-  loading: boolean;
   threadId?: string;
   onBack: () => void;
-  onReload: () => void;
   isMenuCollapsed?: boolean;
   toggleMenu?: () => void;
 }) {
@@ -956,7 +886,7 @@ function EvalObservationDashboard({
   }>({ loading: false });
   const selectedRow = rows.find((item) => item.caseId === selectedCaseId) || rows[0];
   const selectedObservation = useMemo(() => {
-    return normalizeTraceObservation(traceState.data) || normalizeTraceObservation(selectedRow?.tracePayload) || normalizeTraceObservation(traceDetailFixture);
+    return normalizeTraceObservation(traceState.data) || normalizeTraceObservation(selectedRow?.tracePayload);
   }, [selectedRow, traceState.data]);
   const detail = getPrimaryObservation(selectedObservation);
 
@@ -987,8 +917,8 @@ function EvalObservationDashboard({
         if (isEmptyResultPayload(response.data)) {
           setTraceState({
             loading: false,
-            data: traceDetailFixture,
-            error: "当前 trace 接口暂无数据，先展示样例观测详情。",
+            data: undefined,
+            error: "当前 trace 接口暂无数据。",
             traceId,
           });
           return;
@@ -1001,8 +931,8 @@ function EvalObservationDashboard({
         }
         setTraceState({
           loading: false,
-          data: traceDetailFixture,
-          error: `观测详情加载失败，已回退到样例数据。${getLocalizedErrorMessage(error, "请稍后重试。")}`,
+          data: undefined,
+          error: getLocalizedErrorMessage(error, "观测详情加载失败，请稍后重试。"),
           traceId,
         });
       });
@@ -1018,11 +948,10 @@ function EvalObservationDashboard({
         <ObservationHeaderControls isMenuCollapsed={isMenuCollapsed} toggleMenu={toggleMenu} onBack={onBack} />
         <div className="self-evolution-eval-dashboard-head-right">
           {threadId && <Tag>{`thread ${threadId}`}</Tag>}
-          {isFallback && <Tag color="gold">样例数据</Tag>}
-          <Button icon={<ReloadOutlined />} loading={loading} onClick={onReload}>刷新</Button>
+          {isFallback && <Tag color="gold">暂无数据</Tag>}
         </div>
       </header>
-      {notice && !loading && <Alert type="warning" showIcon message={notice} />}
+      {notice && <Alert type="warning" showIcon message={notice} />}
       <div className="self-evolution-eval-dashboard-grid">
         <EvalReportPanel rows={rows} selectedCaseId={selectedCaseId} onSelectCase={setSelectedCaseId} />
         {selectedRow ? (
@@ -1466,7 +1395,7 @@ export function SelfEvolutionObservationPage() {
             loaded: true,
             data: fallbackObservationData[resultKind],
             notice: resultKind === "eval-reports"
-              ? "当前接口暂无第二步 CSV 数据，先用前端样例 CSV 行，并用你提供的 JSON 作为选中行观测详情。"
+              ? "当前接口暂无第二步 CSV 数据。"
               : "当前接口暂无观测数据，先展示你提供的样例数据。",
             isFallback: true,
           });
@@ -1483,7 +1412,9 @@ export function SelfEvolutionObservationPage() {
           loading: false,
           loaded: true,
           data: fallbackObservationData[resultKind],
-          notice: `观测接口暂不可用，先展示前端样例数据。${errorMessage}`,
+          notice: resultKind === "eval-reports"
+            ? errorMessage
+            : `观测接口暂不可用，先展示前端样例数据。${errorMessage}`,
           isFallback: true,
         });
       });
@@ -1509,10 +1440,8 @@ export function SelfEvolutionObservationPage() {
         data={state.data}
         notice={state.notice}
         isFallback={state.isFallback}
-        loading={state.loading}
         threadId={threadId}
         onBack={backToDetail}
-        onReload={reload}
         isMenuCollapsed={isMenuCollapsed}
         toggleMenu={toggleMenu}
       />
