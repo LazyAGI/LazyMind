@@ -38,6 +38,7 @@ import {
 import {
   type Dataset as CoreDataset,
 } from "@/api/generated/core-client";
+import { AgentAppsAuth } from "@/components/auth";
 import { getLocalizedErrorMessage } from "@/components/request";
 import {
   dataSourceCloudOauthApi,
@@ -267,6 +268,16 @@ const datasourceConnectors: Array<{ key: string; name: string; icon: ReactNode; 
 
 function normalizeProviderName(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function isAdminRole(role?: string) {
+  const normalizedRole = (role || "").trim().toLowerCase();
+  return (
+    normalizedRole === "admin" ||
+    normalizedRole === "system-admin" ||
+    normalizedRole === "system_admin" ||
+    normalizedRole.endsWith(".admin")
+  );
 }
 
 function normalizeFeishuAccountStatus(status?: string): FeishuConnectionStatus {
@@ -833,6 +844,10 @@ export default function DataSourceManagement() {
   const [manualOauthCallbackValue, setManualOauthCallbackValue] = useState("");
   const [manualOauthSubmitting, setManualOauthSubmitting] = useState(false);
   const oauthAttemptRef = useRef<PendingOAuthAttempt | null>(null);
+  const canCreateLocalSource = isAdminRole(AgentAppsAuth.getUserInfo()?.role);
+  const creatableSourceTypeOptions = sourceTypeOptions.filter(
+    (item) => !item.adminOnly || canCreateLocalSource,
+  );
   const scanAgents: ScanV2AgentHint[] = [];
   const [knowledgeBaseNames, setKnowledgeBaseNames] = useState<string[]>([]);
   const [defaultDatasetIds, setDefaultDatasetIds] = useState<string[]>([]);
@@ -2399,6 +2414,10 @@ export default function DataSourceManagement() {
   };
 
   const handleSelectType = (type: SourceType) => {
+    if (type === "local" && !canCreateLocalSource) {
+      message.error(t("admin.dataSourceAdminOnly"));
+      return;
+    }
     if (type === "feishu" && !isFeishuSetupReady) {
       openFeishuSetupModal("create");
       return;
@@ -2410,6 +2429,10 @@ export default function DataSourceManagement() {
     type: SourceType,
     options?: { connection?: FeishuDataSourceConnection | null },
   ) => {
+    if (type === "local" && !canCreateLocalSource) {
+      message.error(t("admin.dataSourceAdminOnly"));
+      return;
+    }
     const reusableConnection =
       type === "feishu"
         ? options?.connection || oauthConnection
@@ -3046,6 +3069,10 @@ export default function DataSourceManagement() {
         message.warning(t("admin.dataSourceSelectTypeFirst"));
         return;
       }
+      if (effectiveSourceType === "local" && !canCreateLocalSource) {
+        message.error(t("admin.dataSourceAdminOnly"));
+        return;
+      }
 
       if (
         wizardMode !== "edit" &&
@@ -3461,7 +3488,7 @@ export default function DataSourceManagement() {
           {t("admin.dataSourceCreateProviderIntro")}
         </Paragraph>
         <div className="data-source-create-provider-grid">
-          {sourceTypeOptions.map((item) => {
+          {creatableSourceTypeOptions.map((item) => {
             const isFeishu = item.type === "feishu";
             const isFeishuLocked = isFeishu && !isFeishuAuthValid;
             const authStatusText = isFeishuAuthValid

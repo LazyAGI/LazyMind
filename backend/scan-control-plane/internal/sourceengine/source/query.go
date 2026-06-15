@@ -125,12 +125,16 @@ func (e *DefaultEngine) enqueueManualSyncs(ctx context.Context, req TriggerSourc
 	resp := TriggerSourceSyncResponse{RunIDs: []string{}, JobIDs: []string{}, Intents: []SyncRunIntentResponse{}}
 	for _, binding := range bindings {
 		for idx, scopeRef := range syncScopeRefs(req.ScopeRef, binding.BindingID) {
+			normalizedScopeRef, err := e.normalizeManualSyncScope(ctx, binding, connector.ScopeType(req.ScopeType), scopeRef)
+			if err != nil {
+				return resp, err
+			}
 			intent, err := e.schedule.EnqueueManualSync(ctx, scheduleengine.ManualSyncRequest{
 				RequestID: scopedSyncRequestID(req.RequestID, idx),
 				SourceID:  binding.SourceID,
 				BindingID: binding.BindingID,
 				ScopeType: connector.ScopeType(req.ScopeType),
-				ScopeRef:  scopeRef,
+				ScopeRef:  normalizedScopeRef,
 			})
 			if err != nil {
 				return resp, mapStoreError(err)
@@ -144,6 +148,62 @@ func (e *DefaultEngine) enqueueManualSyncs(ctx context.Context, req TriggerSourc
 		}
 	}
 	return resp, nil
+}
+
+type syncObjectReader interface {
+	GetObject(ctx context.Context, sourceID, bindingID, objectKey string) (store.SourceObject, error)
+}
+
+func (e *DefaultEngine) normalizeManualSyncScope(ctx context.Context, binding store.Binding, scopeType connector.ScopeType, scopeRef connector.ScopeRef) (connector.ScopeRef, error) {
+	if scopeType != connector.ScopeTypePartial || len(scopeRef) == 0 {
+		return scopeRef, nil
+	}
+	reader, ok := e.repo.(syncObjectReader)
+	if !ok {
+		return scopeRef, nil
+	}
+	objectKey := firstSourceNonBlank(scopeRef["subtree_root"], scopeRef["root_object_key"], scopeRef["object_key"])
+	if objectKey == "" {
+		objectKey = localPathObjectKey(binding, scopeRef["path"])
+	}
+	if objectKey == "" {
+		return scopeRef, nil
+	}
+	object, err := reader.GetObject(ctx, binding.SourceID, binding.BindingID, objectKey)
+	if err != nil {
+		if store.ErrorCodeOf(err) == store.ErrCodeNotFound {
+			return scopeRef, nil
+		}
+		return nil, mapStoreError(err)
+	}
+	if !object.IsContainer && !object.HasChildren {
+		return scopeRef, nil
+	}
+	return connector.ScopeRef{
+		"node_ref":     connectorNodeRef(binding, object.ObjectKey),
+		"subtree_root": object.ObjectKey,
+	}, nil
+}
+
+func connectorNodeRef(binding store.Binding, objectKey string) string {
+	objectKey = strings.TrimSpace(objectKey)
+	if binding.ConnectorType == "feishu" {
+		if strings.HasPrefix(objectKey, "feishu:wiki:space:") {
+			return objectKey
+		}
+		if strings.HasPrefix(objectKey, "feishu:wiki:") {
+			return strings.TrimPrefix(objectKey, "feishu:")
+		}
+	}
+	return objectKey
+}
+
+func localPathObjectKey(binding store.Binding, path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" || binding.ConnectorType != "local_fs" || strings.TrimSpace(binding.AgentID) == "" {
+		return ""
+	}
+	return "local_fs:" + strings.TrimSpace(binding.AgentID) + ":path:" + path
 }
 
 func syncScopeRef(values map[string]any) connector.ScopeRef {

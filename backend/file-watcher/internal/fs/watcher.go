@@ -220,6 +220,7 @@ func (rw *recursiveWatcher) loop(ctx context.Context, sourceID, tenantID string,
 
 	flush := func(path string, et internal.FileEventType, isDir bool) {
 		publicPath := rw.mapper.ToPublic(path)
+		occurredAt := fileEventOccurredAt(path)
 		ev := internal.FileEvent{
 			SourceID:   sourceID,
 			TenantID:   tenantID,
@@ -227,7 +228,7 @@ func (rw *recursiveWatcher) loop(ctx context.Context, sourceID, tenantID string,
 			Path:       publicPath,
 			ObjectKey:  pathObjectKey(rw.agentID, publicPath),
 			IsDir:      isDir,
-			OccurredAt: time.Now(),
+			OccurredAt: occurredAt,
 		}
 		if err := rw.reporter.ReportEvents(ctx, internal.ReportEventsRequest{
 			AgentID: rw.agentID,
@@ -366,4 +367,12 @@ func isDirectory(path string) bool {
 		return false
 	}
 	return info.IsDir()
+}
+
+func fileEventOccurredAt(path string) time.Time {
+	info, err := os.Stat(path)
+	if err != nil {
+		return time.Now().UTC()
+	}
+	return info.ModTime().UTC()
 }

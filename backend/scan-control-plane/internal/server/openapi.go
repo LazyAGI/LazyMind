@@ -480,6 +480,7 @@ func sourceDocumentItemSchema() map[string]any {
 		"update_desc", stringSchema(),
 		"core_document_id", stringSchema(),
 		"modified_at", stringSchema(),
+		"source_modified_at", stringSchema(),
 		"last_synced_at", stringSchema(),
 		"last_error", objectSchema(),
 	))

@@ -14,6 +14,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/resourcechange"
 	"lazymind/core/store"
 )
 
@@ -36,6 +37,8 @@ type draftPreviewMemoryAPITestResponse struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Data    struct {
+		ReviewResultID     string `json:"review_result_id"`
+		ReviewStatus       string `json:"review_status"`
 		DraftStatus        string `json:"draft_status"`
 		DraftSourceVersion int64  `json:"draft_source_version"`
 		CurrentContent     string `json:"current_content"`
@@ -67,6 +70,32 @@ func newMemoryTestDB(t *testing.T) *orm.DB {
 		t.Fatalf("auto migrate: %v", err)
 	}
 	return db
+}
+
+func createMemoryReviewResult(t *testing.T, db *orm.DB, id, userID, target, content string, at time.Time) {
+	t.Helper()
+	if err := db.Create(&orm.MemoryReviewResult{
+		ID:           id,
+		UserID:       userID,
+		Target:       target,
+		SessionID:    "session-" + id,
+		Content:      content,
+		Operations:   json.RawMessage(`[]`),
+		State:        "success",
+		ReviewStatus: "pending",
+		Time:         at,
+	}).Error; err != nil {
+		t.Fatalf("create memory review result: %v", err)
+	}
+}
+
+func memoryReviewResultStatus(t *testing.T, db *orm.DB, id string) string {
+	t.Helper()
+	var row orm.MemoryReviewResult
+	if err := db.Select("review_status").Where("id = ?", id).Take(&row).Error; err != nil {
+		t.Fatalf("query memory review result %s: %v", id, err)
+	}
+	return row.ReviewStatus
 }
 
 func TestUpsertCreatesThenUpdatesMemory(t *testing.T) {
@@ -191,7 +220,55 @@ func TestUpsertPreservesMemoryAutoEvoWhenOmitted(t *testing.T) {
 	}
 }
 
-func TestUpsertPartiallyUpdatesMemoryMetadata(t *testing.T) {
+func TestUpsertMemoryAutoEvoOnlyDoesNotCreateResourceVersion(t *testing.T) {
+	db := newMemoryTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	createReq := httptest.NewRequest(http.MethodPut, "/api/core/memory", strings.NewReader(`{"content":"第一版记忆内容"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("X-User-Id", "u1")
+	createReq.Header.Set("X-User-Name", "User 1")
+	createRec := httptest.NewRecorder()
+
+	Upsert(createRec, createReq)
+
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", createRec.Code, createRec.Body.String())
+	}
+	var row orm.SystemMemory
+	if err := db.Where("user_id = ?", "u1").Take(&row).Error; err != nil {
+		t.Fatalf("query created memory: %v", err)
+	}
+	if got := countMemoryResourceVersions(t, db, row.ID); got != 1 {
+		t.Fatalf("expected create to write 1 resource version, got %d", got)
+	}
+
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/core/memory", strings.NewReader(`{"auto_evo":false}`))
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateReq.Header.Set("X-User-Id", "u1")
+	updateReq.Header.Set("X-User-Name", "User 1")
+	updateRec := httptest.NewRecorder()
+
+	Upsert(updateRec, updateReq)
+
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", updateRec.Code, updateRec.Body.String())
+	}
+	if got := countMemoryResourceVersions(t, db, row.ID); got != 1 {
+		t.Fatalf("expected auto_evo-only update to keep 1 resource version, got %d", got)
+	}
+
+	var version orm.ResourceVersion
+	if err := db.Where("resource_id = ?", row.ID).Take(&version).Error; err != nil {
+		t.Fatalf("query resource version: %v", err)
+	}
+	if version.ChangeSource != resourcechange.ChangeSourceDirectSave {
+		t.Fatalf("expected direct_save version source, got %q", version.ChangeSource)
+	}
+}
+
+func TestUpsertIgnoresMemoryMetadataFields(t *testing.T) {
 	db := newMemoryTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -211,8 +288,11 @@ func TestUpsertPartiallyUpdatesMemoryMetadata(t *testing.T) {
 	if err := json.Unmarshal(createRec.Body.Bytes(), &createResp); err != nil {
 		t.Fatalf("decode create response: %v", err)
 	}
-	if stringValue(createResp.Data.AgentPersona) != "严谨助手" || stringValue(createResp.Data.UserAddress) != "老师" || stringValue(createResp.Data.ResponseStyle) != "先结论后解释" {
-		t.Fatalf("unexpected metadata in create response: %#v", createResp.Data)
+	if createResp.Data.Content != "长期记忆" {
+		t.Fatalf("unexpected content in create response: %#v", createResp.Data)
+	}
+	if createResp.Data.AgentPersona != nil || createResp.Data.UserAddress != nil || createResp.Data.ResponseStyle != nil {
+		t.Fatalf("expected memory metadata fields to be omitted, got %#v", createResp.Data)
 	}
 
 	var created orm.SystemMemory
@@ -220,47 +300,11 @@ func TestUpsertPartiallyUpdatesMemoryMetadata(t *testing.T) {
 		t.Fatalf("query created memory: %v", err)
 	}
 	if created.ContentHash != evolution.HashSystemMemory(created) {
-		t.Fatalf("expected metadata-aware content hash, got %q", created.ContentHash)
-	}
-
-	updateReq := httptest.NewRequest(http.MethodPut, "/api/core/memory", strings.NewReader(`{"user_address":"同学"}`))
-	updateReq.Header.Set("Content-Type", "application/json")
-	updateReq.Header.Set("X-User-Id", "u1")
-	updateReq.Header.Set("X-User-Name", "User 1")
-	updateRec := httptest.NewRecorder()
-
-	Upsert(updateRec, updateReq)
-
-	if updateRec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d body=%s", updateRec.Code, updateRec.Body.String())
-	}
-	var updateResp upsertMemoryAPITestResponse
-	if err := json.Unmarshal(updateRec.Body.Bytes(), &updateResp); err != nil {
-		t.Fatalf("decode update response: %v", err)
-	}
-	if updateResp.Data.Content != "长期记忆" || stringValue(updateResp.Data.AgentPersona) != "严谨助手" || stringValue(updateResp.Data.UserAddress) != "同学" || stringValue(updateResp.Data.ResponseStyle) != "先结论后解释" {
-		t.Fatalf("unexpected metadata in update response: %#v", updateResp.Data)
-	}
-
-	var updated orm.SystemMemory
-	if err := db.Where("user_id = ?", "u1").Take(&updated).Error; err != nil {
-		t.Fatalf("query updated memory: %v", err)
-	}
-	if updated.Content != created.Content || updated.AgentPersona != created.AgentPersona || updated.ResponseStyle != created.ResponseStyle {
-		t.Fatalf("expected omitted fields preserved, got %#v", updated)
-	}
-	if updated.UserAddress != "同学" {
-		t.Fatalf("expected user_address update, got %q", updated.UserAddress)
-	}
-	if updated.Version != created.Version+1 {
-		t.Fatalf("expected metadata update to bump version, got %d from %d", updated.Version, created.Version)
-	}
-	if updated.ContentHash != evolution.HashSystemMemory(updated) || updated.ContentHash == created.ContentHash {
-		t.Fatalf("expected metadata-aware content hash to change, created=%q updated=%q", created.ContentHash, updated.ContentHash)
+		t.Fatalf("expected memory content hash, got %q", created.ContentHash)
 	}
 }
 
-func TestUpsertAllowsMetadataOnlyCreate(t *testing.T) {
+func TestUpsertRejectsMemoryMetadataOnlyCreate(t *testing.T) {
 	db := newMemoryTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -272,15 +316,15 @@ func TestUpsertAllowsMetadataOnlyCreate(t *testing.T) {
 
 	Upsert(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	var created orm.SystemMemory
-	if err := db.Where("user_id = ?", "u1").Take(&created).Error; err != nil {
-		t.Fatalf("query created memory: %v", err)
+	var count int64
+	if err := db.Model(&orm.SystemMemory{}).Where("user_id = ?", "u1").Count(&count).Error; err != nil {
+		t.Fatalf("count memory rows: %v", err)
 	}
-	if created.Content != "" || created.AgentPersona != "严谨助手" {
-		t.Fatalf("unexpected metadata-only created memory: %#v", created)
+	if count != 0 {
+		t.Fatalf("expected metadata-only request not to create memory, got %d rows", count)
 	}
 }
 
@@ -409,7 +453,7 @@ func TestDraftPreviewReturnsCurrentDraftAndDiff(t *testing.T) {
 		Content:            "current memory",
 		ContentHash:        "hash-current",
 		Version:            2,
-		DraftContent:       "updated memory",
+		DraftContent:       "legacy draft memory",
 		DraftSourceVersion: 2,
 		DraftStatus:        "pending_confirm",
 		UpdatedBy:          "u1",
@@ -420,6 +464,7 @@ func TestDraftPreviewReturnsCurrentDraftAndDiff(t *testing.T) {
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatalf("create memory: %v", err)
 	}
+	createMemoryReviewResult(t, db, "memory-preview", "u1", orm.ResourceUpdateResourceTypeMemory, "updated memory", now)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/core/memory:draft-preview", nil)
 	req.Header.Set("X-User-Id", "u1")
@@ -438,8 +483,11 @@ func TestDraftPreviewReturnsCurrentDraftAndDiff(t *testing.T) {
 	if resp.Code != 0 {
 		t.Fatalf("expected code 0, got %d message=%s", resp.Code, resp.Message)
 	}
-	if resp.Data.DraftStatus != "pending_confirm" {
-		t.Fatalf("expected pending_confirm, got %q", resp.Data.DraftStatus)
+	if resp.Data.ReviewResultID != "memory-preview" {
+		t.Fatalf("expected review_result_id memory-preview, got %q", resp.Data.ReviewResultID)
+	}
+	if resp.Data.ReviewStatus != "pending" || resp.Data.DraftStatus != "pending" {
+		t.Fatalf("expected pending review status, got review_status=%q draft_status=%q", resp.Data.ReviewStatus, resp.Data.DraftStatus)
 	}
 	if resp.Data.CurrentContent != "current memory" {
 		t.Fatalf("unexpected current content: %q", resp.Data.CurrentContent)
@@ -452,6 +500,41 @@ func TestDraftPreviewReturnsCurrentDraftAndDiff(t *testing.T) {
 	}
 	if !strings.Contains(resp.Data.Diff, "+updated memory") {
 		t.Fatalf("expected diff to contain added draft content, got %q", resp.Data.Diff)
+	}
+}
+
+func TestDraftPreviewIgnoresLegacyMemoryResourceDraft(t *testing.T) {
+	db := newMemoryTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	row := orm.SystemMemory{
+		ID:                 "memory-1",
+		UserID:             "u1",
+		Content:            "current memory",
+		ContentHash:        evolution.HashContent("current memory"),
+		Version:            2,
+		DraftContent:       "legacy draft memory",
+		DraftSourceVersion: 2,
+		DraftStatus:        "pending_confirm",
+		UpdatedBy:          "u1",
+		UpdatedByName:      "User 1",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	if err := db.Create(&row).Error; err != nil {
+		t.Fatalf("create memory: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/memory:draft-preview", nil)
+	req.Header.Set("X-User-Id", "u1")
+	rec := httptest.NewRecorder()
+
+	DraftPreview(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected legacy resource draft to be ignored as 404, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -651,6 +734,7 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 	if len(gotIDs) != 0 {
 		t.Fatalf("expected draft suggestion ids to be cleared, got %#v", gotIDs)
 	}
+	createMemoryReviewResult(t, db, "memory-confirm", "u1", orm.ResourceUpdateResourceTypeMemory, "draft from user instruction", now.Add(time.Second))
 
 	confirmReq := httptest.NewRequest(http.MethodPost, "/api/core/memory:confirm", nil)
 	confirmReq.Header.Set("X-User-Id", "u1")
@@ -662,16 +746,19 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 	if confirmRec.Code != http.StatusOK {
 		t.Fatalf("expected confirm status 200, got %d body=%s", confirmRec.Code, confirmRec.Body.String())
 	}
-	var applied orm.ResourceSuggestion
-	if err := db.Where("id = ?", "suggestion-1").Take(&applied).Error; err != nil {
-		t.Fatalf("query applied suggestion: %v", err)
+	if status := memoryReviewResultStatus(t, db, "memory-confirm"); status != "accepted" {
+		t.Fatalf("expected review result accepted, got %q", status)
 	}
-	if applied.Status != evolution.SuggestionStatusAccepted {
-		t.Fatalf("expected suggestion status to stay accepted after confirm, got %q", applied.Status)
+	var confirmed orm.SystemMemory
+	if err := db.Where("id = ?", row.ID).Take(&confirmed).Error; err != nil {
+		t.Fatalf("query confirmed memory: %v", err)
+	}
+	if confirmed.Content != "draft from user instruction" || confirmed.Version != row.Version+1 {
+		t.Fatalf("expected review result content to be applied, got content=%q version=%d", confirmed.Content, confirmed.Version)
 	}
 }
 
-func TestDiscardKeepsAcceptedSuggestionVisibleForRegeneration(t *testing.T) {
+func TestDiscardRejectsPendingMemoryReviewResult(t *testing.T) {
 	db := newMemoryTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -683,7 +770,7 @@ func TestDiscardKeepsAcceptedSuggestionVisibleForRegeneration(t *testing.T) {
 		Content:            "current memory",
 		ContentHash:        evolution.HashContent("current memory"),
 		Version:            3,
-		DraftContent:       "draft memory",
+		DraftContent:       "legacy draft memory",
 		DraftSourceVersion: 3,
 		DraftStatus:        "pending_confirm",
 		Ext:                evolution.WithDraftSuggestionIDs(nil, []string{"suggestion-1"}),
@@ -695,22 +782,7 @@ func TestDiscardKeepsAcceptedSuggestionVisibleForRegeneration(t *testing.T) {
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatalf("create memory: %v", err)
 	}
-	suggestion := orm.ResourceSuggestion{
-		ID:           "suggestion-1",
-		UserID:       "u1",
-		ResourceType: evolution.ResourceTypeMemory,
-		ResourceKey:  evolution.SystemResourceKey(evolution.ResourceTypeMemory),
-		Action:       evolution.SuggestionActionModify,
-		SessionID:    "session-1",
-		Title:        "memory suggestion",
-		Content:      "update memory",
-		Status:       evolution.SuggestionStatusAccepted,
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	}
-	if err := db.Create(&suggestion).Error; err != nil {
-		t.Fatalf("create suggestion: %v", err)
-	}
+	createMemoryReviewResult(t, db, "memory-discard", "u1", orm.ResourceUpdateResourceTypeMemory, "review draft memory", now)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/core/memory:discard", nil)
 	req.Header.Set("X-User-Id", "u1")
@@ -722,12 +794,15 @@ func TestDiscardKeepsAcceptedSuggestionVisibleForRegeneration(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	var updated orm.ResourceSuggestion
-	if err := db.Where("id = ?", "suggestion-1").Take(&updated).Error; err != nil {
-		t.Fatalf("query suggestion: %v", err)
+	if status := memoryReviewResultStatus(t, db, "memory-discard"); status != "rejected" {
+		t.Fatalf("expected review result rejected, got %q", status)
 	}
-	if updated.Status != evolution.SuggestionStatusAccepted {
-		t.Fatalf("expected suggestion to remain accepted after discard, got %q", updated.Status)
+	var updated orm.SystemMemory
+	if err := db.Where("id = ?", row.ID).Take(&updated).Error; err != nil {
+		t.Fatalf("query memory: %v", err)
+	}
+	if updated.Content != row.Content || updated.Version != row.Version {
+		t.Fatalf("discard should not change memory content/version, got content=%q version=%d", updated.Content, updated.Version)
 	}
 }
 
@@ -736,4 +811,13 @@ func stringValue(value *string) string {
 		return ""
 	}
 	return *value
+}
+
+func countMemoryResourceVersions(t *testing.T, db *orm.DB, resourceID string) int64 {
+	t.Helper()
+	var count int64
+	if err := db.Model(&orm.ResourceVersion{}).Where("resource_id = ?", resourceID).Count(&count).Error; err != nil {
+		t.Fatalf("count resource versions: %v", err)
+	}
+	return count
 }

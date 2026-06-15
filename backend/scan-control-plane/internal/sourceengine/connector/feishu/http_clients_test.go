@@ -222,6 +222,43 @@ func TestDriveObjectMapsShortcutTargetMetadata(t *testing.T) {
 	}
 }
 
+func TestDriveObjectUsesUpdatedTimeFallbackForVersion(t *testing.T) {
+	t.Parallel()
+
+	obj := driveObject(map[string]any{
+		"type":         "file",
+		"token":        "file-1",
+		"name":         "Guide.md",
+		"updated_time": "1710002222",
+	}, "folder-1")
+
+	if obj.Revision != "1710002222" || versionFor(obj) != "1710002222" {
+		t.Fatalf("drive version should use updated_time fallback, got revision=%q version=%q", obj.Revision, versionFor(obj))
+	}
+}
+
+func TestWikiNodeObjectUsesModifiedTimeFallbacksForVersion(t *testing.T) {
+	t.Parallel()
+
+	for _, field := range []string{"modified_time", "node_update_time", "obj_update_time"} {
+		field := field
+		t.Run(field, func(t *testing.T) {
+			t.Parallel()
+
+			obj := wikiNodeObject(map[string]any{
+				"node_token": "node-1",
+				"obj_type":   "docx",
+				"obj_token":  "docx-1",
+				field:        "1710003333",
+			}, "space-1", "")
+
+			if obj.Revision != "1710003333" || versionFor(obj) != "1710003333" {
+				t.Fatalf("wiki version should use %s fallback, got revision=%q version=%q", field, obj.Revision, versionFor(obj))
+			}
+		})
+	}
+}
+
 func TestDefaultFeishuAPIClientMapsWikiNodeNameFallbacks(t *testing.T) {
 	t.Parallel()
 

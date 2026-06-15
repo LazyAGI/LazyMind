@@ -16,8 +16,11 @@ func NewPartialCrawlStrategy(input strategyInput) *PartialCrawlStrategy {
 	full := NewFullCrawlStrategy(input)
 	full.builder = newCoverageBuilder(connector.ScopeTypePartial, input.claim.ScopeRef)
 	full.recursive = input.spec.SupportsRecursiveFetch
-	fetchOne := firstScopeValue(input.claim.ScopeRef, "object_key", "path") != ""
-	if !full.recursive {
+	fetchOne := firstScopeValue(input.claim.ScopeRef, "object_key", "path") != "" && firstScopeValue(input.claim.ScopeRef, "node_ref", "object_ref", "subtree_root", "root_object_key") == ""
+	if !full.recursive && fetchOne {
+		full.queue = nil
+	}
+	if !full.recursive && !fetchOne {
 		full.queue = partialQueue(input.binding.TargetRef, input.binding.TreeKey, input.claim.ScopeRef)
 	}
 	return &PartialCrawlStrategy{FullCrawlStrategy: full, fetchOne: fetchOne}
@@ -44,12 +47,41 @@ func (s *PartialCrawlStrategy) ObservePage(ctx context.Context, page connector.R
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if s.recursive || s.fetchOne {
+	if s.recursive {
 		s.observePage(page)
+		return nil
+	}
+	if s.fetchOne {
+		s.done = false
+		s.observePage(page)
+		s.queueContainers(page)
+		if page.HasMore {
+			return nil
+		}
+		s.activateQueuedContainers()
 		return nil
 	}
 	s.observeBFSPage(page)
 	return nil
+}
+
+func (s *PartialCrawlStrategy) queueContainers(page connector.RawObjectPage) {
+	for _, raw := range page.Items {
+		if raw.IsContainer || raw.HasChildren {
+			s.queue = append(s.queue, nodeRefForRaw(raw))
+		}
+	}
+}
+
+func (s *PartialCrawlStrategy) activateQueuedContainers() {
+	if len(s.queue) == 0 {
+		s.done = true
+		return
+	}
+	s.fetchOne = false
+	s.rootDone = true
+	s.done = false
+	s.cursor = ""
 }
 
 func partialQueue(_ string, _ string, scopeRef connector.ScopeRef) []string {

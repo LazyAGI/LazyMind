@@ -155,8 +155,7 @@ func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) (access.A
 		return access.Actor{}, false
 	}
 	// Admin-only enforcement happens at the Kong gateway layer (rbac-auth plugin requires "user.admin"
-	// permission for all /api/scan/admin/* paths). The Kong plugin does not inject a role header, so
-	// we cannot re-verify the role here. Any request that reaches this point has already been
-	// authorized by Kong; we still require a valid actor as a defence-in-depth measure.
+	// permission for all /api/scan/admin/* paths). Any request that reaches this point has already
+	// been authorized by Kong; we still require a valid actor as a defence-in-depth measure.
 	return actor, true
 }

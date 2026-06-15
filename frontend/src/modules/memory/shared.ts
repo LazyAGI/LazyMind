@@ -10,7 +10,6 @@ export type ChangeProposalTab = Extract<MemoryTab, "skills" | "experience">;
 export type SkillShareCenterTab = "incoming" | "outgoing";
 export type SkillShareAction = "accept" | "reject" | "preview";
 export type GlossarySource = "user" | "ai";
-export type SkillUpdatePhase = "none" | "pending" | "confirmed" | "discarded" | "unknown";
 
 export const GLOSSARY_TERM_MAX_LENGTH = 50;
 export const GLOSSARY_ALIAS_MAX_LENGTH = 50;
@@ -40,7 +39,9 @@ export interface StructuredAsset extends BaseAsset {
   activationStatus?: string;
   readonly?: boolean;
   hasPendingReviewSuggestions?: boolean;
+  hasPendingReviewResult?: boolean;
   hasPendingRemoveSuggestion?: boolean;
+  reviewStatus?: string;
   suggestionStatus?: string;
   updateStatus?: string;
   nodeType?: string;
@@ -48,9 +49,12 @@ export interface StructuredAsset extends BaseAsset {
 
 export interface ExperienceAsset extends BaseAsset {
   title: string;
+  agentPersona?: string;
   hasPendingReviewSuggestions?: boolean;
+  responseStyle?: string;
   resourceType?: string;
   suggestionStatus?: string;
+  userAddress?: string;
 }
 
 export interface GlossaryAsset extends BaseAsset {
@@ -102,6 +106,7 @@ export interface GlossaryConflictResolution {
 export interface AssetDraft {
   id?: string;
   title: string;
+  agentPersona: string;
   name: string;
   description: string;
   category: string;
@@ -114,6 +119,8 @@ export interface AssetDraft {
   source: GlossarySource;
   content: string;
   protect: boolean;
+  responseStyle: string;
+  userAddress: string;
 }
 
 export interface SkillTreeNode extends StructuredAsset {
@@ -145,6 +152,13 @@ export interface StructuredChangeProposal {
   targetId: string;
   before: StructuredAsset;
   after: StructuredAsset;
+  backendDraftPreview?: {
+    currentContent: string;
+    diff: string;
+    draftContent: string;
+    draftSourceVersion: number;
+    draftStatus: string;
+  };
   backendSuggestionId?: string;
   backendSuggestionIdsByField?: Partial<Record<ProposalFieldKey, string>>;
   backendSuggestions?: EvolutionSuggestionRecord[];
@@ -159,6 +173,13 @@ export interface ExperienceChangeProposal {
   targetId: string;
   before: ExperienceAsset;
   after: ExperienceAsset;
+  backendDraftPreview?: {
+    currentContent: string;
+    diff: string;
+    draftContent: string;
+    draftSourceVersion: number;
+    draftStatus: string;
+  };
   backendSuggestionId?: string;
   backendSuggestionIdsByField?: Partial<Record<ProposalFieldKey, string>>;
   backendSuggestions?: EvolutionSuggestionRecord[];
@@ -217,53 +238,10 @@ export interface ExperienceDiffLabels {
 export const isSkillShareActionable = (status: SkillShareStatus) =>
   status === "pending" || status === "unknown";
 
-export const normalizeSkillUpdateStatus = (value?: string) => (value || "").trim().toLowerCase();
-
-export const resolveSkillUpdatePhase = (value?: string): SkillUpdatePhase => {
-  const normalized = normalizeSkillUpdateStatus(value);
-  if (!normalized) {
-    return "none";
-  }
-
-  if (
-    normalized.includes("pending") ||
-    normalized.includes("wait") ||
-    normalized.includes("review") ||
-    normalized.includes("draft") ||
-    normalized.includes("generate") ||
-    normalized.includes("processing") ||
-    normalized.includes("proposed")
-  ) {
-    return "pending";
-  }
-
-  if (
-    normalized.includes("discard") ||
-    normalized.includes("reject") ||
-    normalized.includes("abandon") ||
-    normalized.includes("cancel") ||
-    normalized.includes("drop")
-  ) {
-    return "discarded";
-  }
-
-  if (
-    normalized.includes("confirm") ||
-    normalized.includes("applied") ||
-    normalized.includes("apply") ||
-    normalized.includes("accept") ||
-    normalized.includes("complete") ||
-    normalized.includes("done") ||
-    normalized.includes("success")
-  ) {
-    return "confirmed";
-  }
-
-  return "unknown";
-};
+const normalizeSkillUpdateStatus = (value?: string) => (value || "").trim().toLowerCase();
 
 export const isSkillUpdatePending = (value?: string) =>
-  resolveSkillUpdatePhase(value) === "pending";
+  normalizeSkillUpdateStatus(value) === "pending";
 
 export const formatDateTime = (value?: string) => {
   if (!value) {
@@ -280,6 +258,7 @@ export const formatDateTime = (value?: string) => {
 
 export const createDraft = (): AssetDraft => ({
   title: "",
+  agentPersona: "",
   name: "",
   description: "",
   category: "",
@@ -292,6 +271,8 @@ export const createDraft = (): AssetDraft => ({
   source: "user",
   content: "",
   protect: false,
+  responseStyle: "",
+  userAddress: "",
 });
 
 export const createStructuredDraft = (
@@ -308,6 +289,7 @@ export const createStructuredDraft = (
   return {
     id: item.id,
     title: "",
+    agentPersona: "",
     name: item.name,
     description: item.description,
     category: item.category,
@@ -320,6 +302,8 @@ export const createStructuredDraft = (
     source: "user",
     content: normalizedContent,
     protect: Boolean(item.protect),
+    responseStyle: "",
+    userAddress: "",
   };
 };
 

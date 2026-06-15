@@ -368,6 +368,19 @@ components:
             required:
                 - success
             type: object
+        CheckResponse:
+            properties:
+                message:
+                    type: string
+                success:
+                    type: boolean
+                tool_count:
+                    type: integer
+            required:
+                - message
+                - success
+                - tool_count
+            type: object
         CheckWordsExistRequest:
             properties:
                 aliases:
@@ -683,6 +696,31 @@ components:
                 - group_id
                 - name
             type: object
+        CreateServerRequest:
+            properties:
+                allowed_tools:
+                    items:
+                        type: string
+                    type: array
+                api_key:
+                    type: string
+                enabled:
+                    type: boolean
+                name:
+                    type: string
+                timeout:
+                    type: integer
+                transport:
+                    type: string
+                url:
+                    type: string
+            required:
+                - api_key
+                - name
+                - timeout
+                - transport
+                - url
+            type: object
         CreateTaskItem:
             properties:
                 cross_dataset:
@@ -987,6 +1025,17 @@ components:
             required:
                 - deleted_rows
                 - group_id
+            type: object
+        DiscoverResponse:
+            properties:
+                success:
+                    type: boolean
+                tools:
+                    items:
+                        $ref: '#/components/schemas/ToolResponse'
+                    type: array
+            required:
+                - success
             type: object
         Doc:
             properties:
@@ -1657,6 +1706,13 @@ components:
                         $ref: '#/components/schemas/GrantPrincipal'
                     type: array
             type: object
+        ListServersResponse:
+            properties:
+                mcp_servers:
+                    items:
+                        $ref: '#/components/schemas/ServerResponse'
+                    type: array
+            type: object
         ListTasksResponse:
             properties:
                 next_page_token:
@@ -1934,6 +1990,55 @@ components:
                 - page_token
                 - source
             type: object
+        ServerResponse:
+            properties:
+                allowed_tools:
+                    items:
+                        type: string
+                    type: array
+                api_key_preview:
+                    type: string
+                create_time:
+                    format: date-time
+                    type: string
+                enabled:
+                    type: boolean
+                id:
+                    type: string
+                is_verified:
+                    type: boolean
+                name:
+                    type: string
+                share:
+                    type: boolean
+                timeout:
+                    type: integer
+                tool_count:
+                    format: int64
+                    type: integer
+                tools:
+                    items:
+                        $ref: '#/components/schemas/ToolResponse'
+                    type: array
+                transport:
+                    type: string
+                update_time:
+                    format: date-time
+                    type: string
+                url:
+                    type: string
+            required:
+                - create_time
+                - enabled
+                - id
+                - is_verified
+                - name
+                - share
+                - timeout
+                - transport
+                - update_time
+                - url
+            type: object
         SetChatHistoryResponse:
             properties:
                 history_id:
@@ -2197,6 +2302,24 @@ components:
                 summary:
                     type: string
             type: object
+        ToolResponse:
+            properties:
+                description:
+                    type: string
+                id:
+                    type: string
+                input_schema:
+                    items:
+                        minimum: 0
+                        type: integer
+                    type: array
+                tool_name:
+                    type: string
+            required:
+                - description
+                - id
+                - tool_name
+            type: object
         ToolStateResponse:
             properties:
                 disabled:
@@ -2291,6 +2414,30 @@ components:
                     type: string
                 name:
                     type: string
+            type: object
+        UpdateServerRequest:
+            properties:
+                allowed_tools:
+                    items:
+                        type: string
+                    type: array
+                api_key:
+                    type: string
+                enabled:
+                    type: boolean
+                name:
+                    type: string
+                timeout:
+                    type: integer
+                url:
+                    type: string
+            type: object
+        UpdateToolsRequest:
+            properties:
+                allowed_tools:
+                    items:
+                        type: string
+                    type: array
             type: object
         UpdateWordGroupRequest:
             properties:
@@ -2629,6 +2776,22 @@ components:
             required:
                 - session_id
             type: object
+        latestVersionChangeOpenAPIResponse:
+            properties:
+                change_source:
+                    type: string
+                changed_at:
+                    type: string
+                source_ref_id:
+                    type: string
+                source_ref_type:
+                    type: string
+            required:
+                - change_source
+                - changed_at
+                - source_ref_id
+                - source_ref_type
+            type: object
         listModelProviderGroupModelsOpenAPIItem:
             properties:
                 base_url:
@@ -2733,6 +2896,8 @@ components:
                     type: string
                 has_pending_review_suggestions:
                     type: boolean
+                latest_version_change:
+                    $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
                 resource_id:
                     type: string
                 resource_type:
@@ -2745,6 +2910,9 @@ components:
                     type: string
                 user_address:
                     type: string
+                version:
+                    format: int64
+                    type: integer
             required:
                 - auto_evo
                 - auto_evo_apply_status
@@ -2757,17 +2925,9 @@ components:
                 - resource_type
                 - suggestion_status
                 - title
+                - version
             type: object
         managedStateUpsertOpenAPIRequest:
-            properties:
-                auto_evo:
-                    type: boolean
-                content:
-                    type: string
-            required:
-                - content
-            type: object
-        memoryUpsertOpenAPIRequest:
             properties:
                 agent_persona:
                     type: string
@@ -2778,6 +2938,74 @@ components:
                 response_style:
                     type: string
                 user_address:
+                    type: string
+            type: object
+        mcpDeleteServerOpenAPIResponse:
+            properties:
+                id:
+                    type: string
+            required:
+                - id
+            type: object
+        memoryReviewResultListOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/memoryReviewResultOpenAPIResponse'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - page
+                - page_size
+                - total
+            type: object
+        memoryReviewResultOpenAPIResponse:
+            properties:
+                content:
+                    type: string
+                id:
+                    type: string
+                operations:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                review_status:
+                    type: string
+                session_id:
+                    type: string
+                source_content:
+                    type: string
+                state:
+                    type: string
+                target:
+                    type: string
+                time:
+                    type: string
+                user_id:
+                    type: string
+            required:
+                - content
+                - id
+                - review_status
+                - session_id
+                - source_content
+                - state
+                - target
+                - time
+                - user_id
+            type: object
+        memoryUpsertOpenAPIRequest:
+            properties:
+                auto_evo:
+                    type: boolean
+                content:
                     type: string
             type: object
         personalizationSettingOpenAPIRequest:
@@ -2812,6 +3040,139 @@ components:
             required:
                 - id
                 - status
+            type: object
+        resourceUpdateTaskListOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/resourceUpdateTaskOpenAPIResponse'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - page
+                - page_size
+                - total
+            type: object
+        resourceUpdateTaskOpenAPIResponse:
+            properties:
+                attempt_count:
+                    type: integer
+                created_at:
+                    type: string
+                error_code:
+                    type: string
+                error_message:
+                    type: string
+                finished_at:
+                    type: string
+                id:
+                    type: string
+                next_run_at:
+                    type: string
+                resource_id:
+                    type: string
+                resource_type:
+                    type: string
+                result_id:
+                    type: string
+                review_result_id:
+                    type: string
+                started_at:
+                    type: string
+                status:
+                    type: string
+                task_type:
+                    type: string
+                trigger_id:
+                    type: string
+                trigger_type:
+                    type: string
+                updated_at:
+                    type: string
+                user_id:
+                    type: string
+            required:
+                - attempt_count
+                - created_at
+                - id
+                - next_run_at
+                - resource_id
+                - resource_type
+                - status
+                - task_type
+                - trigger_id
+                - trigger_type
+                - updated_at
+                - user_id
+            type: object
+        resourceVersionListOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/resourceVersionOpenAPIResponse'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - page
+                - page_size
+                - total
+            type: object
+        resourceVersionOpenAPIResponse:
+            properties:
+                after_content:
+                    type: string
+                before_content:
+                    type: string
+                change_source:
+                    type: string
+                created_at:
+                    type: string
+                diff:
+                    type: string
+                from_version:
+                    format: int64
+                    type: integer
+                id:
+                    type: string
+                resource_id:
+                    type: string
+                resource_type:
+                    type: string
+                source_ref_id:
+                    type: string
+                source_ref_type:
+                    type: string
+                to_version:
+                    format: int64
+                    type: integer
+                user_id:
+                    type: string
+            required:
+                - after_content
+                - before_content
+                - change_source
+                - created_at
+                - diff
+                - from_version
+                - id
+                - resource_id
+                - resource_type
+                - source_ref_id
+                - source_ref_type
+                - to_version
+                - user_id
             type: object
         selectedModelOpenAPIItem:
             properties:
@@ -3010,6 +3371,8 @@ components:
                     type: boolean
                 is_enabled:
                     type: boolean
+                latest_version_change:
+                    $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
                 name:
                     type: string
                 node_type:
@@ -3026,6 +3389,9 @@ components:
                     type: string
                 update_status:
                     type: string
+                version:
+                    format: int64
+                    type: integer
             required:
                 - auto_evo
                 - auto_evo_apply_status
@@ -3044,6 +3410,7 @@ components:
                 - skill_id
                 - suggestion_status
                 - update_status
+                - version
             type: object
         skillDetailOpenAPIResponse:
             properties:
@@ -3072,6 +3439,8 @@ components:
                     type: boolean
                 is_enabled:
                     type: boolean
+                latest_version_change:
+                    $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
                 name:
                     type: string
                 node_type:
@@ -3092,6 +3461,9 @@ components:
                     type: array
                 update_status:
                     type: string
+                version:
+                    format: int64
+                    type: integer
             required:
                 - auto_evo
                 - auto_evo_apply_status
@@ -3111,6 +3483,7 @@ components:
                 - skill_id
                 - suggestion_status
                 - update_status
+                - version
             type: object
         skillDiscardOpenAPIResponse:
             properties:
@@ -3188,6 +3561,8 @@ components:
                     type: boolean
                 is_enabled:
                     type: boolean
+                latest_version_change:
+                    $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
                 name:
                     type: string
                 node_type:
@@ -3204,6 +3579,9 @@ components:
                     type: string
                 update_status:
                     type: string
+                version:
+                    format: int64
+                    type: integer
             required:
                 - auto_evo
                 - auto_evo_apply_status
@@ -3221,6 +3599,7 @@ components:
                 - skill_id
                 - suggestion_status
                 - update_status
+                - version
             type: object
         skillListItemOpenAPIResponse:
             properties:
@@ -3245,6 +3624,8 @@ components:
                     type: boolean
                 is_enabled:
                     type: boolean
+                latest_version_change:
+                    $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
                 name:
                     type: string
                 node_type:
@@ -3259,6 +3640,9 @@ components:
                     type: array
                 update_status:
                     type: string
+                version:
+                    format: int64
+                    type: integer
             required:
                 - auto_evo
                 - auto_evo_apply_status
@@ -3273,6 +3657,7 @@ components:
                 - skill_id
                 - suggestion_status
                 - update_status
+                - version
             type: object
         skillListOpenAPIResponse:
             properties:
@@ -3290,6 +3675,56 @@ components:
                 - page
                 - page_size
                 - total
+            type: object
+        skillReviewResultListOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/skillReviewResultOpenAPIResponse'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - page
+                - page_size
+                - total
+            type: object
+        skillReviewResultOpenAPIResponse:
+            properties:
+                current_content:
+                    type: string
+                id:
+                    type: string
+                requestid:
+                    type: string
+                review_status:
+                    type: string
+                skill_content:
+                    type: string
+                skill_name:
+                    type: string
+                summary:
+                    type: string
+                time:
+                    type: string
+                type:
+                    type: string
+                userid:
+                    type: string
+            required:
+                - id
+                - requestid
+                - review_status
+                - skill_name
+                - summary
+                - time
+                - type
+                - userid
             type: object
         skillShareAcceptOpenAPIResponse:
             properties:
@@ -3963,11 +4398,6 @@ paths:
                     type: integer
                 - in: query
                   name: page_token
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: keyword
                   required: false
                   schema:
                     type: string
@@ -6045,6 +6475,24 @@ paths:
             summary: Batch delete eval set items
             tags:
                 - eval-set-items
+    /api/core/eval-sets/{eval_set_id}/question-types:
+        get:
+            parameters:
+                - in: path
+                  name: eval_set_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/QuestionTypeOptionsResponse'
+                    description: Question type options
+            summary: List eval set question types
+            tags:
+                - eval-set-items
     /api/core/eval-sets/datasets:
         get:
             responses:
@@ -6239,6 +6687,64 @@ paths:
                                 $ref: '#/components/schemas/suggestionBatchReviewOpenAPIResponse'
                     description: Rejected suggestions
             summary: Batch reject evolution suggestions
+            tags:
+                - evolution
+    /api/core/evolution/tasks:
+        get:
+            description: Lists background resource update tasks for the current user.
+            parameters:
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: status
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: resource_type
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: task_type
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/resourceUpdateTaskListOpenAPIResponse'
+                    description: Resource update task list
+            summary: List resource update tasks
+            tags:
+                - evolution
+    /api/core/evolution/tasks/{task_id}:
+        get:
+            description: Gets one background resource update task for the current user.
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/resourceUpdateTaskOpenAPIResponse'
+                    description: Resource update task
+            summary: Get resource update task
             tags:
                 - evolution
     /api/core/health:
@@ -6622,6 +7128,153 @@ paths:
                 "200":
                     description: Returns group names
             summary: List knowledge base groups
+    /api/core/mcp_servers:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListServersResponse'
+                    description: MCP server list
+            summary: List MCP servers
+            tags:
+                - mcp_servers
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateServerRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ServerResponse'
+                    description: Created MCP server
+            summary: Create MCP server
+            tags:
+                - mcp_servers
+    /api/core/mcp_servers/{id}:
+        delete:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/mcpDeleteServerOpenAPIResponse'
+                    description: Deleted MCP server
+            summary: Delete MCP server
+            tags:
+                - mcp_servers
+        get:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ServerResponse'
+                    description: MCP server
+            summary: Get MCP server
+            tags:
+                - mcp_servers
+        patch:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateServerRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ServerResponse'
+                    description: Updated MCP server
+            summary: Update MCP server
+            tags:
+                - mcp_servers
+    /api/core/mcp_servers/{id}/tools:
+        put:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateToolsRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ServerResponse'
+                    description: Updated MCP server tools
+            summary: Update MCP server tools
+            tags:
+                - mcp_servers
+    /api/core/mcp_servers/{id}:check:
+        post:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CheckResponse'
+                    description: MCP server check result
+            summary: Check MCP server
+            tags:
+                - mcp_servers
+    /api/core/mcp_servers/{id}:discover:
+        post:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DiscoverResponse'
+                    description: Discovered MCP tools
+            summary: Discover MCP server tools
+            tags:
+                - mcp_servers
     /api/core/memory:
         put:
             requestBody:
@@ -6640,6 +7293,97 @@ paths:
             summary: Upsert managed memory
             tags:
                 - memory
+    /api/core/memory-review-results:
+        get:
+            description: Lists memory and user preference draft review results for the current user.
+            parameters:
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: review_status
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: target
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/memoryReviewResultListOpenAPIResponse'
+                    description: Memory review result list
+            summary: List memory review results
+            tags:
+                - memory-review-results
+    /api/core/memory-review-results/{review_result_id}:
+        get:
+            description: Gets one memory or user preference draft review result for the current user.
+            parameters:
+                - in: path
+                  name: review_result_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/memoryReviewResultOpenAPIResponse'
+                    description: Memory review result
+            summary: Get memory review result
+            tags:
+                - memory-review-results
+    /api/core/memory-review-results/{review_result_id}:accept:
+        post:
+            description: Synchronously accepts a pending memory or user preference draft review result.
+            parameters:
+                - in: path
+                  name: review_result_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/memoryReviewResultOpenAPIResponse'
+                    description: Accepted memory review result
+            summary: Accept memory review result
+            tags:
+                - memory-review-results
+    /api/core/memory-review-results/{review_result_id}:reject:
+        post:
+            description: Synchronously rejects a pending memory or user preference draft review result.
+            parameters:
+                - in: path
+                  name: review_result_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/memoryReviewResultOpenAPIResponse'
+                    description: Rejected memory review result
+            summary: Reject memory review result
+            tags:
+                - memory-review-results
     /api/core/memory/suggestion:
         post:
             requestBody:
@@ -6714,7 +7458,7 @@ paths:
                 - memory
     /api/core/model_providers:
         get:
-            description: Per-user model provider list. Missing catalog rows are synced from default_model_providers on each request. Query parameter category filters by provider category (default model when category and exclude_category are both omitted). Query parameter exclude_category excludes a category (e.g. exclude_category=model returns ocr and search providers). Query parameter keyword filters by provider name (SQL LIKE).
+            description: Per-user model provider list. Missing catalog rows are synced from default_model_providers on each request. Query parameter category filters by provider category (default model when category and exclude_category are both omitted). Query parameter exclude_category excludes a category (e.g. exclude_category=model returns ocr and search providers). Query parameter keyword filters by provider name case-insensitively.
             parameters:
                 - in: query
                   name: category
@@ -7212,6 +7956,11 @@ paths:
                   required: false
                   schema:
                     type: string
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
             responses:
                 "200":
                     content:
@@ -7361,6 +8110,150 @@ paths:
                 "200":
                     description: OK
             summary: GET /remote-fs/list
+    /api/core/resource-versions:
+        get:
+            description: Lists content version history for skills, memory, and user preferences for the current user.
+            parameters:
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: resource_type
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: resource_id
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/resourceVersionListOpenAPIResponse'
+                    description: Resource version list
+            summary: List resource versions
+            tags:
+                - resource-versions
+    /api/core/resource-versions/{version_id}:
+        get:
+            description: Gets one content version history entry for the current user.
+            parameters:
+                - in: path
+                  name: version_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/resourceVersionOpenAPIResponse'
+                    description: Resource version
+            summary: Get resource version
+            tags:
+                - resource-versions
+    /api/core/skill-review-results:
+        get:
+            description: Lists skill draft review results for the current user.
+            parameters:
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: review_status
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: type
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillReviewResultListOpenAPIResponse'
+                    description: Skill review result list
+            summary: List skill review results
+            tags:
+                - skill-review-results
+    /api/core/skill-review-results/{review_result_id}:
+        get:
+            description: Gets one skill draft review result for the current user.
+            parameters:
+                - in: path
+                  name: review_result_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillReviewResultOpenAPIResponse'
+                    description: Skill review result
+            summary: Get skill review result
+            tags:
+                - skill-review-results
+    /api/core/skill-review-results/{review_result_id}:accept:
+        post:
+            description: Synchronously accepts a pending skill draft review result.
+            parameters:
+                - in: path
+                  name: review_result_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillReviewResultOpenAPIResponse'
+                    description: Accepted skill review result
+            summary: Accept skill review result
+            tags:
+                - skill-review-results
+    /api/core/skill-review-results/{review_result_id}:reject:
+        post:
+            description: Synchronously rejects a pending skill draft review result.
+            parameters:
+                - in: path
+                  name: review_result_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillReviewResultOpenAPIResponse'
+                    description: Rejected skill review result
+            summary: Reject skill review result
+            tags:
+                - skill-review-results
     /api/core/skill-shares/{share_item_id}:
         get:
             parameters:

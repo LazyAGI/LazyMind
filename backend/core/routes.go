@@ -8,9 +8,12 @@ import (
 	"lazymind/core/evalset"
 	"lazymind/core/evolution"
 	"lazymind/core/file"
+	"lazymind/core/mcp"
 	"lazymind/core/memory"
 	"lazymind/core/modelprovider"
 	"lazymind/core/preference"
+	"lazymind/core/resourcechange"
+	"lazymind/core/resourceupdate"
 	"lazymind/core/skill"
 	"lazymind/core/wordgroup"
 
@@ -120,6 +123,16 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/tools/{tool_name}:disable", []string{"qa.read"}, chat.DisableTool)
 	handleAPI(r, "POST", "/tools/{tool_name}:enable", []string{"qa.read"}, chat.EnableTool)
 
+	// ----- MCP servers -----
+	handleAPI(r, "GET", "/mcp_servers", []string{"qa.read"}, mcp.List)
+	handleAPI(r, "POST", "/mcp_servers", []string{"qa.write"}, mcp.Create)
+	handleAPI(r, "GET", "/mcp_servers/{id}", []string{"qa.read"}, mcp.Get)
+	handleAPI(r, "PATCH", "/mcp_servers/{id}", []string{"qa.write"}, mcp.Update)
+	handleAPI(r, "DELETE", "/mcp_servers/{id}", []string{"qa.write"}, mcp.Delete)
+	handleAPI(r, "POST", "/mcp_servers/{id}:check", []string{"qa.write"}, mcp.Check)
+	handleAPI(r, "POST", "/mcp_servers/{id}:discover", []string{"qa.write"}, mcp.Discover)
+	handleAPI(r, "PUT", "/mcp_servers/{id}/tools", []string{"qa.write"}, mcp.UpdateTools)
+
 	// ----- Agent thread stream -----
 	handleAPI(r, "GET", "/agent/threads", []string{"qa.read"}, agent.ListThreads)
 	handleAPI(r, "POST", "/agent/threads", []string{"qa.write"}, agent.CreateThread)
@@ -150,6 +163,22 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/conversations/{conversation_id}:status", []string{"qa.read"}, chat.GetChatStatus)
 	handleAPI(r, "GET", "/evolution/suggestions", []string{"qa.read"}, evolution.ListSuggestions)
 	handleAPI(r, "GET", "/evolution/suggestions/{id}", []string{"qa.read"}, evolution.GetSuggestion)
+	handleAPI(r, "POST", "/evolution/suggestions/{id}:approve", []string{"qa.read"}, evolution.ApproveSuggestion)
+	handleAPI(r, "POST", "/evolution/suggestions/{id}:reject", []string{"qa.read"}, evolution.RejectSuggestion)
+	handleAPI(r, "POST", "/evolution/suggestions:batchApprove", []string{"qa.read"}, evolution.BatchApproveSuggestions)
+	handleAPI(r, "POST", "/evolution/suggestions:batchReject", []string{"qa.read"}, evolution.BatchRejectSuggestions)
+	handleAPI(r, "GET", "/evolution/tasks", []string{"qa.read"}, resourceupdate.ListTasks)
+	handleAPI(r, "GET", "/evolution/tasks/{task_id}", []string{"qa.read"}, resourceupdate.GetTask)
+	handleAPI(r, "GET", "/skill-review-results", []string{"qa.read"}, resourceupdate.ListSkillReviewResults)
+	handleAPI(r, "GET", "/skill-review-results/{review_result_id}", []string{"qa.read"}, resourceupdate.GetSkillReviewResult)
+	handleAPI(r, "POST", "/skill-review-results/{review_result_id}:accept", []string{"qa.read"}, resourceupdate.AcceptSkillReviewResult)
+	handleAPI(r, "POST", "/skill-review-results/{review_result_id}:reject", []string{"qa.read"}, resourceupdate.RejectSkillReviewResult)
+	handleAPI(r, "GET", "/memory-review-results", []string{"qa.read"}, resourceupdate.ListMemoryReviewResults)
+	handleAPI(r, "GET", "/memory-review-results/{review_result_id}", []string{"qa.read"}, resourceupdate.GetMemoryReviewResult)
+	handleAPI(r, "POST", "/memory-review-results/{review_result_id}:accept", []string{"qa.read"}, resourceupdate.AcceptMemoryReviewResult)
+	handleAPI(r, "POST", "/memory-review-results/{review_result_id}:reject", []string{"qa.read"}, resourceupdate.RejectMemoryReviewResult)
+	handleAPI(r, "GET", "/resource-versions", []string{"qa.read"}, resourcechange.ListVersions)
+	handleAPI(r, "GET", "/resource-versions/{version_id}", []string{"qa.read"}, resourcechange.GetVersion)
 	handleAPI(r, "POST", "/evolution/suggestions/{id}:approve", []string{"qa.write"}, evolution.ApproveSuggestion)
 	handleAPI(r, "POST", "/evolution/suggestions/{id}:reject", []string{"qa.write"}, evolution.RejectSuggestion)
 	handleAPI(r, "POST", "/evolution/suggestions:batchApprove", []string{"qa.write"}, evolution.BatchApproveSuggestions)

@@ -2,7 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Button,
+  Checkbox,
+  Drawer,
+  Form,
+  Input,
+  InputNumber,
   Modal,
+  Popconfirm,
+  Select,
   Space,
   Switch,
   Tag,
@@ -15,6 +22,7 @@ import type { ColumnsType } from "antd/es/table";
 import {
   AppstoreOutlined,
   BookOutlined,
+  CloudServerOutlined,
   DeleteOutlined,
   EditOutlined,
   EyeOutlined,
@@ -126,8 +134,6 @@ import {
   GLOSSARY_TERM_MAX_LENGTH,
   MEMORY_BASE_PATH,
   buildDiffLines,
-  buildExperienceProposalFromSuggestions,
-  buildSkillProposalFromSuggestions,
   buildUnifiedDiffLines,
   canUploadSkillFile,
   cloneExperienceAsset,
@@ -140,7 +146,6 @@ import {
   formatDateTime,
   getBaseName,
   getPreferenceSuggestionResourceParam,
-  getSkillSuggestionResourceParam,
   getSkillBodyContentForDisplay,
   inferSkillFileExt,
   initialChangeProposals,
@@ -162,9 +167,19 @@ import {
   skillUploadAccept,
 } from "./shared";
 import {
+  checkMcpServer,
+  createMcpServer,
+  deleteMcpServer,
   disableTool,
+  discoverMcpServerTools,
   enableTool,
+  listMcpServers,
   listToolAssets,
+  updateMcpServer,
+  updateMcpServerTools,
+  type McpServerAsset,
+  type McpServerDraft,
+  type McpToolAsset,
 } from "./toolApi";
 
 import "./index.scss";
@@ -178,7 +193,7 @@ const MERGED_GLOSSARY_GROUP_OPTION_ID_PREFIX = `${MERGED_GLOSSARY_GROUP_OPTION_I
 const NEW_GLOSSARY_GROUP_OPTION_ID = "__new_glossary_group__";
 const isReviewableSuggestionStatus = (status?: string) => {
   const normalized = String(status || "").trim().toLowerCase();
-  return normalized === "pending_review" || normalized === "accepted";
+  return normalized === "pending";
 };
 const isSkillRemoveSuggestion = (suggestion: EvolutionSuggestionRecord) =>
   String(suggestion.action || "").trim().toLowerCase() === "remove";
@@ -193,6 +208,84 @@ const getAutoEvoStatusMeta = (status?: string) => {
     return { color: "red" as const, text: "自动进化执行失败" };
   }
   return { color: "blue" as const, text: "等待进化建议" };
+};
+const hasDraftPreviewStatus = (record: ExperienceAsset) =>
+  Boolean(record.hasPendingReviewSuggestions) ||
+  isReviewableSuggestionStatus(record.suggestionStatus) ||
+  Boolean(normalizeAutoEvoApplyStatus(record.autoEvoApplyStatus));
+const hasSkillDraftPreviewStatus = (record: StructuredAsset) =>
+  Boolean(record.hasPendingReviewResult) ||
+  Boolean(record.hasPendingReviewSuggestions) ||
+  isReviewableSuggestionStatus(record.reviewStatus) ||
+  isReviewableSuggestionStatus(record.suggestionStatus) ||
+  isSkillUpdatePending(record.updateStatus);
+type ExperienceProfileFieldKey = "agentPersona" | "userAddress" | "responseStyle";
+type ExperienceProfileDraft = Record<ExperienceProfileFieldKey, string>;
+type ExperienceProfileFieldConfig = {
+  key: ExperienceProfileFieldKey;
+  label: string;
+  description: string;
+  placeholder: string;
+};
+type ExperienceProfileEditTarget = {
+  recordId: string;
+  fieldKey: ExperienceProfileFieldKey;
+};
+const USER_PROFILE_FIELD_MAX_LENGTH = 500;
+const getExperienceProfileDraft = (record: ExperienceAsset): ExperienceProfileDraft => ({
+  agentPersona: record.agentPersona || "",
+  userAddress: record.userAddress || "",
+  responseStyle: record.responseStyle || "",
+});
+const isExperienceProfileAsset = (record: ExperienceAsset) => {
+  const resourceType = String(record.resourceType || "").toLowerCase();
+  return (
+    resourceType.includes("user_preference") ||
+    resourceType.includes("user-preference") ||
+    resourceType.includes("preference") ||
+    record.title === "用户画像"
+  );
+};
+const getMcpActionKey = (action: string, id: string) => `${action}:${id}`;
+const getMcpToolId = (tool: McpToolAsset) => tool.id || tool.name;
+const normalizeMcpTransportValue = (value?: string) =>
+  value === "streamable_http" ? "http" : value || "sse";
+const getMcpTransportLabel = (value?: string) => {
+  const normalizedValue = normalizeMcpTransportValue(value);
+  if (normalizedValue === "http") {
+    return "Streamable HTTP";
+  }
+  return "SSE";
+};
+const parseMcpEndpoint = (value: string) => {
+  if (!value) {
+    return { scheme: "", host: "-", path: "" };
+  }
+
+  try {
+    const endpointUrl = new URL(value);
+    return {
+      scheme: endpointUrl.protocol.replace(/:$/, ""),
+      host: endpointUrl.host,
+      path:
+        `${endpointUrl.pathname}${endpointUrl.search}${endpointUrl.hash}` ||
+        "/",
+    };
+  } catch {
+    return { scheme: "", host: value, path: "" };
+  }
+};
+const resolveAllowedMcpToolIds = (
+  server: McpServerAsset,
+  tools: McpToolAsset[],
+) => {
+  const toolIds = tools.map(getMcpToolId).filter(Boolean);
+  if (!server.allowedTools) {
+    return toolIds;
+  }
+
+  const allowedToolSet = new Set(server.allowedTools);
+  return toolIds.filter((toolId) => allowedToolSet.has(toolId));
 };
 
 const mergeEvolutionSuggestionRecords = (
@@ -260,6 +353,18 @@ export default function MemoryManagement() {
   const [toolAssets, setToolAssets] = useState<StructuredAsset[]>([]);
   const [toolLoading, setToolLoading] = useState(false);
   const [toolActionLoading, setToolActionLoading] = useState<Set<string>>(new Set());
+  const [mcpServers, setMcpServers] = useState<McpServerAsset[]>([]);
+  const [mcpLoading, setMcpLoading] = useState(false);
+  const [mcpActionLoading, setMcpActionLoading] = useState<Set<string>>(new Set());
+  const [mcpModalOpen, setMcpModalOpen] = useState(false);
+  const [mcpModalMode, setMcpModalMode] = useState<"add" | "edit">("add");
+  const [mcpEditingServer, setMcpEditingServer] = useState<McpServerAsset | null>(null);
+  const [mcpSaving, setMcpSaving] = useState(false);
+  const [mcpToolsDrawerOpen, setMcpToolsDrawerOpen] = useState(false);
+  const [mcpToolTarget, setMcpToolTarget] = useState<McpServerAsset | null>(null);
+  const [mcpToolDraftIds, setMcpToolDraftIds] = useState<string[]>([]);
+  const [mcpToolSaving, setMcpToolSaving] = useState(false);
+  const [mcpForm] = Form.useForm<McpServerDraft>();
   const [skillAssets, setSkillAssets] = useState<StructuredAsset[]>(initialSkills);
   const [skillLoading, setSkillLoading] = useState(false);
   const [skillAutoEvoLoading, setSkillAutoEvoLoading] = useState<Set<string>>(new Set());
@@ -282,6 +387,17 @@ export default function MemoryManagement() {
   const [experienceAutoEvoLoading, setExperienceAutoEvoLoading] = useState<Set<string>>(new Set());
   const [experienceInitialized, setExperienceInitialized] = useState(false);
   const [experienceSaving, setExperienceSaving] = useState(false);
+  const [experienceProfileDrafts, setExperienceProfileDrafts] = useState<
+    Record<string, ExperienceProfileDraft>
+  >({});
+  const [experienceProfileSaving, setExperienceProfileSaving] = useState<Set<string>>(
+    new Set(),
+  );
+  const [expandedExperienceProfileIds, setExpandedExperienceProfileIds] = useState<string[]>(
+    [],
+  );
+  const [experienceProfileEditTarget, setExperienceProfileEditTarget] =
+    useState<ExperienceProfileEditTarget | null>(null);
   const [experienceSettingSaving, setExperienceSettingSaving] = useState(false);
   const [glossaryAssets, setGlossaryAssets] = useState<GlossaryAsset[]>([]);
   const [glossaryLoading, setGlossaryLoading] = useState(false);
@@ -392,6 +508,7 @@ export default function MemoryManagement() {
   const glossaryRequestIdRef = useRef(0);
   const glossaryConflictRequestIdRef = useRef(0);
   const backendSuggestionLoadMoreRequestIdRef = useRef(0);
+  const confirmedDraftProposalIdsRef = useRef<Set<string>>(new Set());
   const activeProposalFieldChangesRef = useRef<ProposalFieldChange[]>([]);
 
   const tabMeta: Record<
@@ -561,14 +678,17 @@ export default function MemoryManagement() {
             id: item.id,
             title: item.title,
             content: item.content,
+            agentPersona: item.agentPersona,
             hasPendingReviewSuggestions: item.hasPendingReviewSuggestions,
             protect: item.protect,
+            responseStyle: item.responseStyle,
             autoEvo: item.autoEvo,
             autoEvoApplyStatus: item.autoEvoApplyStatus,
             autoEvoGeneration: item.autoEvoGeneration,
             autoEvoError: item.autoEvoError,
             resourceType: item.resourceType,
             suggestionStatus: item.suggestionStatus,
+            userAddress: item.userAddress,
           })),
         );
       } catch (error) {
@@ -679,7 +799,9 @@ export default function MemoryManagement() {
           fileExt: item.fileExt,
           isEnabled: item.isEnabled,
           hasPendingReviewSuggestions: item.hasPendingReviewSuggestions,
+          hasPendingReviewResult: item.hasPendingReviewResult,
           hasPendingRemoveSuggestion: item.hasPendingRemoveSuggestion,
+          reviewStatus: item.reviewStatus,
           suggestionStatus: item.suggestionStatus,
           nodeType: item.nodeType,
           updateStatus: item.updateStatus,
@@ -754,6 +876,257 @@ export default function MemoryManagement() {
     },
     [refreshToolAssets, t],
   );
+
+  const refreshMcpServers = useCallback(async () => {
+    setMcpLoading(true);
+
+    try {
+      const records = await listMcpServers();
+      setMcpServers(records);
+    } catch (error) {
+      console.error("Load MCP servers failed:", error);
+      message.error(
+        getLocalizedErrorMessage(error, t("admin.memoryMcpLoadFailed")) ||
+          t("admin.memoryMcpLoadFailed"),
+      );
+    } finally {
+      setMcpLoading(false);
+    }
+  }, [t]);
+
+  const markMcpActionLoading = useCallback((key: string, loading: boolean) => {
+    setMcpActionLoading((previous) => {
+      const next = new Set(previous);
+      if (loading) {
+        next.add(key);
+      } else {
+        next.delete(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const openMcpToolsDrawer = useCallback((server: McpServerAsset) => {
+    const tools = server.tools || [];
+    setMcpToolTarget(server);
+    setMcpToolDraftIds(resolveAllowedMcpToolIds(server, tools));
+    setMcpToolsDrawerOpen(true);
+  }, []);
+
+  const openMcpCreateModal = useCallback(() => {
+    setMcpModalMode("add");
+    setMcpEditingServer(null);
+    mcpForm.setFieldsValue({
+      apiKey: "",
+      enabled: true,
+      name: "",
+      timeout: 30,
+      transport: "sse",
+      url: "",
+    });
+    setMcpModalOpen(true);
+  }, [mcpForm]);
+
+  const openMcpEditModal = useCallback(
+    (server: McpServerAsset) => {
+      setMcpModalMode("edit");
+      setMcpEditingServer(server);
+      mcpForm.setFieldsValue({
+        apiKey: "",
+        enabled: server.enabled,
+        name: server.name,
+        timeout: server.timeout || 30,
+        transport: normalizeMcpTransportValue(server.transport),
+        url: server.url,
+      });
+      setMcpModalOpen(true);
+    },
+    [mcpForm],
+  );
+
+  const closeMcpModal = useCallback(() => {
+    if (mcpSaving) {
+      return;
+    }
+    setMcpModalOpen(false);
+  }, [mcpSaving]);
+
+  const saveMcpServer = useCallback(async () => {
+    const values = await mcpForm.validateFields();
+    const draft: McpServerDraft = {
+      apiKey: String(values.apiKey || ""),
+      enabled: Boolean(values.enabled),
+      name: String(values.name || ""),
+      timeout: Number(values.timeout) || 30,
+      transport: normalizeMcpTransportValue(String(values.transport || "sse")),
+      url: String(values.url || ""),
+    };
+
+    setMcpSaving(true);
+    try {
+      if (mcpModalMode === "edit" && mcpEditingServer) {
+        await updateMcpServer(mcpEditingServer.id, draft);
+        message.success(t("admin.memoryMcpUpdateSuccess"));
+      } else {
+        await createMcpServer(draft);
+        message.success(t("admin.memoryMcpCreateSuccess"));
+      }
+      setMcpModalOpen(false);
+      await refreshMcpServers();
+    } catch (error) {
+      console.error("Save MCP server failed:", error);
+      message.error(
+        getLocalizedErrorMessage(error, t("admin.memoryMcpSaveFailed")) ||
+          t("admin.memoryMcpSaveFailed"),
+      );
+    } finally {
+      setMcpSaving(false);
+    }
+  }, [mcpEditingServer, mcpForm, mcpModalMode, refreshMcpServers, t]);
+
+  const handleToggleMcpServer = useCallback(
+    async (server: McpServerAsset, checked: boolean) => {
+      const actionKey = getMcpActionKey("toggle", server.id);
+      markMcpActionLoading(actionKey, true);
+
+      try {
+        await updateMcpServer(server.id, {
+          apiKey: "",
+          enabled: checked,
+          name: server.name,
+          timeout: server.timeout || 30,
+          transport: normalizeMcpTransportValue(server.transport),
+          url: server.url,
+        });
+        await refreshMcpServers();
+        message.success(
+          checked
+            ? t("admin.memoryMcpEnableSuccess")
+            : t("admin.memoryMcpDisableSuccess"),
+        );
+      } catch (error) {
+        console.error("Toggle MCP server failed:", error);
+        message.error(
+          getLocalizedErrorMessage(error, t("admin.memoryMcpToggleFailed")) ||
+            t("admin.memoryMcpToggleFailed"),
+        );
+      } finally {
+        markMcpActionLoading(actionKey, false);
+      }
+    },
+    [markMcpActionLoading, refreshMcpServers, t],
+  );
+
+  const handleCheckMcpServer = useCallback(
+    async (server: McpServerAsset) => {
+      const actionKey = getMcpActionKey("check", server.id);
+      markMcpActionLoading(actionKey, true);
+
+      try {
+        const result = await checkMcpServer(server.id);
+        const text =
+          result.message ||
+          t("admin.memoryMcpCheckResult", { count: result.toolCount });
+        if (result.success) {
+          message.success(text);
+        } else {
+          message.warning(text);
+        }
+      } catch (error) {
+        console.error("Check MCP server failed:", error);
+        message.error(
+          getLocalizedErrorMessage(error, t("admin.memoryMcpCheckFailed")) ||
+            t("admin.memoryMcpCheckFailed"),
+        );
+      } finally {
+        markMcpActionLoading(actionKey, false);
+      }
+    },
+    [markMcpActionLoading, t],
+  );
+
+  const handleDiscoverMcpTools = useCallback(
+    async (server: McpServerAsset) => {
+      const actionKey = getMcpActionKey("discover", server.id);
+      markMcpActionLoading(actionKey, true);
+
+      try {
+        const result = await discoverMcpServerTools(server.id);
+        const nextServer = {
+          ...server,
+          toolCount: result.tools.length,
+          tools: result.tools,
+        };
+        setMcpServers((previous) =>
+          previous.map((item) => (item.id === server.id ? nextServer : item)),
+        );
+        openMcpToolsDrawer(nextServer);
+        message.success(
+          t("admin.memoryMcpDiscoverSuccess", { count: result.tools.length }),
+        );
+      } catch (error) {
+        console.error("Discover MCP tools failed:", error);
+        message.error(
+          getLocalizedErrorMessage(error, t("admin.memoryMcpDiscoverFailed")) ||
+            t("admin.memoryMcpDiscoverFailed"),
+        );
+      } finally {
+        markMcpActionLoading(actionKey, false);
+      }
+    },
+    [markMcpActionLoading, openMcpToolsDrawer, t],
+  );
+
+  const handleDeleteMcpServer = useCallback(
+    async (server: McpServerAsset) => {
+      const actionKey = getMcpActionKey("delete", server.id);
+      markMcpActionLoading(actionKey, true);
+
+      try {
+        await deleteMcpServer(server.id);
+        await refreshMcpServers();
+        message.success(t("admin.memoryMcpDeleteSuccess"));
+      } catch (error) {
+        console.error("Delete MCP server failed:", error);
+        message.error(
+          getLocalizedErrorMessage(error, t("admin.memoryMcpDeleteFailed")) ||
+            t("admin.memoryMcpDeleteFailed"),
+        );
+      } finally {
+        markMcpActionLoading(actionKey, false);
+      }
+    },
+    [markMcpActionLoading, refreshMcpServers, t],
+  );
+
+  const closeMcpToolsDrawer = useCallback(() => {
+    if (mcpToolSaving) {
+      return;
+    }
+    setMcpToolsDrawerOpen(false);
+  }, [mcpToolSaving]);
+
+  const saveMcpServerTools = useCallback(async () => {
+    if (!mcpToolTarget) {
+      return;
+    }
+
+    setMcpToolSaving(true);
+    try {
+      await updateMcpServerTools(mcpToolTarget.id, mcpToolDraftIds);
+      setMcpToolsDrawerOpen(false);
+      await refreshMcpServers();
+      message.success(t("admin.memoryMcpToolsSaveSuccess"));
+    } catch (error) {
+      console.error("Save MCP tools failed:", error);
+      message.error(
+        getLocalizedErrorMessage(error, t("admin.memoryMcpToolsSaveFailed")) ||
+          t("admin.memoryMcpToolsSaveFailed"),
+      );
+    } finally {
+      setMcpToolSaving(false);
+    }
+  }, [mcpToolDraftIds, mcpToolTarget, refreshMcpServers, t]);
 
   const refreshGlossaryAssets = useCallback(
     async (options?: {
@@ -1100,7 +1473,8 @@ export default function MemoryManagement() {
     }
 
     void refreshToolAssets();
-  }, [refreshToolAssets, routeMemoryTab]);
+    void refreshMcpServers();
+  }, [refreshMcpServers, refreshToolAssets, routeMemoryTab]);
 
   useEffect(() => {
     const shouldRefreshExperience =
@@ -1357,7 +1731,7 @@ export default function MemoryManagement() {
     }
 
     const reviewRouteReloadKey = `${reviewRouteTab}:${reviewRouteItemId}`;
-    if (reviewRouteReloadKeyRef.current === reviewRouteReloadKey) {
+    if (reviewRouteReloadKeyRef.current === reviewRouteReloadKey && activeProposal) {
       return;
     }
     reviewRouteReloadKeyRef.current = reviewRouteReloadKey;
@@ -1466,11 +1840,11 @@ export default function MemoryManagement() {
     activeBackendSuggestionPage * activeBackendSuggestionPageSize < activeBackendSuggestionTotal;
   const isBackendSuggestionReviewMode =
     Boolean(activeProposal?.backendSuggestions) &&
-    (activeBackendSuggestions.length > 0 ||
+    (activeProposal?.tab === "skills" ||
+      activeProposal?.tab === "experience" ||
+      activeBackendSuggestions.length > 0 ||
       approvedBackendSuggestionIds.length > 0 ||
-      rejectedBackendSuggestionIds.length > 0 ||
-      (activeProposal?.tab === "experience" &&
-        Boolean(backendDraftPreview)));
+      rejectedBackendSuggestionIds.length > 0);
   const activeBackendSuggestionSourceText = useMemo(() => {
     if (!activeProposal) {
       return "";
@@ -1607,6 +1981,8 @@ export default function MemoryManagement() {
   activeProposalFieldChangesRef.current = activeProposalFieldChanges;
 
   useEffect(() => {
+    let ignore = false;
+
     if (!activeProposal) {
       setProposalFieldDecisions({});
       setSelectedFieldKeys([]);
@@ -1624,7 +2000,9 @@ export default function MemoryManagement() {
       setBackendDraftPreview(null);
       setBackendDraftLoading(false);
       setBackendDraftSubmitting("");
-      return;
+      return () => {
+        ignore = true;
+      };
     }
 
     const fieldChanges = activeProposal.backendSuggestions
@@ -1654,9 +2032,65 @@ export default function MemoryManagement() {
     setBackendDraftPreview(null);
     setBackendDraftLoading(false);
     setBackendDraftSubmitting("");
-    if (activeProposal.tab === "experience") {
-      setBackendDraftKind(resolveManagedPreferenceDraftKind(activeProposal.before.resourceType));
+
+    if (
+      (activeProposal.tab === "skills" || activeProposal.tab === "experience") &&
+      activeProposal.backendSuggestions
+    ) {
+      if (confirmedDraftProposalIdsRef.current.has(activeProposal.id)) {
+        return () => {
+          ignore = true;
+        };
+      }
+
+      const isSkillProposal = activeProposal.tab === "skills";
+      setActiveReviewStep(1);
+      if (activeProposal.backendDraftPreview) {
+        setBackendDraftPreview(activeProposal.backendDraftPreview);
+        if (!isSkillProposal) {
+          setBackendDraftKind(resolveManagedPreferenceDraftKind(activeProposal.before.resourceType));
+        }
+        return () => {
+          ignore = true;
+        };
+      }
+      setBackendDraftLoading(true);
+      void (async () => {
+        try {
+          const preview = isSkillProposal
+            ? await previewSkillDraft(activeProposal.targetId)
+            : await previewManagedPreferenceDraft(
+                resolveManagedPreferenceDraftKind(activeProposal.before.resourceType),
+              );
+          if (!ignore) {
+            if (!isSkillProposal) {
+              setBackendDraftKind(
+                resolveManagedPreferenceDraftKind(activeProposal.before.resourceType),
+              );
+            }
+            setBackendDraftPreview(preview);
+          }
+        } catch (error) {
+          if (!ignore) {
+            console.error("Load draft preview failed:", error);
+            const errorKey = isSkillProposal
+              ? "admin.memorySkillDraftPreviewFailed"
+              : "admin.memoryPreferenceDraftPreviewFailed";
+            message.error(
+              getLocalizedErrorMessage(error, t(errorKey)) || t(errorKey),
+            );
+          }
+        } finally {
+          if (!ignore) {
+            setBackendDraftLoading(false);
+          }
+        }
+      })();
     }
+
+    return () => {
+      ignore = true;
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProposal?.id]);
 
@@ -1899,6 +2333,108 @@ export default function MemoryManagement() {
   );
 
   const filteredExperienceItems = experienceAssets;
+  useEffect(() => {
+    const profileIds = experienceAssets
+      .filter(isExperienceProfileAsset)
+      .map((item) => item.id);
+    const validIdSet = new Set(experienceAssets.map((item) => item.id));
+
+    setExpandedExperienceProfileIds((previous) => {
+      const next = previous.filter((id) => profileIds.includes(id));
+      profileIds.forEach((id) => {
+        if (!next.includes(id)) {
+          next.push(id);
+        }
+      });
+      return next.length === previous.length && next.every((id, index) => id === previous[index])
+        ? previous
+        : next;
+    });
+    setExperienceProfileDrafts((previous) => {
+      const nextEntries = Object.entries(previous).filter(([id]) => validIdSet.has(id));
+      if (nextEntries.length === Object.keys(previous).length) {
+        return previous;
+      }
+      return Object.fromEntries(nextEntries);
+    });
+    setExperienceProfileEditTarget((previous) =>
+      previous && validIdSet.has(previous.recordId) ? previous : null,
+    );
+  }, [experienceAssets]);
+
+  const updateExperienceProfileDraft = useCallback(
+    (record: ExperienceAsset, key: ExperienceProfileFieldKey, value: string) => {
+      setExperienceProfileDrafts((previous) => ({
+        ...previous,
+        [record.id]: {
+          ...(previous[record.id] || getExperienceProfileDraft(record)),
+          [key]: value,
+        },
+      }));
+    },
+    [],
+  );
+
+  const resetExperienceProfileDraft = useCallback((record: ExperienceAsset) => {
+    setExperienceProfileDrafts((previous) => {
+      const next = { ...previous };
+      delete next[record.id];
+      return next;
+    });
+  }, []);
+
+  const saveExperienceProfileDraft = useCallback(
+    async (record: ExperienceAsset) => {
+      const draft = experienceProfileDrafts[record.id] || getExperienceProfileDraft(record);
+
+      setExperienceProfileSaving((previous) => new Set(previous).add(record.id));
+      try {
+        await upsertPreferenceAsset({
+          title: record.title,
+          content: record.content,
+          protect: Boolean(record.protect),
+          autoEvo: Boolean(record.autoEvo),
+          agentPersona: draft.agentPersona.trim(),
+          responseStyle: draft.responseStyle.trim(),
+          resourceType: record.resourceType,
+          userAddress: draft.userAddress.trim(),
+        });
+        resetExperienceProfileDraft(record);
+        await refreshExperienceSection({ silent: true });
+        message.success(
+          t("admin.memoryProfileSaveSuccess", { defaultValue: "用户画像配置已保存" }),
+        );
+        return true;
+      } catch (error) {
+        console.error("Save user profile preference failed:", error);
+        message.error(
+          getLocalizedErrorMessage(
+            error,
+            t("admin.memoryProfileSaveFailed", {
+              defaultValue: "保存用户画像配置失败",
+            }),
+          ) ||
+            t("admin.memoryProfileSaveFailed", {
+              defaultValue: "保存用户画像配置失败",
+            }),
+        );
+        return false;
+      } finally {
+        setExperienceProfileSaving((previous) => {
+          const next = new Set(previous);
+          next.delete(record.id);
+          return next;
+        });
+      }
+    },
+    [
+      experienceProfileDrafts,
+      refreshExperienceSection,
+      resetExperienceProfileDraft,
+      t,
+    ],
+  );
+
   const filteredGlossaryItems = glossaryAssets.filter((item) => {
     const matchesSource = !glossarySource || item.source === glossarySource;
     if (!matchesSource) {
@@ -1936,6 +2472,29 @@ export default function MemoryManagement() {
 
   const filteredStructuredItems = currentStructuredItems.filter((item) =>
     matchesStructuredFilter(item),
+  );
+  const filteredMcpServers = useMemo(
+    () =>
+      mcpServers.filter((server) => {
+        if (!keyword) {
+          return true;
+        }
+
+        const searchableText = [
+          server.name,
+          server.url,
+          server.transport,
+          server.apiKeyPreview,
+          ...server.tools.flatMap((toolItem) => [
+            toolItem.name,
+            toolItem.description,
+          ]),
+        ]
+          .join(" ")
+          .toLowerCase();
+        return searchableText.includes(keyword);
+      }),
+    [keyword, mcpServers],
   );
 
   const filteredSkillTree = useMemo<SkillTreeNode[]>(() => {
@@ -2210,6 +2769,7 @@ export default function MemoryManagement() {
       setDraft({
         id: item.id,
         title: item.title,
+        agentPersona: item.agentPersona || "",
         name: "",
         description: "",
         category: "",
@@ -2222,11 +2782,14 @@ export default function MemoryManagement() {
         source: "user",
         content: item.content,
         protect: Boolean(item.protect),
+        responseStyle: item.responseStyle || "",
+        userAddress: item.userAddress || "",
       });
     } else if ("term" in item) {
       setDraft({
         id: item.id,
         title: "",
+        agentPersona: "",
         name: "",
         description: "",
         category: "",
@@ -2239,6 +2802,8 @@ export default function MemoryManagement() {
         source: item.source,
         content: item.content,
         protect: Boolean(item.protect),
+        responseStyle: "",
+        userAddress: "",
       });
     } else {
       setDraft(
@@ -2419,36 +2984,26 @@ export default function MemoryManagement() {
   const loadExperienceChangeProposal = async (
     item: ExperienceAsset,
   ): Promise<ExperienceChangeProposal | null> => {
-    const resourceParam = getPreferenceSuggestionResourceParam(item);
-    const suggestionPage = await listEvolutionSuggestions({
-      page: 1,
-      pageSize: backendSuggestionPageSize,
-      ...resourceParam,
-    });
-    if (!suggestionPage.items.length) {
-      return null;
-    }
-
-    return buildExperienceProposalFromSuggestions(item, suggestionPage.items, suggestionPage);
+    return {
+      id: `experience-draft-${item.id}`,
+      tab: "experience",
+      targetId: item.id,
+      before: cloneExperienceAsset(item),
+      after: cloneExperienceAsset(item),
+      backendSuggestions: [],
+      backendSuggestionPage: 1,
+      backendSuggestionPageSize: backendSuggestionPageSize,
+      backendSuggestionTotal: 0,
+    };
   };
 
   const loadSkillChangeProposal = async (
     item: StructuredAsset,
   ): Promise<ChangeProposal | null> => {
-    const [detail, suggestionPage] = await Promise.all([
-      getSkillAssetDetail(item.id).catch((error) => {
-        console.error("Load skill detail for review failed:", error);
-        return null;
-      }),
-      listEvolutionSuggestions({
-        page: 1,
-        pageSize: backendSuggestionPageSize,
-        ...getSkillSuggestionResourceParam(item),
-      }),
-    ]);
-    if (!suggestionPage.items.length) {
+    const detail = await getSkillAssetDetail(item.id).catch((error) => {
+      console.error("Load skill detail for review failed:", error);
       return null;
-    }
+    });
 
     const reviewItem: StructuredAsset = detail
       ? {
@@ -2465,13 +3020,26 @@ export default function MemoryManagement() {
           isEnabled: detail.isEnabled,
           hasPendingReviewSuggestions:
             detail.hasPendingReviewSuggestions ?? item.hasPendingReviewSuggestions,
+          hasPendingReviewResult:
+            detail.hasPendingReviewResult ?? item.hasPendingReviewResult,
+          reviewStatus: detail.reviewStatus || item.reviewStatus,
           suggestionStatus: detail.suggestionStatus || item.suggestionStatus,
           nodeType: detail.nodeType || item.nodeType,
           updateStatus: detail.updateStatus || item.updateStatus,
         }
       : item;
 
-    return buildSkillProposalFromSuggestions(reviewItem, suggestionPage.items, suggestionPage);
+    return {
+      id: `skill-draft-${reviewItem.id}`,
+      tab: "skills",
+      targetId: reviewItem.id,
+      before: cloneStructuredAsset(reviewItem),
+      after: cloneStructuredAsset(reviewItem),
+      backendSuggestions: [],
+      backendSuggestionPage: 1,
+      backendSuggestionPageSize: backendSuggestionPageSize,
+      backendSuggestionTotal: 0,
+    };
   };
 
   const openChangeReview = async (
@@ -2488,14 +3056,14 @@ export default function MemoryManagement() {
     if (!proposal || shouldReloadProposal) {
       if (tab === "skills") {
         const matchedSkill = skillAssets.find((item) => item.id === itemId);
-        const hasBackendReviewableSuggestions = Boolean(
-          matchedSkill?.hasPendingReviewSuggestions,
-        );
+        const hasReviewableDraft = matchedSkill
+          ? hasSkillDraftPreviewStatus(matchedSkill)
+          : false;
 
         if (
           shouldReloadProposal ||
           isSkillUpdatePending(skillUpdateStatus) ||
-          hasBackendReviewableSuggestions
+          hasReviewableDraft
         ) {
           if (!matchedSkill) {
             message.warning(t("admin.memoryDiffTargetMissing"));
@@ -2528,10 +3096,10 @@ export default function MemoryManagement() {
               navigateToChangeReview(tab, itemId);
             }
           } catch (error) {
-            console.error("Load skill evolution suggestion failed:", error);
+            console.error("Load skill draft preview failed:", error);
             message.error(
-              getLocalizedErrorMessage(error, t("admin.memoryPreferenceDraftPreviewFailed")) ||
-                t("admin.memoryPreferenceDraftPreviewFailed"),
+              getLocalizedErrorMessage(error, t("admin.memorySkillDraftPreviewFailed")) ||
+                t("admin.memorySkillDraftPreviewFailed"),
             );
             return false;
           } finally {
@@ -2544,9 +3112,7 @@ export default function MemoryManagement() {
       if (
         tab === "experience" &&
         (shouldReloadProposal ||
-          experienceAssets.some(
-            (item) => item.id === itemId && item.hasPendingReviewSuggestions,
-          ))
+          experienceAssets.some((item) => item.id === itemId && hasDraftPreviewStatus(item)))
       ) {
         const matchedExperience = experienceAssets.find((item) => item.id === itemId);
         if (!matchedExperience) {
@@ -2563,7 +3129,7 @@ export default function MemoryManagement() {
                 (item) => !(item.tab === "experience" && item.targetId === itemId),
               ),
             );
-            message.info(t("admin.memoryDiffNoPending"));
+            message.info(t("admin.memoryPreferenceDraftPreviewFailed"));
             return false;
           }
 
@@ -2582,11 +3148,11 @@ export default function MemoryManagement() {
             reviewRouteReloadKeyRef.current = `${tab}:${itemId}`;
             navigateToChangeReview(tab, itemId);
           }
-        } catch (error) {
-          console.error("Load evolution suggestion failed:", error);
-          message.error(
-            getLocalizedErrorMessage(error, t("admin.memoryPreferenceDraftPreviewFailed")) ||
-              t("admin.memoryPreferenceDraftPreviewFailed"),
+          } catch (error) {
+            console.error("Load preference draft preview failed:", error);
+            message.error(
+              getLocalizedErrorMessage(error, t("admin.memoryPreferenceDraftPreviewFailed")) ||
+                t("admin.memoryPreferenceDraftPreviewFailed"),
           );
           return false;
         } finally {
@@ -3022,12 +3588,48 @@ export default function MemoryManagement() {
     ].filter(Boolean);
     return instructions.join("\n");
   };
+  const getActiveManagedDraftKind = () =>
+    activeProposal?.tab === "experience"
+      ? resolveManagedPreferenceDraftKind(activeProposal.before.resourceType)
+      : backendDraftKind;
   const startBackendDraftPreviewLoading = () => {
     setActiveReviewStep(1);
     setBackendDraftPreview(null);
     setIsPreviewContentEditing(false);
     setManualPreviewContentDraft("");
     setBackendDraftLoading(true);
+  };
+  const loadCurrentDraftPreview = async () => {
+    if (!activeProposal) {
+      return false;
+    }
+
+    startBackendDraftPreviewLoading();
+    try {
+      const preview =
+        activeProposal.tab === "skills"
+          ? await previewSkillDraft(activeProposal.targetId)
+          : await previewManagedPreferenceDraft(
+              resolveManagedPreferenceDraftKind(activeProposal.before.resourceType),
+            );
+      if (activeProposal.tab === "experience") {
+        setBackendDraftKind(resolveManagedPreferenceDraftKind(activeProposal.before.resourceType));
+      }
+      setBackendDraftPreview(preview);
+      return true;
+    } catch (error) {
+      console.error("Load draft preview failed:", error);
+      const errorKey =
+        activeProposal.tab === "skills"
+          ? "admin.memorySkillDraftPreviewFailed"
+          : "admin.memoryPreferenceDraftPreviewFailed";
+      message.error(
+        getLocalizedErrorMessage(error, t(errorKey)) || t(errorKey),
+      );
+      return false;
+    } finally {
+      setBackendDraftLoading(false);
+    }
   };
   const loadBackendDraftPreview = async (
     suggestionIds: string[],
@@ -3056,26 +3658,23 @@ export default function MemoryManagement() {
               return previewSkillDraft(activeProposal.targetId);
             })()
           : await (async () => {
-              await generateManagedPreferenceDraft(backendDraftKind, {
+              const draftKind = getActiveManagedDraftKind();
+              await generateManagedPreferenceDraft(draftKind, {
                 suggestionIds: shouldOmitSuggestionIds ? undefined : suggestionIds,
                 userInstruct,
               });
-              return previewManagedPreferenceDraft(backendDraftKind);
+              return previewManagedPreferenceDraft(draftKind);
             })();
       setBackendDraftPreview(preview);
       return true;
     } catch (error) {
       console.error("Load managed draft preview failed:", error);
+      const errorKey =
+        activeProposal?.tab === "skills"
+          ? "admin.memorySkillDraftPreviewFailed"
+          : "admin.memoryPreferenceDraftPreviewFailed";
       message.error(
-        getLocalizedErrorMessage(
-          error,
-          activeProposal?.tab === "skills"
-            ? t("admin.memorySkillDraftPreviewFailed")
-            : t("admin.memoryPreferenceDraftPreviewFailed"),
-        ) ||
-          (activeProposal?.tab === "skills"
-            ? t("admin.memorySkillDraftPreviewFailed")
-            : t("admin.memoryPreferenceDraftPreviewFailed")),
+        getLocalizedErrorMessage(error, t(errorKey)) || t(errorKey),
       );
       return false;
     } finally {
@@ -3092,22 +3691,23 @@ export default function MemoryManagement() {
       if (activeProposal.tab === "skills") {
         await confirmSkillDraft(activeProposal.targetId);
       } else {
-        await confirmManagedPreferenceDraft(backendDraftKind);
+        await confirmManagedPreferenceDraft(getActiveManagedDraftKind());
       }
       message.success(
         activeProposal.tab === "skills"
           ? t("admin.memorySkillDraftConfirmSuccess")
           : t("admin.memoryPreferenceDraftConfirmSuccess"),
       );
+      confirmedDraftProposalIdsRef.current.add(activeProposal.id);
+      setChangeProposals((previous) =>
+        previous.filter((item) => item.id !== activeProposal.id),
+      );
+      setActiveProposalId(undefined);
       if (activeProposal.tab === "skills") {
         await refreshSkillAssets({ preserveChangeProposals: true });
       } else {
         await refreshExperienceAssets({ silent: true });
       }
-      setChangeProposals((previous) =>
-        previous.filter((item) => item.id !== activeProposal.id),
-      );
-      setActiveProposalId(undefined);
       navigateToMemoryList(activeProposal.tab);
     } catch (error) {
       console.error("Confirm managed draft failed:", error);
@@ -3132,7 +3732,7 @@ export default function MemoryManagement() {
       if (activeProposal?.tab === "skills") {
         await discardSkillDraft(activeProposal.targetId);
       } else {
-        await discardManagedPreferenceDraft(backendDraftKind);
+        await discardManagedPreferenceDraft(getActiveManagedDraftKind());
       }
       message.success(
         activeProposal?.tab === "skills"
@@ -3143,26 +3743,21 @@ export default function MemoryManagement() {
       setApprovedBackendSuggestionIds([]);
       setRejectedBackendSuggestionIds([]);
       setSelectedBackendSuggestionIds([]);
-      if (activeProposal?.backendSuggestions) {
-        const suggestionPage = await listEvolutionSuggestions({
-          page: 1,
-          pageSize: backendSuggestionPageSize,
-          ...(activeProposal.tab === "skills"
-            ? getSkillSuggestionResourceParam(activeProposal.before)
-            : getPreferenceSuggestionResourceParam(activeProposal.before)),
-        });
-        replaceBackendSuggestionPageInProposal(activeProposal.id, suggestionPage);
-        setSelectedBackendSuggestionIds((previous) => {
-          const latestIds = new Set(suggestionPage.items.map((item) => item.id));
-          return previous.filter((item) => latestIds.has(item));
-        });
+      if (activeProposal?.tab === "skills" || activeProposal?.tab === "experience") {
+        setChangeProposals((previous) =>
+          previous.filter((item) => item.id !== activeProposal.id),
+        );
+        setActiveProposalId(undefined);
+        navigateToMemoryList(activeProposal.tab);
+        if (activeProposal.tab === "skills") {
+          await refreshSkillAssets();
+        } else {
+          await refreshExperienceSection({ silent: true });
+        }
+        return;
       }
       setActiveReviewStep(0);
-      if (activeProposal?.tab === "skills") {
-        await refreshSkillAssets({ preserveChangeProposals: true });
-      } else {
-        await refreshExperienceSection({ silent: true });
-      }
+      await refreshExperienceSection({ silent: true });
     } catch (error) {
       console.error("Discard managed draft failed:", error);
       message.error(
@@ -3266,6 +3861,9 @@ export default function MemoryManagement() {
   const loadMoreBackendSuggestions = useCallback(async () => {
     if (
       !activeProposal ||
+      activeProposal.backendDraftPreview ||
+      activeProposal.backendSuggestions ||
+      activeProposal.tab !== "experience" ||
       backendSuggestionLoadingMore ||
       !backendSuggestionHasMore
     ) {
@@ -3281,9 +3879,7 @@ export default function MemoryManagement() {
       const suggestionPage = await listEvolutionSuggestions({
         page: activeBackendSuggestionPage + 1,
         pageSize: activeBackendSuggestionPageSize,
-        ...(activeProposal.tab === "skills"
-          ? getSkillSuggestionResourceParam(activeProposal.before)
-          : getPreferenceSuggestionResourceParam(activeProposal.before)),
+        ...getPreferenceSuggestionResourceParam(activeProposal.before),
       });
 
       if (backendSuggestionLoadMoreRequestIdRef.current !== requestId) {
@@ -3350,6 +3946,14 @@ export default function MemoryManagement() {
   const goToReviewPreview = () => {
     if (
       activeProposal?.backendSuggestions &&
+      (activeProposal.tab === "skills" || activeProposal.tab === "experience")
+    ) {
+      void loadCurrentDraftPreview();
+      return;
+    }
+
+    if (
+      activeProposal?.backendSuggestions &&
       (activeProposal.backendSuggestions?.length || approvedBackendSuggestionIds.length)
     ) {
       void loadBackendDraftPreview(approvedBackendSuggestionIds);
@@ -3360,7 +3964,23 @@ export default function MemoryManagement() {
 
   const goToReviewChoose = () => {
     setIsPreviewContentEditing(false);
+    if (
+      activeProposal?.backendSuggestions &&
+      (activeProposal.tab === "skills" || activeProposal.tab === "experience")
+    ) {
+      void loadCurrentDraftPreview();
+      return;
+    }
+
     if (!activeProposal?.backendSuggestions) {
+      setActiveReviewStep(0);
+      return;
+    }
+    if (activeProposal.backendDraftPreview) {
+      setActiveReviewStep(1);
+      return;
+    }
+    if (activeProposal.tab !== "experience") {
       setActiveReviewStep(0);
       return;
     }
@@ -3369,9 +3989,7 @@ export default function MemoryManagement() {
       const suggestionPage = await listEvolutionSuggestions({
         page: 1,
         pageSize: backendSuggestionPageSize,
-        ...(activeProposal.tab === "skills"
-          ? getSkillSuggestionResourceParam(activeProposal.before)
-          : getPreferenceSuggestionResourceParam(activeProposal.before)),
+        ...getPreferenceSuggestionResourceParam(activeProposal.before),
       });
 
       replaceBackendSuggestionPageInProposal(activeProposal.id, suggestionPage);
@@ -3391,6 +4009,15 @@ export default function MemoryManagement() {
   };
   const closeChangeReview = () => {
     if (
+      (activeProposal?.tab === "skills" || activeProposal?.tab === "experience") &&
+      activeProposal.backendSuggestions &&
+      activeReviewStep === 1
+    ) {
+      finishCloseChangeReview();
+      return;
+    }
+
+    if (
       activeProposal?.backendSuggestions &&
       activeReviewStep === 1 &&
       backendDraftPreview
@@ -3402,11 +4029,7 @@ export default function MemoryManagement() {
         cancelText: t("common.cancel"),
         onOk: async () => {
           try {
-            if (activeProposal?.tab === "skills") {
-              await discardSkillDraft(activeProposal.targetId);
-            } else {
-              await discardManagedPreferenceDraft(backendDraftKind);
-            }
+            await discardManagedPreferenceDraft(getActiveManagedDraftKind());
           } catch (error) {
             console.error("Discard managed draft on close failed:", error);
           } finally {
@@ -3482,11 +4105,16 @@ export default function MemoryManagement() {
             markBackendSuggestionReviewed(suggestionId);
           }
           if (activeProposal.tab === "experience") {
+            const mergedExperience = effectiveProposalMerged as ExperienceAsset;
             await upsertPreferenceAsset({
-              title: (effectiveProposalMerged as ExperienceAsset).title,
-              content: (effectiveProposalMerged as ExperienceAsset).content,
-              protect: Boolean((effectiveProposalMerged as ExperienceAsset).protect),
-              resourceType: (effectiveProposalMerged as ExperienceAsset).resourceType,
+              title: mergedExperience.title,
+              content: mergedExperience.content,
+              protect: Boolean(mergedExperience.protect),
+              autoEvo: Boolean(mergedExperience.autoEvo),
+              agentPersona: mergedExperience.agentPersona,
+              responseStyle: mergedExperience.responseStyle,
+              resourceType: mergedExperience.resourceType,
+              userAddress: mergedExperience.userAddress,
             });
           }
           message.success(t("admin.memoryDiffApproveSuccess"));
@@ -3971,7 +4599,11 @@ export default function MemoryManagement() {
           title: draft.title.trim(),
           content: draft.content.trim(),
           protect: draft.protect,
+          autoEvo: currentExperienceItem?.autoEvo,
+          agentPersona: draft.agentPersona,
+          responseStyle: draft.responseStyle,
           resourceType: currentExperienceItem?.resourceType,
+          userAddress: draft.userAddress,
         });
         if (modalMode === "edit" && draft.id) {
           setChangeProposals((previous) =>
@@ -4568,16 +5200,10 @@ export default function MemoryManagement() {
       render: (_value, record) => {
         const pendingProposal =
           activeTab === "skills" ? getPendingProposal("skills", record.id) : undefined;
-        const hasBackendReviewableSuggestions =
-          activeTab === "skills" &&
-          !record.autoEvo &&
-          (Boolean(record.hasPendingReviewSuggestions) ||
-            isReviewableSuggestionStatus(record.suggestionStatus));
+        const hasReviewableDraft =
+          activeTab === "skills" && hasSkillDraftPreviewStatus(record);
         const showPendingTag =
-          !record.autoEvo &&
-          (Boolean(pendingProposal) ||
-            isSkillUpdatePending(record.updateStatus) ||
-            hasBackendReviewableSuggestions);
+          !record.autoEvo && (Boolean(pendingProposal) || hasReviewableDraft);
         const autoEvoStatusMeta =
           activeTab === "skills" && record.autoEvo
             ? getAutoEvoStatusMeta(record.autoEvoApplyStatus)
@@ -4741,21 +5367,12 @@ export default function MemoryManagement() {
         const isBuiltinTemplate = activeTab === "skills" && Boolean(record.isBuiltinTemplate);
         const pendingProposal =
           activeTab === "skills" ? getPendingProposal("skills", record.id) : undefined;
-        const hasBackendReviewableSuggestions =
-          activeTab === "skills" &&
-          !record.autoEvo &&
-          (Boolean(record.hasPendingReviewSuggestions) ||
-            isReviewableSuggestionStatus(record.suggestionStatus));
-        const canReviewChange =
-          !record.autoEvo &&
-          (Boolean(pendingProposal) ||
-            isSkillUpdatePending(record.updateStatus) ||
-            hasBackendReviewableSuggestions);
-        const reviewTooltip = record.autoEvo
-          ? t("admin.memoryDiffNoPending")
-          : pendingProposal
+        const hasReviewableDraft =
+          activeTab === "skills" && hasSkillDraftPreviewStatus(record);
+        const canReviewChange = Boolean(pendingProposal) || hasReviewableDraft;
+        const reviewTooltip = pendingProposal
           ? t("admin.memoryDiffReviewAction")
-          : isSkillUpdatePending(record.updateStatus) || hasBackendReviewableSuggestions
+          : hasReviewableDraft
             ? t("admin.memorySkillUpdateReviewAction")
             : t("admin.memoryDiffNoPending");
 
@@ -4849,6 +5466,35 @@ export default function MemoryManagement() {
       </div>
     );
 
+  const renderMcpEndpoint = (record: McpServerAsset) => {
+    const endpoint = parseMcpEndpoint(record.url);
+    const transportLabel = getMcpTransportLabel(record.transport);
+
+    return (
+      <div className="memory-mcp-endpoint">
+        <div className="memory-mcp-endpoint-meta">
+          <Tag bordered={false}>{transportLabel}</Tag>
+          {endpoint.scheme ? (
+            <span className="memory-mcp-endpoint-scheme">{endpoint.scheme}</span>
+          ) : null}
+        </div>
+        <Tooltip
+          title={<div className="memory-text-popover-content">{record.url}</div>}
+          overlayClassName="memory-text-popover"
+          placement="topLeft"
+          trigger="hover"
+        >
+          <div className="memory-mcp-endpoint-url" title={record.url}>
+            <span className="memory-mcp-endpoint-host">{endpoint.host}</span>
+            {endpoint.path ? (
+              <span className="memory-mcp-endpoint-path">{endpoint.path}</span>
+            ) : null}
+          </div>
+        </Tooltip>
+      </div>
+    );
+  };
+
   const toolColumns: ColumnsType<StructuredAsset> = [
     {
       title: t("admin.memoryToolName"),
@@ -4899,35 +5545,265 @@ export default function MemoryManagement() {
         />
       ),
     },
+  ];
+
+  const mcpColumns: ColumnsType<McpServerAsset> = [
     {
-      title: t("admin.memoryToolStatus"),
-      dataIndex: "isEnabled",
-      key: "status",
-      width: 120,
-      render: (value: boolean) => (
-        <Tag color={value ? "success" : "default"}>
-          {value ? t("common.enabled") : t("common.disabled")}
-        </Tag>
+      title: t("admin.memoryMcpServer"),
+      dataIndex: "name",
+      key: "name",
+      width: 260,
+      render: (_value, record) => (
+        <div className="memory-table-main">
+          <div className="memory-table-main-title">
+            <span className="memory-mcp-server-name">{record.name}</span>
+            <Tag color={record.isVerified ? "blue" : "warning"}>
+              {record.isVerified
+                ? t("admin.memoryMcpVerified")
+                : t("admin.memoryMcpUnverified")}
+            </Tag>
+          </div>
+          <div className="memory-table-main-desc">
+            {record.apiKeyPreview || t("admin.memoryMcpApiKeyHidden")}
+          </div>
+        </div>
       ),
     },
     {
-      title: t("common.actions"),
-      key: "actions",
-      width: 140,
+      title: t("admin.memoryMcpEndpoint"),
+      dataIndex: "url",
+      key: "url",
+      width: 330,
+      render: (_value, record) => renderMcpEndpoint(record),
+    },
+    {
+      title: t("admin.memoryMcpTools"),
+      key: "tools",
+      width: 150,
+      render: (_value, record) => {
+        const allowedCount =
+          record.allowedTools === undefined
+            ? record.toolCount
+            : record.allowedTools.length;
+        return (
+          <div className="memory-mcp-tool-count">
+            <strong>{record.toolCount}</strong>
+            <span>
+              {t("admin.memoryMcpAllowedToolsCount", { count: allowedCount })}
+            </span>
+          </div>
+        );
+      },
+    },
+    {
+      title: t("admin.memoryMcpEnableStatus", { defaultValue: "启用状态" }),
+      dataIndex: "enabled",
+      key: "enabled",
+      width: 120,
       render: (_value, record) => (
         <Switch
-          checked={Boolean(record.isEnabled)}
-          checkedChildren={t("common.enabled")}
-          disabled={Boolean(record.readonly)}
-          loading={toolActionLoading.has(record.id)}
-          unCheckedChildren={t("common.disabled")}
+          checked={record.enabled}
+          checkedChildren={t("admin.enable")}
+          loading={mcpActionLoading.has(getMcpActionKey("toggle", record.id))}
+          size="small"
+          unCheckedChildren={t("admin.disable")}
           onChange={(checked) => {
-            void handleToggleTool(record, checked);
+            void handleToggleMcpServer(record, checked);
           }}
         />
       ),
     },
+    {
+      title: t("admin.memoryMcpTimeout"),
+      dataIndex: "timeout",
+      key: "timeout",
+      width: 110,
+      render: (value: number) => t("admin.memoryMcpTimeoutSeconds", { count: value }),
+    },
+    {
+      title: t("admin.memoryMcpUpdatedAt"),
+      dataIndex: "updateTime",
+      key: "updateTime",
+      width: 170,
+      render: (value: string) => formatDateTime(value) || "-",
+    },
+    {
+      title: t("common.actions"),
+      key: "actions",
+      width: 280,
+      fixed: "right",
+      render: (_value, record) => (
+        <Space className="memory-mcp-actions" size={0} wrap>
+          <Button
+            loading={mcpActionLoading.has(getMcpActionKey("check", record.id))}
+            size="small"
+            type="link"
+            onClick={() => void handleCheckMcpServer(record)}
+          >
+            {t("admin.memoryMcpCheck")}
+          </Button>
+          <Button
+            loading={mcpActionLoading.has(getMcpActionKey("discover", record.id))}
+            size="small"
+            type="link"
+            onClick={() => void handleDiscoverMcpTools(record)}
+          >
+            {t("admin.memoryMcpDiscover")}
+          </Button>
+          <Button
+            size="small"
+            type="link"
+            onClick={() => openMcpEditModal(record)}
+          >
+            {t("common.edit")}
+          </Button>
+          <Popconfirm
+            cancelText={t("common.cancel")}
+            okText={t("common.delete")}
+            okButtonProps={{
+              danger: true,
+              loading: mcpActionLoading.has(getMcpActionKey("delete", record.id)),
+            }}
+            title={t("admin.memoryMcpDeleteConfirm", { name: record.name })}
+            onConfirm={() => void handleDeleteMcpServer(record)}
+          >
+            <Button danger size="small" type="link">
+              {t("common.delete")}
+            </Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
   ];
+
+  const experienceProfileFields = useMemo<ExperienceProfileFieldConfig[]>(
+    () => [
+      {
+        key: "agentPersona",
+        label: t("admin.memoryProfileAgentPersona", { defaultValue: "角色" }),
+        description: t("admin.memoryProfileAgentPersonaDesc", {
+          defaultValue: "描述智能体在回复时应保持的身份、职责和边界。",
+        }),
+        placeholder: t("admin.memoryProfileAgentPersonaPlaceholder", {
+          defaultValue: "例如：专业、审慎、主动澄清上下文的智能体",
+        }),
+      },
+      {
+        key: "userAddress",
+        label: t("admin.memoryProfileUserAddress", { defaultValue: "用户称谓" }),
+        description: t("admin.memoryProfileUserAddressDesc", {
+          defaultValue: "设置回复中对用户的称呼方式。",
+        }),
+        placeholder: t("admin.memoryProfileUserAddressPlaceholder", {
+          defaultValue: "例如：称呼用户为“您”，或使用指定昵称",
+        }),
+      },
+      {
+        key: "responseStyle",
+        label: t("admin.memoryProfileResponseStyle", { defaultValue: "回复风格" }),
+        description: t("admin.memoryProfileResponseStyleDesc", {
+          defaultValue: "定义默认表达习惯、篇幅和结构偏好。",
+        }),
+        placeholder: t("admin.memoryProfileResponseStylePlaceholder", {
+          defaultValue: "例如：简洁、结构化，先结论后解释",
+        }),
+      },
+    ],
+    [t],
+  );
+
+  const activeExperienceProfileRecord = useMemo(
+    () =>
+      experienceProfileEditTarget
+        ? experienceAssets.find((item) => item.id === experienceProfileEditTarget.recordId) ||
+          null
+        : null,
+    [experienceAssets, experienceProfileEditTarget],
+  );
+
+  const activeExperienceProfileField = useMemo(
+    () =>
+      experienceProfileEditTarget
+        ? experienceProfileFields.find(
+            (field) => field.key === experienceProfileEditTarget.fieldKey,
+          ) || null
+        : null,
+    [experienceProfileEditTarget, experienceProfileFields],
+  );
+
+  const renderExperienceProfileEditor = useCallback(
+    (record: ExperienceAsset): ReactNode => {
+      const draft = experienceProfileDrafts[record.id] || getExperienceProfileDraft(record);
+      const isSaving = experienceProfileSaving.has(record.id);
+      const emptyText = t("admin.memoryProfileEmpty", { defaultValue: "未配置" });
+
+      return (
+        <div className="memory-profile-editor">
+          <div className="memory-profile-editor-head">
+            <div>
+              <strong>
+                {t("admin.memoryProfileEditorTitle", { defaultValue: "用户画像配置" })}
+              </strong>
+              <span>
+                {t("admin.memoryProfileEditorDesc", {
+                  defaultValue: "作为用户画像的二级信息参与对话偏好，不影响主内容结构。",
+                })}
+              </span>
+            </div>
+            <Tag bordered={false}>
+              {t("admin.memoryProfileEditorTag", { defaultValue: "二级结构" })}
+            </Tag>
+          </div>
+          <div className="memory-profile-field-grid">
+            {experienceProfileFields.map((field) => (
+              <div className="memory-profile-field" key={field.key}>
+                <div className="memory-profile-field-copy">
+                  <span className="memory-profile-field-label">{field.label}</span>
+                  <span className="memory-profile-field-desc">{field.description}</span>
+                </div>
+                <div className="memory-profile-field-value">
+                  <span className={draft[field.key] ? "" : "is-empty"}>
+                    {draft[field.key] || emptyText}
+                  </span>
+                </div>
+                <Button
+                  disabled={isSaving}
+                  icon={<EditOutlined />}
+                  size="small"
+                  onClick={() =>
+                    setExperienceProfileEditTarget({
+                      recordId: record.id,
+                      fieldKey: field.key,
+                    })
+                  }
+                >
+                  {t("common.edit")}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    },
+    [
+      experienceProfileFields,
+      experienceProfileDrafts,
+      experienceProfileSaving,
+      t,
+    ],
+  );
+
+  const experienceProfileExpandable = useMemo(
+    () => ({
+      expandedRowClassName: () => "memory-profile-expanded-row",
+      expandedRowKeys: expandedExperienceProfileIds,
+      expandedRowRender: renderExperienceProfileEditor,
+      rowExpandable: isExperienceProfileAsset,
+      onExpandedRowsChange: (keys: readonly unknown[]) =>
+        setExpandedExperienceProfileIds(keys.map(String)),
+    }),
+    [expandedExperienceProfileIds, renderExperienceProfileEditor],
+  );
 
   const experienceColumns: ColumnsType<ExperienceAsset> = [
     {
@@ -4937,12 +5813,8 @@ export default function MemoryManagement() {
       width: 320,
       render: (_value, record) => {
         const pendingProposal = getPendingProposal("experience", record.id);
-        const hasBackendReviewableSuggestions =
-          !record.autoEvo &&
-          (Boolean(record.hasPendingReviewSuggestions) ||
-            isReviewableSuggestionStatus(record.suggestionStatus));
-        const showPendingTag =
-          !record.autoEvo && (Boolean(pendingProposal) || hasBackendReviewableSuggestions);
+        const hasReviewableDraft = hasDraftPreviewStatus(record);
+        const showPendingTag = Boolean(pendingProposal) || hasReviewableDraft;
         const autoEvoStatusMeta = record.autoEvo
           ? getAutoEvoStatusMeta(record.autoEvoApplyStatus)
           : null;
@@ -5015,7 +5887,10 @@ export default function MemoryManagement() {
                   content: record.content,
                   protect: Boolean(record.protect),
                   autoEvo: checked,
+                  agentPersona: record.agentPersona,
+                  responseStyle: record.responseStyle,
                   resourceType: record.resourceType,
+                  userAddress: record.userAddress,
                 });
                 await refreshExperienceSection({ silent: true });
               } catch (error) {
@@ -5043,12 +5918,8 @@ export default function MemoryManagement() {
       width: 210,
       render: (_value, record) => {
         const pendingProposal = getPendingProposal("experience", record.id);
-        const hasBackendReviewableSuggestions =
-          !record.autoEvo &&
-          (Boolean(record.hasPendingReviewSuggestions) ||
-            isReviewableSuggestionStatus(record.suggestionStatus));
-        const canReviewChange =
-          !record.autoEvo && (Boolean(pendingProposal) || hasBackendReviewableSuggestions);
+        const hasReviewableDraft = hasDraftPreviewStatus(record);
+        const canReviewChange = Boolean(pendingProposal) || hasReviewableDraft;
         const reviewTooltip = canReviewChange
           ? t("admin.memoryDiffReviewAction")
           : t("admin.memoryDiffNoPending");
@@ -5201,6 +6072,35 @@ export default function MemoryManagement() {
     }
     return { color: "processing", text: t("admin.memorySkillShareStatusPending") };
   };
+  const mcpToolIds = (mcpToolTarget?.tools || [])
+    .map(getMcpToolId)
+    .filter(Boolean);
+  const selectedMcpToolSet = new Set(mcpToolDraftIds);
+  const allMcpToolsSelected =
+    mcpToolIds.length > 0 && mcpToolIds.every((toolId) => selectedMcpToolSet.has(toolId));
+  const hasPartialMcpToolsSelected =
+    mcpToolIds.some((toolId) => selectedMcpToolSet.has(toolId)) && !allMcpToolsSelected;
+  const activeExperienceProfileDraft = activeExperienceProfileRecord
+    ? experienceProfileDrafts[activeExperienceProfileRecord.id] ||
+      getExperienceProfileDraft(activeExperienceProfileRecord)
+    : null;
+  const activeExperienceProfileOriginal = activeExperienceProfileRecord
+    ? getExperienceProfileDraft(activeExperienceProfileRecord)
+    : null;
+  const activeExperienceProfileSaving = activeExperienceProfileRecord
+    ? experienceProfileSaving.has(activeExperienceProfileRecord.id)
+    : false;
+  const activeExperienceProfileValue =
+    activeExperienceProfileDraft && activeExperienceProfileField
+      ? activeExperienceProfileDraft[activeExperienceProfileField.key]
+      : "";
+  const activeExperienceProfileHasChanges =
+    Boolean(activeExperienceProfileDraft && activeExperienceProfileOriginal) &&
+    experienceProfileFields.some(
+      (field) =>
+        activeExperienceProfileDraft?.[field.key] !==
+        activeExperienceProfileOriginal?.[field.key],
+    );
 
   const outletContext = {
     t,
@@ -5260,6 +6160,7 @@ export default function MemoryManagement() {
     experienceLoading,
     experienceInitialized,
     experienceColumns,
+    experienceProfileExpandable,
     filteredGlossaryItems,
     glossaryColumns,
     selectedGlossaryAssetIds,
@@ -5276,9 +6177,15 @@ export default function MemoryManagement() {
     skillAssets,
     filteredSkillTree,
     filteredStructuredItems,
+    filteredMcpServers,
     genericColumns,
     toolColumns,
     toolLoading,
+    refreshToolAssets,
+    mcpColumns,
+    mcpLoading,
+    refreshMcpServers,
+    openMcpCreateModal,
     isReviewRouteRequested,
     isGlossaryRouteRequested,
     reviewRouteTab,
@@ -5316,6 +6223,7 @@ export default function MemoryManagement() {
     setBackendSuggestionSelected,
     submitBackendSuggestionDecision,
     backendDraftDiffLines,
+    backendDraftReady: Boolean(backendDraftPreview),
     qaQuestionDraft,
     setQaQuestionDraft,
     handleReviewQuestionKeyDown,
@@ -5431,6 +6339,280 @@ export default function MemoryManagement() {
         getSkillShareStatusMeta={getSkillShareStatusMeta}
         formatDateTime={formatDateTime}
       />
+
+      <Modal
+        cancelText={t("common.cancel")}
+        destroyOnHidden
+        okButtonProps={{
+          disabled: !activeExperienceProfileHasChanges,
+          loading: activeExperienceProfileSaving,
+        }}
+        okText={t("common.save")}
+        open={Boolean(activeExperienceProfileRecord && activeExperienceProfileField)}
+        title={
+          activeExperienceProfileField
+            ? t("admin.memoryProfileEditTitle", {
+                defaultValue: "编辑{{field}}",
+                field: activeExperienceProfileField.label,
+              })
+            : t("admin.memoryProfileEditorTitle", { defaultValue: "用户画像配置" })
+        }
+        width={560}
+        onCancel={() => {
+          if (activeExperienceProfileRecord) {
+            resetExperienceProfileDraft(activeExperienceProfileRecord);
+          }
+          setExperienceProfileEditTarget(null);
+        }}
+        onOk={async () => {
+          if (!activeExperienceProfileRecord) {
+            return;
+          }
+          const saved = await saveExperienceProfileDraft(activeExperienceProfileRecord);
+          if (saved) {
+            setExperienceProfileEditTarget(null);
+          }
+        }}
+      >
+        {activeExperienceProfileRecord && activeExperienceProfileField ? (
+          <label className="memory-profile-edit-modal">
+            <span className="memory-profile-edit-modal-label">
+              {activeExperienceProfileField.label}
+            </span>
+            <span className="memory-profile-edit-modal-desc">
+              {activeExperienceProfileField.description}
+            </span>
+            <Input.TextArea
+              autoFocus
+              autoSize={{ minRows: 5, maxRows: 8 }}
+              disabled={activeExperienceProfileSaving}
+              maxLength={USER_PROFILE_FIELD_MAX_LENGTH}
+              placeholder={activeExperienceProfileField.placeholder}
+              showCount
+              value={activeExperienceProfileValue}
+              onChange={(event) =>
+                updateExperienceProfileDraft(
+                  activeExperienceProfileRecord,
+                  activeExperienceProfileField.key,
+                  event.target.value,
+                )
+              }
+            />
+          </label>
+        ) : null}
+      </Modal>
+
+      <Drawer
+        className="memory-mcp-drawer"
+        destroyOnHidden
+        footer={
+          <div className="memory-drawer-footer">
+            <Button onClick={closeMcpModal}>{t("common.cancel")}</Button>
+            <Button
+              loading={mcpSaving}
+              type="primary"
+              onClick={() => void saveMcpServer()}
+            >
+              {t("common.save")}
+            </Button>
+          </div>
+        }
+        open={mcpModalOpen}
+        title={
+          mcpModalMode === "add"
+            ? t("admin.memoryMcpCreateTitle")
+            : t("admin.memoryMcpEditTitle")
+        }
+        width={560}
+        onClose={closeMcpModal}
+      >
+        <Form<McpServerDraft>
+          className="memory-mcp-form"
+          form={mcpForm}
+          layout="vertical"
+        >
+          <Form.Item
+            label={t("admin.memoryMcpName")}
+            name="name"
+            rules={[
+              {
+                required: true,
+                whitespace: true,
+                message: t("admin.memoryMcpNameRequired"),
+              },
+            ]}
+          >
+            <Input maxLength={80} placeholder={t("admin.memoryMcpNamePlaceholder")} />
+          </Form.Item>
+          <Form.Item
+            label={t("admin.memoryMcpUrl")}
+            name="url"
+            rules={[
+              {
+                required: true,
+                whitespace: true,
+                message: t("admin.memoryMcpUrlRequired"),
+              },
+              { type: "url", message: t("admin.memoryMcpUrlInvalid") },
+            ]}
+          >
+            <Input placeholder="https://example.com/mcp" />
+          </Form.Item>
+          <div className="memory-mcp-form-grid">
+            <Form.Item
+              extra={
+                mcpModalMode === "edit"
+                  ? t("admin.memoryMcpTransportEditHint")
+                  : undefined
+              }
+              label={t("admin.memoryMcpTransport")}
+              name="transport"
+              rules={[
+                {
+                  required: true,
+                  message: t("admin.memoryMcpTransportRequired"),
+                },
+              ]}
+            >
+              <Select
+                disabled={mcpModalMode === "edit"}
+                options={[
+                  { label: "SSE", value: "sse" },
+                  { label: "Streamable HTTP", value: "http" },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item
+              label={t("admin.memoryMcpTimeout")}
+              name="timeout"
+              rules={[
+                {
+                  required: true,
+                  message: t("admin.memoryMcpTimeoutRequired"),
+                },
+              ]}
+            >
+              <InputNumber max={600} min={1} placeholder="30" />
+            </Form.Item>
+          </div>
+          <Form.Item
+            extra={
+              mcpModalMode === "edit"
+                ? t("admin.memoryMcpApiKeyEditHint", {
+                    preview:
+                      mcpEditingServer?.apiKeyPreview ||
+                      t("admin.memoryMcpApiKeyHidden"),
+                  })
+                : undefined
+            }
+            label={t("admin.memoryMcpApiKey")}
+            name="apiKey"
+            rules={
+              mcpModalMode === "add"
+                ? [
+                    {
+                      required: true,
+                      whitespace: true,
+                      message: t("admin.memoryMcpApiKeyRequired"),
+                    },
+                  ]
+                : []
+            }
+          >
+            <Input.Password
+              autoComplete="new-password"
+              placeholder={
+                mcpModalMode === "add"
+                  ? t("admin.memoryMcpApiKeyPlaceholder")
+                  : t("admin.memoryMcpApiKeyEditPlaceholder")
+              }
+            />
+          </Form.Item>
+          <Form.Item
+            label={t("admin.memoryMcpEnabled")}
+            name="enabled"
+            valuePropName="checked"
+          >
+            <Switch checkedChildren={t("common.enabled")} unCheckedChildren={t("common.disabled")} />
+          </Form.Item>
+        </Form>
+      </Drawer>
+
+      <Drawer
+        className="memory-mcp-drawer"
+        footer={
+          <div className="memory-drawer-footer">
+            <Button onClick={closeMcpToolsDrawer}>{t("common.cancel")}</Button>
+            <Button
+              disabled={!mcpToolTarget?.tools.length}
+              loading={mcpToolSaving}
+              type="primary"
+              onClick={() => void saveMcpServerTools()}
+            >
+              {t("common.save")}
+            </Button>
+          </div>
+        }
+        open={mcpToolsDrawerOpen}
+        title={t("admin.memoryMcpToolsTitle", {
+          name: mcpToolTarget?.name || "",
+        })}
+        width={620}
+        onClose={closeMcpToolsDrawer}
+      >
+        {mcpToolTarget ? (
+          <div className="memory-mcp-tools-panel">
+            <div className="memory-mcp-tools-summary">
+              <div>
+                <strong>{mcpToolTarget.name}</strong>
+                <span>{mcpToolTarget.url}</span>
+              </div>
+              <Tag color={mcpToolTarget.isVerified ? "blue" : "warning"}>
+                {mcpToolTarget.isVerified
+                  ? t("admin.memoryMcpVerified")
+                  : t("admin.memoryMcpUnverified")}
+              </Tag>
+            </div>
+            {mcpToolTarget.tools.length ? (
+              <>
+                <Checkbox
+                  checked={allMcpToolsSelected}
+                  indeterminate={hasPartialMcpToolsSelected}
+                  onChange={(event) =>
+                    setMcpToolDraftIds(event.target.checked ? mcpToolIds : [])
+                  }
+                >
+                  {t("admin.memoryMcpSelectAllTools")}
+                </Checkbox>
+                <Checkbox.Group
+                  className="memory-mcp-tool-group"
+                  value={mcpToolDraftIds}
+                  onChange={(values) => setMcpToolDraftIds(values.map(String))}
+                >
+                  {mcpToolTarget.tools.map((toolItem) => {
+                    const toolId = getMcpToolId(toolItem);
+                    return (
+                      <div className="memory-mcp-tool-option" key={toolId}>
+                        <Checkbox value={toolId} />
+                        <div className="memory-mcp-tool-option-copy">
+                          <strong>{toolItem.name || toolId}</strong>
+                          <span>{toolItem.description || "-"}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </Checkbox.Group>
+              </>
+            ) : (
+              <div className="memory-mcp-empty-tools">
+                <CloudServerOutlined />
+                <strong>{t("admin.memoryMcpNoToolsTitle")}</strong>
+                <span>{t("admin.memoryMcpNoToolsDesc")}</span>
+              </div>
+            )}
+          </div>
+        ) : null}
+      </Drawer>
     </div>
   );
 }

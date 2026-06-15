@@ -1,6 +1,10 @@
 package source
 
-import "context"
+import (
+	"context"
+
+	store "github.com/lazymind/scan_control_plane/internal/store/source"
+)
 
 func (e *DefaultEngine) DeleteBinding(ctx context.Context, sourceID, bindingID string) (DeleteBindingResponse, error) {
 	src, err := e.repo.GetSource(ctx, sourceID)
@@ -13,6 +17,7 @@ func (e *DefaultEngine) DeleteBinding(ctx context.Context, sourceID, bindingID s
 		return DeleteBindingResponse{}, mapStoreError(err)
 	}
 	warnings := e.deleteFolderAsWarning(ctx, src.DatasetID, deleted.Binding.CoreParentDocumentID, src.CreatedBy)
+	warnings = append(warnings, e.queueLocalWatcherStops(ctx, src, []store.Binding{deleted.Binding})...)
 	return DeleteBindingResponse{
 		Deleted:                     true,
 		BindingID:                   deleted.Binding.BindingID,

@@ -321,6 +321,7 @@ services:
       LAZYMIND_PARSING_SERVICE_URL: http://lazyllm-parse-server:8000
       LAZYMIND_CHAT_SERVICE_URL: http://chat:8046
       LAZYMIND_EVO_SERVICE_URL: http://evo-api:8047
+      LAZYMIND_RESOURCE_UPDATE_ENABLED: "true"
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
       LAZYMIND_OFFICE_CONVERT_WORKERS: "4"
     healthcheck:

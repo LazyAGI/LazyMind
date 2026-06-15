@@ -24,8 +24,10 @@ func (e *DefaultEngine) AddBinding(ctx context.Context, callerID, sourceID strin
 		_ = e.deleteCoreFolder(ctx, src.DatasetID, prepared.binding.CoreParentDocumentID, callerID)
 		return BindingMutationResponse{}, err
 	}
+	warnings := e.queueLocalWatcherStarts(ctx, src, []store.Binding{prepared.binding})
 	jobIDs, jobErrors := e.triggerInitialSyncs(ctx, []store.Binding{prepared.binding})
-	return BindingMutationResponse{Binding: bindingToResponse(prepared.binding), NewGeneration: prepared.binding.BindingGeneration, JobIDs: jobIDs, CompensationErrors: jobErrors}, nil
+	warnings = append(warnings, jobErrors...)
+	return BindingMutationResponse{Binding: bindingToResponse(prepared.binding), NewGeneration: prepared.binding.BindingGeneration, JobIDs: jobIDs, CompensationErrors: warnings}, nil
 }
 
 func (e *DefaultEngine) ensureUniqueTarget(ctx context.Context, binding store.Binding, excludeBindingID string) error {

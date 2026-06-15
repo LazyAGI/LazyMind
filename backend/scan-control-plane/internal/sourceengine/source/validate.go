@@ -18,9 +18,6 @@ func validateCreateRequest(req CreateSourceRequest) error {
 	if strings.TrimSpace(req.CallerID) == "" {
 		return FieldError("caller_id", "required")
 	}
-	if strings.TrimSpace(req.TenantID) == "" {
-		return FieldError("tenant_id", "required")
-	}
 	if strings.TrimSpace(req.RequestID) == "" {
 		return FieldError("request_id", "required")
 	}

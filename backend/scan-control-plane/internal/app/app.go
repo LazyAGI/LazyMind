@@ -41,6 +41,7 @@ type Components struct {
 	CoreResource                      coreclient.ResourceClient
 	CoreClient                        coreclient.Client
 	AgentClient                       localfs.AgentClient
+	AgentToken                        string
 	LocalFSDefaultAgentID             string
 	LocalFSPublicRoot                 string
 	AuthConnectionClient              feishu.AuthConnectionClient
@@ -76,6 +77,7 @@ type handlerRepository interface {
 	taskengine.Store
 	taskengine.QueryStore
 	tree.SourceTreeReadRepository
+	server.AgentStore
 }
 
 func New(cfg config.Config) *App {
@@ -199,6 +201,7 @@ func buildAdapters(cfg config.Config) (Components, error) {
 		CoreResource:                      coreResource,
 		CoreClient:                        coreWorker,
 		AgentClient:                       agent,
+		AgentToken:                        cfg.AgentToken,
 		LocalFSDefaultAgentID:             cfg.LocalFSDefaultAgentID,
 		LocalFSPublicRoot:                 cfg.LocalFSPublicRoot,
 		AuthConnectionClient:              auth,
@@ -279,6 +282,9 @@ func newHandlerWithComponents(built Components) http.Handler {
 			repo,
 			access.WithAuthConnectionVerifier(newAuthConnectionVerifier(built.AuthConnectionClient)),
 		)),
+		server.WithAgentStore(repo),
+		server.WithScheduleEngine(scheduler),
+		server.WithAgentToken(built.AgentToken),
 	)
 }
 

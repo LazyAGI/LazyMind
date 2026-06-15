@@ -90,7 +90,26 @@ func TestLoadDerivesPathMappingFromWatchVolumeEnv(t *testing.T) {
 	}
 }
 
+func TestLoadAllowsEmptyTenantID(t *testing.T) {
+	root := t.TempDir()
+	cfgPath := writeTestConfigWithTenant(t, root, `${LAZYMIND_FILE_WATCHER_TENANT_ID:-}`, `${LAZYMIND_FILE_WATCHER_BASE_ROOT:-../../../data/scan}`)
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.TenantID != "" {
+		t.Fatalf("TenantID = %q, want empty", cfg.TenantID)
+	}
+}
+
 func writeTestConfig(t *testing.T, root, baseRoot string) string {
+	t.Helper()
+	return writeTestConfigWithTenant(t, root, "tenant-test", baseRoot)
+}
+
+func writeTestConfigWithTenant(t *testing.T, root, tenantID, baseRoot string) string {
 	t.Helper()
 
 	cfgDir := filepath.Join(root, "backend", "file-watcher", "configs")
@@ -100,7 +119,7 @@ func writeTestConfig(t *testing.T, root, baseRoot string) string {
 
 	cfgPath := filepath.Join(cfgDir, "agent.yaml")
 	data := []byte(`agent_id: "agent-test"
-tenant_id: "tenant-test"
+tenant_id: "` + tenantID + `"
 listen_addr: "${LAZYMIND_FILE_WATCHER_LISTEN_ADDR:-127.0.0.1:19090}"
 control_plane_base_url: "${LAZYMIND_FILE_WATCHER_CONTROL_PLANE_BASE_URL:-http://127.0.0.1:18080}"
 base_root: "` + baseRoot + `"

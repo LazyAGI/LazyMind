@@ -28,6 +28,8 @@ interface SkillNode {
   file_ext?: string;
   node_type?: string;
   update_status?: string;
+  review_status?: string;
+  has_pending_review_result?: boolean;
   has_pending_review_suggestions?: boolean;
   has_pending_remove_suggestion?: boolean;
   suggestion_status?: string;
@@ -61,7 +63,9 @@ export interface SkillAssetRecord {
   fileExt?: string;
   nodeType?: string;
   hasPendingReviewSuggestions?: boolean;
+  hasPendingReviewResult?: boolean;
   hasPendingRemoveSuggestion?: boolean;
+  reviewStatus?: string;
   suggestionStatus?: string;
   updateStatus?: string;
   autoEvoApplyStatus?: string;
@@ -303,7 +307,9 @@ const normalizeSkillNode = (raw: SkillNode, parentId?: string): SkillAssetRecord
     fileExt: toStringValue(raw.file_ext || ""),
     nodeType: toStringValue(raw.node_type || ""),
     hasPendingReviewSuggestions: toBoolean(raw.has_pending_review_suggestions, false),
+    hasPendingReviewResult: toBoolean(raw.has_pending_review_result, false),
     hasPendingRemoveSuggestion: toBoolean(raw.has_pending_remove_suggestion, false),
+    reviewStatus: toStringValue(raw.review_status || ""),
     suggestionStatus: toStringValue(raw.suggestion_status || ""),
     updateStatus: toStringValue(raw.update_status || ""),
     autoEvoApplyStatus: toStringValue(raw.auto_evo_apply_status || ""),

@@ -19,6 +19,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	appLog "lazymind/core/log"
+	"lazymind/core/resourcechange"
 	"lazymind/core/store"
 )
 
@@ -237,56 +238,54 @@ func builtinListResponse(item builtinSkill) map[string]any {
 	children := make([]map[string]any, 0, len(item.Children))
 	for _, child := range item.Children {
 		children = append(children, map[string]any{
-			"skill_id":                       builtinTemplateID(item.UID + ":" + child.RelativePath),
-			"name":                           child.Name,
-			"description":                    child.Description,
-			"category":                       item.Category,
-			"tags":                           []string{},
-			"parent_id":                      builtinTemplateID(item.UID),
-			"parent_skill_id":                builtinTemplateID(item.UID),
-			"parent_skill_name":              item.Name,
-			"file_ext":                       child.FileExt,
-			"auto_evo":                       false,
-			"auto_evo_apply_status":          evolution.AutoEvoApplyStatusIdle,
-			"auto_evo_generation":            0,
-			"auto_evo_error":                 "",
-			"is_enabled":                     true,
-			"update_status":                  evolution.UpdateStatusUpToDate,
-			"has_pending_review_suggestions": false,
-			"has_pending_remove_suggestion":  false,
-			"suggestion_status":              "",
-			"node_type":                      evolution.SkillNodeTypeChild,
-			"builtin_skill_uid":              item.UID,
-			"is_builtin_template":            true,
-			"activation_status":              "available",
-			"readonly":                       true,
-			"content":                        "",
-			"origin_builtin_skill_uid":       "",
+			"skill_id":                  builtinTemplateID(item.UID + ":" + child.RelativePath),
+			"name":                      child.Name,
+			"description":               child.Description,
+			"category":                  item.Category,
+			"tags":                      []string{},
+			"parent_id":                 builtinTemplateID(item.UID),
+			"parent_skill_id":           builtinTemplateID(item.UID),
+			"parent_skill_name":         item.Name,
+			"file_ext":                  child.FileExt,
+			"auto_evo":                  false,
+			"auto_evo_apply_status":     evolution.AutoEvoApplyStatusIdle,
+			"auto_evo_generation":       0,
+			"auto_evo_error":            "",
+			"is_enabled":                true,
+			"update_status":             evolution.UpdateStatusUpToDate,
+			"has_pending_review_result": false,
+			"review_status":             "none",
+			"node_type":                 evolution.SkillNodeTypeChild,
+			"builtin_skill_uid":         item.UID,
+			"is_builtin_template":       true,
+			"activation_status":         "available",
+			"readonly":                  true,
+			"content":                   "",
+			"origin_builtin_skill_uid":  "",
 		})
 	}
 	return map[string]any{
-		"skill_id":                       builtinTemplateID(item.UID),
-		"name":                           item.Name,
-		"description":                    item.Description,
-		"category":                       item.Category,
-		"tags":                           item.Tags,
-		"auto_evo":                       false,
-		"auto_evo_apply_status":          evolution.AutoEvoApplyStatusIdle,
-		"auto_evo_generation":            0,
-		"auto_evo_error":                 "",
-		"is_enabled":                     true,
-		"update_status":                  evolution.UpdateStatusUpToDate,
-		"has_pending_review_suggestions": false,
-		"has_pending_remove_suggestion":  false,
-		"suggestion_status":              "",
-		"node_type":                      evolution.SkillNodeTypeParent,
-		"children":                       children,
-		"builtin_skill_uid":              item.UID,
-		"is_builtin_template":            true,
-		"activation_status":              "available",
-		"readonly":                       true,
-		"content":                        "",
-		"origin_builtin_skill_uid":       "",
+		"skill_id":                  builtinTemplateID(item.UID),
+		"name":                      item.Name,
+		"description":               item.Description,
+		"category":                  item.Category,
+		"tags":                      item.Tags,
+		"auto_evo":                  false,
+		"auto_evo_apply_status":     evolution.AutoEvoApplyStatusIdle,
+		"auto_evo_generation":       0,
+		"auto_evo_error":            "",
+		"is_enabled":                true,
+		"update_status":             evolution.UpdateStatusUpToDate,
+		"has_pending_review_result": false,
+		"review_status":             "none",
+		"node_type":                 evolution.SkillNodeTypeParent,
+		"children":                  children,
+		"builtin_skill_uid":         item.UID,
+		"is_builtin_template":       true,
+		"activation_status":         "available",
+		"readonly":                  true,
+		"content":                   "",
+		"origin_builtin_skill_uid":  "",
 	}
 }
 
@@ -456,11 +455,34 @@ func createBuiltinSkillCopy(ctx context.Context, db *gorm.DB, userID, userName s
 	}
 
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&parent).Error; err != nil {
+		source := resourcechange.Source{
+			ChangeSource: resourcechange.ChangeSourceDirectSave,
+			ChangedAt:    now,
+		}
+		if err := resourcechange.CreateModel(ctx, tx, &parent, resourcechange.ContentChange{
+			ResourceType:  orm.ResourceUpdateResourceTypeSkill,
+			ResourceID:    parent.ID,
+			UserID:        userID,
+			FromVersion:   0,
+			ToVersion:     parent.Version,
+			BeforeContent: "",
+			AfterContent:  parent.Content,
+			Source:        source,
+		}); err != nil {
 			return err
 		}
-		if len(children) > 0 {
-			if err := tx.Create(&children).Error; err != nil {
+		for i := range children {
+			child := &children[i]
+			if err := resourcechange.CreateModel(ctx, tx, child, resourcechange.ContentChange{
+				ResourceType:  orm.ResourceUpdateResourceTypeSkill,
+				ResourceID:    child.ID,
+				UserID:        userID,
+				FromVersion:   0,
+				ToVersion:     child.Version,
+				BeforeContent: "",
+				AfterContent:  child.Content,
+				Source:        source,
+			}); err != nil {
 				return err
 			}
 		}

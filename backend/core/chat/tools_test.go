@@ -13,6 +13,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"lazymind/core/common/orm"
+	"lazymind/core/mcp"
 	"lazymind/core/store"
 )
 
@@ -162,6 +163,9 @@ func TestListToolsForwardsRuntimeConfigsAndMarksDisabled(t *testing.T) {
 	if toolConfig["bing"] != "bing-key" {
 		t.Fatalf("expected bing tool_config, got %#v", upstreamBody["tool_config"])
 	}
+	if _, ok := upstreamBody["mcp_config"]; ok {
+		t.Fatalf("list tools should not forward mcp_config, got %#v", upstreamBody["mcp_config"])
+	}
 	var resp struct {
 		Data chatToolsResponse `json:"data"`
 	}
@@ -227,6 +231,15 @@ func TestChatConversationsMergesPersistedDisabledTools(t *testing.T) {
 	if err := disableToolForUser(context.Background(), db.DB, "u1", "User 1", "bing"); err != nil {
 		t.Fatalf("disable tool: %v", err)
 	}
+	if _, err := mcp.CreateServer(context.Background(), db.DB, mcp.CreateServerRequest{
+		Name:         "context7",
+		Transport:    "sse",
+		URL:          "https://mcp.example.com/sse",
+		APIKey:       "sk-secret-xyz",
+		AllowedTools: []string{"resolve-library-id"},
+	}, "u1", "User 1"); err != nil {
+		t.Fatalf("create mcp server: %v", err)
+	}
 
 	var upstreamBody map[string]any
 	baseURL := startChatToolsTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -268,5 +281,14 @@ func TestChatConversationsMergesPersistedDisabledTools(t *testing.T) {
 	rawDisabled, _ := upstreamBody["disabled_tools"].([]any)
 	if len(rawDisabled) != 1 || rawDisabled[0] != "bing" {
 		t.Fatalf("expected disabled_tools to include persisted tool, got %#v", upstreamBody["disabled_tools"])
+	}
+	rawMCPConfig, _ := upstreamBody["mcp_config"].([]any)
+	if len(rawMCPConfig) != 1 {
+		t.Fatalf("expected mcp_config to be forwarded for chat, got %#v", upstreamBody["mcp_config"])
+	}
+	firstMCPConfig, _ := rawMCPConfig[0].(map[string]any)
+	headers, _ := firstMCPConfig["headers"].(map[string]any)
+	if headers["Authorization"] != "Bearer sk-secret-xyz" {
+		t.Fatalf("expected decrypted authorization header in mcp_config, got %#v", headers)
 	}
 }

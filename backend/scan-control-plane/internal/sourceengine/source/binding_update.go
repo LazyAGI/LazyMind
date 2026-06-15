@@ -37,6 +37,7 @@ func (e *DefaultEngine) UpdateBinding(ctx context.Context, callerID, sourceID, b
 		return BindingMutationResponse{}, err
 	}
 	warnings := e.deleteFolderAsWarning(ctx, src.DatasetID, cleanup.OldCoreParentDocumentID, callerID)
+	warnings = append(warnings, e.queueLocalWatcherTransition(ctx, src, current, updated)...)
 	var jobIDs []string
 	if cleanup.ClearIndexedState {
 		var jobErrors []JobError
