@@ -16,6 +16,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	appLog "lazymind/core/log"
+	"lazymind/core/resourcechange"
 	"lazymind/core/store"
 )
 
@@ -303,7 +304,11 @@ func Create(w http.ResponseWriter, r *http.Request) {
 		Category:    req.Category,
 		Content:     req.Content,
 	}
-	if err := createParentSkillWithContent(r.Context(), db, userID, userName, createReq, req.Content, description); err != nil {
+	if err := createParentSkillWithContent(r.Context(), db, userID, userName, createReq, req.Content, description, resourcechange.Source{
+		ChangeSource:  resourcechange.ChangeSourceInternalDirect,
+		SourceRefType: "session",
+		SourceRefID:   req.SessionID,
+	}); err != nil {
 		replySkillError(w, err)
 		return
 	}
@@ -586,7 +591,11 @@ func applyRemoveSuggestion(ctx context.Context, db *gorm.DB, suggestion orm.Reso
 		}
 		return err
 	}
-	return DeleteSkill(ctx, db, suggestion.UserID, skill.ID)
+	return DeleteSkillWithSource(ctx, db, suggestion.UserID, skill.ID, resourcechange.Source{
+		ChangeSource:  resourcechange.ChangeSourceReviewAccept,
+		SourceRefType: resourcechange.SourceRefTypeResourceSuggestion,
+		SourceRefID:   suggestion.ID,
+	})
 }
 
 func firstNonEmpty(values ...string) string {

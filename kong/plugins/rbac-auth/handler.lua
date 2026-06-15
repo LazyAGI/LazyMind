@@ -21,6 +21,21 @@ local function _parse_json(body)
   return obj
 end
 
+local function _trim(s)
+  return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function _string_claim(value)
+  if type(value) ~= "string" then
+    return nil
+  end
+  value = _trim(value)
+  if value == "" then
+    return nil
+  end
+  return value
+end
+
 local function _decode_jwt_payload(token)
   if not token or token == "" then
     return nil
@@ -102,15 +117,22 @@ function RbacAuthHandler:access(conf)
     return kong.response.exit(502, { message = "Authorization check failed" },
       { ["Content-Type"] = "application/json" })
   end
+  local authz_payload = _parse_json(res.body) or {}
+  local authz_data = authz_payload.data or authz_payload
+  local authz_role = type(authz_data) == "table" and _string_claim(authz_data.role) or nil
 
   -- 200: allowed; inject user headers when Authorization is present.
-  -- 这里直接从 JWT payload 解析用户信息（已由 auth-service 颁发、rbac 已校验权限）。
+  -- User identity comes from the verified JWT; role comes from auth-service's current DB authorization result.
+  kong.service.request.clear_header("X-User-Id")
+  kong.service.request.clear_header("X-User-Name")
+  kong.service.request.clear_header("X-Tenant-Id")
+  kong.service.request.clear_header("X-User-Role")
   if auth ~= "" then
     local payload = _decode_jwt_payload(auth)
     if payload then
-      local uid = payload.user_id or payload.sub
-      local uname = payload.username
-      local tenant = payload.tenant_id or payload.tenant_code
+      local uid = _string_claim(payload.user_id) or _string_claim(payload.sub)
+      local uname = _string_claim(payload.username)
+      local tenant = _string_claim(payload.tenant_id)
       kong.log.debug("rbac-auth: jwt payload user_id=", uid, " username=", uname, " tenant=", tenant)
       if uid then
         kong.service.request.set_header("X-User-Id", tostring(uid))
@@ -120,6 +142,9 @@ function RbacAuthHandler:access(conf)
       end
       if tenant then
         kong.service.request.set_header("X-Tenant-Id", tostring(tenant))
+      end
+      if authz_role then
+        kong.service.request.set_header("X-User-Role", tostring(authz_role))
       end
     else
       kong.log.warn("rbac-auth: failed to decode JWT payload for header injection")

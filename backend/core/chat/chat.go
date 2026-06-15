@@ -55,6 +55,7 @@ type LazyChatRequest struct {
 	EnvironmentContext map[string]any  `json:"environment_context,omitempty"`
 	LLMConfig          map[string]any  `json:"llm_config,omitempty"`
 	ToolConfig         map[string]any  `json:"tool_config,omitempty"`
+	MCPConfig          []any           `json:"mcp_config,omitempty"`
 }
 
 // LazyChatData text data text。
@@ -63,6 +64,7 @@ type LazyChatData struct {
 	Sources       []any  `json:"sources"`
 	Status        string `json:"status"`
 	ReasoningText string `json:"think"`
+	ToolCallTurns int64  `json:"tool_call_turns"`
 }
 
 // LazyChatResponse text /api/chat textResponse。
@@ -219,6 +221,7 @@ type UpstreamStreamChunk struct {
 	Status        string `json:"status"`
 	Sources       []any  `json:"sources"`
 	ReasoningText string `json:"reasoning_text"` // text think
+	ToolCallTurns int64  `json:"tool_call_turns"`
 }
 
 type upstreamStreamLine struct {
@@ -298,6 +301,14 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 		}
 		if len(tc) > 0 {
 			req.ToolConfig = tc
+		}
+	}
+	if mcpConfig, ok := body["mcp_config"].([]any); ok {
+		req.MCPConfig = mcpConfig
+	} else if mcpConfigAny, ok := body["mcp_config"].([]map[string]any); ok {
+		req.MCPConfig = make([]any, 0, len(mcpConfigAny))
+		for _, item := range mcpConfigAny {
+			req.MCPConfig = append(req.MCPConfig, item)
 		}
 	}
 	return req
@@ -413,6 +424,7 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 				Status:        d.Resp.Data.Status,
 				Sources:       d.Resp.Data.Sources,
 				ReasoningText: d.Resp.Data.ReasoningText,
+				ToolCallTurns: d.Resp.Data.ToolCallTurns,
 			}
 			select {
 			case out <- chunk:

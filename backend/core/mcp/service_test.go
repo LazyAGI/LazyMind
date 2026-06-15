@@ -1,0 +1,159 @@
+package mcp
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"lazymind/core/common/orm"
+)
+
+func newTestDB(t *testing.T) *orm.DB {
+	t.Helper()
+	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/mcp.db")
+	if err != nil {
+		t.Fatalf("connect db: %v", err)
+	}
+	if err := db.AutoMigrate(&orm.MCPServer{}, &orm.MCPServerTool{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	return db
+}
+
+func TestCreateServerMasksAndEncryptsAPIKey(t *testing.T) {
+	db := newTestDB(t)
+	resp, err := CreateServer(context.Background(), db.DB, CreateServerRequest{
+		Name:         "context7",
+		Transport:    "sse",
+		URL:          "https://mcp.example.com/sse",
+		APIKey:       "sk-secret-xyz",
+		AllowedTools: []string{"get-library-docs", "resolve-library-id"},
+	}, "u1", "User 1")
+	if err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+	if resp.APIKeyPreview != "sk-***xyz" {
+		t.Fatalf("unexpected api key preview: %q", resp.APIKeyPreview)
+	}
+
+	var row orm.MCPServer
+	if err := db.First(&row, "id = ?", resp.ID).Error; err != nil {
+		t.Fatalf("query row: %v", err)
+	}
+	if strings.Contains(string(row.HeadersJSON), "sk-secret-xyz") || strings.Contains(string(row.HeadersJSON), "Authorization") {
+		t.Fatalf("headers_json leaked credential material: %s", row.HeadersJSON)
+	}
+
+	runtime, err := LoadRuntimeConfig(context.Background(), db.DB, "u1")
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+	if len(runtime) != 1 {
+		t.Fatalf("expected one runtime config, got %d", len(runtime))
+	}
+	if got := runtime[0].Headers["Authorization"]; got != "Bearer sk-secret-xyz" {
+		t.Fatalf("unexpected runtime authorization header: %#v", got)
+	}
+	if len(runtime[0].AllowedTools) != 2 || runtime[0].AllowedTools[0] != "get-library-docs" {
+		t.Fatalf("unexpected allowed tools: %#v", runtime[0].AllowedTools)
+	}
+}
+
+func TestDiscoverReplacesToolsAndSoftDeletesMissing(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode rpc request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch req.Method {
+		case "initialize":
+			w.Header().Set("Mcp-Session-Id", "session-1")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"result": map[string]any{
+					"protocolVersion": "2024-11-05",
+					"capabilities":    map[string]any{},
+					"serverInfo":      map[string]any{"name": "test", "version": "1"},
+				},
+			})
+		case "notifications/initialized":
+			if r.Header.Get("Mcp-Session-Id") != "session-1" {
+				t.Fatalf("initialized notification missing session header: %q", r.Header.Get("Mcp-Session-Id"))
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "result": map[string]any{}})
+		case "tools/list":
+			if r.Header.Get("Mcp-Session-Id") != "session-1" {
+				t.Fatalf("tools/list missing session header: %q", r.Header.Get("Mcp-Session-Id"))
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"result": map[string]any{
+					"tools": []map[string]any{{
+						"name":        "new-tool",
+						"description": "new description",
+						"inputSchema": map[string]any{"type": "object"},
+					}},
+				},
+			})
+		default:
+			t.Fatalf("unexpected rpc method: %s", req.Method)
+		}
+	}))
+	defer server.Close()
+
+	created, err := CreateServer(context.Background(), db.DB, CreateServerRequest{
+		Name:      "local",
+		Transport: "http",
+		URL:       server.URL,
+		Timeout:   2,
+	}, "u1", "User 1")
+	if err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+	oldTool := orm.MCPServerTool{
+		ID:               "mst_old",
+		MCPServerID:      created.ID,
+		ToolName:         "old-tool",
+		Description:      "old",
+		InputSchemaJSON:  json.RawMessage(`{}`),
+		LastDiscoveredAt: now,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if err := db.Create(&oldTool).Error; err != nil {
+		t.Fatalf("seed old tool: %v", err)
+	}
+
+	resp, err := DiscoverServer(context.Background(), db.DB, "u1", created.ID)
+	if err != nil {
+		t.Fatalf("discover server: %v", err)
+	}
+	if !resp.Success || len(resp.Tools) != 1 || resp.Tools[0].ToolName != "new-tool" {
+		t.Fatalf("unexpected discover response: %#v", resp)
+	}
+
+	var oldRow orm.MCPServerTool
+	if err := db.First(&oldRow, "id = ?", "mst_old").Error; err != nil {
+		t.Fatalf("query old tool: %v", err)
+	}
+	if oldRow.DeletedAt == nil {
+		t.Fatalf("expected missing old tool to be soft deleted")
+	}
+
+	detail, err := GetServer(context.Background(), db.DB, "u1", created.ID)
+	if err != nil {
+		t.Fatalf("get server: %v", err)
+	}
+	if !detail.IsVerified || len(detail.Tools) != 1 || detail.Tools[0].ToolName != "new-tool" {
+		t.Fatalf("unexpected server detail: %#v", detail)
+	}
+}

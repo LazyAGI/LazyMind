@@ -124,6 +124,24 @@ func TestPartialStrategyCoversDeclaredSubtreeOnly(t *testing.T) {
 	}
 }
 
+func TestPartialStrategyTreatsObjectKeyWithNodeRefAsSubtree(t *testing.T) {
+	t.Parallel()
+
+	strategy := NewPartialCrawlStrategy(strategyInput{
+		binding:  strategyBinding(),
+		spec:     connector.ConnectorSpec{SupportsRecursiveFetch: false},
+		claim:    strategyClaim(connector.ScopeTypePartial, connector.ScopeRef{"object_key": "folder-1", "node_ref": "folder-1", "subtree_root": "folder-1"}),
+		pageSize: 10,
+	})
+	req, done, err := strategy.NextRequest(context.Background(), CrawlLoopState{})
+	if err != nil || done {
+		t.Fatalf("next request done=%v err=%v", done, err)
+	}
+	if req.Kind != CrawlRequestKindListChildren || req.ListChildren.NodeRef != "folder-1" {
+		t.Fatalf("expected selected object_key directory to use subtree traversal, got %+v", req)
+	}
+}
+
 func TestPartialStrategyFetchesSelectedPath(t *testing.T) {
 	t.Parallel()
 

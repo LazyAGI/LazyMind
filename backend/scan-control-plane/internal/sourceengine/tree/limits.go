@@ -48,6 +48,13 @@ func validateListMode(listMode, cursor string, maxItems int, limits TreeQueryLim
 	}
 }
 
+func validateSearchListMode(listMode string) error {
+	if listMode == "" || listMode == ListModePage {
+		return nil
+	}
+	return NewError(ErrCodeUnsupportedListMode, "list_mode is not supported for search")
+}
+
 func cursorOffset(cursor string) (int, error) {
 	if cursor == "" {
 		return 0, nil

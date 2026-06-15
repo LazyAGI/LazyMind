@@ -14,6 +14,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/resourcechange"
 	"lazymind/core/store"
 )
 
@@ -21,11 +22,14 @@ type upsertPreferenceAPITestResponse struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Data    struct {
-		ResourceID     string `json:"resource_id"`
-		ResourceType   string `json:"resource_type"`
-		Title          string `json:"title"`
-		Content        string `json:"content"`
-		ContentSummary string `json:"content_summary"`
+		ResourceID     string  `json:"resource_id"`
+		ResourceType   string  `json:"resource_type"`
+		Title          string  `json:"title"`
+		Content        string  `json:"content"`
+		AgentPersona   *string `json:"agent_persona"`
+		UserAddress    *string `json:"user_address"`
+		ResponseStyle  *string `json:"response_style"`
+		ContentSummary string  `json:"content_summary"`
 	} `json:"data"`
 }
 
@@ -33,6 +37,8 @@ type draftPreviewPreferenceAPITestResponse struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Data    struct {
+		ReviewResultID     string `json:"review_result_id"`
+		ReviewStatus       string `json:"review_status"`
 		DraftStatus        string `json:"draft_status"`
 		DraftSourceVersion int64  `json:"draft_source_version"`
 		CurrentContent     string `json:"current_content"`
@@ -64,6 +70,32 @@ func newPreferenceTestDB(t *testing.T) *orm.DB {
 		t.Fatalf("auto migrate: %v", err)
 	}
 	return db
+}
+
+func createPreferenceReviewResult(t *testing.T, db *orm.DB, id, userID, target, content string, at time.Time) {
+	t.Helper()
+	if err := db.Create(&orm.MemoryReviewResult{
+		ID:           id,
+		UserID:       userID,
+		Target:       target,
+		SessionID:    "session-" + id,
+		Content:      content,
+		Operations:   json.RawMessage(`[]`),
+		State:        "success",
+		ReviewStatus: "pending",
+		Time:         at,
+	}).Error; err != nil {
+		t.Fatalf("create preference review result: %v", err)
+	}
+}
+
+func preferenceReviewResultStatus(t *testing.T, db *orm.DB, id string) string {
+	t.Helper()
+	var row orm.MemoryReviewResult
+	if err := db.Select("review_status").Where("id = ?", id).Take(&row).Error; err != nil {
+		t.Fatalf("query preference review result %s: %v", id, err)
+	}
+	return row.ReviewStatus
 }
 
 func TestUpsertCreatesThenUpdatesPreference(t *testing.T) {
@@ -182,6 +214,88 @@ func TestUpsertPreservesPreferenceAutoEvoWhenOmitted(t *testing.T) {
 	}
 	if updated.Content != "第二版偏好内容" {
 		t.Fatalf("unexpected updated content: %q", updated.Content)
+	}
+}
+
+func TestUpsertPartiallyUpdatesPreferenceMetadata(t *testing.T) {
+	db := newPreferenceTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	createReq := httptest.NewRequest(http.MethodPut, "/api/core/user-preference", strings.NewReader(`{"content":"用户偏好","agent_persona":"严谨助手","user_address":"老师","response_style":"先结论后解释"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("X-User-Id", "u1")
+	createReq.Header.Set("X-User-Name", "User 1")
+	createRec := httptest.NewRecorder()
+
+	Upsert(createRec, createReq)
+
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", createRec.Code, createRec.Body.String())
+	}
+	var createResp upsertPreferenceAPITestResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if stringValue(createResp.Data.AgentPersona) != "严谨助手" || stringValue(createResp.Data.UserAddress) != "老师" || stringValue(createResp.Data.ResponseStyle) != "先结论后解释" {
+		t.Fatalf("unexpected metadata in create response: %#v", createResp.Data)
+	}
+
+	var created orm.SystemUserPreference
+	if err := db.Where("user_id = ?", "u1").Take(&created).Error; err != nil {
+		t.Fatalf("query created preference: %v", err)
+	}
+	if created.ContentHash != evolution.HashSystemUserPreference(created) {
+		t.Fatalf("expected user_preference content hash, got %q", created.ContentHash)
+	}
+	if got := countPreferenceResourceVersions(t, db, created.ID); got != 1 {
+		t.Fatalf("expected create to write 1 resource version, got %d", got)
+	}
+
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/core/user-preference", strings.NewReader(`{"user_address":"同学"}`))
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateReq.Header.Set("X-User-Id", "u1")
+	updateReq.Header.Set("X-User-Name", "User 1")
+	updateRec := httptest.NewRecorder()
+
+	Upsert(updateRec, updateReq)
+
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", updateRec.Code, updateRec.Body.String())
+	}
+	var updateResp upsertPreferenceAPITestResponse
+	if err := json.Unmarshal(updateRec.Body.Bytes(), &updateResp); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if updateResp.Data.Content != "用户偏好" || stringValue(updateResp.Data.AgentPersona) != "严谨助手" || stringValue(updateResp.Data.UserAddress) != "同学" || stringValue(updateResp.Data.ResponseStyle) != "先结论后解释" {
+		t.Fatalf("unexpected metadata in update response: %#v", updateResp.Data)
+	}
+
+	var updated orm.SystemUserPreference
+	if err := db.Where("user_id = ?", "u1").Take(&updated).Error; err != nil {
+		t.Fatalf("query updated preference: %v", err)
+	}
+	if updated.Content != created.Content || updated.AgentPersona != created.AgentPersona || updated.ResponseStyle != created.ResponseStyle {
+		t.Fatalf("expected omitted fields preserved, got %#v", updated)
+	}
+	if updated.UserAddress != "同学" {
+		t.Fatalf("expected user_address update, got %q", updated.UserAddress)
+	}
+	if updated.Version != created.Version+1 {
+		t.Fatalf("expected metadata update to bump version, got %d from %d", updated.Version, created.Version)
+	}
+	if updated.ContentHash != evolution.HashSystemUserPreference(updated) || updated.ContentHash == created.ContentHash {
+		t.Fatalf("expected user_preference content hash to change, created=%q updated=%q", created.ContentHash, updated.ContentHash)
+	}
+	if got := countPreferenceResourceVersions(t, db, created.ID); got != 1 {
+		t.Fatalf("expected metadata-only update to keep 1 resource version, got %d", got)
+	}
+	var version orm.ResourceVersion
+	if err := db.Where("resource_id = ?", created.ID).Take(&version).Error; err != nil {
+		t.Fatalf("query resource version: %v", err)
+	}
+	if version.ChangeSource != resourcechange.ChangeSourceDirectSave {
+		t.Fatalf("expected direct_save version source, got %q", version.ChangeSource)
 	}
 }
 
@@ -308,9 +422,12 @@ func TestDraftPreviewReturnsCurrentDraftAndDiff(t *testing.T) {
 		ID:                 "preference-1",
 		UserID:             "u1",
 		Content:            "current preference",
+		AgentPersona:       "current persona",
+		UserAddress:        "current address",
+		ResponseStyle:      "current style",
 		ContentHash:        "hash-current",
 		Version:            3,
-		DraftContent:       "updated preference",
+		DraftContent:       "---\nagent_persona: legacy persona\nuser_address: legacy address\nresponse_style: legacy style\n---\n\nlegacy preference",
 		DraftSourceVersion: 3,
 		DraftStatus:        "pending_confirm",
 		UpdatedBy:          "u1",
@@ -321,6 +438,9 @@ func TestDraftPreviewReturnsCurrentDraftAndDiff(t *testing.T) {
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatalf("create preference: %v", err)
 	}
+	row.ContentHash = evolution.HashSystemUserPreference(row)
+	draftContent := "---\nagent_persona: updated persona\nuser_address: updated address\nresponse_style: updated style\n---\n\nupdated preference"
+	createPreferenceReviewResult(t, db, "preference-preview", "u1", orm.ResourceUpdateResourceTypeUserPreference, draftContent, now)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/core/user-preference:draft-preview", nil)
 	req.Header.Set("X-User-Id", "u1")
@@ -339,13 +459,16 @@ func TestDraftPreviewReturnsCurrentDraftAndDiff(t *testing.T) {
 	if resp.Code != 0 {
 		t.Fatalf("expected code 0, got %d message=%s", resp.Code, resp.Message)
 	}
-	if resp.Data.DraftStatus != "pending_confirm" {
-		t.Fatalf("expected pending_confirm, got %q", resp.Data.DraftStatus)
+	if resp.Data.ReviewResultID != "preference-preview" {
+		t.Fatalf("expected review_result_id preference-preview, got %q", resp.Data.ReviewResultID)
 	}
-	if resp.Data.CurrentContent != "current preference" {
+	if resp.Data.ReviewStatus != "pending" || resp.Data.DraftStatus != "pending" {
+		t.Fatalf("expected pending review status, got review_status=%q draft_status=%q", resp.Data.ReviewStatus, resp.Data.DraftStatus)
+	}
+	if resp.Data.CurrentContent != evolution.FormatSystemUserPreferenceForChat(row) {
 		t.Fatalf("unexpected current content: %q", resp.Data.CurrentContent)
 	}
-	if resp.Data.DraftContent != "updated preference" {
+	if resp.Data.DraftContent != draftContent {
 		t.Fatalf("unexpected draft content: %q", resp.Data.DraftContent)
 	}
 	if !strings.Contains(resp.Data.Diff, "-current preference") {
@@ -353,6 +476,44 @@ func TestDraftPreviewReturnsCurrentDraftAndDiff(t *testing.T) {
 	}
 	if !strings.Contains(resp.Data.Diff, "+updated preference") {
 		t.Fatalf("expected diff to contain added draft content, got %q", resp.Data.Diff)
+	}
+}
+
+func TestDraftPreviewIgnoresLegacyPreferenceResourceDraft(t *testing.T) {
+	db := newPreferenceTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	row := orm.SystemUserPreference{
+		ID:                 "preference-1",
+		UserID:             "u1",
+		Content:            "current preference",
+		AgentPersona:       "current persona",
+		UserAddress:        "current address",
+		ResponseStyle:      "current style",
+		Version:            3,
+		DraftContent:       "---\nagent_persona: legacy\nuser_address: legacy\nresponse_style: legacy\n---\n\nlegacy preference",
+		DraftSourceVersion: 3,
+		DraftStatus:        "pending_confirm",
+		UpdatedBy:          "u1",
+		UpdatedByName:      "User 1",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	row.ContentHash = evolution.HashSystemUserPreference(row)
+	if err := db.Create(&row).Error; err != nil {
+		t.Fatalf("create preference: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/user-preference:draft-preview", nil)
+	req.Header.Set("X-User-Id", "u1")
+	rec := httptest.NewRecorder()
+
+	DraftPreview(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected legacy resource draft to be ignored as 404, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -549,7 +710,7 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": map[string]any{"content": "draft from user instruction"},
+			"data": map[string]any{"content": "---\nagent_persona: 新角色\nuser_address: 新称谓\nresponse_style: 新风格\n---\n\ndraft from user instruction"},
 		})
 	})
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -566,9 +727,11 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 		ID:                 "preference-1",
 		UserID:             "u1",
 		Content:            "current preference",
-		ContentHash:        evolution.HashContent("current preference"),
+		AgentPersona:       "当前角色",
+		UserAddress:        "当前称谓",
+		ResponseStyle:      "当前风格",
 		Version:            4,
-		DraftContent:       "draft preference",
+		DraftContent:       "---\nagent_persona: 草稿角色\nuser_address: 草稿称谓\nresponse_style: 草稿风格\n---\n\ndraft preference",
 		DraftSourceVersion: 4,
 		DraftStatus:        "pending_confirm",
 		Ext:                evolution.WithDraftSuggestionIDs(nil, []string{"suggestion-1"}),
@@ -577,6 +740,7 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
+	row.ContentHash = evolution.HashSystemUserPreference(row)
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatalf("create preference: %v", err)
 	}
@@ -611,7 +775,7 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 	if algoBody["user_instruct"] != "只按用户意见生成" {
 		t.Fatalf("unexpected user_instruct sent to algorithm: %#v", algoBody["user_instruct"])
 	}
-	if algoBody["content"] != "draft preference" {
+	if algoBody["content"] != row.DraftContent {
 		t.Fatalf("expected draft content sent to algorithm, got %#v", algoBody["content"])
 	}
 	if algoBody["task_type"] != "user_preference" {
@@ -628,6 +792,8 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 	if len(gotIDs) != 0 {
 		t.Fatalf("expected draft suggestion ids to be cleared, got %#v", gotIDs)
 	}
+	reviewContent := "---\nagent_persona: 新角色\nuser_address: 新称谓\nresponse_style: 新风格\n---\n\ndraft from user instruction"
+	createPreferenceReviewResult(t, db, "preference-confirm", "u1", orm.ResourceUpdateResourceTypeUserPreference, reviewContent, now.Add(time.Second))
 
 	confirmReq := httptest.NewRequest(http.MethodPost, "/api/core/user-preference:confirm", nil)
 	confirmReq.Header.Set("X-User-Id", "u1")
@@ -639,16 +805,77 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 	if confirmRec.Code != http.StatusOK {
 		t.Fatalf("expected confirm status 200, got %d body=%s", confirmRec.Code, confirmRec.Body.String())
 	}
-	var applied orm.ResourceSuggestion
-	if err := db.Where("id = ?", "suggestion-1").Take(&applied).Error; err != nil {
-		t.Fatalf("query applied suggestion: %v", err)
+	if status := preferenceReviewResultStatus(t, db, "preference-confirm"); status != "accepted" {
+		t.Fatalf("expected review result accepted, got %q", status)
 	}
-	if applied.Status != evolution.SuggestionStatusAccepted {
-		t.Fatalf("expected suggestion status to stay accepted after confirm, got %q", applied.Status)
+	var confirmed orm.SystemUserPreference
+	if err := db.Where("id = ?", row.ID).Take(&confirmed).Error; err != nil {
+		t.Fatalf("query confirmed preference: %v", err)
+	}
+	if confirmed.Content != "draft from user instruction" || confirmed.AgentPersona != "新角色" || confirmed.UserAddress != "新称谓" || confirmed.ResponseStyle != "新风格" {
+		t.Fatalf("expected generated frontmatter to be split after confirm, got %#v", confirmed)
 	}
 }
 
-func TestDiscardKeepsAcceptedSuggestionVisibleForRegeneration(t *testing.T) {
+func TestConfirmParsesUserPreferenceFrontmatter(t *testing.T) {
+	db := newPreferenceTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	row := orm.SystemUserPreference{
+		ID:                 "preference-1",
+		UserID:             "u1",
+		Content:            "旧正文",
+		AgentPersona:       "旧角色",
+		UserAddress:        "旧称谓",
+		ResponseStyle:      "旧风格",
+		ContentHash:        evolution.HashContent("旧正文"),
+		Version:            4,
+		DraftContent:       "---\nagent_persona: legacy\nuser_address: legacy\nresponse_style: legacy\n---\n\nlegacy",
+		DraftSourceVersion: 4,
+		DraftStatus:        "pending_confirm",
+		UpdatedBy:          "u1",
+		UpdatedByName:      "User 1",
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	row.ContentHash = evolution.HashSystemUserPreference(row)
+	if err := db.Create(&row).Error; err != nil {
+		t.Fatalf("create preference: %v", err)
+	}
+	reviewContent := "---\nagent_persona: 新角色\nuser_address: 用户称谓\nresponse_style: 回复风格\n---\n\n新正文"
+	createPreferenceReviewResult(t, db, "preference-frontmatter", "u1", orm.ResourceUpdateResourceTypeUserPreference, reviewContent, now)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/user-preference:confirm", nil)
+	req.Header.Set("X-User-Id", "u1")
+	req.Header.Set("X-User-Name", "User 1")
+	rec := httptest.NewRecorder()
+
+	Confirm(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected confirm status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var updated orm.SystemUserPreference
+	if err := db.Where("id = ?", row.ID).Take(&updated).Error; err != nil {
+		t.Fatalf("query updated preference: %v", err)
+	}
+	if updated.Content != "新正文" || updated.AgentPersona != "新角色" || updated.UserAddress != "用户称谓" || updated.ResponseStyle != "回复风格" {
+		t.Fatalf("expected frontmatter to be split into preference columns, got %#v", updated)
+	}
+	if strings.Contains(updated.Content, "agent_persona") || strings.Contains(updated.Content, "---") {
+		t.Fatalf("content should not keep raw frontmatter, got %q", updated.Content)
+	}
+	if updated.ContentHash != evolution.HashSystemUserPreference(updated) {
+		t.Fatalf("expected hash over split preference, got %q", updated.ContentHash)
+	}
+	if status := preferenceReviewResultStatus(t, db, "preference-frontmatter"); status != "accepted" {
+		t.Fatalf("expected review result accepted, got %q", status)
+	}
+}
+
+func TestDiscardRejectsPendingPreferenceReviewResult(t *testing.T) {
 	db := newPreferenceTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -660,7 +887,7 @@ func TestDiscardKeepsAcceptedSuggestionVisibleForRegeneration(t *testing.T) {
 		Content:            "current preference",
 		ContentHash:        evolution.HashContent("current preference"),
 		Version:            4,
-		DraftContent:       "draft preference",
+		DraftContent:       "---\nagent_persona: legacy\nuser_address: legacy\nresponse_style: legacy\n---\n\nlegacy preference",
 		DraftSourceVersion: 4,
 		DraftStatus:        "pending_confirm",
 		Ext:                evolution.WithDraftSuggestionIDs(nil, []string{"suggestion-1"}),
@@ -672,22 +899,7 @@ func TestDiscardKeepsAcceptedSuggestionVisibleForRegeneration(t *testing.T) {
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatalf("create preference: %v", err)
 	}
-	suggestion := orm.ResourceSuggestion{
-		ID:           "suggestion-1",
-		UserID:       "u1",
-		ResourceType: evolution.ResourceTypeUserPreference,
-		ResourceKey:  evolution.SystemResourceKey(evolution.ResourceTypeUserPreference),
-		Action:       evolution.SuggestionActionModify,
-		SessionID:    "session-1",
-		Title:        "preference suggestion",
-		Content:      "update preference",
-		Status:       evolution.SuggestionStatusAccepted,
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	}
-	if err := db.Create(&suggestion).Error; err != nil {
-		t.Fatalf("create suggestion: %v", err)
-	}
+	createPreferenceReviewResult(t, db, "preference-discard", "u1", orm.ResourceUpdateResourceTypeUserPreference, "---\nagent_persona: rejected\nuser_address: rejected\nresponse_style: rejected\n---\n\nrejected preference", now)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/core/user-preference:discard", nil)
 	req.Header.Set("X-User-Id", "u1")
@@ -699,11 +911,30 @@ func TestDiscardKeepsAcceptedSuggestionVisibleForRegeneration(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	var updated orm.ResourceSuggestion
-	if err := db.Where("id = ?", "suggestion-1").Take(&updated).Error; err != nil {
-		t.Fatalf("query suggestion: %v", err)
+	if status := preferenceReviewResultStatus(t, db, "preference-discard"); status != "rejected" {
+		t.Fatalf("expected review result rejected, got %q", status)
 	}
-	if updated.Status != evolution.SuggestionStatusAccepted {
-		t.Fatalf("expected suggestion to remain accepted after discard, got %q", updated.Status)
+	var updated orm.SystemUserPreference
+	if err := db.Where("id = ?", row.ID).Take(&updated).Error; err != nil {
+		t.Fatalf("query preference: %v", err)
 	}
+	if updated.Content != row.Content || updated.Version != row.Version {
+		t.Fatalf("discard should not change preference content/version, got content=%q version=%d", updated.Content, updated.Version)
+	}
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func countPreferenceResourceVersions(t *testing.T, db *orm.DB, resourceID string) int64 {
+	t.Helper()
+	var count int64
+	if err := db.Model(&orm.ResourceVersion{}).Where("resource_id = ?", resourceID).Count(&count).Error; err != nil {
+		t.Fatalf("count resource versions: %v", err)
+	}
+	return count
 }

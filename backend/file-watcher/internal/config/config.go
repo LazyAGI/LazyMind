@@ -253,9 +253,6 @@ func (c *Config) validate() error {
 	if c.AgentID == "" {
 		return fmt.Errorf("agent_id is required")
 	}
-	if c.TenantID == "" {
-		return fmt.Errorf("tenant_id is required")
-	}
 	if c.ControlPlaneBaseURL == "" {
 		return fmt.Errorf("control_plane_base_url is required")
 	}

@@ -4,14 +4,17 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/lazymind/scan_control_plane/internal/access"
 	adminservice "github.com/lazymind/scan_control_plane/internal/admin"
 	"github.com/lazymind/scan_control_plane/internal/observability"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
+	scheduleengine "github.com/lazymind/scan_control_plane/internal/sourceengine/schedule"
 	sourceengine "github.com/lazymind/scan_control_plane/internal/sourceengine/source"
 	taskengine "github.com/lazymind/scan_control_plane/internal/sourceengine/task"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/tree"
+	store "github.com/lazymind/scan_control_plane/internal/store/source"
 )
 
 type Handler struct {
@@ -25,9 +28,26 @@ type Handler struct {
 	admin      *adminservice.Service
 	metrics    *observability.Registry
 	access     access.Checker
+	agents     AgentStore
+	scheduler  WatchEventScheduler
+	agentToken string
+	clock      func() time.Time
 }
 
 type Option func(*Handler)
+
+type AgentStore interface {
+	UpsertAgent(ctx context.Context, agent store.Agent) error
+	ListWatchBindingsForAgentEvent(ctx context.Context, sourceID, agentID string) ([]store.Binding, error)
+	ListLocalWatcherBindingsForAgent(ctx context.Context, agentID string) ([]store.Binding, error)
+	CreateAgentCommand(ctx context.Context, command store.AgentCommand) error
+	ListPendingAgentCommands(ctx context.Context, agentID string, now time.Time, limit int) ([]store.AgentCommand, error)
+	AckAgentCommand(ctx context.Context, ack store.AgentCommandAck) error
+}
+
+type WatchEventScheduler interface {
+	EnqueueWatchEventSync(ctx context.Context, req scheduleengine.WatchEventSyncRequest) (scheduleengine.SyncRunIntent, error)
+}
 
 func NewHandler(options ...Option) http.Handler {
 	h := &Handler{}
@@ -36,6 +56,9 @@ func NewHandler(options ...Option) http.Handler {
 	}
 	if h.access == nil {
 		h.access = unavailableAccessChecker{}
+	}
+	if h.clock == nil {
+		h.clock = time.Now
 	}
 	mux := http.NewServeMux()
 	h.registerRoutes(mux)
@@ -156,6 +179,32 @@ func WithAccessChecker(checker access.Checker) Option {
 	}
 }
 
+func WithAgentStore(store AgentStore) Option {
+	return func(h *Handler) {
+		h.agents = store
+	}
+}
+
+func WithScheduleEngine(engine WatchEventScheduler) Option {
+	return func(h *Handler) {
+		h.scheduler = engine
+	}
+}
+
+func WithAgentToken(token string) Option {
+	return func(h *Handler) {
+		h.agentToken = strings.TrimSpace(token)
+	}
+}
+
+func WithClock(clock func() time.Time) Option {
+	return func(h *Handler) {
+		if clock != nil {
+			h.clock = clock
+		}
+	}
+}
+
 func NewHTTPServer(listenAddr string, handler http.Handler) *http.Server {
 	return &http.Server{
 		Addr:    listenAddr,
@@ -180,6 +229,15 @@ func (h *Handler) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/scan/openapi.json", h.openapi)
 	mux.HandleFunc("GET /api/scan/openapi.yaml", h.openapiYAML)
 	mux.HandleFunc("GET /api/scan/docs", h.docs)
+
+	// File-watcher agent control-plane API. These endpoints use the shared
+	// agent bearer token instead of end-user RBAC because they are called by
+	// local file-watcher processes.
+	mux.HandleFunc("POST /api/v1/agents/register", h.agentRegister)
+	mux.HandleFunc("POST /api/v1/agents/heartbeat", h.agentHeartbeat)
+	mux.HandleFunc("POST /api/v1/agents/events", h.agentReportEvents)
+	mux.HandleFunc("POST /api/v1/agents/pull", h.agentPullCommands)
+	mux.HandleFunc("POST /api/v1/agents/commands/ack", h.agentAckCommand)
 
 	// Connectors — read-only metadata, any authenticated user.
 	routeAPI(mux, "GET", "/api/scan/connectors", []string{"scan.read"}, h.listConnectors)
@@ -231,15 +289,13 @@ func actorFromRequest(r *http.Request) (access.Actor, error) {
 	actor := access.Actor{
 		UserID:   strings.TrimSpace(r.Header.Get("X-User-ID")),
 		TenantID: strings.TrimSpace(r.Header.Get("X-Tenant-ID")),
+		Role:     strings.TrimSpace(r.Header.Get("X-User-Role")),
 	}
 	if actor.TenantID == "" {
 		actor.TenantID = strings.TrimSpace(r.URL.Query().Get("tenant_id"))
 	}
 	if actor.UserID == "" {
 		return access.Actor{}, access.NewError(access.ErrCodeUnauthorized, "missing caller")
-	}
-	if actor.TenantID == "" {
-		return access.Actor{}, access.NewError(access.ErrCodeUnauthorized, "missing tenant")
 	}
 	return actor, nil
 }

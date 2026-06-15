@@ -16,6 +16,8 @@ import (
 	"lazymind/core/evolution"
 	appLog "lazymind/core/log"
 	"lazymind/core/modelconfig"
+	"lazymind/core/resourcechange"
+	"lazymind/core/resourceupdate"
 	"lazymind/core/store"
 )
 
@@ -29,16 +31,15 @@ type generateRequest struct {
 }
 
 type upsertRequest struct {
-	Content       *string `json:"content"`
-	AgentPersona  *string `json:"agent_persona"`
-	UserAddress   *string `json:"user_address"`
-	ResponseStyle *string `json:"response_style"`
-	AutoEvo       *bool   `json:"auto_evo"`
+	Content *string `json:"content"`
+	AutoEvo *bool   `json:"auto_evo"`
 }
 
 const errAutoEvoTaskRunning = "auto_evo task is running"
 
 type draftPreviewResponse struct {
+	ReviewResultID     string `json:"review_result_id"`
+	ReviewStatus       string `json:"review_status"`
 	DraftStatus        string `json:"draft_status"`
 	DraftSourceVersion int64  `json:"draft_source_version"`
 	CurrentContent     string `json:"current_content"`
@@ -81,14 +82,14 @@ func upsertManagedMemoryContent(r *http.Request, db *gorm.DB, userID, userName s
 		resolvedAutoEvo = existing.AutoEvo
 	}
 	if existing == nil {
-		content := stringFromPtr(req.Content)
+		content := ""
+		if req.Content != nil {
+			content = *req.Content
+		}
 		row := orm.SystemMemory{
 			ID:                 evolution.NewID(),
 			UserID:             userID,
 			Content:            content,
-			AgentPersona:       stringFromPtr(req.AgentPersona),
-			UserAddress:        stringFromPtr(req.UserAddress),
-			ResponseStyle:      stringFromPtr(req.ResponseStyle),
 			Version:            1,
 			AutoEvo:            resolvedAutoEvo,
 			AutoEvoApplyStatus: evolution.AutoEvoApplyStatusIdle,
@@ -99,13 +100,10 @@ func upsertManagedMemoryContent(r *http.Request, db *gorm.DB, userID, userName s
 			UpdatedAt:          now,
 		}
 		row.ContentHash = evolution.HashSystemMemory(row)
-		if err := db.WithContext(r.Context()).Model(&orm.SystemMemory{}).Create(map[string]any{
+		createValues := map[string]any{
 			"id":                    row.ID,
 			"user_id":               row.UserID,
 			"content":               row.Content,
-			"agent_persona":         row.AgentPersona,
-			"user_address":          row.UserAddress,
-			"response_style":        row.ResponseStyle,
 			"content_hash":          row.ContentHash,
 			"version":               row.Version,
 			"auto_evo":              row.AutoEvo,
@@ -115,38 +113,36 @@ func upsertManagedMemoryContent(r *http.Request, db *gorm.DB, userID, userName s
 			"updated_by_name":       row.UpdatedByName,
 			"created_at":            row.CreatedAt,
 			"updated_at":            row.UpdatedAt,
-		}).Error; err != nil {
+		}
+		change := resourcechange.ContentChange{
+			ResourceType:  orm.ResourceUpdateResourceTypeMemory,
+			ResourceID:    row.ID,
+			UserID:        userID,
+			FromVersion:   0,
+			ToVersion:     row.Version,
+			BeforeContent: "",
+			AfterContent:  row.Content,
+			Source: resourcechange.Source{
+				ChangeSource: resourcechange.ChangeSourceDirectSave,
+				ChangedAt:    now,
+			},
+		}
+		if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+			return resourcechange.CreateIntoModel(r.Context(), tx, &orm.SystemMemory{}, createValues, change)
+		}); err != nil {
 			return nil, err
 		}
 		return &row, nil
 	}
 
 	newContent := existing.Content
-	newAgentPersona := existing.AgentPersona
-	newUserAddress := existing.UserAddress
-	newResponseStyle := existing.ResponseStyle
 	if req.Content != nil {
 		newContent = *req.Content
 	}
-	if req.AgentPersona != nil {
-		newAgentPersona = *req.AgentPersona
-	}
-	if req.UserAddress != nil {
-		newUserAddress = *req.UserAddress
-	}
-	if req.ResponseStyle != nil {
-		newResponseStyle = *req.ResponseStyle
-	}
 	hashRow := *existing
 	hashRow.Content = newContent
-	hashRow.AgentPersona = newAgentPersona
-	hashRow.UserAddress = newUserAddress
-	hashRow.ResponseStyle = newResponseStyle
 	update := map[string]any{
 		"content":         newContent,
-		"agent_persona":   newAgentPersona,
-		"user_address":    newUserAddress,
-		"response_style":  newResponseStyle,
 		"content_hash":    evolution.HashSystemMemory(hashRow),
 		"version":         existing.Version + 1,
 		"updated_by":      userID,
@@ -172,16 +168,28 @@ func upsertManagedMemoryContent(r *http.Request, db *gorm.DB, userID, userName s
 		update["draft_updated_at"] = nil
 		update["ext"] = evolution.WithDraftSuggestionIDs(existing.Ext, nil)
 	}
-	if err := db.WithContext(r.Context()).
-		Model(&orm.SystemMemory{}).
-		Where("id = ? AND version = ?", existing.ID, existing.Version).
-		Updates(update).Error; err != nil {
+	change := resourcechange.ContentChange{
+		ResourceType:  orm.ResourceUpdateResourceTypeMemory,
+		ResourceID:    existing.ID,
+		UserID:        userID,
+		FromVersion:   existing.Version,
+		ToVersion:     existing.Version + 1,
+		BeforeContent: existing.Content,
+		AfterContent:  newContent,
+		Source: resourcechange.Source{
+			ChangeSource: resourcechange.ChangeSourceDirectSave,
+			ChangedAt:    now,
+		},
+	}
+	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		_, err := resourcechange.UpdateModel(r.Context(), tx, &orm.SystemMemory{}, func(query *gorm.DB) *gorm.DB {
+			return query.Where("id = ? AND version = ?", existing.ID, existing.Version)
+		}, update, change)
+		return err
+	}); err != nil {
 		return nil, err
 	}
 	existing.Content = newContent
-	existing.AgentPersona = newAgentPersona
-	existing.UserAddress = newUserAddress
-	existing.ResponseStyle = newResponseStyle
 	existing.ContentHash = evolution.HashSystemMemory(*existing)
 	existing.Version++
 	if req.AutoEvo != nil {
@@ -262,29 +270,11 @@ func Upsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !hasMemoryUpsertField(req) {
-		common.ReplyErr(w, "content or memory metadata required", http.StatusBadRequest)
+		common.ReplyErr(w, "content or auto_evo required", http.StatusBadRequest)
 		return
 	}
 	if req.Content != nil {
 		if err := validateManagedContentLength(*req.Content); err != nil {
-			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-	}
-	if req.AgentPersona != nil {
-		if err := validateManagedContentLength(*req.AgentPersona); err != nil {
-			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-	}
-	if req.UserAddress != nil {
-		if err := validateManagedContentLength(*req.UserAddress); err != nil {
-			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-	}
-	if req.ResponseStyle != nil {
-		if err := validateManagedContentLength(*req.ResponseStyle); err != nil {
 			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -324,14 +314,32 @@ func Upsert(w http.ResponseWriter, r *http.Request) {
 		if err := evolution.EnsureManagedMemoryAutoEvolutionScheduled(*row); err != nil {
 			appLog.Logger.Warn().Err(err).Str("route", "/memory").Msg("auto_evo schedule on upsert failed")
 		}
+		if existing != nil && !existing.AutoEvo {
+			if err := resourceupdate.ScanPendingResultsForResource(r.Context(), db, orm.ResourceUpdateResourceTypeMemory, userID, row.ID); err != nil {
+				appLog.Logger.Warn().Err(err).
+					Str("component", "resource_update").
+					Str("event", "resource_update.auto_evo_enabled.scan_failed").
+					Str("resource_type", orm.ResourceUpdateResourceTypeMemory).
+					Str("resource_id", row.ID).
+					Str("route", "/memory").
+					Str("user_id", userID).
+					Str("memory_id", row.ID).
+					Str("reason", "auto_evo_enabled_scan_failed").
+					Msg("resource update scan on upsert failed")
+			}
+		}
 	}
 
-	suggestionStatus, err := evolution.ManagedSuggestionStatusForResource(r.Context(), db, userID, evolution.ResourceTypeMemory)
+	reviewStatus, err := evolution.ManagedReviewStatusForResource(r.Context(), db, userID, evolution.ResourceTypeMemory)
 	if err != nil {
 		common.ReplyErr(w, "query memory failed", http.StatusInternalServerError)
 		return
 	}
-	common.ReplyOK(w, evolution.NewManagedStateItem(evolution.ResourceTypeMemory, row, suggestionStatus))
+	item := evolution.NewManagedStateItem(evolution.ResourceTypeMemory, row, reviewStatus)
+	if summary, err := resourcechange.LatestSummaryForResource(r.Context(), db, userID, orm.ResourceUpdateResourceTypeMemory, row.ID); err == nil {
+		item.LatestVersionChange = summary
+	}
+	common.ReplyOK(w, item)
 }
 
 func DraftPreview(w http.ResponseWriter, r *http.Request) {
@@ -356,22 +364,25 @@ func DraftPreview(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query memory failed", http.StatusInternalServerError)
 		return
 	}
-	if strings.TrimSpace(row.DraftStatus) != "pending_confirm" {
-		common.ReplyErr(w, "memory draft not found", http.StatusNotFound)
+	result, err := resourceupdate.LatestPendingMemoryReviewResult(r.Context(), db, userID, orm.ResourceUpdateResourceTypeMemory)
+	if err != nil {
+		resourceupdate.ReplyReviewError(w, err, "memory draft")
 		return
 	}
 
-	diff, err := evolution.BuildContentDiff(row.Content, row.DraftContent)
+	diff, err := evolution.BuildContentDiff(row.Content, result.Content)
 	if err != nil {
 		common.ReplyErr(w, "build memory diff failed", http.StatusInternalServerError)
 		return
 	}
 
 	common.ReplyOK(w, draftPreviewResponse{
-		DraftStatus:        row.DraftStatus,
-		DraftSourceVersion: row.DraftSourceVersion,
+		ReviewResultID:     result.ID,
+		ReviewStatus:       result.ReviewStatus,
+		DraftStatus:        result.ReviewStatus,
+		DraftSourceVersion: row.Version,
 		CurrentContent:     row.Content,
-		DraftContent:       row.DraftContent,
+		DraftContent:       result.Content,
 		Diff:               diff,
 	})
 }
@@ -579,51 +590,28 @@ func Confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := strings.TrimSpace(store.UserID(r))
-	userName := strings.TrimSpace(store.UserName(r))
 	if userID == "" {
 		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
 		return
 	}
 
-	row, err := evolution.EnsureSystemMemory(r.Context(), db, userID, userName)
+	result, err := resourceupdate.LatestPendingMemoryReviewResult(r.Context(), db, userID, orm.ResourceUpdateResourceTypeMemory)
+	if err != nil {
+		resourceupdate.ReplyReviewError(w, err, "memory draft")
+		return
+	}
+	if _, err := resourceupdate.AcceptMemoryReviewResultByID(r.Context(), db, userID, result.ID); err != nil {
+		resourceupdate.ReplyReviewError(w, err, "confirm memory draft")
+		return
+	}
+	row, err := evolution.LoadSystemMemory(r.Context(), db, userID)
 	if err != nil {
 		common.ReplyErr(w, "query memory failed", http.StatusInternalServerError)
 		return
 	}
-	if strings.TrimSpace(row.DraftStatus) != "pending_confirm" {
-		common.ReplyErr(w, "memory draft not found", http.StatusNotFound)
-		return
-	}
-	if row.Version != row.DraftSourceVersion {
-		common.ReplyErr(w, "memory draft version conflict", http.StatusConflict)
-		return
-	}
-
-	now := time.Now()
-	newContent := row.DraftContent
-	newExt := evolution.WithDraftSuggestionIDs(row.Ext, nil)
-	hashRow := *row
-	hashRow.Content = newContent
-	update := map[string]any{
-		"content":              newContent,
-		"content_hash":         evolution.HashSystemMemory(hashRow),
-		"version":              row.Version + 1,
-		"draft_content":        "",
-		"draft_source_version": 0,
-		"draft_status":         "",
-		"draft_updated_at":     nil,
-		"updated_by":           userID,
-		"updated_by_name":      userName,
-		"updated_at":           now,
-		"ext":                  newExt,
-	}
-	if err := db.WithContext(r.Context()).Model(&orm.SystemMemory{}).Where("id = ? AND version = ?", row.ID, row.Version).Updates(update).Error; err != nil {
-		common.ReplyErr(w, "confirm memory draft failed", http.StatusInternalServerError)
-		return
-	}
 	common.ReplyOK(w, map[string]any{
-		"content": newContent,
-		"version": row.Version + 1,
+		"content": row.Content,
+		"version": row.Version,
 	})
 }
 
@@ -634,35 +622,18 @@ func Discard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := strings.TrimSpace(store.UserID(r))
-	userName := strings.TrimSpace(store.UserName(r))
 	if userID == "" {
 		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
 		return
 	}
 
-	row, err := evolution.EnsureSystemMemory(r.Context(), db, userID, userName)
+	result, err := resourceupdate.LatestPendingMemoryReviewResult(r.Context(), db, userID, orm.ResourceUpdateResourceTypeMemory)
 	if err != nil {
-		common.ReplyErr(w, "query memory failed", http.StatusInternalServerError)
+		resourceupdate.ReplyReviewError(w, err, "memory draft")
 		return
 	}
-	if strings.TrimSpace(row.DraftStatus) != "pending_confirm" {
-		common.ReplyErr(w, "memory draft not found", http.StatusNotFound)
-		return
-	}
-
-	now := time.Now()
-	update := map[string]any{
-		"draft_content":        "",
-		"draft_source_version": 0,
-		"draft_status":         "",
-		"draft_updated_at":     nil,
-		"updated_by":           userID,
-		"updated_by_name":      userName,
-		"updated_at":           now,
-		"ext":                  evolution.WithDraftSuggestionIDs(row.Ext, nil),
-	}
-	if err := db.WithContext(r.Context()).Model(&orm.SystemMemory{}).Where("id = ?", row.ID).Updates(update).Error; err != nil {
-		common.ReplyErr(w, "discard memory draft failed", http.StatusInternalServerError)
+	if _, err := resourceupdate.RejectMemoryReviewResultByID(r.Context(), db, userID, result.ID); err != nil {
+		resourceupdate.ReplyReviewError(w, err, "discard memory draft")
 		return
 	}
 	common.ReplyOK(w, map[string]any{"discarded": true})
@@ -679,15 +650,5 @@ func firstNonEmpty(values ...string) string {
 
 func hasMemoryUpsertField(req upsertRequest) bool {
 	return req.Content != nil ||
-		req.AgentPersona != nil ||
-		req.UserAddress != nil ||
-		req.ResponseStyle != nil ||
 		req.AutoEvo != nil
-}
-
-func stringFromPtr(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
 }

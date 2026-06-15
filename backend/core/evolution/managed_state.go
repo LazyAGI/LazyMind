@@ -11,6 +11,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/resourcechange"
 	"lazymind/core/store"
 )
 
@@ -20,20 +21,22 @@ const (
 )
 
 type ManagedStateItem struct {
-	ResourceID                  string  `json:"resource_id"`
-	ResourceType                string  `json:"resource_type"`
-	Title                       string  `json:"title"`
-	Content                     string  `json:"content"`
-	AgentPersona                *string `json:"agent_persona,omitempty"`
-	UserAddress                 *string `json:"user_address,omitempty"`
-	ResponseStyle               *string `json:"response_style,omitempty"`
-	ContentSummary              string  `json:"content_summary"`
-	HasPendingReviewSuggestions bool    `json:"has_pending_review_suggestions"`
-	SuggestionStatus            string  `json:"suggestion_status"`
-	AutoEvo                     bool    `json:"auto_evo"`
-	AutoEvoApplyStatus          string  `json:"auto_evo_apply_status"`
-	AutoEvoGeneration           int64   `json:"auto_evo_generation"`
-	AutoEvoError                string  `json:"auto_evo_error"`
+	ResourceID             string                               `json:"resource_id"`
+	ResourceType           string                               `json:"resource_type"`
+	Title                  string                               `json:"title"`
+	Content                string                               `json:"content"`
+	AgentPersona           *string                              `json:"agent_persona,omitempty"`
+	UserAddress            *string                              `json:"user_address,omitempty"`
+	ResponseStyle          *string                              `json:"response_style,omitempty"`
+	ContentSummary         string                               `json:"content_summary"`
+	Version                int64                                `json:"version"`
+	LatestVersionChange    *resourcechange.VersionChangeSummary `json:"latest_version_change"`
+	HasPendingReviewResult bool                                 `json:"has_pending_review_result"`
+	ReviewStatus           string                               `json:"review_status"`
+	AutoEvo                bool                                 `json:"auto_evo"`
+	AutoEvoApplyStatus     string                               `json:"auto_evo_apply_status"`
+	AutoEvoGeneration      int64                                `json:"auto_evo_generation"`
+	AutoEvoError           string                               `json:"auto_evo_error"`
 }
 
 func ListManagedStates(w http.ResponseWriter, r *http.Request) {
@@ -59,15 +62,31 @@ func ListManagedStates(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query managed states failed", http.StatusInternalServerError)
 		return
 	}
-	suggestionStatuses, err := LoadManagedSuggestionStatuses(r.Context(), db, userID)
+	reviewStatuses, err := LoadManagedReviewStatuses(r.Context(), db, userID)
 	if err != nil {
 		common.ReplyErr(w, "query managed states failed", http.StatusInternalServerError)
 		return
 	}
 
 	items := []ManagedStateItem{
-		NewManagedStateItem(ResourceTypeMemory, memoryRow, suggestionStatuses[ResourceTypeMemory]),
-		NewManagedStateItem(ResourceTypeUserPreference, preferenceRow, suggestionStatuses[ResourceTypeUserPreference]),
+		NewManagedStateItem(ResourceTypeMemory, memoryRow, reviewStatuses[ResourceTypeMemory]),
+		NewManagedStateItem(ResourceTypeUserPreference, preferenceRow, reviewStatuses[ResourceTypeUserPreference]),
+	}
+	if memoryRow != nil {
+		summary, err := resourcechange.LatestSummaryForResource(r.Context(), db, userID, orm.ResourceUpdateResourceTypeMemory, memoryRow.ID)
+		if err != nil {
+			common.ReplyErr(w, "query managed states failed", http.StatusInternalServerError)
+			return
+		}
+		items[0].LatestVersionChange = summary
+	}
+	if preferenceRow != nil {
+		summary, err := resourcechange.LatestSummaryForResource(r.Context(), db, userID, orm.ResourceUpdateResourceTypeUserPreference, preferenceRow.ID)
+		if err != nil {
+			common.ReplyErr(w, "query managed states failed", http.StatusInternalServerError)
+			return
+		}
+		items[1].LatestVersionChange = summary
 	}
 
 	common.ReplyOK(w, map[string]any{"items": items})
@@ -95,23 +114,21 @@ func LoadSystemUserPreference(ctx context.Context, db *gorm.DB, userID string) (
 	return &row, nil
 }
 
-func NewManagedStateItem(resourceType string, row any, suggestionStatus string) ManagedStateItem {
-	suggestionStatus = CanonicalSuggestionStatus(suggestionStatus)
+func NewManagedStateItem(resourceType string, row any, reviewStatus string) ManagedStateItem {
+	reviewStatus = CanonicalReviewStatus(reviewStatus)
 	item := ManagedStateItem{
-		ResourceType:                strings.TrimSpace(resourceType),
-		Title:                       ManagedStateTitle(resourceType),
-		HasPendingReviewSuggestions: suggestionStatus != SuggestionStatusNone,
-		SuggestionStatus:            suggestionStatus,
+		ResourceType:           strings.TrimSpace(resourceType),
+		Title:                  ManagedStateTitle(resourceType),
+		HasPendingReviewResult: reviewStatus == ReviewStatusPending,
+		ReviewStatus:           reviewStatus,
 	}
 	switch typed := row.(type) {
 	case *orm.SystemMemory:
 		if typed != nil {
 			item.ResourceID = strings.TrimSpace(typed.ID)
 			item.Content = typed.Content
-			item.AgentPersona = stringPtr(typed.AgentPersona)
-			item.UserAddress = stringPtr(typed.UserAddress)
-			item.ResponseStyle = stringPtr(typed.ResponseStyle)
 			item.ContentSummary = ManagedStateSummary(typed.Content)
+			item.Version = typed.Version
 			item.AutoEvo = typed.AutoEvo
 			item.AutoEvoApplyStatus = NormalizeAutoEvoApplyStatus(typed.AutoEvoApplyStatus)
 			item.AutoEvoGeneration = typed.AutoEvoGeneration
@@ -121,7 +138,11 @@ func NewManagedStateItem(resourceType string, row any, suggestionStatus string) 
 		if typed != nil {
 			item.ResourceID = strings.TrimSpace(typed.ID)
 			item.Content = typed.Content
+			item.AgentPersona = stringPtr(typed.AgentPersona)
+			item.UserAddress = stringPtr(typed.UserAddress)
+			item.ResponseStyle = stringPtr(typed.ResponseStyle)
 			item.ContentSummary = ManagedStateSummary(typed.Content)
+			item.Version = typed.Version
 			item.AutoEvo = typed.AutoEvo
 			item.AutoEvoApplyStatus = NormalizeAutoEvoApplyStatus(typed.AutoEvoApplyStatus)
 			item.AutoEvoGeneration = typed.AutoEvoGeneration
@@ -135,40 +156,51 @@ func stringPtr(value string) *string {
 	return &value
 }
 
-func LoadManagedSuggestionStatuses(ctx context.Context, db *gorm.DB, userID string) (map[string]string, error) {
-	var rows []struct {
-		ResourceType string `gorm:"column:resource_type"`
-		Status       string `gorm:"column:status"`
+const (
+	ReviewStatusPending = "pending"
+	ReviewStatusNone    = "none"
+)
+
+func CanonicalReviewStatus(status string) string {
+	if strings.TrimSpace(status) == ReviewStatusPending {
+		return ReviewStatusPending
+	}
+	return ReviewStatusNone
+}
+
+func LoadManagedReviewStatuses(ctx context.Context, db *gorm.DB, userID string) (map[string]string, error) {
+	var reviewRows []struct {
+		Target string `gorm:"column:target"`
 	}
 	if err := db.WithContext(ctx).
-		Model(&orm.ResourceSuggestion{}).
-		Select("resource_type", "status").
-		Where("user_id = ? AND status IN ? AND resource_type IN ?",
+		Model(&orm.MemoryReviewResult{}).
+		Select("target").
+		Where("user_id = ? AND state = ? AND review_status = ? AND target IN ?",
 			strings.TrimSpace(userID),
-			VisibleSuggestionStatuses(),
+			"success",
+			ReviewStatusPending,
 			[]string{ResourceTypeMemory, ResourceTypeUserPreference},
 		).
-		Find(&rows).Error; err != nil {
+		Find(&reviewRows).Error; err != nil {
 		return nil, err
 	}
-
-	result := make(map[string]string, len(rows))
-	for _, row := range rows {
-		resourceType := strings.TrimSpace(row.ResourceType)
+	result := make(map[string]string, len(reviewRows))
+	for _, row := range reviewRows {
+		resourceType := strings.TrimSpace(row.Target)
 		if resourceType == "" {
 			continue
 		}
-		result[resourceType] = MergeSuggestionStatus(result[resourceType], row.Status)
+		result[resourceType] = ReviewStatusPending
 	}
 	return result, nil
 }
 
-func ManagedSuggestionStatusForResource(ctx context.Context, db *gorm.DB, userID, resourceType string) (string, error) {
-	statuses, err := LoadManagedSuggestionStatuses(ctx, db, userID)
+func ManagedReviewStatusForResource(ctx context.Context, db *gorm.DB, userID, resourceType string) (string, error) {
+	statuses, err := LoadManagedReviewStatuses(ctx, db, userID)
 	if err != nil {
-		return SuggestionStatusNone, err
+		return ReviewStatusNone, err
 	}
-	return CanonicalSuggestionStatus(statuses[strings.TrimSpace(resourceType)]), nil
+	return CanonicalReviewStatus(statuses[strings.TrimSpace(resourceType)]), nil
 }
 
 func ManagedStateTitle(resourceType string) string {

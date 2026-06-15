@@ -244,9 +244,6 @@ func validateActor(actor Actor) error {
 	if strings.TrimSpace(actor.UserID) == "" {
 		return unauthorized("missing caller")
 	}
-	if strings.TrimSpace(actor.TenantID) == "" {
-		return unauthorized("missing tenant")
-	}
 	return nil
 }
 

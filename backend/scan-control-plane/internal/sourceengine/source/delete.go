@@ -14,6 +14,7 @@ func (e *DefaultEngine) DeleteSource(ctx context.Context, sourceID string) (Dele
 		removedBindingIDs = append(removedBindingIDs, binding.BindingID)
 		warnings = append(warnings, e.deleteFolderAsWarning(ctx, deleted.Source.DatasetID, binding.CoreParentDocumentID, deleted.Source.CreatedBy)...)
 	}
+	warnings = append(warnings, e.queueLocalWatcherStops(ctx, deleted.Source, deleted.Bindings)...)
 	if err := e.deleteCoreDataset(ctx, deleted.Source.DatasetID, deleted.Source.CreatedBy); err != nil {
 		warnings = append(warnings, JobError{Code: string(ErrCodeInternal), Message: err.Error(), Details: map[string]any{"dataset_id": deleted.Source.DatasetID}})
 	}

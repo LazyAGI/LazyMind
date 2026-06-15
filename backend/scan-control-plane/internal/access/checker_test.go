@@ -21,6 +21,18 @@ func TestDefaultCheckerCanUseAgentAllowsSameTenantOnlineAgent(t *testing.T) {
 	}
 }
 
+func TestDefaultCheckerCanUseAgentAllowsEmptyTenantAgent(t *testing.T) {
+	t.Parallel()
+
+	checker := NewDefaultChecker(&checkerStore{
+		agent: store.Agent{AgentID: "agent-1", Status: "ONLINE"},
+	})
+
+	if err := checker.CanUseAgent(context.Background(), Actor{UserID: "user-1"}, "agent-1"); err != nil {
+		t.Fatalf("expected online empty-tenant agent to be allowed, got %v", err)
+	}
+}
+
 func TestDefaultCheckerCanUseAgentRejectsCrossTenantOrUnavailableAgent(t *testing.T) {
 	t.Parallel()
 
@@ -84,6 +96,18 @@ func TestDefaultCheckerSourceActionsUsePermissionVerifier(t *testing.T) {
 	}
 	if got := verifier.actions; len(got) != 3 || got[0] != SourceActionRead || got[1] != SourceActionWrite || got[2] != SourceActionDelete {
 		t.Fatalf("source actions were not checked separately: %+v", got)
+	}
+}
+
+func TestDefaultCheckerDefaultOwnerPolicyAllowsEmptyTenantSource(t *testing.T) {
+	t.Parallel()
+
+	checker := NewDefaultChecker(&checkerStore{
+		source: store.Source{SourceID: "source-1", CreatedBy: "owner-1"},
+	})
+
+	if err := checker.CanWriteSource(context.Background(), Actor{UserID: "owner-1"}, "source-1"); err != nil {
+		t.Fatalf("expected owner to access empty-tenant source, got %v", err)
 	}
 }
 

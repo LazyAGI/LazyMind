@@ -1,5 +1,5 @@
 agent_id: "${LAZYMIND_FILE_WATCHER_AGENT_ID:-file-watcher-local-001}"
-tenant_id: "${LAZYMIND_FILE_WATCHER_TENANT_ID:-tenant-demo}"
+tenant_id: "${LAZYMIND_FILE_WATCHER_TENANT_ID:-}"
 agent_token: "${LAZYMIND_FILE_WATCHER_AGENT_TOKEN:-my-secret-token}"
 listen_addr: "${LAZYMIND_FILE_WATCHER_LISTEN_ADDR:-127.0.0.1:19090}"
 # Address advertised to control-plane. Use host.docker.internal when control-plane runs in a container.

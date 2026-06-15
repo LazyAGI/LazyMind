@@ -510,6 +510,9 @@ CREATE TABLE public.system_memories (
 CREATE TABLE public.system_user_preferences (
     id character varying(36) NOT NULL,
     content text DEFAULT ''::text NOT NULL,
+    agent_persona text DEFAULT ''::text NOT NULL,
+    user_address text DEFAULT ''::text NOT NULL,
+    response_style text DEFAULT ''::text NOT NULL,
     content_hash character varying(64) DEFAULT ''::character varying NOT NULL,
     version bigint DEFAULT 1 NOT NULL,
     draft_content text,
@@ -1247,7 +1250,6 @@ CREATE UNIQUE INDEX uk_user_selected_models_user_type ON public.user_selected_mo
 
 
 CREATE UNIQUE INDEX ukx_create_user_id_dataset_id ON public.default_datasets USING btree (create_user_id, dataset_id);
-
 
 
 
