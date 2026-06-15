@@ -412,6 +412,7 @@ services:
       LAZYMIND_DOCUMENT_SERVICE_PORT: "8000"
       LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
       LAZYMIND_DOCUMENT_SERVICE_CALLBACK_URL: http://doc-server:8000/v1/internal/callbacks/tasks
+      LAZYMIND_OPENSEARCH_URI: ${LAZYMIND_OPENSEARCH_URI:-https://opensearch:9200}
       LAZYMIND_DOCUMENT_SERVICE_STORAGE_DIR: /var/lib/lazymind/uploads
       LAZYMIND_RESET_ALGO_ON_STARTUP: ${LAZYMIND_RESET_ALGO_ON_STARTUP:-false}
       LAZYMIND_RESET_ALL_ON_STARTUP: ${LAZYMIND_RESET_ALL_ON_STARTUP:-false}
@@ -544,6 +545,7 @@ services:
       - sqlite-data:/data/sqlite
     environment:
       LAZYMIND_DOCUMENT_PROCESSOR_PORT: "8000"
+      LAZYMIND_OPENSEARCH_URI: ${LAZYMIND_OPENSEARCH_URI:-https://opensearch:9200}
       <<: [*runtime-home, *db-conn, *upload-paths, *llm-api-keys, *ocr-env, *trace-config]
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
       LAZYLLM_EXPECTED_LOG_MODULES: "all"
@@ -589,6 +591,7 @@ services:
       LAZYMIND_DOCUMENT_WORKER_HIGH_PRIORITY_TASK_TYPES: ""
       LAZYMIND_DOCUMENT_WORKER_HIGH_PRIORITY_ONLY: "false"
       LAZYMIND_DOCUMENT_WORKER_POLL_MODE: direct
+      LAZYMIND_OPENSEARCH_URI: ${LAZYMIND_OPENSEARCH_URI:-https://opensearch:9200}
       <<: [*runtime-home, *db-conn, *upload-paths, *llm-api-keys, *ocr-env, *trace-config]
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
       LAZYLLM_EXPECTED_LOG_MODULES: "all"
@@ -696,6 +699,7 @@ services:
       LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
       LAZYMIND_SEGMENT_STORE_TYPE: ${LAZYMIND_SEGMENT_STORE_TYPE:-opensearch}
       LAZYMIND_SEGMENT_STORE_URI_OR_PATH: ${LAZYMIND_SEGMENT_STORE_URI_OR_PATH:-https://opensearch:9200}
+      LAZYMIND_OPENSEARCH_URI: ${LAZYMIND_OPENSEARCH_URI:-https://opensearch:9200}
       LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
       LAZYMIND_MOUNT_BASE_DIR: /var/lib/lazymind/uploads
       LAZYMIND_AGENTIC_WORKSPACE: /tmp/.lazyllm_rag/agent_workspace
