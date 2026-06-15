@@ -749,7 +749,7 @@ export default function ExternalServicesPage() {
         await selectServiceProvider(activeService, savedGroup.id);
       }
 
-      message.success(t("modelProvider.external.baseUrlChanged"));
+      message.success(t("modelProvider.external.configSaved", { name: activeService.name }));
       void loadExternalServices(normalizedSearchValue);
       closeConfigModal();
     } catch (error) {

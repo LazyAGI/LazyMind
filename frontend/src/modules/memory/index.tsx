@@ -213,8 +213,8 @@ const getAutoEvoStatusMeta = (status?: string) => {
 };
 const hasDraftPreviewStatus = (record: ExperienceAsset) =>
   Boolean(record.hasPendingReviewSuggestions) ||
-  isReviewableSuggestionStatus(record.suggestionStatus) ||
-  Boolean(normalizeAutoEvoApplyStatus(record.autoEvoApplyStatus));
+  isPendingReviewStatus(record.reviewStatus) ||
+  isReviewableSuggestionStatus(record.suggestionStatus);
 const hasSkillDraftPreviewStatus = (record: StructuredAsset) =>
   Boolean(record.hasPendingReviewResult) ||
   Boolean(record.hasPendingReviewSuggestions) ||
@@ -497,7 +497,6 @@ export default function MemoryManagement() {
     userIds: [],
     message: "",
   });
-  const [shareRecords, setShareRecords] = useState<Record<string, ShareRecord>>({});
   const [shareUsers, setShareUsers] = useState<UserItem[]>([]);
   const [shareGroups, setShareGroups] = useState<GroupItem[]>([]);
   const [shareLoading, setShareLoading] = useState(false);
@@ -2734,8 +2733,6 @@ export default function MemoryManagement() {
     };
   };
 
-  const getShareKey = (tab: ShareableTab, itemId: string) => `${tab}:${itemId}`;
-
   const syncShareParams = (nextTab?: MemoryTab, nextItemId?: string) => {
     const nextSearchParams = new URLSearchParams(searchParams);
 
@@ -2859,14 +2856,8 @@ export default function MemoryManagement() {
   };
 
   const openShareModal = (tab: ShareableTab, item: StructuredAsset | ExperienceAsset) => {
-    const existingShare = shareRecords[getShareKey(tab, item.id)] || {
-      groupIds: [],
-      userIds: [],
-      message: "",
-    };
-
     setShareTarget({ tab, item });
-    setShareDraft(existingShare);
+    setShareDraft({ groupIds: [], userIds: [], message: "" });
     setShareModalOpen(true);
   };
 
@@ -4815,15 +4806,6 @@ export default function MemoryManagement() {
       }
     }
 
-    setShareRecords((previous) => ({
-      ...previous,
-      [getShareKey(shareTarget.tab, shareTarget.item.id)]: {
-        groupIds: shareDraft.groupIds,
-        userIds: shareDraft.userIds,
-        message: shareDraft.message,
-      },
-    }));
-
     message.success(t("admin.memoryShareSuccess"));
     if (shareTarget.tab === "skills") {
       void refreshSkillShareCenter({ silent: true });
@@ -5306,7 +5288,7 @@ export default function MemoryManagement() {
   const genericColumns: ColumnsType<StructuredAsset> = [
     ...structuredInfoColumns,
     {
-      title: t("admin.memoryAutoEvo"),
+      title: t("admin.memoryAutoUpdate"),
       key: "autoEvo",
       width: 90,
       render: (_value, record) => {
@@ -5817,7 +5799,7 @@ export default function MemoryManagement() {
       render: (_value, record) => {
         const pendingProposal = getPendingProposal("experience", record.id);
         const hasReviewableDraft = hasDraftPreviewStatus(record);
-        const showPendingTag = Boolean(pendingProposal) || hasReviewableDraft;
+        const showPendingTag = !record.autoEvo && (Boolean(pendingProposal) || hasReviewableDraft);
         const autoEvoStatusMeta = record.autoEvo
           ? getAutoEvoStatusMeta(record.autoEvoApplyStatus)
           : null;
@@ -5874,7 +5856,7 @@ export default function MemoryManagement() {
         ),
     },
     {
-      title: t("admin.memoryAutoEvo"),
+      title: t("admin.memoryAutoUpdate"),
       key: "autoEvo",
       width: 90,
       render: (_value, record) => (
