@@ -256,11 +256,19 @@ def _config_cmd(env: dict[str, str]) -> str:
     base_url, key_env = env.get('OPENCODE_PROVIDER_BASE_URL', ''), env.get('OPENCODE_PROVIDER_KEY_ENV', '')
     config: dict[str, Any] = {'$schema': 'https://opencode.ai/config.json', 'permission': PERMISSIONS}
     if provider and model and base_url and key_env and env.get(key_env):
+        # Custom base URLs (inner lazyllm, proxies) must use chat-completions via
+        # openai-compatible; @ai-sdk/openai routes through Responses API which inner
+        # endpoints reject for tool use.
+        official = base_url.rstrip('/').endswith('api.openai.com/v1')
+        npm = '@ai-sdk/openai' if provider == 'openai' and official else '@ai-sdk/openai-compatible'
+        model_cfg: dict[str, Any] = {'name': model, 'tool_call': True}
+        if not official:
+            model_cfg['limit'] = {'context': 32768, 'output': 1024}
         config['provider'] = {provider: {
-            'npm': '@ai-sdk/openai-compatible',
+            'npm': npm,
             'name': env.get('OPENCODE_PROVIDER_LABEL') or provider,
             'options': {'baseURL': base_url, 'apiKey': f'{{env:{key_env}}}'},
-            'models': {model: {'name': model}},
+            'models': {model: model_cfg},
         }}
     return f'printf %s {shlex.quote(json.dumps(config, ensure_ascii=False))} > opencode.json;'
 
