@@ -49,6 +49,7 @@ import {
   splitThinkingContent,
   formatThinkingForDisplay,
 } from "@/modules/chat/utils/thinking";
+import { PluginPanel } from "@/modules/chat/components/PluginPanel";
 
 const ThinkIcon = new URL("../../assets/images/think.png", import.meta.url)
   .href;
@@ -1605,6 +1606,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
               </span>
             </div>
           )}
+
+          <PluginPanel conversationId={sessionId} />
 
           <ChatInput
             value={content}

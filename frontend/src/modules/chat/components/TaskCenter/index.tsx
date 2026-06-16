@@ -21,7 +21,6 @@ import {
   TaskStatus,
   useTaskCenterStore,
 } from "@/modules/chat/store/taskCenter";
-import { PluginPanel } from "@/modules/chat/components/PluginPanel";
 import { usePluginStore } from "@/modules/chat/store/pluginPanel";
 import { resolveCoreAssetUrl } from "@/modules/knowledge/utils/imageUrl";
 import "./index.scss";
@@ -435,7 +434,6 @@ const TaskCenter = (props: Props) => {
           </button>
         )}
       </div>
-      {sessionId && <PluginPanel conversationId={sessionId} />}
       <div className="task-center-filters">
         {filterDefs.map(({ key, label }) => (
           <button

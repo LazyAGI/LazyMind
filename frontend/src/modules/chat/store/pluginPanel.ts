@@ -113,7 +113,7 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
     }));
     try {
       const res = await PluginSessionApi().getLatestSession(conversationId);
-      const session: PluginSession | null = res?.data?.session ?? null;
+      const session: PluginSession | null = res?.data?.data?.session ?? null;
       get().setSession(conversationId, session);
     } catch {
       // ignore
@@ -127,7 +127,7 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
   refreshSlots: async (conversationId, sessionId) => {
     try {
       const res = await PluginSessionApi().getSlots(sessionId);
-      const slots: SlotRevision[] = res?.data?.slots ?? [];
+      const slots: SlotRevision[] = res?.data?.data?.slots ?? [];
       set((state) => {
         const session = state.sessionByConversation[conversationId];
         if (!session) return state;
@@ -188,7 +188,7 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
     if (cached) return cached;
     try {
       const res = await PluginInfoApi().getPlugin(pluginId);
-      const ui: PluginUI = res?.data?.ui ?? {};
+      const ui: PluginUI = res?.data?.data?.ui ?? res?.data?.ui ?? {};
       set((state) => ({
         pluginUIByPlugin: { ...state.pluginUIByPlugin, [pluginId]: ui },
       }));

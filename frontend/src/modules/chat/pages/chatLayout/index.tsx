@@ -567,7 +567,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         disabledDescription={autoRunning ? undefined : chatDisabledDescription}
         disabledAction={autoRunning ? undefined : chatDisabledAction}
       />
-      {(tasks.length > 0 || hasPluginSession) && isTaskPanelCollapsed && (
+      {tasks.length > 0 && isTaskPanelCollapsed && (
         <button
           type="button"
           className="task-panel-restore-btn"
@@ -578,7 +578,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           <span className="task-panel-restore-label">{t("taskCenter.panelTitle")} ({tasks.length})</span>
         </button>
       )}
-      {(tasks.length > 0 || hasPluginSession) && !isTaskPanelCollapsed && (
+      {tasks.length > 0 && !isTaskPanelCollapsed && (
         <div
           className="right-box"
           style={panelWidth ? { width: panelWidth, minWidth: panelWidth } : undefined}
