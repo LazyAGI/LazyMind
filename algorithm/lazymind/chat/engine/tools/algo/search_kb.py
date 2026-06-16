@@ -1,6 +1,6 @@
 from typing import Any, List, Optional
 
-from lazyllm import Document
+from lazyllm import Document, warp
 from lazyllm.tools.rag import Reranker, Retriever, TempDocRetriever
 from lazyllm.tools.rag.rank_fusion.reciprocal_rank_fusion import RRFFusion
 
@@ -45,16 +45,17 @@ def search_text(
 ):
     queries = payload['queries']
     files = (payload or {}).get('files')
-    all_nodes: List[Any] = []
+    user_id = payload['user_id']
+    filters = payload.get('filters') or {}
 
-    for query in queries:
-        expanded_query = get_vocab_manager(payload['user_id'])(query)
+    if files and tmp_retriever is None:
+        raise ValueError('tmp_retriever is required when payload.files is set')
+
+    def _process_one(query: str):
+        expanded_query = get_vocab_manager(user_id)(query)
         if files:
-            if tmp_retriever is None:
-                raise ValueError('tmp_retriever is required when payload.files is set')
             nodes = tmp_retriever(files, expanded_query, topk=retriever_topk)
         else:
-            filters = payload.get('filters') or {}
             nodes = tuple(
                 result for result in (
                     retriever(expanded_query, filters=filters, topk=retriever_topk)
@@ -62,9 +63,9 @@ def search_text(
                 ) if result
             )
             nodes = RRFFusion(top_k=50)(nodes)
+        return reranker(nodes, query=expanded_query, topk=rerank_topk) if reranker else _pass_through_rerank(nodes)
 
-        nodes = reranker(nodes, query=expanded_query, topk=rerank_topk) if reranker else _pass_through_rerank(nodes)
-        all_nodes.append(nodes)
+    all_nodes = list(warp(_process_one, _concurrent=min(len(queries), 5))(*queries))
 
     merged = _merge_and_deduplicate(all_nodes)
     merged = adaptive_k(merged)
@@ -116,15 +117,17 @@ def search_kb(
         return text_nodes
 
     queries = payload['queries']
-    all_image_nodes: List[Any] = []
     filters = payload.get('filters') or {}
-    for query in queries:
+
+    def _image_one(query: str):
         image_nodes = image_retriever(query, filters=filters, topk=image_topk)
-        if image_nodes:
-            if isinstance(image_nodes, (list, tuple)):
-                all_image_nodes.append(list(image_nodes))
-            else:
-                all_image_nodes.append([image_nodes])
+        if not image_nodes:
+            return []
+        if isinstance(image_nodes, (list, tuple)):
+            return list(image_nodes)
+        return [image_nodes]
+
+    all_image_nodes = list(warp(_image_one, _concurrent=min(len(queries), 5))(*queries))
 
     merged_images = _merge_and_deduplicate(all_image_nodes)
     return list(text_nodes or []) + merged_images[:image_topk]
