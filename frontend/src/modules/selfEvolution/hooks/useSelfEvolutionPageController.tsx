@@ -192,6 +192,15 @@ type CaseArtifactState = {
   error?: string;
 };
 
+type EvalReportBadCasesState = {
+  reportId?: string;
+  loading: boolean;
+  loaded: boolean;
+  data?: unknown;
+  error?: string;
+  totalSize?: number;
+};
+
 const stageArtifactKindMap: Record<string, WorkflowResultKind> = {
   dataset: "datasets",
   eval: "eval-reports",
@@ -206,6 +215,7 @@ const artifactStepIdMap: Record<WorkflowResultKind, ArtifactPanelItem["stepId"]>
   diffs: "code-optimize",
   abtests: "ab-test",
 };
+const EVAL_REPORT_BAD_CASES_PAGE_SIZE = 1000;
 const legacyPlanningThinkingText = "正在理解你的请求并规划下一步。";
 
 const finalResultMetricLabels: Record<string, string> = {
@@ -247,6 +257,68 @@ function humanizeFinalResultReason(reason: string, primaryMetricLabel: string) {
     .replace(/target/gi, "门槛")
     .replace(/limit/gi, "上限")
     .replace(/_/g, " ");
+}
+
+function getEvalReportSourceRecord(resultData: unknown) {
+  const resultItems = getResultItems(resultData).filter(isRecord);
+  if (resultItems.length > 0) {
+    return resultItems[0];
+  }
+  return isRecord(resultData) ? resultData : undefined;
+}
+
+function getEvalReportPayloadRecord(sourceRecord: Record<string, unknown> | undefined) {
+  return (
+    getStructuredRecordField(sourceRecord, ["data"]) ||
+    getNestedRecordField(sourceRecord, ["data"]) ||
+    sourceRecord
+  );
+}
+
+function getEvalReportId(resultData: unknown) {
+  const sourceRecord = getEvalReportSourceRecord(resultData);
+  const reportRecord = getEvalReportPayloadRecord(sourceRecord);
+
+  return (
+    getStringField(sourceRecord, ["report_id", "reportId"]) ||
+    getStringField(reportRecord, ["report_id", "reportId"])
+  );
+}
+
+function getEvalReportBadCaseListRecords(resultData: unknown): Record<string, unknown>[] {
+  if (Array.isArray(resultData)) {
+    return resultData.filter(isRecord);
+  }
+  if (!isRecord(resultData)) {
+    return [];
+  }
+
+  const payloadRecord = getEvalReportPayloadRecord(resultData);
+  return (getStructuredArrayField(payloadRecord, ["items"]) || []).filter(isRecord);
+}
+
+function buildPxCaseDetailRows(caseRecords: Record<string, unknown>[]) {
+  const seen = new Set<string>();
+
+  return caseRecords.flatMap((item, index): PxCaseDetailRow[] => {
+    const caseId = getStringField(item, ["case_id", "caseId", "case", "id"]) || `case-${index + 1}`;
+    if (seen.has(caseId)) {
+      return [];
+    }
+    seen.add(caseId);
+    const score = getNumberField(item, ["score", "metric_score", "answer_correctness", "value"]);
+
+    return [{
+      key: caseId,
+      caseId,
+      question: getStringField(item, ["query", "question", "prompt", "Question"]) || "-",
+      score: typeof score === "number" ? score.toFixed(2) : "-",
+      failureType: getStringField(item, ["failure_type", "failureType", "failure_reason", "fail_reason", "category"]) || "-",
+      defect: getStringField(item, ["Defect", "defect"]) || "-",
+      reason: getStringField(item, ["Reason", "reason", "failure_detail"]) || "-",
+      traceId: getStringField(item, ["trace_id", "traceId"]) || "-",
+    }];
+  });
 }
 
 export type SelfEvolutionPageRenderProps = {
@@ -308,6 +380,10 @@ export function SelfEvolutionPageController({
   const [workflowResults, setWorkflowResults] = useState<WorkflowResultsState>(
     createInitialWorkflowResultsState,
   );
+  const [evalReportBadCases, setEvalReportBadCases] = useState<EvalReportBadCasesState>({
+    loading: false,
+    loaded: false,
+  });
   const [liveCheckpointWaitPrompt, setLiveCheckpointWaitPrompt] = useState<CheckpointWaitPrompt>();
   const [terminalFlowStepStatus, setTerminalFlowStepStatus] = useState<StepStatus>();
   const [diffArtifactContent, setDiffArtifactContent] = useState<DiffArtifactContentState>({
@@ -571,62 +647,33 @@ export function SelfEvolutionPageController({
   );
   const pxReportCategoryMetrics = fetchedPxCategoryMetricAverages;
   const isSinglePxCategory = pxReportCategoryMetrics.length === 1;
+  const evalReportSourceRecord = useMemo(
+    () => getEvalReportSourceRecord(workflowResults["eval-reports"].data),
+    [workflowResults["eval-reports"].data],
+  );
+  const evalReportId = useMemo(
+    () => getEvalReportId(workflowResults["eval-reports"].data),
+    [workflowResults["eval-reports"].data],
+  );
   const pxReportTotalCases = useMemo(() => {
-    const sourceRecord = Array.isArray(workflowResults["eval-reports"].data)
-      ? (workflowResults["eval-reports"].data.find((item): item is Record<string, unknown> => isRecord(item)) ??
-        undefined)
-      : isRecord(workflowResults["eval-reports"].data)
-        ? workflowResults["eval-reports"].data
-        : undefined;
     const caseDetailSummary =
-      getStructuredRecordField(sourceRecord, ["case_details_summary"]) ||
-      getNestedRecordField(sourceRecord, ["case_details_summary"]);
+      getStructuredRecordField(evalReportSourceRecord, ["case_details_summary"]) ||
+      getNestedRecordField(evalReportSourceRecord, ["case_details_summary"]);
 
     return (
       getNumberField(caseDetailSummary, ["total_count"]) ||
-      getNumberField(sourceRecord, ["total_cases"]) ||
+      getNumberField(evalReportSourceRecord, ["total_cases", "case_count"]) ||
       pxReportCategoryMetrics.reduce((total, item) => total + item.caseCount, 0)
     );
-  }, [pxReportCategoryMetrics, workflowResults]);
-  const pxCaseDetailRows = useMemo<PxCaseDetailRow[]>(() => {
-    const sourceRecord = Array.isArray(workflowResults["eval-reports"].data)
-      ? (workflowResults["eval-reports"].data.find((item): item is Record<string, unknown> => isRecord(item)) ??
-        undefined)
-      : isRecord(workflowResults["eval-reports"].data)
-        ? workflowResults["eval-reports"].data
-        : undefined;
-    const reportRecord = getStructuredRecordField(sourceRecord, ["data"]) || getNestedRecordField(sourceRecord, ["data"]) || sourceRecord;
-    const caseRecords = [
-      ...(getStructuredArrayField(reportRecord, ["bad_cases"]) || []),
-      ...(getStructuredArrayField(reportRecord, ["badcases"]) || []),
-      ...(getStructuredArrayField(reportRecord, ["badcase_list"]) || []),
-      ...(getStructuredArrayField(reportRecord, ["cases"]) || []),
-      ...(getStructuredArrayField(reportRecord, ["rows"]) || []),
-      ...(getStructuredArrayField(reportRecord, ["records"]) || []),
-      ...(getStructuredArrayField(reportRecord, ["items"]) || []),
-    ].filter(isRecord);
-    const seen = new Set<string>();
-
-    return caseRecords.flatMap((item, index): PxCaseDetailRow[] => {
-      const caseId = getStringField(item, ["case_id", "caseId", "case", "id"]) || `case-${index + 1}`;
-      if (seen.has(caseId)) {
-        return [];
-      }
-      seen.add(caseId);
-      const score = getNumberField(item, ["score", "metric_score", "answer_correctness", "value"]);
-
-      return [{
-        key: caseId,
-        caseId,
-        question: getStringField(item, ["query", "question", "prompt"]) || "-",
-        score: typeof score === "number" ? score.toFixed(2) : "-",
-        failureType: getStringField(item, ["failure_type", "failure_reason", "fail_reason", "category"]) || "-",
-        defect: getStringField(item, ["defect"]) || "-",
-        reason: getStringField(item, ["reason", "failure_detail"]) || "-",
-        traceId: getStringField(item, ["trace_id", "traceId"]) || "-",
-      }];
-    });
-  }, [workflowResults]);
+  }, [evalReportSourceRecord, pxReportCategoryMetrics]);
+  const pxCaseDetailRows = useMemo<PxCaseDetailRow[]>(
+    () => buildPxCaseDetailRows(getEvalReportBadCaseListRecords(evalReportBadCases.data)),
+    [evalReportBadCases.data],
+  );
+  const pxCaseDetailCount =
+    evalReportBadCases.loaded && typeof evalReportBadCases.totalSize === "number"
+      ? evalReportBadCases.totalSize
+      : pxCaseDetailRows.length;
   const pxCaseDetailColumns = useMemo<ColumnsType<PxCaseDetailRow>>(
     () => [
       { title: "Case", dataIndex: "caseId", key: "caseId", width: 126 },
@@ -1113,6 +1160,69 @@ export function SelfEvolutionPageController({
     },
     [activeThreadId],
   );
+  const fetchEvalReportBadCases = useCallback(
+    async (resultData: unknown, options?: { force?: boolean }) => {
+      const reportId = getEvalReportId(resultData);
+      if (!activeThreadId || !reportId) {
+        setEvalReportBadCases({ loading: false, loaded: false });
+        return undefined;
+      }
+
+      if (
+        !options?.force &&
+        evalReportBadCases.reportId === reportId &&
+        (evalReportBadCases.loading || evalReportBadCases.loaded)
+      ) {
+        return evalReportBadCases.data;
+      }
+
+      setEvalReportBadCases((prev) => ({
+        ...prev,
+        reportId,
+        loading: true,
+        loaded: prev.reportId === reportId ? prev.loaded : false,
+        data: prev.reportId === reportId ? prev.data : undefined,
+        error: undefined,
+        totalSize: prev.reportId === reportId ? prev.totalSize : undefined,
+      }));
+
+      try {
+        const response = await axiosInstance.get(
+          `${AGENT_API_BASE}/threads/${encodeURIComponent(activeThreadId)}/results/eval-reports/${encodeURIComponent(reportId)}/bad-cases`,
+          { params: { page_size: EVAL_REPORT_BAD_CASES_PAGE_SIZE } },
+        );
+        const responseRecord = isRecord(response.data) ? response.data : undefined;
+        const totalSize =
+          getNumberField(responseRecord, ["total_size", "total_count", "total"]) ??
+          getEvalReportBadCaseListRecords(response.data).length;
+
+        setEvalReportBadCases({
+          reportId,
+          loading: false,
+          loaded: true,
+          data: response.data,
+          totalSize,
+        });
+        return response.data;
+      } catch (error) {
+        setEvalReportBadCases((prev) => ({
+          ...prev,
+          reportId,
+          loading: false,
+          loaded: true,
+          error: getLocalizedErrorMessage(error, "数据列表加载失败，请稍后重试。"),
+        }));
+        return undefined;
+      }
+    },
+    [
+      activeThreadId,
+      evalReportBadCases.data,
+      evalReportBadCases.loaded,
+      evalReportBadCases.loading,
+      evalReportBadCases.reportId,
+    ],
+  );
   const fetchWorkflowResult = useCallback(
     async (kind: WorkflowResultKind, options?: { force?: boolean }) => {
       if (!activeThreadId) {
@@ -1122,6 +1232,9 @@ export function SelfEvolutionPageController({
 
       const currentState = workflowResults[kind];
       if (!options?.force && (currentState.loading || currentState.loaded)) {
+        if (kind === "eval-reports" && currentState.loaded) {
+          void fetchEvalReportBadCases(currentState.data);
+        }
         return currentState.data;
       }
 
@@ -1140,6 +1253,9 @@ export function SelfEvolutionPageController({
             data: response.data,
           },
         }));
+        if (kind === "eval-reports") {
+          void fetchEvalReportBadCases(response.data, { force: options?.force });
+        }
         return response.data;
       } catch (error) {
         setWorkflowResults((prev) => ({
@@ -1154,7 +1270,7 @@ export function SelfEvolutionPageController({
         return undefined;
       }
     },
-    [activeThreadId, getWorkflowResultUrl, workflowResults],
+    [activeThreadId, fetchEvalReportBadCases, getWorkflowResultUrl, workflowResults],
   );
   const handleWorkflowDownload = useCallback(
     async (
@@ -1311,6 +1427,7 @@ export function SelfEvolutionPageController({
 
   useEffect(() => {
     setWorkflowResults(createInitialWorkflowResultsState());
+    setEvalReportBadCases({ loading: false, loaded: false });
     setActiveArtifactKind(undefined);
     setIsArtifactPanelOpen(false);
     setCaseArtifact(undefined);
@@ -3489,9 +3606,25 @@ export function SelfEvolutionPageController({
       <div className="self-evolution-px-case-section">
         <div className="self-evolution-px-case-section-head">
           <Text>数据列表</Text>
-          <Text>{`${pxCaseDetailRows.length} 条`}</Text>
+          <Text>{`${pxCaseDetailCount} 条`}</Text>
         </div>
-        {pxCaseDetailRows.length === 0 ? (
+        {evalReportBadCases.loading ? (
+          <div className="self-evolution-result-state is-loading">
+            <LoadingOutlined spin />
+            <span>正在请求数据列表接口...</span>
+          </div>
+        ) : evalReportBadCases.error ? (
+          <div className="self-evolution-result-state is-error" role="alert">
+            <span>{evalReportBadCases.error}</span>
+            <button
+              type="button"
+              disabled={!evalReportId}
+              onClick={() => void fetchEvalReportBadCases(workflowResults["eval-reports"].data, { force: true })}
+            >
+              重试
+            </button>
+          </div>
+        ) : pxCaseDetailRows.length === 0 ? (
           <Paragraph className="self-evolution-px-empty">当前报告无可展示的数据列表。</Paragraph>
         ) : (
           <Table<PxCaseDetailRow>

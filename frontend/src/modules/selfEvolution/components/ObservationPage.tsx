@@ -82,6 +82,14 @@ type ObservationPageState = {
   isFallback?: boolean;
 };
 
+type EvalBadcaseListState = {
+  reportId?: string;
+  loading: boolean;
+  loaded: boolean;
+  data?: unknown;
+  error?: string;
+};
+
 type CsvBadcaseRow = {
   caseId: string;
   query: string;
@@ -156,6 +164,7 @@ const observationKindMap: Record<string, ObservationResultKind> = {
 const fallbackObservationData: Partial<Record<ObservationResultKind, unknown>> = {
   abtests: traceCompareFixture,
 };
+const EVAL_BADCASE_PAGE_SIZE = 1000;
 
 const fallbackAbCaseRows: AbCaseRow[] = [
   {
@@ -442,12 +451,12 @@ function normalizeBadcaseRows(value: unknown): CsvBadcaseRow[] {
       score,
       failureType,
       failureTone: score < 0.5 ? "orange" : score < 0.6 ? "red" : "blue",
-      defect: getStringField(item, ["defect"]) || "-",
-      reason: getStringField(item, ["reason", "failure_detail"]) || failureType,
+      defect: getStringField(item, ["Defect", "defect"]) || "-",
+      reason: getStringField(item, ["Reason", "reason", "failure_detail"]) || failureType,
       mode: getStringField(item, ["mode", "execution_mode"]) || "Agentic RAG",
       traceId: getStringField(item, ["trace_id", "traceId"]) || "-",
       traceStatus: getStringField(item, ["trace_status", "traceStatus"]) || "已关联",
-      failureReason: getStringField(item, ["failure_detail", "failure_reason", "fail_reason", "reason"]) || failureType,
+      failureReason: getStringField(item, ["failure_detail", "failure_reason", "fail_reason", "Reason", "reason"]) || failureType,
       tracePayload: item.trace || item.observation || item.trace_detail,
     };
   });
@@ -587,13 +596,19 @@ function MetricCard({
 function EvalReportPanel({
   summary,
   rows,
+  rowsError,
+  rowsLoading,
   selectedCaseId,
   onSelectCase,
+  onReloadRows,
 }: {
   summary: EvalReportSummary;
   rows: CsvBadcaseRow[];
+  rowsError?: string;
+  rowsLoading?: boolean;
   selectedCaseId: string;
   onSelectCase: (caseId: string) => void;
+  onReloadRows: () => void;
 }) {
   const selectedRow = rows.find((item) => item.caseId === selectedCaseId) || rows[0];
   const columns: ColumnsType<CsvBadcaseRow> = [
@@ -652,7 +667,7 @@ function EvalReportPanel({
       <div className="self-evolution-eval-badcase-panel">
         <div className="self-evolution-eval-section-title">
           <Text strong>Badcase 列表</Text>
-          <span>来自 eval_report.data.bad_cases</span>
+          <span>来自 eval-reports/{summary.reportId}/bad-cases</span>
         </div>
         <div className="self-evolution-eval-filter-row">
           <label>
@@ -673,19 +688,29 @@ function EvalReportPanel({
           </label>
           <Button size="small">重置</Button>
         </div>
-        <Table<CsvBadcaseRow>
-          className="self-evolution-eval-badcase-table"
-          size="small"
-          rowKey="caseId"
-          columns={columns}
-          dataSource={rows}
-          pagination={false}
-          rowClassName={(row) => row.caseId === selectedCaseId ? "is-selected" : ""}
-          scroll={{ x: 1052 }}
-          onRow={(row) => ({
-            onClick: () => onSelectCase(row.caseId),
-          })}
-        />
+        {rowsError ? (
+          <Alert
+            type="error"
+            showIcon
+            message={rowsError}
+            action={<Button size="small" onClick={onReloadRows}>重试</Button>}
+          />
+        ) : (
+          <Table<CsvBadcaseRow>
+            className="self-evolution-eval-badcase-table"
+            size="small"
+            rowKey="caseId"
+            columns={columns}
+            dataSource={rows}
+            loading={rowsLoading}
+            pagination={false}
+            rowClassName={(row) => row.caseId === selectedCaseId ? "is-selected" : ""}
+            scroll={{ x: 1052 }}
+            onRow={(row) => ({
+              onClick: () => onSelectCase(row.caseId),
+            })}
+          />
+        )}
       </div>
       {selectedRow && (
         <div className="self-evolution-eval-case-result">
@@ -910,8 +935,13 @@ function EvalObservationDashboard({
   isMenuCollapsed?: boolean;
   toggleMenu?: () => void;
 }) {
-  const rows = useMemo(() => normalizeBadcaseRows(data), [data]);
   const summary = useMemo(() => normalizeEvalReportSummary(data), [data]);
+  const [badcaseReloadToken, setBadcaseReloadToken] = useState(0);
+  const [badcaseState, setBadcaseState] = useState<EvalBadcaseListState>({
+    loading: false,
+    loaded: false,
+  });
+  const rows = useMemo(() => normalizeBadcaseRows(badcaseState.data), [badcaseState.data]);
   const [selectedCaseId, setSelectedCaseId] = useState(rows[0]?.caseId || "");
   const [traceState, setTraceState] = useState<{
     loading: boolean;
@@ -924,6 +954,58 @@ function EvalObservationDashboard({
     return normalizeTraceObservation(traceState.data) || normalizeTraceObservation(selectedRow?.tracePayload);
   }, [selectedRow, traceState.data]);
   const detail = getPrimaryObservation(selectedObservation);
+
+  useEffect(() => {
+    if (!threadId || !summary.reportId || summary.reportId === "-") {
+      setBadcaseState({ loading: false, loaded: false });
+      return;
+    }
+
+    const controller = new AbortController();
+    setBadcaseState((prev) => ({
+      reportId: summary.reportId,
+      loading: true,
+      loaded: prev.reportId === summary.reportId ? prev.loaded : false,
+      data: prev.reportId === summary.reportId ? prev.data : undefined,
+      error: undefined,
+    }));
+
+    axiosInstance
+      .get(
+        `${AGENT_API_BASE}/threads/${encodeURIComponent(threadId)}/results/eval-reports/${encodeURIComponent(summary.reportId)}/bad-cases`,
+        {
+          params: { page_size: EVAL_BADCASE_PAGE_SIZE },
+          signal: controller.signal,
+        },
+      )
+      .then((response) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setBadcaseState({
+          reportId: summary.reportId,
+          loading: false,
+          loaded: true,
+          data: response.data,
+        });
+      })
+      .catch((error) => {
+        if (isCanceledRequest(error) || controller.signal.aborted) {
+          return;
+        }
+        setBadcaseState((prev) => ({
+          ...prev,
+          reportId: summary.reportId,
+          loading: false,
+          loaded: true,
+          error: getLocalizedErrorMessage(error, "Badcase 列表加载失败，请稍后重试。"),
+        }));
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [badcaseReloadToken, summary.reportId, threadId]);
 
   useEffect(() => {
     if (!rows.some((item) => item.caseId === selectedCaseId)) {
@@ -988,7 +1070,15 @@ function EvalObservationDashboard({
       </header>
       {notice && <Alert type="warning" showIcon message={notice} />}
       <div className="self-evolution-eval-dashboard-grid">
-        <EvalReportPanel summary={summary} rows={rows} selectedCaseId={selectedCaseId} onSelectCase={setSelectedCaseId} />
+        <EvalReportPanel
+          summary={summary}
+          rows={rows}
+          rowsError={badcaseState.error}
+          rowsLoading={badcaseState.loading}
+          selectedCaseId={selectedCaseId}
+          onSelectCase={setSelectedCaseId}
+          onReloadRows={() => setBadcaseReloadToken((prev) => prev + 1)}
+        />
         {selectedRow ? (
           traceState.loading ? (
             <section className="self-evolution-eval-trace-card" aria-label="Agentic RAG 观测详情">

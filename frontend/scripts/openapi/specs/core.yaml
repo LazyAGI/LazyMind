@@ -2594,6 +2594,74 @@ components:
                 - user_model_provider_group_id
                 - user_model_provider_id
             type: object
+        agentEvalReportBadCaseListItemOpenAPIResponse:
+            properties:
+                Defect:
+                    type: string
+                Reason:
+                    type: string
+                case_id:
+                    type: string
+                failure_type:
+                    type: string
+                trace_id:
+                    type: string
+            type: object
+        agentEvalReportBadCaseListOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/agentEvalReportBadCaseListItemOpenAPIResponse'
+                    type: array
+                next_page_token:
+                    type: string
+                total_size:
+                    type: integer
+            required:
+                - next_page_token
+                - total_size
+            type: object
+        agentEvalReportResultOpenAPIResponse:
+            properties:
+                artifact_id:
+                    type: string
+                artifact_ref:
+                    type: string
+                bad_case_count:
+                    type: integer
+                case_count:
+                    type: integer
+                data:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                report_id:
+                    type: string
+                schema:
+                    type: string
+                trace_coverage:
+                    $ref: '#/components/schemas/agentEvalReportTraceCoverageOpenAPIResponse'
+            required:
+                - artifact_id
+                - artifact_ref
+                - case_count
+                - schema
+            type: object
+        agentEvalReportTraceCoverageOpenAPIResponse:
+            properties:
+                covered_count:
+                    type: integer
+                rate:
+                    format: double
+                    type: number
+                total_count:
+                    type: integer
+            required:
+                - covered_count
+                - rate
+                - total_count
+            type: object
         agentFileContentOpenAPIRequest:
             properties:
                 path:
@@ -2894,7 +2962,7 @@ components:
                     type: string
                 content_summary:
                     type: string
-                has_pending_review_suggestions:
+                has_pending_review_result:
                     type: boolean
                 latest_version_change:
                     $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
@@ -2904,7 +2972,7 @@ components:
                     type: string
                 response_style:
                     type: string
-                suggestion_status:
+                review_status:
                     type: string
                 title:
                     type: string
@@ -2920,10 +2988,10 @@ components:
                 - auto_evo_generation
                 - content
                 - content_summary
-                - has_pending_review_suggestions
+                - has_pending_review_result
                 - resource_id
                 - resource_type
-                - suggestion_status
+                - review_status
                 - title
                 - version
             type: object
@@ -2968,6 +3036,10 @@ components:
         memoryReviewResultOpenAPIResponse:
             properties:
                 content:
+                    type: string
+                current_content:
+                    type: string
+                diff:
                     type: string
                 id:
                     type: string
@@ -3367,7 +3439,7 @@ components:
                     type: string
                 file_ext:
                     type: string
-                has_pending_review_suggestions:
+                has_pending_review_result:
                     type: boolean
                 is_enabled:
                     type: boolean
@@ -3383,9 +3455,9 @@ components:
                     type: string
                 parent_skill_name:
                     type: string
-                skill_id:
+                review_status:
                     type: string
-                suggestion_status:
+                skill_id:
                     type: string
                 update_status:
                     type: string
@@ -3400,15 +3472,15 @@ components:
                 - content
                 - description
                 - file_ext
-                - has_pending_review_suggestions
+                - has_pending_review_result
                 - is_enabled
                 - name
                 - node_type
                 - parent_id
                 - parent_skill_id
                 - parent_skill_name
+                - review_status
                 - skill_id
-                - suggestion_status
                 - update_status
                 - version
             type: object
@@ -3435,7 +3507,7 @@ components:
                     type: string
                 file_ext:
                     type: string
-                has_pending_review_suggestions:
+                has_pending_review_result:
                     type: boolean
                 is_enabled:
                     type: boolean
@@ -3451,9 +3523,9 @@ components:
                     type: string
                 parent_skill_name:
                     type: string
-                skill_id:
+                review_status:
                     type: string
-                suggestion_status:
+                skill_id:
                     type: string
                 tags:
                     items:
@@ -3473,15 +3545,15 @@ components:
                 - content
                 - description
                 - file_ext
-                - has_pending_review_suggestions
+                - has_pending_review_result
                 - is_enabled
                 - name
                 - node_type
                 - parent_id
                 - parent_skill_id
                 - parent_skill_name
+                - review_status
                 - skill_id
-                - suggestion_status
                 - update_status
                 - version
             type: object
@@ -3507,6 +3579,10 @@ components:
                     type: string
                 outdated:
                     type: boolean
+                review_result_id:
+                    type: string
+                review_status:
+                    type: string
                 skill_id:
                     type: string
             required:
@@ -3516,6 +3592,8 @@ components:
                 - draft_source_version
                 - draft_status
                 - outdated
+                - review_result_id
+                - review_status
                 - skill_id
             type: object
         skillGenerateOpenAPIRequest:
@@ -3557,7 +3635,7 @@ components:
                     type: string
                 file_ext:
                     type: string
-                has_pending_review_suggestions:
+                has_pending_review_result:
                     type: boolean
                 is_enabled:
                     type: boolean
@@ -3573,9 +3651,9 @@ components:
                     type: string
                 parent_skill_name:
                     type: string
-                skill_id:
+                review_status:
                     type: string
-                suggestion_status:
+                skill_id:
                     type: string
                 update_status:
                     type: string
@@ -3589,15 +3667,15 @@ components:
                 - auto_evo_generation
                 - description
                 - file_ext
-                - has_pending_review_suggestions
+                - has_pending_review_result
                 - is_enabled
                 - name
                 - node_type
                 - parent_id
                 - parent_skill_id
                 - parent_skill_name
+                - review_status
                 - skill_id
-                - suggestion_status
                 - update_status
                 - version
             type: object
@@ -3620,7 +3698,7 @@ components:
                     type: array
                 description:
                     type: string
-                has_pending_review_suggestions:
+                has_pending_review_result:
                     type: boolean
                 is_enabled:
                     type: boolean
@@ -3630,9 +3708,9 @@ components:
                     type: string
                 node_type:
                     type: string
-                skill_id:
+                review_status:
                     type: string
-                suggestion_status:
+                skill_id:
                     type: string
                 tags:
                     items:
@@ -3650,12 +3728,12 @@ components:
                 - auto_evo_generation
                 - category
                 - description
-                - has_pending_review_suggestions
+                - has_pending_review_result
                 - is_enabled
                 - name
                 - node_type
+                - review_status
                 - skill_id
-                - suggestion_status
                 - update_status
                 - version
             type: object
@@ -3697,6 +3775,8 @@ components:
         skillReviewResultOpenAPIResponse:
             properties:
                 current_content:
+                    type: string
+                diff:
                     type: string
                 id:
                     type: string
@@ -3954,6 +4034,13 @@ components:
                 - status_summary
                 - total
             type: object
+        skillTagsOpenAPIResponse:
+            properties:
+                tags:
+                    items:
+                        type: string
+                    type: array
+            type: object
         skillUpdateManagedOpenAPIRequest:
             properties:
                 auto_evo:
@@ -4126,12 +4213,18 @@ components:
                     type: integer
                 draft_status:
                     type: string
+                review_result_id:
+                    type: string
+                review_status:
+                    type: string
             required:
                 - current_content
                 - diff
                 - draft_content
                 - draft_source_version
                 - draft_status
+                - review_result_id
+                - review_status
             type: object
         systemGenerateOpenAPIResponse:
             properties:
@@ -4502,6 +4595,7 @@ paths:
             summary: GET /agent/threads/{thread_id}/results/diffs
     /api/core/agent/threads/{thread_id}/results/eval-reports:
         get:
+            description: Returns eval report artifact rows from Evo, with core-added report_id, bad_case_count, and trace_coverage when available. Existing report fields remain under data except bad_cases, which is served by the dedicated bad-case list endpoint.
             parameters:
                 - in: path
                   name: thread_id
@@ -4510,8 +4604,60 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                items:
+                                    $ref: '#/components/schemas/agentEvalReportResultOpenAPIResponse'
+                                type: array
+                    description: Eval report result rows
             summary: GET /agent/threads/{thread_id}/results/eval-reports
+            tags:
+                - agent
+    /api/core/agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases:
+        get:
+            description: Returns filtered, paginated bad cases for an eval report. keyword matches defect and reason text; failure_type matches exactly.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: report_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: page_token
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: failure_type
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agentEvalReportBadCaseListOpenAPIResponse'
+                    description: Eval report bad case list
+            summary: GET /agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases
+            tags:
+                - agent
     /api/core/agent/threads/{thread_id}/rounds:
         get:
             parameters:
@@ -8668,6 +8814,18 @@ paths:
             summary: List latest skill share status by target user
             tags:
                 - skill-shares
+    /api/core/skills/tags:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillTagsOpenAPIResponse'
+                    description: Skill tag list
+            summary: List skill tags
+            tags:
+                - skills
     /api/core/static-files/{path:.*}:
         get:
             parameters:

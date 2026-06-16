@@ -81,6 +81,33 @@ export interface AddWordGroupConflictToGroupsResponse {
     'skipped_groups'?: Array<string>;
     'word': string;
 }
+export interface AgentEvalReportBadCaseListItemOpenAPIResponse {
+    'Defect'?: string;
+    'Reason'?: string;
+    'case_id'?: string;
+    'failure_type'?: string;
+    'trace_id'?: string;
+}
+export interface AgentEvalReportBadCaseListOpenAPIResponse {
+    'items'?: Array<AgentEvalReportBadCaseListItemOpenAPIResponse>;
+    'next_page_token': string;
+    'total_size': number;
+}
+export interface AgentEvalReportResultOpenAPIResponse {
+    'artifact_id': string;
+    'artifact_ref': string;
+    'bad_case_count'?: number;
+    'case_count': number;
+    'data'?: { [key: string]: object; };
+    'report_id'?: string;
+    'schema': string;
+    'trace_coverage'?: AgentEvalReportTraceCoverageOpenAPIResponse;
+}
+export interface AgentEvalReportTraceCoverageOpenAPIResponse {
+    'covered_count': number;
+    'rate': number;
+    'total_count': number;
+}
 export interface AgentFileContentOpenAPIRequest {
     'path': string;
 }
@@ -889,12 +916,12 @@ export interface ManagedStateOpenAPIResponse {
     'auto_evo_generation': number;
     'content': string;
     'content_summary': string;
-    'has_pending_review_suggestions': boolean;
+    'has_pending_review_result': boolean;
     'latest_version_change'?: LatestVersionChangeOpenAPIResponse;
     'resource_id': string;
     'resource_type': string;
     'response_style'?: string;
-    'suggestion_status': string;
+    'review_status': string;
     'title': string;
     'user_address'?: string;
     'version': number;
@@ -917,6 +944,8 @@ export interface MemoryReviewResultListOpenAPIResponse {
 }
 export interface MemoryReviewResultOpenAPIResponse {
     'content': string;
+    'current_content'?: string;
+    'diff'?: string;
     'id': string;
     'operations'?: { [key: string]: object; };
     'review_status': string;
@@ -1199,7 +1228,7 @@ export interface SkillDetailChildOpenAPIResponse {
     'content': string;
     'description': string;
     'file_ext': string;
-    'has_pending_review_suggestions': boolean;
+    'has_pending_review_result': boolean;
     'is_enabled': boolean;
     'latest_version_change'?: LatestVersionChangeOpenAPIResponse;
     'name': string;
@@ -1207,8 +1236,8 @@ export interface SkillDetailChildOpenAPIResponse {
     'parent_id': string;
     'parent_skill_id': string;
     'parent_skill_name': string;
+    'review_status': string;
     'skill_id': string;
-    'suggestion_status': string;
     'update_status': string;
     'version': number;
 }
@@ -1222,7 +1251,7 @@ export interface SkillDetailOpenAPIResponse {
     'content': string;
     'description': string;
     'file_ext': string;
-    'has_pending_review_suggestions': boolean;
+    'has_pending_review_result': boolean;
     'is_enabled': boolean;
     'latest_version_change'?: LatestVersionChangeOpenAPIResponse;
     'name': string;
@@ -1230,8 +1259,8 @@ export interface SkillDetailOpenAPIResponse {
     'parent_id': string;
     'parent_skill_id': string;
     'parent_skill_name': string;
+    'review_status': string;
     'skill_id': string;
-    'suggestion_status': string;
     'tags'?: Array<string>;
     'update_status': string;
     'version': number;
@@ -1246,6 +1275,8 @@ export interface SkillDraftPreviewOpenAPIResponse {
     'draft_source_version': number;
     'draft_status': string;
     'outdated': boolean;
+    'review_result_id': string;
+    'review_status': string;
     'skill_id': string;
 }
 export interface SkillGenerateOpenAPIRequest {
@@ -1264,7 +1295,7 @@ export interface SkillListChildOpenAPIResponse {
     'auto_evo_generation': number;
     'description': string;
     'file_ext': string;
-    'has_pending_review_suggestions': boolean;
+    'has_pending_review_result': boolean;
     'is_enabled': boolean;
     'latest_version_change'?: LatestVersionChangeOpenAPIResponse;
     'name': string;
@@ -1272,8 +1303,8 @@ export interface SkillListChildOpenAPIResponse {
     'parent_id': string;
     'parent_skill_id': string;
     'parent_skill_name': string;
+    'review_status': string;
     'skill_id': string;
-    'suggestion_status': string;
     'update_status': string;
     'version': number;
 }
@@ -1285,13 +1316,13 @@ export interface SkillListItemOpenAPIResponse {
     'category': string;
     'children'?: Array<SkillListChildOpenAPIResponse>;
     'description': string;
-    'has_pending_review_suggestions': boolean;
+    'has_pending_review_result': boolean;
     'is_enabled': boolean;
     'latest_version_change'?: LatestVersionChangeOpenAPIResponse;
     'name': string;
     'node_type': string;
+    'review_status': string;
     'skill_id': string;
-    'suggestion_status': string;
     'tags'?: Array<string>;
     'update_status': string;
     'version': number;
@@ -1310,6 +1341,7 @@ export interface SkillReviewResultListOpenAPIResponse {
 }
 export interface SkillReviewResultOpenAPIResponse {
     'current_content'?: string;
+    'diff'?: string;
     'id': string;
     'requestid': string;
     'review_status': string;
@@ -1404,6 +1436,9 @@ export interface SkillShareTargetsOpenAPIResponse {
     'status_summary': SkillShareTargetStatusSummaryOpenAPIResponse;
     'total': number;
 }
+export interface SkillTagsOpenAPIResponse {
+    'tags'?: Array<string>;
+}
 export interface SkillUpdateManagedOpenAPIRequest {
     'auto_evo'?: boolean;
     'category'?: string;
@@ -1493,6 +1528,8 @@ export interface SystemDraftPreviewOpenAPIResponse {
     'draft_content': string;
     'draft_source_version': number;
     'draft_status': string;
+    'review_result_id': string;
+    'review_status': string;
 }
 export interface SystemGenerateOpenAPIResponse {
     'draft_content': string;
@@ -1833,6 +1870,98 @@ export const AgentApiAxiosParamCreator = function (configuration?: Configuration
                 options: localVarRequestOptions,
             };
         },
+        /**
+         * Returns eval report artifact rows from Evo, with core-added report_id, bad_case_count, and trace_coverage when available. Existing report fields remain under data except bad_cases, which is served by the dedicated bad-case list endpoint.
+         * @summary GET /agent/threads/{thread_id}/results/eval-reports
+         * @param {string} threadId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentThreadsThreadIdResultsEvalReportsGet: async (threadId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'threadId' is not null or undefined
+            assertParamExists('apiCoreAgentThreadsThreadIdResultsEvalReportsGet', 'threadId', threadId)
+            const localVarPath = `/api/core/agent/threads/{thread_id}/results/eval-reports`
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns filtered, paginated bad cases for an eval report. keyword matches defect and reason text; failure_type matches exactly.
+         * @summary GET /agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases
+         * @param {string} threadId
+         * @param {string} reportId
+         * @param {string} [pageToken]
+         * @param {number} [pageSize]
+         * @param {string} [keyword]
+         * @param {string} [failureType]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGet: async (threadId: string, reportId: string, pageToken?: string, pageSize?: number, keyword?: string, failureType?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'threadId' is not null or undefined
+            assertParamExists('apiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGet', 'threadId', threadId)
+            // verify required parameter 'reportId' is not null or undefined
+            assertParamExists('apiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGet', 'reportId', reportId)
+            const localVarPath = `/api/core/agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases`
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)))
+                .replace(`{${"report_id"}}`, encodeURIComponent(String(reportId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (pageToken !== undefined) {
+                localVarQueryParameter['page_token'] = pageToken;
+            }
+
+            if (pageSize !== undefined) {
+                localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            if (keyword !== undefined) {
+                localVarQueryParameter['keyword'] = keyword;
+            }
+
+            if (failureType !== undefined) {
+                localVarQueryParameter['failure_type'] = failureType;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
     }
 };
 
@@ -1869,6 +1998,37 @@ export const AgentApiFp = function(configuration?: Configuration) {
             const localVarOperationServerBasePath = operationServerMap['AgentApi.apiCoreAgentThreadsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
+        /**
+         * Returns eval report artifact rows from Evo, with core-added report_id, bad_case_count, and trace_coverage when available. Existing report fields remain under data except bad_cases, which is served by the dedicated bad-case list endpoint.
+         * @summary GET /agent/threads/{thread_id}/results/eval-reports
+         * @param {string} threadId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAgentThreadsThreadIdResultsEvalReportsGet(threadId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<Array<AgentEvalReportResultOpenAPIResponse>>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAgentThreadsThreadIdResultsEvalReportsGet(threadId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AgentApi.apiCoreAgentThreadsThreadIdResultsEvalReportsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns filtered, paginated bad cases for an eval report. keyword matches defect and reason text; failure_type matches exactly.
+         * @summary GET /agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases
+         * @param {string} threadId
+         * @param {string} reportId
+         * @param {string} [pageToken]
+         * @param {number} [pageSize]
+         * @param {string} [keyword]
+         * @param {string} [failureType]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGet(threadId: string, reportId: string, pageToken?: string, pageSize?: number, keyword?: string, failureType?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AgentEvalReportBadCaseListOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGet(threadId, reportId, pageToken, pageSize, keyword, failureType, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AgentApi.apiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
     }
 };
 
@@ -1898,6 +2058,26 @@ export const AgentApiFactory = function (configuration?: Configuration, basePath
         apiCoreAgentThreadsGet(requestParameters: AgentApiApiCoreAgentThreadsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<AgentThreadListOpenAPIResponse> {
             return localVarFp.apiCoreAgentThreadsGet(requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(axios, basePath));
         },
+        /**
+         * Returns eval report artifact rows from Evo, with core-added report_id, bad_case_count, and trace_coverage when available. Existing report fields remain under data except bad_cases, which is served by the dedicated bad-case list endpoint.
+         * @summary GET /agent/threads/{thread_id}/results/eval-reports
+         * @param {AgentApiApiCoreAgentThreadsThreadIdResultsEvalReportsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentThreadsThreadIdResultsEvalReportsGet(requestParameters: AgentApiApiCoreAgentThreadsThreadIdResultsEvalReportsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<Array<AgentEvalReportResultOpenAPIResponse>> {
+            return localVarFp.apiCoreAgentThreadsThreadIdResultsEvalReportsGet(requestParameters.threadId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns filtered, paginated bad cases for an eval report. keyword matches defect and reason text; failure_type matches exactly.
+         * @summary GET /agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases
+         * @param {AgentApiApiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGet(requestParameters: AgentApiApiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<AgentEvalReportBadCaseListOpenAPIResponse> {
+            return localVarFp.apiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGet(requestParameters.threadId, requestParameters.reportId, requestParameters.pageToken, requestParameters.pageSize, requestParameters.keyword, requestParameters.failureType, options).then((request) => request(axios, basePath));
+        },
     };
 };
 
@@ -1915,6 +2095,30 @@ export interface AgentApiApiCoreAgentThreadsGetRequest {
     readonly pageSize?: number
 
     readonly pageToken?: string
+}
+
+/**
+ * Request parameters for apiCoreAgentThreadsThreadIdResultsEvalReportsGet operation in AgentApi.
+ */
+export interface AgentApiApiCoreAgentThreadsThreadIdResultsEvalReportsGetRequest {
+    readonly threadId: string
+}
+
+/**
+ * Request parameters for apiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGet operation in AgentApi.
+ */
+export interface AgentApiApiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGetRequest {
+    readonly threadId: string
+
+    readonly reportId: string
+
+    readonly pageToken?: string
+
+    readonly pageSize?: number
+
+    readonly keyword?: string
+
+    readonly failureType?: string
 }
 
 /**
@@ -1941,6 +2145,28 @@ export class AgentApi extends BaseAPI {
      */
     public apiCoreAgentThreadsGet(requestParameters: AgentApiApiCoreAgentThreadsGetRequest = {}, options?: RawAxiosRequestConfig) {
         return AgentApiFp(this.configuration).apiCoreAgentThreadsGet(requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns eval report artifact rows from Evo, with core-added report_id, bad_case_count, and trace_coverage when available. Existing report fields remain under data except bad_cases, which is served by the dedicated bad-case list endpoint.
+     * @summary GET /agent/threads/{thread_id}/results/eval-reports
+     * @param {AgentApiApiCoreAgentThreadsThreadIdResultsEvalReportsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAgentThreadsThreadIdResultsEvalReportsGet(requestParameters: AgentApiApiCoreAgentThreadsThreadIdResultsEvalReportsGetRequest, options?: RawAxiosRequestConfig) {
+        return AgentApiFp(this.configuration).apiCoreAgentThreadsThreadIdResultsEvalReportsGet(requestParameters.threadId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns filtered, paginated bad cases for an eval report. keyword matches defect and reason text; failure_type matches exactly.
+     * @summary GET /agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases
+     * @param {AgentApiApiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGet(requestParameters: AgentApiApiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGetRequest, options?: RawAxiosRequestConfig) {
+        return AgentApiFp(this.configuration).apiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGet(requestParameters.threadId, requestParameters.reportId, requestParameters.pageToken, requestParameters.pageSize, requestParameters.keyword, requestParameters.failureType, options).then((request) => request(this.axios, this.basePath));
     }
 }
 
@@ -3308,39 +3534,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'threadId' is not null or undefined
             assertParamExists('apiCoreAgentThreadsThreadIdResultsDiffsGet', 'threadId', threadId)
             const localVarPath = `/api/core/agent/threads/{thread_id}/results/diffs`
-                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /agent/threads/{thread_id}/results/eval-reports
-         * @param {string} threadId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAgentThreadsThreadIdResultsEvalReportsGet: async (threadId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'threadId' is not null or undefined
-            assertParamExists('apiCoreAgentThreadsThreadIdResultsEvalReportsGet', 'threadId', threadId)
-            const localVarPath = `/api/core/agent/threads/{thread_id}/results/eval-reports`
                 .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -6477,19 +6670,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary GET /agent/threads/{thread_id}/results/eval-reports
-         * @param {string} threadId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAgentThreadsThreadIdResultsEvalReportsGet(threadId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAgentThreadsThreadIdResultsEvalReportsGet(threadId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAgentThreadsThreadIdResultsEvalReportsGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary POST /agent/threads/{thread_id}:retry
          * @param {string} threadId
          * @param {*} [options] Override http request option.
@@ -7732,16 +7912,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary GET /agent/threads/{thread_id}/results/eval-reports
-         * @param {DefaultApiApiCoreAgentThreadsThreadIdResultsEvalReportsGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAgentThreadsThreadIdResultsEvalReportsGet(requestParameters: DefaultApiApiCoreAgentThreadsThreadIdResultsEvalReportsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAgentThreadsThreadIdResultsEvalReportsGet(requestParameters.threadId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
          * @summary POST /agent/threads/{thread_id}:retry
          * @param {DefaultApiApiCoreAgentThreadsThreadIdRetryPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -8630,13 +8800,6 @@ export interface DefaultApiApiCoreAgentThreadsThreadIdResultsDiffsGetRequest {
 }
 
 /**
- * Request parameters for apiCoreAgentThreadsThreadIdResultsEvalReportsGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreAgentThreadsThreadIdResultsEvalReportsGetRequest {
-    readonly threadId: string
-}
-
-/**
  * Request parameters for apiCoreAgentThreadsThreadIdRetryPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreAgentThreadsThreadIdRetryPostRequest {
@@ -9377,17 +9540,6 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreAgentThreadsThreadIdResultsDiffsGet(requestParameters: DefaultApiApiCoreAgentThreadsThreadIdResultsDiffsGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreAgentThreadsThreadIdResultsDiffsGet(requestParameters.threadId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /agent/threads/{thread_id}/results/eval-reports
-     * @param {DefaultApiApiCoreAgentThreadsThreadIdResultsEvalReportsGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAgentThreadsThreadIdResultsEvalReportsGet(requestParameters: DefaultApiApiCoreAgentThreadsThreadIdResultsEvalReportsGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAgentThreadsThreadIdResultsEvalReportsGet(requestParameters.threadId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -18704,6 +18856,36 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
                 options: localVarRequestOptions,
             };
         },
+        /**
+         *
+         * @summary List skill tags
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSkillsTagsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/skills/tags`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
     }
 };
 
@@ -18836,6 +19018,18 @@ export const SkillsApiFp = function(configuration?: Configuration) {
             const localVarOperationServerBasePath = operationServerMap['SkillsApi.apiCoreSkillsSkillIdPatch']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
+        /**
+         *
+         * @summary List skill tags
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSkillsTagsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillTagsOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillsTagsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['SkillsApi.apiCoreSkillsTagsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
     }
 };
 
@@ -18934,6 +19128,15 @@ export const SkillsApiFactory = function (configuration?: Configuration, basePat
          */
         apiCoreSkillsSkillIdPatch(requestParameters: SkillsApiApiCoreSkillsSkillIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<SkillDetailOpenAPIResponse> {
             return localVarFp.apiCoreSkillsSkillIdPatch(requestParameters.skillId, requestParameters.skillUpdateManagedOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List skill tags
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSkillsTagsGet(options?: RawAxiosRequestConfig): AxiosPromise<SkillTagsOpenAPIResponse> {
+            return localVarFp.apiCoreSkillsTagsGet(options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -19114,6 +19317,16 @@ export class SkillsApi extends BaseAPI {
      */
     public apiCoreSkillsSkillIdPatch(requestParameters: SkillsApiApiCoreSkillsSkillIdPatchRequest, options?: RawAxiosRequestConfig) {
         return SkillsApiFp(this.configuration).apiCoreSkillsSkillIdPatch(requestParameters.skillId, requestParameters.skillUpdateManagedOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List skill tags
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSkillsTagsGet(options?: RawAxiosRequestConfig) {
+        return SkillsApiFp(this.configuration).apiCoreSkillsTagsGet(options).then((request) => request(this.axios, this.basePath));
     }
 }
 
