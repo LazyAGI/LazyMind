@@ -1,43 +1,72 @@
 initial: __start__
 
+# Retry semantics are expressed entirely through state-machine transitions:
+#
+#   Full retry  — the step self-loops (step_x → step_x).  The new execution
+#                 overwrites all artifacts produced by that step; existing
+#                 plugin_slot_revisions for the step's output slots have their
+#                 selected flag cleared before the new revision is written.
+#
+#   Partial retry — applies only to steps with list-cardinality slots.
+#                 When the user is unhappy with a subset of items (e.g. one
+#                 out of four collected materials), ChatAgent passes a
+#                 runtime_instruction to advance_step that constrains the
+#                 SubAgent to regenerate only those items.  The SubAgent calls
+#                 save_artifact once per regenerated item; each call writes a
+#                 new plugin_slot_revisions row for the affected list_index and
+#                 marks it selected=true while the previous row for that index
+#                 is set selected=false.  Unaffected list items are untouched.
+#
+# {{placeholder}} substitution rules (performed by Go before launching the SubAgent):
+#
+#   {{user_input}}           — the user's original request text (injected by Python
+#                              _render_step_objective before the task_created signal).
+#   {{runtime_instruction}}  — ephemeral per-run instruction for retries (same).
+#   {{<artifact_id>}}        — value of an artifact saved by a prior step, e.g.
+#                              {{subject_analysis}}, {{optimized_prompt}}.
+#                              Go's injectArtifacts() replaces these from the DB
+#                              after the task is created.  For text artifacts the
+#                              text field is used; for image artifacts the url field.
+
 transitions:
   __start__:
     - to: analyze_subject
       condition: "Cold start — always enter subject analysis first."
 
   analyze_subject:
-    - to: collect_materials
-      condition: "Subject analysis complete — proceed to material collection."
+    - to: collect_material
+      condition: "Subject analysis complete — collect reference materials."
+    - to: analyze_subject
+      condition: "Analysis result unsatisfactory — full retry."
 
-  collect_materials:
-    - to: collect_materials
-      condition: "User wants to re-collect all materials from scratch."
-    - to: collect_materials
-      condition: "User wants to re-collect specific materials (partial retry)."
+  collect_material:
     - to: optimize_prompt
-      condition: "Materials collected — proceed to prompt optimization."
+      condition: "All materials collected — proceed to prompt optimization."
+    - to: collect_material
+      condition: >
+        User wants all materials re-collected (e.g. completely different theme) — full retry.
+        ChatAgent passes runtime_instruction describing the new theme.
+    - to: collect_material
+      condition: >
+        User is unhappy with one or more specific materials — partial retry.
+        ChatAgent passes runtime_instruction naming the items to replace,
+        and partial_indices mapping artifact key to the list_index values.
 
   optimize_prompt:
     - to: generate_image
       condition: "Prompt ready — proceed to image generation."
     - to: optimize_prompt
-      condition: "User is unhappy with the prompt and wants it re-optimized."
+      condition: "User is unhappy with the prompt — full retry."
+    - to: collect_material
+      condition: "User wants fresh materials before re-optimizing."
 
   generate_image:
-    - to: enhance_image
-      condition: "Raw image generated — proceed to enhancement."
+    - to: __end__
+      condition: "User is satisfied with the image — pipeline complete."
     - to: generate_image
-      condition: "User wants to regenerate without changing the prompt."
+      condition: "User wants to regenerate without changing the prompt — full retry."
     - to: optimize_prompt
       condition: "User wants to change the description and regenerate from scratch."
-
-  enhance_image:
-    - to: enhance_image
-      condition: "User wants the enhanced image re-done with different settings."
-    - to: generate_image
-      condition: "User wants a brand-new raw image, then enhance again."
-    - to: __end__
-      condition: "User is satisfied — pipeline complete."
 
 steps:
   analyze_subject:
@@ -48,92 +77,101 @@ steps:
       The user wants to create an image with this description:
       {{user_input}}
 
+      {{runtime_instruction}}
+
       Your task:
-      1. Identify the main subject(s), their attributes (color, texture, pose, etc.).
+      1. Identify the main subject(s) and sub-topics that require reference materials.
+         For example, if the user asks for "a painting featuring A, B, C, D",
+         list each of A, B, C, D as an item to collect.
       2. Suggest a suitable artistic style (photorealistic, oil painting, anime, etc.).
       3. Note mood, lighting, and composition hints.
-      4. Save the structured analysis as an artifact:
+      4. Save the structured analysis:
            save_artifact(key='subject_analysis', content_type='text', value=<analysis text>)
 
       Keep the analysis concise (100–200 words). Stop after saving.
-    tools:
-      - save_artifact
     outputs:
       - artifact_id: subject_analysis
         content_type: text
         slot_id: subject_analysis
-        cardinality: single
     acceptance_criteria: |
       subject_analysis artifact must be saved and contain at least 50 words covering
-      subject, style, and mood/lighting hints.
+      subjects/items to collect, artistic style, and mood/lighting hints.
 
-  collect_materials:
+  collect_material:
     label: Collect Reference Materials
+    # This step has a list-cardinality slot (material_images).
+    #
+    # Normal run: collect one image URL per subject item identified in subject_analysis.
+    # Call save_artifact once per item (no list_index needed — each call appends a new entry).
+    #
+    # Partial retry: if the user says "re-collect item B only", ChatAgent sets:
+    #   runtime_instruction = "Re-collect only item B; leave A, C, D untouched."
+    #   partial_indices = {"material_image": [1]}   ← list_index of B
+    # The SubAgent must call save_artifact with list_index=1 so that only the
+    # revision at index 1 is replaced; other indices are not touched.
     prompt: |
-      You are a research agent. Your goal is to collect reference images or visual
-      descriptions for the image generation pipeline.
+      You are a research agent that collects reference images for an art project.
 
       Subject analysis:
       {{subject_analysis}}
 
-      User instruction:
-      {{user_input}}
+      {{runtime_instruction}}
 
       Your task:
-      For each material item requested, search the web and save one artifact per item.
-      Call save_artifact once per item:
-        save_artifact(key='material_images', content_type='image', value=<url or path>)
-
-      If this is a partial retry, the instruction will tell you which specific item(s) to
-      re-collect. Only save artifacts for those items; do not re-collect the others.
+      - Unless runtime_instruction restricts you to specific items, collect one reference
+        image URL for each subject item identified in the analysis.
+      - For each item, call:
+          save_artifact(key='material_image', content_type='image', value=<url>)
+        If you are doing a partial retry for item at a specific position, also pass
+          list_index=<position>
+        so that only that slot entry is replaced.
+      - Stop after all required items are saved.
     tools:
-      - save_artifact
-      - web_search
+      - web_search_tool
+      - image_search_tool
     inputs:
       - artifact_id: subject_analysis
         required: true
     outputs:
-      - artifact_id: material_images
+      - artifact_id: material_image
         content_type: image
-        slot_id: material_images_slot
-        cardinality: list
+        slot_id: material_images   # cardinality: list
     acceptance_criteria: |
-      At least one material_images artifact must be saved.
+      At least one material_image artifact must be saved with a valid http(s):// URL.
 
   optimize_prompt:
     label: Optimize Prompt
     prompt: |
       You are a professional image-generation prompt engineer.
 
-      Subject analysis from the previous step:
+      Subject analysis:
       {{subject_analysis}}
 
       Reference materials collected:
-      {{material_images}}
+      {{material_image}}
 
       Original user request:
       {{user_input}}
 
+      {{runtime_instruction}}
+
       Your task:
-      1. Expand the analysis into a high-quality English image-generation prompt
-         (50–200 words, rich in visual detail).
+      1. Combine the analysis and material references into a high-quality English
+         image-generation prompt (50–200 words, rich in visual detail).
       2. Include style modifiers, lighting, composition, and quality keywords.
       3. Save the result:
            save_artifact(key='optimized_prompt', content_type='text', value=<prompt>)
 
       Stop after saving. Do not output anything else.
-    tools:
-      - save_artifact
     inputs:
       - artifact_id: subject_analysis
         required: true
-      - artifact_id: material_images
+      - artifact_id: material_image
         required: false
     outputs:
       - artifact_id: optimized_prompt
         content_type: text
         slot_id: prompt_used
-        cardinality: single
     acceptance_criteria: |
       optimized_prompt artifact must be saved, in English, and contain at least 30 words.
 
@@ -145,48 +183,21 @@ steps:
       Use the following optimized prompt to generate an image:
       {{optimized_prompt}}
 
+      {{runtime_instruction}}
+
       Steps:
       1. Call generate_image_tool(prompt=<optimized_prompt>) to create the image.
       2. Save the image URL:
-           save_artifact(key='raw_image_url', content_type='image', value=<url>)
+           save_artifact(key='generated_image_url', content_type='image', value=<url>)
       3. Stop after saving.
     tools:
-      - save_artifact
       - generate_image_tool
     inputs:
       - artifact_id: optimized_prompt
         required: true
     outputs:
-      - artifact_id: raw_image_url
+      - artifact_id: generated_image_url
         content_type: image
         slot_id: image_output
-        cardinality: single
     acceptance_criteria: |
-      raw_image_url artifact must be saved and contain a valid URL starting with http(s)://.
-
-  enhance_image:
-    label: Enhance Image
-    prompt: |
-      You are an image enhancement agent.
-
-      Raw image to enhance:
-      {{raw_image_url}}
-
-      Your task:
-      1. Call enhance_image_tool(image_url=<raw_image_url>) to upscale / improve the image.
-      2. Save the enhanced result:
-           save_artifact(key='enhanced_image_url', content_type='image', value=<url>)
-      3. Stop after saving.
-    tools:
-      - save_artifact
-      - enhance_image_tool
-    inputs:
-      - artifact_id: raw_image_url
-        required: true
-    outputs:
-      - artifact_id: enhanced_image_url
-        content_type: image
-        slot_id: enhanced_image_output
-        cardinality: list
-    acceptance_criteria: |
-      enhanced_image_url artifact must be saved and contain a valid https?:// URL.
+      generated_image_url artifact must be saved and contain a valid URL starting with http(s)://.

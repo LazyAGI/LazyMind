@@ -160,7 +160,15 @@ CREATE INDEX        idx_psr_artifact  ON plugin_slot_revisions(artifact_key);
 CREATE INDEX        idx_psr_session   ON plugin_slot_revisions(session_id, slot_id);
 ```
 
-`selected` 字段由 Go 在插入新 revision 时维护：新记录插入时置为 `TRUE`，同时将同 `(session_id, slot_id)` 的旧记录（`cardinality=single`）置为 `FALSE`；`list` 模式各项独立，`selected` 始终为 `TRUE`。
+`selected` 字段由 Go 在插入新 revision 时维护，规则如下：
+
+| cardinality | 场景 | 行为 |
+| --- | --- | --- |
+| `single` | 任意重写 | 新记录 `selected=TRUE`，旧记录全部 `selected=FALSE` |
+| `list` | 全量追加（正常写入或全量重试） | `list_index = 当前计数`，新记录 `selected=TRUE` |
+| `list` | **部分重试**（指定 `list_index`） | 只将旧的同 `list_index` 行置 `selected=FALSE`，插入新行 `selected=TRUE`；其余 index 不受影响 |
+
+部分重试场景触发条件：SubAgent 的 `save_artifact` 调用携带了 `list_index` 字段。Go 的 `OnArtifactEvent` 从 artifact value 中读取该字段后，传给 `WriteSlotRevision` 触发按 index 替换逻辑。
 
 ---
 
@@ -229,6 +237,13 @@ ui:
 - `__start__`：虚拟入口，无对应 step，仅用于声明初始跳转目标，`plugin_loader` 解析后不会创建 SubAgent。
 - `__end__`：虚拟终态，transitions 目标为 `__end__` 时表示流程结束；DriverAgent 裁决 `DONE` 即等价于转入此状态，Go 停止 auto loop 并发 `plugin_completed`。
 
+**重试语义完全通过状态机 transitions 表达，不需要 `re_runnable` 等额外字段：**
+
+- **全量重试**：step 自环边（`step_x → step_x`）。新 attempt 覆盖该 step 的全部 artifact；`cardinality=single` 的 slot 旧 revision 被 deselect，`cardinality=list` 的 slot 全部旧项被 deselect，写入全新的 list。
+- **部分重试**：同样走 step 自环边，但 ChatAgent 在调用 `advance_step` 时传入 `runtime_instruction`，约束 SubAgent 只重新生成指定 list_index 的项。SubAgent 在 `save_artifact` 时携带 `list_index` 字段，Go 仅替换对应 index 的 revision，其他 index 的 artifact 保持不变。
+
+**`runtime_instruction` 机制**：由 ChatAgent 根据用户输入在步骤调用时动态生成，注入 step objective 的 `{{runtime_instruction}}` 占位符（state.yml prompt 中声明）。该指令仅影响当次 SubAgent 执行，不持久化到 session 状态。
+
 ```yaml
 initial: __start__
 
@@ -240,12 +255,12 @@ transitions:
     - to: generate_image
       condition: "提示词优化完成，可进入生图"
     - to: optimize_prompt
-      condition: "用户对提示词不满意，重新优化"
+      condition: "用户对提示词不满意，重新优化（全量重试）"
   generate_image:
     - to: optimize_prompt
       condition: "用户不满意图片，重新优化提示词"
     - to: generate_image
-      condition: "保持描述不变重新生图"
+      condition: "保持描述不变重新生图（全量重试）"
     - to: __end__
       condition: "用户满意，流程完成"
 
@@ -253,16 +268,17 @@ steps:
   optimize_prompt:
     prompt: |
       用户想生成一张图片。用户描述：{{user_input}}
+      {{runtime_instruction}}
       将描述优化为高质量英文图片生成 prompt，完成后调用 save_artifact('optimized_prompt', text)。
-    tools: []
     outputs:
       - artifact_id: optimized_prompt
         content_type: text
-        slot_id: optimized_prompt   # 写入 Tab:prompt / Slot:optimized_prompt（single）
+        slot_id: optimized_prompt
 
   generate_image:
     prompt: |
       使用优化后的 prompt 生成图片：{{optimized_prompt}}
+      {{runtime_instruction}}
       调用 dalle_generate(prompt) 生成图片，完成后调用 save_artifact('image_url', url)。
     tools: [dalle_generate]
     inputs:
@@ -271,7 +287,7 @@ steps:
     outputs:
       - artifact_id: image_url
         content_type: image
-        slot_id: preview_images     # 追加到 Tab:result / Slot:preview_images（list）
+        slot_id: preview_images
 ```
 
 ### 3.3 scenario/scenario.md
@@ -326,9 +342,15 @@ Plugin Step 的 `task_created` 沿用 SubAgent 协议（见 SubAgent plan 3.1）
 
 `session_id` 在冷启动时为占位符（Go 会分配真实 ID 并替换）；热路径时为已有 session ID。
 
-### 4.3 SubAgent 工具（Step 执行层，不变）
+### 4.3 SubAgent 工具（Step 执行层）
 
-Step 执行时完全复用 SubAgent 工具：`save_artifact` / `get_artifact` / `list_artifacts`，加上 `plugin.yaml` 声明的插件专属工具（`tools.py` 中的函数）。
+Step 执行时使用的工具集由两部分合并而成：
+
+**框架工具（强制注入）**：`save_artifact` / `load_artifact` / `list_artifacts` 无论插件 state.yml 的 `tools` 字段是否声明，均自动注入到每个 step 的工具列表中。这确保所有 SubAgent 都能保存和读取 artifact，插件作者无需在每个 step 里显式声明框架工具。
+
+**插件自定义工具**：`plugin.yaml` 的 `tool_scripts` + state.yml step 的 `tools` 字段声明的函数（如 `dalle_generate`、`enhance_image_tool`）。
+
+合并规则：框架工具在前，插件工具在后，去重。最终列表通过 `_write_agent_data` 的 `tools` 参数发给 Go，Go 透传给 `/api/subagent/run`。
 
 ---
 
@@ -368,12 +390,18 @@ artifact 事件到达
   → 查 state.yml outputs[artifact_key].slot_id
   → 有 slot_id：
       → 查 plugin.yaml ui 找到 slot 定义（cardinality）
-      → 计算新 revision = MAX(revision WHERE session_id=? AND slot_id=?) + 1
-      → cardinality=single：将旧记录 selected=FALSE，再插入新记录 selected=TRUE
-      → cardinality=list：计算 list_index = COUNT(WHERE session_id=? AND slot_id=?)，直接插入 selected=TRUE
+      → 从 artifact value 中读取 list_index 字段（可选）
+      → cardinality=single：旧记录 selected=FALSE，插入新记录 selected=TRUE
+      → cardinality=list，list_index=nil（无指定）：
+          → 全量追加：list_index = 当前计数，插入 selected=TRUE
+      → cardinality=list，list_index=N（指定）：
+          → 部分重试：将旧的 list_index=N 行 selected=FALSE，插入新行 selected=TRUE
+          → 其他 list_index 行不受影响
       → 写 plugin_slot_revisions 记录
   → 原 artifact 事件照常推送到 Task SSE（不变）
 ```
+
+`list_index` 由 SubAgent 通过 `save_artifact(key=..., list_index=N)` 写入 artifact value JSON。ChatAgent 在部分重试时通过 `runtime_instruction` 告知 SubAgent 需要覆盖哪些 index。
 
 Task SSE 的 `artifact` 事件结构不变，前端 Plugin Panel 通过订阅各 Step 对应的 Task SSE 获取 `artifact` 事件后，用 `artifact_key` 去匹配 `slot_id`，实时刷新对应 Slot 内容。
 

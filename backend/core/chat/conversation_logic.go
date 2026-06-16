@@ -1161,17 +1161,14 @@ func handleTaskCreated(
 				"status": subagent.StatusRunning, "progress": existing.ProgressPct,
 			})
 			go subagent.Run(context.Background(), db, rdb, subagent.RunRequest{
-				TaskID:             existing.ID,
-				AgentType:          existing.AgentType,
-				Objective:          existing.Objective,
-				Params:             ev.Params,
-				InputArtifactKeys:  ev.InputArtifactKeys,
-				OutputArtifactKeys: ev.OutputArtifactKeys,
-				WorkspacePath:      existing.WorkspacePath,
-				Tools:              ev.Tools,
-				DBDSN:              subagent.DBDSN(),
-				Resume:             true,
-				LLMConfig:          llmConfig,
+				TaskID:        existing.ID,
+				AgentType:     existing.AgentType,
+				Params:        ev.Params,
+				WorkspacePath: existing.WorkspacePath,
+				Tools:         ev.Tools,
+				DBDSN:         subagent.DBDSN(),
+				Resume:        true,
+				LLMConfig:     llmConfig,
 			})
 			return &TaskCreatedNotice{
 				TaskID:            existing.ID,
@@ -1207,17 +1204,14 @@ func handleTaskCreated(
 	})
 
 	go subagent.Run(context.Background(), db, rdb, subagent.RunRequest{
-		TaskID:             task.ID,
-		AgentType:          ev.AgentType,
-		Objective:          ev.Objective,
-		Params:             ev.Params,
-		InputArtifactKeys:  ev.InputArtifactKeys,
-		OutputArtifactKeys: ev.OutputArtifactKeys,
-		WorkspacePath:      workspacePath,
-		Tools:              ev.Tools,
-		DBDSN:              subagent.DBDSN(),
-		Resume:             false,
-		LLMConfig:          llmConfig,
+		TaskID:        task.ID,
+		AgentType:     ev.AgentType,
+		Params:        ev.Params,
+		WorkspacePath: workspacePath,
+		Tools:         ev.Tools,
+		DBDSN:         subagent.DBDSN(),
+		Resume:        false,
+		LLMConfig:     llmConfig,
 	})
 
 	return &TaskCreatedNotice{
@@ -1268,7 +1262,7 @@ func handlePluginStepCreated(
 		ctx, db, rdb, convID, historyID, userID,
 		ev.TaskID, ev.Title, ev.Objective,
 		params,
-		ev.InputArtifactKeys, ev.OutputArtifactKeys, ev.Tools,
+		ev.InputArtifactKeys, ev.OutputArtifactKeys,
 		llmConfig,
 	)
 	if err != nil {

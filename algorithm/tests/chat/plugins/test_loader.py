@@ -44,22 +44,22 @@ _STATE_YML = textwrap.dedent("""\
         - to: step_a
       step_a:
         - to: step_b
-        - to: step_a    # retry
+        - to: step_a    # full retry
       step_b:
         - to: step_c
-        - to: step_b    # retry
+        - to: step_b    # full retry
       step_c:
         - to: step_d
         - to: step_b    # re-run from step_b
       step_d:
-        - to: step_d    # re-run independently
+        - to: step_d    # full retry or partial retry (list slot)
         - to: __end__
     steps:
       step_a:
         prompt: |
           Analyze the input: {{user_input}}.
+          {{runtime_instruction}}
           Save result: save_artifact(key='analysis', content_type='text', value=<text>).
-        tools: [save_artifact]
         outputs:
           - artifact_id: analysis
             content_type: text
@@ -67,7 +67,7 @@ _STATE_YML = textwrap.dedent("""\
       step_b:
         prompt: |
           Optimize based on analysis: {{analysis}}.
-        tools: [save_artifact]
+          {{runtime_instruction}}
         inputs:
           - artifact_id: analysis
             required: true
@@ -75,11 +75,11 @@ _STATE_YML = textwrap.dedent("""\
           - artifact_id: optimized
             content_type: text
             slot_id: text_result
-        re_runnable: true
       step_c:
         prompt: |
           Generate image from: {{optimized}}.
-        tools: [save_artifact, gen_tool]
+          {{runtime_instruction}}
+        tools: [gen_tool]
         inputs:
           - artifact_id: optimized
             required: true
@@ -90,7 +90,8 @@ _STATE_YML = textwrap.dedent("""\
       step_d:
         prompt: |
           Enhance image: {{image_url}}.
-        tools: [save_artifact, enhance_tool]
+          {{runtime_instruction}}
+        tools: [enhance_tool]
         inputs:
           - artifact_id: image_url
             required: true
@@ -98,7 +99,6 @@ _STATE_YML = textwrap.dedent("""\
           - artifact_id: enhanced_url
             content_type: image
             slot_id: image_gallery
-        re_runnable: true
 """)
 
 _SCENARIO_MD = 'Call trigger_test_plugin when user wants to test.\n'
@@ -168,9 +168,11 @@ def test_get_step_config_returns_full_dict(tmp_path):
     spec = PluginSpec('test-plugin', plugins_dir / 'test-plugin')
 
     cfg = spec.get_step_config('step_b')
-    assert cfg['re_runnable'] is True
     assert len(cfg['inputs']) == 1
     assert cfg['inputs'][0]['artifact_id'] == 'analysis'
+    assert 'outputs' in cfg
+    # Retry is expressed via state machine transitions, not a step-level flag.
+    assert 're_runnable' not in cfg
 
 
 def test_get_step_config_unknown_step_returns_empty(tmp_path):

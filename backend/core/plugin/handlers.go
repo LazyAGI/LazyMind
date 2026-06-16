@@ -291,23 +291,14 @@ func AdvanceSession(w http.ResponseWriter, r *http.Request) {
 		if len(task.Params) > 0 {
 			_ = json.Unmarshal(task.Params, &params)
 		}
-		var inputKeys, outputKeys []string
-		if len(task.InputArtifactKeys) > 0 {
-			_ = json.Unmarshal(task.InputArtifactKeys, &inputKeys)
-		}
-		if len(task.OutputArtifactKeys) > 0 {
-			_ = json.Unmarshal(task.OutputArtifactKeys, &outputKeys)
-		}
 		// LLMConfig is not persisted on the task; subagent runner uses its default model on resume.
+		// input_artifact_keys, output_artifact_keys, and tools are read by the Python runner from DB.
 		go subagent.Run(context.Background(), db, rdb, subagent.RunRequest{
-			TaskID:             task.ID,
-			AgentType:          "plugin_step",
-			Objective:          task.Objective,
-			Params:             params.asMap(),
-			InputArtifactKeys:  inputKeys,
-			OutputArtifactKeys: outputKeys,
-			WorkspacePath:      task.WorkspacePath,
-			Resume:             true,
+			TaskID:        task.ID,
+			AgentType:     "plugin_step",
+			Params:        params.asMap(),
+			WorkspacePath: task.WorkspacePath,
+			Resume:        true,
 		})
 		common.ReplyOK(w, map[string]any{"action": "resumed", "task_id": task.ID})
 

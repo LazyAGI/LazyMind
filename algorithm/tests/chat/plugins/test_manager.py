@@ -145,8 +145,8 @@ def test_advance_step_tool_triggers_reachable_step(loaded_plugin, mock_write_age
     assert call_kwargs['params']['is_cold_start'] is False
 
 
-def test_advance_step_tool_rerunnable_step(loaded_plugin, mock_write_agent_data, mock_agentic_config):
-    """step_d is re_runnable=True; from step_d the user can re-trigger step_d itself."""
+def test_advance_step_tool_retrigger_same_step(loaded_plugin, mock_write_agent_data, mock_agentic_config):
+    """step_d can re-trigger step_d itself (full retry or partial retry via list slot)."""
     from lazymind.chat.plugin import plugin_manager
     mock_agentic_config.update({
         'plugin_id': 'test-plugin',
@@ -177,7 +177,7 @@ def test_render_step_objective_leaves_other_placeholders():
     from lazymind.chat.plugin.plugin_manager import _render_step_objective
     cfg = {'prompt': 'Enhance {{image_url}} based on {{user_input}}.'}
     rendered = _render_step_objective(cfg, 'high contrast')
-    assert '{{image_url}}' in rendered       # Go injects this later
+    assert '{{image_url}}' in rendered       # Python runner injects this via _enrich_objective_with_artifacts
     assert '{{user_input}}' not in rendered
     assert 'high contrast' in rendered
 
@@ -220,3 +220,225 @@ def test_trigger_plugin_step_output_keys_emitted(loaded_plugin, mock_agentic_con
     assert mock_write_agent_data.called
     kwargs = mock_write_agent_data.call_args.kwargs
     assert 'analysis' in kwargs['output_artifact_keys']
+
+
+# ---------------------------------------------------------------------------
+# Framework tools injection
+# ---------------------------------------------------------------------------
+
+def test_framework_tools_always_present_even_when_step_declares_none(
+        loaded_plugin, mock_agentic_config, mock_write_agent_data):
+    """step_a declares no tools in state.yml; framework tools must still be injected."""
+    from lazymind.chat.plugin.plugin_manager import _trigger_plugin_step, _FRAMEWORK_TOOLS
+    mock_agentic_config['plugin_step'] = '__start__'
+
+    _trigger_plugin_step('test-plugin', 'step_a', 'hello', is_cold_start=True)
+
+    assert mock_write_agent_data.called
+    tools = mock_write_agent_data.call_args.kwargs['tools']
+    for fw_tool in _FRAMEWORK_TOOLS:
+        assert fw_tool in tools, f'framework tool {fw_tool!r} missing from tools list'
+
+
+def test_framework_tools_prepended_before_plugin_tools(
+        loaded_plugin, mock_agentic_config, mock_write_agent_data):
+    """Framework tools are first in the merged list; plugin-declared tools come after."""
+    from lazymind.chat.plugin.plugin_manager import _trigger_plugin_step, _FRAMEWORK_TOOLS
+    mock_agentic_config['plugin_step'] = 'step_c'
+
+    _trigger_plugin_step('test-plugin', 'step_d', 'enhance it', is_cold_start=False)
+
+    tools = mock_write_agent_data.call_args.kwargs['tools']
+    for i, fw_tool in enumerate(_FRAMEWORK_TOOLS):
+        assert tools[i] == fw_tool, (
+            f'expected framework tool at position {i}: {fw_tool!r}, got {tools[i]!r}'
+        )
+    # Plugin-declared tool must also be present.
+    assert 'enhance_tool' in tools
+
+
+def test_framework_tools_no_duplicates(
+        loaded_plugin, mock_agentic_config, mock_write_agent_data):
+    """If a plugin explicitly declares a framework tool, there should be no duplicate."""
+    from lazymind.chat.plugin.plugin_manager import _merge_tools
+    merged = _merge_tools(['save_artifact', 'my_custom_tool', 'load_artifact'])
+    assert merged.count('save_artifact') == 1
+    assert merged.count('load_artifact') == 1
+    assert 'my_custom_tool' in merged
+
+
+# ---------------------------------------------------------------------------
+# runtime_instruction
+# ---------------------------------------------------------------------------
+
+def test_render_step_objective_replaces_runtime_instruction():
+    from lazymind.chat.plugin.plugin_manager import _render_step_objective
+    cfg = {'prompt': 'Do {{user_input}}. {{runtime_instruction}}'}
+    rendered = _render_step_objective(cfg, 'draw a cat', 'Only draw the left eye.')
+    assert 'draw a cat' in rendered
+    assert 'Only draw the left eye.' in rendered
+    assert '{{runtime_instruction}}' not in rendered
+    assert '{{user_input}}' not in rendered
+
+
+def test_render_step_objective_empty_runtime_instruction_removed():
+    from lazymind.chat.plugin.plugin_manager import _render_step_objective
+    cfg = {'prompt': 'Do {{user_input}}. {{runtime_instruction}} Done.'}
+    rendered = _render_step_objective(cfg, 'draw a cat')
+    assert '{{runtime_instruction}}' not in rendered
+    # Placeholder replaced with empty string, surrounding text intact.
+    assert 'Done.' in rendered
+
+
+def test_advance_step_passes_runtime_instruction(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config):
+    """runtime_instruction is forwarded into the step objective."""
+    from lazymind.chat.plugin import plugin_manager
+    mock_agentic_config.update({
+        'plugin_id': 'test-plugin',
+        'plugin_session_id': 'ps-partial',
+        'plugin_step': 'step_d',
+    })
+    advance = plugin_manager.build_advance_step_tool('test-plugin', 'step_d')
+
+    advance(
+        step_id='step_d',
+        user_input='redo enhancement',
+        runtime_instruction='Re-enhance only image at index 1; keep others.',
+    )
+
+    assert mock_write_agent_data.called
+    objective = mock_write_agent_data.call_args.kwargs['objective']
+    assert 'Re-enhance only image at index 1' in objective
+
+
+def test_advance_step_no_runtime_instruction_leaves_no_placeholder(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config):
+    """When runtime_instruction is omitted, {{runtime_instruction}} must not appear in objective."""
+    from lazymind.chat.plugin import plugin_manager
+    mock_agentic_config.update({
+        'plugin_id': 'test-plugin',
+        'plugin_session_id': 'ps-normal',
+        'plugin_step': 'step_d',
+    })
+    advance = plugin_manager.build_advance_step_tool('test-plugin', 'step_d')
+    advance(step_id='step_d', user_input='enhance all images')
+
+    objective = mock_write_agent_data.call_args.kwargs['objective']
+    assert '{{runtime_instruction}}' not in objective
+
+
+# ---------------------------------------------------------------------------
+# _enrich_objective_with_artifacts (runner-side artifact injection)
+# ---------------------------------------------------------------------------
+
+def test_enrich_objective_no_placeholders():
+    """Objective without {{ }} is returned as-is without hitting the DB."""
+    from lazymind.chat.engine.subagent.runner import _enrich_objective_with_artifacts
+    from unittest.mock import MagicMock
+
+    db = MagicMock()
+    result = _enrich_objective_with_artifacts('Analyze the image.', {'session_id': 'ps-1'}, db)
+    assert result == 'Analyze the image.'
+    db.load_plugin_session_steps.assert_not_called()
+
+
+def test_enrich_objective_no_session_id():
+    """Missing session_id falls back to original objective."""
+    from lazymind.chat.engine.subagent.runner import _enrich_objective_with_artifacts
+    from unittest.mock import MagicMock
+
+    db = MagicMock()
+    result = _enrich_objective_with_artifacts('Do {{something}}.', {}, db)
+    assert result == 'Do {{something}}.'
+    db.load_plugin_session_steps.assert_not_called()
+
+
+def test_enrich_objective_replaces_placeholders():
+    """Artifacts from succeeded steps are substituted into the objective."""
+    from lazymind.chat.engine.subagent.runner import _enrich_objective_with_artifacts
+    from unittest.mock import MagicMock
+
+    db = MagicMock()
+    db.load_plugin_session_steps.return_value = [
+        {'step_id': 'step_a', 'task_id': 'task-001', 'status': 'succeeded'},
+    ]
+    db.load_artifacts_for_tasks.return_value = [
+        {'task_id': 'task-001', 'artifact_key': 'optimized_prompt', 'content_type': 'text',
+         'value': {'text': 'a beautiful sunset'}, 'seq': 1},
+    ]
+
+    objective = 'Generate image from: {{optimized_prompt}}.'
+    result = _enrich_objective_with_artifacts(objective, {'session_id': 'ps-1'}, db)
+    assert 'a beautiful sunset' in result
+    assert '{{optimized_prompt}}' not in result
+
+
+def test_enrich_objective_skips_non_succeeded_steps():
+    """Only artifacts from succeeded steps are used."""
+    from lazymind.chat.engine.subagent.runner import _enrich_objective_with_artifacts
+    from unittest.mock import MagicMock
+
+    db = MagicMock()
+    db.load_plugin_session_steps.return_value = [
+        {'step_id': 'step_a', 'task_id': 'task-running', 'status': 'running'},
+    ]
+    objective = 'Generate from: {{analysis}}.'
+    result = _enrich_objective_with_artifacts(objective, {'session_id': 'ps-1'}, db)
+    # No succeeded steps → placeholder stays.
+    assert '{{analysis}}' in result
+    db.load_artifacts_for_tasks.assert_not_called()
+
+
+def test_enrich_objective_db_error_falls_back():
+    """Any DB error falls back gracefully to original objective."""
+    from lazymind.chat.engine.subagent.runner import _enrich_objective_with_artifacts
+    from unittest.mock import MagicMock
+
+    db = MagicMock()
+    db.load_plugin_session_steps.side_effect = Exception('DB unavailable')
+    objective = 'Enhance: {{image_url}}.'
+    result = _enrich_objective_with_artifacts(objective, {'session_id': 'ps-err'}, db)
+    assert result == objective
+
+
+# ---------------------------------------------------------------------------
+# _resolve_plugin_step_tools (runner-side tools resolution)
+# ---------------------------------------------------------------------------
+
+def test_resolve_plugin_step_tools_returns_merged_list(loaded_plugin):
+    """Tools for a known step_id are resolved from plugin_loader."""
+    from lazymind.chat.engine.subagent.runner import _resolve_plugin_step_tools
+
+    # step_d declares enhance_tool in state.yml; framework tools must be prepended.
+    tools = _resolve_plugin_step_tools({'plugin_id': 'test-plugin', 'step_id': 'step_d'})
+    assert tools is not None
+    assert 'save_artifact' in tools
+    assert 'enhance_tool' in tools
+    # Framework tools come first.
+    assert tools.index('save_artifact') < tools.index('enhance_tool')
+
+
+def test_resolve_plugin_step_tools_no_declared_tools_returns_only_framework(loaded_plugin):
+    """step_a declares no tools; only framework tools are returned."""
+    from lazymind.chat.engine.subagent.runner import _resolve_plugin_step_tools
+
+    tools = _resolve_plugin_step_tools({'plugin_id': 'test-plugin', 'step_id': 'step_a'})
+    assert tools is not None
+    assert 'save_artifact' in tools
+    assert 'get_artifact' in tools
+
+
+def test_resolve_plugin_step_tools_unknown_plugin_returns_none(loaded_plugin):
+    """Unknown plugin_id returns None so caller can fall back."""
+    from lazymind.chat.engine.subagent.runner import _resolve_plugin_step_tools
+
+    result = _resolve_plugin_step_tools({'plugin_id': 'nonexistent-plugin', 'step_id': 'step_a'})
+    assert result is None
+
+
+def test_resolve_plugin_step_tools_missing_params_returns_none(loaded_plugin):
+    """Empty params returns None."""
+    from lazymind.chat.engine.subagent.runner import _resolve_plugin_step_tools
+
+    assert _resolve_plugin_step_tools({}) is None

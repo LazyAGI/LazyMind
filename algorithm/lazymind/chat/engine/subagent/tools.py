@@ -46,13 +46,17 @@ def _build_artifact_value(value: Any, content_type: str) -> Dict[str, Any]:
 
 @handle_tool_errors
 def save_artifact(key: str, value: Any, content_type: str = 'text',
-                  source_tool: Optional[str] = None) -> Dict[str, Any]:
+                  source_tool: Optional[str] = None,
+                  list_index: Optional[int] = None) -> Dict[str, Any]:
     """Save an output artifact produced by this SubAgent.
 
     File-type values must be local absolute paths; the framework copies them into the
     workspace and converts to relative paths. The same key may be saved multiple times
     (each call appends a row with an incremented seq), which is how variable-count outputs
     such as per-image generation are streamed to the frontend.
+
+    For list-cardinality slots, pass list_index to overwrite a specific existing item
+    instead of appending a new one (partial retry). Omit list_index for normal append.
 
     Args:
         key (str): Artifact key. Must be one of the declared output_artifact_keys.
@@ -61,6 +65,9 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
         content_type (str): One of text, json, image, file, file_list. Default text.
         source_tool (str): Optional name of the tool that produced this artifact,
             e.g. 'web_search', 'wikipedia', 'image_generation'. Used for display only.
+        list_index (int): Optional. When provided, signals that this artifact should
+            replace the existing list slot entry at this position (0-based) rather than
+            being appended as a new entry. Use for partial retries only.
 
     Returns:
         A confirmation that the artifact was saved.
@@ -70,6 +77,8 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
     built = _build_artifact_value(value, ct)
     if source_tool:
         built['_source_tool'] = str(source_tool)
+    if list_index is not None:
+        built['list_index'] = int(list_index)
     seq = ctx.next_artifact_seq(key)
     ctx.record_local_artifact(key, ct, built, seq)
     ctx.emit({

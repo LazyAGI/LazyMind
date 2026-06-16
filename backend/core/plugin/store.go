@@ -206,18 +206,24 @@ func ListSteps(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.Plugin
 }
 
 // WriteSlotRevision inserts a new slot revision and manages the selected flag.
-// For cardinality=single: deselects previous revisions of same (sessionID, slotID).
-// For cardinality=list: each item is always selected=true.
+//
+// cardinality=single: deselects all previous revisions of the same (sessionID, slotID).
+//
+// cardinality=list, listIndex=nil: appends a new item; list_index = current count.
+//
+// cardinality=list, listIndex!=nil: partial retry — replaces the revision at the given
+// list_index by deselecting the old row for that index and inserting a new selected row.
+// Revisions at other indices are untouched.
 func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 	sessionID, slotID, artifactKey, stepID string, attempt int,
-	cardinality string) (*orm.PluginSlotRevision, error) {
+	cardinality string, listIndex *int) (*orm.PluginSlotRevision, error) {
 
 	now := time.Now().UTC()
 	var revision int
-	var listIndex *int
+	var finalListIndex *int
 
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Compute revision number
+		// Compute next revision number across all revisions for this (session, slot).
 		var maxRev int
 		if err := tx.Model(&orm.PluginSlotRevision{}).
 			Select("COALESCE(MAX(revision), 0)").
@@ -228,22 +234,34 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 		revision = maxRev + 1
 
 		if cardinality == "single" {
-			// Deselect all previous revisions for this slot
+			// Deselect all previous revisions for this slot.
 			if err := tx.Model(&orm.PluginSlotRevision{}).
 				Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true).
 				Update("selected", false).Error; err != nil {
 				return err
 			}
 		} else {
-			// list: compute list_index = count of existing entries
-			var count int64
-			if err := tx.Model(&orm.PluginSlotRevision{}).
-				Where("session_id = ? AND slot_id = ?", sessionID, slotID).
-				Count(&count).Error; err != nil {
-				return err
+			// list cardinality.
+			if listIndex != nil {
+				// Partial retry: deselect the existing selected row for this list_index only.
+				if err := tx.Model(&orm.PluginSlotRevision{}).
+					Where("session_id = ? AND slot_id = ? AND list_index = ? AND selected = ?",
+						sessionID, slotID, *listIndex, true).
+					Update("selected", false).Error; err != nil {
+					return err
+				}
+				finalListIndex = listIndex
+			} else {
+				// Full append: list_index = current count of entries (before this insert).
+				var count int64
+				if err := tx.Model(&orm.PluginSlotRevision{}).
+					Where("session_id = ? AND slot_id = ?", sessionID, slotID).
+					Count(&count).Error; err != nil {
+					return err
+				}
+				idx := int(count)
+				finalListIndex = &idx
 			}
-			idx := int(count)
-			listIndex = &idx
 		}
 
 		row := &orm.PluginSlotRevision{
@@ -251,7 +269,7 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 			SessionID:   sessionID,
 			SlotID:      slotID,
 			Revision:    revision,
-			ListIndex:   listIndex,
+			ListIndex:   finalListIndex,
 			Selected:    true,
 			ArtifactKey: artifactKey,
 			StepID:      stepID,

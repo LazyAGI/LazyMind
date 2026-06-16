@@ -7,11 +7,16 @@ Two tool types are registered dynamically per-conversation:
 
 Both are stop-tools: after a successful invocation the ReAct loop terminates immediately
 without entering a summarize step.
+
+Framework tools (save_artifact / load_artifact / list_artifacts) are always merged into
+the step's tool list regardless of what the plugin's state.yml declares.  This ensures
+every SubAgent can persist and retrieve artifacts without plugin authors having to
+remember to list them explicitly.
 """
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import lazyllm
 from lazyllm.tools.agent.base import _write_agent_data
@@ -21,7 +26,30 @@ from lazymind.chat.engine.tools.infra import handle_tool_errors
 
 
 # ---------------------------------------------------------------------------
-# Internal helper
+# Framework tools always injected into every plugin step regardless of what
+# the plugin's state.yml declares.
+# ---------------------------------------------------------------------------
+
+_FRAMEWORK_TOOLS: List[str] = [
+    'save_artifact',
+    'load_artifact',
+    'list_artifacts',
+]
+
+
+def _merge_tools(declared: List[str]) -> List[str]:
+    """Return a deduplicated tool list with framework tools prepended."""
+    seen = set()
+    merged: List[str] = []
+    for t in _FRAMEWORK_TOOLS + list(declared):
+        if t not in seen:
+            seen.add(t)
+            merged.append(t)
+    return merged
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
 # ---------------------------------------------------------------------------
 
 def _agentic_config() -> Dict[str, Any]:
@@ -31,23 +59,47 @@ def _agentic_config() -> Dict[str, Any]:
         return {}
 
 
-def _render_step_objective(step_config: Dict[str, Any], user_input: str) -> str:
-    """Replace {{user_input}} in state.yml step.prompt with the actual input.
+def _render_step_objective(
+    step_config: Dict[str, Any],
+    user_input: str,
+    runtime_instruction: str = '',
+) -> str:
+    """Replace {{user_input}} and {{runtime_instruction}} in state.yml step.prompt.
 
-    Other template vars (e.g. {{optimized_prompt}}) are injected by Go when
-    constructing the sub_agent_tasks.objective from sub_agent_artifacts.
+    {{user_input}} is replaced with the actual user input.
+    {{runtime_instruction}} is replaced with the ephemeral instruction when provided,
+    or removed (replaced with empty string) when absent.
+
+    Other template vars (e.g. {{optimized_prompt}}) are left as-is; Go injects them
+    by querying sub_agent_artifacts before launching the SubAgent.
     """
     prompt = step_config.get('prompt', '')
-    return prompt.replace('{{user_input}}', user_input)
+    prompt = prompt.replace('{{user_input}}', user_input)
+    prompt = prompt.replace('{{runtime_instruction}}', runtime_instruction)
+    return prompt
 
 
 def _trigger_plugin_step(
         plugin_id: str, step_id: str, user_input: str,
-        is_cold_start: bool = False) -> str:
+        is_cold_start: bool = False,
+        runtime_instruction: str = '',
+        partial_indices: Optional[Dict[str, List[int]]] = None) -> str:
     """Shared implementation for trigger_<plugin_id> and advance_step.
 
     Performs two-layer validation then emits a task_created signal.
     Returns a short status string (the tool return value seen by the LLM).
+
+    Args:
+        plugin_id: The plugin identifier.
+        step_id: The step to trigger.
+        user_input: The user's original or latest input.
+        is_cold_start: True for the first step of a new session.
+        runtime_instruction: Optional ephemeral instruction injected into the step
+            objective for this execution only.  Used for partial retries where the
+            user wants to regenerate only a subset of list artifacts.
+            Not persisted to session state.
+        partial_indices: Maps artifact_key → list_index values that should overwrite
+            existing list-slot entries rather than appending. None means full write.
     """
     cfg = _agentic_config()
     session_id: str = cfg.get('plugin_session_id', '') or str(uuid.uuid4())
@@ -115,23 +167,34 @@ def _trigger_plugin_step(
     output_keys = [o['artifact_id'] for o in step_config.get('outputs', [])]
     input_keys = [i['artifact_id'] for i in inputs]
 
+    # Framework tools are always present regardless of plugin declaration.
+    declared_tools: List[str] = step_config.get('tools', [])
+    merged_tools = _merge_tools(declared_tools)
+
+    params: Dict[str, Any] = {
+        'plugin_id': plugin_id,
+        'step_id': step_id,
+        'session_id': session_id,
+        'user_input': user_input,
+        'is_cold_start': is_cold_start,
+    }
+    # Map Python-side runtime_instruction to Go-side retry_hint field name.
+    if runtime_instruction:
+        params['retry_hint'] = runtime_instruction
+    if partial_indices:
+        params['partial_indices'] = partial_indices
+
     _write_agent_data(
         'task_created',
         task_id=task_id,
         title=f'{plugin_id}:{step_id}',
         agent_type='plugin_step',
         mode='manual',          # Plugin steps always async; Go controls auto-advance
-        objective=_render_step_objective(step_config, user_input),
-        params={
-            'plugin_id': plugin_id,
-            'step_id': step_id,
-            'session_id': session_id,
-            'user_input': user_input,
-            'is_cold_start': is_cold_start,
-        },
+        objective=_render_step_objective(step_config, user_input, runtime_instruction),
+        params=params,
         input_artifact_keys=input_keys,
         output_artifact_keys=output_keys,
-        tools=step_config.get('tools', []),
+        tools=merged_tools,
         resume=False,
     )
     return f'Step {step_id!r} triggered. Stop here.'
@@ -148,7 +211,6 @@ def build_cold_start_tools() -> List[Any]:
         pid = spec.plugin_id
         name = spec.yaml.get('name', pid)
         desc = spec.yaml.get('description', f'Trigger the {name} plugin.')
-        # First reachable step from __start__
         sm = spec.state_machine
         first_steps = sm.get_reachable_steps('__start__')
 
@@ -189,17 +251,36 @@ def build_advance_step_tool(plugin_id: str, current_step: str) -> Any:
     reachable = sm.get_reachable_steps(current_step) if sm else []
 
     @handle_tool_errors
-    def advance_step(step_id: str, user_input: str) -> str:
+    def advance_step(
+        step_id: str,
+        user_input: str,
+        runtime_instruction: Optional[str] = None,
+        partial_indices: Optional[Dict[str, List[int]]] = None,
+    ) -> str:
         """Advance the active plugin to the next step.
 
         Use this when there is an active plugin session and you need to
         trigger or re-trigger a specific step based on user intent.
+
+        For partial retries (re-running only a subset of list-slot items),
+        set runtime_instruction to a concise directive that tells the SubAgent
+        which items to regenerate, and set partial_indices to mark which list
+        positions should be replaced rather than appended.  Example:
+          runtime_instruction='Re-collect material B only; keep A, C, D as-is.'
+          partial_indices={'material_images': [1]}
+        Both values are ephemeral and only affect this single execution.
 
         Args:
             step_id (str): The step to advance to.  Must be one of the
                 currently reachable steps.
             user_input (str): The user's latest input or instruction
                 relevant to this step.
+            runtime_instruction (str, optional): An ephemeral directive that
+                constrains the SubAgent's execution for this run only, e.g.
+                for partial retries.  Leave empty for normal full runs.
+            partial_indices (dict, optional): Maps artifact_key to a list
+                of 0-based list_index values that should be overwritten rather
+                than appended.  Only relevant for list-cardinality slots.
 
         Returns:
             Confirmation that the step was triggered.
@@ -209,6 +290,11 @@ def build_advance_step_tool(plugin_id: str, current_step: str) -> Any:
                 f'Error: step {step_id!r} is not reachable from '
                 f'{current_step!r}. Reachable: {reachable}.'
             )
-        return _trigger_plugin_step(plugin_id, step_id, user_input, is_cold_start=False)
+        return _trigger_plugin_step(
+            plugin_id, step_id, user_input,
+            is_cold_start=False,
+            runtime_instruction=runtime_instruction or '',
+            partial_indices=partial_indices or {},
+        )
 
     return advance_step

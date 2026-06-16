@@ -2,13 +2,18 @@ id: image-plugin
 name: AI Image Generation
 description: >
   Generate and enhance high-quality images from natural language descriptions.
-  The workflow has four steps: analyze the subject, optimize the prompt,
-  generate an image, and enhance the result. Users may re-run individual
-  steps (optimize_prompt or enhance_image) without restarting the whole pipeline.
+  The workflow has five steps: analyze the subject, collect reference materials,
+  optimize the prompt, generate an image, and enhance the result. Each step
+  supports full retry via state-machine self-loops. The collect_materials and
+  enhance_image steps additionally support partial retry: the user can request
+  re-collection or re-enhancement of specific list items while keeping others.
 
 steps:
   - id: analyze_subject
     label: Analyze Subject
+
+  - id: collect_materials
+    label: Collect Materials
 
   - id: optimize_prompt
     label: Optimize Prompt
@@ -25,14 +30,22 @@ ui:
       label: Result
       slots:
         - id: enhanced_image_output
-          label: Enhanced Image
+          label: Enhanced Images
           type: image
-          cardinality: list     # each enhance run appends a new entry
+          cardinality: list     # each enhance run appends; partial retry overwrites by list_index
 
         - id: image_output
           label: Raw Image
           type: image
           cardinality: single
+
+    - id: materials
+      label: Materials
+      slots:
+        - id: material_images_slot
+          label: Reference Materials
+          type: image
+          cardinality: list     # one entry per collected material; partial retry overwrites by list_index
 
     - id: prompt
       label: Prompt

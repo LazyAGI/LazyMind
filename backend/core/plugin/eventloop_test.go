@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -19,138 +18,28 @@ import (
 
 // makeSubAgentTask inserts a sub_agent_task row directly, so EventLoop tests
 // can work without going through HandlePluginStepCreated.
-func makeSubAgentTask(t *testing.T, db interface{ CreateTask(in subagent.CreateTaskInput) error }, taskID, convID, sessionID, stepID string) {
+func makeSubAgentTask(t *testing.T, db interface {
+	CreateTask(in subagent.CreateTaskInput) error
+}, taskID, convID, sessionID, stepID string) {
 	t.Helper()
 }
 
 // seedSession creates a session + step + sub_agent_task record for a given step.
 // Returns the task ID used.
-func seedSessionAndTask(t *testing.T, ctx context.Context, gdb interface{
+func seedSessionAndTask(t *testing.T, ctx context.Context, gdb interface {
 	CreateSession(context.Context, CreateSessionInput) error
 }, sessionID, convID, pluginID, stepID, taskID string) {
 	t.Helper()
 }
 
 // ──────────────────────────────────────────────
-// injectArtifacts
+// Artifact injection — moved to Python runner
 // ──────────────────────────────────────────────
 
-func TestInjectArtifacts_NoPlaceholders(t *testing.T) {
-	objective := "Generate a beautiful landscape image."
-	db := newTestDB(t)
-	ctx := context.Background()
-
-	// No session steps exist, but that's fine — no placeholders to fill.
-	result := injectArtifacts(ctx, db.DB, "ps-1", objective)
-	if result != objective {
-		t.Fatalf("expected unchanged objective, got %q", result)
-	}
-}
-
-func TestInjectArtifacts_ReplacesTextArtifact(t *testing.T) {
-	db := newTestDB(t)
-	ctx := context.Background()
-
-	// Create session + step + task.
-	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
-		SessionID: "ps-1", ConversationID: "conv-1", PluginID: "image-plugin",
-	}); err != nil {
-		t.Fatalf("session: %v", err)
-	}
-	_, err := subagent.CreateTask(ctx, db.DB, subagent.CreateTaskInput{
-		TaskID: "task-a", ConversationID: "conv-1", AgentType: "plugin_step",
-		Title: "image-plugin:analyze_subject", Mode: "manual",
-	})
-	if err != nil {
-		t.Fatalf("task: %v", err)
-	}
-	if _, err := CreateSessionStep(ctx, db.DB, "ps-1", "analyze_subject", "task-a", 1); err != nil {
-		t.Fatalf("step: %v", err)
-	}
-	// Mark succeeded.
-	if err := subagent.UpdateFinalStatus(ctx, db.DB, "task-a", subagent.StatusSucceeded, "done"); err != nil {
-		t.Fatalf("final status: %v", err)
-	}
-	// Save an artifact.
-	if err := subagent.SaveArtifact(ctx, db.DB, "task-a", "subject_analysis", "text",
-		json.RawMessage(`{"text":"A cyberpunk city at night"}`), 1); err != nil {
-		t.Fatalf("artifact: %v", err)
-	}
-	// Update step status so injectArtifacts picks it up.
-	if err := UpdateStepStatus(ctx, db.DB, "task-a", StepStatusSucceeded); err != nil {
-		t.Fatalf("step status: %v", err)
-	}
-
-	objective := "Create an image based on the analysis: {{subject_analysis}}"
-	result := injectArtifacts(ctx, db.DB, "ps-1", objective)
-	if !strings.Contains(result, "cyberpunk") {
-		t.Fatalf("expected placeholder replaced, got %q", result)
-	}
-	if strings.Contains(result, "{{subject_analysis}}") {
-		t.Fatalf("placeholder not replaced in %q", result)
-	}
-}
-
-func TestInjectArtifacts_ReplacesURLArtifact(t *testing.T) {
-	db := newTestDB(t)
-	ctx := context.Background()
-
-	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
-		SessionID: "ps-2", ConversationID: "conv-2", PluginID: "image-plugin",
-	}); err != nil {
-		t.Fatalf("session: %v", err)
-	}
-	_, err := subagent.CreateTask(ctx, db.DB, subagent.CreateTaskInput{
-		TaskID: "task-b", ConversationID: "conv-2", AgentType: "plugin_step",
-		Title: "image-plugin:generate_image", Mode: "manual",
-	})
-	if err != nil {
-		t.Fatalf("task: %v", err)
-	}
-	if _, err := CreateSessionStep(ctx, db.DB, "ps-2", "generate_image", "task-b", 1); err != nil {
-		t.Fatalf("step: %v", err)
-	}
-	_ = subagent.UpdateFinalStatus(ctx, db.DB, "task-b", subagent.StatusSucceeded, "done")
-	_ = subagent.SaveArtifact(ctx, db.DB, "task-b", "raw_image_url", "image",
-		json.RawMessage(`{"url":"https://cdn.example.com/img.png"}`), 1)
-	_ = UpdateStepStatus(ctx, db.DB, "task-b", StepStatusSucceeded)
-
-	objective := "Enhance {{raw_image_url}} with HDR."
-	result := injectArtifacts(ctx, db.DB, "ps-2", objective)
-	if !strings.Contains(result, "https://cdn.example.com/img.png") {
-		t.Fatalf("URL not injected, got %q", result)
-	}
-}
-
-func TestInjectArtifacts_IgnoresPendingSteps(t *testing.T) {
-	db := newTestDB(t)
-	ctx := context.Background()
-
-	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
-		SessionID: "ps-3", ConversationID: "conv-3", PluginID: "image-plugin",
-	}); err != nil {
-		t.Fatalf("session: %v", err)
-	}
-	_, err := subagent.CreateTask(ctx, db.DB, subagent.CreateTaskInput{
-		TaskID: "task-c", ConversationID: "conv-3", AgentType: "plugin_step",
-		Title: "image-plugin:optimize_prompt", Mode: "manual",
-	})
-	if err != nil {
-		t.Fatalf("task: %v", err)
-	}
-	if _, err := CreateSessionStep(ctx, db.DB, "ps-3", "optimize_prompt", "task-c", 1); err != nil {
-		t.Fatalf("step: %v", err)
-	}
-	// Step still pending — injectArtifacts must leave placeholder intact.
-	_ = subagent.SaveArtifact(ctx, db.DB, "task-c", "optimized_prompt", "text",
-		json.RawMessage(`{"text":"a fine English prompt"}`), 1)
-
-	objective := "Use prompt {{optimized_prompt}} to generate."
-	result := injectArtifacts(ctx, db.DB, "ps-3", objective)
-	if !strings.Contains(result, "{{optimized_prompt}}") {
-		t.Fatalf("placeholder should be preserved for pending step, got %q", result)
-	}
-}
+// injectArtifacts was removed from the Go layer (eventloop.go).
+// Artifact placeholder replacement is now performed by the Python runner via
+// _enrich_objective_with_artifacts() in algorithm/lazymind/chat/engine/subagent/runner.py.
+// The corresponding tests live in algorithm/tests/chat/plugins/test_manager.py.
 
 // ──────────────────────────────────────────────
 // OnSubAgentDone — status routing
@@ -276,9 +165,9 @@ func TestOnSubAgentDone_Failed_SetsSessionFailed(t *testing.T) {
 
 func TestCallDriverAgent_ParsesVerdict(t *testing.T) {
 	cases := []struct {
-		body            string
-		wantVerdict     string
-		wantReasonHas   string
+		body          string
+		wantVerdict   string
+		wantReasonHas string
 	}{
 		{
 			body:          `{"verdict":"PASS","reason":"Prompt looks good."}`,

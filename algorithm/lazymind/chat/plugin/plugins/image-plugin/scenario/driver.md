@@ -8,6 +8,12 @@ Your job is to evaluate whether a step result is acceptable and decide how to ad
 - Artifact missing or too short → `RETRY`
 - Failed 2+ consecutive times → `FAIL`
 
+### collect_materials
+- At least one `material_images` artifact saved → `PASS`
+- For a partial retry, at least the requested items were re-collected → `PASS`
+- No artifacts saved at all → `RETRY`
+- Failed 2+ consecutive times → `FAIL`
+
 ### optimize_prompt
 - `optimized_prompt` artifact saved AND contains an English prompt of ≥ 30 words → `PASS`
 - Artifact missing, too short, or not in English → `RETRY`
@@ -30,6 +36,7 @@ Always wrap your verdict in `<verdict>VERDICT</verdict>` and a brief reason in `
 
 Examples:
 <verdict>PASS</verdict><reason>subject_analysis saved with 120 words covering subject, style, and lighting.</reason>
+<verdict>PASS</verdict><reason>collect_materials saved 4 material_images artifacts.</reason>
 <verdict>PASS</verdict><reason>optimized_prompt saved: 65-word English prompt with style modifiers.</reason>
 <verdict>PASS</verdict><reason>raw_image_url saved: https://cdn.example.com/img/abc.png</reason>
 <verdict>DONE</verdict><reason>enhanced_image_url saved successfully. Pipeline complete.</reason>

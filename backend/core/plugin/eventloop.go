@@ -84,6 +84,11 @@ type PluginChatContext struct {
 // persists the sub_agent_task + plugin_session_step records,
 // and launches the SubAgent goroutine.
 // Returns (sessionID, taskID, error).
+//
+// NOTE: objective is stored as-is (raw template with {{...}} placeholders).
+// Artifact injection is handled by the Python runner at execution time via
+// _enrich_objective_with_artifacts(), avoiding the Go layer querying the DB
+// for data that Python can fetch itself.
 func HandlePluginStepCreated(
 	ctx context.Context,
 	db *gorm.DB,
@@ -92,7 +97,6 @@ func HandlePluginStepCreated(
 	taskID, title, objective string,
 	params PluginStepParams,
 	inputKeys, outputKeys []string,
-	tools []string,
 	llmConfig map[string]any,
 ) (sessionID string, returnedTaskID string, err error) {
 	pluginID := params.PluginID
@@ -131,17 +135,27 @@ func HandlePluginStepCreated(
 		}
 	}
 
-	// Inject artifacts from previous steps into objective.
-	enrichedObjective := injectArtifacts(ctx, db, sessionID, objective)
+	// Inject artifacts from previous steps into objective, then append retry_hint if present.
+	enrichedObjective := objective
+	if params.RetryHint != "" {
+		enrichedObjective += "\n\n--- Retry instruction (runtime only, not part of permanent prompt) ---\n" + params.RetryHint
+	}
 
 	// Create sub_agent_tasks record.
-	rawParams, _ := json.Marshal(map[string]any{
+	rawParamsMap := map[string]any{
 		"plugin_id":     pluginID,
 		"step_id":       stepID,
 		"session_id":    sessionID,
 		"user_input":    params.UserInput,
 		"is_cold_start": isCold,
-	})
+	}
+	if params.RetryHint != "" {
+		rawParamsMap["retry_hint"] = params.RetryHint
+	}
+	if len(params.PartialIndices) > 0 {
+		rawParamsMap["partial_indices"] = params.PartialIndices
+	}
+	rawParams, _ := json.Marshal(rawParamsMap)
 	inputJSON, _ := json.Marshal(inputKeys)
 	outputJSON, _ := json.Marshal(outputKeys)
 	task, cErr := subagent.CreateTask(ctx, db, subagent.CreateTaskInput{
@@ -174,69 +188,23 @@ func HandlePluginStepCreated(
 	})
 
 	// Launch SubAgent goroutine.
+	// input_artifact_keys, output_artifact_keys, and tools are NOT forwarded here:
+	// the Python runner reads them from the DB task record and plugin_loader respectively.
 	go subagent.Run(context.Background(), db, rdb, subagent.RunRequest{
-		TaskID:    task.ID,
-		AgentType: "plugin_step",
-		Objective: enrichedObjective,
+		TaskID:        task.ID,
+		AgentType:     "plugin_step",
+		WorkspacePath: task.WorkspacePath,
 		Params: map[string]any{
 			"plugin_id":  pluginID,
 			"step_id":    stepID,
 			"session_id": sessionID,
 		},
-		InputArtifactKeys:  inputKeys,
-		OutputArtifactKeys: outputKeys,
-		WorkspacePath:      task.WorkspacePath,
-		Tools:              tools,
-		DBDSN:              subagent.DBDSN(),
-		Resume:             false,
-		LLMConfig:          llmConfig,
+		DBDSN:     subagent.DBDSN(),
+		Resume:    false,
+		LLMConfig: llmConfig,
 	})
 
 	return sessionID, task.ID, nil
-}
-
-// injectArtifacts replaces {{artifact_id}} placeholders in objective with artifact text values
-// from prior succeeded plugin session steps. Falls back to the original objective on any error.
-func injectArtifacts(ctx context.Context, db *gorm.DB, sessionID, objective string) string {
-	if !strings.Contains(objective, "{{") {
-		return objective
-	}
-	steps, err := ListSteps(ctx, db, sessionID)
-	if err != nil || len(steps) == 0 {
-		return objective
-	}
-	taskIDs := make([]string, 0, len(steps))
-	for _, s := range steps {
-		if s.Status == StepStatusSucceeded {
-			taskIDs = append(taskIDs, s.TaskID)
-		}
-	}
-	if len(taskIDs) == 0 {
-		return objective
-	}
-	var artifacts []orm.SubAgentArtifact
-	if err := db.WithContext(ctx).
-		Where("task_id IN ?", taskIDs).
-		Order("task_id, artifact_key, seq ASC").
-		Find(&artifacts).Error; err != nil {
-		return objective
-	}
-	result := objective
-	for _, a := range artifacts {
-		var v map[string]any
-		if json.Unmarshal(a.Value, &v) == nil {
-			var textVal string
-			if t, ok := v["text"].(string); ok {
-				textVal = t
-			} else if u, ok := v["url"].(string); ok {
-				textVal = u
-			}
-			if textVal != "" {
-				result = strings.ReplaceAll(result, "{{"+a.ArtifactKey+"}}", textVal)
-			}
-		}
-	}
-	return result
 }
 
 // OnSubAgentDone is called when a plugin_step task reaches terminal status.
@@ -387,6 +355,11 @@ func triggerNextChatTurn(
 
 // OnArtifactEvent is called when a plugin_step SubAgent emits an artifact event.
 // It checks slot binding and writes plugin_slot_revisions if the artifact is bound.
+//
+// For list-cardinality slots, the artifact value may carry a "list_index" field
+// (written by save_artifact) that enables partial retry: only the revision at that
+// index is replaced; other indices remain untouched.
+// When "list_index" is absent the item is appended at the next available index.
 func OnArtifactEvent(
 	ctx context.Context,
 	db *gorm.DB,
@@ -405,10 +378,47 @@ func OnArtifactEvent(
 	if step != nil {
 		attempt = step.Attempt
 	}
+
+	// For list slots, extract list_index from the artifact value if present.
+	// A non-nil value triggers partial-retry semantics (replace that index only).
+	var listIndex *int
+	if cardinality == "list" {
+		listIndex = extractListIndex(ctx, db, taskID, artifactKey)
+	}
+
 	if _, err := WriteSlotRevision(ctx, db,
-		pctx.SessionID, slotID, artifactKey, pctx.StepID, attempt, cardinality); err != nil {
+		pctx.SessionID, slotID, artifactKey, pctx.StepID, attempt, cardinality, listIndex); err != nil {
 		fmt.Printf("[Plugin] WriteSlotRevision failed: %v\n", err)
 	}
+}
+
+// extractListIndex reads the most recent artifact value for the given (taskID, artifactKey)
+// and returns the list_index embedded in the JSON value, or nil if absent.
+func extractListIndex(ctx context.Context, db *gorm.DB, taskID, artifactKey string) *int {
+	var a orm.SubAgentArtifact
+	err := db.WithContext(ctx).
+		Where("task_id = ? AND artifact_key = ?", taskID, artifactKey).
+		Order("seq DESC").
+		First(&a).Error
+	if err != nil {
+		return nil
+	}
+	var v map[string]any
+	if json.Unmarshal(a.Value, &v) != nil {
+		return nil
+	}
+	raw, ok := v["list_index"]
+	if !ok {
+		return nil
+	}
+	switch idx := raw.(type) {
+	case float64:
+		i := int(idx)
+		return &i
+	case int:
+		return &idx
+	}
+	return nil
 }
 
 // resolveSlotBinding looks up (slotID, cardinality) for an artifact key from the Python plugin API.

@@ -18,15 +18,102 @@ from .db import SubAgentDB
 from . import tools as subagent_tools
 
 
+def _enrich_objective_with_artifacts(objective: str, params: Dict[str, Any], db: 'SubAgentDB') -> str:
+    """Replace {{artifact_id}} placeholders in objective with artifact text/url values.
+
+    For plugin_step tasks, artifacts produced by prior succeeded steps in the same
+    plugin session are fetched from the DB and substituted into the raw objective
+    template.  Falls back to the original objective on any error.
+
+    This mirrors what Go's injectArtifacts() used to do, but runs on the Python side
+    so that Go does not need to query sub_agent_artifacts before launching the runner.
+    """
+    if '{{' not in objective:
+        return objective
+
+    session_id: str = params.get('session_id', '')
+    if not session_id:
+        return objective
+
+    try:
+        steps = db.load_plugin_session_steps(session_id)
+    except Exception:
+        return objective
+
+    succeeded_task_ids = [s['task_id'] for s in steps if s.get('status') == 'succeeded' and s.get('task_id')]
+    if not succeeded_task_ids:
+        return objective
+
+    try:
+        artifacts = db.load_artifacts_for_tasks(succeeded_task_ids)
+    except Exception:
+        return objective
+
+    result = objective
+    for a in artifacts:
+        key = a.get('artifact_key', '')
+        if not key:
+            continue
+        value = a.get('value') or {}
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except ValueError:
+                continue
+        text_val = value.get('text') or value.get('url') or ''
+        if text_val:
+            result = result.replace('{{' + key + '}}', str(text_val))
+    return result
+
+
+def _resolve_plugin_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
+    """Resolve the tool list for a plugin_step task from plugin_loader.
+
+    Returns None if the plugin or step cannot be resolved (falls back to caller default).
+    """
+    try:
+        from lazymind.chat.plugin import plugin_loader as _loader
+        plugin_id: str = params.get('plugin_id', '')
+        step_id: str = params.get('step_id', '')
+        if not plugin_id or not step_id:
+            return None
+        step_config = _loader.get_step_config(plugin_id, step_id)
+        if not step_config and not plugin_id:
+            return None
+        # If the plugin itself doesn't exist, get_step_config returns {}.
+        # Distinguish "step exists but has no tools" from "plugin not found"
+        # by checking whether the plugin is registered.
+        if _loader.get_plugin(plugin_id) is None:
+            return None
+        declared: List[str] = step_config.get('tools', [])
+        # Mirror _merge_tools from plugin_manager: prepend framework tools.
+        _FRAMEWORK_TOOLS = ['save_artifact', 'get_artifact', 'list_artifacts']
+        seen: set = set()
+        merged: List[str] = []
+        for t in _FRAMEWORK_TOOLS + list(declared):
+            if t not in seen:
+                seen.add(t)
+                merged.append(t)
+        return merged
+    except Exception as exc:
+        LOG.warning(f'[SubAgent] _resolve_plugin_step_tools failed: {exc}')
+        return None
+
+
 def _resolve_runtime_tools(explicit: Optional[List[str]]) -> List[Any]:
     """Build the runtime tool list for a SubAgent.
 
     If explicit tool names are provided, use only those (looked up from DEFAULT_TOOLS).
     Otherwise fall back to all DEFAULT_TOOLS, giving the SubAgent the same tool set
     as ChatAgent minus the subagent-management tools.
+
+    Note: save_artifact, get_artifact, and list_artifacts are always available regardless
+    of this list — they are injected as mandatory base tools in _build_subagent_tools.
+    Names of base tools in the explicit list are silently ignored (already present).
     """
+    _BASE_TOOL_NAMES = {'save_artifact', 'get_artifact', 'list_artifacts'}
     if explicit:
-        name_set = {str(n).strip() for n in explicit if str(n).strip()}
+        name_set = {str(n).strip() for n in explicit if str(n).strip()} - _BASE_TOOL_NAMES
         configs = [cfg for cfg in DEFAULT_TOOLS if cfg.name in name_set]
     else:
         configs = list(DEFAULT_TOOLS)
@@ -34,6 +121,12 @@ def _resolve_runtime_tools(explicit: Optional[List[str]]) -> List[Any]:
 
 
 def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
+    """Combine mandatory SubAgent infra tools with optional domain tools.
+
+    save_artifact, get_artifact, and list_artifacts are always included regardless
+    of the explicit tools list passed to the SubAgent — they are the SubAgent's
+    write/read interface and must never be stripped by plugin tool configurations.
+    """
     base = [
         subagent_tools.save_artifact,
         subagent_tools.get_artifact,
@@ -152,6 +245,17 @@ async def run_subagent_stream(
             emit=_emit,
         )
         ctx.ensure_workspace()
+
+        # For plugin_step tasks: enrich objective by replacing {{artifact_id}} placeholders
+        # with values from prior succeeded steps in the same session. This was previously
+        # done on the Go side (injectArtifacts), but Python owns this data retrieval.
+        effective_agent_type = str(task.get('agent_type') or agent_type or '')
+        if effective_agent_type == 'plugin_step':
+            ctx.objective = _enrich_objective_with_artifacts(ctx.objective, params, db)
+            # Also resolve tools from plugin_loader when no explicit list was provided.
+            # Go no longer forwards the tools list for plugin_step tasks.
+            if not tools:
+                tools = _resolve_plugin_step_tools(params)
 
         sid = task_id
         lazyllm.globals._init_sid(sid=sid)

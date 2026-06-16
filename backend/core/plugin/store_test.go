@@ -279,7 +279,7 @@ func TestWriteSlotRevision_Single_DeselectsPrevious(t *testing.T) {
 	}
 
 	// Write revision 1.
-	r1, err := WriteSlotRevision(ctx, db.DB, "ps-1", "prompt_used", "optimized_prompt", "optimize_prompt", 1, "single")
+	r1, err := WriteSlotRevision(ctx, db.DB, "ps-1", "prompt_used", "optimized_prompt", "optimize_prompt", 1, "single", nil)
 	if err != nil {
 		t.Fatalf("rev1: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestWriteSlotRevision_Single_DeselectsPrevious(t *testing.T) {
 	}
 
 	// Write revision 2 (re-run of optimize_prompt).
-	r2, err := WriteSlotRevision(ctx, db.DB, "ps-1", "prompt_used", "optimized_prompt", "optimize_prompt", 2, "single")
+	r2, err := WriteSlotRevision(ctx, db.DB, "ps-1", "prompt_used", "optimized_prompt", "optimize_prompt", 2, "single", nil)
 	if err != nil {
 		t.Fatalf("rev2: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestWriteSlotRevision_List_AppendsAll(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		if _, err := WriteSlotRevision(ctx, db.DB,
 			"ps-1", "enhanced_image_output", "enhanced_image_url",
-			"enhance_image", i, "list"); err != nil {
+			"enhance_image", i, "list", nil); err != nil {
 			t.Fatalf("rev %d: %v", i, err)
 		}
 	}
@@ -354,7 +354,7 @@ func TestWriteSlotRevision_SingleAndList_Coexist(t *testing.T) {
 
 	// Write a single-cardinality slot (prompt).
 	if _, err := WriteSlotRevision(ctx, db.DB,
-		"ps-1", "prompt_used", "optimized_prompt", "optimize_prompt", 1, "single"); err != nil {
+		"ps-1", "prompt_used", "optimized_prompt", "optimize_prompt", 1, "single", nil); err != nil {
 		t.Fatalf("single slot: %v", err)
 	}
 
@@ -362,7 +362,7 @@ func TestWriteSlotRevision_SingleAndList_Coexist(t *testing.T) {
 	for i := 1; i <= 2; i++ {
 		if _, err := WriteSlotRevision(ctx, db.DB,
 			"ps-1", "enhanced_image_output", "enhanced_image_url",
-			"enhance_image", i, "list"); err != nil {
+			"enhance_image", i, "list", nil); err != nil {
 			t.Fatalf("list slot %d: %v", i, err)
 		}
 	}
@@ -371,6 +371,61 @@ func TestWriteSlotRevision_SingleAndList_Coexist(t *testing.T) {
 	// 1 single + 2 list = 3 selected rows.
 	if len(selected) != 3 {
 		t.Fatalf("expected 3 total selected rows, got %d", len(selected))
+	}
+}
+
+func TestWriteSlotRevision_PartialRetry_ReplacesTargetIndex(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
+		SessionID: "ps-partial", ConversationID: "conv-1", PluginID: "image-plugin",
+	}); err != nil {
+		t.Fatalf("session: %v", err)
+	}
+
+	// Write three items (index 0, 1, 2) via normal append.
+	for i := 1; i <= 3; i++ {
+		if _, err := WriteSlotRevision(ctx, db.DB,
+			"ps-partial", "image_gallery", "material_image",
+			"collect_materials", i, "list", nil); err != nil {
+			t.Fatalf("initial append %d: %v", i, err)
+		}
+	}
+
+	// Partial retry: replace only index 1.
+	idx := 1
+	r, err := WriteSlotRevision(ctx, db.DB,
+		"ps-partial", "image_gallery", "material_image",
+		"collect_materials", 4, "list", &idx)
+	if err != nil {
+		t.Fatalf("partial retry: %v", err)
+	}
+	if r.ListIndex == nil || *r.ListIndex != 1 {
+		t.Fatalf("expected list_index=1, got %v", r.ListIndex)
+	}
+	if !r.Selected {
+		t.Fatal("new revision must be selected=true")
+	}
+
+	// After partial retry: indices 0 and 2 still selected; index 1 has a new selected row.
+	selected, err := LoadSelectedSlots(ctx, db.DB, "ps-partial")
+	if err != nil {
+		t.Fatalf("LoadSelectedSlots: %v", err)
+	}
+	// We expect 3 selected rows: index 0, index 1 (new), index 2.
+	if len(selected) != 3 {
+		t.Fatalf("expected 3 selected rows after partial retry, got %d", len(selected))
+	}
+	// The selected row for index 1 must be the new one (revision 4).
+	var idx1Rev int
+	for _, s := range selected {
+		if s.ListIndex != nil && *s.ListIndex == 1 {
+			idx1Rev = s.Revision
+		}
+	}
+	if idx1Rev != 4 {
+		t.Fatalf("expected index-1 revision to be 4 (new), got %d", idx1Rev)
 	}
 }
 

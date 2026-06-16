@@ -24,18 +24,20 @@ const subagentRunTimeout = 2 * time.Hour
 
 // RunRequest is the body posted to the algorithm layer /api/subagent/run.
 // task_id doubles as the request sid (independent FileSystemQueue bucket).
+//
+// objective, input_artifact_keys, and output_artifact_keys are intentionally
+// omitted: the Python runner reads those from the sub_agent_tasks DB record.
+// tools is still forwarded for non-plugin_step agent types; plugin_step tasks
+// resolve their tools from plugin_loader at execution time.
 type RunRequest struct {
-	TaskID             string         `json:"task_id"`
-	AgentType          string         `json:"agent_type"`
-	Objective          string         `json:"objective"`
-	Params             map[string]any `json:"params,omitempty"`
-	InputArtifactKeys  []string       `json:"input_artifact_keys"`
-	OutputArtifactKeys []string       `json:"output_artifact_keys"`
-	WorkspacePath      string         `json:"workspace_path"`
-	Tools              []string       `json:"tools,omitempty"`
-	DBDSN              string         `json:"db_dsn"`
-	Resume             bool           `json:"resume"`
-	LLMConfig          map[string]any `json:"llm_config,omitempty"`
+	TaskID        string         `json:"task_id"`
+	AgentType     string         `json:"agent_type"`
+	Params        map[string]any `json:"params,omitempty"`
+	WorkspacePath string         `json:"workspace_path"`
+	Tools         []string       `json:"tools,omitempty"`
+	DBDSN         string         `json:"db_dsn"`
+	Resume        bool           `json:"resume"`
+	LLMConfig     map[string]any `json:"llm_config,omitempty"`
 }
 
 // TaskEvent is one event emitted by the SubAgent SSE stream.
@@ -141,6 +143,8 @@ func routeEvent(ctx context.Context, db *gorm.DB, rdb *redis.Client, ev TaskEven
 		}
 		_ = SaveArtifact(ctx, db, ev.TaskID, ev.ArtifactKey, ev.ContentType, ev.Value, seq)
 		// Write slot revision if this is a plugin_step task with a slot binding.
+		// list_index for partial retry is embedded inside the artifact JSON value and
+		// extracted by the plugin hook via extractListIndex — no need to pass it here.
 		routePluginArtifact(ctx, db, ev.TaskID, ev.ArtifactKey)
 	case "done":
 		status := ev.Status
