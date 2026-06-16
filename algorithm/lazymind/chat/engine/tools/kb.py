@@ -254,7 +254,7 @@ class KBToolGroup:
         self._ensure_search_runtime()
 
         payload = {
-            'queries': queries,
+            'queries': [queries] if isinstance(queries, str) else queries,
             'filters': filters or agentic_config.get('filters') or {},
             'files': [],
             'user_id': agentic_config.get('user_id', ''),
@@ -520,7 +520,7 @@ class TempKBToolGroup:
         agentic_config = lazyllm.globals['agentic_config']
         self._ensure_search_runtime()
         payload = {
-            'queries': queries,
+            'queries': [queries] if isinstance(queries, str) else queries,
             'filters': {},
             'files': files,
             'user_id': agentic_config.get('user_id', ''),
