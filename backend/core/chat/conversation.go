@@ -219,10 +219,15 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	if cnt, err := subagent.CountByConversation(r.Context(), db, convID); err == nil && cnt > 0 {
 		reqBody["has_subagents"] = true
 	}
-	// Auto-inject plugin_context when the conversation has an active plugin session
-	// and the request body does not already carry one (e.g. from triggerNextChatTurn).
-	if _, hasPC := reqBody["plugin_context"]; !hasPC {
-		if activeSess, err := plugin.GetActiveSession(r.Context(), db, convID); err == nil && activeSess != nil {
+	// Reconcile plugin_context with the DB-authoritative active session.
+	// Rules:
+	//   1. No plugin_context from frontend → inject from DB if an active session exists.
+	//   2. Frontend sent plugin_context → cross-check with DB; overwrite any stale fields
+	//      so Python always receives the ground-truth session_id / current_step.
+	if activeSess, err := plugin.GetActiveSession(r.Context(), db, convID); err == nil && activeSess != nil {
+		existing, hasPC := reqBody["plugin_context"].(map[string]any)
+		if !hasPC || existing == nil {
+			// Case 1: inject from DB.
 			reqBody["plugin_context"] = map[string]any{
 				"session_id":   activeSess.ID,
 				"plugin_id":    activeSess.PluginID,
@@ -231,7 +236,32 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			}
 			fmt.Printf("[PLUGIN_CONTEXT_INJECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s\n",
 				convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID)
+		} else {
+			// Case 2: validate/correct stale fields from frontend.
+			stale := false
+			if sid, _ := existing["session_id"].(string); sid != activeSess.ID {
+				existing["session_id"] = activeSess.ID
+				stale = true
+			}
+			if pid, _ := existing["plugin_id"].(string); pid != activeSess.PluginID {
+				existing["plugin_id"] = activeSess.PluginID
+				stale = true
+			}
+			if cs, _ := existing["current_step"].(string); cs != activeSess.CurrentStepID {
+				existing["current_step"] = activeSess.CurrentStepID
+				stale = true
+			}
+			existing["advance_mode"] = plugin.DefaultMode()
+			if stale {
+				fmt.Printf("[PLUGIN_CONTEXT_CORRECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s\n",
+					convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID)
+			}
 		}
+	} else if _, hasPC := reqBody["plugin_context"]; hasPC {
+		// No active session in DB but frontend sent a plugin_context — clear it to avoid
+		// Python entering advance-step mode with a stale/non-existent session.
+		delete(reqBody, "plugin_context")
+		fmt.Printf("[PLUGIN_CONTEXT_CLEARED] conversation_id=%s no active session in DB\n", convID)
 	}
 	historyExt := buildChatHistoryExt(raw, query)
 	if err := applyChatRuntimeConfigs(r.Context(), db, userID, reqBody); err != nil {

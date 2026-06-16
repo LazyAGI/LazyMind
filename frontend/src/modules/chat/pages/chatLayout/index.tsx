@@ -36,6 +36,7 @@ import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
 import TaskCenter from "@/modules/chat/components/TaskCenter";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
+import { usePluginStore } from "@/modules/chat/store/pluginPanel";
 
 // Stable empty reference to avoid returning a fresh array from the zustand
 // selector on every render, which (with useSyncExternalStore) would trigger an
@@ -270,6 +271,18 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           ? chatConfig.knowledgeBaseId.map((k) => ({ id: k }))
           : [];
 
+    // Attach active plugin session context so Go/Python can inject advance_step
+    // instead of cold-start trigger tools on follow-up messages.
+    const activeSession = usePluginStore.getState().sessionByConversation[sessionId];
+    const pluginContext =
+      activeSession?.status === "active" || activeSession?.status === "waiting"
+        ? {
+            session_id: activeSession.session_id,
+            plugin_id: activeSession.plugin_id,
+            current_step: activeSession.current_step_id,
+          }
+        : undefined;
+
     return new SSE(CHAT_STREAM_URL, {
       method: Method.POST,
       headers: {
@@ -301,6 +314,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         mode: "auto",
         create_time: new Date().toISOString(),
         environment_context: buildEnvironmentContext(),
+        ...(pluginContext ? { plugin_context: pluginContext } : {}),
       }),
       callbacks,
     });
