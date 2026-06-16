@@ -56,9 +56,13 @@ SKILLS_GUIDANCE = (
 )
 IMAGE_REFERENCE_MARKDOWN_GUIDANCE = (
     '# Image path formatting (mandatory)\n'
-    'When showing knowledge-base images, you MUST copy the `image_markdown` field from '
-    '`KBToolGroup` tool results verbatim. If `image_markdown` is absent, copy the '
-    '`image_url` or signed `text` field that starts with `/static-files/` exactly.\n'
+    'When showing images in your answer, you MUST copy the `image_markdown` field from '
+    'tool results verbatim:\n'
+    '- Knowledge-base images: from `KBToolGroup` results.\n'
+    '- Generated images: from `image_generator` results.\n'
+    '- Edited images: from `image_editor` results.\n'
+    'If `image_markdown` is absent, copy the `image_url` or signed `text` field that '
+    'starts with `/static-files/` exactly.\n'
     'Rules:\n'
     '- Use Markdown image syntax only: `![alt](/static-files/...?expires=...&sig=...)`.\n'
     '- NEVER invent hosts or prefixes (`https://ext.lazymind.ai`, `agent-cdn.minimax.io`, '
@@ -68,8 +72,9 @@ IMAGE_REFERENCE_MARKDOWN_GUIDANCE = (
     '- Do not paste bare filesystem paths (`/var/lib/lazymind/uploads/...`) in answers.'
 )
 VISION_EXTRACTOR_GUIDANCE = (
-    'When calling vision_extractor on knowledge-base images, pass the `local_path` field '
-    'from KBToolGroup results (filesystem path under /var/lib/lazymind/uploads/). '
+    'When calling vision_extractor on knowledge-base or attached images, pass the '
+    'short filename shown in tool results or under Attached Files, or the '
+    '`local_path` field from KBToolGroup results. '
     'Do NOT pass `/static-files/` signed URLs to vision_extractor.'
 )
 VISION_EXTRACT_DEFAULT_INSTRUCTION = (
@@ -80,7 +85,8 @@ ATTACHED_FILES_GUIDANCE = (
     '# Attached file rules\n'
     'The user may provide attached files in this conversation. Treat the attached file '
     'paths in the system prompt as available evidence, and choose tools by file type:\n'
-    '- If an attached file is an image, call `vision_extractor` with that local file path '
+    '- If an attached file is an image, call `vision_extractor` with its short filename '
+    'shown under Attached Files (or the local path when no short ref is available) '
     'before answering questions that depend on its visual content.\n'
     '- If an attached file is a PDF, text, document, or data file, call `kb_tmp_search` or another '
     '`kb_*` tool with the attached file scope before answering questions that depend on '
@@ -120,6 +126,12 @@ TOOL_CALL_STATUS_GUIDANCE = (
     "Before calling a tool, write one concise, user-visible sentence explaining "
     "what you are about to do. Keep it action-oriented and do not reveal hidden "
     "reasoning. Then make the tool call in the same response."
+)
+TOOL_AVAILABILITY_GUIDANCE = (
+    "# Tool availability rules\n"
+    "Only call tools that are currently registered and active in this session.\n"
+    "If a requested tool is not registered, not active, or not available, explicitly tell the user it is unavailable.\n"
+    "Do not silently remove the request, do not pretend the tool call succeeded, and do not substitute a different tool without telling the user."
 )
 TOOL_USE_ENFORCEMENT_GUIDANCE = (
     "# Tool-use enforcement\n"
