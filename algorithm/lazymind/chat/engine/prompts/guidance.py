@@ -105,6 +105,13 @@ SEARCH_GUIDANCE = (
     "or `ArxivSearch`, do not "
     "fabricate `[[document.chunk]]`; instead, mention the source title or URL plainly.\n"
 )
+WEB_SEARCH_GUIDANCE = (
+    "# Web Search Tool Rules\n"
+    "When using `web_search`, the `query` must represent one search intent. "
+    "If the user asks to search multiple unrelated keywords or topics, call "
+    "`web_search` separately for each keyword/topic. Do not combine unrelated "
+    "terms into one `query` with spaces, commas, punctuation, or list-like text."
+)
 TOOL_CALL_STATUS_GUIDANCE = (
     "Before calling a tool, write one concise, user-visible sentence explaining "
     "what you are about to do. Keep it action-oriented and do not reveal hidden "

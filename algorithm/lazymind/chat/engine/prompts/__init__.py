@@ -12,6 +12,7 @@ from .guidance import (
     VISION_EXTRACT_DEFAULT_INSTRUCTION,
     VISION_EXTRACTOR_GUIDANCE,
     VOCAB_GUIDANCE,
+    WEB_SEARCH_GUIDANCE,
 )
 from .system_prompt import build_system_prompt
 
@@ -27,5 +28,6 @@ __all__ = [
     'VISION_EXTRACT_DEFAULT_INSTRUCTION',
     'VISION_EXTRACTOR_GUIDANCE',
     'VOCAB_GUIDANCE',
+    'WEB_SEARCH_GUIDANCE',
     'build_system_prompt',
 ]

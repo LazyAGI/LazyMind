@@ -10,6 +10,7 @@ from .guidance import (
     TOOL_CALL_STATUS_GUIDANCE,
     VISION_EXTRACTOR_GUIDANCE,
     VOCAB_GUIDANCE,
+    WEB_SEARCH_GUIDANCE,
 )
 
 
@@ -86,6 +87,8 @@ def build_system_prompt(
         prompt_parts.append(TOOL_CALL_STATUS_GUIDANCE)
     if 'kb' in active_groups or 'temp_kb' in active_groups:
         prompt_parts.append(SEARCH_GUIDANCE)
+    if 'web_search' in active_groups:
+        prompt_parts.append(WEB_SEARCH_GUIDANCE)
     if files:
         prompt_parts.append(IMAGE_REFERENCE_MARKDOWN_GUIDANCE)
     if 'multimodal' in active_groups:
