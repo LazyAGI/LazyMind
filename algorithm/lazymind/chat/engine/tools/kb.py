@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 import lazyllm
 from lazyllm import AutoModel, LOG
 from lazyllm.tools.rag import Reranker, Retriever, TempDocRetriever
+from lazyllm.tools.rag.doc_impl import NodeGroupType
 
 from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
 from lazymind.chat.engine.tools._utils import (
@@ -15,6 +16,7 @@ from lazymind.chat.engine.tools.algo import DOCUMENT, search_kb, search_temp_fil
 from lazymind.chat.engine.tools.infra import (
     resolve_index,
 )
+from lazymind.parsing.engine.transform import GeneralParser
 from lazymind.chat.service.utils import (
     annotate_citations,
     basename_from_path,
@@ -26,6 +28,8 @@ from lazymind.model_config import get_dynamic_role_slot_map
 
 _MAX_TEXT_LEN = 1200
 _MAX_RESULT_ITEMS = 50
+
+
 def build_default_retriever_configs() -> List[dict]:
     return [
         {'group_name': 'line', 'embed_keys': [EMBED_MAIN], 'target': 'block'},
@@ -475,6 +479,12 @@ class TempKBToolGroup:
         if cls._tmp_retriever is not None:
             return
         cls._tmp_retriever = TempDocRetriever(embed=AutoModel(model=EMBED_MAIN))
+        cls._tmp_retriever.create_node_group(
+            name='block',
+            display_name='paragraph slice',
+            group_type=NodeGroupType.CHUNK,
+            transform=GeneralParser(max_length=2048, split_by='\n'),
+        )
         cls._tmp_retriever.add_subretriever('block')
         cls._reranker = (
             Reranker('ModuleReranker', model=AutoModel(model='reranker'))

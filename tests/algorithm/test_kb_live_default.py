@@ -114,3 +114,34 @@ def test_kb_tmp_search_core_flow(monkeypatch):
     }
     assert result['success'] is True
     assert result['tool'] == 'kb_tmp_search'
+
+
+def test_temp_kb_runtime_registers_block_group(monkeypatch):
+    calls = []
+
+    class FakeTempDocRetriever:
+        def __init__(self, embed):
+            calls.append(('init', embed))
+
+        def create_node_group(self, **kwargs):
+            calls.append(('create_node_group', kwargs))
+            return self
+
+        def add_subretriever(self, group):
+            calls.append(('add_subretriever', group))
+            return self
+
+    monkeypatch.setattr(kb, 'AutoModel', lambda model: f'model:{model}')
+    monkeypatch.setattr(kb, 'TempDocRetriever', FakeTempDocRetriever)
+    monkeypatch.setattr(kb, '_is_reranker_enabled', lambda: False)
+    monkeypatch.setattr(kb.TempKBToolGroup, '_tmp_retriever', None)
+    monkeypatch.setattr(kb.TempKBToolGroup, '_reranker', None)
+
+    kb.TempKBToolGroup()._ensure_search_runtime()
+
+    assert calls[0] == ('init', f'model:{kb.EMBED_MAIN}')
+    assert calls[1][0] == 'create_node_group'
+    assert calls[1][1]['name'] == 'block'
+    assert calls[1][1]['display_name'] == 'paragraph slice'
+    assert calls[1][1]['group_type'] == kb.NodeGroupType.CHUNK
+    assert calls[2] == ('add_subretriever', 'block')

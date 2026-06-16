@@ -8,20 +8,25 @@ from lazyllm import AutoModel
 from lazyllm.components.formatter import encode_query_with_filepaths
 
 from lazymind.chat.engine.prompts import VISION_EXTRACT_DEFAULT_INSTRUCTION
-from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
+from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_error, tool_success
 from lazymind.chat.service.utils import resolve_local_image_path
+
+_SUPPORTED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif'}
 
 
 @handle_tool_errors
 def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, Any]:
     """Extract a text description from an image reachable at the given URL.
 
+    Only image files are supported. PDFs and other document/data files should be
+    searched with ``kb_tmp_search`` or another knowledge-base retrieval tool.
+
     Uses the configured VLM endpoint (role ``vlm`` in runtime_models)
     with LazyLLM multimodal file-path encoding.
 
     Args:
-        url: Local filesystem path under the upload root, or a ``/static-files/``
-            signed path from kb results (resolved to the local file automatically).
+        url: Image filesystem path under the upload root, or a ``/static-files/``
+            signed image path from kb results (resolved to the local file automatically).
         instruction: Optional focus for what to extract; defaults to a general
             description prompt.
 
@@ -31,11 +36,20 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
     """
     raw = str(url or '').strip()
     if not raw:
-        raise ValueError('url is required')
+        return tool_error('vision_extractor', 'url is required')
 
     local_path = resolve_local_image_path(raw)
     if not local_path or not os.path.isfile(local_path):
-        raise ValueError(f'image file not found: {local_path or raw}')
+        return tool_error('vision_extractor', f'image file not found: {local_path or raw}')
+    ext = os.path.splitext(local_path.split('?', 1)[0])[1].lower()
+    if ext not in _SUPPORTED_IMAGE_EXTENSIONS:
+        return tool_error(
+            'vision_extractor',
+            f'vision_extractor only supports image files; got {ext or "unknown"} file. '
+            'Use kb_tmp_search for PDFs, documents, or data files.',
+            error_type='UnsupportedFileType',
+            meta={'path': local_path, 'extension': ext},
+        )
 
     prompt_instruction = (
         str(instruction).strip() if instruction else VISION_EXTRACT_DEFAULT_INSTRUCTION
