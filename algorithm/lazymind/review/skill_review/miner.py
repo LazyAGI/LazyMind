@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from concurrent.futures import as_completed
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,10 @@ from lazymind.review.skill_review.schemas import (
 from lazymind.review.skill_review.json_call import call_json
 from lazymind.review.skill_review.reports import finish_stage_report, stage_error, start_stage, write_json_file
 from lazymind.review.skill_review.prompt import candidate_prompt, outline_prompt
+
+
+_SKILL_NAME_PATTERN = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
+_SKILL_NAME_MAX_LENGTH = 64
 
 
 _OUTLINE_RESPONSE_SCHEMA: dict[str, Any] = {
@@ -248,6 +253,8 @@ def _normalize_candidate_payload(
         raise ValueError('candidate payload must contain applicable_scenario')
     if not content:
         raise ValueError('candidate payload must contain content')
+    _validate_skill_name(skill_name, field='candidate skill_name')
+    _validate_candidate_skill_content(content, skill_name)
     return {
         'skill_name': skill_name,
         'category': str(payload.get('category') or 'general'),
@@ -257,6 +264,64 @@ def _normalize_candidate_payload(
         'content': content + '\n',
         'outline': outline.model_dump(),
     }
+
+
+def _validate_skill_name(skill_name: str, *, field: str = 'skill_name') -> None:
+    if len(skill_name) > _SKILL_NAME_MAX_LENGTH:
+        raise ValueError(f'{field} must be no more than {_SKILL_NAME_MAX_LENGTH} characters')
+    if not _SKILL_NAME_PATTERN.fullmatch(skill_name):
+        raise ValueError(
+            f'{field} must use lowercase letters, numbers, and single hyphens '
+            'without leading or trailing hyphens'
+        )
+
+
+def _validate_candidate_skill_content(content: str, skill_name: str) -> None:
+    frontmatter = _parse_skill_frontmatter(content)
+    frontmatter_name = str(frontmatter.get('name') or '').strip()
+    description = str(frontmatter.get('description') or '').strip()
+    if not frontmatter_name:
+        raise ValueError('candidate content frontmatter must contain name')
+    _validate_skill_name(frontmatter_name, field='candidate content frontmatter name')
+    if frontmatter_name != skill_name:
+        raise ValueError(
+            f'candidate skill_name must match content frontmatter name: '
+            f'{skill_name!r} != {frontmatter_name!r}'
+        )
+    if not description:
+        raise ValueError('candidate content frontmatter must contain description')
+
+
+def _parse_skill_frontmatter(content: str) -> dict[str, str]:
+    lines = content.lstrip('\ufeff').splitlines()
+    if not lines or lines[0].strip() != '---':
+        raise ValueError('candidate content must start with YAML frontmatter')
+
+    frontmatter_lines: list[str] = []
+    for line in lines[1:]:
+        if line.strip() == '---':
+            break
+        frontmatter_lines.append(line)
+    else:
+        raise ValueError('candidate content must close YAML frontmatter')
+
+    fields: dict[str, str] = {}
+    for line in frontmatter_lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#') or ':' not in stripped:
+            continue
+        key, value = stripped.split(':', 1)
+        key = key.strip()
+        if key:
+            fields[key] = _strip_yaml_scalar(value.strip())
+    return fields
+
+
+def _strip_yaml_scalar(value: str) -> str:
+    value = re.sub(r'\s+#.*$', '', value).strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1].strip()
+    return value
 
 
 def _collect_source_trajectories(cluster: TaskCluster) -> list[str]:

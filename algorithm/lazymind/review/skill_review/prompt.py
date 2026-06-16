@@ -198,6 +198,7 @@ Do NOT create a step just because:
 # Refinement Principles
 
 Keep a step ONLY IF it:
+- preserves at least one task-critical constraint
 - changed the agent's understanding
 - changed execution strategy or direction
 - retrieved or produced critical evidence
@@ -226,10 +227,12 @@ Do NOT:
 
 # State Field
 
-The "state" field should describe:
-- why this step mattered
-- what new understanding, evidence, constraint, or decision state was produced
-- how it affected subsequent execution
+The "state" field should describe only the critical state produced by this step.
+When applicable, the state should explicitly capture:
+- why this step mattered and how if affected subsequent execution
+- which required state has or has not been satisfied
+- which destination, filter, or stopping condition remains necessary
+- which similar-looking alternative would be incorrect
 
 # Output Format
 
@@ -501,8 +504,65 @@ Do NOT include:
 
 Only retain patterns likely to generalize.
 
----
+## 5. Skill name rules
 
+The skill name must satisfy the following:
+- 
+skill_name must match: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+- skill_name must be <= 64 characters
+- skill_name must use lowercase ASCII letters, digits, and hyphens only
+- no spaces, underscores, dots, slashes, uppercase letters, or non-ASCII characters
+
+# Mandatory Terminal Verification
+
+These are hard structural constraints. An SOP that violates any of them is invalid.
+
+## First Step: Goal Anchoring
+
+Every SOP MUST begin with an anchoring step (step_name = "Anchor on Task Goal").
+
+action_goal: "Extract the task's objectives, explicit constraints, and completion criteria
+from the task description, so every subsequent step can be evaluated against them."
+
+branch_conditions MUST include:
+- "The task's constraints are incompatible with this SOP's approach → abort and state which constraint conflicts"
+- "The task fits within this SOP → use the extracted criteria as the checklist for all subsequent steps"
+
+expected_state: "All objectives, constraints, and completion criteria from the task description
+are explicitly listed and understood."
+
+## Last Step: Completion Verification
+
+Every SOP MUST end with a verification step (step_name = "Verify Completion").
+
+action_goal: "Confirm that every constraint and objective identified in the anchoring step
+has been satisfied, before declaring success or failure."
+
+branch_conditions MUST include:
+- "All extracted criteria are satisfied → report success, citing evidence for each"
+- "Any criterion is unmet → report which criterion and why it is not satisfied, do NOT claim success"
+
+expected_state: "Every criterion from the anchoring step has been independently checked."
+
+## Branch Conditions Per Step
+
+For every step in the SOP, at least one branch_condition MUST be present.
+
+Required coverage across the SOP as a whole:
+1. At least one goal-completion gate: "current state already satisfies the task → skip remaining steps"
+2. At least one constraint-boundary gate: "this action would violate a known constraint → take corrective action instead"
+3. At least one information-quality gate: "available information is insufficient for a decision → gather more before proceeding"
+
+BAD branch_conditions:
+- "Continue to next step" (no decision)
+- "Try again" (no strategy change)
+- "If successful → proceed" (tautology)
+
+## Skip Conditions
+
+For each step, expected_state SHOULD additionally describe when the step can be safely skipped:
+- What observable condition means the step's purpose is already fulfilled?
+  
 # Input
 
 You will receive:
@@ -566,24 +626,13 @@ Focus on operational intent.
 ---
 
 ## branch_conditions
-Only include meaningful decision points.
-
-Examples:
-- insufficient evidence retrieved
-- conflicting results detected
-- retrieval confidence too low
-- execution path blocked
+Only include meaningful decision points. For EVERY step, you MUST generate at least ONE branch condition.
+Details of this part are already described in Section **Mandatory Terminal Verification**.
 
 ---
 
 ## expected_state
-Describe the expected agent state after the step succeeds.
-
-Examples:
-- key constraints are identified
-- sufficient evidence is collected
-- candidate solution is validated
-- execution uncertainty is reduced
+Describe the expected agent state after the step succeeds, details of this part are already described in Section **Mandatory Terminal Verification**.
 
 # Input Data
 
@@ -607,11 +656,13 @@ Your job is to synthesize them into a complete Agent Skills `SKILL.md` document 
 
 Convert abstract SOP structure and trajectory-level experiences into reusable operational knowledge.
 
+A valid skill must be specific enough that an agent can decide both when to use it and when NOT to use it.
 The final skill should help an agent:
 - execute more reliably
 - avoid common mistakes
 - make better decisions
 - self-check execution quality
+Do not merge different action spaces into one skill. In particular, do not merge Read-only action space with State-changing action space
 
 The final document must read like a human-authored skill, not like a database dump. The `content` field must contain the full `SKILL.md` file content, including YAML frontmatter and Markdown instructions.
 
@@ -682,7 +733,7 @@ Prefer:
 
 ---
 
-## 4. Write a standards-compliant Agent Skill document
+## 4. Skill Document Structure
 
 Use Markdown in the "content" field. The content is the entire `SKILL.md` file, not a summary and not a JSON representation of the skill.
 
@@ -691,21 +742,34 @@ Required structure:
 - `name`, `category`, and `description` fields in frontmatter
 - Markdown instructions after the closing `---`
 
-Frontmatter requirements:
-- `name` must be lowercase letters, numbers, and hyphens only
-- `name` must be no more than 64 characters
-- `name` must not start or end with a hyphen
-- `category` must be a concise lowercase classification for the skill, such as `research`, `coding`, `writing`, `data-analysis`, `tool-use`, `planning`, `debugging`, `review`, or `general`
-- `category` must describe the reusable task family, not the source trajectory, user, project, or implementation detail
-- `description` must state when to use the skill and what reusable capability it provides
-- keep frontmatter concise; do not put trajectory history in metadata
+### YAML Frontmatter
 
-Recommended Markdown structure:
-- H1 title
-- "When To Use"
-- "Procedure" or "Steps"
-- Optional "Recovery And Edge Cases"
-- Optional "Quality Checks"
+- `name`: lowercase letters, numbers, hyphens only; ≤64 chars; no leading/trailing hyphens
+- `description`: must follow this template:
+
+  "When [ONE specific triggering condition] — [what the agent gains by following this skill] (NOT [most confusable alternative scenario])"
+
+  The (NOT ...) clause is REQUIRED. Its purpose is to give the agent a concrete
+  exclusion test: "if my task matches the NOT clause, this skill is the wrong choice."
+
+  BAD (no exclusion):
+  "When you need to process structured data — provides systematic data handling"
+  → Agent cannot distinguish which data tasks require this skill versus a simpler approach.
+
+  GOOD (has exclusion):
+  "When you need to validate structured data against a known schema — provides
+   systematic constraint checking (NOT for exploratory data browsing or ad-hoc queries)"
+  → Agent receives a clear boundary between schema-validation and free-form exploration.
+
+### Markdown Sections (REQUIRED)
+
+The content MUST include these sections in order:
+1. H1 title
+2. "When To Use"
+3. "Do Not Use When"
+4. "Procedure" (or "Steps")
+5. Optional "Recovery And Edge Cases"
+6. Optional "Quality Checks"
 
 Within each step:
 - start with the step purpose
@@ -717,13 +781,82 @@ Avoid overly long step sections. Prefer concise, synthesized guidance.
 
 ---
 
-## 5. Emphasize reliability
+## 5. Content Quality
 
 The skill should improve:
 - robustness
 - recovery ability
 - decision quality
 - execution consistency
+
+## 6. Scope Boundary
+
+This section governs how the agent decides whether to apply this skill.
+
+### When To Use
+
+Describe EXACTLY ONE triggering scenario. It must answer:
+- What observable property of the task makes this skill applicable?
+- What must be true about the task BEFORE the agent invokes this skill?
+
+If the triggering scenario can be stated more narrowly without losing coverage, do so.
+A narrower trigger prevents false-positive matches.
+
+### Do Not Use When
+
+Describe at least TWO exclusion scenarios:
+
+1. Nearest-neighbor exclusion: the task class that shares the most surface-level
+   similarity but has a fundamentally different objective or action space.
+   "Do NOT use when [surface similarity] but [objective difference]."
+
+2. Constraint-mismatch exclusion: a scenario where the task's access level,
+   scope, or constraints make this skill's approach unsuitable.
+   "Do NOT use when [constraint] prevents [action this skill relies on]."
+
+### Relationship between description and scope sections
+
+- The `description` frontmatter is a one-line summary used for skill matching.
+  Its (NOT ...) clause should echo the nearest-neighbor exclusion from "Do Not Use When".
+
+- The "When To Use" and "Do Not Use When" sections are the expanded, operational
+  version that the agent reads before committing to the skill's procedure.
+  They provide enough detail for a binary decision: use this skill, or look elsewhere.
+
+## 7. Pre-Output Self-Critique
+
+Before finalizing the `content` field, silently apply these checks and revise
+the content if needed. Do NOT include the checks in the output.
+
+1. Gate-Position Check:
+  Would an agent following this skill discover that the task is out-of-scope
+  only AFTER completing substantive steps?
+  If YES → move the scope-matching logic earlier, so rejection happens before action.
+
+2. Boundary-Clarity Check:
+  What is the single task class most likely to trigger a false-positive match
+  with this skill? Does "Do Not Use When" explicitly exclude it with enough
+  detail that the agent can distinguish the two?
+  If NO → add the exclusion, using the most relevant failure_pattern as source material.
+
+3. Constraint-Degradation Check:
+  Imagine the task has twice as many explicit constraints as the source trajectories.
+  Would this skill's guidance become misleading because it assumes constraints
+  that are no longer valid?
+  If YES → add a constraint-priority statement at the relevant step:
+  "If constraints conflict, the constraint that limits action space takes priority."
+
+4. Skill Name Check:
+  Do the skill_name and frontmatter name match the rules below?
+  - JSON field skill_name must match: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+  - skill_name must be <= 64 characters
+  - skill_name must use lowercase ASCII letters, digits, and hyphens only
+  - no spaces, underscores, dots, slashes, uppercase letters, or non-ASCII characters
+  - YAML frontmatter name must be exactly identical to JSON skill_name
+  - If invalid, rewrite the name before output.
+  Only prose fields and Markdown body should follow the trajectory language; skill_name/name must always be an ASCII slug.
+
+Revise the content silently based on these checks, then output the final version.
 
 # Input
 
