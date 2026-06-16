@@ -5,14 +5,18 @@ Each plugin lives at plugin/plugins/<plugin-id>/ and must contain:
   - scenario/scenario.md (required) — ChatAgent intent-recognition guide
   - scenario/state.yml   (required) — state machine + step execution spec
   - scenario/driver.md   (optional, required for auto mode) — DriverAgent prompt
+  - scripts/             (optional) — plugin-local tool implementations
 
 Loaded plugins are cached at import time (startup). Hot-reload is not supported.
 """
 from __future__ import annotations
 
+import importlib.util
 import logging
+import sys
+import types
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 
@@ -101,8 +105,80 @@ class PluginSpec:
         # Extract step configs from state.yml
         self._steps: Dict[str, Dict[str, Any]] = self.state.get('steps', {})
 
+        # Load plugin-local script tools declared in plugin.yaml tool_scripts.
+        self._script_tools: Dict[str, Callable] = self._load_script_tools()
+
         # Validate: auto-capable steps need driver.md
         self._validate()
+
+    def _load_script_tools(self) -> Dict[str, Callable]:
+        """Dynamically import functions declared in plugin.yaml tool_scripts.
+
+        Each entry under tool_scripts must have:
+          - path: relative path from the plugin directory to the Python file
+          - functions: list of function names to import from that file
+
+        Returns a dict mapping function_name -> callable.
+        """
+        result: Dict[str, Callable] = {}
+        entries: List[Dict[str, Any]] = self.yaml.get('tool_scripts', []) or []
+        for entry in entries:
+            rel_path = entry.get('path', '')
+            func_names: List[str] = entry.get('functions', []) or []
+            if not rel_path or not func_names:
+                continue
+            script_path = self.plugin_dir / rel_path
+            if not script_path.exists():
+                LOG.warning(
+                    '[PluginLoader] plugin=%s tool_script not found: %s',
+                    self.plugin_id, script_path,
+                )
+                continue
+            # Use a unique module name to avoid collisions across plugins.
+            module_name = f'_plugin_script_{self.plugin_id}_{script_path.stem}'
+            if module_name in sys.modules:
+                module: types.ModuleType = sys.modules[module_name]
+            else:
+                spec = importlib.util.spec_from_file_location(module_name, script_path)
+                if spec is None or spec.loader is None:
+                    LOG.warning(
+                        '[PluginLoader] plugin=%s cannot load script: %s',
+                        self.plugin_id, script_path,
+                    )
+                    continue
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module
+                try:
+                    spec.loader.exec_module(module)  # type: ignore[union-attr]
+                except Exception as exc:
+                    LOG.error(
+                        '[PluginLoader] plugin=%s script exec failed (%s): %s',
+                        self.plugin_id, script_path, exc,
+                    )
+                    del sys.modules[module_name]
+                    continue
+            for fn_name in func_names:
+                fn = getattr(module, fn_name, None)
+                if fn is None or not callable(fn):
+                    LOG.warning(
+                        '[PluginLoader] plugin=%s script %s has no callable %r',
+                        self.plugin_id, rel_path, fn_name,
+                    )
+                    continue
+                result[fn_name] = fn
+                LOG.info(
+                    '[PluginLoader] plugin=%s registered script tool: %s',
+                    self.plugin_id, fn_name,
+                )
+        return result
+
+    def get_script_tool(self, name: str) -> Optional[Callable]:
+        """Return a script tool callable by name, or None if not found."""
+        return self._script_tools.get(name)
+
+    def list_script_tool_names(self) -> List[str]:
+        """Return the names of all registered script tools for this plugin."""
+        return list(self._script_tools.keys())
 
     @staticmethod
     def _read_text(path: Path, optional: bool = False) -> Optional[str]:
@@ -227,6 +303,18 @@ def find_producer_step(plugin_id: str, artifact_id: str) -> Optional[str]:
             if out.get('artifact_id') == artifact_id:
                 return step_id
     return None
+
+
+def get_script_tool(plugin_id: str, tool_name: str) -> Optional[Callable]:
+    """Return a plugin script tool callable by name, or None."""
+    spec = get_plugin(plugin_id)
+    return spec.get_script_tool(tool_name) if spec else None
+
+
+def list_script_tool_names(plugin_id: str) -> List[str]:
+    """Return names of all script tools registered for a plugin."""
+    spec = get_plugin(plugin_id)
+    return spec.list_script_tool_names() if spec else []
 
 
 # Auto-load on import.

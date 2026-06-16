@@ -8,6 +8,13 @@ description: >
   enhance_image steps additionally support partial retry: the user can request
   re-collection or re-enhancement of specific list items while keeping others.
 
+tool_scripts:
+  - path: scripts/tools.py
+    functions:
+      - web_search_tool
+      - image_search_tool
+      - generate_image_tool
+
 steps:
   - id: analyze_subject
     label: Analyze Subject

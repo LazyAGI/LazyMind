@@ -1,32 +1,11 @@
 initial: __start__
 
-# Retry semantics are expressed entirely through state-machine transitions:
-#
-#   Full retry  — the step self-loops (step_x → step_x).  The new execution
-#                 overwrites all artifacts produced by that step; existing
-#                 plugin_slot_revisions for the step's output slots have their
-#                 selected flag cleared before the new revision is written.
-#
-#   Partial retry — applies only to steps with list-cardinality slots.
-#                 When the user is unhappy with a subset of items (e.g. one
-#                 out of four collected materials), ChatAgent passes a
-#                 runtime_instruction to advance_step that constrains the
-#                 SubAgent to regenerate only those items.  The SubAgent calls
-#                 save_artifact once per regenerated item; each call writes a
-#                 new plugin_slot_revisions row for the affected list_index and
-#                 marks it selected=true while the previous row for that index
-#                 is set selected=false.  Unaffected list items are untouched.
-#
 # {{placeholder}} substitution rules (performed by Go before launching the SubAgent):
 #
-#   {{user_input}}           — the user's original request text (injected by Python
-#                              _render_step_objective before the task_created signal).
-#   {{runtime_instruction}}  — ephemeral per-run instruction for retries (same).
-#   {{<artifact_id>}}        — value of an artifact saved by a prior step, e.g.
-#                              {{subject_analysis}}, {{optimized_prompt}}.
-#                              Go's injectArtifacts() replaces these from the DB
-#                              after the task is created.  For text artifacts the
-#                              text field is used; for image artifacts the url field.
+#   {{user_input}}           — the user's original request text
+#   {{runtime_instruction}}  — ephemeral per-run instruction for retries
+#   {{<artifact_id>}}        — value of an artifact saved by a prior step
+#                              (text → text field; image → url field)
 
 transitions:
   __start__:
@@ -36,37 +15,18 @@ transitions:
   analyze_subject:
     - to: collect_material
       condition: "Subject analysis complete — collect reference materials."
-    - to: analyze_subject
-      condition: "Analysis result unsatisfactory — full retry."
 
   collect_material:
     - to: optimize_prompt
       condition: "All materials collected — proceed to prompt optimization."
-    - to: collect_material
-      condition: >
-        User wants all materials re-collected (e.g. completely different theme) — full retry.
-        ChatAgent passes runtime_instruction describing the new theme.
-    - to: collect_material
-      condition: >
-        User is unhappy with one or more specific materials — partial retry.
-        ChatAgent passes runtime_instruction naming the items to replace,
-        and partial_indices mapping artifact key to the list_index values.
 
   optimize_prompt:
     - to: generate_image
       condition: "Prompt ready — proceed to image generation."
-    - to: optimize_prompt
-      condition: "User is unhappy with the prompt — full retry."
-    - to: collect_material
-      condition: "User wants fresh materials before re-optimizing."
 
   generate_image:
     - to: __end__
       condition: "User is satisfied with the image — pipeline complete."
-    - to: generate_image
-      condition: "User wants to regenerate without changing the prompt — full retry."
-    - to: optimize_prompt
-      condition: "User wants to change the description and regenerate from scratch."
 
 steps:
   analyze_subject:

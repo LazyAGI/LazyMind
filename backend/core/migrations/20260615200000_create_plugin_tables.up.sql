@@ -2,7 +2,7 @@
 -- Plugin sessions track one plugin workflow per conversation.
 -- SubAgent tables (sub_agent_tasks / sub_agent_steps / sub_agent_artifacts) are reused unchanged.
 
-CREATE TABLE plugin_sessions (
+CREATE TABLE IF NOT EXISTS plugin_sessions (
     id                  VARCHAR(36)  PRIMARY KEY,
     conversation_id     VARCHAR(36)  NOT NULL,
     plugin_id           VARCHAR(64)  NOT NULL,
@@ -14,26 +14,27 @@ CREATE TABLE plugin_sessions (
     updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_ps_conv ON plugin_sessions(conversation_id, created_at DESC);
-CREATE INDEX idx_ps_conv_active ON plugin_sessions(conversation_id, status);
+CREATE INDEX IF NOT EXISTS idx_ps_conv        ON plugin_sessions(conversation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ps_conv_active ON plugin_sessions(conversation_id, status);
 
 -- Each step execution instance maps to one sub_agent_tasks record.
-CREATE TABLE plugin_session_steps (
-    id          VARCHAR(36)  PRIMARY KEY,
-    session_id  VARCHAR(36)  NOT NULL REFERENCES plugin_sessions(id),
-    step_id     VARCHAR(64)  NOT NULL,
-    attempt     INT          NOT NULL DEFAULT 1,
-    task_id     VARCHAR(36)  NOT NULL,
-    status      VARCHAR(16)  NOT NULL DEFAULT 'pending',
+CREATE TABLE IF NOT EXISTS plugin_session_steps (
+    id          VARCHAR(36) PRIMARY KEY,
+    session_id  VARCHAR(36) NOT NULL REFERENCES plugin_sessions(id),
+    step_id     VARCHAR(64) NOT NULL,
+    attempt     INT         NOT NULL DEFAULT 1,
+    task_id     VARCHAR(36) NOT NULL,
+    status      VARCHAR(16) NOT NULL DEFAULT 'pending',
     created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_pss_session ON plugin_session_steps(session_id, step_id, attempt);
-CREATE INDEX idx_pss_task    ON plugin_session_steps(task_id);
+CREATE INDEX IF NOT EXISTS idx_pss_session ON plugin_session_steps(session_id, step_id, attempt);
+CREATE INDEX IF NOT EXISTS idx_pss_task    ON plugin_session_steps(task_id);
 
 -- Records each slot write produced by a step artifact.
-CREATE TABLE plugin_slot_revisions (
+-- list_index is NULL for single-cardinality slots; 0-based index for list slots.
+CREATE TABLE IF NOT EXISTS plugin_slot_revisions (
     id           VARCHAR(36)  PRIMARY KEY,
     session_id   VARCHAR(36)  NOT NULL REFERENCES plugin_sessions(id),
     slot_id      VARCHAR(64)  NOT NULL,
@@ -46,6 +47,6 @@ CREATE TABLE plugin_slot_revisions (
     created_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX idx_psr_slot_rev ON plugin_slot_revisions(session_id, slot_id, revision);
-CREATE INDEX        idx_psr_artifact  ON plugin_slot_revisions(artifact_key);
-CREATE INDEX        idx_psr_session   ON plugin_slot_revisions(session_id, slot_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_psr_slot_rev ON plugin_slot_revisions(session_id, slot_id, revision);
+CREATE INDEX        IF NOT EXISTS idx_psr_artifact  ON plugin_slot_revisions(artifact_key);
+CREATE INDEX        IF NOT EXISTS idx_psr_session   ON plugin_slot_revisions(session_id, slot_id);

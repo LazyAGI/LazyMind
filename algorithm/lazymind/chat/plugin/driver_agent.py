@@ -39,10 +39,27 @@ _DEFAULT_DRIVER_PROMPT = (
     'Always wrap verdict in <verdict>...</verdict> and optional reason in <reason>...</reason>.'
 )
 
+# Appended to every driver prompt regardless of whether the plugin supplies driver.md.
+_ROLLBACK_HINT = (
+    '\n\n## Rollback decision guidance\n\n'
+    'When evaluating a step result, if the root cause of the problem lies not in the\n'
+    'current step but in the output of a prior step (e.g. the subject analysis is too\n'
+    'vague, the collected materials are irrelevant, or the optimized prompt is\n'
+    'misleading), you should reflect this in your reason so that the ChatAgent can\n'
+    'decide to rewind to the responsible upstream step rather than retrying the\n'
+    'current one in vain.\n\n'
+    'In your <reason>, explicitly name the upstream step that should be re-run when\n'
+    'applicable, for example: "The generated image is off-topic because the subject\n'
+    'analysis misidentified the main subject. Recommend rewinding to analyze_subject."\n\n'
+    'The ChatAgent has the ability to call advance_step with any previously completed\n'
+    'step as step_id — your reason will guide that decision.'
+)
+
 
 def _build_driver_prompt(plugin_id: str) -> str:
     driver_md = plugin_loader.get_driver(plugin_id)
-    return driver_md or _DEFAULT_DRIVER_PROMPT
+    base = driver_md or _DEFAULT_DRIVER_PROMPT
+    return base + _ROLLBACK_HINT
 
 
 def evaluate_step(

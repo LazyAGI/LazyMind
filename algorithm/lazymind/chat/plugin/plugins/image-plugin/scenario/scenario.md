@@ -26,8 +26,9 @@
 | 对 prompt 不满意，想重新优化 | optimize_prompt | `advance_step(step_id='optimize_prompt', user_input=<说明>)` |
 | 想用当前 prompt 重新生图 | generate_image | `advance_step(step_id='generate_image', user_input=<说明>)` |
 | 想重新增强（换风格 / 更高清） | enhance_image | `advance_step(step_id='enhance_image', user_input=<说明>)` |
-| 想全部重来，换描述 | optimize_prompt（退回） | `advance_step(step_id='optimize_prompt', user_input=<新描述>)` |
 | 对最终结果满意 | （无需操作，DriverAgent 自动判 DONE） | — |
+
+当用户或 DriverAgent 指出问题源于某个前序步骤时，使用 `advance_step` 并传入该前序步骤的 `step_id` 即可回退重做。可用的前序步骤由 `advance_step` 工具的 Rewind 列表动态给出，无需在此枚举。
 
 ## 注意
 

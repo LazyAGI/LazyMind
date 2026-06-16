@@ -100,12 +100,15 @@ def _resolve_plugin_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
         return None
 
 
-def _resolve_runtime_tools(explicit: Optional[List[str]]) -> List[Any]:
+def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[str] = None) -> List[Any]:
     """Build the runtime tool list for a SubAgent.
 
-    If explicit tool names are provided, use only those (looked up from DEFAULT_TOOLS).
-    Otherwise fall back to all DEFAULT_TOOLS, giving the SubAgent the same tool set
-    as ChatAgent minus the subagent-management tools.
+    If explicit tool names are provided, each name is resolved in order:
+      1. Plugin script tools (loaded from the plugin's tool_scripts declarations).
+      2. DEFAULT_TOOLS registry (framework / global tools).
+    If a name is not found in either source it is silently skipped and a warning is logged.
+
+    When explicit is None/empty, fall back to all DEFAULT_TOOLS.
 
     Note: save_artifact, get_artifact, and list_artifacts are always available regardless
     of this list — they are injected as mandatory base tools in _build_subagent_tools.
@@ -113,11 +116,32 @@ def _resolve_runtime_tools(explicit: Optional[List[str]]) -> List[Any]:
     """
     _BASE_TOOL_NAMES = {'save_artifact', 'get_artifact', 'list_artifacts'}
     if explicit:
-        name_set = {str(n).strip() for n in explicit if str(n).strip()} - _BASE_TOOL_NAMES
-        configs = [cfg for cfg in DEFAULT_TOOLS if cfg.name in name_set]
-    else:
-        configs = list(DEFAULT_TOOLS)
-    return build_agent_tools(configs)
+        name_list = [str(n).strip() for n in explicit if str(n).strip() and str(n).strip() not in _BASE_TOOL_NAMES]
+        # Build lookup from DEFAULT_TOOLS
+        default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS}
+        # Build lookup from plugin script tools
+        script_by_name: Dict[str, Any] = {}
+        if plugin_id:
+            try:
+                from lazymind.chat.plugin import plugin_loader as _loader
+                for fn_name in _loader.list_script_tool_names(plugin_id):
+                    fn = _loader.get_script_tool(plugin_id, fn_name)
+                    if fn is not None:
+                        script_by_name[fn_name] = fn
+            except Exception as exc:
+                LOG.warning('[SubAgent] failed to load script tools for plugin=%s: %s', plugin_id, exc)
+
+        result = []
+        for name in name_list:
+            if name in script_by_name:
+                result.append(script_by_name[name])
+            elif name in default_by_name:
+                resolved = build_agent_tools([default_by_name[name]])
+                result.extend(resolved)
+            else:
+                LOG.warning('[SubAgent] tool %r not found in plugin scripts or DEFAULT_TOOLS — skipped', name)
+        return result
+    return build_agent_tools(list(DEFAULT_TOOLS))
 
 
 def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
@@ -266,7 +290,7 @@ async def run_subagent_stream(
         yield _sse({'type': 'task_start', 'task_id': task_id})
 
         llm = AutoModel(model='llm')
-        runtime_tools = _resolve_runtime_tools(tools)
+        runtime_tools = _resolve_runtime_tools(tools, plugin_id=params.get('plugin_id') or None)
         agent = build_react_agent(
             llm=llm,
             tools=_build_subagent_tools(runtime_tools),
