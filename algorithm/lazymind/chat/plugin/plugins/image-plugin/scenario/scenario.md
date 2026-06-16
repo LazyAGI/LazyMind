@@ -2,20 +2,38 @@
 
 ## 场景描述
 
-帮助用户生成高质量图片。流程分两步：先将用户描述优化为专业英文 prompt，再调用图片生成模型。
+帮助用户生成并增强高质量图片。工作流分四步：
 
-## 各步骤能力
+1. **analyze_subject** — 分析用户描述的主体、风格、氛围
+2. **optimize_prompt** — 基于分析结果生成高质量英文图片生成 prompt
+3. **generate_image** — 调用图片生成模型产出原始图片
+4. **enhance_image** — 对原始图片进行风格增强 / 超分处理
 
-- **optimize_prompt**：将用户的自然语言描述优化为高质量英文图片生成 prompt
-- **generate_image**：根据优化后的 prompt 调用图片生成模型，产出图片 URL
+**步骤 2（optimize_prompt）和步骤 4（enhance_image）支持独立重跑**：用户无需重启整个流程，
+只需表达对 prompt 或增强结果不满意即可触发单步重跑。
 
 ## 用户意图识别
 
-- 用户提到「生成图片」、「画一张」、「绘制」、「创建图片」等图片生成类请求 → 调用 `trigger_image_plugin(user_input=<用户原始描述>)`
-- 已有活跃会话且需要推进下一步（如重试或用户提供额外信息） → 调用 `advance_step(step_id=<next_step>, user_input=<用户输入>)`
+### 冷启动（无活跃会话）
+
+- 用户提到「生成图片」、「画一张」、「绘制」、「创建图片」等图片生成类请求
+  → 调用 `trigger_image_plugin(user_input=<用户原始描述>)`
+
+### 有活跃会话时
+
+| 用户意图 | 推荐步骤 | 工具调用 |
+|---|---|---|
+| 对 prompt 不满意，想重新优化 | optimize_prompt | `advance_step(step_id='optimize_prompt', user_input=<说明>)` |
+| 想用当前 prompt 重新生图 | generate_image | `advance_step(step_id='generate_image', user_input=<说明>)` |
+| 想重新增强（换风格 / 更高清） | enhance_image | `advance_step(step_id='enhance_image', user_input=<说明>)` |
+| 想全部重来，换描述 | optimize_prompt（退回） | `advance_step(step_id='optimize_prompt', user_input=<新描述>)` |
+| 对最终结果满意 | （无需操作，DriverAgent 自动判 DONE） | — |
 
 ## 注意
 
-- 冷启动（无活跃会话）时必须调用 `trigger_image_plugin`，不要跳过。
-- 调用工具后立即停止，不要输出任何额外文字。
-- 工具返回确认消息后，对用户简短说明「正在为您生成图片，请稍候……」。
+- 冷启动时必须调用 `trigger_image_plugin`，不要跳过。
+- 调用工具后立即停止，不要输出额外文字。
+- 工具返回确认消息后，对用户简短说明当前正在进行的步骤，例如：
+  - 冷启动：「正在分析您的描述，请稍候……」
+  - 优化 prompt：「正在重新优化提示词……」
+  - 重跑增强：「正在重新增强图片，新版本会追加到增强结果列表中……」

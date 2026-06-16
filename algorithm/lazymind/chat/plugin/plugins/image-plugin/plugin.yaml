@@ -1,25 +1,51 @@
 id: image-plugin
 name: AI Image Generation
-description: Generate high-quality images from natural language descriptions. First optimizes the prompt, then calls an image generation model.
+description: >
+  Generate and enhance high-quality images from natural language descriptions.
+  The workflow has four steps: analyze the subject, optimize the prompt,
+  generate an image, and enhance the result. Users may re-run individual
+  steps (optimize_prompt or enhance_image) without restarting the whole pipeline.
 
 steps:
+  - id: analyze_subject
+    label: Analyze Subject
+
   - id: optimize_prompt
     label: Optimize Prompt
 
   - id: generate_image
     label: Generate Image
 
+  - id: enhance_image
+    label: Enhance Image
+
 ui:
   tabs:
     - id: result
       label: Result
       slots:
+        - id: enhanced_image_output
+          label: Enhanced Image
+          type: image
+          cardinality: list     # each enhance run appends a new entry
+
         - id: image_output
-          label: Generated Image
+          label: Raw Image
           type: image
           cardinality: single
 
+    - id: prompt
+      label: Prompt
+      slots:
         - id: prompt_used
-          label: Prompt Used
+          label: Optimized Prompt
+          type: text
+          cardinality: single   # latest optimization overwrites previous
+
+    - id: analysis
+      label: Analysis
+      slots:
+        - id: subject_analysis
+          label: Subject Analysis
           type: text
           cardinality: single

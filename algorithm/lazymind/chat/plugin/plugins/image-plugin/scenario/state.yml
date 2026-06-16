@@ -2,37 +2,140 @@ initial: __start__
 
 transitions:
   __start__:
+    - to: analyze_subject
+      condition: "Cold start — always enter subject analysis first."
+
+  analyze_subject:
+    - to: collect_materials
+      condition: "Subject analysis complete — proceed to material collection."
+
+  collect_materials:
+    - to: collect_materials
+      condition: "User wants to re-collect all materials from scratch."
+    - to: collect_materials
+      condition: "User wants to re-collect specific materials (partial retry)."
     - to: optimize_prompt
+      condition: "Materials collected — proceed to prompt optimization."
+
   optimize_prompt:
     - to: generate_image
-    - to: optimize_prompt   # retry path
+      condition: "Prompt ready — proceed to image generation."
+    - to: optimize_prompt
+      condition: "User is unhappy with the prompt and wants it re-optimized."
+
   generate_image:
+    - to: enhance_image
+      condition: "Raw image generated — proceed to enhancement."
+    - to: generate_image
+      condition: "User wants to regenerate without changing the prompt."
+    - to: optimize_prompt
+      condition: "User wants to change the description and regenerate from scratch."
+
+  enhance_image:
+    - to: enhance_image
+      condition: "User wants the enhanced image re-done with different settings."
+    - to: generate_image
+      condition: "User wants a brand-new raw image, then enhance again."
     - to: __end__
-    - to: generate_image    # retry path
+      condition: "User is satisfied — pipeline complete."
 
 steps:
-  optimize_prompt:
-    label: Optimize Prompt
+  analyze_subject:
+    label: Analyze Subject
     prompt: |
-      You are a professional image generation prompt engineer.
+      You are an expert art director and image analyst.
 
-      The user wants to generate an image with the following description:
+      The user wants to create an image with this description:
       {{user_input}}
 
       Your task:
-      1. Expand and enrich the description with visual details (style, lighting, composition, etc.).
-      2. Write a concise, high-quality English image generation prompt (max 200 words).
-      3. Save the result as an artifact using save_artifact(key='optimized_prompt', content_type='text', value=<prompt>).
+      1. Identify the main subject(s), their attributes (color, texture, pose, etc.).
+      2. Suggest a suitable artistic style (photorealistic, oil painting, anime, etc.).
+      3. Note mood, lighting, and composition hints.
+      4. Save the structured analysis as an artifact:
+           save_artifact(key='subject_analysis', content_type='text', value=<analysis text>)
 
-      Do not generate any other output. After saving the artifact, stop.
+      Keep the analysis concise (100–200 words). Stop after saving.
     tools:
       - save_artifact
     outputs:
-      - artifact_id: optimized_prompt
-        slot_id: prompt_used
+      - artifact_id: subject_analysis
+        content_type: text
+        slot_id: subject_analysis
+        cardinality: single
     acceptance_criteria: |
-      The optimized_prompt artifact must be saved and contain an English image prompt
-      with at least 20 words and no more than 200 words.
+      subject_analysis artifact must be saved and contain at least 50 words covering
+      subject, style, and mood/lighting hints.
+
+  collect_materials:
+    label: Collect Reference Materials
+    prompt: |
+      You are a research agent. Your goal is to collect reference images or visual
+      descriptions for the image generation pipeline.
+
+      Subject analysis:
+      {{subject_analysis}}
+
+      User instruction:
+      {{user_input}}
+
+      Your task:
+      For each material item requested, search the web and save one artifact per item.
+      Call save_artifact once per item:
+        save_artifact(key='material_images', content_type='image', value=<url or path>)
+
+      If this is a partial retry, the instruction will tell you which specific item(s) to
+      re-collect. Only save artifacts for those items; do not re-collect the others.
+    tools:
+      - save_artifact
+      - web_search
+    inputs:
+      - artifact_id: subject_analysis
+        required: true
+    outputs:
+      - artifact_id: material_images
+        content_type: image
+        slot_id: material_images_slot
+        cardinality: list
+    acceptance_criteria: |
+      At least one material_images artifact must be saved.
+
+  optimize_prompt:
+    label: Optimize Prompt
+    prompt: |
+      You are a professional image-generation prompt engineer.
+
+      Subject analysis from the previous step:
+      {{subject_analysis}}
+
+      Reference materials collected:
+      {{material_images}}
+
+      Original user request:
+      {{user_input}}
+
+      Your task:
+      1. Expand the analysis into a high-quality English image-generation prompt
+         (50–200 words, rich in visual detail).
+      2. Include style modifiers, lighting, composition, and quality keywords.
+      3. Save the result:
+           save_artifact(key='optimized_prompt', content_type='text', value=<prompt>)
+
+      Stop after saving. Do not output anything else.
+    tools:
+      - save_artifact
+    inputs:
+      - artifact_id: subject_analysis
+        required: true
+      - artifact_id: material_images
+        required: false
+    outputs:
+      - artifact_id: optimized_prompt
+        content_type: text
+        slot_id: prompt_used
+        cardinality: single
+    acceptance_criteria: |
+      optimized_prompt artifact must be saved, in English, and contain at least 30 words.
 
   generate_image:
     label: Generate Image
@@ -43,8 +146,9 @@ steps:
       {{optimized_prompt}}
 
       Steps:
-      1. Call the image generation tool with the above prompt.
-      2. Save the resulting image URL using save_artifact(key='image_url', content_type='image', value=<url>).
+      1. Call generate_image_tool(prompt=<optimized_prompt>) to create the image.
+      2. Save the image URL:
+           save_artifact(key='raw_image_url', content_type='image', value=<url>)
       3. Stop after saving.
     tools:
       - save_artifact
@@ -53,7 +157,36 @@ steps:
       - artifact_id: optimized_prompt
         required: true
     outputs:
-      - artifact_id: image_url
+      - artifact_id: raw_image_url
+        content_type: image
         slot_id: image_output
+        cardinality: single
     acceptance_criteria: |
-      The image_url artifact must be saved and contain a valid URL starting with http(s)://.
+      raw_image_url artifact must be saved and contain a valid URL starting with http(s)://.
+
+  enhance_image:
+    label: Enhance Image
+    prompt: |
+      You are an image enhancement agent.
+
+      Raw image to enhance:
+      {{raw_image_url}}
+
+      Your task:
+      1. Call enhance_image_tool(image_url=<raw_image_url>) to upscale / improve the image.
+      2. Save the enhanced result:
+           save_artifact(key='enhanced_image_url', content_type='image', value=<url>)
+      3. Stop after saving.
+    tools:
+      - save_artifact
+      - enhance_image_tool
+    inputs:
+      - artifact_id: raw_image_url
+        required: true
+    outputs:
+      - artifact_id: enhanced_image_url
+        content_type: image
+        slot_id: enhanced_image_output
+        cardinality: list
+    acceptance_criteria: |
+      enhanced_image_url artifact must be saved and contain a valid https?:// URL.
