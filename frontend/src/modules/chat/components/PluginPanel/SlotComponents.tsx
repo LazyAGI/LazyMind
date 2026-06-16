@@ -1,8 +1,6 @@
-import React from "react";
 import { useTaskCenterStore, type TaskArtifact } from "@/modules/chat/store/taskCenter";
 import type { SlotRevision } from "@/modules/chat/store/pluginPanel";
 
-// Resolve artifact value from the task store given an artifact_key and session tasks.
 function resolveArtifactValue(
   artifact_key: string,
   conversationId: string,
@@ -15,7 +13,6 @@ function resolveArtifactValue(
   return undefined;
 }
 
-/** Renders a text slot value. */
 export function SlotText({
   conversationId,
   slot,
@@ -32,37 +29,49 @@ export function SlotText({
   );
 }
 
-/** Renders an image slot value. */
+/**
+ * SlotImage renders a single image slot.
+ * cardMode=true: card layout with image on top and caption overlay at bottom.
+ */
 export function SlotImage({
   conversationId,
   slot,
+  cardMode = false,
 }: {
   conversationId: string;
   slot: SlotRevision;
+  cardMode?: boolean;
 }) {
   const artifact = resolveArtifactValue(slot.artifact_key, conversationId);
   const url: string = (artifact?.value as any)?.url ?? "";
-  const alt: string = (artifact?.value as any)?.alt ?? slot.artifact_key;
+  const alt: string = (artifact?.value as any)?.alt ?? "";
+
   if (!url) {
     return (
-      <div className="plugin-slot plugin-slot--image plugin-slot--empty">
+      <div className={`plugin-slot plugin-slot--image plugin-slot--empty${cardMode ? " plugin-slot--image-card" : ""}`}>
         <span className="plugin-slot__placeholder">Image pending…</span>
       </div>
     );
   }
+
+  if (cardMode) {
+    return (
+      <div className="plugin-slot plugin-slot--image-card">
+        <img src={url} alt={alt} className="plugin-slot__image-card-img" loading="lazy" />
+        {alt && (
+          <div className="plugin-slot__image-card-caption">{alt}</div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="plugin-slot plugin-slot--image">
-      <img
-        src={url}
-        alt={alt}
-        className="plugin-slot__image"
-        loading="lazy"
-      />
+      <img src={url} alt={alt} className="plugin-slot__image" loading="lazy" />
     </div>
   );
 }
 
-/** Renders a file/download slot value. */
 export function SlotFile({
   conversationId,
   slot,
@@ -72,8 +81,7 @@ export function SlotFile({
 }) {
   const artifact = resolveArtifactValue(slot.artifact_key, conversationId);
   const url: string = (artifact?.value as any)?.url ?? "";
-  const name: string =
-    (artifact?.value as any)?.name ?? slot.artifact_key;
+  const name: string = (artifact?.value as any)?.name ?? slot.artifact_key;
   const size: number | undefined = (artifact?.value as any)?.size;
   if (!url) {
     return (
@@ -106,20 +114,22 @@ export function SlotFile({
 
 /**
  * SlotRenderer dispatches to the correct slot component based on content_type.
- * For unknown types falls back to SlotText.
+ * cardMode is forwarded to image slots for the horizontal card layout.
  */
 export function SlotRenderer({
   conversationId,
   slot,
+  cardMode = false,
 }: {
   conversationId: string;
   slot: SlotRevision;
+  cardMode?: boolean;
 }) {
   const artifact = resolveArtifactValue(slot.artifact_key, conversationId);
   const contentType: string = artifact?.content_type ?? "text/plain";
 
   if (contentType.startsWith("image/")) {
-    return <SlotImage conversationId={conversationId} slot={slot} />;
+    return <SlotImage conversationId={conversationId} slot={slot} cardMode={cardMode} />;
   }
   if (contentType === "application/octet-stream" || contentType.startsWith("application/")) {
     return <SlotFile conversationId={conversationId} slot={slot} />;

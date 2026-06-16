@@ -1587,6 +1587,12 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
             onCancelEditUserMessage={handleCancelEditUserMessage}
             onResendEditedUserMessage={handleResendEditedUserMessage}
             onCopyUserMessage={handleCopyUserMessage}
+            footer={
+              <PluginPanel
+                conversationId={sessionId}
+                onSendMessage={(text) => sendMessage({ text })}
+              />
+            }
           />
 
           {messageList.length > 0 && (
@@ -1606,8 +1612,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
               </span>
             </div>
           )}
-
-          <PluginPanel conversationId={sessionId} />
 
           <ChatInput
             value={content}

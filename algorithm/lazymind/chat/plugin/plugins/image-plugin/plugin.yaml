@@ -39,17 +39,12 @@ steps:
 
 ui:
   tabs:
-    - id: result
-      label: Result
+    - id: analysis
+      label: Analysis
       slots:
-        - id: enhanced_image_output
-          label: Enhanced Images
-          type: image
-          cardinality: list     # each enhance run appends; partial retry overwrites by list_index
-
-        - id: image_output
-          label: Raw Image
-          type: image
+        - id: subject_analysis
+          label: Subject Analysis
+          type: text
           cardinality: single
 
     - id: materials
@@ -68,10 +63,15 @@ ui:
           type: text
           cardinality: single   # latest optimization overwrites previous
 
-    - id: analysis
-      label: Analysis
+    - id: result
+      label: Result
       slots:
-        - id: subject_analysis
-          label: Subject Analysis
-          type: text
+        - id: enhanced_image_output
+          label: Enhanced Images
+          type: image
+          cardinality: list     # each enhance run appends; partial retry overwrites by list_index
+
+        - id: image_output
+          label: Raw Image
+          type: image
           cardinality: single
