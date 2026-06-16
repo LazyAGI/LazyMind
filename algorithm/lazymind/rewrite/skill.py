@@ -50,7 +50,7 @@ def _build_skill_prompt(
         'using a unified methodology when the description scope is satisfied.\n'
         '\n'
         '[Format requirements]\n'
-        '1. Must start with YAML frontmatter containing at least name and description fields, '
+        '1. Must start with YAML frontmatter containing non-empty name, category, and description fields, '
         'followed by a blank line, then the markdown body.\n'
         '2. Keep the existing name value; do not rename unless user_instruct explicitly requests it.\n'
         '3. description should describe the applicable scope and trigger conditions in one sentence; '

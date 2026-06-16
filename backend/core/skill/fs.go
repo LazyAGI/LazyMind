@@ -17,6 +17,7 @@ import (
 
 type parentFrontmatter struct {
 	Name        string `yaml:"name"`
+	Category    string `yaml:"category,omitempty"`
 	Description string `yaml:"description"`
 }
 
@@ -161,10 +162,14 @@ func parentSkillBody(content string) (string, error) {
 	return body, nil
 }
 
-func buildParentSkillContent(name, description, body string) (string, string, error) {
+func buildParentSkillContent(name, category, description, body string) (string, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "", "", errors.New("name required")
+	}
+	category = strings.TrimSpace(category)
+	if category == "" {
+		return "", "", errors.New("category required")
 	}
 	description = strings.TrimSpace(description)
 	if description == "" {
@@ -176,6 +181,7 @@ func buildParentSkillContent(name, description, body string) (string, string, er
 	}
 	meta, err := yaml.Marshal(parentFrontmatter{
 		Name:        name,
+		Category:    category,
 		Description: description,
 	})
 	if err != nil {

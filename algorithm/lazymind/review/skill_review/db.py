@@ -13,6 +13,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from lazymind.chat.service.component.history import normalize_history_for_agent
+from lazymind.chat.engine.tools.infra.skill_validation import parse_skill_frontmatter
 from lazymind.common.postgres import normalize_postgres_sqlalchemy_url
 from lazymind.review.skill_review.schemas import SkillReviewResolution, SkillReviewRunStat
 from lazymind.config import config as _cfg
@@ -77,6 +78,7 @@ def insert_skill_review_records(
         {
             'id': item.id,
             'skill_name': item.skill_name,
+            'category': _parse_skill_category(item.skill_content),
             'type': item.type,
             'review_status': item.review_status,
             'userid': item.userid,
@@ -91,14 +93,15 @@ def insert_skill_review_records(
         conn.execute(
             text(
                 f"""INSERT INTO {SKILL_REVIEW_TABLE}
-                       (id, skill_name, "type", review_status, userid, requestid,
+                       (id, skill_name, category, "type", review_status, userid, requestid,
                         skill_content, summary, "time")
                     VALUES
-                       (:id, :skill_name, :type, :review_status, :userid, :requestid,
+                       (:id, :skill_name, :category, :type, :review_status, :userid, :requestid,
                         :skill_content, :summary,
                         COALESCE(CAST(NULLIF(:time, '') AS TIMESTAMPTZ), CURRENT_TIMESTAMP))
                     ON CONFLICT (id) DO UPDATE SET
                        skill_name = EXCLUDED.skill_name,
+                       category = EXCLUDED.category,
                        "type" = EXCLUDED."type",
                        userid = EXCLUDED.userid,
                        requestid = EXCLUDED.requestid,
@@ -286,6 +289,11 @@ def _normalize_raw_message(raw: Any) -> dict[str, Any] | None:
         return {'role': role, 'content': content}
 
     return None
+
+
+def _parse_skill_category(skill_content: str) -> str:
+    frontmatter, _ = parse_skill_frontmatter(skill_content)
+    return str(frontmatter.get('category') or '').strip()
 
 
 def _normalize_records(

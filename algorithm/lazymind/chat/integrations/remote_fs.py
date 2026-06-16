@@ -10,7 +10,7 @@ from lazymind.config import config as _cfg
 
 
 class RemoteFS(LazyLLMFSBase):
-    """A read-only filesystem proxy using the backend core remote-fs API."""
+    """A filesystem proxy for skill resources using the backend core remote-fs API."""
 
     def __init__(self, token: str = 'remote', base_url: str = '', timeout: float = 10, **kwargs):
         super().__init__(token=token, **kwargs)
@@ -25,20 +25,26 @@ class RemoteFS(LazyLLMFSBase):
             raw = f'{parsed.netloc}{parsed.path}'
         return raw.strip('/')
 
-    def _request_json(self, endpoint: str, **params) -> Any:
+    def _request(self, method: str, endpoint: str, **kwargs) -> Any:
         session_id = lazyllm.globals['agentic_config'].get('session_id')
+        params = kwargs.pop('params', {})
         if session_id:
             params['session_id'] = session_id
-        response = requests.get(
+        response = requests.request(
+            method,
             f'{self.base_url}/remote-fs/{endpoint}',
             params=params,
             timeout=self.timeout,
+            **kwargs,
         )
         response.raise_for_status()
         payload = response.json()
         if payload.get('code') != 0:
             raise RuntimeError(payload.get('message') or f'remote-fs {endpoint} failed')
         return payload.get('data')
+
+    def _request_json(self, endpoint: str, **params: Any) -> Any:
+        return self._request('GET', endpoint, params=params)
 
     @staticmethod
     def _qualify_name(name: str) -> str:
@@ -70,14 +76,35 @@ class RemoteFS(LazyLLMFSBase):
         return bool(data.get('exists'))
 
     def makedirs(self, path: str, exist_ok: bool = True) -> None:
-        raise PermissionError(f'{self.__class__.__name__} is read-only. Cannot create directories.')
+        return
 
     def mkdir(self, path: str, create_parents: bool = True, **kwargs) -> None:
-        raise PermissionError(f'{self.__class__.__name__} is read-only. Cannot create directories.')
+        return
 
     def rm(self, path: str, recursive: bool = False, maxdepth: Optional[int] = None) -> None:
-        raise PermissionError(
-            f'{self.__class__.__name__} is read-only. Cannot remove files/directories.'
+        self._request(
+            'DELETE',
+            'path',
+            params={
+                'path': self._normalize_path(path),
+                'recursive': str(bool(recursive)).lower(),
+            },
+        )
+
+    def write(self, path: str, content: str) -> None:
+        self._request(
+            'PUT',
+            'content',
+            params={'path': self._normalize_path(path)},
+            data=content.encode('utf-8'),
+        )
+
+    def write_file(self, path: str, data: bytes) -> None:
+        self._request(
+            'PUT',
+            'content',
+            params={'path': self._normalize_path(path)},
+            data=data,
         )
 
     def _open(
@@ -89,9 +116,33 @@ class RemoteFS(LazyLLMFSBase):
     ):
         is_write = any(flag in mode for flag in ('w', 'a', 'x', '+'))
         if is_write:
-            raise PermissionError(
-                f'{self.__class__.__name__} is read-only. Cannot open file {path} for writing.'
-            )
+            encoding = kwargs.get('encoding') or 'utf-8'
+            buf = BytesIO()
+
+            class _WriteBuffer:
+                def __init__(self, _buf, _path, _encoding, _fs):
+                    self._buf = _buf
+                    self._path = _path
+                    self._encoding = _encoding
+                    self._fs = _fs
+
+                def write(self, data):
+                    if isinstance(data, str):
+                        data = data.encode(self._encoding)
+                    self._buf.write(data)
+
+                def close(self):
+                    self._fs.write_file(self._path, self._buf.getvalue())
+                    self._buf.close()
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    self.close()
+                    return False
+
+            return _WriteBuffer(buf, self._normalize_path(path), encoding, self)
 
         params = {'path': self._normalize_path(path)}
         session_id = lazyllm.globals['agentic_config'].get('session_id')

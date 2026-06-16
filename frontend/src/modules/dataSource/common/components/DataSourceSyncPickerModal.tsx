@@ -8,6 +8,26 @@ type LazySyncDataNode = DataNode & {
   childrenLoaded?: boolean;
 };
 
+function collectSelectableTreeKeys(
+  nodes: DataNode[],
+  selectableKeys: Set<string>,
+) {
+  const keys: string[] = [];
+  const walk = (items: DataNode[]) => {
+    items.forEach((node) => {
+      const key = `${node.key}`;
+      if (selectableKeys.has(key)) {
+        keys.push(key);
+      }
+      if (node.children) {
+        walk(node.children);
+      }
+    });
+  };
+  walk(nodes);
+  return keys;
+}
+
 export interface DataSourceSyncPickerModalProps {
   t: any;
   open: boolean;
@@ -173,13 +193,27 @@ export default function DataSourceSyncPickerModal({
             onSelect={(_keys, info) => {
               toggleTreeNode(info.node);
             }}
-            onCheck={(keys) => {
+            onCheck={(keys, info) => {
               const nextKeys = Array.isArray(keys) ? keys : keys.checked;
-              setSyncSelectedDocIds(
+              const nextSelectedKeys = new Set(
                 nextKeys
                   .map((key) => `${key}`)
                   .filter((key) => selectableSyncFileKeys.has(key)),
               );
+              const changedKeys = collectSelectableTreeKeys(
+                [info.node],
+                selectableSyncFileKeys,
+              );
+
+              changedKeys.forEach((key) => {
+                if (info.checked) {
+                  nextSelectedKeys.add(key);
+                } else {
+                  nextSelectedKeys.delete(key);
+                }
+              });
+
+              setSyncSelectedDocIds(Array.from(nextSelectedKeys));
             }}
           />
         ) : (
