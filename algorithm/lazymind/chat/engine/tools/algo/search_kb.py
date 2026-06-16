@@ -1,6 +1,6 @@
 from typing import Any, Callable, List, Optional
 
-from lazyllm import Document
+from lazyllm import Document, parallel
 from lazyllm.tools.rag import Reranker, Retriever, TempDocRetriever
 from lazyllm.tools.rag.rank_fusion.reciprocal_rank_fusion import RRFFusion
 
@@ -60,12 +60,10 @@ def search_kb(
 
     def _kb_retrieve(query: str):
         expanded = get_vocab_manager(payload['user_id'])(query)
-        nodes = tuple(
-            result for result in (
-                retriever(expanded, filters=payload.get('filters') or {}, topk=retriever_topk)
-                for retriever in retrievers
-            ) if result
+        results = parallel(*retrievers)(
+            expanded, filters=payload.get('filters') or {}, topk=retriever_topk
         )
+        nodes = tuple(r for r in results if r)
         nodes = RRFFusion(top_k=50)(nodes)
         return nodes, expanded
 

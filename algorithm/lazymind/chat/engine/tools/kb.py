@@ -233,13 +233,18 @@ class KBToolGroup:
     ) -> Any:
         """Search the knowledge base and return text and image retrieval results.
 
-        Each call handles exactly one search intent. If the user asks about
-        multiple unrelated keywords or topics, call this tool separately for
-        each keyword/topic. Do not combine unrelated terms into one query
-        with spaces, commas, or list-like text.
+        IMPORTANT: Each call handles exactly ONE search intent. If the user asks
+        about multiple unrelated keywords or topics, you MUST call this tool
+        separately for each keyword/topic — do NOT combine unrelated terms into
+        one query with spaces, commas, or list-like text.
+
+        For example, if the user asks "What is the difference between Redis and
+        Kafka?", call this tool twice: once with query="Redis" and once with
+        query="Kafka", rather than a single call with query="Redis Kafka".
 
         Args:
-            query: A single natural language query for retrieval.
+            query: A SINGLE natural language query for retrieval. Do NOT put
+                multiple unrelated keywords in this field.
             retriever_topk: Candidate count used by each retriever route before
                 fusion. Defaults to 20.
             rerank_topk: Number of nodes the reranker keeps before adaptive-k
