@@ -19,6 +19,7 @@ import {
   AGENT_API_BASE,
   EVO_API_BASE,
   getNumberField,
+  getResultItems,
   getStringField,
   getStructuredArrayField,
   getStructuredRecordField,
@@ -96,6 +97,14 @@ type CsvBadcaseRow = {
   traceStatus: string;
   failureReason: string;
   tracePayload?: unknown;
+};
+
+type EvalReportSummary = {
+  reportId: string;
+  dataset: string;
+  correctRate?: number;
+  badCaseCount?: number;
+  traceCoverageRate?: number;
 };
 
 type TraceDocRow = {
@@ -473,6 +482,13 @@ function formatPercent(value: number) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function formatOptionalPercent(value?: number) {
+  if (!isFiniteNumber(value)) {
+    return "-";
+  }
+  return formatPercent(value);
+}
+
 function formatDeltaScore(value: number) {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
 }
@@ -522,6 +538,30 @@ function getPrimaryObservation(observation?: TraceObservation) {
   return observation.kind === "detail" ? observation.detail : observation.a;
 }
 
+function getPrimaryEvalReportRecord(value: unknown) {
+  const items = getResultItems(value);
+  const itemRecord = items.find((item): item is Record<string, unknown> => isRecord(item));
+  if (itemRecord) {
+    return itemRecord;
+  }
+  return isRecord(value) ? value : undefined;
+}
+
+function normalizeEvalReportSummary(value: unknown): EvalReportSummary {
+  const row = getPrimaryEvalReportRecord(value);
+  const data = getStructuredRecordField(row, ["data"]);
+  const metrics = getStructuredRecordField(data, ["metrics"]);
+  const traceCoverage = getStructuredRecordField(row, ["trace_coverage"]);
+
+  return {
+    reportId: getStringField(row, ["report_id"]) || "-",
+    dataset: getStringField(data, ["eval_dataset_ref"]) || "-",
+    correctRate: getNumberField(metrics, ["correct_rate"]),
+    badCaseCount: getNumberField(row, ["bad_case_count"]),
+    traceCoverageRate: getNumberField(traceCoverage, ["rate"]),
+  };
+}
+
 function MetricCard({
   icon,
   label,
@@ -545,10 +585,12 @@ function MetricCard({
 }
 
 function EvalReportPanel({
+  summary,
   rows,
   selectedCaseId,
   onSelectCase,
 }: {
+  summary: EvalReportSummary;
   rows: CsvBadcaseRow[];
   selectedCaseId: string;
   onSelectCase: (caseId: string) => void;
@@ -598,14 +640,14 @@ function EvalReportPanel({
       <div className="self-evolution-eval-report-head">
         <div>
           <Title level={3}>评测报告详情</Title>
-          <Text>报告 ID：-</Text>
-          <Text>数据集：- · 样本数 - · Badcase -</Text>
+          <Text>{`报告 ID：${summary.reportId}`}</Text>
+          <Text>{`数据集：${summary.dataset} · 样本数 - · Badcase ${summary.badCaseCount ?? "-"}`}</Text>
         </div>
       </div>
       <div className="self-evolution-eval-metric-grid">
-        <MetricCard icon={<AimOutlined />} label="准确率" value="-" tone="blue" />
-        <MetricCard icon={<WarningOutlined />} label="Badcase" value="-" tone="red" />
-        <MetricCard icon={<ThunderboltOutlined />} label="Trace 覆盖率" value="-" tone="purple" />
+        <MetricCard icon={<AimOutlined />} label="准确率" value={formatOptionalPercent(summary.correctRate)} tone="blue" />
+        <MetricCard icon={<WarningOutlined />} label="Badcase" value={String(summary.badCaseCount ?? "-")} tone="red" />
+        <MetricCard icon={<ThunderboltOutlined />} label="Trace 覆盖率" value={formatOptionalPercent(summary.traceCoverageRate)} tone="purple" />
       </div>
       <div className="self-evolution-eval-badcase-panel">
         <div className="self-evolution-eval-section-title">
@@ -651,12 +693,6 @@ function EvalReportPanel({
             <Text strong>{`${selectedRow.caseId} 执行结果`}</Text>
           </div>
           <dl>
-            <dt>Query</dt>
-            <dd>{selectedRow.query}</dd>
-            <dt>Reference</dt>
-            <dd>{selectedRow.reference}</dd>
-            <dt>Answer</dt>
-            <dd>{selectedRow.answer}</dd>
             <dt>Score</dt>
             <dd>
               <span className="is-low-score">{selectedRow.score.toFixed(2)}</span>
@@ -875,6 +911,7 @@ function EvalObservationDashboard({
   toggleMenu?: () => void;
 }) {
   const rows = useMemo(() => normalizeBadcaseRows(data), [data]);
+  const summary = useMemo(() => normalizeEvalReportSummary(data), [data]);
   const [selectedCaseId, setSelectedCaseId] = useState(rows[0]?.caseId || "");
   const [traceState, setTraceState] = useState<{
     loading: boolean;
@@ -951,7 +988,7 @@ function EvalObservationDashboard({
       </header>
       {notice && <Alert type="warning" showIcon message={notice} />}
       <div className="self-evolution-eval-dashboard-grid">
-        <EvalReportPanel rows={rows} selectedCaseId={selectedCaseId} onSelectCase={setSelectedCaseId} />
+        <EvalReportPanel summary={summary} rows={rows} selectedCaseId={selectedCaseId} onSelectCase={setSelectedCaseId} />
         {selectedRow ? (
           traceState.loading ? (
             <section className="self-evolution-eval-trace-card" aria-label="Agentic RAG 观测详情">
