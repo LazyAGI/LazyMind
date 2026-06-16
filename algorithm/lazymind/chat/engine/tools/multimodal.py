@@ -21,7 +21,7 @@ _SUPPORTED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp',
 
 @handle_tool_errors
 def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, Any]:
-    """Extract a text description from an image file.
+    """Extract a text description from an image reachable at the given URL.
 
     Supports common image formats (JPEG, PNG, GIF, WebP, BMP, TIFF).
     Uses a vision-language model to describe visual content in natural language.
