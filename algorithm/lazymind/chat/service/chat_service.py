@@ -225,9 +225,31 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                 'plugin_step': p_current_step,
             })
             sm = plugin_loader.get_state_machine(p_plugin_id)
-            reachable = sm.get_reachable_steps(p_current_step) if sm else []
-            if reachable:
-                plugin_tools = [plugin_manager.build_advance_step_tool(p_plugin_id, p_current_step)]
+            forward_steps = sm.get_reachable_steps(p_current_step) if sm else []
+
+            # Compute rewind candidates: topological ancestors that have succeeded.
+            rewind_steps: list = []
+            if sm and p_session_id and p_current_step:
+                ancestors = sm.get_ancestors(p_current_step)
+                if ancestors:
+                    succeeded = plugin_manager._fetch_succeeded_steps(p_session_id)
+                    rewind_steps = sorted(ancestors & succeeded)
+
+            # Build step_labels from plugin spec for display in the docstring.
+            step_labels: dict = {}
+            spec = plugin_loader.get_plugin(p_plugin_id)
+            if spec:
+                for sid, scfg in spec._steps.items():
+                    lbl = scfg.get('label', '')
+                    if lbl:
+                        step_labels[sid] = lbl
+
+            if forward_steps or rewind_steps:
+                plugin_tools = [plugin_manager.build_advance_step_tool(
+                    p_plugin_id, p_current_step,
+                    rewind_steps=rewind_steps,
+                    step_labels=step_labels,
+                )]
                 plugin_stop_tools = ['advance_step']
             plugin_system_prompt = plugin_loader.get_scenario(p_plugin_id)
         else:

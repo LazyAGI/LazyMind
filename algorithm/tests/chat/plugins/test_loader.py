@@ -290,6 +290,62 @@ def test_state_machine_empty_current_defaults_to_start(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# StateMachine — get_ancestors
+# ---------------------------------------------------------------------------
+
+def test_state_machine_get_ancestors_of_step_d(tmp_path):
+    from lazymind.chat.plugin.plugin_loader import PluginSpec
+    plugins_dir = make_plugin_dir(tmp_path)
+    sm = PluginSpec('test-plugin', plugins_dir / 'test-plugin').state_machine
+
+    # step_d is reachable from step_a -> step_b -> step_c -> step_d,
+    # so all of step_a, step_b, step_c are ancestors.
+    ancestors = sm.get_ancestors('step_d')
+    assert 'step_a' in ancestors
+    assert 'step_b' in ancestors
+    assert 'step_c' in ancestors
+    # step_d self-loops; it must not appear as its own ancestor.
+    assert 'step_d' not in ancestors
+    # Reserved nodes must be excluded.
+    assert '__start__' not in ancestors
+    assert '__end__' not in ancestors
+
+
+def test_state_machine_get_ancestors_of_step_a(tmp_path):
+    from lazymind.chat.plugin.plugin_loader import PluginSpec
+    plugins_dir = make_plugin_dir(tmp_path)
+    sm = PluginSpec('test-plugin', plugins_dir / 'test-plugin').state_machine
+
+    # step_a has no non-reserved, non-self ancestors.
+    ancestors = sm.get_ancestors('step_a')
+    assert len(ancestors) == 0
+
+
+def test_state_machine_get_ancestors_of_step_c(tmp_path):
+    from lazymind.chat.plugin.plugin_loader import PluginSpec
+    plugins_dir = make_plugin_dir(tmp_path)
+    sm = PluginSpec('test-plugin', plugins_dir / 'test-plugin').state_machine
+
+    # step_c is reachable from step_a -> step_b -> step_c.
+    # step_c -> step_b creates a cycle; BFS must not loop.
+    ancestors = sm.get_ancestors('step_c')
+    assert 'step_a' in ancestors
+    assert 'step_b' in ancestors
+    assert 'step_c' not in ancestors
+
+
+def test_state_machine_get_ancestors_excludes_reserved(tmp_path):
+    from lazymind.chat.plugin.plugin_loader import PluginSpec
+    plugins_dir = make_plugin_dir(tmp_path)
+    sm = PluginSpec('test-plugin', plugins_dir / 'test-plugin').state_machine
+
+    for step in ('step_a', 'step_b', 'step_c', 'step_d'):
+        ancestors = sm.get_ancestors(step)
+        assert '__start__' not in ancestors
+        assert '__end__' not in ancestors
+
+
+# ---------------------------------------------------------------------------
 # load_all registry
 # ---------------------------------------------------------------------------
 

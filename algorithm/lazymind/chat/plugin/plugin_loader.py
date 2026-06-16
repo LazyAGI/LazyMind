@@ -46,6 +46,29 @@ class StateMachine:
         """Return True if target_step is directly reachable from current_step."""
         return target_step in self.get_reachable_steps(current_step)
 
+    def get_ancestors(self, step: str) -> set:
+        """Return all ancestor step IDs of step in the state machine graph.
+
+        An ancestor is any node from which step is reachable via one or more
+        forward transitions.  Reserved nodes (__start__, __end__) are excluded.
+        Self-loops do not contribute ancestors.
+        """
+        reverse: Dict[str, List[str]] = {}
+        for src, targets in self._transitions.items():
+            for t in targets:
+                if t != src:  # skip self-loops
+                    reverse.setdefault(t, []).append(src)
+        visited: set = {step}  # seed with step itself to prevent cycles back to the origin
+        queue: List[str] = [step]
+        while queue:
+            node = queue.pop()
+            for parent in reverse.get(node, []):
+                if parent not in visited and parent not in self._RESERVED:
+                    visited.add(parent)
+                    queue.append(parent)
+        visited.discard(step)  # remove origin; only true ancestors should be in the result
+        return visited
+
 
 class PluginSpec:
     """Holds all parsed artifacts for one plugin."""

@@ -442,3 +442,165 @@ def test_resolve_plugin_step_tools_missing_params_returns_none(loaded_plugin):
     from lazymind.chat.engine.subagent.runner import _resolve_plugin_step_tools
 
     assert _resolve_plugin_step_tools({}) is None
+
+
+# ---------------------------------------------------------------------------
+# Four reachability scenarios (ancestor rewind + dependency guard)
+# ---------------------------------------------------------------------------
+
+def _make_session_steps_payload(*steps):
+    """Build the dict that _fetch_succeeded_steps / _trigger_plugin_step expect from the API."""
+    return {'session': {'steps': [{'step_id': s, 'status': 'succeeded'} for s in steps]}}
+
+
+@pytest.fixture()
+def mock_fetch_succeeded():
+    """Patch _fetch_succeeded_steps to return a controlled set."""
+    with patch('lazymind.chat.plugin.plugin_manager._fetch_succeeded_steps') as m:
+        yield m
+
+
+# Scenario 1: current=step_b, target=step_a  → allowed (step_a is ancestor + succeeded)
+def test_scenario1_rewind_to_ancestor_allowed(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config, mock_fetch_succeeded):
+    from lazymind.chat.plugin.plugin_manager import _trigger_plugin_step
+    mock_agentic_config.update({
+        'plugin_id': 'test-plugin',
+        'plugin_session_id': 'ps-s1',
+        'plugin_step': 'step_b',
+    })
+    # step_a has succeeded previously in this session.
+    mock_fetch_succeeded.return_value = {'step_a'}
+
+    result = _trigger_plugin_step('test-plugin', 'step_a', 're-run analysis', is_cold_start=False)
+    assert 'error' not in result.lower(), f'Expected success but got: {result}'
+    assert mock_write_agent_data.called
+    assert mock_write_agent_data.call_args.kwargs['params']['step_id'] == 'step_a'
+
+
+# Scenario 1b: same but step_a never succeeded → rejected
+def test_scenario1_rewind_to_ancestor_rejected_if_not_succeeded(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config, mock_fetch_succeeded):
+    from lazymind.chat.plugin.plugin_manager import _trigger_plugin_step
+    mock_agentic_config.update({
+        'plugin_id': 'test-plugin',
+        'plugin_session_id': 'ps-s1b',
+        'plugin_step': 'step_b',
+    })
+    mock_fetch_succeeded.return_value = set()  # step_a never ran
+
+    result = _trigger_plugin_step('test-plugin', 'step_a', 're-run analysis', is_cold_start=False)
+    assert 'error' in result.lower()
+    assert not mock_write_agent_data.called
+
+
+# Scenario 2: after rewinding to step_b, step_d is not reachable (not neighbour, not ancestor of step_b)
+def test_scenario2_forward_only_from_rewound_step(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config, mock_fetch_succeeded):
+    from lazymind.chat.plugin.plugin_manager import _trigger_plugin_step
+    mock_agentic_config.update({
+        'plugin_id': 'test-plugin',
+        'plugin_session_id': 'ps-s2',
+        'plugin_step': 'step_b',
+    })
+    # Even though step_d succeeded before, it is not a topological ancestor of step_b.
+    mock_fetch_succeeded.return_value = {'step_a', 'step_d'}
+
+    result = _trigger_plugin_step('test-plugin', 'step_d', 'skip to enhance', is_cold_start=False)
+    assert 'error' in result.lower()
+    assert not mock_write_agent_data.called
+
+
+# Scenario 3: current=step_c (re-run), target=step_d  → allowed (direct forward neighbour)
+def test_scenario3_forward_after_rerun_allowed(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config, mock_fetch_succeeded):
+    from lazymind.chat.plugin.plugin_manager import _trigger_plugin_step
+    mock_agentic_config.update({
+        'plugin_id': 'test-plugin',
+        'plugin_session_id': 'ps-s3',
+        'plugin_step': 'step_c',
+    })
+    mock_fetch_succeeded.return_value = {'step_a', 'step_b', 'step_c', 'step_d'}
+
+    result = _trigger_plugin_step('test-plugin', 'step_d', 'proceed to enhance', is_cold_start=False)
+    assert 'error' not in result.lower(), f'Expected success but got: {result}'
+    assert mock_write_agent_data.called
+
+
+# Scenario 4: dependency check catches missing required input (handled by Layer 2 in real env)
+# Here we verify that a non-ancestor, non-neighbour step is rejected by Layer 1.
+def test_scenario4_non_ancestor_non_neighbour_rejected(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config, mock_fetch_succeeded):
+    from lazymind.chat.plugin.plugin_manager import _trigger_plugin_step
+    mock_agentic_config.update({
+        'plugin_id': 'test-plugin',
+        'plugin_session_id': 'ps-s4',
+        'plugin_step': 'step_b',
+    })
+    # step_d is neither a direct neighbour of step_b nor an ancestor.
+    mock_fetch_succeeded.return_value = {'step_a', 'step_b', 'step_c', 'step_d'}
+
+    result = _trigger_plugin_step('test-plugin', 'step_d', 'jump ahead', is_cold_start=False)
+    assert 'error' in result.lower()
+    assert not mock_write_agent_data.called
+
+
+# ---------------------------------------------------------------------------
+# Dynamic docstring candidate list
+# ---------------------------------------------------------------------------
+
+def test_build_advance_step_tool_docstring_contains_forward_steps(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+    advance = plugin_manager.build_advance_step_tool(
+        'test-plugin', 'step_a',
+        rewind_steps=[],
+        step_labels={'step_b': 'Optimize'},
+    )
+    doc = advance.__doc__ or ''
+    assert 'step_b' in doc
+    assert 'Forward' in doc
+    assert 'Optimize' in doc
+
+
+def test_build_advance_step_tool_docstring_contains_rewind_steps(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+    advance = plugin_manager.build_advance_step_tool(
+        'test-plugin', 'step_b',
+        rewind_steps=['step_a'],
+        step_labels={'step_a': 'Analyze Subject', 'step_c': 'Generate Image'},
+    )
+    doc = advance.__doc__ or ''
+    assert 'step_a' in doc
+    assert 'Rewind' in doc
+    assert 'Analyze Subject' in doc
+    assert 'previously completed' in doc
+
+
+def test_build_advance_step_tool_docstring_no_rewind_when_empty(loaded_plugin):
+    from lazymind.chat.plugin import plugin_manager
+    advance = plugin_manager.build_advance_step_tool(
+        'test-plugin', 'step_a',
+        rewind_steps=[],
+    )
+    doc = advance.__doc__ or ''
+    assert 'Rewind' not in doc
+
+
+def test_build_advance_step_tool_rewind_step_is_accepted(
+        loaded_plugin, mock_write_agent_data, mock_agentic_config, mock_fetch_succeeded):
+    """advance_step should accept a step_id listed in rewind_steps."""
+    from lazymind.chat.plugin import plugin_manager
+    mock_agentic_config.update({
+        'plugin_id': 'test-plugin',
+        'plugin_session_id': 'ps-rewind',
+        'plugin_step': 'step_b',
+    })
+    mock_fetch_succeeded.return_value = {'step_a'}
+
+    advance = plugin_manager.build_advance_step_tool(
+        'test-plugin', 'step_b',
+        rewind_steps=['step_a'],
+    )
+    result = advance(step_id='step_a', user_input='redo analysis')
+    assert 'error' not in result.lower(), f'Expected rewind to be accepted but got: {result}'
+    assert mock_write_agent_data.called

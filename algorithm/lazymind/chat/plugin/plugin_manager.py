@@ -52,6 +52,27 @@ def _merge_tools(declared: List[str]) -> List[str]:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+def _fetch_succeeded_steps(session_id: str) -> set:
+    """Return the set of step_ids that have ever succeeded in this session.
+
+    Queries the Go core REST API.  Returns an empty set on any error so that
+    the caller degrades gracefully (ancestor rewind is simply not offered).
+    """
+    if not session_id:
+        return set()
+    try:
+        import httpx
+        from lazymind.config import config as _cfg
+        core_url = str(_cfg.get('core_api_url', 'http://core:8000')).rstrip('/')
+        resp = httpx.get(f'{core_url}/plugin-sessions/{session_id}', timeout=3.0)
+        if resp.status_code != 200:
+            return set()
+        steps = resp.json().get('session', {}).get('steps', [])
+        return {s['step_id'] for s in steps if isinstance(s, dict) and s.get('status') == 'succeeded'}
+    except Exception:
+        return set()
+
+
 def _agentic_config() -> Dict[str, Any]:
     try:
         return lazyllm.globals['agentic_config'] or {}
@@ -114,13 +135,25 @@ def _trigger_plugin_step(
 
     current_step: str = cfg.get('plugin_step', '')
     if not sm.is_reachable(current_step, step_id):
-        reachable = sm.get_reachable_steps(current_step)
-        current_label = repr(current_step) if current_step else "'__start__'"
-        return (
-            f'Error: step {step_id!r} is not reachable from '
-            f'{current_label}. '
-            f'Reachable steps: {reachable}.'
-        )
+        # Condition B: allow rewind to an ancestor that has previously succeeded.
+        ancestors = sm.get_ancestors(current_step)
+        if step_id in ancestors:
+            succeeded = _fetch_succeeded_steps(session_id)
+            if step_id not in succeeded:
+                return (
+                    f'Error: step {step_id!r} is an ancestor of {current_step!r} '
+                    f'but has not succeeded in this session yet. '
+                    f'Run it first before rewinding.'
+                )
+            # Ancestor rewind allowed — fall through to Layer 2.
+        else:
+            reachable = sm.get_reachable_steps(current_step)
+            current_label = repr(current_step) if current_step else "'__start__'"
+            return (
+                f'Error: step {step_id!r} is not reachable from '
+                f'{current_label}. '
+                f'Reachable steps: {reachable}.'
+            )
 
     # --- Layer 2: dependency validation (via Go core REST API) ---
     step_config = plugin_loader.get_step_config(plugin_id, step_id)
@@ -204,6 +237,33 @@ def _trigger_plugin_step(
 # Public tool factories
 # ---------------------------------------------------------------------------
 
+def _build_step_choices_doc(
+    forward_steps: List[str],
+    rewind_steps: List[str],
+    step_labels: Dict[str, str],
+) -> str:
+    """Return a formatted string listing available step choices for the LLM."""
+    lines = [
+        'Available steps at this moment',
+        '------------------------------',
+    ]
+    if forward_steps:
+        lines.append('Forward (next steps):')
+        for s in forward_steps:
+            label = step_labels.get(s, '')
+            suffix = f'  ({label})' if label else ''
+            lines.append(f'  - {s}{suffix}')
+    if rewind_steps:
+        lines.append('Rewind (re-run a past step):')
+        for s in rewind_steps:
+            label = step_labels.get(s, '')
+            suffix = f'  ({label})' if label else ''
+            lines.append(f'  - {s}{suffix}  <- previously completed, can re-trigger')
+    lines.append('')
+    lines.append('Pass one of the above IDs as step_id. Any other value will be rejected.')
+    return '\n'.join(lines)
+
+
 def build_cold_start_tools() -> List[Any]:
     """Build one trigger_<plugin_id> callable per loaded plugin."""
     tools = []
@@ -245,10 +305,30 @@ def build_cold_start_tools() -> List[Any]:
     return tools
 
 
-def build_advance_step_tool(plugin_id: str, current_step: str) -> Any:
-    """Build the advance_step tool bound to the given plugin and current step."""
+def build_advance_step_tool(
+    plugin_id: str,
+    current_step: str,
+    rewind_steps: Optional[List[str]] = None,
+    step_labels: Optional[Dict[str, str]] = None,
+) -> Any:
+    """Build the advance_step tool bound to the given plugin and current step.
+
+    Args:
+        plugin_id: Plugin identifier.
+        current_step: The step that is currently active in the session.
+        rewind_steps: Step IDs that are topological ancestors of current_step
+            AND have already succeeded in this session.  These are offered to
+            the LLM as valid rewind targets in addition to the forward steps.
+        step_labels: Mapping of step_id to human-readable label for display in
+            the docstring.  Sourced from plugin.yaml steps[].label.
+    """
     sm = plugin_loader.get_state_machine(plugin_id)
-    reachable = sm.get_reachable_steps(current_step) if sm else []
+    forward = sm.get_reachable_steps(current_step) if sm else []
+    rewind = list(rewind_steps or [])
+    labels = step_labels or {}
+    all_reachable = list(forward) + rewind
+
+    choices_doc = _build_step_choices_doc(forward, rewind, labels)
 
     @handle_tool_errors
     def advance_step(
@@ -257,38 +337,11 @@ def build_advance_step_tool(plugin_id: str, current_step: str) -> Any:
         runtime_instruction: Optional[str] = None,
         partial_indices: Optional[Dict[str, List[int]]] = None,
     ) -> str:
-        """Advance the active plugin to the next step.
-
-        Use this when there is an active plugin session and you need to
-        trigger or re-trigger a specific step based on user intent.
-
-        For partial retries (re-running only a subset of list-slot items),
-        set runtime_instruction to a concise directive that tells the SubAgent
-        which items to regenerate, and set partial_indices to mark which list
-        positions should be replaced rather than appended.  Example:
-          runtime_instruction='Re-collect material B only; keep A, C, D as-is.'
-          partial_indices={'material_images': [1]}
-        Both values are ephemeral and only affect this single execution.
-
-        Args:
-            step_id (str): The step to advance to.  Must be one of the
-                currently reachable steps.
-            user_input (str): The user's latest input or instruction
-                relevant to this step.
-            runtime_instruction (str, optional): An ephemeral directive that
-                constrains the SubAgent's execution for this run only, e.g.
-                for partial retries.  Leave empty for normal full runs.
-            partial_indices (dict, optional): Maps artifact_key to a list
-                of 0-based list_index values that should be overwritten rather
-                than appended.  Only relevant for list-cardinality slots.
-
-        Returns:
-            Confirmation that the step was triggered.
-        """
-        if step_id not in reachable:
+        """Advance the active plugin to the next step."""
+        if step_id not in all_reachable:
             return (
                 f'Error: step {step_id!r} is not reachable from '
-                f'{current_step!r}. Reachable: {reachable}.'
+                f'{current_step!r}. Reachable: {all_reachable}.'
             )
         return _trigger_plugin_step(
             plugin_id, step_id, user_input,
@@ -296,5 +349,30 @@ def build_advance_step_tool(plugin_id: str, current_step: str) -> Any:
             runtime_instruction=runtime_instruction or '',
             partial_indices=partial_indices or {},
         )
+
+    advance_step.__doc__ = (
+        'Advance the active plugin to the next step.\n\n'
+        'Use this when there is an active plugin session and you need to\n'
+        'trigger or re-trigger a specific step based on user intent.\n\n'
+        'For partial retries (re-running only a subset of list-slot items),\n'
+        'set runtime_instruction to a concise directive that tells the SubAgent\n'
+        'which items to regenerate, and set partial_indices to mark which list\n'
+        'positions should be replaced rather than appended.\n'
+        'Both values are ephemeral and only affect this single execution.\n\n'
+        + choices_doc + '\n\n'
+        'Args:\n'
+        '    step_id (str): The step to advance to.  Must be one of the\n'
+        '        currently available steps listed above.\n'
+        "    user_input (str): The user's latest input or instruction\n"
+        '        relevant to this step.\n'
+        '    runtime_instruction (str, optional): An ephemeral directive that\n'
+        "        constrains the SubAgent's execution for this run only, e.g.\n"
+        '        for partial retries.  Leave empty for normal full runs.\n'
+        '    partial_indices (dict, optional): Maps artifact_key to a list\n'
+        '        of 0-based list_index values that should be overwritten rather\n'
+        '        than appended.  Only relevant for list-cardinality slots.\n\n'
+        'Returns:\n'
+        '    Confirmation that the step was triggered.'
+    )
 
     return advance_step
