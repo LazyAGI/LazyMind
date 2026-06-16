@@ -1120,7 +1120,7 @@ const enUS = {
       "Manage local, object storage, and OAuth cloud knowledge sources in one place",
     dataSourceDemoTitle: "Frontend demo mode",
     dataSourceCreate: "New Data Source",
-    dataSourceCreateKnowledgeSource: "New Knowledge Source",
+    dataSourceCreateKnowledgeSource: "New Data Source",
     dataSourceEdit: "Edit Data Source",
     dataSourceSaveConfig: "Save Configuration",
     dataSourceCreateOnly: "Create Only",

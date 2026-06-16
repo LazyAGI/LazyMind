@@ -1080,7 +1080,7 @@ const zhCN = {
     dataSourceSubtitle: "统一管理本地、对象存储与 OAuth 云端数据源的接入、同步与运行状态",
     dataSourceDemoTitle: "当前为前端演示态",
     dataSourceCreate: "新建数据源",
-    dataSourceCreateKnowledgeSource: "新建知识源",
+    dataSourceCreateKnowledgeSource: "新建数据源",
     dataSourceEdit: "编辑数据源",
     dataSourceSaveConfig: "保存配置",
     dataSourceCreateOnly: "仅创建",
