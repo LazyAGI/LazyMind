@@ -21,9 +21,9 @@ import (
 	"lazymind/core/subagent"
 )
 
-// defaultMode returns the configured plugin advance mode (auto|manual).
+// DefaultMode returns the configured plugin advance mode (auto|manual).
 // Defaults to "auto" when unset.
-func defaultMode() string {
+func DefaultMode() string {
 	v := strings.TrimSpace(os.Getenv("LAZYMIND_PLUGIN_MODE"))
 	if v == "manual" {
 		return "manual"
@@ -76,7 +76,6 @@ type PluginChatContext struct {
 	StepID    string
 	ConvID    string
 	UserID    string
-	HistoryID string // TriggerHistoryID from the chat turn that started the session
 }
 
 // HandlePluginStepCreated processes a task_created event for agent_type='plugin_step'.
@@ -249,7 +248,7 @@ func OnSubAgentDone(
 		return
 	}
 
-	if defaultMode() == "auto" {
+	if DefaultMode() == "auto" {
 		go advanceAutoMode(ctx, db, rdb, summary, onSSE, pctx)
 	} else {
 		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)

@@ -77,6 +77,10 @@ export const CHAT_RESUME_STREAM_URL = `${coreApiBaseUrl}/conversations:resumeCha
 export const taskStreamUrl = (taskId: string) =>
   `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}:stream`;
 
+// Conversation-level events SSE endpoint.
+export const convEventsUrl = (conversationId: string) =>
+  `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/events`;
+
 export function TaskServiceApi() {
   return {
     listConversationTasks(conversationId: string, options?: RawAxiosRequestConfig) {

@@ -154,7 +154,7 @@ def _extract_methods(instance: Any) -> list[dict]:
                 continue
             try:
                 doc = inspect.getdoc(method)
-                summary = docstring_parser.parse(doc).long_description if doc else ''
+                summary = docstring_parser.parse(doc).short_description if doc else ''
             except Exception:
                 summary = ''
             methods.append({'name': resolved_name, 'summary': summary})
@@ -164,7 +164,7 @@ def _extract_methods(instance: Any) -> list[dict]:
         name = getattr(instance, '__name__', '')
         try:
             doc = inspect.getdoc(instance)
-            summary = docstring_parser.parse(doc).long_description if doc else ''
+            summary = docstring_parser.parse(doc).short_description if doc else ''
         except Exception:
             summary = ''
         return [{'name': name, 'summary': summary}]
@@ -178,7 +178,7 @@ def _extract_group_methods(instances: list) -> list[dict]:
         name = inst.__class__.__name__
         try:
             doc = inspect.getdoc(inst)
-            summary = docstring_parser.parse(doc).long_description if doc else ''
+            summary = docstring_parser.parse(doc).short_description if doc else ''
         except Exception:
             summary = ''
         methods.append({

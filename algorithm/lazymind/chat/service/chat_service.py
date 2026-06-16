@@ -316,10 +316,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         skills_dir=_cfg['skill_fs_url'],
     )
     if plugin_stop_tools:
-        try:
-            react_agent.set_stop_tools(plugin_stop_tools)
-        except Exception:
-            pass
+        react_agent.set_stop_tools(plugin_stop_tools)
 
     async def event_stream() -> Any:
         final_result: Any = None

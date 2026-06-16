@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
@@ -21,6 +22,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	"lazymind/core/modelconfig"
+	"lazymind/core/plugin"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 )
@@ -216,6 +218,20 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	reqBody := buildChatRequestBody(convID, sessionID, query, upstreamHistories, raw, resourceContext, userID)
 	if cnt, err := subagent.CountByConversation(r.Context(), db, convID); err == nil && cnt > 0 {
 		reqBody["has_subagents"] = true
+	}
+	// Auto-inject plugin_context when the conversation has an active plugin session
+	// and the request body does not already carry one (e.g. from triggerNextChatTurn).
+	if _, hasPC := reqBody["plugin_context"]; !hasPC {
+		if activeSess, err := plugin.GetActiveSession(r.Context(), db, convID); err == nil && activeSess != nil {
+			reqBody["plugin_context"] = map[string]any{
+				"session_id":   activeSess.ID,
+				"plugin_id":    activeSess.PluginID,
+				"current_step": activeSess.CurrentStepID,
+				"advance_mode": plugin.DefaultMode(),
+			}
+			fmt.Printf("[PLUGIN_CONTEXT_INJECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s\n",
+				convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID)
+		}
 	}
 	historyExt := buildChatHistoryExt(raw, query)
 	if err := applyChatRuntimeConfigs(r.Context(), db, userID, reqBody); err != nil {
@@ -1253,4 +1269,64 @@ func SetMultiAnswersSwitchStatus(w http.ResponseWriter, r *http.Request) {
 		db.Model(&row).Updates(map[string]any{"status": body.Status, "updated_at": now})
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{"status": body.Status})
+}
+
+// StreamConvEvents is GET /conversations/{conversation_id}/events.
+// It opens a long-lived SSE connection that replays all existing ConvEvents for the
+// conversation and then tails new ones in real time. The frontend subscribes once per
+// active conversation and uses the events to update TaskCenter and PluginPanel without
+// depending on any specific chat-turn history_id stream.
+func StreamConvEvents(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	convID := strings.TrimSpace(vars["conversation_id"])
+	if convID == "" {
+		common.ReplyErr(w, "conversation_id required", http.StatusBadRequest)
+		return
+	}
+
+	userID := store.UserID(r)
+	if userID == "" {
+		userID = "0"
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	var conv orm.Conversation
+	if err := db.Where("id = ? AND create_user_id = ?", convID, userID).First(&conv).Error; err != nil {
+		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		common.ReplyErr(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	rdb := store.Redis()
+	if rdb == nil {
+		// No Redis — nothing to stream; send a keepalive and return.
+		fmt.Fprintf(w, "data: {}\n\n")
+		flusher.Flush()
+		return
+	}
+
+	ctx := r.Context()
+	_ = WatchConvEvents(ctx, rdb, convID, -1, func(ev *ConvEvent) error {
+		bs, err := json.Marshal(ev)
+		if err != nil {
+			return nil
+		}
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", bs); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	})
 }

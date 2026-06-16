@@ -116,12 +116,20 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const loadConversationTasks = useTaskCenterStore(
     (s) => s.loadConversationTasks,
   );
+  const subscribeConvEvents = useTaskCenterStore((s) => s.subscribeConvEvents);
+  const unsubscribeConvEvents = useTaskCenterStore((s) => s.unsubscribeConvEvents);
 
   useEffect(() => {
     if (sessionId) {
       loadConversationTasks(sessionId);
+      subscribeConvEvents(sessionId);
     }
-  }, [sessionId, loadConversationTasks]);
+    return () => {
+      if (sessionId) {
+        unsubscribeConvEvents(sessionId);
+      }
+    };
+  }, [sessionId, loadConversationTasks, subscribeConvEvents, unsubscribeConvEvents]);
 
   // Auto-expand the task panel the first time a SubAgent task appears in the current session.
   const prevTasksLengthRef = useRef(0);

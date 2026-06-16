@@ -783,6 +783,13 @@ func streamSingleAnswer(
 				}
 				if rdb != nil {
 					_ = appendChatChunk(chatCtx, rdb, convID, historyID, taskChunk)
+					// Also write to the conversation-level events channel so the frontend
+					// receives task_created notifications regardless of which history stream
+					// is currently open (covers auto-advance internal requests).
+					_ = AppendConvEvent(chatCtx, rdb, convID, &ConvEvent{
+						Type:    "task_created",
+						Payload: notice,
+					})
 				}
 			}
 			continue

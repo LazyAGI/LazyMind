@@ -62,7 +62,7 @@ func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 
 	pctx := &PluginChatContext{
 		SessionID: "ps-1", PluginID: "image-plugin", StepID: "analyze_subject",
-		ConvID: "conv-1", UserID: "user-1", HistoryID: "hist-1",
+		ConvID: "conv-1", UserID: "user-1",
 	}
 
 	var gotEvent string
@@ -101,7 +101,7 @@ func TestOnSubAgentDone_Interrupted_SetsWaiting(t *testing.T) {
 
 	pctx := &PluginChatContext{
 		SessionID: "ps-2", PluginID: "image-plugin", StepID: "generate_image",
-		ConvID: "conv-2", UserID: "user-1", HistoryID: "hist-2",
+		ConvID: "conv-2", UserID: "user-1",
 	}
 
 	var gotEvent string

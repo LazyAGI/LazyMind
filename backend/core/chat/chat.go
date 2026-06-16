@@ -73,6 +73,7 @@ type LazyChatRequest struct {
 	HasSubagents       bool            `json:"has_subagents"`
 	ConversationID     string          `json:"conversation_id,omitempty"`
 	MCPConfig          []any           `json:"mcp_config,omitempty"`
+	PluginContext      map[string]any  `json:"plugin_context,omitempty"`
 }
 
 // LazyChatData text data text。
@@ -355,6 +356,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 		for _, item := range mcpConfigAny {
 			req.MCPConfig = append(req.MCPConfig, item)
 		}
+	}
+	if pluginContext, ok := body["plugin_context"].(map[string]any); ok && len(pluginContext) > 0 {
+		req.PluginContext = pluginContext
 	}
 	return req
 }

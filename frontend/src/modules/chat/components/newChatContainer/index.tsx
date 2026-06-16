@@ -527,31 +527,12 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
           status: tc.status || "pending",
         });
         taskStore.subscribeTask(convId, tc.task_id);
-
-        // If this is a plugin_step, refresh the plugin session for the conversation.
         if (tc.agent_type === "plugin_step" && tc.plugin_session_id) {
-          import("@/modules/chat/store/pluginPanel").then(({ usePluginStore }) => {
-            usePluginStore.getState().loadActiveSession(convId);
-          });
-        }
-      }
-
-      // Handle plugin lifecycle events (step_waiting, plugin_completed, plugin_error).
-      // These arrive on the original SSE stream; on step_waiting/plugin_completed we
-      // reload the full task list so that auto-advanced subtasks become visible.
-      if (result.plugin_event) {
-        const convId =
-          result.conversation_id || currentConversationIdRef.current || "";
-        const pe = result.plugin_event;
-        const taskStore = useTaskCenterStore.getState();
-        if (pe.event_type === "step_waiting" || pe.event_type === "plugin_completed") {
-          // Reload conversation tasks — the auto-advanced subtask is now in the DB.
-          taskStore.loadConversationTasks(convId);
-        }
-        if (pe.event_type === "step_waiting" || pe.event_type === "plugin_completed" || pe.event_type === "plugin_error") {
-          import("@/modules/chat/store/pluginPanel").then(({ usePluginStore }) => {
-            usePluginStore.getState().loadActiveSession(convId);
-          });
+          import("@/modules/chat/store/pluginPanel").then(
+            ({ usePluginStore }) => {
+              usePluginStore.getState().loadActiveSession(convId);
+            }
+          );
         }
       }
 

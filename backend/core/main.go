@@ -200,25 +200,20 @@ func main() {
 
 	// Register plugin lifecycle hooks into the subagent EventHooks.
 	plugin.RegisterSubAgentHooks()
-	// Wire the conversation SSE hook so plugin events reach the frontend main SSE.
+	// Wire the conversation SSE hook so plugin events reach the frontend via the
+	// conversation-level events channel (history-independent real-time push).
 	subagent.EventHooks.RegisterConversationEventHook(
-		func(ctx context.Context, rdb *redis.Client, convID, historyID, eventType string, payload map[string]any) {
-			ev := &chat.PluginEventNotice{
-				EventType: eventType,
-			}
-			if s, ok := payload["session_id"].(string); ok {
-				ev.SessionID = s
-			}
-			if s, ok := payload["plugin_id"].(string); ok {
-				ev.PluginID = s
-			}
-			if s, ok := payload["step_id"].(string); ok {
-				ev.StepID = s
-			}
-			if s, ok := payload["message"].(string); ok {
-				ev.Message = s
-			}
-			_ = chat.AppendConversationPluginEvent(ctx, rdb, convID, historyID, ev)
+		func(ctx context.Context, rdb *redis.Client, convID, _ string, eventType string, payload map[string]any) {
+			_ = chat.AppendConvEvent(ctx, rdb, convID, &chat.ConvEvent{
+				Type: eventType,
+				Payload: map[string]any{
+					"event_type": eventType,
+					"session_id": payload["session_id"],
+					"plugin_id":  payload["plugin_id"],
+					"step_id":    payload["step_id"],
+					"message":    payload["message"],
+				},
+			})
 		},
 	)
 	log.Logger.Info().Msg("plugin subagent hooks registered")

@@ -63,11 +63,11 @@ def _fetch_succeeded_steps(session_id: str) -> set:
     try:
         import httpx
         from lazymind.config import config as _cfg
-        core_url = str(_cfg.get('core_api_url', 'http://core:8000')).rstrip('/')
+        core_url = str(_cfg['core_api_url']).rstrip('/')
         resp = httpx.get(f'{core_url}/plugin-sessions/{session_id}', timeout=3.0)
         if resp.status_code != 200:
             return set()
-        steps = resp.json().get('session', {}).get('steps', [])
+        steps = resp.json().get('data', {}).get('session', {}).get('steps', [])
         return {s['step_id'] for s in steps if isinstance(s, dict) and s.get('status') == 'succeeded'}
     except Exception:
         return set()
@@ -161,7 +161,7 @@ def _trigger_plugin_step(
     if inputs and not is_cold_start and session_id:
         import httpx
         from lazymind.config import config as _cfg
-        core_url = str(_cfg.get('core_api_url', 'http://core:8000')).rstrip('/')
+        core_url = str(_cfg['core_api_url']).rstrip('/')
         try:
             resp = httpx.get(
                 f'{core_url}/plugin-sessions/{session_id}',
@@ -170,7 +170,7 @@ def _trigger_plugin_step(
             if resp.status_code == 200:
                 steps_data = {
                     s['step_id']: s['status']
-                    for s in resp.json().get('session', {}).get('steps', [])
+                    for s in resp.json().get('data', {}).get('session', {}).get('steps', [])
                     if isinstance(s, dict)
                 }
                 for inp in inputs:

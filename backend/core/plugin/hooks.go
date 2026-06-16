@@ -40,10 +40,10 @@ func onTerminalStatus(ctx context.Context, db *gorm.DB, rdb *redis.Client, taskI
 	if pctx == nil {
 		return
 	}
-	// Build an onSSE that actually pushes events to the main conversation SSE stream.
+	// Build an onSSE that pushes events to the conversation-level events channel.
 	onSSE := func(eventType string, payload map[string]any) {
 		if subagent.EventHooks != nil {
-			subagent.EventHooks.CallConversationEvent(ctx, rdb, pctx.ConvID, pctx.HistoryID, eventType, payload)
+			subagent.EventHooks.CallConversationEvent(ctx, rdb, pctx.ConvID, "", eventType, payload)
 		}
 	}
 	OnSubAgentDone(ctx, db, rdb, taskID, status, message, onSSE, pctx)
@@ -67,20 +67,11 @@ func loadPluginChatContextFromDB(ctx context.Context, db *gorm.DB, taskID string
 		return nil
 	}
 
-	// Use the plugin session's TriggerHistoryID so that step_waiting / plugin_completed
-	// events are pushed to the frontend SSE stream that was open when the plugin started,
-	// not the ephemeral stream of an auto-advance internal request.
-	historyID := task.TriggerHistoryID
-	if session, sErr := GetSession(ctx, db, params.SessionID); sErr == nil && session != nil && session.TriggerHistoryID != "" {
-		historyID = session.TriggerHistoryID
-	}
-
 	return &PluginChatContext{
 		SessionID: params.SessionID,
 		PluginID:  params.PluginID,
 		StepID:    params.StepID,
 		ConvID:    task.ConversationID,
 		UserID:    task.CreateUserID,
-		HistoryID: historyID,
 	}
 }

@@ -28,7 +28,11 @@ alwaysApply: true
 
 ## Debug
 
-add log, simulate requests and anylasis db and logs instead of reading code only
+When debugging, do not infer root causes from code alone. First collect evidence by adding logs, reproducing the issue, simulating requests, inspecting database records, reviewing application logs, and tracing the actual execution path. Every diagnosis should be supported by runtime evidence. Avoid speculative fixes that are not verified against observed behavior.
+
+## Refactoring Role
+
+Whenever you refactor code, you must clean up the old implementation immediately. Remove dead code, unused functions, unused variables, obsolete comments, redundant logic, and superseded implementations. Do not keep both old and new versions of the same logic unless backward compatibility is explicitly required. The codebase should be cleaner after every refactor, not accumulate technical debt.
 
 ## 模拟前端 Chat 请求（端到端调试）
 
