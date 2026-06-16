@@ -160,6 +160,21 @@ type ReferenceContextValue = {
   parts: ReferenceContextPart[];
 };
 
+function createReferenceChunkSelectorState(): ReferenceChunkSelectorState {
+  return {
+    open: false,
+    loading: false,
+    confirming: false,
+    error: "",
+    itemId: "",
+    documentName: "",
+    documentPreviewUrl: "",
+    segmentGroup: "",
+    chunks: [],
+    selectedChunkIds: [],
+  };
+}
+
 const CONFIGURABLE_COLUMN_OPTIONS: Array<{
   labelKey: string;
   value: ConfigurableColumnKey;
@@ -860,38 +875,58 @@ export default function DatasetDetailPage() {
     Record<string, DocumentSearchState>
   >({});
   const [referenceChunkSelector, setReferenceChunkSelector] =
-    useState<ReferenceChunkSelectorState>({
-      open: false,
-      loading: false,
-      confirming: false,
-      error: "",
-      itemId: "",
-      documentName: "",
-      documentPreviewUrl: "",
-      segmentGroup: "",
-      chunks: [],
-      selectedChunkIds: [],
-    });
+    useState<ReferenceChunkSelectorState>(createReferenceChunkSelectorState);
   const documentSearchPaginationRequestRef = useRef<Record<string, string>>({});
+  const documentSearchRequestRef = useRef<Record<string, number>>({});
+  const referenceChunkSelectorRequestRef = useRef(0);
   const referenceDocumentCacheRef = useRef<Record<string, ReferenceDocumentPreview>>({});
   const [referenceDocumentCacheVersion, setReferenceDocumentCacheVersion] = useState(0);
   const referenceContextInsertIndexRef = useRef<Record<string, number | undefined>>({});
   const referenceContextEditingValueRef = useRef<Record<string, string | undefined>>({});
   const referenceContextEditingDirtyRef = useRef<Record<string, boolean | undefined>>({});
+  const pendingNewItemCellActivationRef = useRef<ActiveEditableCell>(null);
 
   const resetReferenceChunkSelector = useCallback(() => {
-    setReferenceChunkSelector({
-      open: false,
-      loading: false,
-      confirming: false,
-      error: "",
-      itemId: "",
-      documentName: "",
-      documentPreviewUrl: "",
-      segmentGroup: "",
-      chunks: [],
-      selectedChunkIds: [],
-    });
+    referenceChunkSelectorRequestRef.current += 1;
+    setReferenceChunkSelector(createReferenceChunkSelectorState());
+  }, []);
+
+  const clearReferenceContextRuntimeState = useCallback((itemId: string) => {
+    delete referenceContextInsertIndexRef.current[itemId];
+    delete referenceContextEditingValueRef.current[itemId];
+    delete referenceContextEditingDirtyRef.current[itemId];
+  }, []);
+
+  const clearItemRuntimeState = useCallback(
+    (itemId: string) => {
+      clearReferenceContextRuntimeState(itemId);
+      if (itemId === NEW_ITEM_ID) {
+        pendingNewItemCellActivationRef.current = null;
+      }
+      delete documentSearchPaginationRequestRef.current[itemId];
+      delete documentSearchRequestRef.current[itemId];
+      setDocumentSearchState((current) => {
+        if (!current[itemId]) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[itemId];
+        return next;
+      });
+    },
+    [clearReferenceContextRuntimeState],
+  );
+
+  const clearAllItemRuntimeState = useCallback(() => {
+    documentSearchPaginationRequestRef.current = {};
+    documentSearchRequestRef.current = {};
+    referenceContextInsertIndexRef.current = {};
+    referenceContextEditingValueRef.current = {};
+    referenceContextEditingDirtyRef.current = {};
+    pendingNewItemCellActivationRef.current = null;
+    referenceChunkSelectorRequestRef.current += 1;
+    setDocumentSearchState({});
+    setReferenceChunkSelector(createReferenceChunkSelectorState());
   }, []);
 
   const handleColumnResize = useCallback(
@@ -967,6 +1002,16 @@ export default function DatasetDetailPage() {
     }) as ResizableHeaderCellProps,
     [columnWidths, handleColumnResize, handleHeaderResize, headerHeight],
   );
+
+  useEffect(() => {
+    clearAllItemRuntimeState();
+    referenceDocumentCacheRef.current = {};
+    setReferenceDocumentCacheVersion((version) => version + 1);
+    setSelectedRowKeys([]);
+    setDirtyItemIds([]);
+    setNewItemVisible(false);
+    setActiveCell(null);
+  }, [clearAllItemRuntimeState, datasetId]);
 
   const loadDetail = async () => {
     if (!datasetId) {
@@ -1046,6 +1091,7 @@ export default function DatasetDetailPage() {
     if (!canContinue) {
       return;
     }
+    clearAllItemRuntimeState();
     setDirtyItemIds([]);
     setNewItemVisible(false);
     setActiveCell(null);
@@ -1058,6 +1104,7 @@ export default function DatasetDetailPage() {
     if (!canContinue) {
       return;
     }
+    clearAllItemRuntimeState();
     setNewItemVisible(true);
     setDirtyItemIds([NEW_ITEM_ID]);
     setDrafts({ [NEW_ITEM_ID]: createItemDraft() });
@@ -1101,6 +1148,9 @@ export default function DatasetDetailPage() {
   };
 
   const handleReferenceDocumentSearch = async (record: DatasetItem, value: string) => {
+    clearReferenceContextRuntimeState(record.id);
+    const searchRequestId = (documentSearchRequestRef.current[record.id] || 0) + 1;
+    documentSearchRequestRef.current[record.id] = searchRequestId;
     setDrafts((current) => ({
       ...current,
       [record.id]: {
@@ -1108,6 +1158,7 @@ export default function DatasetDetailPage() {
         reference_doc: value || "",
         reference_doc_ids: "",
         reference_chunk_ids: "",
+        reference_context: "",
       },
     }));
     setDirtyItemIds((current) =>
@@ -1140,6 +1191,9 @@ export default function DatasetDetailPage() {
     try {
       const result = await searchKnowledgeBaseDocuments(knowledgeBaseIds, keyword);
       setDocumentSearchState((current) => {
+        if (documentSearchRequestRef.current[record.id] !== searchRequestId) {
+          return current;
+        }
         const latestKeyword = current[record.id]?.keyword || "";
         if (latestKeyword !== keyword) {
           return current;
@@ -1156,6 +1210,9 @@ export default function DatasetDetailPage() {
         };
       });
     } catch {
+      if (documentSearchRequestRef.current[record.id] !== searchRequestId) {
+        return;
+      }
       updateDocumentSearchState(record.id, {
         keyword,
         loading: false,
@@ -1240,6 +1297,9 @@ export default function DatasetDetailPage() {
     record: DatasetItem,
     option: KnowledgeDocumentOption,
   ) => {
+    clearReferenceContextRuntimeState(record.id);
+    documentSearchRequestRef.current[record.id] =
+      (documentSearchRequestRef.current[record.id] || 0) + 1;
     if (option.datasetId) {
       referenceDocumentCacheRef.current[option.documentId] = {
         datasetId: option.datasetId,
@@ -1255,6 +1315,7 @@ export default function DatasetDetailPage() {
         reference_doc: option.name,
         reference_doc_ids: option.documentId,
         reference_chunk_ids: "",
+        reference_context: "",
       },
     }));
     setDirtyItemIds((current) =>
@@ -1343,6 +1404,8 @@ export default function DatasetDetailPage() {
         return;
       }
 
+      const selectorRequestId = referenceChunkSelectorRequestRef.current + 1;
+      referenceChunkSelectorRequestRef.current = selectorRequestId;
       setReferenceChunkSelector({
         open: true,
         loading: true,
@@ -1386,6 +1449,9 @@ export default function DatasetDetailPage() {
           },
         });
         const chunks = segmentResponse.data.segments || [];
+        if (referenceChunkSelectorRequestRef.current !== selectorRequestId) {
+          return;
+        }
         const nextSelectedChunkIds =
           `${draft.reference_chunk_ids || ""}`
             .split(",")
@@ -1407,6 +1473,9 @@ export default function DatasetDetailPage() {
           error: chunks.length === 0 ? "该文档暂无可选 chunk" : "",
         }));
       } catch (error: any) {
+        if (referenceChunkSelectorRequestRef.current !== selectorRequestId) {
+          return;
+        }
         setReferenceChunkSelector((current) => ({
           ...current,
           loading: false,
@@ -1510,6 +1579,7 @@ export default function DatasetDetailPage() {
         insertIndex,
       );
       referenceContextEditingValueRef.current[itemId] = nextReferenceContext;
+      referenceContextEditingDirtyRef.current[itemId] = true;
       return {
         ...current,
         [itemId]: {
@@ -1522,9 +1592,10 @@ export default function DatasetDetailPage() {
     setDirtyItemIds((current) => (current.includes(itemId) ? current : [...current, itemId]));
 
     resetReferenceChunkSelector();
-  }, [referenceChunkSelector, resetReferenceChunkSelector]);
+  }, [items, referenceChunkSelector, resetReferenceChunkSelector]);
 
   const handleCancelItem = (item: DatasetItem) => {
+    clearItemRuntimeState(item.id);
     if (item.id === NEW_ITEM_ID) {
       setNewItemVisible(false);
       setActiveCell(null);
@@ -1570,6 +1641,7 @@ export default function DatasetDetailPage() {
       if (activeCell?.itemId === itemId) {
         setActiveCell(null);
       }
+      clearItemRuntimeState(itemId);
       setDirtyItemIds((current) => current.filter((id) => id !== itemId));
       await loadDetail();
     } catch (error: any) {
@@ -1580,6 +1652,15 @@ export default function DatasetDetailPage() {
   };
 
   const handleAutoSaveItem = async (item: DatasetItem) => {
+    const pendingNewItemCellActivation = pendingNewItemCellActivationRef.current;
+    if (
+      item.id === NEW_ITEM_ID &&
+      pendingNewItemCellActivation?.itemId === NEW_ITEM_ID
+    ) {
+      pendingNewItemCellActivationRef.current = null;
+      return;
+    }
+
     const editingReferenceContext = referenceContextEditingValueRef.current[item.id];
     const referenceContextEditingDirty = Boolean(referenceContextEditingDirtyRef.current[item.id]);
     const baseDraft = drafts[item.id] || createItemDraft(item);
@@ -1603,10 +1684,6 @@ export default function DatasetDetailPage() {
       setActiveCell(null);
       return;
     }
-    if (editingReferenceContext !== undefined) {
-      delete referenceContextEditingValueRef.current[item.id];
-    }
-    delete referenceContextEditingDirtyRef.current[item.id];
     await handleSaveItem(item.id, draft);
   };
 
@@ -1623,6 +1700,7 @@ export default function DatasetDetailPage() {
       cancelText: "取消",
       onOk: async () => {
         await deleteDatasetItem(datasetId, item.id);
+        clearItemRuntimeState(item.id);
         message.success("样本已删除");
         await loadDetail();
       },
@@ -1642,6 +1720,7 @@ export default function DatasetDetailPage() {
       cancelText: "取消",
       onOk: async () => {
         await batchDeleteDatasetItems(datasetId, selectedRowKeys.map(String));
+        selectedRowKeys.map(String).forEach(clearItemRuntimeState);
         setSelectedRowKeys([]);
         message.success("样本已批量删除");
         await loadDetail();
@@ -1655,6 +1734,7 @@ export default function DatasetDetailPage() {
     file: File | null,
   ) => {
     await importDatasetItems(datasetId, file, importedItems, result.failedCount);
+    clearAllItemRuntimeState();
     setVisibleColumnKeys(DEFAULT_VISIBLE_COLUMN_KEYS);
     message.success("导入完成");
     await loadDetail();
@@ -1692,7 +1772,22 @@ export default function DatasetDetailPage() {
         <button
           type="button"
           className={`dataset-inline-display${field === "reference_context" ? " dataset-reference-context-display" : ""}`}
-          onClick={() => setActiveCell({ itemId: record.id, field })}
+          onMouseDown={() => {
+            if (record.id === NEW_ITEM_ID) {
+              pendingNewItemCellActivationRef.current = {
+                itemId: record.id,
+                field,
+              };
+            }
+          }}
+          onClick={() => {
+            setActiveCell({ itemId: record.id, field });
+            if (record.id === NEW_ITEM_ID) {
+              window.setTimeout(() => {
+                pendingNewItemCellActivationRef.current = null;
+              }, 0);
+            }
+          }}
         >
           {field === "reference_context"
             ? renderReferenceContextParts(value, placeholder)
@@ -1773,8 +1868,7 @@ export default function DatasetDetailPage() {
                     },
                   };
                 });
-                delete referenceContextEditingValueRef.current[record.id];
-                delete referenceContextEditingDirtyRef.current[record.id];
+                clearItemRuntimeState(record.id);
                 setDirtyItemIds((current) =>
                   current.includes(record.id) ? current : [...current, record.id],
                 );
@@ -2014,6 +2108,14 @@ export default function DatasetDetailPage() {
             danger
             size="small"
             icon={<DeleteOutlined />}
+            onMouseDown={() => {
+              if (record.id === NEW_ITEM_ID) {
+                pendingNewItemCellActivationRef.current = {
+                  itemId: NEW_ITEM_ID,
+                  field: activeCell?.field || "question",
+                };
+              }
+            }}
             onClick={() => handleDeleteItem(record)}
           >
             删除
@@ -2188,6 +2290,7 @@ export default function DatasetDetailPage() {
               if (!canContinue) {
                 return;
               }
+              clearAllItemRuntimeState();
               setDirtyItemIds([]);
               setNewItemVisible(false);
               setActiveCell(null);
