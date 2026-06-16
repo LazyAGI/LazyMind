@@ -214,7 +214,8 @@ const getAutoEvoStatusMeta = (status?: string) => {
 const hasDraftPreviewStatus = (record: ExperienceAsset) =>
   Boolean(record.hasPendingReviewSuggestions) ||
   isPendingReviewStatus(record.reviewStatus) ||
-  isReviewableSuggestionStatus(record.suggestionStatus);
+  isReviewableSuggestionStatus(record.suggestionStatus) ||
+  Boolean(normalizeAutoEvoApplyStatus(record.autoEvoApplyStatus));
 const hasSkillDraftPreviewStatus = (record: StructuredAsset) =>
   Boolean(record.hasPendingReviewResult) ||
   Boolean(record.hasPendingReviewSuggestions) ||

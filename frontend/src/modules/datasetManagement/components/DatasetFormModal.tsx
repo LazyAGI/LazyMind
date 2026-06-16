@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { Form, Input, Modal, Select } from "antd";
+import { useTranslation } from "react-i18next";
 import type {
   DatasetFormValues,
   DatasetListItem,
@@ -28,8 +29,12 @@ export default function DatasetFormModal({
   onSubmit,
 }: DatasetFormModalProps) {
   const [form] = Form.useForm<DatasetFormValues>();
+  const { t } = useTranslation();
 
-  const title = mode === "create" ? "新建数据集" : "编辑数据集";
+  const title =
+    mode === "create"
+      ? t("datasetManagement.form.createTitle")
+      : t("datasetManagement.form.editTitle");
 
   const initialValues = useMemo<Partial<DatasetFormValues>>(() => {
     if (!dataset) {
@@ -61,8 +66,8 @@ export default function DatasetFormModal({
       destroyOnClose
       open={open}
       title={title}
-      okText="保存"
-      cancelText="取消"
+      okText={t("common.save")}
+      cancelText={t("common.cancel")}
       confirmLoading={submitting}
       width={720}
       onCancel={onCancel}
@@ -76,32 +81,36 @@ export default function DatasetFormModal({
       >
         <Form.Item
           name="name"
-          label="数据集名称"
+          label={t("datasetManagement.fields.datasetName")}
           rules={[
-            { required: true, whitespace: true, message: "请输入数据集名称" },
-            { max: 80, message: "数据集名称不能超过 80 个字符" },
+            {
+              required: true,
+              whitespace: true,
+              message: t("datasetManagement.form.validation.nameRequired"),
+            },
+            { max: 80, message: t("datasetManagement.form.validation.nameMax") },
           ]}
         >
-          <Input placeholder="请输入数据集名称" />
+          <Input placeholder={t("datasetManagement.form.namePlaceholder")} />
         </Form.Item>
 
         <Form.Item
           name="description"
-          label="数据集描述"
-          rules={[{ max: 500, message: "数据集描述不能超过 500 个字符" }]}
+          label={t("datasetManagement.fields.datasetDescription")}
+          rules={[{ max: 500, message: t("datasetManagement.form.validation.descriptionMax") }]}
         >
-          <TextArea rows={3} placeholder="请输入数据集描述" />
+          <TextArea rows={3} placeholder={t("datasetManagement.form.descriptionPlaceholder")} />
         </Form.Item>
 
         <Form.Item
           name="knowledge_base_ids"
-          label="关联知识库"
-          rules={[{ required: true, message: "请选择关联知识库" }]}
+          label={t("datasetManagement.fields.knowledgeBase")}
+          rules={[{ required: true, message: t("datasetManagement.form.validation.knowledgeBaseRequired") }]}
         >
           <Select
             mode="multiple"
             allowClear
-            placeholder="请选择知识库"
+            placeholder={t("datasetManagement.form.knowledgeBasePlaceholder")}
             options={knowledgeBases.map((item) => ({
               label: item.name,
               value: item.id,

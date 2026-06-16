@@ -1,15 +1,20 @@
 from __future__ import annotations
 
-import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import lazyllm
-from lazyllm import AutoModel
+from lazyllm import AutoModel, fc_register
 from lazyllm.components.formatter import encode_query_with_filepaths
 
 from lazymind.chat.engine.prompts import VISION_EXTRACT_DEFAULT_INSTRUCTION
 from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
-from lazymind.chat.service.utils import resolve_local_image_path
+from lazymind.chat.engine.tools.infra.image_generation_support import (
+    _DEFAULT_BATCH_SIZE,
+    _DEFAULT_IMAGE_SIZE,
+    _resolve_source_image_paths,
+    resolve_tool_image_path,
+    run_image_model,
+)
 
 
 @handle_tool_errors
@@ -20,8 +25,8 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
     with LazyLLM multimodal file-path encoding.
 
     Args:
-        url: Local filesystem path under the upload root, or a ``/static-files/``
-            signed path from kb results (resolved to the local file automatically).
+        url: Short image ref (filename), local filesystem path, or a
+            ``/static-files/`` signed path from kb results.
         instruction: Optional focus for what to extract; defaults to a general
             description prompt.
 
@@ -33,16 +38,16 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
     if not raw:
         raise ValueError('url is required')
 
-    local_path = resolve_local_image_path(raw)
-    if not local_path or not os.path.isfile(local_path):
-        raise ValueError(f'image file not found: {local_path or raw}')
+    local_path = resolve_tool_image_path(raw)
+    if not local_path:
+        raise ValueError(f'image file not found: {raw}')
 
     prompt_instruction = (
         str(instruction).strip() if instruction else VISION_EXTRACT_DEFAULT_INSTRUCTION
     )
     encoded_query = encode_query_with_filepaths(prompt_instruction, [local_path])
 
-    agentic_config = lazyllm.globals['agentic_config']
+    agentic_config = lazyllm.globals.get('agentic_config') or {}
     priority = int(agentic_config.get('priority', 0) or 0)
 
     vlm = AutoModel(model='vlm')
@@ -55,3 +60,68 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
     )
     text = str(out).strip()
     return tool_success('vision_extractor', {'description': text, 'url': local_path})
+
+
+@fc_register('tool', execute_in_sandbox=False)
+@handle_tool_errors
+def image_generator(
+    prompt: str,
+    image_size: str = _DEFAULT_IMAGE_SIZE,
+    batch_size: int = _DEFAULT_BATCH_SIZE,
+) -> Dict[str, Any]:
+    """Generate an image from a text prompt (text-to-image).
+
+    Uses the configured ``image_generator`` role in runtime_models (type
+    ``text2image``). Model files are written under lazyllm temp first, then
+    moved into ``shared_upload_dir/ai_generated/`` for signed static URLs.
+
+    Args:
+        prompt: Natural-language description of the image to generate.
+        image_size: Output resolution, e.g. ``1024x1024``.
+        batch_size: Number of images to generate (default 1).
+
+    Returns:
+        On success: ``success``, ``prompt``, ``local_path``, optional
+        ``image_url`` / ``image_markdown``, and ``images`` (list per file).
+    """
+    return run_image_model(
+        'image_generator',
+        prompt,
+        image_size=image_size,
+        batch_size=batch_size,
+    )
+
+
+@fc_register('tool', execute_in_sandbox=False)
+@handle_tool_errors
+def image_editor(
+    prompt: str,
+    urls: List[str],
+    image_size: str = _DEFAULT_IMAGE_SIZE,
+    batch_size: int = _DEFAULT_BATCH_SIZE,
+) -> Dict[str, Any]:
+    """Edit reference image(s) according to a text instruction (image-to-image).
+
+    Uses the configured ``image_editor`` role in runtime_models (type
+    ``image_editing``). Pass short refs, ``local_path`` from kb results, or
+    filesystem paths; ``/static-files/`` signed URLs are resolved automatically.
+    The first entry in ``urls`` is the primary reference; additional entries are
+    extra references when the model supports them.
+
+    Args:
+        prompt: Edit instruction, e.g. change colors or add text.
+        urls: One or more reference image paths or signed static URLs.
+        image_size: Output resolution, e.g. ``1024x1024``.
+        batch_size: Number of variants to generate (default 1).
+
+    Returns:
+        Same shape as ``image_generator``.
+    """
+    source_files = _resolve_source_image_paths(urls)
+    return run_image_model(
+        'image_editor',
+        prompt,
+        files=source_files,
+        image_size=image_size,
+        batch_size=batch_size,
+    )

@@ -285,14 +285,17 @@ const KnowledgePage: FC = () => {
               className="link-btn"
               type="link"
               danger
-              onClick={() =>
+              onClick={() => {
+                const knowledgeName = data.display_name || data.dataset_id || "";
                 confirmRef.current?.onOpen({
                   id: data.dataset_id || "",
-                  title: t("knowledge.deleteTitle", { name: data.display_name }),
+                  title: t("knowledge.deleteTitle", { name: knowledgeName }),
                   content: t("knowledge.deleteContent"),
-                  confirmText: t("knowledge.deleteConfirmText"),
-                })
-              }
+                  confirmText: t("knowledge.deleteConfirmText", {
+                    name: knowledgeName,
+                  }),
+                });
+              }}
             >
               {t("common.delete")}
             </Button>

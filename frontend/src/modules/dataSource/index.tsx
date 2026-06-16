@@ -324,13 +324,19 @@ function mapCloudConnectionToFeishuAccount(
     cachedAccount?.name ||
     appId;
   const status = normalizeFeishuAccountStatus(connection.status);
+  const providerOptions = connection.provider_options || {};
+  const serverChatEnabled =
+    providerOptions.chat_enabled ?? providerOptions.chatEnabled ??
+    providerMeta.chat_enabled ?? providerMeta.chatEnabled;
+  const rawChatEnabled =
+    serverChatEnabled != null ? Boolean(serverChatEnabled) : (cachedAccount?.chatEnabled ?? false);
 
   return {
     id: connection.connection_id,
     name: displayName,
     appId,
     appSecret: cachedAccount?.appSecret || "",
-    chatEnabled: cachedAccount?.chatEnabled ?? false,
+    chatEnabled: status === "connected" ? rawChatEnabled : false,
     status,
     connection: {
       provider: "feishu",

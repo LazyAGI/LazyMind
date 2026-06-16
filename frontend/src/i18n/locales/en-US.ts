@@ -482,6 +482,11 @@ const enUS = {
 
   datasetManagement: {
     fields: {
+      datasetName: "Dataset Name",
+      datasetDescription: "Dataset Description",
+      knowledgeBase: "Linked Knowledge Base",
+      sampleCount: "Samples",
+      owner: "Creator",
       caseId: "Case ID",
       question: "Question",
       questionType: "Question Type",
@@ -495,6 +500,35 @@ const enUS = {
       isDeleted: "Deleted",
       source: "Source",
       updatedAt: "Updated At",
+    },
+    list: {
+      title: "Dataset Management",
+      subtitle: "Manage Q&A evaluation samples with manual editing, file import, and algorithm feedback data.",
+      createDataset: "New Dataset",
+      searchPlaceholder: "Search dataset name/description",
+      enter: "Enter",
+      confirmDeleteTitle: "Delete {{name}}?",
+      confirmDeleteContent: "All samples in this dataset will be affected. Please proceed carefully.",
+      message: {
+        loadFailed: "Failed to load datasets",
+        detailLoadFailed: "Failed to load dataset details",
+        deleted: "Dataset deleted",
+        updated: "Dataset updated",
+        created: "Dataset created",
+      },
+    },
+    form: {
+      createTitle: "New Dataset",
+      editTitle: "Edit Dataset",
+      namePlaceholder: "Enter dataset name",
+      descriptionPlaceholder: "Enter dataset description",
+      knowledgeBasePlaceholder: "Select knowledge base",
+      validation: {
+        nameRequired: "Enter dataset name",
+        nameMax: "Dataset name cannot exceed 80 characters",
+        descriptionMax: "Dataset description cannot exceed 500 characters",
+        knowledgeBaseRequired: "Select linked knowledge base",
+      },
     },
     import: {
       rowNumber: "Row",
@@ -841,7 +875,7 @@ const enUS = {
     authorize: "Authorize",
     deleteTitle: "Delete Knowledge Base [{{name}}]",
     deleteContent: "This action cannot be undone. Related applications will be invalidated. Please enter the text below to confirm:",
-    deleteConfirmText: "I confirm deletion of this knowledge base and understand the consequences",
+    deleteConfirmText: "I confirm deletion of knowledge base [{{name}}] and understand the consequences",
     searchPlaceholder: "Name / Description / Tags",
     searchDocPlaceholder: "Search by name, tags, or creator",
     createKnowledgeBase: "Create Knowledge Base",
@@ -1086,7 +1120,7 @@ const enUS = {
       "Manage local, object storage, and OAuth cloud knowledge sources in one place",
     dataSourceDemoTitle: "Frontend demo mode",
     dataSourceCreate: "New Data Source",
-    dataSourceCreateKnowledgeSource: "New Knowledge Source",
+    dataSourceCreateKnowledgeSource: "New Data Source",
     dataSourceEdit: "Edit Data Source",
     dataSourceSaveConfig: "Save Configuration",
     dataSourceCreateOnly: "Create Only",
@@ -1132,6 +1166,8 @@ const enUS = {
       "Toggle whether {{name}} is used in chat by default",
     dataSourceFeishuAccountChatSwitchHint:
       "When on, knowledge sources created with this Feishu account are searched in chat by default.",
+    dataSourceFeishuAccountChatAuthRequired:
+      "Only Feishu accounts with valid authorization can be used in chat by default.",
     dataSourceFeishuAccountChatOn: "On",
     dataSourceFeishuAccountChatOff: "Off",
     dataSourceFeishuAccountName: "Account Description",
@@ -1148,7 +1184,7 @@ const enUS = {
     dataSourceSelectFeishuAuthTitle: "Select Feishu Authorization",
     dataSourceSelectFeishuAuthIntro:
       "Choose a valid authorization before configuring the Feishu knowledge source.",
-    dataSourceAssetSearchPlaceholder: "Search data source, knowledge base, or target",
+    dataSourceAssetSearchPlaceholder: "Search data source, knowledge base",
     dataSourceAssetNoResultTitle: "No matching data assets",
     dataSourceAssetNoResultDesc: "Adjust the search term or health filter and try again.",
     dataSourceAccessAlertTitle: "Knowledge Source Access",

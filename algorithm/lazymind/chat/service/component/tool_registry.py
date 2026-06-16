@@ -20,12 +20,15 @@ from lazymind.chat.engine.tools import (
     KBToolGroup,
     TempKBToolGroup,
     calculator,
+    image_editor,
+    image_generator,
     memory_editor,
     skill_editor,
     url_fetch,
     vision_extractor,
     vocab_learn,
 )
+from lazymind.model_config import is_model_role_available
 
 
 @dataclass
@@ -34,6 +37,7 @@ class ToolGroupConfig:
     label: str
     description: str
     instance: Any
+    model_role: str | None = None
 
 
 _WEB_SEARCH_ENGINE_INSTANCES: list = [
@@ -108,6 +112,21 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         label='多模态识别',
         description='从图片中提取文字描述',
         instance=vision_extractor,
+        model_role='vlm',
+    ),
+    ToolGroupConfig(
+        name='image_generator',
+        label='文生图',
+        description='根据文字描述生成图片',
+        instance=image_generator,
+        model_role='image_generator',
+    ),
+    ToolGroupConfig(
+        name='image_editor',
+        label='图编辑',
+        description='根据文字指令编辑参考图片',
+        instance=image_editor,
+        model_role='image_editor',
     ),
     ToolGroupConfig(
         name='vocab_learn',
@@ -206,6 +225,14 @@ def _instance_is_active(instance: Any) -> bool:
         return False
 
 
+def group_is_active(cfg: ToolGroupConfig) -> bool:
+    if cfg.model_role and not is_model_role_available(cfg.model_role):
+        return False
+    if cfg.instance is None:
+        return True
+    return _instance_is_active(cfg.instance)
+
+
 def get_all_tool_groups() -> list[dict]:
     result = []
     for cfg in DEFAULT_TOOLS:
@@ -221,7 +248,7 @@ def get_all_tool_groups() -> list[dict]:
             'description': cfg.description,
             'methods': methods,
             'can_disable': True,
-            'active': _instance_is_active(cfg.instance),
+            'active': group_is_active(cfg),
         })
     result.append({
         'name': SKILL_TOOL_GROUP.name,
@@ -231,6 +258,20 @@ def get_all_tool_groups() -> list[dict]:
         'can_disable': False,
         'active': True,
     })
+    return result
+
+
+def filter_tools(
+    configs: list[ToolGroupConfig],
+    available_tools: list[str] | None = None,
+) -> list[ToolGroupConfig]:
+    result = []
+    for cfg in configs:
+        if available_tools is not None and cfg.name not in available_tools:
+            continue
+        if not group_is_active(cfg):
+            continue
+        result.append(cfg)
     return result
 
 
