@@ -259,7 +259,7 @@ func getMultiAnswerInfo(ctx context.Context, rdb *redis.Client, conversationID, 
 // ConvEvent is a conversation-level notification pushed to the frontend via the
 // /conversations/{id}/events SSE endpoint. It is independent of any chat turn.
 type ConvEvent struct {
-	Type    string `json:"type"`    // task_created | step_waiting | plugin_completed | plugin_error
+	Type    string `json:"type"`    // task_created | step_waiting | plugin_completed | plugin_error | driver_input | auto_chat_started
 	Payload any    `json:"payload"` // *TaskCreatedNotice or plugin lifecycle payload map
 }
 

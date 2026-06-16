@@ -1,31 +1,14 @@
-import React, { useEffect } from "react";
-import { usePluginSession, useSlot } from "@/modules/chat/hooks/usePlugin";
-import type { PluginSession, SlotRevision } from "@/modules/chat/store/pluginPanel";
+import React, { useEffect, useState } from "react";
+import { usePluginSession } from "@/modules/chat/hooks/usePlugin";
+import { usePluginStore } from "@/modules/chat/store/pluginPanel";
+import type { PluginSession, SlotRevision, TabDef, PluginUI } from "@/modules/chat/store/pluginPanel";
 import { SlotRenderer } from "./SlotComponents";
 import "./PluginPanel.scss";
 
-interface TabDef {
-  id: string;
-  label: string;
-  slots: SlotDef[];
-}
-
-interface SlotDef {
-  id: string;
-  label: string;
-  type: "image" | "text" | "file";
-  cardinality?: "single" | "list";
-}
-
-interface PluginUI {
-  tabs?: TabDef[];
-}
-
-function getPluginUI(session: PluginSession): PluginUI {
-  // The plugin UI definition is passed down via chat_context from Go.
-  // In the current implementation we don't persist full plugin YAML in the DB,
-  // so we fall back to a generic auto-render mode based on available slots.
-  return {};
+interface PluginPanelProps {
+  conversationId: string;
+  /** Poll interval in ms for slot refreshes (default: 3000). */
+  pollIntervalMs?: number;
 }
 
 /**
@@ -138,6 +121,20 @@ interface PluginPanelProps {
 export function PluginPanel({ conversationId, pollIntervalMs = 3000 }: PluginPanelProps) {
   const { session, loading, refresh, selectRevision, advance, retry } = usePluginSession(conversationId);
   const [activeTab, setActiveTab] = React.useState(0);
+  const fetchPluginUI = usePluginStore((s) => s.fetchPluginUI);
+  const pluginUIByPlugin = usePluginStore((s) => s.pluginUIByPlugin);
+  const [ui, setUI] = useState<PluginUI>({});
+
+  // Fetch plugin UI declaration when session plugin_id becomes known.
+  useEffect(() => {
+    if (!session?.plugin_id) return;
+    const cached = pluginUIByPlugin[session.plugin_id];
+    if (cached) {
+      setUI(cached);
+      return;
+    }
+    fetchPluginUI(session.plugin_id).then(setUI);
+  }, [session?.plugin_id, fetchPluginUI, pluginUIByPlugin]);
 
   // Poll for slot updates while session is active.
   useEffect(() => {
@@ -154,7 +151,6 @@ export function PluginPanel({ conversationId, pollIntervalMs = 3000 }: PluginPan
     return null;
   }
 
-  const ui = getPluginUI(session);
   const tabs: TabDef[] = ui.tabs ?? [];
   const hasTabs = tabs.length > 0;
 
@@ -165,11 +161,13 @@ export function PluginPanel({ conversationId, pollIntervalMs = 3000 }: PluginPan
     waiting: "Waiting",
   };
 
-  // Show action buttons only in manual-mode states (waiting = step done, active = step running).
-  // "completed" and "failed" sessions don't need controls.
-  const showActions = session.status === "waiting" || session.status === "active";
+  // Show action buttons only in manual-mode states and completed sessions (retry is allowed).
+  // "failed" sessions don't need controls.
+  const showActions = session.status === "waiting" || session.status === "active" || session.status === "completed";
   // Buttons are disabled while a SubAgent is actively running.
   const buttonsDisabled = session.status === "active";
+  // Continue is only meaningful when waiting for next step; completed sessions only allow retry.
+  const showContinue = session.status === "waiting" || session.status === "active";
 
   return (
     <div
@@ -239,16 +237,18 @@ export function PluginPanel({ conversationId, pollIntervalMs = 3000 }: PluginPan
           >
             Retry
           </button>
-          <button
-            type="button"
-            className="plugin-panel__action-btn plugin-panel__action-btn--primary"
-            disabled={buttonsDisabled}
-            aria-disabled={buttonsDisabled}
-            onClick={advance}
-            title={buttonsDisabled ? "Waiting for step to finish…" : "Continue to next step"}
-          >
-            Continue
-          </button>
+          {showContinue && (
+            <button
+              type="button"
+              className="plugin-panel__action-btn plugin-panel__action-btn--primary"
+              disabled={buttonsDisabled}
+              aria-disabled={buttonsDisabled}
+              onClick={advance}
+              title={buttonsDisabled ? "Waiting for step to finish…" : "Continue to next step"}
+            >
+              Continue
+            </button>
+          )}
         </div>
       )}
     </div>

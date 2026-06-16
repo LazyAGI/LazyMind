@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from typing import Any, Dict, List, Optional
 
@@ -14,7 +15,7 @@ from lazymind.chat.service.component.event_translator import AgentEventFrameTran
 from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, build_agent_tools
 from lazyllm.tools.tool_config_inject import inject_tool_config
 
-from .context import SubAgentContext, set_context
+from .context import SubAgentContext, set_context, LARGE_TOOL_RESULT_THRESHOLD
 from .db import SubAgentDB
 from . import tools as subagent_tools
 
@@ -195,6 +196,35 @@ def _objective_prompt(ctx: SubAgentContext) -> str:
     return '\n'.join(lines)
 
 
+def _truncate_tool_result(ctx: SubAgentContext, result: Any, tool_name: str) -> str:
+    """Truncate a large tool result for the LLM.
+
+    If the serialised result exceeds LARGE_TOOL_RESULT_THRESHOLD the full
+    content is written to the workspace filesystem and the LLM receives a
+    compact notice with the file path and size so it can reference the file
+    in subsequent tool calls or reasoning.
+    """
+    text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, default=str)
+    encoded = text.encode('utf-8', errors='replace')
+    if len(encoded) <= LARGE_TOOL_RESULT_THRESHOLD:
+        return text
+    try:
+        abs_path = ctx.write_large_content(text, hint=tool_name or 'tool_result')
+        rel_path = os.path.relpath(abs_path, ctx.workspace_path) if ctx.workspace_path else abs_path
+        size_kb = len(encoded) / 1024
+        return (
+            f'[Large result offloaded to file — {size_kb:.1f} KB]\n'
+            f'File path (relative to workspace): {rel_path}\n'
+            f'Use this path to reference the content in subsequent reasoning or tool calls.'
+        )
+    except Exception as exc:
+        LOG.warning('[SubAgent] failed to offload large tool result for %s: %s', tool_name, exc)
+        # Fallback: truncate with a notice.
+        limit = LARGE_TOOL_RESULT_THRESHOLD
+        truncated = text[:limit]
+        return truncated + f'\n... [truncated — original {len(encoded) // 1024} KB]'
+
+
 def _persist_step(ctx: SubAgentContext, seq: int, event: Dict[str, Any]) -> None:
     tag = event.get('tag')
     if tag == 'tool_calls':
@@ -213,10 +243,12 @@ def _persist_step(ctx: SubAgentContext, seq: int, event: Dict[str, Any]) -> None
         for tr in event.get('tool_results', []) or []:
             if not isinstance(tr, dict):
                 continue
+            raw_result = tr.get('result', tr.get('content', ''))
+            tool_name = tr.get('name', '')
             results.append({
                 'tool_call_id': tr.get('id', ''),
-                'name': tr.get('name', ''),
-                'result': tr.get('result', tr.get('content', '')),
+                'name': tool_name,
+                'result': _truncate_tool_result(ctx, raw_result, tool_name),
             })
         ctx.db.append_step(ctx.task_id, seq, 'tool', {'tool_results': results})
 

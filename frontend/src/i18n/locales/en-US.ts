@@ -570,6 +570,7 @@ const enUS = {
     promptSuggestionPolishTemplate:
       "Please polish the following message by removing redundant wording and improving readability and accuracy:\n\n{{prompt}}",
     promptPolishing: "Optimizing...",
+    autoAdvanceRunning: "Auto mode is running, please wait…",
     upload: "Upload file",
     modelProviderChecking: "Checking model configuration",
     modelProviderCheckingDesc: "Q&A will be available once the check finishes.",
@@ -786,6 +787,9 @@ const enUS = {
     statusFailed: "Failed",
     statusRunning: "In progress",
     statusInterrupted: "Interrupted",
+    filterAll: "All",
+    filterSucceeded: "Succeeded",
+    filterFailed: "Failed",
   },
 
   // Knowledge Base

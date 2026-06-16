@@ -22,13 +22,13 @@ import (
 )
 
 // DefaultMode returns the configured plugin advance mode (auto|manual).
-// Defaults to "auto" when unset.
+// Defaults to "manual" when unset.
 func DefaultMode() string {
 	v := strings.TrimSpace(os.Getenv("LAZYMIND_PLUGIN_MODE"))
-	if v == "manual" {
-		return "manual"
+	if v == "auto" {
+		return "auto"
 	}
-	return "auto"
+	return "manual"
 }
 
 // PluginStepParams are the task_created.params fields for plugin_step agent type.
@@ -287,6 +287,18 @@ func advanceAutoMode(
 		})
 	default: // PASS, RETRY
 		syntheticMsg := buildSyntheticMessage(verdict, pctx.StepID, reason)
+		// Emit driver_input so the frontend renders the synthetic user message.
+		onSSE("driver_input", map[string]any{
+			"session_id": pctx.SessionID,
+			"step_id":    pctx.StepID,
+			"verdict":    verdict,
+			"message":    syntheticMsg,
+		})
+		// Notify frontend to open a resume SSE so it can receive the next chat turn.
+		onSSE("auto_chat_started", map[string]any{
+			"session_id":      pctx.SessionID,
+			"conversation_id": pctx.ConvID,
+		})
 		go triggerNextChatTurn(pctx.ConvID, pctx.SessionID, pctx.PluginID, pctx.StepID,
 			pctx.UserID, syntheticMsg)
 	}

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
 
-from .context import require_context
+from .context import require_context, LARGE_ARTIFACT_THRESHOLD
 
 # Valid artifact content types.
 _CONTENT_TYPES = {'text', 'json', 'image', 'file', 'file_list'}
@@ -15,13 +15,25 @@ _CONTENT_TYPES = {'text', 'json', 'image', 'file', 'file_list'}
 def _build_artifact_value(value: Any, content_type: str) -> Dict[str, Any]:
     ctx = require_context()
     if content_type == 'text':
-        return {'text': str(value)}
+        text = str(value)
+        # Offload large text to workspace filesystem.
+        if len(text.encode('utf-8', errors='replace')) > LARGE_ARTIFACT_THRESHOLD:
+            abs_path = ctx.write_large_content(text, hint='artifact_text')
+            rel = os.path.relpath(abs_path, ctx.workspace_path)
+            return {'type': 'file', 'path': rel, 'size': os.path.getsize(abs_path)}
+        return {'text': text}
     if content_type == 'json':
         if isinstance(value, str):
             try:
                 value = json.loads(value)
             except ValueError:
                 pass
+        serialized = json.dumps(value, ensure_ascii=False, default=str)
+        # Offload large JSON to workspace filesystem.
+        if len(serialized.encode('utf-8', errors='replace')) > LARGE_ARTIFACT_THRESHOLD:
+            abs_path = ctx.write_large_content(serialized, hint='artifact_json')
+            rel = os.path.relpath(abs_path, ctx.workspace_path)
+            return {'type': 'file', 'path': rel, 'size': os.path.getsize(abs_path)}
         return {'data': value}
     if content_type == 'image':
         rel = ctx.copy_into_workspace(str(value)) if os.path.isabs(str(value)) else str(value)

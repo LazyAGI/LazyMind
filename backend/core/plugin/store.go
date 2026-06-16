@@ -88,6 +88,23 @@ func GetActiveSession(ctx context.Context, db *gorm.DB, conversationID string) (
 	return &s, nil
 }
 
+// GetLatestSession returns the most recent plugin session for a conversation regardless of status,
+// or nil if none exists. Used by the frontend to always show session output even after completion.
+func GetLatestSession(ctx context.Context, db *gorm.DB, conversationID string) (*orm.PluginSession, error) {
+	var s orm.PluginSession
+	err := db.WithContext(ctx).
+		Where("conversation_id = ?", conversationID).
+		Order("created_at DESC").
+		First(&s).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
 // GetSession loads a session by ID.
 func GetSession(ctx context.Context, db *gorm.DB, sessionID string) (*orm.PluginSession, error) {
 	var s orm.PluginSession

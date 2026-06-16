@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { PluginSessionApi } from "@/modules/chat/utils/request";
+import { PluginInfoApi, PluginSessionApi } from "@/modules/chat/utils/request";
 
 export interface SlotRevision {
   slot_id: string;
@@ -30,10 +30,33 @@ export type SlotValue =
   | { type: "file"; url: string; name: string; size?: number }
   | { type: "unknown"; raw: unknown };
 
+// UI tab/slot declaration from plugin.yaml.
+export interface SlotDef {
+  id: string;
+  label: string;
+  type: "image" | "text" | "file";
+  cardinality?: "single" | "list";
+}
+
+export interface TabDef {
+  id: string;
+  label: string;
+  slots: SlotDef[];
+}
+
+export interface PluginUI {
+  tabs?: TabDef[];
+}
+
 interface PluginStore {
   // Active session per conversation.
   sessionByConversation: Record<string, PluginSession | null>;
   loadingByConversation: Record<string, boolean>;
+  // Whether auto-advance is running (driver agent triggered next chat turn).
+  // Keyed by conversation_id. True = input should be disabled.
+  autoRunningByConversation: Record<string, boolean>;
+  // Plugin UI definition cache: keyed by plugin_id.
+  pluginUIByPlugin: Record<string, PluginUI>;
 
   setSession: (conversationId: string, session: PluginSession | null) => void;
   updateSlot: (conversationId: string, slot: SlotRevision) => void;
@@ -43,11 +66,15 @@ interface PluginStore {
   advanceSession: (conversationId: string, sessionId: string) => Promise<void>;
   retrySession: (conversationId: string, sessionId: string) => Promise<void>;
   clearSession: (conversationId: string) => void;
+  setAutoRunning: (conversationId: string, running: boolean) => void;
+  fetchPluginUI: (pluginId: string) => Promise<PluginUI>;
 }
 
 export const usePluginStore = create<PluginStore>()((set, get) => ({
   sessionByConversation: {},
   loadingByConversation: {},
+  autoRunningByConversation: {},
+  pluginUIByPlugin: {},
 
   setSession: (conversationId, session) => {
     set((state) => ({
@@ -85,7 +112,7 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
       loadingByConversation: { ...s.loadingByConversation, [conversationId]: true },
     }));
     try {
-      const res = await PluginSessionApi().getActiveSession(conversationId);
+      const res = await PluginSessionApi().getLatestSession(conversationId);
       const session: PluginSession | null = res?.data?.session ?? null;
       get().setSession(conversationId, session);
     } catch {
@@ -147,5 +174,27 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
     set((state) => ({
       sessionByConversation: { ...state.sessionByConversation, [conversationId]: null },
     }));
+  },
+
+  setAutoRunning: (conversationId, running) => {
+    set((state) => ({
+      autoRunningByConversation: { ...state.autoRunningByConversation, [conversationId]: running },
+    }));
+  },
+
+  fetchPluginUI: async (pluginId) => {
+    // Return cached value if already fetched.
+    const cached = get().pluginUIByPlugin[pluginId];
+    if (cached) return cached;
+    try {
+      const res = await PluginInfoApi().getPlugin(pluginId);
+      const ui: PluginUI = res?.data?.ui ?? {};
+      set((state) => ({
+        pluginUIByPlugin: { ...state.pluginUIByPlugin, [pluginId]: ui },
+      }));
+      return ui;
+    } catch {
+      return {};
+    }
   },
 }));

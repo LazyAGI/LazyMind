@@ -18,11 +18,13 @@ from lazymind.review.api import memory_review_routes, skill_review_routes
 def register_chat_routers(app: FastAPI) -> FastAPI:
     # health is always available for liveness probes.
     app.include_router(health_routes.router)
+    # plugin routes must always be registered: Go backend calls /api/plugin/slot-binding
+    # and /api/plugin/driver regardless of whether router mode is enabled.
+    app.include_router(plugin_routes.router)
 
     if not config['enable_router']:
         app.include_router(chat_routes.router)
         app.include_router(subagent_routes.router)
-        app.include_router(plugin_routes.router)
 
     if not config['router_child_proxied_only']:
         app.include_router(rewrite_routes.router)

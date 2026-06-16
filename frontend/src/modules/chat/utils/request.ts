@@ -104,12 +104,33 @@ export function TaskServiceApi() {
   };
 }
 
+// Plugin Info API — fetches plugin spec (including ui.tabs) from Go /api/core/plugins.
+export function PluginInfoApi() {
+  return {
+    getPlugin(pluginId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/plugins/${encodeURIComponent(pluginId)}`,
+        options,
+      );
+    },
+    listPlugins(options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(`${coreApiBaseUrl}/plugins`, options);
+    },
+  };
+}
+
 // Plugin Session API.
 export function PluginSessionApi() {
   return {
     getActiveSession(conversationId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(
         `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/plugin-sessions:active`,
+        options,
+      );
+    },
+    getLatestSession(conversationId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/plugin-sessions:latest`,
         options,
       );
     },

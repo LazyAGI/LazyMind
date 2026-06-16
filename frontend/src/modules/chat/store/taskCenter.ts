@@ -419,6 +419,16 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             get().loadConversationTasks(conversationId);
             import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
               usePluginStore.getState().loadActiveSession(conversationId);
+              usePluginStore.getState().setAutoRunning(conversationId, false);
+            });
+          } else if (type === 'auto_chat_started') {
+            import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
+              usePluginStore.getState().setAutoRunning(conversationId, true);
+            });
+            import('@/modules/chat/constants/chat').then(({ CHAT_AUTO_ADVANCE_EVENT }) => {
+              window.dispatchEvent(new CustomEvent(CHAT_AUTO_ADVANCE_EVENT, {
+                detail: { conversationId },
+              }));
             });
           }
         },

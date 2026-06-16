@@ -30,6 +30,7 @@ import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import {
   CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
+  CHAT_AUTO_ADVANCE_EVENT,
 } from "@/modules/chat/constants/chat";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
@@ -111,6 +112,13 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   const chatRef = useRef<ChatImperativeProps>(null);
 
+  const autoRunning = usePluginStore((s) =>
+    sessionId ? (s.autoRunningByConversation[sessionId] ?? false) : false,
+  );
+  const hasPluginSession = usePluginStore((s) =>
+    sessionId ? (s.sessionByConversation[sessionId] ?? null) !== null : false,
+  );
+
   const tasks = useTaskCenterStore((s) =>
     sessionId ? s.tasksByConversation[sessionId] ?? EMPTY_TASKS : EMPTY_TASKS,
   );
@@ -132,7 +140,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     };
   }, [sessionId, loadConversationTasks, subscribeConvEvents, unsubscribeConvEvents]);
 
-  // Auto-expand the task panel the first time a SubAgent task appears in the current session.
+  // Auto-expand the task panel the first time a SubAgent task or plugin session appears.
   const prevTasksLengthRef = useRef(0);
   useEffect(() => {
     const prev = prevTasksLengthRef.current;
@@ -141,6 +149,16 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       setIsTaskPanelCollapsed(false);
     }
   }, [tasks.length]);
+
+  // Also auto-expand when a plugin session first appears (even with no tasks yet).
+  const prevHasPluginSessionRef = useRef(false);
+  useEffect(() => {
+    const prev = prevHasPluginSessionRef.current;
+    prevHasPluginSessionRef.current = hasPluginSession;
+    if (!prev && hasPluginSession) {
+      setIsTaskPanelCollapsed(false);
+    }
+  }, [hasPluginSession]);
 
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
@@ -431,6 +449,19 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     };
   }, [sessionId, setIsChatContent, loadConversation]);
 
+  // Auto-advance: when driver agent triggers a new chat turn, open resume SSE.
+  useEffect(() => {
+    const handleAutoAdvance = (event: Event) => {
+      const { conversationId } = (event as CustomEvent<{ conversationId: string }>).detail || {};
+      if (!conversationId || conversationId !== sessionId) return;
+      chatRef.current?.openResumeSSE?.(conversationId);
+    };
+    window.addEventListener(CHAT_AUTO_ADVANCE_EVENT, handleAutoAdvance);
+    return () => {
+      window.removeEventListener(CHAT_AUTO_ADVANCE_EVENT, handleAutoAdvance);
+    };
+  }, [sessionId]);
+
   function parseErrorData(data: string) {
     const dataObject = UIUtils.jsonParser(data) || {};
     return dataObject.message;
@@ -532,11 +563,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         embeddingReady={embeddingReady}
         multimodalEmbeddingReady={multimodalEmbeddingReady}
         rerankReady={rerankReady}
-        disabledReason={chatDisabledReason}
-        disabledDescription={chatDisabledDescription}
-        disabledAction={chatDisabledAction}
+        disabledReason={autoRunning ? t("chat.autoAdvanceRunning") : chatDisabledReason}
+        disabledDescription={autoRunning ? undefined : chatDisabledDescription}
+        disabledAction={autoRunning ? undefined : chatDisabledAction}
       />
-      {tasks.length > 0 && isTaskPanelCollapsed && (
+      {(tasks.length > 0 || hasPluginSession) && isTaskPanelCollapsed && (
         <button
           type="button"
           className="task-panel-restore-btn"
@@ -547,7 +578,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           <span className="task-panel-restore-label">{t("taskCenter.panelTitle")} ({tasks.length})</span>
         </button>
       )}
-      {tasks.length > 0 && !isTaskPanelCollapsed && (
+      {(tasks.length > 0 || hasPluginSession) && !isTaskPanelCollapsed && (
         <div
           className="right-box"
           style={panelWidth ? { width: panelWidth, minWidth: panelWidth } : undefined}

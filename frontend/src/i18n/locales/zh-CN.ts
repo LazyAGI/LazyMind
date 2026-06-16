@@ -543,6 +543,7 @@ const zhCN = {
     promptSuggestionPolishTemplate:
       "请润色下面这段消息，去掉冗余表达，提升可读性和准确性：\n\n{{prompt}}",
     promptPolishing: "正在优化...",
+    autoAdvanceRunning: "自动推进中，请稍候…",
     upload: "上传文件",
     modelProviderChecking: "正在确认模型配置",
     modelProviderCheckingDesc: "检查完成后即可开始问答。",
@@ -752,6 +753,9 @@ const zhCN = {
     statusFailed: "失败",
     statusRunning: "进行中",
     statusInterrupted: "已中断",
+    filterAll: "全部",
+    filterSucceeded: "已完成",
+    filterFailed: "失败",
   },
 
   knowledge: {

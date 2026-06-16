@@ -233,6 +233,117 @@ func GetActiveConversationSession(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{"session": dto})
 }
 
+// GetLatestConversationSession handles GET /conversations/{conversation_id}/plugin-sessions:latest.
+// Returns the most recent session regardless of status, so the frontend can always show
+// plugin output even after a session completes or fails.
+func GetLatestConversationSession(w http.ResponseWriter, r *http.Request) {
+	convID := common.PathVar(r, "conversation_id")
+	if convID == "" {
+		common.ReplyErr(w, "conversation_id required", http.StatusBadRequest)
+		return
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	s, err := GetLatestSession(r.Context(), db, convID)
+	if err != nil {
+		common.ReplyErr(w, "query latest session failed", http.StatusInternalServerError)
+		return
+	}
+	if s == nil {
+		common.ReplyOK(w, map[string]any{"session": nil})
+		return
+	}
+	dto := toSessionDTO(s)
+	revisions, _ := LoadSelectedSlots(r.Context(), db, s.ID)
+	for i := range revisions {
+		dto.Slots = append(dto.Slots, toSlotDTO(&revisions[i]))
+	}
+	common.ReplyOK(w, map[string]any{"session": dto})
+}
+
+// GetPluginInfo handles GET /plugins/{plugin_id}.
+// Proxies to the Python chat service /api/plugins/{plugin_id} and returns the plugin spec
+// including the ui.tabs declaration needed by the frontend PluginPanel.
+func GetPluginInfo(w http.ResponseWriter, r *http.Request) {
+	pluginID := common.PathVar(r, "plugin_id")
+	if pluginID == "" {
+		common.ReplyErr(w, "plugin_id required", http.StatusBadRequest)
+		return
+	}
+	upstream := common.ChatServiceEndpoint() + "/api/plugins/" + pluginID
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstream, nil)
+	if err != nil {
+		common.ReplyErr(w, "build upstream request failed", http.StatusInternalServerError)
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		common.ReplyErr(w, "upstream request failed", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		common.ReplyErr(w, "plugin not found", http.StatusNotFound)
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		common.ReplyErr(w, "upstream error", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	buf := make([]byte, 4096)
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			_, _ = w.Write(buf[:n])
+		}
+		if readErr != nil {
+			break
+		}
+	}
+}
+
+// ListPlugins handles GET /plugins.
+// Proxies to the Python chat service /api/plugins.
+func ListPlugins(w http.ResponseWriter, r *http.Request) {
+	upstream := common.ChatServiceEndpoint() + "/api/plugins"
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstream, nil)
+	if err != nil {
+		common.ReplyErr(w, "build upstream request failed", http.StatusInternalServerError)
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		common.ReplyErr(w, "upstream request failed", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		common.ReplyErr(w, "upstream error", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	buf := make([]byte, 4096)
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			_, _ = w.Write(buf[:n])
+		}
+		if readErr != nil {
+			break
+		}
+	}
+}
+
 // AdvanceSession handles POST /plugin-sessions/{session_id}:advance.
 // This is the §5.5 manual-mode resume path: the frontend calls this after
 // the user confirms they want to proceed or retry the current step.
@@ -277,7 +388,19 @@ func AdvanceSession(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query session failed", http.StatusInternalServerError)
 		return
 	}
-	if session.Status != SessionStatusWaiting && session.Status != SessionStatusActive {
+	// completed sessions can be retried (re-run a step), but not continued.
+	if session.Status == SessionStatusCompleted {
+		if body.Action != "retry" {
+			common.ReplyErr(w, "completed sessions can only be retried, not continued", http.StatusConflict)
+			return
+		}
+		// Reset to active so the state machine can proceed.
+		if err := UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive); err != nil {
+			common.ReplyErr(w, "reset session status failed", http.StatusInternalServerError)
+			return
+		}
+		session.Status = SessionStatusActive
+	} else if session.Status != SessionStatusWaiting && session.Status != SessionStatusActive {
 		common.ReplyErr(w, "session is not in a resumable state", http.StatusConflict)
 		return
 	}
