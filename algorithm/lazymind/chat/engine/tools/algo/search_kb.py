@@ -33,13 +33,13 @@ _ctx_expand = ContextExpansionComponent(
 
 
 def _search_text(
-    query: str,
-    retrieve_fn: Callable[[str], tuple],
+    expanded: str,
+    retrieve_fn: Callable[[str], Any],
     reranker: Optional[Reranker],
     rerank_topk: int,
     k_max: int,
 ) -> List[Any]:
-    nodes, expanded = retrieve_fn(query)
+    nodes = retrieve_fn(expanded)
     ranked = reranker(nodes, query=expanded, topk=rerank_topk) if reranker else _pass_through_rerank(nodes)
     merged = _adaptive_k(ranked or [], k_max=k_max)
     return _ctx_expand(merged)
@@ -57,17 +57,16 @@ def search_kb(
     image_topk: int = 3,
 ):
     query = payload['query']
+    expanded = get_vocab_manager(payload['user_id'])(query)
 
-    def _kb_retrieve(query: str):
-        expanded = get_vocab_manager(payload['user_id'])(query)
+    def _kb_retrieve(expanded: str):
         results = parallel(*retrievers)(
             expanded, filters=payload.get('filters') or {}, topk=retriever_topk
         )
         nodes = tuple(r for r in results if r)
-        nodes = RRFFusion(top_k=50)(nodes)
-        return nodes, expanded
+        return RRFFusion(top_k=50)(nodes)
 
-    text_nodes = _search_text(query, _kb_retrieve, reranker, rerank_topk, k_max)
+    text_nodes = _search_text(expanded, _kb_retrieve, reranker, rerank_topk, k_max)
 
     if image_retriever is None:
         return text_nodes
@@ -86,10 +85,9 @@ def search_temp_files(
     k_max: int = 10,
 ):
     query = payload['query']
+    expanded = get_vocab_manager(payload['user_id'])(query)
 
-    def _tmp_retrieve(query: str):
-        expanded = get_vocab_manager(payload['user_id'])(query)
-        nodes = tmp_retriever(payload.get('files') or [], expanded, topk=retriever_topk)
-        return nodes, expanded
+    def _tmp_retrieve(expanded: str):
+        return tmp_retriever(payload.get('files') or [], expanded, topk=retriever_topk)
 
-    return _search_text(query, _tmp_retrieve, reranker, rerank_topk, k_max)
+    return _search_text(expanded, _tmp_retrieve, reranker, rerank_topk, k_max)
