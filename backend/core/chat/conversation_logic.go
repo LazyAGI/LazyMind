@@ -770,14 +770,20 @@ func streamSingleAnswer(
 		if d.TaskCreated != nil {
 			userIDForTask, _ := reqBody["user_id"].(string)
 			notice := handleTaskCreated(chatCtx, db, rdb, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody))
-			if notice != nil && reqCtx.Err() == nil {
-				writeSSEChunk(w, flusher, &ChatChunkResponse{
+			if notice != nil {
+				taskChunk := &ChatChunkResponse{
 					ConversationID: convID,
 					Seq:            int32(seq),
 					HistoryID:      historyID,
 					FinishReason:   "FINISH_REASON_UNSPECIFIED",
 					TaskCreated:    notice,
-				})
+				}
+				if reqCtx.Err() == nil {
+					writeSSEChunk(w, flusher, taskChunk)
+				}
+				if rdb != nil {
+					_ = appendChatChunk(chatCtx, rdb, convID, historyID, taskChunk)
+				}
 			}
 			continue
 		}

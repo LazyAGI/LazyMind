@@ -271,10 +271,12 @@ def build_cold_start_tools() -> List[Any]:
         pid = spec.plugin_id
         name = spec.yaml.get('name', pid)
         desc = spec.yaml.get('description', f'Trigger the {name} plugin.')
+        # when_to_use is the primary trigger hint; fall back to a generic phrase.
+        when_to_use = spec.yaml.get('when_to_use', '').strip()
         sm = spec.state_machine
         first_steps = sm.get_reachable_steps('__start__')
 
-        def _make_trigger(plugin_id: str, first: List[str], desc: str):
+        def _make_trigger(plugin_id: str, first: List[str], desc: str, when_to_use: str):
             @handle_tool_errors
             def _trigger(user_input: str) -> str:
                 """Trigger plugin.
@@ -291,9 +293,13 @@ def build_cold_start_tools() -> List[Any]:
                 return _trigger_plugin_step(plugin_id, step_id, user_input, is_cold_start=True)
 
             _trigger.__name__ = f'trigger_{plugin_id.replace("-", "_")}'
+            # Build a short, LLM-friendly description that leads with the trigger condition.
+            if when_to_use:
+                tool_desc = f'{when_to_use.rstrip(".")}.  ({desc.rstrip(".")})'
+            else:
+                tool_desc = desc
             _trigger.__doc__ = (
-                f'{desc}\n\n'
-                f'Call this when the user wants to {desc.lower().rstrip(".")}.\n\n'
+                f'{tool_desc}\n\n'
                 'Args:\n'
                 "    user_input (str): The user's original request.\n\n"
                 'Returns:\n'
@@ -301,7 +307,7 @@ def build_cold_start_tools() -> List[Any]:
             )
             return _trigger
 
-        tools.append(_make_trigger(pid, first_steps, desc))
+        tools.append(_make_trigger(pid, first_steps, desc, when_to_use))
     return tools
 
 

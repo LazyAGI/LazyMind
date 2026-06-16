@@ -536,6 +536,25 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
         }
       }
 
+      // Handle plugin lifecycle events (step_waiting, plugin_completed, plugin_error).
+      // These arrive on the original SSE stream; on step_waiting/plugin_completed we
+      // reload the full task list so that auto-advanced subtasks become visible.
+      if (result.plugin_event) {
+        const convId =
+          result.conversation_id || currentConversationIdRef.current || "";
+        const pe = result.plugin_event;
+        const taskStore = useTaskCenterStore.getState();
+        if (pe.event_type === "step_waiting" || pe.event_type === "plugin_completed") {
+          // Reload conversation tasks — the auto-advanced subtask is now in the DB.
+          taskStore.loadConversationTasks(convId);
+        }
+        if (pe.event_type === "step_waiting" || pe.event_type === "plugin_completed" || pe.event_type === "plugin_error") {
+          import("@/modules/chat/store/pluginPanel").then(({ usePluginStore }) => {
+            usePluginStore.getState().loadActiveSession(convId);
+          });
+        }
+      }
+
       const messageConversationId = result.conversation_id || "";
       const currentConversationIdAtStart = currentConversationIdRef.current;
 

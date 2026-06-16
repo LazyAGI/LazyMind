@@ -8,6 +8,12 @@ description: >
   enhance_image steps additionally support partial retry: the user can request
   re-collection or re-enhancement of specific list items while keeping others.
 
+when_to_use: >
+  Call this tool whenever the user wants to generate, draw, create, paint, or
+  produce an image or picture — including requests like "画一张图", "帮我生成图片",
+  "draw a cat", "create an illustration", "生成漫画风格的图", or any similar
+  image-creation request.
+
 tool_scripts:
   - path: scripts/tools.py
     functions:

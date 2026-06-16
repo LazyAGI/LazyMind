@@ -67,12 +67,20 @@ func loadPluginChatContextFromDB(ctx context.Context, db *gorm.DB, taskID string
 		return nil
 	}
 
+	// Use the plugin session's TriggerHistoryID so that step_waiting / plugin_completed
+	// events are pushed to the frontend SSE stream that was open when the plugin started,
+	// not the ephemeral stream of an auto-advance internal request.
+	historyID := task.TriggerHistoryID
+	if session, sErr := GetSession(ctx, db, params.SessionID); sErr == nil && session != nil && session.TriggerHistoryID != "" {
+		historyID = session.TriggerHistoryID
+	}
+
 	return &PluginChatContext{
 		SessionID: params.SessionID,
 		PluginID:  params.PluginID,
 		StepID:    params.StepID,
 		ConvID:    task.ConversationID,
 		UserID:    task.CreateUserID,
-		HistoryID: task.TriggerHistoryID,
+		HistoryID: historyID,
 	}
 }

@@ -21,6 +21,7 @@ import {
   TaskStatus,
   useTaskCenterStore,
 } from "@/modules/chat/store/taskCenter";
+import { PluginPanel } from "@/modules/chat/components/PluginPanel";
 import { resolveCoreAssetUrl } from "@/modules/knowledge/utils/imageUrl";
 import "./index.scss";
 
@@ -393,6 +394,7 @@ const TaskCenter = (props: Props) => {
   const tasks = useTaskCenterStore((s) =>
     sessionId ? s.tasksByConversation[sessionId] ?? EMPTY_TASKS : EMPTY_TASKS,
   );
+  const loadConversationTasks = useTaskCenterStore((s) => s.loadConversationTasks);
 
   const runningTasks = useMemo(
     () => tasks.filter((t) => RUNNING_STATUSES.includes(t.status)),
@@ -402,6 +404,21 @@ const TaskCenter = (props: Props) => {
     () => tasks.filter((t) => HISTORY_STATUSES.includes(t.status)),
     [tasks],
   );
+
+  // Poll for new subtasks while there are running plugin_step tasks.
+  // Auto-advance creates new tasks asynchronously; polling bridges the gap
+  // between the original SSE stream closing and the new task appearing.
+  const hasRunningPluginStep = useMemo(
+    () => runningTasks.some((t) => t.agent_type === "plugin_step"),
+    [runningTasks],
+  );
+  useEffect(() => {
+    if (!sessionId || !hasRunningPluginStep) return;
+    const id = setInterval(() => {
+      loadConversationTasks(sessionId);
+    }, 5000);
+    return () => clearInterval(id);
+  }, [sessionId, hasRunningPluginStep, loadConversationTasks]);
 
   const items = [
     {
@@ -453,6 +470,7 @@ const TaskCenter = (props: Props) => {
           </button>
         )}
       </div>
+      {sessionId && <PluginPanel conversationId={sessionId} />}
       <Tabs defaultActiveKey="running" items={items} />
     </div>
   );

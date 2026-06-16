@@ -41,7 +41,6 @@ def create_subagent(
     resume: bool = False,
 ) -> Dict[str, Any]:
     """Spawn an autonomous SubAgent to handle a complex, long-running, or tool-heavy subtask.
-
     Use this when a step is complex enough to warrant its own tool-calling chain, takes a long
     time, or streams outputs incrementally (e.g. generating multiple images). For simple steps,
     just use ordinary tools or reason directly instead. To resume an interrupted task, set
