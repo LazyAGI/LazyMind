@@ -11,7 +11,7 @@ from lazymind.chat.engine.tools._utils import (
     parse_number_range,
     truncate_text,
 )
-from lazymind.chat.engine.tools.algo import search_kb
+from lazymind.chat.engine.tools.algo import DOCUMENT, search_kb, search_temp_files
 from lazymind.chat.engine.tools.infra import (
     resolve_index,
 )
@@ -26,10 +26,6 @@ from lazymind.model_config import get_dynamic_role_slot_map
 
 _MAX_TEXT_LEN = 1200
 _MAX_RESULT_ITEMS = 50
-_DEFAULT_KB_URL = _cfg['agentic_kb_url']
-_DEFAULT_KB_DOCUMENT = lazyllm.Document(url=f'{_DEFAULT_KB_URL}/_call', name=_cfg['algo_id'])
-
-
 def build_default_retriever_configs() -> List[dict]:
     return [
         {'group_name': 'line', 'embed_keys': [EMBED_MAIN], 'target': 'block'},
@@ -193,7 +189,6 @@ def _annotate_result_citations(result: Any) -> Any:
 
 class KBToolGroup:
     __public_apis__ = ['kb_search', 'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search']
-    _document = None
     _retrievers = None
     _reranker = None
     _image_retriever = None
@@ -204,11 +199,10 @@ class KBToolGroup:
 
     def _ensure_search_runtime(self) -> None:
         cls = type(self)
-        if cls._document is not None:
+        if cls._retrievers is not None:
             return
-        cls._document = _DEFAULT_KB_DOCUMENT
         cls._retrievers = [
-            Retriever(cls._document, **cfg)
+            Retriever(DOCUMENT, **cfg)
             for cfg in build_default_retriever_configs()
         ]
         cls._reranker = (
@@ -217,7 +211,7 @@ class KBToolGroup:
             else None
         )
         cls._image_retriever = Retriever(
-            cls._document,
+            DOCUMENT,
             group_name='image',
             embed_keys=[EMBED_IMAGE],
         )
@@ -256,15 +250,12 @@ class KBToolGroup:
         payload = {
             'queries': [queries] if isinstance(queries, str) else queries,
             'filters': filters or agentic_config.get('filters') or {},
-            'files': [],
             'user_id': agentic_config.get('user_id', ''),
         }
 
         result = search_kb(
             payload,
-            document=type(self)._document,
             retrievers=type(self)._retrievers,
-            tmp_retriever=None,
             reranker=type(self)._reranker,
             image_retriever=type(self)._image_retriever,
             retriever_topk=retriever_topk or 20,
@@ -294,7 +285,7 @@ class KBToolGroup:
             raise ValueError('node_id is required')
 
         config = lazyllm.globals['agentic_config']
-        doc = _DEFAULT_KB_DOCUMENT
+        doc = DOCUMENT
 
         for kb_id in iter_lookup_ids(
             (config.get('filters') or {}).get('kb_id'),
@@ -372,7 +363,7 @@ class KBToolGroup:
             raise ValueError(f'number range cannot exceed {_MAX_RESULT_ITEMS} nodes')
 
         config = lazyllm.globals['agentic_config']
-        doc = _DEFAULT_KB_DOCUMENT
+        doc = DOCUMENT
 
         for kb_id in iter_lookup_ids(
             (config.get('filters') or {}).get('kb_id'),
@@ -437,7 +428,7 @@ class KBToolGroup:
         config = lazyllm.globals['agentic_config']
         index_name = resolve_index(group)
         size = max(1, min(int(size), _MAX_RESULT_ITEMS))
-        doc = _DEFAULT_KB_DOCUMENT
+        doc = DOCUMENT
         LOG.info(f'[kb_keyword_search] store={_cfg["segment_store_type"]!r} keyword={keyword!r} docid={docid!r} '
                  f'group={group!r} phrase={phrase} sort_by={sort_by!r} size={size}')
 
@@ -472,7 +463,6 @@ class KBToolGroup:
 
 class TempKBToolGroup:
     __public_apis__ = ['kb_tmp_search']
-    _document = None
     _tmp_retriever = None
     _reranker = None
 
@@ -484,7 +474,6 @@ class TempKBToolGroup:
         cls = type(self)
         if cls._tmp_retriever is not None:
             return
-        cls._document = _DEFAULT_KB_DOCUMENT
         cls._tmp_retriever = TempDocRetriever(embed=AutoModel(model=EMBED_MAIN))
         cls._tmp_retriever.add_subretriever('block')
         cls._reranker = (
@@ -525,13 +514,10 @@ class TempKBToolGroup:
             'files': files,
             'user_id': agentic_config.get('user_id', ''),
         }
-        result = search_kb(
+        result = search_temp_files(
             payload,
-            document=type(self)._document,
-            retrievers=[],
             tmp_retriever=type(self)._tmp_retriever,
             reranker=type(self)._reranker,
-            image_retriever=None,
             retriever_topk=retriever_topk or 20,
             rerank_topk=rerank_topk or 20,
             k_max=k_max or 10,

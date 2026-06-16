@@ -1,4 +1,4 @@
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 from lazyllm import Document, warp
 from lazyllm.tools.rag import Reranker, Retriever, TempDocRetriever
@@ -7,6 +7,7 @@ from lazyllm.tools.rag.rank_fusion.reciprocal_rank_fusion import RRFFusion
 from lazymind.chat.engine.tools.algo.kb_adaptive_topk import AdaptiveKComponent
 from lazymind.chat.engine.tools.algo.kb_context_expansion import ContextExpansionComponent
 from lazymind.chat.engine.tools.infra import get_vocab_manager
+from lazymind.config import config as _cfg
 
 
 def _adaptive_get_token_len(n: Any) -> int:
@@ -32,93 +33,39 @@ def _merge_and_deduplicate(node_lists: List[List[Any]]) -> List[Any]:
     return sorted(seen.values(), key=lambda n: getattr(n, 'relevance_score', 0.0) or 0.0, reverse=True)
 
 
-def search_text(
-    payload: dict,
-    *,
-    retrievers: List[Retriever],
-    retriever_topk: int,
+DOCUMENT = Document(url=f'{_cfg["agentic_kb_url"]}/_call', name=_cfg['algo_id'])
+
+_adaptive_k = AdaptiveKComponent(
+    bias=2, gap_tau=0.2, get_token_len=_adaptive_get_token_len, max_tokens=2048,
+)
+_ctx_expand = ContextExpansionComponent(
+    document=DOCUMENT, token_budget=1500, score_decay=0.97, max_seeds=1,
+)
+
+
+def _search_text(
+    queries: List[str],
+    retrieve_fn: Callable[[str], tuple],
+    reranker: Optional[Reranker],
     rerank_topk: int,
-    tmp_retriever: Optional[TempDocRetriever],
-    reranker: Optional[Reranker],
-    adaptive_k: AdaptiveKComponent,
-    ctx_expand: ContextExpansionComponent,
-):
-    queries = payload['queries']
-    files = (payload or {}).get('files')
-    user_id = payload['user_id']
-    filters = payload.get('filters') or {}
-
-    if files and tmp_retriever is None:
-        raise ValueError('tmp_retriever is required when payload.files is set')
-
+    k_max: int,
+) -> List[Any]:
     def _process_one(query: str):
-        expanded_query = get_vocab_manager(user_id)(query)
-        if files:
-            nodes = tmp_retriever(files, expanded_query, topk=retriever_topk)
-        else:
-            nodes = tuple(
-                result for result in (
-                    retriever(expanded_query, filters=filters, topk=retriever_topk)
-                    for retriever in retrievers
-                ) if result
-            )
-            nodes = RRFFusion(top_k=50)(nodes)
-        return reranker(nodes, query=expanded_query, topk=rerank_topk) if reranker else _pass_through_rerank(nodes)
+        nodes, expanded = retrieve_fn(query)
+        return reranker(nodes, query=expanded, topk=rerank_topk) if reranker else _pass_through_rerank(nodes)
 
-    all_nodes = list(warp(_process_one, _concurrent=min(len(queries), 5))(*queries))
-
+    all_nodes = list(warp(_process_one, _concurrent=min(len(queries), 5))(queries))
     merged = _merge_and_deduplicate(all_nodes)
-    merged = adaptive_k(merged)
-    return ctx_expand(merged)
+    merged = _adaptive_k(merged, k_max=k_max)
+    return _ctx_expand(merged)
 
 
-def search_kb(
-    payload: dict,
-    *,
-    document: Document,
-    retrievers: List[Retriever],
-    tmp_retriever: Optional[TempDocRetriever],
-    reranker: Optional[Reranker],
-    image_retriever: Optional[Retriever],
-    retriever_topk: int = 20,
-    rerank_topk: int = 20,
-    k_max: int = 10,
-    image_topk: int = 3,
-):
-    adaptive_k = AdaptiveKComponent(
-        bias=2,
-        k_max=k_max,
-        gap_tau=0.2,
-        get_token_len=_adaptive_get_token_len,
-        max_tokens=2048,
-    )
-    ctx_expand = ContextExpansionComponent(
-        document=document,
-        token_budget=1500,
-        score_decay=0.97,
-        max_seeds=1,
-    )
-
-    text_nodes = search_text(
-        payload,
-        retrievers=retrievers,
-        retriever_topk=retriever_topk,
-        rerank_topk=rerank_topk,
-        tmp_retriever=tmp_retriever,
-        reranker=reranker,
-        adaptive_k=adaptive_k,
-        ctx_expand=ctx_expand,
-    )
-
-    if image_retriever is None:
-        return text_nodes
-
-    if (payload or {}).get('files'):
-        return text_nodes
-
-    queries = payload['queries']
-    filters = payload.get('filters') or {}
-
+def _search_image(
+    queries: List[str],
+    image_retriever: Retriever,
+    filters: dict,
+    image_topk: int,
+) -> List[Any]:
     def _image_one(query: str):
         image_nodes = image_retriever(query, filters=filters, topk=image_topk)
         if not image_nodes:
@@ -127,7 +74,57 @@ def search_kb(
             return list(image_nodes)
         return [image_nodes]
 
-    all_image_nodes = list(warp(_image_one, _concurrent=min(len(queries), 5))(*queries))
+    all_nodes = list(warp(_image_one, _concurrent=min(len(queries), 5))(queries))
+    return _merge_and_deduplicate(all_nodes)
 
-    merged_images = _merge_and_deduplicate(all_image_nodes)
-    return list(text_nodes or []) + merged_images[:image_topk]
+
+def search_kb(
+    payload: dict,
+    *,
+    retrievers: List[Retriever],
+    reranker: Optional[Reranker],
+    image_retriever: Optional[Retriever],
+    retriever_topk: int = 20,
+    rerank_topk: int = 20,
+    k_max: int = 10,
+    image_topk: int = 3,
+):
+    queries = payload['queries']
+
+    def _kb_retrieve(query: str):
+        expanded = get_vocab_manager(payload['user_id'])(query)
+        nodes = tuple(
+            result for result in (
+                retriever(expanded, filters=payload.get('filters') or {}, topk=retriever_topk)
+                for retriever in retrievers
+            ) if result
+        )
+        nodes = RRFFusion(top_k=50)(nodes)
+        return nodes, expanded
+
+    text_nodes = _search_text(queries, _kb_retrieve, reranker, rerank_topk, k_max)
+
+    if image_retriever is None:
+        return text_nodes
+
+    image_nodes = _search_image(queries, image_retriever, payload.get('filters') or {}, image_topk)
+    return list(text_nodes or []) + image_nodes[:image_topk]
+
+
+def search_temp_files(
+    payload: dict,
+    *,
+    tmp_retriever: TempDocRetriever,
+    reranker: Optional[Reranker],
+    retriever_topk: int = 20,
+    rerank_topk: int = 20,
+    k_max: int = 10,
+):
+    queries = payload['queries']
+
+    def _tmp_retrieve(query: str):
+        expanded = get_vocab_manager(payload['user_id'])(query)
+        nodes = tmp_retriever(payload.get('files') or [], expanded, topk=retriever_topk)
+        return nodes, expanded
+
+    return _search_text(queries, _tmp_retrieve, reranker, rerank_topk, k_max)

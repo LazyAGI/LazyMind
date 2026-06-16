@@ -15,9 +15,7 @@ def test_kb_search_core_flow(monkeypatch):
     def fake_search_kb(
         payload,
         *,
-        document,
         retrievers,
-        tmp_retriever,
         reranker,
         image_retriever,
         retriever_topk=20,
@@ -27,7 +25,6 @@ def test_kb_search_core_flow(monkeypatch):
     ):
         captured.update({
             'payload': payload,
-            'document': document,
             'retrievers': retrievers,
             'image_retriever': image_retriever,
         })
@@ -49,7 +46,6 @@ def test_kb_search_core_flow(monkeypatch):
 
     monkeypatch.setattr(kb, 'search_kb', fake_search_kb)
     monkeypatch.setattr(kb.KBToolGroup, '_ensure_search_runtime', lambda self: None)
-    monkeypatch.setattr(kb.KBToolGroup, '_document', kb._DEFAULT_KB_DOCUMENT)
     monkeypatch.setattr(kb.KBToolGroup, '_retrievers', ['retriever'])
     monkeypatch.setattr(kb.KBToolGroup, '_reranker', 'reranker')
     monkeypatch.setattr(kb.KBToolGroup, '_image_retriever', 'image-retriever')
@@ -67,10 +63,8 @@ def test_kb_search_core_flow(monkeypatch):
         'payload': {
             'queries': [SEED_KEYWORD],
             'filters': {'kb_id': DEFAULT_AGENTIC_CONFIG['kb_id']},
-            'files': [],
             'user_id': 'user-007',
         },
-        'document': kb._DEFAULT_KB_DOCUMENT,
         'retrievers': ['retriever'],
         'image_retriever': 'image-retriever',
     }
@@ -83,30 +77,23 @@ def test_kb_search_core_flow(monkeypatch):
 def test_kb_tmp_search_core_flow(monkeypatch):
     captured = {}
 
-    def fake_search_kb(
+    def fake_search_temp_files(
         payload,
         *,
-        document,
-        retrievers,
         tmp_retriever,
         reranker,
-        image_retriever,
         retriever_topk=20,
         rerank_topk=20,
         k_max=10,
-        image_topk=3,
     ):
         captured.update({
             'payload': payload,
-            'document': document,
             'tmp_retriever': tmp_retriever,
-            'image_retriever': image_retriever,
         })
         return []
 
-    monkeypatch.setattr(kb, 'search_kb', fake_search_kb)
+    monkeypatch.setattr(kb, 'search_temp_files', fake_search_temp_files)
     monkeypatch.setattr(kb.TempKBToolGroup, '_ensure_search_runtime', lambda self: None)
-    monkeypatch.setattr(kb.TempKBToolGroup, '_document', kb._DEFAULT_KB_DOCUMENT)
     monkeypatch.setattr(kb.TempKBToolGroup, '_tmp_retriever', 'tmp-retriever')
     monkeypatch.setattr(kb.TempKBToolGroup, '_reranker', 'reranker')
     original_config = kb.lazyllm.globals.get('agentic_config')
@@ -123,9 +110,7 @@ def test_kb_tmp_search_core_flow(monkeypatch):
             'files': ['tmp-a.md'],
             'user_id': 'user-007',
         },
-        'document': kb._DEFAULT_KB_DOCUMENT,
         'tmp_retriever': 'tmp-retriever',
-        'image_retriever': None,
     }
     assert result['success'] is True
     assert result['tool'] == 'kb_tmp_search'
