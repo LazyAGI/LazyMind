@@ -192,6 +192,7 @@ def _annotate_result_citations(result: Any) -> Any:
 
 
 class KBToolGroup:
+    """Knowledge base search and navigation tools."""
     __public_apis__ = ['kb_search', 'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search']
     _retrievers = None
     _reranker = None
@@ -223,7 +224,7 @@ class KBToolGroup:
     @handle_tool_errors
     def kb_search(
         self,
-        queries: List[str],
+        query: str,
         retriever_topk: Optional[int] = None,
         rerank_topk: Optional[int] = None,
         k_max: Optional[int] = None,
@@ -232,17 +233,17 @@ class KBToolGroup:
     ) -> Any:
         """Search the knowledge base and return text and image retrieval results.
 
-        Each query is independently retrieved and reranked, then results are
-        merged (deduplicated by uid, keeping the highest relevance_score) and
-        trimmed by adaptive-k. Images are also retrieved per query, merged, and
-        capped at *image_topk*.
+        Each call handles exactly one search intent. If the user asks about
+        multiple unrelated keywords or topics, call this tool separately for
+        each keyword/topic. Do not combine unrelated terms into one query
+        with spaces, commas, or list-like text.
 
         Args:
-            queries: List of natural language queries for retrieval.
+            query: A single natural language query for retrieval.
             retriever_topk: Candidate count used by each retriever route before
-                fusion (per query). Defaults to 20.
+                fusion. Defaults to 20.
             rerank_topk: Number of nodes the reranker keeps before adaptive-k
-                trimming (per query). Defaults to 20.
+                trimming. Defaults to 20.
             k_max: Hard upper bound on the adaptive-k stage. Defaults to 10.
             image_topk: Top-k for the image retrieval branch. Defaults to 3.
             filters: Metadata filters for retrieval, e.g.
@@ -250,9 +251,11 @@ class KBToolGroup:
         """
         agentic_config = lazyllm.globals['agentic_config']
         self._ensure_search_runtime()
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError('query is required and must be a non-empty string')
 
         payload = {
-            'queries': [queries] if isinstance(queries, str) else queries,
+            'query': query.strip(),
             'filters': filters or agentic_config.get('filters') or {},
             'user_id': agentic_config.get('user_id', ''),
         }
@@ -276,10 +279,14 @@ class KBToolGroup:
 
     @handle_tool_errors
     def kb_get_parent_node(self, node_id: str) -> Dict[str, Any]:
-        """Get the parent node of a target node by document node uid.
+        """Get the parent node of a target document node.
+
+        Retrieves the parent node (e.g., section heading or enclosing
+        paragraph) for a given chunk node. This provides the section-level
+        context needed to fully understand the chunk's content.
 
         Args:
-            node_id: Target document node ``uid``.
+            node_id: Target document node uid.
 
         Returns:
             The matched parent node, if the current node has a parent and the
@@ -343,14 +350,18 @@ class KBToolGroup:
         number: Any,
         group: str = 'block',
     ) -> Dict[str, Any]:
-        """Get nodes by number in a target document using LazyLLM Document.
+        """Get nodes by number range from a target document.
+
+        Retrieves one or more neighboring nodes around a specific position
+        within a known document. This provides surrounding context for a
+        node whose docid and number are already known.
 
         Args:
             docid: Target document id.
             number: Node number or inclusive number range. Pass an int for one
-                node, or ``[start, end]`` / ``"start,end"`` for all nodes in that
+                node, or [start, end] / "start,end" for all nodes in that
                 range.
-            group: Node group, either ``block`` or ``line``.
+            group: Node group, either block or line.
 
         Returns:
             A compact dict with node numbers and contents only.
@@ -410,15 +421,19 @@ class KBToolGroup:
         size: int = 10,
         sort_by: str = 'score',
     ) -> Dict[str, Any]:
-        """Search a keyword inside one target document.
+        """Search for exact keyword or phrase matches within a specific document.
+
+        Performs full-text keyword matching inside one target document,
+        useful for finding all occurrences of a term or checking whether a
+        document mentions something specific.
 
         Args:
-            keyword: Keyword or phrase to search in ``content``.
+            keyword: Keyword or phrase to search in content.
             docid: Target document id.
-            group: Search granularity, either ``block`` or ``line``.
-            phrase: Use ``match_phrase`` when true, otherwise ``match``.
+            group: Search granularity, either block or line.
+            phrase: Use match_phrase when true, otherwise match.
             size: Maximum number of hits.
-            sort_by: ``score`` for relevance first, or ``number`` for document
+            sort_by: score for relevance first, or number for document
                 order.
 
         Returns:
@@ -466,6 +481,7 @@ class KBToolGroup:
 
 
 class TempKBToolGroup:
+    """Temporary file search tools."""
     __public_apis__ = ['kb_tmp_search']
     _tmp_retriever = None
     _reranker = None
@@ -495,7 +511,7 @@ class TempKBToolGroup:
     @handle_tool_errors
     def kb_tmp_search(
         self,
-        queries: List[str],
+        query: str,
         retriever_topk: Optional[int] = None,
         rerank_topk: Optional[int] = None,
         k_max: Optional[int] = None,
@@ -503,23 +519,27 @@ class TempKBToolGroup:
     ) -> Any:
         """Search temporary uploaded files with the temporary document retriever.
 
-        Each query is independently retrieved and reranked, then results are
-        merged and deduplicated by uid before adaptive-k trimming.
+        Each call handles exactly one search intent. If the user asks about
+        multiple unrelated keywords or topics, call this tool separately for
+        each keyword/topic. Do not combine unrelated terms into one query
+        with spaces, commas, or list-like text.
 
         Args:
-            queries: List of natural language queries for retrieval.
+            query: A single natural language query for retrieval.
             retriever_topk: Candidate count used by the temporary retriever
-                (per query). Defaults to 20.
+                before reranking. Defaults to 20.
             rerank_topk: Number of nodes the reranker keeps before adaptive-k
-                trimming (per query). Defaults to 20.
+                trimming. Defaults to 20.
             k_max: Hard upper bound on the adaptive-k stage. Defaults to 10.
             files: Optional list of temporary file IDs. Defaults to the current
-                request's ``agentic_config.files``.
+                request's agentic_config.files.
         """
         agentic_config = lazyllm.globals['agentic_config']
         self._ensure_search_runtime()
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError('query is required and must be a non-empty string')
         payload = {
-            'queries': [queries] if isinstance(queries, str) else queries,
+            'query': query.strip(),
             'filters': {},
             'files': files,
             'user_id': agentic_config.get('user_id', ''),

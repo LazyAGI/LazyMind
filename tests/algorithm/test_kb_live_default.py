@@ -55,13 +55,13 @@ def test_kb_search_core_flow(monkeypatch):
         'user_id': 'user-007',
     }
     try:
-        result = kb.KBToolGroup().kb_search([SEED_KEYWORD])
+        result = kb.KBToolGroup().kb_search(SEED_KEYWORD)
     finally:
         kb.lazyllm.globals['agentic_config'] = original_config or {}
 
     assert captured == {
         'payload': {
-            'queries': [SEED_KEYWORD],
+            'query': SEED_KEYWORD,
             'filters': {'kb_id': DEFAULT_AGENTIC_CONFIG['kb_id']},
             'user_id': 'user-007',
         },
@@ -99,13 +99,13 @@ def test_kb_tmp_search_core_flow(monkeypatch):
     original_config = kb.lazyllm.globals.get('agentic_config')
     kb.lazyllm.globals['agentic_config'] = {'user_id': 'user-007'}
     try:
-        result = kb.TempKBToolGroup().kb_tmp_search([SEED_KEYWORD], files=['tmp-a.md'])
+        result = kb.TempKBToolGroup().kb_tmp_search(SEED_KEYWORD, files=['tmp-a.md'])
     finally:
         kb.lazyllm.globals['agentic_config'] = original_config or {}
 
     assert captured == {
         'payload': {
-            'queries': [SEED_KEYWORD],
+            'query': SEED_KEYWORD,
             'filters': {},
             'files': ['tmp-a.md'],
             'user_id': 'user-007',

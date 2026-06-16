@@ -55,7 +55,7 @@ def test_translator_counts_tool_call_turns_not_individual_calls():
     translator.feed({
         'tag': 'tool_calls',
         'tool_calls': [
-            {'id': 'call-1', 'function': {'name': 'kb_search', 'arguments': {'queries': ['q']}}},
+            {'id': 'call-1', 'function': {'name': 'kb_search', 'arguments': {'query': 'q'}}},
             {'id': 'call-2', 'function': {'name': 'calculator', 'arguments': {'exp': '1+1'}}},
         ],
     })

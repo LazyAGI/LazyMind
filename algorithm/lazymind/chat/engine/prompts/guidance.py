@@ -70,8 +70,7 @@ IMAGE_REFERENCE_MARKDOWN_GUIDANCE = (
 VISION_EXTRACTOR_GUIDANCE = (
     'When calling vision_extractor on knowledge-base images, pass the `local_path` field '
     'from KBToolGroup results (filesystem path under /var/lib/lazymind/uploads/). '
-    'Do NOT pass `/static-files/` signed URLs to vision_extractor. '
-    'Never call vision_extractor for PDFs or non-image files; use kb_tmp_search for those files.'
+    'Do NOT pass `/static-files/` signed URLs to vision_extractor.'
 )
 VISION_EXTRACT_DEFAULT_INSTRUCTION = (
     'Describe the image in plain text. Include visible text, objects, charts, and any '
@@ -86,7 +85,6 @@ ATTACHED_FILES_GUIDANCE = (
     '- If an attached file is a PDF, text, document, or data file, call `kb_tmp_search` or another '
     '`kb_*` tool with the attached file scope before answering questions that depend on '
     'its contents.\n'
-    '- Never call `vision_extractor` for PDF files.\n'
     '- Do not ignore attached files or ask the user to paste their contents when a suitable '
     'tool is available.'
 )

@@ -16,22 +16,19 @@ _SUPPORTED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp',
 
 @handle_tool_errors
 def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, Any]:
-    """Extract a text description from an image reachable at the given URL.
+    """Extract a text description from an image file.
 
-    Only image files are supported. PDFs and other document/data files should be
-    searched with ``kb_tmp_search`` or another knowledge-base retrieval tool.
-
-    Uses the configured VLM endpoint (role ``vlm`` in runtime_models)
-    with LazyLLM multimodal file-path encoding.
+    Supports common image formats (JPEG, PNG, GIF, WebP, BMP, TIFF).
+    Uses a vision-language model to describe visual content in natural language.
 
     Args:
-        url: Image filesystem path under the upload root, or a ``/static-files/``
+        url: Image filesystem path under the upload root, or a /static-files/
             signed image path from kb results (resolved to the local file automatically).
         instruction: Optional focus for what to extract; defaults to a general
             description prompt.
 
     Returns:
-        A unified tool payload whose ``result`` contains the extracted
+        A unified tool payload whose result contains the extracted
         description and resolved local path.
     """
     raw = str(url or '').strip()

@@ -11,8 +11,8 @@ _TOOL_CALL_TAG = 'tool_call'
 _TOOL_RESULT_TAG = 'tool_result'
 
 _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
-    'kb_search': 'queries',
-    'kb_tmp_search': 'queries',
+    'kb_search': 'query',
+    'kb_tmp_search': 'query',
     'kb_get_parent_node': 'node_id',
     'kb_get_window_nodes': 'number',
     'kb_keyword_search': 'keyword',
