@@ -32,6 +32,32 @@ func TestAgentThreadEventsRouteWinsOverGenericThreadRoute(t *testing.T) {
 	}
 }
 
+func TestAgentEvalReportBadCasesRouteRegistered(t *testing.T) {
+	r := mux.NewRouter()
+	r.UseEncodedPath()
+	registerAllRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/agent/threads/thr-1/results/eval-reports/v0001/bad-cases", nil)
+	var match mux.RouteMatch
+	if !r.Match(req, &match) {
+		t.Fatalf("expected eval report bad cases route to match")
+	}
+
+	gotTemplate, err := match.Route.GetPathTemplate()
+	if err != nil {
+		t.Fatalf("get matched route template: %v", err)
+	}
+	if want := "/agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases"; gotTemplate != want {
+		t.Fatalf("expected template %q, got %q", want, gotTemplate)
+	}
+	if got := match.Vars["thread_id"]; got != "thr-1" {
+		t.Fatalf("expected thread_id %q, got %q", "thr-1", got)
+	}
+	if got := match.Vars["report_id"]; got != "v0001" {
+		t.Fatalf("expected report_id %q, got %q", "v0001", got)
+	}
+}
+
 func TestSkillDraftPreviewRouteWinsOverGenericSkillRoute(t *testing.T) {
 	r := mux.NewRouter()
 	registerAllRoutes(r)

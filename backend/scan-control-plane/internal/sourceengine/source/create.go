@@ -55,9 +55,7 @@ func (e *DefaultEngine) CreateSource(ctx context.Context, req CreateSourceReques
 	}
 
 	bindings := collectBindings(prepared)
-	watcherErrors := e.queueLocalWatcherStarts(ctx, source, bindings)
-	jobIDs, jobErrors := e.triggerInitialSyncs(ctx, bindings)
-	jobErrors = append(watcherErrors, jobErrors...)
+	jobErrors := e.queueLocalWatcherStarts(ctx, source, bindings)
 	operation.Status = OperationStatusSucceeded
 	if len(jobErrors) > 0 {
 		operation.Status = OperationStatusSucceededWithWarning
@@ -67,7 +65,7 @@ func (e *DefaultEngine) CreateSource(ctx context.Context, req CreateSourceReques
 	if err := mapStoreError(e.repo.UpdateCreateOperation(ctx, operation)); err != nil {
 		return CreateSourceResponse{}, err
 	}
-	return CreateSourceResponse{Source: sourceToResponse(source), Bindings: bindingsToResponse(bindings), JobIDs: jobIDs, JobErrors: jobErrors}, nil
+	return CreateSourceResponse{Source: sourceToResponse(source), Bindings: bindingsToResponse(bindings), JobErrors: jobErrors}, nil
 }
 
 func (e *DefaultEngine) loadCreateReplay(ctx context.Context, callerID, requestID, hash string) (CreateSourceResponse, bool, error) {

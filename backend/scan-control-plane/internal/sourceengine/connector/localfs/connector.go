@@ -68,7 +68,7 @@ func (c *LocalFSConnector) Spec() connector.ConnectorSpec {
 		ConnectorType:          ConnectorType,
 		DisplayName:            "Local Files",
 		TargetTypes:            []connector.TargetType{TargetTypeLocalPath},
-		SupportsSearch:         false,
+		SupportsSearch:         true,
 		SupportsDelta:          false,
 		SupportsRecursiveFetch: false,
 		SupportsDualRoleObject: false,
@@ -127,8 +127,8 @@ func (c *LocalFSConnector) ListChildren(ctx context.Context, req connector.ListC
 	return c.virtualTargetPage(page), nil
 }
 
-func (c *LocalFSConnector) Search(context.Context, connector.SearchRequest) (connector.RawObjectPage, error) {
-	return connector.RawObjectPage{}, connector.NewError(connector.ErrorCodeUnsupported, "local_fs search is not supported")
+func (c *LocalFSConnector) Search(ctx context.Context, req connector.SearchRequest) (connector.RawObjectPage, error) {
+	return c.search(ctx, req)
 }
 
 func (c *LocalFSConnector) FetchPage(ctx context.Context, req connector.FetchPageRequest) (connector.RawObjectPage, error) {

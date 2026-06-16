@@ -46,6 +46,27 @@ type Token struct {
 	AccessToken string
 }
 
+type ConnectionStatusRequest struct {
+	ConnectionIDs []string
+	UserID        string
+	TenantID      string
+}
+
+type ConnectionStatus struct {
+	ConnectionID      string
+	TenantID          string
+	OwnerUserID       string
+	Provider          string
+	AuthMode          string
+	ProviderAccountID string
+	DisplayName       string
+	ProviderTenantKey string
+	Status            string
+	LastError         string
+	LastUsedAt        string
+	UpdatedAt         string
+}
+
 type ObjectKind string
 
 const (

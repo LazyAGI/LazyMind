@@ -19,6 +19,7 @@ from api.group import router as group_router
 from api.role import router as role_router
 from api.user import router as user_router
 from core.errors import AppException, error_payload_from_exception
+from services import cloud_oauth_health
 
 
 # Ensure logs are visible (uvicorn log_config may set default level to WARNING and disable existing loggers)
@@ -237,6 +238,16 @@ def _handle_validation_error(_, exc: RequestValidationError):
             'ex_mesage': json.dumps(exc.errors(), ensure_ascii=False),
         },
     )
+
+
+@app.on_event('startup')
+async def _start_cloud_oauth_health_check():
+    cloud_oauth_health.start()
+
+
+@app.on_event('shutdown')
+async def _stop_cloud_oauth_health_check():
+    await cloud_oauth_health.stop()
 
 
 def _export_openapi_artifacts() -> None:

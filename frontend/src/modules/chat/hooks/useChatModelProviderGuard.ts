@@ -24,6 +24,40 @@ export type ChatModelProviderStatus =
   | "missing"
   | "error";
 
+interface ChatModelProviderSnapshot {
+  status: ChatModelProviderStatus;
+  requiresModelProviderConfig: boolean | null;
+  embeddingReady: boolean | null;
+  multimodalEmbeddingReady: boolean | null;
+  rerankReady: boolean | null;
+  vlmReady: boolean | null;
+}
+
+let cachedSnapshotUserKey: string | null = null;
+let cachedSnapshot: ChatModelProviderSnapshot | null = null;
+
+function getCurrentUserCacheKey() {
+  const userInfo = AgentAppsAuth.getUserInfo();
+  return userInfo?.userId || userInfo?.username || userInfo?.token || null;
+}
+
+function getCachedSnapshot() {
+  const userKey = getCurrentUserCacheKey();
+  if (!userKey || userKey !== cachedSnapshotUserKey) {
+    return null;
+  }
+  return cachedSnapshot;
+}
+
+function setCachedSnapshot(snapshot: ChatModelProviderSnapshot) {
+  const userKey = getCurrentUserCacheKey();
+  if (!userKey) {
+    return;
+  }
+  cachedSnapshotUserKey = userKey;
+  cachedSnapshot = snapshot;
+}
+
 function unwrapResponse<T>(payload: ApiEnvelope<T> | T): T {
   if (payload && typeof payload === "object" && "data" in payload) {
     return (payload as ApiEnvelope<T>).data as T;
@@ -32,22 +66,38 @@ function unwrapResponse<T>(payload: ApiEnvelope<T> | T): T {
 }
 
 export function useChatModelProviderGuard() {
-  const [status, setStatus] = useState<ChatModelProviderStatus>("loading");
+  const initialSnapshot = getCachedSnapshot();
+  const [status, setStatus] = useState<ChatModelProviderStatus>(
+    () => initialSnapshot?.status ?? "loading",
+  );
   const [requiresModelProviderConfig, setRequiresModelProviderConfig] =
     useState<boolean | null>(() => {
       const dynamic = AgentAppsAuth.getUserInfo()?.dynamic;
-      return typeof dynamic === "boolean" ? dynamic : null;
+      return typeof dynamic === "boolean"
+        ? dynamic
+        : initialSnapshot?.requiresModelProviderConfig ?? null;
     });
-  const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
-  const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<boolean | null>(null);
-  const [rerankReady, setRerankReady] = useState<boolean | null>(null);
-  const [vlmReady, setVlmReady] = useState<boolean | null>(null);
+  const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(
+    () => initialSnapshot?.embeddingReady ?? null,
+  );
+  const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] =
+    useState<boolean | null>(
+      () => initialSnapshot?.multimodalEmbeddingReady ?? null,
+    );
+  const [rerankReady, setRerankReady] = useState<boolean | null>(
+    () => initialSnapshot?.rerankReady ?? null,
+  );
+  const [vlmReady, setVlmReady] = useState<boolean | null>(
+    () => initialSnapshot?.vlmReady ?? null,
+  );
   const requestIdRef = useRef(0);
 
   const runCheck = useCallback(async () => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
-    setStatus("loading");
+    if (!getCachedSnapshot()) {
+      setStatus("loading");
+    }
 
     const isStale = () => requestIdRef.current !== requestId;
 
@@ -69,7 +119,19 @@ export function useChatModelProviderGuard() {
 
     if (!shouldCheckModelProvider) {
       if (!isStale()) {
+        setEmbeddingReady(null);
+        setMultimodalEmbeddingReady(null);
+        setRerankReady(null);
+        setVlmReady(null);
         setStatus("ready");
+        setCachedSnapshot({
+          status: "ready",
+          requiresModelProviderConfig: shouldCheckModelProvider,
+          embeddingReady: null,
+          multimodalEmbeddingReady: null,
+          rerankReady: null,
+          vlmReady: null,
+        });
       }
       return true;
     }
@@ -105,17 +167,33 @@ export function useChatModelProviderGuard() {
       const ready = chatReadyResp
         ? unwrapResponse<ModelReadyResponse>(chatReadyResp.data).ready === true
         : false;
-      setStatus(ready ? "ready" : "missing");
+      const nextStatus: ChatModelProviderStatus = ready ? "ready" : "missing";
+      setStatus(nextStatus);
 
       const getReady = (resp: typeof embeddingResp): boolean | null => {
         if (!resp) return null;
         return unwrapResponse<ModelReadyResponse>(resp.data).ready ?? null;
       };
-      setEmbeddingReady(getReady(embeddingResp));
+      const nextEmbeddingReady = getReady(embeddingResp);
+      const nextMultimodalEmbeddingReady = imageEmbedRequired
+        ? getReady(multimodalEmbeddingResp)
+        : null;
+      const nextRerankReady = getReady(rerankResp);
+      const nextVlmReady = getReady(vlmResp);
+
+      setEmbeddingReady(nextEmbeddingReady);
       // null means "not applicable" (image embed not configured) — does not trigger disabled state.
-      setMultimodalEmbeddingReady(imageEmbedRequired ? getReady(multimodalEmbeddingResp) : null);
-      setRerankReady(getReady(rerankResp));
-      setVlmReady(getReady(vlmResp));
+      setMultimodalEmbeddingReady(nextMultimodalEmbeddingReady);
+      setRerankReady(nextRerankReady);
+      setVlmReady(nextVlmReady);
+      setCachedSnapshot({
+        status: nextStatus,
+        requiresModelProviderConfig: shouldCheckModelProvider,
+        embeddingReady: nextEmbeddingReady,
+        multimodalEmbeddingReady: nextMultimodalEmbeddingReady,
+        rerankReady: nextRerankReady,
+        vlmReady: nextVlmReady,
+      });
 
       return ready;
     } catch {

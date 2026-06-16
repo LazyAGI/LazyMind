@@ -312,6 +312,23 @@ class CloudOAuthService:
             'updated_at': row.updated_at,
         }
 
+    @staticmethod
+    def _connection_status_payload(row) -> dict[str, Any]:
+        return {
+            'connection_id': row.connection_id,
+            'tenant_id': row.tenant_id or '',
+            'owner_user_id': row.owner_user_id or '',
+            'provider': row.provider or '',
+            'auth_mode': row.auth_mode or '',
+            'provider_account_id': row.provider_account_id or '',
+            'display_name': row.display_name or '',
+            'provider_tenant_key': row.provider_tenant_key or '',
+            'status': row.status or '',
+            'last_error': row.last_error or '',
+            'last_used_at': row.last_used_at,
+            'updated_at': row.updated_at,
+        }
+
     def _app_credential_payload(self, row) -> dict[str, Any]:
         if row is None:
             return {
@@ -857,14 +874,25 @@ class CloudOAuthService:
                         extra_msg='reauthorize target account changed',
                     )
             else:
+                provider_account_lookup = {
+                    'owner_user_id': row.owner_user_id or '',
+                    'provider': row.provider or '',
+                    'auth_mode': row.auth_mode or '',
+                    'provider_account_id': row.provider_account_id or '',
+                    'provider_tenant_key': row.provider_tenant_key or '',
+                    'exclude_connection_id': row.connection_id,
+                }
                 existing = CloudAuthConnectionRepository.find_by_provider_account(
                     db,
-                    owner_user_id=row.owner_user_id or '',
-                    provider=row.provider or '',
-                    auth_mode=row.auth_mode or '',
-                    provider_account_id=row.provider_account_id or '',
+                    **provider_account_lookup,
                     exclude_statuses=('REVOKED',),
                 )
+                if existing is None:
+                    existing = CloudAuthConnectionRepository.find_by_provider_account(
+                        db,
+                        **provider_account_lookup,
+                        status='REVOKED',
+                    )
             if existing is not None and existing.connection_id != row.connection_id:
                 existing.credential_ciphertext = row.credential_ciphertext
                 existing.auth_state_ciphertext = row.auth_state_ciphertext
@@ -950,6 +978,32 @@ class CloudOAuthService:
                 except Exception:
                     pass
             return {'items': enabled}
+
+    def batch_connection_status(
+        self,
+        connection_ids: list[str],
+        *,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_ids = []
+        seen = set()
+        for connection_id in connection_ids or []:
+            normalized = (connection_id or '').strip()
+            if normalized and normalized not in seen:
+                normalized_ids.append(normalized)
+                seen.add(normalized)
+        if not normalized_ids:
+            return {'items': []}
+        with SessionLocal() as db:
+            rows = CloudAuthConnectionRepository.list_by_ids(db, normalized_ids)
+            items = []
+            for row in rows:
+                self._ensure_connection_owner(row, tenant_id=tenant_id, user_id=user_id)
+                items.append(self._connection_status_payload(row))
+            order = {connection_id: index for index, connection_id in enumerate(normalized_ids)}
+            items.sort(key=lambda item: order.get(item['connection_id'], len(order)))
+            return {'items': items}
 
     def get_connection(self, connection_id: str, *, user_id: str | None = None) -> dict[str, Any]:
         with SessionLocal() as db:
@@ -1281,6 +1335,99 @@ class CloudOAuthService:
             'token_type': token_payload.token_type or 'Bearer',
             'expires_at': token_payload.expires_at,
             'status': row.status,
+        }
+
+    def _refresh_connection_for_health_check(self, connection_id: str) -> str:
+        with SessionLocal() as db:
+            row = CloudAuthConnectionRepository.get_by_id(db, connection_id)
+            if row is None:
+                raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
+            status = (row.status or '').strip().upper()
+            if status in {'PENDING', 'REVOKED'}:
+                return status
+            if (row.auth_mode or '').strip().lower() != 'oauth_user':
+                return status
+            provider_impl = self._provider(row.provider)
+            credential = self._decrypt_payload(row.credential_ciphertext, field_name='credential')
+            auth_state_payload = self._decrypt_payload(row.auth_state_ciphertext, field_name='auth_state')
+            try:
+                token_payload = self._refresh_oauth_user_token(
+                    provider_impl=provider_impl,
+                    credential=credential,
+                    auth_state_payload=auth_state_payload,
+                )
+            except Exception as exc:
+                row.status = 'ERROR'
+                row.last_error = _truncate_error(exc)
+                CloudAuthConnectionRepository.save(db, row)
+                self._cache_delete(connection_id)
+                return row.status
+            auth_state_payload.update({
+                'access_token': token_payload.access_token,
+                'access_expires_at': _iso(token_payload.expires_at),
+                'refresh_token': token_payload.refresh_token or auth_state_payload.get('refresh_token') or '',
+                'token_type': token_payload.token_type or 'Bearer',
+            })
+            row.auth_state_ciphertext = self._encrypt_payload(auth_state_payload, field_name='auth_state')
+            row.status = 'ACTIVE'
+            row.last_error = ''
+            row.last_used_at = _utcnow()
+            CloudAuthConnectionRepository.save(db, row)
+        self._cache_set(connection_id, row.provider, token_payload)
+        return 'ACTIVE'
+
+    def check_connection_health(self, connection_id: str) -> dict[str, Any]:
+        connection_id = (connection_id or '').strip()
+        if not connection_id:
+            return {'connection_id': '', 'checked': False, 'status': '', 'last_error': 'connection_id is required'}
+        status = self._refresh_connection_for_health_check(connection_id)
+        with SessionLocal() as db:
+            row = CloudAuthConnectionRepository.get_by_id(db, connection_id)
+            if row is None:
+                return {
+                    'connection_id': connection_id,
+                    'checked': False,
+                    'status': '',
+                    'last_error': 'connection not found',
+                }
+            return {
+                'connection_id': connection_id,
+                'checked': status not in {'PENDING', 'REVOKED'},
+                'status': row.status or status,
+                'last_error': row.last_error or '',
+            }
+
+    def run_health_check_once(
+        self,
+        *,
+        provider: str | None = 'feishu',
+        batch_size: int = 100,
+    ) -> dict[str, Any]:
+        with SessionLocal() as db:
+            rows = CloudAuthConnectionRepository.list_health_check_candidates(
+                db,
+                provider=provider,
+                auth_mode='oauth_user',
+                statuses=('ACTIVE', 'EXPIRED', 'ERROR'),
+                limit=batch_size,
+            )
+            connection_ids = [row.connection_id for row in rows]
+        checked = 0
+        active = 0
+        error = 0
+        for connection_id in connection_ids:
+            result = self.check_connection_health(connection_id)
+            if result.get('checked'):
+                checked += 1
+            if result.get('status') == 'ACTIVE':
+                active += 1
+            elif result.get('status') == 'ERROR':
+                error += 1
+        return {
+            'checked': checked,
+            'active': active,
+            'error': error,
+            'candidate_count': len(connection_ids),
         }
 
 

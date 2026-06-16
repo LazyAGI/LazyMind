@@ -8,6 +8,7 @@ import lazyllm
 from lazyllm import LOG, set_trace_context
 from fastapi.responses import StreamingResponse
 from lazymind.chat.config import (
+    IMAGE_EXTENSIONS,
     LAZYMIND_LLM_PRIORITY,
     MAX_CONCURRENCY,
     RAG_MODE,
@@ -19,12 +20,15 @@ from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
     DEFAULT_TOOLS,
     build_agent_tools,
+    filter_tools,
     normalize_history_for_agent,
 )
 from lazymind.chat.engine.agent_core import build_react_agent, drive_agent
 from lazymind.chat.service.utils import (
     SensitiveFilter,
+    basename_from_path,
     log_and_emit_frame,
+    register_image_url,
     response_payload,
     single_event_stream_response,
     sse_line,
@@ -142,6 +146,28 @@ def _build_subagent_chat_tools(has_subagents: bool) -> list:
     return tools
 
 
+def _collect_active_tool_names(configs: list) -> set[str]:
+    # Build a per-request callable allowlist from filtered tool configs.
+    # This is consumed by tool_runtime guard to prevent accidental execution
+    # when the model tries to call a tool that is not active in this session.
+    names: set[str] = set()
+    for cfg in configs:
+        inst = getattr(cfg, 'instance', None)
+        if inst is None:
+            continue
+        if callable(inst):
+            tool_name = str(getattr(inst, '__name__', '')).strip()
+            if tool_name:
+                names.add(tool_name)
+        public_apis = getattr(inst, '__public_apis__', None)
+        if isinstance(public_apis, (list, tuple)):
+            for method_name in public_apis:
+                method = str(method_name).strip()
+                if method:
+                    names.add(method)
+    return names
+
+
 async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       session_id: str, filters: Optional[Dict[str, Any]],
                       files: Optional[List[str]],
@@ -206,6 +232,13 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         'conversation_id': (conversation_id or '').strip(),
         'query': query or '',
     }
+    display_files: list[str] = []
+    for path in resolved_files:
+        if path.lower().endswith(IMAGE_EXTENSIONS):
+            register_image_url(translator.citation_state, path)
+            display_files.append(basename_from_path(path) or path)
+        else:
+            display_files.append(path)
 
     # Plugin context injection
     plugin_tools: list = []
@@ -280,7 +313,12 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     inject_tool_config(tool_config)
     lazyllm.globals['agentic_config'] = agentic_config
     disabled = set(disabled_tools or [])
-    active_configs = [cfg for cfg in DEFAULT_TOOLS if cfg.name not in disabled]
+    active_configs = filter_tools(
+        [cfg for cfg in DEFAULT_TOOLS if cfg.name not in disabled],
+    )
+    # Persist the allowlist in session globals so every @handle_tool_errors-wrapped
+    # tool can do a cheap runtime check before executing business logic.
+    lazyllm.globals['active_tool_names'] = _collect_active_tool_names(active_configs)
     agent_tools = build_agent_tools(active_configs)
     subagent_tools = _build_subagent_chat_tools(bool(has_subagents))
     mcp_tools = _build_mcp_tools(mcp_config) if mcp_config else []
@@ -299,7 +337,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         use_memory=use_memory,
         user_preference=user_preference,
         memory=memory,
-        files=resolved_files,
+        files=display_files,
     )
     if plugin_system_prompt:
         runtime_prompt = runtime_prompt + '\n\n' + plugin_system_prompt

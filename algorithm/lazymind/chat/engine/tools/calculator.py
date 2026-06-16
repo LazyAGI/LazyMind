@@ -26,20 +26,20 @@ def calculator(expression: str) -> Dict[str, Any]:
     """Evaluate a mathematical expression safely.
 
     Use this tool for numeric calculations, unit conversions, percentages, and
-    formula evaluation. Only arithmetic operators and a fixed set of ``math``
+    formula evaluation. Only arithmetic operators and a fixed set of math
     functions are allowed; arbitrary Python code is rejected.
 
     Args:
-        expression: A math expression such as ``(12 * 13) / 6``, ``sqrt(2)``,
-            ``sin(pi / 4)``, or ``2 ** 10``. Supported operators are ``+``,
-            ``-``, ``*``, ``/``, ``//``, ``%``, and ``**``. Supported
-            functions include ``sqrt``, ``sin``, ``cos``, ``tan``, ``log``,
-            ``log10``, ``exp``, ``pow``, ``ceil``, ``floor``, ``fabs``,
-            ``factorial``, ``min``, ``max``, ``abs``, and ``round``. Constants
-            ``pi``, ``e``, and ``tau`` are available.
+        expression: A math expression such as (12 * 13) / 6, sqrt(2),
+            sin(pi / 4), or 2 ** 10. Supported operators are +,
+            -, *, /, //, %, and **. Supported
+            functions include sqrt, sin, cos, tan, log,
+            log10, exp, pow, ceil, floor, fabs,
+            factorial, min, max, abs, and round. Constants
+            pi, e, and tau are available.
 
     Returns:
-        A unified tool payload whose ``result`` contains the evaluated value.
+        A unified tool payload whose result contains the evaluated value.
     """
     normalized = str(expression or '').strip()
     value = safe_evaluate_expression(normalized)

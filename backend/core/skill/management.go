@@ -147,6 +147,42 @@ func List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func ListTags(w http.ResponseWriter, r *http.Request) {
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	userID := strings.TrimSpace(store.UserID(r))
+	if userID == "" {
+		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
+		return
+	}
+
+	var rows []orm.SkillResource
+	if err := db.WithContext(r.Context()).
+		Select("tags").
+		Where("owner_user_id = ?", userID).
+		Find(&rows).Error; err != nil {
+		common.ReplyErr(w, "query skills failed", http.StatusInternalServerError)
+		return
+	}
+
+	tagSet := make(map[string]struct{})
+	for _, row := range rows {
+		for _, tag := range parseTags(row.Tags) {
+			tagSet[tag] = struct{}{}
+		}
+	}
+
+	tags := make([]string, 0, len(tagSet))
+	for tag := range tagSet {
+		tags = append(tags, tag)
+	}
+	sort.Strings(tags)
+	common.ReplyOK(w, map[string]any{"tags": tags})
+}
+
 func Get(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	if db == nil {

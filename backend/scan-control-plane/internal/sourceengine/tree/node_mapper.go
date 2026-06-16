@@ -84,9 +84,14 @@ func sourceObjectNode(item ObjectWithState) TreeNode {
 		ProviderMeta: store.CloneJSON(object.ProviderMeta),
 	}
 	if item.State != nil {
+		updateType := updateTypeForState(item.State.SourceState)
 		node.SourceState = item.State.SourceState
 		node.SyncState = item.State.SyncState
+		node.PendingAction = item.State.PendingAction
 		node.ParseQueueState = item.State.ParseQueueState
+		node.HasUpdate = updateType != "unchanged"
+		node.UpdateType = updateType
+		node.UpdateDesc = updateDescForType(updateType)
 		node.Selectable = item.State.Selectable || selectableContainer
 	}
 	return node
@@ -120,6 +125,7 @@ func documentItem(item DocumentWithState) SourceDocumentItem {
 	name := documentTypedName(item)
 	fileType := documentFileType(item)
 	updateType := updateTypeForState(item.State.SourceState)
+	parseState := documentPendingParseState(item, updateType)
 	out := SourceDocumentItem{
 		SourceID:         item.Object.SourceID,
 		BindingID:        item.Object.BindingID,
@@ -135,8 +141,8 @@ func documentItem(item DocumentWithState) SourceDocumentItem {
 		SourceState:      item.State.SourceState,
 		SyncState:        item.State.SyncState,
 		PendingAction:    item.State.PendingAction,
-		ParseQueueState:  item.State.ParseQueueState,
-		ParseState:       item.State.ParseQueueState,
+		ParseQueueState:  parseState,
+		ParseState:       parseState,
 		HasUpdate:        updateType != "unchanged",
 		UpdateType:       updateType,
 		UpdateDesc:       updateDescForType(updateType),
@@ -151,6 +157,13 @@ func documentItem(item DocumentWithState) SourceDocumentItem {
 		out.CoreDocumentID = item.Document.CoreDocumentID
 	}
 	return out
+}
+
+func documentPendingParseState(item DocumentWithState, updateType string) string {
+	if item.Document == nil && (updateType == "new" || updateType == "changed") {
+		return store.ParseTaskStatusPending
+	}
+	return item.State.ParseQueueState
 }
 
 func documentSourceDisplayName(item DocumentWithState) string {

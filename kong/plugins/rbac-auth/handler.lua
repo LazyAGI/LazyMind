@@ -36,45 +36,6 @@ local function _string_claim(value)
   return value
 end
 
-local function _decode_jwt_payload(token)
-  if not token or token == "" then
-    return nil
-  end
-  -- Strip "Bearer " prefix if present
-  local lower = string.lower(token)
-  if string.sub(lower, 1, 7) == "bearer " then
-    token = string.sub(token, 8)
-  end
-  local first_dot = string.find(token, ".", 1, true)
-  if not first_dot then
-    return nil
-  end
-  local second_dot = string.find(token, ".", first_dot + 1, true)
-  if not second_dot then
-    return nil
-  end
-  local payload_b64 = string.sub(token, first_dot + 1, second_dot - 1)
-  -- base64url -> base64
-  payload_b64 = payload_b64:gsub("-", "+"):gsub("_", "/")
-  local pad = #payload_b64 % 4
-  if pad == 2 then
-    payload_b64 = payload_b64 .. "=="
-  elseif pad == 3 then
-    payload_b64 = payload_b64 .. "="
-  elseif pad ~= 0 then
-    return nil
-  end
-  local decoded = ngx.decode_base64(payload_b64)
-  if not decoded then
-    return nil
-  end
-  local obj, err = cjson.decode(decoded)
-  if err then
-    return nil
-  end
-  return obj
-end
-
 function RbacAuthHandler:access(conf)
   local method = kong.request.get_method()
   local path = kong.request.get_path()
@@ -119,36 +80,28 @@ function RbacAuthHandler:access(conf)
   end
   local authz_payload = _parse_json(res.body) or {}
   local authz_data = authz_payload.data or authz_payload
+  local authz_user_id = type(authz_data) == "table" and _string_claim(authz_data.user_id) or nil
+  local authz_username = type(authz_data) == "table" and _string_claim(authz_data.username) or nil
+  local authz_tenant = type(authz_data) == "table" and _string_claim(authz_data.tenant_id) or nil
   local authz_role = type(authz_data) == "table" and _string_claim(authz_data.role) or nil
 
   -- 200: allowed; inject user headers when Authorization is present.
-  -- User identity comes from the verified JWT; role comes from auth-service's current DB authorization result.
+  -- User identity and role come from auth-service's verified token and current DB authorization result.
   kong.service.request.clear_header("X-User-Id")
   kong.service.request.clear_header("X-User-Name")
   kong.service.request.clear_header("X-Tenant-Id")
   kong.service.request.clear_header("X-User-Role")
-  if auth ~= "" then
-    local payload = _decode_jwt_payload(auth)
-    if payload then
-      local uid = _string_claim(payload.user_id) or _string_claim(payload.sub)
-      local uname = _string_claim(payload.username)
-      local tenant = _string_claim(payload.tenant_id)
-      kong.log.debug("rbac-auth: jwt payload user_id=", uid, " username=", uname, " tenant=", tenant)
-      if uid then
-        kong.service.request.set_header("X-User-Id", tostring(uid))
-      end
-      if uname then
-        kong.service.request.set_header("X-User-Name", tostring(uname))
-      end
-      if tenant then
-        kong.service.request.set_header("X-Tenant-Id", tostring(tenant))
-      end
-      if authz_role then
-        kong.service.request.set_header("X-User-Role", tostring(authz_role))
-      end
-    else
-      kong.log.warn("rbac-auth: failed to decode JWT payload for header injection")
-    end
+  if authz_user_id then
+    kong.service.request.set_header("X-User-Id", tostring(authz_user_id))
+  end
+  if authz_username then
+    kong.service.request.set_header("X-User-Name", tostring(authz_username))
+  end
+  if authz_tenant then
+    kong.service.request.set_header("X-Tenant-Id", tostring(authz_tenant))
+  end
+  if authz_role then
+    kong.service.request.set_header("X-User-Role", tostring(authz_role))
   end
 end
 

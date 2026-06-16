@@ -16,7 +16,37 @@ _TYPE_TO_SLOT: Dict[str, str] = {
     'embed': 'embed',
     'rerank': 'embed',
     'cross_modal_embed': 'embed',
+    'text2image': 'multimodal',
+    'image_editing': 'multimodal',
 }
+
+
+def _role_entry(entries: Any) -> Optional[Dict[str, Any]]:
+    '''Normalize a role block from runtime_models yaml (dict or single-item list).'''
+    if isinstance(entries, list):
+        return entries[0] if entries else None
+    return entries if isinstance(entries, dict) else None
+
+
+def is_model_role_available(role: str, *, config_path: Optional[str] = None) -> bool:
+    '''Return whether a model role is configured and injectable for the current request.
+
+    Static roles (source != dynamic) are available when declared in runtime_models.
+    Dynamic roles additionally require inject_model_config to have supplied that role.
+    '''
+    entry = _role_entry(load_model_config(config_path or get_config_path()).get(role))
+    if not entry:
+        return False
+    if (entry.get('source') or '').lower() != 'dynamic':
+        return True
+    import lazyllm
+    dynamic_cfg = lazyllm.globals['config'].get('dynamic_model_configs') or {}
+    buckets = dynamic_cfg.get(role) or {}
+    return any(
+        (v.get('source') or v.get('model') or v.get('url'))
+        for v in buckets.values()
+        if isinstance(v, dict)
+    )
 
 
 def get_config_path() -> str:
@@ -80,12 +110,11 @@ def get_dynamic_role_slot_map(config_path: Optional[str] = None) -> Dict[str, st
     '''
     raw = load_model_config(config_path or get_config_path())
     result: Dict[str, str] = {}
-    for role, cfg in raw.items():
-        if not isinstance(cfg, dict):
+    for role, entries in raw.items():
+        entry = _role_entry(entries)
+        if not entry or (entry.get('source') or '').lower() != 'dynamic':
             continue
-        if (cfg.get('source') or '').lower() != 'dynamic':
-            continue
-        role_type = (cfg.get('type') or 'llm').lower()
+        role_type = (entry.get('type') or 'llm').lower()
         slot = _TYPE_TO_SLOT.get(role_type, 'chat')
         result[role] = slot
     return result
@@ -131,13 +160,51 @@ def summarize_model_config_for_log(model_config: Optional[Dict[str, Any]]) -> st
     return f'roles={sorted(str(k) for k in model_config.keys())} ' + '; '.join(parts)
 
 
+# Maps frontend model_key values to runtime_models.yaml role names.
+_MODEL_CONFIG_ROLE_ALIASES: Dict[str, str] = {
+    'text2image': 'image_generator',
+    'image_editing': 'image_editor',
+}
+
+
+def _normalize_model_config(model_config: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not model_config:
+        return model_config
+    normalized: Dict[str, Any] = {}
+    for role, role_cfg in model_config.items():
+        target = _MODEL_CONFIG_ROLE_ALIASES.get(role, role)
+        if target in normalized:
+            continue
+        normalized[target] = role_cfg
+    return normalized
+
+
+def _enrich_role_types(model_config: Dict[str, Any]) -> Dict[str, Any]:
+    yaml_cfg = load_model_config()
+    enriched: Dict[str, Any] = {}
+    for role, role_cfg in model_config.items():
+        if not isinstance(role_cfg, dict):
+            enriched[role] = role_cfg
+            continue
+        merged = dict(role_cfg)
+        if not merged.get('type'):
+            entry = _role_entry(yaml_cfg.get(role))
+            if entry:
+                merged['type'] = entry.get('type')
+        enriched[role] = merged
+    return enriched
+
+
 def inject_model_config(model_config: Optional[Dict[str, Any]]) -> None:
     '''Inject per-request model configuration into lazyllm globals.
 
     Delegates to lazyllm.inject_model_config. Kept here for backward compatibility.
     '''
     import lazyllm
-    lazyllm.inject_model_config(model_config)
+    normalized = _normalize_model_config(model_config)
+    if isinstance(normalized, dict):
+        normalized = _enrich_role_types(normalized)
+    lazyllm.inject_model_config(normalized)
 
 
 def _expand_env(value: str) -> str:

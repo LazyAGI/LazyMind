@@ -100,6 +100,10 @@ function normalizeFeishuAccountStatus(status?: string): FeishuConnectionStatus {
   return "pending";
 }
 
+function isFeishuAccountAuthValid(account: FeishuAuthAccount) {
+  return account.status === "connected" && Boolean(account.connection?.connectionId?.trim());
+}
+
 function splitScopes(value?: string | null) {
   return `${value || ""}`
     .split(/[,\s]+/)
@@ -152,8 +156,9 @@ function mapCloudConnectionToFeishuAccount(
   const serverChatEnabled =
     providerOptions.chat_enabled ?? providerOptions.chatEnabled ??
     providerMeta.chat_enabled ?? providerMeta.chatEnabled;
-  const chatEnabled =
+  const rawChatEnabled =
     serverChatEnabled != null ? Boolean(serverChatEnabled) : (cachedAccount?.chatEnabled ?? false);
+  const chatEnabled = status === "connected" ? rawChatEnabled : false;
 
   return {
     id: connection.connection_id,
@@ -681,6 +686,11 @@ export default function FeishuAccountPage() {
   };
 
   const handleToggleChat = (account: FeishuAuthAccount, checked: boolean) => {
+    if (checked && !isFeishuAccountAuthValid(account)) {
+      message.warning(t("admin.dataSourceFeishuAccountChatAuthRequired"));
+      return;
+    }
+
     const connectionId = account.connection?.connectionId?.trim();
     const previousAccounts = accounts;
 
@@ -819,17 +829,28 @@ export default function FeishuAccountPage() {
       key: "chatEnabled",
       width: 150,
       render: (_value, record) => {
-        const enabled = Boolean(record.chatEnabled);
+        const canToggleChat = isFeishuAccountAuthValid(record);
+        const enabled = canToggleChat && Boolean(record.chatEnabled);
         return (
-          <Tooltip title={t("admin.dataSourceFeishuAccountChatSwitchHint")}>
+          <Tooltip
+            title={
+              canToggleChat
+                ? t("admin.dataSourceFeishuAccountChatSwitchHint")
+                : t("admin.dataSourceFeishuAccountChatAuthRequired")
+            }
+          >
             <button
               type="button"
               role="switch"
               aria-checked={enabled}
+              aria-disabled={!canToggleChat}
               aria-label={t("admin.dataSourceFeishuAccountChatSwitchAria", {
                 name: record.name,
               })}
-              className={`data-source-chat-switch${enabled ? " is-on" : ""}`}
+              disabled={!canToggleChat}
+              className={`data-source-chat-switch${enabled ? " is-on" : ""}${
+                canToggleChat ? "" : " is-disabled"
+              }`}
               onClick={() => handleToggleChat(record, !enabled)}
             >
               <span className="data-source-chat-switch-thumb" aria-hidden="true" />

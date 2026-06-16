@@ -564,6 +564,11 @@ func getThreadResults(w http.ResponseWriter, r *http.Request, resultKind string)
 			}
 		case "eval-reports", "abtests":
 			if strings.Contains(proxy.ContentType, "application/json") {
+				if resultKind == "eval-reports" {
+					if found, summaryErr := attachEvalReportSummaryResult(proxy.Body, threadID); summaryErr != nil {
+						log.Logger.Warn().Err(summaryErr).Str("thread_id", threadID).Bool("eval_report_found", found).Msg("attach eval report summary result failed")
+					}
+				}
 				if _, found, reportErr := attachCaseDetailsReportResult(r.Context(), proxy.Body, caseDetailsReportOptions{
 					ThreadID:   threadID,
 					ResultKind: resultKind,

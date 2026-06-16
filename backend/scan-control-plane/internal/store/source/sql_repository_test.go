@@ -192,6 +192,44 @@ func TestListSourcesScansProjectedSourceFields(t *testing.T) {
 	}
 }
 
+func TestListBindingsBySourceIDsScansAuthConnections(t *testing.T) {
+	now := time.Date(2026, 5, 31, 15, 0, 0, 0, time.UTC)
+	db := openStoreFakeDB(t, []storeFakeQuery{
+		{
+			columns: []string{
+				"binding_id", "source_id", "binding_type", "connector_type", "target_type", "target_ref",
+				"target_fingerprint", "agent_id", "auth_connection_id", "provider_options_json", "tree_key",
+				"binding_generation", "core_parent_document_id", "core_parent_document_name", "sync_mode",
+				"schedule_policy_json", "next_sync_at", "include_extensions_json", "exclude_extensions_json",
+				"status", "last_error", "deleted_at", "created_at", "updated_at",
+			},
+			rows: [][]driver.Value{{
+				"binding-1", "source-1", "connector_target", "feishu", "wiki_node", "wiki:space:node",
+				"fingerprint-1", nil, "auth-1", []byte(`{"user_id":"user-1"}`), "tree-1",
+				int64(1), "folder-1", "Docs", "manual",
+				nil, nil, []byte(`{"items":[".md"]}`), []byte(`{"items":[]}`),
+				"ACTIVE", []byte(`{}`), nil, now, now,
+			}},
+		},
+	})
+	repo := NewSQLRepository(db)
+
+	bindings, err := repo.ListBindingsBySourceIDs(context.Background(), []string{"source-1", "source-2", "source-1", ""})
+	if err != nil {
+		t.Fatalf("list bindings by source ids: %v", err)
+	}
+	if len(bindings) != 1 {
+		t.Fatalf("unexpected binding count: %d", len(bindings))
+	}
+	binding := bindings[0]
+	if binding.SourceID != "source-1" || binding.BindingID != "binding-1" || binding.AuthConnectionID != "auth-1" {
+		t.Fatalf("binding projection was not scanned: %+v", binding)
+	}
+	if binding.ProviderOptions["user_id"] != "user-1" {
+		t.Fatalf("provider options were not scanned: %#v", binding.ProviderOptions)
+	}
+}
+
 func TestGetSourceSummaryComputesStorageBytesFromDocuments(t *testing.T) {
 	db := openStoreFakeDB(t, []storeFakeQuery{
 		{columns: []string{"source_id"}, rows: [][]driver.Value{{"source-1"}}},

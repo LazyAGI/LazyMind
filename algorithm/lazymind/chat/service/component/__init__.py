@@ -6,6 +6,7 @@ from .tool_registry import (
     DEFAULT_TOOLS,
     ToolGroupConfig,
     build_agent_tools,
+    filter_tools,
     get_all_tool_groups,
 )
 
@@ -14,6 +15,7 @@ __all__ = [
     'DEFAULT_TOOLS',
     'ToolGroupConfig',
     'build_agent_tools',
+    'filter_tools',
     'get_all_tool_groups',
     'normalize_history_for_agent',
 ]

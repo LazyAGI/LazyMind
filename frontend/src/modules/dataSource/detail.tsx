@@ -879,9 +879,15 @@ export default function DataSourceDetail() {
       }
       const cachedChildren = syncTreeChildrenCacheRef.current.get(parentKey);
       if (cachedChildren) {
+        const selectableKeys = collectScanTreeFileKeys(cachedChildren);
         setSyncTreeNodes((current) =>
           mergeScanTreeChildren(current, parentKey, cachedChildren),
         );
+        if (syncSelectedDocIds.includes(parentKey)) {
+          setSyncSelectedDocIds((current) =>
+            Array.from(new Set([...current, ...selectableKeys])),
+          );
+        }
         return;
       }
 
@@ -918,6 +924,11 @@ export default function DataSourceDetail() {
         setSyncTreeNodes((current) =>
           mergeScanTreeChildren(current, parentKey, children),
         );
+        if (syncSelectedDocIds.includes(parentKey)) {
+          setSyncSelectedDocIds((current) =>
+            Array.from(new Set([...current, ...selectableKeys])),
+          );
+        }
       } catch (error) {
         message.error(
           getLocalizedErrorMessage(error, t("common.requestFailed")) ||
@@ -925,7 +936,7 @@ export default function DataSourceDetail() {
         );
       }
     },
-    [detailSource, syncKeyword, t],
+    [detailSource, syncKeyword, syncSelectedDocIds, t],
   );
 
   useEffect(() => {
