@@ -387,7 +387,7 @@ func createBuiltinSkillCopy(ctx context.Context, db *gorm.DB, userID, userName s
 		if err != nil {
 			return orm.SkillResource{}, err
 		}
-		fullContent, _, err = buildParentSkillContent(name, item.Description, body)
+		fullContent, _, err = buildParentSkillContent(name, item.Category, item.Description, body)
 		if err != nil {
 			return orm.SkillResource{}, err
 		}

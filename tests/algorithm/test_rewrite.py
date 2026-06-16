@@ -3,16 +3,36 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
 def _load_rewrite_module():
+    validation_path = (
+        Path(__file__).resolve().parents[2]
+        / 'algorithm/lazymind/chat/engine/tools/infra/user_preference_validation.py'
+    )
+    validation_spec = importlib.util.spec_from_file_location(
+        'test_user_preference_validation',
+        validation_path,
+    )
+    assert validation_spec is not None
+    assert validation_spec.loader is not None
+    user_preference_validation = importlib.util.module_from_spec(validation_spec)
+    validation_spec.loader.exec_module(user_preference_validation)
+
     fake_lazyllm = ModuleType('lazyllm')
     fake_lazyllm.AutoModel = lambda *args, **kwargs: object()
 
     fake_tool_infra = ModuleType('lazymind.chat.engine.tools.infra')
+    fake_tool_infra.parse_user_preference_frontmatter = (
+        user_preference_validation.parse_user_preference_frontmatter
+    )
     fake_tool_infra.validate_skill_content = lambda *_args, **_kwargs: None
+    fake_tool_infra.validate_user_preference_content = (
+        user_preference_validation.validate_user_preference_content
+    )
 
     fake_load_config = ModuleType('lazymind.model_config')
     fake_load_config.get_config_path = lambda: ''
@@ -34,11 +54,16 @@ def _load_rewrite_module():
 
         ns = ModuleType('test_rewrite_module')
         ns.BadRequestError = base.BadRequestError
+        ns.UnprocessableContentError = base.UnprocessableContentError
         ns._apply_memory_edit_operations = memory._apply_memory_edit_operations
         ns._apply_user_preference_edit_operations = preference._apply_user_preference_edit_operations
         ns._PROMPT_BUILDERS = base._PROMPT_BUILDERS
         ns._compact_memory_to_recent_week = memory._compact_memory_to_recent_week
         ns._format_inputs_block = base._format_inputs_block
+        ns.parse_user_preference_frontmatter = (
+            user_preference_validation.parse_user_preference_frontmatter
+        )
+        ns._validate_generated_content = base._validate_generated_content
         ns.rewrite_content = base.rewrite_content
         return ns
     finally:
@@ -51,11 +76,14 @@ def _load_rewrite_module():
 
 rewrite = _load_rewrite_module()
 BadRequestError = rewrite.BadRequestError
+UnprocessableContentError = rewrite.UnprocessableContentError
 _apply_memory_edit_operations = rewrite._apply_memory_edit_operations
 _apply_user_preference_edit_operations = rewrite._apply_user_preference_edit_operations
 _PROMPT_BUILDERS = rewrite._PROMPT_BUILDERS
 _compact_memory_to_recent_week = rewrite._compact_memory_to_recent_week
 _format_inputs_block = rewrite._format_inputs_block
+parse_user_preference_frontmatter = rewrite.parse_user_preference_frontmatter
+_validate_generated_content = rewrite._validate_generated_content
 rewrite_content = rewrite.rewrite_content
 
 
@@ -146,6 +174,81 @@ def test_polish_prompt_asks_model_to_rewrite_without_answering():
     assert 'task type: polish' in prompt
     assert 'Do not answer the prompt.' in prompt
     assert '{"content": "<new complete text>"}' in prompt
+
+
+def test_user_preference_prompt_requires_yaml_frontmatter():
+    prompt = _PROMPT_BUILDERS['user_preference'](
+        content='Prefers concise replies',
+        user_instruct='Keep replies in Chinese.',
+    )
+
+    assert 'Format requirements' in prompt
+    assert 'agent_persona' in prompt
+    assert 'user_address' in prompt
+    assert 'response_style' in prompt
+    assert 'legacy/free-form' in prompt
+    assert 'frontmatter-plus-body format' in prompt
+    assert 'role the user wants the agent to play' in prompt
+    assert 'how the user wants the agent to address them' in prompt
+    assert 'display/use exactly one of 简洁, 详细, 幽默, 正式' in prompt
+    assert '简洁, 详细, 幽默, 正式' in prompt
+    assert 'concise, detailed, humorous, formal' in prompt
+    assert 'existing valid response_style in either language' in prompt
+    assert 'Do not put language preferences' in prompt
+    assert 'verbs, or full instructions' in prompt
+    assert 'response_style is unknown' in prompt
+    assert 'use ""' in prompt
+    assert 'never use generic acknowledgement text' in prompt
+    assert 'only when user_instruct explicitly asks to change that specific field' in prompt
+
+
+def test_user_preference_validation_requires_yaml_frontmatter():
+    valid_english = (
+        '---\n'
+        'agent_persona: "algorithm collaborator"\n'
+        'user_address: ""\n'
+        'response_style: "concise"\n'
+        '---\n'
+        '- Prefer manual git commits.\n'
+        '- Prefer algorithm-side changes only.'
+    )
+    valid_chinese = (
+        '---\n'
+        'agent_persona: "算法协作者"\n'
+        'user_address: ""\n'
+        'response_style: "简洁"\n'
+        '---\n'
+        '- 偏好手动提交 git。'
+    )
+
+    parsed, body = parse_user_preference_frontmatter(valid_english)
+    assert parsed['agent_persona'] == 'algorithm collaborator'
+    assert body == '- Prefer manual git commits.\n- Prefer algorithm-side changes only.'
+    assert _validate_generated_content('user_preference', valid_english) == valid_english
+    assert _validate_generated_content('user_preference', valid_chinese) == valid_chinese
+    assert _validate_generated_content(
+        'user_preference',
+        (
+            '---\n'
+            'agent_persona: "algorithm collaborator"\n'
+            'user_address: ""\n'
+            'response_style: ""\n'
+            '---\n'
+            '- Prefer manual git commits.'
+        ),
+    )
+
+    invalid_cases = [
+        'agent_persona: "x"\nuser_address: ""\nresponse_style: "concise"\n\nbody',
+        '---\nagent_persona: "x"\nresponse_style: "concise"\n---\nbody',
+        '---\nagent_persona: "x"\nuser_address: ""\nresponse_style: "concise"\n---\n',
+        '---\nagent_persona: "x"\nuser_address: ""\nresponse_style: "concise, direct"\n---\nbody',
+        '---\nagent_persona: "x"\nuser_address: ""\nresponse_style: "轻松"\n---\nbody',
+        '- not: a mapping',
+    ]
+    for invalid in invalid_cases:
+        with pytest.raises(UnprocessableContentError):
+            _validate_generated_content('user_preference', invalid)
 
 
 def test_memory_edit_operations_use_replace_text_to_add_day_and_edit_text():

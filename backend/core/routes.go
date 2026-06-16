@@ -293,17 +293,18 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/prompts/{name}", []string{"document.read"}, chat.GetPrompt)
 	handleAPI(r, "GET", "/prompts", []string{"document.read"}, chat.ListPrompts)
 
-	// ----- Evolution / long-term state -----
 	// Algorithm service callbacks: no request-level RBAC, protected by internal service token at infra level.
-	handleAPI(r, "POST", "/skill/suggestion", nil, skill.Suggestion)
-	handleAPI(r, "POST", "/skill/create", nil, skill.Create)
-	handleAPI(r, "POST", "/skill/remove", nil, skill.Remove)
-	handleAPI(r, "GET", "/remote-fs/list", []string{"qa.read"}, skill.RemoteFSList)
-	handleAPI(r, "GET", "/remote-fs/info", []string{"qa.read"}, skill.RemoteFSInfo)
-	handleAPI(r, "GET", "/remote-fs/exists", []string{"qa.read"}, skill.RemoteFSExists)
-	handleAPI(r, "GET", "/remote-fs/content", []string{"qa.read"}, skill.RemoteFSContent)
-	handleAPI(r, "POST", "/memory/suggestion", nil, memory.Suggestion)
-	handleAPI(r, "POST", "/user_preference/suggestion", nil, preference.Suggestion)
+	handleAPI(r, "POST", "/skill/suggestion", []string{}, skill.Suggestion)
+	handleAPI(r, "POST", "/skill/create", []string{}, skill.Create)
+	handleAPI(r, "POST", "/skill/remove", []string{}, skill.Remove)
+	handleAPI(r, "GET", "/remote-fs/list", []string{}, skill.RemoteFSList)
+	handleAPI(r, "GET", "/remote-fs/info", []string{}, skill.RemoteFSInfo)
+	handleAPI(r, "GET", "/remote-fs/exists", []string{}, skill.RemoteFSExists)
+	handleAPI(r, "GET", "/remote-fs/content", []string{}, skill.RemoteFSContent)
+	handleAPI(r, "PUT", "/remote-fs/content", []string{}, skill.RemoteFSWrite)
+	handleAPI(r, "DELETE", "/remote-fs/path", []string{}, skill.RemoteFSDelete)
+	handleAPI(r, "POST", "/memory/suggestion", []string{}, memory.Suggestion)
+	handleAPI(r, "POST", "/user_preference/suggestion", []string{}, preference.Suggestion)
 
 	// ----- ACL（Knowledge basetextPermission） -----
 	handleAPI(r, "GET", "/kb/list", []string{"document.read"}, acl.ListKB)

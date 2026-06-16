@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import json
+import re
 import time
 from typing import Any, Dict, List, Optional, Union
 import lazyllm
@@ -38,6 +39,38 @@ from lazymind.config import config as _cfg
 
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
 sensitive_filter = SensitiveFilter(SENSITIVE_WORDS_PATH)
+_CITE_MESSAGE_PATTERN = re.compile(
+    r'<cite_message>([\s\S]*?)</cite_message>\s*',
+    re.IGNORECASE,
+)
+
+
+def _normalize_cite_message_query_for_agent(query: str) -> tuple[str, str]:
+    cite_messages: list[str] = []
+
+    def collect_cite_message(match: re.Match[str]) -> str:
+        cite_message = match.group(1).strip()
+        if cite_message:
+            cite_messages.append(cite_message)
+        return ''
+
+    user_query = _CITE_MESSAGE_PATTERN.sub(collect_cite_message, query).strip()
+    if not cite_messages:
+        return query, query
+
+    if len(cite_messages) == 1:
+        cite_text = cite_messages[0]
+    else:
+        cite_text = '\n\n'.join(
+            f'{index}. {cite_message}'
+            for index, cite_message in enumerate(cite_messages, start=1)
+        )
+
+    agent_query = (
+        f'用户本次引用的消息：\n{cite_text}\n\n'
+        f'用户本次的问题：\n{user_query}'
+    ).strip()
+    return user_query, agent_query
 
 
 def _normalize_kb_id_filter(raw_kb_id: Any) -> str | list[str] | None:
@@ -132,6 +165,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     )
     start_time = time.time()
     priority = priority or LAZYMIND_LLM_PRIORITY
+    query, agent_query = _normalize_cite_message_query_for_agent(query)
     sensitive_word = check_sensitive_content(query)
     if sensitive_word:
         cost = round(time.time() - start_time, 3)
@@ -153,7 +187,6 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     filters = dict(filters or {})
     resolved_files = validate_and_resolve_files(files)
     filters['kb_id'] = _normalize_kb_id_filter(filters.get('kb_id'))
-    resolved_use_memory = use_memory is not False
 
     raw_history = list(history) if isinstance(history, list) else []
     agent_history = normalize_history_for_agent(raw_history)
@@ -165,7 +198,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         'files': resolved_files,
         'priority': priority,
         'user_id': user_id or '',
-        'use_memory': resolved_use_memory,
+        'use_memory': use_memory,
         'citation_state': translator.citation_state,
         'mode': mode if mode in ('auto', 'manual') else 'auto',
         'has_subagents': bool(has_subagents),
@@ -193,7 +226,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     runtime_prompt = build_system_prompt(
         {cfg.name for cfg in active_configs},
         environment_context=environment_context,
-        use_memory=resolved_use_memory,
+        use_memory=use_memory,
         user_preference=user_preference,
         memory=memory,
         files=resolved_files,
@@ -218,7 +251,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
         try:
             async with rag_sem:
-                async for kind, payload in drive_agent(react_agent, query, history=agent_history):
+                async for kind, payload in drive_agent(react_agent, agent_query, history=agent_history):
                     if kind == 'event':
                         for frame in translator.feed(payload):
                             cost = round(time.time() - start_time, 3)

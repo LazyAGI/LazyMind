@@ -1,25 +1,35 @@
 from typing import Any, Dict, List, Literal, Optional
 
 import lazyllm
-import requests
 
 from lazymind.chat.engine.tools.infra import (
-    Suggestion,
     build_skill_identity,
-    dump_suggestion,
+    create_remote_skill,
     handle_tool_errors,
     is_writable_skill_source,
     list_all_skill_entries,
     normalize_skill_category,
-    post_core_api,
+    parse_skill_frontmatter,
+    remove_remote_skill,
     tool_error,
     tool_success,
     validate_skill_content,
     validate_skill_name,
 )
+from lazymind.chat.engine.tools.infra.skill_operations import (
+    SkillEditOperation,
+    apply_skill_edit_operations,
+)
+from lazymind.chat.engine.tools.infra.skill_review_store import (
+    SKILL_REVIEW_TYPE_PATCH,
+    find_pending_skill_review,
+    insert_skill_review_result,
+)
 from lazymind.config import config as _cfg
 
-MAX_SUGGESTIONS_PER_CALL = 5
+
+_PENDING_CHANGE_MESSAGE = '存在未处理的变更，请先处理'
+_SUCCESS_MESSAGE = '已写入变更，等待确认'
 
 
 @handle_tool_errors
@@ -28,36 +38,39 @@ def skill_editor(
     action: Literal['create', 'modify', 'remove'],
     category: Optional[str],
     content: Optional[str] = None,
-    suggestions: Optional[List[Suggestion]] = None,
+    operations: Optional[List[SkillEditOperation]] = None,
     reason: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Manage skills by creating, modifying, or removing a skill entry.
 
     Args:
         name: Skill name.
-        action: Action to perform.
-        category: Skill category directory.
-        content: Full SKILL.md content. ONLY for action='create'.
-            Do NOT pass for action='modify' or 'remove'.
-        suggestions: Ordered list of suggestions (max 5 per call). Each
-            item is a dict with the following fields. ONLY for
-            action='modify'. Do NOT pass for action='create' or 'remove'.
+        action: Skill workflow to run. Use 'create' to submit a new SKILL.md
+            content row for review, 'modify' to edit an existing remote skill
+            using the 'operations' argument and submit the edited content for
+            review, or 'remove' to mark an existing remote skill for deletion.
+            For 'modify' and 'remove', a pending review row for the same
+            category/name blocks the request.
+        category: Skill category directory used to locate category/name/SKILL.md.
+        content: Full SKILL.md content, including YAML frontmatter with
+            name/category/description. ONLY for action='create'. Do NOT pass
+            for action='modify' or 'remove'.
+        operations: Ordered JSON edit operations. ONLY for action='modify'.
+            Do NOT pass for action='create' or 'remove'. Supported operations:
 
-            - ``title`` (str, required): short label summarising the
-              proposed change.
-            - ``content`` (str, required): natural-language description of
-              the modification to the existing skill content. This should
-              usually describe one focused update such as adjusting trigger
-              conditions, refining scope, adding/removing a rule, or
-              correcting an inaccurate instruction.
-            - ``reason`` (str, optional): why the change is worth making.
+            - ``{"op": "replace_text", "old": "...", "new": "..."}``:
+              replace the first exact ``old`` substring with ``new``.
+              Prefer multiple small replace_text operations for local edits.
+            - ``{"op": "replace_all", "content": "..."}``: replace the
+              full original SKILL.md content with ``content``. Use this only
+              when exact local replacement is not safe enough.
         reason: Why the skill should be removed. ONLY for action='remove'.
     """
     lazyllm.LOG.info(
         '[skill_editor] called '
         f'name={name!r} action={action!r} '
         f'category={category!r} content_len={len(content) if content else 0} '
-        f'suggestions_count={len(suggestions) if suggestions else 0}'
+        f'operations_count={len(operations) if operations else 0}'
     )
 
     name_error = validate_skill_name(name)
@@ -65,16 +78,11 @@ def skill_editor(
         return tool_error('skill_editor', name_error, log_message=f'[skill_editor] fail reason={name_error!r}')
 
     agentic_config = lazyllm.globals['agentic_config']
+    user_id = str(agentic_config.get('user_id') or '').strip()
     session_id = str(agentic_config.get('session_id') or '').strip()
-    if not session_id:
-        return tool_error(
-            'skill_editor',
-            "'session_id' is required in agentic_config.",
-            log_message="[skill_editor] fail reason='session_id' is required in agentic_config.",
-        )
 
     normalized_category = normalize_skill_category(category)
-    if normalized_category is None:
+    if not normalized_category:
         return tool_error(
             'skill_editor',
             f'Category {category!r} is invalid; it must be a single '
@@ -100,56 +108,26 @@ def skill_editor(
                 content_error,
                 log_message=f'[skill_editor] fail reason={content_error!r}',
             )
-        if suggestions:
-            return tool_error('skill_editor', "action='create' must not include 'suggestions'.")
-        if existing_skill:
-            source = existing_skill.get('source', 'file')
-            if not is_writable_skill_source(source):
-                return tool_error(
-                    'skill_editor',
-                    f'Skill {name!r} already exists in category {normalized_category!r} '
-                    f'with read-only source {source!r}; skill_editor can only write remote skills.'
-                )
+        if operations:
+            return tool_error('skill_editor', "action='create' must not include 'operations'.")
+        content_category, content_name = _skill_identity_from_content(content or '')
+        if content_category != normalized_category or content_name != name:
             return tool_error(
                 'skill_editor',
-                f'Skill {name!r} already exists in category {normalized_category!r}; '
-                "use action='modify' to edit it or action='remove' to delete it first."
+                'SKILL.md frontmatter name/category must match the tool name/category for create.'
             )
+        pending = find_pending_skill_review(content_category, content_name, user_id)
+        if pending or existing_skill:
+            return tool_error('skill_editor', _PENDING_CHANGE_MESSAGE)
 
-        result: Dict[str, Any] = {
-            'name': name,
-            'action': action,
-            'category': normalized_category,
-            'content': content,
-        }
-        payload = {
-            'session_id': session_id,
-            'category': normalized_category,
-            'skill_name': name,
-            'content': content,
-        }
-        try:
-            result.update(post_core_api('/skill/create', payload))
-        except (requests.RequestException, RuntimeError) as exc:
-            return tool_error(
-                'skill_editor',
-                f'Failed to create skill: {exc}',
-                log_message=f'[skill_editor] create failed: {exc}',
-                log_level='error',
-            )
-        return tool_success('skill_editor', result)
+        create_remote_skill(content_category, content_name, content or '')
+        return tool_success('skill_editor', _SUCCESS_MESSAGE)
 
     if action == 'modify':
         if content is not None:
-            return tool_error('skill_editor', "action='modify' must not include 'content'; use 'suggestions'.")
-        if not suggestions:
-            return tool_error('skill_editor', "action='modify' requires a non-empty 'suggestions' list.")
-        if len(suggestions) > MAX_SUGGESTIONS_PER_CALL:
-            return tool_error(
-                'skill_editor',
-                f'At most {MAX_SUGGESTIONS_PER_CALL} suggestions are allowed per call; '
-                f'got {len(suggestions)}.'
-            )
+            return tool_error('skill_editor', "action='modify' must not include 'content'; use 'operations'.")
+        if not operations:
+            return tool_error('skill_editor', "action='modify' requires a non-empty 'operations' list.")
         if not existing_skill:
             return tool_error(
                 'skill_editor',
@@ -169,32 +147,38 @@ def skill_editor(
                 f'{source!r}; skill_editor can only modify remote skills.'
             )
 
-        result = {
-            'name': name,
-            'action': action,
-            'category': normalized_category,
-            'suggestions': [dump_suggestion(s) for s in suggestions],
-        }
-        payload = {
-            'session_id': session_id,
-            'skill_name': name,
-            'category': normalized_category,
-            'suggestions': [dump_suggestion(s) for s in suggestions],
-        }
         try:
-            result.update(post_core_api('/skill/suggestion', payload))
-        except (requests.RequestException, RuntimeError) as exc:
-            return tool_error(
-                'skill_editor',
-                f'Failed to submit skill suggestions: {exc}',
-                log_message=f'[skill_editor] modify failed: {exc}',
-                log_level='error',
+            from lazymind.rewrite.base import UnprocessableContentError
+
+            edited_content, operation_payload = apply_skill_edit_operations(
+                existing_skill.get('content') or '',
+                operations,
             )
-        return tool_success('skill_editor', result)
+        except UnprocessableContentError as exc:
+            return tool_error('skill_editor', str(exc))
+
+        content_error = validate_skill_content(edited_content)
+        if content_error:
+            return tool_error('skill_editor', content_error)
+        edited_category, edited_name = _skill_identity_from_content(edited_content)
+        pending = find_pending_skill_review(edited_category, edited_name, user_id)
+        if pending:
+            return tool_error('skill_editor', _PENDING_CHANGE_MESSAGE)
+
+        insert_skill_review_result(
+            category=normalized_category,
+            skill_name=name,
+            review_type=SKILL_REVIEW_TYPE_PATCH,
+            skill_content=edited_content,
+            user_id=user_id,
+            requestid=session_id,
+            summary=reason or f'skill_editor operations: {len(operation_payload)}',
+        )
+        return tool_success('skill_editor', _SUCCESS_MESSAGE)
 
     if action == 'remove':
-        if content is not None or suggestions:
-            return tool_error('skill_editor', "action='remove' must not include 'content' or 'suggestions'.")
+        if content is not None or operations:
+            return tool_error('skill_editor', "action='remove' must not include 'content' or 'operations'.")
         if not existing_skill:
             return tool_error(
                 'skill_editor',
@@ -209,30 +193,21 @@ def skill_editor(
                 f'{source!r}; skill_editor can only remove remote skills.'
             )
 
-        result = {
-            'name': name,
-            'action': action,
-            'category': normalized_category,
-            'reason': reason,
-        }
-        payload = {
-            'session_id': session_id,
-            'skill_name': name,
-            'category': normalized_category,
-            'reason': reason or '',
-        }
-        try:
-            result.update(post_core_api('/skill/remove', payload))
-        except (requests.RequestException, RuntimeError) as exc:
-            return tool_error(
-                'skill_editor',
-                f'Failed to remove skill: {exc}',
-                log_message=f'[skill_editor] remove failed: {exc}',
-                log_level='error',
-            )
-        return tool_success('skill_editor', result)
+        pending = find_pending_skill_review(normalized_category, name, user_id)
+        if pending:
+            return tool_error('skill_editor', _PENDING_CHANGE_MESSAGE)
+
+        remove_remote_skill(normalized_category, name)
+        return tool_success('skill_editor', _SUCCESS_MESSAGE)
 
     return tool_error(
         'skill_editor',
         f"Unknown action {action!r}; expected one of 'create', 'modify', 'remove'."
     )
+
+
+def _skill_identity_from_content(content: str) -> tuple[str, str]:
+    frontmatter, _ = parse_skill_frontmatter(content)
+    category = str(frontmatter.get('category') or '').strip()
+    name = str(frontmatter.get('name') or '').strip()
+    return category, name

@@ -11,6 +11,7 @@ import {
   Steps,
   Tag,
   TimePicker,
+  Tooltip,
   TreeSelect,
   Typography,
 } from "antd";
@@ -18,10 +19,11 @@ import type { FormInstance } from "antd";
 import type { DataNode } from "antd/es/tree";
 import type { TreeSelectProps } from "antd";
 import dayjs from "dayjs";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   ApiOutlined,
+  CalendarOutlined,
   ClockCircleOutlined,
   DisconnectOutlined,
   FolderOpenOutlined,
@@ -42,15 +44,6 @@ const { Paragraph, Text } = Typography;
 
 const SCHEDULE_WEEKDAYS = ["1", "2", "3", "4", "5", "6", "7"];
 const SCHEDULE_WEEKDAY_DISPLAY_ORDER = ["7", "1", "2", "3", "4", "5", "6"];
-const SCHEDULE_WEEKDAY_SHORT_LABELS: Record<string, string> = {
-  "1": "一",
-  "2": "二",
-  "3": "三",
-  "4": "四",
-  "5": "五",
-  "6": "六",
-  "7": "日",
-};
 const SCHEDULE_WORKDAYS = ["1", "2", "3", "4", "5"];
 const SCHEDULE_WEEKENDS = ["6", "7"];
 
@@ -123,6 +116,51 @@ function collapseSelectedTreeValues(
   return values.filter((item) => !descendantValues.has(item));
 }
 
+function getTreeNodeTitleText(node: CollapsibleTreeNode) {
+  const title = node.title;
+  if (typeof title === "string" || typeof title === "number") {
+    return `${title}`.trim();
+  }
+  return `${node.value || node.key || ""}`.trim();
+}
+
+function buildTreeValuePathMap(treeData: CollapsibleTreeNode[]) {
+  const pathMap = new Map<string, string>();
+
+  const visit = (nodes: CollapsibleTreeNode[], parentTitles: string[]) => {
+    nodes.forEach((node) => {
+      const nodeValue = `${node.value || node.key || ""}`.trim();
+      const title = getTreeNodeTitleText(node);
+      const nextTitles = title ? [...parentTitles, title] : parentTitles;
+      if (nodeValue) {
+        pathMap.set(nodeValue, nextTitles.join(" / ") || nodeValue);
+      }
+      if (node.children) {
+        visit(node.children, nextTitles);
+      }
+    });
+  };
+
+  visit(treeData, []);
+  return pathMap;
+}
+
+function getTreeSelectLabelText(label: ReactNode) {
+  if (typeof label === "string" || typeof label === "number") {
+    return `${label}`.trim();
+  }
+  return "";
+}
+
+function getTreeSelectValuePath(
+  value: unknown,
+  label: ReactNode,
+  pathMap: Map<string, string>,
+) {
+  const normalizedValue = `${value || ""}`.trim();
+  return pathMap.get(normalizedValue) || getTreeSelectLabelText(label) || normalizedValue;
+}
+
 export type LocalPathSelectOption = DataNode & {
   value: string;
   nodeRef?: string;
@@ -152,12 +190,12 @@ interface DataSourceWizardModalProps {
   wizardOpen: boolean;
   wizardStep: number;
   form: FormInstance<SourceFormValues>;
-  existingKnowledgeBaseNames: string[];
   selectedType: SourceType | null;
   isFeishuSetupReady: boolean;
   connectionVerified: boolean;
   syncMode: SyncMode;
   saving: boolean;
+  savingMode?: "create" | "createAndSync";
   localPathOptions?: LocalPathSelectOption[];
   localPathLoading?: boolean;
   feishuTargetLoading?: boolean;
@@ -185,12 +223,12 @@ export default function DataSourceWizardModal({
   wizardOpen,
   wizardStep,
   form,
-  existingKnowledgeBaseNames,
   selectedType,
   isFeishuSetupReady,
   connectionVerified,
   syncMode,
   saving,
+  savingMode,
   localPathOptions = [],
   localPathLoading = false,
   feishuTargetLoading = false,
@@ -214,6 +252,17 @@ export default function DataSourceWizardModal({
   const isEditMode = wizardMode === "edit";
   const [localPathSearchValue, setLocalPathSearchValue] = useState("");
   const [feishuTargetSearchValue, setFeishuTargetSearchValue] = useState("");
+  const feishuTargetPathMap = useMemo(
+    () => buildTreeValuePathMap(feishuTargetTreeData as CollapsibleTreeNode[]),
+    [feishuTargetTreeData],
+  );
+  const selectedFeishuTargetValues = normalizeTreeSelectValues(
+    Form.useWatch("target", form),
+  );
+  const feishuTargetTitle = selectedFeishuTargetValues
+    .map((value) => feishuTargetPathMap.get(value) || value)
+    .filter(Boolean)
+    .join("\n");
   const selectedScheduleWeekdays = normalizeSelectedWeekdays(
     Form.useWatch("scheduleWeekdays", form),
   );
@@ -229,20 +278,6 @@ export default function DataSourceWizardModal({
     selectedScheduleWeekdays,
     SCHEDULE_WEEKDAYS,
   );
-  const existingKnowledgeBaseNameSet = new Set(
-    existingKnowledgeBaseNames.map((name) => name.trim().toLowerCase()).filter(Boolean),
-  );
-
-  const validateKnowledgeBaseName = (_: unknown, value?: string) => {
-    const normalizedValue = `${value || ""}`.trim().toLowerCase();
-    if (!normalizedValue || isEditMode) {
-      return Promise.resolve();
-    }
-    if (existingKnowledgeBaseNameSet.has(normalizedValue)) {
-      return Promise.reject(new Error(t("admin.dataSourceKnowledgeBaseNameDuplicated")));
-    }
-    return Promise.resolve();
-  };
 
   const renderConnectionSection = () => {
     if (!selectedType) {
@@ -276,6 +311,51 @@ export default function DataSourceWizardModal({
       </div>
     );
   };
+  const renderFeishuTargetTag: TreeSelectProps["tagRender"] = ({
+    label,
+    value,
+    closable,
+    onClose,
+  }) => (
+    <Tooltip title={getTreeSelectValuePath(value, label, feishuTargetPathMap)}>
+      <Tag
+        className="data-source-tree-select-tag"
+        closable={closable}
+        onClose={onClose}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+      >
+        <span className="data-source-tree-select-tag-label">{label}</span>
+      </Tag>
+    </Tooltip>
+  );
+  const renderFeishuTargetMaxTagPlaceholder: TreeSelectProps["maxTagPlaceholder"] = (
+    omittedValues,
+  ) => {
+    if (omittedValues.length === 0) {
+      return null;
+    }
+
+    const paths = omittedValues
+      .map((item) => getTreeSelectValuePath(item.value, item.label, feishuTargetPathMap))
+      .filter(Boolean);
+
+    return (
+      <Tooltip
+        title={
+          <div className="data-source-tree-select-tooltip-list">
+            {paths.map((path, index) => (
+              <div key={`${path}-${index}`}>{path}</div>
+            ))}
+          </div>
+        }
+      >
+        <span>{`+ ${omittedValues.length} ...`}</span>
+      </Tooltip>
+    );
+  };
 
   return (
     <Modal
@@ -303,14 +383,19 @@ export default function DataSourceWizardModal({
             ) : null}
             {wizardStep === 1 ? (
               <>
-                <Button disabled={saving} onClick={() => onSave("create")}>
+                <Button
+                  disabled={saving}
+                  loading={savingMode === "create"}
+                  onClick={() => onSave("create")}
+                >
                   {isEditMode
                     ? t("admin.dataSourceSaveOnly")
                     : t("admin.dataSourceCreateOnly")}
                 </Button>
                 <Button
                   type="primary"
-                  loading={saving}
+                  disabled={saving}
+                  loading={savingMode === "createAndSync"}
                   onClick={() => onSave("createAndSync")}
                 >
                   {isEditMode
@@ -409,9 +494,6 @@ export default function DataSourceWizardModal({
                       required: true,
                       whitespace: true,
                       message: t("admin.dataSourceKnowledgeBaseNameRequired"),
-                    },
-                    {
-                      validator: validateKnowledgeBaseName,
                     },
                   ]}
                 >
@@ -516,10 +598,13 @@ export default function DataSourceWizardModal({
                       loadData={onLoadFeishuTargetChildren}
                       loading={feishuTargetLoading}
                       maxTagCount="responsive"
+                      maxTagPlaceholder={renderFeishuTargetMaxTagPlaceholder}
                       placeholder={t("admin.dataSourceFeishuTargetPlaceholderWiki")}
                       showSearch
                       searchValue={feishuTargetSearchValue}
                       style={{ width: "100%" }}
+                      tagRender={renderFeishuTargetTag}
+                      title={feishuTargetTitle}
                       treeCheckable
                       treeData={feishuTargetTreeData}
                       treeDefaultExpandAll={false}
@@ -630,58 +715,77 @@ export default function DataSourceWizardModal({
                         </Space>
                       </div>
                       <div className="data-source-schedule-inline-sentence">
-                        <Text className="data-source-schedule-inline-prefix">
-                          请选择你的同步日期
-                        </Text>
-                        <Form.Item
-                          name="scheduleWeekdays"
-                          className="data-source-schedule-inline-weekdays-item"
-                          rules={[
-                            {
-                              required: true,
-                              message: t("admin.dataSourceScheduleWeekdaysRequired"),
-                            },
-                          ]}
-                        >
-                          <Checkbox.Group className="data-source-schedule-weekdays">
-                            {SCHEDULE_WEEKDAY_DISPLAY_ORDER.map((day) => (
-                              <Checkbox key={day} value={day}>
-                                <span className="data-source-schedule-weekday-pill">
-                                  {SCHEDULE_WEEKDAY_SHORT_LABELS[day]}
-                                </span>
-                              </Checkbox>
-                            ))}
-                          </Checkbox.Group>
-                        </Form.Item>
-                        <Text className="data-source-schedule-inline-connector">将于</Text>
-                        <Form.Item
-                          name="scheduleTime"
-                          className="data-source-schedule-inline-time-item"
-                          getValueProps={(value?: string) => ({
-                            value: value ? dayjs(value, "HH:mm:ss") : null,
-                          })}
-                          normalize={(value: ReturnType<typeof dayjs> | null) =>
-                            value ? value.format("HH:mm:ss") : undefined
-                          }
-                          rules={[
-                            {
-                              required: true,
-                              message: t("admin.dataSourceScheduleTimeRequired"),
-                            },
-                            {
-                              pattern: /^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/,
-                              message: t("admin.dataSourceScheduleTimeInvalid"),
-                            },
-                          ]}
-                        >
-                          <TimePicker
-                            className="data-source-schedule-time-picker"
-                            format="HH:mm:ss"
-                            needConfirm={false}
-                            showNow={false}
-                          />
-                        </Form.Item>
-                        <Text className="data-source-schedule-inline-suffix">进行同步</Text>
+                        <div className="data-source-schedule-inline-icon">
+                          <CalendarOutlined />
+                          <ClockCircleOutlined />
+                        </div>
+                        <div className="data-source-schedule-inline-content">
+                          <Text className="data-source-schedule-inline-prefix">
+                            {t("admin.dataSourceScheduleSelectDaysPrefix")}
+                          </Text>
+                          <div className="data-source-schedule-inline-controls">
+                            <Text className="data-source-schedule-inline-cycle">
+                              {t("admin.dataSourceScheduleWeekly")}
+                            </Text>
+                            <Form.Item
+                              name="scheduleWeekdays"
+                              className="data-source-schedule-inline-weekdays-item"
+                              rules={[
+                                {
+                                  required: true,
+                                  message: t("admin.dataSourceScheduleWeekdaysRequired"),
+                                },
+                              ]}
+                            >
+                              <Checkbox.Group className="data-source-schedule-weekdays">
+                                {SCHEDULE_WEEKDAY_DISPLAY_ORDER.map((day) => (
+                                  <Checkbox key={day} value={day}>
+                                    <span className="data-source-schedule-weekday-pill">
+                                      {t(`admin.dataSourceScheduleWeekdayShort${day}`)}
+                                    </span>
+                                  </Checkbox>
+                                ))}
+                              </Checkbox.Group>
+                            </Form.Item>
+                            <Text className="data-source-schedule-inline-connector">
+                              {t("admin.dataSourceScheduleTimeConnector")}
+                            </Text>
+                            <Form.Item
+                              name="scheduleTime"
+                              className="data-source-schedule-inline-time-item"
+                              getValueProps={(value?: string) => ({
+                                value: value ? dayjs(value, "HH:mm:ss") : null,
+                              })}
+                              normalize={(value: ReturnType<typeof dayjs> | null) =>
+                                value ? value.format("HH:mm:ss") : undefined
+                              }
+                              rules={[
+                                {
+                                  required: true,
+                                  message: t("admin.dataSourceScheduleTimeRequired"),
+                                },
+                                {
+                                  pattern: /^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/,
+                                  message: t("admin.dataSourceScheduleTimeInvalid"),
+                                },
+                              ]}
+                            >
+                              <TimePicker
+                                className="data-source-schedule-time-picker"
+                                format="HH:mm:ss"
+                                needConfirm={false}
+                                showNow={false}
+                              />
+                            </Form.Item>
+                            <Text className="data-source-schedule-inline-suffix">
+                              {t("admin.dataSourceScheduleTimeSuffix")}
+                            </Text>
+                          </div>
+                        </div>
+                        <div className="data-source-schedule-visual" aria-hidden="true">
+                          <CalendarOutlined />
+                          <ClockCircleOutlined />
+                        </div>
                       </div>
                     </div>
                   </div>

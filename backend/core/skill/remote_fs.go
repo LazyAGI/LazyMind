@@ -2,6 +2,7 @@ package skill
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"path/filepath"
 	"sort"
@@ -13,13 +14,15 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/resourcechange"
 	"lazymind/core/store"
 )
 
 const (
-	remoteFSRoot     = "skills"
-	remoteFSTypeFile = "file"
-	remoteFSTypeDir  = "directory"
+	remoteFSRoot          = "skills"
+	remoteFSTypeFile      = "file"
+	remoteFSTypeDir       = "directory"
+	remoteFSMaxWriteBytes = 1 << 20
 )
 
 type remoteFSEntry struct {
@@ -143,6 +146,143 @@ func RemoteFSContent(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(file.Content))
 }
 
+func RemoteFSWrite(w http.ResponseWriter, r *http.Request) {
+	db, userID, userName, ok := prepareRemoteFSWriteRequest(w, r)
+	if !ok {
+		return
+	}
+	parsed, err := parseRemoteFSPath(r.URL.Query().Get("path"))
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if parsed.category == "" || parsed.skillName == "" || parsed.internalPath != "SKILL.md" {
+		common.ReplyErr(w, "path must be skills/{category}/{name}/SKILL.md", http.StatusBadRequest)
+		return
+	}
+	if err := validatePathSegment(parsed.category); err != nil {
+		common.ReplyErr(w, "invalid category: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := validatePathSegment(parsed.skillName); err != nil {
+		common.ReplyErr(w, "invalid skill name: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, remoteFSMaxWriteBytes+1))
+	if err != nil {
+		common.ReplyErr(w, "read body failed", http.StatusBadRequest)
+		return
+	}
+	if len(body) > remoteFSMaxWriteBytes {
+		common.ReplyErr(w, "content exceeds maximum size", http.StatusRequestEntityTooLarge)
+		return
+	}
+	content := string(body)
+	if strings.TrimSpace(content) == "" {
+		common.ReplyErr(w, "content required", http.StatusBadRequest)
+		return
+	}
+
+	meta, _, err := parseFrontmatter(content)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(meta.Name)
+	if name == "" {
+		common.ReplyErr(w, "frontmatter name required", http.StatusBadRequest)
+		return
+	}
+	if name != parsed.skillName {
+		common.ReplyErr(w, "frontmatter name and path skill name must match", http.StatusBadRequest)
+		return
+	}
+	category := strings.TrimSpace(meta.Category)
+	if category == "" {
+		common.ReplyErr(w, "frontmatter category required", http.StatusBadRequest)
+		return
+	}
+	if category != parsed.category {
+		common.ReplyErr(w, "frontmatter category and path category must match", http.StatusBadRequest)
+		return
+	}
+
+	description, err := validateParentSkillContent(name, "", content)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	relPath := parentRelativePath(parsed.category, name)
+	var count int64
+	if err := db.WithContext(r.Context()).Model(&orm.SkillResource{}).Where("owner_user_id = ? AND relative_path = ?", userID, relPath).Count(&count).Error; err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if count > 0 {
+		common.ReplyErr(w, "skill already exists", http.StatusConflict)
+		return
+	}
+
+	createReq := createSkillRequest{
+		Name:        name,
+		Description: description,
+		Category:    parsed.category,
+		Content:     content,
+	}
+	if err := createParentSkillWithContent(r.Context(), db, userID, userName, createReq, content, description, resourcechange.Source{ChangeSource: resourcechange.ChangeSourceDirectSave}); err != nil {
+		replySkillError(w, err)
+		return
+	}
+
+	common.ReplyOK(w, map[string]any{
+		"persisted": "remote_fs",
+		"path":      remoteFSJoin(parsed.category, name, "SKILL.md"),
+		"name":      name,
+		"category":  parsed.category,
+	})
+}
+
+func RemoteFSDelete(w http.ResponseWriter, r *http.Request) {
+	db, userID, ok := prepareRemoteFSRequest(w, r, false)
+	if !ok {
+		return
+	}
+	parsed, err := parseRemoteFSPath(r.URL.Query().Get("path"))
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if parsed.category == "" || parsed.skillName == "" || parsed.internalPath != "" {
+		common.ReplyErr(w, "path must be skills/{category}/{name}", http.StatusBadRequest)
+		return
+	}
+
+	var parent orm.SkillResource
+	if err := db.WithContext(r.Context()).Where("owner_user_id = ? AND category = ? AND skill_name = ? AND node_type = ?", userID, parsed.category, parsed.skillName, evolution.SkillNodeTypeParent).Take(&parent).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ReplyErr(w, "skill not found", http.StatusNotFound)
+			return
+		}
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := deleteParentSkill(r.Context(), db, userID, &parent, resourcechange.Source{ChangeSource: resourcechange.ChangeSourceDirectSave}); err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	common.ReplyOK(w, map[string]any{
+		"persisted": "remote_fs",
+		"deleted":   true,
+		"path":      remoteFSJoin(parsed.category, parsed.skillName, ""),
+		"name":      parsed.skillName,
+		"category":  parsed.category,
+	})
+}
+
 func prepareRemoteFSRequest(w http.ResponseWriter, r *http.Request, silent bool) (*gorm.DB, string, bool) {
 	db := store.DB()
 	if db == nil {
@@ -166,6 +306,25 @@ func prepareRemoteFSRequest(w http.ResponseWriter, r *http.Request, silent bool)
 		return nil, "", false
 	}
 	return db, strings.TrimSpace(userID), true
+}
+
+func prepareRemoteFSWriteRequest(w http.ResponseWriter, r *http.Request) (*gorm.DB, string, string, bool) {
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return nil, "", "", false
+	}
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	if sessionID == "" {
+		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
+		return nil, "", "", false
+	}
+	userID, userName, err := evolution.ResolveSessionUser(r.Context(), db, sessionID)
+	if err != nil || strings.TrimSpace(userID) == "" {
+		common.ReplyErr(w, "unable to resolve session user", http.StatusBadRequest)
+		return nil, "", "", false
+	}
+	return db, strings.TrimSpace(userID), strings.TrimSpace(userName), true
 }
 
 func parseRemoteFSPath(raw string) (remoteFSPath, error) {

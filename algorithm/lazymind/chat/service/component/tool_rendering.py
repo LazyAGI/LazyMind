@@ -27,7 +27,7 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'SciverseSearch_meta_search': 'query',
     'SciverseSearch_meta_catalog': 'include_sample_values',
     'ArxivSearch_search': 'query',
-    'memory_editor': 'suggestions.title',
+    'memory_editor': 'target',
     'vocab_learn': 'suggestions.word <-> suggestions.synonym',
     'vision_extractor': 'url',
     'skill_editor': 'category/name',

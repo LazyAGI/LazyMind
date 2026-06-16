@@ -62,6 +62,7 @@ def list_all_skill_entries(skill_fs_url: str) -> Dict[str, Dict[str, str]]:
             'category': category,
             'path': skill_dir,
             'source': extract_skill_fs_source(skill_dir),
+            'content': content,
         }
     return results
 

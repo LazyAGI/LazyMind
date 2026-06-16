@@ -5,7 +5,10 @@ import re
 from typing import Any, Dict, List, Literal, Optional
 
 from lazyllm import AutoModel
-from lazymind.chat.engine.tools.infra import validate_skill_content
+from lazymind.chat.engine.tools.infra import (
+    validate_skill_content,
+    validate_user_preference_content,
+)
 
 try:
     from json_repair import repair_json as _repair_json  # type: ignore
@@ -141,6 +144,12 @@ def _validate_generated_content(task_type: RewriteTaskType, content: Any) -> str
                 'or less after removing whitespace, keeping only the most important '
                 'concise entries.'
             )
+        if task_type == 'user_preference':
+            validation_error = validate_user_preference_content(content)
+            if validation_error:
+                raise UnprocessableContentError(
+                    f'Generated user_preference is invalid: {validation_error}'
+                )
     elif task_type == 'polish' and not content.strip():
         raise UnprocessableContentError("Generated field 'content' must be a non-empty string.")
     return content

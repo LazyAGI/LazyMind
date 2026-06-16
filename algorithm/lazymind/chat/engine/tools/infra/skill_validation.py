@@ -3,18 +3,20 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-_PATH_SEGMENT_RE = re.compile(r'^[^\s/\\]+$')
+_PATH_SEGMENT_RE = re.compile(r'^[A-Za-z0-9._-]+$')
 _FRONTMATTER_RE = re.compile(r'^---\s*\n(.*?)\n---\s*\n(.*)$', re.DOTALL)
 _MAX_DESCRIPTION_LENGTH = 1024
 
 
 def validate_skill_name(name: str) -> Optional[str]:
-    if not name or not name.strip():
+    raw = str(name or '')
+    cleaned = raw.strip()
+    if not cleaned:
         return "'name' must be a non-empty skill name."
-    if name in {'.', '..'} or not _PATH_SEGMENT_RE.match(name):
+    if raw != cleaned or cleaned in {'.', '..'} or not _PATH_SEGMENT_RE.match(cleaned):
         return (
-            f'Skill name {name!r} is invalid; whitespace and slashes '
-            'are not allowed.'
+            f'Skill name {name!r} is invalid; only ASCII letters, digits, '
+            "'-', '_' and '.' are allowed."
         )
     return None
 
@@ -55,11 +57,24 @@ def validate_skill_content(content: str) -> Optional[str]:
     frontmatter, body = parse_skill_frontmatter(content)
     if not frontmatter:
         return 'SKILL.md must contain YAML frontmatter.'
-    if 'name' not in frontmatter:
-        return "Frontmatter must include 'name'."
-    if 'description' not in frontmatter:
-        return "Frontmatter must include 'description'."
-    if len(str(frontmatter.get('description', ''))) > _MAX_DESCRIPTION_LENGTH:
+    name = str(frontmatter.get('name') or '').strip()
+    category = str(frontmatter.get('category') or '').strip()
+    description = str(frontmatter.get('description') or '').strip()
+    if not name:
+        return "Frontmatter must include non-empty 'name'."
+    if not category:
+        return "Frontmatter must include non-empty 'category'."
+    if not description:
+        return "Frontmatter must include non-empty 'description'."
+    name_error = validate_skill_name(name)
+    if name_error:
+        return name_error
+    if normalize_skill_category(category) is None:
+        return (
+            f'Frontmatter category {category!r} is invalid; only ASCII '
+            "letters, digits, '-', '_' and '.' are allowed."
+        )
+    if len(description) > _MAX_DESCRIPTION_LENGTH:
         return f'Description exceeds {_MAX_DESCRIPTION_LENGTH} characters.'
     if not body.strip():
         return 'SKILL.md must have markdown content after frontmatter.'

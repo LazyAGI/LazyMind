@@ -19,10 +19,10 @@ _USER_PREFERENCE_EDIT_OUTPUT_SPEC = (
     '1. Output only a JSON object; no markdown code blocks, no extra text.\n'
     '2. JSON structure must be {"operations": [...]}.\n'
     '3. operations is a list of edit commands that will be applied inside the generate endpoint and then rendered back to full user_preference text.\n'  # noqa: E501
-    '4. When the current text is free-form or not clearly section-structured, prefer {"op":"replace_text","old":"<exact old text>","new":"<new text>"} for local edits.\n'  # noqa: E501
+    '4. The final rendered user_preference text must be a frontmatter-style document: YAML frontmatter delimited by --- followed by Markdown body content.\n'  # noqa: E501
     '5. replace_text always replaces the first matching occurrence only. If that is not safe enough, use replace_all instead of trying to target a later match.\n'  # noqa: E501
     '6. You may output multiple replace_text operations and they will be applied in order.\n'
-    '7. Use {"op":"replace_all","content":"<new full user_preference text>"} only as a last resort when the current text is too malformed or legacy to edit safely with local text replacement operations.\n'  # noqa: E501
+    '7. Use {"op":"replace_all","content":"<new full user_preference text>"} only when the current text is empty, legacy/free-form, or missing the required YAML frontmatter.\n'  # noqa: E501
 )
 
 
@@ -42,11 +42,22 @@ def _build_user_preference_prompt(
         '- Do not record specific experiences, specific project knowledge, or one-time events here; those belong to memory.\n'  # noqa: E501
         '- Do not write as chat logs or journals; organize as itemized profile entries that the agent can quickly read.\n'  # noqa: E501
         '\n'
+        '[Format requirements]\n'
+        '- Must start with YAML frontmatter delimited by `---`, containing at least agent_persona, user_address, and response_style fields, followed by a blank line and Markdown body content.\n'  # noqa: E501
+        '- agent_persona means the role the user wants the agent to play, such as secretary, engineer, reviewer, or research assistant.\n'  # noqa: E501
+        '- user_address means how the user wants the agent to address them, such as a preferred name, title, or pronoun.\n'  # noqa: E501
+        '- When creating response_style or explicitly changing it, display/use exactly one of 简洁, 详细, 幽默, 正式 when the user language is Chinese; otherwise display/use exactly one of concise, detailed, humorous, formal.\n'  # noqa: E501
+        '- Do not put language preferences, formatting rules, citation rules, workflow constraints, task procedures, verbs, or full instructions in response_style; write those details in the Markdown body.\n'  # noqa: E501
+        '- Use "" when agent_persona, user_address, or response_style is unknown. If response_style is missing or invalid during format repair and the user did not specify one, use "".\n'  # noqa: E501
+        '- Modify agent_persona, user_address, or response_style only when user_instruct explicitly asks to change that specific field or clearly states the corresponding stable preference.\n'  # noqa: E501
+        '- If user_instruct only adds ordinary profile/preferences, keep existing frontmatter values unchanged, including an existing valid response_style in either language, and write the new information in the Markdown body.\n'  # noqa: E501
+        '- Write concrete user profile/preference entries in the Markdown body after the closing `---`.\n'  # noqa: E501
+        '\n'
         '[Writing and merging rules]\n'
         '- You do NOT output final user_preference text directly unless you must use replace_all. Normally you output edit operations that will be applied to the existing user_preference inside the generate endpoint.\n'  # noqa: E501
-        "- If the current text is free-form, paragraph-based, or otherwise not clearly section-structured, prefer `replace_text` with an exact old substring and the desired new substring so the user's own writing structure is preserved.\n"  # noqa: E501
+        '- If the current text is empty, free-form, paragraph-based, or missing the required YAML frontmatter, use `replace_all` to convert the whole content to the frontmatter-plus-body format.\n'  # noqa: E501
         '- `replace_text` always replaces the first matching occurrence only. If first-match replacement is unsafe or not enough, use `replace_all` instead.\n'  # noqa: E501
-        '- Prefer small, local `replace_text` edits over rewriting the whole text. Keep untouched user-authored wording and structure exactly as-is whenever possible.\n'  # noqa: E501
+        '- Prefer small, local `replace_text` edits only when the existing content already has the required YAML frontmatter and the edited result will still preserve the frontmatter and body.\n'  # noqa: E501
         '- When preferences conflict, the new preference should replace the old text directly, and user_instruct takes precedence.\n'  # noqa: E501
         '- Keep language concise and neutral; no anthropomorphic comments; only state factual user profile entries.\n'
         '- Use `replace_all` only when the current content cannot be edited safely with local text replacement operations.\n'  # noqa: E501

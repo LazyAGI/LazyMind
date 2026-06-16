@@ -20,11 +20,19 @@ from .skill_registry import (
     list_all_skill_entries,
     list_all_skills_with_category,
 )
+from .skill_remote_store import (
+    create_remote_skill,
+    remove_remote_skill,
+)
 from .skill_validation import (
     normalize_skill_category,
     parse_skill_frontmatter,
     validate_skill_content,
     validate_skill_name,
+)
+from .user_preference_validation import (
+    parse_user_preference_frontmatter,
+    validate_user_preference_content,
 )
 from .suggestion import (
     Suggestion,
@@ -76,6 +84,7 @@ __all__ = [
     'VocabManager',
     'build_skill_identity',
     'clear_vocab_registry',
+    'create_remote_skill',
     'dedupe_vocab_values_keep_order',
     'dump_suggestion',
     'dump_vocab_suggestion',
@@ -91,8 +100,10 @@ __all__ = [
     'normalize_skill_category',
     'opensearch_search',
     'parse_skill_frontmatter',
+    'parse_user_preference_frontmatter',
     'post_core_api',
     'prepare_vocab_candidates',
+    'remove_remote_skill',
     'resolve_index',
     'resolve_vocab_user_id',
     'safe_evaluate_expression',
@@ -106,4 +117,5 @@ __all__ = [
     'tool_success',
     'validate_skill_content',
     'validate_skill_name',
+    'validate_user_preference_content',
 ]

@@ -115,9 +115,9 @@ interface Props {
 
 const DocumentStageEnum = {
   WAITING: "knowledge.pending",
-  WORKING: "knowledge.processing",
-  SUCCESS: "common.success",
-  FAILED: "common.failed",
+  WORKING: "knowledge.stageParsing",
+  SUCCESS: "knowledge.stageParsed",
+  FAILED: "knowledge.stageFailed",
   CANCELED: "knowledge.stageCanceled",
   DELETING: "knowledge.stageDeleting",
   DELETED: "knowledge.stageDeleted",
@@ -125,12 +125,12 @@ const DocumentStageEnum = {
   [DocDocumentStageEnum.DocumentUploaded]: "knowledge.pending",
   [DocDocumentStageEnum.DocumentQueued]: "knowledge.pending",
   [DocDocumentStageEnum.DocumentCrawlingQueued]: "knowledge.pending",
-  [DocDocumentStageEnum.DocumentParsing]: "knowledge.processing",
-  [DocDocumentStageEnum.DocumentCrawling]: "knowledge.processing",
-  [DocDocumentStageEnum.DocumentParseSuccessfully]: "common.success",
-  [DocDocumentStageEnum.DocumentParsingFailed]: "common.failed",
-  [DocDocumentStageEnum.DocumentCrawlingFailed]: "common.failed",
-  [DocDocumentStageEnum.DocumentFailed]: "common.failed",
+  [DocDocumentStageEnum.DocumentParsing]: "knowledge.stageParsing",
+  [DocDocumentStageEnum.DocumentCrawling]: "knowledge.stageParsing",
+  [DocDocumentStageEnum.DocumentParseSuccessfully]: "knowledge.stageParsed",
+  [DocDocumentStageEnum.DocumentParsingFailed]: "knowledge.stageFailed",
+  [DocDocumentStageEnum.DocumentCrawlingFailed]: "knowledge.stageFailed",
+  [DocDocumentStageEnum.DocumentFailed]: "knowledge.stageFailed",
   [DocDocumentStageEnum.DocumentParsingCancelled]: "knowledge.stageCanceled",
 } as const;
 

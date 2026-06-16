@@ -818,7 +818,7 @@ func buildDraftPreviewResponse(ctx context.Context, db *gorm.DB, userID, skillID
 }
 
 func createParentSkill(ctx context.Context, db *gorm.DB, userID, userName string, req createSkillRequest) error {
-	fullContent, description, err := buildParentSkillContent(req.Name, req.Description, req.Content)
+	fullContent, description, err := buildParentSkillContent(req.Name, req.Category, req.Description, req.Content)
 	if err != nil {
 		return err
 	}
@@ -832,7 +832,7 @@ func createParentSkillWithContent(ctx context.Context, db *gorm.DB, userID, user
 	var count int64
 	if err := db.WithContext(ctx).
 		Model(&orm.SkillResource{}).
-		Where("owner_user_id = ? AND node_type = ? AND skill_name = ?", userID, evolution.SkillNodeTypeParent, req.Name).
+		Where("owner_user_id = ? AND category = ? AND node_type = ? AND skill_name = ?", userID, req.Category, evolution.SkillNodeTypeParent, req.Name).
 		Count(&count).Error; err != nil {
 		return err
 	}
@@ -1237,7 +1237,7 @@ func updateParentSkill(ctx context.Context, db *gorm.DB, userID, userName string
 	if req.Description != nil {
 		newDescription = strings.TrimSpace(*req.Description)
 	}
-	newContent, resolvedDescription, err := buildParentSkillContent(newName, newDescription, newBody)
+	newContent, resolvedDescription, err := buildParentSkillContent(newName, newCategory, newDescription, newBody)
 	if err != nil {
 		return err
 	}
@@ -1248,7 +1248,7 @@ func updateParentSkill(ctx context.Context, db *gorm.DB, userID, userName string
 		if oldName != newName {
 			if err := db.WithContext(ctx).
 				Model(&orm.SkillResource{}).
-				Where("owner_user_id = ? AND node_type = ? AND skill_name = ? AND id <> ?", userID, evolution.SkillNodeTypeParent, newName, row.ID).
+				Where("owner_user_id = ? AND category = ? AND node_type = ? AND skill_name = ? AND id <> ?", userID, newCategory, evolution.SkillNodeTypeParent, newName, row.ID).
 				Count(&count).Error; err != nil {
 				return err
 			}
