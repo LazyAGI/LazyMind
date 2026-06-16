@@ -136,7 +136,7 @@ interface PluginPanelProps {
  * Polls for slot updates while session is active.
  */
 export function PluginPanel({ conversationId, pollIntervalMs = 3000 }: PluginPanelProps) {
-  const { session, loading, refresh, selectRevision } = usePluginSession(conversationId);
+  const { session, loading, refresh, selectRevision, advance, retry } = usePluginSession(conversationId);
   const [activeTab, setActiveTab] = React.useState(0);
 
   // Poll for slot updates while session is active.
@@ -164,6 +164,12 @@ export function PluginPanel({ conversationId, pollIntervalMs = 3000 }: PluginPan
     failed: "Failed",
     waiting: "Waiting",
   };
+
+  // Show action buttons only in manual-mode states (waiting = step done, active = step running).
+  // "completed" and "failed" sessions don't need controls.
+  const showActions = session.status === "waiting" || session.status === "active";
+  // Buttons are disabled while a SubAgent is actively running.
+  const buttonsDisabled = session.status === "active";
 
   return (
     <div
@@ -220,6 +226,31 @@ export function PluginPanel({ conversationId, pollIntervalMs = 3000 }: PluginPan
           <AutoSlotGrid session={session} conversationId={conversationId} />
         )}
       </div>
+
+      {showActions && (
+        <div className="plugin-panel__footer" role="group" aria-label="Session controls">
+          <button
+            type="button"
+            className="plugin-panel__action-btn plugin-panel__action-btn--secondary"
+            disabled={buttonsDisabled}
+            aria-disabled={buttonsDisabled}
+            onClick={retry}
+            title={buttonsDisabled ? "Waiting for step to finish…" : "Retry current step"}
+          >
+            Retry
+          </button>
+          <button
+            type="button"
+            className="plugin-panel__action-btn plugin-panel__action-btn--primary"
+            disabled={buttonsDisabled}
+            aria-disabled={buttonsDisabled}
+            onClick={advance}
+            title={buttonsDisabled ? "Waiting for step to finish…" : "Continue to next step"}
+          >
+            Continue
+          </button>
+        </div>
+      )}
     </div>
   );
 }

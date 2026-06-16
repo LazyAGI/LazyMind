@@ -46,6 +46,13 @@ func llmConfigFromBody(reqBody map[string]any) map[string]any {
 	return nil
 }
 
+func toolConfigFromBody(reqBody map[string]any) map[string]any {
+	if cfg, ok := reqBody["tool_config"].(map[string]any); ok && len(cfg) > 0 {
+		return cfg
+	}
+	return nil
+}
+
 func recordConversationIdleAfterPersist(ctx context.Context, db *gorm.DB, rdb *redis.Client, convID, userID, historyID string, at time.Time, query, answer string) {
 	if db == nil || rdb == nil {
 		return
@@ -769,7 +776,7 @@ func streamSingleAnswer(
 	for d := range ch {
 		if d.TaskCreated != nil {
 			userIDForTask, _ := reqBody["user_id"].(string)
-			notice := handleTaskCreated(chatCtx, db, rdb, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody))
+			notice := handleTaskCreated(chatCtx, db, rdb, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody), toolConfigFromBody(reqBody))
 			if notice != nil {
 				taskChunk := &ChatChunkResponse{
 					ConversationID: convID,
@@ -1147,6 +1154,7 @@ func handleTaskCreated(
 	convID, historyID, userID string,
 	ev *TaskCreatedEvent,
 	llmConfig map[string]any,
+	toolConfig map[string]any,
 ) *TaskCreatedNotice {
 	if ev == nil || strings.TrimSpace(ev.TaskID) == "" {
 		return nil
@@ -1154,7 +1162,7 @@ func handleTaskCreated(
 
 	// Plugin Step path — handled separately.
 	if ev.AgentType == "plugin_step" {
-		return handlePluginStepCreated(chatCtx, db, rdb, convID, historyID, userID, ev, llmConfig)
+		return handlePluginStepCreated(chatCtx, db, rdb, convID, historyID, userID, ev, llmConfig, toolConfig)
 	}
 	mode := ev.Mode
 	if mode != "auto" && mode != "manual" {
@@ -1182,6 +1190,7 @@ func handleTaskCreated(
 				DBDSN:         subagent.DBDSN(),
 				Resume:        true,
 				LLMConfig:     llmConfig,
+				ToolConfig:    toolConfig,
 			})
 			return &TaskCreatedNotice{
 				TaskID:            existing.ID,
@@ -1225,6 +1234,7 @@ func handleTaskCreated(
 		DBDSN:         subagent.DBDSN(),
 		Resume:        false,
 		LLMConfig:     llmConfig,
+		ToolConfig:    toolConfig,
 	})
 
 	return &TaskCreatedNotice{
@@ -1246,6 +1256,7 @@ func handlePluginStepCreated(
 	convID, historyID, userID string,
 	ev *TaskCreatedEvent,
 	llmConfig map[string]any,
+	toolConfig map[string]any,
 ) *TaskCreatedNotice {
 	// Parse PluginStepParams from ev.Params.
 	var params plugin.PluginStepParams
@@ -1276,7 +1287,7 @@ func handlePluginStepCreated(
 		ev.TaskID, ev.Title, ev.Objective,
 		params,
 		ev.InputArtifactKeys, ev.OutputArtifactKeys,
-		llmConfig,
+		llmConfig, toolConfig,
 	)
 	if err != nil {
 		fmt.Printf("[Core] [PLUGIN_STEP_FAILED] err=%v\n", err)

@@ -138,10 +138,10 @@ export function PluginSessionApi() {
         options,
       );
     },
-    advanceSession(sessionId: string, options?: RawAxiosRequestConfig) {
+    advanceSession(sessionId: string, action: 'continue' | 'retry' = 'continue', options?: RawAxiosRequestConfig) {
       return axiosInstance.post(
         `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}:advance`,
-        {},
+        { action },
         options,
       );
     },

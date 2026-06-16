@@ -97,6 +97,7 @@ func HandlePluginStepCreated(
 	params PluginStepParams,
 	inputKeys, outputKeys []string,
 	llmConfig map[string]any,
+	toolConfig map[string]any,
 ) (sessionID string, returnedTaskID string, err error) {
 	pluginID := params.PluginID
 	stepID := params.StepID
@@ -198,9 +199,10 @@ func HandlePluginStepCreated(
 			"step_id":    stepID,
 			"session_id": sessionID,
 		},
-		DBDSN:     subagent.DBDSN(),
-		Resume:    false,
-		LLMConfig: llmConfig,
+		DBDSN:      subagent.DBDSN(),
+		Resume:     false,
+		LLMConfig:  llmConfig,
+		ToolConfig: toolConfig,
 	})
 
 	return sessionID, task.ID, nil

@@ -235,14 +235,31 @@ func GetActiveConversationSession(w http.ResponseWriter, r *http.Request) {
 
 // AdvanceSession handles POST /plugin-sessions/{session_id}:advance.
 // This is the §5.5 manual-mode resume path: the frontend calls this after
-// the user confirms they want to proceed. Go inspects the last step status
-// and takes the appropriate action (wait / resume interrupted / trigger ChatAgent).
+// the user confirms they want to proceed or retry the current step.
+//
+// Body (optional): {"action": "continue"|"retry"}  — defaults to "continue".
+//   - "continue": proceed to the next step after the current one succeeds.
+//   - "retry":    re-run the current step from scratch (full retry via self-loop).
 func AdvanceSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := common.PathVar(r, "session_id")
 	if sessionID == "" {
 		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
 		return
 	}
+
+	var body struct {
+		Action string `json:"action"` // "continue" | "retry"; default "continue"
+	}
+	// Ignore decode errors — body is optional; default action is "continue".
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	if body.Action == "" {
+		body.Action = "continue"
+	}
+	if body.Action != "continue" && body.Action != "retry" {
+		common.ReplyErr(w, `action must be "continue" or "retry"`, http.StatusBadRequest)
+		return
+	}
+
 	db := store.DB()
 	rdb := store.Redis()
 	if db == nil {
@@ -303,14 +320,20 @@ func AdvanceSession(w http.ResponseWriter, r *http.Request) {
 		common.ReplyOK(w, map[string]any{"action": "resumed", "task_id": task.ID})
 
 	case StepStatusSucceeded:
-		// Step already succeeded; synthesise a "user confirmed" message into ChatAgent via Go core.
-		syntheticMsg := fmt.Sprintf("Step %s completed. User confirmed. Please proceed.", session.CurrentStepID)
 		_ = UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive)
+		var syntheticMsg string
+		if body.Action == "retry" {
+			// User wants to redo the current step (full retry via state-machine self-loop).
+			syntheticMsg = fmt.Sprintf("Step %s completed but user wants to retry it. Please re-run step %s from scratch.", session.CurrentStepID, session.CurrentStepID)
+		} else {
+			// Default: user confirmed, proceed to next step.
+			syntheticMsg = fmt.Sprintf("Step %s completed. User confirmed. Please proceed.", session.CurrentStepID)
+		}
 		go triggerNextChatTurn(
 			session.ConversationID, sessionID, session.PluginID,
 			session.CurrentStepID, userID, syntheticMsg,
 		)
-		common.ReplyOK(w, map[string]any{"action": "advancing", "message": syntheticMsg})
+		common.ReplyOK(w, map[string]any{"action": body.Action, "message": syntheticMsg})
 
 	default:
 		common.ReplyErr(w, fmt.Sprintf("step status %q is not resumable", step.Status), http.StatusConflict)

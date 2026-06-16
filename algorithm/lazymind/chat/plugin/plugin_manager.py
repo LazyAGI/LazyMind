@@ -127,6 +127,10 @@ def _trigger_plugin_step(
 
     # --- Layer 1: format validation (no DB needed) ---
     if not user_input or not user_input.strip():
+        # Fall back to the current conversation query so the SubAgent always
+        # receives meaningful context even when the LLM omits user_input.
+        user_input = cfg.get('query', '').strip()
+    if not user_input:
         return 'Error: user_input must not be empty.'
 
     sm = plugin_loader.get_state_machine(plugin_id)
@@ -301,7 +305,13 @@ def build_cold_start_tools() -> List[Any]:
             _trigger.__doc__ = (
                 f'{tool_desc}\n\n'
                 'Args:\n'
-                "    user_input (str): The user's original request.\n\n"
+                '    user_input (str): A concise goal statement for the SubAgent that\n'
+                '        will execute this step.  Synthesise the key intent from the\n'
+                '        conversation — do NOT pass vague phrases like "继续", "请继续",\n'
+                '        or "continue".  Include: what the user wants to achieve, any\n'
+                '        style / quality constraints they mentioned, and relevant context\n'
+                '        from the chat history.  Example: "生成一张科幻风格的宇宙飞船插画，\n'
+                '        线条简洁，色调冷蓝，适合作为游戏启动画面背景".\n\n'
                 'Returns:\n'
                 '    Confirmation that the plugin was started.'
             )
@@ -376,8 +386,13 @@ def build_advance_step_tool(
         'Args:\n'
         '    step_id (str): The step to advance to.  Must be one of the\n'
         '        currently available steps listed above.\n'
-        "    user_input (str): The user's latest input or instruction\n"
-        '        relevant to this step.\n'
+        '    user_input (str): A concise goal statement for the SubAgent that\n'
+        '        will execute this step.  Synthesise the key intent from the\n'
+        '        conversation — do NOT pass vague phrases like "继续", "请继续",\n'
+        '        "好的", or "continue".  Include: what the user wants to achieve,\n'
+        '        constraints or preferences they expressed (style, quality, format),\n'
+        '        and any relevant context from prior steps or the chat history.\n'
+        '        Example for a retry: "重新生成图片，保持科幻风格，但人物表情要更有力量感".\n'
         '    runtime_instruction (str, optional): An ephemeral directive that\n'
         "        constrains the SubAgent's execution for this run only, e.g.\n"
         '        for partial retries.  Leave empty for normal full runs.\n'

@@ -204,6 +204,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         'mode': mode if mode in ('auto', 'manual') else 'auto',
         'has_subagents': bool(has_subagents),
         'conversation_id': (conversation_id or '').strip(),
+        'query': query or '',
     }
 
     # Plugin context injection
@@ -227,13 +228,14 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
             sm = plugin_loader.get_state_machine(p_plugin_id)
             forward_steps = sm.get_reachable_steps(p_current_step) if sm else []
 
-            # Compute rewind candidates: topological ancestors that have succeeded.
+            # Compute rewind candidates: topological ancestors that have succeeded,
+            # plus the current step itself if it has already succeeded (allows retry).
             rewind_steps: list = []
             if sm and p_session_id and p_current_step:
                 ancestors = sm.get_ancestors(p_current_step)
-                if ancestors:
-                    succeeded = plugin_manager._fetch_succeeded_steps(p_session_id)
-                    rewind_steps = sorted(ancestors & succeeded)
+                succeeded = plugin_manager._fetch_succeeded_steps(p_session_id)
+                candidates = ancestors | {p_current_step}
+                rewind_steps = sorted(candidates & succeeded)
 
             # Build step_labels from plugin spec for display in the docstring.
             step_labels: dict = {}

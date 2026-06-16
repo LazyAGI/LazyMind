@@ -12,6 +12,7 @@ from lazymind.chat.engine.agent_core import build_react_agent, drive_agent
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 
 from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, build_agent_tools
+from lazyllm.tools.tool_config_inject import inject_tool_config
 
 from .context import SubAgentContext, set_context
 from .db import SubAgentDB
@@ -225,6 +226,7 @@ async def run_subagent_stream(
     db_dsn: str,
     resume: bool = False,
     model_config: Optional[Dict[str, Any]] = None,
+    tool_config: Optional[Dict[str, Any]] = None,
     agent_type: Optional[str] = None,
     tools: Optional[List[str]] = None,
 ):
@@ -285,6 +287,7 @@ async def run_subagent_stream(
         lazyllm.globals._init_sid(sid=sid)
         lazyllm.locals._init_sid(sid=sid)
         inject_model_config(model_config)
+        inject_tool_config(tool_config)
         set_context(ctx)
 
         yield _sse({'type': 'task_start', 'task_id': task_id})

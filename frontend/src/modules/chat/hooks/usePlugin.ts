@@ -12,6 +12,7 @@ export function usePluginSession(conversationId: string) {
   const refreshSlots = usePluginStore((s) => s.refreshSlots);
   const patchSlot = usePluginStore((s) => s.patchSlot);
   const advanceSession = usePluginStore((s) => s.advanceSession);
+  const retrySession = usePluginStore((s) => s.retrySession);
 
   useEffect(() => {
     loadActiveSession(conversationId);
@@ -38,7 +39,13 @@ export function usePluginSession(conversationId: string) {
     }
   }, [conversationId, session?.session_id, advanceSession]);
 
-  return { session, loading, refresh, selectRevision, advance };
+  const retry = useCallback(() => {
+    if (session?.session_id) {
+      retrySession(conversationId, session.session_id);
+    }
+  }, [conversationId, session?.session_id, retrySession]);
+
+  return { session, loading, refresh, selectRevision, advance, retry };
 }
 
 /**

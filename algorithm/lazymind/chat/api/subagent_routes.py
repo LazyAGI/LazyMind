@@ -29,6 +29,7 @@ async def run_subagent(
     ] = None,
     resume: Annotated[Optional[bool], Body(description='Resume from persisted steps when true')] = False,
     llm_config: Annotated[Optional[Dict[str, Any]], Body(description='Per-request model config')] = None,
+    tool_config: Annotated[Optional[Dict[str, Any]], Body(description='Per-request tool credentials (API keys)')] = None,
 ):
     return StreamingResponse(
         run_subagent_stream(
@@ -36,6 +37,7 @@ async def run_subagent(
             db_dsn=db_dsn,
             resume=bool(resume),
             model_config=llm_config,
+            tool_config=tool_config,
             agent_type=agent_type,
             tools=tools,
         ),
