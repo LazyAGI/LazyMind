@@ -113,6 +113,7 @@ type getSkillDetailAPITestResponse struct {
 
 func newSkillTestDB(t *testing.T) *orm.DB {
 	t.Helper()
+	disableBuiltinSkillsForTest()
 
 	builtinCatalogOnce = sync.Once{}
 	builtinCatalogOnce.Do(func() {
@@ -163,6 +164,13 @@ func testBuiltinSkill(uid, category, name string) builtinSkill {
 			},
 		},
 	}
+}
+
+func disableBuiltinSkillsForTest() {
+	builtinCatalog = []builtinSkill{}
+	builtinCatalogErr = nil
+	builtinCatalogOnce = sync.Once{}
+	builtinCatalogOnce.Do(func() {})
 }
 
 func createSkillPatchReviewResult(t *testing.T, db *orm.DB, id, userID, skillName, content string, at time.Time) {
