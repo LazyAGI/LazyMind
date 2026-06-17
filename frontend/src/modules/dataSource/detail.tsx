@@ -301,17 +301,20 @@ function getDocumentType(name: string) {
   return extension.toLowerCase();
 }
 
-function mapScanSyncDetail(updateState: DocumentStatusRow["updateState"]) {
+function mapScanSyncDetail(
+  updateState: DocumentStatusRow["updateState"],
+  t: TFunction,
+) {
   if (updateState === "new") {
-    return "新文件待入库";
+    return t("admin.dataSourceFileUpdateNewDetail");
   }
   if (updateState === "changed") {
-    return "内容变化待重解析";
+    return t("admin.dataSourceFileUpdateChangedDetail");
   }
   if (updateState === "deleted") {
-    return "源端删除待清理";
+    return t("admin.dataSourceFileUpdateDeletedDetail");
   }
-  return "当前文件已是最新";
+  return t("admin.dataSourceFileUpdateUnchangedDetail");
 }
 
 function stringifyScanError(value: unknown) {
@@ -325,7 +328,7 @@ function stringifyScanError(value: unknown) {
   return `${value}`;
 }
 
-function mapScanDocumentToDetail(item: ScanV2Document): DocumentStatusRow {
+function mapScanDocumentToDetail(item: ScanV2Document, t: TFunction): DocumentStatusRow {
   const sourceState = resolveSourceState({
     source_state: item.source_state,
     update_type: item.update_type || item.source_state,
@@ -355,7 +358,7 @@ function mapScanDocumentToDetail(item: ScanV2Document): DocumentStatusRow {
     size: formatBytes(item.size_bytes),
     tags: item.tags || [],
     updateState,
-    syncDetail: item.update_desc || mapScanSyncDetail(updateState),
+    syncDetail: item.update_desc || mapScanSyncDetail(updateState, t),
     parseStatus: normalizeDataSourceParseStatus(parseState),
     sourceUpdatedAt: lastSyncedAt || "-",
     updatedAt: lastSyncedAt || "-",
@@ -577,6 +580,7 @@ function sleep(ms: number) {
 async function waitForCloudSyncRun(
   client: ScanV2Client,
   sourceId: string,
+  t: TFunction,
   runId?: string,
 ) {
   const deadline = Date.now() + CLOUD_SYNC_TIMEOUT_MS;
@@ -594,13 +598,13 @@ async function waitForCloudSyncRun(
       status.includes("ERROR") ||
       status.includes("CANCEL")
     ) {
-      throw new Error("飞书云同步失败，请检查绑定配置后重试。");
+      throw new Error(t("admin.dataSourceDetailCloudSyncFailedFallback"));
     }
 
     await sleep(CLOUD_SYNC_POLL_INTERVAL_MS);
   }
 
-  throw new Error("等待飞书目录同步超时，请稍后重试。");
+  throw new Error(t("admin.dataSourceDetailCloudSyncTimeout"));
 }
 
 export default function DataSourceDetail() {
@@ -912,7 +916,7 @@ export default function DataSourceDetail() {
       options: { selectAll?: boolean; closeOnError?: boolean } = {},
     ) => {
       if (!detailSource?.id) {
-        message.error("未获取到数据源信息，无法加载目录树。");
+        message.error(t("admin.dataSourceDetailMissingForTree"));
         if (options.closeOnError) {
           setSyncPickerOpen(false);
         }
@@ -1087,7 +1091,7 @@ export default function DataSourceDetail() {
 
   const openSyncPicker = () => {
     if (!detailSource?.id) {
-      message.error("未获取到数据源信息，无法加载目录树。");
+      message.error(t("admin.dataSourceDetailMissingForTree"));
       return;
     }
 
@@ -1109,7 +1113,7 @@ export default function DataSourceDetail() {
     }
 
     if (!detailSource?.id) {
-      message.error("未获取到数据源信息，无法发起拉取。");
+      message.error(t("admin.dataSourceDetailMissingForSync"));
       return false;
     }
 

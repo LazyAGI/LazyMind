@@ -4,6 +4,8 @@ import {
   ArrowLeftOutlined,
   CheckCircleOutlined,
 } from "@ant-design/icons";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import "./feishuSetupGuide.scss";
 
@@ -22,96 +24,103 @@ const FEISHU_FINE_GRAINED_PERMISSIONS = [
   "docx:document",
 ];
 
-const guideSteps = [
+type GuideStep = {
+  title: string;
+  description: string;
+  image: string;
+  alt: string;
+  details?: string[];
+  linkLabel?: string;
+  linkHref?: string;
+};
+
+function buildGuideSteps(t: TFunction, permissionSeparator: string): GuideStep[] {
+  const permissions = FEISHU_FINE_GRAINED_PERMISSIONS.join(permissionSeparator);
+  const stepKey = (key: string) => `admin.dataSourceFeishuSetupGuide.steps.${key}`;
+  return [
   {
-    title: "进入飞书开发平台",
-    description:
-      "打开飞书开放平台后，点击右上角的开发者后台，进入企业自建应用管理页面。这里会创建一个专门给 LazyMind 使用的飞书授权应用。",
-    linkLabel: "打开飞书开发平台",
+    title: t(stepKey("openPlatformTitle")),
+    description: t(stepKey("openPlatformDesc")),
+    linkLabel: t("admin.dataSourceFeishuSetupGuide.openPlatform"),
     linkHref: FEISHU_OPEN_PLATFORM_URL,
     image: "/docs/feishu-setup/step-10.png",
-    alt: "飞书开发平台首页与开发者后台入口",
+    alt: t(stepKey("openPlatformAlt")),
   },
   {
-    title: "创建企业自建应用",
-    description:
-      "进入开发者后台后，点击创建企业自建应用，准备创建一个专门用于飞书数据源接入的应用。",
+    title: t(stepKey("createAppTitle")),
+    description: t(stepKey("createAppDesc")),
     image: "/docs/feishu-setup/step-09.png",
-    alt: "飞书开发者后台创建企业自建应用入口",
+    alt: t(stepKey("createAppAlt")),
   },
   {
-    title: "填写应用名称和描述",
-    description:
-      "填写应用名称和应用描述并完成创建。建议名称里带上 LazyMind 或数据源用途，后续在飞书后台和 LazyMind 中都更容易识别。",
+    title: t(stepKey("appInfoTitle")),
+    description: t(stepKey("appInfoDesc")),
     image: "/docs/feishu-setup/step-08.png",
-    alt: "飞书企业自建应用名称和描述表单",
+    alt: t(stepKey("appInfoAlt")),
   },
   {
-    title: "开通所需权限",
-    description:
-      "创建应用后进入权限管理页面，点击开通权限，搜索并添加 LazyMind 访问飞书数据源所需的权限。注意，如果想访问个人名下的知识，一定要配置用户身份权限(user_access_token)，而不是应用身份权限。",
+    title: t(stepKey("permissionsTitle")),
+    description: t(stepKey("permissionsDesc")),
     details: [
-      "通用版本：添加 offline_access、drive、wiki、docx，并勾选对应权限即可。",
-      `细致版本：${FEISHU_FINE_GRAINED_PERMISSIONS.join("、")}`,
+      t(stepKey("permissionsSimple")),
+      t("admin.dataSourceFeishuSetupGuide.fineGrainedPermissions", { permissions }),
     ],
     image: "/docs/feishu-setup/step-07.png",
-    alt: "飞书开放平台权限管理页面与开通权限入口",
+    alt: t(stepKey("permissionsAlt")),
   },
   {
-    title: "发布应用版本",
-    description:
-      "完成权限配置后，进入版本管理与发布，提交新版本并确认发布。发布成功后，新权限才会正式生效。",
+    title: t(stepKey("publishTitle")),
+    description: t(stepKey("publishDesc")),
     image: "/docs/feishu-setup/step-06.png",
-    alt: "飞书开放平台确认发布应用版本弹窗",
+    alt: t(stepKey("publishAlt")),
   },
   {
-    title: "配置重定向 URL",
-    description:
-      "进入安全设置，将系统的 OAuth 回调地址加入重定向 URL。这个地址必须和系统发起授权时使用的回调地址一致。",
+    title: t(stepKey("redirectTitle")),
+    description: t(stepKey("redirectDesc")),
     details: [
-      `回调地址格式：http://前端应用的 IP 和端口${FEISHU_CALLBACK_PATH}`,
+      t("admin.dataSourceFeishuSetupGuide.callbackFormat", {
+        path: FEISHU_CALLBACK_PATH,
+      }),
     ],
     image: "/docs/feishu-setup/step-05.png",
-    alt: "飞书开放平台安全设置中的重定向 URL 配置页面",
+    alt: t(stepKey("redirectAlt")),
   },
   {
-    title: "复制 App ID 与 App Secret",
-    description:
-      "回到应用的凭证与基础信息页面，复制 App ID 和 App Secret，准备粘贴到系统里。",
+    title: t(stepKey("credentialsTitle")),
+    description: t(stepKey("credentialsDesc")),
     image: "/docs/feishu-setup/step-04.png",
-    alt: "飞书开放平台应用凭证页面中的 App ID 与 App Secret",
+    alt: t(stepKey("credentialsAlt")),
   },
   {
-    title: "回到系统填写飞书凭据",
-    description:
-      "回到数据源管理，打开飞书 App 凭据弹窗，填入刚刚复制的 App ID 和 App Secret，并保存。",
+    title: t(stepKey("enterCredentialsTitle")),
+    description: t(stepKey("enterCredentialsDesc")),
     image: "/docs/feishu-setup/step-03.png",
-    alt: "系统内填写飞书 App ID 与 App Secret 的弹窗",
+    alt: t(stepKey("enterCredentialsAlt")),
   },
   {
-    title: "复制飞书文件夹 ID",
-    description:
-      "在飞书云文档中打开目标文件夹，复制浏览器地址栏中的文件夹 ID；如果接入 Wiki，则复制对应的 Wiki 空间 ID。",
+    title: t(stepKey("copyFolderTitle")),
+    description: t(stepKey("copyFolderDesc")),
     details: [
-      "目标类型可根据你的接入目标选择 Drive 文件夹或 Wiki。",
-      "Drive 文件夹场景下，可直接从浏览器地址栏复制文件夹 ID。",
+      t(stepKey("copyFolderDetailTarget")),
+      t(stepKey("copyFolderDetailDrive")),
     ],
     image: "/docs/feishu-setup/step-02.png",
-    alt: "飞书云文档文件夹地址栏中的文件夹 ID",
+    alt: t(stepKey("copyFolderAlt")),
   },
   {
-    title: "填写文件夹 ID 并完成授权",
-    description:
-      "回到数据源创建弹窗，选择目标类型，填入上一步复制的 ID，然后点击连接账号完成 OAuth 授权并保存配置。",
+    title: t(stepKey("finishTitle")),
+    description: t(stepKey("finishDesc")),
     details: [
-      "授权前请先在飞书云盘中创建文件夹，并把文件夹目录地址复制到 LazyMind。",
+      t(stepKey("finishDetail")),
     ],
     image: "/docs/feishu-setup/step-01.png",
-    alt: "系统内填写飞书文件夹 ID 并发起授权",
+    alt: t(stepKey("finishAlt")),
   },
-];
+  ];
+}
 
 export default function FeishuSetupGuide() {
+  const { i18n, t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const pageRef = useRef<HTMLDivElement | null>(null);
@@ -119,7 +128,10 @@ export default function FeishuSetupGuide() {
   const stepRefs = useRef<Array<HTMLElement | null>>([]);
   const isFromCreateSource =
     new URLSearchParams(location.search).get("from") === "create-source";
-  const orderedGuideSteps = guideSteps;
+  const orderedGuideSteps = buildGuideSteps(
+    t,
+    i18n.language === "zh-CN" ? "、" : ", ",
+  );
 
   const scrollToStep = (index: number) => {
     const page = pageRef.current;
@@ -151,18 +163,23 @@ export default function FeishuSetupGuide() {
               navigate(isFromCreateSource ? "/data-sources" : "/data-sources/providers/feishu")
             }
           >
-            {isFromCreateSource ? "返回新建数据源" : "返回飞书账号"}
+            {isFromCreateSource
+              ? t("admin.dataSourceFeishuSetupGuide.backCreateSource")
+              : t("admin.dataSourceFeishuSetupGuide.backAccounts")}
           </Button>
-          <h1>数据源管理-新建数据源-飞书</h1>
+          <h1>{t("admin.dataSourceFeishuSetupGuide.title")}</h1>
           <Paragraph className="feishu-setup-guide-subtitle">
-            从飞书开发平台创建企业自建应用，并在 LazyMind 中完成飞书数据源授权。
+            {t("admin.dataSourceFeishuSetupGuide.subtitle")}
           </Paragraph>
         </div>
       </header>
 
       <main className="feishu-setup-guide-shell">
-        <aside className="feishu-setup-guide-summary" aria-label="飞书接入流程概览">
-          <Text strong>准备流程</Text>
+        <aside
+          className="feishu-setup-guide-summary"
+          aria-label={t("admin.dataSourceFeishuSetupGuide.summaryAria")}
+        >
+          <Text strong>{t("admin.dataSourceFeishuSetupGuide.summaryTitle")}</Text>
           <ol>
             {orderedGuideSteps.map((step, index) => (
               <li key={step.title}>
@@ -222,7 +239,7 @@ export default function FeishuSetupGuide() {
                   alt={step.alt}
                   loading="lazy"
                   preview={{
-                    mask: "点击放大查看",
+                    mask: t("admin.dataSourceFeishuSetupGuide.zoomMask"),
                   }}
                 />
               </figure>
