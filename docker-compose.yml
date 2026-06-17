@@ -366,13 +366,16 @@ services:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-frontend:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
-      context: ./frontend
+      context: .
+      dockerfile: frontend/Dockerfile
       args:
         <<: *mirror-args
     ports:
       - "${LAZYMIND_FRONTEND_PORT:-8090}:80"
     expose:
       - "80"
+    volumes:
+      - ./plugins:/usr/share/nginx/html/plugins:ro
     depends_on:
       kong:
         condition: service_started
@@ -666,6 +669,7 @@ services:
       - *lazyllm-src-mount
       # Router mode: mount algorithm source so child processes can load different versions.
       - ./algorithm/lazymind:/opt/lazymind
+      - ./plugins:/app/plugins:ro
     healthcheck:
       test: ['CMD-SHELL', 'curl -sf http://localhost:8046/health || exit 1']
       interval: 10s
@@ -706,6 +710,7 @@ services:
       LAZYMIND_ROUTER_PORTS_PER_INSTANCE: 100
       LAZYMIND_ROUTER_DEFAULT_ALGO_PATH: /opt/lazymind/chat
       LAZYMIND_ROUTER_DEFAULT_INSTANCE_COUNT: 1
+      LAZYMIND_PLUGINS_DIR: /app/plugins
       <<: [*runtime-home, *trace-config, *proxy-env, *db-conn, *core-db-conn, *llm-api-keys, *upload-paths]
     command: ["python", "-m", "lazymind.router.app", "--port", "8046"]
     depends_on:

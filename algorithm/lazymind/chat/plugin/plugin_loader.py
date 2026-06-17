@@ -1,11 +1,14 @@
-"""Plugin loader — discovers and validates plugin packages under plugin/plugins/.
+"""Plugin loader — discovers and validates plugin packages under the plugins directory.
 
-Each plugin lives at plugin/plugins/<plugin-id>/ and must contain:
+Each plugin lives at <plugins-dir>/<plugin-id>/ and must contain:
   - plugin.yaml          (required) — registration metadata
   - scenario/scenario.md (required) — ChatAgent intent-recognition guide
   - scenario/state.yml   (required) — state machine + step execution spec
   - scenario/driver.md   (optional, required for auto mode) — DriverAgent prompt
   - scripts/             (optional) — plugin-local tool implementations
+
+The plugins directory is configured via lazymind.config['plugins_dir'] (env: LAZYMIND_PLUGINS_DIR),
+falling back to plugin/plugins/ relative to this file for local development.
 
 Loaded plugins are cached at import time (startup). Hot-reload is not supported.
 """
@@ -20,10 +23,12 @@ from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 
+from lazymind.config import config as _cfg
+
 LOG = logging.getLogger(__name__)
 
-# Base directory for all plugin packages.
-_PLUGINS_DIR = Path(__file__).parent / 'plugins'
+# Base directory for all plugin packages, configured via lazymind config.
+_PLUGINS_DIR = Path(_cfg['plugins_dir'])
 
 # Registry: {plugin_id: PluginSpec}
 _registry: Dict[str, 'PluginSpec'] = {}
