@@ -10,6 +10,19 @@ from core.redis_client import redis_client
 BACKEND_ENV = 'LAZYMIND_STATE_BACKEND'
 SQLITE_DIR_ENV = 'LAZYMIND_STATE_SQLITE_DIR'
 SQLITE_PATH_ENV = 'LAZYMIND_STATE_SQLITE_PATH'
+_STORE_LOCK = threading.Lock()
+
+
+def _lazymind_config_value(key: str) -> str | None:
+    try:
+        from lazymind.config import config as _cfg
+    except Exception:
+        return None
+    try:
+        value = _cfg[key]
+    except Exception:
+        return None
+    return str(value).strip() if value is not None else None
 
 
 class StateStore(Protocol):
@@ -151,15 +164,18 @@ def _sqlite_path() -> str:
 
 
 def state_backend() -> str:
-    return (os.environ.get(BACKEND_ENV) or 'redis').strip().lower() or 'redis'
+    return (_lazymind_config_value('backend') or os.environ.get(BACKEND_ENV) or 'redis').strip().lower() or 'redis'
 
 
 def state_store() -> StateStore:
     global _STORE
     if _STORE is not None:
         return _STORE
-    if state_backend() == 'sqlite':
-        _STORE = SQLiteStateStore(_sqlite_path())
-    else:
-        _STORE = RedisStateStore()
+    with _STORE_LOCK:
+        if _STORE is not None:
+            return _STORE
+        if state_backend() == 'sqlite':
+            _STORE = SQLiteStateStore(_sqlite_path())
+        else:
+            _STORE = RedisStateStore()
     return _STORE

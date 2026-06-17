@@ -1,10 +1,15 @@
 import os
+import threading
+import time
 
 import redis
 
 
 _CLIENT: redis.Redis | None = None
+_CLIENT_LOCK = threading.Lock()
 REDIS_URL_ENV = 'LAZYMIND_REDIS_URL'
+REDIS_CONNECT_RETRIES = 10
+REDIS_CONNECT_RETRY_INTERVAL_SECONDS = 1.0
 
 
 def redis_url() -> str:
@@ -14,13 +19,8 @@ def redis_url() -> str:
     return url
 
 
-def redis_client() -> redis.Redis:
-    global _CLIENT
-    if _CLIENT is not None:
-        return _CLIENT
-
-    url = redis_url()
-    _CLIENT = redis.Redis.from_url(
+def _build_redis_client(url: str) -> redis.Redis:
+    return redis.Redis.from_url(
         url,
         decode_responses=True,
         socket_connect_timeout=5,
@@ -33,4 +33,31 @@ def redis_client() -> redis.Redis:
         ],
         max_connections=50,
     )
-    return _CLIENT
+
+
+def redis_client() -> redis.Redis:
+    global _CLIENT
+    if _CLIENT is not None:
+        return _CLIENT
+
+    with _CLIENT_LOCK:
+        if _CLIENT is not None:
+            return _CLIENT
+
+        url = redis_url()
+        last_error: Exception | None = None
+        for attempt in range(REDIS_CONNECT_RETRIES):
+            client = _build_redis_client(url)
+            try:
+                client.ping()
+            except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as exc:
+                last_error = exc
+                if attempt < REDIS_CONNECT_RETRIES - 1:
+                    time.sleep(REDIS_CONNECT_RETRY_INTERVAL_SECONDS)
+                    continue
+                raise
+            _CLIENT = client
+            return _CLIENT
+
+        assert last_error is not None
+        raise last_error

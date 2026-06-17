@@ -153,10 +153,13 @@ make test-hermetic
 | Scenario | Command |
 |----------|---------|
 | Standard | `make up` |
+| No-Redis local stack (SQLite state backend) | `make up-build LAZYMIND_STATE_BACKEND=sqlite` |
 | Deploy MinerU OCR (on-prem) | `make up LAZYMIND_DEPLOY_MINERU=1` |
 | Deploy PaddleOCR (on-prem) | `make up LAZYMIND_DEPLOY_PADDLEOCR=1` |
 | External Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 | Enable store dashboards | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
+
+`LAZYMIND_STATE_BACKEND=sqlite` stores short-lived chat/auth/subagent state in SQLite and skips the Redis compose profile. Omit it, or set `LAZYMIND_STATE_BACKEND=redis`, to run the default Redis-backed stack.
 
 ---
 

@@ -102,6 +102,9 @@ export LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD ?= admin
 export LAZYMIND_RESET_ALGO_ON_STARTUP ?= false
 export LAZYMIND_RESET_ALL_ON_STARTUP ?= false
 export LAZYLLM_ALGO_REGISTER_POLICY ?= none
+# Short-lived shared state backend used by chat streams, auth refresh tokens,
+# login rate limits, subagent task streams, and conversation idle timers.
+# Use sqlite for a no-Redis local stack; redis remains the default production-like mode.
 LAZYMIND_STATE_BACKEND := $(if $(strip $(LAZYMIND_STATE_BACKEND)),$(strip $(LAZYMIND_STATE_BACKEND)),redis)
 export LAZYMIND_STATE_BACKEND
 
@@ -171,6 +174,7 @@ help:
 	@echo "  make up-build   - Build images and start services"
 	@echo "                    Use SERVICES=svc1,svc2 to target specific services"
 	@echo "                    Use LAZYMIND_STATE_BACKEND=sqlite to run without Redis"
+	@echo "                    Example: make up-build LAZYMIND_STATE_BACKEND=sqlite"
 	@echo "  make down       - Stop services"
 	@echo "                    Use SERVICES=svc1,svc2 to stop specific services only"
 	@echo "  make build      - Build compose services (mineru profile only when needed)"
