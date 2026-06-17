@@ -4,7 +4,7 @@
 # dependencies = ["httpx>=0.27", "python-dotenv>=1.0"]
 # ///
 
-"""Configure and verify LazyMind providers from bootstrap environment."""
+"""Configure, verify, and validate LazyMind providers from bootstrap environment."""
 
 from __future__ import annotations
 
@@ -64,20 +64,23 @@ class BootstrapError(RuntimeError):
 
 def parse_args() -> None:
     argparse.ArgumentParser(
-        description="Bootstrap LazyMind model/cloud providers and verify them.",
+        description="Bootstrap LazyMind model/cloud providers, verify groups, and validate selections.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Configuration sources:\n"
             "  1. ~/lazymind.bootstrap.env (highest priority)\n"
             "  2. Process environment variables\n\n"
             "Run:\n"
-            "  uv run scripts/lazymind_bootstrap.py\n\n"
+            "  uv run scripts/bootstrap.py\n\n"
             "Common variables:\n"
             "  LAZYMIND_BOOTSTRAP_ADMIN_USERNAME=admin\n"
             "  LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD=admin\n"
             "  LAZYMIND_BOOTSTRAP_BASE_URL=http://localhost:8090\n"
             "  LAZYMIND_MODEL_PROVIDERS=SiliconFlow\n"
             "  LAZYMIND_CLOUD_SERVICES=Bocha,MinerU\n"
+            "  LAZYMIND_MODEL_PROVIDER_SILICONFLOW_API_KEY=sk-...\n"
+            "  LAZYMIND_CLOUD_SERVICE_BOCHA_API_KEY=sk-...\n"
+            "  LAZYMIND_CLOUD_SERVICE_MINERU_API_KEY=sk-...\n"
             "  LAZYMIND_DEFAULT_LLM=Qwen/Qwen3-32B\n"
             "  LAZYMIND_DEFAULT_EMBED_MAIN=Qwen/Qwen3-Embedding-8B\n"
             "  LAZYMIND_DEFAULT_EMBED_IMAGE=Qwen/Qwen3-VL-Embedding-8B\n"
@@ -103,6 +106,15 @@ def squashed(value: str) -> str:
 
 def slug(value: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-") or "provider"
+
+
+def bool_field(row: dict[str, Any], key: str) -> bool:
+    value = row.get(key)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y"}
+    return bool(value)
 
 
 def load_config() -> dict[str, str]:
@@ -168,7 +180,7 @@ class LazyMindClient:
     def __init__(self, config: dict[str, str]) -> None:
         timeout = float(config.get("LAZYMIND_BOOTSTRAP_TIMEOUT", "60"))
         self.config = config
-        self.client = httpx.Client(timeout=timeout, headers={"Accept": "application/json", "User-Agent": "lazymind-bootstrap/4.0"})
+        self.client = httpx.Client(timeout=timeout, headers={"Accept": "application/json", "User-Agent": "lazymind-bootstrap/5.0"})
         self.base = ""
         self.core_prefix = ""
         self.token = ""
@@ -256,6 +268,16 @@ def available_names(names: list[str], providers: list[dict[str, Any]]) -> list[s
     return [name for name in names if find_provider(name, providers)]
 
 
+def find_group(groups: list[dict[str, Any]], group_name: str) -> dict[str, Any] | None:
+    exact = [g for g in groups if str(g.get("name", "")) == group_name]
+    return exact[0] if exact else None
+
+
+def group_api_key_matches(group: dict[str, Any], api_key: str) -> bool:
+    current = str(group.get("api_key") or "")
+    return not api_key or current == api_key
+
+
 def ensure_groups(lm: LazyMindClient, providers: list[dict[str, Any]], names: list[str], api_keys: dict[str, str]) -> list[dict[str, Any]]:
     ready: list[dict[str, Any]] = []
     for requested in names:
@@ -269,27 +291,49 @@ def ensure_groups(lm: LazyMindClient, providers: list[dict[str, Any]], names: li
         group_name = f"bootstrap-{slug(provider_name)}"
         base_url = str(provider.get("base_url") or "").rstrip("/")
         api_key = api_keys.get(token(provider_name)) or api_keys.get(token(requested), "")
-        group = next((g for g in lm.groups(provider_id) if str(g.get("name", "")) == group_name), None)
-        group = group or (lm.groups(provider_id)[0] if lm.groups(provider_id) else None)
-        payload = {"name": group_name if group is None else str(group.get("name") or group_name), "base_url": base_url, "api_key": api_key, "verify": True}
+        group = find_group(lm.groups(provider_id), group_name)
 
+        payload = {"name": group_name, "base_url": base_url, "api_key": api_key, "verify": False}
         if group:
             group_id = str(group.get("id") or "")
             if not group_id:
                 raise BootstrapError(f"provider group has no id: {group}")
-            if str(group.get("base_url") or "").rstrip("/") != base_url or (api_key and str(group.get("api_key") or "") != api_key):
+            needs_update = (
+                str(group.get("name") or "") != group_name
+                or str(group.get("base_url") or "").rstrip("/") != base_url
+                or not group_api_key_matches(group, api_key)
+            )
+            if needs_update:
                 lm.core("PATCH", f"/model_providers/{provider_id}/groups/{group_id}", json=payload)
-                print(f"updated group {payload['name']} for {provider_name}")
+                print(f"updated group {group_name} for {provider_name}")
             else:
-                print(f"reuse group {payload['name']} for {provider_name}")
+                print(f"reuse group {group_name} for {provider_name}")
         else:
             data = lm.core("POST", f"/model_providers/{provider_id}/groups", json=payload)
             group_id = str(data.get("id") if isinstance(data, dict) else "")
             if not group_id:
                 raise BootstrapError(f"create group returned no id: {data}")
             print(f"created group {group_name} for {provider_name}")
-        ready.append({"provider_id": provider_id, "group_id": group_id, "name": provider_name, "base_url": base_url, "api_key": api_key})
+
+        ready.append({"provider_id": provider_id, "group_id": group_id, "group_name": group_name, "name": provider_name, "base_url": base_url, "api_key": api_key})
     return ready
+
+
+def require_verified_groups(lm: LazyMindClient, groups: list[dict[str, Any]]) -> None:
+    for group in groups:
+        data = lm.core(
+            "POST",
+            f"/model_providers/{group['provider_id']}/groups/{group['group_id']}:check",
+            json={"provider_name": group["name"], "base_url": group["base_url"], "api_key": group["api_key"], "dry_run": False},
+        )
+        ok = bool(data.get("success", True)) if isinstance(data, dict) else True
+        if not ok:
+            raise BootstrapError(f"verification failed for {group['name']}: {data}")
+
+        refreshed = find_group(lm.groups(group["provider_id"]), group["group_name"])
+        if not refreshed or not bool_field(refreshed, "is_verified"):
+            raise BootstrapError(f"verification did not persist for {group['name']} group {group['group_id']}")
+        print(f"verify {group['name']} ({group['group_name']}): PASS")
 
 
 def choose_model_id(groups: list[dict[str, Any]], model_key: str, wanted: str) -> str | None:
@@ -299,7 +343,11 @@ def choose_model_id(groups: list[dict[str, Any]], model_key: str, wanted: str) -
         if str(model.get("model_type") or model.get("type") or "") not in accepted_types:
             return False
         name = str(model.get("name") or "")
-        return name == wanted if mode == "exact" else name.casefold() == wanted.casefold() if mode == "casefold" else token(name) == token(wanted)
+        if mode == "exact":
+            return name == wanted
+        if mode == "casefold":
+            return name.casefold() == wanted.casefold()
+        return token(name) == token(wanted)
 
     for mode in ("exact", "casefold", "normalized"):
         for group in groups:
@@ -309,24 +357,26 @@ def choose_model_id(groups: list[dict[str, Any]], model_key: str, wanted: str) -
     return None
 
 
-def configure_models(lm: LazyMindClient, groups: list[dict[str, Any]]) -> None:
+def configure_models(lm: LazyMindClient, groups: list[dict[str, Any]]) -> list[dict[str, str]]:
     groups_with_models = [{**g, "models": lm.models(g["provider_id"], g["group_id"])} for g in groups]
-    selections = []
+    selections: list[dict[str, str]] = []
     for model_key, model_name in default_models(lm.config).items():
         model_id = choose_model_id(groups_with_models, model_key, model_name)
         if not model_id:
             raise BootstrapError(f"default model not found: {model_key} -> {model_name}")
         selections.append({"model_key": model_key, "model_id": model_id})
-    if selections:
-        lm.core("PUT", "/model_providers/selected_models", json={"selections": selections})
-        print(f"set selected models: {[item['model_key'] for item in selections]}")
-    else:
+    if not selections:
         print("no default models configured")
+        return []
+
+    lm.core("PUT", "/model_providers/selected_models", json={"selections": selections})
+    print(f"set selected models: {[item['model_key'] for item in selections]}")
+    return selections
 
 
-def configure_service_defaults(lm: LazyMindClient, groups: list[dict[str, Any]]) -> None:
+def configure_service_defaults(lm: LazyMindClient, groups: list[dict[str, Any]]) -> list[dict[str, str]]:
     by_name = {squashed(g["name"]): g for g in groups}
-    selections = []
+    selections: list[dict[str, str]] = []
     for category in ("ocr", "search"):
         wanted = lm.config.get(f"LAZYMIND_DEFAULT_{category.upper()}", "").strip()
         if wanted and (group := by_name.get(squashed(wanted))):
@@ -336,31 +386,40 @@ def configure_service_defaults(lm: LazyMindClient, groups: list[dict[str, Any]])
     if selections:
         lm.core("PUT", "/model_providers/selected_providers", json={"selections": selections})
         print(f"set selected providers: {[item['category'] for item in selections]}")
+    return selections
 
 
-def check_groups(lm: LazyMindClient, groups: list[dict[str, Any]]) -> None:
-    for group in groups:
-        data = lm.core(
-            "POST",
-            f"/model_providers/{group['provider_id']}/groups/{group['group_id']}:check",
-            json={"provider_name": group["name"], "base_url": group["base_url"], "api_key": group["api_key"], "dry_run": True},
-        )
-        ok = bool(data.get("success", True)) if isinstance(data, dict) else True
-        print(f"check {group['name']} ({group['group_id']}): {'PASS' if ok else 'FAIL'}")
-        if not ok:
-            raise BootstrapError(f"verification failed for {group['name']}: {data}")
+def assert_selected_models(lm: LazyMindClient, expected: list[dict[str, str]]) -> None:
+    if not expected:
+        return
+    rows = list_rows(lm.core("GET", "/model_providers/selected_models"), "selections")
+    actual = {str(item.get("model_key") or item.get("model_type") or ""): str(item.get("model_id") or item.get("user_model_provider_group_model_id") or "") for item in rows}
+    missing = [item for item in expected if actual.get(item["model_key"]) != item["model_id"]]
+    if missing:
+        raise BootstrapError(f"selected model validation failed: expected {missing}, actual {actual}")
+    print(f"validate selected models: PASS ({[item['model_key'] for item in expected]})")
+
+
+def assert_selected_providers(lm: LazyMindClient, expected: list[dict[str, str]]) -> None:
+    if not expected:
+        return
+    rows = list_rows(lm.core("GET", "/model_providers/selected_providers"), "selections")
+    actual = {str(item.get("category") or ""): str(item.get("group_id") or "") for item in rows}
+    missing = [item for item in expected if actual.get(item["category"]) != item["group_id"]]
+    if missing:
+        raise BootstrapError(f"selected provider validation failed: expected {missing}, actual {actual}")
+    print(f"validate selected providers: PASS ({[item['category'] for item in expected]})")
 
 
 def print_current_selection(lm: LazyMindClient) -> None:
     models = list_rows(lm.core("GET", "/model_providers/selected_models"), "selections")
     providers = list_rows(lm.core("GET", "/model_providers/selected_providers"), "selections")
-def print_current_selection(lm: LazyMindClient) -> None:
-    models = list_rows(lm.core("GET", "/model_providers/selected_models"), "selections")
-    providers = list_rows(lm.core("GET", "/model_providers/selected_providers"), "selections")
-    model_map = {item.get("model_key"): item.get("model_id") for item in models}
+    model_map = {item.get("model_key") or item.get("model_type"): item.get("model_id") or item.get("user_model_provider_group_model_id") for item in models}
     provider_map = {item.get("category"): item.get("group_id") for item in providers}
     print(f"current selected models: {model_map}")
     print(f"current selected providers: {provider_map}")
+
+
 def run() -> None:
     config = load_config()
     lm = LazyMindClient(config)
@@ -378,9 +437,11 @@ def run() -> None:
         service_groups = ensure_groups(lm, ocr_providers, available_names(cloud_names, ocr_providers), cloud_keys)
         service_groups += ensure_groups(lm, search_providers, available_names(cloud_names, search_providers), cloud_keys)
 
-        configure_models(lm, model_groups)
-        configure_service_defaults(lm, service_groups)
-        check_groups(lm, model_groups + service_groups)
+        require_verified_groups(lm, model_groups + service_groups)
+        model_selections = configure_models(lm, model_groups)
+        provider_selections = configure_service_defaults(lm, service_groups)
+        assert_selected_models(lm, model_selections)
+        assert_selected_providers(lm, provider_selections)
         print_current_selection(lm)
     finally:
         lm.close()
