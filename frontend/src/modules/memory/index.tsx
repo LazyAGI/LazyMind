@@ -196,7 +196,7 @@ const isReviewableSuggestionStatus = (status?: string) => {
   return normalized === "pending";
 };
 const isPendingReviewStatus = (status?: string) =>
-  ["pending", "padding"].includes(String(status || "").trim().toLowerCase());
+  String(status || "").trim().toLowerCase() === "pending";
 const isSkillRemoveSuggestion = (suggestion: EvolutionSuggestionRecord) =>
   String(suggestion.action || "").trim().toLowerCase() === "remove";
 const normalizeAutoEvoApplyStatus = (status?: string) =>
@@ -212,10 +212,7 @@ const getAutoEvoStatusMeta = (status?: string) => {
   return { color: "blue" as const, text: "等待进化建议" };
 };
 const hasDraftPreviewStatus = (record: ExperienceAsset) =>
-  Boolean(record.hasPendingReviewSuggestions) ||
-  isPendingReviewStatus(record.reviewStatus) ||
-  isReviewableSuggestionStatus(record.suggestionStatus) ||
-  Boolean(normalizeAutoEvoApplyStatus(record.autoEvoApplyStatus));
+  isPendingReviewStatus(record.reviewStatus);
 const hasSkillDraftPreviewStatus = (record: StructuredAsset) =>
   Boolean(record.hasPendingReviewResult) ||
   Boolean(record.hasPendingReviewSuggestions) ||
@@ -5798,9 +5795,7 @@ export default function MemoryManagement() {
       key: "title",
       width: 320,
       render: (_value, record) => {
-        const pendingProposal = getPendingProposal("experience", record.id);
-        const hasReviewableDraft = hasDraftPreviewStatus(record);
-        const showPendingTag = !record.autoEvo && (Boolean(pendingProposal) || hasReviewableDraft);
+        const showPendingTag = hasDraftPreviewStatus(record);
         const autoEvoStatusMeta = record.autoEvo
           ? getAutoEvoStatusMeta(record.autoEvoApplyStatus)
           : null;

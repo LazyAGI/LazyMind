@@ -2733,67 +2733,19 @@ export function SelfEvolutionPageController({
     setIsHistorySessionModalOpen(false);
   };
 
-  const onSelectHistorySession = async (entry: HistorySessionEntry) => {
-    const nextPreviewKey = entry.threadId || entry.sessionId || entry.key;
-    if (!nextPreviewKey) {
+  const onSelectHistorySession = (entry: HistorySessionEntry) => {
+    const nextSessionKey = entry.threadId || entry.sessionId || entry.key;
+    if (!nextSessionKey) {
       return;
     }
 
-    if (previewHistoryKey === nextPreviewKey) {
-      setPreviewHistoryKey(undefined);
-      setHistoryPreviewTitle("");
-      setHistoryPreviewMessages([]);
-      setHistoryPreviewError("");
-      enterHistorySession(entry);
-      return;
-    }
-
-    const requestId = historyPreviewRequestIdRef.current + 1;
-    historyPreviewRequestIdRef.current = requestId;
-    setPreviewHistoryKey(nextPreviewKey);
-    setHistoryPreviewTitle(entry.title || "历史对话");
+    historyPreviewRequestIdRef.current += 1;
+    setPreviewHistoryKey(undefined);
+    setHistoryPreviewTitle("");
     setHistoryPreviewMessages([]);
     setHistoryPreviewError("");
     setIsLoadingHistoryPreview(false);
-    setActiveWorkbenchTab("processes");
-    setActiveArtifactKind(undefined);
-    setCaseArtifact(undefined);
-    setIsHistorySessionModalOpen(false);
-
-    if (entry.sessionId) {
-      const matchedSession = chatSessions.find((session) => session.id === entry.sessionId);
-      setHistoryPreviewMessages(matchedSession?.messages || []);
-      return;
-    }
-
-    if (!entry.threadId) {
-      return;
-    }
-
-    setIsLoadingHistoryPreview(true);
-    try {
-      const encodedThreadId = encodeURIComponent(entry.threadId);
-      const historyPayload = (
-        await axiosInstance.get(`${AGENT_API_BASE}/threads/${encodedThreadId}/history`)
-      ).data as ThreadRestorePayload;
-      if (historyPreviewRequestIdRef.current !== requestId) {
-        return;
-      }
-      setHistoryPreviewTitle(getThreadTitleFromHistoryPayload(historyPayload) || entry.title || "历史对话");
-      setHistoryPreviewMessages(normalizeThreadHistoryMessages(historyPayload));
-    } catch (error) {
-      if (historyPreviewRequestIdRef.current !== requestId || isCanceledRequest(error)) {
-        return;
-      }
-      setHistoryPreviewError(
-        getLocalizedErrorMessage(error, "历史对话预览失败，请再次点击进入完整会话。") ||
-          "历史对话预览失败，请再次点击进入完整会话。",
-      );
-    } finally {
-      if (historyPreviewRequestIdRef.current === requestId) {
-        setIsLoadingHistoryPreview(false);
-      }
-    }
+    enterHistorySession(entry);
   };
 
   const resetToEmptySession = () => {
