@@ -31,7 +31,8 @@ def prepare_physical_attempt(seed_workspace: Path, attempt: int,
 def _prepare_physical_attempt(seed_workspace: Path, attempt: int, memory: dict[str, Any],
                               root: Path) -> tuple[Path, dict[str, Any]]:
     original = root / 'baselines' / 'original'
-    if not original.exists(): _copy_workspace(seed_workspace, original, root)
+    if not original.exists():
+        _copy_workspace(seed_workspace, original, root)
     original_status = _workspace_status(original)
     if not isinstance(memory.get('best_baseline'), dict):
         memory['best_baseline'] = {
@@ -143,13 +144,15 @@ def apply_branch_decision(workspace: Path, before_state: dict[str, Any],
     attempt = int(branch_decision.get('attempt') or 0)
     if decision in RESTORE_BEST_DECISIONS:
         checkpoint = checkpoint_current_branch(workspace, attempt, decision, required=False)
-        if checkpoint.get('status') == 'failed': return checkpoint
+        if checkpoint.get('status') == 'failed':
+            return checkpoint
         restore = (fork_physical_from_best(workspace, before_state, attempt) if physical
                    else restore_to_best_baseline(workspace, before_state))
         return {**restore, 'candidate_checkpoint': checkpoint}
     if decision == 'stop_failed':
         checkpoint = checkpoint_current_branch(workspace, attempt, decision, required=False)
-        if checkpoint.get('status') == 'failed': return checkpoint
+        if checkpoint.get('status') == 'failed':
+            return checkpoint
         status = _workspace_status(workspace)
         return {'status': 'passed', 'action': 'stop_failed', 'decision': decision,
                 'checkpoint_status': checkpoint.get('checkpoint_status', 'not_run'),
@@ -159,10 +162,12 @@ def apply_branch_decision(workspace: Path, before_state: dict[str, Any],
                 'after_head': checkpoint.get('after_head') or status['git_head']}
     if decision in KEEP_CURRENT_BRANCH_DECISIONS:
         checkpoint = checkpoint_current_branch(workspace, attempt, decision)
-        if not physical or checkpoint.get('status') == 'failed': return checkpoint
+        if not physical or checkpoint.get('status') == 'failed':
+            return checkpoint
         if decision in {'promote_to_best', 'accept_verified'}:
             snapshot = snapshot_physical_best(workspace, before_state, attempt)
-            if snapshot.get('status') == 'failed': return snapshot
+            if snapshot.get('status') == 'failed':
+                return snapshot
             return {**checkpoint, **snapshot, 'active_workspace_ref': str(workspace)}
         return {**checkpoint, 'active_workspace_ref': str(workspace)}
     return {'status': 'failed', 'action': 'physical_decision' if physical else 'record_decision',
@@ -225,15 +230,18 @@ def checkpoint_current_branch(workspace: Path, attempt: int, decision: str, *, r
                 'checkpoint_status': 'failed', 'before_head': before['git_head'], **extra, 'failure': failure}
 
     if not changed:
-        if required: return fail('checkpoint_requires_dirty_patch')
+        if required:
+            return fail('checkpoint_requires_dirty_patch')
         return {'status': 'passed', 'action': 'keep_current_branch', 'decision': decision,
                 'checkpoint_status': 'not_needed', 'before_head': before['git_head'],
                 'after_head': before['git_head']}
     add = _git_result(workspace, ['add', '--', *changed])
-    if add.returncode: return fail((add.stderr or add.stdout).strip()[:300])
+    if add.returncode:
+        return fail((add.stderr or add.stdout).strip()[:300])
     commit = _git_result(workspace, ['-c', 'user.email=evo@example.local', '-c', 'user.name=evo',
                                      'commit', '-m', f'repair attempt {attempt}'])
-    if commit.returncode: return fail((commit.stderr or commit.stdout).strip()[:300])
+    if commit.returncode:
+        return fail((commit.stderr or commit.stdout).strip()[:300])
     after = _workspace_status(workspace)
     if after['working_tree_status'] != 'clean':
         return fail('workspace_dirty_after_checkpoint', after_head=after['git_head'])
@@ -285,7 +293,8 @@ def _workspace_hash(workspace: Path) -> str:
     digest = hashlib.sha256()
     for path in sorted(workspace.rglob('*')):
         rel = path.relative_to(workspace).as_posix()
-        if not path.is_file() or _ignored(rel): continue
+        if not path.is_file() or _ignored(rel):
+            continue
         digest.update(rel.encode())
         digest.update(path.read_bytes())
     return f'sha256:{digest.hexdigest()}'
@@ -313,10 +322,13 @@ def _git_status(workspace: Path) -> tuple[list[str], list[str], list[str]]:
     for line in _git(workspace, ['status', '--porcelain', '--untracked-files=all']).splitlines():
         code = line[:2]
         path = line[3:].split(' -> ')[-1] if len(line) >= 4 else ''
-        if _ignored(path): continue
+        if _ignored(path):
+            continue
         dirty.append(path)
-        if code == '??' or 'A' in code: created.append(path)
-        if 'D' in code: deleted.append(path)
+        if code == '??' or 'A' in code:
+            created.append(path)
+        if 'D' in code:
+            deleted.append(path)
     return sorted(set(dirty)), sorted(set(created)), sorted(set(deleted))
 
 
@@ -340,7 +352,8 @@ def _restore_worktree(workspace: Path) -> None:
     dirty, created, _ = _git_status(workspace)
     created_set = set(created)
     tracked = sorted(path for path in dirty if path not in created_set)
-    if tracked: _git(workspace, ['restore', '--staged', '--worktree', '--', *tracked])
+    if tracked:
+        _git(workspace, ['restore', '--staged', '--worktree', '--', *tracked])
     if created:
         _git(workspace, ['restore', '--staged', '--', *created])
         subprocess.run(['git', '-c', f'safe.directory={workspace}', '-C', str(workspace), 'clean', '-fd', '--',
@@ -348,24 +361,29 @@ def _restore_worktree(workspace: Path) -> None:
 
 
 def _state_status(decision: str, status: dict[str, Any]) -> str:
-    if decision == 'stop_failed': return 'failed'
+    if decision == 'stop_failed':
+        return 'failed'
     if decision in {'fork_from_best', 'abandon_direction'} and status.get('working_tree_status') == 'clean':
         return 'reset_to_best'
-    if status.get('working_tree_status') == 'dirty': return 'dirty_explained'
+    if status.get('working_tree_status') == 'dirty':
+        return 'dirty_explained'
     return 'ready'
 
 
 def _active_base_commit(before_state: dict[str, Any], decision: str, status: dict[str, Any]) -> str:
     if decision in {'fork_from_best', 'abandon_direction'}:
         return str(((before_state.get('best_baseline') or {}).get('baseline_commit') or status['git_head']))
-    if decision in {'promote_to_best', 'accept_verified'}: return status['git_head']
+    if decision in {'promote_to_best', 'accept_verified'}:
+        return status['git_head']
     return str(((before_state.get('active_branch') or {}).get('base_commit') or status['git_head']))
 
 
 def _active_base_kind(before_state: dict[str, Any], decision: str) -> str:
     best = before_state.get('best_baseline') if isinstance(before_state.get('best_baseline'), dict) else {}
-    if decision in {'promote_to_best', 'accept_verified'}: return 'best_intermediate'
-    if decision in {'fork_from_best', 'abandon_direction'} and best.get('patch_ref'): return 'best_intermediate'
+    if decision in {'promote_to_best', 'accept_verified'}:
+        return 'best_intermediate'
+    if decision in {'fork_from_best', 'abandon_direction'} and best.get('patch_ref'):
+        return 'best_intermediate'
     return 'original'
 
 
@@ -373,7 +391,8 @@ def _best_baseline(before_state: dict[str, Any], branch_decision: dict[str, Any]
                    evaluation: dict[str, Any], status: dict[str, Any],
                    apply_result: dict[str, Any] | None = None) -> dict[str, Any]:
     previous = before_state.get('best_baseline') if isinstance(before_state.get('best_baseline'), dict) else {}
-    if branch_decision.get('decision') not in {'promote_to_best', 'accept_verified'}: return previous
+    if branch_decision.get('decision') not in {'promote_to_best', 'accept_verified'}:
+        return previous
     apply_result = apply_result or {}
     overall = (evaluation.get('overall_eval') or {}).get('summary') or {}
     bad = (evaluation.get('badcase_eval') or {}).get('summary') or {}
@@ -392,7 +411,8 @@ def _best_baseline(before_state: dict[str, Any], branch_decision: dict[str, Any]
 
 
 def _patch_lineage(before_state: dict[str, Any], branch_decision: dict[str, Any], patch: dict[str, Any]) -> list[str]:
-    if branch_decision.get('decision') in {'fork_from_best', 'abandon_direction', 'stop_failed'}: return []
+    if branch_decision.get('decision') in {'fork_from_best', 'abandon_direction', 'stop_failed'}:
+        return []
     existing = [str(item) for item in ((before_state.get('active_branch') or {}).get('patch_lineage') or [])
                 if str(item)]
     patch_ref = f"{patch.get('id')}@v1" if patch.get('id') else ''
@@ -431,10 +451,13 @@ def _physical_attempt_source(memory: dict[str, Any], original: Path) -> tuple[Pa
     active_workspace = Path(str(active.get('workspace_ref') or ''))
     best_patch_ref = str(best.get('patch_ref') or '')
     needs_active = bool(lineage and (not best_patch_ref or lineage[-1] != best_patch_ref))
-    if needs_active and not active_workspace.exists(): raise ValueError('active_branch_workspace_missing')
-    if needs_active: return active_workspace, _workspace_status(active_workspace)['git_head']
+    if needs_active and not active_workspace.exists():
+        raise ValueError('active_branch_workspace_missing')
+    if needs_active:
+        return active_workspace, _workspace_status(active_workspace)['git_head']
     best_workspace = Path(str(best.get('workspace_ref') or original))
-    if not best_workspace.exists(): best_workspace = original
+    if not best_workspace.exists():
+        best_workspace = original
     return best_workspace, str(best.get('baseline_commit') or _workspace_status(best_workspace)['git_head'])
 
 
@@ -445,13 +468,15 @@ def _physical_root(seed_workspace: Path, memory: dict[str, Any] | None = None) -
 
 def _copy_workspace(source: Path, target: Path, root: Path) -> None:
     source, target, root = source.resolve(), target.resolve(), root.resolve()
-    if root == target or root not in target.parents: raise ValueError(f'physical copy target outside root: {target}')
+    if root == target or root not in target.parents:
+        raise ValueError(f'physical copy target outside root: {target}')
     allowed = {root / 'baselines', root / 'branches'}
     if not any(parent == target or parent in target.parents for parent in allowed):
         raise ValueError(f'physical copy target outside baselines/branches: {target}')
     if source == target or source in target.parents or target in source.parents:
         raise ValueError(f'physical copy source/target overlap: {source} -> {target}')
-    if target.exists(): shutil.rmtree(target)
+    if target.exists():
+        shutil.rmtree(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, target, ignore=_copy_ignore)
 

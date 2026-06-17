@@ -58,6 +58,7 @@ type threadFlowStatusResponse struct {
 	LatestAbtestID     any      `json:"latest_abtest_id,omitempty"`
 	LatestAbtestStatus any      `json:"latest_abtest_status,omitempty"`
 	ReportReady        bool     `json:"report_ready,omitempty"`
+	PendingCheckpoint  any      `json:"pending_checkpoint,omitempty"`
 }
 
 type threadStatusesResponse struct {
@@ -351,7 +352,7 @@ func StreamThreadEvents(w http.ResponseWriter, r *http.Request) {
 		Msg("agent thread events load thread completed")
 
 	upstreamURL := threadEventsURL(threadID)
-	lastUpstreamEventID := ""
+	lastUpstreamEventID := strings.TrimSpace(r.URL.Query().Get("since"))
 	for {
 		if r.Context().Err() != nil {
 			return
@@ -413,6 +414,7 @@ func StreamThreadEvents(w http.ResponseWriter, r *http.Request) {
 		if streamErr != nil {
 			log.Logger.Warn().Err(streamErr).Str("thread_id", threadID).Msg("consume upstream thread events stream failed")
 		}
+		emitPendingCheckpointWait(w, flusher, r, threadID)
 		select {
 		case <-flowStopped:
 			log.Logger.Info().
@@ -434,6 +436,31 @@ func StreamThreadEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func emitPendingCheckpointWait(w http.ResponseWriter, flusher http.Flusher, r *http.Request, threadID string) {
+	flowStatus, err := fetchThreadFlowStatus(r.Context(), r, threadID)
+	if err != nil || flowStatus == nil {
+		if err != nil {
+			log.Logger.Warn().Err(err).Str("thread_id", threadID).Msg("fetch checkpoint flow status failed")
+		}
+		return
+	}
+	status := strings.ToLower(strings.TrimSpace(flowStatus.Status))
+	if status != "waiting_checkpoint" && status != "paused" {
+		return
+	}
+	checkpoint, ok := flowStatus.PendingCheckpoint.(map[string]any)
+	if !ok || len(checkpoint) == 0 {
+		return
+	}
+	payload := make(map[string]any, len(checkpoint)+2)
+	payload["type"] = "checkpoint.wait"
+	payload["thread_id"] = threadID
+	for key, value := range checkpoint {
+		payload[key] = value
+	}
+	writeNamedSSE(w, flusher, "", payload)
+}
+
 func GetThreadResultDatasets(w http.ResponseWriter, r *http.Request) {
 	getThreadResults(w, r, "datasets")
 }
@@ -447,10 +474,24 @@ func GetThreadResultDiffs(w http.ResponseWriter, r *http.Request) { getThreadRes
 func GetThreadResultAbtests(w http.ResponseWriter, r *http.Request) {
 	getThreadResults(w, r, "abtests")
 }
+func GetThreadFlowStatus(w http.ResponseWriter, r *http.Request) {
+	proxyThreadGet(w, r, func(threadID string) string { return threadFlowStatusURL(threadID) }, "fetch thread flow status failed")
+}
+func GetThreadArtifact(w http.ResponseWriter, r *http.Request) {
+	artifactID := strings.TrimSpace(mux.Vars(r)["artifact_id"])
+	if artifactID == "" {
+		common.ReplyErr(w, "artifact_id required", http.StatusBadRequest)
+		return
+	}
+	proxyThreadGet(w, r, func(threadID string) string { return threadArtifactURL(threadID, artifactID) }, "fetch thread artifact failed")
+}
 func StartThread(w http.ResponseWriter, r *http.Request)  { postThreadAction(w, r, "start") }
 func PauseThread(w http.ResponseWriter, r *http.Request)  { postThreadAction(w, r, "pause") }
 func CancelThread(w http.ResponseWriter, r *http.Request) { postThreadAction(w, r, "cancel") }
 func RetryThread(w http.ResponseWriter, r *http.Request)  { postThreadAction(w, r, "retry") }
+func ContinueThread(w http.ResponseWriter, r *http.Request) {
+	postThreadAction(w, r, "continue")
+}
 
 func writeUserActiveThreadSSEError(w http.ResponseWriter, threadID string, err error) {
 	var activeErr *userActiveThreadError
@@ -601,6 +642,24 @@ func getThreadResults(w http.ResponseWriter, r *http.Request, resultKind string)
 	writeProxyResponse(w, proxy)
 }
 
+func proxyThreadGet(w http.ResponseWriter, r *http.Request, urlFor func(string) string, errorMessage string) {
+	threadID := strings.TrimSpace(mux.Vars(r)["thread_id"])
+	if threadID == "" {
+		common.ReplyErr(w, "thread_id required", http.StatusBadRequest)
+		return
+	}
+	if _, err := loadUserThread(store.DB(), r, threadID); err != nil {
+		replyThreadLoadError(w, err)
+		return
+	}
+	proxy, statusCode, err := fetchUpstreamProxy(r.Context(), r, urlFor(threadID))
+	if err != nil {
+		common.ReplyErrWithData(w, errorMessage, map[string]any{"detail": err.Error()}, statusCode)
+		return
+	}
+	writeProxyResponse(w, proxy)
+}
+
 func postThreadAction(w http.ResponseWriter, r *http.Request, action string) {
 	threadID := strings.TrimSpace(mux.Vars(r)["thread_id"])
 	if threadID == "" {
@@ -611,7 +670,7 @@ func postThreadAction(w http.ResponseWriter, r *http.Request, action string) {
 		replyThreadLoadError(w, err)
 		return
 	}
-	if action == "start" || action == "retry" {
+	if action == "start" || action == "retry" || action == "continue" {
 		if err := ensureUserCanActivateThread(r.Context(), store.DB(), r, threadID); err != nil {
 			replyUserActiveThreadError(w, err)
 			return
@@ -620,7 +679,7 @@ func postThreadAction(w http.ResponseWriter, r *http.Request, action string) {
 	var proxy *upstreamProxyResponse
 	var statusCode int
 	var err error
-	if action == "start" || action == "retry" {
+	if action == "start" || action == "retry" || action == "continue" {
 		payload, _, decodeErr := decodeRequestBody(r)
 		if decodeErr != nil {
 			common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", decodeErr), http.StatusBadRequest)

@@ -17,7 +17,8 @@ def bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
 
 
 def strings(value: Any) -> list[str]:
-    if value is None: return []
+    if value is None:
+        return []
     values = [value] if isinstance(value, str) else value if isinstance(value, (list, tuple, set)) else [value]
     return [str(item).strip() for item in values if item is not None and str(item).strip()]
 
@@ -34,17 +35,22 @@ def progress(ctx, phase: str, status: str, message: str, **kwargs: Any) -> None:
 
 
 def json_object(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict): return value
+    if isinstance(value, dict):
+        return value
     raw = str(value).strip()
-    if raw.endswith('```'): raw = raw[: raw.rfind('```')].rstrip()
-    if raw.endswith('</think>'): raw = raw[: -len('</think>')].rstrip()
+    if raw.endswith('```'):
+        raw = raw[: raw.rfind('```')].rstrip()
+    if raw.endswith('</think>'):
+        raw = raw[: -len('</think>')].rstrip()
     decoder = json.JSONDecoder()
     for match in reversed(list(re.finditer(r'\{', raw))):
         try:
             data, end = decoder.raw_decode(raw[match.start():])
         except json.JSONDecodeError:
             continue
-        if isinstance(data, dict) and not raw[match.start() + end:].strip(): return data
+        if isinstance(data, dict) and not raw[match.start() + end:].strip():
+            return data
     data = repair_json_loads(raw)
-    if not isinstance(data, dict): raise ValueError('expected JSON object')
+    if not isinstance(data, dict):
+        raise ValueError('expected JSON object')
     return data

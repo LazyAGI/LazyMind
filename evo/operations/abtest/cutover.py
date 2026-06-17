@@ -32,14 +32,16 @@ class CompareABTestOperation:
         if ctx.params.get('case_ids') is not None:
             raise ValueError('case_ids is not supported; compare uses full EvalReport case set')
         primary = str(ctx.params.get('primary_metric') or 'answer_correctness')
-        if primary not in METRICS: raise ValueError(f'unsupported primary_metric: {primary}')
+        if primary not in METRICS:
+            raise ValueError(f'unsupported primary_metric: {primary}')
         policy = {'primary_metric': primary, 'target_mean_delta': self._ratio(ctx.params, 'target_mean_delta', 0.02),
                   'goodcase_regression_ratio_limit': self._ratio(ctx.params, 'goodcase_regression_ratio_limit', 0.34),
                   'regression_epsilon': self._ratio(ctx.params, 'regression_epsilon', 0.02)}
         before, after = self._judge_rows(ctx, base), self._judge_rows(ctx, cand)
         if set(before) != set(after):
             raise ValueError(f'EvalReport case sets mismatch: {sorted(set(before) ^ set(after))}')
-        if not before: raise ValueError('ABTest comparison case_ids cannot be empty')
+        if not before:
+            raise ValueError('ABTest comparison case_ids cannot be empty')
         case_ids = sorted(before)
         rows = [self._delta(case_id, before[case_id], after[case_id], policy) for case_id in case_ids]
         b, a = (self._summary([rows_by_id[case_id] for case_id in case_ids]) for rows_by_id in (before, after))
@@ -59,9 +61,12 @@ class CompareABTestOperation:
         ci = self._bootstrap_ci(deltas)
         delta_reached, guard_ok = delta >= target, guard['passed']
         decisive = len(deltas) >= MIN_DECISIVE_CASES and (ci['lower'] > 0 or ci['upper'] < 0)
-        if delta_reached and guard_ok and decisive: status = 'accept'
-        elif delta_reached and guard_ok: status = 'inconclusive'
-        else: status = 'reject'
+        if delta_reached and guard_ok and decisive:
+            status = 'accept'
+        elif delta_reached and guard_ok:
+            status = 'inconclusive'
+        else:
+            status = 'reject'
         decision = {'status': status, 'primary_metric': key, 'primary_delta': delta,
                     'target_mean_delta': target, 'bootstrap_ci': ci,
                     'reasons': [f"primary metric delta {delta} {'>=' if delta_reached else '<'} target {target}",
@@ -91,7 +96,8 @@ class CompareABTestOperation:
             ref = ArtifactRef.parse(str(raw_ref))
             judge = typed_payload(ctx, ref, 'JudgeResult')
             case_id = validate_case_id(str(judge.get('case_id') or ''))
-            if case_id in rows: raise ValueError(f'duplicate JudgeResult case_id: {case_id}')
+            if case_id in rows:
+                raise ValueError(f'duplicate JudgeResult case_id: {case_id}')
             rows[case_id] = judge | {'judge_ref': str(ref)}
         return rows
 
@@ -108,7 +114,8 @@ class CompareABTestOperation:
     def _case_scores(self, row) -> dict[str, float]:
         out = {metric: self._number(row.get(metric), metric) for metric in METRICS}
         bad = [metric for metric, value in out.items() if not 0 <= value <= 1]
-        if bad: raise ValueError(f'{bad[0]} out of range for {row.get("judge_ref")}: {row.get(bad[0])!r}')
+        if bad:
+            raise ValueError(f'{bad[0]} out of range for {row.get("judge_ref")}: {row.get(bad[0])!r}')
         return out
 
     def _summary(self, rows) -> dict[str, float]:
@@ -120,7 +127,8 @@ class CompareABTestOperation:
                 for m in METRICS} | {'correct_rate': round(sum(correct) / len(correct), 4) if correct else 0.0}
 
     def _bootstrap_ci(self, deltas, iterations=BOOTSTRAP_ITERATIONS) -> dict[str, float]:
-        if not deltas: return {'lower': 0.0, 'upper': 0.0}
+        if not deltas:
+            return {'lower': 0.0, 'upper': 0.0}
         rng = random.Random(f'abtest:{len(deltas)}:{round(sum(deltas), 6)}')
         means = sorted(sum(rng.choice(deltas) for _ in deltas) / len(deltas) for _ in range(iterations))
         return {'lower': round(means[int(0.025 * iterations)], 4),
@@ -147,7 +155,8 @@ class CompareABTestOperation:
     def _ratio(self, params, name, default) -> float:
         value = self._number(params.get(name, default), name)
         value = value / 100 if value > 1 else value
-        if not 0 <= value <= 1: raise ValueError(f'{name} out of range: {value}')
+        if not 0 <= value <= 1:
+            raise ValueError(f'{name} out of range: {value}')
         return value
 
     def _number(self, value, name) -> float:
@@ -169,10 +178,12 @@ class CutoverCandidateAlgorithmOperation:
                                        or f'evo_{ctx.run_id}_{int(time.time())}').replace('@', '_'), 'algorithm_id')
         path = Path(str(ctx.params.get('code_path') or workspace.get('workspace_ref') or '')).resolve()
         chat_path = path if (path / 'app.py').exists() else path / 'lazymind' / 'chat'
-        if not chat_path.exists(): raise ValueError(f'candidate chat code_path not found: {chat_path}')
+        if not chat_path.exists():
+            raise ValueError(f'candidate chat code_path not found: {chat_path}')
         code_path = str(chat_path)
         health = request_json('GET', f'{router_admin_url}/health', timeout_s=10)
-        if health.get('status') != 'ok': raise RuntimeError(f'router health check failed: {health}')
+        if health.get('status') != 'ok':
+            raise RuntimeError(f'router health check failed: {health}')
         progress(ctx, 'abtest_cutover', 'running', 'registering parser algorithm',
                  detail={'algorithm_id': algorithm_id, 'workspace_ref': workspace.get('workspace_ref')})
         root = Path(str(workspace.get('workspace_ref') or '')).resolve()
@@ -189,7 +200,8 @@ class CutoverCandidateAlgorithmOperation:
                'LAZYMIND_DOCUMENT_SERVER_URL': f'{doc_url},{algorithm_id}'}
         for key in ('LAZYMIND_DOCUMENT_PROCESSOR_URL', 'LAZYMIND_MILVUS_URI', 'LAZYMIND_OPENSEARCH_URI',
                     'LAZYMIND_OPENSEARCH_USER', 'LAZYMIND_OPENSEARCH_PASSWORD', 'LAZYMIND_MODEL_CONFIG_PATH'):
-            if value := os.getenv(key): env[key] = value
+            if value := os.getenv(key):
+                env[key] = value
         env |= {k: str(v) for k, v in dict(ctx.params.get('config') or {}).items()}
         body = {'id': algorithm_id, 'name': algorithm_id, 'code_path': code_path,
                 'instance_count': int(ctx.params.get('instance_count') or 1), 'config': env}
@@ -216,7 +228,8 @@ class CutoverCandidateAlgorithmOperation:
                 if algorithm_id not in ((applied.get('strategy') or {}).get('weights') or weights):
                     raise RuntimeError(f'{stage} strategy not applied: {applied}')
                 stages.append({'stage': stage, 'status': 'passed', 'weights': weights})
-                if weight == target_weight: break
+                if weight == target_weight:
+                    break
         except Exception:
             _restore_strategy(router_admin_url, previous_strategy)
             if registered:
@@ -240,7 +253,8 @@ class CutoverCandidateAlgorithmOperation:
 
     def _ref(self, ctx, name, schema) -> ArtifactRef:
         ref = ArtifactRef.parse(str(ctx.params.get(name) or ''))
-        if ctx.artifact_graph.schema_name(ref) != schema: raise ValueError(f'{name} must be {schema}: {ref}')
+        if ctx.artifact_graph.schema_name(ref) != schema:
+            raise ValueError(f'{name} must be {schema}: {ref}')
         return ref
 
 
@@ -268,7 +282,8 @@ def disable_candidate_algorithm(payload: dict[str, Any]) -> None:
 
 def _restore_strategy(router_admin_url: str, previous: Any) -> bool:
     weights = ((previous or {}).get('strategy') or {}).get('weights') if isinstance(previous, dict) else {}
-    if not weights: return False
+    if not weights:
+        return False
     try:
         request_json('PUT', f'{router_admin_url}/inner/ab/strategy', {'weights': weights})
         return True

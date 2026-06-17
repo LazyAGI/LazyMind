@@ -28,7 +28,8 @@ class CaseFineClassificationOperation:
         case_id = validate_case_id(str(coarse.get('case_id') or ''))
         default_id = f'case_fine_classification_{case_id}'
         output_id = validate_id(str(ctx.params.get('output_id') or default_id), 'output_id')
-        if output_id != default_id: raise ValueError(f'output_id does not match case_id: {output_id}')
+        if output_id != default_id:
+            raise ValueError(f'output_id does not match case_id: {output_id}')
         keys = ('eval_report_ref', 'case_ref', 'rag_answer_ref', 'judge_result_ref')
         if missing := [key for key in keys if not str(coarse.get(key) or '').strip()]:
             raise ValueError(f'coarse missing refs: {missing}')
@@ -36,7 +37,8 @@ class CaseFineClassificationOperation:
         case, rag, judge, report = (typed_payload(ctx, refs[k], s) for k, s in (
             ('case_ref', 'DatasetCase'), ('rag_answer_ref', 'RagAnswer'), ('judge_result_ref', 'JudgeResult'),
             ('eval_report_ref', 'EvalReport')))
-        if str(case.get('id') or '') != case_id: raise ValueError(f"{refs['case_ref']} payload id mismatch")
+        if str(case.get('id') or '') != case_id:
+            raise ValueError(f"{refs['case_ref']} payload id mismatch")
         if not any(str(row.get('case_id') or '') == case_id for row in report.get('bad_cases') or []):
             raise ValueError(f'case is not a badcase in EvalReport: {case_id}')
         check_fields('RagAnswer', rag, {'case_id': case_id, 'case_ref': str(refs['case_ref'])})
@@ -79,17 +81,20 @@ class CaseFineClassificationOperation:
         fine = str(data.get('fine_category') or '').strip()
         if fine == 'insufficient_evidence':
             return _insufficient(values(data.get('missing_evidence')) or ['llm_insufficient_evidence']), [call]
-        if fine not in ev['allowed']: raise ValueError(f'LLM fine_category not allowed: {fine}')
+        if fine not in ev['allowed']:
+            raise ValueError(f'LLM fine_category not allowed: {fine}')
         return _result(fine, 'llm', data.get('confidence'), short(data.get('reason'), 120), ev['coarse_hits'],
                        refs=[]), [call]
 
     def _model(self):
-        if self.llm is None: self.llm = evo_llm()
+        if self.llm is None:
+            self.llm = evo_llm()
         return self.llm
 
 
 def classify_payload(ctx, coarse_ref, coarse, case, rag, judge, op) -> dict[str, Any]:
-    if str(coarse.get('coarse_category') or '') == 'infra_failure': return _infra_payload(ctx, coarse_ref, coarse)
+    if str(coarse.get('coarse_category') or '') == 'infra_failure':
+        return _infra_payload(ctx, coarse_ref, coarse)
     trace_id = str(rag.get('trace_id') or judge.get('trace_id') or '').strip()
     trace = load_trace_payload(ctx, trace_id, rag)
     nodes = flatten_trace(trace, trace_id or str(trace.get('trace_id') or trace.get('id') or ''))
@@ -150,7 +155,8 @@ def _infra_payload(ctx, coarse_ref, coarse) -> dict[str, Any]:
 def _rule(ev):
     cat, hits = ev['coarse_category'], ev['coarse_hits']
     if cat == 'dataset_or_reference_issue':
-        if ev['ref_docs'] and ev['ref_chunks']: return None
+        if ev['ref_docs'] and ev['ref_chunks']:
+            return None
         return _result('missing_reference', 'rule', 'high', 'DatasetCase missing reference ids', hits)
     if cat == 'agentic_tool_issue':
         rule_ids = [str(hit.get('rule_id') or '') for hit in hits]
@@ -159,7 +165,8 @@ def _rule(ev):
         if any('tool_error' in rule for rule in rule_ids):
             return _result('tool_execution_issue', 'rule', 'high', 'tool trace contains execution error', hits)
         for node in ev['nodes']:
-            if node['role'] != 'tool_call': continue
+            if node['role'] != 'tool_call':
+                continue
             text = json.dumps(node['raw'].get('input') or {}, ensure_ascii=False)
             if 'kb_search' in text and not any(key in text for key in ('query', 'dataset', 'dataset_id')):
                 return _result('tool_argument_issue', 'rule', 'high', 'tool call missing argument', hits)
@@ -172,7 +179,8 @@ def _rule(ev):
                 return _result(fine, 'rule', 'high', f'reference {kind}s missing from retriever outputs', hits,
                                _hit(f'fine.{fine}', ev, {f'missing_{kind}_ids': missed}))
         return None
-    if cat == 'rerank_issue': return _rerank_rule(ev)
+    if cat == 'rerank_issue':
+        return _rerank_rule(ev)
     if cat == 'chunking_or_parse_issue':
         texts = clean_contexts(ev['case'].get('reference_context')) + clean_contexts(ev['rag'].get('contexts'))
         if any('\ufffd' in text or '\x00' in text for text in texts):
@@ -181,13 +189,15 @@ def _rule(ev):
         if qtype in {'table_list', 'formula'} and texts and not any(has_structure(text) for text in texts):
             return _result('formula_parse_issue' if qtype == 'formula' else 'table_parse_issue', 'rule', 'medium',
                            'structured source text lost markers', hits)
-        if any('boundary' in str(hit) for hit in hits): return _insufficient(['source_snapshot_neighbors'])
+        if any('boundary' in str(hit) for hit in hits):
+            return _insufficient(['source_snapshot_neighbors'])
         return None
     return None
 
 
 def _rerank_rule(ev):
-    if not ev['searches']: return _insufficient(['rerank_trace'])
+    if not ev['searches']:
+        return _insufficient(['rerank_trace'])
     hits = {k: hit_union(ev['searches'], k) for k in (
         'retriever_doc_hits', 'retriever_chunk_hits', 'rerank_input_doc_hits', 'rerank_input_chunk_hits',
         'rerank_output_doc_hits', 'rerank_output_chunk_hits')}

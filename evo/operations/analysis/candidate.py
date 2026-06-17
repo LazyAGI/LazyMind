@@ -43,7 +43,8 @@ def classify_candidate_case(ctx: OperationContext, row: dict[str, Any], plan: di
         coarse['coarse_reason'] = f'candidate classification evidence unavailable: {trace_error}'
         del coarse['source_message_id']
         fine = fine_rules.classify_payload(ctx, refs['coarse_classification'], coarse, case, rag, judge, None)
-        for key in ('adjudication', 'source_message_id'): del fine[key]
+        for key in ('adjudication', 'source_message_id'):
+            del fine[key]
     rag_payload = {key: value for key, value in rag.items() if key != 'trace'}
     drafts = [
         ArtifactDraft(ids['rag_answer'], 'RagAnswer', rag_payload, ctx.operation_run_id, input_refs=[case_ref]),

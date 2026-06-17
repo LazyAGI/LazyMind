@@ -277,8 +277,13 @@ class RepairAnalyzer:
                 if mode == 'patch_once' else [],
                 'must_not_do': ['do not edit tests', 'do not touch blocked_roots or outside allowed_roots',
                                 'do not add broad fallback behavior',
-                                *(['do not re-submit a previously failed patch; failed attempts: '
-                                   + '; '.join(str(item)[:120] for item in avoid)] if avoid else [])],
+                                *(
+                                    [
+                                        'do not re-submit a previously failed patch; failed attempts: '
+                                        + '; '.join(str(item)[:120] for item in avoid),
+                                    ]
+                                    if avoid else []
+                                )],
                 'allowed_roots': self.scope['allowed_roots'], 'blocked_roots': self.scope['blocked_roots'],
                 'allow_new_files': self.scope['allow_new_files'],
             },
@@ -354,7 +359,8 @@ def extract_stage_hits(ctx: OperationContext, case: dict[str, Any], rag: dict[st
     aggregate['final_doc'], aggregate['final_chunk'] = final['doc'], final['chunk']
     primary = _transition_failure(searches, aggregate, final, judge, fine, bool(nodes))
     evidence_conflict = _fine_stage_conflict(fine, primary)
-    if evidence_conflict: unknowns.append(evidence_conflict)
+    if evidence_conflict:
+        unknowns.append(evidence_conflict)
     confidence = 'low' if evidence_conflict else _stage_confidence(ref_docs, ref_chunks, nodes, fine, final)
     return {
         'case_id': str(case.get('id') or fine.get('case_id') or ''), 'trace_id': trace_id,
@@ -379,10 +385,12 @@ def collect_source_observations(workspace: Path, scope: dict[str, Any], fine_cat
     observations = []
     for rel, file_relevance in _candidate_source_paths(workspace, roots, cfg):
         path = workspace / rel
-        if not path.is_file(): continue
+        if not path.is_file():
+            continue
         for symbol in _symbols(path, rel):
             features = _ranking_features(rel, symbol, cfg, memory or {}, file_relevance)
-            if features['total'] < 3: continue
+            if features['total'] < 3:
+                continue
             observations.append(_source_observation(path, rel, symbol, features, roots, cfg))
     observations.sort(key=lambda item: (-(item.get('ranking_features') or {}).get('total', 0),
                                         item['path'], item['line_start']))
@@ -406,9 +414,11 @@ def _location_dynamic_evidence(obs: dict[str, Any], trace_observations: list[dic
                 if str(item.get('primary_transition_failure') or '') not in {'', 'none'}]
     evidence = [f'badcase stage failure is {failure}' for failure in sorted(set(failures))]
     roles = sorted(str(role) for role in obs.get('matched_trace_roles') or [] if str(role))
-    if roles: evidence.append(f'source symbol matches trace roles: {", ".join(roles[:4])}')
+    if roles:
+        evidence.append(f'source symbol matches trace roles: {", ".join(roles[:4])}')
     keywords = sorted(str(keyword) for keyword in obs.get('matched_keywords') or [] if str(keyword))
-    if keywords: evidence.append(f'source symbol matches repair keywords: {", ".join(keywords[:4])}')
+    if keywords:
+        evidence.append(f'source symbol matches repair keywords: {", ".join(keywords[:4])}')
     return evidence
 
 
@@ -430,7 +440,8 @@ def _trace_fine_evidence_refs(trace_observations: list[dict[str, Any]]) -> list[
 def _analysis_limitations(evidence: dict[str, Any], locations: list[dict[str, Any]]) -> list[str]:
     limitations = [] if locations else ['source localization did not find a valid primary symbol']
     for obs in evidence.get('trace_observations') or []:
-        if not isinstance(obs, dict): continue
+        if not isinstance(obs, dict):
+            continue
         for unknown in obs.get('unknowns') or []:
             if isinstance(unknown, dict) and unknown.get('kind') == 'trace_read_error':
                 limitations.append(f"trace read error: {str(unknown.get('reason') or 'trace read error')}")
@@ -449,13 +460,16 @@ def _source_match_evidence(obs: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _anchored_first(fault_report: dict[str, Any], primary_ref: str) -> list[dict[str, Any]]:
     ranked = [item for item in fault_report.get('ranked_locations') or [] if isinstance(item, dict)]
-    if not primary_ref: return ranked
+    if not primary_ref:
+        return ranked
     return sorted(ranked, key=lambda item: str(item.get('source_observation_ref') or '') != primary_ref)
 
 
 def _local_probe_evidence(status: str, confidence: str, stage_conflicts: bool) -> str:
-    if status == 'confirmed': return 'local AST source observation confirms ranked symbol'
-    if stage_conflicts: return 'local AST found a symbol, but trace/fine stage evidence conflicts'
+    if status == 'confirmed':
+        return 'local AST source observation confirms ranked symbol'
+    if stage_conflicts:
+        return 'local AST found a symbol, but trace/fine stage evidence conflicts'
     if confidence == 'low':
         return 'local AST found a low-confidence symbol; opencode explore should verify before patch'
     return 'local AST candidate only; opencode explore must confirm before patch'
@@ -529,7 +543,8 @@ def _transition_failure(searches: list[dict[str, Any]], aggregate: dict[str, Any
     coarse_hits = (fine.get('evidence') or {}).get('coarse_rule_hits') or []
     if any('tool_error' in str(hit.get('rule_id') or hit) for hit in coarse_hits if isinstance(hit, (dict, str))):
         return 'tool_execution_error'
-    if not trace_available: return 'none'
+    if not trace_available:
+        return 'none'
     if not searches and final['doc']['status'] in {'miss', 'unknown'} \
             and final['chunk']['status'] in {'miss', 'unknown'}:
         return 'no_kb_search'
@@ -577,7 +592,8 @@ def _fine_stage_conflict(fine: dict[str, Any], primary: str) -> dict[str, str] |
 
 
 def _hit_status(expected: set[str], actual: set[str]) -> dict[str, Any]:
-    if not expected: return {'status': 'unknown', 'hits': [], 'missing': [], 'unknown_reason': 'no_reference_ids'}
+    if not expected:
+        return {'status': 'unknown', 'hits': [], 'missing': [], 'unknown_reason': 'no_reference_ids'}
     hits, missing = sorted(expected & actual), sorted(expected - actual)
     status = 'hit' if hits and not missing else 'partial' if hits else 'miss'
     return {'status': status, 'hits': hits, 'missing': missing, 'unknown_reason': ''}
@@ -590,7 +606,8 @@ def _candidate_source_paths(workspace: Path, roots: list[str], cfg: dict[str, An
     scored: list[tuple[int, int, str]] = []
     for root in roots:
         base = workspace / root
-        if not base.exists(): continue
+        if not base.exists():
+            continue
         for path in sorted(base.rglob('*.py')):
             rel = path.relative_to(workspace).as_posix()
             try:
@@ -606,8 +623,10 @@ def _candidate_source_paths(workspace: Path, roots: list[str], cfg: dict[str, An
 
 
 def _file_relevance(path_hits: int, content_hits: int) -> int:
-    if path_hits >= 2: return 2
-    if path_hits or content_hits >= 3: return 1
+    if path_hits >= 2:
+        return 2
+    if path_hits or content_hits >= 3:
+        return 1
     return 0
 
 
@@ -656,7 +675,8 @@ def _called_by(symbols: list[dict[str, Any]]) -> dict[str, list[str]]:
         caller = str(symbol.get('symbol') or '')
         for call in _call_context(str(symbol.get('text') or '')).get('calls', []):
             callee = names.get(call)
-            if callee and caller not in out[callee]: out[callee].append(caller)
+            if callee and caller not in out[callee]:
+                out[callee].append(caller)
     return out
 
 
@@ -690,7 +710,8 @@ def _anchor_lock_score(rel: str, symbol: dict[str, Any], memory: dict[str, Any])
     name = str(symbol.get('symbol') or '')
     lock = memory.get('anchor_lock') if isinstance(memory.get('anchor_lock'), dict) else {}
     score = 8 if lock and _location_matches(lock, rel, name) else 0
-    if any(_location_matches(item, rel, name) for item in memory.get('released_anchors') or []): score -= 4
+    if any(_location_matches(item, rel, name) for item in memory.get('released_anchors') or []):
+        score -= 4
     return score
 
 
@@ -700,13 +721,16 @@ def _worker_probe_score(rel: str, symbol: dict[str, Any], memory: dict[str, Any]
     evidence = memory.get('worker_probe_evidence') if isinstance(memory.get('worker_probe_evidence'), dict) else {}
     name = str(symbol.get('symbol') or '')
     score = 0
-    if any(_location_matches(loc, rel, name) for loc in evidence.get('confirmed_locations') or []): score += 6
-    if any(_location_matches(loc, rel, name) for loc in evidence.get('rejected_locations') or []): score -= 4
+    if any(_location_matches(loc, rel, name) for loc in evidence.get('confirmed_locations') or []):
+        score += 6
+    if any(_location_matches(loc, rel, name) for loc in evidence.get('rejected_locations') or []):
+        score -= 4
     return score
 
 
 def _location_matches(location: Any, rel: str, name: str) -> bool:
-    if not isinstance(location, dict) or str(location.get('path') or '') != rel: return False
+    if not isinstance(location, dict) or str(location.get('path') or '') != rel:
+        return False
     loc_symbol = str(location.get('symbol') or location.get('confirmed_symbol') or '').rsplit(':', 1)[-1]
     return bool(name) and bool(loc_symbol) and (
         symbol_within_primary(loc_symbol, name) or symbol_within_primary(name, loc_symbol)
@@ -799,7 +823,8 @@ def _memory_refs(memory: dict[str, Any]) -> list[str]:
 
 
 def _memory_usage(memory: dict[str, Any], attempt: int) -> dict[str, Any]:
-    if attempt <= 1: return {'used_memory_keys': [], 'rejected_memory_keys': []}
+    if attempt <= 1:
+        return {'used_memory_keys': [], 'rejected_memory_keys': []}
     return {'used_memory_keys': _memory_refs(memory), 'rejected_memory_keys': []}
 
 
@@ -813,7 +838,8 @@ def _claim(category: str, failure: str) -> str:
         return 'available context reaches final answer stage but synthesis misses the evidence'
     if failure == 'rerank_output_to_final_context_drop':
         return 'final context cutoff drops evidence after rerank output'
-    if failure == 'retriever_miss': return 'retriever does not recall required reference evidence'
+    if failure == 'retriever_miss':
+        return 'retriever does not recall required reference evidence'
     return f'{category or "repair target"} is explained by {failure}'
 
 
@@ -879,7 +905,8 @@ def _context_names(rag: dict[str, Any]) -> set[str]:
 def _context_text_status(case: dict[str, Any], rag: dict[str, Any]) -> dict[str, Any]:
     refs = clean_contexts(case.get('reference_context'))
     contexts = '\n'.join(clean_contexts(rag.get('contexts')))
-    if not refs: return {'status': 'unknown', 'hits': [], 'missing': [], 'unknown_reason': 'no_reference_context'}
+    if not refs:
+        return {'status': 'unknown', 'hits': [], 'missing': [], 'unknown_reason': 'no_reference_context'}
     hits = [text[:80] for text in refs if text and text[:80] in contexts]
     missing = [text[:80] for text in refs if text and text[:80] not in contexts]
     status = 'hit' if hits and not missing else 'partial' if hits else 'miss'

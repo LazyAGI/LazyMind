@@ -50,7 +50,8 @@ def patch_shape(patch: dict[str, Any]) -> dict[str, Any]:
     test_files = [path for path in files if _is_test_path(str(path))]
     flags = (['test_files_touched'] if test_files else [])
     large = len(files) > 3 or len(added) + len(deleted) > 160
-    if large: flags.append('large_patch')
+    if large:
+        flags.append('large_patch')
     return {
         'line_added': len(added), 'line_deleted': len(deleted),
         'code_line_added': len(code_added), 'code_line_deleted': len(code_deleted),
@@ -118,14 +119,18 @@ def _behavior_invariants(patch: dict[str, Any], shape: dict[str, Any],
 
 def _verdict(patch: dict[str, Any], evaluation: dict[str, Any], risks: list[dict[str, Any]],
              invariants: list[dict[str, Any]]) -> str:
-    if any(risk.get('severity') == 'high' for risk in risks): return 'reject'
-    if (patch.get('scope_check') or {}).get('status') != 'passed': return 'needs_more_validation'
+    if any(risk.get('severity') == 'high' for risk in risks):
+        return 'reject'
+    if (patch.get('scope_check') or {}).get('status') != 'passed':
+        return 'needs_more_validation'
     if any(risk.get('kind') in {'unbounded_topk_increase', 'large_patch', 'broad_prompt_rewrite',
                                 'ranking_semantics_break'} for risk in risks):
         return 'needs_more_validation'
-    if any(not item.get('passed') for item in invariants): return 'needs_more_validation'
+    if any(not item.get('passed') for item in invariants):
+        return 'needs_more_validation'
     heldout = _heldout_eval(evaluation)
-    if heldout.get('enabled') and heldout.get('passed') is not True: return 'needs_more_validation'
+    if heldout.get('enabled') and heldout.get('passed') is not True:
+        return 'needs_more_validation'
     return 'acceptable' if evaluation.get('status') == 'passed' else 'needs_more_validation'
 
 
@@ -149,9 +154,11 @@ def _heldout_eval(evaluation: dict[str, Any]) -> dict[str, Any]:
 def _looks_like_broad_topk_increase(diff: str) -> bool:
     removed, added = [], []
     for line in diff.splitlines():
-        if line.startswith('---') or line.startswith('+++'): continue
+        if line.startswith('---') or line.startswith('+++'):
+            continue
         target = added if line.startswith('+') else removed if line.startswith('-') else None
-        if target is None or not TOPK_RE.search(line): continue
+        if target is None or not TOPK_RE.search(line):
+            continue
         target.extend(int(item) for item in INT_RE.findall(line))
     return bool(removed and added and max(added) > max(removed))
 
@@ -181,7 +188,8 @@ def _looks_like_broad_prompt_rewrite(diff: str) -> bool:
 
 def _looks_like_ranking_semantics_break(diff: str) -> bool:
     added, deleted = _added_lines(diff), _deleted_lines(diff)
-    if not any(RANKING_RE.search(line) for line in added + deleted): return False
+    if not any(RANKING_RE.search(line) for line in added + deleted):
+        return False
     text = '\n'.join(added + deleted)
     return bool(re.search(r'\breverse\s*=|sorted\(|sort\(|score\s*[+\-*/]=|threshold\s*=|weight\s*=', text))
 

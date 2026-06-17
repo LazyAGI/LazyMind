@@ -119,6 +119,7 @@ export type SelfEvolutionWorkbenchViewProps = {
   onPromptChange: (value: string) => void;
   onSend: (command?: string) => void;
   onConfirmIntentCheckpoint: () => void;
+  onContinueCheckpoint: (command?: string) => void;
   onOpenArtifact: (kind: WorkflowResultKind) => void;
   onOpenCaseArtifact: (kind: WorkflowResultKind, artifactId: string, title: string) => void;
   onWorkbenchTabChange: (tab?: SelfEvolutionWorkbenchTab) => void;
@@ -177,6 +178,7 @@ export function SelfEvolutionWorkbenchView({
   onPromptChange,
   onSend,
   onConfirmIntentCheckpoint,
+  onContinueCheckpoint,
   onOpenArtifact,
   onOpenCaseArtifact,
   onWorkbenchTabChange,
@@ -794,7 +796,7 @@ export function SelfEvolutionWorkbenchView({
                             if (isIntentConfirmation) {
                               onConfirmIntentCheckpoint();
                             } else {
-                              onSend(checkpointDecisionPrompt.command);
+                              onContinueCheckpoint(checkpointDecisionPrompt.command);
                             }
                           }
                         }}

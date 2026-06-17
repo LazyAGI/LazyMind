@@ -237,6 +237,41 @@ func TestThreadEventsURLDoesNotForceSince(t *testing.T) {
 	}
 }
 
+func TestThreadArtifactURLUsesEvoArtifactRoute(t *testing.T) {
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", "http://evo-service:8048/")
+
+	got := threadArtifactURL("thr/1", "eval.case[case_0001]")
+	want := "http://evo-service:8048/v1/evo/threads/thr%2F1/artifacts/eval.case%5Bcase_0001%5D"
+	if got != want {
+		t.Fatalf("unexpected thread artifact URL:\nwant: %q\ngot:  %q", want, got)
+	}
+}
+
+func TestFrontendMessageStreamDataAdaptsAssistantResponse(t *testing.T) {
+	raw := `{"type":"assistant_response","thread_id":"thr_1","content":"继续执行已提交"}`
+
+	got := frontendMessageStreamData("assistant_response", raw)
+	payload := parseJSONValue(got)
+	if extractStringByExactKeys(payload, "type") != "message.assistant" {
+		t.Fatalf("expected frontend assistant message payload, got %s", got)
+	}
+	if extractStringByExactKeys(payload, "original_type") != "assistant_response" {
+		t.Fatalf("expected original_type to preserve evo event type, got %s", got)
+	}
+	if extractStringByExactKeys(payload, "role") != "assistant" || extractStringByExactKeys(payload, "content") != "继续执行已提交" {
+		t.Fatalf("expected assistant role/content fields, got %s", got)
+	}
+}
+
+func TestFrontendMessageStreamDataLeavesRuntimeEventsUntouched(t *testing.T) {
+	raw := `{"type":"command_applied","kind":"continue_flow"}`
+
+	got := frontendMessageStreamData("command_applied", raw)
+	if got != raw {
+		t.Fatalf("expected non-display runtime event to remain unchanged:\nwant: %s\ngot:  %s", raw, got)
+	}
+}
+
 func TestBuildFetchedThreadEventsPreservesRawFrames(t *testing.T) {
 	events := []map[string]any{
 		{"kind": "user.message", "payload": map[string]any{"content": "a"}},

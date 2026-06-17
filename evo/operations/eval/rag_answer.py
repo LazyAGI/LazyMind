@@ -57,8 +57,10 @@ class RagAnswerOperation:
                 ctx, req['target_chat_url'], {**req['payload'], 'llm_config': self.model_config or None},
             )).run(ctx, {'target_chat_url': target_url, 'payload': chat_payload}, phase='rag_answer', item_ref=case_id)
             response, call_id = result.response, result.record.call_id
-            if require_trace and not response.get('trace_id'): raise ValueError('target chat did not return trace_id')
-            if not str(response.get('answer') or '').strip(): raise ValueError('target chat returned empty answer')
+            if require_trace and not response.get('trace_id'):
+                raise ValueError('target chat did not return trace_id')
+            if not str(response.get('answer') or '').strip():
+                raise ValueError('target chat returned empty answer')
         except AdapterCallError as exc:
             response, call_id = self._failed(chat_payload, exc.record.error or {}, exc.record.call_id)
         except ValueError as exc:
@@ -97,8 +99,9 @@ class RagAnswerOperation:
         refs = [dataset_ref, case_ref] + ([service_ref] if service_ref else [])
         output_id = validate_id(str(ctx.params.get('output_id') or f'rag_answer_{case_id}'), 'output_id')
         drafts = [ArtifactDraft(output_id, 'RagAnswer', answer, ctx.operation_run_id, input_refs=refs)]
-        if trace: drafts.append(
-            ArtifactDraft(f"trace_{answer['trace_id']}", 'Trace', trace, ctx.operation_run_id, input_refs=refs))
+        if trace:
+            drafts.append(
+                ArtifactDraft(f"trace_{answer['trace_id']}", 'Trace', trace, ctx.operation_run_id, input_refs=refs))
         return OperationOutput(drafts)
 
     def _failed(self, payload, error, call_id) -> tuple[dict[str, Any], str]:
@@ -123,7 +126,8 @@ def _call_chat(ctx: OperationContext, target_url: str, payload: dict[str, Any], 
 
     def cancel() -> None:
         cancelled.set()
-        if holder.get('response') is not None: holder['response'].close()
+        if holder.get('response') is not None:
+            holder['response'].close()
 
     ctx.register_cancel_callback(cancel)
     with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=timeout_s) as response:
@@ -131,25 +135,34 @@ def _call_chat(ctx: OperationContext, target_url: str, payload: dict[str, Any], 
         deadline = time.time() + timeout_s
         progress(ctx, 'rag_answer', 'running', 'reading LazyMind chat stream')
         for raw_line in response:
-            if cancelled.is_set(): raise RuntimeError('chat call cancelled')
-            if time.time() > deadline: raise TimeoutError(f'chat stream exceeded {timeout_s}s')
+            if cancelled.is_set():
+                raise RuntimeError('chat call cancelled')
+            if time.time() > deadline:
+                raise TimeoutError(f'chat stream exceeded {timeout_s}s')
             line = raw_line.decode('utf-8', errors='replace').strip()
-            if line.startswith('data:'): line = line[5:].strip()
-            if line == '[DONE]': break
+            if line.startswith('data:'):
+                line = line[5:].strip()
+            if line == '[DONE]':
+                break
             body = json.loads(line) if line else {}
-            if not isinstance(body, dict): continue
+            if not isinstance(body, dict):
+                continue
             data = body.get('data') if isinstance(body.get('data'), dict) else {}
             if body.get('code') not in (None, 0, 200) or data.get('status') == 'FAILED':
                 raise RuntimeError(body.get('msg') or data or body)
-            if isinstance(data.get('text'), str): text.append(data['text'])
-            if isinstance(data.get('sources'), list): sources.extend(data['sources'])
-            if isinstance(data.get('trace_id'), str): trace_id = data['trace_id']
+            if isinstance(data.get('text'), str):
+                text.append(data['text'])
+            if isinstance(data.get('sources'), list):
+                sources.extend(data['sources'])
+            if isinstance(data.get('trace_id'), str):
+                trace_id = data['trace_id']
     raw_answer = ''.join(text)
     tool_sources, kb_errors = [], []
     for raw in re.findall(r'<tool_result>(.*?)</tool_result>', raw_answer, flags=re.S):
         try:
             result = json.loads(raw).get('result')
-        except json.JSONDecodeError: continue
+        except json.JSONDecodeError:
+            continue
         if isinstance(result, dict) and result.get('success') is False:
             kb_errors.append(str(result.get('reason') or result.get('error') or 'kb_search failed'))
         res = result.get('result') if isinstance(result, dict) else None
@@ -157,7 +170,8 @@ def _call_chat(ctx: OperationContext, target_url: str, payload: dict[str, Any], 
         tool_sources.extend(item for item in items or [] if isinstance(item, dict))
     unique, seen = [], set()
     for item in sources or tool_sources:
-        if not isinstance(item, dict): continue
+        if not isinstance(item, dict):
+            continue
         key = str(next((item.get(name) for name in SOURCE_KEY_FIELDS if item.get(name)), id(item)))
         if key not in seen:
             seen.add(key)
@@ -175,5 +189,6 @@ def _pluck(items: Any, keys: tuple[str, ...]) -> list[Any]:
     out = []
     for item in items if isinstance(items, list) else []:
         value = next((item[key] for key in keys if isinstance(item, dict) and item.get(key) is not None), None)
-        if value is not None: out.append(value)
+        if value is not None:
+            out.append(value)
     return out

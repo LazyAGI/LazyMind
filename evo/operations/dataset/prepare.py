@@ -62,10 +62,13 @@ class PrepareDatasetCaseOperation:
                      'doc_id': str(g('doc_id') or ''), 'filename': str(g('filename') or ''),
                      'chunk_id': str(g('segment_id') or g('chunk_id') or g('source_unit_ref') or ''),
                      'unit_type': str(g('unit_type') or 'paragraph'), 'content': str(g('content') or '')}
-                if chunk_ids and n['chunk_id'] not in chunk_ids: continue
-                if not chunk_ids and doc_ids and n['doc_id'] not in doc_ids: continue
+                if chunk_ids and n['chunk_id'] not in chunk_ids:
+                    continue
+                if not chunk_ids and doc_ids and n['doc_id'] not in doc_ids:
+                    continue
                 units.append(n)
-        if not units: raise ValueError('no source units matched prepare scope')
+        if not units:
+            raise ValueError('no source units matched prepare scope')
         progress(ctx, 'select_candidates', 'running', 'selected candidate source units', current_item=case_id,
                  detail={'question_type': qtype, 'candidate_count': len(units),
                          'requires_llm_plan': qtype in MULTI_HOP})
@@ -126,9 +129,11 @@ class PrepareDatasetCaseOperation:
             docs.setdefault(unit['doc_id'], []).append(unit)
         if qtype == 'single_doc_multi_hop':
             candidates = next((items[:8] for items in docs.values() if len(items) >= 2), None)
-            if not candidates: raise ValueError('single_doc_multi_hop requires at least two chunks from one document')
+            if not candidates:
+                raise ValueError('single_doc_multi_hop requires at least two chunks from one document')
         else:
-            if len(docs) < 2: raise ValueError('multi_doc_multi_hop requires chunks from at least two documents')
+            if len(docs) < 2:
+                raise ValueError('multi_doc_multi_hop requires chunks from at least two documents')
             candidates = [items[0] for items in docs.values() if items][:10]
         by_chunk = {unit['chunk_id']: unit for unit in candidates}
         candidates_json = json.dumps([{k: u[k] for k in ('doc_id', 'filename', 'chunk_id', 'unit_type', 'content')}
@@ -147,7 +152,8 @@ class PrepareDatasetCaseOperation:
             selected = [by_chunk[item] for item in chunk_ids if item in by_chunk]
             try:
                 bad = [item for item in chunk_ids if item not in by_chunk]
-                if bad: raise ValueError(f'selected chunk outside candidates: {bad}')
+                if bad:
+                    raise ValueError(f'selected chunk outside candidates: {bad}')
                 if 'question' in plan or 'answer' in plan:
                     raise ValueError('prepare plan must not include question or answer')
                 self._validate(qtype, selected, difficulty)
@@ -166,7 +172,8 @@ class PrepareDatasetCaseOperation:
                 raise ValueError('single_doc_multi_hop plan must select chunks from one document')
             if qtype == 'multi_doc_multi_hop' and len(docs) < 2:
                 raise ValueError('multi_doc_multi_hop plan must select chunks from at least two documents')
-        if not units: raise ValueError(f'{qtype} has no selected source units')
+        if not units:
+            raise ValueError(f'{qtype} has no selected source units')
 
 
 class GenerateDatasetCaseOperation:
@@ -178,7 +185,8 @@ class GenerateDatasetCaseOperation:
         ref = None if not value else ArtifactRef.parse(value) if '@' in value else ctx.artifact_graph.latest_ref(value)
         if ctx.input_refs and (ref is None or ctx.input_refs[0].artifact_id == ref.artifact_id):
             ref = ctx.input_refs[0]
-        if ref is None: raise ValueError('case_preparation_ref is required')
+        if ref is None:
+            raise ValueError('case_preparation_ref is required')
         plan = ctx.artifact_graph.get(ref)
         progress(ctx, 'generate_case', 'running', 'generating dataset case', current_item=str(plan['case_id']))
         prompt, feedback, result = GEN_PROMPT.format(prompt=plan['prompt']), '', None
@@ -219,7 +227,8 @@ class GenerateDatasetCaseOperation:
 
     def _standalone(self, question) -> str:
         for prefix in SOURCE_PREFIXES:
-            if question.startswith(prefix): question = question[len(prefix):].strip()
+            if question.startswith(prefix):
+                question = question[len(prefix):].strip()
         lower = question.lower()
         named = ("paper '" in lower or 'paper "' in lower or 'paper titled' in lower or 'arxiv' in lower
                  or '.pdf' in lower)
@@ -246,7 +255,8 @@ class AssembleDatasetOperation:
                 raise ValueError(f'artifact is not DatasetCase: {ref}')
             case = ctx.artifact_graph.get(ref)
             missing = [key for key in ('id', 'question', 'answer', 'question_type', 'difficulty') if not case.get(key)]
-            if missing: raise ValueError(f'{ref} missing required fields: {", ".join(missing)}')
+            if missing:
+                raise ValueError(f'{ref} missing required fields: {", ".join(missing)}')
             if str(case['id']) != case_id:
                 raise ValueError(f'{ref} payload id mismatch: {case.get("id")} != {case_id}')
             cases.append(case)
@@ -315,11 +325,13 @@ class AssembleDatasetOperation:
 
 
 def _model(op):
-    if op.llm is None: op.llm = evo_llm()
+    if op.llm is None:
+        op.llm = evo_llm()
     return op.llm
 
 
 def _first(units, predicate, error):
     selected = [unit for unit in units if predicate(unit)]
-    if not selected: raise ValueError(error)
+    if not selected:
+        raise ValueError(error)
     return selected

@@ -44,8 +44,10 @@ def normalize_http_origin(url: str, field: str) -> str:
 
 def _parse_http_url(url: str, field: str) -> tuple[urllib.parse.ParseResult, str]:
     parsed = urllib.parse.urlparse(url)
-    if not parsed.scheme or not parsed.netloc: raise ValueError(f'invalid {field}: {url!r}')
-    if parsed.scheme not in HTTP_SCHEMES: raise ValueError(f'{field} must use http or https')
+    if not parsed.scheme or not parsed.netloc:
+        raise ValueError(f'invalid {field}: {url!r}')
+    if parsed.scheme not in HTTP_SCHEMES:
+        raise ValueError(f'{field} must use http or https')
     return parsed, _canonical_netloc(parsed, field)
 
 
@@ -53,7 +55,8 @@ def _canonical_netloc(parsed: urllib.parse.ParseResult, field: str) -> str:
     if parsed.username is not None or parsed.password is not None or '@' in parsed.netloc:
         raise ValueError(f'{field} must not include userinfo')
     host = parsed.hostname
-    if not host: raise ValueError(f'invalid {field}: {parsed.geturl()!r}')
+    if not host:
+        raise ValueError(f'invalid {field}: {parsed.geturl()!r}')
     try:
         port = parsed.port
     except ValueError as exc:
@@ -63,6 +66,7 @@ def _canonical_netloc(parsed: urllib.parse.ParseResult, field: str) -> str:
 
 
 def _has_url_delimiter(url: str, parsed: urllib.parse.ParseResult) -> bool:
-    if any(delimiter in parsed.netloc for delimiter in URL_DELIMITERS): return True
+    if any(delimiter in parsed.netloc for delimiter in URL_DELIMITERS):
+        return True
     tail = url.split('://', 1)[1][len(parsed.netloc):]
     return any(delimiter in tail for delimiter in URL_DELIMITERS)
