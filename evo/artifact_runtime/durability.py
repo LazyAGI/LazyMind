@@ -72,7 +72,8 @@ from .utils import (
     validate_nonempty,
 )
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 4
+_SUPPORTED_SCHEMA_VERSIONS = frozenset({1, _SCHEMA_VERSION})
 
 
 @dataclass(frozen=True)
@@ -1229,7 +1230,7 @@ def _decode_control(value: Any) -> Any:
         raise TypeError(f'unsupported encoded value: {type(value).__name__}')
     if 'schema_version' not in value or 'type' not in value:
         return _decode_plain_json_object(value)
-    if value['schema_version'] != _SCHEMA_VERSION:
+    if value['schema_version'] not in _SUPPORTED_SCHEMA_VERSIONS:
         raise ValueError(f"unsupported schema_version: {value['schema_version']}")
 
     item_type = value['type']

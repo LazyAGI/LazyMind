@@ -21,6 +21,7 @@ from evo.artifact_runtime import (
     intent_request_fingerprint,
     open_evo_runtime,
 )
+from evo.artifact_runtime.store import ArtifactStoreVersionResolver
 
 from .contract import STEP_ROOTS, StepName, case_ids
 from .graph import build_evo_graph
@@ -210,7 +211,7 @@ class EvoFlowRuntime:
             'eval.target_config': ArtifactPayload('EvalTargetConfig', dict(config.get('target') or config)),
             'eval.policy': ArtifactPayload('EvalPolicy', dict(config.get('eval_policy') or {})),
             'repair.policy': ArtifactPayload('RepairPolicy', dict(config.get('repair_policy') or {})),
-            'abtest.candidate_config': ArtifactPayload('CandidateConfig', dict(config.get('candidate') or {})),
+            'abtest.candidate_config': ArtifactPayload('CandidateConfig', _candidate_config(config)),
         }
         for artifact_id, payload in payloads.items():
             outcome = self.runtime.stores.artifact_store.put_source_once(
@@ -225,13 +226,26 @@ class EvoFlowRuntime:
 
     def _submit_step(self, *, command_id: str, run_id: str, step: StepName) -> FlowStepState:
         root = STEP_ROOTS[step]
-        result = self.runtime.execute_intent(
-            IntentCommandRequest(command_id, run_id, SubmitPlanIntent(
-                (root,), reason=f'step:{step}'), advance_until_idle=True)
+        resolver = ArtifactStoreVersionResolver(self.runtime.stores.artifact_store)
+        plan = self.runtime.graph.build_plan_for_selected_artifacts(
+            resolver,
+            flow=step,
         )
-        if result.status != 'applied' or result.plan_result is None:
-            raise ValueError(result.reason or 'step submit failed')
-        ref = self.runtime.stores.artifact_store.latest(root)
+        instance = self.runtime.controller.submit_plan(
+            run_id,
+            plan,
+            targets={root},
+            reason=f'step:{step}',
+            command_id=f'{command_id}:submit_plan',
+        )
+        driver_result = self.runtime.driver.run_until_idle(run_ids=(run_id,))
+        if driver_result.status != 'idle':
+            raise ValueError(f'step execution did not reach idle: {driver_result.status}')
+        state = self.runtime.controller.state(run_id)
+        if state.run.active_plan_version != instance.plan_version:
+            raise ValueError('step plan was superseded before completion')
+        producer = state.producer_by_artifact.get((instance.plan_version, root))
+        ref = None if producer is None else producer.output_refs.get(root)
         if ref is None:
             raise ValueError(f'step root was not materialized: {root}')
         completed = tuple(item for item in STEPS if STEPS.index(item) <= STEPS.index(step))
@@ -242,7 +256,7 @@ class EvoFlowRuntime:
                 step,
                 completed,
                 (),
-                result.plan_result.plan_version,
+                instance.plan_version,
                 status,
                 ref,
             )
@@ -289,3 +303,11 @@ def _model_config(config: Mapping[str, Any]) -> Mapping[str, Any]:
 
 def _artifact_config(config: Mapping[str, Any]) -> dict[str, Any]:
     return {str(key): value for key, value in config.items() if key not in {'model_config', 'llm_config'}}
+
+
+def _candidate_config(config: Mapping[str, Any]) -> dict[str, Any]:
+    candidate = dict(config.get('candidate') or {})
+    for key in ('target_chat_url', 'router_admin_url', 'candidate_chat_url', 'dataset_id', 'kb_id'):
+        if key in config and key not in candidate:
+            candidate[key] = config[key]
+    return candidate

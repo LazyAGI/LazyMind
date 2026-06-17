@@ -271,7 +271,18 @@ class DAGGraph:
         keys = self.select_artifacts(flow=flow, stage=stage, tags=tags)
         if not keys:
             raise UnknownTargetError('selection matched no artifacts')
-        return self.build_plan_for_keys(resolver, keys)
+        nodes = self._materialize_nodes()
+        instance_graph, writer_by_key, outputs_by_instance = self._instance_graph(nodes)
+        selected = {writer_by_key[key] for key in keys if key in writer_by_key}
+        if not selected:
+            raise UnknownTargetError('selection matched no materializers')
+        return self._build_plan_for_selected_instances(
+            nodes,
+            instance_graph,
+            outputs_by_instance,
+            selected,
+            resolver,
+        )
 
     def build_recompute_plan(
         self,

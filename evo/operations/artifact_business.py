@@ -215,6 +215,12 @@ def rag_answer(case: Mapping[str, Any], target_config: Mapping[str, Any], ctx: A
     value = result.value if result.status == 'completed' and isinstance(result.value, Mapping) else {}
     chat_error = None if result.status == 'completed' else {'type': result.error_type, 'message': result.error_message}
     answer = _text(value.get('answer') or value.get('text'))
+    routed_algorithm_id = _text(value.get('routed_algorithm_id'))
+    if algorithm_id and routed_algorithm_id and routed_algorithm_id != algorithm_id:
+        chat_error = {
+            'type': 'candidate_route_mismatch',
+            'message': f'expected {algorithm_id}, got {routed_algorithm_id}',
+        }
     contexts = [str(item) for item in value.get('contexts') or value.get('sources') or []]
     source_doc_ids, source_chunk_ids = _source_ids(
         [*(_as_list(value.get('sources'))), *(_as_list(value.get('contexts')))])
@@ -238,6 +244,7 @@ def rag_answer(case: Mapping[str, Any], target_config: Mapping[str, Any], ctx: A
             'dataset_id': dataset_id,
             'require_trace': request_payload['trace'],
             **({'algorithm_id': algorithm_id} if algorithm_id else {}),
+            **({'routed_algorithm_id': routed_algorithm_id} if routed_algorithm_id else {}),
         },
     })
 
@@ -278,6 +285,7 @@ def judge_answer(answer: Mapping[str, Any], policy: Mapping[str, Any]) -> Artifa
         'reason': reason[:200],
         'defect': '' if quality == 'good' else failure,
         'trace_id': _text(answer.get('trace_id')),
+        'target': dict(answer.get('target') or {}) if isinstance(answer.get('target'), Mapping) else {},
         'evaluation_policy': dict(policy),
         'judge_contexts': list(answer.get('contexts') or []),
     })
@@ -485,7 +493,11 @@ def candidate_service(config: Mapping[str, Any], patch: Mapping[str, Any], ctx: 
     })
 
 
-def candidate_rag_answer(case: Mapping[str, Any], service: Mapping[str, Any], ctx: Any | None = None) -> ArtifactPayload:
+def candidate_rag_answer(
+    case: Mapping[str, Any],
+    service: Mapping[str, Any],
+    ctx: Any | None = None,
+) -> ArtifactPayload:
     if service.get('status') == 'skipped':
         return payload('CandidateRagAnswer', {
             'case_id': _text(case.get('id')),
@@ -494,6 +506,7 @@ def candidate_rag_answer(case: Mapping[str, Any], service: Mapping[str, Any], ct
             'answer': '',
             'service_status': 'skipped',
         })
+    _ensure_candidate_service_ready(service)
     target = {
         'target_chat_url': _text(service.get('service_url')),
         'dataset_id': _case_dataset_id(case) or _text(service.get('dataset_id')),
@@ -529,6 +542,7 @@ def candidate_judge(answer: Mapping[str, Any], policy: Mapping[str, Any] | None 
 def candidate_summary(judges: Mapping[str, ArtifactPayload]) -> ArtifactPayload:
     rows = [dict(item.payload) for _, item in sorted(judges.items())]
     metrics = _summary_metrics(rows)
+    failures = _candidate_execution_failures(rows)
     return payload('CandidateEvalSummary', {
         'id': 'abtest.candidate_eval_summary',
         'case_ids': [_text(row.get('case_id')) for row in rows],
@@ -536,14 +550,10 @@ def candidate_summary(judges: Mapping[str, ArtifactPayload]) -> ArtifactPayload:
         'metrics': metrics,
         'quality_counts': dict(Counter(_text(row.get('quality_label')) for row in rows)),
         'failure_type_counts': dict(Counter(_text(row.get('failure_type')) for row in rows)),
-        'execution_failures': [
-            {'case_id': row['case_id'], 'reason': row['reason']}
-            for row in rows
-            if row.get('failure_type') == 'infra_failure'
-        ],
+        'execution_failures': failures,
         'checks': {
-            'ready': not any(row.get('failure_type') == 'infra_failure' for row in rows),
-            'errors': [],
+            'ready': not failures and metrics['scored_count'] == len(rows) and bool(rows),
+            'errors': [{'code': 'candidate_execution_failed', **item} for item in failures],
             'warnings': [],
         },
         'rows': rows,
@@ -552,7 +562,7 @@ def candidate_summary(judges: Mapping[str, ArtifactPayload]) -> ArtifactPayload:
 
 def compare_abtest(baseline: Mapping[str, Any], candidate: Mapping[str, Any]) -> ArtifactPayload:
     skipped = candidate.get('quality_counts', {}).get('skipped', 0) == candidate.get('total', 0)
-    candidate_failed = bool(candidate.get('execution_failures')) and not int((candidate.get('metrics') or {}).get('scored_count') or 0)
+    candidate_failed = _candidate_summary_failed(candidate)
     case_ids = list(dict.fromkeys([*_as_list(baseline.get('case_ids')), *_as_list(candidate.get('case_ids'))]))
     baseline_metrics = _ab_metrics(baseline.get('metrics') or {})
     candidate_metrics = _ab_metrics(candidate.get('metrics') or {})
@@ -618,8 +628,10 @@ def _start_candidate_algorithm(config: Mapping[str, Any], patch: Mapping[str, An
     if not (chat_path / 'app.py').exists():
         raise RuntimeError(f'candidate chat app not found in verified patch workspace: {chat_path}')
     _normalize_candidate_config(workspace / 'lazymind' / 'config.py')
-    target_url = _text(config.get('target_chat_url') or os.getenv('LAZYMIND_EVO_TARGET_CHAT_URL') or 'http://chat:8046/api/chat/stream')
-    router_admin_url = _text(config.get('router_admin_url') or os.getenv('LAZYMIND_EVO_ROUTER_ADMIN_URL') or _origin(target_url))
+    target_url = _text(config.get('target_chat_url') or os.getenv(
+        'LAZYMIND_EVO_TARGET_CHAT_URL') or 'http://chat:8046/api/chat/stream')
+    router_admin_url = _text(config.get('router_admin_url') or os.getenv(
+        'LAZYMIND_EVO_ROUTER_ADMIN_URL') or _origin(target_url))
     if not router_admin_url:
         raise RuntimeError('router_admin_url is required to start candidate service')
     algorithm_id = _candidate_algorithm_id(config, patch, ctx)
@@ -636,7 +648,10 @@ def _start_candidate_algorithm(config: Mapping[str, Any], patch: Mapping[str, An
         call_id='candidate_service:register',
         payload={'router_admin_url': router_admin_url, 'algorithm_id': algorithm_id, 'body': request_body},
         runner=RouterCandidateRegisterRunner(timeout_s=_int_between(config.get('startup_timeout_s'), 180, 10, 900)),
-        idempotency_key=f'candidate-service:{algorithm_id}:{_stable_text({"workspace": str(workspace), "diff": patch.get("diff")})}',
+        idempotency_key=(
+            f'candidate-service:{algorithm_id}:'
+            f'{_stable_text({"workspace": str(workspace), "diff": patch.get("diff")})}'
+        ),
         metadata={'kind': 'candidate_service', 'algorithm_id': algorithm_id},
     )
     if result.status != 'completed' or not isinstance(result.value, Mapping):
@@ -658,10 +673,49 @@ def _start_candidate_algorithm(config: Mapping[str, Any], patch: Mapping[str, An
     }
 
 
+def _ensure_candidate_service_ready(service: Mapping[str, Any]) -> None:
+    if service.get('status') != 'ready':
+        raise RuntimeError(f"candidate service is not ready: {service.get('status')}")
+    if (service.get('healthcheck') or {}).get('status') != 'passed':
+        raise RuntimeError(f"candidate service healthcheck failed: {service.get('healthcheck')}")
+    if not _text(service.get('algorithm_id')):
+        raise RuntimeError('candidate service missing algorithm_id')
+    if not _text(service.get('service_url')):
+        raise RuntimeError('candidate service missing service_url')
+
+
+def _candidate_execution_failures(rows: list[Mapping[str, Any]]) -> list[dict[str, str]]:
+    bad_types = {'infra_failure', 'candidate_not_run', 'candidate_failed'}
+    failures = []
+    for row in rows:
+        failure_type = _text(row.get('failure_type'))
+        target = row.get('target') if isinstance(row.get('target'), Mapping) else {}
+        expected, actual = _text(target.get('algorithm_id')), _text(target.get('routed_algorithm_id'))
+        if failure_type in bad_types or (expected and actual and expected != actual):
+            failures.append({
+                'case_id': _text(row.get('case_id')),
+                'failure_type': failure_type or 'candidate_failed',
+                'reason': _text(row.get('reason') or 'candidate evaluation failed'),
+            })
+    return failures
+
+
+def _candidate_summary_failed(candidate: Mapping[str, Any]) -> bool:
+    total = int(candidate.get('total') or 0)
+    metrics = candidate.get('metrics') if isinstance(candidate.get('metrics'), Mapping) else {}
+    scored = int(metrics.get('scored_count') or 0)
+    checks = candidate.get('checks') if isinstance(candidate.get('checks'), Mapping) else {}
+    return bool(candidate.get('execution_failures')) or not checks.get('ready') or scored == 0 or scored != total
+
+
 def _candidate_algorithm_env(config: Mapping[str, Any], algorithm_id: str) -> dict[str, str]:
     env = {
         'LAZYMIND_ALGO_ID': algorithm_id,
-        'LAZYMIND_AGENTIC_KB_NAME': _text(config.get('agentic_kb_name') or os.getenv('LAZYMIND_AGENTIC_KB_NAME') or 'general_algo'),
+        'LAZYMIND_AGENTIC_KB_NAME': _text(
+            config.get('agentic_kb_name')
+            or os.getenv('LAZYMIND_AGENTIC_KB_NAME')
+            or 'general_algo',
+        ),
         'LAZYMIND_ENABLE_ROUTER': 'false',
         'LAZYMIND_ROUTER_CHILD_PROXIED_ONLY': 'true',
     }
@@ -695,7 +749,8 @@ def _candidate_algorithm_id(config: Mapping[str, Any], patch: Mapping[str, Any],
     if explicit:
         return _safe_id(explicit, 'evo_candidate')
     run_part = _safe_id(_text(getattr(ctx, 'output_partition', '')), 'run')
-    digest = hashlib.sha1(_stable_text({'workspace': patch.get('workspace_ref'), 'diff': patch.get('diff')}).encode('utf-8')).hexdigest()[:10]
+    digest = hashlib.sha1(_stable_text({'workspace': patch.get('workspace_ref'),
+                          'diff': patch.get('diff')}).encode('utf-8')).hexdigest()[:10]
     return f'evo_{run_part}_{digest}'[:64]
 
 
@@ -765,11 +820,23 @@ def _router_get(router_admin_url: str, algorithm_id: str, token: Any, *, timeout
         raise
 
 
-def _router_post_register(router_admin_url: str, body: Mapping[str, Any], token: Any, *, timeout_s: float) -> dict[str, Any]:
+def _router_post_register(
+    router_admin_url: str,
+    body: Mapping[str, Any],
+    token: Any,
+    *,
+    timeout_s: float,
+) -> dict[str, Any]:
     return _request_json('POST', f'{router_admin_url}/inner/algorithm/register', token, body=body, timeout_s=timeout_s)
 
 
-def _wait_router_algorithm_ready(router_admin_url: str, algorithm_id: str, token: Any, *, timeout_s: float) -> dict[str, Any]:
+def _wait_router_algorithm_ready(
+    router_admin_url: str,
+    algorithm_id: str,
+    token: Any,
+    *,
+    timeout_s: float,
+) -> dict[str, Any]:
     deadline = time.time() + timeout_s
     last: dict[str, Any] = {}
     while time.time() < deadline:
@@ -786,6 +853,18 @@ def _wait_router_algorithm_ready(router_admin_url: str, algorithm_id: str, token
             }
         time.sleep(1)
     raise TimeoutError(f'candidate algorithm did not become healthy: {algorithm_id}; last={last}')
+
+
+def _ensure_existing_candidate_matches(existing: Mapping[str, Any], body: Mapping[str, Any]) -> None:
+    expected_path = _text(body.get('code_path'))
+    actual_path = _text(existing.get('code_path'))
+    if expected_path and actual_path and expected_path != actual_path:
+        raise RuntimeError(f'candidate algorithm_id already points to different code_path: {actual_path}')
+    expected_config = body.get('config') if isinstance(body.get('config'), Mapping) else {}
+    actual_config = existing.get('config') if isinstance(existing.get('config'), Mapping) else {}
+    for key in ('LAZYMIND_ALGO_ID', 'LAZYMIND_ENABLE_ROUTER', 'LAZYMIND_ROUTER_CHILD_PROXIED_ONLY'):
+        if _text(expected_config.get(key)) != _text(actual_config.get(key)):
+            raise RuntimeError(f'candidate algorithm_id already has different config for {key}')
 
 
 def _request_json(
@@ -824,9 +903,14 @@ class HttpChatRunner:
                                              headers={'content-type': 'application/json'})
                 with urllib.request.urlopen(req, timeout=self.timeout_s) as response:
                     raw = response.read().decode('utf-8', 'replace')
-                return ExternalCallResult(
-                    'completed', _parse_chat_response(raw), metadata={
-                        'target_url': target_url, 'attempt': attempt})
+                    routed_algorithm = response.headers.get('X-Algorithm-Id') or ''
+                    routed_instance = response.headers.get('X-Instance-Host') or ''
+                parsed = _parse_chat_response(raw)
+                if routed_algorithm:
+                    parsed['routed_algorithm_id'] = routed_algorithm
+                if routed_instance:
+                    parsed['routed_instance_host'] = routed_instance
+                return ExternalCallResult('completed', parsed, metadata={'target_url': target_url, 'attempt': attempt})
             except urllib.error.HTTPError as exc:
                 last_error = exc
                 if exc.code not in {429, 502, 503, 504} or attempt >= self.max_attempts:
@@ -846,27 +930,6 @@ class HttpChatRunner:
 
 
 @dataclass(frozen=True)
-class HttpJSONRunner:
-    timeout_s: float = 30.0
-
-    def invoke(self, request: ExternalCallRequest, token: Any) -> ExternalCallResult:
-        token.raise_if_cancelled()
-        method = _text(request.payload.get('method') or 'GET').upper()
-        url = _text(request.payload.get('url'))
-        body = request.payload.get('body')
-        data = None if method == 'GET' else json.dumps(body or {}, ensure_ascii=False).encode('utf-8')
-        try:
-            req = urllib.request.Request(url, data=data, method=method, headers={'content-type': 'application/json'})
-            with urllib.request.urlopen(req, timeout=self.timeout_s) as response:
-                raw = response.read().decode('utf-8', 'replace')
-            return ExternalCallResult('completed', json.loads(raw) if raw else {}, metadata={'url': url, 'method': method})
-        except urllib.error.HTTPError as exc:
-            return ExternalCallResult('failed_permanent', error_type='HTTPError', error_message=f'{exc.code}: {exc.reason}')
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            return ExternalCallResult('failed_transient', error_type=type(exc).__name__, error_message=str(exc))
-
-
-@dataclass(frozen=True)
 class RouterCandidateRegisterRunner:
     timeout_s: float = 180.0
 
@@ -876,6 +939,8 @@ class RouterCandidateRegisterRunner:
         body = request.payload.get('body') if isinstance(request.payload.get('body'), Mapping) else {}
         try:
             existing = _router_get(router_admin_url, algorithm_id, token, timeout_s=10)
+            if existing:
+                _ensure_existing_candidate_matches(existing, body)
             registered = existing if existing.get('status') == 'active' and existing.get('instances') else None
             if registered is None:
                 registered = _router_post_register(router_admin_url, body, token, timeout_s=self.timeout_s)
@@ -890,7 +955,11 @@ class RouterCandidateRegisterRunner:
                 'ready': ready,
             })
         except urllib.error.HTTPError as exc:
-            return ExternalCallResult('failed_permanent', error_type='HTTPError', error_message=f'{exc.code}: {exc.reason}')
+            return ExternalCallResult(
+                'failed_permanent',
+                error_type='HTTPError',
+                error_message=f'{exc.code}: {exc.reason}',
+            )
         except TimeoutError as exc:
             return ExternalCallResult('timeout', error_type='TimeoutError', error_message=str(exc))
         except (urllib.error.URLError, OSError, ValueError, RuntimeError) as exc:
@@ -1127,6 +1196,7 @@ def _judge_row(case_id: str, value: Any) -> dict[str, Any]:
         'is_correct': bool(value.get('is_correct')),
         'reason': _text(value.get('reason')),
         'trace_id': _text(value.get('trace_id')),
+        'target': dict(value.get('target') or {}) if isinstance(value.get('target'), Mapping) else {},
         **{key: round(float(value.get(key) or 0.0), 4) for key in METRICS},
     }
 
@@ -1298,6 +1368,13 @@ def _call_repair_llm(prompt: str, ctx: Any | None) -> str:
 def _opencode_task(plan: Mapping[str, Any], workspace: Mapping[str, Any],
                    diagnosis: Mapping[str, Any], attempt: int) -> dict[str, Any]:
     policy = plan.get('policy') if isinstance(plan.get('policy'), Mapping) else {}
+    seed_files = _as_list(policy.get('seed_files')) or [
+        'lazymind/chat/engine/prompts/guidance.py',
+        'lazymind/chat/engine/prompts/system_prompt.py',
+        'lazymind/chat/engine/agent_core.py',
+        'lazymind/chat/service/chat_service.py',
+        'lazymind/chat/engine/tools/kb.py',
+    ]
     return {
         'mode': 'lazyrag_evo_repair_patch_once',
         'attempt': attempt,
@@ -1305,20 +1382,23 @@ def _opencode_task(plan: Mapping[str, Any], workspace: Mapping[str, Any],
         'workspace': {'path': workspace.get('workspace_ref'), 'source_dir': workspace.get('source_dir')},
         'allowed_roots': _as_list(policy.get('allowed_roots')) or ['lazymind/chat'],
         'blocked_roots': _as_list(policy.get('blocked_roots')) or ['tests', '.git', 'lazyllm'],
+        'seed_files': seed_files,
         'evidence_cases': plan.get('evidence_cases') or [],
         'diagnosis': diagnosis,
         'instructions': [
-            'Read the relevant source files first.',
-            'Make the smallest code change that addresses the observed RAG/tool/generation failure.',
+            'Read only the seed_files first. Do not inspect vendored lazyllm sources unless a seed file directly '
+            'points to an allowed-root wrapper that must be changed.',
+            'You must make one smallest code change in allowed_roots that addresses the observed '
+            'RAG/tool/generation failure, unless the seed files prove no safe code patch exists.',
             'Do not edit tests, vendored lazyllm code, secrets, or unrelated modules.',
             'If the evidence points to bad source/OCR data rather than code, still inspect retrieval/chat handling '
             'and only patch when a code-level improvement is justified.',
-            'After editing, run a lightweight syntax or import check if possible.',
-            'Stop after one minimal patch.',
+            'After editing, run: python -m compileall -q lazymind/chat.',
+            'Stop immediately after the first minimal patch and leave the git diff in the workspace.',
         ],
         'stop_condition': (
-            'A git diff exists in allowed roots, or you determined no safe code patch exists '
-            'after inspecting the source.'
+            'A git diff exists in allowed_roots. If no safe patch exists, write a final note explaining the exact '
+            'seed file evidence; do not continue broad exploration.'
         ),
     }
 

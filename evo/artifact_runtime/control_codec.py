@@ -7,7 +7,8 @@ from typing import Any
 from .artifact import ArtifactKey, ArtifactPayload, ArtifactRef
 from .utils import is_json_scalar, normalize_json_value, sorted_string_items
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 4
+_SUPPORTED_SCHEMA_VERSIONS = frozenset({1, _SCHEMA_VERSION})
 
 
 def encode_control_value(value: Any) -> Any:
@@ -47,7 +48,7 @@ def decode_control_value(value: Any) -> Any:
         raise TypeError(f'unsupported encoded value: {type(value).__name__}')
     if 'schema_version' not in value or 'type' not in value:
         return {key: decode_control_value(item) for key, item in sorted_string_items(value)}
-    if value['schema_version'] != _SCHEMA_VERSION:
+    if value['schema_version'] not in _SUPPORTED_SCHEMA_VERSIONS:
         raise ValueError(f"unsupported schema_version: {value['schema_version']}")
 
     item_type = value['type']
@@ -69,12 +70,16 @@ def decode_control_value(value: Any) -> Any:
 
 
 def is_basic_control_envelope(value: Any) -> bool:
-    return isinstance(value, Mapping) and value.get('schema_version') == _SCHEMA_VERSION and value.get('type') in {
-        'ArtifactKey',
-        'ArtifactRef',
-        'ArtifactPayload',
-        'StringAnyMap',
-    }
+    return (
+        isinstance(value, Mapping)
+        and value.get('schema_version') in _SUPPORTED_SCHEMA_VERSIONS
+        and value.get('type') in {
+            'ArtifactKey',
+            'ArtifactRef',
+            'ArtifactPayload',
+            'StringAnyMap',
+        }
+    )
 
 
 def _envelope(item_type: str, **fields: Any) -> dict[str, Any]:
