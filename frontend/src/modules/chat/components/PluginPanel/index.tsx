@@ -16,13 +16,7 @@ interface PluginPanelProps {
  * AutoSlotGrid renders all available slot revisions in a responsive grid,
  * without requiring a pre-defined UI spec.
  */
-function AutoSlotGrid({
-  session,
-  conversationId,
-}: {
-  session: PluginSession;
-  conversationId: string;
-}) {
+function AutoSlotGrid({ session }: { session: PluginSession }) {
   if (!session.slots || session.slots.length === 0) {
     return (
       <div className='plugin-panel__empty' role='status' aria-live='polite'>
@@ -47,7 +41,6 @@ function AutoSlotGrid({
             {revisions.map((rev) => (
               <SlotRenderer
                 key={`${rev.slot_id}-${rev.revision}-${rev.list_index ?? 0}`}
-                conversationId={conversationId}
                 slot={rev}
               />
             ))}
@@ -61,15 +54,7 @@ function AutoSlotGrid({
 /**
  * TabSlotGrid renders slots according to the plugin UI tab definition.
  */
-function TabSlotGrid({
-  tab,
-  session,
-  conversationId,
-}: {
-  tab: TabDef;
-  session: PluginSession;
-  conversationId: string;
-}) {
+function TabSlotGrid({ tab, session }: { tab: TabDef; session: PluginSession }) {
   return (
     <div className='plugin-panel__tab-content'>
       {tab.slots.map((slotDef) => {
@@ -95,7 +80,6 @@ function TabSlotGrid({
                 {revisions.map((rev) => (
                   <SlotRenderer
                     key={`${rev.slot_id}-${rev.revision}-${rev.list_index ?? 0}`}
-                    conversationId={conversationId}
                     slot={rev}
                     cardMode
                     expectedType={slotDef.type}
@@ -106,7 +90,6 @@ function TabSlotGrid({
               revisions.map((rev) => (
                 <SlotRenderer
                   key={`${rev.slot_id}-${rev.revision}-${rev.list_index ?? 0}`}
-                  conversationId={conversationId}
                   slot={rev}
                   expectedType={slotDef.type}
                 />
@@ -256,12 +239,11 @@ export function PluginPanel({
                 <TabSlotGrid
                   tab={tab}
                   session={session}
-                  conversationId={conversationId}
                 />
               </div>
             ))
           ) : (
-            <AutoSlotGrid session={session} conversationId={conversationId} />
+            <AutoSlotGrid session={session} />
           )}
         </div>
       )}

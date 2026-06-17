@@ -281,23 +281,17 @@ def build_cold_start_tools() -> List[Any]:
         first_steps = sm.get_reachable_steps('__start__')
 
         def _make_trigger(plugin_id: str, first: List[str], desc: str, when_to_use: str):
-            @handle_tool_errors
+            tool_name = f'trigger_{plugin_id.replace("-", "_")}'
+
             def _trigger(user_input: str) -> str:
-                """Trigger plugin.
-
-                Args:
-                    user_input (str): The user's original request that triggered this plugin.
-
-                Returns:
-                    Confirmation that the plugin was started.
-                """
                 step_id = first[0] if first else ''
                 if not step_id:
                     return f'Error: plugin {plugin_id!r} has no reachable first step.'
                 return _trigger_plugin_step(plugin_id, step_id, user_input, is_cold_start=True)
 
-            _trigger.__name__ = f'trigger_{plugin_id.replace("-", "_")}'
-            # Build a short, LLM-friendly description that leads with the trigger condition.
+            # Set __name__ before wrapping so handle_tool_errors guard checks the
+            # final public name (trigger_<plugin_id>), not the inner closure name.
+            _trigger.__name__ = tool_name
             if when_to_use:
                 tool_desc = f'{when_to_use.rstrip(".")}.  ({desc.rstrip(".")})'
             else:
@@ -315,7 +309,7 @@ def build_cold_start_tools() -> List[Any]:
                 'Returns:\n'
                 '    Confirmation that the plugin was started.'
             )
-            return _trigger
+            return handle_tool_errors(_trigger)
 
         tools.append(_make_trigger(pid, first_steps, desc, when_to_use))
     return tools
@@ -463,13 +457,15 @@ def resolve_plugin_injection(
                     if lbl:
                         step_labels[sid] = lbl
 
-            if forward_steps or rewind_steps:
-                plugin_tools = [build_advance_step_tool(
-                    p_plugin_id, p_current_step,
-                    rewind_steps=rewind_steps,
-                    step_labels=step_labels,
-                )]
-                plugin_stop_tools = ['advance_step']
+            # advance_step is always available in an active session.
+            # forward_steps / rewind_steps only influence the docstring choices;
+            # they do not gate whether the tool itself is injected.
+            plugin_tools = [build_advance_step_tool(
+                p_plugin_id, p_current_step,
+                rewind_steps=rewind_steps,
+                step_labels=step_labels,
+            )]
+            plugin_stop_tools = ['advance_step']
             plugin_system_prompt = plugin_loader.get_scenario(p_plugin_id)
         else:
             # Cold start: no active session yet

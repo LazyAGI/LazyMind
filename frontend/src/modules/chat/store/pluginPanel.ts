@@ -10,6 +10,10 @@ export interface SlotRevision {
   step_id: string;
   attempt: number;
   created_at: string;
+  /** Artifact content type returned by the backend (e.g. 'text', 'image', 'file'). */
+  content_type?: string;
+  /** Artifact value as returned by the backend — shape depends on content_type. */
+  artifact_value?: any;
 }
 
 export interface PluginSession {

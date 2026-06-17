@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
@@ -35,16 +36,18 @@ type stepDTO struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// slotDTO represents a currently-selected slot revision.
+// slotDTO represents a currently-selected slot revision, with its artifact value inline.
 type slotDTO struct {
-	SlotID      string    `json:"slot_id"`
-	Revision    int       `json:"revision"`
-	ListIndex   *int      `json:"list_index,omitempty"`
-	Selected    bool      `json:"selected"`
-	ArtifactKey string    `json:"artifact_key"`
-	StepID      string    `json:"step_id"`
-	Attempt     int       `json:"attempt"`
-	CreatedAt   time.Time `json:"created_at"`
+	SlotID        string          `json:"slot_id"`
+	Revision      int             `json:"revision"`
+	ListIndex     *int            `json:"list_index,omitempty"`
+	Selected      bool            `json:"selected"`
+	ArtifactKey   string          `json:"artifact_key"`
+	StepID        string          `json:"step_id"`
+	Attempt       int             `json:"attempt"`
+	CreatedAt     time.Time       `json:"created_at"`
+	ContentType   string          `json:"content_type,omitempty"`
+	ArtifactValue json.RawMessage `json:"artifact_value,omitempty"`
 }
 
 func toSessionDTO(s *orm.PluginSession) sessionDTO {
@@ -79,6 +82,80 @@ func toSlotDTO(r *orm.PluginSlotRevision) slotDTO {
 		StepID:      r.StepID,
 		Attempt:     r.Attempt,
 		CreatedAt:   r.CreatedAt,
+	}
+}
+
+// enrichSlots fills ContentType and ArtifactValue on each slotDTO by looking up
+// the corresponding artifact row.
+// For each revision: look up plugin_session_steps → task_id, then query
+// sub_agent_artifacts(task_id, artifact_key) ordered by seq ASC and pick the
+// row at position list_index (0-based); for single slots take the latest (seq DESC).
+func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slotDTO) {
+	// Step 1: build a map (step_id, attempt) → task_id
+	type stepKey struct{ stepID string; attempt int }
+	taskIDByStep := map[stepKey]string{}
+	var steps []orm.PluginSessionStep
+	db.WithContext(ctx).Where("session_id = ?", sessionID).Find(&steps)
+	for _, s := range steps {
+		taskIDByStep[stepKey{s.StepID, s.Attempt}] = s.TaskID
+	}
+
+	// Step 2: collect distinct task_ids we need artifacts for
+	type artifactEntry struct {
+		ContentType string
+		Value       json.RawMessage
+	}
+	// key: taskID + "#" + artifactKey → ordered list of artifacts by seq ASC
+	artifactsByTask := map[string][]orm.SubAgentArtifact{}
+	taskIDs := map[string]bool{}
+	for _, slot := range slots {
+		tid := taskIDByStep[stepKey{slot.StepID, slot.Attempt}]
+		if tid != "" {
+			taskIDs[tid] = true
+		}
+	}
+	if len(taskIDs) > 0 {
+		ids := make([]string, 0, len(taskIDs))
+		for id := range taskIDs {
+			ids = append(ids, id)
+		}
+		var arts []orm.SubAgentArtifact
+		db.WithContext(ctx).
+			Where("task_id IN ?", ids).
+			Order("task_id ASC, artifact_key ASC, seq ASC").
+			Find(&arts)
+		for _, a := range arts {
+			k := a.TaskID + "#" + a.ArtifactKey
+			artifactsByTask[k] = append(artifactsByTask[k], a)
+		}
+	}
+
+	// Step 3: assign value to each slotDTO
+	for i := range slots {
+		slot := &slots[i]
+		tid := taskIDByStep[stepKey{slot.StepID, slot.Attempt}]
+		if tid == "" {
+			continue
+		}
+		k := tid + "#" + slot.ArtifactKey
+		arts := artifactsByTask[k]
+		if len(arts) == 0 {
+			continue
+		}
+		var chosen *orm.SubAgentArtifact
+		if slot.ListIndex != nil {
+			idx := *slot.ListIndex
+			if idx < len(arts) {
+				chosen = &arts[idx]
+			} else {
+				chosen = &arts[len(arts)-1]
+			}
+		} else {
+			// single slot: latest seq
+			chosen = &arts[len(arts)-1]
+		}
+		slot.ContentType = chosen.ContentType
+		slot.ArtifactValue = chosen.Value
 	}
 }
 
@@ -134,6 +211,7 @@ func GetSessionDetail(w http.ResponseWriter, r *http.Request) {
 	for i := range revisions {
 		dto.Slots = append(dto.Slots, toSlotDTO(&revisions[i]))
 	}
+	enrichSlots(ctx, db, sessionID, dto.Slots)
 	// Load steps inline (used by Python Layer-2 dependency validation).
 	steps, _ := ListSteps(ctx, db, sessionID)
 	for i := range steps {
@@ -163,6 +241,7 @@ func GetSessionSlots(w http.ResponseWriter, r *http.Request) {
 	for i := range revisions {
 		out = append(out, toSlotDTO(&revisions[i]))
 	}
+	enrichSlots(r.Context(), db, sessionID, out)
 	common.ReplyOK(w, map[string]any{"slots": out})
 }
 
@@ -230,6 +309,7 @@ func GetActiveConversationSession(w http.ResponseWriter, r *http.Request) {
 	for i := range revisions {
 		dto.Slots = append(dto.Slots, toSlotDTO(&revisions[i]))
 	}
+	enrichSlots(r.Context(), db, s.ID, dto.Slots)
 	common.ReplyOK(w, map[string]any{"session": dto})
 }
 
@@ -261,6 +341,7 @@ func GetLatestConversationSession(w http.ResponseWriter, r *http.Request) {
 	for i := range revisions {
 		dto.Slots = append(dto.Slots, toSlotDTO(&revisions[i]))
 	}
+	enrichSlots(r.Context(), db, s.ID, dto.Slots)
 	common.ReplyOK(w, map[string]any{"session": dto})
 }
 

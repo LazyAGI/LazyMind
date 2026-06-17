@@ -257,6 +257,10 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     # Persist the allowlist in session globals so every @handle_tool_errors-wrapped
     # tool can do a cheap runtime check before executing business logic.
     lazyllm.globals['active_tool_names'] = _collect_active_tool_names(active_configs)
+    # Plugin tools are dynamically injected and pre-validated by resolve_plugin_injection;
+    # add their names to the allowlist so the ToolGuard does not block them.
+    if plugin_stop_tools:
+        lazyllm.globals['active_tool_names'] |= set(plugin_stop_tools)
     agent_tools = build_agent_tools(active_configs)
     subagent_tools = _build_subagent_chat_tools(bool(has_subagents))
     mcp_tools = _build_mcp_tools(mcp_config) if mcp_config else []
