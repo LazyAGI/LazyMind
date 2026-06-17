@@ -207,14 +207,9 @@ const AssistantMessage = (props: any) => {
     }
   }, [index, length, sessionId, loadActiveSession]);
 
-  const pluginSession = usePluginStore((s) => {
-    const byConv = s.sessionByConversation;
-    if (sessionId && byConv[sessionId]) return byConv[sessionId];
-    // Fall back to any available session (at most one active per UI view).
-    const sessions = Object.values(byConv).filter(Boolean);
-    return sessions.length > 0 ? sessions[0] : null;
-  });
-  const pluginConversationId = pluginSession?.conversation_id ?? sessionId;
+  const pluginSession = usePluginStore((s) =>
+    sessionId ? s.sessionByConversation[sessionId] ?? null : null,
+  );
 
   useEffect(() => {
     dispatch({
@@ -905,9 +900,10 @@ const AssistantMessage = (props: any) => {
             />
           </div>
           {index === length - 1 && renderBottom()}
-          {index === length - 1 && pluginSession && (
+          {index === length - 1 && pluginSession && sessionId && (
             <PluginPanel
-              conversationId={pluginConversationId}
+              key={sessionId}
+              conversationId={sessionId}
               onSendMessage={(text) => props.sendMessage?.(text)}
             />
           )}
@@ -956,9 +952,10 @@ const AssistantMessage = (props: any) => {
             renderFooter()}
         </div>
         {index === length - 1 && renderBottom()}
-        {index === length - 1 && pluginSession && (
+        {index === length - 1 && pluginSession && sessionId && (
           <PluginPanel
-            conversationId={pluginConversationId}
+            key={sessionId}
+            conversationId={sessionId}
             onSendMessage={(text) => props.sendMessage?.(text)}
           />
         )}
