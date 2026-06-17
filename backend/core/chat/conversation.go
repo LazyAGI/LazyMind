@@ -224,7 +224,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	//   1. No plugin_context from frontend → inject from DB if an active session exists.
 	//   2. Frontend sent plugin_context → cross-check with DB; overwrite any stale fields
 	//      so Python always receives the ground-truth session_id / current_step.
-	if activeSess, err := plugin.GetActiveSession(r.Context(), db, convID); err == nil && activeSess != nil {
+	if activeSess, err := plugin.GetLatestSession(r.Context(), db, convID); err == nil && activeSess != nil {
 		existing, hasPC := reqBody["plugin_context"].(map[string]any)
 		if !hasPC || existing == nil {
 			// Case 1: inject from DB.

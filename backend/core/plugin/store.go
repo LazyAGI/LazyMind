@@ -72,7 +72,9 @@ func CreateSession(ctx context.Context, db *gorm.DB, in CreateSessionInput) (*or
 	return s, nil
 }
 
-// GetActiveSession returns the active plugin session for a conversation, or nil if none.
+// GetActiveSession returns the in-progress plugin session for a conversation, or nil if none.
+// Only 'active' status is considered: used by HandlePluginStepCreated to guard against
+// duplicate cold-start sessions.
 func GetActiveSession(ctx context.Context, db *gorm.DB, conversationID string) (*orm.PluginSession, error) {
 	var s orm.PluginSession
 	err := db.WithContext(ctx).

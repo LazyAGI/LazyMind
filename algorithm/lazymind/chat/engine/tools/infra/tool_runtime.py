@@ -61,17 +61,17 @@ def tool_failure(tool_name: str, exc: Exception) -> Dict[str, Any]:
 def handle_tool_errors(func: _F) -> _F:
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Dict[str, Any]:
-        # Defense-in-depth: model-side tool planning can occasionally drift from
-        # server-side active tool filtering. Block inactive tool calls here to
-        # avoid executing unintended tools and return a deterministic error.
+        # Defense-in-depth: block inactive tool calls before executing business logic.
+        # wrapper.__name__ is the public tool name (may differ from func.__name__ when
+        # the caller renames the wrapper after decoration, e.g. trigger_image_plugin).
         active_tool_names = lazyllm.globals.get('active_tool_names')
-        if isinstance(active_tool_names, set) and func.__name__ not in active_tool_names:
+        if isinstance(active_tool_names, set) and wrapper.__name__ not in active_tool_names:
             return tool_error(
-                func.__name__,
-                f'{func.__name__} is not registered or active in current session.',
+                wrapper.__name__,
+                f'{wrapper.__name__} is not registered or active in current session.',
                 error_type='ToolUnavailable',
                 detail='Please enable this tool in model/tool config, then retry.',
-                log_message=f'[ToolGuard] blocked inactive tool call: {func.__name__}',
+                log_message=f'[ToolGuard] blocked inactive tool call: {wrapper.__name__}',
             )
         try:
             return func(*args, **kwargs)

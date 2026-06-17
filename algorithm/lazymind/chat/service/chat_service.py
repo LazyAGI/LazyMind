@@ -190,6 +190,9 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         f'[ChatServer] [MODEL_CONFIG_RECEIVED] [sid={session_id}] [user_id={user_id or ""}] '
         f'[{summarize_model_config_for_log(model_config)}]'
     )
+    LOG.info(
+        f'[ChatServer] [PLUGIN_CONTEXT] [sid={session_id}] [plugin_context={plugin_context!r}]'
+    )
     start_time = time.time()
     priority = priority or LAZYMIND_LLM_PRIORITY
     query, agent_query = _normalize_cite_message_query_for_agent(query)

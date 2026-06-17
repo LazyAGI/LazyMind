@@ -248,8 +248,10 @@ def _build_step_choices_doc(
 ) -> str:
     """Return a formatted string listing available step choices for the LLM."""
     lines = [
-        'Available steps at this moment',
-        '------------------------------',
+        '## Available steps at this moment (authoritative — state machine computed)',
+        '--------------------------------------------------------------------------',
+        'These are the ONLY valid values for step_id right now.',
+        'Do NOT infer step names from scenario descriptions or chat history.',
     ]
     if forward_steps:
         lines.append('Forward (next steps):')
@@ -364,6 +366,11 @@ def build_advance_step_tool(
         'Advance the active plugin to the next step.\n\n'
         'Use this when there is an active plugin session and you need to\n'
         'trigger or re-trigger a specific step based on user intent.\n\n'
+        '## IMPORTANT — use the step list below as the single source of truth\n\n'
+        'The "Available steps at this moment" section below is computed from the\n'
+        'live state machine and reflects what is actually reachable right now.\n'
+        'Any step descriptions in the scenario guide are for background context\n'
+        'only. If they differ, trust the list below — not the scenario guide.\n\n'
         'For partial retries (re-running only a subset of list-slot items),\n'
         'set runtime_instruction to a concise directive that tells the SubAgent\n'
         'which items to regenerate, and set partial_indices to mark which list\n'

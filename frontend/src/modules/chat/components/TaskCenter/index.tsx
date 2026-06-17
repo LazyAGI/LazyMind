@@ -78,7 +78,9 @@ function CollapsibleSection({
         </span>
         <span className="task-section-title">{title}</span>
       </button>
-      {open && <div className="task-section-body">{children}</div>}
+      <div className="task-section-body" style={open ? undefined : { display: 'none' }}>
+        {children}
+      </div>
     </div>
   );
 }

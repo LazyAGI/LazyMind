@@ -1,6 +1,6 @@
-import { Avatar, Button, Divider, Flex, message, Spin, Tooltip } from "antd";
+import { Avatar, Button, Divider, Flex, message, Popover, Spin, Tooltip } from "antd";
 import { trim } from "lodash";
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -13,6 +13,7 @@ import {
   LikeFilled,
   LikeOutlined,
   ReloadOutlined,
+  AppstoreOutlined,
 } from "@ant-design/icons";
 import {
   ChatConversationsResponseFinishReasonEnum,
@@ -21,6 +22,8 @@ import {
 } from "@/api/generated/chatbot-client";
 import { AgentAppsAuth } from "@/components/auth";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
+import { usePluginStore } from "@/modules/chat/store/pluginPanel";
+import { PluginPanel } from "@/modules/chat/components/PluginPanel";
 import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
 
@@ -196,6 +199,17 @@ const AssistantMessage = (props: any) => {
     localFeedbackType: normalizeFeedbackType(item?.feed_back),
     targetHistoryId: undefined,
   });
+
+  const [pluginPopoverOpen, setPluginPopoverOpen] = useState(false);
+  // sessionId prop may be "" when the page loads; fall back to any available session.
+  const pluginSession = usePluginStore((s) => {
+    const byConv = s.sessionByConversation;
+    if (sessionId && byConv[sessionId]) return byConv[sessionId];
+    // Pick any session that exists (there is at most one active per UI view)
+    const sessions = Object.values(byConv).filter(Boolean);
+    return sessions.length > 0 ? sessions[0] : null;
+  });
+  const pluginConversationId = pluginSession?.conversation_id ?? sessionId;
 
   useEffect(() => {
     dispatch({
@@ -645,6 +659,32 @@ const AssistantMessage = (props: any) => {
                   onClick={regenerate}
                 />
               </Tooltip>
+            )}
+            {index === length - 1 && pluginSession && (
+              <Popover
+                open={pluginPopoverOpen}
+                onOpenChange={setPluginPopoverOpen}
+                trigger="click"
+                placement="topLeft"
+                overlayStyle={{ width: 480 }}
+                overlayInnerStyle={{ padding: 0 }}
+                content={
+                  <PluginPanel
+                    conversationId={pluginConversationId}
+                    onSendMessage={(text) => {
+                      setPluginPopoverOpen(false);
+                      props.sendMessage?.({ text });
+                    }}
+                  />
+                }
+              >
+                <Tooltip title="插件面板">
+                  <Button
+                    className="tool-btn"
+                    icon={<AppstoreOutlined />}
+                  />
+                </Tooltip>
+              </Popover>
             )}
           </div>
           {showFullToolbar && (

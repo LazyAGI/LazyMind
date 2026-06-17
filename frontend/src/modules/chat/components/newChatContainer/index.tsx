@@ -49,7 +49,6 @@ import {
   splitThinkingContent,
   formatThinkingForDisplay,
 } from "@/modules/chat/utils/thinking";
-import { PluginPanel } from "@/modules/chat/components/PluginPanel";
 
 const ThinkIcon = new URL("../../assets/images/think.png", import.meta.url)
   .href;
@@ -954,6 +953,13 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
 
       currentConversationIdRef.current = id;
 
+      // Load plugin session for this conversation (if any) so the toolbar icon shows.
+      if (id) {
+        import("@/modules/chat/store/pluginPanel").then(({ usePluginStore }) => {
+          usePluginStore.getState().loadActiveSession(id);
+        });
+      }
+
       streamManager.setActiveConversation(id || null);
 
       if (id && streamManager.hasActiveStream(id)) {
@@ -1587,12 +1593,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
             onCancelEditUserMessage={handleCancelEditUserMessage}
             onResendEditedUserMessage={handleResendEditedUserMessage}
             onCopyUserMessage={handleCopyUserMessage}
-            footer={
-              <PluginPanel
-                conversationId={sessionId}
-                onSendMessage={(text) => sendMessage({ text })}
-              />
-            }
           />
 
           {messageList.length > 0 && (
