@@ -99,12 +99,10 @@ class SQLiteStateStore:
 
     def get(self, key: str) -> str | None:
         with self._lock:
-            self._cleanup_key(key)
             row = self._conn.execute(
                 'SELECT value FROM state_kv WHERE key = ? AND (expires_at = 0 OR expires_at > ?)',
                 (key, int(time.time())),
             ).fetchone()
-            self._conn.commit()
             return row[0] if row else None
 
     def delete(self, key: str) -> None:
@@ -134,12 +132,10 @@ class SQLiteStateStore:
 
     def zcard(self, key: str) -> int:
         with self._lock:
-            self._cleanup_key(key)
             row = self._conn.execute(
                 'SELECT COUNT(*) FROM state_zset WHERE key = ? AND (expires_at = 0 OR expires_at > ?)',
                 (key, int(time.time())),
             ).fetchone()
-            self._conn.commit()
             return int(row[0]) if row else 0
 
 

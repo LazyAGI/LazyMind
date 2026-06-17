@@ -84,19 +84,7 @@ func (s *stateIdleStore) AppendHistory(ctx context.Context, key string, messages
 			return err
 		}
 	}
-	if maxMessages > 0 {
-		items, err := s.store.LRange(ctx, key, int64(-maxMessages), -1)
-		if err != nil {
-			return err
-		}
-		_ = s.store.Del(ctx, key)
-		for _, item := range items {
-			if err := s.store.RPush(ctx, key, []byte(item), ttl); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return s.store.LTrim(ctx, key, int64(-maxMessages), -1)
 }
 
 func (s *stateIdleStore) ReadHistory(ctx context.Context, key string) ([]idleHistoryMessage, error) {

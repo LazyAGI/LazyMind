@@ -125,6 +125,10 @@ func (s *RedisStore) LRange(ctx context.Context, key string, start, stop int64) 
 	return s.client.LRange(ctx, key, start, stop).Result()
 }
 
+func (s *RedisStore) LTrim(ctx context.Context, key string, start, stop int64) error {
+	return s.client.LTrim(ctx, key, start, stop).Err()
+}
+
 func (s *RedisStore) BLPop(ctx context.Context, key string, timeout time.Duration) error {
 	_, err := s.client.BLPop(ctx, timeout, key).Result()
 	return err

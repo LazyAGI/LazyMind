@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -106,7 +107,6 @@ func (s *SQLiteStore) HSet(ctx context.Context, key string, fields map[string]an
 }
 
 func (s *SQLiteStore) HGetAll(ctx context.Context, key string) (map[string]string, error) {
-	s.cleanupKey(ctx, key)
 	rows, err := s.db.QueryContext(ctx, `SELECT field, value FROM state_hash WHERE key = ? AND `+liveWhere(), key, nowMS())
 	if err != nil {
 		return nil, err
@@ -124,7 +124,6 @@ func (s *SQLiteStore) HGetAll(ctx context.Context, key string) (map[string]strin
 }
 
 func (s *SQLiteStore) HGet(ctx context.Context, key, field string) ([]byte, error) {
-	s.cleanupKey(ctx, key)
 	var value []byte
 	err := s.db.QueryRowContext(ctx, `SELECT value FROM state_hash WHERE key = ? AND field = ? AND `+liveWhere(), key, field, nowMS()).Scan(&value)
 	return value, err
@@ -152,7 +151,6 @@ func (s *SQLiteStore) Set(ctx context.Context, key string, value []byte, ttl tim
 }
 
 func (s *SQLiteStore) Get(ctx context.Context, key string) ([]byte, error) {
-	s.cleanupKey(ctx, key)
 	var value []byte
 	err := s.db.QueryRowContext(ctx, `SELECT value FROM state_kv WHERE key = ? AND `+liveWhere(), key, nowMS()).Scan(&value)
 	return value, err
@@ -177,7 +175,6 @@ func (s *SQLiteStore) Del(ctx context.Context, keys ...string) error {
 }
 
 func (s *SQLiteStore) Exists(ctx context.Context, key string) (bool, error) {
-	s.cleanupKey(ctx, key)
 	for _, query := range []string{
 		`SELECT 1 FROM state_kv WHERE key = ? AND ` + liveWhere() + ` LIMIT 1`,
 		`SELECT 1 FROM state_hash WHERE key = ? AND ` + liveWhere() + ` LIMIT 1`,
@@ -216,8 +213,30 @@ func (s *SQLiteStore) LPush(ctx context.Context, key string, value []byte, ttl t
 	return s.RPush(ctx, key, value, ttl)
 }
 
+func normalizeListRange(length int, start, stop int64) (int, int, bool) {
+	if length == 0 {
+		return 0, 0, false
+	}
+	n := int64(length)
+	if start < 0 {
+		start = n + start
+	}
+	if stop < 0 {
+		stop = n + stop
+	}
+	if start < 0 {
+		start = 0
+	}
+	if stop >= n {
+		stop = n - 1
+	}
+	if start > stop || start >= n || stop < 0 {
+		return 0, 0, false
+	}
+	return int(start), int(stop), true
+}
+
 func (s *SQLiteStore) LRange(ctx context.Context, key string, start, stop int64) ([]string, error) {
-	s.cleanupKey(ctx, key)
 	rows, err := s.db.QueryContext(ctx, `SELECT value FROM state_list WHERE key = ? AND `+liveWhere()+` ORDER BY id ASC`, key, nowMS())
 	if err != nil {
 		return nil, err
@@ -234,25 +253,65 @@ func (s *SQLiteStore) LRange(ctx context.Context, key string, start, stop int64)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if len(all) == 0 {
+	startIdx, stopIdx, ok := normalizeListRange(len(all), start, stop)
+	if !ok {
 		return nil, nil
 	}
-	if start < 0 {
-		start = int64(len(all)) + start
+	return all[startIdx : stopIdx+1], nil
+}
+
+func (s *SQLiteStore) LTrim(ctx context.Context, key string, start, stop int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
 	}
-	if stop < 0 {
-		stop = int64(len(all)) + stop
+	defer tx.Rollback()
+
+	now := nowMS()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM state_list WHERE key = ? AND expires_at > 0 AND expires_at <= ?`, key, now); err != nil {
+		return err
 	}
-	if start < 0 {
-		start = 0
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM state_list WHERE key = ? AND `+liveWhere()+` ORDER BY id ASC`, key, now)
+	if err != nil {
+		return err
 	}
-	if stop >= int64(len(all)) {
-		stop = int64(len(all)) - 1
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		ids = append(ids, id)
 	}
-	if start > stop || start >= int64(len(all)) {
-		return nil, nil
+	if err := rows.Close(); err != nil {
+		return err
 	}
-	return all[start : stop+1], nil
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	startIdx, stopIdx, ok := normalizeListRange(len(ids), start, stop)
+	if !ok {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM state_list WHERE key = ?`, key); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+
+	keep := ids[startIdx : stopIdx+1]
+	placeholders := make([]string, len(keep))
+	args := make([]any, 0, len(keep)+1)
+	args = append(args, key)
+	for i, id := range keep {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	query := `DELETE FROM state_list WHERE key = ? AND id NOT IN (` + strings.Join(placeholders, ",") + `)`
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *SQLiteStore) BLPop(ctx context.Context, key string, timeout time.Duration) error {
@@ -261,7 +320,6 @@ func (s *SQLiteStore) BLPop(ctx context.Context, key string, timeout time.Durati
 		deadline = time.Now().Add(timeout)
 	}
 	for {
-		s.cleanupKey(ctx, key)
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
@@ -306,7 +364,6 @@ func (s *SQLiteStore) ZRemRangeByScore(ctx context.Context, key string, min, max
 }
 
 func (s *SQLiteStore) ZCard(ctx context.Context, key string) (int64, error) {
-	s.cleanupKey(ctx, key)
 	var n int64
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM state_zset WHERE key = ? AND `+liveWhere(), key, nowMS()).Scan(&n)
 	return n, err
