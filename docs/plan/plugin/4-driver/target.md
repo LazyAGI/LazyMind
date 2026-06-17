@@ -1,17 +1,35 @@
-1. 用户说，我对xx不满意，帮我重新跑阶段1-3，然后给我确认  （难点，目前的auto是全局的，不受agent控制，此举需要agent分析用户意图，决策下一步是否auto，甚至要直接让ChatAgent连续推进多个SubAgent的流程，而不是像之前一样，一次只推进一个step）；如果一次性推进多个step，中间是否需要DriverAgent参与呢，是否需要go参与，还是直接走sync模式处理掉
-2. 没有依赖的step并行执行
-3. async job和定时任务
-4. 查询指令
+# 阶段 4：驱动模式增强与并发能力
 
-## 来自 M3 的补充目标
+> 在已实现的 auto/manual 单步推进基础上，增强驱动模式的灵活性：支持用户对步骤结果的局部修改、无依赖步骤的并行执行、多步骤连续推进、异步定时任务，以及自然语言查询插件状态。
 
-5. human 模式：步骤完成后 step_status 置为 waiting，AsyncJob Handler 通过 Redis BLPOP 阻塞等待用户确认信号（key: plugin:proceed:{session_id}），lock_ttl_seconds=86400（支持长时间等待）
-6. POST /plugin-sessions/:id/proceed 接口：human 模式下用户点「继续」触发，写 Redis 信号唤醒 Handler；仅当 step_status='waiting' 时有效，否则返回 409
-7. plugin_proceed 工具（Python）：Agent 调用，含 state.yml 硬约束校验（非法 transition 直接拦截，不写 Redis）；state.yml 缺失时回退到 plugin.yaml steps 线性顺序
-8. plugin_edit 工具（Python）：对当前步骤 artifact 发起修改请求，写 Redis 信号触发 Handler 重新执行修改逻辑；框架记录每步 edit 次数，超出 driver.md 规定上限时强制推进
-9. auto 模式 driver 触发：步骤完成且 step_mode='auto' 时，框架自动构造 system prompt（注入 driver.md + 当前 artifacts 摘要），发起一次 ReactAgent 调用；driver.md 缺失时降级为 human 模式并打印 warning
-10. step_change SSE 事件：统一字段（plugin_session_id / step / step_status / step_mode），Go 接收后写 plugin_session_steps 表并更新 current_step_id FK
-11. plugin_sessions.current_step_id 改为 FK 指向 plugin_session_steps.id（M3 正式约束）
-12. async_jobs 新增 conversation_id 和 lock_ttl_seconds 字段
-13. StepProgress 前端组件：展示步骤列表 + 状态（running 旋转/waiting 等待图标/done 勾选）、human/auto 切换 Toggle（调 PATCH 接口）、waiting+human 时显示「继续」按钮
-14. plugin_proceed 并发幂等：用户 UI 点击和 Agent 同时触发时，Handler 侧做幂等处理，避免重复执行
+---
+
+## 一、步骤结果修改
+
+1. **局部修改请求**：用户可以在步骤完成后要求对已产出的 artifact 进行局部修改，而不是全量重跑整个步骤；ChatAgent 识别修改意图后，向 SubAgent 传入修改指令，SubAgent 仅针对被指定的内容部分重新生成。
+2. **修改次数限制**：框架记录每个步骤的修改次数；超出 `plugin.yaml` / `driver.md` 配置的上限后，自动放弃修改路径，强制推进到下一步，避免无限循环。
+
+## 二、步骤级 human / auto 模式控制
+
+3. **human 模式**：步骤完成后进入等待状态，暂停自动推进；前端显示「继续」/「重试」按钮，等待用户手动确认后才触发下一步。
+4. **手动推进接口**：用户在 human 模式下点击「继续」时，通过标准对话消息通道发送确认（复用已有 `POST /conversations:chat`），Go 根据当前步骤状态决定是否推进；防止用户重复点击导致重复触发。
+5. **步骤级模式切换**：支持在会话进行中对单个步骤的 human/auto 模式进行切换；切换后立即对下次该步骤完成时生效。
+
+## 三、多步骤连续推进
+
+6. **用户指定范围重跑**：用户说「重新跑阶段1到3」时，ChatAgent 应能解析出目标步骤范围，决策是否需要 DriverAgent 参与，并连续推进多个步骤，完成后给用户一次汇总确认，而非每步都中断等待。
+7. **单次 auto 推进多步**：支持 ChatAgent 在一轮决策中连续触发多个步骤，无需每步都经过用户消息驱动；推进策略（同步链式 vs DriverAgent 裁决）可由步骤配置或用户意图决定。
+
+## 四、并行执行
+
+8. **无依赖步骤并行**：当同一插件中存在多个互不依赖的步骤时（根据 state.yml 的 inputs 声明判断），支持同时启动多个 SubAgent 并行执行；所有并行步骤完成后再进入下一个依赖它们的步骤。
+9. **并行状态感知**：前端 Plugin Panel 和 StateGraph 能正确展示多个步骤同时处于 running 状态的情况；DriverAgent 在并行步骤全部完成后才做整体裁决。
+
+## 五、异步任务与定时触发
+
+10. **异步 Job 支持**：插件步骤支持以异步 Job 形式提交执行，用户不必保持连接等待；Job 完成后通过 Conversation Events SSE 或通知机制告知用户结果。
+11. **定时触发**：支持为插件或特定步骤配置定时触发规则；定时到达时自动启动插件执行流程，无需用户主动发起。
+
+## 六、查询指令
+
+12. **自然语言状态查询**：用户可通过对话询问「现在跑到哪一步了」「第2步的结果是什么」「有哪些步骤失败了」等问题；ChatAgent 通过查询类工具（`list_subagents`、`get_subagent_artifacts` 等）获取当前会话的插件执行状态后作答，不触发新的步骤执行。
