@@ -5,9 +5,10 @@ import re
 import threading
 from typing import Any
 
+import jsonschema
 from json_repair import repair_json
 from lazyllm import LOG
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from lazymind.review.skill_review.config import DEFAULT_LLM_CALL_TIMEOUT_SECONDS
 
@@ -92,4 +93,13 @@ def _parse_json_object(text: str) -> Any:
 def _validate_json_object(payload: dict[str, Any], schema: Any) -> dict[str, Any]:
     if isinstance(schema, type) and issubclass(schema, BaseModel):
         return schema.model_validate(payload).model_dump()
-    return payload
+    if isinstance(schema, dict):
+        jsonschema.validate(payload, schema)
+        return payload
+
+    validated = TypeAdapter(schema).validate_python(payload)
+    if isinstance(validated, BaseModel):
+        return validated.model_dump()
+    if isinstance(validated, dict):
+        return validated
+    raise ValueError(f'LLM response schema must validate to an object, got {type(validated).__name__}')
