@@ -456,7 +456,7 @@ func AdvanceSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db := store.DB()
-	rdb := store.Redis()
+	stateStore := store.State()
 	if db == nil {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
 		return
@@ -517,7 +517,7 @@ func AdvanceSession(w http.ResponseWriter, r *http.Request) {
 		}
 		// LLMConfig is not persisted on the task; subagent runner uses its default model on resume.
 		// input_artifact_keys, output_artifact_keys, and tools are read by the Python runner from DB.
-		go subagent.Run(context.Background(), db, rdb, subagent.RunRequest{
+		go subagent.Run(context.Background(), db, stateStore, subagent.RunRequest{
 			TaskID:        task.ID,
 			AgentType:     "plugin_step",
 			Params:        params.asMap(),

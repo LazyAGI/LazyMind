@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	"lazymind/core/state"
 )
 
 const (
@@ -86,23 +86,23 @@ func chatMultiKey(cid, primaryHID string) string {
 func chatInputKey(cid, hid string) string { return fmt.Sprintf(chatInputKeyPrefix, cid, hid) }
 func convEventsKey(cid string) string     { return fmt.Sprintf(convEventsKeyPrefix, cid) }
 
-func setChatStatus(ctx context.Context, rdb *redis.Client, conversationID, historyID, status, currentResult string) error {
+func setChatStatus(ctx context.Context, stateStore state.Store, conversationID, historyID, status, currentResult string) error {
 	key := chatStatusKey(conversationID)
 	totalChunks := int32(0)
-	chunks, _ := getChatChunks(ctx, rdb, conversationID, historyID)
+	chunks, _ := getChatChunks(ctx, stateStore, conversationID, historyID)
 	if len(chunks) > 0 {
 		totalChunks = int32(len(chunks))
 	}
 	data := ChatStatus{Status: status, CurrentResult: currentResult, LastUpdate: time.Now().Unix(), TotalChunks: totalChunks}
 	bs, _ := json.Marshal(data)
-	if err := rdb.HSet(ctx, key, historyID, bs).Err(); err != nil {
+	if err := stateStore.HSet(ctx, key, map[string]any{historyID: string(bs)}, chatCacheExpireTime); err != nil {
 		return err
 	}
-	return rdb.Expire(ctx, key, chatCacheExpireTime).Err()
+	return nil
 }
 
-func getGeneratingHistoryIDs(ctx context.Context, rdb *redis.Client, conversationID string) ([]string, error) {
-	m, err := rdb.HGetAll(ctx, chatStatusKey(conversationID)).Result()
+func getGeneratingHistoryIDs(ctx context.Context, stateStore state.Store, conversationID string) ([]string, error) {
+	m, err := stateStore.HGetAll(ctx, chatStatusKey(conversationID))
 	if err != nil {
 		return nil, err
 	}
@@ -119,8 +119,8 @@ func getGeneratingHistoryIDs(ctx context.Context, rdb *redis.Client, conversatio
 	return ids, nil
 }
 
-func getChatStatus(ctx context.Context, rdb *redis.Client, conversationID, historyID string) (*ChatStatus, error) {
-	bs, err := rdb.HGet(ctx, chatStatusKey(conversationID), historyID).Bytes()
+func getChatStatus(ctx context.Context, stateStore state.Store, conversationID, historyID string) (*ChatStatus, error) {
+	bs, err := stateStore.HGet(ctx, chatStatusKey(conversationID), historyID)
 	if err != nil {
 		return nil, err
 	}
@@ -131,22 +131,22 @@ func getChatStatus(ctx context.Context, rdb *redis.Client, conversationID, histo
 	return &st, nil
 }
 
-func clearChatData(ctx context.Context, rdb *redis.Client, conversationID, historyID string) error {
+func clearChatData(ctx context.Context, stateStore state.Store, conversationID, historyID string) error {
 	key := chatStatusKey(conversationID)
-	_ = rdb.HDel(ctx, key, historyID).Err()
-	_ = rdb.Del(ctx, chatStreamKey(conversationID, historyID)).Err()
-	_ = rdb.Del(ctx, chatInputKey(conversationID, historyID)).Err()
+	_ = stateStore.HDel(ctx, key, historyID)
+	_ = stateStore.Del(ctx, chatStreamKey(conversationID, historyID))
+	_ = stateStore.Del(ctx, chatInputKey(conversationID, historyID))
 	return nil
 }
 
-func setChatInput(ctx context.Context, rdb *redis.Client, conversationID, historyID, rawContent string, seq int, ext json.RawMessage) error {
+func setChatInput(ctx context.Context, stateStore state.Store, conversationID, historyID, rawContent string, seq int, ext json.RawMessage) error {
 	data := ChatInput{RawContent: rawContent, Seq: seq, CreatedAt: time.Now().UnixMilli(), Ext: ext}
 	bs, _ := json.Marshal(data)
-	return rdb.Set(ctx, chatInputKey(conversationID, historyID), bs, chatCacheExpireTime).Err()
+	return stateStore.Set(ctx, chatInputKey(conversationID, historyID), bs, chatCacheExpireTime)
 }
 
-func getChatInput(ctx context.Context, rdb *redis.Client, conversationID, historyID string) (*ChatInput, error) {
-	bs, err := rdb.Get(ctx, chatInputKey(conversationID, historyID)).Bytes()
+func getChatInput(ctx context.Context, stateStore state.Store, conversationID, historyID string) (*ChatInput, error) {
+	bs, err := stateStore.Get(ctx, chatInputKey(conversationID, historyID))
 	if err != nil {
 		return nil, err
 	}
@@ -157,25 +157,25 @@ func getChatInput(ctx context.Context, rdb *redis.Client, conversationID, histor
 	return &in, nil
 }
 
-func appendChatChunk(ctx context.Context, rdb *redis.Client, conversationID, historyID string, chunk *ChatChunkResponse) error {
+func appendChatChunk(ctx context.Context, stateStore state.Store, conversationID, historyID string, chunk *ChatChunkResponse) error {
 	bs, err := json.Marshal(chunk)
 	if err != nil {
 		return err
 	}
 	key := chatStreamKey(conversationID, historyID)
-	if err := rdb.RPush(ctx, key, bs).Err(); err != nil {
+	if err := stateStore.RPush(ctx, key, bs, chatCacheExpireTime); err != nil {
 		return err
 	}
-	return rdb.Expire(ctx, key, chatCacheExpireTime).Err()
+	return nil
 }
 
-func getChatChunks(ctx context.Context, rdb *redis.Client, conversationID, historyID string) ([]*ChatChunkResponse, error) {
-	return getChatChunksFrom(ctx, rdb, conversationID, historyID, 0)
+func getChatChunks(ctx context.Context, stateStore state.Store, conversationID, historyID string) ([]*ChatChunkResponse, error) {
+	return getChatChunksFrom(ctx, stateStore, conversationID, historyID, 0)
 }
 
-func getChatChunksFrom(ctx context.Context, rdb *redis.Client, conversationID, historyID string, from int64) ([]*ChatChunkResponse, error) {
+func getChatChunksFrom(ctx context.Context, stateStore state.Store, conversationID, historyID string, from int64) ([]*ChatChunkResponse, error) {
 	key := chatStreamKey(conversationID, historyID)
-	list, err := rdb.LRange(ctx, key, from, -1).Result()
+	list, err := stateStore.LRange(ctx, key, from, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -190,27 +190,26 @@ func getChatChunksFrom(ctx context.Context, rdb *redis.Client, conversationID, h
 	return out, nil
 }
 
-func setChatCancelSignal(ctx context.Context, rdb *redis.Client, conversationID, historyID string) error {
+func setChatCancelSignal(ctx context.Context, stateStore state.Store, conversationID, historyID string) error {
 	key := chatStopKey(conversationID, historyID)
-	if err := rdb.LPush(ctx, key, "1").Err(); err != nil {
+	if err := stateStore.LPush(ctx, key, []byte("1"), chatStopExpireTime); err != nil {
 		return err
 	}
-	return rdb.Expire(ctx, key, chatStopExpireTime).Err()
+	return nil
 }
 
-func watchChatCancelSignal(ctx context.Context, rdb *redis.Client, conversationID, historyID string) error {
+func watchChatCancelSignal(ctx context.Context, stateStore state.Store, conversationID, historyID string) error {
 	key := chatStopKey(conversationID, historyID)
-	_, err := rdb.BLPop(ctx, 0, key).Result()
-	return err
+	return stateStore.BLPop(ctx, key, 0)
 }
 
-func watchChatChunks(ctx context.Context, rdb *redis.Client, conversationID, historyID string, lastIndex int64, callback func(*ChatChunkResponse) error) error {
+func watchChatChunks(ctx context.Context, stateStore state.Store, conversationID, historyID string, lastIndex int64, callback func(*ChatChunkResponse) error) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			chunks, err := getChatChunksFrom(ctx, rdb, conversationID, historyID, lastIndex+1)
+			chunks, err := getChatChunksFrom(ctx, stateStore, conversationID, historyID, lastIndex+1)
 			if err != nil {
 				return err
 			}
@@ -220,7 +219,7 @@ func watchChatChunks(ctx context.Context, rdb *redis.Client, conversationID, his
 				}
 				lastIndex++
 			}
-			st, _ := getChatStatus(ctx, rdb, conversationID, historyID)
+			st, _ := getChatStatus(ctx, stateStore, conversationID, historyID)
 			if st != nil {
 				switch st.Status {
 				case "completed", "stopped", "failed":
@@ -232,7 +231,7 @@ func watchChatChunks(ctx context.Context, rdb *redis.Client, conversationID, his
 	}
 }
 
-func setMultiAnswerInfo(ctx context.Context, rdb *redis.Client, conversationID, primaryHistoryID, secondaryHistoryID string, seq int) error {
+func setMultiAnswerInfo(ctx context.Context, stateStore state.Store, conversationID, primaryHistoryID, secondaryHistoryID string, seq int) error {
 	key := chatMultiKey(conversationID, primaryHistoryID)
 	data := MultiAnswerInfo{
 		PrimaryHistoryID:   primaryHistoryID,
@@ -241,11 +240,11 @@ func setMultiAnswerInfo(ctx context.Context, rdb *redis.Client, conversationID, 
 		CreatedAt:          time.Now().Unix(),
 	}
 	bs, _ := json.Marshal(data)
-	return rdb.Set(ctx, key, bs, chatCacheExpireTime).Err()
+	return stateStore.Set(ctx, key, bs, chatCacheExpireTime)
 }
 
-func getMultiAnswerInfo(ctx context.Context, rdb *redis.Client, conversationID, primaryHistoryID string) (*MultiAnswerInfo, error) {
-	bs, err := rdb.Get(ctx, chatMultiKey(conversationID, primaryHistoryID)).Bytes()
+func getMultiAnswerInfo(ctx context.Context, stateStore state.Store, conversationID, primaryHistoryID string) (*MultiAnswerInfo, error) {
+	bs, err := stateStore.Get(ctx, chatMultiKey(conversationID, primaryHistoryID))
 	if err != nil {
 		return nil, err
 	}
@@ -266,8 +265,8 @@ type ConvEvent struct {
 // AppendConvEvent appends a ConvEvent to the conversation-level event LIST.
 // It is safe to call concurrently. The LIST is capped at convEventsMaxLen entries
 // (oldest dropped) and expires after convEventsExpireTime.
-func AppendConvEvent(ctx context.Context, rdb *redis.Client, conversationID string, ev *ConvEvent) error {
-	if rdb == nil || conversationID == "" || ev == nil {
+func AppendConvEvent(ctx context.Context, stateStore state.Store, conversationID string, ev *ConvEvent) error {
+	if stateStore == nil || conversationID == "" || ev == nil {
 		return nil
 	}
 	bs, err := json.Marshal(ev)
@@ -275,24 +274,30 @@ func AppendConvEvent(ctx context.Context, rdb *redis.Client, conversationID stri
 		return err
 	}
 	key := convEventsKey(conversationID)
-	pipe := rdb.Pipeline()
-	pipe.RPush(ctx, key, bs)
-	pipe.LTrim(ctx, key, -convEventsMaxLen, -1)
-	pipe.Expire(ctx, key, convEventsExpireTime)
-	_, err = pipe.Exec(ctx)
-	return err
+	if err := stateStore.RPush(ctx, key, bs, convEventsExpireTime); err != nil {
+		return err
+	}
+	if trimmer, ok := stateStore.(interface {
+		LTrim(context.Context, string, int64, int64) error
+	}); ok {
+		return trimmer.LTrim(ctx, key, -convEventsMaxLen, -1)
+	}
+	return nil
 }
 
 // WatchConvEvents long-polls the conversation-level event LIST starting from lastIndex+1
 // and calls callback for each new ConvEvent. It returns when ctx is cancelled.
-func WatchConvEvents(ctx context.Context, rdb *redis.Client, conversationID string, lastIndex int64, callback func(*ConvEvent) error) error {
+func WatchConvEvents(ctx context.Context, stateStore state.Store, conversationID string, lastIndex int64, callback func(*ConvEvent) error) error {
+	if stateStore == nil {
+		return nil
+	}
 	key := convEventsKey(conversationID)
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			list, err := rdb.LRange(ctx, key, lastIndex+1, -1).Result()
+			list, err := stateStore.LRange(ctx, key, lastIndex+1, -1)
 			if err != nil {
 				return err
 			}

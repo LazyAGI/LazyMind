@@ -2,16 +2,15 @@
 Login failure rate limiting (deny login for a period after N consecutive failures on the same account)
 """
 import time
-import redis
 
-from core.redis_client import redis_client
+from core.state_store import state_store
 
 LOGIN_MAX_ATTEMPTS = 3
 LOGIN_TIME_WINDOW_SECONDS = 60
 
 
 class LoginRateLimiter:
-    """Per-user login failure rate limiter (Redis ZSET sliding window)"""
+    """Per-user login failure rate limiter (state-store sliding window)"""
 
     def __init__(
         self,
@@ -27,36 +26,31 @@ class LoginRateLimiter:
     def is_limited(self, user_id: int | str) -> bool:
         """Return True when failures for the same user reach the limit within the time window."""
         try:
-            r = redis_client()
+            store = state_store()
             key = f'{self._key_prefix}:{user_id}'
             now = int(time.time())
             window_start_time = now - self._time_window
 
-            pipe = r.pipeline()
-            pipe.zremrangebyscore(key, '-inf', window_start_time)
-            pipe.zcard(key)
-            _, attempts = pipe.execute()
+            store.zremrangebyscore(key, float('-inf'), window_start_time)
+            attempts = store.zcard(key)
 
             try:
                 return int(attempts) >= self._max_attempts
             except (TypeError, ValueError):
                 return False
-        except redis.RedisError:
-            # Do not block login when Redis is unavailable (only lose rate-limit protection)
+        except Exception:
+            # Do not block login when state store is unavailable (only lose rate-limit protection)
             return False
 
     def record_failure(self, user_id: int | str) -> None:
         """Record one login failure."""
         try:
-            r = redis_client()
+            store = state_store()
             key = f'{self._key_prefix}:{user_id}'
             now = int(time.time())
 
-            pipe = r.pipeline()
-            pipe.zadd(key, {now: now})
-            pipe.expire(key, self._time_window * 2)
-            pipe.execute()
-        except redis.RedisError:
+            store.zadd(key, {str(now): now}, ex=self._time_window * 2)
+        except Exception:
             return
 
 

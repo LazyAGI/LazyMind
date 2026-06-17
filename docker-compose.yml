@@ -41,6 +41,8 @@ x-core-env: &core-env
   ACL_DB_DRIVER: postgres
   ACL_DB_DSN: "host=db user=root password=123456 dbname=core port=5432 sslmode=disable TimeZone=UTC"
   LAZYMIND_REDIS_URL: redis://test:123456@redis:6379/0
+  LAZYMIND_STATE_BACKEND: ${LAZYMIND_STATE_BACKEND:-redis}
+  LAZYMIND_STATE_SQLITE_DIR: /data/sqlite
   LAZYMIND_UPLOAD_ROOT: /var/lib/lazymind/uploads
   LAZYMIND_UPLOAD_TEXT_UTF8_CONVERT_ENABLED: ${LAZYMIND_UPLOAD_TEXT_UTF8_CONVERT_ENABLED:-true}
   LAZYMIND_PUBLIC_BASE_URL: http://localhost:8000/api/core
@@ -228,6 +230,8 @@ services:
     restart: unless-stopped
 
   redis:
+    profiles:
+      - redis
     image: ${DOCKER_MIRROR:-docker.m.daocloud.io/library/}redis:7
     command: ["redis-server", "--appendonly", "yes", "--aclfile", "/usr/local/etc/redis/users.acl"]
     volumes:
@@ -249,12 +253,15 @@ services:
         <<: *mirror-args
     volumes:
       - ./api/backend:/openapi-export
+      - sqlite-data:/data/sqlite
     expose:
       - "8000"
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     environment:
       LAZYMIND_DATABASE_URL: postgresql+psycopg://root:123456@db:5432/authservice
       LAZYMIND_REDIS_URL: redis://test:123456@redis:6379/0
+      LAZYMIND_STATE_BACKEND: ${LAZYMIND_STATE_BACKEND:-redis}
+      LAZYMIND_STATE_SQLITE_DIR: /data/sqlite
       LAZYMIND_JWT_SECRET: dev-secret-change-me
       LAZYMIND_JWT_TTL_MINUTES: "60"
       LAZYMIND_JWT_REFRESH_TTL_DAYS: "7"
@@ -274,8 +281,6 @@ services:
         condition: service_healthy
       db-bootstrap:
         condition: service_completed_successfully
-      redis:
-        condition: service_healthy
 
   office-convert-service:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-office-convert-service:${LAZYMIND_IMAGE_TAG:-latest}
@@ -312,6 +317,7 @@ services:
       - ./data/evo:/var/lib/lazymind/evo
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/subagent:/data/subagent
+      - sqlite-data:/data/sqlite
       - ./skills:/skills:ro
     expose:
       - "8000"
@@ -355,6 +361,7 @@ services:
     volumes:
       - ./backend/core:/app
       - ./data/core/uploads:/var/lib/lazymind/uploads
+      - sqlite-data:/data/sqlite
       - ./skills:/skills:ro
     environment:
       <<: *core-env
@@ -363,8 +370,6 @@ services:
         condition: service_healthy
       db-bootstrap:
         condition: service_completed_successfully
-      redis:
-        condition: service_healthy
       office-convert-service:
         condition: service_healthy
 
