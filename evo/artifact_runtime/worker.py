@@ -20,13 +20,14 @@ from .graph import DAGGraph
 from .plan import PlanOp
 from .store import ArtifactRecord
 
-DispatchStatus = Literal["idle", "dispatched"]
-RUN_TERMINAL = frozenset({"completed", "failed", "cancelled"})
-_CANCEL_ERROR = {"error_type": "cancel_requested", "error_message": "cancel_requested"}
+DispatchStatus = Literal['idle', 'dispatched']
+RUN_TERMINAL = frozenset({'completed', 'failed', 'cancelled'})
+_CANCEL_ERROR = {'error_type': 'cancel_requested', 'error_message': 'cancel_requested'}
 
 
 class ArtifactReader(Protocol):
-    def get(self, ref: ArtifactRef) -> ArtifactRecord | None: ...
+    def get(self, ref: ArtifactRef) -> ArtifactRecord | None:
+        ...
 
 
 class ExternalCallFacade:
@@ -46,7 +47,7 @@ class ExternalCallFacade:
         metadata: Mapping[str, Any] | None = None,
     ) -> ExternalCallResult:
         if self._gateway is None:
-            raise RuntimeError("external call gateway is not configured")
+            raise RuntimeError('external call gateway is not configured')
         return self._gateway.call(
             run_id=self._claim.run_id,
             attempt_id=self._claim.attempt_id,
@@ -78,7 +79,7 @@ class ExecutionContext:
     @property
     def output_partition(self) -> str:
         partitions = {key.partition for key in self.output_keys if key.partition}
-        return next(iter(partitions)) if len(partitions) == 1 else ""
+        return next(iter(partitions)) if len(partitions) == 1 else ''
 
 
 @dataclass(frozen=True)
@@ -123,24 +124,28 @@ class MaterializerExecutor(AttemptExecutor):
             outputs = op_cls.execute(inputs, self._context_for(claim, plan_op, model_config))
             return _validate_outputs(plan_op, outputs)
         except DAGGraphError as error:
-            return AttemptExecutionResult(False, error_type="materializer_lookup_failed", error_message=str(error))
+            return AttemptExecutionResult(False, error_type='materializer_lookup_failed', error_message=str(error))
         except _InputLoadError as error:
             return AttemptExecutionResult(False, error_type=error.error_type, error_message=error.message)
         except Exception as error:  # noqa: BLE001 - worker boundary converts op failures to attempt failures.
             return AttemptExecutionResult(False, error_type=type(error).__name__, error_message=str(error))
 
-    def _load_inputs(self, claim: AttemptClaim, plan_op: PlanOp) -> dict[str, ArtifactPayload | dict[str, ArtifactPayload]]:
+    def _load_inputs(self,
+                     claim: AttemptClaim,
+                     plan_op: PlanOp) -> dict[str,
+                                              ArtifactPayload | dict[str,
+                                                                     ArtifactPayload]]:
         inputs: dict[str, ArtifactPayload | dict[str, ArtifactPayload]] = {}
         for binding in plan_op.input_bindings:
             ref = claim.resolved_input_refs.get(binding.key)
             if ref is None:
                 if binding.required:
-                    raise _InputLoadError("missing_input_ref", f"missing input ref: {binding.key}")
+                    raise _InputLoadError('missing_input_ref', f'missing input ref: {binding.key}')
                 continue
             record = self.reader.get(ref)
             if record is None:
-                raise _InputLoadError("missing_input_record", f"missing input record: {ref}")
-            if binding.input_kind == "partition_collection":
+                raise _InputLoadError('missing_input_record', f'missing input record: {ref}')
+            if binding.input_kind == 'partition_collection':
                 collection = inputs.setdefault(binding.collection_name or binding.name, {})
                 collection[binding.key.partition] = record.value
             else:
@@ -175,22 +180,23 @@ class PlanExecutionWorker:
 
     def dispatch_once(self, run_id: str, *, limit: int = 1) -> WorkerDispatchResult:
         if limit < 1:
-            raise ValueError("limit must be >= 1")
+            raise ValueError('limit must be >= 1')
         claims = self.controller.claim_ready(run_id, limit=limit)
         results = dispatch_claims(self.controller, self.executor, claims)
         return WorkerDispatchResult(
             run_id,
             len(claims),
             results,
-            "dispatched" if claims else "idle",
+            'dispatched' if claims else 'idle',
             _run_status(self.controller, run_id),
         )
 
-    def drain(self, run_id: str, *, max_rounds: int | None = None, limit_per_round: int = 1) -> tuple[WorkerDispatchResult, ...]:
+    def drain(self, run_id: str, *, max_rounds: int | None = None,
+              limit_per_round: int = 1) -> tuple[WorkerDispatchResult, ...]:
         if limit_per_round < 1:
-            raise ValueError("limit_per_round must be >= 1")
+            raise ValueError('limit_per_round must be >= 1')
         if max_rounds is not None and max_rounds < 1:
-            raise ValueError("max_rounds must be >= 1")
+            raise ValueError('max_rounds must be >= 1')
 
         rounds: list[WorkerDispatchResult] = []
         while max_rounds is None or len(rounds) < max_rounds:
@@ -203,32 +209,42 @@ class PlanExecutionWorker:
 
 class _InputLoadError(Exception):
     def __init__(self, error_type: str, message: str) -> None:
-        super().__init__(message)
+        super().__init__(error_type, message)
         self.error_type = error_type
-        self.message = message
 
 
 def _validate_outputs(plan_op: PlanOp, outputs: Any) -> AttemptExecutionResult:
     if not isinstance(outputs, Mapping):
-        return AttemptExecutionResult(False, error_type="output_mismatch", error_message="outputs must be a mapping")
+        return AttemptExecutionResult(False, error_type='output_mismatch', error_message='outputs must be a mapping')
     expected = set(plan_op.output_names)
     actual = set(outputs)
     if actual != expected:
-        return AttemptExecutionResult(False, error_type="output_mismatch", error_message="output keys do not match output names")
+        return AttemptExecutionResult(
+            False,
+            error_type='output_mismatch',
+            error_message='output keys do not match output names')
     if not all(isinstance(value, ArtifactPayload) for value in outputs.values()):
-        return AttemptExecutionResult(False, error_type="output_mismatch", error_message="outputs must be ArtifactPayload values")
+        return AttemptExecutionResult(
+            False,
+            error_type='output_mismatch',
+            error_message='outputs must be ArtifactPayload values')
     return AttemptExecutionResult(True, dict(outputs))
 
 
-def dispatch_claims(controller: RunController, executor: AttemptExecutor, claims: list[AttemptClaim]) -> tuple[AttemptResult, ...]:
+def dispatch_claims(controller: RunController, executor: AttemptExecutor,
+                    claims: list[AttemptClaim]) -> tuple[AttemptResult, ...]:
     results: list[AttemptResult] = []
     for claim in claims:
         inspection = controller.inspect_claim(claim)
-        if inspection.status == "stale":
-            results.append(AttemptResult(claim.attempt_id, "stale", reason="stale_claim"))
+        if inspection.status == 'stale':
+            results.append(AttemptResult(claim.attempt_id, 'stale', reason='stale_claim'))
             continue
-        if inspection.status == "terminal":
-            results.append(AttemptResult(claim.attempt_id, inspection.attempt_status or "stale", reason=inspection.reason))
+        if inspection.status == 'terminal':
+            results.append(
+                AttemptResult(
+                    claim.attempt_id,
+                    inspection.attempt_status or 'stale',
+                    reason=inspection.reason))
             continue
         if inspection.cancel_requested:
             results.append(controller.fail_attempt(claim, _CANCEL_ERROR))
@@ -237,11 +253,8 @@ def dispatch_claims(controller: RunController, executor: AttemptExecutor, claims
             execution = executor.execute(claim, claim.plan_op)
         except Exception as error:  # noqa: BLE001 - worker boundary must not leave claims hanging.
             execution = AttemptExecutionResult(False, error_type=type(error).__name__, error_message=str(error))
-        results.append(
-            controller.complete_attempt(claim, execution)
-            if execution.ok
-            else controller.fail_attempt(claim, {"error_type": execution.error_type, "error_message": execution.error_message})
-        )
+        results.append(controller.complete_attempt(claim, execution) if execution.ok else controller.fail_attempt(
+            claim, {'error_type': execution.error_type, 'error_message': execution.error_message}))
     return tuple(results)
 
 
@@ -266,9 +279,9 @@ def _init_lazyllm_session(claim: AttemptClaim, *, required: bool) -> None:
             raise
         return
 
-    session_id = f"evo-materializer-{claim.run_id}-{claim.attempt_id}"
-    globals_init = getattr(getattr(lazyllm, "globals", None), "_init_sid", None)
-    locals_init = getattr(getattr(lazyllm, "locals", None), "_init_sid", None)
+    session_id = f'evo-materializer-{claim.run_id}-{claim.attempt_id}'
+    globals_init = getattr(getattr(lazyllm, 'globals', None), '_init_sid', None)
+    locals_init = getattr(getattr(lazyllm, 'locals', None), '_init_sid', None)
     if callable(globals_init):
         globals_init(sid=session_id)
     if callable(locals_init):

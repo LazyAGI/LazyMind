@@ -40,7 +40,8 @@ def validate_fault_localization_report(payload: dict[str, Any]) -> None:
     _require(payload, 'id', 'attempt', 'ranked_locations')
     for index, item in enumerate(_list(payload.get('ranked_locations')), start=1):
         _require(item, 'rank', 'source_observation_ref', 'path', 'symbol', 'score', 'confidence')
-        if int(item.get('rank') or 0) != index: raise ValueError('FaultLocalizationReport ranks must be contiguous')
+        if int(item.get('rank') or 0) != index:
+            raise ValueError('FaultLocalizationReport ranks must be contiguous')
         _relative_path(str(item.get('path') or ''))
 
 
@@ -60,7 +61,8 @@ def validate_diagnostic_probe_result(payload: dict[str, Any]) -> None:
     origin = str(payload.get('origin') or '')
     worker_ref, trace_ref = str(payload.get('worker_report_ref') or ''), str(payload.get('raw_trace_ref') or '')
     if origin == 'local_candidate':
-        if worker_ref or trace_ref: raise ValueError('local_candidate DiagnosticProbeResult cannot carry worker refs')
+        if worker_ref or trace_ref:
+            raise ValueError('local_candidate DiagnosticProbeResult cannot carry worker refs')
     elif origin == 'opencode_probe_worker':
         _artifact_ref(worker_ref, 'worker_report_ref')
         _artifact_ref(trace_ref, 'raw_trace_ref')
@@ -92,7 +94,8 @@ def validate_repair_diagnosis(payload: dict[str, Any]) -> None:
 def validate_opencode_instruction(payload: dict[str, Any]) -> None:
     _require(payload, 'id', 'attempt', 'diagnosis_ref', 'mode', 'allowed_tools', 'no_edit')
     mode = str(payload.get('mode') or '')
-    if mode not in INSTRUCTION_MODES: raise ValueError(f'invalid OpenCodeInstruction mode: {mode}')
+    if mode not in INSTRUCTION_MODES:
+        raise ValueError(f'invalid OpenCodeInstruction mode: {mode}')
     tools = {str(tool) for tool in _list(payload.get('allowed_tools'))}
     if mode == 'explore_only':
         if payload.get('no_edit') is not True or tools & {'edit', 'write'}:
@@ -106,7 +109,8 @@ def validate_opencode_instruction(payload: dict[str, Any]) -> None:
         if not _list(payload.get('linked_probe_result_refs')):
             raise ValueError('patch_once instruction requires linked_probe_result_refs')
     elif mode == 'no_patch':
-        if payload.get('no_edit') is not True or tools: raise ValueError('no_patch instruction cannot allow tools')
+        if payload.get('no_edit') is not True or tools:
+            raise ValueError('no_patch instruction cannot allow tools')
     scope = payload.get('patch_contract') if isinstance(payload.get('patch_contract'), dict) else {}
     for path in _list(scope.get('allowed_roots')) + _list(scope.get('blocked_roots')):
         _relative_path(str(path))
@@ -114,7 +118,8 @@ def validate_opencode_instruction(payload: dict[str, Any]) -> None:
 
 def validate_opencode_worker_report(payload: dict[str, Any]) -> None:
     _require(payload, 'id', 'attempt', 'mode', 'protocol_status')
-    if payload.get('mode') not in INSTRUCTION_MODES: raise ValueError('invalid OpenCodeWorkerReport mode')
+    if payload.get('mode') not in INSTRUCTION_MODES:
+        raise ValueError('invalid OpenCodeWorkerReport mode')
     if payload.get('protocol_status') not in WORKER_PROTOCOL_STATUSES:
         raise ValueError('invalid OpenCodeWorkerReport protocol_status')
     if payload.get('protocol_status') == 'not_run' and payload.get('mode') != 'no_patch':
@@ -131,7 +136,8 @@ def validate_code_patch_candidate(payload: dict[str, Any]) -> None:
         raise ValueError('invalid CodePatchCandidate apply_status')
     if payload.get('reverse_apply_status') not in {'verified', 'failed', 'not_checked'}:
         raise ValueError('invalid CodePatchCandidate reverse_apply_status')
-    if payload.get('apply_status') == 'applied': _require(payload, 'post_patch_git_head')
+    if payload.get('apply_status') == 'applied':
+        _require(payload, 'post_patch_git_head')
     for item in _list(payload.get('changed_hunks')):
         _require(item, 'path', 'line_start', 'line_end', 'symbol', 'comment_only')
         _relative_path(str(item.get('path') or ''))
@@ -148,7 +154,8 @@ def validate_patch_correctness_assessment(payload: dict[str, Any]) -> None:
     verdict = str(payload.get('verdict') or '')
     if verdict not in PATCH_CORRECTNESS_VERDICTS:
         raise ValueError(f'invalid PatchCorrectnessAssessment verdict: {verdict}')
-    if verdict != 'acceptable': return
+    if verdict != 'acceptable':
+        return
     if any(isinstance(r, dict) and r.get('severity') == 'high' for r in _list(payload.get('overfitting_risks'))):
         raise ValueError('PatchCorrectnessAssessment cannot accept high severity overfitting risk')
     if any(isinstance(i, dict) and i.get('passed') is False for i in _list(payload.get('behavior_invariants'))):
@@ -176,7 +183,8 @@ def validate_repair_evaluation(payload: dict[str, Any]) -> None:
             raise ValueError(f"invalid RepairEvaluation trace delta: {item.get('delta')}")
         for key in ('before', 'after'):
             stage = item.get(key) if isinstance(item.get(key), dict) else {}
-            if stage: _transition(stage.get('primary_transition_failure'))
+            if stage:
+                _transition(stage.get('primary_transition_failure'))
 
 
 def validate_patch_critique(payload: dict[str, Any]) -> None:
@@ -188,7 +196,8 @@ def validate_patch_critique(payload: dict[str, Any]) -> None:
 
 def validate_branch_decision(payload: dict[str, Any]) -> None:
     _require(payload, 'id', 'attempt', 'decision')
-    if payload.get('decision') not in BRANCH_DECISIONS: raise ValueError('invalid BranchDecision decision')
+    if payload.get('decision') not in BRANCH_DECISIONS:
+        raise ValueError('invalid BranchDecision decision')
 
 
 def validate_repair_branch_state(payload: dict[str, Any]) -> None:
@@ -236,19 +245,23 @@ VALIDATORS = {
 
 def validate_repair_artifact(schema_name: str, payload: dict[str, Any]) -> None:
     validator = VALIDATORS.get(schema_name)
-    if validator: validator(payload)
+    if validator:
+        validator(payload)
 
 
 def validate_patch_gate_contract(instruction: dict[str, Any], fault_report: dict[str, Any],
                                  probe_result: dict[str, Any]) -> None:
-    if instruction.get('mode') != 'patch_once': return
+    if instruction.get('mode') != 'patch_once':
+        return
     status = probe_gate_status(fault_report, probe_result, instruction)
-    if not status.get('allowed'): raise ValueError(f"patch_once probe gate closed: {status.get('reason')}")
+    if not status.get('allowed'):
+        raise ValueError(f"patch_once probe gate closed: {status.get('reason')}")
 
 
 def validate_worker_report_protocol_shape(payload: dict[str, Any], expected_mode: str = '') -> None:
     errors = worker_report_protocol_shape_errors(payload, expected_mode)
-    if errors: raise ValueError(f'OpenCodeWorkerReport {errors[0]}')
+    if errors:
+        raise ValueError(f'OpenCodeWorkerReport {errors[0]}')
 
 
 def worker_report_contract(mode: str) -> dict[str, Any]:
@@ -265,23 +278,33 @@ def worker_report_contract(mode: str) -> dict[str, Any]:
 
 def worker_report_protocol_shape_errors(payload: dict[str, Any], expected_mode: str = '') -> list[str]:
     missing = [key for key in WORKER_REPORT_REQUIRED_FIELDS if key not in payload]
-    if missing: return [f'missing required field: {missing[0]}']
+    if missing:
+        return [f'missing required field: {missing[0]}']
     mode, status = str(payload.get('mode') or ''), str(payload.get('protocol_status') or '')
-    if expected_mode and mode != expected_mode: return [f'mode mismatch: expected {expected_mode}']
-    if mode not in INSTRUCTION_MODES: return ['invalid mode']
-    if status not in WORKER_PROTOCOL_STATUSES: return ['invalid protocol_status']
-    if mode == 'no_patch' and status != 'not_run': return ['no_patch report must have protocol_status=not_run']
-    if status == 'not_run' and mode != 'no_patch': return ['protocol_status=not_run is only valid for mode=no_patch']
+    if expected_mode and mode != expected_mode:
+        return [f'mode mismatch: expected {expected_mode}']
+    if mode not in INSTRUCTION_MODES:
+        return ['invalid mode']
+    if status not in WORKER_PROTOCOL_STATUSES:
+        return ['invalid protocol_status']
+    if mode == 'no_patch' and status != 'not_run':
+        return ['no_patch report must have protocol_status=not_run']
+    if status == 'not_run' and mode != 'no_patch':
+        return ['protocol_status=not_run is only valid for mode=no_patch']
     for key in ('confirmed_locations', 'rejected_locations', 'files_changed', 'touched_symbols', 'local_validation'):
-        if not isinstance(payload.get(key), list): return [f'{key} must be a list']
-    if not isinstance(payload.get('edit_intent'), dict): return ['edit_intent must be an object']
+        if not isinstance(payload.get(key), list):
+            return [f'{key} must be a list']
+    if not isinstance(payload.get('edit_intent'), dict):
+        return ['edit_intent must be an object']
     edit = payload.get('edit_intent') if isinstance(payload.get('edit_intent'), dict) else {}
     missing_edit = [key for key in WORKER_REPORT_EDIT_INTENT_FIELDS if key not in edit]
-    if missing_edit: return [f'edit_intent missing required field: {missing_edit[0]}']
+    if missing_edit:
+        return [f'edit_intent missing required field: {missing_edit[0]}']
     if not isinstance(edit.get('risk_acknowledgement'), list):
         return ['edit_intent.risk_acknowledgement must be a list']
     for key in ('hypothesis_checked', 'stop_reason', 'remaining_uncertainty'):
-        if not isinstance(payload.get(key), str): return [f'{key} must be a string']
+        if not isinstance(payload.get(key), str):
+            return [f'{key} must be a string']
     if status == 'valid':
         if not _worker_locations_are_structured(payload.get('confirmed_locations')):
             return ['confirmed_locations must be structured']
@@ -298,9 +321,11 @@ def worker_report_protocol_shape_errors(payload: dict[str, Any], expected_mode: 
 
 def validate_patch_gate_artifacts(artifact_graph: Any, instruction: dict[str, Any],
                                   fault_report: dict[str, Any]) -> dict[str, Any]:
-    if instruction.get('mode') != 'patch_once': return {'allowed': False, 'reason': 'not_patch_once'}
+    if instruction.get('mode') != 'patch_once':
+        return {'allowed': False, 'reason': 'not_patch_once'}
     linked_refs = _list(instruction.get('linked_probe_result_refs'))
-    if len(linked_refs) != 1: raise ValueError('patch_once requires exactly one DiagnosticProbeResult ref')
+    if len(linked_refs) != 1:
+        raise ValueError('patch_once requires exactly one DiagnosticProbeResult ref')
     probe_ref = ArtifactRef.parse(str(linked_refs[0]))
     if artifact_graph.schema_name(probe_ref) != 'DiagnosticProbeResult':
         raise ValueError('patch_once linked ref is not DiagnosticProbeResult')
@@ -320,7 +345,8 @@ def validate_patch_gate_artifacts(artifact_graph: Any, instruction: dict[str, An
         raise ValueError('patch_once worker report id/ref mismatch')
     if int(worker_report.get('attempt') or 0) != int(probe_result.get('attempt') or 0):
         raise ValueError('patch_once worker report attempt mismatch')
-    if str(trace.get('id') or '') != trace_ref.artifact_id: raise ValueError('patch_once probe trace id/ref mismatch')
+    if str(trace.get('id') or '') != trace_ref.artifact_id:
+        raise ValueError('patch_once probe trace id/ref mismatch')
     if int(trace.get('attempt') or 0) != int(probe_result.get('attempt') or 0):
         raise ValueError('patch_once probe trace attempt mismatch')
     primary = anchor_location(fault_report, probe_result)
@@ -336,64 +362,81 @@ def anchor_location(fault_report: dict[str, Any], probe_result: dict[str, Any] |
     The patch anchor prefers the ranked location the probe proposes to edit, then the highest-ranked
     confirmed location; without any confirmation we fall back to rank #1."""
     locations = [loc for loc in _list(fault_report.get('ranked_locations')) if isinstance(loc, dict)]
-    if not locations: return {}
+    if not locations:
+        return {}
     confirmed = [item for item in _list((probe_result or {}).get('probe_results'))
                  if isinstance(item, dict) and item.get('status') == 'confirmed']
     for pick_edit_target in (True, False):
         refs = {str(item.get('source_observation_ref') or '')
                 for item in confirmed if not pick_edit_target or item.get('edit_target')}
         for loc in locations:
-            if str(loc.get('source_observation_ref') or '') in refs: return loc
+            if str(loc.get('source_observation_ref') or '') in refs:
+                return loc
     return locations[0]
 
 
 def probe_gate_status(fault_report: dict[str, Any], probe_result: dict[str, Any],
                       instruction: dict[str, Any] | None = None) -> dict[str, Any]:
     locations = _list(fault_report.get('ranked_locations'))
-    if not locations: return _gate(False, 'no_primary_location')
-    if fault_report.get('stage_conflicts'): return _gate(False, 'stage_conflict_requires_reanalysis')
+    if not locations:
+        return _gate(False, 'no_primary_location')
+    if fault_report.get('stage_conflicts'):
+        return _gate(False, 'stage_conflict_requires_reanalysis')
     primary = anchor_location(fault_report, probe_result)
-    if not _list(probe_result.get('probe_results')): return _gate(False, 'probe_result_missing')
+    if not _list(probe_result.get('probe_results')):
+        return _gate(False, 'probe_result_missing')
     instruction_attempt = _positive_int((instruction or {}).get('attempt')) if instruction else 0
     probe_attempt = _positive_int(probe_result.get('attempt'))
-    if instruction is not None and not instruction_attempt: return _gate(False, 'instruction_attempt_missing')
-    if not probe_attempt: return _gate(False, 'probe_attempt_missing')
-    if instruction_attempt and instruction_attempt != probe_attempt: return _gate(False, 'probe_attempt_mismatch')
+    if instruction is not None and not instruction_attempt:
+        return _gate(False, 'instruction_attempt_missing')
+    if not probe_attempt:
+        return _gate(False, 'probe_attempt_missing')
+    if instruction_attempt and instruction_attempt != probe_attempt:
+        return _gate(False, 'probe_attempt_mismatch')
     if instruction is not None:
         linked = {str(ref) for ref in _list(instruction.get('linked_probe_result_refs'))}
-        if f"{probe_result.get('id')}@v1" not in linked: return _gate(False, 'linked_probe_result_ref_mismatch')
+        if f"{probe_result.get('id')}@v1" not in linked:
+            return _gate(False, 'linked_probe_result_ref_mismatch')
         primary_ref = str(instruction.get('primary_source_observation_ref') or '')
         if primary_ref != str(primary.get('source_observation_ref') or ''):
             return _gate(False, 'primary_source_observation_mismatch')
-    if probe_result.get('protocol_status') != 'valid': return _gate(False, 'probe_protocol_invalid')
+    if probe_result.get('protocol_status') != 'valid':
+        return _gate(False, 'probe_protocol_invalid')
     if probe_result.get('origin') != 'opencode_probe_worker':
         return _gate(False, 'local_candidate_requires_worker_confirmation')
-    if not str(probe_result.get('worker_report_ref') or ''): return _gate(False, 'probe_worker_report_ref_missing')
-    if not str(probe_result.get('raw_trace_ref') or ''): return _gate(False, 'probe_trace_ref_missing')
+    if not str(probe_result.get('worker_report_ref') or ''):
+        return _gate(False, 'probe_worker_report_ref_missing')
+    if not str(probe_result.get('raw_trace_ref') or ''):
+        return _gate(False, 'probe_trace_ref_missing')
     confirmed = any(
         item.get('status') == 'confirmed'
         and str(item.get('source_observation_ref') or '') == str(primary.get('source_observation_ref') or '')
         and location_within_primary(item, primary)
         for item in _list(probe_result.get('probe_results'))
     )
-    if not confirmed: return _gate(False, 'confirmed_probe_primary_mismatch')
+    if not confirmed:
+        return _gate(False, 'confirmed_probe_primary_mismatch')
     return _gate(True, '')
 
 
 def location_within_primary(location: dict[str, Any], primary: dict[str, Any]) -> bool:
     """AST primary locations are often class scopes; accept worker locations contained in them
     (e.g. KBToolGroup.kb_search inside KBToolGroup) instead of demanding exact equality."""
-    if str(location.get('path') or '') != str(primary.get('path') or ''): return False
+    if str(location.get('path') or '') != str(primary.get('path') or ''):
+        return False
     symbol = str(location.get('symbol') or location.get('confirmed_symbol') or '').rsplit(':', 1)[-1]
-    if not symbol_within_primary(symbol, str(primary.get('symbol') or '')): return False
+    if not symbol_within_primary(symbol, str(primary.get('symbol') or '')):
+        return False
     start, end = int(location.get('line_start') or 0), int(location.get('line_end') or 0)
     p_start, p_end = int(primary.get('line_start') or 0), int(primary.get('line_end') or 0)
-    if start and end and p_start and p_end: return p_start <= start and end <= p_end
+    if start and end and p_start and p_end:
+        return p_start <= start and end <= p_end
     return True
 
 
 def symbol_within_primary(symbol: str, primary_symbol: str) -> bool:
-    if not primary_symbol: return True
+    if not primary_symbol:
+        return True
     return symbol == primary_symbol or symbol.startswith(primary_symbol + '.')
 
 
@@ -406,9 +449,12 @@ def _worker_locations_are_structured(value: Any) -> bool:
 
 
 def _worker_location_is_structured(value: Any) -> bool:
-    if not isinstance(value, dict): return False
-    if any(key not in value for key in ('path', 'symbol', 'line_start', 'line_end', 'evidence')): return False
-    if not str(value.get('path') or '').strip() or not str(value.get('symbol') or '').strip(): return False
+    if not isinstance(value, dict):
+        return False
+    if any(key not in value for key in ('path', 'symbol', 'line_start', 'line_end', 'evidence')):
+        return False
+    if not str(value.get('path') or '').strip() or not str(value.get('symbol') or '').strip():
+        return False
     try:
         line_start, line_end = int(value.get('line_start')), int(value.get('line_end'))
     except (TypeError, ValueError):
@@ -435,15 +481,18 @@ def _source_observation(payload: dict[str, Any], allowed_roots: list[str]) -> No
     if payload.get('symbol_type') not in {'function', 'class', 'method', 'module_block'}:
         raise ValueError('invalid SourceObservation symbol_type')
     start, end = int(payload.get('line_start') or 0), int(payload.get('line_end') or 0)
-    if start <= 0 or end < start: raise ValueError('invalid SourceObservation line range')
+    if start <= 0 or end < start:
+        raise ValueError('invalid SourceObservation line range')
 
 
 def _transition(value: Any) -> None:
-    if str(value or '') not in TRANSITION_FAILURE_KINDS: raise ValueError(f'invalid transition failure kind: {value}')
+    if str(value or '') not in TRANSITION_FAILURE_KINDS:
+        raise ValueError(f'invalid transition failure kind: {value}')
 
 
 def _stage_hit(value: Any, label: str) -> None:
-    if not isinstance(value, dict): raise ValueError(f'missing stage hit: {label}')
+    if not isinstance(value, dict):
+        raise ValueError(f'missing stage hit: {label}')
     if value.get('status') not in {'hit', 'miss', 'partial', 'unknown'}:
         raise ValueError(f'invalid stage hit status: {label}')
     if not isinstance(value.get('hits'), list) or not isinstance(value.get('missing'), list):
@@ -457,7 +506,8 @@ def _allowed_roots(payload: dict[str, Any]) -> list[str]:
 
 def _require(payload: dict[str, Any], *keys: str) -> None:
     missing = [key for key in keys if key not in payload or payload.get(key) in (None, '')]
-    if missing: raise ValueError(f'missing required fields: {missing}')
+    if missing:
+        raise ValueError(f'missing required fields: {missing}')
 
 
 def _artifact_ref(value: str, label: str) -> None:

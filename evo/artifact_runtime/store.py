@@ -13,7 +13,7 @@ from .controller import Attempt, AttemptExecutionResult, CommitResult
 from .plan import PlanOp
 from .utils import canonical_json, is_json_scalar, json_mapping_fingerprint, validate_nonempty
 
-ArtifactCommitStatus = Literal["committed", "stale", "conflict", "failed"]
+ArtifactCommitStatus = Literal['committed', 'stale', 'conflict', 'failed']
 
 
 @dataclass(frozen=True)
@@ -27,8 +27,8 @@ class ArtifactRecord:
     metadata: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "input_refs", _freeze_mapping(self.input_refs))
-        object.__setattr__(self, "metadata", _freeze_mapping(self.metadata))
+        object.__setattr__(self, 'input_refs', _freeze_mapping(self.input_refs))
+        object.__setattr__(self, 'metadata', _freeze_mapping(self.metadata))
 
 
 @dataclass(frozen=True)
@@ -41,29 +41,37 @@ class ArtifactCommitRequest:
     input_refs: Mapping[ArtifactKey, ArtifactRef]
 
     def __post_init__(self) -> None:
-        validate_nonempty(self.run_id, "run_id")
-        validate_nonempty(self.attempt_id, "attempt_id")
-        validate_nonempty(self.producer_op_id, "producer_op_id")
-        object.__setattr__(self, "output_keys", tuple(self.output_keys))
-        object.__setattr__(self, "output_values", _freeze_mapping(self.output_values))
-        object.__setattr__(self, "input_refs", _freeze_mapping(self.input_refs))
+        validate_nonempty(self.run_id, 'run_id')
+        validate_nonempty(self.attempt_id, 'attempt_id')
+        validate_nonempty(self.producer_op_id, 'producer_op_id')
+        object.__setattr__(self, 'output_keys', tuple(self.output_keys))
+        object.__setattr__(self, 'output_values', _freeze_mapping(self.output_values))
+        object.__setattr__(self, 'input_refs', _freeze_mapping(self.input_refs))
 
 
 @dataclass(frozen=True)
 class ArtifactCommitOutcome:
     status: ArtifactCommitStatus
     output_refs: Mapping[ArtifactKey, ArtifactRef] = field(default_factory=lambda: MappingProxyType({}))
-    reason: str = ""
+    reason: str = ''
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "output_refs", _freeze_mapping(self.output_refs))
+        object.__setattr__(self, 'output_refs', _freeze_mapping(self.output_refs))
 
 
 class ArtifactStore(Protocol):
-    def latest(self, key: ArtifactKey) -> ArtifactRef | None: ...
-    def get(self, ref: ArtifactRef) -> ArtifactRecord | None: ...
-    def history(self, key: ArtifactKey) -> tuple[ArtifactRecord, ...]: ...
-    def put_source(self, key: ArtifactKey, value: Any, *, metadata: Mapping[str, Any] | None = None) -> ArtifactRef: ...
+    def latest(self, key: ArtifactKey) -> ArtifactRef | None:
+        ...
+
+    def get(self, ref: ArtifactRef) -> ArtifactRecord | None:
+        ...
+
+    def history(self, key: ArtifactKey) -> tuple[ArtifactRecord, ...]:
+        ...
+
+    def put_source(self, key: ArtifactKey, value: Any, *, metadata: Mapping[str, Any] | None = None) -> ArtifactRef:
+        ...
+
     def put_source_once(
         self,
         command_id: str,
@@ -73,8 +81,11 @@ class ArtifactStore(Protocol):
         expected_ref: ArtifactRef | None = None,
         create_only: bool = False,
         metadata: Mapping[str, Any] | None = None,
-    ) -> ArtifactCommitOutcome: ...
-    def commit(self, request: ArtifactCommitRequest) -> ArtifactCommitOutcome: ...
+    ) -> ArtifactCommitOutcome:
+        ...
+
+    def commit(self, request: ArtifactCommitRequest) -> ArtifactCommitOutcome:
+        ...
 
 
 class InMemoryArtifactStore:
@@ -103,14 +114,14 @@ class InMemoryArtifactStore:
 
     def put_source(self, key: ArtifactKey, value: Any, *, metadata: Mapping[str, Any] | None = None) -> ArtifactRef:
         with self._lock:
-            payload = _payload(value, metadata=metadata, role="source")
+            payload = _payload(value, metadata=metadata, role='source')
             ref = self._next_ref(key)
             record = _make_record(
                 key=key,
                 ref=ref,
                 value=payload,
-                producer_id=("", ""),
-                producer_op_id="",
+                producer_id=('', ''),
+                producer_op_id='',
                 input_refs={},
                 metadata=metadata or {},
             )
@@ -127,30 +138,32 @@ class InMemoryArtifactStore:
         create_only: bool = False,
         metadata: Mapping[str, Any] | None = None,
     ) -> ArtifactCommitOutcome:
-        validate_nonempty(command_id, "command_id")
+        validate_nonempty(command_id, 'command_id')
         with self._lock:
-            payload = _payload(value, metadata=metadata, role="source")
+            payload = _payload(value, metadata=metadata, role='source')
             identity = source_write_fingerprint(key, payload, expected_ref, create_only)
             if previous := self._source_writes.get(command_id):
                 previous_identity, outcome = previous
-                return outcome if previous_identity == identity else ArtifactCommitOutcome("conflict", reason="source command conflict")
+                return outcome if previous_identity == identity else ArtifactCommitOutcome(
+                    'conflict', reason='source command conflict')
             latest = self._latest_by_key.get(key)
             if create_only and latest is not None:
                 record = self._records_by_ref.get(_ref_key(latest))
                 if record is not None and record.value == payload:
-                    outcome = ArtifactCommitOutcome("committed", {key: latest})
+                    outcome = ArtifactCommitOutcome('committed', {key: latest})
                     self._source_writes[command_id] = (identity, outcome)
                     return outcome
-                outcome = ArtifactCommitOutcome("conflict", reason="source already exists")
+                outcome = ArtifactCommitOutcome('conflict', reason='source already exists')
                 self._source_writes[command_id] = (identity, outcome)
                 return outcome
             if expected_ref is not None and latest != expected_ref:
-                outcome = ArtifactCommitOutcome("stale", reason="expected ref is not latest")
+                outcome = ArtifactCommitOutcome('stale', reason='expected ref is not latest')
                 self._source_writes[command_id] = (identity, outcome)
                 return outcome
             ref = self._next_ref(key)
-            self._write_record(_make_record(key=key, ref=ref, value=payload, producer_id=("", command_id), producer_op_id="", input_refs={}, metadata=metadata or {}))
-            outcome = ArtifactCommitOutcome("committed", {key: ref})
+            self._write_record(_make_record(key=key, ref=ref, value=payload, producer_id=(
+                '', command_id), producer_op_id='', input_refs={}, metadata=metadata or {}))
+            outcome = ArtifactCommitOutcome('committed', {key: ref})
             self._source_writes[command_id] = (identity, outcome)
             return outcome
 
@@ -160,7 +173,8 @@ class InMemoryArtifactStore:
             fingerprint = commit_request_fingerprint(request)
             if previous := self._commits_by_producer.get(producer_id):
                 previous_fingerprint, outcome = previous
-                return outcome if previous_fingerprint == fingerprint else ArtifactCommitOutcome("conflict", reason="producer_id conflict")
+                return outcome if previous_fingerprint == fingerprint else ArtifactCommitOutcome(
+                    'conflict', reason='producer_id conflict')
 
             failure = self._validate_commit_request(request)
             if failure is not None:
@@ -172,7 +186,7 @@ class InMemoryArtifactStore:
                 _make_record(
                     key=key,
                     ref=output_refs[key],
-                    value=_payload(request.output_values[key], role="materialized"),
+                    value=_payload(request.output_values[key], role='materialized'),
                     producer_id=producer_id,
                     producer_op_id=request.producer_op_id,
                     input_refs=request.input_refs,
@@ -182,7 +196,7 @@ class InMemoryArtifactStore:
             ]
             for record in records:
                 self._write_record(record)
-            outcome = ArtifactCommitOutcome("committed", output_refs)
+            outcome = ArtifactCommitOutcome('committed', output_refs)
             self._commits_by_producer[producer_id] = (fingerprint, outcome)
             return outcome
 
@@ -197,19 +211,20 @@ class InMemoryArtifactStore:
 
     def _validate_commit_request(self, request: ArtifactCommitRequest) -> ArtifactCommitOutcome | None:
         if len(set(request.output_keys)) != len(request.output_keys):
-            return ArtifactCommitOutcome("failed", reason="duplicate output keys")
+            return ArtifactCommitOutcome('failed', reason='duplicate output keys')
 
         if set(request.output_keys) != set(request.output_values):
-            return ArtifactCommitOutcome("failed", reason="output keys do not match declared outputs")
+            return ArtifactCommitOutcome('failed', reason='output keys do not match declared outputs')
 
         for key, ref in request.input_refs.items():
             if key != ref.key:
-                return ArtifactCommitOutcome("failed", reason="input key/ref mismatch")
+                return ArtifactCommitOutcome('failed', reason='input key/ref mismatch')
             if _ref_key(ref) not in self._records_by_ref:
-                return ArtifactCommitOutcome("stale", reason=f"input ref not found: {ref}")
+                return ArtifactCommitOutcome('stale', reason=f'input ref not found: {ref}')
             if self._latest_by_key.get(key) != ref:
-                return ArtifactCommitOutcome("stale", reason=f"input ref is not latest: {ref}")
+                return ArtifactCommitOutcome('stale', reason=f'input ref is not latest: {ref}')
         return None
+
 
 class ArtifactCommitCoordinator:
     def __init__(self, store: ArtifactStore) -> None:
@@ -217,12 +232,12 @@ class ArtifactCommitCoordinator:
 
     def commit_attempt(self, attempt: Attempt, plan_op: PlanOp, result: AttemptExecutionResult) -> CommitResult:
         if not result.ok:
-            return CommitResult("failed", reason=result.error_message or result.error_type or "execution_failed")
+            return CommitResult('failed', reason=result.error_message or result.error_type or 'execution_failed')
         output_keys = plan_op.output_keys
         if set(attempt.output_artifact_keys) != set(output_keys):
-            return CommitResult("failed", reason="attempt outputs do not match plan op outputs")
+            return CommitResult('failed', reason='attempt outputs do not match plan op outputs')
         if set(result.outputs) != set(plan_op.output_key_by_name):
-            return CommitResult("failed", reason="attempt outputs do not match plan op outputs")
+            return CommitResult('failed', reason='attempt outputs do not match plan op outputs')
 
         outcome = self.store.commit(
             ArtifactCommitRequest(
@@ -289,7 +304,7 @@ def _record_snapshot(record: ArtifactRecord) -> ArtifactRecord:
     )
 
 
-def _payload(value: Any, *, metadata: Mapping[str, Any] | None = None, role: str = "") -> ArtifactPayload:
+def _payload(value: Any, *, metadata: Mapping[str, Any] | None = None, role: str = '') -> ArtifactPayload:
     return ArtifactPayload.from_value(value, metadata=metadata, role=role)
 
 
@@ -301,14 +316,14 @@ def source_write_fingerprint(
 ) -> str:
     return json_mapping_fingerprint(
         {
-            "artifact": {"artifact_id": key.artifact_id, "partition": key.partition},
-            "create_only": create_only,
-            "expected_ref": None if expected_ref is None else {
-                "artifact_id": expected_ref.key.artifact_id,
-                "partition": expected_ref.key.partition,
-                "version": expected_ref.version,
+            'artifact': {'artifact_id': key.artifact_id, 'partition': key.partition},
+            'create_only': create_only,
+            'expected_ref': None if expected_ref is None else {
+                'artifact_id': expected_ref.key.artifact_id,
+                'partition': expected_ref.key.partition,
+                'version': expected_ref.version,
             },
-            "value": _stable_payload_identity(payload),
+            'value': _stable_payload_identity(payload),
         },
         reject_reserved_envelope=False,
     )
@@ -317,14 +332,15 @@ def source_write_fingerprint(
 def commit_request_fingerprint(request: ArtifactCommitRequest) -> str:
     return json_mapping_fingerprint(
         {
-            "producer_op_id": request.producer_op_id,
-            "output_keys": [_artifact_key_identity(key) for key in sorted(request.output_keys)],
-            "input_refs": [
+            'producer_op_id': request.producer_op_id,
+            'output_keys': [_artifact_key_identity(key) for key in sorted(request.output_keys)],
+            'input_refs': [
                 [_artifact_key_identity(key), _artifact_ref_identity(ref)]
                 for key, ref in sorted(request.input_refs.items())
             ],
-            "output_values": [
-                [_artifact_key_identity(key), _stable_payload_identity(_payload(request.output_values[key], role="materialized"))]
+            'output_values': [
+                [_artifact_key_identity(key), _stable_payload_identity(
+                    _payload(request.output_values[key], role='materialized'))]
                 for key in sorted(request.output_values)
             ],
         },
@@ -334,37 +350,37 @@ def commit_request_fingerprint(request: ArtifactCommitRequest) -> str:
 
 def _stable_payload_identity(payload: ArtifactPayload) -> dict[str, Any]:
     return {
-        "schema": payload.schema,
-        "metadata": _stable_value_identity(dict(payload.metadata)),
-        "fragments": _stable_value_identity(tuple(payload.fragments)),
-        "role": payload.role,
-        "payload": _stable_value_identity(payload.payload),
+        'schema': payload.schema,
+        'metadata': _stable_value_identity(dict(payload.metadata)),
+        'fragments': _stable_value_identity(tuple(payload.fragments)),
+        'role': payload.role,
+        'payload': _stable_value_identity(payload.payload),
     }
 
 
 def _artifact_key_identity(key: ArtifactKey) -> dict[str, str]:
-    return {"artifact_id": key.artifact_id, "partition": key.partition}
+    return {'artifact_id': key.artifact_id, 'partition': key.partition}
 
 
 def _artifact_ref_identity(ref: ArtifactRef) -> dict[str, Any]:
-    return {"artifact_id": ref.key.artifact_id, "partition": ref.key.partition, "version": ref.version}
+    return {'artifact_id': ref.key.artifact_id, 'partition': ref.key.partition, 'version': ref.version}
 
 
 def _stable_value_identity(value: Any) -> Any:
     if is_json_scalar(value):
-        return {"kind": "scalar", "value": value}
+        return {'kind': 'scalar', 'value': value}
     if isinstance(value, Mapping):
         items = [
             [_stable_value_identity(key), _stable_value_identity(item)]
             for key, item in value.items()
         ]
-        return {"kind": "mapping", "items": sorted(items, key=lambda item: canonical_json(item[0]))}
+        return {'kind': 'mapping', 'items': sorted(items, key=lambda item: canonical_json(item[0]))}
     if isinstance(value, list):
-        return {"kind": "list", "items": [_stable_value_identity(item) for item in value]}
+        return {'kind': 'list', 'items': [_stable_value_identity(item) for item in value]}
     if isinstance(value, tuple):
-        return {"kind": "tuple", "items": [_stable_value_identity(item) for item in value]}
+        return {'kind': 'tuple', 'items': [_stable_value_identity(item) for item in value]}
     if isinstance(value, (set, frozenset)):
         items = [_stable_value_identity(item) for item in value]
-        return {"kind": type(value).__name__, "items": sorted(items, key=canonical_json)}
+        return {'kind': type(value).__name__, 'items': sorted(items, key=canonical_json)}
     digest = hashlib.sha256(pickle.dumps(value, protocol=5)).hexdigest()
-    return {"kind": "pickle:v5", "sha256": digest}
+    return {'kind': 'pickle:v5', 'sha256': digest}

@@ -9,14 +9,14 @@ from typing import Literal, Protocol
 from .supervisor import RuntimeSupervisor, TickResult
 from .utils import validate_nonempty
 
-DEFAULT_CHECKPOINT_ID = "default"
+DEFAULT_CHECKPOINT_ID = 'default'
 
-CheckpointSaveStatus = Literal["saved", "stale"]
-DriverTickStatus = Literal["saved", "checkpoint_stale"]
-DriverRunStatus = Literal["idle", "max_ticks", "cancelled", "checkpoint_stale"]
-_CHECKPOINT_SAVE_STATUSES = frozenset({"saved", "stale"})
-_DRIVER_TICK_STATUSES = frozenset({"saved", "checkpoint_stale"})
-_DRIVER_RUN_STATUSES = frozenset({"idle", "max_ticks", "cancelled", "checkpoint_stale"})
+CheckpointSaveStatus = Literal['saved', 'stale']
+DriverTickStatus = Literal['saved', 'checkpoint_stale']
+DriverRunStatus = Literal['idle', 'max_ticks', 'cancelled', 'checkpoint_stale']
+_CHECKPOINT_SAVE_STATUSES = frozenset({'saved', 'stale'})
+_DRIVER_TICK_STATUSES = frozenset({'saved', 'checkpoint_stale'})
+_DRIVER_RUN_STATUSES = frozenset({'idle', 'max_ticks', 'cancelled', 'checkpoint_stale'})
 
 
 @dataclass(frozen=True)
@@ -28,13 +28,13 @@ class RuntimeDriverPolicy:
 
     def __post_init__(self) -> None:
         if self.idle_sleep_seconds < 0:
-            raise ValueError("idle_sleep_seconds must be >= 0")
+            raise ValueError('idle_sleep_seconds must be >= 0')
         if self.busy_sleep_seconds < 0:
-            raise ValueError("busy_sleep_seconds must be >= 0")
+            raise ValueError('busy_sleep_seconds must be >= 0')
         if self.max_ticks < 1:
-            raise ValueError("max_ticks must be >= 1")
+            raise ValueError('max_ticks must be >= 1')
         if self.max_consecutive_idle_ticks < 1:
-            raise ValueError("max_consecutive_idle_ticks must be >= 1")
+            raise ValueError('max_consecutive_idle_ticks must be >= 1')
 
 
 @dataclass(frozen=True)
@@ -42,23 +42,23 @@ class RuntimeDriverCheckpoint:
     checkpoint_id: str = DEFAULT_CHECKPOINT_ID
     revision: int = 0
     cursor: int = 0
-    last_tick_id: str = ""
+    last_tick_id: str = ''
     last_tick_started_at: float = 0.0
     last_tick_finished_at: float = 0.0
     consecutive_idle_ticks: int = 0
 
     def __post_init__(self) -> None:
-        validate_nonempty(self.checkpoint_id, "checkpoint_id")
+        validate_nonempty(self.checkpoint_id, 'checkpoint_id')
         if self.revision < 0:
-            raise ValueError("revision must be >= 0")
+            raise ValueError('revision must be >= 0')
         if self.cursor < 0:
-            raise ValueError("cursor must be >= 0")
+            raise ValueError('cursor must be >= 0')
         if self.last_tick_started_at < 0:
-            raise ValueError("last_tick_started_at must be >= 0")
+            raise ValueError('last_tick_started_at must be >= 0')
         if self.last_tick_finished_at < 0:
-            raise ValueError("last_tick_finished_at must be >= 0")
+            raise ValueError('last_tick_finished_at must be >= 0')
         if self.consecutive_idle_ticks < 0:
-            raise ValueError("consecutive_idle_ticks must be >= 0")
+            raise ValueError('consecutive_idle_ticks must be >= 0')
 
 
 @dataclass(frozen=True)
@@ -68,22 +68,24 @@ class RuntimeDriverCheckpointSaveResult:
 
     def __post_init__(self) -> None:
         if self.status not in _CHECKPOINT_SAVE_STATUSES:
-            raise ValueError(f"invalid checkpoint save status: {self.status}")
-        if self.status == "saved" and self.checkpoint is None:
-            raise ValueError("saved checkpoint result requires checkpoint")
-        if self.status == "stale" and self.checkpoint is not None:
-            raise ValueError("stale checkpoint result must not include checkpoint")
+            raise ValueError(f'invalid checkpoint save status: {self.status}')
+        if self.status == 'saved' and self.checkpoint is None:
+            raise ValueError('saved checkpoint result requires checkpoint')
+        if self.status == 'stale' and self.checkpoint is not None:
+            raise ValueError('stale checkpoint result must not include checkpoint')
 
 
 class RuntimeDriverCheckpointStore(Protocol):
-    def load(self, checkpoint_id: str = DEFAULT_CHECKPOINT_ID) -> RuntimeDriverCheckpoint: ...
+    def load(self, checkpoint_id: str = DEFAULT_CHECKPOINT_ID) -> RuntimeDriverCheckpoint:
+        ...
 
     def save(
         self,
         checkpoint: RuntimeDriverCheckpoint,
         *,
         expected_revision: int,
-    ) -> RuntimeDriverCheckpointSaveResult: ...
+    ) -> RuntimeDriverCheckpointSaveResult:
+        ...
 
 
 @dataclass(frozen=True)
@@ -94,11 +96,11 @@ class RuntimeDriverTickResult:
 
     def __post_init__(self) -> None:
         if self.status not in _DRIVER_TICK_STATUSES:
-            raise ValueError(f"invalid runtime driver tick status: {self.status}")
-        if self.status == "saved" and self.checkpoint is None:
-            raise ValueError("saved tick result requires checkpoint")
-        if self.status == "checkpoint_stale" and self.checkpoint is not None:
-            raise ValueError("stale tick result must not include checkpoint")
+            raise ValueError(f'invalid runtime driver tick status: {self.status}')
+        if self.status == 'saved' and self.checkpoint is None:
+            raise ValueError('saved tick result requires checkpoint')
+        if self.status == 'checkpoint_stale' and self.checkpoint is not None:
+            raise ValueError('stale tick result must not include checkpoint')
 
 
 @dataclass(frozen=True)
@@ -113,14 +115,14 @@ class RuntimeDriverResult:
 
     def __post_init__(self) -> None:
         if self.status not in _DRIVER_RUN_STATUSES:
-            raise ValueError(f"invalid runtime driver result status: {self.status}")
+            raise ValueError(f'invalid runtime driver result status: {self.status}')
         if self.ticks < 0:
-            raise ValueError("ticks must be >= 0")
+            raise ValueError('ticks must be >= 0')
         if self.cursor < 0:
-            raise ValueError("cursor must be >= 0")
-        object.__setattr__(self, "recovered_run_ids", tuple(sorted(set(self.recovered_run_ids))))
-        object.__setattr__(self, "dispatched_run_ids", tuple(sorted(set(self.dispatched_run_ids))))
-        object.__setattr__(self, "tick_results", tuple(self.tick_results))
+            raise ValueError('cursor must be >= 0')
+        object.__setattr__(self, 'recovered_run_ids', tuple(sorted(set(self.recovered_run_ids))))
+        object.__setattr__(self, 'dispatched_run_ids', tuple(sorted(set(self.dispatched_run_ids))))
+        object.__setattr__(self, 'tick_results', tuple(self.tick_results))
 
 
 class InMemoryRuntimeDriverCheckpointStore:
@@ -129,7 +131,7 @@ class InMemoryRuntimeDriverCheckpointStore:
         self._checkpoints: dict[str, RuntimeDriverCheckpoint] = {}
 
     def load(self, checkpoint_id: str = DEFAULT_CHECKPOINT_ID) -> RuntimeDriverCheckpoint:
-        validate_nonempty(checkpoint_id, "checkpoint_id")
+        validate_nonempty(checkpoint_id, 'checkpoint_id')
         with self._lock:
             checkpoint = self._checkpoints.get(checkpoint_id)
             if checkpoint is None:
@@ -147,12 +149,12 @@ class InMemoryRuntimeDriverCheckpointStore:
         with self._lock:
             current = self.load(checkpoint.checkpoint_id)
             if current.revision != expected_revision:
-                return RuntimeDriverCheckpointSaveResult("stale")
+                return RuntimeDriverCheckpointSaveResult('stale')
             if checkpoint.cursor < current.cursor:
-                raise ValueError("cursor cannot move backwards")
+                raise ValueError('cursor cannot move backwards')
             saved = replace(checkpoint, revision=current.revision + 1)
             self._checkpoints[checkpoint.checkpoint_id] = saved
-            return RuntimeDriverCheckpointSaveResult("saved", saved)
+            return RuntimeDriverCheckpointSaveResult('saved', saved)
 
 
 class DurableRuntimeDriver:
@@ -166,8 +168,8 @@ class DurableRuntimeDriver:
         policy: RuntimeDriverPolicy | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
-        validate_nonempty(driver_id, "driver_id")
-        validate_nonempty(checkpoint_id, "checkpoint_id")
+        validate_nonempty(driver_id, 'driver_id')
+        validate_nonempty(checkpoint_id, 'checkpoint_id')
         self.supervisor = supervisor
         self.checkpoint_store = checkpoint_store
         self.driver_id = driver_id
@@ -197,9 +199,9 @@ class DurableRuntimeDriver:
             0 if busy else checkpoint.consecutive_idle_ticks + 1,
         )
         saved = self.checkpoint_store.save(next_checkpoint, expected_revision=checkpoint.revision)
-        if saved.status == "stale":
-            return RuntimeDriverTickResult("checkpoint_stale", tick_result)
-        return RuntimeDriverTickResult("saved", tick_result, saved.checkpoint)
+        if saved.status == 'stale':
+            return RuntimeDriverTickResult('checkpoint_stale', tick_result)
+        return RuntimeDriverTickResult('saved', tick_result, saved.checkpoint)
 
     def run_until_idle(
         self,
@@ -211,30 +213,31 @@ class DurableRuntimeDriver:
         should_stop = stop_requested or (lambda: False)
         if should_stop():
             checkpoint = self.checkpoint_store.load(self.checkpoint_id)
-            return RuntimeDriverResult("cancelled", 0, checkpoint.cursor)
+            return RuntimeDriverResult('cancelled', 0, checkpoint.cursor)
 
         tick_results: list[RuntimeDriverTickResult] = []
         for _ in range(self.policy.max_ticks):
             tick = self.tick_once(run_ids=run_ids)
             tick_results.append(tick)
-            if tick.status == "checkpoint_stale":
+            if tick.status == 'checkpoint_stale':
                 checkpoint = self.checkpoint_store.load(self.checkpoint_id)
-                return _run_result("checkpoint_stale", tick_results, checkpoint.cursor)
+                return _run_result('checkpoint_stale', tick_results, checkpoint.cursor)
             checkpoint = tick.checkpoint
             assert checkpoint is not None
             if checkpoint.consecutive_idle_ticks >= self.policy.max_consecutive_idle_ticks:
-                return _run_result("idle", tick_results, checkpoint.cursor)
+                return _run_result('idle', tick_results, checkpoint.cursor)
             if should_stop():
-                return _run_result("cancelled", tick_results, checkpoint.cursor)
-            sleep_seconds = self.policy.busy_sleep_seconds if is_tick_busy(tick.tick_result) else self.policy.idle_sleep_seconds
+                return _run_result('cancelled', tick_results, checkpoint.cursor)
+            sleep_seconds = self.policy.busy_sleep_seconds if is_tick_busy(
+                tick.tick_result) else self.policy.idle_sleep_seconds
             if sleep_fn is not None and sleep_seconds > 0:
                 sleep_fn(sleep_seconds)
 
         checkpoint = self.checkpoint_store.load(self.checkpoint_id)
-        return _run_result("max_ticks", tick_results, checkpoint.cursor)
+        return _run_result('max_ticks', tick_results, checkpoint.cursor)
 
     def _tick_id(self, checkpoint: RuntimeDriverCheckpoint) -> str:
-        return f"{self.driver_id}:tick:{checkpoint.revision + 1}"
+        return f'{self.driver_id}:tick:{checkpoint.revision + 1}'
 
 
 def is_tick_busy(tick_result: TickResult) -> bool:
@@ -248,11 +251,11 @@ def is_tick_busy(tick_result: TickResult) -> bool:
 
 def _validate_save_inputs(checkpoint: RuntimeDriverCheckpoint, expected_revision: int) -> None:
     if expected_revision < 0:
-        raise ValueError("expected_revision must be >= 0")
+        raise ValueError('expected_revision must be >= 0')
     if checkpoint.revision < 0:
-        raise ValueError("checkpoint.revision must be >= 0")
+        raise ValueError('checkpoint.revision must be >= 0')
     if checkpoint.cursor < 0:
-        raise ValueError("checkpoint.cursor must be >= 0")
+        raise ValueError('checkpoint.cursor must be >= 0')
 
 
 def _run_result(status: DriverRunStatus, ticks: list[RuntimeDriverTickResult], cursor: int) -> RuntimeDriverResult:

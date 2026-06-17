@@ -25,8 +25,8 @@ from evo.artifact_runtime import (
 from .contract import STEP_ROOTS, StepName, case_ids
 from .graph import build_evo_graph
 
-GateStatus = Literal["idle", "active", "paused", "completed", "cancelled", "stale"]
-STEPS: tuple[StepName, ...] = ("dataset", "eval", "analysis", "repair", "abtest")
+GateStatus = Literal['idle', 'active', 'paused', 'completed', 'cancelled', 'stale']
+STEPS: tuple[StepName, ...] = ('dataset', 'eval', 'analysis', 'repair', 'abtest')
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ class FlowStepState:
     completed_steps: tuple[StepName, ...] = ()
     stale_steps: tuple[StepName, ...] = ()
     active_step_plan_version: int = 0
-    gate_status: GateStatus = "idle"
+    gate_status: GateStatus = 'idle'
     gate_artifact_ref: ArtifactRef | None = None
 
     @property
@@ -70,7 +70,7 @@ class SQLiteFlowStepStore:
         self._connection.commit()
 
     def get(self, run_id: str) -> FlowStepState | None:
-        row = self._connection.execute("SELECT * FROM flow_step_state WHERE run_id = ?", (run_id,)).fetchone()
+        row = self._connection.execute('SELECT * FROM flow_step_state WHERE run_id = ?', (run_id,)).fetchone()
         return None if row is None else _state_from_row(row)
 
     def put(self, state: FlowStepState) -> FlowStepState:
@@ -95,12 +95,12 @@ class SQLiteFlowStepStore:
             (
                 state.run_id,
                 state.current_step,
-                ",".join(state.completed_steps),
-                ",".join(state.stale_steps),
+                ','.join(state.completed_steps),
+                ','.join(state.stale_steps),
                 state.active_step_plan_version,
                 state.gate_status,
-                "" if ref is None else ref.key.artifact_id,
-                "" if ref is None else ref.key.partition,
+                '' if ref is None else ref.key.artifact_id,
+                '' if ref is None else ref.key.partition,
                 0 if ref is None else ref.version,
             ),
         )
@@ -117,15 +117,17 @@ class EvoFlowRuntime:
         self.step_store = step_store
 
     @classmethod
-    def open(cls, path: str | Path, *, case_count: int, model_config: Mapping[str, Any] | None = None) -> "EvoFlowRuntime":
+    def open(cls, path: str | Path, *, case_count: int,
+             model_config: Mapping[str, Any] | None = None) -> 'EvoFlowRuntime':
         graph = build_evo_graph(case_ids(case_count))
-        runtime = open_evo_runtime(path, graph=graph, config=EvoRuntimeConfig(path, model_config=dict(model_config or {})))
+        runtime = open_evo_runtime(path, graph=graph, config=EvoRuntimeConfig(
+            path, model_config=dict(model_config or {})))
         return cls(runtime, SQLiteFlowStepStore(path))
 
     def start_full_flow(self, *, command_id: str, run_id: str, config: Mapping[str, Any]) -> FlowStepState:
         self.set_model_config(_model_config(config))
         self._put_sources_once(command_id, _artifact_config(config))
-        return self._submit_step(command_id=f"{command_id}:dataset", run_id=run_id, step="dataset")
+        return self._submit_step(command_id=f'{command_id}:dataset', run_id=run_id, step='dataset')
 
     def set_model_config(self, model_config: Mapping[str, Any] | None) -> None:
         self.runtime.set_model_config(dict(model_config or {}))
@@ -133,45 +135,48 @@ class EvoFlowRuntime:
     def continue_flow(self, *, command_id: str, run_id: str) -> FlowStepState:
         state = self.step_store.get(run_id)
         if state is None:
-            raise ValueError("flow has not started")
+            raise ValueError('flow has not started')
         step = state.next_step
         if step is None:
             return state
-        if self.runtime.controller.state(run_id).run.status == "paused":
-            self.runtime.execute_intent(IntentCommandRequest(f"{command_id}:resume", run_id, RunControlIntent("resume")))
+        if self.runtime.controller.state(run_id).run.status == 'paused':
+            self.runtime.execute_intent(IntentCommandRequest(
+                f'{command_id}:resume', run_id, RunControlIntent('resume')))
         return self._submit_step(command_id=command_id, run_id=run_id, step=step)
 
     def continue_flow_command_id(self, *, turn_id: str, intent_index: int, run_id: str) -> str:
         state = self.step_store.get(run_id)
         if state is None:
-            raise ValueError("flow has not started")
+            raise ValueError('flow has not started')
         step = state.next_step
         if step is None:
-            intent = RunUntilIdleIntent(reason="continue_flow_noop")
+            intent = RunUntilIdleIntent(reason='continue_flow_noop')
             advance_until_idle = False
         else:
-            intent = SubmitPlanIntent((STEP_ROOTS[step],), reason=f"step:{step}")
+            intent = SubmitPlanIntent((STEP_ROOTS[step],), reason=f'step:{step}')
             advance_until_idle = True
-        request = IntentCommandRequest("msg:pending", run_id, intent, advance_until_idle=advance_until_idle)
+        request = IntentCommandRequest('msg:pending', run_id, intent, advance_until_idle=advance_until_idle)
         fingerprint = intent_request_fingerprint(request)
-        return f"msg:{turn_id}:{intent_index}:continue_flow:{fingerprint}"
+        return f'msg:{turn_id}:{intent_index}:continue_flow:{fingerprint}'
 
     def pause_flow(self, *, command_id: str, run_id: str) -> FlowStepState:
-        self.runtime.execute_intent(IntentCommandRequest(command_id, run_id, RunControlIntent("pause")))
-        return self._mark_status(run_id, "paused")
+        self.runtime.execute_intent(IntentCommandRequest(command_id, run_id, RunControlIntent('pause')))
+        return self._mark_status(run_id, 'paused')
 
     def cancel_flow(self, *, command_id: str, run_id: str) -> FlowStepState:
-        self.runtime.execute_intent(IntentCommandRequest(command_id, run_id, RunControlIntent("cancel")))
-        return self._mark_status(run_id, "cancelled")
+        self.runtime.execute_intent(IntentCommandRequest(command_id, run_id, RunControlIntent('cancel')))
+        return self._mark_status(run_id, 'cancelled')
 
     def run_until_idle(self, *, command_id: str, run_id: str) -> None:
-        self.runtime.execute_intent(IntentCommandRequest(command_id, run_id, RunUntilIdleIntent(), advance_until_idle=True))
+        self.runtime.execute_intent(IntentCommandRequest(
+            command_id, run_id, RunUntilIdleIntent(), advance_until_idle=True))
 
     def retry_failed_flow(self, *, command_id: str, run_id: str) -> FlowStepState:
-        self.runtime.execute_intent(IntentCommandRequest(command_id, run_id, RetryFailedIntent(), advance_until_idle=True))
+        self.runtime.execute_intent(IntentCommandRequest(
+            command_id, run_id, RetryFailedIntent(), advance_until_idle=True))
         state = self.step_store.get(run_id)
         if state is None:
-            raise ValueError("flow has not started")
+            raise ValueError('flow has not started')
         return state
 
     def materialize_flow(self, *, command_id: str, run_id: str, artifacts: tuple[ArtifactKey, ...]) -> FlowStepState:
@@ -180,15 +185,15 @@ class EvoFlowRuntime:
         )
         state = self.step_store.get(run_id)
         if state is None:
-            raise ValueError("flow has not started")
+            raise ValueError('flow has not started')
         return state
 
     def preview_reconcile(self, artifact: ArtifactKey) -> dict[str, Any]:
         affected = tuple(sorted(self.runtime.graph.affected_artifacts_of(artifact)))
         return {
-            "changed_artifact": _artifact_key_payload(artifact),
-            "affected_artifacts": [_artifact_key_payload(item) for item in affected],
-            "affected_count": len(affected),
+            'changed_artifact': _artifact_key_payload(artifact),
+            'affected_artifacts': [_artifact_key_payload(item) for item in affected],
+            'affected_count': len(affected),
         }
 
     def latest_ref(self, artifact: ArtifactKey) -> ArtifactRef | None:
@@ -200,36 +205,37 @@ class EvoFlowRuntime:
 
     def _put_sources_once(self, command_id: str, config: Mapping[str, Any]) -> None:
         payloads = {
-            "run.config": ArtifactPayload("RunConfig", dict(config)),
-            "corpus.source_config": ArtifactPayload("CorpusSourceConfig", dict(config.get("corpus") or config)),
-            "eval.target_config": ArtifactPayload("EvalTargetConfig", dict(config.get("target") or config)),
-            "eval.policy": ArtifactPayload("EvalPolicy", dict(config.get("eval_policy") or {})),
-            "repair.policy": ArtifactPayload("RepairPolicy", dict(config.get("repair_policy") or {})),
-            "abtest.candidate_config": ArtifactPayload("CandidateConfig", dict(config.get("candidate") or {})),
+            'run.config': ArtifactPayload('RunConfig', dict(config)),
+            'corpus.source_config': ArtifactPayload('CorpusSourceConfig', dict(config.get('corpus') or config)),
+            'eval.target_config': ArtifactPayload('EvalTargetConfig', dict(config.get('target') or config)),
+            'eval.policy': ArtifactPayload('EvalPolicy', dict(config.get('eval_policy') or {})),
+            'repair.policy': ArtifactPayload('RepairPolicy', dict(config.get('repair_policy') or {})),
+            'abtest.candidate_config': ArtifactPayload('CandidateConfig', dict(config.get('candidate') or {})),
         }
         for artifact_id, payload in payloads.items():
             outcome = self.runtime.stores.artifact_store.put_source_once(
-                f"{command_id}:source:{artifact_id}",
+                f'{command_id}:source:{artifact_id}',
                 ArtifactKey.of(artifact_id),
                 payload,
                 create_only=True,
-                metadata={"bootstrap_command_id": command_id},
+                metadata={'bootstrap_command_id': command_id},
             )
-            if outcome.status != "committed":
-                raise ValueError(f"bootstrap source write failed for {artifact_id}: {outcome.reason}")
+            if outcome.status != 'committed':
+                raise ValueError(f'bootstrap source write failed for {artifact_id}: {outcome.reason}')
 
     def _submit_step(self, *, command_id: str, run_id: str, step: StepName) -> FlowStepState:
         root = STEP_ROOTS[step]
         result = self.runtime.execute_intent(
-            IntentCommandRequest(command_id, run_id, SubmitPlanIntent((root,), reason=f"step:{step}"), advance_until_idle=True)
+            IntentCommandRequest(command_id, run_id, SubmitPlanIntent(
+                (root,), reason=f'step:{step}'), advance_until_idle=True)
         )
-        if result.status != "applied" or result.plan_result is None:
-            raise ValueError(result.reason or "step submit failed")
+        if result.status != 'applied' or result.plan_result is None:
+            raise ValueError(result.reason or 'step submit failed')
         ref = self.runtime.stores.artifact_store.latest(root)
         if ref is None:
-            raise ValueError(f"step root was not materialized: {root}")
+            raise ValueError(f'step root was not materialized: {root}')
         completed = tuple(item for item in STEPS if STEPS.index(item) <= STEPS.index(step))
-        status: GateStatus = "completed" if step == "abtest" else "paused"
+        status: GateStatus = 'completed' if step == 'abtest' else 'paused'
         return self.step_store.put(
             FlowStepState(
                 run_id,
@@ -243,7 +249,7 @@ class EvoFlowRuntime:
         )
 
     def _mark_status(self, run_id: str, status: GateStatus) -> FlowStepState:
-        current = self.step_store.get(run_id) or FlowStepState(run_id, "", gate_status=status)
+        current = self.step_store.get(run_id) or FlowStepState(run_id, '', gate_status=status)
         return self.step_store.put(
             FlowStepState(
                 current.run_id,
@@ -258,27 +264,28 @@ class EvoFlowRuntime:
 
 
 def _state_from_row(row: sqlite3.Row) -> FlowStepState:
-    version = int(row["gate_version"])
-    ref = None if version < 1 else ArtifactRef(ArtifactKey(str(row["gate_artifact_id"]), str(row["gate_partition"])), version)
+    version = int(row['gate_version'])
+    ref = None if version < 1 else ArtifactRef(ArtifactKey(
+        str(row['gate_artifact_id']), str(row['gate_partition'])), version)
     return FlowStepState(
-        str(row["run_id"]),
-        str(row["current_step"]),
-        tuple(item for item in str(row["completed_steps"]).split(",") if item),
-        tuple(item for item in str(row["stale_steps"]).split(",") if item),
-        int(row["active_step_plan_version"]),
-        str(row["gate_status"]),
+        str(row['run_id']),
+        str(row['current_step']),
+        tuple(item for item in str(row['completed_steps']).split(',') if item),
+        tuple(item for item in str(row['stale_steps']).split(',') if item),
+        int(row['active_step_plan_version']),
+        str(row['gate_status']),
         ref,
     )
 
 
 def _artifact_key_payload(key: ArtifactKey) -> dict[str, str]:
-    return {"artifact_id": key.artifact_id, "partition": key.partition}
+    return {'artifact_id': key.artifact_id, 'partition': key.partition}
 
 
 def _model_config(config: Mapping[str, Any]) -> Mapping[str, Any]:
-    value = config.get("model_config") or config.get("llm_config") or {}
+    value = config.get('model_config') or config.get('llm_config') or {}
     return value if isinstance(value, Mapping) else {}
 
 
 def _artifact_config(config: Mapping[str, Any]) -> dict[str, Any]:
-    return {str(key): value for key, value in config.items() if key not in {"model_config", "llm_config"}}
+    return {str(key): value for key, value in config.items() if key not in {'model_config', 'llm_config'}}

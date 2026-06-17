@@ -16,9 +16,9 @@ class WorkerLeasePolicy:
 
     def __post_init__(self) -> None:
         if self.lease_seconds <= 0:
-            raise ValueError("lease_seconds must be > 0")
+            raise ValueError('lease_seconds must be > 0')
         if self.max_recoveries < 0:
-            raise ValueError("max_recoveries must be >= 0")
+            raise ValueError('max_recoveries must be >= 0')
 
 
 class LeasedPlanExecutionWorker:
@@ -31,7 +31,7 @@ class LeasedPlanExecutionWorker:
         policy: WorkerLeasePolicy,
         clock: Callable[[], float] = time.time,
     ) -> None:
-        validate_nonempty(worker_id, "worker_id")
+        validate_nonempty(worker_id, 'worker_id')
         self.controller = controller
         self.executor = executor
         self.worker_id = worker_id
@@ -40,7 +40,7 @@ class LeasedPlanExecutionWorker:
 
     def dispatch_once(self, run_id: str, *, limit: int = 1) -> WorkerDispatchResult:
         if limit < 1:
-            raise ValueError("limit must be >= 1")
+            raise ValueError('limit must be >= 1')
         claims = self.controller.claim_ready(
             run_id,
             limit=limit,
@@ -51,7 +51,7 @@ class LeasedPlanExecutionWorker:
             run_id,
             len(claims),
             dispatch_claims(self.controller, self.executor, claims),
-            "dispatched" if claims else "idle",
+            'dispatched' if claims else 'idle',
             _run_status(self.controller, run_id),
         )
 

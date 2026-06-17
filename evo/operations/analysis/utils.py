@@ -13,7 +13,8 @@ CONTEXT_LOC_KEYS = ('doc_id', 'document_id', 'chunk_id', 'segment_id', 'filename
 
 def jsonish(value: Any) -> Any:
     for _ in range(4):
-        if not isinstance(value, str) or not (text := value.strip()) or text[:1] not in {'"', '{', '['}: return value
+        if not isinstance(value, str) or not (text := value.strip()) or text[:1] not in {'"', '{', '['}:
+            return value
         try:
             value = json.loads(text)
         except json.JSONDecodeError:
@@ -48,16 +49,19 @@ def check_fields(name: str, payload: dict[str, Any], expected: dict[str, str]) -
 
 
 def typed_payload(ctx: OperationContext, ref: ArtifactRef, schema: str) -> dict[str, Any]:
-    if ctx.artifact_graph.schema_name(ref) != schema: raise ValueError(f'artifact is not {schema}: {ref}')
+    if ctx.artifact_graph.schema_name(ref) != schema:
+        raise ValueError(f'artifact is not {schema}: {ref}')
     payload = ctx.artifact_graph.get(ref)
-    if not isinstance(payload, dict): raise ValueError(f'{ref} payload must be object')
+    if not isinstance(payload, dict):
+        raise ValueError(f'{ref} payload must be object')
     return payload
 
 
 def bound_input_ref(ctx: OperationContext, raw_ref: Any, schema: str) -> ArtifactRef:
     requested = ArtifactRef.parse(str(raw_ref or ''))
     ref = next((item for item in ctx.input_refs if item.artifact_id == requested.artifact_id), requested)
-    if ctx.artifact_graph.schema_name(ref) != schema: raise ValueError(f'artifact is not {schema}: {ref}')
+    if ctx.artifact_graph.schema_name(ref) != schema:
+        raise ValueError(f'artifact is not {schema}: {ref}')
     return ref
 
 
@@ -65,9 +69,11 @@ def clean_contexts(contexts: Any) -> list[str]:
     out = []
     for item in contexts if isinstance(contexts, list) else []:
         if isinstance(item, str):
-            if item.strip(): out.append(item.strip())
+            if item.strip():
+                out.append(item.strip())
         elif isinstance(item, dict):
             text = next((str(item[key]).strip() for key in CONTEXT_TEXT_KEYS if item.get(key)), '')
             loc = ' '.join(f'{key}={item[key]}' for key in CONTEXT_LOC_KEYS if item.get(key))
-            if text: out.append(f'{loc}\n{text}'.strip())
+            if text:
+                out.append(f'{loc}\n{text}'.strip())
     return out

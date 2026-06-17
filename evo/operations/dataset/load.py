@@ -16,14 +16,16 @@ _DOCUMENTS: dict[tuple[str, str], Any] = {}
 class LoadCorpusOperation:
     def execute(self, ctx) -> OperationOutput:
         sources = ctx.params.get('sources', [])
-        if not isinstance(sources, list): raise ValueError('sources must be a list')
+        if not isinstance(sources, list):
+            raise ValueError('sources must be a list')
         state = {'pages': [], 'sources': [], 'filters': [], 'loaded_refs': [], 'skipped': [],
                  'stats': {'source_count': 0, 'matched_doc_count': 0, 'scanned_doc_count': 0, 'loaded_doc_count': 0,
                            'skipped_doc_count': 0, 'document_page_count': 0, 'hit_doc_limit': False}}
         self._progress(ctx, state, 'load_corpus', 'running', 'starting corpus load', done=0, total=len(sources))
         for index, source in enumerate(sources, 1):
             ctx.check_interrupt()
-            if not isinstance(source, dict): raise ValueError(f'source_{index} is not an object')
+            if not isinstance(source, dict):
+                raise ValueError(f'source_{index} is not an object')
             source_id = str(source.get('source_id') or source.get('dataset_id') or f'source_{index}')
             state['stats']['source_count'] += 1
             driver = str(source.get('driver') or 'postgres').strip().lower()
@@ -41,7 +43,8 @@ class LoadCorpusOperation:
                                                                ctx.operation_run_id)])
 
     def _doc_page(self, ctx, state, source_id, docs) -> None:
-        if not docs: return
+        if not docs:
+            return
         index = state['stats']['document_page_count'] + 1
         payload = {'source_id': source_id, 'page_index': index, 'documents': docs}
         state['pages'].append(ArtifactDraft(f'corpus_docs_page_{index:04d}', 'CorpusDocumentPage', payload,
@@ -55,7 +58,8 @@ class LoadCorpusOperation:
         except ImportError as exc:
             raise RuntimeError('psycopg is required for db corpus loading') from exc
         driver = os.getenv('LAZYMIND_READONLY_DB_DRIVER', 'postgres').strip().lower()
-        if driver not in {'postgres', 'postgresql'}: raise RuntimeError(f'unsupported readonly db driver: {driver}')
+        if driver not in {'postgres', 'postgresql'}:
+            raise RuntimeError(f'unsupported readonly db driver: {driver}')
         dsn = os.getenv('LAZYMIND_READONLY_DB_DSN', '').strip()
         schema = os.getenv('LAZYMIND_READONLY_SCHEMA', 'public').strip()
         default = 'host=db user=app password=app dbname=app port=5432 sslmode=disable connect_timeout=5'
@@ -77,7 +81,8 @@ class LoadCorpusOperation:
             else:
                 items = strings(value)
                 group = {'include': items} if items and 'include' in allowed else {}
-            if group: filters[name] = group
+            if group:
+                filters[name] = group
         if filters or unsupported:
             state['filters'].append({'source_id': source_id, 'applied': filters, 'unsupported': unsupported})
         q = '"' + schema.replace('"', '""') + '"'
@@ -107,7 +112,8 @@ class LoadCorpusOperation:
                 cursor.execute(f'select kb.id as kb_document_id, d.* {table} where {where_sql} order by kb.id'
                                ' limit %s offset %s', [*params, min(page_size, limit - offset), offset])
                 rows = cursor.fetchall()
-                if not rows: break
+                if not rows:
+                    break
                 offset += len(rows)
                 for row in rows:
                     scanned += 1
@@ -155,8 +161,10 @@ class LoadCorpusOperation:
             params.extend(patterns)
 
     def _json(self, value) -> Any:
-        if isinstance(value, dict): return {str(key): self._json(item) for key, item in value.items()}
-        if isinstance(value, (list, tuple)): return [self._json(item) for item in value]
+        if isinstance(value, dict):
+            return {str(key): self._json(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [self._json(item) for item in value]
         return value if value is None or isinstance(value, (str, int, float, bool)) else str(value)
 
     def _progress(self, ctx, state, phase, status, message, current_item='', done=0, total=0) -> None:
@@ -175,7 +183,8 @@ class BuildCorpusSnapshotOperation:
         loaded_refs = set(report.get('loaded_doc_refs') or [])
         docs = [doc for ref in page_refs for doc in ctx.artifact_graph.get(ref).get('documents', [])
                 if not loaded_refs or doc.get('doc_ref') in loaded_refs]
-        if not docs: raise ValueError('corpus load report has no loaded documents')
+        if not docs:
+            raise ValueError('corpus load report has no loaded documents')
         groups = strings(ctx.params.get('segment_groups')) or ['block', 'line']
         page_size = bounded_int(ctx.params.get('segment_page_size'), 50, 1, 1000)
         min_chars = bounded_int(ctx.params.get('min_segment_chars'), 80, 1, 100000)
@@ -230,14 +239,16 @@ class BuildCorpusSnapshotOperation:
         state['stats']['source_unit_count'] += len(units)
         state['stats']['total_char_count'] += chars
         counts = state['stats']['unit_type_counts']
-        for t in (str(u.get('unit_type') or 'paragraph') for u in units): counts[t] = int(counts.get(t, 0)) + 1
+        for t in (str(u.get('unit_type') or 'paragraph') for u in units):
+            counts[t] = int(counts.get(t, 0)) + 1
         state['buffer'].extend(units)
         while len(state['buffer']) >= page_size:
             self._unit_page(ctx, state, report_ref, page_refs, state['buffer'][:page_size])
             state['buffer'] = state['buffer'][page_size:]
 
     def _unit_page(self, ctx, state, report_ref, page_refs, units) -> None:
-        if not units: return
+        if not units:
+            return
         index = state['stats']['source_unit_page_count'] + 1
         payload = {'snapshot_id': 'corpus_snapshot', 'page_index': index, 'source_units': units}
         state['pages'].append(ArtifactDraft(f'corpus_source_units_page_{index:04d}', 'CorpusSourceUnitPage',
@@ -247,7 +258,8 @@ class BuildCorpusSnapshotOperation:
     def _doc_units(self, groups, doc, page_size, min_chars, preview_chars) -> list[dict[str, Any]]:
         """Merge units across segment groups; earlier groups win on duplicate content."""
         parts = str(doc.get('doc_ref') or '').split(':', 1)
-        if len(parts) != 2: raise ValueError(f"invalid doc_ref: {doc.get('doc_ref')}")
+        if len(parts) != 2:
+            raise ValueError(f"invalid doc_ref: {doc.get('doc_ref')}")
         dataset_id, doc_id, last_error = parts[0].strip(), parts[1].strip(), ''
         merged, seen = [], set()
         for group in groups:
@@ -260,10 +272,12 @@ class BuildCorpusSnapshotOperation:
                 continue
             for unit in units:
                 key = hashlib.sha256(re.sub(r'\s+', ' ', unit['content']).strip().encode('utf-8')).hexdigest()
-                if key in seen: continue
+                if key in seen:
+                    continue
                 seen.add(key)
                 merged.append(unit)
-        if not merged and last_error: raise RuntimeError(last_error)
+        if not merged and last_error:
+            raise RuntimeError(last_error)
         return merged
 
     def _unit(self, dataset_id, doc_id, doc, group, row, index, preview_chars) -> dict[str, Any]:
@@ -289,14 +303,16 @@ class BuildCorpusSnapshotOperation:
                       'content': getattr(n, 'text', '') or '', 'metadata': m,
                       'global_metadata': getattr(n, 'global_metadata', {}) or {}} for n in nodes]
             rows.extend(items)
-            if not items or len(rows) >= int(total or len(rows)): return rows
+            if not items or len(rows) >= int(total or len(rows)):
+                return rows
             offset += len(items)
 
     def _document(self):
         from lazyllm import Document
         from lazymind.config import config
         key = (config['agentic_kb_url'].rstrip('/'), config['agentic_kb_name'])
-        if key not in _DOCUMENTS: _DOCUMENTS[key] = Document(url=f'{key[0]}/_call', name=key[1])
+        if key not in _DOCUMENTS:
+            _DOCUMENTS[key] = Document(url=f'{key[0]}/_call', name=key[1])
         return _DOCUMENTS[key]
 
     def _snap_progress(self, ctx, state, phase, status, message, current_item='', done=0, total=0) -> None:

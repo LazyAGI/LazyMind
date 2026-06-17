@@ -47,7 +47,8 @@ class TraceAccess:
         steps = self.flat_steps
         for key in ('role', 'name', 'node_type', 'status') if filters else ():
             vals = _filter_values(filters.get(key) or filters.get(f'{key}s'))
-            if vals: steps = [step for step in steps if str(step.get(key) or '') in vals]
+            if vals:
+                steps = [step for step in steps if str(step.get(key) or '') in vals]
         return [dict(step) for step in steps]
 
     def get_trace_steps(self, selector: dict[str, Any], include_io: bool = True,
@@ -63,7 +64,8 @@ class TraceAccess:
             depth = min(int(selector.get('children_depth', children_depth) or 0), 1)
             kids = set(step.get('children_step_ids') or []) if depth > 0 else set()
             for item in [step, *(s for s in self.flat_steps if s['step_id'] in kids)]:
-                if not item['step_id'] or item['step_id'] in seen: continue
+                if not item['step_id'] or item['step_id'] in seen:
+                    continue
                 seen.add(item['step_id'])
                 data = dict(item)
                 if include_io:
@@ -75,13 +77,16 @@ class TraceAccess:
 
 
 def load_trace_payload(ctx: OperationContext, trace_id: str, rag: dict[str, Any]) -> dict[str, Any]:
-    if isinstance(rag.get('trace'), dict): return _require_trace_payload(rag['trace'], trace_id)
-    if not trace_id: raise ValueError('trace_id is required for classification')
+    if isinstance(rag.get('trace'), dict):
+        return _require_trace_payload(rag['trace'], trace_id)
+    if not trace_id:
+        raise ValueError('trace_id is required for classification')
     try:
         ref = ctx.artifact_graph.latest_ref(f"trace_{validate_id(trace_id, 'trace_id')}")
         if ctx.artifact_graph.schema_name(ref) == 'Trace':
             payload = ctx.artifact_graph.get(ref)
-            if isinstance(payload, dict): return _require_trace_payload(payload, trace_id)
+            if isinstance(payload, dict):
+                return _require_trace_payload(payload, trace_id)
     except (KeyError, ValueError):
         pass
     try:
@@ -93,7 +98,8 @@ def load_trace_payload(ctx: OperationContext, trace_id: str, rag: dict[str, Any]
             backend = os.getenv('LAZYLLM_TRACE_CONSUME_BACKEND') or os.getenv('LAZYLLM_TRACE_BACKEND') or 'local'
             trace = get_single_trace(trace_id, backend=backend)
             payload = dataclasses.asdict(trace) if dataclasses.is_dataclass(trace) else trace
-            if isinstance(payload, dict): return _require_trace_payload(payload, trace_id)
+            if isinstance(payload, dict):
+                return _require_trace_payload(payload, trace_id)
         except Exception:
             time.sleep(1)
     raise ValueError(f'trace payload not found or unreadable: {trace_id}')
@@ -101,7 +107,8 @@ def load_trace_payload(ctx: OperationContext, trace_id: str, rag: dict[str, Any]
 
 def _require_trace_payload(payload, trace_id):
     root = payload.get('execution_tree') or payload
-    if not root or not isinstance(root, dict): raise ValueError(f'trace payload is not an object: {trace_id}')
+    if not root or not isinstance(root, dict):
+        raise ValueError(f'trace payload is not an object: {trace_id}')
     return payload
 
 
@@ -110,7 +117,8 @@ def build_trace_access(trace: dict[str, Any], trace_id: str) -> TraceAccess:
     flat: list[dict[str, Any]] = []
 
     def walk(node, path='execution_tree', parent='', depth=0):
-        if not isinstance(node, dict): return
+        if not isinstance(node, dict):
+            return
         sid = str(node.get('step_id') or node.get('node_id') or f'step_{len(flat)}')
         raw_nodes[sid] = node
         raw_data = node.get('raw_data') if isinstance(node.get('raw_data'), dict) else {}
@@ -125,10 +133,12 @@ def build_trace_access(trace: dict[str, Any], trace_id: str) -> TraceAccess:
             'has_input': 'input' in raw_data, 'has_output': 'output' in raw_data,
             'input_preview': _preview(raw_data.get('input')), 'output_preview': _preview(raw_data.get('output')),
         })
-        for index, child in enumerate(children): walk(child, f'{path}.children[{index}]', sid, depth + 1)
+        for index, child in enumerate(children):
+            walk(child, f'{path}.children[{index}]', sid, depth + 1)
 
     walk(trace.get('execution_tree') or trace)
-    if not flat: raise ValueError(f'trace has no readable steps: {trace_id}')
+    if not flat:
+        raise ValueError(f'trace has no readable steps: {trace_id}')
     return TraceAccess(trace, trace_id, flat, raw_nodes)
 
 
@@ -136,14 +146,16 @@ def flatten_trace(trace: dict[str, Any], trace_id: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
 
     def walk(node, path='execution_tree', parent_id='', parent_path='', kb_path='', kb_id=''):
-        if not isinstance(node, dict): return
+        if not isinstance(node, dict):
+            return
         raw_data = node.get('raw_data') if isinstance(node.get('raw_data'), dict) else {}
         raw = {key: jsonish(raw_data.get(key)) for key in ('input', 'output') if key in raw_data}
         parts, input_parts, output_parts = ids_in(raw), ids_in(raw.get('input')), ids_in(raw.get('output'))
         name, node_type = str(node.get('name') or ''), str(node.get('node_type') or '')
         role = NODE_TYPES.get((name, node_type), 'unknown')
         node_id = str(node.get('step_id') or node.get('node_id') or '')
-        if role == 'kb_search': kb_path, kb_id = path, node_id
+        if role == 'kb_search':
+            kb_path, kb_id = path, node_id
         out.append({
             'trace_id': trace_id, 'node_id': node_id, 'parent_node_id': parent_id, 'name': name,
             'node_type': node_type, 'status': str(node.get('status') or ''), 'path': path,
@@ -194,15 +206,18 @@ def hit_union(searches: list[dict[str, Any]], key: str) -> set[str]:
 
 
 def stage_hit_status(searches: list[dict[str, Any]], stage: str, kind: str, expected: set[str]) -> dict[str, Any]:
-    if not expected: return _unknown_hit_status('no_reference_ids')
+    if not expected:
+        return _unknown_hit_status('no_reference_ids')
     path, items = STAGE_PATHS.get(stage) or (), []
     for search in searches if path else []:
         base = [item for item in (search.get(path[0]) or []) if isinstance(item, dict)]
         items += base if len(path) == 1 else [i[path[1]] for i in base if isinstance(i.get(path[1]), dict)]
-    if not items: return _unknown_hit_status(f'{stage}_not_observed')
+    if not items:
+        return _unknown_hit_status(f'{stage}_not_observed')
     key = 'doc_ids' if kind == 'doc' else 'chunk_ids'
     ids = {str(value) for item in items for value in item.get(key, []) if str(value)}
-    if not ids: return _unknown_hit_status(f'{stage}_{kind}_ids_not_observed')
+    if not ids:
+        return _unknown_hit_status(f'{stage}_{kind}_ids_not_observed')
     hits, missing = sorted(expected & ids), sorted(expected - ids)
     status = 'hit' if hits and not missing else 'partial' if hits else 'miss'
     return {'status': status, 'hits': hits, 'missing': missing, 'unknown_reason': ''}
@@ -253,7 +268,8 @@ def _stage_summary(item, missing_reason):
 def _status_from_observed(hits, observed_ids):
     values = sorted({str(item) for item in hits or [] if str(item)})
     observed = sorted({str(item) for item in observed_ids or [] if str(item)})
-    if not values and not observed: return _unknown_hit_status('ids_not_observed')
+    if not values and not observed:
+        return _unknown_hit_status('ids_not_observed')
     return {'status': 'hit' if values else 'miss', 'hits': values, 'missing': [], 'unknown_reason': ''}
 
 
@@ -262,32 +278,42 @@ def ids_in(value: Any) -> dict[str, set[str]]:
 
     def add(value, bucket=''):
         text = str(value or '').strip()
-        if not text: return
-        if bucket == 'name': found['names'].add(text)
-        elif bucket == 'doc' or text.startswith('doc_'): found['docs'].add(text)
-        elif bucket == 'chunk' or ID_RE.fullmatch(text) or _looks_like_id(text): found['chunks'].add(text)
+        if not text:
+            return
+        if bucket == 'name':
+            found['names'].add(text)
+        elif bucket == 'doc' or text.startswith('doc_'):
+            found['docs'].add(text)
+        elif bucket == 'chunk' or ID_RE.fullmatch(text) or _looks_like_id(text):
+            found['chunks'].add(text)
         found['ids'].update(found['docs'] | found['chunks'] | found['names'])
 
     def walk(item):
         if isinstance(item, dict):
             for key, val in item.items():
-                if key in NAME_KEYS and val is not None: add(val, 'name')
-                if key in ID_KEYS and _looks_like_id(val): add(val, ID_KEYS[key])
+                if key in NAME_KEYS and val is not None:
+                    add(val, 'name')
+                if key in ID_KEYS and _looks_like_id(val):
+                    add(val, ID_KEYS[key])
                 walk(val)
         elif isinstance(item, list):
-            for val in item: walk(val)
+            for val in item:
+                walk(val)
         elif isinstance(item, str):
             if (text := item.strip())[:1] in {'{', '['} and (parsed := jsonish(text)) is not text:
                 return walk(parsed)
-            for match in ID_RE.findall(text): add(match)
+            for match in ID_RE.findall(text):
+                add(match)
 
     walk(value)
     return found
 
 
 def _looks_like_id(value):
-    if not (text := str(value or '').strip()): return False
-    if ID_RE.fullmatch(text): return True
+    if not (text := str(value or '').strip()):
+        return False
+    if ID_RE.fullmatch(text):
+        return True
     return len(text) >= 24 and all(char.isascii() and (char.isalnum() or char in '_-') for char in text)
 
 

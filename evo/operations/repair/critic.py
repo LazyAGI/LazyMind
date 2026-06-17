@@ -24,7 +24,8 @@ def build_patch_critique(attempt: int, diagnosis: dict[str, Any], instruction: d
     avoid = [] if diff_hit else ['patch did not touch suspected location']
     avoid += [str(risk.get('kind')) for risk in correctness.get('overfitting_risks') or [] if risk.get('kind')]
     scope_failure = (patch.get('scope_check') or {}).get('failure')
-    if scope_failure: avoid.append(str(scope_failure))
+    if scope_failure:
+        avoid.append(str(scope_failure))
     focus_cases = [str(row.get('case_id') or '') for row in (candidate_report.get('cases') or [])
                    if isinstance(row, dict) and row.get('case_id')]
     focus_cases += [str(row.get('case_id') or '')
@@ -110,25 +111,33 @@ def build_branch_decision(attempt: int, critique: dict[str, Any], evaluation: di
 
 
 def classify_metric_progress(evaluation: dict[str, Any], policy: dict[str, Any]) -> str:
-    if evaluation.get('status') == 'incomplete': return 'execution_failed'
+    if evaluation.get('status') == 'incomplete':
+        return 'execution_failed'
     overall = (evaluation.get('overall_eval') or {}).get('summary') or {}
     bad = (evaluation.get('badcase_eval') or {}).get('summary') or {}
     delta = float(overall.get('delta_mean') or bad.get('delta_mean') or 0.0)
     target = float(policy.get('target_mean_delta') or overall.get('required_delta_mean') or 0.0)
     improved, regressed = int(bad.get('improved_case_count') or 0), int(bad.get('regressed_case_count') or 0)
-    if evaluation.get('status') == 'passed' and delta >= target and regressed == 0: return 'strong'
-    if delta < -0.001 or regressed > improved: return 'regressed'
-    if delta > 0.001 or improved > regressed: return 'partial'
+    if evaluation.get('status') == 'passed' and delta >= target and regressed == 0:
+        return 'strong'
+    if delta < -0.001 or regressed > improved:
+        return 'regressed'
+    if delta > 0.001 or improved > regressed:
+        return 'partial'
     return 'none'
 
 
 def classify_trace_progress(evaluation: dict[str, Any]) -> str:
     deltas = evaluation.get('trace_delta_by_case') if isinstance(evaluation.get('trace_delta_by_case'), list) else []
     kinds = {str(item.get('delta') or '') for item in deltas if isinstance(item, dict)}
-    if 'fixed_transition_failure' in kinds: return 'fixed_transition'
-    if 'new_failure' in kinds: return 'new_failure'
-    if 'partial' in kinds or 'moved_later' in kinds: return 'partial'
-    if 'unknown' in kinds: return 'unknown'
+    if 'fixed_transition_failure' in kinds:
+        return 'fixed_transition'
+    if 'new_failure' in kinds:
+        return 'new_failure'
+    if 'partial' in kinds or 'moved_later' in kinds:
+        return 'partial'
+    if 'unknown' in kinds:
+        return 'unknown'
     return 'unknown' if not kinds else 'none'
 
 
@@ -139,12 +148,15 @@ def touched_suspected_location(patch: dict[str, Any], diagnosis: dict[str, Any],
                   if isinstance(item, dict) and item.get('source_observation_ref') == primary), {})
     if start:
         path = str(start.get('path') or '')
-        if path not in files: return False
+        if path not in files:
+            return False
         hunks = patch.get('changed_hunks') if isinstance(patch.get('changed_hunks'), list) else []
-        if hunks: return _hunks_touch_start(hunks, start)
+        if hunks:
+            return _hunks_touch_start(hunks, start)
         changed = _changed_code_lines(str(patch.get('diff') or ''), path)
         line_start, line_end = int(start.get('line_start') or 0), int(start.get('line_end') or 0)
-        if line_start and line_end: return any(line_start <= line <= line_end for line in changed)
+        if line_start and line_end:
+            return any(line_start <= line <= line_end for line in changed)
         return bool(changed)
     locations = diagnosis.get('suspected_code_locations') or []
     return any(str(item.get('path') or '') in files for item in locations if isinstance(item, dict))
@@ -156,10 +168,14 @@ def decide_branch(critique: dict[str, Any], evaluation: dict[str, Any], patch: d
     diff = critique.get('diff_assessment') or {}
     effect = critique.get('effect_assessment') or {}
     metric, trace = effect.get('metric_progress'), effect.get('trace_progress')
-    if budget_exhausted: return 'stop_failed'
-    if correctness.get('verdict') == 'reject': return 'fork_from_best'
-    if effect.get('goodcase_impact') == 'over_budget': return 'fork_from_best'
-    if _verification_command_failed(evaluation): return 'fork_from_best'
+    if budget_exhausted:
+        return 'stop_failed'
+    if correctness.get('verdict') == 'reject':
+        return 'fork_from_best'
+    if effect.get('goodcase_impact') == 'over_budget':
+        return 'fork_from_best'
+    if _verification_command_failed(evaluation):
+        return 'fork_from_best'
     gates = _quality_gates_pass(critique, patch, service, correctness, worker_report)
     if (evaluation.get('status') == 'passed' and gates
             and (critique.get('effect_assessment') or {}).get('goodcase_impact') != 'over_budget'
@@ -168,8 +184,10 @@ def decide_branch(critique: dict[str, Any], evaluation: dict[str, Any], patch: d
     lessons = (critique.get('memory_update') or {}).get('lessons') or []
     # Full cross-attempt counting is added with BranchManager memory. For record mode,
     # only an explicit repeated_rejection lesson triggers abandon_direction.
-    if any('rejected_twice' in str(item) for item in lessons): return 'abandon_direction'
-    if trace == 'new_failure': return 'fork_from_best'
+    if any('rejected_twice' in str(item) for item in lessons):
+        return 'abandon_direction'
+    if trace == 'new_failure':
+        return 'fork_from_best'
     if metric == 'execution_failed':
         service_failed = (service.get('healthcheck') or {}).get('status') == 'failed'
         return 'fix_current_patch' if diff.get('touched_suspected_location') and service_failed else 'fork_from_best'
@@ -184,24 +202,31 @@ def decide_branch(critique: dict[str, Any], evaluation: dict[str, Any], patch: d
 def _quality_gates_pass(critique: dict[str, Any], patch: dict[str, Any], service: dict[str, Any],
                         correctness: dict[str, Any], worker_report: dict[str, Any]) -> bool:
     diff = critique.get('diff_assessment') if isinstance(critique.get('diff_assessment'), dict) else {}
-    if (service.get('healthcheck') or {}).get('status') != 'passed': return False
-    if (patch.get('scope_check') or {}).get('status') != 'passed': return False
-    if correctness.get('verdict') != 'acceptable': return False
-    if worker_report.get('protocol_status') != 'valid': return False
+    if (service.get('healthcheck') or {}).get('status') != 'passed':
+        return False
+    if (patch.get('scope_check') or {}).get('status') != 'passed':
+        return False
+    if correctness.get('verdict') != 'acceptable':
+        return False
+    if worker_report.get('protocol_status') != 'valid':
+        return False
     return bool(diff.get('matched_instruction')) and bool(diff.get('touched_suspected_location'))
 
 
 def _hypothesis_status(metric: str, trace: str, diff_hit: bool, correctness: dict[str, Any]) -> str:
     if correctness.get('verdict') == 'reject' or not diff_hit or metric == 'regressed' or trace == 'new_failure':
         return 'rejected'
-    if metric in {'strong', 'partial'} and trace in {'fixed_transition', 'partial', 'unknown'}: return 'supported'
-    if diff_hit and metric in {'none', 'partial'} and trace in {'partial', 'unknown'}: return 'needs_more_patch'
+    if metric in {'strong', 'partial'} and trace in {'fixed_transition', 'partial', 'unknown'}:
+        return 'supported'
+    if diff_hit and metric in {'none', 'partial'} and trace in {'partial', 'unknown'}:
+        return 'needs_more_patch'
     return 'weakened'
 
 
 def _goodcase_impact(evaluation: dict[str, Any]) -> str:
     guard = evaluation.get('goodcase_impact') or evaluation.get('goodcase_guard') or {}
-    if not guard or guard.get('skipped'): return 'within_budget'
+    if not guard or guard.get('skipped'):
+        return 'within_budget'
     return 'within_budget' if guard.get('passed') else 'over_budget'
 
 
@@ -227,10 +252,13 @@ def _hunks_touch_start(hunks: list[Any], start: dict[str, Any]) -> bool:
     symbol = str(start.get('symbol_hint') or start.get('symbol') or '')
     line_start, line_end = int(start.get('line_start') or 0), int(start.get('line_end') or 0)
     for hunk in hunks:
-        if not isinstance(hunk, dict) or hunk.get('comment_only') is True: continue
-        if str(hunk.get('path') or '') != path: continue
+        if not isinstance(hunk, dict) or hunk.get('comment_only') is True:
+            continue
+        if str(hunk.get('path') or '') != path:
+            continue
         hunk_symbol = str(hunk.get('symbol') or '')
-        if symbol and hunk_symbol and hunk_symbol == symbol: return True
+        if symbol and hunk_symbol and hunk_symbol == symbol:
+            return True
         hunk_start, hunk_end = int(hunk.get('line_start') or 0), int(hunk.get('line_end') or 0)
         if line_start and line_end and hunk_start and hunk_end and hunk_start <= line_end and hunk_end >= line_start:
             return True
@@ -247,14 +275,17 @@ def _changed_code_lines(diff: str, path: str) -> list[int]:
         if line.startswith('+++ b/'):
             current = line[6:]
             continue
-        if current != path: continue
+        if current != path:
+            continue
         if line.startswith('+') and not line.startswith('+++'):
             text = line[1:].strip()
-            if text and not text.startswith('#'): changed.append(new_line)
+            if text and not text.startswith('#'):
+                changed.append(new_line)
             new_line += 1
         elif line.startswith('-') and not line.startswith('---'):
             text = line[1:].strip()
-            if text and not text.startswith('#'): changed.append(new_line)
+            if text and not text.startswith('#'):
+                changed.append(new_line)
         elif not line.startswith('\\'):
             new_line += 1
     return changed

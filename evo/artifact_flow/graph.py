@@ -209,7 +209,7 @@ def _ops(partitions: StaticPartitions) -> tuple[type[FixedOp], ...]:
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {"service": business.candidate_service(inputs["config"].payload, inputs["patch"].payload)}
+            return {"service": business.candidate_service(inputs["config"].payload, inputs["patch"].payload, ctx)}
 
     class CandidateRagAnswer(FixedOp):
         op_id = "abtest.candidate_rag_answer"
@@ -222,17 +222,20 @@ def _ops(partitions: StaticPartitions) -> tuple[type[FixedOp], ...]:
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {"answer": business.candidate_rag_answer(inputs["case"].payload, inputs["service"].payload)}
+            return {"answer": business.candidate_rag_answer(inputs["case"].payload, inputs["service"].payload, ctx)}
 
     class CandidateJudge(FixedOp):
         op_id = "abtest.candidate_judge"
-        inputs = {"answer": ArtifactInput("abtest.candidate_rag_answer", partition_spec=partitions)}
+        inputs = {
+            "answer": ArtifactInput("abtest.candidate_rag_answer", partition_spec=partitions),
+            "policy": ArtifactInput("eval.policy", partition_mapping=unpartitioned_to_all()),
+        }
         outputs = {"judge": ArtifactOutput("abtest.candidate_judge_result", partition_spec=partitions)}
         flow, stage = "abtest", "candidate_eval"
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {"judge": business.candidate_judge(inputs["answer"].payload)}
+            return {"judge": business.candidate_judge(inputs["answer"].payload, inputs["policy"].payload)}
 
     class CandidateSummary(FixedOp):
         op_id = "abtest.candidate_eval_summary"

@@ -63,33 +63,48 @@ from .store import (
     commit_request_fingerprint,
     source_write_fingerprint,
 )
-from .utils import canonical_json, is_json_scalar, json_mapping_fingerprint, normalize_json_value, sorted_string_items, validate_nonempty
+from .utils import (
+    canonical_json,
+    is_json_scalar,
+    json_mapping_fingerprint,
+    normalize_json_value,
+    sorted_string_items,
+    validate_nonempty,
+)
 
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
 class AttemptFailureEnvelope:
-    error_type: str = ""
-    error_message: str = ""
+    error_type: str = ''
+    error_message: str = ''
 
 
 class ControlPlaneCodec(Protocol):
-    def encode_payload(self, value: Any) -> str: ...
-    def decode_payload(self, payload: str) -> Any: ...
+    def encode_payload(self, value: Any) -> str:
+        ...
+
+    def decode_payload(self, payload: str) -> Any:
+        ...
 
 
 class ArtifactValueCodec(Protocol):
     @property
-    def codec_id(self) -> str: ...
-    def encode(self, value: Any) -> bytes: ...
-    def decode(self, payload: bytes) -> Any: ...
+    def codec_id(self) -> str:
+        ...
+
+    def encode(self, value: Any) -> bytes:
+        ...
+
+    def decode(self, payload: bytes) -> Any:
+        ...
 
 
 class PickleArtifactValueCodec:
     """Trusted local-process codec for artifact values only."""
 
-    codec_id = "pickle:v5"
+    codec_id = 'pickle:v5'
 
     def encode(self, value: Any) -> bytes:
         return pickle.dumps(value, protocol=5)
@@ -126,7 +141,7 @@ class SQLiteEventLog(EventLog):
         payload_json = self.codec.encode_payload(event.payload)
         with self._lock:
             cursor = self._connection.execute(
-                "INSERT INTO controller_events(run_id, event_type, payload_json) VALUES (?, ?, ?)",
+                'INSERT INTO controller_events(run_id, event_type, payload_json) VALUES (?, ?, ?)',
                 (event.run_id, event.event_type, payload_json),
             )
             self._connection.commit()
@@ -134,15 +149,15 @@ class SQLiteEventLog(EventLog):
 
     def scan(self, run_id: str) -> list[ControllerEvent]:
         rows = self._connection.execute(
-            "SELECT seq, event_type, payload_json FROM controller_events WHERE run_id = ? ORDER BY seq",
+            'SELECT seq, event_type, payload_json FROM controller_events WHERE run_id = ? ORDER BY seq',
             (run_id,),
         ).fetchall()
         return [
             ControllerEvent(
-                event_type=str(row["event_type"]),
+                event_type=str(row['event_type']),
                 run_id=run_id,
-                payload=self.codec.decode_payload(str(row["payload_json"])),
-                seq=int(row["seq"]),
+                payload=self.codec.decode_payload(str(row['payload_json'])),
+                seq=int(row['seq']),
             )
             for row in rows
         ]
@@ -161,17 +176,17 @@ class SQLiteEventLog(EventLog):
         ).fetchall()
         return tuple(
             ControllerEvent(
-                event_type=str(row["event_type"]),
-                run_id=str(row["run_id"]),
-                payload=self.codec.decode_payload(str(row["payload_json"])),
-                seq=int(row["seq"]),
+                event_type=str(row['event_type']),
+                run_id=str(row['run_id']),
+                payload=self.codec.decode_payload(str(row['payload_json'])),
+                seq=int(row['seq']),
             )
             for row in rows
         )
 
     def max_seq(self) -> int:
-        row = self._connection.execute("SELECT MAX(seq) AS seq FROM controller_events").fetchone()
-        return 0 if row is None or row["seq"] is None else int(row["seq"])
+        row = self._connection.execute('SELECT MAX(seq) AS seq FROM controller_events').fetchone()
+        return 0 if row is None or row['seq'] is None else int(row['seq'])
 
 
 class SQLiteArtifactStore(ArtifactStore):
@@ -191,12 +206,12 @@ class SQLiteArtifactStore(ArtifactStore):
 
     def latest(self, key: ArtifactKey) -> ArtifactRef | None:
         row = self._connection.execute(
-            "SELECT MAX(version) AS version FROM artifact_records WHERE artifact_id = ? AND partition = ?",
+            'SELECT MAX(version) AS version FROM artifact_records WHERE artifact_id = ? AND partition = ?',
             (key.artifact_id, key.partition),
         ).fetchone()
-        if row is None or row["version"] is None:
+        if row is None or row['version'] is None:
             return None
-        return ArtifactRef(key, int(row["version"]))
+        return ArtifactRef(key, int(row['version']))
 
     def get(self, ref: ArtifactRef) -> ArtifactRecord | None:
         row = self._connection.execute(
@@ -227,15 +242,15 @@ class SQLiteArtifactStore(ArtifactStore):
         with self._lock:
             _begin_immediate(self._connection)
             try:
-                payload = ArtifactPayload.from_value(value, metadata=metadata, role="source")
+                payload = ArtifactPayload.from_value(value, metadata=metadata, role='source')
                 ref = self._next_ref(key)
                 self._insert_record(
                     ArtifactRecord(
                         key,
                         ref,
                         payload,
-                        ("", ""),
-                        "",
+                        ('', ''),
+                        '',
                         MappingProxyType({}),
                         MappingProxyType(dict(metadata or {})),
                     )
@@ -256,35 +271,35 @@ class SQLiteArtifactStore(ArtifactStore):
         create_only: bool = False,
         metadata: Mapping[str, Any] | None = None,
     ) -> ArtifactCommitOutcome:
-        validate_nonempty(command_id, "command_id")
+        validate_nonempty(command_id, 'command_id')
         with self._lock:
             _begin_immediate(self._connection)
             try:
-                payload = ArtifactPayload.from_value(value, metadata=metadata, role="source")
+                payload = ArtifactPayload.from_value(value, metadata=metadata, role='source')
                 fingerprint = source_write_fingerprint(key, payload, expected_ref, create_only)
                 row = self._source_write_row(command_id)
                 if row is not None:
-                    if str(row["request_fingerprint"]) == fingerprint:
-                        outcome = self.control_codec.decode_payload(str(row["outcome_json"]))
+                    if str(row['request_fingerprint']) == fingerprint:
+                        outcome = self.control_codec.decode_payload(str(row['outcome_json']))
                         self._connection.commit()
                         return outcome
                     self._connection.commit()
-                    return ArtifactCommitOutcome("conflict", reason="source command conflict")
+                    return ArtifactCommitOutcome('conflict', reason='source command conflict')
 
                 latest = self.latest(key)
                 if create_only and latest is not None:
                     record = self.get(latest)
                     if record is not None and record.value == payload:
-                        outcome = ArtifactCommitOutcome("committed", {key: latest})
+                        outcome = ArtifactCommitOutcome('committed', {key: latest})
                         self._record_source_write(command_id, fingerprint, outcome)
                         self._connection.commit()
                         return outcome
-                    outcome = ArtifactCommitOutcome("conflict", reason="source already exists")
+                    outcome = ArtifactCommitOutcome('conflict', reason='source already exists')
                     self._record_source_write(command_id, fingerprint, outcome)
                     self._connection.commit()
                     return outcome
                 if expected_ref is not None and latest != expected_ref:
-                    outcome = ArtifactCommitOutcome("stale", reason="expected ref is not latest")
+                    outcome = ArtifactCommitOutcome('stale', reason='expected ref is not latest')
                     self._record_source_write(command_id, fingerprint, outcome)
                     self._connection.commit()
                     return outcome
@@ -295,13 +310,13 @@ class SQLiteArtifactStore(ArtifactStore):
                         key,
                         ref,
                         payload,
-                        ("", command_id),
-                        "",
+                        ('', command_id),
+                        '',
                         MappingProxyType({}),
                         MappingProxyType(dict(metadata or {})),
                     )
                 )
-                outcome = ArtifactCommitOutcome("committed", {key: ref})
+                outcome = ArtifactCommitOutcome('committed', {key: ref})
                 self._record_source_write(command_id, fingerprint, outcome)
                 self._connection.commit()
                 return outcome
@@ -316,12 +331,12 @@ class SQLiteArtifactStore(ArtifactStore):
                 existing = self._commit_row(request.run_id, request.attempt_id)
                 if existing is not None:
                     fingerprint = commit_request_fingerprint(request)
-                    if str(existing["request_fingerprint"]) == fingerprint:
-                        outcome = self.control_codec.decode_payload(str(existing["outcome_json"]))
+                    if str(existing['request_fingerprint']) == fingerprint:
+                        outcome = self.control_codec.decode_payload(str(existing['outcome_json']))
                         self._connection.commit()
                         return outcome
                     self._connection.commit()
-                    return ArtifactCommitOutcome("conflict", reason="producer_id conflict")
+                    return ArtifactCommitOutcome('conflict', reason='producer_id conflict')
 
                 fingerprint = commit_request_fingerprint(request)
                 shape_failure = self._validate_commit_shape(request)
@@ -342,14 +357,14 @@ class SQLiteArtifactStore(ArtifactStore):
                         ArtifactRecord(
                             key,
                             output_refs[key],
-                            ArtifactPayload.from_value(request.output_values[key], role="materialized"),
+                            ArtifactPayload.from_value(request.output_values[key], role='materialized'),
                             (request.run_id, request.attempt_id),
                             request.producer_op_id,
                             request.input_refs,
                             MappingProxyType({}),
                         )
                     )
-                outcome = ArtifactCommitOutcome("committed", output_refs)
+                outcome = ArtifactCommitOutcome('committed', output_refs)
                 self._record_commit(request, fingerprint, outcome)
                 self._connection.commit()
                 return outcome
@@ -358,17 +373,17 @@ class SQLiteArtifactStore(ArtifactStore):
                 raise
 
     def _record_from_row(self, row: sqlite3.Row) -> ArtifactRecord:
-        if str(row["value_codec"]) != self.value_codec.codec_id:
+        if str(row['value_codec']) != self.value_codec.codec_id:
             raise ValueError(f"artifact value codec mismatch: {row['value_codec']}")
-        key = ArtifactKey(str(row["artifact_id"]), str(row["partition"] or ""))
+        key = ArtifactKey(str(row['artifact_id']), str(row['partition'] or ''))
         return ArtifactRecord(
             key,
-            ArtifactRef(key, int(row["version"])),
-            self.value_codec.decode(bytes(row["value_blob"])),
-            (str(row["producer_run_id"]), str(row["producer_attempt_id"])),
-            str(row["producer_op_id"]),
-            self.control_codec.decode_payload(str(row["input_refs_json"])),
-            self.control_codec.decode_payload(str(row["metadata_json"])),
+            ArtifactRef(key, int(row['version'])),
+            self.value_codec.decode(bytes(row['value_blob'])),
+            (str(row['producer_run_id']), str(row['producer_attempt_id'])),
+            str(row['producer_op_id']),
+            self.control_codec.decode_payload(str(row['input_refs_json'])),
+            self.control_codec.decode_payload(str(row['metadata_json'])),
         )
 
     def _insert_record(self, record: ArtifactRecord) -> None:
@@ -396,21 +411,21 @@ class SQLiteArtifactStore(ArtifactStore):
 
     def _next_ref(self, key: ArtifactKey) -> ArtifactRef:
         row = self._connection.execute(
-            "SELECT MAX(version) AS version FROM artifact_records WHERE artifact_id = ? AND partition = ?",
+            'SELECT MAX(version) AS version FROM artifact_records WHERE artifact_id = ? AND partition = ?',
             (key.artifact_id, key.partition),
         ).fetchone()
-        latest = None if row is None else row["version"]
+        latest = None if row is None else row['version']
         return ArtifactRef(key, 1 if latest is None else int(latest) + 1)
 
     def _commit_row(self, run_id: str, attempt_id: str) -> sqlite3.Row | None:
         return self._connection.execute(
-            "SELECT request_fingerprint, outcome_json FROM artifact_commits WHERE run_id = ? AND attempt_id = ?",
+            'SELECT request_fingerprint, outcome_json FROM artifact_commits WHERE run_id = ? AND attempt_id = ?',
             (run_id, attempt_id),
         ).fetchone()
 
     def _source_write_row(self, command_id: str) -> sqlite3.Row | None:
         return self._connection.execute(
-            "SELECT request_fingerprint, outcome_json FROM artifact_source_writes WHERE command_id = ?",
+            'SELECT request_fingerprint, outcome_json FROM artifact_source_writes WHERE command_id = ?',
             (command_id,),
         ).fetchone()
 
@@ -434,19 +449,19 @@ class SQLiteArtifactStore(ArtifactStore):
 
     def _validate_commit_shape(self, request: ArtifactCommitRequest) -> ArtifactCommitOutcome | None:
         if len(set(request.output_keys)) != len(request.output_keys):
-            return ArtifactCommitOutcome("failed", reason="duplicate output keys")
+            return ArtifactCommitOutcome('failed', reason='duplicate output keys')
         if set(request.output_keys) != set(request.output_values):
-            return ArtifactCommitOutcome("failed", reason="output keys do not match declared outputs")
+            return ArtifactCommitOutcome('failed', reason='output keys do not match declared outputs')
         return None
 
     def _validate_commit_freshness(self, request: ArtifactCommitRequest) -> ArtifactCommitOutcome | None:
         for key, ref in request.input_refs.items():
             if key != ref.key:
-                return ArtifactCommitOutcome("failed", reason="input key/ref mismatch")
+                return ArtifactCommitOutcome('failed', reason='input key/ref mismatch')
             if self.get(ref) is None:
-                return ArtifactCommitOutcome("stale", reason=f"input ref not found: {ref}")
+                return ArtifactCommitOutcome('stale', reason=f'input ref not found: {ref}')
             if self.latest(key) != ref:
-                return ArtifactCommitOutcome("stale", reason=f"input ref is not latest: {ref}")
+                return ArtifactCommitOutcome('stale', reason=f'input ref is not latest: {ref}')
         return None
 
 
@@ -460,15 +475,15 @@ class SQLiteMutationLog(MutationLog):
 
     def get(self, command_id: str) -> ArtifactMutationResult | None:
         row = self._connection.execute(
-            "SELECT result_json FROM mutation_results WHERE command_id = ?",
+            'SELECT result_json FROM mutation_results WHERE command_id = ?',
             (command_id,),
         ).fetchone()
-        return None if row is None else self.codec.decode_payload(str(row["result_json"]))
+        return None if row is None else self.codec.decode_payload(str(row['result_json']))
 
     def record(self, command_id: str, result: ArtifactMutationResult) -> None:
         with self._lock:
             self._connection.execute(
-                "INSERT OR IGNORE INTO mutation_results(command_id, result_json) VALUES (?, ?)",
+                'INSERT OR IGNORE INTO mutation_results(command_id, result_json) VALUES (?, ?)',
                 (command_id, self.codec.encode_payload(result)),
             )
             self._connection.commit()
@@ -484,17 +499,17 @@ class SQLiteInterventionLog(InterventionLog):
 
     def get(self, command_id: str) -> InterventionRecord | None:
         row = self._connection.execute(
-            "SELECT kind, result_json FROM intervention_records WHERE command_id = ?",
+            'SELECT kind, result_json FROM intervention_records WHERE command_id = ?',
             (command_id,),
         ).fetchone()
         if row is None:
             return None
-        return InterventionRecord(str(row["kind"]), self.codec.decode_payload(str(row["result_json"])))
+        return InterventionRecord(str(row['kind']), self.codec.decode_payload(str(row['result_json'])))
 
     def record(self, command_id: str, kind: InterventionKind, result: InterventionResult) -> None:
         with self._lock:
             self._connection.execute(
-                "INSERT OR IGNORE INTO intervention_records(command_id, kind, result_json) VALUES (?, ?, ?)",
+                'INSERT OR IGNORE INTO intervention_records(command_id, kind, result_json) VALUES (?, ?, ?)',
                 (command_id, kind, self.codec.encode_payload(result)),
             )
             self._connection.commit()
@@ -528,51 +543,51 @@ class SQLiteExternalCallLedger:
                     record = ExternalCallRecord(
                         key,
                         payload_fingerprint,
-                        "in_progress",
+                        'in_progress',
                         claim_token=_new_claim_token(),
                         claim_expires_at=claim_expires_at,
                         attempt_metadata=dict(attempt_metadata or {}),
                     )
                     self._upsert_record(record)
                     self._connection.commit()
-                    return ExternalCallAcquireResult("started", record.claim_token, record)
+                    return ExternalCallAcquireResult('started', record.claim_token, record)
 
                 record = self._record_from_row(row)
                 if record.payload_fingerprint != payload_fingerprint:
                     self._connection.commit()
-                    return ExternalCallAcquireResult("conflict", record=record)
+                    return ExternalCallAcquireResult('conflict', record=record)
                 if record.status in TERMINAL_REPLAY_STATUSES:
                     self._connection.commit()
-                    return ExternalCallAcquireResult("replay", record=record)
-                if record.status == "in_progress" and record.claim_expires_at > now:
+                    return ExternalCallAcquireResult('replay', record=record)
+                if record.status == 'in_progress' and record.claim_expires_at > now:
                     self._connection.commit()
-                    return ExternalCallAcquireResult("in_progress", record=record)
-                if record.status in RETRYABLE_STATUSES or record.status == "in_progress":
+                    return ExternalCallAcquireResult('in_progress', record=record)
+                if record.status in RETRYABLE_STATUSES or record.status == 'in_progress':
                     reclaimed = ExternalCallRecord(
                         key,
                         payload_fingerprint,
-                        "in_progress",
+                        'in_progress',
                         claim_token=_new_claim_token(),
                         claim_expires_at=claim_expires_at,
                         attempt_metadata=dict(attempt_metadata or {}),
                     )
                     self._upsert_record(reclaimed)
                     self._connection.commit()
-                    return ExternalCallAcquireResult("started", reclaimed.claim_token, reclaimed)
+                    return ExternalCallAcquireResult('started', reclaimed.claim_token, reclaimed)
                 self._connection.commit()
-                return ExternalCallAcquireResult("replay", record=record)
+                return ExternalCallAcquireResult('replay', record=record)
             except Exception:
                 self._connection.rollback()
                 raise
 
     def complete(self, key: str, claim_token: str, result: ExternalCallResult) -> ExternalCallWriteResult:
-        if result.status != "completed":
-            raise ValueError("complete requires a completed result")
+        if result.status != 'completed':
+            raise ValueError('complete requires a completed result')
         return self._terminal_write(key, claim_token, result)
 
     def fail(self, key: str, claim_token: str, result: ExternalCallResult) -> ExternalCallWriteResult:
-        if result.status in {"completed", "conflict"}:
-            raise ValueError("fail requires a non-completed, non-conflict result")
+        if result.status in {'completed', 'conflict'}:
+            raise ValueError('fail requires a non-completed, non-conflict result')
         return self._terminal_write(key, claim_token, result)
 
     def reclaim_expired(self, now: float) -> tuple[ExternalCallRecord, ...]:
@@ -593,9 +608,9 @@ class SQLiteExternalCallLedger:
             try:
                 row = self._row_for_key(key)
                 current = None if row is None else self._record_from_row(row)
-                if current is None or current.status != "in_progress" or current.claim_token != claim_token:
+                if current is None or current.status != 'in_progress' or current.claim_token != claim_token:
                     self._connection.commit()
-                    return ExternalCallWriteResult("stale", current)
+                    return ExternalCallWriteResult('stale', current)
                 record = ExternalCallRecord(
                     current.key,
                     current.payload_fingerprint,
@@ -605,13 +620,13 @@ class SQLiteExternalCallLedger:
                 )
                 self._upsert_record(record)
                 self._connection.commit()
-                return ExternalCallWriteResult("recorded", record)
+                return ExternalCallWriteResult('recorded', record)
             except Exception:
                 self._connection.rollback()
                 raise
 
     def _row_for_key(self, key: str) -> sqlite3.Row | None:
-        return self._connection.execute("SELECT * FROM external_call_records WHERE key = ?", (key,)).fetchone()
+        return self._connection.execute('SELECT * FROM external_call_records WHERE key = ?', (key,)).fetchone()
 
     def _upsert_record(self, record: ExternalCallRecord) -> None:
         result = record.result
@@ -640,8 +655,8 @@ class SQLiteExternalCallLedger:
                 record.claim_token,
                 float(record.claim_expires_at),
                 None if result is None else self.codec.encode_payload(result.value),
-                "" if result is None else result.error_type,
-                "" if result is None else result.error_message,
+                '' if result is None else result.error_type,
+                '' if result is None else result.error_message,
                 None if result is None else self.codec.encode_payload(dict(result.metadata)),
                 self.codec.encode_payload(dict(record.attempt_metadata)),
             ),
@@ -649,24 +664,24 @@ class SQLiteExternalCallLedger:
 
     def _record_from_row(self, row: sqlite3.Row) -> ExternalCallRecord:
         result = None
-        if str(row["status"]) != "in_progress":
-            value_json = row["result_value_json"]
-            metadata_json = row["result_metadata_json"]
+        if str(row['status']) != 'in_progress':
+            value_json = row['result_value_json']
+            metadata_json = row['result_metadata_json']
             result = ExternalCallResult(
-                str(row["status"]),
+                str(row['status']),
                 None if value_json is None else self.codec.decode_payload(str(value_json)),
-                str(row["error_type"] or ""),
-                str(row["error_message"] or ""),
+                str(row['error_type'] or ''),
+                str(row['error_message'] or ''),
                 {} if metadata_json is None else self.codec.decode_payload(str(metadata_json)),
             )
         return ExternalCallRecord(
-            str(row["key"]),
-            str(row["payload_fingerprint"]),
-            str(row["status"]),
-            str(row["claim_token"] or ""),
-            float(row["claim_expires_at"] or 0.0),
+            str(row['key']),
+            str(row['payload_fingerprint']),
+            str(row['status']),
+            str(row['claim_token'] or ''),
+            float(row['claim_expires_at'] or 0.0),
             result,
-            self.codec.decode_payload(str(row["attempt_metadata_json"])),
+            self.codec.decode_payload(str(row['attempt_metadata_json'])),
         )
 
 
@@ -677,14 +692,14 @@ class SQLiteRuntimeDriverCheckpointStore:
         self._lock = RLock()
         _init_schema(self._connection)
 
-    def load(self, checkpoint_id: str = "default") -> RuntimeDriverCheckpoint:
+    def load(self, checkpoint_id: str = 'default') -> RuntimeDriverCheckpoint:
         _validate_checkpoint_id(checkpoint_id)
         with self._lock:
             self._ensure_checkpoint_row(checkpoint_id)
             self._connection.commit()
             row = self._row_for_checkpoint(checkpoint_id)
             if row is None:
-                raise RuntimeError("runtime driver checkpoint bootstrap failed")
+                raise RuntimeError('runtime driver checkpoint bootstrap failed')
             return self._checkpoint_from_row(row)
 
     def save(
@@ -725,21 +740,21 @@ class SQLiteRuntimeDriverCheckpointStore:
                 if cursor.rowcount == 1:
                     row = self._row_for_checkpoint(checkpoint.checkpoint_id)
                     if row is None:
-                        raise RuntimeError("saved runtime driver checkpoint is missing")
+                        raise RuntimeError('saved runtime driver checkpoint is missing')
                     saved = self._checkpoint_from_row(row)
                     self._connection.commit()
-                    return RuntimeDriverCheckpointSaveResult("saved", saved)
+                    return RuntimeDriverCheckpointSaveResult('saved', saved)
 
                 row = self._row_for_checkpoint(checkpoint.checkpoint_id)
                 if row is None:
-                    raise RuntimeError("runtime driver checkpoint bootstrap failed")
+                    raise RuntimeError('runtime driver checkpoint bootstrap failed')
                 current = self._checkpoint_from_row(row)
                 if current.revision != expected_revision:
                     self._connection.commit()
-                    return RuntimeDriverCheckpointSaveResult("stale")
+                    return RuntimeDriverCheckpointSaveResult('stale')
                 if current.cursor > checkpoint.cursor:
-                    raise ValueError("cursor cannot move backwards")
-                raise RuntimeError("runtime driver checkpoint CAS failed unexpectedly")
+                    raise ValueError('cursor cannot move backwards')
+                raise RuntimeError('runtime driver checkpoint CAS failed unexpectedly')
             except Exception:
                 self._connection.rollback()
                 raise
@@ -758,20 +773,20 @@ class SQLiteRuntimeDriverCheckpointStore:
 
     def _row_for_checkpoint(self, checkpoint_id: str) -> sqlite3.Row | None:
         return self._connection.execute(
-            "SELECT * FROM runtime_driver_checkpoints WHERE checkpoint_id = ?",
+            'SELECT * FROM runtime_driver_checkpoints WHERE checkpoint_id = ?',
             (checkpoint_id,),
         ).fetchone()
 
     @staticmethod
     def _checkpoint_from_row(row: sqlite3.Row) -> RuntimeDriverCheckpoint:
         return RuntimeDriverCheckpoint(
-            str(row["checkpoint_id"]),
-            int(row["revision"]),
-            int(row["cursor"]),
-            str(row["last_tick_id"]),
-            float(row["last_tick_started_at"]),
-            float(row["last_tick_finished_at"]),
-            int(row["consecutive_idle_ticks"]),
+            str(row['checkpoint_id']),
+            int(row['revision']),
+            int(row['cursor']),
+            str(row['last_tick_id']),
+            float(row['last_tick_started_at']),
+            float(row['last_tick_finished_at']),
+            int(row['consecutive_idle_ticks']),
         )
 
 
@@ -812,11 +827,11 @@ class SQLiteIntentCommandLog(IntentCommandLog):
                 inserted = cursor.rowcount == 1
                 row = self._row_for_command(command_id)
                 if row is None:
-                    raise RuntimeError("intent command reserve failed")
+                    raise RuntimeError('intent command reserve failed')
                 record = self._record_from_row(row)
                 if record.request_fingerprint != request_fingerprint or record.kind != kind:
                     self._connection.commit()
-                    return IntentCommandAcquireResult("conflict", record)
+                    return IntentCommandAcquireResult('conflict', record)
                 if record.result is None:
                     if not inserted and record.claim_expires_at <= now:
                         claim_token = _new_claim_token()
@@ -847,23 +862,23 @@ class SQLiteIntentCommandLog(IntentCommandLog):
                         if updated.rowcount == 1:
                             row = self._row_for_command(command_id)
                             if row is None:
-                                raise RuntimeError("intent command reclaim failed")
+                                raise RuntimeError('intent command reclaim failed')
                             record = self._record_from_row(row)
                             self._connection.commit()
-                            return IntentCommandAcquireResult("reserved", record)
+                            return IntentCommandAcquireResult('reserved', record)
                         row = self._row_for_command(command_id)
                         if row is None:
-                            raise RuntimeError("intent command reserve row disappeared")
+                            raise RuntimeError('intent command reserve row disappeared')
                         record = self._record_from_row(row)
                         if record.result is not None:
                             self._connection.commit()
-                            return IntentCommandAcquireResult("replay", record)
+                            return IntentCommandAcquireResult('replay', record)
                         self._connection.commit()
-                        return IntentCommandAcquireResult("in_progress", record)
+                        return IntentCommandAcquireResult('in_progress', record)
                     self._connection.commit()
-                    return IntentCommandAcquireResult("reserved" if inserted else "in_progress", record)
+                    return IntentCommandAcquireResult('reserved' if inserted else 'in_progress', record)
                 self._connection.commit()
-                return IntentCommandAcquireResult("replay", record)
+                return IntentCommandAcquireResult('replay', record)
             except Exception:
                 self._connection.rollback()
                 raise
@@ -879,7 +894,7 @@ class SQLiteIntentCommandLog(IntentCommandLog):
     ) -> IntentCommandWriteResult:
         _validate_intent_record_key(command_id, request_fingerprint)
         if not claim_token or not claim_token.strip():
-            raise ValueError("claim_token must be non-empty")
+            raise ValueError('claim_token must be non-empty')
         result_json = self.codec.encode_payload(replace(result, replayed=False))
         with self._lock:
             _begin_immediate(self._connection)
@@ -899,34 +914,34 @@ class SQLiteIntentCommandLog(IntentCommandLog):
                 row = self._row_for_command(command_id)
                 if row is None:
                     self._connection.commit()
-                    return IntentCommandWriteResult("stale")
+                    return IntentCommandWriteResult('stale')
                 record = self._record_from_row(row)
                 if cursor.rowcount == 1:
                     self._connection.commit()
-                    return IntentCommandWriteResult("recorded", record)
+                    return IntentCommandWriteResult('recorded', record)
                 self._connection.commit()
-                return IntentCommandWriteResult("stale", record)
+                return IntentCommandWriteResult('stale', record)
             except Exception:
                 self._connection.rollback()
                 raise
 
     def _row_for_command(self, command_id: str) -> sqlite3.Row | None:
         return self._connection.execute(
-            "SELECT * FROM intent_command_records WHERE command_id = ?",
+            'SELECT * FROM intent_command_records WHERE command_id = ?',
             (command_id,),
         ).fetchone()
 
     def _record_from_row(self, row: sqlite3.Row) -> IntentCommandRecord:
-        result_json = row["result_json"]
+        result_json = row['result_json']
         return IntentCommandRecord(
-            str(row["command_id"]),
-            str(row["request_fingerprint"]),
-            str(row["kind"]),
+            str(row['command_id']),
+            str(row['request_fingerprint']),
+            str(row['kind']),
             None if result_json is None else self.codec.decode_payload(str(result_json)),
-            str(row["claim_token"] or ""),
-            float(row["claim_expires_at"] or 0.0),
-            str(row["owner_id"] or ""),
-            float(row["reserved_at"] or 0.0),
+            str(row['claim_token'] or ''),
+            float(row['claim_expires_at'] or 0.0),
+            str(row['owner_id'] or ''),
+            float(row['reserved_at'] or 0.0),
         )
 
 
@@ -976,40 +991,40 @@ def request_fingerprint(request_payload: Mapping[str, Any]) -> str:
 
 
 def artifact_value_hash(value: Any, codec: ArtifactValueCodec) -> str:
-    return hashlib.sha256(codec.codec_id.encode() + b"\0" + codec.encode(value)).hexdigest()
+    return hashlib.sha256(codec.codec_id.encode() + b'\0' + codec.encode(value)).hexdigest()
 
 
 def _validate_runtime_checkpoint_save(checkpoint: RuntimeDriverCheckpoint, expected_revision: int) -> None:
     _validate_checkpoint_id(checkpoint.checkpoint_id)
     if expected_revision < 0:
-        raise ValueError("expected_revision must be >= 0")
+        raise ValueError('expected_revision must be >= 0')
     if checkpoint.revision < 0:
-        raise ValueError("checkpoint.revision must be >= 0")
+        raise ValueError('checkpoint.revision must be >= 0')
     if checkpoint.cursor < 0:
-        raise ValueError("checkpoint.cursor must be >= 0")
+        raise ValueError('checkpoint.cursor must be >= 0')
 
 
 def _validate_checkpoint_id(checkpoint_id: str) -> None:
     if not checkpoint_id or not checkpoint_id.strip():
-        raise ValueError("checkpoint_id must be non-empty")
+        raise ValueError('checkpoint_id must be non-empty')
 
 
 def _validate_intent_record_key(command_id: str, request_fingerprint: str) -> None:
     if not command_id or not command_id.strip():
-        raise ValueError("command_id must be non-empty")
+        raise ValueError('command_id must be non-empty')
     if not request_fingerprint or not request_fingerprint.strip():
-        raise ValueError("request_fingerprint must be non-empty")
+        raise ValueError('request_fingerprint must be non-empty')
 
 
 def _validate_intent_claim_inputs(now: float, claim_expires_at: float, owner_id: str) -> None:
     if not math.isfinite(now):
-        raise ValueError("now must be finite")
+        raise ValueError('now must be finite')
     if not math.isfinite(claim_expires_at):
-        raise ValueError("claim_expires_at must be finite")
+        raise ValueError('claim_expires_at must be finite')
     if claim_expires_at <= now:
-        raise ValueError("claim_expires_at must be greater than now")
+        raise ValueError('claim_expires_at must be greater than now')
     if not owner_id or not owner_id.strip():
-        raise ValueError("owner_id must be non-empty")
+        raise ValueError('owner_id must be non-empty')
 
 
 def _encode_control(value: Any) -> Any:
@@ -1017,7 +1032,7 @@ def _encode_control(value: Any) -> Any:
         return encode_basic_control_value(value)
     if isinstance(value, PlanInput):
         return _envelope(
-            "PlanInput",
+            'PlanInput',
             name=value.name,
             key=_encode_control(value.key),
             version=_encode_control(value.version) if value.version is not None else None,
@@ -1028,7 +1043,7 @@ def _encode_control(value: Any) -> Any:
         )
     if isinstance(value, PlanOp):
         return _envelope(
-            "PlanOp",
+            'PlanOp',
             op_id=value.op_id,
             input_bindings=[_encode_control(item) for item in value.input_bindings],
             output_key_by_name=_encode_string_artifact_key_map(value.output_key_by_name),
@@ -1040,14 +1055,14 @@ def _encode_control(value: Any) -> Any:
         )
     if isinstance(value, ExecutionPlan):
         return _envelope(
-            "ExecutionPlan",
+            'ExecutionPlan',
             plan_id=value.plan_id,
             graph_revision=value.graph_revision,
             layers=_encode_execution_plan_layers(value.layers),
         )
     if isinstance(value, PlanInstance):
         return _envelope(
-            "PlanInstance",
+            'PlanInstance',
             run_id=value.run_id,
             plan_id=value.plan_id,
             plan_version=value.plan_version,
@@ -1059,7 +1074,7 @@ def _encode_control(value: Any) -> Any:
         )
     if isinstance(value, Attempt):
         return _envelope(
-            "Attempt",
+            'Attempt',
             attempt_id=value.attempt_id,
             run_id=value.run_id,
             plan_version=value.plan_version,
@@ -1080,7 +1095,7 @@ def _encode_control(value: Any) -> Any:
         )
     if isinstance(value, AttemptClaim):
         return _envelope(
-            "AttemptClaim",
+            'AttemptClaim',
             claim_id=value.claim_id,
             attempt_id=value.attempt_id,
             run_id=value.run_id,
@@ -1097,24 +1112,24 @@ def _encode_control(value: Any) -> Any:
         )
     if isinstance(value, AttemptResult):
         return _envelope(
-            "AttemptResult",
+            'AttemptResult',
             attempt_id=value.attempt_id,
             status=value.status,
             commit_status=value.commit_status,
             reason=value.reason,
         )
     if isinstance(value, AttemptFailureEnvelope):
-        return _envelope("AttemptFailureEnvelope", error_type=value.error_type, error_message=value.error_message)
+        return _envelope('AttemptFailureEnvelope', error_type=value.error_type, error_message=value.error_message)
     if isinstance(value, CommitResult):
         return _envelope(
-            "CommitResult",
+            'CommitResult',
             status=value.status,
             output_refs=_encode_artifact_ref_map(value.output_refs),
             reason=value.reason,
         )
     if isinstance(value, RunState):
         return _envelope(
-            "RunState",
+            'RunState',
             run_id=value.run_id,
             status=value.status,
             active_plan_version=value.active_plan_version,
@@ -1122,14 +1137,14 @@ def _encode_control(value: Any) -> Any:
         )
     if isinstance(value, ArtifactCommitOutcome):
         return _envelope(
-            "ArtifactCommitOutcome",
+            'ArtifactCommitOutcome',
             status=value.status,
             output_refs=_encode_artifact_ref_map(value.output_refs),
             reason=value.reason,
         )
     if isinstance(value, ArtifactMutationResult):
         return _envelope(
-            "ArtifactMutationResult",
+            'ArtifactMutationResult',
             status=value.status,
             artifact=_encode_control(value.artifact),
             ref=_encode_control(value.ref) if value.ref is not None else None,
@@ -1137,7 +1152,7 @@ def _encode_control(value: Any) -> Any:
         )
     if isinstance(value, ReconcileResult):
         return _envelope(
-            "ReconcileResult",
+            'ReconcileResult',
             status=value.status,
             changed_artifacts=_encode_artifact_key_list(value.changed_artifacts),
             materialize_artifacts=_encode_artifact_key_list(value.materialize_artifacts),
@@ -1147,7 +1162,7 @@ def _encode_control(value: Any) -> Any:
         )
     if isinstance(value, InterventionResult):
         return _envelope(
-            "InterventionResult",
+            'InterventionResult',
             status=value.status,
             mutation_result=_encode_control(value.mutation_result) if value.mutation_result is not None else None,
             reconcile_result=_encode_control(value.reconcile_result) if value.reconcile_result is not None else None,
@@ -1156,7 +1171,7 @@ def _encode_control(value: Any) -> Any:
         )
     if isinstance(value, IntentControllerResult):
         return _envelope(
-            "IntentControllerResult",
+            'IntentControllerResult',
             action=value.action,
             run_id=value.run_id,
             status=value.status,
@@ -1165,7 +1180,7 @@ def _encode_control(value: Any) -> Any:
         )
     if isinstance(value, IntentAdvanceResult):
         return _envelope(
-            "IntentAdvanceResult",
+            'IntentAdvanceResult',
             status=value.status,
             ticks=value.ticks,
             cursor=value.cursor,
@@ -1175,7 +1190,7 @@ def _encode_control(value: Any) -> Any:
         )
     if isinstance(value, IntentPlanResult):
         return _envelope(
-            "IntentPlanResult",
+            'IntentPlanResult',
             run_id=value.run_id,
             plan_id=value.plan_id,
             plan_version=value.plan_version,
@@ -1185,11 +1200,12 @@ def _encode_control(value: Any) -> Any:
         )
     if isinstance(value, IntentCommandResult):
         return _envelope(
-            "IntentCommandResult",
+            'IntentCommandResult',
             status=value.status,
             kind=value.kind,
             replayed=value.replayed,
-            intervention_result=_encode_control(value.intervention_result) if value.intervention_result is not None else None,
+            intervention_result=_encode_control(
+                value.intervention_result) if value.intervention_result is not None else None,
             controller_result=_encode_control(value.controller_result) if value.controller_result is not None else None,
             advance_result=_encode_control(value.advance_result) if value.advance_result is not None else None,
             reason=value.reason,
@@ -1201,7 +1217,7 @@ def _encode_control(value: Any) -> Any:
         return _encode_event_payload(value)
     if _is_json_scalar(value):
         return value
-    raise TypeError(f"unsupported control-plane value: {type(value).__name__}")
+    raise TypeError(f'unsupported control-plane value: {type(value).__name__}')
 
 
 def _decode_control(value: Any) -> Any:
@@ -1210,189 +1226,195 @@ def _decode_control(value: Any) -> Any:
     if isinstance(value, list):
         return [_decode_control(item) for item in value]
     if not isinstance(value, dict):
-        raise TypeError(f"unsupported encoded value: {type(value).__name__}")
-    if "schema_version" not in value or "type" not in value:
+        raise TypeError(f'unsupported encoded value: {type(value).__name__}')
+    if 'schema_version' not in value or 'type' not in value:
         return _decode_plain_json_object(value)
-    if value["schema_version"] != _SCHEMA_VERSION:
+    if value['schema_version'] != _SCHEMA_VERSION:
         raise ValueError(f"unsupported schema_version: {value['schema_version']}")
 
-    item_type = value["type"]
+    item_type = value['type']
     if is_basic_control_envelope(value):
         return decode_basic_control_value(value)
-    if item_type == "ArtifactKey":
-        return ArtifactKey(str(value["artifact_id"]), str(value.get("partition") or ""))
-    if item_type == "ArtifactRef":
-        return ArtifactRef(_decode_control(value["key"]), int(value["version"]))
-    if item_type == "ArtifactPayload":
+    if item_type == 'ArtifactKey':
+        return ArtifactKey(str(value['artifact_id']), str(value.get('partition') or ''))
+    if item_type == 'ArtifactRef':
+        return ArtifactRef(_decode_control(value['key']), int(value['version']))
+    if item_type == 'ArtifactPayload':
         return ArtifactPayload(
-            str(value["schema"]),
-            _decode_json_compatible(value["payload"]),
-            _decode_string_any_map(value["metadata"]),
-            tuple(_decode_json_compatible(item) for item in value.get("fragments") or ()),
-            str(value.get("role") or ""),
+            str(value['schema']),
+            _decode_json_compatible(value['payload']),
+            _decode_string_any_map(value['metadata']),
+            tuple(_decode_json_compatible(item) for item in value.get('fragments') or ()),
+            str(value.get('role') or ''),
         )
-    if item_type == "PlanInput":
-        version = _decode_control(value["version"]) if value.get("version") is not None else None
+    if item_type == 'PlanInput':
+        version = _decode_control(value['version']) if value.get('version') is not None else None
         return PlanInput(
-            str(value["name"]),
-            _decode_control(value["key"]),
+            str(value['name']),
+            _decode_control(value['key']),
             version,
-            bool(value["planned"]),
-            bool(value["required"]),
-            input_kind=str(value.get("input_kind") or "single"),
-            collection_name=str(value.get("collection_name") or ""),
+            bool(value['planned']),
+            bool(value['required']),
+            input_kind=str(value.get('input_kind') or 'single'),
+            collection_name=str(value.get('collection_name') or ''),
         )
-    if item_type == "PlanOp":
+    if item_type == 'PlanOp':
         return PlanOp(
-            str(value["op_id"]),
-            tuple(_decode_control(item) for item in value["input_bindings"]),
-            _decode_string_artifact_key_map(value["output_key_by_name"]),
-            _decode_string_list(value["depends_on"]),
-            int(value["graph_revision"]),
-            str(value.get("flow") or ""),
-            str(value.get("stage") or ""),
-            MappingProxyType(_decode_string_any_map(value["tags"])),
+            str(value['op_id']),
+            tuple(_decode_control(item) for item in value['input_bindings']),
+            _decode_string_artifact_key_map(value['output_key_by_name']),
+            _decode_string_list(value['depends_on']),
+            int(value['graph_revision']),
+            str(value.get('flow') or ''),
+            str(value.get('stage') or ''),
+            MappingProxyType(_decode_string_any_map(value['tags'])),
         )
-    if item_type == "ExecutionPlan":
+    if item_type == 'ExecutionPlan':
         return ExecutionPlan(
-            str(value["plan_id"]),
-            int(value["graph_revision"]),
-            _decode_execution_plan_layers(value["layers"]),
+            str(value['plan_id']),
+            int(value['graph_revision']),
+            _decode_execution_plan_layers(value['layers']),
         )
-    if item_type == "PlanInstance":
+    if item_type == 'PlanInstance':
         return PlanInstance(
-            str(value["run_id"]),
-            str(value["plan_id"]),
-            int(value["plan_version"]),
-            int(value["epoch"]),
-            int(value["graph_revision"]),
-            _decode_artifact_key_list(value["target_artifacts"]),
-            str(value.get("reason") or ""),
-            _decode_control(value["plan"]),
+            str(value['run_id']),
+            str(value['plan_id']),
+            int(value['plan_version']),
+            int(value['epoch']),
+            int(value['graph_revision']),
+            _decode_artifact_key_list(value['target_artifacts']),
+            str(value.get('reason') or ''),
+            _decode_control(value['plan']),
         )
-    if item_type == "Attempt":
+    if item_type == 'Attempt':
         return Attempt(
-            str(value["attempt_id"]),
-            str(value["run_id"]),
-            int(value["plan_version"]),
-            int(value["epoch"]),
-            str(value["op_id"]),
-            dict(_decode_artifact_ref_map(value["resolved_input_refs"])),
-            _decode_artifact_key_list(value["output_artifact_keys"]),
-            _decode_string_list(value["depends_on"]),
-            str(value["status"]),
-            int(value["attempt_number"]),
-            str(value.get("claim_id") or ""),
-            dict(_decode_artifact_ref_map(value["output_refs"])),
-            str(value.get("reason") or ""),
-            str(value.get("worker_id") or ""),
-            float(value.get("lease_expires_at") or 0),
-            int(value.get("claim_generation") or 0),
-            int(value.get("lease_recovery_count") or 0),
+            str(value['attempt_id']),
+            str(value['run_id']),
+            int(value['plan_version']),
+            int(value['epoch']),
+            str(value['op_id']),
+            dict(_decode_artifact_ref_map(value['resolved_input_refs'])),
+            _decode_artifact_key_list(value['output_artifact_keys']),
+            _decode_string_list(value['depends_on']),
+            str(value['status']),
+            int(value['attempt_number']),
+            str(value.get('claim_id') or ''),
+            dict(_decode_artifact_ref_map(value['output_refs'])),
+            str(value.get('reason') or ''),
+            str(value.get('worker_id') or ''),
+            float(value.get('lease_expires_at') or 0),
+            int(value.get('claim_generation') or 0),
+            int(value.get('lease_recovery_count') or 0),
         )
-    if item_type == "AttemptClaim":
+    if item_type == 'AttemptClaim':
         return AttemptClaim(
-            str(value["claim_id"]),
-            str(value["attempt_id"]),
-            str(value["run_id"]),
-            int(value["plan_version"]),
-            int(value["epoch"]),
-            str(value["op_id"]),
-            _decode_control(value["plan_op"]),
-            dict(_decode_artifact_ref_map(value["resolved_input_refs"])),
-            _decode_artifact_key_list(value["output_artifact_keys"]),
-            bool(value.get("cancel_requested", False)),
-            str(value.get("worker_id") or ""),
-            float(value.get("lease_expires_at") or 0),
-            int(value.get("claim_generation") or 0),
+            str(value['claim_id']),
+            str(value['attempt_id']),
+            str(value['run_id']),
+            int(value['plan_version']),
+            int(value['epoch']),
+            str(value['op_id']),
+            _decode_control(value['plan_op']),
+            dict(_decode_artifact_ref_map(value['resolved_input_refs'])),
+            _decode_artifact_key_list(value['output_artifact_keys']),
+            bool(value.get('cancel_requested', False)),
+            str(value.get('worker_id') or ''),
+            float(value.get('lease_expires_at') or 0),
+            int(value.get('claim_generation') or 0),
         )
-    if item_type == "AttemptResult":
-        return AttemptResult(str(value["attempt_id"]), str(value["status"]), value.get("commit_status"), str(value.get("reason") or ""))
-    if item_type == "AttemptFailureEnvelope":
-        return AttemptFailureEnvelope(str(value.get("error_type") or ""), str(value.get("error_message") or ""))
-    if item_type == "CommitResult":
-        return CommitResult(str(value["status"]), dict(_decode_artifact_ref_map(value["output_refs"])), str(value.get("reason") or ""))
-    if item_type == "RunState":
-        return RunState(str(value["run_id"]), str(value["status"]), value.get("active_plan_version"), int(value.get("epoch") or 0))
-    if item_type == "ArtifactCommitOutcome":
-        return ArtifactCommitOutcome(str(value["status"]), _decode_artifact_ref_map(value["output_refs"]), str(value.get("reason") or ""))
-    if item_type == "ArtifactMutationResult":
-        ref = _decode_control(value["ref"]) if value.get("ref") is not None else None
-        return ArtifactMutationResult(str(value["status"]), _decode_control(value["artifact"]), ref, str(value.get("reason") or ""))
-    if item_type == "ReconcileResult":
-        plan_instance = _decode_control(value["plan_instance"]) if value.get("plan_instance") is not None else None
+    if item_type == 'AttemptResult':
+        return AttemptResult(str(value['attempt_id']), str(value['status']),
+                             value.get('commit_status'), str(value.get('reason') or ''))
+    if item_type == 'AttemptFailureEnvelope':
+        return AttemptFailureEnvelope(str(value.get('error_type') or ''), str(value.get('error_message') or ''))
+    if item_type == 'CommitResult':
+        return CommitResult(str(value['status']),
+                            dict(_decode_artifact_ref_map(value['output_refs'])),
+                            str(value.get('reason') or ''))
+    if item_type == 'RunState':
+        return RunState(str(value['run_id']), str(value['status']), value.get(
+            'active_plan_version'), int(value.get('epoch') or 0))
+    if item_type == 'ArtifactCommitOutcome':
+        return ArtifactCommitOutcome(str(value['status']), _decode_artifact_ref_map(
+            value['output_refs']), str(value.get('reason') or ''))
+    if item_type == 'ArtifactMutationResult':
+        ref = _decode_control(value['ref']) if value.get('ref') is not None else None
+        return ArtifactMutationResult(str(value['status']), _decode_control(
+            value['artifact']), ref, str(value.get('reason') or ''))
+    if item_type == 'ReconcileResult':
+        plan_instance = _decode_control(value['plan_instance']) if value.get('plan_instance') is not None else None
         return ReconcileResult(
-            str(value["status"]),
-            _decode_artifact_key_list(value["changed_artifacts"]),
-            _decode_artifact_key_list(value["materialize_artifacts"]),
-            _decode_artifact_key_list(value["target_artifacts"]),
+            str(value['status']),
+            _decode_artifact_key_list(value['changed_artifacts']),
+            _decode_artifact_key_list(value['materialize_artifacts']),
+            _decode_artifact_key_list(value['target_artifacts']),
             plan_instance,
-            str(value.get("reason") or ""),
+            str(value.get('reason') or ''),
         )
-    if item_type == "InterventionResult":
+    if item_type == 'InterventionResult':
         return InterventionResult(
-            str(value["status"]),
-            _decode_control(value["mutation_result"]) if value.get("mutation_result") is not None else None,
-            _decode_control(value["reconcile_result"]) if value.get("reconcile_result") is not None else None,
-            _decode_control(value["run"]) if value.get("run") is not None else None,
-            str(value.get("reason") or ""),
+            str(value['status']),
+            _decode_control(value['mutation_result']) if value.get('mutation_result') is not None else None,
+            _decode_control(value['reconcile_result']) if value.get('reconcile_result') is not None else None,
+            _decode_control(value['run']) if value.get('run') is not None else None,
+            str(value.get('reason') or ''),
         )
-    if item_type == "IntentControllerResult":
+    if item_type == 'IntentControllerResult':
         return IntentControllerResult(
-            str(value["action"]),
-            str(value["run_id"]),
-            str(value["status"]),
-            _decode_string_list(value["retry_attempt_ids"]),
-            str(value.get("reason") or ""),
+            str(value['action']),
+            str(value['run_id']),
+            str(value['status']),
+            _decode_string_list(value['retry_attempt_ids']),
+            str(value.get('reason') or ''),
         )
-    if item_type == "IntentAdvanceResult":
+    if item_type == 'IntentAdvanceResult':
         return IntentAdvanceResult(
-            str(value["status"]),
-            int(value["ticks"]),
-            int(value["cursor"]),
-            bool(value.get("partial_sync", False)),
-            _decode_string_list(value["recovered_run_ids"]),
-            _decode_string_list(value["dispatched_run_ids"]),
+            str(value['status']),
+            int(value['ticks']),
+            int(value['cursor']),
+            bool(value.get('partial_sync', False)),
+            _decode_string_list(value['recovered_run_ids']),
+            _decode_string_list(value['dispatched_run_ids']),
         )
-    if item_type == "IntentPlanResult":
+    if item_type == 'IntentPlanResult':
         return IntentPlanResult(
-            str(value["run_id"]),
-            str(value["plan_id"]),
-            int(value["plan_version"]),
-            _decode_artifact_key_list(value["target_artifacts"]),
-            int(value["target_artifact_count"]),
-            str(value.get("reason") or ""),
+            str(value['run_id']),
+            str(value['plan_id']),
+            int(value['plan_version']),
+            _decode_artifact_key_list(value['target_artifacts']),
+            int(value['target_artifact_count']),
+            str(value.get('reason') or ''),
         )
-    if item_type == "IntentCommandResult":
+    if item_type == 'IntentCommandResult':
         return IntentCommandResult(
-            str(value["status"]),
-            str(value["kind"]),
-            bool(value.get("replayed", False)),
-            _decode_control(value["intervention_result"]) if value.get("intervention_result") is not None else None,
-            _decode_control(value["controller_result"]) if value.get("controller_result") is not None else None,
-            _decode_control(value["advance_result"]) if value.get("advance_result") is not None else None,
-            str(value.get("reason") or ""),
-            _decode_control(value["plan_result"]) if value["plan_result"] is not None else None,
+            str(value['status']),
+            str(value['kind']),
+            bool(value.get('replayed', False)),
+            _decode_control(value['intervention_result']) if value.get('intervention_result') is not None else None,
+            _decode_control(value['controller_result']) if value.get('controller_result') is not None else None,
+            _decode_control(value['advance_result']) if value.get('advance_result') is not None else None,
+            str(value.get('reason') or ''),
+            _decode_control(value['plan_result']) if value['plan_result'] is not None else None,
         )
-    if item_type == "EventPayload":
-        return {_require_string(key): _decode_control(item) for key, item in value["items"]}
-    if item_type == "ArtifactRefMap":
+    if item_type == 'EventPayload':
+        return {_require_string(key): _decode_control(item) for key, item in value['items']}
+    if item_type == 'ArtifactRefMap':
         return _decode_artifact_ref_map(value)
-    if item_type == "StringAnyMap":
+    if item_type == 'StringAnyMap':
         return _decode_string_any_map(value)
-    if item_type == "ArtifactKeyList":
+    if item_type == 'ArtifactKeyList':
         return _decode_artifact_key_list(value)
-    if item_type == "StringList":
+    if item_type == 'StringList':
         return _decode_string_list(value)
-    if item_type == "PlanOpList":
-        return tuple(_decode_control(item) for item in value["items"])
-    if item_type == "ExecutionPlanLayers":
-        return tuple(_decode_control(layer) for layer in value["items"])
-    raise ValueError(f"unsupported control-plane type: {item_type}")
+    if item_type == 'PlanOpList':
+        return tuple(_decode_control(item) for item in value['items'])
+    if item_type == 'ExecutionPlanLayers':
+        return tuple(_decode_control(layer) for layer in value['items'])
+    raise ValueError(f'unsupported control-plane type: {item_type}')
 
 
 def _envelope(item_type: str, **fields: Any) -> dict[str, Any]:
-    return {"schema_version": _SCHEMA_VERSION, "type": item_type, **fields}
+    return {'schema_version': _SCHEMA_VERSION, 'type': item_type, **fields}
 
 
 def _encode_event_payload(values: dict[Any, Any]) -> dict[str, Any]:
@@ -1400,9 +1422,9 @@ def _encode_event_payload(values: dict[Any, Any]) -> dict[str, Any]:
     items: list[list[Any]] = []
     for key in sorted(values):
         if not isinstance(key, str):
-            raise TypeError("EventPayload keys must be strings")
+            raise TypeError('EventPayload keys must be strings')
         items.append([key, _encode_event_value(values[key])])
-    return _envelope("EventPayload", items=items)
+    return _envelope('EventPayload', items=items)
 
 
 def _encode_event_value(value: Any) -> Any:
@@ -1418,7 +1440,7 @@ def _encode_event_value(value: Any) -> Any:
         _reject_reserved_envelope_shape(value)
         return {key: _encode_event_value(item) for key, item in _sorted_string_items(value)}
     if isinstance(value, Mapping):
-        raise TypeError("plain event payload mappings must be dicts with string keys")
+        raise TypeError('plain event payload mappings must be dicts with string keys')
     return _encode_control(value)
 
 
@@ -1428,72 +1450,73 @@ def _decode_plain_json_object(values: dict[str, Any]) -> dict[str, Any]:
 
 def _encode_artifact_ref_map(values: Mapping[ArtifactKey, ArtifactRef]) -> dict[str, Any]:
     return _envelope(
-        "ArtifactRefMap",
+        'ArtifactRefMap',
         items=[[_encode_control(key), _encode_control(ref)] for key, ref in sorted(values.items())],
     )
 
 
 def _decode_artifact_ref_map(value: Mapping[str, Any]) -> Mapping[ArtifactKey, ArtifactRef]:
-    if value.get("type") != "ArtifactRefMap":
-        raise ValueError("expected ArtifactRefMap")
-    return MappingProxyType({_decode_control(key): _decode_control(ref) for key, ref in value["items"]})
+    if value.get('type') != 'ArtifactRefMap':
+        raise ValueError('expected ArtifactRefMap')
+    return MappingProxyType({_decode_control(key): _decode_control(ref) for key, ref in value['items']})
 
 
 def _encode_string_any_map(values: Mapping[str, Any]) -> dict[str, Any]:
-    return _envelope("StringAnyMap", items=[[key, _encode_json_compatible(item)] for key, item in _sorted_string_items(values)])
+    return _envelope('StringAnyMap', items=[[key, _encode_json_compatible(item)]
+                     for key, item in _sorted_string_items(values)])
 
 
 def _decode_string_any_map(value: Mapping[str, Any]) -> Mapping[str, Any]:
-    if value.get("type") != "StringAnyMap":
-        raise ValueError("expected StringAnyMap")
-    return MappingProxyType({_require_string(key): _decode_json_compatible(item) for key, item in value["items"]})
+    if value.get('type') != 'StringAnyMap':
+        raise ValueError('expected StringAnyMap')
+    return MappingProxyType({_require_string(key): _decode_json_compatible(item) for key, item in value['items']})
 
 
 def _encode_artifact_key_list(values: tuple[ArtifactKey, ...]) -> dict[str, Any]:
-    return _envelope("ArtifactKeyList", items=[_encode_control(key) for key in values])
+    return _envelope('ArtifactKeyList', items=[_encode_control(key) for key in values])
 
 
 def _decode_artifact_key_list(value: Mapping[str, Any]) -> tuple[ArtifactKey, ...]:
-    if value.get("type") != "ArtifactKeyList":
-        raise ValueError("expected ArtifactKeyList")
-    return tuple(_decode_control(item) for item in value["items"])
+    if value.get('type') != 'ArtifactKeyList':
+        raise ValueError('expected ArtifactKeyList')
+    return tuple(_decode_control(item) for item in value['items'])
 
 
 def _encode_string_artifact_key_map(values: Mapping[str, ArtifactKey]) -> dict[str, Any]:
     return _envelope(
-        "StringArtifactKeyMap",
+        'StringArtifactKeyMap',
         items=[[name, _encode_control(key)] for name, key in _sorted_string_items(values)],
     )
 
 
 def _decode_string_artifact_key_map(value: Mapping[str, Any]) -> Mapping[str, ArtifactKey]:
-    if value.get("type") != "StringArtifactKeyMap":
-        raise ValueError("expected StringArtifactKeyMap")
-    return MappingProxyType({_require_string(name): _decode_control(key) for name, key in value["items"]})
+    if value.get('type') != 'StringArtifactKeyMap':
+        raise ValueError('expected StringArtifactKeyMap')
+    return MappingProxyType({_require_string(name): _decode_control(key) for name, key in value['items']})
 
 
 def _encode_string_list(values: tuple[str, ...]) -> dict[str, Any]:
-    return _envelope("StringList", items=list(values))
+    return _envelope('StringList', items=list(values))
 
 
 def _decode_string_list(value: Mapping[str, Any]) -> tuple[str, ...]:
-    if value.get("type") != "StringList":
-        raise ValueError("expected StringList")
-    return tuple(_require_string(item) for item in value["items"])
+    if value.get('type') != 'StringList':
+        raise ValueError('expected StringList')
+    return tuple(_require_string(item) for item in value['items'])
 
 
 def _encode_plan_op_list(values: tuple[PlanOp, ...]) -> dict[str, Any]:
-    return _envelope("PlanOpList", items=[_encode_control(plan_op) for plan_op in values])
+    return _envelope('PlanOpList', items=[_encode_control(plan_op) for plan_op in values])
 
 
 def _encode_execution_plan_layers(values: tuple[tuple[PlanOp, ...], ...]) -> dict[str, Any]:
-    return _envelope("ExecutionPlanLayers", items=[_encode_plan_op_list(layer) for layer in values])
+    return _envelope('ExecutionPlanLayers', items=[_encode_plan_op_list(layer) for layer in values])
 
 
 def _decode_execution_plan_layers(value: Mapping[str, Any]) -> tuple[tuple[PlanOp, ...], ...]:
-    if value.get("type") != "ExecutionPlanLayers":
-        raise ValueError("expected ExecutionPlanLayers")
-    return tuple(_decode_control(layer) for layer in value["items"])
+    if value.get('type') != 'ExecutionPlanLayers':
+        raise ValueError('expected ExecutionPlanLayers')
+    return tuple(_decode_control(layer) for layer in value['items'])
 
 
 def _encode_json_compatible(value: Any) -> Any:
@@ -1507,7 +1530,7 @@ def _decode_json_compatible(value: Any) -> Any:
         return [_decode_json_compatible(item) for item in value]
     if isinstance(value, dict):
         return {key: _decode_json_compatible(item) for key, item in _sorted_string_items(value)}
-    raise TypeError(f"value is not JSON-compatible: {type(value).__name__}")
+    raise TypeError(f'value is not JSON-compatible: {type(value).__name__}')
 
 
 def _sorted_string_items(values: Mapping[Any, Any]) -> list[tuple[str, Any]]:
@@ -1515,8 +1538,8 @@ def _sorted_string_items(values: Mapping[Any, Any]) -> list[tuple[str, Any]]:
 
 
 def _reject_reserved_envelope_shape(values: Mapping[Any, Any]) -> None:
-    if "schema_version" in values and "type" in values:
-        raise TypeError("plain JSON objects cannot use reserved schema_version/type envelope keys")
+    if 'schema_version' in values and 'type' in values:
+        raise TypeError('plain JSON objects cannot use reserved schema_version/type envelope keys')
 
 
 def _is_json_scalar(value: Any) -> bool:
@@ -1525,7 +1548,7 @@ def _is_json_scalar(value: Any) -> bool:
 
 def _require_string(value: Any) -> str:
     if not isinstance(value, str):
-        raise TypeError("mapping keys must be strings")
+        raise TypeError('mapping keys must be strings')
     return value
 
 
@@ -1534,7 +1557,7 @@ def _canonical_json(value: Any) -> str:
 
 
 def _begin_immediate(connection: sqlite3.Connection) -> None:
-    connection.execute("BEGIN IMMEDIATE")
+    connection.execute('BEGIN IMMEDIATE')
 
 
 def _new_claim_token() -> str:
@@ -1543,13 +1566,19 @@ def _new_claim_token() -> str:
 
 def _validate_scan_window(seq: int, limit: int) -> None:
     if seq < 0:
-        raise ValueError("seq must be >= 0")
+        raise ValueError('seq must be >= 0')
     if limit < 1:
-        raise ValueError("limit must be >= 1")
+        raise ValueError('limit must be >= 1')
 
 
 def _is_artifact_ref_map(value: Mapping[Any, Any]) -> bool:
-    return bool(value) and all(isinstance(key, ArtifactKey) and isinstance(item, ArtifactRef) for key, item in value.items())
+    return bool(value) and all(
+        isinstance(
+            key,
+            ArtifactKey) and isinstance(
+            item,
+            ArtifactRef) for key,
+        item in value.items())
 
 
 def _connect(path: str) -> sqlite3.Connection:
@@ -1559,7 +1588,7 @@ def _connect(path: str) -> sqlite3.Connection:
 
 
 def _close_sqlite_owner(owner: Any) -> None:
-    connection = getattr(owner, "_connection", None)
+    connection = getattr(owner, '_connection', None)
     if connection is None:
         return
     try:
@@ -1568,7 +1597,7 @@ def _close_sqlite_owner(owner: Any) -> None:
         pass
     finally:
         try:
-            setattr(owner, "_connection", None)
+            owner._connection = None
         except Exception:
             pass
 
@@ -1658,13 +1687,13 @@ def _init_schema(connection: sqlite3.Connection) -> None:
 
 
 def _migrate_intent_command_records(connection: sqlite3.Connection) -> None:
-    rows = connection.execute("PRAGMA table_info(intent_command_records)").fetchall()
-    columns = {str(row["name"]) for row in rows}
+    rows = connection.execute('PRAGMA table_info(intent_command_records)').fetchall()
+    columns = {str(row['name']) for row in rows}
     migrations = {
-        "claim_token": "ALTER TABLE intent_command_records ADD COLUMN claim_token TEXT NOT NULL DEFAULT ''",
-        "claim_expires_at": "ALTER TABLE intent_command_records ADD COLUMN claim_expires_at REAL NOT NULL DEFAULT 0",
-        "owner_id": "ALTER TABLE intent_command_records ADD COLUMN owner_id TEXT NOT NULL DEFAULT ''",
-        "reserved_at": "ALTER TABLE intent_command_records ADD COLUMN reserved_at REAL NOT NULL DEFAULT 0",
+        'claim_token': "ALTER TABLE intent_command_records ADD COLUMN claim_token TEXT NOT NULL DEFAULT ''",
+        'claim_expires_at': 'ALTER TABLE intent_command_records ADD COLUMN claim_expires_at REAL NOT NULL DEFAULT 0',
+        'owner_id': "ALTER TABLE intent_command_records ADD COLUMN owner_id TEXT NOT NULL DEFAULT ''",
+        'reserved_at': 'ALTER TABLE intent_command_records ADD COLUMN reserved_at REAL NOT NULL DEFAULT 0',
     }
     for column, sql in migrations.items():
         if column not in columns:

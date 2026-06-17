@@ -35,11 +35,11 @@ class DAGGraph:
 
     def register(self, op_cls: type[FixedOp]) -> None:
         if not isinstance(op_cls, type) or not issubclass(op_cls, FixedOp):
-            raise TypeError("op_cls must be a FixedOp subclass")
-        op_id = str(getattr(op_cls, "op_id", "") or "")
-        validate_nonempty(op_id, "op_id")
+            raise TypeError('op_cls must be a FixedOp subclass')
+        op_id = str(getattr(op_cls, 'op_id', '') or '')
+        validate_nonempty(op_id, 'op_id')
         if op_id in self._nodes:
-            raise DuplicateOpError(f"duplicate op_id: {op_id}")
+            raise DuplicateOpError(f'duplicate op_id: {op_id}')
         self._validate_op_metadata(op_cls)
         self._nodes[op_id] = MaterializerNode(
             op_id=op_id,
@@ -47,8 +47,8 @@ class DAGGraph:
             inputs=dict(op_cls.inputs),
             outputs=dict(op_cls.outputs),
             producer_dependencies=(),
-            flow=str(op_cls.flow or ""),
-            stage=str(op_cls.stage or ""),
+            flow=str(op_cls.flow or ''),
+            stage=str(op_cls.stage or ''),
             tags=MappingProxyType(dict(op_cls.tags or {})),
         )
         self._order.append(op_id)
@@ -86,7 +86,7 @@ class DAGGraph:
     def materializer_for_plan_op(self, plan_op: PlanOp) -> type[FixedOp]:
         if plan_op.graph_revision != self._graph_revision:
             raise DAGGraphError(
-                f"plan graph revision {plan_op.graph_revision} does not match graph revision {self._graph_revision}"
+                f'plan graph revision {plan_op.graph_revision} does not match graph revision {self._graph_revision}'
             )
         nodes = self._materialize_nodes()
         op_id = _base_op_id(plan_op.op_id)
@@ -112,7 +112,7 @@ class DAGGraph:
         consumers = {
             instance_id
             for instance_id in instance_graph.nodes
-            if key in instance_graph.nodes[instance_id].get("input_keys", ())
+            if key in instance_graph.nodes[instance_id].get('input_keys', ())
         }
         return _output_keys_for_instances(consumers, outputs_by_instance)
 
@@ -128,7 +128,7 @@ class DAGGraph:
             affected_instances = {
                 instance_id
                 for instance_id in instance_graph.nodes
-                if key in instance_graph.nodes[instance_id].get("input_keys", ())
+                if key in instance_graph.nodes[instance_id].get('input_keys', ())
             }
             for instance_id in tuple(affected_instances):
                 affected_instances.update(nx.descendants(instance_graph, instance_id))
@@ -142,11 +142,11 @@ class DAGGraph:
         instance_graph, writer_by_key, _ = self._instance_graph(self._materialize_nodes())
         producer = writer_by_key.get(key)
         if producer is None:
-            raise UnknownTargetError(f"no producer for artifact key: {key}")
+            raise UnknownTargetError(f'no producer for artifact key: {key}')
         return {
             input_key
             for instance_id in (*nx.ancestors(instance_graph, producer), producer)
-            for input_key in instance_graph.nodes[instance_id].get("input_keys", ())
+            for input_key in instance_graph.nodes[instance_id].get('input_keys', ())
         }
 
     def downstream_artifacts_of(self, key: ArtifactKey) -> set[ArtifactKey]:
@@ -212,10 +212,14 @@ class DAGGraph:
 
     def artifact_topological_sort(self) -> list[ArtifactKey]:
         instance_graph, _, outputs_by_instance = self._instance_graph(self._materialize_nodes())
+        order_index = {op_id: index for index, op_id in enumerate(self._order)}
         return [
             key
             for generation in nx.topological_generations(instance_graph)
-            for instance_id in sorted(generation, key=lambda item: _instance_sort_key(item, {op_id: index for index, op_id in enumerate(self._order)}))
+            for instance_id in sorted(
+                generation,
+                key=lambda item: _instance_sort_key(item, order_index),
+            )
             for key in outputs_by_instance[instance_id].values()
         ]
 
@@ -237,7 +241,7 @@ class DAGGraph:
         targets: set[ArtifactKey],
     ) -> ExecutionPlan:
         if not targets:
-            raise UnknownTargetError("target keys must not be empty")
+            raise UnknownTargetError('target keys must not be empty')
         nodes = self._materialize_nodes()
         instance_graph, writer_by_key, outputs_by_instance = self._instance_graph(nodes)
         unknown = sorted(target for target in targets if target not in writer_by_key)
@@ -266,7 +270,7 @@ class DAGGraph:
     ) -> ExecutionPlan:
         keys = self.select_artifacts(flow=flow, stage=stage, tags=tags)
         if not keys:
-            raise UnknownTargetError("selection matched no artifacts")
+            raise UnknownTargetError('selection matched no artifacts')
         return self.build_plan_for_keys(resolver, keys)
 
     def build_recompute_plan(
@@ -299,19 +303,20 @@ class DAGGraph:
         selected = {writer_by_key[key] for key in materialize_keys if key in writer_by_key}
         unknown_materialize = sorted(key for key in materialize_keys if key not in writer_by_key)
         if unknown_materialize:
-            raise UnknownTargetError(f"no producer for artifact key: {', '.join(str(item) for item in unknown_materialize)}")
+            raise UnknownTargetError(
+                f"no producer for artifact key: {', '.join(str(item) for item in unknown_materialize)}")
         for key in changed_keys:
             direct = {
                 instance_id
                 for instance_id in instance_graph.nodes
-                if key in instance_graph.nodes[instance_id].get("input_keys", ())
+                if key in instance_graph.nodes[instance_id].get('input_keys', ())
             }
             selected.update(direct)
         if include_downstream:
             for instance_id in tuple(selected):
                 selected.update(nx.descendants(instance_graph, instance_id))
         if not selected:
-            raise UnknownTargetError("recompute selection matched no artifacts")
+            raise UnknownTargetError('recompute selection matched no artifacts')
         return self._build_plan_for_selected_instances(
             nodes,
             instance_graph,
@@ -377,12 +382,16 @@ class DAGGraph:
                     output_spec,
                 )
             )
-            input_kind = "partition_collection" if input_item.partition_mapping.kind == "all_to_unpartitioned" else "single"
-            collection_name = input_name if input_kind == "partition_collection" else ""
+            input_kind = (
+                'partition_collection'
+                if input_item.partition_mapping.kind == 'all_to_unpartitioned'
+                else 'single'
+            )
+            collection_name = input_name if input_kind == 'partition_collection' else ''
             for input_key in input_keys:
                 if input_item.version is not None:
-                    if input_kind != "single":
-                        raise DAGGraphError("pinned partition collection inputs are not supported")
+                    if input_kind != 'single':
+                        raise DAGGraphError('pinned partition collection inputs are not supported')
                     input_bindings.append(
                         PlanInput(
                             name=input_name,
@@ -407,12 +416,12 @@ class DAGGraph:
                     continue
                 try:
                     ref = resolver.latest(input_key)
-                except (KeyError, LookupError):
+                except LookupError:
                     if input_item.required:
-                        raise MissingArtifactVersionError(f"missing latest version for required artifact: {input_key}")
+                        raise MissingArtifactVersionError(f'missing latest version for required artifact: {input_key}')
                     continue
                 if ref.key != input_key:
-                    raise DAGGraphError(f"resolver returned {ref} for artifact {input_key}")
+                    raise DAGGraphError(f'resolver returned {ref} for artifact {input_key}')
                 input_bindings.append(
                     PlanInput(
                         name=input_name,
@@ -430,7 +439,8 @@ class DAGGraph:
             depends_on=tuple(
                 sorted(
                     (dep for dep in instance_graph.predecessors(instance_id) if dep in selected),
-                    key=lambda item: _instance_sort_key(item, {op_id: index for index, op_id in enumerate(self._order)}),
+                    key=lambda item: _instance_sort_key(
+                        item, {op_id: index for index, op_id in enumerate(self._order)}),
                 )
             ),
             graph_revision=self._graph_revision,
@@ -456,7 +466,8 @@ class DAGGraph:
                 for key in output_key_by_name.values():
                     existing = writer_by_key.get(key)
                     if existing is not None and existing != instance_id:
-                        raise DuplicateArtifactWriterError(f"artifact {key} has multiple writers: {existing}, {instance_id}")
+                        raise DuplicateArtifactWriterError(
+                            f'artifact {key} has multiple writers: {existing}, {instance_id}')
                     writer_by_key[key] = instance_id
 
         for instance_id, output_key_by_name in outputs_by_instance.items():
@@ -476,10 +487,10 @@ class DAGGraph:
                     writer = writer_by_key.get(input_key)
                     if writer is not None and writer != instance_id:
                         graph.add_edge(writer, instance_id)
-            graph.nodes[instance_id]["input_keys"] = tuple(input_keys)
+            graph.nodes[instance_id]['input_keys'] = tuple(input_keys)
 
         if not nx.is_directed_acyclic_graph(graph):
-            raise CycleError("operation graph must be a DAG")
+            raise CycleError('operation graph must be a DAG')
         return graph, writer_by_key, outputs_by_instance
 
     @staticmethod
@@ -490,8 +501,9 @@ class DAGGraph:
     ) -> list[list[str]]:
         graph = instance_graph.subgraph(selected).copy()
         if not nx.is_directed_acyclic_graph(graph):
-            raise CycleError("operation graph must be a DAG")
-        return [sorted(layer, key=lambda item: _instance_sort_key(item, position)) for layer in nx.topological_generations(graph)]
+            raise CycleError('operation graph must be a DAG')
+        return [sorted(layer, key=lambda item: _instance_sort_key(item, position))
+                for layer in nx.topological_generations(graph)]
 
     def _materialize_nodes(self) -> dict[str, MaterializerNode]:
         writer_by_artifact = self._writer_by_artifact_from_registered_nodes()
@@ -526,7 +538,7 @@ class DAGGraph:
                 existing = writer_by_artifact.get(output.artifact_id)
                 if existing and existing != op_id:
                     raise DuplicateArtifactWriterError(
-                        f"artifact {output.artifact_id} has multiple writers: {existing}, {op_id}"
+                        f'artifact {output.artifact_id} has multiple writers: {existing}, {op_id}'
                     )
                 writer_by_artifact[output.artifact_id] = op_id
         return writer_by_artifact
@@ -534,60 +546,60 @@ class DAGGraph:
     @staticmethod
     def _require_materializer(op_id: str, nodes: dict[str, MaterializerNode]) -> None:
         if op_id not in nodes:
-            raise UnknownTargetError(f"unknown materializer: {op_id}")
+            raise UnknownTargetError(f'unknown materializer: {op_id}')
 
     @staticmethod
     def _validate_op_metadata(op_cls: type[FixedOp]) -> None:
-        if "depends_on" in op_cls.__dict__:
+        if 'depends_on' in op_cls.__dict__:
             raise TypeError(
-                f"{op_cls.__name__}.depends_on is not supported; declare artifact dependencies as inputs"
+                f'{op_cls.__name__}.depends_on is not supported; declare artifact dependencies as inputs'
             )
         if not isinstance(op_cls.inputs, Mapping):
-            raise TypeError(f"{op_cls.__name__}.inputs must be a mapping")
+            raise TypeError(f'{op_cls.__name__}.inputs must be a mapping')
         if not isinstance(op_cls.outputs, Mapping):
-            raise TypeError(f"{op_cls.__name__}.outputs must be a mapping")
+            raise TypeError(f'{op_cls.__name__}.outputs must be a mapping')
         if not isinstance(op_cls.flow, str):
-            raise TypeError(f"{op_cls.__name__}.flow must be a str")
+            raise TypeError(f'{op_cls.__name__}.flow must be a str')
         if not isinstance(op_cls.stage, str):
-            raise TypeError(f"{op_cls.__name__}.stage must be a str")
+            raise TypeError(f'{op_cls.__name__}.stage must be a str')
         if not isinstance(op_cls.tags, Mapping):
-            raise TypeError(f"{op_cls.__name__}.tags must be a mapping")
+            raise TypeError(f'{op_cls.__name__}.tags must be a mapping')
         for key, value in op_cls.tags.items():
-            validate_nonempty(str(key), "tag key")
+            validate_nonempty(str(key), 'tag key')
             if not isinstance(value, str):
-                raise TypeError(f"{op_cls.__name__}.tags[{key!r}] must be str")
+                raise TypeError(f'{op_cls.__name__}.tags[{key!r}] must be str')
         for name, input_item in op_cls.inputs.items():
-            validate_nonempty(str(name), "input name")
+            validate_nonempty(str(name), 'input name')
             if not isinstance(input_item, ArtifactInput):
-                raise TypeError(f"{op_cls.__name__}.inputs[{name!r}] must be ArtifactInput")
+                raise TypeError(f'{op_cls.__name__}.inputs[{name!r}] must be ArtifactInput')
         declared_output_ids: set[str] = set()
         for name, output in op_cls.outputs.items():
-            validate_nonempty(str(name), "output name")
+            validate_nonempty(str(name), 'output name')
             if not isinstance(output, ArtifactOutput):
-                raise TypeError(f"{op_cls.__name__}.outputs[{name!r}] must be ArtifactOutput")
+                raise TypeError(f'{op_cls.__name__}.outputs[{name!r}] must be ArtifactOutput')
             if output.artifact_id in declared_output_ids:
                 raise DuplicateArtifactWriterError(
-                    f"{op_cls.__name__} declares artifact {output.artifact_id} more than once"
+                    f'{op_cls.__name__} declares artifact {output.artifact_id} more than once'
                 )
             declared_output_ids.add(output.artifact_id)
 
     @staticmethod
     def _plan_id(graph_revision: int, layers: tuple[tuple[PlanOp, ...], ...]) -> str:
         digest = hashlib.sha256()
-        digest.update(str(graph_revision).encode("utf-8"))
+        digest.update(str(graph_revision).encode('utf-8'))
         for layer in layers:
-            digest.update(b"|")
+            digest.update(b'|')
             for plan_op in layer:
-                digest.update(plan_op.op_id.encode("utf-8"))
+                digest.update(plan_op.op_id.encode('utf-8'))
                 for dep in plan_op.depends_on:
-                    digest.update(f"dep:{dep};".encode("utf-8"))
+                    digest.update(f'dep:{dep};'.encode('utf-8'))
                 for key in plan_op.planned_input_keys:
-                    digest.update(f"planned:{key};".encode("utf-8"))
+                    digest.update(f'planned:{key};'.encode('utf-8'))
                 for key, ref in sorted(plan_op.input_key_versions.items()):
-                    digest.update(f"{key}:{ref};".encode("utf-8"))
+                    digest.update(f'{key}:{ref};'.encode('utf-8'))
                 for key in plan_op.output_keys:
-                    digest.update(f"out:{key};".encode("utf-8"))
-        return f"plan_{digest.hexdigest()[:16]}"
+                    digest.update(f'out:{key};'.encode('utf-8'))
+        return f'plan_{digest.hexdigest()[:16]}'
 
 
 def _matches_selection(
@@ -623,11 +635,11 @@ def _output_key_groups(node: MaterializerNode) -> dict[str, Mapping[str, Artifac
         if not is_unpartitioned(output.partition_spec)
     }
     if not static_partitions:
-        return {"": {name: ArtifactKey.of(output.artifact_id) for name, output in node.outputs.items()}}
+        return {'': {name: ArtifactKey.of(output.artifact_id) for name, output in node.outputs.items()}}
     if len(static_partitions) != 1:
-        raise DAGGraphError(f"{node.op_id} outputs use incompatible partition specs")
+        raise DAGGraphError(f'{node.op_id} outputs use incompatible partition specs')
     if any(is_unpartitioned(output.partition_spec) for output in node.outputs.values()):
-        raise DAGGraphError(f"{node.op_id} cannot mix partitioned and unpartitioned outputs")
+        raise DAGGraphError(f'{node.op_id} cannot mix partitioned and unpartitioned outputs')
     partitions = next(iter(static_partitions))
     return {
         partition: {name: ArtifactKey(output.artifact_id, partition) for name, output in node.outputs.items()}
@@ -639,27 +651,27 @@ def _output_spec_for_key(node: MaterializerNode, key: ArtifactKey) -> ArtifactPa
     for output in node.outputs.values():
         if output.artifact_id == key.artifact_id:
             if key.partition and key.partition not in partition_keys(output.partition_spec):
-                raise DAGGraphError(f"output key {key} is not declared by {node.op_id}")
+                raise DAGGraphError(f'output key {key} is not declared by {node.op_id}')
             return ArtifactPartitionSpec(output.artifact_id, output.partition_spec)
-    raise DAGGraphError(f"output key {key} is not declared by {node.op_id}")
+    raise DAGGraphError(f'output key {key} is not declared by {node.op_id}')
 
 
 def _spec_declares_key(spec: object, key: ArtifactKey) -> bool:
     if is_unpartitioned(spec):
-        return key.partition == ""
+        return key.partition == ''
     return key.partition in partition_keys(spec)  # type: ignore[arg-type]
 
 
 def _instance_id(op_id: str, partition: str) -> str:
-    return op_id if not partition else f"{op_id}[{partition}]"
+    return op_id if not partition else f'{op_id}[{partition}]'
 
 
 def _base_op_id(instance_id: str) -> str:
-    return instance_id.split("[", 1)[0]
+    return instance_id.split('[', 1)[0]
 
 
 def _instance_sort_key(instance_id: str, position: dict[str, int]) -> tuple[int, str]:
-    if "[" not in instance_id:
-        return (position.get(instance_id, len(position)), "")
-    op_id, partition = instance_id.split("[", 1)
-    return (position.get(op_id, len(position)), partition.rstrip("]"))
+    if '[' not in instance_id:
+        return (position.get(instance_id, len(position)), '')
+    op_id, partition = instance_id.split('[', 1)
+    return (position.get(op_id, len(position)), partition.rstrip(']'))

@@ -16,19 +16,19 @@ from evo.artifact_runtime import prepared_intent_payload_fingerprint
 from evo.artifact_runtime.utils import canonical_json, normalize_json_value, validate_nonempty
 
 MessageEventType = Literal[
-    "message_received",
-    "intent_parsed",
-    "artifact_view",
-    "clarification_required",
-    "confirmation_required",
-    "approval_resolved",
-    "command_applied",
-    "assistant_response",
-    "done",
-    "error",
+    'message_received',
+    'intent_parsed',
+    'artifact_view',
+    'clarification_required',
+    'confirmation_required',
+    'approval_resolved',
+    'command_applied',
+    'assistant_response',
+    'done',
+    'error',
 ]
 
-PendingApprovalStatus = Literal["active", "approved", "rejected", "cancelled", "superseded", "expired"]
+PendingApprovalStatus = Literal['active', 'approved', 'rejected', 'cancelled', 'superseded', 'expired']
 
 
 @dataclass(frozen=True)
@@ -94,8 +94,8 @@ class MessageSessionStore:
         self._connection = sqlite3.connect(str(self.path), check_same_thread=False, isolation_level=None)
         self._connection.row_factory = sqlite3.Row
         self._lock = RLock()
-        self._connection.execute("PRAGMA journal_mode=WAL")
-        self._connection.execute("PRAGMA foreign_keys=ON")
+        self._connection.execute('PRAGMA journal_mode=WAL')
+        self._connection.execute('PRAGMA foreign_keys=ON')
         self._init_schema()
 
     def close(self) -> None:
@@ -110,16 +110,16 @@ class MessageSessionStore:
             self.release_lease(lease)
 
     def claim_lease(self, thread_id: str, *, owner_id: str | None = None) -> MessageLease:
-        validate_nonempty(thread_id, "thread_id")
-        owner = owner_id or f"message-intent:{os.getpid()}:{uuid.uuid4().hex}"
-        validate_nonempty(owner, "owner_id")
+        validate_nonempty(thread_id, 'thread_id')
+        owner = owner_id or f'message-intent:{os.getpid()}:{uuid.uuid4().hex}'
+        validate_nonempty(owner, 'owner_id')
         now = time.time()
         expires_at = now + self.lease_seconds
         token = uuid.uuid4().hex
         with self._transaction() as conn:
-            row = conn.execute("SELECT * FROM thread_lease WHERE thread_id = ?", (thread_id,)).fetchone()
-            if row is not None and float(row["expires_at"]) > now and str(row["owner_id"]) != owner:
-                raise MessageLeaseError("thread lease is held")
+            row = conn.execute('SELECT * FROM thread_lease WHERE thread_id = ?', (thread_id,)).fetchone()
+            if row is not None and float(row['expires_at']) > now and str(row['owner_id']) != owner:
+                raise MessageLeaseError('thread lease is held')
             conn.execute(
                 """
                 INSERT INTO thread_lease(thread_id, owner_id, fencing_token, expires_at, heartbeat_at)
@@ -140,7 +140,7 @@ class MessageSessionStore:
         with self._transaction() as conn:
             self._require_lease(conn, lease)
             conn.execute(
-                "UPDATE thread_lease SET expires_at = ?, heartbeat_at = ? WHERE thread_id = ? AND fencing_token = ?",
+                'UPDATE thread_lease SET expires_at = ?, heartbeat_at = ? WHERE thread_id = ? AND fencing_token = ?',
                 (expires_at, now, lease.thread_id, lease.fencing_token),
             )
         return MessageLease(lease.thread_id, lease.owner_id, lease.fencing_token, expires_at)
@@ -148,7 +148,7 @@ class MessageSessionStore:
     def release_lease(self, lease: MessageLease) -> None:
         with self._transaction() as conn:
             conn.execute(
-                "DELETE FROM thread_lease WHERE thread_id = ? AND fencing_token = ?",
+                'DELETE FROM thread_lease WHERE thread_id = ? AND fencing_token = ?',
                 (lease.thread_id, lease.fencing_token),
             )
 
@@ -158,10 +158,10 @@ class MessageSessionStore:
         event_type: str,
         payload: Mapping[str, Any],
         *,
-        turn_id: str = "",
-        message_id: str = "",
+        turn_id: str = '',
+        message_id: str = '',
     ) -> MessageEvent:
-        validate_nonempty(event_type, "event_type")
+        validate_nonempty(event_type, 'event_type')
         normalized = _json_object(payload)
         now = time.time()
         with self._transaction() as conn:
@@ -201,36 +201,42 @@ class MessageSessionStore:
             ).fetchall()
         out: list[dict[str, Any]] = []
         for row in rows:
-            payload = json.loads(str(row["payload_json"]))
-            role = "user" if row["event_type"] == "message_received" else "assistant"
-            content = str(payload.get("content") or payload.get("message") or "").strip()
+            payload = json.loads(str(row['payload_json']))
+            role = 'user' if row['event_type'] == 'message_received' else 'assistant'
+            content = str(payload.get('content') or payload.get('message') or '').strip()
             if content:
-                out.append({"id": str(row["message_id"] or f"msg-{row['seq']}"), "role": role, "content": content, "ts": row["created_at"]})
+                out.append({'id': str(row['message_id'] or f"msg-{row['seq']}"),
+                           'role': role, 'content': content, 'ts': row['created_at']})
         return out
 
     def begin_turn(self, lease: MessageLease, message_id: str, content: str) -> tuple[str, MessageEvent]:
-        validate_nonempty(message_id, "message_id")
-        validate_nonempty(content, "content")
-        turn_id = f"turn_{uuid.uuid4().hex[:12]}"
+        validate_nonempty(message_id, 'message_id')
+        validate_nonempty(content, 'content')
+        turn_id = f'turn_{uuid.uuid4().hex[:12]}'
         now = time.time()
         with self._transaction() as conn:
             self._require_lease(conn, lease)
             conn.execute(
                 """
-                INSERT INTO turns(thread_id, turn_id, message_ids_json, processed_cursor, status, request_fingerprint, created_at, updated_at)
+                INSERT INTO turns(
+                    thread_id, turn_id, message_ids_json, processed_cursor,
+                    status, request_fingerprint, created_at, updated_at
+                )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (lease.thread_id, turn_id, canonical_json([message_id]), 0, "active", "", now, now),
+                (lease.thread_id, turn_id, canonical_json([message_id]), 0, 'active', '', now, now),
             )
             cursor = conn.execute(
                 """
                 INSERT INTO message_events(thread_id, event_type, turn_id, message_id, payload_json, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (lease.thread_id, "message_received", turn_id, message_id, canonical_json({"content": content}), now),
+                (lease.thread_id, 'message_received', turn_id, message_id, canonical_json({'content': content}), now),
             )
             seq = int(cursor.lastrowid)
-        return turn_id, MessageEvent(seq, lease.thread_id, "message_received", {"content": content}, turn_id, message_id, now)
+        return turn_id, MessageEvent(
+            seq, lease.thread_id, 'message_received', {
+                'content': content}, turn_id, message_id, now)
 
     def finish_turn(
         self,
@@ -238,17 +244,17 @@ class MessageSessionStore:
         turn_id: str,
         *,
         status: str,
-        request_fingerprint: str = "",
+        request_fingerprint: str = '',
         processed_cursor: int | None = None,
     ) -> None:
-        validate_nonempty(turn_id, "turn_id")
+        validate_nonempty(turn_id, 'turn_id')
         now = time.time()
         with self._transaction() as conn:
             self._require_lease(conn, lease)
-            assignments = ["status = ?", "request_fingerprint = ?", "updated_at = ?"]
+            assignments = ['status = ?', 'request_fingerprint = ?', 'updated_at = ?']
             values: list[Any] = [status, request_fingerprint, now]
             if processed_cursor is not None:
-                assignments.append("processed_cursor = ?")
+                assignments.append('processed_cursor = ?')
                 values.append(processed_cursor)
             values.extend([lease.thread_id, turn_id])
             conn.execute(
@@ -257,9 +263,9 @@ class MessageSessionStore:
             )
 
     def update_turn_cursor(self, lease: MessageLease, turn_id: str, processed_cursor: int) -> None:
-        validate_nonempty(turn_id, "turn_id")
+        validate_nonempty(turn_id, 'turn_id')
         if processed_cursor < 0:
-            raise ValueError("processed_cursor must be >= 0")
+            raise ValueError('processed_cursor must be >= 0')
         now = time.time()
         with self._transaction() as conn:
             self._require_lease(conn, lease)
@@ -294,20 +300,22 @@ class MessageSessionStore:
             ).fetchall()
         out: list[PendingTurnBuffer] = []
         for row in rows:
-            payload = _json_object(json.loads(str(row["payload_json"])))
-            content = str(payload.get("content") or payload.get("message") or "")
-            cursor = max(0, min(int(row["processed_cursor"]), len(content)))
+            payload = _json_object(json.loads(str(row['payload_json'])))
+            content = str(payload.get('content') or payload.get('message') or '')
+            cursor = max(0, min(int(row['processed_cursor']), len(content)))
             remaining = content[cursor:]
             if remaining.strip():
-                out.append(PendingTurnBuffer(str(row["turn_id"]), str(row["message_id"]), content, cursor, remaining, int(row["seq"])))
+                out.append(PendingTurnBuffer(str(row['turn_id']), str(
+                    row['message_id']), content, cursor, remaining, int(row['seq'])))
         return out
 
     def working_set(self, thread_id: str) -> dict[str, Any]:
         with self._lock:
-            row = self._connection.execute("SELECT data_json FROM working_set WHERE thread_id = ?", (thread_id,)).fetchone()
+            row = self._connection.execute(
+                'SELECT data_json FROM working_set WHERE thread_id = ?', (thread_id,)).fetchone()
         if row is None:
             return {}
-        return _json_object(json.loads(str(row["data_json"])))
+        return _json_object(json.loads(str(row['data_json'])))
 
     def update_working_set(self, lease: MessageLease, patch: Mapping[str, Any]) -> dict[str, Any]:
         current = self.working_set(lease.thread_id)
@@ -356,14 +364,14 @@ class MessageSessionStore:
         expires_at: float,
         supersede_existing: bool = False,
     ) -> PendingApproval:
-        validate_nonempty(approval_token, "approval_token")
-        validate_nonempty(command_id, "command_id")
-        validate_nonempty(run_id, "run_id")
-        validate_nonempty(intent_kind, "intent_kind")
-        validate_nonempty(request_fingerprint, "request_fingerprint")
+        validate_nonempty(approval_token, 'approval_token')
+        validate_nonempty(command_id, 'command_id')
+        validate_nonempty(run_id, 'run_id')
+        validate_nonempty(intent_kind, 'intent_kind')
+        validate_nonempty(request_fingerprint, 'request_fingerprint')
         prepared = _json_object(prepared_payload, reject_reserved_envelope=False)
         if prepared_intent_payload_fingerprint(prepared) != request_fingerprint:
-            raise ValueError("prepared_payload fingerprint mismatch")
+            raise ValueError('prepared_payload fingerprint mismatch')
         now = time.time()
         with self._transaction() as conn:
             self._require_lease(conn, lease)
@@ -372,11 +380,13 @@ class MessageSessionStore:
                 (lease.thread_id,),
             ).fetchone()
             if existing is not None and not supersede_existing:
-                raise MessageStoreConflict("active approval already exists")
+                raise MessageStoreConflict('active approval already exists')
             if existing is not None:
-                superseded = str(existing["approval_token"])
+                superseded = str(existing['approval_token'])
                 conn.execute(
-                    "UPDATE pending_approval SET status = 'superseded', superseded_by = ? WHERE thread_id = ? AND status = 'active'",
+                    'UPDATE pending_approval '
+                    "SET status = 'superseded', superseded_by = ? "
+                    "WHERE thread_id = ? AND status = 'active'",
                     (approval_token, lease.thread_id),
                 )
                 conn.execute(
@@ -386,9 +396,10 @@ class MessageSessionStore:
                     """,
                     (
                         lease.thread_id,
-                        "",
-                        "",
-                        canonical_json({"approval_token": superseded, "status": "superseded", "superseded_by": approval_token}),
+                        '',
+                        '',
+                        canonical_json({'approval_token': superseded, 'status': 'superseded',
+                                       'superseded_by': approval_token}),
                         now,
                     ),
                 )
@@ -427,10 +438,10 @@ class MessageSessionStore:
             preview_hash,
             tuple(expected_refs),
             risk_level,
-            "active",
+            'active',
             now,
             expires_at,
-            "",
+            '',
         )
 
     def resolve_approval(
@@ -440,25 +451,25 @@ class MessageSessionStore:
         *,
         status: PendingApprovalStatus,
         event_payload: Mapping[str, Any],
-        turn_id: str = "",
-        message_id: str = "",
+        turn_id: str = '',
+        message_id: str = '',
     ) -> PendingApproval:
-        if status not in {"approved", "rejected", "cancelled", "superseded", "expired"}:
-            raise ValueError("approval resolution status must be terminal")
+        if status not in {'approved', 'rejected', 'cancelled', 'superseded', 'expired'}:
+            raise ValueError('approval resolution status must be terminal')
         now = time.time()
         payload = _json_object(event_payload)
         with self._transaction() as conn:
             self._require_lease(conn, lease)
             row = conn.execute(
-                "SELECT * FROM pending_approval WHERE thread_id = ? AND approval_token = ?",
+                'SELECT * FROM pending_approval WHERE thread_id = ? AND approval_token = ?',
                 (lease.thread_id, approval_token),
             ).fetchone()
             if row is None:
-                raise MessageStoreConflict("pending approval not found")
-            if str(row["status"]) != "active":
-                raise MessageStoreConflict("pending approval is not active")
+                raise MessageStoreConflict('pending approval not found')
+            if str(row['status']) != 'active':
+                raise MessageStoreConflict('pending approval is not active')
             conn.execute(
-                "UPDATE pending_approval SET status = ? WHERE thread_id = ? AND approval_token = ?",
+                'UPDATE pending_approval SET status = ? WHERE thread_id = ? AND approval_token = ?',
                 (status, lease.thread_id, approval_token),
             )
             conn.execute(
@@ -466,7 +477,8 @@ class MessageSessionStore:
                 INSERT INTO message_events(thread_id, event_type, turn_id, message_id, payload_json, created_at)
                 VALUES (?, 'approval_resolved', ?, ?, ?, ?)
                 """,
-                (lease.thread_id, turn_id, message_id, canonical_json({"approval_token": approval_token, "status": status, **payload}), now),
+                (lease.thread_id, turn_id, message_id, canonical_json(
+                    {'approval_token': approval_token, 'status': status, **payload}), now),
             )
         resolved = _approval_from_row(row)
         return PendingApproval(
@@ -489,7 +501,7 @@ class MessageSessionStore:
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
         with self._lock:
-            self._connection.execute("BEGIN IMMEDIATE")
+            self._connection.execute('BEGIN IMMEDIATE')
             try:
                 yield self._connection
             except Exception:
@@ -500,11 +512,11 @@ class MessageSessionStore:
 
     def _require_lease(self, conn: sqlite3.Connection, lease: MessageLease) -> None:
         row = conn.execute(
-            "SELECT * FROM thread_lease WHERE thread_id = ? AND fencing_token = ?",
+            'SELECT * FROM thread_lease WHERE thread_id = ? AND fencing_token = ?',
             (lease.thread_id, lease.fencing_token),
         ).fetchone()
-        if row is None or str(row["owner_id"]) != lease.owner_id or float(row["expires_at"]) <= time.time():
-            raise MessageLeaseError("stale message lease")
+        if row is None or str(row['owner_id']) != lease.owner_id or float(row['expires_at']) <= time.time():
+            raise MessageLeaseError('stale message lease')
 
     def _init_schema(self) -> None:
         self._connection.executescript(
@@ -572,42 +584,42 @@ class MessageSessionStore:
 
 def _json_object(value: Mapping[str, Any] | Any, *, reject_reserved_envelope: bool = True) -> dict[str, Any]:
     if not isinstance(value, Mapping):
-        raise TypeError("value must be a JSON object")
+        raise TypeError('value must be a JSON object')
     normalized = normalize_json_value(dict(value), allow_tuple=True, reject_reserved_envelope=reject_reserved_envelope)
     if not isinstance(normalized, dict):
-        raise TypeError("value must be a JSON object")
+        raise TypeError('value must be a JSON object')
     return normalized
 
 
 def _event_from_row(row: sqlite3.Row) -> MessageEvent:
     return MessageEvent(
-        int(row["seq"]),
-        str(row["thread_id"]),
-        str(row["event_type"]),
-        _json_object(json.loads(str(row["payload_json"]))),
-        str(row["turn_id"]),
-        str(row["message_id"]),
-        float(row["created_at"]),
+        int(row['seq']),
+        str(row['thread_id']),
+        str(row['event_type']),
+        _json_object(json.loads(str(row['payload_json']))),
+        str(row['turn_id']),
+        str(row['message_id']),
+        float(row['created_at']),
     )
 
 
 def _approval_from_row(row: sqlite3.Row) -> PendingApproval:
-    refs = json.loads(str(row["expected_refs_json"]))
+    refs = json.loads(str(row['expected_refs_json']))
     if not isinstance(refs, list):
         refs = []
     return PendingApproval(
-        str(row["approval_token"]),
-        str(row["thread_id"]),
-        str(row["command_id"]),
-        str(row["run_id"]),
-        str(row["intent_kind"]),
-        _json_object(json.loads(str(row["prepared_payload_json"])), reject_reserved_envelope=False),
-        str(row["request_fingerprint"]),
-        str(row["preview_hash"]),
+        str(row['approval_token']),
+        str(row['thread_id']),
+        str(row['command_id']),
+        str(row['run_id']),
+        str(row['intent_kind']),
+        _json_object(json.loads(str(row['prepared_payload_json'])), reject_reserved_envelope=False),
+        str(row['request_fingerprint']),
+        str(row['preview_hash']),
         tuple(str(item) for item in refs),
-        str(row["risk_level"]),
-        str(row["status"]),
-        float(row["created_at"]),
-        float(row["expires_at"]),
-        str(row["superseded_by"]),
+        str(row['risk_level']),
+        str(row['status']),
+        float(row['created_at']),
+        float(row['expires_at']),
+        str(row['superseded_by']),
     )

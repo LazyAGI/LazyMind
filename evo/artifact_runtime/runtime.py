@@ -9,7 +9,13 @@ from .controller import AttemptExecutor, RunController
 from .durability import ArtifactValueCodec, ControlPlaneCodec, SQLiteRuntimeStores, open_sqlite_runtime
 from .external import ExternalCallGateway, ExternalCallPolicy
 from .graph import DAGGraph
-from .intent import GraphPlanSubmitter, IntentCommandGateway, IntentCommandPolicy, IntentCommandRequest, IntentCommandResult
+from .intent import (
+    GraphPlanSubmitter,
+    IntentCommandGateway,
+    IntentCommandPolicy,
+    IntentCommandRequest,
+    IntentCommandResult,
+)
 from .intervention import FlowInterventionCoordinator
 from .lease import ClaimLeaseReaper, LeasedPlanExecutionWorker, WorkerLeasePolicy
 from .mutation import ArtifactMutationService
@@ -25,8 +31,8 @@ from .worker import MaterializerExecutor
 @dataclass(frozen=True)
 class EvoRuntimeConfig:
     path: str | Path
-    driver_id: str = "evo-runtime-driver"
-    worker_id: str = "evo-runtime-worker"
+    driver_id: str = 'evo-runtime-driver'
+    worker_id: str = 'evo-runtime-worker'
     checkpoint_id: str = DEFAULT_CHECKPOINT_ID
     model_config: dict[str, object] = field(default_factory=dict)
     worker_lease_policy: WorkerLeasePolicy = field(default_factory=lambda: WorkerLeasePolicy(300.0, 100))
@@ -35,10 +41,10 @@ class EvoRuntimeConfig:
     intent_command_policy: IntentCommandPolicy = field(default_factory=IntentCommandPolicy)
 
     def __post_init__(self) -> None:
-        validate_nonempty(str(self.path), "path")
-        validate_nonempty(self.driver_id, "driver_id")
-        validate_nonempty(self.worker_id, "worker_id")
-        validate_nonempty(self.checkpoint_id, "checkpoint_id")
+        validate_nonempty(str(self.path), 'path')
+        validate_nonempty(self.driver_id, 'driver_id')
+        validate_nonempty(self.worker_id, 'worker_id')
+        validate_nonempty(self.checkpoint_id, 'checkpoint_id')
 
 
 class BootstrappedIntentGateway:
@@ -96,35 +102,35 @@ class EvoRuntime:
     def validate(self) -> None:
         self.graph.validate()
         if self.executor is None:
-            raise ValueError("executor must be configured")
+            raise ValueError('executor must be configured')
         if self.external_gateway is None:
-            raise ValueError("external gateway must be configured")
+            raise ValueError('external gateway must be configured')
         if not isinstance(self.gateway, BootstrappedIntentGateway) or self.gateway._runtime is not self:
-            raise ValueError("gateway must be the runtime bootstrapped facade")
+            raise ValueError('gateway must be the runtime bootstrapped facade')
         if self.intent_gateway is self.gateway:
-            raise ValueError("raw intent gateway must not be the bootstrapped facade")
+            raise ValueError('raw intent gateway must not be the bootstrapped facade')
         if self.reaper.controller is not self.controller:
-            raise ValueError("reaper must share runtime controller")
+            raise ValueError('reaper must share runtime controller')
         if self.worker.controller is not self.controller:
-            raise ValueError("worker must share runtime controller")
+            raise ValueError('worker must share runtime controller')
         if self.supervisor.controller is not self.controller:
-            raise ValueError("supervisor must share runtime controller")
+            raise ValueError('supervisor must share runtime controller')
         if self.supervisor.worker is not self.worker:
-            raise ValueError("supervisor must use runtime worker")
+            raise ValueError('supervisor must use runtime worker')
         if self.supervisor.reaper is not self.reaper:
-            raise ValueError("supervisor must use runtime reaper")
+            raise ValueError('supervisor must use runtime reaper')
         if self.driver.supervisor is not self.supervisor:
-            raise ValueError("driver must use runtime supervisor")
+            raise ValueError('driver must use runtime supervisor')
         if self.intent_gateway.controller is not self.controller:
-            raise ValueError("intent gateway must use runtime controller")
+            raise ValueError('intent gateway must use runtime controller')
         if self.intent_gateway.intervention is not self.intervention:
-            raise ValueError("intent gateway must use runtime intervention")
+            raise ValueError('intent gateway must use runtime intervention')
         if self.intent_gateway.driver is not self.driver:
-            raise ValueError("intent gateway must use runtime driver")
+            raise ValueError('intent gateway must use runtime driver')
         if self.intent_gateway.log is not self.stores.intent_command_log:
-            raise ValueError("intent gateway must use durable intent command log")
+            raise ValueError('intent gateway must use durable intent command log')
         if self.intent_gateway.plan_submitter is None:
-            raise ValueError("intent gateway must use runtime plan submitter")
+            raise ValueError('intent gateway must use runtime plan submitter')
 
     def bootstrap_projection(self) -> int:
         """Fully catch up the in-memory projection read model to the event log."""
@@ -168,7 +174,7 @@ class EvoRuntime:
         return self.bootstrap_projection()
 
     def set_model_config(self, model_config: dict[str, object] | None) -> None:
-        object.__setattr__(self.config, "model_config", dict(model_config or {}))
+        object.__setattr__(self.config, 'model_config', dict(model_config or {}))
         if isinstance(self.executor, MaterializerExecutor):
             self.executor.set_model_config(self.config.model_config)
 
@@ -244,10 +250,11 @@ def open_evo_runtime(
     clock: Callable[[], float] = time.time,
 ) -> EvoRuntime:
     if graph is None:
-        raise ValueError("graph is required")
+        raise ValueError('graph is required')
     runtime_config = config or EvoRuntimeConfig(_resolve_path(path, stores))
     owns_stores = stores is None
-    runtime_stores = stores or open_sqlite_runtime(runtime_config.path, value_codec=value_codec, control_codec=control_codec)
+    runtime_stores = stores or open_sqlite_runtime(
+        runtime_config.path, value_codec=value_codec, control_codec=control_codec)
     committer = ArtifactCommitCoordinator(runtime_stores.artifact_store)
     controller = RunController(event_log=runtime_stores.event_log, committer=committer)
     resolver = ArtifactStoreVersionResolver(runtime_stores.artifact_store)
@@ -330,4 +337,4 @@ def _resolve_path(path: str | Path | None, stores: SQLiteRuntimeStores | None) -
         return path
     if stores is not None:
         return stores.event_log.path
-    raise ValueError("path is required when stores are not provided")
+    raise ValueError('path is required when stores are not provided')
