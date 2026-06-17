@@ -36,6 +36,19 @@ def register_image_url(config: dict[str, Any], path_or_url: str) -> None:
     base = basename_from_path(signed)
     if base:
         registry[base] = signed
+    static_ref = _extract_static_files_ref(signed) or _extract_static_files_ref(path_or_url)
+    if static_ref:
+        registry[static_ref] = signed
+
+
+def _extract_static_files_ref(url: str) -> str:
+    marker = '/static-files/'
+    trimmed = (url or '').strip()
+    idx = trimmed.find(marker)
+    if idx < 0:
+        return ''
+    ref = trimmed[idx:]
+    return ref.split('?', 1)[0]
 
 
 def build_citation_key(item: dict[str, Any]) -> Optional[str]:

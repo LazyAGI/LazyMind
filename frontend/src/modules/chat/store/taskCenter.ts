@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { AgentAppsAuth } from "@/components/auth";
 import { Method, SSE } from "@/modules/chat/utils/sse";
-import { TaskServiceApi, taskStreamUrl } from "@/modules/chat/utils/request";
+import { TaskServiceApi, taskStreamUrl, convEventsUrl } from "@/modules/chat/utils/request";
 import UIUtils from "@/modules/chat/utils/ui";
 
 export type TaskStatus =
@@ -73,6 +73,8 @@ interface TaskCenterStore {
   activeConversationId: string;
   // live SSE connections keyed by task_id.
   _streams: Record<string, SSE>;
+  // conversation-level events SSE connections keyed by conversation_id.
+  _convStreams: Record<string, SSE>;
 
   setActiveConversation: (conversationId: string) => void;
   getTasks: (conversationId: string) => SubAgentTask[];
@@ -81,6 +83,8 @@ interface TaskCenterStore {
   subscribeTask: (conversationId: string, taskId: string) => void;
   unsubscribeTask: (taskId: string) => void;
   loadConversationTasks: (conversationId: string) => Promise<void>;
+  subscribeConvEvents: (conversationId: string) => void;
+  unsubscribeConvEvents: (conversationId: string) => void;
   reset: (conversationId: string) => void;
 }
 
@@ -120,8 +124,9 @@ function stepsToExecutionLog(steps: any[]): TaskLogEntry[] {
 
 export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   tasksByConversation: {},
-  activeConversationId: "",
+  activeConversationId: '',
   _streams: {},
+  _convStreams: {},
 
   setActiveConversation: (conversationId) => {
     set({ activeConversationId: conversationId });
@@ -365,11 +370,85 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
 
   reset: (conversationId) => {
     Object.keys(get()._streams).forEach((taskId) => get().unsubscribeTask(taskId));
+    get().unsubscribeConvEvents(conversationId);
     set((state) => ({
       tasksByConversation: {
         ...state.tasksByConversation,
         [conversationId]: [],
       },
     }));
+  },
+
+  subscribeConvEvents: (conversationId) => {
+    if (!conversationId) return;
+    const existing = get()._convStreams[conversationId];
+    if (existing) return;
+    const sse = new SSE(convEventsUrl(conversationId), {
+      method: Method.GET,
+      headers: {
+        Accept: 'text/event-stream',
+        ...AgentAppsAuth.getAuthHeaders(),
+      },
+      timeout: 3600000,
+      callbacks: {
+        message: (e: CustomEvent) => {
+          const raw = (e as any).data;
+          if (!raw || raw === '[DONE]') return;
+          const event = UIUtils.jsonParser(raw);
+          if (!event || !event.type) return;
+          const { type, payload } = event;
+          if (type === 'task_created' && payload?.task_id) {
+            get().upsertTask(conversationId, {
+              task_id: payload.task_id,
+              title: payload.title,
+              agent_type: payload.agent_type,
+              mode: payload.mode,
+              status: payload.status || 'pending',
+            });
+            get().subscribeTask(conversationId, payload.task_id);
+            if (payload.agent_type === 'plugin_step' && payload.plugin_session_id) {
+              import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
+                usePluginStore.getState().loadActiveSession(conversationId);
+              });
+            }
+          } else if (
+            type === 'step_waiting' ||
+            type === 'plugin_completed' ||
+            type === 'plugin_error'
+          ) {
+            get().loadConversationTasks(conversationId);
+            import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
+              usePluginStore.getState().loadActiveSession(conversationId);
+              usePluginStore.getState().setAutoRunning(conversationId, false);
+            });
+          } else if (type === 'auto_chat_started') {
+            import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
+              usePluginStore.getState().setAutoRunning(conversationId, true);
+            });
+            import('@/modules/chat/constants/chat').then(({ CHAT_AUTO_ADVANCE_EVENT }) => {
+              window.dispatchEvent(new CustomEvent(CHAT_AUTO_ADVANCE_EVENT, {
+                detail: { conversationId },
+              }));
+            });
+          }
+        },
+        error: () => {
+          get().unsubscribeConvEvents(conversationId);
+        },
+      },
+    });
+    set((state) => ({ _convStreams: { ...state._convStreams, [conversationId]: sse } }));
+  },
+
+  unsubscribeConvEvents: (conversationId) => {
+    const sse = get()._convStreams[conversationId];
+    if (sse) {
+      try { sse.close(); } catch { /* ignore */ }
+    }
+    set((state) => {
+      const next = { ...state._convStreams };
+      delete next[conversationId];
+      return { _convStreams: next };
+    });
   },
 }));

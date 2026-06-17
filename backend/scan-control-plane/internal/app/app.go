@@ -20,6 +20,7 @@ import (
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector/feishu"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector/localfs"
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector/notion"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/crawl"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/schedule"
 	sourceengine "github.com/lazymind/scan_control_plane/internal/sourceengine/source"
@@ -255,6 +256,7 @@ func newHandlerWithComponents(built Components) http.Handler {
 		registry,
 		coreResource,
 		scheduler,
+		sourceengine.WithAuthConnectionStatusClient(authStatusClient(built.AuthConnectionClient)),
 		sourceengine.WithDefaultDatasetAlgo(built.DefaultDatasetAlgo),
 	)
 	taskPlanner.SetManualSyncScheduler(sourceEngine)
@@ -262,6 +264,7 @@ func newHandlerWithComponents(built Components) http.Handler {
 	limits := tree.TreeQueryLimits{DefaultPageSize: 50, MaxPageSize: 100, MaxAllCurrentLevelItems: 1000}
 	sourceTree := tree.NewDBSourceTreeQueryEngine(repo, limits, tree.WithSourceTreeConnectorRegistry(registry))
 	documents := tree.NewDBSourceDocumentQuery(repo, limits)
+	readRefresher := tree.NewDBSourceReadRefresher(built.Repository, registry)
 	targetTree := tree.NewDefaultTargetTreeEngine(
 		registry,
 		tree.WithTargetTreeLimits(limits),
@@ -274,6 +277,7 @@ func newHandlerWithComponents(built Components) http.Handler {
 		server.WithTargetTreeEngine(targetTree),
 		server.WithSourceTreeQueryEngine(sourceTree),
 		server.WithSourceDocumentQuery(documents),
+		server.WithSourceReadRefresher(readRefresher),
 		server.WithTaskPlanner(taskPlanner),
 		server.WithParseTaskQuery(taskQuery),
 		server.WithAdminService(adminSvc),
@@ -286,6 +290,42 @@ func newHandlerWithComponents(built Components) http.Handler {
 		server.WithScheduleEngine(scheduler),
 		server.WithAgentToken(built.AgentToken),
 	)
+}
+
+type feishuAuthStatusClient interface {
+	BatchStatus(ctx context.Context, req feishu.ConnectionStatusRequest) (map[string]feishu.ConnectionStatus, error)
+}
+
+type authStatusAdapter struct {
+	client feishuAuthStatusClient
+}
+
+func authStatusClient(client feishu.AuthConnectionClient) sourceengine.AuthConnectionStatusClient {
+	statusClient, ok := client.(feishuAuthStatusClient)
+	if !ok {
+		return nil
+	}
+	return authStatusAdapter{client: statusClient}
+}
+
+func (a authStatusAdapter) BatchStatus(ctx context.Context, req sourceengine.AuthConnectionStatusRequest) (map[string]sourceengine.AuthConnectionStatus, error) {
+	statuses, err := a.client.BatchStatus(ctx, feishu.ConnectionStatusRequest{
+		ConnectionIDs: req.ConnectionIDs,
+		UserID:        req.UserID,
+		TenantID:      req.TenantID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]sourceengine.AuthConnectionStatus, len(statuses))
+	for key, value := range statuses {
+		out[key] = sourceengine.AuthConnectionStatus{
+			ConnectionID: value.ConnectionID,
+			Status:       value.Status,
+			LastError:    value.LastError,
+		}
+	}
+	return out, nil
 }
 
 type pendingTaskPlanner struct {
@@ -329,13 +369,17 @@ func connectorForType(connectorType connector.ConnectorType, agent localfs.Agent
 		conn := feishu.NewFeishuConnector(auth, feishuClient)
 		conn.UseTempObjectStore(temp)
 		return conn, nil
+	case notion.ConnectorType:
+		conn := notion.NewNotionConnector(auth, nil)
+		conn.UseTempObjectStore(temp)
+		return conn, nil
 	default:
 		return nil, fmt.Errorf("unsupported connector type %q", connectorType)
 	}
 }
 
 func enabledConnectorTypes() []connector.ConnectorType {
-	return []connector.ConnectorType{localfs.ConnectorType, feishu.ConnectorType}
+	return []connector.ConnectorType{localfs.ConnectorType, feishu.ConnectorType, notion.ConnectorType}
 }
 
 func buildCoreClients(cfg config.Config) (coreclient.ResourceClient, coreclient.Client, error) {

@@ -167,16 +167,10 @@ func applyMCPRuntimeConfig(ctx context.Context, db *gorm.DB, userID string, body
 
 func loadChatToolConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {
 	var toolConfig map[string]any
-	if feishuTokens, err := fetchFeishuTokens(ctx, userID); err != nil {
-		fmt.Printf("[Core] [FEISHU_TOKEN] failed to fetch feishu tokens for user %s: %v\n", userID, err)
-	} else if len(feishuTokens) > 0 {
-		var feishuValue any
-		if len(feishuTokens) == 1 {
-			feishuValue = feishuTokens[0]
-		} else {
-			feishuValue = feishuTokens
-		}
-		toolConfig = mergeToolConfig(toolConfig, map[string]any{"feishu": feishuValue})
+	if cloudToolConfig, err := fetchCloudToolConfig(ctx, userID); err != nil {
+		fmt.Printf("[Core] [CLOUD_TOOL_TOKEN] failed to fetch cloud tool tokens for user %s: %v\n", userID, err)
+	} else if len(cloudToolConfig) > 0 {
+		toolConfig = mergeToolConfig(toolConfig, cloudToolConfig)
 	}
 	if searchConfig, err := searchToolConfigEntry(ctx, db, userID); err != nil {
 		fmt.Printf("[Core] [SEARCH_TOOL_CONFIG] failed to load search tool config for user %s: %v\n", userID, err)

@@ -23,6 +23,7 @@ type Handler struct {
 	targetTree tree.TargetTreeEngine
 	sourceTree tree.SourceTreeQueryEngine
 	documents  tree.SourceDocumentQuery
+	refresher  tree.SourceReadRefresher
 	tasks      taskengine.Planner
 	taskQuery  taskengine.Query
 	admin      *adminservice.Service
@@ -146,6 +147,12 @@ func WithSourceTreeQueryEngine(engine tree.SourceTreeQueryEngine) Option {
 func WithSourceDocumentQuery(query tree.SourceDocumentQuery) Option {
 	return func(h *Handler) {
 		h.documents = query
+	}
+}
+
+func WithSourceReadRefresher(refresher tree.SourceReadRefresher) Option {
+	return func(h *Handler) {
+		h.refresher = refresher
 	}
 }
 

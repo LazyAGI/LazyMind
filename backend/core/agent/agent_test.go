@@ -647,6 +647,165 @@ func TestAttachCaseDetailsReportResultAddsSummaryAndCSVFile(t *testing.T) {
 	assertOnlyTopLevelFileURL(t, data)
 }
 
+func TestAttachEvalReportSummaryResultAddsSummaryFields(t *testing.T) {
+	baseDir := t.TempDir()
+	t.Setenv("LAZYMIND_EVO_BASE_DIR", baseDir)
+	manifestDir := filepath.Join(baseDir, "dev-runs", "thr-1", "store", "runs", "run_1", "artifacts", "manifests")
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatalf("create manifest dir: %v", err)
+	}
+	manifest := `{
+		"artifact_id": "eval_report",
+		"latest_version": 2,
+		"schema_name": "EvalReport",
+		"versions": [
+			{"version": 1, "payload_ref": "artifacts/blobs/eval_report/v0001.json"},
+			{"version": 2, "payload_ref": "artifacts/blobs/eval_report/v0042.json"}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(manifestDir, "eval_report.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	payload := []any{
+		map[string]any{
+			"artifact_id":   "eval_report",
+			"artifact_ref":  "eval_report@v2",
+			"schema":        "EvalReport",
+			"case_count":    float64(0),
+			"unrelated_key": "keep-me",
+			"data": map[string]any{
+				"eval_dataset_ref": "eval_dataset@v1",
+				"metrics":          map[string]any{"correct_rate": 0.4},
+				"bad_cases": []any{
+					map[string]any{"case_id": "case_0001", "trace_id": "trace-1"},
+					map[string]any{"case_id": "case_0002", "trace_id": ""},
+					map[string]any{"case_id": "case_0003"},
+				},
+			},
+		},
+	}
+
+	found, err := attachEvalReportSummaryResult(payload, "thr-1")
+	if err != nil {
+		t.Fatalf("attachEvalReportSummaryResult returned error: %v", err)
+	}
+	if !found {
+		t.Fatalf("expected eval report row to be found")
+	}
+	row := payload[0].(map[string]any)
+	if row[evalReportIDField] != "v0042" {
+		t.Fatalf("expected report_id from latest payload_ref, got %#v", row[evalReportIDField])
+	}
+	coverage, ok := row[evalReportTraceCoverageField].(evalReportTraceCoverage)
+	if !ok {
+		t.Fatalf("expected trace coverage, got %#v", row[evalReportTraceCoverageField])
+	}
+	if coverage.CoveredCount != 1 || coverage.TotalCount != 3 || math.Abs(coverage.Rate-1.0/3.0) > 0.000001 {
+		t.Fatalf("unexpected trace coverage: %#v", coverage)
+	}
+	if row[evalReportBadCaseCountField] != 3 {
+		t.Fatalf("expected bad_case_count from bad_cases length, got %#v", row[evalReportBadCaseCountField])
+	}
+	if _, ok := row["eval_dataset_ref"]; ok {
+		t.Fatalf("did not expect eval_dataset_ref to be duplicated at result row")
+	}
+	if _, ok := row["accuracy"]; ok {
+		t.Fatalf("did not expect accuracy to be duplicated at result row")
+	}
+	data := row["data"].(map[string]any)
+	if data["eval_dataset_ref"] != "eval_dataset@v1" {
+		t.Fatalf("expected original dataset ref to remain in data")
+	}
+	if data["metrics"].(map[string]any)["correct_rate"] != 0.4 {
+		t.Fatalf("expected original metrics to remain in data")
+	}
+	if _, ok := data["bad_cases"]; ok {
+		t.Fatalf("expected bad_cases to be removed from summary response")
+	}
+}
+
+func TestListEvalReportBadCasesFiltersAndPaginates(t *testing.T) {
+	baseDir := t.TempDir()
+	t.Setenv("LAZYMIND_EVO_BASE_DIR", baseDir)
+	manifestDir := filepath.Join(baseDir, "dev-runs", "thr-1", "store", "runs", "run_1", "artifacts", "manifests")
+	blobDir := filepath.Join(baseDir, "dev-runs", "thr-1", "store", "runs", "run_1", "artifacts", "blobs", "eval_report")
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatalf("create manifest dir: %v", err)
+	}
+	if err := os.MkdirAll(blobDir, 0o755); err != nil {
+		t.Fatalf("create blob dir: %v", err)
+	}
+	manifest := `{
+		"artifact_id": "eval_report",
+		"latest_version": 1,
+		"schema_name": "EvalReport",
+		"versions": [
+			{"version": 1, "payload_ref": "artifacts/blobs/eval_report/v0001.json"}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(manifestDir, "eval_report.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	payload := `{
+		"bad_cases": [
+			{"case_id":"case_1","Defect":"答案缺少合同条款","Reason":"没有覆盖退款条款","failure_type":"missing_answer"},
+			{"case_id":"case_2","Defect":"引用错误","Reason":"检索片段错误","failure_type":"wrong_context"},
+			{"case_id":"case_3","defect":"合同金额错误","reason":"金额计算错误","failure_type":"missing_answer"},
+			{"case_id":"case_4","Defect":"格式问题","Reason":"输出冗余","failure_type":"format"}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(blobDir, "v0001.json"), []byte(payload), 0o644); err != nil {
+		t.Fatalf("write payload: %v", err)
+	}
+
+	result, err := listEvalReportBadCases("thr-1", "eval_report", "v0001", evalReportBadCaseListQuery{
+		PageSize:    1,
+		Offset:      0,
+		Keyword:     "合同",
+		FailureType: "missing_answer",
+	})
+	if err != nil {
+		t.Fatalf("listEvalReportBadCases returned error: %v", err)
+	}
+	if result.TotalSize != 2 {
+		t.Fatalf("expected total_size 2 after filtering, got %d", result.TotalSize)
+	}
+	if result.NextPageToken != "1" {
+		t.Fatalf("expected next_page_token=1, got %q", result.NextPageToken)
+	}
+	if len(result.Items) != 1 || result.Items[0]["case_id"] != "case_1" {
+		t.Fatalf("unexpected first page items: %#v", result.Items)
+	}
+
+	secondPage, err := listEvalReportBadCases("thr-1", "eval_report", "v0001", evalReportBadCaseListQuery{
+		PageSize:    10,
+		Offset:      1,
+		Keyword:     "合同",
+		FailureType: "missing_answer",
+	})
+	if err != nil {
+		t.Fatalf("listEvalReportBadCases second page returned error: %v", err)
+	}
+	if secondPage.NextPageToken != "" {
+		t.Fatalf("expected empty next_page_token, got %q", secondPage.NextPageToken)
+	}
+	if len(secondPage.Items) != 1 || secondPage.Items[0]["case_id"] != "case_3" {
+		t.Fatalf("unexpected second page items: %#v", secondPage.Items)
+	}
+}
+
+func TestParseEvalReportBadCaseListQueryDefaultsPageSizeToTen(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/core/agent/threads/thr-1/results/eval-reports/v0001/bad-cases", nil)
+
+	query, err := parseEvalReportBadCaseListQuery(req)
+	if err != nil {
+		t.Fatalf("parseEvalReportBadCaseListQuery returned error: %v", err)
+	}
+	if query.PageSize != 10 {
+		t.Fatalf("expected default page_size 10, got %d", query.PageSize)
+	}
+}
+
 func TestAttachCaseDetailsReportResultReadsCaseDetailsFromJSONPath(t *testing.T) {
 	uploadRoot := t.TempDir()
 	t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)

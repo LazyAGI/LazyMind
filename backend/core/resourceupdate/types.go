@@ -47,9 +47,11 @@ type skillGenerateRequestJSON struct {
 
 type memoryGenerateRequestJSON struct {
 	SessionID      string          `json:"session_id"`
-	Target         string          `json:"target"`
 	History        json.RawMessage `json:"history,omitempty"`
-	CurrentContent string          `json:"current_content"`
+	Memory         string          `json:"memory,omitempty"`
+	User           string          `json:"user,omitempty"`
+	Target         string          `json:"target,omitempty"`
+	CurrentContent string          `json:"current_content,omitempty"`
 }
 
 type taskOutcome struct {

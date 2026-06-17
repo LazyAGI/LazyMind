@@ -2,14 +2,16 @@ package feishu
 
 import (
 	"context"
+	"time"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 )
 
 type FeishuConnector struct {
-	auth AuthConnectionClient
-	api  FeishuClient
-	temp TempObjectStore
+	auth             AuthConnectionClient
+	api              FeishuClient
+	temp             TempObjectStore
+	searchRetryDelay func(int) time.Duration
 }
 
 func NewFeishuConnector(auth AuthConnectionClient, api FeishuClient) *FeishuConnector {

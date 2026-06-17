@@ -901,6 +901,34 @@
   }
 }
 
+.data-source-tree-select-tag.ant-tag {
+  max-width: 100%;
+  margin-inline-end: 4px;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  vertical-align: middle;
+
+  .ant-tag-close-icon {
+    flex: none;
+    margin-inline-start: 4px;
+  }
+}
+
+.data-source-tree-select-tag-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.data-source-tree-select-tooltip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .data-source-form-section-title {
   margin-bottom: 8px;
   color: #101828;

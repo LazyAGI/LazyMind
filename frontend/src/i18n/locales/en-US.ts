@@ -482,6 +482,11 @@ const enUS = {
 
   datasetManagement: {
     fields: {
+      datasetName: "Dataset Name",
+      datasetDescription: "Dataset Description",
+      knowledgeBase: "Linked Knowledge Base",
+      sampleCount: "Samples",
+      owner: "Creator",
       caseId: "Case ID",
       question: "Question",
       questionType: "Question Type",
@@ -495,6 +500,35 @@ const enUS = {
       isDeleted: "Deleted",
       source: "Source",
       updatedAt: "Updated At",
+    },
+    list: {
+      title: "Dataset Management",
+      subtitle: "Manage Q&A evaluation samples with manual editing, file import, and algorithm feedback data.",
+      createDataset: "New Dataset",
+      searchPlaceholder: "Search dataset name/description",
+      enter: "Enter",
+      confirmDeleteTitle: "Delete {{name}}?",
+      confirmDeleteContent: "All samples in this dataset will be affected. Please proceed carefully.",
+      message: {
+        loadFailed: "Failed to load datasets",
+        detailLoadFailed: "Failed to load dataset details",
+        deleted: "Dataset deleted",
+        updated: "Dataset updated",
+        created: "Dataset created",
+      },
+    },
+    form: {
+      createTitle: "New Dataset",
+      editTitle: "Edit Dataset",
+      namePlaceholder: "Enter dataset name",
+      descriptionPlaceholder: "Enter dataset description",
+      knowledgeBasePlaceholder: "Select knowledge base",
+      validation: {
+        nameRequired: "Enter dataset name",
+        nameMax: "Dataset name cannot exceed 80 characters",
+        descriptionMax: "Dataset description cannot exceed 500 characters",
+        knowledgeBaseRequired: "Select linked knowledge base",
+      },
     },
     import: {
       rowNumber: "Row",
@@ -570,6 +604,7 @@ const enUS = {
     promptSuggestionPolishTemplate:
       "Please polish the following message by removing redundant wording and improving readability and accuracy:\n\n{{prompt}}",
     promptPolishing: "Optimizing...",
+    autoAdvanceRunning: "Auto mode is running, please wait…",
     upload: "Upload file",
     modelProviderChecking: "Checking model configuration",
     modelProviderCheckingDesc: "Q&A will be available once the check finishes.",
@@ -600,6 +635,14 @@ const enUS = {
     noReferences: "No references",
     stopGenerate: "Stop",
     send: "Send",
+    pluginContinue: "Continue",
+    pluginRetry: "Retry",
+    pluginPanelTitle: "Plugin Panel",
+    pluginStatusRunning: "Running",
+    pluginStatusDone: "Done",
+    pluginStatusFailed: "Failed",
+    pluginStatusWaiting: "Waiting",
+    pluginBtnDisabledHint: "Step is running, please wait…",
     // Greeting
     greetingMorning: "Good morning",
     greetingAfternoon: "Good afternoon",
@@ -786,6 +829,9 @@ const enUS = {
     statusFailed: "Failed",
     statusRunning: "In progress",
     statusInterrupted: "Interrupted",
+    filterAll: "All",
+    filterSucceeded: "Succeeded",
+    filterFailed: "Failed",
   },
 
   // Knowledge Base
@@ -841,7 +887,7 @@ const enUS = {
     authorize: "Authorize",
     deleteTitle: "Delete Knowledge Base [{{name}}]",
     deleteContent: "This action cannot be undone. Related applications will be invalidated. Please enter the text below to confirm:",
-    deleteConfirmText: "I confirm deletion of this knowledge base and understand the consequences",
+    deleteConfirmText: "I confirm deletion of knowledge base [{{name}}] and understand the consequences",
     searchPlaceholder: "Name / Description / Tags",
     searchDocPlaceholder: "Search by name, tags, or creator",
     createKnowledgeBase: "Create Knowledge Base",
@@ -1086,7 +1132,7 @@ const enUS = {
       "Manage local, object storage, and OAuth cloud knowledge sources in one place",
     dataSourceDemoTitle: "Frontend demo mode",
     dataSourceCreate: "New Data Source",
-    dataSourceCreateKnowledgeSource: "New Knowledge Source",
+    dataSourceCreateKnowledgeSource: "New Data Source",
     dataSourceEdit: "Edit Data Source",
     dataSourceSaveConfig: "Save Configuration",
     dataSourceCreateOnly: "Create Only",
@@ -1132,6 +1178,8 @@ const enUS = {
       "Toggle whether {{name}} is used in chat by default",
     dataSourceFeishuAccountChatSwitchHint:
       "When on, knowledge sources created with this Feishu account are searched in chat by default.",
+    dataSourceFeishuAccountChatAuthRequired:
+      "Only Feishu accounts with valid authorization can be used in chat by default.",
     dataSourceFeishuAccountChatOn: "On",
     dataSourceFeishuAccountChatOff: "Off",
     dataSourceFeishuAccountName: "Account Description",
@@ -1148,7 +1196,7 @@ const enUS = {
     dataSourceSelectFeishuAuthTitle: "Select Feishu Authorization",
     dataSourceSelectFeishuAuthIntro:
       "Choose a valid authorization before configuring the Feishu knowledge source.",
-    dataSourceAssetSearchPlaceholder: "Search data source, knowledge base, or target",
+    dataSourceAssetSearchPlaceholder: "Search data source, knowledge base",
     dataSourceAssetNoResultTitle: "No matching data assets",
     dataSourceAssetNoResultDesc: "Adjust the search term or health filter and try again.",
     dataSourceAccessAlertTitle: "Knowledge Source Access",
@@ -1158,6 +1206,9 @@ const enUS = {
     dataSourceTypeFeishu: "Feishu",
     dataSourceTypeLocalDesc: "Supports selecting multiple local paths and connection testing",
     dataSourceTypeFeishuDesc: "Set App ID / App Secret first, then connect via OAuth",
+    dataSourceTypeNotion: "Notion",
+    dataSourceTypeNotionDesc:
+      "Connect Notion pages or databases, sync by authorization scope and serve chat.",
     dataSourceTypeStepIntro:
       "Currently supports local directory and Feishu data source access. Select one to continue.",
     dataSourceAdminOnly: "Admin",
@@ -1185,6 +1236,38 @@ const enUS = {
     dataSourceFeishuNotReady: "Feishu data source setup is incomplete",
     dataSourceFeishuNotReadyDesc:
       "Go back to set App ID and App Secret, then continue to connect your Feishu account.",
+    dataSourceNotionLockHint: "Requires Client ID / Client Secret to be set before selecting Notion data source",
+    dataSourceNotionAuthReadyHint: "Credentials saved but not yet authorized. Click to update Client ID / Client Secret and reauthorize.",
+    dataSourceNotionAuthConnectedHint: "Currently authorized: {{account}}.",
+    dataSourceNotionCredentialModalTitle: "Configure Notion OAuth App",
+    dataSourceNotionCredentialSaveAndSelect: "Save and Authorize Notion",
+    dataSourceNotionCredentialHint:
+      "Go to Notion Developers to create a Public Integration, get OAuth Client ID and Client Secret; the Redirect URI must be set to /oauth/notion/data-source/callback.",
+    dataSourceNotionCredentialSaved: "Notion OAuth credentials saved",
+    dataSourceNotionCredentialReset: "Notion OAuth credentials disconnected",
+    dataSourceNotionResetCredentialAction: "Reset credentials",
+    dataSourceNotionCredentialResetConfirmTitle: "Reset Notion OAuth credentials?",
+    dataSourceNotionCredentialResetConfirmContent:
+      "This will clear the current Notion Client ID / Client Secret and OAuth connection state. You will need to configure them again before using Notion data sources.",
+    dataSourceNotionAuthRequired: "Please complete Notion authorization first.",
+    dataSourceNotionConnected: "Connected {{account}}",
+    dataSourceNotionSetupRequiredHint: "Please configure Notion OAuth app credentials first.",
+    dataSourceNotionAuthPendingHint: "Credentials saved. Click to complete Notion authorization.",
+    dataSourceNotionCredentialRequired:
+      "Please enter Notion OAuth Client ID and Client Secret.",
+    dataSourceNotionCredentialFirst:
+      "Please enter and save the Notion Client ID / Client Secret before reauthorizing.",
+    dataSourceNotionAuthWindowTitle: "Notion Authorization",
+    dataSourceNotionNotReady: "Notion data source setup is incomplete",
+    dataSourceNotionNotReadyDesc:
+      "Go back to set Client ID and Client Secret, then continue to connect your Notion account.",
+    dataSourceNotionTargetPlaceholder: "https://www.notion.so/... or Notion page/database id",
+    dataSourceNotionTargetRequired: "Please paste a Notion page/database link or ID.",
+    dataSourceNotionSourceCreationFailed: "Data source created but no source id returned. Cannot continue Notion binding configuration.",
+    dataSourceNotionSetupRequiredForCreate: "OAuth credentials must be configured before creating a Notion data source.",
+    dataSourceNotionTargetTypeLabel: "Notion target type",
+    dataSourceNotionTargetTypeRequired: "Please select Notion target type",
+    dataSourceNotionTargetLabel: "Notion page or database",
     dataSourceAppIdRequired: "Please enter App ID",
     dataSourceAppSecretRequired: "Please enter App Secret",
     dataSourceAppId: "App ID",
@@ -1207,6 +1290,7 @@ const enUS = {
     dataSourceFeishuSpace: "Feishu Space / Wiki ID",
     dataSourceFeishuSpaceRequired: "Please enter target space identifier",
     dataSourceFeishuSetupGuideAction: "Setup Guide",
+    dataSourceNotionSetupGuideAction: "Setup Guide",
     dataSourceFeishuTargetType: "Sync Target Type",
     dataSourceFeishuTargetTypeRequired: "Please select a Feishu sync target type",
     dataSourceFeishuTargetTypeWiki: "Wiki Space",
@@ -1293,8 +1377,8 @@ const enUS = {
     dataSourceTenantKey: "Tenant Key",
     dataSourceTokenSummary: "Token Summary",
     dataSourceGrantedScopes: "Granted Scopes",
-    dataSourceOauthSuccess: "Feishu OAuth succeeded. Account connection status updated.",
-    dataSourceOauthFailedRetry: "Feishu OAuth failed. Please try again later.",
+    dataSourceOauthSuccess: "OAuth succeeded. Account connection status updated.",
+    dataSourceOauthFailedRetry: "OAuth failed. Please try again later.",
     dataSourceOauthSessionMissing:
       "Authorization session expired. Please start Feishu OAuth again.",
     dataSourceOauthStateMismatch:

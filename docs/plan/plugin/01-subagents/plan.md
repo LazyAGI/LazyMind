@@ -58,12 +58,12 @@
 
 ### 1.5 设计原则：算法层不反向依赖后端
 
-算法层（Python）不直接持有 core 业务库连接，也不硬编码 core 表结构。任务 / 成果状态读写二选一：
+算法层（Python）不直接持有 core 业务库连接，也不硬编码 core 表结构。任务 / 成果状态读写有两条路径：
 
-- **HTTP 优先**：通过 `core_api_client` 调 core 暴露的内部端点（如 auto 轮询任务状态）。
-- **连接信息随请求下发**：当确需算法层直接读写 sub_agent 相关表时（SubAgent 框架持久化 `sub_agent_steps`、读写 artifact），**由 Go 在调用 `/api/subagent/run` 时把数据库连接信息（DSN）放进请求体下发**。依赖方向仍是 Go → Python。
+- **连接信息随请求下发（SubAgent 执行层）**：`SubAgentDB` 类接收 Go 在调用 `/api/subagent/run` 时下发的 `db_dsn`，直接对 `sub_agent_steps`、`sub_agent_artifacts` 读写。连接随请求创建（`SubAgentDB.__init__`）、完成后释放（`SubAgentDB.dispose`），不做全局单例缓存。
+- **环境配置读取（ChatAgent 工具层）**：`TaskQueryDB` 类从环境变量 `LAZYMIND_CORE_DATABASE_URL` / `ACL_DB_DSN` 取连接串，用于 ChatAgent 工具（如 `create_subagent` auto 模式轮询、`list_subagents`、`get_subagent_artifacts` 等）直接查 `sub_agent_tasks` / `sub_agent_artifacts`。全局单例，进程生命周期内复用。
 
-> DSN 经 `lazymind.common.postgres.normalize_postgres_connection_url` 规整后使用；连接随请求创建、用完释放，不做全局单例缓存，不落 LLM 上下文、不写日志明文。
+依赖方向仍是 Go → Python。DSN 经 `lazymind.common.postgres.normalize_postgres_connection_url` 规整后使用；DSN 不落 LLM 上下文、不写日志明文。
 
 ### 1.6 mode 全链路透传（前置改动）
 
@@ -121,23 +121,28 @@ CREATE UNIQUE INDEX uq_sat_conv_seq ON sub_agent_tasks(conversation_id, seq_in_c
 
 ### 2.2 `sub_agent_steps`
 
-SubAgent 执行过程的 ReAct 步骤序列，用于断点恢复时重建 LLM 上下文。每行对应一步（assistant 推理 + tool_calls 一行，tool_results 一行）。
+SubAgent 执行过程的步骤序列，用于断点恢复时重建 LLM 上下文，也供前端展示执行路径。每行对应一步。
 
 ```sql
 CREATE TABLE sub_agent_steps (
     id          VARCHAR(36)  PRIMARY KEY,
     task_id     VARCHAR(36)  NOT NULL REFERENCES sub_agent_tasks(id),
-    seq         INT          NOT NULL,       -- 0-based，ReAct 步骤序号
-    role        VARCHAR(16)  NOT NULL,       -- 'assistant' | 'tool'
+    seq         INT          NOT NULL,       -- 0-based，步骤序号（严格递增）
+    role        VARCHAR(16)  NOT NULL,       -- 'assistant' | 'tool' | 'think' | 'text'
     content     JSONB        NOT NULL,
-    -- role='assistant': {"text": "...", "tool_calls": [{"id": "call_xxx", "name": "...", "args": {...}}]}
+    -- role='assistant': {"text": "", "tool_calls": [{"id": "call_xxx", "name": "...", "args": {...}}]}
     -- role='tool':      {"tool_results": [{"tool_call_id": "call_xxx", "name": "...", "result": "..."}]}
+    -- role='think':     {"content": "..."}   ← LLM 推理内容，在 tool_calls 前 flush
+    -- role='text':      {"content": "..."}   ← LLM 输出文本，在 tool_calls 前或最终 flush
     created_at  TIMESTAMP    NOT NULL DEFAULT NOW()
 );
 CREATE INDEX idx_sas_task ON sub_agent_steps(task_id, seq);
 ```
 
-**tool_call_id 配对约束（断点恢复正确性依赖）**：重建 LLM messages 时，OpenAI 风格要求每个 `role=tool` 消息的 `tool_call_id` 能匹配前序 `role=assistant` 的 `tool_calls[].id`，否则模型 API 报错。因此 assistant 行须存 tool_call 的 `id`，tool 行须存对应 `tool_call_id`；resume 时按 `seq` 回放并校验配对，发现孤儿 tool_result 行则丢弃该步并从最近一个完整 assistant 边界重放。
+**tool_call_id 配对约束（断点恢复正确性依赖）**：重建 LLM messages 时，OpenAI 风格要求每个 `role=tool` 消息的 `tool_call_id` 能匹配前序 `role=assistant` 的 `tool_calls[].id`，否则模型 API 报错。`_rebuild_history_from_steps` 重建时：
+- 遇到孤儿 tool_result 行（无匹配的 assistant tool_call id）则丢弃该步，截止到上一个完整 assistant 边界重放。
+- 遇到 assistant 行的 `function.arguments` 不是合法 JSON（截断/损坏）时，同样截止到上一个完整边界。
+- `think` / `text` 行仅用于日志 / 前端展示，不参与 LLM messages 重建。
 
 ### 2.3 `sub_agent_artifacts`
 
@@ -179,8 +184,8 @@ CREATE INDEX idx_saa_task_key ON sub_agent_artifacts(task_id, artifact_key, seq)
 
 因此"主 SSE 携带 `tag`、Go `switch ev.Tag` 拦截"在现有协议中不成立，必须新增结构化通道：
 
-- **Python（`event_translator.py`）**：`feed()` 新增分支，`tag == 'task_created'` / `'heartbeat'` 时产出携带 `extra={'task_created': {...}}` 或心跳占位的帧（复用 `_stream_frame(extra=...)`），而非丢弃。
-- **Python（`chat_service.py` / `response_payload`）**：确保 `data` 能携带 `task_created` 子对象（透传 translator 的 extra）。
+- **Python（`event_translator.py`）**：`feed()` 已实现分支：`tag == 'task_created'` 时产出 `_stream_frame(extra={'task_created': {全部字段去掉tag}})`；`tag == 'heartbeat'` 时产出 `_stream_frame(extra={'heartbeat': True})`。
+- **Python（`chat_service.py`）**：无需额外改动；translator 产出的 extra 字段通过 `response_payload` 透传到帧的顶层。
 - **Go**：`UpstreamStreamChunk` 新增 `TaskCreated *TaskCreatedEvent json:"task_created,omitempty"`；在**现有 upstream 消费循环**（`streamSingleAnswer` 的 `for d := range ch`）识别 `d.TaskCreated != nil`，而非另起 `processMainSSEEvent`。
 
 `task_created` 事件结构见 [code.md C2](./code.md#c2)；Go 拦截逻辑见 [code.md C4](./code.md#c4)。
@@ -219,10 +224,10 @@ SubAgent 的**完整执行步骤**持久化到 `sub_agent_steps`，无需额外 
 | 工具 | 输入 | 输出 |
 | --- | --- | --- |
 | `todo_writer` | `todos: list[{title, description}]` | `"Plan saved (N steps). Proceeding with step 1."` |
-| `create_subagent` | `agent_type`, `title`, `objective`, `params`, `input_artifact_keys`, `output_artifact_keys`（可选 `tools`、`resume`） | auto：阻塞至终态返回摘要串；manual：立即返回后台执行提示。详见 4.3 与 [code.md C1](./code.md#c1) |
+| `create_subagent` | `agent_type`, `title`, `objective`, `params`, `input_artifact_keys`, `output_artifact_keys`（可选 `tools`、`resume`） | auto：阻塞至终态返回摘要串（含 artifacts 描述）；manual：立即返回后台执行提示。详见 4.3 与 [code.md C1](./code.md#c1) |
 | `list_subagents` | `status: str = None`（过滤 pending/running/succeeded/failed/interrupted） | 自然语言列表，如 `"1. 任务指令优化（task_optimization, succeeded）\n2. 素材收集（…, running, 60%）"` |
 | `get_subagent_status` | `task_ref: str`（标题 / "第N个" / 类型名） | 状态摘要，如 `"素材收集（running）：已完成 60%，正在分析风格特征，预计还需 30 秒。"` |
-| `list_artifacts` | `task_ref: str` | key 摘要，如 `"素材收集任务共有 2 个成果：style_refs（file_list）、style_keywords（json）。"` |
+| `list_subagent_artifacts` | `task_ref: str` | key 摘要，如 `"Task '素材收集' has 2 artifact(s): style_refs (file_list), style_keywords (json)."` |
 | `get_subagent_artifacts` | `task_ref: str`, `keys: list[str] = None`（不传返回全部） | 各 artifact 结构化描述：文件返回路径，文本返回内容摘要 |
 
 ### 4.2 SubAgent 工具
@@ -230,10 +235,9 @@ SubAgent 的**完整执行步骤**持久化到 `sub_agent_steps`，无需额外 
 | 工具 | 输入 | 输出 / 说明 |
 | --- | --- | --- |
 | `todo_writer` | 同 ChatAgent | 同 ChatAgent |
-| `save_artifact` | `key`, `value`（文件类型传本地绝对路径，框架自动复制到 workspace 并转相对路径）, `content_type`（text/json/image/file/file_list） | `"Artifact '{key}' saved."`；框架在 emit `done` 前校验每个声明 key 至少 save 过 1 行 |
-| `get_artifact` | `key`, `task_ref: str = None`（不传则当前对话按 key 取最新一条；可传标题 / "第N个" / 类型名精确定位） | artifact 内容串（文本 / 文件路径 / JSON 描述） |
-| `list_artifacts` | `task_ref: str = None`（不传列出当前对话所有任务） | 摘要串，如 `"可用成果：\n- 第1步（任务指令优化）: optimized_task（text）\n- 第2步（素材收集）: style_refs（file_list）、style_keywords（json）"` |
-| `get_tool_result` | `call_index: int`（0-based） | 该步工具调用原始返回值串。**框架需新增**按调用序号索引工具结果的能力（当前 `FunctionCall` 仅在 `locals['_lazyllm_agent']['workspace']['history']` 存历史，无此接口），可基于 workspace history 或 `sub_agent_steps` 实现 |
+| `save_artifact` | `key`, `value`（文件类型传本地绝对路径，框架自动复制到 workspace 并转相对路径）, `content_type`（text/json/image/file/file_list），可选 `source_tool`（产出该成果的工具名，仅展示用） | `"Artifact '{key}' saved."`；框架在 emit `done` 前校验每个声明 key 至少 save 过 1 行 |
+| `get_artifact` | `key`, `task_ref: str = None`（不传则当前任务按 key 取最新一条；可传标题 / "第N个" / 类型名精确定位） | artifact 内容串（文本 / 文件路径 / JSON 描述） |
+| `list_artifacts` | `task_ref: str = None`（不传列出当前任务已产出的成果） | 摘要串，如 `"可用成果：style_refs（file_list）、style_keywords（json）"` |
 
 ### 4.3 工具注册规则与 `create_subagent` 行为
 
@@ -247,7 +251,7 @@ SubAgent 的**完整执行步骤**持久化到 `sub_agent_steps`，无需额外 
 
 | 模式 | 工具行为 | 对话后续 |
 | --- | --- | --- |
-| **auto** | 轮询 core 内部状态端点等待终态，return 摘要，LLM 继续 ReAct | 当前轮次继续，直到 LLM 无新 SubAgent 且输出最终文本 |
+| **auto** | 通过 `TaskQueryDB` 轮询 `sub_agent_tasks` 表等待终态（直读 DB，不走 HTTP），return 摘要（含 artifacts 描述），LLM 继续 ReAct | 当前轮次继续，直到 LLM 无新 SubAgent 且输出最终文本 |
 | **manual** | 立即 return（不等执行），Go 在主 SSE 关闭后后台调 `/api/subagent/run` | 当前 SSE 关闭，等待用户下一次输入构成新轮次 |
 
 **auto 阻塞与连接超时（必须处理）**：Go 调上游 `/api/chat/stream` 的 HTTP client 默认 `Timeout = 10min`（`chat.go`），而 auto 阻塞期间主 SSE 静默。长任务超过 10 分钟会被掐断。处理：
@@ -255,7 +259,7 @@ SubAgent 的**完整执行步骤**持久化到 `sub_agent_steps`，无需额外 
 1. **调大上游 chat client 超时**（或 0 表不限、依赖 ctx 取消），与 SubAgent 最长预期时长匹配。
 2. **心跳保活**：轮询期间周期性（如每 15s）`_write_agent_data('heartbeat')`；translator 把 `heartbeat` 翻译成 SSE 注释行 / 空 data 帧（不进入文本内容）。心跳帧的 translator 分支需与 3.1 的 `task_created` 分支一并实现，否则同样被丢弃。
 
-**条件工具注册**：查询类工具（`list_subagents` / `get_subagent_status` / `list_artifacts` / `get_subagent_artifacts`）在 auto / manual **都注册**，但**仅当对话内已存在 SubAgent 时生效**（无任务时不出现在工具列表）。
+**条件工具注册**：查询类工具（`list_subagents` / `get_subagent_status` / `list_subagent_artifacts` / `get_subagent_artifacts`）在 auto / manual **都注册**，但**仅当对话内已存在 SubAgent 时生效**（无任务时不出现在工具列表）。
 
 > auto 模式 `create_subagent` 返回话术会引导 LLM 调 `get_subagent_artifacts`，故 auto 也必须注册，否则引导到不存在的工具。
 
@@ -267,30 +271,34 @@ Go 每次组装 ChatAgent 请求时通过 `SELECT COUNT(*) FROM sub_agent_tasks 
 
 ### 5.1 Python `/api/subagent/run`（SSE）
 
-**由 Go 调用**（auto / manual 均如此）。Go 收到 `task_created` 建库后立即调此端点。请求用独立 sid（`sid = task_id`）获得独立队列桶；请求体携带 `db_dsn`，供 SubAgent 框架持久化步骤 / 读写 artifact。
+**由 Go 调用**（auto / manual 均如此）。Go 收到 `task_created` 建库后立即调此端点。请求用独立 sid（`sid = task_id`）获得独立队列桶；请求体携带 `db_dsn`，SubAgent 框架用它连库加载任务参数（`SubAgentDB.load_task`）并持久化步骤 / 读写 artifact。
 
 ```
 POST /api/subagent/run
 {
-    "task_id":             "uuid",       ← create_subagent 生成；同时作为本请求 sid
-    "agent_type":          "image_generation",
-    "objective":           "...",
-    "params":              {"count": 4},
-    "input_artifact_keys": ["optimized_prompt"],
-    "output_artifact_keys": ["images"],  ← key 固定声明；每个 key 产出条数不限
-    "workspace_path":      "/data/subagent/user-xyz/task-uuid/",
-    "db_dsn":              "postgresql://...",  ← Go 下发，normalize 后使用，请求结束释放
-    "resume":              false         ← true 时从 sub_agent_steps 加载恢复
+    "task_id":      "uuid",          ← 同时作为本请求 sid
+    "db_dsn":       "postgresql://...",  ← Go 下发；框架 normalize 后使用，请求结束释放
+    "resume":       false,           ← true 时从 sub_agent_steps 加载恢复
+    "model_config": {...},           ← 可选，Go 透传用户模型配置
+    "agent_type":   "image_generation",  ← 可选，覆盖 DB 中的 agent_type
+    "tools":        ["image_gen_api"]    ← 可选，指定工具集
 }
-→ SSE 流（task_start / progress / artifact / done / error）
+→ SSE 流（task_start / progress / text / think / tool_calls / tool_results / artifact / done / error）
 ```
+
+框架启动时通过 `db_dsn` 建立 `SubAgentDB` 连接，调用 `load_task(task_id)` 从 `sub_agent_tasks` 读取 `objective` / `params` / `workspace_path` / `input_artifact_keys` / `output_artifact_keys` 等参数，**这些字段无需在请求体中重复传递**。
 
 ### 5.2 Python SubAgent 框架层职责
 
 1. **执行上下文注入**：`task_id` / `conversation_id` / `workspace_path` / `db_dsn` 注入工具实现层（不暴露给 LLM）。
-2. **执行步骤持久化**：ReAct 每步完成后同步写 `sub_agent_steps`（assistant 存带 `id` 的 tool_calls，tool 存带 `tool_call_id` 的 tool_results），确保中断时已有步骤不丢失。
-3. **`done` 前完整性校验**：检查 `output_artifact_keys` 每个 key 是否**至少产出过 1 行** artifact（不校验条数）；有 key 完全缺失则 emit `error`（含缺失 key 列表），不发 `done`。
-4. **断点恢复**：`resume=true` 时查 `sub_agent_steps ORDER BY seq`，按 `tool_call_id` 校验配对后重建 LLM messages，从断点继续，已完成步骤不重复执行。
+2. **执行步骤持久化**：ReAct 每步完成后同步写 `sub_agent_steps`。role 取值：
+   - `'assistant'`：存带 `id` 的 tool_calls（`{"text": "", "tool_calls": [...]}`）
+   - `'tool'`：存带 `tool_call_id` 的 tool_results（`{"tool_results": [...]}`）
+   - `'think'`：存 LLM 推理内容（`{"content": "..."}`，在 tool_calls 前 flush）
+   - `'text'`：存 LLM 输出文本（`{"content": "..."}`，在 tool_calls 前或最终 flush）
+3. **`done` 前完整性校验（含 LLM 兜底）**：先检查 `output_artifact_keys` 每个 key 是否至少产出过 1 行 artifact；有 key 缺失时，调用 `_evaluate_completion` 让 LLM 结合执行 trace 和最终输出判断任务是否实质完成：判定成功则自动补存缺失 key 的文本 artifact 并 emit `done`；判定失败则 emit `error`（含缺失 key 列表），不发 `done`。
+4. **断点恢复**：`resume=true` 时查 `sub_agent_steps ORDER BY seq`，按 `tool_call_id` 校验配对后重建 LLM messages，从断点继续，已完成步骤不重复执行。`_rebuild_history_from_steps` 还会校验 function arguments JSON 合法性，遇到截断/损坏的参数则截止到上一个完整 assistant 边界重放。
+5. **Task SSE 新增 text/think/tool_calls/tool_results 帧**：SubAgent 的 LLM 推理文本和工具调用均通过 Task SSE 实时输出（`type=text`/`think`/`tool_calls`/`tool_results`），与 ChatAgent 主 SSE 帧结构对称，供前端 Task Center 面板展示执行过程。
 
 ### 5.3 Go 事件路由职责
 

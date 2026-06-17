@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
@@ -25,6 +26,7 @@ func (e *DefaultEngine) ListSources(ctx context.Context, req ListSourcesRequest)
 	for _, record := range records {
 		items = append(items, sourceListItemToResponse(record))
 	}
+	e.attachAuthConnectionStatuses(ctx, req, items)
 	return ListSourcesResponse{Items: items, Total: total}, nil
 }
 
@@ -37,6 +39,132 @@ func storeListSourcesRequest(req ListSourcesRequest) store.SourceListRequest {
 		Status:    req.Status,
 		Page:      req.Page,
 		PageSize:  req.PageSize,
+	}
+}
+
+func (e *DefaultEngine) attachAuthConnectionStatuses(ctx context.Context, req ListSourcesRequest, items []SourceListItemResponse) {
+	if e.authStatus == nil || len(items) == 0 {
+		return
+	}
+	sourceIDs := sourceIDsFromListItems(items)
+	bindings, err := e.repo.ListBindingsBySourceIDs(ctx, sourceIDs)
+	if err != nil {
+		return
+	}
+	connectionIDsBySource := authConnectionIDsBySource(bindings)
+	connectionIDs := authConnectionIDsFromSourceMap(connectionIDsBySource)
+	if len(connectionIDs) == 0 {
+		return
+	}
+	statuses, err := e.authStatus.BatchStatus(ctx, AuthConnectionStatusRequest{
+		ConnectionIDs: connectionIDs,
+		TenantID:      req.TenantID,
+	})
+	if err != nil {
+		return
+	}
+	for i := range items {
+		ids := connectionIDsBySource[items[i].SourceID]
+		if len(ids) == 0 {
+			continue
+		}
+		items[i].AuthConnectionStatus = aggregateAuthConnectionStatus(ids, statuses)
+	}
+}
+
+func sourceIDsFromListItems(items []SourceListItemResponse) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.SourceID != "" {
+			ids = append(ids, item.SourceID)
+		}
+	}
+	return ids
+}
+
+func authConnectionIDsBySource(bindings []store.Binding) map[string][]string {
+	out := make(map[string][]string)
+	seen := map[string]map[string]struct{}{}
+	for _, binding := range bindings {
+		if strings.TrimSpace(binding.ConnectorType) != "feishu" {
+			continue
+		}
+		sourceID := strings.TrimSpace(binding.SourceID)
+		connectionID := strings.TrimSpace(binding.AuthConnectionID)
+		if sourceID == "" || connectionID == "" {
+			continue
+		}
+		if seen[sourceID] == nil {
+			seen[sourceID] = map[string]struct{}{}
+		}
+		if _, ok := seen[sourceID][connectionID]; ok {
+			continue
+		}
+		seen[sourceID][connectionID] = struct{}{}
+		out[sourceID] = append(out[sourceID], connectionID)
+	}
+	for sourceID := range out {
+		slices.Sort(out[sourceID])
+	}
+	return out
+}
+
+func authConnectionIDsFromSourceMap(values map[string][]string) []string {
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, ids := range values {
+		for _, id := range ids {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+func aggregateAuthConnectionStatus(ids []string, statuses map[string]AuthConnectionStatus) *AuthConnectionStatusResponse {
+	if len(ids) == 0 {
+		return nil
+	}
+	worst := ""
+	for _, id := range ids {
+		status := "REVOKED"
+		if item, ok := statuses[id]; ok {
+			status = strings.ToUpper(strings.TrimSpace(item.Status))
+			if status == "" {
+				status = "ERROR"
+			}
+		}
+		if authStatusRank(status) > authStatusRank(worst) {
+			worst = status
+		}
+	}
+	if worst == "" {
+		worst = "ACTIVE"
+	}
+	return &AuthConnectionStatusResponse{
+		Status:        worst,
+		ConnectionIDs: append([]string(nil), ids...),
+	}
+}
+
+func authStatusRank(status string) int {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case "REVOKED":
+		return 5
+	case "ERROR":
+		return 4
+	case "EXPIRED":
+		return 3
+	case "PENDING":
+		return 2
+	case "ACTIVE":
+		return 1
+	default:
+		return 0
 	}
 }
 

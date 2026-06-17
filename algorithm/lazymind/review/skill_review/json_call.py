@@ -5,6 +5,7 @@ import re
 import threading
 from typing import Any
 
+import jsonschema
 from json_repair import repair_json
 from lazyllm import LOG
 from pydantic import BaseModel, TypeAdapter
@@ -24,18 +25,21 @@ def call_json(
     *,
     max_retries: int = 3,
 ) -> dict[str, Any]:
-    """Call an LLM with a JSON schema response_format and return a JSON object."""
+    """Call an LLM and return a JSON object."""
     if max_retries < 1:
         raise ValueError('max_retries must be at least 1')
 
-    response_format = _response_format(schema)
     last_error: Exception | None = None
     last_raw: Any = None
     for round in range(max_retries):
         try:
             if round > 0:
                 LOG.warning(f'LLM JSON call failed after {round} attempts, retrying...')
-            raw = llm(prompt, response_format=response_format, timeout=DEFAULT_LLM_CALL_TIMEOUT_SECONDS)
+            raw = llm(
+                prompt,
+                response_format={'type': 'json_object'},
+                timeout=DEFAULT_LLM_CALL_TIMEOUT_SECONDS,
+            )
             last_raw = raw
             _record_token_usage(prompt, raw)
             parsed = _json_object(raw)
@@ -57,43 +61,6 @@ def _record_token_usage(prompt: str, raw: Any) -> None:
         input_chars = TOTAL_INPUT_TOKEN_CHARS
         output_chars = TOTAL_OUTPUT_TOKEN_CHARS
     LOG.info(f'[SkillReview] Total input token chars: {input_chars}, total output token chars: {output_chars}')
-
-
-def _response_format(schema: Any) -> dict[str, Any]:
-    name = _schema_name(schema)
-    return {
-        'type': 'json_schema',
-        'json_schema': {
-            'name': name,
-            'schema': _json_schema(schema),
-        },
-    }
-
-
-def _schema_name(schema: Any) -> str:
-    if isinstance(schema, type) and issubclass(schema, BaseModel):
-        return _safe_schema_name(schema.__name__)
-    if isinstance(schema, dict):
-        title = schema.get('title') or schema.get('name') or 'response'
-        return _safe_schema_name(str(title))
-    return _safe_schema_name(getattr(schema, '__name__', 'response'))
-
-
-def _safe_schema_name(value: str) -> str:
-    normalized = re.sub(r'[^A-Za-z0-9_-]+', '_', value).strip('_')
-    return normalized or 'response'
-
-
-def _json_schema(schema: Any) -> dict[str, Any]:
-    if isinstance(schema, type) and issubclass(schema, BaseModel):
-        return schema.model_json_schema()
-    if isinstance(schema, dict):
-        if schema.get('type') == 'json_schema' and isinstance(schema.get('json_schema'), dict):
-            json_schema = schema['json_schema'].get('schema')
-            if isinstance(json_schema, dict):
-                return json_schema
-        return schema
-    return TypeAdapter(schema).json_schema()
 
 
 def _json_object(raw: Any) -> dict[str, Any]:
@@ -126,4 +93,13 @@ def _parse_json_object(text: str) -> Any:
 def _validate_json_object(payload: dict[str, Any], schema: Any) -> dict[str, Any]:
     if isinstance(schema, type) and issubclass(schema, BaseModel):
         return schema.model_validate(payload).model_dump()
-    return payload
+    if isinstance(schema, dict):
+        jsonschema.validate(payload, schema)
+        return payload
+
+    validated = TypeAdapter(schema).validate_python(payload)
+    if isinstance(validated, BaseModel):
+        return validated.model_dump()
+    if isinstance(validated, dict):
+        return validated
+    raise ValueError(f'LLM response schema must validate to an object, got {type(validated).__name__}')

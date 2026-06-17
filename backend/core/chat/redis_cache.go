@@ -16,8 +16,15 @@ const (
 	chatMultiKeyPrefix  = "rag/chat/multi:%s:%s"
 	chatInputKeyPrefix  = "rag/chat/input:%s:%s"
 
-	chatCacheExpireTime = time.Hour * 2
-	chatStopExpireTime  = 15 * time.Minute
+	// convEventsKeyPrefix is a conversation-level event LIST, keyed only by conversation_id.
+	// It carries task_created and plugin lifecycle events across all chat turns so that
+	// the frontend can subscribe at conversation granularity rather than per history_id.
+	convEventsKeyPrefix = "rag/conv/events:%s"
+
+	chatCacheExpireTime  = time.Hour * 2
+	chatStopExpireTime   = 15 * time.Minute
+	convEventsExpireTime = time.Hour * 24
+	convEventsMaxLen     = int64(1000)
 )
 
 type ChatStatus struct {
@@ -64,6 +71,8 @@ type TaskCreatedNotice struct {
 	Mode              string `json:"mode"`
 	Status            string `json:"status"`
 	SeqInConversation int    `json:"seq_in_conversation"`
+	// PluginSessionID is set when the task is a Plugin Step (agent_type='plugin_step').
+	PluginSessionID string `json:"plugin_session_id,omitempty"`
 }
 
 func chatStatusKey(conversationID string) string {
@@ -75,6 +84,7 @@ func chatMultiKey(cid, primaryHID string) string {
 	return fmt.Sprintf(chatMultiKeyPrefix, cid, primaryHID)
 }
 func chatInputKey(cid, hid string) string { return fmt.Sprintf(chatInputKeyPrefix, cid, hid) }
+func convEventsKey(cid string) string     { return fmt.Sprintf(convEventsKeyPrefix, cid) }
 
 func setChatStatus(ctx context.Context, rdb *redis.Client, conversationID, historyID, status, currentResult string) error {
 	key := chatStatusKey(conversationID)
@@ -244,4 +254,60 @@ func getMultiAnswerInfo(ctx context.Context, rdb *redis.Client, conversationID, 
 		return nil, err
 	}
 	return &info, nil
+}
+
+// ConvEvent is a conversation-level notification pushed to the frontend via the
+// /conversations/{id}/events SSE endpoint. It is independent of any chat turn.
+type ConvEvent struct {
+	Type    string `json:"type"`    // task_created | step_waiting | plugin_completed | plugin_error | driver_input | auto_chat_started
+	Payload any    `json:"payload"` // *TaskCreatedNotice or plugin lifecycle payload map
+}
+
+// AppendConvEvent appends a ConvEvent to the conversation-level event LIST.
+// It is safe to call concurrently. The LIST is capped at convEventsMaxLen entries
+// (oldest dropped) and expires after convEventsExpireTime.
+func AppendConvEvent(ctx context.Context, rdb *redis.Client, conversationID string, ev *ConvEvent) error {
+	if rdb == nil || conversationID == "" || ev == nil {
+		return nil
+	}
+	bs, err := json.Marshal(ev)
+	if err != nil {
+		return err
+	}
+	key := convEventsKey(conversationID)
+	pipe := rdb.Pipeline()
+	pipe.RPush(ctx, key, bs)
+	pipe.LTrim(ctx, key, -convEventsMaxLen, -1)
+	pipe.Expire(ctx, key, convEventsExpireTime)
+	_, err = pipe.Exec(ctx)
+	return err
+}
+
+// WatchConvEvents long-polls the conversation-level event LIST starting from lastIndex+1
+// and calls callback for each new ConvEvent. It returns when ctx is cancelled.
+func WatchConvEvents(ctx context.Context, rdb *redis.Client, conversationID string, lastIndex int64, callback func(*ConvEvent) error) error {
+	key := convEventsKey(conversationID)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			list, err := rdb.LRange(ctx, key, lastIndex+1, -1).Result()
+			if err != nil {
+				return err
+			}
+			for _, s := range list {
+				var ev ConvEvent
+				if json.Unmarshal([]byte(s), &ev) != nil {
+					lastIndex++
+					continue
+				}
+				if err := callback(&ev); err != nil {
+					return err
+				}
+				lastIndex++
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
 }

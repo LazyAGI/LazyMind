@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
@@ -21,6 +22,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	"lazymind/core/modelconfig"
+	"lazymind/core/plugin"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 )
@@ -216,6 +218,50 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	reqBody := buildChatRequestBody(convID, sessionID, query, upstreamHistories, raw, resourceContext, userID)
 	if cnt, err := subagent.CountByConversation(r.Context(), db, convID); err == nil && cnt > 0 {
 		reqBody["has_subagents"] = true
+	}
+	// Reconcile plugin_context with the DB-authoritative active session.
+	// Rules:
+	//   1. No plugin_context from frontend → inject from DB if an active session exists.
+	//   2. Frontend sent plugin_context → cross-check with DB; overwrite any stale fields
+	//      so Python always receives the ground-truth session_id / current_step.
+	if activeSess, err := plugin.GetLatestSession(r.Context(), db, convID); err == nil && activeSess != nil {
+		existing, hasPC := reqBody["plugin_context"].(map[string]any)
+		if !hasPC || existing == nil {
+			// Case 1: inject from DB.
+			reqBody["plugin_context"] = map[string]any{
+				"session_id":   activeSess.ID,
+				"plugin_id":    activeSess.PluginID,
+				"current_step": activeSess.CurrentStepID,
+				"advance_mode": plugin.DefaultMode(),
+			}
+			fmt.Printf("[PLUGIN_CONTEXT_INJECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s\n",
+				convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID)
+		} else {
+			// Case 2: validate/correct stale fields from frontend.
+			stale := false
+			if sid, _ := existing["session_id"].(string); sid != activeSess.ID {
+				existing["session_id"] = activeSess.ID
+				stale = true
+			}
+			if pid, _ := existing["plugin_id"].(string); pid != activeSess.PluginID {
+				existing["plugin_id"] = activeSess.PluginID
+				stale = true
+			}
+			if cs, _ := existing["current_step"].(string); cs != activeSess.CurrentStepID {
+				existing["current_step"] = activeSess.CurrentStepID
+				stale = true
+			}
+			existing["advance_mode"] = plugin.DefaultMode()
+			if stale {
+				fmt.Printf("[PLUGIN_CONTEXT_CORRECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s\n",
+					convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID)
+			}
+		}
+	} else if _, hasPC := reqBody["plugin_context"]; hasPC {
+		// No active session in DB but frontend sent a plugin_context — clear it to avoid
+		// Python entering advance-step mode with a stale/non-existent session.
+		delete(reqBody, "plugin_context")
+		fmt.Printf("[PLUGIN_CONTEXT_CLEARED] conversation_id=%s no active session in DB\n", convID)
 	}
 	historyExt := buildChatHistoryExt(raw, query)
 	if err := applyChatRuntimeConfigs(r.Context(), db, userID, reqBody); err != nil {
@@ -1253,4 +1299,64 @@ func SetMultiAnswersSwitchStatus(w http.ResponseWriter, r *http.Request) {
 		db.Model(&row).Updates(map[string]any{"status": body.Status, "updated_at": now})
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{"status": body.Status})
+}
+
+// StreamConvEvents is GET /conversations/{conversation_id}/events.
+// It opens a long-lived SSE connection that replays all existing ConvEvents for the
+// conversation and then tails new ones in real time. The frontend subscribes once per
+// active conversation and uses the events to update TaskCenter and PluginPanel without
+// depending on any specific chat-turn history_id stream.
+func StreamConvEvents(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	convID := strings.TrimSpace(vars["conversation_id"])
+	if convID == "" {
+		common.ReplyErr(w, "conversation_id required", http.StatusBadRequest)
+		return
+	}
+
+	userID := store.UserID(r)
+	if userID == "" {
+		userID = "0"
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	var conv orm.Conversation
+	if err := db.Where("id = ? AND create_user_id = ?", convID, userID).First(&conv).Error; err != nil {
+		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		common.ReplyErr(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	rdb := store.Redis()
+	if rdb == nil {
+		// No Redis — nothing to stream; send a keepalive and return.
+		fmt.Fprintf(w, "data: {}\n\n")
+		flusher.Flush()
+		return
+	}
+
+	ctx := r.Context()
+	_ = WatchConvEvents(ctx, rdb, convID, -1, func(ev *ConvEvent) error {
+		bs, err := json.Marshal(ev)
+		if err != nil {
+			return nil
+		}
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", bs); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	})
 }

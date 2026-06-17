@@ -16,6 +16,7 @@ import (
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector/feishu"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector/localfs"
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector/notion"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/schedule"
 	taskengine "github.com/lazymind/scan_control_plane/internal/sourceengine/task"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/worker"
@@ -88,7 +89,7 @@ func TestBuildSelectsSQLRepositoryAndHTTPAdapters(t *testing.T) {
 	if built.CrawlWorker == nil || built.CoreResultRunner == nil || built.TempCleanupRunner == nil {
 		t.Fatalf("runtime runners should be wired: crawl=%v reconciler=%v temp=%v", built.CrawlWorker, built.CoreResultRunner, built.TempCleanupRunner)
 	}
-	if got, want := built.ConnectorTypes, []connector.ConnectorType{localfs.ConnectorType, feishu.ConnectorType}; !reflect.DeepEqual(got, want) {
+	if got, want := built.ConnectorTypes, []connector.ConnectorType{localfs.ConnectorType, feishu.ConnectorType, notion.ConnectorType}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("connectors = %+v, want %+v", got, want)
 	}
 }
@@ -156,11 +157,11 @@ func TestBuildMissingRequiredValueReturnsError(t *testing.T) {
 	}
 }
 
-func TestEnabledConnectorTypesIncludesLocalFSAndFeishu(t *testing.T) {
+func TestEnabledConnectorTypesIncludesLocalFSFeishuAndNotion(t *testing.T) {
 	t.Parallel()
 
 	got := enabledConnectorTypes()
-	want := []connector.ConnectorType{localfs.ConnectorType, feishu.ConnectorType}
+	want := []connector.ConnectorType{localfs.ConnectorType, feishu.ConnectorType, notion.ConnectorType}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("connectors = %+v, want %+v", got, want)
 	}

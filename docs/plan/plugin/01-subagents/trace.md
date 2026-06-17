@@ -70,18 +70,20 @@ Go → DB:   事务内分配 seq_in_conversation（FOR UPDATE / 序列），INSE
            {id:'a1b2c3d4-...', conversation_id:'conv-001', trigger_history_id:'h-001',
             seq_in_conversation:1, title:'生图', agent_type:'image_generation',
             mode:'auto', status:'pending',
+            objective:'根据优化后的提示词生成4张漫画风格森林场景图片',
+            params:'{"count":4,...}',
             output_artifact_keys:'["images"]',
             workspace_path:'/data/subagent/user-xyz/a1b2c3d4/'}
 Go → Redis: HSET rag/subagent/status:a1b2c3d4 {status:"pending",progress:0}
 Go → FE（主SSE）:
   data: {"task_created":{"task_id":"a1b2c3d4-...","title":"生图","status":"pending"}}
-Go:  立即 go runSubAgent(task)  ← 启动 SubAgent（带 db_dsn，sid=task_id）
+Go:  立即 go runSubAgent(task, resume=false)  ← 启动 SubAgent（带 db_dsn，sid=task_id）
 
 FE:  右侧 Task Center 出现"生图"任务卡片（pending）
 FE:  立即订阅 GET /api/core/tasks/a1b2c3d4-...:stream（先 DB 补历史再 tail Redis）
 ```
 
-与此同时 `create_subagent` 进入轮询等待（HTTP 查内部状态端点 + 心跳保活）。
+与此同时 `create_subagent` 进入轮询等待（**通过 `TaskQueryDB` 直接查 `sub_agent_tasks`** + 心跳保活）。
 
 ---
 
@@ -92,20 +94,24 @@ FE:  立即订阅 GET /api/core/tasks/a1b2c3d4-...:stream（先 DB 补历史再 
 ```
 Go → Python:  POST /api/subagent/run
 Body: { task_id: "a1b2c3d4-...", db_dsn: "postgresql://...", resume: false }  # sid=task_id
+# 注：objective / params / artifact_keys / workspace_path 由框架通过 db_dsn 从 sub_agent_tasks 读取
 
 Python SubAgent（独立请求上下文，独立 sid → 独立队列桶）:
-  - 用 db_dsn 连库读取 task 参数（objective / artifact_keys / workspace_path）
+  - 用 db_dsn 创建 SubAgentDB，调用 load_task(task_id) 读取全部任务参数
   - 内部 ReactAgent 跑 image_gen_api 工具
-  - 每步写 sub_agent_steps（含 tool_call_id 配对）
+  - 每步写 sub_agent_steps（含 think/text 中间步 + assistant tool_calls + tool tool_results）
   → SSE 输出：
-    {"type":"task_start"}
-    {"type":"progress","progress":10,"current_phase":"开始生成第1张...","estimated_sec":60}
-    {"type":"artifact","artifact_key":"images","seq":1,"content_type":"image","value":{...}}
-    {"type":"progress","progress":35,"current_phase":"已完成第1张，生成第2张..."}
-    {"type":"artifact","artifact_key":"images","seq":2,...}
-    {"type":"artifact","artifact_key":"images","seq":3,...}
-    {"type":"artifact","artifact_key":"images","seq":4,...}
-    {"type":"done","status":"succeeded","summary":"已生成4张图片"}
+    {"type":"task_start","task_id":"a1b2c3d4-..."}
+    {"type":"progress","task_id":"a1b2c3d4-...","progress":5,"current_phase":"开始执行..."}
+    {"type":"think","task_id":"a1b2c3d4-...","think":"分析任务要求..."}
+    {"type":"tool_calls","task_id":"a1b2c3d4-...","tool_calls":[{"id":"call_1","name":"image_gen_api","args":{...}}]}
+    {"type":"tool_results","task_id":"a1b2c3d4-...","tool_results":[{"id":"call_1","name":"image_gen_api","result":"..."}]}
+    {"type":"artifact","task_id":"a1b2c3d4-...","artifact_key":"images","seq":1,"content_type":"image","value":{...}}
+    {"type":"progress","task_id":"a1b2c3d4-...","progress":35,"current_phase":"已完成第1张，生成第2张..."}
+    {"type":"artifact","task_id":"a1b2c3d4-...","artifact_key":"images","seq":2,...}
+    {"type":"artifact","task_id":"a1b2c3d4-...","artifact_key":"images","seq":3,...}
+    {"type":"artifact","task_id":"a1b2c3d4-...","artifact_key":"images","seq":4,...}
+    {"type":"done","task_id":"a1b2c3d4-...","status":"succeeded","summary":"已生成4张图片","cost":12.3}
 ```
 
 Go 消费这条 SSE（`runSubAgent` goroutine 内，先落 DB 再写 Redis）：
@@ -115,6 +121,11 @@ task_start  → DB: UPDATE sub_agent_tasks status='running', last_heartbeat=NOW(
             → Redis: RPUSH rag/subagent/stream:a1b2c3d4 <task_start>
             → FE（Task SSE）
 
+think/text  → Redis RPUSH → FE（Task SSE）（不落 DB，仅用于展示）
+
+tool_calls/
+tool_results → Redis RPUSH → FE（Task SSE）（不落 DB，仅用于展示）
+
 progress(每次) → DB: UPDATE progress_pct=N, current_phase=...
             → Redis RPUSH → FE（Task SSE）
 
@@ -122,7 +133,7 @@ artifact(每张) → DB: INSERT sub_agent_artifacts {artifact_key:'images', seq:
             → Redis RPUSH → FE（Task SSE）
             FE: 每张图到达立刻追加缩略图，不等全部完成
 
-done        → DB: UPDATE status='succeeded', progress_pct=100
+done        → DB: UPDATE status='succeeded', progress_pct=100, summary='已生成4张图片'
             → Redis RPUSH → FE（Task SSE）
             FE: 任务卡片 ✓，4张图全部展示
 ```
@@ -133,11 +144,14 @@ done        → DB: UPDATE status='succeeded', progress_pct=100
 
 ## T=4：ChatAgent 继续，输出最终文本
 
-Go 写入 `status='succeeded'` 后，`create_subagent` 轮询 break，return 摘要：
+Go 写入 `status='succeeded'` 后，`create_subagent` 通过 `TaskQueryDB` 轮询 break，return 摘要：
 
 ```
 工具 return:
-"任务'生图'已完成。产出 key：images。如需完整内容可调用 get_subagent_artifacts('生图')。"
+"Task '生图' completed. Summary: 已生成4张图片
+Artifacts:
+  image (image_2.png) stored at key=images
+  ..."
 
 ChatAgent LLM 收到 tool_result → 决策无需再 spawn → 输出最终文本（Python 侧 translator 翻译为标准帧）
 
@@ -209,4 +223,4 @@ Go → Algo: POST /api/chat/stream（history 含 interrupted 任务状态）
 Algo:  ChatAgent 调 list_subagents("interrupted") → 决策恢复 → 调 create_subagent（resume=True）
 ```
 
-`create_subagent(resume=True)` → 工具调 `/api/subagent/run`（`resume=true`）→ Python 框架查 `sub_agent_steps ORDER BY seq`、按 `tool_call_id` 校验配对后重建 LLM 上下文 → 从断点继续，已完成步骤不重复执行。
+`create_subagent(resume=True)` → 工具通过标题解析出原 task_id → 写 `task_created`（携带 `resume=true`）→ Go 调 `/api/subagent/run`（`resume=true`）→ Python 框架查 `sub_agent_steps ORDER BY seq`、按 `tool_call_id` 校验配对（并验证 function.arguments JSON 合法性）后重建 LLM 上下文 → 从断点继续，已完成步骤不重复执行。

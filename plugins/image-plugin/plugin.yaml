@@ -1,0 +1,82 @@
+id: image-plugin
+name: AI Image Generation
+description: >
+  Generate and enhance high-quality images from natural language descriptions.
+  The workflow has five steps: analyze the subject, collect reference materials,
+  optimize the prompt, generate an image, and enhance the result. Each step
+  supports full retry via state-machine self-loops. The collect_materials and
+  enhance_image steps additionally support partial retry: the user can request
+  re-collection or re-enhancement of specific list items while keeping others.
+
+when_to_use: >
+  Call this tool whenever the user wants to generate, draw, create, paint, or
+  produce an image or picture — including requests like "画一张图", "帮我生成图片",
+  "draw a cat", "create an illustration", "生成漫画风格的图", or any similar
+  image-creation request.
+
+tool_scripts:
+  - path: scripts/tools.py
+    functions:
+      - web_search_tool
+      - image_search_tool
+      - generate_image_tool
+
+steps:
+  - id: analyze_subject
+    label: Analyze Subject
+
+  - id: collect_materials
+    label: Collect Materials
+
+  - id: optimize_prompt
+    label: Optimize Prompt
+
+  - id: generate_image
+    label: Generate Image
+
+  - id: enhance_image
+    label: Enhance Image
+
+ui:
+  tabs:
+    - id: analysis
+      label: Analysis
+      slots:
+        - id: subject_analysis
+          label: Subject Analysis
+          type: text
+          cardinality: single
+          artifact_key: subject_analysis
+
+    - id: materials
+      label: Materials
+      slots:
+        - id: material_images
+          label: Reference Materials
+          type: image
+          cardinality: list
+          artifact_key: material_image   # artifact_key written by save_artifact in collect_material step
+
+    - id: prompt
+      label: Prompt
+      slots:
+        - id: prompt_used
+          label: Optimized Prompt
+          type: text
+          cardinality: single
+          artifact_key: optimized_prompt
+
+    - id: result
+      label: Result
+      slots:
+        - id: enhanced_image_output
+          label: Enhanced Images
+          type: image
+          cardinality: list
+          artifact_key: enhanced_image_url
+
+        - id: image_output
+          label: Raw Image
+          type: image
+          cardinality: single
+          artifact_key: generated_image_url

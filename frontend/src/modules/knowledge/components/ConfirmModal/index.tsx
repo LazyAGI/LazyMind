@@ -31,6 +31,8 @@ const ConfirmModalComponent = forwardRef<ConfirmImperativeProps, ForwardProps>(
 
     const onOpen = (data: ModalInfo) => {
       setModalInfo(data);
+      setValue("");
+      setErrorText("");
       setVisible(true);
     };
     const onCancel = () => {
@@ -49,6 +51,7 @@ const ConfirmModalComponent = forwardRef<ConfirmImperativeProps, ForwardProps>(
         setErrorText(t("knowledge.inputMismatch"));
         return false;
       }
+      setErrorText("");
       return true;
     };
 
@@ -61,8 +64,9 @@ const ConfirmModalComponent = forwardRef<ConfirmImperativeProps, ForwardProps>(
         okText={t("common.confirm")}
         cancelText={t("common.cancel")}
         okType="danger"
+        okButtonProps={{ disabled: value !== modalInfo?.confirmText }}
         onOk={() => {
-          if (errorText || !isSuccess()) {
+          if (!isSuccess()) {
             return false;
           }
           onClick(modalInfo?.id || "");

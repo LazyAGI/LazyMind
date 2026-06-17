@@ -22,6 +22,7 @@ import DataSourceDetail from "@/modules/dataSource/detail";
 import DataSourceFeishuCallback from "@/modules/dataSource/common/feishuCallback";
 import FeishuAccountPage from "@/modules/dataSource/feishuAccounts";
 import FeishuSetupGuide from "@/modules/dataSource/FeishuSetupGuide";
+import NotionSetupGuide from "@/modules/dataSource/NotionSetupGuide";
 import DatasetListPage from "@/modules/datasetManagement/pages/list";
 import DatasetDetailPage from "@/modules/datasetManagement/pages/detail";
 import MemoryManagement from "@/modules/memory";
@@ -53,6 +54,14 @@ export default function AppRouter() {
           path="/oauth/feishu/callback"
           element={<DataSourceFeishuCallback />}
         />
+        <Route
+          path="/oauth/notion/data-source/callback"
+          element={<DataSourceFeishuCallback provider="notion" />}
+        />
+        <Route
+          path="/oauth/notion/callback"
+          element={<DataSourceFeishuCallback provider="notion" />}
+        />
         <Route path="/loginTransition" element={<LoginTransition />} />
         <Route path="/" element={<MainLayout />}>
           <Route index element={<Navigate to="/agent/chat" replace />} />
@@ -72,7 +81,9 @@ export default function AppRouter() {
           </Route>
           <Route path="data-sources" element={<DataSourceManagement />} />
           <Route path="data-sources/docs/feishu-setup" element={<FeishuSetupGuide />} />
+          <Route path="data-sources/docs/notion-setup" element={<NotionSetupGuide />} />
           <Route path="data-sources/providers/feishu" element={<FeishuAccountPage />} />
+          <Route path="data-sources/providers/notion" element={<DataSourceManagement />} />
           <Route path="data-sources/providers/sciverse" element={<Navigate to="/data-sources?view=connectors&provider=sciverse" replace />} />
           <Route path="data-sources/:id" element={<DataSourceDetail />} />
           <Route path="dataset-management" element={<DatasetListPage />} />

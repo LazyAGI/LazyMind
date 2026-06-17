@@ -1444,7 +1444,6 @@ export default function ModelProviderPage() {
             rules={[
               { required: true, message: t("modelProvider.validation.modelNameRequired") },
               { max: 120, message: t("modelProvider.validation.modelNameMax") },
-              { pattern: /^[\w.-]+$/, message: t("modelProvider.validation.modelNamePattern") },
             ]}
           >
             <Input maxLength={120} placeholder={t("modelProvider.modelNamePlaceholder")} />

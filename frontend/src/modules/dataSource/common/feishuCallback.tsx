@@ -5,10 +5,11 @@ import { useSearchParams } from "react-router-dom";
 
 import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
-  finishFeishuDataSourceOAuth,
+  finishCloudDataSourceOAuth,
   getDataSourceManagementUrl,
-  getFeishuDataSourceOAuthReturnUrl,
-  saveFeishuDataSourceOAuthResult,
+  getCloudDataSourceOAuthReturnUrl,
+  saveCloudDataSourceOAuthResult,
+  type CloudDataSourceProvider,
   type FeishuDataSourceOAuthMessage,
 } from "./feishuOAuth";
 
@@ -30,7 +31,13 @@ function isPopupWindow() {
 const CALLBACK_REDIRECT_DELAY_MS = 100;
 const POPUP_CLOSE_FALLBACK_DELAY_MS = 150;
 
-export default function FeishuDataSourceCallback() {
+interface DataSourceOAuthCallbackProps {
+  provider?: CloudDataSourceProvider;
+}
+
+export default function FeishuDataSourceCallback({
+  provider = "feishu",
+}: DataSourceOAuthCallbackProps) {
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const [viewState, setViewState] = useState<CallbackViewState>({
@@ -58,7 +65,7 @@ export default function FeishuDataSourceCallback() {
     };
 
     const finalize = (payload: FeishuDataSourceOAuthMessage) => {
-      saveFeishuDataSourceOAuthResult(payload);
+      saveCloudDataSourceOAuthResult(provider, payload);
 
       if (isPopupWindow()) {
         window.opener?.postMessage(payload, window.location.origin);
@@ -82,9 +89,10 @@ export default function FeishuDataSourceCallback() {
         });
         finalize({
           channel: FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
-          source: "feishu-data-source",
+          source: `${provider}-data-source` as FeishuDataSourceOAuthMessage["source"],
           status: "error",
           message,
+          provider,
         });
         return;
       }
@@ -98,16 +106,17 @@ export default function FeishuDataSourceCallback() {
         });
         finalize({
           channel: FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
-          source: "feishu-data-source",
+          source: `${provider}-data-source` as FeishuDataSourceOAuthMessage["source"],
           status: "error",
           message,
+          provider,
         });
         return;
       }
 
       try {
-        const returnUrl = getFeishuDataSourceOAuthReturnUrl(state);
-        const connection = await finishFeishuDataSourceOAuth(code, state);
+        const returnUrl = getCloudDataSourceOAuthReturnUrl(provider, state);
+        const connection = await finishCloudDataSourceOAuth(provider, code, state);
         setViewState({
           status: "success",
           title: t("admin.dataSourceCallbackSuccessTitle"),
@@ -118,7 +127,7 @@ export default function FeishuDataSourceCallback() {
         });
         finalize({
           channel: FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
-          source: "feishu-data-source",
+          source: `${provider}-data-source` as FeishuDataSourceOAuthMessage["source"],
           status: "success",
           connection,
         });
@@ -133,15 +142,16 @@ export default function FeishuDataSourceCallback() {
         });
         finalize({
           channel: FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
-          source: "feishu-data-source",
+          source: `${provider}-data-source` as FeishuDataSourceOAuthMessage["source"],
           status: "error",
           message,
+          provider,
         });
       }
     };
 
     void run();
-  }, [searchParams, t]);
+  }, [provider, searchParams, t]);
 
   return (
     <div
@@ -198,7 +208,7 @@ export default function FeishuDataSourceCallback() {
                   window.location.replace(
                     viewState.status === "success" && viewState.returnUrl
                       ? viewState.returnUrl
-                      : getDataSourceManagementUrl(),
+                      : getDataSourceManagementUrl(provider),
                   )
                 }
               >

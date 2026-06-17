@@ -25,9 +25,7 @@ func (e *DefaultEngine) AddBinding(ctx context.Context, callerID, sourceID strin
 		return BindingMutationResponse{}, err
 	}
 	warnings := e.queueLocalWatcherStarts(ctx, src, []store.Binding{prepared.binding})
-	jobIDs, jobErrors := e.triggerInitialSyncs(ctx, []store.Binding{prepared.binding})
-	warnings = append(warnings, jobErrors...)
-	return BindingMutationResponse{Binding: bindingToResponse(prepared.binding), NewGeneration: prepared.binding.BindingGeneration, JobIDs: jobIDs, CompensationErrors: warnings}, nil
+	return BindingMutationResponse{Binding: bindingToResponse(prepared.binding), NewGeneration: prepared.binding.BindingGeneration, CompensationErrors: warnings}, nil
 }
 
 func (e *DefaultEngine) ensureUniqueTarget(ctx context.Context, binding store.Binding, excludeBindingID string) error {

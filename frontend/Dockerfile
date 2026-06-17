@@ -10,16 +10,16 @@ RUN sed -i "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" /etc/apk
     && corepack enable \
     && corepack prepare pnpm@9.15.9 --activate
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
-COPY . .
+COPY frontend/ .
 RUN pnpm build
 
 FROM ${DOCKER_MIRROR}nginx:alpine
 WORKDIR /usr/share/nginx/html
 
 COPY --from=builder /app/dist/ /usr/share/nginx/html/
-COPY default.conf.template /etc/nginx/templates/default.conf.template
+COPY frontend/default.conf.template /etc/nginx/templates/default.conf.template
 
 EXPOSE 80

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
 
-from .context import require_context
+from .context import require_context, LARGE_ARTIFACT_THRESHOLD
 
 # Valid artifact content types.
 _CONTENT_TYPES = {'text', 'json', 'image', 'file', 'file_list'}
@@ -15,13 +15,25 @@ _CONTENT_TYPES = {'text', 'json', 'image', 'file', 'file_list'}
 def _build_artifact_value(value: Any, content_type: str) -> Dict[str, Any]:
     ctx = require_context()
     if content_type == 'text':
-        return {'text': str(value)}
+        text = str(value)
+        # Offload large text to workspace filesystem.
+        if len(text.encode('utf-8', errors='replace')) > LARGE_ARTIFACT_THRESHOLD:
+            abs_path = ctx.write_large_content(text, hint='artifact_text')
+            rel = os.path.relpath(abs_path, ctx.workspace_path)
+            return {'type': 'file', 'path': rel, 'size': os.path.getsize(abs_path)}
+        return {'text': text}
     if content_type == 'json':
         if isinstance(value, str):
             try:
                 value = json.loads(value)
             except ValueError:
                 pass
+        serialized = json.dumps(value, ensure_ascii=False, default=str)
+        # Offload large JSON to workspace filesystem.
+        if len(serialized.encode('utf-8', errors='replace')) > LARGE_ARTIFACT_THRESHOLD:
+            abs_path = ctx.write_large_content(serialized, hint='artifact_json')
+            rel = os.path.relpath(abs_path, ctx.workspace_path)
+            return {'type': 'file', 'path': rel, 'size': os.path.getsize(abs_path)}
         return {'data': value}
     if content_type == 'image':
         rel = ctx.copy_into_workspace(str(value)) if os.path.isabs(str(value)) else str(value)
@@ -46,13 +58,17 @@ def _build_artifact_value(value: Any, content_type: str) -> Dict[str, Any]:
 
 @handle_tool_errors
 def save_artifact(key: str, value: Any, content_type: str = 'text',
-                  source_tool: Optional[str] = None) -> Dict[str, Any]:
+                  source_tool: Optional[str] = None,
+                  list_index: Optional[int] = None) -> Dict[str, Any]:
     """Save an output artifact produced by this SubAgent.
 
     File-type values must be local absolute paths; the framework copies them into the
     workspace and converts to relative paths. The same key may be saved multiple times
     (each call appends a row with an incremented seq), which is how variable-count outputs
     such as per-image generation are streamed to the frontend.
+
+    For list-cardinality slots, pass list_index to overwrite a specific existing item
+    instead of appending a new one (partial retry). Omit list_index for normal append.
 
     Args:
         key (str): Artifact key. Must be one of the declared output_artifact_keys.
@@ -61,6 +77,9 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
         content_type (str): One of text, json, image, file, file_list. Default text.
         source_tool (str): Optional name of the tool that produced this artifact,
             e.g. 'web_search', 'wikipedia', 'image_generation'. Used for display only.
+        list_index (int): Optional. When provided, signals that this artifact should
+            replace the existing list slot entry at this position (0-based) rather than
+            being appended as a new entry. Use for partial retries only.
 
     Returns:
         A confirmation that the artifact was saved.
@@ -70,6 +89,8 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
     built = _build_artifact_value(value, ct)
     if source_tool:
         built['_source_tool'] = str(source_tool)
+    if list_index is not None:
+        built['list_index'] = int(list_index)
     seq = ctx.next_artifact_seq(key)
     ctx.record_local_artifact(key, ct, built, seq)
     ctx.emit({

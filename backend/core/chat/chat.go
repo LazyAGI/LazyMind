@@ -73,6 +73,7 @@ type LazyChatRequest struct {
 	HasSubagents       bool            `json:"has_subagents"`
 	ConversationID     string          `json:"conversation_id,omitempty"`
 	MCPConfig          []any           `json:"mcp_config,omitempty"`
+	PluginContext      map[string]any  `json:"plugin_context,omitempty"`
 }
 
 // LazyChatData text data text。
@@ -356,6 +357,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 			req.MCPConfig = append(req.MCPConfig, item)
 		}
 	}
+	if pluginContext, ok := body["plugin_context"].(map[string]any); ok && len(pluginContext) > 0 {
+		req.PluginContext = pluginContext
+	}
 	return req
 }
 
@@ -431,11 +435,64 @@ func stringSlice(v any) []string {
 }
 
 func debugJSON(v any) string {
-	b, err := json.Marshal(v)
+	safe := redactForLog(v)
+	b, err := json.Marshal(safe)
 	if err != nil {
-		return fmt.Sprintf("%+v", v)
+		return fmt.Sprintf("<%T>", v)
 	}
 	return string(b)
+}
+
+func redactForLog(v any) any {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprintf("<%T>", v)
+	}
+	var decoded any
+	if err := json.Unmarshal(b, &decoded); err != nil {
+		return fmt.Sprintf("<%T>", v)
+	}
+	return redactDecodedForLog(decoded)
+}
+
+func redactDecodedForLog(v any) any {
+	switch value := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(value))
+		for k, item := range value {
+			if strings.EqualFold(k, "tool_config") {
+				out[k] = summarizeSecretMapForLog(item)
+				continue
+			}
+			out[k] = redactDecodedForLog(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(value))
+		for i, item := range value {
+			out[i] = redactDecodedForLog(item)
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func summarizeSecretMapForLog(v any) map[string]string {
+	result := map[string]string{}
+	if values, ok := v.(map[string]any); ok {
+		for k, item := range values {
+			if secret, ok := item.(string); ok {
+				result[k] = fmt.Sprintf("<redacted len=%d>", len(strings.TrimSpace(secret)))
+			} else {
+				result[k] = "<redacted>"
+			}
+		}
+	}
+	if len(result) == 0 {
+		result["_"] = "<redacted>"
+	}
+	return result
 }
 
 // StreamChatUpstream text：text ChatConversations text，text ChatService.StreamChat text。

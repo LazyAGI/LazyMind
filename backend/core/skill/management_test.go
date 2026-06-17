@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -72,6 +73,14 @@ type listSkillsAPITestResponse struct {
 		Page     int `json:"page"`
 		PageSize int `json:"page_size"`
 		Total    int `json:"total"`
+	} `json:"data"`
+}
+
+type listSkillTagsAPITestResponse struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    struct {
+		Tags []string `json:"tags"`
 	} `json:"data"`
 }
 
@@ -1814,6 +1823,126 @@ func TestListPaginatesAndCountsParentSkills(t *testing.T) {
 	}
 	if len(resp.Data.Items) != 1 || resp.Data.Items[0].SkillID != "skill-parent-three" {
 		t.Fatalf("expected second page to include third parent, got %#v", resp.Data.Items)
+	}
+}
+
+func TestListTagsReturnsAllSkillTagsForCurrentUser(t *testing.T) {
+	db := newSkillTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	rows := []orm.SkillResource{
+		{
+			ID:              "skill-parent-one",
+			OwnerUserID:     "u1",
+			OwnerUserName:   "User 1",
+			Category:        "coding",
+			ParentSkillName: "workflow",
+			SkillName:       "workflow",
+			NodeType:        evolution.SkillNodeTypeParent,
+			Tags:            tagsJSON([]string{"UI", " 产品设计 ", "UI", ""}),
+			FileExt:         "md",
+			RelativePath:    evolution.ParentSkillRelativePath("coding", "workflow"),
+			ContentHash:     evolution.HashContent("content-1"),
+			Version:         1,
+			IsEnabled:       true,
+			UpdateStatus:    evolution.UpdateStatusUpToDate,
+			CreateUserID:    "u1",
+			CreateUserName:  "User 1",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+		{
+			ID:              "skill-child-one",
+			OwnerUserID:     "u1",
+			OwnerUserName:   "User 1",
+			Category:        "coding",
+			ParentSkillName: "workflow",
+			SkillName:       "rules",
+			NodeType:        evolution.SkillNodeTypeChild,
+			Tags:            tagsJSON([]string{"规则", "UI"}),
+			FileExt:         "md",
+			RelativePath:    "coding/workflow/rules.md",
+			ContentHash:     evolution.HashContent("child-content"),
+			Version:         1,
+			IsEnabled:       true,
+			UpdateStatus:    evolution.UpdateStatusUpToDate,
+			CreateUserID:    "u1",
+			CreateUserName:  "User 1",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+		{
+			ID:              "skill-other-user",
+			OwnerUserID:     "u2",
+			OwnerUserName:   "User 2",
+			Category:        "coding",
+			ParentSkillName: "other",
+			SkillName:       "other",
+			NodeType:        evolution.SkillNodeTypeParent,
+			Tags:            tagsJSON([]string{"其他用户"}),
+			FileExt:         "md",
+			RelativePath:    evolution.ParentSkillRelativePath("coding", "other"),
+			ContentHash:     evolution.HashContent("content-2"),
+			Version:         1,
+			IsEnabled:       true,
+			UpdateStatus:    evolution.UpdateStatusUpToDate,
+			CreateUserID:    "u2",
+			CreateUserName:  "User 2",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("create skills: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/skills/tags", nil)
+	req.Header.Set("X-User-Id", "u1")
+	rec := httptest.NewRecorder()
+
+	ListTags(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp listSkillTagsAPITestResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Code != 0 {
+		t.Fatalf("expected code 0, got %d message=%s", resp.Code, resp.Message)
+	}
+	want := []string{"UI", "产品设计", "规则"}
+	if !reflect.DeepEqual(resp.Data.Tags, want) {
+		t.Fatalf("expected tags %#v, got %#v", want, resp.Data.Tags)
+	}
+}
+
+func TestListTagsReturnsEmptyArray(t *testing.T) {
+	db := newSkillTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/skills/tags", nil)
+	req.Header.Set("X-User-Id", "u1")
+	rec := httptest.NewRecorder()
+
+	ListTags(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp listSkillTagsAPITestResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data.Tags == nil {
+		t.Fatalf("expected empty tags array, got nil")
+	}
+	if len(resp.Data.Tags) != 0 {
+		t.Fatalf("expected no tags, got %#v", resp.Data.Tags)
 	}
 }
 

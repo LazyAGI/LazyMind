@@ -41,7 +41,11 @@ type TreeNode struct {
 	Selectable      bool           `json:"selectable"`
 	SourceState     string         `json:"source_state,omitempty"`
 	SyncState       string         `json:"sync_state,omitempty"`
+	PendingAction   string         `json:"pending_action,omitempty"`
 	ParseQueueState string         `json:"parse_queue_state,omitempty"`
+	HasUpdate       bool           `json:"has_update,omitempty"`
+	UpdateType      string         `json:"update_type,omitempty"`
+	UpdateDesc      string         `json:"update_desc,omitempty"`
 	ProviderMeta    map[string]any `json:"provider_meta,omitempty"`
 }
 
@@ -93,7 +97,8 @@ type SourceTreeChildrenRequest struct {
 	NodeRef           string         `json:"node_ref,omitempty"`
 	ParentRef         string         `json:"parent_ref,omitempty"`
 	Key               string         `json:"key,omitempty"`
-	UseCache          bool           `json:"use_cache,omitempty"`
+	UseCache          *bool          `json:"use_cache,omitempty"`
+	RefreshState      *bool          `json:"refresh_state,omitempty"`
 	ProviderOptions   map[string]any `json:"-"`
 	IncludeDocuments  bool           `json:"include_documents"`
 	IncludeContainers bool           `json:"include_containers"`
@@ -109,6 +114,7 @@ type SourceTreeSearchRequest struct {
 	Keyword           string   `json:"keyword"`
 	BindingID         string   `json:"binding_id,omitempty"`
 	TreeKey           string   `json:"tree_key,omitempty"`
+	RefreshState      *bool    `json:"refresh_state,omitempty"`
 	IncludeDocuments  bool     `json:"include_documents"`
 	IncludeContainers bool     `json:"include_containers"`
 	StateFilter       []string `json:"state_filter,omitempty"`

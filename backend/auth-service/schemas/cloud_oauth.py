@@ -106,6 +106,29 @@ class CloudConnectionVerifyResponse(BaseModel):
     status: str = Field(default='ACTIVE')
 
 
+class CloudConnectionStatusItem(BaseModel):
+    connection_id: str
+    tenant_id: str = ''
+    owner_user_id: str = ''
+    provider: str = ''
+    auth_mode: str = ''
+    provider_account_id: str = ''
+    display_name: str = ''
+    provider_tenant_key: str = ''
+    status: str = ''
+    last_error: str = ''
+    last_used_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class CloudConnectionStatusBatchBody(BaseModel):
+    connection_ids: list[str] = Field(default_factory=list, max_length=500)
+
+
+class CloudConnectionStatusBatchResponse(BaseModel):
+    items: list[CloudConnectionStatusItem]
+
+
 class CloudConnectionListResponse(BaseModel):
     items: list[CloudConnectionResponse]
 

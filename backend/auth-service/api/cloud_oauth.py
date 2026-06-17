@@ -9,6 +9,8 @@ from schemas.cloud_oauth import (
     CloudConnectionListResponse,
     CloudConnectionCreateResponse,
     CloudConnectionResponse,
+    CloudConnectionStatusBatchBody,
+    CloudConnectionStatusBatchResponse,
     CloudConnectionTokenResponse,
     CloudConnectionUpdateBody,
     CloudConnectionVerifyResponse,
@@ -136,6 +138,20 @@ def list_connections(
         provider=provider,
         auth_mode=auth_mode,
         status=status,
+    )
+
+
+@router.post('/connections/status:batch', response_model=CloudConnectionStatusBatchResponse)
+def batch_connection_status(
+    body: CloudConnectionStatusBatchBody,
+    user_id: str | None = None,
+    tenant_id: str | None = None,
+    _internal: None = Depends(require_internal_service_token),  # noqa: B008
+):
+    return cloud_oauth_service.batch_connection_status(
+        body.connection_ids,
+        user_id=user_id,
+        tenant_id=tenant_id,
     )
 
 

@@ -118,10 +118,54 @@ def test_authorize_allows_when_no_permission_is_required(monkeypatch):
     assert authorization_api.authorize(AuthorizeBody(method='GET', path='/unknown'), _request()) == {'allowed': True}
 
 
+def test_authorize_returns_verified_identity_when_no_permission_is_required(monkeypatch):
+    user_id = uuid.uuid4()
+    user = SimpleNamespace(
+        id=user_id,
+        username='admin',
+        tenant_id='root',
+        disabled=False,
+        role=SimpleNamespace(name=authorization_api.BUILTIN_ADMIN_ROLE),
+    )
+    monkeypatch.setattr(authorization_api, 'API_PERMISSIONS_MAP', {})
+    monkeypatch.setattr(authorization_api, '_user_id_from_token', lambda token: user_id)
+    monkeypatch.setattr(authorization_api, 'SessionLocal', lambda: _Session())
+    monkeypatch.setattr(authorization_api.UserRepository, 'get_by_id', lambda db, uid, **kwargs: user)
+
+    result = authorization_api.authorize(
+        AuthorizeBody(method='POST', path='/api/scan/sources'),
+        _request({'authorization': 'Bearer token-value'}),
+    )
+
+    assert result == {
+        'allowed': True,
+        'user_id': str(user_id),
+        'username': 'admin',
+        'tenant_id': 'root',
+        'role': authorization_api.BUILTIN_ADMIN_ROLE,
+    }
+
+
+def test_authorize_keeps_allow_all_behavior_for_invalid_optional_token(monkeypatch):
+    monkeypatch.setattr(authorization_api, 'API_PERMISSIONS_MAP', {})
+
+    def reject_token(token):
+        raise AppException(http_code=401, code=1000301, message='Unauthorized')
+
+    monkeypatch.setattr(authorization_api, '_user_id_from_token', reject_token)
+
+    assert authorization_api.authorize(
+        AuthorizeBody(method='GET', path='/unknown'),
+        _request({'authorization': 'Bearer bad-token'}),
+    ) == {'allowed': True}
+
+
 def test_authorize_checks_bearer_token_and_effective_permissions(monkeypatch):
     user_id = uuid.uuid4()
     user = SimpleNamespace(
         id=user_id,
+        username='member',
+        tenant_id='root',
         disabled=False,
         role=SimpleNamespace(name='member'),
     )
@@ -140,12 +184,24 @@ def test_authorize_checks_bearer_token_and_effective_permissions(monkeypatch):
     )
 
     assert isinstance(result, dict)
-    assert result == {'allowed': True, 'role': 'member'}
+    assert result == {
+        'allowed': True,
+        'user_id': str(user_id),
+        'username': 'member',
+        'tenant_id': 'root',
+        'role': 'member',
+    }
 
 
 def test_authorize_allows_builtin_admin_without_permission_match(monkeypatch):
     user_id = uuid.uuid4()
-    user = SimpleNamespace(id=user_id, disabled=False, role=SimpleNamespace(name=authorization_api.BUILTIN_ADMIN_ROLE))
+    user = SimpleNamespace(
+        id=user_id,
+        username='admin',
+        tenant_id='root',
+        disabled=False,
+        role=SimpleNamespace(name=authorization_api.BUILTIN_ADMIN_ROLE),
+    )
     monkeypatch.setattr(authorization_api, 'API_PERMISSIONS_MAP', {('DELETE', '/api/user'): ['user.admin']})
     monkeypatch.setattr(authorization_api, '_user_id_from_token', lambda token: user_id)
     monkeypatch.setattr(authorization_api, 'SessionLocal', lambda: _Session())
@@ -154,7 +210,13 @@ def test_authorize_allows_builtin_admin_without_permission_match(monkeypatch):
     assert authorization_api.authorize(
         AuthorizeBody(method='DELETE', path='/api/user'),
         _request({'authorization': 'token-value'}),
-    ) == {'allowed': True, 'role': authorization_api.BUILTIN_ADMIN_ROLE}
+    ) == {
+        'allowed': True,
+        'user_id': str(user_id),
+        'username': 'admin',
+        'tenant_id': 'root',
+        'role': authorization_api.BUILTIN_ADMIN_ROLE,
+    }
 
 
 def test_authorize_rejects_missing_token_disabled_user_and_missing_permission(monkeypatch):

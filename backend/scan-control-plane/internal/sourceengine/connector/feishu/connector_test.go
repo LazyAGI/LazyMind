@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/worker"
@@ -658,15 +659,59 @@ func TestWikiListClampsProviderPageSizeToOpenAPILimit(t *testing.T) {
 	}
 }
 
-func TestSearchReturnsUnsupportedForUnimplementedScopeAndDeltaUnsupported(t *testing.T) {
+func TestCurrentLevelSearchByNameAndDeltaUnsupported(t *testing.T) {
 	t.Parallel()
 
-	conn := NewFeishuConnector(&authStub{}, newFeishuAPIStub())
+	auth := &authStub{}
+	api := newFeishuAPIStub()
+	rootMatch := Object{Kind: ObjectKindDriveFile, Token: "file-test-root", ParentToken: "folder-root", Name: "test-root.pdf", IsDocument: true, Revision: "rev-test-root", FileExtension: ".pdf", StableID: "file-test-root"}
+	nested := Object{Kind: ObjectKindDriveFile, Token: "file-test", ParentToken: "folder-guides", Name: "test-plan.pdf", IsDocument: true, Revision: "rev-test", FileExtension: ".pdf", StableID: "file-test"}
+	api.driveObjects["file-test-root"] = rootMatch
+	api.driveObjects["file-test"] = nested
+	api.driveChildren["folder-root"] = append(api.driveChildren["folder-root"], rootMatch)
+	api.driveChildren["folder-guides"] = []Object{nested}
+	api.driveListErrors = []error{connector.NewError(connector.ErrorCodeRateLimited, "request trigger frequency limit")}
+	conn := NewFeishuConnector(auth, api)
+	conn.searchRetryDelay = func(int) time.Duration { return 0 }
 	if !conn.Spec().SupportsSearch {
 		t.Fatalf("feishu spec should advertise search support per connector contract")
 	}
-	_, err := conn.Search(context.Background(), connector.SearchRequest{Keyword: "a"})
-	assertFeishuErrorCode(t, err, connector.ErrorCodeUnsupported)
+	page, err := conn.Search(context.Background(), connector.SearchRequest{
+		Keyword:          "test",
+		PageSize:         50,
+		AuthConnectionID: "auth-1",
+		ProviderOptions:  connector.ProviderOptions{"user_id": "user-1"},
+	})
+	if err != nil {
+		t.Fatalf("search drive files: %v", err)
+	}
+	if auth.calls != 1 || len(api.drivePageSizes) != 2 {
+		t.Fatalf("search should retry and only list the current drive level, auth=%d drive_page_sizes=%v", auth.calls, api.drivePageSizes)
+	}
+	if got := feishuObjectKeys(page.Items); !sameStrings(got, []string{"feishu:drive:file-test-root"}) {
+		t.Fatalf("unexpected search results: %v", got)
+	}
+	if page.Items[0].ProviderMeta["auth_connection_id"] != "auth-1" {
+		t.Fatalf("search results should preserve auth connection metadata: %+v", page.Items[0].ProviderMeta)
+	}
+
+	wikiChild := api.wikiObjects["space-1:node-child"]
+	wikiChild.Name = "Test Wiki Child"
+	api.wikiObjects["space-1:node-child"] = wikiChild
+	api.wikiChildren["space-1:node-root"] = []Object{wikiChild}
+	wikiPage, err := conn.Search(context.Background(), connector.SearchRequest{
+		Keyword:          "wiki child",
+		TargetType:       TargetTypeWikiNode,
+		TargetRef:        "space-1:node-root",
+		PageSize:         10,
+		AuthConnectionID: "auth-1",
+	})
+	if err != nil {
+		t.Fatalf("search wiki current level: %v", err)
+	}
+	if got := feishuObjectKeys(wikiPage.Items); !sameStrings(got, []string{"feishu:wiki:space-1:node-child"}) {
+		t.Fatalf("unexpected wiki search results: %v", got)
+	}
 
 	_, err = conn.FetchPage(context.Background(), connector.FetchPageRequest{
 		BindingGeneration: 1,
@@ -724,6 +769,7 @@ type feishuAPIStub struct {
 	driveChildren    map[string][]Object
 	wikiChildren     map[string][]Object
 	wikiSpaces       []Object
+	driveListErrors  []error
 	drivePageSizes   []int
 	wikiPageSizes    []int
 	driveFolderCalls int
@@ -777,6 +823,11 @@ func (a *feishuAPIStub) GetDriveFolder(_ context.Context, _ string, folderToken 
 
 func (a *feishuAPIStub) ListDriveChildren(_ context.Context, _ string, folderToken, cursor string, pageSize int) (ObjectPage, error) {
 	a.drivePageSizes = append(a.drivePageSizes, pageSize)
+	if len(a.driveListErrors) > 0 {
+		err := a.driveListErrors[0]
+		a.driveListErrors = a.driveListErrors[1:]
+		return ObjectPage{}, err
+	}
 	return objectPage(a.driveChildren[driveFolderToken(folderToken)], cursor, pageSize)
 }
 

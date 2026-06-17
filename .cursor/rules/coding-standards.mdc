@@ -26,6 +26,14 @@ alwaysApply: true
 
 - Modidy `algorithm/lazyllm` directly when you need to modify lazyllm. **DO NOT** modify `site-pickages`
 
+## Debug
+
+When debugging, do not infer root causes from code alone. First collect evidence by adding logs, reproducing the issue, simulating requests, inspecting database records, reviewing application logs, and tracing the actual execution path. Every diagnosis should be supported by runtime evidence. Avoid speculative fixes that are not verified against observed behavior.
+
+## Refactoring Role
+
+Whenever you refactor code, you must clean up the old implementation immediately. Remove dead code, unused functions, unused variables, obsolete comments, redundant logic, and superseded implementations. Do not keep both old and new versions of the same logic unless backward compatibility is explicitly required. The codebase should be cleaner after every refactor, not accumulate technical debt.
+
 ## 模拟前端 Chat 请求（端到端调试）
 
 用于验证完整链路（Go 落库 → Python 工具执行 → `task_created` 事件回传）时，优先从 **Go core 入口** 发请求，而不是直接打 Python chat 服务。

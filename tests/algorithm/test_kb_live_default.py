@@ -15,9 +15,7 @@ def test_kb_search_core_flow(monkeypatch):
     def fake_search_kb(
         payload,
         *,
-        document,
         retrievers,
-        tmp_retriever,
         reranker,
         image_retriever,
         retriever_topk=20,
@@ -27,7 +25,6 @@ def test_kb_search_core_flow(monkeypatch):
     ):
         captured.update({
             'payload': payload,
-            'document': document,
             'retrievers': retrievers,
             'image_retriever': image_retriever,
         })
@@ -66,10 +63,8 @@ def test_kb_search_core_flow(monkeypatch):
         'payload': {
             'query': SEED_KEYWORD,
             'filters': {'kb_id': DEFAULT_AGENTIC_CONFIG['kb_id']},
-            'files': [],
             'user_id': 'user-007',
         },
-        'document': kb._DEFAULT_KB_DOCUMENT,
         'retrievers': ['retriever'],
         'image_retriever': 'image-retriever',
     }
@@ -82,28 +77,22 @@ def test_kb_search_core_flow(monkeypatch):
 def test_kb_tmp_search_core_flow(monkeypatch):
     captured = {}
 
-    def fake_search_kb(
+    def fake_search_temp_files(
         payload,
         *,
-        document,
-        retrievers,
         tmp_retriever,
         reranker,
-        image_retriever,
         retriever_topk=20,
         rerank_topk=20,
         k_max=10,
-        image_topk=3,
     ):
         captured.update({
             'payload': payload,
-            'document': document,
             'tmp_retriever': tmp_retriever,
-            'image_retriever': image_retriever,
         })
         return []
 
-    monkeypatch.setattr(kb, 'search_kb', fake_search_kb)
+    monkeypatch.setattr(kb, 'search_temp_files', fake_search_temp_files)
     monkeypatch.setattr(kb.TempKBToolGroup, '_ensure_search_runtime', lambda self: None)
     monkeypatch.setattr(kb.TempKBToolGroup, '_tmp_retriever', 'tmp-retriever')
     monkeypatch.setattr(kb.TempKBToolGroup, '_reranker', 'reranker')
@@ -121,9 +110,38 @@ def test_kb_tmp_search_core_flow(monkeypatch):
             'files': ['tmp-a.md'],
             'user_id': 'user-007',
         },
-        'document': kb._DEFAULT_KB_DOCUMENT,
         'tmp_retriever': 'tmp-retriever',
-        'image_retriever': None,
     }
     assert result['success'] is True
     assert result['tool'] == 'kb_tmp_search'
+
+
+def test_temp_kb_runtime_registers_block_group(monkeypatch):
+    calls = []
+
+    class FakeTempDocRetriever:
+        def __init__(self, embed):
+            calls.append(('init', embed))
+
+        def create_node_group(self, **kwargs):
+            calls.append(('create_node_group', kwargs))
+            return self
+
+        def add_subretriever(self, group):
+            calls.append(('add_subretriever', group))
+            return self
+
+    monkeypatch.setattr(kb, 'AutoModel', lambda model: f'model:{model}')
+    monkeypatch.setattr(kb, 'TempDocRetriever', FakeTempDocRetriever)
+    monkeypatch.setattr(kb, '_is_reranker_enabled', lambda: False)
+    monkeypatch.setattr(kb.TempKBToolGroup, '_tmp_retriever', None)
+    monkeypatch.setattr(kb.TempKBToolGroup, '_reranker', None)
+
+    kb.TempKBToolGroup()._ensure_search_runtime()
+
+    assert calls[0] == ('init', f'model:{kb.EMBED_MAIN}')
+    assert calls[1][0] == 'create_node_group'
+    assert calls[1][1]['name'] == 'block'
+    assert calls[1][1]['display_name'] == 'paragraph slice'
+    assert calls[1][1]['group_type'] == kb.NodeGroupType.CHUNK
+    assert calls[2] == ('add_subretriever', 'block')

@@ -89,8 +89,8 @@ async def chat(
         Body(
             description=(
                 'Per-request tool credentials. Format: {tool_name: token} or {tool_name: [token, ...]}. '
-                'For OAuth2 providers (e.g. feishu) pass a valid, unexpired access token. '
-                'Example: {"feishu": "u-xxx", "bing": ["sk-1", "sk-2"]}'
+                'For OAuth2 providers (e.g. feishu, notion) pass a valid, unexpired access token. '
+                'Example: {"feishu": "u-xxx", "notion": "ntn_xxx", "bing": ["sk-1", "sk-2"]}'
             )
         ),
     ] = None,
@@ -101,6 +101,17 @@ async def chat(
                 'Per-request MCP server configuration. Each item: '
                 '{id, name, transport, url, headers, allowed_tools, timeout}. '
                 'headers contains decrypted real credentials and is discarded after the request.'
+            )
+        ),
+    ] = None,
+    plugin_context: Annotated[
+        Optional[Dict[str, Any]],
+        Body(
+            description=(
+                'Active plugin session context injected by Go. '
+                'Fields: session_id, plugin_id, current_step, advance. '
+                'When present with session_id, only advance_step is injected; '
+                'when absent or empty, cold-start trigger tools are injected.'
             )
         ),
     ] = None,
@@ -127,4 +138,5 @@ async def chat(
         tool_config=tool_config,
         mcp_config=mcp_config,
         trace=trace,
+        plugin_context=plugin_context,
     )

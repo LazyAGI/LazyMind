@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -59,6 +60,54 @@ func TestHTTPAuthConnectionClientVerifyUsesOwnerScope(t *testing.T) {
 	client := newHTTPAuthTestClient(t, server.URL)
 	if err := client.Verify(context.Background(), "auth-1", "user-1", "tenant-1"); err != nil {
 		t.Fatalf("verify auth connection: %v", err)
+	}
+}
+
+func TestHTTPAuthConnectionClientBatchStatus(t *testing.T) {
+	t.Parallel()
+
+	var requestBody struct {
+		ConnectionIDs []string `json:"connection_ids"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+		if r.URL.Path != "/api/authservice/v1/cloud/connections/status:batch" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("user_id") != "user-1" || r.URL.Query().Get("tenant_id") != "tenant-1" {
+			t.Fatalf("batch status request did not include owner scope: %s", r.URL.RawQuery)
+		}
+		if r.Header.Get("X-LazyMind-Internal-Token") != "internal-token" {
+			t.Fatalf("missing internal service token")
+		}
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		writeFeishuJSON(t, w, http.StatusOK, map[string]any{
+			"items": []map[string]any{
+				{"connection_id": "auth-1", "provider": "feishu", "status": "ACTIVE"},
+				{"connection_id": "auth-2", "provider": "feishu", "status": "REVOKED", "last_error": "deleted"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := newHTTPAuthTestClient(t, server.URL)
+	statuses, err := client.BatchStatus(context.Background(), ConnectionStatusRequest{
+		ConnectionIDs: []string{"auth-1", "auth-2", "auth-1", ""},
+		UserID:        "user-1",
+		TenantID:      "tenant-1",
+	})
+	if err != nil {
+		t.Fatalf("batch status: %v", err)
+	}
+	if !reflect.DeepEqual(requestBody.ConnectionIDs, []string{"auth-1", "auth-2"}) {
+		t.Fatalf("connection ids were not deduped: %#v", requestBody.ConnectionIDs)
+	}
+	if statuses["auth-1"].Status != "ACTIVE" || statuses["auth-2"].Status != "REVOKED" || statuses["auth-2"].LastError != "deleted" {
+		t.Fatalf("unexpected statuses: %+v", statuses)
 	}
 }
 
@@ -396,6 +445,13 @@ func TestDefaultFeishuAPIClientMapsScopeMissing(t *testing.T) {
 	client := newHTTPFeishuAPITestClient(t, server.URL)
 	_, err := client.GetDriveRoot(context.Background(), "user-token")
 	assertFeishuErrorCode(t, err, connector.ErrorCodePermissionDenied)
+}
+
+func TestFeishuOpenAPIMapsFrequencyLimitAsRateLimited(t *testing.T) {
+	t.Parallel()
+
+	err := mapFeishuOpenAPIError("99991400", "request trigger frequency limit", http.StatusOK)
+	assertFeishuErrorCode(t, err, connector.ErrorCodeRateLimited)
 }
 
 func newHTTPAuthTestClient(t *testing.T, baseURL string) *HTTPAuthConnectionClient {

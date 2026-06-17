@@ -172,6 +172,64 @@ class SubAgentDB:
             ).mappings().all()
         return [r['artifact_key'] for r in rows]
 
+    def load_plugin_session_steps(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return plugin_session_steps rows for a session, ordered by attempt ASC.
+
+        Used by _enrich_objective_with_artifacts to find succeeded step task_ids.
+        Returns empty list on any error.
+        """
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    text(
+                        'SELECT step_id, task_id, status, attempt '
+                        'FROM plugin_session_steps '
+                        'WHERE session_id = :session_id '
+                        'ORDER BY attempt ASC'
+                    ),
+                    {'session_id': session_id},
+                ).mappings().all()
+            return [dict(r) for r in rows]
+        except Exception:
+            return []
+
+    def load_artifacts_for_tasks(self, task_ids: List[str]) -> List[Dict[str, Any]]:
+        """Return artifacts for a list of task_ids, ordered by task_id / key / seq ASC.
+
+        Returns empty list on any error or if task_ids is empty.
+        """
+        if not task_ids:
+            return []
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    text(
+                        'SELECT task_id, artifact_key, content_type, value, seq '
+                        'FROM sub_agent_artifacts '
+                        'WHERE task_id IN :ids '
+                        'ORDER BY task_id, artifact_key, seq ASC'
+                    ).bindparams(bindparam('ids', expanding=True)),
+                    {'ids': task_ids},
+                ).mappings().all()
+            out: List[Dict[str, Any]] = []
+            for r in rows:
+                value = r['value']
+                if isinstance(value, str):
+                    try:
+                        value = json.loads(value)
+                    except ValueError:
+                        value = {}
+                out.append({
+                    'task_id': r['task_id'],
+                    'artifact_key': r['artifact_key'],
+                    'content_type': r['content_type'],
+                    'value': value,
+                    'seq': r['seq'],
+                })
+            return out
+        except Exception:
+            return []
+
 
 # ---------------------------------------------------------------------------
 # TaskQueryDB — read-only DB accessor for ChatAgent tool context.

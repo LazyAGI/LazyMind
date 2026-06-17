@@ -259,6 +259,109 @@ class CloudOAuthOwnerTest(unittest.TestCase):
         self.assertEqual(detail['status'], 'ACTIVE')
         self.assertEqual(detail['last_error'], '')
 
+    def test_batch_connection_status_reads_without_refreshing_token(self) -> None:
+        created = self.service.create_authorize_url(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            auth_mode='oauth_user',
+            client_id='client',
+            client_secret='secret',
+            redirect_uri='https://example.test/callback',
+            state='state-1',
+        )
+        callback = self.service.oauth_callback(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            connection_id=created['connection_id'],
+            code='code-1',
+            state='state-1',
+        )
+        connection_id = callback['connection_id']
+        self.provider.refresh_error = RuntimeError('refresh should not run')
+
+        status = self.service.batch_connection_status([connection_id, connection_id], user_id='user-1')
+
+        self.assertEqual(len(status['items']), 1)
+        self.assertEqual(status['items'][0]['connection_id'], connection_id)
+        self.assertEqual(status['items'][0]['status'], 'ACTIVE')
+
+    def test_health_check_refreshes_error_connection_to_active(self) -> None:
+        created = self.service.create_authorize_url(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            auth_mode='oauth_user',
+            client_id='client',
+            client_secret='secret',
+            redirect_uri='https://example.test/callback',
+            state='state-1',
+        )
+        callback = self.service.oauth_callback(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            connection_id=created['connection_id'],
+            code='code-1',
+            state='state-1',
+        )
+        connection_id = callback['connection_id']
+        self.service._cache_delete(connection_id)
+        with cloud_oauth_module.SessionLocal() as db:
+            row = db.query(CloudAuthConnection).filter_by(connection_id=connection_id).first()
+            state = self.service._decrypt_payload(row.auth_state_ciphertext, field_name='auth_state')
+            state.update({
+                'access_token': '',
+                'access_expires_at': '',
+                'refresh_token': 'refresh-token-health',
+            })
+            row.auth_state_ciphertext = self.service._encrypt_payload(state, field_name='auth_state')
+            row.status = 'ERROR'
+            row.last_error = 'previous failure'
+            db.commit()
+
+        result = self.service.run_health_check_once(provider='feishu', batch_size=10)
+
+        self.assertEqual(result['checked'], 1)
+        self.assertEqual(result['active'], 1)
+        detail = self.service.get_connection(connection_id, user_id='user-1')
+        self.assertEqual(detail['status'], 'ACTIVE')
+        self.assertEqual(detail['last_error'], '')
+
+    def test_health_check_skips_revoked_connection(self) -> None:
+        created = self.service.create_authorize_url(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            auth_mode='oauth_user',
+            client_id='client',
+            client_secret='secret',
+            redirect_uri='https://example.test/callback',
+            state='state-1',
+        )
+        callback = self.service.oauth_callback(
+            provider='feishu',
+            tenant_id='',
+            owner_user_id='user-1',
+            connection_id=created['connection_id'],
+            code='code-1',
+            state='state-1',
+        )
+        connection_id = callback['connection_id']
+        self.service.delete_connection(connection_id, user_id='user-1')
+
+        result = self.service.run_health_check_once(provider='feishu', batch_size=10)
+
+        self.assertEqual(result['candidate_count'], 0)
+        revoked = self.service.list_connections(
+            owner_user_id='user-1',
+            provider='feishu',
+            auth_mode='oauth_user',
+            status='REVOKED',
+        )
+        self.assertEqual(len(revoked['items']), 1)
+
     def test_delete_connection_revokes_owner_connection(self) -> None:
         created = self.service.create_authorize_url(
             provider='feishu',
@@ -432,7 +535,7 @@ class CloudOAuthOwnerTest(unittest.TestCase):
         with self.assertRaisesRegex(Exception, 'cloud auth connection not found'):
             self.service.update_connection(callback['connection_id'], user_id='user-1', name='Deleted')
 
-    def test_oauth_callback_does_not_reuse_deleted_provider_account_connection(self) -> None:
+    def test_oauth_callback_restores_deleted_provider_account_connection(self) -> None:
         first = self.service.create_authorize_url(
             provider='feishu',
             tenant_id='',
@@ -453,6 +556,15 @@ class CloudOAuthOwnerTest(unittest.TestCase):
         )
         self.service.delete_connection(first_callback['connection_id'], user_id='user-1')
 
+        revoked = self.service.list_connections(
+            owner_user_id='user-1',
+            provider='feishu',
+            auth_mode='oauth_user',
+            status='REVOKED',
+        )
+        self.assertEqual(len(revoked['items']), 1)
+        self.assertEqual(revoked['items'][0]['connection_id'], first_callback['connection_id'])
+
         second = self.service.create_authorize_url(
             provider='feishu',
             tenant_id='',
@@ -472,7 +584,7 @@ class CloudOAuthOwnerTest(unittest.TestCase):
             state='state-2',
         )
 
-        self.assertNotEqual(second_callback['connection_id'], first_callback['connection_id'])
+        self.assertEqual(second_callback['connection_id'], first_callback['connection_id'])
         active = self.service.list_connections(
             owner_user_id='user-1',
             provider='feishu',
@@ -480,7 +592,15 @@ class CloudOAuthOwnerTest(unittest.TestCase):
             status='ACTIVE',
         )
         self.assertEqual(len(active['items']), 1)
-        self.assertEqual(active['items'][0]['connection_id'], second_callback['connection_id'])
+        self.assertEqual(active['items'][0]['connection_id'], first_callback['connection_id'])
+        revoked = self.service.list_connections(
+            owner_user_id='user-1',
+            provider='feishu',
+            auth_mode='oauth_user',
+            status='REVOKED',
+        )
+        self.assertEqual(len(revoked['items']), 1)
+        self.assertEqual(revoked['items'][0]['connection_id'], second['connection_id'])
 
     def test_reauthorize_connection_locks_existing_provider_account(self) -> None:
         first = self.service.create_authorize_url(

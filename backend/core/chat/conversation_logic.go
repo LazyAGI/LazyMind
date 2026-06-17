@@ -18,6 +18,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
 	"lazymind/core/log"
+	"lazymind/core/plugin"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/subagent"
 )
@@ -40,6 +41,13 @@ func userIDFromChatRequestBody(reqBody map[string]any) string {
 
 func llmConfigFromBody(reqBody map[string]any) map[string]any {
 	if cfg, ok := reqBody["llm_config"].(map[string]any); ok && len(cfg) > 0 {
+		return cfg
+	}
+	return nil
+}
+
+func toolConfigFromBody(reqBody map[string]any) map[string]any {
+	if cfg, ok := reqBody["tool_config"].(map[string]any); ok && len(cfg) > 0 {
 		return cfg
 	}
 	return nil
@@ -436,6 +444,10 @@ func buildChatRequestBody(convID, sessionID, query string, histories []orm.ChatH
 	if environmentContext, ok := raw["environment_context"].(map[string]any); ok {
 		body["environment_context"] = environmentContext
 	}
+	// Propagate plugin_context so Python ChatAgent receives the active session info.
+	if pc, ok := raw["plugin_context"].(map[string]any); ok && len(pc) > 0 {
+		body["plugin_context"] = pc
+	}
 	if resourceContext != nil {
 		body["disabled_tools"] = resourceContext.DisabledTools
 		body["available_skills"] = resourceContext.AvailableSkills
@@ -544,7 +556,7 @@ func handleNonStreamChat(
 ) {
 	pyBody, _ := json.Marshal(reqBody)
 	upstreamURL := common.JoinURL(baseURL, "/api/chat")
-	fmt.Printf("DEBUG upstream request url=%s params=%+v\n", upstreamURL, reqBody)
+	fmt.Printf("DEBUG upstream request url=%s params=%s\n", upstreamURL, debugJSON(reqBody))
 	respBytes, statusCode, err := common.HTTPPost(reqCtx, upstreamURL, "application/json", pyBody)
 	if err != nil {
 		fmt.Println("DEBUG upstream request failed url=", upstreamURL, " err=", err)
@@ -764,15 +776,28 @@ func streamSingleAnswer(
 	for d := range ch {
 		if d.TaskCreated != nil {
 			userIDForTask, _ := reqBody["user_id"].(string)
-			notice := handleTaskCreated(chatCtx, db, rdb, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody))
-			if notice != nil && reqCtx.Err() == nil {
-				writeSSEChunk(w, flusher, &ChatChunkResponse{
+			notice := handleTaskCreated(chatCtx, db, rdb, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody), toolConfigFromBody(reqBody))
+			if notice != nil {
+				taskChunk := &ChatChunkResponse{
 					ConversationID: convID,
 					Seq:            int32(seq),
 					HistoryID:      historyID,
 					FinishReason:   "FINISH_REASON_UNSPECIFIED",
 					TaskCreated:    notice,
-				})
+				}
+				if reqCtx.Err() == nil {
+					writeSSEChunk(w, flusher, taskChunk)
+				}
+				if rdb != nil {
+					_ = appendChatChunk(chatCtx, rdb, convID, historyID, taskChunk)
+					// Also write to the conversation-level events channel so the frontend
+					// receives task_created notifications regardless of which history stream
+					// is currently open (covers auto-advance internal requests).
+					_ = AppendConvEvent(chatCtx, rdb, convID, &ConvEvent{
+						Type:    "task_created",
+						Payload: notice,
+					})
+				}
 			}
 			continue
 		}
@@ -1129,9 +1154,15 @@ func handleTaskCreated(
 	convID, historyID, userID string,
 	ev *TaskCreatedEvent,
 	llmConfig map[string]any,
+	toolConfig map[string]any,
 ) *TaskCreatedNotice {
 	if ev == nil || strings.TrimSpace(ev.TaskID) == "" {
 		return nil
+	}
+
+	// Plugin Step path — handled separately.
+	if ev.AgentType == "plugin_step" {
+		return handlePluginStepCreated(chatCtx, db, rdb, convID, historyID, userID, ev, llmConfig, toolConfig)
 	}
 	mode := ev.Mode
 	if mode != "auto" && mode != "manual" {
@@ -1151,17 +1182,15 @@ func handleTaskCreated(
 				"status": subagent.StatusRunning, "progress": existing.ProgressPct,
 			})
 			go subagent.Run(context.Background(), db, rdb, subagent.RunRequest{
-				TaskID:             existing.ID,
-				AgentType:          existing.AgentType,
-				Objective:          existing.Objective,
-				Params:             ev.Params,
-				InputArtifactKeys:  ev.InputArtifactKeys,
-				OutputArtifactKeys: ev.OutputArtifactKeys,
-				WorkspacePath:      existing.WorkspacePath,
-				Tools:              ev.Tools,
-				DBDSN:              subagent.DBDSN(),
-				Resume:             true,
-				LLMConfig:          llmConfig,
+				TaskID:        existing.ID,
+				AgentType:     existing.AgentType,
+				Params:        ev.Params,
+				WorkspacePath: existing.WorkspacePath,
+				Tools:         ev.Tools,
+				DBDSN:         subagent.DBDSN(),
+				Resume:        true,
+				LLMConfig:     llmConfig,
+				ToolConfig:    toolConfig,
 			})
 			return &TaskCreatedNotice{
 				TaskID:            existing.ID,
@@ -1197,17 +1226,15 @@ func handleTaskCreated(
 	})
 
 	go subagent.Run(context.Background(), db, rdb, subagent.RunRequest{
-		TaskID:             task.ID,
-		AgentType:          ev.AgentType,
-		Objective:          ev.Objective,
-		Params:             ev.Params,
-		InputArtifactKeys:  ev.InputArtifactKeys,
-		OutputArtifactKeys: ev.OutputArtifactKeys,
-		WorkspacePath:      workspacePath,
-		Tools:              ev.Tools,
-		DBDSN:              subagent.DBDSN(),
-		Resume:             false,
-		LLMConfig:          llmConfig,
+		TaskID:        task.ID,
+		AgentType:     ev.AgentType,
+		Params:        ev.Params,
+		WorkspacePath: workspacePath,
+		Tools:         ev.Tools,
+		DBDSN:         subagent.DBDSN(),
+		Resume:        false,
+		LLMConfig:     llmConfig,
+		ToolConfig:    toolConfig,
 	})
 
 	return &TaskCreatedNotice{
@@ -1217,5 +1244,69 @@ func handleTaskCreated(
 		Mode:              task.Mode,
 		Status:            task.Status,
 		SeqInConversation: task.SeqInConversation,
+	}
+}
+
+// handlePluginStepCreated processes a task_created event for agent_type='plugin_step'.
+// It delegates to the plugin package EventLoop to manage session/step lifecycle.
+func handlePluginStepCreated(
+	ctx context.Context,
+	db *gorm.DB,
+	rdb *redis.Client,
+	convID, historyID, userID string,
+	ev *TaskCreatedEvent,
+	llmConfig map[string]any,
+	toolConfig map[string]any,
+) *TaskCreatedNotice {
+	// Parse PluginStepParams from ev.Params.
+	var params plugin.PluginStepParams
+	if ev.Params != nil {
+		if pid, ok := ev.Params["plugin_id"].(string); ok {
+			params.PluginID = pid
+		}
+		if sid, ok := ev.Params["step_id"].(string); ok {
+			params.StepID = sid
+		}
+		if sessID, ok := ev.Params["session_id"].(string); ok {
+			params.SessionID = sessID
+		}
+		if ui, ok := ev.Params["user_input"].(string); ok {
+			params.UserInput = ui
+		}
+		if cold, ok := ev.Params["is_cold_start"].(bool); ok {
+			params.IsColdStart = cold
+		}
+	}
+	if params.PluginID == "" || params.StepID == "" {
+		fmt.Println("[Core] [PLUGIN_STEP_INVALID_PARAMS] plugin_id or step_id missing")
+		return nil
+	}
+
+	sessionID, taskID, err := plugin.HandlePluginStepCreated(
+		ctx, db, rdb, convID, historyID, userID,
+		ev.TaskID, ev.Title, ev.Objective,
+		params,
+		ev.InputArtifactKeys, ev.OutputArtifactKeys,
+		llmConfig, toolConfig,
+	)
+	if err != nil {
+		fmt.Printf("[Core] [PLUGIN_STEP_FAILED] err=%v\n", err)
+		return nil
+	}
+
+	// Fetch the created task for the notice.
+	task, getErr := subagent.GetTask(ctx, db, taskID)
+	if getErr != nil {
+		fmt.Printf("[Core] [PLUGIN_STEP_GET_TASK_FAILED] err=%v\n", getErr)
+		return nil
+	}
+	return &TaskCreatedNotice{
+		TaskID:            task.ID,
+		Title:             task.Title,
+		AgentType:         "plugin_step",
+		Mode:              "manual",
+		Status:            task.Status,
+		SeqInConversation: task.SeqInConversation,
+		PluginSessionID:   sessionID,
 	}
 }

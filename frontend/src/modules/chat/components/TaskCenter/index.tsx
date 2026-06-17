@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Image, Progress, Tabs, Tooltip } from "antd";
+import { Image, Progress, Tooltip } from "antd";
 import {
   CheckCircleFilled,
   CloseCircleFilled,
@@ -21,6 +21,7 @@ import {
   TaskStatus,
   useTaskCenterStore,
 } from "@/modules/chat/store/taskCenter";
+import { usePluginStore } from "@/modules/chat/store/pluginPanel";
 import { resolveCoreAssetUrl } from "@/modules/knowledge/utils/imageUrl";
 import "./index.scss";
 
@@ -32,12 +33,6 @@ interface Props {
 const EMPTY_TASKS: SubAgentTask[] = [];
 
 const RUNNING_STATUSES: TaskStatus[] = ["pending", "running"];
-const HISTORY_STATUSES: TaskStatus[] = [
-  "succeeded",
-  "failed",
-  "interrupted",
-  "canceled",
-];
 
 function imageUrlOf(value: any): string {
   if (!value) return "";
@@ -83,7 +78,9 @@ function CollapsibleSection({
         </span>
         <span className="task-section-title">{title}</span>
       </button>
-      {open && <div className="task-section-body">{children}</div>}
+      <div className="task-section-body" style={open ? undefined : { display: 'none' }}>
+        {children}
+      </div>
     </div>
   );
 }
@@ -386,54 +383,40 @@ function TaskCard({ task }: { task: SubAgentTask }) {
   );
 }
 
+type FilterKey = "all" | "running" | "succeeded" | "failed";
+
 const TaskCenter = (props: Props) => {
   const { sessionId, onClose } = props;
   const { t } = useTranslation();
+  const [filter, setFilter] = useState<FilterKey>("all");
+
+  const loadActiveSession = usePluginStore((s) => s.loadActiveSession);
+
+  // Ensure plugin session is loaded whenever the conversation changes,
+  // independently of whether PluginPanel has mounted yet.
+  useEffect(() => {
+    if (sessionId) {
+      loadActiveSession(sessionId);
+    }
+  }, [sessionId, loadActiveSession]);
 
   const tasks = useTaskCenterStore((s) =>
     sessionId ? s.tasksByConversation[sessionId] ?? EMPTY_TASKS : EMPTY_TASKS,
   );
 
-  const runningTasks = useMemo(
-    () => tasks.filter((t) => RUNNING_STATUSES.includes(t.status)),
-    [tasks],
-  );
-  const historyTasks = useMemo(
-    () => tasks.filter((t) => HISTORY_STATUSES.includes(t.status)),
-    [tasks],
-  );
+  const filteredTasks = useMemo(() => {
+    if (filter === "all") return tasks;
+    if (filter === "running") return tasks.filter((t) => RUNNING_STATUSES.includes(t.status));
+    if (filter === "succeeded") return tasks.filter((t) => t.status === "succeeded");
+    if (filter === "failed") return tasks.filter((t) => t.status === "failed" || t.status === "interrupted" || t.status === "canceled");
+    return tasks;
+  }, [tasks, filter]);
 
-  const items = [
-    {
-      key: "running",
-      label: `${t("taskCenter.running")} (${runningTasks.length})`,
-      children: (
-        <div className="task-list">
-          {runningTasks.length === 0 ? (
-            <div className="task-empty">{t("taskCenter.empty")}</div>
-          ) : (
-            runningTasks.map((task) => (
-              <TaskCard key={task.task_id} task={task} />
-            ))
-          )}
-        </div>
-      ),
-    },
-    {
-      key: "history",
-      label: t("taskCenter.history"),
-      children: (
-        <div className="task-list">
-          {historyTasks.length === 0 ? (
-            <div className="task-empty">{t("taskCenter.empty")}</div>
-          ) : (
-            historyTasks.map((task) => (
-              <TaskCard key={task.task_id} task={task} />
-            ))
-          )}
-        </div>
-      ),
-    },
+  const filterDefs: { key: FilterKey; label: string }[] = [
+    { key: "all", label: t("taskCenter.filterAll") },
+    { key: "running", label: t("taskCenter.running") },
+    { key: "succeeded", label: t("taskCenter.filterSucceeded") },
+    { key: "failed", label: t("taskCenter.filterFailed") },
   ];
 
   return (
@@ -453,7 +436,32 @@ const TaskCenter = (props: Props) => {
           </button>
         )}
       </div>
-      <Tabs defaultActiveKey="running" items={items} />
+      <div className="task-center-filters">
+        {filterDefs.map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            className={`task-filter-btn${filter === key ? " task-filter-btn--active" : ""}`}
+            onClick={() => setFilter(key)}
+          >
+            {label}
+            {key === "running" && tasks.filter((t) => RUNNING_STATUSES.includes(t.status)).length > 0 && (
+              <span className="task-filter-badge">
+                {tasks.filter((t) => RUNNING_STATUSES.includes(t.status)).length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+      <div className="task-list">
+        {filteredTasks.length === 0 ? (
+          <div className="task-empty">{t("taskCenter.empty")}</div>
+        ) : (
+          filteredTasks.map((task) => (
+            <TaskCard key={task.task_id} task={task} />
+          ))
+        )}
+      </div>
     </div>
   );
 };

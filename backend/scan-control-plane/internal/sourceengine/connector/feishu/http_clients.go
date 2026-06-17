@@ -42,7 +42,7 @@ func (c *HTTPAuthConnectionClient) GetToken(ctx context.Context, req TokenReques
 	}
 	var out Token
 	path := "/api/authservice/v1/cloud/connections/" + url.PathEscape(connectionID) + "/token"
-	if err := c.doAuthServiceJSON(ctx, endpoint(c.baseURL, path, authQuery(req.UserID, "")), &out); err != nil {
+	if err := c.doAuthServiceToken(ctx, endpoint(c.baseURL, path, authQuery(req.UserID, "")), &out); err != nil {
 		return Token{}, err
 	}
 	return out, nil
@@ -54,15 +54,71 @@ func (c *HTTPAuthConnectionClient) Verify(ctx context.Context, authConnectionID,
 		return connector.NewError(ErrorCodeAuthInvalid, "auth_connection_id is required")
 	}
 	path := "/api/authservice/v1/cloud/connections/" + url.PathEscape(connectionID) + "/verify"
-	return c.doAuthServiceJSON(ctx, endpoint(c.baseURL, path, authQuery(userID, tenantID)), nil)
+	return c.doAuthServiceRequest(ctx, endpoint(c.baseURL, path, authQuery(userID, tenantID)), http.MethodGet, nil, nil)
 }
 
-func (c *HTTPAuthConnectionClient) doAuthServiceJSON(ctx context.Context, url string, out *Token) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func (c *HTTPAuthConnectionClient) BatchStatus(ctx context.Context, req ConnectionStatusRequest) (map[string]ConnectionStatus, error) {
+	connectionIDs := uniqueNonEmptyStrings(req.ConnectionIDs)
+	if len(connectionIDs) == 0 {
+		return map[string]ConnectionStatus{}, nil
+	}
+	body, err := json.Marshal(map[string]any{"connection_ids": connectionIDs})
+	if err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Items []struct {
+			ConnectionID      string `json:"connection_id"`
+			TenantID          string `json:"tenant_id"`
+			OwnerUserID       string `json:"owner_user_id"`
+			Provider          string `json:"provider"`
+			AuthMode          string `json:"auth_mode"`
+			ProviderAccountID string `json:"provider_account_id"`
+			DisplayName       string `json:"display_name"`
+			ProviderTenantKey string `json:"provider_tenant_key"`
+			Status            string `json:"status"`
+			LastError         string `json:"last_error"`
+			LastUsedAt        string `json:"last_used_at"`
+			UpdatedAt         string `json:"updated_at"`
+		} `json:"items"`
+	}
+	path := "/api/authservice/v1/cloud/connections/status:batch"
+	if err := c.doAuthServiceRequest(ctx, endpoint(c.baseURL, path, authQuery(req.UserID, req.TenantID)), http.MethodPost, bytes.NewReader(body), &payload); err != nil {
+		return nil, err
+	}
+	statuses := make(map[string]ConnectionStatus, len(payload.Items))
+	for _, item := range payload.Items {
+		connectionID := strings.TrimSpace(item.ConnectionID)
+		if connectionID == "" {
+			continue
+		}
+		statuses[connectionID] = ConnectionStatus{
+			ConnectionID:      connectionID,
+			TenantID:          item.TenantID,
+			OwnerUserID:       item.OwnerUserID,
+			Provider:          item.Provider,
+			AuthMode:          item.AuthMode,
+			ProviderAccountID: item.ProviderAccountID,
+			DisplayName:       item.DisplayName,
+			ProviderTenantKey: item.ProviderTenantKey,
+			Status:            strings.ToUpper(strings.TrimSpace(item.Status)),
+			LastError:         item.LastError,
+			LastUsedAt:        item.LastUsedAt,
+			UpdatedAt:         item.UpdatedAt,
+		}
+	}
+	return statuses, nil
+}
+
+func (c *HTTPAuthConnectionClient) doAuthServiceRequest(ctx context.Context, url, method string, body io.Reader, out any) error {
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if c.internalToken != "" {
 		req.Header.Set("X-LazyMind-Internal-Token", c.internalToken)
 	}
@@ -78,13 +134,20 @@ func (c *HTTPAuthConnectionClient) doAuthServiceJSON(ctx context.Context, url st
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil
 	}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *HTTPAuthConnectionClient) doAuthServiceToken(ctx context.Context, url string, out *Token) error {
 	var payload struct {
 		AccessToken string `json:"access_token"`
 		Data        struct {
 			AccessToken string `json:"access_token"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := c.doAuthServiceRequest(ctx, url, http.MethodGet, nil, &payload); err != nil {
 		return err
 	}
 	out.AccessToken = strings.TrimSpace(firstNonEmpty(payload.AccessToken, payload.Data.AccessToken))
@@ -200,7 +263,7 @@ func (c *DefaultFeishuAPIClient) ListWikiChildren(ctx context.Context, token, sp
 	if err := doFeishuOpenAPIJSON(ctx, c.httpClient, endpoint(c.baseURL, path, query), http.MethodGet, token, nil, &out); err != nil {
 		return ObjectPage{}, err
 	}
-	return wikiNodesPage(out, spaceID), nil
+	return wikiNodesPage(out, spaceID, strings.TrimSpace(nodeToken)), nil
 }
 
 func (c *DefaultFeishuAPIClient) ExportWikiNodeMarkdown(ctx context.Context, token, spaceID, nodeToken, expectedVersion string) (ExportedContent, error) {
@@ -534,20 +597,24 @@ func wikiSpacesPage(data openAPIWikiSpaces) ObjectPage {
 	return ObjectPage{Items: items, NextCursor: next, HasMore: data.HasMore || next != ""}
 }
 
-func wikiNodesPage(data openAPIWikiNodes, spaceID string) ObjectPage {
+func wikiNodesPage(data openAPIWikiNodes, spaceID, parentNodeToken string) ObjectPage {
 	nodes := data.Items
 	if len(nodes) == 0 {
 		nodes = data.Nodes
 	}
 	items := make([]Object, 0, len(nodes))
 	for _, node := range nodes {
-		items = append(items, wikiNodeObject(node, spaceID, ""))
+		items = append(items, wikiNodeObjectWithParent(node, spaceID, "", parentNodeToken))
 	}
 	next := firstNonEmpty(data.NextPageToken, data.PageToken)
 	return ObjectPage{Items: items, NextCursor: next, HasMore: data.HasMore || next != ""}
 }
 
 func wikiNodeObject(node map[string]any, spaceID, fallbackToken string) Object {
+	return wikiNodeObjectWithParent(node, spaceID, fallbackToken, "")
+}
+
+func wikiNodeObjectWithParent(node map[string]any, spaceID, fallbackToken, fallbackParentToken string) Object {
 	nodeToken := firstNonEmpty(openAPIString(node["node_token"]), openAPIString(node["token"]), fallbackToken)
 	resolvedSpaceID := firstNonEmpty(openAPIString(node["space_id"]), spaceID)
 	objType := strings.ToLower(openAPIString(node["obj_type"]))
@@ -570,7 +637,7 @@ func wikiNodeObject(node map[string]any, spaceID, fallbackToken string) Object {
 	return Object{
 		Kind:        ObjectKindWikiNode,
 		Token:       nodeToken,
-		ParentToken: openAPIString(node["parent_node_token"]),
+		ParentToken: firstNonEmpty(openAPIString(node["parent_node_token"]), strings.TrimSpace(fallbackParentToken)),
 		SpaceID:     resolvedSpaceID,
 		Name:        name,
 		IsDocument:  true,
@@ -718,6 +785,9 @@ func mapFeishuOpenAPIError(code, message string, statusCode int) error {
 	if strings.TrimSpace(message) == "" {
 		message = "feishu api request failed"
 	}
+	if statusCode == http.StatusTooManyRequests || isFeishuRateLimitMessage(message) {
+		return connector.NewError(connector.ErrorCodeRateLimited, message)
+	}
 	switch code {
 	case "connection_not_found", "token_expired", "refresh_failed", "auth_invalid":
 		return connector.NewError(ErrorCodeAuthInvalid, message)
@@ -739,6 +809,13 @@ func mapFeishuOpenAPIError(code, message string, statusCode int) error {
 		}
 		return connector.NewError(connector.ErrorCodeTransient, message)
 	}
+}
+
+func isFeishuRateLimitMessage(message string) bool {
+	message = strings.ToLower(strings.TrimSpace(message))
+	return strings.Contains(message, "frequency limit") ||
+		strings.Contains(message, "rate limit") ||
+		strings.Contains(message, "too many requests")
 }
 
 func isHTMLResponse(contentType string, body []byte) bool {

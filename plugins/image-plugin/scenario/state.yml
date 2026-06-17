@@ -1,0 +1,163 @@
+initial: __start__
+
+# {{placeholder}} substitution rules (performed by Go before launching the SubAgent):
+#
+#   {{user_input}}           — the user's original request text
+#   {{runtime_instruction}}  — ephemeral per-run instruction for retries
+#   {{<artifact_id>}}        — value of an artifact saved by a prior step
+#                              (text → text field; image → url field)
+
+transitions:
+  __start__:
+    - to: analyze_subject
+      condition: "Cold start — always enter subject analysis first."
+
+  analyze_subject:
+    - to: collect_material
+      condition: "Subject analysis complete — collect reference materials."
+
+  collect_material:
+    - to: optimize_prompt
+      condition: "All materials collected — proceed to prompt optimization."
+
+  optimize_prompt:
+    - to: generate_image
+      condition: "Prompt ready — proceed to image generation."
+
+  generate_image:
+    - to: __end__
+      condition: "User is satisfied with the image — pipeline complete."
+
+steps:
+  analyze_subject:
+    label: Analyze Subject
+    prompt: |
+      You are an expert art director and image analyst.
+
+      The user wants to create an image with this description:
+      {{user_input}}
+
+      {{runtime_instruction}}
+
+      Your task:
+      1. Identify the main subject(s) and sub-topics that require reference materials.
+         For example, if the user asks for "a painting featuring A, B, C, D",
+         list each of A, B, C, D as an item to collect.
+      2. Suggest a suitable artistic style (photorealistic, oil painting, anime, etc.).
+      3. Note mood, lighting, and composition hints.
+      4. Save the structured analysis:
+           save_artifact(key='subject_analysis', content_type='text', value=<analysis text>)
+
+      Keep the analysis concise (100–200 words). Stop after saving.
+    outputs:
+      - artifact_id: subject_analysis
+        content_type: text
+        slot_id: subject_analysis
+    acceptance_criteria: |
+      subject_analysis artifact must be saved and contain at least 50 words covering
+      subjects/items to collect, artistic style, and mood/lighting hints.
+
+  collect_material:
+    label: Collect Reference Materials
+    # This step has a list-cardinality slot (material_images).
+    #
+    # Normal run: collect one image URL per subject item identified in subject_analysis.
+    # Call save_artifact once per item (no list_index needed — each call appends a new entry).
+    #
+    # Partial retry: if the user says "re-collect item B only", ChatAgent sets:
+    #   runtime_instruction = "Re-collect only item B; leave A, C, D untouched."
+    #   partial_indices = {"material_image": [1]}   ← list_index of B
+    # The SubAgent must call save_artifact with list_index=1 so that only the
+    # revision at index 1 is replaced; other indices are not touched.
+    prompt: |
+      You are a research agent that collects reference images for an art project.
+
+      Subject analysis:
+      {{subject_analysis}}
+
+      {{runtime_instruction}}
+
+      Your task:
+      - Unless runtime_instruction restricts you to specific items, collect one reference
+        image URL for each subject item identified in the analysis.
+      - For each item, call:
+          save_artifact(key='material_image', content_type='image', value=<url>)
+        If you are doing a partial retry for item at a specific position, also pass
+          list_index=<position>
+        so that only that slot entry is replaced.
+      - Stop after all required items are saved.
+    tools:
+      - web_search_tool
+      - image_search_tool
+    inputs:
+      - artifact_id: subject_analysis
+        required: true
+    outputs:
+      - artifact_id: material_image
+        content_type: image
+        slot_id: material_images   # cardinality: list
+    acceptance_criteria: |
+      At least one material_image artifact must be saved with a valid http(s):// URL.
+
+  optimize_prompt:
+    label: Optimize Prompt
+    prompt: |
+      You are a professional image-generation prompt engineer.
+
+      Subject analysis:
+      {{subject_analysis}}
+
+      Reference materials collected:
+      {{material_image}}
+
+      Original user request:
+      {{user_input}}
+
+      {{runtime_instruction}}
+
+      Your task:
+      1. Combine the analysis and material references into a high-quality English
+         image-generation prompt (50–200 words, rich in visual detail).
+      2. Include style modifiers, lighting, composition, and quality keywords.
+      3. Save the result:
+           save_artifact(key='optimized_prompt', content_type='text', value=<prompt>)
+
+      Stop after saving. Do not output anything else.
+    inputs:
+      - artifact_id: subject_analysis
+        required: true
+      - artifact_id: material_image
+        required: false
+    outputs:
+      - artifact_id: optimized_prompt
+        content_type: text
+        slot_id: prompt_used
+    acceptance_criteria: |
+      optimized_prompt artifact must be saved, in English, and contain at least 30 words.
+
+  generate_image:
+    label: Generate Image
+    prompt: |
+      You are an image generation agent.
+
+      Use the following optimized prompt to generate an image:
+      {{optimized_prompt}}
+
+      {{runtime_instruction}}
+
+      Steps:
+      1. Call generate_image_tool(prompt=<optimized_prompt>) to create the image.
+      2. Save the image URL:
+           save_artifact(key='generated_image_url', content_type='image', value=<url>)
+      3. Stop after saving.
+    tools:
+      - generate_image_tool
+    inputs:
+      - artifact_id: optimized_prompt
+        required: true
+    outputs:
+      - artifact_id: generated_image_url
+        content_type: image
+        slot_id: image_output
+    acceptance_criteria: |
+      generated_image_url artifact must be saved and contain a valid URL starting with http(s)://.

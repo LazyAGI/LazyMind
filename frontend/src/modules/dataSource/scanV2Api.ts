@@ -148,6 +148,17 @@ export function inferSourceKind(source?: ScanV2Source | null, binding?: ScanV2Bi
     return "feishu" as const;
   }
 
+  if (
+    connector.includes("notion") ||
+    sourceType.includes("notion") ||
+    targetType === "page" ||
+    targetType === "database" ||
+    targetType === "notion_page" ||
+    targetType === "notion_database"
+  ) {
+    return "notion" as const;
+  }
+
   return "local" as const;
 }
 
