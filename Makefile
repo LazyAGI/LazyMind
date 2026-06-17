@@ -56,21 +56,8 @@ endif
 # internal Makefile bookkeeping uses the resolved absolute path below.
 export LAZYMIND_FILE_WATCHER_BASE_ROOT ?= ./data/scan
 LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS := $(abspath $(LAZYMIND_FILE_WATCHER_BASE_ROOT))
-_CLEAR_ALL_BIND_DIRS := \
-	data/state \
-	data/scan \
-	data/core/uploads \
-	data/evo \
-	data/subagent \
-	data/traces
-_CLEAR_ALL_BIND_DIRS_IN_CONTAINER := \
-	/data/state \
-	/data/scan \
-	/data/core/uploads \
-	/data/evo \
-	/data/subagent \
-	/data/traces
 _CLEAR_ALL_DATA_ROOT := $(abspath data)
+_CLEAR_ALL_DATA_DIRS := state scan core/uploads evo subagent traces
 export LAZYMIND_FILE_WATCHER_MODE ?= container
 
 # Auto-detect host OS for path style and default watch directory.
@@ -475,18 +462,14 @@ reset-all: reset-kb
 	@echo "✅ Full reset done. All persistent data removed."
 
 # ---------------------------------------------------------------------------
-# clear-all: strongest local cleanup. Runs the existing teardown/reset targets
-#            and removes bind-mounted host data, including root-owned files.
+# clear-all: reset all Docker state, then remove root-owned bind-mount data.
 # ---------------------------------------------------------------------------
 clear-all:
-	@$(MAKE) --no-print-directory down
-	@$(MAKE) --no-print-directory reset-kb
 	@$(MAKE) --no-print-directory reset-all
-	@$(MAKE) --no-print-directory clear
-	@echo "🗑  Removing bind-mounted host data: $(_CLEAR_ALL_BIND_DIRS)..."
+	@echo "🗑  Removing bind-mounted data: $(_CLEAR_ALL_DATA_DIRS)..."
 	@docker run --rm --user 0 -v "$(_CLEAR_ALL_DATA_ROOT):/data" postgres:16 \
-		sh -c 'rm -rf $(_CLEAR_ALL_BIND_DIRS_IN_CONTAINER)' 2>/dev/null || true
-	@echo "✅ Clear-all done. Docker volumes and bind-mounted local data removed."
+		sh -c 'cd /data && rm -rf "$$@"' sh $(_CLEAR_ALL_DATA_DIRS) 2>/dev/null || true
+	@echo "✅ Clear-all done."
 
 # ---------------------------------------------------------------------------
 # fresh-start: reset-kb + up with LAZYMIND_RESET_ALGO_ON_STARTUP=true.

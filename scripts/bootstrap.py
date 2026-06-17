@@ -178,7 +178,10 @@ def default_models(config: dict[str, str]) -> dict[str, str]:
 
 class LazyMindClient:
     def __init__(self, config: dict[str, str]) -> None:
-        timeout = float(config.get("LAZYMIND_BOOTSTRAP_TIMEOUT", "60"))
+        try:
+            timeout = float(config.get("LAZYMIND_BOOTSTRAP_TIMEOUT", "60"))
+        except ValueError:
+            timeout = 60.0
         self.config = config
         self.client = httpx.Client(timeout=timeout, headers={"Accept": "application/json", "User-Agent": "lazymind-bootstrap/5.0"})
         self.base = ""
@@ -206,9 +209,10 @@ class LazyMindClient:
             payload = response.json()
         except ValueError as exc:
             raise BootstrapError(f"invalid JSON from {response.url}: {response.text!r}") from exc
-        if isinstance(payload, dict) and {"code", "message", "data"}.issubset(payload):
-            if payload.get("code") not in {0, 200}:
-                raise BootstrapError(f"api error {payload.get('code')}: {payload.get('message')}")
+        if isinstance(payload, dict) and "code" in payload:
+            code = payload.get("code")
+            if code not in {0, 200}:
+                raise BootstrapError(f"api error {code}: {payload.get('message', 'unknown error')}")
             return payload.get("data")
         return payload
 
@@ -237,11 +241,11 @@ class LazyMindClient:
         last_error: Exception | None = None
         for prefix in CORE_PREFIXES:
             try:
-                providers = list_rows(self.request("GET", f"{self.base}{prefix}/model_providers", params={"category": "model"}), "providers")
-                if providers:
-                    self.core_prefix = prefix
-                    print(f"core API detected: {self.base}{prefix}")
-                    return providers
+                data = self.request("GET", f"{self.base}{prefix}/model_providers", params={"category": "model"})
+                providers = list_rows(data, "providers")
+                self.core_prefix = prefix
+                print(f"core API detected: {self.base}{prefix}")
+                return providers
             except BootstrapError as exc:
                 last_error = exc
         raise BootstrapError(f"core API discovery failed at {self.base}: {last_error}")
@@ -257,10 +261,10 @@ class LazyMindClient:
 
 
 def find_provider(name: str, providers: list[dict[str, Any]]) -> dict[str, Any] | None:
-    exact = [p for p in providers if squashed(str(p.get("name", ""))) == squashed(name)]
+    exact = [p for p in providers if squashed(str(p.get("name") or "")) == squashed(name)]
     if exact:
         return exact[0]
-    loose = [p for p in providers if squashed(name) and squashed(name) in squashed(str(p.get("name", "")))]
+    loose = [p for p in providers if squashed(name) and squashed(name) in squashed(str(p.get("name") or ""))]
     return loose[0] if len(loose) == 1 else None
 
 
