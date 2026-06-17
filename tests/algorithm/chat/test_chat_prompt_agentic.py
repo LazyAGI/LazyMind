@@ -8,7 +8,6 @@ from lazymind.chat.engine.prompts import (
     TOOL_CALL_STATUS_GUIDANCE,
     VOCAB_GUIDANCE,
     VISION_EXTRACTOR_GUIDANCE,
-    build_system_prompt,
 )
 
 

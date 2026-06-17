@@ -3,17 +3,13 @@ from pathlib import Path
 
 import json
 import pytest
+from algorithm.config import config
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 for _p in (_ROOT, _ROOT / 'algorithm'):
     s = str(_p)
     if s not in sys.path:
         sys.path.insert(0, s)
-
-try:
-    from algorithm.config import config
-except ModuleNotFoundError:
-    config = None
 
 
 @pytest.fixture(autouse=True)
@@ -96,6 +92,5 @@ def _evo_test_data_env(tmp_path, monkeypatch):
     monkeypatch.setenv('EVO_BASE_DIR', str(base_dir))
     monkeypatch.setenv('LAZYMIND_EVO_DATA_DIR', str(data_dir))
     monkeypatch.setenv('LAZYMIND_EVO_BASE_DIR', str(base_dir))
-    if config is not None:
-        config.refresh(['evo_data_dir', 'evo_base_dir'])
+    config.refresh(['evo_data_dir', 'evo_base_dir'])
     yield
