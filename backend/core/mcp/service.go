@@ -529,7 +529,17 @@ func applyListServersKeyword(q *gorm.DB, keyword string) *gorm.DB {
 	}
 	pattern := "%" + escapeListServersLikePattern(keyword) + "%"
 	return q.Where(
-		"(LOWER(name) LIKE ? ESCAPE '!' OR LOWER(url) LIKE ? ESCAPE '!' OR LOWER(transport) LIKE ? ESCAPE '!')",
+		`(LOWER(name) LIKE ? ESCAPE '!' OR LOWER(url) LIKE ? ESCAPE '!' OR LOWER(transport) LIKE ? ESCAPE '!' OR EXISTS (
+			SELECT 1 FROM mcp_server_tools
+			WHERE mcp_server_tools.mcp_server_id = mcp_servers.id
+				AND mcp_server_tools.deleted_at IS NULL
+				AND (
+					LOWER(mcp_server_tools.tool_name) LIKE ? ESCAPE '!' OR
+					LOWER(mcp_server_tools.description) LIKE ? ESCAPE '!'
+				)
+		))`,
+		pattern,
+		pattern,
 		pattern,
 		pattern,
 		pattern,
