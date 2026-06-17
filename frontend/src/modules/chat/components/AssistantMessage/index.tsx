@@ -1,4 +1,4 @@
-import { Avatar, Button, Divider, Flex, message, Popover, Spin, Tooltip } from "antd";
+import { Avatar, Button, Divider, Flex, message, Spin, Tooltip } from "antd";
 import { trim } from "lodash";
 import { useEffect, useReducer, useRef, useState } from "react";
 import type { MouseEvent } from "react";
@@ -13,7 +13,6 @@ import {
   LikeFilled,
   LikeOutlined,
   ReloadOutlined,
-  AppstoreOutlined,
 } from "@ant-design/icons";
 import {
   ChatConversationsResponseFinishReasonEnum,
@@ -200,9 +199,8 @@ const AssistantMessage = (props: any) => {
     targetHistoryId: undefined,
   });
 
-  const [pluginPopoverOpen, setPluginPopoverOpen] = useState(false);
   const loadActiveSession = usePluginStore((s) => s.loadActiveSession);
-  // Eagerly load the plugin session so the toolbar button appears without waiting for Popover mount.
+  // Eagerly load the plugin session so the panel appears without waiting for component mount.
   useEffect(() => {
     if (index === length - 1 && sessionId) {
       loadActiveSession(sessionId);
@@ -634,36 +632,6 @@ const AssistantMessage = (props: any) => {
     );
   }
 
-  function renderPluginButton() {
-    if (!pluginSession) return null;
-    return (
-      <Popover
-        open={pluginPopoverOpen}
-        onOpenChange={setPluginPopoverOpen}
-        trigger="click"
-        placement="topLeft"
-        overlayStyle={{ width: 480 }}
-        overlayInnerStyle={{ padding: 0 }}
-        content={
-          <PluginPanel
-            conversationId={pluginConversationId}
-            onSendMessage={(text) => {
-              setPluginPopoverOpen(false);
-              props.sendMessage?.({ text });
-            }}
-          />
-        }
-      >
-        <Tooltip title="插件面板">
-          <Button
-            className="tool-btn"
-            icon={<AppstoreOutlined />}
-          />
-        </Tooltip>
-      </Popover>
-    );
-  }
-
   function renderAnswerFooter(answerIndex: number, showFullToolbar = false) {
     const answer = item.answers?.[answerIndex];
     if (!answer) {
@@ -697,7 +665,6 @@ const AssistantMessage = (props: any) => {
                 />
               </Tooltip>
             )}
-            {index === length - 1 && renderPluginButton()}
           </div>
           {showFullToolbar && (
             <Flex>
@@ -769,7 +736,6 @@ const AssistantMessage = (props: any) => {
                 />
               </Tooltip>
             )}
-            {index === length - 1 && renderPluginButton()}
           </div>
           <Flex>
             {currentFeedback ===
@@ -939,6 +905,12 @@ const AssistantMessage = (props: any) => {
             />
           </div>
           {index === length - 1 && renderBottom()}
+          {index === length - 1 && pluginSession && (
+            <PluginPanel
+              conversationId={pluginConversationId}
+              onSendMessage={(text) => props.sendMessage?.(text)}
+            />
+          )}
         </div>
         <FeedbackModal
           visible={feedbackState.showModal}
@@ -984,6 +956,12 @@ const AssistantMessage = (props: any) => {
             renderFooter()}
         </div>
         {index === length - 1 && renderBottom()}
+        {index === length - 1 && pluginSession && (
+          <PluginPanel
+            conversationId={pluginConversationId}
+            onSendMessage={(text) => props.sendMessage?.(text)}
+          />
+        )}
       </div>
       <FeedbackModal
         visible={feedbackState.showModal}

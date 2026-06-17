@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -163,11 +164,21 @@ def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
     return base
 
 
+_ZH_RE = re.compile('[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]')
+
+
 def _objective_prompt(ctx: SubAgentContext) -> str:
+    # Detect language from the user_input param (primary) or the full objective text.
+    user_input = str(ctx.params.get('user_input') or '')
+    is_zh = bool(_ZH_RE.search(user_input) or _ZH_RE.search(ctx.objective))
     lines = [
         'You are an autonomous SubAgent. Complete the objective below using the available tools.',
         'You are NOT allowed to spawn or create sub-agents or delegate tasks to other agents. '
         'Only use the tools explicitly listed in your tool set.',
+    ]
+    if is_zh:
+        lines.append('You MUST respond and write all artifact content in Simplified Chinese(简体中文).')
+    lines += [
         '',
         f'Objective: {ctx.objective}',
     ]

@@ -52,6 +52,7 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'FeishuWikiFS_write': 'path',
     'FeishuWikiFS_move': 'path1',
     'FeishuWikiFS_copy': 'path1',
+    'advance_step': 'step_id',
 }
 
 _REPRESENTATIVE_TOOL_RESULTS: dict[str, str] = {
@@ -131,6 +132,8 @@ _TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_write': 'Writing content to Feishu file at {value}.',
     'FeishuWikiFS_move': 'Moving Feishu file from {value} to the target path.',
     'FeishuWikiFS_copy': 'Copying Feishu file from {value} to the target path.',
+    'advance_step': 'Switching to step {value}.',
+    'regex:trigger_(.+)_plugin': 'Loading the {match} plugin now.',
 }
 _TOOL_CALL_FALLBACK_TEMPLATE = 'Calling a tool to handle the request.'
 
@@ -176,6 +179,8 @@ _ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_write': '正在向飞书文件 {value} 写入内容。',
     'FeishuWikiFS_move': '正在将飞书文件从 {value} 移动到目标路径。',
     'FeishuWikiFS_copy': '正在将飞书文件从 {value} 复制到目标路径。',
+    'advance_step': '正在切换到步骤 {value}...',
+    'regex:trigger_(.+)_plugin': '正在加载 {match} 插件...',
 }
 _ZH_TOOL_CALL_FALLBACK_TEMPLATE = '正在调用工具处理请求...'
 
@@ -221,6 +226,8 @@ _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_write': 'Content was written to Feishu file at {value} successfully.',
     'FeishuWikiFS_move': 'Feishu file was moved from {value} to the target path successfully.',
     'FeishuWikiFS_copy': 'Feishu file was copied from {value} to the target path successfully.',
+    'advance_step': 'Plugin launched.',
+    'regex:trigger_(.+)_plugin': 'Plugin launched.',
 }
 
 _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
@@ -265,6 +272,8 @@ _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_write': '已成功向飞书文件 {value} 写入内容。',
     'FeishuWikiFS_move': '已成功将飞书文件从 {value} 移动到目标路径。',
     'FeishuWikiFS_copy': '已成功将飞书文件从 {value} 复制到目标路径。',
+    'advance_step': '插件已启动',
+    'regex:trigger_(.+)_plugin': '插件已启动',
 }
 
 _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
@@ -309,6 +318,8 @@ _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_write': 'Content could not be written to Feishu file at {value}.',
     'FeishuWikiFS_move': 'Feishu file could not be moved from {value} to the target path.',
     'FeishuWikiFS_copy': 'Feishu file could not be copied from {value} to the target path.',
+    'advance_step': 'Step {value} could not be started.',
+    'regex:trigger_(.+)_plugin': 'Failed to load the {match} plugin.',
 }
 
 _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
@@ -353,6 +364,8 @@ _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_write': '未能向飞书文件 {value} 写入内容。',
     'FeishuWikiFS_move': '未能将飞书文件从 {value} 移动到目标路径。',
     'FeishuWikiFS_copy': '未能将飞书文件从 {value} 复制到目标路径。',
+    'advance_step': '步骤 {value} 启动失败',
+    'regex:trigger_(.+)_plugin': '{match} 插件加载失败',
 }
 
 _TOOL_RESULT_APPROVAL_TEMPLATES: dict[str, str] = {
@@ -474,6 +487,23 @@ def _resolve_tool_key(tool_name: str, mapping: dict[str, Any]) -> Any:
         if suffix in mapping:
             return mapping[suffix]
     return None
+
+
+def _resolve_tool_key_regex(
+    tool_name: str, mapping: dict[str, Any]
+) -> tuple[Any, re.Match | None]:
+    """Look up *tool_name* in *mapping* using regex keys prefixed with ``regex:``.
+
+    Returns ``(value, match)`` when a pattern matches, otherwise ``(None, None)``.
+    Regex keys have lower priority than exact keys and are only tried when
+    :func:`_resolve_tool_key` returns nothing.
+    """
+    for key, value in mapping.items():
+        if key.startswith('regex:'):
+            m = re.fullmatch(key[len('regex:'):], tool_name)
+            if m:
+                return value, m
+    return None, None
 
 
 def _tool_name_is(tool_name: str, base_name: str) -> bool:
@@ -735,7 +765,16 @@ def _render_preview_template(
     template_map: dict[str, str],
     fallback_template: str,
 ) -> str:
-    template = _resolve_tool_key(tool_name, template_map) or fallback_template
+    template = _resolve_tool_key(tool_name, template_map)
+    match_group = None
+    if template is None:
+        template, m = _resolve_tool_key_regex(tool_name, template_map)
+        if m:
+            match_group = m.group(1) if m.lastindex else m.group(0)
+    template = template or fallback_template
+    if '{match}' in template:
+        label = match_group or tool_name
+        return _ensure_trailing_newline(template.replace('{match}', f'**{label}**'))
     if '{value}' not in template:
         return _ensure_trailing_newline(template)
     preview_value = value or 'the current item'

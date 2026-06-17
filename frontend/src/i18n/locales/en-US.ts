@@ -635,6 +635,13 @@ const enUS = {
     noReferences: "No references",
     stopGenerate: "Stop",
     send: "Send",
+    pluginContinue: "Continue",
+    pluginRetry: "Retry",
+    pluginPanelTitle: "Plugin Panel",
+    pluginStatusRunning: "Running",
+    pluginStatusDone: "Done",
+    pluginStatusFailed: "Failed",
+    pluginStatusWaiting: "Waiting",
     // Greeting
     greetingMorning: "Good morning",
     greetingAfternoon: "Good afternoon",

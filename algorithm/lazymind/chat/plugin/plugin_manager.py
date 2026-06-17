@@ -447,7 +447,6 @@ def resolve_plugin_injection(
                 'plugin_step': p_current_step,
             }
             sm = plugin_loader.get_state_machine(p_plugin_id)
-            forward_steps = sm.get_reachable_steps(p_current_step) if sm else []
 
             rewind_steps: List[str] = []
             if sm and p_session_id and p_current_step:

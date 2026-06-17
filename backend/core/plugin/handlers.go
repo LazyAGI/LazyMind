@@ -92,7 +92,10 @@ func toSlotDTO(r *orm.PluginSlotRevision) slotDTO {
 // row at position list_index (0-based); for single slots take the latest (seq DESC).
 func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slotDTO) {
 	// Step 1: build a map (step_id, attempt) → task_id
-	type stepKey struct{ stepID string; attempt int }
+	type stepKey struct {
+		stepID  string
+		attempt int
+	}
 	taskIDByStep := map[stepKey]string{}
 	var steps []orm.PluginSessionStep
 	db.WithContext(ctx).Where("session_id = ?", sessionID).Find(&steps)

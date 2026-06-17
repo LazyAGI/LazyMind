@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { usePluginSession } from '@/modules/chat/hooks/usePlugin';
 import { usePluginStore } from '@/modules/chat/store/pluginPanel';
 import type { PluginSession, SlotRevision, TabDef, PluginUI } from '@/modules/chat/store/pluginPanel';
@@ -102,11 +103,11 @@ function TabSlotGrid({ tab, session }: { tab: TabDef; session: PluginSession }) 
   );
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  active: 'Running',
-  completed: 'Done',
-  failed: 'Failed',
-  waiting: 'Waiting',
+const STATUS_KEY: Record<string, string> = {
+  active: 'chat.pluginStatusRunning',
+  completed: 'chat.pluginStatusDone',
+  failed: 'chat.pluginStatusFailed',
+  waiting: 'chat.pluginStatusWaiting',
 };
 
 export function PluginPanel({
@@ -114,6 +115,7 @@ export function PluginPanel({
   pollIntervalMs = 3000,
   onSendMessage,
 }: PluginPanelProps) {
+  const { t } = useTranslation();
   const { session, loading, refresh } = usePluginSession(conversationId);
   const [activeTab, setActiveTab] = React.useState(0);
   const [collapsed, setCollapsed] = useState(false);
@@ -158,12 +160,12 @@ export function PluginPanel({
 
   function handleContinue() {
     if (buttonsDisabled) return;
-    onSendMessage?.('继续');
+    onSendMessage?.(t('chat.pluginContinue'));
   }
 
   function handleRetry() {
     if (buttonsDisabled) return;
-    onSendMessage?.('重试');
+    onSendMessage?.(t('chat.pluginRetry'));
   }
 
   return (
@@ -177,9 +179,9 @@ export function PluginPanel({
         <span className='plugin-panel__title'>{session.plugin_id}</span>
         <span
           className={`plugin-panel__status plugin-panel__status--${session.status}`}
-          aria-label={`Status: ${STATUS_LABEL[session.status] ?? session.status}`}
+          aria-label={`Status: ${t(STATUS_KEY[session.status] ?? session.status)}`}
         >
-          {STATUS_LABEL[session.status] ?? session.status}
+          {t(STATUS_KEY[session.status] ?? session.status)}
         </span>
         <button
           type='button'
@@ -257,9 +259,9 @@ export function PluginPanel({
             disabled={buttonsDisabled}
             aria-disabled={buttonsDisabled}
             onClick={handleRetry}
-            title={buttonsDisabled ? 'Waiting for step to finish…' : 'Retry current step'}
+            title={buttonsDisabled ? t('chat.pluginStatusRunning') : t('chat.pluginRetry')}
           >
-            Retry
+            {t('chat.pluginRetry')}
           </button>
           {showContinue && (
             <button
@@ -268,9 +270,9 @@ export function PluginPanel({
               disabled={buttonsDisabled}
               aria-disabled={buttonsDisabled}
               onClick={handleContinue}
-              title={buttonsDisabled ? 'Waiting for step to finish…' : 'Continue to next step'}
+              title={buttonsDisabled ? t('chat.pluginStatusRunning') : t('chat.pluginContinue')}
             >
-              Continue
+              {t('chat.pluginContinue')}
             </button>
           )}
         </div>

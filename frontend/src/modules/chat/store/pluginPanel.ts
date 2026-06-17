@@ -55,7 +55,7 @@ export interface PluginUI {
 }
 
 interface PluginStore {
-  // Active session per conversation.
+  // Latest session per conversation (any status, not just active).
   sessionByConversation: Record<string, PluginSession | null>;
   loadingByConversation: Record<string, boolean>;
   // Whether auto-advance is running (driver agent triggered next chat turn).
