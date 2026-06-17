@@ -37,14 +37,22 @@ func newToolID() string {
 	return "mst_" + common.GenerateID()
 }
 
-func ListServers(ctx context.Context, db *gorm.DB, userID string) (*ListServersResponse, error) {
+func ListServers(ctx context.Context, db *gorm.DB, userID string, optionList ...ListServersOptions) (*ListServersResponse, error) {
 	if db == nil {
 		return nil, fmt.Errorf("store not initialized")
 	}
+	options := normalizeListServersOptions(optionList...)
 	userID = strings.TrimSpace(userID)
 	var rows []orm.MCPServer
-	if err := visibleServerQuery(db.WithContext(ctx), userID).
+	query := applyListServersKeyword(visibleServerQuery(db.WithContext(ctx), userID), options.Keyword)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	if err := query.
 		Order("share ASC, updated_at DESC").
+		Offset((options.Page - 1) * options.PageSize).
+		Limit(options.PageSize).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -58,7 +66,51 @@ func ListServers(ctx context.Context, db *gorm.DB, userID string) (*ListServersR
 	for i := range rows {
 		out = append(out, serverResponse(rows[i], counts[rows[i].ID], nil))
 	}
-	return &ListServersResponse{MCPServers: out}, nil
+	return &ListServersResponse{
+		MCPServers: out,
+		Total:      total,
+		Page:       options.Page,
+		PageSize:   options.PageSize,
+	}, nil
+}
+
+func normalizeListServersOptions(optionList ...ListServersOptions) ListServersOptions {
+	options := ListServersOptions{Page: 1, PageSize: 50}
+	if len(optionList) > 0 {
+		options = optionList[0]
+	}
+	options.Keyword = strings.TrimSpace(options.Keyword)
+	if options.Page <= 0 {
+		options.Page = 1
+	}
+	if options.PageSize <= 0 {
+		options.PageSize = 50
+	}
+	if options.PageSize > 1000 {
+		options.PageSize = 1000
+	}
+	return options
+}
+
+func applyListServersKeyword(query *gorm.DB, keyword string) *gorm.DB {
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
+	if keyword == "" {
+		return query
+	}
+	like := "%" + keyword + "%"
+	return query.Where(
+		`LOWER(name) LIKE ? OR LOWER(url) LIKE ? OR LOWER(transport) LIKE ? OR EXISTS (
+			SELECT 1 FROM mcp_server_tools
+			WHERE mcp_server_tools.mcp_server_id = mcp_servers.id
+				AND mcp_server_tools.deleted_at IS NULL
+				AND (LOWER(mcp_server_tools.tool_name) LIKE ? OR LOWER(mcp_server_tools.description) LIKE ?)
+		)`,
+		like,
+		like,
+		like,
+		like,
+		like,
+	)
 }
 
 func CreateServer(ctx context.Context, db *gorm.DB, req CreateServerRequest, userID, userName string) (*ServerResponse, error) {

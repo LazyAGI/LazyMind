@@ -2338,6 +2338,7 @@ const enUS = {
     memoryMcpApiKeyRequired: "Enter an API key",
     memoryMcpEnabled: "Enable Server",
     memoryMcpEnableStatus: "Enable Status",
+    memoryMcpEnableRequiresVerified: "Verify the server before enabling it",
     memoryMcpLoadFailed: "Failed to load MCP servers",
     memoryMcpSaveFailed: "Failed to save MCP server",
     memoryMcpCreateSuccess: "MCP server created",

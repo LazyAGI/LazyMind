@@ -407,7 +407,7 @@ type toolPathParams struct {
 	ToolName string `path:"tool_name"`
 }
 
-type toolListQueryParams struct {
+type keywordPageQueryParams struct {
 	Keyword  string `query:"keyword"`
 	Page     int32  `query:"page"`
 	PageSize int32  `query:"page_size"`
@@ -438,9 +438,9 @@ type toolGroupOpenAPIResponse struct {
 
 type toolListOpenAPIResponse struct {
 	ToolGroups []toolGroupOpenAPIResponse `json:"tool_groups"`
-	Page       int32                      `json:"page"`
-	PageSize   int32                      `json:"page_size"`
-	Total      int32                      `json:"total"`
+	Total      int                        `json:"total"`
+	Page       int                        `json:"page"`
+	PageSize   int                        `json:"page_size"`
 }
 
 type toolStateOpenAPIResponse struct {
@@ -2230,7 +2230,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Path:        "/tools",
 			Summary:     "Tool list",
 			Tags:        []string{"tools"},
-			QueryParams: toolListQueryParams{},
+			QueryParams: keywordPageQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Tool list", toolListOpenAPIResponse{})},
 		},
 		{
@@ -2250,11 +2250,12 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:  map[int]openAPIResponse{200: resp("Tool enabled", toolStateOpenAPIResponse{})},
 		},
 		{
-			Method:    "GET",
-			Path:      "/mcp_servers",
-			Summary:   "List MCP servers",
-			Tags:      []string{"mcp_servers"},
-			Responses: map[int]openAPIResponse{200: resp("MCP server list", mcp.ListServersResponse{})},
+			Method:      "GET",
+			Path:        "/mcp_servers",
+			Summary:     "List MCP servers",
+			Tags:        []string{"mcp_servers"},
+			QueryParams: keywordPageQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("MCP server list", mcp.ListServersResponse{})},
 		},
 		{
 			Method:      "POST",

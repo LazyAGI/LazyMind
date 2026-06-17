@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"lazymind/core/common"
@@ -14,12 +15,32 @@ import (
 func List(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	userID := strings.TrimSpace(store.UserID(r))
-	resp, err := ListServers(r.Context(), db, userID)
+	resp, err := ListServers(r.Context(), db, userID, parseListServersOptions(r))
 	if err != nil {
 		common.ReplyErr(w, "list mcp servers failed", http.StatusInternalServerError)
 		return
 	}
 	common.ReplyOK(w, resp)
+}
+
+func parseListServersOptions(r *http.Request) ListServersOptions {
+	q := r.URL.Query()
+	return ListServersOptions{
+		Keyword:  strings.TrimSpace(q.Get("keyword")),
+		Page:     parsePositiveInt(q.Get("page"), 1, 1000000),
+		PageSize: parsePositiveInt(q.Get("page_size"), 50, 1000),
+	}
+}
+
+func parsePositiveInt(raw string, fallback, max int) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	if max > 0 && value > max {
+		return max
+	}
+	return value
 }
 
 func Create(w http.ResponseWriter, r *http.Request) {

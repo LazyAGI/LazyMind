@@ -2208,6 +2208,7 @@ const zhCN = {
     memoryMcpApiKeyRequired: "请输入 API Key",
     memoryMcpEnabled: "启用服务",
     memoryMcpEnableStatus: "启用状态",
+    memoryMcpEnableRequiresVerified: "请先重新连接并验证通过后再启用",
     memoryMcpLoadFailed: "加载 MCP 服务失败",
     memoryMcpSaveFailed: "保存 MCP 服务失败",
     memoryMcpCreateSuccess: "MCP 服务已创建",
