@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 import time
 import urllib.error
@@ -14,6 +16,8 @@ from evo.artifact_runtime import ArtifactPayload, ExternalCallRequest, ExternalC
 QUESTION_TYPES = ("single_hop", "single_doc_multi_hop", "multi_doc_multi_hop", "table_list", "formula")
 DIFFICULTIES = ("easy", "medium", "hard")
 METRICS = ("answer_correctness", "faithfulness", "doc_recall", "context_recall")
+DEFAULT_KB_GROUPS = ("block", "line", "doc-summary")
+_DOCUMENTS: dict[tuple[str, str], Any] = {}
 
 
 def payload(schema: str, value: Mapping[str, Any] | list[Any]) -> ArtifactPayload:
@@ -22,31 +26,46 @@ def payload(schema: str, value: Mapping[str, Any] | list[Any]) -> ArtifactPayloa
 
 def load_corpus(source_config: Mapping[str, Any]) -> ArtifactPayload:
     dataset_id = _text(source_config.get("dataset_id") or source_config.get("kb_id") or "algo")
-    docs = _input_documents(source_config, dataset_id)
+    docs, load_mode, errors = _input_documents(source_config, dataset_id), "inline", []
+    if not docs:
+        docs, load_mode = _kb_documents(source_config, dataset_id), "lazyllm_document"
+    if not docs:
+        raise ValueError(f"dataset {dataset_id} has no usable source units")
+    unique_docs = sorted({_text(doc.get("doc_id")) for doc in docs if _text(doc.get("doc_id"))})
+    page_size = _int_between(source_config.get("document_page_size") or source_config.get("page_size"), 200, 1, 5000)
     pages = [{
         "source_id": dataset_id,
-        "page_index": 1,
-        "documents": [{"doc_id": doc["doc_id"], "filename": doc["filename"], "content": doc["content"]} for doc in docs],
-    }]
+        "page_index": index,
+        "documents": page,
+    } for index, page in enumerate(_chunks(docs, page_size), 1)]
     return payload("CorpusLoadReport", {
         "dataset_id": dataset_id,
-        "sources": [{"source_id": dataset_id, "type": "input", "document_count": len(docs)}],
+        "sources": [{"source_id": dataset_id, "type": load_mode, "document_count": len(unique_docs)}],
         "document_pages": pages,
-        "stats": {"source_count": 1, "loaded_doc_count": len(docs), "document_page_count": len(pages)},
+        "stats": {
+            "source_count": 1,
+            "loaded_doc_count": len(unique_docs),
+            "source_unit_count": len(docs),
+            "document_page_count": len(pages),
+        },
         "skipped": [],
-        "errors": [],
+        "errors": errors,
     })
 
 
 def build_corpus_snapshot(report: Mapping[str, Any], source_config: Mapping[str, Any]) -> ArtifactPayload:
-    units = [
-        _unit(doc, index)
+    raw_docs = [
+        doc
         for page in report.get("document_pages", [])
-        for index, doc in enumerate(page.get("documents", []), 1)
+        for doc in page.get("documents", [])
         if isinstance(doc, Mapping)
     ]
+    units = [
+        _unit(doc, index)
+        for index, doc in enumerate(raw_docs, 1)
+    ]
     if not units:
-        units = [_unit(doc, index) for index, doc in enumerate(_input_documents(source_config, _text(report.get("dataset_id"))), 1)]
+        raise ValueError("corpus load report has no loaded documents")
     by_type = Counter(unit["unit_type"] for unit in units)
     return payload("CorpusSnapshot", {
         "dataset_id": _text(report.get("dataset_id") or source_config.get("dataset_id") or source_config.get("kb_id") or "algo"),
@@ -90,7 +109,7 @@ def generate_case(preparation: Mapping[str, Any]) -> ArtifactPayload:
     first = contexts[0] if contexts else {}
     filename = _text(first.get("filename") or "the selected source")
     evidence = _text(first.get("content_preview") or "No evidence text was available.")
-    question = f"What key fact should be verified for {filename} in case {case_id}?"
+    question = _question_from_evidence(filename, evidence)
     answer = _answer_from_evidence(evidence)
     return payload("DatasetCase", {
         "id": case_id,
@@ -150,8 +169,9 @@ def rag_answer(case: Mapping[str, Any], target_config: Mapping[str, Any], ctx: A
             "feishu",
         ],
     }
-    model_identity = _model_config_identity(target_config.get("model_config"))
-    call_payload = {**request_payload, "llm_config": target_config.get("model_config") or None}
+    model_config = getattr(ctx, "model_config", None) or {}
+    model_identity = _model_config_identity(model_config)
+    call_payload = {**request_payload, "llm_config": model_config or None}
     call_identity = {"target_chat_url": target_url, "payload": request_payload, "model_config": model_identity}
     result = (
         ctx.external.call(
@@ -438,17 +458,36 @@ def compare_abtest(baseline: Mapping[str, Any], candidate: Mapping[str, Any]) ->
 @dataclass(frozen=True)
 class HttpChatRunner:
     timeout_s: float = 20.0
+    max_attempts: int = 6
+    backoff_s: float = 1.0
 
     def invoke(self, request: ExternalCallRequest, token: Any) -> ExternalCallResult:
         target_url = _text(request.payload.get("target_chat_url"))
         body = json.dumps(request.payload.get("payload") or {}, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(target_url, data=body, method="POST", headers={"content-type": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout_s) as response:
-                raw = response.read().decode("utf-8", "replace")
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            return ExternalCallResult("failed_transient", error_type=type(exc).__name__, error_message=str(exc))
-        return ExternalCallResult("completed", _parse_chat_response(raw), metadata={"target_url": target_url})
+        last_error: BaseException | None = None
+        for attempt in range(1, max(1, self.max_attempts) + 1):
+            try:
+                token.raise_if_cancelled()
+                req = urllib.request.Request(target_url, data=body, method="POST", headers={"content-type": "application/json"})
+                with urllib.request.urlopen(req, timeout=self.timeout_s) as response:
+                    raw = response.read().decode("utf-8", "replace")
+                return ExternalCallResult("completed", _parse_chat_response(raw), metadata={"target_url": target_url, "attempt": attempt})
+            except urllib.error.HTTPError as exc:
+                last_error = exc
+                if exc.code not in {429, 502, 503, 504} or attempt >= self.max_attempts:
+                    break
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                last_error = exc
+                if attempt >= self.max_attempts:
+                    break
+            token.raise_if_cancelled()
+            time.sleep(min(self.backoff_s * (2 ** (attempt - 1)), 8.0))
+        exc = last_error or RuntimeError("chat call failed")
+        if isinstance(exc, urllib.error.HTTPError) and exc.code == 429:
+            return ExternalCallResult("rate_limited", error_type=type(exc).__name__, error_message=str(exc))
+        if isinstance(exc, TimeoutError):
+            return ExternalCallResult("timeout", error_type=type(exc).__name__, error_message=str(exc))
+        return ExternalCallResult("failed_transient", error_type=type(exc).__name__, error_message=str(exc))
 
 
 def _input_documents(config: Mapping[str, Any], dataset_id: str) -> list[dict[str, str]]:
@@ -471,11 +510,126 @@ def _input_documents(config: Mapping[str, Any], dataset_id: str) -> list[dict[st
                     "filename": _text(source.get("filename") or source.get("file_name") or f"{dataset_id}_source_{index}.txt"),
                     "content": content,
                 })
-    return docs or [{
-        "doc_id": f"{dataset_id}_bootstrap_doc",
-        "filename": f"{dataset_id}_bootstrap.txt",
-        "content": f"Dataset {dataset_id} was bootstrapped from evo request inputs. Use this record to verify the artifact flow wiring.",
-    }]
+    return docs
+
+
+def _kb_documents(config: Mapping[str, Any], dataset_id: str) -> list[dict[str, Any]]:
+    rows = _kb_document_rows(config, dataset_id)
+    doc = _document_client()
+    groups = tuple(_unique_texts(config.get("segment_groups") or config.get("groups"))) or DEFAULT_KB_GROUPS
+    max_units = _int_between(config.get("max_source_units") or config.get("max_units"), 200, 1, 10000)
+    page_size = _int_between(config.get("kb_page_size") or config.get("node_page_size"), 100, 1, 1000)
+    min_chars = _int_between(config.get("min_segment_chars"), 80, 1, 100000)
+    units, seen = [], set()
+    for row in rows:
+        for group in groups:
+            offset = 0
+            while len(units) < max_units:
+                nodes, total = doc.get_nodes(
+                    doc_ids=[row["doc_id"]],
+                    kb_id=dataset_id,
+                    group=group,
+                    limit=min(page_size, max_units - len(units)),
+                    offset=offset,
+                    return_total=True,
+                    sort_by_number=True,
+                )
+                if not nodes:
+                    break
+                for node in nodes:
+                    unit = _node_unit(dataset_id, group, node, row)
+                    content = _text(unit.get("content"))
+                    if len(content) < min_chars:
+                        continue
+                    key = _text(unit.get("chunk_id")) or hashlib.sha256(content.encode("utf-8")).hexdigest()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    units.append(unit)
+                    if len(units) >= max_units:
+                        break
+                offset += len(nodes)
+                if offset >= int(total or offset):
+                    break
+            if len(units) >= max_units:
+                break
+        if len(units) >= max_units:
+            break
+    return units
+
+
+def _kb_document_rows(config: Mapping[str, Any], dataset_id: str) -> list[dict[str, str]]:
+    try:
+        import psycopg
+        from psycopg.rows import dict_row
+    except ImportError as exc:
+        raise RuntimeError("psycopg is required for LazyRAG dataset loading") from exc
+
+    schema = _text(config.get("db_schema") or os.getenv("LAZYMIND_READONLY_SCHEMA") or "public")
+    max_docs = _int_between(config.get("max_docs"), 1000, 1, 100000)
+    table = f'from "{schema.replace(chr(34), chr(34) + chr(34))}".lazyllm_kb_documents kb join "{schema.replace(chr(34), chr(34) + chr(34))}".lazyllm_documents d on d.doc_id = kb.doc_id'
+    sql = f"select d.doc_id, d.filename, d.file_type {table} where kb.kb_id = %s order by kb.id limit %s"
+    with psycopg.connect(_db_dsn(), row_factory=dict_row) as conn, conn.cursor() as cursor:
+        cursor.execute(sql, (dataset_id, max_docs))
+        rows = [
+            {
+                "doc_id": _text(row.get("doc_id")),
+                "filename": _text(row.get("filename") or row.get("doc_id")),
+                "file_type": _text(row.get("file_type")),
+            }
+            for row in cursor.fetchall()
+            if _text(row.get("doc_id"))
+        ]
+    if not rows:
+        raise ValueError(f"dataset {dataset_id} has no registered documents")
+    return rows
+
+
+def _db_dsn() -> str:
+    raw = _text(os.getenv("LAZYMIND_READONLY_DB_DSN") or os.getenv("LAZYMIND_DATABASE_URL"))
+    if raw.startswith("postgresql+psycopg://"):
+        return "postgresql://" + raw.removeprefix("postgresql+psycopg://")
+    if raw.startswith("postgres+psycopg://"):
+        return "postgres://" + raw.removeprefix("postgres+psycopg://")
+    return raw or "host=db user=app password=app dbname=app port=5432 sslmode=disable connect_timeout=5"
+
+
+def _document_client() -> Any:
+    from lazyllm import Document
+    from lazymind.config import config
+
+    url = _config_value(config, "agentic_kb_url").rstrip("/")
+    name = _config_value(config, "agentic_kb_name")
+    if not url or not name:
+        raise RuntimeError("LazyRAG document service config is missing")
+    key = (url, name)
+    if key not in _DOCUMENTS:
+        _DOCUMENTS[key] = Document(url=f"{url}/_call", name=name)
+    return _DOCUMENTS[key]
+
+
+def _node_unit(dataset_id: str, group: str, node: Any, doc_row: Mapping[str, Any]) -> dict[str, Any]:
+    metadata = getattr(node, "metadata", {}) or {}
+    global_metadata = getattr(node, "global_metadata", {}) or {}
+    if not isinstance(metadata, Mapping):
+        metadata = {}
+    if not isinstance(global_metadata, Mapping):
+        global_metadata = {}
+    doc_id = _text(doc_row.get("doc_id"))
+    filename = _text(doc_row.get("filename")) or _first_text(global_metadata, "file_name", "display_name", "filename") or f"{doc_id}.txt"
+    chunk_id = _text(getattr(node, "uid", "")) or _text(metadata.get("uid")) or hashlib.sha256(_text(getattr(node, "text", "")).encode("utf-8")).hexdigest()
+    content = _text(getattr(node, "text", ""))
+    return {
+        "source_unit_ref": f"{dataset_id}:{doc_id}:segment:{chunk_id}",
+        "doc_ref": f"{dataset_id}:{doc_id}",
+        "doc_id": doc_id,
+        "filename": filename,
+        "chunk_id": chunk_id,
+        "group": _text(getattr(node, "group", "")) or group,
+        "unit_type": _unit_type(content, metadata),
+        "content": content,
+        "metadata": _json_safe({"node": metadata, "document": global_metadata, "number": getattr(node, "number", None)}),
+    }
 
 
 def _unit(doc: Mapping[str, Any], index: int) -> dict[str, str]:
@@ -483,12 +637,12 @@ def _unit(doc: Mapping[str, Any], index: int) -> dict[str, str]:
     doc_id = _text(doc.get("doc_id") or f"doc_{index}")
     filename = _text(doc.get("filename") or f"{doc_id}.txt")
     return {
-        "source_unit_ref": f"source_unit:{doc_id}:{index}",
-        "doc_ref": f"doc:{doc_id}",
+        "source_unit_ref": _text(doc.get("source_unit_ref")) or f"source_unit:{doc_id}:{index}",
+        "doc_ref": _text(doc.get("doc_ref")) or f"doc:{doc_id}",
         "doc_id": doc_id,
         "filename": filename,
         "chunk_id": _text(doc.get("chunk_id") or f"{doc_id}:chunk:{index}"),
-        "unit_type": _unit_type(content),
+        "unit_type": _text(doc.get("unit_type")) or _unit_type(content),
         "content": content,
     }
 
@@ -500,7 +654,15 @@ def _select_units(units: list[Mapping[str, Any]], qtype: str, index: int) -> lis
             docs.setdefault(_text(unit.get("doc_id")), unit)
         selected = list(docs.values())[:2]
         return selected or [units[index % len(units)]]
-    if qtype in {"single_doc_multi_hop", "table_list"} and len(units) > 1:
+    if qtype == "single_doc_multi_hop" and len(units) > 1:
+        by_doc: dict[str, list[Mapping[str, Any]]] = {}
+        for unit in units:
+            by_doc.setdefault(_text(unit.get("doc_id")), []).append(unit)
+        same_doc = [items for items in by_doc.values() if len(items) > 1]
+        if same_doc:
+            selected = same_doc[index % len(same_doc)]
+            return selected[:2]
+    if qtype == "table_list" and len(units) > 1:
         start = index % len(units)
         return [units[start], units[(start + 1) % len(units)]]
     return [units[index % len(units)]]
@@ -588,11 +750,13 @@ def _parse_chat_response(raw: str) -> dict[str, Any]:
         parsed = _chat_payload_from_events([body])
         if not parsed.get("kb_errors"):
             parsed["kb_errors"] = _extract_tool_errors_from_text(raw)
+        _merge_tool_sources(parsed, raw)
         return parsed
     if isinstance(body, list):
         parsed = _chat_payload_from_events([item for item in body if isinstance(item, Mapping)])
         if not parsed.get("kb_errors"):
             parsed["kb_errors"] = _extract_tool_errors_from_text(raw)
+        _merge_tool_sources(parsed, raw)
         return parsed
 
     events, text_fragments = [], []
@@ -614,6 +778,7 @@ def _parse_chat_response(raw: str) -> dict[str, Any]:
         parsed["answer"] = _clean_answer("".join(text_fragments))
     if not parsed.get("kb_errors"):
         parsed["kb_errors"] = _extract_tool_errors_from_text(raw)
+    _merge_tool_sources(parsed, raw)
     return parsed
 
 
@@ -621,15 +786,20 @@ def _chat_payload_from_events(events: list[Mapping[str, Any]]) -> dict[str, Any]
     answer, sources, contexts, doc_ids, chunk_ids, trace_id, kb_errors = [], [], [], [], [], "", []
     for event in events:
         piece = _unwrap_chat_event(event)
-        piece_sources = [item for item in piece.get("sources") or [] if isinstance(piece.get("sources"), list)]
-        piece_contexts = [item for item in piece.get("contexts") or [] if isinstance(piece.get("contexts"), list)]
+        piece_sources = [item for item in _as_list(piece.get("sources")) if isinstance(item, Mapping)]
+        piece_contexts = _as_list(piece.get("contexts"))
+        piece_context_sources = [item for item in piece_contexts if isinstance(item, Mapping)]
         piece_text = _chat_text(piece)
+        tool_sources = _tool_sources_from_text(piece_text)
         answer.append(piece_text)
-        sources.extend(piece_sources)
-        contexts.extend(piece_contexts)
+        sources.extend([*piece_sources, *tool_sources])
+        contexts.extend([
+            *(_source_text(item) for item in piece_contexts),
+            *(_source_text(item) for item in tool_sources),
+        ])
         doc_ids.extend(_as_list(piece.get("doc_ids") or piece.get("document_ids")))
         chunk_ids.extend(_as_list(piece.get("chunk_ids") or piece.get("segment_ids") or piece.get("segement_ids")))
-        source_doc_ids, source_chunk_ids = _source_ids([*piece_sources, *piece_contexts])
+        source_doc_ids, source_chunk_ids = _source_ids([*piece_sources, *piece_context_sources, *tool_sources])
         doc_ids.extend(source_doc_ids)
         chunk_ids.extend(source_chunk_ids)
         kb_errors.extend(_tool_errors(piece))
@@ -637,8 +807,8 @@ def _chat_payload_from_events(events: list[Mapping[str, Any]]) -> dict[str, Any]
         trace_id = trace_id or _text(piece.get("trace_id") or piece.get("traceId"))
     return {
         "answer": _clean_answer("".join(answer)),
-        "sources": sources,
-        "contexts": contexts,
+        "sources": _unique_sources(sources),
+        "contexts": list(dict.fromkeys(item for item in contexts if item)),
         "doc_ids": list(dict.fromkeys(_text(item) for item in doc_ids if _text(item))),
         "chunk_ids": list(dict.fromkeys(_text(item) for item in chunk_ids if _text(item))),
         "trace_id": trace_id,
@@ -739,7 +909,63 @@ def _unique_docs(units: list[Mapping[str, Any]]) -> list[dict[str, str]]:
     return list(by_id.values())
 
 
-def _unit_type(content: str) -> str:
+def _tool_sources_from_text(raw: str) -> list[Mapping[str, Any]]:
+    sources: list[Mapping[str, Any]] = []
+    for raw_item in re.findall(r"<tool_result>(.*?)</tool_result>", raw, flags=re.S):
+        try:
+            payload = json.loads(raw_item)
+        except json.JSONDecodeError:
+            continue
+        result = payload.get("result") if isinstance(payload, Mapping) else None
+        nested = result.get("result") if isinstance(result, Mapping) else None
+        for key in ("items", "sources", "contexts"):
+            value = nested.get(key) if isinstance(nested, Mapping) else None
+            if isinstance(value, list):
+                sources.extend(item for item in value if isinstance(item, Mapping))
+    return sources
+
+
+def _merge_tool_sources(parsed: dict[str, Any], raw: str) -> None:
+    sources = _tool_sources_from_text(raw)
+    if not sources:
+        return
+    parsed["sources"] = _unique_sources([*parsed.get("sources", []), *sources])
+    doc_ids, chunk_ids = _source_ids(sources)
+    parsed["doc_ids"] = list(dict.fromkeys([*parsed.get("doc_ids", []), *doc_ids]))
+    parsed["chunk_ids"] = list(dict.fromkeys([*parsed.get("chunk_ids", []), *chunk_ids]))
+    parsed["contexts"] = list(dict.fromkeys([
+        *(_source_text(item) for item in _as_list(parsed.get("contexts"))),
+        *(_source_text(item) for item in sources),
+    ]))
+
+
+def _source_text(item: Any) -> str:
+    if isinstance(item, Mapping):
+        return _text(item.get("context") or item.get("content") or item.get("text"))
+    return _text(item)
+
+
+def _unique_sources(items: Any) -> list[Mapping[str, Any]]:
+    unique: dict[str, Mapping[str, Any]] = {}
+    for item in _as_list(items):
+        if not isinstance(item, Mapping):
+            continue
+        key = _first_text(item, "uid", "chunk_id", "segment_id", "segement_id", "node_id", "doc_id", "document_id", "file_id", "docid", "ref") or _stable_text(item)
+        unique.setdefault(key, item)
+    return list(unique.values())
+
+
+def _question_from_evidence(filename: str, evidence: str) -> str:
+    topic = _clip(re.split(r"[。.!?\n]", evidence.strip(), maxsplit=1)[0], 80)
+    if not topic:
+        return f"What verifiable fact is stated in {filename}?"
+    return f"What does {filename} state about {topic}?"
+
+
+def _unit_type(content: str, metadata: Mapping[str, Any] | None = None) -> str:
+    node_type = _text((metadata or {}).get("type") or (metadata or {}).get("node_type")).lower()
+    if node_type in {"table", "list", "ordered_list", "unordered_list", "formula", "equation"}:
+        return {"ordered_list": "list", "unordered_list": "list", "equation": "formula"}.get(node_type, node_type)
     if "|" in content and "\n" in content:
         return "table"
     if re.search(r"\b(sum|average|formula|equation|=)\b", content, re.I):
@@ -771,6 +997,33 @@ def _case_index(case_id: str) -> int:
 
 def _stable_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _config_value(config: Any, key: str) -> str:
+    try:
+        return _text(config[key])
+    except Exception:
+        return _text(getattr(config, key, ""))
+
+
+def _int_between(value: Any, default: int, low: int, high: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    return min(high, max(low, number))
+
+
+def _chunks(items: list[Any], size: int) -> list[list[Any]]:
+    return [items[index:index + size] for index in range(0, len(items), size)]
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    return value if value is None or isinstance(value, (str, int, float, bool)) else str(value)
 
 
 def _first_text(item: Mapping[str, Any], *keys: str) -> str:

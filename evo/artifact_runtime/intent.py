@@ -10,6 +10,7 @@ from types import MappingProxyType
 from typing import Any, Callable, Literal, Protocol, cast
 
 from .artifact import ArtifactKey, ArtifactRef, ArtifactVersionResolver
+from .control_codec import decode_control_value, encode_control_value
 from .controller import RunController
 from .errors import DAGGraphError, MissingArtifactVersionError, UnknownTargetError
 from .graph import DAGGraph
@@ -127,6 +128,12 @@ class IntentCommandRequest:
     @property
     def kind(self) -> IntentCommandKind:
         return intent_kind(self.intent)
+
+
+@dataclass(frozen=True)
+class PreparedIntentPayload:
+    request_fingerprint: str
+    payload: Mapping[str, Any]
 
 
 @dataclass(frozen=True)
@@ -313,6 +320,7 @@ class IntentCommandWriteResult:
 @dataclass(frozen=True)
 class _PreparedIntentCommand:
     fingerprint: str
+    payload: Mapping[str, Any]
     intent_payload: Mapping[str, Any]
     metadata: Mapping[str, Any]
 
@@ -500,14 +508,13 @@ class IntentCommandGateway:
         if self.intervention is None:
             return self._failed(request, "intervention_not_configured")
         intent = cast(PatchAndReconcileIntent, request.intent)
-        value = prepared.intent_payload["value"]
         try:
             result = self.intervention.patch_and_reconcile(
                 PatchAndReconcileRequest(
                     run_id=request.run_id,
                     command_id=f"{request.command_id}:patch_and_reconcile",
                     artifact=intent.artifact,
-                    value=value,
+                    value=intent.value,
                     expected_ref=intent.expected_ref,
                     patch_source=intent.patch_source,
                     include_downstream=intent.include_downstream,
@@ -614,6 +621,40 @@ def intent_request_fingerprint(request: IntentCommandRequest) -> str:
     return _prepare_request(request).fingerprint
 
 
+def prepare_intent_payload(request: IntentCommandRequest) -> PreparedIntentPayload:
+    """Return the runtime-owned canonical payload used for request fingerprinting."""
+    prepared = _prepare_request(request)
+    return PreparedIntentPayload(prepared.fingerprint, prepared.payload)
+
+
+def prepared_intent_payload_fingerprint(payload: Mapping[str, Any]) -> str:
+    return json_mapping_fingerprint(dict(payload), allow_tuple=True, reject_reserved_envelope=False)
+
+
+def intent_request_from_payload(
+    command_id: str,
+    payload: Mapping[str, Any],
+    *,
+    expected_fingerprint: str | None = None,
+) -> IntentCommandRequest:
+    fingerprint = prepared_intent_payload_fingerprint(payload)
+    if expected_fingerprint is not None and fingerprint != expected_fingerprint:
+        raise ValueError("request_fingerprint mismatch")
+    intent_payload = payload.get("intent")
+    if not isinstance(intent_payload, Mapping):
+        raise ValueError("prepared intent payload must include intent object")
+    request = IntentCommandRequest(
+        command_id,
+        str(payload.get("run_id") or ""),
+        _intent_from_payload(str(payload.get("kind") or ""), intent_payload),
+        advance_until_idle=bool(payload.get("advance_until_idle")),
+        metadata=_metadata_from_payload(payload.get("metadata")),
+    )
+    if expected_fingerprint is not None and intent_request_fingerprint(request) != expected_fingerprint:
+        raise ValueError("request_fingerprint mismatch")
+    return request
+
+
 def _prepare_request(request: IntentCommandRequest) -> _PreparedIntentCommand:
     _intent_spec(request.intent)
     if isinstance(request.intent, RunUntilIdleIntent) and request.advance_until_idle:
@@ -627,7 +668,12 @@ def _prepare_request(request: IntentCommandRequest) -> _PreparedIntentCommand:
         "advance_until_idle": request.advance_until_idle,
         "metadata": metadata,
     }
-    return _PreparedIntentCommand(json_mapping_fingerprint(payload, allow_tuple=True), intent_payload, metadata)
+    return _PreparedIntentCommand(
+        json_mapping_fingerprint(payload, allow_tuple=True, reject_reserved_envelope=False),
+        payload,
+        intent_payload,
+        metadata,
+    )
 
 
 def intent_advance_result(result: RuntimeDriverResult) -> IntentAdvanceResult:
@@ -650,6 +696,38 @@ def _safe_kind(request: IntentCommandRequest) -> IntentCommandKind:
 
 def _intent_payload(intent: TypedIntent) -> dict[str, Any]:
     return _intent_spec(intent).payload_builder(intent)
+
+
+def _intent_from_payload(kind: str, payload: Mapping[str, Any]) -> TypedIntent:
+    if kind == "submit_plan":
+        targets = tuple(_artifact_key_from_payload(item) for item in _list_payload(payload.get("targets")))
+        return SubmitPlanIntent(targets, reason=str(payload.get("reason") or "submit_plan"))
+    if kind == "patch_and_reconcile":
+        return PatchAndReconcileIntent(
+            _artifact_key_from_payload(payload.get("artifact")),
+            decode_control_value(payload.get("value")),
+            _artifact_ref_from_payload(payload.get("expected_ref")),
+            patch_source=str(payload.get("patch_source") or "intent"),
+            include_downstream=bool(payload.get("include_downstream")),
+            pause_first=bool(payload.get("pause_first")),
+            resume_after=bool(payload.get("resume_after")),
+            reason=str(payload.get("reason") or "patch_and_reconcile"),
+        )
+    if kind == "materialize":
+        artifacts = tuple(_artifact_key_from_payload(item) for item in _list_payload(payload.get("artifacts")))
+        return MaterializeIntent(
+            artifacts,
+            include_downstream=bool(payload.get("include_downstream")),
+            resume_after=bool(payload.get("resume_after")),
+            reason=str(payload.get("reason") or "manual_materialize"),
+        )
+    if kind == "retry_failed":
+        return RetryFailedIntent(reason=str(payload.get("reason") or "retry_failed"))
+    if kind == "run_control":
+        return RunControlIntent(cast(RunControlAction, str(payload.get("action") or "")), reason=str(payload.get("reason") or "run_control"))
+    if kind == "run_until_idle":
+        return RunUntilIdleIntent(reason=str(payload.get("reason") or "run_until_idle"))
+    raise ValueError(f"unsupported prepared intent kind: {kind}")
 
 
 def _submit_plan_payload(intent: SubmitPlanIntent) -> dict[str, Any]:
@@ -727,6 +805,33 @@ def _artifact_ref(ref: ArtifactRef) -> dict[str, Any]:
     return {"key": _artifact_key(ref.key), "version": ref.version}
 
 
+def _artifact_key_from_payload(value: Any) -> ArtifactKey:
+    if not isinstance(value, Mapping):
+        raise ValueError("artifact key payload must be an object")
+    return ArtifactKey(str(value.get("artifact_id") or ""), str(value.get("partition") or ""))
+
+
+def _artifact_ref_from_payload(value: Any) -> ArtifactRef | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("artifact ref payload must be an object")
+    return ArtifactRef(_artifact_key_from_payload(value.get("key")), int(value.get("version") or 0))
+
+
+def _list_payload(value: Any) -> list[Any]:
+    if not isinstance(value, list):
+        raise ValueError("prepared payload field must be a list")
+    return value
+
+
+def _metadata_from_payload(value: Any) -> Mapping[str, Any]:
+    decoded = decode_control_value(value if value is not None else {})
+    if not isinstance(decoded, Mapping):
+        raise ValueError("prepared metadata payload must be an object")
+    return decoded
+
+
 def _validate_artifact_key(key: ArtifactKey) -> None:
     if not isinstance(key, ArtifactKey):
         raise TypeError("artifact must be an ArtifactKey")
@@ -767,4 +872,4 @@ def _claimed_intent_record(
 
 
 def _json_value(value: Any) -> Any:
-    return normalize_json_value(value, allow_tuple=True, reject_reserved_envelope=True)
+    return normalize_json_value(encode_control_value(value), allow_tuple=True, reject_reserved_envelope=False)

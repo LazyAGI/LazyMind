@@ -14,6 +14,11 @@ from types import MappingProxyType
 from typing import Any, Protocol
 
 from .artifact import ArtifactKey, ArtifactPayload, ArtifactRef
+from .control_codec import (
+    decode_control_value as decode_basic_control_value,
+    encode_control_value as encode_basic_control_value,
+    is_basic_control_envelope,
+)
 from .controller import (
     Attempt,
     AttemptClaim,
@@ -99,6 +104,14 @@ class JSONControlPlaneCodec:
 
     def decode_payload(self, payload: str) -> Any:
         return _decode_control(json.loads(payload))
+
+
+def encode_control_value(value: Any) -> Any:
+    return _encode_control(value)
+
+
+def decode_control_value(value: Any) -> Any:
+    return _decode_control(value)
 
 
 class SQLiteEventLog(EventLog):
@@ -1000,19 +1013,8 @@ def _validate_intent_claim_inputs(now: float, claim_expires_at: float, owner_id:
 
 
 def _encode_control(value: Any) -> Any:
-    if isinstance(value, ArtifactKey):
-        return _envelope("ArtifactKey", artifact_id=value.artifact_id, partition=value.partition)
-    if isinstance(value, ArtifactRef):
-        return _envelope("ArtifactRef", key=_encode_control(value.key), version=value.version)
-    if isinstance(value, ArtifactPayload):
-        return _envelope(
-            "ArtifactPayload",
-            schema=value.schema,
-            payload=_encode_json_compatible(value.payload),
-            metadata=_encode_string_any_map(value.metadata),
-            fragments=[_encode_json_compatible(item) for item in value.fragments],
-            role=value.role,
-        )
+    if isinstance(value, ArtifactKey | ArtifactRef | ArtifactPayload):
+        return encode_basic_control_value(value)
     if isinstance(value, PlanInput):
         return _envelope(
             "PlanInput",
@@ -1215,6 +1217,8 @@ def _decode_control(value: Any) -> Any:
         raise ValueError(f"unsupported schema_version: {value['schema_version']}")
 
     item_type = value["type"]
+    if is_basic_control_envelope(value):
+        return decode_basic_control_value(value)
     if item_type == "ArtifactKey":
         return ArtifactKey(str(value["artifact_id"]), str(value.get("partition") or ""))
     if item_type == "ArtifactRef":

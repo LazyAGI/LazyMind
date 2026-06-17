@@ -13,9 +13,12 @@ from evo.artifact_runtime import (
     EvoRuntime,
     EvoRuntimeConfig,
     IntentCommandRequest,
+    MaterializeIntent,
+    RetryFailedIntent,
     RunControlIntent,
     RunUntilIdleIntent,
     SubmitPlanIntent,
+    intent_request_fingerprint,
     open_evo_runtime,
 )
 
@@ -114,14 +117,18 @@ class EvoFlowRuntime:
         self.step_store = step_store
 
     @classmethod
-    def open(cls, path: str | Path, *, case_count: int) -> "EvoFlowRuntime":
+    def open(cls, path: str | Path, *, case_count: int, model_config: Mapping[str, Any] | None = None) -> "EvoFlowRuntime":
         graph = build_evo_graph(case_ids(case_count))
-        runtime = open_evo_runtime(path, graph=graph, config=EvoRuntimeConfig(path))
+        runtime = open_evo_runtime(path, graph=graph, config=EvoRuntimeConfig(path, model_config=dict(model_config or {})))
         return cls(runtime, SQLiteFlowStepStore(path))
 
     def start_full_flow(self, *, command_id: str, run_id: str, config: Mapping[str, Any]) -> FlowStepState:
-        self._put_sources_once(command_id, config)
+        self.set_model_config(_model_config(config))
+        self._put_sources_once(command_id, _artifact_config(config))
         return self._submit_step(command_id=f"{command_id}:dataset", run_id=run_id, step="dataset")
+
+    def set_model_config(self, model_config: Mapping[str, Any] | None) -> None:
+        self.runtime.set_model_config(dict(model_config or {}))
 
     def continue_flow(self, *, command_id: str, run_id: str) -> FlowStepState:
         state = self.step_store.get(run_id)
@@ -134,6 +141,21 @@ class EvoFlowRuntime:
             self.runtime.execute_intent(IntentCommandRequest(f"{command_id}:resume", run_id, RunControlIntent("resume")))
         return self._submit_step(command_id=command_id, run_id=run_id, step=step)
 
+    def continue_flow_command_id(self, *, turn_id: str, intent_index: int, run_id: str) -> str:
+        state = self.step_store.get(run_id)
+        if state is None:
+            raise ValueError("flow has not started")
+        step = state.next_step
+        if step is None:
+            intent = RunUntilIdleIntent(reason="continue_flow_noop")
+            advance_until_idle = False
+        else:
+            intent = SubmitPlanIntent((STEP_ROOTS[step],), reason=f"step:{step}")
+            advance_until_idle = True
+        request = IntentCommandRequest("msg:pending", run_id, intent, advance_until_idle=advance_until_idle)
+        fingerprint = intent_request_fingerprint(request)
+        return f"msg:{turn_id}:{intent_index}:continue_flow:{fingerprint}"
+
     def pause_flow(self, *, command_id: str, run_id: str) -> FlowStepState:
         self.runtime.execute_intent(IntentCommandRequest(command_id, run_id, RunControlIntent("pause")))
         return self._mark_status(run_id, "paused")
@@ -144,6 +166,33 @@ class EvoFlowRuntime:
 
     def run_until_idle(self, *, command_id: str, run_id: str) -> None:
         self.runtime.execute_intent(IntentCommandRequest(command_id, run_id, RunUntilIdleIntent(), advance_until_idle=True))
+
+    def retry_failed_flow(self, *, command_id: str, run_id: str) -> FlowStepState:
+        self.runtime.execute_intent(IntentCommandRequest(command_id, run_id, RetryFailedIntent(), advance_until_idle=True))
+        state = self.step_store.get(run_id)
+        if state is None:
+            raise ValueError("flow has not started")
+        return state
+
+    def materialize_flow(self, *, command_id: str, run_id: str, artifacts: tuple[ArtifactKey, ...]) -> FlowStepState:
+        self.runtime.execute_intent(
+            IntentCommandRequest(command_id, run_id, MaterializeIntent(artifacts), advance_until_idle=True)
+        )
+        state = self.step_store.get(run_id)
+        if state is None:
+            raise ValueError("flow has not started")
+        return state
+
+    def preview_reconcile(self, artifact: ArtifactKey) -> dict[str, Any]:
+        affected = tuple(sorted(self.runtime.graph.affected_artifacts_of(artifact)))
+        return {
+            "changed_artifact": _artifact_key_payload(artifact),
+            "affected_artifacts": [_artifact_key_payload(item) for item in affected],
+            "affected_count": len(affected),
+        }
+
+    def latest_ref(self, artifact: ArtifactKey) -> ArtifactRef | None:
+        return self.runtime.stores.artifact_store.latest(artifact)
 
     def close(self) -> None:
         self.step_store.close()
@@ -220,3 +269,16 @@ def _state_from_row(row: sqlite3.Row) -> FlowStepState:
         str(row["gate_status"]),
         ref,
     )
+
+
+def _artifact_key_payload(key: ArtifactKey) -> dict[str, str]:
+    return {"artifact_id": key.artifact_id, "partition": key.partition}
+
+
+def _model_config(config: Mapping[str, Any]) -> Mapping[str, Any]:
+    value = config.get("model_config") or config.get("llm_config") or {}
+    return value if isinstance(value, Mapping) else {}
+
+
+def _artifact_config(config: Mapping[str, Any]) -> dict[str, Any]:
+    return {str(key): value for key, value in config.items() if key not in {"model_config", "llm_config"}}

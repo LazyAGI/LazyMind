@@ -14,7 +14,7 @@ from .utils import validate_nonempty
 
 InterventionStatus = Literal["applied", "failed"]
 InterventionKind = Literal["patch_and_reconcile", "materialize"]
-RUN_NOT_ACCEPTING_PLAN = frozenset({"completed", "failed", "cancelled", "cancel_requested"})
+RUN_NOT_ACCEPTING_PLAN = frozenset({"failed", "cancelled", "cancel_requested"})
 
 
 @dataclass(frozen=True)

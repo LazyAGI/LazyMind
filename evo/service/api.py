@@ -6,7 +6,9 @@ import os
 import shutil
 import time
 import uuid
+from collections import Counter
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 from fastapi import Body, FastAPI, HTTPException, Request, Response
@@ -15,6 +17,9 @@ from sse_starlette.sse import EventSourceResponse
 from evo import normalize_chat_stream_url, normalize_http_origin, validate_id
 from evo.artifact_flow import EvoFlowRuntime, FlowStepState
 from evo.artifact_runtime import ArtifactKey, ArtifactRef
+from evo.message_intent import MessageSessionStore
+from evo.message_intent.planner import LazyLLMPlannerClient, StructuredJSONNextIntentPlanner
+from evo.message_intent.service import MessageIntentService
 
 BODY_REQUIRED = Body(...)
 BODY_DEFAULT = Body(default_factory=dict)
@@ -35,10 +40,26 @@ STAGE_LABELS = {
     "repair": "修复",
     "abtest": "ABTest",
 }
+RESULT_ARTIFACT_ALIASES = {
+    "eval.dataset": "eval_dataset",
+    "eval.summary": "eval_report",
+    "abtest.candidate_eval_summary": "candidate_eval_report",
+    "analysis.summary": "classification_report",
+    "repair.verified_patch": "repair_loop_plan",
+    "abtest.comparison": "abtest_comparison",
+}
+ARTIFACT_ID_ALIASES = {value: key for key, value in RESULT_ARTIFACT_ALIASES.items()} | {
+    "eval_dataset": "eval.dataset",
+    "eval_report": "eval.summary",
+    "candidate_eval_report": "abtest.candidate_eval_summary",
+    "classification_report": "analysis.summary",
+    "repair_loop_plan": "repair.verified_patch",
+    "abtest_comparison": "abtest.comparison",
+}
 
 
-def create_app() -> FastAPI:
-    hub = EvoMessageHub(Path(os.getenv("LAZYMIND_EVO_BASE_DIR") or "/var/lib/lazymind/evo"))
+def create_app(*, planner_factory: Any | None = None) -> FastAPI:
+    hub = EvoMessageHub(Path(os.getenv("LAZYMIND_EVO_BASE_DIR") or "/var/lib/lazymind/evo"), planner_factory=planner_factory)
     app = FastAPI(title="evo flow service", version="artifact-runtime")
     app.state.hub = hub
 
@@ -98,8 +119,14 @@ def create_app() -> FastAPI:
     @app.post("/v1/evo/threads/{thread_id}/messages")
     async def post_message(thread_id: str, request: Request, body: dict = BODY_REQUIRED):
         if "text/event-stream" in request.headers.get("accept", ""):
-            hub.reject_message(thread_id, body)
+            return EventSourceResponse(hub.post_message_stream(thread_id, body))
         return await asyncio.to_thread(hub.post_message, thread_id, body)
+
+    @app.get("/v1/evo/threads/{thread_id}/message-events")
+    async def message_events(thread_id: str, request: Request, since: int = 0) -> EventSourceResponse:
+        hub.get_thread(thread_id)
+        last = request.headers.get("last-event-id") or ""
+        return EventSourceResponse(hub.message_events(thread_id, int(last) if last.isdigit() else since))
 
     @app.post("/v1/evo/threads/{thread_id}/start")
     async def start(thread_id: str, body: dict = BODY_DEFAULT) -> dict:
@@ -177,10 +204,13 @@ def get_app() -> FastAPI:
 
 
 class EvoMessageHub:
-    def __init__(self, base_dir: Path):
+    def __init__(self, base_dir: Path, *, planner_factory: Any | None = None):
         self.base_dir = base_dir
         self.threads_dir = base_dir / "state" / "threads"
         self._artifact_flows: dict[str, EvoFlowRuntime] = {}
+        self._message_services: dict[str, MessageIntentService] = {}
+        self._message_service_lock = RLock()
+        self._planner_factory = planner_factory
 
     def create_thread(self, payload: dict[str, Any]) -> dict:
         mode = str(payload.get("mode") or "interactive").strip()
@@ -197,7 +227,7 @@ class EvoMessageHub:
             "mode": mode,
             "title": str(payload.get("title") or ""),
             "inputs": inputs,
-            "model_config": payload.get("llm_config") or {},
+            "model_config": _model_config_payload(payload),
             "status": "idle",
             "created_at": now,
             "updated_at": now,
@@ -217,6 +247,7 @@ class EvoMessageHub:
     def delete_thread(self, thread_id: str) -> dict:
         self._meta(thread_id)
         self._close_flow(thread_id)
+        self._close_message_service(thread_id)
         run_root, thread_dir = self._run_root(thread_id), self._thread_dir(thread_id)
         run_deleted, thread_deleted = run_root.exists(), thread_dir.exists()
         shutil.rmtree(run_root, ignore_errors=True)
@@ -230,10 +261,19 @@ class EvoMessageHub:
 
     def history(self, thread_id: str) -> dict:
         self._meta(thread_id)
-        return {"thread_id": thread_id, "messages": _read_messages(self._thread_dir(thread_id) / "messages.jsonl")}
+        messages = []
+        service_path = self._message_store_path(thread_id)
+        if service_path.exists():
+            store = MessageSessionStore(service_path)
+            try:
+                messages = store.events_as_history(thread_id)
+            finally:
+                store.close()
+        return {"thread_id": thread_id, "messages": messages or _read_messages(self._thread_dir(thread_id) / "messages.jsonl")}
 
     def start(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
         payload = payload or {}
+        self._update_model_config(thread_id, payload)
         self._meta(thread_id)
         flow = self._artifact_flow(thread_id)
         state = flow.start_full_flow(
@@ -261,22 +301,20 @@ class EvoMessageHub:
         return self._artifact_flow_response(thread_id, state)
 
     def retry(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
+        self._update_model_config(thread_id, payload or {})
         self._meta(thread_id)
         if not self._has_artifact_flow(thread_id):
             raise HTTPException(409, "thread has no flow to retry")
         flow = self._artifact_flow(thread_id)
-        flow.runtime.controller.retry_failed(
-            RUN_ID,
+        state = flow.retry_failed_flow(
             command_id=str((payload or {}).get("command_id") or f"retry:{uuid.uuid4().hex}"),
+            run_id=RUN_ID,
         )
-        flow.run_until_idle(command_id=f"retry-idle:{uuid.uuid4().hex}", run_id=RUN_ID)
-        state = flow.step_store.get(RUN_ID)
-        if state is None:
-            raise HTTPException(409, "thread has no flow to retry")
         return self._artifact_flow_response(thread_id, state) | {"retried": True}
 
     def continue_thread(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
         payload = payload or {}
+        self._update_model_config(thread_id, payload)
         self._meta(thread_id)
         if not self._has_artifact_flow(thread_id):
             raise HTTPException(409, "thread has no flow to continue")
@@ -287,7 +325,24 @@ class EvoMessageHub:
         return self._artifact_flow_response(thread_id, state) | {"resumed": True}
 
     def post_message(self, thread_id: str, payload: dict[str, Any]) -> dict:
-        self.reject_message(thread_id, payload)
+        with self._message_service_lock:
+            self._update_model_config(thread_id, payload)
+            self._meta(thread_id)
+            try:
+                result = self._message_service(thread_id).handle(thread_id, payload)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(409, str(exc)) from exc
+        return {
+            "status": result.status,
+            "thread_id": result.thread_id,
+            "turn_id": result.turn_id,
+            "message_id": result.message_id,
+            "response": result.response,
+            "message_event_cursor": result.message_event_cursor,
+            "pending_approval": result.pending_approval,
+        }
 
     def reject_message(self, thread_id: str, payload: dict[str, Any]) -> None:
         self._meta(thread_id)
@@ -297,16 +352,32 @@ class EvoMessageHub:
         raise HTTPException(409, "message/NL intervention is not migrated for artifact flow")
 
     async def post_message_stream(self, thread_id: str, payload: dict[str, Any]):
-        message_id = str(payload.get("message_id") or f"msg_{thread_id}_{uuid.uuid4().hex[:8]}")
-
-        def emit(event: str, data: dict[str, Any]) -> dict:
-            return _sse(event, {"thread_id": thread_id, "message_id": message_id, **data})
-
-        yield emit("intent_start", {})
+        cursor = 0
         try:
-            self.post_message(thread_id, {**payload, "message_id": message_id})
+            result = self.post_message(thread_id, payload)
+            cursor = max(0, int(result.get("message_event_cursor") or 0) - 100)
+            with self._message_service_lock:
+                rows = self._message_service(thread_id).subscribe_events(thread_id, cursor)
+            for row in rows:
+                yield _sse(str(row["event"]), {"thread_id": thread_id, **row["data"]}, str(row["id"]))
+            yield _sse("done", {"thread_id": thread_id, "status": result["status"]}, str(result.get("message_event_cursor") or 0))
         except HTTPException as exc:
-            yield emit("error", {"code": exc.status_code, "message": exc.detail})
+            yield _sse("error", {"thread_id": thread_id, "code": exc.status_code, "message": exc.detail})
+
+    async def message_events(self, thread_id: str, since: int = 0):
+        self._meta(thread_id)
+        cursor = max(0, since)
+        idle_ticks = 0
+        while True:
+            with self._message_service_lock:
+                rows = self._message_service(thread_id).subscribe_events(thread_id, cursor)
+            for row in rows:
+                cursor = max(cursor, int(row["id"]))
+                yield _sse(str(row["event"]), {"thread_id": thread_id, **row["data"]}, str(row["id"]))
+            idle_ticks = idle_ticks + 1 if not rows else 0
+            if idle_ticks > 4:
+                return
+            await asyncio.sleep(0.5)
 
     async def events(self, thread_id: str, since: int = 0):
         self._meta(thread_id)
@@ -358,13 +429,14 @@ class EvoMessageHub:
         self._meta(thread_id)
         if kind not in RESULT_ARTIFACTS:
             raise HTTPException(404, f"unknown result kind: {kind}")
-        return [row for artifact_id in RESULT_ARTIFACTS[kind] if (row := self._artifact_runtime_row(thread_id, artifact_id))]
+        rows = [row for artifact_id in RESULT_ARTIFACTS[kind] if (row := self._artifact_runtime_row(thread_id, artifact_id))]
+        return _frontend_result_rows(kind, rows)
 
     def artifact(self, thread_id: str, artifact_id: str) -> dict:
-        row = self._artifact_runtime_row(thread_id, artifact_id)
+        row = self._artifact_runtime_row(thread_id, ARTIFACT_ID_ALIASES.get(artifact_id, artifact_id))
         if row is None:
             raise HTTPException(404, f"artifact not found: {artifact_id}")
-        return row
+        return _frontend_artifact_row(row)
 
     def report_content(self, thread_id: str, artifact_id: str) -> str:
         data = self.artifact(thread_id, artifact_id)["data"]
@@ -393,8 +465,34 @@ class EvoMessageHub:
             inputs = self._artifact_flow_config(thread_id)
             path = self._artifact_runtime_path(thread_id)
             path.parent.mkdir(parents=True, exist_ok=True)
-            self._artifact_flows[thread_id] = EvoFlowRuntime.open(path, case_count=int(inputs["num_cases"]))
+            self._artifact_flows[thread_id] = EvoFlowRuntime.open(
+                path,
+                case_count=int(inputs["num_cases"]),
+                model_config=inputs.get("model_config") or {},
+            )
+        else:
+            self._artifact_flows[thread_id].set_model_config(self._meta(thread_id).get("model_config") or {})
         return self._artifact_flows[thread_id]
+
+    def _message_service(self, thread_id: str) -> MessageIntentService:
+        with self._message_service_lock:
+            if thread_id not in self._message_services:
+                self._message_services[thread_id] = MessageIntentService(
+                    MessageSessionStore(self._message_store_path(thread_id)),
+                    flow_getter=self._artifact_flow,
+                    has_flow=self._has_artifact_flow,
+                    flow_status=self.flow_status,
+                    artifact_reader=lambda tid, artifact_id: self._artifact_runtime_row(tid, artifact_id),
+                    case_count_getter=lambda tid: int(self._artifact_flow_config(tid)["num_cases"]),
+                    planner=self._message_planner(thread_id),
+                )
+            return self._message_services[thread_id]
+
+    def _message_planner(self, thread_id: str) -> StructuredJSONNextIntentPlanner:
+        model_config = self._meta(thread_id).get("model_config") or {}
+        if self._planner_factory is not None:
+            return self._planner_factory(thread_id, model_config)
+        return StructuredJSONNextIntentPlanner(LazyLLMPlannerClient(model_config=model_config))
 
     def _close_flow(self, thread_id: str) -> None:
         flow = self._artifact_flows.pop(thread_id, None)
@@ -442,6 +540,21 @@ class EvoMessageHub:
             self._update_meta(thread_id, inputs=inputs, updated_at=time.time())
         return inputs | {"model_config": meta.get("model_config") or {}}
 
+    def _update_model_config(self, thread_id: str, payload: dict[str, Any]) -> None:
+        model_config = _model_config_payload(payload)
+        if not model_config:
+            return
+        self._update_meta(thread_id, model_config=model_config, updated_at=time.time())
+        if thread_id in self._artifact_flows:
+            self._artifact_flows[thread_id].set_model_config(model_config)
+        self._close_message_service(thread_id)
+
+    def _close_message_service(self, thread_id: str) -> None:
+        with self._message_service_lock:
+            service = self._message_services.pop(thread_id, None)
+        if service is not None:
+            service.store.close()
+
     def _artifact_flow_response(self, thread_id: str, state: FlowStepState) -> dict:
         status = _artifact_flow_http_status(state)
         checkpoint = _artifact_checkpoint_payload(state)
@@ -466,6 +579,9 @@ class EvoMessageHub:
 
     def _artifact_runtime_path(self, thread_id: str) -> Path:
         return self._run_root(thread_id) / "artifact-runtime.sqlite"
+
+    def _message_store_path(self, thread_id: str) -> Path:
+        return self._thread_dir(thread_id) / "message-session.sqlite"
 
     def _meta(self, thread_id: str) -> dict:
         meta = _read_json(self._thread_dir(thread_id) / "thread.json")
@@ -516,6 +632,164 @@ def _flow_status_row(
     }
 
 
+def _frontend_result_rows(kind: str, rows: list[dict]) -> list[dict]:
+    if kind == "analysis-reports":
+        adapted = []
+        for row in rows:
+            adapted.extend(_analysis_result_rows(row))
+        return adapted
+    return [_frontend_artifact_row(row) for row in rows]
+
+
+def _frontend_artifact_row(row: dict) -> dict:
+    data = row.get("data") if isinstance(row.get("data"), dict) else {}
+    artifact_id = str(row.get("artifact_id") or "")
+    alias = RESULT_ARTIFACT_ALIASES.get(artifact_id, artifact_id)
+    adapted_data = _frontend_data(artifact_id, data)
+    return {
+        **row,
+        "artifact_id": alias,
+        "runtime_artifact_id": artifact_id,
+        "source_artifact_id": artifact_id,
+        "data": adapted_data,
+        **_frontend_top_level_fields(alias, adapted_data),
+    }
+
+
+def _analysis_result_rows(row: dict) -> list[dict]:
+    base = _frontend_artifact_row(row)
+    data = base.get("data") if isinstance(base.get("data"), dict) else {}
+    repair_plan = _repair_loop_plan_data(data)
+    return [
+        {**base, "artifact_id": "classification_report", "data": data, **_frontend_top_level_fields("classification_report", data)},
+        {
+            **base,
+            "artifact_id": "repair_loop_plan",
+            "runtime_artifact_id": "analysis.summary",
+            "source_artifact_id": "analysis.summary",
+            "data": repair_plan,
+            **_frontend_top_level_fields("repair_loop_plan", repair_plan),
+        },
+    ]
+
+
+def _frontend_data(artifact_id: str, data: dict) -> dict:
+    if artifact_id in {"eval.summary", "abtest.candidate_eval_summary"}:
+        return _eval_report_data(data)
+    if artifact_id == "analysis.summary":
+        return _classification_report_data(data)
+    if artifact_id == "repair.verified_patch":
+        return _diff_data(data)
+    if artifact_id == "abtest.comparison":
+        return _abtest_data(data)
+    return data
+
+
+def _frontend_top_level_fields(alias: str, data: dict) -> dict:
+    if alias == "eval_dataset":
+        return {"total_nums": data.get("size") or data.get("total_nums"), "cases": data.get("cases") or []}
+    if alias in {"eval_report", "candidate_eval_report"}:
+        return {"metrics": data.get("metrics") or {}, "total_cases": data.get("total") or data.get("case_count")}
+    if alias == "classification_report":
+        return {"cases": data.get("cases") or [], "summary": data.get("summary") or {}}
+    if alias == "repair_loop_plan":
+        return {"target": data.get("target") or {}, "priorities": data.get("priorities") or []}
+    return {}
+
+
+def _eval_report_data(data: dict) -> dict:
+    metrics = dict(data.get("metrics") or {})
+    rows = [dict(item) for item in data.get("rows") or [] if isinstance(item, dict)]
+    question_types: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        category = str(row.get("question_type") or row.get("category") or "总体")
+        bucket = question_types.setdefault(category, {"count": 0, "totals": {}})
+        bucket["count"] += 1
+        for key in ("answer_correctness", "faithfulness", "context_recall", "doc_recall"):
+            bucket["totals"][key] = float(bucket["totals"].get(key, 0.0)) + float(row.get(key) or 0.0)
+    if not question_types:
+        question_types["总体"] = {
+            "count": int(data.get("total") or data.get("case_count") or 0),
+            "totals": {key.removesuffix("_avg"): float(value or 0.0) for key, value in metrics.items() if key.endswith("_avg")},
+            "already_average": True,
+        }
+    summary_rows = []
+    for category, bucket in question_types.items():
+        count = int(bucket["count"] or 0)
+        totals = bucket["totals"]
+        averages = {
+            key: round(float(value or 0.0) if bucket.get("already_average") else float(value or 0.0) / max(count, 1), 4)
+            for key, value in totals.items()
+        }
+        summary_rows.append({"question_type_key": category, "question_type_name": category, "count": count, "averages": averages})
+    return data | {
+        "total_cases": data.get("total") or data.get("case_count") or len(rows),
+        "case_details_summary": {
+            "total_count": data.get("total") or data.get("case_count") or len(rows),
+            "question_types": summary_rows,
+        },
+    }
+
+
+def _classification_report_data(data: dict) -> dict:
+    rows = [dict(item) for item in data.get("rows") or [] if isinstance(item, dict)]
+    category_counts = dict(data.get("category_counts") or {})
+    priorities = [
+        {
+            "rank": index + 1,
+            "fine_category": category,
+            "case_count": count,
+            "priority_score": round(float(count or 0) / max(int(data.get("total") or 1), 1), 4),
+        }
+        for index, (category, count) in enumerate(sorted(category_counts.items(), key=lambda item: (-int(item[1] or 0), item[0])))
+    ]
+    target = priorities[0] | {"badcase_ids": [row.get("case_id") for row in rows if row.get("case_id")]} if priorities else {}
+    return data | {
+        "bad_case_count": len(rows),
+        "classified_case_count": len(rows),
+        "cases": rows,
+        "priorities": priorities,
+        "target": target,
+        "summary": {
+            "fine_category_counts": category_counts,
+            "coarse_category_counts": category_counts,
+            "confidence_counts": dict(Counter(str(row.get("confidence") or "medium") for row in rows)),
+        },
+    }
+
+
+def _repair_loop_plan_data(analysis_data: dict) -> dict:
+    report = _classification_report_data(analysis_data)
+    return {
+        "id": "repair_loop_plan",
+        "classification_report_ref": "analysis.summary",
+        "target": report.get("target") or {},
+        "priorities": report.get("priorities") or [],
+        "cases": report.get("cases") or [],
+        "summary": report.get("summary") or {},
+    }
+
+
+def _diff_data(data: dict) -> dict:
+    content = str(data.get("diff") or data.get("patch") or data.get("content") or "")
+    return data | {"content": content, "diff": str(data.get("diff") or content), "files": data.get("files") or []}
+
+
+def _abtest_data(data: dict) -> dict:
+    return data | {
+        "abtest_id": data.get("id") or "abtest_comparison",
+        "summary": data.get("summary") or {
+            "metrics": data.get("metrics") or {},
+            "case_deltas": data.get("case_deltas") or [],
+            "case_count": data.get("case_count") or len(data.get("case_ids") or []),
+            "verdict": data.get("verdict"),
+            "reasons": data.get("reasons") or [],
+            "missing_metrics": data.get("missing_metrics") or [],
+            "policy": data.get("policy") or {},
+        },
+    }
+
+
 def _artifact_flow_http_status(state: FlowStepState | None) -> str:
     if state is None:
         return "idle"
@@ -539,6 +813,11 @@ def _artifact_checkpoint_payload(state: FlowStepState | None) -> dict | None:
         "message": f'{STAGE_LABELS.get(str(state.current_step), state.current_step)}已完成，请确认是否继续执行下一步。',
         "gate_artifact_ref": "" if state.gate_artifact_ref is None else str(state.gate_artifact_ref),
     }
+
+
+def _model_config_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    value = payload.get("llm_config") or payload.get("model_config") or {}
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _abtest_status(flow: EvoFlowRuntime) -> str | None:
