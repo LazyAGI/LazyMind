@@ -154,9 +154,14 @@ export function PluginPanel({
   const showActions =
     session.status === 'waiting' ||
     session.status === 'active' ||
-    session.status === 'completed';
+    session.status === 'completed' ||
+    session.status === 'failed';
+  // Both buttons are disabled while a SubAgent is running.
   const buttonsDisabled = session.status === 'active';
-  const showContinue = session.status === 'waiting' || session.status === 'active';
+  // "Continue" is only shown when there is a next step to advance to.
+  // completed = last step already done (Driver returned DONE), failed = terminal.
+  const showContinue =
+    session.status === 'waiting' || session.status === 'active';
 
   function handleContinue() {
     if (buttonsDisabled) return;
@@ -259,7 +264,7 @@ export function PluginPanel({
             disabled={buttonsDisabled}
             aria-disabled={buttonsDisabled}
             onClick={handleRetry}
-            title={buttonsDisabled ? t('chat.pluginStatusRunning') : t('chat.pluginRetry')}
+            title={buttonsDisabled ? t('chat.pluginBtnDisabledHint') : t('chat.pluginRetry')}
           >
             {t('chat.pluginRetry')}
           </button>
@@ -270,7 +275,7 @@ export function PluginPanel({
               disabled={buttonsDisabled}
               aria-disabled={buttonsDisabled}
               onClick={handleContinue}
-              title={buttonsDisabled ? t('chat.pluginStatusRunning') : t('chat.pluginContinue')}
+              title={buttonsDisabled ? t('chat.pluginBtnDisabledHint') : t('chat.pluginContinue')}
             >
               {t('chat.pluginContinue')}
             </button>

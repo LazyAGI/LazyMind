@@ -614,6 +614,7 @@ const zhCN = {
     pluginStatusDone: "已完成",
     pluginStatusFailed: "失败",
     pluginStatusWaiting: "等待确认",
+    pluginBtnDisabledHint: "步骤执行中，请稍候",
     greetingMorning: "上午好",
     greetingAfternoon: "下午好",
     greetingSuffix: "，有什么我能帮你的吗？",

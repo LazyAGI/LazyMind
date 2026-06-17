@@ -642,6 +642,7 @@ const enUS = {
     pluginStatusDone: "Done",
     pluginStatusFailed: "Failed",
     pluginStatusWaiting: "Waiting",
+    pluginBtnDisabledHint: "Step is running, please wait…",
     // Greeting
     greetingMorning: "Good morning",
     greetingAfternoon: "Good afternoon",
