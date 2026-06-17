@@ -596,6 +596,62 @@ function placeCaretAtEnd(element: HTMLElement) {
   selection.addRange(range);
 }
 
+function escapeHtml(value?: string) {
+  return `${value || ""}`
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeHtmlAttribute(value?: string) {
+  return escapeHtml(value)
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/\r/g, "&#13;")
+    .replace(/\n/g, "&#10;");
+}
+
+function buildReferenceContextEditorHtml(
+  value: string,
+  formatChunkLabel: (index: number) => string,
+  formatDeleteChunkAria: (index: number) => string,
+) {
+  // contentEditable mutates children directly, so keep editor internals out of React reconciliation.
+  const editorValue = referenceContextEditorValue(value);
+  let chunkIndex = 0;
+
+  return editorValue.parts
+    .map((part, index) => {
+      if (part.type === "chunk") {
+        chunkIndex += 1;
+        return [
+          `<span contenteditable="false"`,
+          ` data-reference-context-part="chunk"`,
+          ` data-reference-context-part-index="${index}"`,
+          ` data-id="${escapeHtmlAttribute(part.id)}"`,
+          ` data-content="${escapeHtmlAttribute(part.content)}"`,
+          ` title="${escapeHtmlAttribute(part.content)}"`,
+          ` class="dataset-reference-context-chip">`,
+          escapeHtml(formatChunkLabel(chunkIndex)),
+          `<button type="button"`,
+          ` class="dataset-reference-context-chip-remove"`,
+          ` aria-label="${escapeHtmlAttribute(formatDeleteChunkAria(chunkIndex))}"`,
+          ` data-reference-context-remove-part="${index}">&times;</button>`,
+          `</span>`,
+        ].join("");
+      }
+
+      return [
+        `<span data-reference-context-part-index="${index}"`,
+        ` data-reference-context-text-index="${index}"`,
+        ` class="dataset-reference-context-editor-text">`,
+        escapeHtml(part.content) || "&#8203;",
+        `</span>`,
+      ].join("");
+    })
+    .join("");
+}
+
 function ReferenceContextInlineEditor({
   value,
   placeholder,
@@ -619,6 +675,11 @@ function ReferenceContextInlineEditor({
 }) {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const editorValue = referenceContextEditorValue(value);
+  const editorHtml = buildReferenceContextEditorHtml(
+    value,
+    formatChunkLabel,
+    formatDeleteChunkAria,
+  );
 
   useEffect(() => {
     if (autoFocus && editorRef.current) {
@@ -664,6 +725,17 @@ function ReferenceContextInlineEditor({
     }
     const partNode = element.closest<HTMLElement>("[data-reference-context-part-index]");
     const index = Number(partNode?.dataset.referenceContextPartIndex);
+    return Number.isFinite(index) ? index : undefined;
+  };
+
+  const removePartIndexFromTarget = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) {
+      return undefined;
+    }
+    const removeButton = target.closest<HTMLElement>(
+      "[data-reference-context-remove-part]",
+    );
+    const index = Number(removeButton?.dataset.referenceContextRemovePart);
     return Number.isFinite(index) ? index : undefined;
   };
 
@@ -719,7 +791,6 @@ function ReferenceContextInlineEditor({
     onRemovePart(chunkIndexToRemove);
   };
 
-  let chunkIndex = 0;
   const isEmpty = editorValue.parts.length === 0;
   return (
     <div
@@ -738,64 +809,25 @@ function ReferenceContextInlineEditor({
       }}
       onKeyUp={(event) => updateInsertIndex(event.target)}
       onKeyDown={handleKeyDown}
+      onMouseDown={(event) => {
+        if (removePartIndexFromTarget(event.target) !== undefined) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+      onClick={(event) => {
+        const index = removePartIndexFromTarget(event.target);
+        if (index === undefined) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        onRemovePart(index);
+      }}
       onMouseUp={(event) => updateInsertIndex(event.target)}
       onPaste={handlePaste}
-    >
-      {editorValue.parts.map((part, index) => {
-        if (part.type === "chunk") {
-          chunkIndex += 1;
-          return (
-            <Popover
-              key={`${part.id || index}-${chunkIndex}`}
-              trigger="hover"
-              placement="topLeft"
-              content={
-                <div className="dataset-reference-context-popover">
-                  {part.content}
-                </div>
-              }
-            >
-              <span
-                contentEditable={false}
-                data-reference-context-part="chunk"
-                data-reference-context-part-index={index}
-                data-id={part.id}
-                data-content={part.content}
-                className="dataset-reference-context-chip"
-              >
-                {formatChunkLabel(chunkIndex)}
-                <button
-                  type="button"
-                  className="dataset-reference-context-chip-remove"
-                  aria-label={formatDeleteChunkAria(chunkIndex)}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                  }}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    onRemovePart(index);
-                  }}
-                >
-                  <CloseOutlined />
-                </button>
-              </span>
-            </Popover>
-          );
-        }
-        return (
-          <span
-            key={`text-${index}`}
-            data-reference-context-part-index={index}
-            data-reference-context-text-index={index}
-            className="dataset-reference-context-editor-text"
-          >
-            {part.content || "\u200b"}
-          </span>
-        );
-      })}
-    </div>
+      dangerouslySetInnerHTML={{ __html: editorHtml }}
+    />
   );
 }
 
@@ -821,6 +853,9 @@ function mergeHiddenItemFields(
 ): DatasetItemFormValues {
   const currentReferenceDocIDs = joinListField(item.reference_doc_ids);
   const nextReferenceDocIDs = values.reference_doc_ids || "";
+  const currentReferenceContext = `${item.reference_context || ""}`.trim();
+  const nextReferenceContext = `${values.reference_context || ""}`.trim();
+  const referenceContextChanged = nextReferenceContext !== currentReferenceContext;
   const referenceDocChanged =
     `${values.reference_doc || ""}`.trim() !== `${item.reference_doc || ""}`.trim() ||
     (Boolean(nextReferenceDocIDs.trim()) &&
@@ -832,7 +867,7 @@ function mergeHiddenItemFields(
     reference_doc_ids: referenceDocChanged
       ? nextReferenceDocIDs
       : nextReferenceDocIDs || currentReferenceDocIDs,
-    reference_chunk_ids: referenceDocChanged
+    reference_chunk_ids: referenceDocChanged || referenceContextChanged
       ? values.reference_chunk_ids || ""
       : values.reference_chunk_ids || joinListField(item.reference_chunk_ids),
     is_deleted: Boolean(item.is_deleted),
@@ -913,24 +948,28 @@ export default function DatasetDetailPage() {
     delete referenceContextEditingDirtyRef.current[itemId];
   }, []);
 
+  const clearReferenceDocumentRuntimeState = useCallback((itemId: string) => {
+    delete documentSearchPaginationRequestRef.current[itemId];
+    delete documentSearchRequestRef.current[itemId];
+    setDocumentSearchState((current) => {
+      if (!current[itemId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[itemId];
+      return next;
+    });
+  }, []);
+
   const clearItemRuntimeState = useCallback(
     (itemId: string) => {
       clearReferenceContextRuntimeState(itemId);
       if (itemId === NEW_ITEM_ID) {
         pendingNewItemCellActivationRef.current = null;
       }
-      delete documentSearchPaginationRequestRef.current[itemId];
-      delete documentSearchRequestRef.current[itemId];
-      setDocumentSearchState((current) => {
-        if (!current[itemId]) {
-          return current;
-        }
-        const next = { ...current };
-        delete next[itemId];
-        return next;
-      });
+      clearReferenceDocumentRuntimeState(itemId);
     },
-    [clearReferenceContextRuntimeState],
+    [clearReferenceContextRuntimeState, clearReferenceDocumentRuntimeState],
   );
 
   const clearAllItemRuntimeState = useCallback(() => {
@@ -1164,19 +1203,26 @@ export default function DatasetDetailPage() {
   };
 
   const handleReferenceDocumentSearch = async (record: DatasetItem, value: string) => {
-    clearReferenceContextRuntimeState(record.id);
     const searchRequestId = (documentSearchRequestRef.current[record.id] || 0) + 1;
     documentSearchRequestRef.current[record.id] = searchRequestId;
-    setDrafts((current) => ({
-      ...current,
-      [record.id]: {
-        ...(current[record.id] || createItemDraft(record.id === NEW_ITEM_ID ? undefined : record)),
-        reference_doc: value || "",
-        reference_doc_ids: "",
-        reference_chunk_ids: "",
-        reference_context: "",
-      },
-    }));
+    setDrafts((current) => {
+      const currentDraft =
+        current[record.id] || createItemDraft(record.id === NEW_ITEM_ID ? undefined : record);
+      const referenceContext =
+        referenceContextEditingValueRef.current[record.id] ??
+        currentDraft.reference_context ??
+        "";
+      return {
+        ...current,
+        [record.id]: {
+          ...currentDraft,
+          reference_doc: value || "",
+          reference_doc_ids: "",
+          reference_chunk_ids: referenceContextChunkIDs(referenceContext).join(", "),
+          reference_context: referenceContext,
+        },
+      };
+    });
     setDirtyItemIds((current) =>
       current.includes(record.id) ? current : [...current, record.id],
     );
@@ -1313,7 +1359,6 @@ export default function DatasetDetailPage() {
     record: DatasetItem,
     option: KnowledgeDocumentOption,
   ) => {
-    clearReferenceContextRuntimeState(record.id);
     documentSearchRequestRef.current[record.id] =
       (documentSearchRequestRef.current[record.id] || 0) + 1;
     if (option.datasetId) {
@@ -1324,16 +1369,24 @@ export default function DatasetDetailPage() {
       };
       setReferenceDocumentCacheVersion((version) => version + 1);
     }
-    setDrafts((current) => ({
-      ...current,
-      [record.id]: {
-        ...(current[record.id] || createItemDraft(record.id === NEW_ITEM_ID ? undefined : record)),
-        reference_doc: option.name,
-        reference_doc_ids: option.documentId,
-        reference_chunk_ids: "",
-        reference_context: "",
-      },
-    }));
+    setDrafts((current) => {
+      const currentDraft =
+        current[record.id] || createItemDraft(record.id === NEW_ITEM_ID ? undefined : record);
+      const referenceContext =
+        referenceContextEditingValueRef.current[record.id] ??
+        currentDraft.reference_context ??
+        "";
+      return {
+        ...current,
+        [record.id]: {
+          ...currentDraft,
+          reference_doc: option.name,
+          reference_doc_ids: option.documentId,
+          reference_chunk_ids: referenceContextChunkIDs(referenceContext).join(", "),
+          reference_context: referenceContext,
+        },
+      };
+    });
     setDirtyItemIds((current) =>
       current.includes(record.id) ? current : [...current, record.id],
     );
@@ -1780,7 +1833,13 @@ export default function DatasetDetailPage() {
     field: EditableDatasetItemField,
     placeholder: string,
   ) => {
-    const value = drafts[record.id]?.[field] || "";
+    const draft = drafts[record.id];
+    const value =
+      field === "reference_context"
+        ? referenceContextEditingValueRef.current[record.id] ??
+          draft?.reference_context ??
+          ""
+        : draft?.[field] || "";
     const shouldShowReferenceChunkSelector =
       field === "reference_context" && canSelectReferenceChunks(record);
     return (
@@ -1867,9 +1926,7 @@ export default function DatasetDetailPage() {
       .map((item) => item.trim())
       .filter(Boolean);
     const shouldRenderReferenceDocTag =
-      Boolean(currentReferenceDoc) &&
-      (selectedReferenceDocIDs.length > 0 ||
-        currentReferenceDoc === `${record.reference_doc || ""}`.trim());
+      Boolean(currentReferenceDoc) && selectedReferenceDocIDs.length > 0;
 
     if (shouldRenderReferenceDocTag) {
       return (
@@ -1883,18 +1940,22 @@ export default function DatasetDetailPage() {
               onClick={() => {
                 setDrafts((current) => {
                   const currentDraft = current[record.id] || createItemDraft(record);
+                  const referenceContext =
+                    referenceContextEditingValueRef.current[record.id] ??
+                    currentDraft.reference_context ??
+                    "";
                   return {
                     ...current,
                     [record.id]: {
                       ...currentDraft,
                       reference_doc: "",
                       reference_doc_ids: "",
-                      reference_chunk_ids: "",
-                      reference_context: "",
+                      reference_chunk_ids: referenceContextChunkIDs(referenceContext).join(", "),
+                      reference_context: referenceContext,
                     },
                   };
                 });
-                clearItemRuntimeState(record.id);
+                clearReferenceDocumentRuntimeState(record.id);
                 setDirtyItemIds((current) =>
                   current.includes(record.id) ? current : [...current, record.id],
                 );
