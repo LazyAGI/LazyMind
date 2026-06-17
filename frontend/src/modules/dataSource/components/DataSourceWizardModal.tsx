@@ -41,6 +41,10 @@ import {
   getSourceTypeDescription,
   getSourceTypeTitle,
 } from "../shared";
+import {
+  KNOWLEDGE_BASE_NAME_MAX_LENGTH,
+  KNOWLEDGE_BASE_NAME_PATTERN,
+} from "@/modules/knowledge/constants/validation";
 
 const { Paragraph, Text } = Typography;
 
@@ -512,16 +516,22 @@ export default function DataSourceWizardModal({
                 <Form.Item
                   label={t("admin.dataSourceKnowledgeBaseName")}
                   name="knowledgeBase"
+                  extra={t("knowledge.knowledgeNameRule")}
                   rules={[
                     {
                       required: true,
                       whitespace: true,
                       message: t("admin.dataSourceKnowledgeBaseNameRequired"),
                     },
+                    {
+                      pattern: KNOWLEDGE_BASE_NAME_PATTERN,
+                      message: t("knowledge.knowledgeNameRule"),
+                    },
                   ]}
                 >
                   <Input
                     disabled={isEditMode}
+                    maxLength={KNOWLEDGE_BASE_NAME_MAX_LENGTH}
                     placeholder={t("admin.dataSourceKnowledgeBaseNamePlaceholder")}
                   />
                 </Form.Item>

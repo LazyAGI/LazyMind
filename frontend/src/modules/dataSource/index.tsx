@@ -290,10 +290,21 @@ const providerAuthOptions = sourceTypeOptions.filter(
   (item) => item.type === "feishu" || item.type === "notion",
 );
 
-const datasourceConnectors: Array<{ key: string; name: string; icon: ReactNode; logoUrl?: string }> = [
+const datasourceConnectors: Array<{
+  key: string;
+  providerName: string;
+  titleKey: string;
+  descriptionKey: string;
+  summaryKey: string;
+  icon: ReactNode;
+  logoUrl?: string;
+}> = [
   {
     key: "sciverse",
-    name: "Sciverse",
+    providerName: "Sciverse",
+    titleKey: "modelProvider.external.sciverseTitle",
+    descriptionKey: "modelProvider.external.sciverseDesc",
+    summaryKey: "modelProvider.external.sciverseSummary",
     icon: <SearchOutlined />,
     logoUrl: "https://www.google.com/s2/favicons?domain=sciverse.space&sz=96",
   },
@@ -2951,7 +2962,7 @@ export default function DataSourceManagement() {
     try {
       const response = await dataSourceModelProvidersApi.apiCoreModelProvidersGet({
         category: "datasource",
-        keyword: connector.name,
+        keyword: connector.providerName,
       });
       const providers = unwrapDataSourceApiData<{
         providers?: Array<{
@@ -2962,7 +2973,9 @@ export default function DataSourceManagement() {
         }>;
       }>(response.data).providers || [];
       const provider = providers.find(
-        (item) => normalizeProviderName(item.name) === normalizeProviderName(connector.name)
+        (item) =>
+          normalizeProviderName(item.name) ===
+          normalizeProviderName(connector.providerName),
       );
       if (!provider) {
         message.error(t("modelProvider.external.loadFailed"));
@@ -2970,10 +2983,10 @@ export default function DataSourceManagement() {
       }
       setActiveExternalService({
         key: provider.id,
-        name: provider.name || connector.name,
-        description:
-          provider.description ||
-          t("modelProvider.external.sciverseDesc"),
+        name: provider.name || t(connector.titleKey),
+        description: t(connector.descriptionKey, {
+          defaultValue: provider.description || "",
+        }),
         fields: ["apiKey"],
         logo: connector.icon,
         logoUrl: connector.logoUrl || "",
@@ -4013,10 +4026,10 @@ export default function DataSourceManagement() {
                   </span>
                   <span className="data-source-provider-card-copy">
                     <span className="data-source-provider-title-row">
-                      <span className="data-source-provider-name">{connector.name}</span>
+                      <span className="data-source-provider-name">{t(connector.titleKey)}</span>
                     </span>
                     <span className="data-source-provider-desc">
-                      {t("modelProvider.external.sciverseSummary")}
+                      {t(connector.summaryKey)}
                     </span>
                   </span>
                   <span className="data-source-provider-card-arrow" aria-hidden="true">

@@ -10,6 +10,10 @@ import { useTranslation } from "react-i18next";
 import { Dataset, Algo } from "@/api/generated/knowledge-client";
 
 import { KnowledgeBaseServiceApi } from "@/modules/knowledge/utils/request";
+import {
+  KNOWLEDGE_BASE_NAME_MAX_LENGTH,
+  KNOWLEDGE_BASE_NAME_PATTERN,
+} from "@/modules/knowledge/constants/validation";
 import TagSelect from "../TagSelect";
 
 const { TextArea } = Input;
@@ -172,7 +176,7 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
               { required: true, message: t("knowledge.inputKnowledgeBaseName") },
 
               {
-                pattern: /^[\u4e00-\u9fa5a-zA-Z0-9-_\.]{1,100}$/, // eslint-disable-line
+                pattern: KNOWLEDGE_BASE_NAME_PATTERN,
                 message: t("knowledge.knowledgeNameRule"),
               },
             ]}
@@ -181,7 +185,7 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
               placeholder={
                 t("knowledge.knowledgeNameRule")
               }
-              maxLength={100}
+              maxLength={KNOWLEDGE_BASE_NAME_MAX_LENGTH}
             />
           </Form.Item>
           <Form.Item
