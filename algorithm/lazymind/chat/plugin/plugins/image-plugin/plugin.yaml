@@ -46,14 +46,16 @@ ui:
           label: Subject Analysis
           type: text
           cardinality: single
+          artifact_key: subject_analysis
 
     - id: materials
       label: Materials
       slots:
-        - id: material_images_slot
+        - id: material_images
           label: Reference Materials
           type: image
-          cardinality: list     # one entry per collected material; partial retry overwrites by list_index
+          cardinality: list
+          artifact_key: material_image   # artifact_key written by save_artifact in collect_material step
 
     - id: prompt
       label: Prompt
@@ -61,7 +63,8 @@ ui:
         - id: prompt_used
           label: Optimized Prompt
           type: text
-          cardinality: single   # latest optimization overwrites previous
+          cardinality: single
+          artifact_key: optimized_prompt
 
     - id: result
       label: Result
@@ -69,9 +72,11 @@ ui:
         - id: enhanced_image_output
           label: Enhanced Images
           type: image
-          cardinality: list     # each enhance run appends; partial retry overwrites by list_index
+          cardinality: list
+          artifact_key: enhanced_image_url
 
         - id: image_output
           label: Raw Image
           type: image
           cardinality: single
+          artifact_key: generated_image_url

@@ -404,3 +404,92 @@ def build_advance_step_tool(
     )
 
     return advance_step
+
+
+# ---------------------------------------------------------------------------
+# High-level helper consumed by chat_service
+# ---------------------------------------------------------------------------
+
+def resolve_plugin_injection(
+    plugin_context: Optional[Dict[str, Any]],
+) -> tuple:
+    """Resolve plugin tools, system prompt, stop-tools and agentic_config patches.
+
+    Called once per request from handle_chat.  Encapsulates all plugin-context
+    branching so chat_service stays free of plugin-internal details.
+
+    Returns:
+        (plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch)
+
+        plugin_tools          – list of callables to append to the agent tool list.
+        plugin_system_prompt  – extra system-prompt text to append (may be empty).
+        plugin_stop_tools     – list of tool names that terminate the ReAct loop.
+        agentic_config_patch  – dict to merge into agentic_config (may be empty).
+    """
+    plugin_tools: List[Any] = []
+    plugin_system_prompt: str = ''
+    plugin_stop_tools: List[str] = []
+    agentic_config_patch: Dict[str, Any] = {}
+
+    if not plugin_loader._registry:
+        return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch
+
+    if plugin_context and isinstance(plugin_context, dict):
+        p_session_id = plugin_context.get('session_id', '')
+        p_plugin_id = plugin_context.get('plugin_id', '')
+        p_current_step = plugin_context.get('current_step', '')
+
+        if p_session_id and p_plugin_id:
+            agentic_config_patch = {
+                'plugin_id': p_plugin_id,
+                'plugin_session_id': p_session_id,
+                'plugin_step': p_current_step,
+            }
+            sm = plugin_loader.get_state_machine(p_plugin_id)
+            forward_steps = sm.get_reachable_steps(p_current_step) if sm else []
+
+            rewind_steps: List[str] = []
+            if sm and p_session_id and p_current_step:
+                ancestors = sm.get_ancestors(p_current_step)
+                succeeded = _fetch_succeeded_steps(p_session_id)
+                candidates = ancestors | {p_current_step}
+                rewind_steps = sorted(candidates & succeeded)
+
+            step_labels: Dict[str, str] = {}
+            spec = plugin_loader.get_plugin(p_plugin_id)
+            if spec:
+                for sid, scfg in spec._steps.items():
+                    lbl = scfg.get('label', '')
+                    if lbl:
+                        step_labels[sid] = lbl
+
+            if forward_steps or rewind_steps:
+                plugin_tools = [build_advance_step_tool(
+                    p_plugin_id, p_current_step,
+                    rewind_steps=rewind_steps,
+                    step_labels=step_labels,
+                )]
+                plugin_stop_tools = ['advance_step']
+            plugin_system_prompt = plugin_loader.get_scenario(p_plugin_id)
+        else:
+            # Cold start: no active session yet
+            plugin_tools = build_cold_start_tools()
+            plugin_stop_tools = [t.__name__ for t in plugin_tools]
+            if plugin_tools:
+                scenarios = [
+                    plugin_loader.get_scenario(spec.plugin_id)
+                    for spec in (plugin_loader._registry or {}).values()
+                ]
+                plugin_system_prompt = '\n\n---\n\n'.join(s for s in scenarios if s)
+    else:
+        # No plugin_context provided: still inject cold-start triggers
+        plugin_tools = build_cold_start_tools()
+        plugin_stop_tools = [t.__name__ for t in plugin_tools]
+        if plugin_tools:
+            scenarios = [
+                plugin_loader.get_scenario(spec.plugin_id)
+                for spec in (plugin_loader._registry or {}).values()
+            ]
+            plugin_system_prompt = '\n\n---\n\n'.join(s for s in scenarios if s)
+
+    return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch

@@ -240,72 +240,10 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         else:
             display_files.append(path)
 
-    # Plugin context injection
-    plugin_tools: list = []
-    plugin_system_prompt = ''
-    plugin_stop_tools: list = []
-
-    if plugin_context and isinstance(plugin_context, dict):
-        from lazymind.chat.plugin import plugin_loader, plugin_manager
-        p_session_id = plugin_context.get('session_id', '')
-        p_plugin_id = plugin_context.get('plugin_id', '')
-        p_current_step = plugin_context.get('current_step', '')
-
-        if p_session_id and p_plugin_id:
-            # Active session: inject advance_step only
-            agentic_config.update({
-                'plugin_id': p_plugin_id,
-                'plugin_session_id': p_session_id,
-                'plugin_step': p_current_step,
-            })
-            sm = plugin_loader.get_state_machine(p_plugin_id)
-            forward_steps = sm.get_reachable_steps(p_current_step) if sm else []
-
-            # Compute rewind candidates: topological ancestors that have succeeded,
-            # plus the current step itself if it has already succeeded (allows retry).
-            rewind_steps: list = []
-            if sm and p_session_id and p_current_step:
-                ancestors = sm.get_ancestors(p_current_step)
-                succeeded = plugin_manager._fetch_succeeded_steps(p_session_id)
-                candidates = ancestors | {p_current_step}
-                rewind_steps = sorted(candidates & succeeded)
-
-            # Build step_labels from plugin spec for display in the docstring.
-            step_labels: dict = {}
-            spec = plugin_loader.get_plugin(p_plugin_id)
-            if spec:
-                for sid, scfg in spec._steps.items():
-                    lbl = scfg.get('label', '')
-                    if lbl:
-                        step_labels[sid] = lbl
-
-            if forward_steps or rewind_steps:
-                plugin_tools = [plugin_manager.build_advance_step_tool(
-                    p_plugin_id, p_current_step,
-                    rewind_steps=rewind_steps,
-                    step_labels=step_labels,
-                )]
-                plugin_stop_tools = ['advance_step']
-            plugin_system_prompt = plugin_loader.get_scenario(p_plugin_id)
-        else:
-            # Cold start: inject all trigger_<plugin_id> tools
-            plugin_tools = plugin_manager.build_cold_start_tools()
-            plugin_stop_tools = [t.__name__ for t in plugin_tools]
-            if plugin_tools:
-                scenarios = []
-                for spec in (plugin_loader._registry or {}).values():
-                    scenarios.append(plugin_loader.get_scenario(spec.plugin_id))
-                plugin_system_prompt = '\n\n---\n\n'.join(s for s in scenarios if s)
-    else:
-        # No plugin context at all: inject cold-start triggers
-        from lazymind.chat.plugin import plugin_loader, plugin_manager
-        if plugin_loader._registry:
-            plugin_tools = plugin_manager.build_cold_start_tools()
-            plugin_stop_tools = [t.__name__ for t in plugin_tools]
-            scenarios = []
-            for spec in (plugin_loader._registry or {}).values():
-                scenarios.append(plugin_loader.get_scenario(spec.plugin_id))
-            plugin_system_prompt = '\n\n---\n\n'.join(s for s in scenarios if s)
+    from lazymind.chat.plugin.plugin_manager import resolve_plugin_injection
+    plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch = \
+        resolve_plugin_injection(plugin_context)
+    agentic_config.update(agentic_config_patch)
 
     lazyllm.globals._init_sid(sid=session_id)
     lazyllm.locals._init_sid(sid=session_id)

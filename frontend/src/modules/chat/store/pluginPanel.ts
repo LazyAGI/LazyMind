@@ -36,6 +36,8 @@ export interface SlotDef {
   label: string;
   type: "image" | "text" | "file";
   cardinality?: "single" | "list";
+  /** The artifact_key written by the SubAgent. If absent, falls back to id. */
+  artifact_key?: string;
 }
 
 export interface TabDef {

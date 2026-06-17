@@ -409,6 +409,34 @@
     color: #9ca3af;
   }
 
+  &--pending {
+    opacity: 0.6;
+    animation: pulse 1.5s ease-in-out infinite;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 56px;
+    background: #f9fafb;
+    border-radius: 6px;
+    border: 1px dashed #d1d5db;
+  }
+
+  &__placeholder-icon {
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  &__placeholder {
+    color: #9ca3af;
+    font-size: 12px;
+  }
+
+  &__text--pending {
+    color: #9ca3af;
+    font-style: italic;
+  }
+
   &--empty {
     display: flex;
     align-items: center;

@@ -73,8 +73,9 @@ function TabSlotGrid({
   return (
     <div className='plugin-panel__tab-content'>
       {tab.slots.map((slotDef) => {
+        const artifactKey = slotDef.artifact_key ?? slotDef.id;
         const revisions = (session.slots ?? []).filter(
-          (s) => s.slot_id === slotDef.id && s.selected,
+          (s) => s.artifact_key === artifactKey && s.selected,
         );
         const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
         return (
@@ -97,6 +98,7 @@ function TabSlotGrid({
                     conversationId={conversationId}
                     slot={rev}
                     cardMode
+                    expectedType={slotDef.type}
                   />
                 ))}
               </div>
@@ -106,6 +108,7 @@ function TabSlotGrid({
                   key={`${rev.slot_id}-${rev.revision}-${rev.list_index ?? 0}`}
                   conversationId={conversationId}
                   slot={rev}
+                  expectedType={slotDef.type}
                 />
               ))
             )}
