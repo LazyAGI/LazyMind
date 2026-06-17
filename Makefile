@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 lint-python lint-go test test-hermetic test-hermetic-setup test-hermetic-check build up up-build down clear reset-kb reset-all fresh-start file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop
+.PHONY: help lint install-flake8 lint-python lint-go test test-hermetic test-hermetic-setup test-hermetic-check build up up-build down clear reset-kb reset-all clear-all fresh-start file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop
 .DEFAULT_GOAL := help
 
 # Use legacy Docker builder by default to avoid pulling moby/buildkit:buildx-stable-1 from Docker Hub
@@ -56,6 +56,14 @@ endif
 # internal Makefile bookkeeping uses the resolved absolute path below.
 export LAZYMIND_FILE_WATCHER_BASE_ROOT ?= ./data/scan
 LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS := $(abspath $(LAZYMIND_FILE_WATCHER_BASE_ROOT))
+_CLEAR_ALL_BIND_DIRS := \
+	data/state/postgres \
+	data/state/redis \
+	data/scan \
+	data/core/uploads \
+	data/evo \
+	data/subagent \
+	data/traces
 export LAZYMIND_FILE_WATCHER_MODE ?= container
 
 # Auto-detect host OS for path style and default watch directory.
@@ -181,6 +189,7 @@ help:
 	@echo "  make test-hermetic-setup - Prepare the uv-managed Python test env and check Node/Go"
 	@echo "  make test-hermetic-check - Check uv, fnm/nvm, Node 20, Go 1.24.0, and the test venv"
 	@echo "  make clear      - Stop services, remove volumes, clear Python cache"
+	@echo "  make clear-all  - Run down + reset-kb + reset-all + clear, then remove bind-mounted data"
 	@echo "  make reset-kb   - Stop services, wipe KB data (Milvus, OpenSearch, uploads, lazyllm DB tables)"
 	@echo "                    Set LAZYMIND_RESET_ALGO_ON_STARTUP=true to also clear algo state on next startup"
 	@echo "  make reset-all  - Stop services, wipe ALL persistent data (KB + users, auth, Redis, etc.)"
@@ -450,6 +459,19 @@ reset-kb:
 # reset-all: wipe ALL persistent data — equivalent to a clean first-run state.
 #            Builds on reset-kb and additionally removes pgdata and redisdata.
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# clear-all: strongest local cleanup. Runs the existing teardown/reset targets
+#            and additionally removes host bind-mounted persistent data.
+# ---------------------------------------------------------------------------
+clear-all:
+	@$(MAKE) --no-print-directory down
+	@$(MAKE) --no-print-directory reset-kb
+	@$(MAKE) --no-print-directory reset-all
+	@$(MAKE) --no-print-directory clear
+	@echo "🗑  Removing bind-mounted host data: $(_CLEAR_ALL_BIND_DIRS)..."
+	@rm -rf $(_CLEAR_ALL_BIND_DIRS) 2>/dev/null || true
+	@echo "✅ Clear-all done. Docker volumes and bind-mounted local data removed."
 reset-all: reset-kb
 	@echo "🗑  Removing all remaining persistent volumes (pgdata, redisdata, caches)..."
 	@$(_COMPOSE) $(_COMPOSE_PROFILES) down -v 2>/dev/null || true
