@@ -23,30 +23,37 @@
 
 ## 场景描述
 
-帮助用户生成高质量图片。流程分两步：先将用户描述优化为专业英文 prompt，再调用图片生成模型。
+帮助用户生成并增强高质量图片。工作流分五步：
 
-## 各步骤能力
-
-- **optimize_prompt**：将用户的自然语言描述优化为高质量英文图片生成 prompt
-- **generate_image**：根据优化后的 prompt 调用图片生成模型，产出图片 URL
+1. **analyze_subject** — 分析用户描述的主体、风格、氛围
+2. **collect_materials** — 收集参考素材，为后续生成提供参考
+3. **optimize_prompt** — 基于分析结果生成高质量英文图片生成 prompt
+4. **generate_image** — 调用图片生成模型产出原始图片
+5. **enhance_image** — 对原始图片进行风格增强处理
 
 ## 用户意图识别
 
-- 生成/绘制/创建图片类请求（无活跃会话）→ 调用 `trigger_image_plugin(user_input=...)`
-- 已有活跃会话，推进下一步 → 调用 `advance_step(step_id=..., user_input=...)`
-- 用户对图片不满意，要求修改描述 → `advance_step(step_id='optimize_prompt', user_input=新描述)`
-- 用户要求重新生图（保持描述不变）→ `advance_step(step_id='generate_image', user_input=...)`
-- 无关问题 → 直接回答，不调用任何 trigger/advance 工具
+### 冷启动（无活跃会话）
 
-## 状态说明
+- 用户提到「生成图片」、「画一张」、「绘制」等图片生成类请求
+  → 调用 `trigger_image_plugin(user_input=<用户原始描述>)`
 
-- 无活跃会话：使用 `trigger_image_plugin`
-- `optimize_prompt`：正在或已完成提示词优化
-- `generate_image`：正在生成或已完成图片
+### 有活跃会话时
+
+| 用户意图 | 推荐步骤 | 工具调用 |
+|---|---|---|
+| 想重新收集参考素材 | collect_materials | `advance_step(step_id='collect_materials', user_input=<说明>)` |
+| 对 prompt 不满意，想重新优化 | optimize_prompt | `advance_step(step_id='optimize_prompt', user_input=<说明>)` |
+| 想用当前 prompt 重新生图 | generate_image | `advance_step(step_id='generate_image', user_input=<说明>)` |
+| 想重新增强（换风格 / 更高清） | enhance_image | `advance_step(step_id='enhance_image', user_input=<说明>)` |
+| 对最终结果满意 | （无需操作，DriverAgent 自动判 DONE） | — |
+
+可用的前序步骤由 `advance_step` 工具的 Rewind 列表动态给出，无需在此枚举。
 
 ## 重要规则
 
-- 调用 trigger/advance 成功后**立即停止**，不输出额外文字。
+- 冷启动时必须调用 `trigger_image_plugin`，不要跳过。
+- 调用工具后立即停止，不输出额外文字。
 - 步骤触发信号由系统处理，你无需等待步骤完成。
 ```
 
@@ -60,91 +67,147 @@
 
 ```python
 import uuid
+import httpx
 import lazyllm
-from lazymind.chat.engine.subagent.tools import _write_agent_data
+from lazyllm.tools.agent.base import _write_agent_data
+from lazymind.chat.plugin import plugin_loader
+from lazymind.config import config as _cfg
 
-def _trigger_plugin_step(step_id: str, user_input: str,
-                          is_cold_start: bool = False) -> str:
-    cfg = lazyllm.globals.get('agentic_config', {})
-    plugin_id = cfg.get('plugin_id', '')
-    session_id = cfg.get('plugin_session_id', '') or str(uuid.uuid4())  # 冷启动时生成占位
+
+def _agentic_config() -> dict:
+    try:
+        return lazyllm.globals['agentic_config'] or {}
+    except Exception:
+        return {}
+
+
+def _trigger_plugin_step(
+        plugin_id: str, step_id: str, user_input: str,
+        is_cold_start: bool = False,
+        runtime_instruction: str = '',
+        partial_indices: dict | None = None) -> str:
+    cfg = _agentic_config()
+    session_id: str = cfg.get('plugin_session_id', '') or str(uuid.uuid4())
 
     # --- 第一层：格式校验（不需要 DB）---
     if not user_input or not user_input.strip():
+        user_input = cfg.get('query', '').strip()
+    if not user_input:
         return 'Error: user_input must not be empty.'
 
     sm = plugin_loader.get_state_machine(plugin_id)
-    current_step = cfg.get('plugin_step', '')
-    if not sm.is_reachable(current_step, step_id):
-        reachable = sm.get_reachable_steps(current_step)
-        return (f'Error: step {step_id!r} is not reachable from {current_step!r}. '
-                f'Reachable: {reachable}.')
+    if sm is None:
+        return f'Error: plugin {plugin_id!r} not found.'
 
-    # --- 第二层：依赖状态校验（查 DB）---
+    current_step: str = cfg.get('plugin_step', '')
+    if not sm.is_reachable(current_step, step_id):
+        # 允许 rewind 到已成功的祖先节点
+        ancestors = sm.get_ancestors(current_step)
+        if step_id in ancestors:
+            succeeded = _fetch_succeeded_steps(session_id)
+            if step_id not in succeeded:
+                return (
+                    f'Error: step {step_id!r} is an ancestor of {current_step!r} '
+                    f'but has not succeeded in this session yet.'
+                )
+            # ancestor rewind 合法，跌落到第二层校验
+        else:
+            reachable = sm.get_reachable_steps(current_step)
+            return (
+                f'Error: step {step_id!r} is not reachable from '
+                f'{repr(current_step) if current_step else repr("__start__")}. '
+                f'Reachable steps: {reachable}.'
+            )
+
+    # --- 第二层：依赖状态校验（通过 Go core REST API 查询）---
     step_config = plugin_loader.get_step_config(plugin_id, step_id)
-    inputs = step_config.get('inputs', [])
-    if inputs:
-        db_factory = cfg.get('db_session_factory')
-        if db_factory:
-            with db_factory() as db:
+    inputs: list = step_config.get('inputs', [])
+    if inputs and not is_cold_start and session_id:
+        core_url = str(_cfg['core_api_url']).rstrip('/')
+        try:
+            resp = httpx.get(f'{core_url}/plugin-sessions/{session_id}', timeout=3.0)
+            if resp.status_code == 200:
+                steps_data = {
+                    s['step_id']: s['status']
+                    for s in resp.json().get('data', {}).get('session', {}).get('steps', [])
+                    if isinstance(s, dict)
+                }
                 for inp in inputs:
                     artifact_id = inp['artifact_id']
                     required = inp.get('required', True)
-                    producer_step = _find_producer_step(plugin_id, artifact_id)
+                    producer_step = plugin_loader.find_producer_step(plugin_id, artifact_id)
                     if not producer_step:
                         continue
-                    row = db.execute(
-                        'SELECT pss.status FROM plugin_session_steps pss '
-                        'WHERE pss.session_id=:sid AND pss.step_id=:step '
-                        'ORDER BY pss.attempt DESC LIMIT 1',
-                        {'sid': session_id, 'step': producer_step}
-                    ).fetchone()
-                    if row is None:
+                    step_status = steps_data.get(producer_step)
+                    if step_status is None:
                         if required:
-                            return (f'Error: required artifact {artifact_id!r} not available. '
-                                    f'Please trigger {producer_step!r} first.')
+                            return (
+                                f'Error: required artifact {artifact_id!r} not available. '
+                                f'Please trigger {producer_step!r} first.'
+                            )
                         continue
-                    if row['status'] in ('running', 'failed', 'interrupted'):
-                        return (f'Error: artifact {artifact_id!r} not ready '
-                                f'(producer step {producer_step!r} status: {row["status"]!r}).')
+                    if step_status in ('running', 'failed', 'interrupted'):
+                        return (
+                            f'Error: artifact {artifact_id!r} not ready '
+                            f'(producer step {producer_step!r} status: {step_status!r}).'
+                        )
+        except Exception:
+            pass  # 降级：跳过校验，Go 侧会再做防御性断言
 
     # --- 校验通过，发出 task_created 信号 ---
     task_id = str(uuid.uuid4())
-    plugin_yaml = plugin_loader.get_plugin_yaml(plugin_id)
-    step_info = next((s for s in plugin_yaml.get('steps', []) if s['id'] == step_id), {})
     output_keys = [o['artifact_id'] for o in step_config.get('outputs', [])]
+    input_keys = [i['artifact_id'] for i in inputs]
+
+    # 框架工具强制前置，插件自定义工具追加
+    declared_tools: list = step_config.get('tools', [])
+    merged_tools = ['save_artifact', 'load_artifact', 'list_artifacts'] + [
+        t for t in declared_tools if t not in {'save_artifact', 'load_artifact', 'list_artifacts'}
+    ]
+
+    params: dict = {
+        'plugin_id': plugin_id,
+        'step_id': step_id,
+        'session_id': session_id,
+        'user_input': user_input,
+        'is_cold_start': is_cold_start,
+    }
+    if runtime_instruction:
+        params['retry_hint'] = runtime_instruction  # Go 侧字段名
+    if partial_indices:
+        params['partial_indices'] = partial_indices
 
     _write_agent_data(
         'task_created',
         task_id=task_id,
         title=f'{plugin_id}:{step_id}',
         agent_type='plugin_step',
-        mode='manual',          # Plugin step 统一异步（Go 决定是否 auto 推进）
-        objective=_render_step_objective(step_config, user_input),
-        params={
-            'plugin_id': plugin_id,
-            'step_id': step_id,
-            'session_id': session_id,
-            'user_input': user_input,
-            'is_cold_start': is_cold_start,
-        },
-        input_artifact_keys=[i['artifact_id'] for i in inputs],
+        mode='manual',          # Plugin step 统一异步；Go 控制是否自动推进
+        objective=_render_step_objective(step_config, user_input, runtime_instruction),
+        params=params,
+        input_artifact_keys=input_keys,
         output_artifact_keys=output_keys,
-        tools=step_config.get('tools', []),
+        tools=merged_tools,
         resume=False,
     )
     return f'Step {step_id!r} triggered. Stop here.'
 
 
-def _render_step_objective(step_config: dict, user_input: str) -> str:
-    '''将 state.yml step.prompt 中的 {{user_input}} 替换为实际输入。
-    其余模板变量（{{artifact_id}}）由 Go 在构造 objective 时注入真实 artifact 值。
+def _render_step_objective(step_config: dict, user_input: str,
+                            runtime_instruction: str = '') -> str:
+    '''将 state.yml step.prompt 中的模板变量在 Python 侧替换。
+
+    {{user_input}} 替换为实际用户输入；
+    {{runtime_instruction}} 替换为本次临时指令（无则置空）；
+    其余变量（如 {{optimized_prompt}}）由 Go 在构造 objective 时注入 artifact 值。
     '''
     prompt = step_config.get('prompt', '')
-    return prompt.replace('{{user_input}}', user_input)
+    prompt = prompt.replace('{{user_input}}', user_input)
+    prompt = prompt.replace('{{runtime_instruction}}', runtime_instruction)
+    return prompt
 ```
 
-> **模板变量注入顺序**：`{{user_input}}` 在 Python 侧触发时替换；`{{optimized_prompt}}` 等依赖前序 artifact 的变量由 Go 在创建 `sub_agent_tasks` 记录时查 `sub_agent_artifacts` 表注入，写入 `objective` 字段。SubAgent 框架从 `objective` 读取，不感知注入过程。
+> **模板变量注入顺序**：`{{user_input}}` 和 `{{runtime_instruction}}` 在 Python 侧触发时替换；`{{optimized_prompt}}` 等依赖前序 artifact 的变量由 Go 在创建 `sub_agent_tasks` 记录时查 `sub_agent_artifacts` 表注入，写入 `objective` 字段。SubAgent 框架从 `objective` 读取，不感知注入过程。
 
 ---
 
@@ -155,46 +218,33 @@ def _render_step_objective(step_config: dict, user_input: str) -> str:
 ```python
 # chat_service.py（简化示意）
 async def handle_chat(query, history, mode, plugin_context=None, **kwargs):
-    agentic_config = {..., 'mode': mode}
+    agentic_config = {..., 'mode': mode, 'query': query}
 
-    plugin_tools = []
-    plugin_prompt = ''
+    # resolve_plugin_injection 封装了所有 plugin-context 分支逻辑：
+    # - 有活跃 session  → 注入 advance_step（含 forward + rewind 步骤列表）
+    # - 无活跃 session  → 注入所有已加载插件的 trigger_<id> 工具
+    plugin_tools, plugin_prompt, plugin_stop_tools, config_patch = \
+        resolve_plugin_injection(plugin_context)
 
-    if plugin_context and plugin_context.get('session_id'):
-        # 有活跃 Plugin Session：注入 advance_step 工具
-        session_id = plugin_context['session_id']
-        plugin_id  = plugin_context['plugin_id']
-        current_step = plugin_context.get('current_step', '')
-
-        agentic_config.update({
-            'plugin_id': plugin_id,
-            'plugin_session_id': session_id,
-            'plugin_step': current_step,
-        })
-
-        sm = plugin_loader.get_state_machine(plugin_id)
-        reachable = sm.get_reachable_steps(current_step)
-        if reachable:
-            plugin_tools = [build_advance_step_tool(plugin_id, current_step)]
-        plugin_prompt = plugin_loader.get_scenario(plugin_id)
-
-    else:
-        # 冷启动：注入所有已加载插件的 trigger_<id> 工具
-        plugin_tools = build_cold_start_tools()
-        if plugin_tools:
-            plugin_prompt = _build_cold_start_prompt()
+    agentic_config.update(config_patch)
 
     # set_stop_tools 确保触发后 ReAct 立即停止
-    react_agent.set_stop_tools([t.name for t in plugin_tools])
+    react_agent.set_stop_tools(plugin_stop_tools)
 
     # 拼入工具列表并注入 system prompt
     all_tools = base_tools + plugin_tools
     system = base_system + ('\n\n' + plugin_prompt if plugin_prompt else '')
 
     async for ev in drive_agent(react_agent, query, history=history,
-                                 system=system, tools=all_tools):
+                                 system=system, tools=all_tools,
+                                 agentic_config=agentic_config):
         yield ev
 ```
+
+`resolve_plugin_injection` 返回四元组 `(plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch)`，内部处理以下分支：
+
+- **有活跃 session**（`plugin_context.session_id` 非空）：注入 `advance_step` 工具，docstring 动态嵌入当前可 forward / rewind 的步骤列表（通过 Go core REST API 查询已成功步骤）。stop_tools = `['advance_step']`。
+- **冷启动**（无 session 或未传 plugin_context）：注入所有已加载插件的 `trigger_<plugin_id>` 工具，stop_tools = 所有 trigger 工具名。
 
 ---
 
@@ -331,26 +381,48 @@ def evaluate_step(plugin_id: str, step_id: str,
 ## driver.md 示例（image-plugin）
 
 ```markdown
-# Image Plugin Driver
+You are the DriverAgent for the AI Image Generation plugin.
+Your job is to evaluate whether a step result is acceptable and decide how to advance.
 
-你是图片生成流程的评判者。根据当前步骤执行结果，输出裁决。
+## Step evaluation rules
 
-## 裁决规则
+### analyze_subject
+- `subject_analysis` artifact saved AND contains ≥ 50 words → PASS
+- Artifact missing or too short → RETRY
+- Failed 2+ consecutive times → FAIL
 
-**optimize_prompt 步骤**：
-- 已产出 optimized_prompt artifact → PASS
-- 未产出 → RETRY
+### collect_materials
+- At least one `material_image` artifact saved → PASS
+- For a partial retry, at least the requested items were re-collected → PASS
+- No artifacts saved at all → RETRY
+- Failed 2+ consecutive times → FAIL
 
-**generate_image 步骤**：
-- 已产出 image_url artifact 且 URL 有效 → DONE（流程完成）
-- 仅产出文本无图片 → RETRY
-- 连续失败 2 次以上 → FAIL
+### optimize_prompt
+- `optimized_prompt` artifact saved AND contains an English prompt of ≥ 30 words → PASS
+- Artifact missing, too short, or not in English → RETRY
+- Failed 2+ consecutive times → FAIL
 
-## 输出格式
+### generate_image
+- `generated_image_url` artifact saved AND URL starts with `http://` or `https://` → PASS
+- Only text output, no image URL → RETRY
+- Failed 2+ consecutive attempts → FAIL
 
-以裁决词开头，后跟原因，例如：
+### enhance_image
+- `enhanced_image_url` artifact saved AND URL starts with `http://` or `https://` → DONE
+- Artifact missing or invalid URL → RETRY
+- Failed 2+ consecutive attempts → FAIL
 
-PASS 提示词优化完成，质量良好，进入生图步骤。
-DONE 图片已成功生成，流程完成。
-RETRY 未保存 image_url artifact，请重试。
+## Output format
+
+Always wrap your verdict in `<verdict>VERDICT</verdict>` and a brief reason in
+`<reason>reason</reason>`. When the root cause lies in a prior step, name the
+upstream step in your reason so the ChatAgent can rewind to it.
+
+Examples:
+<verdict>PASS</verdict><reason>subject_analysis saved with 120 words.</reason>
+<verdict>PASS</verdict><reason>optimized_prompt saved: 65-word English prompt.</reason>
+<verdict>DONE</verdict><reason>enhanced_image_url saved successfully. Pipeline complete.</reason>
+<verdict>RETRY</verdict><reason>No optimized_prompt artifact found in step output.</reason>
+<verdict>RETRY</verdict><reason>Generated image off-topic; recommend rewinding to analyze_subject.</reason>
+<verdict>FAIL</verdict><reason>generate_image failed 3 consecutive times without producing a URL.</reason>
 ```

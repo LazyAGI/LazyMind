@@ -41,14 +41,17 @@
 
 ChatAgent 的 `create_subagent` 调用中 **`auto` 参数不再出现**——Plugin Step 统一走异步，mode 由 Go 侧提供的全局配置来决定。
 
-### 1.3 主 SSE vs Task SSE（直接复用 SubAgent 协议）
+### 1.3 三条 SSE 通道
 
 | 通道 | 内容 | 消费方 |
 | --- | --- | --- |
 | **主 SSE**（`POST /conversations:chat`） | ChatAgent 文本流 + `task_created` 通知 | 前端主消息框 |
 | **Task SSE**（`GET /tasks/{id}:stream`） | `task_start / progress / artifact / done / error` | 前端 Task Center |
+| **Conversation Events SSE**（`GET /conversations/{id}/events`） | `step_waiting / plugin_completed / plugin_error / auto_chat_started` | 前端 PluginPanel、auto 推进 |
 
-每个 Step 对应一个 `sub_agent_tasks` 记录，前端在 Task Center 中分组（按 Plugin Session）展示各步骤进度与产物。完全复用已有 Task SSE 协议，**无需新增事件类型**。
+前两条通道复用已有 SubAgent 协议。Conversation Events SSE 是常驻长连接，在会话建立时即订阅，与 chat stream 无关；Go 通过它向前端推送插件级别的状态变更事件，**这三类事件不会出现在主 SSE 里**。
+
+每个 Step 对应一个 `sub_agent_tasks` 记录，前端在 Task Center 中分组（按 Plugin Session）展示各步骤进度与产物。
 
 ### 1.4 设计原则：ChatAgent 不调用 StepAgent
 
@@ -192,36 +195,72 @@ plugin/plugins/<plugin-id>/
 
 ```yaml
 id: image-plugin
-name: AI 图片生成
-description: 帮助用户生成高质量图片，先优化提示词再生成图片
+name: AI Image Generation
+description: >
+  Generate and enhance high-quality images from natural language descriptions.
+  The workflow has five steps: analyze the subject, collect reference materials,
+  optimize the prompt, generate an image, and enhance the result.
 
-steps:
-  - id: optimize_prompt
-    label: 优化提示词
-  - id: generate_image
-    label: 生成图片
+when_to_use: >
+  Call this tool whenever the user wants to generate, draw, create, paint, or
+  produce an image or picture.
 
 tool_scripts:
-  - path: tools.py
-    functions: [dalle_generate]
+  - path: scripts/tools.py
+    functions:
+      - web_search_tool
+      - image_search_tool
+      - generate_image_tool
+
+steps:
+  - id: analyze_subject
+    label: Analyze Subject
+  - id: collect_materials
+    label: Collect Materials
+  - id: optimize_prompt
+    label: Optimize Prompt
+  - id: generate_image
+    label: Generate Image
+  - id: enhance_image
+    label: Enhance Image
 
 ui:
   tabs:
-    - id: result
-      label: 生成结果
+    - id: analysis
+      label: Analysis
       slots:
-        - id: preview_images
+        - id: subject_analysis
+          type: text
+          cardinality: single
+          artifact_key: subject_analysis
+
+    - id: materials
+      label: Materials
+      slots:
+        - id: material_images
           type: image
-          cardinality: list      # 追加模式，每次生成为列表中的一项
-          label: 生成图片
+          cardinality: list      # 追加模式，每次收集为列表中的一项
+          artifact_key: material_image
 
     - id: prompt
-      label: 提示词
+      label: Prompt
       slots:
-        - id: optimized_prompt
+        - id: prompt_used
           type: text
           cardinality: single    # 覆盖模式，selected 始终指向最新 revision
-          label: 优化后的提示词
+          artifact_key: optimized_prompt
+
+    - id: result
+      label: Result
+      slots:
+        - id: image_output
+          type: image
+          cardinality: single
+          artifact_key: generated_image_url
+        - id: enhanced_image_output
+          type: image
+          cardinality: list
+          artifact_key: enhanced_image_url
 ```
 
 `cardinality` 语义：
@@ -249,45 +288,105 @@ initial: __start__
 
 transitions:
   __start__:
+    - to: analyze_subject
+      condition: "冷启动，直接进入主体分析"
+  analyze_subject:
+    - to: collect_materials
+      condition: "主体分析完成，收集参考素材"
+    - to: analyze_subject
+      condition: "分析结果不满意，重新分析（全量重试）"
+  collect_materials:
     - to: optimize_prompt
-      condition: "冷启动，直接进入提示词优化"
+      condition: "素材收集完成，进入 prompt 优化"
+    - to: collect_materials
+      condition: "素材不满意，重新收集（全量重试）"
   optimize_prompt:
     - to: generate_image
       condition: "提示词优化完成，可进入生图"
     - to: optimize_prompt
       condition: "用户对提示词不满意，重新优化（全量重试）"
   generate_image:
-    - to: optimize_prompt
-      condition: "用户不满意图片，重新优化提示词"
+    - to: enhance_image
+      condition: "原始图片生成完成，进入增强步骤"
     - to: generate_image
       condition: "保持描述不变重新生图（全量重试）"
+    - to: optimize_prompt
+      condition: "用户不满意图片，重新优化提示词"
+  enhance_image:
     - to: __end__
       condition: "用户满意，流程完成"
+    - to: enhance_image
+      condition: "增强效果不满意，重新增强（全量重试）"
+    - to: generate_image
+      condition: "用户不满意增强结果，重新生图"
 
 steps:
+  analyze_subject:
+    prompt: |
+      用户想创建一张图片。用户描述：{{user_input}}
+      {{runtime_instruction}}
+      分析主体、风格、氛围，完成后调用 save_artifact('subject_analysis', text)。
+    outputs:
+      - artifact_id: subject_analysis
+        content_type: text
+        slot_id: subject_analysis
+
+  collect_materials:
+    prompt: |
+      主体分析结果：{{subject_analysis}}
+      {{runtime_instruction}}
+      为每个主体收集一张参考图，调用 save_artifact('material_image', url) 保存。
+    tools: [web_search_tool, image_search_tool]
+    inputs:
+      - artifact_id: subject_analysis
+        required: true
+    outputs:
+      - artifact_id: material_image
+        content_type: image
+        slot_id: material_images
+
   optimize_prompt:
     prompt: |
-      用户想生成一张图片。用户描述：{{user_input}}
+      主体分析：{{subject_analysis}}，参考素材：{{material_image}}
+      原始描述：{{user_input}}
       {{runtime_instruction}}
-      将描述优化为高质量英文图片生成 prompt，完成后调用 save_artifact('optimized_prompt', text)。
+      生成高质量英文图片 prompt，完成后调用 save_artifact('optimized_prompt', text)。
+    inputs:
+      - artifact_id: subject_analysis
+        required: true
+      - artifact_id: material_image
+        required: false
     outputs:
       - artifact_id: optimized_prompt
         content_type: text
-        slot_id: optimized_prompt
+        slot_id: prompt_used
 
   generate_image:
     prompt: |
       使用优化后的 prompt 生成图片：{{optimized_prompt}}
       {{runtime_instruction}}
-      调用 dalle_generate(prompt) 生成图片，完成后调用 save_artifact('image_url', url)。
-    tools: [dalle_generate]
+      调用 generate_image_tool(prompt) 生成图片，完成后调用 save_artifact('generated_image_url', url)。
+    tools: [generate_image_tool]
     inputs:
       - artifact_id: optimized_prompt
         required: true
     outputs:
-      - artifact_id: image_url
+      - artifact_id: generated_image_url
         content_type: image
-        slot_id: preview_images
+        slot_id: image_output
+
+  enhance_image:
+    prompt: |
+      对原始图片进行风格增强：{{generated_image_url}}
+      {{runtime_instruction}}
+      完成后调用 save_artifact('enhanced_image_url', url)。
+    inputs:
+      - artifact_id: generated_image_url
+        required: true
+    outputs:
+      - artifact_id: enhanced_image_url
+        content_type: image
+        slot_id: enhanced_image_output
 ```
 
 ### 3.3 scenario/scenario.md
@@ -333,14 +432,16 @@ Plugin Step 的 `task_created` 沿用 SubAgent 协议（见 SubAgent plan 3.1）
     "step_id": "optimize_prompt",
     "session_id": "ps-placeholder-uuid",
     "user_input": "...",
-    "is_cold_start": true
+    "is_cold_start": true,
+    "retry_hint": "..."
   },
   "input_artifact_keys": [],
   "output_artifact_keys": ["optimized_prompt"]
 }
 ```
 
-`session_id` 在冷启动时为占位符（Go 会分配真实 ID 并替换）；热路径时为已有 session ID。
+- `session_id` 在冷启动时为占位符（Go 会分配真实 ID 并替换）；热路径时为已有 session ID。
+- `retry_hint`：对应 `runtime_instruction`，仅在重试时存在，Go 侧以此字段名读取并注入 step objective。正常执行时不传此字段。
 
 ### 4.3 SubAgent 工具（Step 执行层）
 
@@ -383,13 +484,14 @@ Go 处理 `task_created`（`agent_type='plugin_step'`）时走 Plugin 专属路�
 
 **Artifact 写入 Slot**（`routeToTaskSSE` 的 `artifact` 分支新增逻辑）：
 
-当 SubAgent 产出 artifact 事件时，Go 检查该 artifact 的 `artifact_key` 是否在 `state.yml` 的 step outputs 中声明了 `slot_id`：
+当 SubAgent 产出 artifact 事件时，Go 调用 Python 的 `GET /api/plugin/slot-binding?plugin_id=...&artifact_key=...` 查询该 artifact 绑定的 `slot_id` 和 `cardinality`：
 
 ```
 artifact 事件到达
-  → 查 state.yml outputs[artifact_key].slot_id
+  → GET /api/plugin/slot-binding?plugin_id=<pid>&artifact_key=<key>
+      → Python 查 state.yml outputs[].slot_id + plugin.yaml ui.slots[].cardinality
+      → 返回 {slot_id, cardinality}
   → 有 slot_id：
-      → 查 plugin.yaml ui 找到 slot 定义（cardinality）
       → 从 artifact value 中读取 list_index 字段（可选）
       → cardinality=single：旧记录 selected=FALSE，插入新记录 selected=TRUE
       → cardinality=list，list_index=nil（无指定）：
@@ -403,19 +505,22 @@ artifact 事件到达
 
 `list_index` 由 SubAgent 通过 `save_artifact(key=..., list_index=N)` 写入 artifact value JSON。ChatAgent 在部分重试时通过 `runtime_instruction` 告知 SubAgent 需要覆盖哪些 index。
 
-Task SSE 的 `artifact` 事件结构不变，前端 Plugin Panel 通过订阅各 Step 对应的 Task SSE 获取 `artifact` 事件后，用 `artifact_key` 去匹配 `slot_id`，实时刷新对应 Slot 内容。
-
 **Step 完成后推进**（`routeToTaskSSE` 的 `done` 分支新增逻辑）：
 
 ```
 SubAgent done
   → 更新 sub_agent_tasks.status = 'succeeded'
   → 更新 plugin_session_steps.status = 'succeeded'
-  → auto：调 DriverAgent → 以 judgment 合成用户消息 → 调 ChatAgent（新一轮）
-  → manual：发 step_waiting 给前端 → 当轮 SSE 关闭
+  → auto：
+      1. 发 auto_chat_started 事件给前端（Conversation Events SSE）
+         前端收到后调 openResumeSSE 打开新一轮 chat stream
+      2. 调 DriverAgent（POST /api/plugin/driver）→ 解析 <verdict>
+      3. PASS/RETRY → 以 judgment 合成用户消息 → 调 ChatAgent（新一轮 /api/chat/stream）
+         新一轮 ChatAgent 响应（含新 task_created）通过 resume chat stream 推给前端
+      4. DONE → 发 plugin_completed 给前端（Conversation Events SSE）
+      5. FAIL → 更新 session status='failed'，发 plugin_error 给前端（Conversation Events SSE）
+  → manual：发 step_waiting 给前端（Conversation Events SSE），当轮 chat stream 已关闭
 ```
-
-**auto 推进的 ChatAgent 调用**与用户主动发消息的调用逻辑完全一致，Go 只是将 DriverAgent 评判作为 `role=user` 消息注入对话历史。
 
 ### 5.3 Go Plugin Session 状态机
 
@@ -431,20 +536,24 @@ ChatAgent 的 `_trigger_plugin_step` 已做主路径依赖校验，Go 侧的检�
 
 ### 5.4 DriverAgent
 
-`driver.md` 不存在时，禁止该插件使用 `auto` 模式。 即使用户配置auto，也忽略，不报错。
+`driver.md` 不存在时，禁止该插件使用 `auto` 模式。即使用户配置 auto，也忽略，不报错。
 
-DriverAgent 输出裁决词：
+DriverAgent 输出裁决，格式为 XML 标签：`<verdict>VERDICT</verdict><reason>...</reason>`。Go 通过正则解析 `<verdict>` 标签提取裁决词：
 
 | 裁决 | 含义 | Go 行为 |
 | --- | --- | --- |
 | `PASS` | 步骤通过，继续推进 | 合成「Step X completed, proceed.」→ ChatAgent |
 | `RETRY` | 步骤需重试 | 合成「Step X result unsatisfactory, retry.」→ ChatAgent |
-| `DONE` | 流程完成，无需继续 | 结束 auto loop，发 `plugin_completed` 给前端 |
-| `FAIL` | 无法恢复的失败 | 更新 session status='failed'，发 error 给前端 |
+| `DONE` | 流程完成，无需继续 | 结束 auto loop，发 `plugin_completed` 给前端（Conversation Events SSE） |
+| `FAIL` | 无法恢复的失败 | 更新 session status='failed'，发 error 给前端（Conversation Events SSE） |
 
-### 5.5 human 模式（advance=true 的恢复路径）
+Go 通过 HTTP POST `/api/plugin/driver` 调用 Python DriverAgent。
 
-前端 `advance=true` 时，Go 根据最后一个 step 状态决定行为：
+### 5.5 manual 模式（用户手动推进路径）
+
+Step 完成后 Go 通过 **Conversation Events SSE** 发 `step_waiting` 事件，前端 PluginPanel 显示「继续」/「重试」按钮。
+
+用户点击「继续」时，前端通过 **普通聊天消息通道**（`POST /conversations:chat`）发送消息（如「继续」），同时携带 `plugin_context`（含 `session_id` / `plugin_id` / `current_step_id`），Go 根据最后一个 step 状态决定行为：
 
 | 上次 step 状态 | Go 行为 |
 | --- | --- |
@@ -512,16 +621,19 @@ Plugin Panel 是对话视图中的一个独立区块，**始终挂载在当前�
 
 ```
 页面加载 / 会话切换
-  → GET /plugin-sessions/{session_id}/slots   （初始化全量 Slot 内容）
+  → GET /conversations/{id}/plugin-sessions:latest   （获取当前活跃 session）
+  → GET /plugin-sessions/{session_id}/slots           （初始化全量 Slot 内容）
+  → GET /plugins/{plugin_id}                          （获取 ui.tabs 结构用于渲染）
 
 运行时（Step 执行中）
-  → 前端已订阅各 Step 的 Task SSE（Task Center 现有逻辑）
-  → 监听 artifact 事件：根据 artifact_key 匹配 slot_id（从 plugin.yaml ui 声明中查找）
-  → 命中 slot_id 时，追加或覆盖对应 Slot 的展示内容
-  → selected 始终指向最新写入，无需额外处理
+  → PluginPanel 以 3 秒间隔轮询 GET /plugin-sessions/{session_id}/slots
+  → 订阅 Conversation Events SSE（/conversations/{id}/events）
+    → step_waiting：step 完成等待用户，刷新 session + slots，显示继续/重试按钮
+    → plugin_completed：整个插件完成，停止轮询，刷新最终 Slot 内容
+    → auto_chat_started：auto 模式新一轮推进开始，前端打开 resume chat stream
 ```
 
-前端无需订阅新的事件通道，**完全复用 Task SSE 的 `artifact` 事件**。
+前端不直接监听 Task SSE `artifact` 事件来刷新 Slot，**而是通过轮询 `/slots` 接口**获取最新 selected revision；Conversation Events SSE 用于接收插件级别的状态事件。
 
 ### 7.3 Panel 渲染模式
 
