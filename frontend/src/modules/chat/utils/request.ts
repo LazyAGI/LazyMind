@@ -122,12 +122,6 @@ export function PluginInfoApi() {
 // Plugin Session API.
 export function PluginSessionApi() {
   return {
-    getActiveSession(conversationId: string, options?: RawAxiosRequestConfig) {
-      return axiosInstance.get(
-        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/plugin-sessions:active`,
-        options,
-      );
-    },
     getLatestSession(conversationId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(
         `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/plugin-sessions:latest`,

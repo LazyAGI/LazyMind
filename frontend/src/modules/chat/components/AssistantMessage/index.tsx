@@ -201,11 +201,18 @@ const AssistantMessage = (props: any) => {
   });
 
   const [pluginPopoverOpen, setPluginPopoverOpen] = useState(false);
-  // sessionId prop may be "" when the page loads; fall back to any available session.
+  const loadActiveSession = usePluginStore((s) => s.loadActiveSession);
+  // Eagerly load the plugin session so the toolbar button appears without waiting for Popover mount.
+  useEffect(() => {
+    if (index === length - 1 && sessionId) {
+      loadActiveSession(sessionId);
+    }
+  }, [index, length, sessionId, loadActiveSession]);
+
   const pluginSession = usePluginStore((s) => {
     const byConv = s.sessionByConversation;
     if (sessionId && byConv[sessionId]) return byConv[sessionId];
-    // Pick any session that exists (there is at most one active per UI view)
+    // Fall back to any available session (at most one active per UI view).
     const sessions = Object.values(byConv).filter(Boolean);
     return sessions.length > 0 ? sessions[0] : null;
   });
@@ -627,6 +634,36 @@ const AssistantMessage = (props: any) => {
     );
   }
 
+  function renderPluginButton() {
+    if (!pluginSession) return null;
+    return (
+      <Popover
+        open={pluginPopoverOpen}
+        onOpenChange={setPluginPopoverOpen}
+        trigger="click"
+        placement="topLeft"
+        overlayStyle={{ width: 480 }}
+        overlayInnerStyle={{ padding: 0 }}
+        content={
+          <PluginPanel
+            conversationId={pluginConversationId}
+            onSendMessage={(text) => {
+              setPluginPopoverOpen(false);
+              props.sendMessage?.({ text });
+            }}
+          />
+        }
+      >
+        <Tooltip title="插件面板">
+          <Button
+            className="tool-btn"
+            icon={<AppstoreOutlined />}
+          />
+        </Tooltip>
+      </Popover>
+    );
+  }
+
   function renderAnswerFooter(answerIndex: number, showFullToolbar = false) {
     const answer = item.answers?.[answerIndex];
     if (!answer) {
@@ -660,32 +697,7 @@ const AssistantMessage = (props: any) => {
                 />
               </Tooltip>
             )}
-            {index === length - 1 && pluginSession && (
-              <Popover
-                open={pluginPopoverOpen}
-                onOpenChange={setPluginPopoverOpen}
-                trigger="click"
-                placement="topLeft"
-                overlayStyle={{ width: 480 }}
-                overlayInnerStyle={{ padding: 0 }}
-                content={
-                  <PluginPanel
-                    conversationId={pluginConversationId}
-                    onSendMessage={(text) => {
-                      setPluginPopoverOpen(false);
-                      props.sendMessage?.({ text });
-                    }}
-                  />
-                }
-              >
-                <Tooltip title="插件面板">
-                  <Button
-                    className="tool-btn"
-                    icon={<AppstoreOutlined />}
-                  />
-                </Tooltip>
-              </Popover>
-            )}
+            {index === length - 1 && renderPluginButton()}
           </div>
           {showFullToolbar && (
             <Flex>
@@ -757,6 +769,7 @@ const AssistantMessage = (props: any) => {
                 />
               </Tooltip>
             )}
+            {index === length - 1 && renderPluginButton()}
           </div>
           <Flex>
             {currentFeedback ===
