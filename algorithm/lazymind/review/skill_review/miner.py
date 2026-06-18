@@ -282,7 +282,7 @@ def _repair_skill_name(raw_name: str, *, fallback: str = 'skill') -> str:
 
 
 def _repair_candidate_skill_content(content: str, skill_name: str) -> str:
-    lines = content.lstrip('\ufeff').splitlines()
+    lines = content.lstrip('\ufeff').lstrip().splitlines()
     if not lines or lines[0].strip() != '---':
         raise ValueError('candidate content must start with YAML frontmatter')
 
