@@ -16,7 +16,6 @@ x-mirror-args: &mirror-args
   BASE_LAZYMIND_IMAGE: ${BASE_LAZYMIND_IMAGE:-base_code}
 
 x-trace-config: &trace-config
-  TZ: ${TZ:-Asia/Shanghai}
   LANGFUSE_HOST: ${LANGFUSE_HOST:-}
   LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-}
   LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
@@ -371,8 +370,8 @@ services:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-frontend:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
       args:
         <<: *mirror-args
     ports:
@@ -411,7 +410,6 @@ services:
       LAZYMIND_DOCUMENT_SERVICE_PORT: "8000"
       LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
       LAZYMIND_DOCUMENT_SERVICE_CALLBACK_URL: http://doc-server:8000/v1/internal/callbacks/tasks
-      LAZYMIND_OPENSEARCH_URI: ${LAZYMIND_OPENSEARCH_URI:-https://opensearch:9200}
       LAZYMIND_DOCUMENT_SERVICE_STORAGE_DIR: /var/lib/lazymind/uploads
       LAZYMIND_RESET_ALGO_ON_STARTUP: ${LAZYMIND_RESET_ALGO_ON_STARTUP:-false}
       LAZYMIND_RESET_ALL_ON_STARTUP: ${LAZYMIND_RESET_ALL_ON_STARTUP:-false}
@@ -542,7 +540,6 @@ services:
       - sqlite-data:/data/sqlite
     environment:
       LAZYMIND_DOCUMENT_PROCESSOR_PORT: "8000"
-      LAZYMIND_OPENSEARCH_URI: ${LAZYMIND_OPENSEARCH_URI:-https://opensearch:9200}
       <<: [*runtime-home, *db-conn, *upload-paths, *llm-api-keys, *ocr-env, *trace-config]
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
       LAZYLLM_EXPECTED_LOG_MODULES: "all"
@@ -586,7 +583,6 @@ services:
       LAZYMIND_DOCUMENT_WORKER_HIGH_PRIORITY_TASK_TYPES: ""
       LAZYMIND_DOCUMENT_WORKER_HIGH_PRIORITY_ONLY: "false"
       LAZYMIND_DOCUMENT_WORKER_POLL_MODE: direct
-      LAZYMIND_OPENSEARCH_URI: ${LAZYMIND_OPENSEARCH_URI:-https://opensearch:9200}
       <<: [*runtime-home, *db-conn, *upload-paths, *llm-api-keys, *ocr-env, *trace-config]
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
       LAZYLLM_EXPECTED_LOG_MODULES: "all"
@@ -640,7 +636,6 @@ services:
       LAZYLLM_ALGO_REGISTER_POLICY: ${LAZYLLM_ALGO_REGISTER_POLICY:-}
       LAZYMIND_USE_INNER_MODEL: "true"
       LAZYMIND_MILVUS_URI: ${LAZYMIND_MILVUS_URI:-http://milvus:19530}
-      LAZYMIND_OPENSEARCH_URI: ${LAZYMIND_OPENSEARCH_URI:-https://opensearch:9200}
       LAZYMIND_SEGMENT_STORE_TYPE: ${LAZYMIND_SEGMENT_STORE_TYPE:-opensearch}
       LAZYMIND_SEGMENT_STORE_URI_OR_PATH: ${LAZYMIND_SEGMENT_STORE_URI_OR_PATH:-https://opensearch:9200}
       LAZYMIND_SEGMENT_STORE_USER: ${LAZYMIND_SEGMENT_STORE_USER:-admin}
@@ -692,7 +687,6 @@ services:
       LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
       LAZYMIND_SEGMENT_STORE_TYPE: ${LAZYMIND_SEGMENT_STORE_TYPE:-opensearch}
       LAZYMIND_SEGMENT_STORE_URI_OR_PATH: ${LAZYMIND_SEGMENT_STORE_URI_OR_PATH:-https://opensearch:9200}
-      LAZYMIND_OPENSEARCH_URI: ${LAZYMIND_OPENSEARCH_URI:-https://opensearch:9200}
       LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
       LAZYMIND_MOUNT_BASE_DIR: /var/lib/lazymind/uploads
       LAZYMIND_AGENTIC_WORKSPACE: /tmp/.lazyllm_rag/agent_workspace
@@ -714,7 +708,7 @@ services:
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
       LAZYMIND_CORE_SERVICE_URL: http://core:8000
       LAZYMIND_WORD_GROUP_APPLY_URL: ""
-      LAZYMIND_ENABLE_ROUTER: ${LAZYMIND_ENABLE_ROUTER:-false}
+      LAZYMIND_ENABLE_ROUTER: ${LAZYMIND_ENABLE_ROUTER:-true}
       LAZYMIND_ROUTER_PORT_POOL_START: 18000
       LAZYMIND_ROUTER_PORT_POOL_END: 18999
       LAZYMIND_ROUTER_PORTS_PER_INSTANCE: 100
@@ -753,7 +747,7 @@ services:
       LAZYMIND_EVO_LLM_ROLE: evo_llm
       LAZYMIND_EVO_KB_BASE_URL: http://doc-server:8000
       LAZYMIND_EVO_CHUNK_BASE_URL: http://doc-server:8000
-      LAZYMIND_EVO_CORE_CHAT_URL: http://core:8000/conversations:chat
+      LAZYMIND_EVO_TARGET_CHAT_URL: http://chat:8046/api/chat/stream
       LAZYMIND_DOCUMENT_PROCESSOR_URL: http://processor-server:8000
       LAZYMIND_MILVUS_URI: ${LAZYMIND_MILVUS_URI:-http://milvus:19530}
       LAZYMIND_OPENSEARCH_URI: ${LAZYMIND_OPENSEARCH_URI:-https://opensearch:9200}
