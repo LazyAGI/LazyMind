@@ -41,8 +41,6 @@ x-core-env: &core-env
   ACL_DB_DRIVER: postgres
   ACL_DB_DSN: "host=db user=root password=123456 dbname=core port=5432 sslmode=disable TimeZone=UTC"
   LAZYMIND_REDIS_URL: redis://test:123456@redis:6379/0
-  LAZYMIND_STATE_BACKEND: ${LAZYMIND_STATE_BACKEND:-redis}
-  LAZYMIND_STATE_SQLITE_DIR: /data/sqlite
   LAZYMIND_UPLOAD_ROOT: /var/lib/lazymind/uploads
   LAZYMIND_UPLOAD_TEXT_UTF8_CONVERT_ENABLED: ${LAZYMIND_UPLOAD_TEXT_UTF8_CONVERT_ENABLED:-true}
   LAZYMIND_PUBLIC_BASE_URL: http://localhost:8000/api/core
@@ -176,8 +174,6 @@ services:
       LAZYMIND_SCAN_CONTROL_PLANE_FEISHU_BASE_URL: "https://open.feishu.cn"
       LAZYMIND_SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL: "http://auth-service:8000"
       LAZYMIND_REDIS_URL: ${LAZYMIND_SCAN_CONTROL_PLANE_REDIS_URL-redis://test:123456@redis:6379/0}
-      LAZYMIND_STATE_BACKEND: ${LAZYMIND_STATE_BACKEND:-redis}
-      LAZYMIND_STATE_SQLITE_PATH: /tmp/scan-control-plane/state/scan_state.db
       SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_STAGGER: ${SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_STAGGER:-10s}
       LAZYMIND_SCAN_CONTROL_PLANE_TEMP_DIR: "/tmp/scan-control-plane/sourceengine"
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
@@ -254,15 +250,12 @@ services:
         <<: *mirror-args
     volumes:
       - ./api/backend:/openapi-export
-      - sqlite-data:/data/sqlite
     expose:
       - "8000"
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     environment:
       LAZYMIND_DATABASE_URL: postgresql+psycopg://root:123456@db:5432/authservice
       LAZYMIND_REDIS_URL: redis://test:123456@redis:6379/0
-      LAZYMIND_STATE_BACKEND: ${LAZYMIND_STATE_BACKEND:-redis}
-      LAZYMIND_STATE_SQLITE_DIR: /data/sqlite
       LAZYMIND_JWT_SECRET: dev-secret-change-me
       LAZYMIND_JWT_TTL_MINUTES: "60"
       LAZYMIND_JWT_REFRESH_TTL_DAYS: "7"
@@ -321,7 +314,6 @@ services:
       - ./data/evo:/var/lib/lazymind/evo
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/subagent:/data/subagent
-      - sqlite-data:/data/sqlite
       - ./skills:/skills:ro
     expose:
       - "8000"
@@ -368,7 +360,6 @@ services:
     volumes:
       - ./backend/core:/app
       - ./data/core/uploads:/var/lib/lazymind/uploads
-      - sqlite-data:/data/sqlite
       - ./skills:/skills:ro
     environment:
       <<: *core-env
@@ -551,9 +542,6 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
-      - *lazyllm-src-mount
-      - *algorithm-src-mount
-      - sqlite-data:/data/sqlite
     environment:
       LAZYMIND_DOCUMENT_PROCESSOR_PORT: "8000"
       <<: [*runtime-home, *db-conn, *upload-paths, *llm-api-keys, *ocr-env, *trace-config]
@@ -590,9 +578,6 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
-      - *lazyllm-src-mount
-      - *algorithm-src-mount
-      - sqlite-data:/data/sqlite
     environment:
       LAZYMIND_DOCUMENT_WORKER_PORT: "8001"
       LAZYMIND_DOCUMENT_WORKER_NUM_WORKERS: "1"
@@ -638,9 +623,6 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
-      - *lazyllm-src-mount
-      - *algorithm-src-mount
-      - sqlite-data:/data/sqlite
     healthcheck:
       test: ['CMD-SHELL', 'python -m lazymind.parsing.service.healthcheck']
       interval: 15s
@@ -911,4 +893,3 @@ volumes:
   milvus-minio:
   milvus-data:
   opensearch-data:
-  sqlite-data:

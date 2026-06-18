@@ -159,7 +159,7 @@ make test-hermetic
 | External Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 | Enable store dashboards | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
 
-`LAZYMIND_STATE_BACKEND=sqlite` stores short-lived chat/auth/subagent state in SQLite. The Makefile applies the sqlite compose override and scales the Redis service to 0. Omit it, or set `LAZYMIND_STATE_BACKEND=redis`, to run the default Redis-backed stack where Redis is required.
+`LAZYMIND_STATE_BACKEND=sqlite` stores short-lived chat/auth/subagent state in SQLite. The Makefile applies the local compose override and scales the Redis service to 0. Omit it, or set `LAZYMIND_STATE_BACKEND=redis`, to run the default Redis-backed stack where Redis is required.
 
 ---
 
