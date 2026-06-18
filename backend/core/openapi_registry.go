@@ -407,7 +407,7 @@ type toolPathParams struct {
 	ToolName string `path:"tool_name"`
 }
 
-type keywordPageQueryParams struct {
+type toolListQueryParams struct {
 	Keyword  string `query:"keyword"`
 	Page     int32  `query:"page"`
 	PageSize int32  `query:"page_size"`
@@ -438,9 +438,9 @@ type toolGroupOpenAPIResponse struct {
 
 type toolListOpenAPIResponse struct {
 	ToolGroups []toolGroupOpenAPIResponse `json:"tool_groups"`
-	Total      int                        `json:"total"`
-	Page       int                        `json:"page"`
-	PageSize   int                        `json:"page_size"`
+	Page       int32                      `json:"page"`
+	PageSize   int32                      `json:"page_size"`
+	Total      int32                      `json:"total"`
 }
 
 type toolStateOpenAPIResponse struct {
@@ -459,23 +459,13 @@ type agentFileContentOpenAPIResponse struct {
 	FileSize int64  `json:"file_size"`
 }
 
-type agentThreadPathParams struct {
-	ThreadID string `path:"thread_id"`
-}
-
-type agentTracePathParams struct {
-	ThreadID string `path:"thread_id"`
-	TraceID  string `path:"trace_id"`
-}
-
-type agentTraceCompareQueryParams struct {
-	A string `query:"a" required:"true"`
-	B string `query:"b" required:"true"`
-}
-
 type agentThreadListQueryParams struct {
 	PageSize  int32  `query:"page_size"`
 	PageToken string `query:"page_token"`
+}
+
+type agentThreadPathParams struct {
+	ThreadID string `path:"thread_id"`
 }
 
 type agentThreadOpenAPIResponse struct {
@@ -534,29 +524,6 @@ type agentEvalReportBadCaseListOpenAPIResponse struct {
 	Items         []agentEvalReportBadCaseListItemOpenAPIResponse `json:"items"`
 	TotalSize     int                                             `json:"total_size"`
 	NextPageToken string                                          `json:"next_page_token"`
-}
-
-type agentTraceSummaryOpenAPIResponse struct {
-	Status         string   `json:"status"`
-	LatencyMS      *float64 `json:"latency_ms,omitempty"`
-	RoundCount     int      `json:"round_count"`
-	ToolCallCount  int      `json:"tool_call_count"`
-	RetrievalCount int      `json:"retrieval_count"`
-	RerankCount    int      `json:"rerank_count"`
-}
-
-type agentTraceDetailOpenAPIResponse struct {
-	TraceID     string                           `json:"trace_id"`
-	TraceStatus string                           `json:"trace_status"`
-	Query       string                           `json:"query"`
-	Summary     agentTraceSummaryOpenAPIResponse `json:"summary"`
-	Trace       map[string]any                   `json:"trace,omitempty"`
-}
-
-type agentTraceCompareOpenAPIResponse struct {
-	Query string                          `json:"query"`
-	A     agentTraceDetailOpenAPIResponse `json:"a"`
-	B     agentTraceDetailOpenAPIResponse `json:"b"`
 }
 
 type skillPathParams struct {
@@ -2230,7 +2197,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Path:        "/tools",
 			Summary:     "Tool list",
 			Tags:        []string{"tools"},
-			QueryParams: keywordPageQueryParams{},
+			QueryParams: toolListQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Tool list", toolListOpenAPIResponse{})},
 		},
 		{
@@ -2250,12 +2217,11 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:  map[int]openAPIResponse{200: resp("Tool enabled", toolStateOpenAPIResponse{})},
 		},
 		{
-			Method:      "GET",
-			Path:        "/mcp_servers",
-			Summary:     "List MCP servers",
-			Tags:        []string{"mcp_servers"},
-			QueryParams: keywordPageQueryParams{},
-			Responses:   map[int]openAPIResponse{200: resp("MCP server list", mcp.ListServersResponse{})},
+			Method:    "GET",
+			Path:      "/mcp_servers",
+			Summary:   "List MCP servers",
+			Tags:      []string{"mcp_servers"},
+			Responses: map[int]openAPIResponse{200: resp("MCP server list", mcp.ListServersResponse{})},
 		},
 		{
 			Method:      "POST",
@@ -2358,25 +2324,6 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  agentEvalReportBadCaseListPathParams{},
 			QueryParams: agentEvalReportBadCaseListQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Eval report bad case list", agentEvalReportBadCaseListOpenAPIResponse{})},
-		},
-		{
-			Method:      "GET",
-			Path:        "/agent/threads/{thread_id}/results/traces/{trace_id}",
-			Summary:     "Get agent trace detail",
-			Description: "Get one trace detail for a thread owned by the current user.",
-			Tags:        []string{"agent"},
-			PathParams:  agentTracePathParams{},
-			Responses:   map[int]openAPIResponse{200: resp("Agent trace detail", agentTraceDetailOpenAPIResponse{})},
-		},
-		{
-			Method:      "GET",
-			Path:        "/agent/threads/{thread_id}/results/traces-compare",
-			Summary:     "Compare agent traces",
-			Description: "Compare two trace details in a thread. Query parameters a and b are trace IDs.",
-			Tags:        []string{"agent"},
-			PathParams:  agentThreadPathParams{},
-			QueryParams: agentTraceCompareQueryParams{},
-			Responses:   map[int]openAPIResponse{200: resp("Agent trace comparison", agentTraceCompareOpenAPIResponse{})},
 		},
 		{
 			Method:      "POST",
