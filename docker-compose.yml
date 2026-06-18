@@ -175,7 +175,7 @@ services:
       LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT: *file-watcher-watch-host-dir
       LAZYMIND_SCAN_CONTROL_PLANE_FEISHU_BASE_URL: "https://open.feishu.cn"
       LAZYMIND_SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL: "http://auth-service:8000"
-      LAZYMIND_SCAN_CONTROL_PLANE_REDIS_URL: ${LAZYMIND_SCAN_CONTROL_PLANE_REDIS_URL:-}
+      LAZYMIND_REDIS_URL: ${LAZYMIND_SCAN_CONTROL_PLANE_REDIS_URL-redis://test:123456@redis:6379/0}
       LAZYMIND_STATE_BACKEND: ${LAZYMIND_STATE_BACKEND:-redis}
       LAZYMIND_STATE_SQLITE_PATH: /tmp/scan-control-plane/state/scan_state.db
       SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_STAGGER: ${SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_STAGGER:-10s}
@@ -233,8 +233,6 @@ services:
     restart: unless-stopped
 
   redis:
-    profiles:
-      - redis
     image: ${DOCKER_MIRROR:-docker.m.daocloud.io/library/}redis:7
     command: ["redis-server", "--appendonly", "yes", "--aclfile", "/usr/local/etc/redis/users.acl"]
     volumes:

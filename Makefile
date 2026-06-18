@@ -249,7 +249,6 @@ test-hermetic:
 
 # Only mineru has build:; paddleocr/milvus/opensearch use image: only, so only needed for up.
 _need_mineru := $(filter 1 true TRUE yes YES on ON,$(LAZYMIND_DEPLOY_MINERU))
-_need_redis := $(if $(filter sqlite,$(strip $(LAZYMIND_STATE_BACKEND))),,--profile redis)
 # _need_paddleocr := $(filter 1 true TRUE yes YES on ON,$(LAZYMIND_DEPLOY_PADDLEOCR))  # needs GPU
 # Deploy milvus/opensearch only when URI exactly matches the built-in services; external URIs = no deployment
 _builtin_milvus_uris := http://milvus:19530 http://milvus:19530/
@@ -262,9 +261,10 @@ _need_milvus_dashboard := $(and $(_need_milvus),$(_enable_milvus_dashboard))
 _need_opensearch_dashboard := $(and $(_need_opensearch),$(_enable_opensearch_dashboard))
 
 # Start/build profile flags are mode-aware. Cleanup profile flags are intentionally exhaustive.
-_COMPOSE_PROFILES := $(strip $(_need_redis) $(if $(_need_mineru),--profile mineru) $(if $(_need_milvus),--profile milvus) $(if $(_need_opensearch),--profile opensearch) $(if $(_need_milvus_dashboard),--profile milvus-dashboard) $(if $(_need_opensearch_dashboard),--profile opensearch-dashboard))
-_CLEANUP_COMPOSE_PROFILES := --profile redis --profile mineru --profile paddleocr --profile milvus --profile opensearch --profile milvus-dashboard --profile opensearch-dashboard --profile file-watcher-artifact
-_REMOVE_REDIS_IF_SQLITE = $(if $(filter sqlite,$(strip $(LAZYMIND_STATE_BACKEND))),$(_COMPOSE) --profile redis rm -sf redis >/dev/null 2>&1 || true,true)
+_COMPOSE_PROFILES := $(strip $(if $(_need_mineru),--profile mineru) $(if $(_need_milvus),--profile milvus) $(if $(_need_opensearch),--profile opensearch) $(if $(_need_milvus_dashboard),--profile milvus-dashboard) $(if $(_need_opensearch_dashboard),--profile opensearch-dashboard))
+_CLEANUP_COMPOSE_PROFILES := --profile mineru --profile paddleocr --profile milvus --profile opensearch --profile milvus-dashboard --profile opensearch-dashboard --profile file-watcher-artifact
+_REMOVE_REDIS_IF_SQLITE = $(if $(filter sqlite,$(strip $(LAZYMIND_STATE_BACKEND))),$(_COMPOSE) rm -sf redis >/dev/null 2>&1 || true,true)
+_COMPOSE_REDIS_SCALE := $(if $(filter sqlite,$(strip $(LAZYMIND_STATE_BACKEND))),--scale redis=0,)
 _COMPOSE_FILE_WATCHER_SCALE := $(if $(filter container,$(LAZYMIND_FILE_WATCHER_MODE)),,--scale file-watcher=0)
 
 # Only init submodules when not yet cloned; if already present (even with different commit), do nothing. Never recursive.
@@ -338,7 +338,7 @@ up:
 	fi
 	$(_SUBMODULE_INIT)
 	@$(_REMOVE_REDIS_IF_SQLITE)
-	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) -d \
+	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) $(_COMPOSE_REDIS_SCALE) -d \
 		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-run; \
@@ -362,7 +362,7 @@ up-build:
 	fi
 	$(_SUBMODULE_INIT)
 	@$(_REMOVE_REDIS_IF_SQLITE)
-	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) --build -d \
+	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) $(_COMPOSE_REDIS_SCALE) --build -d \
 		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-run; \
