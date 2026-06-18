@@ -200,14 +200,20 @@ def _repair_case_evidence(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _failure_analysis(plan: Mapping[str, Any], attempt: int, feedback: Mapping[str, Any], services: Any) -> dict[str, Any]:
+def _failure_analysis(
+    plan: Mapping[str, Any],
+    attempt: int,
+    feedback: Mapping[str, Any],
+    services: Any,
+) -> dict[str, Any]:
     prompt = (
         '你是 LazyRAG evo 修复复盘器。基于上一轮 mini-eval 反馈，输出下一轮必须修复和必须避免的要点。'
         '只输出 JSON，不要 markdown。字段: root_causes, must_fix_cases, regressed_cases, failed_strategies, '
         'next_patch_strategy, validation_focus。\n'
         f'Attempt: {attempt}\n'
         f'Previous feedback: {json.dumps(json_safe(dict(feedback)), ensure_ascii=False, sort_keys=True)}\n'
-        f'Evidence cases: {json.dumps(json_safe(list(plan.get("evidence_cases") or [])), ensure_ascii=False, sort_keys=True)}'
+        'Evidence cases: '
+        f'{json.dumps(json_safe(list(plan.get("evidence_cases") or [])), ensure_ascii=False, sort_keys=True)}'
     )
     raw = clip(services.llm_complete(prompt), 4000)
     try:

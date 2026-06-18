@@ -113,7 +113,9 @@ class ReconciliationScheduler:
                 raise
             materialized = tuple(
                 key
-                for key in sorted(set().union(*(self.graph.consumer_artifacts_of(key) for key in request.changed_artifacts)))
+                for key in sorted(
+                    set().union(*(self.graph.consumer_artifacts_of(key) for key in request.changed_artifacts))
+                )
                 if self._can_materialize(key)
             )
             if not materialized:
