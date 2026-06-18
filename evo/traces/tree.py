@@ -6,10 +6,10 @@ from typing import Any
 from lazyllm.tracing.datamodel.structured import ExecutionStep, StructuredTrace
 from lazyllm.tracing.semantics import SemanticType
 
-from evo.projections.traces.models import TraceNodeView, TraceView
-from evo.projections.traces.io import normalize_io, rerank_data, retriever_data
-from evo.projections.traces.tools import is_tool_node, tool_metadata
-from evo.projections.traces.values import drop_empty, parse_jsonish, pick
+from .models import TraceNodeView, TraceView
+from .io import normalize_io, rerank_data, retriever_data
+from .tools import is_tool_node, tool_metadata
+from .values import drop_empty, parse_jsonish, pick
 
 
 def build_trace_view(trace: StructuredTrace | None) -> TraceView | None:

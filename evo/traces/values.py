@@ -4,33 +4,14 @@ import ast
 import json
 from typing import Any
 
-from evo.projections.traces.models import TraceIOKind, TraceIOView
+from .models import TraceIOKind, TraceIOView
 
 
-_RAW_PROJECTION_EXCLUDED_KEYS = frozenset({
-    'uid',
-    'user_id',
-    'session_id',
-    'files',
-    'image_files',
-})
+_RAW_PROJECTION_EXCLUDED_KEYS = frozenset({'uid', 'user_id', 'session_id', 'files', 'image_files'})
 _RAW_PROJECTION_PARSE_STRING_KEYS = frozenset({'arguments', 'content'})
 _SUMMARY_KEYS = (
-    'value',
-    'query',
-    'expression',
-    'keyword',
-    'url',
-    'final_url',
-    'title',
-    'name',
-    'docid',
-    'document_id',
-    'node_id',
-    'target',
-    'content',
-    'description',
-    'text',
+    'value', 'query', 'expression', 'keyword', 'url', 'final_url', 'title', 'name',
+    'docid', 'document_id', 'node_id', 'target', 'content', 'description', 'text'
 )
 _ARGUMENT_SUMMARY_KEYS = ('query', 'expression', 'keyword', 'name', 'url', 'node_id', 'docid', 'target')
 _TOOL_RESULT_SUMMARY_KEYS = ('success', 'status', 'tool', 'expression', 'total')
@@ -94,9 +75,7 @@ def compact_display_value(value: Any) -> Any:
         return text_summary(parsed, limit=1000)
     if isinstance(parsed, (int, float, bool)) or parsed is None:
         return parsed
-    if isinstance(parsed, list):
-        return raw_projection(parsed, list_limit=8, dict_limit=8)
-    if isinstance(parsed, dict):
+    if isinstance(parsed, (list, dict)):
         return raw_projection(parsed, list_limit=8, dict_limit=8)
     return text_summary(str(parsed), limit=1000)
 

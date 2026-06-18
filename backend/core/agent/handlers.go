@@ -484,6 +484,7 @@ func GetThreadArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	proxyThreadGet(w, r, func(threadID string) string { return threadArtifactURL(threadID, artifactID) }, "fetch thread artifact failed")
+}
 func GetThreadResultTrace(w http.ResponseWriter, r *http.Request) {
 	threadID := strings.TrimSpace(mux.Vars(r)["thread_id"])
 	traceID := strings.TrimSpace(mux.Vars(r)["trace_id"])
