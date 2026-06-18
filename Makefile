@@ -135,7 +135,7 @@ export LAZYMIND_ENABLE_OPENSEARCH_DASHBOARD ?= $(LAZYMIND_ENABLE_STORE_DASHBOARD
 # Chat tuning
 export LAZYMIND_MAX_CONCURRENCY ?= 10
 export LAZYMIND_LLM_PRIORITY ?= 0
-export LAZYMIND_ENABLE_ROUTER ?= false
+export LAZYMIND_ENABLE_ROUTER ?= true
 
 # Tracing (set LAZYLLM_TRACE_ENABLED=0 to disable; requires LANGFUSE_* keys when enabled)
 export LAZYLLM_TRACE_ENABLED ?= 1
@@ -310,11 +310,6 @@ build:
 
 compose-host-permissions:
 	@echo "🔐 Ensuring compose bind mounts are readable by containers..."
-	@dir="$(CURDIR)"; \
-	while [ "$$dir" != "/" ] && [ "$$dir" != "$(HOME)" ]; do \
-		chmod a+x "$$dir" 2>/dev/null || true; \
-		dir="$$(dirname "$$dir")"; \
-	done
 	@chmod a+rx .
 	@for path in $(_COMPOSE_BIND_CRITICAL_READ_PATHS); do \
 		if [ -e "$$path" ]; then \
@@ -442,15 +437,12 @@ up-build:
 	fi
 
 up-build-local:
-	@$(MAKE) --no-print-directory compose-host-permissions
 	@if [ ! -x "$(PROCESS_COMPOSE_BIN)" ]; then \
 		mkdir -p "$(dir $(PROCESS_COMPOSE_BIN))"; \
 		GOBIN="$(CURDIR)/local/bin" $(GO) install "$(PROCESS_COMPOSE_PKG)"; \
 	fi
-	@$(MAKE) --no-print-directory compose-host-permissions
 	@mkdir -p "$(LAZYMIND_LOCAL_GOCACHE)"
 	@cd local/local-runtime-manager && GOCACHE="$(LAZYMIND_LOCAL_GOCACHE)" $(GO) build -buildvcs=false -o lazymind-local .
-	@$(MAKE) --no-print-directory compose-host-permissions
 	@"$(LAZYMIND_LOCAL_BIN)" up --profile "$(LAZYMIND_LOCAL_PROFILE)"
 
 clear:
