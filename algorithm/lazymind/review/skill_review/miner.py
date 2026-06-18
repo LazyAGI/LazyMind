@@ -310,10 +310,9 @@ def _repair_candidate_skill_content(content: str, skill_name: str) -> str:
 def _parse_frontmatter_lines(frontmatter_lines: list[str]) -> dict[str, str]:
     fields: dict[str, str] = {}
     for line in frontmatter_lines:
-        stripped = line.strip()
-        if not stripped or stripped.startswith('#') or ':' not in stripped:
+        if not line or line.startswith((' ', '\t', '#')) or ':' not in line:
             continue
-        key, value = stripped.split(':', 1)
+        key, value = line.split(':', 1)
         key = key.strip()
         if key:
             fields[key] = _strip_yaml_scalar(value.strip())
