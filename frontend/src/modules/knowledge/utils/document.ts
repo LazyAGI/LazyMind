@@ -11,9 +11,7 @@ export const IMAGE_DOCUMENT_FILE_TYPES = [
   "tif",
 ];
 
-export const DETAIL_UNSUPPORTED_FILE_TYPES = [
-  "mp3",
-];
+export const DETAIL_UNSUPPORTED_FILE_TYPES: string[] = [];
 
 export function isDocumentDetailUnsupported(fileName?: string) {
   const suffix = FileUtils.getSuffix(fileName || "");

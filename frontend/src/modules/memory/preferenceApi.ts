@@ -461,12 +461,7 @@ const normalizeManagedPreference = (item: ManagedStateItem): PreferenceAssetReco
     item.has_pending_review_suggestions,
     false,
   );
-  const reviewStatus = toStringValue(
-    item.review_status ||
-      item.suggestion_status ||
-      (hasPendingReviewSuggestions ? "pending" : ""),
-    "",
-  );
+  const reviewStatus = toStringValue(item.review_status, "none");
   const suggestionStatus = toStringValue(item.suggestion_status, "");
 
   if (!id && !title && !content) {

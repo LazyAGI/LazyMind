@@ -891,6 +891,25 @@ export async function listSkillAssets(
   return result.records;
 }
 
+export async function listSkillTags(): Promise<string[]> {
+  const response = await axiosInstance.get(`${coreBasePath}/skills/tags`);
+  const payload = unwrapEnvelope<unknown>(response.data);
+  const rawPayload = toRawObject(payload);
+  const rawEnvelope = toRawObject(response.data);
+  const tags = toStringArray(
+    Array.isArray(payload)
+      ? payload
+      : getFirstValue([rawPayload, rawEnvelope], [
+          "tags",
+          "list",
+          "items",
+          "records",
+        ]),
+  );
+
+  return [...new Set(tags)].sort((left, right) => left.localeCompare(right));
+}
+
 export async function listSkillAssetsPage(
   options: ListSkillOptions = {},
 ): Promise<SkillAssetListResult> {

@@ -62,6 +62,7 @@ import {
   listOutgoingSkillShares,
   listSkillShareTargets,
   listSkillAssetsPage,
+  listSkillTags,
   patchSkillAsset,
   previewSkillDraft,
   rejectSkillShare,
@@ -173,13 +174,14 @@ import {
   disableTool,
   discoverMcpServerTools,
   enableTool,
-  listMcpServers,
-  listToolAssets,
+  listMcpServersPage,
+  listToolAssetsPage,
   updateMcpServer,
   updateMcpServerTools,
   type McpServerAsset,
   type McpServerDraft,
   type McpToolAsset,
+  type ToolListOptions,
 } from "./toolApi";
 
 import "./index.scss";
@@ -196,7 +198,7 @@ const isReviewableSuggestionStatus = (status?: string) => {
   return normalized === "pending";
 };
 const isPendingReviewStatus = (status?: string) =>
-  ["pending", "padding"].includes(String(status || "").trim().toLowerCase());
+  String(status || "").trim().toLowerCase() === "pending";
 const isSkillRemoveSuggestion = (suggestion: EvolutionSuggestionRecord) =>
   String(suggestion.action || "").trim().toLowerCase() === "remove";
 const normalizeAutoEvoApplyStatus = (status?: string) =>
@@ -212,10 +214,7 @@ const getAutoEvoStatusMeta = (status?: string) => {
   return { color: "blue" as const, text: "等待进化建议" };
 };
 const hasDraftPreviewStatus = (record: ExperienceAsset) =>
-  Boolean(record.hasPendingReviewSuggestions) ||
-  isPendingReviewStatus(record.reviewStatus) ||
-  isReviewableSuggestionStatus(record.suggestionStatus) ||
-  Boolean(normalizeAutoEvoApplyStatus(record.autoEvoApplyStatus));
+  isPendingReviewStatus(record.reviewStatus);
 const hasSkillDraftPreviewStatus = (record: StructuredAsset) =>
   Boolean(record.hasPendingReviewResult) ||
   Boolean(record.hasPendingReviewSuggestions) ||
@@ -355,9 +354,13 @@ export default function MemoryManagement() {
   const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
   const [toolAssets, setToolAssets] = useState<StructuredAsset[]>([]);
   const [toolLoading, setToolLoading] = useState(false);
+  const [toolListTotal, setToolListTotal] = useState(0);
+  const toolListParamsRef = useRef<ToolListOptions>({});
   const [toolActionLoading, setToolActionLoading] = useState<Set<string>>(new Set());
   const [mcpServers, setMcpServers] = useState<McpServerAsset[]>([]);
   const [mcpLoading, setMcpLoading] = useState(false);
+  const [mcpListTotal, setMcpListTotal] = useState(0);
+  const mcpListParamsRef = useRef<ToolListOptions>({});
   const [mcpActionLoading, setMcpActionLoading] = useState<Set<string>>(new Set());
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
   const [mcpModalMode, setMcpModalMode] = useState<"add" | "edit">("add");
@@ -370,6 +373,9 @@ export default function MemoryManagement() {
   const [mcpForm] = Form.useForm<McpServerDraft>();
   const [skillAssets, setSkillAssets] = useState<StructuredAsset[]>(initialSkills);
   const [skillLoading, setSkillLoading] = useState(false);
+  const [skillTags, setSkillTags] = useState<string[]>([]);
+  const [skillTagsLoaded, setSkillTagsLoaded] = useState(false);
+  const [skillTagsLoading, setSkillTagsLoading] = useState(false);
   const [skillAutoEvoLoading, setSkillAutoEvoLoading] = useState<Set<string>>(new Set());
   const [builtinSkillEnableLoading, setBuiltinSkillEnableLoading] = useState<Set<string>>(new Set());
   const [skillsInitialized, setSkillsInitialized] = useState(false);
@@ -576,9 +582,13 @@ export default function MemoryManagement() {
   const availableCategories = [...new Set(currentStructuredItems.map((item) => item.category))]
     .filter(Boolean)
     .sort((left, right) => left.localeCompare(right));
-  const availableTags = [
+  const localAvailableTags = [
     ...new Set(currentStructuredItems.flatMap((item) => item.tags)),
   ].sort((left, right) => left.localeCompare(right));
+  const availableTags =
+    activeTab === "skills" && skillTagsLoaded
+      ? skillTags
+      : localAvailableTags;
 
   const shareableItems = useMemo(
     () => ({
@@ -833,12 +843,15 @@ export default function MemoryManagement() {
     }
   }, [category, skillKeyword, skillListPage, skillListPageSize, tag]);
 
-  const refreshToolAssets = useCallback(async () => {
+  const refreshToolAssets = useCallback(async (options: ToolListOptions = {}) => {
+    const requestOptions = { ...toolListParamsRef.current, ...options };
+    toolListParamsRef.current = requestOptions;
     setToolLoading(true);
 
     try {
-      const records = await listToolAssets();
-      setToolAssets(records);
+      const result = await listToolAssetsPage(requestOptions);
+      setToolAssets(result.records);
+      setToolListTotal(result.total);
     } catch (error) {
       console.error("Load tool assets failed:", error);
     } finally {
@@ -880,12 +893,15 @@ export default function MemoryManagement() {
     [refreshToolAssets, t],
   );
 
-  const refreshMcpServers = useCallback(async () => {
+  const refreshMcpServers = useCallback(async (options: ToolListOptions = {}) => {
+    const requestOptions = { ...mcpListParamsRef.current, ...options };
+    mcpListParamsRef.current = requestOptions;
     setMcpLoading(true);
 
     try {
-      const records = await listMcpServers();
-      setMcpServers(records);
+      const result = await listMcpServersPage(requestOptions);
+      setMcpServers(result.records);
+      setMcpListTotal(result.total);
     } catch (error) {
       console.error("Load MCP servers failed:", error);
       message.error(
@@ -921,7 +937,7 @@ export default function MemoryManagement() {
     setMcpEditingServer(null);
     mcpForm.setFieldsValue({
       apiKey: "",
-      enabled: true,
+      enabled: false,
       name: "",
       timeout: 30,
       transport: "sse",
@@ -936,7 +952,7 @@ export default function MemoryManagement() {
       setMcpEditingServer(server);
       mcpForm.setFieldsValue({
         apiKey: "",
-        enabled: server.enabled,
+        enabled: server.isVerified && server.enabled,
         name: server.name,
         timeout: server.timeout || 30,
         transport: normalizeMcpTransportValue(server.transport),
@@ -958,7 +974,10 @@ export default function MemoryManagement() {
     const values = await mcpForm.validateFields();
     const draft: McpServerDraft = {
       apiKey: String(values.apiKey || ""),
-      enabled: Boolean(values.enabled),
+      enabled:
+        mcpModalMode === "edit" && mcpEditingServer?.isVerified
+          ? Boolean(values.enabled)
+          : false,
       name: String(values.name || ""),
       timeout: Number(values.timeout) || 30,
       transport: normalizeMcpTransportValue(String(values.transport || "sse")),
@@ -1471,13 +1490,43 @@ export default function MemoryManagement() {
   ]);
 
   useEffect(() => {
-    if (routeMemoryTab !== "tools") {
-      return;
+    const shouldLoadSkillTags =
+      Boolean(skillRouteItemId) ||
+      reviewRouteTab === "skills" ||
+      routeMemoryTab === "skills";
+
+    if (!shouldLoadSkillTags) {
+      return undefined;
     }
 
-    void refreshToolAssets();
-    void refreshMcpServers();
-  }, [refreshMcpServers, refreshToolAssets, routeMemoryTab]);
+    let ignore = false;
+    setSkillTagsLoading(true);
+
+    void listSkillTags()
+      .then((tags) => {
+        if (ignore) {
+          return;
+        }
+        setSkillTags(tags);
+        setSkillTagsLoaded(true);
+      })
+      .catch((error) => {
+        if (ignore) {
+          return;
+        }
+        console.error("Load skill tags failed:", error);
+        setSkillTagsLoaded(false);
+      })
+      .finally(() => {
+        if (!ignore) {
+          setSkillTagsLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [reviewRouteTab, routeMemoryTab, skillRouteItemId]);
 
   useEffect(() => {
     const shouldRefreshExperience =
@@ -2316,7 +2365,7 @@ export default function MemoryManagement() {
 
   const keyword = query.trim().toLowerCase();
   const hasStructuredFilter = Boolean(keyword || category || tag);
-  const shouldFilterStructuredItemsLocally = activeTab !== "skills";
+  const shouldFilterStructuredItemsLocally = activeTab !== "skills" && activeTab !== "tools";
   const matchesStructuredFilter = useCallback(
     (item: StructuredAsset) => {
       if (!shouldFilterStructuredItemsLocally) {
@@ -2476,29 +2525,7 @@ export default function MemoryManagement() {
   const filteredStructuredItems = currentStructuredItems.filter((item) =>
     matchesStructuredFilter(item),
   );
-  const filteredMcpServers = useMemo(
-    () =>
-      mcpServers.filter((server) => {
-        if (!keyword) {
-          return true;
-        }
-
-        const searchableText = [
-          server.name,
-          server.url,
-          server.transport,
-          server.apiKeyPreview,
-          ...server.tools.flatMap((toolItem) => [
-            toolItem.name,
-            toolItem.description,
-          ]),
-        ]
-          .join(" ")
-          .toLowerCase();
-        return searchableText.includes(keyword);
-      }),
-    [keyword, mcpServers],
-  );
+  const filteredMcpServers = mcpServers;
 
   const filteredSkillTree = useMemo<SkillTreeNode[]>(() => {
     const skillMap = new Map(skillAssets.map((item) => [item.id, item]));
@@ -5586,18 +5613,30 @@ export default function MemoryManagement() {
       dataIndex: "enabled",
       key: "enabled",
       width: 120,
-      render: (_value, record) => (
-        <Switch
-          checked={record.enabled}
-          checkedChildren={t("admin.enable")}
-          loading={mcpActionLoading.has(getMcpActionKey("toggle", record.id))}
-          size="small"
-          unCheckedChildren={t("admin.disable")}
-          onChange={(checked) => {
-            void handleToggleMcpServer(record, checked);
-          }}
-        />
-      ),
+      render: (_value, record) => {
+        const enableDisabled = !record.isVerified && !record.enabled;
+        const switchNode = (
+          <Switch
+            checked={record.enabled}
+            checkedChildren={t("admin.enable")}
+            disabled={enableDisabled}
+            loading={mcpActionLoading.has(getMcpActionKey("toggle", record.id))}
+            size="small"
+            unCheckedChildren={t("admin.disable")}
+            onChange={(checked) => {
+              void handleToggleMcpServer(record, checked);
+            }}
+          />
+        );
+        if (!enableDisabled) {
+          return switchNode;
+        }
+        return (
+          <Tooltip title={t("admin.memoryMcpEnableRequiresVerified")}>
+            <span>{switchNode}</span>
+          </Tooltip>
+        );
+      },
     },
     {
       title: t("admin.memoryMcpTimeout"),
@@ -5798,9 +5837,7 @@ export default function MemoryManagement() {
       key: "title",
       width: 320,
       render: (_value, record) => {
-        const pendingProposal = getPendingProposal("experience", record.id);
-        const hasReviewableDraft = hasDraftPreviewStatus(record);
-        const showPendingTag = !record.autoEvo && (Boolean(pendingProposal) || hasReviewableDraft);
+        const showPendingTag = hasDraftPreviewStatus(record);
         const autoEvoStatusMeta = record.autoEvo
           ? getAutoEvoStatusMeta(record.autoEvoApplyStatus)
           : null;
@@ -6136,6 +6173,7 @@ export default function MemoryManagement() {
     availableGlossarySourceOptions,
     availableCategories,
     availableTags,
+    skillTagsLoading,
     selectedGlossaryAssets,
     handleBatchMergeGlossary,
     handleBatchDeleteGlossary,
@@ -6162,6 +6200,8 @@ export default function MemoryManagement() {
     filteredSkillTree,
     filteredStructuredItems,
     filteredMcpServers,
+    toolListTotal,
+    mcpListTotal,
     genericColumns,
     toolColumns,
     toolLoading,
@@ -6515,9 +6555,22 @@ export default function MemoryManagement() {
           <Form.Item
             label={t("admin.memoryMcpEnabled")}
             name="enabled"
+            tooltip={
+              mcpModalMode === "add" ||
+              (mcpModalMode === "edit" && !mcpEditingServer?.isVerified)
+                ? t("admin.memoryMcpEnableRequiresVerified")
+                : undefined
+            }
             valuePropName="checked"
           >
-            <Switch checkedChildren={t("common.enabled")} unCheckedChildren={t("common.disabled")} />
+            <Switch
+              checkedChildren={t("common.enabled")}
+              disabled={
+                mcpModalMode === "add" ||
+                (mcpModalMode === "edit" && !mcpEditingServer?.isVerified)
+              }
+              unCheckedChildren={t("common.disabled")}
+            />
           </Form.Item>
         </Form>
       </Drawer>

@@ -1,5 +1,6 @@
 import { Button, Space, message } from "antd";
 import { DownloadOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import * as XLSX from "xlsx";
 import { createTemplateRows } from "../utils/datasetImport";
 
@@ -14,20 +15,19 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-function downloadCsvTemplate() {
-  const rows = createTemplateRows();
+function downloadCsvTemplate(rows: ReturnType<typeof createTemplateRows>) {
   const sheet = XLSX.utils.json_to_sheet(rows);
   const csv = XLSX.utils.sheet_to_csv(sheet);
   downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), "dataset-template.csv");
 }
 
-function downloadJsonTemplate() {
-  const json = JSON.stringify(createTemplateRows(), null, 2);
+function downloadJsonTemplate(rows: ReturnType<typeof createTemplateRows>) {
+  const json = JSON.stringify(rows, null, 2);
   downloadBlob(new Blob([json], { type: "application/json" }), "dataset-template.json");
 }
 
-function downloadXlsxTemplate() {
-  const worksheet = XLSX.utils.json_to_sheet(createTemplateRows());
+function downloadXlsxTemplate(rows: ReturnType<typeof createTemplateRows>) {
+  const worksheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "dataset");
   const output = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
@@ -40,32 +40,45 @@ function downloadXlsxTemplate() {
 }
 
 export default function DatasetTemplateDownload() {
+  const { t } = useTranslation();
+  const templateRows = () =>
+    createTemplateRows({
+      question: t("datasetManagement.template.sampleQuestion"),
+      question_type: t("datasetManagement.template.sampleQuestionType"),
+      ground_truth: t("datasetManagement.template.sampleGroundTruth"),
+      key_points: t("datasetManagement.template.sampleKeyPoints"),
+      reference_context: t("datasetManagement.template.sampleReferenceContext"),
+      reference_doc: t("datasetManagement.template.sampleReferenceDoc"),
+      generate_reason: t("datasetManagement.template.sampleGenerateReason"),
+    });
+
   const handleDownload = (type: "xlsx" | "csv" | "json") => {
     try {
+      const rows = templateRows();
       if (type === "xlsx") {
-        downloadXlsxTemplate();
+        downloadXlsxTemplate(rows);
       } else if (type === "csv") {
-        downloadCsvTemplate();
+        downloadCsvTemplate(rows);
       } else {
-        downloadJsonTemplate();
+        downloadJsonTemplate(rows);
       }
-      message.success("模版已下载");
+      message.success(t("datasetManagement.template.downloaded"));
     } catch (error) {
       console.error("Failed to download dataset template:", error);
-      message.error("模版下载失败");
+      message.error(t("datasetManagement.template.downloadFailed"));
     }
   };
 
   return (
     <Space wrap>
       <Button icon={<DownloadOutlined />} onClick={() => handleDownload("xlsx")}>
-        下载 Excel 模版
+        {t("datasetManagement.template.downloadExcel")}
       </Button>
       <Button icon={<DownloadOutlined />} onClick={() => handleDownload("csv")}>
-        下载 CSV 模版
+        {t("datasetManagement.template.downloadCsv")}
       </Button>
       <Button icon={<DownloadOutlined />} onClick={() => handleDownload("json")}>
-        下载 JSON 模版
+        {t("datasetManagement.template.downloadJson")}
       </Button>
     </Space>
   );

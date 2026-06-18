@@ -459,10 +459,6 @@ type agentFileContentOpenAPIResponse struct {
 	FileSize int64  `json:"file_size"`
 }
 
-type agentThreadPathParams struct {
-	ThreadID string `path:"thread_id"`
-}
-
 type agentTracePathParams struct {
 	ThreadID string `path:"thread_id"`
 	TraceID  string `path:"trace_id"`
@@ -539,7 +535,7 @@ type agentEvalReportBadCaseListOpenAPIResponse struct {
 	TotalSize     int                                             `json:"total_size"`
 	NextPageToken string                                          `json:"next_page_token"`
 }
-	
+
 type agentTraceSummaryOpenAPIResponse struct {
 	Status         string   `json:"status"`
 	LatencyMS      *float64 `json:"latency_ms,omitempty"`
@@ -2345,7 +2341,6 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "GET",
-<<<<<<< HEAD
 			Path:        "/agent/threads/{thread_id}/results/eval-reports",
 			Summary:     "GET /agent/threads/{thread_id}/results/eval-reports",
 			Description: "Returns eval report artifact rows from Evo, with core-added report_id, bad_case_count, and trace_coverage when available. Existing report fields remain under data except bad_cases, which is served by the dedicated bad-case list endpoint.",
@@ -2362,7 +2357,9 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  agentEvalReportBadCaseListPathParams{},
 			QueryParams: agentEvalReportBadCaseListQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Eval report bad case list", agentEvalReportBadCaseListOpenAPIResponse{})},
-=======
+		},
+		{
+			Method:      "GET",
 			Path:        "/agent/threads/{thread_id}/results/traces/{trace_id}",
 			Summary:     "Get agent trace detail",
 			Description: "Get one trace detail for a thread owned by the current user.",
@@ -2379,7 +2376,6 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  agentThreadPathParams{},
 			QueryParams: agentTraceCompareQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Agent trace comparison", agentTraceCompareOpenAPIResponse{})},
->>>>>>> d794fdf (feat: add trace detail and abtest interface)
 		},
 		{
 			Method:      "POST",

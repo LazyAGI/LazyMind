@@ -89,7 +89,7 @@ class _WhisperMediaReader(LazyLLMReaderBase):
             transcript = result['text']
             metadata = {
                 'start_time': 0,
-                'end_time': float('inf'),
+                'end_time': -1,
                 'audio_file_path': str(metadata_audio_path),
                 'multimodal_type': 'video_audio_text',
             }
@@ -148,10 +148,11 @@ class _WhisperMediaReader(LazyLLMReaderBase):
 
 
 class VideoReader(LazyLLMReaderBase):
-    '''MP3: Whisper time-segment transcript. MP4: same plus interval frame extraction.
+    '''MP3: speech-to-text transcript. MP4: same plus interval frame extraction.
 
-    Without whisper (or if transcription fails), MP4 still yields frame image nodes;
-    MP3 yields no nodes.
+    When ``model_role`` is set, resolve it via ``AutoModel`` for transcription.
+    Otherwise fall back to local Whisper. Without either (or on failure), MP4 still
+    yields frame image nodes; MP3 yields no nodes.
     '''
 
     __lazyllm_registry_disable__ = True
@@ -160,6 +161,7 @@ class VideoReader(LazyLLMReaderBase):
         self,
         frame_interval: Optional[float] = None,
         model_version: Optional[str] = None,
+        model_role: Optional[str] = None,
         return_trace: bool = True,
         time_segment: bool = True,
         time_interval: Optional[int] = None,
@@ -169,13 +171,52 @@ class VideoReader(LazyLLMReaderBase):
         if interval <= 0:
             raise ValueError('`frame_interval` must be greater than 0.')
         self._frame_interval = interval
-        self._audio_reader = _WhisperMediaReader(
-            model_version=model_version,
-            return_trace=return_trace,
-            time_segment=time_segment,
-            time_interval=time_interval,
-        )
+        self._model_role = model_role
+        self._stt_model = None
+        self._audio_reader = None
+        if not model_role:
+            self._audio_reader = _WhisperMediaReader(
+                model_version=model_version,
+                return_trace=return_trace,
+                time_segment=time_segment,
+                time_interval=time_interval,
+            )
         self._image_reader = ImageEmbReader(return_trace=return_trace)
+
+    def _get_stt_model(self):
+        if self._stt_model is None and self._model_role:
+            from lazyllm import AutoModel
+            self._stt_model = AutoModel(model=self._model_role)
+        return self._stt_model
+
+    def _build_text_metadata(self, media_path: str, suffix: str) -> dict:
+        metadata = {
+            'start_time': 0,
+            'end_time': -1,
+            'audio_file_path': media_path,
+            'multimodal_type': 'video_audio_text',
+        }
+        if suffix == '.mp4':
+            metadata['video_file_path'] = media_path
+        return metadata
+
+    def _transcribe_text_nodes(
+        self, media_path: str, suffix: str, fs: Optional['fsspec.AbstractFileSystem'],
+    ) -> List[DocNode]:
+        stt_model = self._get_stt_model()
+        if stt_model is not None:
+            transcript = str(stt_model(media_path)).strip()
+            if not transcript:
+                return []
+            return [DocNode(text=transcript, metadata=self._build_text_metadata(media_path, suffix))]
+
+        try:
+            return self._audio_reader._load_data(Path(media_path), fs=fs)
+        except ImportError as exc:
+            LOG.warning(f'[VideoReader] audio transcription skipped (missing dependency): {exc}')
+        except Exception as exc:
+            LOG.warning(f'[VideoReader] audio transcription skipped: {exc}')
+        return []
 
     def _safe_name(self, value: str) -> str:
         normalized = ''.join(c if c.isalnum() or c in ('-', '_') else '_' for c in value.strip())
@@ -323,13 +364,7 @@ class VideoReader(LazyLLMReaderBase):
 
         video_path = os.path.abspath(str(file))
         suffix = file.suffix.lower()
-        text_nodes: List[DocNode] = []
-        try:
-            text_nodes = self._audio_reader._load_data(Path(video_path), fs=fs)
-        except ImportError as exc:
-            LOG.warning(f'[VideoReader] audio transcription skipped (missing dependency): {exc}')
-        except Exception as exc:
-            LOG.warning(f'[VideoReader] audio transcription skipped: {exc}')
+        text_nodes = self._transcribe_text_nodes(video_path, suffix, fs)
 
         if suffix == '.mp3':
             return list(text_nodes)

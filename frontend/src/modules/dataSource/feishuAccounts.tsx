@@ -942,7 +942,7 @@ export default function FeishuAccountPage() {
             icon={<FileTextOutlined />}
             onClick={() => navigate("/data-sources/docs/feishu-setup")}
           >
-            接入文档
+            {t("admin.dataSourceFeishuSetupGuideAction")}
           </Button>
           <Button
             type="primary"

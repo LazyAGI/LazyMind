@@ -30,7 +30,7 @@ export type SelfEvolutionCheckpointPrompt = {
   command: string;
 };
 
-export type SelfEvolutionWorkbenchTab = "artifacts" | "messages" | "processes";
+export type SelfEvolutionWorkbenchTab = "artifacts" | "history" | "messages" | "processes";
 
 export type SelfEvolutionStepStatus = "running" | "pending" | "done" | "paused" | "canceled" | "failed";
 

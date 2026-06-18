@@ -82,13 +82,15 @@ import {
 import {
   CLOUD_SYNC_POLL_INTERVAL_MS,
   CLOUD_SYNC_TIMEOUT_MS,
+  DATA_SOURCE_FILE_TYPE_OPTIONS,
+  DEFAULT_DATA_SOURCE_FILE_TYPES,
   FEISHU_DEFAULT_SCOPES,
   FEISHU_EXCLUDE_PATTERNS,
-  FEISHU_INCLUDE_PATTERNS,
   FEISHU_MAX_OBJECT_SIZE_BYTES,
   NOTION_APP_SETUP_STORAGE_KEY,
   type DataSourceItem,
   type DetailDocumentItem,
+  type DataSourceFileType,
   type FeishuAppSetup,
   type FeishuTargetType,
   type NotionTargetType,
@@ -288,10 +290,21 @@ const providerAuthOptions = sourceTypeOptions.filter(
   (item) => item.type === "feishu" || item.type === "notion",
 );
 
-const datasourceConnectors: Array<{ key: string; name: string; icon: ReactNode; logoUrl?: string }> = [
+const datasourceConnectors: Array<{
+  key: string;
+  providerName: string;
+  titleKey: string;
+  descriptionKey: string;
+  summaryKey: string;
+  icon: ReactNode;
+  logoUrl?: string;
+}> = [
   {
     key: "sciverse",
-    name: "Sciverse",
+    providerName: "Sciverse",
+    titleKey: "modelProvider.external.sciverseTitle",
+    descriptionKey: "modelProvider.external.sciverseDesc",
+    summaryKey: "modelProvider.external.sciverseSummary",
     icon: <SearchOutlined />,
     logoUrl: "https://www.google.com/s2/favicons?domain=sciverse.space&sz=96",
   },
@@ -491,6 +504,7 @@ function sleep(ms: number) {
 async function waitForCloudSyncRun(
   client: ScanV2Client,
   sourceId: string,
+  t: TFunction,
   runIds: string[] = [],
 ) {
   const deadline = Date.now() + CLOUD_SYNC_TIMEOUT_MS;
@@ -527,13 +541,16 @@ async function waitForCloudSyncRun(
       status.includes("ERROR") ||
       status.includes("CANCEL")
     ) {
-      throw new Error(getBindingLastError(errorBinding) || "飞书云同步失败，请检查绑定配置后重试。");
+      throw new Error(
+        getBindingLastError(errorBinding) ||
+          t("admin.dataSourceDetailCloudSyncFailedFallback"),
+      );
     }
 
     await sleep(CLOUD_SYNC_POLL_INTERVAL_MS);
   }
 
-  throw new Error("等待飞书目录同步超时，请稍后重试。");
+  throw new Error(t("admin.dataSourceDetailCloudSyncTimeout"));
 }
 
 function parseFeishuScheduleExpr(expr?: string) {
@@ -644,6 +661,105 @@ function normalizeCloudTargetRefs(value?: SourceFormValues["target"]) {
 function normalizeLocalPathRefs(value?: SourceFormValues["path"]) {
   const values = Array.isArray(value) ? value : value ? [value] : [];
   return values.map((item) => `${item || ""}`.trim()).filter(Boolean);
+}
+
+const LEGACY_DATA_SOURCE_FILE_TYPE_MAP: Record<string, DataSourceFileType[]> = {
+  word: ["doc", "docx"],
+  excel: ["xls", "xlsx", "csv"],
+  powerpoint: ["ppt", "pptx", "pptm"],
+  image: ["jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "tif"],
+  notebook: ["ipynb"],
+  ebook: ["epub"],
+  markdown: ["md"],
+  mailbox: ["mbox"],
+  audio: ["mp3"],
+  video: ["mp4"],
+  text: ["txt"],
+};
+
+function normalizeDataSourceFileTypes(value?: SourceFormValues["fileTypes"]) {
+  const allowedTypes = new Set(DATA_SOURCE_FILE_TYPE_OPTIONS.map((item) => item.value));
+  const values = Array.isArray(value) ? value : [];
+  const normalizedValues = Array.from(
+    new Set(
+      values
+        .flatMap((item) => {
+          const normalizedItem = `${item || ""}`.trim().toLowerCase();
+          return LEGACY_DATA_SOURCE_FILE_TYPE_MAP[normalizedItem] || normalizedItem;
+        })
+        .map((item) => item as DataSourceFileType)
+        .filter((item) => allowedTypes.has(item)),
+    ),
+  );
+  return normalizedValues.length > 0 ? normalizedValues : DEFAULT_DATA_SOURCE_FILE_TYPES;
+}
+
+function getDataSourceFileTypeExtensions(value?: SourceFormValues["fileTypes"]) {
+  const selectedTypes = new Set(normalizeDataSourceFileTypes(value));
+  return DATA_SOURCE_FILE_TYPE_OPTIONS
+    .filter((item) => selectedTypes.has(item.value))
+    .flatMap((item) => item.extensions);
+}
+
+function getDataSourceFileTypeIncludePatterns(value?: SourceFormValues["fileTypes"]) {
+  return getDataSourceFileTypeExtensions(value).map((extension) => `**/*.${extension}`);
+}
+
+function getExtensionsFromIncludePatterns(value: unknown) {
+  const patterns = Array.isArray(value) ? value : [];
+  return patterns
+    .map((pattern) => `${pattern || ""}`.trim().toLowerCase())
+    .map((pattern) => pattern.match(/\.([a-z0-9]+)$/)?.[1] || "")
+    .filter(Boolean);
+}
+
+function getBindingFileTypes(
+  binding?: ScanV2Binding | null,
+  fallbackTypes?: DataSourceFileType[],
+) {
+  const providerOptions = (binding?.provider_options || {}) as Record<string, unknown>;
+  const rawExtensions = [
+    ...((binding?.include_extensions || []) as string[]),
+    ...((providerOptions.include_extensions || []) as string[]),
+    ...getExtensionsFromIncludePatterns(providerOptions.include_patterns),
+  ];
+  const extensionSet = new Set(
+    rawExtensions.map((extension) => `${extension || ""}`.replace(/^\./, "").toLowerCase()),
+  );
+
+  if (extensionSet.size === 0) {
+    return fallbackTypes || DEFAULT_DATA_SOURCE_FILE_TYPES;
+  }
+
+  const fileTypes = DATA_SOURCE_FILE_TYPE_OPTIONS
+    .filter((item) => item.extensions.some((extension) => extensionSet.has(extension)))
+    .map((item) => item.value);
+  return fileTypes.length > 0 ? fileTypes : fallbackTypes || DEFAULT_DATA_SOURCE_FILE_TYPES;
+}
+
+function getDataSourceErrorMessage(error: unknown) {
+  const payload = (error as any)?.response?.data ?? error;
+  const detail = payload?.detail;
+
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => (typeof item === "string" ? item : item?.message || item?.msg))
+      .filter(Boolean);
+
+    if (messages.length > 0) {
+      return messages.join("；");
+    }
+  }
+
+  return `${payload?.message || (error as any)?.message || ""}`.trim();
+}
+
+function isKnowledgeBaseNameDuplicatedError(error: unknown) {
+  const payload = (error as any)?.response?.data ?? error;
+  const errorCode = `${payload?.code || payload?.error_code || payload?.errorCode || ""}`.trim();
+  const rawMessage = getDataSourceErrorMessage(error).toLowerCase();
+
+  return errorCode === "2001102" || rawMessage === "dataset name already exists";
 }
 
 function hasFeishuTargetTypes(targetTypes?: Record<string, unknown>) {
@@ -800,17 +916,17 @@ function buildFeishuNextSyncLabel(binding: ScanV2Binding | null, t: TFunction) {
   });
 }
 
-function mapScanSyncDetail(updateState: FileUpdateState) {
+function mapScanSyncDetail(updateState: FileUpdateState, t: TFunction) {
   if (updateState === "new") {
-    return "新文件待入库";
+    return t("admin.dataSourceFileUpdateNewDetail");
   }
   if (updateState === "changed") {
-    return "内容变化待重解析";
+    return t("admin.dataSourceFileUpdateChangedDetail");
   }
   if (updateState === "deleted") {
-    return "源端删除待清理";
+    return t("admin.dataSourceFileUpdateDeletedDetail");
   }
-  return "当前文件已是最新";
+  return t("admin.dataSourceFileUpdateUnchangedDetail");
 }
 
 function pickScanAgent(agents: ScanV2AgentHint[], preferredAgentId?: string) {
@@ -1050,7 +1166,7 @@ export default function DataSourceManagement() {
       options.push({
         key: normalizedPath,
         value: normalizedPath,
-        title: `使用当前输入：${normalizedPath}`,
+        title: t("admin.dataSourceUseCurrentInput", { value: normalizedPath }),
         isLeaf: true,
       });
     }
@@ -1178,7 +1294,9 @@ export default function DataSourceManagement() {
         ),
       ];
       const nextNodes =
-        nodes.length > 0 ? nodes : buildManualLocalPathOptions("", "未获取到可选目录");
+        nodes.length > 0
+          ? nodes
+          : buildManualLocalPathOptions("", t("admin.dataSourceNoLocalDirectories"));
       localPathOptionsCacheRef.current.set(cacheKey, nextNodes);
       localPathActiveOptionsCacheKeyRef.current = cacheKey;
       setLocalPathOptions(nextNodes);
@@ -1190,8 +1308,11 @@ export default function DataSourceManagement() {
         buildManualLocalPathOptions(
           normalizedPath,
           agentId
-            ? getLocalizedErrorMessage(error, "目录列表获取失败，可先手动输入路径")
-            : "后端未返回可用扫描 Agent，暂时只能手动输入路径",
+            ? getLocalizedErrorMessage(
+              error,
+              t("admin.dataSourceLocalDirectoryListFailedManual"),
+            )
+            : t("admin.dataSourceNoScanAgentManual"),
         ),
       );
     } finally {
@@ -1375,7 +1496,7 @@ export default function DataSourceManagement() {
 
     if (!authConnectionId) {
       setFeishuTargetTreeData([
-        buildFeishuHelperNode("请先完成飞书授权，再联机选择空间或文件夹"),
+        buildFeishuHelperNode(t("admin.dataSourceFeishuAuthorizeFirstBrowse")),
       ]);
       setFeishuTargetLoading(false);
       return;
@@ -1433,7 +1554,9 @@ export default function DataSourceManagement() {
 
       const nodes = mapFeishuTargetNodes(response.data.items || []);
       const nextNodes =
-        nodes.length > 0 ? nodes : [buildFeishuHelperNode("未获取到可选飞书目标")];
+        nodes.length > 0
+          ? nodes
+          : [buildFeishuHelperNode(t("admin.dataSourceNoFeishuTargets"))];
       feishuTargetOptionsCacheRef.current.set(cacheKey, nextNodes);
       setFeishuTargetTreeData(nextNodes);
     } catch (error) {
@@ -1442,8 +1565,10 @@ export default function DataSourceManagement() {
       }
       setFeishuTargetTreeData([
         buildFeishuHelperNode(
-          getLocalizedErrorMessage(error, "飞书目录列表获取失败，可先手动输入目标 ID") ||
-            "飞书目录列表获取失败，可先手动输入目标 ID",
+          getLocalizedErrorMessage(
+            error,
+            t("admin.dataSourceFeishuDirectoryListFailedManual"),
+          ) || t("admin.dataSourceFeishuDirectoryListFailedManual"),
         ),
       ]);
     } finally {
@@ -1583,6 +1708,10 @@ export default function DataSourceManagement() {
     if (localScanChatSaving) {
       return;
     }
+    if (!canCreateLocalSource) {
+      message.error(t("admin.dataSourceAdminOnly"));
+      return;
+    }
 
     const localSources = sources.filter((item) => item.type === "local");
     const localSourcesWithDataset = localSources.filter((item) => item.datasetId);
@@ -1659,6 +1788,7 @@ export default function DataSourceManagement() {
     const deleteCount = summary?.deleted_count ?? fallback?.deleteCount ?? 0;
     const changeCount = summary?.modified_count ?? fallback?.changeCount ?? 0;
     const storageUsed = resolveStorageUsed(summary, fallback?.storageUsed);
+    const fileTypes = getBindingFileTypes(binding, fallback?.fileTypes);
 
     if (isFeishuSource) {
       const bindingTargetTypes = getFeishuBindingTargetTypes(bindings);
@@ -1688,6 +1818,7 @@ export default function DataSourceManagement() {
         enabled: Boolean(binding?.enabled ?? true),
         scopeMode: "all",
         selectedFiles: [],
+        fileTypes,
         fileCandidates,
         logs: [
           {
@@ -1826,6 +1957,7 @@ export default function DataSourceManagement() {
       enabled: sourceStatus === "active",
       scopeMode: "all",
       selectedFiles: [],
+      fileTypes,
       fileCandidates,
       logs: [
         {
@@ -2184,7 +2316,10 @@ export default function DataSourceManagement() {
       setConnectionVerified(Boolean(draft.connectionVerified));
       setOauthConnection(draft.oauthConnection || null);
       window.setTimeout(() => {
-        form.setFieldsValue(draft.formValues);
+        form.setFieldsValue({
+          fileTypes: DEFAULT_DATA_SOURCE_FILE_TYPES,
+          ...draft.formValues,
+        });
       }, 0);
     }
 
@@ -2395,6 +2530,7 @@ export default function DataSourceManagement() {
           : record.type === "notion"
             ? record.targetType || "page"
             : undefined,
+      fileTypes: normalizeDataSourceFileTypes(record.fileTypes),
       bucket:
         record.type === "s3"
           ? record.target.replace("s3://", "").split("/")[0]
@@ -2439,6 +2575,7 @@ export default function DataSourceManagement() {
           : type === "notion"
             ? "page"
             : undefined,
+      fileTypes: DEFAULT_DATA_SOURCE_FILE_TYPES,
     });
   };
 
@@ -2825,7 +2962,7 @@ export default function DataSourceManagement() {
     try {
       const response = await dataSourceModelProvidersApi.apiCoreModelProvidersGet({
         category: "datasource",
-        keyword: connector.name,
+        keyword: connector.providerName,
       });
       const providers = unwrapDataSourceApiData<{
         providers?: Array<{
@@ -2836,7 +2973,9 @@ export default function DataSourceManagement() {
         }>;
       }>(response.data).providers || [];
       const provider = providers.find(
-        (item) => normalizeProviderName(item.name) === normalizeProviderName(connector.name)
+        (item) =>
+          normalizeProviderName(item.name) ===
+          normalizeProviderName(connector.providerName),
       );
       if (!provider) {
         message.error(t("modelProvider.external.loadFailed"));
@@ -2844,10 +2983,10 @@ export default function DataSourceManagement() {
       }
       setActiveExternalService({
         key: provider.id,
-        name: provider.name || connector.name,
-        description:
-          provider.description ||
-          t("modelProvider.external.sciverseDesc", { defaultValue: "Sciverse 面向科研场景提供论文搜索、元数据检索和文献内容读取能力。" }),
+        name: provider.name || t(connector.titleKey),
+        description: t(connector.descriptionKey, {
+          defaultValue: provider.description || "",
+        }),
         fields: ["apiKey"],
         logo: connector.icon,
         logoUrl: connector.logoUrl || "",
@@ -2904,66 +3043,6 @@ export default function DataSourceManagement() {
     navigate("/data-sources/docs/feishu-setup?from=create-source");
   };
 
-  const handleTestConnection = async () => {
-    if (selectedType !== "local") {
-      setConnectionVerified(true);
-      message.success(t("admin.dataSourceConnectionTestSuccess"));
-      return;
-    }
-
-    try {
-      await form.validateFields(["path"]);
-      const { path = "" } = form.getFieldsValue(["path"]);
-      const normalizedPaths = normalizeLocalPathRefs(path);
-
-      if (normalizedPaths.length === 0) {
-        message.warning(t("admin.dataSourceAccessPathRequired"));
-        return;
-      }
-
-      const preferredAgentId =
-        validatedAgentId ||
-        (editingId
-          ? sources.find((item) => item.id === editingId)?.agentId
-          : undefined);
-      const selectedAgent = pickScanAgent(scanAgents, preferredAgentId);
-      const validateResponses = await Promise.all(
-        normalizedPaths.map((normalizedPath) =>
-          createScanV2ApiClient().validateBindingTarget({
-            validateBindingTargetRequest: {
-              connector_type: "local_fs",
-              target_type: "local_path",
-              target_ref: normalizedPath,
-              agent_id: selectedAgent?.agent_id || preferredAgentId || undefined,
-            },
-          }),
-        ),
-      );
-      const passed = validateResponses.every((response) => {
-        const validation = response.data;
-        return (
-          Boolean(validation.target_ref) &&
-          Boolean(validation.target_fingerprint || validation.root_object_key)
-        );
-      });
-
-      setConnectionVerified(passed);
-      if (passed) {
-        setValidatedAgentId(selectedAgent?.agent_id || preferredAgentId || null);
-        message.success(t("admin.dataSourceConnectionTestSuccess"));
-        return;
-      }
-
-      message.error("路径校验未通过，请检查目录是否存在且具备只读权限。");
-    } catch (error) {
-      setConnectionVerified(false);
-      message.error(
-        getLocalizedErrorMessage(error, t("common.requestFailed")) ||
-          t("common.requestFailed"),
-      );
-    }
-  };
-
   const handleSubmitManualOauthCallback = async () => {
     const parsed = parseFeishuOAuthCallbackInput(manualOauthCallbackValue);
     if (!parsed) {
@@ -3006,7 +3085,7 @@ export default function DataSourceManagement() {
         size: item.size,
         tags: [],
         updateState: item.updateState,
-        syncDetail: mapScanSyncDetail(item.updateState),
+        syncDetail: mapScanSyncDetail(item.updateState, t),
         parseStatus: item.updateState === "deleted" ? "deleted" : "parsed",
         sourceUpdatedAt: record.lastSync,
         updatedAt: record.lastSync,
@@ -3119,6 +3198,16 @@ export default function DataSourceManagement() {
     }
   };
 
+  const markKnowledgeBaseNameDuplicated = () => {
+    form.setFields([
+      {
+        name: "knowledgeBase",
+        errors: [t("admin.dataSourceKnowledgeBaseNameDuplicated")],
+      },
+    ]);
+    form.scrollToField("knowledgeBase", { block: "center" });
+  };
+
   const handleSaveLocalSource = async (
     values: SourceFormValues,
     saveMode: DataSourceSaveMode,
@@ -3129,6 +3218,8 @@ export default function DataSourceManagement() {
     const schedulePolicy = isScheduled
       ? buildSchedulePolicy(values.scheduleWeekdays, values.scheduleTime)
       : undefined;
+    const includeExtensions = getDataSourceFileTypeExtensions(values.fileTypes);
+    const includePatterns = getDataSourceFileTypeIncludePatterns(values.fileTypes);
     const currentLocalSource =
       editingId && selectedType === "local"
         ? sources.find((item) => item.id === editingId && item.type === "local")
@@ -3152,7 +3243,10 @@ export default function DataSourceManagement() {
       sync_mode: isScheduled ? "scheduled" : "manual",
       schedule_policy: schedulePolicy,
       agent_id: selectedAgent?.agent_id || validatedAgentId || currentLocalSource?.agentId,
-      provider_options: {},
+      include_extensions: includeExtensions,
+      provider_options: {
+        include_patterns: includePatterns,
+      },
     });
 
     try {
@@ -3211,6 +3305,11 @@ export default function DataSourceManagement() {
       );
       handleCloseWizard();
     } catch (error) {
+      if (isKnowledgeBaseNameDuplicatedError(error)) {
+        markKnowledgeBaseNameDuplicated();
+        return;
+      }
+
       message.error(
         getLocalizedErrorMessage(error, t("common.requestFailed")) ||
           t("common.requestFailed"),
@@ -3267,13 +3366,17 @@ export default function DataSourceManagement() {
         values.syncMode === "scheduled"
           ? buildSchedulePolicy(values.scheduleWeekdays, values.scheduleTime)
           : undefined;
+      const includeExtensions = getDataSourceFileTypeExtensions(values.fileTypes);
+      const includePatterns = getDataSourceFileTypeIncludePatterns(values.fileTypes);
       const bindingRequest = {
         connector_type: "feishu",
         sync_mode: values.syncMode === "scheduled" ? "scheduled" : "manual",
         schedule_policy: schedulePolicy,
         auth_connection_id: authConnectionId,
+        include_extensions: includeExtensions,
         provider_options: {
-          include_patterns: FEISHU_INCLUDE_PATTERNS,
+          include_extensions: includeExtensions,
+          include_patterns: includePatterns,
           exclude_patterns: FEISHU_EXCLUDE_PATTERNS,
           max_object_size_bytes: FEISHU_MAX_OBJECT_SIZE_BYTES,
           reconcile_after_sync: true,
@@ -3322,7 +3425,7 @@ export default function DataSourceManagement() {
       }
 
       if (!sourceId) {
-        message.error("数据源创建成功但未返回 source id，无法继续配置飞书绑定。");
+        message.error(t("admin.dataSourceCreateMissingSourceId"));
         return;
       }
 
@@ -3336,7 +3439,7 @@ export default function DataSourceManagement() {
             scope_ref: {},
           },
         });
-        await waitForCloudSyncRun(client, sourceId, triggerResponse.data.run_ids || []);
+        await waitForCloudSyncRun(client, sourceId, t, triggerResponse.data.run_ids || []);
       }
 
       setValidatedAgentId(selectedAgent?.agent_id || validatedAgentId);
@@ -3346,6 +3449,11 @@ export default function DataSourceManagement() {
       );
       handleCloseWizard();
     } catch (error) {
+      if (isKnowledgeBaseNameDuplicatedError(error)) {
+        markKnowledgeBaseNameDuplicated();
+        return;
+      }
+
       message.error(
         getLocalizedErrorMessage(error, t("common.requestFailed")) ||
           t("common.requestFailed"),
@@ -3454,20 +3562,15 @@ export default function DataSourceManagement() {
 
       if (saveMode === "createAndSync") {
         message.info(t("admin.dataSourceDetailCloudSyncPreparing"));
-        const latestSource = await client.getSource({ sourceId }).catch(() => null);
-        const latestBinding = getFirstScanBinding(
-          latestSource?.data.bindings as ScanV2Binding[] | undefined,
-        );
         const triggerResponse = await client.triggerSourceSync({
           sourceId,
           triggerSourceSyncRequest: {
             request_id: createScanRequestId("notion-sync"),
-            binding_id: getScanBindingId(latestBinding) || currentNotionSource?.bindingId,
             scope_type: "full",
             scope_ref: {},
           },
         });
-        await waitForCloudSyncRun(client, sourceId, triggerResponse.data.run_ids?.[0]);
+        await waitForCloudSyncRun(client, sourceId, t, triggerResponse.data.run_ids || []);
       }
 
       setValidatedAgentId(selectedAgent?.agent_id || validatedAgentId);
@@ -3494,8 +3597,8 @@ export default function DataSourceManagement() {
     try {
       const syncStrategyFields =
         form.getFieldValue("syncMode") === "scheduled"
-          ? ["syncMode", "scheduleWeekdays", "scheduleTime"]
-          : ["syncMode"];
+          ? ["syncMode", "scheduleWeekdays", "scheduleTime", "fileTypes"]
+          : ["syncMode", "fileTypes"];
 
       if (wizardMode === "edit") {
         await form.validateFields(syncStrategyFields);
@@ -3761,49 +3864,51 @@ export default function DataSourceManagement() {
               </div>
             </div>
             <div className="data-source-provider-grid">
-              <div className="data-source-local-scan-card">
-                <span className="data-source-provider-logo data-source-icon-local">
-                  <FolderOpenOutlined />
-                </span>
-                <span className="data-source-provider-card-copy">
-                  <span className="data-source-provider-title-row">
-                    <span className="data-source-provider-name">
-                      {t("admin.dataSourceLocalScanChatTitle")}
+              {canCreateLocalSource ? (
+                <div className="data-source-local-scan-card">
+                  <span className="data-source-provider-logo data-source-icon-local">
+                    <FolderOpenOutlined />
+                  </span>
+                  <span className="data-source-provider-card-copy">
+                    <span className="data-source-provider-title-row">
+                      <span className="data-source-provider-name">
+                        {t("admin.dataSourceLocalScanChatTitle")}
+                      </span>
+                    </span>
+                    <span className="data-source-provider-desc">
+                      {t("admin.dataSourceLocalScanChatDesc", {
+                        count: localSourceCount,
+                      })}
                     </span>
                   </span>
-                  <span className="data-source-provider-desc">
-                    {t("admin.dataSourceLocalScanChatDesc", {
-                      count: localSourceCount,
-                    })}
-                  </span>
-                </span>
-                <Tooltip
-                  title={
-                    t("admin.dataSourceLocalScanChatSwitchHint")
-                  }
-                >
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={localScanChatEnabled}
-                    aria-label={t("admin.dataSourceLocalScanChatSwitchAria")}
-                    disabled={localScanChatSaving}
-                    className={`data-source-chat-switch${localScanChatEnabled ? " is-on" : ""}${
-                      localScanChatSaving ? " is-disabled" : ""
-                    }`}
-                    onClick={() => {
-                      void handleToggleLocalScanChat(!localScanChatEnabled);
-                    }}
+                  <Tooltip
+                    title={
+                      t("admin.dataSourceLocalScanChatSwitchHint")
+                    }
                   >
-                    <span className="data-source-chat-switch-thumb" aria-hidden="true" />
-                    <span className="data-source-chat-switch-label">
-                      {localScanChatEnabled
-                        ? t("admin.dataSourceLocalScanChatSwitchEnabledStatus")
-                        : t("admin.dataSourceLocalScanChatSwitchDisabledStatus")}
-                    </span>
-                  </button>
-                </Tooltip>
-              </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={localScanChatEnabled}
+                      aria-label={t("admin.dataSourceLocalScanChatSwitchAria")}
+                      disabled={localScanChatSaving}
+                      className={`data-source-chat-switch${localScanChatEnabled ? " is-on" : ""}${
+                        localScanChatSaving ? " is-disabled" : ""
+                      }`}
+                      onClick={() => {
+                        void handleToggleLocalScanChat(!localScanChatEnabled);
+                      }}
+                    >
+                      <span className="data-source-chat-switch-thumb" aria-hidden="true" />
+                      <span className="data-source-chat-switch-label">
+                        {localScanChatEnabled
+                          ? t("admin.dataSourceLocalScanChatSwitchEnabledStatus")
+                          : t("admin.dataSourceLocalScanChatSwitchDisabledStatus")}
+                      </span>
+                    </button>
+                  </Tooltip>
+                </div>
+              ) : null}
               {providerAuthOptions.map((item) => {
                 const isFeishu = item.type === "feishu";
                 const isAuthValid = isFeishu ? isFeishuAuthValid : isNotionAuthValid;
@@ -3921,10 +4026,10 @@ export default function DataSourceManagement() {
                   </span>
                   <span className="data-source-provider-card-copy">
                     <span className="data-source-provider-title-row">
-                      <span className="data-source-provider-name">{connector.name}</span>
+                      <span className="data-source-provider-name">{t(connector.titleKey)}</span>
                     </span>
                     <span className="data-source-provider-desc">
-                      Sciverse 面向科研场景的论文搜索与文献内容读取能力
+                      {t(connector.summaryKey)}
                     </span>
                   </span>
                   <span className="data-source-provider-card-arrow" aria-hidden="true">

@@ -11,8 +11,8 @@ from lazyllm.tracing.consume.reconstruction.extractors.utils import parse_jsonis
 from lazyllm.tracing.datamodel.structured import ExecutionStep, RawData, StructuredTrace, TraceMetadata
 from lazyllm.tracing.semantics import SemanticType
 
-from evo.traces.models import TraceCompareView, TraceDetailView, TraceSummaryView
-from evo.traces.tree import build_trace_view
+from .models import TraceCompareView, TraceDetailView, TraceSummaryView
+from .tree import build_trace_view
 
 
 TraceArtifactLoader = Callable[[str], Any]

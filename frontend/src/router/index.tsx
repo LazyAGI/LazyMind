@@ -35,7 +35,7 @@ import ModelProviderPage from "@/modules/modelProvider";
 import ModelProvidersPage from "@/modules/modelProvider/pages/ModelProvidersPage";
 import ExternalServicesPage from "@/modules/modelProvider/pages/ExternalServicesPage";
 import DefaultServicesPage from "@/modules/modelProvider/pages/DefaultServicesPage";
-import { SelfEvolutionHomePage, SelfEvolutionDetailPage } from "@/modules/selfEvolution";
+import { SelfEvolutionHomePage, SelfEvolutionDetailPage, SelfEvolutionObservationPage } from "@/modules/selfEvolution";
 import { getAntdLocale } from "@/i18n/antdLocale";
 
 export default function AppRouter() {
@@ -115,7 +115,9 @@ export default function AppRouter() {
             />
           </Route>
           <Route path="self-evolution" element={<SelfEvolutionHomePage />} />
+          <Route path="self-evolution/detail/:threadId/observation/:kind" element={<SelfEvolutionObservationPage />} />
           <Route path="self-evolution/detail/:threadId" element={<SelfEvolutionDetailPage />} />
+          <Route path="self-evolution/:threadId/observation/:kind" element={<SelfEvolutionObservationPage />} />
           <Route path="self-evolution/:threadId" element={<SelfEvolutionDetailPage />} />
         </Route>
         <Route path="/admin" element={<AdminLayout />}>

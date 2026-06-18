@@ -62,6 +62,7 @@ export default function MemoryManagementListPage() {
     availableGlossarySourceOptions,
     availableCategories,
     availableTags,
+    skillTagsLoading,
     selectedGlossaryAssets,
     glossaryAssets,
     glossaryLoading,
@@ -92,11 +93,15 @@ export default function MemoryManagementListPage() {
     filteredSkillTree,
     filteredStructuredItems,
     filteredMcpServers,
+    toolListTotal,
+    mcpListTotal,
     genericColumns,
     toolColumns,
     toolLoading,
+    refreshToolAssets,
     mcpColumns,
     mcpLoading,
+    refreshMcpServers,
     openMcpCreateModal,
   } = useMemoryManagementOutletContext();
 
@@ -108,17 +113,15 @@ export default function MemoryManagementListPage() {
       return skillListTotal;
     }
     if (activeTab === "tools") {
-      return toolView === "mcp"
-        ? filteredMcpServers.length
-        : filteredStructuredItems.length;
+      return toolView === "mcp" ? mcpListTotal : toolListTotal;
     }
     return 0;
   }, [
     activeTab,
     filteredExperienceItems.length,
-    filteredMcpServers.length,
     skillListTotal,
-    filteredStructuredItems.length,
+    mcpListTotal,
+    toolListTotal,
     toolView,
   ]);
 
@@ -129,6 +132,23 @@ export default function MemoryManagementListPage() {
     }
     setCurrentPage(1);
   }, [activeTab, category, query, setSkillListPage, tag, toolView]);
+
+  useEffect(() => {
+    if (activeTab !== "tools") {
+      return;
+    }
+
+    const options = { keyword: query, page: currentPage, pageSize };
+    void refreshToolAssets(options);
+    void refreshMcpServers(options);
+  }, [
+    activeTab,
+    currentPage,
+    pageSize,
+    query,
+    refreshMcpServers,
+    refreshToolAssets,
+  ]);
 
   const activePage = activeTab === "skills" ? skillListPage : currentPage;
   const activePageSize = activeTab === "skills" ? skillListPageSize : pageSize;
@@ -327,10 +347,10 @@ export default function MemoryManagementListPage() {
             <span>
               {toolView === "mcp"
                 ? t("admin.memoryMcpServerCount", {
-                    count: filteredMcpServers.length,
+                    count: mcpListTotal,
                   })
                 : t("admin.memoryBuiltinToolCount", {
-                    count: filteredStructuredItems.length,
+                    count: toolListTotal,
                   })}
             </span>
           </div>
@@ -394,6 +414,7 @@ export default function MemoryManagementListPage() {
                 allowClear
                 value={tag}
                 placeholder={t("admin.memoryAllTags")}
+                loading={skillTagsLoading}
                 options={availableTags.map((item: string) => ({
                   label: item,
                   value: item,

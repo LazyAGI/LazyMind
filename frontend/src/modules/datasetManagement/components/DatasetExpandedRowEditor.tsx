@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { Button, Form, Input, Space, Typography } from "antd";
+import { useTranslation } from "react-i18next";
 import type { DatasetItem, DatasetItemFormValues } from "../shared";
-import { sourceLabelMap } from "../shared";
+import { sourceLabelI18nKeys } from "../shared";
 import { joinListField } from "../utils/datasetValidation";
 import QuestionTypeSelect from "./QuestionTypeSelect";
 
@@ -46,6 +47,7 @@ export default function DatasetExpandedRowEditor({
   onSave,
   onCancel,
 }: DatasetExpandedRowEditorProps) {
+  const { t } = useTranslation();
   const [form] = Form.useForm<DatasetItemFormValues>();
 
   useEffect(() => {
@@ -74,59 +76,78 @@ export default function DatasetExpandedRowEditor({
         <div className="dataset-editor-grid">
           <Form.Item
             name="question"
-            label="问题"
-            rules={[{ required: true, whitespace: true, message: "问题不能为空" }]}
+            label={t("datasetManagement.fields.question")}
+            rules={[{
+              required: true,
+              whitespace: true,
+              message: t("datasetManagement.validation.questionRequired"),
+            }]}
           >
-            <Input placeholder="请输入问题" />
+            <Input placeholder={t("datasetManagement.detail.placeholders.question")} />
           </Form.Item>
           <Form.Item
             name="question_type"
-            label="问题类型"
-            rules={[{ required: true, message: "问题类型不能为空" }]}
+            label={t("datasetManagement.fields.questionType")}
+            rules={[{
+              required: true,
+              message: t("datasetManagement.validation.questionTypeRequired"),
+            }]}
           >
-            <QuestionTypeSelect placeholder="请选择问题类型" />
+            <QuestionTypeSelect placeholder={t("datasetManagement.detail.placeholders.questionType")} />
           </Form.Item>
         </div>
 
         <Form.Item
           name="ground_truth"
-          label="标准答案"
-          rules={[{ required: true, whitespace: true, message: "标准答案不能为空" }]}
+          label={t("datasetManagement.fields.groundTruth")}
+          rules={[{
+            required: true,
+            whitespace: true,
+            message: t("datasetManagement.validation.groundTruthRequired"),
+          }]}
         >
-          <TextArea rows={4} placeholder="请输入标准答案" />
+          <TextArea rows={4} placeholder={t("datasetManagement.detail.placeholders.groundTruth")} />
         </Form.Item>
 
-        <Form.Item name="key_points" label="答案要点">
-          <TextArea rows={3} placeholder="请输入答案要点" />
+        <Form.Item name="key_points" label={t("datasetManagement.fields.keyPoints")}>
+          <TextArea rows={3} placeholder={t("datasetManagement.detail.placeholders.keyPoints")} />
         </Form.Item>
 
-        <Form.Item name="reference_context" label="参考上下文">
-          <TextArea rows={4} placeholder="请输入参考上下文" />
+        <Form.Item name="reference_context" label={t("datasetManagement.fields.referenceContext")}>
+          <TextArea rows={4} placeholder={t("datasetManagement.detail.placeholders.referenceContext")} />
         </Form.Item>
 
         <div className="dataset-editor-grid dataset-editor-grid-single">
-          <Form.Item name="reference_doc" label="参考文档">
-            <Input placeholder="请输入参考文档" />
+          <Form.Item name="reference_doc" label={t("datasetManagement.fields.referenceDoc")}>
+            <Input placeholder={t("datasetManagement.detail.placeholders.referenceDoc")} />
           </Form.Item>
         </div>
 
-        <Form.Item name="generate_reason" label="生成依据">
-          <TextArea rows={3} placeholder="请输入生成依据" />
+        <Form.Item name="generate_reason" label={t("datasetManagement.fields.generateReason")}>
+          <TextArea rows={3} placeholder={t("datasetManagement.fields.generateReason")} />
         </Form.Item>
 
         <div className="dataset-editor-footer">
           <Space size="middle" wrap>
             <Text type="secondary">
-              数据来源：{item?.source ? sourceLabelMap[item.source] : isNew ? "手动" : "-"}
+              {t("datasetManagement.editor.dataSource")}:
+              {" "}
+              {item?.source
+                ? t(sourceLabelI18nKeys[item.source])
+                : isNew
+                  ? t(sourceLabelI18nKeys.manual)
+                  : "-"}
             </Text>
             {item?.source_session_id ? (
-              <Text type="secondary">来源会话：{item.source_session_id}</Text>
+              <Text type="secondary">
+                {t("datasetManagement.editor.sourceSession")}: {item.source_session_id}
+              </Text>
             ) : null}
           </Space>
           <Space>
-            <Button onClick={onCancel}>取消</Button>
+            <Button onClick={onCancel}>{t("common.cancel")}</Button>
             <Button type="primary" loading={saving} onClick={handleSave}>
-              保存
+              {t("common.save")}
             </Button>
           </Space>
         </div>

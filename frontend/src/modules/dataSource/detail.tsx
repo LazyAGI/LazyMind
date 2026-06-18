@@ -69,6 +69,8 @@ import {
 const { Text } = Typography;
 
 const SCAN_TREE_PAGE_SIZE = 50;
+const DETAIL_STATUS_POLL_INTERVAL_MS = 3000;
+const DETAIL_SEARCH_DEBOUNCE_MS = 300;
 
 type SyncTreeDataNode = DataNode & {
   treeKey?: string;
@@ -299,17 +301,20 @@ function getDocumentType(name: string) {
   return extension.toLowerCase();
 }
 
-function mapScanSyncDetail(updateState: DocumentStatusRow["updateState"]) {
+function mapScanSyncDetail(
+  updateState: DocumentStatusRow["updateState"],
+  t: TFunction,
+) {
   if (updateState === "new") {
-    return "新文件待入库";
+    return t("admin.dataSourceFileUpdateNewDetail");
   }
   if (updateState === "changed") {
-    return "内容变化待重解析";
+    return t("admin.dataSourceFileUpdateChangedDetail");
   }
   if (updateState === "deleted") {
-    return "源端删除待清理";
+    return t("admin.dataSourceFileUpdateDeletedDetail");
   }
-  return "当前文件已是最新";
+  return t("admin.dataSourceFileUpdateUnchangedDetail");
 }
 
 function stringifyScanError(value: unknown) {
@@ -323,7 +328,7 @@ function stringifyScanError(value: unknown) {
   return `${value}`;
 }
 
-function mapScanDocumentToDetail(item: ScanV2Document): DocumentStatusRow {
+function mapScanDocumentToDetail(item: ScanV2Document, t: TFunction): DocumentStatusRow {
   const sourceState = resolveSourceState({
     source_state: item.source_state,
     update_type: item.update_type || item.source_state,
@@ -353,7 +358,7 @@ function mapScanDocumentToDetail(item: ScanV2Document): DocumentStatusRow {
     size: formatBytes(item.size_bytes),
     tags: item.tags || [],
     updateState,
-    syncDetail: item.update_desc || mapScanSyncDetail(updateState),
+    syncDetail: item.update_desc || mapScanSyncDetail(updateState, t),
     parseStatus: normalizeDataSourceParseStatus(parseState),
     sourceUpdatedAt: lastSyncedAt || "-",
     updatedAt: lastSyncedAt || "-",
@@ -557,9 +562,12 @@ function getTreeNodeUpdateState(node: ScanV2TreeNode) {
   );
 }
 
-function shouldPollByParseStatus(items: DocumentStatusRow[]) {
+function shouldPollDocumentStatus(items: DocumentStatusRow[]) {
   return items.some(
-    (item) => item.parseStatus !== "parsed" && item.parseStatus !== "failed",
+    (item) =>
+      item.parseStatus === "reindexing" ||
+      item.syncState === "PENDING" ||
+      item.syncState === "RUNNING",
   );
 }
 
@@ -572,6 +580,7 @@ function sleep(ms: number) {
 async function waitForCloudSyncRun(
   client: ScanV2Client,
   sourceId: string,
+  t: TFunction,
   runId?: string,
 ) {
   const deadline = Date.now() + CLOUD_SYNC_TIMEOUT_MS;
@@ -589,13 +598,13 @@ async function waitForCloudSyncRun(
       status.includes("ERROR") ||
       status.includes("CANCEL")
     ) {
-      throw new Error("飞书云同步失败，请检查绑定配置后重试。");
+      throw new Error(t("admin.dataSourceDetailCloudSyncFailedFallback"));
     }
 
     await sleep(CLOUD_SYNC_POLL_INTERVAL_MS);
   }
 
-  throw new Error("等待飞书目录同步超时，请稍后重试。");
+  throw new Error(t("admin.dataSourceDetailCloudSyncTimeout"));
 }
 
 export default function DataSourceDetail() {
@@ -619,7 +628,9 @@ export default function DataSourceDetail() {
     routeSource?.documents || (initialSource && documentStatusMap[initialSource.id]?.documents) || [];
   const [detailSource, setDetailSource] = useState<DataSourceSummary | undefined>(initialSource);
   const [documents, setDocuments] = useState<DocumentStatusRow[]>(initialDocumentsSeed);
+  const [displayDocuments, setDisplayDocuments] = useState<DocumentStatusRow[]>(initialDocumentsSeed);
   const [detailLoading, setDetailLoading] = useState(true);
+  const [documentLoading, setDocumentLoading] = useState(false);
   const [syncSelectedDocIds, setSyncSelectedDocIds] = useState<string[]>([]);
   const [syncPickerOpen, setSyncPickerOpen] = useState(false);
   const [syncTreeNodes, setSyncTreeNodes] = useState<ScanV2TreeNode[]>([]);
@@ -641,12 +652,17 @@ export default function DataSourceDetail() {
   } | null>(null);
   const syncPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncPollingActiveRef = useRef(false);
+  const syncPollSeqRef = useRef(0);
+  const detailRefreshSeqRef = useRef(0);
+  const documentSearchSeqRef = useRef(0);
+  const keywordRef = useRef("");
   const syncTreeRequestSeqRef = useRef(0);
   const syncTreeInitialLoadRef = useRef(false);
   const syncTreeChildrenCacheRef = useRef(new Map<string, ScanV2TreeNode[]>());
 
   const stopSyncPolling = useCallback(() => {
     syncPollingActiveRef.current = false;
+    syncPollSeqRef.current += 1;
     if (syncPollTimerRef.current) {
       clearTimeout(syncPollTimerRef.current);
       syncPollTimerRef.current = null;
@@ -657,6 +673,9 @@ export default function DataSourceDetail() {
     stopSyncPolling();
     setDetailSource(initialSource);
     setDocuments(initialDocumentsSeed);
+    setDisplayDocuments(initialDocumentsSeed);
+    setKeyword("");
+    setDocumentLoading(false);
     setSyncSelectedDocIds([]);
     setSyncPickerOpen(false);
     setSyncTreeNodes([]);
@@ -664,6 +683,8 @@ export default function DataSourceDetail() {
     setSyncTreeLoading(false);
     setSyncSelectionToken("");
     setSyncSubmitting(false);
+    detailRefreshSeqRef.current += 1;
+    documentSearchSeqRef.current += 1;
     syncTreeRequestSeqRef.current += 1;
     syncTreeInitialLoadRef.current = false;
     syncTreeChildrenCacheRef.current.clear();
@@ -696,6 +717,9 @@ export default function DataSourceDetail() {
         setDetailLoading(true);
       }
 
+      const requestSeq = detailRefreshSeqRef.current + 1;
+      detailRefreshSeqRef.current = requestSeq;
+
       try {
         const client = createScanV2ApiClient();
         const sourceResponse = await client.getSource({ sourceId: id });
@@ -715,6 +739,10 @@ export default function DataSourceDetail() {
         const nextDocuments = (documentsResponse.data.items || []).map(
           mapScanDocumentToDetail,
         );
+        if (detailRefreshSeqRef.current !== requestSeq) {
+          return null;
+        }
+
         const nextSource = buildDetailSummaryFromSource(
           source,
           (summaryResponse?.data || sourceResponse.data.summary) as ScanV2Summary | undefined,
@@ -725,6 +753,9 @@ export default function DataSourceDetail() {
 
         setDetailSource(nextSource);
         setDocuments(nextDocuments);
+        if (!keywordRef.current.trim()) {
+          setDisplayDocuments(nextDocuments);
+        }
         setLastSync(nextSource.lastSync || t("admin.dataSourceNeverSynced"));
         if (resetSyncState) {
           setSyncSelectedDocIds([]);
@@ -733,7 +764,7 @@ export default function DataSourceDetail() {
 
         return nextDocuments;
       } catch (error) {
-        if (showError) {
+        if (showError && detailRefreshSeqRef.current === requestSeq) {
           message.error(
             getLocalizedErrorMessage(error, t("common.requestFailed")) ||
               t("common.requestFailed"),
@@ -741,12 +772,57 @@ export default function DataSourceDetail() {
         }
         return null;
       } finally {
-        if (setLoading) {
+        if (setLoading && detailRefreshSeqRef.current === requestSeq) {
           setDetailLoading(false);
         }
       }
     },
-    [id, routeSource?.tenantId, t],
+    [id, routeSource?.bindingId, routeSource?.tenantId, t],
+  );
+
+  const startSyncPolling = useCallback(
+    (seedDocuments: DocumentStatusRow[] | null) => {
+      if (!seedDocuments || !shouldPollDocumentStatus(seedDocuments)) {
+        stopSyncPolling();
+        return;
+      }
+
+      stopSyncPolling();
+      syncPollingActiveRef.current = true;
+      const pollSeq = syncPollSeqRef.current + 1;
+      syncPollSeqRef.current = pollSeq;
+
+      const pollOnce = async () => {
+        if (!syncPollingActiveRef.current || syncPollSeqRef.current !== pollSeq) {
+          return;
+        }
+
+        const latestDocuments = await refreshDetailFromServer({
+          setLoading: false,
+          showError: false,
+          resetSyncState: false,
+        });
+        if (!syncPollingActiveRef.current || syncPollSeqRef.current !== pollSeq) {
+          return;
+        }
+
+        if (latestDocuments && !shouldPollDocumentStatus(latestDocuments)) {
+          stopSyncPolling();
+          return;
+        }
+
+        syncPollTimerRef.current = setTimeout(
+          pollOnce,
+          DETAIL_STATUS_POLL_INTERVAL_MS,
+        );
+      };
+
+      syncPollTimerRef.current = setTimeout(
+        pollOnce,
+        DETAIL_STATUS_POLL_INTERVAL_MS,
+      );
+    },
+    [refreshDetailFromServer, stopSyncPolling],
   );
 
   useEffect(() => {
@@ -761,28 +837,76 @@ export default function DataSourceDetail() {
       if (cancelled || nextDocuments === null) {
         return;
       }
+      startSyncPolling(nextDocuments);
     };
 
     void loadDetail();
 
     return () => {
       cancelled = true;
+      detailRefreshSeqRef.current += 1;
     };
-  }, [refreshDetailFromServer]);
+  }, [refreshDetailFromServer, startSyncPolling]);
 
-  const filteredDocuments = useMemo(() => {
-    const normalized = keyword.trim().toLowerCase();
-    if (!normalized) {
-      return documents;
+  useEffect(() => {
+    keywordRef.current = keyword;
+    const normalizedKeyword = keyword.trim();
+    const requestSeq = documentSearchSeqRef.current + 1;
+    documentSearchSeqRef.current = requestSeq;
+
+    if (!normalizedKeyword) {
+      setDisplayDocuments(documents);
+      setDocumentLoading(false);
+      return;
     }
 
-    return documents.filter(
-      (item) =>
-        item.name.toLowerCase().includes(normalized) ||
-        item.path.toLowerCase().includes(normalized) ||
-        item.syncDetail.toLowerCase().includes(normalized),
-    );
-  }, [documents, keyword]);
+    const timerId = setTimeout(async () => {
+      if (!id) {
+        return;
+      }
+
+      setDocumentLoading(true);
+      try {
+        const client = createScanV2ApiClient();
+        const documentsResponse = await client.listSourceDocuments({
+          sourceId: id,
+          bindingId: detailSource?.bindingId || routeSource?.bindingId,
+          keyword: normalizedKeyword,
+          page: 1,
+          pageSize: 200,
+        });
+        if (documentSearchSeqRef.current !== requestSeq) {
+          return;
+        }
+        setDisplayDocuments(
+          (documentsResponse.data.items || []).map(mapScanDocumentToDetail),
+        );
+      } catch (error) {
+        if (documentSearchSeqRef.current !== requestSeq) {
+          return;
+        }
+        message.error(
+          getLocalizedErrorMessage(error, t("common.requestFailed")) ||
+            t("common.requestFailed"),
+        );
+      } finally {
+        if (documentSearchSeqRef.current === requestSeq) {
+          setDocumentLoading(false);
+        }
+      }
+    }, DETAIL_SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      clearTimeout(timerId);
+      documentSearchSeqRef.current += 1;
+    };
+  }, [detailSource?.bindingId, id, keyword, routeSource?.bindingId, t]);
+
+  useEffect(() => {
+    if (!keywordRef.current.trim()) {
+      setDisplayDocuments(documents);
+    }
+  }, [documents]);
 
   const sourceNameForPath = detailSource?.name || t("admin.dataSourceFallbackName");
 
@@ -792,7 +916,7 @@ export default function DataSourceDetail() {
       options: { selectAll?: boolean; closeOnError?: boolean } = {},
     ) => {
       if (!detailSource?.id) {
-        message.error("未获取到数据源信息，无法加载目录树。");
+        message.error(t("admin.dataSourceDetailMissingForTree"));
         if (options.closeOnError) {
           setSyncPickerOpen(false);
         }
@@ -967,7 +1091,7 @@ export default function DataSourceDetail() {
 
   const openSyncPicker = () => {
     if (!detailSource?.id) {
-      message.error("未获取到数据源信息，无法加载目录树。");
+      message.error(t("admin.dataSourceDetailMissingForTree"));
       return;
     }
 
@@ -989,7 +1113,7 @@ export default function DataSourceDetail() {
     }
 
     if (!detailSource?.id) {
-      message.error("未获取到数据源信息，无法发起拉取。");
+      message.error(t("admin.dataSourceDetailMissingForSync"));
       return false;
     }
 
@@ -1130,33 +1254,7 @@ export default function DataSourceDetail() {
         showError: true,
         resetSyncState: false,
       });
-      if (refreshedDocuments && shouldPollByParseStatus(refreshedDocuments)) {
-        syncPollingActiveRef.current = true;
-
-        const pollOnce = async () => {
-          if (!syncPollingActiveRef.current) {
-            return;
-          }
-
-          const latestDocuments = await refreshDetailFromServer({
-            setLoading: false,
-            showError: false,
-            resetSyncState: false,
-          });
-          if (!syncPollingActiveRef.current) {
-            return;
-          }
-
-          if (latestDocuments && !shouldPollByParseStatus(latestDocuments)) {
-            stopSyncPolling();
-            return;
-          }
-
-          syncPollTimerRef.current = setTimeout(pollOnce, 3000);
-        };
-
-        syncPollTimerRef.current = setTimeout(pollOnce, 3000);
-      }
+      startSyncPolling(refreshedDocuments);
 
       return true;
     } catch (error) {
@@ -1377,12 +1475,13 @@ export default function DataSourceDetail() {
       t={t}
       detailSource={detailSource ?? null}
       detailLoading={detailLoading}
+      documentLoading={documentLoading}
       lastSync={lastSync}
       documents={documents}
       lastOperation={lastOperation}
       keyword={keyword}
       setKeyword={setKeyword}
-      filteredDocuments={filteredDocuments}
+      filteredDocuments={displayDocuments}
       columns={columns}
       onBack={() => navigate("/data-sources")}
       onOpenSyncPicker={() => {

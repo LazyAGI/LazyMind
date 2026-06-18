@@ -30,13 +30,15 @@ import { axiosInstance, getLocalizedErrorMessage } from "@/components/request";
 import type { AxiosError } from "axios";
 import { type HistorySessionModalProps } from "../components/HistorySessions";
 import { type SelfEvolutionHomeViewProps } from "../components/LaunchViews";
-import { type SelfEvolutionFinalResultSummary, type SelfEvolutionWorkbenchViewProps } from "../components/WorkbenchView";
+import { normalizeTraceObservation, TraceObservationView } from "../components/TraceObservationView";
+import { type SelfEvolutionFinalResultSummary, type SelfEvolutionObservationKind, type SelfEvolutionWorkbenchViewProps } from "../components/WorkbenchView";
 import { type SelfEvolutionWorkbenchTab } from "../components/types";
 import "../index.scss";
 import {
   EvolutionMode,
   ExtraEvalStrategy,
   WorkflowStep,
+  StepStatus,
   ChatMessage,
   ChatSession,
   ThreadHistoryEntry,
@@ -134,6 +136,7 @@ import {
   getThreadTitleFromPayload,
   getThreadKnowledgeBaseId,
   getThreadModeFromPayload,
+  getTerminalFlowStepStatus,
 } from "../shared";
 const { Paragraph, Text } = Typography;
 
@@ -157,6 +160,17 @@ type AnalysisCasePreviewRow = {
   quality: string;
 };
 
+type PxCaseDetailRow = {
+  key: string;
+  caseId: string;
+  question: string;
+  score: string;
+  failureType: string;
+  defect: string;
+  reason: string;
+  traceId: string;
+};
+
 type ArtifactPanelItem = {
   kind: WorkflowResultKind;
   stepId: WorkflowStep["id"];
@@ -178,6 +192,15 @@ type CaseArtifactState = {
   error?: string;
 };
 
+type EvalReportBadCasesState = {
+  reportId?: string;
+  loading: boolean;
+  loaded: boolean;
+  data?: unknown;
+  error?: string;
+  totalSize?: number;
+};
+
 const stageArtifactKindMap: Record<string, WorkflowResultKind> = {
   dataset: "datasets",
   eval: "eval-reports",
@@ -185,14 +208,15 @@ const stageArtifactKindMap: Record<string, WorkflowResultKind> = {
   repair: "diffs",
   abtest: "abtests",
 };
-const legacyPlanningThinkingText = "正在理解你的请求并规划下一步。";
-const artifactStepIdMap: Record<WorkflowResultKind, WorkflowStep["id"]> = {
+const artifactStepIdMap: Record<WorkflowResultKind, ArtifactPanelItem["stepId"]> = {
   datasets: "dataset",
   "eval-reports": "px-report",
   "analysis-reports": "analysis",
   diffs: "code-optimize",
   abtests: "ab-test",
 };
+const EVAL_REPORT_BAD_CASES_PAGE_SIZE = 1000;
+const legacyPlanningThinkingText = "正在理解你的请求并规划下一步。";
 
 const finalResultMetricLabels: Record<string, string> = {
   answer_correctness: "答案正确性",
@@ -233,6 +257,68 @@ function humanizeFinalResultReason(reason: string, primaryMetricLabel: string) {
     .replace(/target/gi, "门槛")
     .replace(/limit/gi, "上限")
     .replace(/_/g, " ");
+}
+
+function getEvalReportSourceRecord(resultData: unknown) {
+  const resultItems = getResultItems(resultData).filter(isRecord);
+  if (resultItems.length > 0) {
+    return resultItems[0];
+  }
+  return isRecord(resultData) ? resultData : undefined;
+}
+
+function getEvalReportPayloadRecord(sourceRecord: Record<string, unknown> | undefined) {
+  return (
+    getStructuredRecordField(sourceRecord, ["data"]) ||
+    getNestedRecordField(sourceRecord, ["data"]) ||
+    sourceRecord
+  );
+}
+
+function getEvalReportId(resultData: unknown) {
+  const sourceRecord = getEvalReportSourceRecord(resultData);
+  const reportRecord = getEvalReportPayloadRecord(sourceRecord);
+
+  return (
+    getStringField(sourceRecord, ["report_id", "reportId"]) ||
+    getStringField(reportRecord, ["report_id", "reportId"])
+  );
+}
+
+function getEvalReportBadCaseListRecords(resultData: unknown): Record<string, unknown>[] {
+  if (Array.isArray(resultData)) {
+    return resultData.filter(isRecord);
+  }
+  if (!isRecord(resultData)) {
+    return [];
+  }
+
+  const payloadRecord = getEvalReportPayloadRecord(resultData);
+  return (getStructuredArrayField(payloadRecord, ["items"]) || []).filter(isRecord);
+}
+
+function buildPxCaseDetailRows(caseRecords: Record<string, unknown>[]) {
+  const seen = new Set<string>();
+
+  return caseRecords.flatMap((item, index): PxCaseDetailRow[] => {
+    const caseId = getStringField(item, ["case_id", "caseId", "case", "id"]) || `case-${index + 1}`;
+    if (seen.has(caseId)) {
+      return [];
+    }
+    seen.add(caseId);
+    const score = getNumberField(item, ["score", "metric_score", "answer_correctness", "value"]);
+
+    return [{
+      key: caseId,
+      caseId,
+      question: getStringField(item, ["query", "question", "prompt", "Question"]) || "-",
+      score: typeof score === "number" ? score.toFixed(2) : "-",
+      failureType: getStringField(item, ["failure_type", "failureType", "failure_reason", "fail_reason", "category"]) || "-",
+      defect: getStringField(item, ["Defect", "defect"]) || "-",
+      reason: getStringField(item, ["Reason", "reason", "failure_detail"]) || "-",
+      traceId: getStringField(item, ["trace_id", "traceId"]) || "-",
+    }];
+  });
 }
 
 export type SelfEvolutionPageRenderProps = {
@@ -288,14 +374,18 @@ export function SelfEvolutionPageController({
   const [historyPreviewMessages, setHistoryPreviewMessages] = useState<ChatMessage[]>([]);
   const [historyPreviewError, setHistoryPreviewError] = useState("");
   const [isLoadingHistoryPreview, setIsLoadingHistoryPreview] = useState(false);
-  const [collapsedArtifactSections, setCollapsedArtifactSections] = useState<Record<string, boolean>>({});
   const [workflowRuntimeState, setWorkflowRuntimeState] = useState<WorkflowRuntimeState>(
     createInitialWorkflowRuntimeState,
   );
   const [workflowResults, setWorkflowResults] = useState<WorkflowResultsState>(
     createInitialWorkflowResultsState,
   );
+  const [evalReportBadCases, setEvalReportBadCases] = useState<EvalReportBadCasesState>({
+    loading: false,
+    loaded: false,
+  });
   const [liveCheckpointWaitPrompt, setLiveCheckpointWaitPrompt] = useState<CheckpointWaitPrompt>();
+  const [terminalFlowStepStatus, setTerminalFlowStepStatus] = useState<StepStatus>();
   const [diffArtifactContent, setDiffArtifactContent] = useState<DiffArtifactContentState>({
     loading: false,
     key: "",
@@ -438,21 +528,31 @@ export function SelfEvolutionPageController({
   const isNewSessionStepThreeDone = Boolean(newSessionDraft.extraEvalStrategy);
   const isNewSessionStepFourDone = Boolean(newSessionDraft.mode);
   const workflowSteps = useMemo<WorkflowStep[]>(
-    () => buildVisibleWorkflowSteps(threadEvents, workflowRuntimeState, isWorkbenchVisible),
-    [isWorkbenchVisible, threadEvents, workflowRuntimeState],
+    () => buildVisibleWorkflowSteps(
+      threadEvents,
+      workflowRuntimeState,
+      isWorkbenchVisible,
+      terminalFlowStepStatus,
+    ),
+    [isWorkbenchVisible, terminalFlowStepStatus, threadEvents, workflowRuntimeState],
   );
   const processDashboard = useMemo(
-    () => buildEvoProcessDashboard(threadEvents, workflowRuntimeState, isWorkbenchVisible),
-    [isWorkbenchVisible, threadEvents, workflowRuntimeState],
+    () => buildEvoProcessDashboard(
+      threadEvents,
+      workflowRuntimeState,
+      isWorkbenchVisible,
+      terminalFlowStepStatus,
+    ),
+    [isWorkbenchVisible, terminalFlowStepStatus, threadEvents, workflowRuntimeState],
   );
   const pendingCheckpointWaitPrompt = useMemo(
     () => {
-      if (threadEvents.some(isInactiveTerminalThreadEvent)) {
+      if (terminalFlowStepStatus || threadEvents.some(isInactiveTerminalThreadEvent)) {
         return undefined;
       }
       return liveCheckpointWaitPrompt || getPendingCheckpointWaitPrompt(threadEvents);
     },
-    [liveCheckpointWaitPrompt, threadEvents],
+    [liveCheckpointWaitPrompt, terminalFlowStepStatus, threadEvents],
   );
   const isSendDisabled = !prompt.trim() || isSendingMessage;
   const activeStepText = useMemo(() => {
@@ -483,6 +583,10 @@ export function SelfEvolutionPageController({
   }, []);
   const fetchedPxCategoryMetricAverages = useMemo<PxCategoryMetricAverage[]>(
     () => buildPxCategoryMetricAveragesFromReport(workflowResults["eval-reports"].data),
+    [workflowResults["eval-reports"].data],
+  );
+  const evalTraceObservation = useMemo(
+    () => normalizeTraceObservation(workflowResults["eval-reports"].data),
     [workflowResults["eval-reports"].data],
   );
   const datasetArtifactData = useMemo(() => {
@@ -543,23 +647,75 @@ export function SelfEvolutionPageController({
   );
   const pxReportCategoryMetrics = fetchedPxCategoryMetricAverages;
   const isSinglePxCategory = pxReportCategoryMetrics.length === 1;
+  const evalReportSourceRecord = useMemo(
+    () => getEvalReportSourceRecord(workflowResults["eval-reports"].data),
+    [workflowResults["eval-reports"].data],
+  );
+  const evalReportId = useMemo(
+    () => getEvalReportId(workflowResults["eval-reports"].data),
+    [workflowResults["eval-reports"].data],
+  );
   const pxReportTotalCases = useMemo(() => {
-    const sourceRecord = Array.isArray(workflowResults["eval-reports"].data)
-      ? (workflowResults["eval-reports"].data.find((item): item is Record<string, unknown> => isRecord(item)) ??
-        undefined)
-      : isRecord(workflowResults["eval-reports"].data)
-        ? workflowResults["eval-reports"].data
-        : undefined;
     const caseDetailSummary =
-      getStructuredRecordField(sourceRecord, ["case_details_summary"]) ||
-      getNestedRecordField(sourceRecord, ["case_details_summary"]);
+      getStructuredRecordField(evalReportSourceRecord, ["case_details_summary"]) ||
+      getNestedRecordField(evalReportSourceRecord, ["case_details_summary"]);
 
     return (
       getNumberField(caseDetailSummary, ["total_count"]) ||
-      getNumberField(sourceRecord, ["total_cases"]) ||
+      getNumberField(evalReportSourceRecord, ["total_cases", "case_count"]) ||
       pxReportCategoryMetrics.reduce((total, item) => total + item.caseCount, 0)
     );
-  }, [pxReportCategoryMetrics, workflowResults]);
+  }, [evalReportSourceRecord, pxReportCategoryMetrics]);
+  const pxCaseDetailRows = useMemo<PxCaseDetailRow[]>(
+    () => buildPxCaseDetailRows(getEvalReportBadCaseListRecords(evalReportBadCases.data)),
+    [evalReportBadCases.data],
+  );
+  const pxCaseDetailCount =
+    evalReportBadCases.loaded && typeof evalReportBadCases.totalSize === "number"
+      ? evalReportBadCases.totalSize
+      : pxCaseDetailRows.length;
+  const pxCaseDetailColumns = useMemo<ColumnsType<PxCaseDetailRow>>(
+    () => [
+      { title: "Case", dataIndex: "caseId", key: "caseId", width: 126 },
+      {
+        title: "问题",
+        dataIndex: "question",
+        key: "question",
+        width: 360,
+        render: (value: string) => <span className="self-evolution-table-ellipsis" title={value}>{value}</span>,
+      },
+      { title: "Score", dataIndex: "score", key: "score", width: 96 },
+      {
+        title: "失败类型",
+        dataIndex: "failureType",
+        key: "failureType",
+        width: 150,
+        render: (value: string) => <span className="self-evolution-table-ellipsis" title={value}>{value}</span>,
+      },
+      {
+        title: "Defect",
+        dataIndex: "defect",
+        key: "defect",
+        width: 260,
+        render: (value: string) => <span className="self-evolution-table-ellipsis" title={value}>{value}</span>,
+      },
+      {
+        title: "Reason",
+        dataIndex: "reason",
+        key: "reason",
+        width: 420,
+        render: (value: string) => <span className="self-evolution-table-ellipsis" title={value}>{value}</span>,
+      },
+      {
+        title: "Trace",
+        dataIndex: "traceId",
+        key: "traceId",
+        width: 170,
+        render: (value: string) => <span className="self-evolution-table-ellipsis" title={value}>{value}</span>,
+      },
+    ],
+    [],
+  );
   const analysisArtifactItems = useMemo(
     () => getResultItems(workflowResults["analysis-reports"].data).filter(isRecord),
     [workflowResults["analysis-reports"].data],
@@ -616,6 +772,10 @@ export function SelfEvolutionPageController({
   );
   const abSummaryReports = useMemo<AbSummaryReport[]>(
     () => buildAbSummaryReports(workflowResults.abtests.data),
+    [workflowResults.abtests.data],
+  );
+  const abTraceObservation = useMemo(
+    () => normalizeTraceObservation(workflowResults.abtests.data),
     [workflowResults.abtests.data],
   );
   const abCategoryComparisons = useMemo<AbCategoryComparison[]>(
@@ -1000,6 +1160,69 @@ export function SelfEvolutionPageController({
     },
     [activeThreadId],
   );
+  const fetchEvalReportBadCases = useCallback(
+    async (resultData: unknown, options?: { force?: boolean }) => {
+      const reportId = getEvalReportId(resultData);
+      if (!activeThreadId || !reportId) {
+        setEvalReportBadCases({ loading: false, loaded: false });
+        return undefined;
+      }
+
+      if (
+        !options?.force &&
+        evalReportBadCases.reportId === reportId &&
+        (evalReportBadCases.loading || evalReportBadCases.loaded)
+      ) {
+        return evalReportBadCases.data;
+      }
+
+      setEvalReportBadCases((prev) => ({
+        ...prev,
+        reportId,
+        loading: true,
+        loaded: prev.reportId === reportId ? prev.loaded : false,
+        data: prev.reportId === reportId ? prev.data : undefined,
+        error: undefined,
+        totalSize: prev.reportId === reportId ? prev.totalSize : undefined,
+      }));
+
+      try {
+        const response = await axiosInstance.get(
+          `${AGENT_API_BASE}/threads/${encodeURIComponent(activeThreadId)}/results/eval-reports/${encodeURIComponent(reportId)}/bad-cases`,
+          { params: { page_size: EVAL_REPORT_BAD_CASES_PAGE_SIZE } },
+        );
+        const responseRecord = isRecord(response.data) ? response.data : undefined;
+        const totalSize =
+          getNumberField(responseRecord, ["total_size", "total_count", "total"]) ??
+          getEvalReportBadCaseListRecords(response.data).length;
+
+        setEvalReportBadCases({
+          reportId,
+          loading: false,
+          loaded: true,
+          data: response.data,
+          totalSize,
+        });
+        return response.data;
+      } catch (error) {
+        setEvalReportBadCases((prev) => ({
+          ...prev,
+          reportId,
+          loading: false,
+          loaded: true,
+          error: getLocalizedErrorMessage(error, "数据列表加载失败，请稍后重试。"),
+        }));
+        return undefined;
+      }
+    },
+    [
+      activeThreadId,
+      evalReportBadCases.data,
+      evalReportBadCases.loaded,
+      evalReportBadCases.loading,
+      evalReportBadCases.reportId,
+    ],
+  );
   const fetchWorkflowResult = useCallback(
     async (kind: WorkflowResultKind, options?: { force?: boolean }) => {
       if (!activeThreadId) {
@@ -1009,6 +1232,9 @@ export function SelfEvolutionPageController({
 
       const currentState = workflowResults[kind];
       if (!options?.force && (currentState.loading || currentState.loaded)) {
+        if (kind === "eval-reports" && currentState.loaded) {
+          void fetchEvalReportBadCases(currentState.data);
+        }
         return currentState.data;
       }
 
@@ -1027,6 +1253,9 @@ export function SelfEvolutionPageController({
             data: response.data,
           },
         }));
+        if (kind === "eval-reports") {
+          void fetchEvalReportBadCases(response.data, { force: options?.force });
+        }
         return response.data;
       } catch (error) {
         setWorkflowResults((prev) => ({
@@ -1041,7 +1270,7 @@ export function SelfEvolutionPageController({
         return undefined;
       }
     },
-    [activeThreadId, getWorkflowResultUrl, workflowResults],
+    [activeThreadId, fetchEvalReportBadCases, getWorkflowResultUrl, workflowResults],
   );
   const handleWorkflowDownload = useCallback(
     async (
@@ -1096,18 +1325,36 @@ export function SelfEvolutionPageController({
   );
   const openWorkflowArtifact = useCallback(
     (kind: WorkflowResultKind) => {
+      const step = workflowSteps.find((candidate) => candidate.id === artifactStepIdMap[kind]);
+      const resultState = workflowResults[kind];
+      const hasLoadedArtifact = resultState.loaded && !isEmptyResultPayload(resultState.data);
+      const isObservationKind = kind === "eval-reports" || kind === "abtests";
+      if (step && step.status !== "done" && !hasLoadedArtifact && !isObservationKind) {
+        message.info(`${step.title}仍在执行，完成后可查看结果。`, 2);
+        return;
+      }
       setCaseArtifact(undefined);
-      setActiveWorkbenchTab("artifacts");
+      setActiveWorkbenchTab("processes");
       setActiveArtifactKind(kind);
       setIsArtifactPanelOpen(true);
       setPreviewHistoryKey(undefined);
       setHistoryPreviewTitle("");
       setHistoryPreviewMessages([]);
       setHistoryPreviewError("");
-      setCollapsedArtifactSections((prev) => ({ ...prev, [artifactStepIdMap[kind]]: false }));
       void fetchWorkflowResult(kind, { force: true });
     },
-    [fetchWorkflowResult],
+    [fetchWorkflowResult, workflowResults, workflowSteps],
+  );
+
+  const openObservationPage = useCallback(
+    (kind: SelfEvolutionObservationKind) => {
+      if (!activeThreadId) {
+        message.warning("当前没有可用线程 ID，无法查看观测结果。", 2);
+        return;
+      }
+      navigate(`/self-evolution/detail/${encodeURIComponent(activeThreadId)}/observation/${kind}`);
+    },
+    [activeThreadId, navigate],
   );
 
   const openCaseArtifact = useCallback(
@@ -1116,14 +1363,13 @@ export function SelfEvolutionPageController({
         message.warning("当前没有可用线程 ID，无法请求 case 结果。", 2);
         return;
       }
-      setActiveWorkbenchTab("artifacts");
+      setActiveWorkbenchTab("processes");
       setActiveArtifactKind(kind);
       setIsArtifactPanelOpen(true);
       setPreviewHistoryKey(undefined);
       setHistoryPreviewTitle("");
       setHistoryPreviewMessages([]);
       setHistoryPreviewError("");
-      setCollapsedArtifactSections((prev) => ({ ...prev, [artifactStepIdMap[kind]]: false }));
       setCaseArtifact({ kind, artifactId, title, loading: true });
       try {
         const response = await axiosInstance.get(`${AGENT_API_BASE}/threads/${encodeURIComponent(activeThreadId)}/artifacts/${encodeURIComponent(artifactId)}`);
@@ -1181,6 +1427,7 @@ export function SelfEvolutionPageController({
 
   useEffect(() => {
     setWorkflowResults(createInitialWorkflowResultsState());
+    setEvalReportBadCases({ loading: false, loaded: false });
     setActiveArtifactKind(undefined);
     setIsArtifactPanelOpen(false);
     setCaseArtifact(undefined);
@@ -1429,6 +1676,7 @@ export function SelfEvolutionPageController({
 
   const replaceThreadEvents = (events: NormalizedThreadEvent[]) => {
     threadEventsRef.current = events;
+    setTerminalFlowStepStatus(undefined);
     setLiveCheckpointWaitPrompt(undefined);
     setThreadEvents(events);
   };
@@ -2006,7 +2254,12 @@ export function SelfEvolutionPageController({
       const pendingCheckpoint = flowPendingCheckpoint || (isRecord(threadPayload)
         ? getNestedRecordField(threadPayload, ["pending_checkpoint", "pendingCheckpoint"])
         : undefined);
-      if (pendingCheckpoint) {
+      const nextTerminalFlowStepStatus = getTerminalFlowStepStatus(restoredFlowStatus);
+      setTerminalFlowStepStatus(nextTerminalFlowStepStatus);
+      if (nextTerminalFlowStepStatus) {
+        setLiveCheckpointWaitPrompt(undefined);
+      }
+      if (!nextTerminalFlowStepStatus && pendingCheckpoint) {
         const checkpointEvent = normalizeThreadEvent({
           id: `restore-checkpoint-${threadId}-${getStringField(pendingCheckpoint, ["checkpoint_id", "id"]) || "latest"}`,
           eventName: "checkpoint.wait",
@@ -2480,67 +2733,19 @@ export function SelfEvolutionPageController({
     setIsHistorySessionModalOpen(false);
   };
 
-  const onSelectHistorySession = async (entry: HistorySessionEntry) => {
-    const nextPreviewKey = entry.threadId || entry.sessionId || entry.key;
-    if (!nextPreviewKey) {
+  const onSelectHistorySession = (entry: HistorySessionEntry) => {
+    const nextSessionKey = entry.threadId || entry.sessionId || entry.key;
+    if (!nextSessionKey) {
       return;
     }
 
-    if (previewHistoryKey === nextPreviewKey) {
-      setPreviewHistoryKey(undefined);
-      setHistoryPreviewTitle("");
-      setHistoryPreviewMessages([]);
-      setHistoryPreviewError("");
-      enterHistorySession(entry);
-      return;
-    }
-
-    const requestId = historyPreviewRequestIdRef.current + 1;
-    historyPreviewRequestIdRef.current = requestId;
-    setPreviewHistoryKey(nextPreviewKey);
-    setHistoryPreviewTitle(entry.title || "历史对话");
+    historyPreviewRequestIdRef.current += 1;
+    setPreviewHistoryKey(undefined);
+    setHistoryPreviewTitle("");
     setHistoryPreviewMessages([]);
     setHistoryPreviewError("");
     setIsLoadingHistoryPreview(false);
-    setActiveWorkbenchTab("processes");
-    setActiveArtifactKind(undefined);
-    setCaseArtifact(undefined);
-    setIsHistorySessionModalOpen(false);
-
-    if (entry.sessionId) {
-      const matchedSession = chatSessions.find((session) => session.id === entry.sessionId);
-      setHistoryPreviewMessages(matchedSession?.messages || []);
-      return;
-    }
-
-    if (!entry.threadId) {
-      return;
-    }
-
-    setIsLoadingHistoryPreview(true);
-    try {
-      const encodedThreadId = encodeURIComponent(entry.threadId);
-      const historyPayload = (
-        await axiosInstance.get(`${AGENT_API_BASE}/threads/${encodedThreadId}/history`)
-      ).data as ThreadRestorePayload;
-      if (historyPreviewRequestIdRef.current !== requestId) {
-        return;
-      }
-      setHistoryPreviewTitle(getThreadTitleFromHistoryPayload(historyPayload) || entry.title || "历史对话");
-      setHistoryPreviewMessages(normalizeThreadHistoryMessages(historyPayload));
-    } catch (error) {
-      if (historyPreviewRequestIdRef.current !== requestId || isCanceledRequest(error)) {
-        return;
-      }
-      setHistoryPreviewError(
-        getLocalizedErrorMessage(error, "历史对话预览失败，请再次点击进入完整会话。") ||
-          "历史对话预览失败，请再次点击进入完整会话。",
-      );
-    } finally {
-      if (historyPreviewRequestIdRef.current === requestId) {
-        setIsLoadingHistoryPreview(false);
-      }
-    }
+    enterHistorySession(entry);
   };
 
   const resetToEmptySession = () => {
@@ -3294,48 +3499,30 @@ export function SelfEvolutionPageController({
     );
   };
 
-  const renderPxCategorySummaryGrid = (categoryMetrics: PxCategoryMetricAverage[]) => (
-    <div className="self-evolution-px-summary-grid" aria-label="问题类别指标概览">
-      {categoryMetrics.map((item) => (
-        <article key={item.category} className="self-evolution-px-summary-card">
-          <div className="self-evolution-px-summary-card-head">
-            <div className="self-evolution-px-summary-card-title-group">
-              <span className="self-evolution-px-summary-card-icon" aria-hidden>
-                {item.category.slice(0, 1)}
-              </span>
-              <div className="self-evolution-px-summary-card-copy">
-                <strong>{item.category}</strong>
-                <span>{`${item.caseCount} 条样本`}</span>
-              </div>
-            </div>
-          </div>
-          <div className="self-evolution-px-summary-metrics">
-            {pxMetricMeta.map((metric) => (
-              <div key={`${item.category}-${metric.key}`} className="self-evolution-px-summary-metric-row">
-                <span className="self-evolution-px-summary-metric-label">
-                  <span className="self-evolution-px-legend-dot" style={{ backgroundColor: metric.color }} />
-                  {metric.label}
-                </span>
-                <strong>{formatPercent(item.metrics[metric.key])}</strong>
-              </div>
-            ))}
-          </div>
-        </article>
-      ))}
-    </div>
-  );
-
   const renderPxReportPreview = () => (
     <section className="self-evolution-px-report" aria-label="评测报告指标展示">
       {workflowResults["eval-reports"].loading ? (
         renderWorkflowResultPayload("eval-reports")
       ) : workflowResults["eval-reports"].error ? (
         renderWorkflowResultPayload("eval-reports")
+      ) : evalTraceObservation && pxReportCategoryMetrics.length === 0 ? (
+        <TraceObservationView observation={evalTraceObservation} title="Agentic RAG 观测详情" />
       ) : (
         <>
       <div className="self-evolution-px-report-head">
         <Text>按问题类别聚合四项指标均值</Text>
-        <Text>{`样本数 ${pxReportTotalCases}，分类数 ${pxReportCategoryMetrics.length}`}</Text>
+        <div className="self-evolution-px-report-actions">
+          <Text>{`样本数 ${pxReportTotalCases}，分类数 ${pxReportCategoryMetrics.length}`}</Text>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              openObservationPage("eval");
+            }}
+          >
+            进入观测
+          </button>
+        </div>
       </div>
 
       {pxReportCategoryMetrics.length === 0 ? (
@@ -3368,7 +3555,41 @@ export function SelfEvolutionPageController({
           </div>
         </div>
       )}
-      {renderPxCategorySummaryGrid(pxReportCategoryMetrics)}
+      <div className="self-evolution-px-case-section">
+        <div className="self-evolution-px-case-section-head">
+          <Text>数据列表</Text>
+          <Text>{`${pxCaseDetailCount} 条`}</Text>
+        </div>
+        {evalReportBadCases.loading ? (
+          <div className="self-evolution-result-state is-loading">
+            <LoadingOutlined spin />
+            <span>正在请求数据列表接口...</span>
+          </div>
+        ) : evalReportBadCases.error ? (
+          <div className="self-evolution-result-state is-error" role="alert">
+            <span>{evalReportBadCases.error}</span>
+            <button
+              type="button"
+              disabled={!evalReportId}
+              onClick={() => void fetchEvalReportBadCases(workflowResults["eval-reports"].data, { force: true })}
+            >
+              重试
+            </button>
+          </div>
+        ) : pxCaseDetailRows.length === 0 ? (
+          <Paragraph className="self-evolution-px-empty">当前报告无可展示的数据列表。</Paragraph>
+        ) : (
+          <Table<PxCaseDetailRow>
+            className="self-evolution-px-case-table"
+            size="small"
+            rowKey="key"
+            columns={pxCaseDetailColumns}
+            dataSource={pxCaseDetailRows}
+            pagination={false}
+            scroll={{ x: 1582, y: 280 }}
+          />
+        )}
+      </div>
         </>
       )}
     </section>
@@ -3946,6 +4167,8 @@ export function SelfEvolutionPageController({
       <section className="self-evolution-ab-report" aria-label="A/B 对比展示">
         {workflowResults.abtests.loading || workflowResults.abtests.error ? (
           renderWorkflowResultPayload("abtests")
+        ) : workflowResults.abtests.loaded && abTraceObservation && abSummaryReports.length === 0 ? (
+          <TraceObservationView observation={abTraceObservation} title="Case A/B Trace 对比" />
         ) : workflowResults.abtests.loaded && abSummaryReports.length > 0 ? (
           <>
             <div className="self-evolution-ab-head">
@@ -4039,19 +4262,14 @@ export function SelfEvolutionPageController({
   ];
 
   const activeArtifactItem = artifactItems.find((item) => item.kind === activeArtifactKind);
-  const artifactSections = artifactItems.map((item) => {
-    const step = workflowSteps.find((candidate) => candidate.id === item.stepId);
-    return {
-      id: item.stepId,
-      title: step?.title || item.sectionTitle,
-      desc: step?.status === "done" ? item.sectionDesc : step?.runtimeText || item.sectionDesc,
-      status: step?.status || "pending",
-      items: [item],
-    };
-  });
+  const visibleArtifactItems = artifactItems.filter((item) =>
+    workflowSteps.some((step) => step.id === item.stepId),
+  );
+  const getArtifactStep = (item: ArtifactPanelItem) =>
+    workflowSteps.find((step) => step.id === item.stepId);
   const getArtifactStatusLabel = (item: ArtifactPanelItem) => {
     const state = workflowResults[item.kind];
-    const step = workflowSteps.find((candidate) => candidate.id === item.stepId);
+    const step = getArtifactStep(item);
     if (state.loading) {
       return "加载中";
     }
@@ -4065,74 +4283,47 @@ export function SelfEvolutionPageController({
   };
   const renderArtifactNavigationPanel = () => (
     <>
-        {artifactSections.map((section) => {
-          const isCollapsed = activeWorkbenchTab !== "artifacts" || (collapsedArtifactSections[section.id] ?? true);
-          const isSectionActive = activeArtifactItem
-            ? section.items.some((item) => item.kind === activeArtifactItem.kind)
-            : false;
+      {visibleArtifactItems.length === 0 ? (
+        <Paragraph className="self-evolution-artifact-empty">
+          启动后会按执行进度显示产物。
+        </Paragraph>
+      ) : (
+        visibleArtifactItems.map((item) => {
+          const step = getArtifactStep(item);
+          const stepStatus = step?.status || "pending";
+          const isActive = item.kind === activeArtifactItem?.kind;
+          const resultState = workflowResults[item.kind];
+          const hasLoadedArtifact = resultState.loaded && !isEmptyResultPayload(resultState.data);
+          const canOpenArtifact = stepStatus === "done" || hasLoadedArtifact;
+
           return (
-            <section
-              key={section.id}
-              className={`self-evolution-artifact-section${isSectionActive ? " is-active" : ""}`}
+            <button
+              key={item.kind}
+              type="button"
+              className={`self-evolution-artifact-item${isActive ? " is-active" : ""}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (!canOpenArtifact) {
+                  message.info(`${item.title}尚未生成完整产物。`, 2);
+                  return;
+                }
+                openWorkflowArtifact(item.kind);
+              }}
             >
-              <button
-                type="button"
-                className="self-evolution-artifact-section-toggle"
-                onClick={() => {
-                  setActiveWorkbenchTab("artifacts");
-                  setCollapsedArtifactSections((prev) => ({
-                    ...prev,
-                    [section.id]: activeWorkbenchTab === "artifacts" ? !(prev[section.id] ?? true) : false,
-                  }));
-                }}
-                aria-expanded={!isCollapsed}
-                aria-controls={`self-evolution-artifact-section-${section.id}`}
-              >
-                <DownOutlined />
-                <span className="self-evolution-artifact-section-copy">
-                  <span className="self-evolution-artifact-section-title">{section.title}</span>
-                  <span className="self-evolution-artifact-section-desc">{section.desc}</span>
-                </span>
-                <span className={`self-evolution-artifact-item-status is-${section.status}`}>
-                  {localizedGetStepStatusLabel(section.status)}
-                </span>
-              </button>
-              {!isCollapsed && (
-                <div
-                  id={`self-evolution-artifact-section-${section.id}`}
-                  className="self-evolution-artifact-section-body"
-                >
-                  {section.items.map((item) => {
-                    const isActive = item.kind === activeArtifactItem?.kind;
-                    const stepStatus = workflowSteps.find((candidate) => candidate.id === item.stepId)?.status || "pending";
-                    const canOpenArtifact = stepStatus === "done";
-                    return (
-                      <button
-                        key={item.kind}
-                        type="button"
-                        className={`self-evolution-artifact-item${isActive ? " is-active" : ""}`}
-                        onClick={() => {
-                          if (!canOpenArtifact) {
-                            message.info(`${item.title}尚未生成完整产物，可在 Case 进度中查看已完成的单 case 结果。`, 2);
-                            return;
-                          }
-                          openWorkflowArtifact(item.kind);
-                        }}
-                      >
-                        <span className="self-evolution-artifact-item-title">{item.title}</span>
-                        <span className="self-evolution-artifact-item-desc">{item.desc}</span>
-                        <span className={`self-evolution-artifact-item-status is-${stepStatus}`}>
-                          {getArtifactStatusLabel(item)}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
+              <span className="self-evolution-artifact-item-title">
+                {step?.title || item.sectionTitle}
+              </span>
+              <span className="self-evolution-artifact-item-desc">
+                {item.sectionDesc}
+              </span>
+              <span className={`self-evolution-artifact-item-status is-${stepStatus}`}>
+                {getArtifactStatusLabel(item)}
+              </span>
+            </button>
           );
-        })}
-      </>
+        })
+      )}
+    </>
   );
   const renderCaseArtifactPreview = () => {
     if (!caseArtifact) {
@@ -4154,6 +4345,15 @@ export function SelfEvolutionPageController({
             重试
           </button>
         </div>
+      );
+    }
+    const traceObservation = normalizeTraceObservation(caseArtifact.data);
+    if (traceObservation) {
+      return (
+        <TraceObservationView
+          observation={traceObservation}
+          title={traceObservation.kind === "compare" ? `${caseArtifact.title} · A/B Trace 对比` : `${caseArtifact.title} · 观测详情`}
+        />
       );
     }
     return (
@@ -4231,6 +4431,7 @@ export function SelfEvolutionPageController({
           onCancel: () => setIsHistorySessionModalOpen(false),
           onRetry: () => void fetchThreadHistoryList(),
           onSelectHistorySession,
+          onEnterHistorySession: enterHistorySession,
           onDeleteHistorySession,
         },
         workbenchViewProps: {
@@ -4281,6 +4482,7 @@ export function SelfEvolutionPageController({
           },
           onCloseSession,
           onSelectHistorySession,
+          onEnterHistorySession: enterHistorySession,
           onDeleteHistorySession,
           onCreateSession,
           onOpenHistorySessionModal,
@@ -4289,6 +4491,7 @@ export function SelfEvolutionPageController({
           onConfirmIntentCheckpoint: () => void onConfirmIntentCheckpoint(),
           onContinueCheckpoint: (command?: string) => void onContinueCheckpoint(command),
           onOpenArtifact: openWorkflowArtifact,
+          onOpenObservation: openObservationPage,
           onOpenCaseArtifact: openCaseArtifact,
           onWorkbenchTabChange: handleWorkbenchTabChange,
           onCloseArtifactPanel: closeArtifactPanel,
