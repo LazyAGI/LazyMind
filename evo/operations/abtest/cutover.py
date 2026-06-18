@@ -96,9 +96,10 @@ class CompareABTestOperation:
             ref = ArtifactRef.parse(str(raw_ref))
             judge = typed_payload(ctx, ref, 'JudgeResult')
             case_id = validate_case_id(str(judge.get('case_id') or ''))
+
             if case_id in rows:
                 raise ValueError(f'duplicate JudgeResult case_id: {case_id}')
-            rows[case_id] = judge | {'judge_ref': str(ref)}
+            rows[case_id] = judge | {'judge_ref': str(ref), 'query': self._case_query(ctx, judge)}
         return rows
 
     def _delta(self, case_id, before, after, policy) -> dict[str, Any]:
@@ -107,9 +108,28 @@ class CompareABTestOperation:
         d, epsilon = delta[policy['primary_metric']], policy['regression_epsilon']
         return {'case_id': case_id, 'baseline_judge_ref': before['judge_ref'],
                 'candidate_judge_ref': after['judge_ref'],
-                'before': b | {'quality_label': before.get('quality_label', 'bad')},
-                'after': a | {'quality_label': after.get('quality_label', 'bad')}, 'delta': delta,
+                'query': before.get('query') or after.get('query') or '',
+                'before': b | self._case_delta_side(before),
+                'after': a | self._case_delta_side(after), 'delta': delta,
                 'outcome': 'improved' if d > epsilon else 'regressed' if d < -epsilon else 'unchanged'}
+
+    def _case_query(self, ctx, row) -> str:
+        try:
+            case_ref = ArtifactRef.parse(str(row.get('case_ref') or ''))
+            case = typed_payload(ctx, case_ref, 'DatasetCase')
+            return str(case.get('question') or '').strip()
+        except (TypeError, ValueError, KeyError):
+            return ''
+
+    def _case_delta_side(self, row) -> dict[str, Any]:
+        return {'quality_label': row.get('quality_label', 'bad'),
+                'trace_id': str(row.get('trace_id') or '').strip(),
+                'reason': self._case_reason(row)}
+
+    def _case_reason(self, row) -> str:
+        reason = row.get('reason') or row.get('judge_reason') or ''
+        if isinstance(reason, list): return '; '.join(str(item) for item in reason if str(item).strip())
+        return str(reason or '')
 
     def _case_scores(self, row) -> dict[str, float]:
         out = {metric: self._number(row.get(metric), metric) for metric in METRICS}

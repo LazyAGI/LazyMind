@@ -1,6 +1,7 @@
 import { type SelfEvolutionPageView } from "./shared";
 import { HistorySessionModal } from "./components/HistorySessions";
 import { SelfEvolutionHomeView } from "./components/LaunchViews";
+import { SelfEvolutionObservationPage as ObservationPage } from "./components/ObservationPage";
 import { SelfEvolutionPageController } from "./components/SelfEvolutionPage";
 import { SelfEvolutionWorkbenchView } from "./components/WorkbenchView";
 
@@ -34,6 +35,10 @@ export function SelfEvolutionHomePage() {
 
 export function SelfEvolutionDetailPage() {
   return <SelfEvolutionPage view="detail" />;
+}
+
+export function SelfEvolutionObservationPage() {
+  return <ObservationPage />;
 }
 
 export default SelfEvolutionHomePage;

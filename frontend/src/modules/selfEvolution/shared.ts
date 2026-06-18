@@ -274,7 +274,7 @@ export type AbComparisonRow = {
 
 export const FIXED_EVAL_SET = "__none__";
 export const FIXED_EXTRA_EVAL_STRATEGY: ExtraEvalStrategy = "generate";
-export const DEFAULT_EVAL_CASE_COUNT = 100;
+export const DEFAULT_EVAL_CASE_COUNT = 10;
 export const AGENT_API_BASE = `${BASE_URL}/api/core/agent`;
 export const EVO_API_BASE = `${BASE_URL}/api/evo/v1/evo`;
 export const SELF_EVOLUTION_LAST_THREAD_STORAGE_KEY = "lazymind:self-evolution:last-thread";
@@ -745,6 +745,23 @@ export function getStepStatusLabel(status: StepStatus) {
     return "已失败";
   }
   return "待执行";
+}
+
+export function getTerminalFlowStepStatus(status?: string): StepStatus | undefined {
+  const normalizedStatus = status?.trim().toLowerCase();
+  if (!normalizedStatus) {
+    return undefined;
+  }
+  if (["cancel", "cancelled", "canceled"].includes(normalizedStatus)) {
+    return "canceled";
+  }
+  if (["error", "failed"].includes(normalizedStatus)) {
+    return "failed";
+  }
+  if (["completed", "done", "ended", "success", "succeeded"].includes(normalizedStatus)) {
+    return "done";
+  }
+  return undefined;
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1826,7 +1843,9 @@ function updateEvalProgressPhases(
 
   const currentPhase = next.find((item) => item.id === phase);
   const progressSnapshot = progress || {
-    statusText: getEvalProgressStatusLabel(action, phase),
+    statusText: isActionKind(action, "finish") && isOperationScoped
+      ? `${getEvalPhaseLabel(phase)}中`
+      : getEvalProgressStatusLabel(action, phase),
     percent: isActionKind(action, "finish") && !isOperationScoped ? 100 : currentPhase?.percent ?? 0,
   };
 
@@ -3251,6 +3270,51 @@ export function createWorkflowStepFromRuntime(
   };
 }
 
+const terminalFlowRuntimeText: Partial<Record<StepStatus, string>> = {
+  canceled: "流程已取消。",
+  done: "流程已结束。",
+  failed: "流程已失败。",
+};
+
+function getTerminalOverrideStepIndex(steps: WorkflowStep[]) {
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    if (["running", "paused", "failed", "canceled"].includes(steps[index].status)) {
+      return index;
+    }
+  }
+  for (let index = 0; index < steps.length; index += 1) {
+    if (steps[index].status === "pending") {
+      return index;
+    }
+  }
+  return steps.length > 0 ? steps.length - 1 : -1;
+}
+
+function applyTerminalFlowStepStatus(
+  steps: WorkflowStep[],
+  terminalStepStatus?: StepStatus,
+) {
+  if (!terminalStepStatus || steps.length === 0) {
+    return steps;
+  }
+  const terminalStepIndex = getTerminalOverrideStepIndex(steps);
+  if (terminalStepIndex < 0) {
+    return steps;
+  }
+  return steps.map((step, index) =>
+    index === terminalStepIndex
+      ? {
+          ...step,
+          status: terminalStepStatus,
+          runtimeText: terminalFlowRuntimeText[terminalStepStatus] || step.runtimeText,
+          progress: terminalStepStatus === "done"
+            ? step.progress || getCompletedProgressSnapshot()
+            : step.progress,
+        }
+      : step,
+  );
+}
+
 export function buildWorkflowStepRuntimeFromEvents(events: NormalizedThreadEvent[], isSuperseded: boolean) {
   const snapshot: {
     status: StepStatus;
@@ -3337,10 +3401,14 @@ export function buildVisibleWorkflowSteps(
   events: NormalizedThreadEvent[],
   runtimeState: WorkflowRuntimeState,
   includeFirstStep: boolean,
+  terminalStepStatus?: StepStatus,
 ): WorkflowStep[] {
   const stageEvents = dedupeNormalizedEvents(events).filter((event) => event.stage);
   if (stageEvents.length === 0) {
-    return includeFirstStep ? [createWorkflowStepFromRuntime("dataset", runtimeState)] : [];
+    return applyTerminalFlowStepStatus(
+      includeFirstStep ? [createWorkflowStepFromRuntime("dataset", runtimeState)] : [],
+      terminalStepStatus,
+    );
   }
 
   const groups: Array<{ stepId: WorkflowStepId; events: NormalizedThreadEvent[] }> = [];
@@ -3357,7 +3425,7 @@ export function buildVisibleWorkflowSteps(
     groups.push({ stepId, events: [event] });
   });
 
-  return groups.map((group, index) => {
+  const steps = groups.map((group, index) => {
     const definition = workflowStepDefinitions.find((step) => step.id === group.stepId) || workflowStepDefinitions[0];
     return {
       ...definition,
@@ -3365,6 +3433,7 @@ export function buildVisibleWorkflowSteps(
       ...buildWorkflowStepRuntimeFromEvents(group.events, index < groups.length - 1),
     };
   });
+  return applyTerminalFlowStepStatus(steps, terminalStepStatus);
 }
 
 function eventActivityTone(event: NormalizedThreadEvent): EvoStageActivity["tone"] {
@@ -3693,17 +3762,62 @@ function isCutoverCompletedEvent(event: NormalizedThreadEvent) {
     (isActionKind(event.action, "finish") || event.progress?.percent === 100);
 }
 
+function getStageLogicalTaskCount(events: NormalizedThreadEvent[], stage: ThreadEventStage) {
+  const keys = new Set<string>();
+  events.forEach((event) => {
+    const payload = event.payload;
+    const operationRefs = getStructuredArrayField(payload, ["operation_refs"]);
+    operationRefs?.forEach((item) => {
+      if (typeof item !== "string") {
+        return;
+      }
+      const flowKind = operationFlowKindFromRef(item);
+      if (stage === "eval" && flowKind !== "eval.rag_answer" && flowKind !== "eval.judge_answer") {
+        return;
+      }
+      keys.add(item);
+    });
+    const operationRunId = getOperationRunId(payload);
+    if (!operationRunId) {
+      return;
+    }
+    const flowKind = getEventFlowKind(payload) || operationFlowKindFromRef(operationRunId);
+    if (stage === "eval" && flowKind !== "eval.rag_answer" && flowKind !== "eval.judge_answer") {
+      return;
+    }
+    keys.add(operationRunId);
+  });
+  return keys.size || events.length;
+}
+
+function operationFlowKindFromRef(ref: string) {
+  if (/^(?:eval|eval_retry_\d+)\.rag\./.test(ref)) {
+    return "eval.rag_answer";
+  }
+  if (/^(?:eval|eval_retry_\d+)\.judge\./.test(ref)) {
+    return "eval.judge_answer";
+  }
+  if (/^(?:eval|eval_retry_\d+)\.aggregate$/.test(ref)) {
+    return "eval.aggregate";
+  }
+  return "";
+}
+
 export function buildEvoProcessDashboard(
   events: NormalizedThreadEvent[],
   runtimeState: WorkflowRuntimeState,
   includeFirstStep: boolean,
+  terminalStepStatus?: StepStatus,
 ): EvoProcessDashboard {
   const sortedEvents = dedupeNormalizedEvents(events);
   const cutoverCompleted = sortedEvents.some(isCutoverCompletedEvent);
   const hasInactiveTerminalEvent = sortedEvents.some(isInactiveTerminalThreadEvent);
-  const checkpoint = cutoverCompleted || hasInactiveTerminalEvent ? undefined : getPendingCheckpointWaitPrompt(sortedEvents);
+  const checkpoint = cutoverCompleted || hasInactiveTerminalEvent || terminalStepStatus
+    ? undefined
+    : getPendingCheckpointWaitPrompt(sortedEvents);
   const visibleStepsById = new Map(
-    buildVisibleWorkflowSteps(sortedEvents, runtimeState, includeFirstStep).map((step) => [step.id, step]),
+    buildVisibleWorkflowSteps(sortedEvents, runtimeState, includeFirstStep, terminalStepStatus)
+      .map((step) => [step.id, step]),
   );
   const runtimeSteps = workflowStepDefinitions.map((definition) =>
     visibleStepsById.get(definition.id) || createWorkflowStepFromRuntime(definition.id, runtimeState),
@@ -3728,7 +3842,7 @@ export function buildEvoProcessDashboard(
           : step.progress || stageProgressFromEvents(sortedEvents, stage),
       },
       stage,
-      eventCount: stageEvents.length,
+      eventCount: getStageLogicalTaskCount(stageEvents, stage),
       latestActivity: stageEvents.length ? buildEventActivity(stageEvents[stageEvents.length - 1]) : undefined,
     };
   });
@@ -3738,7 +3852,7 @@ export function buildEvoProcessDashboard(
   const latestStage = cutoverCompleted ? "abtest" : checkpoint?.completedStage || getLastItem(visibleActivityEvents.filter((event) => event.stage))?.stage;
   const activeOverview =
     (latestStage ? overview.find((item) => item.stage === latestStage) : undefined) ||
-    overview.find((item) => ["running", "paused", "failed"].includes(item.step.status)) ||
+    overview.find((item) => ["running", "paused", "failed", "canceled"].includes(item.step.status)) ||
     overview.find((item) => item.step.status === "pending") ||
     getLastItem(overview);
   const recentActivities = activities.slice().reverse();

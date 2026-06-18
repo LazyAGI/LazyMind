@@ -16,6 +16,8 @@ _TYPE_TO_SLOT: Dict[str, str] = {
     'embed': 'embed',
     'rerank': 'embed',
     'cross_modal_embed': 'embed',
+    'stt': 'multimodal',
+    'tts': 'multimodal',
     'text2image': 'multimodal',
     'image_editing': 'multimodal',
 }
@@ -162,6 +164,7 @@ def summarize_model_config_for_log(model_config: Optional[Dict[str, Any]]) -> st
 
 # Maps frontend model_key values to runtime_models.yaml role names.
 _MODEL_CONFIG_ROLE_ALIASES: Dict[str, str] = {
+    'stt': 'speech_to_text',
     'text2image': 'image_generator',
     'image_editing': 'image_editor',
 }
@@ -198,13 +201,14 @@ def _enrich_role_types(model_config: Dict[str, Any]) -> Dict[str, Any]:
 def inject_model_config(model_config: Optional[Dict[str, Any]]) -> None:
     '''Inject per-request model configuration into lazyllm globals.
 
-    Delegates to lazyllm.inject_model_config. Kept here for backward compatibility.
+    Delegates to lazyllm.module.llms.model_config_inject. Kept here for
+    backward compatibility and Lazymind-specific role alias normalization.
     '''
-    import lazyllm
+    from lazyllm.module.llms.model_config_inject import inject_model_config as _lazyllm_inject
     normalized = _normalize_model_config(model_config)
     if isinstance(normalized, dict):
         normalized = _enrich_role_types(normalized)
-    lazyllm.inject_model_config(normalized)
+    _lazyllm_inject(normalized)
 
 
 def _expand_env(value: str) -> str:

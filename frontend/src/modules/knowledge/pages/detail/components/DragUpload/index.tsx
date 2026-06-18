@@ -22,14 +22,13 @@ import JSZip from "@progress/jszip-esm";
 
 const ZIP_TOTAL_MAX_SIZE = 1 * 1024 * 1024 * 1024;
 const ZIP_SINGLE_FILE_MAX_SIZE = 500 * 1024 * 1024;
-const ZIP_ALLOWED_SUFFIX = [
+export const ALLOWED_FILE_TYPES = [
   "pdf",
   "docx",
   "doc",
   "hwp",
-  "pptx",
   "ppt",
-  "pptm",
+  "pptx",
   "jpg",
   "jpeg",
   "png",
@@ -49,7 +48,16 @@ const ZIP_ALLOWED_SUFFIX = [
   "mp4",
   "txt",
   "xml",
+  "json",
+  "jsonl",
+  "yaml",
+  "yml",
+  "html",
+  "htm",
+  "py",
 ];
+
+const ZIP_ALLOWED_SUFFIX = ALLOWED_FILE_TYPES;
 
 export interface IDragUploadProps {
   value?: any[];

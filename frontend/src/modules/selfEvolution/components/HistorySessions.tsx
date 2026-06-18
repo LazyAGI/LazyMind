@@ -128,6 +128,7 @@ export type HistorySessionModalProps = {
   onCancel: () => void;
   onRetry: () => void;
   onSelectHistorySession: (entry: SelfEvolutionHistoryEntry) => void;
+  onEnterHistorySession?: (entry: SelfEvolutionHistoryEntry) => void;
   onDeleteHistorySession: (
     entry: SelfEvolutionHistoryEntry,
     event: MouseEvent<HTMLElement>,
@@ -143,9 +144,11 @@ export function HistorySessionModal({
   onCancel,
   onRetry,
   onSelectHistorySession,
+  onEnterHistorySession,
   onDeleteHistorySession,
 }: HistorySessionModalProps) {
   const { t } = useTranslation();
+  const handleSelectHistorySession = onEnterHistorySession || onSelectHistorySession;
   return (
     <Modal
       open={open}
@@ -190,7 +193,7 @@ export function HistorySessionModal({
                 key={entry.key}
                 entry={entry}
                 isDeleting={deletingHistoryKeys.includes(entry.key)}
-                onSelect={onSelectHistorySession}
+                onSelect={handleSelectHistorySession}
                 onDelete={onDeleteHistorySession}
               />
             ))

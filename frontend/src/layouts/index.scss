@@ -32,10 +32,10 @@
 }
 
 .main-menu-restore-button {
-  position: absolute;
-  top: 24px;
-  left: 24px;
-  z-index: 20;
+  position: fixed;
+  top: 16px;
+  inset-inline-start: 16px;
+  z-index: 30;
   width: 28px;
   height: 28px;
   border: 1px solid rgba(22, 119, 255, 0.18);
@@ -570,6 +570,12 @@
   .self-evolution-chatlike-top {
     padding-left: 48px;
   }
+
+  .self-evolution-workbench-nav-head {
+    padding-left: 60px;
+    box-sizing: border-box;
+  }
+
 }
 
 .sider-bar-bottom {

@@ -16,6 +16,7 @@ x-mirror-args: &mirror-args
   BASE_LAZYMIND_IMAGE: ${BASE_LAZYMIND_IMAGE:-base_code}
 
 x-trace-config: &trace-config
+  TZ: ${TZ:-Asia/Shanghai}
   LANGFUSE_HOST: ${LANGFUSE_HOST:-}
   LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-}
   LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
@@ -370,8 +371,8 @@ services:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-frontend:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
       args:
         <<: *mirror-args
     ports:
@@ -537,6 +538,8 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
+      - *lazyllm-src-mount
+      - *algorithm-src-mount
       - sqlite-data:/data/sqlite
     environment:
       LAZYMIND_DOCUMENT_PROCESSOR_PORT: "8000"
@@ -574,6 +577,8 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
+      - *lazyllm-src-mount
+      - *algorithm-src-mount
       - sqlite-data:/data/sqlite
     environment:
       LAZYMIND_DOCUMENT_WORKER_PORT: "8001"
@@ -620,6 +625,8 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
+      - *lazyllm-src-mount
+      - *algorithm-src-mount
       - sqlite-data:/data/sqlite
     healthcheck:
       test: ['CMD-SHELL', 'python -m lazymind.parsing.service.healthcheck']
@@ -809,7 +816,7 @@ services:
   milvus:
     profiles:
       - milvus
-    image: milvusdb/milvus:v2.6.11
+    image: milvusdb/milvus:v2.4.15
     command: ['sh', '-c', 'sleep 15 && exec milvus run standalone']
     # seccomp:unconfined removed for security; add back if Milvus fails on your platform
     environment:

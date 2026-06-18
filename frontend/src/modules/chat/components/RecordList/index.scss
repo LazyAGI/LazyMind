@@ -70,6 +70,26 @@
     }
   }
 
+  .record-batch-select-row {
+    padding: 8px 0;
+  }
+
+  .record-selected-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    margin-left: 4px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: #1677ff;
+    color: #ffffff;
+    font-size: 12px;
+    line-height: 18px;
+    font-weight: 600;
+  }
+
   .record {
     position: relative;
 

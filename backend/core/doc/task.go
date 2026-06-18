@@ -1356,7 +1356,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 		}
 		candidate := startCandidate{task: taskRow, doc: docRow, docExt: dExt}
 		candidates = append(candidates, candidate)
-		if dExt.ConvertRequired {
+		if needsOfficeConvertBeforeParse(dExt, ocrConfig) {
 			officeCandidates = append(officeCandidates, candidate)
 		} else {
 			pdfCandidates = append(pdfCandidates, candidate)
@@ -1379,7 +1379,7 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 		baseDocExts := make([]documentExt, 0, len(pdfCandidates))
 		items := make([]addFileItem, 0, len(pdfCandidates))
 		for _, candidate := range pdfCandidates {
-			parsePath := parsePathForAdd(candidate.docExt)
+			parsePath := parsePathForIngestion(candidate.docExt, ocrConfig)
 			if strings.TrimSpace(parsePath) == "" {
 				resultsByTaskID[candidate.task.ID] = StartTaskResult{TaskID: candidate.task.ID, DocumentID: candidate.doc.ID, DisplayName: candidate.doc.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "parse file path is empty"}
 				continue
