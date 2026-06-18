@@ -38,6 +38,7 @@ import TaskCenter from "@/modules/chat/components/TaskCenter";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
 import { usePluginStore } from "@/modules/chat/store/pluginPanel";
+import { useChatInputStore } from "@/modules/chat/store/chatInput";
 
 // Stable empty reference to avoid returning a fresh array from the zustand
 // selector on every render, which (with useSyncExternalStore) would trigger an
@@ -301,6 +302,23 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           }
         : undefined;
 
+    // Attach focused_tab and focused_sort_order so the AI knows what the user is looking at.
+    const pluginUIState =
+      activeSession && (activeSession.focusedTab || activeSession.focusedSortOrder !== undefined)
+        ? {
+            focused_tab: activeSession.focusedTab,
+            focused_sort_order: activeSession.focusedSortOrder,
+          }
+        : undefined;
+
+    // Collect pending artifact references from the chat input store.
+    const { getArtifactRefs, clearArtifactRefs } = useChatInputStore.getState();
+    const artifactRefs = getArtifactRefs(sessionId);
+    // Clear after reading so they are not repeated in the next message.
+    if (artifactRefs.length > 0) {
+      clearArtifactRefs(sessionId);
+    }
+
     return new SSE(CHAT_STREAM_URL, {
       method: Method.POST,
       headers: {
@@ -333,6 +351,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         create_time: new Date().toISOString(),
         environment_context: buildEnvironmentContext(),
         ...(pluginContext ? { plugin_context: pluginContext } : {}),
+        ...(pluginUIState ? { plugin_ui_state: pluginUIState } : {}),
+        ...(artifactRefs.length > 0 ? { artifact_refs: artifactRefs } : {}),
       }),
       callbacks,
     });

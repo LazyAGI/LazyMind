@@ -52,7 +52,11 @@ type SubAgentArtifact struct {
 	ContentType string          `gorm:"column:content_type;type:varchar(32);not null"`
 	Value       json.RawMessage `gorm:"column:value;type:json;not null"`
 	Seq         int             `gorm:"column:seq;not null;default:1"`
-	CreatedAt   time.Time       `gorm:"column:created_at;not null"`
+	// Hidden marks logically-deleted list items; list_index is never reused.
+	Hidden bool `gorm:"column:hidden;not null;default:false"`
+	// Caption is a human-readable description for image/file artifacts, used in artifact_summary.
+	Caption   *string   `gorm:"column:caption"`
+	CreatedAt time.Time `gorm:"column:created_at;not null"`
 }
 
 func (SubAgentArtifact) TableName() string { return "sub_agent_artifacts" }

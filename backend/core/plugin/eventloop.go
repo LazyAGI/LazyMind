@@ -259,6 +259,8 @@ func OnSubAgentDone(
 			"step_id":    pctx.StepID,
 		})
 	}
+	// Write content_snapshot to all selected revisions for this step.
+	go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
 }
 
 // advanceAutoMode calls DriverAgent and either triggers a new ChatAgent turn or ends the session.
@@ -368,6 +370,7 @@ func triggerNextChatTurn(
 
 // OnArtifactEvent is called when a plugin_step SubAgent emits an artifact event.
 // It checks slot binding and writes plugin_slot_revisions if the artifact is bound.
+// Caption embedded in the artifact value is written to sub_agent_artifacts.caption.
 //
 // For list-cardinality slots, the artifact value may carry a "list_index" field
 // (written by save_artifact) that enables partial retry: only the revision at that
@@ -393,15 +396,115 @@ func OnArtifactEvent(
 	}
 
 	// For list slots, extract list_index from the artifact value if present.
-	// A non-nil value triggers partial-retry semantics (replace that index only).
 	var listIndex *int
 	if cardinality == "list" {
 		listIndex = extractListIndex(ctx, db, taskID, artifactKey)
 	}
 
+	// Extract caption from artifact value and write it to sub_agent_artifacts.caption.
+	// PostgreSQL does not support UPDATE with ORDER BY/LIMIT, so we first fetch the
+	// target row's primary key (task_id + artifact_key + seq), then update by PK.
+	if caption := extractCaption(ctx, db, taskID, artifactKey); caption != "" {
+		var target orm.SubAgentArtifact
+		if db.WithContext(ctx).
+			Where("task_id = ? AND artifact_key = ?", taskID, artifactKey).
+			Order("seq DESC").
+			First(&target).Error == nil {
+			_ = db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).
+				Where("task_id = ? AND artifact_key = ? AND seq = ?", target.TaskID, target.ArtifactKey, target.Seq).
+				Update("caption", caption).Error
+		}
+	}
+
 	if _, err := WriteSlotRevision(ctx, db,
 		pctx.SessionID, slotID, artifactKey, pctx.StepID, attempt, cardinality, listIndex); err != nil {
 		fmt.Printf("[Plugin] WriteSlotRevision failed: %v\n", err)
+	}
+}
+
+// OnSubAgentDoneSnapshot writes content_snapshot to all selected slot revisions
+// for a completed step. Called after OnSubAgentDone persists the terminal status.
+func OnSubAgentDoneSnapshot(
+	ctx context.Context,
+	db *gorm.DB,
+	pctx *PluginChatContext,
+) {
+	if pctx == nil {
+		return
+	}
+	// Load all selected revisions for this session.
+	revisions, err := LoadSelectedSlots(ctx, db, pctx.SessionID)
+	if err != nil {
+		fmt.Printf("[Plugin] OnSubAgentDoneSnapshot: load slots: %v\n", err)
+		return
+	}
+
+	// Build task_id lookup for the current step attempt.
+	step, _ := GetLatestStep(ctx, db, pctx.SessionID, pctx.StepID)
+	if step == nil {
+		return
+	}
+
+	// For each revision that belongs to this step attempt, write its artifact value as snapshot.
+	for _, rev := range revisions {
+		if rev.StepID != pctx.StepID || rev.Attempt != step.Attempt {
+			continue
+		}
+		if len(rev.ContentSnapshot) > 0 {
+			continue // already snapshotted
+		}
+		// Fetch the artifact value from sub_agent_artifacts.
+		// For list slots, the list_index is embedded inside the artifact JSON value
+		// (written by save_artifact as {"list_index": N, ...}).  We match on that field
+		// rather than using Offset, which would be fragile after partial retries or deletions.
+		var art orm.SubAgentArtifact
+		var q *gorm.DB
+		if rev.ListIndex != nil {
+			// Query artifacts for this task+key that carry the matching list_index in their value.
+			var candidates []orm.SubAgentArtifact
+			db.WithContext(ctx).
+				Where("task_id = ? AND artifact_key = ?", step.TaskID, rev.ArtifactKey).
+				Order("seq DESC").
+				Find(&candidates)
+			for _, c := range candidates {
+				var v map[string]any
+				if json.Unmarshal(c.Value, &v) == nil {
+					if li, ok := v["list_index"]; ok {
+						var liInt int
+						switch idx := li.(type) {
+						case float64:
+							liInt = int(idx)
+						case int:
+							liInt = idx
+						default:
+							continue
+						}
+						if liInt == *rev.ListIndex {
+							art = c
+							break
+						}
+					}
+				}
+			}
+			if art.TaskID == "" {
+				continue
+			}
+		} else {
+			q = db.WithContext(ctx).
+				Where("task_id = ? AND artifact_key = ?", step.TaskID, rev.ArtifactKey).
+				Order("seq DESC")
+			if err := q.First(&art).Error; err != nil {
+				continue
+			}
+		}
+		if err := db.WithContext(ctx).Model(&orm.PluginSlotRevision{}).
+			Where("id = ?", rev.ID).
+			Updates(map[string]any{
+				"content_snapshot": art.Value,
+				"change_source":    "ai",
+			}).Error; err != nil {
+			fmt.Printf("[Plugin] OnSubAgentDoneSnapshot: write snapshot rev=%s: %v\n", rev.ID, err)
+		}
 	}
 }
 
@@ -432,6 +535,27 @@ func extractListIndex(ctx context.Context, db *gorm.DB, taskID, artifactKey stri
 		return &idx
 	}
 	return nil
+}
+
+// extractCaption reads the most recent artifact value for the given (taskID, artifactKey)
+// and returns the caption string embedded in the JSON value, or "" if absent.
+func extractCaption(ctx context.Context, db *gorm.DB, taskID, artifactKey string) string {
+	var a orm.SubAgentArtifact
+	err := db.WithContext(ctx).
+		Where("task_id = ? AND artifact_key = ?", taskID, artifactKey).
+		Order("seq DESC").
+		First(&a).Error
+	if err != nil {
+		return ""
+	}
+	var v map[string]any
+	if json.Unmarshal(a.Value, &v) != nil {
+		return ""
+	}
+	if cap, ok := v["caption"].(string); ok {
+		return strings.TrimSpace(cap)
+	}
+	return ""
 }
 
 // resolveSlotBinding looks up (slotID, cardinality) for an artifact key from the Python plugin API.

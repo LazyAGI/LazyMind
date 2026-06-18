@@ -8,7 +8,7 @@ Two tool types are registered dynamically per-conversation:
 Both are stop-tools: after a successful invocation the ReAct loop terminates immediately
 without entering a summarize step.
 
-Framework tools (save_artifact / load_artifact / list_artifacts) are always merged into
+Framework tools (save_artifact / get_artifact / list_artifacts) are always merged into
 the step's tool list regardless of what the plugin's state.yml declares.  This ensures
 every SubAgent can persist and retrieve artifacts without plugin authors having to
 remember to list them explicitly.
@@ -32,8 +32,9 @@ from lazymind.chat.engine.tools.infra import handle_tool_errors
 
 _FRAMEWORK_TOOLS: List[str] = [
     'save_artifact',
-    'load_artifact',
+    'get_artifact',
     'list_artifacts',
+    'list_knowledge_bases',
 ]
 
 
@@ -221,13 +222,32 @@ def _trigger_plugin_step(
     if partial_indices:
         params['partial_indices'] = partial_indices
 
+    # Inject focused_tab / focused_sort_order from agentic_config into objective context.
+    # Both values are always appended to the instruction when present, regardless of whether
+    # a runtime_instruction was already provided.
+    focused_tab = cfg.get('focused_tab')
+    focused_sort_order = cfg.get('focused_sort_order')
+    enriched_instruction = runtime_instruction or ''
+    context_hints: list[str] = []
+    if focused_tab:
+        context_hints.append(f'User is currently viewing tab: {focused_tab}.')
+    if focused_sort_order is not None:
+        context_hints.append(f'User is currently focused on item at sort_order={focused_sort_order}.')
+    if context_hints:
+        sep = ' ' if enriched_instruction else ''
+        enriched_instruction = enriched_instruction + sep + ' '.join(context_hints)
+    # Resolve "第N个" pattern in runtime_instruction → target_sort_order.
+    target_sort_order = _resolve_nth_item(runtime_instruction or user_input, cfg)
+    if target_sort_order is not None:
+        params['target_sort_order'] = target_sort_order
+
     _write_agent_data(
         'task_created',
         task_id=task_id,
         title=f'{plugin_id}:{step_id}',
         agent_type='plugin_step',
         mode='manual',          # Plugin steps always async; Go controls auto-advance
-        objective=_render_step_objective(step_config, user_input, runtime_instruction),
+        objective=_render_step_objective(step_config, user_input, enriched_instruction),
         params=params,
         input_artifact_keys=input_keys,
         output_artifact_keys=output_keys,
@@ -235,6 +255,38 @@ def _trigger_plugin_step(
         resume=False,
     )
     return f'Step {step_id!r} triggered. Stop here.'
+
+
+def _resolve_nth_item(text: str, cfg: Dict[str, Any]) -> Optional[int]:
+    """Detect "第N个" / "the Nth" / "item N" patterns and return the sort_order, or None.
+
+    Uses the visible_sort_order_map from plugin_context to map N → sort_order.
+    If the map is absent or N is out of range, returns None.
+    """
+    if not text:
+        return None
+    import re
+    # Match: 第N个, 第N张, the Nth, item N (N is 1-9 digits)
+    patterns = [
+        r'第\s*([1-9]\d*)\s*[个张幅条件]',
+        r'\bthe\s+([1-9]\d*)\w*\b',
+        r'\bitem\s+([1-9]\d*)\b',
+        r'\b#([1-9]\d*)\b',
+    ]
+    for pat in patterns:
+        m = re.search(pat, text, re.IGNORECASE)
+        if m:
+            n = int(m.group(1))
+            # Try to look up visible_sort_order_map from agentic_config.
+            vsom: Optional[Dict[str, Any]] = cfg.get('visible_sort_order_map')
+            if vsom:
+                # Pick any slot's list and return the nth sort_order.
+                for orders in vsom.values():
+                    if isinstance(orders, list) and 1 <= n <= len(orders):
+                        return int(orders[n - 1])
+            # Fallback: return n directly as sort_order.
+            return n
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -445,6 +497,9 @@ def resolve_plugin_injection(
                 'plugin_id': p_plugin_id,
                 'plugin_session_id': p_session_id,
                 'plugin_step': p_current_step,
+                'focused_tab': plugin_context.get('focused_tab'),
+                'focused_sort_order': plugin_context.get('focused_sort_order'),
+                'visible_sort_order_map': plugin_context.get('visible_sort_order_map'),
             }
             sm = plugin_loader.get_state_machine(p_plugin_id)
 

@@ -125,7 +125,7 @@ ui:
 
 - `layout`：Tab 布局模式。`list` 为垂直堆叠（默认），`grid` 为网格，`composite` 为跨 slot 联合渲染（见 §7.4）。
 - `ordered`：声明该 slot 的顺序是否有意义；`true` 时前端渲染拖拽手柄，调序结果写回 `sort_order`。
-- `caption_key`：与图片/文件 slot 配对的描述 artifact key；Go 在处理 artifact 事件时将两者关联写入。
+- `caption_key`：~~与图片/文件 slot 配对的描述 artifact key；Go 在处理 artifact 事件时将两者关联写入。~~ **已废弃**：caption 直接通过 `save_artifact(caption=...)` 写入主 artifact 的 value JSON，Go 的 `extractCaption` 从 value JSON 中读取并写入 `sub_agent_artifacts.caption` 列，无需额外 artifact key。
 - `i18n`：多语言覆盖字段，详见 §7.5。
 
 ### 2.5 Artifact 类型系统
@@ -205,7 +205,6 @@ DELETE /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}
   → sub_agent_artifacts WHERE session_id=? AND slot_id=? AND list_index=? → hidden=TRUE
   → plugin_slot_revisions 对应 list_index 的所有 revision → selected=FALSE（历史保留，仅取消选中）
   → plugin_slot_order.order_list 中移除该 list_index，order_version+1
-  → SSE: {type: 'slot_item_deleted', slot_id, sort_order}
 ```
 
 > **composite 场景（同行多 slot）**：如果 Tab 是 `layout=composite`，同一 `sort_order` 代表一行中多个 slot 各自的 artifact。前端删除时应同时删除该行所有参与 slot 的对应 `sort_order` 项（批量调用上述接口，或后端提供 composite 行级删除接口）。该扩展留到 composite 布局实现阶段再确定。
@@ -213,7 +212,7 @@ DELETE /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}
 前端在图片/内容卡片**右上角**直接展示 `×` 按钮（`cardinality=list` 时显示）：
 - 点击 `×` → 弹出二次确认弹窗（"确认删除该项？此操作不可撤销"）
 - 确认后调用删除接口
-- 前端收到 SSE `slot_item_deleted` 后从渲染列表中移除，不刷新整个 Panel
+- 调用成功后前端触发本地刷新，从渲染列表中移除对应项
 - 版本历史记录完整保留，保证可追溯
 
 ### 3.2 有序 Slot 调序
@@ -282,7 +281,7 @@ def save_artifact(key, value, content_type='text',
 
 ### 4.2 联网搜索结果入库
 
-SubAgent 调用 `web_search_tool` / `image_search_tool` 后，通过现有 `save_artifact(key, url, content_type='image')` 即可存入。本阶段无需修改工具层，只需在 `plugin.yaml` 的对应 slot 加 `caption_key` 字段，使搜索结果的描述文本同步写入（SubAgent 在 `save_artifact` 时额外调一次 `save_artifact(caption_key, description, content_type='text')`）。
+SubAgent 调用 `web_search_tool` / `image_search_tool` 后，通过现有 `save_artifact(key, url, content_type='image')` 即可存入。本阶段无需修改工具层，只需在调用 `save_artifact` 时额外传入 `caption` 参数（`save_artifact(key, url, content_type='image', caption=description)`），caption 会自动写入 `sub_agent_artifacts.caption`，并在 `artifact_summary` 中使用。`caption_key` 字段已废弃（见 §2.4）。
 
 ### 4.3 知识库检索
 
@@ -358,9 +357,8 @@ Go 在 `applyChatRuntimeConfigs` 阶段读取 `plugin_ui_state`，合并进 `plu
 
 | 场景 | 触发时机 | `change_source` |
 | --- | --- | --- |
-| AI 步骤完成（`done` 事件） | Go 在 `routeToTaskSSE` 的 `done` 分支，读取该步骤所有 artifact，对每个 `(slot_id, list_index)` 写一条新 `plugin_slot_revisions`（`content_snapshot` = artifact value，`selected=TRUE`，旧行 `selected=FALSE`） | `'ai'` |
-| 用户在 Panel 内人工编辑 | 前端防抖 3s 后调 `PATCH /plugin-sessions/{id}/slots/{slot_id}/items/{sort_order}`，Go 根据 `sort_order` 查出 `list_index` 后写新 revision 行 | `'human'` |
-| 发送对话消息前强制快照 | 前端在调 `POST /conversations:chat` 前，若有未提交的编辑，先发 PATCH 强制写版本，再发消息 | `'human'` |
+| AI 步骤完成（`done` 事件） | Go 在 `routeToTaskSSE` 的 `done` 分支收到 done 信号后，**异步（goroutine）**读取该步骤所有 artifact，对每个 `(slot_id, list_index)` 写一条新 `plugin_slot_revisions`（`content_snapshot` = artifact value，`selected=TRUE`，旧行 `selected=FALSE`）。**注意**：快照为异步写入，前端在极短时间窗口内通过 `/versions` 接口可能拿到 `content_snapshot=null` 的最新版本，应展示 loading 状态直到有值。 | `'ai'` |
+| 用户在 Panel 内人工编辑 | 前端通过显式保存按钮调用 `PATCH /plugin-sessions/{id}/slots/{slot_id}/items/{sort_order}`，Go 根据 `sort_order` 查出 `list_index` 后写新 revision 行 | `'human'` |
 
 ### 6.2 版本回退
 
@@ -396,8 +394,8 @@ GET /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}/ve
 | 组件 | 新增能力 |
 | --- | --- |
 | `SlotImage` | 右上角 `×` 按钮（二次确认后删除该 sort_order 下所有 artifact）；左下角版本角标（多版本时显示，含快速切换箭头）；右键菜单：「引用到对话框」（携带 artifact 元数据，见 §7.2）、查看版本历史（弹出 `SlotVersionPopover`）；`ordered=true` 时渲染拖拽手柄 |
-| `SlotText` | 支持内联编辑（contentEditable），失焦后防抖触发 PATCH；右上角版本角标（多版本时显示）；右键「查看版本历史」 |
-| `PluginPanel` | 发送消息前拦截：若有未提交编辑先强制快照再发；接收 `slot_item_deleted` / `slot_updated` SSE 事件局部刷新；维护 `focused_tab` / `focused_sort_order` 状态并随 chat 请求携带 |
+| `SlotText` | 支持内联编辑（textarea + 显式保存/取消按钮），保存后触发 PATCH；右上角版本角标（多版本时显示）；版本角标点击弹出「查看版本历史」 |
+| `PluginPanel` | `composite` 布局渲染；接收 `slot_updated` SSE 事件局部刷新；维护 `focused_tab` / `focused_sort_order` 状态并随 chat 请求携带 |
 
 ### 7.2 Artifact 引用到对话框
 
@@ -440,6 +438,7 @@ GET /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}/ve
 - 当前只有一个版本时，不渲染角标，保持主界面干净。
 - 点击 `‹` / `›`：直接在当前卡片内切换预览版本（仅前端状态，不触发 rollback）；切换后角标高亮提示"非当前版本"，显示「应用」按钮。
 - 点击版本号（`V3`）：弹出版本对比浮层（见下）。
+- UI图参考docs/plan/plugin/03-data_history/image_version_ui.png
 
 #### 版本对比浮层
 
@@ -566,13 +565,16 @@ i18n:
 ```
 # Artifact 管理
 DELETE /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}
-  → 逻辑删除（hidden=TRUE），同步从 order_list 移除，发 slot_item_deleted 事件
+  → 逻辑删除（hidden=TRUE），同步从 order_list 移除；前端调用后通过本地刷新更新 UI
 
 PATCH  /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}
   → 人工编辑写版本，change_source='human'
 
 PATCH  /api/core/plugin-sessions/{session_id}/slots/{slot_id}/order
   body: {order: [3,1,2], version: N}  → 乐观锁调序（version 不匹配返回 409）
+
+GET /api/core/plugin-sessions/{session_id}/slots/{slot_id}/order
+  → 返回当前 {order_list: [...], order_version: N}（内部接口，供工具层 sort_order→list_index 查询）
 
 # 版本历史
 GET  /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}/versions
@@ -618,9 +620,9 @@ GET /api/core/plugins/{plugin_id}
 
 4. **前端**：
    - `SlotImage`：右上角 `×` 删除按钮（二次确认）；左下角版本角标（多版本时显示，含 `‹/›` 快切箭头）；版本角标点击弹出 `SlotVersionPopover`；引用按钮携带 artifact 元数据；拖拽手柄。
-   - `SlotText`：内联编辑（防抖 PATCH）；版本角标与 `SlotVersionPopover`。
+   - `SlotText`：内联编辑（textarea + 显式保存/取消按钮），保存后触发 PATCH；版本角标与 `SlotVersionPopover`。
    - `SlotVersionPopover` 组件：版本列表 + 当前 vs 历史并排对比（图片/diff）+ 「应用此版本」。
-   - `PluginPanel`：`composite` 布局；发消息前强制快照；`slot_item_deleted` / `slot_updated` SSE 局部刷新；维护 `focused_tab` / `focused_sort_order` 并随 chat 请求携带 `plugin_ui_state`。
+   - `PluginPanel`：`composite` 布局；`slot_updated` SSE 局部刷新；维护 `focused_tab` / `focused_sort_order` 并随 chat 请求携带 `plugin_ui_state`。
    - `ChatInput`：「引用」注入 files + artifact_refs 元数据列表。
 
 5. **端到端验证**（image-plugin 扩展）：

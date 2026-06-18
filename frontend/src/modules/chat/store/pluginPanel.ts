@@ -5,6 +5,8 @@ export interface SlotRevision {
   slot_id: string;
   revision: number;
   list_index?: number;
+  /** 1-based display position within a list slot; computed from order_list. */
+  sort_order?: number;
   selected: boolean;
   artifact_key: string;
   step_id: string;
@@ -14,6 +16,12 @@ export interface SlotRevision {
   content_type?: string;
   /** Artifact value as returned by the backend — shape depends on content_type. */
   artifact_value?: any;
+  /** Human-readable description for image/file artifacts. */
+  caption?: string;
+  /** change_source: 'ai' (generated) or 'human' (manually edited). */
+  change_source?: "ai" | "human";
+  /** Number of revisions for this (slot_id, list_index) — used to show version badge. */
+  revision_count?: number;
 }
 
 export interface PluginSession {
@@ -25,6 +33,10 @@ export interface PluginSession {
   created_at: string;
   updated_at: string;
   slots?: SlotRevision[];
+  /** The tab currently focused by the user — forwarded to the AI in plugin_context. */
+  focusedTab?: string;
+  /** The sort_order item currently focused by the user — forwarded to the AI. */
+  focusedSortOrder?: number;
 }
 
 // Slot value resolved from a TaskArtifact's value field.
@@ -42,16 +54,57 @@ export interface SlotDef {
   cardinality?: "single" | "list";
   /** The artifact_key written by the SubAgent. If absent, falls back to id. */
   artifact_key?: string;
+  /** Whether this list slot supports drag-reorder. */
+  ordered?: boolean;
+  /** The artifact_key used for the caption of this slot's items. */
+  caption_key?: string;
+  /** Maximum characters shown in the artifact summary injected into the AI prompt. */
+  summary_max_chars?: number;
+}
+
+// composite_layout node types (recursive).
+// A node is one of:
+//   - string: slot_id
+//   - CompositeColumnNode: { slot?: string | InnerTabsNode; weight?: number }
+//   - InnerTabsNode: { tabs: CompositeLayoutNode[] }
+export type CompositeLayoutNode =
+  | string
+  | CompositeColumnNode
+  | InnerTabsNode;
+
+export interface CompositeColumnNode {
+  slot?: string | InnerTabsNode;
+  weight?: number;
+}
+
+export interface InnerTabsNode {
+  tabs: CompositeLayoutNode[];
 }
 
 export interface TabDef {
   id: string;
   label: string;
+  layout?: "grid" | "list" | "composite";
   slots: SlotDef[];
+  /** Only present when layout === "composite". Each element describes one column. */
+  composite_layout?: CompositeLayoutNode[];
 }
 
 export interface PluginUI {
   tabs?: TabDef[];
+}
+
+export interface SlotOrderInfo {
+  order_list: number[];
+  order_version: number;
+}
+
+export interface SlotVersionEntry {
+  revision: number;
+  change_source: "ai" | "human";
+  created_at: string;
+  selected: boolean;
+  content_snapshot?: any;
 }
 
 interface PluginStore {
@@ -63,6 +116,8 @@ interface PluginStore {
   autoRunningByConversation: Record<string, boolean>;
   // Plugin UI definition cache: keyed by plugin_id.
   pluginUIByPlugin: Record<string, PluginUI>;
+  // Slot order cache: keyed by "sessionId:slotId"
+  slotOrderCache: Record<string, SlotOrderInfo>;
 
   setSession: (conversationId: string, session: PluginSession | null) => void;
   updateSlot: (conversationId: string, slot: SlotRevision) => void;
@@ -74,6 +129,16 @@ interface PluginStore {
   clearSession: (conversationId: string) => void;
   setAutoRunning: (conversationId: string, running: boolean) => void;
   fetchPluginUI: (pluginId: string) => Promise<PluginUI>;
+  // Phase 3: slot item management.
+  deleteSlotItem: (sessionId: string, slotId: string, sortOrder: number) => Promise<void>;
+  patchSlotItemValue: (sessionId: string, slotId: string, sortOrder: number, value: any) => Promise<void>;
+  reorderSlotItems: (sessionId: string, slotId: string, newSortOrderSeq: number[], version: number) => Promise<void>;
+  getSlotVersions: (sessionId: string, slotId: string, sortOrder: number) => Promise<SlotVersionEntry[]>;
+  rollbackSlotItem: (sessionId: string, slotId: string, sortOrder: number, revision: number) => Promise<void>;
+  loadSlotOrder: (sessionId: string, slotId: string) => Promise<SlotOrderInfo>;
+  // Track focused tab and sort_order for the AI.
+  setFocusedTab: (conversationId: string, tabId: string) => void;
+  setFocusedSortOrder: (conversationId: string, sortOrder: number | undefined) => void;
 }
 
 export const usePluginStore = create<PluginStore>()((set, get) => ({
@@ -81,6 +146,7 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
   loadingByConversation: {},
   autoRunningByConversation: {},
   pluginUIByPlugin: {},
+  slotOrderCache: {},
 
   setSession: (conversationId, session) => {
     set((state) => ({
@@ -202,5 +268,76 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
     } catch {
       return {};
     }
+  },
+
+  deleteSlotItem: async (sessionId, slotId, sortOrder) => {
+    await PluginSessionApi().deleteSlotItem(sessionId, slotId, sortOrder);
+  },
+
+  patchSlotItemValue: async (sessionId, slotId, sortOrder, value) => {
+    await PluginSessionApi().patchSlotItem(sessionId, slotId, sortOrder, value);
+  },
+
+  reorderSlotItems: async (sessionId, slotId, newSortOrderSeq, version) => {
+    await PluginSessionApi().reorderSlotItems(sessionId, slotId, newSortOrderSeq, version);
+    // Invalidate order cache.
+    set((state) => {
+      const key = `${sessionId}:${slotId}`;
+      const cache = { ...state.slotOrderCache };
+      delete cache[key];
+      return { slotOrderCache: cache };
+    });
+  },
+
+  getSlotVersions: async (sessionId, slotId, sortOrder) => {
+    const res = await PluginSessionApi().getSlotItemVersions(sessionId, slotId, sortOrder);
+    return res?.data?.data?.versions ?? [];
+  },
+
+  rollbackSlotItem: async (sessionId, slotId, sortOrder, revision) => {
+    await PluginSessionApi().rollbackSlotItem(sessionId, slotId, sortOrder, revision);
+  },
+
+  loadSlotOrder: async (sessionId, slotId) => {
+    const key = `${sessionId}:${slotId}`;
+    const cached = get().slotOrderCache[key];
+    if (cached) return cached;
+    try {
+      const res = await PluginSessionApi().getSlotOrder(sessionId, slotId);
+      const info: SlotOrderInfo = {
+        order_list: res?.data?.data?.order_list ?? [],
+        order_version: res?.data?.data?.order_version ?? 0,
+      };
+      set((state) => ({ slotOrderCache: { ...state.slotOrderCache, [key]: info } }));
+      return info;
+    } catch {
+      return { order_list: [], order_version: 0 };
+    }
+  },
+
+  setFocusedTab: (conversationId, tabId) => {
+    set((state) => {
+      const session = state.sessionByConversation[conversationId];
+      if (!session) return state;
+      return {
+        sessionByConversation: {
+          ...state.sessionByConversation,
+          [conversationId]: { ...session, focusedTab: tabId },
+        },
+      };
+    });
+  },
+
+  setFocusedSortOrder: (conversationId, sortOrder) => {
+    set((state) => {
+      const session = state.sessionByConversation[conversationId];
+      if (!session) return state;
+      return {
+        sessionByConversation: {
+          ...state.sessionByConversation,
+          [conversationId]: { ...session, focusedSortOrder: sortOrder },
+        },
+      };
+    });
   },
 }));

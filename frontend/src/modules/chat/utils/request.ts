@@ -160,6 +160,46 @@ export function PluginSessionApi() {
         options,
       );
     },
+    // Phase 3: slot item management
+    deleteSlotItem(sessionId: string, slotId: string, sortOrder: number, options?: RawAxiosRequestConfig) {
+      return axiosInstance.delete(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/${sortOrder}`,
+        options,
+      );
+    },
+    patchSlotItem(sessionId: string, slotId: string, sortOrder: number, value: any, options?: RawAxiosRequestConfig) {
+      return axiosInstance.patch(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/${sortOrder}`,
+        { value },
+        options,
+      );
+    },
+    reorderSlotItems(sessionId: string, slotId: string, order: number[], version: number, options?: RawAxiosRequestConfig) {
+      return axiosInstance.patch(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/order`,
+        { order, version },
+        options,
+      );
+    },
+    getSlotOrder(sessionId: string, slotId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/order`,
+        options,
+      );
+    },
+    getSlotItemVersions(sessionId: string, slotId: string, sortOrder: number, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/${sortOrder}/versions`,
+        options,
+      );
+    },
+    rollbackSlotItem(sessionId: string, slotId: string, sortOrder: number, revision: number, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/${sortOrder}/rollback`,
+        { revision },
+        options,
+      );
+    },
   };
 }
 

@@ -414,7 +414,7 @@ func filePathsForUpstreamChat(raw map[string]any) any {
 	return out
 }
 
-func buildChatRequestBody(convID, sessionID, query string, histories []orm.ChatHistory, raw map[string]any, resourceContext *evolution.ChatResourceContext, userID string) map[string]any {
+func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, query string, histories []orm.ChatHistory, raw map[string]any, resourceContext *evolution.ChatResourceContext, userID string) map[string]any {
 	if strings.TrimSpace(sessionID) == "" {
 		sessionID = upstreamSessionID(convID)
 	}
@@ -445,8 +445,32 @@ func buildChatRequestBody(convID, sessionID, query string, histories []orm.ChatH
 		body["environment_context"] = environmentContext
 	}
 	// Propagate plugin_context so Python ChatAgent receives the active session info.
+	// Merge plugin_ui_state (focused_tab, focused_sort_order) from the request body.
+	// Also inject artifact_summary and visible_sort_order_map for the AI.
 	if pc, ok := raw["plugin_context"].(map[string]any); ok && len(pc) > 0 {
-		body["plugin_context"] = pc
+		mergedPC := make(map[string]any, len(pc)+8)
+		for k, v := range pc {
+			mergedPC[k] = v
+		}
+		if uis, ok := raw["plugin_ui_state"].(map[string]any); ok {
+			if ft, ok := uis["focused_tab"]; ok {
+				mergedPC["focused_tab"] = ft
+			}
+			if fso, ok := uis["focused_sort_order"]; ok {
+				mergedPC["focused_sort_order"] = fso
+			}
+		}
+		// Build artifact_summary and visible_sort_order_map from the active plugin session.
+		if sid, _ := pc["session_id"].(string); sid != "" && db != nil {
+			summary, vsom := buildArtifactSummary(ctx, db, sid)
+			if len(summary) > 0 {
+				mergedPC["artifact_summary"] = summary
+			}
+			if len(vsom) > 0 {
+				mergedPC["visible_sort_order_map"] = vsom
+			}
+		}
+		body["plugin_context"] = mergedPC
 	}
 	if resourceContext != nil {
 		body["disabled_tools"] = resourceContext.DisabledTools
@@ -1309,4 +1333,176 @@ func handlePluginStepCreated(
 		SeqInConversation: task.SeqInConversation,
 		PluginSessionID:   sessionID,
 	}
+}
+
+// buildArtifactSummary constructs artifact_summary and visible_sort_order_map for the AI context.
+// It loads the selected slot revisions for sessionID, resolves artifact values, truncates them,
+// and returns them as maps ready to embed in plugin_context.
+//
+// artifact_summary: map[artifact_key][]string — always a slice (one entry for single slots,
+//
+//	N entries for list slots) so that Python callers can handle it uniformly.
+//
+// visible_sort_order_map: map[slot_id][]int (list of visible sort_order values in order)
+func buildArtifactSummary(ctx context.Context, db *gorm.DB, sessionID string) (map[string]any, map[string][]int) {
+	const defaultMaxChars = 200
+
+	revisions, err := plugin.LoadSelectedSlots(ctx, db, sessionID)
+	if err != nil || len(revisions) == 0 {
+		return nil, nil
+	}
+
+	// Load slot order rows to compute sort_order.
+	var orders []orm.PluginSlotOrder
+	db.WithContext(ctx).Where("session_id = ?", sessionID).Find(&orders)
+	orderBySlot := make(map[string][]int, len(orders))
+	for _, o := range orders {
+		var list []int
+		_ = json.Unmarshal(o.OrderList, &list)
+		orderBySlot[o.SlotID] = list
+	}
+
+	// Build step → task_id map.
+	type stepKey struct {
+		stepID  string
+		attempt int
+	}
+	var steps []orm.PluginSessionStep
+	db.WithContext(ctx).Where("session_id = ?", sessionID).Find(&steps)
+	taskIDByStep := make(map[stepKey]string, len(steps))
+	for _, s := range steps {
+		taskIDByStep[stepKey{s.StepID, s.Attempt}] = s.TaskID
+	}
+
+	summary := make(map[string]any)
+	vsom := make(map[string][]int)
+
+	// Build a lookup: (slotID, listIndex) → revision so we can iterate in order_list order.
+	type revLookupKey struct {
+		slotID    string
+		listIndex int
+	}
+	revByListIndex := make(map[revLookupKey]*orm.PluginSlotRevision)
+	revBySingle := make(map[string]*orm.PluginSlotRevision) // slotID → single-slot revision
+	for i := range revisions {
+		rev := &revisions[i]
+		if rev.ListIndex != nil {
+			revByListIndex[revLookupKey{rev.SlotID, *rev.ListIndex}] = rev
+		} else {
+			revBySingle[rev.SlotID] = rev
+		}
+	}
+
+	// Process list slots in order_list order so that artifact_summary and vsom
+	// both reflect the correct display sequence.
+	processedSlots := make(map[string]bool)
+	for _, o := range orders {
+		var list []int
+		_ = json.Unmarshal(o.OrderList, &list)
+		for pos, li := range list {
+			rev, ok := revByListIndex[revLookupKey{o.SlotID, li}]
+			if !ok {
+				continue
+			}
+			sk := stepKey{rev.StepID, rev.Attempt}
+			taskID := taskIDByStep[sk]
+			if taskID == "" {
+				continue
+			}
+			var art orm.SubAgentArtifact
+			if err := db.WithContext(ctx).
+				Where("task_id = ? AND artifact_key = ? AND hidden = ?", taskID, rev.ArtifactKey, false).
+				Order("seq DESC").First(&art).Error; err != nil {
+				continue
+			}
+			var entry string
+			realCT := plugin.ResolveContentType(art.ContentType, art.Value)
+			if art.Caption != nil && *art.Caption != "" {
+				entry = *art.Caption
+			} else if realCT == "file" {
+				// Offloaded binary file — use filename as summary.
+				var v map[string]any
+				if json.Unmarshal(art.Value, &v) == nil {
+					if fn, ok := v["filename"].(string); ok && fn != "" {
+						entry = "[文件: " + fn + "]"
+					} else {
+						entry = "[文件]"
+					}
+				} else {
+					entry = "[文件]"
+				}
+			} else if (realCT == "text" || realCT == "json") && isOffloadedArtifact(art.Value) {
+				// Large text/json offloaded to workspace — can't inline; use placeholder.
+				entry = "[大文本，已存档]"
+			} else {
+				val := string(art.Value)
+				if len(val) > defaultMaxChars {
+					val = val[:defaultMaxChars]
+				}
+				entry = val
+			}
+			existing, _ := summary[rev.ArtifactKey].([]string)
+			summary[rev.ArtifactKey] = append(existing, entry)
+			vsom[o.SlotID] = append(vsom[o.SlotID], pos+1)
+		}
+		processedSlots[o.SlotID] = true
+	}
+
+	// Process single slots (list_index IS NULL).
+	for _, rev := range revBySingle {
+		if processedSlots[rev.SlotID] {
+			continue
+		}
+		sk := stepKey{rev.StepID, rev.Attempt}
+		taskID := taskIDByStep[sk]
+		if taskID == "" {
+			continue
+		}
+		var art orm.SubAgentArtifact
+		if err := db.WithContext(ctx).
+			Where("task_id = ? AND artifact_key = ? AND hidden = ?", taskID, rev.ArtifactKey, false).
+			Order("seq DESC").First(&art).Error; err != nil {
+			continue
+		}
+		var entry string
+		realCT := plugin.ResolveContentType(art.ContentType, art.Value)
+		if art.Caption != nil && *art.Caption != "" {
+			entry = *art.Caption
+		} else if realCT == "file" {
+			var v map[string]any
+			if json.Unmarshal(art.Value, &v) == nil {
+				if fn, ok := v["filename"].(string); ok && fn != "" {
+					entry = "[文件: " + fn + "]"
+				} else {
+					entry = "[文件]"
+				}
+			} else {
+				entry = "[文件]"
+			}
+		} else if (realCT == "text" || realCT == "json") && isOffloadedArtifact(art.Value) {
+			entry = "[大文本，已存档]"
+		} else {
+			val := string(art.Value)
+			if len(val) > defaultMaxChars {
+				val = val[:defaultMaxChars]
+			}
+			entry = val
+		}
+		// Wrap in a slice so artifact_summary is always []string regardless of cardinality.
+		summary[rev.ArtifactKey] = []string{entry}
+	}
+
+	return summary, vsom
+}
+
+// isOffloadedArtifact returns true when the artifact value JSON represents a large-content
+// offload: {"type":"text"|"json","path":"...","size":N} written by _build_artifact_value.
+func isOffloadedArtifact(value []byte) bool {
+	var v map[string]any
+	if json.Unmarshal(value, &v) != nil {
+		return false
+	}
+	_, hasPath := v["path"]
+	t, _ := v["type"].(string)
+	return hasPath && (t == "text" || t == "json")
 }

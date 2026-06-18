@@ -1,8 +1,17 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePluginSession } from '@/modules/chat/hooks/usePlugin';
 import { usePluginStore } from '@/modules/chat/store/pluginPanel';
-import type { PluginSession, SlotRevision, TabDef, PluginUI } from '@/modules/chat/store/pluginPanel';
+import type {
+  PluginSession,
+  SlotRevision,
+  TabDef,
+  PluginUI,
+  SlotDef,
+  CompositeLayoutNode,
+  CompositeColumnNode,
+  InnerTabsNode,
+} from '@/modules/chat/store/pluginPanel';
 import { SlotRenderer } from './SlotComponents';
 import './PluginPanel.scss';
 
@@ -11,13 +20,23 @@ interface PluginPanelProps {
   pollIntervalMs?: number;
   /** Called when the user clicks Continue or Retry — simulates sending a user message. */
   onSendMessage?: (text: string) => void;
+  /** Called when the user clicks the reference button on a slot item. */
+  onReference?: (slot: SlotRevision) => void;
 }
 
 /**
  * AutoSlotGrid renders all available slot revisions in a responsive grid,
  * without requiring a pre-defined UI spec.
  */
-function AutoSlotGrid({ session }: { session: PluginSession }) {
+function AutoSlotGrid({
+  session,
+  onRefresh,
+  onReference,
+}: {
+  session: PluginSession;
+  onRefresh?: () => void;
+  onReference?: (slot: SlotRevision) => void;
+}) {
   if (!session.slots || session.slots.length === 0) {
     return (
       <div className='plugin-panel__empty' role='status' aria-live='polite'>
@@ -43,6 +62,11 @@ function AutoSlotGrid({ session }: { session: PluginSession }) {
               <SlotRenderer
                 key={`${rev.slot_id}-${rev.revision}-${rev.list_index ?? 0}`}
                 slot={rev}
+                sessionId={session.session_id}
+                slotId={slotId}
+                revisionCount={rev.revision_count}
+                onRefresh={onRefresh}
+                onReference={onReference}
               />
             ))}
           </div>
@@ -53,17 +77,288 @@ function AutoSlotGrid({ session }: { session: PluginSession }) {
 }
 
 /**
- * TabSlotGrid renders slots according to the plugin UI tab definition.
+ * CompositeSlotGrid renders a composite-layout tab where multiple slots are
+ * aligned by sort_order. Each row corresponds to one sort_order value; within
+ * a row, columns are laid out according to composite_layout.
  */
-function TabSlotGrid({ tab, session }: { tab: TabDef; session: PluginSession }) {
+
+// ---------------------------------------------------------------------------
+// Helpers for composite_layout parsing
+// ---------------------------------------------------------------------------
+
+function isInnerTabsNode(node: CompositeLayoutNode): node is InnerTabsNode {
+  return typeof node === 'object' && node !== null && 'tabs' in node;
+}
+
+function isColumnNode(node: CompositeLayoutNode): node is CompositeColumnNode {
+  return typeof node === 'object' && node !== null && 'slot' in node;
+}
+
+/** Resolve a leaf node to { slotId, weight }. Returns null for unknown shapes. */
+function resolveColumnSlotId(
+  node: CompositeLayoutNode,
+): { slotId: string | InnerTabsNode; weight: number } | null {
+  if (typeof node === 'string') {
+    return { slotId: node, weight: 1 };
+  }
+  if (isColumnNode(node)) {
+    if (node.slot === undefined) return null;
+    return { slotId: node.slot, weight: node.weight ?? 1 };
+  }
+  return null;
+}
+
+/** Build the effective column list from composite_layout (or fall back to slot ids). */
+function buildColumns(
+  tab: TabDef,
+): Array<{ slotId: string | InnerTabsNode; weight: number }> {
+  const layout = tab.composite_layout;
+  if (!layout || layout.length === 0) {
+    // Fallback: all slots side-by-side with equal weight.
+    return tab.slots.map((s) => ({ slotId: s.id, weight: 1 }));
+  }
+  // The top-level array may be a single [...] parallel node or an explicit list of columns.
+  // Detect whether the first element is itself an array (parallel node).
+  const first = layout[0];
+  const cols =
+    Array.isArray(first)
+      ? (first as CompositeLayoutNode[])
+      : layout;
+  return cols
+    .map((n) => resolveColumnSlotId(n))
+    .filter((c): c is NonNullable<typeof c> => c !== null);
+}
+
+/** Get all distinct sort_orders present across the participating slots. */
+function getCompositeRows(
+  tab: TabDef,
+  session: PluginSession,
+): number[] {
+  const participating = new Set(tab.slots.map((s) => s.artifact_key ?? s.id));
+  const orders = new Set<number>();
+  for (const slot of session.slots ?? []) {
+    if (slot.selected && participating.has(slot.artifact_key ?? slot.slot_id)) {
+      if (slot.sort_order !== undefined) {
+        orders.add(slot.sort_order);
+      }
+    }
+  }
+  return Array.from(orders).sort((a, b) => a - b);
+}
+
+/** Find a slot revision for (artifact_key, sort_order). */
+function findSlotRevision(
+  session: PluginSession,
+  artifactKey: string,
+  sortOrder: number,
+): SlotRevision | undefined {
+  return (session.slots ?? []).find(
+    (s) => s.selected && (s.artifact_key ?? s.slot_id) === artifactKey && s.sort_order === sortOrder,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// InnerTabsCell: renders an {tabs: [...]} node for a single row
+// ---------------------------------------------------------------------------
+
+function InnerTabsCell({
+  tabsNode,
+  session,
+  slotDefs,
+  sortOrder,
+  onRefresh,
+  onReference,
+}: {
+  tabsNode: InnerTabsNode;
+  session: PluginSession;
+  slotDefs: SlotDef[];
+  sortOrder: number;
+  onRefresh?: () => void;
+  onReference?: (slot: SlotRevision) => void;
+}) {
+  const [activeIdx, setActiveIdx] = useState(0);
+
+  const innerSlotIds = tabsNode.tabs
+    .map((n) => (typeof n === 'string' ? n : isColumnNode(n) ? (typeof n.slot === 'string' ? n.slot : null) : null))
+    .filter((id): id is string => id !== null);
+
   return (
-    <div className='plugin-panel__tab-content'>
+    <div className='composite-cell__inner-tabs'>
+      <div className='composite-cell__inner-tab-bar' role='tablist'>
+        {innerSlotIds.map((slotId, i) => {
+          const def = slotDefs.find((s) => s.id === slotId);
+          return (
+            <button
+              key={slotId}
+              role='tab'
+              aria-selected={i === activeIdx}
+              className={`composite-cell__inner-tab-btn${i === activeIdx ? ' composite-cell__inner-tab-btn--active' : ''}`}
+              onClick={() => setActiveIdx(i)}
+              type='button'
+            >
+              {def?.label ?? slotId}
+            </button>
+          );
+        })}
+      </div>
+      {innerSlotIds.map((slotId, i) => {
+        const def = slotDefs.find((s) => s.id === slotId);
+        const artifactKey = def?.artifact_key ?? slotId;
+        const rev = findSlotRevision(session, artifactKey, sortOrder);
+        return (
+          <div key={slotId} role='tabpanel' hidden={i !== activeIdx}>
+            {rev ? (
+              <SlotRenderer
+                slot={rev}
+                sessionId={session.session_id}
+                slotId={slotId}
+                revisionCount={rev.revision_count}
+                onRefresh={onRefresh}
+                onReference={onReference}
+              />
+            ) : (
+              <div className='composite-cell__empty'>—</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CompositeSlotGrid
+// ---------------------------------------------------------------------------
+
+function CompositeSlotGrid({
+  tab,
+  session,
+  onRefresh,
+  onReference,
+  onFocusSortOrder,
+}: {
+  tab: TabDef;
+  session: PluginSession;
+  onRefresh?: () => void;
+  onReference?: (slot: SlotRevision) => void;
+  onFocusSortOrder?: (sortOrder: number | undefined) => void;
+}) {
+  const rows = getCompositeRows(tab, session);
+  const columns = buildColumns(tab);
+
+  // Compute total weight for flex proportions.
+  const totalWeight = columns.reduce((s, c) => s + c.weight, 0);
+
+  if (rows.length === 0) {
+    return (
+      <div className='plugin-panel__empty' role='status' aria-live='polite'>
+        <span>Waiting for results…</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className='composite-grid'>
+      {rows.map((sortOrder) => (
+        <div
+          key={sortOrder}
+          className='composite-grid__row'
+          onClick={() => onFocusSortOrder?.(sortOrder)}
+          role='button'
+          tabIndex={0}
+          aria-label={`行 ${sortOrder}`}
+        >
+          {columns.map((col, colIdx) => {
+            const flexBasis = `${(col.weight / totalWeight) * 100}%`;
+            if (isInnerTabsNode(col.slotId)) {
+              return (
+                <div
+                  key={colIdx}
+                  className='composite-grid__cell'
+                  style={{ flexBasis, flexGrow: col.weight, flexShrink: 1 }}
+                >
+                  <InnerTabsCell
+                    tabsNode={col.slotId}
+                    session={session}
+                    slotDefs={tab.slots}
+                    sortOrder={sortOrder}
+                    onRefresh={onRefresh}
+                    onReference={onReference}
+                  />
+                </div>
+              );
+            }
+            const slotId = col.slotId as string;
+            const def = tab.slots.find((s) => s.id === slotId);
+            const artifactKey = def?.artifact_key ?? slotId;
+            const rev = findSlotRevision(session, artifactKey, sortOrder);
+            return (
+              <div
+                key={slotId}
+                className='composite-grid__cell'
+                style={{ flexBasis, flexGrow: col.weight, flexShrink: 1 }}
+              >
+                {def?.label && (
+                  <span className='composite-grid__cell-label'>{def.label}</span>
+                )}
+                {rev ? (
+                  <SlotRenderer
+                    slot={rev}
+                    sessionId={session.session_id}
+                    slotId={slotId}
+                    revisionCount={rev.revision_count}
+                    onRefresh={onRefresh}
+                    onReference={onReference}
+                  />
+                ) : (
+                  <div className='composite-grid__cell-empty'>—</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * TabSlotGrid renders slots according to the plugin UI tab definition.
+ * Passes sort_order, sessionId, slotId to each SlotRenderer for Phase 3 actions.
+ */
+function TabSlotGrid({
+  tab,
+  session,
+  onRefresh,
+  onReference,
+  onFocusSortOrder,
+}: {
+  tab: TabDef;
+  session: PluginSession;
+  onRefresh?: () => void;
+  onReference?: (slot: SlotRevision) => void;
+  onFocusSortOrder?: (sortOrder: number | undefined) => void;
+}) {
+  if (tab.layout === 'composite') {
+    return (
+      <CompositeSlotGrid
+        tab={tab}
+        session={session}
+        onRefresh={onRefresh}
+        onReference={onReference}
+        onFocusSortOrder={onFocusSortOrder}
+      />
+    );
+  }
+  return (
+    <div className={`plugin-panel__tab-content plugin-panel__tab-content--${tab.layout ?? 'list'}`}>
       {tab.slots.map((slotDef) => {
         const artifactKey = slotDef.artifact_key ?? slotDef.id;
         const revisions = (session.slots ?? []).filter(
           (s) => s.artifact_key === artifactKey && s.selected,
         );
         const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
+        const isDraggable = Boolean(slotDef.ordered);
         return (
           <div key={slotDef.id} className='plugin-panel__named-slot'>
             {slotDef.label && (
@@ -77,23 +372,48 @@ function TabSlotGrid({ tab, session }: { tab: TabDef; session: PluginSession }) 
                 <span>—</span>
               </div>
             ) : isImageList ? (
-              <div className='plugin-panel__image-list'>
+              <div className={`plugin-panel__image-list${isDraggable ? ' plugin-panel__image-list--sortable' : ''}`}>
                 {revisions.map((rev) => (
-                  <SlotRenderer
+                  <div
                     key={`${rev.slot_id}-${rev.revision}-${rev.list_index ?? 0}`}
-                    slot={rev}
-                    cardMode
-                    expectedType={slotDef.type}
-                  />
+                    onClick={() => onFocusSortOrder?.(rev.sort_order)}
+                    role='button'
+                    tabIndex={0}
+                    aria-label={`图片 ${rev.sort_order ?? ''}`}
+                  >
+                    <SlotRenderer
+                      slot={rev}
+                      cardMode
+                      expectedType={slotDef.type}
+                      sessionId={session.session_id}
+                      slotId={slotDef.id}
+                      revisionCount={rev.revision_count}
+                      isDraggable={isDraggable}
+                      onRefresh={onRefresh}
+                      onReference={onReference}
+                    />
+                  </div>
                 ))}
               </div>
             ) : (
               revisions.map((rev) => (
-                <SlotRenderer
+                <div
                   key={`${rev.slot_id}-${rev.revision}-${rev.list_index ?? 0}`}
-                  slot={rev}
-                  expectedType={slotDef.type}
-                />
+                  onClick={() => onFocusSortOrder?.(rev.sort_order)}
+                  role='button'
+                  tabIndex={0}
+                  aria-label={`内容项 ${rev.sort_order ?? ''}`}
+                >
+                  <SlotRenderer
+                    slot={rev}
+                    expectedType={slotDef.type}
+                    sessionId={session.session_id}
+                    slotId={slotDef.id}
+                    revisionCount={rev.revision_count}
+                    onRefresh={onRefresh}
+                    onReference={onReference}
+                  />
+                </div>
               ))
             )}
           </div>
@@ -114,13 +434,16 @@ export function PluginPanel({
   conversationId,
   pollIntervalMs = 3000,
   onSendMessage,
+  onReference,
 }: PluginPanelProps) {
   const { t } = useTranslation();
   const { session, loading, refresh } = usePluginSession(conversationId);
-  const [activeTab, setActiveTab] = React.useState(0);
+  const [activeTabIdx, setActiveTabIdx] = React.useState(0);
   const [collapsed, setCollapsed] = useState(false);
   const fetchPluginUI = usePluginStore((s) => s.fetchPluginUI);
   const pluginUIByPlugin = usePluginStore((s) => s.pluginUIByPlugin);
+  const setFocusedTab = usePluginStore((s) => s.setFocusedTab);
+  const setFocusedSortOrder = usePluginStore((s) => s.setFocusedSortOrder);
   const [ui, setUI] = useState<PluginUI>({});
 
   useEffect(() => {
@@ -135,6 +458,17 @@ export function PluginPanel({
     const id = setInterval(refresh, pollIntervalMs);
     return () => clearInterval(id);
   }, [session, refresh, pollIntervalMs]);
+
+  // Track focused tab changes.
+  const handleTabChange = useCallback((idx: number, tabId: string) => {
+    setActiveTabIdx(idx);
+    setFocusedTab(conversationId, tabId);
+    setFocusedSortOrder(conversationId, undefined);
+  }, [conversationId, setFocusedTab, setFocusedSortOrder]);
+
+  const handleFocusSortOrder = useCallback((sortOrder: number | undefined) => {
+    setFocusedSortOrder(conversationId, sortOrder);
+  }, [conversationId, setFocusedSortOrder]);
 
   if (loading && !session) {
     return (
@@ -156,10 +490,7 @@ export function PluginPanel({
     session.status === 'active' ||
     session.status === 'completed' ||
     session.status === 'failed';
-  // Both buttons are disabled while a SubAgent is running.
   const buttonsDisabled = session.status === 'active';
-  // "Continue" is only shown when there is a next step to advance to.
-  // completed = last step already done (Driver returned DONE), failed = terminal.
   const showContinue =
     session.status === 'waiting' || session.status === 'active';
 
@@ -215,17 +546,17 @@ export function PluginPanel({
             <React.Fragment key={tab.id}>
               <button
                 role='tab'
-                aria-selected={idx === activeTab}
+                aria-selected={idx === activeTabIdx}
                 aria-controls={`plugin-tab-panel-${tab.id}`}
-                className={`plugin-panel__tab${idx === activeTab ? ' plugin-panel__tab--active' : ''}${idx < activeTab ? ' plugin-panel__tab--done' : ''}`}
-                onClick={() => setActiveTab(idx)}
+                className={`plugin-panel__tab${idx === activeTabIdx ? ' plugin-panel__tab--active' : ''}${idx < activeTabIdx ? ' plugin-panel__tab--done' : ''}`}
+                onClick={() => handleTabChange(idx, tab.id)}
                 type='button'
               >
                 <span className='plugin-panel__tab-badge'>{idx + 1}</span>
                 <span className='plugin-panel__tab-label'>{tab.label}</span>
               </button>
               {idx < tabs.length - 1 && (
-                <span className={`plugin-panel__tab-connector${idx < activeTab ? ' plugin-panel__tab-connector--done' : ''}`} aria-hidden='true' />
+                <span className={`plugin-panel__tab-connector${idx < activeTabIdx ? ' plugin-panel__tab-connector--done' : ''}`} aria-hidden='true' />
               )}
             </React.Fragment>
           ))}
@@ -241,16 +572,23 @@ export function PluginPanel({
                 key={tab.id}
                 id={`plugin-tab-panel-${tab.id}`}
                 role='tabpanel'
-                hidden={idx !== activeTab}
+                hidden={idx !== activeTabIdx}
               >
                 <TabSlotGrid
                   tab={tab}
                   session={session}
+                  onRefresh={refresh}
+                  onReference={onReference}
+                  onFocusSortOrder={handleFocusSortOrder}
                 />
               </div>
             ))
           ) : (
-            <AutoSlotGrid session={session} />
+            <AutoSlotGrid
+              session={session}
+              onRefresh={refresh}
+              onReference={onReference}
+            />
           )}
         </div>
       )}

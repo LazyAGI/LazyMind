@@ -4,10 +4,12 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -225,10 +227,11 @@ func ListSteps(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.Plugin
 }
 
 // WriteSlotRevision inserts a new slot revision and manages the selected flag.
+// It also updates plugin_slot_order for list slots and writes content_snapshot.
 //
 // cardinality=single: deselects all previous revisions of the same (sessionID, slotID).
 //
-// cardinality=list, listIndex=nil: appends a new item; list_index = current count.
+// cardinality=list, listIndex=nil: appends a new item; list_index = MAX(all existing)+1.
 //
 // cardinality=list, listIndex!=nil: partial retry — replaces the revision at the given
 // list_index by deselecting the old row for that index and inserting a new selected row.
@@ -271,31 +274,44 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 				}
 				finalListIndex = listIndex
 			} else {
-				// Full append: list_index = current count of entries (before this insert).
-				var count int64
+				// Full append: list_index = MAX(all existing list_index) + 1 (never reuse deleted indices).
+				var maxIdx int
 				if err := tx.Model(&orm.PluginSlotRevision{}).
+					Select("COALESCE(MAX(list_index), -1)").
 					Where("session_id = ? AND slot_id = ?", sessionID, slotID).
-					Count(&count).Error; err != nil {
+					Scan(&maxIdx).Error; err != nil {
 					return err
 				}
-				idx := int(count)
+				idx := maxIdx + 1
 				finalListIndex = &idx
 			}
 		}
 
 		row := &orm.PluginSlotRevision{
-			ID:          "psr_" + common.GenerateID(),
-			SessionID:   sessionID,
-			SlotID:      slotID,
-			Revision:    revision,
-			ListIndex:   finalListIndex,
-			Selected:    true,
-			ArtifactKey: artifactKey,
-			StepID:      stepID,
-			Attempt:     attempt,
-			CreatedAt:   now,
+			ID:           "psr_" + common.GenerateID(),
+			SessionID:    sessionID,
+			SlotID:       slotID,
+			Revision:     revision,
+			ListIndex:    finalListIndex,
+			Selected:     true,
+			ChangeSource: "ai",
+			ArtifactKey:  artifactKey,
+			StepID:       stepID,
+			Attempt:      attempt,
+			CreatedAt:    now,
 		}
-		return tx.Create(row).Error
+		if err := tx.Create(row).Error; err != nil {
+			return err
+		}
+
+		// Maintain plugin_slot_order for list slots: append new list_index if not a partial retry.
+		if cardinality == "list" && listIndex == nil && finalListIndex != nil {
+			if err := appendSlotOrderEntry(ctx, tx, sessionID, slotID, *finalListIndex); err != nil {
+				return err
+			}
+		}
+
+		return nil
 	}); err != nil {
 		return nil, err
 	}
@@ -303,6 +319,485 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 	var result orm.PluginSlotRevision
 	err := db.WithContext(ctx).
 		Where("session_id = ? AND slot_id = ? AND revision = ?", sessionID, slotID, revision).
+		First(&result).Error
+	return &result, err
+}
+
+// WriteSlotRevisionWithSnapshot writes a new revision and records content_snapshot atomically.
+// Used by PatchSlotItem (human edits) to write version + snapshot in one transaction.
+func WriteSlotRevisionWithSnapshot(ctx context.Context, db *gorm.DB,
+	sessionID, slotID, artifactKey, stepID string, attempt int,
+	cardinality string, listIndex *int,
+	contentSnapshot json.RawMessage, changeSource string) (*orm.PluginSlotRevision, error) {
+
+	src := changeSource
+	if src == "" {
+		src = "ai"
+	}
+
+	now := time.Now().UTC()
+	var revision int
+	var finalListIndex *int
+
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var maxRev int
+		if err := tx.Model(&orm.PluginSlotRevision{}).
+			Select("COALESCE(MAX(revision), 0)").
+			Where("session_id = ? AND slot_id = ?", sessionID, slotID).
+			Scan(&maxRev).Error; err != nil {
+			return err
+		}
+		revision = maxRev + 1
+
+		if cardinality == "single" {
+			if err := tx.Model(&orm.PluginSlotRevision{}).
+				Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true).
+				Update("selected", false).Error; err != nil {
+				return err
+			}
+		} else {
+			if listIndex != nil {
+				if err := tx.Model(&orm.PluginSlotRevision{}).
+					Where("session_id = ? AND slot_id = ? AND list_index = ? AND selected = ?",
+						sessionID, slotID, *listIndex, true).
+					Update("selected", false).Error; err != nil {
+					return err
+				}
+				finalListIndex = listIndex
+			} else {
+				var maxIdx int
+				if err := tx.Model(&orm.PluginSlotRevision{}).
+					Select("COALESCE(MAX(list_index), -1)").
+					Where("session_id = ? AND slot_id = ?", sessionID, slotID).
+					Scan(&maxIdx).Error; err != nil {
+					return err
+				}
+				idx := maxIdx + 1
+				finalListIndex = &idx
+			}
+		}
+
+		row := &orm.PluginSlotRevision{
+			ID:              "psr_" + common.GenerateID(),
+			SessionID:       sessionID,
+			SlotID:          slotID,
+			Revision:        revision,
+			ListIndex:       finalListIndex,
+			Selected:        true,
+			ChangeSource:    src,
+			ContentSnapshot: contentSnapshot,
+			ArtifactKey:     artifactKey,
+			StepID:          stepID,
+			Attempt:         attempt,
+			CreatedAt:       now,
+		}
+		if err := tx.Create(row).Error; err != nil {
+			return err
+		}
+
+		if cardinality == "list" && listIndex == nil && finalListIndex != nil {
+			if err := appendSlotOrderEntry(ctx, tx, sessionID, slotID, *finalListIndex); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	var result orm.PluginSlotRevision
+	err := db.WithContext(ctx).
+		Where("session_id = ? AND slot_id = ? AND revision = ?", sessionID, slotID, revision).
+		First(&result).Error
+	return &result, err
+}
+
+// appendSlotOrderEntry adds idx to the end of plugin_slot_order.order_list for the slot.
+// Must be called from within an existing transaction; db should be the tx handle.
+// Uses SELECT FOR UPDATE to prevent concurrent appends from losing updates.
+func appendSlotOrderEntry(ctx context.Context, db *gorm.DB, sessionID, slotID string, idx int) error {
+	now := time.Now().UTC()
+	var existing orm.PluginSlotOrder
+	err := db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("session_id = ? AND slot_id = ?", sessionID, slotID).
+		First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		list, _ := json.Marshal([]int{idx})
+		row := orm.PluginSlotOrder{
+			SessionID:    sessionID,
+			SlotID:       slotID,
+			OrderList:    list,
+			OrderVersion: 0,
+			UpdatedAt:    now,
+		}
+		return db.WithContext(ctx).Create(&row).Error
+	}
+	if err != nil {
+		return err
+	}
+	var current []int
+	_ = json.Unmarshal(existing.OrderList, &current)
+	// Avoid duplicates (idempotent on retry).
+	for _, v := range current {
+		if v == idx {
+			return nil
+		}
+	}
+	current = append(current, idx)
+	newList, _ := json.Marshal(current)
+	return db.WithContext(ctx).Model(&orm.PluginSlotOrder{}).
+		Where("session_id = ? AND slot_id = ?", sessionID, slotID).
+		Updates(map[string]any{
+			"order_list":    newList,
+			"order_version": existing.OrderVersion + 1,
+			"updated_at":    now,
+		}).Error
+}
+
+// GetSlotOrder returns the plugin_slot_order row for a slot, or nil if not found.
+func GetSlotOrder(ctx context.Context, db *gorm.DB, sessionID, slotID string) (*orm.PluginSlotOrder, error) {
+	var row orm.PluginSlotOrder
+	err := db.WithContext(ctx).
+		Where("session_id = ? AND slot_id = ?", sessionID, slotID).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &row, err
+}
+
+// ReorderSlot atomically replaces order_list with a new permutation.
+// sortOrderSeq is the desired new sequence of sort_order values (1-based) computed from
+// the current order; the caller must have already translated them to list_index values.
+// version is used for optimistic locking; a mismatch returns ErrConflict.
+var ErrConflict = errors.New("version conflict")
+
+func ReorderSlot(ctx context.Context, db *gorm.DB,
+	sessionID, slotID string, newListIndexOrder []int, version int) error {
+
+	now := time.Now().UTC()
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing orm.PluginSlotOrder
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("session_id = ? AND slot_id = ?", sessionID, slotID).
+			First(&existing).Error; err != nil {
+			return err
+		}
+		if existing.OrderVersion != version {
+			return ErrConflict
+		}
+		// Validate: none of the provided list_index values should correspond to a hidden item.
+		// A hidden item's list_index is absent from plugin_slot_order.order_list, so if the
+		// caller's newListIndexOrder contains any list_index that is NOT in the current
+		// (just-locked) order_list, reject. This is the correct guard: hidden items were
+		// already removed from order_list by HideSlotItem.
+		currentList := existing.OrderList
+		var currentListIndexes []int
+		_ = json.Unmarshal(currentList, &currentListIndexes)
+		currentSet := make(map[int]struct{}, len(currentListIndexes))
+		for _, v := range currentListIndexes {
+			currentSet[v] = struct{}{}
+		}
+		for _, li := range newListIndexOrder {
+			if _, ok := currentSet[li]; !ok {
+				return errors.New("order list contains hidden or unknown list_index")
+			}
+		}
+		newList, _ := json.Marshal(newListIndexOrder)
+		return tx.Model(&orm.PluginSlotOrder{}).
+			Where("session_id = ? AND slot_id = ?", sessionID, slotID).
+			Updates(map[string]any{
+				"order_list":    newList,
+				"order_version": existing.OrderVersion + 1,
+				"updated_at":    now,
+			}).Error
+	})
+}
+
+// HideSlotItem logically deletes the revision at list_index and removes it from order_list.
+// It sets hidden=TRUE on all sub_agent_artifacts rows that share the same (task_id, artifact_key)
+// and are associated with this session/slot/list_index, and deselects all plugin_slot_revisions rows.
+func HideSlotItem(ctx context.Context, db *gorm.DB, sessionID, slotID string, listIndex int) error {
+	now := time.Now().UTC()
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Deselect all revisions at this list_index.
+		if err := tx.Model(&orm.PluginSlotRevision{}).
+			Where("session_id = ? AND slot_id = ? AND list_index = ?", sessionID, slotID, listIndex).
+			Updates(map[string]any{"selected": false}).Error; err != nil {
+			return err
+		}
+
+		// Mark the corresponding sub_agent_artifacts rows as hidden.
+		// Look up task_ids for this session, then hide artifacts with the matching artifact_key
+		// at the row corresponding to this list_index (seq position).
+		// We identify the correct artifact_key from the revisions we just deselected.
+		var artifactKeys []string
+		if err := tx.Model(&orm.PluginSlotRevision{}).
+			Select("DISTINCT artifact_key").
+			Where("session_id = ? AND slot_id = ? AND list_index = ?", sessionID, slotID, listIndex).
+			Pluck("artifact_key", &artifactKeys).Error; err != nil {
+			return err
+		}
+		if len(artifactKeys) > 0 {
+			// Get all task_ids for this session.
+			var taskIDs []string
+			if err := tx.Model(&orm.PluginSessionStep{}).
+				Select("DISTINCT task_id").
+				Where("session_id = ?", sessionID).
+				Pluck("task_id", &taskIDs).Error; err != nil {
+				return err
+			}
+			if len(taskIDs) > 0 {
+				// Load all non-hidden artifacts for this session + artifact_key combination.
+				// Find only the artifact whose value JSON contains {"list_index": listIndex}.
+				var candidates []orm.SubAgentArtifact
+				if err := tx.Where("task_id IN ? AND artifact_key IN ? AND hidden = ?", taskIDs, artifactKeys, false).
+					Find(&candidates).Error; err != nil {
+					return err
+				}
+				for _, c := range candidates {
+					var v map[string]any
+					if json.Unmarshal(c.Value, &v) != nil {
+						continue
+					}
+					var li int
+					switch raw := v["list_index"].(type) {
+					case float64:
+						li = int(raw)
+					case int:
+						li = raw
+					default:
+						continue
+					}
+					if li == listIndex {
+						if err := tx.Model(&orm.SubAgentArtifact{}).
+							Where("task_id = ? AND artifact_key = ? AND seq = ?", c.TaskID, c.ArtifactKey, c.Seq).
+							Updates(map[string]any{"hidden": true}).Error; err != nil {
+							return err
+						}
+					}
+				}
+			}
+		}
+
+		// Remove list_index from order_list.
+		var existing orm.PluginSlotOrder
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("session_id = ? AND slot_id = ?", sessionID, slotID).
+			First(&existing).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if existing.SessionID != "" {
+			var current []int
+			_ = json.Unmarshal(existing.OrderList, &current)
+			filtered := current[:0]
+			for _, v := range current {
+				if v != listIndex {
+					filtered = append(filtered, v)
+				}
+			}
+			newList, _ := json.Marshal(filtered)
+			if err := tx.Model(&orm.PluginSlotOrder{}).
+				Where("session_id = ? AND slot_id = ?", sessionID, slotID).
+				Updates(map[string]any{
+					"order_list":    newList,
+					"order_version": existing.OrderVersion + 1,
+					"updated_at":    now,
+				}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// SortOrderToListIndex converts a 1-based sort_order to the list_index stored in plugin_slot_order.
+// Returns -1 if not found.
+func SortOrderToListIndex(ctx context.Context, db *gorm.DB, sessionID, slotID string, sortOrder int) (int, error) {
+	row, err := GetSlotOrder(ctx, db, sessionID, slotID)
+	if err != nil {
+		return -1, err
+	}
+	if row == nil {
+		return -1, nil
+	}
+	var list []int
+	if err := json.Unmarshal(row.OrderList, &list); err != nil {
+		return -1, err
+	}
+	if sortOrder < 1 || sortOrder > len(list) {
+		return -1, nil
+	}
+	return list[sortOrder-1], nil
+}
+
+// ListIndexToSortOrder converts a list_index to its current 1-based sort_order.
+// Returns -1 if not found (e.g. item is hidden).
+func ListIndexToSortOrder(ctx context.Context, db *gorm.DB, sessionID, slotID string, listIndex int) (int, error) {
+	row, err := GetSlotOrder(ctx, db, sessionID, slotID)
+	if err != nil {
+		return -1, err
+	}
+	if row == nil {
+		return -1, nil
+	}
+	var list []int
+	if err := json.Unmarshal(row.OrderList, &list); err != nil {
+		return -1, err
+	}
+	for i, idx := range list {
+		if idx == listIndex {
+			return i + 1, nil
+		}
+	}
+	return -1, nil
+}
+
+// LoadSlotVersions returns all revisions for (sessionID, slotID, listIndex) ordered by revision ASC.
+func LoadSlotVersions(ctx context.Context, db *gorm.DB,
+	sessionID, slotID string, listIndex *int) ([]orm.PluginSlotRevision, error) {
+	q := db.WithContext(ctx).
+		Where("session_id = ? AND slot_id = ?", sessionID, slotID)
+	if listIndex == nil {
+		q = q.Where("list_index IS NULL")
+	} else {
+		q = q.Where("list_index = ?", *listIndex)
+	}
+	var rows []orm.PluginSlotRevision
+	if err := q.Order("revision ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// RollbackSlotRevision creates a new revision whose content_snapshot matches the target revision.
+// The new revision has change_source='human' and selected=TRUE.
+func RollbackSlotRevision(ctx context.Context, db *gorm.DB,
+	sessionID, slotID string, listIndex *int,
+	targetRevision int, artifactKey string) (*orm.PluginSlotRevision, error) {
+
+	// Load the target revision.
+	q := db.WithContext(ctx).
+		Where("session_id = ? AND slot_id = ? AND revision = ?", sessionID, slotID, targetRevision)
+	if listIndex == nil {
+		q = q.Where("list_index IS NULL")
+	} else {
+		q = q.Where("list_index = ?", *listIndex)
+	}
+	var target orm.PluginSlotRevision
+	if err := q.First(&target).Error; err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	var newRevision int
+
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Compute next revision.
+		var maxRev int
+		if err := tx.Model(&orm.PluginSlotRevision{}).
+			Select("COALESCE(MAX(revision), 0)").
+			Where("session_id = ? AND slot_id = ?", sessionID, slotID).
+			Scan(&maxRev).Error; err != nil {
+			return err
+		}
+		newRevision = maxRev + 1
+
+		// Deselect current selected.
+		where := tx.Model(&orm.PluginSlotRevision{}).
+			Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true)
+		if listIndex == nil {
+			where = where.Where("list_index IS NULL")
+		} else {
+			where = where.Where("list_index = ?", *listIndex)
+		}
+		if err := where.Update("selected", false).Error; err != nil {
+			return err
+		}
+
+		row := &orm.PluginSlotRevision{
+			ID:              "psr_" + common.GenerateID(),
+			SessionID:       sessionID,
+			SlotID:          slotID,
+			Revision:        newRevision,
+			ListIndex:       listIndex,
+			Selected:        true,
+			ContentSnapshot: target.ContentSnapshot,
+			ChangeSource:    "human",
+			ArtifactKey:     artifactKey,
+			StepID:          target.StepID,
+			Attempt:         target.Attempt,
+			CreatedAt:       now,
+		}
+		if err := tx.Create(row).Error; err != nil {
+			return err
+		}
+
+		// Sync the artifact value so that GET /slots returns the rolled-back content.
+		// We insert a new sub_agent_artifacts row with the snapshot as value so the
+		// enrichSlots logic (which reads list_index from value JSON) sees the rolled-back value.
+		if len(target.ContentSnapshot) > 0 {
+			// Look up the task_id for the step that originally produced this revision.
+			var step orm.PluginSessionStep
+			if err := tx.Where("session_id = ? AND step_id = ? AND attempt = ?",
+				sessionID, target.StepID, target.Attempt).
+				First(&step).Error; err == nil && step.TaskID != "" {
+				// Get max seq and the content_type of the most-recent artifact row
+				// for this (task_id, artifact_key).  content_type is the authoritative
+				// type stored in the DB column ("text", "image", "file", etc.).
+				var maxSeq int
+				tx.Model(&orm.SubAgentArtifact{}).
+					Select("COALESCE(MAX(seq), 0)").
+					Where("task_id = ? AND artifact_key = ?", step.TaskID, artifactKey).
+					Scan(&maxSeq)
+
+				var origArt orm.SubAgentArtifact
+				_ = tx.Where("task_id = ? AND artifact_key = ?", step.TaskID, artifactKey).
+					Order("seq DESC").
+					First(&origArt).Error
+
+				// Resolve the true content type:
+				//   - use the DB content_type column directly when it is not "file"
+				//   - when content_type="file" the value is JSON {"type":"<real>","path":"..."}
+				//     so read the inner "type" key for the true render type.
+				contentType := resolveContentType(origArt.ContentType, target.ContentSnapshot)
+
+				artValue := target.ContentSnapshot
+				// For list slots, ensure the value JSON carries the correct list_index so that
+				// enrichSlots (which matches on list_index field) can locate it.
+				if listIndex != nil {
+					var v map[string]any
+					if json.Unmarshal(target.ContentSnapshot, &v) == nil {
+						v["list_index"] = *listIndex
+						if encoded, err := json.Marshal(v); err == nil {
+							artValue = encoded
+						}
+					}
+				}
+
+				newArt := &orm.SubAgentArtifact{
+					TaskID:      step.TaskID,
+					ArtifactKey: artifactKey,
+					ContentType: contentType,
+					Value:       artValue,
+					Seq:         maxSeq + 1,
+					Hidden:      false,
+					CreatedAt:   now,
+				}
+				// Ignore insert error — rollback of the revision still succeeds.
+				_ = tx.Create(newArt).Error
+			}
+		}
+
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	var result orm.PluginSlotRevision
+	err := db.WithContext(ctx).
+		Where("session_id = ? AND slot_id = ? AND revision = ?", sessionID, slotID, newRevision).
 		First(&result).Error
 	return &result, err
 }
@@ -323,4 +818,37 @@ func LoadSelectedSlots(ctx context.Context, db *gorm.DB, sessionID string) ([]or
 // IsNotFound reports whether err is a gorm record-not-found error.
 func IsNotFound(err error) bool {
 	return errors.Is(err, gorm.ErrRecordNotFound)
+}
+
+// ResolveContentType returns the true render content type for an artifact.
+//
+// The DB content_type column is authoritative:
+//   - "text", "image", "html", "json", etc. → returned as-is.
+//   - "file" → the value column is JSON {"type":"<real>","path":"...","size":N}
+//     where "type" carries the actual content type (e.g. "text", "json", "pdf", "pptx").
+//     Parse the JSON and return value["type"], falling back to "file" if absent.
+//
+// snapshot is the raw artifact value bytes (stored in content_snapshot or read directly
+// from sub_agent_artifacts.value).
+func ResolveContentType(contentType string, snapshot []byte) string {
+	return resolveContentType(contentType, snapshot)
+}
+
+// resolveContentType is the internal implementation of ResolveContentType.
+func resolveContentType(contentType string, snapshot []byte) string {
+	if contentType != "file" {
+		return contentType
+	}
+	// content_type == "file": parse the JSON value to get the real type.
+	if len(snapshot) == 0 {
+		return "file"
+	}
+	var v map[string]any
+	if json.Unmarshal(snapshot, &v) != nil {
+		return "file"
+	}
+	if t, ok := v["type"].(string); ok && t != "" {
+		return t
+	}
+	return "file"
 }

@@ -1,6 +1,9 @@
 package orm
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // PluginSession represents one plugin workflow execution for a conversation.
 // A conversation may have at most one active session at a time.
@@ -43,12 +46,29 @@ type PluginSlotRevision struct {
 	SlotID    string `gorm:"column:slot_id;type:varchar(64);not null"`
 	Revision  int    `gorm:"column:revision;not null"`
 	// ListIndex is the 0-based position within a cardinality=list slot; NULL for single.
-	ListIndex   *int      `gorm:"column:list_index"`
-	Selected    bool      `gorm:"column:selected;not null;default:true"`
-	ArtifactKey string    `gorm:"column:artifact_key;type:varchar(255);not null"`
-	StepID      string    `gorm:"column:step_id;type:varchar(64);not null"`
-	Attempt     int       `gorm:"column:attempt;not null"`
-	CreatedAt   time.Time `gorm:"column:created_at;not null"`
+	ListIndex *int `gorm:"column:list_index"`
+	Selected  bool `gorm:"column:selected;not null;default:true"`
+	// ContentSnapshot stores the artifact value at the time of this revision for version history.
+	ContentSnapshot json.RawMessage `gorm:"column:content_snapshot;type:jsonb"`
+	// ChangeSource distinguishes AI-generated ('ai') from human-edited ('human') revisions.
+	ChangeSource string    `gorm:"column:change_source;type:varchar(16);not null;default:'ai'"`
+	ArtifactKey  string    `gorm:"column:artifact_key;type:varchar(255);not null"`
+	StepID       string    `gorm:"column:step_id;type:varchar(64);not null"`
+	Attempt      int       `gorm:"column:attempt;not null"`
+	CreatedAt    time.Time `gorm:"column:created_at;not null"`
 }
 
 func (PluginSlotRevision) TableName() string { return "plugin_slot_revisions" }
+
+// PluginSlotOrder tracks the display ordering of list-cardinality slot items.
+// order_list is a JSONB array of list_index values in display order (visible items only).
+// order_version is an optimistic-lock counter incremented on every reorder or delete.
+type PluginSlotOrder struct {
+	SessionID    string          `gorm:"column:session_id;type:varchar(36);not null;primaryKey"`
+	SlotID       string          `gorm:"column:slot_id;type:varchar(64);not null;primaryKey"`
+	OrderList    json.RawMessage `gorm:"column:order_list;type:jsonb;not null;default:'[]'"`
+	OrderVersion int             `gorm:"column:order_version;not null;default:0"`
+	UpdatedAt    time.Time       `gorm:"column:updated_at;not null"`
+}
+
+func (PluginSlotOrder) TableName() string { return "plugin_slot_order" }
