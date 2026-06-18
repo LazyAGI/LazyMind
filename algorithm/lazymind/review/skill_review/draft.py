@@ -115,7 +115,7 @@ def _draft_jobs(
         {
             'kind': 'trajectory',
             'item_id': trajectory.session_id,
-            'build': lambda trajectory=trajectory: _build_trajectory_draft(trajectory, llm.share()),
+            'build': lambda trajectory=trajectory: _build_trajectory_draft(trajectory, llm),
         }
         for trajectory in trajectories
     ]
@@ -123,7 +123,7 @@ def _draft_jobs(
         {
             'kind': 'pending_skill',
             'item_id': str(record.get('id') or index),
-            'build': lambda record=record: _build_pending_skill_draft(record, llm.share()),
+            'build': lambda record=record: _build_pending_skill_draft(record, llm),
         }
         for index, record in enumerate(pending_records)
     )
@@ -153,8 +153,6 @@ def _draft_report_metadata(
 
 def _build_trajectory_draft(trajectory: Trajectory, llm: AutoModel) -> SkillDraft | None:
     try:
-        trajectory_text = trajectory.steps_text
-
         gate = _build_skill_extraction_gate(trajectory, llm)
         if not gate.get('should_extract'):
             LOG.info(f'[SkillReview] skip skill draft for trajectory {trajectory.session_id}')
