@@ -284,6 +284,9 @@ services:
         condition: service_healthy
       db-bootstrap:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+        required: false
 
   office-convert-service:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-office-convert-service:${LAZYMIND_IMAGE_TAG:-latest}
@@ -356,6 +359,9 @@ services:
         condition: service_healthy
       office-convert-service:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+        required: false
 
   core-dev:
     image: ${DOCKER_MIRROR:-docker.m.daocloud.io/library/}golang:1.25.11-alpine
