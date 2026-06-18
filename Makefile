@@ -17,7 +17,7 @@ comma := ,
 #        make down                         →  docker compose down
 #        make down COMPOSE_PROJECT=myproj  →  docker compose -p myproj down
 # ---------------------------------------------------------------------------
-_COMPOSE = LAZYMIND_STATE_BACKEND=$(LAZYMIND_STATE_BACKEND) DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(if $(COMPOSE_PROJECT),-p $(COMPOSE_PROJECT),) $(_COMPOSE_FILE_FLAGS)
+_COMPOSE = LAZYMIND_RUNTIME_MODE=$(LAZYMIND_RUNTIME_MODE) DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(if $(COMPOSE_PROJECT),-p $(COMPOSE_PROJECT),) $(_COMPOSE_FILE_FLAGS)
 # ---------------------------------------------------------------------------
 # Mirror profile: cn (domestic/default) or intl (international).
 # Selects which .env.mirrors.<profile> file to load for all build-time source
@@ -102,11 +102,10 @@ export LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD ?= admin
 export LAZYMIND_RESET_ALGO_ON_STARTUP ?= false
 export LAZYMIND_RESET_ALL_ON_STARTUP ?= false
 export LAZYLLM_ALGO_REGISTER_POLICY ?= none
-# Short-lived shared state backend used by chat streams, auth refresh tokens,
-# login rate limits, subagent task streams, and conversation idle timers.
-# Use sqlite for a no-Redis local stack; redis remains the default production-like mode.
-LAZYMIND_STATE_BACKEND := $(if $(strip $(LAZYMIND_STATE_BACKEND)),$(strip $(LAZYMIND_STATE_BACKEND)),redis)
-export LAZYMIND_STATE_BACKEND
+# Runtime mode gates local/desktop-only compose overrides. Cloud/server remains
+# the default when unset. Local mode currently uses SQLite for short-lived state.
+LAZYMIND_RUNTIME_MODE := $(if $(strip $(LAZYMIND_RUNTIME_MODE)),$(strip $(LAZYMIND_RUNTIME_MODE)),cloud)
+export LAZYMIND_RUNTIME_MODE
 
 # Core database
 export LAZYMIND_CORE_DATABASE_URL ?= postgresql+psycopg://root:123456@db:5432/core
@@ -173,8 +172,8 @@ help:
 	@echo "                    Use SERVICES=svc1,svc2 to start specific services only"
 	@echo "  make up-build   - Build images and start services"
 	@echo "                    Use SERVICES=svc1,svc2 to target specific services"
-	@echo "                    Use LAZYMIND_STATE_BACKEND=sqlite to run without Redis"
-	@echo "                    Example: make up-build LAZYMIND_STATE_BACKEND=sqlite"
+	@echo "                    Use LAZYMIND_RUNTIME_MODE=local to run without Redis"
+	@echo "                    Example: make up-build LAZYMIND_RUNTIME_MODE=local"
 	@echo "  make down       - Stop services"
 	@echo "                    Use SERVICES=svc1,svc2 to stop specific services only"
 	@echo "  make build      - Build compose services (mineru profile only when needed)"
@@ -256,10 +255,13 @@ _need_opensearch_dashboard := $(and $(_need_opensearch),$(_enable_opensearch_das
 # Start/build profile flags are mode-aware. Cleanup profile flags are intentionally exhaustive.
 _COMPOSE_PROFILES := $(strip $(if $(_need_mineru),--profile mineru) $(if $(_need_milvus),--profile milvus) $(if $(_need_opensearch),--profile opensearch) $(if $(_need_milvus_dashboard),--profile milvus-dashboard) $(if $(_need_opensearch_dashboard),--profile opensearch-dashboard))
 _CLEANUP_COMPOSE_PROFILES := --profile mineru --profile paddleocr --profile milvus --profile opensearch --profile milvus-dashboard --profile opensearch-dashboard --profile file-watcher-artifact
-_REMOVE_REDIS_IF_SQLITE = $(if $(filter sqlite,$(strip $(LAZYMIND_STATE_BACKEND))),$(_COMPOSE) rm -sf redis >/dev/null 2>&1 || true,true)
-_COMPOSE_FILE_FLAGS := $(if $(filter sqlite,$(strip $(LAZYMIND_STATE_BACKEND))),-f docker-compose.yml -f docker-compose.local.yml,)
-_COMPOSE_REDIS_SCALE := $(if $(filter sqlite,$(strip $(LAZYMIND_STATE_BACKEND))),--scale redis=0,)
+_IS_LOCAL_RUNTIME := $(filter local,$(strip $(LAZYMIND_RUNTIME_MODE)))
+_REMOVE_REDIS_IF_LOCAL = $(if $(_IS_LOCAL_RUNTIME),$(_COMPOSE) rm -sf redis >/dev/null 2>&1 || true,true)
+_COMPOSE_FILE_FLAGS := $(if $(_IS_LOCAL_RUNTIME),-f docker-compose.yml -f docker-compose.local.yml,)
+_COMPOSE_REDIS_SCALE := $(if $(_IS_LOCAL_RUNTIME),--scale redis=0,)
 _COMPOSE_FILE_WATCHER_SCALE := $(if $(filter container,$(LAZYMIND_FILE_WATCHER_MODE)),,--scale file-watcher=0)
+_COMPOSE_READABLE_PATHS := db-init backend/scan-control-plane/migrations backend/scan-control-plane/scripts
+_PREPARE_COMPOSE_PERMISSIONS = @chmod -R a+rX $(_COMPOSE_READABLE_PATHS) 2>/dev/null || true
 
 # Only init submodules when not yet cloned; if already present (even with different commit), do nothing. Never recursive.
 _SUBMODULE_INIT = @git submodule status | grep -q '^-' && git submodule update --init || true
@@ -330,8 +332,9 @@ up:
 	else \
 		$(MAKE) --no-print-directory file-watcher-build; \
 	fi
+	$(_PREPARE_COMPOSE_PERMISSIONS)
 	$(_SUBMODULE_INIT)
-	@$(_REMOVE_REDIS_IF_SQLITE)
+	@$(_REMOVE_REDIS_IF_LOCAL)
 	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) $(_COMPOSE_REDIS_SCALE) -d \
 		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
@@ -354,8 +357,9 @@ up-build:
 	else \
 		$(MAKE) --no-print-directory file-watcher-build; \
 	fi
+	$(_PREPARE_COMPOSE_PERMISSIONS)
 	$(_SUBMODULE_INIT)
-	@$(_REMOVE_REDIS_IF_SQLITE)
+	@$(_REMOVE_REDIS_IF_LOCAL)
 	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) $(_COMPOSE_REDIS_SCALE) --build -d \
 		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
