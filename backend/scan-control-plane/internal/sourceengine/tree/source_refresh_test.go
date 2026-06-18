@@ -2,6 +2,7 @@ package tree
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,6 +52,68 @@ func TestSourceReadRefresherMarksFeishuMissingDocumentDeleted(t *testing.T) {
 	current := repo.states["doc-current"]
 	if current.SourceState != "NEW" || current.PendingAction != "CREATE" || !current.DocumentListVisible {
 		t.Fatalf("seen source document should still be reduced: %+v", current)
+	}
+}
+
+func TestSourceReadRefresherReportsMissingBindingTarget(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "not found", err: connector.NewError(connector.ErrorCodeNotFound, "wiki node not found")},
+		{name: "transient not found", err: connector.NewError(connector.ErrorCodeTransient, "not found")},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			now := time.Date(2026, 6, 16, 8, 30, 0, 0, time.UTC)
+			repo := newRefreshTestRepo(now)
+			repo.binding.TargetType = "wiki_node"
+			repo.binding.TargetRef = "wiki:space-1:node-root"
+			repo.binding.CoreParentDocumentName = "Root Wiki"
+			repo.states["doc-existing"] = store.DocumentState{
+				SourceID:            "source-1",
+				BindingID:           "binding-1",
+				BindingGeneration:   1,
+				ObjectKey:           "doc-existing",
+				SourceVersion:       "old-v1",
+				BaselineVersion:     "old-v1",
+				SourceState:         "UNCHANGED",
+				SyncState:           "IDLE",
+				DocumentListVisible: true,
+				Selectable:          true,
+				CreatedAt:           now,
+				UpdatedAt:           now,
+			}
+			conn := &treeConnectorSpy{
+				connectorType: connector.ConnectorType("feishu"),
+				listErr:       tt.err,
+			}
+			registry, err := connector.NewDefaultConnectorRegistry(conn)
+			if err != nil {
+				t.Fatalf("create registry: %v", err)
+			}
+			refresher := NewDBSourceReadRefresher(repo, registry, WithSourceReadRefreshClock(func() time.Time { return now }))
+
+			err = refresher.RefreshSourceRead(context.Background(), SourceReadRefreshRequest{SourceID: "source-1", BindingID: "binding-1"})
+			if err == nil {
+				t.Fatalf("expected missing target error")
+			}
+			if got := ErrorCodeOf(err); got != ErrCodeTargetNotFound {
+				t.Fatalf("expected error code %s, got %s (%v)", ErrCodeTargetNotFound, got, err)
+			}
+			if msg := err.Error(); !strings.Contains(msg, "Root Wiki") || !strings.Contains(msg, "wiki:space-1:node-root") {
+				t.Fatalf("expected target name and ref in error message, got %q", msg)
+			}
+			existing := repo.states["doc-existing"]
+			if existing.SourceState == "DELETED" || existing.PendingAction == "DELETE" {
+				t.Fatalf("binding target missing should not mark existing states deleted: %+v", existing)
+			}
+		})
 	}
 }
 

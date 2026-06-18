@@ -1499,6 +1499,7 @@ const enUS = {
     dataSourceBackToList: "Back to List",
     dataSourceFallbackName: "Data Source",
     dataSourceParseParsed: "Parsed",
+    dataSourceParsePending: "Pending parse",
     dataSourceParseReindexing: "Reindexing",
     dataSourceParseDuplicate: "Duplicate",
     dataSourceParseDeleted: "Pending deletion",

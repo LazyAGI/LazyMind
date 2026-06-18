@@ -13,9 +13,8 @@ const (
 )
 
 const (
-	SourceRefTypeSkillReviewResult  = "skill_review_results"
-	SourceRefTypeMemoryReview       = "memory_review"
-	SourceRefTypeResourceSuggestion = "resource_suggestions"
+	SourceRefTypeSkillReviewResult = "skill_review_results"
+	SourceRefTypeMemoryReview      = "memory_review"
 )
 
 type Source struct {

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,6 +40,9 @@ func TestCreateServerMasksAndEncryptsAPIKey(t *testing.T) {
 	if resp.APIKeyPreview != "sk-***xyz" {
 		t.Fatalf("unexpected api key preview: %q", resp.APIKeyPreview)
 	}
+	if resp.Enabled {
+		t.Fatalf("new server should start disabled")
+	}
 
 	var row orm.MCPServer
 	if err := db.First(&row, "id = ?", resp.ID).Error; err != nil {
@@ -46,6 +50,12 @@ func TestCreateServerMasksAndEncryptsAPIKey(t *testing.T) {
 	}
 	if strings.Contains(string(row.HeadersJSON), "sk-secret-xyz") || strings.Contains(string(row.HeadersJSON), "Authorization") {
 		t.Fatalf("headers_json leaked credential material: %s", row.HeadersJSON)
+	}
+
+	if err := db.Model(&orm.MCPServer{}).
+		Where("id = ?", resp.ID).
+		Updates(map[string]any{"is_verified": true, "enabled": true}).Error; err != nil {
+		t.Fatalf("enable verified server: %v", err)
 	}
 
 	runtime, err := LoadRuntimeConfig(context.Background(), db.DB, "u1")
@@ -60,6 +70,155 @@ func TestCreateServerMasksAndEncryptsAPIKey(t *testing.T) {
 	}
 	if len(runtime[0].AllowedTools) != 2 || runtime[0].AllowedTools[0] != "get-library-docs" {
 		t.Fatalf("unexpected allowed tools: %#v", runtime[0].AllowedTools)
+	}
+}
+
+func TestCreateServerIgnoresEnabledAndStartsDisabled(t *testing.T) {
+	db := newTestDB(t)
+	enabled := true
+	resp, err := CreateServer(context.Background(), db.DB, CreateServerRequest{
+		Name:      "context7",
+		Transport: "sse",
+		URL:       "https://mcp.example.com/sse",
+		Enabled:   &enabled,
+	}, "u1", "User 1")
+	if err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+	if resp.Enabled {
+		t.Fatalf("new server should ignore requested enabled=true and start disabled")
+	}
+
+	var row orm.MCPServer
+	if err := db.First(&row, "id = ?", resp.ID).Error; err != nil {
+		t.Fatalf("query row: %v", err)
+	}
+	if row.Enabled {
+		t.Fatalf("stored server should be disabled")
+	}
+
+	runtime, err := LoadRuntimeConfig(context.Background(), db.DB, "u1")
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+	if len(runtime) != 0 {
+		t.Fatalf("disabled new server should not load into runtime config: %#v", runtime)
+	}
+}
+
+func TestUpdateServerRequiresVerificationBeforeEnabling(t *testing.T) {
+	db := newTestDB(t)
+	created, err := CreateServer(context.Background(), db.DB, CreateServerRequest{
+		Name:      "context7",
+		Transport: "sse",
+		URL:       "https://mcp.example.com/sse",
+	}, "u1", "User 1")
+	if err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+
+	enabled := true
+	if _, err := UpdateServer(context.Background(), db.DB, "u1", created.ID, UpdateServerRequest{
+		Enabled: &enabled,
+	}); !errors.Is(err, errBadRequest) {
+		t.Fatalf("expected bad request enabling unverified server, got %v", err)
+	}
+
+	var row orm.MCPServer
+	if err := db.First(&row, "id = ?", created.ID).Error; err != nil {
+		t.Fatalf("query row: %v", err)
+	}
+	if row.Enabled {
+		t.Fatalf("unverified server should remain disabled")
+	}
+
+	if err := db.Model(&orm.MCPServer{}).
+		Where("id = ?", created.ID).
+		Update("is_verified", true).Error; err != nil {
+		t.Fatalf("mark server verified: %v", err)
+	}
+	updated, err := UpdateServer(context.Background(), db.DB, "u1", created.ID, UpdateServerRequest{
+		Enabled: &enabled,
+	})
+	if err != nil {
+		t.Fatalf("enable verified server: %v", err)
+	}
+	if !updated.Enabled {
+		t.Fatalf("verified server should be enabled")
+	}
+}
+
+func TestCheckServerMarksVerifiedOnSuccess(t *testing.T) {
+	db := newTestDB(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode rpc request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch req.Method {
+		case "initialize":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"result": map[string]any{
+					"protocolVersion": "2024-11-05",
+					"capabilities":    map[string]any{},
+					"serverInfo":      map[string]any{"name": "test", "version": "1"},
+				},
+			})
+		case "notifications/initialized":
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "result": map[string]any{}})
+		case "tools/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"result": map[string]any{
+					"tools": []map[string]any{{
+						"name":        "search",
+						"description": "search docs",
+						"inputSchema": map[string]any{"type": "object"},
+					}},
+				},
+			})
+		default:
+			t.Fatalf("unexpected rpc method: %s", req.Method)
+		}
+	}))
+	defer server.Close()
+
+	created, err := CreateServer(context.Background(), db.DB, CreateServerRequest{
+		Name:      "local",
+		Transport: "http",
+		URL:       server.URL,
+		Timeout:   2,
+	}, "u1", "User 1")
+	if err != nil {
+		t.Fatalf("create server: %v", err)
+	}
+
+	var before orm.MCPServer
+	if err := db.First(&before, "id = ?", created.ID).Error; err != nil {
+		t.Fatalf("query created server: %v", err)
+	}
+	if before.IsVerified {
+		t.Fatalf("new server should start unverified")
+	}
+
+	resp, err := CheckServer(context.Background(), db.DB, "u1", created.ID)
+	if err != nil {
+		t.Fatalf("check server: %v", err)
+	}
+	if !resp.Success || resp.ToolCount != 1 {
+		t.Fatalf("unexpected check response: %#v", resp)
+	}
+
+	var row orm.MCPServer
+	if err := db.First(&row, "id = ?", created.ID).Error; err != nil {
+		t.Fatalf("query checked server: %v", err)
+	}
+	if !row.IsVerified {
+		t.Fatalf("expected successful check to mark server verified")
 	}
 }
 

@@ -87,7 +87,7 @@ func Share(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	task := orm.SkillShareTask{
-		ID:                    evolution.BuildSuggestionRecord("", "", "", "", "", "").ID,
+		ID:                    evolution.NewID(),
 		SourceUserID:          userID,
 		SourceUserName:        userName,
 		SourceSkillID:         parent.ID,
@@ -103,7 +103,7 @@ func Share(w http.ResponseWriter, r *http.Request) {
 	for _, target := range filtered {
 		targetUserName := firstNonEmpty(targetUserNames[target], target)
 		items = append(items, orm.SkillShareItem{
-			ID:             evolution.BuildSuggestionRecord("", "", "", "", "", "").ID,
+			ID:             evolution.NewID(),
 			ShareTaskID:    task.ID,
 			TargetUserID:   target,
 			TargetUserName: targetUserName,
@@ -358,7 +358,7 @@ func AcceptShare(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
-	targetParentID := evolution.BuildSuggestionRecord("", "", "", "", "", "").ID
+	targetParentID := evolution.NewID()
 	targetParent := sourceParent
 	targetParent.ID = targetParentID
 	targetParent.OwnerUserID = userID
@@ -377,7 +377,7 @@ func AcceptShare(w http.ResponseWriter, r *http.Request) {
 	targetChildren := make([]orm.SkillResource, 0, len(sourceChildren))
 	for _, sourceChild := range sourceChildren {
 		child := sourceChild
-		child.ID = evolution.BuildSuggestionRecord("", "", "", "", "", "").ID
+		child.ID = evolution.NewID()
 		child.OwnerUserID = userID
 		child.OwnerUserName = userName
 		child.CreateUserID = userID

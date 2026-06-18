@@ -6,6 +6,7 @@ type DefaultTargetTreeEngine struct {
 	registry connector.ConnectorRegistry
 	fallback TargetTreeFallbackSearch
 	limits   TreeQueryLimits
+	cache    *targetSearchCache
 }
 
 type TargetTreeOption func(*DefaultTargetTreeEngine)
@@ -14,6 +15,7 @@ func NewDefaultTargetTreeEngine(registry connector.ConnectorRegistry, options ..
 	e := &DefaultTargetTreeEngine{
 		registry: registry,
 		limits:   defaultLimits(TreeQueryLimits{}),
+		cache:    newTargetSearchCache(),
 	}
 	for _, option := range options {
 		option(e)
@@ -31,5 +33,13 @@ func WithTargetTreeLimits(limits TreeQueryLimits) TargetTreeOption {
 func WithFallbackSearch(fallback TargetTreeFallbackSearch) TargetTreeOption {
 	return func(e *DefaultTargetTreeEngine) {
 		e.fallback = fallback
+	}
+}
+
+func WithTargetSearchCacheStore(store targetSearchCacheStore) TargetTreeOption {
+	return func(e *DefaultTargetTreeEngine) {
+		if e.cache != nil {
+			e.cache.store = store
+		}
 	}
 }

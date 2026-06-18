@@ -11,7 +11,13 @@ export type FileUpdateState = "new" | "changed" | "unchanged" | "deleted";
 export type FeishuTargetType = "wiki_space" | "drive_folder";
 export type NotionTargetType = "page" | "database";
 export type CloudTargetType = FeishuTargetType | NotionTargetType;
-export type DetailParseStatus = "parsed" | "reindexing" | "duplicate" | "deleted" | "failed";
+export type DetailParseStatus =
+  | "parsed"
+  | "pending"
+  | "reindexing"
+  | "duplicate"
+  | "deleted"
+  | "failed";
 export type DataSourceKind = "local" | "feishu" | "notion";
 
 // New source state machine fields exposed by the backend.
@@ -369,7 +375,7 @@ export function normalizeDataSourceParseStatus(parseState?: string): DetailParse
       "pending parse",
     ])
   ) {
-    return "reindexing";
+    return "pending";
   }
   if (hasStatusToken(parseState, ["delete", "deleted", "remove", "removed"])) {
     return "deleted";
@@ -395,6 +401,8 @@ export function normalizeDataSourceParseStatus(parseState?: string): DetailParse
       "reindexing",
       "running",
       "pending",
+      "waiting",
+      "working",
       "queued",
       "processing",
       "parsing",

@@ -12,7 +12,7 @@ type MCPServer struct {
 	URL              string          `gorm:"column:url;type:text;not null;default:''"`
 	HeadersJSON      json.RawMessage `gorm:"column:headers_json;type:json;not null"`
 	AllowedToolsJSON json.RawMessage `gorm:"column:allowed_tools_json;type:json;not null"`
-	Enabled          bool            `gorm:"column:enabled;type:boolean;not null;default:true"`
+	Enabled          bool            `gorm:"column:enabled;type:boolean;not null;default:false"`
 	IsVerified       bool            `gorm:"column:is_verified;type:boolean;not null;default:false"`
 	Share            bool            `gorm:"column:share;type:boolean;not null;default:false"`
 	Timeout          int             `gorm:"column:timeout;not null;default:5"`

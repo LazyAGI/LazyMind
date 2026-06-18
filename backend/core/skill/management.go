@@ -25,12 +25,18 @@ import (
 )
 
 var (
-	errDraftPreviewParentOnly  = errors.New("only parent skill supports draft preview")
-	errDraftPreviewNotFound    = errors.New("skill draft not found")
-	errAutoEvoApplyConflict    = errors.New("auto_evo apply conflict")
-	errAutoEvoTaskRunning      = errors.New("auto_evo task is running")
-	errPendingRemoveSuggestion = errors.New("skill has pending remove suggestion")
+	errDraftPreviewParentOnly = errors.New("only parent skill supports draft preview")
+	errDraftPreviewNotFound   = errors.New("skill draft not found")
+	errAutoEvoApplyConflict   = errors.New("auto_evo apply conflict")
 )
+
+func payloadForLog(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
 
 func normalizedSkillUpdateStatus(status string) string {
 	status = strings.TrimSpace(status)
@@ -896,7 +902,7 @@ func createParentSkillWithContent(ctx context.Context, db *gorm.DB, userID, user
 		enabled = *req.IsEnabled
 	}
 	parent := orm.SkillResource{
-		ID:              evolution.BuildSuggestionRecord("", "", "", "", "", "").ID,
+		ID:              evolution.NewID(),
 		OwnerUserID:     userID,
 		OwnerUserName:   userName,
 		Category:        req.Category,
@@ -925,7 +931,7 @@ func createParentSkillWithContent(ctx context.Context, db *gorm.DB, userID, user
 		ext := normalizeExt(child.FileExt)
 		rel := childRelativePath(req.Category, req.Name, child.Name, ext)
 		children = append(children, orm.SkillResource{
-			ID:              evolution.BuildSuggestionRecord("", "", "", "", "", "").ID,
+			ID:              evolution.NewID(),
 			OwnerUserID:     userID,
 			OwnerUserName:   userName,
 			Category:        req.Category,
@@ -1024,7 +1030,7 @@ func createChildSkill(ctx context.Context, db *gorm.DB, userID, userName string,
 	}
 	now := time.Now()
 	row := orm.SkillResource{
-		ID:              evolution.BuildSuggestionRecord("", "", "", "", "", "").ID,
+		ID:              evolution.NewID(),
 		OwnerUserID:     userID,
 		OwnerUserName:   userName,
 		Category:        parent.Category,
@@ -1068,9 +1074,6 @@ func updateSkill(ctx context.Context, db *gorm.DB, userID, userName, skillID str
 	var row orm.SkillResource
 	if err := db.WithContext(ctx).Where("id = ? AND owner_user_id = ?", skillID, userID).Take(&row).Error; err != nil {
 		return err
-	}
-	if req.AutoEvo != nil && evolution.HasAutoEvoWorker(evolution.AutoEvoWorkerKey(evolution.ResourceTypeSkill, row.ID)) {
-		return errAutoEvoTaskRunning
 	}
 	if row.NodeType == evolution.SkillNodeTypeParent {
 		return updateParentSkill(ctx, db, userID, userName, &row, req)
@@ -1196,13 +1199,6 @@ func enableParentSkillAutoEvoWithDiscardedDraft(ctx context.Context, db *gorm.DB
 		Where("owner_user_id = ? AND node_type = ? AND category = ? AND parent_skill_name = ?",
 			row.OwnerUserID, evolution.SkillNodeTypeChild, row.Category, row.SkillName).
 		Updates(map[string]any{"update_status": evolution.UpdateStatusUpToDate, "updated_at": now}).Error
-	var refreshed orm.SkillResource
-	if err := db.WithContext(ctx).Where("id = ?", row.ID).Take(&refreshed).Error; err != nil {
-		return err
-	}
-	if err := ensureSkillAutoEvolutionScheduled(refreshed); err != nil {
-		appLog.Logger.Warn().Err(err).Str("skill_id", row.ID).Msg("auto_evo schedule on PATCH failed")
-	}
 	if !wasAutoEvo {
 		if err := resourceupdate.ScanPendingResultsForResource(ctx, db, orm.ResourceUpdateResourceTypeSkill, row.OwnerUserID, row.ID); err != nil {
 			appLog.Logger.Warn().Err(err).
@@ -1222,9 +1218,6 @@ func enableParentSkillAutoEvoWithDiscardedDraft(ctx context.Context, db *gorm.DB
 func updateParentSkill(ctx context.Context, db *gorm.DB, userID, userName string, row *orm.SkillResource, req updateSkillRequest) error {
 	pendingDraft := strings.TrimSpace(row.DraftStatus) == "pending_confirm"
 	if pendingDraft && req.AutoEvo != nil && *req.AutoEvo {
-		if err := ensureNoPendingRemoveSuggestionForAutoEvo(ctx, db, userID, *row); err != nil {
-			return err
-		}
 		return enableParentSkillAutoEvoWithDiscardedDraft(ctx, db, row)
 	}
 	if pendingDraft {
@@ -1235,11 +1228,6 @@ func updateParentSkill(ctx context.Context, db *gorm.DB, userID, userName string
 	}
 	if req.ParentSkillName != nil {
 		return errors.New("parent_skill_name cannot be updated")
-	}
-	if req.AutoEvo != nil && *req.AutoEvo {
-		if err := ensureNoPendingRemoveSuggestionForAutoEvo(ctx, db, userID, *row); err != nil {
-			return err
-		}
 	}
 	currentContent, err := storedSkillContent(*row)
 	if err != nil {
@@ -1386,17 +1374,6 @@ func updateParentSkill(ctx context.Context, db *gorm.DB, userID, userName string
 	}
 
 	enabledAutoEvo := req.AutoEvo != nil && *req.AutoEvo && !row.AutoEvo
-	if req.AutoEvo != nil {
-		var refreshed orm.SkillResource
-		if err := db.WithContext(ctx).Where("id = ?", row.ID).Take(&refreshed).Error; err != nil {
-			return err
-		}
-		if *req.AutoEvo {
-			if err := ensureSkillAutoEvolutionScheduled(refreshed); err != nil {
-				appLog.Logger.Warn().Err(err).Str("skill_id", row.ID).Msg("auto_evo schedule on PATCH failed")
-			}
-		}
-	}
 	if enabledAutoEvo {
 		if err := resourceupdate.ScanPendingResultsForResource(ctx, db, orm.ResourceUpdateResourceTypeSkill, userID, row.ID); err != nil {
 			appLog.Logger.Warn().Err(err).
@@ -1420,11 +1397,6 @@ func updateChildSkill(ctx context.Context, db *gorm.DB, userID string, row *orm.
 	}
 	if req.Category != nil || req.IsEnabled != nil {
 		return errors.New("child skill only supports name/description/tags/content/file_ext/auto_evo/parent_skill_id updates")
-	}
-	if req.AutoEvo != nil && *req.AutoEvo {
-		if err := ensureNoPendingRemoveSuggestionForAutoEvo(ctx, db, userID, *row); err != nil {
-			return err
-		}
 	}
 	currentContent, err := storedSkillContent(*row)
 	if err != nil {
@@ -1559,17 +1531,6 @@ func updateChildSkill(ctx context.Context, db *gorm.DB, userID string, row *orm.
 	}
 
 	enabledAutoEvo := req.AutoEvo != nil && *req.AutoEvo && !row.AutoEvo
-	if req.AutoEvo != nil {
-		var refreshed orm.SkillResource
-		if err := db.WithContext(ctx).Where("id = ?", row.ID).Take(&refreshed).Error; err != nil {
-			return err
-		}
-		if *req.AutoEvo {
-			if err := ensureSkillAutoEvolutionScheduled(refreshed); err != nil {
-				appLog.Logger.Warn().Err(err).Str("skill_id", row.ID).Msg("auto_evo schedule on PATCH failed for child skill")
-			}
-		}
-	}
 	if enabledAutoEvo {
 		if err := resourceupdate.ScanPendingResultsForResource(ctx, db, orm.ResourceUpdateResourceTypeSkill, userID, row.ID); err != nil {
 			appLog.Logger.Warn().Err(err).
@@ -1821,217 +1782,6 @@ func compactStrings(values []string) []string {
 	return out
 }
 
-func hasPendingRemoveSuggestion(rows []orm.ResourceSuggestion) bool {
-	for _, row := range rows {
-		if strings.TrimSpace(row.Action) == evolution.SuggestionActionRemove {
-			return true
-		}
-	}
-	return false
-}
-
-func disableSkillAutoEvoForPendingRemove(ctx context.Context, db *gorm.DB, row orm.SkillResource) error {
-	now := time.Now()
-	update := map[string]any{
-		"auto_evo":              false,
-		"auto_evo_apply_status": evolution.AutoEvoApplyStatusIdle,
-		"auto_evo_error":        "",
-		"auto_evo_started_at":   nil,
-		"auto_evo_finished_at":  now,
-		"auto_evo_generation":   gorm.Expr("auto_evo_generation + 1"),
-		"updated_at":            now,
-	}
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&orm.SkillResource{}).Where("id = ?", row.ID).Updates(update).Error; err != nil {
-			return err
-		}
-		if row.NodeType == evolution.SkillNodeTypeParent {
-			return tx.Model(&orm.SkillResource{}).
-				Where("owner_user_id = ? AND node_type = ? AND category = ? AND parent_skill_name = ?",
-					row.OwnerUserID, evolution.SkillNodeTypeChild, row.Category, row.SkillName).
-				Updates(update).Error
-		}
-		return nil
-	})
-}
-
-func ensureNoPendingRemoveSuggestionForAutoEvo(ctx context.Context, db *gorm.DB, userID string, row orm.SkillResource) error {
-	resourceKey := evolution.SkillSuggestionResourceKey(row)
-	if resourceKey == "" {
-		return nil
-	}
-	pending, err := evolution.LoadAutoApplicableSuggestions(ctx, db, userID, evolution.ResourceTypeSkill, resourceKey)
-	if err != nil {
-		return err
-	}
-	if !hasPendingRemoveSuggestion(pending) {
-		return nil
-	}
-	if err := disableSkillAutoEvoForPendingRemove(ctx, db, row); err != nil {
-		return err
-	}
-	return errPendingRemoveSuggestion
-}
-
-func applySkillAutoEvolution(ctx context.Context, db *gorm.DB, row orm.SkillResource) (bool, error) {
-	resourceKey := evolution.SkillSuggestionResourceKey(row)
-	if resourceKey == "" {
-		return false, nil
-	}
-
-	pending, err := evolution.LoadAutoApplicableSuggestions(ctx, db, row.OwnerUserID, evolution.ResourceTypeSkill, resourceKey)
-	if err != nil {
-		return false, err
-	}
-	if len(pending) == 0 {
-		return false, nil
-	}
-	if hasPendingRemoveSuggestion(pending) {
-		if err := disableSkillAutoEvoForPendingRemove(ctx, db, row); err != nil {
-			return false, err
-		}
-		return false, nil
-	}
-	return false, nil
-}
-
-func ensureSkillAutoEvolutionScheduled(row orm.SkillResource) error {
-	if !row.AutoEvo {
-		return nil
-	}
-	workerKey := evolution.AutoEvoWorkerKey(evolution.ResourceTypeSkill, row.ID)
-	if !evolution.TryAcquireAutoEvoWorker(workerKey) {
-		return nil
-	}
-
-	db := store.DB()
-	if db == nil {
-		evolution.ReleaseAutoEvoWorker(workerKey)
-		return errors.New("store not initialized")
-	}
-
-	var latest orm.SkillResource
-	if err := db.WithContext(context.Background()).Where("id = ?", row.ID).Take(&latest).Error; err != nil {
-		evolution.ReleaseAutoEvoWorker(workerKey)
-		return err
-	}
-	if !latest.AutoEvo {
-		evolution.ReleaseAutoEvoWorker(workerKey)
-		return nil
-	}
-
-	pending, err := evolution.LoadAutoApplicableSuggestions(context.Background(), db, latest.OwnerUserID, evolution.ResourceTypeSkill, evolution.SkillSuggestionResourceKey(latest))
-	if err != nil {
-		evolution.ReleaseAutoEvoWorker(workerKey)
-		return err
-	}
-	if len(pending) == 0 {
-		_ = db.WithContext(context.Background()).Model(&orm.SkillResource{}).
-			Where("id = ?", latest.ID).
-			Updates(map[string]any{
-				"auto_evo_apply_status": evolution.AutoEvoApplyStatusIdle,
-				"auto_evo_error":        "",
-				"auto_evo_finished_at":  time.Now(),
-				"updated_at":            time.Now(),
-			}).Error
-		evolution.ReleaseAutoEvoWorker(workerKey)
-		return nil
-	}
-	if hasPendingRemoveSuggestion(pending) {
-		if err := disableSkillAutoEvoForPendingRemove(context.Background(), db, latest); err != nil {
-			evolution.ReleaseAutoEvoWorker(workerKey)
-			return err
-		}
-		evolution.ReleaseAutoEvoWorker(workerKey)
-		return nil
-	}
-
-	now := time.Now()
-	if err := db.WithContext(context.Background()).Model(&orm.SkillResource{}).
-		Where("id = ?", latest.ID).
-		Updates(map[string]any{
-			"auto_evo_apply_status": evolution.AutoEvoApplyStatusRunning,
-			"auto_evo_started_at":   now,
-			"auto_evo_finished_at":  nil,
-			"auto_evo_error":        "",
-			"updated_at":            now,
-		}).Error; err != nil {
-		evolution.ReleaseAutoEvoWorker(workerKey)
-		return err
-	}
-
-	go runSkillAutoEvolutionLoop(latest.ID, workerKey)
-	return nil
-}
-
-func runSkillAutoEvolutionLoop(skillID, workerKey string) {
-	defer evolution.ReleaseAutoEvoWorker(workerKey)
-
-	ctx := context.Background()
-	db := store.DB()
-	if db == nil {
-		return
-	}
-
-	for {
-		var row orm.SkillResource
-		if err := db.WithContext(ctx).Where("id = ?", skillID).Take(&row).Error; err != nil {
-			return
-		}
-		if !row.AutoEvo {
-			return
-		}
-
-		pending, err := evolution.LoadAutoApplicableSuggestions(ctx, db, row.OwnerUserID, evolution.ResourceTypeSkill, evolution.SkillSuggestionResourceKey(row))
-		if err != nil {
-			_ = db.WithContext(ctx).Model(&orm.SkillResource{}).Where("id = ?", row.ID).Updates(map[string]any{
-				"auto_evo_apply_status": evolution.AutoEvoApplyStatusFailed,
-				"auto_evo_error":        err.Error(),
-				"auto_evo_finished_at":  time.Now(),
-				"updated_at":            time.Now(),
-			}).Error
-			return
-		}
-		if len(pending) == 0 {
-			_ = db.WithContext(ctx).Model(&orm.SkillResource{}).Where("id = ?", row.ID).Updates(map[string]any{
-				"auto_evo_apply_status": evolution.AutoEvoApplyStatusIdle,
-				"auto_evo_error":        "",
-				"auto_evo_finished_at":  time.Now(),
-				"updated_at":            time.Now(),
-			}).Error
-			return
-		}
-		if hasPendingRemoveSuggestion(pending) {
-			_ = disableSkillAutoEvoForPendingRemove(ctx, db, row)
-			return
-		}
-
-		generation := row.AutoEvoGeneration
-		applied, err := applySkillAutoEvolution(ctx, db, row)
-		if err != nil {
-			_ = db.WithContext(ctx).Model(&orm.SkillResource{}).Where("id = ?", row.ID).Updates(map[string]any{
-				"auto_evo_apply_status": evolution.AutoEvoApplyStatusFailed,
-				"auto_evo_error":        err.Error(),
-				"auto_evo_finished_at":  time.Now(),
-				"updated_at":            time.Now(),
-			}).Error
-			return
-		}
-		if !applied {
-			var latest orm.SkillResource
-			if reloadErr := db.WithContext(ctx).Where("id = ?", row.ID).Take(&latest).Error; reloadErr != nil {
-				return
-			}
-			if !latest.AutoEvo {
-				return
-			}
-			if latest.AutoEvoGeneration != generation {
-				continue
-			}
-		}
-	}
-}
-
 func replySkillError(w http.ResponseWriter, err error) {
 	switch {
 	case err == nil:
@@ -2040,10 +1790,6 @@ func replySkillError(w http.ResponseWriter, err error) {
 		common.ReplyErr(w, "skill not found", http.StatusNotFound)
 	case errors.Is(err, gorm.ErrDuplicatedKey):
 		common.ReplyErr(w, "skill already exists", http.StatusConflict)
-	case errors.Is(err, errPendingRemoveSuggestion):
-		common.ReplyErr(w, err.Error(), http.StatusConflict)
-	case errors.Is(err, errAutoEvoTaskRunning):
-		common.ReplyErr(w, err.Error(), http.StatusConflict)
 	default:
 		message := strings.TrimSpace(err.Error())
 		status := http.StatusBadRequest

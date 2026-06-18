@@ -556,3 +556,54 @@ func TestShouldEmitStreamFrame(t *testing.T) {
 		}
 	}
 }
+
+func TestFeedBackChatHistoryCancelsFeedback(t *testing.T) {
+	db, err := orm.Connect(orm.DriverSQLite, t.TempDir()+"/feedback.db")
+	if err != nil {
+		t.Fatalf("connect db: %v", err)
+	}
+	if err := db.AutoMigrate(&orm.ChatHistory{}); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	if err := db.Create(&orm.ChatHistory{
+		ID:             "h_1",
+		Seq:            1,
+		ConversationID: "conv-1",
+		RawContent:     "question",
+		Content:        "question",
+		Result:         "answer",
+		FeedBack:       2,
+		Reason:         "not helpful",
+		ExpectedAnswer: "better answer",
+		TimeMixin:      orm.TimeMixin{CreateTime: now, UpdateTime: now},
+	}).Error; err != nil {
+		t.Fatalf("create history: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/core/conversations:feedBackChatHistory",
+		strings.NewReader(`{"history_id":"h_1","type":"FEED_BACK_TYPE_UNSPECIFIED"}`),
+	)
+	rec := httptest.NewRecorder()
+
+	FeedBackChatHistory(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var history orm.ChatHistory
+	if err := db.Where("id = ?", "h_1").First(&history).Error; err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	if history.FeedBack != 0 {
+		t.Fatalf("expected feedback to be cancelled, got %d", history.FeedBack)
+	}
+	if history.Reason != "" || history.ExpectedAnswer != "" {
+		t.Fatalf("expected feedback detail to be cleared, got reason=%q expected_answer=%q", history.Reason, history.ExpectedAnswer)
+	}
+}

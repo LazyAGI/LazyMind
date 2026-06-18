@@ -407,6 +407,12 @@ type toolPathParams struct {
 	ToolName string `path:"tool_name"`
 }
 
+type toolListQueryParams struct {
+	Keyword  string `query:"keyword"`
+	Page     int32  `query:"page"`
+	PageSize int32  `query:"page_size"`
+}
+
 type mcpServerPathParams struct {
 	ID string `path:"id"`
 }
@@ -432,6 +438,9 @@ type toolGroupOpenAPIResponse struct {
 
 type toolListOpenAPIResponse struct {
 	ToolGroups []toolGroupOpenAPIResponse `json:"tool_groups"`
+	Page       int32                      `json:"page"`
+	PageSize   int32                      `json:"page_size"`
+	Total      int32                      `json:"total"`
 }
 
 type toolStateOpenAPIResponse struct {
@@ -917,21 +926,8 @@ type skillDraftPreviewOpenAPIResponse struct {
 	Outdated           bool   `json:"outdated"`
 }
 
-type suggestionIDPathParams struct {
-	ID string `path:"id"`
-}
-
 type shareItemPathParams struct {
 	ShareItemID string `path:"share_item_id"`
-}
-
-type suggestionListQueryParams struct {
-	Page         int32  `query:"page"`
-	PageSize     int32  `query:"page_size"`
-	EvolutionID  string `query:"evolution_id"`
-	ResourceType string `query:"resource_type"`
-	ResourceKey  string `query:"resource_key"`
-	Keyword      string `query:"keyword"`
 }
 
 type skillListQueryParams struct {
@@ -946,63 +942,6 @@ type shareListQueryParams struct {
 	Status   string `query:"status"`
 	Page     int32  `query:"page"`
 	PageSize int32  `query:"page_size"`
-}
-
-type suggestionPayloadOpenAPIRequest struct {
-	Title   string `json:"title"`
-	Content string `json:"content"`
-	Reason  string `json:"reason,omitempty"`
-}
-
-type suggestionBatchReviewOpenAPIRequest struct {
-	IDs []string `json:"ids"`
-}
-
-type recordedSuggestionOpenAPIResponse struct {
-	ID            string `json:"id"`
-	Status        string `json:"status"`
-	InvalidReason string `json:"invalid_reason,omitempty"`
-}
-
-type recordedSuggestionListOpenAPIResponse struct {
-	Items []recordedSuggestionOpenAPIResponse `json:"items"`
-}
-
-type suggestionItemOpenAPIResponse struct {
-	ID              string  `json:"id"`
-	UserID          string  `json:"user_id"`
-	ResourceType    string  `json:"resource_type"`
-	ResourceKey     string  `json:"resource_key"`
-	Category        string  `json:"category"`
-	ParentSkillName string  `json:"parent_skill_name"`
-	SkillName       string  `json:"skill_name"`
-	FileExt         string  `json:"file_ext"`
-	RelativePath    string  `json:"relative_path"`
-	Action          string  `json:"action"`
-	SessionID       string  `json:"session_id"`
-	Title           string  `json:"title"`
-	Content         string  `json:"content"`
-	Reason          string  `json:"reason"`
-	FullContent     string  `json:"full_content"`
-	Status          string  `json:"status"`
-	InvalidReason   string  `json:"invalid_reason"`
-	ReviewerID      string  `json:"reviewer_id"`
-	ReviewerName    string  `json:"reviewer_name"`
-	ReviewedAt      *string `json:"reviewed_at,omitempty"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
-	Outdated        bool    `json:"outdated"`
-}
-
-type suggestionListOpenAPIResponse struct {
-	Items    []suggestionItemOpenAPIResponse `json:"items"`
-	Page     int32                           `json:"page"`
-	PageSize int32                           `json:"page_size"`
-	Total    int64                           `json:"total"`
-}
-
-type suggestionBatchReviewOpenAPIResponse struct {
-	Items []suggestionItemOpenAPIResponse `json:"items"`
 }
 
 type skillChildCreateOpenAPIRequest struct {
@@ -1248,11 +1187,6 @@ type skillShareRejectOpenAPIResponse struct {
 	Rejected bool `json:"rejected"`
 }
 
-type systemSuggestionOpenAPIRequest struct {
-	SessionID   string                            `json:"session_id"`
-	Suggestions []suggestionPayloadOpenAPIRequest `json:"suggestions"`
-}
-
 type memoryUpsertOpenAPIRequest struct {
 	Content string `json:"content,omitempty"`
 	AutoEvo *bool  `json:"auto_evo,omitempty"`
@@ -1322,28 +1256,11 @@ type systemDiscardOpenAPIResponse struct {
 	Discarded bool `json:"discarded"`
 }
 
-type internalSkillSuggestionOpenAPIRequest struct {
-	SessionID   string                            `json:"session_id"`
-	ID          string                            `json:"id,omitempty"`
-	SkillID     string                            `json:"skill_id,omitempty"`
-	Category    string                            `json:"category,omitempty"`
-	SkillName   string                            `json:"skill_name,omitempty"`
-	Suggestions []suggestionPayloadOpenAPIRequest `json:"suggestions"`
-}
-
 type internalSkillCreateOpenAPIRequest struct {
 	SessionID string `json:"session_id"`
 	Category  string `json:"category"`
 	SkillName string `json:"skill_name"`
 	Content   string `json:"content"`
-}
-
-type internalSkillRemoveOpenAPIRequest struct {
-	ID        string `json:"id,omitempty"`
-	SessionID string `json:"session_id,omitempty"`
-	Category  string `json:"category,omitempty"`
-	SkillName string `json:"skill_name,omitempty"`
-	Reason    string `json:"reason,omitempty"`
 }
 
 type evalSetImportPreviewOpenAPIRequest struct {
@@ -1800,57 +1717,6 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "GET",
-			Path:        "/evolution/suggestions",
-			Summary:     "List evolution suggestions",
-			Description: "Use evolution_id=<resource_type>:<resource_id> for a single-parameter resource filter. resource_type and resource_key remain available as optional compatibility filters.",
-			Tags:        []string{"evolution"},
-			QueryParams: suggestionListQueryParams{},
-			Responses:   map[int]openAPIResponse{200: resp("Suggestion list", suggestionListOpenAPIResponse{})},
-		},
-		{
-			Method:     "GET",
-			Path:       "/evolution/suggestions/{id}",
-			Summary:    "Get evolution suggestion",
-			Tags:       []string{"evolution"},
-			PathParams: suggestionIDPathParams{},
-			Responses:  map[int]openAPIResponse{200: resp("Suggestion details", suggestionItemOpenAPIResponse{})},
-		},
-		{
-			Method:     "POST",
-			Path:       "/evolution/suggestions/{id}:approve",
-			Summary:    "Approve evolution suggestion",
-			Tags:       []string{"evolution"},
-			PathParams: suggestionIDPathParams{},
-			Responses:  map[int]openAPIResponse{200: resp("Approved suggestion", suggestionItemOpenAPIResponse{})},
-		},
-		{
-			Method:     "POST",
-			Path:       "/evolution/suggestions/{id}:reject",
-			Summary:    "Reject evolution suggestion",
-			Tags:       []string{"evolution"},
-			PathParams: suggestionIDPathParams{},
-			Responses:  map[int]openAPIResponse{200: resp("Rejected suggestion", suggestionItemOpenAPIResponse{})},
-		},
-		{
-			Method:      "POST",
-			Path:        "/evolution/suggestions:batchApprove",
-			Summary:     "Batch approve evolution suggestions",
-			Description: "Sets every listed suggestion to accepted regardless of its current status, as long as the suggestion exists.",
-			Tags:        []string{"evolution"},
-			RequestBody: jsonBodyOf(suggestionBatchReviewOpenAPIRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: resp("Approved suggestions", suggestionBatchReviewOpenAPIResponse{})},
-		},
-		{
-			Method:      "POST",
-			Path:        "/evolution/suggestions:batchReject",
-			Summary:     "Batch reject evolution suggestions",
-			Description: "Sets every listed suggestion to rejected regardless of its current status, as long as the suggestion exists.",
-			Tags:        []string{"evolution"},
-			RequestBody: jsonBodyOf(suggestionBatchReviewOpenAPIRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: resp("Rejected suggestions", suggestionBatchReviewOpenAPIResponse{})},
-		},
-		{
-			Method:      "GET",
 			Path:        "/evolution/tasks",
 			Summary:     "List resource update tasks",
 			Description: "Lists background resource update tasks for the current user.",
@@ -2098,35 +1964,11 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:      "POST",
-			Path:        "/skill/suggestion",
-			Summary:     "Create skill suggestions",
-			Tags:        []string{"skill-evolution"},
-			RequestBody: jsonBodyOf(internalSkillSuggestionOpenAPIRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: resp("Created skill suggestions", recordedSuggestionListOpenAPIResponse{})},
-		},
-		{
-			Method:      "POST",
 			Path:        "/skill/create",
 			Summary:     "Create skill directly from internal request",
 			Tags:        []string{"skill-evolution"},
 			RequestBody: jsonBodyOf(internalSkillCreateOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Created skill", skillDetailOpenAPIResponse{})},
-		},
-		{
-			Method:      "POST",
-			Path:        "/skill/remove",
-			Summary:     "Delete skill by ID",
-			Tags:        []string{"skill-evolution"},
-			RequestBody: jsonBodyOf(internalSkillRemoveOpenAPIRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: resp("Created remove suggestion", recordedSuggestionListOpenAPIResponse{})},
-		},
-		{
-			Method:      "POST",
-			Path:        "/memory/suggestion",
-			Summary:     "Create memory suggestions",
-			Tags:        []string{"memory"},
-			RequestBody: jsonBodyOf(systemSuggestionOpenAPIRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: resp("Created memory suggestions", recordedSuggestionListOpenAPIResponse{})},
 		},
 		{
 			Method:      "GET",
@@ -2314,14 +2156,6 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses: map[int]openAPIResponse{200: resp("Discarded memory draft", systemDiscardOpenAPIResponse{})},
 		},
 		{
-			Method:      "POST",
-			Path:        "/user_preference/suggestion",
-			Summary:     "Create user preference suggestions",
-			Tags:        []string{"preferences"},
-			RequestBody: jsonBodyOf(systemSuggestionOpenAPIRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: resp("Created user preference suggestions", recordedSuggestionListOpenAPIResponse{})},
-		},
-		{
 			Method:      "PUT",
 			Path:        "/user-preference",
 			Summary:     "Upsert managed user preference",
@@ -2359,11 +2193,12 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses: map[int]openAPIResponse{200: resp("Discarded user preference draft", systemDiscardOpenAPIResponse{})},
 		},
 		{
-			Method:    "GET",
-			Path:      "/tools",
-			Summary:   "Tool list",
-			Tags:      []string{"tools"},
-			Responses: map[int]openAPIResponse{200: resp("Tool list", toolListOpenAPIResponse{})},
+			Method:      "GET",
+			Path:        "/tools",
+			Summary:     "Tool list",
+			Tags:        []string{"tools"},
+			QueryParams: toolListQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Tool list", toolListOpenAPIResponse{})},
 		},
 		{
 			Method:     "POST",

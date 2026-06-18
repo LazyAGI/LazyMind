@@ -983,6 +983,27 @@ class CloudOAuthService:
                     pass
             return {'items': enabled}
 
+    def list_target_cache_connections(
+        self,
+        *,
+        provider: str | None = 'feishu',
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Return active user OAuth connections that scan-control-plane can prewarm."""
+        try:
+            normalized_limit = max(1, min(int(limit or 100), 500))
+        except Exception:
+            normalized_limit = 100
+        with SessionLocal() as db:
+            rows = CloudAuthConnectionRepository.list_health_check_candidates(
+                db,
+                provider=provider,
+                auth_mode='oauth_user',
+                statuses=('ACTIVE',),
+                limit=normalized_limit,
+            )
+            return {'items': [self._connection_payload(row) for row in rows]}
+
     def batch_connection_status(
         self,
         connection_ids: list[str],

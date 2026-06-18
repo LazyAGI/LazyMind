@@ -17,12 +17,8 @@ func (r *SQLRepository) UpsertObjects(ctx context.Context, objects []SourceObjec
 				return err
 			}
 			err := tx.Clauses(clause.OnConflict{
-				Columns: []clause.Column{{Name: "binding_id"}, {Name: "object_key"}},
-				DoUpdates: clause.AssignmentColumns([]string{
-					"tree_key", "parent_key", "display_name", "search_name", "object_type", "is_document",
-					"is_container", "has_children", "source_version", "size_bytes", "mime_type", "file_extension",
-					"modified_at", "deleted_at_source", "depth", "provider_meta_json", "last_seen_run_id", "updated_at",
-				}),
+				Columns:   []clause.Column{{Name: "binding_id"}, {Name: "object_key"}},
+				DoUpdates: sourceObjectUpsertAssignments(),
 			}).Create(objectToORM(object)).Error
 			if err != nil {
 				return err
@@ -30,6 +26,23 @@ func (r *SQLRepository) UpsertObjects(ctx context.Context, objects []SourceObjec
 		}
 		return nil
 	})
+}
+
+func sourceObjectUpsertAssignments() clause.Set {
+	assignments := clause.AssignmentColumns([]string{
+		"tree_key", "parent_key", "display_name", "search_name", "object_type", "is_document",
+		"is_container", "has_children", "source_version", "mime_type", "file_extension",
+		"modified_at", "deleted_at_source", "depth", "provider_meta_json", "last_seen_run_id", "updated_at",
+	})
+	assignments = append(assignments, clause.Assignment{
+		Column: clause.Column{Name: "size_bytes"},
+		Value: gorm.Expr(`CASE
+WHEN excluded.size_bytes > 0 THEN excluded.size_bytes
+WHEN excluded.provider_meta_json->>'kind' = 'wiki_node' AND source_object_index.size_bytes > 0 THEN source_object_index.size_bytes
+ELSE excluded.size_bytes
+END`),
+	})
+	return assignments
 }
 
 func validateSourceObjectIndexRow(object SourceObject) error {

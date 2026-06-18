@@ -1176,6 +1176,8 @@ func parseFeedbackType(raw json.RawMessage) (int32, error) {
 	}
 	s := strings.TrimSpace(strings.ToUpper(tStr))
 	switch s {
+	case "FEED_BACK_TYPE_UNSPECIFIED", "UNSPECIFIED":
+		return 0, nil
 	case "FEED_BACK_TYPE_LIKE", "LIKE":
 		return 1, nil
 	case "FEED_BACK_TYPE_UNLIKE", "UNLIKE":
@@ -1225,15 +1227,19 @@ func FeedBackChatHistory(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Model(&orm.ChatHistory{}).
 			Where("conversation_id = ? AND seq = ?", target.ConversationID, target.Seq).
 			Updates(map[string]any{
-				"feed_back":   0,
-				"update_time": now,
+				"feed_back":       0,
+				"reason":          "",
+				"expected_answer": "",
+				"update_time":     now,
 			}).Error; err != nil {
 			return err
 		}
 
 		updates := map[string]any{
-			"feed_back":   feedbackType,
-			"update_time": now,
+			"feed_back":       feedbackType,
+			"reason":          "",
+			"expected_answer": "",
+			"update_time":     now,
 		}
 		if feedbackType == 2 {
 			updates["reason"] = body.Reason

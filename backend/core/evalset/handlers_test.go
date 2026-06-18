@@ -296,6 +296,30 @@ func TestListEvalSetsKeywordIsCaseInsensitive(t *testing.T) {
 	}
 }
 
+func TestListEvalSetsKeywordMatchesBackslash(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	now := time.Now().UTC()
+	match := seedEvalSet(t, db, "eval_set_backslash", "user_1", "", "", now)
+	if err := db.Model(&orm.EvalSet{}).Where("id = ?", match.ID).Updates(map[string]any{
+		"name":        `Windows \ Cases`,
+		"description": "Model eval set",
+	}).Error; err != nil {
+		t.Fatalf("update match eval set: %v", err)
+	}
+	seedEvalSet(t, db, "eval_set_other", "user_1", "", "", now.Add(-time.Minute))
+
+	rec, req := requestWithUser(http.MethodGet, "/api/core/eval-sets?keyword=%5C&page=1&page_size=10", "", "user_1")
+	ListEvalSets(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeOKData[ListEvalSetsResponse](t, rec)
+	if resp.Total != 1 || len(resp.Items) != 1 || resp.Items[0].ID != "eval_set_backslash" {
+		t.Fatalf("expected only backslash eval set, got %#v", resp)
+	}
+}
+
 func TestGetEvalSetForbiddenWithoutPermission(t *testing.T) {
 	db := newEvalSetTestDB(t)
 	seedEvalSet(t, db, "eval_set_private", "owner_1", "", "", time.Now().UTC())

@@ -13,6 +13,7 @@ const (
 	ErrCodeInvalidRequest      ErrorCode = "INVALID_REQUEST"
 	ErrCodeConnectorNotFound   ErrorCode = "CONNECTOR_NOT_FOUND"
 	ErrCodeInvalidTarget       ErrorCode = "INVALID_TARGET"
+	ErrCodeTargetNotFound      ErrorCode = "TARGET_NOT_FOUND"
 	ErrCodeUnsupportedListMode ErrorCode = "UNSUPPORTED_LIST_MODE"
 	ErrCodeResultTooLarge      ErrorCode = "RESULT_TOO_LARGE"
 	ErrCodeSourceNotFound      ErrorCode = "SOURCE_NOT_FOUND"

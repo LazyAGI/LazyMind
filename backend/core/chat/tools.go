@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,11 +22,21 @@ import (
 )
 
 const chatToolsPath = "/api/chat/tools"
+const defaultToolListPageSize = 10
 
 type chatToolGroup map[string]any
 
 type chatToolsResponse struct {
 	ToolGroups []chatToolGroup `json:"tool_groups"`
+	Page       int             `json:"page"`
+	PageSize   int             `json:"page_size"`
+	Total      int             `json:"total"`
+}
+
+type toolListQuery struct {
+	Keyword  string
+	Page     int
+	PageSize int
 }
 
 func ListTools(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +61,7 @@ func ListTools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	markDisabledTools(toolsResp.ToolGroups, disabled)
+	applyToolListQuery(toolsResp, parseToolListQuery(r))
 	common.ReplyOK(w, toolsResp)
 }
 
@@ -200,6 +212,80 @@ func markDisabledTools(groups []chatToolGroup, disabled []string) {
 		_, isDisabled := disabledSet[name]
 		group["disabled"] = isDisabled
 	}
+}
+
+func parseToolListQuery(r *http.Request) toolListQuery {
+	q := r.URL.Query()
+	page := parsePositiveToolListInt(q.Get("page"), 1)
+	pageSize := parsePositiveToolListInt(q.Get("page_size"), defaultToolListPageSize)
+	return toolListQuery{
+		Keyword:  strings.TrimSpace(q.Get("keyword")),
+		Page:     page,
+		PageSize: pageSize,
+	}
+}
+
+func parsePositiveToolListInt(raw string, fallback int) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func applyToolListQuery(resp *chatToolsResponse, query toolListQuery) {
+	if resp == nil {
+		return
+	}
+	filtered := filterToolGroups(resp.ToolGroups, query.Keyword)
+	total := len(filtered)
+	resp.ToolGroups = paginateToolGroups(filtered, query.Page, query.PageSize)
+	resp.Page = query.Page
+	resp.PageSize = query.PageSize
+	resp.Total = total
+}
+
+func filterToolGroups(groups []chatToolGroup, keyword string) []chatToolGroup {
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
+	if keyword == "" {
+		return groups
+	}
+	filtered := make([]chatToolGroup, 0, len(groups))
+	for _, group := range groups {
+		if toolGroupMatchesKeyword(group, keyword) {
+			filtered = append(filtered, group)
+		}
+	}
+	return filtered
+}
+
+func toolGroupMatchesKeyword(group chatToolGroup, keyword string) bool {
+	for _, field := range []string{"name", "label", "description"} {
+		value, _ := group[field].(string)
+		if strings.Contains(strings.ToLower(value), keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func paginateToolGroups(groups []chatToolGroup, page, pageSize int) []chatToolGroup {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = defaultToolListPageSize
+	}
+	total := len(groups)
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	return groups[start:end]
 }
 
 func listDisabledToolNames(ctx context.Context, db *gorm.DB, userID string) ([]string, error) {

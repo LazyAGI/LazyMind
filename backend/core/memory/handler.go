@@ -21,11 +21,6 @@ import (
 	"lazymind/core/store"
 )
 
-type suggestionRequest struct {
-	SessionID   string                        `json:"session_id"`
-	Suggestions []evolution.SuggestionPayload `json:"suggestions"`
-}
-
 type generateRequest struct {
 	UserInstruct string `json:"user_instruct"`
 }
@@ -34,8 +29,6 @@ type upsertRequest struct {
 	Content *string `json:"content"`
 	AutoEvo *bool   `json:"auto_evo"`
 }
-
-const errAutoEvoTaskRunning = "auto_evo task is running"
 
 type draftPreviewResponse struct {
 	ReviewResultID     string `json:"review_result_id"`
@@ -286,10 +279,6 @@ func Upsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pendingDraft := existing != nil && strings.TrimSpace(existing.DraftStatus) == "pending_confirm"
-	if existing != nil && req.AutoEvo != nil && evolution.HasAutoEvoWorker(evolution.AutoEvoWorkerKey(evolution.ResourceTypeMemory, existing.ID)) {
-		common.ReplyErr(w, errAutoEvoTaskRunning, http.StatusConflict)
-		return
-	}
 	if pendingDraft && (req.AutoEvo == nil || !*req.AutoEvo) {
 		common.ReplyErr(w, "memory draft already pending_confirm", http.StatusConflict)
 		return
@@ -311,9 +300,6 @@ func Upsert(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.AutoEvo != nil && *req.AutoEvo {
-		if err := evolution.EnsureManagedMemoryAutoEvolutionScheduled(*row); err != nil {
-			appLog.Logger.Warn().Err(err).Str("route", "/memory").Msg("auto_evo schedule on upsert failed")
-		}
 		if existing != nil && !existing.AutoEvo {
 			if err := resourceupdate.ScanPendingResultsForResource(r.Context(), db, orm.ResourceUpdateResourceTypeMemory, userID, row.ID); err != nil {
 				appLog.Logger.Warn().Err(err).
@@ -385,115 +371,6 @@ func DraftPreview(w http.ResponseWriter, r *http.Request) {
 		DraftContent:       result.Content,
 		Diff:               diff,
 	})
-}
-
-func Suggestion(w http.ResponseWriter, r *http.Request) {
-	db := store.DB()
-	if db == nil {
-		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
-		return
-	}
-
-	var req suggestionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
-		return
-	}
-	req.SessionID = strings.TrimSpace(req.SessionID)
-	appLog.Logger.Info().
-		Str("route", "/memory/suggestion").
-		Str("session_id", req.SessionID).
-		Int("suggestion_count", len(req.Suggestions)).
-		Msg("internal memory mutation request received")
-	if req.SessionID == "" {
-		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
-		return
-	}
-	if len(req.Suggestions) == 0 || len(req.Suggestions) > 5 {
-		common.ReplyErr(w, "suggestions length must be between 1 and 5", http.StatusBadRequest)
-		return
-	}
-	for _, item := range req.Suggestions {
-		if strings.TrimSpace(item.Title) == "" || strings.TrimSpace(item.Content) == "" {
-			common.ReplyErr(w, "suggestion title/content required", http.StatusBadRequest)
-			return
-		}
-	}
-
-	userID, userName, err := evolution.ResolveSessionUser(r.Context(), db, req.SessionID)
-	if err != nil || strings.TrimSpace(userID) == "" {
-		appLog.Logger.Warn().
-			Err(err).
-			Str("route", "/memory/suggestion").
-			Str("session_id", req.SessionID).
-			Msg("internal memory suggestion request rejected: unable to resolve session user")
-		common.ReplyErr(w, "unable to resolve session user", http.StatusBadRequest)
-		return
-	}
-	resource, err := evolution.EnsureSystemMemory(r.Context(), db, userID, userName)
-	if err != nil {
-		common.ReplyErr(w, "query memory failed", http.StatusInternalServerError)
-		return
-	}
-	resourceKey := evolution.SystemResourceKey(evolution.ResourceTypeMemory)
-	snapshot, err := evolution.FindSnapshot(r.Context(), db, req.SessionID, evolution.ResourceTypeMemory, resourceKey)
-	if err != nil {
-		common.ReplyErr(w, "session snapshot not found", http.StatusNotFound)
-		return
-	}
-
-	status := evolution.SuggestionStatusPendingReview
-	invalidReason := ""
-	currentHash := firstNonEmpty(strings.TrimSpace(resource.ContentHash), evolution.HashSystemMemory(*resource))
-	if currentHash != snapshot.SnapshotHash {
-		status = evolution.SuggestionStatusInvalid
-		invalidReason = "snapshot hash mismatch"
-	}
-
-	rows := make([]orm.ResourceSuggestion, 0, len(req.Suggestions))
-	resp := make([]evolution.RecordedSuggestion, 0, len(req.Suggestions))
-	for _, item := range req.Suggestions {
-		row := evolution.BuildSuggestionRecord(userID, evolution.ResourceTypeMemory, resourceKey, evolution.SuggestionActionModify, req.SessionID, status)
-		row.SnapshotHash = snapshot.SnapshotHash
-		row.Title = strings.TrimSpace(item.Title)
-		row.Content = strings.TrimSpace(item.Content)
-		row.Reason = strings.TrimSpace(item.Reason)
-		row.InvalidReason = invalidReason
-		rows = append(rows, row)
-		resp = append(resp, evolution.RecordedSuggestion{
-			ID:            row.ID,
-			Status:        row.Status,
-			InvalidReason: row.InvalidReason,
-		})
-	}
-	if err := db.WithContext(r.Context()).Create(&rows).Error; err != nil {
-		appLog.Logger.Error().
-			Err(err).
-			Str("route", "/memory/suggestion").
-			Str("session_id", req.SessionID).
-			Str("user_id", userID).
-			Msg("internal memory suggestion request failed to persist")
-		common.ReplyErr(w, "create suggestions failed", http.StatusInternalServerError)
-		return
-	}
-	appLog.Logger.Info().
-		Str("route", "/memory/suggestion").
-		Str("session_id", req.SessionID).
-		Str("user_id", userID).
-		Int("created_count", len(rows)).
-		Msg("internal memory suggestion request persisted")
-
-	if resource.AutoEvo && status != evolution.SuggestionStatusInvalid {
-		if err := evolution.EnsureManagedMemoryAutoEvolutionScheduled(*resource); err != nil {
-			appLog.Logger.Warn().
-				Err(err).
-				Str("route", "/memory/suggestion").
-				Str("session_id", req.SessionID).
-				Str("user_id", userID).
-				Msg("auto_evo schedule failed, suggestions kept for manual review")
-		}
-	}
-	common.ReplyOK(w, map[string]any{"items": resp})
 }
 
 func Generate(w http.ResponseWriter, r *http.Request) {
