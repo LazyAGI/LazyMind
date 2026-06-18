@@ -17,7 +17,7 @@ comma := ,
 #        make down                         →  docker compose down
 #        make down COMPOSE_PROJECT=myproj  →  docker compose -p myproj down
 # ---------------------------------------------------------------------------
-_COMPOSE = LAZYMIND_STATE_BACKEND=$(LAZYMIND_STATE_BACKEND) DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(if $(COMPOSE_PROJECT),-p $(COMPOSE_PROJECT),)
+_COMPOSE = LAZYMIND_STATE_BACKEND=$(LAZYMIND_STATE_BACKEND) DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(if $(COMPOSE_PROJECT),-p $(COMPOSE_PROJECT),) $(_COMPOSE_FILE_FLAGS)
 # ---------------------------------------------------------------------------
 # Mirror profile: cn (domestic/default) or intl (international).
 # Selects which .env.mirrors.<profile> file to load for all build-time source
@@ -264,6 +264,7 @@ _need_opensearch_dashboard := $(and $(_need_opensearch),$(_enable_opensearch_das
 _COMPOSE_PROFILES := $(strip $(if $(_need_mineru),--profile mineru) $(if $(_need_milvus),--profile milvus) $(if $(_need_opensearch),--profile opensearch) $(if $(_need_milvus_dashboard),--profile milvus-dashboard) $(if $(_need_opensearch_dashboard),--profile opensearch-dashboard))
 _CLEANUP_COMPOSE_PROFILES := --profile mineru --profile paddleocr --profile milvus --profile opensearch --profile milvus-dashboard --profile opensearch-dashboard --profile file-watcher-artifact
 _REMOVE_REDIS_IF_SQLITE = $(if $(filter sqlite,$(strip $(LAZYMIND_STATE_BACKEND))),$(_COMPOSE) rm -sf redis >/dev/null 2>&1 || true,true)
+_COMPOSE_FILE_FLAGS := $(if $(filter sqlite,$(strip $(LAZYMIND_STATE_BACKEND))),-f docker-compose.yml -f docker-compose.sqlite.yml,)
 _COMPOSE_REDIS_SCALE := $(if $(filter sqlite,$(strip $(LAZYMIND_STATE_BACKEND))),--scale redis=0,)
 _COMPOSE_FILE_WATCHER_SCALE := $(if $(filter container,$(LAZYMIND_FILE_WATCHER_MODE)),,--scale file-watcher=0)
 

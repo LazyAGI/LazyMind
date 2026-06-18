@@ -1,0 +1,24 @@
+services:
+  scan-control-plane:
+    environment:
+      LAZYMIND_REDIS_URL: ""
+    depends_on:
+      redis:
+        condition: service_healthy
+        required: false
+
+  auth-service:
+    environment:
+      LAZYMIND_REDIS_URL: ""
+    depends_on:
+      redis:
+        condition: service_healthy
+        required: false
+
+  core:
+    environment:
+      LAZYMIND_REDIS_URL: ""
+    depends_on:
+      redis:
+        condition: service_healthy
+        required: false

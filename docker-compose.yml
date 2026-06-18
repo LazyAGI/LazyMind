@@ -194,7 +194,7 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-        required: false
+        required: true
     healthcheck:
       test: ["CMD", "/app/scan-control-plane", "healthcheck"]
       interval: 5s
@@ -284,7 +284,7 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-        required: false
+        required: true
 
   office-convert-service:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-office-convert-service:${LAZYMIND_IMAGE_TAG:-latest}
@@ -359,7 +359,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-        required: false
+        required: true
 
   core-dev:
     image: ${DOCKER_MIRROR:-docker.m.daocloud.io/library/}golang:1.25.11-alpine
