@@ -507,8 +507,7 @@ Only retain patterns likely to generalize.
 ## 5. Skill name rules
 
 The skill name must satisfy the following:
-- 
-skill_name must match: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+- skill_name must match: ^[a-z0-9]+(?:-[a-z0-9]+)*$
 - skill_name must be <= 64 characters
 - skill_name must use lowercase ASCII letters, digits, and hyphens only
 - no spaces, underscores, dots, slashes, uppercase letters, or non-ASCII characters

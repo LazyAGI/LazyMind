@@ -282,7 +282,7 @@ def _repair_skill_name(raw_name: str, *, fallback: str = 'skill') -> str:
 
 
 def _repair_candidate_skill_content(content: str, skill_name: str) -> str:
-    lines = content.lstrip('\ufeff').splitlines()
+    lines = content.lstrip('\ufeff').lstrip().splitlines()
     if not lines or lines[0].strip() != '---':
         raise ValueError('candidate content must start with YAML frontmatter')
 
@@ -310,10 +310,9 @@ def _repair_candidate_skill_content(content: str, skill_name: str) -> str:
 def _parse_frontmatter_lines(frontmatter_lines: list[str]) -> dict[str, str]:
     fields: dict[str, str] = {}
     for line in frontmatter_lines:
-        stripped = line.strip()
-        if not stripped or stripped.startswith('#') or ':' not in stripped:
+        if not line or line.startswith((' ', '\t', '#')) or ':' not in line:
             continue
-        key, value = stripped.split(':', 1)
+        key, value = line.split(':', 1)
         key = key.strip()
         if key:
             fields[key] = _strip_yaml_scalar(value.strip())
@@ -332,17 +331,16 @@ def _repair_frontmatter_name(frontmatter_lines: list[str], skill_name: str) -> t
     changed = False
     found = False
     for line in frontmatter_lines:
-        stripped = line.strip()
-        key = stripped.split(':', 1)[0].strip() if ':' in stripped else ''
-        if key == 'name':
-            found = True
-            indent = line[:len(line) - len(line.lstrip())]
-            new_line = f'{indent}name: {skill_name}'
-            repaired.append(new_line)
-            if line != new_line:
-                changed = True
-        else:
-            repaired.append(line)
+        if not line.startswith((' ', '\t', '#')) and ':' in line:
+            key = line.split(':', 1)[0].strip()
+            if key == 'name':
+                found = True
+                new_line = f'name: {skill_name}'
+                repaired.append(new_line)
+                if line.strip() != new_line:
+                    changed = True
+                continue
+        repaired.append(line)
     if not found:
         repaired.insert(0, f'name: {skill_name}')
         changed = True
