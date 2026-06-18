@@ -34,7 +34,7 @@ class EvoRuntimeConfig:
     driver_id: str = 'evo-runtime-driver'
     worker_id: str = 'evo-runtime-worker'
     checkpoint_id: str = DEFAULT_CHECKPOINT_ID
-    model_config: dict[str, object] = field(default_factory=dict)
+    llm_config: dict[str, object] = field(default_factory=dict)
     worker_lease_policy: WorkerLeasePolicy = field(default_factory=lambda: WorkerLeasePolicy(300.0, 100))
     driver_policy: RuntimeDriverPolicy = field(default_factory=RuntimeDriverPolicy)
     supervisor_policy: RuntimeSupervisorPolicy = field(default_factory=RuntimeSupervisorPolicy)
@@ -92,7 +92,7 @@ class EvoRuntime:
         self._projection_cursor = 0
         self._projection_bootstrapped = False
         self._projection_sync = ProjectionSynchronizer(controller, projection_store)
-        self.set_model_config(config.model_config)
+        self.set_llm_config(config.llm_config)
         self.validate()
 
     @property
@@ -173,10 +173,10 @@ class EvoRuntime:
     def warm_up(self) -> int:
         return self.bootstrap_projection()
 
-    def set_model_config(self, model_config: dict[str, object] | None) -> None:
-        object.__setattr__(self.config, 'model_config', dict(model_config or {}))
+    def set_llm_config(self, llm_config: dict[str, object] | None) -> None:
+        object.__setattr__(self.config, 'llm_config', dict(llm_config or {}))
         if isinstance(self.executor, MaterializerExecutor):
-            self.executor.set_model_config(self.config.model_config)
+            self.executor.set_llm_config(self.config.llm_config)
 
     def ensure_projection_bootstrapped(self) -> int:
         if not self._projection_bootstrapped:
@@ -276,7 +276,7 @@ def open_evo_runtime(
             graph,
             runtime_stores.artifact_store,
             external_gateway=actual_external_gateway,
-            model_config=runtime_config.model_config,
+            llm_config=runtime_config.llm_config,
         )
         actual_executor.bind_controller(controller)
     else:

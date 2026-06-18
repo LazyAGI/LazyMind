@@ -1,8 +1,6 @@
-"""Analysis step operations."""
+from .cluster import trace_clusters
+from .coarse import classify_case
+from .report import analysis_summary
+from .trace_summary import trace_summary
 
-from .coarse import CaseCoarseClassificationOperation
-from .fine import CaseFineClassificationOperation
-from .report import AssembleClassificationReportOperation
-
-__all__ = ['AssembleClassificationReportOperation', 'CaseCoarseClassificationOperation',
-           'CaseFineClassificationOperation']
+__all__ = ['analysis_summary', 'classify_case', 'trace_clusters', 'trace_summary']

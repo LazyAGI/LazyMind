@@ -4,7 +4,7 @@ import ast
 import json
 from typing import Any
 
-from evo.projections.traces.models import TraceIOKind, TraceIOView
+from evo.traces.models import TraceIOKind, TraceIOView
 
 
 _RAW_PROJECTION_EXCLUDED_KEYS = frozenset({

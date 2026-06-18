@@ -15,19 +15,6 @@ from typing import Any, Iterator, Literal
 from evo.artifact_runtime import prepared_intent_payload_fingerprint
 from evo.artifact_runtime.utils import canonical_json, normalize_json_value, validate_nonempty
 
-MessageEventType = Literal[
-    'message_received',
-    'intent_parsed',
-    'artifact_view',
-    'clarification_required',
-    'confirmation_required',
-    'approval_resolved',
-    'command_applied',
-    'assistant_response',
-    'done',
-    'error',
-]
-
 PendingApprovalStatus = Literal['active', 'approved', 'rejected', 'cancelled', 'superseded', 'expired']
 
 
@@ -66,16 +53,6 @@ class PendingApproval:
     created_at: float
     expires_at: float
     superseded_by: str
-
-
-@dataclass(frozen=True)
-class PendingTurnBuffer:
-    turn_id: str
-    message_id: str
-    content: str
-    processed_cursor: int
-    remaining: str
-    message_seq: int
 
 
 class MessageStoreConflict(RuntimeError):
@@ -209,6 +186,106 @@ class MessageSessionStore:
                            'role': role, 'content': content, 'ts': row['created_at']})
         return out
 
+    def last_turn_for_message(self, thread_id: str, message_id: str) -> dict[str, Any] | None:
+        validate_nonempty(message_id, 'message_id')
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT t.turn_id, t.status, e.message_id, e.seq
+                FROM turns t
+                JOIN message_events e
+                    ON e.thread_id = t.thread_id
+                    AND e.turn_id = t.turn_id
+                    AND e.event_type = 'message_received'
+                WHERE t.thread_id = ? AND e.message_id = ?
+                ORDER BY e.seq DESC
+                LIMIT 1
+                """,
+                (thread_id, message_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            'turn_id': str(row['turn_id']),
+            'status': str(row['status']),
+            'message_id': str(row['message_id']),
+            'message_event_cursor': int(row['seq']),
+        }
+
+    def last_turn_for_message_family(self, thread_id: str, message_id_prefix: str) -> dict[str, Any] | None:
+        validate_nonempty(message_id_prefix, 'message_id_prefix')
+        repair_prefix = f'{message_id_prefix}:repair:'
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT t.turn_id, t.status, e.message_id, e.seq
+                FROM turns AS t
+                JOIN message_events AS e
+                    ON e.thread_id = t.thread_id
+                    AND e.turn_id = t.turn_id
+                    AND e.event_type = 'message_received'
+                WHERE t.thread_id = ?
+                  AND (e.message_id = ? OR substr(e.message_id, 1, ?) = ?)
+                ORDER BY e.seq DESC
+                LIMIT 1
+                """,
+                (thread_id, message_id_prefix, len(repair_prefix), repair_prefix),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            'turn_id': str(row['turn_id']),
+            'status': str(row['status']),
+            'message_id': str(row['message_id']),
+            'message_event_cursor': int(row['seq']),
+        }
+
+    def latest_assistant_for_turn(self, thread_id: str, turn_id: str) -> MessageEvent | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT * FROM message_events
+                WHERE thread_id = ? AND turn_id = ? AND event_type = 'assistant_response'
+                ORDER BY seq DESC
+                LIMIT 1
+                """,
+                (thread_id, turn_id),
+            ).fetchone()
+        return None if row is None else _event_from_row(row)
+
+    def confirmation_for_turn(self, thread_id: str, turn_id: str, message_id: str) -> MessageEvent | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT * FROM message_events
+                WHERE thread_id = ?
+                  AND turn_id = ?
+                  AND message_id = ?
+                  AND event_type = 'confirmation_required'
+                ORDER BY seq DESC
+                LIMIT 1
+                """,
+                (thread_id, turn_id, message_id),
+            ).fetchone()
+        return None if row is None else _event_from_row(row)
+
+    def message_turn_count(self, thread_id: str, message_id_prefix: str) -> int:
+        validate_nonempty(message_id_prefix, 'message_id_prefix')
+        repair_prefix = f'{message_id_prefix}:repair:'
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM turns AS t
+                JOIN message_events AS e ON e.thread_id = t.thread_id AND e.turn_id = t.turn_id
+                WHERE t.thread_id = ?
+                  AND (e.message_id = ? OR substr(e.message_id, 1, ?) = ?)
+                  AND e.event_type = 'message_received'
+                """,
+                (thread_id, message_id_prefix, len(repair_prefix), repair_prefix),
+            ).fetchone()
+        return 0 if row is None else int(row['count'])
+
     def begin_turn(self, lease: MessageLease, message_id: str, content: str) -> tuple[str, MessageEvent]:
         validate_nonempty(message_id, 'message_id')
         validate_nonempty(content, 'content')
@@ -216,23 +293,26 @@ class MessageSessionStore:
         now = time.time()
         with self._transaction() as conn:
             self._require_lease(conn, lease)
-            conn.execute(
-                """
-                INSERT INTO turns(
-                    thread_id, turn_id, message_ids_json, processed_cursor,
-                    status, request_fingerprint, created_at, updated_at
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO turns(
+                        thread_id, turn_id, status, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (lease.thread_id, turn_id, 'active', now, now),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (lease.thread_id, turn_id, canonical_json([message_id]), 0, 'active', '', now, now),
-            )
-            cursor = conn.execute(
-                """
-                INSERT INTO message_events(thread_id, event_type, turn_id, message_id, payload_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (lease.thread_id, 'message_received', turn_id, message_id, canonical_json({'content': content}), now),
-            )
+                cursor = conn.execute(
+                    """
+                    INSERT INTO message_events(thread_id, event_type, turn_id, message_id, payload_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (lease.thread_id, 'message_received', turn_id,
+                     message_id, canonical_json({'content': content}), now),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise MessageStoreConflict('message_id already exists') from exc
             seq = int(cursor.lastrowid)
         return turn_id, MessageEvent(
             seq, lease.thread_id, 'message_received', {
@@ -244,70 +324,19 @@ class MessageSessionStore:
         turn_id: str,
         *,
         status: str,
-        request_fingerprint: str = '',
-        processed_cursor: int | None = None,
     ) -> None:
         validate_nonempty(turn_id, 'turn_id')
-        now = time.time()
-        with self._transaction() as conn:
-            self._require_lease(conn, lease)
-            assignments = ['status = ?', 'request_fingerprint = ?', 'updated_at = ?']
-            values: list[Any] = [status, request_fingerprint, now]
-            if processed_cursor is not None:
-                assignments.append('processed_cursor = ?')
-                values.append(processed_cursor)
-            values.extend([lease.thread_id, turn_id])
-            conn.execute(
-                f"UPDATE turns SET {', '.join(assignments)} WHERE thread_id = ? AND turn_id = ?",
-                tuple(values),
-            )
-
-    def update_turn_cursor(self, lease: MessageLease, turn_id: str, processed_cursor: int) -> None:
-        validate_nonempty(turn_id, 'turn_id')
-        if processed_cursor < 0:
-            raise ValueError('processed_cursor must be >= 0')
         now = time.time()
         with self._transaction() as conn:
             self._require_lease(conn, lease)
             conn.execute(
                 """
                 UPDATE turns
-                SET processed_cursor = ?, updated_at = ?
+                SET status = ?, updated_at = ?
                 WHERE thread_id = ? AND turn_id = ?
                 """,
-                (processed_cursor, now, lease.thread_id, turn_id),
+                (status, now, lease.thread_id, turn_id),
             )
-
-    def pending_turn_buffers(self, thread_id: str) -> list[PendingTurnBuffer]:
-        with self._lock:
-            rows = self._connection.execute(
-                """
-                SELECT
-                    t.turn_id,
-                    t.processed_cursor,
-                    e.message_id,
-                    e.payload_json,
-                    e.seq
-                FROM turns t
-                JOIN message_events e
-                    ON e.thread_id = t.thread_id
-                    AND e.turn_id = t.turn_id
-                    AND e.event_type = 'message_received'
-                WHERE t.thread_id = ?
-                ORDER BY e.seq ASC
-                """,
-                (thread_id,),
-            ).fetchall()
-        out: list[PendingTurnBuffer] = []
-        for row in rows:
-            payload = _json_object(json.loads(str(row['payload_json'])))
-            content = str(payload.get('content') or payload.get('message') or '')
-            cursor = max(0, min(int(row['processed_cursor']), len(content)))
-            remaining = content[cursor:]
-            if remaining.strip():
-                out.append(PendingTurnBuffer(str(row['turn_id']), str(
-                    row['message_id']), content, cursor, remaining, int(row['seq'])))
-        return out
 
     def working_set(self, thread_id: str) -> dict[str, Any]:
         with self._lock:
@@ -320,6 +349,10 @@ class MessageSessionStore:
     def update_working_set(self, lease: MessageLease, patch: Mapping[str, Any]) -> dict[str, Any]:
         current = self.working_set(lease.thread_id)
         current.update(_json_object(patch))
+        return self._write_working_set(lease, current)
+
+    def _write_working_set(self, lease: MessageLease, data: Mapping[str, Any]) -> dict[str, Any]:
+        current = _json_object(data)
         now = time.time()
         with self._transaction() as conn:
             self._require_lease(conn, lease)
@@ -335,6 +368,20 @@ class MessageSessionStore:
             )
         return current
 
+    def reminder(self, thread_id: str) -> str:
+        return str(self.working_set(thread_id).get('reminder') or '')
+
+    def set_reminder(self, lease: MessageLease, reminder: str) -> dict[str, Any]:
+        return self.update_working_set(lease, {'reminder': str(reminder or '').strip()})
+
+    def set_blocked_next_ops(self, lease: MessageLease, blocked: Mapping[str, Any]) -> dict[str, Any]:
+        return self.update_working_set(lease, {'blocked_next_ops': _json_object(blocked)})
+
+    def clear_blocked_next_ops(self, lease: MessageLease) -> dict[str, Any]:
+        current = self.working_set(lease.thread_id)
+        current.pop('blocked_next_ops', None)
+        return self._write_working_set(lease, current)
+
     def active_approval(self, thread_id: str) -> PendingApproval | None:
         with self._lock:
             row = self._connection.execute(
@@ -347,6 +394,17 @@ class MessageSessionStore:
                 (thread_id,),
             ).fetchone()
         return None if row is None else _approval_from_row(row)
+
+    def expire_approval(self, lease: MessageLease, approval_token: str, *,
+                        turn_id: str = '', message_id: str = '') -> PendingApproval:
+        return self.resolve_approval(
+            lease,
+            approval_token,
+            status='expired',
+            event_payload={'reason': 'expired'},
+            turn_id=turn_id,
+            message_id=message_id,
+        )
 
     def put_pending_approval(
         self,
@@ -532,14 +590,14 @@ class MessageSessionStore:
             );
             CREATE INDEX IF NOT EXISTS idx_message_events_thread_seq
                 ON message_events(thread_id, seq);
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_message_received_thread_message
+                ON message_events(thread_id, message_id)
+                WHERE event_type = 'message_received';
 
             CREATE TABLE IF NOT EXISTS turns (
                 thread_id TEXT NOT NULL,
                 turn_id TEXT NOT NULL,
-                message_ids_json TEXT NOT NULL,
-                processed_cursor INTEGER NOT NULL,
                 status TEXT NOT NULL,
-                request_fingerprint TEXT NOT NULL,
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
                 PRIMARY KEY(thread_id, turn_id)
@@ -580,6 +638,40 @@ class MessageSessionStore:
             );
             """
         )
+        self._migrate_turns_schema()
+
+    def _migrate_turns_schema(self) -> None:
+        rows = self._connection.execute('PRAGMA table_info(turns)').fetchall()
+        columns = [str(row['name']) for row in rows]
+        expected = ['thread_id', 'turn_id', 'status', 'created_at', 'updated_at']
+        if columns == expected:
+            return
+        existing = set(columns)
+        required = {'thread_id', 'turn_id', 'status', 'created_at', 'updated_at'}
+        if not required.issubset(existing):
+            return
+        with self._transaction() as conn:
+            conn.execute(
+                """
+                CREATE TABLE turns_new (
+                    thread_id TEXT NOT NULL,
+                    turn_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY(thread_id, turn_id)
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO turns_new(thread_id, turn_id, status, created_at, updated_at)
+                SELECT thread_id, turn_id, status, created_at, updated_at
+                FROM turns
+                """
+            )
+            conn.execute('DROP TABLE turns')
+            conn.execute('ALTER TABLE turns_new RENAME TO turns')
 
 
 def _json_object(value: Mapping[str, Any] | Any, *, reject_reserved_envelope: bool = True) -> dict[str, Any]:

@@ -5,7 +5,7 @@ from typing import Any
 
 from lazyllm.tracing.datamodel.structured import ExecutionStep
 
-from evo.projections.traces.values import drop_empty
+from evo.traces.values import drop_empty
 
 _FALLBACK_CHAT_TOOL_NAMES = frozenset({
     'ArxivSearch',

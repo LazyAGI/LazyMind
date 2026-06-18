@@ -5,9 +5,9 @@ from typing import Any
 from lazyllm.tracing.datamodel.structured import ExecutionStep
 from lazyllm.tracing.semantics import SemanticType
 
-from evo.projections.traces.models import TraceIOKind, TraceIOView
-from evo.projections.traces.tools import is_tool_node
-from evo.projections.traces.values import (
+from evo.traces.models import TraceIOKind, TraceIOView
+from evo.traces.tools import is_tool_node
+from evo.traces.values import (
     arguments_summary,
     compact_display_value,
     display_summary,

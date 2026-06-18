@@ -7,10 +7,9 @@ import shutil
 import time
 import uuid
 from collections import Counter
-from collections.abc import Mapping
 from pathlib import Path
 from threading import RLock
-from typing import Any
+from typing import Any, Mapping
 
 from fastapi import Body, FastAPI, HTTPException, Request, Response
 from sse_starlette.sse import EventSourceResponse
@@ -18,10 +17,13 @@ from sse_starlette.sse import EventSourceResponse
 from evo import normalize_chat_stream_url, normalize_http_origin, validate_id
 from evo.artifact_flow import EvoFlowRuntime, FlowStepState
 from evo.artifact_runtime import ArtifactKey, ArtifactRef
+from evo.auto_agent import ActiveApproval, AutoAgentRunner
 from evo.message_intent import MessageSessionStore
+from evo.message_intent.store import MessageLeaseError, MessageStoreConflict
 from evo.message_intent.planner import LazyLLMPlannerClient, StructuredJSONNextIntentPlanner
 from evo.message_intent.service import MessageIntentService
 from evo.traces import build_trace_compare_view, build_trace_detail_view
+from evo.service.auto_ports import HubAutoAgentPorts
 
 BODY_REQUIRED = Body(...)
 BODY_DEFAULT = Body(default_factory=dict)
@@ -152,19 +154,38 @@ def create_app(*, planner_factory: Any | None = None) -> FastAPI:
         return await asyncio.to_thread(hub.continue_thread, thread_id, body)
 
     @app.post('/v1/evo/threads/{thread_id}/auto/step')
-    async def auto_step(thread_id: str) -> dict:
-        return await asyncio.to_thread(hub.start, thread_id, {})
+    async def auto_step(thread_id: str, body: dict = BODY_DEFAULT) -> dict:
+        return await asyncio.to_thread(hub.auto_step, thread_id, body)
 
     @app.post('/v1/evo/threads/{thread_id}/auto/start')
     async def auto_start(thread_id: str, request: Request, body: dict = BODY_DEFAULT):
         if 'text/event-stream' in request.headers.get('accept', ''):
             return EventSourceResponse(_single_sse(
-                'auto_start', {'thread_id': thread_id, **hub.start(thread_id, body)}))
-        return await asyncio.to_thread(hub.start, thread_id, body)
+                'auto_start', {'thread_id': thread_id, **hub.auto_start(thread_id, body)}))
+        return await asyncio.to_thread(hub.auto_start, thread_id, body)
 
     @app.post('/v1/evo/threads/{thread_id}/auto/stop')
     def auto_stop(thread_id: str) -> dict:
-        return hub.pause(thread_id)
+        return hub.auto_stop(thread_id)
+
+    @app.get('/v1/evo/threads/{thread_id}/auto/status')
+    def auto_status(thread_id: str) -> dict:
+        return hub.auto_status(thread_id)
+
+    @app.post('/v1/evo/threads/{thread_id}/approvals/{approval_token}:approve')
+    async def approve_pending(thread_id: str, approval_token: str, body: dict = BODY_DEFAULT) -> dict:
+        return await asyncio.to_thread(hub.resolve_approval, thread_id, action='approve',
+                                       approval_token=approval_token, command_id=str(body.get('command_id') or ''))
+
+    @app.post('/v1/evo/threads/{thread_id}/approvals/{approval_token}:reject')
+    async def reject_pending(thread_id: str, approval_token: str, body: dict = BODY_DEFAULT) -> dict:
+        return await asyncio.to_thread(hub.resolve_approval, thread_id, action='reject',
+                                       approval_token=approval_token, command_id=str(body.get('command_id') or ''))
+
+    @app.post('/v1/evo/threads/{thread_id}/approvals/{approval_token}:cancel')
+    async def cancel_pending(thread_id: str, approval_token: str, body: dict = BODY_DEFAULT) -> dict:
+        return await asyncio.to_thread(hub.resolve_approval, thread_id, action='cancel',
+                                       approval_token=approval_token, command_id=str(body.get('command_id') or ''))
 
     @app.get('/v1/evo/threads/{thread_id}:events')
     @app.get('/v1/evo/threads/{thread_id}/events')
@@ -223,6 +244,7 @@ class EvoMessageHub:
         self._message_services: dict[str, MessageIntentService] = {}
         self._message_service_lock = RLock()
         self._planner_factory = planner_factory
+        self._auto_agent = AutoAgentRunner(base_dir, HubAutoAgentPorts(self))
 
     def create_thread(self, payload: dict[str, Any]) -> dict:
         mode = str(payload.get('mode') or 'interactive').strip()
@@ -239,14 +261,14 @@ class EvoMessageHub:
             'mode': mode,
             'title': str(payload.get('title') or ''),
             'inputs': inputs,
-            'model_config': _model_config_payload(payload),
+            'llm_config': _llm_config_payload(payload),
             'status': 'idle',
             'created_at': now,
             'updated_at': now,
         }
         self._write_meta(thread_id, meta)
         if mode == 'auto' and payload.get('start_auto'):
-            self.start(thread_id, payload)
+            self.auto_start(thread_id, payload)
         return self._meta(thread_id)
 
     def list_threads(self) -> list[dict]:
@@ -292,7 +314,7 @@ class EvoMessageHub:
 
     def start(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
         payload = payload or {}
-        self._update_model_config(thread_id, payload)
+        self._update_llm_config(thread_id, payload)
         self._meta(thread_id)
         flow = self._artifact_flow(thread_id)
         state = flow.start_full_flow(
@@ -302,25 +324,31 @@ class EvoMessageHub:
         )
         return self._artifact_flow_response(thread_id, state)
 
-    def pause(self, thread_id: str) -> dict:
+    def pause(self, thread_id: str, command_id: str | None = None) -> dict:
         self._meta(thread_id)
         if not self._has_artifact_flow(thread_id):
             self._update_meta(thread_id, status='paused', pending_checkpoint=None, updated_at=time.time())
             return {'status': 'paused', 'thread_id': thread_id}
-        state = self._artifact_flow(thread_id).pause_flow(command_id=f'pause:{uuid.uuid4().hex}', run_id=RUN_ID)
+        state = self._artifact_flow(thread_id).pause_flow(
+            command_id=command_id or f'pause:{uuid.uuid4().hex}',
+            run_id=RUN_ID,
+        )
         response = self._artifact_flow_response(thread_id, state)
         return response | {'status': 'paused', 'pending_checkpoint': None}
 
-    def cancel(self, thread_id: str) -> dict:
+    def cancel(self, thread_id: str, command_id: str | None = None) -> dict:
         self._meta(thread_id)
         if not self._has_artifact_flow(thread_id):
             self._update_meta(thread_id, status='cancelled', pending_checkpoint=None, updated_at=time.time())
             return {'status': 'cancelled', 'thread_id': thread_id}
-        state = self._artifact_flow(thread_id).cancel_flow(command_id=f'cancel:{uuid.uuid4().hex}', run_id=RUN_ID)
+        state = self._artifact_flow(thread_id).cancel_flow(
+            command_id=command_id or f'cancel:{uuid.uuid4().hex}',
+            run_id=RUN_ID,
+        )
         return self._artifact_flow_response(thread_id, state)
 
     def retry(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
-        self._update_model_config(thread_id, payload or {})
+        self._update_llm_config(thread_id, payload or {})
         self._meta(thread_id)
         if not self._has_artifact_flow(thread_id):
             raise HTTPException(409, 'thread has no flow to retry')
@@ -333,7 +361,7 @@ class EvoMessageHub:
 
     def continue_thread(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
         payload = payload or {}
-        self._update_model_config(thread_id, payload)
+        self._update_llm_config(thread_id, payload)
         self._meta(thread_id)
         if not self._has_artifact_flow(thread_id):
             raise HTTPException(409, 'thread has no flow to continue')
@@ -343,12 +371,71 @@ class EvoMessageHub:
         )
         return self._artifact_flow_response(thread_id, state) | {'resumed': True}
 
-    def post_message(self, thread_id: str, payload: dict[str, Any]) -> dict:
+    def auto_start(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
+        self._meta(thread_id)
+        return self._auto_agent.start(thread_id, payload or {})
+
+    def auto_step(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
+        self._meta(thread_id)
+        return self._auto_agent.step(thread_id, payload or {})
+
+    def auto_stop(self, thread_id: str) -> dict:
+        self._meta(thread_id)
+        return self._auto_agent.stop(thread_id)
+
+    def auto_status(self, thread_id: str) -> dict:
+        self._meta(thread_id)
+        return self._auto_agent.status(thread_id)
+
+    def active_approval(self, thread_id: str) -> ActiveApproval | None:
+        self._meta(thread_id)
+        if not self._message_store_path(thread_id).exists():
+            return None
+        approval = self._message_service(thread_id).active_approval(thread_id)
+        if approval is None:
+            return None
+        return ActiveApproval(
+            approval_token=approval.approval_token,
+            intent_kind=approval.intent_kind,
+            risk_level=approval.risk_level,
+            expected_refs=approval.expected_refs,
+            expires_at=approval.expires_at,
+        )
+
+    def resolve_approval(self, thread_id: str, *, action: str, approval_token: str, command_id: str = '') -> dict:
+        self._meta(thread_id)
+        command = command_id or f'approval:{thread_id}:{action}:{approval_token}'
+        try:
+            result = self._message_service(thread_id).resolve_pending_structured(
+                thread_id,
+                action=action,
+                approval_token=approval_token,
+                command_id=command,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except (MessageLeaseError, MessageStoreConflict, RuntimeError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {
+            'status': result.status,
+            'thread_id': result.thread_id,
+            'turn_id': result.turn_id,
+            'message_id': result.message_id,
+            'response': result.response,
+            'message_event_cursor': result.message_event_cursor,
+            'pending_approval': result.pending_approval,
+        }
+
+    def post_message(self, thread_id: str, payload: dict[str, Any], *, trusted_auto_agent: bool = False) -> dict:
         with self._message_service_lock:
-            self._update_model_config(thread_id, payload)
+            self._update_llm_config(thread_id, payload)
             self._meta(thread_id)
             try:
-                result = self._message_service(thread_id).handle(thread_id, payload)
+                result = self._message_service(thread_id).handle(
+                    thread_id,
+                    payload,
+                    trusted_auto_agent=trusted_auto_agent,
+                )
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from exc
             except RuntimeError as exc:
@@ -501,15 +588,16 @@ class EvoMessageHub:
             self._artifact_flows[thread_id] = EvoFlowRuntime.open(
                 path,
                 case_count=int(inputs['num_cases']),
-                model_config=inputs.get('model_config') or {},
+                llm_config=inputs.get('llm_config') or {},
             )
         else:
-            self._artifact_flows[thread_id].set_model_config(self._meta(thread_id).get('model_config') or {})
+            self._artifact_flows[thread_id].set_llm_config(_llm_config_payload(self._meta(thread_id)))
         return self._artifact_flows[thread_id]
 
     def _message_service(self, thread_id: str) -> MessageIntentService:
         with self._message_service_lock:
             if thread_id not in self._message_services:
+                llm = self._message_llm(thread_id)
                 self._message_services[thread_id] = MessageIntentService(
                     MessageSessionStore(self._message_store_path(thread_id)),
                     flow_getter=self._artifact_flow,
@@ -517,15 +605,24 @@ class EvoMessageHub:
                     flow_status=self.flow_status,
                     artifact_reader=lambda tid, artifact_id: self._artifact_runtime_row(tid, artifact_id),
                     case_count_getter=lambda tid: int(self._artifact_flow_config(tid)['num_cases']),
-                    planner=self._message_planner(thread_id),
+                    planner=self._message_planner(thread_id, llm=llm),
+                    response_llm=llm,
                 )
             return self._message_services[thread_id]
 
-    def _message_planner(self, thread_id: str) -> StructuredJSONNextIntentPlanner:
-        model_config = self._meta(thread_id).get('model_config') or {}
+    def _message_llm(self, thread_id: str) -> LazyLLMPlannerClient:
+        return LazyLLMPlannerClient(llm_config=_llm_config_payload(self._meta(thread_id)))
+
+    def _message_planner(
+        self,
+        thread_id: str,
+        *,
+        llm: LazyLLMPlannerClient | None = None,
+    ) -> StructuredJSONNextIntentPlanner:
+        llm_config = _llm_config_payload(self._meta(thread_id))
         if self._planner_factory is not None:
-            return self._planner_factory(thread_id, model_config)
-        return StructuredJSONNextIntentPlanner(LazyLLMPlannerClient(model_config=model_config))
+            return self._planner_factory(thread_id, llm_config)
+        return StructuredJSONNextIntentPlanner(llm or self._message_llm(thread_id))
 
     def _close_flow(self, thread_id: str) -> None:
         flow = self._artifact_flows.pop(thread_id, None)
@@ -572,15 +669,15 @@ class EvoMessageHub:
             raise HTTPException(400, str(exc)) from exc
         if inputs != raw_inputs:
             self._update_meta(thread_id, inputs=inputs, updated_at=time.time())
-        return inputs | {'model_config': meta.get('model_config') or {}}
+        return inputs | {'llm_config': _llm_config_payload(meta)}
 
-    def _update_model_config(self, thread_id: str, payload: dict[str, Any]) -> None:
-        model_config = _model_config_payload(payload)
-        if not model_config:
+    def _update_llm_config(self, thread_id: str, payload: dict[str, Any]) -> None:
+        llm_config = _llm_config_payload(payload)
+        if not llm_config:
             return
-        self._update_meta(thread_id, model_config=model_config, updated_at=time.time())
+        self._update_meta(thread_id, llm_config=llm_config, updated_at=time.time())
         if thread_id in self._artifact_flows:
-            self._artifact_flows[thread_id].set_model_config(model_config)
+            self._artifact_flows[thread_id].set_llm_config(llm_config)
         self._close_message_service(thread_id)
 
     def _close_message_service(self, thread_id: str) -> None:
@@ -786,10 +883,6 @@ def _stage_from_op(op_id: str) -> str:
 
 
 def _frontend_flow_kind(op_id: str, artifact_id: str) -> str:
-    if op_id == 'dataset.prepare_case':
-        return 'dataset_gen.prepare_case'
-    if op_id == 'dataset.generate_case':
-        return 'dataset_gen.generate_case'
     if op_id == 'dataset.build_corpus_snapshot':
         return 'dataset.build_corpus_snapshot'
     if op_id == 'eval.summary' or artifact_id == 'eval.summary':
@@ -797,9 +890,9 @@ def _frontend_flow_kind(op_id: str, artifact_id: str) -> str:
     if op_id == 'analysis.classify_case':
         return 'analysis.fine_classify'
     if op_id == 'abtest.candidate_rag_answer':
-        return 'eval.rag_answer'
+        return 'abtest.candidate_rag_answer'
     if op_id == 'abtest.candidate_judge':
-        return 'eval.judge_answer'
+        return 'abtest.candidate_judge'
     if op_id == 'abtest.candidate_eval_summary' or artifact_id == 'abtest.candidate_eval_summary':
         return 'eval.aggregate'
     if op_id == 'abtest.candidate_service':
@@ -1016,7 +1109,18 @@ def _case_details_summary(
         category = str(row.get('question_type') or row.get('category') or '总体')
         bucket = buckets.setdefault(category, {'count': 0, 'totals': {}})
         bucket['count'] += 1
-        for key in ('answer_correctness', 'faithfulness', 'context_recall', 'doc_recall'):
+        for key in (
+            'answer_score',
+            'answer_correctness',
+            'answer_relevance',
+            'completeness',
+            'format_compliance',
+            'chunk_recall',
+            'chunk_precision',
+            'doc_recall',
+            'doc_precision',
+            'retrieval_score',
+        ):
             bucket['totals'][key] = float(bucket['totals'].get(key, 0.0)) + float(row.get(key) or 0.0)
     if not buckets:
         buckets['总体'] = {
@@ -1050,10 +1154,17 @@ def _case_details_from_eval_rows(rows: list[dict], existing: Any) -> list[dict]:
         {
             'case_id': row.get('case_id') or row.get('id'),
             'question_type': row.get('question_type') or row.get('category') or '总体',
+            'answer_score': row.get('answer_score'),
             'answer_correctness': row.get('answer_correctness'),
-            'faithfulness': row.get('faithfulness'),
-            'context_recall': row.get('context_recall'),
+            'answer_relevance': row.get('answer_relevance'),
+            'completeness': row.get('completeness'),
+            'format_compliance': row.get('format_compliance'),
+            'chunk_recall': row.get('chunk_recall'),
+            'chunk_precision': row.get('chunk_precision'),
             'doc_recall': row.get('doc_recall'),
+            'doc_precision': row.get('doc_precision'),
+            'retrieval_score': row.get('retrieval_score'),
+            'retrieval_failure_type': row.get('retrieval_failure_type'),
             'is_correct': row.get('is_correct'),
             'reason': row.get('reason'),
             'trace_id': row.get('trace_id'),
@@ -1177,8 +1288,8 @@ def _history_timestamp(value: Any) -> str:
     return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
 
-def _model_config_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    value = payload.get('llm_config') or payload.get('model_config') or {}
+def _llm_config_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    value = payload.get('llm_config') or {}
     return dict(value) if isinstance(value, dict) else {}
 
 
