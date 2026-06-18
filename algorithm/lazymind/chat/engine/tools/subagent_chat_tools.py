@@ -42,10 +42,22 @@ def create_subagent(
 ) -> Dict[str, Any]:
     """Spawn an autonomous SubAgent to handle a complex, long-running, or tool-heavy subtask.
 
-    Use this when a step is complex enough to warrant its own tool-calling chain, takes a long
-    time, or streams outputs incrementally (e.g. generating multiple images). For simple steps,
-    just use ordinary tools or reason directly instead. To resume an interrupted task, set
-    resume=True and pass the interrupted task's title so it continues from its last step.
+    WHEN TO CREATE A SUBAGENT:
+    Only create a SubAgent when the task goal is clear, key information is sufficiently complete,
+    and the work can proceed autonomously for an extended period without frequent user decisions.
+    Prefer SubAgents for self-contained tasks such as research and information gathering, document
+    analysis, code scanning, batch processing, and other work that can advance independently and
+    produce incremental results.
+
+    WHEN NOT TO CREATE A SUBAGENT:
+    Do NOT create a SubAgent when: requirements are vague or still being clarified; the task
+    depends on frequent user feedback or approval at each step; the direction may change as the
+    conversation continues; or the work is simple enough to handle with ordinary tools or direct
+    reasoning. When in doubt, do NOT create a SubAgent — instead, continue in the main
+    conversation and ask the user to confirm any missing critical information first.
+
+    To resume an interrupted task, set resume=True and pass the interrupted task's title so it
+    continues from its last step.
 
     Args:
         agent_type (str): The kind of SubAgent, e.g. 'image_generation', 'research'.

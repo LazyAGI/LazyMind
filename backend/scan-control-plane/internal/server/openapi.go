@@ -256,6 +256,7 @@ func openAPISchemas() map[string]any {
 		"SourceResponse":                sourceResponseSchema(),
 		"SourceListResponse":            object([]string{"items", "total"}, props("items", arrayOf("SourceListItem"), "total", integerSchema())),
 		"SourceListItem":                sourceListItemSchema(),
+		"AuthConnectionStatus":          authConnectionStatusSchema(),
 		"GetSourceResponse":             object([]string{"source"}, props("source", schemaRef("SourceResponse"), "bindings", arrayOf("SourceBindingResponse"), "summary", objectSchema())),
 		"UpdateSourceRequest":           updateSourceRequestSchema(),
 		"UpdateSourceResponse":          object([]string{"source", "bindings"}, props("source", schemaRef("SourceResponse"), "bindings", arrayOf("SourceBindingResponse"), "created_binding_ids", stringArray(), "updated_binding_ids", stringArray(), "removed_binding_ids", stringArray(), "job_ids", stringArray())),
@@ -269,7 +270,7 @@ func openAPISchemas() map[string]any {
 		"TriggerSourceSyncRequest":      object(nil, props("request_id", stringSchema(), "binding_id", stringSchema(), "scope_type", stringSchema(), "scope_ref", objectSchema())),
 		"TriggerSourceSyncResponse":     object([]string{"run_ids", "job_ids"}, props("run_ids", stringArray(), "job_ids", stringArray(), "intents", arrayOf("SyncRunIntent"))),
 		"SyncRunIntent":                 syncRunIntentSchema(),
-		"SourceTreeChildrenRequest":     object(nil, mergeProps(sourceTreeRequestProps(), props("use_cache", boolSchema()))),
+		"SourceTreeChildrenRequest":     object(nil, mergeProps(sourceTreeRequestProps(), props("use_cache", boolSchema(), "refresh_state", boolSchema()))),
 		"SourceTreeSearchRequest":       object([]string{"keyword"}, mergeProps(sourceTreeRequestProps(), props("keyword", stringSchema()))),
 		"SourceDocumentListResponse":    object([]string{"items", "total", "page", "page_size"}, props("items", arrayOf("SourceDocumentItem"), "total", integerSchema(), "page", integerSchema(), "page_size", integerSchema(), "summary", objectSchema())),
 		"SourceDocumentItem":            sourceDocumentItemSchema(),
@@ -298,6 +299,7 @@ func openAPISchemas() map[string]any {
 		"ListMode":                      enumSchema("page", "all_current_level"),
 		"SourceStatus":                  enumSchema("ACTIVE", "PAUSED", "DELETING", "ERROR"),
 		"BindingStatus":                 enumSchema("ACTIVE", "PAUSED", "DELETING", "ERROR"),
+		"CloudAuthConnectionStatus":     enumSchema("ACTIVE", "EXPIRED", "REVOKED", "ERROR", "PENDING"),
 		"SyncMode":                      enumSchema("manual", "scheduled", "watch"),
 		"SourceState":                   enumSchema("NEW", "MODIFIED", "DELETED", "UNCHANGED"),
 		"SyncState":                     enumSchema("IDLE", "SCHEDULED", "PENDING", "RUNNING", "FAILED"),
@@ -335,9 +337,13 @@ func treeNodeSchema() map[string]any {
 		"is_container", boolSchema(),
 		"has_children", boolSchema(),
 		"selectable", boolSchema(),
-		"source_state", stringSchema(),
-		"sync_state", stringSchema(),
+		"source_state", schemaRef("SourceState"),
+		"sync_state", schemaRef("SyncState"),
+		"pending_action", stringSchema(),
 		"parse_queue_state", stringSchema(),
+		"has_update", boolSchema(),
+		"update_type", stringSchema(),
+		"update_desc", stringSchema(),
 		"provider_meta", objectSchema(),
 	))
 }
@@ -398,10 +404,18 @@ func sourceListItemSchema() map[string]any {
 		"exclude_extensions", stringArray(),
 		"config_version", integerSchema(),
 		"binding_count", integerSchema(),
+		"auth_connection_status", schemaRef("AuthConnectionStatus"),
 		"summary", objectSchema(),
 		"deleted_at", stringSchema(),
 		"created_at", stringSchema(),
 		"updated_at", stringSchema(),
+	))
+}
+
+func authConnectionStatusSchema() map[string]any {
+	return object([]string{"status", "connection_ids"}, props(
+		"status", schemaRef("CloudAuthConnectionStatus"),
+		"connection_ids", stringArray(),
 	))
 }
 
@@ -763,6 +777,7 @@ func sourceTreeRequestProps() map[string]any {
 		"binding_id", stringSchema(),
 		"tree_key", stringSchema(),
 		"parent_key", stringSchema(),
+		"refresh_state", boolSchema(),
 		"include_documents", boolSchema(),
 		"include_containers", boolSchema(),
 		"state_filter", stringArray(),
@@ -779,6 +794,7 @@ func documentQueryParameters() []map[string]any {
 		queryParameter("keyword", stringSchema()),
 		queryParameter("state_filter", stringArray()),
 		queryParameter("parse_status", stringArray()),
+		queryParameter("refresh_state", boolSchema()),
 		queryParameter("page", integerSchema()),
 		queryParameter("page_size", integerSchema()),
 	}

@@ -183,6 +183,114 @@ func TestListToolsForwardsRuntimeConfigsAndMarksDisabled(t *testing.T) {
 	}
 }
 
+func TestListToolsFiltersAndPaginates(t *testing.T) {
+	db := newToolsTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	baseURL := startChatToolsTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/authservice/") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]any{"items": []any{}},
+			})
+			return
+		}
+		if r.URL.Path != chatToolsPath {
+			http.NotFound(w, r)
+			return
+		}
+		groups := make([]map[string]any, 0, 12)
+		for i := 1; i <= 12; i++ {
+			description := "general tool"
+			if i <= 5 {
+				description = "Calendar scheduling helper"
+			}
+			name := fmt.Sprintf("tool-%02d", i)
+			if i == 12 {
+				name = "report-builder"
+			}
+			groups = append(groups, map[string]any{
+				"name":        name,
+				"label":       fmt.Sprintf("Tool %02d", i),
+				"description": description,
+				"can_disable": true,
+				"active":      true,
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"tool_groups": groups})
+	}))
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", baseURL)
+	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", baseURL)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/tools", nil)
+	req.Header.Set("X-User-Id", "u1")
+	rec := httptest.NewRecorder()
+	ListTools(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var firstPage struct {
+		Data chatToolsResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &firstPage); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if firstPage.Data.Page != 1 || firstPage.Data.PageSize != 10 || firstPage.Data.Total != 12 {
+		t.Fatalf("unexpected default page metadata: %#v", firstPage.Data)
+	}
+	if len(firstPage.Data.ToolGroups) != 10 {
+		t.Fatalf("expected default page size 10, got %d", len(firstPage.Data.ToolGroups))
+	}
+	if firstPage.Data.ToolGroups[0]["name"] != "tool-01" || firstPage.Data.ToolGroups[9]["name"] != "tool-10" {
+		t.Fatalf("unexpected default page items: %#v", firstPage.Data.ToolGroups)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/core/tools?keyword=calendar&page=2&page_size=2", nil)
+	req.Header.Set("X-User-Id", "u1")
+	rec = httptest.NewRecorder()
+	ListTools(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var filteredPage struct {
+		Data chatToolsResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &filteredPage); err != nil {
+		t.Fatalf("decode filtered response: %v", err)
+	}
+	if filteredPage.Data.Page != 2 || filteredPage.Data.PageSize != 2 || filteredPage.Data.Total != 5 {
+		t.Fatalf("unexpected filtered page metadata: %#v", filteredPage.Data)
+	}
+	if len(filteredPage.Data.ToolGroups) != 2 {
+		t.Fatalf("expected 2 filtered tools, got %#v", filteredPage.Data.ToolGroups)
+	}
+	if filteredPage.Data.ToolGroups[0]["name"] != "tool-03" || filteredPage.Data.ToolGroups[1]["name"] != "tool-04" {
+		t.Fatalf("unexpected filtered page items: %#v", filteredPage.Data.ToolGroups)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/core/tools?keyword=REPORT&page_size=10", nil)
+	req.Header.Set("X-User-Id", "u1")
+	rec = httptest.NewRecorder()
+	ListTools(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var nameMatched struct {
+		Data chatToolsResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &nameMatched); err != nil {
+		t.Fatalf("decode name matched response: %v", err)
+	}
+	if nameMatched.Data.Total != 1 || len(nameMatched.Data.ToolGroups) != 1 || nameMatched.Data.ToolGroups[0]["name"] != "report-builder" {
+		t.Fatalf("expected keyword to match tool name case-insensitively, got %#v", nameMatched.Data)
+	}
+}
+
 func TestDisableToolRejectsNonDisableableTool(t *testing.T) {
 	db := newToolsTestDB(t)
 	store.Init(db.DB, nil, nil)
@@ -231,14 +339,20 @@ func TestChatConversationsMergesPersistedDisabledTools(t *testing.T) {
 	if err := disableToolForUser(context.Background(), db.DB, "u1", "User 1", "bing"); err != nil {
 		t.Fatalf("disable tool: %v", err)
 	}
-	if _, err := mcp.CreateServer(context.Background(), db.DB, mcp.CreateServerRequest{
+	created, err := mcp.CreateServer(context.Background(), db.DB, mcp.CreateServerRequest{
 		Name:         "context7",
 		Transport:    "sse",
 		URL:          "https://mcp.example.com/sse",
 		APIKey:       "sk-secret-xyz",
 		AllowedTools: []string{"resolve-library-id"},
-	}, "u1", "User 1"); err != nil {
+	}, "u1", "User 1")
+	if err != nil {
 		t.Fatalf("create mcp server: %v", err)
+	}
+	if err := db.Model(&orm.MCPServer{}).
+		Where("id = ?", created.ID).
+		Updates(map[string]any{"is_verified": true, "enabled": true}).Error; err != nil {
+		t.Fatalf("enable verified mcp server: %v", err)
 	}
 
 	var upstreamBody map[string]any

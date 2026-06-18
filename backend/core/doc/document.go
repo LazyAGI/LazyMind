@@ -1877,6 +1877,14 @@ func loadDocumentsByDatasetIDs(ctx context.Context, datasetIDs []string, keyword
 	if err != nil {
 		return nil, 0, false, time.Time{}, err
 	}
+	filteredRows := rows[:0]
+	for _, row := range rows {
+		if strings.EqualFold(strings.TrimSpace(row.Type), "FOLDER") {
+			continue
+		}
+		filteredRows = append(filteredRows, row)
+	}
+	rows = filteredRows
 	if keyword = strings.TrimSpace(keyword); keyword != "" {
 		filtered := rows[:0]
 		for _, row := range rows {

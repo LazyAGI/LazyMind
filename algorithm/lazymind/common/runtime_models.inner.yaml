@@ -19,7 +19,7 @@ reranker:
   - source: openai
     type: rerank
     name: Qwen3-Reranker-8B
-    url: http://10.119.24.104:8331/v1
+    url: http://10.119.17.248:8331/v1
     skip_auth: true
 
 embed_main:
@@ -44,3 +44,15 @@ vlm:
     name: lazyllm
     url: http://10.119.21.178:36517/v1/
     skip_auth: true
+
+image_generator:
+  - source: siliconflow
+    type: text2image
+    name: Kwai-Kolors/Kolors
+    api_key: ${LAZYLLM_SILICONFLOW_API_KEY}
+
+image_editor:
+  - source: siliconflow
+    type: image_editing
+    name: Kwai-Kolors/Kolors
+    api_key: ${LAZYLLM_SILICONFLOW_API_KEY}

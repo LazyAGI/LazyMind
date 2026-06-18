@@ -170,21 +170,39 @@ type ListSourcesResponse struct {
 }
 
 type SourceListItemResponse struct {
-	SourceID          string         `json:"source_id"`
-	TenantID          string         `json:"tenant_id,omitempty"`
-	CreatedBy         string         `json:"created_by,omitempty"`
-	Name              string         `json:"name"`
-	DatasetID         string         `json:"dataset_id"`
-	Status            string         `json:"status"`
-	SourceOptions     map[string]any `json:"source_options,omitempty"`
-	IncludeExtensions []string       `json:"include_extensions,omitempty"`
-	ExcludeExtensions []string       `json:"exclude_extensions,omitempty"`
-	ConfigVersion     int64          `json:"config_version"`
-	BindingCount      int            `json:"binding_count"`
-	Summary           map[string]any `json:"summary,omitempty"`
-	DeletedAt         *time.Time     `json:"deleted_at,omitempty"`
-	CreatedAt         time.Time      `json:"created_at"`
-	UpdatedAt         time.Time      `json:"updated_at"`
+	SourceID             string                        `json:"source_id"`
+	TenantID             string                        `json:"tenant_id,omitempty"`
+	CreatedBy            string                        `json:"created_by,omitempty"`
+	Name                 string                        `json:"name"`
+	DatasetID            string                        `json:"dataset_id"`
+	Status               string                        `json:"status"`
+	SourceOptions        map[string]any                `json:"source_options,omitempty"`
+	IncludeExtensions    []string                      `json:"include_extensions,omitempty"`
+	ExcludeExtensions    []string                      `json:"exclude_extensions,omitempty"`
+	ConfigVersion        int64                         `json:"config_version"`
+	BindingCount         int                           `json:"binding_count"`
+	AuthConnectionStatus *AuthConnectionStatusResponse `json:"auth_connection_status,omitempty"`
+	Summary              map[string]any                `json:"summary,omitempty"`
+	DeletedAt            *time.Time                    `json:"deleted_at,omitempty"`
+	CreatedAt            time.Time                     `json:"created_at"`
+	UpdatedAt            time.Time                     `json:"updated_at"`
+}
+
+type AuthConnectionStatusResponse struct {
+	Status        string   `json:"status"`
+	ConnectionIDs []string `json:"connection_ids"`
+}
+
+type AuthConnectionStatusRequest struct {
+	ConnectionIDs []string
+	UserID        string
+	TenantID      string
+}
+
+type AuthConnectionStatus struct {
+	ConnectionID string
+	Status       string
+	LastError    string
 }
 
 type GetSourceResponse struct {
@@ -285,6 +303,7 @@ type SourceRepository interface {
 	UpdateSourceWithBindings(ctx context.Context, mutation store.SourceUpdateMutation) (store.SourceUpdateResult, error)
 	DeleteSource(ctx context.Context, sourceID string, deletedAt time.Time) (store.SourceDeleteResult, error)
 	ListBindings(ctx context.Context, sourceID string) ([]store.Binding, error)
+	ListBindingsBySourceIDs(ctx context.Context, sourceIDs []string) ([]store.Binding, error)
 	GetBinding(ctx context.Context, sourceID, bindingID string) (store.Binding, error)
 	FindActiveBindingByTarget(ctx context.Context, sourceID, excludeBindingID, connectorType, targetType, targetFingerprint string) (store.Binding, bool, error)
 	AddBinding(ctx context.Context, binding store.Binding, checkpoint store.SyncCheckpoint) error
@@ -293,6 +312,10 @@ type SourceRepository interface {
 	DeleteBinding(ctx context.Context, sourceID, bindingID string, deletedAt time.Time) (store.BindingDeleteResult, error)
 	GetSourceSummary(ctx context.Context, req store.SourceSummaryRequest) (store.SourceSummary, error)
 	CreateAgentCommand(ctx context.Context, command store.AgentCommand) error
+}
+
+type AuthConnectionStatusClient interface {
+	BatchStatus(ctx context.Context, req AuthConnectionStatusRequest) (map[string]AuthConnectionStatus, error)
 }
 
 type ScheduleEngine interface {

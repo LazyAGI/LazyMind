@@ -55,8 +55,8 @@ func (r *Repository) List(ctx context.Context, userID string, groupIDs []string,
 	q = q.Where("("+strings.Join(accessParts, " OR ")+")", accessArgs...)
 
 	if filter.Keyword != "" {
-		like := "%" + strings.ToLower(filter.Keyword) + "%"
-		q = q.Where("(LOWER(name) LIKE ? OR LOWER(description) LIKE ?)", like, like)
+		like := containsLikePattern(strings.ToLower(filter.Keyword))
+		q = q.Where("(LOWER(name) LIKE ? ESCAPE '!' OR LOWER(description) LIKE ? ESCAPE '!')", like, like)
 	}
 	var rows []orm.EvalSet
 	if err := q.Order("updated_at DESC").Find(&rows).Error; err != nil {
@@ -405,6 +405,23 @@ func insertACLRows(tx *gorm.DB, evalSetID, granteeType, targetID, createdBy stri
 		},
 	}
 	return tx.Create(&rows).Error
+}
+
+func containsLikePattern(keyword string) string {
+	return "%" + escapeLikePattern(keyword) + "%"
+}
+
+func escapeLikePattern(keyword string) string {
+	var b strings.Builder
+	b.Grow(len(keyword) + 8)
+	for _, r := range keyword {
+		switch r {
+		case '!', '%', '_':
+			b.WriteRune('!')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func withUpdateLock(db *gorm.DB) *gorm.DB {

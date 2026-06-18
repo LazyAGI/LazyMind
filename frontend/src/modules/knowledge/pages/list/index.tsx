@@ -74,10 +74,20 @@ const KnowledgePage: FC = () => {
   const { t } = useTranslation();
 
   const DocumentStageEnum = {
+    WAITING: t("knowledge.stageParsing"),
+    WORKING: t("knowledge.stageParsing"),
+    SUCCESS: t("knowledge.stageParsed"),
+    FAILED: t("knowledge.stageFailed"),
+    CANCELED: t("knowledge.stageCanceled"),
+    DELETING: t("knowledge.stageDeleting"),
+    DELETED: t("knowledge.stageDeleted"),
+
     [DocDocumentStageEnum.DocumentUploaded]: t("knowledge.stageUploaded"),
+    [DocDocumentStageEnum.DocumentQueued]: t("knowledge.stageParsing"),
     [DocDocumentStageEnum.DocumentParsing]: t("knowledge.stageParsing"),
     [DocDocumentStageEnum.DocumentParseSuccessfully]: t("knowledge.stageParsed"),
     [DocDocumentStageEnum.DocumentParsingFailed]: t("knowledge.stageFailed"),
+    [DocDocumentStageEnum.DocumentParsingCancelled]: t("knowledge.stageCanceled"),
   };
 
   const confirmRef = useRef<ConfirmImperativeProps>(null);
@@ -285,14 +295,17 @@ const KnowledgePage: FC = () => {
               className="link-btn"
               type="link"
               danger
-              onClick={() =>
+              onClick={() => {
+                const knowledgeName = data.display_name || data.dataset_id || "";
                 confirmRef.current?.onOpen({
                   id: data.dataset_id || "",
-                  title: t("knowledge.deleteTitle", { name: data.display_name }),
+                  title: t("knowledge.deleteTitle", { name: knowledgeName }),
                   content: t("knowledge.deleteContent"),
-                  confirmText: t("knowledge.deleteConfirmText"),
-                })
-              }
+                  confirmText: t("knowledge.deleteConfirmText", {
+                    name: knowledgeName,
+                  }),
+                });
+              }}
             >
               {t("common.delete")}
             </Button>
@@ -440,9 +453,10 @@ const KnowledgePage: FC = () => {
       dataIndex: "document_stage",
       width: 120,
       render: (document_stage: string) => {
-        return DocumentStageEnum[
-          document_stage as keyof typeof DocumentStageEnum
-        ];
+        return (
+          DocumentStageEnum[document_stage as keyof typeof DocumentStageEnum] ||
+          "-"
+        );
       },
     },
     {

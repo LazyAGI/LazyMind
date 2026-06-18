@@ -67,8 +67,8 @@ func DefaultConfig() Config {
 
 		ScannerInterval: 5 * time.Second,
 
-		ConversationIdleSeconds:                 time.Hour,
-		ConversationIdleHistoryTTL:              24 * time.Hour,
+		ConversationIdleSeconds:                 5 * time.Minute,
+		ConversationIdleHistoryTTL:              30 * time.Minute,
 		ConversationIdleHistoryMaxMessages:      100,
 		ConversationIdleFallbackScanInterval:    5 * time.Minute,
 		ConversationIdleFallbackBatchSize:       100,

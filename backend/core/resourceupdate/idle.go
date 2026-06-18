@@ -51,6 +51,7 @@ type idleRedisStore interface {
 	ReadHistory(ctx context.Context, key string) ([]idleHistoryMessage, error)
 	SetTTLKey(ctx context.Context, key, value string, ttl time.Duration) error
 	AcquireProcessingLock(ctx context.Context, key string, ttl time.Duration) (bool, error)
+	CleanupIdleKeys(ctx context.Context, ttlKey, expectedTTLValue, historyKey string) (bool, error)
 }
 
 type redisIdleStore struct {
@@ -117,6 +118,21 @@ func (s *redisIdleStore) AcquireProcessingLock(ctx context.Context, key string, 
 		return false, errors.New("redis client is nil")
 	}
 	return s.client.SetNX(ctx, key, "1", ttl).Result()
+}
+
+func (s *redisIdleStore) CleanupIdleKeys(ctx context.Context, ttlKey, expectedTTLValue, historyKey string) (bool, error) {
+	if s == nil || s.client == nil {
+		return false, errors.New("redis client is nil")
+	}
+	result, err := redis.NewScript(`
+local v = redis.call("GET", KEYS[1])
+if (not v) or v == ARGV[1] then
+	redis.call("DEL", KEYS[1], KEYS[2])
+	return 1
+end
+return 0
+`).Run(ctx, s.client, []string{ttlKey, historyKey}, expectedTTLValue).Int()
+	return result == 1, err
 }
 
 type IdleRecorder struct {
@@ -197,10 +213,10 @@ func (r *IdleRecorder) RecordConversationMessage(ctx context.Context, record Con
 		{Role: "user", Content: record.UserContent},
 		{Role: "assistant", Content: record.AssistantText},
 	}
-	if err := r.store.AppendHistory(ctx, conversationIdleHistoryKey(record.SessionID), messages, r.cfg.ConversationIdleHistoryMaxMessages, r.cfg.ConversationIdleHistoryTTL); err != nil {
+	if err := r.store.SetTTLKey(ctx, conversationIdleTTLKey(record.SessionID), eventID, r.cfg.ConversationIdleSeconds); err != nil {
 		return err
 	}
-	if err := r.store.SetTTLKey(ctx, conversationIdleTTLKey(record.SessionID), eventID, r.cfg.ConversationIdleSeconds); err != nil {
+	if err := r.store.AppendHistory(ctx, conversationIdleHistoryKey(record.SessionID), messages, r.cfg.ConversationIdleHistoryMaxMessages, r.cfg.ConversationIdleHistoryTTL); err != nil {
 		return err
 	}
 	resourceUpdateInfo(logEventIdleEventRecorded).
@@ -329,7 +345,8 @@ func (p *IdleProcessor) ProcessEvent(ctx context.Context, eventID string) error 
 		return nil
 	}
 	now := p.clock().UTC()
-	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	cleanupSessionID := ""
+	err = p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var event orm.ConversationIdleEvent
 		if err := withUpdateLock(tx).Where("event_id = ?", eventID).Take(&event).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -370,52 +387,78 @@ func (p *IdleProcessor) ProcessEvent(ctx context.Context, eventID string) error 
 
 		history, err := p.store.ReadHistory(ctx, conversationIdleHistoryKey(event.SessionID))
 		if err != nil {
+			cleanupSessionID = event.SessionID
 			return p.markEventFailed(tx, event.ID, now, "read_history_failed", err.Error())
 		}
 		if !historyHasNonEmptyUserMessage(history) {
+			cleanupSessionID = event.SessionID
 			return p.markEventSkipped(tx, event.ID, now, conversationIdleSkipNoUserMessage)
 		}
 		historyJSON, err := json.Marshal(history)
 		if err != nil {
+			cleanupSessionID = event.SessionID
 			return p.markEventFailed(tx, event.ID, now, "marshal_history_failed", err.Error())
 		}
 
 		memory, err := loadSystemMemoryForIdle(ctx, tx, event.UserID)
 		if err != nil {
+			cleanupSessionID = event.SessionID
 			return p.markEventFailed(tx, event.ID, now, "load_system_memory_failed", err.Error())
 		}
 		preference, err := loadSystemUserPreferenceForIdle(ctx, tx, event.UserID)
 		if err != nil {
+			cleanupSessionID = event.SessionID
 			return p.markEventFailed(tx, event.ID, now, "load_system_user_preference_failed", err.Error())
 		}
 
-		memoryTaskID, err := createIdleGenerateTask(ctx, tx, event, orm.ResourceUpdateResourceTypeMemory, memory.ID, memory.Content, historyJSON, now)
+		userContent := evolution.FormatSystemUserPreferenceForChat(preference)
+		memoryTaskID, err := createIdleGenerateTask(ctx, tx, event, memory.ID, memory.Content, userContent, historyJSON, now)
 		if err != nil {
+			cleanupSessionID = event.SessionID
 			return p.markEventFailed(tx, event.ID, now, "create_memory_task_failed", err.Error())
-		}
-		preferenceTaskID, err := createIdleGenerateTask(ctx, tx, event, orm.ResourceUpdateResourceTypeUserPreference, preference.ID, evolution.FormatSystemUserPreferenceForChat(preference), historyJSON, now)
-		if err != nil {
-			return p.markEventFailed(tx, event.ID, now, "create_user_preference_task_failed", err.Error())
 		}
 		resourceUpdateInfo(logEventIdleEventTriggered).
 			Str("event_id", event.EventID).
 			Str("session_id", event.SessionID).
 			Str("user_id", event.UserID).
 			Str("memory_task_id", memoryTaskID).
-			Str("user_preference_task_id", preferenceTaskID).
+			Str("user_preference_task_id", memoryTaskID).
 			Int("history_message_count", len(history)).
 			Msg(logEventIdleEventTriggered)
 		triggeredAt := now
+		cleanupSessionID = event.SessionID
 		return tx.Model(&orm.ConversationIdleEvent{}).Where("id = ?", event.ID).Updates(map[string]any{
 			"status":                  orm.ConversationIdleEventStatusTriggered,
 			"error_code":              "",
 			"error_message":           "",
 			"memory_task_id":          memoryTaskID,
-			"user_preference_task_id": preferenceTaskID,
+			"user_preference_task_id": memoryTaskID,
 			"triggered_at":            &triggeredAt,
 			"updated_at":              now,
 		}).Error
 	})
+	if err == nil && cleanupSessionID != "" {
+		if cleanupErr := p.cleanupIdleRedisKeys(ctx, cleanupSessionID, eventID); cleanupErr != nil {
+			resourceUpdateWarn(logEventIdleRedisCleanupFailed, cleanupErr).
+				Str("event_id", eventID).
+				Str("session_id", cleanupSessionID).
+				Msg(logEventIdleRedisCleanupFailed)
+		}
+	}
+	return err
+}
+
+func (p *IdleProcessor) cleanupIdleRedisKeys(ctx context.Context, sessionID, eventID string) error {
+	if p == nil || p.store == nil {
+		return nil
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	eventID = strings.TrimSpace(eventID)
+	if sessionID == "" || eventID == "" {
+		return nil
+	}
+	_, err := p.store.CleanupIdleKeys(ctx, conversationIdleTTLKey(sessionID), eventID, conversationIdleHistoryKey(sessionID))
+	return err
 }
 
 func (p *IdleProcessor) loadEventStatus(ctx context.Context, eventID string) (string, error) {
@@ -470,14 +513,13 @@ func loadSystemUserPreferenceForIdle(ctx context.Context, db *gorm.DB, userID st
 	return row, err
 }
 
-func createIdleGenerateTask(ctx context.Context, db *gorm.DB, event orm.ConversationIdleEvent, target, resourceID, currentContent string, historyJSON json.RawMessage, now time.Time) (string, error) {
-	target = strings.TrimSpace(target)
-	triggerID := fmt.Sprintf("%s:%s", strings.TrimSpace(event.EventID), target)
+func createIdleGenerateTask(ctx context.Context, db *gorm.DB, event orm.ConversationIdleEvent, resourceID, memoryContent, userContent string, historyJSON json.RawMessage, now time.Time) (string, error) {
+	triggerID := fmt.Sprintf("%s:%s", strings.TrimSpace(event.EventID), "memory_review")
 	request := memoryGenerateRequestJSON{
-		SessionID:      strings.TrimSpace(event.SessionID),
-		Target:         target,
-		History:        historyJSON,
-		CurrentContent: currentContent,
+		SessionID: strings.TrimSpace(event.SessionID),
+		History:   historyJSON,
+		Memory:    memoryContent,
+		User:      userContent,
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -486,7 +528,7 @@ func createIdleGenerateTask(ctx context.Context, db *gorm.DB, event orm.Conversa
 	task := orm.ResourceUpdateTask{
 		ID:           common.GenerateID(),
 		TaskType:     orm.ResourceUpdateTaskTypeGenerateReview,
-		ResourceType: target,
+		ResourceType: orm.ResourceUpdateResourceTypeMemory,
 		UserID:       strings.TrimSpace(event.UserID),
 		ResourceID:   strings.TrimSpace(resourceID),
 		TriggerType:  orm.ResourceUpdateTriggerTypeConversationIdle,
@@ -508,7 +550,7 @@ func createIdleGenerateTask(ctx context.Context, db *gorm.DB, event orm.Conversa
 	if err := db.WithContext(ctx).
 		Select("id").
 		Where("task_type = ? AND resource_type = ? AND trigger_type = ? AND trigger_id = ?",
-			orm.ResourceUpdateTaskTypeGenerateReview, target, orm.ResourceUpdateTriggerTypeConversationIdle, triggerID).
+			orm.ResourceUpdateTaskTypeGenerateReview, orm.ResourceUpdateResourceTypeMemory, orm.ResourceUpdateTriggerTypeConversationIdle, triggerID).
 		Take(&existing).Error; err != nil {
 		return "", err
 	}

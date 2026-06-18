@@ -81,3 +81,14 @@ def test_oauth_authorize_url_success_when_secret_key_present(client: TestClient,
     pending_items = _data(pending)['items']
     assert len(pending_items) == 1
     assert pending_items[0]['connection_id'] == data['connection_id']
+
+    status = client.post(
+        '/api/authservice/v1/cloud/connections/status:batch',
+        json={'connection_ids': [data['connection_id'], data['connection_id']]},
+        headers={'X-LazyMind-Internal-Token': 'test-internal-token'},
+    )
+    assert status.status_code == 200
+    status_items = _data(status)['items']
+    assert len(status_items) == 1
+    assert status_items[0]['connection_id'] == data['connection_id']
+    assert status_items[0]['status'] == 'PENDING'

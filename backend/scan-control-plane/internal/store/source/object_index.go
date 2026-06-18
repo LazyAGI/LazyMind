@@ -17,12 +17,8 @@ func (r *SQLRepository) UpsertObjects(ctx context.Context, objects []SourceObjec
 				return err
 			}
 			err := tx.Clauses(clause.OnConflict{
-				Columns: []clause.Column{{Name: "binding_id"}, {Name: "object_key"}},
-				DoUpdates: clause.AssignmentColumns([]string{
-					"tree_key", "parent_key", "display_name", "search_name", "object_type", "is_document",
-					"is_container", "has_children", "source_version", "size_bytes", "mime_type", "file_extension",
-					"modified_at", "deleted_at_source", "depth", "provider_meta_json", "last_seen_run_id", "updated_at",
-				}),
+				Columns:   []clause.Column{{Name: "binding_id"}, {Name: "object_key"}},
+				DoUpdates: sourceObjectUpsertAssignments(),
 			}).Create(objectToORM(object)).Error
 			if err != nil {
 				return err
@@ -30,6 +26,23 @@ func (r *SQLRepository) UpsertObjects(ctx context.Context, objects []SourceObjec
 		}
 		return nil
 	})
+}
+
+func sourceObjectUpsertAssignments() clause.Set {
+	assignments := clause.AssignmentColumns([]string{
+		"tree_key", "parent_key", "display_name", "search_name", "object_type", "is_document",
+		"is_container", "has_children", "source_version", "mime_type", "file_extension",
+		"modified_at", "deleted_at_source", "depth", "provider_meta_json", "last_seen_run_id", "updated_at",
+	})
+	assignments = append(assignments, clause.Assignment{
+		Column: clause.Column{Name: "size_bytes"},
+		Value: gorm.Expr(`CASE
+WHEN excluded.size_bytes > 0 THEN excluded.size_bytes
+WHEN excluded.provider_meta_json->>'kind' = 'wiki_node' AND source_object_index.size_bytes > 0 THEN source_object_index.size_bytes
+ELSE excluded.size_bytes
+END`),
+	})
+	return assignments
 }
 
 func validateSourceObjectIndexRow(object SourceObject) error {
@@ -76,6 +89,7 @@ func (r *SQLRepository) ListObjects(ctx context.Context, req ObjectListRequest) 
 		Where("COALESCE(o.parent_key, '') = ?", req.ParentKey).
 		Where("? OR NOT o.is_document", req.IncludeDocuments).
 		Where("? OR NOT o.is_container", req.IncludeContainers).
+		Where("NOT o.is_document OR COALESCE(s.document_list_visible, TRUE)").
 		Where("o.object_key > ?", req.Cursor).
 		Scopes(applyObjectStateFilter(req.StateFilter)).
 		Order("o.display_name, o.object_key").
@@ -96,6 +110,7 @@ func (r *SQLRepository) SearchObjects(ctx context.Context, req ObjectSearchReque
 		Where("? = '' OR o.tree_key = ?", req.TreeKey, req.TreeKey).
 		Where("? OR NOT o.is_document", req.IncludeDocuments).
 		Where("? OR NOT o.is_container", req.IncludeContainers).
+		Where("NOT o.is_document OR COALESCE(s.document_list_visible, TRUE)").
 		Where("LOWER(o.search_name || ' ' || o.display_name) LIKE LOWER(?)", "%"+req.Keyword+"%").
 		Where("o.object_key > ?", req.Cursor).
 		Scopes(applyObjectStateFilter(req.StateFilter)).
@@ -115,8 +130,25 @@ func objectSelectSQLForAlias(alias string) string {
 
 func objectWithStateBaseQuery(db *gorm.DB) *gorm.DB {
 	return db.Table("source_object_index AS o").
-		Select(objectSelectSQLForAlias("o") + ", " + documentStateSelectSQLForAlias("s")).
+		Select(objectTreeSelectSQLForAlias("o") + ", " + documentStateSelectSQLForAlias("s")).
 		Joins("LEFT JOIN source_document_states s ON s.source_id = o.source_id AND s.binding_id = o.binding_id AND s.object_key = o.object_key")
+}
+
+func objectTreeSelectSQLForAlias(alias string) string {
+	hasVisibleChildren := `EXISTS (
+		SELECT 1
+		FROM source_object_index child
+		LEFT JOIN source_document_states child_state
+		  ON child_state.source_id = child.source_id
+		 AND child_state.binding_id = child.binding_id
+		 AND child_state.object_key = child.object_key
+		WHERE child.source_id = ` + alias + `.source_id
+		  AND child.binding_id = ` + alias + `.binding_id
+		  AND child.tree_key = ` + alias + `.tree_key
+		  AND child.parent_key = ` + alias + `.object_key
+		  AND (NOT child.is_document OR COALESCE(child_state.document_list_visible, TRUE))
+	)`
+	return alias + `.source_id, ` + alias + `.binding_id, ` + alias + `.tree_key, ` + alias + `.object_key, ` + alias + `.parent_key, ` + alias + `.display_name, ` + alias + `.search_name, ` + alias + `.object_type, ` + alias + `.is_document, ` + alias + `.is_container, CASE WHEN ` + alias + `.has_children OR ` + hasVisibleChildren + ` THEN TRUE ELSE FALSE END AS has_children, ` + alias + `.source_version, ` + alias + `.size_bytes, ` + alias + `.mime_type, ` + alias + `.file_extension, ` + alias + `.modified_at, ` + alias + `.deleted_at_source, ` + alias + `.depth, ` + alias + `.provider_meta_json, ` + alias + `.last_seen_run_id, ` + alias + `.created_at, ` + alias + `.updated_at`
 }
 
 func applyObjectStateFilter(values []string) func(*gorm.DB) *gorm.DB {

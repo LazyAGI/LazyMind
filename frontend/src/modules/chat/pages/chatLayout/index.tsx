@@ -30,12 +30,14 @@ import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import {
   CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
+  CHAT_AUTO_ADVANCE_EVENT,
 } from "@/modules/chat/constants/chat";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
 import TaskCenter from "@/modules/chat/components/TaskCenter";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
+import { usePluginStore } from "@/modules/chat/store/pluginPanel";
 
 // Stable empty reference to avoid returning a fresh array from the zustand
 // selector on every render, which (with useSyncExternalStore) would trigger an
@@ -110,20 +112,35 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   const chatRef = useRef<ChatImperativeProps>(null);
 
+  const autoRunning = usePluginStore((s) =>
+    sessionId ? (s.autoRunningByConversation[sessionId] ?? false) : false,
+  );
+  const hasPluginSession = usePluginStore((s) =>
+    sessionId ? (s.sessionByConversation[sessionId] ?? null) !== null : false,
+  );
+
   const tasks = useTaskCenterStore((s) =>
     sessionId ? s.tasksByConversation[sessionId] ?? EMPTY_TASKS : EMPTY_TASKS,
   );
   const loadConversationTasks = useTaskCenterStore(
     (s) => s.loadConversationTasks,
   );
+  const subscribeConvEvents = useTaskCenterStore((s) => s.subscribeConvEvents);
+  const unsubscribeConvEvents = useTaskCenterStore((s) => s.unsubscribeConvEvents);
 
   useEffect(() => {
     if (sessionId) {
       loadConversationTasks(sessionId);
+      subscribeConvEvents(sessionId);
     }
-  }, [sessionId, loadConversationTasks]);
+    return () => {
+      if (sessionId) {
+        unsubscribeConvEvents(sessionId);
+      }
+    };
+  }, [sessionId, loadConversationTasks, subscribeConvEvents, unsubscribeConvEvents]);
 
-  // Auto-expand the task panel the first time a SubAgent task appears in the current session.
+  // Auto-expand the task panel the first time a SubAgent task or plugin session appears.
   const prevTasksLengthRef = useRef(0);
   useEffect(() => {
     const prev = prevTasksLengthRef.current;
@@ -132,6 +149,16 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       setIsTaskPanelCollapsed(false);
     }
   }, [tasks.length]);
+
+  // Also auto-expand when a plugin session first appears (even with no tasks yet).
+  const prevHasPluginSessionRef = useRef(false);
+  useEffect(() => {
+    const prev = prevHasPluginSessionRef.current;
+    prevHasPluginSessionRef.current = hasPluginSession;
+    if (!prev && hasPluginSession) {
+      setIsTaskPanelCollapsed(false);
+    }
+  }, [hasPluginSession]);
 
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
@@ -262,6 +289,18 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           ? chatConfig.knowledgeBaseId.map((k) => ({ id: k }))
           : [];
 
+    // Attach active plugin session context so Go/Python can inject advance_step
+    // instead of cold-start trigger tools on follow-up messages.
+    const activeSession = usePluginStore.getState().sessionByConversation[sessionId];
+    const pluginContext =
+      activeSession?.status === "active" || activeSession?.status === "waiting"
+        ? {
+            session_id: activeSession.session_id,
+            plugin_id: activeSession.plugin_id,
+            current_step: activeSession.current_step_id,
+          }
+        : undefined;
+
     return new SSE(CHAT_STREAM_URL, {
       method: Method.POST,
       headers: {
@@ -293,6 +332,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         mode: "auto",
         create_time: new Date().toISOString(),
         environment_context: buildEnvironmentContext(),
+        ...(pluginContext ? { plugin_context: pluginContext } : {}),
       }),
       callbacks,
     });
@@ -409,6 +449,19 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     };
   }, [sessionId, setIsChatContent, loadConversation]);
 
+  // Auto-advance: when driver agent triggers a new chat turn, open resume SSE.
+  useEffect(() => {
+    const handleAutoAdvance = (event: Event) => {
+      const { conversationId } = (event as CustomEvent<{ conversationId: string }>).detail || {};
+      if (!conversationId || conversationId !== sessionId) return;
+      chatRef.current?.openResumeSSE?.(conversationId);
+    };
+    window.addEventListener(CHAT_AUTO_ADVANCE_EVENT, handleAutoAdvance);
+    return () => {
+      window.removeEventListener(CHAT_AUTO_ADVANCE_EVENT, handleAutoAdvance);
+    };
+  }, [sessionId]);
+
   function parseErrorData(data: string) {
     const dataObject = UIUtils.jsonParser(data) || {};
     return dataObject.message;
@@ -510,9 +563,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         embeddingReady={embeddingReady}
         multimodalEmbeddingReady={multimodalEmbeddingReady}
         rerankReady={rerankReady}
-        disabledReason={chatDisabledReason}
-        disabledDescription={chatDisabledDescription}
-        disabledAction={chatDisabledAction}
+        disabledReason={autoRunning ? t("chat.autoAdvanceRunning") : chatDisabledReason}
+        disabledDescription={autoRunning ? undefined : chatDisabledDescription}
+        disabledAction={autoRunning ? undefined : chatDisabledAction}
       />
       {tasks.length > 0 && isTaskPanelCollapsed && (
         <button

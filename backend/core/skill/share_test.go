@@ -2,6 +2,7 @@ package skill
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,18 @@ import (
 	"lazymind/core/evolution"
 	"lazymind/core/store"
 )
+
+func newTCP4HTTPTestServer(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("listener unavailable in current test environment: %v", err)
+	}
+	server := httptest.NewUnstartedServer(handler)
+	server.Listener = listener
+	server.Start()
+	return server
+}
 
 type listSkillShareTargetsAPITestResponse struct {
 	Code    int    `json:"code"`
@@ -144,7 +157,7 @@ func TestShareExpandsTargetGroupsFromAuthService(t *testing.T) {
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
 	const internalToken = "test-internal-token"
-	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	authServer := newTCP4HTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/authservice/group/g1/user":
@@ -216,7 +229,7 @@ func TestShareGroupTargetsExcludeLocallyCachedDisabledUsers(t *testing.T) {
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
-	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	authServer := newTCP4HTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/authservice/group/g1/user":

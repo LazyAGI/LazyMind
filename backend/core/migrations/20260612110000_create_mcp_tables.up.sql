@@ -41,4 +41,3 @@ CREATE TABLE IF NOT EXISTS public.mcp_server_tools (
 
 CREATE INDEX IF NOT EXISTS idx_mcp_tools_server
     ON public.mcp_server_tools USING btree (mcp_server_id, deleted_at);
-

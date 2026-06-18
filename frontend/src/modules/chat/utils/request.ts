@@ -77,6 +77,10 @@ export const CHAT_RESUME_STREAM_URL = `${coreApiBaseUrl}/conversations:resumeCha
 export const taskStreamUrl = (taskId: string) =>
   `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}:stream`;
 
+// Conversation-level events SSE endpoint.
+export const convEventsUrl = (conversationId: string) =>
+  `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/events`;
+
 export function TaskServiceApi() {
   return {
     listConversationTasks(conversationId: string, options?: RawAxiosRequestConfig) {
@@ -94,6 +98,65 @@ export function TaskServiceApi() {
     getTaskArtifacts(taskId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(
         `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}/artifacts`,
+        options,
+      );
+    },
+  };
+}
+
+// Plugin Info API — fetches plugin spec (including ui.tabs) from Go /api/core/plugins.
+export function PluginInfoApi() {
+  return {
+    getPlugin(pluginId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/plugins/${encodeURIComponent(pluginId)}`,
+        options,
+      );
+    },
+    listPlugins(options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(`${coreApiBaseUrl}/plugins`, options);
+    },
+  };
+}
+
+// Plugin Session API.
+export function PluginSessionApi() {
+  return {
+    getLatestSession(conversationId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/plugin-sessions:latest`,
+        options,
+      );
+    },
+    listSessions(conversationId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/plugin-sessions`,
+        options,
+      );
+    },
+    getSession(sessionId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}`,
+        options,
+      );
+    },
+    getSlots(sessionId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots`,
+        options,
+      );
+    },
+    patchSlot(sessionId: string, slotId: string, selectedRevision: number, options?: RawAxiosRequestConfig) {
+      return axiosInstance.patch(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}`,
+        { selected_revision: selectedRevision },
+        options,
+      );
+    },
+    advanceSession(sessionId: string, action: 'continue' | 'retry' = 'continue', options?: RawAxiosRequestConfig) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}:advance`,
+        { action },
         options,
       );
     },

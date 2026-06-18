@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -16,6 +17,26 @@ func (r *SQLRepository) ListBindings(ctx context.Context, sourceID string) ([]Bi
 	}
 	var rows []ormBinding
 	if err := db.Where("source_id = ?", sourceID).Order("binding_id").Find(&rows).Error; err != nil {
+		return nil, mapSQLConstraint(err)
+	}
+	bindings := make([]Binding, 0, len(rows))
+	for _, row := range rows {
+		bindings = append(bindings, bindingFromORM(row))
+	}
+	return bindings, nil
+}
+
+func (r *SQLRepository) ListBindingsBySourceIDs(ctx context.Context, sourceIDs []string) ([]Binding, error) {
+	db := r.ormDB(ctx)
+	if db == nil {
+		return nil, NewStoreError(ErrCodeInternal, "orm repository is not initialized")
+	}
+	ids := uniqueNonEmptyStoreStrings(sourceIDs)
+	if len(ids) == 0 {
+		return []Binding{}, nil
+	}
+	var rows []ormBinding
+	if err := db.Where("source_id IN ? AND status <> ?", ids, "DELETING").Order("source_id, binding_id").Find(&rows).Error; err != nil {
 		return nil, mapSQLConstraint(err)
 	}
 	bindings := make([]Binding, 0, len(rows))
@@ -280,6 +301,23 @@ func bindingUpdateValues(binding Binding) map[string]any {
 		"deleted_at":                binding.DeletedAt,
 		"updated_at":                binding.UpdatedAt,
 	}
+}
+
+func uniqueNonEmptyStoreStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		normalized := strings.TrimSpace(value)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	return out
 }
 
 func ormUpsertCheckpoint(db *gorm.DB, checkpoint SyncCheckpoint) error {

@@ -246,6 +246,13 @@ function getParseStatusMeta(status: DocumentStatusRow["parseStatus"], t: TFuncti
       icon: <SyncOutlined spin />,
     };
   }
+  if (status === "pending") {
+    return {
+      color: "default",
+      text: t("admin.dataSourceParsePending"),
+      icon: <ClockCircleFilled />,
+    };
+  }
   if (status === "duplicate") {
     return {
       color: "#f79009",
@@ -701,7 +708,6 @@ export default function DataSourceDetail() {
         );
         const documentsResponse = await client.listSourceDocuments({
           sourceId: id,
-          bindingId: getScanBindingId(binding) || routeSource?.bindingId,
           page: 1,
           pageSize: 200,
         });
@@ -1327,6 +1333,8 @@ export default function DataSourceDetail() {
                 ? "success"
                 : parseStatus === "reindexing"
                   ? "processing"
+                  : parseStatus === "pending"
+                    ? "default"
                   : parseStatus === "duplicate"
                     ? "warning"
                     : "error"

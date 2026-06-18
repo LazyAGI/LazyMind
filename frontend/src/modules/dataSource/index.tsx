@@ -34,6 +34,7 @@ import type { TFunction } from "i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   type CloudConnectionResponse,
+  type CloudOAuthAppCredentialBody,
 } from "@/api/generated/auth-client";
 import { AgentAppsAuth } from "@/components/auth";
 import { getLocalizedErrorMessage } from "@/components/request";
@@ -63,12 +64,16 @@ import {
 import {
   FEISHU_DATA_SOURCE_OAUTH_CHANNEL,
   clearFeishuDataSourceWizardDraft,
+  consumeCloudDataSourceOAuthResult,
   consumeFeishuDataSourceOAuthResult,
   consumeFeishuDataSourceWizardDraft,
+  enableCloudConnectionForChat,
   finishFeishuDataSourceOAuth,
+  requestCloudDataSourceAuthorizeUrl,
   openCenteredPopup,
   requestFeishuDataSourceAuthorizeUrl,
   saveFeishuDataSourceWizardDraft,
+  type CloudDataSourceProvider,
   type FeishuConnectionStatus,
   type FeishuDataSourceConnection,
   type FeishuDataSourceOAuthMessage,
@@ -81,10 +86,12 @@ import {
   FEISHU_EXCLUDE_PATTERNS,
   FEISHU_INCLUDE_PATTERNS,
   FEISHU_MAX_OBJECT_SIZE_BYTES,
+  NOTION_APP_SETUP_STORAGE_KEY,
   type DataSourceItem,
   type DetailDocumentItem,
   type FeishuAppSetup,
   type FeishuTargetType,
+  type NotionTargetType,
   type FileUpdateState,
   type OAuthState,
   type PendingOAuthAttempt,
@@ -143,6 +150,7 @@ const SCHEDULE_WEEKDAY_API_MAP: Record<string, string> = {
 };
 type DataSourceView = "assets" | "connectors";
 type FeishuSetupIntent = "create" | "auth" | null;
+type CloudSetupIntent = FeishuSetupIntent;
 type DataSourceSaveMode = "create" | "createAndSync";
 type FeishuTargetTreeNode = DataNode & {
   value: string;
@@ -202,8 +210,12 @@ function resolveSourceTypeFromValues(
 ): SourceType | null {
   const localPaths = normalizeLocalPathRefs(values.path);
   const feishuTargets = normalizeFeishuTargetRefs(values.target);
+  const notionTargets = normalizeCloudTargetRefs(values.target);
   if (localPaths.length > 0 && feishuTargets.length === 0) {
     return "local";
+  }
+  if (fallbackType === "notion" && notionTargets.length > 0 && localPaths.length === 0) {
+    return "notion";
   }
   if (feishuTargets.length > 0 && localPaths.length === 0) {
     return "feishu";
@@ -223,6 +235,33 @@ function persistLocalScanChatEnabled(enabled: boolean) {
   localStorage.setItem(LOCAL_SCAN_CHAT_STORAGE_KEY, enabled ? "true" : "false");
 }
 
+function loadNotionAppSetup(): FeishuAppSetup | null {
+  try {
+    const raw = localStorage.getItem(NOTION_APP_SETUP_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as Partial<FeishuAppSetup>;
+    const appId = typeof parsed.appId === "string" ? parsed.appId.trim() : "";
+    const appSecret =
+      typeof parsed.appSecret === "string" ? parsed.appSecret.trim() : "";
+    if (!appId || !appSecret) {
+      return null;
+    }
+    return { appId, appSecret };
+  } catch {
+    return null;
+  }
+}
+
+function persistNotionAppSetup(setup: FeishuAppSetup) {
+  localStorage.setItem(NOTION_APP_SETUP_STORAGE_KEY, JSON.stringify(setup));
+}
+
+function clearNotionAppSetup() {
+  localStorage.removeItem(NOTION_APP_SETUP_STORAGE_KEY);
+}
+
 const sourceTypeOptions: Array<{
   type: SourceType;
   icon: ReactNode;
@@ -239,8 +278,15 @@ const sourceTypeOptions: Array<{
     icon: <ApiOutlined />,
     logoUrl: "https://www.google.com/s2/favicons?domain=feishu.cn&sz=96",
   },
+  {
+    type: "notion",
+    icon: <DatabaseOutlined />,
+    logoUrl: "https://www.google.com/s2/favicons?domain=notion.so&sz=96",
+  },
 ];
-const providerAuthOptions = sourceTypeOptions.filter((item) => item.type === "feishu");
+const providerAuthOptions = sourceTypeOptions.filter(
+  (item) => item.type === "feishu" || item.type === "notion",
+);
 
 const datasourceConnectors: Array<{ key: string; name: string; icon: ReactNode; logoUrl?: string }> = [
   {
@@ -324,13 +370,19 @@ function mapCloudConnectionToFeishuAccount(
     cachedAccount?.name ||
     appId;
   const status = normalizeFeishuAccountStatus(connection.status);
+  const providerOptions = connection.provider_options || {};
+  const serverChatEnabled =
+    providerOptions.chat_enabled ?? providerOptions.chatEnabled ??
+    providerMeta.chat_enabled ?? providerMeta.chatEnabled;
+  const rawChatEnabled =
+    serverChatEnabled != null ? Boolean(serverChatEnabled) : (cachedAccount?.chatEnabled ?? false);
 
   return {
     id: connection.connection_id,
     name: displayName,
     appId,
     appSecret: cachedAccount?.appSecret || "",
-    chatEnabled: cachedAccount?.chatEnabled ?? false,
+    chatEnabled: status === "connected" ? rawChatEnabled : false,
     status,
     connection: {
       provider: "feishu",
@@ -347,6 +399,62 @@ function mapCloudConnectionToFeishuAccount(
     lastAuthorizedAt: connection.last_used_at || connection.updated_at || undefined,
   };
 }
+
+function mapCloudConnectionToDataSourceConnection(
+  connection: CloudConnectionResponse,
+  provider: CloudDataSourceProvider,
+): FeishuDataSourceConnection {
+  const providerMeta = connection.provider_account_meta || {};
+  const status = normalizeFeishuAccountStatus(connection.status);
+  const accountName =
+    connection.display_name ||
+    providerMeta.name ||
+    providerMeta.display_name ||
+    providerMeta.workspace_name ||
+    providerMeta.tenant_name ||
+    providerMeta.owner_name ||
+    connection.provider_account_id ||
+    connection.connection_id;
+
+  return {
+    provider,
+    connectionId: connection.connection_id,
+    status,
+    accountName,
+    grantedScopes: splitFeishuScopes(connection.scope),
+    connectedAt: connection.last_used_at || connection.updated_at || connection.created_at,
+    tenantKey: connection.provider_tenant_key,
+    openId: connection.provider_account_id,
+    avatarUrl: providerMeta.avatar_url || providerMeta.icon_url,
+  };
+}
+
+async function listKnowledgeBaseNames(client = dataSourceDatasetsApi) {
+  const names: string[] = [];
+  let pageToken: string | undefined;
+
+  for (let pageIndex = 0; pageIndex < 20; pageIndex += 1) {
+    const response = await client.apiCoreDatasetsGet({
+      pageToken,
+      pageSize: 200,
+    });
+    names.push(
+      ...(response.data.datasets || [])
+        .filter((dataset) => !isDataSourceManagedDataset(dataset))
+        .map(getDatasetDisplayName)
+        .filter(Boolean),
+    );
+
+    const nextPageToken = response.data.next_page_token || "";
+    if (!nextPageToken || nextPageToken === pageToken) {
+      break;
+    }
+    pageToken = nextPageToken;
+  }
+
+  return names;
+}
+
 
 async function listDefaultKnowledgeBaseIds(client = dataSourceDatasetsApi) {
   const ids: string[] = [];
@@ -383,9 +491,10 @@ function sleep(ms: number) {
 async function waitForCloudSyncRun(
   client: ScanV2Client,
   sourceId: string,
-  runId?: string,
+  runIds: string[] = [],
 ) {
   const deadline = Date.now() + CLOUD_SYNC_TIMEOUT_MS;
+  const expectedRuns = Math.max(runIds.length, 1);
 
   while (Date.now() < deadline) {
     const [detailResponse, summaryResponse] = await Promise.all([
@@ -394,14 +503,23 @@ async function waitForCloudSyncRun(
     ]);
     const bindings = (detailResponse?.data.bindings || []) as ScanV2Binding[];
     const summary = summaryResponse?.data as Record<string, any> | undefined;
-    const matchedBinding = bindings.find((item) => {
+    const errorBinding = bindings.find((item) => {
       const status = `${item.status || ""}`.toUpperCase();
-      return status === "ACTIVE" || status === "ERROR";
+      return status.includes("FAILED") || status.includes("ERROR") || status.includes("CANCEL");
     });
-    const status = `${matchedBinding?.status || summary?.status || ""}`.toUpperCase();
+    const status = `${errorBinding?.status || summary?.status || ""}`.toUpperCase();
+    const summaryBindings = Array.isArray(summary?.bindings)
+      ? (summary.bindings as Record<string, any>[])
+      : [];
+    const finishedBindings = summaryBindings.filter((item) =>
+      Boolean(item.last_success_at || item.lastSuccessAt),
+    );
 
-    if (status === "ACTIVE" || summary?.total_objects !== undefined) {
-      return { run_id: runId, status: status || "SUCCEEDED" };
+    if (
+      finishedBindings.length >= expectedRuns ||
+      (expectedRuns === 1 && Boolean(summary?.last_success_at || summary?.lastSuccessAt))
+    ) {
+      return { run_ids: runIds, status: "SUCCEEDED" };
     }
 
     if (
@@ -409,7 +527,7 @@ async function waitForCloudSyncRun(
       status.includes("ERROR") ||
       status.includes("CANCEL")
     ) {
-      throw new Error(getBindingLastError(matchedBinding) || "飞书云同步失败，请检查绑定配置后重试。");
+      throw new Error(getBindingLastError(errorBinding) || "飞书云同步失败，请检查绑定配置后重试。");
     }
 
     await sleep(CLOUD_SYNC_POLL_INTERVAL_MS);
@@ -469,6 +587,17 @@ function toUiFeishuTargetType(targetType?: string): FeishuTargetType | undefined
   return normalizeFeishuTargetType(targetType);
 }
 
+function normalizeNotionTargetType(value?: string): NotionTargetType | undefined {
+  const normalized = `${value || ""}`.trim().toLowerCase();
+  if (normalized === "database" || normalized === "notion_database") {
+    return "database";
+  }
+  if (normalized === "page" || normalized === "notion_page") {
+    return "page";
+  }
+  return undefined;
+}
+
 function collectFeishuTargetTypes(
   nodes: FeishuTargetTreeNode[],
   inheritedTargetType?: FeishuTargetType,
@@ -504,13 +633,26 @@ function normalizeFeishuTargetRefs(value?: SourceFormValues["target"]) {
   return values.map((item) => `${item || ""}`.trim()).filter(Boolean);
 }
 
+function normalizeCloudTargetRefs(value?: SourceFormValues["target"]) {
+  const values = Array.isArray(value) ? value : value ? [value] : [];
+  return values
+    .flatMap((item) => `${item || ""}`.split(/\n+/))
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function normalizeLocalPathRefs(value?: SourceFormValues["path"]) {
   const values = Array.isArray(value) ? value : value ? [value] : [];
   return values.map((item) => `${item || ""}`.trim()).filter(Boolean);
 }
 
-function hasFeishuTargetTypes(targetTypes?: Record<string, FeishuTargetType>) {
-  return Boolean(targetTypes && Object.keys(targetTypes).length > 0);
+function hasFeishuTargetTypes(targetTypes?: Record<string, unknown>) {
+  if (!targetTypes) {
+    return false;
+  }
+  return Object.values(targetTypes).some((targetType) =>
+    Boolean(normalizeFeishuTargetType(`${targetType || ""}`)),
+  );
 }
 
 function getFeishuBindingTargetTypes(bindings: ScanV2Binding[]) {
@@ -528,7 +670,7 @@ function getFeishuBindingTargetTypes(bindings: ScanV2Binding[]) {
 }
 
 function normalizeFeishuTargetTypeRecord(
-  targetTypes?: Record<string, FeishuTargetType>,
+  targetTypes?: Record<string, unknown>,
 ) {
   if (!targetTypes) {
     return undefined;
@@ -538,7 +680,7 @@ function normalizeFeishuTargetTypeRecord(
   Object.entries(targetTypes).forEach(([targetRef, targetType]) => {
     const normalizedTargetRef = `${targetRef || ""}`.trim();
     const normalizedTargetType = normalizeFeishuTargetType(
-      targetType,
+      `${targetType || ""}`,
       normalizedTargetRef,
     );
     if (normalizedTargetRef && normalizedTargetType) {
@@ -794,9 +936,16 @@ export default function DataSourceManagement() {
   const [feishuAppSetup, setFeishuAppSetup] = useState<FeishuAppSetup | null>(
     () => loadFeishuAppSetup(),
   );
+  const [notionAppSetup, setNotionAppSetup] = useState<FeishuAppSetup | null>(
+    () => loadNotionAppSetup(),
+  );
+  const [notionOauthConnection, setNotionOauthConnection] =
+    useState<FeishuDataSourceConnection | null>(null);
+  const [cloudSetupProvider, setCloudSetupProvider] =
+    useState<CloudDataSourceProvider>("feishu");
   const [feishuSetupModalOpen, setFeishuSetupModalOpen] = useState(false);
   const [feishuSetupIntent, setFeishuSetupIntent] =
-    useState<FeishuSetupIntent>(null);
+    useState<CloudSetupIntent>(null);
   const [feishuSetupSubmitting, setFeishuSetupSubmitting] = useState(false);
   const [feishuSetupForm] = Form.useForm<FeishuAccountFormValues>();
   const [manualOauthModalOpen, setManualOauthModalOpen] = useState(false);
@@ -839,11 +988,17 @@ export default function DataSourceManagement() {
   const isFeishuSetupReady = Boolean(
     feishuAppSetup?.appId.trim() && feishuAppSetup?.appSecret.trim(),
   );
+  const isNotionSetupReady = Boolean(
+    notionAppSetup?.appId.trim() && notionAppSetup?.appSecret.trim(),
+  );
   const validFeishuAccounts = feishuAuthAccounts.filter(
     (account) =>
       account.status === "connected" && Boolean(account.connection?.connectionId),
   );
   const isFeishuAuthValid = validFeishuAccounts.length > 0;
+  const isNotionAuthValid =
+    notionOauthConnection?.status === "connected" &&
+    Boolean(notionOauthConnection.connectionId);
   const localSourceCount = sources.filter((item) => item.type === "local").length;
 
   const buildScanScheduleLabel = (binding?: ScanV2Binding | null) => {
@@ -1475,7 +1630,9 @@ export default function DataSourceManagement() {
     bindings: ScanV2Binding[] = binding ? [binding] : [],
   ): DataSourceItem => {
     const summary = (source.summary || {}) as Record<string, any>;
-    const isFeishuSource = inferSourceKind(source, binding) === "feishu";
+    const sourceKind = inferSourceKind(source, binding);
+    const isFeishuSource = sourceKind === "feishu";
+    const isNotionSource = sourceKind === "notion";
     const sourceId = getScanSourceId(source);
     const sourceName = getScanSourceName(source);
     const targetRef = getScanBindingTarget(binding);
@@ -1568,6 +1725,75 @@ export default function DataSourceManagement() {
         targetRefs: targetRefs.length > 0 ? targetRefs : fallback?.targetRefs,
         targetType: toUiFeishuTargetType(binding?.target_type) || fallback?.targetType,
         targetTypes,
+        authConnectionId: binding?.auth_connection_id || fallback?.authConnectionId,
+        datasetId: getScanSourceDatasetId(source),
+        bindingId: getScanBindingId(binding),
+        bindingIds: bindings.map(getScanBindingId).filter(Boolean),
+        bindingTreeKey: binding?.tree_key,
+        bindingTreeKeys: bindings.map((item) => item.tree_key).filter(Boolean),
+        configVersion: getScanSourceConfigVersion(source),
+      };
+    }
+
+    if (isNotionSource) {
+      return {
+        id: sourceId,
+        name: sourceName,
+        type: "notion",
+        knowledgeBase: sourceName,
+        description: getSourceTypeDescription("notion", t),
+        target: targetLabel,
+        syncMode: binding?.sync_mode === "scheduled" || binding?.sync_mode === "watch" ? "scheduled" : "manual",
+        scheduleLabel: buildScanScheduleLabel(binding),
+        status: sourceStatus,
+        connectionState,
+        lastSync: currentTime,
+        nextSync: buildScanNextSyncLabel(binding),
+        documentCount,
+        addCount,
+        deleteCount,
+        changeCount,
+        permissions: [t("admin.dataSourcePermissionReadOnly")],
+        conflictPolicy: "versioned",
+        enabled: Boolean(binding?.enabled ?? true),
+        scopeMode: "all",
+        selectedFiles: [],
+        fileCandidates,
+        logs: [
+          {
+            id: `scan-log-${sourceId}-${binding?.updated_at || getScanSourceUpdatedAt(source)}`,
+            time: currentTime,
+            result:
+              sourceStatus === "error"
+                ? "failed"
+                : sourceStatus === "paused"
+                  ? "warning"
+                  : "success",
+            title:
+              sourceStatus === "error"
+                ? t("admin.dataSourceStatusError")
+                : t("admin.dataSourceConnectionConnected"),
+            description:
+              getBindingLastError(binding) ||
+              (binding?.sync_mode === "scheduled" || binding?.sync_mode === "watch"
+                ? t("admin.dataSourceSyncModeScheduledDesc")
+                : t("admin.dataSourceSyncModeManualDesc")),
+          },
+        ],
+        warning: getBindingLastError(binding) || t("admin.dataSourceReadonlyPermissionHint"),
+        oauthConnection:
+          fallback?.oauthConnection && fallback.oauthConnection.connectionId === binding?.auth_connection_id
+            ? fallback.oauthConnection
+            : null,
+        agentId: getScanBindingAgentId(binding),
+        tenantId: source.tenant_id || getScanTenantId(),
+        scanManaged: true,
+        storageUsed,
+        detailDocuments,
+        rootPath: targetRef,
+        targetRef: targetRef || fallback?.targetRef,
+        targetRefs: targetRefs.length > 0 ? targetRefs : fallback?.targetRefs,
+        targetType: normalizeNotionTargetType(binding?.target_type) || fallback?.targetType,
         authConnectionId: binding?.auth_connection_id || fallback?.authConnectionId,
         datasetId: getScanSourceDatasetId(source),
         bindingId: getScanBindingId(binding),
@@ -1771,6 +1997,30 @@ export default function DataSourceManagement() {
     }
   };
 
+  const refreshNotionAuthConnection = async () => {
+    try {
+      const response =
+        await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet({
+          provider: "notion",
+          status: null,
+        });
+      const nextConnection = getCloudConnectionItems(response.data)
+        .map((item) => mapCloudConnectionToDataSourceConnection(item, "notion"))
+        .find(
+          (connection) =>
+            connection.status === "connected" && Boolean(connection.connectionId),
+        ) || null;
+      setNotionOauthConnection(nextConnection);
+      if (nextConnection && selectedType === "notion") {
+        setOauthConnection(nextConnection);
+        setOauthState("connected");
+        setConnectionVerified(true);
+      }
+    } catch (error) {
+      console.error("Failed to refresh Notion auth connection", error);
+    }
+  };
+
   const clearOauthAttempt = () => {
     if (oauthAttemptRef.current?.timerId) {
       window.clearInterval(oauthAttemptRef.current.timerId);
@@ -1836,8 +2086,19 @@ export default function DataSourceManagement() {
       setOauthConnection(payload.connection);
       setOauthState(nextOauthState);
       setConnectionVerified(nextOauthState === "connected");
+      if (payload.connection.provider === "notion") {
+        setNotionOauthConnection(payload.connection);
+        if (nextOauthState === "connected") {
+          void enableCloudConnectionForChat(payload.connection.connectionId).catch((error) => {
+            console.error("Failed to enable Notion connection for chat", error);
+          });
+        }
+      }
       if (nextOauthState === "connected") {
         setFeishuAuthAccounts((current) => {
+          if (payload.connection.provider !== "feishu") {
+            return current;
+          }
           const matchedAccount = current.find(
             (item) =>
               (attempt?.accountId && item.id === attempt.accountId) ||
@@ -1951,6 +2212,13 @@ export default function DataSourceManagement() {
       }, 0);
     }
 
+    const storedNotionResult = consumeCloudDataSourceOAuthResult("notion");
+    if (storedNotionResult) {
+      window.setTimeout(() => {
+        applyOauthResult(storedNotionResult);
+      }, 0);
+    }
+
     const handleMessage = (event: MessageEvent<FeishuDataSourceOAuthMessage>) => {
       if (event.origin !== window.location.origin) {
         return;
@@ -1972,6 +2240,7 @@ export default function DataSourceManagement() {
   useEffect(() => {
     void refreshSources(false);
     void refreshFeishuAuthAccounts();
+    void refreshNotionAuthConnection();
   }, []);
 
   useEffect(() => {
@@ -1979,6 +2248,7 @@ export default function DataSourceManagement() {
       return;
     }
     void refreshFeishuAuthAccounts();
+    void refreshNotionAuthConnection();
   }, [activeView]);
 
   useEffect(() => {
@@ -2116,8 +2386,15 @@ export default function DataSourceManagement() {
       target:
         record.type === "feishu"
           ? normalizeFeishuTargetRefs(record.targetRefs || record.targetRef || record.target)
+          : record.type === "notion"
+            ? normalizeCloudTargetRefs(record.targetRefs || record.targetRef || record.target)
           : undefined,
-      targetType: record.type === "feishu" ? record.targetType || "wiki_space" : undefined,
+      targetType:
+        record.type === "feishu"
+          ? record.targetType || "wiki_space"
+          : record.type === "notion"
+            ? record.targetType || "page"
+            : undefined,
       bucket:
         record.type === "s3"
           ? record.target.replace("s3://", "").split("/")[0]
@@ -2156,11 +2433,16 @@ export default function DataSourceManagement() {
       conflictPolicy: "versioned",
       path: [],
       target: type === "feishu" ? [] : "",
-      targetType: type === "feishu" ? "wiki_space" : undefined,
+      targetType:
+        type === "feishu"
+          ? "wiki_space"
+          : type === "notion"
+            ? "page"
+            : undefined,
     });
   };
 
-  const startFeishuOAuth = async (options?: {
+  const startCloudOAuth = async (provider: CloudDataSourceProvider, options?: {
     setup?: FeishuAppSetup;
     draftSelectedType?: SourceType | null;
     draftWizardStep?: number;
@@ -2174,14 +2456,19 @@ export default function DataSourceManagement() {
     accountId?: string;
     appId?: string;
   }) => {
-    const activeSetup = options?.setup || feishuAppSetup;
+    const activeSetup =
+      options?.setup || (provider === "feishu" ? feishuAppSetup : notionAppSetup);
     const previousState = options?.previousState ?? oauthState;
     const previousVerified = options?.previousVerified ?? connectionVerified;
     const previousConnection = options?.previousConnection ?? oauthConnection;
 
     try {
       if (!activeSetup?.appId.trim() || !activeSetup.appSecret.trim()) {
-        message.warning(t("admin.dataSourceFeishuCredentialRequired"));
+        message.warning(
+          provider === "feishu"
+            ? t("admin.dataSourceFeishuCredentialRequired")
+            : t("admin.dataSourceNotionCredentialRequired"),
+        );
         return false;
       }
 
@@ -2192,11 +2479,16 @@ export default function DataSourceManagement() {
 
       setOauthState("waiting");
       setValidatedAgentId(selectedAgent.agent_id || null);
-      const authorizeUrl = await requestFeishuDataSourceAuthorizeUrl({
+      const requestAuthorizeUrl =
+        provider === "feishu"
+          ? requestFeishuDataSourceAuthorizeUrl
+          : (input: Parameters<typeof requestCloudDataSourceAuthorizeUrl>[1]) =>
+              requestCloudDataSourceAuthorizeUrl(provider, input);
+      const authorizeUrl = await requestAuthorizeUrl({
         tenantId: selectedAgent.tenant_id || getScanTenantId(),
         appId: activeSetup.appId,
         appSecret: activeSetup.appSecret,
-        scopes: FEISHU_DEFAULT_SCOPES,
+        scopes: provider === "feishu" ? FEISHU_DEFAULT_SCOPES : [],
         returnUrl: window.location.href,
       });
 
@@ -2215,7 +2507,10 @@ export default function DataSourceManagement() {
 
       saveFeishuDataSourceWizardDraft(draft);
 
-      const popup = openCenteredPopup(authorizeUrl, t("admin.dataSourceFeishuAuthWindowTitle"));
+      const popup = openCenteredPopup(
+        authorizeUrl,
+        provider === "feishu" ? t("admin.dataSourceFeishuAuthWindowTitle") : t("admin.dataSourceNotionAuthWindowTitle"),
+      );
 
       if (options?.draftWizardOpen === false) {
         clearFeishuDataSourceWizardDraft();
@@ -2242,6 +2537,21 @@ export default function DataSourceManagement() {
             return;
           }
 
+          // Fallback: postMessage may not have been processed yet —
+          // check sessionStorage for OAuth result saved synchronously by callback page.
+          const storedResult = consumeFeishuDataSourceOAuthResult();
+          if (storedResult) {
+            applyOauthResult(storedResult);
+            return;
+          }
+          const storedCloudResult = consumeCloudDataSourceOAuthResult(
+            (options?.draftSelectedType as CloudDataSourceProvider) || "notion",
+          );
+          if (storedCloudResult) {
+            applyOauthResult(storedCloudResult);
+            return;
+          }
+
           restorePreviousOauthState(t("admin.dataSourceOauthWindowClosed"));
         }, 400);
 
@@ -2261,19 +2571,41 @@ export default function DataSourceManagement() {
     }
   };
 
-  const openFeishuSetupModal = (
-    intent: FeishuSetupIntent = null,
+  const saveCloudAppCredentials = async (
+    provider: CloudDataSourceProvider,
+    setup: FeishuAppSetup,
+  ) => {
+    const body: CloudOAuthAppCredentialBody = {
+      client_id: setup.appId,
+      client_secret: setup.appSecret,
+    };
+    await dataSourceCloudOauthApi.saveOauthAppCredentialsApiAuthserviceV1CloudProviderOauthAppCredentialsPut({
+      provider,
+      cloudOAuthAppCredentialBody: body,
+    });
+  };
+
+  const openCloudSetupModal = (
+    provider: CloudDataSourceProvider,
+    intent: CloudSetupIntent = null,
     account?: FeishuAuthAccount | null,
   ) => {
+    const activeSetup = provider === "feishu" ? feishuAppSetup : notionAppSetup;
+    setCloudSetupProvider(provider);
     setFeishuSetupIntent(intent);
     setEditingFeishuAccountId(account?.id || null);
     feishuSetupForm.setFieldsValue({
       name: account?.name || "",
-      appId: account?.appId || feishuAppSetup?.appId || "",
-      appSecret: account?.appSecret || feishuAppSetup?.appSecret || "",
+      appId: account?.appId || activeSetup?.appId || "",
+      appSecret: account?.appSecret || activeSetup?.appSecret || "",
     });
     setFeishuSetupModalOpen(true);
   };
+
+  const openFeishuSetupModal = (
+    intent: FeishuSetupIntent = null,
+    account?: FeishuAuthAccount | null,
+  ) => openCloudSetupModal("feishu", intent, account);
 
   const handleSaveFeishuSetup = async () => {
     if (feishuSetupSubmitting) {
@@ -2288,40 +2620,53 @@ export default function DataSourceManagement() {
         appSecret: values.appSecret.trim(),
       };
       const shouldStartOAuth = feishuSetupIntent === "create" || feishuSetupIntent === "auth";
-      const nextAccount = upsertFeishuAuthAccount(values, "waiting");
+      const nextAccount =
+        cloudSetupProvider === "feishu"
+          ? upsertFeishuAuthAccount(values, "waiting")
+          : null;
 
-      persistFeishuAppSetup(nextSetup);
-      setFeishuAppSetup(nextSetup);
+      await saveCloudAppCredentials(cloudSetupProvider, nextSetup);
+      if (cloudSetupProvider === "feishu") {
+        persistFeishuAppSetup(nextSetup);
+        setFeishuAppSetup(nextSetup);
+      } else {
+        persistNotionAppSetup(nextSetup);
+        setNotionAppSetup(nextSetup);
+      }
       setFeishuSetupModalOpen(false);
       const setupIntent = feishuSetupIntent;
       setFeishuSetupIntent(null);
       setEditingFeishuAccountId(null);
-      message.success(t("admin.dataSourceFeishuCredentialSaved"));
+      message.success(
+        cloudSetupProvider === "feishu"
+          ? t("admin.dataSourceFeishuCredentialSaved")
+          : t("admin.dataSourceNotionCredentialSaved"),
+      );
 
       if (shouldStartOAuth) {
         resetWizard();
         setWizardMode("create");
         setEditingId(null);
-        const feishuFormValues = {
+        const cloudFormValues = {
           syncMode: "scheduled",
           scheduleWeekdays: DEFAULT_SCHEDULE_WEEKDAYS,
           scheduleTime: DEFAULT_SCHEDULE_TIME,
           conflictPolicy: "versioned",
           path: [],
-          target: [],
-          targetType: "wiki_space",
+          target: cloudSetupProvider === "feishu" ? [] : "",
+          targetType: cloudSetupProvider === "feishu" ? "wiki_space" : "page",
         };
 
-        applySourceType("feishu");
+        applySourceType(cloudSetupProvider);
         setWizardOpen(setupIntent === "create");
         setWizardStep(1);
-        await startFeishuOAuth({
+        await startCloudOAuth(cloudSetupProvider, {
           setup: nextSetup,
-          draftSelectedType: "feishu",
+          draftSelectedType: cloudSetupProvider,
           draftWizardStep: 1,
           draftWizardMode: "create",
           draftEditingId: null,
-          draftFormValues: feishuFormValues,
+          draftFormValues: cloudFormValues,
           draftWizardOpen: setupIntent === "create",
           previousState: "pending",
           previousVerified: false,
@@ -2356,6 +2701,28 @@ export default function DataSourceManagement() {
     });
   };
 
+  const handleResetNotionSetup = () => {
+    Modal.confirm({
+      title: t("admin.dataSourceNotionCredentialResetConfirmTitle"),
+      content: t("admin.dataSourceNotionCredentialResetConfirmContent"),
+      okText: t("common.confirm"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      icon: <WarningFilled />,
+      onOk: () => {
+        clearOauthAttempt();
+        clearNotionAppSetup();
+        setNotionAppSetup(null);
+        setNotionOauthConnection(null);
+        setSelectedType((current) => (current === "notion" ? null : current));
+        setOauthState("pending");
+        setConnectionVerified(false);
+        setOauthConnection(null);
+        message.success(t("admin.dataSourceNotionCredentialReset"));
+      },
+    });
+  };
+
   const handleSelectType = (type: SourceType) => {
     if (type === "local" && !canCreateLocalSource) {
       message.error(t("admin.dataSourceAdminOnly"));
@@ -2363,6 +2730,10 @@ export default function DataSourceManagement() {
     }
     if (type === "feishu" && !isFeishuSetupReady) {
       openFeishuSetupModal("create");
+      return;
+    }
+    if (type === "notion" && !isNotionSetupReady) {
+      openCloudSetupModal("notion", "create");
       return;
     }
     applySourceType(type);
@@ -2377,8 +2748,8 @@ export default function DataSourceManagement() {
       return;
     }
     const reusableConnection =
-      type === "feishu"
-        ? options?.connection || oauthConnection
+      type === "feishu" || type === "notion"
+        ? options?.connection || (type === "notion" ? notionOauthConnection : oauthConnection)
         : null;
     resetWizard();
     setWizardMode("create");
@@ -2390,7 +2761,7 @@ export default function DataSourceManagement() {
     setWizardOpen(true);
 
     if (
-      type === "feishu" &&
+      (type === "feishu" || type === "notion") &&
       reusableConnection?.connectionId &&
       getOAuthStateFromConnection(reusableConnection) === "connected"
     ) {
@@ -2401,15 +2772,21 @@ export default function DataSourceManagement() {
   };
 
   const handleCreateProviderSelect = (type: SourceType) => {
-    if (type !== "feishu") {
+    if (type !== "feishu" && type !== "notion") {
       setCreateProviderModalOpen(false);
       openSourceCreateWizard(type);
       return;
     }
 
-    if (isFeishuAuthValid) {
+    if (type === "feishu" && isFeishuAuthValid) {
       setCreateProviderModalOpen(false);
       setAuthSelectModalOpen(true);
+      return;
+    }
+
+    if (type === "notion" && isNotionAuthValid) {
+      setCreateProviderModalOpen(false);
+      openSourceCreateWizard("notion", { connection: notionOauthConnection });
       return;
     }
 
@@ -2417,11 +2794,15 @@ export default function DataSourceManagement() {
     resetWizard();
     setWizardMode("create");
     setEditingId(null);
-    applySourceType("feishu");
+    applySourceType(type);
     setWizardStep(1);
 
-    if (!isFeishuAuthValid) {
-      openFeishuSetupModal("create");
+    if (type === "feishu" && !isFeishuAuthValid) {
+      openCloudSetupModal("feishu", "create");
+      return;
+    }
+    if (type === "notion" && !isNotionAuthValid) {
+      openCloudSetupModal("notion", "create");
       return;
     }
   };
@@ -2700,9 +3081,12 @@ export default function DataSourceManagement() {
         message.warning(t("admin.dataSourceSelectOneTypeFirst"));
         return;
       }
-      if (selectedType === "feishu" && !oauthConnection?.connectionId) {
+      if (
+        selectedType === "feishu" &&
+        !(oauthConnection?.provider === "feishu" && oauthConnection.connectionId)
+      ) {
         if (isFeishuSetupReady && feishuAppSetup && oauthState !== "waiting") {
-          void startFeishuOAuth({
+          void startCloudOAuth("feishu", {
             setup: feishuAppSetup,
             draftSelectedType: "feishu",
             draftWizardStep: 0,
@@ -2712,6 +3096,23 @@ export default function DataSourceManagement() {
           });
         }
         message.warning(t("admin.dataSourceOauthRequiredBeforeSave"));
+        return;
+      }
+      if (
+        selectedType === "notion" &&
+        !(oauthConnection?.provider === "notion" && oauthConnection.connectionId)
+      ) {
+        if (isNotionSetupReady && notionAppSetup && oauthState !== "waiting") {
+          void startCloudOAuth("notion", {
+            setup: notionAppSetup,
+            draftSelectedType: "notion",
+            draftWizardStep: 0,
+            previousState: oauthState,
+            previousVerified: connectionVerified,
+            previousConnection: oauthConnection,
+          });
+        }
+        message.warning(t("admin.dataSourceNotionAuthRequired"));
         return;
       }
       setWizardStep(1);
@@ -2829,7 +3230,11 @@ export default function DataSourceManagement() {
         : undefined;
 
     const authConnectionId =
-      oauthConnection?.connectionId || (wizardMode === "edit" ? currentFeishuSource?.authConnectionId : "");
+      oauthConnection?.provider === "feishu" && oauthConnection.connectionId
+        ? oauthConnection.connectionId
+        : wizardMode === "edit"
+          ? currentFeishuSource?.authConnectionId
+          : "";
 
     if (targetRefs.length === 0) {
       message.warning(t("admin.dataSourceFeishuSpaceRequired"));
@@ -2923,6 +3328,132 @@ export default function DataSourceManagement() {
 
       if (saveMode === "createAndSync") {
         message.info(t("admin.dataSourceDetailCloudSyncPreparing"));
+        const triggerResponse = await client.triggerSourceSync({
+          sourceId,
+          triggerSourceSyncRequest: {
+            request_id: createScanRequestId("feishu-sync"),
+            scope_type: "full",
+            scope_ref: {},
+          },
+        });
+        await waitForCloudSyncRun(client, sourceId, triggerResponse.data.run_ids || []);
+      }
+
+      setValidatedAgentId(selectedAgent?.agent_id || validatedAgentId);
+      await refreshSources(false);
+      message.success(
+        editingId ? t("admin.dataSourceConfigUpdated") : t("admin.dataSourceCreated"),
+      );
+      handleCloseWizard();
+    } catch (error) {
+      message.error(
+        getLocalizedErrorMessage(error, t("common.requestFailed")) ||
+          t("common.requestFailed"),
+      );
+    }
+  };
+
+  const handleSaveNotionSource = async (
+    values: SourceFormValues,
+    saveMode: DataSourceSaveMode,
+  ) => {
+    const sourceName = `${values.knowledgeBase || getSourceTypeTitle("notion", t)}`.trim();
+    const targetRefs = normalizeCloudTargetRefs(values.target);
+    const currentNotionSource =
+      editingId && selectedType === "notion"
+        ? sources.find((item) => item.id === editingId && item.type === "notion")
+        : undefined;
+    const authConnectionId =
+      oauthConnection?.provider === "notion" && oauthConnection.connectionId
+        ? oauthConnection.connectionId
+        : wizardMode === "edit"
+          ? currentNotionSource?.authConnectionId
+          : "";
+    const targetType =
+      normalizeNotionTargetType(`${values.targetType || ""}`) ||
+      normalizeNotionTargetType(currentNotionSource?.targetType) ||
+      "page";
+
+    if (!authConnectionId) {
+      message.warning(t("admin.dataSourceNotionAuthRequired"));
+      return;
+    }
+
+    if (targetRefs.length === 0) {
+      message.warning(t("admin.dataSourceNotionTargetRequired"));
+      return;
+    }
+
+    const client = createScanV2ApiClient();
+    const selectedAgent = pickScanAgent(
+      scanAgents,
+      validatedAgentId || currentNotionSource?.agentId,
+    );
+
+    try {
+      let sourceId = currentNotionSource?.id || "";
+      const schedulePolicy =
+        values.syncMode === "scheduled"
+          ? buildSchedulePolicy(values.scheduleWeekdays, values.scheduleTime)
+          : undefined;
+      const bindingRequest = {
+        connector_type: "notion",
+        sync_mode: values.syncMode === "scheduled" ? "scheduled" : "manual",
+        schedule_policy: schedulePolicy,
+        auth_connection_id: authConnectionId,
+        agent_id: selectedAgent?.agent_id || validatedAgentId || currentNotionSource?.agentId,
+        provider_options: {
+          reconcile_after_sync: true,
+          reconcile_delay_minutes: 10,
+        },
+      };
+
+      if (currentNotionSource?.scanManaged) {
+        await client.updateSource({
+          sourceId: currentNotionSource.id,
+          updateSourceRequest: {
+            name: sourceName,
+            config_version: currentNotionSource.configVersion || 0,
+            bindings: targetRefs.map((targetRef, index) => ({
+              ...bindingRequest,
+              target_type: targetType,
+              target_ref: targetRef,
+              binding_id:
+                currentNotionSource.bindingIds?.[index] ||
+                (index === 0 ? currentNotionSource.bindingId : undefined),
+            })) as any,
+            source_options: {
+              source_type: "notion",
+              auth_connection_id: authConnectionId,
+            },
+          },
+        });
+      } else {
+        const createSourceResponse = await client.createSource({
+          createSourceRequest: {
+            request_id: createScanRequestId("notion-source"),
+            name: sourceName,
+            bindings: targetRefs.map((targetRef) => ({
+              ...bindingRequest,
+              target_type: targetType,
+              target_ref: targetRef,
+            })) as any,
+            source_options: {
+              source_type: "notion",
+              auth_connection_id: authConnectionId,
+            },
+          },
+        });
+        sourceId = createSourceResponse.data.source.source_id || "";
+      }
+
+      if (!sourceId) {
+        message.error(t("admin.dataSourceNotionSourceCreationFailed"));
+        return;
+      }
+
+      if (saveMode === "createAndSync") {
+        message.info(t("admin.dataSourceDetailCloudSyncPreparing"));
         const latestSource = await client.getSource({ sourceId }).catch(() => null);
         const latestBinding = getFirstScanBinding(
           latestSource?.data.bindings as ScanV2Binding[] | undefined,
@@ -2930,8 +3461,8 @@ export default function DataSourceManagement() {
         const triggerResponse = await client.triggerSourceSync({
           sourceId,
           triggerSourceSyncRequest: {
-            request_id: createScanRequestId("feishu-sync"),
-            binding_id: getScanBindingId(latestBinding) || currentFeishuSource?.bindingId,
+            request_id: createScanRequestId("notion-sync"),
+            binding_id: getScanBindingId(latestBinding) || currentNotionSource?.bindingId,
             scope_type: "full",
             scope_ref: {},
           },
@@ -2986,6 +3517,10 @@ export default function DataSourceManagement() {
 
       if (effectiveSourceType === "local") {
         await handleSaveLocalSource(values, saveMode);
+        return;
+      }
+      if (effectiveSourceType === "notion") {
+        await handleSaveNotionSource(values, saveMode);
         return;
       }
       await handleSaveFeishuSource(values, saveMode);
@@ -3270,18 +3805,31 @@ export default function DataSourceManagement() {
                 </Tooltip>
               </div>
               {providerAuthOptions.map((item) => {
-                const isFeishuLocked = !isFeishuAuthValid && !isFeishuSetupReady;
-                const authStatusText = isFeishuAuthValid
+                const isFeishu = item.type === "feishu";
+                const isAuthValid = isFeishu ? isFeishuAuthValid : isNotionAuthValid;
+                const isSetupReady = isFeishu ? isFeishuSetupReady : isNotionSetupReady;
+                const isProviderLocked = !isAuthValid && !isSetupReady;
+                const authStatusText = isAuthValid
                   ? t("admin.dataSourceProviderAuthValid")
-                  : isFeishuLocked
+                  : isProviderLocked
                     ? t("admin.dataSourceProviderCredentialMissing")
                     : t("admin.dataSourceProviderAuthPending");
                 return (
                   <button
                     key={item.type}
                     type="button"
-                    className={`data-source-provider-card ${isFeishuLocked ? "locked" : ""}`}
-                    onClick={handleManageFeishuAuth}
+                    className={`data-source-provider-card ${isProviderLocked ? "locked" : ""}`}
+                    onClick={() => {
+                      if (isFeishu) {
+                        handleManageFeishuAuth();
+                        return;
+                      }
+                      if (isNotionAuthValid) {
+                        openSourceCreateWizard("notion", { connection: notionOauthConnection });
+                        return;
+                      }
+                      openCloudSetupModal("notion", "create");
+                    }}
                   >
                     <span className={`data-source-provider-logo data-source-icon-${item.type}`}>
                       {item.logoUrl ? (
@@ -3306,12 +3854,12 @@ export default function DataSourceManagement() {
                         {item.adminOnly ? (
                           <Tag color="orange">{t("admin.dataSourceAdminOnly")}</Tag>
                         ) : null}
-                        {item.type === "feishu" ? (
+                        {item.type === "feishu" || item.type === "notion" ? (
                           <Tag
                             color={
-                              isFeishuAuthValid
+                              isAuthValid
                                 ? "success"
-                                : isFeishuLocked
+                                : isProviderLocked
                                   ? "default"
                                   : "processing"
                             }
@@ -3321,15 +3869,24 @@ export default function DataSourceManagement() {
                         ) : null}
                       </span>
                       <span className="data-source-provider-desc">
-                        {isFeishuAuthValid
-                          ? t("admin.dataSourceFeishuAuthConnectedHint", {
-                              account:
-                                oauthConnection?.accountName ||
-                                t("admin.dataSourceFeishuConnectedAccountFallback"),
-                            })
-                          : isFeishuLocked
-                            ? t("admin.dataSourceFeishuLockHint")
-                            : t("admin.dataSourceFeishuAuthReadyHint")}
+                        {isAuthValid
+                          ? isFeishu
+                            ? t("admin.dataSourceFeishuAuthConnectedHint", {
+                                account:
+                                  oauthConnection?.provider === "feishu"
+                                    ? oauthConnection.accountName
+                                    : t("admin.dataSourceFeishuConnectedAccountFallback"),
+                              })
+                            : t("admin.dataSourceNotionConnected", {
+                                account: notionOauthConnection?.accountName || "Notion workspace",
+                              })
+                          : isProviderLocked
+                            ? isFeishu
+                              ? t("admin.dataSourceFeishuLockHint")
+                              : t("admin.dataSourceNotionSetupRequiredHint")
+                            : isFeishu
+                              ? t("admin.dataSourceFeishuAuthReadyHint")
+                              : t("admin.dataSourceNotionAuthPendingHint")}
                       </span>
                     </span>
                     <span className="data-source-provider-card-arrow" aria-hidden="true">
@@ -3394,16 +3951,22 @@ export default function DataSourceManagement() {
         <div className="data-source-create-provider-grid">
           {creatableSourceTypeOptions.map((item) => {
             const isFeishu = item.type === "feishu";
-            const isFeishuLocked = isFeishu && !isFeishuAuthValid;
-            const authStatusText = isFeishuAuthValid
+            const isNotion = item.type === "notion";
+            const isCloudProvider = isFeishu || isNotion;
+            const isAuthValid = isFeishu ? isFeishuAuthValid : isNotion ? isNotionAuthValid : false;
+            const isSetupReady = isFeishu ? isFeishuSetupReady : isNotion ? isNotionSetupReady : true;
+            const isProviderLocked = isCloudProvider && !isAuthValid && !isSetupReady;
+            const authStatusText = isAuthValid
               ? t("admin.dataSourceProviderAuthValid")
-              : t("admin.dataSourceProviderCredentialMissing");
+              : isSetupReady
+                ? t("admin.dataSourceProviderAuthPending")
+                : t("admin.dataSourceProviderCredentialMissing");
             return (
               <button
                 key={item.type}
                 type="button"
                 className={`data-source-create-provider-card ${
-                  isFeishuLocked ? "locked" : ""
+                  isProviderLocked ? "locked" : ""
                 }`}
                 onClick={() => handleCreateProviderSelect(item.type)}
               >
@@ -3430,15 +3993,17 @@ export default function DataSourceManagement() {
                     {item.adminOnly ? (
                       <Tag color="orange">{t("admin.dataSourceAdminOnly")}</Tag>
                     ) : null}
-                    {isFeishu ? (
-                      <Tag color={isFeishuAuthValid ? "success" : "default"}>
+                    {isCloudProvider ? (
+                      <Tag color={isAuthValid ? "success" : isSetupReady ? "processing" : "default"}>
                         {authStatusText}
                       </Tag>
                     ) : null}
                   </span>
                   <span className="data-source-provider-desc">
-                    {isFeishuLocked
-                      ? t("admin.dataSourceCreateFeishuAuthRequiredHint")
+                    {isProviderLocked
+                      ? isFeishu
+                        ? t("admin.dataSourceCreateFeishuAuthRequiredHint")
+                        : t("admin.dataSourceNotionSetupRequiredForCreate")
                       : getSourceTypeDescription(item.type, t)}
                   </span>
                 </span>
@@ -3547,7 +4112,11 @@ export default function DataSourceManagement() {
       </Modal>
 
       <Modal
-        title={t("admin.dataSourceFeishuCredentialModalTitle")}
+        title={
+          cloudSetupProvider === "feishu"
+            ? t("admin.dataSourceFeishuCredentialModalTitle")
+            : t("admin.dataSourceNotionCredentialModalTitle")
+        }
         open={feishuSetupModalOpen}
         destroyOnHidden
         onCancel={() => {
@@ -3560,7 +4129,9 @@ export default function DataSourceManagement() {
         onOk={handleSaveFeishuSetup}
         okText={
           feishuSetupIntent
-            ? t("admin.dataSourceFeishuCredentialSaveAndSelect")
+            ? cloudSetupProvider === "feishu"
+              ? t("admin.dataSourceFeishuCredentialSaveAndSelect")
+              : t("admin.dataSourceNotionCredentialSaveAndSelect")
             : t("common.save")
         }
         okButtonProps={{ loading: feishuSetupSubmitting }}
@@ -3591,8 +4162,24 @@ export default function DataSourceManagement() {
           <Alert
             showIcon
             type="info"
-            message={t("admin.dataSourceFeishuCredentialHint")}
+            message={
+              cloudSetupProvider === "feishu"
+                ? t("admin.dataSourceFeishuCredentialHint")
+                : t("admin.dataSourceNotionCredentialHint")
+            }
           />
+          {cloudSetupProvider !== "feishu" && (
+            <Paragraph style={{ marginTop: 12, marginBottom: 0 }}>
+              <a
+                href="/data-sources/docs/notion-setup?from=create-source"
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t("admin.dataSourceNotionSetupGuideAction")}
+              </a>
+              ：查看详细的 Notion OAuth 配置步骤、所需凭证和 Redirect URI 说明。
+            </Paragraph>
+          )}
         </Form>
       </Modal>
 
@@ -3618,6 +4205,7 @@ export default function DataSourceManagement() {
         form={form}
         selectedType={selectedType}
         isFeishuSetupReady={isFeishuSetupReady}
+        isNotionSetupReady={isNotionSetupReady}
         connectionVerified={connectionVerified}
         syncMode={syncMode}
         saving={wizardSaving}
@@ -3635,6 +4223,7 @@ export default function DataSourceManagement() {
         }}
         onSelectType={handleSelectType}
         onResetFeishuSetup={handleResetFeishuSetup}
+        onResetNotionSetup={handleResetNotionSetup}
         onTestConnection={() => {
           void handleTestConnection();
         }}

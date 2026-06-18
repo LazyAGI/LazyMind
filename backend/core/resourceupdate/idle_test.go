@@ -62,6 +62,18 @@ func (s *fakeIdleStore) AcquireProcessingLock(_ context.Context, key string, _ t
 	return true, nil
 }
 
+func (s *fakeIdleStore) CleanupIdleKeys(_ context.Context, ttlKey, expectedTTLValue, historyKey string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.values[ttlKey]
+	if ok && value != expectedTTLValue {
+		return false, nil
+	}
+	delete(s.values, ttlKey)
+	delete(s.history, historyKey)
+	return true, nil
+}
+
 func TestIdleRecorderSupersedesWaitingEvent(t *testing.T) {
 	db := newIdleTestDB(t)
 	store := newFakeIdleStore()
@@ -111,8 +123,8 @@ func TestIdleRecorderSupersedesWaitingEvent(t *testing.T) {
 
 func TestConversationIdleDefaultsMatchPlan2(t *testing.T) {
 	cfg := normalizeConfig(Config{})
-	if cfg.ConversationIdleSeconds != time.Hour ||
-		cfg.ConversationIdleHistoryTTL != 24*time.Hour ||
+	if cfg.ConversationIdleSeconds != 5*time.Minute ||
+		cfg.ConversationIdleHistoryTTL != 30*time.Minute ||
 		cfg.ConversationIdleHistoryMaxMessages != 100 ||
 		cfg.ConversationIdleFallbackScanInterval != 5*time.Minute ||
 		cfg.ConversationIdleFallbackBatchSize != 100 ||
@@ -187,6 +199,9 @@ func TestIdleProcessorSkipsWhenNoUserMessage(t *testing.T) {
 	if taskCount != 0 {
 		t.Fatalf("expected no tasks, got %d", taskCount)
 	}
+	if _, ok := store.history[conversationIdleHistoryKey("session-empty")]; ok {
+		t.Fatal("expected idle history to be cleaned after skipped event")
+	}
 }
 
 func TestIdleProcessorIsIdempotentForSameEvent(t *testing.T) {
@@ -215,8 +230,8 @@ func TestIdleProcessorIsIdempotentForSameEvent(t *testing.T) {
 	if err := db.Model(&orm.ResourceUpdateTask{}).Count(&taskCount).Error; err != nil {
 		t.Fatalf("count tasks: %v", err)
 	}
-	if taskCount != 2 {
-		t.Fatalf("expected exactly two tasks, got %d", taskCount)
+	if taskCount != 1 {
+		t.Fatalf("expected exactly one task, got %d", taskCount)
 	}
 	var event orm.ConversationIdleEvent
 	if err := db.First(&event, "event_id = ?", "session-idem:h1").Error; err != nil {
@@ -227,7 +242,7 @@ func TestIdleProcessorIsIdempotentForSameEvent(t *testing.T) {
 	}
 }
 
-func TestIdleFallbackCreatesMemoryAndPreferenceTasksWithoutSensitiveRequestFields(t *testing.T) {
+func TestIdleFallbackCreatesCombinedMemoryReviewTaskWithoutSensitiveRequestFields(t *testing.T) {
 	db := newIdleTestDB(t)
 	store := newFakeIdleStore()
 	ctx := context.Background()
@@ -256,13 +271,12 @@ func TestIdleFallbackCreatesMemoryAndPreferenceTasksWithoutSensitiveRequestField
 	if err := db.Order("resource_type ASC").Find(&tasks).Error; err != nil {
 		t.Fatalf("list tasks: %v", err)
 	}
-	if len(tasks) != 2 {
-		t.Fatalf("expected two tasks, got %d", len(tasks))
+	if len(tasks) != 1 {
+		t.Fatalf("expected one task, got %d", len(tasks))
 	}
-	targets := map[string]bool{}
 	for _, task := range tasks {
-		targets[task.ResourceType] = true
 		if task.TaskType != orm.ResourceUpdateTaskTypeGenerateReview ||
+			task.ResourceType != orm.ResourceUpdateResourceTypeMemory ||
 			task.TriggerType != orm.ResourceUpdateTriggerTypeConversationIdle ||
 			task.Status != orm.ResourceUpdateTaskStatusPending {
 			t.Fatalf("unexpected task: %#v", task)
@@ -275,21 +289,42 @@ func TestIdleFallbackCreatesMemoryAndPreferenceTasksWithoutSensitiveRequestField
 		if err := json.Unmarshal(task.RequestJSON, &request); err != nil {
 			t.Fatalf("unmarshal request: %v", err)
 		}
-		if request.SessionID != "session-fallback" || request.Target != task.ResourceType || len(request.History) == 0 {
+		if request.SessionID != "session-fallback" || len(request.History) == 0 {
 			t.Fatalf("unexpected request json: %#v", request)
 		}
-		if task.ResourceType == orm.ResourceUpdateResourceTypeUserPreference {
-			want := "---\nagent_persona: |-\n  当前角色\nuser_address: |-\n  当前称谓\nresponse_style: |-\n  当前风格\n---\n\ncurrent preference"
-			if request.CurrentContent != want {
-				t.Fatalf("expected formatted user_preference current_content, got %q", request.CurrentContent)
-			}
+		if request.Memory != "current memory" {
+			t.Fatalf("expected memory content in request, got %q", request.Memory)
+		}
+		wantUser := "---\nagent_persona: |-\n  当前角色\nuser_address: |-\n  当前称谓\nresponse_style: |-\n  当前风格\n---\n\ncurrent preference"
+		if request.User != wantUser {
+			t.Fatalf("expected formatted user_preference in request, got %q", request.User)
 		}
 		if strings.Contains(string(task.RequestJSON), "api_key") || strings.Contains(string(task.RequestJSON), "model_configs") || strings.Contains(string(task.RequestJSON), "llm_config") {
 			t.Fatalf("request_json contains sensitive field: %s", string(task.RequestJSON))
 		}
 	}
-	if !targets[orm.ResourceUpdateResourceTypeMemory] || !targets[orm.ResourceUpdateResourceTypeUserPreference] {
-		t.Fatalf("missing expected task targets: %#v", targets)
+	if _, ok := store.history[conversationIdleHistoryKey("session-fallback")]; ok {
+		t.Fatal("expected idle history to be cleaned after triggered event")
+	}
+}
+
+func TestIdleCleanupKeepsHistoryForNewerEvent(t *testing.T) {
+	store := newFakeIdleStore()
+	ctx := context.Background()
+	store.values[conversationIdleTTLKey("session-active")] = "session-active:h2"
+	store.history[conversationIdleHistoryKey("session-active")] = []idleHistoryMessage{
+		{Role: "user", Content: "new message"},
+	}
+
+	cleaned, err := store.CleanupIdleKeys(ctx, conversationIdleTTLKey("session-active"), "session-active:h1", conversationIdleHistoryKey("session-active"))
+	if err != nil {
+		t.Fatalf("cleanup idle keys: %v", err)
+	}
+	if cleaned {
+		t.Fatal("expected cleanup to skip keys owned by newer event")
+	}
+	if _, ok := store.history[conversationIdleHistoryKey("session-active")]; !ok {
+		t.Fatal("expected newer event history to remain")
 	}
 }
 

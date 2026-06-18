@@ -2,6 +2,7 @@ package tree
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -145,6 +146,301 @@ func TestTargetTreeFallbackSearchScopesToBindingAndTreeKey(t *testing.T) {
 	}
 }
 
+func TestTargetTreeSearchRespectsIncludeFiles(t *testing.T) {
+	t.Parallel()
+
+	spy := &treeConnectorSpy{supportsSearch: true}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	engine := NewDefaultTargetTreeEngine(registry)
+
+	withoutFiles, err := engine.Search(context.Background(), TargetTreeSearchRequest{
+		ConnectorType: treeTestConnectorType,
+		TargetType:    treeTestTargetType,
+		TargetRef:     "tree-test://root",
+		Keyword:       "welcome",
+		PageSize:      10,
+		IncludeFiles:  false,
+	})
+	if err != nil {
+		t.Fatalf("search target tree without files: %v", err)
+	}
+	if len(withoutFiles.Items) != 0 {
+		t.Fatalf("search should filter files when include_files=false, got %+v", withoutFiles.Items)
+	}
+	if len(spy.searchRequests) != 0 || len(spy.listRequests) != 1 {
+		t.Fatalf("target search should filter normal list results without connector search, searches=%d lists=%d", len(spy.searchRequests), len(spy.listRequests))
+	}
+	if spy.listRequests[0].Cursor != "" || spy.listRequests[0].PageSize != 2 {
+		t.Fatalf("search should pass normal list pagination, got %+v", spy.listRequests[0])
+	}
+
+	withFiles, err := engine.Search(context.Background(), TargetTreeSearchRequest{
+		ConnectorType: treeTestConnectorType,
+		TargetType:    treeTestTargetType,
+		TargetRef:     "tree-test://root",
+		Keyword:       "welcome",
+		PageSize:      10,
+		IncludeFiles:  true,
+	})
+	if err != nil {
+		t.Fatalf("search target tree with files: %v", err)
+	}
+	if len(withFiles.Items) != 1 || withFiles.Items[0].ObjectKey != "doc-1" {
+		t.Fatalf("search should keep files when include_files=true, got %+v", withFiles.Items)
+	}
+	if len(spy.searchRequests) != 0 || len(spy.listRequests) != 2 {
+		t.Fatalf("target search should continue using normal list results, searches=%d lists=%d", len(spy.searchRequests), len(spy.listRequests))
+	}
+}
+
+func TestLocalFSTargetSearchWithCurrentLevelBuildsRecursiveCache(t *testing.T) {
+	t.Parallel()
+
+	spy := &treeConnectorSpy{
+		connectorType:  connector.ConnectorType("local_fs"),
+		supportsSearch: true,
+		childrenByNodeRef: map[string][]connector.RawObject{
+			"/workspace/docs": {
+				rawTreeObject("/workspace/docs/guides", "", "Guides", false, true),
+				rawTreeObject("/workspace/docs/readme.md", "", "Readme.md", true, false),
+			},
+			"/workspace/docs/guides": {
+				rawTreeObject("/workspace/docs/guides/test-plan.md", "/workspace/docs/guides", "test-plan.md", true, false),
+			},
+		},
+	}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	engine := NewDefaultTargetTreeEngine(registry)
+	engine.cache.delay = time.Hour
+
+	page, err := engine.Search(context.Background(), TargetTreeSearchRequest{
+		ConnectorType: connector.ConnectorType("local_fs"),
+		TargetType:    connector.TargetType("local_path"),
+		TargetRef:     "/workspace/docs",
+		Keyword:       "test",
+		PageSize:      10,
+		IncludeFiles:  true,
+	})
+	if err != nil {
+		t.Fatalf("search local recursive cache: %v", err)
+	}
+	if page.SearchMode != SearchModeCache || page.CacheStatus != targetSearchCacheStatusComplete || !page.CacheComplete {
+		t.Fatalf("local current-level search should build and read cache, got %+v", page)
+	}
+	if len(page.Items) != 1 || page.Items[0].ObjectKey != "/workspace/docs/guides/test-plan.md" {
+		t.Fatalf("local recursive search should find nested match, got %+v", page.Items)
+	}
+	if len(spy.searchRequests) != 0 || len(spy.listRequests) != 2 {
+		t.Fatalf("local recursive search should list subtree without connector search, searches=%d lists=%d", len(spy.searchRequests), len(spy.listRequests))
+	}
+}
+
+func TestLocalFSTargetSearchWithoutCurrentLevelUsesConnectorSearch(t *testing.T) {
+	t.Parallel()
+
+	spy := &treeConnectorSpy{
+		connectorType:  connector.ConnectorType("local_fs"),
+		supportsSearch: true,
+	}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	engine := NewDefaultTargetTreeEngine(registry)
+
+	page, err := engine.Search(context.Background(), TargetTreeSearchRequest{
+		ConnectorType: connector.ConnectorType("local_fs"),
+		TargetType:    connector.TargetType("local_path"),
+		Keyword:       "welcome",
+		PageSize:      10,
+		IncludeFiles:  true,
+	})
+	if err != nil {
+		t.Fatalf("search local roots: %v", err)
+	}
+	if page.SearchMode != SearchModeConnector || len(page.Items) != 1 || page.Items[0].ObjectKey != "doc-1" {
+		t.Fatalf("local search without current level should use connector search, got %+v", page)
+	}
+	if len(spy.searchRequests) != 1 || len(spy.listRequests) != 0 {
+		t.Fatalf("local search without current level should not build recursive cache, searches=%d lists=%d", len(spy.searchRequests), len(spy.listRequests))
+	}
+}
+
+func TestTargetTreeSearchWithoutCurrentLevelUsesCache(t *testing.T) {
+	t.Parallel()
+
+	spy := &treeConnectorSpy{supportsSearch: true}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	engine := NewDefaultTargetTreeEngine(registry)
+	engine.cache.delay = 0
+
+	first, err := engine.Search(context.Background(), TargetTreeSearchRequest{
+		ConnectorType: treeTestConnectorType,
+		Keyword:       "welcome",
+		PageSize:      10,
+		IncludeFiles:  true,
+	})
+	if err != nil {
+		t.Fatalf("cached search first response: %v", err)
+	}
+	if first.SearchMode != SearchModeCache || first.CacheStatus != targetSearchCacheStatusMissing || first.CacheBuilding || len(first.Items) != 0 {
+		t.Fatalf("first cached search should only read missing cache, got %+v", first)
+	}
+	if len(spy.searchRequests) != 0 || len(spy.listRequests) != 0 {
+		t.Fatalf("cache miss search should not access connector, searches=%d lists=%d", len(spy.searchRequests), len(spy.listRequests))
+	}
+
+	if err := engine.Prewarm(context.Background(), TargetTreeSearchRequest{
+		ConnectorType: treeTestConnectorType,
+		IncludeFiles:  true,
+	}); err != nil {
+		t.Fatalf("prewarm target search cache: %v", err)
+	}
+
+	page, err := engine.Search(context.Background(), TargetTreeSearchRequest{
+		ConnectorType: treeTestConnectorType,
+		Keyword:       "welcome",
+		PageSize:      10,
+		IncludeFiles:  true,
+	})
+	if err != nil {
+		t.Fatalf("cached search: %v", err)
+	}
+	if page.CacheStatus != targetSearchCacheStatusComplete || page.CacheBuilding || !page.CacheComplete || len(page.Items) != 1 || page.Items[0].ObjectKey != "doc-1" {
+		t.Fatalf("cached search should return completed cache matches, got %+v", page)
+	}
+	if len(spy.searchRequests) != 0 || len(spy.listRequests) == 0 {
+		t.Fatalf("prewarm should build from normal list calls only, searches=%d lists=%d", len(spy.searchRequests), len(spy.listRequests))
+	}
+}
+
+func TestTargetTreeSearchCachePersistsThroughStore(t *testing.T) {
+	t.Parallel()
+
+	store := newMemoryTargetSearchCacheStore()
+	buildSpy := &treeConnectorSpy{supportsSearch: true}
+	buildRegistry, err := connector.NewDefaultConnectorRegistry(buildSpy)
+	if err != nil {
+		t.Fatalf("create build registry: %v", err)
+	}
+	buildEngine := NewDefaultTargetTreeEngine(buildRegistry, WithTargetSearchCacheStore(store))
+	buildEngine.cache.delay = 0
+	req := TargetTreeSearchRequest{
+		ConnectorType: treeTestConnectorType,
+		Keyword:       "welcome",
+		PageSize:      10,
+		IncludeFiles:  true,
+	}
+	if err := buildEngine.Prewarm(context.Background(), req); err != nil {
+		t.Fatalf("prewarm target search cache: %v", err)
+	}
+	if store.locks != 1 || store.sets != 1 {
+		t.Fatalf("prewarm should lock and persist cache once, locks=%d sets=%d", store.locks, store.sets)
+	}
+
+	readSpy := &treeConnectorSpy{supportsSearch: true}
+	readRegistry, err := connector.NewDefaultConnectorRegistry(readSpy)
+	if err != nil {
+		t.Fatalf("create read registry: %v", err)
+	}
+	readEngine := NewDefaultTargetTreeEngine(readRegistry, WithTargetSearchCacheStore(store))
+	page, err := readEngine.Search(context.Background(), req)
+	if err != nil {
+		t.Fatalf("cached search from store: %v", err)
+	}
+	if page.CacheStatus != targetSearchCacheStatusComplete || !page.CacheComplete || len(page.Items) != 1 || page.Items[0].ObjectKey != "doc-1" {
+		t.Fatalf("search should read completed cache from store, got %+v", page)
+	}
+	if len(readSpy.listRequests) != 0 || len(readSpy.searchRequests) != 0 {
+		t.Fatalf("store-backed search should not access connector, lists=%d searches=%d", len(readSpy.listRequests), len(readSpy.searchRequests))
+	}
+}
+
+func TestTargetTreeSearchCacheFailureIsReadableAndRetryable(t *testing.T) {
+	t.Parallel()
+
+	spy := &treeConnectorSpy{
+		supportsSearch: true,
+		listErr:        connector.NewError(connector.ErrorCodePermissionDenied, "permission denied"),
+	}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	engine := NewDefaultTargetTreeEngine(registry)
+	engine.cache.delay = 0
+
+	req := TargetTreeSearchRequest{
+		ConnectorType: treeTestConnectorType,
+		Keyword:       "welcome",
+		PageSize:      10,
+		IncludeFiles:  true,
+	}
+	if err := engine.Prewarm(context.Background(), req); err == nil {
+		t.Fatalf("failed prewarm should return an error")
+	}
+	page, err := engine.Search(context.Background(), req)
+	if err != nil {
+		t.Fatalf("cached search after failed prewarm: %v", err)
+	}
+	if page.CacheStatus != targetSearchCacheStatusFailed || page.CacheError == "" || page.CacheBuilding {
+		t.Fatalf("failed prewarm should leave readable failed cache state, got %+v", page)
+	}
+
+	spy.listErr = nil
+	if err := engine.Prewarm(context.Background(), req); err != nil {
+		t.Fatalf("retry prewarm target search cache: %v", err)
+	}
+	page, err = engine.Search(context.Background(), req)
+	if err != nil {
+		t.Fatalf("cached search after retry: %v", err)
+	}
+	if page.CacheStatus != targetSearchCacheStatusComplete || !page.CacheComplete || len(page.Items) != 1 {
+		t.Fatalf("retry prewarm should replace failed state with complete cache, got %+v", page)
+	}
+}
+
+func TestTargetTreeSearchCacheFailsWhenPaginationCursorDoesNotAdvance(t *testing.T) {
+	t.Parallel()
+
+	spy := &treeConnectorSpy{
+		supportsSearch: true,
+		repeatCursor:   true,
+	}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	engine := NewDefaultTargetTreeEngine(registry)
+	engine.cache.delay = 0
+
+	req := TargetTreeSearchRequest{
+		ConnectorType: treeTestConnectorType,
+		Keyword:       "welcome",
+		PageSize:      10,
+		IncludeFiles:  true,
+	}
+	if err := engine.Prewarm(context.Background(), req); err == nil {
+		t.Fatalf("prewarm should fail when pagination cursor does not advance")
+	}
+	page, err := engine.Search(context.Background(), req)
+	if err != nil {
+		t.Fatalf("cached search after pagination failure: %v", err)
+	}
+	if page.CacheStatus != targetSearchCacheStatusFailed || !strings.Contains(page.CacheError, "cursor did not advance") {
+		t.Fatalf("pagination failure should leave readable failed cache state, got %+v", page)
+	}
+}
+
 func TestTreeSearchRejectsUnsupportedListMode(t *testing.T) {
 	t.Parallel()
 
@@ -210,7 +506,7 @@ func TestTargetTreeNodeUsesBindingTargetSemantics(t *testing.T) {
 	}
 }
 
-func TestSourceTreeListChildrenUsesLiveConnectorByDefault(t *testing.T) {
+func TestSourceTreeListChildrenUsesLiveConnectorWhenUseCacheFalse(t *testing.T) {
 	t.Parallel()
 
 	spy := &treeConnectorSpy{}
@@ -241,6 +537,7 @@ func TestSourceTreeListChildrenUsesLiveConnectorByDefault(t *testing.T) {
 	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
 		SourceID:        "source-1",
 		BindingID:       "binding-1",
+		UseCache:        boolPtr(false),
 		ProviderOptions: map[string]any{"user_id": "user-1"},
 		PageSize:        10,
 	})
@@ -293,6 +590,7 @@ func TestSourceTreeLiveRootRequestUsesTreeKeyNodeRef(t *testing.T) {
 		BindingID: "binding-1",
 		TreeKey:   "feishu:wiki:space-1:node-root",
 		ParentKey: "",
+		UseCache:  boolPtr(false),
 		PageSize:  40,
 	})
 	if err != nil {
@@ -334,6 +632,7 @@ func TestSourceTreeLiveWikiSpaceNodeRefPreserved(t *testing.T) {
 		BindingID: "binding-1",
 		TreeKey:   "feishu:feishu:wiki:spaces",
 		ParentKey: "feishu:wiki:space:space-1",
+		UseCache:  boolPtr(false),
 		PageSize:  40,
 	})
 	if err != nil {
@@ -382,6 +681,7 @@ func TestSourceTreeLiveWikiRootFallsBackToBindingTargetWhenEmpty(t *testing.T) {
 		SourceID:  "source-1",
 		BindingID: "binding-1",
 		TreeKey:   "feishu:wiki:space-1:node-root",
+		UseCache:  boolPtr(false),
 		PageSize:  40,
 	})
 	if err != nil {
@@ -442,6 +742,7 @@ func TestSourceTreeLiveWikiRootPreservesBindingRootLayer(t *testing.T) {
 		SourceID:  "source-1",
 		BindingID: "binding-1",
 		TreeKey:   "feishu:wiki:space-1:node-root",
+		UseCache:  boolPtr(false),
 		PageSize:  40,
 	})
 	if err != nil {
@@ -462,6 +763,7 @@ func TestSourceTreeLiveWikiRootPreservesBindingRootLayer(t *testing.T) {
 		BindingID: "binding-1",
 		TreeKey:   "feishu:wiki:space-1:node-root",
 		ParentKey: "feishu:wiki:space-1:node-root",
+		UseCache:  boolPtr(false),
 		PageSize:  40,
 	})
 	if err != nil {
@@ -521,7 +823,7 @@ func TestSourceTreeListChildrenUsesIndexedRepoWhenUseCache(t *testing.T) {
 		SourceID:  "source-1",
 		BindingID: "binding-1",
 		TreeKey:   "tree-root",
-		UseCache:  true,
+		UseCache:  boolPtr(true),
 		ParentKey: "",
 		PageSize:  10,
 	})
@@ -541,6 +843,224 @@ func TestSourceTreeListChildrenUsesIndexedRepoWhenUseCache(t *testing.T) {
 		if node.ObjectKey == "nested-1" {
 			t.Fatalf("source tree should not recursively build child levels: %+v", page.Items)
 		}
+	}
+}
+
+func TestSourceTreeBindingRootRequestReturnsAllBindingRootsForMultiBindingSource(t *testing.T) {
+	t.Parallel()
+
+	repo := newTreeReadRepo()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{
+		{
+			BindingID:              "binding-1",
+			SourceID:               "source-1",
+			TreeKey:                "wiki-root-1",
+			CoreParentDocumentName: "test1",
+			ConnectorType:          "feishu",
+			TargetType:             "wiki_node",
+			TargetRef:              "wiki:space-1:node-1",
+			Status:                 "ACTIVE",
+		},
+		{
+			BindingID:              "binding-2",
+			SourceID:               "source-1",
+			TreeKey:                "wiki-root-2",
+			CoreParentDocumentName: "test1",
+			ConnectorType:          "feishu",
+			TargetType:             "wiki_node",
+			TargetRef:              "wiki:space-1:node-2",
+			Status:                 "ACTIVE",
+		},
+	}
+	engine := NewDBSourceTreeQueryEngine(repo, TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10, MaxAllCurrentLevelItems: 10})
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		TreeKey:   "wiki-root-1",
+		UseCache:  boolPtr(true),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("list binding roots: %v", err)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("expected both same-name binding roots, got %+v", page.Items)
+	}
+	if page.Items[0].BindingID != "binding-1" || page.Items[1].BindingID != "binding-2" {
+		t.Fatalf("unexpected binding roots: %+v", page.Items)
+	}
+	if page.Items[0].DisplayName != "test1" || page.Items[1].DisplayName != "test1" {
+		t.Fatalf("same-name roots should preserve display names: %+v", page.Items)
+	}
+}
+
+func TestSourceTreeParentKeyCanSelectSiblingBindingRoot(t *testing.T) {
+	t.Parallel()
+
+	base := newTreeReadRepo()
+	repo := &treeReadRepoWithObject{treeReadRepo: base}
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{
+		{
+			BindingID:              "binding-1",
+			SourceID:               "source-1",
+			TreeKey:                "wiki-root-1",
+			CoreParentDocumentName: "test1",
+			ConnectorType:          "feishu",
+			TargetType:             "wiki_node",
+			TargetRef:              "wiki:space-1:node-1",
+			Status:                 "ACTIVE",
+		},
+		{
+			BindingID:              "binding-2",
+			SourceID:               "source-1",
+			TreeKey:                "wiki-root-2",
+			CoreParentDocumentName: "test1",
+			ConnectorType:          "feishu",
+			TargetType:             "wiki_node",
+			TargetRef:              "wiki:space-1:node-2",
+			Status:                 "ACTIVE",
+		},
+	}
+	repo.objects = []ObjectWithState{
+		indexedObject("source-1", "binding-2", "wiki-root-2", "wiki-root-2", "", "test1", true, true),
+		indexedObject("source-1", "binding-2", "wiki-root-2", "doc-2", "wiki-root-2", "Nested.md", true, false),
+	}
+	engine := NewDBSourceTreeQueryEngine(repo, TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10, MaxAllCurrentLevelItems: 10})
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		TreeKey:   "wiki-root-1",
+		UseCache:  boolPtr(true),
+		ParentKey: "wiki-root-2",
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("list sibling binding root children: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].BindingID != "binding-2" || page.Items[0].ObjectKey != "doc-2" {
+		t.Fatalf("expected children from sibling binding root, got %+v", page.Items)
+	}
+}
+
+func TestSourceTreeCachedChildrenExposeDocumentUpdateState(t *testing.T) {
+	t.Parallel()
+
+	repo := newTreeReadRepo()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{{
+		BindingID: "binding-1",
+		SourceID:  "source-1",
+		TreeKey:   "tree-root",
+		Status:    "ACTIVE",
+	}}
+	deleted := indexedObject("source-1", "binding-1", "tree-root", "doc-1", "", "Removed.md", true, false)
+	deleted.State.SourceState = "DELETED"
+	deleted.State.PendingAction = "DELETE"
+	deleted.State.ParseQueueState = "PENDING"
+	repo.objects = []ObjectWithState{deleted}
+	engine := NewDBSourceTreeQueryEngine(repo, TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10, MaxAllCurrentLevelItems: 10})
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		TreeKey:   "tree-root",
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("list indexed children: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("expected deleted indexed document, got %+v", page.Items)
+	}
+	node := page.Items[0]
+	if node.SourceState != "DELETED" || node.PendingAction != "DELETE" || node.ParseQueueState != "PENDING" {
+		t.Fatalf("tree node did not expose document state: %+v", node)
+	}
+	if !node.HasUpdate || node.UpdateType != "deleted" || node.UpdateDesc != "源端删除待清理" {
+		t.Fatalf("tree node did not expose document update status: %+v", node)
+	}
+}
+
+func TestSourceTreeIndexedBindingRootDocumentExposesUpdateState(t *testing.T) {
+	t.Parallel()
+
+	base := newTreeReadRepo()
+	base.sources["source-1"] = store.Source{SourceID: "source-1"}
+	base.bindings["source-1"] = []store.Binding{{
+		BindingID: "binding-1",
+		SourceID:  "source-1",
+		TreeKey:   "wiki-root",
+		Status:    "ACTIVE",
+	}}
+	root := indexedObject("source-1", "binding-1", "wiki-root", "wiki-root", "", "Wiki Root", true, true)
+	root.State.SourceState = "UNCHANGED"
+	root.State.PendingAction = ""
+	base.objects = []ObjectWithState{root}
+	repo := &treeReadRepoWithObject{treeReadRepo: base}
+	engine := NewDBSourceTreeQueryEngine(repo, TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10, MaxAllCurrentLevelItems: 10})
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		UseCache:  boolPtr(true),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("list indexed binding root: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("expected binding root document, got %+v", page.Items)
+	}
+	node := page.Items[0]
+	if node.ObjectKey != "wiki-root" || !node.IsDocument || !node.IsContainer {
+		t.Fatalf("binding root should stay a dual-role wiki document: %+v", node)
+	}
+	if node.SourceState != "UNCHANGED" || node.UpdateType != "unchanged" || node.UpdateDesc != "当前文件已是最新" {
+		t.Fatalf("binding root document state was not exposed: %+v", node)
+	}
+}
+
+func TestSourceTreeIndexedBindingRootUsesVisibleChildrenForExpandState(t *testing.T) {
+	t.Parallel()
+
+	base := newTreeReadRepo()
+	base.sources["source-1"] = store.Source{SourceID: "source-1"}
+	base.bindings["source-1"] = []store.Binding{{
+		BindingID:     "binding-1",
+		SourceID:      "source-1",
+		TreeKey:       "wiki-root",
+		ConnectorType: "feishu",
+		Status:        "ACTIVE",
+	}}
+	root := indexedObject("source-1", "binding-1", "wiki-root", "wiki-root", "", "Wiki Root", true, false)
+	root.Object.HasChildren = false
+	root.State.SourceState = "UNCHANGED"
+	deletedChild := indexedObject("source-1", "binding-1", "wiki-root", "doc-deleted", "wiki-root", "Deleted.md", true, false)
+	deletedChild.State.SourceState = "DELETED"
+	deletedChild.State.PendingAction = "DELETE"
+	deletedChild.State.DocumentListVisible = true
+	base.objects = []ObjectWithState{root, deletedChild}
+	repo := &treeReadRepoWithObject{treeReadRepo: base}
+	engine := NewDBSourceTreeQueryEngine(repo, TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10, MaxAllCurrentLevelItems: 10})
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		UseCache:  boolPtr(true),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("list indexed binding root: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("expected binding root document, got %+v", page.Items)
+	}
+	if !page.Items[0].HasChildren {
+		t.Fatalf("binding root should stay expandable while it has visible deleted children: %+v", page.Items[0])
 	}
 }
 
@@ -565,7 +1085,7 @@ func TestSourceTreeBindingRequestExpandsIndexedRootObject(t *testing.T) {
 	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
 		SourceID:  "source-1",
 		BindingID: "binding-1",
-		UseCache:  true,
+		UseCache:  boolPtr(true),
 		PageSize:  10,
 	})
 	if err != nil {
@@ -606,7 +1126,7 @@ func TestSourceTreeBindingRequestFallsBackToLegacyRootLevelObjects(t *testing.T)
 	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
 		SourceID:  "source-1",
 		BindingID: "binding-1",
-		UseCache:  true,
+		UseCache:  boolPtr(true),
 		PageSize:  10,
 	})
 	if err != nil {
@@ -641,7 +1161,7 @@ func TestSourceTreeAcceptsNodeRefAndTreeNodeKeyAsParent(t *testing.T) {
 	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
 		SourceID:  "source-1",
 		BindingID: "binding-1",
-		UseCache:  true,
+		UseCache:  boolPtr(true),
 		NodeRef:   "binding-1:folder-1",
 		PageSize:  10,
 	})
@@ -671,7 +1191,7 @@ func TestSourceTreeAllCurrentLevelRejectsTooManyIndexedChildren(t *testing.T) {
 	_, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
 		SourceID:  "source-1",
 		BindingID: "binding-1",
-		UseCache:  true,
+		UseCache:  boolPtr(true),
 		ListMode:  ListModeAllCurrentLevel,
 		MaxItems:  1,
 	})
@@ -734,6 +1254,150 @@ func TestSourceDocumentQueryReadsIndexedDocumentsOnly(t *testing.T) {
 	}
 }
 
+func TestSourceDocumentQueryMarksUnparsedUpdatesPendingParse(t *testing.T) {
+	t.Parallel()
+
+	repo := newTreeReadRepo()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{{BindingID: "binding-1", SourceID: "source-1"}}
+	object := indexedObject("source-1", "binding-1", "tree-root", "doc-1", "", "Welcome", true, false).Object
+	repo.documents = []DocumentWithState{{
+		Object: object,
+		State: store.DocumentState{
+			SourceID:        "source-1",
+			BindingID:       "binding-1",
+			ObjectKey:       "doc-1",
+			SourceState:     "NEW",
+			SyncState:       "IDLE",
+			PendingAction:   "CREATE",
+			ParseQueueState: "NONE",
+			Selectable:      true,
+		},
+	}}
+	query := NewDBSourceDocumentQuery(repo, TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10})
+
+	resp, err := query.ListDocuments(context.Background(), SourceDocumentListRequest{SourceID: "source-1", BindingID: "binding-1"})
+	if err != nil {
+		t.Fatalf("list documents: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("expected one document, got %+v", resp.Items)
+	}
+	if resp.Items[0].ParseQueueState != "PENDING_PARSE" || resp.Items[0].ParseState != "PENDING_PARSE" {
+		t.Fatalf("unparsed update should be marked pending parse: %+v", resp.Items[0])
+	}
+}
+
+func TestSourceDocumentQueryKeepsActiveQueueStateForExistingDocument(t *testing.T) {
+	t.Parallel()
+
+	repo := newTreeReadRepo()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{{BindingID: "binding-1", SourceID: "source-1"}}
+	object := indexedObject("source-1", "binding-1", "tree-root", "doc-1", "", "Welcome", true, false).Object
+	repo.documents = []DocumentWithState{{
+		Object: object,
+		State: store.DocumentState{
+			SourceID:            "source-1",
+			BindingID:           "binding-1",
+			ObjectKey:           "doc-1",
+			SourceState:         "MODIFIED",
+			SyncState:           "IDLE",
+			PendingAction:       "REPARSE",
+			DocumentListVisible: true,
+			Selectable:          true,
+			ParseQueueState:     "RUNNING",
+		},
+		Document: &store.Document{
+			DocumentID:  "document-1",
+			SourceID:    "source-1",
+			BindingID:   "binding-1",
+			ObjectKey:   "doc-1",
+			ParseStatus: "SUCCEEDED",
+		},
+	}}
+	query := NewDBSourceDocumentQuery(repo, TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10})
+
+	resp, err := query.ListDocuments(context.Background(), SourceDocumentListRequest{SourceID: "source-1", BindingID: "binding-1"})
+	if err != nil {
+		t.Fatalf("list documents: %v", err)
+	}
+	if len(resp.Items) != 1 || resp.Items[0].ParseStatus != "SUCCEEDED" || resp.Items[0].ParseState != "RUNNING" {
+		t.Fatalf("active queue state should not be hidden by previous document status: %+v", resp.Items)
+	}
+}
+
+func TestSourceDocumentQueryDedupesSamePathAndPrefersActiveParse(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 17, 10, 0, 0, 0, time.UTC)
+	repo := newTreeReadRepo()
+	repo.sources["source-1"] = store.Source{SourceID: "source-1"}
+	repo.bindings["source-1"] = []store.Binding{{BindingID: "binding-1", SourceID: "source-1"}}
+	parsed := indexedObject("source-1", "binding-1", "tree-root", "doc-old", "folder-1", "CN-43", true, false).Object
+	parsed.FileExtension = ".txt"
+	pending := indexedObject("source-1", "binding-1", "tree-root", "doc-new", "folder-1", "CN-43", true, false).Object
+	pending.FileExtension = ".txt"
+	repo.documents = []DocumentWithState{
+		{
+			Object: parsed,
+			State: store.DocumentState{
+				SourceID:            "source-1",
+				BindingID:           "binding-1",
+				ObjectKey:           "doc-old",
+				SourceState:         "UNCHANGED",
+				SyncState:           "IDLE",
+				DocumentListVisible: true,
+				Selectable:          true,
+				ParseQueueState:     "NONE",
+				LastSyncedAt:        &now,
+			},
+			Document: &store.Document{
+				DocumentID:  "document-old",
+				SourceID:    "source-1",
+				BindingID:   "binding-1",
+				ObjectKey:   "doc-old",
+				DisplayName: "CN-43",
+				ParseStatus: "SUCCEEDED",
+			},
+		},
+		{
+			Object: pending,
+			State: store.DocumentState{
+				SourceID:            "source-1",
+				BindingID:           "binding-1",
+				ObjectKey:           "doc-new",
+				SourceState:         "NEW",
+				SyncState:           "IDLE",
+				PendingAction:       "CREATE",
+				DocumentListVisible: true,
+				Selectable:          true,
+				ParseQueueState:     "PENDING",
+			},
+			Document: &store.Document{
+				DocumentID:  "document-new",
+				SourceID:    "source-1",
+				BindingID:   "binding-1",
+				ObjectKey:   "doc-new",
+				DisplayName: "CN-43",
+				ParseStatus: "PENDING",
+			},
+		},
+	}
+	query := NewDBSourceDocumentQuery(repo, TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10})
+
+	resp, err := query.ListDocuments(context.Background(), SourceDocumentListRequest{SourceID: "source-1", BindingID: "binding-1"})
+	if err != nil {
+		t.Fatalf("list documents: %v", err)
+	}
+	if resp.Total != 1 || len(resp.Items) != 1 {
+		t.Fatalf("same-path documents should be collapsed, got total=%d items=%+v", resp.Total, resp.Items)
+	}
+	if resp.Items[0].ObjectKey != "doc-new" || resp.Items[0].ParseState != "PENDING" {
+		t.Fatalf("active parse row should win over stale parsed row: %+v", resp.Items[0])
+	}
+}
+
 func TestSourceDocumentQueryPassesStateParseFiltersAndPagination(t *testing.T) {
 	t.Parallel()
 
@@ -774,15 +1438,18 @@ const (
 )
 
 type treeConnectorSpy struct {
-	connectorType  connector.ConnectorType
-	supportsSearch bool
-	childrenSet    bool
-	children       []connector.RawObject
-	fetchPage      connector.RawObjectPage
-	listRequests   []connector.ListChildrenRequest
-	fetchRequests  []connector.FetchPageRequest
-	searchRequests []connector.SearchRequest
-	mapObjects     []connector.RawObject
+	connectorType     connector.ConnectorType
+	supportsSearch    bool
+	childrenSet       bool
+	children          []connector.RawObject
+	childrenByNodeRef map[string][]connector.RawObject
+	listErr           error
+	repeatCursor      bool
+	fetchPage         connector.RawObjectPage
+	listRequests      []connector.ListChildrenRequest
+	fetchRequests     []connector.FetchPageRequest
+	searchRequests    []connector.SearchRequest
+	mapObjects        []connector.RawObject
 }
 
 func (c *treeConnectorSpy) Spec() connector.ConnectorSpec {
@@ -805,8 +1472,18 @@ func (c *treeConnectorSpy) ValidateTarget(context.Context, connector.ValidateTar
 
 func (c *treeConnectorSpy) ListChildren(_ context.Context, req connector.ListChildrenRequest) (connector.RawObjectPage, error) {
 	c.listRequests = append(c.listRequests, req)
-	items := c.children
-	if !c.childrenSet && len(items) == 0 {
+	if c.listErr != nil {
+		return connector.RawObjectPage{}, c.listErr
+	}
+	if c.repeatCursor {
+		return connector.RawObjectPage{
+			Items:      []connector.RawObject{rawTreeObject("doc-1", "", "Welcome.md", true, false)},
+			HasMore:    true,
+			NextCursor: "cursor-1",
+		}, nil
+	}
+	items, hasNodeChildren := c.childrenForListRequest(req)
+	if !hasNodeChildren && !c.childrenSet && len(items) == 0 {
 		items = []connector.RawObject{
 			rawTreeObject("folder-1", "", "Guides", false, true),
 			rawTreeObject("doc-1", "", "Welcome.md", true, false),
@@ -827,6 +1504,18 @@ func (c *treeConnectorSpy) ListChildren(_ context.Context, req connector.ListChi
 		page.NextCursor = "2"
 	}
 	return page, nil
+}
+
+func (c *treeConnectorSpy) childrenForListRequest(req connector.ListChildrenRequest) ([]connector.RawObject, bool) {
+	if c.childrenByNodeRef == nil {
+		return c.children, false
+	}
+	key := strings.TrimSpace(req.NodeRef)
+	if key == "" {
+		key = strings.TrimSpace(req.TargetRef)
+	}
+	items, ok := c.childrenByNodeRef[key]
+	return items, ok
 }
 
 func (c *treeConnectorSpy) Search(_ context.Context, req connector.SearchRequest) (connector.RawObjectPage, error) {
@@ -893,6 +1582,44 @@ func (s *panicFallbackSearch) Search(context.Context, TargetTreeSearchRequest) (
 	return TreeNodePage{}, nil
 }
 
+type memoryTargetSearchCacheStore struct {
+	snapshots map[string]targetSearchCacheSnapshot
+	locks     int
+	sets      int
+	locked    bool
+}
+
+func newMemoryTargetSearchCacheStore() *memoryTargetSearchCacheStore {
+	return &memoryTargetSearchCacheStore{snapshots: map[string]targetSearchCacheSnapshot{}}
+}
+
+func (s *memoryTargetSearchCacheStore) Get(_ context.Context, key string) (targetSearchCacheSnapshot, bool, error) {
+	snapshot, ok := s.snapshots[key]
+	if ok {
+		return snapshot, true, nil
+	}
+	if s.locked {
+		return targetSearchCacheSnapshot{status: targetSearchCacheStatusBuilding, building: true}, true, nil
+	}
+	return targetSearchCacheSnapshot{}, false, nil
+}
+
+func (s *memoryTargetSearchCacheStore) Set(_ context.Context, key string, snapshot targetSearchCacheSnapshot, _ time.Duration) error {
+	s.sets++
+	s.locked = false
+	s.snapshots[key] = snapshot
+	return nil
+}
+
+func (s *memoryTargetSearchCacheStore) TryLock(context.Context, string, time.Duration) (bool, error) {
+	if s.locked {
+		return false, nil
+	}
+	s.locks++
+	s.locked = true
+	return true, nil
+}
+
 type treeReadRepo struct {
 	sources   map[string]store.Source
 	bindings  map[string][]store.Binding
@@ -915,6 +1642,28 @@ func newTreeReadRepo() *treeReadRepo {
 		sources:  map[string]store.Source{},
 		bindings: map[string][]store.Binding{},
 	}
+}
+
+type treeReadRepoWithObject struct {
+	*treeReadRepo
+}
+
+func (r *treeReadRepoWithObject) GetObject(_ context.Context, sourceID, bindingID, objectKey string) (store.SourceObject, error) {
+	for _, item := range r.objects {
+		if item.Object.SourceID == sourceID && item.Object.BindingID == bindingID && item.Object.ObjectKey == objectKey {
+			return item.Object, nil
+		}
+	}
+	return store.SourceObject{}, store.NewStoreError(store.ErrCodeNotFound, "object not found")
+}
+
+func (r *treeReadRepoWithObject) GetDocumentState(_ context.Context, sourceID, bindingID, objectKey string) (store.DocumentState, error) {
+	for _, item := range r.objects {
+		if item.Object.SourceID == sourceID && item.Object.BindingID == bindingID && item.Object.ObjectKey == objectKey && item.State != nil {
+			return *item.State, nil
+		}
+	}
+	return store.DocumentState{}, store.NewStoreError(store.ErrCodeNotFound, "document state not found")
 }
 
 func (r *treeReadRepo) GetSource(_ context.Context, sourceID string) (store.Source, error) {
@@ -1034,6 +1783,10 @@ func paginateObjects(items []ObjectWithState, pageSize int, cursor string) ([]Ob
 		nextCursor = "next"
 	}
 	return append([]ObjectWithState(nil), items[offset:end]...), nextCursor, hasMore, nil
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 func indexedObject(sourceID, bindingID, treeKey, objectKey, parentKey, displayName string, isDocument, isContainer bool) ObjectWithState {

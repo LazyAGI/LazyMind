@@ -264,17 +264,11 @@ func (w *Worker) handleMemoryGenerate(ctx context.Context, task orm.ResourceUpda
 	if userID == "" {
 		return permanentOutcome("missing_user_id", "user_id required")
 	}
-	target := strings.TrimSpace(request.Target)
-	if target == "" {
-		target = task.ResourceType
-	}
-	if target != orm.ResourceUpdateResourceTypeMemory && target != orm.ResourceUpdateResourceTypeUserPreference {
-		return permanentOutcome("invalid_target", target)
-	}
 	sessionID := strings.TrimSpace(request.SessionID)
 	if sessionID == "" {
 		return permanentOutcome("missing_session_id", "session_id required")
 	}
+	memoryContent, userContent := memoryReviewContentsFromRequest(request)
 	llmConfig, err := w.loadLLMConfig(ctx, w.db, userID)
 	if err != nil {
 		return retryableOutcome("load_llm_config_failed", err)
@@ -282,73 +276,64 @@ func (w *Worker) handleMemoryGenerate(ctx context.Context, task orm.ResourceUpda
 	resourceUpdateInfo(logEventMemoryReviewCallStart).
 		Str("task_id", task.ID).
 		Str("user_id", userID).
-		Str("resource_type", target).
+		Str("resource_type", task.ResourceType).
 		Str("resource_id", task.ResourceID).
 		Str("session_id", sessionID).
 		Msg(logEventMemoryReviewCallStart)
 	resp, status, err := w.callers.Memory(ctx, algo.MemoryReviewRequest{
-		UserID:         userID,
-		Target:         target,
-		SessionID:      sessionID,
-		History:        decodeHistory(request.History),
-		CurrentContent: request.CurrentContent,
-		LLMConfig:      llmConfig,
+		UserID:    userID,
+		History:   decodeHistory(request.History),
+		Memory:    memoryContent,
+		User:      userContent,
+		LLMConfig: llmConfig,
 	})
 	if err != nil {
 		resourceUpdateWarn(logEventMemoryReviewCallFailed, err).
 			Str("task_id", task.ID).
 			Str("user_id", userID).
-			Str("resource_type", target).
+			Str("resource_type", task.ResourceType).
 			Str("session_id", sessionID).
 			Int("http_status", status).
 			Str("reason", "request_failed").
 			Msg(logEventMemoryReviewCallFailed)
 		return retryableOutcome("memory_review_call_failed", fmt.Errorf("http_status=%d: %w", status, err))
 	}
-	if status != 200 || resp == nil || resp.Code != 0 {
+	if status != 200 || resp == nil || strings.TrimSpace(resp.Status) != "success" {
 		resourceUpdateWarn(logEventMemoryReviewCallFailed, nil).
 			Str("task_id", task.ID).
 			Str("user_id", userID).
-			Str("resource_type", target).
+			Str("resource_type", task.ResourceType).
 			Str("session_id", sessionID).
 			Int("http_status", status).
-			Int("response_code", safeMemoryCode(resp)).
+			Str("response_status", safeMemoryStatus(resp)).
 			Str("reason", "unexpected_response").
 			Msg(logEventMemoryReviewCallFailed)
-		return retryableOutcome("memory_review_unexpected_response", fmt.Errorf("http_status=%d code=%d", status, safeMemoryCode(resp)))
-	}
-	if resp.Data.UserID != userID || resp.Data.Target != target || resp.Data.SessionID != sessionID {
-		resourceUpdateWarn(logEventMemoryReviewCallFailed, nil).
-			Str("task_id", task.ID).
-			Str("user_id", userID).
-			Str("response_user_id", resp.Data.UserID).
-			Str("resource_type", target).
-			Str("response_target", resp.Data.Target).
-			Str("session_id", sessionID).
-			Str("response_session_id", resp.Data.SessionID).
-			Str("reason", "response_mismatch").
-			Msg(logEventMemoryReviewCallFailed)
-		return retryableOutcome("memory_review_response_mismatch", fmt.Errorf("user_id=%q target=%q session_id=%q", resp.Data.UserID, resp.Data.Target, resp.Data.SessionID))
-	}
-	if !resp.Data.Submitted {
-		resourceUpdateInfo(logEventMemoryReviewSkipped).
-			Str("task_id", task.ID).
-			Str("user_id", userID).
-			Str("resource_type", target).
-			Str("session_id", sessionID).
-			Int("http_status", status).
-			Msg(logEventMemoryReviewSkipped)
-		return taskOutcome{Status: orm.ResourceUpdateTaskStatusSkipped}
+		return retryableOutcome("memory_review_unexpected_response", fmt.Errorf("http_status=%d status=%q", status, safeMemoryStatus(resp)))
 	}
 	resourceUpdateInfo(logEventMemoryReviewCallDone).
 		Str("task_id", task.ID).
 		Str("user_id", userID).
-		Str("resource_type", target).
+		Str("resource_type", task.ResourceType).
 		Str("session_id", sessionID).
-		Str("result_id", strings.TrimSpace(resp.Data.ResultID)).
 		Int("http_status", status).
 		Msg(logEventMemoryReviewCallDone)
-	return taskOutcome{Status: orm.ResourceUpdateTaskStatusDone, ResultID: strings.TrimSpace(resp.Data.ResultID)}
+	return taskOutcome{Status: orm.ResourceUpdateTaskStatusDone}
+}
+
+func memoryReviewContentsFromRequest(request memoryGenerateRequestJSON) (string, string) {
+	memoryContent := request.Memory
+	userContent := request.User
+	switch strings.TrimSpace(request.Target) {
+	case orm.ResourceUpdateResourceTypeMemory:
+		if memoryContent == "" {
+			memoryContent = request.CurrentContent
+		}
+	case orm.ResourceUpdateResourceTypeUserPreference:
+		if userContent == "" {
+			userContent = request.CurrentContent
+		}
+	}
+	return memoryContent, userContent
 }
 
 func decodeHistory(raw json.RawMessage) any {
@@ -415,11 +400,11 @@ func safeSkillRequestID(resp *algo.SkillReviewResponse) string {
 	return resp.Data.RequestID
 }
 
-func safeMemoryCode(resp *algo.MemoryReviewResponse) int {
+func safeMemoryStatus(resp *algo.MemoryReviewResponse) string {
 	if resp == nil {
-		return 0
+		return ""
 	}
-	return resp.Code
+	return resp.Status
 }
 
 func skillPreflightReason(err error) string {

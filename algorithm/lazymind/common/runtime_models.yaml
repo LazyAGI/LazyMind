@@ -32,3 +32,13 @@ vlm:
   source: dynamic
   dynamic_auth: true
   type: vlm
+
+image_generator:
+  source: dynamic
+  dynamic_auth: true
+  type: text2image
+
+image_editor:
+  source: dynamic
+  dynamic_auth: true
+  type: image_editing

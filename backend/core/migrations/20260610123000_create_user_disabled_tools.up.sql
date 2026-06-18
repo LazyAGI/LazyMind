@@ -14,4 +14,3 @@ CREATE TABLE IF NOT EXISTS public.user_disabled_tools (
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_user_disabled_tools_user_tool
     ON public.user_disabled_tools USING btree (create_user_id, tool_name);
-

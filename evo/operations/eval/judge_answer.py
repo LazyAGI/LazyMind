@@ -28,10 +28,12 @@ class JudgeAnswerOperation:
         dataset_ref = ArtifactRef.parse(str(ctx.params.get('eval_dataset_ref') or ''))
         case_id = validate_case_id(str(ctx.params.get('case_id') or ''))
         raw = str(ctx.params.get('rag_answer_ref') or '').strip()
-        if not raw: raise ValueError('rag_answer_ref is required')
+        if not raw:
+            raise ValueError('rag_answer_ref is required')
         rag_ref = ArtifactRef.parse(raw) if '@v' in raw else next((i for i in ctx.input_refs if i.artifact_id == raw),
                                                                   None)
-        if rag_ref is None: raise ValueError(f'rag_answer_ref is not bound in operation inputs: {raw}')
+        if rag_ref is None:
+            raise ValueError(f'rag_answer_ref is not bound in operation inputs: {raw}')
         if graph.schema_name(dataset_ref) != 'EvalDataset' or graph.schema_name(rag_ref) != 'RagAnswer':
             raise ValueError('eval_dataset_ref must be EvalDataset and rag_answer_ref must be RagAnswer')
         policy = validate_evaluation_policy(str(ctx.params.get('evaluation_policy') or ''))
@@ -50,9 +52,11 @@ class JudgeAnswerOperation:
                      current_item=case_id)
             return OperationOutput([ArtifactDraft(output_id, 'JudgeResult', payload, ctx.operation_run_id,
                                                   input_refs=[dataset_ref, case_ref, rag_ref])])
-        if str(case.get('id') or '') != case_id: raise ValueError(f'{case_ref} payload id mismatch')
+        if str(case.get('id') or '') != case_id:
+            raise ValueError(f'{case_ref} payload id mismatch')
         for k, v in (('case_id', case_id), ('eval_dataset_ref', str(dataset_ref)), ('case_ref', str(case_ref))):
-            if str(rag.get(k) or '') != v: raise ValueError(f'RagAnswer {k} mismatch: {rag.get(k)!r} != {v!r}')
+            if str(rag.get(k) or '') != v:
+                raise ValueError(f'RagAnswer {k} mismatch: {rag.get(k)!r} != {v!r}')
         if any(not str(case.get(key) or '').strip() for key in ('question', 'answer', 'grading_guidance')):
             raise ValueError(f'{case_ref} missing question, answer or grading_guidance')
         prompt, contexts = build_judge_prompt(case, rag)
@@ -71,7 +75,8 @@ class JudgeAnswerOperation:
                                        policy_failure_type(policy, quality, *args), contexts)
                 break
             except ValueError:
-                if attempt == 3: raise
+                if attempt == 3:
+                    raise
                 progress(ctx, 'judge_answer', 'retrying', 'retrying judge JSON parse')
         progress(ctx, 'judge_answer', 'success', 'judge result generated', current_item=case_id,
                  detail={'call_id': result.record.call_id, 'quality_label': payload['quality_label']})
@@ -79,7 +84,8 @@ class JudgeAnswerOperation:
                                               input_refs=[dataset_ref, case_ref, rag_ref])])
 
     def _llm(self):
-        if self.llm is None: self.llm = evo_llm()
+        if self.llm is None:
+            self.llm = evo_llm()
         return self.llm
 
     def _result(self, ctx, policy, dataset_ref, case_ref, rag_ref, case_id, trace_id, scores, doc_recall,
@@ -103,10 +109,12 @@ class EvalAggregateOperation:
         if not case_ids or len(case_ids) != len(case_refs):
             raise ValueError('EvalDataset case_ids/case_refs length mismatch')
         raw = ctx.params.get('judge_result_ids') or {}
-        if raw and not isinstance(raw, dict): raise ValueError('judge_result_ids must be a mapping')
+        if raw and not isinstance(raw, dict):
+            raise ValueError('judge_result_ids must be a mapping')
         ids = {c: validate_id(str(raw.get(c) or f'judge_result_{c}'), 'judge_result_id') for c in case_ids}
         extra = sorted(set(raw) - set(case_ids)) if isinstance(raw, dict) else []
-        if extra: raise ValueError(f'judge_result_ids contains unknown cases: {extra}')
+        if extra:
+            raise ValueError(f'judge_result_ids contains unknown cases: {extra}')
         rows = []
         for index, (case_id, case_ref) in enumerate(zip(case_ids, case_refs), 1):
             ctx.check_interrupt()
@@ -122,15 +130,19 @@ class EvalAggregateOperation:
 
     def _row(self, ctx, dataset_ref, case_id, case_ref, judge_result_id) -> dict[str, Any]:
         judge_ref = next((ref for ref in ctx.input_refs if ref.artifact_id == judge_result_id), None)
-        if judge_ref is None: raise ValueError(f'JudgeResult is not bound in operation inputs: {judge_result_id}')
+        if judge_ref is None:
+            raise ValueError(f'JudgeResult is not bound in operation inputs: {judge_result_id}')
         for ref, schema in ((judge_ref, 'JudgeResult'), (case_ref, 'DatasetCase')):
-            if ctx.artifact_graph.schema_name(ref) != schema: raise ValueError(f'artifact is not {schema}: {ref}')
+            if ctx.artifact_graph.schema_name(ref) != schema:
+                raise ValueError(f'artifact is not {schema}: {ref}')
         judge, case = ctx.artifact_graph.get(judge_ref), ctx.artifact_graph.get(case_ref)
         for k, v in (('eval_dataset_ref', str(dataset_ref)), ('case_id', case_id), ('case_ref', str(case_ref))):
-            if str(judge.get(k) or '') != v: raise ValueError(f'JudgeResult {k} mismatch: {judge.get(k)!r} != {v!r}')
+            if str(judge.get(k) or '') != v:
+                raise ValueError(f'JudgeResult {k} mismatch: {judge.get(k)!r} != {v!r}')
         scores = {key: round(float(judge.get(key)), 4) for key in METRICS}
         bad = [key for key in METRICS if not 0 <= scores[key] <= 1]
-        if bad: raise ValueError(f'{bad[0]} out of range: {judge.get(bad[0])!r}')
+        if bad:
+            raise ValueError(f'{bad[0]} out of range: {judge.get(bad[0])!r}')
         return {'case_id': case_id, 'case_ref': case_ref, 'judge_ref': judge_ref, 'judge': judge, 'case': case,
                 **scores}
 
@@ -184,7 +196,8 @@ class EvalAggregateOperation:
                 ('low_recall', 'doc_recall or context_recall is zero',
                  row['doc_recall'] == 0 or row['context_recall'] == 0),
             ):
-                if hit: warnings.append({'code': code, 'case_id': case_id, 'message': message})
+                if hit:
+                    warnings.append({'code': code, 'case_id': case_id, 'message': message})
         return {'ready': not errors, 'errors': errors, 'warnings': warnings}
 
     def _avg(self, values) -> float:
@@ -200,7 +213,8 @@ class EvalAggregateOperation:
 def build_judge_prompt(case: dict[str, Any], rag: dict[str, Any]) -> tuple[str, list[str]]:
     contexts, remaining = [], MAX_CONTEXT
     for context in clean_contexts(rag.get('contexts'))[:MAX_CONTEXT_ITEMS]:
-        if remaining <= 0: break
+        if remaining <= 0:
+            break
         text = _clip(context, min(MAX_CONTEXT_ITEM, remaining))
         if text:
             contexts.append(text)
@@ -219,17 +233,21 @@ def _clip(value: Any, limit: int) -> str:
 def _scores(data: dict[str, Any]) -> dict[str, Any]:
     answer_correctness, faithfulness = _score(data.get('answer_correctness')), _score(data.get('faithfulness'))
     reason = str(data.get('reason') or '').strip()[:100]
-    if not reason: raise ValueError('judge response missing reason')
+    if not reason:
+        raise ValueError('judge response missing reason')
     is_correct = data.get('is_correct')
-    if is_correct is None: is_correct = answer_correctness >= 0.8 and faithfulness >= 0.8
-    if not isinstance(is_correct, bool): raise ValueError('judge response is_correct must be boolean')
+    if is_correct is None:
+        is_correct = answer_correctness >= 0.8 and faithfulness >= 0.8
+    if not isinstance(is_correct, bool):
+        raise ValueError('judge response is_correct must be boolean')
     return {'answer_correctness': answer_correctness, 'faithfulness': faithfulness, 'is_correct': is_correct,
             'reason': reason, 'defect': str(data.get('defect') or '').strip()[:80]}
 
 
 def _score(value: Any) -> float:
     score = round(float(value), 4)
-    if not 0 <= score <= 1: raise ValueError(f'score out of range: {value}')
+    if not 0 <= score <= 1:
+        raise ValueError(f'score out of range: {value}')
     return score
 
 

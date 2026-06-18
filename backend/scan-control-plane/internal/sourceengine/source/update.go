@@ -76,7 +76,6 @@ type bindingListChanges struct {
 	stopWatchers    []store.Binding
 	reloadWatchers  []store.Binding
 	oldFolderIDs    []string
-	initialSyncs    []store.Binding
 }
 
 func (e *DefaultEngine) prepareBindingList(ctx context.Context, callerID string, src store.Source, inputs []BindingInput, now time.Time) (bindingListChanges, error) {
@@ -96,7 +95,6 @@ func (e *DefaultEngine) prepareBindingList(ctx context.Context, callerID string,
 			}
 			changes.created = append(changes.created, prepared.binding.BindingID)
 			changes.createdBindings = append(changes.createdBindings, prepared)
-			changes.initialSyncs = append(changes.initialSyncs, prepared.binding)
 			if localWatcherStartable(prepared.binding) {
 				changes.startWatchers = append(changes.startWatchers, prepared.binding)
 			}
@@ -119,7 +117,6 @@ func (e *DefaultEngine) prepareBindingList(ctx context.Context, callerID string,
 		changes = appendWatcherTransition(changes, current, updated)
 		if cleanup.ClearIndexedState {
 			changes.oldFolderIDs = append(changes.oldFolderIDs, cleanup.OldCoreParentDocumentID)
-			changes.initialSyncs = append(changes.initialSyncs, updated)
 		}
 	}
 	for _, binding := range existing {
@@ -164,9 +161,7 @@ func (e *DefaultEngine) runPostCommitBindingActions(ctx context.Context, changes
 		}
 	}
 	jobErrors = append(jobErrors, e.queueLocalWatcherStarts(ctx, src, changes.startWatchers)...)
-	jobIDs, syncErrors := e.triggerInitialSyncs(ctx, changes.initialSyncs)
-	jobErrors = append(jobErrors, syncErrors...)
-	return jobIDs, jobErrors
+	return nil, jobErrors
 }
 
 func appendWatcherTransition(changes bindingListChanges, current, updated store.Binding) bindingListChanges {

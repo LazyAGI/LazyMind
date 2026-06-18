@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -12,28 +14,146 @@ from lazymind.chat.engine.agent_core import build_react_agent, drive_agent
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 
 from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, build_agent_tools
+from lazyllm.tools.tool_config_inject import inject_tool_config
 
-from .context import SubAgentContext, set_context
+from .context import SubAgentContext, set_context, LARGE_TOOL_RESULT_THRESHOLD
 from .db import SubAgentDB
 from . import tools as subagent_tools
 
 
-def _resolve_runtime_tools(explicit: Optional[List[str]]) -> List[Any]:
+def _enrich_objective_with_artifacts(objective: str, params: Dict[str, Any], db: 'SubAgentDB') -> str:
+    """Replace {{artifact_id}} placeholders in objective with artifact text/url values.
+
+    For plugin_step tasks, artifacts produced by prior succeeded steps in the same
+    plugin session are fetched from the DB and substituted into the raw objective
+    template.  Falls back to the original objective on any error.
+
+    This mirrors what Go's injectArtifacts() used to do, but runs on the Python side
+    so that Go does not need to query sub_agent_artifacts before launching the runner.
+    """
+    if '{{' not in objective:
+        return objective
+
+    session_id: str = params.get('session_id', '')
+    if not session_id:
+        return objective
+
+    try:
+        steps = db.load_plugin_session_steps(session_id)
+    except Exception:
+        return objective
+
+    succeeded_task_ids = [s['task_id'] for s in steps if s.get('status') == 'succeeded' and s.get('task_id')]
+    if not succeeded_task_ids:
+        return objective
+
+    try:
+        artifacts = db.load_artifacts_for_tasks(succeeded_task_ids)
+    except Exception:
+        return objective
+
+    result = objective
+    for a in artifacts:
+        key = a.get('artifact_key', '')
+        if not key:
+            continue
+        value = a.get('value') or {}
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except ValueError:
+                continue
+        text_val = value.get('text') or value.get('url') or ''
+        if text_val:
+            result = result.replace('{{' + key + '}}', str(text_val))
+    return result
+
+
+def _resolve_plugin_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
+    """Resolve the tool list for a plugin_step task from plugin_loader.
+
+    Returns None if the plugin or step cannot be resolved (falls back to caller default).
+    """
+    try:
+        from lazymind.chat.plugin import plugin_loader as _loader
+        plugin_id: str = params.get('plugin_id', '')
+        step_id: str = params.get('step_id', '')
+        if not plugin_id or not step_id:
+            return None
+        step_config = _loader.get_step_config(plugin_id, step_id)
+        if not step_config and not plugin_id:
+            return None
+        # If the plugin itself doesn't exist, get_step_config returns {}.
+        # Distinguish "step exists but has no tools" from "plugin not found"
+        # by checking whether the plugin is registered.
+        if _loader.get_plugin(plugin_id) is None:
+            return None
+        declared: List[str] = step_config.get('tools', [])
+        # Mirror _merge_tools from plugin_manager: prepend framework tools.
+        _FRAMEWORK_TOOLS = ['save_artifact', 'get_artifact', 'list_artifacts']
+        seen: set = set()
+        merged: List[str] = []
+        for t in _FRAMEWORK_TOOLS + list(declared):
+            if t not in seen:
+                seen.add(t)
+                merged.append(t)
+        return merged
+    except Exception as exc:
+        LOG.warning(f'[SubAgent] _resolve_plugin_step_tools failed: {exc}')
+        return None
+
+
+def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[str] = None) -> List[Any]:
     """Build the runtime tool list for a SubAgent.
 
-    If explicit tool names are provided, use only those (looked up from DEFAULT_TOOLS).
-    Otherwise fall back to all DEFAULT_TOOLS, giving the SubAgent the same tool set
-    as ChatAgent minus the subagent-management tools.
+    If explicit tool names are provided, each name is resolved in order:
+      1. Plugin script tools (loaded from the plugin's tool_scripts declarations).
+      2. DEFAULT_TOOLS registry (framework / global tools).
+    If a name is not found in either source it is silently skipped and a warning is logged.
+
+    When explicit is None/empty, fall back to all DEFAULT_TOOLS.
+
+    Note: save_artifact, get_artifact, and list_artifacts are always available regardless
+    of this list — they are injected as mandatory base tools in _build_subagent_tools.
+    Names of base tools in the explicit list are silently ignored (already present).
     """
+    _BASE_TOOL_NAMES = {'save_artifact', 'get_artifact', 'list_artifacts'}
     if explicit:
-        name_set = {str(n).strip() for n in explicit if str(n).strip()}
-        configs = [cfg for cfg in DEFAULT_TOOLS if cfg.name in name_set]
-    else:
-        configs = list(DEFAULT_TOOLS)
-    return build_agent_tools(configs)
+        name_list = [str(n).strip() for n in explicit if str(n).strip() and str(n).strip() not in _BASE_TOOL_NAMES]
+        # Build lookup from DEFAULT_TOOLS
+        default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS}
+        # Build lookup from plugin script tools
+        script_by_name: Dict[str, Any] = {}
+        if plugin_id:
+            try:
+                from lazymind.chat.plugin import plugin_loader as _loader
+                for fn_name in _loader.list_script_tool_names(plugin_id):
+                    fn = _loader.get_script_tool(plugin_id, fn_name)
+                    if fn is not None:
+                        script_by_name[fn_name] = fn
+            except Exception as exc:
+                LOG.warning('[SubAgent] failed to load script tools for plugin=%s: %s', plugin_id, exc)
+
+        result = []
+        for name in name_list:
+            if name in script_by_name:
+                result.append(script_by_name[name])
+            elif name in default_by_name:
+                resolved = build_agent_tools([default_by_name[name]])
+                result.extend(resolved)
+            else:
+                LOG.warning('[SubAgent] tool %r not found in plugin scripts or DEFAULT_TOOLS — skipped', name)
+        return result
+    return build_agent_tools(list(DEFAULT_TOOLS))
 
 
 def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
+    """Combine mandatory SubAgent infra tools with optional domain tools.
+
+    save_artifact, get_artifact, and list_artifacts are always included regardless
+    of the explicit tools list passed to the SubAgent — they are the SubAgent's
+    write/read interface and must never be stripped by plugin tool configurations.
+    """
     base = [
         subagent_tools.save_artifact,
         subagent_tools.get_artifact,
@@ -44,11 +164,21 @@ def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
     return base
 
 
+_ZH_RE = re.compile('[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]')
+
+
 def _objective_prompt(ctx: SubAgentContext) -> str:
+    # Detect language from the user_input param (primary) or the full objective text.
+    user_input = str(ctx.params.get('user_input') or '')
+    is_zh = bool(_ZH_RE.search(user_input) or _ZH_RE.search(ctx.objective))
     lines = [
         'You are an autonomous SubAgent. Complete the objective below using the available tools.',
         'You are NOT allowed to spawn or create sub-agents or delegate tasks to other agents. '
         'Only use the tools explicitly listed in your tool set.',
+    ]
+    if is_zh:
+        lines.append('You MUST respond and write all artifact content in Simplified Chinese(简体中文).')
+    lines += [
         '',
         f'Objective: {ctx.objective}',
     ]
@@ -77,6 +207,35 @@ def _objective_prompt(ctx: SubAgentContext) -> str:
     return '\n'.join(lines)
 
 
+def _truncate_tool_result(ctx: SubAgentContext, result: Any, tool_name: str) -> str:
+    """Truncate a large tool result for the LLM.
+
+    If the serialised result exceeds LARGE_TOOL_RESULT_THRESHOLD the full
+    content is written to the workspace filesystem and the LLM receives a
+    compact notice with the file path and size so it can reference the file
+    in subsequent tool calls or reasoning.
+    """
+    text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, default=str)
+    encoded = text.encode('utf-8', errors='replace')
+    if len(encoded) <= LARGE_TOOL_RESULT_THRESHOLD:
+        return text
+    try:
+        abs_path = ctx.write_large_content(text, hint=tool_name or 'tool_result')
+        rel_path = os.path.relpath(abs_path, ctx.workspace_path) if ctx.workspace_path else abs_path
+        size_kb = len(encoded) / 1024
+        return (
+            f'[Large result offloaded to file — {size_kb:.1f} KB]\n'
+            f'File path (relative to workspace): {rel_path}\n'
+            f'Use this path to reference the content in subsequent reasoning or tool calls.'
+        )
+    except Exception as exc:
+        LOG.warning('[SubAgent] failed to offload large tool result for %s: %s', tool_name, exc)
+        # Fallback: truncate with a notice.
+        limit = LARGE_TOOL_RESULT_THRESHOLD
+        truncated = text[:limit]
+        return truncated + f'\n... [truncated — original {len(encoded) // 1024} KB]'
+
+
 def _persist_step(ctx: SubAgentContext, seq: int, event: Dict[str, Any]) -> None:
     tag = event.get('tag')
     if tag == 'tool_calls':
@@ -95,10 +254,12 @@ def _persist_step(ctx: SubAgentContext, seq: int, event: Dict[str, Any]) -> None
         for tr in event.get('tool_results', []) or []:
             if not isinstance(tr, dict):
                 continue
+            raw_result = tr.get('result', tr.get('content', ''))
+            tool_name = tr.get('name', '')
             results.append({
                 'tool_call_id': tr.get('id', ''),
-                'name': tr.get('name', ''),
-                'result': tr.get('result', tr.get('content', '')),
+                'name': tool_name,
+                'result': _truncate_tool_result(ctx, raw_result, tool_name),
             })
         ctx.db.append_step(ctx.task_id, seq, 'tool', {'tool_results': results})
 
@@ -108,6 +269,7 @@ async def run_subagent_stream(
     db_dsn: str,
     resume: bool = False,
     model_config: Optional[Dict[str, Any]] = None,
+    tool_config: Optional[Dict[str, Any]] = None,
     agent_type: Optional[str] = None,
     tools: Optional[List[str]] = None,
 ):
@@ -153,16 +315,28 @@ async def run_subagent_stream(
         )
         ctx.ensure_workspace()
 
+        # For plugin_step tasks: enrich objective by replacing {{artifact_id}} placeholders
+        # with values from prior succeeded steps in the same session. This was previously
+        # done on the Go side (injectArtifacts), but Python owns this data retrieval.
+        effective_agent_type = str(task.get('agent_type') or agent_type or '')
+        if effective_agent_type == 'plugin_step':
+            ctx.objective = _enrich_objective_with_artifacts(ctx.objective, params, db)
+            # Also resolve tools from plugin_loader when no explicit list was provided.
+            # Go no longer forwards the tools list for plugin_step tasks.
+            if not tools:
+                tools = _resolve_plugin_step_tools(params)
+
         sid = task_id
         lazyllm.globals._init_sid(sid=sid)
         lazyllm.locals._init_sid(sid=sid)
         inject_model_config(model_config)
+        inject_tool_config(tool_config)
         set_context(ctx)
 
         yield _sse({'type': 'task_start', 'task_id': task_id})
 
         llm = AutoModel(model='llm')
-        runtime_tools = _resolve_runtime_tools(tools)
+        runtime_tools = _resolve_runtime_tools(tools, plugin_id=params.get('plugin_id') or None)
         agent = build_react_agent(
             llm=llm,
             tools=_build_subagent_tools(runtime_tools),

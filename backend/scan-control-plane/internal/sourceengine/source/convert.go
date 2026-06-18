@@ -28,21 +28,22 @@ func sourceToResponse(src store.Source) SourceResponse {
 func sourceListItemToResponse(record store.SourceListRecord) SourceListItemResponse {
 	src := sourceToResponse(record.Source)
 	return SourceListItemResponse{
-		SourceID:          src.SourceID,
-		TenantID:          src.TenantID,
-		CreatedBy:         src.CreatedBy,
-		Name:              src.Name,
-		DatasetID:         src.DatasetID,
-		Status:            src.Status,
-		SourceOptions:     src.SourceOptions,
-		IncludeExtensions: src.IncludeExtensions,
-		ExcludeExtensions: src.ExcludeExtensions,
-		ConfigVersion:     src.ConfigVersion,
-		BindingCount:      record.BindingCount,
-		Summary:           record.Summary,
-		DeletedAt:         src.DeletedAt,
-		CreatedAt:         src.CreatedAt,
-		UpdatedAt:         src.UpdatedAt,
+		SourceID:             src.SourceID,
+		TenantID:             src.TenantID,
+		CreatedBy:            src.CreatedBy,
+		Name:                 src.Name,
+		DatasetID:            src.DatasetID,
+		Status:               src.Status,
+		SourceOptions:        src.SourceOptions,
+		IncludeExtensions:    src.IncludeExtensions,
+		ExcludeExtensions:    src.ExcludeExtensions,
+		ConfigVersion:        src.ConfigVersion,
+		BindingCount:         record.BindingCount,
+		AuthConnectionStatus: nil,
+		Summary:              record.Summary,
+		DeletedAt:            src.DeletedAt,
+		CreatedAt:            src.CreatedAt,
+		UpdatedAt:            src.UpdatedAt,
 	}
 }
 

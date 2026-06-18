@@ -34,6 +34,7 @@ interface MessageListProps {
   onResendEditedUserMessage?: (index: number, value: string) => void;
   onCopyUserMessage?: (item: any) => void;
   onCiteMessage?: (text: string) => void;
+  footer?: React.ReactNode;
 }
 
 function splitCiteMessages(citeMessage?: string) {
@@ -181,6 +182,7 @@ const MessageList: React.FC<MessageListProps> = ({
   onResendEditedUserMessage,
   onCopyUserMessage,
   onCiteMessage,
+  footer,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -343,6 +345,7 @@ const MessageList: React.FC<MessageListProps> = ({
         })}
 
       {messageList.length === 0 && initialCard}
+      {footer}
     </div>
   );
 };

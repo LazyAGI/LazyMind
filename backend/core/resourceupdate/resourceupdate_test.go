@@ -432,7 +432,7 @@ func TestMemoryWorkerRetriesThenFailsAndDoesNotPersistLLMConfig(t *testing.T) {
 	}
 }
 
-func TestMemoryWorkerMarksSubmittedReviewDone(t *testing.T) {
+func TestMemoryWorkerMarksSuccessfulReviewDone(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	ctx := context.Background()
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
@@ -470,16 +470,7 @@ func TestMemoryWorkerMarksSubmittedReviewDone(t *testing.T) {
 	}
 	worker.callers.Memory = func(_ context.Context, req algo.MemoryReviewRequest) (*algo.MemoryReviewResponse, int, error) {
 		captured = req
-		return &algo.MemoryReviewResponse{
-			Code: 0,
-			Data: algo.MemoryReviewData{
-				UserID:    req.UserID,
-				Target:    req.Target,
-				SessionID: req.SessionID,
-				Submitted: true,
-				ResultID:  "review-result-1",
-			},
-		}, 200, nil
+		return &algo.MemoryReviewResponse{Status: "success"}, 200, nil
 	}
 
 	result, err := worker.RunOnce(ctx)
@@ -489,17 +480,83 @@ func TestMemoryWorkerMarksSubmittedReviewDone(t *testing.T) {
 	if result.Done != 1 {
 		t.Fatalf("expected done result, got %#v", result)
 	}
-	if captured.UserID != "user-1" || captured.Target != orm.ResourceUpdateResourceTypeUserPreference || captured.SessionID != "session-2" {
+	if captured.UserID != "user-1" || captured.User != "current preference" || captured.Memory != "" {
 		t.Fatalf("unexpected memory review request: %#v", captured)
+	}
+	if captured.History == nil || captured.LLMConfig == nil {
+		t.Fatalf("expected history and llm_config in memory review request: %#v", captured)
 	}
 	var got orm.ResourceUpdateTask
 	if err := db.First(&got, "id = ?", task.ID).Error; err != nil {
 		t.Fatalf("read done task: %v", err)
 	}
-	if got.Status != orm.ResourceUpdateTaskStatusDone || got.ResultID != "review-result-1" {
+	if got.Status != orm.ResourceUpdateTaskStatusDone || got.ResultID != "" {
 		t.Fatalf("unexpected done task: %#v", got)
 	}
 	assertRequestJSONHasNoSensitiveFields(t, got.RequestJSON)
+}
+
+func TestMemoryWorkerSendsCombinedMemoryReviewRequest(t *testing.T) {
+	db := newResourceUpdateTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	task := insertTask(t, db, orm.ResourceUpdateTask{
+		ID:           "task-memory-combined",
+		TaskType:     orm.ResourceUpdateTaskTypeGenerateReview,
+		ResourceType: orm.ResourceUpdateResourceTypeMemory,
+		UserID:       "user-1",
+		ResourceID:   "memory",
+		TriggerType:  orm.ResourceUpdateTriggerTypeConversationIdle,
+		TriggerID:    "idle-combined",
+		Status:       orm.ResourceUpdateTaskStatusPending,
+		RequestJSON: marshalJSON(t, memoryGenerateRequestJSON{
+			SessionID: "session-combined",
+			History:   json.RawMessage(`[{"role":"user","content":"hello"}]`),
+			Memory:    "current memory",
+			User:      "current preference",
+		}),
+		NextRunAt: now,
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+
+	var captured algo.MemoryReviewRequest
+	worker := NewWorker(db, Config{
+		WorkerBatchSize:  1,
+		WorkerLockTTL:    time.Minute,
+		MaxAttempts:      2,
+		RetryBackoffBase: time.Minute,
+		RetryBackoffMax:  time.Minute,
+	}, "worker-memory-combined")
+	worker.clock = func() time.Time { return now }
+	worker.loadLLMConfig = func(context.Context, *gorm.DB, string) (map[string]any, error) {
+		return map[string]any{"chat": map[string]any{"model": "demo"}}, nil
+	}
+	worker.callers.Memory = func(_ context.Context, req algo.MemoryReviewRequest) (*algo.MemoryReviewResponse, int, error) {
+		captured = req
+		return &algo.MemoryReviewResponse{Status: "success"}, 200, nil
+	}
+
+	result, err := worker.RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("worker run: %v", err)
+	}
+	if result.Done != 1 {
+		t.Fatalf("expected done result, got %#v", result)
+	}
+	if captured.UserID != "user-1" || captured.Memory != "current memory" || captured.User != "current preference" {
+		t.Fatalf("unexpected memory review request: %#v", captured)
+	}
+	if captured.History == nil || captured.LLMConfig == nil {
+		t.Fatalf("expected history and llm_config in memory review request: %#v", captured)
+	}
+	var got orm.ResourceUpdateTask
+	if err := db.First(&got, "id = ?", task.ID).Error; err != nil {
+		t.Fatalf("read done task: %v", err)
+	}
+	if got.Status != orm.ResourceUpdateTaskStatusDone {
+		t.Fatalf("unexpected done task: %#v", got)
+	}
 }
 
 func TestScannerCreatesAutoApplyTasksAndExpiresOlderSkillPatches(t *testing.T) {

@@ -59,7 +59,6 @@ import {
   FIXED_EXTRA_EVAL_STRATEGY,
   DEFAULT_EVAL_CASE_COUNT,
   AGENT_API_BASE,
-  EVO_API_BASE,
   SELF_EVOLUTION_LAST_THREAD_STORAGE_KEY,
   DEPRECATED_SELF_EVOLUTION_THREAD_HISTORY_STORAGE_KEY,
   workflowResultLabels,
@@ -1127,7 +1126,7 @@ export function SelfEvolutionPageController({
       setCollapsedArtifactSections((prev) => ({ ...prev, [artifactStepIdMap[kind]]: false }));
       setCaseArtifact({ kind, artifactId, title, loading: true });
       try {
-        const response = await axiosInstance.get(`${EVO_API_BASE}/threads/${encodeURIComponent(activeThreadId)}/artifacts/${encodeURIComponent(artifactId)}`);
+        const response = await axiosInstance.get(`${AGENT_API_BASE}/threads/${encodeURIComponent(activeThreadId)}/artifacts/${encodeURIComponent(artifactId)}`);
         setCaseArtifact({ kind, artifactId, title, loading: false, data: response.data });
       } catch (error) {
         setCaseArtifact({ kind, artifactId, title, loading: false, error: getLocalizedErrorMessage(error, `${title}加载失败，请稍后重试。`) });
@@ -1694,13 +1693,13 @@ export function SelfEvolutionPageController({
     return response;
   };
 
-  const openEvoThreadEventsResponse = async (
+  const openThreadEventsSnapshotResponse = async (
     threadId: string,
     signal: AbortSignal,
     allowRefresh = true,
     since = 0,
   ): Promise<Response> => {
-    const response = await fetch(`${EVO_API_BASE}/threads/${encodeURIComponent(threadId)}/events?since=${since}`, {
+    const response = await fetch(`${AGENT_API_BASE}/threads/${encodeURIComponent(threadId)}:events?since=${since}`, {
       method: "GET",
       headers: {
         Accept: "text/event-stream",
@@ -1711,7 +1710,7 @@ export function SelfEvolutionPageController({
 
     if (response.status === 401 && allowRefresh && !signal.aborted) {
       await AgentAppsAuth.refreshAccessToken();
-      return openEvoThreadEventsResponse(threadId, signal, false, since);
+      return openThreadEventsSnapshotResponse(threadId, signal, false, since);
     }
 
     return response;
@@ -1739,7 +1738,7 @@ export function SelfEvolutionPageController({
     };
 
     try {
-      const response = await openEvoThreadEventsResponse(threadId, controller.signal, true, 0);
+      const response = await openThreadEventsSnapshotResponse(threadId, controller.signal, true, 0);
       if (!response.ok || !response.body) {
         return;
       }
@@ -1991,7 +1990,7 @@ export function SelfEvolutionPageController({
         : undefined;
       let flowPendingCheckpoint: Record<string, unknown> | undefined;
       try {
-        const flowStatusResult = await axiosInstance.get(`${EVO_API_BASE}/threads/${encodedThreadId}/flow-status`, { signal });
+        const flowStatusResult = await axiosInstance.get(`${AGENT_API_BASE}/threads/${encodedThreadId}/flow-status`, { signal });
         const flowStatusPayload = flowStatusResult.data;
         restoredFlowStatus = isRecord(flowStatusPayload)
           ? getStringField(flowStatusPayload, ["status", "state"]) || restoredFlowStatus
@@ -2168,19 +2167,19 @@ export function SelfEvolutionPageController({
     appendSystemMessage("请先启动自进化流程，再通过 message 干预运行中的 thread。", activeSessionId);
   };
 
-  const onConfirmIntentCheckpoint = async () => {
+  const onContinueCheckpoint = async (command = "继续执行") => {
     const activeThreadId = activeSession?.threadId || routeThreadId;
     if (!activeThreadId) {
-      appendSystemMessage("请先启动自进化流程，再确认执行修改。", activeSessionId);
+      appendSystemMessage("请先启动自进化流程，再继续执行。", activeSessionId);
       return;
     }
 
     appendMessageToSession(
       activeSessionId,
       {
-        id: `user-confirm-intent-${Date.now()}`,
+        id: `user-continue-checkpoint-${Date.now()}`,
         role: "user",
-        content: "确认执行",
+        content: command,
         time: getTimeLabel(),
       },
     );
@@ -2188,27 +2187,24 @@ export function SelfEvolutionPageController({
     setIsPlanningNextStep(true);
     try {
       const response = await axiosInstance.post(
-        `${EVO_API_BASE}/threads/${encodeURIComponent(activeThreadId)}/continue`,
-        { confirm_intent: true },
+        `${AGENT_API_BASE}/threads/${encodeURIComponent(activeThreadId)}:continue`,
+        {},
       );
       const responsePayload = isRecord(response.data) ? response.data : {};
-      const intentApplied = responsePayload.intent_applied === true;
-      if (responsePayload.resumed === false && !intentApplied) {
+      if (responsePayload.resumed === false) {
         const blockReason = getStringField(responsePayload, ["block_reason", "blockReason"]);
         throw new Error(
           blockReason === "flow_busy"
-            ? "当前流程仍在处理上一条请求，请稍后再确认执行。"
-            : "确认执行未生效，请稍后重试。",
+            ? "当前流程仍在处理上一条请求，请稍后再继续执行。"
+            : "继续执行未生效，请稍后重试。",
         );
       }
       appendMessageToSession(
         activeSessionId,
         {
-          id: `assistant-confirm-intent-${Date.now()}`,
+          id: `assistant-continue-checkpoint-${Date.now()}`,
           role: "assistant",
-          content: intentApplied
-            ? "修改已应用，测试集已更新。点击「继续执行」进入评测阶段。"
-            : "已确认执行，正在应用这条修改。",
+          content: "已确认继续执行，正在推进下一阶段。",
           time: getTimeLabel(),
         },
         { dedupeLast: true },
@@ -2217,14 +2213,18 @@ export function SelfEvolutionPageController({
       subscribeThreadEvents(activeThreadId, activeSessionId);
     } catch (error) {
       appendSystemMessage(
-        getLocalizedErrorMessage(error, "确认执行失败，请稍后重试。") ||
-          "确认执行失败，请稍后重试。",
+        getLocalizedErrorMessage(error, "继续执行失败，请稍后重试。") ||
+          "继续执行失败，请稍后重试。",
         activeSessionId,
       );
     } finally {
       setIsSendingMessage(false);
       setIsPlanningNextStep(false);
     }
+  };
+
+  const onConfirmIntentCheckpoint = () => {
+    void onSend("确认执行");
   };
 
   const onStartSession = async () => {
@@ -4287,6 +4287,7 @@ export function SelfEvolutionPageController({
           onPromptChange: setPrompt,
           onSend: (command) => void onSend(command),
           onConfirmIntentCheckpoint: () => void onConfirmIntentCheckpoint(),
+          onContinueCheckpoint: (command?: string) => void onContinueCheckpoint(command),
           onOpenArtifact: openWorkflowArtifact,
           onOpenCaseArtifact: openCaseArtifact,
           onWorkbenchTabChange: handleWorkbenchTabChange,

@@ -527,6 +527,13 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
           status: tc.status || "pending",
         });
         taskStore.subscribeTask(convId, tc.task_id);
+        if (tc.agent_type === "plugin_step" && tc.plugin_session_id) {
+          import("@/modules/chat/store/pluginPanel").then(
+            ({ usePluginStore }) => {
+              usePluginStore.getState().loadActiveSession(convId);
+            }
+          );
+        }
       }
 
       const messageConversationId = result.conversation_id || "";
@@ -945,6 +952,13 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       }
 
       currentConversationIdRef.current = id;
+
+      // Load plugin session for this conversation (if any) so the toolbar icon shows.
+      if (id) {
+        import("@/modules/chat/store/pluginPanel").then(({ usePluginStore }) => {
+          usePluginStore.getState().loadActiveSession(id);
+        });
+      }
 
       streamManager.setActiveConversation(id || null);
 

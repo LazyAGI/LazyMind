@@ -21,24 +21,13 @@ type SkillReviewData struct {
 }
 
 type MemoryReviewRequest struct {
-	UserID         string         `json:"user_id"`
-	Target         string         `json:"target"`
-	SessionID      string         `json:"session_id"`
-	History        any            `json:"history,omitempty"`
-	CurrentContent string         `json:"current_content"`
-	LLMConfig      map[string]any `json:"llm_config,omitempty"`
+	UserID    string         `json:"user_id"`
+	History   any            `json:"history"`
+	Memory    string         `json:"memory"`
+	User      string         `json:"user"`
+	LLMConfig map[string]any `json:"llm_config"`
 }
 
 type MemoryReviewResponse struct {
-	Code int              `json:"code"`
-	Msg  string           `json:"msg"`
-	Data MemoryReviewData `json:"data"`
-}
-
-type MemoryReviewData struct {
-	UserID    string `json:"user_id"`
-	Target    string `json:"target"`
-	SessionID string `json:"session_id"`
-	Submitted bool   `json:"submitted"`
-	ResultID  string `json:"result_id,omitempty"`
+	Status string `json:"status"`
 }

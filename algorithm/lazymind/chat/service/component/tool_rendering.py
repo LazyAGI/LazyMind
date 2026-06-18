@@ -49,9 +49,15 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'FeishuWikiFS_exists': 'path',
     'FeishuWikiFS_read': 'path',
     'FeishuWikiFS_read_file': 'path',
+    'FeishuWikiFS_read_with_references': 'path',
+    'FeishuWikiFS_resolve_link': 'url_or_path',
+    'FeishuWikiFS_get_document_id': 'path',
+    'FeishuWikiFS_get_doc_blocks': 'path',
+    'FeishuWikiFS_update_doc_block_text': 'path/block_id',
     'FeishuWikiFS_write': 'path',
     'FeishuWikiFS_move': 'path1',
     'FeishuWikiFS_copy': 'path1',
+    'advance_step': 'step_id',
 }
 
 _REPRESENTATIVE_TOOL_RESULTS: dict[str, str] = {
@@ -84,6 +90,11 @@ _REPRESENTATIVE_TOOL_RESULTS: dict[str, str] = {
     'FeishuWikiFS_exists': 'path',
     'FeishuWikiFS_read': 'path',
     'FeishuWikiFS_read_file': 'content',
+    'FeishuWikiFS_read_with_references': 'content',
+    'FeishuWikiFS_resolve_link': 'title',
+    'FeishuWikiFS_get_document_id': 'document_id',
+    'FeishuWikiFS_get_doc_blocks': 'plain_text',
+    'FeishuWikiFS_update_doc_block_text': 'block_id',
     'FeishuWikiFS_write': 'path',
     'FeishuWikiFS_move': 'path2',
     'FeishuWikiFS_copy': 'path2',
@@ -128,9 +139,16 @@ _TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_exists': 'Checking whether {value} exists in Feishu.',
     'FeishuWikiFS_read': 'Reading Feishu document content from {value}.',
     'FeishuWikiFS_read_file': 'Reading Feishu file content from {value}.',
+    'FeishuWikiFS_read_with_references': 'Reading Feishu document content and references from {value}.',
+    'FeishuWikiFS_resolve_link': 'Fetching Feishu document metadata for {value}.',
+    'FeishuWikiFS_get_document_id': 'Resolving the Feishu document id for {value}.',
+    'FeishuWikiFS_get_doc_blocks': 'Listing editable Feishu document blocks for {value}.',
+    'FeishuWikiFS_update_doc_block_text': 'Updating Feishu document block {value}.',
     'FeishuWikiFS_write': 'Writing content to Feishu file at {value}.',
     'FeishuWikiFS_move': 'Moving Feishu file from {value} to the target path.',
     'FeishuWikiFS_copy': 'Copying Feishu file from {value} to the target path.',
+    'advance_step': 'Switching to step {value}.',
+    'regex:trigger_(.+)_plugin': 'Loading the {match} plugin now.',
 }
 _TOOL_CALL_FALLBACK_TEMPLATE = 'Calling a tool to handle the request.'
 
@@ -173,9 +191,16 @@ _ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_exists': '正在检查 {value} 是否存在于飞书中。',
     'FeishuWikiFS_read': '正在读取飞书文档 {value} 的内容。',
     'FeishuWikiFS_read_file': '正在读取飞书文件 {value} 的内容。',
+    'FeishuWikiFS_read_with_references': '正在读取飞书文档 {value} 的正文和引用。',
+    'FeishuWikiFS_resolve_link': '正在获取飞书文档 {value} 的基础信息。',
+    'FeishuWikiFS_get_document_id': '正在解析飞书文档 {value} 的 document_id。',
+    'FeishuWikiFS_get_doc_blocks': '正在列出飞书文档 {value} 的可编辑块。',
+    'FeishuWikiFS_update_doc_block_text': '正在更新飞书文档块 {value}。',
     'FeishuWikiFS_write': '正在向飞书文件 {value} 写入内容。',
     'FeishuWikiFS_move': '正在将飞书文件从 {value} 移动到目标路径。',
     'FeishuWikiFS_copy': '正在将飞书文件从 {value} 复制到目标路径。',
+    'advance_step': '正在切换到步骤 {value}...',
+    'regex:trigger_(.+)_plugin': '正在加载 {match} 插件...',
 }
 _ZH_TOOL_CALL_FALLBACK_TEMPLATE = '正在调用工具处理请求...'
 
@@ -218,9 +243,18 @@ _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_exists': 'Existence check for {value} in Feishu completed successfully.',
     'FeishuWikiFS_read': 'Feishu document content from {value} was loaded successfully.',
     'FeishuWikiFS_read_file': 'Feishu file content from {value} was loaded successfully.',
+    'FeishuWikiFS_read_with_references': (
+        'Feishu document content and references from {value} were loaded successfully.'
+    ),
+    'FeishuWikiFS_resolve_link': 'Feishu document metadata for {value} was retrieved successfully.',
+    'FeishuWikiFS_get_document_id': 'Feishu document id for {value} was resolved successfully.',
+    'FeishuWikiFS_get_doc_blocks': 'Editable Feishu document blocks for {value} were listed successfully.',
+    'FeishuWikiFS_update_doc_block_text': 'Feishu document block {value} was updated successfully.',
     'FeishuWikiFS_write': 'Content was written to Feishu file at {value} successfully.',
     'FeishuWikiFS_move': 'Feishu file was moved from {value} to the target path successfully.',
     'FeishuWikiFS_copy': 'Feishu file was copied from {value} to the target path successfully.',
+    'advance_step': 'Plugin launched.',
+    'regex:trigger_(.+)_plugin': 'Plugin launched.',
 }
 
 _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
@@ -262,9 +296,16 @@ _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_exists': '已完成对飞书中 {value} 的存在性检查。',
     'FeishuWikiFS_read': '已成功读取飞书文档 {value} 的内容。',
     'FeishuWikiFS_read_file': '已成功读取飞书文件 {value} 的内容。',
+    'FeishuWikiFS_read_with_references': '已成功读取飞书文档 {value} 的正文和引用。',
+    'FeishuWikiFS_resolve_link': '已成功获取飞书文档 {value} 的基础信息。',
+    'FeishuWikiFS_get_document_id': '已成功解析飞书文档 {value} 的 document_id。',
+    'FeishuWikiFS_get_doc_blocks': '已成功列出飞书文档 {value} 的可编辑块。',
+    'FeishuWikiFS_update_doc_block_text': '已成功更新飞书文档块 {value}。',
     'FeishuWikiFS_write': '已成功向飞书文件 {value} 写入内容。',
     'FeishuWikiFS_move': '已成功将飞书文件从 {value} 移动到目标路径。',
     'FeishuWikiFS_copy': '已成功将飞书文件从 {value} 复制到目标路径。',
+    'advance_step': '插件已启动',
+    'regex:trigger_(.+)_plugin': '插件已启动',
 }
 
 _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
@@ -306,9 +347,16 @@ _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_exists': 'Existence check for {value} in Feishu could not be completed.',
     'FeishuWikiFS_read': 'Feishu document content from {value} could not be loaded.',
     'FeishuWikiFS_read_file': 'Feishu file content from {value} could not be loaded.',
+    'FeishuWikiFS_read_with_references': 'Feishu document content and references from {value} could not be loaded.',
+    'FeishuWikiFS_resolve_link': 'Feishu document metadata for {value} could not be retrieved.',
+    'FeishuWikiFS_get_document_id': 'Feishu document id for {value} could not be resolved.',
+    'FeishuWikiFS_get_doc_blocks': 'Editable Feishu document blocks for {value} could not be listed.',
+    'FeishuWikiFS_update_doc_block_text': 'Feishu document block {value} could not be updated.',
     'FeishuWikiFS_write': 'Content could not be written to Feishu file at {value}.',
     'FeishuWikiFS_move': 'Feishu file could not be moved from {value} to the target path.',
     'FeishuWikiFS_copy': 'Feishu file could not be copied from {value} to the target path.',
+    'advance_step': 'Step {value} could not be started.',
+    'regex:trigger_(.+)_plugin': 'Failed to load the {match} plugin.',
 }
 
 _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
@@ -350,9 +398,16 @@ _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_exists': '未能完成对飞书中 {value} 的存在性检查。',
     'FeishuWikiFS_read': '未能读取飞书文档 {value} 的内容。',
     'FeishuWikiFS_read_file': '未能读取飞书文件 {value} 的内容。',
+    'FeishuWikiFS_read_with_references': '未能读取飞书文档 {value} 的正文和引用。',
+    'FeishuWikiFS_resolve_link': '未能获取飞书文档 {value} 的基础信息。',
+    'FeishuWikiFS_get_document_id': '未能解析飞书文档 {value} 的 document_id。',
+    'FeishuWikiFS_get_doc_blocks': '未能列出飞书文档 {value} 的可编辑块。',
+    'FeishuWikiFS_update_doc_block_text': '未能更新飞书文档块 {value}。',
     'FeishuWikiFS_write': '未能向飞书文件 {value} 写入内容。',
     'FeishuWikiFS_move': '未能将飞书文件从 {value} 移动到目标路径。',
     'FeishuWikiFS_copy': '未能将飞书文件从 {value} 复制到目标路径。',
+    'advance_step': '步骤 {value} 启动失败',
+    'regex:trigger_(.+)_plugin': '{match} 插件加载失败',
 }
 
 _TOOL_RESULT_APPROVAL_TEMPLATES: dict[str, str] = {
@@ -374,6 +429,150 @@ _ZH_TOOL_RESULT_APPROVAL_TEMPLATES: dict[str, str] = {
     'FeishuWikiFS_move': '移动这个飞书文件前，请先确认提示“{value}”。',
     'FeishuWikiFS_write': '写入这个飞书文件前，请先确认提示“{value}”。',
 }
+
+_NOTION_TOOL_ARGUMENTS = {
+    'NotionFS_ls': 'path',
+    'NotionFS_info': 'path',
+    'NotionFS_mkdir': 'path',
+    'NotionFS_rm': 'path',
+    'NotionFS_exists': 'path',
+    'NotionFS_read': 'path',
+    'NotionFS_read_file': 'path',
+    'NotionFS_search': 'query',
+    'NotionFS_read_with_references': 'path',
+    'NotionFS_resolve_link': 'url_or_path',
+    'NotionFS_get_document_id': 'path',
+    'NotionFS_get_doc_blocks': 'path',
+    'NotionFS_update_doc_block_text': 'path/block_id',
+    'NotionFS_write': 'path',
+    'NotionFS_move': 'path1',
+}
+_NOTION_TOOL_RESULTS = {
+    **_NOTION_TOOL_ARGUMENTS,
+    'NotionFS_read_file': 'content',
+    'NotionFS_search': 'title',
+    'NotionFS_read_with_references': 'content',
+    'NotionFS_resolve_link': 'title',
+    'NotionFS_get_document_id': 'document_id',
+    'NotionFS_get_doc_blocks': 'plain_text',
+    'NotionFS_update_doc_block_text': 'block_id',
+    'NotionFS_move': 'path2',
+}
+_REPRESENTATIVE_TOOL_ARGUMENTS.update(_NOTION_TOOL_ARGUMENTS)
+_REPRESENTATIVE_TOOL_RESULTS.update(_NOTION_TOOL_RESULTS)
+
+_TOOL_CALL_PREVIEW_TEMPLATES.update({
+    'NotionFS_ls': 'Listing Notion page contents at {value}.',
+    'NotionFS_info': 'Fetching Notion page info for {value}.',
+    'NotionFS_mkdir': 'Creating Notion page at {value}.',
+    'NotionFS_rm': 'Deleting Notion page or block at {value}.',
+    'NotionFS_exists': 'Checking whether {value} exists in Notion.',
+    'NotionFS_read': 'Reading Notion content from {value}.',
+    'NotionFS_read_file': 'Reading Notion content from {value}.',
+    'NotionFS_search': 'Searching Notion titles for {value}.',
+    'NotionFS_read_with_references': 'Reading Notion content and linked references from {value}.',
+    'NotionFS_resolve_link': 'Fetching Notion page metadata for {value}.',
+    'NotionFS_get_document_id': 'Resolving the Notion document id for {value}.',
+    'NotionFS_get_doc_blocks': 'Listing editable Notion blocks for {value}.',
+    'NotionFS_update_doc_block_text': 'Updating Notion block {value}.',
+    'NotionFS_write': 'Writing content to Notion at {value}.',
+    'NotionFS_move': 'Moving Notion content from {value} to the target path.',
+})
+_ZH_TOOL_CALL_PREVIEW_TEMPLATES.update({
+    'NotionFS_ls': '正在列出 Notion 页面 {value} 的内容。',
+    'NotionFS_info': '正在获取 Notion 页面 {value} 的信息。',
+    'NotionFS_mkdir': '正在 Notion 中创建页面 {value}。',
+    'NotionFS_rm': '正在删除 Notion 页面或块 {value}。',
+    'NotionFS_exists': '正在检查 {value} 是否存在于 Notion 中。',
+    'NotionFS_read': '正在读取 Notion 页面 {value} 的内容。',
+    'NotionFS_read_file': '正在读取 Notion 页面 {value} 的内容。',
+    'NotionFS_search': '正在 Notion 中搜索标题 {value}。',
+    'NotionFS_read_with_references': '正在读取 Notion 页面 {value} 的正文和引用。',
+    'NotionFS_resolve_link': '正在获取 Notion 页面 {value} 的基础信息。',
+    'NotionFS_get_document_id': '正在解析 Notion 页面 {value} 的 document_id。',
+    'NotionFS_get_doc_blocks': '正在列出 Notion 页面 {value} 的可编辑块。',
+    'NotionFS_update_doc_block_text': '正在更新 Notion 块 {value}。',
+    'NotionFS_write': '正在向 Notion 页面 {value} 写入内容。',
+    'NotionFS_move': '正在将 Notion 内容从 {value} 移动到目标路径。',
+})
+_TOOL_RESULT_PREVIEW_TEMPLATES.update({
+    'NotionFS_ls': 'Notion page contents at {value} were listed successfully.',
+    'NotionFS_info': 'Notion page info for {value} was retrieved successfully.',
+    'NotionFS_mkdir': 'Notion page at {value} was created successfully.',
+    'NotionFS_rm': 'Notion page or block at {value} was deleted successfully.',
+    'NotionFS_exists': 'Existence check for {value} in Notion completed successfully.',
+    'NotionFS_read': 'Notion content from {value} was loaded successfully.',
+    'NotionFS_read_file': 'Notion content from {value} was loaded successfully.',
+    'NotionFS_search': 'Notion search results for {value} were retrieved successfully.',
+    'NotionFS_read_with_references': 'Notion content and linked references from {value} were loaded successfully.',
+    'NotionFS_resolve_link': 'Notion page metadata for {value} was retrieved successfully.',
+    'NotionFS_get_document_id': 'Notion document id for {value} was resolved successfully.',
+    'NotionFS_get_doc_blocks': 'Editable Notion blocks for {value} were listed successfully.',
+    'NotionFS_update_doc_block_text': 'Notion block {value} was updated successfully.',
+    'NotionFS_write': 'Content was written to Notion at {value} successfully.',
+    'NotionFS_move': 'Notion content was moved from {value} to the target path successfully.',
+})
+_ZH_TOOL_RESULT_PREVIEW_TEMPLATES.update({
+    'NotionFS_ls': '已成功列出 Notion 页面 {value} 的内容。',
+    'NotionFS_info': '已成功获取 Notion 页面 {value} 的信息。',
+    'NotionFS_mkdir': '已成功在 Notion 中创建页面 {value}。',
+    'NotionFS_rm': '已成功删除 Notion 页面或块 {value}。',
+    'NotionFS_exists': '已完成对 Notion 中 {value} 的存在性检查。',
+    'NotionFS_read': '已成功读取 Notion 页面 {value} 的内容。',
+    'NotionFS_read_file': '已成功读取 Notion 页面 {value} 的内容。',
+    'NotionFS_search': '已成功获取 Notion 中 {value} 的搜索结果。',
+    'NotionFS_read_with_references': '已成功读取 Notion 页面 {value} 的正文和引用。',
+    'NotionFS_resolve_link': '已成功获取 Notion 页面 {value} 的基础信息。',
+    'NotionFS_get_document_id': '已成功解析 Notion 页面 {value} 的 document_id。',
+    'NotionFS_get_doc_blocks': '已成功列出 Notion 页面 {value} 的可编辑块。',
+    'NotionFS_update_doc_block_text': '已成功更新 Notion 块 {value}。',
+    'NotionFS_write': '已成功向 Notion 页面 {value} 写入内容。',
+    'NotionFS_move': '已成功将 Notion 内容从 {value} 移动到目标路径。',
+})
+_TOOL_RESULT_FAILURE_TEMPLATES.update({
+    'NotionFS_ls': 'Notion page contents at {value} could not be listed.',
+    'NotionFS_info': 'Notion page info for {value} could not be retrieved.',
+    'NotionFS_mkdir': 'Notion page at {value} could not be created.',
+    'NotionFS_rm': 'Notion page or block at {value} could not be deleted.',
+    'NotionFS_exists': 'Existence check for {value} in Notion could not be completed.',
+    'NotionFS_read': 'Notion content from {value} could not be loaded.',
+    'NotionFS_read_file': 'Notion content from {value} could not be loaded.',
+    'NotionFS_search': 'Notion search results for {value} could not be retrieved.',
+    'NotionFS_read_with_references': 'Notion content and linked references from {value} could not be loaded.',
+    'NotionFS_resolve_link': 'Notion page metadata for {value} could not be retrieved.',
+    'NotionFS_get_document_id': 'Notion document id for {value} could not be resolved.',
+    'NotionFS_get_doc_blocks': 'Editable Notion blocks for {value} could not be listed.',
+    'NotionFS_update_doc_block_text': 'Notion block {value} could not be updated.',
+    'NotionFS_write': 'Content could not be written to Notion at {value}.',
+    'NotionFS_move': 'Notion content could not be moved from {value} to the target path.',
+})
+_ZH_TOOL_RESULT_FAILURE_TEMPLATES.update({
+    'NotionFS_ls': '未能列出 Notion 页面 {value} 的内容。',
+    'NotionFS_info': '未能获取 Notion 页面 {value} 的信息。',
+    'NotionFS_mkdir': '未能在 Notion 中创建页面 {value}。',
+    'NotionFS_rm': '未能删除 Notion 页面或块 {value}。',
+    'NotionFS_exists': '未能完成对 Notion 中 {value} 的存在性检查。',
+    'NotionFS_read': '未能读取 Notion 页面 {value} 的内容。',
+    'NotionFS_read_file': '未能读取 Notion 页面 {value} 的内容。',
+    'NotionFS_search': '未能获取 Notion 中 {value} 的搜索结果。',
+    'NotionFS_read_with_references': '未能读取 Notion 页面 {value} 的正文和引用。',
+    'NotionFS_resolve_link': '未能获取 Notion 页面 {value} 的基础信息。',
+    'NotionFS_get_document_id': '未能解析 Notion 页面 {value} 的 document_id。',
+    'NotionFS_get_doc_blocks': '未能列出 Notion 页面 {value} 的可编辑块。',
+    'NotionFS_update_doc_block_text': '未能更新 Notion 块 {value}。',
+    'NotionFS_write': '未能向 Notion 页面 {value} 写入内容。',
+    'NotionFS_move': '未能将 Notion 内容从 {value} 移动到目标路径。',
+})
+_TOOL_RESULT_APPROVAL_TEMPLATES.update({
+    'NotionFS_rm': 'Please review the confirmation note "{value}" before deleting this Notion page.',
+    'NotionFS_move': 'Please review the confirmation note "{value}" before moving this Notion page.',
+    'NotionFS_write': 'Please review the confirmation note "{value}" before writing this Notion page.',
+})
+_ZH_TOOL_RESULT_APPROVAL_TEMPLATES.update({
+    'NotionFS_rm': '删除这个 Notion 页面前，请先确认提示“{value}”。',
+    'NotionFS_move': '移动这个 Notion 页面前，请先确认提示“{value}”。',
+    'NotionFS_write': '写入这个 Notion 页面前，请先确认提示“{value}”。',
+})
 
 _TOOL_RESULT_FALLBACK_TEMPLATE = 'Tool processing has finished.'
 _TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE = 'Tool processing could not be completed.'
@@ -474,6 +673,23 @@ def _resolve_tool_key(tool_name: str, mapping: dict[str, Any]) -> Any:
         if suffix in mapping:
             return mapping[suffix]
     return None
+
+
+def _resolve_tool_key_regex(
+    tool_name: str, mapping: dict[str, Any]
+) -> tuple[Any, re.Match | None]:
+    """Look up *tool_name* in *mapping* using regex keys prefixed with ``regex:``.
+
+    Returns ``(value, match)`` when a pattern matches, otherwise ``(None, None)``.
+    Regex keys have lower priority than exact keys and are only tried when
+    :func:`_resolve_tool_key` returns nothing.
+    """
+    for key, value in mapping.items():
+        if key.startswith('regex:'):
+            m = re.fullmatch(key[len('regex:'):], tool_name)
+            if m:
+                return value, m
+    return None, None
 
 
 def _tool_name_is(tool_name: str, base_name: str) -> bool:
@@ -735,7 +951,16 @@ def _render_preview_template(
     template_map: dict[str, str],
     fallback_template: str,
 ) -> str:
-    template = _resolve_tool_key(tool_name, template_map) or fallback_template
+    template = _resolve_tool_key(tool_name, template_map)
+    match_group = None
+    if template is None:
+        template, m = _resolve_tool_key_regex(tool_name, template_map)
+        if m:
+            match_group = m.group(1) if m.lastindex else m.group(0)
+    template = template or fallback_template
+    if '{match}' in template:
+        label = match_group or tool_name
+        return _ensure_trailing_newline(template.replace('{match}', f'**{label}**'))
     if '{value}' not in template:
         return _ensure_trailing_newline(template)
     preview_value = value or 'the current item'

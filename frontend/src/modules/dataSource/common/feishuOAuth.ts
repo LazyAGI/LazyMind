@@ -5,6 +5,7 @@ import {
   unwrapDataSourceApiData,
 } from "@/modules/dataSource/api";
 import type {
+  CloudConnectionUpdateBody,
   CloudOAuthAuthorizeURLBody,
   CloudOAuthCallbackBody,
 } from "@/api/generated/auth-client";
@@ -16,6 +17,9 @@ const PENDING_STORAGE_KEY_PREFIX = `${PENDING_STORAGE_KEY}:`;
 
 export const FEISHU_DATA_SOURCE_OAUTH_CHANNEL =
   "lazymind:datasource:feishu-oauth";
+export const CLOUD_DATA_SOURCE_OAUTH_CHANNEL = FEISHU_DATA_SOURCE_OAUTH_CHANNEL;
+
+export type CloudDataSourceProvider = "feishu" | "notion";
 
 export type FeishuConnectionStatus =
   | "pending"
@@ -24,7 +28,7 @@ export type FeishuConnectionStatus =
   | "error";
 
 export interface FeishuDataSourceConnection {
-  provider: "feishu";
+  provider: CloudDataSourceProvider;
   connectionId: string;
   status: FeishuConnectionStatus;
   accountName: string;
@@ -56,6 +60,7 @@ export interface FeishuDataSourceWizardDraft {
 }
 
 interface FeishuPendingOAuthSession {
+  provider?: CloudDataSourceProvider;
   tenantId: string;
   connectionId: string;
   state: string;
@@ -66,16 +71,19 @@ interface FeishuPendingOAuthSession {
 export type FeishuDataSourceOAuthMessage =
   | {
       channel: typeof FEISHU_DATA_SOURCE_OAUTH_CHANNEL;
-      source: "feishu-data-source";
+      source: "feishu-data-source" | "notion-data-source";
       status: "success";
       connection: FeishuDataSourceConnection;
     }
   | {
       channel: typeof FEISHU_DATA_SOURCE_OAUTH_CHANNEL;
-      source: "feishu-data-source";
+      source: "feishu-data-source" | "notion-data-source";
       status: "error";
       message: string;
+      provider?: CloudDataSourceProvider;
     };
+
+export type CloudDataSourceOAuthMessage = FeishuDataSourceOAuthMessage;
 
 function getBaseName() {
   return ((window as Window & { BASENAME?: string }).BASENAME || "").trim();
@@ -104,7 +112,7 @@ function normalizeSameOriginReturnUrl(value?: string) {
       return fallbackUrl;
     }
 
-    if (url.pathname.endsWith("/oauth/feishu/callback")) {
+    if (/\/oauth\/(feishu|notion)(\/data-source)?\/callback$/.test(url.pathname)) {
       return fallbackUrl;
     }
 
@@ -154,6 +162,71 @@ function loadPendingFeishuOAuthSession(state: string) {
   }
 
   return null;
+}
+
+function getProviderStorageKey(baseKey: string, provider: CloudDataSourceProvider) {
+  return provider === "feishu" ? baseKey : baseKey.replace(":feishu-oauth", `:${provider}-oauth`);
+}
+
+function savePendingCloudOAuthSession(
+  provider: CloudDataSourceProvider,
+  payload: FeishuPendingOAuthSession,
+) {
+  if (provider === "feishu") {
+    savePendingFeishuOAuthSession({ ...payload, provider });
+    return;
+  }
+
+  const storageKey = getProviderStorageKey(PENDING_STORAGE_KEY, provider);
+  const storageKeyPrefix = `${storageKey}:`;
+  const serialized = JSON.stringify({ ...payload, provider });
+  sessionStorage.setItem(storageKey, serialized);
+  sessionStorage.setItem(`${storageKeyPrefix}${payload.state}`, serialized);
+}
+
+function loadPendingCloudOAuthSession(
+  provider: CloudDataSourceProvider,
+  state: string,
+) {
+  if (provider === "feishu") {
+    return loadPendingFeishuOAuthSession(state);
+  }
+
+  const storageKey = getProviderStorageKey(PENDING_STORAGE_KEY, provider);
+  const storageKeyPrefix = `${storageKey}:`;
+  const pendingByState = parsePendingFeishuOAuthSession(
+    sessionStorage.getItem(`${storageKeyPrefix}${state}`),
+  );
+
+  if (pendingByState?.state === state) {
+    return pendingByState;
+  }
+
+  const pending = parsePendingFeishuOAuthSession(sessionStorage.getItem(storageKey));
+  if (pending?.state === state) {
+    return pending;
+  }
+
+  return null;
+}
+
+function clearPendingCloudOAuthSession(
+  provider: CloudDataSourceProvider,
+  state: string,
+) {
+  if (provider === "feishu") {
+    clearPendingFeishuOAuthSession(state);
+    return;
+  }
+
+  const storageKey = getProviderStorageKey(PENDING_STORAGE_KEY, provider);
+  const storageKeyPrefix = `${storageKey}:`;
+  sessionStorage.removeItem(`${storageKeyPrefix}${state}`);
+  const pending = parsePendingFeishuOAuthSession(sessionStorage.getItem(storageKey));
+
+  if (!pending || pending.state === state) {
+    sessionStorage.removeItem(storageKey);
+  }
 }
 
 function clearPendingFeishuOAuthSession(state: string) {
@@ -284,21 +357,25 @@ function maskToken(token?: string) {
   return `${token.slice(0, 6)}...${token.slice(-4)}`;
 }
 
-function normalizeConnection(payload: any, fallbackConnectionId?: string): FeishuDataSourceConnection {
+function normalizeConnection(
+  payload: any,
+  fallbackConnectionId?: string,
+  provider: CloudDataSourceProvider = "feishu",
+): FeishuDataSourceConnection {
   const raw = unwrapPayload<any>(payload);
   const connection = raw?.connection || raw?.oauth_connection || raw;
   const accessToken = connection?.access_token || raw?.access_token;
   const refreshToken = connection?.refresh_token || raw?.refresh_token;
 
   return {
-    provider: "feishu",
+    provider,
     connectionId: String(
       connection?.connection_id ||
         connection?.id ||
         connection?.open_id ||
         raw?.connection_id ||
         fallbackConnectionId ||
-        `feishu-${Date.now()}`,
+        `${provider}-${Date.now()}`,
     ),
     status: normalizeStatus(connection?.status || raw?.status || "connected"),
     accountName:
@@ -307,6 +384,8 @@ function normalizeConnection(payload: any, fallbackConnectionId?: string): Feish
       connection?.name ||
       connection?.display_name ||
       connection?.tenant_name ||
+      connection?.workspace_name ||
+      connection?.workspaceName ||
       i18n.t("admin.dataSourceFeishuConnectedAccountFallback"),
     grantedScopes: normalizeScopes(
       connection?.granted_scopes ||
@@ -339,16 +418,30 @@ export function getFeishuDataSourceCallbackUrl() {
   return buildAppUrlFromApiOrigin("/oauth/feishu/callback");
 }
 
-export function getDataSourceManagementUrl() {
-  return `${window.location.origin}${getBaseName()}/data-sources/providers/feishu`;
+export function getCloudDataSourceCallbackUrl(provider: CloudDataSourceProvider) {
+  if (provider === "feishu") {
+    return getFeishuDataSourceCallbackUrl();
+  }
+  return buildAppUrlFromApiOrigin(`/oauth/${provider}/data-source/callback`);
+}
+
+export function getDataSourceManagementUrl(provider: CloudDataSourceProvider = "feishu") {
+  return `${window.location.origin}${getBaseName()}/data-sources/providers/${provider}`;
 }
 
 export function getFeishuDataSourceOAuthReturnUrl(state?: string | null) {
+  return getCloudDataSourceOAuthReturnUrl("feishu", state);
+}
+
+export function getCloudDataSourceOAuthReturnUrl(
+  provider: CloudDataSourceProvider,
+  state?: string | null,
+) {
   if (!state) {
-    return getDataSourceManagementUrl();
+    return getDataSourceManagementUrl(provider);
   }
 
-  const pending = loadPendingFeishuOAuthSession(state);
+  const pending = loadPendingCloudOAuthSession(provider, state);
   return normalizeSameOriginReturnUrl(pending?.returnUrl);
 }
 
@@ -397,8 +490,11 @@ type FeishuAuthorizeUrlInput =
       reauthorizeConnectionId: string;
     };
 
-export async function requestFeishuDataSourceAuthorizeUrl(input: FeishuAuthorizeUrlInput) {
-  const redirectUri = getFeishuDataSourceCallbackUrl();
+export async function requestCloudDataSourceAuthorizeUrl(
+  provider: CloudDataSourceProvider,
+  input: FeishuAuthorizeUrlInput,
+) {
+  const redirectUri = getCloudDataSourceCallbackUrl(provider);
   const appId = input.appId?.trim();
   const appSecret = input.appSecret?.trim();
   const reauthorizeConnectionId = input.reauthorizeConnectionId?.trim();
@@ -421,7 +517,7 @@ export async function requestFeishuDataSourceAuthorizeUrl(input: FeishuAuthorize
   let payload: unknown;
   try {
     const response = await dataSourceCloudOauthApi.oauthAuthorizeUrlApiAuthserviceV1CloudProviderOauthAuthorizeUrlPost({
-      provider: "feishu",
+      provider,
       cloudOAuthAuthorizeURLBody: body as CloudOAuthAuthorizeURLBody,
     });
     payload = response.data;
@@ -447,7 +543,7 @@ export async function requestFeishuDataSourceAuthorizeUrl(input: FeishuAuthorize
     throw new Error(getErrorMessage(payload, i18n.t("admin.dataSourceAuthorizeUrlFailed")));
   }
 
-  savePendingFeishuOAuthSession({
+  savePendingCloudOAuthSession(provider, {
     tenantId: input.tenantId.trim(),
     connectionId: connectionId.trim(),
     state: state.trim(),
@@ -458,8 +554,16 @@ export async function requestFeishuDataSourceAuthorizeUrl(input: FeishuAuthorize
   return authorizeUrl;
 }
 
-export async function finishFeishuDataSourceOAuth(code: string, state: string) {
-  const pending = loadPendingFeishuOAuthSession(state);
+export async function requestFeishuDataSourceAuthorizeUrl(input: FeishuAuthorizeUrlInput) {
+  return requestCloudDataSourceAuthorizeUrl("feishu", input);
+}
+
+export async function finishCloudDataSourceOAuth(
+  provider: CloudDataSourceProvider,
+  code: string,
+  state: string,
+) {
+  const pending = loadPendingCloudOAuthSession(provider, state);
   if (!pending?.tenantId || !pending.connectionId || !pending.redirectUri) {
     throw new Error(i18n.t("admin.dataSourceOauthSessionMissing"));
   }
@@ -471,13 +575,13 @@ export async function finishFeishuDataSourceOAuth(code: string, state: string) {
   let payload: unknown;
   try {
     const response = await dataSourceCloudOauthApi.oauthCallbackApiAuthserviceV1CloudProviderOauthCallbackPost({
-      provider: "feishu",
+      provider,
       cloudOAuthCallbackBody: {
-      tenant_id: pending.tenantId,
-      connection_id: pending.connectionId,
-      code,
-      state,
-      redirect_uri: pending.redirectUri,
+        tenant_id: pending.tenantId,
+        connection_id: pending.connectionId,
+        code,
+        state,
+        redirect_uri: pending.redirectUri,
       } satisfies CloudOAuthCallbackBody,
     });
     payload = response.data;
@@ -492,26 +596,72 @@ export async function finishFeishuDataSourceOAuth(code: string, state: string) {
     throw new Error(getFeishuOAuthCallbackErrorMessage(payload));
   }
 
-  clearPendingFeishuOAuthSession(state);
-  return normalizeConnection(payload, pending.connectionId);
+  clearPendingCloudOAuthSession(provider, state);
+  return normalizeConnection(payload, pending.connectionId, provider);
+}
+
+export async function finishFeishuDataSourceOAuth(code: string, state: string) {
+  return finishCloudDataSourceOAuth("feishu", code, state);
+}
+
+export async function enableCloudConnectionForChat(connectionId: string) {
+  const body = {
+    chat_enabled: true,
+    chatEnabled: true,
+  } satisfies CloudConnectionUpdateBody;
+  let payload: unknown;
+
+  try {
+    const response = await dataSourceCloudOauthApi.patchConnectionApiAuthserviceV1CloudConnectionsConnectionIdPatch({
+      connectionId,
+      cloudConnectionUpdateBody: body,
+    });
+    payload = response.data;
+  } catch (error: any) {
+    payload = error?.response?.data || error;
+    throw new Error(getErrorMessage(payload, i18n.t("common.requestFailed")));
+  }
+
+  if (hasBusinessError(payload)) {
+    throw new Error(getErrorMessage(payload, i18n.t("common.requestFailed")));
+  }
+
+  return unwrapDataSourceApiData<any>(payload);
 }
 
 export function saveFeishuDataSourceOAuthResult(
   payload: FeishuDataSourceOAuthMessage,
 ) {
-  sessionStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify(payload));
+  const provider =
+    payload.status === "success" ? payload.connection.provider : payload.provider || "feishu";
+  saveCloudDataSourceOAuthResult(provider, payload);
+}
+
+export function saveCloudDataSourceOAuthResult(
+  provider: CloudDataSourceProvider,
+  payload: CloudDataSourceOAuthMessage,
+) {
+  sessionStorage.setItem(
+    getProviderStorageKey(RESULT_STORAGE_KEY, provider),
+    JSON.stringify(payload),
+  );
 }
 
 export function consumeFeishuDataSourceOAuthResult() {
-  const raw = sessionStorage.getItem(RESULT_STORAGE_KEY);
+  return consumeCloudDataSourceOAuthResult("feishu");
+}
+
+export function consumeCloudDataSourceOAuthResult(provider: CloudDataSourceProvider) {
+  const storageKey = getProviderStorageKey(RESULT_STORAGE_KEY, provider);
+  const raw = sessionStorage.getItem(storageKey);
   if (!raw) {
     return null;
   }
 
-  sessionStorage.removeItem(RESULT_STORAGE_KEY);
+  sessionStorage.removeItem(storageKey);
 
   try {
-    return JSON.parse(raw) as FeishuDataSourceOAuthMessage;
+    return JSON.parse(raw) as CloudDataSourceOAuthMessage;
   } catch {
     return null;
   }

@@ -50,6 +50,16 @@ func ParsingServiceEndpoint() string {
 	return "http://localhost:8000"
 }
 
+// CoreSelfEndpoint returns the base URL for the Go core service itself.
+// Used by internal callers (e.g. plugin EventLoop auto-advance) to route through
+// the full chat pipeline including history persistence and runtime config loading.
+func CoreSelfEndpoint() string {
+	if u := strings.TrimSpace(os.Getenv("LAZYMIND_CORE_SELF_URL")); u != "" {
+		return strings.TrimRight(u, "/")
+	}
+	return "http://localhost:8000"
+}
+
 // ScanControlPlaneEndpoint returns the base URL for the scan-control-plane service.
 func ScanControlPlaneEndpoint() string {
 	if u := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_URL")); u != "" {

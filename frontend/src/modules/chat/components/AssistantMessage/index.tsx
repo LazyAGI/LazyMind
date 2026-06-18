@@ -1,6 +1,6 @@
 import { Avatar, Button, Divider, Flex, message, Spin, Tooltip } from "antd";
 import { trim } from "lodash";
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -21,6 +21,8 @@ import {
 } from "@/api/generated/chatbot-client";
 import { AgentAppsAuth } from "@/components/auth";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
+import { usePluginStore } from "@/modules/chat/store/pluginPanel";
+import { PluginPanel } from "@/modules/chat/components/PluginPanel";
 import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
 import FeedbackModal from "../FeedbackModal";
 
@@ -72,7 +74,7 @@ async function copyTextToClipboard(text: string) {
 interface FeedbackState {
   showModal: boolean;
   isSubmitting: boolean;
-  localFeedbackType: string | undefined;
+  localFeedbackType: FeedBackChatHistoryRequestTypeEnum | undefined;
   targetHistoryId: string | undefined;
 }
 
@@ -80,9 +82,43 @@ type FeedbackAction =
   | { type: "OPEN_MODAL"; historyId: string }
   | { type: "CLOSE_MODAL" }
   | { type: "SUBMIT_START" }
-  | { type: "SUBMIT_SUCCESS"; feedbackType: string }
+  | {
+      type: "SUBMIT_SUCCESS";
+      feedbackType: FeedBackChatHistoryRequestTypeEnum;
+    }
   | { type: "SUBMIT_FAIL" }
-  | { type: "SYNC_FROM_SERVER"; feedbackType: string | undefined };
+  | {
+      type: "SYNC_FROM_SERVER";
+      feedbackType: FeedBackChatHistoryRequestTypeEnum | undefined;
+    };
+
+function normalizeFeedbackType(
+  feedbackType: unknown,
+): FeedBackChatHistoryRequestTypeEnum | undefined {
+  const normalizedFeedbackType =
+    typeof feedbackType === "string"
+      ? feedbackType.trim().toUpperCase()
+      : feedbackType;
+  if (
+    normalizedFeedbackType ===
+      FeedBackChatHistoryRequestTypeEnum.FeedBackTypeLike ||
+    normalizedFeedbackType === 1 ||
+    normalizedFeedbackType === "1" ||
+    normalizedFeedbackType === "LIKE"
+  ) {
+    return FeedBackChatHistoryRequestTypeEnum.FeedBackTypeLike;
+  }
+  if (
+    normalizedFeedbackType ===
+      FeedBackChatHistoryRequestTypeEnum.FeedBackTypeUnlike ||
+    normalizedFeedbackType === 2 ||
+    normalizedFeedbackType === "2" ||
+    normalizedFeedbackType === "UNLIKE"
+  ) {
+    return FeedBackChatHistoryRequestTypeEnum.FeedBackTypeUnlike;
+  }
+  return undefined;
+}
 
 // ==================== Reducer ====================
 
@@ -159,12 +195,27 @@ const AssistantMessage = (props: any) => {
   const [feedbackState, dispatch] = useReducer(feedbackReducer, {
     showModal: false,
     isSubmitting: false,
-    localFeedbackType: item?.feed_back,
+    localFeedbackType: normalizeFeedbackType(item?.feed_back),
     targetHistoryId: undefined,
   });
 
+  const loadActiveSession = usePluginStore((s) => s.loadActiveSession);
+  // Eagerly load the plugin session so the panel appears without waiting for component mount.
   useEffect(() => {
-    dispatch({ type: "SYNC_FROM_SERVER", feedbackType: item?.feed_back });
+    if (index === length - 1 && sessionId) {
+      loadActiveSession(sessionId);
+    }
+  }, [index, length, sessionId, loadActiveSession]);
+
+  const pluginSession = usePluginStore((s) =>
+    sessionId ? s.sessionByConversation[sessionId] ?? null : null,
+  );
+
+  useEffect(() => {
+    dispatch({
+      type: "SYNC_FROM_SERVER",
+      feedbackType: normalizeFeedbackType(item?.feed_back),
+    });
   }, [item?.feed_back]);
 
   const handleCopy = async (text?: string) => {
@@ -363,6 +414,18 @@ const AssistantMessage = (props: any) => {
   }
 
   
+  function getCurrentFeedback(historyId?: string) {
+    if (historyId && item.answers) {
+      const answer = item.answers.find(
+        (ans: any) => ans.history_id === historyId,
+      );
+      return normalizeFeedbackType(answer?.feed_back ?? item.feed_back);
+    }
+    return (
+      feedbackState.localFeedbackType ?? normalizeFeedbackType(item.feed_back)
+    );
+  }
+
   const createUpdatedItem = (
     feedbackType: FeedBackChatHistoryRequestTypeEnum,
     targetHistoryId?: string,
@@ -371,9 +434,9 @@ const AssistantMessage = (props: any) => {
       const updatedAnswers = item.answers.map((ans: any) =>
         ans.history_id === targetHistoryId
           ? { ...ans, feed_back: feedbackType }
-          : ans,
+          : { ...ans, feed_back: undefined },
       );
-      return { ...item, answers: updatedAnswers };
+      return { ...item, feed_back: undefined, answers: updatedAnswers };
     }
     return { ...item, feed_back: feedbackType };
   };
@@ -393,15 +456,7 @@ const AssistantMessage = (props: any) => {
       return;
     }
 
-    let currentFeedBack: string | undefined;
-    if (historyId && item.answers) {
-      const answer = item.answers.find(
-        (ans: any) => ans.history_id === historyId,
-      );
-      currentFeedBack = answer?.feed_back || item.feed_back;
-    } else {
-      currentFeedBack = item.feed_back;
-    }
+    const currentFeedBack = getCurrentFeedback(historyId);
 
     if (currentFeedBack === type) {
       return;
@@ -431,15 +486,7 @@ const AssistantMessage = (props: any) => {
       return;
     }
 
-    let currentFeedBack: string | undefined;
-    if (historyId && item.answers) {
-      const answer = item.answers.find(
-        (ans: any) => ans.history_id === historyId,
-      );
-      currentFeedBack = answer?.feed_back || item.feed_back;
-    } else {
-      currentFeedBack = item.feed_back;
-    }
+    const currentFeedBack = getCurrentFeedback(historyId);
 
     if (
       currentFeedBack === FeedBackChatHistoryRequestTypeEnum.FeedBackTypeUnlike
@@ -587,7 +634,7 @@ const AssistantMessage = (props: any) => {
     }
 
     const answerHistoryId = answer.history_id;
-    const answerFeedBack = answer.feed_back || item.feed_back;
+    const answerFeedBack = getCurrentFeedback(answerHistoryId);
 
     return (
       <>
@@ -661,6 +708,8 @@ const AssistantMessage = (props: any) => {
   }
 
   function renderFooter() {
+    const currentFeedback = getCurrentFeedback();
+
     return (
       <>
         <Divider className="chat-assistant-msg-tool-divider" />
@@ -684,7 +733,7 @@ const AssistantMessage = (props: any) => {
             )}
           </div>
           <Flex>
-            {feedbackState.localFeedbackType ===
+            {currentFeedback ===
             FeedBackChatHistoryRequestTypeEnum.FeedBackTypeLike ? (
               <LikeFilled
                 className="tool-btn"
@@ -704,7 +753,7 @@ const AssistantMessage = (props: any) => {
                 }
               />
             )}
-            {feedbackState.localFeedbackType ===
+            {currentFeedback ===
             FeedBackChatHistoryRequestTypeEnum.FeedBackTypeUnlike ? (
               <DislikeFilled
                 className="tool-btn"
@@ -851,6 +900,13 @@ const AssistantMessage = (props: any) => {
             />
           </div>
           {index === length - 1 && renderBottom()}
+          {index === length - 1 && pluginSession && sessionId && (
+            <PluginPanel
+              key={sessionId}
+              conversationId={sessionId}
+              onSendMessage={(text) => props.sendMessage?.(text)}
+            />
+          )}
         </div>
         <FeedbackModal
           visible={feedbackState.showModal}
@@ -896,6 +952,13 @@ const AssistantMessage = (props: any) => {
             renderFooter()}
         </div>
         {index === length - 1 && renderBottom()}
+        {index === length - 1 && pluginSession && sessionId && (
+          <PluginPanel
+            key={sessionId}
+            conversationId={sessionId}
+            onSendMessage={(text) => props.sendMessage?.(text)}
+          />
+        )}
       </div>
       <FeedbackModal
         visible={feedbackState.showModal}

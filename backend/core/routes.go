@@ -11,6 +11,7 @@ import (
 	"lazymind/core/mcp"
 	"lazymind/core/memory"
 	"lazymind/core/modelprovider"
+	"lazymind/core/plugin"
 	"lazymind/core/preference"
 	"lazymind/core/resourcechange"
 	"lazymind/core/resourceupdate"
@@ -145,14 +146,18 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/agent/threads/{thread_id}/records", []string{"qa.read"}, agent.ListThreadRecords)
 	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/datasets", []string{"qa.read"}, agent.GetThreadResultDatasets)
 	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/eval-reports", []string{"qa.read"}, agent.GetThreadResultEvalReports)
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases", []string{"qa.read"}, agent.GetThreadEvalReportBadCases)
 	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/analysis-reports", []string{"qa.read"}, agent.GetThreadResultAnalysisReports)
 	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/diffs", []string{"qa.read"}, agent.GetThreadResultDiffs)
 	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/abtests", []string{"qa.read"}, agent.GetThreadResultAbtests)
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/flow-status", []string{"qa.read"}, agent.GetThreadFlowStatus)
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/artifacts/{artifact_id}", []string{"qa.read"}, agent.GetThreadArtifact)
 	handleAPI(r, "POST", "/agent/threads/{thread_id}:messages", []string{"qa.write"}, agent.StreamThreadMessages)
 	handleAPI(r, "POST", "/agent/threads/{thread_id}:start", []string{"qa.write"}, agent.StartThread)
 	handleAPI(r, "POST", "/agent/threads/{thread_id}:pause", []string{"qa.write"}, agent.PauseThread)
 	handleAPI(r, "POST", "/agent/threads/{thread_id}:cancel", []string{"qa.write"}, agent.CancelThread)
 	handleAPI(r, "POST", "/agent/threads/{thread_id}:retry", []string{"qa.write"}, agent.RetryThread)
+	handleAPI(r, "POST", "/agent/threads/{thread_id}:continue", []string{"qa.write"}, agent.ContinueThread)
 	handleAPI(r, "GET", "/agent/reports/{report_id}:content", []string{"qa.read"}, agent.GetReportContent)
 	handleAPI(r, "GET", "/agent/diffs/{apply_id}/{filename:.*}", []string{"qa.read"}, agent.GetDiffContent)
 	handleAPI(r, "POST", "/agent/files:content", []string{"qa.read"}, agent.GetAgentFileContent)
@@ -165,18 +170,26 @@ func registerAllRoutes(r *mux.Router) {
 
 	// ----- SubAgent (Task Center) -----
 	handleAPI(r, "GET", "/conversations/{conversation_id}/tasks", []string{"qa.read"}, subagent.ListConversationTasks)
+	handleAPI(r, "GET", "/conversations/{conversation_id}/events", []string{"qa.read"}, chat.StreamConvEvents)
 	handleAPI(r, "GET", "/tasks/{task_id}:stream", []string{"qa.read"}, subagent.StreamTask)
 	handleAPI(r, "GET", "/tasks/{task_id}/artifacts", []string{"qa.read"}, subagent.GetTaskArtifacts)
 	handleAPI(r, "GET", "/tasks/{task_id}", []string{"qa.read"}, subagent.GetTaskDetail)
 	// Internal endpoint for algorithm service auto polling; no request-level RBAC.
 	handleAPI(r, "GET", "/internal/subagent/tasks/{task_id}", nil, subagent.InternalGetTaskStatus)
 	handleAPI(r, "GET", "/internal/subagent/tasks/{task_id}/events", nil, subagent.InternalGetTaskEvents)
-	handleAPI(r, "GET", "/evolution/suggestions", []string{"qa.read"}, evolution.ListSuggestions)
-	handleAPI(r, "GET", "/evolution/suggestions/{id}", []string{"qa.read"}, evolution.GetSuggestion)
-	handleAPI(r, "POST", "/evolution/suggestions/{id}:approve", []string{"qa.read"}, evolution.ApproveSuggestion)
-	handleAPI(r, "POST", "/evolution/suggestions/{id}:reject", []string{"qa.read"}, evolution.RejectSuggestion)
-	handleAPI(r, "POST", "/evolution/suggestions:batchApprove", []string{"qa.read"}, evolution.BatchApproveSuggestions)
-	handleAPI(r, "POST", "/evolution/suggestions:batchReject", []string{"qa.read"}, evolution.BatchRejectSuggestions)
+
+	// ----- Plugin Info -----
+	handleAPI(r, "GET", "/plugins", []string{"qa.read"}, plugin.ListPlugins)
+	handleAPI(r, "GET", "/plugins/{plugin_id}", []string{"qa.read"}, plugin.GetPluginInfo)
+
+	// ----- Plugin Sessions -----
+	handleAPI(r, "GET", "/conversations/{conversation_id}/plugin-sessions", []string{"qa.read"}, plugin.ListConversationSessions)
+	handleAPI(r, "GET", "/conversations/{conversation_id}/plugin-sessions:active", []string{"qa.read"}, plugin.GetActiveConversationSession)
+	handleAPI(r, "GET", "/conversations/{conversation_id}/plugin-sessions:latest", []string{"qa.read"}, plugin.GetLatestConversationSession)
+	handleAPI(r, "GET", "/plugin-sessions/{session_id}", []string{"qa.read"}, plugin.GetSessionDetail)
+	handleAPI(r, "GET", "/plugin-sessions/{session_id}/slots", []string{"qa.read"}, plugin.GetSessionSlots)
+	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}", []string{"qa.write"}, plugin.PatchSessionSlot)
+	handleAPI(r, "POST", "/plugin-sessions/{session_id}:advance", []string{"qa.write"}, plugin.AdvanceSession)
 	handleAPI(r, "GET", "/evolution/tasks", []string{"qa.read"}, resourceupdate.ListTasks)
 	handleAPI(r, "GET", "/evolution/tasks/{task_id}", []string{"qa.read"}, resourceupdate.GetTask)
 	handleAPI(r, "GET", "/skill-review-results", []string{"qa.read"}, resourceupdate.ListSkillReviewResults)
@@ -189,14 +202,11 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/memory-review-results/{review_result_id}:reject", []string{"qa.read"}, resourceupdate.RejectMemoryReviewResult)
 	handleAPI(r, "GET", "/resource-versions", []string{"qa.read"}, resourcechange.ListVersions)
 	handleAPI(r, "GET", "/resource-versions/{version_id}", []string{"qa.read"}, resourcechange.GetVersion)
-	handleAPI(r, "POST", "/evolution/suggestions/{id}:approve", []string{"qa.write"}, evolution.ApproveSuggestion)
-	handleAPI(r, "POST", "/evolution/suggestions/{id}:reject", []string{"qa.write"}, evolution.RejectSuggestion)
-	handleAPI(r, "POST", "/evolution/suggestions:batchApprove", []string{"qa.write"}, evolution.BatchApproveSuggestions)
-	handleAPI(r, "POST", "/evolution/suggestions:batchReject", []string{"qa.write"}, evolution.BatchRejectSuggestions)
 	handleAPI(r, "GET", "/personalization-items", []string{"qa.read"}, evolution.ListManagedStates)
 	handleAPI(r, "GET", "/personalization-setting", []string{"qa.read"}, evolution.GetPersonalizationSetting)
 	handleAPI(r, "PUT", "/personalization-setting", []string{"qa.write"}, evolution.SetPersonalizationSetting)
 	handleAPI(r, "GET", "/skills", []string{"qa.read"}, skill.List)
+	handleAPI(r, "GET", "/skills/tags", []string{"qa.read"}, skill.ListTags)
 	handleAPI(r, "POST", "/skills", []string{"qa.write"}, skill.CreateManaged)
 	handleAPI(r, "POST", "/builtin-skills/{builtin_skill_uid}:enable", []string{"qa.write"}, skill.EnableBuiltinSkill)
 	handleAPI(r, "GET", "/skills/{skill_id}:shares", []string{"qa.read"}, skill.ListSkillShareTargets)
@@ -294,17 +304,13 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/prompts", []string{"document.read"}, chat.ListPrompts)
 
 	// Algorithm service callbacks: no request-level RBAC, protected by internal service token at infra level.
-	handleAPI(r, "POST", "/skill/suggestion", []string{}, skill.Suggestion)
-	handleAPI(r, "POST", "/skill/create", []string{}, skill.Create)
-	handleAPI(r, "POST", "/skill/remove", []string{}, skill.Remove)
-	handleAPI(r, "GET", "/remote-fs/list", []string{}, skill.RemoteFSList)
-	handleAPI(r, "GET", "/remote-fs/info", []string{}, skill.RemoteFSInfo)
-	handleAPI(r, "GET", "/remote-fs/exists", []string{}, skill.RemoteFSExists)
-	handleAPI(r, "GET", "/remote-fs/content", []string{}, skill.RemoteFSContent)
-	handleAPI(r, "PUT", "/remote-fs/content", []string{}, skill.RemoteFSWrite)
-	handleAPI(r, "DELETE", "/remote-fs/path", []string{}, skill.RemoteFSDelete)
-	handleAPI(r, "POST", "/memory/suggestion", []string{}, memory.Suggestion)
-	handleAPI(r, "POST", "/user_preference/suggestion", []string{}, preference.Suggestion)
+	handleAPI(r, "POST", "/skill/create", nil, skill.Create)
+	handleAPI(r, "GET", "/remote-fs/list", []string{"qa.read"}, skill.RemoteFSList)
+	handleAPI(r, "GET", "/remote-fs/info", []string{"qa.read"}, skill.RemoteFSInfo)
+	handleAPI(r, "GET", "/remote-fs/exists", []string{"qa.read"}, skill.RemoteFSExists)
+	handleAPI(r, "GET", "/remote-fs/content", []string{"qa.read"}, skill.RemoteFSContent)
+	handleAPI(r, "PUT", "/remote-fs/content", []string{"qa.write"}, skill.RemoteFSWrite)
+	handleAPI(r, "DELETE", "/remote-fs/path", []string{"qa.write"}, skill.RemoteFSDelete)
 
 	// ----- ACL（Knowledge basetextPermission） -----
 	handleAPI(r, "GET", "/kb/list", []string{"document.read"}, acl.ListKB)

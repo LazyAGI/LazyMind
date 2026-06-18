@@ -14,6 +14,7 @@ type DefaultEngine struct {
 	registry           connector.ConnectorRegistry
 	core               coreclient.ResourceClient
 	schedule           ScheduleEngine
+	authStatus         AuthConnectionStatusClient
 	clock              func() time.Time
 	newID              func(string) string
 	defaultDatasetAlgo coreclient.DatasetAlgo
@@ -58,6 +59,12 @@ func WithIDGenerator(newID func(string) string) Option {
 func WithDefaultDatasetAlgo(algo coreclient.DatasetAlgo) Option {
 	return func(e *DefaultEngine) {
 		e.defaultDatasetAlgo = algo
+	}
+}
+
+func WithAuthConnectionStatusClient(client AuthConnectionStatusClient) Option {
+	return func(e *DefaultEngine) {
+		e.authStatus = client
 	}
 }
 

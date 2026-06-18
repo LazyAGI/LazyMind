@@ -64,7 +64,8 @@ class CaseCoarseClassificationOperation:
         rag_ref = ArtifactRef.parse(str(judge.get('rag_answer_ref') or ''))
         case_ref = ArtifactRef.parse(str(case_refs[case_ids.index(case_id)]))
         case, rag = typed_payload(ctx, case_ref, 'DatasetCase'), typed_payload(ctx, rag_ref, 'RagAnswer')
-        if str(case.get('id') or '') != case_id: raise ValueError(f'{case_ref} payload id mismatch')
+        if str(case.get('id') or '') != case_id:
+            raise ValueError(f'{case_ref} payload id mismatch')
         expected = {'case_id': case_id, 'eval_dataset_ref': str(dataset_ref), 'case_ref': str(case_ref)}
         check_fields('RagAnswer', rag, expected)
         check_fields('JudgeResult', judge, expected | {'rag_answer_ref': str(rag_ref)})
@@ -202,7 +203,8 @@ def _classify(e):
 
 
 def _result(category, reason, confidence, hits, missing=None):
-    if category not in CATEGORIES: raise ValueError(f'invalid coarse category: {category}')
+    if category not in CATEGORIES:
+        raise ValueError(f'invalid coarse category: {category}')
     return {'coarse_category': category, 'coarse_reason': reason, 'confidence': confidence, 'rule_hits': hits,
             'missing_evidence': sorted(set(missing or []))}
 
@@ -225,7 +227,8 @@ def _obs(searches, **extra):
 
 
 def _tool_failures(node):
-    if node['role'] not in {'tool_manager', 'tool_call', 'kb_search'}: return []
+    if node['role'] not in {'tool_manager', 'tool_call', 'kb_search'}:
+        return []
     status = str(node.get('status') or '')
     failures = [{'status': status}] if status.lower() in {'failed', 'error', 'exception', 'timeout'} else []
     text = json.dumps(node.get('raw') or {}, ensure_ascii=False)

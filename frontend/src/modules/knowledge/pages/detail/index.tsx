@@ -378,16 +378,19 @@ const Detail = () => {
                 <Button
                   icon={<DeleteOutlined />}
                   style={{ marginLeft: "12px", width: "24px", height: "24px" }}
-                  onClick={() =>
+                  onClick={() => {
+                    const knowledgeName = detail?.display_name || id;
                     confirmRef.current?.onOpen({
                       id,
                       title: t("knowledge.deleteTitle", {
-                        name: detail?.display_name,
+                        name: knowledgeName,
                       }),
                       content: t("knowledge.deleteContent"),
-                      confirmText: t("knowledge.deleteConfirmText"),
-                    })
-                  }
+                      confirmText: t("knowledge.deleteConfirmText", {
+                        name: knowledgeName,
+                      }),
+                    });
+                  }}
                 />
               </Tooltip>
             </div>

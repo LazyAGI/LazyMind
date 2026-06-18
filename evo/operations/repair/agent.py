@@ -63,8 +63,12 @@ class BuildRepairLoopPlanOperation:
         guards, guard_meta = _goodcase_guard(ctx, eval_report, targets)
         heldout = _heldout_policy(ctx, report, eval_report, targets, guards, category)
         delta = float(ctx.params.get('target_mean_delta', 0.02))
-        policy = {'primary_metric': str(ctx.params.get('primary_metric')
-                                        or CATEGORY_PRIMARY_METRIC.get(category) or 'answer_correctness'),
+        primary_metric = (
+            ctx.params.get('primary_metric')
+            or CATEGORY_PRIMARY_METRIC.get(category)
+            or 'answer_correctness'
+        )
+        policy = {'primary_metric': str(primary_metric),
                   'target_mean_delta': round(delta / 100 if delta >= 1 else delta, 4),
                   'goodcase_regression_ratio_limit': round(float(ctx.params.get(
                       'goodcase_regression_ratio_limit', 0.34
@@ -136,7 +140,8 @@ class RepairLoopAgentOperation:
         budget = DEFAULT_REPAIR_ATTEMPT_BUDGET if raw_budget in (None, '') else (
             int(raw_budget) if int(raw_budget) > 0 else None)
         start = attempt
-        if self.llm is None: self.llm = evo_llm(self.model_config)
+        if self.llm is None:
+            self.llm = evo_llm(self.model_config)
         drafts, decision, evaluation, patch, correctness = [], {}, {}, {}, {}
         while budget is None or attempt - start < budget:
             attempt += 1
@@ -158,7 +163,8 @@ class RepairLoopAgentOperation:
                     correctness, plan
                 ), ctx, refs))
                 break
-            if decision['decision'] == 'failed': break
+            if decision['decision'] == 'failed':
+                break
             if budget is None or attempt - start < budget:
                 ctx.report_progress(phase='repair_loop', status='running',
                                     message=f'attempt {attempt} failed; continuing',
@@ -174,7 +180,8 @@ class RepairLoopAgentOperation:
 def _attempt(ctx, plan_ref, plan, workspace, attempt, memory, session, llm, model_config,
              budget_exhausted: bool = False):
     branch_mode = str(ctx.params.get('repair_branch_mode') or 'physical').strip()
-    if branch_mode not in {'physical', 'record'}: raise ValueError(f'unsupported repair_branch_mode: {branch_mode}')
+    if branch_mode not in {'physical', 'record'}:
+        raise ValueError(f'unsupported repair_branch_mode: {branch_mode}')
     if branch_mode == 'physical':
         workspace, memory = prepare_physical_attempt(workspace, attempt, memory)
     branch_before = branch_state_before(attempt, plan_ref, workspace, memory, mode=branch_mode)
@@ -253,7 +260,8 @@ def _attempt(ctx, plan_ref, plan, workspace, attempt, memory, session, llm, mode
             evaluation, candidate_report, candidate_drafts = _evaluate(ctx, plan, service, patch, attempt, llm,
                                                                        model_config)
         finally:
-            if proc: terminate_pid(proc.pid)
+            if proc:
+                terminate_pid(proc.pid)
         opencode_session = opencode.session_id or session
     validate_repair_artifact('RepairEvaluation', evaluation)
     correctness = assess_patch_correctness(attempt, patch, evaluation, worker_report)
@@ -425,7 +433,8 @@ def _compat_artifacts(ctx: OperationContext, plan_ref: ArtifactRef, plan: dict[s
                       probe_instruction_ref: str = '') -> tuple[dict[str, Any], dict[str, Any]]:
     hypothesis = _compat_hypothesis(plan_ref, plan, attempt, evidence, fault_report, probe_result, diagnosis, memory)
     repair_plan = _compat_repair_plan(ctx, plan_ref, hypothesis, plan, attempt, diagnosis, fault_report)
-    if probe_instruction_ref: repair_plan['opencode_probe_instruction_ref'] = probe_instruction_ref
+    if probe_instruction_ref:
+        repair_plan['opencode_probe_instruction_ref'] = probe_instruction_ref
     return hypothesis, repair_plan
 
 
@@ -474,7 +483,8 @@ def _patch(ctx, workspace, plan_ref, repair_ref, trace, attempt, repair_plan, op
            worker_report: dict[str, Any] | None = None, memory: dict[str, Any] | None = None) -> dict[str, Any]:
     base_head = _git(workspace, ['rev-parse', '--verify', 'HEAD']).strip()
     changed, created, _ = _git_status(workspace, *PATCH_IGNORES)
-    if created: _git(workspace, ['add', '-N', *created])
+    if created:
+        _git(workspace, ['add', '-N', *created])
     diff = _git(workspace, ['diff', '--', *changed]) if changed else ''
     diff_ref = _write_patch_diff(workspace, attempt, diff)
     check = _scope_check(changed, created, repair_plan['change_plan'])
@@ -526,7 +536,8 @@ def _patch_fingerprint(diff: str) -> str:
             line.startswith('-') and not line.startswith('---')
         ):
             text = ' '.join(line[1:].split())
-            if text and not text.startswith('#'): tokens.add(f'{current}::{line[0]}{text}')
+            if text and not text.startswith('#'):
+                tokens.add(f'{current}::{line[0]}{text}')
     digest = hashlib.sha256('\n'.join(sorted(tokens)).encode('utf-8')).hexdigest()
     return f'sha256:{digest}' if tokens else ''
 
@@ -555,28 +566,36 @@ def _gate_failure(explore_artifacts: list[tuple[str, dict[str, Any]]]) -> str:
     for schema, payload in reversed(explore_artifacts):
         if schema == 'OpenCodeRunTrace':
             failure = _trace_failure(payload)
-            if failure: return failure
+            if failure:
+                return failure
     for schema, payload in reversed(explore_artifacts):
         if schema == 'OpenCodeWorkerReport':
             failure = _worker_failure(payload)
-            if failure: return failure
+            if failure:
+                return failure
     return ''
 
 
 def _trace_failure(trace: dict[str, Any]) -> str:
     last_error = trace.get('last_error') if isinstance(trace.get('last_error'), dict) else {}
     error_type = str(last_error.get('type') or '')
-    if error_type: return f'opencode_{error_type}'
-    if trace and trace.get('mapping_status') == 'failed': return 'opencode_mapping_failed'
-    if int(trace.get('returncode') or 0): return 'opencode_failed'
+    if error_type:
+        return f'opencode_{error_type}'
+    if trace and trace.get('mapping_status') == 'failed':
+        return 'opencode_mapping_failed'
+    if int(trace.get('returncode') or 0):
+        return 'opencode_failed'
     return ''
 
 
 def _worker_failure(worker_report: dict[str, Any]) -> str:
     status = str(worker_report.get('protocol_status') or '')
-    if status == 'valid' or not worker_report: return ''
-    if status == 'missing': return 'worker_report_missing'
-    if status == 'invalid': return 'worker_protocol_violation'
+    if status == 'valid' or not worker_report:
+        return ''
+    if status == 'missing':
+        return 'worker_report_missing'
+    if status == 'invalid':
+        return 'worker_protocol_violation'
     return f'worker_report_{status}'
 
 
@@ -640,7 +659,8 @@ def _write_patch_diff(workspace: Path, attempt: int, diff: str) -> str:
 
 
 def _reverse_apply_status(workspace: Path, diff: str) -> str:
-    if not diff.strip(): return 'not_checked'
+    if not diff.strip():
+        return 'not_checked'
     result = subprocess.run(
         ['git', '-c', f'safe.directory={workspace}', '-C', str(workspace), 'apply', '--reverse', '--check', '-'],
         input=diff, capture_output=True, text=True, check=False,
@@ -663,7 +683,8 @@ def _changed_hunks(workspace: Path, diff: str) -> list[dict[str, Any]]:
             start, end = _hunk_range(line)
             hunk = {'path': current, 'line_start': start, 'line_end': end, 'lines': []}
             continue
-        if hunk is not None: hunk['lines'].append(line)
+        if hunk is not None:
+            hunk['lines'].append(line)
     return hunks
 
 
@@ -685,13 +706,15 @@ def _finalize_hunk(workspace: Path, hunk: dict[str, Any]) -> dict[str, Any]:
 
 
 def _symbol_at(path: Path, line_number: int) -> str:
-    if not path.exists() or line_number <= 0: return '__module__'
+    if not path.exists() or line_number <= 0:
+        return '__module__'
     symbol = '__module__'
     for index, line in enumerate(path.read_text(encoding='utf-8', errors='ignore').splitlines(), start=1):
         stripped = line.strip()
         if stripped.startswith('def ') or stripped.startswith('class '):
             symbol = stripped.split('(', 1)[0].split(':', 1)[0].split()[-1]
-        if index >= line_number: return symbol
+        if index >= line_number:
+            return symbol
     return symbol
 
 
@@ -747,7 +770,8 @@ def _evaluate(ctx, plan, service, patch, attempt, llm, model_config):
     dataset_name = str(ctx.params.get('dataset_name') or service.get('dataset_name') or '')
     failure = '' if target_url and dataset_name and str(target_url).endswith('/api/chat/stream') else (
         'candidate_chat_url and dataset_name are required for real repair evaluation')
-    if failure: return _incomplete(attempt, failure), _candidate_report(attempt, [], failure), []
+    if failure:
+        return _incomplete(attempt, failure), _candidate_report(attempt, [], failure), []
     heldout_plan = plan.get('heldout') if isinstance(plan.get('heldout'), dict) else {}
     primary = plan['policy']['primary_metric']
     bad = [_safe_eval_case(ctx, plan, case_id, target_url, dataset_name, model_config, llm)
@@ -824,7 +848,8 @@ def _safe_eval_case(ctx, plan, case_id, target_url, dataset_name, model_config, 
 
 
 def _safe_classify_candidate_case(ctx, row, plan, attempt, llm) -> tuple[dict[str, Any], list[ArtifactDraft]]:
-    if not str(row.get('case_ref') or '').strip(): return row, []
+    if not str(row.get('case_ref') or '').strip():
+        return row, []
     try:
         return classify_candidate_case(ctx, row, plan, attempt, llm)
     except Exception as exc:
@@ -920,8 +945,10 @@ def _category(ctx: OperationContext, priorities: list[dict[str, Any]]) -> str:
                   if item.get('fine_category') not in NON_REPAIRABLE_CATEGORIES]
     if requested and requested not in available:
         raise ValueError(f'fine_category not found in ClassificationReport priorities: {requested}')
-    if requested in NON_REPAIRABLE_CATEGORIES: raise ValueError(f'fine_category is not repairable: {requested}')
-    if not (requested or repairable): raise ValueError('ClassificationReport has no repairable priorities')
+    if requested in NON_REPAIRABLE_CATEGORIES:
+        raise ValueError(f'fine_category is not repairable: {requested}')
+    if not (requested or repairable):
+        raise ValueError('ClassificationReport has no repairable priorities')
     return requested or repairable[0]
 
 
@@ -943,7 +970,8 @@ def _target_rows(ctx, report, priorities, category) -> list[dict[str, Any]]:
         fine = typed_payload(ctx, ArtifactRef.parse(str(row.get('fine_classification_ref') or '')),
                              'CaseFineClassification')
         rows.append({**row, 'judge_result_ref': str(fine.get('judge_result_ref') or '')})
-    if not rows: raise ValueError('repair target badcase set is empty')
+    if not rows:
+        raise ValueError('repair target badcase set is empty')
     return rows
 
 
@@ -958,7 +986,8 @@ def _goodcase_guard(ctx, eval_report, targets) -> tuple[list[dict[str, str]], di
         if case_id not in bad_ids and judge.get('quality_label') == 'good':
             candidates.append({'case_id': case_id, 'judge_ref': str(ref)})
     target_count, meta = len(targets), _guard_meta(ctx, len(candidates), len(targets))
-    if not candidates: return [], meta | {'mode': 'no_goodcase', 'target_badcase_count': target_count}
+    if not candidates:
+        return [], meta | {'mode': 'no_goodcase', 'target_badcase_count': target_count}
     sample_size = meta['sample_size']
     rng = random.Random(str(ctx.params.get('random_seed') or f'{ctx.run_id}:'
                             f"{ctx.params.get('classification_report_ref')}"))
@@ -1003,14 +1032,16 @@ def _heldout_policy(ctx, report, eval_report, targets, guards, category: str) ->
 
 def _stratified_goodcase_heldout(ctx, eval_report, excluded_ids: set[str],
                                  cap: int) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-    if cap <= 0: return [], []
+    if cap <= 0:
+        return [], []
     groups: dict[str, list[dict[str, str]]] = {}
     skipped: list[dict[str, str]] = []
     for raw_ref in eval_report.get('judge_result_refs') or []:
         ref = ArtifactRef.parse(str(raw_ref))
         judge = typed_payload(ctx, ref, 'JudgeResult')
         case_id = validate_case_id(str(judge.get('case_id') or ''))
-        if case_id in excluded_ids or judge.get('quality_label') != 'good': continue
+        if case_id in excluded_ids or judge.get('quality_label') != 'good':
+            continue
         case_ref = str(judge.get('case_ref') or '')
         try:
             case = typed_payload(ctx, ArtifactRef.parse(case_ref), 'DatasetCase')
@@ -1032,7 +1063,8 @@ def _stratified_goodcase_heldout(ctx, eval_report, excluded_ids: set[str],
         for row in sorted(groups[stratum], key=lambda item: item['case_id']):
             selected.append(row)
             break
-        if len(selected) >= cap: break
+        if len(selected) >= cap:
+            break
     return selected, skipped
 
 
@@ -1061,7 +1093,8 @@ def _baseline(ctx: OperationContext) -> dict[str, Any]:
     ):
         raise ValueError(f'invalid VerifiedRepair baseline: {ref}')
     snapshot = verified.get('metric_after_snapshot') if isinstance(verified.get('metric_after_snapshot'), dict) else {}
-    if not snapshot: raise ValueError(f'VerifiedRepair has no metric baseline snapshot: {ref}')
+    if not snapshot:
+        raise ValueError(f'VerifiedRepair has no metric baseline snapshot: {ref}')
     return {'mode': 'verified_repair', 'source_ref': ref, 'code_base_ref': workspace,
             'metric_baseline_ref': str(verified.get('winning_evaluation_ref') or ''), 'metric_baseline': snapshot}
 
@@ -1075,16 +1108,21 @@ def _baseline_ref(plan: dict[str, Any], case_id: str) -> str:
     ):
         ids = list(bucket.get(ids_key) or bucket.get('badcase_ids') or bucket.get('goodcase_ids') or [])
         refs = list(bucket.get(key) or [])
-        if not ids: continue
-        if len(refs) != len(ids): raise ValueError(f'repair loop plan baseline refs mismatch: {ids_key}/{key}')
-        if case_id in ids: return refs[ids.index(case_id)]
+        if not ids:
+            continue
+        if len(refs) != len(ids):
+            raise ValueError(f'repair loop plan baseline refs mismatch: {ids_key}/{key}')
+        if case_id in ids:
+            return refs[ids.index(case_id)]
     raise ValueError(f'case is not in repair loop plan: {case_id}')
 
 
 def _mechanism_progress(trace_deltas: list[dict[str, Any]]) -> str:
     kinds = {str(item.get('delta') or '') for item in trace_deltas if isinstance(item, dict)}
-    if kinds & MECHANISM_PROGRESS_KINDS and 'new_failure' not in kinds: return 'improved'
-    if kinds and kinds <= {'none'}: return 'unchanged'
+    if kinds & MECHANISM_PROGRESS_KINDS and 'new_failure' not in kinds:
+        return 'improved'
+    if kinds and kinds <= {'none'}:
+        return 'unchanged'
     return 'inconclusive'
 
 
@@ -1211,8 +1249,10 @@ def _trace_delta_summary(stage_hits: dict[str, Any]) -> dict[str, Any]:
 def _trace_delta_kind(before: dict[str, Any], after: dict[str, Any]) -> str:
     before_failure = str(before.get('primary_transition_failure') or 'none')
     after_failure = str(after.get('primary_transition_failure') or 'none')
-    if before_failure != 'none' and after_failure == 'none': return 'fixed_transition_failure'
-    if before_failure == after_failure: return 'none'
+    if before_failure != 'none' and after_failure == 'none':
+        return 'fixed_transition_failure'
+    if before_failure == after_failure:
+        return 'none'
     order = ['no_kb_search', 'retriever_miss', 'retriever_to_merge_drop', 'merge_to_rerank_input_drop',
              'rerank_drop', 'rerank_output_to_final_context_drop', 'generation_missed_available_context', 'none']
     if before_failure in order and after_failure in order:
@@ -1272,7 +1312,8 @@ def _candidate_focus(rows, bad) -> list[dict[str, Any]]:
     focus = [row for row in rows if row['outcome'] in {'regressed', 'failed'}
              or id(row) in bad_ids and row['outcome'] == 'unchanged']
     improved = next((row for row in bad if row.get('outcome') == 'improved'), None)
-    if improved and id(improved) not in {id(row) for row in focus}: focus.append(improved)
+    if improved and id(improved) not in {id(row) for row in focus}:
+        focus.append(improved)
     return focus
 
 
@@ -1510,10 +1551,12 @@ def _run_command(ctx: OperationContext, command: Any, attempt: int, workspace_re
         argv = command_args(command)
     except ValueError as exc:
         return fail([], 'invalid_command', 127, str(exc), str(exc))
-    if not argv: return fail(argv, 'empty_command', 127, 'empty verification command', 'empty verification command')
+    if not argv:
+        return fail(argv, 'empty_command', 127, 'empty verification command', 'empty verification command')
     try:
         timeout_s = int(ctx.params.get('verification_timeout_s', 600))
-        if timeout_s <= 0: raise ValueError('verification_timeout_s must be positive')
+        if timeout_s <= 0:
+            raise ValueError('verification_timeout_s must be positive')
     except (TypeError, ValueError) as exc:
         return fail(argv, 'invalid_timeout', 124, str(exc), str(exc))
     try:
@@ -1564,7 +1607,8 @@ def _norm_paths(items: Any) -> list[str]:
     out = []
     for item in items or []:
         rel = _rel_path(str(item))
-        if rel and rel not in out: out.append(rel)
+        if rel and rel not in out:
+            out.append(rel)
     return out
 
 
@@ -1589,7 +1633,8 @@ def _git_status(workspace, ignored_roots=(), ignored_files=None) -> tuple[list[s
         code, path = line[:2], _rel_path(line[3:].split(' -> ')[-1]) if len(line) >= 4 else ''
         ignored = (not path or path in (ignored_files or set()) or path.endswith('.pyc')
                    or '__pycache__' in Path(path).parts or _path_in(path, list(ignored_roots)))
-        if ignored: continue
+        if ignored:
+            continue
         buckets[0].append(path)
         buckets[1].extend([path] if code == '??' or 'A' in code else [])
         buckets[2].extend([path] if 'D' in code else [])
@@ -1601,17 +1646,20 @@ def _restore_diff_since(workspace: Path, before: tuple[list[str], list[str], lis
     before_changed = set(before[0])
     changed, created, deleted = _git_status(workspace, ignored_roots, ignored_files)
     new_changed = sorted(set(changed) - before_changed)
-    if not new_changed: return
+    if not new_changed:
+        return
     created_new = [path for path in created if path in new_changed]
     deleted_new = [path for path in deleted if path in new_changed]
     tracked = [path for path in new_changed if path not in set(created_new + deleted_new)]
-    if tracked: _git(workspace, ['restore', '--staged', '--worktree', '--', *tracked])
+    if tracked:
+        _git(workspace, ['restore', '--staged', '--worktree', '--', *tracked])
     if created_new:
         subprocess.run(
             ['git', '-c', f'safe.directory={workspace}', '-C', str(workspace), 'clean', '-f', '--', *created_new],
             capture_output=True, text=True, check=False,
         )
-    if deleted_new: _git(workspace, ['restore', '--staged', '--worktree', '--', *deleted_new])
+    if deleted_new:
+        _git(workspace, ['restore', '--staged', '--worktree', '--', *deleted_new])
 
 
 def _avg(values: Any) -> float:

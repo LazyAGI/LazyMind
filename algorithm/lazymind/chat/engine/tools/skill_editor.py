@@ -43,6 +43,22 @@ def skill_editor(
 ) -> Dict[str, Any]:
     """Manage skills by creating, modifying, or removing a skill entry.
 
+    Use this tool to curate reusable skills. It has three actions:
+
+    - action='create': after completing a complex task (5+ tool calls),
+      fixing a tricky error, or discovering a non-trivial workflow, save the
+      approach as a new skill by passing the full SKILL.md body in
+      content.
+    - action='modify': when finding a skill outdated, incomplete, or
+      wrong, submit targeted edit proposals via suggestions
+      (natural-language, max 5 per call).
+    - action='remove': when a skill is superseded or no longer correct,
+      request its deletion.
+
+    Only skills with source=remote are writable. Skills with
+    source=file or any other source are read-only; do not use this tool
+    to modify or remove them.
+
     Args:
         name: Skill name.
         action: Skill workflow to run. Use 'create' to submit a new SKILL.md

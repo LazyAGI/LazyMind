@@ -4,143 +4,65 @@ import asyncio
 import json
 import os
 import shutil
-import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from collections import Counter
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Callable
+from threading import RLock
+from typing import Any
 
 from fastapi import Body, FastAPI, HTTPException, Request, Response
 from sse_starlette.sse import EventSourceResponse
 
 from evo import normalize_chat_stream_url, normalize_http_origin, validate_id
-from evo.artifacts import ArtifactRef
-from evo.checkpoints import CheckpointState, checkpoint_state_from_run, frontend_checkpoint_from_run
-from evo.checkpoints.manager import _lifecycle_payload
-from evo.checkpoints.models import RESUME_FROM_SNAPSHOT, RESUME_WITH_INTERVENTIONS
-from evo.projections import rebuild_frontend_state
-from evo.service.flow import EvoFlowService, FlowMessageResult, TARGET_MEAN_DELTA, result_dict
-from evo.store import Event, StoreRunLifecycle
+from evo.artifact_flow import EvoFlowRuntime, FlowStepState
+from evo.artifact_runtime import ArtifactKey, ArtifactRef
+from evo.message_intent import MessageSessionStore
+from evo.message_intent.planner import LazyLLMPlannerClient, StructuredJSONNextIntentPlanner
+from evo.message_intent.service import MessageIntentService
 
 BODY_REQUIRED = Body(...)
 BODY_DEFAULT = Body(default_factory=dict)
 RUN_ID = 'run_1'
 MAX_CREATE_THREAD_CASES = 1000
 MAX_CREATE_THREAD_WORKERS = 32
-STAGE_MAP = {
-    'dataset_corpus': 'dataset', 'dataset_gen': 'dataset', 'dataset': 'dataset', 'eval': 'eval',
-    'candidate_eval': 'abtest', 'run': 'analysis', 'analysis': 'analysis', 'apply': 'repair', 'repair': 'repair',
-    'abtest': 'abtest', 'repair_plan': 'repair', 'candidate_workspace': 'repair', 'repair_loop': 'repair',
-    'candidate_service_start': 'abtest', 'candidate_service_stop': 'abtest', 'abtest_compare': 'abtest',
-    'candidate_cutover': 'abtest',
+RESULT_ARTIFACTS = {
+    'datasets': ('eval.dataset',),
+    'eval-reports': ('eval.summary', 'abtest.candidate_eval_summary'),
+    'analysis-reports': ('analysis.summary',),
+    'abtests': ('abtest.comparison',),
+    'diffs': ('repair.verified_patch',),
 }
-RUN_STATUS_STAGES = (
-    ('dataset', '数据集生成', ('eval_dataset', 'corpus_snapshot')),
-    ('eval', '执行评测', ('eval_report',)),
-    ('analysis', '错误分析', ('classification_report', 'repair_loop_plan')),
-    ('repair', '代码优化', ('verified_repair', 'opencode_run_trace_attempt_1')),
-    ('abtest', 'ABTest 和切流', ('abtest_comparison', 'candidate_algorithm_cutover')),
-)
-RESULT_ARTIFACT_IDS = {
-    'datasets': ('eval_dataset',),
-    'eval-reports': ('eval_report', 'candidate_eval_report'),
-    'analysis-reports': ('classification_report', 'repair_loop_plan'),
-    'abtests': ('abtest_comparison', 'candidate_algorithm_cutover'),
+STAGE_LABELS = {
+    'dataset': '数据集生成',
+    'eval': '评测',
+    'analysis': '分析',
+    'repair': '修复',
+    'abtest': 'ABTest',
 }
-RESULT_ARTIFACT_SCHEMAS = {
-    'analysis-reports': {'RepairLoopPlan', 'RepairEvidencePacket', 'FaultLocalizationReport', 'DiagnosticProbePlan',
-                         'DiagnosticProbeResult', 'RepairDiagnosis', 'OpenCodeInstruction'},
-    'diffs': {'OpenCodeRunTrace', 'OpenCodeWorkerReport', 'CodePatchCandidate', 'CandidateServiceRun',
-              'RepairEvaluation', 'PatchCorrectnessAssessment', 'PatchCritique', 'BranchDecision', 'RepairBranchState',
-              'RepairStateTransition', 'RepairHypothesis', 'RepairPlan', 'CandidateClassificationReport',
-              'RepairLoopDecision', 'RepairLoopMemory', 'RepairLoopState', 'VerifiedRepair'},
+RESULT_ARTIFACT_ALIASES = {
+    'eval.dataset': 'eval_dataset',
+    'eval.summary': 'eval_report',
+    'abtest.candidate_eval_summary': 'candidate_eval_report',
+    'analysis.summary': 'classification_report',
+    'repair.verified_patch': 'repair_loop_plan',
+    'abtest.comparison': 'abtest_comparison',
+}
+ARTIFACT_ID_ALIASES = {value: key for key, value in RESULT_ARTIFACT_ALIASES.items()} | {
+    'eval_dataset': 'eval.dataset',
+    'eval_report': 'eval.summary',
+    'candidate_eval_report': 'abtest.candidate_eval_summary',
+    'classification_report': 'analysis.summary',
+    'repair_loop_plan': 'repair.verified_patch',
+    'abtest_comparison': 'abtest.comparison',
 }
 
 
-@dataclass(frozen=True)
-class QueuedDrainResult:
-    blocked: bool = False
-    confirmation_result: FlowMessageResult | None = None
-    applied_count: int = 0
-    remaining_count: int = 0
-
-
-class CheckpointMessageController:
-    def __init__(self, hub: 'EvoMessageHub'):
-        self.hub = hub
-
-    def handle(self, thread_id: str, service: EvoFlowService, checkpoint: CheckpointState, message_id: str,
-               content: str, payload: dict[str, Any]) -> dict:
-        input_policy = _resume_input_policy(payload)
-        allowed_capabilities = payload.get('allowed_capabilities')
-        if checkpoint.is_manual_cutover:
-            allowed = (
-                list(allowed_capabilities) if isinstance(allowed_capabilities, list)
-                else service.registry.capability_ids()
-            )
-            allowed_capabilities = [
-                capability for capability in allowed if capability != 'cutover_candidate_algorithm'
-            ]
-        result = service.send_checkpoint_message(
-            message_id, content, allowed_capabilities=allowed_capabilities,
-            dispatch=bool(payload.get('dispatch', True)), max_dispatch=int(payload.get('max_dispatch') or 1),
-        )
-        return self._handle_checkpoint_result(thread_id, service, checkpoint, message_id, result, input_policy)
-
-    def _handle_checkpoint_result(self, thread_id: str, service: EvoFlowService, checkpoint: CheckpointState,
-                                  message_id: str, result: FlowMessageResult, input_policy: str) -> dict:
-        resumed_checkpoint = False
-        if result.action == 'confirm_intent_operation':
-            parent = service.checkpoints.active_checkpoint(RUN_ID)
-            if parent and parent.checkpoint_kind == 'stage_gate' and service.confirmation_succeeded(result):
-                input_policy = _default_resume_input_policy(parent, input_policy)
-                self.hub._apply_confirmed_intent_at_stage_gate(thread_id, service, parent, input_policy)
-                reply = '修改已应用，测试集已更新。点击「继续执行」进入评测阶段。'
-            else:
-                self.hub._cache_active_checkpoint(thread_id, service) if parent else self.hub._clear_stage_checkpoint(
-                    thread_id)
-                reply = self.hub._result_reply(thread_id, service, result)
-        elif result.action == 'resume_checkpointed':
-            if checkpoint.is_manual_cutover:
-                reply = '候选算法切流需要前端调用继续接口并显式确认切流。'
-                return self._reply(thread_id, message_id, reply, result, requires_confirmation=True,
-                                   confirmation_checkpoint_id=checkpoint.checkpoint_id)
-            input_policy = _default_resume_input_policy(checkpoint, input_policy)
-            resumed_checkpoint = self.hub._resume_stage_checkpoint(thread_id, service, checkpoint, 'message',
-                                                                   input_policy)
-            result = _stage_checkpoint_resumed_result(message_id, checkpoint, input_policy)
-            reply = f'已继续：{checkpoint.next_stage or "下一阶段"}。' if resumed_checkpoint \
-                else '已应用排队干预，当前操作需要确认。'
-        elif _completed_manual_cutover(checkpoint, result, service):
-            input_policy = _default_resume_input_policy(checkpoint, input_policy)
-            resumed_checkpoint = self.hub._resume_stage_checkpoint(thread_id, service, checkpoint, 'message',
-                                                                   input_policy)
-            reply = '已完成候选算法切流，正在收尾当前流程。' if resumed_checkpoint \
-                else '已完成候选算法切流，但排队干预需要确认。'
-        else:
-            reply = self.hub._result_reply(thread_id, service, result)
-            if result.action != 'read_run_status_query': reply += ' 当前仍在 checkpoint，已记录这条干预。'
-        if result.requires_confirmation: self.hub._cache_active_checkpoint(thread_id, service)
-        checkpoint_requires_confirmation = (checkpoint.is_manual_cutover and not resumed_checkpoint
-                                            and not _completed_manual_cutover(checkpoint, result, service))
-        return self._reply(
-            thread_id, message_id, reply, result,
-            requires_confirmation=result.requires_confirmation or checkpoint_requires_confirmation,
-            confirmation_checkpoint_id=(result.confirmation_checkpoint_id
-                                        or (checkpoint.checkpoint_id if checkpoint_requires_confirmation else '')),
-        )
-
-    def _reply(self, thread_id: str, message_id: str, reply: str, result: FlowMessageResult, *,
-               requires_confirmation: bool | None = None, confirmation_checkpoint_id: str | None = None) -> dict:
-        return self.hub._message_response(thread_id, message_id, reply, result,
-                                          requires_confirmation=requires_confirmation,
-                                          confirmation_checkpoint_id=confirmation_checkpoint_id)
-
-
-def create_app() -> FastAPI:
-    hub = EvoMessageHub(Path(os.getenv('LAZYMIND_EVO_BASE_DIR') or '/var/lib/lazymind/evo'))
-    app = FastAPI(title='evo flow service', version='refactor')
+def create_app(*, planner_factory: Any | None = None) -> FastAPI:
+    hub = EvoMessageHub(Path(os.getenv('LAZYMIND_EVO_BASE_DIR') or '/var/lib/lazymind/evo'),
+                        planner_factory=planner_factory)
+    app = FastAPI(title='evo flow service', version='artifact-runtime')
     app.state.hub = hub
 
     @app.get('/healthz')
@@ -165,11 +87,15 @@ def create_app() -> FastAPI:
 
     @app.get('/v1/evo/threads/statuses')
     def list_thread_statuses() -> dict:
-        rows = [hub.flow_status(meta['id']) | {'title': meta.get('title', ''),
-                                               'mode': meta.get('mode', 'interactive'),
-                                               'created_at': meta.get('created_at'),
-                                               'updated_at': meta.get('updated_at')}
-                for meta in hub.list_threads()]
+        rows = [
+            hub.flow_status(meta['id']) | {
+                'title': meta.get('title', ''),
+                'mode': meta.get('mode', 'interactive'),
+                'created_at': meta.get('created_at'),
+                'updated_at': meta.get('updated_at'),
+            }
+            for meta in hub.list_threads()
+        ]
         counts: dict[str, int] = {}
         for row in rows:
             counts[row['status']] = counts.get(row['status'], 0) + 1
@@ -198,6 +124,12 @@ def create_app() -> FastAPI:
             return EventSourceResponse(hub.post_message_stream(thread_id, body))
         return await asyncio.to_thread(hub.post_message, thread_id, body)
 
+    @app.get('/v1/evo/threads/{thread_id}/message-events')
+    async def message_events(thread_id: str, request: Request, since: int = 0) -> EventSourceResponse:
+        hub.get_thread(thread_id)
+        last = request.headers.get('last-event-id') or ''
+        return EventSourceResponse(hub.message_events(thread_id, int(last) if last.isdigit() else since))
+
     @app.post('/v1/evo/threads/{thread_id}/start')
     async def start(thread_id: str, body: dict = BODY_DEFAULT) -> dict:
         return await asyncio.to_thread(hub.start, thread_id, body)
@@ -220,14 +152,13 @@ def create_app() -> FastAPI:
 
     @app.post('/v1/evo/threads/{thread_id}/auto/step')
     async def auto_step(thread_id: str) -> dict:
-        return await asyncio.to_thread(hub.start, thread_id, {'force_auto': True})
+        return await asyncio.to_thread(hub.start, thread_id, {})
 
     @app.post('/v1/evo/threads/{thread_id}/auto/start')
     async def auto_start(thread_id: str, request: Request, body: dict = BODY_DEFAULT):
         if 'text/event-stream' in request.headers.get('accept', ''):
-            return EventSourceResponse(
-                _single_sse('auto_start', {'thread_id': thread_id, **hub.start(thread_id, body)})
-            )
+            return EventSourceResponse(_single_sse(
+                'auto_start', {'thread_id': thread_id, **hub.start(thread_id, body)}))
         return await asyncio.to_thread(hub.start, thread_id, body)
 
     @app.post('/v1/evo/threads/{thread_id}/auto/stop')
@@ -252,15 +183,17 @@ def create_app() -> FastAPI:
     @app.get('/v1/evo/threads/{thread_id}/reports/{report_id}/content')
     def thread_report_content(thread_id: str, report_id: str, fmt: str = ''):
         content = hub.report_content(thread_id, report_id)
-        if fmt in {'md', 'markdown', 'text'}: return Response(content, media_type='text/markdown; charset=utf-8')
+        if fmt in {'md', 'markdown', 'text'}:
+            return Response(content, media_type='text/markdown; charset=utf-8')
         return {'thread_id': thread_id, 'report_id': report_id, 'content': content}
 
     @app.get('/v1/evo/reports/{report_id}/content')
     def report_content(report_id: str, fmt: str = ''):
-        thread_id, artifact = _scoped_report_id(report_id)
-        content = hub.report_content(thread_id, artifact)
-        if fmt in {'md', 'markdown', 'text'}: return Response(content, media_type='text/markdown; charset=utf-8')
-        return {'thread_id': thread_id, 'report_id': artifact, 'content': content}
+        thread_id, artifact_id = _scoped_report_id(report_id)
+        content = hub.report_content(thread_id, artifact_id)
+        if fmt in {'md', 'markdown', 'text'}:
+            return Response(content, media_type='text/markdown; charset=utf-8')
+        return {'thread_id': thread_id, 'report_id': artifact_id, 'content': content}
 
     @app.get('/v1/evo/diffs/{apply_id}/{filename:path}')
     def diff_content(apply_id: str, filename: str) -> Response:
@@ -273,61 +206,39 @@ def get_app() -> FastAPI:
     return create_app()
 
 
-class ThreadDispatchGate:
-    def __init__(self, hub: 'EvoMessageHub', thread_id: str):
-        self.hub = hub
-        self.thread_id = thread_id
-
-    def can_dispatch(self, run_id: str) -> bool:
-        del run_id
-        try:
-            status = str(self.hub._meta(self.thread_id).get('status') or '')
-        except HTTPException:
-            return False
-        return status not in {'paused', 'cancelled', 'deleting'}
-
-
-class ContinuationPolicyResolver:
-    @staticmethod
-    def resolve(payload: dict[str, Any] | None = None, checkpoint: CheckpointState | None = None) -> str:
-        del checkpoint
-        payload = payload or {}
-        value = str(payload.get('input_policy') or '').strip()
-        if not value and payload.get('restart_from_snapshot'):
-            value = RESUME_FROM_SNAPSHOT
-        if not value:
-            value = RESUME_WITH_INTERVENTIONS
-        if value not in {RESUME_FROM_SNAPSHOT, RESUME_WITH_INTERVENTIONS}:
-            expected = f'{RESUME_WITH_INTERVENTIONS} or {RESUME_FROM_SNAPSHOT}'
-            raise HTTPException(400, f'bad input_policy {value!r}; expected {expected}')
-        return value
-
-
 class EvoMessageHub:
-    def __init__(self, base_dir: Path):
+    def __init__(self, base_dir: Path, *, planner_factory: Any | None = None):
         self.base_dir = base_dir
         self.threads_dir = base_dir / 'state' / 'threads'
-        self._services: dict[str, EvoFlowService] = {}
-        self._tasks: dict[str, threading.Thread] = {}
-        self._checkpoint_events: dict[str, threading.Event] = {}
-        self._queued_messages: dict[str, list[dict[str, Any]]] = {}
-        self._lock = threading.RLock()
-        self._checkpoint_messages = CheckpointMessageController(self)
+        self._artifact_flows: dict[str, EvoFlowRuntime] = {}
+        self._message_services: dict[str, MessageIntentService] = {}
+        self._message_service_lock = RLock()
+        self._planner_factory = planner_factory
 
     def create_thread(self, payload: dict[str, Any]) -> dict:
         mode = str(payload.get('mode') or 'interactive').strip()
-        if mode not in {'auto', 'interactive'}: raise HTTPException(400, f'bad mode {mode!r}')
-        thread_id, now = f'thr-{uuid.uuid4().hex[:8]}', time.time()
+        if mode not in {'auto', 'interactive'}:
+            raise HTTPException(400, f'bad mode {mode!r}')
         try:
             inputs = _normalize_inputs(dict(payload.get('inputs') or {}))
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        meta = {'id': thread_id, 'thread_id': thread_id, 'mode': mode, 'title': str(payload.get('title') or ''),
-                'inputs': inputs, 'model_config': payload.get('llm_config') or {}, 'status': 'idle',
-                'created_at': now, 'updated_at': now}
+        thread_id, now = f'thr-{uuid.uuid4().hex[:8]}', time.time()
+        meta = {
+            'id': thread_id,
+            'thread_id': thread_id,
+            'mode': mode,
+            'title': str(payload.get('title') or ''),
+            'inputs': inputs,
+            'model_config': _model_config_payload(payload),
+            'status': 'idle',
+            'created_at': now,
+            'updated_at': now,
+        }
         self._write_meta(thread_id, meta)
-        if mode == 'auto' and payload.get('start_auto'): self.start(thread_id, payload)
-        return meta
+        if mode == 'auto' and payload.get('start_auto'):
+            self.start(thread_id, payload)
+        return self._meta(thread_id)
 
     def list_threads(self) -> list[dict]:
         rows = [_read_json(path) for path in self.threads_dir.glob('*/thread.json')]
@@ -338,673 +249,354 @@ class EvoMessageHub:
 
     def delete_thread(self, thread_id: str) -> dict:
         self._meta(thread_id)
-        cancelled = False
-        service = self._service(thread_id) if thread_id in self._services or self._has_run(thread_id) else None
-        if service and self._manual_cutover_pending(service):
-            raise HTTPException(409, f'thread {thread_id} is running manual cutover')
-        task = self._tasks.get(thread_id)
-        if task and task.is_alive():
-            self._update_meta(thread_id, status='deleting', pending_checkpoint=None, updated_at=time.time())
-            self.cancel(thread_id)
-            cancelled = True
-            task.join(timeout=5)
-            if task.is_alive(): raise HTTPException(409, f'thread {thread_id} is still running')
-        self._queued_messages.pop(thread_id, None)
-        self._checkpoint_events.pop(thread_id, None)
-        service = self._services.pop(thread_id, None)
-        run_root, thread_dir = self.base_dir / 'dev-runs' / thread_id, self._thread_dir(thread_id)
+        self._close_flow(thread_id)
+        self._close_message_service(thread_id)
+        run_root, thread_dir = self._run_root(thread_id), self._thread_dir(thread_id)
         run_deleted, thread_deleted = run_root.exists(), thread_dir.exists()
-        if service:
-            run_deleted = service.delete()
-        elif run_deleted:
-            EvoFlowService.delete_run(run_root=run_root, run_id=RUN_ID)
+        shutil.rmtree(run_root, ignore_errors=True)
         shutil.rmtree(thread_dir, ignore_errors=True)
-        return {'thread_id': thread_id, 'deleted_run': run_deleted, 'deleted_thread': thread_deleted,
-                'cancelled': cancelled}
+        return {
+            'thread_id': thread_id,
+            'deleted_run': run_deleted,
+            'deleted_thread': thread_deleted,
+            'cancelled': False,
+        }
 
     def history(self, thread_id: str) -> dict:
-        return {'thread_id': thread_id, 'messages': _read_messages(self._thread_dir(thread_id) / 'messages.jsonl')}
+        meta = self._meta(thread_id)
+        messages = []
+        service_path = self._message_store_path(thread_id)
+        if service_path.exists():
+            store = MessageSessionStore(service_path)
+            try:
+                messages = store.events_as_history(thread_id)
+            finally:
+                store.close()
+        messages = messages or _read_messages(self._thread_dir(thread_id) / 'messages.jsonl')
+        messages = messages or [_thread_summary_message(meta, self.flow_status(thread_id))]
+        return {
+            'thread_id': thread_id,
+            'title': meta.get('title') or thread_id,
+            'messages': messages,
+            'rounds': _history_rounds(thread_id, messages),
+        }
 
     def start(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
+        payload = payload or {}
+        self._update_model_config(thread_id, payload)
         self._meta(thread_id)
-        with self._lock:
-            checkpoint = self._stage_checkpoint(thread_id)
-            if checkpoint:
-                return {'status': 'waiting_checkpoint', 'thread_id': thread_id, 'task_id': thread_id,
-                        'checkpoint_id': checkpoint.checkpoint_id}
-            if self._task_alive(thread_id):
-                return {'status': 'running', 'thread_id': thread_id, 'task_id': thread_id}
-            self._clear_stage_checkpoint(thread_id)
-            self._start_flow_task_locked(thread_id, self._resume_start_stage(thread_id))
-        return {'status': 'running', 'thread_id': thread_id, 'task_id': thread_id}
-
-    def _resume_start_stage(self, thread_id: str) -> str:
-        """Restarting a thread must not redo finished stages: once eval_dataset exists the
-        flow starts at eval, where per-stage artifact-match guards skip completed work."""
-        if not self._has_run(thread_id): return 'dataset'
-        try:
-            self._service(thread_id).artifacts.latest_ref('eval_dataset')
-        except KeyError:
-            return 'dataset'
-        return 'eval'
+        flow = self._artifact_flow(thread_id)
+        state = flow.start_full_flow(
+            command_id=str(payload.get('command_id') or f'start:{thread_id}'),
+            run_id=RUN_ID,
+            config=self._artifact_flow_config(thread_id),
+        )
+        return self._artifact_flow_response(thread_id, state)
 
     def pause(self, thread_id: str) -> dict:
-        service = self._service(thread_id)
-        StoreRunLifecycle(service.store, RUN_ID).mark_paused(thread_id=thread_id)
-        self._update_meta(thread_id, status='paused', updated_at=time.time())
-        for ref in service.graph.run_refs({'running'}):
-            service.runtime.request_interrupt(ref)
-        task = self._tasks.get(thread_id)
-        if task and task.is_alive():
-            task.join(timeout=5)
-        if not (task and task.is_alive()):
-            self._checkpoint_orphaned_running_operations(service)
-        return {'status': 'paused', 'thread_id': thread_id}
-
-    def _checkpoint_orphaned_running_operations(self, service: EvoFlowService) -> None:
-        for ref in service.graph.run_refs({'running'}):
-            service.graph.checkpoint_run(ref)
+        self._meta(thread_id)
+        if not self._has_artifact_flow(thread_id):
+            self._update_meta(thread_id, status='paused', pending_checkpoint=None, updated_at=time.time())
+            return {'status': 'paused', 'thread_id': thread_id}
+        state = self._artifact_flow(thread_id).pause_flow(command_id=f'pause:{uuid.uuid4().hex}', run_id=RUN_ID)
+        response = self._artifact_flow_response(thread_id, state)
+        return response | {'status': 'paused', 'pending_checkpoint': None}
 
     def cancel(self, thread_id: str) -> dict:
-        service = self._service(thread_id)
-        for ref in service.graph.run_refs({'running'}):
-            service.runtime.request_interrupt(ref)
-        self._queued_messages.pop(thread_id, None)
-        service.checkpoints.cancel_active(RUN_ID, thread_id=thread_id)
-        StoreRunLifecycle(service.store, RUN_ID).mark_cancelled(thread_id=thread_id)
-        self._update_meta(thread_id, status='cancelled', pending_checkpoint=None, updated_at=time.time())
-        event = self._checkpoint_events.get(thread_id)
-        if event: event.set()
-        return {'status': 'cancelled', 'thread_id': thread_id}
+        self._meta(thread_id)
+        if not self._has_artifact_flow(thread_id):
+            self._update_meta(thread_id, status='cancelled', pending_checkpoint=None, updated_at=time.time())
+            return {'status': 'cancelled', 'thread_id': thread_id}
+        state = self._artifact_flow(thread_id).cancel_flow(command_id=f'cancel:{uuid.uuid4().hex}', run_id=RUN_ID)
+        return self._artifact_flow_response(thread_id, state)
 
     def retry(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
-        return self.continue_thread(thread_id, payload)
+        self._update_model_config(thread_id, payload or {})
+        self._meta(thread_id)
+        if not self._has_artifact_flow(thread_id):
+            raise HTTPException(409, 'thread has no flow to retry')
+        flow = self._artifact_flow(thread_id)
+        state = flow.retry_failed_flow(
+            command_id=str((payload or {}).get('command_id') or f'retry:{uuid.uuid4().hex}'),
+            run_id=RUN_ID,
+        )
+        return self._artifact_flow_response(thread_id, state) | {'retried': True}
 
     def continue_thread(self, thread_id: str, payload: dict[str, Any] | None = None) -> dict:
         payload = payload or {}
+        self._update_model_config(thread_id, payload)
         self._meta(thread_id)
-        if self._task_alive(thread_id):
-            return {'status': 'running', 'thread_id': thread_id, 'resumed': False, 'block_reason': 'flow_busy'}
-        if not self._has_run(thread_id) and thread_id not in self._services:
+        if not self._has_artifact_flow(thread_id):
             raise HTTPException(409, 'thread has no flow to continue')
-        service = self._service(thread_id)
-        checkpoint = self._stage_checkpoint(thread_id)
-        if checkpoint and checkpoint.is_intent_confirmation and not payload.get('confirm_intent'):
-            return {'status': 'waiting_checkpoint', 'thread_id': thread_id, 'resumed': False,
-                    'block_reason': 'intent_confirmation_required'}
-        if checkpoint and checkpoint.is_manual_cutover and not payload.get('confirm_cutover'):
-            return {'status': 'waiting_checkpoint', 'thread_id': thread_id, 'resumed': False,
-                    'block_reason': 'manual_cutover_confirmation_required'}
-
-        policy = ContinuationPolicyResolver.resolve(payload, checkpoint)
-        if checkpoint and checkpoint.is_intent_confirmation:
-            result = self._execute_intent_confirmation(
-                thread_id, service, checkpoint, str(payload.get('message_id') or f'continue_{uuid.uuid4().hex[:8]}'),
-                input_policy=policy,
-            )
-            return {'status': self.flow_status(thread_id)['status'], 'thread_id': thread_id,
-                    'resumed': bool(result.raw.get('parent_resumed', False)),
-                    'intent_applied': bool(result.raw.get('intent_applied', False)),
-                    'action': result.action}
-        if checkpoint and checkpoint.is_manual_cutover:
-            result = self._confirm_manual_cutover(
-                thread_id, service, checkpoint, str(payload.get('message_id') or f'continue_{uuid.uuid4().hex[:8]}'),
-                policy,
-            )
-            return {'status': self.flow_status(thread_id)['status'], 'thread_id': thread_id, 'resumed': True,
-                    'action': result.action, 'input_policy': policy}
-        if checkpoint:
-            resumed = self._resume_stage_checkpoint(thread_id, service, checkpoint, 'continue', policy)
-            return {'status': self.flow_status(thread_id)['status'], 'thread_id': thread_id, 'resumed': resumed,
-                    'input_policy': policy, 'next_stage': checkpoint.next_stage}
-
-        if service.graph.run_refs({'checkpointed'}):
-            service.resume_checkpointed(input_policy=policy, dispatch=False)
-            self._update_meta(thread_id, status='running', pending_checkpoint=None, updated_at=time.time())
-            self._start_flow_task_locked(thread_id, self._resume_start_stage(thread_id))
-            return {'status': 'running', 'thread_id': thread_id, 'resumed': True, 'input_policy': policy}
-
-        if str(self._meta(thread_id).get('status') or '') == 'paused':
-            self._update_meta(thread_id, status='running', pending_checkpoint=None, updated_at=time.time())
-            self._start_flow_task_locked(thread_id, self._resume_start_stage(thread_id))
-            return {'status': 'running', 'thread_id': thread_id, 'resumed': True}
-
-        raise HTTPException(409, 'thread has no checkpoint or paused work to continue')
+        state = self._artifact_flow(thread_id).continue_flow(
+            command_id=str(payload.get('command_id') or f'continue:{uuid.uuid4().hex}'),
+            run_id=RUN_ID,
+        )
+        return self._artifact_flow_response(thread_id, state) | {'resumed': True}
 
     def post_message(self, thread_id: str, payload: dict[str, Any]) -> dict:
-        content = str(payload.get('content') or payload.get('message') or '').strip()
-        if not content: raise HTTPException(400, 'message content required')
-        message_id = str(payload.get('message_id') or f'msg_{thread_id}_{uuid.uuid4().hex[:8]}')
-        self._append_message(thread_id, 'user', content)
-        task_alive = self._task_alive(thread_id)
-        checkpoint = self._stage_checkpoint(thread_id)
-        if checkpoint:
-            service = self._service(thread_id)
-            return self._checkpoint_messages.handle(thread_id, service, checkpoint, message_id, content, payload)
-        if task_alive:
-            service = self._service(thread_id)
-            result = self._preview_message(thread_id, service, message_id, content, payload)
-            if result.action == 'read_run_status_query':
-                return self._message_response(thread_id, message_id, self._result_reply(thread_id, service, result),
-                                              result)
-            if self._pause_running_for_message(thread_id, service):
-                self._update_meta(thread_id, status='running', updated_at=time.time())
-                result = service.send_message(message_id, content,
-                                              allowed_capabilities=payload.get('allowed_capabilities'),
-                                              dispatch=bool(payload.get('dispatch', True)),
-                                              max_dispatch=int(payload.get('max_dispatch') or 1))
-                if result.action == 'resume_checkpointed':
-                    self._start_resumed_dispatch(thread_id)
-                elif not result.requires_confirmation:
-                    self._start_resumed_dispatch(thread_id)
-                return self._message_response(thread_id, message_id, self._result_reply(thread_id, service, result),
-                                              result)
-            self._queued_messages.setdefault(thread_id, []).append({
-                'message_id': message_id, 'content': content,
-                'allowed_capabilities': payload.get('allowed_capabilities'),
-                'dispatch': bool(payload.get('dispatch', True)),
-                'max_dispatch': int(payload.get('max_dispatch') or 1), 'action': result.action,
-            })
-            return self._message_response(
-                thread_id, message_id, '已收到你的消息，当前运行任务正在进入 checkpoint；状态就绪后会优先处理这条消息。',
-                FlowMessageResult(message_id, result.raw, result.action, result.operation_refs, [], skipped=True),
-                requires_confirmation=False, confirmation_checkpoint_id='',
-                result_payload=_queued_preview_result_dict(result),
-            )
-        dispatch = bool(payload.get('dispatch', True))
-        had_run = self._has_run(thread_id)
-        service = self._service(thread_id)
-        if not had_run: service.plan_full_flow()
-        checkpoint = self._stage_checkpoint(thread_id)
-        if checkpoint:
-            return self._checkpoint_messages.handle(thread_id, service, checkpoint, message_id, content, payload)
-        resume_stage = self._stalled_resume_stage(thread_id)
-        result = self._preview_message(thread_id, service, message_id, content, payload) if not dispatch else (
-            service.send_message(message_id, content, allowed_capabilities=payload.get('allowed_capabilities'),
-                                 dispatch=True, max_dispatch=int(payload.get('max_dispatch') or 1))
-        )
-        if result.action == 'resume_checkpointed' and resume_stage:
-            self._start_resume_stage(thread_id, service, resume_stage, 'message')
-            reply = f'已继续：{resume_stage}。'
-        else:
-            if result.action == 'resume_checkpointed': self._start_resumed_dispatch(thread_id)
-            reply = self._result_reply(thread_id, service, result)
-        return self._message_response(thread_id, message_id, reply, result)
-
-    def _start_resumed_dispatch(self, thread_id: str) -> None:
-        """resume_checkpointed only closes the checkpoint; dispatch runs in a flow task."""
-        with self._lock:
-            if self._task_alive(thread_id): return
-            self._update_meta(thread_id, status='running', updated_at=time.time())
-            self._start_flow_task_locked(thread_id, self._resume_start_stage(thread_id))
-
-    def _pause_running_for_message(self, thread_id: str, service: EvoFlowService) -> bool:
-        StoreRunLifecycle(service.store, RUN_ID).mark_paused(thread_id=thread_id, reason='message_preemption')
-        self._update_meta(thread_id, status='paused', updated_at=time.time())
-        refs = service.graph.run_refs({'running'})
-        for ref in refs:
-            service.runtime.request_interrupt(ref)
-        task = self._tasks.get(thread_id)
-        if task and task.is_alive():
-            task.join(timeout=5)
-        if task and task.is_alive():
-            return False
-        self._checkpoint_orphaned_running_operations(service)
-        return True
-
-    def _message_response(self, thread_id: str, message_id: str, reply: str, result: FlowMessageResult, *,
-                          requires_confirmation: bool | None = None, confirmation_checkpoint_id: str | None = None,
-                          result_payload: dict[str, Any] | None = None) -> dict:
-        self._append_message(thread_id, 'assistant', reply)
-        self._update_meta(thread_id, status=self.flow_status(thread_id)['status'], updated_at=time.time())
+        with self._message_service_lock:
+            self._update_model_config(thread_id, payload)
+            self._meta(thread_id)
+            try:
+                result = self._message_service(thread_id).handle(thread_id, payload)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(409, str(exc)) from exc
         return {
-            'intent_id': message_id, 'reply': reply, 'thinking': '',
-            'requires_confirm': result.requires_confirmation if requires_confirmation is None
-            else requires_confirmation,
-            'confirmation_checkpoint_id': result.confirmation_checkpoint_id if confirmation_checkpoint_id is None
-            else confirmation_checkpoint_id,
-            'preview': _preview(result), 'warnings': [], 'result': result_payload or result_dict(result),
+            'status': result.status,
+            'thread_id': result.thread_id,
+            'turn_id': result.turn_id,
+            'message_id': result.message_id,
+            'response': result.response,
+            'message_event_cursor': result.message_event_cursor,
+            'pending_approval': result.pending_approval,
         }
 
-    def _result_reply(self, thread_id: str, service: EvoFlowService, result: FlowMessageResult) -> str:
-        if result.action == 'read_run_status_query':
-            return _run_status_reply(thread_id, service, self.flow_status(thread_id), self._meta(thread_id))
-        return _intent_answer(service, result) or _reply(result)
+    def reject_message(self, thread_id: str, payload: dict[str, Any]) -> None:
+        self._meta(thread_id)
+        content = str(payload.get('content') or payload.get('message') or '').strip()
+        if not content:
+            raise HTTPException(400, 'message content required')
+        raise HTTPException(409, 'message/NL intervention is not migrated for artifact flow')
 
     async def post_message_stream(self, thread_id: str, payload: dict[str, Any]):
-        message_id = str(payload.get('message_id') or f'msg_{thread_id}_{uuid.uuid4().hex[:8]}')
-
-        def emit(event: str, data: dict[str, Any]) -> dict:
-            return _sse(event, {'thread_id': thread_id, 'message_id': message_id, **data})
-
-        yield emit('intent_start', {})
+        cursor = 0
         try:
-            result = await asyncio.to_thread(self.post_message, thread_id, {**payload, 'message_id': message_id})
-            for chunk in _chunks(result['reply']):
-                yield emit('answer_delta', {'delta': chunk})
-            yield emit('plan_ready', {'intent_id': result['intent_id'], 'actions': result['preview'],
-                                      'warnings': result['warnings'],
-                                      'requires_confirm': result.get('requires_confirm', False),
-                                      'confirmation_checkpoint_id': result.get('confirmation_checkpoint_id', '')})
-            for action in result['preview']:
-                yield emit('action', {'intent_id': result['intent_id'], 'action': action})
-            yield emit('done', {'intent_id': result['intent_id'],
-                                'requires_confirm': result.get('requires_confirm', False),
-                                'confirmation_checkpoint_id': result.get('confirmation_checkpoint_id', '')})
-        except Exception as exc:
-            yield emit('error', {'code': getattr(exc, 'code', 'MESSAGE_FAILED'), 'message': str(exc)})
+            result = self.post_message(thread_id, payload)
+            cursor = max(0, int(result.get('message_event_cursor') or 0) - 100)
+            with self._message_service_lock:
+                rows = self._message_service(thread_id).subscribe_events(thread_id, cursor)
+            for row in rows:
+                yield _sse(str(row['event']), {'thread_id': thread_id, **row['data']}, str(row['id']))
+            yield _sse(
+                'done',
+                {'thread_id': thread_id, 'status': result['status']},
+                str(result.get('message_event_cursor') or 0),
+            )
+        except HTTPException as exc:
+            yield _sse('error', {'thread_id': thread_id, 'code': exc.status_code, 'message': exc.detail})
 
-    def flow_status(self, thread_id: str) -> dict:
-        meta, task = self._meta(thread_id), self._tasks.get(thread_id)
-        status = str(meta.get('status') or 'idle')
-        active_task_ids = [thread_id] if task and task.is_alive() else []
-        if thread_id not in self._services and not self._has_run(thread_id):
-            visible = 'running' if active_task_ids else ('idle' if status == 'running' else status)
-            return _flow_status_row(thread_id, visible, active_task_ids)
-        if thread_id not in self._services:
-            run_dir = self._run_dir(thread_id)
-            projection = _read_json(run_dir / 'projections' / 'current.json')
-            return _lifecycle_flow_status(thread_id, run_dir, projection, status, active_task_ids)
-        service = self._service(thread_id)
-        run_dir = service.store.run_dir(RUN_ID)
-        projection = _read_json(run_dir / 'projections' / 'current.json') or rebuild_frontend_state(service.store,
-                                                                                                    RUN_ID)
-        return _lifecycle_flow_status(thread_id, run_dir, projection, status, active_task_ids)
+    async def message_events(self, thread_id: str, since: int = 0):
+        self._meta(thread_id)
+        cursor = max(0, since)
+        idle_ticks = 0
+        while True:
+            with self._message_service_lock:
+                rows = self._message_service(thread_id).subscribe_events(thread_id, cursor)
+            for row in rows:
+                cursor = max(cursor, int(row['id']))
+                yield _sse(str(row['event']), {'thread_id': thread_id, **row['data']}, str(row['id']))
+            idle_ticks = idle_ticks + 1 if not rows else 0
+            if idle_ticks > 4:
+                return
+            await asyncio.sleep(0.5)
 
     async def events(self, thread_id: str, since: int = 0):
         self._meta(thread_id)
-        if thread_id not in self._services and not self._has_run(thread_id): return
+        if not self._has_artifact_flow(thread_id):
+            return
         cursor, idle_ticks = max(0, since), 0
+        flow = self._artifact_flow(thread_id)
         while True:
-            in_memory = thread_id in self._services
-            events = self._service(thread_id).store.read_events(RUN_ID) if in_memory \
-                else _stored_events(self._run_dir(thread_id))
-            operations = _operations_by_id(self._service(thread_id)) if in_memory \
-                else _read_json(self._run_dir(thread_id) / 'operations.json')
-            event_rows = _event_rows(events)
-            for seq, event in event_rows:
-                if seq <= cursor: continue
-                cursor = seq
-                frame = _event_frame(event, seq, operations)
-                if frame: yield frame
+            events = flow.runtime.controller.event_log.scan_since(cursor, limit=100)
+            for event in events:
+                cursor = max(cursor, event.seq)
+                yield _sse('message', _frontend_event_payload(event), str(event.seq))
             status = self.flow_status(thread_id)['status']
-            latest_sequence = event_rows[-1][0] if event_rows else 0
-            if status in {'ended', 'failed', 'cancelled'} and cursor >= latest_sequence:
+            if status in {'ended', 'failed', 'cancelled'} and not events:
                 yield _sse('done', {'thread_id': thread_id, 'status': status}, str(cursor + 1))
                 return
-            idle_ticks = idle_ticks + 1 if cursor >= latest_sequence else 0
-            if status in {'idle', 'paused', 'waiting_checkpoint'} and idle_ticks > 4: return
+            idle_ticks = idle_ticks + 1 if not events else 0
+            if status in {'idle', 'paused', 'waiting_checkpoint'} and idle_ticks > 4:
+                return
             await asyncio.sleep(0.5)
+
+    def flow_status(self, thread_id: str) -> dict:
+        meta = self._meta(thread_id)
+        if not self._has_artifact_flow(thread_id):
+            return _flow_status_row(thread_id, str(meta.get('status') or 'idle'), [])
+        flow = self._artifact_flow(thread_id)
+        state = flow.step_store.get(RUN_ID)
+        status = _artifact_flow_http_status(state)
+        return _flow_status_row(
+            thread_id,
+            status,
+            [],
+            latest_abtest_status=_abtest_status(flow),
+            report_ready=self._artifact_runtime_row(thread_id, 'eval.summary') is not None,
+            pending_checkpoint=_artifact_checkpoint_payload(state),
+        ) | {
+            'current_step': '' if state is None else state.current_step,
+            'completed_steps': [] if state is None else list(state.completed_steps),
+            'stale_steps': [] if state is None else list(state.stale_steps),
+        }
 
     def results(self, thread_id: str, kind: str) -> list[dict]:
         self._meta(thread_id)
-        rows = _stored_result_rows(self._run_dir(thread_id), kind)
-        if rows is not None:
-            return rows
-        raise HTTPException(404, f'unknown result kind: {kind}')
+        if kind not in RESULT_ARTIFACTS:
+            raise HTTPException(404, f'unknown result kind: {kind}')
+        rows = [row for artifact_id in RESULT_ARTIFACTS[kind] if (
+            row := self._artifact_runtime_row(thread_id, artifact_id))]
+        return _frontend_result_rows(kind, rows)
 
     def artifact(self, thread_id: str, artifact_id: str) -> dict:
-        row = _artifact_row(self._service(thread_id), artifact_id)
-        if not row: raise HTTPException(404, f'artifact not found: {artifact_id}')
-        return row
+        row = self._artifact_runtime_row(thread_id, ARTIFACT_ID_ALIASES.get(artifact_id, artifact_id))
+        if row is None:
+            raise HTTPException(404, f'artifact not found: {artifact_id}')
+        return _frontend_artifact_row(row)
 
-    def report_content(self, thread_id: str, report_id: str) -> str:
-        data = self._thread_artifact_payload(thread_id, report_id)
-        for key in ('markdown', 'report', 'content', 'text', 'summary'):
-            value = data.get(key)
-            if isinstance(value, str) and value.strip(): return value
+    def report_content(self, thread_id: str, artifact_id: str) -> str:
+        data = self.artifact(thread_id, artifact_id)['data']
+        if isinstance(data, dict):
+            for key in ('markdown', 'report', 'content', 'text', 'summary'):
+                value = data.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value
         return json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True, default=str)
 
     def diff_content(self, apply_id: str, filename: str) -> str:
-        data = self._artifact_payload_any(apply_id)
-        diff = data.get('diff') or data.get('patch') or data.get('content') or ''
-        if isinstance(diff, str) and diff.strip(): return diff
-        files = data.get('files') or data.get('diff_files') or []
-        for item in files if isinstance(files, list) else []:
-            if not isinstance(item, dict): continue
-            path = str(item.get('path') or item.get('filename') or '')
-            if path == filename or path.endswith('/' + filename) or Path(path).name == filename:
-                text = item.get('diff') or item.get('patch') or item.get('content') or ''
-                if isinstance(text, str): return text
-        raise HTTPException(404, f'diff content not found: {apply_id}/{filename}')
+        del filename
+        thread_id, artifact_id = _scoped_report_id(apply_id) if ':' in apply_id else self._find_artifact(apply_id)
+        data = self.artifact(thread_id, artifact_id)['data']
+        if isinstance(data, dict):
+            for key in ('diff', 'patch', 'content'):
+                value = data.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value
+            if data.get('status') in {'skipped', 'skipped_no_bad_case'}:
+                return 'No code changes were produced for this repair step.\n'
+        raise HTTPException(404, f'diff content not found: {apply_id}')
 
-    def _run_full_flow(self, thread_id: str, start_stage: str = 'dataset') -> None:
-        self._update_meta(thread_id, status='running', updated_at=time.time())
-        try:
-            service = self._service(thread_id)
-            flow = service.run_full_flow(
-                repair_plan_params={'target_mean_delta': TARGET_MEAN_DELTA, 'goodcase_guard_ratio': 0.5},
-                start_stage=start_stage,
-                after_stage=lambda stage, detail: self._after_stage(thread_id, service, stage, detail),
+    def _artifact_flow(self, thread_id: str) -> EvoFlowRuntime:
+        if thread_id not in self._artifact_flows:
+            inputs = self._artifact_flow_config(thread_id)
+            path = self._artifact_runtime_path(thread_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._artifact_flows[thread_id] = EvoFlowRuntime.open(
+                path,
+                case_count=int(inputs['num_cases']),
+                model_config=inputs.get('model_config') or {},
             )
-            if self._meta(thread_id).get('status') == 'cancelled': return
-            StoreRunLifecycle(service.store, RUN_ID).mark_ended(outcome='success')
-            self._update_meta(thread_id, status='ended',
-                              flow={k: [asdict(item) for item in v] for k, v in flow.items()},
-                              pending_checkpoint=None, updated_at=time.time())
-        except Exception as exc:
-            current_status = str(self._meta(thread_id).get('status') or '')
-            service = self._service(thread_id)
-            status = 'cancelled' if current_status == 'cancelled' else (
-                'paused' if service.graph.run_refs({'checkpointed'}) else 'failed')
-            lifecycle = StoreRunLifecycle(service.store, RUN_ID)
-            if status == 'cancelled':
-                service.checkpoints.cancel_active(RUN_ID, thread_id=thread_id)
-                lifecycle.mark_cancelled(error_type=exc.__class__.__name__, message=str(exc))
-            elif status == 'paused':
-                lifecycle.mark_paused(error_type=exc.__class__.__name__, message=str(exc))
-            else:
-                service.checkpoints.cancel_active(RUN_ID, thread_id=thread_id)
-                lifecycle.mark_failed(error_type=exc.__class__.__name__, message=str(exc))
-            self._update_meta(thread_id, status=status,
-                              error={'type': exc.__class__.__name__, 'message': str(exc)}, updated_at=time.time())
-        finally:
-            # A paused flow keeps its pending checkpoint so the thread can be resumed
-            # (even after a service restart); only terminal outcomes clear it.
-            if str(self._meta(thread_id).get('status') or '') not in {'paused', 'waiting_checkpoint'}:
-                self._clear_stage_checkpoint(thread_id)
-            else:
-                event = self._checkpoint_events.get(thread_id)
-                if event: event.set()
-
-    def _after_stage(self, thread_id: str, service: EvoFlowService, stage: str, detail: dict[str, Any]) -> None:
-        if self._stopped(thread_id): raise RuntimeError('flow cancelled')
-        if detail.get('terminal'): return
-        checkpoint = service.checkpoints.create_checkpoint(RUN_ID, None, f'{stage} stage finished')
-        if not detail.get('next_stage') or not detail.get('next_op'):
-            raise RuntimeError(f'{stage} checkpoint missing next stage metadata')
-        event = self._checkpoint_events.setdefault(thread_id, threading.Event())
-        event.clear()
-        stage_checkpoint = service.checkpoints.record_stage_wait(
-            RUN_ID, checkpoint.checkpoint_id, stage=_checkpoint_stage(stage), next_stage=str(detail['next_stage']),
-            message=str(detail.get('message') or f'{_stage_label(stage)}已完成，请确认是否继续执行下一步。'),
-            checkpoint_kind=str(detail.get('checkpoint_kind') or 'stage_gate'), next_op=str(detail['next_op']),
-            detail=detail,
-        )
-        self._update_meta(thread_id, status='waiting_checkpoint',
-                          pending_checkpoint=stage_checkpoint.frontend_payload(), updated_at=time.time())
-        if self._meta(thread_id).get('mode') == 'auto':
-            if stage_checkpoint.is_manual_cutover:
-                self._auto_hold_stage(thread_id, service, stage_checkpoint)
-            elif self._auto_continue_stage(thread_id, service, stage_checkpoint):
-                return
-        while not event.wait(1):
-            if self._stopped(thread_id):
-                raise RuntimeError(f'{thread_id} stopped while waiting for checkpoint {checkpoint.checkpoint_id}')
-        if self._stopped(thread_id):
-            raise RuntimeError(f'{thread_id} stopped while waiting for checkpoint {checkpoint.checkpoint_id}')
-
-    def _auto_continue_stage(self, thread_id: str, service: EvoFlowService, checkpoint: CheckpointState) -> bool:
-        queued = self._apply_queued_messages(thread_id, service)
-        if queued.blocked and queued.confirmation_result:
-            self._cache_active_checkpoint(thread_id, service)
-            self._append_message(thread_id, 'assistant',
-                                 f'AutoOperator 已应用前端干预：{queued.confirmation_result.action}，等待用户确认。')
-            return False
-        message = f'AutoOperator 已分析 {checkpoint.stage} checkpoint，继续执行。'
-        service.store.append_event(Event('autooperator.analysis', RUN_ID, {
-            'checkpoint_id': checkpoint.checkpoint_id, 'stage': checkpoint.stage,
-            'next_stage': checkpoint.next_stage, 'message': message,
-        }))
-        self._append_message(thread_id, 'assistant', message)
-        # AutoOperator always adopts interventions: queued frontend edits were just applied above.
-        self._resume_stage_checkpoint(thread_id, service, checkpoint, 'autooperator', RESUME_WITH_INTERVENTIONS)
-        return True
-
-    def _auto_hold_stage(self, thread_id: str, service: EvoFlowService, checkpoint: CheckpointState) -> None:
-        self._hold_queued_messages(thread_id, service)
-        message = 'AutoOperator 已完成 ABTest 分析，候选算法切流需要用户确认。'
-        service.store.append_event(Event('autooperator.analysis', RUN_ID, {
-            'checkpoint_id': checkpoint.checkpoint_id, 'stage': checkpoint.stage,
-            'next_stage': checkpoint.next_stage, 'message': message,
-        }))
-        self._append_message(thread_id, 'assistant', message)
-
-    def _hold_queued_messages(self, thread_id: str, service: EvoFlowService) -> None:
-        for item in self._queued_messages.pop(thread_id, []):
-            service.store.append_event(Event('autooperator.intervention_observed', RUN_ID, {
-                'message_id': item['message_id'], 'action': item.get('action') or 'manual_cutover_hold',
-                'message': 'AutoOperator 已记录前端干预消息，候选算法切流等待用户显式确认。',
-            }))
-
-    def _apply_queued_messages(self, thread_id: str, service: EvoFlowService) -> QueuedDrainResult:
-        messages = self._queued_messages.pop(thread_id, [])
-        applied_count = 0
-        for index, item in enumerate(messages):
-            if not item.get('dispatch'):
-                service.store.append_event(Event('autooperator.intervention_observed', RUN_ID, {
-                    'message_id': item['message_id'], 'action': item.get('action') or 'preview',
-                    'message': 'AutoOperator 已记录前端干预消息，等待 checkpoint 处理。',
-                }))
-                applied_count += 1
-                continue
-            result = service.send_checkpoint_message(
-                item['message_id'], item['content'], allowed_capabilities=item.get('allowed_capabilities'),
-                dispatch=bool(item.get('dispatch')), max_dispatch=int(item.get('max_dispatch') or 1),
-            )
-            applied_count += 1
-            service.store.append_event(Event('autooperator.intervention_applied', RUN_ID, {
-                'message_id': item['message_id'], 'action': result.action,
-                'operation_refs': list(result.operation_refs),
-                'message': f'AutoOperator 已应用前端干预：{result.action}。',
-            }))
-            if result.requires_confirmation:
-                remaining = messages[index + 1:] + self._queued_messages.get(thread_id, [])
-                if remaining: self._queued_messages[thread_id] = remaining
-                return QueuedDrainResult(blocked=True, confirmation_result=result, applied_count=applied_count,
-                                         remaining_count=len(remaining))
-        return QueuedDrainResult(applied_count=applied_count)
-
-    def _resume_stage_checkpoint(self, thread_id: str, service: EvoFlowService, checkpoint: CheckpointState,
-                                 source: str, input_policy: str) -> bool:
-        start_stage = checkpoint.next_stage or _blocked_operations_stage(checkpoint)
-        if not start_stage: raise RuntimeError('checkpoint missing next_stage')
-        if checkpoint.is_manual_cutover:
-            self._hold_queued_messages(thread_id, service)
         else:
-            queued = self._apply_queued_messages(thread_id, service)
-            if queued.blocked:
-                self._cache_active_checkpoint(thread_id, service)
-                return False
+            self._artifact_flows[thread_id].set_model_config(self._meta(thread_id).get('model_config') or {})
+        return self._artifact_flows[thread_id]
 
-        if checkpoint.dispatch_block_reason == 'checkpointed':
-            service.resume_checkpointed(input_policy=input_policy, dispatch=False)
-        else:
-            service.resume_stage_checkpoint(checkpoint, source=source, input_policy=input_policy, thread_id=thread_id)
-        with self._lock:
-            alive = self._task_alive(thread_id)
-            self._clear_stage_checkpoint(thread_id)
-            self._update_meta(thread_id, status='running', updated_at=time.time())
-            if not alive: self._start_flow_task_locked(thread_id, start_stage)
-        return True
+    def _message_service(self, thread_id: str) -> MessageIntentService:
+        with self._message_service_lock:
+            if thread_id not in self._message_services:
+                self._message_services[thread_id] = MessageIntentService(
+                    MessageSessionStore(self._message_store_path(thread_id)),
+                    flow_getter=self._artifact_flow,
+                    has_flow=self._has_artifact_flow,
+                    flow_status=self.flow_status,
+                    artifact_reader=lambda tid, artifact_id: self._artifact_runtime_row(tid, artifact_id),
+                    case_count_getter=lambda tid: int(self._artifact_flow_config(tid)['num_cases']),
+                    planner=self._message_planner(thread_id),
+                )
+            return self._message_services[thread_id]
 
-    def _cache_active_checkpoint(self, thread_id: str, service: EvoFlowService) -> None:
-        self._update_meta(thread_id, pending_checkpoint=service.checkpoints.frontend_checkpoint(RUN_ID),
-                          status='waiting_checkpoint', updated_at=time.time())
+    def _message_planner(self, thread_id: str) -> StructuredJSONNextIntentPlanner:
+        model_config = self._meta(thread_id).get('model_config') or {}
+        if self._planner_factory is not None:
+            return self._planner_factory(thread_id, model_config)
+        return StructuredJSONNextIntentPlanner(LazyLLMPlannerClient(model_config=model_config))
 
-    def _apply_confirmed_intent_at_stage_gate(self, thread_id: str, service: EvoFlowService,
-                                              parent: CheckpointState, input_policy: str) -> None:
-        service.apply_stage_interventions(parent.checkpoint_id, input_policy)
-        run_path = service.store.run_dir(RUN_ID) / 'run.json'
-        run_data = service.store.read_json(run_path) if run_path.exists() else {}
-        lifecycle = StoreRunLifecycle(service.store, RUN_ID)
-        if run_data.get('status') == 'ended':
-            lifecycle.mark_running()
-        if service.checkpoints.active_checkpoint(RUN_ID) is None:
-            lifecycle.block_dispatch('checkpoint_wait', **_lifecycle_payload(parent.frontend_payload()))
-        self._cache_active_checkpoint(thread_id, service)
+    def _close_flow(self, thread_id: str) -> None:
+        flow = self._artifact_flows.pop(thread_id, None)
+        if flow is not None:
+            flow.close()
 
-    def _confirm_manual_cutover(self, thread_id: str, service: EvoFlowService, checkpoint: CheckpointState | None,
-                                message_id: str, input_policy: str) -> FlowMessageResult:
-        with self._lock:
-            if _has_artifact(service, 'candidate_algorithm_cutover'):
-                return self._manual_cutover_result(message_id, already_done=True)
-            active = service.checkpoints.active_checkpoint(RUN_ID)
-            if active and checkpoint and active.checkpoint_id == checkpoint.checkpoint_id and active.is_manual_cutover:
-                resumed = self._resume_stage_checkpoint(thread_id, service, active, 'manual_cutover', input_policy)
-                if not resumed:
-                    raise RuntimeError('manual cutover confirmation was blocked by a queued intervention')
-                return self._manual_cutover_result(message_id, already_done=False)
-            if service.manual_cutover_confirmed():
-                self._ensure_cutover_flow_running(thread_id, service)
-                return self._manual_cutover_result(message_id, already_done=False)
-        raise RuntimeError('manual cutover confirmation requires an active checkpoint')
+    def _has_artifact_flow(self, thread_id: str) -> bool:
+        return thread_id in self._artifact_flows or self._artifact_runtime_path(thread_id).exists()
 
-    def _execute_intent_confirmation(
-        self, thread_id: str, service: EvoFlowService, checkpoint: CheckpointState,
-        message_id: str, input_policy: str = RESUME_WITH_INTERVENTIONS,
-    ) -> FlowMessageResult:
-        result = service.confirm_checkpoint(checkpoint.checkpoint_id, message_id)
-        parent = service.checkpoints.active_checkpoint(RUN_ID)
-        if parent and parent.checkpoint_kind == 'stage_gate' and service.confirmation_succeeded(result):
-            self._apply_confirmed_intent_at_stage_gate(thread_id, service, parent, input_policy)
-            result.raw['parent_resumed'] = False
-            result.raw['intent_applied'] = True
-        elif parent:
-            result.raw['parent_resumed'] = False
-            self._cache_active_checkpoint(thread_id, service)
-        else:
-            result.raw['parent_resumed'] = True
-            self._clear_stage_checkpoint(thread_id)
-        return result
+    def _artifact_runtime_row(self, thread_id: str, artifact_id: str) -> dict | None:
+        self._meta(thread_id)
+        if not self._has_artifact_flow(thread_id):
+            return None
+        flow = self._artifact_flow(thread_id)
+        key, requested_version = _artifact_selector(artifact_id)
+        ref = ArtifactRef(
+            key, requested_version) if requested_version is not None else flow.runtime.stores.artifact_store.latest(key)
+        if ref is None:
+            return None
+        record = flow.runtime.stores.artifact_store.get(ref)
+        if record is None:
+            return None
+        return {
+            'artifact_id': key.artifact_id,
+            'partition': key.partition,
+            'ref': str(ref),
+            'schema': record.value.schema,
+            'data': record.value.payload,
+        }
 
-    def _manual_cutover_result(self, message_id: str, *, already_done: bool) -> FlowMessageResult:
-        return FlowMessageResult(message_id,
-                                 {'next_task': {'type': 'manual_cutover_confirmation', 'already_done': already_done}},
-                                 'cutover_candidate_algorithm', [], [])
+    def _find_artifact(self, artifact_id: str) -> tuple[str, str]:
+        for meta in self.list_threads():
+            thread_id = str(meta.get('id') or '')
+            if thread_id and self._artifact_runtime_row(thread_id, artifact_id) is not None:
+                return thread_id, artifact_id
+        raise HTTPException(404, f'artifact not found: {artifact_id}')
 
-    def _manual_cutover_pending(self, service: EvoFlowService) -> bool:
-        return service.manual_cutover_confirmed() and not _has_artifact(service, 'candidate_algorithm_cutover')
-
-    def _ensure_cutover_flow_running(self, thread_id: str, service: EvoFlowService) -> None:
-        # Cutover is a standalone action on an accepted comparison; it never replays the abtest stage.
-        with self._lock:
-            if self._task_alive(thread_id):
-                self._update_meta(thread_id, status='running', updated_at=time.time())
-                return
-            task = threading.Thread(target=self._run_cutover_task, args=(thread_id, service), daemon=True)
-            self._tasks[thread_id] = task
-            task.start()
-
-    def _run_cutover_task(self, thread_id: str, service: EvoFlowService) -> None:
-        self._update_meta(thread_id, status='running', updated_at=time.time())
-        lifecycle = StoreRunLifecycle(service.store, RUN_ID)
-        try:
-            service.execute_candidate_cutover('msg_manual_cutover')
-            lifecycle.mark_ended(outcome='success')
-            self._update_meta(thread_id, status='ended', pending_checkpoint=None, updated_at=time.time())
-        except Exception as exc:
-            lifecycle.mark_failed(error_type=exc.__class__.__name__, message=str(exc))
-            self._update_meta(thread_id, status='failed',
-                              error={'type': exc.__class__.__name__, 'message': str(exc)}, updated_at=time.time())
-
-    def _start_resume_stage(self, thread_id: str, service: EvoFlowService, start_stage: str, source: str) -> None:
-        # Recovery of a stage whose checkpoint was already resumed (flow task died afterwards):
-        # the original resume already applied its policy, so the restart replays from snapshot.
-        service.checkpoints.record_resume(
-            RUN_ID, validate_id(f'recovered_{start_stage or "stage"}', 'checkpoint_id'),
-            input_policy=RESUME_FROM_SNAPSHOT, next_operations=[], rebound_input_refs={},
-            resume_context={'kind': 'stage', 'stage': '', 'next_stage': str(start_stage or ''),
-                            'source': str(source or ''), 'recovered': True},
-        )
-        with self._lock:
-            if not self._task_alive(thread_id):
-                self._start_flow_task_locked(thread_id, start_stage)
-            else:
-                self._update_meta(thread_id, status='running', updated_at=time.time())
-
-    def _start_flow_task_locked(self, thread_id: str, start_stage: str = 'dataset') -> None:
-        task = threading.Thread(target=self._run_full_flow, args=(thread_id, start_stage), daemon=True)
-        self._tasks[thread_id] = task
-        task.start()
-
-    def _stage_checkpoint(self, thread_id: str) -> CheckpointState | None:
-        if self._stopped(thread_id): return None
-        if thread_id in self._services:
-            return self._service(thread_id).checkpoints.active_checkpoint(RUN_ID)
-        run = _read_json(self._run_dir(thread_id) / 'run.json')
-        lifecycle_checkpoint = checkpoint_state_from_run(run)
-        if lifecycle_checkpoint and _lifecycle_status(run) == 'waiting_checkpoint': return lifecycle_checkpoint
-        return None
-
-    def _clear_stage_checkpoint(self, thread_id: str) -> None:
-        event = self._checkpoint_events.get(thread_id)
-        if event: event.set()
-        try:
-            self._update_meta(thread_id, pending_checkpoint=None, updated_at=time.time())
-        except HTTPException:
-            pass
-
-    def _task_alive(self, thread_id: str) -> bool:
-        task = self._tasks.get(thread_id)
-        return bool(task and task.is_alive())
-
-    def _stopped(self, thread_id: str) -> bool:
-        return str(self._meta(thread_id).get('status') or '') in {'cancelled', 'deleting', 'failed'}
-
-    def _stalled_resume_stage(self, thread_id: str) -> str:
-        events = self._service(thread_id).store.read_events(RUN_ID) if thread_id in self._services \
-            else _stored_events(self._run_dir(thread_id))
-        start_stage, offset = '', -1
-        for index, event in enumerate(events):
-            if event.event_type == 'checkpoint.continue':
-                stage = str(((event.payload or {}).get('resume_context') or {}).get('next_stage') or '')
-                if stage: start_stage, offset = stage, index
-        if not start_stage: return ''
-        for event in events[offset + 1:]:
-            payload = event.payload or {}
-            stage = STAGE_MAP.get(str(payload.get('stage') or payload.get('phase') or ''))
-            if stage == start_stage or event.event_type.startswith('checkpoint.wait'): return ''
-        return start_stage
-
-    def _has_run(self, thread_id: str) -> bool:
-        return self._run_dir(thread_id).exists()
-
-    def _service(self, thread_id: str) -> EvoFlowService:
-        with self._lock:
-            if thread_id in self._services: return self._services[thread_id]
-            run_root = self.base_dir / 'dev-runs' / thread_id
-            kwargs = self._service_kwargs(thread_id, run_root)
-            service = EvoFlowService.resume(**kwargs) if (run_root / 'store' / 'runs' / RUN_ID).exists() \
-                else EvoFlowService(**kwargs)
-            self._services[thread_id] = service
-            return service
-
-    def _service_kwargs(self, thread_id: str, run_root: Path) -> dict[str, Any]:
+    def _artifact_flow_config(self, thread_id: str) -> dict[str, Any]:
         meta = self._meta(thread_id)
         raw_inputs = dict(meta.get('inputs') or {})
         try:
             inputs = _normalize_inputs(raw_inputs)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        if inputs != raw_inputs: self._update_meta(thread_id, inputs=inputs, updated_at=time.time())
-        return {'run_root': run_root, 'run_id': RUN_ID, 'dataset_id': _dataset_id(inputs),
-                'target_chat_url': str(inputs['target_chat_url']),
-                'candidate_chat_url': str(inputs.get('candidate_chat_url') or ''),
-                'router_admin_url': str(inputs.get('router_admin_url') or ''),
-                'case_count': int(inputs.get('num_cases') or os.getenv('EVO_FLOW_CASE_COUNT', '20')),
-                'max_workers': int(inputs.get('max_workers') or os.getenv('EVO_FLOW_WORKERS', '2')),
-                'model_config': meta.get('model_config') or None,
-                'dispatch_gate': ThreadDispatchGate(self, thread_id)}
+        if inputs != raw_inputs:
+            self._update_meta(thread_id, inputs=inputs, updated_at=time.time())
+        return inputs | {'model_config': meta.get('model_config') or {}}
 
-    def _preview_message(self, thread_id: str, service: EvoFlowService, message_id: str, content: str,
-                         payload: dict[str, Any]) -> FlowMessageResult:
-        root = self.base_dir / 'dev-runs' / thread_id / 'tmp' / message_id
-        shutil.rmtree(root, ignore_errors=True)
-        root.parent.mkdir(parents=True, exist_ok=True)
-        with service.store.artifact_graph(RUN_ID).snapshot_lock():
-            shutil.copytree(service.run_root / 'store', root / 'store', ignore=_preview_copy_ignore)
-        try:
-            runner = EvoFlowService.resume(**self._service_kwargs(thread_id, root))
-            StoreRunLifecycle(runner.store, RUN_ID).open_dispatch(checkpoint_close_verified=True, preview=True)
-            return runner.send_message(message_id, content, allowed_capabilities=payload.get('allowed_capabilities'),
-                                       dispatch=False, max_dispatch=int(payload.get('max_dispatch') or 1))
-        finally:
-            shutil.rmtree(root, ignore_errors=True)
+    def _update_model_config(self, thread_id: str, payload: dict[str, Any]) -> None:
+        model_config = _model_config_payload(payload)
+        if not model_config:
+            return
+        self._update_meta(thread_id, model_config=model_config, updated_at=time.time())
+        if thread_id in self._artifact_flows:
+            self._artifact_flows[thread_id].set_model_config(model_config)
+        self._close_message_service(thread_id)
+
+    def _close_message_service(self, thread_id: str) -> None:
+        with self._message_service_lock:
+            service = self._message_services.pop(thread_id, None)
+        if service is not None:
+            service.store.close()
+
+    def _artifact_flow_response(self, thread_id: str, state: FlowStepState) -> dict:
+        status = _artifact_flow_http_status(state)
+        checkpoint = _artifact_checkpoint_payload(state)
+        self._update_meta(thread_id, status=status, pending_checkpoint=checkpoint, updated_at=time.time())
+        return {
+            'status': status,
+            'thread_id': thread_id,
+            'run_id': state.run_id,
+            'current_step': state.current_step,
+            'completed_steps': list(state.completed_steps),
+            'stale_steps': list(state.stale_steps),
+            'gate_status': state.gate_status,
+            'gate_artifact_ref': '' if state.gate_artifact_ref is None else str(state.gate_artifact_ref),
+            'pending_checkpoint': checkpoint,
+        }
+
+    def _thread_dir(self, thread_id: str) -> Path:
+        return self.threads_dir / thread_id
+
+    def _run_root(self, thread_id: str) -> Path:
+        return self.base_dir / 'dev-runs' / thread_id
+
+    def _artifact_runtime_path(self, thread_id: str) -> Path:
+        return self._run_root(thread_id) / 'artifact-runtime.sqlite'
+
+    def _message_store_path(self, thread_id: str) -> Path:
+        return self._thread_dir(thread_id) / 'message-session.sqlite'
 
     def _meta(self, thread_id: str) -> dict:
         meta = _read_json(self._thread_dir(thread_id) / 'thread.json')
-        if not meta: raise HTTPException(404, f'thread {thread_id} not found')
+        if not meta:
+            raise HTTPException(404, f'thread {thread_id} not found')
         return meta
 
     def _write_meta(self, thread_id: str, meta: dict) -> None:
@@ -1015,141 +607,630 @@ class EvoMessageHub:
         meta.update(patch)
         self._write_meta(thread_id, meta)
 
-    def _append_message(self, thread_id: str, role: str, content: str) -> None:
-        path = self._thread_dir(thread_id) / 'messages.jsonl'
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open('a', encoding='utf-8') as handle:
-            handle.write(json.dumps({'role': role, 'content': content, 'ts': time.time()}, ensure_ascii=False) + '\n')
-
-    def _thread_dir(self, thread_id: str) -> Path:
-        return self.threads_dir / thread_id
-
-    def _run_dir(self, thread_id: str) -> Path:
-        return self.base_dir / 'dev-runs' / thread_id / 'store' / 'runs' / RUN_ID
-
-    def _artifact_payload_any(self, artifact: str) -> dict[str, Any]:
-        artifact = artifact.strip()
-        if not artifact: raise HTTPException(400, 'artifact id required')
-        errors = []
-        for meta in self.list_threads():
-            if not self._has_run(str(meta['id'])) and str(meta['id']) not in self._services: continue
-            try:
-                service = self._service(str(meta['id']))
-                ref = ArtifactRef.parse(artifact) if '@v' in artifact else service.artifacts.latest_ref(artifact)
-                data = service.artifacts.get(ref)
-                return data if isinstance(data, dict) else {'content': data}
-            except (KeyError, ValueError, FileNotFoundError) as exc:
-                errors.append(str(exc))
-        raise HTTPException(404, f'artifact not found: {artifact}; searched={len(errors)}')
-
-    def _thread_artifact_payload(self, thread_id: str, artifact: str) -> dict[str, Any]:
-        artifact = artifact.strip()
-        if not artifact: raise HTTPException(400, 'artifact id required')
-        self._meta(thread_id)
-        run_dir = self._run_dir(thread_id)
-        if not run_dir.exists(): raise HTTPException(404, f'run not found for thread: {thread_id}')
-        try:
-            data = _stored_artifact_payload(run_dir, artifact)
-            return data if isinstance(data, dict) else {'content': data}
-        except (KeyError, ValueError, FileNotFoundError) as exc:
-            raise HTTPException(404, f'artifact not found in thread {thread_id}: {artifact}') from exc
-
 
 def _single_sse(event: str, payload: dict[str, Any]):
     async def gen():
         yield _sse(event, payload)
+
     return gen()
-
-
-def _event_rows(events: list[Event]) -> list[tuple[int, Event]]:
-    rows = [(index, event.sequence or index + 1, event) for index, event in enumerate(events)]
-    return [(sequence, event) for index, sequence, event in sorted(rows, key=lambda item: (item[1], item[0]))]
 
 
 def _sse(event: str, payload: dict[str, Any], event_id: str | None = None) -> dict:
     row = {'event': event, 'data': json.dumps({'type': event, **payload}, ensure_ascii=False, default=str)}
-    if event_id: row['id'] = event_id
+    if event_id:
+        row['id'] = event_id
     return row
 
 
-def _event_frame(event, seq: int, operations: dict[str, Any] | None = None) -> dict | None:
+def _flow_status_row(
+    thread_id: str,
+    status: str,
+    active_task_ids: list[str],
+    *,
+    latest_abtest_status: str | None = None,
+    report_ready: bool = False,
+    pending_checkpoint: dict | None = None,
+) -> dict:
+    return {
+        'thread_id': thread_id,
+        'status': status,
+        'active_task_ids': active_task_ids,
+        'latest_abtest_id': 'abtest.comparison' if latest_abtest_status else None,
+        'latest_abtest_status': latest_abtest_status,
+        'report_ready': report_ready,
+        'pending_checkpoint': pending_checkpoint,
+    }
+
+
+def _frontend_event_payload(event: Any) -> dict:
     payload = dict(event.payload or {})
-    if event.event_type.startswith('checkpoint.') or event.event_type.startswith('autooperator.'):
-        return _sse(event.event_type,
-                    {'seq': seq, 'event_id': event.event_id, 'created_at': event.created_at, **payload}, str(seq))
-    if event.event_type == 'evo_flow.progress':
-        if str(payload.get('stage') or '') == 'full_flow': return None
-        stage = STAGE_MAP.get(str(payload.get('stage') or ''))
-    elif event.event_type == 'operation.progress':
-        payload.update(_operation_event_meta(str(payload.get('operation_run_id') or ''), operations or {}))
-        stage = _stage_from_operation(payload)
-    else:
+    derived = _derive_frontend_event(event.event_type, payload)
+    display_payload = _compact_event_payload(event.event_type, payload)
+    raw_event = {
+        'event_type': event.event_type,
+        'run_id': event.run_id,
+        'payload_keys': sorted(str(key) for key in payload),
+    }
+    return {
+        'seq': event.seq,
+        'event_id': f'artifact:{event.seq}',
+        'type': derived.get('type') or event.event_type,
+        'stage': derived.get('stage'),
+        'action': derived.get('action'),
+        'event_type': event.event_type,
+        'run_id': event.run_id,
+        'payload': {**display_payload, **derived, 'raw_event': raw_event},
+        **{key: value for key, value in derived.items() if value not in (None, '')},
+    }
+
+
+def _compact_event_payload(event_type: str, payload: dict) -> dict:
+    return {
+        key: value
+        for key, value in {
+            'command_id': payload.get('command_id'),
+            'attempt_id': payload.get('attempt_id') or _nested(payload, 'attempt', 'attempt_id'),
+            'reason': payload.get('reason'),
+            'event_type': event_type,
+        }.items()
+        if value not in (None, '')
+    }
+
+
+def _derive_frontend_event(event_type: str, payload: dict) -> dict:
+    if event_type.startswith('run.'):
+        return {
+            'type': f'artifact.{event_type}',
+            'stage': '',
+            'action': '',
+            'operation_run_id': '',
+            'flow_kind': '',
+            'case_id': '',
+            'artifact_id': '',
+            'writes_artifact_id': '',
+            'runtime_artifact_id': '',
+            'status': '',
+        }
+    attempt_id = str(payload.get('attempt_id') or _nested(payload, 'attempt', 'attempt_id') or '')
+    stage, op_id, case_id = _attempt_parts(attempt_id)
+    artifact_id = _first_output_artifact_id(payload.get('output_refs'))
+    if not artifact_id:
+        artifact_id = _first_artifact_key_id(_nested(payload, 'attempt', 'output_artifact_keys'))
+    artifact_alias = RESULT_ARTIFACT_ALIASES.get(artifact_id, artifact_id)
+    flow_kind = _frontend_flow_kind(op_id, artifact_id)
+    action = _frontend_event_action(event_type)
+    if event_type == 'plan.submitted':
+        reason = _nested(payload, 'plan', 'reason')
+        stage = str(reason).removeprefix('step:') if isinstance(reason, str) and reason.startswith('step:') else stage
+        if not stage:
+            stage = _stage_from_command_id(str(payload.get('command_id') or ''))
+        action = 'start'
+    if event_type == 'run.completed':
+        stage = ''
+        action = 'finish'
+    return {
+        'type': f'{stage}.{action}' if stage and action else event_type,
+        'stage': stage,
+        'action': action,
+        'operation_run_id': op_id,
+        'flow_kind': flow_kind,
+        'case_id': case_id,
+        'artifact_id': artifact_alias,
+        'writes_artifact_id': artifact_alias,
+        'runtime_artifact_id': artifact_id,
+        'status': 'success' if action == 'finish' else 'running' if action in {'start', 'progress'} else action,
+    }
+
+
+def _frontend_event_action(event_type: str) -> str:
+    if event_type == 'attempt.completed':
+        return 'finish'
+    if event_type == 'attempt.failed':
+        return 'failed'
+    if event_type == 'attempt.cancelled':
+        return 'cancel'
+    if event_type in {'attempt.created', 'attempt.claimed', 'attempt.heartbeat'}:
+        return 'progress'
+    if event_type == 'run.cancelled':
+        return 'cancel'
+    if event_type == 'run.failed':
+        return 'failed'
+    return ''
+
+
+def _attempt_parts(attempt_id: str) -> tuple[str, str, str]:
+    parts = attempt_id.split(':')
+    op_id = parts[1] if len(parts) > 1 else ''
+    case_id = ''
+    if op_id.endswith(']') and '[' in op_id:
+        op_id, case_id = op_id[:-1].split('[', 1)
+    return _stage_from_op(op_id), op_id, case_id
+
+
+def _stage_from_op(op_id: str) -> str:
+    if op_id.startswith('candidate_eval.') or op_id.startswith('abtest.'):
+        return 'abtest'
+    if op_id.startswith('analysis.'):
+        return 'analysis'
+    if op_id.startswith('repair.'):
+        return 'repair'
+    if op_id.startswith('eval.'):
+        return 'eval'
+    if op_id.startswith('dataset.'):
+        return 'dataset'
+    return ''
+
+
+def _frontend_flow_kind(op_id: str, artifact_id: str) -> str:
+    if op_id == 'dataset.prepare_case':
+        return 'dataset_gen.prepare_case'
+    if op_id == 'dataset.generate_case':
+        return 'dataset_gen.generate_case'
+    if op_id == 'dataset.build_corpus_snapshot':
+        return 'dataset.build_corpus_snapshot'
+    if op_id == 'eval.summary' or artifact_id == 'eval.summary':
+        return 'eval.aggregate'
+    if op_id == 'analysis.classify_case':
+        return 'analysis.fine_classify'
+    if op_id == 'abtest.candidate_rag_answer':
+        return 'eval.rag_answer'
+    if op_id == 'abtest.candidate_judge':
+        return 'eval.judge_answer'
+    if op_id == 'abtest.candidate_eval_summary' or artifact_id == 'abtest.candidate_eval_summary':
+        return 'eval.aggregate'
+    if op_id == 'abtest.candidate_service':
+        return 'abtest.candidate_service.start'
+    return op_id
+
+
+def _first_output_artifact_id(value: Any) -> str:
+    if isinstance(value, dict):
+        items = value.get('items')
+        if isinstance(items, list) and items:
+            first = items[0]
+            if isinstance(first, list) and first:
+                return str(
+                    _artifact_id_value(
+                        first[0]) or _nested(
+                        first[1] if len(first) > 1 else {},
+                        'key',
+                        'artifact_id') or '')
+    if isinstance(value, Mapping) and value:
+        first_key = next(iter(value))
+        return _artifact_id_value(first_key)
+    return ''
+
+
+def _first_artifact_key_id(value: Any) -> str:
+    items = _nested(value, 'items')
+    if isinstance(items, list) and items:
+        return _artifact_id_value(items[0])
+    if isinstance(value, (list, tuple)) and value:
+        return _artifact_id_value(value[0])
+    return ''
+
+
+def _artifact_id_value(value: Any) -> str:
+    if isinstance(value, dict):
+        return str(value.get('artifact_id') or '')
+    return str(getattr(value, 'artifact_id', '') or '')
+
+
+def _stage_from_command_id(command_id: str) -> str:
+    parts = command_id.split(':')
+    return parts[2] if len(parts) > 3 and parts[2] in STAGE_LABELS else ''
+
+
+def _nested(value: Any, *keys: str) -> Any:
+    current = value
+    for key in keys:
+        if isinstance(current, dict):
+            current = current.get(key)
+        else:
+            current = getattr(current, key, None)
+    return current
+
+
+def _frontend_result_rows(kind: str, rows: list[dict]) -> list[dict]:
+    if kind == 'analysis-reports':
+        adapted = []
+        for row in rows:
+            adapted.extend(_analysis_result_rows(row))
+        return adapted
+    return [_frontend_artifact_row(row) for row in rows]
+
+
+def _frontend_artifact_row(row: dict) -> dict:
+    data = row.get('data') if isinstance(row.get('data'), dict) else {}
+    artifact_id = str(row.get('artifact_id') or '')
+    alias = RESULT_ARTIFACT_ALIASES.get(artifact_id, artifact_id)
+    adapted_data = _frontend_data(artifact_id, data)
+    return {
+        **row,
+        'artifact_id': alias,
+        'runtime_artifact_id': artifact_id,
+        'source_artifact_id': artifact_id,
+        'data': adapted_data,
+        **_frontend_top_level_fields(alias, adapted_data),
+    }
+
+
+def _analysis_result_rows(row: dict) -> list[dict]:
+    base = _frontend_artifact_row(row)
+    data = base.get('data') if isinstance(base.get('data'), dict) else {}
+    repair_plan = _repair_loop_plan_data(data)
+    return [
+        {**base, 'artifact_id': 'classification_report', 'data': data,
+            ** _frontend_top_level_fields('classification_report', data)},
+        {
+            **base,
+            'artifact_id': 'repair_loop_plan',
+            'runtime_artifact_id': 'analysis.summary',
+            'source_artifact_id': 'analysis.summary',
+            'data': repair_plan,
+            **_frontend_top_level_fields('repair_loop_plan', repair_plan),
+        },
+    ]
+
+
+def _frontend_data(artifact_id: str, data: dict) -> dict:
+    if artifact_id in {'eval.summary', 'abtest.candidate_eval_summary'}:
+        return _eval_report_data(data)
+    if artifact_id == 'analysis.summary':
+        return _classification_report_data(data)
+    if artifact_id == 'repair.verified_patch':
+        return _diff_data(data)
+    if artifact_id == 'abtest.comparison':
+        return _abtest_data(data)
+    return data
+
+
+def _frontend_top_level_fields(alias: str, data: dict) -> dict:
+    if alias == 'eval_dataset':
+        return {'total_nums': data.get('size') or data.get('total_nums'), 'cases': data.get('cases') or []}
+    if alias in {'eval_report', 'candidate_eval_report'}:
+        return {'metrics': data.get('metrics') or {}, 'total_cases': data.get('total') or data.get('case_count')}
+    if alias == 'classification_report':
+        return {'cases': data.get('cases') or [], 'summary': data.get('summary') or {}}
+    if alias == 'repair_loop_plan':
+        return {'target': data.get('target') or {}, 'priorities': data.get('priorities') or []}
+    return {}
+
+
+def _eval_report_data(data: dict) -> dict:
+    metrics = dict(data.get('metrics') or {})
+    rows = [dict(item) for item in data.get('rows') or [] if isinstance(item, dict)]
+    case_details = _case_details_from_eval_rows(rows, data.get('case_details'))
+    total_cases = data.get('total') or data.get('case_count') or data.get(
+        'total_cases') or len(case_details) or len(rows)
+    return data | {
+        'case_details': case_details,
+        'total_cases': total_cases,
+        'case_details_summary': _case_details_summary(case_details, total_cases, metrics),
+    }
+
+
+def _classification_report_data(data: dict) -> dict:
+    rows = [dict(item) for item in data.get('rows') or [] if isinstance(item, dict)]
+    category_counts = dict(data.get('category_counts') or {})
+    priorities = [
+        {
+            'rank': index + 1,
+            'fine_category': category,
+            'case_count': count,
+            'priority_score': round(float(count or 0) / max(int(data.get('total') or 1), 1), 4),
+        }
+        for index, (category, count) in enumerate(
+            sorted(category_counts.items(), key=lambda item: (-int(item[1] or 0), item[0])),
+        )
+    ]
+    target = priorities[0] | {'badcase_ids': [row.get('case_id')
+                                              for row in rows if row.get('case_id')]} if priorities else {}
+    return data | {
+        'bad_case_count': len(rows),
+        'classified_case_count': len(rows),
+        'cases': rows,
+        'priorities': priorities,
+        'target': target,
+        'summary': {
+            'fine_category_counts': category_counts,
+            'coarse_category_counts': category_counts,
+            'confidence_counts': dict(Counter(str(row.get('confidence') or 'medium') for row in rows)),
+        },
+    }
+
+
+def _repair_loop_plan_data(analysis_data: dict) -> dict:
+    report = _classification_report_data(analysis_data)
+    return {
+        'id': 'repair_loop_plan',
+        'classification_report_ref': 'analysis.summary',
+        'target': report.get('target') or {},
+        'priorities': report.get('priorities') or [],
+        'cases': report.get('cases') or [],
+        'summary': report.get('summary') or {},
+    }
+
+
+def _diff_data(data: dict) -> dict:
+    content = str(data.get('diff') or data.get('patch') or data.get('content') or '')
+    return data | {'content': content, 'diff': str(data.get('diff') or content), 'files': data.get('files') or []}
+
+
+def _abtest_data(data: dict) -> dict:
+    raw_summary = dict(data.get('summary') or {})
+    case_deltas = [dict(item) for item in data.get('case_deltas')
+                   or raw_summary.get('case_deltas') or [] if isinstance(item, dict)]
+    metrics = data.get('metrics') or raw_summary.get('metrics') or {}
+    policy = data.get('policy') or raw_summary.get('policy') or {}
+    decision = data.get('decision') or raw_summary.get('decision') or {}
+    case_details = _case_details_from_abtest_deltas(case_deltas, data.get('case_details'))
+    summary = raw_summary | {
+        'metrics': metrics,
+        'case_deltas': case_deltas,
+        'goodcase_guard': data.get('goodcase_guard') or raw_summary.get('goodcase_guard') or {},
+        'decision': decision,
+        'policy': policy,
+        'case_count': data.get('case_count') or raw_summary.get('case_count') or len(case_deltas),
+        'reasons': data.get('reasons') or raw_summary.get('reasons') or decision.get('reasons') or [],
+        'missing_metrics': data.get('missing_metrics') or raw_summary.get('missing_metrics') or [],
+    }
+    return data | {
+        'abtest_id': data.get('id') or 'abtest_comparison',
+        'case_details': case_details,
+        'case_details_summary': _case_details_summary(case_details, summary['case_count']),
+        'summary': summary,
+    }
+
+
+def _case_details_summary(
+        case_details: list[dict],
+        total_cases: Any | None = None,
+        fallback_metrics: dict | None = None) -> dict:
+    buckets: dict[str, dict[str, Any]] = {}
+    for row in case_details:
+        category = str(row.get('question_type') or row.get('category') or '总体')
+        bucket = buckets.setdefault(category, {'count': 0, 'totals': {}})
+        bucket['count'] += 1
+        for key in ('answer_correctness', 'faithfulness', 'context_recall', 'doc_recall'):
+            bucket['totals'][key] = float(bucket['totals'].get(key, 0.0)) + float(row.get(key) or 0.0)
+    if not buckets:
+        buckets['总体'] = {
+            'count': int(
+                total_cases or 0), 'totals': {
+                key.removesuffix('_avg'): float(
+                    value or 0.0) for key, value in (
+                    fallback_metrics or {}).items() if key.endswith('_avg')}, 'already_average': True, }
+    return {
+        'total_count': total_cases or len(case_details),
+        'question_types': [
+            {
+                'question_type_key': category,
+                'question_type_name': category,
+                'count': int(bucket['count'] or 0),
+                'averages': {
+                    key: round(float(value or 0.0) if bucket.get('already_average')
+                               else float(value or 0.0) / max(int(bucket['count'] or 0), 1), 4)
+                    for key, value in bucket['totals'].items()
+                },
+            }
+            for category, bucket in buckets.items()
+        ],
+    }
+
+
+def _case_details_from_eval_rows(rows: list[dict], existing: Any) -> list[dict]:
+    if isinstance(existing, list):
+        return [dict(item) for item in existing if isinstance(item, dict)]
+    return [
+        {
+            'case_id': row.get('case_id') or row.get('id'),
+            'question_type': row.get('question_type') or row.get('category') or '总体',
+            'answer_correctness': row.get('answer_correctness'),
+            'faithfulness': row.get('faithfulness'),
+            'context_recall': row.get('context_recall'),
+            'doc_recall': row.get('doc_recall'),
+            'is_correct': row.get('is_correct'),
+            'reason': row.get('reason'),
+            'trace_id': row.get('trace_id'),
+            'quality': row.get('quality_label') or row.get('quality'),
+            'failure_type': row.get('failure_type'),
+        }
+        | {
+            key: row[key]
+            for key in (
+                'question',
+                'key_points',
+                'ground_truth',
+                'rag_answer',
+                'retrieve_contexts',
+                'retrieve_doc',
+                'reference_chunk_ids',
+                'reference_doc_ids',
+                'retrieve_chunk_ids',
+                'retrieve_doc_ids',
+                'rag_trace',
+                'rag_response',
+            )
+            if key in row
+        }
+        for row in rows
+    ]
+
+
+def _case_details_from_abtest_deltas(case_deltas: list[dict], existing: Any) -> list[dict]:
+    if isinstance(existing, list):
+        return [dict(item) for item in existing if isinstance(item, dict)]
+    return [
+        {
+            'case_id': row.get('case_id') or row.get('case_key') or row.get('id'),
+            'outcome': row.get('outcome'),
+            **{f'baseline_{metric}': value for metric, value in _dict_items(row.get('before'))},
+            **{f'candidate_{metric}': value for metric, value in _dict_items(row.get('after'))},
+            **{metric: value for metric, value in _dict_items(row.get('delta'))},
+        }
+        for row in case_deltas
+    ]
+
+
+def _dict_items(value: Any):
+    return value.items() if isinstance(value, dict) else ()
+
+
+def _artifact_flow_http_status(state: FlowStepState | None) -> str:
+    if state is None:
+        return 'idle'
+    if state.gate_status == 'completed':
+        return 'ended'
+    if state.gate_status == 'cancelled':
+        return 'cancelled'
+    if state.gate_status in {'paused', 'stale'}:
+        return 'waiting_checkpoint'
+    return 'running'
+
+
+def _artifact_checkpoint_payload(state: FlowStepState | None) -> dict | None:
+    if state is None or state.gate_status not in {'paused', 'stale'}:
         return None
-    if not stage: return None
-    action = _action(str(payload.get('status') or 'running'))
-    data = {'type': f'{stage}.{action}', 'stage': stage, 'action': action, 'seq': seq,
-            'event_id': event.event_id, 'created_at': event.created_at,
-            'message': payload.get('message') or '', 'payload': payload,
-            'task_id': payload.get('stage') or payload.get('phase'),
-            **{key: payload[key] for key in ('flow_kind', 'case_id', 'case_index', 'artifact_id') if key in payload}}
-    return _sse('message', data, str(seq))
+    return {
+        'checkpoint_id': f'artifact_gate:{state.current_step}',
+        'checkpoint_kind': 'stage_gate',
+        'stage': state.current_step,
+        'next_stage': state.next_step or '',
+        'message': f'{STAGE_LABELS.get(str(state.current_step), state.current_step)}已完成，请确认是否继续执行下一步。',
+        'gate_artifact_ref': '' if state.gate_artifact_ref is None else str(state.gate_artifact_ref),
+    }
 
 
-def _action(status: str) -> str:
-    return {'running': 'progress', 'success': 'finish', 'failed': 'failed', 'checkpointed': 'pause',
-            'cancelled': 'cancel', 'skipped': 'finish'}.get(status, 'progress')
+def _thread_summary_message(meta: dict, status: dict) -> dict:
+    completed = [STAGE_LABELS.get(str(step), str(step)) for step in status.get('completed_steps') or []]
+    content = f"自进化线程 {meta.get('id') or meta.get('thread_id') or ''} 已恢复。"
+    if completed:
+        content += f" 已完成阶段：{'、'.join(completed)}。"
+    if status.get('status'):
+        content += f" 当前状态：{status['status']}。"
+    return {
+        'id': f"{meta.get('id') or meta.get('thread_id') or 'thread'}-summary",
+        'role': 'assistant',
+        'content': content,
+        'ts': meta.get('updated_at') or meta.get('created_at') or time.time(),
+    }
 
 
-def _dataset_id(inputs: dict[str, Any]) -> str:
-    ids = {str(inputs.get(key) or '').strip() for key in ('kb_id', 'dataset_id') if str(inputs.get(key) or '').strip()}
-    if len(ids) > 1: raise ValueError('dataset id aliases must match')
-    if ids: return validate_id(ids.pop(), 'dataset_id')
-    # Legacy frontend threads carry dataset_name as a display name, never as an id alias;
-    # it only acts as the id when no kb_id/dataset_id was provided at all.
-    legacy = str(inputs.get('dataset_name') or '').strip()
-    return validate_id(legacy, 'dataset_id') if legacy else 'algo'
+def _history_rounds(thread_id: str, messages: list[dict]) -> list[dict]:
+    rounds, pending_user = [], None
+    for index, message in enumerate(messages):
+        role, content = message.get('role'), str(message.get('content') or '').strip()
+        if not content:
+            continue
+        if role == 'user':
+            pending_user = message
+            continue
+        if role != 'assistant':
+            continue
+        user_message = pending_user or {}
+        round_id = str(user_message.get('id') or message.get('id') or f'{thread_id}-round-{index + 1}')
+        rounds.append(
+            {
+                'round_id': round_id,
+                'thread_id': thread_id,
+                'status': 'completed',
+                'user_message': str(user_message.get('content') or ''),
+                'assistant_message': content,
+                'created_at': _history_timestamp(user_message.get('ts') or message.get('ts')),
+                'updated_at': _history_timestamp(message.get('ts')),
+            }
+        )
+        pending_user = None
+    return rounds
+
+
+def _history_timestamp(value: Any) -> str:
+    if isinstance(value, (int, float)) and value > 0:
+        return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(value))
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
+
+def _model_config_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    value = payload.get('llm_config') or payload.get('model_config') or {}
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _abtest_status(flow: EvoFlowRuntime) -> str | None:
+    ref = flow.runtime.stores.artifact_store.latest(ArtifactKey.of('abtest.comparison'))
+    if ref is None:
+        return None
+    record = flow.runtime.stores.artifact_store.get(ref)
+    if record is None or not isinstance(record.value.payload, dict):
+        return 'completed'
+    return str(record.value.payload.get('status') or 'completed')
+
+
+def _artifact_selector(value: str) -> tuple[ArtifactKey, int | None]:
+    text = value.strip()
+    if not text:
+        raise HTTPException(400, 'artifact id required')
+    version = None
+    if '@v' in text:
+        text, raw_version = text.rsplit('@v', 1)
+        try:
+            version = int(raw_version)
+        except ValueError as exc:
+            raise HTTPException(400, f'bad artifact version: {value}') from exc
+    partition = ''
+    if text.endswith(']') and '[' in text:
+        text, partition = text[:-1].split('[', 1)
+    return ArtifactKey(text, partition), version
 
 
 def _scoped_report_id(value: str) -> tuple[str, str]:
     text = str(value or '').strip()
     if ':' not in text:
         raise HTTPException(400, 'global report content requires scoped id: {thread_id}:{artifact_ref}')
-    thread_id, artifact = (part.strip() for part in text.split(':', 1))
-    if not thread_id or not artifact:
+    thread_id, artifact_id = (part.strip() for part in text.split(':', 1))
+    if not thread_id or not artifact_id:
         raise HTTPException(400, 'global report content requires scoped id: {thread_id}:{artifact_ref}')
-    return thread_id, artifact
+    return thread_id, artifact_id
 
 
 def _normalize_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(inputs)
     dataset_id = _dataset_id(normalized)
     normalized['kb_id'] = normalized['dataset_id'] = dataset_id
-    if 'dataset_name' in normalized: normalized['dataset_name'] = dataset_id
+    if 'dataset_name' in normalized:
+        normalized['dataset_name'] = dataset_id
     normalized['target_chat_url'] = _chat_url(normalized.get('target_chat_url'))
     normalized['candidate_chat_url'] = _optional_chat_url(normalized.get('candidate_chat_url'))
     if normalized['candidate_chat_url'] and normalized['candidate_chat_url'] == normalized['target_chat_url']:
         raise ValueError('candidate_chat_url must differ from target_chat_url')
     normalized['router_admin_url'] = _admin_url(normalized.get('router_admin_url'))
-    normalized['num_cases'] = _bounded_positive_int(_case_count_value(normalized), 'num_cases',
-                                                    MAX_CREATE_THREAD_CASES)
+    normalized['num_cases'] = _bounded_positive_int(_case_count_value(normalized), 'num_cases', MAX_CREATE_THREAD_CASES)
     normalized.pop('case_count', None)
     max_workers = inputs['max_workers'] if 'max_workers' in inputs else os.getenv('EVO_FLOW_WORKERS', '2')
     normalized['max_workers'] = _bounded_positive_int(max_workers, 'max_workers', MAX_CREATE_THREAD_WORKERS)
     return normalized
 
 
+def _dataset_id(inputs: dict[str, Any]) -> str:
+    ids = {str(inputs.get(key) or '').strip() for key in ('kb_id', 'dataset_id') if str(inputs.get(key) or '').strip()}
+    if len(ids) > 1:
+        raise ValueError('dataset id aliases must match')
+    if ids:
+        return validate_id(ids.pop(), 'dataset_id')
+    legacy = str(inputs.get('dataset_name') or '').strip()
+    return validate_id(legacy, 'dataset_id') if legacy else 'algo'
+
+
 def _chat_url(value: Any) -> str:
     url = str(value or os.getenv('LAZYMIND_EVO_TARGET_CHAT_URL') or 'http://chat:8046/api/chat/stream').strip()
-    return _stream_url(url, 'target_chat_url')
+    return normalize_chat_stream_url(url.replace('http://evo-chat:', 'http://chat:'), 'target_chat_url')
 
 
 def _optional_chat_url(value: Any) -> str:
     url = str(value or '').strip()
-    return _stream_url(url, 'candidate_chat_url') if url else ''
-
-
-def _stream_url(url: str, field: str) -> str:
-    return normalize_chat_stream_url(url.replace('http://evo-chat:', 'http://chat:'), field)
+    return normalize_chat_stream_url(url, 'candidate_chat_url') if url else ''
 
 
 def _admin_url(value: Any) -> str:
@@ -1169,224 +1250,16 @@ def _bounded_positive_int(value: Any, field: str, maximum: int) -> int:
         out = int(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f'{field} must be a positive integer') from exc
-    if out < 1: raise ValueError(f'{field} must be a positive integer')
-    if out > maximum: raise ValueError(f'{field} must be <= {maximum}')
+    if out < 1:
+        raise ValueError(f'{field} must be a positive integer')
+    if out > maximum:
+        raise ValueError(f'{field} must be <= {maximum}')
     return out
 
 
-def _intent_label(action: str) -> str:
-    labels = {'ask_clarification': '需要补充信息', 'no_operations': '无需新增操作', 'reject': '未通过当前能力边界',
-              'resume_checkpointed': '继续执行 checkpoint 后续流程', 'respond_to_user': '直接回复用户',
-              'read_run_status_query': '查看当前流程进度', 'read_artifact_query': '查看产物内容',
-              'read_repair_artifact': '查看修复产物', 'read_operation_query': '查看操作状态'}
-    return labels.get(action, action.replace('_', ' '))
-
-
-def _reply(result) -> str:
-    fixed = {'ask_clarification': '我还需要你补充一点信息，才能继续规划下一步。',
-             'no_operations': '收到，这条消息不需要新增自进化操作。',
-             'reject': '这条消息超出了当前 checkpoint 允许的能力边界，请调整后重试。',
-             'resume_checkpointed': '已收到继续确认，正在恢复 checkpoint 后续流程。'}
-    if result.action in fixed: return fixed[result.action]
-    status = '已完成' if result.results else '已识别'
-    return f'{status}意图：{_intent_label(str(result.action))}。'
-
-
-def _intent_answer(service: EvoFlowService, result: FlowMessageResult) -> str:
-    for op_result in result.results:
-        for ref in op_result.output_refs:
-            try:
-                payload = service.artifacts.get(ref)
-            except (KeyError, FileNotFoundError):
-                continue
-            answer = payload.get('answer') if isinstance(payload, dict) else ''
-            if isinstance(answer, str) and answer.strip(): return answer.strip()
-    return ''
-
-
-def _run_status_reply(thread_id: str, service: EvoFlowService, flow_status: dict[str, Any],
-                      meta: dict[str, Any]) -> str:
-    run_dir = service.store.run_dir(RUN_ID)
-    projection = _read_json(run_dir / 'projections' / 'current.json')
-    run = _read_json(run_dir / 'run.json')
-    operations = _read_json(run_dir / 'operations.json')
-    latest = projection.get('latest_artifacts') or {}
-    progress = projection.get('progress') or {}
-    events = _stored_events(run_dir)
-    checkpoint = flow_status.get('pending_checkpoint')
-    status = str(flow_status.get('status') or meta.get('status') or run.get('status') or 'idle')
-    status = str(meta.get('status')) if str(meta.get('status') or '') in {'cancelled', 'failed', 'paused'} else status
-    stages = [_stage_summary(stage, label, artifacts, operations, latest, progress, events, checkpoint)
-              for stage, label, artifacts in RUN_STATUS_STAGES]
-    current = next((item for item in stages if item['state'] in {'running', 'waiting', 'failed'}), None)
-    current = current or next((item for item in stages if item['state'] == 'pending'), stages[-1])
-    lines = [f'当前线程 {thread_id}：{_thread_status_label(status)}，当前阶段：{current["label"]} - {current["text"]}。']
-    if status == 'cancelled': lines.append('线程已取消，当前不会继续推进；下面是取消前已经完成和未开始的部分。')
-    if checkpoint: lines.append(_checkpoint_line(checkpoint))
-    lines.append('阶段状态：')
-    lines.extend(f'- {item["label"]}: {item["text"]}{item["detail"]}' for item in stages)
-    return '\n'.join(lines)
-
-
-def _stage_summary(stage: str, label: str, artifacts: tuple[str, ...], operations: dict, latest: dict, progress: dict,
-                   events: list[Event], checkpoint: dict | None) -> dict[str, str]:
-    stage_ops = [row for row in operations.values() if isinstance(row, dict) and _operation_stage(row) == stage]
-    flow_state = _latest_flow_stage_status(events, stage)
-    state = _stage_state(stage, artifacts, stage_ops, latest, flow_state, checkpoint)
-    detail = _stage_detail(stage, artifacts, latest, progress, stage_ops, checkpoint)
-    return {'label': label, 'state': state, 'text': _stage_state_label(state, flow_state), 'detail': detail}
-
-
-def _stage_state(stage: str, artifacts: tuple[str, ...], operations: list[dict], latest: dict, flow_state: str,
-                 checkpoint: dict | None) -> str:
-    if checkpoint and STAGE_MAP.get(str(checkpoint.get('next_stage') or '')) == stage: return 'waiting'
-    if any(str(op.get('outcome') or op.get('status')) == 'failed' for op in operations) or flow_state == 'failed':
-        return 'failed'
-    if any(str(op.get('status') or '') == 'running' for op in operations) or flow_state == 'running': return 'running'
-    if any(artifact in latest for artifact in artifacts) or flow_state in {'success', 'skipped'}: return 'done'
-    return 'pending'
-
-
-def _stage_detail(stage: str, artifacts: tuple[str, ...], latest: dict, progress: dict, operations: list[dict],
-                  checkpoint: dict | None) -> str:
-    if stage == 'dataset' and 'eval_dataset' in latest:
-        payload = progress.get('dataset.assemble') if isinstance(progress, dict) else {}
-        total = (payload or {}).get('total') or (payload or {}).get('done')
-        return f'，已生成 {total} 条样本' if total else '，数据集已生成'
-    if stage == 'repair':
-        if any(key in latest for key in {'verified_repair', 'repair_loop_agent'}): return '，opencode 执行轨迹已生成'
-        return '，opencode 尚未开始' if not operations else ''
-    if stage == 'abtest':
-        if 'candidate_algorithm_cutover' in latest: return '，候选算法已切流'
-        if checkpoint and checkpoint.get('checkpoint_kind') == 'manual_cutover': return '，等待用户确认切流'
-        return '，ABTest 结果已生成' if 'abtest_comparison' in latest else ''
-    ready = next((artifact for artifact in artifacts if artifact in latest), '')
-    return f'，产物 {ready} 已生成' if ready else ''
-
-
-def _operation_stage(operation: dict[str, Any]) -> str | None:
-    oid = str(operation.get('operation_id') or operation.get('operation_run_id') or '')
-    return None if oid.startswith('intent.') else _stage_from_operation(operation)
-
-
-def _latest_flow_stage_status(events: list[Event], stage: str) -> str:
-    status = ''
-    for event in events:
-        payload = event.payload or {}
-        if event.event_type == 'evo_flow.progress' and STAGE_MAP.get(str(payload.get('stage') or '')) == stage:
-            status = str(payload.get('status') or status)
-    return status
-
-
-def _checkpoint_line(checkpoint: dict) -> str:
-    next_op = checkpoint.get('next_op') or {}
-    op = next_op.get('op') if isinstance(next_op, dict) else next_op
-    next_stage = STAGE_MAP.get(str(checkpoint.get('next_stage') or '')) or str(checkpoint.get('next_stage') or '')
-    next_label = next((label for stage, label, _ in RUN_STATUS_STAGES if stage == next_stage), next_stage or '下一阶段')
-    return f'待确认：{checkpoint.get("message") or "等待确认是否继续"} 下一步是 {next_label}{f" ({op})" if op else ""}。'
-
-
-def _completed_manual_cutover(checkpoint: CheckpointState, result: FlowMessageResult,
-                              service: EvoFlowService) -> bool:
-    if not checkpoint.is_manual_cutover or result.action != 'cutover_candidate_algorithm': return False
-    cutover_done = _has_artifact(service, 'candidate_algorithm_cutover')
-    return cutover_done and any(ref.status in {'ended', 'success'} for ref in result.results)
-
-
-def _resume_input_policy(payload: dict[str, Any]) -> str:
-    return str(payload.get('input_policy') or '').strip()
-
-
-def _default_resume_input_policy(checkpoint: CheckpointState, input_policy: str) -> str:
-    return ContinuationPolicyResolver.resolve({'input_policy': input_policy}, checkpoint)
-
-
-def _stage_checkpoint_resumed_result(message_id: str, checkpoint: CheckpointState,
-                                     input_policy: str) -> FlowMessageResult:
-    return FlowMessageResult(
-        message_id,
-        {'next_task': {'type': 'stage_checkpoint_resumed', 'checkpoint_id': checkpoint.checkpoint_id,
-                       'next_stage': checkpoint.next_stage, 'input_policy': input_policy}},
-        'resume_checkpointed',
-    )
-
-
-def _blocked_operations_stage(checkpoint: CheckpointState) -> str:
-    """Operation checkpoints carry no next_stage; derive the restart stage from blocked operations."""
-    for operation in checkpoint.blocked_operations or checkpoint.next_operations or ():
-        stage = STAGE_MAP.get(str(operation).split('.', 1)[0])
-        if stage: return stage
-    return ''
-
-
-def _thread_status_label(status: str) -> str:
-    return {'running': '运行中', 'waiting_checkpoint': '等待确认', 'cancelled': '已取消', 'ended': '已完成',
-            'failed': '失败', 'paused': '已暂停', 'idle': '空闲'}.get(status, status)
-
-
-def _stage_state_label(state: str, flow_state: str) -> str:
-    if state == 'done': return '已完成' if flow_state != 'skipped' else '已跳过'
-    return {'running': '进行中', 'waiting': '等待确认', 'failed': '失败', 'pending': '未开始'}.get(state, state)
-
-
-def _checkpoint_stage(stage: str) -> str:
-    return {'dataset_gen': 'dataset', 'run': 'analysis', 'apply': 'repair'}.get(stage, stage)
-
-
-def _stage_label(stage: str) -> str:
-    return {'dataset': '数据集生成', 'eval': '评测', 'analysis': '分析', 'repair': '修复',
-            'abtest': 'ABTest'}.get(stage, stage)
-
-
-def _operations_by_id(service: EvoFlowService) -> dict[str, Any]:
-    return {str(row.get('operation_run_id') or ''): row for row in service.store.list_operations(RUN_ID)}
-
-
-def _operation_event_meta(operation_run_id: str, operations: dict[str, Any]) -> dict[str, Any]:
-    operation = operations.get(operation_run_id) or {}
-    params, tags = operation.get('params') or {}, operation.get('tags') or {}
-    return {
-        'flow_tag': operation.get('flow_tag'), 'stage_tag': operation.get('stage_tag'),
-        'flow_kind': tags.get('evo_step') or operation.get('stage_tag') or operation.get('flow_tag'),
-        'case_id': params.get('case_id') or params.get('output_case_id'),
-        'artifact_id': tags.get('writes_artifact_id'),
-    } | _case_index(params.get('case_id') or params.get('output_case_id'))
-
-
-def _case_index(case_id: Any) -> dict[str, int]:
-    value = str(case_id or '')
-    suffix = value.rsplit('_', 1)[1] if value.startswith('case_') else ''
-    return {'case_index': int(suffix)} if suffix.isdigit() else {}
-
-
-def _stage_from_operation(payload: dict[str, Any]) -> str | None:
-    return STAGE_MAP.get(str(payload.get('flow_tag') or payload.get('stage_tag') or payload.get('phase') or ''))
-
-
-def _preview(result) -> list[dict]:
-    return [{'op': ref, 'intent': result.action, 'humanized': _intent_label(result.action), 'safety': 'normal',
-             'params_summary': {}} for ref in result.operation_refs]
-
-
-def _queued_preview_result_dict(result: FlowMessageResult) -> dict[str, Any]:
-    data = result_dict(result)
-    data['requires_confirmation'] = False
-    data['confirmation_checkpoint_id'] = ''
-    return data
-
-
-def _preview_copy_ignore(path: str, names: list[str]) -> set[str]:
-    ignored = {name for name in names if '.tmp' in name}
-    if Path(path).name == RUN_ID: ignored |= {'candidate', 'tmp'} & set(names)
-    return ignored
-
-
-def _chunks(text: str, size: int = 64) -> list[str]:
-    return [text[i:i + size] for i in range(0, len(text), size)] or ['']
-
-
 def _read_messages(path: Path) -> list[dict]:
-    if not path.exists(): return []
+    if not path.exists():
+        return []
     rows = []
     for index, line in enumerate(path.read_text(encoding='utf-8').splitlines()):
         try:
@@ -1410,206 +1283,3 @@ def _write_json(path: Path, data: dict) -> None:
     tmp = path.with_suffix(f'.{os.getpid()}.{time.time_ns()}.tmp')
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True, default=str), encoding='utf-8')
     tmp.replace(path)
-
-
-def _flow_status_row(thread_id: str, status: str, active_task_ids: list[str], *,
-                     latest_abtest_status: str | None = None, report_ready: bool = False,
-                     pending_checkpoint: dict | None = None) -> dict:
-    return {'thread_id': thread_id, 'status': status, 'active_task_ids': active_task_ids,
-            'latest_abtest_id': 'abtest_comparison' if latest_abtest_status else None,
-            'latest_abtest_status': latest_abtest_status, 'report_ready': report_ready,
-            'pending_checkpoint': pending_checkpoint}
-
-
-def _lifecycle_flow_status(thread_id: str, run_dir: Path, projection: dict[str, Any], meta_status: str,
-                           active_task_ids: list[str]) -> dict:
-    run = projection.get('run') if isinstance(projection.get('run'), dict) else {}
-    if not run: run = _read_json(run_dir / 'run.json')
-    latest = projection.get('latest_artifacts') if isinstance(projection.get('latest_artifacts'), dict) else {}
-    status = _lifecycle_status(run)
-    pending_checkpoint = frontend_checkpoint_from_run(run)
-    if status == 'running' and not active_task_ids:
-        status, pending_checkpoint = _stalled_running_status(run_dir, projection, pending_checkpoint)
-    # RunLifecycle (run.json) is the single source of run status; thread meta only
-    # tracks the deletion intent, which never reaches the lifecycle.
-    if meta_status == 'deleting': status = 'deleting'
-    decision = _artifact_decision(run_dir, 'abtest_comparison') if 'abtest_comparison' in latest else {}
-    return _flow_status_row(thread_id, status, active_task_ids if status == 'running' else [],
-                            latest_abtest_status=decision.get('status'),
-                            report_ready=_eval_report_ready(run_dir, latest),
-                            pending_checkpoint=pending_checkpoint)
-
-
-def _eval_report_ready(run_dir: Path, latest: dict[str, Any]) -> bool:
-    if 'eval_report' not in latest:
-        return False
-    aggregate = _read_json(run_dir / 'operations.json').get('eval.aggregate', {})
-    return aggregate.get('status') == 'ended' and aggregate.get('outcome') == 'success'
-
-
-def _lifecycle_status(run: dict[str, Any]) -> str:
-    status = str(run.get('status') or 'idle')
-    return 'waiting_checkpoint' if status == 'running' and run.get('dispatch_block_reason') else status
-
-
-def _stalled_running_status(run_dir: Path, projection: dict[str, Any],
-                            pending_checkpoint: dict | None) -> tuple[str, dict | None]:
-    if pending_checkpoint: return 'waiting_checkpoint', pending_checkpoint
-    blocker_ids = _blocker_operation_ids(projection.get('blockers') or [])
-    if blocker_ids: return 'waiting_checkpoint', _checkpoint_ids(blocker_ids)
-    operations = _projection_operations(run_dir, projection)
-    waiting = [oid for oid in (_operation_id(operation) for operation in operations
-               if str(operation.get('status') or 'pending') in {'pending', 'running', 'checkpointed'}
-               or str(operation.get('outcome') or '') == 'failed') if oid]
-    if waiting: return 'waiting_checkpoint', _checkpoint_ids(waiting)
-    return ('ended', None) if operations else ('idle', None)
-
-
-def _projection_operations(run_dir: Path, projection: dict[str, Any]) -> list[dict[str, Any]]:
-    operations = projection.get('operations')
-    if isinstance(operations, list):
-        return [operation for operation in operations if isinstance(operation, dict)]
-    stored = _read_json(run_dir / 'operations.json')
-    if isinstance(stored, dict):
-        return [operation for operation in stored.values() if isinstance(operation, dict)]
-    return []
-
-
-def _operation_id(operation: dict[str, Any]) -> str:
-    return str(operation.get('operation_run_id') or operation.get('operation_id') or '')
-
-
-def _blocker_operation_ids(blockers: list[Any]) -> list[str]:
-    out = []
-    for blocker in blockers:
-        operation_id = (blocker.get('operation_run_id') or blocker.get('operation_id')) if isinstance(blocker, dict) \
-            else blocker
-        if operation_id: out.append(str(operation_id))
-    return out
-
-
-def _stored_events(run_dir: Path) -> list[Event]:
-    path = run_dir / 'events.jsonl'
-    if not path.exists(): return []
-    rows = []
-    for line in path.read_text(encoding='utf-8').splitlines():
-        if line.strip():
-            try:
-                rows.append(Event(**json.loads(line)))
-            except (TypeError, json.JSONDecodeError):
-                continue
-    return rows
-
-
-def _checkpoint_ids(operation_ids: list[str]) -> dict | None:
-    return {'checkpoint_id': operation_ids[0], 'message': 'operation paused, send continue to resume'} \
-        if operation_ids else None
-
-
-def _artifact_decision(run_dir: Path, artifact_id: str) -> dict:
-    latest = sorted((run_dir / 'artifacts' / 'blobs' / artifact_id).glob('v*.json'))
-    if not latest: return {}
-    data = _read_json(latest[-1])
-    decision = data.get('decision') if isinstance(data, dict) else {}
-    return decision if isinstance(decision, dict) else {}
-
-
-def _has_artifact(service: EvoFlowService, artifact_id: str) -> bool:
-    try:
-        service.artifacts.latest_ref(artifact_id)
-        return True
-    except KeyError:
-        return False
-
-
-def _artifact_row(service: EvoFlowService, artifact_id: str) -> dict:
-    try:
-        ref = service.artifacts.latest_ref(artifact_id)
-    except KeyError:
-        return {}
-    data = service.artifacts.get(ref)
-    if artifact_id == 'eval_dataset':
-        data = _eval_dataset_with_cases(data, lambda case_ref: service.artifacts.get(case_ref))
-    return _artifact_result_row(artifact_id, str(ref), service.artifacts.schema_name(ref), data)
-
-
-def _stored_result_rows(run_dir: Path, kind: str) -> list[dict] | None:
-    if kind not in RESULT_ARTIFACT_IDS and kind not in RESULT_ARTIFACT_SCHEMAS: return None
-    rows = [_stored_artifact_row(run_dir, artifact_id) for artifact_id in RESULT_ARTIFACT_IDS.get(kind, ())]
-    rows += _stored_schema_rows(run_dir, RESULT_ARTIFACT_SCHEMAS.get(kind, set()))
-    return _dedupe_artifact_rows(rows)
-
-
-def _stored_artifact_row(run_dir: Path, artifact_id: str) -> dict:
-    manifest = _read_json(run_dir / 'artifacts' / 'manifests' / f'{artifact_id}.json')
-    versions = manifest.get('versions') if isinstance(manifest.get('versions'), list) else []
-    latest_version = int(manifest.get('latest_version') or 0)
-    version = next((item for item in versions if isinstance(item, dict) and item.get('version') == latest_version),
-                   None)
-    if not version: version = next((item for item in reversed(versions) if isinstance(item, dict)), None)
-    payload_ref = str(version.get('payload_ref') or '') if version else ''
-    data = _read_json(run_dir / payload_ref) if payload_ref else {}
-    if not data and not manifest: return {}
-    if artifact_id == 'eval_dataset':
-        data = _eval_dataset_with_cases(
-            data, lambda case_ref: _stored_artifact_row(run_dir, case_ref.artifact_id).get('data')
-        )
-    artifact_ref = f"{artifact_id}@v{int(version.get('version') or latest_version or 1)}" if version else artifact_id
-    schema = (manifest.get('schema_name') or version.get('schema_name')) if version else ''
-    return _artifact_result_row(artifact_id, artifact_ref, schema, data)
-
-
-def _artifact_result_row(artifact_id: str, artifact_ref: str, schema: str, data: dict) -> dict:
-    return {'artifact_id': artifact_id, 'artifact_ref': artifact_ref, 'schema': schema,
-            'case_count': len(data.get('case_ids') or data.get('cases') or []), 'data': data}
-
-
-def _stored_schema_rows(run_dir: Path, schemas: set[str]) -> list[dict]:
-    if not schemas: return []
-    rows = []
-    for path in sorted((run_dir / 'artifacts' / 'manifests').glob('*.json')):
-        row = _stored_artifact_row(run_dir, path.stem)
-        if row and row.get('schema') in schemas: rows.append(row)
-    return rows
-
-
-def _dedupe_artifact_rows(rows: list[dict]) -> list[dict]:
-    out, seen = [], set()
-    for row in rows:
-        artifact_id = str(row.get('artifact_id') or '')
-        if not artifact_id or artifact_id in seen: continue
-        seen.add(artifact_id)
-        out.append(row)
-    return out
-
-
-def _stored_artifact_payload(run_dir: Path, artifact: str) -> Any:
-    artifact_id, version = _stored_artifact_target(artifact)
-    manifest = _read_json(run_dir / 'artifacts' / 'manifests' / f'{artifact_id}.json')
-    versions = manifest.get('versions') if isinstance(manifest.get('versions'), list) else []
-    if not versions: raise KeyError(artifact)
-    target_version = int(manifest.get('latest_version') or 0) if version is None else version
-    selected = next(
-        (item for item in versions if isinstance(item, dict) and int(item.get('version') or 0) == target_version),
-        None)
-    if not selected: raise KeyError(artifact)
-    payload_ref = str(selected.get('payload_ref') or '')
-    if not payload_ref: raise FileNotFoundError(artifact)
-    return json.loads((run_dir / payload_ref).read_text(encoding='utf-8'))
-
-
-def _stored_artifact_target(artifact: str) -> tuple[str, int | None]:
-    if '@v' not in artifact: return artifact, None
-    ref = ArtifactRef.parse(artifact)
-    return ref.artifact_id, ref.version
-
-
-def _eval_dataset_with_cases(data: dict, load_case: Callable[[ArtifactRef], Any]) -> dict:
-    cases = []
-    for value in data.get('case_refs') or []:
-        try:
-            case = load_case(ArtifactRef.parse(str(value)))
-        except (KeyError, ValueError, TypeError):
-            continue
-        if isinstance(case, dict): cases.append(case)
-    return {**data, 'cases': cases} if cases else data

@@ -24,18 +24,21 @@ const subagentRunTimeout = 2 * time.Hour
 
 // RunRequest is the body posted to the algorithm layer /api/subagent/run.
 // task_id doubles as the request sid (independent FileSystemQueue bucket).
+//
+// objective, input_artifact_keys, and output_artifact_keys are intentionally
+// omitted: the Python runner reads those from the sub_agent_tasks DB record.
+// tools is still forwarded for non-plugin_step agent types; plugin_step tasks
+// resolve their tools from plugin_loader at execution time.
 type RunRequest struct {
-	TaskID             string         `json:"task_id"`
-	AgentType          string         `json:"agent_type"`
-	Objective          string         `json:"objective"`
-	Params             map[string]any `json:"params,omitempty"`
-	InputArtifactKeys  []string       `json:"input_artifact_keys"`
-	OutputArtifactKeys []string       `json:"output_artifact_keys"`
-	WorkspacePath      string         `json:"workspace_path"`
-	Tools              []string       `json:"tools,omitempty"`
-	DBDSN              string         `json:"db_dsn"`
-	Resume             bool           `json:"resume"`
-	LLMConfig          map[string]any `json:"llm_config,omitempty"`
+	TaskID        string         `json:"task_id"`
+	AgentType     string         `json:"agent_type"`
+	Params        map[string]any `json:"params,omitempty"`
+	WorkspacePath string         `json:"workspace_path"`
+	Tools         []string       `json:"tools,omitempty"`
+	DBDSN         string         `json:"db_dsn"`
+	Resume        bool           `json:"resume"`
+	LLMConfig     map[string]any `json:"llm_config,omitempty"`
+	ToolConfig    map[string]any `json:"tool_config,omitempty"`
 }
 
 // TaskEvent is one event emitted by the SubAgent SSE stream.
@@ -127,6 +130,8 @@ func routeEvent(ctx context.Context, db *gorm.DB, rdb *redis.Client, ev TaskEven
 	case "task_start":
 		_ = UpdateStatus(ctx, db, ev.TaskID, StatusRunning)
 		_ = WriteStatus(ctx, rdb, ev.TaskID, map[string]any{"status": StatusRunning, "progress": 0})
+		// Mirror running status into plugin_session_steps if this is a plugin_step task.
+		routePluginStepStatus(ctx, db, rdb, ev.TaskID, StatusRunning, "")
 	case "progress":
 		_ = UpdateProgress(ctx, db, ev.TaskID, ev.Progress, ev.CurrentPhase, ev.EstimatedSec)
 		_ = WriteStatus(ctx, rdb, ev.TaskID, map[string]any{
@@ -138,6 +143,10 @@ func routeEvent(ctx context.Context, db *gorm.DB, rdb *redis.Client, ev TaskEven
 			seq = 1
 		}
 		_ = SaveArtifact(ctx, db, ev.TaskID, ev.ArtifactKey, ev.ContentType, ev.Value, seq)
+		// Write slot revision if this is a plugin_step task with a slot binding.
+		// list_index for partial retry is embedded inside the artifact JSON value and
+		// extracted by the plugin hook via extractListIndex — no need to pass it here.
+		routePluginArtifact(ctx, db, ev.TaskID, ev.ArtifactKey)
 	case "done":
 		status := ev.Status
 		if status == "" {
@@ -147,6 +156,8 @@ func routeEvent(ctx context.Context, db *gorm.DB, rdb *redis.Client, ev TaskEven
 		_ = WriteStatus(ctx, rdb, ev.TaskID, map[string]any{
 			"status": status, "progress": 100, "summary": ev.Summary,
 		})
+		// Handle plugin step completion (auto-advance or step_waiting).
+		routePluginStepStatus(ctx, db, rdb, ev.TaskID, status, ev.Summary)
 	case "error":
 		status := ev.Status
 		if status == "" {
@@ -154,6 +165,7 @@ func routeEvent(ctx context.Context, db *gorm.DB, rdb *redis.Client, ev TaskEven
 		}
 		_ = UpdateFinalStatus(ctx, db, ev.TaskID, status, ev.Message)
 		_ = WriteStatus(ctx, rdb, ev.TaskID, map[string]any{"status": status, "summary": ev.Message})
+		routePluginStepStatus(ctx, db, rdb, ev.TaskID, status, ev.Message)
 	}
 	_ = AppendStreamEvent(ctx, rdb, ev.TaskID, ev)
 }
@@ -164,4 +176,53 @@ func routeError(ctx context.Context, db *gorm.DB, rdb *redis.Client, taskID, mes
 	_ = UpdateFinalStatus(ctx, db, taskID, StatusFailed, message)
 	_ = WriteStatus(ctx, rdb, taskID, map[string]any{"status": StatusFailed, "summary": message})
 	_ = AppendStreamEvent(ctx, rdb, taskID, ev)
+	routePluginStepStatus(ctx, db, rdb, taskID, StatusFailed, message)
+}
+
+// EventHooks allows external packages (e.g. plugin) to register callbacks for SubAgent events.
+// Hooks must be registered at startup before any SubAgent run begins.
+var EventHooks = &eventHooks{}
+
+type eventHooks struct {
+	onArtifact       func(ctx context.Context, db *gorm.DB, taskID, artifactKey string)
+	onTerminalStatus func(ctx context.Context, db *gorm.DB, rdb *redis.Client, taskID, status, message string)
+	// onConversationEvent is called when a plugin lifecycle event should be pushed to the
+	// main conversation SSE stream. convID and historyID identify the target stream;
+	// eventType is one of "step_waiting", "plugin_completed", "plugin_error".
+	onConversationEvent func(ctx context.Context, rdb *redis.Client, convID, historyID, eventType string, payload map[string]any)
+}
+
+// RegisterArtifactHook registers a hook called on every artifact event for any SubAgent task.
+func (h *eventHooks) RegisterArtifactHook(fn func(ctx context.Context, db *gorm.DB, taskID, artifactKey string)) {
+	h.onArtifact = fn
+}
+
+// RegisterTerminalStatusHook registers a hook called when a task reaches terminal status.
+func (h *eventHooks) RegisterTerminalStatusHook(fn func(ctx context.Context, db *gorm.DB, rdb *redis.Client, taskID, status, message string)) {
+	h.onTerminalStatus = fn
+}
+
+// RegisterConversationEventHook registers a hook that pushes a plugin lifecycle event
+// to the main conversation SSE stream. Should be registered by the chat package at startup.
+func (h *eventHooks) RegisterConversationEventHook(fn func(ctx context.Context, rdb *redis.Client, convID, historyID, eventType string, payload map[string]any)) {
+	h.onConversationEvent = fn
+}
+
+// CallConversationEvent invokes the registered conversation event hook if one is set.
+func (h *eventHooks) CallConversationEvent(ctx context.Context, rdb *redis.Client, convID, historyID, eventType string, payload map[string]any) {
+	if h.onConversationEvent != nil {
+		h.onConversationEvent(ctx, rdb, convID, historyID, eventType, payload)
+	}
+}
+
+func routePluginStepStatus(ctx context.Context, db *gorm.DB, rdb *redis.Client, taskID, status, message string) {
+	if EventHooks.onTerminalStatus != nil {
+		EventHooks.onTerminalStatus(ctx, db, rdb, taskID, status, message)
+	}
+}
+
+func routePluginArtifact(ctx context.Context, db *gorm.DB, taskID, artifactKey string) {
+	if EventHooks.onArtifact != nil {
+		EventHooks.onArtifact(ctx, db, taskID, artifactKey)
+	}
 }

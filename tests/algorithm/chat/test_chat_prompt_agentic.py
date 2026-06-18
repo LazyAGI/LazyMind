@@ -45,3 +45,17 @@ def test_agentic_guidance_strings_are_non_empty_and_balanced():
     assert 'memory_editor' in MEMORY_GUIDANCE
     assert 'skill_editor' in SKILLS_GUIDANCE
     assert 'vocab_learn' in VOCAB_GUIDANCE
+
+
+def test_image_reference_guidance_covers_generation_tools():
+    assert 'image_generator' in IMAGE_REFERENCE_MARKDOWN_GUIDANCE
+    assert 'image_editor' in IMAGE_REFERENCE_MARKDOWN_GUIDANCE
+
+
+def test_build_system_prompt_includes_image_guidance_for_generation_tools():
+    from lazymind.chat.engine.prompts import build_system_prompt
+
+    with_tools = build_system_prompt({'image_generator', 'llm'})
+    without_tools = build_system_prompt({'llm'})
+    assert IMAGE_REFERENCE_MARKDOWN_GUIDANCE in with_tools
+    assert IMAGE_REFERENCE_MARKDOWN_GUIDANCE not in without_tools

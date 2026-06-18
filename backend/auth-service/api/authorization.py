@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from jose import JWTError, jwt
 
-from core.errors import ErrorCodes, raise_error
+from core.errors import AppException, ErrorCodes, raise_error
 from core.security import jwt_secret
 from core.database import SessionLocal
 from repositories import UserRepository
@@ -87,6 +87,42 @@ def _user_id_from_token(token: str) -> uuid.UUID:
         raise_error(ErrorCodes.UNAUTHORIZED)
 
 
+def _token_from_request(request: Request) -> str:
+    auth_header = request.headers.get('authorization') or ''
+    token = auth_header.strip()
+    if token.lower().startswith('bearer '):
+        token = token[7:].strip()
+    return token
+
+
+def _authorize_user_payload(user) -> dict:
+    return {
+        'allowed': True,
+        'user_id': str(user.id),
+        'username': user.username,
+        'tenant_id': user.tenant_id,
+        'role': user.role.name,
+    }
+
+
+def _user_from_token(token: str, *, load_permissions: bool):
+    user_id = _user_id_from_token(token)
+    with SessionLocal() as db:
+        user = UserRepository.get_by_id(
+            db,
+            user_id,
+            load_role=True,
+            load_permission_groups=load_permissions,
+            load_groups=load_permissions,
+            load_group_permission_groups=load_permissions,
+        )
+    if not user:
+        raise_error(ErrorCodes.UNAUTHORIZED)
+    if user.disabled:
+        raise_error(ErrorCodes.USER_DISABLED)
+    return user
+
+
 @router.post('/authorize', response_model=AuthorizeResponse)
 def authorize(body: AuthorizeBody, request: Request):
     """
@@ -98,32 +134,25 @@ def authorize(body: AuthorizeBody, request: Request):
     method = (body.method or 'GET').upper()
     path = _normalize_path(body.path or '/')
     required = _required_permissions_for(method, path)
-    if not required:
-        return {'allowed': True}
-    auth_header = request.headers.get('authorization') or ''
-    token = auth_header.strip()
-    if token.lower().startswith('bearer '):
-        token = token[7:].strip()
+    token = _token_from_request(request)
     if not token:
+        if not required:
+            return {'allowed': True}
         raise_error(ErrorCodes.UNAUTHORIZED)
-    user_id = _user_id_from_token(token)
-    with SessionLocal() as db:
-        user = UserRepository.get_by_id(
-            db,
-            user_id,
-            load_role=True,
-            load_permission_groups=True,
-            load_groups=True,
-            load_group_permission_groups=True,
-        )
-    if not user:
-        raise_error(ErrorCodes.UNAUTHORIZED)
-    if user.disabled:
-        raise_error(ErrorCodes.USER_DISABLED)
+
+    try:
+        user = _user_from_token(token, load_permissions=bool(required))
+    except AppException:
+        if not required:
+            return {'allowed': True}
+        raise
+
+    if not required:
+        return _authorize_user_payload(user)
     if user.role.name == BUILTIN_ADMIN_ROLE:
-        return {'allowed': True, 'role': user.role.name}
+        return _authorize_user_payload(user)
     from core.permissions import get_effective_permission_codes
     effective = get_effective_permission_codes(user)
     if effective & set(required):
-        return {'allowed': True, 'role': user.role.name}
+        return _authorize_user_payload(user)
     raise_error(ErrorCodes.FORBIDDEN)

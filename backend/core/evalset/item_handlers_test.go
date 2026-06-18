@@ -169,6 +169,72 @@ func TestListEvalSetItemsFiltersBySourceAndQuestionType(t *testing.T) {
 	}
 }
 
+func TestListEvalSetItemsKeywordMatchesBackslash(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	seedEvalSet(t, db, "eval_set_items_backslash", "user_1", "", "", time.Now().UTC())
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:           "eval_item_backslash",
+		EvalSetID:    "eval_set_items_backslash",
+		Question:     `open C:\docs\case.txt`,
+		GroundTruth:  "answer",
+		ReferenceDoc: "doc_1",
+	})
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:           "eval_item_other",
+		EvalSetID:    "eval_set_items_backslash",
+		Question:     "open /docs/case.txt",
+		GroundTruth:  "answer",
+		ReferenceDoc: "doc_2",
+	})
+
+	rec, req := requestWithUser(http.MethodGet, "/api/core/eval-sets/eval_set_items_backslash/items?keyword=%5C&page=1&page_size=10", "", "user_1")
+	req = mux.SetURLVars(req, map[string]string{"eval_set_id": "eval_set_items_backslash"})
+	ListEvalSetItems(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeOKData[ListEvalSetItemsResponse](t, rec)
+	if resp.Total != 1 || len(resp.Items) != 1 || resp.Items[0].ID != "eval_item_backslash" {
+		t.Fatalf("expected only backslash item, got %#v", resp)
+	}
+}
+
+func TestListEvalSetItemsKeywordIgnoresHiddenIdentifiers(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	seedEvalSet(t, db, "eval_set_items_keyword_visible", "user_1", "", "", time.Now().UTC())
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:           "eval_item_hidden_match",
+		EvalSetID:    "eval_set_items_keyword_visible",
+		CaseID:       "case_3",
+		Question:     "alpha",
+		GroundTruth:  "answer",
+		KeyPoints:    "point 3",
+		ReferenceDoc: "doc 3",
+	})
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:           "eval_item_visible_match",
+		EvalSetID:    "eval_set_items_keyword_visible",
+		CaseID:       "case_visible",
+		Question:     "question 3",
+		GroundTruth:  "answer",
+		KeyPoints:    "point",
+		ReferenceDoc: "doc visible",
+	})
+
+	rec, req := requestWithUser(http.MethodGet, "/api/core/eval-sets/eval_set_items_keyword_visible/items?keyword=3&page=1&page_size=10", "", "user_1")
+	req = mux.SetURLVars(req, map[string]string{"eval_set_id": "eval_set_items_keyword_visible"})
+	ListEvalSetItems(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	resp := decodeOKData[ListEvalSetItemsResponse](t, rec)
+	if resp.Total != 1 || len(resp.Items) != 1 || resp.Items[0].ID != "eval_item_visible_match" {
+		t.Fatalf("expected only visible keyword match, got %#v", resp)
+	}
+}
+
 func TestListEvalSetQuestionTypesReturnsCurrentEvalSetDistinctTypes(t *testing.T) {
 	db := newEvalSetTestDB(t)
 	seedEvalSet(t, db, "eval_set_question_types", "user_1", "", "", time.Now().UTC())

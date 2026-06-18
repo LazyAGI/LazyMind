@@ -87,7 +87,8 @@ def _row(ctx, report_ref: ArtifactRef, dataset_ref: str, fine_ref: ArtifactRef, 
     quality = {}
     for key in SCORES:
         number = score(judge.get(key))
-        if not 0 <= number <= 1: raise ValueError(f'score out of range: {judge.get(key)!r}')
+        if not 0 <= number <= 1:
+            raise ValueError(f'score out of range: {judge.get(key)!r}')
         quality[key] = round(number, 4)
     return {'case_id': case_id, 'fine_ref': fine_ref, 'fine': fine, 'judge': judge, 'quality': quality,
             'loss_score': round(sum(1 - quality[key] for key in SCORES), 4)}

@@ -251,6 +251,23 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func uniqueNonEmptyStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		normalized := strings.TrimSpace(value)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	return out
+}
+
 func normalizedFeishuObjectType(value string) string {
 	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(value)), ".")
 }

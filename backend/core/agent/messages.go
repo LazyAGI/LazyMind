@@ -303,7 +303,7 @@ func consumeMessageStream(db *gorm.DB, session *activeMessageStream, threadID st
 			break
 		}
 
-		rawData := strings.TrimSpace(frame.Data)
+		rawData := frontendMessageStreamData(frame.Event, frame.Data)
 		payload := parseJSONValue(rawData)
 		if shouldSkipStreamData(frame.Event, payload, rawData) {
 			if rawData == "[DONE]" {
@@ -325,10 +325,10 @@ func consumeMessageStream(db *gorm.DB, session *activeMessageStream, threadID st
 			taskID = extractStringByKeys(payload, "task_id", "current_task_id")
 		}
 		logUpstreamSSEData(":messages", threadID, session.roundID, taskID, frame.Event, rawData)
-		if delta := extractAssistantTextFromFrameData(frame.Data); delta != "" {
+		if delta := extractAssistantTextFromFrameData(rawData); delta != "" {
 			assistantMessage.WriteString(delta)
 		}
-		record, _, saveErr := saveThreadRecord(db, threadID, session.roundID, taskID, streamKindMessage, frame.Event, frame.Data, frame.Raw)
+		record, _, saveErr := saveThreadRecord(db, threadID, session.roundID, taskID, streamKindMessage, frame.Event, rawData, frame.Raw)
 		if saveErr != nil {
 			status = "failed"
 			session.setErr(saveErr)

@@ -13,6 +13,23 @@ class CloudAuthConnectionRepository:
         )
 
     @classmethod
+    def list_by_ids(cls, session: Session, connection_ids: list[str]) -> list[CloudAuthConnection]:
+        ids = []
+        seen = set()
+        for connection_id in connection_ids or []:
+            normalized = (connection_id or '').strip()
+            if normalized and normalized not in seen:
+                ids.append(normalized)
+                seen.add(normalized)
+        if not ids:
+            return []
+        return (
+            session.query(CloudAuthConnection)
+            .filter(CloudAuthConnection.connection_id.in_(ids))
+            .all()
+        )
+
+    @classmethod
     def create(
         cls,
         session: Session,
@@ -92,6 +109,36 @@ class CloudAuthConnectionRepository:
         return q.order_by(CloudAuthConnection.updated_at.desc(), CloudAuthConnection.created_at.desc()).all()
 
     @classmethod
+    def list_health_check_candidates(
+        cls,
+        session: Session,
+        *,
+        provider: str | None = None,
+        auth_mode: str = 'oauth_user',
+        statuses: tuple[str, ...] = ('ACTIVE', 'EXPIRED', 'ERROR'),
+        limit: int = 100,
+    ) -> list[CloudAuthConnection]:
+        normalized_statuses = tuple(
+            status.strip().upper()
+            for status in statuses
+            if status and status.strip()
+        )
+        if not normalized_statuses:
+            return []
+        q = session.query(CloudAuthConnection).filter(
+            CloudAuthConnection.tenant_id == '',
+            CloudAuthConnection.auth_mode == (auth_mode or '').strip().lower(),
+            CloudAuthConnection.status.in_(normalized_statuses),
+        )
+        if provider:
+            q = q.filter(CloudAuthConnection.provider == provider.strip().lower())
+        return (
+            q.order_by(CloudAuthConnection.updated_at.asc(), CloudAuthConnection.created_at.asc())
+            .limit(max(1, int(limit or 100)))
+            .all()
+        )
+
+    @classmethod
     def find_latest_for_owner(
         cls,
         session: Session,
@@ -120,8 +167,10 @@ class CloudAuthConnectionRepository:
         provider: str,
         auth_mode: str,
         provider_account_id: str,
+        provider_tenant_key: str | None = None,
         status: str | None = None,
         exclude_statuses: tuple[str, ...] | None = None,
+        exclude_connection_id: str | None = None,
     ) -> CloudAuthConnection | None:
         account_id = (provider_account_id or '').strip()
         if not account_id:
@@ -133,6 +182,12 @@ class CloudAuthConnectionRepository:
             CloudAuthConnection.auth_mode == (auth_mode or '').strip().lower(),
             CloudAuthConnection.provider_account_id == account_id,
         )
+        tenant_key = (provider_tenant_key or '').strip()
+        if tenant_key:
+            q = q.filter(CloudAuthConnection.provider_tenant_key == tenant_key)
+        excluded_connection_id = (exclude_connection_id or '').strip()
+        if excluded_connection_id:
+            q = q.filter(CloudAuthConnection.connection_id != excluded_connection_id)
         if status:
             q = q.filter(CloudAuthConnection.status == status.strip().upper())
         elif exclude_statuses:

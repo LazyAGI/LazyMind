@@ -97,7 +97,8 @@ def start_candidate_process(ctx, workspace, command, chat_url, health_url, log_p
     ctx.register_cancel_callback(lambda: terminate_pid(proc.pid))
     try:
         wait_health(health_url, proc=proc, timeout_s=timeout_s)
-        if proc.poll() is not None: raise RuntimeError('candidate service exited after healthcheck')
+        if proc.poll() is not None:
+            raise RuntimeError('candidate service exited after healthcheck')
     except Exception:
         terminate_pid(proc.pid)
         raise
@@ -107,7 +108,8 @@ def start_candidate_process(ctx, workspace, command, chat_url, health_url, log_p
 
 def prepare_candidate_workspace(workspace: Path, source: Path) -> Path:
     workspace, source = workspace.resolve(), source.resolve()
-    if not workspace.exists(): copy_source_tree(source, workspace)
+    if not workspace.exists():
+        copy_source_tree(source, workspace)
     if not _is_algorithm_dir(workspace):
         raise RuntimeError(f'candidate_workdir is not LazyMind algorithm dir: {workspace}')
     ensure_git_baseline(workspace)
@@ -123,7 +125,8 @@ def cleanup_candidate_artifacts(run_dir: Path) -> None:
         _cleanup_step(terminate_pid, int((service.get('process') or {}).get('pid') or 0))
     for workspace in _payloads(run_dir, manifests, 'CandidateWorkspace'):
         path = Path(str(workspace.get('workspace_ref') or '')).resolve()
-        if path.exists() and path != run_dir and run_dir in path.parents: _cleanup_step(shutil.rmtree, path)
+        if path.exists() and path != run_dir and run_dir in path.parents:
+            _cleanup_step(shutil.rmtree, path)
 
 
 def _cleanup_step(fn, *args) -> None:
@@ -140,7 +143,8 @@ def default_algorithm_dir() -> Path:
     here = Path(__file__).resolve()
     for path in (Path('/app/algorithm'), Path.cwd() / 'algorithm', Path.cwd().parent / 'LazyRAG' / 'algorithm',
                  here.parents[4] / 'LazyRAG' / 'algorithm', Path.cwd().parent / 'algorithm'):
-        if _is_algorithm_dir(path): return path
+        if _is_algorithm_dir(path):
+            return path
     return Path.cwd().parent / 'algorithm'
 
 
@@ -154,17 +158,21 @@ def copy_source_tree(source: Path, target: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
     ignore = shutil.ignore_patterns('.git', '.evo_repair_logs', '__pycache__', '*.pyc')
     for name in COPY_DIRS:
-        if (source / name).exists(): shutil.copytree(source / name, target / name, ignore=ignore)
+        if (source / name).exists():
+            shutil.copytree(source / name, target / name, ignore=ignore)
     for name in COPY_FILES:
-        if (source / name).exists(): shutil.copy2(source / name, target / name)
+        if (source / name).exists():
+            shutil.copy2(source / name, target / name)
     normalize_candidate_config(target / 'config.py')
 
 
 def normalize_candidate_config(path: Path) -> None:
-    if not path.exists(): return
+    if not path.exists():
+        return
     text = path.read_text(encoding='utf-8')
     updated = text.replace(OLD_CONFIG, NEW_CONFIG)
-    if updated != text: path.write_text(updated, encoding='utf-8')
+    if updated != text:
+        path.write_text(updated, encoding='utf-8')
 
 
 def ensure_git_baseline(workspace: Path) -> None:
@@ -184,7 +192,8 @@ def wait_health(url: str, *, proc: subprocess.Popen | None = None, timeout_s: in
             raise RuntimeError(f'candidate service exited with code {proc.returncode}')
         try:
             with urllib.request.urlopen(url, timeout=3) as response:
-                if 200 <= response.status < 300: return
+                if 200 <= response.status < 300:
+                    return
                 last = f'HTTP {response.status}'
         except Exception as exc:
             last = str(exc)
@@ -193,12 +202,14 @@ def wait_health(url: str, *, proc: subprocess.Popen | None = None, timeout_s: in
 
 
 def terminate_pid(pid: int, grace_s: float = 10.0) -> bool:
-    if pid <= 0 or not _alive(pid): return False
+    if pid <= 0 or not _alive(pid):
+        return False
     try:
         os.kill(pid, 15)
         deadline = time.time() + grace_s
         while time.time() < deadline:
-            if not _alive(pid): return True
+            if not _alive(pid):
+                return True
             time.sleep(0.2)
         os.kill(pid, 9)
         return True
@@ -229,7 +240,8 @@ def _out(ctx, payload, schema, phase, message) -> OperationOutput:
 
 def _workspace(ctx: OperationContext) -> Path:
     ref = str(ctx.params.get('candidate_workspace_ref') or '')
-    if ref: return Path(str(ctx.artifact_graph.get(ArtifactRef.parse(ref)).get('workspace_ref') or '')).resolve()
+    if ref:
+        return Path(str(ctx.artifact_graph.get(ArtifactRef.parse(ref)).get('workspace_ref') or '')).resolve()
     return Path(str(ctx.params.get('candidate_workdir') or '')).resolve()
 
 
@@ -249,8 +261,10 @@ def _payloads(run_dir: Path, manifests: list[Path], schema_name: str) -> list[di
     out = []
     for path in manifests:
         manifest = json.loads(path.read_text(encoding='utf-8'))
-        if manifest.get('schema_name') != schema_name: continue
+        if manifest.get('schema_name') != schema_name:
+            continue
         for version in manifest.get('versions') or []:
             payload = run_dir / str(version.get('payload_ref') or '')
-            if payload.exists(): out.append(json.loads(payload.read_text(encoding='utf-8')))
+            if payload.exists():
+                out.append(json.loads(payload.read_text(encoding='utf-8')))
     return out

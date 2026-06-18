@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from core.deps import current_user, require_internal_service_token
 from core.rbac import permission_required
@@ -9,6 +9,8 @@ from schemas.cloud_oauth import (
     CloudConnectionListResponse,
     CloudConnectionCreateResponse,
     CloudConnectionResponse,
+    CloudConnectionStatusBatchBody,
+    CloudConnectionStatusBatchResponse,
     CloudConnectionTokenResponse,
     CloudConnectionUpdateBody,
     CloudConnectionVerifyResponse,
@@ -139,6 +141,20 @@ def list_connections(
     )
 
 
+@router.post('/connections/status:batch', response_model=CloudConnectionStatusBatchResponse)
+def batch_connection_status(
+    body: CloudConnectionStatusBatchBody,
+    user_id: str | None = None,
+    tenant_id: str | None = None,
+    _internal: None = Depends(require_internal_service_token),  # noqa: B008
+):
+    return cloud_oauth_service.batch_connection_status(
+        body.connection_ids,
+        user_id=user_id,
+        tenant_id=tenant_id,
+    )
+
+
 @router.get('/connections/{connection_id}', response_model=CloudConnectionResponse)
 @permission_required('model.read')
 def get_connection(
@@ -203,6 +219,19 @@ def list_chat_enabled_connections(
     return cloud_oauth_service.list_chat_enabled_connections(
         owner_user_id=owner_user_id or '',
         provider=provider,
+    )
+
+
+@router.get('/connections/internal/target-cache-candidates', response_model=CloudConnectionListResponse)
+def list_target_cache_connections(
+    provider: str | None = 'feishu',
+    limit: int = Query(default=100, ge=1, le=500),  # noqa: B008
+    _internal: None = Depends(require_internal_service_token),  # noqa: B008
+):
+    """Internal endpoint: list active cloud connections for scan target cache prewarm."""
+    return cloud_oauth_service.list_target_cache_connections(
+        provider=provider,
+        limit=limit,
     )
 
 

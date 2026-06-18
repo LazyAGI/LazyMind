@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/lazymind/scan_control_plane/internal/access"
@@ -84,6 +85,12 @@ func (h *Handler) listSourceTreeChildren(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	req.ProviderOptions = withActorProviderOptions(req.ProviderOptions, actor)
+	if sourceTreeShouldRefreshState(req) {
+		if err := h.refreshSourceState(r.Context(), req.SourceID, req.BindingID); err != nil {
+			writeError(w, err)
+			return
+		}
+	}
 	page, err := h.sourceTree.ListChildren(r.Context(), req)
 	if err != nil {
 		writeError(w, err)
@@ -111,6 +118,12 @@ func (h *Handler) searchSourceTree(w http.ResponseWriter, r *http.Request) {
 	if err := h.access.CanReadSource(r.Context(), actor, req.SourceID); err != nil {
 		writeError(w, err)
 		return
+	}
+	if treeShouldRefreshState(req.RefreshState) {
+		if err := h.refreshSourceState(r.Context(), req.SourceID, req.BindingID); err != nil {
+			writeError(w, err)
+			return
+		}
 	}
 	page, err := h.sourceTree.Search(r.Context(), req)
 	if err != nil {
@@ -144,6 +157,12 @@ func (h *Handler) listSourceDocuments(w http.ResponseWriter, r *http.Request) {
 		Page:          parseIntQuery(r, "page"),
 		PageSize:      parseIntQuery(r, "page_size"),
 	}
+	if boolQueryDefault(r, "refresh_state", true) {
+		if err := h.refreshSourceState(r.Context(), req.SourceID, req.BindingID); err != nil {
+			writeError(w, err)
+			return
+		}
+	}
 	page, err := h.documents.ListDocuments(r.Context(), req)
 	if err != nil {
 		writeError(w, err)
@@ -160,6 +179,27 @@ func targetAccessFromChildren(req tree.TargetTreeChildrenRequest) access.Binding
 		AgentID:          req.AgentID,
 		AuthConnectionID: req.AuthConnectionID,
 	}
+}
+
+func (h *Handler) refreshSourceState(ctx context.Context, sourceID, bindingID string) error {
+	if h.refresher == nil {
+		return nil
+	}
+	return h.refresher.RefreshSourceRead(ctx, tree.SourceReadRefreshRequest{
+		SourceID:  sourceID,
+		BindingID: bindingID,
+	})
+}
+
+func sourceTreeShouldRefreshState(req tree.SourceTreeChildrenRequest) bool {
+	return treeShouldRefreshState(req.RefreshState)
+}
+
+func treeShouldRefreshState(refreshState *bool) bool {
+	if refreshState != nil {
+		return *refreshState
+	}
+	return true
 }
 
 func targetAccessFromSearch(req tree.TargetTreeSearchRequest) access.BindingTargetRequest {
