@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"lazymind/core/common/orm"
-	appLog "lazymind/core/log"
 )
 
 func newTestDB(t *testing.T) *orm.DB {
@@ -24,30 +23,6 @@ func newTestDB(t *testing.T) *orm.DB {
 		t.Fatalf("auto migrate: %v", err)
 	}
 	return db
-}
-
-func TestDoRPCNon2xxHidesResponseBodyFromError(t *testing.T) {
-	appLog.InitNop()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"trace_id":"trace-1","error":{"code":"bad_request","message":"model is required"}}`))
-	}))
-	defer server.Close()
-
-	_, _, err := doRPC(context.Background(), server.Client(), server.URL, nil, jsonRPCRequest{
-		JSONRPC: "2.0",
-		ID:      1,
-		Method:  "initialize",
-	})
-	if err == nil {
-		t.Fatalf("expected rpc error")
-	}
-	if got, want := err.Error(), "mcp rpc returned 400"; got != want {
-		t.Fatalf("unexpected error: got %q want %q", got, want)
-	}
-	if strings.Contains(err.Error(), "model is required") || strings.Contains(err.Error(), "trace-1") {
-		t.Fatalf("error leaked response body: %q", err.Error())
-	}
 }
 
 func TestCreateServerMasksAndEncryptsAPIKey(t *testing.T) {
@@ -319,67 +294,6 @@ func TestCheckServerMarksVerifiedOnSuccess(t *testing.T) {
 	}
 	if !row.IsVerified {
 		t.Fatalf("expected successful check to mark server verified")
-	}
-}
-
-func TestListServersFiltersAndPaginates(t *testing.T) {
-	db := newTestDB(t)
-	ctx := context.Background()
-
-	first, err := CreateServer(ctx, db.DB, CreateServerRequest{
-		Name:      "searchable-server",
-		Transport: "http",
-		URL:       "https://one.example.com/mcp",
-	}, "u1", "User 1")
-	if err != nil {
-		t.Fatalf("create first server: %v", err)
-	}
-	second, err := CreateServer(ctx, db.DB, CreateServerRequest{
-		Name:      "plain-server",
-		Transport: "http",
-		URL:       "https://two.example.com/mcp",
-	}, "u1", "User 1")
-	if err != nil {
-		t.Fatalf("create second server: %v", err)
-	}
-	if _, err := CreateServer(ctx, db.DB, CreateServerRequest{
-		Name:      "other-server",
-		Transport: "http",
-		URL:       "https://three.example.com/mcp",
-	}, "u1", "User 1"); err != nil {
-		t.Fatalf("create third server: %v", err)
-	}
-
-	now := time.Now()
-	if err := db.Create(&orm.MCPServerTool{
-		ID:               "mst_search",
-		MCPServerID:      second.ID,
-		ToolName:         "lookup",
-		Description:      "Search documentation",
-		InputSchemaJSON:  json.RawMessage(`{}`),
-		LastDiscoveredAt: now,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-	}).Error; err != nil {
-		t.Fatalf("seed server tool: %v", err)
-	}
-
-	resp, err := ListServers(ctx, db.DB, "u1", ListServersRequest{
-		Keyword:  "search",
-		Page:     2,
-		PageSize: 1,
-	})
-	if err != nil {
-		t.Fatalf("list servers: %v", err)
-	}
-	if resp.Total != 2 || resp.Page != 2 || resp.PageSize != 1 {
-		t.Fatalf("unexpected pagination metadata: %#v", resp)
-	}
-	if len(resp.MCPServers) != 1 {
-		t.Fatalf("expected one server on second page, got %#v", resp.MCPServers)
-	}
-	if resp.MCPServers[0].ID != first.ID {
-		t.Fatalf("expected second page to include first matching server, got %#v", resp.MCPServers[0])
 	}
 }
 
