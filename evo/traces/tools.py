@@ -19,11 +19,12 @@ def is_tool_node(node: ExecutionStep) -> bool:
 def registered_chat_tool_names() -> frozenset[str]:
     try:
         from lazymind.chat.service.component import get_all_tool_groups
+        tool_groups = get_all_tool_groups()
     except Exception:
         return frozenset()
 
     names: set[str] = set()
-    for group in get_all_tool_groups():
+    for group in tool_groups:
         if not isinstance(group, dict):
             continue
         for method in group.get('methods') or []:
