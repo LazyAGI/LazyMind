@@ -8,6 +8,11 @@ import (
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
 )
 
+const (
+	parseStateQueued       = "QUEUED"
+	parseStatePendingParse = "PENDING_PARSE"
+)
+
 func targetNode(connectorType connector.ConnectorType, raw connector.RawObject, normalized connector.NormalizedSourceObject) TreeNode {
 	return TreeNode{
 		Key:           normalized.ObjectKey,
@@ -153,15 +158,34 @@ func documentItem(item DocumentWithState) SourceDocumentItem {
 	if item.Document != nil {
 		out.DocumentID = item.Document.DocumentID
 		out.ParseStatus = item.Document.ParseStatus
-		out.ParseState = item.Document.ParseStatus
+		out.ParseState = documentEffectiveParseState(parseState, item.Document.ParseStatus)
 		out.CoreDocumentID = item.Document.CoreDocumentID
 	}
 	return out
 }
 
+func documentEffectiveParseState(queueState, documentStatus string) string {
+	if activeParseState(queueState) || strings.ToUpper(strings.TrimSpace(queueState)) == store.ParseTaskStatusFailed {
+		return queueState
+	}
+	if strings.TrimSpace(documentStatus) != "" {
+		return documentStatus
+	}
+	return queueState
+}
+
+func activeParseState(value string) bool {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case parseStateQueued, store.ParseTaskStatusPending, store.ParseTaskStatusRunning, store.ParseTaskStatusSubmitted:
+		return true
+	default:
+		return false
+	}
+}
+
 func documentPendingParseState(item DocumentWithState, updateType string) string {
 	if item.Document == nil && (updateType == "new" || updateType == "changed") {
-		return store.ParseTaskStatusPending
+		return parseStatePendingParse
 	}
 	return item.State.ParseQueueState
 }

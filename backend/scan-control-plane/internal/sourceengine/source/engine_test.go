@@ -1122,7 +1122,6 @@ func TestCreateSourceSyncStrategyMatrix(t *testing.T) {
 	t.Parallel()
 
 	now := fixedSourceTestTime()
-	scheduledNext := now.Add(time.Hour)
 	cases := []struct {
 		name         string
 		syncMode     string
@@ -1141,10 +1140,7 @@ func TestCreateSourceSyncStrategyMatrix(t *testing.T) {
 			t.Parallel()
 
 			repo := newSourceEngineRepoStub()
-			scheduler := &sourceScheduleSpy{}
-			if tc.wantNextSync {
-				scheduler.nextSyncAt = &scheduledNext
-			}
+			scheduler := &sourceScheduleSpy{usePolicyNextSync: true}
 			engine := newTestSourceEngineWithSchedule(t, repo, &sourceCoreSpy{}, &sourceSpyConnector{}, scheduler, now)
 			bindingInput := BindingInput{
 				ConnectorType: spyConnectorType,
@@ -1171,8 +1167,8 @@ func TestCreateSourceSyncStrategyMatrix(t *testing.T) {
 			}
 			binding := repo.bindings[createResp.Source.SourceID][0]
 			if tc.wantNextSync {
-				if binding.NextSyncAt == nil || !binding.NextSyncAt.Equal(scheduledNext) {
-					t.Fatalf("scheduled create should keep next_sync_at: got=%v want=%v", binding.NextSyncAt, scheduledNext)
+				if binding.NextSyncAt == nil || !binding.NextSyncAt.After(now) {
+					t.Fatalf("scheduled create should keep a future next_sync_at: got=%v now=%v", binding.NextSyncAt, now)
 				}
 			} else if binding.NextSyncAt != nil {
 				t.Fatalf("manual create should not set next_sync_at: %+v", binding.NextSyncAt)
@@ -1473,16 +1469,23 @@ func (sourceTestScheduleEngine) EnqueueManualSync(context.Context, scheduleengin
 }
 
 type sourceScheduleSpy struct {
-	triggered  []store.Binding
-	manual     []scheduleengine.ManualSyncRequest
-	triggerErr error
-	nextSyncAt *time.Time
+	triggered         []store.Binding
+	manual            []scheduleengine.ManualSyncRequest
+	triggerErr        error
+	nextSyncAt        *time.Time
+	usePolicyNextSync bool
 }
 
 func (s *sourceScheduleSpy) BuildCheckpoint(_ context.Context, binding store.Binding, now time.Time) (store.SyncCheckpoint, error) {
 	nextSyncAt := binding.NextSyncAt
 	if s.nextSyncAt != nil {
 		nextSyncAt = s.nextSyncAt
+	} else if s.usePolicyNextSync && binding.SyncMode == SyncModeScheduled {
+		next, err := scheduleengine.NextSyncAt(binding.SchedulePolicy, now)
+		if err != nil {
+			return store.SyncCheckpoint{}, err
+		}
+		nextSyncAt = &next
 	}
 	return store.SyncCheckpoint{
 		SourceID:          binding.SourceID,

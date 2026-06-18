@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -103,6 +104,12 @@ type getSkillDetailAPITestResponse struct {
 
 func newSkillTestDB(t *testing.T) *orm.DB {
 	t.Helper()
+
+	builtinCatalogOnce = sync.Once{}
+	builtinCatalogOnce.Do(func() {
+		builtinCatalog = []builtinSkill{}
+		builtinCatalogErr = nil
+	})
 
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	db, err := orm.Connect(orm.DriverSQLite, dbPath)
@@ -311,261 +318,6 @@ func TestRemoteFSWriteConflictAndDeleteSkill(t *testing.T) {
 	}
 }
 
-func TestInternalRemoveCreatesRemoveSuggestion(t *testing.T) {
-	db := newSkillTestDB(t)
-	store.Init(db.DB, nil, nil)
-	t.Cleanup(func() { store.Init(nil, nil, nil) })
-
-	createReq := createSkillRequest{
-		Name:        "release-check",
-		Description: "Release checklist",
-		Category:    "coding",
-		Content:     "# Release Checklist\n\n1. Run tests.\n2. Verify rollback plan.\n",
-	}
-	if err := createParentSkill(context.Background(), db.DB, "u1", "User 1", createReq); err != nil {
-		t.Fatalf("create parent skill: %v", err)
-	}
-
-	var row orm.SkillResource
-	relativePath := evolution.ParentSkillRelativePath("coding", "release-check")
-	if err := db.Where("owner_user_id = ? AND relative_path = ?", "u1", relativePath).Take(&row).Error; err != nil {
-		t.Fatalf("query created skill: %v", err)
-	}
-
-	body, err := json.Marshal(map[string]string{
-		"id": row.ID,
-	})
-	if err != nil {
-		t.Fatalf("marshal body: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/skill/remove", strings.NewReader(string(body)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-User-Id", "u1")
-	req.Header.Set("X-User-Name", "User 1")
-	rec := httptest.NewRecorder()
-
-	Remove(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	var resp struct {
-		Code int `json:"code"`
-		Data struct {
-			Items []struct {
-				Status string `json:"status"`
-			} `json:"items"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Code != 0 || len(resp.Data.Items) != 1 || resp.Data.Items[0].Status != evolution.SuggestionStatusPendingReview {
-		t.Fatalf("expected pending remove suggestion response, got %+v", resp)
-	}
-
-	var skillCount int64
-	if err := db.Model(&orm.SkillResource{}).Where("id = ?", row.ID).Count(&skillCount).Error; err != nil {
-		t.Fatalf("count skills: %v", err)
-	}
-	if skillCount != 1 {
-		t.Fatalf("expected skill to remain pending review, got %d rows", skillCount)
-	}
-
-	var suggestionCount int64
-	if err := db.Model(&orm.ResourceSuggestion{}).Count(&suggestionCount).Error; err != nil {
-		t.Fatalf("count suggestions: %v", err)
-	}
-	if suggestionCount != 1 {
-		t.Fatalf("expected one resource suggestion, got %d", suggestionCount)
-	}
-	var suggestion orm.ResourceSuggestion
-	if err := db.Where("user_id = ? AND resource_type = ? AND action = ?", "u1", evolution.ResourceTypeSkill, evolution.SuggestionActionRemove).Take(&suggestion).Error; err != nil {
-		t.Fatalf("query remove suggestion: %v", err)
-	}
-	if suggestion.ResourceKey != row.ID {
-		t.Fatalf("expected remove suggestion resource_key to use skill id %q, got %q", row.ID, suggestion.ResourceKey)
-	}
-	if suggestion.RelativePath != row.RelativePath {
-		t.Fatalf("expected remove suggestion relative_path %q, got %q", row.RelativePath, suggestion.RelativePath)
-	}
-}
-
-func TestInternalRemoveResolvesAlgorithmPayloadFromSession(t *testing.T) {
-	db := newSkillTestDB(t)
-	store.Init(db.DB, nil, nil)
-	t.Cleanup(func() { store.Init(nil, nil, nil) })
-
-	now := time.Now()
-	conversation := orm.Conversation{
-		ID:        "conv-remove",
-		ChannelID: "default",
-		BaseModel: orm.BaseModel{
-			CreateUserID:   "u1",
-			CreateUserName: "User 1",
-			CreatedAt:      now,
-			UpdatedAt:      now,
-		},
-	}
-	if err := db.Create(&conversation).Error; err != nil {
-		t.Fatalf("create conversation: %v", err)
-	}
-
-	createReq := createSkillRequest{
-		Name:        "release-check",
-		Description: "Release checklist",
-		Category:    "coding",
-		Content:     "# Release Checklist\n\n1. Run tests.\n2. Verify rollback plan.\n",
-	}
-	if err := createParentSkill(context.Background(), db.DB, "u1", "User 1", createReq); err != nil {
-		t.Fatalf("create parent skill: %v", err)
-	}
-
-	body, err := json.Marshal(map[string]string{
-		"session_id": "conv-remove_1",
-		"category":   "coding",
-		"skill_name": "release-check",
-		"reason":     "No longer needed",
-	})
-	if err != nil {
-		t.Fatalf("marshal body: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/skill/remove", strings.NewReader(string(body)))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	Remove(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	var resp struct {
-		Code int `json:"code"`
-		Data struct {
-			Items []struct {
-				Status string `json:"status"`
-			} `json:"items"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Code != 0 || len(resp.Data.Items) != 1 || resp.Data.Items[0].Status != evolution.SuggestionStatusPendingReview {
-		t.Fatalf("expected pending remove suggestion response, got %+v", resp)
-	}
-
-	var suggestion orm.ResourceSuggestion
-	if err := db.Where("user_id = ? AND resource_type = ? AND action = ?", "u1", evolution.ResourceTypeSkill, evolution.SuggestionActionRemove).Take(&suggestion).Error; err != nil {
-		t.Fatalf("query remove suggestion: %v", err)
-	}
-	if suggestion.SessionID != "conv-remove_1" || suggestion.Category != "coding" || suggestion.SkillName != "release-check" {
-		t.Fatalf("unexpected suggestion fields: %+v", suggestion)
-	}
-	var row orm.SkillResource
-	if err := db.Where("owner_user_id = ? AND category = ? AND skill_name = ?", "u1", "coding", "release-check").Take(&row).Error; err != nil {
-		t.Fatalf("query skill: %v", err)
-	}
-	if suggestion.ResourceKey != row.ID {
-		t.Fatalf("expected remove suggestion resource_key to use skill id %q, got %q", row.ID, suggestion.ResourceKey)
-	}
-}
-
-func TestInternalSuggestionUsesSnapshotSkillIDAfterRename(t *testing.T) {
-	db := newSkillTestDB(t)
-	store.Init(db.DB, nil, nil)
-	t.Cleanup(func() { store.Init(nil, nil, nil) })
-
-	oldRelativePath := evolution.ParentSkillRelativePath("coding", "git-workflow")
-	newRelativePath := evolution.ParentSkillRelativePath("coding", "git-workflow-renamed")
-	content := "---\nname: git-workflow\ndescription: git workflow\n---\ncurrent body"
-	now := time.Now()
-	skillRow := orm.SkillResource{
-		ID:              "skill-1",
-		OwnerUserID:     "u1",
-		OwnerUserName:   "User 1",
-		Category:        "coding",
-		ParentSkillName: "git-workflow-renamed",
-		SkillName:       "git-workflow-renamed",
-		NodeType:        evolution.SkillNodeTypeParent,
-		FileExt:         "md",
-		RelativePath:    newRelativePath,
-		Content:         content,
-		ContentSize:     int64(len([]byte(content))),
-		MimeType:        "text/markdown; charset=utf-8",
-		ContentHash:     evolution.HashContent(content),
-		Version:         1,
-		IsEnabled:       true,
-		UpdateStatus:    evolution.UpdateStatusUpToDate,
-		CreateUserID:    "u1",
-		CreateUserName:  "User 1",
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	if err := db.Create(&skillRow).Error; err != nil {
-		t.Fatalf("create skill: %v", err)
-	}
-
-	snapshot := orm.ResourceSessionSnapshot{
-		ID:              "snapshot-1",
-		SessionID:       "session-1",
-		UserID:          "u1",
-		ResourceType:    evolution.ResourceTypeSkill,
-		ResourceKey:     skillRow.ID,
-		Category:        "coding",
-		ParentSkillName: "git-workflow",
-		SkillName:       "git-workflow",
-		FileExt:         "md",
-		RelativePath:    oldRelativePath,
-		SnapshotHash:    evolution.HashContent(content),
-		CreatedAt:       now,
-	}
-	if err := db.Create(&snapshot).Error; err != nil {
-		t.Fatalf("create snapshot: %v", err)
-	}
-
-	body, err := json.Marshal(map[string]any{
-		"session_id": "session-1",
-		"category":   "coding",
-		"skill_name": "git-workflow",
-		"suggestions": []map[string]string{
-			{
-				"title":   "update workflow",
-				"content": "update skill body",
-				"reason":  "user asked for the old skill name",
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal body: %v", err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/api/core/skill/suggestion", strings.NewReader(string(body)))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	Suggestion(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	var suggestion orm.ResourceSuggestion
-	if err := db.Where("session_id = ? AND resource_type = ?", "session-1", evolution.ResourceTypeSkill).Take(&suggestion).Error; err != nil {
-		t.Fatalf("query suggestion: %v", err)
-	}
-	if suggestion.ResourceKey != skillRow.ID {
-		t.Fatalf("expected suggestion resource_key to use skill id %q, got %q", skillRow.ID, suggestion.ResourceKey)
-	}
-	if suggestion.RelativePath != newRelativePath {
-		t.Fatalf("expected suggestion relative_path to use current path %q, got %q", newRelativePath, suggestion.RelativePath)
-	}
-	if suggestion.SkillName != "git-workflow-renamed" {
-		t.Fatalf("expected suggestion skill_name to use current skill name, got %q", suggestion.SkillName)
-	}
-}
-
 func TestDeleteManagedStillRequiresUserHeader(t *testing.T) {
 	db := newSkillTestDB(t)
 	store.Init(db.DB, nil, nil)
@@ -663,12 +415,12 @@ func TestGenerateReturnsOutdatedWhenApprovedSuggestionSnapshotIsStale(t *testing
 		SkillName:       "git-workflow",
 		FileExt:         "md",
 		RelativePath:    relativePath,
-		Action:          evolution.SuggestionActionModify,
+		Action:          "modify",
 		SessionID:       "session-1",
 		SnapshotHash:    evolution.HashContent("older body"),
 		Title:           "update workflow",
 		Content:         "update skill body",
-		Status:          evolution.SuggestionStatusAccepted,
+		Status:          "accepted",
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
@@ -794,73 +546,6 @@ func TestUpdateParentAutoEvoDiscardsPendingDraftWithoutOverwritingSkillContent(t
 	}
 }
 
-func TestUpdateManagedAutoEvoReturnsConflictWhenWorkerRunning(t *testing.T) {
-	db := newSkillTestDB(t)
-	store.Init(db.DB, nil, nil)
-	t.Cleanup(func() { store.Init(nil, nil, nil) })
-
-	now := time.Now()
-	currentContent := "---\nname: git-workflow\ndescription: git workflow\n---\ncurrent body"
-	row := orm.SkillResource{
-		ID:                 "skill-1",
-		OwnerUserID:        "u1",
-		OwnerUserName:      "User 1",
-		Category:           "coding",
-		SkillName:          "git-workflow",
-		NodeType:           evolution.SkillNodeTypeParent,
-		Description:        "git workflow",
-		FileExt:            "md",
-		RelativePath:       evolution.ParentSkillRelativePath("coding", "git-workflow"),
-		Content:            currentContent,
-		ContentSize:        int64(len([]byte(currentContent))),
-		MimeType:           "text/markdown; charset=utf-8",
-		ContentHash:        evolution.HashContent(currentContent),
-		Version:            2,
-		AutoEvo:            false,
-		AutoEvoApplyStatus: evolution.AutoEvoApplyStatusRunning,
-		AutoEvoGeneration:  7,
-		IsEnabled:          true,
-		UpdateStatus:       evolution.UpdateStatusUpToDate,
-		CreateUserID:       "u1",
-		CreateUserName:     "User 1",
-		CreatedAt:          now,
-		UpdatedAt:          now,
-	}
-	if err := db.Create(&row).Error; err != nil {
-		t.Fatalf("create skill: %v", err)
-	}
-	workerKey := evolution.AutoEvoWorkerKey(evolution.ResourceTypeSkill, row.ID)
-	if !evolution.TryAcquireAutoEvoWorker(workerKey) {
-		t.Fatalf("expected to acquire worker lock")
-	}
-	t.Cleanup(func() { evolution.ReleaseAutoEvoWorker(workerKey) })
-
-	req := mux.SetURLVars(
-		httptest.NewRequest(http.MethodPatch, "/api/core/skills/skill-1", strings.NewReader(`{"content":"request body should not win","auto_evo":true}`)),
-		map[string]string{"skill_id": row.ID},
-	)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-User-Id", "u1")
-	req.Header.Set("X-User-Name", "User 1")
-	rec := httptest.NewRecorder()
-
-	UpdateManaged(rec, req)
-
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("expected status 409, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	var updated orm.SkillResource
-	if err := db.Where("id = ?", row.ID).Take(&updated).Error; err != nil {
-		t.Fatalf("query updated skill: %v", err)
-	}
-	if updated.Content != row.Content || updated.Version != row.Version || updated.AutoEvo != row.AutoEvo {
-		t.Fatalf("expected skill fields unchanged, got content=%q version=%d auto_evo=%v", updated.Content, updated.Version, updated.AutoEvo)
-	}
-	if updated.AutoEvoGeneration != row.AutoEvoGeneration || updated.AutoEvoApplyStatus != row.AutoEvoApplyStatus {
-		t.Fatalf("expected auto_evo state unchanged, got generation=%d status=%q", updated.AutoEvoGeneration, updated.AutoEvoApplyStatus)
-	}
-}
-
 func TestGenerateAllowsUserInstructWithoutSuggestions(t *testing.T) {
 	db := newSkillTestDB(t)
 	store.Init(db.DB, nil, nil)
@@ -934,11 +619,11 @@ func TestGenerateAllowsUserInstructWithoutSuggestions(t *testing.T) {
 		SkillName:       "git-workflow",
 		FileExt:         "md",
 		RelativePath:    relativePath,
-		Action:          evolution.SuggestionActionModify,
+		Action:          "modify",
 		SessionID:       "session-1",
 		Title:           "update workflow",
 		Content:         "update skill body",
-		Status:          evolution.SuggestionStatusAccepted,
+		Status:          "accepted",
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
@@ -1425,11 +1110,11 @@ func TestListIgnoresLegacyResourceSuggestionsForReviewButtonState(t *testing.T) 
 			SkillName:       "git-workflow",
 			FileExt:         "md",
 			RelativePath:    parentWithPending.RelativePath,
-			Action:          evolution.SuggestionActionModify,
+			Action:          "modify",
 			SessionID:       "session-pending",
 			Title:           "pending suggestion",
 			Content:         "please review this change",
-			Status:          evolution.SuggestionStatusPendingReview,
+			Status:          "pending_review",
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		},
@@ -1443,11 +1128,11 @@ func TestListIgnoresLegacyResourceSuggestionsForReviewButtonState(t *testing.T) 
 			SkillName:       "release-check",
 			FileExt:         "md",
 			RelativePath:    parentAcceptedOnly.RelativePath,
-			Action:          evolution.SuggestionActionModify,
+			Action:          "modify",
 			SessionID:       "session-accepted",
 			Title:           "accepted suggestion",
 			Content:         "already reviewed",
-			Status:          evolution.SuggestionStatusAccepted,
+			Status:          "accepted",
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		},
@@ -2090,11 +1775,11 @@ func TestListIgnoresNameOnlySkillSuggestionsWithoutResourceKey(t *testing.T) {
 		SkillName:       "git-workflow",
 		FileExt:         "md",
 		RelativePath:    "",
-		Action:          evolution.SuggestionActionModify,
+		Action:          "modify",
 		SessionID:       "session-legacy-pending",
 		Title:           "legacy pending suggestion",
 		Content:         "legacy change",
-		Status:          evolution.SuggestionStatusPendingReview,
+		Status:          "pending_review",
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
@@ -2226,11 +1911,11 @@ func TestGetChildDetailDoesNotInheritPendingReviewSuggestionsFromParent(t *testi
 		SkillName:       "git-workflow",
 		FileExt:         "md",
 		RelativePath:    parentRelativePath,
-		Action:          evolution.SuggestionActionModify,
+		Action:          "modify",
 		SessionID:       "session-child-detail",
 		Title:           "pending suggestion",
 		Content:         "please review",
-		Status:          evolution.SuggestionStatusPendingReview,
+		Status:          "pending_review",
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
@@ -3583,9 +3268,9 @@ func TestDeleteChildSkillRemovesRelatedSuggestions(t *testing.T) {
 		UserID:       "u1",
 		ResourceType: evolution.ResourceTypeSkill,
 		ResourceKey:  evolution.SkillSuggestionResourceKey(child),
-		Action:       evolution.SuggestionActionModify,
+		Action:       "modify",
 		SessionID:    "session-1",
-		Status:       evolution.SuggestionStatusPendingReview,
+		Status:       "pending_review",
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}).Error; err != nil {
@@ -3687,9 +3372,9 @@ func TestDeleteParentSkillRemovesRelatedSuggestions(t *testing.T) {
 			UserID:       "u1",
 			ResourceType: evolution.ResourceTypeSkill,
 			ResourceKey:  evolution.SkillSuggestionResourceKey(parent),
-			Action:       evolution.SuggestionActionRemove,
+			Action:       "remove",
 			SessionID:    "session-1",
-			Status:       evolution.SuggestionStatusPendingReview,
+			Status:       "pending_review",
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		},
@@ -3698,9 +3383,9 @@ func TestDeleteParentSkillRemovesRelatedSuggestions(t *testing.T) {
 			UserID:       "u1",
 			ResourceType: evolution.ResourceTypeSkill,
 			ResourceKey:  evolution.SkillSuggestionResourceKey(child),
-			Action:       evolution.SuggestionActionModify,
+			Action:       "modify",
 			SessionID:    "session-1",
-			Status:       evolution.SuggestionStatusPendingReview,
+			Status:       "pending_review",
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		},

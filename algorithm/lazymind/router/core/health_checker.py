@@ -11,7 +11,7 @@ from sqlalchemy import delete, select
 from lazymind.config import config
 import lazymind.router.config  # noqa: F401 — registers router config keys
 from lazymind.router.config import resolve_host
-from lazymind.router.db.client import AsyncSessionLocal
+from lazymind.router.db.client import AsyncSessionLocal, HeartbeatSessionLocal
 from lazymind.router.db.models import RouterChildProcess, RouterInstance
 
 if TYPE_CHECKING:
@@ -107,6 +107,74 @@ class HealthChecker:
         if probe_tasks:
             await asyncio.gather(*probe_tasks, return_exceptions=True)
 
+        # Recover silently-dead child processes that have no DB record.
+        # This can happen when _cleanup_dead_instances removes our own records
+        # due to a transient heartbeat gap. We check the in-memory _procs dict
+        # directly, which is authoritative for this process.
+        await self._recover_missing_children()
+
+    async def _recover_missing_children(self) -> None:
+        """Re-register or respawn local child processes not tracked in DB.
+
+        When _cleanup_dead_instances removes this instance's records (due to a
+        transient heartbeat gap), _probe_all can no longer see the children via
+        DB query. We cross-check against the in-memory _procs dict and either
+        re-register the still-running process or spawn a replacement.
+        """
+        local_procs: dict[int, object] = self._pm._procs  # port -> Popen
+        if not local_procs:
+            return
+
+        # Find which ports have no live DB record for this instance
+        async with AsyncSessionLocal() as session:
+            rows = await session.execute(
+                select(RouterChildProcess.port).where(
+                    RouterChildProcess.instance_id == self._pm.instance_id,
+                )
+            )
+            tracked_ports = {r.port for r in rows}
+
+        missing_ports = [p for p in local_procs if p not in tracked_ports]
+        if not missing_ports:
+            return
+
+        for port in missing_ports:
+            proc = local_procs[port]
+            if proc.poll() is None:
+                # Process is still alive; its DB record was swept away.
+                # Re-register so normal health probing resumes.
+                algo_id = self._pm._port_algo.get((self._pm.host, port), 'default')
+                logger.warning(
+                    'Child on port %d is alive but has no DB record; re-registering (algo=%s)',
+                    port, algo_id,
+                )
+                try:
+                    await self._pm.ensure_instance_registered()
+                    from lazymind.router.core.process_manager import _upsert_child_process
+                    stmt = _upsert_child_process(
+                        instance_id=self._pm.instance_id,
+                        algo_id=algo_id,
+                        host=self._pm.host,
+                        port=port,
+                        pid=proc.pid,
+                    )
+                    async with AsyncSessionLocal() as session:
+                        await session.execute(stmt)
+                        await session.commit()
+                except Exception as exc:
+                    logger.error('Failed to re-register child on port %d: %s', port, exc)
+            else:
+                # Process has exited; trigger restart if not already scheduled.
+                algo_id = self._pm._port_algo.get((self._pm.host, port), 'default')
+                logger.warning(
+                    'Child on port %d (algo=%s) has exited (rc=%s); scheduling restart',
+                    port, algo_id, proc.returncode,
+                )
+                if port not in self._restart_tasks or self._restart_tasks[port].done():
+                    self._restart_tasks[port] = asyncio.create_task(
+                        self._deferred_restart(port, _BACKOFF_SCHEDULE[0])
+                    )
+
     async def _probe_child(self, port: int) -> None:
         url = f'http://127.0.0.1:{port}/health'
         healthy = False
@@ -192,7 +260,7 @@ class HealthChecker:
     async def _update_heartbeat(self) -> None:
         await self._pm.ensure_instance_registered()
         now = datetime.now(timezone.utc)
-        async with AsyncSessionLocal() as session:
+        async with HeartbeatSessionLocal() as session:
             await session.execute(
                 RouterInstance.__table__.update()
                 .where(RouterInstance.instance_id == self._pm.instance_id)
@@ -225,13 +293,20 @@ class HealthChecker:
                 logger.warning('Dead instance cleanup failed: %s', exc)
 
     async def _cleanup_dead_instances(self) -> None:
-        """Delete child_process records and instance records for stale instances."""
+        """Delete child_process records and instance records for stale instances.
+
+        This process's own instance_id is excluded: the heartbeat loop is
+        responsible for keeping it alive, and removing our own record would
+        make _probe_all unable to find our child processes.
+        """
         timeout_secs = config['router_instance_timeout']
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=timeout_secs)
-        async with AsyncSessionLocal() as session:
+        own_id = self._pm.instance_id
+        async with HeartbeatSessionLocal() as session:
             dead = await session.execute(
                 select(RouterInstance.instance_id).where(
-                    RouterInstance.last_heartbeat < cutoff
+                    RouterInstance.last_heartbeat < cutoff,
+                    RouterInstance.instance_id != own_id,
                 )
             )
             dead_ids = [r.instance_id for r in dead]
@@ -240,7 +315,7 @@ class HealthChecker:
             return
 
         logger.info('Cleaning up %d dead router instance(s): %s', len(dead_ids), dead_ids)
-        async with AsyncSessionLocal() as session:
+        async with HeartbeatSessionLocal() as session:
             await session.execute(
                 delete(RouterChildProcess).where(
                     RouterChildProcess.instance_id.in_(dead_ids)

@@ -111,6 +111,80 @@ func TestHTTPAuthConnectionClientBatchStatus(t *testing.T) {
 	}
 }
 
+func TestHTTPAuthConnectionClientListTargetCacheConnections(t *testing.T) {
+	t.Parallel()
+
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+		if r.URL.Path != "/api/authservice/v1/cloud/connections/internal/target-cache-candidates" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("provider") != "feishu" || r.URL.Query().Get("limit") != "50" {
+			t.Fatalf("unexpected target cache query: %s", r.URL.RawQuery)
+		}
+		if r.Header.Get("X-LazyMind-Internal-Token") != "internal-token" {
+			t.Fatalf("missing internal service token")
+		}
+		body := `{"code":200,"message":"success","data":{"items":[{"connection_id":"auth-1","owner_user_id":"user-1","provider":"feishu","provider_tenant_key":"tenant-demo","status":"active"}]}}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	})}
+	client, err := NewHTTPAuthConnectionClient("http://auth.test", "internal-token", httpClient)
+	if err != nil {
+		t.Fatalf("create auth client: %v", err)
+	}
+	items, err := client.ListTargetCacheConnections(context.Background(), ConnectionListRequest{Provider: "feishu", Limit: 50})
+	if err != nil {
+		t.Fatalf("list target cache connections: %v", err)
+	}
+	if len(items) != 1 || items[0].ConnectionID != "auth-1" || items[0].ProviderTenantKey != "tenant-demo" || items[0].Status != "ACTIVE" {
+		t.Fatalf("unexpected target cache connections: %+v", items)
+	}
+}
+
+func TestOpenAPIPagesRespectExplicitHasMoreFalse(t *testing.T) {
+	t.Parallel()
+
+	hasMore := false
+	drive := driveObjectPage(openAPIDriveFiles{
+		Files: []map[string]any{
+			{"type": "file", "token": "file-1", "name": "File"},
+		},
+		PageToken: "echoed-token",
+		HasMore:   &hasMore,
+	}, "root")
+	if drive.HasMore {
+		t.Fatalf("drive page should respect explicit has_more=false: %+v", drive)
+	}
+
+	spaces := wikiSpacesPage(openAPIWikiSpaces{
+		Items: []map[string]any{
+			{"space_id": "space-1", "name": "Space"},
+		},
+		PageToken: "echoed-token",
+		HasMore:   &hasMore,
+	})
+	if spaces.HasMore {
+		t.Fatalf("wiki spaces page should respect explicit has_more=false: %+v", spaces)
+	}
+
+	nodes := wikiNodesPage(openAPIWikiNodes{
+		Items: []map[string]any{
+			{"node_token": "node-1", "title": "Node"},
+		},
+		PageToken: "echoed-token",
+		HasMore:   &hasMore,
+	}, "space-1", "")
+	if nodes.HasMore {
+		t.Fatalf("wiki nodes page should respect explicit has_more=false: %+v", nodes)
+	}
+}
+
 func TestHTTPAuthConnectionClientMapsExpiredToken(t *testing.T) {
 	t.Parallel()
 

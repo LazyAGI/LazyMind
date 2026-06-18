@@ -52,6 +52,11 @@ type ConnectionStatusRequest struct {
 	TenantID      string
 }
 
+type ConnectionListRequest struct {
+	Provider string
+	Limit    int
+}
+
 type ConnectionStatus struct {
 	ConnectionID      string
 	TenantID          string

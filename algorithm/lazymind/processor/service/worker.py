@@ -2,9 +2,14 @@ import signal
 import threading
 import inspect
 
-from lazyllm.tools.rag.parsing_service import DocumentProcessorWorker
-from lazymind.config import config as _cfg
-from lazymind.processor.service.db import require_shared_db_config
+import lazyllm
+from lazymind.model_config import inject_model_config
+
+lazyllm.inject_model_config = inject_model_config
+
+from lazyllm.tools.rag.parsing_service import DocumentProcessorWorker  # noqa: E402
+from lazymind.config import config as _cfg  # noqa: E402
+from lazymind.processor.service.db import require_shared_db_config  # noqa: E402
 
 
 def _parse_high_priority_task_types(raw: str | None) -> list[str] | None:

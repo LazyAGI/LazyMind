@@ -14,6 +14,7 @@ const (
 
 	SearchModeConnector = "connector"
 	SearchModeFallback  = "fallback"
+	SearchModeCache     = "cache"
 )
 
 type TreeQueryLimits struct {
@@ -50,12 +51,16 @@ type TreeNode struct {
 }
 
 type TreeNodePage struct {
-	Items        []TreeNode `json:"items"`
-	NextCursor   string     `json:"next_cursor,omitempty"`
-	HasMore      bool       `json:"has_more"`
-	ListComplete bool       `json:"list_complete"`
-	Truncated    bool       `json:"truncated"`
-	SearchMode   string     `json:"search_mode,omitempty"`
+	Items         []TreeNode `json:"items"`
+	NextCursor    string     `json:"next_cursor,omitempty"`
+	HasMore       bool       `json:"has_more"`
+	ListComplete  bool       `json:"list_complete"`
+	Truncated     bool       `json:"truncated"`
+	SearchMode    string     `json:"search_mode,omitempty"`
+	CacheStatus   string     `json:"cache_status,omitempty"`
+	CacheBuilding bool       `json:"cache_building,omitempty"`
+	CacheComplete bool       `json:"cache_complete,omitempty"`
+	CacheError    string     `json:"cache_error,omitempty"`
 }
 
 type TargetTreeChildrenRequest struct {

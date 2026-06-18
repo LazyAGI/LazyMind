@@ -491,9 +491,10 @@ function sleep(ms: number) {
 async function waitForCloudSyncRun(
   client: ScanV2Client,
   sourceId: string,
-  runId?: string,
+  runIds: string[] = [],
 ) {
   const deadline = Date.now() + CLOUD_SYNC_TIMEOUT_MS;
+  const expectedRuns = Math.max(runIds.length, 1);
 
   while (Date.now() < deadline) {
     const [detailResponse, summaryResponse] = await Promise.all([
@@ -502,14 +503,23 @@ async function waitForCloudSyncRun(
     ]);
     const bindings = (detailResponse?.data.bindings || []) as ScanV2Binding[];
     const summary = summaryResponse?.data as Record<string, any> | undefined;
-    const matchedBinding = bindings.find((item) => {
+    const errorBinding = bindings.find((item) => {
       const status = `${item.status || ""}`.toUpperCase();
-      return status === "ACTIVE" || status === "ERROR";
+      return status.includes("FAILED") || status.includes("ERROR") || status.includes("CANCEL");
     });
-    const status = `${matchedBinding?.status || summary?.status || ""}`.toUpperCase();
+    const status = `${errorBinding?.status || summary?.status || ""}`.toUpperCase();
+    const summaryBindings = Array.isArray(summary?.bindings)
+      ? (summary.bindings as Record<string, any>[])
+      : [];
+    const finishedBindings = summaryBindings.filter((item) =>
+      Boolean(item.last_success_at || item.lastSuccessAt),
+    );
 
-    if (status === "ACTIVE" || summary?.total_objects !== undefined) {
-      return { run_id: runId, status: status || "SUCCEEDED" };
+    if (
+      finishedBindings.length >= expectedRuns ||
+      (expectedRuns === 1 && Boolean(summary?.last_success_at || summary?.lastSuccessAt))
+    ) {
+      return { run_ids: runIds, status: "SUCCEEDED" };
     }
 
     if (
@@ -517,7 +527,7 @@ async function waitForCloudSyncRun(
       status.includes("ERROR") ||
       status.includes("CANCEL")
     ) {
-      throw new Error(getBindingLastError(matchedBinding) || "飞书云同步失败，请检查绑定配置后重试。");
+      throw new Error(getBindingLastError(errorBinding) || "飞书云同步失败，请检查绑定配置后重试。");
     }
 
     await sleep(CLOUD_SYNC_POLL_INTERVAL_MS);
@@ -3318,20 +3328,15 @@ export default function DataSourceManagement() {
 
       if (saveMode === "createAndSync") {
         message.info(t("admin.dataSourceDetailCloudSyncPreparing"));
-        const latestSource = await client.getSource({ sourceId }).catch(() => null);
-        const latestBinding = getFirstScanBinding(
-          latestSource?.data.bindings as ScanV2Binding[] | undefined,
-        );
         const triggerResponse = await client.triggerSourceSync({
           sourceId,
           triggerSourceSyncRequest: {
             request_id: createScanRequestId("feishu-sync"),
-            binding_id: getScanBindingId(latestBinding) || currentFeishuSource?.bindingId,
             scope_type: "full",
             scope_ref: {},
           },
         });
-        await waitForCloudSyncRun(client, sourceId, triggerResponse.data.run_ids?.[0]);
+        await waitForCloudSyncRun(client, sourceId, triggerResponse.data.run_ids || []);
       }
 
       setValidatedAgentId(selectedAgent?.agent_id || validatedAgentId);

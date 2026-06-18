@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"gorm.io/gorm/clause"
 )
 
 func TestListObjectsScansJoinedProjectionInOneRowsScan(t *testing.T) {
@@ -289,6 +291,28 @@ func TestValidateSourceObjectIndexRowEnforcesParentDepthContract(t *testing.T) {
 	if err := validateSourceObjectIndexRow(badChild); ErrorCodeOf(err) != ErrCodeInternal {
 		t.Fatalf("expected invalid child depth error, got %v", err)
 	}
+}
+
+func TestSourceObjectUpsertAssignmentsPreserveExistingSizeOnZero(t *testing.T) {
+	t.Parallel()
+
+	assignments := sourceObjectUpsertAssignments()
+	for _, assignment := range assignments {
+		if assignment.Column.Name != "size_bytes" {
+			continue
+		}
+		expr, ok := assignment.Value.(clause.Expr)
+		if !ok {
+			t.Fatalf("size_bytes update should use expression, got %#v", assignment.Value)
+		}
+		if !strings.Contains(expr.SQL, "excluded.size_bytes > 0") ||
+			!strings.Contains(expr.SQL, "provider_meta_json->>'kind' = 'wiki_node'") ||
+			!strings.Contains(expr.SQL, "source_object_index.size_bytes") {
+			t.Fatalf("size_bytes update should keep existing wiki size when incoming size is zero: %q", expr.SQL)
+		}
+		return
+	}
+	t.Fatalf("size_bytes assignment was not configured")
 }
 
 type storeFakeQuery struct {

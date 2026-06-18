@@ -24,6 +24,38 @@ func (e *DefaultTargetTreeEngine) Search(ctx context.Context, req TargetTreeSear
 		}
 		return e.fallback.Search(ctx, req)
 	}
+	if isLocalFSTargetSearch(req) {
+		if targetSearchHasCurrentLevel(req) {
+			return e.buildAndSearchCachedTargets(ctx, conn, req)
+		}
+		return e.searchConnectorTargets(ctx, conn, req)
+	}
+	if !targetSearchHasCurrentLevel(req) {
+		return e.searchCachedTargets(ctx, conn, req)
+	}
+	return e.searchCurrentLevelTargets(ctx, conn, req)
+}
+
+func (e *DefaultTargetTreeEngine) searchCurrentLevelTargets(ctx context.Context, conn connector.SourceConnector, req TargetTreeSearchRequest) (TreeNodePage, error) {
+	pageSize := normalizePageSize(req.PageSize, e.limitForConnector(conn.Spec()))
+	rawPage, err := conn.ListChildren(ctx, connector.ListChildrenRequest{
+		TargetType:       req.TargetType,
+		TargetRef:        req.TargetRef,
+		NodeRef:          req.NodeRef,
+		ListMode:         connector.ListModePage,
+		Cursor:           req.Cursor,
+		PageSize:         pageSize,
+		AgentID:          req.AgentID,
+		AuthConnectionID: req.AuthConnectionID,
+		ProviderOptions:  connector.ProviderOptions(req.ProviderOptions),
+	})
+	if err != nil {
+		return TreeNodePage{}, mapConnectorError(err)
+	}
+	return e.mapTargetSearchPage(ctx, conn, req, rawPage)
+}
+
+func (e *DefaultTargetTreeEngine) searchConnectorTargets(ctx context.Context, conn connector.SourceConnector, req TargetTreeSearchRequest) (TreeNodePage, error) {
 	pageSize := normalizePageSize(req.PageSize, e.limitForConnector(conn.Spec()))
 	rawPage, err := conn.ListChildren(ctx, connector.ListChildrenRequest{
 		TargetType:       req.TargetType,
@@ -64,6 +96,15 @@ func (e *DefaultTargetTreeEngine) mapTargetSearchPage(ctx context.Context, conn 
 		ListComplete: rawPage.ListComplete,
 		SearchMode:   SearchModeConnector,
 	}, nil
+}
+
+func targetSearchHasCurrentLevel(req TargetTreeSearchRequest) bool {
+	return strings.TrimSpace(string(req.TargetType)) != "" &&
+		(strings.TrimSpace(req.TargetRef) != "" || strings.TrimSpace(req.NodeRef) != "")
+}
+
+func isLocalFSTargetSearch(req TargetTreeSearchRequest) bool {
+	return strings.EqualFold(strings.TrimSpace(string(req.ConnectorType)), "local_fs")
 }
 
 func targetSearchMatches(normalized connector.NormalizedSourceObject, keyword string) bool {

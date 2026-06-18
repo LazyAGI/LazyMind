@@ -79,6 +79,24 @@ func TestCheckpointScheduleEngineEnqueuesDueRunsAndDedupes(t *testing.T) {
 	}
 }
 
+func TestCheckpointScheduleEngineSkipsFutureScheduledCheckpoint(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := scheduleTestTime()
+	future := now.Add(time.Hour)
+	repo := newScheduleStore(store.Binding{SyncMode: SyncModeScheduled, SchedulePolicy: testSchedulePolicy("UTC", testScheduleRule([]string{"everyday"}, "10:00:00"))}, &future, now)
+	engine := NewCheckpointScheduleEngine(repo, repo, WithClock(func() time.Time { return now }), WithIDGenerator(scheduleIDs()))
+
+	intents, err := engine.EnqueueDueSyncRuns(ctx, 10)
+	if err != nil {
+		t.Fatalf("enqueue due sync runs: %v", err)
+	}
+	if len(intents) != 0 {
+		t.Fatalf("future scheduled checkpoint should not enqueue runs: %+v", intents)
+	}
+}
+
 func TestCheckpointScheduleEngineEnqueuesWatchDueRunsAsReconcile(t *testing.T) {
 	t.Parallel()
 

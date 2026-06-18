@@ -25,8 +25,11 @@ type Config struct {
 	FeishuBaseURL                     string
 	AuthServiceBaseURL                string
 	AuthServiceInternalToken          string
+	RedisURL                          string
 	TempDir                           string
 	TempTTL                           time.Duration
+	TargetSearchCachePrewarmInterval  time.Duration
+	TargetSearchCachePrewarmStagger   time.Duration
 	WorkerLeaseTTL                    time.Duration
 	WorkerMaxBackoff                  time.Duration
 	ParseDeadLetterAfter              int64
@@ -56,6 +59,8 @@ func defaultConfig() Config {
 		LocalFSDefaultAgentID:             "file-watcher-local-001",
 		TempDir:                           filepath.Join(os.TempDir(), "scan-control-plane", "sourceengine"),
 		TempTTL:                           24 * time.Hour,
+		TargetSearchCachePrewarmInterval:  10 * time.Minute,
+		TargetSearchCachePrewarmStagger:   10 * time.Second,
 		WorkerLeaseTTL:                    60 * time.Second,
 		WorkerMaxBackoff:                  10 * time.Minute,
 		ParseDeadLetterAfter:              3,
@@ -116,10 +121,17 @@ func (c *Config) applyEnv() {
 	if token := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")); token != "" {
 		c.AuthServiceInternalToken = token
 	}
+	if redisURL := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_REDIS_URL")); redisURL != "" {
+		c.RedisURL = redisURL
+	} else if redisURL := strings.TrimSpace(os.Getenv("LAZYMIND_REDIS_URL")); redisURL != "" {
+		c.RedisURL = redisURL
+	}
 	if tempDir := strings.TrimSpace(os.Getenv("LAZYMIND_SCAN_CONTROL_PLANE_TEMP_DIR")); tempDir != "" {
 		c.TempDir = tempDir
 	}
 	c.TempTTL = durationEnv("SOURCEENGINE_TEMP_TTL", c.TempTTL)
+	c.TargetSearchCachePrewarmInterval = durationEnv("SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_INTERVAL", c.TargetSearchCachePrewarmInterval)
+	c.TargetSearchCachePrewarmStagger = durationEnv("SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_STAGGER", c.TargetSearchCachePrewarmStagger)
 	c.WorkerLeaseTTL = durationEnv("SOURCEENGINE_WORKER_LEASE_TTL", c.WorkerLeaseTTL)
 	c.WorkerMaxBackoff = durationEnv("SOURCEENGINE_WORKER_MAX_BACKOFF", c.WorkerMaxBackoff)
 	c.ParseDeadLetterAfter = int64Env("SOURCEENGINE_PARSE_DEAD_LETTER_AFTER", c.ParseDeadLetterAfter)
@@ -170,6 +182,12 @@ func (c Config) Validate() error {
 	}
 	if c.TempTTL <= 0 {
 		return fmt.Errorf("temp ttl must be positive")
+	}
+	if c.TargetSearchCachePrewarmInterval < 0 {
+		return fmt.Errorf("target search cache prewarm interval must be positive")
+	}
+	if c.TargetSearchCachePrewarmStagger < 0 {
+		return fmt.Errorf("target search cache prewarm stagger must be positive")
 	}
 	if c.WorkerLeaseTTL <= 0 {
 		return fmt.Errorf("worker lease ttl must be positive")

@@ -110,6 +110,58 @@ func (c *HTTPAuthConnectionClient) BatchStatus(ctx context.Context, req Connecti
 	return statuses, nil
 }
 
+func (c *HTTPAuthConnectionClient) ListTargetCacheConnections(ctx context.Context, req ConnectionListRequest) ([]ConnectionStatus, error) {
+	query := url.Values{}
+	if provider := strings.TrimSpace(req.Provider); provider != "" {
+		query.Set("provider", provider)
+	}
+	if req.Limit > 0 {
+		query.Set("limit", strconv.Itoa(req.Limit))
+	}
+	var payload struct {
+		Items []struct {
+			ConnectionID      string `json:"connection_id"`
+			TenantID          string `json:"tenant_id"`
+			OwnerUserID       string `json:"owner_user_id"`
+			Provider          string `json:"provider"`
+			AuthMode          string `json:"auth_mode"`
+			ProviderAccountID string `json:"provider_account_id"`
+			DisplayName       string `json:"display_name"`
+			ProviderTenantKey string `json:"provider_tenant_key"`
+			Status            string `json:"status"`
+			LastError         string `json:"last_error"`
+			LastUsedAt        string `json:"last_used_at"`
+			UpdatedAt         string `json:"updated_at"`
+		} `json:"items"`
+	}
+	path := "/api/authservice/v1/cloud/connections/internal/target-cache-candidates"
+	if err := c.doAuthServiceRequest(ctx, endpoint(c.baseURL, path, query), http.MethodGet, nil, &payload); err != nil {
+		return nil, err
+	}
+	items := make([]ConnectionStatus, 0, len(payload.Items))
+	for _, item := range payload.Items {
+		connectionID := strings.TrimSpace(item.ConnectionID)
+		if connectionID == "" {
+			continue
+		}
+		items = append(items, ConnectionStatus{
+			ConnectionID:      connectionID,
+			TenantID:          item.TenantID,
+			OwnerUserID:       item.OwnerUserID,
+			Provider:          item.Provider,
+			AuthMode:          item.AuthMode,
+			ProviderAccountID: item.ProviderAccountID,
+			DisplayName:       item.DisplayName,
+			ProviderTenantKey: item.ProviderTenantKey,
+			Status:            strings.ToUpper(strings.TrimSpace(item.Status)),
+			LastError:         item.LastError,
+			LastUsedAt:        item.LastUsedAt,
+			UpdatedAt:         item.UpdatedAt,
+		})
+	}
+	return items, nil
+}
+
 func (c *HTTPAuthConnectionClient) doAuthServiceRequest(ctx context.Context, url, method string, body io.Reader, out any) error {
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
@@ -134,10 +186,24 @@ func (c *HTTPAuthConnectionClient) doAuthServiceRequest(ctx context.Context, url
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	if err := decodeAuthServiceJSON(resp.Body, out); err != nil {
 		return err
 	}
 	return nil
+}
+
+func decodeAuthServiceJSON(r io.Reader, out any) error {
+	var raw json.RawMessage
+	if err := json.NewDecoder(r).Decode(&raw); err != nil {
+		return err
+	}
+	var envelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err == nil && len(envelope.Data) > 0 && string(envelope.Data) != "null" {
+		return json.Unmarshal(envelope.Data, out)
+	}
+	return json.Unmarshal(raw, out)
 }
 
 func (c *HTTPAuthConnectionClient) doAuthServiceToken(ctx context.Context, url string, out *Token) error {
@@ -346,6 +412,7 @@ type openAPIDriveFiles struct {
 	Files         []map[string]any `json:"files"`
 	NextPageToken string           `json:"next_page_token"`
 	PageToken     string           `json:"page_token"`
+	HasMore       *bool            `json:"has_more"`
 }
 
 type openAPIWikiSpaces struct {
@@ -353,7 +420,7 @@ type openAPIWikiSpaces struct {
 	Spaces        []map[string]any `json:"spaces"`
 	NextPageToken string           `json:"next_page_token"`
 	PageToken     string           `json:"page_token"`
-	HasMore       bool             `json:"has_more"`
+	HasMore       *bool            `json:"has_more"`
 }
 
 type openAPIWikiNodes struct {
@@ -361,7 +428,7 @@ type openAPIWikiNodes struct {
 	Nodes         []map[string]any `json:"nodes"`
 	NextPageToken string           `json:"next_page_token"`
 	PageToken     string           `json:"page_token"`
-	HasMore       bool             `json:"has_more"`
+	HasMore       *bool            `json:"has_more"`
 }
 
 func doFeishuOpenAPIJSON(ctx context.Context, client *http.Client, url, method, token string, in any, out any) error {
@@ -517,10 +584,11 @@ func driveObjectPage(data openAPIDriveFiles, parentToken string) ObjectPage {
 	for _, item := range data.Files {
 		items = append(items, driveObject(item, parentToken))
 	}
+	next := firstNonEmpty(data.NextPageToken, data.PageToken)
 	return ObjectPage{
 		Items:      items,
-		NextCursor: firstNonEmpty(data.NextPageToken, data.PageToken),
-		HasMore:    firstNonEmpty(data.NextPageToken, data.PageToken) != "",
+		NextCursor: next,
+		HasMore:    openAPIHasMore(data.HasMore, next),
 	}
 }
 
@@ -594,7 +662,7 @@ func wikiSpacesPage(data openAPIWikiSpaces) ObjectPage {
 		})
 	}
 	next := firstNonEmpty(data.NextPageToken, data.PageToken)
-	return ObjectPage{Items: items, NextCursor: next, HasMore: data.HasMore || next != ""}
+	return ObjectPage{Items: items, NextCursor: next, HasMore: openAPIHasMore(data.HasMore, next)}
 }
 
 func wikiNodesPage(data openAPIWikiNodes, spaceID, parentNodeToken string) ObjectPage {
@@ -607,7 +675,14 @@ func wikiNodesPage(data openAPIWikiNodes, spaceID, parentNodeToken string) Objec
 		items = append(items, wikiNodeObjectWithParent(node, spaceID, "", parentNodeToken))
 	}
 	next := firstNonEmpty(data.NextPageToken, data.PageToken)
-	return ObjectPage{Items: items, NextCursor: next, HasMore: data.HasMore || next != ""}
+	return ObjectPage{Items: items, NextCursor: next, HasMore: openAPIHasMore(data.HasMore, next)}
+}
+
+func openAPIHasMore(hasMore *bool, nextCursor string) bool {
+	if hasMore != nil {
+		return *hasMore
+	}
+	return strings.TrimSpace(nextCursor) != ""
 }
 
 func wikiNodeObject(node map[string]any, spaceID, fallbackToken string) Object {

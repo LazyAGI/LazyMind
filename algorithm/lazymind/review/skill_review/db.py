@@ -84,7 +84,7 @@ def insert_skill_review_records(
             'userid': item.userid,
             'requestid': item.requestid,
             'skill_content': item.skill_content,
-            'summary': item.summary if item.type == 'patch' else None,
+            'summary': item.summary if item.summary is not None else '',
             'time': item.time,
         }
         for item in normalized
@@ -97,7 +97,7 @@ def insert_skill_review_records(
                         skill_content, summary, "time")
                     VALUES
                        (:id, :skill_name, :category, :type, :review_status, :userid, :requestid,
-                        :skill_content, :summary,
+                        :skill_content, COALESCE(:summary, ''),
                         COALESCE(CAST(NULLIF(:time, '') AS TIMESTAMPTZ), CURRENT_TIMESTAMP))
                     ON CONFLICT (id) DO UPDATE SET
                        skill_name = EXCLUDED.skill_name,

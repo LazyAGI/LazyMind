@@ -22,7 +22,7 @@ def _is_sqlite(url: str) -> bool:
     return url.startswith('sqlite')
 
 
-def _build_engine(raw_url: str):
+def _build_engine(raw_url: str, *, pool_size: int = 5, max_overflow: int = 10):
     async_url = _make_async_url(raw_url)
     if _is_sqlite(async_url):
         # SQLite does not support connection pooling parameters
@@ -30,8 +30,8 @@ def _build_engine(raw_url: str):
     return create_async_engine(
         async_url,
         pool_pre_ping=True,
-        pool_size=5,
-        max_overflow=10,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
         echo=False,
     )
 
@@ -40,6 +40,21 @@ _engine = _build_engine(config['core_database_url'] or '')
 
 AsyncSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
     bind=_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
+
+# Dedicated small pool for heartbeat and instance-cleanup queries so that
+# long-running business operations (skill_review, health probing) cannot
+# starve the heartbeat writer and cause false-positive instance timeouts.
+_heartbeat_engine = _build_engine(
+    config['core_database_url'] or '',
+    pool_size=2,
+    max_overflow=1,
+)
+
+HeartbeatSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
+    bind=_heartbeat_engine,
     class_=AsyncSession,
     expire_on_commit=False,
 )

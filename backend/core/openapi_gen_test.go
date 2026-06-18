@@ -115,6 +115,48 @@ func TestOpenAPISpecIncludesEvalReportResultSchema(t *testing.T) {
 	}
 }
 
+func TestOpenAPISpecDocumentsFeedbackCancellation(t *testing.T) {
+	r := mux.NewRouter()
+	registerCoreRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	op := openAPIOperationForTest(t, spec, "post", "/api/core/conversations:feedBackChatHistory")
+	requestBody, ok := op["requestBody"].(map[string]any)
+	if !ok {
+		t.Fatalf("requestBody missing")
+	}
+	content := requestBody["content"].(map[string]any)
+	jsonContent := content["application/json"].(map[string]any)
+	schema := jsonContent["schema"].(map[string]any)
+	ref, _ := schema["$ref"].(string)
+	if ref != "#/components/schemas/ConversationFeedbackRequest" {
+		t.Fatalf("unexpected feedback request ref: %q", ref)
+	}
+
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	props := schemaPropertiesForTest(t, schemas, "ConversationFeedbackRequest")
+	typeSchema, ok := props["type"].(map[string]any)
+	if !ok {
+		t.Fatalf("feedback type schema missing")
+	}
+	description, _ := typeSchema["description"].(string)
+	if !strings.Contains(description, "FEED_BACK_TYPE_UNSPECIFIED") || !strings.Contains(description, "cancels feedback") {
+		t.Fatalf("feedback type description does not document cancellation: %q", description)
+	}
+	oneOf, ok := typeSchema["oneOf"].([]any)
+	if !ok || len(oneOf) != 2 {
+		t.Fatalf("feedback type should document numeric and string forms, got %#v", typeSchema["oneOf"])
+	}
+}
+
 func openAPIOperationForTest(t *testing.T, spec map[string]any, method, path string) map[string]any {
 	t.Helper()
 	paths, ok := spec["paths"].(map[string]any)
@@ -240,12 +282,6 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		expectParams    bool
 		expectResponses bool
 	}{
-		{"get", "/api/core/evolution/suggestions", false, true, true},
-		{"get", "/api/core/evolution/suggestions/{id}", false, true, true},
-		{"post", "/api/core/evolution/suggestions/{id}:approve", false, true, true},
-		{"post", "/api/core/evolution/suggestions/{id}:reject", false, true, true},
-		{"post", "/api/core/evolution/suggestions:batchApprove", true, false, true},
-		{"post", "/api/core/evolution/suggestions:batchReject", true, false, true},
 		{"get", "/api/core/skills", false, true, true},
 		{"get", "/api/core/skills/tags", false, false, true},
 		{"post", "/api/core/skills", true, false, true},
@@ -263,9 +299,7 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		{"get", "/api/core/skill-shares/{share_item_id}", false, true, true},
 		{"post", "/api/core/skill-shares/{share_item_id}:accept", false, true, true},
 		{"post", "/api/core/skill-shares/{share_item_id}:reject", false, true, true},
-		{"post", "/api/core/skill/suggestion", true, false, true},
 		{"post", "/api/core/skill/create", true, false, true},
-		{"post", "/api/core/skill/remove", true, false, true},
 		{"get", "/api/core/personalization-items", false, false, true},
 		{"get", "/api/core/model_providers", false, true, true},
 		{"get", "/api/core/model_providers/features", false, false, true},
@@ -285,13 +319,11 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		{"put", "/api/core/personalization-setting", true, false, true},
 		{"put", "/api/core/memory", true, false, true},
 		{"get", "/api/core/memory:draft-preview", false, false, true},
-		{"post", "/api/core/memory/suggestion", true, false, true},
 		{"post", "/api/core/memory:generate", true, false, true},
 		{"post", "/api/core/memory:confirm", false, false, true},
 		{"post", "/api/core/memory:discard", false, false, true},
 		{"put", "/api/core/user-preference", true, false, true},
 		{"get", "/api/core/user-preference:draft-preview", false, false, true},
-		{"post", "/api/core/user_preference/suggestion", true, false, true},
 		{"post", "/api/core/user-preference:generate", true, false, true},
 		{"post", "/api/core/user-preference:confirm", false, false, true},
 		{"post", "/api/core/user-preference:discard", false, false, true},
@@ -338,39 +370,21 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		}
 	}
 
-	pathItem, ok := paths["/api/core/evolution/suggestions"].(map[string]any)
-	if !ok {
-		t.Fatalf("path missing from openapi spec: /api/core/evolution/suggestions")
+	removedPaths := []string{
+		"/api/core/evolution/suggestions",
+		"/api/core/evolution/suggestions/{id}",
+		"/api/core/evolution/suggestions/{id}:approve",
+		"/api/core/evolution/suggestions/{id}:reject",
+		"/api/core/evolution/suggestions:batchApprove",
+		"/api/core/evolution/suggestions:batchReject",
+		"/api/core/skill/suggestion",
+		"/api/core/skill/remove",
+		"/api/core/memory/suggestion",
+		"/api/core/user_preference/suggestion",
 	}
-	getOp, ok := pathItem["get"].(map[string]any)
-	if !ok {
-		t.Fatalf("operation missing from openapi spec: get /api/core/evolution/suggestions")
-	}
-	params, ok := getOp["parameters"].([]any)
-	if !ok {
-		t.Fatalf("parameters missing for get /api/core/evolution/suggestions")
-	}
-
-	paramNames := make(map[string]struct{}, len(params))
-	for _, item := range params {
-		param, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		name, _ := param["name"].(string)
-		if name != "" {
-			paramNames[name] = struct{}{}
-		}
-	}
-
-	for _, name := range []string{"page", "page_size", "evolution_id", "resource_type", "resource_key", "keyword"} {
-		if _, ok := paramNames[name]; !ok {
-			t.Fatalf("expected query parameter %q on get /api/core/evolution/suggestions", name)
-		}
-	}
-	for _, name := range []string{"user_id", "skill_id", "memory_id", "user_preference_id", "preference_id"} {
-		if _, ok := paramNames[name]; ok {
-			t.Fatalf("unexpected removed query parameter %q on get /api/core/evolution/suggestions", name)
+	for _, path := range removedPaths {
+		if _, ok := paths[path]; ok {
+			t.Fatalf("removed legacy suggestion path still present in openapi spec: %s", path)
 		}
 	}
 
@@ -736,13 +750,14 @@ func TestOpenAPISpecIncludesToolOperations(t *testing.T) {
 	}
 
 	cases := []struct {
-		method       string
-		path         string
-		expectParams bool
+		method             string
+		path               string
+		expectedQueryNames []string
+		expectedPathName   string
 	}{
-		{"get", "/api/core/tools", false},
-		{"post", "/api/core/tools/{tool_name}:disable", true},
-		{"post", "/api/core/tools/{tool_name}:enable", true},
+		{"get", "/api/core/tools", []string{"keyword", "page", "page_size"}, ""},
+		{"post", "/api/core/tools/{tool_name}:disable", nil, "tool_name"},
+		{"post", "/api/core/tools/{tool_name}:enable", nil, "tool_name"},
 	}
 	for _, tc := range cases {
 		pathItem, ok := paths[tc.path].(map[string]any)
@@ -769,14 +784,41 @@ func TestOpenAPISpecIncludesToolOperations(t *testing.T) {
 		if !ok || len(content) == 0 {
 			t.Fatalf("response schema missing for %s %s", tc.method, tc.path)
 		}
-		if tc.expectParams {
+		if len(tc.expectedQueryNames) > 0 {
 			params, ok := op["parameters"].([]any)
 			if !ok || len(params) == 0 {
 				t.Fatalf("parameters missing for %s %s", tc.method, tc.path)
 			}
-			param, ok := params[0].(map[string]any)
-			if !ok || param["name"] != "tool_name" || param["in"] != "path" {
-				t.Fatalf("expected tool_name path parameter for %s %s, got %#v", tc.method, tc.path, params)
+			queryNames := map[string]struct{}{}
+			for _, item := range params {
+				param, ok := item.(map[string]any)
+				if !ok || param["in"] != "query" {
+					continue
+				}
+				name, _ := param["name"].(string)
+				queryNames[name] = struct{}{}
+			}
+			for _, name := range tc.expectedQueryNames {
+				if _, ok := queryNames[name]; !ok {
+					t.Fatalf("expected query parameter %q for %s %s, got %#v", name, tc.method, tc.path, params)
+				}
+			}
+		}
+		if tc.expectedPathName != "" {
+			params, ok := op["parameters"].([]any)
+			if !ok || len(params) == 0 {
+				t.Fatalf("parameters missing for %s %s", tc.method, tc.path)
+			}
+			found := false
+			for _, item := range params {
+				param, ok := item.(map[string]any)
+				if ok && param["name"] == tc.expectedPathName && param["in"] == "path" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("expected %s path parameter for %s %s, got %#v", tc.expectedPathName, tc.method, tc.path, params)
 			}
 		}
 	}
@@ -800,6 +842,19 @@ func TestOpenAPISpecIncludesToolOperations(t *testing.T) {
 	for _, name := range []string{"name", "can_disable", "active", "disabled"} {
 		if _, ok := properties[name]; !ok {
 			t.Fatalf("toolGroupOpenAPIResponse expected property %q", name)
+		}
+	}
+	listSchema, ok := schemas["toolListOpenAPIResponse"].(map[string]any)
+	if !ok {
+		t.Fatalf("toolListOpenAPIResponse schema missing")
+	}
+	listProperties, ok := listSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("toolListOpenAPIResponse properties missing")
+	}
+	for _, name := range []string{"tool_groups", "page", "page_size", "total"} {
+		if _, ok := listProperties[name]; !ok {
+			t.Fatalf("toolListOpenAPIResponse expected property %q", name)
 		}
 	}
 }

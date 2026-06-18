@@ -980,7 +980,7 @@ const enUS = {
     supportedFolderImport: "Folder import supported",
     supportedZipFile: "Only ZIP archive files are supported (.zip)",
     supportedDocTypes:
-      "PDF, DOCX, DOC, HWP, PPTX, PPT, PPTM, JPG, JPEG, PNG, GIF, BMP, WEBP, TIFF, TIF, IPYNB, EPUB, MD, MBOX, CSV, XLS, XLSX, MP3, MP4, TXT and XML files are supported",
+      "PDF, DOCX, DOC, HWP, PPT, PPTX, JPG, JPEG, PNG, GIF, BMP, WEBP, TIFF, TIF, IPYNB, EPUB, MD, MBOX, CSV, XLS, XLSX, MP3, MP4, TXT, XML, JSON, JSONL, YAML, YML, HTML, HTM and PY files are supported",
     zipRootOnly: "ZIP archives only support files in the root directory; nested folders will be ignored",
     uploadLimitHint: "Up to 300 files per upload, each file must be under 500MB, total size under 1GB",
     uploadSecurityRiskTip:
@@ -1499,6 +1499,7 @@ const enUS = {
     dataSourceBackToList: "Back to List",
     dataSourceFallbackName: "Data Source",
     dataSourceParseParsed: "Parsed",
+    dataSourceParsePending: "Pending parse",
     dataSourceParseReindexing: "Reindexing",
     dataSourceParseDuplicate: "Duplicate",
     dataSourceParseDeleted: "Pending deletion",
