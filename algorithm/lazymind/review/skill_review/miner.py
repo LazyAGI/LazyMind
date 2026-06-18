@@ -275,9 +275,6 @@ def _collect_source_skills(cluster: TaskCluster) -> dict[str, str]:
     result: dict[str, str] = {}
     for draft in cluster.drafts:
         raw_skills = draft.source_skills
-        if not raw_skills:
-            environment = draft.contextual_description.environment or {}
-            raw_skills = environment.get('called_skills') if isinstance(environment, dict) else {}
         if isinstance(raw_skills, dict):
             items = raw_skills.items()
         elif isinstance(raw_skills, list):
@@ -313,9 +310,11 @@ def _cluster_item_id(index: int, cluster: TaskCluster) -> str:
 def _write_candidate_skill_files(artifact_dir: Path, candidates: list[CandidateSkill]) -> None:
     skill_dir = artifact_dir / 'skills'
     skill_dir.mkdir(parents=True, exist_ok=True)
-    for index, candidate in enumerate(candidates, start=1):
-        filename = f'{index:02d}_{_safe_filename(candidate.skill_name)}.md'
-        path = skill_dir / filename
+    used_names: set[str] = set()
+    for candidate in candidates:
+        skill_name = _unique_skill_dir_name(_safe_filename(candidate.skill_name), used_names)
+        path = skill_dir / skill_name / 'SKILL.md'
+        path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + '.tmp')
         tmp.write_text(candidate.content, encoding='utf-8')
         tmp.replace(path)
@@ -324,3 +323,13 @@ def _write_candidate_skill_files(artifact_dir: Path, candidates: list[CandidateS
 def _safe_filename(value: str) -> str:
     safe = ''.join(ch if ch.isalnum() or ch in ('-', '_', '.') else '_' for ch in value.strip())
     return safe or 'skill'
+
+
+def _unique_skill_dir_name(name: str, used_names: set[str]) -> str:
+    candidate = name
+    suffix = 2
+    while candidate in used_names:
+        candidate = f'{name}_{suffix}'
+        suffix += 1
+    used_names.add(candidate)
+    return candidate
