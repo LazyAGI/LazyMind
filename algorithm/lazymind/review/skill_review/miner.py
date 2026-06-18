@@ -244,67 +244,70 @@ def _normalize_candidate_payload(
     source_trajectories: list[str],
     source_skills: dict[str, str],
 ) -> dict[str, Any]:
-    skill_name = str(payload.get('skill_name') or '').strip()
+    raw_skill_name = str(payload.get('skill_name') or outline.skill_name or '').strip()
     applicable_scenario = str(payload.get('applicable_scenario') or '').strip()
     content = str(payload.get('content') or '').strip()
-    if not skill_name:
-        raise ValueError('candidate payload must contain skill_name')
     if not applicable_scenario:
         raise ValueError('candidate payload must contain applicable_scenario')
     if not content:
         raise ValueError('candidate payload must contain content')
-    _validate_skill_name(skill_name, field='candidate skill_name')
-    _validate_candidate_skill_content(content, skill_name)
+    skill_name = _repair_skill_name(raw_skill_name, fallback=outline.skill_name or 'skill')
+    if skill_name != raw_skill_name:
+        LOG.warning(f'repaired candidate skill_name: {raw_skill_name!r} -> {skill_name!r}')
+    content = _repair_candidate_skill_content(content, skill_name)
+    repaired_outline = outline.model_copy(update={'skill_name': skill_name})
     return {
         'skill_name': skill_name,
         'category': str(payload.get('category') or 'general'),
         'source_trajectories': source_trajectories,
         'source_skills': source_skills,
         'applicable_scenario': applicable_scenario,
-        'content': content + '\n',
-        'outline': outline.model_dump(),
+        'content': content,
+        'outline': repaired_outline.model_dump(),
     }
 
 
-def _validate_skill_name(skill_name: str, *, field: str = 'skill_name') -> None:
-    if len(skill_name) > _SKILL_NAME_MAX_LENGTH:
-        raise ValueError(f'{field} must be no more than {_SKILL_NAME_MAX_LENGTH} characters')
-    if not _SKILL_NAME_PATTERN.fullmatch(skill_name):
-        raise ValueError(
-            f'{field} must use lowercase letters, numbers, and single hyphens '
-            'without leading or trailing hyphens'
-        )
+def _repair_skill_name(raw_name: str, *, fallback: str = 'skill') -> str:
+    source = str(raw_name or fallback or 'skill').strip().lower()
+    slug = re.sub(r'[^a-z0-9]+', '-', source)
+    slug = re.sub(r'-+', '-', slug).strip('-')
+    if not slug:
+        slug = 'skill'
+    if len(slug) > _SKILL_NAME_MAX_LENGTH:
+        slug = slug[:_SKILL_NAME_MAX_LENGTH].rstrip('-')
+    slug = slug or 'skill'
+    if not _SKILL_NAME_PATTERN.fullmatch(slug):
+        raise ValueError(f'failed to repair skill_name from {raw_name!r}')
+    return slug
 
 
-def _validate_candidate_skill_content(content: str, skill_name: str) -> None:
-    frontmatter = _parse_skill_frontmatter(content)
-    frontmatter_name = str(frontmatter.get('name') or '').strip()
-    description = str(frontmatter.get('description') or '').strip()
-    if not frontmatter_name:
-        raise ValueError('candidate content frontmatter must contain name')
-    _validate_skill_name(frontmatter_name, field='candidate content frontmatter name')
-    if frontmatter_name != skill_name:
-        raise ValueError(
-            f'candidate skill_name must match content frontmatter name: '
-            f'{skill_name!r} != {frontmatter_name!r}'
-        )
-    if not description:
-        raise ValueError('candidate content frontmatter must contain description')
-
-
-def _parse_skill_frontmatter(content: str) -> dict[str, str]:
+def _repair_candidate_skill_content(content: str, skill_name: str) -> str:
     lines = content.lstrip('\ufeff').splitlines()
     if not lines or lines[0].strip() != '---':
         raise ValueError('candidate content must start with YAML frontmatter')
 
-    frontmatter_lines: list[str] = []
-    for line in lines[1:]:
+    frontmatter_end = None
+    for index, line in enumerate(lines[1:], start=1):
         if line.strip() == '---':
+            frontmatter_end = index
             break
-        frontmatter_lines.append(line)
-    else:
+    if frontmatter_end is None:
         raise ValueError('candidate content must close YAML frontmatter')
 
+    frontmatter_lines = lines[1:frontmatter_end]
+    frontmatter = _parse_frontmatter_lines(frontmatter_lines)
+    description = str(frontmatter.get('description') or '').strip()
+    if not description:
+        raise ValueError('candidate content frontmatter must contain description')
+
+    repaired_frontmatter, changed = _repair_frontmatter_name(frontmatter_lines, skill_name)
+    if changed:
+        LOG.warning(f'repaired candidate content frontmatter name to {skill_name!r}')
+    repaired = ['---', *repaired_frontmatter, '---', *lines[frontmatter_end + 1:]]
+    return '\n'.join(repaired).strip() + '\n'
+
+
+def _parse_frontmatter_lines(frontmatter_lines: list[str]) -> dict[str, str]:
     fields: dict[str, str] = {}
     for line in frontmatter_lines:
         stripped = line.strip()
@@ -322,6 +325,28 @@ def _strip_yaml_scalar(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
         return value[1:-1].strip()
     return value
+
+
+def _repair_frontmatter_name(frontmatter_lines: list[str], skill_name: str) -> tuple[list[str], bool]:
+    repaired: list[str] = []
+    changed = False
+    found = False
+    for line in frontmatter_lines:
+        stripped = line.strip()
+        key = stripped.split(':', 1)[0].strip() if ':' in stripped else ''
+        if key == 'name':
+            found = True
+            indent = line[:len(line) - len(line.lstrip())]
+            new_line = f'{indent}name: {skill_name}'
+            repaired.append(new_line)
+            if line != new_line:
+                changed = True
+        else:
+            repaired.append(line)
+    if not found:
+        repaired.insert(0, f'name: {skill_name}')
+        changed = True
+    return repaired, changed
 
 
 def _collect_source_trajectories(cluster: TaskCluster) -> list[str]:
