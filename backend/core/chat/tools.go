@@ -22,11 +22,7 @@ import (
 )
 
 const chatToolsPath = "/api/chat/tools"
-
-const (
-	defaultToolListPageSize = 10
-	maxToolListPageSize     = 1000
-)
+const defaultToolListPageSize = 10
 
 type chatToolGroup map[string]any
 
@@ -220,8 +216,8 @@ func markDisabledTools(groups []chatToolGroup, disabled []string) {
 
 func parseToolListQuery(r *http.Request) toolListQuery {
 	q := r.URL.Query()
-	page := parsePositiveToolListInt(q.Get("page"), 1, 1000000)
-	pageSize := parsePositiveToolListInt(q.Get("page_size"), defaultToolListPageSize, maxToolListPageSize)
+	page := parsePositiveToolListInt(q.Get("page"), 1)
+	pageSize := parsePositiveToolListInt(q.Get("page_size"), defaultToolListPageSize)
 	return toolListQuery{
 		Keyword:  strings.TrimSpace(q.Get("keyword")),
 		Page:     page,
@@ -229,13 +225,10 @@ func parseToolListQuery(r *http.Request) toolListQuery {
 	}
 }
 
-func parsePositiveToolListInt(raw string, fallback, max int) int {
+func parsePositiveToolListInt(raw string, fallback int) int {
 	value, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || value <= 0 {
 		return fallback
-	}
-	if max > 0 && value > max {
-		return max
 	}
 	return value
 }
@@ -259,34 +252,18 @@ func filterToolGroups(groups []chatToolGroup, keyword string) []chatToolGroup {
 	}
 	filtered := make([]chatToolGroup, 0, len(groups))
 	for _, group := range groups {
-		if toolGroupContainsKeyword(group, keyword) {
+		if toolGroupMatchesKeyword(group, keyword) {
 			filtered = append(filtered, group)
 		}
 	}
 	return filtered
 }
 
-func toolGroupContainsKeyword(value any, keyword string) bool {
-	switch typed := value.(type) {
-	case string:
-		return strings.Contains(strings.ToLower(typed), keyword)
-	case []any:
-		for _, item := range typed {
-			if toolGroupContainsKeyword(item, keyword) {
-				return true
-			}
-		}
-	case map[string]any:
-		for _, item := range typed {
-			if toolGroupContainsKeyword(item, keyword) {
-				return true
-			}
-		}
-	case chatToolGroup:
-		for _, item := range typed {
-			if toolGroupContainsKeyword(item, keyword) {
-				return true
-			}
+func toolGroupMatchesKeyword(group chatToolGroup, keyword string) bool {
+	for _, field := range []string{"name", "label", "description"} {
+		value, _ := group[field].(string)
+		if strings.Contains(strings.ToLower(value), keyword) {
+			return true
 		}
 	}
 	return false
@@ -301,8 +278,8 @@ func paginateToolGroups(groups []chatToolGroup, page, pageSize int) []chatToolGr
 	}
 	total := len(groups)
 	start := (page - 1) * pageSize
-	if start >= total {
-		return []chatToolGroup{}
+	if start > total {
+		start = total
 	}
 	end := start + pageSize
 	if end > total {

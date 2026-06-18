@@ -217,9 +217,6 @@ func TestListToolsFiltersAndPaginates(t *testing.T) {
 				"can_disable": true,
 				"active":      true,
 			})
-			if i == 11 {
-				groups[len(groups)-1]["methods"] = []map[string]any{{"summary": "Search websites"}}
-			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"tool_groups": groups})
@@ -291,24 +288,6 @@ func TestListToolsFiltersAndPaginates(t *testing.T) {
 	}
 	if nameMatched.Data.Total != 1 || len(nameMatched.Data.ToolGroups) != 1 || nameMatched.Data.ToolGroups[0]["name"] != "report-builder" {
 		t.Fatalf("expected keyword to match tool name case-insensitively, got %#v", nameMatched.Data)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/api/core/tools?keyword=search&page_size=1", nil)
-	req.Header.Set("X-User-Id", "u1")
-	rec = httptest.NewRecorder()
-	ListTools(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	var nestedMatched struct {
-		Data chatToolsResponse `json:"data"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &nestedMatched); err != nil {
-		t.Fatalf("decode nested matched response: %v", err)
-	}
-	if nestedMatched.Data.Total != 1 || len(nestedMatched.Data.ToolGroups) != 1 || nestedMatched.Data.ToolGroups[0]["name"] != "tool-11" {
-		t.Fatalf("expected keyword to match nested method summary, got %#v", nestedMatched.Data)
 	}
 }
 
