@@ -22,7 +22,7 @@ from evo.message_intent import MessageSessionStore
 from evo.message_intent.store import MessageLeaseError, MessageStoreConflict
 from evo.message_intent.planner import LazyLLMPlannerClient, StructuredJSONNextIntentPlanner
 from evo.message_intent.service import MessageIntentService
-from evo.projections.traces import build_trace_compare_view, build_trace_detail_view
+from evo.traces import build_trace_compare_view, build_trace_detail_view
 from evo.service.auto_ports import HubAutoAgentPorts
 
 BODY_REQUIRED = Body(...)
