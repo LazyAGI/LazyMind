@@ -6,13 +6,13 @@ import (
 	"strings"
 	"time"
 
-	corestate "lazymind/core/state"
+	scanstate "github.com/lazymind/scan_control_plane/internal/state"
 )
 
 const targetSearchCacheStatePrefix = "scan:binding_target_search_cache:"
 
 type stateTargetSearchCacheStore struct {
-	store corestate.Store
+	store scanstate.Store
 }
 
 type stateTargetSearchCachePayload struct {
@@ -24,7 +24,7 @@ type stateTargetSearchCachePayload struct {
 	StaleAt   time.Time  `json:"stale_at,omitempty"`
 }
 
-func NewStateTargetSearchCacheStore(store corestate.Store) TargetSearchCacheStore {
+func NewStateTargetSearchCacheStore(store scanstate.Store) TargetSearchCacheStore {
 	if store == nil {
 		return nil
 	}
@@ -36,7 +36,7 @@ func (s *stateTargetSearchCacheStore) Get(ctx context.Context, key string) (targ
 		return targetSearchCacheSnapshot{}, false, nil
 	}
 	data, err := s.store.Get(ctx, s.dataKey(key))
-	if corestate.IsMissing(err) {
+	if scanstate.IsMissing(err) {
 		locked, lockErr := s.hasLock(ctx, key)
 		if lockErr != nil {
 			return targetSearchCacheSnapshot{}, false, lockErr

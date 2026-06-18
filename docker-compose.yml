@@ -158,8 +158,8 @@ services:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-scan-control-plane:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
-      context: ./backend
-      dockerfile: scan-control-plane/Dockerfile
+      context: ./backend/scan-control-plane
+      dockerfile: Dockerfile
       args:
         <<: *mirror-args
     environment:
@@ -173,7 +173,7 @@ services:
       LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT: *file-watcher-watch-host-dir
       LAZYMIND_SCAN_CONTROL_PLANE_FEISHU_BASE_URL: "https://open.feishu.cn"
       LAZYMIND_SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL: "http://auth-service:8000"
-      LAZYMIND_REDIS_URL: ${LAZYMIND_SCAN_CONTROL_PLANE_REDIS_URL-redis://test:123456@redis:6379/0}
+      LAZYMIND_REDIS_URL: redis://test:123456@redis:6379/0
       SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_STAGGER: ${SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_STAGGER:-10s}
       LAZYMIND_SCAN_CONTROL_PLANE_TEMP_DIR: "/tmp/scan-control-plane/sourceengine"
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
@@ -190,7 +190,6 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-        required: true
     healthcheck:
       test: ["CMD", "/app/scan-control-plane", "healthcheck"]
       interval: 5s
@@ -277,7 +276,6 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-        required: true
 
   office-convert-service:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-office-convert-service:${LAZYMIND_IMAGE_TAG:-latest}
@@ -349,9 +347,6 @@ services:
         condition: service_healthy
       office-convert-service:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-        required: true
 
   core-dev:
     image: ${DOCKER_MIRROR:-docker.m.daocloud.io/library/}golang:1.25.11-alpine
@@ -368,6 +363,8 @@ services:
         condition: service_healthy
       db-bootstrap:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
       office-convert-service:
         condition: service_healthy
 
@@ -542,6 +539,7 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
+      - sqlite-data:/data/sqlite
     environment:
       LAZYMIND_DOCUMENT_PROCESSOR_PORT: "8000"
       <<: [*runtime-home, *db-conn, *upload-paths, *llm-api-keys, *ocr-env, *trace-config]
@@ -578,6 +576,7 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
+      - sqlite-data:/data/sqlite
     environment:
       LAZYMIND_DOCUMENT_WORKER_PORT: "8001"
       LAZYMIND_DOCUMENT_WORKER_NUM_WORKERS: "1"
@@ -623,6 +622,7 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
+      - sqlite-data:/data/sqlite
     healthcheck:
       test: ['CMD-SHELL', 'python -m lazymind.parsing.service.healthcheck']
       interval: 15s
@@ -893,3 +893,4 @@ volumes:
   milvus-minio:
   milvus-data:
   opensearch-data:
+  sqlite-data:

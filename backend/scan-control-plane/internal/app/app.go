@@ -29,9 +29,9 @@ import (
 	taskengine "github.com/lazymind/scan_control_plane/internal/sourceengine/task"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/tree"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/worker"
+	scanstate "github.com/lazymind/scan_control_plane/internal/state"
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
 	_ "github.com/lib/pq"
-	corestate "lazymind/core/state"
 )
 
 type App struct {
@@ -428,28 +428,28 @@ func buildFeishuClients(cfg config.Config) (feishu.AuthConnectionClient, feishu.
 }
 
 func buildTargetSearchCacheStore(cfg config.Config) (tree.TargetSearchCacheStore, error) {
-	switch corestate.BackendFromEnv() {
-	case corestate.BackendSQLite:
+	switch scanstate.BackendFromEnv() {
+	case scanstate.BackendSQLite:
 		if strings.TrimSpace(cfg.RedisURL) != "" {
 			return nil, fmt.Errorf("redis url must not be configured when LAZYMIND_STATE_BACKEND=sqlite")
 		}
-		sqliteStore, err := corestate.NewSQLiteStore(os.Getenv("LAZYMIND_STATE_SQLITE_PATH"))
+		sqliteStore, err := scanstate.NewSQLiteStore(os.Getenv("LAZYMIND_STATE_SQLITE_PATH"))
 		if err != nil {
 			return nil, fmt.Errorf("configure target search cache state sqlite: %w", err)
 		}
 		return tree.NewStateTargetSearchCacheStore(sqliteStore), nil
-	case corestate.BackendRedis:
+	case scanstate.BackendRedis:
 		redisURL := strings.TrimSpace(cfg.RedisURL)
 		if redisURL == "" {
 			return nil, nil
 		}
-		redisStore, err := corestate.NewRedisStoreFromURL(redisURL)
+		redisStore, err := scanstate.NewRedisStoreFromURL(redisURL)
 		if err != nil {
 			return nil, fmt.Errorf("configure target search cache state redis: %w", err)
 		}
 		return tree.NewStateTargetSearchCacheStore(redisStore), nil
 	default:
-		return nil, fmt.Errorf("unsupported target search cache state backend %q", corestate.BackendFromEnv())
+		return nil, fmt.Errorf("unsupported target search cache state backend %q", scanstate.BackendFromEnv())
 	}
 }
 
