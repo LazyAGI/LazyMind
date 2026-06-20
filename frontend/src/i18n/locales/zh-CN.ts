@@ -772,6 +772,10 @@ const zhCN = {
     selectAll: "全选",
     cancelSelectAll: "取消全选",
     loadingWait: "加载中,请稍后...",
+    // PreferenceConfigNotice
+    preferenceNotConfigured: "用户画像尚未配置，对话中将使用默认风格。",
+    goToConfigure: "去配置",
+    dontShowAgain: "不再提示",
     noData: "暂无数据",
     docSettings: "文档设置",
     enabled: "启用",

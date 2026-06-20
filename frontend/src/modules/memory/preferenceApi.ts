@@ -549,6 +549,21 @@ export async function listPreferenceAssets(): Promise<PreferenceAssetRecord[]> {
   return extractManagedPreferenceRecords(response.data);
 }
 
+export async function checkUserPreferenceConfigured(): Promise<boolean> {
+  try {
+    const assets = await listPreferenceAssets();
+    const pref = assets.find(
+      (a) =>
+        a.resourceType?.includes("user") ||
+        a.resourceType?.includes("preference"),
+    );
+    if (!pref) return false;
+    return !!(pref.agentPersona || pref.preferredName || pref.responseStyle);
+  } catch {
+    return false;
+  }
+}
+
 export async function listEvolutionSuggestions(
   options: EvolutionSuggestionListOptions = {},
 ): Promise<EvolutionSuggestionListResult> {

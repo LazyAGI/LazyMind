@@ -803,6 +803,10 @@ const enUS = {
     selectAll: "Select All",
     cancelSelectAll: "Deselect All",
     loadingWait: "Loading, please wait...",
+    // PreferenceConfigNotice
+    preferenceNotConfigured: "User profile is not configured. Default style will be used in conversations.",
+    goToConfigure: "Configure",
+    dontShowAgain: "Don't show again",
     noData: "No data",
     docSettings: "Document Settings",
     enabled: "Enabled",

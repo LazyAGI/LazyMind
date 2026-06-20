@@ -21,9 +21,9 @@ func HashSystemMemory(row orm.SystemMemory) string {
 func FormatSystemUserPreferenceForChat(row orm.SystemUserPreference) string {
 	var b strings.Builder
 	b.WriteString("---\n")
-	writeYAMLFrontMatterBlock(&b, "agent_persona", row.AgentPersona)
-	writeYAMLFrontMatterBlock(&b, "user_address", row.PreferredName)
-	writeYAMLFrontMatterBlock(&b, "response_style", row.ResponseStyle)
+	writeYAMLFrontMatterBlock(&b, "智能体角色", row.AgentPersona)
+	writeYAMLFrontMatterBlock(&b, "用户称谓", row.PreferredName)
+	writeYAMLFrontMatterBlock(&b, "回复风格", row.ResponseStyle)
 	b.WriteString("---\n\n")
 	b.WriteString(row.Content)
 	return b.String()
@@ -34,9 +34,9 @@ func HashSystemUserPreference(row orm.SystemUserPreference) string {
 }
 
 type userPreferenceFrontmatter struct {
-	AgentPersona  string `yaml:"agent_persona"`
-	PreferredName   string `yaml:"user_address"`
-	ResponseStyle string `yaml:"response_style"`
+	AgentPersona  string `yaml:"智能体角色"`
+	PreferredName string `yaml:"用户称谓"`
+	ResponseStyle string `yaml:"回复风格"`
 }
 
 func ParseSystemUserPreferenceContent(content string) (orm.SystemUserPreference, error) {
@@ -45,17 +45,20 @@ func ParseSystemUserPreferenceContent(content string) (orm.SystemUserPreference,
 		return orm.SystemUserPreference{}, errors.New("user_preference content must start with YAML frontmatter")
 	}
 	rest := strings.TrimPrefix(content, "---\n")
-	idx := strings.Index(rest, "\n---\n")
+	idx := strings.Index(rest, "\n---")
 	if idx < 0 {
 		return orm.SystemUserPreference{}, errors.New("user_preference content must contain closing frontmatter separator")
 	}
 	yamlPart := rest[:idx]
-	body := strings.TrimSpace(rest[idx+5:])
+	body := ""
+	if restAfter := rest[idx+4:]; strings.HasPrefix(restAfter, "\n") {
+		body = strings.TrimSpace(restAfter[1:])
+	}
 	var raw map[string]any
 	if err := yaml.Unmarshal([]byte(yamlPart), &raw); err != nil {
 		return orm.SystemUserPreference{}, fmt.Errorf("invalid user_preference frontmatter: %w", err)
 	}
-	for _, key := range []string{"agent_persona", "user_address", "response_style"} {
+	for _, key := range []string{"智能体角色", "用户称谓", "回复风格"} {
 		if _, ok := raw[key]; !ok {
 			return orm.SystemUserPreference{}, fmt.Errorf("user_preference frontmatter %s required", key)
 		}

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-_FRONTMATTER_RE = re.compile(r'^---\s*\n(.*?)\n---\s*\n(.*)$', re.DOTALL)
+_FRONTMATTER_RE = re.compile(r'^---\s*\n(.*?)\n---\s*(\n(.*))?$', re.DOTALL)
 _RESPONSE_STYLES_ZH = ('简洁', '详细', '幽默', '正式')
 _RESPONSE_STYLES_EN = ('concise', 'detailed', 'humorous', 'formal')
 _RESPONSE_STYLES = (
@@ -18,7 +18,7 @@ def parse_user_preference_frontmatter(content: str) -> tuple[dict[str, Any], str
     if not match:
         return {}, content or ''
 
-    yaml_text, body = match.group(1), match.group(2)
+    yaml_text, body = match.group(1), match.group(3) or ''
     try:
         import yaml  # type: ignore
 
@@ -49,6 +49,4 @@ def validate_user_preference_content(content: str) -> Optional[str]:
             "Frontmatter '回复风格' must be one of: "
             '简洁/详细/幽默/正式 or concise/detailed/humorous/formal or "".'
         )
-    if not body.strip():
-        return 'user_preference must have markdown content after frontmatter.'
     return None
