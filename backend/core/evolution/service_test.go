@@ -163,7 +163,7 @@ func TestBuildChatResourceContextFormatsUserPreferenceForChat(t *testing.T) {
 		UserID:        "u1",
 		Content:       "记住用户偏好简洁回答",
 		AgentPersona:  "资深研究助理",
-		PreferredName:   "老师",
+		PreferredName: "老师",
 		ResponseStyle: "先结论后解释",
 		Version:       1,
 		UpdatedBy:     "u1",

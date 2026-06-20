@@ -25,7 +25,7 @@ type ManagedStateItem struct {
 	Title                  string                               `json:"title"`
 	Content                string                               `json:"content"`
 	AgentPersona           *string                              `json:"agent_persona,omitempty"`
-	PreferredName            *string                              `json:"preferred_name,omitempty"`
+	PreferredName          *string                              `json:"preferred_name,omitempty"`
 	ResponseStyle          *string                              `json:"response_style,omitempty"`
 	ContentSummary         string                               `json:"content_summary"`
 	Version                int64                                `json:"version"`

@@ -21,7 +21,7 @@ type managedStateListAPITestResponse struct {
 			Title                  string  `json:"title"`
 			Content                string  `json:"content"`
 			AgentPersona           *string `json:"agent_persona"`
-			PreferredName            *string `json:"preferred_name"`
+			PreferredName          *string `json:"preferred_name"`
 			ResponseStyle          *string `json:"response_style"`
 			ContentSummary         string  `json:"content_summary"`
 			HasPendingReviewResult bool    `json:"has_pending_review_result"`
@@ -55,7 +55,7 @@ func TestListManagedStatesReturnsDefaultsAndUserScopedRows(t *testing.T) {
 		UserID:        "u1",
 		Content:       "用户偏好简洁回答。",
 		AgentPersona:  "严谨助手",
-		PreferredName:   "老师",
+		PreferredName: "老师",
 		ResponseStyle: "先结论后论证",
 		Version:       1,
 		UpdatedBy:     "u1",

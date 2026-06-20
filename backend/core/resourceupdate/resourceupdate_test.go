@@ -1157,7 +1157,7 @@ func TestAcceptUserPreferenceReviewResultParsesFrontmatter(t *testing.T) {
 		UserID:        "user-1",
 		Content:       "旧正文",
 		AgentPersona:  "旧角色",
-		PreferredName:   "旧称谓",
+		PreferredName: "旧称谓",
 		ResponseStyle: "旧风格",
 		Version:       1,
 		AutoEvo:       false,

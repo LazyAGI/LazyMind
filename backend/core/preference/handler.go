@@ -28,7 +28,7 @@ type generateRequest struct {
 type upsertRequest struct {
 	Content       *string `json:"content"`
 	AgentPersona  *string `json:"agent_persona"`
-	PreferredName   *string `json:"preferred_name"`
+	PreferredName *string `json:"preferred_name"`
 	ResponseStyle *string `json:"response_style"`
 	AutoEvo       *bool   `json:"auto_evo"`
 }
@@ -83,7 +83,7 @@ func upsertManagedPreferenceContent(r *http.Request, db *gorm.DB, userID, userNa
 			UserID:             userID,
 			Content:            stringFromPtr(req.Content),
 			AgentPersona:       stringFromPtr(req.AgentPersona),
-			PreferredName:        stringFromPtr(req.PreferredName),
+			PreferredName:      stringFromPtr(req.PreferredName),
 			ResponseStyle:      stringFromPtr(req.ResponseStyle),
 			Version:            1,
 			AutoEvo:            resolvedAutoEvo,
@@ -100,7 +100,7 @@ func upsertManagedPreferenceContent(r *http.Request, db *gorm.DB, userID, userNa
 			"user_id":               row.UserID,
 			"content":               row.Content,
 			"agent_persona":         row.AgentPersona,
-			"preferred_name":          row.PreferredName,
+			"preferred_name":        row.PreferredName,
 			"response_style":        row.ResponseStyle,
 			"content_hash":          row.ContentHash,
 			"version":               row.Version,
@@ -157,7 +157,7 @@ func upsertManagedPreferenceContent(r *http.Request, db *gorm.DB, userID, userNa
 	update := map[string]any{
 		"content":         newContent,
 		"agent_persona":   newAgentPersona,
-		"preferred_name":    newPreferredName,
+		"preferred_name":  newPreferredName,
 		"response_style":  newResponseStyle,
 		"content_hash":    evolution.HashSystemUserPreference(hashRow),
 		"version":         existing.Version + 1,
@@ -533,7 +533,7 @@ func Confirm(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{
 		"content":        row.Content,
 		"agent_persona":  row.AgentPersona,
-		"preferred_name":   row.PreferredName,
+		"preferred_name": row.PreferredName,
 		"response_style": row.ResponseStyle,
 		"version":        row.Version,
 	})

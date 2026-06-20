@@ -27,7 +27,7 @@ type upsertPreferenceAPITestResponse struct {
 		Title          string  `json:"title"`
 		Content        string  `json:"content"`
 		AgentPersona   *string `json:"agent_persona"`
-		PreferredName    *string `json:"preferred_name"`
+		PreferredName  *string `json:"preferred_name"`
 		ResponseStyle  *string `json:"response_style"`
 		ContentSummary string  `json:"content_summary"`
 	} `json:"data"`
@@ -371,7 +371,7 @@ func TestDraftPreviewReturnsCurrentDraftAndDiff(t *testing.T) {
 		UserID:             "u1",
 		Content:            "current preference",
 		AgentPersona:       "current persona",
-		PreferredName:        "current address",
+		PreferredName:      "current address",
 		ResponseStyle:      "current style",
 		ContentHash:        "hash-current",
 		Version:            3,
@@ -438,7 +438,7 @@ func TestDraftPreviewIgnoresLegacyPreferenceResourceDraft(t *testing.T) {
 		UserID:             "u1",
 		Content:            "current preference",
 		AgentPersona:       "current persona",
-		PreferredName:        "current address",
+		PreferredName:      "current address",
 		ResponseStyle:      "current style",
 		Version:            3,
 		DraftContent:       "---\n智能体角色: legacy\n用户称谓: legacy\n回复风格: legacy\n---\n\nlegacy preference",
@@ -676,7 +676,7 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 		UserID:             "u1",
 		Content:            "current preference",
 		AgentPersona:       "当前角色",
-		PreferredName:        "当前称谓",
+		PreferredName:      "当前称谓",
 		ResponseStyle:      "当前风格",
 		Version:            4,
 		DraftContent:       "---\n智能体角色: 草稿角色\n用户称谓: 草稿称谓\n回复风格: 草稿风格\n---\n\ndraft preference",
@@ -776,7 +776,7 @@ func TestConfirmParsesUserPreferenceFrontmatter(t *testing.T) {
 		UserID:             "u1",
 		Content:            "旧正文",
 		AgentPersona:       "旧角色",
-		PreferredName:        "旧称谓",
+		PreferredName:      "旧称谓",
 		ResponseStyle:      "旧风格",
 		ContentHash:        evolution.HashContent("旧正文"),
 		Version:            4,

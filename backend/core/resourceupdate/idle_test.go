@@ -364,7 +364,7 @@ func insertIdleResources(t *testing.T, db *gorm.DB, userID string, now time.Time
 		UserID:        userID,
 		Content:       "current preference",
 		AgentPersona:  "当前角色",
-		PreferredName:   "当前称谓",
+		PreferredName: "当前称谓",
 		ResponseStyle: "当前风格",
 		ContentHash:   "preference-hash",
 		Version:       1,

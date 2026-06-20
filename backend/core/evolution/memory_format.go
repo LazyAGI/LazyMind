@@ -70,7 +70,7 @@ func ParseSystemUserPreferenceContent(content string) (orm.SystemUserPreference,
 	row := orm.SystemUserPreference{
 		Content:       body,
 		AgentPersona:  strings.TrimSpace(meta.AgentPersona),
-		PreferredName:   strings.TrimSpace(meta.PreferredName),
+		PreferredName: strings.TrimSpace(meta.PreferredName),
 		ResponseStyle: strings.TrimSpace(meta.ResponseStyle),
 	}
 	if row.Content == "" && row.AgentPersona == "" && row.PreferredName == "" && row.ResponseStyle == "" {

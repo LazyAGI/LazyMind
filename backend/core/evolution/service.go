@@ -191,7 +191,7 @@ func EnsureSystemUserPreference(ctx context.Context, db *gorm.DB, userID, userNa
 		UserID:        userID,
 		Content:       firstNonEmpty(seed.Content, ""),
 		AgentPersona:  seed.AgentPersona,
-		PreferredName:   seed.PreferredName,
+		PreferredName: seed.PreferredName,
 		ResponseStyle: seed.ResponseStyle,
 		Version:       maxInt64(1, seed.Version),
 		AutoEvo:       true,

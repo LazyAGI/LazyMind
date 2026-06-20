@@ -27,7 +27,7 @@ type upsertMemoryAPITestResponse struct {
 		Title          string  `json:"title"`
 		Content        string  `json:"content"`
 		AgentPersona   *string `json:"agent_persona"`
-		PreferredName    *string `json:"preferred_name"`
+		PreferredName  *string `json:"preferred_name"`
 		ResponseStyle  *string `json:"response_style"`
 		ContentSummary string  `json:"content_summary"`
 	} `json:"data"`
