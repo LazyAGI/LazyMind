@@ -28,6 +28,7 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'SciverseSearch_meta_catalog': 'include_sample_values',
     'ArxivSearch_search': 'query',
     'memory_editor': 'target',
+    'read_memory': 'target',
     'vocab_learn': 'suggestions.word <-> suggestions.synonym',
     'vision_extractor': 'url',
     'skill_editor': 'category/name',
@@ -118,7 +119,8 @@ _TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'SciverseSearch_meta_catalog': 'Loading Sciverse metadata fields.',
     'ArxivSearch_search': 'Searching arXiv papers for {value}.',
     'vision_extractor': 'Extracting information from the image.',
-    'memory_editor': 'Saving {value} as useful long term memory now.',
+    'memory_editor': 'Saving long-term memory to {value} now.',
+    'read_memory': 'Reading {value} now.',
     'vocab_learn': 'Updating vocabulary entries for {value} now.',
     'skill_editor': 'Updating reusable skill notes related to {value} now.',
     'get_skill': 'Opening skill details for {value} before continuing now.',
@@ -170,7 +172,8 @@ _ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'SciverseSearch_meta_catalog': '正在加载 Sciverse 元数据字段目录。',
     'ArxivSearch_search': '正在 arXiv 中搜索论文 {value}。',
     'vision_extractor': '正在提取图像信息。',
-    'memory_editor': '正在将 {value} 保存为长期记忆。',
+    'memory_editor': '正在将长期记忆保存到 {value}。',
+    'read_memory': '正在读取{value}。',
     'vocab_learn': '正在更新与 {value} 相关的词汇表。',
     'skill_editor': '正在更新与 {value} 相关的技能。',
     'get_skill': '正在打开 {value} 的技能详情。',
@@ -222,7 +225,8 @@ _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'SciverseSearch_meta_catalog': 'Sciverse metadata fields were loaded successfully.',
     'ArxivSearch_search': 'arXiv results for {value} are ready now.',
     'vision_extractor': 'Image information has been extracted.',
-    'memory_editor': 'Long term memory for {value} was saved successfully.',
+    'memory_editor': 'Long-term memory was saved to {value}.',
+    'read_memory': '{value} was read successfully.',
     'vocab_learn': 'Vocabulary entries for {value} were updated successfully.',
     'skill_editor': 'Reusable skill notes for {value} were updated successfully.',
     'get_skill': 'Skill details for {value} were loaded successfully now.',
@@ -275,7 +279,8 @@ _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'SciverseSearch_meta_catalog': '已成功加载 Sciverse 元数据字段目录。',
     'ArxivSearch_search': '已找到 {value} 的 arXiv 结果。',
     'vision_extractor': '已成功提取图像信息。',
-    'memory_editor': '已成功保存 {value} 的长期记忆。',
+    'memory_editor': '已成功将长期记忆保存到 {value}。',
+    'read_memory': '{value}已成功读取。',
     'vocab_learn': '已成功更新 {value} 的词汇表。',
     'skill_editor': '已成功更新 {value} 的技能。',
     'get_skill': '已成功加载 {value} 的技能详情。',
@@ -326,7 +331,8 @@ _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'SciverseSearch_meta_catalog': 'Sciverse metadata fields could not be loaded.',
     'ArxivSearch_search': 'arXiv results for {value} could not be retrieved.',
     'vision_extractor': 'Vision extraction for {value} could not be completed.',
-    'memory_editor': 'Long term memory for {value} could not be saved.',
+    'memory_editor': 'Long-term memory could not be saved to {value}.',
+    'read_memory': '{value} could not be read.',
     'vocab_learn': 'Vocabulary entries for {value} could not be updated.',
     'skill_editor': 'Reusable skill notes for {value} could not be updated.',
     'get_skill': 'Skill details for {value} could not be loaded.',
@@ -377,7 +383,8 @@ _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'SciverseSearch_meta_catalog': '未能加载 Sciverse 元数据字段目录。',
     'ArxivSearch_search': '未能获取 {value} 的 arXiv 结果。',
     'vision_extractor': '未能完成 {value} 的图像信息提取。',
-    'memory_editor': '未能保存 {value} 的长期记忆。',
+    'memory_editor': '未能将长期记忆保存到 {value}。',
+    'read_memory': '{value}未能读取。',
     'vocab_learn': '未能更新 {value} 的词汇表。',
     'skill_editor': '未能更新 {value} 的技能。',
     'get_skill': '未能加载 {value} 的技能详情。',
@@ -894,8 +901,11 @@ def _tool_preview_value(value: Any) -> str:
 
 def _tool_call_preview_value(tool_name: str, arguments: Any, language: str = 'en') -> str:
     preview = _tool_preview_value(_representative_tool_argument(tool_name, arguments))
-    if _tool_name_is(tool_name, 'memory_editor') and not preview:
-        return '待保存内容' if language == 'zh' else 'memory update'
+    if _tool_name_is(tool_name, 'memory_editor') or _tool_name_is(tool_name, 'read_memory'):
+        if language == 'zh' and preview in ('memory', 'user_preference'):
+            preview = '工作记忆' if preview == 'memory' else '用户偏好'
+        elif not preview:
+            return '待保存内容' if language == 'zh' else 'memory update'
     return preview
 
 
