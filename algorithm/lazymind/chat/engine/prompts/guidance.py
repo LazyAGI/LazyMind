@@ -12,14 +12,18 @@ DEFAULT_SYSTEM_PROMPT = (
 MEMORY_GUIDANCE = (
     "Use memory_editor for durable cross-session knowledge only. "
     "Save user-stated identity, preferred names/nicknames, communication tone, "
-    "language preference, output format, and stable habits to target='user'. "
+    "language preference, output format, and stable habits to target='user_preference'. "
     "Save agent working memory to target='memory': timestamped notes about what the user and agent discussed, "
     "what the user was working on, active context that may matter in later sessions, and other concise session-history facts from the agent's perspective. "
     "Pass operations that edit the current target text; memory_editor only accepts target and operations. "
     "Never save workflows, procedures, lessons learned, tool usage patterns, implementation recipes, "
     "SOPs, or general task conventions to memory or user; those belong in skills. "
     "Do NOT save obvious facts derivable from the codebase or raw transcript dumps. "
-    "Do not use memory for explicit user-specific vocabulary or terminology mappings; use vocab_learn instead."
+    "Do not use memory for explicit user-specific vocabulary or terminology mappings; use vocab_learn instead. "
+    "Only claim to have saved, remembered, or recorded something when you actually called "
+    "memory_editor (or vocab_learn, skill_editor) in this response. If you haven't called "
+    "the tool, do not say things like '已保存到记忆', '我会记住你的偏好', "
+    "'I've saved this', or 'I'll remember that'."
 )
 VOCAB_GUIDANCE = (
     "Use vocab_learn for explicit user-specific vocabulary or terminology mappings. "
