@@ -183,9 +183,9 @@ def test_user_preference_prompt_requires_yaml_frontmatter():
     )
 
     assert 'Format requirements' in prompt
-    assert 'agent_persona' in prompt
-    assert 'user_address' in prompt
-    assert 'response_style' in prompt
+    assert '智能体角色' in prompt
+    assert '用户称谓' in prompt
+    assert '回复风格' in prompt
     assert 'legacy/free-form' in prompt
     assert 'frontmatter-plus-body format' in prompt
     assert 'role the user wants the agent to play' in prompt
@@ -193,10 +193,10 @@ def test_user_preference_prompt_requires_yaml_frontmatter():
     assert 'display/use exactly one of 简洁, 详细, 幽默, 正式' in prompt
     assert '简洁, 详细, 幽默, 正式' in prompt
     assert 'concise, detailed, humorous, formal' in prompt
-    assert 'existing valid response_style in either language' in prompt
+    assert 'existing valid 回复风格 in either language' in prompt
     assert 'Do not put language preferences' in prompt
     assert 'verbs, or full instructions' in prompt
-    assert 'response_style is unknown' in prompt
+    assert '回复风格 is unknown' in prompt
     assert 'use ""' in prompt
     assert 'never use generic acknowledgement text' in prompt
     assert 'only when user_instruct explicitly asks to change that specific field' in prompt
@@ -205,24 +205,24 @@ def test_user_preference_prompt_requires_yaml_frontmatter():
 def test_user_preference_validation_requires_yaml_frontmatter():
     valid_english = (
         '---\n'
-        'agent_persona: "algorithm collaborator"\n'
-        'user_address: ""\n'
-        'response_style: "concise"\n'
+        '智能体角色: "algorithm collaborator"\n'
+        '用户称谓: ""\n'
+        '回复风格: "concise"\n'
         '---\n'
         '- Prefer manual git commits.\n'
         '- Prefer algorithm-side changes only.'
     )
     valid_chinese = (
         '---\n'
-        'agent_persona: "算法协作者"\n'
-        'user_address: ""\n'
-        'response_style: "简洁"\n'
+        '智能体角色: "算法协作者"\n'
+        '用户称谓: ""\n'
+        '回复风格: "简洁"\n'
         '---\n'
         '- 偏好手动提交 git。'
     )
 
     parsed, body = parse_user_preference_frontmatter(valid_english)
-    assert parsed['agent_persona'] == 'algorithm collaborator'
+    assert parsed['智能体角色'] == 'algorithm collaborator'
     assert body == '- Prefer manual git commits.\n- Prefer algorithm-side changes only.'
     assert _validate_generated_content('user_preference', valid_english) == valid_english
     assert _validate_generated_content('user_preference', valid_chinese) == valid_chinese
@@ -230,20 +230,20 @@ def test_user_preference_validation_requires_yaml_frontmatter():
         'user_preference',
         (
             '---\n'
-            'agent_persona: "algorithm collaborator"\n'
-            'user_address: ""\n'
-            'response_style: ""\n'
+            '智能体角色: "algorithm collaborator"\n'
+            '用户称谓: ""\n'
+            '回复风格: ""\n'
             '---\n'
             '- Prefer manual git commits.'
         ),
     )
 
     invalid_cases = [
-        'agent_persona: "x"\nuser_address: ""\nresponse_style: "concise"\n\nbody',
-        '---\nagent_persona: "x"\nresponse_style: "concise"\n---\nbody',
-        '---\nagent_persona: "x"\nuser_address: ""\nresponse_style: "concise"\n---\n',
-        '---\nagent_persona: "x"\nuser_address: ""\nresponse_style: "concise, direct"\n---\nbody',
-        '---\nagent_persona: "x"\nuser_address: ""\nresponse_style: "轻松"\n---\nbody',
+        '智能体角色: "x"\n用户称谓: ""\n回复风格: "concise"\n\nbody',
+        '---\n智能体角色: "x"\n回复风格: "concise"\n---\nbody',
+        '---\n智能体角色: "x"\n用户称谓: ""\n回复风格: "concise"\n---\n',
+        '---\n智能体角色: "x"\n用户称谓: ""\n回复风格: "concise, direct"\n---\nbody',
+        '---\n智能体角色: "x"\n用户称谓: ""\n回复风格: "轻松"\n---\nbody',
         '- not: a mapping',
     ]
     for invalid in invalid_cases:

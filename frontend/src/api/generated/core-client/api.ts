@@ -923,7 +923,7 @@ export interface ManagedStateOpenAPIResponse {
     'response_style'?: string;
     'review_status': string;
     'title': string;
-    'user_address'?: string;
+    'preferred_name'?: string;
     'version': number;
 }
 export interface ManagedStateUpsertOpenAPIRequest {
@@ -931,7 +931,7 @@ export interface ManagedStateUpsertOpenAPIRequest {
     'auto_evo'?: boolean;
     'content'?: string;
     'response_style'?: string;
-    'user_address'?: string;
+    'preferred_name'?: string;
 }
 export interface McpDeleteServerOpenAPIResponse {
     'id': string;

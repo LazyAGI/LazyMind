@@ -1120,7 +1120,7 @@ func TestListMemoryReviewResultsHidesUnmappedRows(t *testing.T) {
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	insertMemoryResource(t, db, orm.SystemMemory{ID: "memory-1", UserID: "user-1", Content: "old memory", ContentHash: evolution.HashContent("old memory"), Version: 1, AutoEvo: false, CreatedAt: now, UpdatedAt: now})
 	insertMemoryReviewResult(t, db, MemoryReviewResult{ID: "mapped", UserID: "user-1", Target: orm.ResourceUpdateResourceTypeMemory, Content: "new memory", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now})
-	insertMemoryReviewResult(t, db, MemoryReviewResult{ID: "unmapped-preference", UserID: "user-1", Target: orm.ResourceUpdateResourceTypeUserPreference, Content: "---\nagent_persona: a\nuser_address: b\nresponse_style: c\n---\n\nbody", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now.Add(time.Second)})
+	insertMemoryReviewResult(t, db, MemoryReviewResult{ID: "unmapped-preference", UserID: "user-1", Target: orm.ResourceUpdateResourceTypeUserPreference, Content: "---\n智能体角色: a\n用户称谓: b\n回复风格: c\n---\n\nbody", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now.Add(time.Second)})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/core/memory-review-results", nil)
 	req.Header.Set("X-User-Id", "user-1")
@@ -1157,7 +1157,7 @@ func TestAcceptUserPreferenceReviewResultParsesFrontmatter(t *testing.T) {
 		UserID:        "user-1",
 		Content:       "旧正文",
 		AgentPersona:  "旧角色",
-		UserAddress:   "旧称谓",
+		PreferredName:   "旧称谓",
 		ResponseStyle: "旧风格",
 		Version:       1,
 		AutoEvo:       false,
@@ -1166,7 +1166,7 @@ func TestAcceptUserPreferenceReviewResultParsesFrontmatter(t *testing.T) {
 	}
 	resource.ContentHash = evolution.HashSystemUserPreference(resource)
 	insertPreferenceResource(t, db, resource)
-	reviewContent := "---\nagent_persona: 新角色\nuser_address: 用户称谓\nresponse_style: 回复风格\n---\n\n新正文"
+	reviewContent := "---\n智能体角色: 新角色\n用户称谓: 用户称谓\n回复风格: 回复风格\n---\n\n新正文"
 	insertMemoryReviewResult(t, db, MemoryReviewResult{
 		ID:           "preference-accept",
 		UserID:       "user-1",
@@ -1190,7 +1190,7 @@ func TestAcceptUserPreferenceReviewResultParsesFrontmatter(t *testing.T) {
 	if err := db.Take(&updated, "id = ?", "preference-1").Error; err != nil {
 		t.Fatalf("read preference: %v", err)
 	}
-	if updated.Content != "新正文" || updated.AgentPersona != "新角色" || updated.UserAddress != "用户称谓" || updated.ResponseStyle != "回复风格" {
+	if updated.Content != "新正文" || updated.AgentPersona != "新角色" || updated.PreferredName != "用户称谓" || updated.ResponseStyle != "回复风格" {
 		t.Fatalf("expected frontmatter to be split into preference columns, got %#v", updated)
 	}
 	if strings.Contains(updated.Content, "agent_persona") || strings.Contains(updated.Content, "---") {

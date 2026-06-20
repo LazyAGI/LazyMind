@@ -221,7 +221,7 @@ const hasSkillDraftPreviewStatus = (record: StructuredAsset) =>
   isReviewableSuggestionStatus(record.reviewStatus) ||
   isReviewableSuggestionStatus(record.suggestionStatus) ||
   isSkillUpdatePending(record.updateStatus);
-type ExperienceProfileFieldKey = "agentPersona" | "userAddress" | "responseStyle";
+type ExperienceProfileFieldKey = "agentPersona" | "preferredName" | "responseStyle";
 type ExperienceProfileDraft = Record<ExperienceProfileFieldKey, string>;
 type ExperienceProfileFieldConfig = {
   key: ExperienceProfileFieldKey;
@@ -236,7 +236,7 @@ type ExperienceProfileEditTarget = {
 const USER_PROFILE_FIELD_MAX_LENGTH = 500;
 const getExperienceProfileDraft = (record: ExperienceAsset): ExperienceProfileDraft => ({
   agentPersona: record.agentPersona || "",
-  userAddress: record.userAddress || "",
+  preferredName: record.preferredName || "",
   responseStyle: record.responseStyle || "",
 });
 const isExperienceProfileAsset = (record: ExperienceAsset) => {
@@ -701,7 +701,7 @@ export default function MemoryManagement() {
             resourceType: item.resourceType,
             reviewStatus: item.reviewStatus,
             suggestionStatus: item.suggestionStatus,
-            userAddress: item.userAddress,
+            preferredName: item.preferredName,
           })),
         );
       } catch (error) {
@@ -2449,7 +2449,7 @@ export default function MemoryManagement() {
           agentPersona: draft.agentPersona.trim(),
           responseStyle: draft.responseStyle.trim(),
           resourceType: record.resourceType,
-          userAddress: draft.userAddress.trim(),
+          preferredName: draft.preferredName.trim(),
         });
         resetExperienceProfileDraft(record);
         await refreshExperienceSection({ silent: true });
@@ -2811,7 +2811,7 @@ export default function MemoryManagement() {
         content: item.content,
         protect: Boolean(item.protect),
         responseStyle: item.responseStyle || "",
-        userAddress: item.userAddress || "",
+        preferredName: item.preferredName || "",
       });
     } else if ("term" in item) {
       setDraft({
@@ -2831,7 +2831,7 @@ export default function MemoryManagement() {
         content: item.content,
         protect: Boolean(item.protect),
         responseStyle: "",
-        userAddress: "",
+        preferredName: "",
       });
     } else {
       setDraft(
@@ -4136,7 +4136,7 @@ export default function MemoryManagement() {
               agentPersona: mergedExperience.agentPersona,
               responseStyle: mergedExperience.responseStyle,
               resourceType: mergedExperience.resourceType,
-              userAddress: mergedExperience.userAddress,
+              preferredName: mergedExperience.preferredName,
             });
           }
           message.success(t("admin.memoryDiffApproveSuccess"));
@@ -4625,7 +4625,7 @@ export default function MemoryManagement() {
           agentPersona: draft.agentPersona,
           responseStyle: draft.responseStyle,
           resourceType: currentExperienceItem?.resourceType,
-          userAddress: draft.userAddress,
+          preferredName: draft.preferredName,
         });
         if (modalMode === "edit" && draft.id) {
           setChangeProposals((previous) =>
@@ -5714,12 +5714,12 @@ export default function MemoryManagement() {
         }),
       },
       {
-        key: "userAddress",
-        label: t("admin.memoryProfileUserAddress", { defaultValue: "用户称谓" }),
-        description: t("admin.memoryProfileUserAddressDesc", {
+        key: "preferredName",
+        label: t("admin.memoryProfilePreferredName", { defaultValue: "用户称谓" }),
+        description: t("admin.memoryProfilePreferredNameDesc", {
           defaultValue: "设置回复中对用户的称呼方式。",
         }),
-        placeholder: t("admin.memoryProfileUserAddressPlaceholder", {
+        placeholder: t("admin.memoryProfilePreferredNamePlaceholder", {
           defaultValue: "例如：称呼用户为“您”，或使用指定昵称",
         }),
       },
@@ -5913,7 +5913,7 @@ export default function MemoryManagement() {
                   agentPersona: record.agentPersona,
                   responseStyle: record.responseStyle,
                   resourceType: record.resourceType,
-                  userAddress: record.userAddress,
+                  preferredName: record.preferredName,
                 });
                 await refreshExperienceSection({ silent: true });
               } catch (error) {

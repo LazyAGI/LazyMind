@@ -38,15 +38,15 @@ def validate_user_preference_content(content: str) -> Optional[str]:
     frontmatter, body = parse_user_preference_frontmatter(content)
     if not frontmatter:
         return 'user_preference must contain YAML frontmatter.'
-    if 'agent_persona' not in frontmatter:
-        return "Frontmatter must include 'agent_persona'."
-    if 'user_address' not in frontmatter:
-        return "Frontmatter must include 'user_address'."
-    if 'response_style' not in frontmatter:
-        return "Frontmatter must include 'response_style'."
-    if frontmatter.get('response_style') not in _RESPONSE_STYLES:
+    if '智能体角色' not in frontmatter:
+        return "Frontmatter must include '智能体角色'."
+    if '用户称谓' not in frontmatter:
+        return "Frontmatter must include '用户称谓'."
+    if '回复风格' not in frontmatter:
+        return "Frontmatter must include '回复风格'."
+    if frontmatter.get('回复风格') not in _RESPONSE_STYLES:
         return (
-            "Frontmatter 'response_style' must be one of: "
+            "Frontmatter '回复风格' must be one of: "
             '简洁/详细/幽默/正式 or concise/detailed/humorous/formal or "".'
         )
     if not body.strip():

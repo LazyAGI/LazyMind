@@ -55,7 +55,7 @@ export interface ExperienceAsset extends BaseAsset {
   resourceType?: string;
   reviewStatus?: string;
   suggestionStatus?: string;
-  userAddress?: string;
+  preferredName?: string;
 }
 
 export interface GlossaryAsset extends BaseAsset {
@@ -121,7 +121,7 @@ export interface AssetDraft {
   content: string;
   protect: boolean;
   responseStyle: string;
-  userAddress: string;
+  preferredName: string;
 }
 
 export interface SkillTreeNode extends StructuredAsset {
@@ -273,7 +273,7 @@ export const createDraft = (): AssetDraft => ({
   content: "",
   protect: false,
   responseStyle: "",
-  userAddress: "",
+  preferredName: "",
 });
 
 export const createStructuredDraft = (
@@ -304,7 +304,7 @@ export const createStructuredDraft = (
     content: normalizedContent,
     protect: Boolean(item.protect),
     responseStyle: "",
-    userAddress: "",
+    preferredName: "",
   };
 };
 

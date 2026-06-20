@@ -22,7 +22,7 @@ func FormatSystemUserPreferenceForChat(row orm.SystemUserPreference) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	writeYAMLFrontMatterBlock(&b, "agent_persona", row.AgentPersona)
-	writeYAMLFrontMatterBlock(&b, "user_address", row.UserAddress)
+	writeYAMLFrontMatterBlock(&b, "user_address", row.PreferredName)
 	writeYAMLFrontMatterBlock(&b, "response_style", row.ResponseStyle)
 	b.WriteString("---\n\n")
 	b.WriteString(row.Content)
@@ -35,7 +35,7 @@ func HashSystemUserPreference(row orm.SystemUserPreference) string {
 
 type userPreferenceFrontmatter struct {
 	AgentPersona  string `yaml:"agent_persona"`
-	UserAddress   string `yaml:"user_address"`
+	PreferredName   string `yaml:"user_address"`
 	ResponseStyle string `yaml:"response_style"`
 }
 
@@ -67,10 +67,10 @@ func ParseSystemUserPreferenceContent(content string) (orm.SystemUserPreference,
 	row := orm.SystemUserPreference{
 		Content:       body,
 		AgentPersona:  strings.TrimSpace(meta.AgentPersona),
-		UserAddress:   strings.TrimSpace(meta.UserAddress),
+		PreferredName:   strings.TrimSpace(meta.PreferredName),
 		ResponseStyle: strings.TrimSpace(meta.ResponseStyle),
 	}
-	if row.Content == "" && row.AgentPersona == "" && row.UserAddress == "" && row.ResponseStyle == "" {
+	if row.Content == "" && row.AgentPersona == "" && row.PreferredName == "" && row.ResponseStyle == "" {
 		return orm.SystemUserPreference{}, errors.New("user_preference content or metadata required")
 	}
 	return row, nil

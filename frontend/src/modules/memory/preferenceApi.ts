@@ -27,7 +27,7 @@ interface ManagedStateItem {
   review_status?: string;
   suggestion_status?: string;
   title?: string;
-  user_address?: string;
+  preferred_name?: string;
 }
 
 type RawObject = Record<string, unknown>;
@@ -45,7 +45,7 @@ export interface PreferenceAssetRecord {
   reviewStatus?: string;
   summary?: string;
   suggestionStatus?: string;
-  userAddress?: string;
+  preferredName?: string;
   autoEvoApplyStatus?: string;
   autoEvoGeneration?: number;
   autoEvoError?: string;
@@ -143,7 +143,7 @@ interface PreferenceFrontMatter {
   title?: string;
   protect?: boolean;
   responseStyle?: string;
-  userAddress?: string;
+  preferredName?: string;
 }
 
 const normalizeResourceType = (resourceType?: string) =>
@@ -342,8 +342,8 @@ const parsePreferenceFrontMatter = (rawContent: string) => {
     if (key === "agent_persona") {
       frontMatter.agentPersona = value;
     }
-    if (key === "user_address") {
-      frontMatter.userAddress = value;
+    if (key === "preferred_name") {
+      frontMatter.preferredName = value;
     }
     if (key === "response_style") {
       frontMatter.responseStyle = value;
@@ -440,7 +440,7 @@ export const parsePreferenceContent = (
     responseStyle: frontMatter.responseStyle ?? fallback?.responseStyle,
     resourceType: fallback?.resourceType,
     summary: fallback?.summary,
-    userAddress: frontMatter.userAddress ?? fallback?.userAddress,
+    preferredName: frontMatter.preferredName ?? fallback?.preferredName,
   };
 };
 
@@ -455,7 +455,7 @@ const normalizeManagedPreference = (item: ManagedStateItem): PreferenceAssetReco
   const summary = toStringValue(item.content_summary, "");
   const content = toStringValue(item.content, "");
   const agentPersona = toStringValue(item.agent_persona, "");
-  const userAddress = toStringValue(item.user_address, "");
+  const preferredName = toStringValue(item.preferred_name, "");
   const responseStyle = toStringValue(item.response_style, "");
   const hasPendingReviewSuggestions = toBoolean(
     item.has_pending_review_suggestions,
@@ -479,7 +479,7 @@ const normalizeManagedPreference = (item: ManagedStateItem): PreferenceAssetReco
     responseStyle,
     resourceType,
     summary,
-    userAddress,
+    preferredName,
   });
 
   return {
@@ -487,7 +487,7 @@ const normalizeManagedPreference = (item: ManagedStateItem): PreferenceAssetReco
     hasPendingReviewSuggestions,
     title: sanitizeInlineValue(title) || parsed.title,
     agentPersona: agentPersona || parsed.agentPersona,
-    userAddress: userAddress || parsed.userAddress,
+    preferredName: preferredName || parsed.preferredName,
     responseStyle: responseStyle || parsed.responseStyle,
     reviewStatus,
     suggestionStatus,
@@ -669,7 +669,7 @@ export async function upsertPreferenceAsset(item: {
   agentPersona?: string;
   responseStyle?: string;
   resourceType?: string;
-  userAddress?: string;
+  preferredName?: string;
 }): Promise<PreferenceAssetRecord> {
   const endpoint = isMemoryResourceType(item.resourceType) ? "memory" : "user-preference";
   const requestPayload: RawObject = {
@@ -681,8 +681,8 @@ export async function upsertPreferenceAsset(item: {
   if (item.agentPersona !== undefined) {
     requestPayload.agent_persona = item.agentPersona;
   }
-  if (item.userAddress !== undefined) {
-    requestPayload.user_address = item.userAddress;
+  if (item.preferredName !== undefined) {
+    requestPayload.preferred_name = item.preferredName;
   }
   if (item.responseStyle !== undefined) {
     requestPayload.response_style = item.responseStyle;

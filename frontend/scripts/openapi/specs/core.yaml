@@ -2976,7 +2976,7 @@ components:
                     type: string
                 title:
                     type: string
-                user_address:
+                preferred_name:
                     type: string
                 version:
                     format: int64
@@ -3005,7 +3005,7 @@ components:
                     type: string
                 response_style:
                     type: string
-                user_address:
+                preferred_name:
                     type: string
             type: object
         mcpDeleteServerOpenAPIResponse:

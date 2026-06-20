@@ -1,0 +1,1 @@
+-- No meaningful rollback for deleted data.

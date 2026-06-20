@@ -43,7 +43,7 @@ def review_memory(
         'user_id': user_id,
         'core_api_url': _cfg['core_api_url'],
         'memory': memory,
-        'user': user,
+        'user_preference': user,
     }
     lazyllm.globals['agentic_config'] = config
 
