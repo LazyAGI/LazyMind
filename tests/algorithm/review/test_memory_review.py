@@ -283,9 +283,8 @@ def test_review_memory_runs_agent_with_memory_editor_tool(monkeypatch):
     assert calls['history'] == [{'role': 'user', 'content': 'normalized'}]
     assert fake_lazyllm.globals['agentic_config']['user_id'] == 'user-1'
     assert fake_lazyllm.globals['agentic_config']['memory'] == '旧记忆'
-    assert fake_lazyllm.globals['agentic_config']['user'] == '旧用户画像'
+    assert fake_lazyllm.globals['agentic_config']['user_preference'] == '旧用户画像'
     assert calls['model_config'] == {'llm': {'model': 'test'}}
-    assert 'user_preference' not in fake_lazyllm.globals['agentic_config']
 
 
 def test_review_memory_returns_success_when_no_tool_submission(monkeypatch):

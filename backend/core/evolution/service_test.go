@@ -181,7 +181,7 @@ func TestBuildChatResourceContextFormatsUserPreferenceForChat(t *testing.T) {
 		t.Fatalf("build chat resource context: %v", err)
 	}
 
-	want := "---\nagent_persona: |-\n  资深研究助理\npreferred_name: |-\n  老师\nresponse_style: |-\n  先结论后解释\n---\n\n记住用户偏好简洁回答"
+	want := "---\nagent_persona: |-\n 资深研究助理\npreferred_name: |-\n 老师\nresponse_style: |-\n 先结论后解释\n---\n\n记住用户偏好简洁回答"
 	if ctx.Memory != "memory-content" {
 		t.Fatalf("unexpected memory context: %q", ctx.Memory)
 	}
