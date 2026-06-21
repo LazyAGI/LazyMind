@@ -87,7 +87,7 @@ func writeYAMLFrontMatterBlock(b *strings.Builder, key, value string) {
 	}
 	b.WriteString(": |-\n")
 	for _, line := range strings.Split(value, "\n") {
-		b.WriteString("  ")
+		b.WriteString(" ")
 		b.WriteString(line)
 		b.WriteByte('\n')
 	}

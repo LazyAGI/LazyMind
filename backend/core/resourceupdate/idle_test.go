@@ -295,7 +295,7 @@ func TestIdleFallbackCreatesCombinedMemoryReviewTaskWithoutSensitiveRequestField
 		if request.Memory != "current memory" {
 			t.Fatalf("expected memory content in request, got %q", request.Memory)
 		}
-		wantUser := "---\n智能体角色: |-\n  当前角色\n用户称谓: |-\n  当前称谓\n回复风格: |-\n  当前风格\n---\n\ncurrent preference"
+		wantUser := "---\nagent_persona: |-\n  当前角色\npreferred_name: |-\n  当前称谓\nresponse_style: |-\n  当前风格\n---\n\ncurrent preference"
 		if request.User != wantUser {
 			t.Fatalf("expected formatted user_preference in request, got %q", request.User)
 		}

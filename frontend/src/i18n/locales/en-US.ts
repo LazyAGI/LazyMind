@@ -2165,6 +2165,8 @@ const enUS = {
     memoryDiffKeepOriginal: "Keep Original and Close",
     memoryDiffStepChooseTitle: "Select Suggestions",
     memoryDiffStepPreviewTitle: "Preview Result",
+    memoryDiffPreferenceYamlSection: "YAML Configuration Changes",
+    memoryDiffPreferenceBodySection: "Body Content Changes",
     memoryDiffStepChooseHint:
       "The current content is on the left and the suggestions are on the right. Select the suggestions to apply, then preview the result.",
     memoryDiffStepPreviewHint:

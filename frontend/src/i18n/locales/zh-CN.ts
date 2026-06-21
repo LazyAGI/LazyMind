@@ -2061,6 +2061,8 @@ const zhCN = {
     memoryDiffKeepOriginal: "保留原文并关闭",
     memoryDiffStepChooseTitle: "选择建议",
     memoryDiffStepPreviewTitle: "预览结果",
+    memoryDiffPreferenceYamlSection: "YAML 配置变更",
+    memoryDiffPreferenceBodySection: "正文内容变更",
     memoryDiffStepChooseHint: "左侧是当前内容，右侧是系统建议；勾选要采纳的建议后，再进入下一步预览。",
     memoryDiffStepPreviewHint: "请检查合并后的预览内容，确认无误后再应用到正式内容。",
     memoryDiffBackendChooseHint: "右侧是系统生成的修改建议；勾选要纳入草稿的建议，再生成预览结果。",

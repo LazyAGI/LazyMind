@@ -21,8 +21,8 @@ def read_memory(target: str) -> Dict[str, Any]:
         target: Which buffer to read. ``'memory'`` returns the agent's own
             working memory about the user's ongoing context and prior
             discussions. ``'user_preference'`` returns the user profile / preference text
-            (YAML frontmatter with ``智能体角色``, ``用户称谓``,
-            ``回复风格``, followed by Markdown body).
+            (YAML frontmatter with ``agent_persona``, ``preferred_name``,
+            ``response_style``, followed by Markdown body).
 
     Returns:
         A unified tool payload whose ``result`` contains ``target``,

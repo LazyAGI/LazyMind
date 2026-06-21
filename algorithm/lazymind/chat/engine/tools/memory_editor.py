@@ -54,16 +54,16 @@ def memory_editor(
             agent's own working memory about the user's ongoing context and
             prior discussions; ``'user_preference'`` is the user profile / preference text.
             For ``'user_preference'``, the edited full text must start with YAML
-            frontmatter delimited by ``---`` containing ``智能体角色``,
-            ``用户称谓``, and ``回复风格``, followed by Markdown body
-            content. ``回复风格`` must be empty or exactly one of
+            frontmatter delimited by ``---`` containing ``agent_persona``,
+            ``preferred_name``, and ``response_style``, followed by Markdown body
+            content. ``response_style`` must be empty or exactly one of
             ``简洁``, ``详细``, ``幽默``, ``正式``, ``concise``, ``detailed``,
             ``humorous``, or ``formal``; use the Chinese values for Chinese
             user language and the English values otherwise. Write language,
             formatting, and workflow preferences in the Markdown body.
             The Markdown body must NOT repeat information already captured
-            in the frontmatter fields (智能体角色, 用户称谓,
-            回复风格).
+            in the frontmatter fields (agent_persona, preferred_name,
+            response_style).
         operations: Ordered JSON edit operations. Supported operations:
 
             - ``{"op": "replace_text", "old": "...", "new": "..."}``:

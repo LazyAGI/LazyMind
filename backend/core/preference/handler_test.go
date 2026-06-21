@@ -375,7 +375,7 @@ func TestDraftPreviewReturnsCurrentDraftAndDiff(t *testing.T) {
 		ResponseStyle:      "current style",
 		ContentHash:        "hash-current",
 		Version:            3,
-		DraftContent:       "---\n智能体角色: legacy persona\n用户称谓: legacy address\n回复风格: legacy style\n---\n\nlegacy preference",
+		DraftContent:       "---\nagent_persona: legacy persona\npreferred_name: legacy address\nresponse_style: legacy style\n---\n\nlegacy preference",
 		DraftSourceVersion: 3,
 		DraftStatus:        "pending_confirm",
 		UpdatedBy:          "u1",
@@ -387,7 +387,7 @@ func TestDraftPreviewReturnsCurrentDraftAndDiff(t *testing.T) {
 		t.Fatalf("create preference: %v", err)
 	}
 	row.ContentHash = evolution.HashSystemUserPreference(row)
-	draftContent := "---\n智能体角色: updated persona\n用户称谓: updated address\n回复风格: updated style\n---\n\nupdated preference"
+	draftContent := "---\nagent_persona: updated persona\npreferred_name: updated address\nresponse_style: updated style\n---\n\nupdated preference"
 	createPreferenceReviewResult(t, db, "preference-preview", "u1", orm.ResourceUpdateResourceTypeUserPreference, draftContent, now)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/core/user-preference:draft-preview", nil)
@@ -441,7 +441,7 @@ func TestDraftPreviewIgnoresLegacyPreferenceResourceDraft(t *testing.T) {
 		PreferredName:      "current address",
 		ResponseStyle:      "current style",
 		Version:            3,
-		DraftContent:       "---\n智能体角色: legacy\n用户称谓: legacy\n回复风格: legacy\n---\n\nlegacy preference",
+		DraftContent:       "---\nagent_persona: legacy\npreferred_name: legacy\nresponse_style: legacy\n---\n\nlegacy preference",
 		DraftSourceVersion: 3,
 		DraftStatus:        "pending_confirm",
 		UpdatedBy:          "u1",
@@ -658,7 +658,7 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": map[string]any{"content": "---\n智能体角色: 新角色\n用户称谓: 新称谓\n回复风格: 新风格\n---\n\ndraft from user instruction"},
+			"data": map[string]any{"content": "---\nagent_persona: 新角色\npreferred_name: 新称谓\nresponse_style: 新风格\n---\n\ndraft from user instruction"},
 		})
 	})
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -679,7 +679,7 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 		PreferredName:      "当前称谓",
 		ResponseStyle:      "当前风格",
 		Version:            4,
-		DraftContent:       "---\n智能体角色: 草稿角色\n用户称谓: 草稿称谓\n回复风格: 草稿风格\n---\n\ndraft preference",
+		DraftContent:       "---\nagent_persona: 草稿角色\npreferred_name: 草稿称谓\nresponse_style: 草稿风格\n---\n\ndraft preference",
 		DraftSourceVersion: 4,
 		DraftStatus:        "pending_confirm",
 		Ext:                evolution.WithDraftSuggestionIDs(nil, []string{"suggestion-1"}),
@@ -740,7 +740,7 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 	if len(gotIDs) != 0 {
 		t.Fatalf("expected draft suggestion ids to be cleared, got %#v", gotIDs)
 	}
-	reviewContent := "---\n智能体角色: 新角色\n用户称谓: 新称谓\n回复风格: 新风格\n---\n\ndraft from user instruction"
+	reviewContent := "---\nagent_persona: 新角色\npreferred_name: 新称谓\nresponse_style: 新风格\n---\n\ndraft from user instruction"
 	createPreferenceReviewResult(t, db, "preference-confirm", "u1", orm.ResourceUpdateResourceTypeUserPreference, reviewContent, now.Add(time.Second))
 
 	confirmReq := httptest.NewRequest(http.MethodPost, "/api/core/user-preference:confirm", nil)
@@ -780,7 +780,7 @@ func TestConfirmParsesUserPreferenceFrontmatter(t *testing.T) {
 		ResponseStyle:      "旧风格",
 		ContentHash:        evolution.HashContent("旧正文"),
 		Version:            4,
-		DraftContent:       "---\n智能体角色: legacy\n用户称谓: legacy\n回复风格: legacy\n---\n\nlegacy",
+		DraftContent:       "---\nagent_persona: legacy\npreferred_name: legacy\nresponse_style: legacy\n---\n\nlegacy",
 		DraftSourceVersion: 4,
 		DraftStatus:        "pending_confirm",
 		UpdatedBy:          "u1",
@@ -792,7 +792,7 @@ func TestConfirmParsesUserPreferenceFrontmatter(t *testing.T) {
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatalf("create preference: %v", err)
 	}
-	reviewContent := "---\n智能体角色: 新角色\n用户称谓: 用户称谓\n回复风格: 回复风格\n---\n\n新正文"
+	reviewContent := "---\nagent_persona: 新角色\npreferred_name: 用户称谓\nresponse_style: 回复风格\n---\n\n新正文"
 	createPreferenceReviewResult(t, db, "preference-frontmatter", "u1", orm.ResourceUpdateResourceTypeUserPreference, reviewContent, now)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/core/user-preference:confirm", nil)
@@ -835,7 +835,7 @@ func TestDiscardRejectsPendingPreferenceReviewResult(t *testing.T) {
 		Content:            "current preference",
 		ContentHash:        evolution.HashContent("current preference"),
 		Version:            4,
-		DraftContent:       "---\n智能体角色: legacy\n用户称谓: legacy\n回复风格: legacy\n---\n\nlegacy preference",
+		DraftContent:       "---\nagent_persona: legacy\npreferred_name: legacy\nresponse_style: legacy\n---\n\nlegacy preference",
 		DraftSourceVersion: 4,
 		DraftStatus:        "pending_confirm",
 		Ext:                evolution.WithDraftSuggestionIDs(nil, []string{"suggestion-1"}),
@@ -847,7 +847,7 @@ func TestDiscardRejectsPendingPreferenceReviewResult(t *testing.T) {
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatalf("create preference: %v", err)
 	}
-	createPreferenceReviewResult(t, db, "preference-discard", "u1", orm.ResourceUpdateResourceTypeUserPreference, "---\n智能体角色: rejected\n用户称谓: rejected\n回复风格: rejected\n---\n\nrejected preference", now)
+	createPreferenceReviewResult(t, db, "preference-discard", "u1", orm.ResourceUpdateResourceTypeUserPreference, "---\nagent_persona: rejected\npreferred_name: rejected\nresponse_style: rejected\n---\n\nrejected preference", now)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/core/user-preference:discard", nil)
 	req.Header.Set("X-User-Id", "u1")

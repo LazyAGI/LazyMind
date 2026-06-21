@@ -164,6 +164,8 @@ import {
   parseMemoryTab,
   serializeExperienceAsset,
   serializeStructuredAsset,
+  serializePreferenceYaml,
+  parsePreferenceYamlAndBody,
   SKILL_TAG_MAX_COUNT,
   skillUploadAccept,
 } from "./shared";
@@ -2309,11 +2311,31 @@ export default function MemoryManagement() {
       .filter((field) => (proposalFieldDecisions[field.key] ?? "pending") === "accept")
       .map((field) => field.label);
 
+    const isPreference =
+      activeProposal.tab === "experience" &&
+      isExperienceProfileAsset(activeProposal.before as ExperienceAsset);
+
+    let prefYamlDiffLines: import("./shared").DiffLine[] = [];
+    let prefBodyDiffLines: import("./shared").DiffLine[] = [];
+    if (isPreference) {
+      const beforeExp = activeProposal.before as ExperienceAsset;
+      const afterExp = effectiveProposalMerged as ExperienceAsset;
+      const beforeYaml = serializePreferenceYaml(beforeExp);
+      const afterYaml = serializePreferenceYaml(afterExp);
+      prefYamlDiffLines = buildDiffLines(beforeYaml, afterYaml);
+      const beforeBody = parsePreferenceYamlAndBody(beforeExp.content).bodyText;
+      const afterBody = parsePreferenceYamlAndBody(afterExp.content).bodyText;
+      prefBodyDiffLines = buildDiffLines(beforeBody, afterBody);
+    }
+
     return {
       beforeText,
       afterText,
       lines: buildDiffLines(beforeText, afterText),
       changedFields,
+      isPreference,
+      prefYamlDiffLines,
+      prefBodyDiffLines,
     };
   }, [
     activeProposal,

@@ -571,6 +571,42 @@ export const normalizeSuggestionValue = (value: string) => {
   return compact.length > 120 ? `${compact.slice(0, 120)}...` : compact;
 };
 
+const PREFERENCE_FRONTMATTER_RE = /^---\n([\s\S]*?)\n---(?:\n([\s\S]*))?$/;
+
+/**
+ * Split user_preference content into YAML frontmatter text and body text.
+ */
+export const parsePreferenceYamlAndBody = (
+  content: string,
+): { yamlText: string; bodyText: string } => {
+  const normalized = content.replace(/\r\n/g, "\n");
+  const matched = normalized.match(PREFERENCE_FRONTMATTER_RE);
+  if (!matched) {
+    return { yamlText: "", bodyText: normalized };
+  }
+  return {
+    yamlText: `---\n${matched[1]}\n---`,
+    bodyText: (matched[2] || "").trimStart(),
+  };
+};
+
+/**
+ * Serialize a preference item's structured YAML fields into text for diffing.
+ */
+export const serializePreferenceYaml = (item: {
+  agentPersona?: string;
+  preferredName?: string;
+  responseStyle?: string;
+}): string => {
+  return [
+    "---",
+    `agent_persona: "${item.agentPersona ?? ""}"`,
+    `preferred_name: "${item.preferredName ?? ""}"`,
+    `response_style: "${item.responseStyle ?? ""}"`,
+    "---",
+  ].join("\n");
+};
+
 export const defaultMemoryGenerateInstruction = "再补一条：跨团队协作时才允许使用 merge";
 
 const buildEvolutionId = (resourceType: string, resourceId: string) => {

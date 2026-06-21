@@ -118,7 +118,7 @@ func TestListManagedStatesReturnsDefaultsAndUserScopedRows(t *testing.T) {
 			"session_id":     "",
 			"source_content": "",
 			"operations":     "[]",
-			"content":        "---\n智能体角色: 严谨助手\n用户称谓: 老师\n回复风格: 先结论后论证\n---\n用户偏好简洁回答。",
+			"content":        "---\nagent_persona: 严谨助手\npreferred_name: 老师\nresponse_style: 先结论后论证\n---\n用户偏好简洁回答。",
 			"state":          "success",
 			"review_status":  "pending",
 			"time":           now,
