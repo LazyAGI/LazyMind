@@ -423,7 +423,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       }
     }
 
-    const openSSE = (
+    const openSSE = async (
       input: any[],
       action: ChatConversationsRequestActionEnum,
     ) => {

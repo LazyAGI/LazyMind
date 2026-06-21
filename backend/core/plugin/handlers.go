@@ -232,11 +232,15 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 		slot.RevisionCount = revCounts[rcKey]
 
 		// sort_order and order_version from plugin_slot_order.
-		if ord, ok := orderBySlot[slot.SlotID]; ok {
+		// single slots (list_index IS NULL) get sort_order=0 as a stable sentinel.
+		if slot.ListIndex == nil {
+			so := 0
+			slot.SortOrder = &so
+		} else if ord, ok := orderBySlot[slot.SlotID]; ok {
 			var list []int
 			_ = json.Unmarshal(ord.OrderList, &list)
 			for pos, li := range list {
-				if slot.ListIndex != nil && li == *slot.ListIndex {
+				if li == *slot.ListIndex {
 					so := pos + 1
 					slot.SortOrder = &so
 					break
@@ -640,7 +644,7 @@ func parseSortOrder(r *http.Request) (int, bool) {
 		return 0, false
 	}
 	var n int
-	if _, err := fmt.Sscanf(s, "%d", &n); err != nil || n < 1 {
+	if _, err := fmt.Sscanf(s, "%d", &n); err != nil || n < 0 {
 		return 0, false
 	}
 	return n, true
@@ -702,23 +706,41 @@ func PatchSlotItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	listIndex, err := SortOrderToListIndex(ctx, db, sessionID, slotID, sortOrder)
-	if err != nil || listIndex < 0 {
-		common.ReplyErr(w, "sort_order not found", http.StatusNotFound)
-		return
+	var listIndex int
+	var isSingle bool
+	if sortOrder == 0 {
+		// sort_order=0 is the sentinel for single-cardinality slots (list_index IS NULL).
+		isSingle = true
+		listIndex = -1 // unused for single
+	} else {
+		var err error
+		listIndex, err = SortOrderToListIndex(ctx, db, sessionID, slotID, sortOrder)
+		if err != nil || listIndex < 0 {
+			common.ReplyErr(w, "sort_order not found", http.StatusNotFound)
+			return
+		}
 	}
 	// Load existing revision to get artifact_key + step info.
 	var existing orm.PluginSlotRevision
-	li := listIndex
-	if err := db.WithContext(ctx).
-		Where("session_id = ? AND slot_id = ? AND list_index = ? AND selected = ?", sessionID, slotID, li, true).
-		First(&existing).Error; err != nil {
-		// Try without list_index for single slots.
-		if err2 := db.WithContext(ctx).
+	if isSingle {
+		if err := db.WithContext(ctx).
 			Where("session_id = ? AND slot_id = ? AND list_index IS NULL AND selected = ?", sessionID, slotID, true).
-			First(&existing).Error; err2 != nil {
+			First(&existing).Error; err != nil {
 			common.ReplyErr(w, "slot revision not found", http.StatusNotFound)
 			return
+		}
+	} else {
+		li := listIndex
+		if err := db.WithContext(ctx).
+			Where("session_id = ? AND slot_id = ? AND list_index = ? AND selected = ?", sessionID, slotID, li, true).
+			First(&existing).Error; err != nil {
+			// Try without list_index for single slots.
+			if err2 := db.WithContext(ctx).
+				Where("session_id = ? AND slot_id = ? AND list_index IS NULL AND selected = ?", sessionID, slotID, true).
+				First(&existing).Error; err2 != nil {
+				common.ReplyErr(w, "slot revision not found", http.StatusNotFound)
+				return
+			}
 		}
 	}
 	newRev, err := WriteSlotRevisionWithSnapshot(ctx, db,
@@ -978,19 +1000,27 @@ func PatchSlotCaption(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	listIndex, err := SortOrderToListIndex(ctx, db, sessionID, slotID, sortOrder)
-	if err != nil || listIndex < 0 {
-		common.ReplyErr(w, "sort_order not found", http.StatusNotFound)
-		return
+	var listIndex int
+	var isSingle bool
+	if sortOrder == 0 {
+		isSingle = true
+		listIndex = -1
+	} else {
+		var err error
+		listIndex, err = SortOrderToListIndex(ctx, db, sessionID, slotID, sortOrder)
+		if err != nil || listIndex < 0 {
+			common.ReplyErr(w, "sort_order not found", http.StatusNotFound)
+			return
+		}
 	}
 	// Find the currently selected revision to get its artifact_key.
 	var rev orm.PluginSlotRevision
 	li := listIndex
 	q := db.WithContext(ctx).Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true)
-	if li >= 0 {
-		q = q.Where("list_index = ?", li)
-	} else {
+	if isSingle || li < 0 {
 		q = q.Where("list_index IS NULL")
+	} else {
+		q = q.Where("list_index = ?", li)
 	}
 	if err := q.First(&rev).Error; err != nil {
 		common.ReplyErr(w, "slot revision not found", http.StatusNotFound)

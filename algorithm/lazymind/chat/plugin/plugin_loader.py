@@ -52,7 +52,12 @@ class StateMachine:
         return [t for t in targets if t not in self._RESERVED]
 
     def is_reachable(self, current_step: str, target_step: str) -> bool:
-        """Return True if target_step is directly reachable from current_step."""
+        """Return True if target_step is directly reachable from current_step.
+
+        A step is always reachable from itself (retry semantics).
+        """
+        if target_step == current_step and target_step not in self._RESERVED:
+            return True
         return target_step in self.get_reachable_steps(current_step)
 
     def get_ancestors(self, step: str) -> set:
