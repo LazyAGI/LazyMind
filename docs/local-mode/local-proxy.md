@@ -46,6 +46,12 @@ Expected behavior:
 - Config examples are under `backend/local-proxy/configs/`:
   - `local.yaml` (full route set, `evo-route` enabled)
   - `local-no-evo.yaml` (`evo-route` disabled)
+- Local Proxy helper scripts live under `backend/local-proxy/scripts/`:
+  - `build.sh`
+  - `start.sh`
+  - `stop.sh`
+  - `local-proxy-dev.sh`
+- `scripts/local-proxy-dev.sh` is kept as a compatibility wrapper to the new location.
 - Default Local Proxy endpoint:
   - `http://127.0.0.1:${LAZYMIND_LOCAL_PROXY_PORT:-5024}`
 - Diagnostics:
@@ -99,7 +105,7 @@ Additional checks:
 
 ## Non-goals / known limitations
 
-- `scripts/local-proxy-dev.sh` and this flow are browser-first helpers; they do not supervise process lifecycle the way Electron will.
-- `scripts/local-proxy-dev.sh` does not launch backend services; the Makefile `LAZYMIND_GATEWAY_MODE=local-proxy` flow starts the compose service stack for this transitional mode.
+- `backend/local-proxy/scripts/local-proxy-dev.sh` and this flow are browser-first helpers; they do not supervise process lifecycle the way Electron will.
+- `backend/local-proxy/scripts/local-proxy-dev.sh` does not launch backend services; the Makefile `LAZYMIND_GATEWAY_MODE=local-proxy` flow starts the compose service stack for this transitional mode.
 - `/api-docs` parity is not guaranteed in this phase unless it already works.
 - This is not production packaging guidance, and not a replacement for future Desktop/Electron launcher work.

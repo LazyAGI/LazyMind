@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOCAL_PROXY_DIR="$ROOT/backend/local-proxy"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOCAL_PROXY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEFAULT_CONFIG="$LOCAL_PROXY_DIR/configs/local.yaml"
 CONFIG_PATH="${1:-$DEFAULT_CONFIG}"
-PROXY_ADDR="http://127.0.0.1:5024"
+PROXY_PORT="${LAZYMIND_LOCAL_PROXY_PORT:-5024}"
+PROXY_ADDR="http://127.0.0.1:$PROXY_PORT"
 
 if [ ! -f "$CONFIG_PATH" ]; then
   echo "Local Proxy config not found: $CONFIG_PATH" >&2

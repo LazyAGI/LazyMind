@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 lint-python lint-go test test-hermetic test-hermetic-setup test-hermetic-check build up up-build up-build-local down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop local-proxy-dirs local-proxy-build local-proxy-stop local-proxy-run local-proxy-start desktop-stop-if-present local-runtime-build local-runtime-up local-runtime-down local-runtime-down-if-present local-runtime-status
+.PHONY: help lint install-flake8 lint-python lint-go test test-hermetic test-hermetic-setup test-hermetic-check build up up-build up-build-local down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop local-proxy-build local-proxy-stop local-proxy-run local-proxy-start desktop-stop-if-present local-runtime-build local-runtime-up local-runtime-down local-runtime-down-if-present local-runtime-status
 .DEFAULT_GOAL := help
 
 # Use legacy Docker builder by default to avoid pulling moby/buildkit:buildx-stable-1 from Docker Hub
@@ -175,6 +175,7 @@ export LAZYMIND_FRONTEND_PORT ?= 8090
 
 # Local proxy runtime
 LAZYMIND_LOCAL_PROXY_DIR := backend/local-proxy
+LAZYMIND_LOCAL_PROXY_SCRIPT_DIR := $(LAZYMIND_LOCAL_PROXY_DIR)/scripts
 LAZYMIND_LOCAL_PROXY_CONFIG := $(LAZYMIND_LOCAL_PROXY_DIR)/configs/cloud-replace-kong.yaml
 export LAZYMIND_LOCAL_PROXY_BASE_ROOT ?= ./data/local-proxy
 LAZYMIND_LOCAL_PROXY_BASE_ROOT_ABS := $(abspath $(LAZYMIND_LOCAL_PROXY_BASE_ROOT))
@@ -382,45 +383,19 @@ file-watcher-run: file-watcher-stop file-watcher-dirs
 file-watcher-start: file-watcher-build
 	@$(MAKE) --no-print-directory file-watcher-run
 
-local-proxy-dirs:
-	@mkdir -p "$(LAZYMIND_LOCAL_PROXY_BASE_ROOT_ABS)" "$(LAZYMIND_LOCAL_PROXY_BASE_ROOT_ABS)/bin" "$(LAZYMIND_LOCAL_PROXY_BASE_ROOT_ABS)/run" "$(LAZYMIND_LOCAL_PROXY_BASE_ROOT_ABS)/logs"
-
-local-proxy-build: local-proxy-dirs
-	@echo "🔨 Rebuilding local-proxy..."
-	@rm -f "$(LAZYMIND_LOCAL_PROXY_BIN)"
-	@cd "$(LAZYMIND_LOCAL_PROXY_DIR)" && $(GO) build -o "$(LAZYMIND_LOCAL_PROXY_BIN)" ./cmd/local-proxy
-	@echo "✅ local-proxy built: $(LAZYMIND_LOCAL_PROXY_BIN)"
+local-proxy-build:
+	@GO="$(GO)" \
+	LAZYMIND_LOCAL_PROXY_BASE_ROOT="$(LAZYMIND_LOCAL_PROXY_BASE_ROOT)" \
+	LAZYMIND_LOCAL_PROXY_BIN="$(LAZYMIND_LOCAL_PROXY_BIN)" \
+	"$(LAZYMIND_LOCAL_PROXY_SCRIPT_DIR)/build.sh"
 
 local-proxy-stop:
-	@if [ -f "$(LAZYMIND_LOCAL_PROXY_PID)" ]; then \
-		pid=$$(cat "$(LAZYMIND_LOCAL_PROXY_PID)"); \
-		if [ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null; then \
-			echo "🛑 Stopping local-proxy ($$pid)..."; \
-			kill "$$pid"; \
-			for i in 1 2 3 4 5; do \
-				kill -0 "$$pid" 2>/dev/null || break; \
-				sleep 1; \
-			done; \
-			if kill -0 "$$pid" 2>/dev/null; then \
-				echo "⚠️  local-proxy still running ($$pid), please stop it manually if needed."; \
-			fi; \
-		fi; \
-		rm -f "$(LAZYMIND_LOCAL_PROXY_PID)"; \
-	fi
-	@if command -v lsof >/dev/null 2>&1; then \
-		for pid in $$(lsof -t -nP -iTCP:$(LAZYMIND_LOCAL_PROXY_PORT) -sTCP:LISTEN 2>/dev/null | sort -u); do \
-			cmd=$$(ps -p "$$pid" -o command= 2>/dev/null || true); \
-			case "$$cmd" in \
-				*local-proxy*|*local_proxy*) \
-					echo "🛑 Stopping local-proxy on :$(LAZYMIND_LOCAL_PROXY_PORT) ($$pid)..."; \
-					kill "$$pid" 2>/dev/null || true; \
-					;; \
-			esac; \
-		done; \
-	fi
+	@LAZYMIND_LOCAL_PROXY_BASE_ROOT="$(LAZYMIND_LOCAL_PROXY_BASE_ROOT)" \
+	LAZYMIND_LOCAL_PROXY_PORT="$(LAZYMIND_LOCAL_PROXY_PORT)" \
+	LAZYMIND_LOCAL_PROXY_PID_FILE="$(LAZYMIND_LOCAL_PROXY_PID)" \
+	"$(LAZYMIND_LOCAL_PROXY_SCRIPT_DIR)/stop.sh"
 
-local-proxy-run: local-proxy-dirs
-	@echo "🚀 Starting local-proxy..."
+local-proxy-run:
 	@LAZYMIND_FRONTEND_PORT="$(LAZYMIND_FRONTEND_PORT)" \
 	LAZYMIND_LOCAL_PROXY_ADDRESS="$(LAZYMIND_LOCAL_PROXY_ADDRESS)" \
 	LAZYMIND_LOCAL_PROXY_PORT="$(LAZYMIND_LOCAL_PROXY_PORT)" \
@@ -429,38 +404,12 @@ local-proxy-run: local-proxy-dirs
 	LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT="$(LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT)" \
 	LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT="$(LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT)" \
 	LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT="$(LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT)" \
+	LAZYMIND_LOCAL_PROXY_BASE_ROOT="$(LAZYMIND_LOCAL_PROXY_BASE_ROOT)" \
+	LAZYMIND_LOCAL_PROXY_BIN="$(LAZYMIND_LOCAL_PROXY_BIN)" \
+	LAZYMIND_LOCAL_PROXY_CONFIG="$(LAZYMIND_LOCAL_PROXY_CONFIG)" \
 	LAZYMIND_LOCAL_PROXY_PID_FILE="$(LAZYMIND_LOCAL_PROXY_PID)" \
 	LAZYMIND_LOCAL_PROXY_LOG_FILE="$(LAZYMIND_LOCAL_PROXY_CONSOLE_LOG)" \
-	sh -c 'if command -v setsid >/dev/null 2>&1; then \
-		setsid "$$@" >> "$$LAZYMIND_LOCAL_PROXY_LOG_FILE" 2>&1 & \
-	else \
-		nohup "$$@" >> "$$LAZYMIND_LOCAL_PROXY_LOG_FILE" 2>&1 & \
-	fi; \
-	echo $$! > "$$LAZYMIND_LOCAL_PROXY_PID_FILE"' sh "$(LAZYMIND_LOCAL_PROXY_BIN)" --config "$(LAZYMIND_LOCAL_PROXY_CONFIG)"
-	@sleep 1
-	@pid=$$(cat "$(LAZYMIND_LOCAL_PROXY_PID)"); \
-	if kill -0 "$$pid" 2>/dev/null; then \
-		if command -v curl >/dev/null 2>&1; then \
-			if curl -fsS "http://127.0.0.1:$(LAZYMIND_LOCAL_PROXY_PORT)/_local/healthz" >/dev/null; then \
-				echo "✅ local-proxy started and healthy (pid=$$pid)"; \
-			else \
-				echo "❌ local-proxy health check failed for http://127.0.0.1:$(LAZYMIND_LOCAL_PROXY_PORT)/_local/healthz"; \
-				tail -n 80 "$(LAZYMIND_LOCAL_PROXY_CONSOLE_LOG)" 2>/dev/null || true; \
-				rm -f "$(LAZYMIND_LOCAL_PROXY_PID)"; \
-				exit 1; \
-			fi; \
-		else \
-			echo "⚠️  curl not found; local-proxy started (pid=$$pid), skipping health check"; \
-		fi; \
-	else \
-		echo "❌ local-proxy failed to start. Recent log:"; \
-		tail -n 80 "$(LAZYMIND_LOCAL_PROXY_CONSOLE_LOG)" 2>/dev/null || true; \
-		rm -f "$(LAZYMIND_LOCAL_PROXY_PID)"; \
-		exit 1; \
-	fi
-	@echo "🔗 local-proxy health: http://127.0.0.1:$(LAZYMIND_LOCAL_PROXY_PORT)/_local/healthz"
-	@echo "🌐 Frontend URL: http://localhost:$(LAZYMIND_FRONTEND_PORT)"
-	@echo "📝 local-proxy log: $(LAZYMIND_LOCAL_PROXY_CONSOLE_LOG)"
+	"$(LAZYMIND_LOCAL_PROXY_SCRIPT_DIR)/start.sh"
 
 local-proxy-start: local-proxy-run
 
