@@ -310,7 +310,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       fileRef.current?.clear();
     }
 
-    function sendMessage(params: SendMessageParams) {
+    async function sendMessage(params: SendMessageParams) {
       const {
         text,
         citeMessage: paramsCiteMessage,
@@ -444,7 +444,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
         timeout: (e) => onTimeout(e),
       };
 
-      const sse = onOpenSSE(input, action, {});
+      const sseOrPromise = onOpenSSE(input, action, {});
+      const sse = sseOrPromise instanceof Promise ? await sseOrPromise : sseOrPromise;
       sseRef.current = sse;
 
       streamManager.registerStream(conversationId, sse, callbacks);

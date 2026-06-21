@@ -262,3 +262,87 @@ def list_knowledge_bases() -> Dict[str, Any]:
             'message': f'list_knowledge_bases failed: {e}',
             'items': [],
         })
+
+
+@handle_tool_errors
+def read_user_attachment(filename: str) -> Dict[str, Any]:
+    """Read the contents of a file previously uploaded by the user in this conversation.
+
+    The list of available files is shown in the system prompt under '## Attached Files'.
+    Use this tool to read a file's content when the user asks about it or when the task
+    requires processing the file.
+
+    Args:
+        filename (str): The filename (basename) or partial path of the attachment to read.
+            Must match one of the files listed in the system prompt.
+
+    Returns:
+        The file content as text, or a confirmation message with the absolute path for
+        binary/image files that should be passed to other tools (e.g. vision_extractor).
+    """
+    try:
+        import lazyllm
+        cfg: Dict[str, Any] = {}
+        try:
+            cfg = lazyllm.globals.get('agentic_config') or {}
+        except Exception:
+            pass
+        files: List[str] = cfg.get('files') or []
+        if not files:
+            return tool_success('read_user_attachment', {
+                'status': 'error',
+                'message': 'No attached files found in this conversation.',
+            })
+        # Match by basename or suffix.
+        target = filename.strip()
+        matched: Optional[str] = None
+        for path in files:
+            if os.path.basename(path) == target or path.endswith(target) or target in path:
+                matched = path
+                break
+        if matched is None:
+            available = [os.path.basename(p) for p in files]
+            return tool_success('read_user_attachment', {
+                'status': 'error',
+                'message': (
+                    f"File '{target}' not found in attached files. "
+                    f"Available: {', '.join(available)}"
+                ),
+            })
+        if not os.path.exists(matched):
+            return tool_success('read_user_attachment', {
+                'status': 'error',
+                'message': f"File '{target}' was found in the index but is no longer on disk.",
+            })
+        # Binary / image files: return path only (caller should use vision_extractor etc.).
+        binary_exts = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.pdf', '.zip'}
+        ext = os.path.splitext(matched)[1].lower()
+        if ext in binary_exts:
+            return tool_success('read_user_attachment', {
+                'status': 'ok',
+                'filename': os.path.basename(matched),
+                'path': matched,
+                'message': (
+                    f"Binary file '{os.path.basename(matched)}' is available at the above path. "
+                    'Pass the path to an appropriate tool (e.g. vision_extractor for images).'
+                ),
+            })
+        # Text file: read content.
+        try:
+            with open(matched, 'r', encoding='utf-8', errors='replace') as fh:
+                content = fh.read()
+        except OSError as e:
+            return tool_success('read_user_attachment', {
+                'status': 'error',
+                'message': f"Could not read '{os.path.basename(matched)}': {e}",
+            })
+        return tool_success('read_user_attachment', {
+            'status': 'ok',
+            'filename': os.path.basename(matched),
+            'content': content,
+        })
+    except Exception as e:
+        return tool_success('read_user_attachment', {
+            'status': 'error',
+            'message': f'read_user_attachment failed: {e}',
+        })

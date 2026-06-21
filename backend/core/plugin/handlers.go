@@ -954,3 +954,145 @@ func GetSlotOrderHandler(w http.ResponseWriter, r *http.Request) {
 		"order_version": row.OrderVersion,
 	})
 }
+
+// PatchSlotCaption handles PATCH /plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}/caption.
+// Updates sub_agent_artifacts.caption for the currently selected artifact without creating a new revision.
+func PatchSlotCaption(w http.ResponseWriter, r *http.Request) {
+	sessionID := common.PathVar(r, "session_id")
+	slotID := common.PathVar(r, "slot_id")
+	sortOrder, ok := parseSortOrder(r)
+	if !ok || sessionID == "" || slotID == "" {
+		common.ReplyErr(w, "session_id, slot_id and sort_order required", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Caption string `json:"caption"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	ctx := r.Context()
+	listIndex, err := SortOrderToListIndex(ctx, db, sessionID, slotID, sortOrder)
+	if err != nil || listIndex < 0 {
+		common.ReplyErr(w, "sort_order not found", http.StatusNotFound)
+		return
+	}
+	// Find the currently selected revision to get its artifact_key.
+	var rev orm.PluginSlotRevision
+	li := listIndex
+	q := db.WithContext(ctx).Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true)
+	if li >= 0 {
+		q = q.Where("list_index = ?", li)
+	} else {
+		q = q.Where("list_index IS NULL")
+	}
+	if err := q.First(&rev).Error; err != nil {
+		common.ReplyErr(w, "slot revision not found", http.StatusNotFound)
+		return
+	}
+	// Locate the sub_agent_artifact row matching the revision's task and artifact_key.
+	// For list slots, also match list_index embedded in value JSON.
+	var step orm.PluginSessionStep
+	if err := db.WithContext(ctx).
+		Where("session_id = ? AND step_id = ? AND attempt = ?", sessionID, rev.StepID, rev.Attempt).
+		First(&step).Error; err != nil {
+		common.ReplyErr(w, "session step not found", http.StatusNotFound)
+		return
+	}
+	cap := body.Caption
+	result := db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).
+		Where("task_id = ? AND artifact_key = ?", step.TaskID, rev.ArtifactKey).
+		Update("caption", &cap)
+	if result.Error != nil {
+		common.ReplyErr(w, "update caption failed", http.StatusInternalServerError)
+		return
+	}
+	common.ReplyOK(w, map[string]any{"status": "ok"})
+}
+
+// CreateSlotItem handles POST /plugin-sessions/{session_id}/slots/{slot_id}/items.
+// Appends a new human-created item to a list slot or inserts before a given sort_order.
+// Body: { value: {...}, caption?: string, insert_before?: number }
+func CreateSlotItem(w http.ResponseWriter, r *http.Request) {
+	sessionID := common.PathVar(r, "session_id")
+	slotID := common.PathVar(r, "slot_id")
+	if sessionID == "" || slotID == "" {
+		common.ReplyErr(w, "session_id and slot_id required", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Value        json.RawMessage `json:"value"`
+		Caption      *string         `json:"caption,omitempty"`
+		InsertBefore *int            `json:"insert_before,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Value) == 0 {
+		common.ReplyErr(w, "invalid body: value required", http.StatusBadRequest)
+		return
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	ctx := r.Context()
+	// Get an existing selected revision to borrow its artifact_key and step info.
+	var anyRev orm.PluginSlotRevision
+	if err := db.WithContext(ctx).
+		Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true).
+		First(&anyRev).Error; err != nil {
+		common.ReplyErr(w, "slot has no existing items; cannot infer artifact_key", http.StatusBadRequest)
+		return
+	}
+	// Write new list revision with nil listIndex (auto-appends).
+	newRev, err := WriteSlotRevisionWithSnapshot(ctx, db,
+		sessionID, slotID, anyRev.ArtifactKey, anyRev.StepID, anyRev.Attempt,
+		"list", nil, body.Value, "human",
+	)
+	if err != nil {
+		common.ReplyErr(w, "create item failed", http.StatusInternalServerError)
+		return
+	}
+	// If insert_before is specified, reorder so the new item sits at that position.
+	if body.InsertBefore != nil && newRev.ListIndex != nil {
+		if orderRow, err := GetSlotOrder(ctx, db, sessionID, slotID); err == nil && orderRow != nil {
+			var currentOrder []int
+			_ = json.Unmarshal(orderRow.OrderList, &currentOrder)
+			newIdx := *newRev.ListIndex
+			target := *body.InsertBefore - 1
+			if target >= 0 && target < len(currentOrder) {
+				reordered := make([]int, 0, len(currentOrder))
+				for _, v := range currentOrder {
+					if v != newIdx {
+						reordered = append(reordered, v)
+					}
+				}
+				final := append(append(reordered[:target:target], newIdx), reordered[target:]...)
+				_ = ReorderSlot(ctx, db, sessionID, slotID, final, orderRow.OrderVersion)
+			}
+		}
+	}
+	// Persist caption if provided.
+	if body.Caption != nil {
+		var step orm.PluginSessionStep
+		if err := db.WithContext(ctx).
+			Where("session_id = ? AND step_id = ? AND attempt = ?", sessionID, anyRev.StepID, anyRev.Attempt).
+			First(&step).Error; err == nil {
+			cap := *body.Caption
+			db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).
+				Where("task_id = ? AND artifact_key = ?", step.TaskID, anyRev.ArtifactKey).
+				Update("caption", &cap)
+		}
+	}
+	common.ReplyOK(w, map[string]any{
+		"type":       "slot_item_created",
+		"session_id": sessionID,
+		"slot_id":    slotID,
+		"revision":   newRev.Revision,
+	})
+}

@@ -199,6 +199,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/plugin-sessions/{session_id}/slots/{slot_id}/order", []string{"qa.read"}, plugin.GetSlotOrderHandler)
 	handleAPI(r, "GET", "/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}/versions", []string{"qa.read"}, plugin.GetSlotItemVersions)
 	handleAPI(r, "POST", "/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}/rollback", []string{"qa.write"}, plugin.RollbackSlotItem)
+	// Phase 4: caption editing and manual item creation
+	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}/caption", []string{"qa.write"}, plugin.PatchSlotCaption)
+	handleAPI(r, "POST", "/plugin-sessions/{session_id}/slots/{slot_id}/items", []string{"qa.write"}, plugin.CreateSlotItem)
 	handleAPI(r, "GET", "/evolution/tasks", []string{"qa.read"}, resourceupdate.ListTasks)
 	handleAPI(r, "GET", "/evolution/tasks/{task_id}", []string{"qa.read"}, resourceupdate.GetTask)
 	handleAPI(r, "GET", "/skill-review-results", []string{"qa.read"}, resourceupdate.ListSkillReviewResults)

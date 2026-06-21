@@ -90,7 +90,10 @@ def _resolve_plugin_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
             return None
         declared: List[str] = step_config.get('tools', [])
         # Mirror _merge_tools from plugin_manager: prepend framework tools.
-        _FRAMEWORK_TOOLS = ['save_artifact', 'get_artifact', 'list_artifacts', 'list_knowledge_bases']
+        _FRAMEWORK_TOOLS = [
+            'save_artifact', 'get_artifact', 'list_artifacts',
+            'list_knowledge_bases', 'read_user_attachment',
+        ]
         seen: set = set()
         merged: List[str] = []
         for t in _FRAMEWORK_TOOLS + list(declared):
@@ -159,6 +162,7 @@ def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
         subagent_tools.get_artifact,
         subagent_tools.list_artifacts,
         subagent_tools.list_knowledge_bases,
+        subagent_tools.read_user_attachment,
     ]
     if extra_tools:
         base.extend(extra_tools)

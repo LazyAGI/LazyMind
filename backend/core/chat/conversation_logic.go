@@ -414,6 +414,85 @@ func filePathsForUpstreamChat(raw map[string]any) any {
 	return out
 }
 
+// historyFilePaths extracts local file URIs from historical chat_histories.ext.input fields.
+// This ensures files uploaded in past turns are still visible to Python on subsequent turns.
+func historyFilePaths(histories []orm.ChatHistory) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, h := range histories {
+		if len(h.Ext) == 0 {
+			continue
+		}
+		var ext struct {
+			Input []map[string]any `json:"input"`
+		}
+		if err := json.Unmarshal(h.Ext, &ext); err != nil {
+			continue
+		}
+		for _, item := range ext.Input {
+			typ, _ := item["input_type"].(string)
+			typ = strings.ToLower(strings.TrimSpace(typ))
+			if typ != "image" && typ != "file" {
+				continue
+			}
+			uri, _ := item["uri"].(string)
+			uri = strings.TrimSpace(uri)
+			if uri == "" {
+				continue
+			}
+			lower := strings.ToLower(uri)
+			if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+				continue
+			}
+			if _, dup := seen[uri]; dup {
+				continue
+			}
+			seen[uri] = struct{}{}
+			out = append(out, uri)
+		}
+	}
+	return out
+}
+
+// mergeFilePaths merges current-turn files with historical file paths, deduplicating.
+// Returns nil when the combined result is empty.
+func mergeFilePaths(current any, historical []string) any {
+	seen := make(map[string]struct{})
+	var out []any
+
+	addStr := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return
+		}
+		if _, dup := seen[s]; dup {
+			return
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+
+	switch xs := current.(type) {
+	case []any:
+		for _, it := range xs {
+			if s, ok := it.(string); ok {
+				addStr(s)
+			}
+		}
+	case []string:
+		for _, s := range xs {
+			addStr(s)
+		}
+	}
+	for _, s := range historical {
+		addStr(s)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, query string, histories []orm.ChatHistory, raw map[string]any, resourceContext *evolution.ChatResourceContext, userID string) map[string]any {
 	if strings.TrimSpace(sessionID) == "" {
 		sessionID = upstreamSessionID(convID)
@@ -431,7 +510,7 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"conversation_id": convID,
 		"history":         buildHistoryMessages(histories),
 		"filters":         raw["filters"],
-		"files":           filePathsForUpstreamChat(raw),
+		"files":           mergeFilePaths(filePathsForUpstreamChat(raw), historyFilePaths(histories)),
 		"databases":       raw["databases"],
 		"debug":           raw["debug"],
 		"reasoning":       resolveReasoning(raw),

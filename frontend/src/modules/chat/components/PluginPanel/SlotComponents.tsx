@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { SlotRevision, SlotVersionEntry } from "@/modules/chat/store/pluginPanel";
-import { usePluginStore } from "@/modules/chat/store/pluginPanel";
+import { usePluginStore, draftStore } from "@/modules/chat/store/pluginPanel";
 import { resolveCoreAssetUrl } from "@/modules/knowledge/utils/imageUrl";
 
 /**
@@ -258,8 +258,10 @@ export function SlotImage({
   const raw = slot.artifact_value;
   const url: string = raw?.url || (raw?.path ? resolveCoreAssetUrl(raw.path) : '');
   const alt: string = slot.caption ?? raw?.alt ?? '';
-  const { deleteSlotItem } = usePluginStore();
+  const { deleteSlotItem, patchSlotCaption } = usePluginStore();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [captionEditing, setCaptionEditing] = useState(false);
+  const [captionDraft, setCaptionDraft] = useState('');
 
   const handleDeleteClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -283,6 +285,23 @@ export function SlotImage({
     e.stopPropagation();
     onReference?.(slot);
   }, [slot, onReference]);
+
+  const handleCaptionEdit = useCallback(() => {
+    setCaptionDraft(slot.caption ?? '');
+    setCaptionEditing(true);
+  }, [slot.caption]);
+
+  const handleCaptionSave = useCallback(async () => {
+    if (!sessionId || !slotId || slot.sort_order === undefined) return;
+    setCaptionEditing(false);
+    await patchSlotCaption(sessionId, slotId, slot.sort_order, captionDraft);
+    onRefresh?.();
+  }, [sessionId, slotId, slot.sort_order, captionDraft, patchSlotCaption, onRefresh]);
+
+  const handleCaptionKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') handleCaptionSave();
+    if (e.key === 'Escape') setCaptionEditing(false);
+  }, [handleCaptionSave]);
 
   if (!url) return <SlotPending type='image' cardMode={cardMode} />;
 
@@ -350,6 +369,33 @@ export function SlotImage({
         <img src={url} alt={alt} className='plugin-slot__image-card-img' loading='lazy' />
         {alt && <div className='plugin-slot__image-card-caption'>{alt}</div>}
         {actions}
+        {sessionId && slotId && slot.sort_order !== undefined && (
+          <div className='plugin-slot__caption'>
+            {captionEditing ? (
+              <input
+                className='plugin-slot__caption-input'
+                value={captionDraft}
+                onChange={(e) => setCaptionDraft(e.target.value)}
+                onBlur={handleCaptionSave}
+                onKeyDown={handleCaptionKeyDown}
+                autoFocus
+                aria-label='编辑描述'
+                placeholder='添加描述…'
+              />
+            ) : (
+              <span
+                className='plugin-slot__caption-text'
+                onClick={handleCaptionEdit}
+                title='点击编辑描述'
+                role='button'
+                tabIndex={0}
+                onKeyDown={(e) => e.key === 'Enter' && handleCaptionEdit()}
+              >
+                {slot.caption || <span className='plugin-slot__caption-placeholder'>添加描述…</span>}
+              </span>
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -357,12 +403,39 @@ export function SlotImage({
     <div className='plugin-slot plugin-slot--image'>
       <img src={url} alt={alt} className='plugin-slot__image' loading='lazy' />
       {actions}
+      {sessionId && slotId && slot.sort_order !== undefined && (
+        <div className='plugin-slot__caption'>
+          {captionEditing ? (
+            <input
+              className='plugin-slot__caption-input'
+              value={captionDraft}
+              onChange={(e) => setCaptionDraft(e.target.value)}
+              onBlur={handleCaptionSave}
+              onKeyDown={handleCaptionKeyDown}
+              autoFocus
+              aria-label='编辑描述'
+              placeholder='添加描述…'
+            />
+          ) : (
+            <span
+              className='plugin-slot__caption-text'
+              onClick={handleCaptionEdit}
+              title='点击编辑描述'
+              role='button'
+              tabIndex={0}
+              onKeyDown={(e) => e.key === 'Enter' && handleCaptionEdit()}
+            >
+              {slot.caption || <span className='plugin-slot__caption-placeholder'>添加描述…</span>}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 // --------------------------------------------------------------------------
-// SlotText with inline editing and version badge
+// SlotText with inline editing, draft store, and version badge
 // --------------------------------------------------------------------------
 
 interface SlotTextProps {
@@ -375,11 +448,14 @@ interface SlotTextProps {
 
 export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: SlotTextProps) {
   const raw = slot.artifact_value;
-  const { patchSlotItemValue } = usePluginStore();
+  const { patchSlotCaption } = usePluginStore();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [offloadedText, setOffloadedText] = useState<string | null>(null);
   const [offloadLoading, setOffloadLoading] = useState(false);
+  // Caption inline editing state.
+  const [captionEditing, setCaptionEditing] = useState(false);
+  const [captionDraft, setCaptionDraft] = useState('');
 
   // Detect large-content offload: {"type":"text"|"json","path":"...","size":N}
   const isOffloaded = raw && typeof raw === 'object' && raw.path && (raw.type === 'text' || raw.type === 'json');
@@ -411,19 +487,83 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
 
   const canEdit = Boolean(sessionId && slotId && slot.sort_order !== undefined);
 
+  // On mount: silently restore localStorage draft if present.
+  useEffect(() => {
+    if (!canEdit || !sessionId || !slotId || slot.sort_order === undefined) return;
+    const saved = draftStore.getLocalDraft(sessionId, slotId, slot.sort_order);
+    if (saved?.text !== undefined) {
+      setDraft(String(saved.text));
+    }
+  // Run only on mount (stable deps).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleEdit = () => {
-    setDraft(text);
+    // Prefer any in-memory draft over the persisted artifact value.
+    const saved = (sessionId && slotId && slot.sort_order !== undefined)
+      ? draftStore.getLocalDraft(sessionId, slotId, slot.sort_order)
+      : null;
+    setDraft(saved?.text !== undefined ? String(saved.text) : text);
     setEditing(true);
   };
 
-  const handleSave = async () => {
-    if (!sessionId || !slotId || slot.sort_order === undefined) return;
-    await patchSlotItemValue(sessionId, slotId, slot.sort_order, { text: draft });
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setDraft(val);
+    if (sessionId && slotId && slot.sort_order !== undefined) {
+      draftStore.setDraft(sessionId, slotId, slot.sort_order, { text: val });
+    }
+  };
+
+  // Save / Ctrl+S / close editing state: persist to localStorage only, no backend version.
+  const handleSave = () => {
+    if (sessionId && slotId && slot.sort_order !== undefined) {
+      draftStore.setDraft(sessionId, slotId, slot.sort_order, { text: draft });
+    }
     setEditing(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      e.preventDefault();
+      handleSave();
+    }
+  };
+
+  const handleCancel = () => {
+    if (sessionId && slotId && slot.sort_order !== undefined) {
+      draftStore.cancelDraft(sessionId, slotId, slot.sort_order);
+    }
+    setEditing(false);
+  };
+
+  // Caption helpers.
+  const handleCaptionEdit = () => {
+    setCaptionDraft(slot.caption ?? '');
+    setCaptionEditing(true);
+  };
+
+  const handleCaptionSave = async () => {
+    if (!sessionId || !slotId || slot.sort_order === undefined) return;
+    setCaptionEditing(false);
+    await patchSlotCaption(sessionId, slotId, slot.sort_order, captionDraft);
     onRefresh?.();
   };
 
-  const handleCancel = () => setEditing(false);
+  const handleCaptionKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') handleCaptionSave();
+    if (e.key === 'Escape') setCaptionEditing(false);
+  };
+
+  // Determine display text: prefer draft if user is not editing (shows unsaved draft).
+  const displayText = (() => {
+    if (editing) return draft;
+    if (sessionId && slotId && slot.sort_order !== undefined) {
+      const saved = draftStore.getLocalDraft(sessionId, slotId, slot.sort_order);
+      if (saved?.text !== undefined) return String(saved.text);
+    }
+    return text;
+  })();
 
   return (
     <div className='plugin-slot plugin-slot--text'>
@@ -432,7 +572,8 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
           <textarea
             className='plugin-slot__text-editor'
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
             rows={6}
             aria-label='编辑文本'
           />
@@ -443,7 +584,7 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
         </div>
       ) : (
         <>
-          <p className='plugin-slot__text'>{text}</p>
+          <p className='plugin-slot__text'>{displayText}</p>
           <div className='plugin-slot__text-meta'>
             {canEdit && (
               <button className='plugin-slot__text-edit-btn' onClick={handleEdit} title='编辑' aria-label='编辑文本'>
@@ -463,6 +604,34 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
               />
             )}
           </div>
+          {/* Caption inline edit */}
+          {canEdit && (
+            <div className='plugin-slot__caption'>
+              {captionEditing ? (
+                <input
+                  className='plugin-slot__caption-input'
+                  value={captionDraft}
+                  onChange={(e) => setCaptionDraft(e.target.value)}
+                  onBlur={handleCaptionSave}
+                  onKeyDown={handleCaptionKeyDown}
+                  autoFocus
+                  aria-label='编辑描述'
+                  placeholder='添加描述…'
+                />
+              ) : (
+                <span
+                  className='plugin-slot__caption-text'
+                  onClick={handleCaptionEdit}
+                  title='点击编辑描述'
+                  role='button'
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCaptionEdit()}
+                >
+                  {slot.caption || <span className='plugin-slot__caption-placeholder'>添加描述…</span>}
+                </span>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -552,5 +721,123 @@ export function SlotRenderer({
       revisionCount={revisionCount}
       onRefresh={onRefresh}
     />
+  );
+}
+
+// --------------------------------------------------------------------------
+// AddSlotItemButton — + button and create modal for list slots
+// --------------------------------------------------------------------------
+
+interface AddSlotItemButtonProps {
+  sessionId: string;
+  slotId: string;
+  slotType: 'image' | 'file' | 'text';
+  onCreated?: () => void;
+}
+
+export function AddSlotItemButton({ sessionId, slotId, slotType, onCreated }: AddSlotItemButtonProps) {
+  const { createSlotItem } = usePluginStore();
+  const [open, setOpen] = useState(false);
+  const [textValue, setTextValue] = useState('');
+  const [caption, setCaption] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleOpen = () => {
+    setTextValue('');
+    setCaption('');
+    setOpen(true);
+  };
+
+  const handleSubmit = async () => {
+    if (slotType === 'text' && !textValue.trim()) return;
+    setSubmitting(true);
+    try {
+      const value = slotType === 'text' ? { text: textValue } : { text: textValue };
+      await createSlotItem(sessionId, slotId, value, caption || undefined);
+      setOpen(false);
+      onCreated?.();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') handleSubmit();
+    if (e.key === 'Escape') setOpen(false);
+  };
+
+  return (
+    <>
+      <button
+        className='plugin-slot__add-btn'
+        onClick={handleOpen}
+        title='添加条目'
+        aria-label='添加条目'
+      >
+        +
+      </button>
+      {open && (
+        <div
+          className='plugin-slot__modal-overlay'
+          role='dialog'
+          aria-modal='true'
+          aria-label='添加条目'
+          onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
+        >
+          <div className='plugin-slot__modal'>
+            <div className='plugin-slot__modal-header'>
+              <span>添加条目</span>
+              <button
+                className='plugin-slot__modal-close'
+                onClick={() => setOpen(false)}
+                aria-label='关闭'
+              >×</button>
+            </div>
+            <div className='plugin-slot__modal-body' onKeyDown={handleKeyDown}>
+              {slotType === 'text' && (
+                <textarea
+                  className='plugin-slot__modal-textarea'
+                  value={textValue}
+                  onChange={(e) => setTextValue(e.target.value)}
+                  placeholder='输入文本内容…'
+                  rows={5}
+                  autoFocus
+                  aria-label='条目内容'
+                />
+              )}
+              {(slotType === 'image' || slotType === 'file') && (
+                <p className='plugin-slot__modal-hint'>
+                  请先上传文件，将 stored_path 填入下方（或使用文件上传流程）。
+                </p>
+              )}
+              <input
+                className='plugin-slot__modal-caption'
+                value={caption}
+                onChange={(e) => setCaption(e.target.value)}
+                placeholder='描述（可选）…'
+                aria-label='描述'
+              />
+            </div>
+            <div className='plugin-slot__modal-footer'>
+              <button
+                className='plugin-slot__modal-submit'
+                onClick={handleSubmit}
+                disabled={submitting || (slotType === 'text' && !textValue.trim())}
+                aria-label='确认添加'
+              >
+                {submitting ? '添加中…' : '确认'}
+              </button>
+              <button
+                className='plugin-slot__modal-cancel'
+                onClick={() => setOpen(false)}
+                aria-label='取消'
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

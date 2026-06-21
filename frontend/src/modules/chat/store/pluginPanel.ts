@@ -1,6 +1,93 @@
 import { create } from "zustand";
 import { PluginInfoApi, PluginSessionApi } from "@/modules/chat/utils/request";
 
+// ---------------------------------------------------------------------------
+// DraftStore — two-layer draft management for slot text editing
+// key format: `${sessionId}:${slotId}:${sortOrder}`
+// ---------------------------------------------------------------------------
+
+interface DraftEntry {
+  value: Record<string, unknown>;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+const DRAFT_FLUSH_DELAY_MS = 60_000;
+const DRAFT_LS_PREFIX = 'slotDraft:';
+
+const _drafts = new Map<string, DraftEntry>();
+
+function _draftKey(sessionId: string, slotId: string, sortOrder: number): string {
+  return `${sessionId}:${slotId}:${sortOrder}`;
+}
+
+export const draftStore = {
+  /** Write value to localStorage and reset the 60s auto-flush timer. */
+  setDraft(sessionId: string, slotId: string, sortOrder: number, value: Record<string, unknown>) {
+    const key = _draftKey(sessionId, slotId, sortOrder);
+    const existing = _drafts.get(key);
+    if (existing?.timer) clearTimeout(existing.timer);
+    try {
+      localStorage.setItem(DRAFT_LS_PREFIX + key, JSON.stringify(value));
+    } catch { /* storage full — ignore */ }
+    const timer = setTimeout(() => {
+      draftStore.flushDraft(sessionId, slotId, sortOrder);
+    }, DRAFT_FLUSH_DELAY_MS);
+    _drafts.set(key, { value, timer });
+  },
+
+  /** Clear timer and call patchSlotItemValue to produce a human revision. Does NOT clear localStorage. */
+  async flushDraft(sessionId: string, slotId: string, sortOrder: number): Promise<void> {
+    const key = _draftKey(sessionId, slotId, sortOrder);
+    const entry = _drafts.get(key);
+    if (!entry) return;
+    if (entry.timer) clearTimeout(entry.timer);
+    _drafts.set(key, { value: entry.value, timer: null });
+    try {
+      await PluginSessionApi().patchSlotItem(sessionId, slotId, sortOrder, entry.value);
+    } catch { /* best-effort — ignore */ }
+    _drafts.delete(key);
+  },
+
+  /** Flush all pending drafts for a session in parallel. Used before sending chat. */
+  async flushAllDrafts(sessionId: string): Promise<void> {
+    const prefix = `${sessionId}:`;
+    const tasks: Promise<void>[] = [];
+    for (const key of Array.from(_drafts.keys())) {
+      if (!key.startsWith(prefix)) continue;
+      const parts = key.split(':');
+      if (parts.length < 3) continue;
+      const slotId = parts[1];
+      const sortOrder = Number(parts[2]);
+      if (!slotId || isNaN(sortOrder)) continue;
+      tasks.push(draftStore.flushDraft(sessionId, slotId, sortOrder));
+    }
+    await Promise.all(tasks);
+  },
+
+  /** Discard draft without producing a revision. Clears localStorage and timer. */
+  cancelDraft(sessionId: string, slotId: string, sortOrder: number) {
+    const key = _draftKey(sessionId, slotId, sortOrder);
+    const existing = _drafts.get(key);
+    if (existing?.timer) clearTimeout(existing.timer);
+    _drafts.delete(key);
+    try {
+      localStorage.removeItem(DRAFT_LS_PREFIX + key);
+    } catch { /* ignore */ }
+  },
+
+  /** Read a persisted draft from localStorage (for mount-time restore). */
+  getLocalDraft(sessionId: string, slotId: string, sortOrder: number): Record<string, unknown> | null {
+    const key = _draftKey(sessionId, slotId, sortOrder);
+    try {
+      const raw = localStorage.getItem(DRAFT_LS_PREFIX + key);
+      if (!raw) return null;
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  },
+};
+
 export interface SlotRevision {
   slot_id: string;
   revision: number;
@@ -136,6 +223,9 @@ interface PluginStore {
   getSlotVersions: (sessionId: string, slotId: string, sortOrder: number) => Promise<SlotVersionEntry[]>;
   rollbackSlotItem: (sessionId: string, slotId: string, sortOrder: number, revision: number) => Promise<void>;
   loadSlotOrder: (sessionId: string, slotId: string) => Promise<SlotOrderInfo>;
+  // Phase 4: new item creation and caption editing.
+  createSlotItem: (sessionId: string, slotId: string, value: any, caption?: string, insertBefore?: number) => Promise<void>;
+  patchSlotCaption: (sessionId: string, slotId: string, sortOrder: number, caption: string) => Promise<void>;
   // Track focused tab and sort_order for the AI.
   setFocusedTab: (conversationId: string, tabId: string) => void;
   setFocusedSortOrder: (conversationId: string, sortOrder: number | undefined) => void;
@@ -296,6 +386,14 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
 
   rollbackSlotItem: async (sessionId, slotId, sortOrder, revision) => {
     await PluginSessionApi().rollbackSlotItem(sessionId, slotId, sortOrder, revision);
+  },
+
+  createSlotItem: async (sessionId, slotId, value, caption, insertBefore) => {
+    await PluginSessionApi().createSlotItem(sessionId, slotId, value, caption, insertBefore);
+  },
+
+  patchSlotCaption: async (sessionId, slotId, sortOrder, caption) => {
+    await PluginSessionApi().patchSlotCaption(sessionId, slotId, sortOrder, caption);
   },
 
   loadSlotOrder: async (sessionId, slotId) => {

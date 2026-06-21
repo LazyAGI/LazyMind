@@ -200,6 +200,20 @@ export function PluginSessionApi() {
         options,
       );
     },
+    createSlotItem(sessionId: string, slotId: string, value: any, caption?: string, insertBefore?: number, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items`,
+        { value, ...(caption !== undefined ? { caption } : {}), ...(insertBefore !== undefined ? { insert_before: insertBefore } : {}) },
+        options,
+      );
+    },
+    patchSlotCaption(sessionId: string, slotId: string, sortOrder: number, caption: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.patch(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/${sortOrder}/caption`,
+        { caption },
+        options,
+      );
+    },
   };
 }
 

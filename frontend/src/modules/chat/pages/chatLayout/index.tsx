@@ -20,6 +20,7 @@ import {
   CHAT_STREAM_URL,
   ChatServiceApi,
 } from "@/modules/chat/utils/request";
+import { draftStore } from "@/modules/chat/store/pluginPanel";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
 import {
   useModelSelectionStore,
@@ -271,11 +272,14 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       });
   }, []);
 
-  function onOpenSSE(
+  async function onOpenSSE(
     input: Query[],
     action: ChatConversationsRequestActionEnum,
     callbacks: Record<string, (e: CustomEvent) => void>,
   ) {
+    // Flush any pending slot drafts before sending so the AI sees the latest content.
+    await draftStore.flushAllDrafts(sessionId);
+
     const modelSelection = getModelSelection(sessionId);
 
     const hasUploadedFiles = input?.some(
@@ -314,6 +318,10 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     // Collect pending artifact references from the chat input store.
     const { getArtifactRefs, clearArtifactRefs } = useChatInputStore.getState();
     const artifactRefs = getArtifactRefs(sessionId);
+    // Clear after reading so they are not repeated in the next message.
+    if (artifactRefs.length > 0) {
+      clearArtifactRefs(sessionId);
+    }
     // Clear after reading so they are not repeated in the next message.
     if (artifactRefs.length > 0) {
       clearArtifactRefs(sessionId);
