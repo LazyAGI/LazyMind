@@ -185,8 +185,9 @@ func (c Config) Validate() error {
 	if c.Listen.Port <= 0 || c.Listen.Port > 65535 {
 		return fmt.Errorf("listen.port must be between 1 and 65535")
 	}
-	if strings.TrimSpace(c.Listen.Host) == "0.0.0.0" && !c.AllowNonLocalBind {
-		return fmt.Errorf("listen.host=0.0.0.0 requires allowNonLocalBind true")
+	ip := net.ParseIP(strings.TrimSpace(c.Listen.Host))
+	if ip != nil && !ip.IsLoopback() && !c.AllowNonLocalBind {
+		return fmt.Errorf("non-loopback listen.host %q requires allowNonLocalBind true", c.Listen.Host)
 	}
 
 	authMode := strings.ToLower(strings.TrimSpace(c.Auth.Mode))
