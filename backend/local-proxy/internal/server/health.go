@@ -85,7 +85,7 @@ func statusHTTPTransport() http.RoundTripper {
 	if statusRoundTripper != nil {
 		return statusRoundTripper
 	}
-	return &http.Transport{
+	statusRoundTripper = &http.Transport{
 		MaxConnsPerHost:       16,
 		MaxIdleConnsPerHost:   16,
 		IdleConnTimeout:       5 * time.Second,
@@ -93,6 +93,7 @@ func statusHTTPTransport() http.RoundTripper {
 		ResponseHeaderTimeout: 2 * time.Second,
 		ExpectContinueTimeout: 2 * time.Second,
 	}
+	return statusRoundTripper
 }
 
 func routeStatus(route config.RouteConfig, client *http.Client) localRouteStatus {
