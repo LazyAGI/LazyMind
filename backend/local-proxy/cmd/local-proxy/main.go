@@ -65,9 +65,16 @@ func main() {
 }
 
 func healthcheck() error {
+	port := os.Getenv("LAZYMIND_LOCAL_PROXY_PORT")
+	if port == "" {
+		port = fmt.Sprint(defaultPort)
+	}
+	addr := os.Getenv("LAZYMIND_LOCAL_PROXY_ADDRESS")
+	if addr == "" {
+		addr = defaultAddress
+	}
 	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get("http://" + defaultAddress + ":" + fmt.Sprint(defaultPort) + "/_local/healthz")
-	if err != nil {
+	resp, err := client.Get("http://" + addr + ":" + port + "/_local/healthz")
 		return err
 	}
 	defer resp.Body.Close()
