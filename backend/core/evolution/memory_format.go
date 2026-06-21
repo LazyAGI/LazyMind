@@ -21,9 +21,9 @@ func HashSystemMemory(row orm.SystemMemory) string {
 func FormatSystemUserPreferenceForChat(row orm.SystemUserPreference) string {
 	var b strings.Builder
 	b.WriteString("---\n")
-	writeYAMLFrontMatterBlock(&b, "智能体角色", row.AgentPersona)
-	writeYAMLFrontMatterBlock(&b, "用户称谓", row.PreferredName)
-	writeYAMLFrontMatterBlock(&b, "回复风格", row.ResponseStyle)
+	writeYAMLFrontMatterBlock(&b, "agent_persona", row.AgentPersona)
+	writeYAMLFrontMatterBlock(&b, "preferred_name", row.PreferredName)
+	writeYAMLFrontMatterBlock(&b, "response_style", row.ResponseStyle)
 	b.WriteString("---\n\n")
 	b.WriteString(row.Content)
 	return b.String()
@@ -34,9 +34,9 @@ func HashSystemUserPreference(row orm.SystemUserPreference) string {
 }
 
 type userPreferenceFrontmatter struct {
-	AgentPersona  string `yaml:"智能体角色"`
-	PreferredName string `yaml:"用户称谓"`
-	ResponseStyle string `yaml:"回复风格"`
+	AgentPersona  string `yaml:"agent_persona"`
+	PreferredName string `yaml:"preferred_name"`
+	ResponseStyle string `yaml:"response_style"`
 }
 
 func ParseSystemUserPreferenceContent(content string) (orm.SystemUserPreference, error) {
@@ -58,7 +58,7 @@ func ParseSystemUserPreferenceContent(content string) (orm.SystemUserPreference,
 	if err := yaml.Unmarshal([]byte(yamlPart), &raw); err != nil {
 		return orm.SystemUserPreference{}, fmt.Errorf("invalid user_preference frontmatter: %w", err)
 	}
-	for _, key := range []string{"智能体角色", "用户称谓", "回复风格"} {
+	for _, key := range []string{"agent_persona", "preferred_name", "response_style"} {
 		if _, ok := raw[key]; !ok {
 			return orm.SystemUserPreference{}, fmt.Errorf("user_preference frontmatter %s required", key)
 		}
