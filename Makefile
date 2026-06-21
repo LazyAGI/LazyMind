@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 lint-python lint-go test test-hermetic test-hermetic-setup test-hermetic-check build up up-build down clear reset-kb reset-all fresh-start file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop local-runtime-build local-runtime-up local-runtime-down local-runtime-status
+.PHONY: help lint install-flake8 lint-python lint-go test test-hermetic test-hermetic-setup test-hermetic-check build up up-build up-build-local down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop local-proxy-dirs local-proxy-build local-proxy-stop local-proxy-run local-proxy-start desktop-stop-if-present local-runtime-build local-runtime-up local-runtime-down local-runtime-down-if-present local-runtime-status
 .DEFAULT_GOAL := help
 
 # Use legacy Docker builder by default to avoid pulling moby/buildkit:buildx-stable-1 from Docker Hub
@@ -13,14 +13,14 @@ LAZYMIND_LOCAL_BIN ?= local/local-runtime-manager/lazymind-local
 LAZYMIND_LOCAL_GOCACHE ?= $(CURDIR)/.codex-gocache/go-build
 comma := ,
 
-# ---------------------------------------------------------------------------
-# Compose project (optional). Pass -p only when COMPOSE_PROJECT is set.
-# Usage: make up                           →  docker compose up -d
-#        make up COMPOSE_PROJECT=myproj    →  docker compose -p myproj up -d
-#        make down                         →  docker compose down
-#        make down COMPOSE_PROJECT=myproj  →  docker compose -p myproj down
-# ---------------------------------------------------------------------------
-_COMPOSE = DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(if $(COMPOSE_PROJECT),-p $(COMPOSE_PROJECT),)
+export LAZYMIND_GATEWAY_MODE ?= kong
+export LAZYMIND_LOCAL_PROXY_ADDRESS ?= 0.0.0.0
+export LAZYMIND_LOCAL_PROXY_PORT ?= 5024
+export LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT ?= 18000
+export LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT ?= 18001
+export LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT ?= 18046
+export LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT ?= 18080
+export LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT ?= 18047
 # ---------------------------------------------------------------------------
 # Mirror profile: cn (domestic/default) or intl (international).
 # Selects which .env.mirrors.<profile> file to load for all build-time source
@@ -48,6 +48,22 @@ ifneq (,$(wildcard .env))
 include .env
 export $(shell sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' .env)
 endif
+
+# ---------------------------------------------------------------------------
+# Compose project (optional). Pass -p only when COMPOSE_PROJECT is set.
+# Usage: make up                           →  docker compose up -d
+#        make up COMPOSE_PROJECT=myproj    →  docker compose -p myproj up -d
+#        make down                         →  docker compose down
+#        make down COMPOSE_PROJECT=myproj  →  docker compose -p myproj down
+#        make up LAZYMIND_GATEWAY_MODE=local-proxy
+#                                          → use docker-compose.local-proxy.yml override and scale kong=0
+# ---------------------------------------------------------------------------
+_COMPOSE_LOCAL_PROXY_FILES := $(if $(filter local-proxy,$(LAZYMIND_GATEWAY_MODE)),-f docker-compose.yml -f docker-compose.local-proxy.yml,)
+_COMPOSE_GATEWAY_SCALE := $(if $(filter local-proxy,$(LAZYMIND_GATEWAY_MODE)),--scale kong=0,)
+_COMPOSE_PROJECT_FLAG := $(if $(COMPOSE_PROJECT),-p $(COMPOSE_PROJECT),)
+_COMPOSE_DEFAULT := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(_COMPOSE_PROJECT_FLAG)
+_COMPOSE_LOCAL_PROXY := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose -f docker-compose.yml -f docker-compose.local-proxy.yml $(_COMPOSE_PROJECT_FLAG)
+_COMPOSE := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(_COMPOSE_LOCAL_PROXY_FILES) $(_COMPOSE_PROJECT_FLAG)
 
 # ---------------------------------------------------------------------------
 # Scan / file-watcher process
@@ -157,11 +173,20 @@ export LAZYMIND_MODEL_CONFIG_PATH ?= dynamic
 # Frontend port (default 8090; override if the port is occupied, e.g. by Cursor)
 export LAZYMIND_FRONTEND_PORT ?= 8090
 
+# Local proxy runtime
+LAZYMIND_LOCAL_PROXY_DIR := backend/local-proxy
+LAZYMIND_LOCAL_PROXY_CONFIG := $(LAZYMIND_LOCAL_PROXY_DIR)/configs/cloud-replace-kong.yaml
+export LAZYMIND_LOCAL_PROXY_BASE_ROOT ?= ./data/local-proxy
+LAZYMIND_LOCAL_PROXY_BASE_ROOT_ABS := $(abspath $(LAZYMIND_LOCAL_PROXY_BASE_ROOT))
+LAZYMIND_LOCAL_PROXY_BIN := $(LAZYMIND_LOCAL_PROXY_BASE_ROOT_ABS)/bin/local-proxy
+LAZYMIND_LOCAL_PROXY_PID := $(LAZYMIND_LOCAL_PROXY_BASE_ROOT_ABS)/run/local-proxy.pid
+LAZYMIND_LOCAL_PROXY_CONSOLE_LOG := $(LAZYMIND_LOCAL_PROXY_BASE_ROOT_ABS)/logs/local-proxy.console.log
+
 # Python dirs to lint (exclude submodule algorithm/lazyllm via .flake8)
 PYTHON_DIRS := algorithm backend evo
 
 # Go dirs to lint
-GO_DIRS := backend/core
+GO_DIRS := backend/core backend/local-proxy
 
 help:
 	@echo "LazyMind Make targets:"
@@ -170,8 +195,12 @@ help:
 	@echo "                    Use LAZYMIND_FILE_WATCHER_MODE=host for host-process debugging"
 	@echo "                    Use SERVICES=svc1,svc2 to start specific services only"
 	@echo "  make up-build   - Build images and start services"
+	@echo "                    Use LAZYMIND_GATEWAY_MODE=local-proxy for explicit Cloud-service-stack mode"
+	@echo "                    where Kong is scaled to 0 and host Local Proxy handles /api ingress"
 	@echo "                    Use SERVICES=svc1,svc2 to target specific services"
+	@echo "  make up-build-local - Build/start full stack with host local-proxy and Kong scaled to 0"
 	@echo "  make down       - Stop services"
+	@echo "                    Tries Cloud/Kong, local-proxy, and optional Desktop stop paths"
 	@echo "                    Use SERVICES=svc1,svc2 to stop specific services only"
 	@echo "  make build      - Build compose services (mineru profile only when needed)"
 	@echo "                    Use SERVICES=svc1,svc2 to build specific services"
@@ -259,16 +288,45 @@ _need_opensearch_dashboard := $(and $(_need_opensearch),$(_enable_opensearch_das
 _COMPOSE_PROFILES := $(strip $(if $(_need_mineru),--profile mineru) $(if $(_need_milvus),--profile milvus) $(if $(_need_opensearch),--profile opensearch) $(if $(_need_milvus_dashboard),--profile milvus-dashboard) $(if $(_need_opensearch_dashboard),--profile opensearch-dashboard))
 _CLEANUP_COMPOSE_PROFILES := --profile mineru --profile paddleocr --profile milvus --profile opensearch --profile milvus-dashboard --profile opensearch-dashboard --profile file-watcher-artifact
 _COMPOSE_FILE_WATCHER_SCALE := $(if $(filter container,$(LAZYMIND_FILE_WATCHER_MODE)),,--scale file-watcher=0)
-_COMPOSE_READABLE_PATHS := db-init backend/scan-control-plane/migrations backend/scan-control-plane/scripts
-_PREPARE_COMPOSE_PERMISSIONS = @chmod -R a+rX $(_COMPOSE_READABLE_PATHS) 2>/dev/null || true
+_COMPOSE_DOWN_ACTION := $(if $(SERVICES),stop,down)
+_COMPOSE_DOWN_SERVICES := $(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
+_COMPOSE_BIND_CRITICAL_READ_PATHS := \
+	backend/scan-control-plane/migrations \
+	backend/scan-control-plane/scripts \
+	backend/file-watcher/configs \
+	db-init \
+	kong/plugins \
+	plugins \
+	scripts/db-bootstrap.sh \
+	kong.yml \
+	redis-users.acl
+_COMPOSE_BIND_BEST_EFFORT_READ_PATHS := \
+	algorithm \
+	api/backend \
+	evo
 
 # Only init submodules when not yet cloned; if already present (even with different commit), do nothing. Never recursive.
 _SUBMODULE_INIT = @git submodule status | grep -q '^-' && git submodule update --init || true
 
 build:
 	$(_SUBMODULE_INIT)
+	@$(MAKE) --no-print-directory compose-host-permissions
 	@$(_COMPOSE) $(strip $(if $(_need_mineru),--profile mineru)) build \
 		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
+
+compose-host-permissions:
+	@echo "🔐 Ensuring compose bind mounts are readable by containers..."
+	@chmod a+rx .
+	@for path in $(_COMPOSE_BIND_CRITICAL_READ_PATHS); do \
+		if [ -e "$$path" ]; then \
+			chmod -R a+rX "$$path"; \
+		fi; \
+	done
+	@for path in $(_COMPOSE_BIND_BEST_EFFORT_READ_PATHS); do \
+		if [ -e "$$path" ]; then \
+			chmod -R a+rX "$$path" 2>/dev/null || true; \
+		fi; \
+	done
 
 file-watcher-dirs:
 	@mkdir -p "$(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)" "$(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)/staging" "$(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)/snapshots" "$(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)/logs" "$(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)/run" "$(LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR)"
@@ -324,6 +382,99 @@ file-watcher-run: file-watcher-stop file-watcher-dirs
 file-watcher-start: file-watcher-build
 	@$(MAKE) --no-print-directory file-watcher-run
 
+local-proxy-dirs:
+	@mkdir -p "$(LAZYMIND_LOCAL_PROXY_BASE_ROOT_ABS)" "$(LAZYMIND_LOCAL_PROXY_BASE_ROOT_ABS)/bin" "$(LAZYMIND_LOCAL_PROXY_BASE_ROOT_ABS)/run" "$(LAZYMIND_LOCAL_PROXY_BASE_ROOT_ABS)/logs"
+
+local-proxy-build: local-proxy-dirs
+	@echo "🔨 Rebuilding local-proxy..."
+	@rm -f "$(LAZYMIND_LOCAL_PROXY_BIN)"
+	@cd "$(LAZYMIND_LOCAL_PROXY_DIR)" && $(GO) build -o "$(LAZYMIND_LOCAL_PROXY_BIN)" ./cmd/local-proxy
+	@echo "✅ local-proxy built: $(LAZYMIND_LOCAL_PROXY_BIN)"
+
+local-proxy-stop:
+	@if [ -f "$(LAZYMIND_LOCAL_PROXY_PID)" ]; then \
+		pid=$$(cat "$(LAZYMIND_LOCAL_PROXY_PID)"); \
+		if [ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null; then \
+			echo "🛑 Stopping local-proxy ($$pid)..."; \
+			kill "$$pid"; \
+			for i in 1 2 3 4 5; do \
+				kill -0 "$$pid" 2>/dev/null || break; \
+				sleep 1; \
+			done; \
+			if kill -0 "$$pid" 2>/dev/null; then \
+				echo "⚠️  local-proxy still running ($$pid), please stop it manually if needed."; \
+			fi; \
+		fi; \
+		rm -f "$(LAZYMIND_LOCAL_PROXY_PID)"; \
+	fi
+	@if command -v lsof >/dev/null 2>&1; then \
+		for pid in $$(lsof -t -nP -iTCP:$(LAZYMIND_LOCAL_PROXY_PORT) -sTCP:LISTEN 2>/dev/null | sort -u); do \
+			cmd=$$(ps -p "$$pid" -o command= 2>/dev/null || true); \
+			case "$$cmd" in \
+				*local-proxy*|*local_proxy*) \
+					echo "🛑 Stopping local-proxy on :$(LAZYMIND_LOCAL_PROXY_PORT) ($$pid)..."; \
+					kill "$$pid" 2>/dev/null || true; \
+					;; \
+			esac; \
+		done; \
+	fi
+
+local-proxy-run: local-proxy-dirs
+	@echo "🚀 Starting local-proxy..."
+	@LAZYMIND_FRONTEND_PORT="$(LAZYMIND_FRONTEND_PORT)" \
+	LAZYMIND_LOCAL_PROXY_ADDRESS="$(LAZYMIND_LOCAL_PROXY_ADDRESS)" \
+	LAZYMIND_LOCAL_PROXY_PORT="$(LAZYMIND_LOCAL_PROXY_PORT)" \
+	LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT="$(LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT)" \
+	LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT="$(LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT)" \
+	LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT="$(LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT)" \
+	LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT="$(LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT)" \
+	LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT="$(LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT)" \
+	LAZYMIND_LOCAL_PROXY_PID_FILE="$(LAZYMIND_LOCAL_PROXY_PID)" \
+	LAZYMIND_LOCAL_PROXY_LOG_FILE="$(LAZYMIND_LOCAL_PROXY_CONSOLE_LOG)" \
+	sh -c 'if command -v setsid >/dev/null 2>&1; then \
+		setsid "$$@" >> "$$LAZYMIND_LOCAL_PROXY_LOG_FILE" 2>&1 & \
+	else \
+		nohup "$$@" >> "$$LAZYMIND_LOCAL_PROXY_LOG_FILE" 2>&1 & \
+	fi; \
+	echo $$! > "$$LAZYMIND_LOCAL_PROXY_PID_FILE"' sh "$(LAZYMIND_LOCAL_PROXY_BIN)" --config "$(LAZYMIND_LOCAL_PROXY_CONFIG)"
+	@sleep 1
+	@pid=$$(cat "$(LAZYMIND_LOCAL_PROXY_PID)"); \
+	if kill -0 "$$pid" 2>/dev/null; then \
+		if command -v curl >/dev/null 2>&1; then \
+			if curl -fsS "http://127.0.0.1:$(LAZYMIND_LOCAL_PROXY_PORT)/_local/healthz" >/dev/null; then \
+				echo "✅ local-proxy started and healthy (pid=$$pid)"; \
+			else \
+				echo "❌ local-proxy health check failed for http://127.0.0.1:$(LAZYMIND_LOCAL_PROXY_PORT)/_local/healthz"; \
+				tail -n 80 "$(LAZYMIND_LOCAL_PROXY_CONSOLE_LOG)" 2>/dev/null || true; \
+				rm -f "$(LAZYMIND_LOCAL_PROXY_PID)"; \
+				exit 1; \
+			fi; \
+		else \
+			echo "⚠️  curl not found; local-proxy started (pid=$$pid), skipping health check"; \
+		fi; \
+	else \
+		echo "❌ local-proxy failed to start. Recent log:"; \
+		tail -n 80 "$(LAZYMIND_LOCAL_PROXY_CONSOLE_LOG)" 2>/dev/null || true; \
+		rm -f "$(LAZYMIND_LOCAL_PROXY_PID)"; \
+		exit 1; \
+	fi
+	@echo "🔗 local-proxy health: http://127.0.0.1:$(LAZYMIND_LOCAL_PROXY_PORT)/_local/healthz"
+	@echo "🌐 Frontend URL: http://localhost:$(LAZYMIND_FRONTEND_PORT)"
+	@echo "📝 local-proxy log: $(LAZYMIND_LOCAL_PROXY_CONSOLE_LOG)"
+
+local-proxy-start: local-proxy-run
+
+desktop-stop-if-present:
+	@if [ -x scripts/desktop-down.sh ]; then \
+		echo "🛑 Stopping Desktop runtime via scripts/desktop-down.sh..."; \
+		scripts/desktop-down.sh || true; \
+	elif [ -x desktop/scripts/down.sh ]; then \
+		echo "🛑 Stopping Desktop runtime via desktop/scripts/down.sh..."; \
+		desktop/scripts/down.sh || true; \
+	else \
+		echo "ℹ️  No Desktop stop hook found; skipping"; \
+	fi
+
 up:
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" = "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-stop; \
@@ -331,10 +482,13 @@ up:
 	else \
 		$(MAKE) --no-print-directory file-watcher-build; \
 	fi
-	$(_PREPARE_COMPOSE_PERMISSIONS)
+	$(if $(filter local-proxy,$(LAZYMIND_GATEWAY_MODE)),	$(MAKE) --no-print-directory local-proxy-build,)
+	$(if $(filter local-proxy,$(LAZYMIND_GATEWAY_MODE)),	$(MAKE) --no-print-directory local-proxy-stop,)
 	$(_SUBMODULE_INIT)
-	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) -d \
+	@$(MAKE) --no-print-directory compose-host-permissions
+	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) $(_COMPOSE_GATEWAY_SCALE) -d \
 		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
+	$(if $(filter local-proxy,$(LAZYMIND_GATEWAY_MODE)),	$(MAKE) --no-print-directory local-proxy-start,)
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-run; \
 	else \
@@ -342,11 +496,16 @@ up:
 	fi
 
 down:
-	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
-		$(MAKE) --no-print-directory file-watcher-stop; \
-	fi
-	@$(_COMPOSE) $(_CLEANUP_COMPOSE_PROFILES) down \
-		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
+	@$(MAKE) --no-print-directory file-watcher-stop
+	@$(MAKE) --no-print-directory local-proxy-stop
+	@$(MAKE) --no-print-directory local-runtime-down-if-present
+	@$(MAKE) --no-print-directory desktop-stop-if-present
+	@echo "🛑 Stopping compose stack with local-proxy override, if present..."
+	@$(_COMPOSE_LOCAL_PROXY) $(_CLEANUP_COMPOSE_PROFILES) $(_COMPOSE_DOWN_ACTION) \
+		$(_COMPOSE_DOWN_SERVICES) || true
+	@echo "🛑 Stopping default Cloud/Kong compose stack, if present..."
+	@$(_COMPOSE_DEFAULT) $(_CLEANUP_COMPOSE_PROFILES) $(_COMPOSE_DOWN_ACTION) \
+		$(_COMPOSE_DOWN_SERVICES) || true
 
 up-build:
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" = "container" ]; then \
@@ -355,15 +514,21 @@ up-build:
 	else \
 		$(MAKE) --no-print-directory file-watcher-build; \
 	fi
-	$(_PREPARE_COMPOSE_PERMISSIONS)
+	$(if $(filter local-proxy,$(LAZYMIND_GATEWAY_MODE)),	$(MAKE) --no-print-directory local-proxy-build,)
+	$(if $(filter local-proxy,$(LAZYMIND_GATEWAY_MODE)),	$(MAKE) --no-print-directory local-proxy-stop,)
 	$(_SUBMODULE_INIT)
-	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) --build -d \
+	@$(MAKE) --no-print-directory compose-host-permissions
+	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) $(_COMPOSE_GATEWAY_SCALE) --build -d \
 		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
+	$(if $(filter local-proxy,$(LAZYMIND_GATEWAY_MODE)),	$(MAKE) --no-print-directory local-proxy-start,)
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-run; \
 	else \
 		echo "✅ file-watcher container enabled"; \
 	fi
+
+up-build-local:
+	@$(MAKE) --no-print-directory up-build LAZYMIND_GATEWAY_MODE=local-proxy
 
 clear:
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
@@ -496,6 +661,13 @@ local-runtime-up: local-runtime-build
 
 local-runtime-down:
 	@$(LAZYMIND_LOCAL_BIN) down --profile $(LAZYMIND_LOCAL_PROFILE)
+
+local-runtime-down-if-present:
+	@if [ -x "$(LAZYMIND_LOCAL_BIN)" ]; then \
+		$(MAKE) --no-print-directory local-runtime-down || true; \
+	else \
+		echo "ℹ️  No Local Runtime manager found; skipping"; \
+	fi
 
 local-runtime-status:
 	@$(LAZYMIND_LOCAL_BIN) status --json --profile $(LAZYMIND_LOCAL_PROFILE)

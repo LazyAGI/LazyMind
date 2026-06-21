@@ -1,0 +1,59 @@
+listen:
+  host: "127.0.0.1"
+  port: 5024
+
+allowNonLocalBind: false
+
+auth:
+  mode: "local-rbac"
+  authServiceURL: "http://127.0.0.1:8000"
+
+cors:
+  allowedOrigins:
+    - "http://localhost:5173"
+    - "http://127.0.0.1:5173"
+
+timeouts:
+  connect: 10s
+  read: 30s
+  write: 30s
+
+log:
+  level: "info"
+
+routes:
+  - name: "authservice-route"
+    prefix: "/api/authservice"
+    upstream: "http://127.0.0.1:8000"
+    stripPath: false
+    enabled: true
+    optional: false
+    healthPath: "/health"
+  - name: "chat-route"
+    prefix: "/api/chat"
+    upstream: "http://127.0.0.1:8046"
+    stripPath: false
+    enabled: true
+    optional: false
+    healthPath: "/health"
+  - name: "scan-route"
+    prefix: "/api/scan"
+    upstream: "http://127.0.0.1:18080"
+    stripPath: false
+    enabled: true
+    optional: true
+    healthPath: "/health"
+  - name: "core-route"
+    prefix: "/api/core"
+    upstream: "http://127.0.0.1:8001"
+    stripPath: true
+    enabled: true
+    optional: false
+    healthPath: "/health"
+  - name: "evo-route"
+    prefix: "/api/evo"
+    upstream: "http://127.0.0.1:8047"
+    stripPath: true
+    enabled: true
+    optional: true
+    healthPath: "/health"

@@ -42,6 +42,11 @@ run_backend_core() {
   go test ./... -v
 }
 
+run_backend_local_proxy() {
+  cd "$ROOT/backend/local-proxy"
+  GOCACHE=/tmp/local-proxy-gocache go test ./... -v
+}
+
 run_algorithm() {
   cd "$ROOT"
   "$LAZYMIND_TEST_PYTHON" -m pytest tests/algorithm/ -v --tb=short
@@ -50,6 +55,7 @@ run_algorithm() {
 run_section "Frontend" run_frontend
 run_section "auth-service" run_auth_service
 run_section "backend/core" run_backend_core
+run_section "backend/local-proxy" run_backend_local_proxy
 run_section "algorithm" run_algorithm
 
 if [ "$FAILED" -eq 1 ]; then
