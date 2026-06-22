@@ -15,12 +15,13 @@ PERMISSIONS = {
     **dict.fromkeys(('read', 'grep', 'glob', 'list', 'bash', 'edit', 'external_directory'), 'allow'),
     **dict.fromkeys(('question', 'plan_enter', 'plan_exit', 'todowrite', 'task'), 'deny'),
 }
-PASSTHROUGH_PREFIXES = ('ANTHROPIC_', 'AZURE_', 'COHERE_', 'GOOGLE_', 'GROQ_', 'LAZYLLM_', 'LAZYMIND_EVO_CODE_',
-                        'MISTRAL_', 'OPENAI_', 'OPENCODE_', 'QWEN_', 'DEEPSEEK_')
-DEFAULT_BASE_URLS = {
-    'qwen': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    'deepseek': 'https://api.deepseek.com',
-    'openai': 'https://api.openai.com/v1',
+OPENCODE_CONFIG_KEYS = {
+    'OPENCODE_MODEL',
+    'OPENCODE_PROVIDER',
+    'OPENCODE_PROVIDER_MODEL',
+    'OPENCODE_PROVIDER_LABEL',
+    'OPENCODE_PROVIDER_BASE_URL',
+    'OPENCODE_PROVIDER_KEY_ENV',
 }
 
 
@@ -54,6 +55,9 @@ def run_opencode_streaming(*, container: str, workdir: str, prompt: str, artifac
         return _result(1, session_id, events, paths, prompt_arg, error, started,
                        setup if setup is not None else time.time(), None, safe_env)
 
+    if missing := _missing_config(safe_env):
+        return fail('configuration_error', f'missing opencode config fields: {", ".join(missing)}')
+
     try:
         artifact_dir.mkdir(parents=True, exist_ok=True)
     except Exception as exc:
@@ -82,7 +86,7 @@ def run_opencode_streaming(*, container: str, workdir: str, prompt: str, artifac
     try:
         proc = subprocess.Popen(_cmd(container, run_workdir, prompt_arg, session_id, safe_env),
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
-                                env={**os.environ, **safe_env}, start_new_session=True)
+                                env=_process_env(safe_env), start_new_session=True)
     except Exception as exc:
         return fail('process_start_failed', exc, prompt_arg, setup_done)
     if register_cancel:
@@ -232,32 +236,30 @@ def _cmd(container: str, workdir: str, prompt: str, session: str, env: dict[str,
 
 
 def _opencode_env(raw: dict[str, str]) -> dict[str, str]:
-    env = {k: v for k, v in raw.items() if v and k.startswith(PASSTHROUGH_PREFIXES)}
-    model_ref = str(raw.get('LAZYMIND_EVO_CODE_MODEL') or raw.get('OPENCODE_MODEL') or '').strip()
-    provider = str(raw.get('LAZYMIND_EVO_CODE_PROVIDER') or '').strip()
-    model = model_ref
-    if '/' in model_ref and not provider:
-        provider, model = model_ref.split('/', 1)
-    provider = ''.join(ch.lower() if ch.isalnum() else '_' for ch in provider).strip('_')
-    safe = ''.join(ch if ch.isalnum() else '_' for ch in provider.upper())
-    key_env, base_env = f'OPENCODE_{safe}_API_KEY', f'OPENCODE_{safe}_BASE_URL'
-    api_key = (raw.get('LAZYMIND_EVO_CODE_API_KEY') or raw.get(key_env) or raw.get(f'LAZYLLM_{safe}_API_KEY')
-               or raw.get(f'{safe}_API_KEY') or '')
-    base_url = raw.get('LAZYMIND_EVO_CODE_BASE_URL') or raw.get(base_env) or DEFAULT_BASE_URLS.get(provider, '')
-    if provider and model:
-        env.update({
-            'OPENCODE_MODEL': f'{provider}/{model}',
-            'OPENCODE_PROVIDER': provider,
-            'OPENCODE_PROVIDER_MODEL': model,
-            'OPENCODE_PROVIDER_LABEL': str(raw.get('LAZYMIND_EVO_CODE_LABEL') or provider).strip(),
-            'OPENCODE_PROVIDER_KEY_ENV': key_env,
-        })
-    if provider and api_key:
-        env[key_env] = api_key
-        env.setdefault(f'{safe}_API_KEY', api_key)
-    if provider and base_url:
-        env['OPENCODE_PROVIDER_BASE_URL'] = base_url.rstrip('/')
-    return {key: value for key, value in env.items() if value}
+    key_env = str(raw.get('OPENCODE_PROVIDER_KEY_ENV') or '').strip()
+    allowed = OPENCODE_CONFIG_KEYS | ({key_env} if key_env else set())
+    return {key: str(value).strip() for key, value in raw.items() if key in allowed and str(value).strip()}
+
+
+def _missing_config(env: dict[str, str]) -> list[str]:
+    required = [
+        'OPENCODE_MODEL',
+        'OPENCODE_PROVIDER',
+        'OPENCODE_PROVIDER_MODEL',
+        'OPENCODE_PROVIDER_BASE_URL',
+        'OPENCODE_PROVIDER_KEY_ENV',
+    ]
+    missing = [key for key in required if not env.get(key)]
+    key_env = env.get('OPENCODE_PROVIDER_KEY_ENV', '')
+    if key_env and not env.get(key_env):
+        missing.append(key_env)
+    return missing
+
+
+def _process_env(safe_env: dict[str, str]) -> dict[str, str]:
+    base_keys = ('HOME', 'PATH', 'SHELL', 'USER', 'LANG', 'LC_ALL', 'TMPDIR', 'SSL_CERT_FILE', 'REQUESTS_CA_BUNDLE')
+    base = {key: value for key in base_keys if (value := os.environ.get(key))}
+    return {**base, **safe_env}
 
 
 def _config_cmd(env: dict[str, str]) -> str:

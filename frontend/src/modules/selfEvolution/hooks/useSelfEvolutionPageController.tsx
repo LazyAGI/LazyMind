@@ -236,12 +236,12 @@ const analysisCategoryColors = ["#2f7fe5", "#22a06b", "#f5a623", "#8b5cf6", "#e8
 const finalResultMetricLabels: Record<string, string> = {
   answer_correctness: "答案正确性",
   answer_correctness_avg: "答案正确性",
-  context_recall: "上下文召回",
-  context_recall_avg: "上下文召回",
+  answer_score: "综合得分",
+  answer_score_avg: "综合得分",
+  chunk_recall: "Chunk 召回",
+  chunk_recall_avg: "Chunk 召回",
   doc_recall: "文档召回",
   doc_recall_avg: "文档召回",
-  faithfulness: "忠实性",
-  faithfulness_avg: "忠实性",
 };
 
 const formatSignedFinalPercent = (value: number) => `${value > 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
@@ -885,8 +885,8 @@ export function SelfEvolutionPageController({
         experimentSummary: formatMetricSummary(item.experiment),
         deltaSummary: [
           `正确性 ${formatMetricDelta(item.delta.answer_correctness)}`,
-          `忠实性 ${formatMetricDelta(item.delta.faithfulness)}`,
-          `上下文召回 ${formatMetricDelta(item.delta.context_recall)}`,
+          `综合得分 ${formatMetricDelta(item.delta.answer_score)}`,
+          `Chunk 召回 ${formatMetricDelta(item.delta.chunk_recall)}`,
           `文档召回 ${formatMetricDelta(item.delta.doc_recall)}`,
         ].join(" / "),
       })),

@@ -1,260 +1,283 @@
+from __future__ import annotations
+
+import json
+import re
 from collections import Counter
+from collections.abc import Mapping
 from typing import Any
 
-from ...artifacts import ArtifactDraft, ArtifactRef
-from ..analysis.utils import METRICS, clean_contexts
-from ..dataset.utils import json_object, progress, validate_case_id
-from ... import validate_id
-from ...runtime import AdapterCall, OperationOutput, evo_llm
-from .policy import failure_type as policy_failure_type, quality_label as policy_quality_label
-from .policy import validate_evaluation_policy
-from .rag_answer import _case_ref
+import numpy as np
 
-PROMPT = ('你是严格的 RAG 评测裁判。只输出 JSON，不要 markdown，不要解释。\n\n评分规则：\n'
-          '- answer_correctness: 1.0=正确；0.7=基本正确；0.4=部分正确；0.0=错误、拒答或矛盾。\n'
-          '- faithfulness: 1.0=主要事实均有上下文支持；0.7=大部分支持；0.4=部分支持；0.0=主要结论无支持。\n'
-          '- reason 解释评分依据，100字以内；defect 给轻量诊断，80字以内。\n\n问题：{question}\n标准答案：{answer}\n'
-          '判分指导：{guidance}\nRAG 回答：{rag_answer}\n清洗后的召回上下文：\n{contexts}\n\n输出格式：\n'
-          '{{"answer_correctness":0.0,"faithfulness":0.0,"is_correct":false,"reason":"...","defect":"..."}}\n')
-MAX_FIELD, MAX_ANSWER, MAX_CONTEXT, MAX_CONTEXT_ITEM, MAX_CONTEXT_ITEMS = 4000, 12000, 20000, 4000, 8
+from evo.operations.common import METRICS, as_list, avg, json_safe, text
 
+ANSWER_METRICS = ('answer_correctness', 'answer_relevance', 'completeness', 'format_compliance')
+RETRIEVAL_METRICS = ('chunk_recall', 'chunk_precision', 'doc_recall', 'doc_precision')
+SUMMARY_METRICS = (
+    *ANSWER_METRICS,
+    'answer_score',
+    *RETRIEVAL_METRICS,
+    'retrieval_score',
+    *METRICS,
+)
 
-class JudgeAnswerOperation:
-    def __init__(self, llm: Any | None = None):
-        self.llm = llm
+ANSWER_WEIGHTS = np.array([0.45, 0.20, 0.20, 0.15], dtype=float)
+RETRIEVAL_WEIGHTS = np.array([0.50, 0.10, 0.30, 0.10], dtype=float)
 
-    def execute(self, ctx) -> OperationOutput:
-        graph = ctx.artifact_graph
-        dataset_ref = ArtifactRef.parse(str(ctx.params.get('eval_dataset_ref') or ''))
-        case_id = validate_case_id(str(ctx.params.get('case_id') or ''))
-        raw = str(ctx.params.get('rag_answer_ref') or '').strip()
-        if not raw:
-            raise ValueError('rag_answer_ref is required')
-        rag_ref = ArtifactRef.parse(raw) if '@v' in raw else next((i for i in ctx.input_refs if i.artifact_id == raw),
-                                                                  None)
-        if rag_ref is None:
-            raise ValueError(f'rag_answer_ref is not bound in operation inputs: {raw}')
-        if graph.schema_name(dataset_ref) != 'EvalDataset' or graph.schema_name(rag_ref) != 'RagAnswer':
-            raise ValueError('eval_dataset_ref must be EvalDataset and rag_answer_ref must be RagAnswer')
-        policy = validate_evaluation_policy(str(ctx.params.get('evaluation_policy') or ''))
-        case_ref = _case_ref(graph.get(dataset_ref), case_id)
-        ctx.check_interrupt()
-        case, rag = graph.get(case_ref), graph.get(rag_ref)
-        output_id = validate_id(str(ctx.params.get('output_id') or f'judge_result_{case_id}'), 'output_id')
-        if rag.get('status') == 'failed' or rag.get('chat_error'):
-            error = rag.get('chat_error') if isinstance(rag.get('chat_error'), dict) else {}
-            reason = f"{error.get('type') or 'ChatError'}: {error.get('message') or 'RAG call failed'}"[:100]
-            scores = {'answer_correctness': 0.0, 'faithfulness': 0.0, 'is_correct': False, 'reason': reason,
-                      'defect': 'chat call failed; no quality scoring performed'[:80]}
-            payload = self._result(ctx, policy, dataset_ref, case_ref, rag_ref, case_id,
-                                   str(rag.get('trace_id') or ''), scores, 0.0, 0.0, 'failed', 'infra_failure', [])
-            progress(ctx, 'judge_answer', 'success', 'RAG call failed; judge recorded infra failure without scoring',
-                     current_item=case_id)
-            return OperationOutput([ArtifactDraft(output_id, 'JudgeResult', payload, ctx.operation_run_id,
-                                                  input_refs=[dataset_ref, case_ref, rag_ref])])
-        if str(case.get('id') or '') != case_id:
-            raise ValueError(f'{case_ref} payload id mismatch')
-        for k, v in (('case_id', case_id), ('eval_dataset_ref', str(dataset_ref)), ('case_ref', str(case_ref))):
-            if str(rag.get(k) or '') != v:
-                raise ValueError(f'RagAnswer {k} mismatch: {rag.get(k)!r} != {v!r}')
-        if any(not str(case.get(key) or '').strip() for key in ('question', 'answer', 'grading_guidance')):
-            raise ValueError(f'{case_ref} missing question, answer or grading_guidance')
-        prompt, contexts = build_judge_prompt(case, rag)
-        progress(ctx, 'judge_answer', 'running', 'judging RAG answer', current_item=case_id)
-        for attempt in range(1, 4):
-            result = AdapterCall('llm.judge_answer', lambda p: self._llm()(p['prompt'], stream=False)).run(
-                ctx, {'case_id': case_id, 'prompt': prompt, 'attempt': attempt}, phase='judge_answer', item_ref=case_id)
-            try:
-                scores = _scores(json_object(result.response))
-                doc_recall = _recall(*_hits(case.get('reference_doc_ids'), rag.get('doc_ids')))
-                context_recall = _recall(*_hits(case.get('reference_chunk_ids'), rag.get('chunk_ids')))
-                args = (scores['answer_correctness'], scores['faithfulness'], doc_recall, context_recall)
-                quality = policy_quality_label(policy, *args)
-                payload = self._result(ctx, policy, dataset_ref, case_ref, rag_ref, case_id,
-                                       str(rag.get('trace_id') or ''), scores, doc_recall, context_recall, quality,
-                                       policy_failure_type(policy, quality, *args), contexts)
-                break
-            except ValueError:
-                if attempt == 3:
-                    raise
-                progress(ctx, 'judge_answer', 'retrying', 'retrying judge JSON parse')
-        progress(ctx, 'judge_answer', 'success', 'judge result generated', current_item=case_id,
-                 detail={'call_id': result.record.call_id, 'quality_label': payload['quality_label']})
-        return OperationOutput([ArtifactDraft(output_id, 'JudgeResult', payload, ctx.operation_run_id,
-                                              input_refs=[dataset_ref, case_ref, rag_ref])])
-
-    def _llm(self):
-        if self.llm is None:
-            self.llm = evo_llm()
-        return self.llm
-
-    def _result(self, ctx, policy, dataset_ref, case_ref, rag_ref, case_id, trace_id, scores, doc_recall,
-                context_recall, quality, failure, contexts) -> dict[str, Any]:
-        return {'case_id': case_id, 'eval_dataset_ref': str(dataset_ref), 'case_ref': str(case_ref),
-                'rag_answer_ref': str(rag_ref), 'trace_id': trace_id, **scores,
-                'context_recall': context_recall, 'doc_recall': doc_recall, 'quality_label': quality,
-                'failure_type': failure, 'evaluation_policy': policy, 'judge_contexts': contexts,
-                'source_message_id': str(ctx.params.get('source_message_id') or '')}
+FAILURE_TYPES = {'none', 'wrong_answer', 'partial_answer', 'question_not_answered', 'format_error'}
 
 
-class EvalAggregateOperation:
-    def execute(self, ctx) -> OperationOutput:
-        dataset_ref = ArtifactRef.parse(str(ctx.params.get('eval_dataset_ref') or ''))
-        report_id = validate_id(str(ctx.params.get('report_id') or 'eval_report'), 'report_id')
-        if ctx.artifact_graph.schema_name(dataset_ref) != 'EvalDataset':
-            raise ValueError(f'artifact is not EvalDataset: {dataset_ref}')
-        dataset = ctx.artifact_graph.get(dataset_ref)
-        case_ids = [validate_case_id(str(item)) for item in dataset.get('case_ids') or []]
-        case_refs = [ArtifactRef.parse(str(item)) for item in dataset.get('case_refs') or []]
-        if not case_ids or len(case_ids) != len(case_refs):
-            raise ValueError('EvalDataset case_ids/case_refs length mismatch')
-        raw = ctx.params.get('judge_result_ids') or {}
-        if raw and not isinstance(raw, dict):
-            raise ValueError('judge_result_ids must be a mapping')
-        ids = {c: validate_id(str(raw.get(c) or f'judge_result_{c}'), 'judge_result_id') for c in case_ids}
-        extra = sorted(set(raw) - set(case_ids)) if isinstance(raw, dict) else []
-        if extra:
-            raise ValueError(f'judge_result_ids contains unknown cases: {extra}')
-        rows = []
-        for index, (case_id, case_ref) in enumerate(zip(case_ids, case_refs), 1):
-            ctx.check_interrupt()
-            rows.append(self._row(ctx, dataset_ref, case_id, case_ref, ids[case_id]))
-            progress(ctx, 'eval_aggregate', 'running', f'aggregated {index}/{len(case_ids)} judge results',
-                     current_item=case_id, done=index, total=len(case_ids))
-        payload = self._report(report_id, dataset_ref, rows, str(ctx.params.get('source_message_id') or ''))
-        progress(ctx, 'eval_aggregate', 'success', f'aggregated eval report with {len(rows)} cases',
-                 current_item=report_id, done=len(rows), total=len(rows), detail=payload['metrics'])
-        refs = [dataset_ref, *[row['judge_ref'] for row in rows]]
-        return OperationOutput([ArtifactDraft(report_id, 'EvalReport', payload, ctx.operation_run_id,
-                                              input_refs=refs)])
+def judge_answer(answer: Mapping[str, Any], policy: Mapping[str, Any], services: Any) -> dict[str, Any]:
+    case = answer.get('case') if isinstance(answer.get('case'), Mapping) else {}
+    if answer.get('status') == 'failed' or answer.get('chat_error'):
+        err = answer.get('chat_error') if isinstance(answer.get('chat_error'), Mapping) else {}
+        reason = f"{text(err.get('type') or 'ChatError')}: {text(err.get('message') or 'RAG call failed')}"
+        return unscored_judge_result(
+            answer,
+            policy,
+            quality_label='infra_failure',
+            failure_type='infra_failure',
+            reason=reason,
+        )
+    try:
+        judged = _llm_judge(case, answer, services)
+    except Exception as error:  # noqa: BLE001 - worker boundary records judge infra failures.
+        return unscored_judge_result(
+            answer,
+            policy,
+            quality_label='infra_failure',
+            failure_type='infra_failure',
+            reason=f'JudgeError: {type(error).__name__}: {error}',
+        )
 
-    def _row(self, ctx, dataset_ref, case_id, case_ref, judge_result_id) -> dict[str, Any]:
-        judge_ref = next((ref for ref in ctx.input_refs if ref.artifact_id == judge_result_id), None)
-        if judge_ref is None:
-            raise ValueError(f'JudgeResult is not bound in operation inputs: {judge_result_id}')
-        for ref, schema in ((judge_ref, 'JudgeResult'), (case_ref, 'DatasetCase')):
-            if ctx.artifact_graph.schema_name(ref) != schema:
-                raise ValueError(f'artifact is not {schema}: {ref}')
-        judge, case = ctx.artifact_graph.get(judge_ref), ctx.artifact_graph.get(case_ref)
-        for k, v in (('eval_dataset_ref', str(dataset_ref)), ('case_id', case_id), ('case_ref', str(case_ref))):
-            if str(judge.get(k) or '') != v:
-                raise ValueError(f'JudgeResult {k} mismatch: {judge.get(k)!r} != {v!r}')
-        scores = {key: round(float(judge.get(key)), 4) for key in METRICS}
-        bad = [key for key in METRICS if not 0 <= scores[key] <= 1]
-        if bad:
-            raise ValueError(f'{bad[0]} out of range: {judge.get(bad[0])!r}')
-        return {'case_id': case_id, 'case_ref': case_ref, 'judge_ref': judge_ref, 'judge': judge, 'case': case,
-                **scores}
-
-    def _report(self, report_id, dataset_ref, rows, source_message_id) -> dict[str, Any]:
-        # Infra failures (chat call failed) are execution problems, not quality data points:
-        # they are excluded from quality metrics and block the report via the quality gate.
-        scored = [row for row in rows if self._failure(row) != 'infra_failure']
-        failed = [row for row in rows if self._failure(row) == 'infra_failure']
-        metrics = {'scored_count': len(scored),
-                   'correct_count': sum(row['judge'].get('is_correct') is True for row in scored),
-                   'correct_rate': self._avg([1.0 if row['judge'].get('is_correct') is True else 0.0
-                                              for row in scored]),
-                   **{f'{key}_avg': self._avg([row[key] for row in scored]) for key in METRICS}}
-        bad_keys = ('case_id', 'quality_label', 'failure_type', 'answer_correctness', 'faithfulness', 'reason',
-                    'defect', 'trace_id')
-        return {'id': report_id, 'eval_dataset_ref': str(dataset_ref), 'total': len(rows),
-                'judge_result_refs': [str(row['judge_ref']) for row in rows], 'metrics': metrics,
-                'quality_counts': dict(Counter(map(self._quality, rows))),
-                'failure_type_counts': dict(Counter(map(self._failure, rows))),
-                'by_question_type': self._group(scored, 'question_type'),
-                'by_difficulty': self._group(scored, 'difficulty'),
-                'bad_cases': [{key: row['judge'].get(key) for key in bad_keys}
-                              | {'judge_result_ref': str(row['judge_ref'])}
-                              for row in scored if self._quality(row) != 'good'],
-                'execution_failures': [{'case_id': row['case_id'], 'judge_result_ref': str(row['judge_ref']),
-                                        'reason': str(row['judge'].get('reason') or '')} for row in failed],
-                'checks': self._checks(scored, failed), 'source_message_id': source_message_id}
-
-    def _group(self, rows, key) -> dict[str, Any]:
-        out = {}
-        for name in sorted({str(row['case'].get(key) or '') for row in rows}):
-            group = [row for row in rows if str(row['case'].get(key) or '') == name]
-            out[name] = {'total': len(group), 'correct_rate': self._avg([
-                1.0 if row['judge'].get('is_correct') is True else 0.0 for row in group
-            ]), 'quality_counts': dict(Counter(map(self._quality, group)))}
-        return out
-
-    def _checks(self, scored, failed) -> dict[str, Any]:
-        errors = [{'code': 'infra_failure', 'case_id': row['case_id'],
-                   'message': str(row['judge'].get('reason') or 'RAG call failed')} for row in failed]
-        if scored and all(row['doc_recall'] == 0 and row['context_recall'] == 0 for row in scored):
-            errors.append({'code': 'systemic_zero_recall', 'case_id': '', 'message':
-                           'every scored case has zero doc and context recall; trace/citation pipeline broken'})
-        warnings = []
-        for row in scored:
-            case_id, judge = row['case_id'], row['judge']
-            for code, message, hit in (
-                ('bad_case', 'case quality_label is bad', self._quality(row) == 'bad'),
-                ('failure_type', f'failure_type={self._failure(row)}', self._failure(row) != 'none'),
-                ('missing_trace_id', 'judge result has empty trace_id', not str(judge.get('trace_id') or '').strip()),
-                ('low_recall', 'doc_recall or context_recall is zero',
-                 row['doc_recall'] == 0 or row['context_recall'] == 0),
-            ):
-                if hit:
-                    warnings.append({'code': code, 'case_id': case_id, 'message': message})
-        return {'ready': not errors, 'errors': errors, 'warnings': warnings}
-
-    def _avg(self, values) -> float:
-        return round(sum(values) / len(values), 4) if values else 0.0
-
-    def _quality(self, row) -> str:
-        return str(row['judge'].get('quality_label') or 'bad')
-
-    def _failure(self, row) -> str:
-        return str(row['judge'].get('failure_type') or 'unknown')
+    scores = {metric: _score(judged.get(metric)) for metric in ANSWER_METRICS}
+    answer_score = answer_score_from_metrics(scores)
+    quality = _quality_label(answer_score, scores['answer_correctness'], policy)
+    failure = _failure_type(judged.get('failure_type'), quality, scores)
+    reason = text(judged.get('reason')) or 'LLM answer quality judge completed'
+    return _judge_result(answer, policy, scores, answer_score, quality, failure, reason)
 
 
-def build_judge_prompt(case: dict[str, Any], rag: dict[str, Any]) -> tuple[str, list[str]]:
-    contexts, remaining = [], MAX_CONTEXT
-    for context in clean_contexts(rag.get('contexts'))[:MAX_CONTEXT_ITEMS]:
-        if remaining <= 0:
-            break
-        text = _clip(context, min(MAX_CONTEXT_ITEM, remaining))
-        if text:
-            contexts.append(text)
-            remaining -= len(text) + 2
-    return PROMPT.format(question=_clip(case['question'], MAX_FIELD), answer=_clip(case['answer'], MAX_FIELD),
-                         guidance=_clip(case['grading_guidance'], MAX_FIELD),
-                         rag_answer=_clip(rag.get('answer'), MAX_ANSWER),
-                         contexts='\n\n'.join(contexts)), contexts
+def unscored_judge_result(answer: Mapping[str, Any], policy: Mapping[str, Any], *,
+                          quality_label: str, failure_type: str, reason: str
+                          ) -> dict[str, Any]:
+    return _judge_result(
+        answer,
+        policy,
+        {metric: 0.0 for metric in ANSWER_METRICS},
+        0.0,
+        quality_label,
+        failure_type,
+        reason,
+    )
 
 
-def _clip(value: Any, limit: int) -> str:
-    text, marker = str(value or '').strip(), '\n...[truncated]'
-    return text if len(text) <= limit else text[:max(0, limit - len(marker))] + marker
+def _judge_result(answer: Mapping[str, Any], policy: Mapping[str, Any], scores: Mapping[str, float],
+                  answer_score: float, quality: str, failure: str, reason: str) -> dict[str, Any]:
+    case = answer.get('case') if isinstance(answer.get('case'), Mapping) else {}
+    case_id = text(answer.get('case_id') or case.get('id'))
+    retrieval = retrieval_metrics(case, answer)
+    retrieval_failure = _retrieval_failure_type(retrieval)
+    return {
+        'case_id': case_id,
+        'case': case,
+        'rag_answer': answer,
+        **scores,
+        'answer_score': answer_score,
+        **retrieval,
+        'retrieval_score': _weighted_score(retrieval, RETRIEVAL_METRICS, RETRIEVAL_WEIGHTS),
+        'retrieval_failure_type': retrieval_failure,
+        'quality_label': quality,
+        'failure_type': failure,
+        'is_correct': quality == 'good',
+        'reason': reason[:500],
+        'defect': '' if failure == 'none' else failure,
+        'trace_id': text(answer.get('trace_id')),
+        'target': dict(answer.get('target') or {}) if isinstance(answer.get('target'), Mapping) else {},
+        'eval_policy': dict(policy),
+        'tool_errors': list(answer.get('tool_errors') or []),
+    }
 
 
-def _scores(data: dict[str, Any]) -> dict[str, Any]:
-    answer_correctness, faithfulness = _score(data.get('answer_correctness')), _score(data.get('faithfulness'))
-    reason = str(data.get('reason') or '').strip()[:100]
-    if not reason:
-        raise ValueError('judge response missing reason')
-    is_correct = data.get('is_correct')
-    if is_correct is None:
-        is_correct = answer_correctness >= 0.8 and faithfulness >= 0.8
-    if not isinstance(is_correct, bool):
-        raise ValueError('judge response is_correct must be boolean')
-    return {'answer_correctness': answer_correctness, 'faithfulness': faithfulness, 'is_correct': is_correct,
-            'reason': reason, 'defect': str(data.get('defect') or '').strip()[:80]}
+def eval_summary(judges: Mapping[str, Any]) -> dict[str, Any]:
+    rows = [_judge_row(case_id, item) for case_id, item in sorted(judges.items())]
+    scored = [row for row in rows if row['failure_type'] != 'infra_failure']
+    metrics = {
+        'scored_count': len(scored),
+        'correct_count': sum(row['is_correct'] for row in scored),
+        'correct_rate': avg(1.0 if row['is_correct'] else 0.0 for row in scored),
+        **{f'{key}_avg': avg(row[key] for row in scored) for key in SUMMARY_METRICS},
+    }
+    return {
+        'id': 'eval.summary',
+        'total': len(rows),
+        'case_ids': [row['case_id'] for row in rows],
+        'metrics': metrics,
+        'quality_counts': dict(Counter(row['quality_label'] for row in rows)),
+        'failure_type_counts': dict(Counter(row['failure_type'] for row in rows)),
+        'retrieval_failure_type_counts': dict(Counter(row['retrieval_failure_type'] for row in rows)),
+        'bad_cases': [
+            {key: row[key] for key in ('case_id', 'quality_label', 'failure_type', 'reason', 'trace_id')}
+            for row in rows if row['quality_label'] != 'good'
+        ],
+        'execution_failures': [
+            {'case_id': row['case_id'], 'reason': row['reason']}
+            for row in rows if row['failure_type'] == 'infra_failure'
+        ],
+        'checks': {
+            'ready': not any(row['failure_type'] == 'infra_failure' for row in rows),
+            'errors': [],
+            'warnings': [],
+        },
+        'rows': rows,
+    }
+
+
+def retrieval_metrics(case: Mapping[str, Any], answer: Mapping[str, Any]) -> dict[str, float]:
+    chunk_recall, chunk_precision = _overlap_scores(case.get('reference_chunk_ids'), answer.get('chunk_ids'))
+    doc_recall, doc_precision = _overlap_scores(case.get('reference_doc_ids'), answer.get('doc_ids'))
+    return {
+        'chunk_recall': chunk_recall,
+        'chunk_precision': chunk_precision,
+        'doc_recall': doc_recall,
+        'doc_precision': doc_precision,
+    }
+
+
+def answer_score_from_metrics(scores: Mapping[str, Any]) -> float:
+    return _weighted_score(
+        {metric: _score(scores.get(metric)) for metric in ANSWER_METRICS},
+        ANSWER_METRICS,
+        ANSWER_WEIGHTS,
+    )
+
+
+def _llm_judge(case: Mapping[str, Any], answer: Mapping[str, Any], services: Any) -> dict[str, Any]:
+    raw = services.llm_complete(_judge_prompt(case, answer))
+    data = _json_object(raw)
+    if not data:
+        raise ValueError('judge LLM did not return a JSON object')
+    return data
+
+
+def _judge_prompt(case: Mapping[str, Any], answer: Mapping[str, Any]) -> str:
+    payload = {
+        'question': text(case.get('question')),
+        'question_type': text(case.get('question_type')),
+        'reference_answer': text(case.get('answer')),
+        'rag_answer': text(answer.get('answer')),
+        'grading_guidance': text(case.get('grading_guidance')),
+    }
+    return (
+        'You are an evaluation judge. Score only the answer quality. Use only input_json.\n'
+        'Return one JSON object with fields: answer_correctness, answer_relevance, completeness, '
+        'format_compliance, failure_type, reason.\n'
+        'Scores must be numbers from 0.0 to 1.0.\n'
+        'failure_type must be one of: none, wrong_answer, partial_answer, question_not_answered, format_error.\n'
+        'Use grading_guidance as the rubric. If the answer is essentially correct, failure_type must be none.\n\n'
+        f'input_json: {json.dumps(json_safe(payload), ensure_ascii=False, sort_keys=True)}'
+    )
+
+
+def _judge_row(case_id: str, value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f'JudgeResult payload for {case_id} must be an object')
+    row = {
+        'case_id': text(value.get('case_id') or case_id),
+        'quality_label': text(value.get('quality_label') or 'bad'),
+        'failure_type': text(value.get('failure_type') or 'unknown'),
+        'retrieval_failure_type': text(value.get('retrieval_failure_type') or 'unknown'),
+        'is_correct': bool(value.get('is_correct')),
+        'reason': text(value.get('reason')),
+        'trace_id': text(value.get('trace_id')),
+        'target': dict(value.get('target') or {}) if isinstance(value.get('target'), Mapping) else {},
+    }
+    row.update({key: round(float(value.get(key) or 0.0), 4) for key in SUMMARY_METRICS})
+    case = value.get('case') if isinstance(value.get('case'), Mapping) else {}
+    rag = value.get('rag_answer') if isinstance(value.get('rag_answer'), Mapping) else {}
+    row.update({
+        'question': text(case.get('question')),
+        'question_type': text(case.get('question_type')),
+        'ground_truth': text(case.get('answer')),
+        'rag_answer': text(rag.get('answer')),
+        'reference_chunk_ids': list(case.get('reference_chunk_ids') or []),
+        'reference_doc_ids': list(case.get('reference_doc_ids') or []),
+        'retrieve_chunk_ids': list(rag.get('chunk_ids') or []),
+        'retrieve_doc_ids': list(rag.get('doc_ids') or []),
+        'retrieve_contexts': list(rag.get('contexts') or []),
+    })
+    return row
+
+
+def _overlap_scores(expected: Any, actual: Any) -> tuple[float, float]:
+    expected_set = {text(item) for item in as_list(expected) if text(item)}
+    actual_set = {text(item) for item in as_list(actual) if text(item)}
+    if not expected_set:
+        return 0.0, 0.0
+    hits = len(expected_set & actual_set)
+    recall = hits / len(expected_set)
+    precision = hits / len(actual_set) if actual_set else 0.0
+    return round(recall, 4), round(precision, 4)
+
+
+def _weighted_score(scores: Mapping[str, float], metrics: tuple[str, ...], weights: np.ndarray) -> float:
+    values = np.array([float(scores.get(metric) or 0.0) for metric in metrics], dtype=float)
+    return round(float(np.dot(values, weights)), 4)
+
+
+def _quality_label(answer_score: float, answer_correctness: float, policy: Mapping[str, Any]) -> str:
+    good_threshold = float(policy.get('answer_good_threshold') or 0.8)
+    partial_threshold = float(policy.get('answer_partial_threshold') or 0.5)
+    correctness_floor = float(policy.get('answer_correctness_floor') or 0.75)
+    if answer_score >= good_threshold and answer_correctness >= correctness_floor:
+        return 'good'
+    return 'partial' if answer_score >= partial_threshold else 'bad'
+
+
+def _failure_type(value: Any, quality: str, scores: Mapping[str, float]) -> str:
+    if quality == 'good':
+        return 'none'
+    failure = text(value)
+    if failure in FAILURE_TYPES and failure != 'none':
+        return failure
+    if scores['format_compliance'] < 0.5:
+        return 'format_error'
+    if scores['answer_relevance'] < 0.5:
+        return 'question_not_answered'
+    return 'wrong_answer' if scores['answer_correctness'] < 0.5 else 'partial_answer'
+
+
+def _retrieval_failure_type(metrics: Mapping[str, float]) -> str:
+    if metrics['chunk_recall'] == 0 and metrics['doc_recall'] == 0:
+        return 'retrieval_miss'
+    if metrics['chunk_recall'] < 1 or metrics['doc_recall'] < 1:
+        return 'retrieval_partial'
+    if metrics['chunk_precision'] < 0.5 and metrics['doc_precision'] < 0.5:
+        return 'retrieval_noise'
+    return 'none'
 
 
 def _score(value: Any) -> float:
-    score = round(float(value), 4)
-    if not 0 <= score <= 1:
-        raise ValueError(f'score out of range: {value}')
-    return score
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        score = 0.0
+    return round(min(1.0, max(0.0, score)), 4)
 
 
-def _hits(expected: Any, actual: Any) -> tuple[list[str], list[str]]:
-    exp, act = [str(x) for x in expected or [] if str(x)], {str(x) for x in actual or [] if str(x)}
-    return [x for x in exp if x in act], [x for x in exp if x not in act]
-
-
-def _recall(hit: list[str], miss: list[str]) -> float:
-    return round(len(hit) / (len(hit) + len(miss)), 4) if hit or miss else 0.0
+def _json_object(raw: str) -> dict[str, Any]:
+    stripped = raw.strip()
+    candidates = [stripped]
+    fenced = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', stripped, flags=re.S)
+    if fenced:
+        candidates.insert(0, fenced.group(1))
+    start, end = stripped.find('{'), stripped.rfind('}')
+    if start >= 0 and end > start:
+        candidates.append(stripped[start:end + 1])
+    for candidate in candidates:
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, Mapping):
+            return dict(data)
+    return {}
