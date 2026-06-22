@@ -1,0 +1,12 @@
+services:
+  lazyllm-algo:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      LAZYMIND_MILVUS_URI: ${LAZYMIND_MILVUS_URI:-http://host.docker.internal:19530}
+
+  evo-api:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      LAZYMIND_MILVUS_URI: ${LAZYMIND_MILVUS_URI:-http://host.docker.internal:19530}

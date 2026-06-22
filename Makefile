@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 lint-python lint-go test test-hermetic test-hermetic-setup test-hermetic-check build up up-build down clear reset-kb reset-all fresh-start file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop
+.PHONY: help lint install-flake8 lint-python lint-go test test-hermetic test-hermetic-setup test-hermetic-check build up up-build down clear reset-kb reset-all fresh-start file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop local-milvus-lite-start local-milvus-lite-stop local-milvus-lite-status up-local-milvus-lite
 .DEFAULT_GOAL := help
 
 # Use legacy Docker builder by default to avoid pulling moby/buildkit:buildx-stable-1 from Docker Hub
@@ -89,6 +89,18 @@ LAZYMIND_FILE_WATCHER_PID := $(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)/run/file_wat
 LAZYMIND_FILE_WATCHER_CONSOLE_LOG := $(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)/logs/file_watcher.console.log
 
 # ---------------------------------------------------------------------------
+# Local Milvus Lite host process
+# ---------------------------------------------------------------------------
+# Browser-based local mode can run Milvus Lite on the host while the rest of the
+# stack still runs in compose. This is opt-in and never changes the default
+# Cloud/Server Milvus profile.
+export LAZYMIND_LOCAL_MILVUS_PORT ?= 19530
+export LAZYMIND_LOCAL_MILVUS_BASE_ROOT ?= ./.lazymind-local/milvus-lite
+export LAZYMIND_LOCAL_MILVUS_DATA_DIR ?= $(abspath $(LAZYMIND_LOCAL_MILVUS_BASE_ROOT))/data
+export LAZYMIND_LOCAL_MILVUS_LOG_DIR ?= $(abspath $(LAZYMIND_LOCAL_MILVUS_BASE_ROOT))/logs
+export LAZYMIND_LOCAL_MILVUS_RUN_DIR ?= $(abspath $(LAZYMIND_LOCAL_MILVUS_BASE_ROOT))/run
+
+# ---------------------------------------------------------------------------
 # Environment variables (override via: make up VAR=value, or set in .env)
 # Only variables that users are likely to change are listed here.
 # Internal service URLs, version pins, and fixed paths are hardcoded in docker-compose.yml.
@@ -175,6 +187,10 @@ help:
 	@echo "                    Use LAZYMIND_ENABLE_STORE_DASHBOARDS=1 to add Attu/OpenSearch Dashboards for built-in stores"
 	@echo "  make file-watcher-start - Rebuild and start host file-watcher"
 	@echo "  make file-watcher-stop  - Stop host file-watcher started by Makefile"
+	@echo "  make local-milvus-lite-start  - Start host Milvus Lite server for local mode"
+	@echo "  make local-milvus-lite-stop   - Stop host Milvus Lite server"
+	@echo "  make local-milvus-lite-status - Check host Milvus Lite server"
+	@echo "  make up-local-milvus-lite     - Start host Milvus Lite and compose with local overlay"
 	@echo "  make lint       - Run Python flake8 and Go gofmt checks"
 	@echo "  make test       - Run project test script"
 	@echo "  make test-hermetic - Prepare an isolated host test env and run the same scope as make test"
@@ -311,6 +327,20 @@ file-watcher-run: file-watcher-stop file-watcher-dirs
 
 file-watcher-start: file-watcher-build
 	@$(MAKE) --no-print-directory file-watcher-run
+
+local-milvus-lite-start:
+	@scripts/local-milvus-lite.sh start
+
+local-milvus-lite-stop:
+	@scripts/local-milvus-lite.sh stop
+
+local-milvus-lite-status:
+	@scripts/local-milvus-lite.sh status
+
+up-local-milvus-lite: local-milvus-lite-start
+	@COMPOSE_FILE=docker-compose.yml:docker-compose.local-milvus-lite.yml \
+		LAZYMIND_MILVUS_URI=http://host.docker.internal:$(LAZYMIND_LOCAL_MILVUS_PORT) \
+		$(MAKE) --no-print-directory up
 
 up:
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" = "container" ]; then \
