@@ -116,6 +116,13 @@ func (m *ComposeManager) ComposeUp(ctx context.Context, repoRoot string, profile
 	}
 	args := append(m.composeBaseArgs(repoRoot), "up", "--build")
 	args = append(args, remaining...)
+	if streamer, ok := m.runner.(CommandStreamer); ok {
+		err := streamer.Stream(ctx, Command{Name: "docker", Args: args, Dir: repoRoot}, os.Stdout, os.Stderr)
+		if err != nil {
+			return fmt.Errorf("docker compose up failed: %w", err)
+		}
+		return nil
+	}
 	res, err := m.runner.Run(ctx, Command{Name: "docker", Args: args, Dir: repoRoot})
 	if err != nil {
 		return fmt.Errorf("docker compose up failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
@@ -214,18 +221,28 @@ func classifyComposeReadiness(statuses []ComposeServiceStatus) (composeReadiness
 			service = st.Name
 		}
 		if service == "db-bootstrap" {
-			if st.State == "exited" && st.ExitCode == 0 {
-				continue
-			}
-			if st.State == "exited" {
+			if st.State == "exited" && st.ExitCode != 0 {
 				return composeReadinessFailed, fmt.Sprintf("service %s exited with code %d", service, st.ExitCode)
 			}
+			continue
 		}
 		if st.State == "exited" || st.State == "dead" || st.State == "removing" {
 			return composeReadinessFailed, fmt.Sprintf("service %s is %s (exit=%d)", service, st.State, st.ExitCode)
 		}
 		if st.Health == "unhealthy" {
 			return composeReadinessFailed, fmt.Sprintf("service %s is unhealthy", service)
+		}
+	}
+	for _, st := range statuses {
+		service := st.Service
+		if service == "" {
+			service = st.Name
+		}
+		if service == "db-bootstrap" {
+			if st.State == "exited" && st.ExitCode == 0 {
+				continue
+			}
+			return composeReadinessPending, fmt.Sprintf("service %s is %s", service, st.State)
 		}
 		if st.State != "running" {
 			return composeReadinessPending, fmt.Sprintf("service %s is %s", service, st.State)

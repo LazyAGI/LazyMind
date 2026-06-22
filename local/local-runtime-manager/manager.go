@@ -287,9 +287,6 @@ func (m *RuntimeManager) waitForComposeTerminalState(ctx context.Context, cfg Ru
 	var lastReason string
 	var lastReport time.Time
 	for {
-		if !m.probeAPI(cfg.ProcessComposePort, 500*time.Millisecond) {
-			return fmt.Errorf("process-compose API stopped before compose services became ready")
-		}
 		statuses, err := m.compose.ComposeStatus(ctx, paths.RepoRoot)
 		if err != nil {
 			lastReason = err.Error()
@@ -302,6 +299,9 @@ func (m *RuntimeManager) waitForComposeTerminalState(ctx context.Context, cfg Ru
 			case composeReadinessFailed:
 				return fmt.Errorf("compose startup failed: %s", reason)
 			}
+		}
+		if !m.probeAPI(cfg.ProcessComposePort, 500*time.Millisecond) {
+			return fmt.Errorf("process-compose API stopped before compose services became ready: %s", lastReason)
 		}
 		if lastReport.IsZero() || time.Since(lastReport) >= 15*time.Second {
 			_, _ = fmt.Fprintf(m.errOut, "waiting for compose services: %s\n", lastReason)

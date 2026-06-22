@@ -24,7 +24,6 @@ func NewProcessComposeManager(r CommandRunner, execPath string) *ProcessComposeM
 func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, profile string, logPath string, tokenPath string, apiPort int) error {
 	commandForComposeUp := quoteShellArg(m.execPath) + " internal compose-up --profile " + profile
 	commandForComposeDown := quoteShellArg(m.execPath) + " internal compose-down --profile " + profile
-	commandForComposeReady := quoteShellArg(m.execPath) + " internal compose-ready --profile " + profile
 
 	_, err := fmt.Fprintf(w, "version: \"0.5\"\n")
 	if err != nil {
@@ -63,34 +62,6 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 		return err
 	}
 	_, err = fmt.Fprintf(w, "      timeout_seconds: 60\n")
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "    readiness_probe:\n")
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "      exec:\n")
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "        command: %s\n", quoteYAMLString(commandForComposeReady))
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "      initial_delay_seconds: 5\n")
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "      period_seconds: 5\n")
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "      timeout_seconds: 30\n")
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "      success_threshold: 1\n")
 	if err != nil {
 		return err
 	}

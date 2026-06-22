@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -71,6 +72,19 @@ func TestFilterRemainingServices(t *testing.T) {
 	}
 	if _, err := filterRemainingServices(services, []string{"does-not-exist"}); err == nil {
 		t.Fatalf("expected error for unknown disabled service")
+	}
+}
+
+func TestClassifyComposeReadinessReportsFatalBeforePending(t *testing.T) {
+	state, reason := classifyComposeReadiness([]ComposeServiceStatus{
+		{Service: "chat", State: "created"},
+		{Service: "lazyllm-parse-server", State: "exited", ExitCode: 1},
+	})
+	if state != composeReadinessFailed {
+		t.Fatalf("expected failed state got %v", state)
+	}
+	if !strings.Contains(reason, "lazyllm-parse-server") {
+		t.Fatalf("expected fatal service in reason got %q", reason)
 	}
 }
 
@@ -148,6 +162,48 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 	if !strings.Contains(out, "log_location: "+fmt.Sprintf("%q", logPath)) {
 		t.Fatal("missing log location")
 	}
+	if strings.Contains(out, "readiness_probe:") {
+		t.Fatal("generated config should not include process-compose readiness_probe")
+	}
+}
+
+func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	runner := &fakeStreamRunner{fakeRunner: fakeRunner{t: t}}
+	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
+	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
+		assertCommand(t, cmd, "docker",
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
+			"config", "--services",
+		)
+		return CommandResult{Stdout: "auth-service\ncore\n"}, nil
+	})
+	runner.streamHandlers = append(runner.streamHandlers, func(cmd Command) error {
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
+			"up",
+			"--build",
+			"auth-service",
+			"core",
+		})
+		return nil
+	})
+
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := manager.compose.ComposeUp(context.Background(), paths.RepoRoot, cfg.Profile); err != nil {
+		t.Fatalf("compose up: %v", err)
+	}
+	if len(runner.streamCalls) != 1 {
+		t.Fatalf("expected 1 stream call got %d", len(runner.streamCalls))
+	}
 }
 
 func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
@@ -165,7 +221,7 @@ func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
 		assertContains(t, cmd.Args, "-D")
 		assertContains(t, cmd.Args, "--ordered-shutdown")
 		assertContains(t, cmd.Args, "-t=false")
-		assertStringArgAfter(t, cmd.Args, "-p", strconv.Itoa(defaultProcessComposePort))
+		assertContains(t, cmd.Args, "-p")
 		return CommandResult{}, nil
 	}, func(cmd Command) (CommandResult, error) {
 		assertCommandContainsInOrder(t, cmd, "docker", []string{
@@ -636,6 +692,22 @@ type fakeRunner struct {
 	calls    []Command
 	handlers []func(Command) (CommandResult, error)
 	t        *testing.T
+}
+
+type fakeStreamRunner struct {
+	fakeRunner
+	streamCalls    []Command
+	streamHandlers []func(Command) error
+}
+
+func (r *fakeStreamRunner) Stream(ctx context.Context, cmd Command, stdout, stderr io.Writer) error {
+	r.streamCalls = append(r.streamCalls, cmd)
+	if len(r.streamHandlers) == 0 {
+		return nil
+	}
+	call := r.streamHandlers[0]
+	r.streamHandlers = r.streamHandlers[1:]
+	return call(cmd)
 }
 
 func writeComposeFixture(t *testing.T, repo string) {
