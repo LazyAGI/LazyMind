@@ -89,7 +89,10 @@ func threadEventsURL(threadID string) string {
 }
 
 func threadStepEventsURL(threadID, stepID string) string {
-	return threadEventsURL(threadID)
+	return common.JoinURL(
+		agentServiceEndpoint(),
+		"/v1/evo/threads/"+url.PathEscape(threadID)+"/events/"+url.PathEscape(stepID),
+	)
 }
 
 func threadArtifactURL(threadID, artifactID string) string {
@@ -104,6 +107,18 @@ func threadResultsURL(threadID, resultKind string) string {
 		agentServiceEndpoint(),
 		"/v1/evo/threads/"+url.PathEscape(threadID)+"/results/"+strings.Trim(strings.TrimSpace(resultKind), "/"),
 	)
+}
+
+func threadResultTraceURL(threadID, traceID string) string {
+	return common.JoinURL(
+		agentServiceEndpoint(),
+		"/v1/evo/threads/"+url.PathEscape(threadID)+"/results/traces/"+url.PathEscape(traceID),
+	)
+}
+
+func threadResultTraceCompareURL(threadID, aTraceID, bTraceID string) string {
+	base := common.JoinURL(agentServiceEndpoint(), "/v1/evo/threads/"+url.PathEscape(threadID)+"/results/traces-compare")
+	return base + "?a=" + url.QueryEscape(aTraceID) + "&b=" + url.QueryEscape(bTraceID)
 }
 
 func reportContentURL(reportID, format string) string {
@@ -596,6 +611,34 @@ func saveThreadRecordWithOptions(
 	return nil, false, err
 }
 
+func markThreadStepActive(db *gorm.DB, threadID, stepID string) error {
+	threadID = strings.TrimSpace(threadID)
+	stepID = strings.TrimSpace(stepID)
+	if db == nil || threadID == "" || stepID == "" {
+		return nil
+	}
+	now := time.Now().UTC()
+	step := orm.AgentThreadStep{
+		ThreadID:  threadID,
+		StepID:    stepID,
+		Title:     stepID,
+		Status:    "running",
+		Active:    true,
+		StartedAt: &now,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	return db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "thread_id"}, {Name: "step_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"status":     "running",
+			"active":     true,
+			"ended_at":   nil,
+			"updated_at": now,
+		}),
+	}).Create(&step).Error
+}
+
 func updateThreadStepFromEvent(db *gorm.DB, threadID, stepID string, event fetchedThreadEvent) error {
 	threadID = strings.TrimSpace(threadID)
 	stepID = strings.TrimSpace(stepID)
@@ -635,7 +678,7 @@ func updateThreadStepFromEvent(db *gorm.DB, threadID, stepID string, event fetch
 	updates := map[string]any{
 		"status":      status,
 		"active":      active,
-		"event_count": gorm.Expr("agent_thread_steps.event_count + ?", 1),
+		"event_count": gorm.Expr("event_count + ?", 1),
 		"ended_at":    endedAt,
 		"updated_at":  now,
 	}
@@ -648,42 +691,16 @@ func updateThreadStepFromEvent(db *gorm.DB, threadID, stepID string, event fetch
 	if hasOrder {
 		updates["order_index"] = orderIndex
 	}
-	return db.Transaction(func(tx *gorm.DB) error {
-		if active {
-			if err := markOtherThreadStepsInactive(tx, threadID, stepID, now); err != nil {
-				return err
-			}
-		}
-		return tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "thread_id"}, {Name: "step_id"}},
-			DoUpdates: clause.Assignments(updates),
-		}).Create(&step).Error
-	})
-}
-
-func markOtherThreadStepsInactive(db *gorm.DB, threadID, stepID string, now time.Time) error {
-	return db.Model(&orm.AgentThreadStep{}).
-		Where("thread_id = ? AND step_id <> ? AND active = ?", threadID, stepID, true).
-		Updates(map[string]any{
-			"active":     false,
-			"status":     gorm.Expr("CASE WHEN status = ? THEN ? ELSE status END", "running", "succeeded"),
-			"ended_at":   gorm.Expr("COALESCE(ended_at, ?)", now),
-			"updated_at": now,
-		}).Error
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "thread_id"}, {Name: "step_id"}},
+		DoUpdates: clause.Assignments(updates),
+	}).Create(&step).Error
 }
 
 func normalizeThreadStepStatus(rawStatus, eventName string) string {
 	status := strings.ToLower(strings.TrimSpace(rawStatus))
-	event := strings.ToLower(strings.TrimSpace(eventName))
-	switch {
-	case strings.Contains(status, "cancel"):
-		return "cancelled"
-	case strings.Contains(status, "fail") || strings.Contains(status, "error"):
-		return "failed"
-	case event == "done":
-		return "succeeded"
-	case status == "":
-		status = event
+	if status == "" {
+		status = strings.ToLower(strings.TrimSpace(eventName))
 	}
 	switch {
 	case status == "":
