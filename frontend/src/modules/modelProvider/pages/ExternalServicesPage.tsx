@@ -25,6 +25,7 @@ import {
   unwrapModelProviderData,
   withModelProviderJsonOptions,
 } from "../api";
+import ToolManagementSection from "../components/ToolManagementSection";
 
 type ServiceCategoryKey = "parsing" | "tools";
 type ServiceProviderCategory = "ocr" | "search";
@@ -183,6 +184,18 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     fields: ["apiKey"],
     logo: <CompassOutlined />,
     logoUrl: "https://www.google.com/s2/favicons?domain=tavily.com&sz=96",
+    tone: "violet",
+    status: "missing",
+  },
+  {
+    key: "sciverse",
+    name: "Sciverse",
+    description: "",
+    summary: "",
+    category: "tools",
+    fields: ["apiKey"],
+    logo: <SearchOutlined />,
+    logoUrl: "https://www.google.com/s2/favicons?domain=sciverse.space&sz=96",
     tone: "violet",
     status: "missing",
   },
@@ -360,14 +373,51 @@ function mapApiProviderToService(provider: ApiExternalProvider, t: ReturnType<ty
 }
 
 async function fetchExternalProviders(keyword: string, signal: AbortSignal) {
+  const normalizedKeyword = keyword.trim();
   const response = await modelProvidersApi.apiCoreModelProvidersGet(
     {
       excludeCategory: "model,datasource",
-      keyword: keyword.trim() || undefined,
+      keyword: normalizedKeyword || undefined,
     },
     { signal },
   );
-  return unwrapModelProviderData<{ providers?: ApiExternalProvider[] }>(response.data).providers || [];
+  const providers = unwrapModelProviderData<{ providers?: ApiExternalProvider[] }>(response.data).providers || [];
+
+  const shouldLoadSciverse =
+    !normalizedKeyword ||
+    normalizeProviderName("Sciverse").includes(normalizeProviderName(normalizedKeyword));
+  if (!shouldLoadSciverse) {
+    return providers;
+  }
+
+  let sciverseProvider: ApiExternalProvider | undefined;
+  try {
+    const sciverseResponse = await modelProvidersApi.apiCoreModelProvidersGet(
+      {
+        category: "datasource",
+        keyword: "Sciverse",
+      },
+      { signal },
+    );
+    const datasourceProviders =
+      unwrapModelProviderData<{ providers?: ApiExternalProvider[] }>(sciverseResponse.data).providers || [];
+    sciverseProvider = datasourceProviders.find(
+      (provider) => normalizeProviderName(provider.name) === "sciverse",
+    );
+  } catch {
+    return providers;
+  }
+
+  if (!sciverseProvider) {
+    return providers;
+  }
+
+  const existingProviderNames = new Set(providers.map((provider) => normalizeProviderName(provider.name)));
+  if (existingProviderNames.has("sciverse")) {
+    return providers;
+  }
+
+  return [...providers, sciverseProvider];
 }
 
 async function listProviderGroups(serviceKey: string) {
@@ -851,7 +901,7 @@ export default function ExternalServicesPage() {
             />
           ) : null}
 
-          {!loading && !loadError && services.length === 0 ? (
+          {!loading && !loadError && services.length === 0 && normalizedSearchValue ? (
             <div className="model-provider-empty-state" role="status">
               <Empty
                 description={normalizedSearchValue ? t("modelProvider.external.noMatchedServices") : t("common.noData")}
@@ -865,7 +915,7 @@ export default function ExternalServicesPage() {
             const categoryDesc = t(category.descKey);
             const categoryServices = categorizedServices[category.key];
 
-            if (!categoryServices.length) {
+            if (!categoryServices.length && category.key !== "tools") {
               return null;
             }
 
@@ -879,46 +929,50 @@ export default function ExternalServicesPage() {
                   </div>
                 </div>
 
-                <div className="model-provider-service-grid">
-                  {categoryServices.map((service) => (
-                    <button
-                      aria-label={t("modelProvider.external.configModalTitle", { name: service.name })}
-                      className="model-provider-service-card"
-                      key={service.key}
-                      onClick={() => openConfigModal(service)}
-                      type="button"
-                    >
-                      <ExternalServiceLogo service={service} />
-                      <div className="model-provider-service-card-copy">
-                        <div>
-                          <div className="model-provider-service-title-row">
-                            <h4>{service.name}</h4>
-                            <Tag
-                              className="model-provider-service-status"
-                              color={
-                                service.status === "configured"
-                                  ? "success"
-                                  : service.status === "tbd"
-                                    ? "warning"
-                                    : "default"
-                              }
-                            >
-                              {t(`modelProvider.external.status.${service.status}`)}
-                            </Tag>
+                {categoryServices.length ? (
+                  <div className="model-provider-service-grid">
+                    {categoryServices.map((service) => (
+                      <button
+                        aria-label={t("modelProvider.external.configModalTitle", { name: service.name })}
+                        className="model-provider-service-card"
+                        key={service.key}
+                        onClick={() => openConfigModal(service)}
+                        type="button"
+                      >
+                        <ExternalServiceLogo service={service} />
+                        <div className="model-provider-service-card-copy">
+                          <div>
+                            <div className="model-provider-service-title-row">
+                              <h4>{service.name}</h4>
+                              <Tag
+                                className="model-provider-service-status"
+                                color={
+                                  service.status === "configured"
+                                    ? "success"
+                                    : service.status === "tbd"
+                                      ? "warning"
+                                      : "default"
+                                }
+                              >
+                                {t(`modelProvider.external.status.${service.status}`)}
+                              </Tag>
+                            </div>
+                            <Tooltip placement="topLeft" title={service.summary}>
+                              <span className="model-provider-service-summary-wrap">
+                                <p className="model-provider-service-summary">{service.summary}</p>
+                              </span>
+                            </Tooltip>
                           </div>
-                          <Tooltip placement="topLeft" title={service.summary}>
-                            <span className="model-provider-service-summary-wrap">
-                              <p className="model-provider-service-summary">{service.summary}</p>
-                            </span>
-                          </Tooltip>
                         </div>
-                      </div>
-                      <span className="model-provider-service-card-arrow" aria-hidden="true">
-                        <RightOutlined />
-                      </span>
-                    </button>
-                  ))}
-                </div>
+                        <span className="model-provider-service-card-arrow" aria-hidden="true">
+                          <RightOutlined />
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {category.key === "tools" ? <ToolManagementSection /> : null}
               </section>
             );
           })}

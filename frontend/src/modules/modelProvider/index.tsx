@@ -7,6 +7,11 @@ import "./index.scss";
 
 const modelProviderTabs = [
   {
+    key: "/model-providers/default-services",
+    labelKey: "modelProvider.tabs.defaultServices",
+    icon: <ControlOutlined />,
+  },
+  {
     key: "/model-providers/models",
     labelKey: "modelProvider.tabs.models",
     icon: <ApiOutlined />,
@@ -15,11 +20,6 @@ const modelProviderTabs = [
     key: "/model-providers/external-services",
     labelKey: "modelProvider.tabs.externalServices",
     icon: <AppstoreOutlined />,
-  },
-  {
-    key: "/model-providers/default-services",
-    labelKey: "modelProvider.tabs.defaultServices",
-    icon: <ControlOutlined />,
   },
 ];
 

@@ -4451,49 +4451,8 @@ export function SelfEvolutionPageController({
     }
     return localizedGetStepStatusLabel(step?.status || "pending");
   };
-  const observationEntryItems = artifactItems.filter((item): item is ArtifactPanelItem & { kind: "eval-reports" | "abtests" } =>
-    item.kind === "eval-reports" || item.kind === "abtests",
-  );
   const renderArtifactNavigationPanel = () => (
     <>
-      <section className="self-evolution-observation-entry-panel" aria-label="观测查看入口">
-        <div className="self-evolution-observation-entry-head">
-          <Text>观测入口</Text>
-          <span>Trace / A-B</span>
-        </div>
-        <div className="self-evolution-observation-entry-list">
-          {observationEntryItems.map((item) => {
-            const isActive = item.kind === activeArtifactItem?.kind;
-            const resultState = workflowResults[item.kind];
-            const stateLabel = resultState.loading
-              ? "加载中"
-              : resultState.error
-                ? "可重试"
-                : resultState.loaded
-                  ? isEmptyResultPayload(resultState.data)
-                    ? "暂无数据"
-                    : "已加载"
-                  : "点击查看";
-            return (
-              <button
-                key={`observation-${item.kind}`}
-                type="button"
-                className={`self-evolution-observation-entry${isActive ? " is-active" : ""}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  openObservationPage(item.kind === "eval-reports" ? "eval" : "abtest");
-                }}
-              >
-                <span>
-                  <strong>{item.kind === "eval-reports" ? "Step 2 · 观测详情" : "Step 5 · A/B 观测"}</strong>
-                  <em>{item.kind === "eval-reports" ? "Agentic RAG Trace 链路" : "Case A/B Trace 对比"}</em>
-                </span>
-                <i>{stateLabel}</i>
-              </button>
-            );
-          })}
-        </div>
-      </section>
       {visibleArtifactItems.length === 0 ? (
         <Paragraph className="self-evolution-artifact-empty">
           启动后会按执行进度显示产物。
