@@ -18,6 +18,8 @@ import { axiosInstance, getLocalizedErrorMessage } from "@/components/request";
 import {
   AGENT_API_BASE,
   EVO_API_BASE,
+  createCoreAgentGeneratedApiClient,
+  getNestedRecordField,
   getNumberField,
   getResultItems,
   getStringField,
@@ -164,7 +166,7 @@ const observationKindMap: Record<string, ObservationResultKind> = {
 const fallbackObservationData: Partial<Record<ObservationResultKind, unknown>> = {
   abtests: traceCompareFixture,
 };
-const EVAL_BADCASE_PAGE_SIZE = 1000;
+const EVAL_BADCASE_PAGE_SIZE = 10;
 
 const fallbackAbCaseRows: AbCaseRow[] = [
   {
@@ -558,12 +560,15 @@ function getPrimaryEvalReportRecord(value: unknown) {
 
 function normalizeEvalReportSummary(value: unknown): EvalReportSummary {
   const row = getPrimaryEvalReportRecord(value);
-  const data = getStructuredRecordField(row, ["data"]);
-  const metrics = getStructuredRecordField(data, ["metrics"]);
-  const traceCoverage = getStructuredRecordField(row, ["trace_coverage"]);
+  const data = getStructuredRecordField(row, ["data"]) || getNestedRecordField(row, ["data"]);
+  const metrics = getStructuredRecordField(data, ["metrics"]) || getNestedRecordField(data, ["metrics"]);
+  const traceCoverage = getStructuredRecordField(row, ["trace_coverage"]) || getNestedRecordField(row, ["trace_coverage"]);
 
   return {
-    reportId: getStringField(row, ["report_id"]) || "-",
+    reportId:
+      getStringField(row, ["report_id", "reportId"]) ||
+      getStringField(data, ["report_id", "reportId", "id"]) ||
+      "-",
     dataset: getStringField(data, ["eval_dataset_ref"]) || "-",
     correctRate: getNumberField(metrics, ["correct_rate"]),
     badCaseCount: getNumberField(row, ["bad_case_count"]),
@@ -970,13 +975,14 @@ function EvalObservationDashboard({
       error: undefined,
     }));
 
-    axiosInstance
-      .get(
-        `${AGENT_API_BASE}/threads/${encodeURIComponent(threadId)}/results/eval-reports/${encodeURIComponent(summary.reportId)}/bad-cases`,
+    createCoreAgentGeneratedApiClient()
+      .apiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGet(
         {
-          params: { page_size: EVAL_BADCASE_PAGE_SIZE },
-          signal: controller.signal,
+          threadId,
+          reportId: summary.reportId,
+          pageSize: EVAL_BADCASE_PAGE_SIZE,
         },
+        { signal: controller.signal },
       )
       .then((response) => {
         if (controller.signal.aborted) {

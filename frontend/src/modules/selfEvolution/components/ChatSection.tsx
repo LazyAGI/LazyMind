@@ -94,6 +94,19 @@ export function ChatComposer({
   renderSendButton,
 }: ChatComposerProps) {
   const { t } = useTranslation();
+
+  if (isAutoMode) {
+    if (isReadOnlyEnded) {
+      return null;
+    }
+
+    return (
+      <div className="self-evolution-chat-composer is-auto">
+        <AutoInteractionStatus />
+      </div>
+    );
+  }
+
   const onInputChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     onPromptChange(event.target.value);
   };
@@ -113,9 +126,7 @@ export function ChatComposer({
   const isCheckpointWaiting = Boolean(pendingCheckpointWaitPrompt);
 
   return (
-    <div className={`self-evolution-chat-composer${isAutoMode ? " is-auto" : ""}`}>
-      {isAutoMode && !isReadOnlyEnded && <AutoInteractionStatus />}
-
+    <div className="self-evolution-chat-composer">
       <Input.TextArea
         value={prompt}
         onChange={onInputChange}

@@ -119,19 +119,19 @@ class EvoFlowRuntime:
 
     @classmethod
     def open(cls, path: str | Path, *, case_count: int,
-             model_config: Mapping[str, Any] | None = None) -> 'EvoFlowRuntime':
+             llm_config: Mapping[str, Any] | None = None) -> 'EvoFlowRuntime':
         graph = build_evo_graph(case_ids(case_count))
         runtime = open_evo_runtime(path, graph=graph, config=EvoRuntimeConfig(
-            path, model_config=dict(model_config or {})))
+            path, llm_config=dict(llm_config or {})))
         return cls(runtime, SQLiteFlowStepStore(path))
 
     def start_full_flow(self, *, command_id: str, run_id: str, config: Mapping[str, Any]) -> FlowStepState:
-        self.set_model_config(_model_config(config))
+        self.set_llm_config(_llm_config(config))
         self._put_sources_once(command_id, _artifact_config(config))
         return self._submit_step(command_id=f'{command_id}:dataset', run_id=run_id, step='dataset')
 
-    def set_model_config(self, model_config: Mapping[str, Any] | None) -> None:
-        self.runtime.set_model_config(dict(model_config or {}))
+    def set_llm_config(self, llm_config: Mapping[str, Any] | None) -> None:
+        self.runtime.set_llm_config(dict(llm_config or {}))
 
     def continue_flow(self, *, command_id: str, run_id: str) -> FlowStepState:
         state = self.step_store.get(run_id)
@@ -244,8 +244,9 @@ class EvoFlowRuntime:
         state = self.runtime.controller.state(run_id)
         if state.run.active_plan_version != instance.plan_version:
             raise ValueError('step plan was superseded before completion')
-        producer = state.producer_by_artifact.get((instance.plan_version, root))
-        ref = None if producer is None else producer.output_refs.get(root)
+        if state.run.status != 'completed':
+            raise ValueError(f'step execution did not complete: {state.run.status}')
+        ref = self.runtime.stores.artifact_store.latest(root)
         if ref is None:
             raise ValueError(f'step root was not materialized: {root}')
         completed = tuple(item for item in STEPS if STEPS.index(item) <= STEPS.index(step))
@@ -296,13 +297,13 @@ def _artifact_key_payload(key: ArtifactKey) -> dict[str, str]:
     return {'artifact_id': key.artifact_id, 'partition': key.partition}
 
 
-def _model_config(config: Mapping[str, Any]) -> Mapping[str, Any]:
-    value = config.get('model_config') or config.get('llm_config') or {}
+def _llm_config(config: Mapping[str, Any]) -> Mapping[str, Any]:
+    value = config.get('llm_config') or {}
     return value if isinstance(value, Mapping) else {}
 
 
 def _artifact_config(config: Mapping[str, Any]) -> dict[str, Any]:
-    return {str(key): value for key, value in config.items() if key not in {'model_config', 'llm_config'}}
+    return {str(key): value for key, value in config.items() if key != 'llm_config'}
 
 
 def _candidate_config(config: Mapping[str, Any]) -> dict[str, Any]:

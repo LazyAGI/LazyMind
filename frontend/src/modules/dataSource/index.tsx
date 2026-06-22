@@ -442,33 +442,6 @@ function mapCloudConnectionToDataSourceConnection(
   };
 }
 
-async function listKnowledgeBaseNames(client = dataSourceDatasetsApi) {
-  const names: string[] = [];
-  let pageToken: string | undefined;
-
-  for (let pageIndex = 0; pageIndex < 20; pageIndex += 1) {
-    const response = await client.apiCoreDatasetsGet({
-      pageToken,
-      pageSize: 200,
-    });
-    names.push(
-      ...(response.data.datasets || [])
-        .filter((dataset) => !isDataSourceManagedDataset(dataset))
-        .map(getDatasetDisplayName)
-        .filter(Boolean),
-    );
-
-    const nextPageToken = response.data.next_page_token || "";
-    if (!nextPageToken || nextPageToken === pageToken) {
-      break;
-    }
-    pageToken = nextPageToken;
-  }
-
-  return names;
-}
-
-
 async function listDefaultKnowledgeBaseIds(client = dataSourceDatasetsApi) {
   const ids: string[] = [];
   let pageToken: string | undefined;
@@ -4282,7 +4255,7 @@ export default function DataSourceManagement() {
               >
                 {t("admin.dataSourceNotionSetupGuideAction")}
               </a>
-              ：查看详细的 Notion OAuth 配置步骤、所需凭证和 Redirect URI 说明。
+              {t("admin.dataSourceNotionSetupGuideHint")}
             </Paragraph>
           )}
         </Form>
@@ -4311,7 +4284,6 @@ export default function DataSourceManagement() {
         selectedType={selectedType}
         isFeishuSetupReady={isFeishuSetupReady}
         isNotionSetupReady={isNotionSetupReady}
-        connectionVerified={connectionVerified}
         syncMode={syncMode}
         saving={wizardSaving}
         savingMode={wizardSavingMode || undefined}
@@ -4329,13 +4301,6 @@ export default function DataSourceManagement() {
         onSelectType={handleSelectType}
         onResetFeishuSetup={handleResetFeishuSetup}
         onResetNotionSetup={handleResetNotionSetup}
-        onTestConnection={() => {
-          void handleTestConnection();
-        }}
-        onInvalidateConnection={() => {
-          setConnectionVerified(false);
-          setValidatedAgentId(null);
-        }}
         onLoadLocalPathOptions={(path) => {
           void loadLocalPathOptions(path);
         }}

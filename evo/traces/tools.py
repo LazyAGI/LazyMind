@@ -8,6 +8,30 @@ from lazyllm.tracing.semantics import SemanticType
 
 from .values import drop_empty
 
+_FALLBACK_CHAT_TOOL_NAMES = frozenset({
+    'ArxivSearch',
+    'BingSearch',
+    'BochaSearch',
+    'GoogleSearch',
+    'SciverseSearch',
+    'TavilySearch',
+    'WikipediaSearch',
+    'calculator',
+    'get_skill',
+    'kb_get_parent_node',
+    'kb_get_window_nodes',
+    'kb_keyword_search',
+    'kb_search',
+    'memory_editor',
+    'read_reference',
+    'run_script',
+    'skill_editor',
+    'url_fetch',
+    'vision_extractor',
+    'vocab_learn',
+    'vocab_manage',
+})
+
 
 def is_tool_node(node: ExecutionStep) -> bool:
     if node.semantic_type == SemanticType.TOOL:

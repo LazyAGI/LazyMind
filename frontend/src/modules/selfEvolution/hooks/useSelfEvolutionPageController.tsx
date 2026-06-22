@@ -65,6 +65,7 @@ import {
   DEPRECATED_SELF_EVOLUTION_THREAD_HISTORY_STORAGE_KEY,
   workflowResultLabels,
   createCoreAgentApiClient,
+  createCoreAgentGeneratedApiClient,
   DiffFileTreeNode,
   PxCategoryMetricAverage,
   AbCategoryComparison,
@@ -160,6 +161,15 @@ type AnalysisCasePreviewRow = {
   quality: string;
 };
 
+type AnalysisCategorySummaryRow = {
+  key: string;
+  category: string;
+  count: number;
+  ratio: string;
+  ratioValue: number;
+  color: string;
+};
+
 type PxCaseDetailRow = {
   key: string;
   caseId: string;
@@ -199,6 +209,10 @@ type EvalReportBadCasesState = {
   data?: unknown;
   error?: string;
   totalSize?: number;
+  page?: number;
+  pageSize?: number;
+  pageToken?: string;
+  nextPageToken?: string;
 };
 
 const stageArtifactKindMap: Record<string, WorkflowResultKind> = {
@@ -215,18 +229,19 @@ const artifactStepIdMap: Record<WorkflowResultKind, ArtifactPanelItem["stepId"]>
   diffs: "code-optimize",
   abtests: "ab-test",
 };
-const EVAL_REPORT_BAD_CASES_PAGE_SIZE = 1000;
+const EVAL_REPORT_BAD_CASES_PAGE_SIZE = 10;
 const legacyPlanningThinkingText = "正在理解你的请求并规划下一步。";
+const analysisCategoryColors = ["#2f7fe5", "#22a06b", "#f5a623", "#8b5cf6", "#e85d75", "#14a8b5"];
 
 const finalResultMetricLabels: Record<string, string> = {
   answer_correctness: "答案正确性",
   answer_correctness_avg: "答案正确性",
-  context_recall: "上下文召回",
-  context_recall_avg: "上下文召回",
+  answer_score: "综合得分",
+  answer_score_avg: "综合得分",
+  chunk_recall: "Chunk 召回",
+  chunk_recall_avg: "Chunk 召回",
   doc_recall: "文档召回",
   doc_recall_avg: "文档召回",
-  faithfulness: "忠实性",
-  faithfulness_avg: "忠实性",
 };
 
 const formatSignedFinalPercent = (value: number) => `${value > 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
@@ -281,7 +296,7 @@ function getEvalReportId(resultData: unknown) {
 
   return (
     getStringField(sourceRecord, ["report_id", "reportId"]) ||
-    getStringField(reportRecord, ["report_id", "reportId"])
+    getStringField(reportRecord, ["report_id", "reportId", "id"])
   );
 }
 
@@ -293,8 +308,23 @@ function getEvalReportBadCaseListRecords(resultData: unknown): Record<string, un
     return [];
   }
 
-  const payloadRecord = getEvalReportPayloadRecord(resultData);
+  const payloadRecord =
+    getStructuredRecordField(resultData, ["data"]) ||
+    getNestedRecordField(resultData, ["data"]) ||
+    resultData;
   return (getStructuredArrayField(payloadRecord, ["items"]) || []).filter(isRecord);
+}
+
+function getEvalReportBadCasesPayloadRecord(resultData: unknown) {
+  if (!isRecord(resultData)) {
+    return undefined;
+  }
+
+  return (
+    getStructuredRecordField(resultData, ["data"]) ||
+    getNestedRecordField(resultData, ["data"]) ||
+    resultData
+  );
 }
 
 function buildPxCaseDetailRows(caseRecords: Record<string, unknown>[]) {
@@ -319,6 +349,58 @@ function buildPxCaseDetailRows(caseRecords: Record<string, unknown>[]) {
       traceId: getStringField(item, ["trace_id", "traceId"]) || "-",
     }];
   });
+}
+
+function getAnalysisCategoryCount(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
+    return Number(value);
+  }
+  if (isRecord(value)) {
+    return getNumberField(value, ["count", "case_count", "caseCount", "total", "value"]);
+  }
+  return undefined;
+}
+
+function buildAnalysisCategorySummaryRows(summary: Record<string, unknown> | undefined): AnalysisCategorySummaryRow[] {
+  const coarseCounts =
+    getStructuredRecordField(summary, ["coarse_category_counts", "coarseCategoryCounts"]) ||
+    getNestedRecordField(summary, ["coarse_category_counts", "coarseCategoryCounts"]);
+  const countedRows = Object.entries(coarseCounts || {})
+    .map(([category, value]) => ({
+      category,
+      count: getAnalysisCategoryCount(value),
+    }))
+    .filter((item): item is { category: string; count: number } => typeof item.count === "number");
+  const total = countedRows.reduce((sum, item) => sum + item.count, 0);
+
+  return countedRows
+    .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category))
+    .map((item, index) => ({
+      key: item.category,
+      category: item.category || "未分类",
+      count: item.count,
+      ratio: total > 0 ? formatPercent(item.count / total) : "-",
+      ratioValue: total > 0 ? item.count / total : 0,
+      color: analysisCategoryColors[index % analysisCategoryColors.length],
+    }));
+}
+
+function buildAnalysisCategoryPieBackground(rows: AnalysisCategorySummaryRow[]) {
+  if (rows.length === 0) {
+    return "#edf5ff";
+  }
+
+  let start = 0;
+  const segments = rows.map((item) => {
+    const end = start + item.ratioValue * 100;
+    const segment = `${item.color} ${start.toFixed(2)}% ${end.toFixed(2)}%`;
+    start = end;
+    return segment;
+  });
+  return `conic-gradient(${segments.join(", ")})`;
 }
 
 export type SelfEvolutionPageRenderProps = {
@@ -674,6 +756,13 @@ export function SelfEvolutionPageController({
     evalReportBadCases.loaded && typeof evalReportBadCases.totalSize === "number"
       ? evalReportBadCases.totalSize
       : pxCaseDetailRows.length;
+  const pxCaseDetailPage = evalReportBadCases.page || 1;
+  const pxCaseDetailPageSize = evalReportBadCases.pageSize || EVAL_REPORT_BAD_CASES_PAGE_SIZE;
+  const isPxCaseDetailPending = Boolean(
+    evalReportId &&
+      evalReportBadCases.reportId !== evalReportId &&
+      !evalReportBadCases.error,
+  );
   const pxCaseDetailColumns = useMemo<ColumnsType<PxCaseDetailRow>>(
     () => [
       { title: "Case", dataIndex: "caseId", key: "caseId", width: 126 },
@@ -717,17 +806,28 @@ export function SelfEvolutionPageController({
     [],
   );
   const analysisArtifactItems = useMemo(
-    () => getResultItems(workflowResults["analysis-reports"].data).filter(isRecord),
+    () => {
+      const items = getResultItems(workflowResults["analysis-reports"].data).filter(isRecord);
+      if (items.length > 0 || !isRecord(workflowResults["analysis-reports"].data)) {
+        return items;
+      }
+
+      const directReport =
+        getStructuredRecordField(workflowResults["analysis-reports"].data, ["data"]) ||
+        getNestedRecordField(workflowResults["analysis-reports"].data, ["data"]) ||
+        workflowResults["analysis-reports"].data;
+      return isRecord(directReport) ? [directReport] : [];
+    },
     [workflowResults["analysis-reports"].data],
   );
   const analysisReportData = useMemo(() => {
     const row = analysisArtifactItems.find((item) => getResultStringField(item, ["artifact_id"]) === "classification_report");
     return getStructuredRecordField(row, ["data"]) || getNestedRecordField(row, ["data"]) || row;
   }, [analysisArtifactItems]);
-  const repairPlanData = useMemo(() => {
-    const row = analysisArtifactItems.find((item) => getResultStringField(item, ["artifact_id"]) === "repair_loop_plan");
-    return getStructuredRecordField(row, ["data"]) || getNestedRecordField(row, ["data"]) || row;
-  }, [analysisArtifactItems]);
+  const analysisSummaryData = useMemo(
+    () => getStructuredRecordField(analysisReportData, ["summary"]) || getNestedRecordField(analysisReportData, ["summary"]),
+    [analysisReportData],
+  );
   const analysisCaseRows = useMemo<AnalysisCasePreviewRow[]>(() => (
     (getStructuredArrayField(analysisReportData, ["cases"]) || [])
       .filter(isRecord)
@@ -741,24 +841,17 @@ export function SelfEvolutionPageController({
         quality: getStringField(item, ["quality", "quality_label"]) || "-",
       }))
   ), [analysisReportData]);
-  const analysisSummaryBadges = useMemo(() => {
-    const summary = getNestedRecordField(analysisReportData, ["summary"]);
-    const fineCounts = getNestedRecordField(summary, ["fine_category_counts"]);
-    const coarseCounts = getNestedRecordField(summary, ["coarse_category_counts"]);
-    const confidenceCounts = getNestedRecordField(summary, ["confidence_counts"]);
-    return [
-      `badcase ${getNumberField(analysisReportData, ["bad_case_count"]) ?? analysisCaseRows.length}`,
-      `已分类 ${getNumberField(analysisReportData, ["classified_case_count"]) ?? analysisCaseRows.length}`,
-      `细分类 ${Object.keys(fineCounts || {}).length}`,
-      `粗分类 ${Object.keys(coarseCounts || {}).length}`,
-      `置信度 ${Object.keys(confidenceCounts || {}).join(" / ") || "-"}`,
-    ];
-  }, [analysisCaseRows.length, analysisReportData]);
-  const analysisPriorityRows = useMemo(
-    () => (getStructuredArrayField(analysisReportData, ["priorities"]) || []).filter(isRecord).slice(0, 5),
-    [analysisReportData],
+  const analysisCategoryRows = useMemo(
+    () => buildAnalysisCategorySummaryRows(analysisSummaryData),
+    [analysisSummaryData],
   );
-  const analysisTarget = getNestedRecordField(repairPlanData, ["target"]);
+  const analysisCategoryPieBackground = useMemo(
+    () => buildAnalysisCategoryPieBackground(analysisCategoryRows),
+    [analysisCategoryRows],
+  );
+  const hasAnalysisStructuredReport =
+    analysisCategoryRows.length > 0 ||
+    analysisCaseRows.length > 0;
   const analysisCaseColumns = useMemo<ColumnsType<AnalysisCasePreviewRow>>(
     () => [
       { title: "case", dataIndex: "caseId", key: "caseId", width: 130 },
@@ -792,8 +885,8 @@ export function SelfEvolutionPageController({
         experimentSummary: formatMetricSummary(item.experiment),
         deltaSummary: [
           `正确性 ${formatMetricDelta(item.delta.answer_correctness)}`,
-          `忠实性 ${formatMetricDelta(item.delta.faithfulness)}`,
-          `上下文召回 ${formatMetricDelta(item.delta.context_recall)}`,
+          `综合得分 ${formatMetricDelta(item.delta.answer_score)}`,
+          `Chunk 召回 ${formatMetricDelta(item.delta.chunk_recall)}`,
           `文档召回 ${formatMetricDelta(item.delta.doc_recall)}`,
         ].join(" / "),
       })),
@@ -1161,16 +1254,24 @@ export function SelfEvolutionPageController({
     [activeThreadId],
   );
   const fetchEvalReportBadCases = useCallback(
-    async (resultData: unknown, options?: { force?: boolean }) => {
+    async (resultData: unknown, options?: { force?: boolean; page?: number }) => {
       const reportId = getEvalReportId(resultData);
       if (!activeThreadId || !reportId) {
         setEvalReportBadCases({ loading: false, loaded: false });
         return undefined;
       }
 
+      const pageSize = EVAL_REPORT_BAD_CASES_PAGE_SIZE;
+      const page = Math.max(
+        1,
+        options?.page ?? (evalReportBadCases.reportId === reportId ? evalReportBadCases.page || 1 : 1),
+      );
+      const pageToken = page > 1 ? String((page - 1) * pageSize) : undefined;
+
       if (
         !options?.force &&
         evalReportBadCases.reportId === reportId &&
+        (evalReportBadCases.page || 1) === page &&
         (evalReportBadCases.loading || evalReportBadCases.loaded)
       ) {
         return evalReportBadCases.data;
@@ -1179,25 +1280,37 @@ export function SelfEvolutionPageController({
       setEvalReportBadCases((prev) => ({
         ...prev,
         reportId,
+        page,
+        pageSize,
+        pageToken,
         loading: true,
-        loaded: prev.reportId === reportId ? prev.loaded : false,
-        data: prev.reportId === reportId ? prev.data : undefined,
+        loaded: prev.reportId === reportId && prev.page === page ? prev.loaded : false,
+        data: prev.reportId === reportId && prev.page === page ? prev.data : undefined,
         error: undefined,
+        nextPageToken: undefined,
         totalSize: prev.reportId === reportId ? prev.totalSize : undefined,
       }));
 
       try {
-        const response = await axiosInstance.get(
-          `${AGENT_API_BASE}/threads/${encodeURIComponent(activeThreadId)}/results/eval-reports/${encodeURIComponent(reportId)}/bad-cases`,
-          { params: { page_size: EVAL_REPORT_BAD_CASES_PAGE_SIZE } },
-        );
-        const responseRecord = isRecord(response.data) ? response.data : undefined;
+        const response = await createCoreAgentGeneratedApiClient()
+          .apiCoreAgentThreadsThreadIdResultsEvalReportsReportIdBadCasesGet({
+            threadId: activeThreadId,
+            reportId,
+            pageToken,
+            pageSize,
+          });
+        const responseRecord = getEvalReportBadCasesPayloadRecord(response.data);
         const totalSize =
           getNumberField(responseRecord, ["total_size", "total_count", "total"]) ??
           getEvalReportBadCaseListRecords(response.data).length;
+        const nextPageToken = getStringField(responseRecord, ["next_page_token", "nextPageToken"]);
 
         setEvalReportBadCases({
           reportId,
+          page,
+          pageSize,
+          pageToken,
+          nextPageToken,
           loading: false,
           loaded: true,
           data: response.data,
@@ -1208,6 +1321,9 @@ export function SelfEvolutionPageController({
         setEvalReportBadCases((prev) => ({
           ...prev,
           reportId,
+          page,
+          pageSize,
+          pageToken,
           loading: false,
           loaded: true,
           error: getLocalizedErrorMessage(error, "数据列表加载失败，请稍后重试。"),
@@ -1220,6 +1336,7 @@ export function SelfEvolutionPageController({
       evalReportBadCases.data,
       evalReportBadCases.loaded,
       evalReportBadCases.loading,
+      evalReportBadCases.page,
       evalReportBadCases.reportId,
     ],
   );
@@ -1411,6 +1528,26 @@ export function SelfEvolutionPageController({
       void fetchWorkflowResult(activeStageArtifactKind);
     }
   }, [activeStageArtifactKind, fetchWorkflowResult, isWorkbenchVisible]);
+
+  useEffect(() => {
+    const resultState = workflowResults["eval-reports"];
+    if (
+      !resultState.loaded ||
+      resultState.loading ||
+      resultState.error ||
+      isEmptyResultPayload(resultState.data)
+    ) {
+      return;
+    }
+
+    void fetchEvalReportBadCases(resultState.data);
+  }, [
+    fetchEvalReportBadCases,
+    workflowResults["eval-reports"].data,
+    workflowResults["eval-reports"].error,
+    workflowResults["eval-reports"].loaded,
+    workflowResults["eval-reports"].loading,
+  ]);
 
   useEffect(() => {
     if (view === "detail" && routeThreadId && !isNewSessionConfigOpen) {
@@ -3560,7 +3697,7 @@ export function SelfEvolutionPageController({
           <Text>数据列表</Text>
           <Text>{`${pxCaseDetailCount} 条`}</Text>
         </div>
-        {evalReportBadCases.loading ? (
+        {evalReportBadCases.loading || isPxCaseDetailPending ? (
           <div className="self-evolution-result-state is-loading">
             <LoadingOutlined spin />
             <span>正在请求数据列表接口...</span>
@@ -3571,7 +3708,10 @@ export function SelfEvolutionPageController({
             <button
               type="button"
               disabled={!evalReportId}
-              onClick={() => void fetchEvalReportBadCases(workflowResults["eval-reports"].data, { force: true })}
+              onClick={() => void fetchEvalReportBadCases(workflowResults["eval-reports"].data, {
+                force: true,
+                page: pxCaseDetailPage,
+              })}
             >
               重试
             </button>
@@ -3585,7 +3725,19 @@ export function SelfEvolutionPageController({
             rowKey="key"
             columns={pxCaseDetailColumns}
             dataSource={pxCaseDetailRows}
-            pagination={false}
+            pagination={{
+              current: pxCaseDetailPage,
+              pageSize: pxCaseDetailPageSize,
+              total: pxCaseDetailCount,
+              showSizeChanger: false,
+              showQuickJumper: false,
+              onChange: (page) => {
+                void fetchEvalReportBadCases(workflowResults["eval-reports"].data, {
+                  force: true,
+                  page,
+                });
+              },
+            }}
             scroll={{ x: 1582, y: 280 }}
           />
         )}
@@ -3601,36 +3753,54 @@ export function SelfEvolutionPageController({
         <Text>完整分析报告</Text>
       </div>
       <div className="self-evolution-analysis-body">
-        {analysisCaseRows.length > 0 ? (
+        {hasAnalysisStructuredReport ? (
           <>
-            <div className="self-evolution-analysis-summary-strip">
-              {analysisSummaryBadges.map((item) => <span key={item}>{item}</span>)}
+            {analysisCategoryRows.length > 0 && (
+              <div className="self-evolution-analysis-category-section">
+                <div className="self-evolution-analysis-section-head">
+                  <Text strong>粗分类分布</Text>
+                  <Text>{`${analysisCategoryRows.length} 类`}</Text>
+                </div>
+                <div className="self-evolution-analysis-category-chart">
+                  <div
+                    className="self-evolution-analysis-category-pie"
+                    style={{ background: analysisCategoryPieBackground }}
+                    aria-label="粗分类占比饼图"
+                  >
+                    <span>{analysisCategoryRows.length}</span>
+                    <small>类</small>
+                  </div>
+                  <div className="self-evolution-analysis-category-legend">
+                    {analysisCategoryRows.map((item) => (
+                      <span key={`analysis-category-legend-${item.key}`}>
+                        <i style={{ backgroundColor: item.color }} />
+                        <strong>{item.category}</strong>
+                        <em>{item.ratio}</em>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className="self-evolution-analysis-case-section">
+              <div className="self-evolution-analysis-section-head">
+                <Text strong>Case 数据</Text>
+                <Text>{`${analysisCaseRows.length} 条`}</Text>
+              </div>
+              {analysisCaseRows.length > 0 ? (
+                <Table<AnalysisCasePreviewRow>
+                  className="self-evolution-dataset-table self-evolution-analysis-table"
+                  size="small"
+                  rowKey="key"
+                  columns={analysisCaseColumns}
+                  dataSource={analysisCaseRows}
+                  pagination={{ pageSize: 8, size: "small", showSizeChanger: false }}
+                  scroll={{ x: 760, y: 330 }}
+                />
+              ) : (
+                <Paragraph className="self-evolution-px-empty">当前报告无可展示的 case 数据。</Paragraph>
+              )}
             </div>
-            {analysisPriorityRows.length > 0 && (
-              <div className="self-evolution-analysis-priority-list">
-                {analysisPriorityRows.map((item, index) => (
-                  <p key={getStringField(item, ["fine_category"]) || `priority-${index + 1}`}>
-                    <strong>{`P${getNumberField(item, ["rank"]) || index + 1} · ${getStringField(item, ["fine_category"]) || "待归类"}`}</strong>
-                    <span>{`${getNumberField(item, ["case_count"]) || 0} cases · priority ${getNumberField(item, ["priority_score"]) ?? "-"}`}</span>
-                  </p>
-                ))}
-              </div>
-            )}
-            {analysisTarget && (
-              <div className="self-evolution-analysis-target">
-                <Text strong>修复目标</Text>
-                <span>{`${getStringField(analysisTarget, ["fine_category"]) || "待确认"} · ${getStructuredArrayField(analysisTarget, ["badcase_ids"])?.length || 0} badcase`}</span>
-              </div>
-            )}
-            <Table<AnalysisCasePreviewRow>
-              className="self-evolution-dataset-table self-evolution-analysis-table"
-              size="small"
-              rowKey="key"
-              columns={analysisCaseColumns}
-              dataSource={analysisCaseRows}
-              pagination={{ pageSize: 8, size: "small", showSizeChanger: false }}
-              scroll={{ x: 760, y: 330 }}
-            />
           </>
         ) : workflowResults["analysis-reports"].loaded ||
         workflowResults["analysis-reports"].loading ||
@@ -4281,8 +4451,49 @@ export function SelfEvolutionPageController({
     }
     return localizedGetStepStatusLabel(step?.status || "pending");
   };
+  const observationEntryItems = artifactItems.filter((item): item is ArtifactPanelItem & { kind: "eval-reports" | "abtests" } =>
+    item.kind === "eval-reports" || item.kind === "abtests",
+  );
   const renderArtifactNavigationPanel = () => (
     <>
+      <section className="self-evolution-observation-entry-panel" aria-label="观测查看入口">
+        <div className="self-evolution-observation-entry-head">
+          <Text>观测入口</Text>
+          <span>Trace / A-B</span>
+        </div>
+        <div className="self-evolution-observation-entry-list">
+          {observationEntryItems.map((item) => {
+            const isActive = item.kind === activeArtifactItem?.kind;
+            const resultState = workflowResults[item.kind];
+            const stateLabel = resultState.loading
+              ? "加载中"
+              : resultState.error
+                ? "可重试"
+                : resultState.loaded
+                  ? isEmptyResultPayload(resultState.data)
+                    ? "暂无数据"
+                    : "已加载"
+                  : "点击查看";
+            return (
+              <button
+                key={`observation-${item.kind}`}
+                type="button"
+                className={`self-evolution-observation-entry${isActive ? " is-active" : ""}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openObservationPage(item.kind === "eval-reports" ? "eval" : "abtest");
+                }}
+              >
+                <span>
+                  <strong>{item.kind === "eval-reports" ? "Step 2 · 观测详情" : "Step 5 · A/B 观测"}</strong>
+                  <em>{item.kind === "eval-reports" ? "Agentic RAG Trace 链路" : "Case A/B Trace 对比"}</em>
+                </span>
+                <i>{stateLabel}</i>
+              </button>
+            );
+          })}
+        </div>
+      </section>
       {visibleArtifactItems.length === 0 ? (
         <Paragraph className="self-evolution-artifact-empty">
           启动后会按执行进度显示产物。

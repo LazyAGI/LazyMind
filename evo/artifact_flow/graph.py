@@ -1,15 +1,33 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 from evo.artifact_runtime import (
     ArtifactInput,
     ArtifactOutput,
+    ArtifactPayload,
     DAGGraph,
     FixedOp,
     StaticPartitions,
     all_to_unpartitioned,
     unpartitioned_to_all,
 )
-from evo.operations import artifact_business as business
+from evo.operations import abtest, analysis, dataset, repair
+from evo.operations import eval as eval_ops
+from evo.operations.common import OperationServices
+
+
+def _payloads(items: Mapping[str, ArtifactPayload]) -> dict[str, Any]:
+    return {name: item.payload for name, item in items.items()}
+
+
+def _collection(items: Mapping[str, ArtifactPayload]) -> dict[str, Any]:
+    return {partition: item.payload for partition, item in items.items()}
+
+
+def _result(name: str, schema: str, value: Any) -> dict[str, ArtifactPayload]:
+    return {name: ArtifactPayload(schema, value)}
 
 
 def build_evo_graph(case_ids: tuple[str, ...]) -> DAGGraph:
@@ -30,7 +48,18 @@ def _ops(partitions: StaticPartitions) -> tuple[type[FixedOp], ...]:
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {'report': business.load_corpus(inputs['source_config'].payload)}
+            source_config = inputs['source_config'].payload
+            loaded = dataset.load_source_documents(source_config)
+            return _result(
+                'report',
+                'CorpusLoadReport',
+                dataset.build_corpus_load_report(
+                    source_config,
+                    loaded.get('documents') or [],
+                    load_mode=str(loaded.get('load_mode') or 'unknown'),
+                    errors=list(loaded.get('errors') or []),
+                ),
+            )
 
     class BuildCorpusSnapshot(FixedOp):
         op_id = 'dataset.build_corpus_snapshot'
@@ -43,41 +72,38 @@ def _ops(partitions: StaticPartitions) -> tuple[type[FixedOp], ...]:
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {
-                'snapshot': business.build_corpus_snapshot(
-                    inputs['report'].payload,
-                    inputs['source_config'].payload,
-                )
-            }
+            data = _payloads(inputs)
+            return _result(
+                'snapshot',
+                'CorpusSnapshot',
+                dataset.build_corpus_snapshot(data['report'], data['source_config']),
+            )
 
-    class PrepareCase(FixedOp):
-        op_id = 'dataset.prepare_case'
+    class GenerateCase(FixedOp):
+        op_id = 'dataset.generate_case'
         inputs = {
             'config': ArtifactInput('run.config', partition_mapping=unpartitioned_to_all()),
             'snapshot': ArtifactInput('corpus.snapshot', partition_mapping=unpartitioned_to_all()),
         }
-        outputs = {'preparation': ArtifactOutput('eval.case_preparation', partition_spec=partitions)}
-        flow, stage = 'dataset', 'prepare_case'
-
-        @classmethod
-        def execute(cls, inputs, ctx):
-            return {
-                'preparation': business.prepare_case(
-                    inputs['config'].payload,
-                    inputs['snapshot'].payload,
-                    ctx.output_partition,
-                )
-            }
-
-    class GenerateCase(FixedOp):
-        op_id = 'dataset.generate_case'
-        inputs = {'preparation': ArtifactInput('eval.case_preparation', partition_spec=partitions)}
-        outputs = {'case': ArtifactOutput('eval.case', partition_spec=partitions)}
+        outputs = {
+            'preparation': ArtifactOutput('eval.case_preparation', partition_spec=partitions),
+            'case': ArtifactOutput('eval.case', partition_spec=partitions),
+        }
         flow, stage = 'dataset', 'generate_case'
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {'case': business.generate_case(inputs['preparation'].payload)}
+            data = _payloads(inputs)
+            preparation, case = dataset.prepare_and_generate_case(
+                data['config'],
+                data['snapshot'],
+                ctx.partition,
+                OperationServices(ctx),
+            )
+            return {
+                **_result('preparation', 'CasePreparation', preparation),
+                **_result('case', 'DatasetCase', case),
+            }
 
     class AssembleDataset(FixedOp):
         op_id = 'dataset.assemble'
@@ -88,33 +114,34 @@ def _ops(partitions: StaticPartitions) -> tuple[type[FixedOp], ...]:
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {'dataset': business.assemble_dataset(inputs['cases'])}
+            return _result('dataset', 'EvalDataset', dataset.assemble_dataset(_collection(inputs['cases'])))
 
-    class RagAnswer(FixedOp):
-        op_id = 'eval.rag_answer'
+    class AnswerAndJudge(FixedOp):
+        op_id = 'eval.answer_and_judge'
         inputs = {
             'case': ArtifactInput('eval.case', partition_spec=partitions),
             'target_config': ArtifactInput('eval.target_config', partition_mapping=unpartitioned_to_all()),
-        }
-        outputs = {'answer': ArtifactOutput('eval.rag_answer', partition_spec=partitions)}
-        flow, stage = 'eval', 'rag_answer'
-
-        @classmethod
-        def execute(cls, inputs, ctx):
-            return {'answer': business.rag_answer(inputs['case'].payload, inputs['target_config'].payload, ctx)}
-
-    class JudgeAnswer(FixedOp):
-        op_id = 'eval.judge_answer'
-        inputs = {
-            'answer': ArtifactInput('eval.rag_answer', partition_spec=partitions),
             'policy': ArtifactInput('eval.policy', partition_mapping=unpartitioned_to_all()),
         }
-        outputs = {'judge': ArtifactOutput('eval.judge_result', partition_spec=partitions)}
-        flow, stage = 'eval', 'judge_answer'
+        outputs = {
+            'answer': ArtifactOutput('eval.rag_answer', partition_spec=partitions),
+            'judge': ArtifactOutput('eval.judge_result', partition_spec=partitions),
+        }
+        flow, stage = 'eval', 'answer_and_judge'
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {'judge': business.judge_answer(inputs['answer'].payload, inputs['policy'].payload)}
+            data = _payloads(inputs)
+            answer, judge = eval_ops.answer_and_judge(
+                data['case'],
+                data['target_config'],
+                data['policy'],
+                OperationServices(ctx),
+            )
+            return {
+                **_result('answer', 'RagAnswer', answer),
+                **_result('judge', 'JudgeResult', judge),
+            }
 
     class EvalSummary(FixedOp):
         op_id = 'eval.summary'
@@ -125,7 +152,25 @@ def _ops(partitions: StaticPartitions) -> tuple[type[FixedOp], ...]:
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {'summary': business.eval_summary(inputs['judges'])}
+            return _result('summary', 'EvalSummary', eval_ops.eval_summary(_collection(inputs['judges'])))
+
+    class TraceSummary(FixedOp):
+        op_id = 'analysis.trace_summary'
+        inputs = {
+            'case': ArtifactInput('eval.case', partition_spec=partitions),
+            'answer': ArtifactInput('eval.rag_answer', partition_spec=partitions),
+        }
+        outputs = {'summary': ArtifactOutput('analysis.trace_summary', partition_spec=partitions)}
+        flow, stage = 'analysis', 'trace_summary'
+
+        @classmethod
+        def execute(cls, inputs, ctx):
+            data = _payloads(inputs)
+            return _result(
+                'summary',
+                'TraceSummary',
+                analysis.trace_summary(data['case'], data['answer'], OperationServices(ctx)),
+            )
 
     class ClassifyCase(FixedOp):
         op_id = 'analysis.classify_case'
@@ -133,19 +178,39 @@ def _ops(partitions: StaticPartitions) -> tuple[type[FixedOp], ...]:
             'case': ArtifactInput('eval.case', partition_spec=partitions),
             'answer': ArtifactInput('eval.rag_answer', partition_spec=partitions),
             'judge': ArtifactInput('eval.judge_result', partition_spec=partitions),
+            'trace': ArtifactInput('analysis.trace_summary', partition_spec=partitions),
         }
         outputs = {'classification': ArtifactOutput('analysis.case_classification', partition_spec=partitions)}
         flow, stage = 'analysis', 'classification'
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {
-                'classification': business.classify_case(
-                    inputs['case'].payload,
-                    inputs['answer'].payload,
-                    inputs['judge'].payload,
-                )
-            }
+            data = _payloads(inputs)
+            return _result(
+                'classification',
+                'CaseClassification',
+                analysis.classify_case(data['case'], data['answer'], data['judge'], data['trace']),
+            )
+
+    class TraceClusters(FixedOp):
+        op_id = 'analysis.trace_clusters'
+        inputs = {
+            'classifications': ArtifactInput(
+                'analysis.case_classification',
+                partition_spec=partitions,
+                partition_mapping=all_to_unpartitioned(),
+            )
+        }
+        outputs = {'clusters': ArtifactOutput('analysis.trace_clusters')}
+        flow, stage = 'analysis', 'trace_clusters'
+
+        @classmethod
+        def execute(cls, inputs, ctx):
+            return _result(
+                'clusters',
+                'TraceClusters',
+                analysis.trace_clusters(_collection(inputs['classifications'])),
+            )
 
     class AnalysisSummary(FixedOp):
         op_id = 'analysis.summary'
@@ -154,14 +219,22 @@ def _ops(partitions: StaticPartitions) -> tuple[type[FixedOp], ...]:
                 'analysis.case_classification',
                 partition_spec=partitions,
                 partition_mapping=all_to_unpartitioned(),
-            )
+            ),
+            'clusters': ArtifactInput('analysis.trace_clusters'),
         }
         outputs = {'summary': ArtifactOutput('analysis.summary')}
         flow, stage = 'analysis', 'summary'
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {'summary': business.analysis_summary(inputs['classifications'])}
+            return _result(
+                'summary',
+                'AnalysisSummary',
+                analysis.analysis_summary(
+                    _collection(inputs['classifications']),
+                    inputs['clusters'].payload,
+                ),
+            )
 
     class BuildRepairPlan(FixedOp):
         op_id = 'repair.plan'
@@ -171,7 +244,8 @@ def _ops(partitions: StaticPartitions) -> tuple[type[FixedOp], ...]:
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {'plan': business.repair_plan(inputs['analysis'].payload, inputs['policy'].payload)}
+            data = _payloads(inputs)
+            return _result('plan', 'RepairPlan', repair.repair_plan(data['analysis'], data['policy']))
 
     class PrepareWorkspace(FixedOp):
         op_id = 'repair.candidate_workspace'
@@ -181,17 +255,47 @@ def _ops(partitions: StaticPartitions) -> tuple[type[FixedOp], ...]:
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {'workspace': business.candidate_workspace(inputs['plan'].payload, ctx)}
+            return _result(
+                'workspace',
+                'CandidateWorkspace',
+                repair.candidate_workspace(inputs['plan'].payload, OperationServices(ctx)),
+            )
 
     class RepairLoop(FixedOp):
         op_id = 'repair.loop_result'
-        inputs = {'workspace': ArtifactInput('repair.candidate_workspace')}
+        inputs = {
+            'workspace': ArtifactInput('repair.candidate_workspace'),
+            'cases': ArtifactInput(
+                'eval.case',
+                partition_spec=partitions,
+                partition_mapping=all_to_unpartitioned(),
+            ),
+            'baseline_judges': ArtifactInput(
+                'eval.judge_result',
+                partition_spec=partitions,
+                partition_mapping=all_to_unpartitioned(),
+            ),
+            'eval_policy': ArtifactInput('eval.policy'),
+            'candidate_config': ArtifactInput('abtest.candidate_config'),
+        }
         outputs = {'result': ArtifactOutput('repair.loop_result')}
         flow, stage = 'repair', 'loop'
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {'result': business.repair_loop(inputs['workspace'].payload, ctx)}
+            data = _payloads({key: inputs[key] for key in ('workspace', 'eval_policy', 'candidate_config')})
+            return _result(
+                'result',
+                'RepairLoopResult',
+                repair.repair_loop(
+                    data['workspace'],
+                    _collection(inputs['cases']),
+                    _collection(inputs['baseline_judges']),
+                    data['eval_policy'],
+                    data['candidate_config'],
+                    OperationServices(ctx),
+                ),
+            )
 
     class VerifyRepair(FixedOp):
         op_id = 'repair.verified_patch'
@@ -201,7 +305,7 @@ def _ops(partitions: StaticPartitions) -> tuple[type[FixedOp], ...]:
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {'patch': business.verified_patch(inputs['loop'].payload)}
+            return _result('patch', 'VerifiedRepair', repair.verified_patch(inputs['loop'].payload))
 
     class CandidateService(FixedOp):
         op_id = 'abtest.candidate_service'
@@ -211,7 +315,12 @@ def _ops(partitions: StaticPartitions) -> tuple[type[FixedOp], ...]:
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {'service': business.candidate_service(inputs['config'].payload, inputs['patch'].payload, ctx)}
+            data = _payloads(inputs)
+            return _result(
+                'service',
+                'CandidateService',
+                abtest.candidate_service(data['config'], data['patch'], OperationServices(ctx)),
+            )
 
     class CandidateRagAnswer(FixedOp):
         op_id = 'abtest.candidate_rag_answer'
@@ -224,7 +333,12 @@ def _ops(partitions: StaticPartitions) -> tuple[type[FixedOp], ...]:
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {'answer': business.candidate_rag_answer(inputs['case'].payload, inputs['service'].payload, ctx)}
+            data = _payloads(inputs)
+            return _result(
+                'answer',
+                'CandidateRagAnswer',
+                abtest.candidate_rag_answer(data['case'], data['service'], OperationServices(ctx)),
+            )
 
     class CandidateJudge(FixedOp):
         op_id = 'abtest.candidate_judge'
@@ -237,7 +351,12 @@ def _ops(partitions: StaticPartitions) -> tuple[type[FixedOp], ...]:
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {'judge': business.candidate_judge(inputs['answer'].payload, inputs['policy'].payload)}
+            data = _payloads(inputs)
+            return _result(
+                'judge',
+                'CandidateJudgeResult',
+                abtest.candidate_judge(data['answer'], data['policy'], OperationServices(ctx)),
+            )
 
     class CandidateSummary(FixedOp):
         op_id = 'abtest.candidate_eval_summary'
@@ -253,7 +372,11 @@ def _ops(partitions: StaticPartitions) -> tuple[type[FixedOp], ...]:
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {'summary': business.candidate_summary(inputs['judges'])}
+            return _result(
+                'summary',
+                'CandidateEvalSummary',
+                abtest.candidate_summary(_collection(inputs['judges'])),
+            )
 
     class CompareABTest(FixedOp):
         op_id = 'abtest.compare'
@@ -264,18 +387,23 @@ def _ops(partitions: StaticPartitions) -> tuple[type[FixedOp], ...]:
 
         @classmethod
         def execute(cls, inputs, ctx):
-            return {'comparison': business.compare_abtest(inputs['baseline'].payload, inputs['candidate'].payload)}
+            data = _payloads(inputs)
+            return _result(
+                'comparison',
+                'ABTestComparison',
+                abtest.compare_abtest(data['baseline'], data['candidate']),
+            )
 
     return (
         LoadCorpus,
         BuildCorpusSnapshot,
-        PrepareCase,
         GenerateCase,
         AssembleDataset,
-        RagAnswer,
-        JudgeAnswer,
+        AnswerAndJudge,
         EvalSummary,
+        TraceSummary,
         ClassifyCase,
+        TraceClusters,
         AnalysisSummary,
         BuildRepairPlan,
         PrepareWorkspace,

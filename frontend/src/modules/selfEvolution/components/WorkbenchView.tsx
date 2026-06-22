@@ -455,50 +455,8 @@ export function SelfEvolutionWorkbenchView({
       </div>
     </div>
   );
-  const renderHistoryNavigationPanel = () => (
-    <>
-      <div className="self-evolution-sidebar-action-row">
-        <button type="button" onClick={onRetryThreadHistoryList}>刷新历史</button>
-      </div>
-      {threadHistoryListError && (
-        <div className="self-evolution-process-history-alert">
-          <span>{threadHistoryListError}</span>
-          <button type="button" onClick={onRetryThreadHistoryList}>重试</button>
-        </div>
-      )}
-      <div className="self-evolution-process-history-list is-navigation">
-        {historySessionEntries.length === 0 ? (
-          <Paragraph className="self-evolution-process-history-empty">
-            {isLoadingThreadHistoryList ? "正在加载历史对话..." : "暂无历史自进化对话。"}
-          </Paragraph>
-        ) : (
-          historySessionEntries.map((entry) => (
-            <article
-              key={entry.key}
-              className={`self-evolution-process-history-item is-navigation${entry.isCurrent ? " is-current" : ""}${entry.isPreviewing ? " is-previewing" : ""}`}
-            >
-              <button type="button" onClick={() => onSelectHistorySession(entry)} disabled={entry.isCurrent}>
-                <strong>{entry.title}</strong>
-                <span>{[entry.updatedAt, entry.status, entry.messageCount ? `${entry.messageCount} 条消息` : ""].filter(Boolean).join(" · ")}</span>
-                {entry.isPreviewing && <em>预览中，再次点击进入</em>}
-              </button>
-              <button
-                type="button"
-                className="self-evolution-process-history-delete"
-                disabled={deletingHistoryKeys.includes(entry.key)}
-                onClick={(event) => onDeleteHistorySession(entry, event)}
-              >
-                <CloseOutlined />
-              </button>
-            </article>
-          ))
-        )}
-      </div>
-    </>
-  );
   const renderWorkbenchNavigationPanel = () => (
     <div className="self-evolution-workbench-accordion">
-      {renderSidebarSection("history", "历史对话", "查看和切换所有自进化对话", renderHistoryNavigationPanel())}
       {renderSidebarSection("messages", "交互处理", "当前会话与消息入口", renderMessagesNavigationPanel())}
       {renderSidebarSection("processes", "阶段概览", activeStageLabel, renderStageNavigationPanel())}
     </div>
@@ -648,18 +606,18 @@ export function SelfEvolutionWorkbenchView({
                       </span>
                     </div>
                   </div>
-                  {displayStage === "eval" && (
+                  {(displayStage === "eval" || displayStage === "abtest") && (
                     <div className="self-evolution-process-observation-actions" aria-label="观测查看入口">
                       <button
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          onOpenObservation("eval");
+                          onOpenObservation(displayStage === "abtest" ? "abtest" : "eval");
                         }}
-                        aria-label="进入 Step 2 观测"
+                        aria-label={displayStage === "abtest" ? "进入 Step 5 A/B 观测" : "进入 Step 2 观测"}
                       >
                         <EyeOutlined />
-                        Step 2 观测
+                        {displayStage === "abtest" ? "Step 5 A/B" : "Step 2 观测"}
                       </button>
                     </div>
                   )}

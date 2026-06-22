@@ -1,4 +1,5 @@
 import {
+  AgentApi as CoreAgentApi,
   Configuration as CoreConfiguration,
   DefaultApi as CoreDefaultApi,
   type Dataset,
@@ -306,6 +307,19 @@ export function createCoreAgentApiClient() {
   );
 }
 
+export function createCoreAgentGeneratedApiClient() {
+  const baseUrl = BASE_URL || window.location.origin;
+  return new CoreAgentApi(
+    new CoreConfiguration({
+      basePath: baseUrl,
+      baseOptions: {
+        headers: { "Content-Type": "application/json" },
+      },
+    }),
+    baseUrl,
+    axiosInstance,
+  );
+}
 
 export type ParsedDiffFile = {
   id: string;
@@ -325,7 +339,7 @@ export type DiffFileTreeNode = {
   children: DiffFileTreeNode[];
 };
 
-export type PxMetricKey = "answer_correctness" | "faithfulness" | "context_recall" | "doc_recall";
+export type PxMetricKey = "answer_correctness" | "answer_score" | "chunk_recall" | "doc_recall";
 
 export type PxCategoryMetricAverage = {
   category: string;
@@ -383,15 +397,15 @@ export type AbSummaryReport = {
 
 export const pxMetricMeta: Array<{ key: PxMetricKey; label: string; color: string }> = [
   { key: "answer_correctness", label: "答案正确性", color: "#1a73e8" },
-  { key: "faithfulness", label: "忠实性", color: "#22a06b" },
-  { key: "context_recall", label: "上下文召回", color: "#f08c00" },
+  { key: "answer_score", label: "综合得分", color: "#22a06b" },
+  { key: "chunk_recall", label: "Chunk 召回", color: "#f08c00" },
   { key: "doc_recall", label: "文档召回", color: "#7048e8" },
 ];
 
 const pxMetricFieldAliases: Record<PxMetricKey, string[]> = {
   answer_correctness: ["answer_correctness", "answer_correctness_avg", "correct_rate"],
-  faithfulness: ["faithfulness", "faithfulness_avg"],
-  context_recall: ["context_recall", "context_recall_avg"],
+  answer_score: ["answer_score", "answer_score_avg"],
+  chunk_recall: ["chunk_recall", "chunk_recall_avg"],
   doc_recall: ["doc_recall", "doc_recall_avg"],
 };
 
@@ -618,8 +632,8 @@ export const buildPxCategoryMetricAveragesFromReport = (payload: unknown): PxCat
         caseCount: typeof item.count === "number" ? item.count : 0,
         metrics: {
           answer_correctness: clampScore(Number(item.averages?.answer_correctness ?? 0)),
-          faithfulness: clampScore(Number(item.averages?.faithfulness ?? 0)),
-          context_recall: clampScore(Number(item.averages?.context_recall ?? 0)),
+          answer_score: clampScore(Number(item.averages?.answer_score ?? 0)),
+          chunk_recall: clampScore(Number(item.averages?.chunk_recall ?? 0)),
           doc_recall: clampScore(Number(item.averages?.doc_recall ?? 0)),
         },
       }))
@@ -633,8 +647,8 @@ export const buildPxCategoryMetricAveragesFromReport = (payload: unknown): PxCat
       caseCount: getNumberField(reportRecord, ["total", "total_cases", "case_count"]) || 0,
       metrics: {
         answer_correctness: getMetricFieldNumber(metricsRecord, "answer_correctness"),
-        faithfulness: getMetricFieldNumber(metricsRecord, "faithfulness"),
-        context_recall: getMetricFieldNumber(metricsRecord, "context_recall"),
+        answer_score: getMetricFieldNumber(metricsRecord, "answer_score"),
+        chunk_recall: getMetricFieldNumber(metricsRecord, "chunk_recall"),
         doc_recall: getMetricFieldNumber(metricsRecord, "doc_recall"),
       },
     }];
@@ -648,8 +662,8 @@ export const buildPxCategoryMetricAveragesFromReport = (payload: unknown): PxCat
       caseCount: getNumberField(item, ["total", "count", "case_count"]) || 0,
       metrics: {
         answer_correctness: getMetricFieldNumber(item, "answer_correctness"),
-        faithfulness: getMetricFieldNumber(item, "faithfulness"),
-        context_recall: getMetricFieldNumber(item, "context_recall"),
+        answer_score: getMetricFieldNumber(item, "answer_score"),
+        chunk_recall: getMetricFieldNumber(item, "chunk_recall"),
         doc_recall: getMetricFieldNumber(item, "doc_recall"),
       },
     }))
@@ -1500,12 +1514,8 @@ function getEventFlowKind(payload: Record<string, unknown> | undefined) {
   return ({
     load_corpus: "dataset.load_corpus",
     build_corpus_snapshot: "dataset.build_corpus_snapshot",
-    "dataset_gen.load_corpus": "dataset.load_corpus",
-    "dataset_gen.build_corpus_snapshot": "dataset.build_corpus_snapshot",
-    prepare_case: "dataset_gen.prepare_case",
-    generate_case: "dataset_gen.generate_case",
+    generate_case: "dataset.generate_case",
     assemble: "dataset.assemble",
-    "dataset_gen.assemble": "dataset.assemble",
   } as Record<string, string>)[value || ""] || value;
 }
 
@@ -1575,10 +1585,10 @@ function getAbtestWorkflowProgressSnapshot(
   const artifactId = getEventArtifactId(payload);
   const decision = getEventDetailField(payload, ["decision_status"]);
 
-  if (flowKind === "eval.rag_answer" && getEventCaseId(payload)) {
+  if (flowKind === "abtest.candidate_rag_answer" && getEventCaseId(payload)) {
     return createSegmentProgressSnapshot("候选回答生成", 8, 40, action, 100, operationProgress?.current, caseTotal);
   }
-  if (flowKind === "eval.judge_answer" && getEventCaseId(payload)) {
+  if (flowKind === "abtest.candidate_judge" && getEventCaseId(payload)) {
     return createSegmentProgressSnapshot("候选结果评测", 48, 40, action, 300, operationProgress?.current, caseTotal);
   }
   if (flowKind === "eval.aggregate" || artifactId === "candidate_eval_report") {
@@ -1618,8 +1628,7 @@ function getAbtestWorkflowProgressSnapshot(
 const datasetOperationSegments = {
   "dataset.load_corpus": { label: "加载语料", base: 0, span: 18, rank: 10 },
   "dataset.build_corpus_snapshot": { label: "构建语料快照", base: 18, span: 17, rank: 20 },
-  "dataset_gen.prepare_case": { label: "准备样本", base: 35, span: 20, rank: 30 },
-  "dataset_gen.generate_case": { label: "生成样本", base: 55, span: 25, rank: 40 },
+  "dataset.generate_case": { label: "生成样本", base: 35, span: 45, rank: 30 },
   "dataset.assemble": { label: "组装数据集", base: 80, span: 20, rank: 50 },
 } as const;
 
@@ -2209,10 +2218,10 @@ export function buildAbtestEventDisplayText(action: string | undefined, payload?
   const caseText = operationProgress?.current
     ? `，case ${operationProgress.current}${caseTotal ? `/${caseTotal}` : ""}`
     : "";
-  if (flowKind === "eval.rag_answer" && getEventCaseId(payload)) {
+  if (flowKind === "abtest.candidate_rag_answer" && getEventCaseId(payload)) {
     return `候选版本正在生成回答${caseText}。`;
   }
-  if (flowKind === "eval.judge_answer" && getEventCaseId(payload)) {
+  if (flowKind === "abtest.candidate_judge" && getEventCaseId(payload)) {
     return `候选版本正在接受实际评测${caseText}。`;
   }
   if (flowKind === "eval.aggregate" || getEventArtifactId(payload) === "candidate_eval_report") {
@@ -2344,7 +2353,6 @@ export function toThreadEventStage(value: unknown): ThreadEventStage | undefined
 
   const normalized = value.trim();
   return {
-    dataset_gen: "dataset",
     dataset: "dataset",
     eval: "eval",
     candidate_eval: "abtest",
@@ -2786,8 +2794,8 @@ export function formatMetricDelta(value: number) {
 export function formatMetricSummary(metrics: Record<PxMetricKey, number>) {
   return [
     `正确性 ${formatMetricPercent(metrics.answer_correctness)}`,
-    `忠实性 ${formatMetricPercent(metrics.faithfulness)}`,
-    `上下文召回 ${formatMetricPercent(metrics.context_recall)}`,
+    `综合得分 ${formatMetricPercent(metrics.answer_score)}`,
+    `Chunk 召回 ${formatMetricPercent(metrics.chunk_recall)}`,
     `文档召回 ${formatMetricPercent(metrics.doc_recall)}`,
   ].join(" / ");
 }
@@ -3593,7 +3601,7 @@ function buildEventActivity(event: NormalizedThreadEvent): EvoStageActivity {
 function stageProgressFromEvents(events: NormalizedThreadEvent[], stage: ThreadEventStage) {
   return getLastItem(
     events.filter((event) => event.stage === stage && event.progress &&
-      !(stage === "eval" && ["eval.rag_answer", "eval.judge_answer"].includes(getEventFlowKind(event.payload) || ""))),
+      !(stage === "eval" && getEventFlowKind(event.payload) === "eval.answer_and_judge")),
   )?.progress;
 }
 
@@ -3604,13 +3612,12 @@ type CaseProgressState = {
   updatedAt?: string;
 };
 
-const datasetCaseSteps = ["load_corpus", "build_snapshot", "plan", "generate", "assemble"] as const;
+const datasetCaseSteps = ["load_corpus", "build_snapshot", "generate", "assemble"] as const;
 const evalCaseSteps = ["rag", "judge"] as const;
 const analysisCaseSteps = ["coarse", "fine"] as const;
 const caseStepLabels: Record<string, string> = {
   load_corpus: "load_corpus",
   build_snapshot: "build_snapshot",
-  plan: "plan",
   generate: "generate",
   assemble: "assemble",
   rag: "RAG",
@@ -3711,28 +3718,20 @@ function buildCaseProgressGroups(events: NormalizedThreadEvent[]): EvoCaseProgre
     } else if (flowKind === "dataset.assemble") {
       datasetGlobal.assemble = status;
       applyGlobalDatasetStep(datasetCases, "assemble", status, event.timestamp);
-    } else if (caseId && flowKind === "dataset_gen.prepare_case") {
-      Object.entries(datasetGlobal).forEach(([step, value]) => updateCaseStep(datasetCases, caseId, step, value, event.timestamp));
-      updateCaseStep(datasetCases, caseId, "plan", status, event.timestamp, artifactId);
-    } else if (caseId && flowKind === "dataset_gen.generate_case") {
+    } else if (caseId && flowKind === "dataset.generate_case") {
       Object.entries(datasetGlobal).forEach(([step, value]) => updateCaseStep(datasetCases, caseId, step, value, event.timestamp));
       updateCaseStep(datasetCases, caseId, "generate", status, event.timestamp, artifactId);
-    } else if (caseId && event.stage === "eval" && flowKind === "eval.rag_answer" && !operationRunId.startsWith("candidate_eval.")) {
+    } else if (caseId && event.stage === "eval" && flowKind === "eval.answer_and_judge") {
       updateCaseStep(evalCases, caseId, "rag", status, event.timestamp, artifactId);
-    } else if (caseId && event.stage === "eval" && flowKind === "eval.judge_answer" && !operationRunId.startsWith("candidate_eval.")) {
       updateCaseStep(evalCases, caseId, "judge", status, event.timestamp, artifactId);
-    } else if (caseId && operationRunId.startsWith("candidate_eval.") && flowKind === "eval.rag_answer") {
+    } else if (caseId && flowKind === "abtest.candidate_rag_answer") {
       updateCaseStep(abtestCases, caseId, "rag", status, event.timestamp, artifactId);
-    } else if (caseId && operationRunId.startsWith("candidate_eval.") && flowKind === "eval.judge_answer") {
+    } else if (caseId && flowKind === "abtest.candidate_judge") {
       updateCaseStep(abtestCases, caseId, "judge", status, event.timestamp, artifactId);
     } else if (caseId && flowKind === "analysis.coarse_classify") {
       updateCaseStep(analysisCases, caseId, "coarse", status, event.timestamp, artifactId);
     } else if (caseId && flowKind === "analysis.fine_classify") {
       updateCaseStep(analysisCases, caseId, "fine", status, event.timestamp, artifactId);
-    } else if (caseId && event.stage === "abtest" && flowKind === "eval.rag_answer") {
-      updateCaseStep(abtestCases, caseId, "rag", status, event.timestamp, artifactId);
-    } else if (caseId && event.stage === "abtest" && flowKind === "eval.judge_answer") {
-      updateCaseStep(abtestCases, caseId, "judge", status, event.timestamp, artifactId);
     }
   });
   const groups: EvoCaseProgressGroup[] = [

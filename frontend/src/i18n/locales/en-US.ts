@@ -567,7 +567,7 @@ const enUS = {
       successCount: "Success: {{count}} rows",
       failedCount: "Failed: {{count}} rows",
       failedRowsTitle: "Failed rows exist",
-      failedRowsDescription: "Failed rows are marked on the preview step. Go back, fix the file, and import again.",
+      failedRowsDescription: "Only successful rows were imported. Failed rows were not imported. Fix the source file and import again.",
     },
     template: {
       downloaded: "Template downloaded",
@@ -1403,7 +1403,11 @@ const enUS = {
     dataSourceNotionSetupRequiredForCreate: "OAuth credentials must be configured before creating a Notion data source.",
     dataSourceNotionTargetTypeLabel: "Notion target type",
     dataSourceNotionTargetTypeRequired: "Please select Notion target type",
+    dataSourceNotionTargetTypePage: "Page",
+    dataSourceNotionTargetTypeDatabase: "Database",
     dataSourceNotionTargetLabel: "Notion page or database",
+    dataSourceNotionSetupGuideHint:
+      ": View detailed Notion OAuth setup steps, required credentials, and Redirect URI instructions.",
     dataSourceAppIdRequired: "Please enter App ID",
     dataSourceAppSecretRequired: "Please enter App Secret",
     dataSourceAppId: "App ID",
@@ -1519,6 +1523,68 @@ const enUS = {
         finishDetail:
           "Before authorization, create the folder in Feishu Drive and copy the folder directory URL into LazyMind.",
         finishAlt: "Enter Feishu folder ID and start authorization in the system",
+      },
+    },
+    dataSourceNotionSetupGuide: {
+      backCreateSource: "Back to New Data Source",
+      backManagement: "Back to Data Source Management",
+      title: "Data Source Management - New Data Source - Notion",
+      subtitle:
+        "Create a Public Integration in Notion Developers, get OAuth credentials, configure the Redirect URI, then complete Notion data source authorization in LazyMind.",
+      summaryAria: "Notion setup process overview",
+      summaryTitle: "Setup Flow",
+      openDevelopers: "Open Notion Developers",
+      callbackUrl: "Callback URL: {{uri}}",
+      steps: {
+        openDevelopersTitle: "Open Notion Developers",
+        openDevelopersDesc:
+          "Open Notion Developers and sign in to your Notion account. This is where OAuth credentials for Notion public integrations are managed.",
+        createIntegrationTitle: "Create a Public Integration",
+        createIntegrationDesc:
+          "On My connections, click New integration to create a new integration app. Choose Public integration, not Internal integration, so OAuth authorization is supported.",
+        createIntegrationExisting:
+          "If you already have a suitable Public integration, you can reuse it.",
+        createIntegrationNaming:
+          "Include LazyMind or the data source purpose in the integration name so it is easy to identify later.",
+        basicInfoTitle: "Enter basic integration information",
+        basicInfoDesc:
+          "Enter the integration name and description, and optionally upload a logo. These details appear on the user authorization page, so use a clear name and description.",
+        credentialsTitle: "Get OAuth Client ID and Client Secret",
+        credentialsDesc:
+          "After creation, find the OAuth Client ID and Client Secret on the integration detail page under OAuth Domain and URIs or Secrets. Enter both credentials in LazyMind.",
+        credentialsClientId:
+          "Client ID: the public unique identifier for the integration.",
+        credentialsClientSecret:
+          "Client Secret: the integration secret. Keep it private; it can only be fully viewed when created.",
+        redirectTitle: "Configure Redirect URI",
+        redirectDesc:
+          "In the Redirect URIs section of integration settings, add LazyMind's OAuth callback URL. It must match the callback URL used by the system, otherwise authorization fails after redirect.",
+        redirectProductionHint:
+          "For production deployments, replace 127.0.0.1 with the actual domain or IP address.",
+        capabilitiesTitle: "Configure Integration Capabilities",
+        capabilitiesDesc:
+          "In integration settings, select the required capabilities such as Read content and Read comments. LazyMind needs at least Read content to read Notion content.",
+        capabilitiesRequired:
+          "Recommended minimum: select Read content and Read user information.",
+        capabilitiesWrite:
+          "If writing or updating Notion content is needed, also select Insert content and Update content.",
+        enterCredentialsTitle: "Enter Notion credentials in the system",
+        enterCredentialsDesc:
+          "Return to LazyMind Data Source Management, choose the Notion data source type, open the credentials dialog, enter the Client ID and Client Secret, then save.",
+        enterCredentialsClientId:
+          "Client ID maps to the App ID field in the system dialog.",
+        enterCredentialsClientSecret:
+          "Client Secret maps to the App Secret field in the system dialog.",
+        finishTitle: "Paste a Notion Page/Database link and finish authorization",
+        finishDesc:
+          "After credentials are saved, the system starts Notion OAuth authorization automatically. Once authorized, paste the Notion page or database link in the data source configuration, then save and sync.",
+        finishPageLink: "Notion page link format: https://www.notion.so/...",
+        finishDatabaseLink:
+          "Notion database link format: https://www.notion.so/...",
+        finishCopyLink:
+          "You can also right-click the page in Notion and choose Copy link.",
+        finishConnectionNote:
+          "Note: connect the page or database to this integration in Notion first (page menu ... -> Connections -> choose your integration).",
       },
     },
     dataSourceFeishuTargetType: "Sync Target Type",
@@ -1827,6 +1893,52 @@ const enUS = {
     dataSourceDetailTreeSelectDesc:
       "You can select files to pull in the tree view. Files marked as updated are processed by backend; unchanged files are ignored automatically.",
     dataSourceDetailNoMatchedFile: "No files match current filters",
+    dataSourceDemoData: {
+      sources: {
+        feishuRdName: "Feishu R&D Knowledge Base",
+        localOpsName: "Ops Shared Drive",
+      },
+      tags: {
+        integration: "Integration",
+        feishu: "Feishu",
+        api: "API",
+        permission: "Permissions",
+        archive: "Archive",
+        inspection: "Inspection",
+        schedule: "Schedule",
+        review: "Review",
+        topology: "Topology",
+        history: "History",
+      },
+      syncDetails: {
+        changedReparsed: "Content changed; incremental reparse completed",
+        newVectorIndexed: "New document ingested; vector index generated",
+        permissionReindexing: "Permission scope updated; waiting to rebuild index",
+        duplicateVersioned:
+          "Duplicate document detected; historical version kept by versioning policy",
+        newIndexDone: "New document ingested; index generation completed",
+        rechunking: "Content change detected; splitting chunks again",
+        sourceDeletedCleanup: "File deleted from source; waiting to clean up index",
+      },
+      docs: {
+        feishuDevDocName: "Feishu integration development guide.pdf",
+        feishuDevDocPath: "/integration-docs/feishu-integration-development-guide.pdf",
+        oauthSpecName: "OAuth API definition guide.docx",
+        oauthSpecPath: "/integration-docs/oauth-api-definition-guide.docx",
+        permissionFlowName: "Knowledge base permission request flow.md",
+        permissionFlowPath: "/permission-center/knowledge-base-permission-request-flow.md",
+        legacyConnectionName: "Legacy connection guide.docx",
+        legacyConnectionPath: "/archive/legacy-connection-guide.docx",
+        inspectionManualName: "Inspection standard operating manual.pdf",
+        inspectionManualPath: "/mnt/team-share/ops-docs/inspection-standard-operating-manual.pdf",
+        dutyScheduleName: "Emergency duty roster.xlsx",
+        dutySchedulePath: "/mnt/team-share/ops-docs/emergency-duty-roster.xlsx",
+        incidentReviewName: "Incident review record.md",
+        incidentReviewPath: "/mnt/team-share/ops-docs/incident-review-record.md",
+        topologyArchiveName: "Historical topology diagram.pptx",
+        topologyArchivePath: "/mnt/team-share/ops-docs/historical-topology-diagram.pptx",
+      },
+    },
     dataSourceCallbackLoadingTitle: "Finishing Feishu authorization",
     dataSourceCallbackLoadingSubtitle:
       "Please wait while the system verifies authorization and writes it back to data source settings.",
