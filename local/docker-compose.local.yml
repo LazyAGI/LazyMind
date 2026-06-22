@@ -1,0 +1,6 @@
+# Local Runtime override file. First version intentionally keeps local mode equivalent to cloud/docker mode.
+x-lazymind-local:
+  mode: local
+  disabled_container_services: []
+  notes:
+    - "First version: no service is de-containerized yet."

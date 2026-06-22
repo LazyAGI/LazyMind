@@ -1,0 +1,255 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"io"
+	"log"
+	"os"
+)
+
+func main() {
+	execPath, err := os.Executable()
+	if err != nil {
+		log.Printf("warning: could not resolve executable path: %v", err)
+		execPath = os.Args[0]
+	}
+	cli := NewCLI(os.Stdout, os.Stderr, &ExecRunner{}, execPath)
+	if err := cli.Run(context.Background(), os.Args[1:]); err != nil {
+		os.Exit(1)
+	}
+}
+
+type CLI struct {
+	out      io.Writer
+	errOut   io.Writer
+	runner   CommandRunner
+	execPath string
+}
+
+func NewCLI(out, errOut io.Writer, runner CommandRunner, execPath string) *CLI {
+	return &CLI{out: out, errOut: errOut, runner: runner, execPath: execPath}
+}
+
+func (c *CLI) Run(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		c.usage()
+		return fmt.Errorf("no command")
+	}
+
+	manager := NewRuntimeManager(c.runner, c.execPath)
+
+	switch args[0] {
+	case "up":
+		profile, repoRoot, err := parseCommonArgs("up", args[1:], c.errOut)
+		if err != nil {
+			return err
+		}
+		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		if err != nil {
+			return err
+		}
+		return manager.Up(ctx, cfg, paths)
+	case "down":
+		profile, repoRoot, err := parseCommonArgs("down", args[1:], c.errOut)
+		if err != nil {
+			return err
+		}
+		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		if err != nil {
+			return err
+		}
+		return manager.Down(ctx, cfg, paths)
+	case "restart":
+		profile, repoRoot, err := parseCommonArgs("restart", args[1:], c.errOut)
+		if err != nil {
+			return err
+		}
+		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		if err != nil {
+			return err
+		}
+		return manager.Restart(ctx, cfg, paths)
+	case "status":
+		asJSON, profile, repoRoot, err := parseStatusArgs(args[1:], c.errOut)
+		if err != nil {
+			return err
+		}
+		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		if err != nil {
+			return err
+		}
+		resp, err := manager.Status(ctx, cfg, paths, asJSON)
+		if err != nil {
+			return err
+		}
+		_, _ = io.WriteString(c.out, resp)
+		if asJSON && len(resp) > 0 && resp[len(resp)-1] != '\n' {
+			_, _ = io.WriteString(c.out, "\n")
+		}
+		return nil
+	case "logs":
+		service, tail, profile, repoRoot, err := parseLogArgs(args[1:], c.errOut)
+		if err != nil {
+			return err
+		}
+		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		if err != nil {
+			return err
+		}
+		_ = cfg
+		content, err := manager.Logs(ctx, paths, service, tail)
+		if err != nil {
+			return err
+		}
+		_, _ = io.WriteString(c.out, content)
+		if len(content) == 0 || content[len(content)-1] != '\n' {
+			_, _ = io.WriteString(c.out, "\n")
+		}
+		return nil
+	case "doctor":
+		_, repoRoot, err := parseCommonArgs("doctor", args[1:], c.errOut)
+		if err != nil {
+			return err
+		}
+		cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repoRoot)
+		if err != nil {
+			return err
+		}
+		_, err = manager.Doctor(ctx, cfg, paths)
+		return err
+	case "export-diagnostics":
+		output, profile, repoRoot, err := parseExportDiagnosticsArgs(args[1:], c.errOut)
+		if err != nil {
+			return err
+		}
+		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+		if err != nil {
+			return err
+		}
+		_ = cfg
+		return manager.ExportDiagnostics(ctx, paths, output)
+	case "internal":
+		return c.runInternal(ctx, manager, args[1:])
+	default:
+		c.usage()
+		return fmt.Errorf("unknown command: %s", args[0])
+	}
+}
+
+func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []string) error {
+	if len(args) == 0 {
+		c.usage()
+		return fmt.Errorf("internal command required")
+	}
+
+	sub := args[0]
+	subArgs := args[1:]
+	profile, repoRoot, err := parseCommonArgs("internal", subArgs, c.errOut)
+	if err != nil {
+		return err
+	}
+	cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
+	if err != nil {
+		return err
+	}
+
+	switch sub {
+	case "compose-up":
+		return manager.compose.ComposeUp(ctx, paths.RepoRoot, cfg.Profile)
+	case "compose-down":
+		return manager.compose.ComposeDown(ctx, paths.RepoRoot, cfg.Profile)
+	case "compose-ready":
+		return manager.compose.ComposeReady(ctx, paths.RepoRoot, cfg.Profile)
+	case "compose-services":
+		services, err := manager.compose.ComposeServices(ctx, paths.RepoRoot)
+		if err != nil {
+			return err
+		}
+		for _, svc := range services {
+			_, _ = io.WriteString(c.out, svc+"\n")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown internal command: %s", sub)
+	}
+}
+
+func parseCommonArgs(name string, args []string, out io.Writer) (string, string, error) {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(out)
+	profile := fs.String("profile", defaultProfileValue(), "")
+	repoRoot := fs.String("repo-root", "", "")
+	if err := fs.Parse(args); err != nil {
+		return "", "", err
+	}
+	if len(fs.Args()) != 0 {
+		return "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+	}
+	return *profile, *repoRoot, nil
+}
+
+func parseStatusArgs(args []string, out io.Writer) (bool, string, string, error) {
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	fs.SetOutput(out)
+	asJSON := fs.Bool("json", false, "")
+	profile := fs.String("profile", defaultProfileValue(), "")
+	repoRoot := fs.String("repo-root", "", "")
+	if err := fs.Parse(args); err != nil {
+		return false, "", "", err
+	}
+	if len(fs.Args()) != 0 {
+		return false, "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+	}
+	return *asJSON, *profile, *repoRoot, nil
+}
+
+func parseLogArgs(args []string, out io.Writer) (string, int, string, string, error) {
+	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
+	fs.SetOutput(out)
+	service := fs.String("service", "docker-stack", "")
+	tail := fs.Int("tail", 200, "")
+	profile := fs.String("profile", defaultProfileValue(), "")
+	repoRoot := fs.String("repo-root", "", "")
+	if err := fs.Parse(args); err != nil {
+		return "", 0, "", "", err
+	}
+	if *service == "" {
+		return "", 0, "", "", fmt.Errorf("logs requires --service")
+	}
+	if len(fs.Args()) != 0 {
+		return "", 0, "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+	}
+	return *service, *tail, *profile, *repoRoot, nil
+}
+
+func parseExportDiagnosticsArgs(args []string, out io.Writer) (string, string, string, error) {
+	fs := flag.NewFlagSet("export-diagnostics", flag.ContinueOnError)
+	fs.SetOutput(out)
+	output := fs.String("output", "", "")
+	profile := fs.String("profile", defaultProfileValue(), "")
+	repoRoot := fs.String("repo-root", "", "")
+	if err := fs.Parse(args); err != nil {
+		return "", "", "", err
+	}
+	if *output == "" {
+		return "", "", "", fmt.Errorf("export-diagnostics requires --output")
+	}
+	if len(fs.Args()) != 0 {
+		return "", "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
+	}
+	return *output, *profile, *repoRoot, nil
+}
+
+func (c *CLI) usage() {
+	_, _ = io.WriteString(c.out, "Usage:\n")
+	_, _ = io.WriteString(c.out, "  lazymind-local up --profile <profile>\n")
+	_, _ = io.WriteString(c.out, "  lazymind-local down --profile <profile>\n")
+	_, _ = io.WriteString(c.out, "  lazymind-local restart --profile <profile>\n")
+	_, _ = io.WriteString(c.out, "  lazymind-local status --json\n")
+	_, _ = io.WriteString(c.out, "  lazymind-local logs --service docker-stack --tail 200\n")
+	_, _ = io.WriteString(c.out, "  lazymind-local doctor\n")
+	_, _ = io.WriteString(c.out, "  lazymind-local export-diagnostics --output <path>\n")
+	_, _ = io.WriteString(c.out, "  lazymind-local internal compose-up|compose-down|compose-ready|compose-services --profile <profile>\n")
+}

@@ -64,6 +64,7 @@ docs/superpowers/
 # Fortran module files
 *.mod
 *.smod
+!local/local-runtime-manager/go.mod
 
 # Compiled Static libraries
 *.lai
@@ -87,7 +88,9 @@ lazyllm_cpp.egg-info/
 .venv-test/
 data/
 volumes/
+.lazymind-local/
 .conda
+local/local-runtime-manager/lazymind-local
 
 # evo runtime artifacts
 evo/output/
