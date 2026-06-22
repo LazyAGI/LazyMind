@@ -245,13 +245,22 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 	var finalListIndex *int
 
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Compute next revision number across all revisions for this (session, slot).
+		// Compute next revision number scoped to (session, slot, list_index) so each
+		// list item has its own independent version counter starting at 1.
+		// For a new list append (listIndex == nil), this is always the first revision.
 		var maxRev int
-		if err := tx.Model(&orm.PluginSlotRevision{}).
-			Select("COALESCE(MAX(revision), 0)").
-			Where("session_id = ? AND slot_id = ?", sessionID, slotID).
-			Scan(&maxRev).Error; err != nil {
-			return err
+		if cardinality != "list" || listIndex != nil {
+			q := tx.Model(&orm.PluginSlotRevision{}).
+				Select("COALESCE(MAX(revision), 0)").
+				Where("session_id = ? AND slot_id = ?", sessionID, slotID)
+			if cardinality == "list" && listIndex != nil {
+				q = q.Where("list_index = ?", *listIndex)
+			} else {
+				q = q.Where("list_index IS NULL")
+			}
+			if err := q.Scan(&maxRev).Error; err != nil {
+				return err
+			}
 		}
 		revision = maxRev + 1
 
@@ -340,12 +349,22 @@ func WriteSlotRevisionWithSnapshot(ctx context.Context, db *gorm.DB,
 	var finalListIndex *int
 
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Compute next revision number scoped to (session, slot, list_index) so each
+		// list item has its own independent version counter starting at 1.
+		// For a new list append (listIndex == nil), this is always the first revision.
 		var maxRev int
-		if err := tx.Model(&orm.PluginSlotRevision{}).
-			Select("COALESCE(MAX(revision), 0)").
-			Where("session_id = ? AND slot_id = ?", sessionID, slotID).
-			Scan(&maxRev).Error; err != nil {
-			return err
+		if cardinality != "list" || listIndex != nil {
+			q := tx.Model(&orm.PluginSlotRevision{}).
+				Select("COALESCE(MAX(revision), 0)").
+				Where("session_id = ? AND slot_id = ?", sessionID, slotID)
+			if cardinality == "list" && listIndex != nil {
+				q = q.Where("list_index = ?", *listIndex)
+			} else {
+				q = q.Where("list_index IS NULL")
+			}
+			if err := q.Scan(&maxRev).Error; err != nil {
+				return err
+			}
 		}
 		revision = maxRev + 1
 

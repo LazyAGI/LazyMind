@@ -171,7 +171,7 @@ export interface InnerTabsNode {
 export interface TabDef {
   id: string;
   label: string;
-  layout?: "grid" | "list" | "composite";
+  layout?: "grid" | "list" | "composite" | "horizontal";
   slots: SlotDef[];
   /** Only present when layout === "composite". Each element describes one column. */
   composite_layout?: CompositeLayoutNode[];

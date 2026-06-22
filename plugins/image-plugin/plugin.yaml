@@ -74,7 +74,7 @@ ui:
 
     - id: result
       label: Result
-      layout: list
+      layout: horizontal
       slots:
         - id: enhanced_image_output
           label: Enhanced Images

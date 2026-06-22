@@ -10,9 +10,84 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/doc"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 )
+
+// resolveValuePaths normalises a human-uploaded value by ensuring it carries a stable
+// absolute path when the value contains a local file path.
+// Signed URL generation is intentionally NOT done here — signed URLs expire and must
+// be generated fresh on every API response (see signArtifactImagePath called from
+// enrichSlots and GetSlotItemVersions).
+// Values that are not JSON objects with a path field are returned unchanged.
+func resolveValuePaths(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return raw
+	}
+	pathVal, ok := m["path"].(string)
+	if !ok || pathVal == "" {
+		return raw
+	}
+	// Strip any pre-existing url field so callers always re-sign on read.
+	delete(m, "url")
+	out, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+// signArtifactImagePath enriches an artifact value with a signed URL when it contains
+// a local file path. Works for both AI-generated artifacts and human-uploaded snapshots.
+// External http(s) URLs stored in the path field are moved to the url field for consistent
+// frontend handling. Local paths are signed fresh (avoiding stale signed URLs in the DB).
+// The path field is preserved alongside url so the algorithm layer can still read the file.
+// Values without a path field, or that already have a url field, are returned unchanged.
+// The contentType parameter is used only to skip non-image processing; pass "image" when
+// the content type is known, or pass "" to attempt signing for any path-bearing value.
+func signArtifactImagePath(raw json.RawMessage, contentType string) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+	if contentType != "" && contentType != "image" {
+		return raw
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return raw
+	}
+	pathVal, _ := m["path"].(string)
+	if pathVal == "" {
+		return raw
+	}
+	// Always re-sign regardless of existing url — stored urls may have expired.
+	// External URL stored in path field — move it to url for consistent frontend handling.
+	if len(pathVal) >= 8 && (pathVal[:7] == "http://" || pathVal[:8] == "https://") {
+		m["url"] = pathVal
+		delete(m, "path")
+		out, err := json.Marshal(m)
+		if err != nil {
+			return raw
+		}
+		return out
+	}
+	// Local path: generate signed URL and keep path for algorithm access.
+	signed := doc.StaticFileURLFromFullPath(pathVal)
+	if signed == "" {
+		return raw
+	}
+	m["url"] = signed
+	out, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return out
+}
 
 // sessionDTO is the frontend shape for a PluginSession.
 type sessionDTO struct {
@@ -220,8 +295,16 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 			// when content_type="file" the value JSON carries {"type":"<real>","path":"..."}
 			// which tells us the actual type to send to the frontend for correct rendering.
 			slot.ContentType = resolveContentType(chosen.ContentType, chosen.Value)
-			slot.ArtifactValue = chosen.Value
+			slot.ArtifactValue = signArtifactImagePath(chosen.Value, slot.ContentType)
 			slot.Caption = chosen.Caption
+		}
+		// For human revisions, content_snapshot holds the actual uploaded value and takes
+		// precedence over the AI artifact fetched above (which belongs to the original step).
+		if slot.ChangeSource == "human" && len(slot.ContentSnapshot) > 0 {
+			slot.ArtifactValue = signArtifactImagePath(slot.ContentSnapshot, "")
+			if slot.ContentType == "" {
+				slot.ContentType = "image"
+			}
 		}
 
 		// Revision count.
@@ -752,7 +835,7 @@ func PatchSlotItem(w http.ResponseWriter, r *http.Request) {
 			return "single"
 		}(),
 		existing.ListIndex,
-		body.Value, "human",
+		resolveValuePaths(body.Value), "human",
 	)
 	if err != nil {
 		common.ReplyErr(w, "write revision failed", http.StatusInternalServerError)
@@ -873,7 +956,7 @@ func GetSlotItemVersions(w http.ResponseWriter, r *http.Request) {
 			"selected":      rev.Selected,
 		}
 		if len(rev.ContentSnapshot) > 0 {
-			item["content_snapshot"] = rev.ContentSnapshot
+			item["content_snapshot"] = signArtifactImagePath(rev.ContentSnapshot, "")
 		}
 		out = append(out, item)
 	}
@@ -1082,7 +1165,7 @@ func CreateSlotItem(w http.ResponseWriter, r *http.Request) {
 	// Write new list revision with nil listIndex (auto-appends).
 	newRev, err := WriteSlotRevisionWithSnapshot(ctx, db,
 		sessionID, slotID, anyRev.ArtifactKey, anyRev.StepID, anyRev.Attempt,
-		"list", nil, body.Value, "human",
+		"list", nil, resolveValuePaths(body.Value), "human",
 	)
 	if err != nil {
 		common.ReplyErr(w, "create item failed", http.StatusInternalServerError)

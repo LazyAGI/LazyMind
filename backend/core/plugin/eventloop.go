@@ -507,6 +507,8 @@ func OnSubAgentDoneSnapshot(
 				continue
 			}
 		}
+		// Store the raw artifact value as snapshot (path, not signed URL).
+		// Signed URLs expire; signing is done fresh at read time in GetSlotItemVersions.
 		if err := db.WithContext(ctx).Model(&orm.PluginSlotRevision{}).
 			Where("id = ?", rev.ID).
 			Updates(map[string]any{

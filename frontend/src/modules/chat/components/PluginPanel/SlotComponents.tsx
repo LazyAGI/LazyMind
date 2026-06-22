@@ -251,11 +251,13 @@ export function SlotVersionPopover({
   const isImage = contentType === 'image';
 
   // Extract plain text/URL from a content_snapshot or artifact_value.
+  // For image slots, url/path values are passed through resolveCoreAssetUrl so that
+  // relative /static-files/... paths are correctly expanded to absolute browser URLs.
   const extractText = (snapshot: any): string => {
     if (!snapshot) return '';
     if (typeof snapshot === 'string') return snapshot;
-    if (snapshot?.url) return snapshot.url;
-    if (snapshot?.path) return snapshot.path;
+    if (snapshot?.url) return isImage ? resolveCoreAssetUrl(snapshot.url) : snapshot.url;
+    if (snapshot?.path) return isImage ? resolveCoreAssetUrl(snapshot.path) : snapshot.path;
     if (snapshot?.text !== undefined) return String(snapshot.text);
     if (snapshot?.data !== undefined) {
       return typeof snapshot.data === 'string' ? snapshot.data : JSON.stringify(snapshot.data, null, 2);
@@ -329,14 +331,16 @@ export function SlotVersionPopover({
                 >‹</button>
               )}
               <div className='plugin-slot__version-preview-img-wrap'>
-                {previewedVersion && (
+                {previewedVersion && extractText(previewedVersion.content_snapshot) ? (
                   <img
                     key={previewedVersion.revision}
                     className='plugin-slot__version-preview-img'
-                    src={extractText(previewedVersion.content_snapshot) || extractText(currentValue)}
+                    src={extractText(previewedVersion.content_snapshot)}
                     alt=''
                   />
-                )}
+                ) : previewedVersion ? (
+                  <span className='plugin-slot__version-preview-empty'>暂无图片</span>
+                ) : null}
               </div>
               {versions.length > 1 && (
                 <button
@@ -361,11 +365,15 @@ export function SlotVersionPopover({
                   aria-label={`版本 V${v.revision}`}
                 >
                   <div className='plugin-slot__version-thumb-img-wrap'>
-                    <img
-                      className='plugin-slot__version-thumb-img'
-                      src={extractText(v.content_snapshot) || extractText(currentValue)}
-                      alt=''
-                    />
+                    {extractText(v.content_snapshot) ? (
+                      <img
+                        className='plugin-slot__version-thumb-img'
+                        src={extractText(v.content_snapshot)}
+                        alt=''
+                      />
+                    ) : (
+                      <span className='plugin-slot__version-thumb-empty'>—</span>
+                    )}
                     <span className='plugin-slot__version-thumb-badge'>V{v.revision}</span>
                   </div>
                   {v.selected && (
@@ -524,7 +532,7 @@ export function SlotImage({
   onReference,
 }: SlotImageProps) {
   const raw = slot.artifact_value;
-  const url: string = raw?.url || (raw?.path ? resolveCoreAssetUrl(raw.path) : '');
+  const url: string = raw?.url ? resolveCoreAssetUrl(raw.url) : (raw?.path ? resolveCoreAssetUrl(raw.path) : '');
   const alt: string = slot.caption ?? raw?.alt ?? '';
   const { deleteSlotItem, patchSlotCaption, patchSlotItemValue } = usePluginStore();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -989,7 +997,7 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
 
 export function SlotFile({ slot }: { slot: SlotRevision }) {
   const raw = slot.artifact_value;
-  const url: string = raw?.url || (raw?.path ? resolveCoreAssetUrl(raw.path) : '');
+  const url: string = raw?.url ? resolveCoreAssetUrl(raw.url) : (raw?.path ? resolveCoreAssetUrl(raw.path) : '');
   const name: string = raw?.filename ?? raw?.name ?? slot.artifact_key;
   const size: number | undefined = raw?.size;
 
