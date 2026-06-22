@@ -465,10 +465,6 @@ type agentFileContentOpenAPIResponse struct {
 	FileSize int64  `json:"file_size"`
 }
 
-type agentThreadPathParams struct {
-	ThreadID string `path:"thread_id"`
-}
-
 type agentTracePathParams struct {
 	ThreadID string `path:"thread_id"`
 	TraceID  string `path:"trace_id"`
@@ -486,6 +482,10 @@ type agentThreadPathParams struct {
 type agentThreadListQueryParams struct {
 	PageSize  int32  `query:"page_size"`
 	PageToken string `query:"page_token"`
+}
+
+type agentThreadPathParams struct {
+	ThreadID string `path:"thread_id"`
 }
 
 type agentThreadOpenAPIResponse struct {
