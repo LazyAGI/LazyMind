@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePluginSession } from '@/modules/chat/hooks/usePlugin';
 import { usePluginStore } from '@/modules/chat/store/pluginPanel';
+import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import type {
   PluginSession,
   SlotRevision,
@@ -12,7 +13,7 @@ import type {
   CompositeColumnNode,
   InnerTabsNode,
 } from '@/modules/chat/store/pluginPanel';
-import { SlotRenderer } from './SlotComponents';
+import { SlotRenderer, SlotEditingContext } from './SlotComponents';
 import './PluginPanel.scss';
 
 interface PluginPanelProps {
@@ -340,6 +341,7 @@ function SortableImageList({
   onRefresh,
   onReference,
   onFocusSortOrder,
+  onAddItem,
 }: {
   revisions: SlotRevision[];
   session: PluginSession;
@@ -348,6 +350,7 @@ function SortableImageList({
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
+  onAddItem?: () => void;
 }) {
   const reorderSlotItems = usePluginStore((s) => s.reorderSlotItems);
   const loadSlotOrder = usePluginStore((s) => s.loadSlotOrder);
@@ -468,6 +471,19 @@ function SortableImageList({
           </React.Fragment>
         );
       })}
+      {/* Add new item card */}
+      {onAddItem && (
+        <button
+          className='plugin-panel__image-add-card'
+          onClick={onAddItem}
+          title='新增附件'
+          aria-label='新增附件'
+          type='button'
+        >
+          <span className='plugin-panel__image-add-card-icon'>+</span>
+          <span className='plugin-panel__image-add-card-label'>新增附件</span>
+        </button>
+      )}
     </div>
   );
 }
@@ -485,6 +501,29 @@ function TabSlotGrid({
   onReference?: (slot: SlotRevision) => void;
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
 }) {
+  const addFileInputRef = useRef<HTMLInputElement>(null);
+  const addingSlotIdRef = useRef<string>('');
+  const { createSlotItem } = usePluginStore();
+
+  const handleAddItem = useCallback((slotId: string) => {
+    addingSlotIdRef.current = slotId;
+    addFileInputRef.current?.click();
+  }, []);
+
+  const handleAddFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const slotId = addingSlotIdRef.current;
+    if (!slotId) return;
+    try {
+      const storedPath = await uploadFileInChunks(file);
+      await createSlotItem(session.session_id, slotId, { path: storedPath }, file.name);
+      onRefresh?.();
+    } catch {
+      // upload failure — no-op
+    }
+  }, [session.session_id, createSlotItem, onRefresh]);
   if (tab.layout === 'composite') {
     return (
       <CompositeSlotGrid
@@ -498,6 +537,15 @@ function TabSlotGrid({
   }
   return (
     <div className={`plugin-panel__tab-content plugin-panel__tab-content--${tab.layout ?? 'list'}`}>
+      {/* Hidden file input for adding new items */}
+      <input
+        ref={addFileInputRef}
+        type='file'
+        accept='image/*'
+        style={{ display: 'none' }}
+        onChange={handleAddFileChange}
+        aria-hidden='true'
+      />
       {tab.slots.map((slotDef) => {
         const artifactKey = slotDef.artifact_key ?? slotDef.id;
         const revisions = (session.slots ?? []).filter(
@@ -526,6 +574,7 @@ function TabSlotGrid({
                 onRefresh={onRefresh}
                 onReference={onReference}
                 onFocusSortOrder={onFocusSortOrder}
+                onAddItem={() => handleAddItem(slotDef.id)}
               />
             ) : (
               revisions.map((rev) => (
@@ -577,6 +626,18 @@ export function PluginPanel({
   const setFocusedTab = usePluginStore((s) => s.setFocusedTab);
   const setFocusedSortOrder = usePluginStore((s) => s.setFocusedSortOrder);
   const [ui, setUI] = useState<PluginUI>({});
+  // Track which text slots are currently being edited; disable footer buttons while any are.
+  const editingSlots = useRef<Set<string>>(new Set());
+  const [anySlotEditing, setAnySlotEditing] = useState(false);
+
+  const handleSlotEditingChange = useCallback((key: string, editing: boolean) => {
+    if (editing) {
+      editingSlots.current.add(key);
+    } else {
+      editingSlots.current.delete(key);
+    }
+    setAnySlotEditing(editingSlots.current.size > 0);
+  }, []);
 
   useEffect(() => {
     if (!session?.plugin_id) return;
@@ -622,7 +683,7 @@ export function PluginPanel({
     session.status === 'active' ||
     session.status === 'completed' ||
     session.status === 'failed';
-  const buttonsDisabled = session.status === 'active';
+  const buttonsDisabled = session.status === 'active' || anySlotEditing;
   const showContinue =
     session.status === 'waiting' || session.status === 'active';
 
@@ -637,6 +698,7 @@ export function PluginPanel({
   }
 
   return (
+    <SlotEditingContext.Provider value={{ setEditing: handleSlotEditingChange }}>
     <div
       className={`plugin-panel plugin-panel--${session.status}${collapsed ? ' plugin-panel--collapsed' : ''}`}
       data-session-id={session.session_id}
@@ -753,5 +815,6 @@ export function PluginPanel({
         </div>
       )}
     </div>
+    </SlotEditingContext.Provider>
   );
 }

@@ -9,6 +9,19 @@ from __future__ import annotations
 import random
 import time
 
+_WORDS = [
+    'aurora', 'blaze', 'canyon', 'drift', 'ember', 'frost', 'grove', 'haze',
+    'ivory', 'jade', 'kite', 'lune', 'mist', 'nova', 'opal', 'pine',
+    'quill', 'reed', 'sage', 'tide', 'umber', 'vale', 'wave', 'xenon',
+    'yarn', 'zeal', 'arch', 'birch', 'crest', 'dawn',
+]
+
+
+def _placeholder(words: int = 2) -> str:
+    """Return a placehold.co URL with random English words as label text."""
+    label = '+'.join(random.sample(_WORDS, words))
+    return f'https://placehold.co/600x400?text={label}'
+
 
 def web_search_tool(query: str) -> str:
     """Search the web for information relevant to an image project.
@@ -38,12 +51,8 @@ def image_search_tool(query: str) -> str:
         A newline-separated list of mock image URLs.
     """
     time.sleep(0.2)
-    seed = abs(hash(query)) % 1000
-    urls = [
-        f'https://mock-images.example.com/ref/{seed}_1.jpg',
-        f'https://mock-images.example.com/ref/{seed}_2.jpg',
-        f'https://mock-images.example.com/ref/{seed}_3.jpg',
-    ]
+    count = random.randint(2, 3)
+    urls = [_placeholder(random.randint(2, 3)) for _ in range(count)]
     return '\n'.join(urls)
 
 
@@ -57,7 +66,4 @@ def generate_image_tool(prompt: str) -> str:
         The URL of the generated image.
     """
     time.sleep(0.3)
-    seed = abs(hash(prompt)) % 99999
-    variation = random.randint(100, 999)
-    url = f'https://mock-images.example.com/generated/{seed}_{variation}.png'
-    return url
+    return _placeholder(random.randint(2, 3))

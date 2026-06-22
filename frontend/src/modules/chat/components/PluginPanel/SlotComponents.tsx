@@ -1,9 +1,21 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo, createContext, useContext } from "react";
 import ReactDOM from "react-dom";
 import type { SlotRevision, SlotVersionEntry } from "@/modules/chat/store/pluginPanel";
 import { usePluginStore, draftStore } from "@/modules/chat/store/pluginPanel";
 import { resolveCoreAssetUrl } from "@/modules/knowledge/utils/imageUrl";
 import { buildDiffLines } from "@/modules/memory/shared";
+import { uploadFileInChunks } from "@/modules/chat/utils/chunkUpload";
+
+/**
+ * Context for notifying the parent PluginPanel when any text slot enters/exits editing mode.
+ * The parent uses this to disable the Retry / Continue footer buttons.
+ */
+interface SlotEditingContextValue {
+  setEditing: (key: string, editing: boolean) => void;
+}
+export const SlotEditingContext = createContext<SlotEditingContextValue>({
+  setEditing: () => {},
+});
 
 /**
  * Normalize the content_type returned by the Python backend.
@@ -47,23 +59,40 @@ interface TextDiffViewProps {
   currentText: string;
   otherText: string;
   otherLabel: string;
+  /** When true, otherText is the newer version (green) and currentText is the older one (red). */
+  reversed?: boolean;
 }
 
-function TextDiffView({ currentText, otherText, otherLabel }: TextDiffViewProps) {
+function TextDiffView({ currentText, otherText, otherLabel, reversed }: TextDiffViewProps) {
   const diffLines = useMemo(
-    () => buildDiffLines(otherText, currentText),
-    [currentText, otherText],
+    () => reversed
+      ? buildDiffLines(currentText, otherText)
+      : buildDiffLines(otherText, currentText),
+    [currentText, otherText, reversed],
   );
 
   return (
     <div className='plugin-slot__version-diff'>
       <div className='plugin-slot__version-diff-header'>
-        <span className='plugin-slot__version-diff-label plugin-slot__version-diff-label--remove'>
-          {otherLabel}
-        </span>
-        <span className='plugin-slot__version-diff-label plugin-slot__version-diff-label--add'>
-          当前版本
-        </span>
+        {reversed ? (
+          <>
+            <span className='plugin-slot__version-diff-label plugin-slot__version-diff-label--remove'>
+              当前版本
+            </span>
+            <span className='plugin-slot__version-diff-label plugin-slot__version-diff-label--add'>
+              {otherLabel}
+            </span>
+          </>
+        ) : (
+          <>
+            <span className='plugin-slot__version-diff-label plugin-slot__version-diff-label--remove'>
+              {otherLabel}
+            </span>
+            <span className='plugin-slot__version-diff-label plugin-slot__version-diff-label--add'>
+              当前版本
+            </span>
+          </>
+        )}
       </div>
       <div className='plugin-slot__version-diff-body'>
         {diffLines.map((line, index) => (
@@ -129,6 +158,8 @@ interface SlotVersionPopoverProps {
   slotId: string;
   sortOrder: number;
   revisionCount: number;
+  /** The revision number of the currently selected version — shown on the badge. */
+  currentRevision?: number;
   currentValue?: any;
   currentChangeSource?: 'ai' | 'human';
   contentType?: string;
@@ -140,8 +171,8 @@ export function SlotVersionPopover({
   slotId,
   sortOrder,
   revisionCount,
+  currentRevision,
   currentValue,
-  currentChangeSource,
   contentType,
   onRollbackDone,
 }: SlotVersionPopoverProps) {
@@ -149,9 +180,13 @@ export function SlotVersionPopover({
   const [open, setOpen] = useGlobalPopoverOpen(popoverKey);
   const [versions, setVersions] = useState<SlotVersionEntry[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedRevision, setSelectedRevision] = useState<SlotVersionEntry | null>(null);
+  // previewIndex: index into versions[] of the currently previewed version
+  const [previewIndex, setPreviewIndex] = useState<number>(0);
   const [rolling, setRolling] = useState(false);
-  const { getSlotVersions, rollbackSlotItem } = usePluginStore();
+  const [selectedRevision, setSelectedRevision] = useState<SlotVersionEntry | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const versionUploadRef = useRef<HTMLInputElement>(null);
+  const { getSlotVersions, rollbackSlotItem, patchSlotItemValue } = usePluginStore();
 
   const handleOpen = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -162,9 +197,12 @@ export function SlotVersionPopover({
     setLoading(true);
     try {
       const vs = await getSlotVersions(sessionId, slotId, sortOrder);
-      setVersions(vs);
-      const current = vs.find((v) => v.selected) ?? vs[vs.length - 1] ?? null;
-      setSelectedRevision(current);
+      // Sort descending by revision so latest is first
+      const sorted = [...vs].sort((a, b) => b.revision - a.revision);
+      setVersions(sorted);
+      // Default to the currently selected (current) version
+      const currentIdx = sorted.findIndex((v) => v.selected);
+      setPreviewIndex(currentIdx >= 0 ? currentIdx : 0);
       setOpen(true);
     } finally {
       setLoading(false);
@@ -188,22 +226,62 @@ export function SlotVersionPopover({
     }
   }, [sessionId, slotId, sortOrder, rollbackSlotItem, setOpen, onRollbackDone]);
 
-  const isImage = contentType === 'image';
-  const badge = currentChangeSource === 'human' ? '✏' : undefined;
+  const handleVersionUploadClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    versionUploadRef.current?.click();
+  }, []);
 
-  // Extract plain text from a content_snapshot or artifact_value.
-  // Prefers .text field so JSON wrapper ({"text": "..."}) is never shown.
+  const handleVersionFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploading(true);
+    try {
+      const storedPath = await uploadFileInChunks(file);
+      await patchSlotItemValue(sessionId, slotId, sortOrder, { path: storedPath });
+      setOpen(false);
+      onRollbackDone?.();
+    } catch {
+      // upload failure — no-op
+    } finally {
+      setUploading(false);
+    }
+  }, [sessionId, slotId, sortOrder, patchSlotItemValue, setOpen, onRollbackDone]);
+
+  const isImage = contentType === 'image';
+
+  // Extract plain text/URL from a content_snapshot or artifact_value.
   const extractText = (snapshot: any): string => {
     if (!snapshot) return '';
     if (typeof snapshot === 'string') return snapshot;
+    if (snapshot?.url) return snapshot.url;
+    if (snapshot?.path) return snapshot.path;
     if (snapshot?.text !== undefined) return String(snapshot.text);
     if (snapshot?.data !== undefined) {
       return typeof snapshot.data === 'string' ? snapshot.data : JSON.stringify(snapshot.data, null, 2);
     }
-    const url = snapshot?.url || snapshot?.path;
-    if (url) return url;
     return JSON.stringify(snapshot, null, 2);
   };
+
+  const previewedVersion = versions[previewIndex] ?? null;
+  // The currently-selected (active) version
+  const currentVersion = versions.find((v) => v.selected) ?? versions[0] ?? null;
+  // Whether the previewed version is already the current one
+  const isPreviewingCurrent = previewedVersion?.selected ?? false;
+
+  // Format date as MM/DD HH:mm
+  const formatDate = (isoStr: string) => {
+    const d = new Date(isoStr);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${mm}/${dd} ${hh}:${min}`;
+  };
+
+  // selectedRevision: the version the user clicked in the left list (text mode)
+  // Keep selectedRevision in sync when versions reload
+  const effectiveSelected = selectedRevision ?? currentVersion;
 
   const popoverContent = open ? ReactDOM.createPortal(
     <div
@@ -212,106 +290,190 @@ export function SlotVersionPopover({
       role='presentation'
     >
       <div
-        className='plugin-slot__version-popover'
+        className={`plugin-slot__version-popover${isImage ? ' plugin-slot__version-popover--image' : ''}`}
         role='dialog'
         aria-label='版本历史'
         aria-modal='true'
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Header */}
         <div className='plugin-slot__version-popover-header'>
-          <span>版本历史</span>
+          <span className='plugin-slot__version-popover-title'>版本历史</span>
           <button
             className='plugin-slot__version-popover-close'
             onClick={handleClose}
             aria-label='关闭版本历史'
           >×</button>
         </div>
-        <div className='plugin-slot__version-popover-body'>
-          <ul className='plugin-slot__version-list' role='listbox' aria-label='版本列表'>
-            {versions.map((v) => (
-              <li
-                key={v.revision}
-                role='option'
-                aria-selected={selectedRevision?.revision === v.revision}
-                className={[
-                  'plugin-slot__version-item',
-                  v.selected ? 'plugin-slot__version-item--current' : '',
-                  selectedRevision?.revision === v.revision ? 'plugin-slot__version-item--focused' : '',
-                ].join(' ')}
-                onClick={() => setSelectedRevision(v)}
+
+        {isImage ? (
+          /* ── Image mode: top-down layout ── */
+          <>
+            {currentVersion && (
+              <div className='plugin-slot__version-meta-row'>
+                <span className='plugin-slot__version-meta-label'>当前版本：</span>
+                <span className='plugin-slot__version-meta-badge'>V{currentVersion.revision}</span>
+                <span className='plugin-slot__version-meta-time'>
+                  创建时间：{formatDate(currentVersion.created_at)}
+                </span>
+              </div>
+            )}
+
+            <div className='plugin-slot__version-preview-area'>
+              {versions.length > 1 && (
+                <button
+                  className='plugin-slot__version-nav plugin-slot__version-nav--prev'
+                  onClick={() => setPreviewIndex((i) => Math.max(0, i - 1))}
+                  disabled={previewIndex === 0}
+                  aria-label='上一版本'
+                >‹</button>
+              )}
+              <div className='plugin-slot__version-preview-img-wrap'>
+                {previewedVersion && (
+                  <img
+                    key={previewedVersion.revision}
+                    className='plugin-slot__version-preview-img'
+                    src={extractText(previewedVersion.content_snapshot) || extractText(currentValue)}
+                    alt=''
+                  />
+                )}
+              </div>
+              {versions.length > 1 && (
+                <button
+                  className='plugin-slot__version-nav plugin-slot__version-nav--next'
+                  onClick={() => setPreviewIndex((i) => Math.min(versions.length - 1, i + 1))}
+                  disabled={previewIndex === versions.length - 1}
+                  aria-label='下一版本'
+                >›</button>
+              )}
+            </div>
+
+            <div className='plugin-slot__version-strip'>
+              {versions.map((v, idx) => (
+                <button
+                  key={v.revision}
+                  className={[
+                    'plugin-slot__version-thumb',
+                    idx === previewIndex ? 'plugin-slot__version-thumb--active' : '',
+                    v.selected ? 'plugin-slot__version-thumb--current' : '',
+                  ].join(' ')}
+                  onClick={() => setPreviewIndex(idx)}
+                  aria-label={`版本 V${v.revision}`}
+                >
+                  <div className='plugin-slot__version-thumb-img-wrap'>
+                    <img
+                      className='plugin-slot__version-thumb-img'
+                      src={extractText(v.content_snapshot) || extractText(currentValue)}
+                      alt=''
+                    />
+                    <span className='plugin-slot__version-thumb-badge'>V{v.revision}</span>
+                  </div>
+                  {v.selected && (
+                    <span className='plugin-slot__version-thumb-current-tag'>当前版本</span>
+                  )}
+                </button>
+              ))}
+              {/* Upload new version card */}
+              <button
+                className='plugin-slot__version-thumb plugin-slot__version-thumb--upload'
+                onClick={handleVersionUploadClick}
+                disabled={uploading}
+                aria-label='上传并选择'
+                type='button'
               >
-                <span className='plugin-slot__version-label'>
-                  <span className={`plugin-slot__version-source-badge plugin-slot__version-source-badge--${v.change_source}`}>
-                    {v.change_source === 'human' ? '手动' : 'AI'}
+                <span className='plugin-slot__version-thumb-upload-icon'>+</span>
+                <span className='plugin-slot__version-thumb-upload-label'>
+                  {uploading ? '上传中…' : '上传并选择'}
+                </span>
+              </button>
+              <input
+                ref={versionUploadRef}
+                type='file'
+                accept='image/*'
+                style={{ display: 'none' }}
+                onChange={handleVersionFileChange}
+                aria-hidden='true'
+              />
+            </div>
+
+            <div className='plugin-slot__version-footer'>
+              <div className='plugin-slot__version-footer-actions'>
+                <button className='plugin-slot__version-footer-cancel' onClick={handleClose}>取消</button>
+                <button
+                  className='plugin-slot__version-footer-apply'
+                  disabled={rolling || isPreviewingCurrent || !previewedVersion}
+                  onClick={() => previewedVersion && handleRollback(previewedVersion.revision)}
+                >
+                  {rolling ? '回退中…' : '设为当前版本'}
+                </button>
+              </div>
+              {previewedVersion && !isPreviewingCurrent && (
+                <p className='plugin-slot__version-footer-hint'>
+                  设为当前版本后，内容将更新为该版本，其他版本不受影响
+                </p>
+              )}
+            </div>
+          </>
+        ) : (
+          /* ── Text mode: left list + right diff ── */
+          <div className='plugin-slot__version-popover-body'>
+            <ul className='plugin-slot__version-list' role='listbox' aria-label='版本列表'>
+              {versions.map((v) => (
+                <li
+                  key={v.revision}
+                  role='option'
+                  aria-selected={effectiveSelected?.revision === v.revision}
+                  className={[
+                    'plugin-slot__version-item',
+                    v.selected ? 'plugin-slot__version-item--current' : '',
+                    effectiveSelected?.revision === v.revision ? 'plugin-slot__version-item--focused' : '',
+                  ].join(' ')}
+                  onClick={() => setSelectedRevision(v)}
+                >
+                  <span className='plugin-slot__version-label'>
+                    <span className={`plugin-slot__version-source-badge plugin-slot__version-source-badge--${v.change_source}`}>
+                      {v.change_source === 'human' ? '手动' : 'AI'}
+                    </span>
+                    v{v.revision}
+                    {v.selected && <span className='plugin-slot__version-current-tag'>当前</span>}
                   </span>
-                  v{v.revision}
-                  {v.selected && <span className='plugin-slot__version-current-tag'>当前</span>}
-                </span>
-                <span className='plugin-slot__version-time'>
-                  {new Date(v.created_at).toLocaleString()}
-                </span>
-              </li>
-            ))}
-          </ul>
-          {selectedRevision && !selectedRevision.selected ? (
-            <div className='plugin-slot__version-compare'>
-              {isImage ? (
-                <div className='plugin-slot__version-compare-cols'>
-                  <div className='plugin-slot__version-compare-col'>
-                    <div className='plugin-slot__version-compare-label'>当前版本</div>
-                    <img
-                      className='plugin-slot__version-compare-img'
-                      src={extractText(currentValue)}
-                      alt='当前版本'
-                    />
-                  </div>
-                  <div className='plugin-slot__version-compare-col'>
-                    <div className='plugin-slot__version-compare-label'>
-                      {`v${selectedRevision.revision} · ${selectedRevision.change_source === 'human' ? '手动编辑' : 'AI 生成'}`}
-                    </div>
-                    <img
-                      className='plugin-slot__version-compare-img'
-                      src={extractText(selectedRevision.content_snapshot)}
-                      alt={`v${selectedRevision.revision}`}
-                    />
-                  </div>
-                </div>
-              ) : (
+                  <span className='plugin-slot__version-time'>
+                    {new Date(v.created_at).toLocaleString()}
+                  </span>
+                </li>
+              ))}
+            </ul>
+
+            {effectiveSelected && !effectiveSelected.selected ? (
+              <div className='plugin-slot__version-compare'>
                 <TextDiffView
                   currentText={extractText(currentValue)}
-                  otherText={extractText(selectedRevision.content_snapshot)}
-                  otherLabel={`v${selectedRevision.revision} · ${selectedRevision.change_source === 'human' ? '手动编辑' : 'AI 生成'}`}
+                  otherText={extractText(effectiveSelected.content_snapshot)}
+                  otherLabel={`v${effectiveSelected.revision} · ${effectiveSelected.change_source === 'human' ? '手动编辑' : 'AI 生成'}`}
+                  reversed={currentVersion !== null && effectiveSelected.revision > currentVersion.revision}
                 />
-              )}
-              <button
-                className='plugin-slot__version-apply-btn'
-                disabled={rolling}
-                onClick={() => handleRollback(selectedRevision.revision)}
-                aria-label={`应用 v${selectedRevision.revision}`}
-              >
-                {rolling ? '回退中…' : `应用此版本 (v${selectedRevision.revision})`}
-              </button>
-            </div>
-          ) : (
-            <div className='plugin-slot__version-compare plugin-slot__version-compare--same'>
-              {selectedRevision ? (
-                isImage ? (
-                  <img
-                    className='plugin-slot__version-compare-img plugin-slot__version-compare-img--solo'
-                    src={extractText(currentValue)}
-                    alt='当前版本'
-                  />
-                ) : (
+                <button
+                  className='plugin-slot__version-apply-btn'
+                  disabled={rolling}
+                  onClick={() => handleRollback(effectiveSelected.revision)}
+                  aria-label={`应用 v${effectiveSelected.revision}`}
+                >
+                  {rolling ? '回退中…' : `应用此版本 (v${effectiveSelected.revision})`}
+                </button>
+              </div>
+            ) : (
+              <div className='plugin-slot__version-compare plugin-slot__version-compare--same'>
+                {effectiveSelected ? (
                   <pre className='plugin-slot__version-current-text'>
                     {extractText(currentValue) || '（无内容）'}
                   </pre>
-                )
-              ) : (
-                <div className='plugin-slot__version-compare-hint'>选择版本查看对比</div>
-              )}
-            </div>
-          )}
-        </div>
+                ) : (
+                  <div className='plugin-slot__version-compare-hint'>选择版本查看对比</div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>,
     document.body,
@@ -326,8 +488,7 @@ export function SlotVersionPopover({
         aria-label={`版本历史 (${revisionCount})`}
         disabled={loading}
       >
-        {badge && <span className='plugin-slot__version-badge' aria-hidden='true'>{badge}</span>}
-        <span className='plugin-slot__version-count'>{revisionCount > 1 ? `v${revisionCount}` : 'v1'}</span>
+        <span className='plugin-slot__version-count'>{currentRevision !== undefined ? `v${currentRevision}` : revisionCount > 1 ? `v${revisionCount}` : 'v1'}</span>
       </button>
       {popoverContent}
     </div>
@@ -365,10 +526,34 @@ export function SlotImage({
   const raw = slot.artifact_value;
   const url: string = raw?.url || (raw?.path ? resolveCoreAssetUrl(raw.path) : '');
   const alt: string = slot.caption ?? raw?.alt ?? '';
-  const { deleteSlotItem, patchSlotCaption } = usePluginStore();
+  const { deleteSlotItem, patchSlotCaption, patchSlotItemValue } = usePluginStore();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [captionEditing, setCaptionEditing] = useState(false);
   const [captionDraft, setCaptionDraft] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleUploadClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !sessionId || !slotId || slot.sort_order === undefined) return;
+    // Reset input so the same file can be re-selected later
+    e.target.value = '';
+    setUploading(true);
+    try {
+      const storedPath = await uploadFileInChunks(file);
+      await patchSlotItemValue(sessionId, slotId, slot.sort_order, { path: storedPath });
+      onRefresh?.();
+    } catch {
+      // upload failure — no-op, user can retry
+    } finally {
+      setUploading(false);
+    }
+  }, [sessionId, slotId, slot.sort_order, patchSlotItemValue, onRefresh]);
 
   const handleDeleteClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -412,71 +597,100 @@ export function SlotImage({
 
   if (!url) return <SlotPending type='image' cardMode={cardMode} />;
 
-  const actions = (sessionId && slotId && slot.sort_order !== undefined) ? (
-    <div className='plugin-slot__image-actions'>
-      {isDraggable && (
-        <span className='plugin-slot__drag-handle' title='拖拽排序' aria-hidden='true'>⠿</span>
-      )}
-      {onReference && (
-        <button
-          className='plugin-slot__ref-btn'
-          onClick={handleReference}
-          title='引用此图片'
-          aria-label='引用此图片'
-        >
-          📎
-        </button>
-      )}
+  const hasActions = Boolean(sessionId && slotId && slot.sort_order !== undefined);
+
+  // Overlays rendered directly on top of the image (no separate action bar)
+  const overlays = hasActions ? (
+    <>
+      {/* Delete + Upload buttons — top-right, shown on hover via CSS */}
       {confirmDelete ? (
-        <span className='plugin-slot__delete-confirm'>
+        <span className='plugin-slot__delete-confirm plugin-slot__delete-confirm--overlay'>
           <span className='plugin-slot__delete-confirm-text'>确认删除？</span>
           <button
             className='plugin-slot__delete-confirm-yes'
             onClick={handleDeleteConfirm}
             aria-label='确认删除'
-          >
-            删除
-          </button>
+          >删除</button>
           <button
             className='plugin-slot__delete-confirm-no'
             onClick={handleDeleteCancel}
             aria-label='取消删除'
-          >
-            取消
-          </button>
+          >取消</button>
         </span>
       ) : (
-        <button
-          className='plugin-slot__delete-btn'
-          onClick={handleDeleteClick}
-          title='删除'
-          aria-label='删除图片'
-        >
-          🗑
-        </button>
+        <span className='plugin-slot__top-right-actions'>
+          <button
+            className='plugin-slot__upload-overlay-btn'
+            onClick={handleUploadClick}
+            disabled={uploading}
+            title='上传并选择'
+            aria-label='上传并选择'
+          >
+            {uploading ? '…' : '+'}
+          </button>
+          <button
+            className='plugin-slot__delete-btn plugin-slot__delete-btn--overlay'
+            onClick={handleDeleteClick}
+            title='删除'
+            aria-label='删除图片'
+          >×</button>
+        </span>
       )}
+
+      {/* Version badge — bottom-left, always visible, overlaid on image */}
       {revisionCount !== undefined && revisionCount > 0 && (
-        <SlotVersionPopover
-          sessionId={sessionId}
-          slotId={slotId}
-          sortOrder={slot.sort_order}
-          revisionCount={revisionCount}
-          currentValue={slot.artifact_value}
-          currentChangeSource={slot.change_source}
-          contentType='image'
-          onRollbackDone={onRefresh}
-        />
+        <div className='plugin-slot__version-overlay-badge'>
+          <SlotVersionPopover
+            sessionId={sessionId!}
+            slotId={slotId!}
+            sortOrder={slot.sort_order!}
+            revisionCount={revisionCount}
+            currentRevision={slot.revision}
+            currentValue={slot.artifact_value}
+            currentChangeSource={slot.change_source}
+            contentType='image'
+            onRollbackDone={onRefresh}
+          />
+        </div>
       )}
-    </div>
+
+      {/* Reference button — bottom-right, shown on hover */}
+      {onReference && (
+        <button
+          className='plugin-slot__ref-btn plugin-slot__ref-btn--overlay'
+          onClick={handleReference}
+          title='引用此图片'
+          aria-label='引用此图片'
+        >📎</button>
+      )}
+
+      {/* Drag handle — bottom-left edge, shown on hover */}
+      {isDraggable && (
+        <span className='plugin-slot__drag-handle plugin-slot__drag-handle--overlay' title='拖拽排序' aria-hidden='true'>⠿</span>
+      )}
+    </>
   ) : null;
 
   if (cardMode) {
     return (
-      <div className='plugin-slot plugin-slot--image-card'>
-        <img src={url} alt={alt} className='plugin-slot__image-card-img' loading='lazy' />
-        {alt && <div className='plugin-slot__image-card-caption'>{alt}</div>}
-        {actions}
-        {sessionId && slotId && slot.sort_order !== undefined && (
+      <div className='plugin-slot plugin-slot--image-card-wrap'>
+        <div className='plugin-slot plugin-slot--image-card'>
+          <img src={url} alt={alt} className='plugin-slot__image-card-img' loading='lazy' />
+          {alt && <div className='plugin-slot__image-card-caption'>{alt}</div>}
+          {overlays}
+        </div>
+        {/* Hidden file input */}
+        {hasActions && (
+          <input
+            ref={fileInputRef}
+            type='file'
+            accept='image/*'
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+            aria-hidden='true'
+          />
+        )}
+        {hasActions && (
           <div className='plugin-slot__caption'>
             {captionEditing ? (
               <input
@@ -509,8 +723,8 @@ export function SlotImage({
   return (
     <div className='plugin-slot plugin-slot--image'>
       <img src={url} alt={alt} className='plugin-slot__image' loading='lazy' />
-      {actions}
-      {sessionId && slotId && slot.sort_order !== undefined && (
+      {overlays}
+      {hasActions && (
         <div className='plugin-slot__caption'>
           {captionEditing ? (
             <input
@@ -556,6 +770,8 @@ interface SlotTextProps {
 export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: SlotTextProps) {
   const raw = slot.artifact_value;
   const { patchSlotCaption } = usePluginStore();
+  const { setEditing: notifyEditing } = useContext(SlotEditingContext);
+  const editingKey = `${sessionId}:${slotId}:${slot.sort_order}`;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [offloadedText, setOffloadedText] = useState<string | null>(null);
@@ -621,6 +837,7 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
     const savedText = saved?.text !== undefined ? String(saved.text) : undefined;
     setDraft(savedText !== undefined && savedText !== text ? savedText : text);
     setEditing(true);
+    notifyEditing(editingKey, true);
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -648,6 +865,7 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
       }
     }
     setEditing(false);
+    notifyEditing(editingKey, false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -666,6 +884,7 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
       draftStore.cancelDraft(sessionId, slotId, slot.sort_order);
     }
     setEditing(false);
+    notifyEditing(editingKey, false);
   };
 
   // Caption helpers.
@@ -726,6 +945,7 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
                 slotId={slotId}
                 sortOrder={slot.sort_order}
                 revisionCount={revisionCount}
+                currentRevision={slot.revision}
                 currentValue={slot.artifact_value}
                 currentChangeSource={slot.change_source}
                 contentType='text'

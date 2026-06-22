@@ -671,135 +671,49 @@ func LoadSlotVersions(ctx context.Context, db *gorm.DB,
 	return rows, nil
 }
 
-// RollbackSlotRevision creates a new revision whose content_snapshot matches the target revision.
-// The new revision has change_source='human' and selected=TRUE.
+// RollbackSlotRevision switches the selected flag to the target revision.
+// The target revision becomes selected=TRUE; the previously selected revision becomes selected=FALSE.
+// No new revision row is created.
 func RollbackSlotRevision(ctx context.Context, db *gorm.DB,
 	sessionID, slotID string, listIndex *int,
-	targetRevision int, artifactKey string) (*orm.PluginSlotRevision, error) {
+	targetRevision int, _ string) (*orm.PluginSlotRevision, error) {
 
-	// Load the target revision.
-	q := db.WithContext(ctx).
+	// Load the target revision to verify it exists.
+	tq := db.WithContext(ctx).
 		Where("session_id = ? AND slot_id = ? AND revision = ?", sessionID, slotID, targetRevision)
 	if listIndex == nil {
-		q = q.Where("list_index IS NULL")
+		tq = tq.Where("list_index IS NULL")
 	} else {
-		q = q.Where("list_index = ?", *listIndex)
+		tq = tq.Where("list_index = ?", *listIndex)
 	}
 	var target orm.PluginSlotRevision
-	if err := q.First(&target).Error; err != nil {
+	if err := tq.First(&target).Error; err != nil {
 		return nil, err
 	}
 
-	now := time.Now().UTC()
-	var newRevision int
-
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Compute next revision.
-		var maxRev int
-		if err := tx.Model(&orm.PluginSlotRevision{}).
-			Select("COALESCE(MAX(revision), 0)").
-			Where("session_id = ? AND slot_id = ?", sessionID, slotID).
-			Scan(&maxRev).Error; err != nil {
-			return err
-		}
-		newRevision = maxRev + 1
-
-		// Deselect current selected.
-		where := tx.Model(&orm.PluginSlotRevision{}).
+		// Deselect current selected revision.
+		deselectQ := tx.Model(&orm.PluginSlotRevision{}).
 			Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true)
 		if listIndex == nil {
-			where = where.Where("list_index IS NULL")
+			deselectQ = deselectQ.Where("list_index IS NULL")
 		} else {
-			where = where.Where("list_index = ?", *listIndex)
+			deselectQ = deselectQ.Where("list_index = ?", *listIndex)
 		}
-		if err := where.Update("selected", false).Error; err != nil {
+		if err := deselectQ.Update("selected", false).Error; err != nil {
 			return err
 		}
 
-		row := &orm.PluginSlotRevision{
-			ID:              "psr_" + common.GenerateID(),
-			SessionID:       sessionID,
-			SlotID:          slotID,
-			Revision:        newRevision,
-			ListIndex:       listIndex,
-			Selected:        true,
-			ContentSnapshot: target.ContentSnapshot,
-			ChangeSource:    "human",
-			ArtifactKey:     artifactKey,
-			StepID:          target.StepID,
-			Attempt:         target.Attempt,
-			CreatedAt:       now,
-		}
-		if err := tx.Create(row).Error; err != nil {
-			return err
-		}
-
-		// Sync the artifact value so that GET /slots returns the rolled-back content.
-		// We insert a new sub_agent_artifacts row with the snapshot as value so the
-		// enrichSlots logic (which reads list_index from value JSON) sees the rolled-back value.
-		if len(target.ContentSnapshot) > 0 {
-			// Look up the task_id for the step that originally produced this revision.
-			var step orm.PluginSessionStep
-			if err := tx.Where("session_id = ? AND step_id = ? AND attempt = ?",
-				sessionID, target.StepID, target.Attempt).
-				First(&step).Error; err == nil && step.TaskID != "" {
-				// Get max seq and the content_type of the most-recent artifact row
-				// for this (task_id, artifact_key).  content_type is the authoritative
-				// type stored in the DB column ("text", "image", "file", etc.).
-				var maxSeq int
-				tx.Model(&orm.SubAgentArtifact{}).
-					Select("COALESCE(MAX(seq), 0)").
-					Where("task_id = ? AND artifact_key = ?", step.TaskID, artifactKey).
-					Scan(&maxSeq)
-
-				var origArt orm.SubAgentArtifact
-				_ = tx.Where("task_id = ? AND artifact_key = ?", step.TaskID, artifactKey).
-					Order("seq DESC").
-					First(&origArt).Error
-
-				// Resolve the true content type:
-				//   - use the DB content_type column directly when it is not "file"
-				//   - when content_type="file" the value is JSON {"type":"<real>","path":"..."}
-				//     so read the inner "type" key for the true render type.
-				contentType := resolveContentType(origArt.ContentType, target.ContentSnapshot)
-
-				artValue := target.ContentSnapshot
-				// For list slots, ensure the value JSON carries the correct list_index so that
-				// enrichSlots (which matches on list_index field) can locate it.
-				if listIndex != nil {
-					var v map[string]any
-					if json.Unmarshal(target.ContentSnapshot, &v) == nil {
-						v["list_index"] = *listIndex
-						if encoded, err := json.Marshal(v); err == nil {
-							artValue = encoded
-						}
-					}
-				}
-
-				newArt := &orm.SubAgentArtifact{
-					TaskID:      step.TaskID,
-					ArtifactKey: artifactKey,
-					ContentType: contentType,
-					Value:       artValue,
-					Seq:         maxSeq + 1,
-					Hidden:      false,
-					CreatedAt:   now,
-				}
-				// Ignore insert error — rollback of the revision still succeeds.
-				_ = tx.Create(newArt).Error
-			}
-		}
-
-		return nil
+		// Select the target revision.
+		return tx.Model(&orm.PluginSlotRevision{}).
+			Where("id = ?", target.ID).
+			Update("selected", true).Error
 	}); err != nil {
 		return nil, err
 	}
 
-	var result orm.PluginSlotRevision
-	err := db.WithContext(ctx).
-		Where("session_id = ? AND slot_id = ? AND revision = ?", sessionID, slotID, newRevision).
-		First(&result).Error
-	return &result, err
+	target.Selected = true
+	return &target, nil
 }
 
 // LoadSelectedSlots returns the currently-selected slot revisions for a session,
