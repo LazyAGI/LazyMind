@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,22 @@ import (
 type ComposeManager struct {
 	runner CommandRunner
 }
+
+type ComposeServiceStatus struct {
+	Name     string
+	Service  string
+	State    string
+	Health   string
+	ExitCode int
+}
+
+type composeReadinessState int
+
+const (
+	composeReadinessPending composeReadinessState = iota
+	composeReadinessReady
+	composeReadinessFailed
+)
 
 func NewComposeManager(r CommandRunner) *ComposeManager {
 	return &ComposeManager{runner: r}
@@ -36,16 +53,12 @@ func (m *ComposeManager) ComposeServices(ctx context.Context, repoRoot string) (
 
 func (m *ComposeManager) ComposeReady(ctx context.Context, repoRoot string, profile string) error {
 	_ = profile
-	args := append(m.composeBaseArgs(repoRoot), "ps", "--status", "running", "--services")
-	res, err := m.runner.Run(ctx, Command{Name: "docker", Args: args, Dir: repoRoot})
+	statuses, err := m.ComposeStatus(ctx, repoRoot)
 	if err != nil {
-		return fmt.Errorf("docker compose ps failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
+		return err
 	}
-	running := parseServiceLines(res.Stdout)
-	if len(running) == 0 {
-		return fmt.Errorf("compose readiness: no running services")
-	}
-	return nil
+	_, readyErr := evaluateComposeReadiness(statuses)
+	return readyErr
 }
 
 func (m *ComposeManager) ComposeDown(ctx context.Context, repoRoot string, profile string) error {
@@ -56,6 +69,32 @@ func (m *ComposeManager) ComposeDown(ctx context.Context, repoRoot string, profi
 		return fmt.Errorf("docker compose down failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
 	}
 	return nil
+}
+
+func (m *ComposeManager) ComposePS(ctx context.Context, repoRoot string) (string, error) {
+	args := append(m.composeBaseArgs(repoRoot), "ps", "-a")
+	res, err := m.runner.Run(ctx, Command{Name: "docker", Args: args, Dir: repoRoot})
+	if err != nil {
+		return res.Stdout + res.Stderr, fmt.Errorf("docker compose ps failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
+	}
+	return res.Stdout, nil
+}
+
+func (m *ComposeManager) ComposeStatus(ctx context.Context, repoRoot string) ([]ComposeServiceStatus, error) {
+	args := append(m.composeBaseArgs(repoRoot), "ps", "-a", "--format", "json")
+	res, err := m.runner.Run(ctx, Command{Name: "docker", Args: args, Dir: repoRoot})
+	if err != nil {
+		return nil, fmt.Errorf("docker compose ps --format json failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
+	}
+	return parseComposeStatusJSON(res.Stdout)
+}
+
+func (m *ComposeManager) ComposeHasContainers(ctx context.Context, repoRoot string) (bool, error) {
+	statuses, err := m.ComposeStatus(ctx, repoRoot)
+	if err != nil {
+		return false, err
+	}
+	return len(statuses) > 0, nil
 }
 
 func (m *ComposeManager) ComposeUp(ctx context.Context, repoRoot string, profile string) error {
@@ -107,4 +146,93 @@ func filterRemainingServices(allServices []string, disabled []string) ([]string,
 		remaining = append(remaining, svc)
 	}
 	return remaining, nil
+}
+
+func parseComposeStatusJSON(raw string) ([]ComposeServiceStatus, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	var rows []struct {
+		Name     string `json:"Name"`
+		Service  string `json:"Service"`
+		State    string `json:"State"`
+		Health   string `json:"Health"`
+		ExitCode int    `json:"ExitCode"`
+	}
+	if err := json.Unmarshal([]byte(raw), &rows); err != nil {
+		for _, line := range strings.Split(raw, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			var row struct {
+				Name     string `json:"Name"`
+				Service  string `json:"Service"`
+				State    string `json:"State"`
+				Health   string `json:"Health"`
+				ExitCode int    `json:"ExitCode"`
+			}
+			if err2 := json.Unmarshal([]byte(line), &row); err2 != nil {
+				rows = nil
+				break
+			}
+			rows = append(rows, row)
+		}
+		if rows == nil {
+			return nil, err
+		}
+	}
+	statuses := make([]ComposeServiceStatus, 0, len(rows))
+	for _, row := range rows {
+		statuses = append(statuses, ComposeServiceStatus{
+			Name:     row.Name,
+			Service:  row.Service,
+			State:    strings.ToLower(row.State),
+			Health:   strings.ToLower(row.Health),
+			ExitCode: row.ExitCode,
+		})
+	}
+	return statuses, nil
+}
+
+func evaluateComposeReadiness(statuses []ComposeServiceStatus) (bool, error) {
+	state, reason := classifyComposeReadiness(statuses)
+	if state == composeReadinessReady {
+		return true, nil
+	}
+	return false, fmt.Errorf("compose readiness: %s", reason)
+}
+
+func classifyComposeReadiness(statuses []ComposeServiceStatus) (composeReadinessState, string) {
+	if len(statuses) == 0 {
+		return composeReadinessPending, "no containers created yet"
+	}
+	for _, st := range statuses {
+		service := st.Service
+		if service == "" {
+			service = st.Name
+		}
+		if service == "db-bootstrap" {
+			if st.State == "exited" && st.ExitCode == 0 {
+				continue
+			}
+			if st.State == "exited" {
+				return composeReadinessFailed, fmt.Sprintf("service %s exited with code %d", service, st.ExitCode)
+			}
+		}
+		if st.State == "exited" || st.State == "dead" || st.State == "removing" {
+			return composeReadinessFailed, fmt.Sprintf("service %s is %s (exit=%d)", service, st.State, st.ExitCode)
+		}
+		if st.Health == "unhealthy" {
+			return composeReadinessFailed, fmt.Sprintf("service %s is unhealthy", service)
+		}
+		if st.State != "running" {
+			return composeReadinessPending, fmt.Sprintf("service %s is %s", service, st.State)
+		}
+		if st.Health != "" && st.Health != "healthy" {
+			return composeReadinessPending, fmt.Sprintf("service %s health is %s", service, st.Health)
+		}
+	}
+	return composeReadinessReady, "all services ready"
 }

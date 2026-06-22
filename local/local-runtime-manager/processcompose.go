@@ -124,6 +124,31 @@ func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths
 	return nil
 }
 
+func (m *ProcessComposeManager) FollowLogs(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, stdout io.Writer, stderr io.Writer) error {
+	streamer, ok := m.runner.(CommandStreamer)
+	if !ok {
+		return nil
+	}
+	args := []string{
+		"-p", strconv.Itoa(cfg.ProcessComposePort),
+		"--token-file", paths.RunDirTokenFile,
+		"process",
+		"logs",
+		processComposeServiceName,
+		"--follow",
+		"--tail",
+		"0",
+	}
+	err := streamer.Stream(ctx, Command{Name: processComposeCommand(paths.RepoRoot), Args: args, Dir: paths.RepoRoot}, stdout, stderr)
+	if ctx.Err() != nil {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("process-compose logs failed: %w", err)
+	}
+	return nil
+}
+
 func (m *ProcessComposeManager) Down(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
 	args := []string{"--config", filepath.ToSlash(paths.GeneratedConfig)}
 	args = append(args,

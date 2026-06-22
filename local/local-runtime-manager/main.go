@@ -40,6 +40,7 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	}
 
 	manager := NewRuntimeManager(c.runner, c.execPath)
+	manager.SetOutput(c.out, c.errOut)
 
 	switch args[0] {
 	case "up":

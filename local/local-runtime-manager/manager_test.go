@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestResolveRepoRoot(t *testing.T) {
@@ -154,6 +155,9 @@ func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
 	writeComposeFixture(t, repo)
 	runner := &fakeRunner{t: t}
 	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
+	manager.probeAPI = func(port int, timeout time.Duration) bool { return true }
+	manager.pollInterval = time.Millisecond
+	manager.upTimeout = time.Second
 	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
 		if cmd.Name != "process-compose" {
 			t.Fatalf("expected process-compose got %s", cmd.Name)
@@ -163,6 +167,17 @@ func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
 		assertContains(t, cmd.Args, "-t=false")
 		assertStringArgAfter(t, cmd.Args, "-p", strconv.Itoa(defaultProcessComposePort))
 		return CommandResult{}, nil
+	}, func(cmd Command) (CommandResult, error) {
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
+			"ps",
+			"-a",
+			"--format",
+			"json",
+		})
+		return CommandResult{Stdout: readyComposeStatusJSON()}, nil
 	})
 	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
 	if err != nil {
@@ -184,6 +199,81 @@ func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
 	}
 	if dockerStack.Status != "running" {
 		t.Fatalf("unexpected docker-stack status: %s", dockerStack.Status)
+	}
+}
+
+func TestRuntimeManagerUpReusesRunningProcessCompose(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	runner := &fakeRunner{t: t}
+	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
+	probeCalls := 0
+	manager.probeAPI = func(port int, timeout time.Duration) bool {
+		probeCalls++
+		return probeCalls == 1
+	}
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("prepare dirs: %v", err)
+	}
+	state := defaultRuntimeState(cfg, defaultProcessComposePort, paths.RunDirTokenFile)
+	state.OverallStatus = "ready"
+	state.Services[processComposeServiceName] = RuntimeServiceState{Kind: "docker-compose", Status: "running"}
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
+		assertCommandContainsInOrder(t, cmd, "docker", []string{"compose", "-f", filepath.Join(repo, repoComposeFileName), "-f", filepath.Join(repo, localComposeOverrideName), "ps", "-a"})
+		return CommandResult{Stdout: "NAME STATUS\nweb running\n"}, nil
+	})
+
+	if err := manager.Up(context.Background(), cfg, paths); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("expected only docker ps call, got %d calls", len(runner.calls))
+	}
+}
+
+func TestRuntimeManagerUpFailsOnExitedService(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	runner := &fakeRunner{t: t}
+	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
+	manager.probeAPI = func(port int, timeout time.Duration) bool { return true }
+	manager.pollInterval = time.Millisecond
+	manager.upTimeout = time.Second
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	runner.handlers = append(runner.handlers,
+		func(cmd Command) (CommandResult, error) {
+			assertCommandContainsInOrder(t, cmd, "process-compose", []string{"--config", filepath.ToSlash(paths.GeneratedConfig)})
+			return CommandResult{}, nil
+		},
+		func(cmd Command) (CommandResult, error) {
+			assertCommandContainsInOrder(t, cmd, "docker", []string{"compose", "-f", filepath.Join(repo, repoComposeFileName), "-f", filepath.Join(repo, localComposeOverrideName), "ps", "-a", "--format", "json"})
+			return CommandResult{Stdout: `[{"Name":"parse","Service":"lazyllm-parse-server","State":"exited","ExitCode":1}]`}, nil
+		},
+		func(cmd Command) (CommandResult, error) {
+			assertCommandContainsInOrder(t, cmd, "docker", []string{"compose", "-f", filepath.Join(repo, repoComposeFileName), "-f", filepath.Join(repo, localComposeOverrideName), "ps", "-a"})
+			return CommandResult{Stdout: "parse exited\n"}, nil
+		},
+	)
+
+	if err := manager.Up(context.Background(), cfg, paths); err == nil {
+		t.Fatalf("expected up failure")
+	}
+	state, err := readRuntimeState(paths.StateFile)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if state.OverallStatus != "failed" {
+		t.Fatalf("expected failed state got %s", state.OverallStatus)
 	}
 }
 
@@ -222,6 +312,13 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 	writeComposeFixture(t, repo)
 	runner := &fakeRunner{t: t}
 	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
+	probeCalls := 0
+	manager.probeAPI = func(port int, timeout time.Duration) bool {
+		probeCalls++
+		return probeCalls == 1
+	}
+	manager.pollInterval = time.Millisecond
+	manager.downTimeout = time.Second
 	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
 	if err != nil {
 		t.Fatalf("runtime config: %v", err)
@@ -256,6 +353,18 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 			})
 			return CommandResult{}, nil
 		},
+		func(cmd Command) (CommandResult, error) {
+			assertCommandContainsInOrder(t, cmd, "docker", []string{
+				"compose",
+				"-f", filepath.Join(repo, repoComposeFileName),
+				"-f", filepath.Join(repo, localComposeOverrideName),
+				"ps",
+				"-a",
+				"--format",
+				"json",
+			})
+			return CommandResult{Stdout: "[]"}, nil
+		},
 	)
 
 	if err := manager.Down(context.Background(), cfg, paths); err != nil {
@@ -271,8 +380,8 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 	if got := state.Services[processComposeServiceName].Status; got != "stopped" {
 		t.Fatalf("unexpected service status %s", got)
 	}
-	if len(runner.calls) != 2 {
-		t.Fatalf("expected 2 commands got %d", len(runner.calls))
+	if len(runner.calls) != 3 {
+		t.Fatalf("expected 3 commands got %d", len(runner.calls))
 	}
 }
 
@@ -370,6 +479,41 @@ func TestStatusJSONContainsDockerStackService(t *testing.T) {
 	}
 	if _, ok := resp.Services[processComposeServiceName]; !ok {
 		t.Fatalf("missing docker-stack service")
+	}
+}
+
+func TestStatusMarksStaleStateWhenProcessComposeAPIIsDown(t *testing.T) {
+	runner := &fakeRunner{t: t}
+	manager := NewRuntimeManager(runner, filepath.Join("/tmp", "lazymind-local"))
+	manager.probeAPI = func(port int, timeout time.Duration) bool { return false }
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("prepare dirs: %v", err)
+	}
+	state := defaultRuntimeState(cfg, defaultProcessComposePort, paths.RunDirTokenFile)
+	state.OverallStatus = "ready"
+	state.Services[processComposeServiceName] = RuntimeServiceState{Kind: "docker-compose", Status: "running"}
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+	out, err := manager.Status(context.Background(), cfg, paths, true)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	var resp StatusResponse
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.OverallStatus != "stale" {
+		t.Fatalf("expected stale overallStatus got %s", resp.OverallStatus)
+	}
+	if got := resp.Services[processComposeServiceName].Status; got != "stale" {
+		t.Fatalf("expected stale service got %s", got)
 	}
 }
 
@@ -505,6 +649,14 @@ func writeComposeFixture(t *testing.T, repo string) {
 	if err := os.WriteFile(overlay, []byte("# Local Runtime override file\nx-lazymind-local:\n  mode: local\n  disabled_container_services: []\n"), 0o644); err != nil {
 		t.Fatalf("write overlay: %v", err)
 	}
+}
+
+func readyComposeStatusJSON() string {
+	return `[
+{"Name":"auth","Service":"auth-service","State":"running","Health":"healthy","ExitCode":0},
+{"Name":"core","Service":"core","State":"running","Health":"","ExitCode":0},
+{"Name":"db","Service":"db-bootstrap","State":"exited","Health":"","ExitCode":0}
+]`
 }
 
 func assertCommand(t *testing.T, cmd Command, name string, args ...string) {

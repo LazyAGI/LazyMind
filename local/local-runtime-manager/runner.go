@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 )
 
@@ -22,6 +23,10 @@ type CommandResult struct {
 
 type CommandRunner interface {
 	Run(ctx context.Context, cmd Command) (CommandResult, error)
+}
+
+type CommandStreamer interface {
+	Stream(ctx context.Context, cmd Command, stdout io.Writer, stderr io.Writer) error
 }
 
 type ExecRunner struct{}
@@ -51,6 +56,14 @@ func (r *ExecRunner) Run(ctx context.Context, cmd Command) (CommandResult, error
 		Stderr:   stderr.String(),
 		ExitCode: exitCode,
 	}, err
+}
+
+func (r *ExecRunner) Stream(ctx context.Context, cmd Command, stdout io.Writer, stderr io.Writer) error {
+	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
+	c.Dir = cmd.Dir
+	c.Stdout = stdout
+	c.Stderr = stderr
+	return c.Run()
 }
 
 func (r *ExecRunner) String() string {

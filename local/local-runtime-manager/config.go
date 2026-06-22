@@ -12,12 +12,17 @@ import (
 const (
 	defaultProfileEnvVar      = "LAZYMIND_LOCAL_PROFILE"
 	processComposePortEnvVar  = "LAZYMIND_PROCESS_COMPOSE_PORT"
+	localUpTimeoutEnvVar      = "LAZYMIND_LOCAL_UP_TIMEOUT"
+	localDownTimeoutEnvVar    = "LAZYMIND_LOCAL_DOWN_TIMEOUT"
 	defaultProfile            = "linux-browser"
 	processComposeVersion     = 1
 	defaultProcessComposePort = 18080
+	defaultLocalUpTimeout     = 30 * 60
+	defaultLocalDownTimeout   = 2 * 60
 	stateFileName             = "runtime-state.json"
 	composeGeneratedFileName  = "process-compose.generated.yaml"
 	tokenFileName             = "pc-token"
+	upLockFileName            = "up.lock"
 	logFileName               = "docker-stack.log"
 	repoComposeFileName       = "docker-compose.yml"
 	localComposeOverrideName  = "local/docker-compose.local.yml"
@@ -37,6 +42,7 @@ type RuntimePaths struct {
 	CacheDir        string
 	StateFile       string
 	RunDirTokenFile string
+	UpLockFile      string
 	LogFilePath     string
 	GeneratedConfig string
 }
@@ -126,6 +132,7 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		CacheDir:        filepath.Join(runtimeRoot, "cache"),
 		StateFile:       filepath.Join(runtimeRoot, "state", stateFileName),
 		RunDirTokenFile: filepath.Join(runtimeRoot, "run", tokenFileName),
+		UpLockFile:      filepath.Join(runtimeRoot, "run", upLockFileName),
 		LogFilePath:     filepath.Join(runtimeRoot, "logs", logFileName),
 		GeneratedConfig: filepath.Join(runtimeRoot, "generated", composeGeneratedFileName),
 	}
