@@ -909,7 +909,7 @@ export function getSyncStateMeta(
 }
 
 // Build a friendly human-readable detail line for a document/tree node, e.g.
-// "源端删除，知识库中仍保留，等待同步删除". Used in tooltips/secondary text.
+// Deleted at source but still retained in the knowledge base until sync removes it.
 export function buildDocumentStatusDetail(
   input: DocumentLikeStatus,
   t: TFunction,

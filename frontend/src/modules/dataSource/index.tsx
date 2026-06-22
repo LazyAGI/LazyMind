@@ -4282,7 +4282,7 @@ export default function DataSourceManagement() {
               >
                 {t("admin.dataSourceNotionSetupGuideAction")}
               </a>
-              ：查看详细的 Notion OAuth 配置步骤、所需凭证和 Redirect URI 说明。
+              {t("admin.dataSourceNotionSetupGuideHint")}
             </Paragraph>
           )}
         </Form>

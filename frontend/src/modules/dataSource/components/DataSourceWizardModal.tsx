@@ -669,8 +669,12 @@ export default function DataSourceWizardModal({
                       rules={[{ required: true, message: t("admin.dataSourceNotionTargetTypeRequired") }]}
                     >
                       <Radio.Group disabled={isEditMode}>
-                        <Radio.Button value="page">Page</Radio.Button>
-                        <Radio.Button value="database">Database</Radio.Button>
+                        <Radio.Button value="page">
+                          {t("admin.dataSourceNotionTargetTypePage")}
+                        </Radio.Button>
+                        <Radio.Button value="database">
+                          {t("admin.dataSourceNotionTargetTypeDatabase")}
+                        </Radio.Button>
                       </Radio.Group>
                     </Form.Item>
                     <Form.Item
@@ -691,7 +695,7 @@ export default function DataSourceWizardModal({
                     >
                       <Input.TextArea
                         disabled={isEditMode}
-                        placeholder="https://www.notion.so/... 或 Notion page/database id"
+                        placeholder={t("admin.dataSourceNotionTargetPlaceholder")}
                         autoSize={{ minRows: 3, maxRows: 6 }}
                       />
                     </Form.Item>

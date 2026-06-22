@@ -542,7 +542,7 @@ const zhCN = {
       successCount: "成功：{{count}} 条",
       failedCount: "失败：{{count}} 条",
       failedRowsTitle: "存在失败行",
-      failedRowsDescription: "失败行已在预览页标记，可返回修正文件后重新导入。",
+      failedRowsDescription: "本次仅导入成功数据，失败数据未导入。请修正源文件后重新导入。",
     },
     template: {
       downloaded: "模版已下载",
@@ -1354,7 +1354,11 @@ const zhCN = {
     dataSourceNotionSetupRequiredForCreate: "创建 Notion 数据源前需要先配置 OAuth 凭证。",
     dataSourceNotionTargetTypeLabel: "Notion 目标类型",
     dataSourceNotionTargetTypeRequired: "请选择 Notion 目标类型",
+    dataSourceNotionTargetTypePage: "页面",
+    dataSourceNotionTargetTypeDatabase: "数据库",
     dataSourceNotionTargetLabel: "Notion 页面或数据库",
+    dataSourceNotionSetupGuideHint:
+      "：查看详细的 Notion OAuth 配置步骤、所需凭证和 Redirect URI 说明。",
     dataSourceAppIdRequired: "请输入 App ID",
     dataSourceAppSecretRequired: "请输入 App Secret",
     dataSourceAppId: "App ID",
@@ -1463,6 +1467,65 @@ const zhCN = {
           "回到数据源创建弹窗，选择目标类型，填入上一步复制的 ID，然后点击连接账号完成 OAuth 授权并保存配置。",
         finishDetail: "授权前请先在飞书云盘中创建文件夹，并把文件夹目录地址复制到 LazyMind。",
         finishAlt: "系统内填写飞书文件夹 ID 并发起授权",
+      },
+    },
+    dataSourceNotionSetupGuide: {
+      backCreateSource: "返回新建数据源",
+      backManagement: "返回数据源管理",
+      title: "数据源管理-新建数据源-Notion",
+      subtitle:
+        "在 Notion Developers 创建 Public Integration，获取 OAuth 凭证并配置 Redirect URI，然后在 LazyMind 中完成 Notion 数据源授权。",
+      summaryAria: "Notion 接入流程概览",
+      summaryTitle: "准备流程",
+      openDevelopers: "打开 Notion Developers",
+      callbackUrl: "回调地址：{{uri}}",
+      steps: {
+        openDevelopersTitle: "进入 Notion 开发者网站",
+        openDevelopersDesc:
+          "打开 Notion Developers 页面，登录你的 Notion 账号。这里会管理所有 Notion public integration 的 OAuth 凭证。",
+        createIntegrationTitle: "创建 Public Integration",
+        createIntegrationDesc:
+          "在 My connections 页面点击「New integration」创建新的集成应用。注意选择 Public integration 类型（而非 Internal integration），才能支持 OAuth 授权流程。",
+        createIntegrationExisting:
+          "如果已有合适的 Public integration，可以直接使用现有应用。",
+        createIntegrationNaming:
+          "Integration 名称建议带上 LazyMind 或数据源用途，方便后续识别。",
+        basicInfoTitle: "填写 Integration 基本信息",
+        basicInfoDesc:
+          "填写 Integration 名称、描述，并可上传 Logo。这些信息会在用户授权页面展示，建议填写清晰易懂的名称和说明。",
+        credentialsTitle: "获取 OAuth Client ID 和 Client Secret",
+        credentialsDesc:
+          "创建完成后，在 Integration 详情页的「OAuth Domain and URIs」或「Secrets」区域，可以找到 OAuth Client ID 和 Client Secret。这两个凭证将在 LazyMind 中填写。",
+        credentialsClientId: "Client ID：Integration 的唯一标识，公开可见。",
+        credentialsClientSecret:
+          "Client Secret：Integration 的密钥，需要保密，仅在创建时可完整查看。",
+        redirectTitle: "配置 Redirect URI",
+        redirectDesc:
+          "在 Integration 设置的「Redirect URIs」区域，添加 LazyMind 的 OAuth 回调地址。这个地址必须是系统实际使用的回调 URL，否则授权完成后会报错。",
+        redirectProductionHint:
+          "如果是生产环境部署，请将 127.0.0.1 替换为实际的域名或 IP 地址。",
+        capabilitiesTitle: "配置 Integration 权限 (Capabilities)",
+        capabilitiesDesc:
+          "在 Integration 设置中，根据需要勾选以下能力：Read content（读取页面/数据库内容）、Read comments（读取评论）等。LazyMind 至少需要 Read content 权限才能读取 Notion 内容。",
+        capabilitiesRequired:
+          "建议至少勾选 Read content 和 Read user information。",
+        capabilitiesWrite:
+          "如需写入或更新 Notion 内容，可额外勾选 Insert content 和 Update content。",
+        enterCredentialsTitle: "回到系统填写 Notion 凭据",
+        enterCredentialsDesc:
+          "回到 LazyMind 数据源管理页面，选择 Notion 数据源类型，弹出凭据配置窗口，填入上一步获取的 Client ID 和 Client Secret，然后保存。",
+        enterCredentialsClientId: "Client ID 对应系统弹窗中的 App ID 字段。",
+        enterCredentialsClientSecret:
+          "Client Secret 对应系统弹窗中的 App Secret 字段。",
+        finishTitle: "粘贴 Notion Page/Database 链接并完成授权",
+        finishDesc:
+          "凭据保存后，系统会自动发起 Notion OAuth 授权。授权通过后，在数据源配置中粘贴需要接入的 Notion page 或 database 链接，保存并同步即可。",
+        finishPageLink: "Notion page 链接格式：https://www.notion.so/...",
+        finishDatabaseLink: "Notion database 链接格式：https://www.notion.so/...",
+        finishCopyLink:
+          "也可以在 Notion 中右键点击页面，选择 Copy link 获取链接。",
+        finishConnectionNote:
+          "注意：需要先在 Notion 中将对应页面或数据库连接到该 Integration（在页面右上角 ··· → Connections → 选择你的 Integration）。",
       },
     },
     dataSourceFeishuTargetType: "同步目标类型",
@@ -1743,6 +1806,51 @@ const zhCN = {
     dataSourceDetailTreeSelectDesc:
       "可在树形目录中勾选要拉取的文件。带“有更新”标识的文件会被后端处理，无更新文件会自动忽略。",
     dataSourceDetailNoMatchedFile: "没有匹配筛选条件的文件",
+    dataSourceDemoData: {
+      sources: {
+        feishuRdName: "飞书研发知识库",
+        localOpsName: "运维共享盘",
+      },
+      tags: {
+        integration: "接入",
+        feishu: "飞书",
+        api: "接口",
+        permission: "权限",
+        archive: "归档",
+        inspection: "巡检",
+        schedule: "排班",
+        review: "复盘",
+        topology: "拓扑",
+        history: "历史",
+      },
+      syncDetails: {
+        changedReparsed: "内容变更，已完成增量重解析",
+        newVectorIndexed: "新文档入库，已生成向量索引",
+        permissionReindexing: "权限范围更新，等待重建索引",
+        duplicateVersioned: "检测到重复文档，按多版本策略保留历史版本",
+        newIndexDone: "新文档入库，已完成索引生成",
+        rechunking: "检测到内容变更，正在重新切分 chunk",
+        sourceDeletedCleanup: "文件已从源目录删除，等待清理索引",
+      },
+      docs: {
+        feishuDevDocName: "飞书接入开发文档.pdf",
+        feishuDevDocPath: "/接入文档/飞书接入开发文档.pdf",
+        oauthSpecName: "OAuth 接口定义说明.docx",
+        oauthSpecPath: "/接入文档/OAuth 接口定义说明.docx",
+        permissionFlowName: "知识库权限申请流程.md",
+        permissionFlowPath: "/权限中心/知识库权限申请流程.md",
+        legacyConnectionName: "旧版连接说明.docx",
+        legacyConnectionPath: "/历史归档/旧版连接说明.docx",
+        inspectionManualName: "巡检标准作业手册.pdf",
+        inspectionManualPath: "/mnt/team-share/ops-docs/巡检标准作业手册.pdf",
+        dutyScheduleName: "应急值班排班.xlsx",
+        dutySchedulePath: "/mnt/team-share/ops-docs/应急值班排班.xlsx",
+        incidentReviewName: "故障复盘记录.md",
+        incidentReviewPath: "/mnt/team-share/ops-docs/故障复盘记录.md",
+        topologyArchiveName: "历史拓扑图.pptx",
+        topologyArchivePath: "/mnt/team-share/ops-docs/历史拓扑图.pptx",
+      },
+    },
     dataSourceCallbackLoadingTitle: "正在完成飞书授权",
     dataSourceCallbackLoadingSubtitle: "请稍候，系统正在校验授权结果并写回数据源配置。",
     dataSourceCallbackErrorTitle: "飞书授权未完成",
