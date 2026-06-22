@@ -89,6 +89,7 @@ lazyllm_cpp.egg-info/
 data/
 volumes/
 .lazymind-local/
+local/bin/process-compose
 .conda
 local/local-runtime-manager/lazymind-local
 

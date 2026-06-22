@@ -55,6 +55,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := paths.EnsureAllDirs(); err != nil {
 		return err
 	}
+	cfg.ProcessComposePort = availableProcessComposePort(cfg.ProcessComposePort)
 	token, err := randomHexToken()
 	if err != nil {
 		return err
@@ -109,6 +110,9 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 	state, err := readOrNewState(paths, cfg)
 	if err != nil {
 		return err
+	}
+	if state.ProcessCompose.APIPort > 0 {
+		cfg.ProcessComposePort = state.ProcessCompose.APIPort
 	}
 	if err := m.processCompose.Down(ctx, cfg, paths); err != nil {
 		fallbackErr := m.compose.ComposeDown(ctx, paths.RepoRoot, cfg.Profile)
@@ -247,7 +251,7 @@ func (m *RuntimeManager) Doctor(ctx context.Context, cfg RuntimeConfig, paths Ru
 	}
 	report.Checks = append(report.Checks, DoctorCheck{Name: "docker-compose-config", OK: true, Details: "services resolved"})
 
-	if _, err := m.runner.Run(ctx, Command{Name: "process-compose", Args: []string{"version"}}); err != nil {
+	if _, err := m.runner.Run(ctx, Command{Name: processComposeCommand(paths.RepoRoot), Args: []string{"version"}, Dir: paths.RepoRoot}); err != nil {
 		report.Checks = append(report.Checks, DoctorCheck{Name: "process-compose", OK: false, Details: "process-compose not found"})
 		return report, err
 	}

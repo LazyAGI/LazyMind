@@ -114,9 +114,12 @@ func readOrNewState(paths RuntimePaths, cfg RuntimeConfig) (RuntimeState, error)
 	st, err := readRuntimeState(paths.StateFile)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return defaultRuntimeState(cfg, defaultProcessComposePort, paths.RunDirTokenFile), nil
+			return defaultRuntimeState(cfg, cfg.ProcessComposePort, paths.RunDirTokenFile), nil
 		}
 		return RuntimeState{}, err
+	}
+	if st.ProcessCompose.APIPort == 0 {
+		st.ProcessCompose.APIPort = cfg.ProcessComposePort
 	}
 	if st.Services == nil {
 		st.Services = map[string]RuntimeServiceState{}

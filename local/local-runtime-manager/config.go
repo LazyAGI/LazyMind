@@ -3,12 +3,15 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 const (
 	defaultProfileEnvVar      = "LAZYMIND_LOCAL_PROFILE"
+	processComposePortEnvVar  = "LAZYMIND_PROCESS_COMPOSE_PORT"
 	defaultProfile            = "linux-browser"
 	processComposeVersion     = 1
 	defaultProcessComposePort = 18080
@@ -18,6 +21,7 @@ const (
 	logFileName               = "docker-stack.log"
 	repoComposeFileName       = "docker-compose.yml"
 	localComposeOverrideName  = "local/docker-compose.local.yml"
+	localProcessComposeBin    = "local/bin/process-compose"
 	processComposeServiceName = "docker-stack"
 )
 
@@ -49,6 +53,31 @@ func defaultProfileValue() string {
 		return v
 	}
 	return defaultProfile
+}
+
+func defaultProcessComposePortValue() int {
+	if v := os.Getenv(processComposePortEnvVar); v != "" {
+		port, err := strconv.Atoi(v)
+		if err == nil && port > 0 && port < 65536 {
+			return port
+		}
+	}
+	return defaultProcessComposePort
+}
+
+func availableProcessComposePort(preferred int) int {
+	if preferred <= 0 {
+		preferred = defaultProcessComposePortValue()
+	}
+	for port := preferred; port < preferred+100 && port < 65536; port++ {
+		ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
+		if err != nil {
+			continue
+		}
+		_ = ln.Close()
+		return port
+	}
+	return preferred
 }
 
 func resolveRepoRoot(start string) (string, error) {
@@ -104,7 +133,7 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		Profile:            profile,
 		RepoRoot:           p.RepoRoot,
 		RuntimeRoot:        runtimeRoot,
-		ProcessComposePort: defaultProcessComposePort,
+		ProcessComposePort: defaultProcessComposePortValue(),
 	}, p, nil
 }
 

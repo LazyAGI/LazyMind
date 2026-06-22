@@ -75,7 +75,7 @@ func (m *ComposeManager) ComposeUp(ctx context.Context, repoRoot string, profile
 	if len(remaining) == 0 {
 		_ = profile
 	}
-	args := append(m.composeBaseArgs(repoRoot), "up")
+	args := append(m.composeBaseArgs(repoRoot), "up", "--build")
 	args = append(args, remaining...)
 	res, err := m.runner.Run(ctx, Command{Name: "docker", Args: args, Dir: repoRoot})
 	if err != nil {

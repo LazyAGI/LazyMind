@@ -95,6 +95,7 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
 			"up",
+			"--build",
 			"auth-service", "core", "web",
 		})
 		return CommandResult{}, nil

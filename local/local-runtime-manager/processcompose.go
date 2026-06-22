@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -116,7 +117,7 @@ func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths
 		"--ordered-shutdown",
 		"up",
 	}
-	res, err := m.runner.Run(ctx, Command{Name: "process-compose", Args: args, Dir: paths.RepoRoot})
+	res, err := m.runner.Run(ctx, Command{Name: processComposeCommand(paths.RepoRoot), Args: args, Dir: paths.RepoRoot})
 	if err != nil {
 		return fmt.Errorf("process-compose up failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
 	}
@@ -130,7 +131,7 @@ func (m *ProcessComposeManager) Down(ctx context.Context, cfg RuntimeConfig, pat
 		"--token-file", paths.RunDirTokenFile,
 		"down",
 	)
-	res, err := m.runner.Run(ctx, Command{Name: "process-compose", Args: args, Dir: paths.RepoRoot})
+	res, err := m.runner.Run(ctx, Command{Name: processComposeCommand(paths.RepoRoot), Args: args, Dir: paths.RepoRoot})
 	if err != nil {
 		return fmt.Errorf("process-compose down failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
 	}
@@ -145,7 +146,7 @@ func (m *ProcessComposeManager) ConfigDryRun(ctx context.Context, cfg RuntimeCon
 		"--dry-run",
 		"up",
 	}
-	res, err := m.runner.Run(ctx, Command{Name: "process-compose", Args: args, Dir: paths.RepoRoot})
+	res, err := m.runner.Run(ctx, Command{Name: processComposeCommand(paths.RepoRoot), Args: args, Dir: paths.RepoRoot})
 	if err != nil {
 		return fmt.Errorf("process-compose dry-run failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
 	}
@@ -183,4 +184,12 @@ func quoteShellArg(value string) string {
 
 func quoteYAMLString(value string) string {
 	return strconv.Quote(value)
+}
+
+func processComposeCommand(repoRoot string) string {
+	candidate := filepath.Join(repoRoot, localProcessComposeBin)
+	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+		return candidate
+	}
+	return "process-compose"
 }
