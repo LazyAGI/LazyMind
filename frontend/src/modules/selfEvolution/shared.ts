@@ -1,4 +1,5 @@
 import {
+  AgentApi as CoreAgentApi,
   Configuration as CoreConfiguration,
   DefaultApi as CoreDefaultApi,
   type Dataset,
@@ -306,6 +307,19 @@ export function createCoreAgentApiClient() {
   );
 }
 
+export function createCoreAgentGeneratedApiClient() {
+  const baseUrl = BASE_URL || window.location.origin;
+  return new CoreAgentApi(
+    new CoreConfiguration({
+      basePath: baseUrl,
+      baseOptions: {
+        headers: { "Content-Type": "application/json" },
+      },
+    }),
+    baseUrl,
+    axiosInstance,
+  );
+}
 
 export type ParsedDiffFile = {
   id: string;
