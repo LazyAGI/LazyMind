@@ -1,7 +1,9 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import ReactDOM from "react-dom";
 import type { SlotRevision, SlotVersionEntry } from "@/modules/chat/store/pluginPanel";
 import { usePluginStore, draftStore } from "@/modules/chat/store/pluginPanel";
 import { resolveCoreAssetUrl } from "@/modules/knowledge/utils/imageUrl";
+import { buildDiffLines } from "@/modules/memory/shared";
 
 /**
  * Normalize the content_type returned by the Python backend.
@@ -37,10 +39,90 @@ function SlotPending({ type, cardMode }: { type: 'image' | 'file' | 'text'; card
   );
 }
 
-// --------------------------------------------------------------------------
-// SlotVersionPopover — 版本历史浮层
-// 左侧版本列表 + 右侧当前 vs 选中版本并排对比
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// TextDiffView — 复用 memory 模块的 buildDiffLines 和样式渲染 diff 块
+// ---------------------------------------------------------------------------
+
+interface TextDiffViewProps {
+  currentText: string;
+  otherText: string;
+  otherLabel: string;
+}
+
+function TextDiffView({ currentText, otherText, otherLabel }: TextDiffViewProps) {
+  const diffLines = useMemo(
+    () => buildDiffLines(otherText, currentText),
+    [currentText, otherText],
+  );
+
+  return (
+    <div className='plugin-slot__version-diff'>
+      <div className='plugin-slot__version-diff-header'>
+        <span className='plugin-slot__version-diff-label plugin-slot__version-diff-label--remove'>
+          {otherLabel}
+        </span>
+        <span className='plugin-slot__version-diff-label plugin-slot__version-diff-label--add'>
+          当前版本
+        </span>
+      </div>
+      <div className='plugin-slot__version-diff-body'>
+        {diffLines.map((line, index) => (
+          <div
+            key={`${index}-${line.type}-${line.text.slice(0, 20)}`}
+            className={`memory-diff-line is-${line.type}`}
+          >
+            <span className='memory-diff-prefix'>
+              {line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '}
+            </span>
+            <code>{line.text}</code>
+          </div>
+        ))}
+        {diffLines.length === 0 && (
+          <div className='plugin-slot__version-diff-empty'>内容完全相同</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Global version popover state — only one popover open at a time.
+// ---------------------------------------------------------------------------
+
+type PopoverKey = string; // `${sessionId}:${slotId}:${sortOrder}`
+let _openPopoverKey: PopoverKey | null = null;
+const _popoverListeners = new Set<() => void>();
+
+function _notifyPopoverListeners() {
+  _popoverListeners.forEach((fn) => fn());
+}
+
+function useGlobalPopoverOpen(key: PopoverKey): [boolean, (open: boolean) => void] {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    const listener = () => {
+      setOpen(_openPopoverKey === key);
+    };
+    _popoverListeners.add(listener);
+    return () => { _popoverListeners.delete(listener); };
+  }, [key]);
+
+  const setGlobalOpen = useCallback((next: boolean) => {
+    if (next) {
+      _openPopoverKey = key;
+    } else if (_openPopoverKey === key) {
+      _openPopoverKey = null;
+    }
+    _notifyPopoverListeners();
+  }, [key]);
+
+  return [open, setGlobalOpen];
+}
+
+// ---------------------------------------------------------------------------
+// SlotVersionPopover — 版本历史浮层 (Portal, 居中全屏遮罩)
+// ---------------------------------------------------------------------------
 
 interface SlotVersionPopoverProps {
   sessionId: string;
@@ -63,14 +145,16 @@ export function SlotVersionPopover({
   contentType,
   onRollbackDone,
 }: SlotVersionPopoverProps) {
-  const [open, setOpen] = useState(false);
+  const popoverKey: PopoverKey = `${sessionId}:${slotId}:${sortOrder}`;
+  const [open, setOpen] = useGlobalPopoverOpen(popoverKey);
   const [versions, setVersions] = useState<SlotVersionEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedRevision, setSelectedRevision] = useState<SlotVersionEntry | null>(null);
   const [rolling, setRolling] = useState(false);
   const { getSlotVersions, rollbackSlotItem } = usePluginStore();
 
-  const handleOpen = useCallback(async () => {
+  const handleOpen = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
     if (open) {
       setOpen(false);
       return;
@@ -85,7 +169,13 @@ export function SlotVersionPopover({
     } finally {
       setLoading(false);
     }
-  }, [open, sessionId, slotId, sortOrder, getSlotVersions]);
+  }, [open, sessionId, slotId, sortOrder, getSlotVersions, setOpen]);
+
+  const handleClose = useCallback(() => setOpen(false), [setOpen]);
+
+  const handleOverlayClick = useCallback((e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) handleClose();
+  }, [handleClose]);
 
   const handleRollback = useCallback(async (revision: number) => {
     setRolling(true);
@@ -96,22 +186,136 @@ export function SlotVersionPopover({
     } finally {
       setRolling(false);
     }
-  }, [sessionId, slotId, sortOrder, rollbackSlotItem, onRollbackDone]);
+  }, [sessionId, slotId, sortOrder, rollbackSlotItem, setOpen, onRollbackDone]);
 
   const isImage = contentType === 'image';
   const badge = currentChangeSource === 'human' ? '✏' : undefined;
 
-  // Resolve a preview URL/text from a content_snapshot value.
-  const resolvePreview = (snapshot: any): { url?: string; text?: string } => {
-    if (!snapshot) return {};
-    if (typeof snapshot === 'string') {
-      if (snapshot.startsWith('http') || snapshot.startsWith('/')) return { url: snapshot };
-      return { text: snapshot.slice(0, 300) };
+  // Extract plain text from a content_snapshot or artifact_value.
+  // Prefers .text field so JSON wrapper ({"text": "..."}) is never shown.
+  const extractText = (snapshot: any): string => {
+    if (!snapshot) return '';
+    if (typeof snapshot === 'string') return snapshot;
+    if (snapshot?.text !== undefined) return String(snapshot.text);
+    if (snapshot?.data !== undefined) {
+      return typeof snapshot.data === 'string' ? snapshot.data : JSON.stringify(snapshot.data, null, 2);
     }
     const url = snapshot?.url || snapshot?.path;
-    if (url) return { url };
-    return { text: JSON.stringify(snapshot, null, 2).slice(0, 300) };
+    if (url) return url;
+    return JSON.stringify(snapshot, null, 2);
   };
+
+  const popoverContent = open ? ReactDOM.createPortal(
+    <div
+      className='plugin-slot__version-overlay'
+      onClick={handleOverlayClick}
+      role='presentation'
+    >
+      <div
+        className='plugin-slot__version-popover'
+        role='dialog'
+        aria-label='版本历史'
+        aria-modal='true'
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className='plugin-slot__version-popover-header'>
+          <span>版本历史</span>
+          <button
+            className='plugin-slot__version-popover-close'
+            onClick={handleClose}
+            aria-label='关闭版本历史'
+          >×</button>
+        </div>
+        <div className='plugin-slot__version-popover-body'>
+          <ul className='plugin-slot__version-list' role='listbox' aria-label='版本列表'>
+            {versions.map((v) => (
+              <li
+                key={v.revision}
+                role='option'
+                aria-selected={selectedRevision?.revision === v.revision}
+                className={[
+                  'plugin-slot__version-item',
+                  v.selected ? 'plugin-slot__version-item--current' : '',
+                  selectedRevision?.revision === v.revision ? 'plugin-slot__version-item--focused' : '',
+                ].join(' ')}
+                onClick={() => setSelectedRevision(v)}
+              >
+                <span className='plugin-slot__version-label'>
+                  <span className={`plugin-slot__version-source-badge plugin-slot__version-source-badge--${v.change_source}`}>
+                    {v.change_source === 'human' ? '手动' : 'AI'}
+                  </span>
+                  v{v.revision}
+                  {v.selected && <span className='plugin-slot__version-current-tag'>当前</span>}
+                </span>
+                <span className='plugin-slot__version-time'>
+                  {new Date(v.created_at).toLocaleString()}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {selectedRevision && !selectedRevision.selected ? (
+            <div className='plugin-slot__version-compare'>
+              {isImage ? (
+                <div className='plugin-slot__version-compare-cols'>
+                  <div className='plugin-slot__version-compare-col'>
+                    <div className='plugin-slot__version-compare-label'>当前版本</div>
+                    <img
+                      className='plugin-slot__version-compare-img'
+                      src={extractText(currentValue)}
+                      alt='当前版本'
+                    />
+                  </div>
+                  <div className='plugin-slot__version-compare-col'>
+                    <div className='plugin-slot__version-compare-label'>
+                      {`v${selectedRevision.revision} · ${selectedRevision.change_source === 'human' ? '手动编辑' : 'AI 生成'}`}
+                    </div>
+                    <img
+                      className='plugin-slot__version-compare-img'
+                      src={extractText(selectedRevision.content_snapshot)}
+                      alt={`v${selectedRevision.revision}`}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <TextDiffView
+                  currentText={extractText(currentValue)}
+                  otherText={extractText(selectedRevision.content_snapshot)}
+                  otherLabel={`v${selectedRevision.revision} · ${selectedRevision.change_source === 'human' ? '手动编辑' : 'AI 生成'}`}
+                />
+              )}
+              <button
+                className='plugin-slot__version-apply-btn'
+                disabled={rolling}
+                onClick={() => handleRollback(selectedRevision.revision)}
+                aria-label={`应用 v${selectedRevision.revision}`}
+              >
+                {rolling ? '回退中…' : `应用此版本 (v${selectedRevision.revision})`}
+              </button>
+            </div>
+          ) : (
+            <div className='plugin-slot__version-compare plugin-slot__version-compare--same'>
+              {selectedRevision ? (
+                isImage ? (
+                  <img
+                    className='plugin-slot__version-compare-img plugin-slot__version-compare-img--solo'
+                    src={extractText(currentValue)}
+                    alt='当前版本'
+                  />
+                ) : (
+                  <pre className='plugin-slot__version-current-text'>
+                    {extractText(currentValue) || '（无内容）'}
+                  </pre>
+                )
+              ) : (
+                <div className='plugin-slot__version-compare-hint'>选择版本查看对比</div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  ) : null;
 
   return (
     <div className='plugin-slot__version-wrap'>
@@ -125,100 +329,7 @@ export function SlotVersionPopover({
         {badge && <span className='plugin-slot__version-badge' aria-hidden='true'>{badge}</span>}
         <span className='plugin-slot__version-count'>{revisionCount > 1 ? `v${revisionCount}` : 'v1'}</span>
       </button>
-      {open && (
-        <div className='plugin-slot__version-popover' role='dialog' aria-label='版本历史' aria-modal='true'>
-          <div className='plugin-slot__version-popover-header'>
-            <span>版本历史</span>
-            <button
-              className='plugin-slot__version-popover-close'
-              onClick={() => setOpen(false)}
-              aria-label='关闭版本历史'
-            >×</button>
-          </div>
-          <div className='plugin-slot__version-popover-body'>
-            {/* Left pane: version list */}
-            <ul className='plugin-slot__version-list' role='listbox' aria-label='版本列表'>
-              {versions.map((v) => (
-                <li
-                  key={v.revision}
-                  role='option'
-                  aria-selected={selectedRevision?.revision === v.revision}
-                  className={[
-                    'plugin-slot__version-item',
-                    v.selected ? 'plugin-slot__version-item--current' : '',
-                    selectedRevision?.revision === v.revision ? 'plugin-slot__version-item--focused' : '',
-                  ].join(' ')}
-                  onClick={() => setSelectedRevision(v)}
-                >
-                  <span className='plugin-slot__version-label'>
-                    <span className={`plugin-slot__version-source-badge plugin-slot__version-source-badge--${v.change_source}`}>
-                      {v.change_source === 'human' ? '手动' : 'AI'}
-                    </span>
-                    v{v.revision}
-                    {v.selected && <span className='plugin-slot__version-current-tag'>当前</span>}
-                  </span>
-                  <span className='plugin-slot__version-time'>
-                    {new Date(v.created_at).toLocaleString()}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            {/* Right pane: comparison — hide when selected version is the current version */}
-            {selectedRevision && !selectedRevision.selected ? (
-              <div className='plugin-slot__version-compare'>
-                <div className='plugin-slot__version-compare-cols'>
-                  {/* Current version */}
-                  <div className='plugin-slot__version-compare-col'>
-                    <div className='plugin-slot__version-compare-label'>当前版本</div>
-                    {isImage ? (
-                      <img
-                        className='plugin-slot__version-compare-img'
-                        src={resolvePreview(currentValue).url ?? ''}
-                        alt='当前版本'
-                      />
-                    ) : (
-                      <pre className='plugin-slot__version-compare-text'>
-                        {resolvePreview(currentValue).text ?? '（无内容）'}
-                      </pre>
-                    )}
-                  </div>
-                  {/* Selected historical version */}
-                  <div className='plugin-slot__version-compare-col'>
-                    <div className='plugin-slot__version-compare-label'>
-                      {`v${selectedRevision.revision} · ${selectedRevision.change_source === 'human' ? '手动编辑' : 'AI 生成'}`}
-                    </div>
-                    {isImage ? (
-                      <img
-                        className='plugin-slot__version-compare-img'
-                        src={resolvePreview(selectedRevision.content_snapshot).url ?? ''}
-                        alt={`v${selectedRevision.revision}`}
-                      />
-                    ) : (
-                      <pre className='plugin-slot__version-compare-text'>
-                        {resolvePreview(selectedRevision.content_snapshot).text ?? '（无内容）'}
-                      </pre>
-                    )}
-                  </div>
-                </div>
-                <button
-                  className='plugin-slot__version-apply-btn'
-                  disabled={rolling}
-                  onClick={() => handleRollback(selectedRevision.revision)}
-                  aria-label={`应用 v${selectedRevision.revision}`}
-                >
-                  {rolling ? '回退中…' : `应用此版本 (v${selectedRevision.revision})`}
-                </button>
-              </div>
-            ) : (
-              <div className='plugin-slot__version-compare plugin-slot__version-compare--same'>
-                <div className='plugin-slot__version-compare-hint'>
-                  {selectedRevision ? '当前版本，无需对比' : '选择版本查看对比'}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {popoverContent}
     </div>
   );
 }
@@ -485,23 +596,30 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
 
   const canEdit = Boolean(sessionId && slotId && slot.sort_order !== undefined);
 
-  // On mount: silently restore localStorage draft if present.
+  // On mount: restore localStorage draft only if it differs from the current artifact text.
+  // A draft equal to the artifact text carries no unsaved change and should be discarded
+  // to avoid triggering a spurious flush later.
   useEffect(() => {
     if (!canEdit || !sessionId || !slotId || slot.sort_order === undefined) return;
     const saved = draftStore.getLocalDraft(sessionId, slotId, slot.sort_order);
-    if (saved?.text !== undefined) {
+    if (saved?.text !== undefined && String(saved.text) !== text) {
       setDraft(String(saved.text));
+    } else if (saved?.text !== undefined) {
+      // Draft matches artifact — discard it so no flush is scheduled.
+      draftStore.cancelDraft(sessionId, slotId, slot.sort_order);
     }
   // Run only on mount (stable deps).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleEdit = () => {
-    // Prefer any in-memory draft over the persisted artifact value.
+    // Prefer an in-memory draft over the persisted artifact value, but only when
+    // the draft actually contains a change; otherwise start fresh from artifact text.
     const saved = (sessionId && slotId && slot.sort_order !== undefined)
       ? draftStore.getLocalDraft(sessionId, slotId, slot.sort_order)
       : null;
-    setDraft(saved?.text !== undefined ? String(saved.text) : text);
+    const savedText = saved?.text !== undefined ? String(saved.text) : undefined;
+    setDraft(savedText !== undefined && savedText !== text ? savedText : text);
     setEditing(true);
   };
 
@@ -513,14 +631,21 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
     }
   };
 
-  // Save / Ctrl+S / onBlur: persist to localStorage only, no backend version.
+  // Save / Ctrl+S / onBlur: persist to localStorage only when content has changed.
+  // If draft equals the original artifact text, discard the draft so no backend
+  // revision is created (flushDraft would otherwise fire after the delay).
   const handleSave = () => {
     if (cancelledRef.current) {
       cancelledRef.current = false;
       return;
     }
     if (sessionId && slotId && slot.sort_order !== undefined) {
-      draftStore.setDraft(sessionId, slotId, slot.sort_order, { text: draft });
+      if (draft !== text) {
+        draftStore.setDraft(sessionId, slotId, slot.sort_order, { text: draft });
+      } else {
+        // No change — cancel any pending draft so the 60s flush never fires.
+        draftStore.cancelDraft(sessionId, slotId, slot.sort_order);
+      }
     }
     setEditing(false);
   };

@@ -168,7 +168,7 @@
   // Horizontal scrollable image card list
   &__image-list {
     display: flex;
-    gap: 10px;
+    align-items: stretch;
     overflow-x: auto;
     padding-bottom: 4px;
     scrollbar-width: thin;
@@ -180,6 +180,17 @@
     &::-webkit-scrollbar-thumb {
       background: #d1d5db;
       border-radius: 4px;
+    }
+
+    // Items themselves keep their original spacing via margin.
+    > [draggable],
+    > [role='button'] {
+      flex-shrink: 0;
+      margin-right: 10px;
+
+      &:last-of-type {
+        margin-right: 0;
+      }
     }
   }
 
@@ -435,19 +446,31 @@
   }
 
   &__version-popover {
-    position: absolute;
-    bottom: calc(100% + 6px);
-    left: 0;
-    z-index: 200;
-    width: 560px;
-    max-width: 90vw;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1050;
+    width: 640px;
+    max-width: 92vw;
+    max-height: 80vh;
     background: #fff;
     border: 1px solid #e5e7eb;
     border-radius: 10px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.14);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+
+  &__version-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1040;
+    background: rgba(0, 0, 0, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   &__version-popover-header {
@@ -558,6 +581,52 @@
     font-style: italic;
   }
 
+  &__version-diff {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+  }
+
+  &__version-diff-header {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    font-size: 11px;
+    font-weight: 600;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  &__version-diff-label {
+    padding: 5px 10px;
+
+    &--remove {
+      background: #fef3f2;
+      color: #b42318;
+      border-right: 1px solid #e5e7eb;
+    }
+
+    &--add {
+      background: #ecfdf3;
+      color: #027a48;
+    }
+  }
+
+  &__version-diff-body {
+    flex: 1;
+    overflow-y: auto;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+
+  &__version-diff-empty {
+    font-size: 12px;
+    color: #9ca3af;
+    padding: 12px;
+    text-align: center;
+    font-style: italic;
+  }
+
   &__version-compare-cols {
     display: flex;
     gap: 8px;
@@ -603,6 +672,26 @@
     max-height: 240px;
     border-radius: 4px;
     border: 1px solid #f3f4f6;
+
+    &--solo {
+      max-height: 320px;
+      align-self: center;
+    }
+  }
+
+  &__version-current-text {
+    flex: 1;
+    margin: 0;
+    padding: 12px;
+    font-size: 13px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #374151;
+    background: #f9fafb;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
+    overflow-y: auto;
   }
 
   &__version-compare-empty {
@@ -1047,4 +1136,22 @@
     font-size: 13px;
     padding: 8px 0;
   }
+}
+
+// Drag-and-drop insert indicator and dragging state for sortable image lists.
+.plugin-panel__image-insert-gap {
+  width: 4px;
+  align-self: stretch;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 0.1s;
+  flex-shrink: 0;
+
+  &--active {
+    background: #6366f1;
+  }
+}
+
+.plugin-panel__image-list-item--dragging {
+  opacity: 0.4;
 }

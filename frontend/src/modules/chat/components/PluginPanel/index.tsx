@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePluginSession } from '@/modules/chat/hooks/usePlugin';
 import { usePluginStore } from '@/modules/chat/store/pluginPanel';
@@ -326,6 +326,152 @@ function CompositeSlotGrid({
  * TabSlotGrid renders slots according to the plugin UI tab definition.
  * Passes sort_order, sessionId, slotId to each SlotRenderer for Phase 3 actions.
  */
+// ---------------------------------------------------------------------------
+// SortableImageList — drag-and-drop reordering for image list slots
+// Uses HTML5 native drag events; no external library needed.
+// Insert indicator is a vertical line between items, not a highlight on the item.
+// ---------------------------------------------------------------------------
+
+function SortableImageList({
+  revisions,
+  session,
+  slotDef,
+  isDraggable,
+  onRefresh,
+  onReference,
+  onFocusSortOrder,
+}: {
+  revisions: SlotRevision[];
+  session: PluginSession;
+  slotDef: SlotDef;
+  isDraggable: boolean;
+  onRefresh?: () => void;
+  onReference?: (slot: SlotRevision) => void;
+  onFocusSortOrder?: (sortOrder: number | undefined) => void;
+}) {
+  const reorderSlotItems = usePluginStore((s) => s.reorderSlotItems);
+  const loadSlotOrder = usePluginStore((s) => s.loadSlotOrder);
+  const [localOrder, setLocalOrder] = useState<number[]>(() =>
+    revisions.map((r) => r.sort_order ?? 0),
+  );
+  useEffect(() => {
+    setLocalOrder(revisions.map((r) => r.sort_order ?? 0));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revisions.map((r) => `${r.sort_order}`).join(',')]);
+
+  const dragSrcIdx = useRef<number | null>(null);
+  // insertIdx is a gap index: 0 = before first item, n = after last item.
+  const [insertIdx, setInsertIdx] = useState<number | null>(null);
+
+  const handleDragStart = useCallback((idx: number) => {
+    dragSrcIdx.current = idx;
+  }, []);
+
+  // Compute which gap the pointer is closest to based on the drag position
+  // relative to the hovered item element.
+  const computeInsertIdx = useCallback((e: React.DragEvent, itemIdx: number) => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const midX = rect.left + rect.width / 2;
+    return e.clientX < midX ? itemIdx : itemIdx + 1;
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent, itemIdx: number) => {
+    e.preventDefault();
+    setInsertIdx(computeInsertIdx(e, itemIdx));
+  }, [computeInsertIdx]);
+
+  const handleContainerDragLeave = useCallback((e: React.DragEvent) => {
+    // Only clear when leaving the container entirely (not entering a child).
+    if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) {
+      setInsertIdx(null);
+    }
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent, itemIdx: number) => {
+    e.preventDefault();
+    const srcIdx = dragSrcIdx.current;
+    const gapIdx = computeInsertIdx(e, itemIdx);
+    dragSrcIdx.current = null;
+    setInsertIdx(null);
+
+    if (srcIdx === null) return;
+    // Dropping back into same position is a no-op.
+    if (gapIdx === srcIdx || gapIdx === srcIdx + 1) return;
+
+    const next = [...localOrder];
+    const [moved] = next.splice(srcIdx, 1);
+    // After removing srcIdx, adjust gap index if needed.
+    const adjustedGap = gapIdx > srcIdx ? gapIdx - 1 : gapIdx;
+    next.splice(adjustedGap, 0, moved);
+    setLocalOrder(next);
+    try {
+      const orderInfo = await loadSlotOrder(session.session_id, slotDef.id);
+      await reorderSlotItems(session.session_id, slotDef.id, next, orderInfo.order_version);
+      onRefresh?.();
+    } catch {
+      setLocalOrder(revisions.map((r) => r.sort_order ?? 0));
+    }
+  }, [localOrder, revisions, session.session_id, slotDef.id, reorderSlotItems, loadSlotOrder, onRefresh, computeInsertIdx]);
+
+  const handleDragEnd = useCallback(() => {
+    dragSrcIdx.current = null;
+    setInsertIdx(null);
+  }, []);
+
+  const byOrder: Record<number, SlotRevision> = {};
+  for (const r of revisions) {
+    if (r.sort_order !== undefined) byOrder[r.sort_order] = r;
+  }
+
+  return (
+    <div
+      className={`plugin-panel__image-list${isDraggable ? ' plugin-panel__image-list--sortable' : ''}`}
+      onDragLeave={isDraggable ? handleContainerDragLeave : undefined}
+    >
+      {/* Insert indicator before first item */}
+      {isDraggable && (
+        <div className={`plugin-panel__image-insert-gap${insertIdx === 0 ? ' plugin-panel__image-insert-gap--active' : ''}`} aria-hidden='true' />
+      )}
+      {localOrder.map((sortOrder, idx) => {
+        const rev = byOrder[sortOrder];
+        if (!rev) return null;
+        return (
+          <React.Fragment key={`${rev.slot_id}-${rev.revision}-${rev.list_index ?? 0}`}>
+            <div
+              draggable={isDraggable}
+              onDragStart={isDraggable ? () => handleDragStart(idx) : undefined}
+              onDragOver={isDraggable ? (e) => handleDragOver(e, idx) : undefined}
+              onDrop={isDraggable ? (e) => handleDrop(e, idx) : undefined}
+              onDragEnd={isDraggable ? handleDragEnd : undefined}
+              onClick={() => onFocusSortOrder?.(sortOrder)}
+              role='button'
+              tabIndex={0}
+              aria-label={`图片 ${sortOrder}`}
+              className={`plugin-panel__image-list-item${dragSrcIdx.current === idx ? ' plugin-panel__image-list-item--dragging' : ''}`}
+            >
+              <SlotRenderer
+                slot={rev}
+                cardMode
+                expectedType={slotDef.type}
+                sessionId={session.session_id}
+                slotId={slotDef.id}
+                revisionCount={rev.revision_count}
+                isDraggable={isDraggable}
+                onRefresh={onRefresh}
+                onReference={onReference}
+              />
+            </div>
+            {/* Insert indicator after each item */}
+            {isDraggable && (
+              <div className={`plugin-panel__image-insert-gap${insertIdx === idx + 1 ? ' plugin-panel__image-insert-gap--active' : ''}`} aria-hidden='true' />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
 function TabSlotGrid({
   tab,
   session,
@@ -372,29 +518,15 @@ function TabSlotGrid({
                 <span>—</span>
               </div>
             ) : isImageList ? (
-              <div className={`plugin-panel__image-list${isDraggable ? ' plugin-panel__image-list--sortable' : ''}`}>
-                {revisions.map((rev) => (
-                  <div
-                    key={`${rev.slot_id}-${rev.revision}-${rev.list_index ?? 0}`}
-                    onClick={() => onFocusSortOrder?.(rev.sort_order)}
-                    role='button'
-                    tabIndex={0}
-                    aria-label={`图片 ${rev.sort_order ?? ''}`}
-                  >
-                    <SlotRenderer
-                      slot={rev}
-                      cardMode
-                      expectedType={slotDef.type}
-                      sessionId={session.session_id}
-                      slotId={slotDef.id}
-                      revisionCount={rev.revision_count}
-                      isDraggable={isDraggable}
-                      onRefresh={onRefresh}
-                      onReference={onReference}
-                    />
-                  </div>
-                ))}
-              </div>
+              <SortableImageList
+                revisions={revisions}
+                session={session}
+                slotDef={slotDef}
+                isDraggable={isDraggable}
+                onRefresh={onRefresh}
+                onReference={onReference}
+                onFocusSortOrder={onFocusSortOrder}
+              />
             ) : (
               revisions.map((rev) => (
                 <div

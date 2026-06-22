@@ -416,9 +416,19 @@ func OnArtifactEvent(
 		}
 	}
 
-	if _, err := WriteSlotRevision(ctx, db,
-		pctx.SessionID, slotID, artifactKey, pctx.StepID, attempt, cardinality, listIndex); err != nil {
+	rev, err := WriteSlotRevision(ctx, db,
+		pctx.SessionID, slotID, artifactKey, pctx.StepID, attempt, cardinality, listIndex)
+	if err != nil {
 		fmt.Printf("[Plugin] WriteSlotRevision failed: %v\n", err)
+		return
+	}
+
+	// Back-fill list_index into sub_agent_artifacts.value so that HideSlotItem
+	// can match the artifact row by list_index when the user deletes an item.
+	// This is needed for append-mode artifacts where Python does not yet know
+	// the list_index assigned by Go (sort_order was not passed to save_artifact).
+	if cardinality == "list" && rev != nil && rev.ListIndex != nil {
+		backfillArtifactListIndex(ctx, db, taskID, artifactKey, *rev.ListIndex)
 	}
 }
 
@@ -626,4 +636,44 @@ func callDriverAgent(pluginID, stepID, stepResult, sessionID string) (verdict, r
 // driverEndpoint returns the DriverAgent URL.
 func driverEndpoint() string {
 	return common.ChatServiceEndpoint() + "/api/plugin/driver"
+}
+
+// backfillArtifactListIndex patches the most-recent sub_agent_artifacts row for
+// (taskID, artifactKey) to embed {"list_index": listIndex} inside its value JSON.
+// This ensures HideSlotItem can match artifacts by list_index even when the AI
+// wrote the artifact in append-mode (no sort_order → no list_index in value at write time).
+// Skipped silently if the row already contains the correct list_index.
+func backfillArtifactListIndex(ctx context.Context, db *gorm.DB, taskID, artifactKey string, listIndex int) {
+	var art orm.SubAgentArtifact
+	if err := db.WithContext(ctx).
+		Where("task_id = ? AND artifact_key = ?", taskID, artifactKey).
+		Order("seq DESC").
+		First(&art).Error; err != nil {
+		return
+	}
+	var v map[string]any
+	if json.Unmarshal(art.Value, &v) != nil {
+		return
+	}
+	// Already correct — no update needed.
+	if existing, ok := v["list_index"]; ok {
+		switch idx := existing.(type) {
+		case float64:
+			if int(idx) == listIndex {
+				return
+			}
+		case int:
+			if idx == listIndex {
+				return
+			}
+		}
+	}
+	v["list_index"] = listIndex
+	newVal, err := json.Marshal(v)
+	if err != nil {
+		return
+	}
+	_ = db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).
+		Where("task_id = ? AND artifact_key = ? AND seq = ?", art.TaskID, art.ArtifactKey, art.Seq).
+		Update("value", newVal).Error
 }
