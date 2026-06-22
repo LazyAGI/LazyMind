@@ -68,12 +68,10 @@ export function SlotVersionPopover({
   const [loading, setLoading] = useState(false);
   const [selectedRevision, setSelectedRevision] = useState<SlotVersionEntry | null>(null);
   const [rolling, setRolling] = useState(false);
-  const openRef = useRef(false);
   const { getSlotVersions, rollbackSlotItem } = usePluginStore();
 
   const handleOpen = useCallback(async () => {
-    if (openRef.current) {
-      openRef.current = false;
+    if (open) {
       setOpen(false);
       return;
     }
@@ -83,18 +81,16 @@ export function SlotVersionPopover({
       setVersions(vs);
       const current = vs.find((v) => v.selected) ?? vs[vs.length - 1] ?? null;
       setSelectedRevision(current);
-      openRef.current = true;
       setOpen(true);
     } finally {
       setLoading(false);
     }
-  }, [sessionId, slotId, sortOrder, getSlotVersions]);
+  }, [open, sessionId, slotId, sortOrder, getSlotVersions]);
 
   const handleRollback = useCallback(async (revision: number) => {
     setRolling(true);
     try {
       await rollbackSlotItem(sessionId, slotId, sortOrder, revision);
-      openRef.current = false;
       setOpen(false);
       onRollbackDone?.();
     } finally {
@@ -167,33 +163,31 @@ export function SlotVersionPopover({
                 </li>
               ))}
             </ul>
-            {/* Right pane: comparison */}
-            <div className='plugin-slot__version-compare'>
-              <div className='plugin-slot__version-compare-cols'>
-                {/* Current version */}
-                <div className='plugin-slot__version-compare-col'>
-                  <div className='plugin-slot__version-compare-label'>当前版本</div>
-                  {isImage ? (
-                    <img
-                      className='plugin-slot__version-compare-img'
-                      src={resolvePreview(currentValue).url ?? ''}
-                      alt='当前版本'
-                    />
-                  ) : (
-                    <pre className='plugin-slot__version-compare-text'>
-                      {resolvePreview(currentValue).text ?? '（无内容）'}
-                    </pre>
-                  )}
-                </div>
-                {/* Selected historical version */}
-                <div className='plugin-slot__version-compare-col'>
-                  <div className='plugin-slot__version-compare-label'>
-                    {selectedRevision
-                      ? `v${selectedRevision.revision} · ${selectedRevision.change_source === 'human' ? '手动编辑' : 'AI 生成'}`
-                      : '选择版本'}
+            {/* Right pane: comparison — hide when selected version is the current version */}
+            {selectedRevision && !selectedRevision.selected ? (
+              <div className='plugin-slot__version-compare'>
+                <div className='plugin-slot__version-compare-cols'>
+                  {/* Current version */}
+                  <div className='plugin-slot__version-compare-col'>
+                    <div className='plugin-slot__version-compare-label'>当前版本</div>
+                    {isImage ? (
+                      <img
+                        className='plugin-slot__version-compare-img'
+                        src={resolvePreview(currentValue).url ?? ''}
+                        alt='当前版本'
+                      />
+                    ) : (
+                      <pre className='plugin-slot__version-compare-text'>
+                        {resolvePreview(currentValue).text ?? '（无内容）'}
+                      </pre>
+                    )}
                   </div>
-                  {selectedRevision ? (
-                    isImage ? (
+                  {/* Selected historical version */}
+                  <div className='plugin-slot__version-compare-col'>
+                    <div className='plugin-slot__version-compare-label'>
+                      {`v${selectedRevision.revision} · ${selectedRevision.change_source === 'human' ? '手动编辑' : 'AI 生成'}`}
+                    </div>
+                    {isImage ? (
                       <img
                         className='plugin-slot__version-compare-img'
                         src={resolvePreview(selectedRevision.content_snapshot).url ?? ''}
@@ -203,13 +197,9 @@ export function SlotVersionPopover({
                       <pre className='plugin-slot__version-compare-text'>
                         {resolvePreview(selectedRevision.content_snapshot).text ?? '（无内容）'}
                       </pre>
-                    )
-                  ) : (
-                    <div className='plugin-slot__version-compare-empty'>点击左侧版本预览</div>
-                  )}
+                    )}
+                  </div>
                 </div>
-              </div>
-              {selectedRevision && !selectedRevision.selected && (
                 <button
                   className='plugin-slot__version-apply-btn'
                   disabled={rolling}
@@ -218,8 +208,14 @@ export function SlotVersionPopover({
                 >
                   {rolling ? '回退中…' : `应用此版本 (v${selectedRevision.revision})`}
                 </button>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className='plugin-slot__version-compare plugin-slot__version-compare--same'>
+                <div className='plugin-slot__version-compare-hint'>
+                  {selectedRevision ? '当前版本，无需对比' : '选择版本查看对比'}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -456,6 +452,8 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
   // Caption inline editing state.
   const [captionEditing, setCaptionEditing] = useState(false);
   const [captionDraft, setCaptionDraft] = useState('');
+  // Flag to skip onBlur save when user presses Escape.
+  const cancelledRef = useRef(false);
 
   // Detect large-content offload: {"type":"text"|"json","path":"...","size":N}
   const isOffloaded = raw && typeof raw === 'object' && raw.path && (raw.type === 'text' || raw.type === 'json');
@@ -515,8 +513,12 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
     }
   };
 
-  // Save / Ctrl+S / close editing state: persist to localStorage only, no backend version.
+  // Save / Ctrl+S / onBlur: persist to localStorage only, no backend version.
   const handleSave = () => {
+    if (cancelledRef.current) {
+      cancelledRef.current = false;
+      return;
+    }
     if (sessionId && slotId && slot.sort_order !== undefined) {
       draftStore.setDraft(sessionId, slotId, slot.sort_order, { text: draft });
     }
@@ -528,9 +530,13 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
       e.preventDefault();
       handleSave();
     }
+    if (e.key === 'Escape') {
+      handleCancel();
+    }
   };
 
   const handleCancel = () => {
+    cancelledRef.current = true;
     if (sessionId && slotId && slot.sort_order !== undefined) {
       draftStore.cancelDraft(sessionId, slotId, slot.sort_order);
     }
@@ -568,29 +574,27 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
   return (
     <div className='plugin-slot plugin-slot--text'>
       {editing ? (
-        <div className='plugin-slot__text-edit'>
-          <textarea
-            className='plugin-slot__text-editor'
-            value={draft}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            rows={6}
-            aria-label='编辑文本'
-          />
-          <div className='plugin-slot__text-edit-actions'>
-            <button className='plugin-slot__text-save' onClick={handleSave}>保存</button>
-            <button className='plugin-slot__text-cancel' onClick={handleCancel}>取消</button>
-          </div>
-        </div>
+        <textarea
+          className='plugin-slot__text-editor'
+          value={draft}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          onBlur={handleSave}
+          autoFocus
+          rows={6}
+          aria-label='编辑文本'
+        />
       ) : (
         <>
-          <p className='plugin-slot__text'>{displayText}</p>
+          <p
+            className={`plugin-slot__text${canEdit ? ' plugin-slot__text--editable' : ''}`}
+            onClick={canEdit ? handleEdit : undefined}
+            title={canEdit ? '点击编辑' : undefined}
+            role={canEdit ? 'button' : undefined}
+            tabIndex={canEdit ? 0 : undefined}
+            onKeyDown={canEdit ? (e) => e.key === 'Enter' && handleEdit() : undefined}
+          >{displayText}</p>
           <div className='plugin-slot__text-meta'>
-            {canEdit && (
-              <button className='plugin-slot__text-edit-btn' onClick={handleEdit} title='编辑' aria-label='编辑文本'>
-                ✏
-              </button>
-            )}
             {revisionCount !== undefined && revisionCount > 0 && sessionId && slotId && slot.sort_order !== undefined && (
               <SlotVersionPopover
                 sessionId={sessionId}

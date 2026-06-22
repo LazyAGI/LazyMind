@@ -203,6 +203,15 @@ def _objective_prompt(ctx: SubAgentContext) -> str:
         'key is missing. Do not write a final summary until all save_artifact calls are done.'
     )
     lines.append(
+        '## Overwrite vs. Append for list slots\n'
+        'save_artifact has an optional sort_order parameter (1-based):\n'
+        '- Omit sort_order → append a new item at the end of the list.\n'
+        '- Pass sort_order=N → overwrite the item currently at display position N.\n'
+        'If the objective says the user wants to replace a specific item '
+        '(e.g. "重新收集第二张图", "replace item 3", "redo position N"), '
+        'you MUST pass sort_order=N. Omitting it will append a new item instead of replacing.'
+    )
+    lines.append(
         'After all required artifacts are saved, write a final summary that contains the '
         'actual results and key findings — not only a reference to the artifacts. '
         'For example, if you searched for information, include the information itself. '

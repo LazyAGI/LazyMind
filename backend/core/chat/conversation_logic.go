@@ -1379,6 +1379,24 @@ func handlePluginStepCreated(
 		if cold, ok := ev.Params["is_cold_start"].(bool); ok {
 			params.IsColdStart = cold
 		}
+		if rh, ok := ev.Params["retry_hint"].(string); ok {
+			params.RetryHint = rh
+		}
+		if pi, ok := ev.Params["partial_indices"].(map[string]any); ok {
+			parsed := make(map[string][]int, len(pi))
+			for k, v := range pi {
+				if arr, ok2 := v.([]any); ok2 {
+					ints := make([]int, 0, len(arr))
+					for _, elem := range arr {
+						if f, ok3 := elem.(float64); ok3 {
+							ints = append(ints, int(f))
+						}
+					}
+					parsed[k] = ints
+				}
+			}
+			params.PartialIndices = parsed
+		}
 	}
 	if params.PluginID == "" || params.StepID == "" {
 		fmt.Println("[Core] [PLUGIN_STEP_INVALID_PARAMS] plugin_id or step_id missing")

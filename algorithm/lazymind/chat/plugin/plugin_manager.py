@@ -117,8 +117,8 @@ def _trigger_plugin_step(
         user_input: The user's original or latest input.
         is_cold_start: True for the first step of a new session.
         runtime_instruction: Optional ephemeral instruction injected into the step
-            objective for this execution only.  Used for partial retries where the
-            user wants to regenerate only a subset of list artifacts.
+            objective for this execution only.  Used for retries where the user
+            wants to refine or partially regenerate the output.
             Not persisted to session state.
         partial_indices: Maps artifact_key → list_index values that should overwrite
             existing list-slot entries rather than appending. None means full write.
@@ -222,24 +222,16 @@ def _trigger_plugin_step(
     if partial_indices:
         params['partial_indices'] = partial_indices
 
-    # Inject focused_tab / focused_sort_order from agentic_config into objective context.
-    # Both values are always appended to the instruction when present, regardless of whether
-    # a runtime_instruction was already provided.
+    # Inject focused_tab (UI context hint) into the objective.
+    # focused_sort_order is NOT injected — it is the UI scroll position,
+    # not the user's intended operation target. The SubAgent reads the
+    # runtime_instruction directly and decides which sort_order to pass
+    # to save_artifact based on the user's stated intent.
     focused_tab = cfg.get('focused_tab')
-    focused_sort_order = cfg.get('focused_sort_order')
     enriched_instruction = runtime_instruction or ''
-    context_hints: list[str] = []
     if focused_tab:
-        context_hints.append(f'User is currently viewing tab: {focused_tab}.')
-    if focused_sort_order is not None:
-        context_hints.append(f'User is currently focused on item at sort_order={focused_sort_order}.')
-    if context_hints:
         sep = ' ' if enriched_instruction else ''
-        enriched_instruction = enriched_instruction + sep + ' '.join(context_hints)
-    # Resolve "第N个" pattern in runtime_instruction → target_sort_order.
-    target_sort_order = _resolve_nth_item(runtime_instruction or user_input, cfg)
-    if target_sort_order is not None:
-        params['target_sort_order'] = target_sort_order
+        enriched_instruction = enriched_instruction + sep + f'User is currently viewing tab: {focused_tab}.'
 
     _write_agent_data(
         'task_created',
@@ -257,42 +249,9 @@ def _trigger_plugin_step(
     return f'Step {step_id!r} triggered. Stop here.'
 
 
-def _resolve_nth_item(text: str, cfg: Dict[str, Any]) -> Optional[int]:
-    """Detect "第N个" / "the Nth" / "item N" patterns and return the sort_order, or None.
-
-    Uses the visible_sort_order_map from plugin_context to map N → sort_order.
-    If the map is absent or N is out of range, returns None.
-    """
-    if not text:
-        return None
-    import re
-    # Match: 第N个, 第N张, the Nth, item N (N is 1-9 digits)
-    patterns = [
-        r'第\s*([1-9]\d*)\s*[个张幅条件]',
-        r'\bthe\s+([1-9]\d*)\w*\b',
-        r'\bitem\s+([1-9]\d*)\b',
-        r'\b#([1-9]\d*)\b',
-    ]
-    for pat in patterns:
-        m = re.search(pat, text, re.IGNORECASE)
-        if m:
-            n = int(m.group(1))
-            # Try to look up visible_sort_order_map from agentic_config.
-            vsom: Optional[Dict[str, Any]] = cfg.get('visible_sort_order_map')
-            if vsom:
-                # Pick any slot's list and return the nth sort_order.
-                for orders in vsom.values():
-                    if isinstance(orders, list) and 1 <= n <= len(orders):
-                        return int(orders[n - 1])
-            # Fallback: return n directly as sort_order.
-            return n
-    return None
-
-
 # ---------------------------------------------------------------------------
 # Public tool factories
 # ---------------------------------------------------------------------------
-
 def _build_step_choices_doc(
     forward_steps: List[str],
     rewind_steps: List[str],

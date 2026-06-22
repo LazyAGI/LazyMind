@@ -73,10 +73,28 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
     (each call appends a row with an incremented seq), which is how variable-count outputs
     such as per-image generation are streamed to the frontend.
 
-    For list-cardinality slots:
-    - Omit sort_order to append a new item.
-    - Pass sort_order=N (1-based) to overwrite the item currently at display position N
-      (partial retry: only that position is replaced, others remain untouched).
+    ## sort_order: append vs. overwrite
+
+    For list-cardinality slots (e.g. a list of reference images):
+
+    - **Omit sort_order** (or pass None): append a brand-new item at the end of the list.
+      Use this for normal full runs or when adding new content.
+
+    - **Pass sort_order=N** (1-based display position): overwrite the item currently
+      shown at position N in the UI. The existing item is replaced; nothing else changes.
+      Use this whenever the user's instruction targets a specific item, for example:
+        - "重新收集第二张图" → sort_order=2
+        - "替换第三张参考图" → sort_order=3
+        - "第一张和第三张都重新生成" → call save_artifact twice: sort_order=1, sort_order=3
+      Do NOT pass list_index directly — always use sort_order (1-based visual position).
+
+    For single-cardinality slots the sort_order parameter is ignored (single slots
+    always overwrite the one existing value).
+
+    ## IMPORTANT: obey the user's stated intent
+    If the objective or runtime_instruction says "overwrite item N", "replace the Nth",
+    or similar, you MUST pass sort_order=N. Omitting sort_order in that case appends
+    a new item and leaves the original untouched, which is wrong.
 
     Args:
         key (str): Artifact key. Must be one of the declared output_artifact_keys.
@@ -85,10 +103,11 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
         content_type (str): One of text, json, image, file, file_list. Default text.
         source_tool (str): Optional name of the tool that produced this artifact,
             e.g. 'web_search', 'wikipedia', 'image_generation'. Used for display only.
-        sort_order (int): Optional. 1-based display position within a list slot. When
-            provided, signals that this artifact should replace the existing item at that
-            position rather than being appended. For single-cardinality slots this parameter
-            is ignored. Do NOT pass list_index directly — always use sort_order.
+        sort_order (int): Optional. 1-based display position within a list slot.
+            **1 = first item, 2 = second item, etc.**
+            Omit (or pass None) to append; pass N to overwrite position N.
+            If N is out of range, the artifact is appended and a warning is returned.
+            See the sort_order section above for full guidance.
         caption (str): Optional human-readable description for image/file artifacts.
             Stored in sub_agent_artifacts.caption and used in artifact_summary.
 
@@ -101,10 +120,13 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
     if source_tool:
         built['_source_tool'] = str(source_tool)
     # Translate sort_order → list_index via Go core API.
+    out_of_range_warning: Optional[str] = None
     if sort_order is not None:
-        list_index = _resolve_list_index_from_sort_order(key, sort_order)
+        list_index, resolve_err = _resolve_list_index_from_sort_order(key, sort_order)
         if list_index is not None:
             built['list_index'] = list_index
+        elif resolve_err:
+            out_of_range_warning = resolve_err
     if caption is not None:
         built['caption'] = str(caption)
     seq = ctx.next_artifact_seq(key)
@@ -116,14 +138,20 @@ def save_artifact(key: str, value: Any, content_type: str = 'text',
         'seq': seq,
         'value': built,
     })
-    return tool_success('save_artifact', {'status': 'ok', 'message': f"Artifact '{key}' saved."})
+    msg = f"Artifact '{key}' saved."
+    if out_of_range_warning:
+        msg += f' WARNING: {out_of_range_warning}'
+    return tool_success('save_artifact', {'status': 'ok', 'message': msg})
 
 
-def _resolve_list_index_from_sort_order(artifact_key: str, sort_order: int) -> Optional[int]:
+def _resolve_list_index_from_sort_order(
+    artifact_key: str, sort_order: int
+) -> tuple[Optional[int], Optional[str]]:
     """Query Go core to translate sort_order → list_index for a list-slot artifact.
 
-    Returns the list_index integer, or None on any error (in which case the artifact
-    is appended as a new item rather than overwriting an existing one).
+    Returns (list_index, None) on success, or (None, error_message) when sort_order
+    is out of range. Returns (None, None) on technical errors or non-list slots
+    (caller should silently append in those cases).
     """
     try:
         import httpx
@@ -136,21 +164,21 @@ def _resolve_list_index_from_sort_order(artifact_key: str, sort_order: int) -> O
             pass
         session_id: str = cfg.get('plugin_session_id', '')
         if not session_id:
-            return None
+            return None, None
         # Look up slot_id from plugin_loader via artifact_key.
         plugin_id: str = cfg.get('plugin_id', '')
         if not plugin_id:
-            return None
+            return None, None
         from lazymind.chat.plugin import plugin_loader
         spec = plugin_loader.get_plugin(plugin_id)
         if not spec:
-            return None
+            return None, None
         slot_def = spec.get_slot_for_artifact_key(artifact_key)
         if not slot_def:
-            return None
+            return None, None
         slot_id = slot_def.get('id', '')
         if not slot_id:
-            return None
+            return None, None
         core_url = str(_cfg['core_api_url']).rstrip('/')
         url = (
             f'{core_url}/plugin-sessions/{session_id}'
@@ -158,13 +186,26 @@ def _resolve_list_index_from_sort_order(artifact_key: str, sort_order: int) -> O
         )
         resp = httpx.get(url, timeout=3.0)
         if resp.status_code != 200:
-            return None
+            return None, None
         order_list: list = resp.json().get('data', {}).get('order_list', [])
-        if not order_list or sort_order < 1 or sort_order > len(order_list):
-            return None
-        return int(order_list[sort_order - 1])
+        if not order_list:
+            # Single-cardinality slot — sort_order is meaningless, ignore silently.
+            return None, None
+        n = len(order_list)
+        if sort_order < 1:
+            return None, (
+                f'sort_order must be >= 1 (sort_order is 1-based, where 1 is the first item). '
+                f'Received sort_order={sort_order}. Artifact appended as a new item instead.'
+            )
+        if sort_order > n:
+            return None, (
+                f'sort_order={sort_order} is out of range — the list currently has {n} item(s) '
+                f'(valid range: 1–{n}). Artifact appended as a new item instead. '
+                f'If you intended to overwrite, use a sort_order between 1 and {n}.'
+            )
+        return int(order_list[sort_order - 1]), None
     except Exception:
-        return None
+        return None, None
 
 
 @handle_tool_errors
