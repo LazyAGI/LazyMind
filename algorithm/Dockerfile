@@ -31,7 +31,7 @@ RUN set -eu; \
     apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl ffmpeg build-essential gcc \
         libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libxcb1 \
-        python3-dev \
+        python3-dev ripgrep \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

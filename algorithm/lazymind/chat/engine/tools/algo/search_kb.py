@@ -1,6 +1,7 @@
-from typing import Any, Callable, List, Optional
+import re
+from typing import Any, Callable, Dict, List, Optional
 
-from lazyllm import Document, parallel
+from lazyllm import Document, LOG, parallel
 from lazyllm.tools.rag import Reranker, Retriever, TempDocRetriever
 from lazyllm.tools.rag.rank_fusion.reciprocal_rank_fusion import RRFFusion
 
@@ -8,6 +9,35 @@ from lazymind.chat.engine.tools.algo.kb_adaptive_topk import AdaptiveKComponent
 from lazymind.chat.engine.tools.algo.kb_context_expansion import ContextExpansionComponent
 from lazymind.chat.engine.tools.infra import get_vocab_manager
 from lazymind.config import config as _cfg
+
+# ── Embedding / retrieval API error diagnosis ──────────────────────────────
+# Patterns that indicate a remote API failure (balance, auth, network, config).
+# Grouped by category so callers can log or surface a human-readable hint.
+_API_ERROR_PATTERNS: List[tuple] = [
+    (re.compile(r'account balance is insufficient', re.I),
+     'EMBEDDING_API_BALANCE', 'Embedding API account balance is insufficient. Please top up your account.'),
+    (re.compile(r'Invalid token|Invalid api_key|Api key is invalid|not authorized', re.I),
+     'EMBEDDING_API_AUTH', 'Embedding API key is invalid or unauthorized. Please check your API key.'),
+    (re.compile(r'No source is configured for dynamic embedding', re.I),
+     'EMBEDDING_API_NOSOURCE', 'Embedding model source is not configured. Check LAZYMIND_MODEL_CONFIG_PATH or model config.'),
+    (re.compile(r'connection.*refused|ConnectionRefusedError|Name or service not known|Failed to resolve', re.I),
+     'EMBEDDING_API_NETWORK', 'Cannot reach embedding API — network or DNS error.'),
+    (re.compile(r'timed out|ReadTimeout|Read timed out', re.I),
+     'EMBEDDING_API_TIMEOUT', 'Embedding API request timed out. Check network or API endpoint.'),
+]
+
+
+def _diagnose_api_error(error_message: str) -> Optional[Dict[str, str]]:
+    """Check an error message for known embedding API failure patterns.
+
+    Returns a dict with ``code`` and ``hint`` if a pattern matches, or ``None``.
+    """
+    if not error_message:
+        return None
+    for pattern, code, hint in _API_ERROR_PATTERNS:
+        if pattern.search(error_message):
+            return {'code': code, 'hint': hint}
+    return None
 
 
 def _adaptive_get_token_len(n: Any) -> int:
@@ -39,7 +69,19 @@ def _search_text(
     rerank_topk: int,
     k_max: int,
 ) -> List[Any]:
-    nodes = retrieve_fn(expanded)
+    try:
+        nodes = retrieve_fn(expanded)
+    except Exception as e:
+        diagnosis = _diagnose_api_error(str(e))
+        if diagnosis:
+            LOG.error(f'[kb_search] Embedding API error detected: '
+                      f'code={diagnosis["code"]} hint={diagnosis["hint"]}')
+            LOG.error(f'[kb_search] Original error: {e}')
+            raise RuntimeError(
+                f'{diagnosis["hint"]} (original: {e})'
+            ) from e
+        raise
+
     ranked = reranker(nodes, query=expanded, topk=rerank_topk) if reranker else _pass_through_rerank(nodes)
     merged = _adaptive_k(ranked or [], k_max=k_max)
     return _ctx_expand(merged)

@@ -222,10 +222,21 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     agent_history = normalize_history_for_agent(raw_history)
     translator = AgentEventFrameTranslator(query=query)
 
+    # localfs is a path whitelist, not a credential — pop from tool_config
+    # so inject_tool_config never sees it, and store in agentic_config instead.
+    _localfs_paths: Optional[List[str]] = None
+    if tool_config and isinstance(tool_config, dict) and 'localfs' in tool_config:
+        raw = tool_config.pop('localfs')
+        if isinstance(raw, str):
+            _localfs_paths = [raw]
+        elif isinstance(raw, list):
+            _localfs_paths = [str(p) for p in raw if p]
+
     agentic_config = {
         'session_id': session_id,
         'filters': filters if RAG_MODE and filters else {},
         'files': resolved_files,
+        'localfs_paths': _localfs_paths or [],
         'priority': priority,
         'user_id': user_id or '',
         'use_memory': use_memory,

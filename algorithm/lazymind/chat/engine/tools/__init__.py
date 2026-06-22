@@ -6,6 +6,7 @@ registration side effects happen in one consistent place.
 
 from .calculator import calculator
 from .kb import KBToolGroup, TempKBToolGroup
+from .local_fs import LocalFSToolGroup
 from .memory_editor import memory_editor
 from .memory_reader import read_memory
 from .multimodal import image_editor, image_generator, vision_extractor
@@ -18,6 +19,7 @@ __all__ = [
     'image_editor',
     'image_generator',
     'KBToolGroup',
+    'LocalFSToolGroup',
     'TempKBToolGroup',
     'memory_editor',
     'read_memory',
