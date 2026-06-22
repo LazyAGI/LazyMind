@@ -21,6 +21,7 @@ from evo.artifact_runtime import ArtifactKey, ArtifactRef
 from evo.message_intent import MessageSessionStore
 from evo.message_intent.planner import LazyLLMPlannerClient, StructuredJSONNextIntentPlanner
 from evo.message_intent.service import MessageIntentService
+from evo.traces import build_trace_compare_view, build_trace_detail_view
 
 BODY_REQUIRED = Body(...)
 BODY_DEFAULT = Body(default_factory=dict)
@@ -171,6 +172,14 @@ def create_app(*, planner_factory: Any | None = None) -> FastAPI:
         hub.get_thread(thread_id)
         last = request.headers.get('last-event-id') or ''
         return EventSourceResponse(hub.events(thread_id, int(last) if last.isdigit() else since))
+
+    @app.get('/v1/evo/threads/{thread_id}/results/traces/{trace_id}')
+    def trace_detail(thread_id: str, trace_id: str) -> dict:
+        return hub.trace_detail(thread_id, trace_id)
+
+    @app.get('/v1/evo/threads/{thread_id}/results/traces-compare')
+    def trace_compare(thread_id: str, a: str, b: str) -> dict:
+        return hub.trace_compare(thread_id, a, b)
 
     @app.get('/v1/evo/threads/{thread_id}/results/{kind}')
     def results(thread_id: str, kind: str) -> list[dict]:
@@ -440,6 +449,21 @@ class EvoMessageHub:
         rows = [row for artifact_id in RESULT_ARTIFACTS[kind] if (
             row := self._artifact_runtime_row(thread_id, artifact_id))]
         return _frontend_result_rows(kind, rows)
+
+    def trace_detail(self, thread_id: str, trace_id: str) -> dict:
+        self._meta(thread_id)
+        return build_trace_detail_view(
+            trace_id,
+            lambda artifact_id: self._thread_artifact_payload(thread_id, artifact_id),
+        )
+
+    def trace_compare(self, thread_id: str, a: str, b: str) -> dict:
+        self._meta(thread_id)
+        return build_trace_compare_view(
+            a,
+            b,
+            lambda artifact_id: self._thread_artifact_payload(thread_id, artifact_id),
+        )
 
     def artifact(self, thread_id: str, artifact_id: str) -> dict:
         row = self._artifact_runtime_row(thread_id, ARTIFACT_ID_ALIASES.get(artifact_id, artifact_id))

@@ -27,7 +27,7 @@ type upsertPreferenceAPITestResponse struct {
 		Title          string  `json:"title"`
 		Content        string  `json:"content"`
 		AgentPersona   *string `json:"agent_persona"`
-		UserAddress    *string `json:"user_address"`
+		PreferredName  *string `json:"preferred_name"`
 		ResponseStyle  *string `json:"response_style"`
 		ContentSummary string  `json:"content_summary"`
 	} `json:"data"`
@@ -222,7 +222,7 @@ func TestUpsertPartiallyUpdatesPreferenceMetadata(t *testing.T) {
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
-	createReq := httptest.NewRequest(http.MethodPut, "/api/core/user-preference", strings.NewReader(`{"content":"用户偏好","agent_persona":"严谨助手","user_address":"老师","response_style":"先结论后解释"}`))
+	createReq := httptest.NewRequest(http.MethodPut, "/api/core/user-preference", strings.NewReader(`{"content":"用户偏好","agent_persona":"严谨助手","preferred_name":"老师","response_style":"先结论后解释"}`))
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("X-User-Id", "u1")
 	createReq.Header.Set("X-User-Name", "User 1")
@@ -237,7 +237,7 @@ func TestUpsertPartiallyUpdatesPreferenceMetadata(t *testing.T) {
 	if err := json.Unmarshal(createRec.Body.Bytes(), &createResp); err != nil {
 		t.Fatalf("decode create response: %v", err)
 	}
-	if stringValue(createResp.Data.AgentPersona) != "严谨助手" || stringValue(createResp.Data.UserAddress) != "老师" || stringValue(createResp.Data.ResponseStyle) != "先结论后解释" {
+	if stringValue(createResp.Data.AgentPersona) != "严谨助手" || stringValue(createResp.Data.PreferredName) != "老师" || stringValue(createResp.Data.ResponseStyle) != "先结论后解释" {
 		t.Fatalf("unexpected metadata in create response: %#v", createResp.Data)
 	}
 
@@ -252,7 +252,7 @@ func TestUpsertPartiallyUpdatesPreferenceMetadata(t *testing.T) {
 		t.Fatalf("expected create to write 1 resource version, got %d", got)
 	}
 
-	updateReq := httptest.NewRequest(http.MethodPut, "/api/core/user-preference", strings.NewReader(`{"user_address":"同学"}`))
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/core/user-preference", strings.NewReader(`{"preferred_name":"同学"}`))
 	updateReq.Header.Set("Content-Type", "application/json")
 	updateReq.Header.Set("X-User-Id", "u1")
 	updateReq.Header.Set("X-User-Name", "User 1")
@@ -267,7 +267,7 @@ func TestUpsertPartiallyUpdatesPreferenceMetadata(t *testing.T) {
 	if err := json.Unmarshal(updateRec.Body.Bytes(), &updateResp); err != nil {
 		t.Fatalf("decode update response: %v", err)
 	}
-	if updateResp.Data.Content != "用户偏好" || stringValue(updateResp.Data.AgentPersona) != "严谨助手" || stringValue(updateResp.Data.UserAddress) != "同学" || stringValue(updateResp.Data.ResponseStyle) != "先结论后解释" {
+	if updateResp.Data.Content != "用户偏好" || stringValue(updateResp.Data.AgentPersona) != "严谨助手" || stringValue(updateResp.Data.PreferredName) != "同学" || stringValue(updateResp.Data.ResponseStyle) != "先结论后解释" {
 		t.Fatalf("unexpected metadata in update response: %#v", updateResp.Data)
 	}
 
@@ -278,8 +278,8 @@ func TestUpsertPartiallyUpdatesPreferenceMetadata(t *testing.T) {
 	if updated.Content != created.Content || updated.AgentPersona != created.AgentPersona || updated.ResponseStyle != created.ResponseStyle {
 		t.Fatalf("expected omitted fields preserved, got %#v", updated)
 	}
-	if updated.UserAddress != "同学" {
-		t.Fatalf("expected user_address update, got %q", updated.UserAddress)
+	if updated.PreferredName != "同学" {
+		t.Fatalf("expected preferred_name update, got %q", updated.PreferredName)
 	}
 	if updated.Version != created.Version+1 {
 		t.Fatalf("expected metadata update to bump version, got %d from %d", updated.Version, created.Version)
@@ -371,11 +371,11 @@ func TestDraftPreviewReturnsCurrentDraftAndDiff(t *testing.T) {
 		UserID:             "u1",
 		Content:            "current preference",
 		AgentPersona:       "current persona",
-		UserAddress:        "current address",
+		PreferredName:      "current address",
 		ResponseStyle:      "current style",
 		ContentHash:        "hash-current",
 		Version:            3,
-		DraftContent:       "---\nagent_persona: legacy persona\nuser_address: legacy address\nresponse_style: legacy style\n---\n\nlegacy preference",
+		DraftContent:       "---\nagent_persona: legacy persona\npreferred_name: legacy address\nresponse_style: legacy style\n---\n\nlegacy preference",
 		DraftSourceVersion: 3,
 		DraftStatus:        "pending_confirm",
 		UpdatedBy:          "u1",
@@ -387,7 +387,7 @@ func TestDraftPreviewReturnsCurrentDraftAndDiff(t *testing.T) {
 		t.Fatalf("create preference: %v", err)
 	}
 	row.ContentHash = evolution.HashSystemUserPreference(row)
-	draftContent := "---\nagent_persona: updated persona\nuser_address: updated address\nresponse_style: updated style\n---\n\nupdated preference"
+	draftContent := "---\nagent_persona: updated persona\npreferred_name: updated address\nresponse_style: updated style\n---\n\nupdated preference"
 	createPreferenceReviewResult(t, db, "preference-preview", "u1", orm.ResourceUpdateResourceTypeUserPreference, draftContent, now)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/core/user-preference:draft-preview", nil)
@@ -438,10 +438,10 @@ func TestDraftPreviewIgnoresLegacyPreferenceResourceDraft(t *testing.T) {
 		UserID:             "u1",
 		Content:            "current preference",
 		AgentPersona:       "current persona",
-		UserAddress:        "current address",
+		PreferredName:      "current address",
 		ResponseStyle:      "current style",
 		Version:            3,
-		DraftContent:       "---\nagent_persona: legacy\nuser_address: legacy\nresponse_style: legacy\n---\n\nlegacy preference",
+		DraftContent:       "---\nagent_persona: legacy\npreferred_name: legacy\nresponse_style: legacy\n---\n\nlegacy preference",
 		DraftSourceVersion: 3,
 		DraftStatus:        "pending_confirm",
 		UpdatedBy:          "u1",
@@ -658,7 +658,7 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": map[string]any{"content": "---\nagent_persona: 新角色\nuser_address: 新称谓\nresponse_style: 新风格\n---\n\ndraft from user instruction"},
+			"data": map[string]any{"content": "---\nagent_persona: 新角色\npreferred_name: 新称谓\nresponse_style: 新风格\n---\n\ndraft from user instruction"},
 		})
 	})
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -676,10 +676,10 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 		UserID:             "u1",
 		Content:            "current preference",
 		AgentPersona:       "当前角色",
-		UserAddress:        "当前称谓",
+		PreferredName:      "当前称谓",
 		ResponseStyle:      "当前风格",
 		Version:            4,
-		DraftContent:       "---\nagent_persona: 草稿角色\nuser_address: 草稿称谓\nresponse_style: 草稿风格\n---\n\ndraft preference",
+		DraftContent:       "---\nagent_persona: 草稿角色\npreferred_name: 草稿称谓\nresponse_style: 草稿风格\n---\n\ndraft preference",
 		DraftSourceVersion: 4,
 		DraftStatus:        "pending_confirm",
 		Ext:                evolution.WithDraftSuggestionIDs(nil, []string{"suggestion-1"}),
@@ -740,7 +740,7 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 	if len(gotIDs) != 0 {
 		t.Fatalf("expected draft suggestion ids to be cleared, got %#v", gotIDs)
 	}
-	reviewContent := "---\nagent_persona: 新角色\nuser_address: 新称谓\nresponse_style: 新风格\n---\n\ndraft from user instruction"
+	reviewContent := "---\nagent_persona: 新角色\npreferred_name: 新称谓\nresponse_style: 新风格\n---\n\ndraft from user instruction"
 	createPreferenceReviewResult(t, db, "preference-confirm", "u1", orm.ResourceUpdateResourceTypeUserPreference, reviewContent, now.Add(time.Second))
 
 	confirmReq := httptest.NewRequest(http.MethodPost, "/api/core/user-preference:confirm", nil)
@@ -760,7 +760,7 @@ func TestGenerateUserInstructOnlyUsesDraftContent(t *testing.T) {
 	if err := db.Where("id = ?", row.ID).Take(&confirmed).Error; err != nil {
 		t.Fatalf("query confirmed preference: %v", err)
 	}
-	if confirmed.Content != "draft from user instruction" || confirmed.AgentPersona != "新角色" || confirmed.UserAddress != "新称谓" || confirmed.ResponseStyle != "新风格" {
+	if confirmed.Content != "draft from user instruction" || confirmed.AgentPersona != "新角色" || confirmed.PreferredName != "新称谓" || confirmed.ResponseStyle != "新风格" {
 		t.Fatalf("expected generated frontmatter to be split after confirm, got %#v", confirmed)
 	}
 }
@@ -776,11 +776,11 @@ func TestConfirmParsesUserPreferenceFrontmatter(t *testing.T) {
 		UserID:             "u1",
 		Content:            "旧正文",
 		AgentPersona:       "旧角色",
-		UserAddress:        "旧称谓",
+		PreferredName:      "旧称谓",
 		ResponseStyle:      "旧风格",
 		ContentHash:        evolution.HashContent("旧正文"),
 		Version:            4,
-		DraftContent:       "---\nagent_persona: legacy\nuser_address: legacy\nresponse_style: legacy\n---\n\nlegacy",
+		DraftContent:       "---\nagent_persona: legacy\npreferred_name: legacy\nresponse_style: legacy\n---\n\nlegacy",
 		DraftSourceVersion: 4,
 		DraftStatus:        "pending_confirm",
 		UpdatedBy:          "u1",
@@ -792,7 +792,7 @@ func TestConfirmParsesUserPreferenceFrontmatter(t *testing.T) {
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatalf("create preference: %v", err)
 	}
-	reviewContent := "---\nagent_persona: 新角色\nuser_address: 用户称谓\nresponse_style: 回复风格\n---\n\n新正文"
+	reviewContent := "---\nagent_persona: 新角色\npreferred_name: 用户称谓\nresponse_style: 回复风格\n---\n\n新正文"
 	createPreferenceReviewResult(t, db, "preference-frontmatter", "u1", orm.ResourceUpdateResourceTypeUserPreference, reviewContent, now)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/core/user-preference:confirm", nil)
@@ -809,7 +809,7 @@ func TestConfirmParsesUserPreferenceFrontmatter(t *testing.T) {
 	if err := db.Where("id = ?", row.ID).Take(&updated).Error; err != nil {
 		t.Fatalf("query updated preference: %v", err)
 	}
-	if updated.Content != "新正文" || updated.AgentPersona != "新角色" || updated.UserAddress != "用户称谓" || updated.ResponseStyle != "回复风格" {
+	if updated.Content != "新正文" || updated.AgentPersona != "新角色" || updated.PreferredName != "用户称谓" || updated.ResponseStyle != "回复风格" {
 		t.Fatalf("expected frontmatter to be split into preference columns, got %#v", updated)
 	}
 	if strings.Contains(updated.Content, "agent_persona") || strings.Contains(updated.Content, "---") {
@@ -835,7 +835,7 @@ func TestDiscardRejectsPendingPreferenceReviewResult(t *testing.T) {
 		Content:            "current preference",
 		ContentHash:        evolution.HashContent("current preference"),
 		Version:            4,
-		DraftContent:       "---\nagent_persona: legacy\nuser_address: legacy\nresponse_style: legacy\n---\n\nlegacy preference",
+		DraftContent:       "---\nagent_persona: legacy\npreferred_name: legacy\nresponse_style: legacy\n---\n\nlegacy preference",
 		DraftSourceVersion: 4,
 		DraftStatus:        "pending_confirm",
 		Ext:                evolution.WithDraftSuggestionIDs(nil, []string{"suggestion-1"}),
@@ -847,7 +847,7 @@ func TestDiscardRejectsPendingPreferenceReviewResult(t *testing.T) {
 	if err := db.Create(&row).Error; err != nil {
 		t.Fatalf("create preference: %v", err)
 	}
-	createPreferenceReviewResult(t, db, "preference-discard", "u1", orm.ResourceUpdateResourceTypeUserPreference, "---\nagent_persona: rejected\nuser_address: rejected\nresponse_style: rejected\n---\n\nrejected preference", now)
+	createPreferenceReviewResult(t, db, "preference-discard", "u1", orm.ResourceUpdateResourceTypeUserPreference, "---\nagent_persona: rejected\npreferred_name: rejected\nresponse_style: rejected\n---\n\nrejected preference", now)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/core/user-preference:discard", nil)
 	req.Header.Set("X-User-Id", "u1")

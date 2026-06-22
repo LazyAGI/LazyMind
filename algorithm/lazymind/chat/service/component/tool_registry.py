@@ -24,6 +24,7 @@ from lazymind.chat.engine.tools import (
     image_editor,
     image_generator,
     memory_editor,
+    read_memory,
     skill_editor,
     url_fetch,
     vision_extractor,
@@ -134,6 +135,12 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         label='词汇学习',
         description='学习用户专属的词汇映射和同义词',
         instance=vocab_learn,
+    ),
+    ToolGroupConfig(
+        name='read_memory',
+        label='记忆读取',
+        description='读取当前的用户记忆或偏好内容',
+        instance=read_memory,
     ),
     ToolGroupConfig(
         name='memory_editor',

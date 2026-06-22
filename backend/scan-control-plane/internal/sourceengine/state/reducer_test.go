@@ -126,6 +126,116 @@ func TestReduceMissingDeltaAndWatchOnlyDeleteCoveredKeys(t *testing.T) {
 	}
 }
 
+func TestReduceSeenUnsupportedDocumentIsHiddenAndNotCounted(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	repo := newReducerStore()
+	repo.binding.IncludeExtensions = store.JSON{"items": []any{"pdf"}}
+	reducer := NewDBStateReducer(repo, WithClock(func() time.Time { return now }))
+
+	result, err := reducer.ReduceSeenObjects(ctx, crawl.ReduceSeenInput{
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		RunID:             "run-1",
+		Objects: []store.SourceObject{{
+			SourceID:      "source-1",
+			BindingID:     "binding-1",
+			ObjectKey:     "script",
+			DisplayName:   "script.py",
+			IsDocument:    true,
+			FileExtension: ".py",
+			SourceVersion: "v1",
+		}},
+		DetectedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("reduce seen: %v", err)
+	}
+	if result.NewCount != 0 {
+		t.Fatalf("unsupported document should not count as new: %+v", result)
+	}
+	got := repo.states["script"]
+	if got.DocumentListVisible || got.Selectable || got.PendingAction != "" || got.SourceState != SourceStateUnchanged {
+		t.Fatalf("unsupported document should be hidden and idle: %+v", got)
+	}
+}
+
+func TestReduceSeenUsesSourceIncludeExtensionsWhenBindingIncludeIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	repo := newReducerStore()
+	repo.source.IncludeExtensions = store.JSON{"items": []any{"pdf"}}
+	reducer := NewDBStateReducer(repo, WithClock(func() time.Time { return now }))
+
+	result, err := reducer.ReduceSeenObjects(ctx, crawl.ReduceSeenInput{
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		RunID:             "run-1",
+		Objects: []store.SourceObject{{
+			SourceID:      "source-1",
+			BindingID:     "binding-1",
+			ObjectKey:     "script",
+			DisplayName:   "script.py",
+			IsDocument:    true,
+			FileExtension: ".py",
+			SourceVersion: "v1",
+		}},
+		DetectedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("reduce seen: %v", err)
+	}
+	if result.NewCount != 0 {
+		t.Fatalf("unsupported document should not count as new: %+v", result)
+	}
+	got := repo.states["script"]
+	if got.DocumentListVisible || got.Selectable {
+		t.Fatalf("source include extensions should hide unsupported documents: %+v", got)
+	}
+}
+
+func TestReduceSeenUnsupportedContainerRemainsVisibleForNavigation(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	repo := newReducerStore()
+	repo.binding.IncludeExtensions = store.JSON{"items": []any{"pdf"}}
+	reducer := NewDBStateReducer(repo, WithClock(func() time.Time { return now }))
+
+	_, err := reducer.ReduceSeenObjects(ctx, crawl.ReduceSeenInput{
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		RunID:             "run-1",
+		Objects: []store.SourceObject{{
+			SourceID:      "source-1",
+			BindingID:     "binding-1",
+			ObjectKey:     "wiki-page",
+			DisplayName:   "Wiki Page",
+			IsDocument:    true,
+			IsContainer:   true,
+			HasChildren:   true,
+			FileExtension: ".py",
+			SourceVersion: "v1",
+		}},
+		DetectedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("reduce seen: %v", err)
+	}
+	got := repo.states["wiki-page"]
+	if !got.DocumentListVisible || got.Selectable || got.PendingAction != "" {
+		t.Fatalf("unsupported document container should stay visible but not selectable: %+v", got)
+	}
+}
+
 func TestApplyTaskFailureMarksDocumentFailed(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
@@ -214,6 +324,8 @@ type reducerStore struct {
 	objects   map[string]store.SourceObject
 	states    map[string]store.DocumentState
 	documents map[string]store.Document
+	source    store.Source
+	binding   store.Binding
 }
 
 func newReducerStore() *reducerStore {
@@ -221,7 +333,22 @@ func newReducerStore() *reducerStore {
 		objects:   map[string]store.SourceObject{},
 		states:    map[string]store.DocumentState{},
 		documents: map[string]store.Document{},
+		source: store.Source{
+			SourceID: "source-1",
+		},
+		binding: store.Binding{
+			SourceID:  "source-1",
+			BindingID: "binding-1",
+		},
 	}
+}
+
+func (s *reducerStore) GetSource(context.Context, string) (store.Source, error) {
+	return s.source, nil
+}
+
+func (s *reducerStore) GetBinding(context.Context, string, string) (store.Binding, error) {
+	return s.binding, nil
 }
 
 func (s *reducerStore) GetDocumentState(_ context.Context, _, _, objectKey string) (store.DocumentState, error) {

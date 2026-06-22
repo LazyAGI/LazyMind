@@ -64,6 +64,24 @@ func TestAgentFSProtocolValidateListStatExport(t *testing.T) {
 	staging := &apiStagingStub{}
 	handler := NewHandler(nil, fs.NewPathValidator([]string{root}), staging, fs.NewPathMapper("", nil), nil)
 
+	rootsReq := httptest.NewRequest(http.MethodPost, "/api/v1/agents/fs/roots", strings.NewReader(`{"agent_id":"agent-1","user_id":"user-1"}`))
+	rootsW := httptest.NewRecorder()
+	handler.AgentListRoots(rootsW, rootsReq)
+	if rootsW.Code != http.StatusOK {
+		t.Fatalf("roots status = %d body = %s", rootsW.Code, rootsW.Body.String())
+	}
+	var rootsResp agentFSRootsResponse
+	if err := json.NewDecoder(rootsW.Body).Decode(&rootsResp); err != nil {
+		t.Fatalf("decode roots: %v", err)
+	}
+	cleanRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("resolve root: %v", err)
+	}
+	if len(rootsResp.Items) != 1 || rootsResp.Items[0].Path != cleanRoot || !rootsResp.Items[0].IsDir {
+		t.Fatalf("unexpected roots response: %+v", rootsResp)
+	}
+
 	validateReq := httptest.NewRequest(http.MethodPost, "/api/v1/agents/fs/validate", strings.NewReader(`{"agent_id":"agent-1","path":`+quoteJSON(filepath.Join(root, "docs"))+`,"user_id":"user-1"}`))
 	validateW := httptest.NewRecorder()
 	handler.AgentValidatePath(validateW, validateReq)
@@ -135,6 +153,7 @@ func TestAgentFSProtocolRequiresAgentID(t *testing.T) {
 		handle func(http.ResponseWriter, *http.Request)
 	}{
 		{name: "validate", path: "/api/v1/agents/fs/validate", body: `{"path":` + quoteJSON(root) + `}`, handle: handler.AgentValidatePath},
+		{name: "roots", path: "/api/v1/agents/fs/roots", body: `{}`, handle: handler.AgentListRoots},
 		{name: "list", path: "/api/v1/agents/fs/list", body: `{"path":` + quoteJSON(root) + `}`, handle: handler.AgentListDir},
 		{name: "stat", path: "/api/v1/agents/fs/stat", body: `{"path":` + quoteJSON(root) + `}`, handle: handler.AgentStatPath},
 		{name: "export", path: "/api/v1/agents/fs/export", body: `{"path":` + quoteJSON(filepath.Join(root, "a.md")) + `}`, handle: handler.AgentExportFile},

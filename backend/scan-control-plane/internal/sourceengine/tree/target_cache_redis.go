@@ -21,6 +21,7 @@ type redisTargetSearchCachePayload struct {
 	Complete  bool       `json:"complete"`
 	Truncated bool       `json:"truncated"`
 	LastError string     `json:"last_error,omitempty"`
+	StaleAt   time.Time  `json:"stale_at,omitempty"`
 }
 
 func NewRedisTargetSearchCacheStore(rawURL string) (TargetSearchCacheStore, error) {
@@ -61,18 +62,27 @@ func (s *redisTargetSearchCacheStore) Get(ctx context.Context, key string) (targ
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return targetSearchCacheSnapshot{}, false, err
 	}
+	stale := !payload.StaleAt.IsZero() && time.Now().After(payload.StaleAt)
 	return targetSearchCacheSnapshot{
 		nodes:     append([]TreeNode(nil), payload.Nodes...),
 		status:    payload.status(),
 		complete:  payload.Complete,
 		truncated: payload.Truncated,
 		lastError: payload.LastError,
+		stale:     stale,
+		staleAt:   payload.StaleAt,
 	}, true, nil
 }
 
-func (s *redisTargetSearchCacheStore) Set(ctx context.Context, key string, snapshot targetSearchCacheSnapshot, ttl time.Duration) error {
+func (s *redisTargetSearchCacheStore) Set(ctx context.Context, key string, snapshot targetSearchCacheSnapshot, staleTTL, expireTTL time.Duration) error {
 	if s == nil || s.client == nil {
 		return nil
+	}
+	if snapshot.staleAt.IsZero() {
+		snapshot.staleAt = time.Now().Add(staleTTL)
+	}
+	if expireTTL <= 0 {
+		expireTTL = targetSearchCacheExpireTTL
 	}
 	payload := redisTargetSearchCachePayload{
 		Nodes:     append([]TreeNode(nil), snapshot.nodes...),
@@ -80,13 +90,14 @@ func (s *redisTargetSearchCacheStore) Set(ctx context.Context, key string, snaps
 		Complete:  snapshot.complete,
 		Truncated: snapshot.truncated,
 		LastError: snapshot.lastError,
+		StaleAt:   snapshot.staleAt,
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 	pipe := s.client.TxPipeline()
-	pipe.Set(ctx, s.dataKey(key), data, ttl)
+	pipe.Set(ctx, s.dataKey(key), data, expireTTL)
 	pipe.Del(ctx, s.lockKey(key))
 	_, err = pipe.Exec(ctx)
 	if err != nil {

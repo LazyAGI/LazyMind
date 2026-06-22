@@ -13,6 +13,7 @@ import (
 
 func TestHTTPAgentClientMapsLocalFSRequests(t *testing.T) {
 	var validateReq ValidatePathRequest
+	var rootsReq ListRootsRequest
 	var listReq ListDirRequest
 	var statReq StatPathRequest
 	var exportReq ExportFileRequest
@@ -25,6 +26,11 @@ func TestHTTPAgentClientMapsLocalFSRequests(t *testing.T) {
 		case "/api/v1/agents/fs/validate":
 			decodeAgentJSON(t, r, &validateReq)
 			payload = PathInfo{Path: validateReq.Path, NormalizedPath: "/workspace/docs", DisplayName: "docs", Exists: true, Readable: true, IsDir: true}
+		case "/api/v1/agents/fs/roots":
+			decodeAgentJSON(t, r, &rootsReq)
+			payload = struct {
+				Items []PathInfo `json:"items"`
+			}{Items: []PathInfo{{Path: "/workspace", NormalizedPath: "/workspace", DisplayName: "workspace", Exists: true, Readable: true, IsDir: true}}}
 		case "/api/v1/agents/fs/list":
 			decodeAgentJSON(t, r, &listReq)
 			payload = ListDirPage{Items: []PathInfo{{Path: "/workspace/docs/a.md", NormalizedPath: "/workspace/docs/a.md", DisplayName: "a.md", SizeBytes: 5, MTimeUnixNano: 10, MimeType: "text/markdown", FileExtension: ".md"}}, HasMore: true, NextCursor: "2"}
@@ -46,6 +52,10 @@ func TestHTTPAgentClientMapsLocalFSRequests(t *testing.T) {
 	if err != nil || info.NormalizedPath != "/workspace/docs" {
 		t.Fatalf("validate path info=%+v err=%v", info, err)
 	}
+	roots, err := client.ListRoots(context.Background(), ListRootsRequest{AgentID: "agent-1", UserID: "user-1"})
+	if err != nil || len(roots) != 1 || roots[0].Path != "/workspace" {
+		t.Fatalf("list roots=%+v err=%v", roots, err)
+	}
 	page, err := client.ListDir(context.Background(), ListDirRequest{AgentID: "agent-1", Path: "/workspace/docs", Cursor: "1", PageSize: 10, IncludeFiles: true})
 	if err != nil || !page.HasMore || len(page.Items) != 1 {
 		t.Fatalf("list dir page=%+v err=%v", page, err)
@@ -60,6 +70,9 @@ func TestHTTPAgentClientMapsLocalFSRequests(t *testing.T) {
 	}
 	if validateReq.AgentID != "agent-1" || validateReq.UserID != "user-1" {
 		t.Fatalf("validate request was not mapped: %+v", validateReq)
+	}
+	if rootsReq.AgentID != "agent-1" || rootsReq.UserID != "user-1" {
+		t.Fatalf("roots request was not mapped: %+v", rootsReq)
 	}
 	if listReq.Cursor != "1" || !listReq.IncludeFiles {
 		t.Fatalf("list request was not mapped: %+v", listReq)

@@ -10,10 +10,10 @@ type SkillReviewResult struct {
 	SkillName    string    `gorm:"column:skill_name;type:text;not null"`
 	Type         string    `gorm:"column:type;type:text;not null"`
 	ReviewStatus string    `gorm:"column:review_status;type:text;not null;default:'pending'"`
-	UserID       string    `gorm:"column:userid;type:text;not null;default:''"`
-	RequestID    string    `gorm:"column:requestid;type:text;not null;default:''"`
+	UserID       string    `gorm:"column:userid;type:text;not null"`
+	RequestID    string    `gorm:"column:requestid;type:text;not null"`
 	SkillContent string    `gorm:"column:skill_content;type:text;not null"`
-	Summary      string    `gorm:"column:summary;type:text;not null;default:''"`
+	Summary      string    `gorm:"column:summary;type:text"`
 	Time         time.Time `gorm:"column:time;not null"`
 }
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/crawl"
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/filefilter"
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
 )
 
@@ -21,6 +22,14 @@ type Store interface {
 
 type stateMutationStore interface {
 	MutateDocumentState(ctx context.Context, sourceID, bindingID, objectKey string, mutate store.DocumentStateMutation) (store.DocumentState, error)
+}
+
+type bindingReader interface {
+	GetBinding(ctx context.Context, sourceID, bindingID string) (store.Binding, error)
+}
+
+type sourceReader interface {
+	GetSource(ctx context.Context, sourceID string) (store.Source, error)
 }
 
 type DBStateReducer struct {
@@ -48,15 +57,23 @@ func WithClock(clock func() time.Time) Option {
 
 func (r *DBStateReducer) ReduceSeenObjects(ctx context.Context, input crawl.ReduceSeenInput) (crawl.ReduceSeenResult, error) {
 	result := crawl.ReduceSeenResult{}
+	policy, err := r.policyForBinding(ctx, input.SourceID, input.BindingID)
+	if err != nil {
+		return result, err
+	}
 	for _, object := range input.Objects {
 		if !object.IsDocument {
 			continue
 		}
-		next, isNew, err := r.mutateSeenState(ctx, input, object)
+		supported := filefilter.AllowsSourceObject(policy, object)
+		next, isNew, err := r.mutateSeenState(ctx, input, object, supported)
 		if err != nil {
 			return result, err
 		}
 		result.States = append(result.States, next)
+		if !supported {
+			continue
+		}
 		switch next.SourceState {
 		case SourceStateNew:
 			result.NewCount++
@@ -75,10 +92,10 @@ func (r *DBStateReducer) ReduceSeenObjects(ctx context.Context, input crawl.Redu
 	return result, nil
 }
 
-func (r *DBStateReducer) mutateSeenState(ctx context.Context, input crawl.ReduceSeenInput, object store.SourceObject) (store.DocumentState, bool, error) {
+func (r *DBStateReducer) mutateSeenState(ctx context.Context, input crawl.ReduceSeenInput, object store.SourceObject, supported bool) (store.DocumentState, bool, error) {
 	mutator, ok := r.store.(stateMutationStore)
 	if !ok {
-		next, isNew, err := r.nextSeenState(ctx, input, object)
+		next, isNew, err := r.nextSeenState(ctx, input, object, supported)
 		if err != nil {
 			return store.DocumentState{}, false, err
 		}
@@ -91,14 +108,14 @@ func (r *DBStateReducer) mutateSeenState(ctx context.Context, input crawl.Reduce
 	next, err := mutator.MutateDocumentState(ctx, input.SourceID, input.BindingID, object.ObjectKey, func(current store.DocumentState, create bool) (store.DocumentState, error) {
 		isNew = create
 		if create {
-			return r.newSeenState(input, object), nil
+			return r.newSeenState(input, object, supported), nil
 		}
-		return r.updateSeenState(input, object, current), nil
+		return r.updateSeenState(input, object, current, supported), nil
 	})
 	return next, isNew, err
 }
 
-func (r *DBStateReducer) nextSeenState(ctx context.Context, input crawl.ReduceSeenInput, object store.SourceObject) (store.DocumentState, bool, error) {
+func (r *DBStateReducer) nextSeenState(ctx context.Context, input crawl.ReduceSeenInput, object store.SourceObject, supported bool) (store.DocumentState, bool, error) {
 	now := input.DetectedAt
 	if now.IsZero() {
 		now = r.clock()
@@ -108,7 +125,7 @@ func (r *DBStateReducer) nextSeenState(ctx context.Context, input crawl.ReduceSe
 		if store.ErrorCodeOf(err) != store.ErrCodeNotFound {
 			return store.DocumentState{}, false, err
 		}
-		return store.DocumentState{
+		next := store.DocumentState{
 			SourceID:            input.SourceID,
 			BindingID:           input.BindingID,
 			BindingGeneration:   input.BindingGeneration,
@@ -124,7 +141,8 @@ func (r *DBStateReducer) nextSeenState(ctx context.Context, input crawl.ReduceSe
 			LastDetectedAt:      &now,
 			CreatedAt:           now,
 			UpdatedAt:           now,
-		}, true, nil
+		}
+		return applySupportDecision(next, object, supported), true, nil
 	}
 	current.BindingGeneration = input.BindingGeneration
 	current.SourceVersion = object.SourceVersion
@@ -141,15 +159,15 @@ func (r *DBStateReducer) nextSeenState(ctx context.Context, input crawl.ReduceSe
 	}
 	current.LastDetectedAt = &now
 	current.UpdatedAt = now
-	return current, false, nil
+	return applySupportDecision(current, object, supported), false, nil
 }
 
-func (r *DBStateReducer) newSeenState(input crawl.ReduceSeenInput, object store.SourceObject) store.DocumentState {
+func (r *DBStateReducer) newSeenState(input crawl.ReduceSeenInput, object store.SourceObject, supported bool) store.DocumentState {
 	now := input.DetectedAt
 	if now.IsZero() {
 		now = r.clock()
 	}
-	return store.DocumentState{
+	return applySupportDecision(store.DocumentState{
 		SourceID:            input.SourceID,
 		BindingID:           input.BindingID,
 		BindingGeneration:   input.BindingGeneration,
@@ -165,10 +183,10 @@ func (r *DBStateReducer) newSeenState(input crawl.ReduceSeenInput, object store.
 		LastDetectedAt:      &now,
 		CreatedAt:           now,
 		UpdatedAt:           now,
-	}
+	}, object, supported)
 }
 
-func (r *DBStateReducer) updateSeenState(input crawl.ReduceSeenInput, object store.SourceObject, current store.DocumentState) store.DocumentState {
+func (r *DBStateReducer) updateSeenState(input crawl.ReduceSeenInput, object store.SourceObject, current store.DocumentState, supported bool) store.DocumentState {
 	now := input.DetectedAt
 	if now.IsZero() {
 		now = r.clock()
@@ -188,7 +206,42 @@ func (r *DBStateReducer) updateSeenState(input crawl.ReduceSeenInput, object sto
 	}
 	current.LastDetectedAt = &now
 	current.UpdatedAt = now
-	return current
+	return applySupportDecision(current, object, supported)
+}
+
+func (r *DBStateReducer) policyForBinding(ctx context.Context, sourceID, bindingID string) (filefilter.Policy, error) {
+	reader, ok := r.store.(bindingReader)
+	if !ok {
+		return filefilter.Policy{}, nil
+	}
+	binding, err := reader.GetBinding(ctx, sourceID, bindingID)
+	if err != nil {
+		return filefilter.Policy{}, err
+	}
+	if sourceReader, ok := r.store.(sourceReader); ok {
+		source, err := sourceReader.GetSource(ctx, sourceID)
+		if err != nil {
+			return filefilter.Policy{}, err
+		}
+		return filefilter.FromSourceBinding(source, binding), nil
+	}
+	return filefilter.FromBinding(binding), nil
+}
+
+func applySupportDecision(state store.DocumentState, object store.SourceObject, supported bool) store.DocumentState {
+	if supported {
+		state.DocumentListVisible = true
+		state.Selectable = true
+		return state
+	}
+	navigationContainer := object.IsContainer || object.HasChildren
+	state.SourceState = SourceStateUnchanged
+	state.PendingAction = ""
+	state.DocumentListVisible = navigationContainer
+	state.Selectable = false
+	state.ParseQueueState = ParseQueueStateNone
+	state.ActiveTaskID = ""
+	return state
 }
 
 func (r *DBStateReducer) ReduceMissingObjects(ctx context.Context, input crawl.ReduceMissingInput) (crawl.ReduceMissingResult, error) {
@@ -239,8 +292,8 @@ func (r *DBStateReducer) mutateMissingState(ctx context.Context, input crawl.Red
 		current.SourceState = SourceStateDeleted
 		current.PendingAction = PendingActionDelete
 		current.ParseQueueState = ParseQueueStateNone
-		current.DocumentListVisible = true
-		current.Selectable = true
+		current.DocumentListVisible = current.DocumentListVisible || current.Selectable
+		current.Selectable = current.DocumentListVisible
 		current.LastDetectedAt = &now
 		current.UpdatedAt = now
 		if err := r.store.SaveDocumentState(ctx, current); err != nil {
@@ -261,8 +314,8 @@ func (r *DBStateReducer) mutateMissingState(ctx context.Context, input crawl.Red
 		locked.SourceState = SourceStateDeleted
 		locked.PendingAction = PendingActionDelete
 		locked.ParseQueueState = ParseQueueStateNone
-		locked.DocumentListVisible = true
-		locked.Selectable = true
+		locked.DocumentListVisible = locked.DocumentListVisible || locked.Selectable
+		locked.Selectable = locked.DocumentListVisible
 		locked.LastDetectedAt = &now
 		locked.UpdatedAt = now
 		return locked, nil

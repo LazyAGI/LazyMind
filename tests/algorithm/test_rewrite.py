@@ -184,8 +184,11 @@ def test_user_preference_prompt_requires_yaml_frontmatter():
 
     assert 'Format requirements' in prompt
     assert 'agent_persona' in prompt
-    assert 'user_address' in prompt
+    assert 'preferred_name' in prompt
     assert 'response_style' in prompt
+    assert '智能体角色' in prompt  # still present in Chinese parenthetical notes
+    assert '用户称谓' in prompt
+    assert '回复风格' in prompt
     assert 'legacy/free-form' in prompt
     assert 'frontmatter-plus-body format' in prompt
     assert 'role the user wants the agent to play' in prompt
@@ -206,7 +209,7 @@ def test_user_preference_validation_requires_yaml_frontmatter():
     valid_english = (
         '---\n'
         'agent_persona: "algorithm collaborator"\n'
-        'user_address: ""\n'
+        'preferred_name: ""\n'
         'response_style: "concise"\n'
         '---\n'
         '- Prefer manual git commits.\n'
@@ -215,7 +218,7 @@ def test_user_preference_validation_requires_yaml_frontmatter():
     valid_chinese = (
         '---\n'
         'agent_persona: "算法协作者"\n'
-        'user_address: ""\n'
+        'preferred_name: ""\n'
         'response_style: "简洁"\n'
         '---\n'
         '- 偏好手动提交 git。'
@@ -231,7 +234,7 @@ def test_user_preference_validation_requires_yaml_frontmatter():
         (
             '---\n'
             'agent_persona: "algorithm collaborator"\n'
-            'user_address: ""\n'
+            'preferred_name: ""\n'
             'response_style: ""\n'
             '---\n'
             '- Prefer manual git commits.'
@@ -239,11 +242,11 @@ def test_user_preference_validation_requires_yaml_frontmatter():
     )
 
     invalid_cases = [
-        'agent_persona: "x"\nuser_address: ""\nresponse_style: "concise"\n\nbody',
+        'agent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\n\nbody',
         '---\nagent_persona: "x"\nresponse_style: "concise"\n---\nbody',
-        '---\nagent_persona: "x"\nuser_address: ""\nresponse_style: "concise"\n---\n',
-        '---\nagent_persona: "x"\nuser_address: ""\nresponse_style: "concise, direct"\n---\nbody',
-        '---\nagent_persona: "x"\nuser_address: ""\nresponse_style: "轻松"\n---\nbody',
+        '---\nagent_persona: "x"\npreferred_name: ""\nresponse_style: "concise"\n---\n',
+        '---\nagent_persona: "x"\npreferred_name: ""\nresponse_style: "concise, direct"\n---\nbody',
+        '---\nagent_persona: "x"\npreferred_name: ""\nresponse_style: "轻松"\n---\nbody',
         '- not: a mapping',
     ]
     for invalid in invalid_cases:

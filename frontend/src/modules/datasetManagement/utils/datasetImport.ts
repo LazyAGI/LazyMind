@@ -11,6 +11,18 @@ import {
 } from "../shared";
 import { parseBooleanLike, splitListField } from "./datasetValidation";
 
+export type DatasetImportMessages = {
+  numbersUnsupported: string;
+  fileUnsupported: string;
+  jsonFormatInvalid: string;
+  deletedFieldInvalid: string;
+  required: {
+    question: string;
+    question_type: string;
+    ground_truth: string;
+  };
+};
+
 const fieldAliases: Record<DatasetItemField, string[]> = {
   case_id: ["case id", "caseid", "case_id", "编号"],
   question: ["question", "query", "问题", "用户问题"],
@@ -45,13 +57,13 @@ export function getFileKind(file: File) {
   return "unknown";
 }
 
-export async function parseDatasetFile(file: File) {
+export async function parseDatasetFile(file: File, messages: DatasetImportMessages) {
   const kind = getFileKind(file);
   if (kind === "numbers") {
-    throw new Error("暂不支持 Numbers 文件，请先导出为 Excel 或 CSV 后再上传。");
+    throw new Error(messages.numbersUnsupported);
   }
   if (kind === "unknown") {
-    throw new Error("仅支持 Excel、CSV、JSON 文件。");
+    throw new Error(messages.fileUnsupported);
   }
 
   if (kind === "json") {
@@ -64,7 +76,7 @@ export async function parseDatasetFile(file: File) {
         : null;
 
     if (!rows) {
-      throw new Error("JSON 格式需为数组，或包含 items 数组。");
+      throw new Error(messages.jsonFormatInvalid);
     }
     return rows.map((row) =>
       typeof row === "object" && row ? (row as Record<string, unknown>) : {},
@@ -111,6 +123,7 @@ function normalizeCellValue(value: unknown) {
 export function buildImportPreview(
   rawRows: Record<string, unknown>[],
   mapping: FieldMapping,
+  messages: DatasetImportMessages,
 ) {
   return rawRows.map<DatasetImportRow>((raw, index) => {
     const normalized: Partial<DatasetItem> = {};
@@ -129,7 +142,7 @@ export function buildImportPreview(
       if (targetField === "is_deleted") {
         const parsed = parseBooleanLike(value);
         if (parsed === undefined) {
-          errors.push("是否删除字段无法识别");
+          errors.push(messages.deletedFieldInvalid);
         } else {
           normalized.is_deleted = parsed;
         }
@@ -141,12 +154,7 @@ export function buildImportPreview(
     requiredDatasetItemFields.forEach((field) => {
       const value = normalized[field];
       if (!`${value || ""}`.trim()) {
-        const labels: Record<string, string> = {
-          question: "问题不能为空",
-          question_type: "问题类型不能为空",
-          ground_truth: "标准答案不能为空",
-        };
-        errors.push(labels[field]);
+        errors.push(messages.required[field]);
       }
     });
 
@@ -164,18 +172,26 @@ export function getMissingRequiredMappings(mapping: FieldMapping) {
   return requiredDatasetItemFields.filter((field) => !mappedTargets.has(field));
 }
 
-export function createTemplateRows() {
+export function createTemplateRows(sample: {
+  question: string;
+  question_type: string;
+  ground_truth: string;
+  key_points: string;
+  reference_context: string;
+  reference_doc: string;
+  generate_reason: string;
+}) {
   return [
     {
-      question: "如何配置模型供应商？",
-      question_type: "操作问答",
-      ground_truth: "进入模型供应商页面，新增 API Key，并选择默认模型。",
-      key_points: "进入模型供应商页面；新增 API Key；选择默认模型",
-      reference_context: "模型供应商配置说明...",
-      reference_doc: "模型配置手册",
+      question: sample.question,
+      question_type: sample.question_type,
+      ground_truth: sample.ground_truth,
+      key_points: sample.key_points,
+      reference_context: sample.reference_context,
+      reference_doc: sample.reference_doc,
       reference_doc_ids: "doc_001",
       reference_chunk_ids: "chunk_001, chunk_002",
-      generate_reason: "答案依据来自模型配置手册相关片段。",
+      generate_reason: sample.generate_reason,
       is_deleted: false,
     },
   ];

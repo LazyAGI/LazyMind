@@ -30,3 +30,8 @@ vlm:
   - source: qwen
     type: vlm
     name: qwen-vl-plus
+
+speech_to_text:
+  - source: siliconflow
+    type: stt
+    name: FunAudioLLM/SenseVoiceSmall

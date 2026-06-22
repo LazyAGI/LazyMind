@@ -772,19 +772,62 @@ export default function MemoryReviewPage() {
                     />
                   </div>
                 ) : (
-                  <div className="memory-diff-unified">
-                    {activeProposalDiff.lines.map((line: any, index: number) => (
-                      <div
-                        key={`${line.type}-${index}`}
-                        className={`memory-diff-line is-${line.type}`}
-                      >
-                        <span className="memory-diff-prefix">
-                          {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
-                        </span>
-                        <span>{line.text || " "}</span>
+                  <>
+                    {activeProposalDiff.isPreference ? (
+                      <div className="memory-diff-unified">
+                        <div className="memory-diff-preference-section">
+                          <div className="memory-diff-preference-section-title">
+                            {t("admin.memoryDiffPreferenceYamlSection")}
+                          </div>
+                          <div className="memory-diff-unified">
+                            {activeProposalDiff.prefYamlDiffLines.map((line: any, index: number) => (
+                              <div
+                                key={`yaml-${line.type}-${index}`}
+                                className={`memory-diff-line is-${line.type}`}
+                              >
+                                <span className="memory-diff-prefix">
+                                  {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
+                                </span>
+                                <span>{line.text || " "}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="memory-diff-preference-section">
+                          <div className="memory-diff-preference-section-title">
+                            {t("admin.memoryDiffPreferenceBodySection")}
+                          </div>
+                          <div className="memory-diff-unified">
+                            {activeProposalDiff.prefBodyDiffLines.map((line: any, index: number) => (
+                              <div
+                                key={`body-${line.type}-${index}`}
+                                className={`memory-diff-line is-${line.type}`}
+                              >
+                                <span className="memory-diff-prefix">
+                                  {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
+                                </span>
+                                <span>{line.text || " "}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
-                    ))}
-                  </div>
+                    ) : (
+                      <div className="memory-diff-unified">
+                        {activeProposalDiff.lines.map((line: any, index: number) => (
+                          <div
+                            key={`${line.type}-${index}`}
+                            className={`memory-diff-line is-${line.type}`}
+                          >
+                            <span className="memory-diff-prefix">
+                              {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
+                            </span>
+                            <span>{line.text || " "}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
                 <div className="memory-diff-question-box">
                   <div className="memory-diff-question-inner">

@@ -52,7 +52,10 @@ func isMarkdownExportObject(object Object) bool {
 	if object.Kind != ObjectKindDriveFile || !object.IsDocument {
 		return false
 	}
-	return isFeishuDocType(object.DriveType)
+	if isFeishuDocType(object.DriveType) {
+		return true
+	}
+	return normalizedFeishuObjectType(object.DriveType) == "shortcut" && isFeishuDocType(object.ShortcutTargetType)
 }
 
 func isBindableObject(object Object) bool {

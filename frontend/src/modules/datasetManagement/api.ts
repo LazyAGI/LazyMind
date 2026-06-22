@@ -16,6 +16,7 @@ import {
 } from "@/api/generated/core-client";
 import { AgentAppsAuth } from "@/components/auth";
 import { axiosInstance, BASE_URL } from "@/components/request";
+import i18n from "@/i18n";
 import {
   KnowledgeBaseServiceApi,
 } from "@/modules/knowledge/utils/request";
@@ -268,7 +269,7 @@ function buildCreateEvalSetPayload(payload: {
     new Set((payload.knowledge_base_ids || []).map((item) => `${item || ""}`.trim())),
   ).filter(Boolean);
   if (datasetIds.length === 0) {
-    throw new Error("请选择关联知识库");
+    throw new Error(i18n.t("datasetManagement.form.validation.knowledgeBaseRequired"));
   }
   return {
     name: payload.name.trim(),
@@ -293,7 +294,7 @@ function buildUpdateEvalSetPayload(
     ),
   ).filter(Boolean);
   if (datasetIds.length === 0) {
-    throw new Error("请选择关联知识库");
+    throw new Error(i18n.t("datasetManagement.form.validation.knowledgeBaseRequired"));
   }
   return {
     name: payload.name.trim(),
@@ -372,7 +373,7 @@ async function waitForImportTask(taskId: string): Promise<EvalSetImportTaskRespo
   }
 
   if (!latestTask) {
-    throw new Error("导入任务创建失败");
+    throw new Error(i18n.t("datasetManagement.import.importFailed"));
   }
 
   return latestTask;

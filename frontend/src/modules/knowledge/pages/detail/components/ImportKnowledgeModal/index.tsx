@@ -9,7 +9,7 @@ import {
 } from "react";
 
 import { DataSourceType } from "@/modules/knowledge/constants/common";
-import DragUpload from "../DragUpload";
+import DragUpload, { ALLOWED_FILE_TYPES } from "../DragUpload";
 import {
   DocumentServiceApi,
   TaskServiceApi,
@@ -18,34 +18,6 @@ import {
 import TagSelect from "@/modules/knowledge/components/TagSelect";
 import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
 
-const ALLOWED_FILE_TYPES = [
-  "pdf",
-  "docx",
-  "doc",
-  "hwp",
-  "pptx",
-  "ppt",
-  "pptm",
-  "jpg",
-  "jpeg",
-  "png",
-  "gif",
-  "bmp",
-  "webp",
-  "tiff",
-  "tif",
-  "ipynb",
-  "epub",
-  "md",
-  "mbox",
-  "csv",
-  "xls",
-  "xlsx",
-  "mp3",
-  "mp4",
-  "txt",
-  "xml",
-];
 const SINGLE_FILE_MAX_SIZE = 500 * 1024 * 1024;
 const TOTAL_FILE_MAX_SIZE = 1 * 1024 * 1024 * 1024;
 const ZIP_FILE_TYPES = ["zip"];

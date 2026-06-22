@@ -138,24 +138,25 @@ def _run_skill_review(request: SkillReviewRequest, llm: AutoModel, emb: AutoMode
         request=request,
         source_user_id=review_user_id,
     )
+    inserted_count = 0
+    insert_error: str | None = None
     try:
         inserted_count = insert_skill_review_records(records)
         LOG.info(f'[SkillReview] inserted skill review records: {inserted_count} records')
     except Exception as exc:
         LOG.exception(f'[SkillReview] failed to insert skill review records for user {review_user_id}: {exc}')
-        raise exc
+        insert_error = str(exc)
 
     try:
         insert_skill_review_run_stats([user_stat])
     except Exception as exc:
         LOG.exception(f'[SkillReview] failed to insert skill review run stats: {exc}')
-        raise exc
 
-    has_failure = user_result.status == 'failed'
+    has_failure = user_result.status == 'failed' or insert_error is not None
     return SkillReviewBatchResult(
         success=not has_failure,
         inserted_count=inserted_count,
-        error=_batch_failure_message([user_result]) if has_failure else None,
+        error=insert_error or (_batch_failure_message([user_result]) if has_failure else None),
     )
 
 

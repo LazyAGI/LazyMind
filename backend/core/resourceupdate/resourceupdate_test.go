@@ -950,6 +950,9 @@ func TestListSkillReviewResultsFiltersSkillName(t *testing.T) {
 	insertFullSkillReviewResult(t, db, SkillReviewResult{ID: "target-1", UserID: "user-1", SkillName: "git-workflow", Type: skillReviewTypePatch, ReviewStatus: reviewStatusPending, SkillContent: skillContent("git-workflow", "target"), Time: now})
 	insertFullSkillReviewResult(t, db, SkillReviewResult{ID: "other-skill", UserID: "user-1", SkillName: "release-check", Type: skillReviewTypePatch, ReviewStatus: reviewStatusPending, SkillContent: skillContent("release-check", "other"), Time: now})
 	insertFullSkillReviewResult(t, db, SkillReviewResult{ID: "other-user", UserID: "user-2", SkillName: "git-workflow", Type: skillReviewTypePatch, ReviewStatus: reviewStatusPending, SkillContent: skillContent("git-workflow", "other user"), Time: now})
+	if err := db.Exec("UPDATE skill_review_results SET summary = NULL WHERE id = ?", "target-1").Error; err != nil {
+		t.Fatalf("set summary null: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/core/skill-review-results?review_status=pending&type=patch&skill_name=git-workflow", nil)
 	req.Header.Set("X-User-Id", "user-1")
@@ -975,6 +978,9 @@ func TestListSkillReviewResultsFiltersSkillName(t *testing.T) {
 	}
 	if resp.Data.Total != 1 || len(resp.Data.Items) != 1 || resp.Data.Items[0].ID != "target-1" {
 		t.Fatalf("expected only target result, got %#v", resp.Data)
+	}
+	if resp.Data.Items[0].Summary != "" {
+		t.Fatalf("expected null summary to be returned as empty string, got %q", resp.Data.Items[0].Summary)
 	}
 }
 
@@ -1114,7 +1120,7 @@ func TestListMemoryReviewResultsHidesUnmappedRows(t *testing.T) {
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	insertMemoryResource(t, db, orm.SystemMemory{ID: "memory-1", UserID: "user-1", Content: "old memory", ContentHash: evolution.HashContent("old memory"), Version: 1, AutoEvo: false, CreatedAt: now, UpdatedAt: now})
 	insertMemoryReviewResult(t, db, MemoryReviewResult{ID: "mapped", UserID: "user-1", Target: orm.ResourceUpdateResourceTypeMemory, Content: "new memory", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now})
-	insertMemoryReviewResult(t, db, MemoryReviewResult{ID: "unmapped-preference", UserID: "user-1", Target: orm.ResourceUpdateResourceTypeUserPreference, Content: "---\nagent_persona: a\nuser_address: b\nresponse_style: c\n---\n\nbody", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now.Add(time.Second)})
+	insertMemoryReviewResult(t, db, MemoryReviewResult{ID: "unmapped-preference", UserID: "user-1", Target: orm.ResourceUpdateResourceTypeUserPreference, Content: "---\nagent_persona: a\npreferred_name: b\nresponse_style: c\n---\n\nbody", State: memoryReviewStateSuccess, ReviewStatus: reviewStatusPending, Time: now.Add(time.Second)})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/core/memory-review-results", nil)
 	req.Header.Set("X-User-Id", "user-1")
@@ -1151,7 +1157,7 @@ func TestAcceptUserPreferenceReviewResultParsesFrontmatter(t *testing.T) {
 		UserID:        "user-1",
 		Content:       "旧正文",
 		AgentPersona:  "旧角色",
-		UserAddress:   "旧称谓",
+		PreferredName: "旧称谓",
 		ResponseStyle: "旧风格",
 		Version:       1,
 		AutoEvo:       false,
@@ -1160,8 +1166,7 @@ func TestAcceptUserPreferenceReviewResultParsesFrontmatter(t *testing.T) {
 	}
 	resource.ContentHash = evolution.HashSystemUserPreference(resource)
 	insertPreferenceResource(t, db, resource)
-	reviewContent := "---\nagent_persona: 新角色\nuser_address: 用户称谓\nresponse_style: 回复风格\n---\n\n新正文"
-	insertMemoryReviewResult(t, db, MemoryReviewResult{
+	reviewContent := "---\nagent_persona: 新角色\npreferred_name: 用户称谓\nresponse_style: 回复风格\n---\n\n新正文"
 		ID:           "preference-accept",
 		UserID:       "user-1",
 		Target:       orm.ResourceUpdateResourceTypeUserPreference,
@@ -1184,7 +1189,7 @@ func TestAcceptUserPreferenceReviewResultParsesFrontmatter(t *testing.T) {
 	if err := db.Take(&updated, "id = ?", "preference-1").Error; err != nil {
 		t.Fatalf("read preference: %v", err)
 	}
-	if updated.Content != "新正文" || updated.AgentPersona != "新角色" || updated.UserAddress != "用户称谓" || updated.ResponseStyle != "回复风格" {
+	if updated.Content != "新正文" || updated.AgentPersona != "新角色" || updated.PreferredName != "用户称谓" || updated.ResponseStyle != "回复风格" {
 		t.Fatalf("expected frontmatter to be split into preference columns, got %#v", updated)
 	}
 	if strings.Contains(updated.Content, "agent_persona") || strings.Contains(updated.Content, "---") {
@@ -1305,12 +1310,12 @@ func createSkillReviewResultsTable(t *testing.T, db *gorm.DB) {
 	if err := db.Exec(`
 CREATE TABLE skill_review_results (
 	id varchar(128) PRIMARY KEY,
-	skill_name varchar(255) NOT NULL DEFAULT '',
-	type varchar(32) NOT NULL DEFAULT '',
+	skill_name varchar(255) NOT NULL,
+	type varchar(32) NOT NULL,
 	userid varchar(255) NOT NULL,
-	requestid varchar(128) NOT NULL DEFAULT '',
-	skill_content text NOT NULL DEFAULT '',
-	summary text NOT NULL DEFAULT '',
+	requestid varchar(128) NOT NULL,
+	skill_content text NOT NULL,
+	summary text,
 	review_status varchar(32) NOT NULL,
 	time datetime NOT NULL
 )`).Error; err != nil {
