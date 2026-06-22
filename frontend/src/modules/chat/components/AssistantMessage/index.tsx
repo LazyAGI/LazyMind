@@ -420,7 +420,7 @@ const AssistantMessage = (props: any) => {
   }
 
   function getCurrentFeedback(historyId?: string) {
-    const resolvedHistoryId = historyId || item.history_id;
+    const resolvedHistoryId = historyId || item?.history_id;
     if (
       resolvedHistoryId &&
       feedbackState.localFeedbackHistoryId === resolvedHistoryId &&
@@ -429,7 +429,7 @@ const AssistantMessage = (props: any) => {
       return feedbackState.localFeedbackType;
     }
 
-    if (resolvedHistoryId && item.answers) {
+    if (resolvedHistoryId && item?.answers) {
       const answer = item.answers.find(
         (ans: any) => ans.history_id === resolvedHistoryId,
       );
@@ -438,8 +438,8 @@ const AssistantMessage = (props: any) => {
       }
     }
 
-    if (!historyId || resolvedHistoryId === item.history_id) {
-      return normalizeFeedbackType(item.feed_back);
+    if (!historyId || resolvedHistoryId === item?.history_id) {
+      return normalizeFeedbackType(item?.feed_back);
     }
 
     return undefined;
@@ -449,8 +449,8 @@ const AssistantMessage = (props: any) => {
     feedbackType: FeedBackChatHistoryRequestTypeEnum,
     targetHistoryId?: string,
   ) => {
-    const resolvedHistoryId = targetHistoryId || item.history_id;
-    if (resolvedHistoryId && item.answers) {
+    const resolvedHistoryId = targetHistoryId || item?.history_id;
+    if (resolvedHistoryId && item?.answers) {
       const hasTargetAnswer = item.answers.some(
         (ans: any) => ans.history_id === resolvedHistoryId,
       );
@@ -462,7 +462,7 @@ const AssistantMessage = (props: any) => {
       return {
         ...item,
         feed_back:
-          resolvedHistoryId === item.history_id || !hasTargetAnswer
+          resolvedHistoryId === item?.history_id || !hasTargetAnswer
             ? feedbackType
             : undefined,
         answers: updatedAnswers,
@@ -480,7 +480,7 @@ const AssistantMessage = (props: any) => {
       return;
     }
 
-    const targetHistoryId = historyId || item.history_id;
+    const targetHistoryId = historyId || item?.history_id;
     if (!targetHistoryId) {
       message.error(t("chat.historyIdMissingFeedback"));
       return;
@@ -528,7 +528,7 @@ const AssistantMessage = (props: any) => {
       return;
     }
 
-    const targetHistoryId = historyId || item.history_id;
+    const targetHistoryId = historyId || item?.history_id;
     if (!targetHistoryId) {
       message.error(t("chat.historyIdMissingFeedback"));
       return;
@@ -547,7 +547,7 @@ const AssistantMessage = (props: any) => {
 
   
   function handleFeedbackSubmit(_reasons: string[], _comment: string) {
-    const targetHistoryId = feedbackState.targetHistoryId || item.history_id;
+    const targetHistoryId = feedbackState.targetHistoryId || item?.history_id;
     if (!targetHistoryId) {
       message.error(t("chat.historyIdMissingFeedback"));
       dispatch({ type: "CLOSE_MODAL" });
