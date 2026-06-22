@@ -203,7 +203,6 @@ interface DataSourceWizardModalProps {
   selectedType: SourceType | null;
   isFeishuSetupReady: boolean;
   isNotionSetupReady?: boolean;
-  connectionVerified: boolean;
   syncMode: SyncMode;
   saving: boolean;
   savingMode?: "create" | "createAndSync";
@@ -219,8 +218,6 @@ interface DataSourceWizardModalProps {
   onSelectType: (type: SourceType) => void;
   onResetFeishuSetup: () => void;
   onResetNotionSetup?: () => void;
-  onTestConnection: () => void;
-  onInvalidateConnection: () => void;
   onLoadLocalPathOptions?: (path?: string) => void;
   onSearchLocalPathOptions?: (keyword: string) => void;
   onLoadLocalPathChildren?: TreeSelectProps["loadData"];
@@ -238,7 +235,6 @@ export default function DataSourceWizardModal({
   selectedType,
   isFeishuSetupReady,
   isNotionSetupReady = false,
-  connectionVerified,
   syncMode,
   saving,
   savingMode,
@@ -254,8 +250,6 @@ export default function DataSourceWizardModal({
   onSelectType,
   onResetFeishuSetup,
   onResetNotionSetup,
-  onTestConnection,
-  onInvalidateConnection,
   onLoadLocalPathOptions,
   onSearchLocalPathOptions,
   onLoadLocalPathChildren,
