@@ -194,7 +194,7 @@ class SubAgentDB:
             return []
 
     def load_artifacts_for_tasks(self, task_ids: List[str]) -> List[Dict[str, Any]]:
-        """Return artifacts for a list of task_ids, ordered by task_id / key / seq ASC.
+        """Return non-hidden artifacts for a list of task_ids, ordered by task_id / key / seq ASC.
 
         Returns empty list on any error or if task_ids is empty.
         """
@@ -206,7 +206,7 @@ class SubAgentDB:
                     text(
                         'SELECT task_id, artifact_key, content_type, value, seq '
                         'FROM sub_agent_artifacts '
-                        'WHERE task_id IN :ids '
+                        'WHERE task_id IN :ids AND hidden = FALSE '
                         'ORDER BY task_id, artifact_key, seq ASC'
                     ).bindparams(bindparam('ids', expanding=True)),
                     {'ids': task_ids},
@@ -225,6 +225,51 @@ class SubAgentDB:
                     'content_type': r['content_type'],
                     'value': value,
                     'seq': r['seq'],
+                })
+            return out
+        except Exception:
+            return []
+
+    def load_selected_slot_artifacts(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return the currently-selected slot values for a plugin session.
+
+        Reads plugin_slot_revisions WHERE selected=TRUE and returns one entry per
+        (slot_id / list_index), using content_snapshot as the value.  Only revisions
+        that have a non-NULL content_snapshot are returned.
+
+        This is the preferred source for _enrich_objective_with_artifacts when the
+        task belongs to a plugin session, because it reflects:
+          - soft-deleted list items  (selected=FALSE → excluded)
+          - the latest selected revision after a retry / overwrite
+
+        Returns empty list on any error.
+        """
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    text(
+                        'SELECT psr.artifact_key, psr.content_snapshot, psr.list_index '
+                        'FROM plugin_slot_revisions psr '
+                        'WHERE psr.session_id = :session_id '
+                        '  AND psr.selected = TRUE '
+                        '  AND psr.content_snapshot IS NOT NULL '
+                        'ORDER BY psr.artifact_key ASC, COALESCE(psr.list_index, -1) ASC'
+                    ),
+                    {'session_id': session_id},
+                ).mappings().all()
+            out: List[Dict[str, Any]] = []
+            for r in rows:
+                snapshot = r['content_snapshot']
+                if isinstance(snapshot, str):
+                    try:
+                        snapshot = json.loads(snapshot)
+                    except ValueError:
+                        snapshot = {}
+                out.append({
+                    'artifact_key': r['artifact_key'],
+                    'content_type': None,  # snapshot has no content_type; callers use value shape
+                    'value': snapshot or {},
+                    'list_index': r['list_index'],
                 })
             return out
         except Exception:

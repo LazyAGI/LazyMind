@@ -24,12 +24,17 @@ from . import tools as subagent_tools
 def _enrich_objective_with_artifacts(objective: str, params: Dict[str, Any], db: 'SubAgentDB') -> str:
     """Replace {{artifact_id}} placeholders in objective with artifact text/url values.
 
-    For plugin_step tasks, artifacts produced by prior succeeded steps in the same
-    plugin session are fetched from the DB and substituted into the raw objective
-    template.  Falls back to the original objective on any error.
+    For plugin_step tasks, two data sources are tried in order:
 
-    This mirrors what Go's injectArtifacts() used to do, but runs on the Python side
-    so that Go does not need to query sub_agent_artifacts before launching the runner.
+    1. plugin_slot_revisions (preferred): reads only selected=TRUE revisions for the
+       session.  This correctly handles soft-deleted list items (hidden artifacts) and
+       always uses the user-selected version after a retry/overwrite.
+
+    2. sub_agent_artifacts (fallback): used when the slot-revision table returns no
+       results (e.g. content_snapshot not yet written, or non-plugin SubAgent tasks).
+       Only non-hidden artifacts from succeeded steps are returned.
+
+    Falls back to the original objective on any error.
     """
     if '{{' not in objective:
         return objective
@@ -38,6 +43,26 @@ def _enrich_objective_with_artifacts(objective: str, params: Dict[str, Any], db:
     if not session_id:
         return objective
 
+    # --- Source 1: plugin_slot_revisions (selected revisions) ---
+    slot_artifacts = db.load_selected_slot_artifacts(session_id)
+    if slot_artifacts:
+        result = objective
+        for a in slot_artifacts:
+            key = a.get('artifact_key', '')
+            if not key:
+                continue
+            value = a.get('value') or {}
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except ValueError:
+                    continue
+            text_val = value.get('text') or value.get('url') or ''
+            if text_val:
+                result = result.replace('{{' + key + '}}', str(text_val))
+        return result
+
+    # --- Source 2: sub_agent_artifacts (fallback for sessions without slot snapshots) ---
     try:
         steps = db.load_plugin_session_steps(session_id)
     except Exception:
