@@ -28,6 +28,49 @@ from lazymind.processor.service.env import env_int, env_float  # noqa: E402
 from lazyllm.tools.rag.doc_service import DocServer  # noqa: E402
 
 
+def _map_container_upload_path(path: str) -> str:
+    container_root = os.getenv('LAZYMIND_CONTAINER_UPLOAD_ROOT', '').strip()
+    host_root = os.getenv('LAZYMIND_HOST_UPLOAD_ROOT', '').strip()
+    raw = (path or '').strip()
+    if not container_root or not host_root or not raw:
+        return path
+
+    container_root = os.path.normpath(container_root)
+    raw_norm = os.path.normpath(raw)
+    try:
+        rel = os.path.relpath(raw_norm, container_root)
+    except ValueError:
+        return path
+    if rel == os.curdir or rel.startswith(os.pardir + os.sep) or rel == os.pardir:
+        return path
+    return os.path.join(host_root, rel)
+
+
+def _install_host_upload_path_mapper() -> None:
+    if not os.getenv('LAZYMIND_CONTAINER_UPLOAD_ROOT') or not os.getenv('LAZYMIND_HOST_UPLOAD_ROOT'):
+        return
+
+    from lazyllm.tools.rag.doc_service.doc_manager import DocManager  # noqa: E402
+
+    if getattr(DocManager.add_files, '_lazymind_path_mapper', False):
+        return
+
+    original_add_files = DocManager.add_files
+
+    def add_files_with_host_paths(self, request):
+        for item in getattr(request, 'items', []) or []:
+            item.file_path = _map_container_upload_path(item.file_path)
+            metadata = getattr(item, 'metadata', None)
+            if isinstance(metadata, dict):
+                for key in ('external_file_path', 'core_stored_path', 'core_parse_stored_path'):
+                    if isinstance(metadata.get(key), str):
+                        metadata[key] = _map_container_upload_path(metadata[key])
+        return original_add_files(self, request)
+
+    add_files_with_host_paths._lazymind_path_mapper = True
+    DocManager.add_files = add_files_with_host_paths
+
+
 def _default_storage_dir() -> str:
     return (
         os.getenv('LAZYMIND_DOCUMENT_SERVICE_STORAGE_DIR')
@@ -42,6 +85,7 @@ def build_doc_server(
     parser_url: Optional[str] = None,
     callback_url: Optional[str] = None,
 ) -> DocServer:
+    _install_host_upload_path_mapper()
     resolved_port = port or env_int('LAZYMIND_DOCUMENT_SERVICE_PORT', 8000)
     resolved_parser_url = parser_url or os.getenv('LAZYMIND_DOCUMENT_PROCESSOR_URL', 'http://localhost:8000')
     resolved_callback_url = callback_url or os.getenv('LAZYMIND_DOCUMENT_SERVICE_CALLBACK_URL')

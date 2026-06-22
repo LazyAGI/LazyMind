@@ -289,11 +289,29 @@ def filter_tools(
     return result
 
 
+def _ensure_public_api_docstrings(instance: Any) -> None:
+    public_apis = getattr(instance, '__public_apis__', None)
+    if not public_apis:
+        return
+
+    for method_name in public_apis:
+        method = getattr(instance, method_name, None)
+        if method is None or inspect.getdoc(method):
+            continue
+
+        owner = getattr(method, '__self__', instance)
+        func = getattr(type(owner), method_name, None)
+        if func is not None and getattr(func, '__doc__', None) is None:
+            func.__doc__ = f'Run the {method_name} tool.'
+
+
 def build_agent_tools(configs: list[ToolGroupConfig]) -> list:
     result = []
     for cfg in configs:
         if cfg.name in _PICK_FIRST_VALID_GROUPS:
             desc, instances = _PICK_FIRST_VALID_GROUPS[cfg.name]
+            for instance in instances:
+                _ensure_public_api_docstrings(instance)
             result.append(dict(
                 name=cfg.name,
                 desc=desc,
@@ -301,5 +319,6 @@ def build_agent_tools(configs: list[ToolGroupConfig]) -> list:
                 tools=list(instances),
             ))
         else:
+            _ensure_public_api_docstrings(cfg.instance)
             result.append(cfg.instance)
     return result

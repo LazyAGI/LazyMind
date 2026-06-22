@@ -1,0 +1,71 @@
+services:
+  db:
+    ports:
+      - "127.0.0.1:${LAZYMIND_LOCAL_POSTGRES_PORT:-15432}:5432"
+
+  redis:
+    ports:
+      - "127.0.0.1:${LAZYMIND_LOCAL_REDIS_PORT:-16379}:6379"
+
+  milvus:
+    ports:
+      - "127.0.0.1:${LAZYMIND_LOCAL_MILVUS_PORT:-19530}:19530"
+
+  opensearch:
+    ports:
+      - "127.0.0.1:${LAZYMIND_LOCAL_OPENSEARCH_PORT:-19200}:9200"
+
+  core:
+    ports:
+      - "127.0.0.1:${LAZYMIND_LOCAL_CORE_PORT:-18000}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      LAZYMIND_ALGO_SERVICE_URL: "http://host.docker.internal:18080"
+      LAZYMIND_DOCUMENT_SERVICE_URL: "http://host.docker.internal:18080"
+      LAZYMIND_PARSING_SERVICE_URL: "http://host.docker.internal:18081"
+      LAZYMIND_PROCESSOR_SERVICE_URL: "http://host.docker.internal:18082"
+      LAZYMIND_CHAT_SERVICE_URL: "http://host.docker.internal:18084"
+      LAZYMIND_EVO_SERVICE_URL: ""
+
+  kong:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./kong.local-algo.yml:/kong/kong.yml:ro
+      - ./kong/plugins/rbac-auth:/usr/local/share/lua/5.1/kong/plugins/rbac-auth
+
+  frontend:
+    build:
+      args:
+        VITE_HIDE_EVO: "true"
+    environment:
+      FRONTEND_API_PROXY_PASS: http://kong:8000
+      FRONTEND_API_DOCS_PROXY_PASS: http://kong:8000
+
+  lazyllm-doc-server:
+    profiles: ["local-algo-no-remote-algo"]
+
+  lazyllm-parse-server:
+    profiles: ["local-algo-no-remote-algo"]
+
+  lazyllm-parse-worker:
+    profiles: ["local-algo-no-remote-algo"]
+
+  lazyllm-algo:
+    profiles: ["local-algo-no-remote-algo"]
+
+  chat:
+    profiles: ["local-algo-no-remote-algo"]
+
+  evo-api:
+    profiles: ["local-algo-no-remote-algo"]
+
+  mineru:
+    profiles: ["local-algo-no-remote-algo"]
+
+  paddleocr:
+    profiles: ["local-algo-no-remote-algo"]
+
+  paddleocr-vlm-server:
+    profiles: ["local-algo-no-remote-algo"]

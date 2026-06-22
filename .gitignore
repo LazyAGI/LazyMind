@@ -85,6 +85,7 @@ lazyllm_cpp.egg-info/
 
 .venv/
 .venv-test/
+.lazymind-local/
 data/
 volumes/
 .conda

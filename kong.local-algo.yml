@@ -1,0 +1,54 @@
+_format_version: "3.0"
+
+services:
+  - name: auth-service
+    url: http://auth-service:8000
+    routes:
+      - name: authservice-route
+        paths:
+          - /api/authservice
+        strip_path: false
+        plugins:
+          - name: rbac-auth
+            config:
+              auth_service_url: http://auth-service:8000
+
+  - name: chat-service
+    url: http://host.docker.internal:18084
+    routes:
+      - name: chat-route
+        paths:
+          - /api/chat
+        strip_path: false
+        plugins:
+          - name: rbac-auth
+            config:
+              auth_service_url: http://auth-service:8000
+
+  - name: scan-control-plane
+    url: http://scan-control-plane:18080
+    routes:
+      - name: scan-route
+        paths:
+          - /api/scan
+        strip_path: false
+        plugins:
+          - name: rbac-auth
+            config:
+              auth_service_url: http://auth-service:8000
+
+  # core 统一通过 /api/core 访问，Kong  strip 前缀后转发（如 /api/core/conversations → /conversations）
+  - name: core-service
+    url: http://core:8000
+    connect_timeout: 180000
+    read_timeout: 600000
+    write_timeout: 600000
+    routes:
+      - name: core-route
+        paths:
+          - /api/core
+        strip_path: true
+        plugins:
+          - name: rbac-auth
+            config:
+              auth_service_url: http://auth-service:8000

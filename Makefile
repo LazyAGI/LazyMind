@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 lint-python lint-go test test-hermetic test-hermetic-setup test-hermetic-check build up up-build down clear reset-kb reset-all fresh-start file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop
+.PHONY: help lint install-flake8 lint-python lint-go test test-hermetic test-hermetic-setup test-hermetic-check build up up-build down clear reset-kb reset-all fresh-start file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop local-algo-bind-perms local-algo-data-perms up-local-algo up-build-local-algo down-local-algo local-algo-status
 .DEFAULT_GOAL := help
 
 # Use legacy Docker builder by default to avoid pulling moby/buildkit:buildx-stable-1 from Docker Hub
@@ -18,6 +18,7 @@ comma := ,
 #        make down COMPOSE_PROJECT=myproj  →  docker compose -p myproj down
 # ---------------------------------------------------------------------------
 _COMPOSE := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(if $(COMPOSE_PROJECT),-p $(COMPOSE_PROJECT),)
+_COMPOSE_LOCAL_ALGO := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(if $(COMPOSE_PROJECT),-p $(COMPOSE_PROJECT),) -f docker-compose.yml -f docker-compose.local-algo.yml
 # ---------------------------------------------------------------------------
 # Mirror profile: cn (domestic/default) or intl (international).
 # Selects which .env.mirrors.<profile> file to load for all build-time source
@@ -168,6 +169,10 @@ help:
 	@echo "                    Use SERVICES=svc1,svc2 to start specific services only"
 	@echo "  make up-build   - Build images and start services"
 	@echo "                    Use SERVICES=svc1,svc2 to target specific services"
+	@echo "  make up-local-algo       - Start services with algorithm processes on the host"
+	@echo "  make up-build-local-algo - Build/start services with algorithm processes on the host"
+	@echo "  make down-local-algo     - Stop host algorithm processes and local-algo containers"
+	@echo "  make local-algo-status   - Show host algorithm process and container status"
 	@echo "  make down       - Stop services"
 	@echo "                    Use SERVICES=svc1,svc2 to stop specific services only"
 	@echo "  make build      - Build compose services (mineru profile only when needed)"
@@ -249,6 +254,7 @@ _need_opensearch_dashboard := $(and $(_need_opensearch),$(_enable_opensearch_das
 # Shared compose profile flags for up/down/up-build
 _COMPOSE_PROFILES := $(strip $(if $(_need_mineru),--profile mineru) $(if $(_need_milvus),--profile milvus) $(if $(_need_opensearch),--profile opensearch) $(if $(_need_milvus_dashboard),--profile milvus-dashboard) $(if $(_need_opensearch_dashboard),--profile opensearch-dashboard))
 _COMPOSE_FILE_WATCHER_SCALE := $(if $(filter container,$(LAZYMIND_FILE_WATCHER_MODE)),,--scale file-watcher=0)
+_LOCAL_ALGO_COMPOSE_SERVICES := db db-bootstrap redis auth-service office-convert-service core kong frontend scan-control-plane $(if $(filter container,$(LAZYMIND_FILE_WATCHER_MODE)),file-watcher) $(if $(_need_milvus),milvus-etcd milvus-minio milvus) $(if $(_need_opensearch),opensearch) $(if $(_need_milvus_dashboard),attu) $(if $(_need_opensearch_dashboard),opensearch-dashboards)
 
 # Only init submodules when not yet cloned; if already present (even with different commit), do nothing. Never recursive.
 _SUBMODULE_INIT = @git submodule status | grep -q '^-' && git submodule update --init || true
@@ -312,6 +318,20 @@ file-watcher-run: file-watcher-stop file-watcher-dirs
 file-watcher-start: file-watcher-build
 	@$(MAKE) --no-print-directory file-watcher-run
 
+local-algo-bind-perms:
+	@chmod a+rx db-init
+	@find db-init -type d -exec chmod a+rx {} +
+	@find db-init -type f -exec chmod a+r {} +
+	@chmod a+r redis-users.acl
+
+local-algo-data-perms:
+	@mkdir -p data/core/uploads data/traces
+	@docker run --rm \
+		-v "$(CURDIR)/data/core/uploads:/mnt/uploads" \
+		-v "$(CURDIR)/data/traces:/mnt/traces" \
+		$(DOCKER_MIRROR)alpine:3.19 \
+		sh -c 'chown -R $(shell id -u):$(shell id -g) /mnt/uploads /mnt/traces && chmod -R u+rwX,go+rwX /mnt/uploads /mnt/traces'
+
 up:
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" = "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-stop; \
@@ -350,6 +370,55 @@ up-build:
 	else \
 		echo "✅ file-watcher container enabled"; \
 	fi
+
+up-local-algo:
+	@$(MAKE) --no-print-directory local-algo-bind-perms
+	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" = "container" ]; then \
+		$(MAKE) --no-print-directory file-watcher-stop; \
+		$(MAKE) --no-print-directory file-watcher-dirs; \
+	else \
+		$(MAKE) --no-print-directory file-watcher-build; \
+	fi
+	$(_SUBMODULE_INIT)
+	@$(_COMPOSE_LOCAL_ALGO) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) -d $(_LOCAL_ALGO_COMPOSE_SERVICES)
+	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
+		$(MAKE) --no-print-directory file-watcher-run; \
+	else \
+		echo "✅ file-watcher container enabled"; \
+	fi
+	@$(MAKE) --no-print-directory local-algo-data-perms
+	@./scripts/local/linux/ensure-algo-python.sh >/dev/null
+	@./scripts/local/linux/up-algo-host.sh
+
+up-build-local-algo:
+	@$(MAKE) --no-print-directory local-algo-bind-perms
+	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" = "container" ]; then \
+		$(MAKE) --no-print-directory file-watcher-stop; \
+		$(MAKE) --no-print-directory file-watcher-dirs; \
+	else \
+		$(MAKE) --no-print-directory file-watcher-build; \
+	fi
+	$(_SUBMODULE_INIT)
+	@$(_COMPOSE_LOCAL_ALGO) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) --build -d $(_LOCAL_ALGO_COMPOSE_SERVICES)
+	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
+		$(MAKE) --no-print-directory file-watcher-run; \
+	else \
+		echo "✅ file-watcher container enabled"; \
+	fi
+	@$(MAKE) --no-print-directory local-algo-data-perms
+	@./scripts/local/linux/ensure-algo-python.sh >/dev/null
+	@./scripts/local/linux/up-algo-host.sh
+
+down-local-algo:
+	@./scripts/local/linux/down-algo-host.sh 2>/dev/null || true
+	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
+		$(MAKE) --no-print-directory file-watcher-stop; \
+	fi
+	@$(_COMPOSE_LOCAL_ALGO) $(_COMPOSE_PROFILES) down
+
+local-algo-status:
+	@./scripts/local/linux/status-algo-host.sh
+	@$(_COMPOSE_LOCAL_ALGO) $(_COMPOSE_PROFILES) ps
 
 clear:
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
