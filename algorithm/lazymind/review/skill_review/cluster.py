@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import os
 import time
 from collections import defaultdict
 from concurrent.futures import as_completed
 from pathlib import Path
-from tempfile import gettempdir
 from typing import Any
 
 import numpy as np
@@ -24,7 +22,7 @@ from lazymind.review.skill_review.schemas import SkillDraft, TaskCluster
 from lazymind.review.skill_review.reports import finish_stage_report, stage_error, start_stage, write_json_file
 
 MIN_VALID_EMBEDDING_RATIO = 0.8
-DEFAULT_LLM_CLUSTER_THRESHOLD = 5
+DEFAULT_LLM_CLUSTER_THRESHOLD = 20
 UMAP_RANDOM_STATE = 42
 
 _CLUSTER_SCHEMA = {
@@ -62,6 +60,7 @@ def cluster_drafts(
     artifact_dir: Path | None = None,
 ) -> tuple[list[TaskCluster], dict]:
     started_at = start_stage()
+    input_count = len(drafts)
     if not drafts:
         clusters: list[TaskCluster] = []
         if artifact_dir is not None:
@@ -79,6 +78,24 @@ def cluster_drafts(
                 failed_embedding_count=0,
             ),
         )
+    drafts = [draft for draft in drafts if _cluster_text(draft)]
+    if not drafts:
+        clusters = []
+        if artifact_dir is not None:
+            write_json_file(artifact_dir / STAGE_FILES[STAGE_CLUSTER], clusters)
+        return clusters, finish_stage_report(
+            STAGE_CLUSTER,
+            started_at,
+            input_count=input_count,
+            output_count=0,
+            errors=[],
+            status='completed',
+            metadata=_cluster_report_metadata(
+                draft_count=input_count,
+                valid_embedding_count=0,
+                failed_embedding_count=input_count,
+            ),
+        )
     if len(drafts) == 1:
         clusters = [_cluster_from_indexes(drafts, [0])]
         if artifact_dir is not None:
@@ -86,13 +103,13 @@ def cluster_drafts(
         return clusters, finish_stage_report(
             STAGE_CLUSTER,
             started_at,
-            input_count=len(drafts),
+            input_count=input_count,
             output_count=len(clusters),
             errors=[],
             metadata=_cluster_report_metadata(
-                draft_count=len(drafts),
+                draft_count=input_count,
                 valid_embedding_count=len(drafts),
-                failed_embedding_count=0,
+                failed_embedding_count=input_count - len(drafts),
             ),
         )
 
@@ -111,14 +128,14 @@ def cluster_drafts(
         return clusters, finish_stage_report(
             STAGE_CLUSTER,
             started_at,
-            input_count=len(drafts),
+            input_count=input_count,
             output_count=len(clusters),
             errors=errors,
             status='failed' if not clusters else 'completed',
             metadata=_cluster_report_metadata(
-                draft_count=len(drafts),
+                draft_count=input_count,
                 valid_embedding_count=0,
-                failed_embedding_count=0,
+                failed_embedding_count=input_count - len(drafts),
                 method='llm',
                 llm_cluster_threshold=llm_cluster_threshold,
             ),
@@ -136,9 +153,9 @@ def cluster_drafts(
     embeddings, valid_drafts, dimension_errors = _validate_embeddings(raw_embeddings, embedded_drafts)
     errors.extend(dimension_errors)
     metadata = _cluster_report_metadata(
-        draft_count=len(drafts),
+        draft_count=input_count,
         valid_embedding_count=len(valid_drafts),
-        failed_embedding_count=len(drafts) - len(valid_drafts),
+        failed_embedding_count=input_count - len(valid_drafts),
     )
     if metadata['valid_embedding_ratio'] < MIN_VALID_EMBEDDING_RATIO:
         exc = RuntimeError(
@@ -367,10 +384,7 @@ def _cluster_text(draft: SkillDraft) -> str:
         '\n'.join(step.strip() for step in signature.procedure if step.strip()),
         signature.boundaries.strip(),
     ]
-    text = '\n'.join(part for part in parts if part)
-    if not text:
-        raise ValueError(f'skill draft {draft.session_id} has empty cluster_signature')
-    return text
+    return '\n'.join(part for part in parts if part)
 
 
 def _embedding_cluster_labels(embeddings: np.ndarray) -> tuple[list[int], dict]:
@@ -386,15 +400,14 @@ def _embedding_cluster_labels(embeddings: np.ndarray) -> tuple[list[int], dict]:
 
 
 def _umap_reduce_embeddings(embeddings: np.ndarray) -> tuple[np.ndarray, dict]:
-    _ensure_numba_cache_dir()
     try:
         from umap import UMAP
     except ImportError as exc:
         raise ImportError('umap-learn is required for embedding clustering') from exc
 
     sample_count = len(embeddings)
-    n_neighbors = min(20, max(8, int(round(sample_count ** 0.5 * 1.5))))
-    n_components = 8
+    n_neighbors = min(sample_count - 1, min(20, max(10, int(round(sample_count ** 0.5 * 1.5)))))
+    n_components = min(10, sample_count - 1)
     reducer = UMAP(
         n_neighbors=n_neighbors,
         n_components=n_components,
@@ -412,12 +425,6 @@ def _umap_reduce_embeddings(embeddings: np.ndarray) -> tuple[np.ndarray, dict]:
         'metric': 'cosine',
         'random_state': UMAP_RANDOM_STATE,
     }
-
-
-def _ensure_numba_cache_dir() -> None:
-    cache_dir = Path(gettempdir()) / 'lazymind_numba_cache'
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    os.environ.setdefault('NUMBA_CACHE_DIR', str(cache_dir))
 
 
 def _hdbscan_labels(embeddings: np.ndarray) -> tuple[list[int], dict]:
