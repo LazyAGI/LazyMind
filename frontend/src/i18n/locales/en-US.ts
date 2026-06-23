@@ -80,8 +80,10 @@ const enUS = {
     tabs: {
       aria: "Model service configuration navigation",
       models: "User Models",
-      externalServices: "Other Services",
-      defaultServices: "Default Services",
+      externalServices: "Document Parsing & Tools",
+      documentParsing: "Document Parsing",
+      tools: "Tools",
+      defaultServices: "System Model Settings",
     },
     capability: {
       llmChat: "LLM",
@@ -116,10 +118,10 @@ const enUS = {
       imageEditingSubtitle: "Edits existing images from prompts for targeted changes and visual adjustments.",
       selfEvolutionTitle: "LLM (Self-evolution)",
       selfEvolutionSubtitle: "Used for memory extraction, strategy reflection, and system self-evolution tasks.",
-      cloudParsingServiceTitle: "Cloud Parsing Service",
-      cloudParsingServiceSubtitle: "Select the default PDF/OCR cloud parsing service. Configuration comes from Cloud Services.",
+      cloudParsingServiceTitle: "Document Parsing",
+      cloudParsingServiceSubtitle: "Select the default document parsing service. Configuration comes from Document Parsing & Tools.",
       searchEngineServiceTitle: "Search Engine",
-      searchEngineServiceSubtitle: "Select the default external search tool service. Configuration comes from Cloud Services.",
+      searchEngineServiceSubtitle: "Select the default external search tool. Configuration comes from Document Parsing & Tools.",
       cloudServiceNoneOption: "None",
       cloudServiceNoneDesc: "Do not enable a default cloud parsing service",
       searchServiceNoneDesc: "Do not enable a default search engine",
@@ -130,7 +132,7 @@ const enUS = {
       cloudServiceTavilyOption: "Tavily",
     },
     defaultConfigAria: "Module default model configuration",
-    defaultTitle: "Module Default Models",
+    defaultTitle: "System Model Settings",
     defaultSubtitle: "Different modules can use different models. Required items must be configured before all features are available.",
     embeddingLimitedAlert: "Embedding models can currently be selected only from platform-approved providers and models. The option list can be narrowed once the final allowlist is confirmed.",
     moduleHelpAria: "{{title}} help",
@@ -139,10 +141,10 @@ const enUS = {
     restrictedPlaceholder: "Only admins can configure and share this with you",
     requiredModelPlaceholder: "Select a required model",
     optionalModelPlaceholder: "Optional",
-    cloudServicePlaceholder: "Select cloud service configuration",
+    cloudServicePlaceholder: "Select external service configuration",
     noModelOptions: "No available models",
-    noCloudServiceOptions: "No cloud service configuration",
-    cloudServiceOptionDesc: "From Cloud Services",
+    noCloudServiceOptions: "No external service configuration",
+    cloudServiceOptionDesc: "From Document Parsing & Tools",
     builtInModelSuffix: " · Built-in model",
     customModelSuffix: " · Custom model",
     myGroupsTitle: "My Provider Groups and Models",
@@ -295,9 +297,9 @@ const enUS = {
     modelNotReadyTip: "Model is not ready",
     modelReadyTip: "Model is ready",
     modelReadySharedTip: "Model is ready (shared by {{user}} · {{provider}} / {{model}})",
-    cloudServiceNotReadyTip: "Cloud service is not ready",
-    cloudServiceReadyTip: "Cloud service is ready",
-    cloudServiceReadySharedTip: "Cloud service is ready (shared by {{user}} · {{provider}} / {{group}})",
+    cloudServiceNotReadyTip: "External service is not ready",
+    cloudServiceReadyTip: "External service is ready",
+    cloudServiceReadySharedTip: "External service is ready (shared by {{user}} · {{provider}} / {{group}})",
     error: {
       searchFailed: "Model provider search failed",
       loadProvidersFailed: "Failed to load model providers",
@@ -315,10 +317,16 @@ const enUS = {
       title: "Key Management and Model Configuration",
       subtitle: "Manage parsing service and built-in tool keys. Full keys are not echoed after creation; leave the edit field empty to keep the existing key.",
       savePolicy: "Save Policy",
-      parsingCategoryTitle: "Parsing Services",
-      parsingCategoryDesc: "MinerU and PaddleOCR keys support system, group, and user scopes. Priority is user > group > system.",
+      parsingCategoryTitle: "Document Parsing",
+      parsingCategoryDesc: "Manage document parsing services such as MinerU and PaddleOCR for converting files into indexable text.",
+      parsingSearchPlaceholder: "Search parsing services",
+      toolsModuleTitle: "Tools",
+      toolsModuleDesc: "Manage search engines, academic retrieval, built-in system tools, and MCP services.",
       toolsCategoryTitle: "Search Engines",
-      toolsCategoryDesc: "Manage search engine API keys. Search tools remain unavailable until configured.",
+      toolsCategoryDesc: "Manage keys for web search services such as Bing, Google Custom Search, Bocha, and Tavily.",
+      searchEngineSearchPlaceholder: "Search search engines",
+      academicCategoryTitle: "Academic Retrieval",
+      academicCategoryDesc: "Manage academic paper retrieval services such as Sciverse for research Q&A and literature review.",
       mineruTitle: "MinerU",
       mineruDesc: "Used for cloud PDF parsing. Whether offline parsing allows per-user keys is currently TBD.",
       mineruSummary: "Cloud PDF parsing and layout recognition for structured document import.",
@@ -363,7 +371,15 @@ const enUS = {
       configureAction: "Configure",
       configModalTitle: "Configure {{name}}",
       saveConfig: "Save service settings",
-      searchPlaceholder: "Search parsing or search services",
+      searchPlaceholder: "Search document parsing, search engines, or academic retrieval",
+      toolManagementTitle: "System Tools",
+      toolManagementDesc: "Manage connected built-in system tools. Tools are invoked at runtime and are not ingested as data sources.",
+      mcpToolManagementTitle: "MCP Tools",
+      mcpToolManagementDesc: "Manage MCP services and their available tools. Tools are invoked at runtime and are not ingested as data sources.",
+      toolSearchPlaceholder: "Search system tools",
+      mcpToolSearchPlaceholder: "Search MCP services",
+      toolLoadFailed: "Failed to load system tools",
+      toolToggleFailed: "Failed to update tool status",
       loadFailed: "Failed to load external services",
       saveFailed: "Failed to save external service configuration",
       checkFailed: "Connection verification failed. Check Base URL and API Key, then try again.",
@@ -472,7 +488,7 @@ const enUS = {
     userManagement: "Users",
     dataSourceManagement: "Data Sources",
     datasetManagement: "Datasets",
-    modelProviderManagement: "Model Providers",
+    modelProviderManagement: "Models & Services",
     memoryManagement: "Wisdom Accumulation",
     selfEvolution: "Algorithm Leap",
     groupManagement: "Groups",
@@ -1280,7 +1296,7 @@ const enUS = {
     dataSourceListRefreshed: "List refreshed",
     dataSourceProviderTitle: "Data Source Providers",
     dataSourceProviderSubtitle:
-      "Manage account authorization for cloud data sources. After authorization is valid, create a knowledge source from the data source list.",
+      "Manage account authorization for cloud data sources. After authorization is valid, create a data source from the data source list.",
     dataSourceProviderCredentialReady: "Credentials ready",
     dataSourceProviderCredentialMissing: "Credentials needed",
     dataSourceProviderAuthPending: "Authorization needed",
@@ -1290,7 +1306,7 @@ const enUS = {
     dataSourceProviderBack: "Back to providers",
     dataSourceFeishuAccountManagementTitle: "Feishu Accounts",
     dataSourceFeishuAccountManagementSubtitle:
-      "Manage multiple Feishu App credentials and authorization status. Choose a valid authorization when creating a knowledge source.",
+      "Manage multiple Feishu App credentials and authorization status. Choose a valid authorization when creating a data source.",
     dataSourceFeishuAccountCreate: "New Feishu Account",
     dataSourceFeishuAccountSecurityHint:
       "Feishu App Secret is sensitive. Keep it safe and grant only required permissions.",
@@ -1326,19 +1342,19 @@ const enUS = {
     dataSourceFeishuAccountDeleteContent:
       "After deleting {{name}}, data sources using this authorization can no longer reuse this account configuration.",
     dataSourceCreateProviderIntro:
-      "Choose a knowledge source type. Feishu requires valid authorization first; if missing, the authorization setup opens directly.",
+      "Choose a data source type. Feishu requires valid authorization first; if missing, the authorization setup opens directly.",
     dataSourceCreateFeishuAuthRequiredHint:
       "No valid Feishu authorization is available. Click to enter App ID / App Secret and authorize.",
     dataSourceSelectFeishuAuthTitle: "Select Feishu Authorization",
     dataSourceSelectFeishuAuthIntro:
-      "Choose a valid authorization before configuring the Feishu knowledge source.",
+      "Choose a valid authorization before configuring the Feishu data source.",
     dataSourceAssetSearchPlaceholder: "Search data source, knowledge base",
     dataSourceAssetNoResultTitle: "No matching data assets",
     dataSourceAssetNoResultDesc: "Adjust the search term or health filter and try again.",
     dataSourceAccessAlertTitle: "Knowledge Source Access",
     dataSourceAccessAlertDesc:
       "Supports local paths and Feishu OAuth integration. Enter the knowledge base name and complete connection testing before saving.",
-    dataSourceTypeLocal: "Local Directory",
+    dataSourceTypeLocal: "Local Files / Directory",
     dataSourceTypeFeishu: "Feishu",
     dataSourceTypeLocalDesc: "Supports selecting multiple local paths and connection testing",
     dataSourceTypeFeishuDesc: "Set App ID / App Secret first, then connect via OAuth",
@@ -1346,7 +1362,7 @@ const enUS = {
     dataSourceTypeNotionDesc:
       "Connect Notion pages or databases, sync by authorization scope and serve chat.",
     dataSourceTypeStepIntro:
-      "Currently supports local directory and Feishu data source access. Select one to continue.",
+      "Currently supports local files / directories, Feishu, and Notion data source access. Select one to continue.",
     dataSourceAdminOnly: "Admin",
     dataSourceFeishuLockHint:
       "Set App ID / App Secret first before selecting Feishu as a data source",
@@ -1509,20 +1525,77 @@ const enUS = {
         enterCredentialsDesc:
           "Return to Data Source Management, open the Feishu App Credentials dialog, enter the App ID and App Secret, and save.",
         enterCredentialsAlt: "Feishu App ID and App Secret dialog in the system",
-        copyFolderTitle: "Copy Feishu folder ID",
-        copyFolderDesc:
-          "Open the target folder in Feishu Docs and copy the folder ID from the browser address bar. If using Wiki, copy the related Wiki space ID.",
-        copyFolderDetailTarget:
-          "Choose Drive Folder or Wiki based on your target access type.",
-        copyFolderDetailDrive:
-          "For Drive Folder access, copy the folder ID directly from the browser address bar.",
-        copyFolderAlt: "Folder ID in the Feishu Docs folder address bar",
-        finishTitle: "Enter folder ID and finish authorization",
+        finishTitle: "Select or enter a target path and finish authorization",
         finishDesc:
-          "Return to the data source creation dialog, choose the target type, enter the ID copied in the previous step, then click Connect Account to complete OAuth authorization and save the configuration.",
+          "Return to the data source creation dialog, choose the target type, complete Feishu account authorization, then select an accessible space or folder directly. You can also enter the target ID manually, then save the configuration.",
         finishDetail:
-          "Before authorization, create the folder in Feishu Drive and copy the folder directory URL into LazyMind.",
-        finishAlt: "Enter Feishu folder ID and start authorization in the system",
+          "For Drive Folder access, create the target folder in Feishu Drive first. For Wiki access, make sure the current Feishu account can access the space.",
+        finishManualDetail:
+          "For manual entry, paste the Wiki space ID or Drive folder ID into the target path selector, for example 7354xxxxxxxxxxxx or fldxxxxxxxxxxxx, then check Use current input.",
+        finishManualAlt: "Drive folder ID in the Feishu Docs address bar",
+        finishAlt: "Select or enter a Feishu target path and finish authorization in the system",
+      },
+    },
+    dataSourceNotionSetupGuide: {
+      backCreateSource: "Back to New Data Source",
+      backManagement: "Back to Data Source Management",
+      title: "Data Source Management - New Data Source - Notion",
+      subtitle:
+        "Create a Public Integration in Notion Developers, get OAuth credentials, configure the Redirect URI, then complete Notion data source authorization in LazyMind.",
+      summaryAria: "Notion setup process overview",
+      summaryTitle: "Setup Flow",
+      openDevelopers: "Open Notion Developers",
+      callbackUrl: "Callback URL: {{uri}}",
+      steps: {
+        openDevelopersTitle: "Open Notion Developers",
+        openDevelopersDesc:
+          "Open Notion Developers and sign in to your Notion account. This is where OAuth credentials for Notion public integrations are managed.",
+        createIntegrationTitle: "Create a Public Integration",
+        createIntegrationDesc:
+          "On My connections, click New integration to create a new integration app. Choose Public integration, not Internal integration, so OAuth authorization is supported.",
+        createIntegrationExisting:
+          "If you already have a suitable Public integration, you can reuse it.",
+        createIntegrationNaming:
+          "Include LazyMind or the data source purpose in the integration name so it is easy to identify later.",
+        basicInfoTitle: "Enter basic integration information",
+        basicInfoDesc:
+          "Enter the integration name and description, and optionally upload a logo. These details appear on the user authorization page, so use a clear name and description.",
+        credentialsTitle: "Get OAuth Client ID and Client Secret",
+        credentialsDesc:
+          "After creation, find the OAuth Client ID and Client Secret on the integration detail page under OAuth Domain and URIs or Secrets. Enter both credentials in LazyMind.",
+        credentialsClientId:
+          "Client ID: the public unique identifier for the integration.",
+        credentialsClientSecret:
+          "Client Secret: the integration secret. Keep it private; it can only be fully viewed when created.",
+        redirectTitle: "Configure Redirect URI",
+        redirectDesc:
+          "In the Redirect URIs section of integration settings, add LazyMind's OAuth callback URL. It must match the callback URL used by the system, otherwise authorization fails after redirect.",
+        redirectProductionHint:
+          "For production deployments, replace 127.0.0.1 with the actual domain or IP address.",
+        capabilitiesTitle: "Configure Integration Capabilities",
+        capabilitiesDesc:
+          "In integration settings, select the required capabilities such as Read content and Read comments. LazyMind needs at least Read content to read Notion content.",
+        capabilitiesRequired:
+          "Recommended minimum: select Read content and Read user information.",
+        capabilitiesWrite:
+          "If writing or updating Notion content is needed, also select Insert content and Update content.",
+        enterCredentialsTitle: "Enter Notion credentials in the system",
+        enterCredentialsDesc:
+          "Return to LazyMind Data Source Management, choose the Notion data source type, open the credentials dialog, enter the Client ID and Client Secret, then save.",
+        enterCredentialsClientId:
+          "Client ID maps to the App ID field in the system dialog.",
+        enterCredentialsClientSecret:
+          "Client Secret maps to the App Secret field in the system dialog.",
+        finishTitle: "Paste a Notion Page/Database link and finish authorization",
+        finishDesc:
+          "After credentials are saved, the system starts Notion OAuth authorization automatically. Once authorized, paste the Notion page or database link in the data source configuration, then save and sync.",
+        finishPageLink: "Notion page link format: https://www.notion.so/...",
+        finishDatabaseLink:
+          "Notion database link format: https://www.notion.so/...",
+        finishCopyLink:
+          "You can also right-click the page in Notion and choose Copy link.",
+        finishConnectionNote:
+          "Note: connect the page or database to this integration in Notion first (page menu ... -> Connections -> choose your integration).",
       },
     },
     dataSourceNotionSetupGuide: {
@@ -2063,7 +2136,7 @@ const enUS = {
     memoryManagementHelp: "Your wisdom and experience will accumulate here.",
     memoryManagementHelpAriaLabel: "View Wisdom Accumulation description",
     memoryManagementSubtitle:
-      "Manage glossary, system tools, skill assets, and experience memory in one operating console.",
+      "Manage glossary, skill assets, and experience memory in one operating console.",
     memoryDemoTitle: "Frontend Demo",
     memoryDemoDescription:
       "This page currently implements the management console interactions from the UI prototype, including browsing, search, filtering, preview, create, edit, and delete. Backend integration can be added next.",
@@ -2141,6 +2214,8 @@ const enUS = {
     memorySkillDraftDiscardSuccess: "Skill draft discarded",
     memorySkillDraftDiscardFailed: "Failed to discard skill draft",
     memorySkillDraftPreviewFailed: "Failed to load skill draft",
+    memorySkillDraftDefaultInstruction:
+      "Generate a skill draft from the accepted suggestions.",
     memoryPreferenceDraftEmpty: "There is no pending habit draft",
     memoryPreferenceDraftStatus: "Draft status: {{status}}",
     memoryPreferenceDraftVersion: "Draft version: {{version}}",
@@ -2349,6 +2424,8 @@ const enUS = {
       "{{accepted}} accepted, {{pending}} still pending",
     memoryDiffBackendSuggestionEmpty:
       "There are no pending suggestions here. You can preview the accepted draft or go back to the list.",
+    memoryBackendSuggestionDeleteBadge: "Delete Suggestion",
+    memoryBackendSuggestionEnd: "All suggestions are shown",
     memoryDiffDecisionStats:
       "Accepted {{accepted}}, rejected {{rejected}}, pending {{pending}}",
     memoryDiffKeepField: "Keep Original",
@@ -2371,6 +2448,9 @@ const enUS = {
       "Experience memory is best shared with specific collaborators to sync preferences, tone, and accumulated know-how.",
     memoryAutoEvo: "Auto Evolution",
     memoryAutoUpdate: "Auto Update",
+    memoryAutoEvoStatusRunning: "Auto evolution running",
+    memoryAutoEvoStatusFailed: "Auto evolution failed",
+    memoryAutoEvoStatusWaiting: "Waiting for evolution suggestions",
     memoryAutoEvoToggleFailed: "Auto evolution toggle failed",
     memorySkillPendingRemoveTag: "Delete Suggested",
     memorySkillAutoEvoDisabledByRemove:
@@ -2477,7 +2557,7 @@ const enUS = {
     memoryMcpToolsTitle: "{{name}} Tools",
     memoryMcpSelectAllTools: "Allow all tools",
     memoryMcpNoToolsTitle: "No discovered tools yet",
-    memoryMcpNoToolsDesc: "Click Discover Tools in the table, then choose which tools can be used here.",
+    memoryMcpNoToolsDesc: "Click Discover Tools on the service card, then choose which tools can be used here.",
     memoryMcpToolsSaveSuccess: "MCP tool settings saved",
     memoryMcpToolsSaveFailed: "Failed to save MCP tool settings",
     memoryMcpEmpty: "No MCP servers",
@@ -2560,6 +2640,46 @@ const enUS = {
     memoryGlossaryInboxActionMergeDesc: "Merge conflicts first",
     memoryGlossaryInboxActionCreateTitle: "New group",
     memoryGlossaryInboxActionCreateDesc: "Create and edit",
+    memoryGlossaryInboxActionLabelMerge:
+      "Merge several groups first, then add {{word}} as an alias",
+    memoryGlossaryInboxActionLabelCreate: "Create a new term",
+    memoryGlossaryInboxActionLabelSeparate:
+      "Select one or more groups and add {{word}} as an alias",
+    memoryGlossaryInboxColorRed: "Red",
+    memoryGlossaryInboxColorGreen: "Green",
+    memoryGlossaryInboxColorBlue: "Blue",
+    memoryGlossaryInboxColorYellow: "Yellow",
+    memoryGlossaryInboxConflictWith: "conflicts with",
+    memoryGlossaryInboxGroupSeparator: ", ",
+    memoryGlossaryInboxConflictHappened: "and has a",
+    memoryGlossaryInboxConflictKeyword: "conflict",
+    memoryGlossaryInboxConflictHandle: ". Please resolve it",
+    memoryGlossaryInboxPendingWriteMode: "Write mode pending confirmation",
+    memoryGlossaryInboxMergeStageConfirmTitle:
+      "Step 3: Choose one or more groups for {{word}}",
+    memoryGlossaryInboxMergeStageConfirmDesc:
+      "You can choose newly merged groups or keep writing to unmerged groups.",
+    memoryGlossaryInboxMergeStageEditTitle: "Step 2: Edit merge result",
+    memoryGlossaryInboxMergeStageEditDesc:
+      "Confirm the merged term, aliases, and description before choosing where to write.",
+    memoryGlossaryInboxMergeEditProgress: "Group {{current}} of {{total}}",
+    memoryGlossaryInboxNext: "Next",
+    memoryGlossaryInboxMergeStageSelectTitle: "Step 1: Merge groups",
+    memoryGlossaryInboxMergeStageSelectDesc:
+      "Assign colors to groups. Groups with the same color will be merged.",
+    memoryGlossaryInboxMergeSummaryPrefix: "Merging",
+    memoryGlossaryInboxMergeRequest: "Merge",
+    memoryGlossaryInboxCreateStageConfirmTitle:
+      "Step 2: Choose one or more groups for {{word}}",
+    memoryGlossaryInboxCreateStageConfirmDesc:
+      "You can choose the new group or continue writing to existing conflict groups.",
+    memoryGlossaryInboxCreateStageEditTitle: "Step 1: Create a term",
+    memoryGlossaryInboxCreateStageEditDesc:
+      "Fill in the new group's term, aliases, and description.",
+    memoryGlossaryInboxConfirmCreate: "Create",
+    memoryGlossaryGroupAliasDuplicate:
+      "The term group cannot be the same as one of its words",
+    memoryGlossaryContentSameAsTerm: "Content cannot be the same as the word",
     memoryGlossaryInboxNewGroupPlaceholder: "Enter a new group name",
     memoryGlossaryInboxNewGroupRequired: "Please enter a new group name",
     memoryGlossaryInboxSelectTargetFirst: "Please select at least one target group",

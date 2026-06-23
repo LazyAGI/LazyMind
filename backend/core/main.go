@@ -25,10 +25,9 @@ import (
 	"lazymind/core/modelprovider"
 	"lazymind/core/plugin"
 	"lazymind/core/resourceupdate"
+	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
-
-	"github.com/redis/go-redis/v9"
 )
 
 //go:embed docs.html
@@ -175,7 +174,7 @@ func main() {
 	log.Logger.Info().Str("driver", driver).Msg("ACL store initialized")
 
 	// text/PrompttextInitialize（DB + Redis）。DB text ACL text；Redis textConversationtext/text/text。
-	store.Init(db.DB, readonlyDB.DB, store.MustRedisFromEnv())
+	store.Init(db.DB, readonlyDB.DB, store.MustStateFromEnv())
 	evalset.RegisterAsyncJobs()
 	asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
 	asyncjob.Start(context.Background(), store.DB(), asyncjob.Options{
@@ -188,7 +187,7 @@ func main() {
 	resourceUpdateEnabled := resourceupdate.EnabledFromEnv()
 	resourceupdate.LogStartup(resourceUpdateEnabled)
 	if resourceUpdateEnabled {
-		resourceupdate.Start(context.Background(), store.DB(), store.Redis(), resourceupdate.DefaultConfig())
+		resourceupdate.Start(context.Background(), store.DB(), store.State(), resourceupdate.DefaultConfig())
 	}
 
 	// Mark stale running SubAgent tasks (no heartbeat for >5m) as interrupted on startup.
@@ -203,8 +202,8 @@ func main() {
 	// Wire the conversation SSE hook so plugin events reach the frontend via the
 	// conversation-level events channel (history-independent real-time push).
 	subagent.EventHooks.RegisterConversationEventHook(
-		func(ctx context.Context, rdb *redis.Client, convID, _ string, eventType string, payload map[string]any) {
-			_ = chat.AppendConvEvent(ctx, rdb, convID, &chat.ConvEvent{
+		func(ctx context.Context, stateStore state.Store, convID, _ string, eventType string, payload map[string]any) {
+			_ = chat.AppendConvEvent(ctx, stateStore, convID, &chat.ConvEvent{
 				Type: eventType,
 				Payload: map[string]any{
 					"event_type": eventType,

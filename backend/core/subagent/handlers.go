@@ -188,9 +188,9 @@ func InternalGetTaskEvents(w http.ResponseWriter, r *http.Request) {
 			from = n
 		}
 	}
-	rdb := store.Redis()
+	stateStore := store.State()
 	ctx := r.Context()
-	raws, err := StreamEventsFrom(ctx, rdb, taskID, from)
+	raws, err := StreamEventsFrom(ctx, stateStore, taskID, from)
 	if err != nil {
 		common.ReplyErr(w, "read events failed", http.StatusInternalServerError)
 		return
@@ -216,8 +216,8 @@ func InternalGetTaskStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	rdb := store.Redis()
-	if snap, err := ReadStatus(ctx, rdb, taskID); err == nil && len(snap) > 0 {
+	stateStore := store.State()
+	if snap, err := ReadStatus(ctx, stateStore, taskID); err == nil && len(snap) > 0 {
 		resp := map[string]any{
 			"task_id":       taskID,
 			"status":        snap["status"],

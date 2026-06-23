@@ -1,0 +1,57 @@
+services:
+  scan-control-plane:
+    environment:
+      LAZYMIND_REDIS_URL: ""
+      LAZYMIND_STATE_BACKEND: sqlite
+      LAZYMIND_STATE_SQLITE_PATH: /tmp/scan-control-plane/state/scan_state.db
+    depends_on:
+      redis:
+        condition: service_healthy
+        required: false
+
+  auth-service:
+    volumes:
+      - sqlite-data:/data/sqlite
+    environment:
+      LAZYMIND_REDIS_URL: ""
+      LAZYMIND_STATE_BACKEND: sqlite
+      LAZYMIND_STATE_SQLITE_DIR: /data/sqlite
+    depends_on:
+      redis:
+        condition: service_healthy
+        required: false
+
+  core:
+    volumes:
+      - sqlite-data:/data/sqlite
+    environment:
+      LAZYMIND_REDIS_URL: ""
+      LAZYMIND_STATE_BACKEND: sqlite
+      LAZYMIND_STATE_SQLITE_DIR: /data/sqlite
+    depends_on:
+      redis:
+        condition: service_healthy
+        required: false
+
+  core-dev:
+    volumes:
+      - sqlite-data:/data/sqlite
+    environment:
+      LAZYMIND_REDIS_URL: ""
+      LAZYMIND_STATE_BACKEND: sqlite
+      LAZYMIND_STATE_SQLITE_DIR: /data/sqlite
+
+  lazyllm-parse-server:
+    volumes:
+      - sqlite-data:/data/sqlite
+
+  lazyllm-parse-worker:
+    volumes:
+      - sqlite-data:/data/sqlite
+
+  lazyllm-algo:
+    volumes:
+      - sqlite-data:/data/sqlite
+
+volumes:
+  sqlite-data:

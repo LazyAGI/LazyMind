@@ -420,41 +420,49 @@ class KBToolGroup:
     def kb_keyword_search(
         self,
         keyword: str,
-        docid: str,
+        docid: str = '',
         group: str = 'block',
         phrase: bool = True,
         size: int = 10,
         sort_by: str = 'score',
+        file_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Search for exact keyword or phrase matches within a specific document.
 
+        Use when the user names a document file — pass it as ``file_name``.
         Performs full-text keyword matching inside one target document,
         useful for finding all occurrences of a term or checking whether a
         document mentions something specific.
 
+        You must provide at least one of ``docid`` or ``file_name`` to identify
+        the target document. When only ``file_name`` is given the search is
+        scoped to all segments belonging to that file.
+
         Args:
-            keyword: Keyword or phrase to search in content.
-            docid: Target document id.
-            group: Search granularity, either block or line.
-            phrase: Use match_phrase when true, otherwise match.
+            keyword: Keyword or phrase to search in ``content``.
+            docid: Target document id (optional if ``file_name`` is given).
+            group: Search granularity, either ``block`` or ``line``.
+            phrase: Use ``match_phrase`` when true, otherwise ``match``.
             size: Maximum number of hits.
             sort_by: score for relevance first, or number for document
                 order.
+            file_name: Target file name, e.g. ``report.pdf`` (optional if
+                ``docid`` is given).
 
         Returns:
             Matching nodes with content snippets.
         """
         if not keyword:
             raise ValueError('keyword is required')
-        if not docid:
-            raise ValueError('docid is required')
+        if not docid and not file_name:
+            raise ValueError('docid or file_name is required')
 
         config = lazyllm.globals['agentic_config']
         index_name = resolve_index(group)
         size = max(1, min(int(size), _MAX_RESULT_ITEMS))
         doc = DOCUMENT
         LOG.info(f'[kb_keyword_search] store={_cfg["segment_store_type"]!r} keyword={keyword!r} docid={docid!r} '
-                 f'group={group!r} phrase={phrase} sort_by={sort_by!r} size={size}')
+                 f'file_name={file_name!r} group={group!r} phrase={phrase} sort_by={sort_by!r} size={size}')
 
         for kb_id in iter_lookup_ids(
             (config.get('filters') or {}).get('kb_id'),
@@ -464,6 +472,7 @@ class KBToolGroup:
             nodes = doc.keyword_search(
                 group=group, keyword=keyword, doc_id=docid,
                 kb_id=kb_id, phrase=phrase, sort_by=sort_by, size=size,
+                file_name=file_name,
             )
             LOG.info(f'[kb_keyword_search] doc.keyword_search returned {len(nodes)} nodes')
             if not nodes:
@@ -472,6 +481,7 @@ class KBToolGroup:
                 'index': index_name,
                 'group': group,
                 'docid': docid,
+                'file_name': file_name,
                 'keyword': keyword,
                 'total': len(nodes),
                 'items': [_store_dict_to_result(n) for n in nodes],
@@ -481,7 +491,7 @@ class KBToolGroup:
 
         return tool_success('kb_keyword_search', {
             'index': index_name, 'group': group, 'docid': docid,
-            'keyword': keyword, 'total': 0, 'items': [],
+            'file_name': file_name, 'keyword': keyword, 'total': 0, 'items': [],
         })
 
 

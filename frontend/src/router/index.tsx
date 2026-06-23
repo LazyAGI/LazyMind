@@ -84,19 +84,21 @@ export default function AppRouter() {
           <Route path="data-sources/docs/notion-setup" element={<NotionSetupGuide />} />
           <Route path="data-sources/providers/feishu" element={<FeishuAccountPage />} />
           <Route path="data-sources/providers/notion" element={<DataSourceManagement />} />
-          <Route path="data-sources/providers/sciverse" element={<Navigate to="/data-sources?view=connectors&provider=sciverse" replace />} />
+          <Route path="data-sources/providers/sciverse" element={<Navigate to="/model-providers/tools" replace />} />
           <Route path="data-sources/:id" element={<DataSourceDetail />} />
           <Route path="dataset-management" element={<DatasetListPage />} />
           <Route path="dataset-management/:datasetId" element={<DatasetDetailPage />} />
           <Route path="model-providers" element={<ModelProviderPage />}>
-            <Route index element={<Navigate to="models" replace />} />
+            <Route index element={<Navigate to="default-services" replace />} />
             <Route path="models" element={<ModelProvidersPage />} />
-            <Route path="external-services" element={<ExternalServicesPage />} />
+            <Route path="document-parsing" element={<ExternalServicesPage section="parsing" />} />
+            <Route path="tools" element={<ExternalServicesPage section="tools" />} />
+            <Route path="external-services" element={<Navigate to="/model-providers/document-parsing" replace />} />
             <Route path="default-services" element={<DefaultServicesPage />} />
           </Route>
           <Route path="memory-management" element={<MemoryManagement />}>
             <Route index element={<MemoryManagementListPage />} />
-            <Route path="tools" element={<MemoryManagementListPage />} />
+            <Route path="tools" element={<Navigate to="/model-providers/tools" replace />} />
             <Route path="skills" element={<MemoryManagementListPage />} />
             <Route path="skills/:itemId" element={<MemorySkillDetailPage />} />
             <Route path="experience" element={<MemoryManagementListPage />} />

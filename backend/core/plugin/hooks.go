@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
+	"lazymind/core/state"
 	"lazymind/core/subagent"
 )
 
@@ -28,7 +28,7 @@ func onArtifact(ctx context.Context, db *gorm.DB, taskID, artifactKey string) {
 }
 
 // onTerminalStatus is called by the subagent runner when a task reaches terminal status.
-func onTerminalStatus(ctx context.Context, db *gorm.DB, rdb *redis.Client, taskID, status, message string) {
+func onTerminalStatus(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID, status, message string) {
 	if status == subagent.StatusRunning {
 		_ = UpdateStepStatus(ctx, db, taskID, status)
 		return
@@ -43,10 +43,10 @@ func onTerminalStatus(ctx context.Context, db *gorm.DB, rdb *redis.Client, taskI
 	// Build an onSSE that pushes events to the conversation-level events channel.
 	onSSE := func(eventType string, payload map[string]any) {
 		if subagent.EventHooks != nil {
-			subagent.EventHooks.CallConversationEvent(ctx, rdb, pctx.ConvID, "", eventType, payload)
+			subagent.EventHooks.CallConversationEvent(ctx, stateStore, pctx.ConvID, "", eventType, payload)
 		}
 	}
-	OnSubAgentDone(ctx, db, rdb, taskID, status, message, onSSE, pctx)
+	OnSubAgentDone(ctx, db, stateStore, taskID, status, message, onSSE, pctx)
 }
 
 // loadPluginChatContextFromDB loads the plugin context for a task from the database.

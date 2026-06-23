@@ -29,6 +29,10 @@ type GuideStep = {
   description: string;
   image: string;
   alt: string;
+  extraImages?: Array<{
+    image: string;
+    alt: string;
+  }>;
   details?: string[];
   linkLabel?: string;
   linkHref?: string;
@@ -98,23 +102,20 @@ function buildGuideSteps(t: TFunction, permissionSeparator: string): GuideStep[]
     alt: t(stepKey("enterCredentialsAlt")),
   },
   {
-    title: t(stepKey("copyFolderTitle")),
-    description: t(stepKey("copyFolderDesc")),
-    details: [
-      t(stepKey("copyFolderDetailTarget")),
-      t(stepKey("copyFolderDetailDrive")),
-    ],
-    image: "/docs/feishu-setup/step-02.png",
-    alt: t(stepKey("copyFolderAlt")),
-  },
-  {
     title: t(stepKey("finishTitle")),
     description: t(stepKey("finishDesc")),
     details: [
       t(stepKey("finishDetail")),
+      t(stepKey("finishManualDetail")),
     ],
-    image: "/docs/feishu-setup/step-01.png",
-    alt: t(stepKey("finishAlt")),
+    image: "/docs/feishu-setup/step-02.png",
+    alt: t(stepKey("finishManualAlt")),
+    extraImages: [
+      {
+        image: "/docs/feishu-setup/step-01.png",
+        alt: t(stepKey("finishAlt")),
+      },
+    ],
   },
   ];
 }
@@ -233,16 +234,21 @@ export default function FeishuSetupGuide() {
                 </div>
                 <CheckCircleOutlined className="feishu-setup-guide-step-icon" />
               </div>
-              <figure>
-                <Image
-                  src={step.image}
-                  alt={step.alt}
-                  loading="lazy"
-                  preview={{
-                    mask: t("admin.dataSourceFeishuSetupGuide.zoomMask"),
-                  }}
-                />
-              </figure>
+              {[
+                { image: step.image, alt: step.alt },
+                ...(step.extraImages || []),
+              ].map((stepImage) => (
+                <figure key={stepImage.image}>
+                  <Image
+                    src={stepImage.image}
+                    alt={stepImage.alt}
+                    loading="lazy"
+                    preview={{
+                      mask: t("admin.dataSourceFeishuSetupGuide.zoomMask"),
+                    }}
+                  />
+                </figure>
+              ))}
             </article>
           ))}
         </section>

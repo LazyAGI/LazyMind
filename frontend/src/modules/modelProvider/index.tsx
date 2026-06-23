@@ -1,25 +1,28 @@
-import { useEffect, useState } from "react";
-import { Input } from "antd";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { ApiOutlined, AppstoreOutlined, ControlOutlined, SearchOutlined } from "@ant-design/icons";
+import { ApiOutlined, ControlOutlined, FilePdfOutlined, ToolOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import "./index.scss";
 
 const modelProviderTabs = [
+  {
+    key: "/model-providers/default-services",
+    labelKey: "modelProvider.tabs.defaultServices",
+    icon: <ControlOutlined />,
+  },
   {
     key: "/model-providers/models",
     labelKey: "modelProvider.tabs.models",
     icon: <ApiOutlined />,
   },
   {
-    key: "/model-providers/external-services",
-    labelKey: "modelProvider.tabs.externalServices",
-    icon: <AppstoreOutlined />,
+    key: "/model-providers/document-parsing",
+    labelKey: "modelProvider.tabs.documentParsing",
+    icon: <FilePdfOutlined />,
   },
   {
-    key: "/model-providers/default-services",
-    labelKey: "modelProvider.tabs.defaultServices",
-    icon: <ControlOutlined />,
+    key: "/model-providers/tools",
+    labelKey: "modelProvider.tabs.tools",
+    icon: <ToolOutlined />,
   },
 ];
 
@@ -27,17 +30,6 @@ export default function ModelProviderLayout() {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
-  const [externalServiceSearchValue, setExternalServiceSearchValue] = useState("");
-  const [debouncedExternalServiceSearchValue, setDebouncedExternalServiceSearchValue] = useState("");
-  const isExternalServicesPage = location.pathname.startsWith("/model-providers/external-services");
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setDebouncedExternalServiceSearchValue(externalServiceSearchValue);
-    }, 300);
-
-    return () => window.clearTimeout(timer);
-  }, [externalServiceSearchValue]);
 
   return (
     <main className="model-provider-page">
@@ -57,18 +49,8 @@ export default function ModelProviderLayout() {
               </button>
             );
           })}
-          {isExternalServicesPage ? (
-            <Input
-              allowClear
-              className="model-provider-tabs-search"
-              prefix={<SearchOutlined />}
-              value={externalServiceSearchValue}
-              onChange={(event) => setExternalServiceSearchValue(event.target.value)}
-              placeholder={t("modelProvider.external.searchPlaceholder")}
-            />
-          ) : null}
         </nav>
-        <Outlet context={{ externalServiceSearchValue: debouncedExternalServiceSearchValue }} />
+        <Outlet />
       </div>
     </main>
   );

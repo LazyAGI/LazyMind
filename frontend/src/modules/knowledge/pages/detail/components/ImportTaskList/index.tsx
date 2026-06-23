@@ -209,12 +209,15 @@ const ImportTaskList = (props: IProps) => {
       width: 105,
       render: (time: string, record: any) => {
         const isRunning = tab === TaskTab.Running;
+        const startTime = isValidTaskTime(record.start_time)
+          ? record.start_time
+          : record.create_time || time;
         const endTime = isRunning
           ? undefined
           : record.finish_time || record.create_time || time;
         return (
           <ElapsedTime
-            startTime={record.start_time || time}
+            startTime={startTime}
             endTime={endTime}
           />
         );
@@ -315,5 +318,10 @@ const ImportTaskList = (props: IProps) => {
     </div>
   );
 };
+
+function isValidTaskTime(value?: number | string) {
+  return value !== undefined && value !== null && value !== "" &&
+    value !== 0 && value !== "0" && moment(value).isValid();
+}
 
 export default ImportTaskList;

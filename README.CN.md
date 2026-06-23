@@ -153,11 +153,14 @@ make test-hermetic
 | 场景 | 命令 |
 |------|------|
 | 标准启动 | `make up` |
+| 本地运行模式（SQLite 状态后端，无 Redis） | `make up-build LAZYMIND_RUNTIME_MODE=local` |
 | 构建镜像并启动 | `make up-build` |
 | 私有化部署 MinerU OCR | `make up LAZYMIND_DEPLOY_MINERU=1` |
 | 私有化部署 PaddleOCR  | `make up LAZYMIND_DEPLOY_PADDLEOCR=1` |
 | 外接 Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 | 开启存储 Dashboard | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
+
+`LAZYMIND_RUNTIME_MODE=local` 会应用本地 compose override，把 chat/auth/subagent 等短生命周期状态写入 SQLite，并把 Redis 服务缩放为 0。不设置该变量，或设置为 `LAZYMIND_RUNTIME_MODE=cloud`，则使用默认 Redis 状态后端。
 
 ---
 
