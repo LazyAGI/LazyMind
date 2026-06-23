@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/filefilter"
 	sourceengine "github.com/lazymind/scan_control_plane/internal/sourceengine/source"
 	statepkg "github.com/lazymind/scan_control_plane/internal/sourceengine/state"
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
@@ -371,6 +372,7 @@ func (p *DBTaskPlanner) generateTasks(ctx context.Context, req GenerateRequest, 
 		return GenerateResult{}, parseBatchLimitError(maxObjects, len(states), "resolved_object_ids")
 	}
 	result := GenerateResult{RequestedCount: len(states)}
+	policy := filefilter.FromSourceBinding(source, binding)
 	for _, docState := range states {
 		if requirePendingAction && docState.PendingAction == "" {
 			result.SkippedCount++
@@ -389,7 +391,7 @@ func (p *DBTaskPlanner) generateTasks(ctx context.Context, req GenerateRequest, 
 			result.SkippedCount++
 			continue
 		}
-		if !object.IsDocument || !docState.Selectable {
+		if !object.IsDocument || !docState.Selectable || !filefilter.AllowsSourceObject(policy, object) {
 			result.SkippedCount++
 			continue
 		}

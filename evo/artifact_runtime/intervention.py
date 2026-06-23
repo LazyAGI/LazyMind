@@ -265,12 +265,28 @@ class FlowInterventionCoordinator:
             return InterventionResult('failed', reason='expected_ref_required')
         if request.expected_ref.key != request.artifact:
             return InterventionResult('failed', reason='expected_ref_key_mismatch')
-        if request.artifact.partition:
-            declares = getattr(self.scheduler, 'declares_artifact_key', None)
-            if callable(declares) and not declares(request.artifact):
-                return InterventionResult('failed', reason='unknown_target')
+        declares = getattr(self.scheduler, 'declares_artifact_key', None)
+        if callable(declares) and not declares(request.artifact):
+            return InterventionResult('failed', reason='unknown_target')
         if not self._run_accepts_plan(request.run_id):
             return self._result('failed', request.run_id, reason='run_not_accepting_plan')
+        preflight = self.scheduler.reconcile(
+            ReconcileRequest(
+                request.run_id,
+                f'{request.command_id}:preflight_reconcile',
+                changed_artifacts=(request.artifact,),
+                reason=request.reason,
+                include_downstream=request.include_downstream,
+                dry_run=True,
+            )
+        )
+        if preflight.status == 'failed':
+            return self._result(
+                'failed',
+                request.run_id,
+                reconcile_result=preflight,
+                reason='reconcile_preflight_failed',
+            )
         return None
 
     def _preflight_materialize(self, request: MaterializeInterventionRequest) -> InterventionResult | None:

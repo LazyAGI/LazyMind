@@ -130,6 +130,30 @@ func TestInitialRootsReturnBindableLocalPathTargets(t *testing.T) {
 	}
 }
 
+func TestInitialRootsCanComeFromAgentMountedRoots(t *testing.T) {
+	t.Parallel()
+
+	agent := &rootListingAgentStub{
+		agentStub: newAgentStub(),
+		roots:     []PathInfo{{Path: "/workspace/docs", NormalizedPath: "/workspace/docs", DisplayName: "docs", Exists: true, Readable: true, IsDir: true, StableID: "root-docs"}},
+	}
+	conn := NewLocalFSConnector(agent)
+	page, err := conn.ListChildren(context.Background(), connector.ListChildrenRequest{
+		AgentID:  "agent-1",
+		PageSize: 10,
+	})
+	if err != nil {
+		t.Fatalf("list agent roots: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("expected one agent root, got %+v", page.Items)
+	}
+	root := page.Items[0]
+	if root.BindingTargetRef != "/workspace/docs" || root.ProviderMeta["agent_id"] != "agent-1" || agent.listRootsCalls != 1 {
+		t.Fatalf("initial roots should come from agent mounted roots, got root=%+v calls=%d", root, agent.listRootsCalls)
+	}
+}
+
 func TestBindingTargetBrowseAndValidateUseDefaultAgentID(t *testing.T) {
 	t.Parallel()
 
@@ -549,6 +573,17 @@ func (a *agentStub) ExportFile(_ context.Context, req ExportFileRequest) (Export
 		FileExtension: info.FileExtension,
 		CleanupToken:  "cleanup-" + info.StableID,
 	}, nil
+}
+
+type rootListingAgentStub struct {
+	*agentStub
+	roots          []PathInfo
+	listRootsCalls int
+}
+
+func (a *rootListingAgentStub) ListRoots(context.Context, ListRootsRequest) ([]PathInfo, error) {
+	a.listRootsCalls++
+	return a.roots, nil
 }
 
 type localTempStoreStub struct {

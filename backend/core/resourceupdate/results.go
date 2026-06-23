@@ -235,7 +235,7 @@ func clearLegacyDraftSuggestionRefs(ext json.RawMessage) json.RawMessage {
 
 func skillResultSelect(db *gorm.DB) *gorm.DB {
 	return db.Table("skill_review_results").
-		Select("id, skill_name, type, review_status, userid, requestid, skill_content, summary, time")
+		Select("id, skill_name, type, review_status, userid, requestid, skill_content, COALESCE(summary, '') AS summary, time")
 }
 
 func memoryResultSelect(db *gorm.DB) *gorm.DB {

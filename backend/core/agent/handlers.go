@@ -655,15 +655,9 @@ func getThreadResults(w http.ResponseWriter, r *http.Request, resultKind string)
 				}
 			}
 		case "analysis-reports":
-			body, found, resultErr := buildAnalysisMarkdownResult(proxy.Body)
-			if resultErr != nil {
-				common.ReplyErrWithData(w, "read analysis report content failed", map[string]any{"detail": resultErr.Error()}, http.StatusInternalServerError)
-				return
-			}
-			if found {
-				proxy.Body = body
-				proxy.ContentType = "application/json"
-			}
+			body, _ := findClassificationReportResult(proxy.Body)
+			common.ReplyOK(w, body)
+			return
 		case "diffs":
 			body, found, resultErr := buildDiffJSONResult(proxy.Body)
 			if resultErr != nil {

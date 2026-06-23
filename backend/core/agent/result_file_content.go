@@ -118,6 +118,34 @@ func buildDiffJSONResult(payload any) (any, bool, error) {
 	}, true, nil
 }
 
+func findClassificationReportResult(payload any) (any, bool) {
+	switch value := payload.(type) {
+	case []any:
+		for _, item := range value {
+			if report, ok := classificationReportFromValue(item); ok {
+				return report, true
+			}
+		}
+	case map[string]any:
+		if report, ok := classificationReportFromValue(value); ok {
+			return report, true
+		}
+	}
+	return nil, false
+}
+
+func classificationReportFromValue(value any) (map[string]any, bool) {
+	report, ok := value.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	artifactID, ok := report["artifact_id"].(string)
+	if !ok || strings.TrimSpace(artifactID) != "classification_report" {
+		return nil, false
+	}
+	return report, true
+}
+
 func buildAgentFileContentResult(path string) (*agentFileContentResponse, error) {
 	content, stat, err := readAgentResultTextFile(path)
 	if err != nil {

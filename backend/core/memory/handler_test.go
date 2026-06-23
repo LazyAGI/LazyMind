@@ -27,7 +27,7 @@ type upsertMemoryAPITestResponse struct {
 		Title          string  `json:"title"`
 		Content        string  `json:"content"`
 		AgentPersona   *string `json:"agent_persona"`
-		UserAddress    *string `json:"user_address"`
+		PreferredName  *string `json:"preferred_name"`
 		ResponseStyle  *string `json:"response_style"`
 		ContentSummary string  `json:"content_summary"`
 	} `json:"data"`
@@ -273,7 +273,7 @@ func TestUpsertIgnoresMemoryMetadataFields(t *testing.T) {
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
-	createReq := httptest.NewRequest(http.MethodPut, "/api/core/memory", strings.NewReader(`{"content":"长期记忆","agent_persona":"严谨助手","user_address":"老师","response_style":"先结论后解释"}`))
+	createReq := httptest.NewRequest(http.MethodPut, "/api/core/memory", strings.NewReader(`{"content":"长期记忆","agent_persona":"严谨助手","preferred_name":"老师","response_style":"先结论后解释"}`))
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("X-User-Id", "u1")
 	createReq.Header.Set("X-User-Name", "User 1")
@@ -291,7 +291,7 @@ func TestUpsertIgnoresMemoryMetadataFields(t *testing.T) {
 	if createResp.Data.Content != "长期记忆" {
 		t.Fatalf("unexpected content in create response: %#v", createResp.Data)
 	}
-	if createResp.Data.AgentPersona != nil || createResp.Data.UserAddress != nil || createResp.Data.ResponseStyle != nil {
+	if createResp.Data.AgentPersona != nil || createResp.Data.PreferredName != nil || createResp.Data.ResponseStyle != nil {
 		t.Fatalf("expected memory metadata fields to be omitted, got %#v", createResp.Data)
 	}
 

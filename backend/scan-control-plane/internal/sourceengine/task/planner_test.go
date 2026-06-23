@@ -53,6 +53,63 @@ func TestGenerateTasksSkipsContainersAndUnselectableStates(t *testing.T) {
 	}
 }
 
+func TestGenerateTasksSkipsUnsupportedDocumentTypes(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	repo := newPlannerStore(now)
+	repo.binding.IncludeExtensions = store.JSON{"items": []any{"pdf"}}
+	script := sourceObject("script.py", true)
+	script.ObjectKey = "script"
+	script.FileExtension = ".py"
+	repo.objects["script"] = script
+	repo.states["script"] = documentState("script", statepkg.SourceStateNew, true, now)
+	planner := NewDBTaskPlanner(repo, WithClock(func() time.Time { return now }), WithIDGenerator(repo.nextID))
+
+	result, err := planner.GenerateTasks(ctx, GenerateRequest{
+		SourceID:   "source-1",
+		BindingID:  "binding-1",
+		ObjectKeys: []string{"script"},
+	})
+	if err != nil {
+		t.Fatalf("generate tasks: %v", err)
+	}
+	if result.RequestedCount != 1 || result.AcceptedCount != 0 || result.SkippedCount != 1 {
+		t.Fatalf("unsupported document should be skipped, got %+v", result)
+	}
+	if len(repo.tasks) != 0 || len(repo.docs) != 0 {
+		t.Fatalf("unsupported document should not create document/task: docs=%d tasks=%d", len(repo.docs), len(repo.tasks))
+	}
+}
+
+func TestGenerateTasksUsesSourceIncludeExtensionsWhenBindingIncludeIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 8, 0, 0, 0, time.UTC)
+	repo := newPlannerStore(now)
+	repo.source.IncludeExtensions = store.JSON{"items": []any{"pdf"}}
+	script := sourceObject("script.py", true)
+	script.ObjectKey = "script"
+	script.FileExtension = ".py"
+	repo.objects["script"] = script
+	repo.states["script"] = documentState("script", statepkg.SourceStateNew, true, now)
+	planner := NewDBTaskPlanner(repo, WithClock(func() time.Time { return now }), WithIDGenerator(repo.nextID))
+
+	result, err := planner.GenerateTasks(ctx, GenerateRequest{
+		SourceID:   "source-1",
+		BindingID:  "binding-1",
+		ObjectKeys: []string{"script"},
+	})
+	if err != nil {
+		t.Fatalf("generate tasks: %v", err)
+	}
+	if result.AcceptedCount != 0 || result.SkippedCount != 1 {
+		t.Fatalf("source include extensions should skip unsupported documents, got %+v", result)
+	}
+}
+
 func TestGenerateTasksReusesActiveTask(t *testing.T) {
 	t.Parallel()
 

@@ -5,11 +5,13 @@ import (
 	"strings"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/filefilter"
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
 )
 
 func (e *DBSourceTreeQueryEngine) ListChildren(ctx context.Context, req SourceTreeChildrenRequest) (TreeNodePage, error) {
-	if _, err := e.repo.GetSource(ctx, req.SourceID); err != nil {
+	source, err := e.repo.GetSource(ctx, req.SourceID)
+	if err != nil {
 		return TreeNodePage{}, mapStoreError(err)
 	}
 	req = defaultSourceTreeIncludes(req)
@@ -41,7 +43,7 @@ func (e *DBSourceTreeQueryEngine) ListChildren(ctx context.Context, req SourceTr
 		req.BindingID = binding.BindingID
 	}
 	if !sourceTreeUseCache(req) {
-		return e.listLiveChildren(ctx, req, binding, listMode)
+		return e.listLiveChildren(ctx, req, source, binding, listMode)
 	}
 	treeKey := req.TreeKey
 	if treeKey == "" || switchedBinding {
@@ -58,7 +60,8 @@ func (e *DBSourceTreeQueryEngine) ListChildren(ctx context.Context, req SourceTr
 			return TreeNodePage{}, err
 		}
 		if ok {
-			return objectPage([]ObjectWithState{root}, "", false, true), nil
+			items := filterObjectItems(filefilter.FromSourceBinding(source, binding), []ObjectWithState{root})
+			return objectPage(items, "", false, true), nil
 		}
 	}
 	items, nextCursor, hasMore, err := e.listObjects(ctx, req, treeKey, parentKey, pageSize)
@@ -74,10 +77,11 @@ func (e *DBSourceTreeQueryEngine) ListChildren(ctx context.Context, req SourceTr
 	if listMode == ListModeAllCurrentLevel && len(items) > req.MaxItems {
 		return TreeNodePage{}, NewError(ErrCodeResultTooLarge, "current level has more items than max_items")
 	}
+	items = filterObjectItems(filefilter.FromSourceBinding(source, binding), items)
 	return objectPage(items, nextCursor, hasMore, listMode == ListModeAllCurrentLevel), nil
 }
 
-func (e *DBSourceTreeQueryEngine) listLiveChildren(ctx context.Context, req SourceTreeChildrenRequest, binding store.Binding, listMode string) (TreeNodePage, error) {
+func (e *DBSourceTreeQueryEngine) listLiveChildren(ctx context.Context, req SourceTreeChildrenRequest, source store.Source, binding store.Binding, listMode string) (TreeNodePage, error) {
 	if e.registry == nil {
 		return TreeNodePage{}, NewError(ErrCodeInternal, "source tree connector registry is not configured")
 	}
@@ -104,7 +108,7 @@ func (e *DBSourceTreeQueryEngine) listLiveChildren(ctx context.Context, req Sour
 			return TreeNodePage{}, mapConnectorError(err)
 		}
 		if len(rootPage.Items) > 0 {
-			return e.mapLiveSourcePage(ctx, conn, req, binding, connector.RawObjectPage{
+			return e.mapLiveSourcePage(ctx, conn, req, source, binding, connector.RawObjectPage{
 				Items:        rootPage.Items[:1],
 				ListComplete: true,
 			})
@@ -125,15 +129,19 @@ func (e *DBSourceTreeQueryEngine) listLiveChildren(ctx context.Context, req Sour
 	if err != nil {
 		return TreeNodePage{}, mapConnectorError(err)
 	}
-	return e.mapLiveSourcePage(ctx, conn, req, binding, rawPage)
+	return e.mapLiveSourcePage(ctx, conn, req, source, binding, rawPage)
 }
 
-func (e *DBSourceTreeQueryEngine) mapLiveSourcePage(ctx context.Context, conn connector.SourceConnector, req SourceTreeChildrenRequest, binding store.Binding, rawPage connector.RawObjectPage) (TreeNodePage, error) {
+func (e *DBSourceTreeQueryEngine) mapLiveSourcePage(ctx context.Context, conn connector.SourceConnector, req SourceTreeChildrenRequest, source store.Source, binding store.Binding, rawPage connector.RawObjectPage) (TreeNodePage, error) {
 	nodes := make([]TreeNode, 0, len(rawPage.Items))
+	policy := filefilter.FromSourceBinding(source, binding)
 	for _, raw := range rawPage.Items {
 		normalized, err := conn.MapObject(ctx, raw)
 		if err != nil {
 			return TreeNodePage{}, mapConnectorError(err)
+		}
+		if !treeAllowsNormalized(policy, normalized) {
+			continue
 		}
 		if normalized.IsDocument && !req.IncludeDocuments {
 			continue
@@ -315,6 +323,24 @@ func objectPage(items []ObjectWithState, nextCursor string, hasMore bool, listCo
 		nodes = append(nodes, sourceObjectNode(item))
 	}
 	return TreeNodePage{Items: nodes, NextCursor: nextCursor, HasMore: hasMore, ListComplete: listComplete}
+}
+
+func filterObjectItems(policy filefilter.Policy, items []ObjectWithState) []ObjectWithState {
+	out := items[:0]
+	for _, item := range items {
+		if treeAllowsSourceObject(policy, item.Object) {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func treeAllowsSourceObject(policy filefilter.Policy, object store.SourceObject) bool {
+	return object.IsContainer || object.HasChildren || filefilter.AllowsSourceObject(policy, object)
+}
+
+func treeAllowsNormalized(policy filefilter.Policy, object connector.NormalizedSourceObject) bool {
+	return object.IsContainer || object.HasChildren || filefilter.AllowsNormalized(policy, object)
 }
 
 func effectiveSourceParentKey(req SourceTreeChildrenRequest, binding store.Binding) string {

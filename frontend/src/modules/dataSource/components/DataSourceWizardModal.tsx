@@ -6,6 +6,7 @@ import {
   Input,
   Modal,
   Radio,
+  Select,
   Space,
   Spin,
   Steps,
@@ -28,7 +29,6 @@ import {
   DatabaseOutlined,
   DisconnectOutlined,
   FolderOpenOutlined,
-  LinkOutlined,
   LockOutlined,
 } from "@ant-design/icons";
 import type {
@@ -37,9 +37,14 @@ import type {
   SyncMode,
 } from "../shared";
 import {
+  DATA_SOURCE_FILE_TYPE_OPTIONS,
   getSourceTypeDescription,
   getSourceTypeTitle,
 } from "../shared";
+import {
+  KNOWLEDGE_BASE_NAME_MAX_LENGTH,
+  KNOWLEDGE_BASE_NAME_PATTERN,
+} from "@/modules/knowledge/constants/validation";
 
 const { Paragraph, Text } = Typography;
 
@@ -198,7 +203,6 @@ interface DataSourceWizardModalProps {
   selectedType: SourceType | null;
   isFeishuSetupReady: boolean;
   isNotionSetupReady?: boolean;
-  connectionVerified: boolean;
   syncMode: SyncMode;
   saving: boolean;
   savingMode?: "create" | "createAndSync";
@@ -214,8 +218,6 @@ interface DataSourceWizardModalProps {
   onSelectType: (type: SourceType) => void;
   onResetFeishuSetup: () => void;
   onResetNotionSetup?: () => void;
-  onTestConnection: () => void;
-  onInvalidateConnection: () => void;
   onLoadLocalPathOptions?: (path?: string) => void;
   onSearchLocalPathOptions?: (keyword: string) => void;
   onLoadLocalPathChildren?: TreeSelectProps["loadData"];
@@ -233,7 +235,6 @@ export default function DataSourceWizardModal({
   selectedType,
   isFeishuSetupReady,
   isNotionSetupReady = false,
-  connectionVerified,
   syncMode,
   saving,
   savingMode,
@@ -249,8 +250,6 @@ export default function DataSourceWizardModal({
   onSelectType,
   onResetFeishuSetup,
   onResetNotionSetup,
-  onTestConnection,
-  onInvalidateConnection,
   onLoadLocalPathOptions,
   onSearchLocalPathOptions,
   onLoadLocalPathChildren,
@@ -261,6 +260,8 @@ export default function DataSourceWizardModal({
   const isEditMode = wizardMode === "edit";
   const [localPathSearchValue, setLocalPathSearchValue] = useState("");
   const [feishuTargetSearchValue, setFeishuTargetSearchValue] = useState("");
+  const localPathValue = Form.useWatch("path", form);
+  const selectedLocalPathValues = normalizeTreeSelectValues(localPathValue);
   const feishuTargetPathMap = useMemo(
     () => buildTreeValuePathMap(feishuTargetTreeData as CollapsibleTreeNode[]),
     [feishuTargetTreeData],
@@ -287,39 +288,42 @@ export default function DataSourceWizardModal({
     selectedScheduleWeekdays,
     SCHEDULE_WEEKDAYS,
   );
-
-  const renderConnectionSection = () => {
-    if (!selectedType) {
+  const fileTypeLabelMap = useMemo(
+    () =>
+      new Map(
+        DATA_SOURCE_FILE_TYPE_OPTIONS.map((item) => [
+          item.value,
+          t(item.i18nKey),
+        ]),
+      ),
+    [t],
+  );
+  const renderFileTypeMaxTagPlaceholder = (
+    omittedValues: Array<{ value?: unknown; label?: ReactNode }>,
+  ) => {
+    if (omittedValues.length === 0) {
       return null;
     }
 
-    if (selectedType !== "local") {
-      return null;
-    }
+    const labels = omittedValues
+      .map((item) => fileTypeLabelMap.get(`${item.value || ""}` as any) || item.label)
+      .filter(Boolean);
 
     return (
-      <div className="data-source-connect-card">
-        <div className="data-source-connect-header">
-          <div>
-            <Text strong>{t("admin.dataSourceConnectionTest")}</Text>
+      <Tooltip
+        title={
+          <div className="data-source-tree-select-tooltip-list">
+            {labels.map((label, index) => (
+              <div key={`${getTreeSelectLabelText(label)}-${index}`}>{label}</div>
+            ))}
           </div>
-          <Tag color={connectionVerified ? "success" : "default"}>
-            {connectionVerified
-              ? t("admin.dataSourceConnectionVerified")
-              : t("admin.dataSourceConnectionPending")}
-          </Tag>
-        </div>
-        <Button
-          type="primary"
-          icon={<LinkOutlined />}
-          disabled={isEditMode}
-          onClick={onTestConnection}
-        >
-          {t("admin.dataSourceConnectionTestAction")}
-        </Button>
-      </div>
+        }
+      >
+        <span>{`+ ${omittedValues.length} ...`}</span>
+      </Tooltip>
     );
   };
+
   const renderFeishuTargetTag: TreeSelectProps["tagRender"] = ({
     label,
     value,
@@ -506,16 +510,22 @@ export default function DataSourceWizardModal({
                 <Form.Item
                   label={t("admin.dataSourceKnowledgeBaseName")}
                   name="knowledgeBase"
+                  extra={t("knowledge.knowledgeNameRule")}
                   rules={[
                     {
                       required: true,
                       whitespace: true,
                       message: t("admin.dataSourceKnowledgeBaseNameRequired"),
                     },
+                    {
+                      pattern: KNOWLEDGE_BASE_NAME_PATTERN,
+                      message: t("knowledge.knowledgeNameRule"),
+                    },
                   ]}
                 >
                   <Input
                     disabled={isEditMode}
+                    maxLength={KNOWLEDGE_BASE_NAME_MAX_LENGTH}
                     placeholder={t("admin.dataSourceKnowledgeBaseNamePlaceholder")}
                   />
                 </Form.Item>
@@ -566,17 +576,16 @@ export default function DataSourceWizardModal({
                       styles={{
                         popup: { root: { maxHeight: 360, overflow: "auto" } },
                       }}
-                      onChange={() => {
-                        if (!isEditMode) {
-                          onInvalidateConnection();
-                        }
-                      }}
                       onOpenChange={(open) => {
                         if (!open) {
                           setLocalPathSearchValue("");
                         }
                         if (open && !isEditMode) {
-                          onLoadLocalPathOptions?.("");
+                          onLoadLocalPathOptions?.(
+                            selectedLocalPathValues.length === 1
+                              ? selectedLocalPathValues[0]
+                              : "",
+                          );
                         }
                       }}
                       onSearch={(value) => {
@@ -654,8 +663,12 @@ export default function DataSourceWizardModal({
                       rules={[{ required: true, message: t("admin.dataSourceNotionTargetTypeRequired") }]}
                     >
                       <Radio.Group disabled={isEditMode}>
-                        <Radio.Button value="page">Page</Radio.Button>
-                        <Radio.Button value="database">Database</Radio.Button>
+                        <Radio.Button value="page">
+                          {t("admin.dataSourceNotionTargetTypePage")}
+                        </Radio.Button>
+                        <Radio.Button value="database">
+                          {t("admin.dataSourceNotionTargetTypeDatabase")}
+                        </Radio.Button>
                       </Radio.Group>
                     </Form.Item>
                     <Form.Item
@@ -676,14 +689,42 @@ export default function DataSourceWizardModal({
                     >
                       <Input.TextArea
                         disabled={isEditMode}
-                        placeholder="https://www.notion.so/... 或 Notion page/database id"
+                        placeholder={t("admin.dataSourceNotionTargetPlaceholder")}
                         autoSize={{ minRows: 3, maxRows: 6 }}
                       />
                     </Form.Item>
                   </>
                 )}
 
-                {selectedType === "local" ? renderConnectionSection() : null}
+                <Form.Item
+                  label={t("admin.dataSourceFileTypes")}
+                  name="fileTypes"
+                  rules={[
+                    {
+                      validator: (_rule, value) =>
+                        Array.isArray(value) && value.length > 0
+                          ? Promise.resolve()
+                          : Promise.reject(
+                              new Error(t("admin.dataSourceFileTypesRequired")),
+                            ),
+                    },
+                  ]}
+                  extra={t("admin.dataSourceFileTypesHint")}
+                >
+                  <Select
+                    allowClear
+                    mode="multiple"
+                    maxTagCount={6}
+                    maxTagPlaceholder={renderFileTypeMaxTagPlaceholder}
+                    optionFilterProp="label"
+                    placeholder={t("admin.dataSourceFileTypesPlaceholder")}
+                    options={DATA_SOURCE_FILE_TYPE_OPTIONS.map((item) => ({
+                      label: t(item.i18nKey),
+                      value: item.value,
+                    }))}
+                  />
+                </Form.Item>
+
               </section>
 
               <section className="data-source-form-section">

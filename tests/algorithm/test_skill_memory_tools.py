@@ -52,7 +52,7 @@ def test_memory_editor_operations_write_memory_review(monkeypatch):
     monkeypatch.setattr(
         memory_mod.lazyllm,
         'globals',
-        {'agentic_config': {'user_id': 'user-1', 'memory': 'old', 'user': 'old'}},
+        {'agentic_config': {'user_id': 'user-1', 'memory': 'old', 'user_preference': 'old'}},
     )
 
     memory_result = memory_mod.memory_editor(
@@ -60,18 +60,16 @@ def test_memory_editor_operations_write_memory_review(monkeypatch):
         [{'op': 'replace_text', 'old': 'old', 'new': 'new'}],
     )
     user_result = memory_mod.memory_editor(
-        'user',
+        'user_preference',
         [{'op': 'replace_text', 'old': 'old', 'new': 'new'}],
     )
 
     assert memory_result['success'] is True
     assert memory_result['tool'] == 'memory_editor'
     assert memory_result['result']['target'] == 'memory'
-    assert memory_result['result']['persisted'] == 'memory_review'
     assert user_result['success'] is True
     assert user_result['tool'] == 'memory_editor'
-    assert user_result['result']['target'] == 'user'
-    assert user_result['result']['storage_target'] == 'user_preference'
+    assert user_result['result']['target'] == 'user_preference'
     assert records == [
         {
             'target': 'memory',

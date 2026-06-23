@@ -184,6 +184,8 @@ export default function MainLayout() {
     pathname.startsWith("/lib/knowledge/detail") ||
     pathname.startsWith("/memory-management") ||
     pathname.startsWith("/self-evolution");
+  const isSelfEvolutionObservationPage =
+    pathname.startsWith("/self-evolution/detail/") && pathname.includes("/observation/");
   const contentClassName = [
     "main-layout-content",
     isMenuCollapsed ? "is-sidebar-collapsed" : "",
@@ -630,8 +632,8 @@ export default function MainLayout() {
               type="button"
               className="sider-inline-toggle"
               onClick={toggleMenu}
-              aria-label={isMenuCollapsed ? "展开菜单" : "收起菜单"}
-              title={isMenuCollapsed ? "展开菜单" : "收起菜单"}
+              aria-label={isMenuCollapsed ? t("layout.expandMenu") : t("layout.collapseMenu")}
+              title={isMenuCollapsed ? t("layout.expandMenu") : t("layout.collapseMenu")}
             >
               {isMenuCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
             </button>
@@ -798,13 +800,13 @@ export default function MainLayout() {
       </Sider>
       <Layout className={contentClassName}>
         <Content className="main-layout-body">
-          {isMenuCollapsed ? (
+          {isMenuCollapsed && !isSelfEvolutionObservationPage ? (
             <button
               type="button"
               className="main-menu-restore-button"
               onClick={toggleMenu}
-              aria-label="展开菜单"
-              title="展开菜单"
+              aria-label={t("layout.expandMenu")}
+              title={t("layout.expandMenu")}
             >
               <MenuUnfoldOutlined />
             </button>

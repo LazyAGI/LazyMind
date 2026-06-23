@@ -409,10 +409,10 @@ export default function ExternalServiceConfigModal({
                     {visibleKeys.has(idx) ? key : maskAPIKey(key)}
                   </span>
                   <div className="model-provider-key-actions">
-                    <Tooltip title="复制">
+                    <Tooltip title={t("common.copy")}>
                       <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => copyKeyToClipboard(key)} />
                     </Tooltip>
-                    <Tooltip title={visibleKeys.has(idx) ? "隐藏" : "显示"}>
+                    <Tooltip title={visibleKeys.has(idx) ? t("common.hide") : t("common.show")}>
                       <Button
                         size="small"
                         type="text"

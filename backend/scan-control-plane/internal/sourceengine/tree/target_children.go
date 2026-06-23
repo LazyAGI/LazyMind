@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/filefilter"
 )
 
 func (e *DefaultTargetTreeEngine) ListChildren(ctx context.Context, req TargetTreeChildrenRequest) (TreeNodePage, error) {
@@ -69,12 +70,16 @@ func (e *DefaultTargetTreeEngine) listAllCurrentLevel(ctx context.Context, conn 
 
 func (e *DefaultTargetTreeEngine) mapTargetPage(ctx context.Context, conn connector.SourceConnector, req TargetTreeChildrenRequest, rawPage connector.RawObjectPage, searchMode string) (TreeNodePage, error) {
 	nodes := make([]TreeNode, 0, len(rawPage.Items))
+	policy := filefilter.FromProviderOptions(req.ProviderOptions)
 	for _, raw := range rawPage.Items {
 		normalized, err := conn.MapObject(ctx, raw)
 		if err != nil {
 			return TreeNodePage{}, mapConnectorError(err)
 		}
 		if !isTargetDirectoryNode(raw, normalized) {
+			continue
+		}
+		if !targetAllowsNormalized(policy, normalized) {
 			continue
 		}
 		nodes = append(nodes, targetNode(req.ConnectorType, raw, normalized))
@@ -101,4 +106,18 @@ func (e *DefaultTargetTreeEngine) limitForConnector(spec connector.ConnectorSpec
 
 func isTargetDirectoryNode(raw connector.RawObject, normalized connector.NormalizedSourceObject) bool {
 	return normalized.IsContainer || raw.Bindable
+}
+
+func targetAllowsNormalized(policy filefilter.Policy, normalized connector.NormalizedSourceObject) bool {
+	return normalized.IsContainer || normalized.HasChildren || filefilter.AllowsNormalized(policy, normalized)
+}
+
+func targetAllowsTreeNode(policy filefilter.Policy, node TreeNode) bool {
+	return node.IsContainer || node.HasChildren || policy.Allows(filefilter.ObjectInfo{
+		DisplayName:  node.DisplayName,
+		ObjectKey:    node.ObjectKey,
+		IsDocument:   node.IsDocument,
+		IsContainer:  node.IsContainer,
+		ProviderMeta: node.ProviderMeta,
+	})
 }

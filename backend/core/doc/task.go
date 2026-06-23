@@ -1140,6 +1140,10 @@ func completeUploadInternal(ctx context.Context, session orm.UploadSession, args
 			return CompleteUploadResponse{}, http.StatusInternalServerError, fmt.Errorf("create final dir failed")
 		}
 		finalPath := filepath.Join(finalDir, meta.StoredName)
+		totalSize, err = normalizeUploadedTextFileInPlace(mergedPath, meta.OriginalFilename, totalSize)
+		if err != nil {
+			return CompleteUploadResponse{}, http.StatusBadRequest, fmt.Errorf("normalize upload text encoding failed: %w", err)
+		}
 		if err := os.Rename(mergedPath, finalPath); err != nil {
 			return CompleteUploadResponse{}, http.StatusInternalServerError, fmt.Errorf("move file failed")
 		}
@@ -1198,6 +1202,10 @@ func completeUploadInternal(ctx context.Context, session orm.UploadSession, args
 			return CompleteUploadResponse{}, http.StatusInternalServerError, fmt.Errorf("create final dir failed")
 		}
 		finalPath := filepath.Join(finalDir, meta.StoredName)
+		totalSize, err = normalizeUploadedTextFileInPlace(mergedPath, meta.OriginalFilename, totalSize)
+		if err != nil {
+			return CompleteUploadResponse{}, http.StatusBadRequest, fmt.Errorf("normalize upload text encoding failed: %w", err)
+		}
 		if err := os.Rename(mergedPath, finalPath); err != nil {
 			return CompleteUploadResponse{}, http.StatusInternalServerError, fmt.Errorf("move file failed")
 		}
@@ -2094,6 +2102,10 @@ func createUploadedTaskAndDocument(r *http.Request, ds *orm.Dataset, datasetID, 
 	if err != nil {
 		return orm.Task{}, orm.Document{}, documentExt{}, fmt.Errorf("save upload file failed")
 	}
+	size, err = normalizeUploadedTextFileInPlace(finalPath, fh.Filename, size)
+	if err != nil {
+		return orm.Task{}, orm.Document{}, documentExt{}, fmt.Errorf("normalize upload text encoding failed: %w", err)
+	}
 	docExt := newDocumentExt(finalPath, storedName, fh.Filename, size, fh.Header.Get("Content-Type"), relativePath, tags)
 	docRow := orm.Document{ID: documentID, LazyllmDocID: "", DatasetID: datasetID, DisplayName: fh.Filename, PID: documentPID, Tags: mustJSON(tags), FileID: documentID, PDFConvertResult: docExt.ConvertStatus, Ext: mustJSON(docExt), BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now}}
 	tExt := taskExt{TaskType: string(TaskTypeParseUploaded), DocumentPID: documentPID, DisplayName: fh.Filename, DataSourceType: "LOCAL_FILE", Files: []TaskFile{{DisplayName: fh.Filename, StoredName: storedName, StoredPath: finalPath, FileSize: size, RelativePath: relativePath, ContentType: fh.Header.Get("Content-Type")}}, DocumentTags: tags}
@@ -2134,6 +2146,10 @@ func createUploadedFileRecord(r *http.Request, ds *orm.Dataset, datasetID, userI
 	_ = out.Close()
 	if err != nil {
 		return orm.UploadedFile{}, uploadedFileExt{}, fmt.Errorf("save upload file failed")
+	}
+	size, err = normalizeUploadedTextFileInPlace(finalPath, fh.Filename, size)
+	if err != nil {
+		return orm.UploadedFile{}, uploadedFileExt{}, fmt.Errorf("normalize upload text encoding failed: %w", err)
 	}
 	ext := uploadedFileExt{StoredPath: finalPath, StoredName: storedName, OriginalFilename: fh.Filename, FileSize: size, ContentType: fh.Header.Get("Content-Type"), RelativePath: relativePath, DocumentPID: documentPID, DocumentTags: tags}
 	row := orm.UploadedFile{UploadFileID: uploadFileID, DatasetID: datasetID, TenantID: ds.TenantID, TaskID: "", DocumentID: "", Status: UploadedFileStateUploaded, Ext: mustJSON(ext), BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now}}

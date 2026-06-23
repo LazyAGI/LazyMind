@@ -29,6 +29,7 @@ export interface DataSourceDetailViewProps {
   t: any;
   detailSource: DataSourceSummary | null;
   detailLoading: boolean;
+  documentLoading?: boolean;
   lastSync: string;
   documents: DocumentStatusRow[];
   lastOperation: DataSourceDetailLastOperation | null;
@@ -45,6 +46,7 @@ export default function DataSourceDetailView({
   t,
   detailSource,
   detailLoading,
+  documentLoading,
   lastSync,
   documents,
   lastOperation,
@@ -189,11 +191,11 @@ export default function DataSourceDetailView({
           rowKey="id"
           columns={columns}
           dataSource={filteredDocuments}
-          loading={detailLoading}
+          loading={documentLoading ?? detailLoading}
           pagination={{ pageSize: 8, showSizeChanger: false }}
           className="admin-page-table data-source-detail-table"
           locale={{ emptyText: t("admin.dataSourceDetailNoDocStatus") }}
-          scroll={{ x: 1120, y: "max(320px, calc(100vh - 420px))" }}
+          scroll={{ x: 1120, y: "52vh" }}
         />
       </section>
 

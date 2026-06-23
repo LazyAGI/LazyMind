@@ -234,6 +234,8 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         'has_subagents': bool(has_subagents),
         'conversation_id': (conversation_id or '').strip(),
         'query': query or '',
+        'memory': memory or '',
+        'user_preference': user_preference or '',
     }
     display_files: list[str] = []
     for path in resolved_files:

@@ -77,6 +77,10 @@ function getErrorPayload(error: any): any {
   return error?.response?.data ?? error;
 }
 
+const RAW_ERROR_MESSAGE_CODE_MAP: Record<string, string> = {
+  "dataset name already exists": "2001102",
+};
+
 export function extractErrorCode(error: any): string | undefined {
   const responseData = getErrorPayload(error);
   const candidates = [
@@ -151,7 +155,16 @@ export function getLocalizedErrorMessage(
     return i18n.t(`errors.${errorCode}`);
   }
 
-  return extractRawErrorMessage(error) || fallback;
+  const rawMessage = extractRawErrorMessage(error);
+  const rawMessageCode = rawMessage
+    ? RAW_ERROR_MESSAGE_CODE_MAP[rawMessage.trim().toLowerCase()]
+    : undefined;
+
+  if (rawMessageCode && i18n.exists(`errors.${rawMessageCode}`)) {
+    return i18n.t(`errors.${rawMessageCode}`);
+  }
+
+  return rawMessage || fallback;
 }
 
 /** Resolve a core error code (e.g. err_msg "2000725") via errors.{code} i18n. */

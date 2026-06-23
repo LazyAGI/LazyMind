@@ -4,8 +4,9 @@ from functools import lru_cache
 from typing import Any
 
 from lazyllm.tracing.datamodel.structured import ExecutionStep
+from lazyllm.tracing.semantics import SemanticType
 
-from evo.projections.traces.values import drop_empty
+from .values import drop_empty
 
 _FALLBACK_CHAT_TOOL_NAMES = frozenset({
     'ArxivSearch',
@@ -33,6 +34,8 @@ _FALLBACK_CHAT_TOOL_NAMES = frozenset({
 
 
 def is_tool_node(node: ExecutionStep) -> bool:
+    if node.semantic_type == SemanticType.TOOL:
+        return True
     return node.name in registered_chat_tool_names()
 
 
@@ -40,17 +43,18 @@ def is_tool_node(node: ExecutionStep) -> bool:
 def registered_chat_tool_names() -> frozenset[str]:
     try:
         from lazymind.chat.service.component import get_all_tool_groups
+        tool_groups = get_all_tool_groups()
     except Exception:
-        return _FALLBACK_CHAT_TOOL_NAMES
+        return frozenset()
 
     names: set[str] = set()
-    for group in get_all_tool_groups():
+    for group in tool_groups:
         if not isinstance(group, dict):
             continue
         for method in group.get('methods') or []:
             if isinstance(method, dict) and (name := str(method.get('name') or '').strip()):
                 names.add(name)
-    return frozenset(names) | _FALLBACK_CHAT_TOOL_NAMES
+    return frozenset(names)
 
 
 def tool_metadata(value: Any, *, fallback_tool: str) -> dict[str, Any]:

@@ -104,7 +104,7 @@ func TestBuildChatRequestBodyKeepsExistingFilters(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
-	memoryContent := "---\nagent_persona: |-\n  严谨助手\nuser_address: |-\n  老师\nresponse_style: |-\n  简洁\n---\n\nmemory-content"
+	memoryContent := "---\nagent_persona: |-\n 严谨助手\npreferred_name: |-\n 老师\nresponse_style: |-\n 简洁\n---\n\nmemory-content"
 	ctx := &evolution.ChatResourceContext{
 		DisabledTools:      []string{"bing"},
 		AvailableSkills:    []string{"coding/git-workflow"},

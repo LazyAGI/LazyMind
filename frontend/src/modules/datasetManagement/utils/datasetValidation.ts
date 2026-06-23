@@ -1,5 +1,11 @@
 import type { DatasetItemFormValues } from "../shared";
 
+export type RequiredDatasetItemMessages = {
+  question: string;
+  question_type: string;
+  ground_truth: string;
+};
+
 export function splitListField(value?: string | string[]) {
   if (Array.isArray(value)) {
     return value.map((item) => `${item}`.trim()).filter(Boolean);
@@ -47,17 +53,19 @@ export function normalizeItemFormValues(values: DatasetItemFormValues) {
   };
 }
 
-export function validateRequiredDatasetItem(values: Partial<DatasetItemFormValues>) {
+export function validateRequiredDatasetItem(
+  values: Partial<DatasetItemFormValues>,
+  messages: RequiredDatasetItemMessages,
+) {
   const errors: string[] = [];
   if (!`${values.question || ""}`.trim()) {
-    errors.push("问题不能为空");
+    errors.push(messages.question);
   }
   if (!`${values.question_type || ""}`.trim()) {
-    errors.push("问题类型不能为空");
+    errors.push(messages.question_type);
   }
   if (!`${values.ground_truth || ""}`.trim()) {
-    errors.push("标准答案不能为空");
+    errors.push(messages.ground_truth);
   }
   return errors;
 }
-

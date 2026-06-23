@@ -140,6 +140,8 @@
 }
 
 .data-source-detail-table.ant-table-wrapper {
+  --data-source-detail-table-body-height: 52vh;
+
   min-width: 0;
   margin-top: 12px;
 
@@ -171,6 +173,8 @@
   }
 
   .ant-table-body {
+    height: var(--data-source-detail-table-body-height);
+    max-height: var(--data-source-detail-table-body-height);
     scrollbar-gutter: stable;
   }
 }

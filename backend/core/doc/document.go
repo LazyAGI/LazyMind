@@ -1395,6 +1395,15 @@ func latestTime(values ...time.Time) time.Time {
 	return out
 }
 
+func firstNonZeroTime(values ...time.Time) time.Time {
+	for _, value := range values {
+		if !value.IsZero() {
+			return value
+		}
+	}
+	return time.Time{}
+}
+
 func loadDatasetDocuments(ctx context.Context, datasetID, keyword, pid string, applyPIDFilter bool, limit, offset int) ([]mergedDocRow, int64, error) {
 	if limit <= 0 {
 		limit = 20
@@ -1719,8 +1728,8 @@ func loadMergedDocumentsBySearch(ctx context.Context, datasetIDs []string, keywo
 			Ext:              doc.Ext,
 			DatasetID:        doc.DatasetID,
 			DatasetDisplay:   datasetDisplay,
-			BaseCreatedAt:    base.CreatedAt,
-			BaseUpdatedAt:    latestTime(base.UpdatedAt, doc.UpdatedAt),
+			BaseCreatedAt:    firstNonZeroTime(doc.CreatedAt, base.CreatedAt),
+			BaseUpdatedAt:    firstNonZeroTime(doc.UpdatedAt, base.UpdatedAt),
 			DisplayName:      displayName,
 			PID:              doc.PID,
 			Tags:             doc.Tags,
@@ -2355,8 +2364,8 @@ func loadMergedDocumentsByDocIDs(ctx context.Context, docIDs []string, datasetID
 			Ext:              doc.Ext,
 			DatasetID:        doc.DatasetID,
 			DatasetDisplay:   datasetDisplay,
-			BaseCreatedAt:    base.CreatedAt,
-			BaseUpdatedAt:    latestTime(base.UpdatedAt, doc.UpdatedAt),
+			BaseCreatedAt:    firstNonZeroTime(doc.CreatedAt, base.CreatedAt),
+			BaseUpdatedAt:    firstNonZeroTime(doc.UpdatedAt, base.UpdatedAt),
 			DisplayName:      displayName,
 			PID:              doc.PID,
 			Tags:             doc.Tags,

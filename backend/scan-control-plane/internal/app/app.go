@@ -375,7 +375,6 @@ func connectorForType(connectorType connector.ConnectorType, agent localfs.Agent
 	case localfs.ConnectorType:
 		options := []localfs.Option{
 			localfs.WithDefaultAgentID(localFSDefaultAgentID),
-			localfs.WithRecommendedRoots("/"),
 			localfs.WithTempObjectStore(temp),
 		}
 		if localFSPublicRoot != "" {
@@ -451,9 +450,10 @@ type targetCacheConnectionLister interface {
 }
 
 type targetTreeCachePrewarmer struct {
-	auth    targetCacheConnectionLister
-	engine  *tree.DefaultTargetTreeEngine
-	stagger time.Duration
+	auth           targetCacheConnectionLister
+	engine         *tree.DefaultTargetTreeEngine
+	stagger        time.Duration
+	prewarmLocalFS bool
 }
 
 func buildTargetSearchCachePrewarmer(built Components, cfg config.Config) (*targetTreeCachePrewarmer, error) {
@@ -461,7 +461,9 @@ func buildTargetSearchCachePrewarmer(built Components, cfg config.Config) (*targ
 		return nil, nil
 	}
 	auth, ok := built.AuthConnectionClient.(targetCacheConnectionLister)
-	if !ok {
+	prewarmFeishu := hasConnectorType(built.ConnectorTypes, feishu.ConnectorType) && ok
+	prewarmLocalFS := hasConnectorType(built.ConnectorTypes, localfs.ConnectorType)
+	if !prewarmFeishu && !prewarmLocalFS {
 		return nil, nil
 	}
 	registry, err := connectorRegistryFromTypes(built.ConnectorTypes, built.AgentClient, built.LocalFSDefaultAgentID, built.LocalFSPublicRoot, built.AuthConnectionClient, built.FeishuClient, built.TempObjectStore)
@@ -475,17 +477,26 @@ func buildTargetSearchCachePrewarmer(built Components, cfg config.Config) (*targ
 	options = append(options, built.TargetTreeOptions...)
 	fmt.Fprintf(os.Stdout, "target search cache prewarmer enabled redis=%t interval=%s stagger=%s\n", built.TargetSearchCacheStore != nil, cfg.TargetSearchCachePrewarmInterval, cfg.TargetSearchCachePrewarmStagger)
 	return &targetTreeCachePrewarmer{
-		auth:    auth,
-		engine:  tree.NewDefaultTargetTreeEngine(registry, options...),
-		stagger: cfg.TargetSearchCachePrewarmStagger,
+		auth:           auth,
+		engine:         tree.NewDefaultTargetTreeEngine(registry, options...),
+		stagger:        cfg.TargetSearchCachePrewarmStagger,
+		prewarmLocalFS: prewarmLocalFS,
 	}, nil
 }
 
 func (p *targetTreeCachePrewarmer) RunOnce(ctx context.Context) error {
 	if p == nil || p.auth == nil || p.engine == nil {
+		if p != nil && p.prewarmLocalFS && p.engine != nil {
+			return p.prewarmLocalFSRoots(ctx)
+		}
 		return nil
 	}
 	roundStartedAt := time.Now()
+	if p.prewarmLocalFS {
+		if err := p.prewarmLocalFSRoots(ctx); err != nil {
+			fmt.Fprintf(os.Stdout, "target search cache local_fs prewarm status=error error=%v\n", err)
+		}
+	}
 	connections, err := p.auth.ListTargetCacheConnections(ctx, feishu.ConnectionListRequest{
 		Provider: string(feishu.ConnectorType),
 		Limit:    100,
@@ -534,6 +545,21 @@ func (p *targetTreeCachePrewarmer) RunOnce(ctx context.Context) error {
 	return nil
 }
 
+func (p *targetTreeCachePrewarmer) prewarmLocalFSRoots(ctx context.Context) error {
+	startedAt := time.Now()
+	fmt.Fprintf(os.Stdout, "target search cache local_fs prewarm start\n")
+	if err := p.engine.PrewarmLocalFSRootCaches(ctx, tree.TargetTreeSearchRequest{
+		ConnectorType: localfs.ConnectorType,
+		TargetType:    localfs.TargetTypeLocalPath,
+		IncludeFiles:  true,
+	}); err != nil {
+		fmt.Fprintf(os.Stdout, "target search cache local_fs prewarm finish status=error elapsed=%s error=%v\n", time.Since(startedAt).Truncate(time.Millisecond), err)
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "target search cache local_fs prewarm finish status=ok elapsed=%s\n", time.Since(startedAt).Truncate(time.Millisecond))
+	return nil
+}
+
 func sleepTargetCachePrewarm(ctx context.Context, delay time.Duration) error {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
@@ -543,6 +569,15 @@ func sleepTargetCachePrewarm(ctx context.Context, delay time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
+}
+
+func hasConnectorType(types []connector.ConnectorType, target connector.ConnectorType) bool {
+	for _, connectorType := range types {
+		if connectorType == target {
+			return true
+		}
+	}
+	return false
 }
 
 func buildParseWorkerRunner(built Components, cfg config.Config) (*worker.Runner, error) {

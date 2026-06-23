@@ -295,7 +295,7 @@ func TestIdleFallbackCreatesCombinedMemoryReviewTaskWithoutSensitiveRequestField
 		if request.Memory != "current memory" {
 			t.Fatalf("expected memory content in request, got %q", request.Memory)
 		}
-		wantUser := "---\nagent_persona: |-\n  当前角色\nuser_address: |-\n  当前称谓\nresponse_style: |-\n  当前风格\n---\n\ncurrent preference"
+		wantUser := "---\nagent_persona: |-\n 当前角色\npreferred_name: |-\n 当前称谓\nresponse_style: |-\n 当前风格\n---\n\ncurrent preference"
 		if request.User != wantUser {
 			t.Fatalf("expected formatted user_preference in request, got %q", request.User)
 		}
@@ -364,7 +364,7 @@ func insertIdleResources(t *testing.T, db *gorm.DB, userID string, now time.Time
 		UserID:        userID,
 		Content:       "current preference",
 		AgentPersona:  "当前角色",
-		UserAddress:   "当前称谓",
+		PreferredName: "当前称谓",
 		ResponseStyle: "当前风格",
 		ContentHash:   "preference-hash",
 		Version:       1,

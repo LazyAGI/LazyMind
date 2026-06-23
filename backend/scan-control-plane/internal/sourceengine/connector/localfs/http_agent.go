@@ -52,6 +52,16 @@ func (c *HTTPAgentClient) ListDir(ctx context.Context, req ListDirRequest) (List
 	return out, nil
 }
 
+func (c *HTTPAgentClient) ListRoots(ctx context.Context, req ListRootsRequest) ([]PathInfo, error) {
+	var out struct {
+		Items []PathInfo `json:"items"`
+	}
+	if err := c.doJSON(ctx, "/api/v1/agents/fs/roots", req, &out); err != nil {
+		return nil, err
+	}
+	return out.Items, nil
+}
+
 func (c *HTTPAgentClient) StatPath(ctx context.Context, req StatPathRequest) (PathInfo, error) {
 	var out PathInfo
 	if err := c.doJSON(ctx, "/api/v1/agents/fs/stat", req, &out); err != nil {

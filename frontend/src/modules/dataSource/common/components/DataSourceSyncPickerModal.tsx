@@ -173,7 +173,9 @@ export default function DataSourceSyncPickerModal({
         />
 
         {syncTreeLoading ? (
-          <div className="data-source-sync-tree-loading">加载目录树中...</div>
+          <div className="data-source-sync-tree-loading">
+            {t("admin.dataSourceDetailTreeLoading")}
+          </div>
         ) : syncTreeData.length > 0 ? (
           <Tree
             blockNode

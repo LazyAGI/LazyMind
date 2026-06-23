@@ -359,12 +359,12 @@ func applyPreferenceReviewResult(ctx context.Context, tx *gorm.DB, result Memory
 	hashRow := resource
 	hashRow.Content = parsed.Content
 	hashRow.AgentPersona = parsed.AgentPersona
-	hashRow.UserAddress = parsed.UserAddress
+	hashRow.PreferredName = parsed.PreferredName
 	hashRow.ResponseStyle = parsed.ResponseStyle
 	update := map[string]any{
 		"content":               parsed.Content,
 		"agent_persona":         parsed.AgentPersona,
-		"user_address":          parsed.UserAddress,
+		"preferred_name":        parsed.PreferredName,
 		"response_style":        parsed.ResponseStyle,
 		"content_hash":          evolution.HashSystemUserPreference(hashRow),
 		"version":               resource.Version + 1,

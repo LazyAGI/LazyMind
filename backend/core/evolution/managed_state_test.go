@@ -21,7 +21,7 @@ type managedStateListAPITestResponse struct {
 			Title                  string  `json:"title"`
 			Content                string  `json:"content"`
 			AgentPersona           *string `json:"agent_persona"`
-			UserAddress            *string `json:"user_address"`
+			PreferredName          *string `json:"preferred_name"`
 			ResponseStyle          *string `json:"response_style"`
 			ContentSummary         string  `json:"content_summary"`
 			HasPendingReviewResult bool    `json:"has_pending_review_result"`
@@ -55,7 +55,7 @@ func TestListManagedStatesReturnsDefaultsAndUserScopedRows(t *testing.T) {
 		UserID:        "u1",
 		Content:       "用户偏好简洁回答。",
 		AgentPersona:  "严谨助手",
-		UserAddress:   "老师",
+		PreferredName: "老师",
 		ResponseStyle: "先结论后论证",
 		Version:       1,
 		UpdatedBy:     "u1",
@@ -118,7 +118,7 @@ func TestListManagedStatesReturnsDefaultsAndUserScopedRows(t *testing.T) {
 			"session_id":     "",
 			"source_content": "",
 			"operations":     "[]",
-			"content":        "---\nagent_persona: 严谨助手\nuser_address: 老师\nresponse_style: 先结论后论证\n---\n用户偏好简洁回答。",
+			"content":        "---\nagent_persona: 严谨助手\npreferred_name: 老师\nresponse_style: 先结论后论证\n---\n用户偏好简洁回答。",
 			"state":          "success",
 			"review_status":  "pending",
 			"time":           now,
@@ -170,7 +170,7 @@ func TestListManagedStatesReturnsDefaultsAndUserScopedRows(t *testing.T) {
 	if memoryItem.ContentSummary == "" {
 		t.Fatalf("expected memory content summary")
 	}
-	if memoryItem.AgentPersona != nil || memoryItem.UserAddress != nil || memoryItem.ResponseStyle != nil {
+	if memoryItem.AgentPersona != nil || memoryItem.PreferredName != nil || memoryItem.ResponseStyle != nil {
 		t.Fatalf("expected memory metadata fields to be omitted, got %#v", memoryItem)
 	}
 	if !memoryItem.HasPendingReviewResult {
@@ -190,7 +190,7 @@ func TestListManagedStatesReturnsDefaultsAndUserScopedRows(t *testing.T) {
 	if preferenceItem.ResourceID != "preference-1" || preferenceItem.Content != "用户偏好简洁回答。" || preferenceItem.ContentSummary == "" {
 		t.Fatalf("unexpected preference item, got %#v", preferenceItem)
 	}
-	if stringValue(preferenceItem.AgentPersona) != "严谨助手" || stringValue(preferenceItem.UserAddress) != "老师" || stringValue(preferenceItem.ResponseStyle) != "先结论后论证" {
+	if stringValue(preferenceItem.AgentPersona) != "严谨助手" || stringValue(preferenceItem.PreferredName) != "老师" || stringValue(preferenceItem.ResponseStyle) != "先结论后论证" {
 		t.Fatalf("unexpected preference metadata: %#v", preferenceItem)
 	}
 	if !preferenceItem.HasPendingReviewResult {

@@ -1,17 +1,13 @@
 package agent
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/gorilla/mux"
-	"gorm.io/gorm"
 
 	"lazymind/core/common"
 	"lazymind/core/store"
@@ -52,10 +48,15 @@ func GetThreadEvalReportBadCases(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	result, err := listEvalReportBadCases(threadID, "eval_report", reportID, query)
+	proxy, statusCode, err := fetchUpstreamProxy(r.Context(), r, threadResultsURL(threadID, "eval-reports"))
+	if err != nil {
+		common.ReplyErrWithData(w, "fetch eval reports failed", map[string]any{"detail": err.Error()}, statusCode)
+		return
+	}
+	result, err := listEvalReportBadCases(proxy.Body, reportID, query)
 	if err != nil {
 		switch {
-		case errors.Is(err, errEvalReportNotFound), errors.Is(err, gorm.ErrRecordNotFound):
+		case errors.Is(err, errEvalReportNotFound):
 			common.ReplyErr(w, "eval report not found", http.StatusNotFound)
 		default:
 			common.ReplyErrWithData(w, "list eval report bad cases failed", map[string]any{"detail": err.Error()}, http.StatusInternalServerError)
@@ -103,77 +104,50 @@ func parseEvalReportPositiveInt(raw string) (int, error) {
 	return value, nil
 }
 
-func listEvalReportBadCases(threadID, artifactID, reportID string, query evalReportBadCaseListQuery) (evalReportBadCaseListResponse, error) {
-	payload, err := readEvalReportPayloadByReportID(threadID, artifactID, reportID)
-	if err != nil {
-		return evalReportBadCaseListResponse{}, err
+func listEvalReportBadCases(payload any, reportID string, query evalReportBadCaseListQuery) (evalReportBadCaseListResponse, error) {
+	row, ok := findEvalReportResultRowByReportID(payload, reportID)
+	if !ok {
+		return evalReportBadCaseListResponse{}, errEvalReportNotFound
 	}
-	badCases, ok := evalReportBadCasesFromPayload(payload)
+	badCases, ok := evalReportBadCasesFromPayload(row)
 	if !ok {
 		return evalReportBadCaseListResponse{}, nil
 	}
 	return buildEvalReportBadCaseListResponse(badCases, query), nil
 }
 
-func readEvalReportPayloadByReportID(threadID, artifactID, reportID string) (any, error) {
+func findEvalReportResultRowByReportID(payload any, reportID string) (map[string]any, bool) {
 	reportID = strings.TrimSpace(reportID)
-	if !safeEvalReportPathSegment(reportID) {
-		return nil, fmt.Errorf("invalid report_id")
+	if reportID == "" {
+		return nil, false
 	}
-	manifest, err := loadEvalReportManifest(threadID, artifactID)
-	if err != nil {
-		return nil, err
-	}
-	version, ok := selectEvalReportManifestVersionByReportID(manifest, reportID)
-	if !ok {
-		return nil, errEvalReportNotFound
-	}
-	path, err := evalReportPayloadPath(threadID, version.PayloadRef)
-	if err != nil {
-		return nil, err
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, errEvalReportNotFound
+	switch value := payload.(type) {
+	case []any:
+		for _, item := range value {
+			row, ok := item.(map[string]any)
+			if ok && evalReportResultRowMatchesReportID(row, reportID) {
+				return row, true
+			}
 		}
-		return nil, fmt.Errorf("read eval report payload failed: %w", err)
-	}
-	var payload any
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, fmt.Errorf("decode eval report payload failed: %w", err)
-	}
-	return payload, nil
-}
-
-func selectEvalReportManifestVersionByReportID(manifest evalReportManifest, reportID string) (evalReportManifestVersion, bool) {
-	for _, version := range manifest.Versions {
-		if evalReportIDFromPayloadRef(version.PayloadRef) == reportID {
-			return version, true
+	case map[string]any:
+		if evalReportResultRowMatchesReportID(value, reportID) {
+			return value, true
 		}
 	}
-	return evalReportManifestVersion{}, false
+	return nil, false
 }
 
-func evalReportIDFromPayloadRef(payloadRef string) string {
-	name := filepath.Base(strings.TrimSpace(payloadRef))
-	return strings.TrimSuffix(name, filepath.Ext(name))
-}
-
-func evalReportPayloadPath(threadID, payloadRef string) (string, error) {
-	runDir, err := evalReportRunDir(threadID)
-	if err != nil {
-		return "", err
+func evalReportResultRowMatchesReportID(row map[string]any, reportID string) bool {
+	if data, ok := row["data"].(map[string]any); ok {
+		if strings.TrimSpace(caseCSVScalarString(data["id"])) == reportID {
+			return true
+		}
 	}
-	payloadRef = strings.TrimSpace(payloadRef)
-	if payloadRef == "" {
-		return "", errEvalReportNotFound
+	ref := strings.TrimSpace(caseCSVScalarString(row["ref"]))
+	if ref == reportID || strings.HasPrefix(ref, reportID+"@") {
+		return true
 	}
-	rel := filepath.Clean(filepath.FromSlash(payloadRef))
-	if rel == "." || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("invalid payload_ref")
-	}
-	return filepath.Join(runDir, rel), nil
+	return strings.TrimSpace(caseCSVScalarString(row["artifact_id"])) == reportID
 }
 
 func evalReportBadCasesFromPayload(payload any) ([]any, bool) {

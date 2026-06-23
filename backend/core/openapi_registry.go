@@ -459,10 +459,6 @@ type agentFileContentOpenAPIResponse struct {
 	FileSize int64  `json:"file_size"`
 }
 
-type agentThreadPathParams struct {
-	ThreadID string `path:"thread_id"`
-}
-
 type agentTracePathParams struct {
 	ThreadID string `path:"thread_id"`
 	TraceID  string `path:"trace_id"`
@@ -1228,7 +1224,7 @@ type memoryUpsertOpenAPIRequest struct {
 type managedStateUpsertOpenAPIRequest struct {
 	Content       string `json:"content,omitempty"`
 	AgentPersona  string `json:"agent_persona,omitempty"`
-	UserAddress   string `json:"user_address,omitempty"`
+	PreferredName string `json:"preferred_name,omitempty"`
 	ResponseStyle string `json:"response_style,omitempty"`
 	AutoEvo       *bool  `json:"auto_evo,omitempty"`
 }
@@ -1239,7 +1235,7 @@ type managedStateOpenAPIResponse struct {
 	Title                  string                              `json:"title"`
 	Content                string                              `json:"content"`
 	AgentPersona           *string                             `json:"agent_persona,omitempty"`
-	UserAddress            *string                             `json:"user_address,omitempty"`
+	PreferredName          *string                             `json:"preferred_name,omitempty"`
 	ResponseStyle          *string                             `json:"response_style,omitempty"`
 	ContentSummary         string                              `json:"content_summary"`
 	Version                int64                               `json:"version"`
