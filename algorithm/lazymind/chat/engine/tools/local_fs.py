@@ -41,8 +41,6 @@ class LocalFSToolGroup:
 
     __public_apis__ = ['glob', 'grep', 'read', 'info']
 
-    # ── activation / path helpers ───────────────────────────────────────
-
     def _get_allowed_paths(self) -> List[str]:
         return lazyllm.globals['agentic_config'].get('localfs_paths', [])
 
@@ -81,8 +79,6 @@ class LocalFSToolGroup:
             raise ValueError(f'Path is not a directory: {path}')
         return resolved
 
-    # ── ripgrep helpers ─────────────────────────────────────────────────
-
     @staticmethod
     def _has_rg() -> bool:
         return bool(_RG_BINARY)
@@ -93,8 +89,6 @@ class LocalFSToolGroup:
             [_RG_BINARY] + args,
             capture_output=True, text=True, timeout=_RG_TIMEOUT, cwd=cwd,
         )
-
-    # ── glob ────────────────────────────────────────────────────────────
 
     @handle_tool_errors
     def glob(self, pattern: str, path: Optional[str] = None) -> Dict[str, Any]:
@@ -121,8 +115,6 @@ class LocalFSToolGroup:
             'match_count': len(raw),
             'matches': raw[:200],
         })
-
-    # ── grep ────────────────────────────────────────────────────────────
 
     @handle_tool_errors
     def grep(
@@ -226,8 +218,6 @@ class LocalFSToolGroup:
             'matches': matches,
         })
 
-    # ── read ────────────────────────────────────────────────────────────
-
     @handle_tool_errors
     def read(
         self,
@@ -266,8 +256,6 @@ class LocalFSToolGroup:
             'end_line': start_line + len(chunk),
             'content': ''.join(chunk),
         })
-
-    # ── info ────────────────────────────────────────────────────────────
 
     @handle_tool_errors
     def info(self, path: Optional[str] = None) -> Dict[str, Any]:
