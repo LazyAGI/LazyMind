@@ -353,14 +353,14 @@ function SortableImageList({
   onAddItem?: () => void;
 }) {
   const reorderSlotItems = usePluginStore((s) => s.reorderSlotItems);
-  const loadSlotOrder = usePluginStore((s) => s.loadSlotOrder);
+  // localOrder stores list_index values in display order.
   const [localOrder, setLocalOrder] = useState<number[]>(() =>
-    revisions.map((r) => r.sort_order ?? 0),
+    revisions.map((r) => r.list_index ?? 0),
   );
   useEffect(() => {
-    setLocalOrder(revisions.map((r) => r.sort_order ?? 0));
+    setLocalOrder(revisions.map((r) => r.list_index ?? 0));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revisions.map((r) => `${r.sort_order}`).join(',')]);
+  }, [revisions.map((r) => `${r.list_index}`).join(',')]);
 
   const dragSrcIdx = useRef<number | null>(null);
   // insertIdx is a gap index: 0 = before first item, n = after last item.
@@ -412,6 +412,7 @@ function SortableImageList({
     // Dropping back into same position is a no-op.
     if (gapIdx === srcIdx || gapIdx === srcIdx + 1) return;
 
+    // next is the new list_index sequence after the move.
     const next = [...localOrder];
     const [moved] = next.splice(srcIdx, 1);
     // After removing srcIdx, adjust gap index if needed.
@@ -419,22 +420,23 @@ function SortableImageList({
     next.splice(adjustedGap, 0, moved);
     setLocalOrder(next);
     try {
-      const orderInfo = await loadSlotOrder(session.session_id, slotDef.id);
-      await reorderSlotItems(session.session_id, slotDef.id, next, orderInfo.order_version);
+      // order_version is carried on each revision; use the first available one.
+      const orderVersion = revisions[0]?.order_version ?? 0;
+      await reorderSlotItems(session.session_id, slotDef.id, next, orderVersion);
       onRefresh?.();
     } catch {
-      setLocalOrder(revisions.map((r) => r.sort_order ?? 0));
+      setLocalOrder(revisions.map((r) => r.list_index ?? 0));
     }
-  }, [localOrder, revisions, session.session_id, slotDef.id, reorderSlotItems, loadSlotOrder, onRefresh, computeInsertIdx]);
+  }, [localOrder, revisions, session.session_id, slotDef.id, reorderSlotItems, onRefresh, computeInsertIdx]);
 
   const handleDragEnd = useCallback(() => {
     dragSrcIdx.current = null;
     setInsertIdx(null);
   }, []);
 
-  const byOrder: Record<number, SlotRevision> = {};
+  const byListIndex: Record<number, SlotRevision> = {};
   for (const r of revisions) {
-    if (r.sort_order !== undefined) byOrder[r.sort_order] = r;
+    if (r.list_index !== undefined) byListIndex[r.list_index] = r;
   }
 
   return (
@@ -447,8 +449,8 @@ function SortableImageList({
       {isDraggable && (
         <div className={`plugin-panel__image-insert-gap${insertIdx === 0 ? ' plugin-panel__image-insert-gap--active' : ''}`} aria-hidden='true' />
       )}
-      {localOrder.map((sortOrder, idx) => {
-        const rev = byOrder[sortOrder];
+      {localOrder.map((listIndex, idx) => {
+        const rev = byListIndex[listIndex];
         if (!rev) return null;
         return (
           <React.Fragment key={`${rev.slot_id}-${rev.revision}-${rev.list_index ?? 0}`}>
@@ -459,10 +461,10 @@ function SortableImageList({
               onDragOver={isDraggable ? (e) => handleDragOver(e, idx) : undefined}
               onDrop={isDraggable ? (e) => handleDrop(e, idx) : undefined}
               onDragEnd={isDraggable ? handleDragEnd : undefined}
-              onClick={() => onFocusSortOrder?.(sortOrder)}
+              onClick={() => onFocusSortOrder?.(rev.sort_order)}
               role='button'
               tabIndex={0}
-              aria-label={`图片 ${sortOrder}`}
+              aria-label={`图片 ${listIndex}`}
               className={`plugin-panel__image-list-item${dragSrcIdx.current === idx ? ' plugin-panel__image-list-item--dragging' : ''}`}
             >
               <SlotRenderer

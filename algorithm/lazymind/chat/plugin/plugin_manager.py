@@ -432,13 +432,16 @@ def _build_session_artifact_section(session_id: str) -> str:
     if not lines:
         return ''
     # Replace the generic header with a plugin-specific one that warns against re-running steps.
-    lines[0] = '## Current session artifacts (already collected — do NOT re-run steps unnecessarily)'
+    lines[0] = (
+        '## Current session artifacts (real-time state — user may have added or removed items '
+        'since earlier in this conversation; treat this list as the single source of truth)'
+    )
     return '\n'.join(lines)
 
 
-def _build_chat_agent_task_context() -> str:
+def _build_chat_agent_task_context(conversation_id: str) -> str:
     """Build the ## Tasks system-prompt section for ChatAgent."""
-    conv_id = str(_agentic_config().get('conversation_id') or '').strip()
+    conv_id = conversation_id.strip()
     if not conv_id:
         return ''
     from lazymind.chat.engine.subagent.db import TaskQueryDB
@@ -447,6 +450,7 @@ def _build_chat_agent_task_context() -> str:
 
 def resolve_plugin_injection(
     plugin_context: Optional[Dict[str, Any]],
+    conversation_id: str = '',
 ) -> tuple:
     """Resolve plugin tools, system prompt, stop-tools and agentic_config patches.
 
@@ -467,6 +471,8 @@ def resolve_plugin_injection(
     agentic_config_patch: Dict[str, Any] = {}
 
     if not plugin_loader._registry:
+        # No plugins registered — inject SubAgent task context for pure SubAgent conversations.
+        plugin_system_prompt = _build_chat_agent_task_context(conversation_id)
         return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch
 
     if plugin_context and isinstance(plugin_context, dict):
@@ -533,9 +539,8 @@ def resolve_plugin_injection(
                 for spec in (plugin_loader._registry or {}).values()
             ]
             plugin_system_prompt = '\n\n---\n\n'.join(s for s in scenarios if s)
-
-    subagent_section = _build_chat_agent_task_context()
-    if subagent_section:
-        plugin_system_prompt = (plugin_system_prompt + '\n\n' + subagent_section).strip()
+        task_context = _build_chat_agent_task_context(conversation_id)
+        if task_context:
+            plugin_system_prompt = (plugin_system_prompt + '\n\n' + task_context).strip()
 
     return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch

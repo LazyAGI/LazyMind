@@ -525,6 +525,14 @@ class SubAgentDB:
         except Exception:
             return []
 
+    def format_plugin_session_artifacts(self, session_id: str) -> List[str]:
+        rows = self.load_selected_slot_artifacts_resolved_with_order(session_id)
+        return _rows_to_artifact_summary(rows) if rows else []
+
+    def format_task_artifacts(self, task_ids: List[str]) -> List[str]:
+        rows = self.load_artifacts_for_tasks(task_ids)
+        return _rows_to_artifact_summary(rows, order_field='seq', is_human_field=None) if rows else []
+
 
 # ---------------------------------------------------------------------------
 # TaskQueryDB — read-only DB accessor for ChatAgent tool context.
@@ -561,8 +569,6 @@ class TaskQueryDB:
 
     @contextmanager
     def _conn(self):
-        with _get_task_query_engine().connect() as conn:
-            yield conn
         with _get_task_query_engine().connect() as conn:
             yield conn
 
@@ -671,36 +677,19 @@ class TaskQueryDB:
             })
         return tasks
 
-    def _rows_to_artifact_summary(self, rows: List[Dict[str, Any]], order_field: str = 'sort_order',
-                                  is_human_field: Optional[str] = 'is_human') -> List[str]:
-        from collections import defaultdict
-        key_items: Dict[str, List[tuple]] = defaultdict(list)
-        key_content_type: Dict[str, str] = {}
-        for r in rows:
-            key = r.get('artifact_key', '')
-            if not key:
-                continue
-            ct = r.get('content_type') or ''
-            value = r.get('value') or {}
-            order = r.get(order_field) or 1
-            is_human = bool(r.get(is_human_field)) if is_human_field else False
-            key_items[key].append((order, ct, value, is_human))
-            if ct and key not in key_content_type:
-                key_content_type[key] = ct
-        return format_artifact_summary(key_items, key_content_type)
-
     def format_plugin_session_artifacts(self, session_id: str) -> List[str]:
-        rows = self.load_selected_slot_artifacts_resolved_with_order(session_id)
-        return self._rows_to_artifact_summary(rows) if rows else []
+        rows = self.load_plugin_session_slot_summary(session_id)
+        return _rows_to_artifact_summary(rows) if rows else []
 
     def format_task_artifacts(self, task_ids: List[str]) -> List[str]:
         rows = self.load_artifacts_for_tasks(task_ids)
-        return self._rows_to_artifact_summary(rows, order_field='seq', is_human_field=None) if rows else []
+        return _rows_to_artifact_summary(rows, order_field='seq', is_human_field=None) if rows else []
 
     def build_chat_agent_task_context(self, conv_id: str) -> str:
         """Build the ## Tasks system-prompt section for ChatAgent.
 
-        For each terminal task in the conversation:
+        For each task in the conversation (plugin_step regardless of status,
+        ordinary tasks only when terminal):
         - plugin_step → format_plugin_session_artifacts (plugin_slot_revisions)
         - ordinary    → format_task_artifacts (sub_agent_artifacts)
         Returns '' on any error or when there is nothing to show.
@@ -712,17 +701,22 @@ class TaskQueryDB:
         if not tasks:
             return ''
         terminal = {'succeeded', 'failed', 'interrupted'}
-        lines = ['## Tasks']
+        lines = ['## Tasks (real-time state — user may have added or removed items since earlier '
+                 'in this conversation; treat this list as the single source of truth)']
         for t in tasks:
             status = str(t.get('status') or '')
-            if status not in terminal:
+            agent_type = str(t.get('agent_type') or '')
+            # plugin_step tasks may still be running but have partial artifacts — always include.
+            # Ordinary tasks only matter once they've reached a terminal state.
+            if agent_type != 'plugin_step' and status not in terminal:
                 continue
             seq = t.get('seq_in_conversation', '')
             title = str(t.get('title') or '')
             task_ref = f'{seq}. {title}' if seq else title
             summary = str(t.get('summary') or '').strip()
             status_label = {'succeeded': 'done', 'failed': 'failed',
-                            'interrupted': 'interrupted'}.get(status, status)
+                            'interrupted': 'interrupted',
+                            'running': 'in progress', 'pending': 'pending'}.get(status, status)
             header = f'- Task {task_ref} [{status_label}]'
             if summary:
                 header += f': {summary}'
@@ -730,14 +724,9 @@ class TaskQueryDB:
 
             agent_type = str(t.get('agent_type') or '')
             if agent_type == 'plugin_step':
-                raw_params = t.get('params') or {}
-                if isinstance(raw_params, str):
-                    try:
-                        raw_params = json.loads(raw_params)
-                    except Exception:
-                        raw_params = {}
-                session_id = str(raw_params.get('session_id') or '').strip()
-                art_lines = self.format_plugin_session_artifacts(session_id) if session_id else []
+                # Plugin step artifacts are already injected via _build_session_artifact_section.
+                # Only show progress summary here to avoid duplicate / misleading context.
+                art_lines = []
             else:
                 art_lines = self.format_task_artifacts([t['id']])
             lines.extend(f'  {ln}' for ln in art_lines)
@@ -910,3 +899,25 @@ def format_artifact_summary(
             else:
                 lines.append(f'    {summary}')
     return lines
+
+
+def _rows_to_artifact_summary(
+    rows: List[Dict[str, Any]],
+    order_field: str = 'sort_order',
+    is_human_field: Optional[str] = 'is_human',
+) -> List[str]:
+    from collections import defaultdict
+    key_items: Dict[str, List[tuple]] = defaultdict(list)
+    key_content_type: Dict[str, str] = {}
+    for r in rows:
+        key = r.get('artifact_key', '')
+        if not key:
+            continue
+        ct = r.get('content_type') or ''
+        value = r.get('value') or {}
+        order = r.get(order_field) or 1
+        is_human = bool(r.get(is_human_field)) if is_human_field else False
+        key_items[key].append((order, ct, value, is_human))
+        if ct and key not in key_content_type:
+            key_content_type[key] = ct
+    return format_artifact_summary(key_items, key_content_type)

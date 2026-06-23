@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"time"
 
 	"gorm.io/gorm"
@@ -761,7 +762,8 @@ func RollbackSlotRevision(ctx context.Context, db *gorm.DB,
 }
 
 // LoadSelectedSlots returns the currently-selected slot revisions for a session,
-// grouped by slot_id (one entry per slot for single, all entries for list).
+// ordered by (slot_id, sort_order) derived from plugin_slot_order.order_list.
+// Falls back to list_index ASC for slots that have no order row.
 func LoadSelectedSlots(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.PluginSlotRevision, error) {
 	var rows []orm.PluginSlotRevision
 	if err := db.WithContext(ctx).
@@ -770,7 +772,78 @@ func LoadSelectedSlots(ctx context.Context, db *gorm.DB, sessionID string) ([]or
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	return rows, nil
+
+	// Re-sort each slot's items by their position in plugin_slot_order.order_list.
+	var orders []orm.PluginSlotOrder
+	if err := db.WithContext(ctx).Where("session_id = ?", sessionID).Find(&orders).Error; err != nil {
+		// On error fall back to the already-loaded list_index order.
+		return rows, nil
+	}
+	orderListBySlot := map[string][]int{}
+	for i := range orders {
+		var list []int
+		if err := json.Unmarshal(orders[i].OrderList, &list); err == nil {
+			orderListBySlot[orders[i].SlotID] = list
+		}
+	}
+	if len(orderListBySlot) == 0 {
+		return rows, nil
+	}
+
+	// Build position map: slotID + list_index → sort_order (1-based).
+	type posKey struct {
+		slotID    string
+		listIndex int
+	}
+	pos := map[posKey]int{}
+	for slotID, list := range orderListBySlot {
+		for i, li := range list {
+			pos[posKey{slotID, li}] = i + 1
+		}
+	}
+
+	// Group rows by slot_id, re-order each group, then flatten.
+	type group struct {
+		slotID string
+		items  []orm.PluginSlotRevision
+	}
+	var groups []group
+	slotIdx := map[string]int{}
+	for _, row := range rows {
+		if idx, ok := slotIdx[row.SlotID]; ok {
+			groups[idx].items = append(groups[idx].items, row)
+		} else {
+			slotIdx[row.SlotID] = len(groups)
+			groups = append(groups, group{slotID: row.SlotID, items: []orm.PluginSlotRevision{row}})
+		}
+	}
+	for g := range groups {
+		slotID := groups[g].slotID
+		if _, hasOrder := orderListBySlot[slotID]; !hasOrder {
+			continue
+		}
+		sort.Slice(groups[g].items, func(i, j int) bool {
+			li := 0
+			if groups[g].items[i].ListIndex != nil {
+				li = *groups[g].items[i].ListIndex
+			}
+			lj := 0
+			if groups[g].items[j].ListIndex != nil {
+				lj = *groups[g].items[j].ListIndex
+			}
+			pi := pos[posKey{slotID, li}]
+			pj := pos[posKey{slotID, lj}]
+			if pi != pj {
+				return pi < pj
+			}
+			return li < lj
+		})
+	}
+	result := make([]orm.PluginSlotRevision, 0, len(rows))
+	for _, g := range groups {
+		result = append(result, g.items...)
+	}
+	return result, nil
 }
 
 // IsNotFound reports whether err is a gorm record-not-found error.

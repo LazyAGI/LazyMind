@@ -94,6 +94,8 @@ export interface SlotRevision {
   list_index?: number;
   /** 1-based display position within a list slot; computed from order_list. */
   sort_order?: number;
+  /** Optimistic-lock version of the slot order row; present on list-slot items. */
+  order_version?: number;
   selected: boolean;
   artifact_key: string;
   step_id: string;

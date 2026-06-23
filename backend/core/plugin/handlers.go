@@ -850,8 +850,8 @@ func PatchSlotItem(w http.ResponseWriter, r *http.Request) {
 }
 
 // ReorderSlotItems handles PATCH /plugin-sessions/{session_id}/slots/{slot_id}/order.
-// Body: {"order": [3,1,2], "version": N}
-// order is the desired new sequence of current sort_order values.
+// Body: {"order": [1,0,2], "version": N}
+// order is the desired new sequence expressed as list_index values.
 func ReorderSlotItems(w http.ResponseWriter, r *http.Request) {
 	sessionID := common.PathVar(r, "session_id")
 	slotID := common.PathVar(r, "slot_id")
@@ -874,33 +874,7 @@ func ReorderSlotItems(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	// Translate sort_order sequence → list_index sequence.
-	row, err := GetSlotOrder(ctx, db, sessionID, slotID)
-	if err != nil || row == nil {
-		common.ReplyErr(w, "slot order not found", http.StatusNotFound)
-		return
-	}
-	// currentOrder[i] = list_index at 1-based sort_order (i+1).
-	// body.Order contains the desired new sequence expressed as sort_order values.
-	// We build a sort_order→list_index map so arbitrary (non-contiguous) sort_order values work.
-	var currentOrder []int
-	_ = json.Unmarshal(row.OrderList, &currentOrder)
-	// soToListIndex maps current sort_order (1-based) → list_index.
-	soToListIndex := make(map[int]int, len(currentOrder))
-	for i, li := range currentOrder {
-		soToListIndex[i+1] = li
-	}
-	newListIndexOrder := make([]int, 0, len(body.Order))
-	for _, so := range body.Order {
-		li, ok := soToListIndex[so]
-		if !ok {
-			common.ReplyErr(w, fmt.Sprintf("sort_order %d not found in current order", so), http.StatusBadRequest)
-			return
-		}
-		newListIndexOrder = append(newListIndexOrder, li)
-	}
-
-	if err := ReorderSlot(ctx, db, sessionID, slotID, newListIndexOrder, body.Version); err != nil {
+	if err := ReorderSlot(ctx, db, sessionID, slotID, body.Order, body.Version); err != nil {
 		if err == ErrConflict {
 			common.ReplyErr(w, "version conflict", http.StatusConflict)
 			return
