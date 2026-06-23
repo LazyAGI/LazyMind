@@ -23,36 +23,6 @@
   padding: 16px 28px 0;
 }
 
-.model-provider-tabs-search.ant-input-affix-wrapper {
-  width: 280px;
-  height: 42px;
-  margin-left: auto;
-  border-color: #dbe3ef;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: none;
-
-  .ant-input {
-    color: #334155;
-    font-weight: 650;
-  }
-
-  .ant-input::placeholder {
-    color: #94a3b8;
-    font-weight: 500;
-  }
-
-  .ant-input-prefix {
-    color: #94a3b8;
-  }
-
-  &:hover,
-  &.ant-input-affix-wrapper-focused {
-    border-color: #9bbcff;
-    box-shadow: 0 0 0 3px rgba(47, 109, 246, 0.08);
-  }
-}
-
 .model-provider-tab {
   min-height: 42px;
   display: inline-flex;
@@ -1037,6 +1007,16 @@
   gap: 14px;
 }
 
+.model-provider-tools-substack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  > .model-provider-service-category {
+    margin-bottom: 0;
+  }
+}
+
 .model-provider-service-category {
   margin-bottom: 14px;
   border: 1px solid rgba(211, 223, 239, 0.9);
@@ -1049,12 +1029,21 @@
   padding: 16px;
 }
 
+.model-provider-service-category-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
 .model-provider-service-category-head {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
   gap: 12px;
   align-items: start;
-  margin-bottom: 16px;
+  flex: 1 1 auto;
+  min-width: 0;
 
   > span {
     width: 42px;
@@ -1082,6 +1071,43 @@
     font-size: 13px;
     line-height: 1.6;
   }
+}
+
+.model-provider-category-search.ant-input-affix-wrapper {
+  width: min(320px, 100%);
+  height: 34px;
+  flex: 0 0 auto;
+  padding: 0 12px;
+  border-color: #dbe3ef;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: none;
+
+  .ant-input {
+    color: #334155;
+    font-size: 13px;
+  }
+
+  .ant-input::placeholder,
+  .ant-input-prefix {
+    color: #94a3b8;
+  }
+
+  &:hover,
+  &.ant-input-affix-wrapper-focused {
+    border-color: #b7c7dc;
+    box-shadow: 0 0 0 3px rgba(47, 109, 246, 0.08);
+  }
+}
+
+.model-provider-category-empty {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed #dbe3ef;
+  border-radius: 8px;
+  background: #fff;
 }
 
 .model-provider-service-card {
@@ -1533,9 +1559,6 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid #e2e8f0;
 }
 
 .model-provider-tool-management-head {
@@ -1560,6 +1583,11 @@
   }
 }
 
+.model-provider-tool-category-title {
+  flex: 1 1 auto;
+  margin-bottom: 0;
+}
+
 .model-provider-tool-primary-button.ant-btn {
   min-height: 34px;
   border-radius: 9px;
@@ -1570,38 +1598,49 @@
 .model-provider-tool-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: flex-end;
   min-width: 0;
-
-  .ant-segmented {
-    flex: 0 0 auto;
-    padding: 3px;
-    border: 1px solid #dbe3ef;
-    background: #f8fafc;
-    border-radius: 10px;
-  }
 }
 
-.model-provider-tool-search.ant-input-search {
+.model-provider-tool-search.ant-input-affix-wrapper {
   width: min(320px, 100%);
+  height: 34px;
   margin-left: auto;
+  padding: 0 6px 0 12px;
+  border-color: #dbe3ef;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: none;
 
-  .ant-input,
-  .ant-input-search-button {
-    height: 34px;
+  &:hover,
+  &.ant-input-affix-wrapper-focused {
+    border-color: #b7c7dc;
+    box-shadow: 0 0 0 3px rgba(47, 109, 246, 0.08);
   }
 
-  .ant-input-affix-wrapper,
-  .ant-input-search-button {
-    border-color: #dbe3ef;
+  .ant-input {
+    color: #334155;
+    font-size: 13px;
+  }
+
+  .ant-input::placeholder {
+    color: #94a3b8;
   }
 }
 
-.model-provider-tool-count {
-  flex: 0 0 auto;
+.model-provider-tool-search-button.ant-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 7px;
   color: #64748b;
-  font-size: 13px;
-  font-weight: 750;
+  box-shadow: none;
+
+  &:hover,
+  &:focus-visible {
+    background: #eef6ff;
+    color: #2563eb;
+  }
 }
 
 .model-provider-tool-popover-content {
@@ -1887,9 +1926,18 @@
     flex-direction: column;
   }
 
-  .model-provider-tool-search.ant-input-search {
+  .model-provider-tool-search.ant-input-affix-wrapper {
     width: 100%;
     margin-left: 0;
+  }
+
+  .model-provider-service-category-top {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .model-provider-category-search.ant-input-affix-wrapper {
+    width: 100%;
   }
 
   .model-provider-group-actions {

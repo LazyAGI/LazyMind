@@ -10,7 +10,6 @@ import {
   Pagination,
   Popconfirm,
   Select,
-  Segmented,
   Space,
   Spin,
   Switch,
@@ -18,7 +17,7 @@ import {
   Tooltip,
   message,
 } from "antd";
-import { CloudServerOutlined, PlusOutlined, ToolOutlined } from "@ant-design/icons";
+import { CloudServerOutlined, PlusOutlined, SearchOutlined, ToolOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
 import type { StructuredAsset } from "@/modules/memory/shared";
@@ -39,6 +38,10 @@ import {
 } from "@/modules/memory/toolApi";
 
 type ToolView = "builtin" | "mcp";
+
+interface ToolManagementSectionProps {
+  view: ToolView;
+}
 
 const DEFAULT_TOOL_PAGE_SIZE = 6;
 const TOOL_PAGE_SIZE_OPTIONS = [6, 12, 20, 50];
@@ -63,9 +66,8 @@ const resolveAllowedMcpToolIds = (server: McpServerAsset, tools: McpToolAsset[])
   return toolIds.filter((toolId) => allowedToolSet.has(toolId));
 };
 
-export default function ToolManagementSection() {
+export default function ToolManagementSection({ view }: ToolManagementSectionProps) {
   const { t } = useTranslation();
-  const [toolView, setToolView] = useState<ToolView>("builtin");
   const [searchInput, setSearchInput] = useState("");
   const [query, setQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -117,6 +119,11 @@ export default function ToolManagementSection() {
     });
   }, []);
 
+  const submitSearch = useCallback((value: string) => {
+    setQuery(value.trim());
+    setCurrentPage(1);
+  }, []);
+
   const refreshToolAssets = useCallback(async () => {
     setToolLoading(true);
     try {
@@ -150,18 +157,18 @@ export default function ToolManagementSection() {
   }, [listOptions, t]);
 
   useEffect(() => {
-    if (toolView === "builtin") {
+    if (view === "builtin") {
       void refreshToolAssets();
       return;
     }
     void refreshMcpServers();
-  }, [refreshMcpServers, refreshToolAssets, toolView]);
+  }, [refreshMcpServers, refreshToolAssets, view]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [query, toolView]);
+  }, [query, view]);
 
-  const activeTotal = toolView === "mcp" ? mcpListTotal : toolListTotal;
+  const activeTotal = view === "mcp" ? mcpListTotal : toolListTotal;
 
   useEffect(() => {
     const maxPage = Math.max(1, Math.ceil(activeTotal / pageSize));
@@ -546,13 +553,24 @@ export default function ToolManagementSection() {
     mcpToolIds.some((toolId) => selectedMcpToolSet.has(toolId)) && !allMcpToolsSelected;
 
   return (
-    <div className="model-provider-tool-management-section">
+    <section className="model-provider-service-category model-provider-tool-management-section">
       <div className="model-provider-tool-management-head">
-        <div>
-          <h4>{t("modelProvider.external.toolManagementTitle")}</h4>
-          <p>{t("modelProvider.external.toolManagementDesc")}</p>
+        <div className="model-provider-service-category-head model-provider-tool-category-title">
+          <span>{view === "mcp" ? <CloudServerOutlined /> : <ToolOutlined />}</span>
+          <div>
+            <h3>
+              {view === "mcp"
+                ? t("modelProvider.external.mcpToolManagementTitle")
+                : t("modelProvider.external.toolManagementTitle")}
+            </h3>
+            <p>
+              {view === "mcp"
+                ? t("modelProvider.external.mcpToolManagementDesc")
+                : t("modelProvider.external.toolManagementDesc")}
+            </p>
+          </div>
         </div>
-        {toolView === "mcp" ? (
+        {view === "mcp" ? (
           <Button
             className="model-provider-tool-primary-button"
             icon={<PlusOutlined />}
@@ -565,52 +583,51 @@ export default function ToolManagementSection() {
       </div>
 
       <div className="model-provider-tool-toolbar">
-        <Segmented<ToolView>
-          options={[
-            {
-              label: t("admin.memoryBuiltinTools"),
-              value: "builtin",
-            },
-            {
-              label: "MCP",
-              value: "mcp",
-            },
-          ]}
-          value={toolView}
-          onChange={(value) => {
-            setToolView(value);
-            setCurrentPage(1);
-          }}
-        />
-        <Input.Search
+        <Input
           allowClear
           className="model-provider-tool-search"
-          placeholder={t("modelProvider.external.toolSearchPlaceholder")}
+          placeholder={
+            view === "mcp"
+              ? t("modelProvider.external.mcpToolSearchPlaceholder")
+              : t("modelProvider.external.toolSearchPlaceholder")
+          }
+          suffix={
+            <Tooltip title={t("common.search")}>
+              <Button
+                aria-label={t("common.search")}
+                className="model-provider-tool-search-button"
+                icon={<SearchOutlined />}
+                size="small"
+                type="text"
+                onClick={() => submitSearch(searchInput)}
+              />
+            </Tooltip>
+          }
           value={searchInput}
-          onChange={(event) => setSearchInput(event.target.value)}
-          onSearch={(value) => {
-            setQuery(value);
-            setCurrentPage(1);
+          onChange={(event) => {
+            const nextValue = event.target.value;
+            setSearchInput(nextValue);
+            if (!nextValue.trim()) {
+              submitSearch("");
+            }
+          }}
+          onPressEnter={(event) => {
+            submitSearch(event.currentTarget.value);
           }}
         />
-        <span className="model-provider-tool-count">
-          {toolView === "mcp"
-            ? t("admin.memoryMcpServerCount", { count: mcpListTotal })
-            : t("admin.memoryBuiltinToolCount", { count: toolListTotal })}
-        </span>
       </div>
 
-      <Spin spinning={toolView === "mcp" ? mcpLoading : toolLoading}>
-        {activeTotal === 0 && !(toolView === "mcp" ? mcpLoading : toolLoading) ? (
+      <Spin spinning={view === "mcp" ? mcpLoading : toolLoading}>
+        {activeTotal === 0 && !(view === "mcp" ? mcpLoading : toolLoading) ? (
           <div className="model-provider-managed-tool-empty">
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={toolView === "mcp" ? t("admin.memoryMcpEmpty") : t("admin.memoryEmpty")}
+              description={view === "mcp" ? t("admin.memoryMcpEmpty") : t("admin.memoryEmpty")}
             />
           </div>
         ) : (
           <div className="model-provider-service-grid model-provider-managed-tool-grid">
-            {toolView === "mcp"
+            {view === "mcp"
               ? mcpServers.map((server) => renderMcpServerCard(server))
               : toolAssets.map((tool) => renderBuiltInToolCard(tool))}
           </div>
@@ -855,6 +872,6 @@ export default function ToolManagementSection() {
           </div>
         ) : null}
       </Drawer>
-    </div>
+    </section>
   );
 }

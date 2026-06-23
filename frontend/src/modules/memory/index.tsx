@@ -179,12 +179,21 @@ const normalizeAutoEvoApplyStatus = (status?: string) =>
 const getAutoEvoStatusMeta = (status?: string) => {
   const normalizedStatus = normalizeAutoEvoApplyStatus(status);
   if (normalizedStatus === "running") {
-    return { color: "blue" as const, text: "正在自动进化" };
+    return {
+      color: "blue" as const,
+      textKey: "admin.memoryAutoEvoStatusRunning",
+    };
   }
   if (normalizedStatus === "failed") {
-    return { color: "red" as const, text: "自动进化执行失败" };
+    return {
+      color: "red" as const,
+      textKey: "admin.memoryAutoEvoStatusFailed",
+    };
   }
-  return { color: "blue" as const, text: "等待进化建议" };
+  return {
+    color: "blue" as const,
+    textKey: "admin.memoryAutoEvoStatusWaiting",
+  };
 };
 const hasDraftPreviewStatus = (record: ExperienceAsset) =>
   isPendingReviewStatus(record.reviewStatus);
@@ -3171,7 +3180,7 @@ export default function MemoryManagement() {
   const buildBackendDraftUserInstruct = (extraInstruction = "") => {
     const instructions = [
       activeProposal?.tab === "skills"
-        ? "请根据已接受的建议生成技能草稿。"
+        ? t("admin.memorySkillDraftDefaultInstruction")
         : "",
       extraInstruction.trim(),
     ].filter(Boolean);
@@ -4648,11 +4657,11 @@ export default function MemoryManagement() {
               .map((item) => item.trim())
               .filter(Boolean);
             if (normalizedNewAliases.some((alias) => alias === newGroupTerm)) {
-              throw new Error("词组归属不允许和其中一个词相同");
+              throw new Error(t("admin.memoryGlossaryGroupAliasDuplicate"));
             }
             const newGroupContent = (resolution?.newGroupContent ?? proposal.after.content).trim();
             if (newGroupTerm && newGroupContent && newGroupTerm === newGroupContent) {
-              throw new Error("内容不可以和词相同");
+              throw new Error(t("admin.memoryGlossaryContentSameAsTerm"));
             }
 
             const writeGroupIds = resolution?.writeGroupIds || [];
@@ -4815,7 +4824,7 @@ export default function MemoryManagement() {
                 <Tag color="blue">{t("admin.memoryBuiltinSkillEnabledTag")}</Tag>
               ) : null}
               {autoEvoStatusMeta ? (
-                <Tag color={autoEvoStatusMeta.color}>{autoEvoStatusMeta.text}</Tag>
+                <Tag color={autoEvoStatusMeta.color}>{t(autoEvoStatusMeta.textKey)}</Tag>
               ) : null}
               {showPendingTag ? (
                 <Tag color="orange">{t("admin.memoryDiffPendingTag")}</Tag>
@@ -5180,7 +5189,7 @@ export default function MemoryManagement() {
                 {record.title}
               </button>
               {autoEvoStatusMeta ? (
-                <Tag color={autoEvoStatusMeta.color}>{autoEvoStatusMeta.text}</Tag>
+                <Tag color={autoEvoStatusMeta.color}>{t(autoEvoStatusMeta.textKey)}</Tag>
               ) : null}
               {showPendingTag ? (
                 <Tag color="orange">{t("admin.memoryDiffPendingTag")}</Tag>

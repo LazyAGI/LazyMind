@@ -407,7 +407,7 @@ export default function MemoryReviewPage() {
                                   <strong>{`${index + 1}. ${suggestion.title || "-"}`}</strong>
                                   {isRemoveSuggestion ? (
                                     <span className="memory-backend-suggestion-delete-badge">
-                                      删除建议
+                                      {t("admin.memoryBackendSuggestionDeleteBadge")}
                                     </span>
                                   ) : null}
                                 </div>
@@ -474,7 +474,7 @@ export default function MemoryReviewPage() {
                         !backendSuggestionLoadMoreError &&
                         !backendSuggestionHasMore ? (
                           <span className="memory-backend-suggestion-loadmore-end">
-                            已展示全部建议
+                            {t("admin.memoryBackendSuggestionEnd")}
                           </span>
                         ) : null}
                       </div>

@@ -11,12 +11,11 @@ import {
   GoogleOutlined,
   InfoCircleFilled,
   PlusOutlined,
+  ReadOutlined,
   RightOutlined,
   ScanOutlined,
   SearchOutlined,
-  ToolOutlined,
 } from "@ant-design/icons";
-import { useOutletContext } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
 import {
@@ -27,7 +26,7 @@ import {
 } from "../api";
 import ToolManagementSection from "../components/ToolManagementSection";
 
-type ServiceCategoryKey = "parsing" | "tools";
+type ServiceCategoryKey = "parsing" | "search" | "academic";
 type ServiceProviderCategory = "ocr" | "search";
 type ServiceTone = "blue" | "cyan" | "green" | "red" | "violet";
 
@@ -52,15 +51,15 @@ interface ExternalServiceFormValues {
   searchEngineId?: string;
 }
 
-interface ModelProviderOutletContext {
-  externalServiceSearchValue?: string;
-}
-
 interface BaseUrlPreset {
   key?: string;
   labelKey?: string;
   descKey?: string;
   value: string;
+}
+
+interface ExternalServicesPageProps {
+  section?: "parsing" | "tools";
 }
 
 interface ApiExternalProvider {
@@ -107,10 +106,16 @@ const serviceCategories: Array<{
     icon: <CloudServerOutlined />,
   },
   {
-    key: "tools",
+    key: "search",
     titleKey: "modelProvider.external.toolsCategoryTitle",
     descKey: "modelProvider.external.toolsCategoryDesc",
-    icon: <ToolOutlined />,
+    icon: <SearchOutlined />,
+  },
+  {
+    key: "academic",
+    titleKey: "modelProvider.external.academicCategoryTitle",
+    descKey: "modelProvider.external.academicCategoryDesc",
+    icon: <ReadOutlined />,
   },
 ];
 
@@ -144,7 +149,7 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     name: "Bing Search",
     description: "",
     summary: "",
-    category: "tools",
+    category: "search",
     fields: ["apiKey"],
     logo: <SearchOutlined />,
     logoUrl: "https://www.google.com/s2/favicons?domain=bing.com&sz=96",
@@ -156,7 +161,7 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     name: "Google Custom Search",
     description: "",
     summary: "",
-    category: "tools",
+    category: "search",
     fields: ["apiKey", "searchEngineId"],
     logo: <GoogleOutlined />,
     logoUrl: "https://www.google.com/s2/favicons?domain=google.com&sz=96",
@@ -168,7 +173,7 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     name: "Bocha",
     description: "",
     summary: "",
-    category: "tools",
+    category: "search",
     fields: ["apiKey"],
     logo: <SearchOutlined />,
     logoUrl: "https://www.google.com/s2/favicons?domain=bochaai.com&sz=96",
@@ -180,7 +185,7 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     name: "Tavily",
     description: "",
     summary: "",
-    category: "tools",
+    category: "search",
     fields: ["apiKey"],
     logo: <CompassOutlined />,
     logoUrl: "https://www.google.com/s2/favicons?domain=tavily.com&sz=96",
@@ -192,7 +197,7 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     name: "Sciverse",
     description: "",
     summary: "",
-    category: "tools",
+    category: "academic",
     fields: ["apiKey"],
     logo: <SearchOutlined />,
     logoUrl: "https://www.google.com/s2/favicons?domain=sciverse.space&sz=96",
@@ -207,7 +212,8 @@ const fallbackServiceByName = new Map<string, ExternalServiceConfig>(
 
 const serviceToneByCategory: Record<ServiceCategoryKey, ServiceTone> = {
   parsing: "blue",
-  tools: "green",
+  search: "green",
+  academic: "violet",
 };
 
 function normalizeProviderName(value: string) {
@@ -271,7 +277,10 @@ function mapProviderCategory(category?: string): ServiceCategoryKey {
   if (normalizedCategory === "ocr" || normalizedCategory === "parse" || normalizedCategory === "parsing") {
     return "parsing";
   }
-  return "tools";
+  if (normalizedCategory === "datasource" || normalizedCategory === "academic") {
+    return "academic";
+  }
+  return "search";
 }
 
 function getProviderLogoUrl(name: string) {
@@ -283,14 +292,27 @@ function getProviderLogoUrl(name: string) {
 }
 
 function getProviderIcon(category: ServiceCategoryKey) {
-  return category === "parsing" ? <ScanOutlined /> : <ToolOutlined />;
+  if (category === "parsing") {
+    return <ScanOutlined />;
+  }
+  return category === "academic" ? <ReadOutlined /> : <SearchOutlined />;
 }
 
 function getServiceFields(provider: ApiExternalProvider, category: ServiceCategoryKey): Array<keyof ExternalServiceFormValues> {
-  if (category === "tools") {
+  if (category !== "parsing") {
     return ["apiKey"];
   }
   return provider.base_url ? ["baseUrl", "apiKey"] : ["apiKey"];
+}
+
+function serviceMatchesKeyword(service: ExternalServiceConfig, keyword: string) {
+  const normalizedKeyword = keyword.trim().toLowerCase();
+  if (!normalizedKeyword) {
+    return true;
+  }
+  return [service.name, service.description, service.summary].some((value) =>
+    value.toLowerCase().includes(normalizedKeyword),
+  );
 }
 
 function getBaseUrlPresetLabelKey(serviceName: string, presetKey?: string) {
@@ -487,16 +509,19 @@ function ExternalServiceLogo({ service }: { service: ExternalServiceConfig }) {
   );
 }
 
-export default function ExternalServicesPage() {
+export default function ExternalServicesPage({ section = "parsing" }: ExternalServicesPageProps) {
   const { t } = useTranslation();
-  const { externalServiceSearchValue = "" } = useOutletContext<ModelProviderOutletContext>();
   const [form] = Form.useForm<Record<string, ExternalServiceFormValues>>();
   const [activeService, setActiveService] = useState<ExternalServiceConfig | null>(null);
   const [services, setServices] = useState<ExternalServiceConfig[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
-  const normalizedSearchValue = externalServiceSearchValue.trim();
+  const normalizedSearchValue = "";
+  const [categorySearchValues, setCategorySearchValues] = useState<Record<"parsing" | "search", string>>({
+    parsing: "",
+    search: "",
+  });
 
   // Multi-key state
   const [keyList, setKeyList] = useState<string[]>([]);
@@ -876,13 +901,130 @@ export default function ExternalServicesPage() {
   const categorizedServices = useMemo(() => {
     const byCategory: Record<ServiceCategoryKey, ExternalServiceConfig[]> = {
       parsing: [],
-      tools: [],
+      search: [],
+      academic: [],
     };
     services.forEach((service) => {
       byCategory[service.category].push(service);
     });
     return byCategory;
   }, [services]);
+
+  const filteredCategorizedServices = useMemo(() => {
+    return {
+      parsing: categorizedServices.parsing.filter((service) =>
+        serviceMatchesKeyword(service, categorySearchValues.parsing),
+      ),
+      search: categorizedServices.search.filter((service) =>
+        serviceMatchesKeyword(service, categorySearchValues.search),
+      ),
+      academic: categorizedServices.academic,
+    };
+  }, [categorizedServices, categorySearchValues]);
+
+  const renderCategorySearch = (categoryKey: ServiceCategoryKey) => {
+    if (categoryKey !== "parsing" && categoryKey !== "search") {
+      return null;
+    }
+
+    return (
+      <Input
+        allowClear
+        className="model-provider-category-search"
+        prefix={<SearchOutlined />}
+        placeholder={
+          categoryKey === "parsing"
+            ? t("modelProvider.external.parsingSearchPlaceholder")
+            : t("modelProvider.external.searchEngineSearchPlaceholder")
+        }
+        value={categorySearchValues[categoryKey]}
+        onChange={(event) =>
+          setCategorySearchValues((previous) => ({
+            ...previous,
+            [categoryKey]: event.target.value,
+          }))
+        }
+      />
+    );
+  };
+
+  const renderServiceCategory = (categoryKey: ServiceCategoryKey) => {
+    const category = serviceCategories.find((item) => item.key === categoryKey);
+    if (!category) {
+      return null;
+    }
+
+    const categoryServices = categorizedServices[categoryKey];
+    const visibleServices = filteredCategorizedServices[categoryKey];
+    if (!categoryServices.length) {
+      return null;
+    }
+
+    return (
+      <section className="model-provider-service-category" key={category.key}>
+        <div className="model-provider-service-category-top">
+          <div className="model-provider-service-category-head">
+            <span>{category.icon}</span>
+            <div>
+              <h3>{t(category.titleKey)}</h3>
+              <p>{t(category.descKey)}</p>
+            </div>
+          </div>
+          {renderCategorySearch(category.key)}
+        </div>
+
+        {visibleServices.length ? (
+          <div className="model-provider-service-grid">
+            {visibleServices.map((service) => (
+              <button
+                aria-label={t("modelProvider.external.configModalTitle", { name: service.name })}
+                className="model-provider-service-card"
+                key={service.key}
+                onClick={() => openConfigModal(service)}
+                type="button"
+              >
+                <ExternalServiceLogo service={service} />
+                <div className="model-provider-service-card-copy">
+                  <div>
+                    <div className="model-provider-service-title-row">
+                      <h4>{service.name}</h4>
+                      <Tag
+                        className="model-provider-service-status"
+                        color={
+                          service.status === "configured"
+                            ? "success"
+                            : service.status === "tbd"
+                              ? "warning"
+                              : "default"
+                        }
+                      >
+                        {t(`modelProvider.external.status.${service.status}`)}
+                      </Tag>
+                    </div>
+                    <Tooltip placement="topLeft" title={service.summary}>
+                      <span className="model-provider-service-summary-wrap">
+                        <p className="model-provider-service-summary">{service.summary}</p>
+                      </span>
+                    </Tooltip>
+                  </div>
+                </div>
+                <span className="model-provider-service-card-arrow" aria-hidden="true">
+                  <RightOutlined />
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="model-provider-category-empty">
+            <Empty
+              description={t("modelProvider.external.noMatchedServices")}
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+            />
+          </div>
+        )}
+      </section>
+    );
+  };
 
   return (
     <div className="model-provider-service-page">
@@ -910,72 +1052,16 @@ export default function ExternalServicesPage() {
             </div>
           ) : null}
 
-          {serviceCategories.map((category) => {
-            const categoryTitle = t(category.titleKey);
-            const categoryDesc = t(category.descKey);
-            const categoryServices = categorizedServices[category.key];
-
-            if (!categoryServices.length && category.key !== "tools") {
-              return null;
-            }
-
-            return (
-              <section className="model-provider-service-category" key={category.key}>
-                <div className="model-provider-service-category-head">
-                  <span>{category.icon}</span>
-                  <div>
-                    <h3>{categoryTitle}</h3>
-                    <p>{categoryDesc}</p>
-                  </div>
-                </div>
-
-                {categoryServices.length ? (
-                  <div className="model-provider-service-grid">
-                    {categoryServices.map((service) => (
-                      <button
-                        aria-label={t("modelProvider.external.configModalTitle", { name: service.name })}
-                        className="model-provider-service-card"
-                        key={service.key}
-                        onClick={() => openConfigModal(service)}
-                        type="button"
-                      >
-                        <ExternalServiceLogo service={service} />
-                        <div className="model-provider-service-card-copy">
-                          <div>
-                            <div className="model-provider-service-title-row">
-                              <h4>{service.name}</h4>
-                              <Tag
-                                className="model-provider-service-status"
-                                color={
-                                  service.status === "configured"
-                                    ? "success"
-                                    : service.status === "tbd"
-                                      ? "warning"
-                                      : "default"
-                                }
-                              >
-                                {t(`modelProvider.external.status.${service.status}`)}
-                              </Tag>
-                            </div>
-                            <Tooltip placement="topLeft" title={service.summary}>
-                              <span className="model-provider-service-summary-wrap">
-                                <p className="model-provider-service-summary">{service.summary}</p>
-                              </span>
-                            </Tooltip>
-                          </div>
-                        </div>
-                        <span className="model-provider-service-card-arrow" aria-hidden="true">
-                          <RightOutlined />
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-
-                {category.key === "tools" ? <ToolManagementSection /> : null}
-              </section>
-            );
-          })}
+          {section === "tools" ? (
+            <div className="model-provider-tools-substack">
+              {renderServiceCategory("search")}
+              {renderServiceCategory("academic")}
+              <ToolManagementSection view="builtin" />
+              <ToolManagementSection view="mcp" />
+            </div>
+          ) : (
+            renderServiceCategory("parsing")
+          )}
         </div>
       </Spin>
 

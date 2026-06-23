@@ -71,6 +71,38 @@ import "./index.scss";
 
 const { Search } = Input;
 
+async function writeTextToClipboard(text: string) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.readOnly = true;
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  let copied = false;
+  try {
+    if (typeof document.execCommand === "function") {
+      copied = document.execCommand("copy");
+    }
+  } finally {
+    document.body.removeChild(textarea);
+  }
+
+  if (copied) {
+    return;
+  }
+
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  throw new Error("Copy command failed");
+}
+
 const Detail = () => {
   const { t } = useTranslation();
   const knowledgeListRef = useRef<IKnowledgeListRef>(null);
@@ -341,7 +373,7 @@ const Detail = () => {
                 style={{ color: "var(--color-text-description)" }}
                 onClick={async () => {
                   try {
-                    await navigator.clipboard.writeText(detail?.dataset_id || "");
+                    await writeTextToClipboard(detail?.dataset_id || "");
                     message.success(t("knowledge.copySuccess"));
                   } catch {
                     message.error(t("knowledge.copyFailedManual"));
