@@ -399,6 +399,7 @@ services:
       target: doc
       args:
         <<: *mirror-args
+    restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
     expose:

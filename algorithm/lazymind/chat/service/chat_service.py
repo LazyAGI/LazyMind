@@ -266,6 +266,11 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         lazyllm.globals['active_tool_names'] |= set(plugin_stop_tools)
     agent_tools = build_agent_tools(active_configs)
     subagent_tools = _build_subagent_chat_tools(bool(has_subagents))
+    # SubAgent chat tools (create_subagent, list_subagents, …) are always active;
+    # add their names to the allowlist so the ToolGuard does not block them.
+    lazyllm.globals['active_tool_names'] |= {
+        getattr(fn, '__name__', '') for fn in subagent_tools if callable(fn)
+    }
     mcp_tools = _build_mcp_tools(mcp_config) if mcp_config else []
     all_tools = agent_tools + subagent_tools + plugin_tools + mcp_tools
     set_trace_context({

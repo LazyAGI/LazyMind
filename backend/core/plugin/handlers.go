@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -66,8 +67,9 @@ func signArtifactImagePath(raw json.RawMessage, contentType string) json.RawMess
 		return raw
 	}
 	// Always re-sign regardless of existing url — stored urls may have expired.
-	// External URL stored in path field — move it to url for consistent frontend handling.
-	if len(pathVal) >= 8 && (pathVal[:7] == "http://" || pathVal[:8] == "https://") {
+	// External or inline URL stored in path field — move it to url for consistent frontend handling.
+	if strings.HasPrefix(pathVal, "http://") || strings.HasPrefix(pathVal, "https://") ||
+		strings.HasPrefix(pathVal, "data:") {
 		m["url"] = pathVal
 		delete(m, "path")
 		out, err := json.Marshal(m)

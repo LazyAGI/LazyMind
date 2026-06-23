@@ -167,10 +167,10 @@ export function PluginSessionApi() {
         options,
       );
     },
-    patchSlotItem(sessionId: string, slotId: string, sortOrder: number, value: any, options?: RawAxiosRequestConfig) {
+    patchSlotItem(sessionId: string, slotId: string, sortOrder: number, value: any, contentType?: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.patch(
         `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/${sortOrder}`,
-        { value },
+        { value, ...(contentType ? { content_type: contentType } : {}) },
         options,
       );
     },

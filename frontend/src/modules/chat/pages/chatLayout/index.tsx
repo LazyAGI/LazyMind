@@ -22,11 +22,6 @@ import {
 } from "@/modules/chat/utils/request";
 import { draftStore } from "@/modules/chat/store/pluginPanel";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
-import {
-  useModelSelectionStore,
-  MODEL_API_LABELS,
-  parseModelSelectionFromModels,
-} from "@/modules/chat/store/modelSelection";
 import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import {
   CHAT_RESUME_CONVERSATION_KEY,
@@ -110,7 +105,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   });
 
   const { pendingMessage, clearPendingMessage } = useChatMessageStore();
-  const { getModelSelection, setModelSelection } = useModelSelectionStore();
 
   const chatRef = useRef<ChatImperativeProps>(null);
 
@@ -250,11 +244,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         setKnowledgeRefreshKey((key) => key + 1);
         setConversationId(resolvedId);
 
-        const modelSelection = parseModelSelectionFromModels(
-          (conversation as any)?.models,
-        );
-        setModelSelection(resolvedId, modelSelection);
-
         const list = buildChatMessageListFromHistory(history, {
           isGenerating,
         });
@@ -278,21 +267,19 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     callbacks: Record<string, (e: CustomEvent) => void>,
   ) {
     // Flush any pending slot drafts before sending so the AI sees the latest content.
-    await draftStore.flushAllDrafts(sessionId);
-
-    const modelSelection = getModelSelection(sessionId);
+    // Draft keys use the plugin session_id (not the conversation_id), so pass the
+    // plugin session_id when one is active; fall back to conversationId otherwise.
+    const activePluginSession = usePluginStore.getState().sessionByConversation[sessionId];
+    const draftSessionId = activePluginSession?.session_id ?? sessionId;
+    await draftStore.flushAllDrafts(draftSessionId);
 
     const hasUploadedFiles = input?.some(
       (q: Query) => q.input_type === "image" || q.input_type === "file",
     );
-    const useKnowledgeBase =
-      modelSelection === "value_engineering" || modelSelection === "both";
     const datasetList =
-      hasUploadedFiles || !useKnowledgeBase
+      hasUploadedFiles || !chatConfig?.knowledgeBaseId?.length
         ? []
-        : chatConfig?.knowledgeBaseId?.length
-          ? chatConfig.knowledgeBaseId.map((k) => ({ id: k }))
-          : [];
+        : chatConfig.knowledgeBaseId.map((k) => ({ id: k }));
 
     // Attach active plugin session context so Go/Python can inject advance_step
     // instead of cold-start trigger tools on follow-up messages.
@@ -346,12 +333,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             tags: chatConfig?.tags,
           },
         },
-        models:
-          modelSelection === "both"
-            ? [MODEL_API_LABELS.lazyMind, MODEL_API_LABELS.deepSeek]
-            : modelSelection === "value_engineering"
-              ? [MODEL_API_LABELS.lazyMind]
-              : [MODEL_API_LABELS.deepSeek],
+        models: ["LazyMind 大模型"],
         // enable_thinking: think ? true : false,
         stream: true,
         input,
@@ -424,13 +406,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         setChatConfigFn(tempData);
         setKnowledgeRefreshKey((key) => key + 1);
 
-        const modelSelection = parseModelSelectionFromModels(
-          (conversation as any)?.models,
-        );
-        if (resolvedId) {
-          setModelSelection(resolvedId, modelSelection);
-        }
-
         setConversationId(resolvedId);
 
         const history = historyRes.data.history;
@@ -442,7 +417,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       .finally(() => {
         setIsRestoringConversation(false);
       });
-  }, [setConversationId, setChatConfigFn, setModelSelection]);
+  }, [setConversationId, setChatConfigFn]);
 
   useEffect(() => {
     const handleConversationSelect = (event: Event) => {

@@ -37,7 +37,6 @@ export type ConversationHistoryRecord = Omit<
   };
 
 interface BuildChatMessageListOptions {
-  enableMultipleAnswers?: boolean;
   fallbackCreateTime?: string;
   isGenerating?: boolean;
   reverseHistory?: boolean;
@@ -99,7 +98,6 @@ export function buildChatMessageListFromHistory(
   options: BuildChatMessageListOptions = {},
 ) {
   const {
-    enableMultipleAnswers = true,
     fallbackCreateTime = "",
     isGenerating = false,
     reverseHistory = true,
@@ -158,10 +156,6 @@ export function buildChatMessageListFromHistory(
       record.result,
       record.reasoning_content,
     );
-    const secondSplitResult = splitThinkingContent(
-      record.second_result,
-      record.second_reasoning_content,
-    );
     const assistantMessage: any = {
       role: RoleTypes.ASSISTANT,
       reasoning_content: splitResult.reasoning_content,
@@ -175,31 +169,6 @@ export function buildChatMessageListFromHistory(
       feed_back: record.feed_back,
       thinking_time_s: record.thinking_time_s,
     };
-
-    if (enableMultipleAnswers && record.second_result && record.second_id) {
-      assistantMessage.answers = [
-        {
-          content: splitResult.content,
-          index: 0,
-          history_id: record.id,
-          reasoning_content: splitResult.reasoning_content,
-          raw_content: record.result || "",
-          sources: record.sources,
-          thinking_duration_s: record.thinking_time_s,
-        },
-        {
-          content: secondSplitResult.content,
-          index: 1,
-          history_id: record.second_id,
-          reasoning_content: secondSplitResult.reasoning_content,
-          raw_content: record.second_result || "",
-          sources: record.sources,
-          thinking_duration_s: record.second_thinking_time_s,
-        },
-      ];
-      assistantMessage.reasoning_content = "";
-      assistantMessage.delta = "";
-    }
 
     list.push(assistantMessage);
   });

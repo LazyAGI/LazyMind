@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo, createContext, useCo
 import ReactDOM from "react-dom";
 import type { SlotRevision, SlotVersionEntry } from "@/modules/chat/store/pluginPanel";
 import { usePluginStore, draftStore } from "@/modules/chat/store/pluginPanel";
-import { resolveCoreAssetUrl } from "@/modules/knowledge/utils/imageUrl";
+import { resolveCoreAssetUrl, resolveMarkdownImageUrlAsync } from "@/modules/knowledge/utils/imageUrl";
 import { buildDiffLines } from "@/modules/memory/shared";
 import { uploadFileInChunks } from "@/modules/chat/utils/chunkUpload";
 
@@ -238,7 +238,7 @@ export function SlotVersionPopover({
     setUploading(true);
     try {
       const storedPath = await uploadFileInChunks(file);
-      await patchSlotItemValue(sessionId, slotId, sortOrder, { path: storedPath });
+      await patchSlotItemValue(sessionId, slotId, sortOrder, { path: storedPath }, isImage ? 'image' : undefined);
       setOpen(false);
       onRollbackDone?.();
     } catch {
@@ -532,7 +532,20 @@ export function SlotImage({
   onReference,
 }: SlotImageProps) {
   const raw = slot.artifact_value;
-  const url: string = raw?.url ? resolveCoreAssetUrl(raw.url) : (raw?.path ? resolveCoreAssetUrl(raw.path) : '');
+  const rawPath: string = raw?.url ?? raw?.path ?? '';
+  const syncUrl: string = rawPath ? resolveCoreAssetUrl(rawPath) : '';
+  // For absolute upload paths that resolveCoreAssetUrl cannot serve directly,
+  // asynchronously sign the path and replace the URL.
+  const [resolvedUrl, setResolvedUrl] = useState<string>(syncUrl);
+  useEffect(() => {
+    setResolvedUrl(syncUrl);
+    // syncUrl === rawPath means resolveCoreAssetUrl returned it unchanged (not http/static-files),
+    // so it's an absolute filesystem path that needs signing via the core API.
+    if (rawPath && syncUrl === rawPath && !rawPath.startsWith('http')) {
+      resolveMarkdownImageUrlAsync(rawPath).then(setResolvedUrl).catch(() => {});
+    }
+  }, [rawPath, syncUrl]);
+  const url = resolvedUrl;
   const alt: string = slot.caption ?? raw?.alt ?? '';
   const { deleteSlotItem, patchSlotCaption, patchSlotItemValue } = usePluginStore();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -554,7 +567,7 @@ export function SlotImage({
     setUploading(true);
     try {
       const storedPath = await uploadFileInChunks(file);
-      await patchSlotItemValue(sessionId, slotId, slot.sort_order, { path: storedPath });
+      await patchSlotItemValue(sessionId, slotId, slot.sort_order, { path: storedPath }, 'image');
       onRefresh?.();
     } catch {
       // upload failure — no-op, user can retry

@@ -13,10 +13,10 @@ transitions:
       condition: "Cold start — always enter subject analysis first."
 
   analyze_subject:
-    - to: collect_material
+    - to: collect_materials
       condition: "Subject analysis complete — collect reference materials."
 
-  collect_material:
+  collect_materials:
     - to: optimize_prompt
       condition: "All materials collected — proceed to prompt optimization."
 
@@ -57,7 +57,7 @@ steps:
       subject_analysis artifact must be saved and contain at least 50 words covering
       subjects/items to collect, artistic style, and mood/lighting hints.
 
-  collect_material:
+  collect_materials:
     label: Collect Reference Materials
     # This step has a list-cardinality slot (material_images).
     #
@@ -80,8 +80,10 @@ steps:
       Your task:
       - Unless runtime_instruction restricts you to specific items, collect one reference
         image URL for each subject item identified in the analysis.
-      - For each item, call:
+      - For each item, call image_search_tool to obtain image URLs, then immediately call:
           save_artifact(key='material_image', content_type='image', value=<url>)
+        using the EXACT URL returned by image_search_tool. Never fabricate, substitute,
+        or look up alternative URLs — always use what image_search_tool returns.
         If you are doing a partial retry for item at a specific position, also pass
           list_index=<position>
         so that only that slot entry is replaced.
@@ -147,7 +149,8 @@ steps:
 
       Steps:
       1. Call generate_image_tool(prompt=<optimized_prompt>) to create the image.
-      2. Save the image URL:
+      2. Save the EXACT URL returned by generate_image_tool — do not fabricate or
+         substitute any URL:
            save_artifact(key='generated_image_url', content_type='image', value=<url>)
       3. Stop after saving.
     tools:

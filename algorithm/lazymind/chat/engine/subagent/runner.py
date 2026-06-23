@@ -222,7 +222,7 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
     of this list — they are injected as mandatory base tools in _build_subagent_tools.
     Names of base tools in the explicit list are silently ignored (already present).
     """
-    _BASE_TOOL_NAMES = {'save_artifact', 'get_artifact', 'list_artifacts', 'list_knowledge_bases'}
+    _BASE_TOOL_NAMES = {'save_artifact', 'get_artifact', 'list_artifacts', 'list_knowledge_bases', 'read_user_attachment'}
     if explicit:
         name_list = [str(n).strip() for n in explicit if str(n).strip() and str(n).strip() not in _BASE_TOOL_NAMES]
         # Build lookup from DEFAULT_TOOLS
@@ -255,9 +255,10 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
 def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
     """Combine mandatory SubAgent infra tools with optional domain tools.
 
-    save_artifact, get_artifact, list_artifacts, and list_knowledge_bases are
-    always included regardless of the explicit tools list — they are the SubAgent's
-    core interface and must never be stripped by plugin tool configurations.
+    save_artifact, get_artifact, list_artifacts, list_knowledge_bases, and
+    read_user_attachment are always included regardless of the explicit tools list —
+    they are the SubAgent's core interface and must never be stripped by plugin tool
+    configurations.
     """
     base = [
         subagent_tools.save_artifact,

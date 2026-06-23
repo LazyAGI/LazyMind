@@ -1432,6 +1432,66 @@ func handlePluginStepCreated(
 	}
 }
 
+// resolveRevisionEntry returns the text summary for a single slot revision.
+// Priority: human artifact > sub_agent artifact > placeholder.
+// If the revision has a HumanArtifactID, the content is read from plugin_human_artifacts;
+// otherwise the sub_agent_artifact identified by (taskID, artifactKey) is used.
+func resolveRevisionEntry(ctx context.Context, db *gorm.DB, rev *orm.PluginSlotRevision, taskID string, maxChars int) string {
+	if rev.HumanArtifactID != nil {
+		var ha orm.PluginHumanArtifact
+		if db.WithContext(ctx).Where("id = ?", *rev.HumanArtifactID).First(&ha).Error == nil {
+			realCT := plugin.ResolveContentType(ha.ContentType, ha.Value)
+			if ha.Caption != nil && *ha.Caption != "" {
+				return *ha.Caption
+			}
+			if realCT == "file" {
+				var v map[string]any
+				if json.Unmarshal(ha.Value, &v) == nil {
+					if fn, ok := v["filename"].(string); ok && fn != "" {
+						return "[文件: " + fn + "] (by user)"
+					}
+				}
+				return "[文件] (by user)"
+			}
+			val := string(ha.Value)
+			if len(val) > maxChars {
+				val = val[:maxChars]
+			}
+			return val + " (by user)"
+		}
+	}
+	if taskID == "" {
+		return ""
+	}
+	var art orm.SubAgentArtifact
+	if db.WithContext(ctx).
+		Where("task_id = ? AND artifact_key = ? AND hidden = ?", taskID, rev.ArtifactKey, false).
+		Order("seq DESC").First(&art).Error != nil {
+		return ""
+	}
+	realCT := plugin.ResolveContentType(art.ContentType, art.Value)
+	if art.Caption != nil && *art.Caption != "" {
+		return *art.Caption
+	}
+	if realCT == "file" {
+		var v map[string]any
+		if json.Unmarshal(art.Value, &v) == nil {
+			if fn, ok := v["filename"].(string); ok && fn != "" {
+				return "[文件: " + fn + "]"
+			}
+		}
+		return "[文件]"
+	}
+	if (realCT == "text" || realCT == "json") && isOffloadedArtifact(art.Value) {
+		return "[大文本，已存档]"
+	}
+	val := string(art.Value)
+	if len(val) > maxChars {
+		val = val[:maxChars]
+	}
+	return val
+}
+
 // buildArtifactSummary constructs artifact_summary and visible_sort_order_map for the AI context.
 // It loads the selected slot revisions for sessionID, resolves artifact values, truncates them,
 // and returns them as maps ready to embed in plugin_context.
@@ -1452,12 +1512,6 @@ func buildArtifactSummary(ctx context.Context, db *gorm.DB, sessionID string) (m
 	// Load slot order rows to compute sort_order.
 	var orders []orm.PluginSlotOrder
 	db.WithContext(ctx).Where("session_id = ?", sessionID).Find(&orders)
-	orderBySlot := make(map[string][]int, len(orders))
-	for _, o := range orders {
-		var list []int
-		_ = json.Unmarshal(o.OrderList, &list)
-		orderBySlot[o.SlotID] = list
-	}
 
 	// Build step → task_id map.
 	type stepKey struct {
@@ -1503,40 +1557,9 @@ func buildArtifactSummary(ctx context.Context, db *gorm.DB, sessionID string) (m
 			}
 			sk := stepKey{rev.StepID, rev.Attempt}
 			taskID := taskIDByStep[sk]
-			if taskID == "" {
+			entry := resolveRevisionEntry(ctx, db, rev, taskID, defaultMaxChars)
+			if entry == "" {
 				continue
-			}
-			var art orm.SubAgentArtifact
-			if err := db.WithContext(ctx).
-				Where("task_id = ? AND artifact_key = ? AND hidden = ?", taskID, rev.ArtifactKey, false).
-				Order("seq DESC").First(&art).Error; err != nil {
-				continue
-			}
-			var entry string
-			realCT := plugin.ResolveContentType(art.ContentType, art.Value)
-			if art.Caption != nil && *art.Caption != "" {
-				entry = *art.Caption
-			} else if realCT == "file" {
-				// Offloaded binary file — use filename as summary.
-				var v map[string]any
-				if json.Unmarshal(art.Value, &v) == nil {
-					if fn, ok := v["filename"].(string); ok && fn != "" {
-						entry = "[文件: " + fn + "]"
-					} else {
-						entry = "[文件]"
-					}
-				} else {
-					entry = "[文件]"
-				}
-			} else if (realCT == "text" || realCT == "json") && isOffloadedArtifact(art.Value) {
-				// Large text/json offloaded to workspace — can't inline; use placeholder.
-				entry = "[大文本，已存档]"
-			} else {
-				val := string(art.Value)
-				if len(val) > defaultMaxChars {
-					val = val[:defaultMaxChars]
-				}
-				entry = val
 			}
 			existing, _ := summary[rev.ArtifactKey].([]string)
 			summary[rev.ArtifactKey] = append(existing, entry)
@@ -1552,38 +1575,9 @@ func buildArtifactSummary(ctx context.Context, db *gorm.DB, sessionID string) (m
 		}
 		sk := stepKey{rev.StepID, rev.Attempt}
 		taskID := taskIDByStep[sk]
-		if taskID == "" {
+		entry := resolveRevisionEntry(ctx, db, rev, taskID, defaultMaxChars)
+		if entry == "" {
 			continue
-		}
-		var art orm.SubAgentArtifact
-		if err := db.WithContext(ctx).
-			Where("task_id = ? AND artifact_key = ? AND hidden = ?", taskID, rev.ArtifactKey, false).
-			Order("seq DESC").First(&art).Error; err != nil {
-			continue
-		}
-		var entry string
-		realCT := plugin.ResolveContentType(art.ContentType, art.Value)
-		if art.Caption != nil && *art.Caption != "" {
-			entry = *art.Caption
-		} else if realCT == "file" {
-			var v map[string]any
-			if json.Unmarshal(art.Value, &v) == nil {
-				if fn, ok := v["filename"].(string); ok && fn != "" {
-					entry = "[文件: " + fn + "]"
-				} else {
-					entry = "[文件]"
-				}
-			} else {
-				entry = "[文件]"
-			}
-		} else if (realCT == "text" || realCT == "json") && isOffloadedArtifact(art.Value) {
-			entry = "[大文本，已存档]"
-		} else {
-			val := string(art.Value)
-			if len(val) > defaultMaxChars {
-				val = val[:defaultMaxChars]
-			}
-			entry = val
 		}
 		// Wrap in a slice so artifact_summary is always []string regardless of cardinality.
 		summary[rev.ArtifactKey] = []string{entry}
