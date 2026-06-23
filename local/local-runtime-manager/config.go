@@ -14,7 +14,7 @@ const (
 	localDownTimeoutEnvVar    = "LAZYMIND_LOCAL_DOWN_TIMEOUT"
 	defaultProfile            = "linux-browser"
 	processComposeVersion     = 1
-	defaultProcessComposePort = 18080
+	defaultProcessComposePort = 19080
 	defaultLocalUpTimeout     = 30 * 60
 	defaultLocalDownTimeout   = 2 * 60
 	stateFileName             = "runtime-state.json"
