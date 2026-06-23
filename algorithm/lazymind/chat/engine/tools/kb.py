@@ -429,6 +429,7 @@ class KBToolGroup:
     ) -> Dict[str, Any]:
         """Search for exact keyword or phrase matches within a specific document.
 
+        Use when the user names a document file — pass it as ``file_name``.
         Performs full-text keyword matching inside one target document,
         useful for finding all occurrences of a term or checking whether a
         document mentions something specific.
