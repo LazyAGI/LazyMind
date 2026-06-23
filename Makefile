@@ -104,7 +104,15 @@ export LAZYMIND_RESET_ALL_ON_STARTUP ?= false
 export LAZYLLM_ALGO_REGISTER_POLICY ?= none
 # Runtime mode gates local/desktop-only compose overrides. Cloud/server remains
 # the default when unset. Local mode currently uses SQLite for short-lived state.
-LAZYMIND_RUNTIME_MODE := $(if $(strip $(LAZYMIND_RUNTIME_MODE)),$(strip $(LAZYMIND_RUNTIME_MODE)),cloud)
+_LAZYMIND_RUNTIME_MODE_RAW := $(strip $(LAZYMIND_RUNTIME_MODE))
+_LAZYMIND_STATE_BACKEND_RAW := $(strip $(LAZYMIND_STATE_BACKEND))
+LAZYMIND_RUNTIME_MODE := $(if $(_LAZYMIND_RUNTIME_MODE_RAW),$(_LAZYMIND_RUNTIME_MODE_RAW),cloud)
+ifneq ($(and $(filter-out local,$(LAZYMIND_RUNTIME_MODE)),$(filter sqlite,$(_LAZYMIND_STATE_BACKEND_RAW))),)
+$(error LAZYMIND_STATE_BACKEND=sqlite requires LAZYMIND_RUNTIME_MODE=local)
+endif
+ifneq ($(and $(filter local,$(LAZYMIND_RUNTIME_MODE)),$(filter redis,$(_LAZYMIND_STATE_BACKEND_RAW))),)
+$(error LAZYMIND_RUNTIME_MODE=local requires LAZYMIND_STATE_BACKEND to be unset or sqlite)
+endif
 export LAZYMIND_RUNTIME_MODE
 
 # Core database

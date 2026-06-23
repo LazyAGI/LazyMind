@@ -41,5 +41,17 @@ services:
       LAZYMIND_STATE_BACKEND: sqlite
       LAZYMIND_STATE_SQLITE_DIR: /data/sqlite
 
+  lazyllm-parse-server:
+    volumes:
+      - sqlite-data:/data/sqlite
+
+  lazyllm-parse-worker:
+    volumes:
+      - sqlite-data:/data/sqlite
+
+  lazyllm-algo:
+    volumes:
+      - sqlite-data:/data/sqlite
+
 volumes:
   sqlite-data:
