@@ -44,7 +44,7 @@ class LocalFSToolGroup:
     # ── activation / path helpers ───────────────────────────────────────
 
     def _get_allowed_paths(self) -> List[str]:
-        paths = lazyllm.globals['agentic_config']['localfs_paths']
+        paths = lazyllm.globals['agentic_config'].get('localfs_paths')
         return [paths] if isinstance(paths, str) else paths
 
     def __key_source__(self) -> Any:
