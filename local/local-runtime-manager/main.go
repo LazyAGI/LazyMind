@@ -63,16 +63,6 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 			return err
 		}
 		return manager.Down(ctx, cfg, paths)
-	case "restart":
-		profile, repoRoot, err := parseCommonArgs("restart", args[1:], c.errOut)
-		if err != nil {
-			return err
-		}
-		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
-		if err != nil {
-			return err
-		}
-		return manager.Restart(ctx, cfg, paths)
 	case "status":
 		asJSON, profile, repoRoot, err := parseStatusArgs(args[1:], c.errOut)
 		if err != nil {
@@ -91,47 +81,6 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 			_, _ = io.WriteString(c.out, "\n")
 		}
 		return nil
-	case "logs":
-		service, tail, profile, repoRoot, err := parseLogArgs(args[1:], c.errOut)
-		if err != nil {
-			return err
-		}
-		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
-		if err != nil {
-			return err
-		}
-		_ = cfg
-		content, err := manager.Logs(ctx, paths, service, tail)
-		if err != nil {
-			return err
-		}
-		_, _ = io.WriteString(c.out, content)
-		if len(content) == 0 || content[len(content)-1] != '\n' {
-			_, _ = io.WriteString(c.out, "\n")
-		}
-		return nil
-	case "doctor":
-		_, repoRoot, err := parseCommonArgs("doctor", args[1:], c.errOut)
-		if err != nil {
-			return err
-		}
-		cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repoRoot)
-		if err != nil {
-			return err
-		}
-		_, err = manager.Doctor(ctx, cfg, paths)
-		return err
-	case "export-diagnostics":
-		output, profile, repoRoot, err := parseExportDiagnosticsArgs(args[1:], c.errOut)
-		if err != nil {
-			return err
-		}
-		cfg, paths, err := NewRuntimeConfig(profile, repoRoot)
-		if err != nil {
-			return err
-		}
-		_ = cfg
-		return manager.ExportDiagnostics(ctx, paths, output)
 	case "internal":
 		return c.runInternal(ctx, manager, args[1:])
 	default:
@@ -162,8 +111,6 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 		return manager.compose.ComposeUp(ctx, paths.RepoRoot, cfg.Profile)
 	case "compose-down":
 		return manager.compose.ComposeDown(ctx, paths.RepoRoot, cfg.Profile)
-	case "compose-ready":
-		return manager.compose.ComposeReady(ctx, paths.RepoRoot, cfg.Profile)
 	case "compose-services":
 		services, err := manager.compose.ComposeServices(ctx, paths.RepoRoot)
 		if err != nil {
@@ -207,51 +154,10 @@ func parseStatusArgs(args []string, out io.Writer) (bool, string, string, error)
 	return *asJSON, *profile, *repoRoot, nil
 }
 
-func parseLogArgs(args []string, out io.Writer) (string, int, string, string, error) {
-	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
-	fs.SetOutput(out)
-	service := fs.String("service", "docker-stack", "")
-	tail := fs.Int("tail", 200, "")
-	profile := fs.String("profile", defaultProfileValue(), "")
-	repoRoot := fs.String("repo-root", "", "")
-	if err := fs.Parse(args); err != nil {
-		return "", 0, "", "", err
-	}
-	if *service == "" {
-		return "", 0, "", "", fmt.Errorf("logs requires --service")
-	}
-	if len(fs.Args()) != 0 {
-		return "", 0, "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
-	}
-	return *service, *tail, *profile, *repoRoot, nil
-}
-
-func parseExportDiagnosticsArgs(args []string, out io.Writer) (string, string, string, error) {
-	fs := flag.NewFlagSet("export-diagnostics", flag.ContinueOnError)
-	fs.SetOutput(out)
-	output := fs.String("output", "", "")
-	profile := fs.String("profile", defaultProfileValue(), "")
-	repoRoot := fs.String("repo-root", "", "")
-	if err := fs.Parse(args); err != nil {
-		return "", "", "", err
-	}
-	if *output == "" {
-		return "", "", "", fmt.Errorf("export-diagnostics requires --output")
-	}
-	if len(fs.Args()) != 0 {
-		return "", "", "", fmt.Errorf("unexpected positional args: %v", fs.Args())
-	}
-	return *output, *profile, *repoRoot, nil
-}
-
 func (c *CLI) usage() {
 	_, _ = io.WriteString(c.out, "Usage:\n")
 	_, _ = io.WriteString(c.out, "  lazymind-local up --profile <profile>\n")
 	_, _ = io.WriteString(c.out, "  lazymind-local down --profile <profile>\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local restart --profile <profile>\n")
 	_, _ = io.WriteString(c.out, "  lazymind-local status --json\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local logs --service docker-stack --tail 200\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local doctor\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local export-diagnostics --output <path>\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local internal compose-up|compose-down|compose-ready|compose-services --profile <profile>\n")
+	_, _ = io.WriteString(c.out, "  lazymind-local internal compose-up|compose-down|compose-services --profile <profile>\n")
 }

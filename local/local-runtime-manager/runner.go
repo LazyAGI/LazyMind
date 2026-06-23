@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os/exec"
 )
@@ -68,8 +67,4 @@ func (r *ExecRunner) Stream(ctx context.Context, cmd Command, stdout io.Writer, 
 
 func (r *ExecRunner) String() string {
 	return "exec"
-}
-
-func formatCommand(name string, args []string) string {
-	return fmt.Sprintf("%s %v", name, args)
 }

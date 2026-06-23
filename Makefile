@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 lint-python lint-go test test-hermetic test-hermetic-setup test-hermetic-check build up up-build down clear reset-kb reset-all fresh-start file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop local-runtime-build local-runtime-up local-runtime-down local-runtime-status local-runtime-doctor local-runtime-diagnostics
+.PHONY: help lint install-flake8 lint-python lint-go test test-hermetic test-hermetic-setup test-hermetic-check build up up-build down clear reset-kb reset-all fresh-start file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop local-runtime-build local-runtime-up local-runtime-down local-runtime-status
 .DEFAULT_GOAL := help
 
 # Use legacy Docker builder by default to avoid pulling moby/buildkit:buildx-stable-1 from Docker Hub
@@ -10,7 +10,6 @@ PIP ?= $(PYTHON) -m pip
 GO ?= go
 LAZYMIND_LOCAL_PROFILE ?= linux-browser
 LAZYMIND_LOCAL_BIN ?= local/local-runtime-manager/lazymind-local
-LAZYMIND_LOCAL_DIAGNOSTICS_OUTPUT ?= .lazymind-local/diagnostics/runtime.zip
 LAZYMIND_LOCAL_GOCACHE ?= $(CURDIR)/.codex-gocache/go-build
 comma := ,
 
@@ -210,8 +209,6 @@ help:
 	@echo "  make local-runtime-up          - Build and run lazymind-local up (profile: $(LAZYMIND_LOCAL_PROFILE))"
 	@echo "  make local-runtime-down        - Run lazymind-local down (profile: $(LAZYMIND_LOCAL_PROFILE))"
 	@echo "  make local-runtime-status      - Run lazymind-local status --json (profile: $(LAZYMIND_LOCAL_PROFILE))"
-	@echo "  make local-runtime-doctor      - Run lazymind-local doctor (profile: $(LAZYMIND_LOCAL_PROFILE))"
-	@echo "  make local-runtime-diagnostics - Export diagnostics to .lazymind-local/diagnostics/runtime.zip"
 	@echo ""
 	@echo "Mirror profile (build-time source URLs):"
 	@echo "  make up MIRROR_PROFILE=cn    - Use domestic mirrors (default: Aliyun/goproxy.cn/daocloud)"
@@ -522,10 +519,3 @@ local-runtime-down:
 
 local-runtime-status:
 	@$(LAZYMIND_LOCAL_BIN) status --json --profile $(LAZYMIND_LOCAL_PROFILE)
-
-local-runtime-doctor: local-runtime-build
-	@$(LAZYMIND_LOCAL_BIN) doctor --profile $(LAZYMIND_LOCAL_PROFILE)
-
-local-runtime-diagnostics: local-runtime-build
-	@mkdir -p "$$(dirname $(LAZYMIND_LOCAL_DIAGNOSTICS_OUTPUT))"
-	@$(LAZYMIND_LOCAL_BIN) export-diagnostics --profile $(LAZYMIND_LOCAL_PROFILE) --output $(LAZYMIND_LOCAL_DIAGNOSTICS_OUTPUT)

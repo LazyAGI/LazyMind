@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -101,13 +100,6 @@ func newStateWithServiceStatus(state RuntimeState, serviceStatus string) Runtime
 	state.Services[processComposeServiceName] = ds
 	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	return state
-}
-
-func ensureStateDirsAndFile(ctx context.Context, paths RuntimePaths) error {
-	if err := paths.EnsureAllDirs(); err != nil {
-		return err
-	}
-	return nil
 }
 
 func readOrNewState(paths RuntimePaths, cfg RuntimeConfig) (RuntimeState, error) {

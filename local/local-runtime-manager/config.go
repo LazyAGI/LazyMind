@@ -1,9 +1,7 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -37,9 +35,6 @@ type RuntimePaths struct {
 	LogsDir         string
 	RunDir          string
 	GeneratedDir    string
-	DiagnosticsDir  string
-	DataDir         string
-	CacheDir        string
 	StateFile       string
 	RunDirTokenFile string
 	UpLockFile      string
@@ -69,21 +64,6 @@ func defaultProcessComposePortValue() int {
 		}
 	}
 	return defaultProcessComposePort
-}
-
-func availableProcessComposePort(preferred int) int {
-	if preferred <= 0 {
-		preferred = defaultProcessComposePortValue()
-	}
-	for port := preferred; port < preferred+100 && port < 65536; port++ {
-		ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
-		if err != nil {
-			continue
-		}
-		_ = ln.Close()
-		return port
-	}
-	return preferred
 }
 
 func resolveRepoRoot(start string) (string, error) {
@@ -127,9 +107,6 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		LogsDir:         filepath.Join(runtimeRoot, "logs"),
 		RunDir:          filepath.Join(runtimeRoot, "run"),
 		GeneratedDir:    filepath.Join(runtimeRoot, "generated"),
-		DiagnosticsDir:  filepath.Join(runtimeRoot, "diagnostics"),
-		DataDir:         filepath.Join(runtimeRoot, "data"),
-		CacheDir:        filepath.Join(runtimeRoot, "cache"),
 		StateFile:       filepath.Join(runtimeRoot, "state", stateFileName),
 		RunDirTokenFile: filepath.Join(runtimeRoot, "run", tokenFileName),
 		UpLockFile:      filepath.Join(runtimeRoot, "run", upLockFileName),
@@ -150,34 +127,11 @@ func (p RuntimePaths) EnsureAllDirs() error {
 		p.LogsDir,
 		p.RunDir,
 		p.GeneratedDir,
-		p.DiagnosticsDir,
-		p.DataDir,
-		p.CacheDir,
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func (p RuntimePaths) WritabilityChecks() error {
-	for _, d := range []string{
-		p.StateDir,
-		p.LogsDir,
-		p.RunDir,
-		p.GeneratedDir,
-		p.DiagnosticsDir,
-		p.DataDir,
-		p.CacheDir,
-	} {
-		f, err := os.CreateTemp(d, ".lazymind-local-writable-*")
-		if err != nil {
-			return errors.New(d + " is not writable")
-		}
-		_ = f.Close()
-		_ = os.Remove(f.Name())
 	}
 	return nil
 }

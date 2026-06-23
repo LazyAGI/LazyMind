@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 type ProcessComposeManager struct {
@@ -21,60 +23,54 @@ func NewProcessComposeManager(r CommandRunner, execPath string) *ProcessComposeM
 	return &ProcessComposeManager{runner: r, execPath: execPath}
 }
 
+type processComposeConfig struct {
+	Version         string                           `yaml:"version"`
+	IsStrict        bool                             `yaml:"is_strict"`
+	OrderedShutdown bool                             `yaml:"ordered_shutdown"`
+	Processes       map[string]processComposeProcess `yaml:"processes"`
+}
+
+type processComposeProcess struct {
+	WorkingDir  string                 `yaml:"working_dir"`
+	Command     string                 `yaml:"command"`
+	Shutdown    processComposeShutdown `yaml:"shutdown"`
+	LogLocation string                 `yaml:"log_location"`
+	Namespace   string                 `yaml:"namespace"`
+}
+
+type processComposeShutdown struct {
+	Command        string `yaml:"command"`
+	TimeoutSeconds int    `yaml:"timeout_seconds"`
+}
+
 func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, profile string, logPath string, tokenPath string, apiPort int) error {
 	commandForComposeUp := quoteShellArg(m.execPath) + " internal compose-up --profile " + profile
 	commandForComposeDown := quoteShellArg(m.execPath) + " internal compose-down --profile " + profile
 
-	_, err := fmt.Fprintf(w, "version: \"0.5\"\n")
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "is_strict: true\n")
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "ordered_shutdown: true\n\n")
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "processes:\n")
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "  %s:\n", processComposeServiceName)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "    working_dir: %s\n", quoteYAMLString(repoRoot))
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "    command: %s\n", quoteYAMLString(commandForComposeUp))
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "    shutdown:\n")
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "      command: %s\n", quoteYAMLString(commandForComposeDown))
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "      timeout_seconds: 60\n")
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "    log_location: %s\n", quoteYAMLString(logPath))
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "    namespace: container\n")
-	if err != nil {
-		return err
+	cfg := processComposeConfig{
+		Version:         "0.5",
+		IsStrict:        true,
+		OrderedShutdown: true,
+		Processes: map[string]processComposeProcess{
+			processComposeServiceName: {
+				WorkingDir: repoRoot,
+				Command:    commandForComposeUp,
+				Shutdown: processComposeShutdown{
+					Command:        commandForComposeDown,
+					TimeoutSeconds: 60,
+				},
+				LogLocation: logPath,
+				Namespace:   "container",
+			},
+		},
 	}
 	_ = tokenPath
 	_ = apiPort
+	out, err := yaml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(out)
 	return err
 }
 
@@ -134,21 +130,6 @@ func (m *ProcessComposeManager) Down(ctx context.Context, cfg RuntimeConfig, pat
 	return nil
 }
 
-func (m *ProcessComposeManager) ConfigDryRun(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
-	args := []string{
-		"--config", filepath.ToSlash(paths.GeneratedConfig),
-		"-p", strconv.Itoa(cfg.ProcessComposePort),
-		"--token-file", paths.RunDirTokenFile,
-		"--dry-run",
-		"up",
-	}
-	res, err := m.runner.Run(ctx, Command{Name: processComposeCommand(paths.RepoRoot), Args: args, Dir: paths.RepoRoot})
-	if err != nil {
-		return fmt.Errorf("process-compose dry-run failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
-	}
-	return nil
-}
-
 func (m *ProcessComposeManager) ProbeAPI(port int, timeout time.Duration) bool {
 	url := "http://127.0.0.1:" + strconv.Itoa(port) + "/api/v1/processes"
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -175,10 +156,6 @@ func quoteShellArg(value string) string {
 	}) == -1 {
 		return value
 	}
-	return strconv.Quote(value)
-}
-
-func quoteYAMLString(value string) string {
 	return strconv.Quote(value)
 }
 

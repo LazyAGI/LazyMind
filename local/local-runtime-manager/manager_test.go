@@ -1,7 +1,6 @@
 package main
 
 import (
-	"archive/zip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestResolveRepoRoot(t *testing.T) {
@@ -42,9 +43,9 @@ func TestParseRuntimeOverlay(t *testing.T) {
 	}
 	if err := os.WriteFile(overlay, []byte(`
 x-lazymind-local:
-  mode: local
+  mode: "local" # quoted values and inline comments should parse cleanly
   disabled_container_services:
-    - auth-service
+    - "auth-service"
     - core
 `), 0o644); err != nil {
 		t.Fatalf("write overlay: %v", err)
@@ -58,6 +59,31 @@ x-lazymind-local:
 	}
 	if len(cfg.DisabledContainerTypes) != 2 {
 		t.Fatalf("expected 2 disabled services got %d", len(cfg.DisabledContainerTypes))
+	}
+	if cfg.DisabledContainerTypes[0] != "auth-service" || cfg.DisabledContainerTypes[1] != "core" {
+		t.Fatalf("unexpected disabled services: %#v", cfg.DisabledContainerTypes)
+	}
+}
+
+func TestRuntimePathsEnsureAllDirsCreatesOnlyV1Directories(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure dirs: %v", err)
+	}
+	for _, dir := range []string{paths.StateDir, paths.LogsDir, paths.RunDir, paths.GeneratedDir} {
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			t.Fatalf("expected directory %s, info=%v err=%v", dir, info, err)
+		}
+	}
+	for _, name := range []string{"data", "cache", "diagnostics"} {
+		if _, err := os.Stat(filepath.Join(paths.RuntimeRoot, name)); !os.IsNotExist(err) {
+			t.Fatalf("expected %s not to be created, err=%v", name, err)
+		}
 	}
 }
 
@@ -147,20 +173,34 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 		t.Fatalf("write generated config: %v", err)
 	}
 	out := b.String()
-	if !strings.Contains(out, "processes:") {
-		t.Fatal("missing processes section")
+	var parsed processComposeConfig
+	if err := yaml.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("generated config is not valid yaml: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "  "+processComposeServiceName+":") {
+	proc, ok := parsed.Processes[processComposeServiceName]
+	if !ok {
 		t.Fatal("missing docker-stack process")
 	}
-	if !strings.Contains(out, "internal compose-up --profile "+profile) {
-		t.Fatal("missing command")
+	if parsed.Version != "0.5" || !parsed.IsStrict || !parsed.OrderedShutdown {
+		t.Fatalf("unexpected root config: %#v", parsed)
 	}
-	if !strings.Contains(out, fmt.Sprintf("shutdown:")) {
-		t.Fatal("missing shutdown section")
+	if proc.WorkingDir != repo {
+		t.Fatalf("unexpected working dir %q", proc.WorkingDir)
 	}
-	if !strings.Contains(out, "log_location: "+fmt.Sprintf("%q", logPath)) {
-		t.Fatal("missing log location")
+	if !strings.Contains(proc.Command, "internal compose-up --profile "+profile) {
+		t.Fatalf("missing compose-up command: %q", proc.Command)
+	}
+	if !strings.Contains(proc.Shutdown.Command, "internal compose-down --profile "+profile) {
+		t.Fatalf("missing compose-down command: %q", proc.Shutdown.Command)
+	}
+	if proc.Shutdown.TimeoutSeconds != 60 {
+		t.Fatalf("unexpected shutdown timeout %d", proc.Shutdown.TimeoutSeconds)
+	}
+	if proc.LogLocation != logPath {
+		t.Fatalf("unexpected log location %q", proc.LogLocation)
+	}
+	if proc.Namespace != "container" {
+		t.Fatalf("unexpected namespace %q", proc.Namespace)
 	}
 	if strings.Contains(out, "readiness_probe:") {
 		t.Fatal("generated config should not include process-compose readiness_probe")
@@ -221,7 +261,7 @@ func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
 		assertContains(t, cmd.Args, "-D")
 		assertContains(t, cmd.Args, "--ordered-shutdown")
 		assertContains(t, cmd.Args, "-t=false")
-		assertContains(t, cmd.Args, "-p")
+		assertStringArgAfter(t, cmd.Args, "-p", strconv.Itoa(defaultProcessComposePort))
 		return CommandResult{}, nil
 	}, func(cmd Command) (CommandResult, error) {
 		assertCommandContainsInOrder(t, cmd, "docker", []string{
@@ -441,62 +481,6 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 	}
 }
 
-func TestDoctorWritesLongTokenForDryRun(t *testing.T) {
-	repo := t.TempDir()
-	writeComposeFixture(t, repo)
-	runner := &fakeRunner{t: t}
-	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
-	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
-	if err != nil {
-		t.Fatalf("runtime config: %v", err)
-	}
-	if err := paths.EnsureAllDirs(); err != nil {
-		t.Fatalf("prepare dirs: %v", err)
-	}
-
-	runner.handlers = append(runner.handlers,
-		func(cmd Command) (CommandResult, error) {
-			assertCommandContainsInOrder(t, cmd, "docker", []string{"compose", "version"})
-			return CommandResult{}, nil
-		},
-		func(cmd Command) (CommandResult, error) {
-			assertCommandContainsInOrder(t, cmd, "docker", []string{
-				"compose",
-				"-f", filepath.Join(repo, repoComposeFileName),
-				"-f", filepath.Join(repo, localComposeOverrideName),
-				"config",
-				"--services",
-			})
-			return CommandResult{Stdout: "service\n"}, nil
-		},
-		func(cmd Command) (CommandResult, error) {
-			assertCommand(t, cmd, "process-compose", "version")
-			return CommandResult{}, nil
-		},
-		func(cmd Command) (CommandResult, error) {
-			assertCommandContainsInOrder(t, cmd, "process-compose", []string{
-				"--config", filepath.ToSlash(paths.GeneratedConfig),
-				"-p", strconv.Itoa(defaultProcessComposePort),
-				"--token-file", paths.RunDirTokenFile,
-				"--dry-run",
-				"up",
-			})
-			return CommandResult{}, nil
-		},
-	)
-
-	if _, err := manager.Doctor(context.Background(), cfg, paths); err != nil {
-		t.Fatalf("doctor: %v", err)
-	}
-	token, err := os.ReadFile(paths.RunDirTokenFile)
-	if err != nil {
-		t.Fatalf("read token: %v", err)
-	}
-	if len(strings.TrimSpace(string(token))) < 20 {
-		t.Fatalf("doctor token too short: %q", string(token))
-	}
-}
-
 func TestStatusJSONContainsDockerStackService(t *testing.T) {
 	runner := &fakeRunner{t: t}
 	manager := NewRuntimeManager(runner, filepath.Join("/tmp", "lazymind-local"))
@@ -570,97 +554,6 @@ func TestStatusMarksStaleStateWhenProcessComposeAPIIsDown(t *testing.T) {
 	}
 	if got := resp.Services[processComposeServiceName].Status; got != "stale" {
 		t.Fatalf("expected stale service got %s", got)
-	}
-}
-
-func TestExportDiagnosticsZip(t *testing.T) {
-	repo := t.TempDir()
-	writeComposeFixture(t, repo)
-	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
-	if err != nil {
-		t.Fatalf("runtime config: %v", err)
-	}
-	if err := paths.EnsureAllDirs(); err != nil {
-		t.Fatalf("prepare dirs: %v", err)
-	}
-	r := &fakeRunner{t: t}
-	m := NewRuntimeManager(r, filepath.Join(repo, "lazymind-local"))
-
-	if err := writeRuntimeState(paths.StateFile, defaultRuntimeState(cfg, defaultProcessComposePort, filepath.Join(paths.RunDir, tokenFileName))); err != nil {
-		t.Fatalf("write state: %v", err)
-	}
-	if err := os.WriteFile(paths.GeneratedConfig, []byte("generated"), 0o644); err != nil {
-		t.Fatalf("write generated: %v", err)
-	}
-	if err := os.WriteFile(paths.LogFilePath, []byte("hello log"), 0o644); err != nil {
-		t.Fatalf("write log: %v", err)
-	}
-
-	r.handlers = append(r.handlers,
-		func(cmd Command) (CommandResult, error) {
-			assertCommandContainsInOrder(t, cmd, "docker", []string{"compose", "-f", filepath.Join(paths.RepoRoot, repoComposeFileName), "-f", filepath.Join(paths.RepoRoot, localComposeOverrideName), "ps"})
-			return CommandResult{Stdout: "service-a\n"}, nil
-		},
-		func(cmd Command) (CommandResult, error) {
-			assertCommandContainsInOrder(t, cmd, "docker", []string{"compose", "-f", filepath.Join(paths.RepoRoot, repoComposeFileName), "-f", filepath.Join(paths.RepoRoot, localComposeOverrideName), "config"})
-			return CommandResult{Stdout: "services: []\n"}, nil
-		},
-	)
-
-	output := filepath.Join(t.TempDir(), "diag.zip")
-	if err := m.ExportDiagnostics(context.Background(), paths, output); err != nil {
-		t.Fatalf("export diagnostics: %v", err)
-	}
-	zipFile, err := os.Open(output)
-	if err != nil {
-		t.Fatalf("open zip: %v", err)
-	}
-	defer zipFile.Close()
-	zr, err := zip.NewReader(zipFile, getFileSize(t, output))
-	if err != nil {
-		t.Fatalf("read zip: %v", err)
-	}
-	entries := map[string]struct{}{}
-	for _, f := range zr.File {
-		entries[f.Name] = struct{}{}
-	}
-	for _, required := range []string{
-		"state/runtime-state.json",
-		"generated/process-compose.generated.yaml",
-		"logs/docker-stack.log",
-		"environment-summary.txt",
-		"docker/docker-ps.txt",
-		"docker/docker-config.txt",
-	} {
-		if _, ok := entries[required]; !ok {
-			t.Fatalf("missing zip entry %s", required)
-		}
-	}
-}
-
-func TestLogsForDockerStackAndUnknownService(t *testing.T) {
-	repo := t.TempDir()
-	writeComposeFixture(t, repo)
-	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
-	if err != nil {
-		t.Fatalf("runtime config: %v", err)
-	}
-	if err := paths.EnsureAllDirs(); err != nil {
-		t.Fatalf("prepare dirs: %v", err)
-	}
-	manager := NewRuntimeManager(&fakeRunner{t: t}, "/bin/lazymind-local")
-	if err := os.WriteFile(paths.LogFilePath, []byte("a\nb\nc\n"), 0o644); err != nil {
-		t.Fatalf("write log: %v", err)
-	}
-	logs, err := manager.Logs(context.Background(), paths, processComposeServiceName, 2)
-	if err != nil {
-		t.Fatalf("logs: %v", err)
-	}
-	if strings.TrimSpace(logs) != "b\nc" {
-		t.Fatalf("unexpected logs: %q", logs)
-	}
-	if _, err := manager.Logs(context.Background(), paths, "missing-service", 10); err == nil {
-		t.Fatalf("expected unknown service error")
 	}
 }
 
@@ -775,13 +668,4 @@ func assertStringArgAfter(t *testing.T, args []string, flag string, want string)
 		}
 	}
 	t.Fatalf("missing arg pair %s %s in %v", flag, want, args)
-}
-
-func getFileSize(t *testing.T, path string) int64 {
-	t.Helper()
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat file: %v", err)
-	}
-	return info.Size()
 }

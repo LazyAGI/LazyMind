@@ -51,16 +51,6 @@ func (m *ComposeManager) ComposeServices(ctx context.Context, repoRoot string) (
 	return services, nil
 }
 
-func (m *ComposeManager) ComposeReady(ctx context.Context, repoRoot string, profile string) error {
-	_ = profile
-	statuses, err := m.ComposeStatus(ctx, repoRoot)
-	if err != nil {
-		return err
-	}
-	_, readyErr := evaluateComposeReadiness(statuses)
-	return readyErr
-}
-
 func (m *ComposeManager) ComposeDown(ctx context.Context, repoRoot string, profile string) error {
 	_ = profile
 	args := append(m.composeBaseArgs(repoRoot), "down", "--remove-orphans")
@@ -201,14 +191,6 @@ func parseComposeStatusJSON(raw string) ([]ComposeServiceStatus, error) {
 		})
 	}
 	return statuses, nil
-}
-
-func evaluateComposeReadiness(statuses []ComposeServiceStatus) (bool, error) {
-	state, reason := classifyComposeReadiness(statuses)
-	if state == composeReadinessReady {
-		return true, nil
-	}
-	return false, fmt.Errorf("compose readiness: %s", reason)
 }
 
 func classifyComposeReadiness(statuses []ComposeServiceStatus) (composeReadinessState, string) {
