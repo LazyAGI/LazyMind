@@ -1,7 +1,7 @@
 # Copyright (c) 2026 LazyAGI. All rights reserved.
 """Read-only local filesystem tool group.
 
-Activated only when ``tool_config`` includes a ``localfs`` path whitelist.
+Activated only when ``tool_config`` includes a ``localfs_paths`` whitelist.
 All operations are constrained to the whitelisted paths.
 
 Backend: prefers ripgrep_ (``rg``) for ``grep`` and ``glob`` when available;
@@ -34,7 +34,7 @@ _RG_TIMEOUT = 30
 class LocalFSToolGroup:
     """Read-only local filesystem tools.
 
-    Activated when ``tool_config`` contains ``{"localfs": ["/path1", ...]}``.
+    Activated when ``tool_config`` contains ``{"localfs_paths": ["/path1", ...]}``.
     The whitelist is stored in ``agentic_config['localfs_paths']`` and every
     operation validates the target path against it.
     """
@@ -42,7 +42,9 @@ class LocalFSToolGroup:
     __public_apis__ = ['glob', 'grep', 'read', 'info']
 
     def _get_allowed_paths(self) -> List[str]:
-        return lazyllm.globals['agentic_config'].get('localfs_paths', [])
+        config = lazyllm.globals.get('agentic_config') or {}
+        paths = config.get('localfs_paths') or []
+        return [paths] if isinstance(paths, str) else paths
 
     def __key_source__(self) -> Any:
         return self._get_allowed_paths()
@@ -54,11 +56,16 @@ class LocalFSToolGroup:
             PermissionError: if *target* is outside the allowed set.
         """
         allowed = self._get_allowed_paths()
-        target = os.path.abspath(target)
+        if not allowed:
+            raise PermissionError('No local filesystem paths are configured')
+        target = os.path.realpath(target)
         for base in allowed:
-            base = os.path.abspath(base)
-            if target == base or target.startswith(base + os.sep):
-                return target
+            base = os.path.realpath(base)
+            try:
+                if os.path.commonpath([base, target]) == base:
+                    return target
+            except ValueError:
+                continue
         raise PermissionError(f'Path {target} is not within allowed paths: {allowed}')
 
     def _resolve_dir(self, path: Optional[str]) -> str:
@@ -67,13 +74,15 @@ class LocalFSToolGroup:
         When *path* is ``None`` or ``"."``, falls back to the first allowed path
         that is a directory (or the first allowed path).
         """
+        allowed = self._get_allowed_paths()
+        if not allowed:
+            raise PermissionError('No local filesystem paths are configured')
         if path is None or str(path).strip() in ('', '.'):
-            allowed = self._get_allowed_paths()
             for base in allowed:
-                abs_base = os.path.abspath(base)
+                abs_base = os.path.realpath(base)
                 if os.path.isdir(abs_base):
                     return abs_base
-            return os.path.abspath(allowed[0])
+            return os.path.realpath(allowed[0])
         resolved = self._resolve(str(path))
         if not os.path.isdir(resolved):
             raise ValueError(f'Path is not a directory: {path}')
@@ -104,6 +113,8 @@ class LocalFSToolGroup:
         safe_dir = self._resolve_dir(path)
         if self._has_rg():
             proc = self._run_rg(['--files', '--glob', pattern], cwd=safe_dir)
+            if proc.returncode > 1:
+                return tool_error('glob', f'ripgrep glob failed: {proc.stderr.strip() or "unknown error"}')
             raw = [os.path.join(safe_dir, p) for p in proc.stdout.splitlines() if p.strip()]
         else:
             py_pattern = pattern if '**' in pattern else f'**/{pattern}'
@@ -149,6 +160,9 @@ class LocalFSToolGroup:
             proc = self._run_rg(args, cwd=safe_dir)
         except subprocess.TimeoutExpired:
             return tool_error('grep', f'Search timed out (>{_RG_TIMEOUT}s)', error_type='Timeout')
+
+        if proc.returncode > 1:
+            return tool_error('grep', f'ripgrep search failed: {proc.stderr.strip() or "unknown error"}')
 
         matches: List[Dict[str, Any]] = []
         for line in proc.stdout.splitlines():
@@ -242,12 +256,14 @@ class LocalFSToolGroup:
 
         try:
             with open(safe_path, 'r', encoding='utf-8', errors='replace') as fh:
-                lines = fh.readlines()
+                chunk: List[str] = []
+                total = 0
+                for index, line in enumerate(fh):
+                    total += 1
+                    if start_line <= index < start_line + max_lines:
+                        chunk.append(line)
         except OSError as exc:
             return tool_error('read', f'Cannot read file: {exc}')
-
-        total = len(lines)
-        chunk = lines[start_line:start_line + max_lines]
 
         return tool_success('read', {
             'filepath': safe_path,
@@ -270,7 +286,9 @@ class LocalFSToolGroup:
         """
         if path is None or str(path).strip() in ('', '.'):
             allowed = self._get_allowed_paths()
-            safe_path = os.path.abspath(allowed[0])
+            if not allowed:
+                raise PermissionError('No local filesystem paths are configured')
+            safe_path = os.path.realpath(allowed[0])
         else:
             safe_path = self._resolve(str(path))
 
