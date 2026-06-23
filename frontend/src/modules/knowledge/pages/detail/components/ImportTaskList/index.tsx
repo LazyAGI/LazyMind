@@ -321,7 +321,7 @@ const ImportTaskList = (props: IProps) => {
 
 function isValidTaskTime(value?: number | string) {
   return value !== undefined && value !== null && value !== "" &&
-    moment(value).isValid();
+    value !== 0 && value !== "0" && moment(value).isValid();
 }
 
 export default ImportTaskList;

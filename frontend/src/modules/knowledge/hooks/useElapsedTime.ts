@@ -61,14 +61,20 @@ const useElapsedTime = (props: IProps) => {
 };
 
 function parseTime(value?: number | string) {
-  if (value === undefined || value === null || value === "") {
+  if (value === undefined || value === null || value === "" || value === 0 || value === "0") {
     return null;
   }
   const text = String(value).trim();
   const numeric = Number(text);
-  const parsed = Number.isFinite(numeric) && text !== ""
-    ? moment(numeric < 1_000_000_000_000 ? numeric * 1000 : numeric)
-    : moment(text);
+  if (Number.isFinite(numeric) && text !== "") {
+    if (numeric >= 1_000_000_000 && numeric < 1_000_000_000_000) {
+      return moment(numeric * 1000);
+    }
+    if (numeric >= 1_000_000_000_000) {
+      return moment(numeric);
+    }
+  }
+  const parsed = moment(text);
   return parsed.isValid() ? parsed : null;
 }
 

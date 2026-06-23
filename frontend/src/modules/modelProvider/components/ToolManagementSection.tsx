@@ -215,6 +215,7 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
   const openMcpCreateModal = useCallback(() => {
     setMcpModalMode("add");
     setMcpEditingServer(null);
+    mcpForm.resetFields();
     mcpForm.setFieldsValue({
       name: "",
       url: "",
@@ -230,6 +231,7 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
     (server: McpServerAsset) => {
       setMcpModalMode("edit");
       setMcpEditingServer(server);
+      mcpForm.resetFields();
       mcpForm.setFieldsValue({
         name: server.name,
         url: server.url,
@@ -250,21 +252,21 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
   }, [mcpSaving]);
 
   const saveMcpServer = useCallback(async () => {
-    const values = await mcpForm.validateFields();
-    const draft: McpServerDraft = {
-      name: values.name.trim(),
-      url: values.url.trim(),
-      transport: normalizeMcpTransportValue(String(values.transport || "sse")),
-      apiKey: values.apiKey?.trim() || "",
-      timeout: Number(values.timeout || 30),
-      enabled:
-        mcpModalMode === "edit" && Boolean(mcpEditingServer?.isVerified)
-          ? Boolean(values.enabled)
-          : false,
-    };
-
-    setMcpSaving(true);
     try {
+      const values = await mcpForm.validateFields();
+      const draft: McpServerDraft = {
+        name: values.name.trim(),
+        url: values.url.trim(),
+        transport: normalizeMcpTransportValue(String(values.transport || "sse")),
+        apiKey: values.apiKey?.trim() || "",
+        timeout: Number(values.timeout || 30),
+        enabled:
+          mcpModalMode === "edit" && Boolean(mcpEditingServer?.isVerified)
+            ? Boolean(values.enabled)
+            : false,
+      };
+
+      setMcpSaving(true);
       if (mcpModalMode === "edit" && mcpEditingServer) {
         await updateMcpServer(mcpEditingServer.id, draft);
         message.success(t("admin.memoryMcpUpdateSuccess"));
@@ -275,6 +277,9 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
       setMcpModalOpen(false);
       await refreshMcpServers();
     } catch (error) {
+      if (error && typeof error === "object" && "errorFields" in error) {
+        return;
+      }
       message.error(
         getLocalizedErrorMessage(error, t("admin.memoryMcpSaveFailed")) ||
           t("admin.memoryMcpSaveFailed"),

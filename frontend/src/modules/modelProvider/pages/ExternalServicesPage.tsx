@@ -426,7 +426,13 @@ async function fetchExternalProviders(keyword: string, signal: AbortSignal) {
     sciverseProvider = datasourceProviders.find(
       (provider) => normalizeProviderName(provider.name) === "sciverse",
     );
-  } catch {
+  } catch (error) {
+    if (
+      signal.aborted ||
+      (error && typeof error === "object" && "name" in error && error.name === "AbortError")
+    ) {
+      throw error;
+    }
     return providers;
   }
 
