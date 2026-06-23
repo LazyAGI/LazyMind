@@ -164,7 +164,8 @@ def _sqlite_path() -> str:
 
 
 def state_backend() -> str:
-    return (_lazymind_config_value('state_backend') or os.environ.get(STATE_BACKEND_ENV) or 'redis').strip().lower() or 'redis'
+    configured_backend = _lazymind_config_value('state_backend') or os.environ.get(STATE_BACKEND_ENV) or 'redis'
+    return configured_backend.strip().lower() or 'redis'
 
 
 def state_store() -> StateStore:
