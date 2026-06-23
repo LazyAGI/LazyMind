@@ -9,6 +9,8 @@ import { PluginInfoApi, PluginSessionApi } from "@/modules/chat/utils/request";
 interface DraftEntry {
   value: Record<string, unknown>;
   timer: ReturnType<typeof setTimeout> | null;
+  /** The list_index to use when calling the backend API (-1 for single/NULL slots). */
+  apiListIndex: number;
 }
 
 const DRAFT_FLUSH_DELAY_MS = 60_000;
@@ -21,31 +23,48 @@ function _draftKey(sessionId: string, slotId: string, listIndex: number): string
 }
 
 export const draftStore = {
-  /** Write value to localStorage and reset the 60s auto-flush timer. */
-  setDraft(sessionId: string, slotId: string, listIndex: number, value: Record<string, unknown>) {
+  /** Write value to localStorage and reset the 60s auto-flush timer.
+   *  apiListIndex: the list_index to use for the backend PATCH call.
+   *  Pass -1 for single (non-list) slots. Defaults to listIndex when omitted.
+   */
+  setDraft(sessionId: string, slotId: string, listIndex: number, value: Record<string, unknown>, apiListIndex?: number) {
     const key = _draftKey(sessionId, slotId, listIndex);
     const existing = _drafts.get(key);
     if (existing?.timer) clearTimeout(existing.timer);
     try {
       localStorage.setItem(DRAFT_LS_PREFIX + key, JSON.stringify(value));
     } catch { /* storage full — ignore */ }
+    const effectiveApiIndex = apiListIndex ?? existing?.apiListIndex ?? listIndex;
     const timer = setTimeout(() => {
-      draftStore.flushDraft(sessionId, slotId, listIndex);
+      draftStore.flushDraft(sessionId, slotId, listIndex, effectiveApiIndex);
     }, DRAFT_FLUSH_DELAY_MS);
-    _drafts.set(key, { value, timer });
+    _drafts.set(key, { value, timer, apiListIndex: effectiveApiIndex });
   },
 
-  /** Clear timer and call patchSlotItemValue to produce a human revision. Does NOT clear localStorage. */
-  async flushDraft(sessionId: string, slotId: string, listIndex: number): Promise<void> {
+  /** Clear timer and call patchSlotItemValue to produce a human revision. Does NOT clear localStorage.
+   *  apiListIndex: when provided, used for the backend PATCH call (e.g. -1 for single slots);
+   *  otherwise falls back to the stored entry's apiListIndex, then listIndex.
+   */
+  async flushDraft(sessionId: string, slotId: string, listIndex: number, apiListIndex?: number): Promise<void> {
     const key = _draftKey(sessionId, slotId, listIndex);
+    // Try in-memory entry first; fall back to localStorage so page-reload still works.
+    let value: Record<string, unknown> | null = null;
+    let targetIndex = apiListIndex ?? listIndex;
     const entry = _drafts.get(key);
-    if (!entry) return;
-    if (entry.timer) clearTimeout(entry.timer);
-    _drafts.set(key, { value: entry.value, timer: null });
+    if (entry) {
+      if (entry.timer) clearTimeout(entry.timer);
+      _drafts.set(key, { value: entry.value, timer: null, apiListIndex: entry.apiListIndex });
+      value = entry.value;
+      targetIndex = apiListIndex ?? entry.apiListIndex;
+    } else {
+      value = draftStore.getLocalDraft(sessionId, slotId, listIndex);
+    }
+    if (!value) return;
     try {
-      await PluginSessionApi().patchSlotItem(sessionId, slotId, listIndex, entry.value);
+      await PluginSessionApi().patchSlotItem(sessionId, slotId, targetIndex, value);
     } catch { /* best-effort — ignore */ }
     _drafts.delete(key);
+    try { localStorage.removeItem(DRAFT_LS_PREFIX + key); } catch { /* ignore */ }
   },
 
   /** Flush all pending drafts for a session in parallel. Used before sending chat. */
@@ -98,8 +117,6 @@ export interface SlotRevision {
   order_version?: number;
   selected: boolean;
   artifact_key: string;
-  step_id: string;
-  attempt: number;
   created_at: string;
   /** Artifact content type returned by the backend (e.g. 'text', 'image', 'file'). */
   content_type?: string;
@@ -292,6 +309,14 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
     try {
       const res = await PluginSessionApi().getSlots(sessionId);
       const slots: SlotRevision[] = res?.data?.data?.slots ?? [];
+      console.log('[refreshSlots] raw slots from API:', slots.map(s => ({
+        slot_id: s.slot_id,
+        list_index: s.list_index,
+        revision: s.revision,
+        change_source: s.change_source,
+        artifact_value: s.artifact_value,
+        content_type: s.content_type,
+      })));
       set((state) => {
         const session = state.sessionByConversation[conversationId];
         if (!session) return state;

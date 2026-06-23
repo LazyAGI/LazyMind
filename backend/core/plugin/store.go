@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
@@ -574,55 +575,46 @@ func HideSlotItem(ctx context.Context, db *gorm.DB, sessionID, slotID string, li
 		}
 
 		// Mark the corresponding sub_agent_artifacts rows as hidden.
-		// Look up task_ids for this session, then hide artifacts with the matching artifact_key
-		// at the row corresponding to this list_index (seq position).
-		// We identify the correct artifact_key from the revisions we just deselected.
-		var artifactKeys []string
-		if err := tx.Model(&orm.PluginSlotRevision{}).
-			Select("DISTINCT artifact_key").
-			Where("session_id = ? AND slot_id = ? AND list_index = ?", sessionID, slotID, listIndex).
-			Pluck("artifact_key", &artifactKeys).Error; err != nil {
+		// We collect the artifact_seq values recorded in plugin_slot_revisions for this
+		// list_index, then hide exactly those sub_agent_artifacts rows by (task_id, artifact_key, seq).
+		// This avoids the old value-JSON matching approach which could incorrectly hide artifacts
+		// whose value happened to carry the same list_index number (a write-time ordinal, not the
+		// stable DB list_index).
+		type artifactRef struct {
+			taskID      string
+			artifactKey string
+			seq         int
+		}
+		var refs []artifactRef
+		var revRows []orm.PluginSlotRevision
+		if err := tx.Where("session_id = ? AND slot_id = ? AND list_index = ?", sessionID, slotID, listIndex).
+			Find(&revRows).Error; err != nil {
 			return err
 		}
-		if len(artifactKeys) > 0 {
-			// Get all task_ids for this session.
-			var taskIDs []string
-			if err := tx.Model(&orm.PluginSessionStep{}).
-				Select("DISTINCT task_id").
-				Where("session_id = ?", sessionID).
-				Pluck("task_id", &taskIDs).Error; err != nil {
-				return err
+		// Build task_id lookup for this session.
+		var stepRows []orm.PluginSessionStep
+		if err := tx.Where("session_id = ?", sessionID).Find(&stepRows).Error; err != nil {
+			return err
+		}
+		taskByStep := map[string]string{}
+		for _, s := range stepRows {
+			taskByStep[s.StepID+"/"+fmt.Sprint(s.Attempt)] = s.TaskID
+		}
+		for _, rev := range revRows {
+			if rev.ArtifactSeq == nil {
+				continue
 			}
-			if len(taskIDs) > 0 {
-				// Load all non-hidden artifacts for this session + artifact_key combination.
-				// Find only the artifact whose value JSON contains {"list_index": listIndex}.
-				var candidates []orm.SubAgentArtifact
-				if err := tx.Where("task_id IN ? AND artifact_key IN ? AND hidden = ?", taskIDs, artifactKeys, false).
-					Find(&candidates).Error; err != nil {
-					return err
-				}
-				for _, c := range candidates {
-					var v map[string]any
-					if json.Unmarshal(c.Value, &v) != nil {
-						continue
-					}
-					var li int
-					switch raw := v["list_index"].(type) {
-					case float64:
-						li = int(raw)
-					case int:
-						li = raw
-					default:
-						continue
-					}
-					if li == listIndex {
-						if err := tx.Model(&orm.SubAgentArtifact{}).
-							Where("task_id = ? AND artifact_key = ? AND seq = ?", c.TaskID, c.ArtifactKey, c.Seq).
-							Updates(map[string]any{"hidden": true}).Error; err != nil {
-							return err
-						}
-					}
-				}
+			tid := taskByStep[rev.StepID+"/"+fmt.Sprint(rev.Attempt)]
+			if tid == "" {
+				continue
+			}
+			refs = append(refs, artifactRef{taskID: tid, artifactKey: rev.ArtifactKey, seq: *rev.ArtifactSeq})
+		}
+		for _, ref := range refs {
+			if err := tx.Model(&orm.SubAgentArtifact{}).
+				Where("task_id = ? AND artifact_key = ? AND seq = ?", ref.taskID, ref.artifactKey, ref.seq).
+				Updates(map[string]any{"hidden": true}).Error; err != nil {
+				return err
 			}
 		}
 

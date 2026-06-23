@@ -156,7 +156,14 @@ function useGlobalPopoverOpen(key: PopoverKey): [boolean, (open: boolean) => voi
 interface SlotVersionPopoverProps {
   sessionId: string;
   slotId: string;
+  /** List index used for backend API calls. Use -1 for single (non-list) slots. */
   listIndex: number;
+  /**
+   * List index used for draftStore operations (localStorage key).
+   * Defaults to listIndex when not provided.
+   * Single slots should pass 0 here (the front-end canonical key).
+   */
+  draftListIndex?: number;
   revisionCount: number;
   /** The revision number of the currently selected version — shown on the badge. */
   currentRevision?: number;
@@ -164,18 +171,29 @@ interface SlotVersionPopoverProps {
   currentChangeSource?: 'ai' | 'human';
   contentType?: string;
   onRollbackDone?: () => void;
+  draftText?: string;
+  /** Called when the user clicks "Discard draft" in draft mode. */
+  onDiscardDraft?: () => void;
 }
+
+// Sentinel value representing the draft entry in the version list.
+const DRAFT_REVISION = -1;
 
 export function SlotVersionPopover({
   sessionId,
   slotId,
   listIndex,
+  draftListIndex,
   revisionCount,
   currentRevision,
   currentValue,
   contentType,
   onRollbackDone,
+  draftText,
+  onDiscardDraft,
 }: SlotVersionPopoverProps) {
+  // effectiveDraftIndex: index used for draftStore operations (localStorage key).
+  const effectiveDraftIndex = draftListIndex ?? listIndex;
   const popoverKey: PopoverKey = `${sessionId}:${slotId}:${listIndex}`;
   const [open, setOpen] = useGlobalPopoverOpen(popoverKey);
   const [versions, setVersions] = useState<SlotVersionEntry[]>([]);
@@ -183,8 +201,11 @@ export function SlotVersionPopover({
   // previewIndex: index into versions[] of the currently previewed version
   const [previewIndex, setPreviewIndex] = useState<number>(0);
   const [rolling, setRolling] = useState(false);
-  const [selectedRevision, setSelectedRevision] = useState<SlotVersionEntry | null>(null);
+  // selectedRevision: the version the user clicked in the left list (text mode)
+  // DRAFT_REVISION means the draft entry is selected.
+  const [selectedRevision, setSelectedRevision] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [flushing, setFlushing] = useState(false);
   const versionUploadRef = useRef<HTMLInputElement>(null);
   const { getSlotVersions, rollbackSlotItem, patchSlotItemValue } = usePluginStore();
 
@@ -194,20 +215,21 @@ export function SlotVersionPopover({
       setOpen(false);
       return;
     }
+    // Always load version history; in draft mode also default-select the draft entry.
     setLoading(true);
     try {
       const vs = await getSlotVersions(sessionId, slotId, listIndex);
-      // Sort descending by revision so latest is first
       const sorted = [...vs].sort((a, b) => b.revision - a.revision);
       setVersions(sorted);
-      // Default to the currently selected (current) version
       const currentIdx = sorted.findIndex((v) => v.selected);
       setPreviewIndex(currentIdx >= 0 ? currentIdx : 0);
+      // Default selection: draft entry when draft exists, otherwise current version.
+      setSelectedRevision(draftText !== undefined ? DRAFT_REVISION : null);
       setOpen(true);
     } finally {
       setLoading(false);
     }
-  }, [open, sessionId, slotId, listIndex, getSlotVersions, setOpen]);
+  }, [open, sessionId, slotId, listIndex, getSlotVersions, draftText, setOpen]);
 
   const handleClose = useCallback(() => setOpen(false), [setOpen]);
 
@@ -225,6 +247,19 @@ export function SlotVersionPopover({
       setRolling(false);
     }
   }, [sessionId, slotId, listIndex, rollbackSlotItem, setOpen, onRollbackDone]);
+
+  const handleFlushDraft = useCallback(async () => {
+    if (!draftText) return;
+    setFlushing(true);
+    try {
+      await draftStore.flushDraft(sessionId, slotId, effectiveDraftIndex, listIndex);
+      onDiscardDraft?.();
+      setOpen(false);
+      onRollbackDone?.();
+    } finally {
+      setFlushing(false);
+    }
+  }, [draftText, sessionId, slotId, effectiveDraftIndex, listIndex, onDiscardDraft, setOpen, onRollbackDone]);
 
   const handleVersionUploadClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -281,9 +316,14 @@ export function SlotVersionPopover({
     return `${mm}/${dd} ${hh}:${min}`;
   };
 
-  // selectedRevision: the version the user clicked in the left list (text mode)
-  // Keep selectedRevision in sync when versions reload
-  const effectiveSelected = selectedRevision ?? currentVersion;
+  // effectiveSelectedRevision: the revision number clicked in left list, or DRAFT_REVISION for the draft entry.
+  // null means default to current version.
+  const effectiveSelectedVersion =
+    selectedRevision === DRAFT_REVISION
+      ? null
+      : (versions.find((v) => v.revision === (selectedRevision ?? currentVersion?.revision)) ?? currentVersion);
+  // When draft is selected (DRAFT_REVISION), the right pane shows draft vs current diff.
+  const isDraftSelected = selectedRevision === DRAFT_REVISION;
 
   const popoverContent = open ? ReactDOM.createPortal(
     <div
@@ -300,7 +340,9 @@ export function SlotVersionPopover({
       >
         {/* Header */}
         <div className='plugin-slot__version-popover-header'>
-          <span className='plugin-slot__version-popover-title'>版本历史</span>
+          <span className='plugin-slot__version-popover-title'>
+            版本历史
+          </span>
           <button
             className='plugin-slot__version-popover-close'
             onClick={handleClose}
@@ -423,20 +465,41 @@ export function SlotVersionPopover({
             </div>
           </>
         ) : (
-          /* ── Text mode: left list + right diff ── */
+          /* ── Text mode: left list + right diff (unified, with optional draft entry) ── */
           <div className='plugin-slot__version-popover-body'>
             <ul className='plugin-slot__version-list' role='listbox' aria-label='版本列表'>
+              {/* Draft entry — only shown when there is a pending local draft */}
+              {draftText !== undefined && (
+                <li
+                  role='option'
+                  aria-selected={isDraftSelected}
+                  className={[
+                    'plugin-slot__version-item',
+                    'plugin-slot__version-item--draft',
+                    isDraftSelected ? 'plugin-slot__version-item--focused' : '',
+                  ].join(' ')}
+                  onClick={() => setSelectedRevision(DRAFT_REVISION)}
+                >
+                  <span className='plugin-slot__version-label'>
+                    <span className='plugin-slot__version-source-badge plugin-slot__version-source-badge--human'>
+                      草稿
+                    </span>
+                    草稿
+                  </span>
+                  <span className='plugin-slot__version-time'>未提交</span>
+                </li>
+              )}
               {versions.map((v) => (
                 <li
                   key={v.revision}
                   role='option'
-                  aria-selected={effectiveSelected?.revision === v.revision}
+                  aria-selected={!isDraftSelected && effectiveSelectedVersion?.revision === v.revision}
                   className={[
                     'plugin-slot__version-item',
                     v.selected ? 'plugin-slot__version-item--current' : '',
-                    effectiveSelected?.revision === v.revision ? 'plugin-slot__version-item--focused' : '',
+                    !isDraftSelected && effectiveSelectedVersion?.revision === v.revision ? 'plugin-slot__version-item--focused' : '',
                   ].join(' ')}
-                  onClick={() => setSelectedRevision(v)}
+                  onClick={() => setSelectedRevision(v.revision)}
                 >
                   <span className='plugin-slot__version-label'>
                     <span className={`plugin-slot__version-source-badge plugin-slot__version-source-badge--${v.change_source}`}>
@@ -452,26 +515,53 @@ export function SlotVersionPopover({
               ))}
             </ul>
 
-            {effectiveSelected && !effectiveSelected.selected ? (
+            {isDraftSelected && draftText !== undefined ? (
+              /* Draft selected: show draft vs current diff with discard + flush actions */
               <div className='plugin-slot__version-compare'>
                 <TextDiffView
                   currentText={extractText(currentValue)}
-                  otherText={extractText(effectiveSelected.content_snapshot)}
-                  otherLabel={`v${effectiveSelected.revision} · ${effectiveSelected.change_source === 'human' ? '手动编辑' : 'AI 生成'}`}
-                  reversed={currentVersion !== null && effectiveSelected.revision > currentVersion.revision}
+                  otherText={draftText}
+                  otherLabel='草稿'
+                  reversed={true}
+                />
+                <div className='plugin-slot__version-draft-actions'>
+                  <button
+                    className='plugin-slot__version-discard-btn'
+                    onClick={() => { onDiscardDraft?.(); handleClose(); }}
+                    aria-label='丢弃草稿'
+                  >
+                    丢弃草稿
+                  </button>
+                  <button
+                    className='plugin-slot__version-flush-btn'
+                    disabled={flushing}
+                    onClick={handleFlushDraft}
+                    aria-label='确定变更'
+                  >
+                    {flushing ? '提交中…' : '确定变更'}
+                  </button>
+                </div>
+              </div>
+            ) : effectiveSelectedVersion && !effectiveSelectedVersion.selected ? (
+              <div className='plugin-slot__version-compare'>
+                <TextDiffView
+                  currentText={extractText(currentValue)}
+                  otherText={extractText(effectiveSelectedVersion.content_snapshot)}
+                  otherLabel={`v${effectiveSelectedVersion.revision} · ${effectiveSelectedVersion.change_source === 'human' ? '手动编辑' : 'AI 生成'}`}
+                  reversed={currentVersion !== null && effectiveSelectedVersion.revision > currentVersion.revision}
                 />
                 <button
                   className='plugin-slot__version-apply-btn'
                   disabled={rolling}
-                  onClick={() => handleRollback(effectiveSelected.revision)}
-                  aria-label={`应用 v${effectiveSelected.revision}`}
+                  onClick={() => handleRollback(effectiveSelectedVersion.revision)}
+                  aria-label={`应用 v${effectiveSelectedVersion.revision}`}
                 >
-                  {rolling ? '回退中…' : `应用此版本 (v${effectiveSelected.revision})`}
+                  {rolling ? '回退中…' : `应用此版本 (v${effectiveSelectedVersion.revision})`}
                 </button>
               </div>
             ) : (
               <div className='plugin-slot__version-compare plugin-slot__version-compare--same'>
-                {effectiveSelected ? (
+                {effectiveSelectedVersion ? (
                   <pre className='plugin-slot__version-current-text'>
                     {extractText(currentValue) || '（无内容）'}
                   </pre>
@@ -490,13 +580,15 @@ export function SlotVersionPopover({
   return (
     <div className='plugin-slot__version-wrap'>
       <button
-        className='plugin-slot__version-btn'
+        className={`plugin-slot__version-btn${draftText !== undefined ? ' plugin-slot__version-btn--draft' : ''}`}
         onClick={handleOpen}
-        title={`版本历史 (${revisionCount})`}
-        aria-label={`版本历史 (${revisionCount})`}
+        title={draftText !== undefined ? '草稿（点击查看与当前版本的对比）' : `版本历史 (${revisionCount})`}
+        aria-label={draftText !== undefined ? '草稿' : `版本历史 (${revisionCount})`}
         disabled={loading}
       >
-        <span className='plugin-slot__version-count'>{currentRevision !== undefined ? `v${currentRevision}` : revisionCount > 1 ? `v${revisionCount}` : 'v1'}</span>
+        <span className='plugin-slot__version-count'>
+          {draftText !== undefined ? 'draft' : (currentRevision !== undefined ? `v${currentRevision}` : revisionCount > 1 ? `v${revisionCount}` : 'v1')}
+        </span>
       </button>
       {popoverContent}
     </div>
@@ -809,6 +901,12 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
   const [draft, setDraft] = useState('');
   const [offloadedText, setOffloadedText] = useState<string | null>(null);
   const [offloadLoading, setOffloadLoading] = useState(false);
+  // hasPendingDraft: reactive flag to show/hide the "draft" badge.
+  const [hasPendingDraft, setHasPendingDraft] = useState(() => {
+    if (!sessionId || !slotId) return false;
+    const saved = draftStore.getLocalDraft(sessionId, slotId, slot.list_index ?? 0);
+    return saved?.text !== undefined;
+  });
   // Caption inline editing state.
   const [captionEditing, setCaptionEditing] = useState(false);
   const [captionDraft, setCaptionDraft] = useState('');
@@ -843,24 +941,34 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
     return <SlotPending type='text' />;
   }
 
-  const canEdit = Boolean(sessionId && slotId && slot.list_index !== undefined);
+  const canEdit = Boolean(sessionId && slotId);
+  // For single slots, list_index is undefined from the backend; use 0 as the canonical index
+  // for localStorage keys (front-end only convention).
+  const effectiveListIndex = slot.list_index ?? 0;
+  // For API calls, single slots must use -1 so the backend queries list_index IS NULL.
+  const apiListIndex = slot.list_index ?? -1;
 
   // On mount: restore localStorage draft only if it differs from the current artifact text.
+  // Also restart the 60s flush timer so the draft doesn't stay in localStorage forever.
   useEffect(() => {
-    if (!canEdit || !sessionId || !slotId || slot.list_index === undefined) return;
-    const saved = draftStore.getLocalDraft(sessionId, slotId, slot.list_index);
+    if (!canEdit || !sessionId || !slotId) return;
+    const saved = draftStore.getLocalDraft(sessionId, slotId, effectiveListIndex);
     if (saved?.text !== undefined && String(saved.text) !== text) {
       setDraft(String(saved.text));
+      setHasPendingDraft(true);
+      // Re-register with draftStore to restart the 60s flush timer lost on page reload.
+      draftStore.setDraft(sessionId, slotId, effectiveListIndex, saved, apiListIndex);
     } else if (saved?.text !== undefined) {
-      draftStore.cancelDraft(sessionId, slotId, slot.list_index);
+      draftStore.cancelDraft(sessionId, slotId, effectiveListIndex);
+      setHasPendingDraft(false);
     }
   // Run only on mount (stable deps).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleEdit = () => {
-    const saved = (sessionId && slotId && slot.list_index !== undefined)
-      ? draftStore.getLocalDraft(sessionId, slotId, slot.list_index)
+    const saved = (sessionId && slotId)
+      ? draftStore.getLocalDraft(sessionId, slotId, effectiveListIndex)
       : null;
     const savedText = saved?.text !== undefined ? String(saved.text) : undefined;
     setDraft(savedText !== undefined && savedText !== text ? savedText : text);
@@ -871,8 +979,8 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setDraft(val);
-    if (sessionId && slotId && slot.list_index !== undefined) {
-      draftStore.setDraft(sessionId, slotId, slot.list_index, { text: val });
+    if (sessionId && slotId) {
+      draftStore.setDraft(sessionId, slotId, effectiveListIndex, { text: val }, apiListIndex);
     }
   };
 
@@ -881,11 +989,13 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
       cancelledRef.current = false;
       return;
     }
-    if (sessionId && slotId && slot.list_index !== undefined) {
+    if (sessionId && slotId) {
       if (draft !== text) {
-        draftStore.setDraft(sessionId, slotId, slot.list_index, { text: draft });
+        draftStore.setDraft(sessionId, slotId, effectiveListIndex, { text: draft }, apiListIndex);
+        setHasPendingDraft(true);
       } else {
-        draftStore.cancelDraft(sessionId, slotId, slot.list_index);
+        draftStore.cancelDraft(sessionId, slotId, effectiveListIndex);
+        setHasPendingDraft(false);
       }
     }
     setEditing(false);
@@ -904,8 +1014,9 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
 
   const handleCancel = () => {
     cancelledRef.current = true;
-    if (sessionId && slotId && slot.list_index !== undefined) {
-      draftStore.cancelDraft(sessionId, slotId, slot.list_index);
+    if (sessionId && slotId) {
+      draftStore.cancelDraft(sessionId, slotId, effectiveListIndex);
+      setHasPendingDraft(false);
     }
     setEditing(false);
     notifyEditing(editingKey, false);
@@ -918,9 +1029,9 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
   };
 
   const handleCaptionSave = async () => {
-    if (!sessionId || !slotId || slot.list_index === undefined) return;
+    if (!sessionId || !slotId) return;
     setCaptionEditing(false);
-    await patchSlotCaption(sessionId, slotId, slot.list_index, captionDraft);
+    await patchSlotCaption(sessionId, slotId, effectiveListIndex, captionDraft);
     onRefresh?.();
   };
 
@@ -932,11 +1043,20 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
   // Determine display text: prefer draft if user is not editing (shows unsaved draft).
   const displayText = (() => {
     if (editing) return draft;
-    if (sessionId && slotId && slot.list_index !== undefined) {
-      const saved = draftStore.getLocalDraft(sessionId, slotId, slot.list_index);
+    if (sessionId && slotId) {
+      const saved = draftStore.getLocalDraft(sessionId, slotId, effectiveListIndex);
       if (saved?.text !== undefined) return String(saved.text);
     }
     return text;
+  })();
+
+  // Compute the pending draft text for the version badge: non-null only when there
+  // is a local draft that differs from the committed artifact text.
+  const pendingDraftText = (() => {
+    if (!hasPendingDraft || !canEdit || !sessionId || !slotId) return undefined;
+    const saved = draftStore.getLocalDraft(sessionId, slotId, effectiveListIndex);
+    if (saved?.text !== undefined && String(saved.text) !== text) return String(saved.text);
+    return undefined;
   })();
 
   return (
@@ -963,17 +1083,25 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
             onKeyDown={canEdit ? (e) => e.key === 'Enter' && handleEdit() : undefined}
           >{displayText}</p>
           <div className='plugin-slot__text-meta'>
-            {revisionCount !== undefined && revisionCount > 0 && sessionId && slotId && slot.list_index !== undefined && (
+            {revisionCount !== undefined && revisionCount > 0 && sessionId && slotId && (
               <SlotVersionPopover
                 sessionId={sessionId}
                 slotId={slotId}
-                listIndex={slot.list_index}
+                listIndex={apiListIndex}
+                draftListIndex={effectiveListIndex}
                 revisionCount={revisionCount}
                 currentRevision={slot.revision}
                 currentValue={slot.artifact_value}
                 currentChangeSource={slot.change_source}
                 contentType='text'
                 onRollbackDone={onRefresh}
+                draftText={pendingDraftText}
+                onDiscardDraft={pendingDraftText !== undefined ? () => {
+                  if (sessionId && slotId) {
+                    draftStore.cancelDraft(sessionId, slotId, effectiveListIndex);
+                    setHasPendingDraft(false);
+                  }
+                } : undefined}
               />
             )}
           </div>

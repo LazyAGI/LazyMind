@@ -455,6 +455,16 @@
     // intentionally minimal
   }
 
+  &__version-btn--draft &__version-count,
+  &__version-btn--draft {
+    // Draft badge: amber/orange to clearly distinguish from committed versions
+    background: #f59e0b !important;
+    color: #fff !important;
+    border-color: #d97706 !important;
+    font-style: italic;
+    letter-spacing: 0.02em;
+  }
+
   &__version-popover {
     position: fixed;
     top: 50%;
@@ -970,6 +980,69 @@
 
     &:hover:not(:disabled) { background: #4338ca; }
     &:disabled { opacity: 0.5; cursor: default; }
+  }
+
+  &__version-draft-header {
+    padding: 8px 0 4px;
+    margin-bottom: 6px;
+    border-bottom: 1px dashed #f59e0b;
+  }
+
+  &__version-draft-label {
+    font-size: 12px;
+    color: #92400e;
+    font-style: italic;
+  }
+
+  &__version-discard-btn {
+    align-self: flex-end;
+    margin-top: 10px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    background: #fff;
+    color: #ef4444;
+    border: 1px solid #fca5a5;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+
+    &:hover { background: #fef2f2; border-color: #ef4444; }
+  }
+
+  &__version-flush-btn {
+    align-self: flex-end;
+    margin-top: 10px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    background: #2563eb;
+    color: #fff;
+    border: 1px solid #2563eb;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+
+    &:hover:not(:disabled) { background: #1d4ed8; border-color: #1d4ed8; }
+    &:disabled { opacity: 0.5; cursor: not-allowed; }
+  }
+
+  &__version-draft-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  &__version-item--draft {
+    background: #fffbeb;
+
+    &:hover { background: #fef3c7; }
+
+    .plugin-slot__version-source-badge--human {
+      background: #f59e0b;
+      color: #fff;
+    }
   }
 
   // Image card needs position:relative for overlays

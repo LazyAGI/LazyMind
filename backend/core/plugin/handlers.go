@@ -115,24 +115,26 @@ type stepDTO struct {
 
 // slotDTO represents a currently-selected slot revision, with its artifact value inline.
 type slotDTO struct {
-	SlotID          string          `json:"slot_id"`
-	Revision        int             `json:"revision"`
-	ListIndex       *int            `json:"list_index,omitempty"`
-	SortOrder       *int            `json:"sort_order,omitempty"`
-	Selected        bool            `json:"selected"`
-	ArtifactKey     string          `json:"artifact_key"`
-	ArtifactSeq     *int            `json:"artifact_seq,omitempty"`
-	HumanArtifactID *string         `json:"human_artifact_id,omitempty"`
-	StepID          string          `json:"step_id"`
-	Attempt         int             `json:"attempt"`
-	CreatedAt       time.Time       `json:"created_at"`
-	ContentType     string          `json:"content_type,omitempty"`
-	ArtifactValue   json.RawMessage `json:"artifact_value,omitempty"`
-	Caption         *string         `json:"caption,omitempty"`
-	ChangeSource    string          `json:"change_source,omitempty"`
-	ContentSnapshot json.RawMessage `json:"content_snapshot,omitempty"`
-	RevisionCount   int             `json:"revision_count,omitempty"`
-	OrderVersion    *int            `json:"order_version,omitempty"`
+	SlotID        string          `json:"slot_id"`
+	Revision      int             `json:"revision"`
+	ListIndex     *int            `json:"list_index,omitempty"`
+	SortOrder     *int            `json:"sort_order,omitempty"`
+	Selected      bool            `json:"selected"`
+	ArtifactKey   string          `json:"artifact_key"`
+	CreatedAt     time.Time       `json:"created_at"`
+	ContentType   string          `json:"content_type,omitempty"`
+	ArtifactValue json.RawMessage `json:"artifact_value,omitempty"`
+	Caption       *string         `json:"caption,omitempty"`
+	ChangeSource  string          `json:"change_source,omitempty"`
+	RevisionCount int             `json:"revision_count,omitempty"`
+	OrderVersion  *int            `json:"order_version,omitempty"`
+
+	// Internal fields — used by enrichSlots, never serialised to the client.
+	ArtifactSeq     *int            `json:"-"`
+	HumanArtifactID *string         `json:"-"`
+	StepID          string          `json:"-"`
+	Attempt         int             `json:"-"`
+	ContentSnapshot json.RawMessage `json:"-"`
 }
 
 func toSessionDTO(s *orm.PluginSession) sessionDTO {
@@ -266,14 +268,21 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 
 		if slot.HumanArtifactID != nil {
 			var ha orm.PluginHumanArtifact
-			if db.WithContext(ctx).Where("id = ?", *slot.HumanArtifactID).First(&ha).Error == nil {
+			haErr := db.WithContext(ctx).Where("id = ?", *slot.HumanArtifactID).First(&ha).Error
+			if haErr == nil {
 				resolvedContentType = resolveContentType(ha.ContentType, ha.Value)
 				resolved = signArtifactImagePath(ha.Value, resolvedContentType)
 				resolvedCaption = ha.Caption
+			} else {
+				fmt.Printf("[enrichSlots] WARN: HumanArtifactID=%s not found for slot_id=%s list_index=%v: %v\n",
+					*slot.HumanArtifactID, slot.SlotID, slot.ListIndex, haErr)
 			}
 		} else if slot.ArtifactSeq != nil {
 			tid := taskIDByStep[stepKey{slot.StepID, slot.Attempt}]
-			if tid != "" {
+			if tid == "" {
+				fmt.Printf("[enrichSlots] WARN: no task_id for step_id=%s attempt=%d slot_id=%s\n",
+					slot.StepID, slot.Attempt, slot.SlotID)
+			} else {
 				k := tid + "#" + slot.ArtifactKey
 				for j := range artifactsByTask[k] {
 					if artifactsByTask[k][j].Seq == *slot.ArtifactSeq {
@@ -284,12 +293,24 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 						break
 					}
 				}
+				if resolved == nil {
+					fmt.Printf("[enrichSlots] WARN: ArtifactSeq=%d not found in task=%s key=%s slot_id=%s\n",
+						*slot.ArtifactSeq, tid, slot.ArtifactKey, slot.SlotID)
+				}
 			}
+		} else {
+			fmt.Printf("[enrichSlots] INFO: slot_id=%s list_index=%v revision=%d has no HumanArtifactID and no ArtifactSeq, ContentSnapshot len=%d\n",
+				slot.SlotID, slot.ListIndex, slot.Revision, len(slot.ContentSnapshot))
 		}
 
 		// Legacy fallback: ContentSnapshot for pre-migration rows.
 		if resolved == nil && len(slot.ContentSnapshot) > 0 {
 			resolved = signArtifactImagePath(slot.ContentSnapshot, "")
+		}
+
+		if resolved == nil {
+			fmt.Printf("[enrichSlots] WARN: resolved=nil for slot_id=%s list_index=%v revision=%d change_source=%s HumanArtifactID=%v ArtifactSeq=%v\n",
+				slot.SlotID, slot.ListIndex, slot.Revision, slot.ChangeSource, slot.HumanArtifactID, slot.ArtifactSeq)
 		}
 
 		if resolved != nil {

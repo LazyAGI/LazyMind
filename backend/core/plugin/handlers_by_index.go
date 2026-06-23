@@ -27,14 +27,16 @@ import (
 	"lazymind/core/store"
 )
 
-// parseListIndex parses the "list_index" path variable as a non-negative integer.
+// parseListIndex parses the "list_index" path variable as an integer.
+// Returns (n, true) for n >= 0 (list items) or n == -1 (sentinel for single/NULL slots).
+// Returns (0, false) on parse error or empty string.
 func parseListIndex(r *http.Request) (int, bool) {
 	s := common.PathVar(r, "list_index")
 	if s == "" {
 		return 0, false
 	}
 	var n int
-	if _, err := fmt.Sscanf(s, "%d", &n); err != nil || n < 0 {
+	if _, err := fmt.Sscanf(s, "%d", &n); err != nil || n < -1 {
 		return 0, false
 	}
 	return n, true
@@ -118,23 +120,31 @@ func PatchSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	li := listIndex
+	var liPtr *int
+	if listIndex >= 0 {
+		li := listIndex
+		liPtr = &li
+	}
+	// listIndex == -1 means single slot (list_index IS NULL)
 	var existing orm.PluginSlotRevision
-	if err := db.WithContext(ctx).
-		Where("session_id = ? AND slot_id = ? AND list_index = ? AND selected = ?", sessionID, slotID, li, true).
-		First(&existing).Error; err != nil {
+	q := db.WithContext(ctx).Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true)
+	if liPtr == nil {
+		q = q.Where("list_index IS NULL")
+	} else {
+		q = q.Where("list_index = ?", *liPtr)
+	}
+	if err := q.First(&existing).Error; err != nil {
 		common.ReplyErr(w, "slot revision not found", http.StatusNotFound)
 		return
 	}
+	slotType := "single"
+	if existing.ListIndex != nil {
+		slotType = "list"
+	}
 	newRev, err := WriteSlotRevisionWithHumanArtifact(ctx, db,
 		sessionID, slotID, existing.ArtifactKey, existing.StepID, existing.Attempt,
-		func() string {
-			if existing.ListIndex != nil {
-				return "list"
-			}
-			return "single"
-		}(),
-		&li,
+		slotType,
+		liPtr,
 		body.ContentType, resolveValuePaths(body.Value), body.Caption,
 	)
 	if err != nil {
@@ -222,8 +232,12 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	li := listIndex
-	liPtr := &li
+	var liPtr *int
+	if listIndex >= 0 {
+		li := listIndex
+		liPtr = &li
+	}
+	// listIndex == -1 means single slot (list_index IS NULL in DB)
 	revisions, err := LoadSlotVersions(ctx, db, sessionID, slotID, liPtr)
 	if err != nil {
 		common.ReplyErr(w, "query versions failed", http.StatusInternalServerError)
@@ -300,12 +314,19 @@ func RollbackSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	li := listIndex
-	liPtr := &li
+	var liPtr *int
+	if listIndex >= 0 {
+		li := listIndex
+		liPtr = &li
+	}
 	var anyRev orm.PluginSlotRevision
-	if err := db.WithContext(ctx).
-		Where("session_id = ? AND slot_id = ? AND list_index = ?", sessionID, slotID, li).
-		First(&anyRev).Error; err != nil {
+	q := db.WithContext(ctx).Where("session_id = ? AND slot_id = ?", sessionID, slotID)
+	if liPtr == nil {
+		q = q.Where("list_index IS NULL")
+	} else {
+		q = q.Where("list_index = ?", *liPtr)
+	}
+	if err := q.First(&anyRev).Error; err != nil {
 		common.ReplyErr(w, "slot revision not found", http.StatusNotFound)
 		return
 	}

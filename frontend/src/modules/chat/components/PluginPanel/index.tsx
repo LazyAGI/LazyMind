@@ -434,6 +434,38 @@ function SortableImageList({
     setInsertIdx(null);
   }, []);
 
+  // Fallback handlers on the container so that dragging into the trailing
+  // "Add item" card area (which has no per-item handlers) still works.
+  const handleContainerDragOver = useCallback((e: React.DragEvent) => {
+    // Only handle if we're not already over a child item (those call stopPropagation).
+    e.preventDefault();
+    // Show the insert indicator at the last position (after all items).
+    setInsertIdx(localOrder.length);
+  }, [localOrder.length]);
+
+  const handleContainerDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    const srcIdx = dragSrcIdx.current;
+    dragSrcIdx.current = null;
+    setInsertIdx(null);
+    if (srcIdx === null) return;
+    // Target gap is after all items.
+    const gapIdx = localOrder.length;
+    // No-op if already at the end.
+    if (gapIdx === srcIdx + 1) return;
+    const next = [...localOrder];
+    const [moved] = next.splice(srcIdx, 1);
+    next.push(moved);
+    setLocalOrder(next);
+    try {
+      const orderVersion = revisions[0]?.order_version ?? 0;
+      await reorderSlotItems(session.session_id, slotDef.id, next, orderVersion);
+      onRefresh?.();
+    } catch {
+      setLocalOrder(revisions.map((r) => r.list_index ?? 0));
+    }
+  }, [localOrder, revisions, session.session_id, slotDef.id, reorderSlotItems, onRefresh]);
+
   const byListIndex: Record<number, SlotRevision> = {};
   for (const r of revisions) {
     if (r.list_index !== undefined) byListIndex[r.list_index] = r;
@@ -444,6 +476,8 @@ function SortableImageList({
       className={`plugin-panel__image-list${isDraggable ? ' plugin-panel__image-list--sortable' : ''}`}
       onDragLeave={isDraggable ? handleContainerDragLeave : undefined}
       onDragEnter={isDraggable ? handleDragEnter : undefined}
+      onDragOver={isDraggable ? handleContainerDragOver : undefined}
+      onDrop={isDraggable ? handleContainerDrop : undefined}
     >
       {/* Insert indicator before first item */}
       {isDraggable && (
