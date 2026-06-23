@@ -118,7 +118,7 @@ function TextDiffView({ currentText, otherText, otherLabel, reversed }: TextDiff
 // Global version popover state — only one popover open at a time.
 // ---------------------------------------------------------------------------
 
-type PopoverKey = string; // `${sessionId}:${slotId}:${sortOrder}`
+type PopoverKey = string; // `${sessionId}:${slotId}:${listIndex}`
 let _openPopoverKey: PopoverKey | null = null;
 const _popoverListeners = new Set<() => void>();
 
@@ -156,7 +156,7 @@ function useGlobalPopoverOpen(key: PopoverKey): [boolean, (open: boolean) => voi
 interface SlotVersionPopoverProps {
   sessionId: string;
   slotId: string;
-  sortOrder: number;
+  listIndex: number;
   revisionCount: number;
   /** The revision number of the currently selected version — shown on the badge. */
   currentRevision?: number;
@@ -169,14 +169,14 @@ interface SlotVersionPopoverProps {
 export function SlotVersionPopover({
   sessionId,
   slotId,
-  sortOrder,
+  listIndex,
   revisionCount,
   currentRevision,
   currentValue,
   contentType,
   onRollbackDone,
 }: SlotVersionPopoverProps) {
-  const popoverKey: PopoverKey = `${sessionId}:${slotId}:${sortOrder}`;
+  const popoverKey: PopoverKey = `${sessionId}:${slotId}:${listIndex}`;
   const [open, setOpen] = useGlobalPopoverOpen(popoverKey);
   const [versions, setVersions] = useState<SlotVersionEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -196,7 +196,7 @@ export function SlotVersionPopover({
     }
     setLoading(true);
     try {
-      const vs = await getSlotVersions(sessionId, slotId, sortOrder);
+      const vs = await getSlotVersions(sessionId, slotId, listIndex);
       // Sort descending by revision so latest is first
       const sorted = [...vs].sort((a, b) => b.revision - a.revision);
       setVersions(sorted);
@@ -207,7 +207,7 @@ export function SlotVersionPopover({
     } finally {
       setLoading(false);
     }
-  }, [open, sessionId, slotId, sortOrder, getSlotVersions, setOpen]);
+  }, [open, sessionId, slotId, listIndex, getSlotVersions, setOpen]);
 
   const handleClose = useCallback(() => setOpen(false), [setOpen]);
 
@@ -218,13 +218,13 @@ export function SlotVersionPopover({
   const handleRollback = useCallback(async (revision: number) => {
     setRolling(true);
     try {
-      await rollbackSlotItem(sessionId, slotId, sortOrder, revision);
+      await rollbackSlotItem(sessionId, slotId, listIndex, revision);
       setOpen(false);
       onRollbackDone?.();
     } finally {
       setRolling(false);
     }
-  }, [sessionId, slotId, sortOrder, rollbackSlotItem, setOpen, onRollbackDone]);
+  }, [sessionId, slotId, listIndex, rollbackSlotItem, setOpen, onRollbackDone]);
 
   const handleVersionUploadClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -238,7 +238,7 @@ export function SlotVersionPopover({
     setUploading(true);
     try {
       const storedPath = await uploadFileInChunks(file);
-      await patchSlotItemValue(sessionId, slotId, sortOrder, { path: storedPath }, isImage ? 'image' : undefined);
+      await patchSlotItemValue(sessionId, slotId, listIndex, { path: storedPath }, isImage ? 'image' : undefined);
       setOpen(false);
       onRollbackDone?.();
     } catch {
@@ -246,7 +246,7 @@ export function SlotVersionPopover({
     } finally {
       setUploading(false);
     }
-  }, [sessionId, slotId, sortOrder, patchSlotItemValue, setOpen, onRollbackDone]);
+  }, [sessionId, slotId, listIndex, patchSlotItemValue, setOpen, onRollbackDone]);
 
   const isImage = contentType === 'image';
 
@@ -554,8 +554,8 @@ export function SlotImage({
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Reset caption editing state when a different slot item is mapped to this component instance
-  // (e.g. after drag-reorder, the same React node may receive a new slot via props).
+  // Reset editing state when a different slot item is mapped to this component instance
+  // (e.g. after delete+reorder, the same React node may receive a new slot via props).
   const prevListIndexRef = useRef(slot.list_index);
   useEffect(() => {
     if (prevListIndexRef.current !== slot.list_index) {
@@ -573,20 +573,20 @@ export function SlotImage({
 
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !sessionId || !slotId || slot.sort_order === undefined) return;
+    if (!file || !sessionId || !slotId || slot.list_index === undefined) return;
     // Reset input so the same file can be re-selected later
     e.target.value = '';
     setUploading(true);
     try {
       const storedPath = await uploadFileInChunks(file);
-      await patchSlotItemValue(sessionId, slotId, slot.sort_order, { path: storedPath }, 'image');
+      await patchSlotItemValue(sessionId, slotId, slot.list_index, { path: storedPath }, 'image');
       onRefresh?.();
     } catch {
       // upload failure — no-op, user can retry
     } finally {
       setUploading(false);
     }
-  }, [sessionId, slotId, slot.sort_order, patchSlotItemValue, onRefresh]);
+  }, [sessionId, slotId, slot.list_index, patchSlotItemValue, onRefresh]);
 
   const handleDeleteClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -595,11 +595,11 @@ export function SlotImage({
 
   const handleDeleteConfirm = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!sessionId || !slotId || slot.sort_order === undefined) return;
-    await deleteSlotItem(sessionId, slotId, slot.sort_order);
+    if (!sessionId || !slotId || slot.list_index === undefined) return;
+    await deleteSlotItem(sessionId, slotId, slot.list_index);
     setConfirmDelete(false);
     onRefresh?.();
-  }, [sessionId, slotId, slot.sort_order, deleteSlotItem, onRefresh]);
+  }, [sessionId, slotId, slot.list_index, deleteSlotItem, onRefresh]);
 
   const handleDeleteCancel = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -617,11 +617,11 @@ export function SlotImage({
   }, [slot.caption]);
 
   const handleCaptionSave = useCallback(async () => {
-    if (!sessionId || !slotId || slot.sort_order === undefined) return;
+    if (!sessionId || !slotId || slot.list_index === undefined) return;
     setCaptionEditing(false);
-    await patchSlotCaption(sessionId, slotId, slot.sort_order, captionDraft);
+    await patchSlotCaption(sessionId, slotId, slot.list_index, captionDraft);
     onRefresh?.();
-  }, [sessionId, slotId, slot.sort_order, captionDraft, patchSlotCaption, onRefresh]);
+  }, [sessionId, slotId, slot.list_index, captionDraft, patchSlotCaption, onRefresh]);
 
   const handleCaptionKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') handleCaptionSave();
@@ -630,7 +630,7 @@ export function SlotImage({
 
   if (!url) return <SlotPending type='image' cardMode={cardMode} />;
 
-  const hasActions = Boolean(sessionId && slotId && slot.sort_order !== undefined);
+  const hasActions = Boolean(sessionId && slotId && slot.list_index !== undefined);
 
   // Overlays rendered directly on top of the image (no separate action bar)
   const overlays = hasActions ? (
@@ -676,7 +676,7 @@ export function SlotImage({
           <SlotVersionPopover
             sessionId={sessionId!}
             slotId={slotId!}
-            sortOrder={slot.sort_order!}
+            listIndex={slot.list_index!}
             revisionCount={revisionCount}
             currentRevision={slot.revision}
             currentValue={slot.artifact_value}
@@ -804,7 +804,7 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
   const raw = slot.artifact_value;
   const { patchSlotCaption } = usePluginStore();
   const { setEditing: notifyEditing } = useContext(SlotEditingContext);
-  const editingKey = `${sessionId}:${slotId}:${slot.sort_order}`;
+  const editingKey = `${sessionId}:${slotId}:${slot.list_index}`;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [offloadedText, setOffloadedText] = useState<string | null>(null);
@@ -843,29 +843,24 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
     return <SlotPending type='text' />;
   }
 
-  const canEdit = Boolean(sessionId && slotId && slot.sort_order !== undefined);
+  const canEdit = Boolean(sessionId && slotId && slot.list_index !== undefined);
 
   // On mount: restore localStorage draft only if it differs from the current artifact text.
-  // A draft equal to the artifact text carries no unsaved change and should be discarded
-  // to avoid triggering a spurious flush later.
   useEffect(() => {
-    if (!canEdit || !sessionId || !slotId || slot.sort_order === undefined) return;
-    const saved = draftStore.getLocalDraft(sessionId, slotId, slot.sort_order);
+    if (!canEdit || !sessionId || !slotId || slot.list_index === undefined) return;
+    const saved = draftStore.getLocalDraft(sessionId, slotId, slot.list_index);
     if (saved?.text !== undefined && String(saved.text) !== text) {
       setDraft(String(saved.text));
     } else if (saved?.text !== undefined) {
-      // Draft matches artifact — discard it so no flush is scheduled.
-      draftStore.cancelDraft(sessionId, slotId, slot.sort_order);
+      draftStore.cancelDraft(sessionId, slotId, slot.list_index);
     }
   // Run only on mount (stable deps).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleEdit = () => {
-    // Prefer an in-memory draft over the persisted artifact value, but only when
-    // the draft actually contains a change; otherwise start fresh from artifact text.
-    const saved = (sessionId && slotId && slot.sort_order !== undefined)
-      ? draftStore.getLocalDraft(sessionId, slotId, slot.sort_order)
+    const saved = (sessionId && slotId && slot.list_index !== undefined)
+      ? draftStore.getLocalDraft(sessionId, slotId, slot.list_index)
       : null;
     const savedText = saved?.text !== undefined ? String(saved.text) : undefined;
     setDraft(savedText !== undefined && savedText !== text ? savedText : text);
@@ -876,25 +871,21 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setDraft(val);
-    if (sessionId && slotId && slot.sort_order !== undefined) {
-      draftStore.setDraft(sessionId, slotId, slot.sort_order, { text: val });
+    if (sessionId && slotId && slot.list_index !== undefined) {
+      draftStore.setDraft(sessionId, slotId, slot.list_index, { text: val });
     }
   };
 
-  // Save / Ctrl+S / onBlur: persist to localStorage only when content has changed.
-  // If draft equals the original artifact text, discard the draft so no backend
-  // revision is created (flushDraft would otherwise fire after the delay).
   const handleSave = () => {
     if (cancelledRef.current) {
       cancelledRef.current = false;
       return;
     }
-    if (sessionId && slotId && slot.sort_order !== undefined) {
+    if (sessionId && slotId && slot.list_index !== undefined) {
       if (draft !== text) {
-        draftStore.setDraft(sessionId, slotId, slot.sort_order, { text: draft });
+        draftStore.setDraft(sessionId, slotId, slot.list_index, { text: draft });
       } else {
-        // No change — cancel any pending draft so the 60s flush never fires.
-        draftStore.cancelDraft(sessionId, slotId, slot.sort_order);
+        draftStore.cancelDraft(sessionId, slotId, slot.list_index);
       }
     }
     setEditing(false);
@@ -913,8 +904,8 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
 
   const handleCancel = () => {
     cancelledRef.current = true;
-    if (sessionId && slotId && slot.sort_order !== undefined) {
-      draftStore.cancelDraft(sessionId, slotId, slot.sort_order);
+    if (sessionId && slotId && slot.list_index !== undefined) {
+      draftStore.cancelDraft(sessionId, slotId, slot.list_index);
     }
     setEditing(false);
     notifyEditing(editingKey, false);
@@ -927,9 +918,9 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
   };
 
   const handleCaptionSave = async () => {
-    if (!sessionId || !slotId || slot.sort_order === undefined) return;
+    if (!sessionId || !slotId || slot.list_index === undefined) return;
     setCaptionEditing(false);
-    await patchSlotCaption(sessionId, slotId, slot.sort_order, captionDraft);
+    await patchSlotCaption(sessionId, slotId, slot.list_index, captionDraft);
     onRefresh?.();
   };
 
@@ -941,8 +932,8 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
   // Determine display text: prefer draft if user is not editing (shows unsaved draft).
   const displayText = (() => {
     if (editing) return draft;
-    if (sessionId && slotId && slot.sort_order !== undefined) {
-      const saved = draftStore.getLocalDraft(sessionId, slotId, slot.sort_order);
+    if (sessionId && slotId && slot.list_index !== undefined) {
+      const saved = draftStore.getLocalDraft(sessionId, slotId, slot.list_index);
       if (saved?.text !== undefined) return String(saved.text);
     }
     return text;
@@ -972,11 +963,11 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
             onKeyDown={canEdit ? (e) => e.key === 'Enter' && handleEdit() : undefined}
           >{displayText}</p>
           <div className='plugin-slot__text-meta'>
-            {revisionCount !== undefined && revisionCount > 0 && sessionId && slotId && slot.sort_order !== undefined && (
+            {revisionCount !== undefined && revisionCount > 0 && sessionId && slotId && slot.list_index !== undefined && (
               <SlotVersionPopover
                 sessionId={sessionId}
                 slotId={slotId}
-                sortOrder={slot.sort_order}
+                listIndex={slot.list_index}
                 revisionCount={revisionCount}
                 currentRevision={slot.revision}
                 currentValue={slot.artifact_value}

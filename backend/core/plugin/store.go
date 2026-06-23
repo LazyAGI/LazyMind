@@ -356,7 +356,7 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 }
 
 // WriteSlotRevisionWithSnapshot writes a new human revision and records content_snapshot
-// atomically. Used by PatchSlotItem (human edits).
+// atomically. Used by PatchSlotItemByIndex (human edits).
 // ArtifactSeq is intentionally left nil — human revisions carry their value in
 // ContentSnapshot; the unified read path in enrichSlots falls back to ContentSnapshot
 // when ArtifactSeq is nil.
@@ -885,7 +885,7 @@ func resolveContentType(contentType string, snapshot []byte) string {
 }
 
 // WriteSlotRevisionWithHumanArtifact inserts a plugin_human_artifacts row and a new
-// 'human' slot revision that points to it.  This is the write path for PatchSlotItem.
+// 'human' slot revision that points to it.  This is the write path for PatchSlotItemByIndex.
 //
 // contentType must be the explicit type declared by the caller ('text','json','image','file').
 // value is the cleaned artifact value (path-only for files/images, inline for text/json).

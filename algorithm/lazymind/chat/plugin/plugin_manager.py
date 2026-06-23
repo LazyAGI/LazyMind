@@ -433,8 +433,9 @@ def _build_session_artifact_section(session_id: str) -> str:
         return ''
     # Replace the generic header with a plugin-specific one that warns against re-running steps.
     lines[0] = (
-        '## Current session artifacts (real-time state — user may have added or removed items '
-        'since earlier in this conversation; treat this list as the single source of truth)'
+        '## Current session artifacts [AUTHORITATIVE — queried at request time]\n'
+        '> Any artifact list mentioned in the conversation history is OUTDATED and must be ignored.\n'
+        '> The list below is the ONLY source of truth for what is currently available.'
     )
     return '\n'.join(lines)
 

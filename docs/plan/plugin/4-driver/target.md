@@ -42,4 +42,5 @@
 每一次ChatAgent和SubAgent如何知道该取哪些附件
 遇到用户的意图缺失，或者需要向用户问询的，如何产生ask(auto模式不ask，manual模式可能ask)
 
-subagent = auto / manual / never, never时候关闭插件机制
+subagent = auto / never, default=auto
+plugin = auto / dynamic / manual / never, default=dynamic, never时候关闭插件机制(如果作为问答助手，是要关闭插件的)

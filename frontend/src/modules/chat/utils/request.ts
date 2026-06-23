@@ -160,16 +160,16 @@ export function PluginSessionApi() {
         options,
       );
     },
-    // Phase 3: slot item management
-    deleteSlotItem(sessionId: string, slotId: string, sortOrder: number, options?: RawAxiosRequestConfig) {
+    // Phase 3: slot item management — addressed by stable list_index (not sort_order).
+    deleteSlotItem(sessionId: string, slotId: string, listIndex: number, orderVersion?: number, options?: RawAxiosRequestConfig) {
       return axiosInstance.delete(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/${sortOrder}`,
-        options,
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}`,
+        { ...options, data: orderVersion !== undefined ? { order_version: orderVersion } : undefined },
       );
     },
-    patchSlotItem(sessionId: string, slotId: string, sortOrder: number, value: any, contentType?: string, options?: RawAxiosRequestConfig) {
+    patchSlotItem(sessionId: string, slotId: string, listIndex: number, value: any, contentType?: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.patch(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/${sortOrder}`,
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}`,
         { value, ...(contentType ? { content_type: contentType } : {}) },
         options,
       );
@@ -187,15 +187,15 @@ export function PluginSessionApi() {
         options,
       );
     },
-    getSlotItemVersions(sessionId: string, slotId: string, sortOrder: number, options?: RawAxiosRequestConfig) {
+    getSlotItemVersions(sessionId: string, slotId: string, listIndex: number, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/${sortOrder}/versions`,
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}/versions`,
         options,
       );
     },
-    rollbackSlotItem(sessionId: string, slotId: string, sortOrder: number, revision: number, options?: RawAxiosRequestConfig) {
+    rollbackSlotItem(sessionId: string, slotId: string, listIndex: number, revision: number, options?: RawAxiosRequestConfig) {
       return axiosInstance.post(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/${sortOrder}/rollback`,
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}/rollback`,
         { revision },
         options,
       );
@@ -207,9 +207,9 @@ export function PluginSessionApi() {
         options,
       );
     },
-    patchSlotCaption(sessionId: string, slotId: string, sortOrder: number, caption: string, options?: RawAxiosRequestConfig) {
+    patchSlotCaption(sessionId: string, slotId: string, listIndex: number, caption: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.patch(
-        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/${sortOrder}/caption`,
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}/caption`,
         { caption },
         options,
       );

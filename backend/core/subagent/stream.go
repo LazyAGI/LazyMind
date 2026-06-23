@@ -70,8 +70,36 @@ func StreamTask(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
-	// 1. DB snapshot: task_start + history progress + history artifacts + history steps.
+	// 1. Always emit task_start so the frontend knows the stream has begun.
 	writeTaskSSE(w, flusher, TaskEvent{Type: "task_start", TaskID: taskID})
+
+	// 2. Choose snapshot strategy based on Redis availability.
+	//    - Redis present: replay ALL events from offset 0 (includes steps not yet persisted to DB).
+	//      This is the authoritative source for live tasks; DB steps are a subset.
+	//    - Redis absent (expired or not used): fall back to DB snapshot (steps + artifacts).
+	exists, _ := StreamExists(ctx, rdb, taskID)
+
+	if rdb != nil && exists {
+		// Replay full Redis history first, then tail for new events.
+		allEvents, _ := StreamEventsFrom(ctx, rdb, taskID, 0)
+		from := int64(len(allEvents))
+		for _, raw := range allEvents {
+			var ev TaskEvent
+			if json.Unmarshal([]byte(raw), &ev) == nil {
+				writeTaskSSE(w, flusher, ev)
+			}
+		}
+		if isTerminal(t.Status) {
+			emitTerminal(w, flusher, taskID, t.Status, t.Summary)
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+			flusher.Flush()
+			return
+		}
+		tailRedisStream(ctx, db, rdb, w, flusher, taskID, from)
+		return
+	}
+
+	// 3. No Redis: DB snapshot (progress + steps + artifacts).
 	writeTaskSSE(w, flusher, TaskEvent{
 		Type: "progress", TaskID: taskID,
 		Progress: t.ProgressPct, CurrentPhase: t.CurrentPhase, EstimatedSec: t.EstimatedSec,
@@ -91,22 +119,13 @@ func StreamTask(w http.ResponseWriter, r *http.Request) {
 			Seq: arts[i].Seq, Value: normalizeJSON(arts[i].Value, "{}"),
 		})
 	}
-
-	// 2. Already terminal: emit done/error and stop (no Redis subscription).
 	if isTerminal(t.Status) {
 		emitTerminal(w, flusher, taskID, t.Status, t.Summary)
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 		flusher.Flush()
 		return
 	}
-
-	// 3. Still running: tail Redis from current end; fall back to DB polling if key missing.
-	exists, _ := StreamExists(ctx, rdb, taskID)
-	if rdb == nil || !exists {
-		pollDBUntilTerminal(ctx, db, w, flusher, taskID)
-		return
-	}
-	tailRedisStream(ctx, db, rdb, w, flusher, taskID)
+	pollDBUntilTerminal(ctx, db, w, flusher, taskID)
 }
 
 func emitTerminal(w http.ResponseWriter, flusher http.Flusher, taskID, status, summary string) {
@@ -165,11 +184,9 @@ func stepToTaskEvent(taskID string, s *orm.SubAgentStep) *TaskEvent {
 	return nil
 }
 
-// tailRedisStream tails the Redis event LIST from current end until a terminal event arrives.
-func tailRedisStream(ctx context.Context, db *gorm.DB, rdb *redis.Client, w http.ResponseWriter, flusher http.Flusher, taskID string) {
-	// Start tailing from the current tail so we only forward new events (snapshot already sent).
-	existing, _ := StreamEventsFrom(ctx, rdb, taskID, 0)
-	from := int64(len(existing))
+// tailRedisStream tails the Redis event LIST starting from `from` until a terminal event arrives.
+// The caller is responsible for replaying events before `from` (the snapshot phase).
+func tailRedisStream(ctx context.Context, db *gorm.DB, rdb *redis.Client, w http.ResponseWriter, flusher http.Flusher, taskID string, from int64) {
 	for {
 		select {
 		case <-ctx.Done():

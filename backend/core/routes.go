@@ -192,15 +192,17 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/plugin-sessions/{session_id}/slots", []string{"qa.read"}, plugin.GetSessionSlots)
 	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}", []string{"qa.write"}, plugin.PatchSessionSlot)
 	handleAPI(r, "POST", "/plugin-sessions/{session_id}:advance", []string{"qa.write"}, plugin.AdvanceSession)
-	// Phase 3: slot item management (delete, reorder, edit, rollback)
-	handleAPI(r, "DELETE", "/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}", []string{"qa.write"}, plugin.DeleteSlotItem)
-	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}", []string{"qa.write"}, plugin.PatchSlotItem)
+	// Phase 3: slot item management.
+	// Stable list_index-based routes (preferred).
+	handleAPI(r, "DELETE", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, plugin.DeleteSlotItemByIndex)
+	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, plugin.PatchSlotItemByIndex)
+	handleAPI(r, "GET", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions", []string{"qa.read"}, plugin.GetSlotItemVersionsByIndex)
+	handleAPI(r, "POST", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback", []string{"qa.write"}, plugin.RollbackSlotItemByIndex)
+	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption", []string{"qa.write"}, plugin.PatchSlotCaptionByIndex)
+	// Order management
 	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}/order", []string{"qa.write"}, plugin.ReorderSlotItems)
 	handleAPI(r, "GET", "/plugin-sessions/{session_id}/slots/{slot_id}/order", []string{"qa.read"}, plugin.GetSlotOrderHandler)
-	handleAPI(r, "GET", "/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}/versions", []string{"qa.read"}, plugin.GetSlotItemVersions)
-	handleAPI(r, "POST", "/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}/rollback", []string{"qa.write"}, plugin.RollbackSlotItem)
 	// Phase 4: caption editing and manual item creation
-	handleAPI(r, "PATCH", "/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}/caption", []string{"qa.write"}, plugin.PatchSlotCaption)
 	handleAPI(r, "POST", "/plugin-sessions/{session_id}/slots/{slot_id}/items", []string{"qa.write"}, plugin.CreateSlotItem)
 	handleAPI(r, "GET", "/evolution/tasks", []string{"qa.read"}, resourceupdate.ListTasks)
 	handleAPI(r, "GET", "/evolution/tasks/{task_id}", []string{"qa.read"}, resourceupdate.GetTask)

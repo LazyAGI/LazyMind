@@ -453,7 +453,7 @@ function SortableImageList({
         const rev = byListIndex[listIndex];
         if (!rev) return null;
         return (
-          <React.Fragment key={`${rev.slot_id}-${rev.revision}-${rev.list_index ?? 0}`}>
+          <React.Fragment key={`${rev.slot_id}-${rev.sort_order ?? rev.list_index ?? 0}`}>
             <div
               draggable={isDraggable}
               onDragStart={isDraggable ? (e) => handleDragStart(idx, e) : undefined}
