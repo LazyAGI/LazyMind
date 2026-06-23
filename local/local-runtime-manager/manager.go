@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -341,37 +342,64 @@ func (m *RuntimeManager) printReadySummary(apiPort int) {
 }
 
 func acquireUpLock(paths RuntimePaths) (func(), error) {
-	f, err := os.OpenFile(paths.UpLockFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	for {
+		f, err := os.OpenFile(paths.UpLockFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			if os.IsExist(err) {
+				alive, readErr := upLockProcessAlive(paths.UpLockFile)
+				if readErr != nil || alive {
+					return nil, fmt.Errorf("local-runtime-up is already in progress (lock: %s)", paths.UpLockFile)
+				}
+				_ = os.Remove(paths.UpLockFile)
+				continue
+			}
+			return nil, err
+		}
+
+		released := false
+		release := func() {
+			if released {
+				return
+			}
+			released = true
+			_ = f.Close()
+			_ = os.Remove(paths.UpLockFile)
+		}
+		if _, err := fmt.Fprintf(f, "%d\n", os.Getpid()); err != nil {
+			release()
+			return nil, err
+		}
+		if err := f.Close(); err != nil {
+			release()
+			return nil, err
+		}
+		return func() {
+			if released {
+				return
+			}
+			released = true
+			_ = os.Remove(paths.UpLockFile)
+		}, nil
+	}
+}
+
+func upLockProcessAlive(lockFile string) (bool, error) {
+	raw, err := os.ReadFile(lockFile)
 	if err != nil {
-		if os.IsExist(err) {
-			return nil, fmt.Errorf("local-runtime-up is already in progress (lock: %s)", paths.UpLockFile)
-		}
-		return nil, err
+		return false, err
 	}
-	released := false
-	release := func() {
-		if released {
-			return
-		}
-		released = true
-		_ = f.Close()
-		_ = os.Remove(paths.UpLockFile)
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || pid <= 0 {
+		return false, nil
 	}
-	if _, err := fmt.Fprintf(f, "%d\n", os.Getpid()); err != nil {
-		release()
-		return nil, err
+	err = syscall.Kill(pid, 0)
+	if err == nil || err == syscall.EPERM {
+		return true, nil
 	}
-	if err := f.Close(); err != nil {
-		release()
-		return nil, err
+	if err == syscall.ESRCH {
+		return false, nil
 	}
-	return func() {
-		if released {
-			return
-		}
-		released = true
-		_ = os.Remove(paths.UpLockFile)
-	}, nil
+	return true, err
 }
 
 func envDuration(name string, fallback time.Duration) time.Duration {

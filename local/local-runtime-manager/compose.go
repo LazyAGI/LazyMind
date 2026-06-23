@@ -105,6 +105,12 @@ func (m *ComposeManager) ComposeUp(ctx context.Context, repoRoot string, profile
 		_ = profile
 	}
 	args := append(m.composeBaseArgs(repoRoot), "up", "--build")
+	for _, svc := range disabled.DisabledContainerTypes {
+		if svc == "" {
+			continue
+		}
+		args = append(args, "--scale", svc+"=0")
+	}
 	args = append(args, remaining...)
 	if streamer, ok := m.runner.(CommandStreamer); ok {
 		err := streamer.Stream(ctx, Command{Name: "docker", Args: args, Dir: repoRoot}, os.Stdout, os.Stderr)

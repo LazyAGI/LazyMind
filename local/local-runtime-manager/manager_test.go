@@ -87,6 +87,49 @@ func TestRuntimePathsEnsureAllDirsCreatesOnlyV1Directories(t *testing.T) {
 	}
 }
 
+func TestAcquireUpLockRemovesStaleLock(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure dirs: %v", err)
+	}
+	if err := os.WriteFile(paths.UpLockFile, []byte("not-a-pid\n"), 0o600); err != nil {
+		t.Fatalf("write stale lock: %v", err)
+	}
+
+	release, err := acquireUpLock(paths)
+	if err != nil {
+		t.Fatalf("acquire stale lock: %v", err)
+	}
+	release()
+	if _, err := os.Stat(paths.UpLockFile); !os.IsNotExist(err) {
+		t.Fatalf("expected lock to be released, err=%v", err)
+	}
+}
+
+func TestAcquireUpLockKeepsLiveLock(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure dirs: %v", err)
+	}
+	if err := os.WriteFile(paths.UpLockFile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
+		t.Fatalf("write live lock: %v", err)
+	}
+
+	if _, err := acquireUpLock(paths); err == nil {
+		t.Fatal("expected live lock to block acquire")
+	}
+}
+
 func TestFilterRemainingServices(t *testing.T) {
 	services := []string{"auth-service", "core", "web"}
 	remaining, err := filterRemainingServices(services, []string{"core"})
@@ -151,6 +194,45 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 	}
 	if call != 2 {
 		t.Fatalf("expected 2 compose calls got %d", call)
+	}
+}
+
+func TestComposeUpScalesDisabledServicesToZero(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	overlay := filepath.Join(repo, localComposeOverrideName)
+	if err := os.WriteFile(overlay, []byte("x-lazymind-local:\n  mode: local\n  disabled_container_services:\n    - redis\n"), 0o644); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+
+	runner := &fakeRunner{t: t}
+	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
+	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
+		return CommandResult{Stdout: "redis\nauth-service\ncore\n"}, nil
+	}, func(cmd Command) (CommandResult, error) {
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
+			"up",
+			"--build",
+			"--scale", "redis=0",
+			"auth-service", "core",
+		})
+		for _, arg := range cmd.Args {
+			if arg == "redis" {
+				t.Fatalf("disabled service redis should not be in explicit service list: %v", cmd.Args)
+			}
+		}
+		return CommandResult{}, nil
+	})
+
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := manager.compose.ComposeUp(context.Background(), paths.RepoRoot, cfg.Profile); err != nil {
+		t.Fatalf("compose up: %v", err)
 	}
 }
 
