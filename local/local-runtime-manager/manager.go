@@ -340,7 +340,7 @@ func (m *RuntimeManager) printReadySummary(cfg RuntimeConfig) {
 	_, _ = fmt.Fprintf(m.out, "local runtime ready\n")
 	_, _ = fmt.Fprintf(m.out, "process-compose: http://127.0.0.1:%d\n", cfg.ProcessComposePort)
 	_, _ = fmt.Fprintf(m.out, "frontend: http://localhost:%d\n", cfg.FrontendPort)
-	_, _ = fmt.Fprintf(m.out, "status: make local-runtime-status\n")
+	_, _ = fmt.Fprintf(m.out, "status: local/local-runtime-manager/lazymind-local status --json --profile %s\n", cfg.Profile)
 }
 
 func acquireUpLock(paths RuntimePaths) (func(), error) {
@@ -350,7 +350,7 @@ func acquireUpLock(paths RuntimePaths) (func(), error) {
 			if os.IsExist(err) {
 				alive, readErr := upLockProcessAlive(paths.UpLockFile)
 				if readErr != nil || alive {
-					return nil, fmt.Errorf("local-runtime-up is already in progress (lock: %s)", paths.UpLockFile)
+					return nil, fmt.Errorf("local runtime startup is already in progress (lock: %s)", paths.UpLockFile)
 				}
 				_ = os.Remove(paths.UpLockFile)
 				continue
