@@ -1472,17 +1472,13 @@ const zhCN = {
         enterCredentialsDesc:
           "回到数据源管理，打开飞书 App 凭据弹窗，填入刚刚复制的 App ID 和 App Secret，并保存。",
         enterCredentialsAlt: "系统内填写飞书 App ID 与 App Secret 的弹窗",
-        copyFolderTitle: "复制飞书文件夹 ID",
-        copyFolderDesc:
-          "在飞书云文档中打开目标文件夹，复制浏览器地址栏中的文件夹 ID；如果接入 Wiki，则复制对应的 Wiki 空间 ID。",
-        copyFolderDetailTarget: "目标类型可根据你的接入目标选择 Drive 文件夹或 Wiki。",
-        copyFolderDetailDrive: "Drive 文件夹场景下，可直接从浏览器地址栏复制文件夹 ID。",
-        copyFolderAlt: "飞书云文档文件夹地址栏中的文件夹 ID",
-        finishTitle: "填写文件夹 ID 并完成授权",
+        finishTitle: "选择或输入目标路径并完成授权",
         finishDesc:
-          "回到数据源创建弹窗，选择目标类型，填入上一步复制的 ID，然后点击连接账号完成 OAuth 授权并保存配置。",
-        finishDetail: "授权前请先在飞书云盘中创建文件夹，并把文件夹目录地址复制到 LazyMind。",
-        finishAlt: "系统内填写飞书文件夹 ID 并发起授权",
+          "回到数据源创建弹窗，选择目标类型，完成飞书账号授权后可直接选择可访问的空间或文件夹；也可以手动输入目标 ID，然后保存配置。",
+        finishDetail: "如果使用 Drive 文件夹，请先在飞书云盘中创建目标文件夹；如果使用 Wiki，请确认当前飞书账号有对应空间访问权限。",
+        finishManualDetail: "手动输入时，在目标路径选择框中粘贴 Wiki 空间 ID 或 Drive 文件夹 ID（例如 7354xxxxxxxxxxxx、fldxxxxxxxxxxxx），然后勾选“使用当前输入”。",
+        finishManualAlt: "飞书云文档地址栏中的 Drive 文件夹 ID",
+        finishAlt: "系统内选择或输入飞书目标路径并完成授权",
       },
     },
     dataSourceNotionSetupGuide: {

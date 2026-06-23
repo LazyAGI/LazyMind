@@ -1384,6 +1384,47 @@ export default function DataSourceManagement() {
     isLeaf: true,
   });
 
+  const buildManualFeishuTargetNode = (
+    targetRef: string,
+  ): FeishuTargetTreeNode => {
+    const normalizedTargetRef = targetRef.trim();
+    return {
+      key: normalizedTargetRef,
+      value: normalizedTargetRef,
+      title: t("admin.dataSourceUseCurrentInput", { value: normalizedTargetRef }),
+      isLeaf: true,
+      targetRef: normalizedTargetRef,
+      targetType:
+        normalizeFeishuTargetType(undefined, normalizedTargetRef) ||
+        feishuTargetType,
+    };
+  };
+
+  const hasFeishuTargetRef = (
+    nodes: FeishuTargetTreeNode[],
+    targetRef: string,
+  ): boolean =>
+    nodes.some((node) => {
+      const refs = [node.value, node.targetRef, node.nodeRef]
+        .map((item) => `${item || ""}`.trim())
+        .filter(Boolean);
+
+      return refs.includes(targetRef) || Boolean(
+        node.children && hasFeishuTargetRef(node.children, targetRef),
+      );
+    });
+
+  const prependManualFeishuTargetOption = (
+    targetRef: string,
+    nodes: FeishuTargetTreeNode[],
+  ): FeishuTargetTreeNode[] => {
+    const normalizedTargetRef = targetRef.trim();
+    if (!normalizedTargetRef || hasFeishuTargetRef(nodes, normalizedTargetRef)) {
+      return nodes;
+    }
+    return [buildManualFeishuTargetNode(normalizedTargetRef), ...nodes];
+  };
+
   const mapFeishuTargetNodes = (
     nodes: ScanV2TreeNode[],
     inheritedTargetType?: FeishuTargetType,
@@ -1493,24 +1534,32 @@ export default function DataSourceManagement() {
       }
 
       const nodes = mapFeishuTargetNodes(response.data.items || []);
-      const nextNodes =
+      const baseNodes =
         nodes.length > 0
           ? nodes
           : [buildFeishuHelperNode(t("admin.dataSourceNoFeishuTargets"))];
+      const nextNodes = normalizedKeyword
+        ? prependManualFeishuTargetOption(normalizedKeyword, baseNodes)
+        : baseNodes;
       feishuTargetOptionsCacheRef.current.set(cacheKey, nextNodes);
       setFeishuTargetTreeData(nextNodes);
     } catch (error) {
       if (feishuTargetRequestSeqRef.current !== requestSeq) {
         return;
       }
-      setFeishuTargetTreeData([
+      const fallbackNodes = [
         buildFeishuHelperNode(
           getLocalizedErrorMessage(
             error,
             t("admin.dataSourceFeishuDirectoryListFailedManual"),
           ) || t("admin.dataSourceFeishuDirectoryListFailedManual"),
         ),
-      ]);
+      ];
+      setFeishuTargetTreeData(
+        normalizedKeyword
+          ? prependManualFeishuTargetOption(normalizedKeyword, fallbackNodes)
+          : fallbackNodes,
+      );
     } finally {
       if (feishuTargetRequestSeqRef.current === requestSeq) {
         setFeishuTargetLoading(false);

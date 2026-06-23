@@ -1525,20 +1525,15 @@ const enUS = {
         enterCredentialsDesc:
           "Return to Data Source Management, open the Feishu App Credentials dialog, enter the App ID and App Secret, and save.",
         enterCredentialsAlt: "Feishu App ID and App Secret dialog in the system",
-        copyFolderTitle: "Copy Feishu folder ID",
-        copyFolderDesc:
-          "Open the target folder in Feishu Docs and copy the folder ID from the browser address bar. If using Wiki, copy the related Wiki space ID.",
-        copyFolderDetailTarget:
-          "Choose Drive Folder or Wiki based on your target access type.",
-        copyFolderDetailDrive:
-          "For Drive Folder access, copy the folder ID directly from the browser address bar.",
-        copyFolderAlt: "Folder ID in the Feishu Docs folder address bar",
-        finishTitle: "Enter folder ID and finish authorization",
+        finishTitle: "Select or enter a target path and finish authorization",
         finishDesc:
-          "Return to the data source creation dialog, choose the target type, enter the ID copied in the previous step, then click Connect Account to complete OAuth authorization and save the configuration.",
+          "Return to the data source creation dialog, choose the target type, complete Feishu account authorization, then select an accessible space or folder directly. You can also enter the target ID manually, then save the configuration.",
         finishDetail:
-          "Before authorization, create the folder in Feishu Drive and copy the folder directory URL into LazyMind.",
-        finishAlt: "Enter Feishu folder ID and start authorization in the system",
+          "For Drive Folder access, create the target folder in Feishu Drive first. For Wiki access, make sure the current Feishu account can access the space.",
+        finishManualDetail:
+          "For manual entry, paste the Wiki space ID or Drive folder ID into the target path selector, for example 7354xxxxxxxxxxxx or fldxxxxxxxxxxxx, then check Use current input.",
+        finishManualAlt: "Drive folder ID in the Feishu Docs address bar",
+        finishAlt: "Select or enter a Feishu target path and finish authorization in the system",
       },
     },
     dataSourceNotionSetupGuide: {
