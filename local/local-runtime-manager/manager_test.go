@@ -249,6 +249,7 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 		repo,
 		profile,
 		logPath,
+		filepath.Join(repo, "local-proxy.log"),
 		tokenPath,
 		defaultProcessComposePort,
 	); err != nil {
@@ -283,6 +284,19 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 	}
 	if proc.Namespace != "container" {
 		t.Fatalf("unexpected namespace %q", proc.Namespace)
+	}
+	localProxy, ok := parsed.Processes[localProxyProcessName]
+	if !ok {
+		t.Fatal("missing local-proxy process")
+	}
+	if !strings.Contains(localProxy.Command, "internal local-proxy-run --profile "+profile) {
+		t.Fatalf("missing local-proxy-run command: %q", localProxy.Command)
+	}
+	if !strings.Contains(localProxy.Shutdown.Command, "internal local-proxy-down --profile "+profile) {
+		t.Fatalf("missing local-proxy-down command: %q", localProxy.Shutdown.Command)
+	}
+	if localProxy.Namespace != "host" {
+		t.Fatalf("unexpected local-proxy namespace %q", localProxy.Namespace)
 	}
 	if strings.Contains(out, "readiness_probe:") {
 		t.Fatal("generated config should not include process-compose readiness_probe")

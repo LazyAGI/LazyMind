@@ -120,6 +120,10 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 			_, _ = io.WriteString(c.out, svc+"\n")
 		}
 		return nil
+	case "local-proxy-run":
+		return manager.localProxy.Run(ctx, cfg, paths)
+	case "local-proxy-down":
+		return manager.localProxy.Down(ctx, cfg, paths)
 	default:
 		return fmt.Errorf("unknown internal command: %s", sub)
 	}
@@ -159,5 +163,5 @@ func (c *CLI) usage() {
 	_, _ = io.WriteString(c.out, "  lazymind-local up --profile <profile>\n")
 	_, _ = io.WriteString(c.out, "  lazymind-local down --profile <profile>\n")
 	_, _ = io.WriteString(c.out, "  lazymind-local status --json\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local internal compose-up|compose-down|compose-services --profile <profile>\n")
+	_, _ = io.WriteString(c.out, "  lazymind-local internal compose-up|compose-down|compose-services|local-proxy-run|local-proxy-down --profile <profile>\n")
 }

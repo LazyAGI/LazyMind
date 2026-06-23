@@ -76,8 +76,12 @@ func defaultRuntimeState(cfg RuntimeConfig, apiPort int, tokenPath string) Runti
 			PID:       0,
 		},
 		Services: map[string]RuntimeServiceState{
-			"docker-stack": {
+			processComposeServiceName: {
 				Kind:   "docker-compose",
+				Status: "stopped",
+			},
+			localProxyProcessName: {
+				Kind:   "host-process",
 				Status: "stopped",
 			},
 		},
@@ -98,6 +102,10 @@ func newStateWithServiceStatus(state RuntimeState, serviceStatus string) Runtime
 	ds.Kind = "docker-compose"
 	ds.Status = serviceStatus
 	state.Services[processComposeServiceName] = ds
+	lp := state.Services[localProxyProcessName]
+	lp.Kind = "host-process"
+	lp.Status = serviceStatus
+	state.Services[localProxyProcessName] = lp
 	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	return state
 }
@@ -119,6 +127,12 @@ func readOrNewState(paths RuntimePaths, cfg RuntimeConfig) (RuntimeState, error)
 	if _, ok := st.Services[processComposeServiceName]; !ok {
 		st.Services[processComposeServiceName] = RuntimeServiceState{
 			Kind:   "docker-compose",
+			Status: "unknown",
+		}
+	}
+	if _, ok := st.Services[localProxyProcessName]; !ok {
+		st.Services[localProxyProcessName] = RuntimeServiceState{
+			Kind:   "host-process",
 			Status: "unknown",
 		}
 	}
