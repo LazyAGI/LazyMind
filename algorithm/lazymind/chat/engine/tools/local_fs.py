@@ -212,7 +212,7 @@ class LocalFSToolGroup:
                                 })
                                 if len(matches) >= max_results:
                                     break
-                except (OSError, PermissionError):
+                except OSError:
                     continue
                 if len(matches) >= max_results:
                     break
@@ -253,7 +253,7 @@ class LocalFSToolGroup:
         try:
             with open(safe_path, 'r', encoding='utf-8', errors='replace') as fh:
                 lines = fh.readlines()
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             return tool_error('read', f'Cannot read file: {exc}')
 
         total = len(lines)
