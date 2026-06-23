@@ -230,6 +230,194 @@ class SubAgentDB:
         except Exception:
             return []
 
+    def load_selected_slot_artifacts_with_order(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return selected slot revisions with sort_order derived from plugin_slot_order.
+
+        sort_order is the 1-based position in the order_list JSON array for the slot.
+        Falls back to list_index + 1 when no order row exists for the slot.
+
+        Returns a list of dicts with keys:
+          artifact_key, list_index, artifact_seq, human_artifact_id,
+          content_snapshot, change_source, task_id, sort_order
+        Returns empty list on any error.
+        """
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    text(
+                        'SELECT '
+                        '  psr.artifact_key, '
+                        '  psr.list_index, '
+                        '  psr.artifact_seq, '
+                        '  psr.human_artifact_id, '
+                        '  psr.content_snapshot, '
+                        '  psr.change_source, '
+                        '  pss.task_id, '
+                        '  COALESCE(pos.sort_order, psr.list_index + 1) AS sort_order '
+                        'FROM plugin_slot_revisions psr '
+                        'LEFT JOIN plugin_session_steps pss '
+                        '  ON pss.session_id = psr.session_id '
+                        '  AND pss.step_id   = psr.step_id '
+                        '  AND pss.attempt   = psr.attempt '
+                        'LEFT JOIN ( '
+                        '  SELECT slot_id, val::int AS list_index, '
+                        '         (ord - 1 + 1) AS sort_order '
+                        '  FROM plugin_slot_order, '
+                        '       jsonb_array_elements_text(order_list) '
+                        '       WITH ORDINALITY AS t(val, ord) '
+                        '  WHERE session_id = :session_id '
+                        ') pos ON pos.slot_id = psr.slot_id '
+                        '      AND pos.list_index = psr.list_index '
+                        'WHERE psr.session_id = :session_id '
+                        '  AND psr.selected = TRUE '
+                        'ORDER BY psr.artifact_key ASC, '
+                        '         COALESCE(pos.sort_order, psr.list_index + 1) ASC'
+                    ),
+                    {'session_id': session_id},
+                ).mappings().all()
+            return [dict(r) for r in rows]
+        except Exception:
+            return []
+
+    def load_slot_artifact_by_sort_order(
+        self, session_id: str, artifact_key: str, sort_order: int
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve sort_order → list_index for a plugin session slot, then return the
+        selected revision metadata (artifact_seq, human_artifact_id, content_snapshot,
+        task_id, list_index).
+
+        Returns None when not found or on any error.
+        """
+        try:
+            with self._conn() as conn:
+                row = conn.execute(
+                    text(
+                        'SELECT '
+                        '  psr.artifact_key, '
+                        '  psr.list_index, '
+                        '  psr.artifact_seq, '
+                        '  psr.human_artifact_id, '
+                        '  psr.content_snapshot, '
+                        '  psr.change_source, '
+                        '  pss.task_id '
+                        'FROM plugin_slot_revisions psr '
+                        'LEFT JOIN plugin_session_steps pss '
+                        '  ON pss.session_id = psr.session_id '
+                        '  AND pss.step_id   = psr.step_id '
+                        '  AND pss.attempt   = psr.attempt '
+                        'INNER JOIN ( '
+                        '  SELECT slot_id, val::int AS list_index '
+                        '  FROM plugin_slot_order, '
+                        '       jsonb_array_elements_text(order_list) '
+                        '       WITH ORDINALITY AS t(val, ord) '
+                        '  WHERE session_id = :session_id '
+                        '    AND (ord - 1 + 1) = :sort_order '
+                        ') pos ON pos.slot_id = psr.slot_id '
+                        '      AND pos.list_index = psr.list_index '
+                        'WHERE psr.session_id = :session_id '
+                        '  AND psr.artifact_key = :artifact_key '
+                        '  AND psr.selected = TRUE '
+                        'ORDER BY psr.list_index ASC '
+                        'LIMIT 1'
+                    ),
+                    {
+                        'session_id': session_id,
+                        'artifact_key': artifact_key,
+                        'sort_order': sort_order,
+                    },
+                ).mappings().first()
+            return dict(row) if row else None
+        except Exception:
+            return None
+
+    def resolve_slot_revision_value(
+        self, row: Dict[str, Any]
+    ) -> tuple:
+        """Resolve value and content_type from a plugin_slot_revisions row dict.
+
+        Returns (value, content_type) where value may be None if unresolvable.
+        """
+        human_artifact_id = row.get('human_artifact_id')
+        artifact_seq = row.get('artifact_seq')
+        task_id = row.get('task_id')
+        content_snapshot = row.get('content_snapshot')
+
+        value: Any = None
+        content_type: Optional[str] = None
+
+        try:
+            if human_artifact_id:
+                with self._conn() as conn:
+                    ha = conn.execute(
+                        text(
+                            'SELECT value, content_type FROM plugin_human_artifacts '
+                            'WHERE id = :id'
+                        ),
+                        {'id': human_artifact_id},
+                    ).mappings().first()
+                if ha is not None:
+                    raw = ha['value']
+                    content_type = ha['content_type']
+                    value = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            elif artifact_seq is not None and task_id:
+                with self._conn() as conn:
+                    ar = conn.execute(
+                        text(
+                            'SELECT value, content_type FROM sub_agent_artifacts '
+                            'WHERE task_id = :tid AND artifact_key = :key AND seq = :seq'
+                        ),
+                        {'tid': task_id, 'key': row.get('artifact_key', ''), 'seq': artifact_seq},
+                    ).mappings().first()
+                if ar is not None:
+                    raw = ar['value']
+                    content_type = ar['content_type']
+                    value = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            elif content_snapshot is not None:
+                if isinstance(content_snapshot, str):
+                    try:
+                        value = json.loads(content_snapshot)
+                    except ValueError:
+                        value = {}
+                else:
+                    value = content_snapshot or {}
+        except Exception:
+            pass
+
+        return value, content_type
+
+    def load_selected_slot_artifacts_resolved_with_order(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return selected slot artifacts with resolved values and sort_order.
+
+        Combines load_selected_slot_artifacts_with_order (raw rows + sort_order) with the
+        value-resolution logic from resolve_slot_revision_value.
+
+        Returns a list of dicts with keys:
+          artifact_key, sort_order, content_type, value, is_human (bool)
+        Returns empty list on any error.
+        """
+        try:
+            raw_rows = self.load_selected_slot_artifacts_with_order(session_id)
+            if not raw_rows:
+                return []
+            out: List[Dict[str, Any]] = []
+            for r in raw_rows:
+                artifact_key = r.get('artifact_key', '')
+                sort_order = r.get('sort_order') or 1
+                is_human = bool(r.get('human_artifact_id'))
+                value, content_type = self.resolve_slot_revision_value(r)
+                if value is None:
+                    continue
+                out.append({
+                    'artifact_key': artifact_key,
+                    'sort_order': sort_order,
+                    'content_type': content_type,
+                    'value': value,
+                    'is_human': is_human,
+                })
+            return out
+        except Exception:
+            return []
+
     def load_selected_slot_artifacts(self, session_id: str) -> List[Dict[str, Any]]:
         """Return the currently-selected slot values for a plugin session.
 

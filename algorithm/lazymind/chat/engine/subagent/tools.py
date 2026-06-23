@@ -209,11 +209,16 @@ def _resolve_list_index_from_sort_order(
 
 
 @handle_tool_errors
-def get_artifact(key: str, task_ref: Optional[str] = None) -> Dict[str, Any]:
+def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[str] = None) -> Dict[str, Any]:
     """Read a previously saved artifact by key.
 
     Args:
         key (str): The artifact key to read.
+        sort_order (int): Optional. 1-based display position within a list slot.
+            For plugin sessions: resolves via plugin_slot_order → fetches that specific
+            selected revision (human or AI).
+            For ordinary SubAgents: treated as seq, returns the artifact at that position.
+            When omitted, returns all artifacts for this key (or the latest for single slots).
         task_ref (str): Optional task reference (title / "the Nth" / type name). When omitted,
             reads the latest artifact with this key from the current task.
 
@@ -221,10 +226,90 @@ def get_artifact(key: str, task_ref: Optional[str] = None) -> Dict[str, Any]:
         The artifact content (text, file path, or JSON description).
     """
     ctx = require_context()
+
+    # Plugin session: resolve sort_order via DB lookup.
+    try:
+        import lazyllm
+        cfg: Dict[str, Any] = {}
+        try:
+            cfg = lazyllm.globals.get('agentic_config') or {}
+        except Exception:
+            pass
+        plugin_session_id: str = cfg.get('plugin_session_id', '')
+    except Exception:
+        plugin_session_id = ''
+
+    if plugin_session_id and sort_order is not None:
+        return _get_plugin_artifact_by_sort_order(ctx, key, plugin_session_id, sort_order)
+
+    if plugin_session_id and sort_order is None:
+        return _get_plugin_artifact_all(ctx, key, plugin_session_id)
+
+    # Ordinary SubAgent: read from sub_agent_artifacts.
+    if sort_order is not None:
+        rows = ctx.local_artifacts(keys=[key]) or ctx.db.load_artifacts(ctx.task_id, keys=[key])
+        matched = [r for r in rows if r.get('seq') == sort_order]
+        if matched:
+            return tool_success('get_artifact', {'status': 'ok', 'key': key, 'artifacts': matched})
+        return tool_success('get_artifact', {
+            'status': 'empty',
+            'message': f"No artifact found for key '{key}' at sort_order={sort_order}.",
+        })
+
     rows = ctx.local_artifacts(keys=[key]) or ctx.db.load_artifacts(ctx.task_id, keys=[key])
     if not rows:
         return tool_success('get_artifact', {'status': 'empty', 'message': f"No artifact found for key '{key}'."})
     return tool_success('get_artifact', {'status': 'ok', 'key': key, 'artifacts': rows})
+
+
+def _get_plugin_artifact_by_sort_order(
+    ctx: Any, key: str, session_id: str, sort_order: int
+) -> Dict[str, Any]:
+    """Fetch a single plugin slot artifact by sort_order via DB resolve."""
+    row = ctx.db.load_slot_artifact_by_sort_order(session_id, key, sort_order)
+    if row is None:
+        return tool_success('get_artifact', {
+            'status': 'empty',
+            'message': (
+                f"No artifact found for key '{key}' at sort_order={sort_order} "
+                f'in plugin session {session_id}.'
+            ),
+        })
+
+    value, content_type = ctx.db.resolve_slot_revision_value(row)
+    if value is None:
+        return tool_success('get_artifact', {
+            'status': 'empty',
+            'message': f"Artifact key '{key}' at sort_order={sort_order} resolved to null value.",
+        })
+    return tool_success('get_artifact', {
+        'status': 'ok',
+        'key': key,
+        'sort_order': sort_order,
+        'content_type': content_type,
+        'artifacts': [{'artifact_key': key, 'content_type': content_type, 'value': value, 'sort_order': sort_order}],
+    })
+
+
+def _get_plugin_artifact_all(ctx: Any, key: str, session_id: str) -> Dict[str, Any]:
+    """Return all selected revisions for a plugin slot key (sort_order=None)."""
+    resolved_rows = ctx.db.load_selected_slot_artifacts_resolved_with_order(session_id)
+    artifacts = [
+        {
+            'artifact_key': r['artifact_key'],
+            'content_type': r.get('content_type'),
+            'value': r['value'],
+            'sort_order': r.get('sort_order'),
+        }
+        for r in resolved_rows
+        if r.get('artifact_key') == key
+    ]
+    if not artifacts:
+        return tool_success('get_artifact', {
+            'status': 'empty',
+            'message': f"No artifact found for key '{key}' in plugin session {session_id}.",
+        })
+    return tool_success('get_artifact', {'status': 'ok', 'key': key, 'artifacts': artifacts})
 
 
 @handle_tool_errors

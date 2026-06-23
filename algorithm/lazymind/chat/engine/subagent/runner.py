@@ -21,107 +21,154 @@ from .db import SubAgentDB
 from . import tools as subagent_tools
 
 
-def _enrich_objective_with_artifacts(objective: str, params: Dict[str, Any], db: 'SubAgentDB') -> str:
-    """Replace {{artifact_id}} placeholders in objective with artifact values.
+_ARTIFACT_SUMMARY_LIMIT = 200  # chars for inline text/json preview
 
-    For plugin_step tasks, two data sources are tried in order:
 
-    1. plugin_slot_revisions (preferred): reads selected=TRUE revisions for the session.
-       Each revision resolves its value via artifact_seq (AI) or content_snapshot (human).
-       This correctly reflects soft-deleted items and human edits.
-       Falls through to Source 2 when the result is empty (e.g. first step has no prior slots).
+def _artifact_summary_line(value: Any, content_type: Optional[str], is_human: bool) -> str:
+    """Return a one-line summary for a single artifact value."""
+    suffix = ' (by user)' if is_human else ''
+    ct = (content_type or '').lower()
+    if ct in ('image', 'file', 'file_list'):
+        if isinstance(value, dict):
+            name = value.get('filename') or os.path.basename(value.get('path', '')) or '(file)'
+            caption = value.get('caption') or ''
+            label = f'{name} — {caption}' if caption else name
+        else:
+            label = str(value)
+        return f'{label}{suffix}'
+    # text / json — inline preview
+    if isinstance(value, dict):
+        text_val = value.get('text') or ''
+        if not text_val and 'data' in value:
+            text_val = json.dumps(value['data'], ensure_ascii=False)
+        if not text_val:
+            text_val = json.dumps(value, ensure_ascii=False)
+    else:
+        text_val = str(value) if value else ''
+    if len(text_val) <= _ARTIFACT_SUMMARY_LIMIT:
+        return f'{text_val}{suffix}'
+    return f'{text_val[:_ARTIFACT_SUMMARY_LIMIT]}...{suffix} (use get_artifact to read full content)'
 
-    2. sub_agent_artifacts (fallback): used when Source 1 returns nothing — covers sessions
-       where no slot revisions exist yet, or non-plugin SubAgent tasks.
-       Only non-hidden artifacts from succeeded steps are returned.
 
-    Supported value shapes and their placeholder replacement:
-      text          {"text": "..."}           → use text field
-      json (small)  {"data": ...}             → JSON-serialise data field
-      image/file    {"path": "...", ...}      → use path (local) or url (external/signed)
-      large text    {"type":"text","path":".."} → read file content from workspace
+def _build_artifact_context_section(
+    ctx: 'SubAgentContext', db: 'SubAgentDB'
+) -> List[str]:
+    """Build a multi-line artifact summary block to inject into the objective prompt.
 
-    Falls back to the original objective on any error.
+    Returns an empty list when there are no input artifacts.
+
+    Plugin scenario (params contains session_id):
+      Reads from plugin_slot_revisions with sort_order from plugin_slot_order.
+      Resolves human vs AI revision for each row, then builds per-key ordered summaries.
+
+    Ordinary SubAgent (no session_id, but has input_artifact_keys):
+      Reads from sub_agent_artifacts of succeeded steps in the same session.
+      sort_order = seq within the same artifact_key group.
     """
-    if '{{' not in objective:
-        return objective
-
+    params = ctx.params
     session_id: str = params.get('session_id', '')
-    if not session_id:
-        return objective
 
-    def _extract_text(value: Any) -> str:
-        """Extract a string representation from an artifact value dict."""
-        if not isinstance(value, dict):
-            return str(value) if value else ''
-        # Inline text
-        if 'text' in value:
-            return str(value['text'])
-        # Inline json data
-        if 'data' in value:
-            import json as _json
-            return _json.dumps(value['data'], ensure_ascii=False, default=str)
-        # File/image: prefer external URL, then local path
-        url = value.get('url') or ''
-        if url:
-            return str(url)
-        path = value.get('path') or ''
-        if path:
-            # Large-content offload: {"type":"text","path":"rel/..."}
-            if value.get('type') == 'text':
-                workspace = params.get('workspace_path', '')
-                if workspace:
-                    import os as _os
-                    full = _os.path.join(workspace, path) if not _os.path.isabs(path) else path
-                    try:
-                        with open(full, 'r', encoding='utf-8', errors='replace') as fh:
-                            return fh.read()
-                    except OSError:
-                        pass
-            return str(path)
-        return ''
+    if session_id:
+        return _build_plugin_artifact_section(ctx, db, session_id)
 
-    # --- Source 1: plugin_slot_revisions (selected revisions) ---
-    slot_artifacts = db.load_selected_slot_artifacts(session_id)
-    if slot_artifacts:
-        result = objective
-        for a in slot_artifacts:
-            key = a.get('artifact_key', '')
-            if not key or '{{' + key + '}}' not in result:
-                continue
-            text_val = _extract_text(a.get('value') or {})
-            if text_val:
-                result = result.replace('{{' + key + '}}', text_val)
-        # Only return if we actually replaced something, otherwise fall through.
-        # This handles the case where slot_artifacts is non-empty but none of the
-        # artifact_keys match placeholders (e.g. all prior-step slots, none relevant here).
-        if result != objective:
-            return result
+    if ctx.input_artifact_keys:
+        return _build_subagent_artifact_section(ctx, db)
 
-    # --- Source 2: sub_agent_artifacts (fallback) ---
+    return []
+
+
+def _build_plugin_artifact_section(
+    ctx: 'SubAgentContext', db: 'SubAgentDB', session_id: str
+) -> List[str]:
+    """Build artifact summary from plugin_slot_revisions for a plugin session."""
+    resolved_rows = db.load_selected_slot_artifacts_resolved_with_order(session_id)
+    if not resolved_rows:
+        return []
+
+    from collections import defaultdict
+    key_items: Dict[str, List[tuple]] = defaultdict(list)
+    key_content_type: Dict[str, str] = {}
+
+    for r in resolved_rows:
+        artifact_key = r.get('artifact_key', '')
+        sort_order = r.get('sort_order') or 1
+        ct = r.get('content_type') or ''
+        value = r.get('value') or {}
+        is_human = bool(r.get('is_human'))
+        key_items[artifact_key].append((sort_order, ct, value, is_human))
+        if ct and artifact_key not in key_content_type:
+            key_content_type[artifact_key] = ct
+
+    if not key_items:
+        return []
+
+    return _format_artifact_summary(key_items, key_content_type)
+
+
+def _build_subagent_artifact_section(
+    ctx: 'SubAgentContext', db: 'SubAgentDB'
+) -> List[str]:
+    """Build artifact summary from sub_agent_artifacts for ordinary SubAgent tasks."""
+    params = ctx.params
+    session_id: str = params.get('session_id', '')
     try:
-        steps = db.load_plugin_session_steps(session_id)
+        steps = db.load_plugin_session_steps(session_id) if session_id else []
     except Exception:
-        return objective
-
-    succeeded_task_ids = [s['task_id'] for s in steps if s.get('status') == 'succeeded' and s.get('task_id')]
+        steps = []
+    succeeded_task_ids = [
+        s['task_id'] for s in steps
+        if s.get('status') == 'succeeded' and s.get('task_id')
+    ]
     if not succeeded_task_ids:
-        return objective
+        return []
 
-    try:
-        artifacts = db.load_artifacts_for_tasks(succeeded_task_ids)
-    except Exception:
-        return objective
+    artifacts = db.load_artifacts_for_tasks(succeeded_task_ids)
+    if not artifacts:
+        return []
 
-    result = objective
+    from collections import defaultdict
+    key_items: Dict[str, List[tuple]] = defaultdict(list)
+    key_content_type: Dict[str, str] = {}
+
     for a in artifacts:
         key = a.get('artifact_key', '')
-        if not key or '{{' + key + '}}' not in result:
+        if not key or (ctx.input_artifact_keys and key not in ctx.input_artifact_keys):
             continue
-        text_val = _extract_text(a.get('value') or {})
-        if text_val:
-            result = result.replace('{{' + key + '}}', text_val)
-    return result
+        seq = a.get('seq', 0)
+        ct = a.get('content_type', '')
+        value = a.get('value') or {}
+        key_items[key].append((seq, ct, value, False))
+        if ct and key not in key_content_type:
+            key_content_type[key] = ct
+
+    if not key_items:
+        return []
+
+    return _format_artifact_summary(key_items, key_content_type)
+
+
+def _format_artifact_summary(
+    key_items: Dict[str, List[tuple]],
+    key_content_type: Dict[str, str],
+) -> List[str]:
+    """Format collected artifact items into the summary block lines."""
+    lines = ['Available artifacts (use get_artifact to retrieve content):']
+    for key in sorted(key_items.keys()):
+        items = sorted(key_items[key], key=lambda t: t[0])
+        ct_label = key_content_type.get(key, 'unknown')
+        count = len(items)
+        if count > 1:
+            header = f'- "{key}" [{ct_label}, {count} items]:'
+        else:
+            header = f'- "{key}" [{ct_label}]:'
+        lines.append(header)
+        for sort_order, ct, value, is_human in items:
+            summary = _artifact_summary_line(value, ct, is_human)
+            if count > 1:
+                lines.append(f'    [{sort_order}] {summary}')
+            else:
+                lines.append(f'    {summary}')
+    return lines
 
 
 def _resolve_plugin_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
@@ -227,7 +274,7 @@ def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
 _ZH_RE = re.compile('[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]')
 
 
-def _objective_prompt(ctx: SubAgentContext) -> str:
+def _objective_prompt(ctx: SubAgentContext, db: Optional['SubAgentDB'] = None) -> str:
     # Detect language from the user_input param (primary) or the full objective text.
     user_input = str(ctx.params.get('user_input') or '')
     is_zh = bool(_ZH_RE.search(user_input) or _ZH_RE.search(ctx.objective))
@@ -244,8 +291,15 @@ def _objective_prompt(ctx: SubAgentContext) -> str:
     ]
     if ctx.params:
         lines.append(f'Parameters: {json.dumps(ctx.params, ensure_ascii=False)}')
-    if ctx.input_artifact_keys:
-        lines.append(f'Input artifact keys you may read: {", ".join(ctx.input_artifact_keys)}')
+    # Inject artifact context: plugin session reads from slot revisions with sort_order;
+    # ordinary SubAgent reads from sub_agent_artifacts of prior succeeded steps.
+    session_id: str = ctx.params.get('session_id', '')
+    if session_id or ctx.input_artifact_keys:
+        artifact_section = _build_artifact_context_section(ctx, db) if db else []
+        if artifact_section:
+            lines.extend(artifact_section)
+        elif ctx.input_artifact_keys:
+            lines.append(f'Input artifact keys you may read: {", ".join(ctx.input_artifact_keys)}')
     lines.append(
         'You MUST call save_artifact for EACH of the following keys before you finish — '
         'do NOT skip this step even if you have already written the results in plain text: '
@@ -384,14 +438,14 @@ async def run_subagent_stream(
         )
         ctx.ensure_workspace()
 
-        # For plugin_step tasks: enrich objective by replacing {{artifact_id}} placeholders
-        # with values from prior succeeded steps in the same session. This was previously
-        # done on the Go side (injectArtifacts), but Python owns this data retrieval.
+        # For plugin_step tasks: remove {{artifact_key}} placeholders from the objective
+        # (artifact context is now injected as a summary section in _objective_prompt instead).
+        # Also resolve tools from plugin_loader when no explicit list was provided.
+        # Go no longer forwards the tools list for plugin_step tasks.
         effective_agent_type = str(task.get('agent_type') or agent_type or '')
         if effective_agent_type == 'plugin_step':
-            ctx.objective = _enrich_objective_with_artifacts(ctx.objective, params, db)
-            # Also resolve tools from plugin_loader when no explicit list was provided.
-            # Go no longer forwards the tools list for plugin_step tasks.
+            # Strip any remaining {{artifact_key}} placeholders so they don't confuse the LLM.
+            ctx.objective = re.sub(r'\{\{[^}]+\}\}', '', ctx.objective).strip()
             if not tools:
                 tools = _resolve_plugin_step_tools(params)
 
@@ -425,7 +479,7 @@ async def run_subagent_stream(
         _pending_text: str = ''
         _pending_think: str = ''
 
-        async for kind, payload in drive_agent(agent, _objective_prompt(ctx), history=resume_history):
+        async for kind, payload in drive_agent(agent, _objective_prompt(ctx, db), history=resume_history):
             if kind == 'event':
                 item = payload
                 tag = item.get('tag')
