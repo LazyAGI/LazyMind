@@ -422,6 +422,79 @@ def build_advance_step_tool(
 # High-level helper consumed by chat_service
 # ---------------------------------------------------------------------------
 
+_ARTIFACT_PREVIEW_LIMIT = 120  # chars for inline text preview in system prompt
+
+
+def _build_session_artifact_section(session_id: str) -> str:
+    """Build a system-prompt section summarising the current plugin session's artifacts.
+
+    Queries plugin_slot_revisions (selected=TRUE) via TaskQueryDB and formats a
+    compact, human-readable block so ChatAgent knows what materials already exist
+    before deciding whether to advance_step or answer the user directly.
+
+    Returns an empty string when the session has no artifacts or on any DB error.
+    """
+    if not session_id:
+        return ''
+    try:
+        from lazymind.chat.engine.subagent.db import TaskQueryDB
+    except Exception:
+        return ''
+    try:
+        rows = TaskQueryDB().load_plugin_session_slot_summary(session_id)
+    except Exception:
+        return ''
+    if not rows:
+        return ''
+
+    from collections import defaultdict
+    import json as _json
+    key_items: Dict[str, List] = defaultdict(list)
+    key_ct: Dict[str, str] = {}
+    for r in rows:
+        key = r.get('artifact_key', '')
+        ct = r.get('content_type') or 'unknown'
+        value = r.get('value') or {}
+        sort_order = r.get('sort_order') or 1
+        is_human = bool(r.get('is_human'))
+        key_items[key].append((sort_order, ct, value, is_human))
+        if ct and key not in key_ct:
+            key_ct[key] = ct
+
+    lines = ['## Current session artifacts (already collected — do NOT re-run steps unnecessarily)']
+    for key in sorted(key_items.keys()):
+        items = sorted(key_items[key], key=lambda t: t[0])
+        ct_label = key_ct.get(key, 'unknown')
+        count = len(items)
+        lines.append(f'- **{key}** [{ct_label}, {count} item(s)]:')
+        for sort_order, ct, value, is_human in items:
+            suffix = ' (by user)' if is_human else ''
+            ct_lower = (ct or '').lower()
+            if ct_lower in ('image', 'file', 'file_list'):
+                if isinstance(value, dict):
+                    label = (
+                        value.get('filename')
+                        or value.get('path', '').split('/')[-1]
+                        or '(file)'
+                    )
+                    caption = value.get('caption') or ''
+                    summary = f'{label} — {caption}' if caption else label
+                else:
+                    summary = str(value)
+            else:
+                text_val = ''
+                if isinstance(value, dict):
+                    text_val = value.get('text') or ''
+                if not text_val:
+                    text_val = _json.dumps(value, ensure_ascii=False) if isinstance(value, dict) else str(value)
+                summary = (
+                    text_val if len(text_val) <= _ARTIFACT_PREVIEW_LIMIT
+                    else text_val[:_ARTIFACT_PREVIEW_LIMIT] + '...'
+                )
+            lines.append(f'  [{sort_order}] {summary}{suffix}')
+    return '\n'.join(lines)
+
+
 def resolve_plugin_injection(
     plugin_context: Optional[Dict[str, Any]],
 ) -> tuple:
@@ -487,6 +560,9 @@ def resolve_plugin_injection(
             )]
             plugin_stop_tools = ['advance_step']
             plugin_system_prompt = plugin_loader.get_scenario(p_plugin_id)
+            artifact_section = _build_session_artifact_section(p_session_id)
+            if artifact_section:
+                plugin_system_prompt = plugin_system_prompt + '\n\n' + artifact_section
         else:
             # Cold start: no active session yet
             plugin_tools = build_cold_start_tools()

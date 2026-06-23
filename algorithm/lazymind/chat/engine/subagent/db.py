@@ -563,6 +563,8 @@ class TaskQueryDB:
     def _conn(self):
         with _get_task_query_engine().connect() as conn:
             yield conn
+        with _get_task_query_engine().connect() as conn:
+            yield conn
 
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Return status snapshot for one task (status, progress_pct, current_phase, summary).
@@ -667,3 +669,106 @@ class TaskQueryDB:
                 'artifacts': arts_by_task.get(r['id'], []),
             })
         return tasks
+
+    def load_plugin_session_slot_summary(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return selected slot artifacts for a plugin session, resolved with sort_order.
+
+        Returns a list of dicts with keys:
+          artifact_key, sort_order, content_type, value, is_human (bool)
+        Returns empty list on any error or when session has no selected artifacts.
+
+        Uses the same resolution logic as SubAgentDB.load_selected_slot_artifacts_resolved_with_order
+        but runs on the shared TaskQueryDB engine (no per-request DSN needed).
+        """
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    text(
+                        'SELECT '
+                        '  psr.artifact_key, '
+                        '  psr.list_index, '
+                        '  psr.artifact_seq, '
+                        '  psr.human_artifact_id, '
+                        '  psr.content_snapshot, '
+                        '  psr.change_source, '
+                        '  pss.task_id, '
+                        '  COALESCE(pos.sort_order, psr.list_index + 1) AS sort_order '
+                        'FROM plugin_slot_revisions psr '
+                        'LEFT JOIN plugin_session_steps pss '
+                        '  ON pss.session_id = psr.session_id '
+                        '  AND pss.step_id   = psr.step_id '
+                        '  AND pss.attempt   = psr.attempt '
+                        'LEFT JOIN ( '
+                        '  SELECT slot_id, val::int AS list_index, '
+                        '         (ord - 1 + 1) AS sort_order '
+                        '  FROM plugin_slot_order, '
+                        '       jsonb_array_elements_text(order_list) '
+                        '       WITH ORDINALITY AS t(val, ord) '
+                        '  WHERE session_id = :session_id '
+                        ') pos ON pos.slot_id = psr.slot_id '
+                        '      AND pos.list_index = psr.list_index '
+                        'WHERE psr.session_id = :session_id '
+                        '  AND psr.selected = TRUE '
+                        'ORDER BY psr.artifact_key ASC, '
+                        '         COALESCE(pos.sort_order, psr.list_index + 1) ASC'
+                    ),
+                    {'session_id': session_id},
+                ).mappings().all()
+        except Exception:
+            return []
+
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            artifact_key = r.get('artifact_key', '')
+            sort_order = r.get('sort_order') or 1
+            is_human = bool(r.get('human_artifact_id'))
+
+            value: Any = None
+            content_type: Optional[str] = None
+            human_artifact_id = r.get('human_artifact_id')
+            artifact_seq = r.get('artifact_seq')
+            task_id = r.get('task_id')
+
+            try:
+                if human_artifact_id:
+                    with self._conn() as conn2:
+                        ha = conn2.execute(
+                            text(
+                                'SELECT value, content_type FROM plugin_human_artifacts '
+                                'WHERE id = :id'
+                            ),
+                            {'id': human_artifact_id},
+                        ).mappings().first()
+                    if ha is not None:
+                        raw = ha['value']
+                        content_type = ha['content_type']
+                        value = json.loads(raw) if isinstance(raw, str) else (raw or {})
+                elif artifact_seq is not None and task_id:
+                    with self._conn() as conn2:
+                        ar = conn2.execute(
+                            text(
+                                'SELECT value, content_type FROM sub_agent_artifacts '
+                                'WHERE task_id = :tid AND artifact_key = :key AND seq = :seq'
+                            ),
+                            {'tid': task_id, 'key': artifact_key, 'seq': artifact_seq},
+                        ).mappings().first()
+                    if ar is not None:
+                        raw = ar['value']
+                        content_type = ar['content_type']
+                        value = json.loads(raw) if isinstance(raw, str) else (raw or {})
+                elif r.get('content_snapshot') is not None:
+                    snap = r['content_snapshot']
+                    value = json.loads(snap) if isinstance(snap, str) else (snap or {})
+            except Exception:
+                pass
+
+            if value is None:
+                continue
+            out.append({
+                'artifact_key': artifact_key,
+                'sort_order': sort_order,
+                'content_type': content_type,
+                'value': value,
+                'is_human': is_human,
+            })
+        return out

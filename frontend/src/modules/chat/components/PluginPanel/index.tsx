@@ -366,7 +366,8 @@ function SortableImageList({
   // insertIdx is a gap index: 0 = before first item, n = after last item.
   const [insertIdx, setInsertIdx] = useState<number | null>(null);
 
-  const handleDragStart = useCallback((idx: number) => {
+  const handleDragStart = useCallback((idx: number, e: React.DragEvent) => {
+    e.stopPropagation();
     dragSrcIdx.current = idx;
   }, []);
 
@@ -380,10 +381,12 @@ function SortableImageList({
 
   const handleDragOver = useCallback((e: React.DragEvent, itemIdx: number) => {
     e.preventDefault();
+    e.stopPropagation();
     setInsertIdx(computeInsertIdx(e, itemIdx));
   }, [computeInsertIdx]);
 
   const handleContainerDragLeave = useCallback((e: React.DragEvent) => {
+    e.stopPropagation();
     // Only clear when leaving the container entirely (not entering a child).
     if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) {
       setInsertIdx(null);
@@ -392,6 +395,7 @@ function SortableImageList({
 
   const handleDrop = useCallback(async (e: React.DragEvent, itemIdx: number) => {
     e.preventDefault();
+    e.stopPropagation();
     const srcIdx = dragSrcIdx.current;
     const gapIdx = computeInsertIdx(e, itemIdx);
     dragSrcIdx.current = null;
@@ -442,7 +446,7 @@ function SortableImageList({
           <React.Fragment key={`${rev.slot_id}-${rev.revision}-${rev.list_index ?? 0}`}>
             <div
               draggable={isDraggable}
-              onDragStart={isDraggable ? () => handleDragStart(idx) : undefined}
+              onDragStart={isDraggable ? (e) => handleDragStart(idx, e) : undefined}
               onDragOver={isDraggable ? (e) => handleDragOver(e, idx) : undefined}
               onDrop={isDraggable ? (e) => handleDrop(e, idx) : undefined}
               onDragEnd={isDraggable ? handleDragEnd : undefined}
