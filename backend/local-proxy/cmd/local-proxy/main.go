@@ -75,6 +75,7 @@ func healthcheck() error {
 	}
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get("http://" + addr + ":" + port + "/_local/healthz")
+	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
