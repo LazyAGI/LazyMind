@@ -31,7 +31,7 @@ func (m *LocalProxyManager) Run(ctx context.Context, cfg RuntimeConfig, paths Ru
 	}
 	build := Command{
 		Name: goBin,
-		Args: []string{"build", "-o", paths.LocalProxyBin, "./cmd/local-proxy"},
+		Args: []string{"build", "-buildvcs=false", "-o", paths.LocalProxyBin, "./cmd/local-proxy"},
 		Dir:  filepath.Join(paths.RepoRoot, localProxySourceDirName),
 	}
 	if res, err := m.runner.Run(ctx, build); err != nil {

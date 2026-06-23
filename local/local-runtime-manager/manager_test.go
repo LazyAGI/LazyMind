@@ -168,6 +168,8 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 		expected := []string{"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
+			"--profile", "milvus",
+			"--profile", "opensearch",
 			"config", "--services",
 		}
 		assertCommand(t, cmd, "docker", expected...)
@@ -178,6 +180,8 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
+			"--profile", "milvus",
+			"--profile", "opensearch",
 			"up",
 			"--build",
 			"auth-service", "core", "web",
@@ -214,6 +218,8 @@ func TestComposeUpScalesDisabledServicesToZero(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
+			"--profile", "milvus",
+			"--profile", "opensearch",
 			"up",
 			"--build",
 			"--scale", "redis=0",
@@ -303,6 +309,29 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 	}
 }
 
+func TestDerivedComposeProfilesUseBuiltInStoresByDefault(t *testing.T) {
+	t.Setenv("LAZYMIND_DEPLOY_MINERU", "")
+	t.Setenv("LAZYMIND_MILVUS_URI", "")
+	t.Setenv("LAZYMIND_OPENSEARCH_URI", "")
+	t.Setenv("LAZYMIND_ENABLE_MILVUS_DASHBOARD", "")
+	t.Setenv("LAZYMIND_ENABLE_OPENSEARCH_DASHBOARD", "")
+
+	assertStringSlicesEqual(t, derivedComposeProfileArgs(), []string{
+		"--profile", "milvus",
+		"--profile", "opensearch",
+	})
+}
+
+func TestDerivedComposeProfilesSkipExternalStores(t *testing.T) {
+	t.Setenv("LAZYMIND_DEPLOY_MINERU", "")
+	t.Setenv("LAZYMIND_MILVUS_URI", "http://127.0.0.1:19530")
+	t.Setenv("LAZYMIND_OPENSEARCH_URI", "https://search.example.test:9200")
+	t.Setenv("LAZYMIND_ENABLE_MILVUS_DASHBOARD", "")
+	t.Setenv("LAZYMIND_ENABLE_OPENSEARCH_DASHBOARD", "")
+
+	assertStringSlicesEqual(t, derivedComposeProfileArgs(), nil)
+}
+
 func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
@@ -313,6 +342,8 @@ func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
+			"--profile", "milvus",
+			"--profile", "opensearch",
 			"config", "--services",
 		)
 		return CommandResult{Stdout: "auth-service\ncore\n"}, nil
@@ -322,6 +353,8 @@ func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
+			"--profile", "milvus",
+			"--profile", "opensearch",
 			"up",
 			"--build",
 			"auth-service",
@@ -364,6 +397,8 @@ func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
+			"--profile", "milvus",
+			"--profile", "opensearch",
 			"ps",
 			"-a",
 			"--format",
@@ -418,7 +453,15 @@ func TestRuntimeManagerUpReusesRunningProcessCompose(t *testing.T) {
 		t.Fatalf("write state: %v", err)
 	}
 	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
-		assertCommandContainsInOrder(t, cmd, "docker", []string{"compose", "-f", filepath.Join(repo, repoComposeFileName), "-f", filepath.Join(repo, localComposeOverrideName), "ps", "-a"})
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
+			"--profile", "milvus",
+			"--profile", "opensearch",
+			"ps",
+			"-a",
+		})
 		return CommandResult{Stdout: "NAME STATUS\nweb running\n"}, nil
 	})
 
@@ -448,11 +491,29 @@ func TestRuntimeManagerUpFailsOnExitedService(t *testing.T) {
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
-			assertCommandContainsInOrder(t, cmd, "docker", []string{"compose", "-f", filepath.Join(repo, repoComposeFileName), "-f", filepath.Join(repo, localComposeOverrideName), "ps", "-a", "--format", "json"})
+			assertCommandContainsInOrder(t, cmd, "docker", []string{
+				"compose",
+				"-f", filepath.Join(repo, repoComposeFileName),
+				"-f", filepath.Join(repo, localComposeOverrideName),
+				"--profile", "milvus",
+				"--profile", "opensearch",
+				"ps",
+				"-a",
+				"--format",
+				"json",
+			})
 			return CommandResult{Stdout: `[{"Name":"parse","Service":"lazyllm-parse-server","State":"exited","ExitCode":1}]`}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
-			assertCommandContainsInOrder(t, cmd, "docker", []string{"compose", "-f", filepath.Join(repo, repoComposeFileName), "-f", filepath.Join(repo, localComposeOverrideName), "ps", "-a"})
+			assertCommandContainsInOrder(t, cmd, "docker", []string{
+				"compose",
+				"-f", filepath.Join(repo, repoComposeFileName),
+				"-f", filepath.Join(repo, localComposeOverrideName),
+				"--profile", "milvus",
+				"--profile", "opensearch",
+				"ps",
+				"-a",
+			})
 			return CommandResult{Stdout: "parse exited\n"}, nil
 		},
 	)
@@ -540,6 +601,8 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 				"compose",
 				"-f", filepath.Join(repo, repoComposeFileName),
 				"-f", filepath.Join(repo, localComposeOverrideName),
+				"--profile", "milvus",
+				"--profile", "opensearch",
 				"down",
 				"--remove-orphans",
 			})
@@ -550,6 +613,8 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 				"compose",
 				"-f", filepath.Join(repo, repoComposeFileName),
 				"-f", filepath.Join(repo, localComposeOverrideName),
+				"--profile", "milvus",
+				"--profile", "opensearch",
 				"ps",
 				"-a",
 				"--format",
@@ -744,6 +809,18 @@ func assertCommandContainsInOrder(t *testing.T, cmd Command, name string, args [
 	for i := range args {
 		if cmd.Args[i] != args[i] {
 			t.Fatalf("arg mismatch at %d expected %q got %q", i, args[i], cmd.Args[i])
+		}
+	}
+}
+
+func assertStringSlicesEqual(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("expected %v got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected %v got %v", want, got)
 		}
 	}
 }

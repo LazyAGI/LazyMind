@@ -58,6 +58,8 @@ services:
   lazyllm-algo:
     volumes:
       - sqlite-data:/data/sqlite
+    environment:
+      LAZYLLM_ALGO_REGISTER_POLICY: force
 
   chat:
     ports:

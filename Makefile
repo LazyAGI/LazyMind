@@ -11,6 +11,8 @@ GO ?= go
 LAZYMIND_LOCAL_PROFILE ?= linux-browser
 LAZYMIND_LOCAL_BIN ?= local/local-runtime-manager/lazymind-local
 LAZYMIND_LOCAL_GOCACHE ?= $(CURDIR)/.codex-gocache/go-build
+PROCESS_COMPOSE_BIN ?= local/bin/process-compose
+PROCESS_COMPOSE_PKG ?= github.com/f1bonacc1/process-compose@v1.116.0
 comma := ,
 
 # ---------------------------------------------------------------------------
@@ -415,6 +417,10 @@ up-build:
 	fi
 
 up-build-local:
+	@if [ ! -x "$(PROCESS_COMPOSE_BIN)" ]; then \
+		mkdir -p "$(dir $(PROCESS_COMPOSE_BIN))"; \
+		GOBIN="$(CURDIR)/local/bin" $(GO) install "$(PROCESS_COMPOSE_PKG)"; \
+	fi
 	@mkdir -p "$(LAZYMIND_LOCAL_GOCACHE)"
 	@cd local/local-runtime-manager && GOCACHE="$(LAZYMIND_LOCAL_GOCACHE)" $(GO) build -buildvcs=false -o lazymind-local .
 	@"$(LAZYMIND_LOCAL_BIN)" up --profile "$(LAZYMIND_LOCAL_PROFILE)"
