@@ -432,8 +432,10 @@ func OnArtifactEvent(
 	}
 }
 
-// OnSubAgentDoneSnapshot writes content_snapshot to all selected slot revisions
-// for a completed step. Called after OnSubAgentDone persists the terminal status.
+// OnSubAgentDoneSnapshot back-fills artifact_seq on any AI slot revision that was
+// written before the artifact row existed (i.e. artifact_seq is still NULL).
+// This covers the race where WriteSlotRevision ran before save_artifact committed.
+// Human revisions (change_source='human') are never touched.
 func OnSubAgentDoneSnapshot(
 	ctx context.Context,
 	db *gorm.DB,
@@ -442,35 +444,29 @@ func OnSubAgentDoneSnapshot(
 	if pctx == nil {
 		return
 	}
-	// Load all selected revisions for this session.
 	revisions, err := LoadSelectedSlots(ctx, db, pctx.SessionID)
 	if err != nil {
 		fmt.Printf("[Plugin] OnSubAgentDoneSnapshot: load slots: %v\n", err)
 		return
 	}
 
-	// Build task_id lookup for the current step attempt.
 	step, _ := GetLatestStep(ctx, db, pctx.SessionID, pctx.StepID)
 	if step == nil {
 		return
 	}
 
-	// For each revision that belongs to this step attempt, write its artifact value as snapshot.
 	for _, rev := range revisions {
 		if rev.StepID != pctx.StepID || rev.Attempt != step.Attempt {
 			continue
 		}
-		if len(rev.ContentSnapshot) > 0 {
-			continue // already snapshotted
+		// Only fix AI revisions where artifact_seq was not resolved at write time.
+		if rev.ChangeSource != "ai" || rev.ArtifactSeq != nil {
+			continue
 		}
-		// Fetch the artifact value from sub_agent_artifacts.
-		// For list slots, the list_index is embedded inside the artifact JSON value
-		// (written by save_artifact as {"list_index": N, ...}).  We match on that field
-		// rather than using Offset, which would be fragile after partial retries or deletions.
+
+		// Find the matching artifact row.
 		var art orm.SubAgentArtifact
-		var q *gorm.DB
 		if rev.ListIndex != nil {
-			// Query artifacts for this task+key that carry the matching list_index in their value.
 			var candidates []orm.SubAgentArtifact
 			db.WithContext(ctx).
 				Where("task_id = ? AND artifact_key = ?", step.TaskID, rev.ArtifactKey).
@@ -478,44 +474,40 @@ func OnSubAgentDoneSnapshot(
 				Find(&candidates)
 			for _, c := range candidates {
 				var v map[string]any
-				if json.Unmarshal(c.Value, &v) == nil {
-					if li, ok := v["list_index"]; ok {
-						var liInt int
-						switch idx := li.(type) {
-						case float64:
-							liInt = int(idx)
-						case int:
-							liInt = idx
-						default:
-							continue
-						}
-						if liInt == *rev.ListIndex {
-							art = c
-							break
-						}
-					}
+				if json.Unmarshal(c.Value, &v) != nil {
+					continue
+				}
+				var liInt int
+				switch idx := v["list_index"].(type) {
+				case float64:
+					liInt = int(idx)
+				case int:
+					liInt = idx
+				default:
+					continue
+				}
+				if liInt == *rev.ListIndex {
+					art = c
+					break
 				}
 			}
 			if art.TaskID == "" {
 				continue
 			}
 		} else {
-			q = db.WithContext(ctx).
+			if err := db.WithContext(ctx).
 				Where("task_id = ? AND artifact_key = ?", step.TaskID, rev.ArtifactKey).
-				Order("seq DESC")
-			if err := q.First(&art).Error; err != nil {
+				Order("seq DESC").
+				First(&art).Error; err != nil {
 				continue
 			}
 		}
-		// Store the raw artifact value as snapshot (path, not signed URL).
-		// Signed URLs expire; signing is done fresh at read time in GetSlotItemVersions.
+
+		seq := art.Seq
 		if err := db.WithContext(ctx).Model(&orm.PluginSlotRevision{}).
 			Where("id = ?", rev.ID).
-			Updates(map[string]any{
-				"content_snapshot": art.Value,
-				"change_source":    "ai",
-			}).Error; err != nil {
-			fmt.Printf("[Plugin] OnSubAgentDoneSnapshot: write snapshot rev=%s: %v\n", rev.ID, err)
+			Update("artifact_seq", seq).Error; err != nil {
+			fmt.Printf("[Plugin] OnSubAgentDoneSnapshot: backfill artifact_seq rev=%s: %v\n", rev.ID, err)
 		}
 	}
 }

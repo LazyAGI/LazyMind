@@ -233,42 +233,104 @@ class SubAgentDB:
     def load_selected_slot_artifacts(self, session_id: str) -> List[Dict[str, Any]]:
         """Return the currently-selected slot values for a plugin session.
 
-        Reads plugin_slot_revisions WHERE selected=TRUE and returns one entry per
-        (slot_id / list_index), using content_snapshot as the value.  Only revisions
-        that have a non-NULL content_snapshot are returned.
+        Value resolution priority (mirrors enrichSlots in Go):
+          1. human_artifact_id IS NOT NULL → read from plugin_human_artifacts.
+          2. artifact_seq IS NOT NULL      → read from sub_agent_artifacts by exact seq.
+          3. content_snapshot IS NOT NULL  → legacy fallback for pre-migration rows.
 
-        This is the preferred source for _enrich_objective_with_artifacts when the
-        task belongs to a plugin session, because it reflects:
-          - soft-deleted list items  (selected=FALSE → excluded)
-          - the latest selected revision after a retry / overwrite
-
+        Only revisions that resolve to a non-NULL value are returned.
         Returns empty list on any error.
         """
         try:
             with self._conn() as conn:
                 rows = conn.execute(
                     text(
-                        'SELECT psr.artifact_key, psr.content_snapshot, psr.list_index '
+                        'SELECT '
+                        '  psr.artifact_key, '
+                        '  psr.list_index, '
+                        '  psr.artifact_seq, '
+                        '  psr.human_artifact_id, '
+                        '  psr.content_snapshot, '
+                        '  pss.task_id '
                         'FROM plugin_slot_revisions psr '
+                        'LEFT JOIN plugin_session_steps pss '
+                        '  ON pss.session_id = psr.session_id '
+                        '  AND pss.step_id   = psr.step_id '
+                        '  AND pss.attempt   = psr.attempt '
                         'WHERE psr.session_id = :session_id '
                         '  AND psr.selected = TRUE '
-                        '  AND psr.content_snapshot IS NOT NULL '
                         'ORDER BY psr.artifact_key ASC, COALESCE(psr.list_index, -1) ASC'
                     ),
                     {'session_id': session_id},
                 ).mappings().all()
             out: List[Dict[str, Any]] = []
             for r in rows:
-                snapshot = r['content_snapshot']
-                if isinstance(snapshot, str):
-                    try:
-                        snapshot = json.loads(snapshot)
-                    except ValueError:
-                        snapshot = {}
+                value: Any = None
+                content_type: Optional[str] = None
+
+                human_artifact_id = r['human_artifact_id']
+                artifact_seq = r['artifact_seq']
+                task_id = r['task_id']
+
+                if human_artifact_id:
+                    # Human revision: read from plugin_human_artifacts.
+                    with self._conn() as conn2:
+                        ha_row = conn2.execute(
+                            text(
+                                'SELECT value, content_type FROM plugin_human_artifacts '
+                                'WHERE id = :id'
+                            ),
+                            {'id': human_artifact_id},
+                        ).mappings().first()
+                    if ha_row is not None:
+                        raw = ha_row['value']
+                        content_type = ha_row['content_type']
+                        if isinstance(raw, str):
+                            try:
+                                value = json.loads(raw)
+                            except ValueError:
+                                value = {}
+                        else:
+                            value = raw or {}
+                elif artifact_seq is not None and task_id:
+                    # AI revision: load from sub_agent_artifacts by exact seq.
+                    with self._conn() as conn2:
+                        art_row = conn2.execute(
+                            text(
+                                'SELECT value, content_type FROM sub_agent_artifacts '
+                                'WHERE task_id = :tid AND artifact_key = :key AND seq = :seq'
+                            ),
+                            {'tid': task_id, 'key': r['artifact_key'], 'seq': artifact_seq},
+                        ).mappings().first()
+                    if art_row is not None:
+                        raw = art_row['value']
+                        content_type = art_row['content_type']
+                        if isinstance(raw, str):
+                            try:
+                                value = json.loads(raw)
+                            except ValueError:
+                                value = {}
+                        else:
+                            value = raw or {}
+                else:
+                    # Legacy fallback: content_snapshot for pre-migration rows.
+                    snapshot = r['content_snapshot']
+                    if snapshot is None:
+                        continue
+                    if isinstance(snapshot, str):
+                        try:
+                            value = json.loads(snapshot)
+                        except ValueError:
+                            value = {}
+                    else:
+                        value = snapshot or {}
+
+                if value is None:
+                    continue
                 out.append({
                     'artifact_key': r['artifact_key'],
-                    'content_type': None,  # snapshot has no content_type; callers use value shape
-                    'value': snapshot or {},
+                    'content_type': content_type,
+                    'value': value,
                     'list_index': r['list_index'],
                 })
             return out

@@ -119,6 +119,8 @@ type slotDTO struct {
 	SortOrder       *int            `json:"sort_order,omitempty"`
 	Selected        bool            `json:"selected"`
 	ArtifactKey     string          `json:"artifact_key"`
+	ArtifactSeq     *int            `json:"artifact_seq,omitempty"`
+	HumanArtifactID *string         `json:"human_artifact_id,omitempty"`
 	StepID          string          `json:"step_id"`
 	Attempt         int             `json:"attempt"`
 	CreatedAt       time.Time       `json:"created_at"`
@@ -160,6 +162,8 @@ func toSlotDTO(r *orm.PluginSlotRevision) slotDTO {
 		ListIndex:       r.ListIndex,
 		Selected:        r.Selected,
 		ArtifactKey:     r.ArtifactKey,
+		ArtifactSeq:     r.ArtifactSeq,
+		HumanArtifactID: r.HumanArtifactID,
 		StepID:          r.StepID,
 		Attempt:         r.Attempt,
 		CreatedAt:       r.CreatedAt,
@@ -249,62 +253,49 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 	// Step 5: assign values to each slotDTO
 	for i := range slots {
 		slot := &slots[i]
-		tid := taskIDByStep[stepKey{slot.StepID, slot.Attempt}]
-		if tid == "" {
-			continue
-		}
-		k := tid + "#" + slot.ArtifactKey
-		arts := artifactsByTask[k]
 
-		var chosen *orm.SubAgentArtifact
-		if len(arts) > 0 {
-			if slot.ListIndex != nil {
-				// Match by list_index embedded in artifact value JSON (same as OnSubAgentDoneSnapshot).
-				// This is robust against partial retries and deletions where seq order no longer
-				// corresponds 1:1 to list_index values.
-				for i := range arts {
-					var v map[string]any
-					if json.Unmarshal(arts[i].Value, &v) != nil {
-						continue
-					}
-					var li int
-					switch raw := v["list_index"].(type) {
-					case float64:
-						li = int(raw)
-					case int:
-						li = raw
-					default:
-						continue
-					}
-					if li == *slot.ListIndex {
-						chosen = &arts[i]
+		// Unified value resolution (priority order):
+		//   1. HumanArtifactID != nil → human revision: read from plugin_human_artifacts.
+		//   2. ArtifactSeq != nil     → AI revision: read from sub_agent_artifacts by seq.
+		//   3. ContentSnapshot        → legacy fallback (pre-migration rows).
+		var resolved json.RawMessage
+		var resolvedContentType string
+		var resolvedCaption *string
+
+		if slot.HumanArtifactID != nil {
+			var ha orm.PluginHumanArtifact
+			if db.WithContext(ctx).Where("id = ?", *slot.HumanArtifactID).First(&ha).Error == nil {
+				resolvedContentType = resolveContentType(ha.ContentType, ha.Value)
+				resolved = signArtifactImagePath(ha.Value, resolvedContentType)
+				resolvedCaption = ha.Caption
+			}
+		} else if slot.ArtifactSeq != nil {
+			tid := taskIDByStep[stepKey{slot.StepID, slot.Attempt}]
+			if tid != "" {
+				k := tid + "#" + slot.ArtifactKey
+				for j := range artifactsByTask[k] {
+					if artifactsByTask[k][j].Seq == *slot.ArtifactSeq {
+						a := &artifactsByTask[k][j]
+						resolvedContentType = resolveContentType(a.ContentType, a.Value)
+						resolved = signArtifactImagePath(a.Value, resolvedContentType)
+						resolvedCaption = a.Caption
 						break
 					}
 				}
-				// Fallback: last artifact by seq (covers artifacts written before list_index embedding).
-				if chosen == nil {
-					chosen = &arts[len(arts)-1]
-				}
-			} else {
-				// single slot: latest seq
-				chosen = &arts[len(arts)-1]
 			}
 		}
-		if chosen != nil {
-			// Resolve the true render content_type:
-			// when content_type="file" the value JSON carries {"type":"<real>","path":"..."}
-			// which tells us the actual type to send to the frontend for correct rendering.
-			slot.ContentType = resolveContentType(chosen.ContentType, chosen.Value)
-			slot.ArtifactValue = signArtifactImagePath(chosen.Value, slot.ContentType)
-			slot.Caption = chosen.Caption
+
+		// Legacy fallback: ContentSnapshot for pre-migration rows.
+		if resolved == nil && len(slot.ContentSnapshot) > 0 {
+			resolved = signArtifactImagePath(slot.ContentSnapshot, "")
 		}
-		// For human revisions, content_snapshot holds the actual uploaded value and takes
-		// precedence over the AI artifact fetched above (which belongs to the original step).
-		if slot.ChangeSource == "human" && len(slot.ContentSnapshot) > 0 {
-			slot.ArtifactValue = signArtifactImagePath(slot.ContentSnapshot, "")
-			if slot.ContentType == "" {
-				slot.ContentType = "image"
+
+		if resolved != nil {
+			slot.ArtifactValue = resolved
+			if resolvedContentType != "" {
+				slot.ContentType = resolvedContentType
 			}
+			slot.Caption = resolvedCaption
 		}
 
 		// Revision count.
@@ -767,7 +758,8 @@ func DeleteSlotItem(w http.ResponseWriter, r *http.Request) {
 }
 
 // PatchSlotItem handles PATCH /plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}.
-// Writes a new 'human' revision with the provided value.
+// Writes a new 'human' revision backed by a plugin_human_artifacts row.
+// Body: {"value": <json>, "content_type": "text"|"json"|"image"|"file", "caption": "..."}
 func PatchSlotItem(w http.ResponseWriter, r *http.Request) {
 	sessionID := common.PathVar(r, "session_id")
 	slotID := common.PathVar(r, "slot_id")
@@ -777,11 +769,16 @@ func PatchSlotItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Value json.RawMessage `json:"value"`
+		Value       json.RawMessage `json:"value"`
+		ContentType string          `json:"content_type"`
+		Caption     *string         `json:"caption"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Value) == 0 {
 		common.ReplyErr(w, "invalid body: value required", http.StatusBadRequest)
 		return
+	}
+	if body.ContentType == "" {
+		body.ContentType = "text"
 	}
 	db := store.DB()
 	if db == nil {
@@ -826,7 +823,7 @@ func PatchSlotItem(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	newRev, err := WriteSlotRevisionWithSnapshot(ctx, db,
+	newRev, err := WriteSlotRevisionWithHumanArtifact(ctx, db,
 		sessionID, slotID, existing.ArtifactKey, existing.StepID, existing.Attempt,
 		func() string {
 			if existing.ListIndex != nil {
@@ -835,7 +832,7 @@ func PatchSlotItem(w http.ResponseWriter, r *http.Request) {
 			return "single"
 		}(),
 		existing.ListIndex,
-		resolveValuePaths(body.Value), "human",
+		body.ContentType, resolveValuePaths(body.Value), body.Caption,
 	)
 	if err != nil {
 		common.ReplyErr(w, "write revision failed", http.StatusInternalServerError)
@@ -947,6 +944,19 @@ func GetSlotItemVersions(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query versions failed", http.StatusInternalServerError)
 		return
 	}
+
+	// Build task_id lookup once for all revisions (avoids N+1 queries).
+	type stepKey2 struct {
+		stepID  string
+		attempt int
+	}
+	taskIDByStep2 := map[stepKey2]string{}
+	var steps2 []orm.PluginSessionStep
+	db.WithContext(ctx).Where("session_id = ?", sessionID).Find(&steps2)
+	for _, s := range steps2 {
+		taskIDByStep2[stepKey2{s.StepID, s.Attempt}] = s.TaskID
+	}
+
 	out := make([]map[string]any, 0, len(revisions))
 	for _, rev := range revisions {
 		item := map[string]any{
@@ -955,7 +965,27 @@ func GetSlotItemVersions(w http.ResponseWriter, r *http.Request) {
 			"created_at":    rev.CreatedAt,
 			"selected":      rev.Selected,
 		}
-		if len(rev.ContentSnapshot) > 0 {
+		// Unified value resolution (same priority as enrichSlots).
+		if rev.HumanArtifactID != nil {
+			var ha orm.PluginHumanArtifact
+			if db.WithContext(ctx).Where("id = ?", *rev.HumanArtifactID).First(&ha).Error == nil {
+				ct := resolveContentType(ha.ContentType, ha.Value)
+				item["content_snapshot"] = signArtifactImagePath(ha.Value, ct)
+				item["content_type"] = ct
+			}
+		} else if rev.ArtifactSeq != nil {
+			tid := taskIDByStep2[stepKey2{rev.StepID, rev.Attempt}]
+			if tid != "" {
+				var art orm.SubAgentArtifact
+				if db.WithContext(ctx).
+					Where("task_id = ? AND artifact_key = ? AND seq = ?", tid, rev.ArtifactKey, *rev.ArtifactSeq).
+					First(&art).Error == nil {
+					ct := resolveContentType(art.ContentType, art.Value)
+					item["content_snapshot"] = signArtifactImagePath(art.Value, ct)
+					item["content_type"] = ct
+				}
+			}
+		} else if len(rev.ContentSnapshot) > 0 {
 			item["content_snapshot"] = signArtifactImagePath(rev.ContentSnapshot, "")
 		}
 		out = append(out, item)

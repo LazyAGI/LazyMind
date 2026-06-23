@@ -40,6 +40,12 @@ func (PluginSessionStep) TableName() string { return "plugin_session_steps" }
 
 // PluginSlotRevision records one artifact write into a plugin panel slot.
 // selected=true means this revision is the currently displayed version of the slot.
+//
+// Value resolution (read path):
+//   - AI revision:    ArtifactSeq != nil → value comes from sub_agent_artifacts at
+//     (task_id via plugin_session_steps, artifact_key, seq=ArtifactSeq).
+//   - Human revision: HumanArtifactID != nil → value comes from plugin_human_artifacts.
+//   - Legacy fallback: both nil → value comes from ContentSnapshot (pre-migration rows).
 type PluginSlotRevision struct {
 	ID        string `gorm:"column:id;type:varchar(36);primaryKey"`
 	SessionID string `gorm:"column:session_id;type:varchar(36);not null"`
@@ -48,7 +54,14 @@ type PluginSlotRevision struct {
 	// ListIndex is the 0-based position within a cardinality=list slot; NULL for single.
 	ListIndex *int `gorm:"column:list_index"`
 	Selected  bool `gorm:"column:selected;not null;default:true"`
-	// ContentSnapshot stores the artifact value at the time of this revision for version history.
+	// ArtifactSeq points to sub_agent_artifacts.seq for AI revisions.
+	// NULL for human revisions.
+	ArtifactSeq *int `gorm:"column:artifact_seq"`
+	// HumanArtifactID points to plugin_human_artifacts.id for human revisions.
+	// NULL for AI revisions.
+	HumanArtifactID *string `gorm:"column:human_artifact_id;type:varchar(36)"`
+	// ContentSnapshot is kept for legacy fallback (pre-migration AI rows where
+	// artifact_seq was not yet populated, and pre-human_artifact_id human rows).
 	ContentSnapshot json.RawMessage `gorm:"column:content_snapshot;type:jsonb"`
 	// ChangeSource distinguishes AI-generated ('ai') from human-edited ('human') revisions.
 	ChangeSource string    `gorm:"column:change_source;type:varchar(16);not null;default:'ai'"`

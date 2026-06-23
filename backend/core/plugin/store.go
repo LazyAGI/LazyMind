@@ -226,8 +226,10 @@ func ListSteps(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.Plugin
 	return rows, nil
 }
 
-// WriteSlotRevision inserts a new slot revision and manages the selected flag.
-// It also updates plugin_slot_order for list slots and writes content_snapshot.
+// WriteSlotRevision inserts a new AI slot revision and manages the selected flag.
+// It resolves artifact_seq by querying the most-recent sub_agent_artifacts row for
+// (taskID, artifactKey) and storing its seq as a pointer — the value is never copied
+// into content_snapshot for AI revisions.
 //
 // cardinality=single: deselects all previous revisions of the same (sessionID, slotID).
 //
@@ -243,6 +245,25 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 	now := time.Now().UTC()
 	var revision int
 	var finalListIndex *int
+
+	// Resolve artifact_seq: find the task_id for this step attempt, then pick
+	// the latest seq from sub_agent_artifacts for (task_id, artifact_key).
+	// This is best-effort; a nil artifactSeq causes enrichSlots to fall back
+	// to content_snapshot (written later by OnSubAgentDoneSnapshot).
+	var artifactSeq *int
+	var step orm.PluginSessionStep
+	if db.WithContext(ctx).
+		Where("session_id = ? AND step_id = ? AND attempt = ?", sessionID, stepID, attempt).
+		First(&step).Error == nil {
+		var art orm.SubAgentArtifact
+		if db.WithContext(ctx).
+			Where("task_id = ? AND artifact_key = ?", step.TaskID, artifactKey).
+			Order("seq DESC").
+			First(&art).Error == nil {
+			seq := art.Seq
+			artifactSeq = &seq
+		}
+	}
 
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Compute next revision number scoped to (session, slot, list_index) so each
@@ -304,6 +325,7 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 			ListIndex:    finalListIndex,
 			Selected:     true,
 			ChangeSource: "ai",
+			ArtifactSeq:  artifactSeq,
 			ArtifactKey:  artifactKey,
 			StepID:       stepID,
 			Attempt:      attempt,
@@ -332,8 +354,11 @@ func WriteSlotRevision(ctx context.Context, db *gorm.DB,
 	return &result, err
 }
 
-// WriteSlotRevisionWithSnapshot writes a new revision and records content_snapshot atomically.
-// Used by PatchSlotItem (human edits) to write version + snapshot in one transaction.
+// WriteSlotRevisionWithSnapshot writes a new human revision and records content_snapshot
+// atomically. Used by PatchSlotItem (human edits).
+// ArtifactSeq is intentionally left nil — human revisions carry their value in
+// ContentSnapshot; the unified read path in enrichSlots falls back to ContentSnapshot
+// when ArtifactSeq is nil.
 func WriteSlotRevisionWithSnapshot(ctx context.Context, db *gorm.DB,
 	sessionID, slotID, artifactKey, stepID string, attempt int,
 	cardinality string, listIndex *int,
@@ -784,4 +809,112 @@ func resolveContentType(contentType string, snapshot []byte) string {
 		return t
 	}
 	return "file"
+}
+
+// WriteSlotRevisionWithHumanArtifact inserts a plugin_human_artifacts row and a new
+// 'human' slot revision that points to it.  This is the write path for PatchSlotItem.
+//
+// contentType must be the explicit type declared by the caller ('text','json','image','file').
+// value is the cleaned artifact value (path-only for files/images, inline for text/json).
+// caption is optional and stored on the artifact row only.
+func WriteSlotRevisionWithHumanArtifact(
+	ctx context.Context, db *gorm.DB,
+	sessionID, slotID, artifactKey, stepID string, attempt int,
+	cardinality string, listIndex *int,
+	contentType string, value json.RawMessage, caption *string,
+) (*orm.PluginSlotRevision, error) {
+
+	now := time.Now().UTC()
+	artifactID := "pha_" + common.GenerateID()
+	humanArt := &orm.PluginHumanArtifact{
+		ID:          artifactID,
+		SessionID:   sessionID,
+		ArtifactKey: artifactKey,
+		ContentType: contentType,
+		Value:       value,
+		Caption:     caption,
+		CreatedAt:   now,
+	}
+
+	var revision int
+	var finalListIndex *int
+
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(humanArt).Error; err != nil {
+			return err
+		}
+		var maxRev int
+		if cardinality != "list" || listIndex != nil {
+			q := tx.Model(&orm.PluginSlotRevision{}).
+				Select("COALESCE(MAX(revision), 0)").
+				Where("session_id = ? AND slot_id = ?", sessionID, slotID)
+			if cardinality == "list" && listIndex != nil {
+				q = q.Where("list_index = ?", *listIndex)
+			} else {
+				q = q.Where("list_index IS NULL")
+			}
+			if err := q.Scan(&maxRev).Error; err != nil {
+				return err
+			}
+		}
+		revision = maxRev + 1
+		if cardinality == "single" {
+			if err := tx.Model(&orm.PluginSlotRevision{}).
+				Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slotID, true).
+				Update("selected", false).Error; err != nil {
+				return err
+			}
+		} else {
+			if listIndex != nil {
+				if err := tx.Model(&orm.PluginSlotRevision{}).
+					Where("session_id = ? AND slot_id = ? AND list_index = ? AND selected = ?",
+						sessionID, slotID, *listIndex, true).
+					Update("selected", false).Error; err != nil {
+					return err
+				}
+				finalListIndex = listIndex
+			} else {
+				var maxIdx int
+				if err := tx.Model(&orm.PluginSlotRevision{}).
+					Select("COALESCE(MAX(list_index), -1)").
+					Where("session_id = ? AND slot_id = ?", sessionID, slotID).
+					Scan(&maxIdx).Error; err != nil {
+					return err
+				}
+				idx := maxIdx + 1
+				finalListIndex = &idx
+			}
+		}
+		row := &orm.PluginSlotRevision{
+			ID:              "psr_" + common.GenerateID(),
+			SessionID:       sessionID,
+			SlotID:          slotID,
+			Revision:        revision,
+			ListIndex:       finalListIndex,
+			Selected:        true,
+			ChangeSource:    "human",
+			HumanArtifactID: &artifactID,
+			ArtifactKey:     artifactKey,
+			StepID:          stepID,
+			Attempt:         attempt,
+			CreatedAt:       now,
+		}
+		if err := tx.Create(row).Error; err != nil {
+			return err
+		}
+		if cardinality == "list" && listIndex == nil && finalListIndex != nil {
+			if err := appendSlotOrderEntry(ctx, tx, sessionID, slotID, *finalListIndex); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	var result orm.PluginSlotRevision
+	err := db.WithContext(ctx).
+		Where("session_id = ? AND slot_id = ? AND revision = ?", sessionID, slotID, revision).
+		First(&result).Error
+	return &result, err
 }

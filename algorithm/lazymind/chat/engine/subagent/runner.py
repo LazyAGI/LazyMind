@@ -22,17 +22,24 @@ from . import tools as subagent_tools
 
 
 def _enrich_objective_with_artifacts(objective: str, params: Dict[str, Any], db: 'SubAgentDB') -> str:
-    """Replace {{artifact_id}} placeholders in objective with artifact text/url values.
+    """Replace {{artifact_id}} placeholders in objective with artifact values.
 
     For plugin_step tasks, two data sources are tried in order:
 
-    1. plugin_slot_revisions (preferred): reads only selected=TRUE revisions for the
-       session.  This correctly handles soft-deleted list items (hidden artifacts) and
-       always uses the user-selected version after a retry/overwrite.
+    1. plugin_slot_revisions (preferred): reads selected=TRUE revisions for the session.
+       Each revision resolves its value via artifact_seq (AI) or content_snapshot (human).
+       This correctly reflects soft-deleted items and human edits.
+       Falls through to Source 2 when the result is empty (e.g. first step has no prior slots).
 
-    2. sub_agent_artifacts (fallback): used when the slot-revision table returns no
-       results (e.g. content_snapshot not yet written, or non-plugin SubAgent tasks).
+    2. sub_agent_artifacts (fallback): used when Source 1 returns nothing — covers sessions
+       where no slot revisions exist yet, or non-plugin SubAgent tasks.
        Only non-hidden artifacts from succeeded steps are returned.
+
+    Supported value shapes and their placeholder replacement:
+      text          {"text": "..."}           → use text field
+      json (small)  {"data": ...}             → JSON-serialise data field
+      image/file    {"path": "...", ...}      → use path (local) or url (external/signed)
+      large text    {"type":"text","path":".."} → read file content from workspace
 
     Falls back to the original objective on any error.
     """
@@ -43,26 +50,55 @@ def _enrich_objective_with_artifacts(objective: str, params: Dict[str, Any], db:
     if not session_id:
         return objective
 
+    def _extract_text(value: Any) -> str:
+        """Extract a string representation from an artifact value dict."""
+        if not isinstance(value, dict):
+            return str(value) if value else ''
+        # Inline text
+        if 'text' in value:
+            return str(value['text'])
+        # Inline json data
+        if 'data' in value:
+            import json as _json
+            return _json.dumps(value['data'], ensure_ascii=False, default=str)
+        # File/image: prefer external URL, then local path
+        url = value.get('url') or ''
+        if url:
+            return str(url)
+        path = value.get('path') or ''
+        if path:
+            # Large-content offload: {"type":"text","path":"rel/..."}
+            if value.get('type') == 'text':
+                workspace = params.get('workspace_path', '')
+                if workspace:
+                    import os as _os
+                    full = _os.path.join(workspace, path) if not _os.path.isabs(path) else path
+                    try:
+                        with open(full, 'r', encoding='utf-8', errors='replace') as fh:
+                            return fh.read()
+                    except OSError:
+                        pass
+            return str(path)
+        return ''
+
     # --- Source 1: plugin_slot_revisions (selected revisions) ---
     slot_artifacts = db.load_selected_slot_artifacts(session_id)
     if slot_artifacts:
         result = objective
         for a in slot_artifacts:
             key = a.get('artifact_key', '')
-            if not key:
+            if not key or '{{' + key + '}}' not in result:
                 continue
-            value = a.get('value') or {}
-            if isinstance(value, str):
-                try:
-                    value = json.loads(value)
-                except ValueError:
-                    continue
-            text_val = value.get('text') or value.get('url') or ''
+            text_val = _extract_text(a.get('value') or {})
             if text_val:
-                result = result.replace('{{' + key + '}}', str(text_val))
-        return result
+                result = result.replace('{{' + key + '}}', text_val)
+        # Only return if we actually replaced something, otherwise fall through.
+        # This handles the case where slot_artifacts is non-empty but none of the
+        # artifact_keys match placeholders (e.g. all prior-step slots, none relevant here).
+        if result != objective:
+            return result
 
-    # --- Source 2: sub_agent_artifacts (fallback for sessions without slot snapshots) ---
+    # --- Source 2: sub_agent_artifacts (fallback) ---
     try:
         steps = db.load_plugin_session_steps(session_id)
     except Exception:
@@ -80,17 +116,11 @@ def _enrich_objective_with_artifacts(objective: str, params: Dict[str, Any], db:
     result = objective
     for a in artifacts:
         key = a.get('artifact_key', '')
-        if not key:
+        if not key or '{{' + key + '}}' not in result:
             continue
-        value = a.get('value') or {}
-        if isinstance(value, str):
-            try:
-                value = json.loads(value)
-            except ValueError:
-                continue
-        text_val = value.get('text') or value.get('url') or ''
+        text_val = _extract_text(a.get('value') or {})
         if text_val:
-            result = result.replace('{{' + key + '}}', str(text_val))
+            result = result.replace('{{' + key + '}}', text_val)
     return result
 
 
