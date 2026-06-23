@@ -177,6 +177,9 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.AuthServiceInternalToken) == "" {
 		return fmt.Errorf("auth service internal token is required")
 	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_STATE_BACKEND")), "sqlite") && strings.TrimSpace(c.RedisURL) != "" {
+		return fmt.Errorf("redis url must not be configured when LAZYMIND_STATE_BACKEND=sqlite")
+	}
 	if c.GenerateTasksMaxObjectsPerRequest <= 0 {
 		return fmt.Errorf("generate tasks max objects per request must be positive")
 	}

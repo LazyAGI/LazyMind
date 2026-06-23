@@ -2,7 +2,6 @@ package resourceupdate
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -126,7 +125,7 @@ func (s *stateIdleStore) CleanupIdleKeys(ctx context.Context, ttlKey, expectedTT
 		return false, errors.New("state store is nil")
 	}
 	value, err := s.store.Get(ctx, ttlKey)
-	missing := errors.Is(err, redis.Nil) || errors.Is(err, sql.ErrNoRows)
+	missing := state.IsMissing(err)
 	if err != nil && !missing {
 		return false, err
 	}
@@ -439,17 +438,17 @@ func (p *IdleProcessor) ProcessEvent(ctx context.Context, eventID string) error 
 		}).Error
 	})
 	if err == nil && cleanupSessionID != "" {
-		if cleanupErr := p.cleanupIdleRedisKeys(ctx, cleanupSessionID, eventID); cleanupErr != nil {
-			resourceUpdateWarn(logEventIdleRedisCleanupFailed, cleanupErr).
+		if cleanupErr := p.cleanupIdleStateKeys(ctx, cleanupSessionID, eventID); cleanupErr != nil {
+			resourceUpdateWarn(logEventIdleStateCleanupFailed, cleanupErr).
 				Str("event_id", eventID).
 				Str("session_id", cleanupSessionID).
-				Msg(logEventIdleRedisCleanupFailed)
+				Msg(logEventIdleStateCleanupFailed)
 		}
 	}
 	return err
 }
 
-func (p *IdleProcessor) cleanupIdleRedisKeys(ctx context.Context, sessionID, eventID string) error {
+func (p *IdleProcessor) cleanupIdleStateKeys(ctx context.Context, sessionID, eventID string) error {
 	if p == nil || p.store == nil {
 		return nil
 	}

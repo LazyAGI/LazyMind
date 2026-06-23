@@ -31,6 +31,7 @@ import (
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/worker"
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
 	_ "github.com/lib/pq"
+	corestate "lazymind/core/state"
 )
 
 type App struct {
@@ -427,11 +428,29 @@ func buildFeishuClients(cfg config.Config) (feishu.AuthConnectionClient, feishu.
 }
 
 func buildTargetSearchCacheStore(cfg config.Config) (tree.TargetSearchCacheStore, error) {
-	store, err := tree.NewRedisTargetSearchCacheStore(cfg.RedisURL)
-	if err != nil {
-		return nil, fmt.Errorf("configure target search cache redis: %w", err)
+	switch corestate.BackendFromEnv() {
+	case corestate.BackendSQLite:
+		if strings.TrimSpace(cfg.RedisURL) != "" {
+			return nil, fmt.Errorf("redis url must not be configured when LAZYMIND_STATE_BACKEND=sqlite")
+		}
+		sqliteStore, err := corestate.NewSQLiteStore(os.Getenv("LAZYMIND_STATE_SQLITE_PATH"))
+		if err != nil {
+			return nil, fmt.Errorf("configure target search cache state sqlite: %w", err)
+		}
+		return tree.NewStateTargetSearchCacheStore(sqliteStore), nil
+	case corestate.BackendRedis:
+		redisURL := strings.TrimSpace(cfg.RedisURL)
+		if redisURL == "" {
+			return nil, nil
+		}
+		redisStore, err := corestate.NewRedisStoreFromURL(redisURL)
+		if err != nil {
+			return nil, fmt.Errorf("configure target search cache state redis: %w", err)
+		}
+		return tree.NewStateTargetSearchCacheStore(redisStore), nil
+	default:
+		return nil, fmt.Errorf("unsupported target search cache state backend %q", corestate.BackendFromEnv())
 	}
-	return store, nil
 }
 
 func buildTargetTreeOptions(store tree.TargetSearchCacheStore) []tree.TargetTreeOption {
@@ -457,7 +476,7 @@ type targetTreeCachePrewarmer struct {
 }
 
 func buildTargetSearchCachePrewarmer(built Components, cfg config.Config) (*targetTreeCachePrewarmer, error) {
-	if strings.TrimSpace(cfg.RedisURL) == "" {
+	if built.TargetSearchCacheStore == nil {
 		return nil, nil
 	}
 	auth, ok := built.AuthConnectionClient.(targetCacheConnectionLister)
@@ -475,7 +494,7 @@ func buildTargetSearchCachePrewarmer(built Components, cfg config.Config) (*targ
 		options = append(options, tree.WithTargetSearchCacheStore(built.TargetSearchCacheStore))
 	}
 	options = append(options, built.TargetTreeOptions...)
-	fmt.Fprintf(os.Stdout, "target search cache prewarmer enabled redis=%t interval=%s stagger=%s\n", built.TargetSearchCacheStore != nil, cfg.TargetSearchCachePrewarmInterval, cfg.TargetSearchCachePrewarmStagger)
+	fmt.Fprintf(os.Stdout, "target search cache prewarmer enabled state_store=%t interval=%s stagger=%s\n", built.TargetSearchCacheStore != nil, cfg.TargetSearchCachePrewarmInterval, cfg.TargetSearchCachePrewarmStagger)
 	return &targetTreeCachePrewarmer{
 		auth:           auth,
 		engine:         tree.NewDefaultTargetTreeEngine(registry, options...),

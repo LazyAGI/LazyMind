@@ -27,24 +27,45 @@ func MustRedisFromEnv() *RedisStore {
 	return NewRedisStore(MustRedisClientFromEnv())
 }
 
+func NewRedisStoreFromURL(raw string) (*RedisStore, error) {
+	client, err := NewRedisClientFromURL(raw)
+	if err != nil {
+		return nil, err
+	}
+	return NewRedisStore(client), nil
+}
+
+func NewRedisClientFromURL(raw string) (*redis.Client, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return nil, err
+	}
+	if u.Scheme != "redis" {
+		return nil, fmt.Errorf("redis url scheme must be redis")
+	}
+	addr := u.Host
+	pass, _ := u.User.Password()
+	dbIndex := 0
+	if p := strings.TrimPrefix(strings.TrimSpace(u.Path), "/"); p != "" {
+		if n, err := strconv.Atoi(p); err == nil && n >= 0 {
+			dbIndex = n
+		}
+	}
+	c := redis.NewClient(&redis.Options{Addr: addr, Password: pass, DB: dbIndex})
+	if err := c.Ping(context.Background()).Err(); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("redis ping failed: %w", err)
+	}
+	return c, nil
+}
+
 func MustRedisClientFromEnv() *redis.Client {
 	if raw := strings.TrimSpace(os.Getenv("LAZYMIND_REDIS_URL")); raw != "" {
-		u, err := url.Parse(raw)
-		if err == nil && u.Scheme == "redis" {
-			addr := u.Host
-			pass, _ := u.User.Password()
-			dbIndex := 0
-			if p := strings.TrimPrefix(strings.TrimSpace(u.Path), "/"); p != "" {
-				if n, err := strconv.Atoi(p); err == nil && n >= 0 {
-					dbIndex = n
-				}
-			}
-			c := redis.NewClient(&redis.Options{Addr: addr, Password: pass, DB: dbIndex})
-			if err := c.Ping(context.Background()).Err(); err != nil {
-				panic(fmt.Errorf("redis ping failed: %w", err))
-			}
-			return c
+		c, err := NewRedisClientFromURL(raw)
+		if err != nil {
+			panic(err)
 		}
+		return c
 	}
 
 	addr := strings.TrimSpace(os.Getenv("REDIS_ADDR"))

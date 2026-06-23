@@ -160,8 +160,8 @@ services:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-scan-control-plane:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
-      context: ./backend/scan-control-plane
-      dockerfile: Dockerfile
+      context: ./backend
+      dockerfile: scan-control-plane/Dockerfile
       args:
         <<: *mirror-args
     environment:
@@ -175,7 +175,9 @@ services:
       LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT: *file-watcher-watch-host-dir
       LAZYMIND_SCAN_CONTROL_PLANE_FEISHU_BASE_URL: "https://open.feishu.cn"
       LAZYMIND_SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL: "http://auth-service:8000"
-      LAZYMIND_REDIS_URL: redis://test:123456@redis:6379/0
+      LAZYMIND_SCAN_CONTROL_PLANE_REDIS_URL: ${LAZYMIND_SCAN_CONTROL_PLANE_REDIS_URL:-}
+      LAZYMIND_STATE_BACKEND: ${LAZYMIND_STATE_BACKEND:-redis}
+      LAZYMIND_STATE_SQLITE_PATH: /tmp/scan-control-plane/state/scan_state.db
       SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_STAGGER: ${SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_STAGGER:-10s}
       LAZYMIND_SCAN_CONTROL_PLANE_TEMP_DIR: "/tmp/scan-control-plane/sourceengine"
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
@@ -192,6 +194,7 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+        required: false
     healthcheck:
       test: ["CMD", "/app/scan-control-plane", "healthcheck"]
       interval: 5s
