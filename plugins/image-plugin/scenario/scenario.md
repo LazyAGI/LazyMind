@@ -5,7 +5,7 @@
 帮助用户生成并增强高质量图片。工作流分五步：
 
 1. **analyze_subject** — 分析用户描述的主体、风格、氛围
-2. **collect_material** — 收集参考素材，为后续生成提供参考
+2. **collect_materials** — 收集参考素材，为后续生成提供参考
 3. **optimize_prompt** — 基于分析结果生成高质量英文图片生成 prompt
 4. **generate_image** — 调用图片生成模型产出原始图片
 5. **enhance_image** — 对原始图片进行风格增强 / 超分处理
@@ -24,7 +24,7 @@
 
 | 用户意图 | 推荐步骤 | 工具调用 |
 |---|---|---|
-| 想重新收集参考素材 | collect_material | `advance_step(step_id='collect_material', user_input=<说明>)` |
+| 想重新收集参考素材 | collect_materials | `advance_step(step_id='collect_materials', user_input=<说明>)` |
 | 对 prompt 不满意，想重新优化 | optimize_prompt | `advance_step(step_id='optimize_prompt', user_input=<说明>)` |
 | 想用当前 prompt 重新生图 | generate_image | `advance_step(step_id='generate_image', user_input=<说明>)` |
 | 想重新增强（换风格 / 更高清） | enhance_image | `advance_step(step_id='enhance_image', user_input=<说明>)` |

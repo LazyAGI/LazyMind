@@ -1,7 +1,7 @@
 """Mock tools for the image-plugin demo.
 
 These stubs return plausible-looking fake data so the full pipeline
-(analyze_subject → collect_material → optimize_prompt → generate_image)
+(analyze_subject → collect_materials → optimize_prompt → generate_image)
 can be exercised end-to-end without real API keys.
 """
 from __future__ import annotations
