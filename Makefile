@@ -17,7 +17,7 @@ comma := ,
 #        make down                         →  docker compose down
 #        make down COMPOSE_PROJECT=myproj  →  docker compose -p myproj down
 # ---------------------------------------------------------------------------
-_COMPOSE := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(if $(COMPOSE_PROJECT),-p $(COMPOSE_PROJECT),)
+_COMPOSE = LAZYMIND_RUNTIME_MODE=$(LAZYMIND_RUNTIME_MODE) DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(if $(COMPOSE_PROJECT),-p $(COMPOSE_PROJECT),) $(_COMPOSE_FILE_FLAGS)
 # ---------------------------------------------------------------------------
 # Mirror profile: cn (domestic/default) or intl (international).
 # Selects which .env.mirrors.<profile> file to load for all build-time source
@@ -102,6 +102,18 @@ export LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD ?= admin
 export LAZYMIND_RESET_ALGO_ON_STARTUP ?= false
 export LAZYMIND_RESET_ALL_ON_STARTUP ?= false
 export LAZYLLM_ALGO_REGISTER_POLICY ?= none
+# Runtime mode gates local/desktop-only compose overrides. Cloud/server remains
+# the default when unset. Local mode currently uses SQLite for short-lived state.
+_LAZYMIND_RUNTIME_MODE_RAW := $(strip $(LAZYMIND_RUNTIME_MODE))
+_LAZYMIND_STATE_BACKEND_RAW := $(strip $(LAZYMIND_STATE_BACKEND))
+LAZYMIND_RUNTIME_MODE := $(if $(_LAZYMIND_RUNTIME_MODE_RAW),$(_LAZYMIND_RUNTIME_MODE_RAW),cloud)
+ifneq ($(and $(filter-out local,$(LAZYMIND_RUNTIME_MODE)),$(filter sqlite,$(_LAZYMIND_STATE_BACKEND_RAW))),)
+$(error LAZYMIND_STATE_BACKEND=sqlite requires LAZYMIND_RUNTIME_MODE=local)
+endif
+ifneq ($(and $(filter local,$(LAZYMIND_RUNTIME_MODE)),$(filter redis,$(_LAZYMIND_STATE_BACKEND_RAW))),)
+$(error LAZYMIND_RUNTIME_MODE=local requires LAZYMIND_STATE_BACKEND to be unset or sqlite)
+endif
+export LAZYMIND_RUNTIME_MODE
 
 # Core database
 export LAZYMIND_CORE_DATABASE_URL ?= postgresql+psycopg://root:123456@db:5432/core
@@ -168,6 +180,8 @@ help:
 	@echo "                    Use SERVICES=svc1,svc2 to start specific services only"
 	@echo "  make up-build   - Build images and start services"
 	@echo "                    Use SERVICES=svc1,svc2 to target specific services"
+	@echo "                    Use LAZYMIND_RUNTIME_MODE=local to run without Redis"
+	@echo "                    Example: make up-build LAZYMIND_RUNTIME_MODE=local"
 	@echo "  make down       - Stop services"
 	@echo "                    Use SERVICES=svc1,svc2 to stop specific services only"
 	@echo "  make build      - Build compose services (mineru profile only when needed)"
@@ -246,9 +260,16 @@ _enable_opensearch_dashboard := $(filter 1 true TRUE yes YES on ON,$(LAZYMIND_EN
 _need_milvus_dashboard := $(and $(_need_milvus),$(_enable_milvus_dashboard))
 _need_opensearch_dashboard := $(and $(_need_opensearch),$(_enable_opensearch_dashboard))
 
-# Shared compose profile flags for up/down/up-build
+# Start/build profile flags are mode-aware. Cleanup profile flags are intentionally exhaustive.
 _COMPOSE_PROFILES := $(strip $(if $(_need_mineru),--profile mineru) $(if $(_need_milvus),--profile milvus) $(if $(_need_opensearch),--profile opensearch) $(if $(_need_milvus_dashboard),--profile milvus-dashboard) $(if $(_need_opensearch_dashboard),--profile opensearch-dashboard))
+_CLEANUP_COMPOSE_PROFILES := --profile mineru --profile paddleocr --profile milvus --profile opensearch --profile milvus-dashboard --profile opensearch-dashboard --profile file-watcher-artifact
+_IS_LOCAL_RUNTIME := $(filter local,$(strip $(LAZYMIND_RUNTIME_MODE)))
+_REMOVE_REDIS_IF_LOCAL = $(if $(_IS_LOCAL_RUNTIME),$(_COMPOSE) rm -sf redis >/dev/null 2>&1 || true,true)
+_COMPOSE_FILE_FLAGS := $(if $(_IS_LOCAL_RUNTIME),-f docker-compose.yml -f docker-compose.local.yml,)
+_COMPOSE_REDIS_SCALE := $(if $(_IS_LOCAL_RUNTIME),--scale redis=0,)
 _COMPOSE_FILE_WATCHER_SCALE := $(if $(filter container,$(LAZYMIND_FILE_WATCHER_MODE)),,--scale file-watcher=0)
+_COMPOSE_READABLE_PATHS := db-init backend/scan-control-plane/migrations backend/scan-control-plane/scripts
+_PREPARE_COMPOSE_PERMISSIONS = @chmod -R a+rX $(_COMPOSE_READABLE_PATHS) 2>/dev/null || true
 
 # Only init submodules when not yet cloned; if already present (even with different commit), do nothing. Never recursive.
 _SUBMODULE_INIT = @git submodule status | grep -q '^-' && git submodule update --init || true
@@ -319,8 +340,10 @@ up:
 	else \
 		$(MAKE) --no-print-directory file-watcher-build; \
 	fi
+	$(_PREPARE_COMPOSE_PERMISSIONS)
 	$(_SUBMODULE_INIT)
-	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) -d \
+	@$(_REMOVE_REDIS_IF_LOCAL)
+	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) $(_COMPOSE_REDIS_SCALE) -d \
 		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-run; \
@@ -332,7 +355,7 @@ down:
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-stop; \
 	fi
-	@$(_COMPOSE) $(_COMPOSE_PROFILES) down \
+	@$(_COMPOSE) $(_CLEANUP_COMPOSE_PROFILES) down \
 		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
 
 up-build:
@@ -342,8 +365,10 @@ up-build:
 	else \
 		$(MAKE) --no-print-directory file-watcher-build; \
 	fi
+	$(_PREPARE_COMPOSE_PERMISSIONS)
 	$(_SUBMODULE_INIT)
-	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) --build -d \
+	@$(_REMOVE_REDIS_IF_LOCAL)
+	@$(_COMPOSE) $(_COMPOSE_PROFILES) up $(_COMPOSE_FILE_WATCHER_SCALE) $(_COMPOSE_REDIS_SCALE) --build -d \
 		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" != "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-run; \
@@ -356,7 +381,7 @@ clear:
 		$(MAKE) --no-print-directory file-watcher-stop; \
 	fi
 	@echo "🧹 Stopping containers and removing volumes (keeping built images/base cache)..."
-	@$(_COMPOSE) $(_COMPOSE_PROFILES) down -v 2>/dev/null || true
+	@$(_COMPOSE) $(_CLEANUP_COMPOSE_PROFILES) down -v 2>/dev/null || true
 	@echo "🧹 Clearing Python cache..."
 	@find . -type d -name '__pycache__' ! -path '*/\.git/*' -exec rm -rf {} + 2>/dev/null || true
 	@find . -type f -name '*.pyc' ! -path '*/\.git/*' -delete 2>/dev/null || true
@@ -422,7 +447,7 @@ reset-kb:
 		$(MAKE) --no-print-directory file-watcher-stop; \
 	fi
 	@echo "⏹  Stopping all services (keeping db running for SQL cleanup)..."
-	@$(_COMPOSE) $(_COMPOSE_PROFILES) stop \
+	@$(_COMPOSE) $(_CLEANUP_COMPOSE_PROFILES) stop \
 		lazyllm-algo lazyllm-doc-server lazyllm-parse-server lazyllm-parse-worker \
 		chat core frontend kong 2>/dev/null || true
 	@echo "🗑  Clearing KB tables in PostgreSQL (core DB)..."
@@ -432,7 +457,7 @@ reset-kb:
 	@$(_COMPOSE) exec -T db psql -U root -d app -c "$$_RESET_KB_SQL_APP" 2>&1 || \
 		echo "⚠️  app DB not running or tables not found — skipping"
 	@echo "⏹  Stopping remaining services..."
-	@$(_COMPOSE) $(_COMPOSE_PROFILES) down 2>/dev/null || true
+	@$(_COMPOSE) $(_CLEANUP_COMPOSE_PROFILES) down 2>/dev/null || true
 	@echo "🗑  Removing KB volumes: $(_KB_VOLUMES)..."
 	@for vol in $(_KB_VOLUMES); do \
 		full="$$(docker volume ls -q | grep -E "(^|_)$${vol}$$" | head -1)"; \
@@ -452,7 +477,7 @@ reset-kb:
 # ---------------------------------------------------------------------------
 reset-all: reset-kb
 	@echo "🗑  Removing all remaining persistent volumes (pgdata, redisdata, caches)..."
-	@$(_COMPOSE) $(_COMPOSE_PROFILES) down -v 2>/dev/null || true
+	@$(_COMPOSE) $(_CLEANUP_COMPOSE_PROFILES) down -v 2>/dev/null || true
 	@echo "🧹 Clearing Python cache..."
 	@find . -type d -name '__pycache__' ! -path '*/\.git/*' -exec rm -rf {} + 2>/dev/null || true
 	@find . -type f -name '*.pyc' ! -path '*/\.git/*' -delete 2>/dev/null || true

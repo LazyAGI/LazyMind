@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
 	"lazymind/core/acl"
@@ -23,6 +22,7 @@ import (
 	"lazymind/core/evolution"
 	"lazymind/core/modelconfig"
 	"lazymind/core/plugin"
+	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 )
@@ -275,14 +275,14 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	applyMCPRuntimeConfig(r.Context(), db, userID, reqBody)
 	baseURL := chatServiceURL()
 	reqCtx := r.Context()
-	rdb := store.Redis()
+	stateStore := store.State()
 
 	if !stream {
-		handleNonStreamChat(w, reqCtx, db, rdb, baseURL, reqBody, convID, query, target, historyExt)
+		handleNonStreamChat(w, reqCtx, db, stateStore, baseURL, reqBody, convID, query, target, historyExt)
 		return
 	}
 
-	handleStreamChat(w, r, db, rdb, baseURL, reqBody, convID, query, target, dualReply, historyExt)
+	handleStreamChat(w, r, db, stateStore, baseURL, reqBody, convID, query, target, dualReply, historyExt)
 }
 
 // ResumeChat text POST /api/v1/conversations:resumeChat
@@ -332,13 +332,13 @@ func resumeChatStream(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	ctx := r.Context()
-	rdb := store.Redis()
-	if rdb == nil {
+	stateStore := store.State()
+	if stateStore == nil {
 		resumeFromDBOnly(db, convID, flusher, w)
 		return
 	}
 
-	generatingIDs, _ := getGeneratingHistoryIDs(ctx, rdb, convID)
+	generatingIDs, _ := getGeneratingHistoryIDs(ctx, stateStore, convID)
 	if len(generatingIDs) == 0 {
 		resumeCompletedFromDB(db, convID, flusher, w)
 		return
@@ -346,7 +346,7 @@ func resumeChatStream(w http.ResponseWriter, r *http.Request) {
 
 	var multiInfo *MultiAnswerInfo
 	for _, id := range generatingIDs {
-		info, err := getMultiAnswerInfo(ctx, rdb, convID, id)
+		info, err := getMultiAnswerInfo(ctx, stateStore, convID, id)
 		if err == nil && info != nil {
 			multiInfo = info
 			break
@@ -354,7 +354,7 @@ func resumeChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if multiInfo != nil {
-		resumeMultiAnswerChat(ctx, rdb, convID, multiInfo, w, flusher)
+		resumeMultiAnswerChat(ctx, stateStore, convID, multiInfo, w, flusher)
 		return
 	}
 
@@ -362,7 +362,7 @@ func resumeChatStream(w http.ResponseWriter, r *http.Request) {
 	if targetHistoryID == "" {
 		targetHistoryID = generatingIDs[0]
 	}
-	resumeSingleAnswerChat(ctx, rdb, convID, targetHistoryID, w, flusher)
+	resumeSingleAnswerChat(ctx, stateStore, convID, targetHistoryID, w, flusher)
 }
 
 func resumeFromDBOnly(db *gorm.DB, convID string, flusher http.Flusher, w http.ResponseWriter) {
@@ -454,9 +454,9 @@ func sendChunk(w http.ResponseWriter, flusher http.Flusher, ch *ChatChunkRespons
 	writeSSEChunk(w, flusher, ch)
 }
 
-func resumeSingleAnswerChat(ctx context.Context, rdb *redis.Client, convID, historyID string, w http.ResponseWriter, flusher http.Flusher) {
-	status, _ := getChatStatus(ctx, rdb, convID, historyID)
-	chunks, _ := getChatChunks(ctx, rdb, convID, historyID)
+func resumeSingleAnswerChat(ctx context.Context, stateStore state.Store, convID, historyID string, w http.ResponseWriter, flusher http.Flusher) {
+	status, _ := getChatStatus(ctx, stateStore, convID, historyID)
+	chunks, _ := getChatChunks(ctx, stateStore, convID, historyID)
 
 	first := mergeChunksToFirstChunk(chunks)
 	if first != nil {
@@ -492,7 +492,7 @@ func resumeSingleAnswerChat(ctx context.Context, rdb *redis.Client, convID, hist
 			HistoryID:      historyID,
 			FinishReason:   "FINISH_REASON_STOP",
 		})
-		_ = clearChatData(context.Background(), rdb, convID, historyID)
+		_ = clearChatData(context.Background(), stateStore, convID, historyID)
 		return
 	}
 
@@ -500,7 +500,7 @@ func resumeSingleAnswerChat(ctx context.Context, rdb *redis.Client, convID, hist
 	if lastIdx < 0 {
 		lastIdx = -1
 	}
-	err := watchChatChunks(ctx, rdb, convID, historyID, lastIdx, func(ch *ChatChunkResponse) error {
+	err := watchChatChunks(ctx, stateStore, convID, historyID, lastIdx, func(ch *ChatChunkResponse) error {
 		sendChunk(w, flusher, ch)
 		return nil
 	})
@@ -511,20 +511,20 @@ func resumeSingleAnswerChat(ctx context.Context, rdb *redis.Client, convID, hist
 		return
 	}
 
-	finalStatus, _ := getChatStatus(context.Background(), rdb, convID, historyID)
+	finalStatus, _ := getChatStatus(context.Background(), stateStore, convID, historyID)
 	if finalStatus != nil && (finalStatus.Status == "completed" || finalStatus.Status == "stopped") {
 		sendChunk(w, flusher, &ChatChunkResponse{
 			ConversationID: convID,
 			HistoryID:      historyID,
 			FinishReason:   "FINISH_REASON_STOP",
 		})
-		_ = clearChatData(context.Background(), rdb, convID, historyID)
+		_ = clearChatData(context.Background(), stateStore, convID, historyID)
 	}
 }
 
-func resumeMultiAnswerChat(ctx context.Context, rdb *redis.Client, convID string, info *MultiAnswerInfo, w http.ResponseWriter, flusher http.Flusher) {
-	primaryChunks, _ := getChatChunks(ctx, rdb, convID, info.PrimaryHistoryID)
-	secondaryChunks, _ := getChatChunks(ctx, rdb, convID, info.SecondaryHistoryID)
+func resumeMultiAnswerChat(ctx context.Context, stateStore state.Store, convID string, info *MultiAnswerInfo, w http.ResponseWriter, flusher http.Flusher) {
+	primaryChunks, _ := getChatChunks(ctx, stateStore, convID, info.PrimaryHistoryID)
+	secondaryChunks, _ := getChatChunks(ctx, stateStore, convID, info.SecondaryHistoryID)
 
 	for _, ch := range primaryChunks {
 		if ch != nil {
@@ -539,14 +539,14 @@ func resumeMultiAnswerChat(ctx context.Context, rdb *redis.Client, convID string
 		}
 	}
 
-	primaryStatus, _ := getChatStatus(ctx, rdb, convID, info.PrimaryHistoryID)
-	secondaryStatus, _ := getChatStatus(ctx, rdb, convID, info.SecondaryHistoryID)
+	primaryStatus, _ := getChatStatus(ctx, stateStore, convID, info.PrimaryHistoryID)
+	secondaryStatus, _ := getChatStatus(ctx, stateStore, convID, info.SecondaryHistoryID)
 
 	var wg sync.WaitGroup
 	var writeMu sync.Mutex
 	watchOne := func(historyID string, startIdx int64) {
 		defer wg.Done()
-		_ = watchChatChunks(ctx, rdb, convID, historyID, startIdx, func(ch *ChatChunkResponse) error {
+		_ = watchChatChunks(ctx, stateStore, convID, historyID, startIdx, func(ch *ChatChunkResponse) error {
 			if ch == nil {
 				return nil
 			}
@@ -569,11 +569,11 @@ func resumeMultiAnswerChat(ctx context.Context, rdb *redis.Client, convID string
 	wg.Wait()
 
 	patchTail := func(historyID string) {
-		st, _ := getChatStatus(context.Background(), rdb, convID, historyID)
+		st, _ := getChatStatus(context.Background(), stateStore, convID, historyID)
 		if st == nil || st.CurrentResult == "" {
 			return
 		}
-		list, _ := getChatChunks(context.Background(), rdb, convID, historyID)
+		list, _ := getChatChunks(context.Background(), stateStore, convID, historyID)
 		merged := mergeChunksToFirstChunk(list)
 		current := ""
 		seq := int32(info.Seq)
@@ -611,8 +611,8 @@ func resumeMultiAnswerChat(ctx context.Context, rdb *redis.Client, convID string
 	})
 
 	if ctx.Err() == nil {
-		_ = clearChatData(context.Background(), rdb, convID, info.PrimaryHistoryID)
-		_ = clearChatData(context.Background(), rdb, convID, info.SecondaryHistoryID)
+		_ = clearChatData(context.Background(), stateStore, convID, info.PrimaryHistoryID)
+		_ = clearChatData(context.Background(), stateStore, convID, info.SecondaryHistoryID)
 	}
 }
 
@@ -643,14 +643,14 @@ func StopChatGeneration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rdb := store.Redis()
-	if rdb != nil {
-		ids, _ := getGeneratingHistoryIDs(r.Context(), rdb, convID)
+	stateStore := store.State()
+	if stateStore != nil {
+		ids, _ := getGeneratingHistoryIDs(r.Context(), stateStore, convID)
 		if len(ids) == 0 && historyID != "" {
 			ids = append(ids, historyID)
 		}
 		for _, hid := range ids {
-			_ = setChatCancelSignal(r.Context(), rdb, convID, hid)
+			_ = setChatCancelSignal(r.Context(), stateStore, convID, hid)
 		}
 	}
 	common.ReplyOK(w, nil)
@@ -673,9 +673,9 @@ func GetChatStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	isGenerating := false
-	rdb := store.Redis()
-	if rdb != nil {
-		ids, _ := getGeneratingHistoryIDs(r.Context(), rdb, convID)
+	stateStore := store.State()
+	if stateStore != nil {
+		ids, _ := getGeneratingHistoryIDs(r.Context(), stateStore, convID)
 		isGenerating = len(ids) > 0
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{"is_generating": isGenerating})
@@ -761,11 +761,11 @@ func loadConversationHistories(ctx context.Context, convID string) []orm.ChatHis
 	var histories []orm.ChatHistory
 	store.DB().Where("conversation_id = ?", convID).Order("seq DESC").Find(&histories)
 
-	rdb := store.Redis()
-	if rdb == nil {
+	stateStore := store.State()
+	if stateStore == nil {
 		return histories
 	}
-	ids, _ := getGeneratingHistoryIDs(ctx, rdb, convID)
+	ids, _ := getGeneratingHistoryIDs(ctx, stateStore, convID)
 	exists := make(map[string]struct{}, len(histories))
 	for _, h := range histories {
 		exists[h.ID] = struct{}{}
@@ -774,7 +774,7 @@ func loadConversationHistories(ctx context.Context, convID string) []orm.ChatHis
 		if _, ok := exists[hid]; ok {
 			continue
 		}
-		in, err := getChatInput(ctx, rdb, convID, hid)
+		in, err := getChatInput(ctx, stateStore, convID, hid)
 		if err != nil || in == nil || strings.TrimSpace(in.RawContent) == "" {
 			continue
 		}
@@ -1161,7 +1161,7 @@ func SetChatHistory(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, fmt.Sprintf("%s: %v", "set history failed", err), http.StatusInternalServerError)
 			return
 		}
-		recordConversationIdleAfterPersist(context.Background(), db, store.Redis(), selected.ConversationID, userID, selected.ID, now, selected.RawContent, stripToolTags(selected.Result))
+		recordConversationIdleAfterPersist(context.Background(), db, store.State(), selected.ConversationID, userID, selected.ID, now, selected.RawContent, stripToolTags(selected.Result))
 	}
 
 	_ = db.Where("id IN ?", []string{body.SetHistoryID, body.DeletedHistoryID}).Delete(&orm.MultiAnswersChatHistory{}).Error
@@ -1349,16 +1349,16 @@ func StreamConvEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
-	rdb := store.Redis()
-	if rdb == nil {
-		// No Redis — nothing to stream; send a keepalive and return.
+	stateStore := store.State()
+	if stateStore == nil {
+		// No state backend — nothing to stream; send a keepalive and return.
 		fmt.Fprintf(w, "data: {}\n\n")
 		flusher.Flush()
 		return
 	}
 
 	ctx := r.Context()
-	_ = WatchConvEvents(ctx, rdb, convID, -1, func(ev *ConvEvent) error {
+	_ = WatchConvEvents(ctx, stateStore, convID, -1, func(ev *ConvEvent) error {
 		bs, err := json.Marshal(ev)
 		if err != nil {
 			return nil

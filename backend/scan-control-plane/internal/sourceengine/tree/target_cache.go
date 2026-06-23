@@ -285,7 +285,7 @@ func stableTargetSearchCacheProviderOptions(connectorType connector.ConnectorTyp
 	return stableProviderOptions(filtered)
 }
 
-func targetSearchCacheRedisKey(key string) string {
+func targetSearchCacheStorageKey(key string) string {
 	sum := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(sum[:])
 }

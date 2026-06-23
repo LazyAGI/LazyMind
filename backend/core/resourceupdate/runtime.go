@@ -7,16 +7,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+	"lazymind/core/state"
 )
 
-func Start(ctx context.Context, db *gorm.DB, rdb *redis.Client, cfg Config) {
+func Start(ctx context.Context, db *gorm.DB, stateStore state.Store, cfg Config) {
 	cfg = normalizeConfig(cfg)
 	workerID := defaultWorkerID("resourceupdate")
 	resourceUpdateInfo(logEventRuntimeStarted).
 		Str("worker_id", workerID).
-		Bool("redis_enabled", rdb != nil).
+		Bool("state_enabled", stateStore != nil).
 		Dur("scheduler_interval", cfg.SchedulerTickInterval).
 		Dur("worker_interval", cfg.WorkerInterval).
 		Dur("scanner_interval", cfg.ScannerInterval).
@@ -28,11 +28,11 @@ func Start(ctx context.Context, db *gorm.DB, rdb *redis.Client, cfg Config) {
 	go runSchedulerLoop(ctx, scheduler, cfg.SchedulerTickInterval)
 	go runWorkerLoop(ctx, worker, cfg.WorkerInterval)
 	go runScannerLoop(ctx, scanner, cfg.ScannerInterval)
-	if rdb != nil {
-		idleProcessor := NewIdleProcessor(db, rdb, cfg, workerID+"-idle")
+	if stateStore != nil {
+		idleProcessor := NewIdleProcessor(db, stateStore, cfg, workerID+"-idle")
 		go runIdleFallbackLoop(ctx, idleProcessor, cfg.ConversationIdleFallbackScanInterval)
-		if cfg.ConversationIdleEnableRedisExpireNotify {
-			go runIdleRedisExpireNotifyLoop(ctx, rdb, idleProcessor)
+		if cfg.ConversationIdleEnableRedisExpireNotify && !state.IsSQLiteMode() {
+			go runIdleRedisExpireNotifyLoop(ctx, stateStore, idleProcessor)
 		}
 	}
 }

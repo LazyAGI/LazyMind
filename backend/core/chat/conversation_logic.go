@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
@@ -20,6 +19,7 @@ import (
 	"lazymind/core/log"
 	"lazymind/core/plugin"
 	"lazymind/core/resourceupdate"
+	"lazymind/core/state"
 	"lazymind/core/subagent"
 )
 
@@ -53,11 +53,11 @@ func toolConfigFromBody(reqBody map[string]any) map[string]any {
 	return nil
 }
 
-func recordConversationIdleAfterPersist(ctx context.Context, db *gorm.DB, rdb *redis.Client, convID, userID, historyID string, at time.Time, query, answer string) {
-	if db == nil || rdb == nil {
+func recordConversationIdleAfterPersist(ctx context.Context, db *gorm.DB, stateStore state.Store, convID, userID, historyID string, at time.Time, query, answer string) {
+	if db == nil || stateStore == nil {
 		return
 	}
-	if err := resourceupdate.RecordConversationIdleMessage(ctx, db, rdb, resourceupdate.ConversationIdleRecord{
+	if err := resourceupdate.RecordConversationIdleMessage(ctx, db, stateStore, resourceupdate.ConversationIdleRecord{
 		SessionID:      convID,
 		UserID:         userID,
 		LastMessageID:  historyID,
@@ -547,7 +547,7 @@ func handleNonStreamChat(
 	w http.ResponseWriter,
 	reqCtx context.Context,
 	db *gorm.DB,
-	rdb *redis.Client,
+	stateStore state.Store,
 	baseURL string,
 	reqBody map[string]any,
 	convID, query string,
@@ -647,13 +647,13 @@ func handleNonStreamChat(
 			return
 		}
 	}
-	if rdb != nil {
-		_ = setChatStatus(reqCtx, rdb, convID, historyID, "completed", answer)
+	if stateStore != nil {
+		_ = setChatStatus(reqCtx, stateStore, convID, historyID, "completed", answer)
 	}
 	db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
 	if !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
-		recordConversationIdleAfterPersist(context.Background(), db, rdb, convID, userIDFromChatRequestBody(reqBody), historyID, now, query, answer)
+		recordConversationIdleAfterPersist(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, now, query, answer)
 	}
 	common.ReplyOK(w, map[string]any{
 		"conversation_id": convID,
@@ -669,7 +669,7 @@ func handleStreamChat(
 	w http.ResponseWriter,
 	r *http.Request,
 	db *gorm.DB,
-	rdb *redis.Client,
+	stateStore state.Store,
 	baseURL string,
 	reqBody map[string]any,
 	convID, query string,
@@ -698,28 +698,28 @@ func handleStreamChat(
 	}
 	chatCtx, chatCancel := context.WithCancel(context.Background())
 	defer chatCancel()
-	if rdb != nil {
+	if stateStore != nil {
 		if target.IsRegeneration {
-			_ = clearChatData(chatCtx, rdb, convID, historyID)
+			_ = clearChatData(chatCtx, stateStore, convID, historyID)
 		}
-		_ = setChatInput(chatCtx, rdb, convID, historyID, query, target.Seq, historyExt)
-		_ = setChatStatus(chatCtx, rdb, convID, historyID, "generating", "")
+		_ = setChatInput(chatCtx, stateStore, convID, historyID, query, target.Seq, historyExt)
+		_ = setChatStatus(chatCtx, stateStore, convID, historyID, "generating", "")
 		if dualReply {
-			_ = setChatInput(chatCtx, rdb, convID, secondaryHistoryID, query, target.Seq, historyExt)
-			_ = setChatStatus(chatCtx, rdb, convID, secondaryHistoryID, "generating", "")
-			_ = setMultiAnswerInfo(chatCtx, rdb, convID, historyID, secondaryHistoryID, target.Seq)
+			_ = setChatInput(chatCtx, stateStore, convID, secondaryHistoryID, query, target.Seq, historyExt)
+			_ = setChatStatus(chatCtx, stateStore, convID, secondaryHistoryID, "generating", "")
+			_ = setMultiAnswerInfo(chatCtx, stateStore, convID, historyID, secondaryHistoryID, target.Seq)
 		}
 		go func() {
-			_ = watchChatCancelSignal(chatCtx, rdb, convID, historyID)
+			_ = watchChatCancelSignal(chatCtx, stateStore, convID, historyID)
 			chatCancel()
 		}()
 	}
 
 	if !dualReply {
-		streamSingleAnswer(chatCtx, reqCtx, w, flusher, db, rdb, baseURL, reqBody, convID, query, historyID, target, historyExt)
+		streamSingleAnswer(chatCtx, reqCtx, w, flusher, db, stateStore, baseURL, reqBody, convID, query, historyID, target, historyExt)
 		return
 	}
-	streamDualAnswer(chatCtx, reqCtx, w, flusher, db, rdb, baseURL, reqBody, convID, query, historyID, secondaryHistoryID, target, historyExt)
+	streamDualAnswer(chatCtx, reqCtx, w, flusher, db, stateStore, baseURL, reqBody, convID, query, historyID, secondaryHistoryID, target, historyExt)
 }
 
 func streamSingleAnswer(
@@ -727,7 +727,7 @@ func streamSingleAnswer(
 	w http.ResponseWriter,
 	flusher http.Flusher,
 	db *gorm.DB,
-	rdb *redis.Client,
+	stateStore state.Store,
 	baseURL string,
 	reqBody map[string]any,
 	convID, query, historyID string,
@@ -737,8 +737,8 @@ func streamSingleAnswer(
 	seq := target.Seq
 	ch, err := StreamChatUpstream(chatCtx, baseURL, reqBody)
 	if err != nil {
-		if rdb != nil {
-			_ = setChatStatus(chatCtx, rdb, convID, historyID, "failed", "")
+		if stateStore != nil {
+			_ = setChatStatus(chatCtx, stateStore, convID, historyID, "failed", "")
 		}
 		writeSSEChunk(w, flusher, &ChatChunkResponse{
 			ConversationID:    convID,
@@ -776,7 +776,7 @@ func streamSingleAnswer(
 	for d := range ch {
 		if d.TaskCreated != nil {
 			userIDForTask, _ := reqBody["user_id"].(string)
-			notice := handleTaskCreated(chatCtx, db, rdb, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody), toolConfigFromBody(reqBody))
+			notice := handleTaskCreated(chatCtx, db, stateStore, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody), toolConfigFromBody(reqBody))
 			if notice != nil {
 				taskChunk := &ChatChunkResponse{
 					ConversationID: convID,
@@ -788,12 +788,12 @@ func streamSingleAnswer(
 				if reqCtx.Err() == nil {
 					writeSSEChunk(w, flusher, taskChunk)
 				}
-				if rdb != nil {
-					_ = appendChatChunk(chatCtx, rdb, convID, historyID, taskChunk)
+				if stateStore != nil {
+					_ = appendChatChunk(chatCtx, stateStore, convID, historyID, taskChunk)
 					// Also write to the conversation-level events channel so the frontend
 					// receives task_created notifications regardless of which history stream
 					// is currently open (covers auto-advance internal requests).
-					_ = AppendConvEvent(chatCtx, rdb, convID, &ConvEvent{
+					_ = AppendConvEvent(chatCtx, stateStore, convID, &ConvEvent{
 						Type:    "task_created",
 						Payload: notice,
 					})
@@ -839,8 +839,8 @@ func streamSingleAnswer(
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, chunk)
 		}
-		if rdb != nil {
-			_ = appendChatChunk(chatCtx, rdb, convID, historyID, chunk)
+		if stateStore != nil {
+			_ = appendChatChunk(chatCtx, stateStore, convID, historyID, chunk)
 		}
 	}
 	now := time.Now()
@@ -885,15 +885,15 @@ func streamSingleAnswer(
 			persisted = true
 		}
 	}
-	if rdb != nil {
-		_ = setChatStatus(context.Background(), rdb, convID, historyID, "completed", stripToolTags(fullText))
+	if stateStore != nil {
+		_ = setChatStatus(context.Background(), stateStore, convID, historyID, "completed", stripToolTags(fullText))
 	}
 	if persisted {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
 	}
 	if persisted && !target.IsRegeneration {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
-		recordConversationIdleAfterPersist(context.Background(), db, rdb, convID, userIDFromChatRequestBody(reqBody), historyID, now, query, stripToolTags(fullText))
+		recordConversationIdleAfterPersist(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, now, query, stripToolTags(fullText))
 	}
 	if reqCtx.Err() == nil {
 		// text：message text，finish_reason text STOP
@@ -920,7 +920,7 @@ func streamDualAnswer(
 	w http.ResponseWriter,
 	flusher http.Flusher,
 	db *gorm.DB,
-	rdb *redis.Client,
+	stateStore state.Store,
 	baseURL string,
 	reqBody map[string]any,
 	convID, query, historyID, secondaryHistoryID string,
@@ -938,9 +938,9 @@ func streamDualAnswer(
 	}
 	secondaryCh, err2 := StreamChatUpstream(chatCtx, baseURL, secondaryReq)
 	if err1 != nil && err2 != nil {
-		if rdb != nil {
-			_ = setChatStatus(chatCtx, rdb, convID, historyID, "failed", "")
-			_ = setChatStatus(chatCtx, rdb, convID, secondaryHistoryID, "failed", "")
+		if stateStore != nil {
+			_ = setChatStatus(chatCtx, stateStore, convID, historyID, "failed", "")
+			_ = setChatStatus(chatCtx, stateStore, convID, secondaryHistoryID, "failed", "")
 		}
 		writeSSEChunk(w, flusher, map[string]any{"finish_reason": "FINISH_REASON_UNKNOWN"})
 		return
@@ -984,8 +984,8 @@ func streamDualAnswer(
 			})
 			writeMu.Unlock()
 		}
-		if rdb != nil {
-			_ = appendChatChunk(chatCtx, rdb, convID, historyID, &ChatChunkResponse{
+		if stateStore != nil {
+			_ = appendChatChunk(chatCtx, stateStore, convID, historyID, &ChatChunkResponse{
 				ConversationID: convID, Seq: int32(seq), Delta: delta, HistoryID: historyID,
 				ReasoningContent: "", Sources: sources,
 			})
@@ -1014,8 +1014,8 @@ func streamDualAnswer(
 			})
 			writeMu.Unlock()
 		}
-		if rdb != nil {
-			_ = appendChatChunk(chatCtx, rdb, convID, secondaryHistoryID, &ChatChunkResponse{
+		if stateStore != nil {
+			_ = appendChatChunk(chatCtx, stateStore, convID, secondaryHistoryID, &ChatChunkResponse{
 				ConversationID: convID, Seq: int32(seq), Delta: delta, HistoryID: secondaryHistoryID,
 				ReasoningContent: "", Sources: sources,
 			})
@@ -1067,8 +1067,8 @@ func streamDualAnswer(
 						if !shouldEmitStreamFrame(delta, d.Sources) {
 							continue
 						}
-						if rdb != nil {
-							_ = appendChatChunk(bg, rdb, convID, historyID, &ChatChunkResponse{
+						if stateStore != nil {
+							_ = appendChatChunk(bg, stateStore, convID, historyID, &ChatChunkResponse{
 								ConversationID: convID, Seq: int32(seq), Delta: delta, HistoryID: historyID,
 								ReasoningContent: "", Sources: d.Sources,
 							})
@@ -1096,8 +1096,8 @@ func streamDualAnswer(
 						if !shouldEmitStreamFrame(delta, d.Sources) {
 							continue
 						}
-						if rdb != nil {
-							_ = appendChatChunk(bg, rdb, convID, secondaryHistoryID, &ChatChunkResponse{
+						if stateStore != nil {
+							_ = appendChatChunk(bg, stateStore, convID, secondaryHistoryID, &ChatChunkResponse{
 								ConversationID: convID, Seq: int32(seq), Delta: delta, HistoryID: secondaryHistoryID,
 								ReasoningContent: "", Sources: d.Sources,
 							})
@@ -1128,9 +1128,9 @@ dualPersist:
 		Ext:           historyExt,
 		TimeMixin:     orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}).Error
-	if rdb != nil {
-		_ = setChatStatus(context.Background(), rdb, convID, historyID, "completed", stripToolTags(primaryText))
-		_ = setChatStatus(context.Background(), rdb, convID, secondaryHistoryID, "completed", stripToolTags(secondaryText))
+	if stateStore != nil {
+		_ = setChatStatus(context.Background(), stateStore, convID, historyID, "completed", stripToolTags(primaryText))
+		_ = setChatStatus(context.Background(), stateStore, convID, secondaryHistoryID, "completed", stripToolTags(secondaryText))
 	}
 	db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
 	if !target.IsRegeneration {
@@ -1150,7 +1150,7 @@ dualPersist:
 func handleTaskCreated(
 	chatCtx context.Context,
 	db *gorm.DB,
-	rdb *redis.Client,
+	stateStore state.Store,
 	convID, historyID, userID string,
 	ev *TaskCreatedEvent,
 	llmConfig map[string]any,
@@ -1162,7 +1162,7 @@ func handleTaskCreated(
 
 	// Plugin Step path — handled separately.
 	if ev.AgentType == "plugin_step" {
-		return handlePluginStepCreated(chatCtx, db, rdb, convID, historyID, userID, ev, llmConfig, toolConfig)
+		return handlePluginStepCreated(chatCtx, db, stateStore, convID, historyID, userID, ev, llmConfig, toolConfig)
 	}
 	mode := ev.Mode
 	if mode != "auto" && mode != "manual" {
@@ -1178,10 +1178,10 @@ func handleTaskCreated(
 		existing, getErr := subagent.GetTask(chatCtx, db, ev.TaskID)
 		if getErr == nil && existing != nil {
 			_ = subagent.UpdateStatus(chatCtx, db, existing.ID, subagent.StatusRunning)
-			_ = subagent.WriteStatus(chatCtx, rdb, existing.ID, map[string]any{
+			_ = subagent.WriteStatus(chatCtx, stateStore, existing.ID, map[string]any{
 				"status": subagent.StatusRunning, "progress": existing.ProgressPct,
 			})
-			go subagent.Run(context.Background(), db, rdb, subagent.RunRequest{
+			go subagent.Run(context.Background(), db, stateStore, subagent.RunRequest{
 				TaskID:        existing.ID,
 				AgentType:     existing.AgentType,
 				Params:        ev.Params,
@@ -1221,11 +1221,11 @@ func handleTaskCreated(
 		fmt.Println("[Core] [SUBAGENT_CREATE_TASK_FAILED] err=", err)
 		return nil
 	}
-	_ = subagent.WriteStatus(chatCtx, rdb, task.ID, map[string]any{
+	_ = subagent.WriteStatus(chatCtx, stateStore, task.ID, map[string]any{
 		"status": subagent.StatusPending, "progress": 0,
 	})
 
-	go subagent.Run(context.Background(), db, rdb, subagent.RunRequest{
+	go subagent.Run(context.Background(), db, stateStore, subagent.RunRequest{
 		TaskID:        task.ID,
 		AgentType:     ev.AgentType,
 		Params:        ev.Params,
@@ -1252,7 +1252,7 @@ func handleTaskCreated(
 func handlePluginStepCreated(
 	ctx context.Context,
 	db *gorm.DB,
-	rdb *redis.Client,
+	stateStore state.Store,
 	convID, historyID, userID string,
 	ev *TaskCreatedEvent,
 	llmConfig map[string]any,
@@ -1283,7 +1283,7 @@ func handlePluginStepCreated(
 	}
 
 	sessionID, taskID, err := plugin.HandlePluginStepCreated(
-		ctx, db, rdb, convID, historyID, userID,
+		ctx, db, stateStore, convID, historyID, userID,
 		ev.TaskID, ev.Title, ev.Objective,
 		params,
 		ev.InputArtifactKeys, ev.OutputArtifactKeys,
