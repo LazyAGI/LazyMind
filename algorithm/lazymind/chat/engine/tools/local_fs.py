@@ -44,8 +44,7 @@ class LocalFSToolGroup:
     # ── activation / path helpers ───────────────────────────────────────
 
     def _get_allowed_paths(self) -> List[str]:
-        paths = lazyllm.globals['agentic_config'].get('localfs_paths')
-        return [paths] if isinstance(paths, str) else paths
+        return lazyllm.globals['agentic_config'].get('localfs_paths', [])
 
     def __key_source__(self) -> Any:
         return self._get_allowed_paths()
@@ -62,7 +61,7 @@ class LocalFSToolGroup:
             base = os.path.abspath(base)
             if target == base or target.startswith(base + os.sep):
                 return target
-        raise PermissionError(f'路径 {target} 不在允许范围内: {allowed}')
+        raise PermissionError(f'Path {target} is not within allowed paths: {allowed}')
 
     def _resolve_dir(self, path: Optional[str]) -> str:
         """Resolve *path* to a directory within the whitelist.
@@ -79,7 +78,7 @@ class LocalFSToolGroup:
             return os.path.abspath(allowed[0])
         resolved = self._resolve(str(path))
         if not os.path.isdir(resolved):
-            raise ValueError(f'路径不是目录: {path}')
+            raise ValueError(f'Path is not a directory: {path}')
         return resolved
 
     # ── ripgrep helpers ─────────────────────────────────────────────────
@@ -99,11 +98,11 @@ class LocalFSToolGroup:
 
     @handle_tool_errors
     def glob(self, pattern: str, path: Optional[str] = None) -> Dict[str, Any]:
-        """在允许的路径内按 glob 模式匹配文件。
+        """Match files by glob pattern within allowed paths.
 
         Args:
-            pattern: glob 模式，如 ``**/*.py``、``*.md``。
-            path: 搜索起始目录，默认使用白名单中的第一个目录。
+            pattern: Glob pattern, e.g. ``**/*.py``, ``*.md``.
+            path: Search root directory; defaults to the first allowed path.
 
         Returns:
             dict with ``pattern``, ``path``, ``match_count``, ``matches``.
@@ -133,13 +132,14 @@ class LocalFSToolGroup:
         glob: str = '*',
         max_results: int = 50,
     ) -> Dict[str, Any]:
-        """在允许的路径内递归搜索文件内容。
+        """Recursively search file contents within allowed paths.
 
         Args:
-            pattern: 正则表达式搜索模式（ripgrep 默认正则，Python 回退也支持）。
-            path: 搜索起始目录，默认使用白名单中的第一个目录。
-            glob: 文件名过滤（仅搜索匹配的文件），默认 ``*``。
-            max_results: 最大返回结果数，默认 50。
+            pattern: Regex search pattern (ripgrep dialect by default; Python
+                fallback also supported).
+            path: Search root directory; defaults to the first allowed path.
+            glob: Filename filter (only search matching files), default ``*``.
+            max_results: Maximum results to return, default 50.
 
         Returns:
             dict with ``pattern``, ``path``, ``match_count``, ``matches``.
@@ -156,7 +156,7 @@ class LocalFSToolGroup:
         try:
             proc = self._run_rg(args, cwd=safe_dir)
         except subprocess.TimeoutExpired:
-            return tool_error('grep', f'搜索超时（>{_RG_TIMEOUT}s）', error_type='Timeout')
+            return tool_error('grep', f'Search timed out (>{_RG_TIMEOUT}s)', error_type='Timeout')
 
         matches: List[Dict[str, Any]] = []
         for line in proc.stdout.splitlines():
@@ -193,7 +193,7 @@ class LocalFSToolGroup:
         try:
             regex = re.compile(pattern)
         except re.error as exc:
-            return tool_error('grep', f'无效的正则表达式: {exc}')
+            return tool_error('grep', f'Invalid regex: {exc}')
 
         matches: List[Dict[str, Any]] = []
         for root, _dirs, files in os.walk(safe_dir):
@@ -235,12 +235,12 @@ class LocalFSToolGroup:
         start_line: int = 0,
         max_lines: int = 500,
     ) -> Dict[str, Any]:
-        """读取允许范围内的文本文件内容。
+        """Read text file contents within allowed paths.
 
         Args:
-            filepath: 文件路径（必须在白名单内）。
-            start_line: 起始行号（0-based），默认 0。
-            max_lines: 最大读取行数，默认 500。
+            filepath: File path (must be within the whitelist).
+            start_line: Starting line number (0-based), default 0.
+            max_lines: Maximum lines to read, default 500.
 
         Returns:
             dict with ``filepath``, ``total_lines``, ``start_line``,
@@ -248,13 +248,13 @@ class LocalFSToolGroup:
         """
         safe_path = self._resolve(filepath)
         if not os.path.isfile(safe_path):
-            return tool_error('read', f'文件不存在: {filepath}')
+            return tool_error('read', f'File not found: {filepath}')
 
         try:
             with open(safe_path, 'r', encoding='utf-8', errors='replace') as fh:
                 lines = fh.readlines()
         except (OSError, PermissionError) as exc:
-            return tool_error('read', f'无法读取文件: {exc}')
+            return tool_error('read', f'Cannot read file: {exc}')
 
         total = len(lines)
         chunk = lines[start_line:start_line + max_lines]
@@ -271,10 +271,11 @@ class LocalFSToolGroup:
 
     @handle_tool_errors
     def info(self, path: Optional[str] = None) -> Dict[str, Any]:
-        """获取文件或目录的元信息。
+        """Get metadata for a file or directory.
 
         Args:
-            path: 路径（必须在白名单内），默认使用白名单中的第一个路径。
+            path: Path (must be within the whitelist); defaults to the first
+                allowed path.
 
         Returns:
             dict with ``path``, ``type``, ``size``, ``mtime``.
@@ -288,7 +289,7 @@ class LocalFSToolGroup:
         try:
             st = os.stat(safe_path)
         except OSError as exc:
-            return tool_error('info', f'无法获取文件信息: {exc}')
+            return tool_error('info', f'Cannot get file info: {exc}')
 
         return tool_success('info', {
             'path': safe_path,
