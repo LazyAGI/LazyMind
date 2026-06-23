@@ -322,7 +322,7 @@ func consumeMessageStream(db *gorm.DB, session *activeMessageStream, threadID st
 
 		taskID := ""
 		if payload != nil {
-			taskID = extractStringByExactKeys(payload, "task_id", "current_task_id")
+			taskID = extractStringByKeys(payload, "task_id", "current_task_id")
 		}
 		logUpstreamSSEData(":messages", threadID, session.roundID, taskID, frame.Event, rawData)
 		if delta := extractAssistantTextFromFrameData(rawData); delta != "" {
