@@ -604,7 +604,7 @@ class TaskQueryDB:
                 task_rows = conn.execute(
                     text(
                         'SELECT id, title, agent_type, status, progress_pct, current_phase, '
-                        '       summary, seq_in_conversation, output_artifact_keys '
+                        '       summary, seq_in_conversation, output_artifact_keys, params '
                         'FROM sub_agent_tasks '
                         'WHERE conversation_id = :conv_id '
                         'ORDER BY seq_in_conversation ASC'
@@ -667,8 +667,84 @@ class TaskQueryDB:
                 'seq_in_conversation': r['seq_in_conversation'],
                 'output_artifact_keys': out_keys or [],
                 'artifacts': arts_by_task.get(r['id'], []),
+                'params': r['params'],
             })
         return tasks
+
+    def _rows_to_artifact_summary(self, rows: List[Dict[str, Any]], order_field: str = 'sort_order',
+                                  is_human_field: Optional[str] = 'is_human') -> List[str]:
+        from collections import defaultdict
+        key_items: Dict[str, List[tuple]] = defaultdict(list)
+        key_content_type: Dict[str, str] = {}
+        for r in rows:
+            key = r.get('artifact_key', '')
+            if not key:
+                continue
+            ct = r.get('content_type') or ''
+            value = r.get('value') or {}
+            order = r.get(order_field) or 1
+            is_human = bool(r.get(is_human_field)) if is_human_field else False
+            key_items[key].append((order, ct, value, is_human))
+            if ct and key not in key_content_type:
+                key_content_type[key] = ct
+        return format_artifact_summary(key_items, key_content_type)
+
+    def format_plugin_session_artifacts(self, session_id: str) -> List[str]:
+        rows = self.load_selected_slot_artifacts_resolved_with_order(session_id)
+        return self._rows_to_artifact_summary(rows) if rows else []
+
+    def format_task_artifacts(self, task_ids: List[str]) -> List[str]:
+        rows = self.load_artifacts_for_tasks(task_ids)
+        return self._rows_to_artifact_summary(rows, order_field='seq', is_human_field=None) if rows else []
+
+    def build_chat_agent_task_context(self, conv_id: str) -> str:
+        """Build the ## Tasks system-prompt section for ChatAgent.
+
+        For each terminal task in the conversation:
+        - plugin_step → format_plugin_session_artifacts (plugin_slot_revisions)
+        - ordinary    → format_task_artifacts (sub_agent_artifacts)
+        Returns '' on any error or when there is nothing to show.
+        """
+        try:
+            tasks = self.list_tasks_by_conversation(conv_id)
+        except Exception:
+            return ''
+        if not tasks:
+            return ''
+        terminal = {'succeeded', 'failed', 'interrupted'}
+        lines = ['## Tasks']
+        for t in tasks:
+            status = str(t.get('status') or '')
+            if status not in terminal:
+                continue
+            seq = t.get('seq_in_conversation', '')
+            title = str(t.get('title') or '')
+            task_ref = f'{seq}. {title}' if seq else title
+            summary = str(t.get('summary') or '').strip()
+            status_label = {'succeeded': 'done', 'failed': 'failed',
+                            'interrupted': 'interrupted'}.get(status, status)
+            header = f'- Task {task_ref} [{status_label}]'
+            if summary:
+                header += f': {summary}'
+            lines.append(header)
+
+            agent_type = str(t.get('agent_type') or '')
+            if agent_type == 'plugin_step':
+                raw_params = t.get('params') or {}
+                if isinstance(raw_params, str):
+                    try:
+                        raw_params = json.loads(raw_params)
+                    except Exception:
+                        raw_params = {}
+                session_id = str(raw_params.get('session_id') or '').strip()
+                art_lines = self.format_plugin_session_artifacts(session_id) if session_id else []
+            else:
+                art_lines = self.format_task_artifacts([t['id']])
+            lines.extend(f'  {ln}' for ln in art_lines)
+
+        if len(lines) == 1:
+            return ''
+        return '\n'.join(lines)
 
     def load_plugin_session_slot_summary(self, session_id: str) -> List[Dict[str, Any]]:
         """Return selected slot artifacts for a plugin session, resolved with sort_order.
@@ -772,3 +848,65 @@ class TaskQueryDB:
                 'is_human': is_human,
             })
         return out
+
+
+# ---------------------------------------------------------------------------
+# Shared artifact formatting utilities
+# Used by both SubAgent (runner.py) and ChatAgent (plugin_manager.py).
+# ---------------------------------------------------------------------------
+
+_ARTIFACT_SUMMARY_LIMIT = 200  # chars for inline text/json preview
+
+
+def artifact_summary_line(value: Any, content_type: Optional[str], is_human: bool) -> str:
+    """Return a one-line summary for a single artifact value."""
+    suffix = ' (by user)' if is_human else ''
+    ct = (content_type or '').lower()
+    if ct in ('image', 'file', 'file_list'):
+        if isinstance(value, dict):
+            name = value.get('filename') or value.get('path', '').split('/')[-1] or '(file)'
+            caption = value.get('caption') or ''
+            label = f'{name} — {caption}' if caption else name
+        else:
+            label = str(value)
+        return f'{label}{suffix}'
+    # text / json — inline preview
+    if isinstance(value, dict):
+        text_val = value.get('text') or ''
+        if not text_val and 'data' in value:
+            text_val = json.dumps(value['data'], ensure_ascii=False)
+        if not text_val:
+            text_val = json.dumps(value, ensure_ascii=False)
+    else:
+        text_val = str(value) if value else ''
+    if len(text_val) <= _ARTIFACT_SUMMARY_LIMIT:
+        return f'{text_val}{suffix}'
+    return f'{text_val[:_ARTIFACT_SUMMARY_LIMIT]}...{suffix} (use get_artifact to read full content)'
+
+
+def format_artifact_summary(
+    key_items: Dict[str, List[tuple]],
+    key_content_type: Dict[str, str],
+) -> List[str]:
+    """Format collected artifact items into summary block lines.
+
+    Each tuple in key_items[key] is (sort_order, content_type, value, is_human).
+    Returns a list of lines starting with an 'Available artifacts' header.
+    """
+    lines = ['Available artifacts (use get_artifact to retrieve content):']
+    for key in sorted(key_items.keys()):
+        items = sorted(key_items[key], key=lambda t: t[0])
+        ct_label = key_content_type.get(key, 'unknown')
+        count = len(items)
+        if count > 1:
+            header = f'- "{key}" [{ct_label}, {count} items]:'
+        else:
+            header = f'- "{key}" [{ct_label}]:'
+        lines.append(header)
+        for sort_order, ct, value, is_human in items:
+            summary = artifact_summary_line(value, ct, is_human)
+            if count > 1:
+                lines.append(f'    [{sort_order}] {summary}')
+            else:
+                lines.append(f'    {summary}')
+    return lines

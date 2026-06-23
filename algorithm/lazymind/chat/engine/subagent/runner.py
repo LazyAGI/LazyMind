@@ -21,33 +21,7 @@ from .db import SubAgentDB
 from . import tools as subagent_tools
 
 
-_ARTIFACT_SUMMARY_LIMIT = 200  # chars for inline text/json preview
-
-
-def _artifact_summary_line(value: Any, content_type: Optional[str], is_human: bool) -> str:
-    """Return a one-line summary for a single artifact value."""
-    suffix = ' (by user)' if is_human else ''
-    ct = (content_type or '').lower()
-    if ct in ('image', 'file', 'file_list'):
-        if isinstance(value, dict):
-            name = value.get('filename') or os.path.basename(value.get('path', '')) or '(file)'
-            caption = value.get('caption') or ''
-            label = f'{name} — {caption}' if caption else name
-        else:
-            label = str(value)
-        return f'{label}{suffix}'
-    # text / json — inline preview
-    if isinstance(value, dict):
-        text_val = value.get('text') or ''
-        if not text_val and 'data' in value:
-            text_val = json.dumps(value['data'], ensure_ascii=False)
-        if not text_val:
-            text_val = json.dumps(value, ensure_ascii=False)
-    else:
-        text_val = str(value) if value else ''
-    if len(text_val) <= _ARTIFACT_SUMMARY_LIMIT:
-        return f'{text_val}{suffix}'
-    return f'{text_val[:_ARTIFACT_SUMMARY_LIMIT]}...{suffix} (use get_artifact to read full content)'
+_ZH_RE = re.compile(r'[\u4e00-\u9fff]')
 
 
 def _build_artifact_context_section(
@@ -69,106 +43,19 @@ def _build_artifact_context_section(
     session_id: str = params.get('session_id', '')
 
     if session_id:
-        return _build_plugin_artifact_section(ctx, db, session_id)
+        return db.format_plugin_session_artifacts(session_id)
 
     if ctx.input_artifact_keys:
-        return _build_subagent_artifact_section(ctx, db)
+        steps = db.load_plugin_session_steps(session_id) if session_id else []
+        succeeded_task_ids = [
+            s['task_id'] for s in steps
+            if s.get('status') == 'succeeded' and s.get('task_id')
+        ]
+        if not succeeded_task_ids:
+            return []
+        return db.format_task_artifacts(succeeded_task_ids)
 
     return []
-
-
-def _build_plugin_artifact_section(
-    ctx: 'SubAgentContext', db: 'SubAgentDB', session_id: str
-) -> List[str]:
-    """Build artifact summary from plugin_slot_revisions for a plugin session."""
-    resolved_rows = db.load_selected_slot_artifacts_resolved_with_order(session_id)
-    if not resolved_rows:
-        return []
-
-    from collections import defaultdict
-    key_items: Dict[str, List[tuple]] = defaultdict(list)
-    key_content_type: Dict[str, str] = {}
-
-    for r in resolved_rows:
-        artifact_key = r.get('artifact_key', '')
-        sort_order = r.get('sort_order') or 1
-        ct = r.get('content_type') or ''
-        value = r.get('value') or {}
-        is_human = bool(r.get('is_human'))
-        key_items[artifact_key].append((sort_order, ct, value, is_human))
-        if ct and artifact_key not in key_content_type:
-            key_content_type[artifact_key] = ct
-
-    if not key_items:
-        return []
-
-    return _format_artifact_summary(key_items, key_content_type)
-
-
-def _build_subagent_artifact_section(
-    ctx: 'SubAgentContext', db: 'SubAgentDB'
-) -> List[str]:
-    """Build artifact summary from sub_agent_artifacts for ordinary SubAgent tasks."""
-    params = ctx.params
-    session_id: str = params.get('session_id', '')
-    try:
-        steps = db.load_plugin_session_steps(session_id) if session_id else []
-    except Exception:
-        steps = []
-    succeeded_task_ids = [
-        s['task_id'] for s in steps
-        if s.get('status') == 'succeeded' and s.get('task_id')
-    ]
-    if not succeeded_task_ids:
-        return []
-
-    artifacts = db.load_artifacts_for_tasks(succeeded_task_ids)
-    if not artifacts:
-        return []
-
-    from collections import defaultdict
-    key_items: Dict[str, List[tuple]] = defaultdict(list)
-    key_content_type: Dict[str, str] = {}
-
-    for a in artifacts:
-        key = a.get('artifact_key', '')
-        if not key or (ctx.input_artifact_keys and key not in ctx.input_artifact_keys):
-            continue
-        seq = a.get('seq', 0)
-        ct = a.get('content_type', '')
-        value = a.get('value') or {}
-        key_items[key].append((seq, ct, value, False))
-        if ct and key not in key_content_type:
-            key_content_type[key] = ct
-
-    if not key_items:
-        return []
-
-    return _format_artifact_summary(key_items, key_content_type)
-
-
-def _format_artifact_summary(
-    key_items: Dict[str, List[tuple]],
-    key_content_type: Dict[str, str],
-) -> List[str]:
-    """Format collected artifact items into the summary block lines."""
-    lines = ['Available artifacts (use get_artifact to retrieve content):']
-    for key in sorted(key_items.keys()):
-        items = sorted(key_items[key], key=lambda t: t[0])
-        ct_label = key_content_type.get(key, 'unknown')
-        count = len(items)
-        if count > 1:
-            header = f'- "{key}" [{ct_label}, {count} items]:'
-        else:
-            header = f'- "{key}" [{ct_label}]:'
-        lines.append(header)
-        for sort_order, ct, value, is_human in items:
-            summary = _artifact_summary_line(value, ct, is_human)
-            if count > 1:
-                lines.append(f'    [{sort_order}] {summary}')
-            else:
-                lines.append(f'    {summary}')
-    return lines
 
 
 def _resolve_plugin_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
@@ -222,7 +109,8 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
     of this list — they are injected as mandatory base tools in _build_subagent_tools.
     Names of base tools in the explicit list are silently ignored (already present).
     """
-    _BASE_TOOL_NAMES = {'save_artifact', 'get_artifact', 'list_artifacts', 'list_knowledge_bases', 'read_user_attachment'}
+    _BASE_TOOL_NAMES = {'save_artifact', 'get_artifact', 'list_artifacts',
+                        'list_knowledge_bases', 'read_user_attachment'}
     if explicit:
         name_list = [str(n).strip() for n in explicit if str(n).strip() and str(n).strip() not in _BASE_TOOL_NAMES]
         # Build lookup from DEFAULT_TOOLS

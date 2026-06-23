@@ -368,7 +368,14 @@ function SortableImageList({
 
   const handleDragStart = useCallback((idx: number, e: React.DragEvent) => {
     e.stopPropagation();
+    // Mark as internal sort drag so outer file-upload listeners can ignore it.
+    e.dataTransfer.setData('application/x-plugin-sort', String(idx));
+    e.dataTransfer.effectAllowed = 'move';
     dragSrcIdx.current = idx;
+  }, []);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.stopPropagation();
   }, []);
 
   // Compute which gap the pointer is closest to based on the drag position
@@ -434,6 +441,7 @@ function SortableImageList({
     <div
       className={`plugin-panel__image-list${isDraggable ? ' plugin-panel__image-list--sortable' : ''}`}
       onDragLeave={isDraggable ? handleContainerDragLeave : undefined}
+      onDragEnter={isDraggable ? handleDragEnter : undefined}
     >
       {/* Insert indicator before first item */}
       {isDraggable && (
@@ -447,6 +455,7 @@ function SortableImageList({
             <div
               draggable={isDraggable}
               onDragStart={isDraggable ? (e) => handleDragStart(idx, e) : undefined}
+              onDragEnter={isDraggable ? handleDragEnter : undefined}
               onDragOver={isDraggable ? (e) => handleDragOver(e, idx) : undefined}
               onDrop={isDraggable ? (e) => handleDrop(e, idx) : undefined}
               onDragEnd={isDraggable ? handleDragEnd : undefined}
