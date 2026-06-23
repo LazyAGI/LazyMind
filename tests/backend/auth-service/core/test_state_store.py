@@ -34,17 +34,17 @@ def test_sqlite_state_store_zset_window(tmp_path):
 def test_state_backend_prefers_lazymind_config(monkeypatch):
     package = types.ModuleType('lazymind')
     config_module = types.ModuleType('lazymind.config')
-    config_module.config = {'backend': 'sqlite'}
+    config_module.config = {'state_backend': 'sqlite'}
     monkeypatch.setitem(sys.modules, 'lazymind', package)
     monkeypatch.setitem(sys.modules, 'lazymind.config', config_module)
-    monkeypatch.setenv(state_store_module.BACKEND_ENV, 'redis')
+    monkeypatch.setenv(state_store_module.STATE_BACKEND_ENV, 'redis')
 
     assert state_store_module.state_backend() == 'sqlite'
 
 
 def test_state_backend_falls_back_to_env_when_lazymind_config_unavailable(monkeypatch):
     monkeypatch.delitem(sys.modules, 'lazymind.config', raising=False)
-    monkeypatch.setenv(state_store_module.BACKEND_ENV, ' sqlite ')
+    monkeypatch.setenv(state_store_module.STATE_BACKEND_ENV, ' sqlite ')
 
     assert state_store_module.state_backend() == 'sqlite'
 

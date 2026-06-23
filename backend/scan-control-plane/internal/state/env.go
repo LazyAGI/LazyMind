@@ -6,14 +6,14 @@ import (
 )
 
 const (
-	BackendRedis  = "redis"
-	BackendSQLite = "sqlite"
+	StateBackendRedis  = "redis"
+	StateBackendSQLite = "sqlite"
 )
 
-func BackendFromEnv() string {
-	backend := strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_STATE_BACKEND")))
-	if backend == "" {
-		return BackendRedis
+func StateBackendFromEnv() string {
+	stateBackend := strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_STATE_BACKEND")))
+	if stateBackend == "" {
+		return StateBackendRedis
 	}
-	return backend
+	return stateBackend
 }

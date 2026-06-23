@@ -428,8 +428,8 @@ func buildFeishuClients(cfg config.Config) (feishu.AuthConnectionClient, feishu.
 }
 
 func buildTargetSearchCacheStore(cfg config.Config) (tree.TargetSearchCacheStore, error) {
-	switch scanstate.BackendFromEnv() {
-	case scanstate.BackendSQLite:
+	switch scanstate.StateBackendFromEnv() {
+	case scanstate.StateBackendSQLite:
 		if strings.TrimSpace(cfg.RedisURL) != "" {
 			return nil, fmt.Errorf("redis url must not be configured when LAZYMIND_STATE_BACKEND=sqlite")
 		}
@@ -438,7 +438,7 @@ func buildTargetSearchCacheStore(cfg config.Config) (tree.TargetSearchCacheStore
 			return nil, fmt.Errorf("configure target search cache state sqlite: %w", err)
 		}
 		return tree.NewStateTargetSearchCacheStore(sqliteStore), nil
-	case scanstate.BackendRedis:
+	case scanstate.StateBackendRedis:
 		redisURL := strings.TrimSpace(cfg.RedisURL)
 		if redisURL == "" {
 			return nil, nil
@@ -449,7 +449,7 @@ func buildTargetSearchCacheStore(cfg config.Config) (tree.TargetSearchCacheStore
 		}
 		return tree.NewStateTargetSearchCacheStore(redisStore), nil
 	default:
-		return nil, fmt.Errorf("unsupported target search cache state backend %q", scanstate.BackendFromEnv())
+		return nil, fmt.Errorf("unsupported target search cache state backend %q", scanstate.StateBackendFromEnv())
 	}
 }
 

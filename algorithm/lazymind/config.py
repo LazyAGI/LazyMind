@@ -77,7 +77,7 @@ config.add('algo_id', str, 'general_algo', 'ALGO_ID', description='LazyMind algo
 # entrypoint and the router entrypoint can read it without cross-importing router config.
 config.add('enable_router', bool, False, 'ENABLE_ROUTER',
            description='Enable router mode. When false, app.py falls back to the original chat service.')
-config.add('backend', str, 'redis', 'STATE_BACKEND',
+config.add('state_backend', str, 'redis', 'STATE_BACKEND',
            description='Short-lived state backend: redis or sqlite.')
 # Marks a process as a router-spawned child that only serves proxied request types
 # (chat / subagent). Set automatically by ProcessManager when spawning children.

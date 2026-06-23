@@ -7,7 +7,7 @@ from typing import Protocol
 
 from core.redis_client import redis_client
 
-BACKEND_ENV = 'LAZYMIND_STATE_BACKEND'
+STATE_BACKEND_ENV = 'LAZYMIND_STATE_BACKEND'
 SQLITE_DIR_ENV = 'LAZYMIND_STATE_SQLITE_DIR'
 SQLITE_PATH_ENV = 'LAZYMIND_STATE_SQLITE_PATH'
 _STORE_LOCK = threading.Lock()
@@ -164,7 +164,7 @@ def _sqlite_path() -> str:
 
 
 def state_backend() -> str:
-    return (_lazymind_config_value('backend') or os.environ.get(BACKEND_ENV) or 'redis').strip().lower() or 'redis'
+    return (_lazymind_config_value('state_backend') or os.environ.get(STATE_BACKEND_ENV) or 'redis').strip().lower() or 'redis'
 
 
 def state_store() -> StateStore:

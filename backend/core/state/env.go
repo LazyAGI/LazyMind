@@ -6,21 +6,21 @@ import (
 )
 
 const (
-	BackendRedis  = "redis"
-	BackendSQLite = "sqlite"
+	StateBackendRedis  = "redis"
+	StateBackendSQLite = "sqlite"
 )
 
-func BackendFromEnv() string {
-	backend := strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_STATE_BACKEND")))
-	if backend == "" {
-		return BackendRedis
+func StateBackendFromEnv() string {
+	stateBackend := strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_STATE_BACKEND")))
+	if stateBackend == "" {
+		return StateBackendRedis
 	}
-	return backend
+	return stateBackend
 }
 
 func MustFromEnv() Store {
-	switch BackendFromEnv() {
-	case BackendSQLite:
+	switch StateBackendFromEnv() {
+	case StateBackendSQLite:
 		return MustSQLiteFromEnv()
 	default:
 		return MustRedisFromEnv()
@@ -28,5 +28,5 @@ func MustFromEnv() Store {
 }
 
 func IsSQLiteMode() bool {
-	return BackendFromEnv() == BackendSQLite
+	return StateBackendFromEnv() == StateBackendSQLite
 }
