@@ -554,6 +554,18 @@ export function SlotImage({
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Reset caption editing state when a different slot item is mapped to this component instance
+  // (e.g. after drag-reorder, the same React node may receive a new slot via props).
+  const prevListIndexRef = useRef(slot.list_index);
+  useEffect(() => {
+    if (prevListIndexRef.current !== slot.list_index) {
+      prevListIndexRef.current = slot.list_index;
+      setCaptionEditing(false);
+      setCaptionDraft('');
+      setConfirmDelete(false);
+    }
+  }, [slot.list_index]);
+
   const handleUploadClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     fileInputRef.current?.click();
@@ -1111,19 +1123,42 @@ export function AddSlotItemButton({ sessionId, slotId, slotType, onCreated }: Ad
   const [textValue, setTextValue] = useState('');
   const [caption, setCaption] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isFileBased = slotType === 'image' || slotType === 'file';
 
   const handleOpen = () => {
+    if (isFileBased) {
+      // For image/file slots, open the native file picker directly — no modal needed.
+      fileInputRef.current?.click();
+      return;
+    }
     setTextValue('');
     setCaption('');
     setOpen(true);
   };
 
-  const handleSubmit = async () => {
-    if (slotType === 'text' && !textValue.trim()) return;
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
     setSubmitting(true);
     try {
-      const value = slotType === 'text' ? { text: textValue } : { text: textValue };
-      await createSlotItem(sessionId, slotId, value, caption || undefined);
+      const storedPath = await uploadFileInChunks(file);
+      await createSlotItem(sessionId, slotId, { path: storedPath }, undefined, undefined, slotType);
+      onCreated?.();
+    } catch {
+      // upload failure — no-op
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!textValue.trim()) return;
+    setSubmitting(true);
+    try {
+      await createSlotItem(sessionId, slotId, { text: textValue }, caption || undefined, undefined, 'text');
       setOpen(false);
       onCreated?.();
     } finally {
@@ -1138,13 +1173,25 @@ export function AddSlotItemButton({ sessionId, slotId, slotType, onCreated }: Ad
 
   return (
     <>
+      {/* Hidden file input for image/file slots */}
+      {isFileBased && (
+        <input
+          ref={fileInputRef}
+          type='file'
+          accept={slotType === 'image' ? 'image/*' : undefined}
+          style={{ display: 'none' }}
+          onChange={handleFileChange}
+          aria-hidden='true'
+        />
+      )}
       <button
         className='plugin-slot__add-btn'
         onClick={handleOpen}
+        disabled={submitting}
         title='添加条目'
         aria-label='添加条目'
       >
-        +
+        {submitting ? '…' : '+'}
       </button>
       {open && (
         <div
@@ -1174,11 +1221,6 @@ export function AddSlotItemButton({ sessionId, slotId, slotType, onCreated }: Ad
                   autoFocus
                   aria-label='条目内容'
                 />
-              )}
-              {(slotType === 'image' || slotType === 'file') && (
-                <p className='plugin-slot__modal-hint'>
-                  请先上传文件，将 stored_path 填入下方（或使用文件上传流程）。
-                </p>
               )}
               <input
                 className='plugin-slot__modal-caption'

@@ -244,7 +244,11 @@ def group_is_active(cfg: ToolGroupConfig) -> bool:
         return False
     if cfg.instance is None:
         return True
-    return _instance_is_active(cfg.instance)
+    result = _instance_is_active(cfg.instance)
+    if cfg.name == 'kb':
+        from lazyllm import LOG as _LOG
+        _LOG.info(f'[KBToolGroup_DEBUG] group_is_active kb={result!r}')
+    return result
 
 
 def get_all_tool_groups() -> list[dict]:

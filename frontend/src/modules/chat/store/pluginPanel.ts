@@ -226,7 +226,7 @@ interface PluginStore {
   rollbackSlotItem: (sessionId: string, slotId: string, sortOrder: number, revision: number) => Promise<void>;
   loadSlotOrder: (sessionId: string, slotId: string) => Promise<SlotOrderInfo>;
   // Phase 4: new item creation and caption editing.
-  createSlotItem: (sessionId: string, slotId: string, value: any, caption?: string, insertBefore?: number) => Promise<void>;
+  createSlotItem: (sessionId: string, slotId: string, value: any, caption?: string, insertBefore?: number, contentType?: string) => Promise<void>;
   patchSlotCaption: (sessionId: string, slotId: string, sortOrder: number, caption: string) => Promise<void>;
   // Track focused tab and sort_order for the AI.
   setFocusedTab: (conversationId: string, tabId: string) => void;
@@ -390,8 +390,8 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
     await PluginSessionApi().rollbackSlotItem(sessionId, slotId, sortOrder, revision);
   },
 
-  createSlotItem: async (sessionId, slotId, value, caption, insertBefore) => {
-    await PluginSessionApi().createSlotItem(sessionId, slotId, value, caption, insertBefore);
+  createSlotItem: async (sessionId, slotId, value, caption, insertBefore, contentType) => {
+    await PluginSessionApi().createSlotItem(sessionId, slotId, value, caption, insertBefore, contentType);
   },
 
   patchSlotCaption: async (sessionId, slotId, sortOrder, caption) => {

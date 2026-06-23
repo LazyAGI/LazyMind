@@ -487,7 +487,6 @@ def resolve_plugin_injection(
                 'plugin_step': p_current_step,
                 'focused_tab': plugin_context.get('focused_tab'),
                 'focused_sort_order': plugin_context.get('focused_sort_order'),
-                'visible_sort_order_map': plugin_context.get('visible_sort_order_map'),
             }
             sm = plugin_loader.get_state_machine(p_plugin_id)
 

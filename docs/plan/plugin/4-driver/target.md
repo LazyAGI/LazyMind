@@ -41,3 +41,5 @@
 用户的意图和约束项（全局，每个step，约束发生变更的识别），约束的展示
 每一次ChatAgent和SubAgent如何知道该取哪些附件
 遇到用户的意图缺失，或者需要向用户问询的，如何产生ask(auto模式不ask，manual模式可能ask)
+
+subagent = auto / manual / never, never时候关闭插件机制

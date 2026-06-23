@@ -200,10 +200,10 @@ export function PluginSessionApi() {
         options,
       );
     },
-    createSlotItem(sessionId: string, slotId: string, value: any, caption?: string, insertBefore?: number, options?: RawAxiosRequestConfig) {
+    createSlotItem(sessionId: string, slotId: string, value: any, caption?: string, insertBefore?: number, contentType?: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.post(
         `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items`,
-        { value, ...(caption !== undefined ? { caption } : {}), ...(insertBefore !== undefined ? { insert_before: insertBefore } : {}) },
+        { value, ...(caption !== undefined ? { caption } : {}), ...(insertBefore !== undefined ? { insert_before: insertBefore } : {}), ...(contentType ? { content_type: contentType } : {}) },
         options,
       );
     },

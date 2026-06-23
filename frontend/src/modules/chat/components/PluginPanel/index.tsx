@@ -518,10 +518,12 @@ function TabSlotGrid({
 }) {
   const addFileInputRef = useRef<HTMLInputElement>(null);
   const addingSlotIdRef = useRef<string>('');
+  const addingSlotTypeRef = useRef<string>('');
   const { createSlotItem } = usePluginStore();
 
-  const handleAddItem = useCallback((slotId: string) => {
+  const handleAddItem = useCallback((slotId: string, slotType: string) => {
     addingSlotIdRef.current = slotId;
+    addingSlotTypeRef.current = slotType;
     addFileInputRef.current?.click();
   }, []);
 
@@ -531,9 +533,11 @@ function TabSlotGrid({
     if (!file) return;
     const slotId = addingSlotIdRef.current;
     if (!slotId) return;
+    const slotType = addingSlotTypeRef.current;
+    const ct = slotType === 'image' ? 'image' : slotType === 'file' ? 'file' : undefined;
     try {
       const storedPath = await uploadFileInChunks(file);
-      await createSlotItem(session.session_id, slotId, { path: storedPath }, file.name);
+      await createSlotItem(session.session_id, slotId, { path: storedPath }, file.name, undefined, ct);
       onRefresh?.();
     } catch {
       // upload failure — no-op
@@ -589,7 +593,7 @@ function TabSlotGrid({
                 onRefresh={onRefresh}
                 onReference={onReference}
                 onFocusSortOrder={onFocusSortOrder}
-                onAddItem={() => handleAddItem(slotDef.id)}
+                onAddItem={() => handleAddItem(slotDef.id, slotDef.type)}
               />
             ) : (
               revisions.map((rev) => (

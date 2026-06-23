@@ -1115,22 +1115,30 @@ func PatchSlotCaption(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "slot revision not found", http.StatusNotFound)
 		return
 	}
-	// Locate the sub_agent_artifact row matching the revision's task and artifact_key.
-	// For list slots, also match list_index embedded in value JSON.
-	var step orm.PluginSessionStep
-	if err := db.WithContext(ctx).
-		Where("session_id = ? AND step_id = ? AND attempt = ?", sessionID, rev.StepID, rev.Attempt).
-		First(&step).Error; err != nil {
-		common.ReplyErr(w, "session step not found", http.StatusNotFound)
-		return
-	}
 	cap := body.Caption
-	result := db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).
-		Where("task_id = ? AND artifact_key = ?", step.TaskID, rev.ArtifactKey).
-		Update("caption", &cap)
-	if result.Error != nil {
-		common.ReplyErr(w, "update caption failed", http.StatusInternalServerError)
-		return
+	if rev.HumanArtifactID != nil {
+		// Human revision: update plugin_human_artifacts.caption.
+		if err := db.WithContext(ctx).Model(&orm.PluginHumanArtifact{}).
+			Where("id = ?", *rev.HumanArtifactID).
+			Update("caption", &cap).Error; err != nil {
+			common.ReplyErr(w, "update caption failed", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// AI revision: locate sub_agent_artifact via step → task_id, then update caption.
+		var step orm.PluginSessionStep
+		if err := db.WithContext(ctx).
+			Where("session_id = ? AND step_id = ? AND attempt = ?", sessionID, rev.StepID, rev.Attempt).
+			First(&step).Error; err != nil {
+			common.ReplyErr(w, "session step not found", http.StatusNotFound)
+			return
+		}
+		if err := db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).
+			Where("task_id = ? AND artifact_key = ?", step.TaskID, rev.ArtifactKey).
+			Update("caption", &cap).Error; err != nil {
+			common.ReplyErr(w, "update caption failed", http.StatusInternalServerError)
+			return
+		}
 	}
 	common.ReplyOK(w, map[string]any{"status": "ok"})
 }
@@ -1149,10 +1157,14 @@ func CreateSlotItem(w http.ResponseWriter, r *http.Request) {
 		Value        json.RawMessage `json:"value"`
 		Caption      *string         `json:"caption,omitempty"`
 		InsertBefore *int            `json:"insert_before,omitempty"`
+		ContentType  string          `json:"content_type,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Value) == 0 {
 		common.ReplyErr(w, "invalid body: value required", http.StatusBadRequest)
 		return
+	}
+	if body.ContentType == "" {
+		body.ContentType = "text"
 	}
 	db := store.DB()
 	if db == nil {
@@ -1168,10 +1180,12 @@ func CreateSlotItem(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "slot has no existing items; cannot infer artifact_key", http.StatusBadRequest)
 		return
 	}
-	// Write new list revision with nil listIndex (auto-appends).
-	newRev, err := WriteSlotRevisionWithSnapshot(ctx, db,
+	// Write new list revision via WriteSlotRevisionWithHumanArtifact so that
+	// content_type is persisted correctly (required for image rendering).
+	newRev, err := WriteSlotRevisionWithHumanArtifact(ctx, db,
 		sessionID, slotID, anyRev.ArtifactKey, anyRev.StepID, anyRev.Attempt,
-		"list", nil, resolveValuePaths(body.Value), "human",
+		"list", nil,
+		body.ContentType, resolveValuePaths(body.Value), body.Caption,
 	)
 	if err != nil {
 		common.ReplyErr(w, "create item failed", http.StatusInternalServerError)
