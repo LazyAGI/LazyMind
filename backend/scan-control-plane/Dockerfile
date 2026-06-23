@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 ARG DOCKER_MIRROR=docker.m.daocloud.io/library/
-FROM ${DOCKER_MIRROR}golang:1.23-bookworm AS build
+FROM ${DOCKER_MIRROR}golang:1.25-bookworm AS build
 
 ARG GOPROXY=https://goproxy.cn,direct
 ARG GOSUMDB=sum.golang.google.cn
@@ -30,6 +30,7 @@ WORKDIR /app
 COPY --from=build /out/scan-control-plane /app/scan-control-plane
 COPY --from=build /src/migrations /app/migrations
 COPY --from=build /src/scripts /app/scripts
+RUN chmod -R a+rX /app/migrations /app/scripts
 
 ENV LAZYMIND_SCAN_CONTROL_PLANE_ADDRESS=0.0.0.0
 ENV LAZYMIND_SCAN_CONTROL_PLANE_PORT=18080

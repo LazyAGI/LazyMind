@@ -132,6 +132,66 @@ func TestLoadMergedDocumentsUsesCoreUpdatedAtWhenNewerThanReadonlyBase(t *testin
 	}
 }
 
+func TestLoadMergedDocumentsUsesCoreTimesWhenReadonlyWallClockLooksNewer(t *testing.T) {
+	db := newDocumentTestDB(t)
+	ctx := context.Background()
+
+	coreCreatedAt := time.Date(2026, 6, 18, 7, 34, 56, 0, time.UTC)
+	coreUpdatedAt := time.Date(2026, 6, 18, 7, 34, 57, 0, time.UTC)
+	readonlyCreatedAt := coreCreatedAt.Add(8 * time.Hour)
+	readonlyUpdatedAt := coreUpdatedAt.Add(8 * time.Hour)
+
+	if err := db.Create(&orm.Document{
+		ID:           "doc-core",
+		LazyllmDocID: "doc-lazy",
+		DatasetID:    "dataset-1",
+		DisplayName:  "report.md",
+		FileID:       "doc-core",
+		Tags:         []byte(`[]`),
+		Ext:          []byte(`{}`),
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "user-1",
+			CreateUserName: "Alice",
+			CreatedAt:      coreCreatedAt,
+			UpdatedAt:      coreUpdatedAt,
+		},
+	}).Error; err != nil {
+		t.Fatalf("create core document: %v", err)
+	}
+	if err := db.Table((readonlyorm.LazyLLMDocRow{}).TableName()).Create(&readonlyorm.LazyLLMDocRow{
+		DocID:        "doc-lazy",
+		Filename:     "report.md",
+		Path:         "/uploads/report.md",
+		UploadStatus: string(TaskStateUploaded),
+		SourceType:   "LOCAL_FILE",
+		CreatedAt:    readonlyCreatedAt,
+		UpdatedAt:    readonlyUpdatedAt,
+	}).Error; err != nil {
+		t.Fatalf("create readonly document: %v", err)
+	}
+
+	rows, total, err := loadMergedDocumentsByDocIDs(ctx, []string{"doc-core"}, "dataset-1", "", "", false, 10, 0)
+	if err != nil {
+		t.Fatalf("load merged documents: %v", err)
+	}
+	if total != 1 || len(rows) != 1 {
+		t.Fatalf("expected one merged row, total=%d len=%d", total, len(rows))
+	}
+	if !rows[0].BaseCreatedAt.Equal(coreCreatedAt) {
+		t.Fatalf("expected core created time %s, got %s", coreCreatedAt.Format(time.RFC3339), rows[0].BaseCreatedAt.Format(time.RFC3339))
+	}
+	if !rows[0].BaseUpdatedAt.Equal(coreUpdatedAt) {
+		t.Fatalf("expected core updated time %s, got %s", coreUpdatedAt.Format(time.RFC3339), rows[0].BaseUpdatedAt.Format(time.RFC3339))
+	}
+	doc := docFromRow(rows[0])
+	if doc.CreateTime != "2026-06-18T07:34:56Z" {
+		t.Fatalf("expected core create_time, got %q", doc.CreateTime)
+	}
+	if doc.UpdateTime != "2026-06-18T07:34:57Z" {
+		t.Fatalf("expected core update_time, got %q", doc.UpdateTime)
+	}
+}
+
 func TestBuildTaskResponseDoesNotSucceedBeforeExternalTaskRowExists(t *testing.T) {
 	db := newDocumentTestDB(t)
 	now := time.Date(2026, 5, 2, 10, 30, 0, 0, time.UTC)

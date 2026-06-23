@@ -67,19 +67,14 @@ class ExternalCallFacade:
 class ExecutionContext:
     cancellation_token: CancellationToken
     external: ExternalCallFacade
-    output_keys: tuple[ArtifactKey, ...] = ()
-    model_config: Mapping[str, Any] | None = None
+    partition: str = ''
+    llm_config: Mapping[str, Any] | None = None
 
     def is_cancel_requested(self) -> bool:
         return self.cancellation_token.is_cancel_requested()
 
     def raise_if_cancelled(self) -> None:
         self.cancellation_token.raise_if_cancelled()
-
-    @property
-    def output_partition(self) -> str:
-        partitions = {key.partition for key in self.output_keys if key.partition}
-        return next(iter(partitions)) if len(partitions) == 1 else ''
 
 
 @dataclass(frozen=True)
@@ -99,29 +94,29 @@ class MaterializerExecutor(AttemptExecutor):
         *,
         external_gateway: ExternalCallGateway | None = None,
         cancellation_probe: Callable[[AttemptClaim], bool] | None = None,
-        model_config: Mapping[str, Any] | None = None,
+        llm_config: Mapping[str, Any] | None = None,
     ) -> None:
         self.graph = graph
         self.reader = reader
         self.external_gateway = external_gateway
         self._cancellation_probe = cancellation_probe
-        self._model_config_lock = RLock()
-        self._model_config = dict(model_config or {})
+        self._llm_config_lock = RLock()
+        self._llm_config = dict(llm_config or {})
 
     def bind_controller(self, controller: RunController) -> None:
         self._cancellation_probe = lambda claim: controller.inspect_claim(claim).cancel_requested
 
-    def set_model_config(self, model_config: Mapping[str, Any] | None) -> None:
-        with self._model_config_lock:
-            self._model_config = dict(model_config or {})
+    def set_llm_config(self, llm_config: Mapping[str, Any] | None) -> None:
+        with self._llm_config_lock:
+            self._llm_config = dict(llm_config or {})
 
     def execute(self, claim: AttemptClaim, plan_op: PlanOp) -> AttemptExecutionResult:
-        model_config = self._model_config_snapshot()
+        llm_config = self._llm_config_snapshot()
         try:
-            _activate_lazyllm_model_config(claim, model_config)
+            _activate_lazyllm_config(claim, llm_config)
             op_cls = self.graph.materializer_for_plan_op(plan_op)
             inputs = self._load_inputs(claim, plan_op)
-            outputs = op_cls.execute(inputs, self._context_for(claim, plan_op, model_config))
+            outputs = op_cls.execute(inputs, self._context_for(claim, plan_op, llm_config))
             return _validate_outputs(plan_op, outputs)
         except DAGGraphError as error:
             return AttemptExecutionResult(False, error_type='materializer_lookup_failed', error_message=str(error))
@@ -152,17 +147,17 @@ class MaterializerExecutor(AttemptExecutor):
                 inputs[binding.name] = record.value
         return inputs
 
-    def _model_config_snapshot(self) -> dict[str, Any]:
-        with self._model_config_lock:
-            return dict(self._model_config)
+    def _llm_config_snapshot(self) -> dict[str, Any]:
+        with self._llm_config_lock:
+            return dict(self._llm_config)
 
-    def _context_for(self, claim: AttemptClaim, plan_op: PlanOp, model_config: Mapping[str, Any]) -> ExecutionContext:
+    def _context_for(self, claim: AttemptClaim, plan_op: PlanOp, llm_config: Mapping[str, Any]) -> ExecutionContext:
         token = CancellationToken(lambda: self._is_cancel_requested(claim))
         return ExecutionContext(
             token,
             ExternalCallFacade(self.external_gateway, claim, token),
-            plan_op.output_keys,
-            dict(model_config),
+            _single_output_partition(plan_op.output_keys),
+            dict(llm_config),
         )
 
     def _is_cancel_requested(self, claim: AttemptClaim) -> bool:
@@ -211,6 +206,12 @@ class _InputLoadError(Exception):
     def __init__(self, error_type: str, message: str) -> None:
         super().__init__(error_type, message)
         self.error_type = error_type
+        self.message = message
+
+
+def _single_output_partition(keys: tuple[ArtifactKey, ...]) -> str:
+    partitions = {key.partition for key in keys if key.partition}
+    return next(iter(partitions)) if len(partitions) == 1 else ''
 
 
 def _validate_outputs(plan_op: PlanOp, outputs: Any) -> AttemptExecutionResult:
@@ -263,12 +264,12 @@ def _run_status(controller: RunController, run_id: str) -> RunStatus | None:
     return state.run.status if state.run_exists else None
 
 
-def _activate_lazyllm_model_config(claim: AttemptClaim, model_config: Mapping[str, Any]) -> None:
-    _init_lazyllm_session(claim, required=bool(model_config))
-    if model_config:
+def _activate_lazyllm_config(claim: AttemptClaim, llm_config: Mapping[str, Any]) -> None:
+    _init_lazyllm_session(claim, required=bool(llm_config))
+    if llm_config:
         from lazymind.model_config import inject_model_config
 
-        inject_model_config(dict(model_config))
+        inject_model_config(dict(llm_config))
 
 
 def _init_lazyllm_session(claim: AttemptClaim, *, required: bool) -> None:

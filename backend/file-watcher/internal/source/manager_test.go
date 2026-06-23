@@ -61,6 +61,10 @@ func (validatorStub) EnsureAllowed(string) error {
 	return nil
 }
 
+func (validatorStub) AllowedRoots() []string {
+	return nil
+}
+
 func TestStopSourceIsIdempotent(t *testing.T) {
 	t.Parallel()
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/filefilter"
 )
 
 const (
@@ -28,7 +29,7 @@ func (e *DefaultTargetTreeEngine) searchCachedTargets(ctx context.Context, conn 
 	if err := ctx.Err(); err != nil {
 		return TreeNodePage{}, err
 	}
-	page, err := paginateCachedTargetNodes(snapshot.nodes, req.Keyword, req.IncludeFiles, pageSize, req.Cursor)
+	page, err := paginateCachedTargetNodes(snapshot.nodes, req.Keyword, req.IncludeFiles, filefilter.FromProviderOptions(req.ProviderOptions), pageSize, req.Cursor)
 	if err != nil {
 		return TreeNodePage{}, err
 	}
@@ -46,7 +47,7 @@ func (e *DefaultTargetTreeEngine) buildAndSearchCachedTargets(ctx context.Contex
 	if snapshot.status == targetSearchCacheStatusFailed && strings.TrimSpace(snapshot.lastError) != "" {
 		return TreeNodePage{}, NewError(ErrCodeInternal, "target search cache build failed: "+snapshot.lastError)
 	}
-	page, err := paginateCachedTargetNodes(snapshot.nodes, req.Keyword, req.IncludeFiles, pageSize, req.Cursor)
+	page, err := paginateCachedTargetNodes(snapshot.nodes, req.Keyword, req.IncludeFiles, filefilter.FromProviderOptions(req.ProviderOptions), pageSize, req.Cursor)
 	if err != nil {
 		return TreeNodePage{}, err
 	}
@@ -73,11 +74,34 @@ func (e *DefaultTargetTreeEngine) Prewarm(ctx context.Context, req TargetTreeSea
 	return nil
 }
 
+func (e *DefaultTargetTreeEngine) PrewarmLocalFSRootCaches(ctx context.Context, req TargetTreeSearchRequest) error {
+	if !isLocalFSTargetSearch(req) {
+		return NewError(ErrCodeInvalidRequest, "connector_type must be local_fs")
+	}
+	conn, err := e.registry.Get(req.ConnectorType)
+	if err != nil {
+		return mapConnectorError(err)
+	}
+	roots, err := e.listLocalFSRootTargets(ctx, conn, req)
+	if err != nil {
+		return err
+	}
+	for _, root := range roots {
+		rootReq := localFSRootSearchRequest(req, root)
+		snapshot := e.cache.buildIfUnlocked(ctx, conn, rootReq, e.buildTargetSearchCache)
+		if snapshot.status == targetSearchCacheStatusFailed && strings.TrimSpace(snapshot.lastError) != "" {
+			return NewError(ErrCodeInternal, "local_fs target search cache prewarm failed: "+snapshot.lastError)
+		}
+	}
+	return nil
+}
+
 func (e *DefaultTargetTreeEngine) buildTargetSearchCache(ctx context.Context, conn connector.SourceConnector, req TargetTreeSearchRequest) ([]TreeNode, bool, error) {
 	queue := initialTargetCacheQueue(req)
 	seenScopes := map[string]struct{}{}
 	seenNodes := map[string]struct{}{}
 	nodes := make([]TreeNode, 0)
+	policy := filefilter.FromProviderOptions(req.ProviderOptions)
 	truncated := false
 	pageSize := e.limitForConnector(conn.Spec()).MaxPageSize
 	listCalls := 0
@@ -128,6 +152,9 @@ func (e *DefaultTargetTreeEngine) buildTargetSearchCache(ctx context.Context, co
 					return nodes, truncated, mapConnectorError(err)
 				}
 				node := targetNode(req.ConnectorType, raw, normalized)
+				if !targetAllowsTreeNode(policy, node) {
+					continue
+				}
 				if _, ok := seenNodes[node.ObjectKey]; ok {
 					continue
 				}

@@ -3,6 +3,12 @@ import pytest
 import core.redis_client as redis_client_module
 
 
+class _FakeExceptions:
+    ReadOnlyError = type('ReadOnlyError', (Exception,), {})
+    ConnectionError = type('ConnectionError', (Exception,), {})
+    TimeoutError = type('TimeoutError', (Exception,), {})
+
+
 def test_redis_url_requires_env(monkeypatch):
     monkeypatch.delenv(redis_client_module.REDIS_URL_ENV, raising=False)
 
@@ -16,20 +22,25 @@ def test_redis_url_strips_env_value(monkeypatch):
     assert redis_client_module.redis_url() == 'redis://localhost:6379/0'
 
 
-def test_redis_client_builds_and_caches_client(monkeypatch):
+def test_redis_client_builds_pings_and_caches_client(monkeypatch):
     seen = {}
+
+    class FakeClient:
+        def __init__(self, url):
+            self.url = url
+            self.ping_count = 0
+
+        def ping(self):
+            self.ping_count += 1
 
     class _FakeRedisClient:
         @staticmethod
         def from_url(url, **kwargs):
             seen['url'] = url
             seen['kwargs'] = kwargs
-            return {'client': url}
-
-    class _FakeExceptions:
-        ReadOnlyError = type('ReadOnlyError', (Exception,), {})
-        ConnectionError = type('ConnectionError', (Exception,), {})
-        TimeoutError = type('TimeoutError', (Exception,), {})
+            client = FakeClient(url)
+            seen['client'] = client
+            return client
 
     class FakeRedisModule:
         Redis = _FakeRedisClient
@@ -41,8 +52,11 @@ def test_redis_client_builds_and_caches_client(monkeypatch):
 
     client = redis_client_module.redis_client()
 
-    assert client == {'client': 'redis://localhost:6379/1'}
+    assert client is seen['client']
+    assert client.url == 'redis://localhost:6379/1'
+    assert client.ping_count == 1
     assert redis_client_module.redis_client() is client
+    assert client.ping_count == 1
     assert seen['url'] == 'redis://localhost:6379/1'
     assert seen['kwargs']['decode_responses'] is True
     assert seen['kwargs']['socket_connect_timeout'] == 5
@@ -54,3 +68,40 @@ def test_redis_client_builds_and_caches_client(monkeypatch):
         _FakeExceptions.ConnectionError,
         _FakeExceptions.TimeoutError,
     ]
+
+
+def test_redis_client_retries_until_first_ping_succeeds(monkeypatch):
+    clients = []
+    sleeps = []
+
+    class FakeClient:
+        def __init__(self, should_fail):
+            self.should_fail = should_fail
+
+        def ping(self):
+            if self.should_fail:
+                raise _FakeExceptions.ConnectionError('not ready')
+
+    class _FakeRedisClient:
+        @staticmethod
+        def from_url(url, **kwargs):
+            client = FakeClient(should_fail=len(clients) < 2)
+            clients.append(client)
+            return client
+
+    class FakeRedisModule:
+        Redis = _FakeRedisClient
+        exceptions = _FakeExceptions
+
+    monkeypatch.setattr(redis_client_module, '_CLIENT', None)
+    monkeypatch.setattr(redis_client_module, 'redis', FakeRedisModule)
+    monkeypatch.setattr(redis_client_module, 'REDIS_CONNECT_RETRIES', 3)
+    monkeypatch.setattr(redis_client_module.time, 'sleep', lambda seconds: sleeps.append(seconds))
+    monkeypatch.setenv(redis_client_module.REDIS_URL_ENV, 'redis://localhost:6379/1')
+
+    client = redis_client_module.redis_client()
+
+    assert client is clients[-1]
+    assert len(clients) == 3
+    assert sleeps == [redis_client_module.REDIS_CONNECT_RETRY_INTERVAL_SECONDS] * 2
+    assert redis_client_module.redis_client() is client

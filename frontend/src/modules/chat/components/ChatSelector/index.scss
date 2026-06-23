@@ -74,8 +74,8 @@
 }
 
 .chat-selector-container {
-  width: clamp(520px, 46vw, calc(100vw - 2.4vw));
-  max-width: calc(100vw - 2.4vw);
+  width: min(500px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
   background: white;
   border-radius: 8px;
   overflow: hidden;
@@ -91,7 +91,7 @@
   row-gap: clamp(6px, 0.6vw, 12px);
 
   .chat-selector-search-input {
-    flex: 1 1 clamp(260px, 34vw, 720px);
+    flex: 1 1 240px;
     min-width: 0;
     font-size: 14px;
 

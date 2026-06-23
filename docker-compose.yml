@@ -16,6 +16,7 @@ x-mirror-args: &mirror-args
   BASE_LAZYMIND_IMAGE: ${BASE_LAZYMIND_IMAGE:-base_code}
 
 x-trace-config: &trace-config
+  TZ: ${TZ:-Asia/Shanghai}
   LANGFUSE_HOST: ${LANGFUSE_HOST:-}
   LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-}
   LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
@@ -41,6 +42,7 @@ x-core-env: &core-env
   ACL_DB_DSN: "host=db user=root password=123456 dbname=core port=5432 sslmode=disable TimeZone=UTC"
   LAZYMIND_REDIS_URL: redis://test:123456@redis:6379/0
   LAZYMIND_UPLOAD_ROOT: /var/lib/lazymind/uploads
+  LAZYMIND_UPLOAD_TEXT_UTF8_CONVERT_ENABLED: ${LAZYMIND_UPLOAD_TEXT_UTF8_CONVERT_ENABLED:-true}
   LAZYMIND_PUBLIC_BASE_URL: http://localhost:8000/api/core
   LAZYMIND_FILE_URL_SIGN_SECRET: changeme-in-production
   LAZYMIND_FILE_URL_EXPIRE_SECONDS: "3600"
@@ -370,8 +372,8 @@ services:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-frontend:${LAZYMIND_IMAGE_TAG:-latest}
     build:
       network: host
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
       args:
         <<: *mirror-args
     ports:
@@ -738,11 +740,6 @@ services:
       LAZYMIND_EVO_BASE_DIR: /var/lib/lazymind/evo
       LAZYMIND_EVO_CHAT_SOURCE: /app/algorithm/lazymind/chat
       LAZYMIND_EVO_CODE_BINARY: /usr/local/bin/opencode
-      LAZYMIND_EVO_CODE_PROVIDER: ${LAZYMIND_EVO_CODE_PROVIDER:-qwen}
-      LAZYMIND_EVO_CODE_MODEL: ${LAZYMIND_EVO_CODE_MODEL:-qwen3-max}
-      LAZYMIND_EVO_CODE_API_KEY: ${LAZYMIND_EVO_CODE_API_KEY:-}
-      LAZYMIND_EVO_CODE_BASE_URL: ${LAZYMIND_EVO_CODE_BASE_URL:-}
-      LAZYMIND_EVO_CODE_LABEL: ${LAZYMIND_EVO_CODE_LABEL:-qwen}
       LAZYMIND_EVO_CODE_TIMEOUT_S: "900"
       LAZYMIND_EVO_LLM_ROLE: evo_llm
       LAZYMIND_EVO_KB_BASE_URL: http://doc-server:8000
@@ -809,7 +806,7 @@ services:
   milvus:
     profiles:
       - milvus
-    image: milvusdb/milvus:v2.6.11
+    image: milvusdb/milvus:v2.4.15
     command: ['sh', '-c', 'sleep 15 && exec milvus run standalone']
     # seccomp:unconfined removed for security; add back if Milvus fails on your platform
     environment:

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	"lazymind/core/state"
 )
 
 const (
@@ -23,28 +23,28 @@ func taskStreamKey(taskID string) string { return fmt.Sprintf(taskStreamKeyPrefi
 func taskStatusKey(taskID string) string { return fmt.Sprintf(taskStatusKeyPrefix, taskID) }
 
 // WriteStatus upserts the status snapshot HASH (status / progress / current_phase / summary).
-func WriteStatus(ctx context.Context, rdb *redis.Client, taskID string, fields map[string]any) error {
-	if rdb == nil {
+func WriteStatus(ctx context.Context, stateStore state.Store, taskID string, fields map[string]any) error {
+	if stateStore == nil {
 		return nil
 	}
 	key := taskStatusKey(taskID)
-	if err := rdb.HSet(ctx, key, fields).Err(); err != nil {
+	if err := stateStore.HSet(ctx, key, fields, taskStatusExpire); err != nil {
 		return err
 	}
-	return rdb.Expire(ctx, key, taskStatusExpire).Err()
+	return nil
 }
 
 // ReadStatus returns the status snapshot HASH (empty map if missing).
-func ReadStatus(ctx context.Context, rdb *redis.Client, taskID string) (map[string]string, error) {
-	if rdb == nil {
+func ReadStatus(ctx context.Context, stateStore state.Store, taskID string) (map[string]string, error) {
+	if stateStore == nil {
 		return nil, nil
 	}
-	return rdb.HGetAll(ctx, taskStatusKey(taskID)).Result()
+	return stateStore.HGetAll(ctx, taskStatusKey(taskID))
 }
 
 // AppendStreamEvent RPUSHes one Task SSE event JSON onto the stream LIST.
-func AppendStreamEvent(ctx context.Context, rdb *redis.Client, taskID string, event any) error {
-	if rdb == nil {
+func AppendStreamEvent(ctx context.Context, stateStore state.Store, taskID string, event any) error {
+	if stateStore == nil {
 		return nil
 	}
 	bs, err := json.Marshal(event)
@@ -52,28 +52,21 @@ func AppendStreamEvent(ctx context.Context, rdb *redis.Client, taskID string, ev
 		return err
 	}
 	key := taskStreamKey(taskID)
-	if err := rdb.RPush(ctx, key, bs).Err(); err != nil {
-		return err
-	}
-	return rdb.Expire(ctx, key, taskStreamExpire).Err()
+	return stateStore.RPush(ctx, key, bs, taskStreamExpire)
 }
 
 // StreamEventsFrom returns raw event JSON strings from offset (0-based) to tail.
-func StreamEventsFrom(ctx context.Context, rdb *redis.Client, taskID string, from int64) ([]string, error) {
-	if rdb == nil {
+func StreamEventsFrom(ctx context.Context, stateStore state.Store, taskID string, from int64) ([]string, error) {
+	if stateStore == nil {
 		return nil, nil
 	}
-	return rdb.LRange(ctx, taskStreamKey(taskID), from, -1).Result()
+	return stateStore.LRange(ctx, taskStreamKey(taskID), from, -1)
 }
 
 // StreamExists reports whether the stream LIST key still exists (not expired).
-func StreamExists(ctx context.Context, rdb *redis.Client, taskID string) (bool, error) {
-	if rdb == nil {
+func StreamExists(ctx context.Context, stateStore state.Store, taskID string) (bool, error) {
+	if stateStore == nil {
 		return false, nil
 	}
-	n, err := rdb.Exists(ctx, taskStreamKey(taskID)).Result()
-	if err != nil {
-		return false, err
-	}
-	return n > 0, nil
+	return stateStore.Exists(ctx, taskStreamKey(taskID))
 }

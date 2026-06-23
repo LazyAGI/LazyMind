@@ -414,7 +414,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           </div>
         )}
         {showBatchExport && (
-          <div style={{ padding: "8px 0" }}>
+          <div className="record-batch-select-row">
             <Checkbox
               indeterminate={
                 checkedList?.length > 0 &&
@@ -433,6 +433,9 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               }
             >
               {t("chat.selectAll")}
+              {checkedList.length > 0 && (
+                <span className="record-selected-count">{checkedList.length}</span>
+              )}
             </Checkbox>
           </div>
         )}

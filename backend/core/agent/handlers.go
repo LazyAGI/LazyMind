@@ -485,6 +485,43 @@ func GetThreadArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 	proxyThreadGet(w, r, func(threadID string) string { return threadArtifactURL(threadID, artifactID) }, "fetch thread artifact failed")
 }
+func GetThreadResultTrace(w http.ResponseWriter, r *http.Request) {
+	threadID := strings.TrimSpace(mux.Vars(r)["thread_id"])
+	traceID := strings.TrimSpace(mux.Vars(r)["trace_id"])
+	if threadID == "" || traceID == "" {
+		common.ReplyErr(w, "thread_id and trace_id required", http.StatusBadRequest)
+		return
+	}
+	if _, err := loadUserThread(store.DB(), r, threadID); err != nil {
+		replyThreadLoadError(w, err)
+		return
+	}
+	proxy, statusCode, err := fetchUpstreamProxy(r.Context(), r, threadResultTraceURL(threadID, traceID))
+	if err != nil {
+		common.ReplyErrWithData(w, "fetch trace result failed", map[string]any{"detail": err.Error()}, statusCode)
+		return
+	}
+	writeProxyResponse(w, proxy)
+}
+func GetThreadResultTraceCompare(w http.ResponseWriter, r *http.Request) {
+	threadID := strings.TrimSpace(mux.Vars(r)["thread_id"])
+	aTraceID := strings.TrimSpace(r.URL.Query().Get("a"))
+	bTraceID := strings.TrimSpace(r.URL.Query().Get("b"))
+	if threadID == "" || aTraceID == "" || bTraceID == "" {
+		common.ReplyErr(w, "thread_id, a and b required", http.StatusBadRequest)
+		return
+	}
+	if _, err := loadUserThread(store.DB(), r, threadID); err != nil {
+		replyThreadLoadError(w, err)
+		return
+	}
+	proxy, statusCode, err := fetchUpstreamProxy(r.Context(), r, threadResultTraceCompareURL(threadID, aTraceID, bTraceID))
+	if err != nil {
+		common.ReplyErrWithData(w, "fetch trace comparison failed", map[string]any{"detail": err.Error()}, statusCode)
+		return
+	}
+	writeProxyResponse(w, proxy)
+}
 func StartThread(w http.ResponseWriter, r *http.Request)  { postThreadAction(w, r, "start") }
 func PauseThread(w http.ResponseWriter, r *http.Request)  { postThreadAction(w, r, "pause") }
 func CancelThread(w http.ResponseWriter, r *http.Request) { postThreadAction(w, r, "cancel") }
@@ -618,15 +655,9 @@ func getThreadResults(w http.ResponseWriter, r *http.Request, resultKind string)
 				}
 			}
 		case "analysis-reports":
-			body, found, resultErr := buildAnalysisMarkdownResult(proxy.Body)
-			if resultErr != nil {
-				common.ReplyErrWithData(w, "read analysis report content failed", map[string]any{"detail": resultErr.Error()}, http.StatusInternalServerError)
-				return
-			}
-			if found {
-				proxy.Body = body
-				proxy.ContentType = "application/json"
-			}
+			body, _ := findClassificationReportResult(proxy.Body)
+			common.ReplyOK(w, body)
+			return
 		case "diffs":
 			body, found, resultErr := buildDiffJSONResult(proxy.Body)
 			if resultErr != nil {

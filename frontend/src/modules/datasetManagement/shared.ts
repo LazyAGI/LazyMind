@@ -150,6 +150,15 @@ export const questionTypeOptions = [
   "排障问答",
 ];
 
+export const questionTypeI18nKeys: Record<string, string> = {
+  事实问答: "datasetManagement.questionTypes.fact",
+  总结问答: "datasetManagement.questionTypes.summary",
+  推理问答: "datasetManagement.questionTypes.reasoning",
+  多跳问答: "datasetManagement.questionTypes.multiHop",
+  操作问答: "datasetManagement.questionTypes.operation",
+  排障问答: "datasetManagement.questionTypes.troubleshooting",
+};
+
 export const mockKnowledgeBases: KnowledgeBaseOption[] = [
   { id: "kb-after-sales", name: "售后知识库" },
   { id: "kb-product-manual", name: "产品手册库" },
@@ -157,10 +166,10 @@ export const mockKnowledgeBases: KnowledgeBaseOption[] = [
   { id: "kb-troubleshooting", name: "排障手册库" },
 ];
 
-export const sourceLabelMap: Record<DatasetItemSource, string> = {
-  upload: "上传",
-  manual: "手动",
-  flowback: "回流",
+export const sourceLabelI18nKeys: Record<DatasetItemSource, string> = {
+  upload: "datasetManagement.sourceLabels.upload",
+  manual: "datasetManagement.sourceLabels.manual",
+  flowback: "datasetManagement.sourceLabels.flowback",
 };
 
 export const sourceColorMap: Record<DatasetItemSource, string> = {

@@ -11,6 +11,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
+	"lazymind/core/state"
+
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
@@ -46,7 +48,7 @@ type idleHistoryMessage struct {
 	Content string `json:"content,omitempty"`
 }
 
-type idleRedisStore interface {
+type idleStateStore interface {
 	AppendHistory(ctx context.Context, key string, messages []idleHistoryMessage, maxMessages int, ttl time.Duration) error
 	ReadHistory(ctx context.Context, key string) ([]idleHistoryMessage, error)
 	SetTTLKey(ctx context.Context, key, value string, ttl time.Duration) error
@@ -54,43 +56,41 @@ type idleRedisStore interface {
 	CleanupIdleKeys(ctx context.Context, ttlKey, expectedTTLValue, historyKey string) (bool, error)
 }
 
-type redisIdleStore struct {
-	client *redis.Client
+type stateIdleStore struct {
+	store state.Store
 }
 
-func newRedisIdleStore(client *redis.Client) idleRedisStore {
-	if client == nil {
+func newStateIdleStore(store state.Store) idleStateStore {
+	if store == nil {
 		return nil
 	}
-	return &redisIdleStore{client: client}
+	return &stateIdleStore{store: store}
 }
 
-func (s *redisIdleStore) AppendHistory(ctx context.Context, key string, messages []idleHistoryMessage, maxMessages int, ttl time.Duration) error {
-	if s == nil || s.client == nil {
-		return errors.New("redis client is nil")
+func (s *stateIdleStore) AppendHistory(ctx context.Context, key string, messages []idleHistoryMessage, maxMessages int, ttl time.Duration) error {
+	if s == nil || s.store == nil {
+		return errors.New("state store is nil")
 	}
 	if maxMessages <= 0 {
 		return nil
 	}
-	pipe := s.client.Pipeline()
 	for _, msg := range messages {
 		body, err := json.Marshal(msg)
 		if err != nil {
 			return err
 		}
-		pipe.RPush(ctx, key, body)
+		if err := s.store.RPush(ctx, key, body, ttl); err != nil {
+			return err
+		}
 	}
-	pipe.LTrim(ctx, key, int64(-maxMessages), -1)
-	pipe.Expire(ctx, key, ttl)
-	_, err := pipe.Exec(ctx)
-	return err
+	return s.store.LTrim(ctx, key, int64(-maxMessages), -1)
 }
 
-func (s *redisIdleStore) ReadHistory(ctx context.Context, key string) ([]idleHistoryMessage, error) {
-	if s == nil || s.client == nil {
-		return nil, errors.New("redis client is nil")
+func (s *stateIdleStore) ReadHistory(ctx context.Context, key string) ([]idleHistoryMessage, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("state store is nil")
 	}
-	raw, err := s.client.LRange(ctx, key, 0, -1).Result()
+	raw, err := s.store.LRange(ctx, key, 0, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -106,51 +106,51 @@ func (s *redisIdleStore) ReadHistory(ctx context.Context, key string) ([]idleHis
 	return messages, nil
 }
 
-func (s *redisIdleStore) SetTTLKey(ctx context.Context, key, value string, ttl time.Duration) error {
-	if s == nil || s.client == nil {
-		return errors.New("redis client is nil")
+func (s *stateIdleStore) SetTTLKey(ctx context.Context, key, value string, ttl time.Duration) error {
+	if s == nil || s.store == nil {
+		return errors.New("state store is nil")
 	}
-	return s.client.Set(ctx, key, value, ttl).Err()
+	return s.store.Set(ctx, key, []byte(value), ttl)
 }
 
-func (s *redisIdleStore) AcquireProcessingLock(ctx context.Context, key string, ttl time.Duration) (bool, error) {
-	if s == nil || s.client == nil {
-		return false, errors.New("redis client is nil")
+func (s *stateIdleStore) AcquireProcessingLock(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+	if s == nil || s.store == nil {
+		return false, errors.New("state store is nil")
 	}
-	return s.client.SetNX(ctx, key, "1", ttl).Result()
+	return s.store.SetNX(ctx, key, []byte("1"), ttl)
 }
 
-func (s *redisIdleStore) CleanupIdleKeys(ctx context.Context, ttlKey, expectedTTLValue, historyKey string) (bool, error) {
-	if s == nil || s.client == nil {
-		return false, errors.New("redis client is nil")
+func (s *stateIdleStore) CleanupIdleKeys(ctx context.Context, ttlKey, expectedTTLValue, historyKey string) (bool, error) {
+	if s == nil || s.store == nil {
+		return false, errors.New("state store is nil")
 	}
-	result, err := redis.NewScript(`
-local v = redis.call("GET", KEYS[1])
-if (not v) or v == ARGV[1] then
-	redis.call("DEL", KEYS[1], KEYS[2])
-	return 1
-end
-return 0
-`).Run(ctx, s.client, []string{ttlKey, historyKey}, expectedTTLValue).Int()
-	return result == 1, err
+	value, err := s.store.Get(ctx, ttlKey)
+	missing := state.IsMissing(err)
+	if err != nil && !missing {
+		return false, err
+	}
+	if missing || string(value) == expectedTTLValue {
+		return true, s.store.Del(ctx, ttlKey, historyKey)
+	}
+	return false, nil
 }
 
 type IdleRecorder struct {
 	db    *gorm.DB
-	store idleRedisStore
+	store idleStateStore
 	cfg   Config
 	clock clockFunc
 }
 
-func NewIdleRecorder(db *gorm.DB, rdb *redis.Client, cfg Config) *IdleRecorder {
-	return newIdleRecorderWithStore(db, newRedisIdleStore(rdb), cfg)
+func NewIdleRecorder(db *gorm.DB, store state.Store, cfg Config) *IdleRecorder {
+	return newIdleRecorderWithStore(db, newStateIdleStore(store), cfg)
 }
 
-func RecordConversationIdleMessage(ctx context.Context, db *gorm.DB, rdb *redis.Client, record ConversationIdleRecord) error {
-	return NewIdleRecorder(db, rdb, DefaultConfig()).RecordConversationMessage(ctx, record)
+func RecordConversationIdleMessage(ctx context.Context, db *gorm.DB, store state.Store, record ConversationIdleRecord) error {
+	return NewIdleRecorder(db, store, DefaultConfig()).RecordConversationMessage(ctx, record)
 }
 
-func newIdleRecorderWithStore(db *gorm.DB, store idleRedisStore, cfg Config) *IdleRecorder {
+func newIdleRecorderWithStore(db *gorm.DB, store idleStateStore, cfg Config) *IdleRecorder {
 	cfg = normalizeConfig(cfg)
 	return &IdleRecorder{
 		db:    db,
@@ -165,7 +165,7 @@ func (r *IdleRecorder) RecordConversationMessage(ctx context.Context, record Con
 		return errors.New("idle recorder db is nil")
 	}
 	if r.store == nil {
-		return errors.New("idle recorder redis store is nil")
+		return errors.New("idle recorder state store is nil")
 	}
 	record.SessionID = strings.TrimSpace(record.SessionID)
 	record.UserID = strings.TrimSpace(record.UserID)
@@ -231,17 +231,17 @@ func (r *IdleRecorder) RecordConversationMessage(ctx context.Context, record Con
 
 type IdleProcessor struct {
 	db       *gorm.DB
-	store    idleRedisStore
+	store    idleStateStore
 	cfg      Config
 	workerID string
 	clock    clockFunc
 }
 
-func NewIdleProcessor(db *gorm.DB, rdb *redis.Client, cfg Config, workerID string) *IdleProcessor {
-	return newIdleProcessorWithStore(db, newRedisIdleStore(rdb), cfg, workerID)
+func NewIdleProcessor(db *gorm.DB, store state.Store, cfg Config, workerID string) *IdleProcessor {
+	return newIdleProcessorWithStore(db, newStateIdleStore(store), cfg, workerID)
 }
 
-func newIdleProcessorWithStore(db *gorm.DB, store idleRedisStore, cfg Config, workerID string) *IdleProcessor {
+func newIdleProcessorWithStore(db *gorm.DB, store idleStateStore, cfg Config, workerID string) *IdleProcessor {
 	cfg = normalizeConfig(cfg)
 	if strings.TrimSpace(workerID) == "" {
 		workerID = defaultWorkerID("resourceupdate-idle")
@@ -327,7 +327,7 @@ func (p *IdleProcessor) ProcessEvent(ctx context.Context, eventID string) error 
 		return errors.New("idle processor db is nil")
 	}
 	if p.store == nil {
-		return errors.New("idle processor redis store is nil")
+		return errors.New("idle processor state store is nil")
 	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
@@ -438,17 +438,17 @@ func (p *IdleProcessor) ProcessEvent(ctx context.Context, eventID string) error 
 		}).Error
 	})
 	if err == nil && cleanupSessionID != "" {
-		if cleanupErr := p.cleanupIdleRedisKeys(ctx, cleanupSessionID, eventID); cleanupErr != nil {
-			resourceUpdateWarn(logEventIdleRedisCleanupFailed, cleanupErr).
+		if cleanupErr := p.cleanupIdleStateKeys(ctx, cleanupSessionID, eventID); cleanupErr != nil {
+			resourceUpdateWarn(logEventIdleStateCleanupFailed, cleanupErr).
 				Str("event_id", eventID).
 				Str("session_id", cleanupSessionID).
-				Msg(logEventIdleRedisCleanupFailed)
+				Msg(logEventIdleStateCleanupFailed)
 		}
 	}
 	return err
 }
 
-func (p *IdleProcessor) cleanupIdleRedisKeys(ctx context.Context, sessionID, eventID string) error {
+func (p *IdleProcessor) cleanupIdleStateKeys(ctx context.Context, sessionID, eventID string) error {
 	if p == nil || p.store == nil {
 		return nil
 	}
@@ -606,8 +606,13 @@ func runIdleFallbackLoop(ctx context.Context, processor *IdleProcessor, interval
 	}
 }
 
-func runIdleRedisExpireNotifyLoop(ctx context.Context, rdb *redis.Client, processor *IdleProcessor) {
-	if rdb == nil || processor == nil {
+func runIdleRedisExpireNotifyLoop(ctx context.Context, store state.Store, processor *IdleProcessor) {
+	redisStore, ok := store.(interface{ RedisClient() *redis.Client })
+	if !ok || processor == nil {
+		return
+	}
+	rdb := redisStore.RedisClient()
+	if rdb == nil {
 		return
 	}
 	channel := fmt.Sprintf("__keyevent@%d__:expired", rdb.Options().DB)

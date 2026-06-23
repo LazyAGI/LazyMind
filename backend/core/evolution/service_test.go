@@ -163,7 +163,7 @@ func TestBuildChatResourceContextFormatsUserPreferenceForChat(t *testing.T) {
 		UserID:        "u1",
 		Content:       "记住用户偏好简洁回答",
 		AgentPersona:  "资深研究助理",
-		UserAddress:   "老师",
+		PreferredName: "老师",
 		ResponseStyle: "先结论后解释",
 		Version:       1,
 		UpdatedBy:     "u1",
@@ -181,7 +181,7 @@ func TestBuildChatResourceContextFormatsUserPreferenceForChat(t *testing.T) {
 		t.Fatalf("build chat resource context: %v", err)
 	}
 
-	want := "---\nagent_persona: |-\n  资深研究助理\nuser_address: |-\n  老师\nresponse_style: |-\n  先结论后解释\n---\n\n记住用户偏好简洁回答"
+	want := "---\nagent_persona: |-\n 资深研究助理\npreferred_name: |-\n 老师\nresponse_style: |-\n 先结论后解释\n---\n\n记住用户偏好简洁回答"
 	if ctx.Memory != "memory-content" {
 		t.Fatalf("unexpected memory context: %q", ctx.Memory)
 	}
@@ -199,15 +199,15 @@ func TestBuildChatResourceContextFormatsUserPreferenceForChat(t *testing.T) {
 }
 
 func TestParseSystemUserPreferenceContentRequiresFrontmatterFields(t *testing.T) {
-	parsed, err := ParseSystemUserPreferenceContent("---\nagent_persona: 角色\nuser_address: 用户称谓\nresponse_style: 回复风格\n---\n")
+	parsed, err := ParseSystemUserPreferenceContent("---\nagent_persona: 角色\npreferred_name: 用户称谓\nresponse_style: 回复风格\n---\n")
 	if err != nil {
 		t.Fatalf("parse metadata-only preference: %v", err)
 	}
-	if parsed.Content != "" || parsed.AgentPersona != "角色" || parsed.UserAddress != "用户称谓" || parsed.ResponseStyle != "回复风格" {
+	if parsed.Content != "" || parsed.AgentPersona != "角色" || parsed.PreferredName != "用户称谓" || parsed.ResponseStyle != "回复风格" {
 		t.Fatalf("unexpected parsed preference: %#v", parsed)
 	}
 
-	if _, err := ParseSystemUserPreferenceContent("---\nagent_persona: 角色\nuser_address: 用户称谓\n---\n正文"); err == nil {
+	if _, err := ParseSystemUserPreferenceContent("---\nagent_persona: 角色\npreferred_name: 用户称谓\n---\n正文"); err == nil {
 		t.Fatal("expected missing response_style to fail")
 	}
 }

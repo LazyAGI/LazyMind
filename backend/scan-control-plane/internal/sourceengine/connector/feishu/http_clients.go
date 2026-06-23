@@ -626,7 +626,7 @@ func driveObject(item map[string]any, parentToken string) Object {
 		ModifiedUnixSec:     modified,
 		SizeBytes:           openAPIInt64(item["size"]),
 		MimeType:            openAPIString(item["mime_type"]),
-		FileExtension:       openAPIString(item["file_extension"]),
+		FileExtension:       driveFileExtension(item, name, rawType, shortcutInfo),
 		DriveType:           rawType,
 		ShortcutTargetType:  strings.ToLower(openAPIString(shortcutInfo["target_type"])),
 		ShortcutTargetToken: openAPIString(shortcutInfo["target_token"]),
@@ -641,6 +641,16 @@ func driveObject(item map[string]any, parentToken string) Object {
 		object.FileExtension = ""
 	}
 	return object
+}
+
+func driveFileExtension(item map[string]any, name, rawType string, shortcutInfo map[string]any) string {
+	if extension := openAPIString(item["file_extension"]); extension != "" {
+		return extension
+	}
+	if isFeishuDocType(rawType) || rawType == "shortcut" && isFeishuDocType(openAPIString(shortcutInfo["target_type"])) {
+		return ".md"
+	}
+	return path.Ext(strings.TrimSpace(name))
 }
 
 func wikiSpacesPage(data openAPIWikiSpaces) ObjectPage {
@@ -747,6 +757,9 @@ func wikiNodeFileExtension(name, objType string, node map[string]any) string {
 		return path.Ext(name)
 	}
 	if objType == "" {
+		if extension := path.Ext(strings.TrimSpace(name)); extension != "" {
+			return extension
+		}
 		return ".docx"
 	}
 	return "." + objType

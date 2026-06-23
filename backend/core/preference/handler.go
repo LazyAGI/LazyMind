@@ -28,7 +28,7 @@ type generateRequest struct {
 type upsertRequest struct {
 	Content       *string `json:"content"`
 	AgentPersona  *string `json:"agent_persona"`
-	UserAddress   *string `json:"user_address"`
+	PreferredName *string `json:"preferred_name"`
 	ResponseStyle *string `json:"response_style"`
 	AutoEvo       *bool   `json:"auto_evo"`
 }
@@ -83,7 +83,7 @@ func upsertManagedPreferenceContent(r *http.Request, db *gorm.DB, userID, userNa
 			UserID:             userID,
 			Content:            stringFromPtr(req.Content),
 			AgentPersona:       stringFromPtr(req.AgentPersona),
-			UserAddress:        stringFromPtr(req.UserAddress),
+			PreferredName:      stringFromPtr(req.PreferredName),
 			ResponseStyle:      stringFromPtr(req.ResponseStyle),
 			Version:            1,
 			AutoEvo:            resolvedAutoEvo,
@@ -100,7 +100,7 @@ func upsertManagedPreferenceContent(r *http.Request, db *gorm.DB, userID, userNa
 			"user_id":               row.UserID,
 			"content":               row.Content,
 			"agent_persona":         row.AgentPersona,
-			"user_address":          row.UserAddress,
+			"preferred_name":        row.PreferredName,
 			"response_style":        row.ResponseStyle,
 			"content_hash":          row.ContentHash,
 			"version":               row.Version,
@@ -135,7 +135,7 @@ func upsertManagedPreferenceContent(r *http.Request, db *gorm.DB, userID, userNa
 
 	newContent := existing.Content
 	newAgentPersona := existing.AgentPersona
-	newUserAddress := existing.UserAddress
+	newPreferredName := existing.PreferredName
 	newResponseStyle := existing.ResponseStyle
 	if req.Content != nil {
 		newContent = *req.Content
@@ -143,8 +143,8 @@ func upsertManagedPreferenceContent(r *http.Request, db *gorm.DB, userID, userNa
 	if req.AgentPersona != nil {
 		newAgentPersona = *req.AgentPersona
 	}
-	if req.UserAddress != nil {
-		newUserAddress = *req.UserAddress
+	if req.PreferredName != nil {
+		newPreferredName = *req.PreferredName
 	}
 	if req.ResponseStyle != nil {
 		newResponseStyle = *req.ResponseStyle
@@ -152,12 +152,12 @@ func upsertManagedPreferenceContent(r *http.Request, db *gorm.DB, userID, userNa
 	hashRow := *existing
 	hashRow.Content = newContent
 	hashRow.AgentPersona = newAgentPersona
-	hashRow.UserAddress = newUserAddress
+	hashRow.PreferredName = newPreferredName
 	hashRow.ResponseStyle = newResponseStyle
 	update := map[string]any{
 		"content":         newContent,
 		"agent_persona":   newAgentPersona,
-		"user_address":    newUserAddress,
+		"preferred_name":  newPreferredName,
 		"response_style":  newResponseStyle,
 		"content_hash":    evolution.HashSystemUserPreference(hashRow),
 		"version":         existing.Version + 1,
@@ -207,7 +207,7 @@ func upsertManagedPreferenceContent(r *http.Request, db *gorm.DB, userID, userNa
 	}
 	existing.Content = newContent
 	existing.AgentPersona = newAgentPersona
-	existing.UserAddress = newUserAddress
+	existing.PreferredName = newPreferredName
 	existing.ResponseStyle = newResponseStyle
 	existing.ContentHash = evolution.HashSystemUserPreference(*existing)
 	existing.Version++
@@ -304,8 +304,8 @@ func Upsert(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if req.UserAddress != nil {
-		if err := validateManagedContentLength(*req.UserAddress); err != nil {
+	if req.PreferredName != nil {
+		if err := validateManagedContentLength(*req.PreferredName); err != nil {
 			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -533,7 +533,7 @@ func Confirm(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{
 		"content":        row.Content,
 		"agent_persona":  row.AgentPersona,
-		"user_address":   row.UserAddress,
+		"preferred_name": row.PreferredName,
 		"response_style": row.ResponseStyle,
 		"version":        row.Version,
 	})
@@ -575,7 +575,7 @@ func firstNonEmpty(values ...string) string {
 func hasPreferenceUpsertField(req upsertRequest) bool {
 	return req.Content != nil ||
 		req.AgentPersona != nil ||
-		req.UserAddress != nil ||
+		req.PreferredName != nil ||
 		req.ResponseStyle != nil ||
 		req.AutoEvo != nil
 }

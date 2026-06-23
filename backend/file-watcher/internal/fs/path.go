@@ -12,6 +12,7 @@ import (
 // PathValidator validates filesystem paths.
 type PathValidator interface {
 	EnsureAllowed(path string) error
+	AllowedRoots() []string
 }
 
 type pathValidator struct {
@@ -39,6 +40,10 @@ func (v *pathValidator) EnsureAllowed(path string) error {
 		return fmt.Errorf("%s: %s", internal.ErrPathNotAllowed, clean)
 	}
 	return nil
+}
+
+func (v *pathValidator) AllowedRoots() []string {
+	return append([]string(nil), v.allowedRoots...)
 }
 
 func (v *pathValidator) isAllowed(clean string) bool {

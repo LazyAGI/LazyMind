@@ -23,7 +23,6 @@ import "./detail.scss";
 import DataSourceDetailView from "@/modules/dataSource/common/components/DataSourceDetailView";
 import DataSourceSyncPickerModal from "@/modules/dataSource/common/components/DataSourceSyncPickerModal";
 import {
-  CLOUD_SYNC_POLL_INTERVAL_MS,
   CLOUD_SYNC_TIMEOUT_MS,
   type DataSourceDetailState,
   type DataSourceSummary,
@@ -44,7 +43,6 @@ import {
   resolveSyncState,
 } from "./shared";
 import {
-  createScanRequestId,
   createScanV2ApiClient,
   getDocumentDisplayName,
   getDocumentLastUpdatedAt,
@@ -59,7 +57,6 @@ import {
   getScanSourceUpdatedAt,
   inferSourceKind,
   type ScanV2Binding,
-  type ScanV2Client,
   type ScanV2Document,
   type ScanV2Source,
   type ScanV2Summary,
@@ -69,6 +66,9 @@ import {
 const { Text } = Typography;
 
 const SCAN_TREE_PAGE_SIZE = 50;
+const DETAIL_STATUS_POLL_INTERVAL_MS = 3000;
+const DETAIL_STATUS_POLL_TIMEOUT_MS = CLOUD_SYNC_TIMEOUT_MS;
+const DETAIL_SEARCH_DEBOUNCE_MS = 300;
 
 type SyncTreeDataNode = DataNode & {
   treeKey?: string;
@@ -86,150 +86,160 @@ type SyncGenerateScope = {
   is_container?: boolean;
 };
 
-const fallbackSources: Record<
+function buildFallbackSources(t: TFunction): Record<
   string,
   DataSourceSummary & { storageUsed: string }
-> = {
-  "source-feishu-rd": {
-    id: "source-feishu-rd",
-    name: "飞书研发知识库",
-    target: "Wiki://space_rd_platform",
-    documentCount: 1284,
-    status: "active",
-    lastSync: "2026-04-13 10:24",
-    addCount: 18,
-    deleteCount: 2,
-    changeCount: 41,
-    storageUsed: "452.8 MB",
-  },
-  "source-local-ops": {
-    id: "source-local-ops",
-    name: "运维共享盘",
-    target: "/mnt/team-share/ops-docs",
-    documentCount: 764,
-    status: "active",
-    lastSync: "2026-04-13 08:12",
-    addCount: 5,
-    deleteCount: 0,
-    changeCount: 9,
-    storageUsed: "218.6 MB",
-  },
-};
+> {
+  return {
+    "source-feishu-rd": {
+      id: "source-feishu-rd",
+      name: t("admin.dataSourceDemoData.sources.feishuRdName"),
+      target: "Wiki://space_rd_platform",
+      documentCount: 1284,
+      status: "active",
+      lastSync: "2026-04-13 10:24",
+      addCount: 18,
+      deleteCount: 2,
+      changeCount: 41,
+      storageUsed: "452.8 MB",
+    },
+    "source-local-ops": {
+      id: "source-local-ops",
+      name: t("admin.dataSourceDemoData.sources.localOpsName"),
+      target: "/mnt/team-share/ops-docs",
+      documentCount: 764,
+      status: "active",
+      lastSync: "2026-04-13 08:12",
+      addCount: 5,
+      deleteCount: 0,
+      changeCount: 9,
+      storageUsed: "218.6 MB",
+    },
+  };
+}
 
-const documentStatusMap: Record<
+function buildDocumentStatusMap(t: TFunction): Record<
   string,
   {
     storageUsed: string;
     documents: DocumentStatusRow[];
   }
-> = {
-  "source-feishu-rd": {
-    storageUsed: "452.8 MB",
-    documents: [
-      {
-        id: "fs-1",
-        name: "飞书接入开发文档.pdf",
-        path: "/接入文档/飞书接入开发文档.pdf",
-        size: "1.4 MB",
-        tags: ["接入", "飞书"],
-        updateState: "changed",
-        syncDetail: "内容变更，已完成增量重解析",
-        parseStatus: "parsed",
-        sourceUpdatedAt: "2026-04-13 10:21",
-        updatedAt: "2026-04-13 10:24",
-      },
-      {
-        id: "fs-2",
-        name: "OAuth 接口定义说明.docx",
-        path: "/接入文档/OAuth 接口定义说明.docx",
-        size: "856 KB",
-        tags: ["OAuth", "接口"],
-        updateState: "new",
-        syncDetail: "新文档入库，已生成向量索引",
-        parseStatus: "parsed",
-        sourceUpdatedAt: "2026-04-13 09:52",
-        updatedAt: "2026-04-13 09:58",
-      },
-      {
-        id: "fs-3",
-        name: "知识库权限申请流程.md",
-        path: "/权限中心/知识库权限申请流程.md",
-        size: "122 KB",
-        tags: ["权限"],
-        updateState: "changed",
-        syncDetail: "权限范围更新，等待重建索引",
-        parseStatus: "reindexing",
-        sourceUpdatedAt: "2026-04-13 09:40",
-        updatedAt: "2026-04-13 09:41",
-      },
-      {
-        id: "fs-4",
-        name: "旧版连接说明.docx",
-        path: "/历史归档/旧版连接说明.docx",
-        size: "730 KB",
-        tags: ["归档"],
-        updateState: "unchanged",
-        syncDetail: "检测到重复文档，按多版本策略保留历史版本",
-        parseStatus: "duplicate",
-        sourceUpdatedAt: "2026-04-11 23:55",
-        updatedAt: "2026-04-12 02:01",
-      },
-    ],
-  },
-  "source-local-ops": {
-    storageUsed: "218.6 MB",
-    documents: [
-      {
-        id: "ops-1",
-        name: "巡检标准作业手册.pdf",
-        path: "/mnt/team-share/ops-docs/巡检标准作业手册.pdf",
-        size: "2.1 MB",
-        tags: ["巡检", "SOP"],
-        updateState: "changed",
-        syncDetail: "内容变更，已完成增量重解析",
-        parseStatus: "parsed",
-        sourceUpdatedAt: "2026-04-13 08:09",
-        updatedAt: "2026-04-13 08:12",
-      },
-      {
-        id: "ops-2",
-        name: "应急值班排班.xlsx",
-        path: "/mnt/team-share/ops-docs/应急值班排班.xlsx",
-        size: "414 KB",
-        tags: ["排班"],
-        updateState: "new",
-        syncDetail: "新文档入库，已完成索引生成",
-        parseStatus: "parsed",
-        sourceUpdatedAt: "2026-04-13 08:00",
-        updatedAt: "2026-04-13 08:05",
-      },
-      {
-        id: "ops-3",
-        name: "故障复盘记录.md",
-        path: "/mnt/team-share/ops-docs/故障复盘记录.md",
-        size: "96 KB",
-        tags: ["复盘"],
-        updateState: "changed",
-        syncDetail: "检测到内容变更，正在重新切分 chunk",
-        parseStatus: "reindexing",
-        sourceUpdatedAt: "2026-04-13 07:53",
-        updatedAt: "2026-04-13 07:58",
-      },
-      {
-        id: "ops-4",
-        name: "历史拓扑图.pptx",
-        path: "/mnt/team-share/ops-docs/历史拓扑图.pptx",
-        size: "8.2 MB",
-        tags: ["拓扑", "历史"],
-        updateState: "deleted",
-        syncDetail: "文件已从源目录删除，等待清理索引",
-        parseStatus: "deleted",
-        sourceUpdatedAt: "2026-04-12 21:10",
-        updatedAt: "2026-04-12 21:16",
-      },
-    ],
-  },
-};
+> {
+  return {
+    "source-feishu-rd": {
+      storageUsed: "452.8 MB",
+      documents: [
+        {
+          id: "fs-1",
+          name: t("admin.dataSourceDemoData.docs.feishuDevDocName"),
+          path: t("admin.dataSourceDemoData.docs.feishuDevDocPath"),
+          size: "1.4 MB",
+          tags: [
+            t("admin.dataSourceDemoData.tags.integration"),
+            t("admin.dataSourceDemoData.tags.feishu"),
+          ],
+          updateState: "changed",
+          syncDetail: t("admin.dataSourceDemoData.syncDetails.changedReparsed"),
+          parseStatus: "parsed",
+          sourceUpdatedAt: "2026-04-13 10:21",
+          updatedAt: "2026-04-13 10:24",
+        },
+        {
+          id: "fs-2",
+          name: t("admin.dataSourceDemoData.docs.oauthSpecName"),
+          path: t("admin.dataSourceDemoData.docs.oauthSpecPath"),
+          size: "856 KB",
+          tags: ["OAuth", t("admin.dataSourceDemoData.tags.api")],
+          updateState: "new",
+          syncDetail: t("admin.dataSourceDemoData.syncDetails.newVectorIndexed"),
+          parseStatus: "parsed",
+          sourceUpdatedAt: "2026-04-13 09:52",
+          updatedAt: "2026-04-13 09:58",
+        },
+        {
+          id: "fs-3",
+          name: t("admin.dataSourceDemoData.docs.permissionFlowName"),
+          path: t("admin.dataSourceDemoData.docs.permissionFlowPath"),
+          size: "122 KB",
+          tags: [t("admin.dataSourceDemoData.tags.permission")],
+          updateState: "changed",
+          syncDetail: t("admin.dataSourceDemoData.syncDetails.permissionReindexing"),
+          parseStatus: "reindexing",
+          sourceUpdatedAt: "2026-04-13 09:40",
+          updatedAt: "2026-04-13 09:41",
+        },
+        {
+          id: "fs-4",
+          name: t("admin.dataSourceDemoData.docs.legacyConnectionName"),
+          path: t("admin.dataSourceDemoData.docs.legacyConnectionPath"),
+          size: "730 KB",
+          tags: [t("admin.dataSourceDemoData.tags.archive")],
+          updateState: "unchanged",
+          syncDetail: t("admin.dataSourceDemoData.syncDetails.duplicateVersioned"),
+          parseStatus: "duplicate",
+          sourceUpdatedAt: "2026-04-11 23:55",
+          updatedAt: "2026-04-12 02:01",
+        },
+      ],
+    },
+    "source-local-ops": {
+      storageUsed: "218.6 MB",
+      documents: [
+        {
+          id: "ops-1",
+          name: t("admin.dataSourceDemoData.docs.inspectionManualName"),
+          path: t("admin.dataSourceDemoData.docs.inspectionManualPath"),
+          size: "2.1 MB",
+          tags: [t("admin.dataSourceDemoData.tags.inspection"), "SOP"],
+          updateState: "changed",
+          syncDetail: t("admin.dataSourceDemoData.syncDetails.changedReparsed"),
+          parseStatus: "parsed",
+          sourceUpdatedAt: "2026-04-13 08:09",
+          updatedAt: "2026-04-13 08:12",
+        },
+        {
+          id: "ops-2",
+          name: t("admin.dataSourceDemoData.docs.dutyScheduleName"),
+          path: t("admin.dataSourceDemoData.docs.dutySchedulePath"),
+          size: "414 KB",
+          tags: [t("admin.dataSourceDemoData.tags.schedule")],
+          updateState: "new",
+          syncDetail: t("admin.dataSourceDemoData.syncDetails.newIndexDone"),
+          parseStatus: "parsed",
+          sourceUpdatedAt: "2026-04-13 08:00",
+          updatedAt: "2026-04-13 08:05",
+        },
+        {
+          id: "ops-3",
+          name: t("admin.dataSourceDemoData.docs.incidentReviewName"),
+          path: t("admin.dataSourceDemoData.docs.incidentReviewPath"),
+          size: "96 KB",
+          tags: [t("admin.dataSourceDemoData.tags.review")],
+          updateState: "changed",
+          syncDetail: t("admin.dataSourceDemoData.syncDetails.rechunking"),
+          parseStatus: "reindexing",
+          sourceUpdatedAt: "2026-04-13 07:53",
+          updatedAt: "2026-04-13 07:58",
+        },
+        {
+          id: "ops-4",
+          name: t("admin.dataSourceDemoData.docs.topologyArchiveName"),
+          path: t("admin.dataSourceDemoData.docs.topologyArchivePath"),
+          size: "8.2 MB",
+          tags: [
+            t("admin.dataSourceDemoData.tags.topology"),
+            t("admin.dataSourceDemoData.tags.history"),
+          ],
+          updateState: "deleted",
+          syncDetail: t("admin.dataSourceDemoData.syncDetails.sourceDeletedCleanup"),
+          parseStatus: "deleted",
+          sourceUpdatedAt: "2026-04-12 21:10",
+          updatedAt: "2026-04-12 21:16",
+        },
+      ],
+    },
+  };
+}
 
 function getParseStatusMeta(status: DocumentStatusRow["parseStatus"], t: TFunction) {
   if (status === "parsed") {
@@ -299,17 +309,20 @@ function getDocumentType(name: string) {
   return extension.toLowerCase();
 }
 
-function mapScanSyncDetail(updateState: DocumentStatusRow["updateState"]) {
+function mapScanSyncDetail(
+  updateState: DocumentStatusRow["updateState"],
+  t: TFunction,
+) {
   if (updateState === "new") {
-    return "新文件待入库";
+    return t("admin.dataSourceFileUpdateNewDetail");
   }
   if (updateState === "changed") {
-    return "内容变化待重解析";
+    return t("admin.dataSourceFileUpdateChangedDetail");
   }
   if (updateState === "deleted") {
-    return "源端删除待清理";
+    return t("admin.dataSourceFileUpdateDeletedDetail");
   }
-  return "当前文件已是最新";
+  return t("admin.dataSourceFileUpdateUnchangedDetail");
 }
 
 function stringifyScanError(value: unknown) {
@@ -323,7 +336,7 @@ function stringifyScanError(value: unknown) {
   return `${value}`;
 }
 
-function mapScanDocumentToDetail(item: ScanV2Document): DocumentStatusRow {
+function mapScanDocumentToDetail(item: ScanV2Document, t: TFunction): DocumentStatusRow {
   const sourceState = resolveSourceState({
     source_state: item.source_state,
     update_type: item.update_type || item.source_state,
@@ -353,7 +366,7 @@ function mapScanDocumentToDetail(item: ScanV2Document): DocumentStatusRow {
     size: formatBytes(item.size_bytes),
     tags: item.tags || [],
     updateState,
-    syncDetail: item.update_desc || mapScanSyncDetail(updateState),
+    syncDetail: item.update_desc || mapScanSyncDetail(updateState, t),
     parseStatus: normalizeDataSourceParseStatus(parseState),
     sourceUpdatedAt: lastSyncedAt || "-",
     updatedAt: lastSyncedAt || "-",
@@ -557,45 +570,17 @@ function getTreeNodeUpdateState(node: ScanV2TreeNode) {
   );
 }
 
-function shouldPollByParseStatus(items: DocumentStatusRow[]) {
-  return items.some(
-    (item) => item.parseStatus !== "parsed" && item.parseStatus !== "failed",
-  );
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
-async function waitForCloudSyncRun(
-  client: ScanV2Client,
-  sourceId: string,
-  runId?: string,
+function shouldPollDocumentStatus(
+  items: DocumentStatusRow[],
+  trackedKeys?: Set<string>,
 ) {
-  const deadline = Date.now() + CLOUD_SYNC_TIMEOUT_MS;
-
-  while (Date.now() < deadline) {
-    const summaryResponse = await client.getSourceSummary({ sourceId }).catch(() => null);
-    const status = `${(summaryResponse?.data as any)?.status || ""}`.toUpperCase();
-
-    if (status === "SUCCEEDED" || status === "PARTIAL_SUCCESS" || summaryResponse?.data) {
-      return { run_id: runId, status: status || "SUCCEEDED" };
-    }
-
-    if (
-      status.includes("FAILED") ||
-      status.includes("ERROR") ||
-      status.includes("CANCEL")
-    ) {
-      throw new Error("飞书云同步失败，请检查绑定配置后重试。");
-    }
-
-    await sleep(CLOUD_SYNC_POLL_INTERVAL_MS);
-  }
-
-  throw new Error("等待飞书目录同步超时，请稍后重试。");
+  return items.some(
+    (item) =>
+      (!trackedKeys || trackedKeys.has(item.id) || trackedKeys.has(item.path)) &&
+      (item.parseStatus === "reindexing" ||
+        item.syncState === "PENDING" ||
+        item.syncState === "RUNNING"),
+  );
 }
 
 export default function DataSourceDetail() {
@@ -607,6 +592,8 @@ export default function DataSourceDetail() {
 
   const routeState = location.state as DataSourceDetailState | null;
   const routeSource = routeState?.source;
+  const fallbackSources = useMemo(() => buildFallbackSources(t), [t]);
+  const documentStatusMap = useMemo(() => buildDocumentStatusMap(t), [t]);
   const fallbackSource = fallbackSources[id];
   const initialSource = routeSource
     ? {
@@ -619,7 +606,9 @@ export default function DataSourceDetail() {
     routeSource?.documents || (initialSource && documentStatusMap[initialSource.id]?.documents) || [];
   const [detailSource, setDetailSource] = useState<DataSourceSummary | undefined>(initialSource);
   const [documents, setDocuments] = useState<DocumentStatusRow[]>(initialDocumentsSeed);
+  const [displayDocuments, setDisplayDocuments] = useState<DocumentStatusRow[]>(initialDocumentsSeed);
   const [detailLoading, setDetailLoading] = useState(true);
+  const [documentLoading, setDocumentLoading] = useState(false);
   const [syncSelectedDocIds, setSyncSelectedDocIds] = useState<string[]>([]);
   const [syncPickerOpen, setSyncPickerOpen] = useState(false);
   const [syncTreeNodes, setSyncTreeNodes] = useState<ScanV2TreeNode[]>([]);
@@ -641,12 +630,19 @@ export default function DataSourceDetail() {
   } | null>(null);
   const syncPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncPollingActiveRef = useRef(false);
+  const syncPollSeqRef = useRef(0);
+  const detailRefreshSeqRef = useRef(0);
+  const documentRefreshSeqRef = useRef(0);
+  const documentSearchSeqRef = useRef(0);
+  const keywordRef = useRef("");
   const syncTreeRequestSeqRef = useRef(0);
   const syncTreeInitialLoadRef = useRef(false);
   const syncTreeChildrenCacheRef = useRef(new Map<string, ScanV2TreeNode[]>());
 
   const stopSyncPolling = useCallback(() => {
     syncPollingActiveRef.current = false;
+    syncPollSeqRef.current += 1;
+    documentRefreshSeqRef.current += 1;
     if (syncPollTimerRef.current) {
       clearTimeout(syncPollTimerRef.current);
       syncPollTimerRef.current = null;
@@ -657,6 +653,9 @@ export default function DataSourceDetail() {
     stopSyncPolling();
     setDetailSource(initialSource);
     setDocuments(initialDocumentsSeed);
+    setDisplayDocuments(initialDocumentsSeed);
+    setKeyword("");
+    setDocumentLoading(false);
     setSyncSelectedDocIds([]);
     setSyncPickerOpen(false);
     setSyncTreeNodes([]);
@@ -664,11 +663,14 @@ export default function DataSourceDetail() {
     setSyncTreeLoading(false);
     setSyncSelectionToken("");
     setSyncSubmitting(false);
+    detailRefreshSeqRef.current += 1;
+    documentRefreshSeqRef.current += 1;
+    documentSearchSeqRef.current += 1;
     syncTreeRequestSeqRef.current += 1;
     syncTreeInitialLoadRef.current = false;
     syncTreeChildrenCacheRef.current.clear();
     setLastOperation(null);
-  }, [id, routeSource?.id, routeSource?.lastSync, stopSyncPolling]);
+  }, [id, routeSource?.id, routeSource?.lastSync, stopSyncPolling, t]);
 
   useEffect(() => {
     setLastSync(detailSource?.lastSync || t("admin.dataSourceNeverSynced"));
@@ -696,6 +698,9 @@ export default function DataSourceDetail() {
         setDetailLoading(true);
       }
 
+      const requestSeq = detailRefreshSeqRef.current + 1;
+      detailRefreshSeqRef.current = requestSeq;
+
       try {
         const client = createScanV2ApiClient();
         const sourceResponse = await client.getSource({ sourceId: id });
@@ -712,9 +717,13 @@ export default function DataSourceDetail() {
           pageSize: 200,
         });
         const summaryResponse = await client.getSourceSummary({ sourceId: id }).catch(() => null);
-        const nextDocuments = (documentsResponse.data.items || []).map(
-          mapScanDocumentToDetail,
+        const nextDocuments = (documentsResponse.data.items || []).map((item) =>
+          mapScanDocumentToDetail(item, t),
         );
+        if (detailRefreshSeqRef.current !== requestSeq) {
+          return null;
+        }
+
         const nextSource = buildDetailSummaryFromSource(
           source,
           (summaryResponse?.data || sourceResponse.data.summary) as ScanV2Summary | undefined,
@@ -725,6 +734,9 @@ export default function DataSourceDetail() {
 
         setDetailSource(nextSource);
         setDocuments(nextDocuments);
+        if (!keywordRef.current.trim()) {
+          setDisplayDocuments(nextDocuments);
+        }
         setLastSync(nextSource.lastSync || t("admin.dataSourceNeverSynced"));
         if (resetSyncState) {
           setSyncSelectedDocIds([]);
@@ -733,7 +745,7 @@ export default function DataSourceDetail() {
 
         return nextDocuments;
       } catch (error) {
-        if (showError) {
+        if (showError && detailRefreshSeqRef.current === requestSeq) {
           message.error(
             getLocalizedErrorMessage(error, t("common.requestFailed")) ||
               t("common.requestFailed"),
@@ -741,12 +753,107 @@ export default function DataSourceDetail() {
         }
         return null;
       } finally {
-        if (setLoading) {
+        if (setLoading && detailRefreshSeqRef.current === requestSeq) {
           setDetailLoading(false);
         }
       }
     },
-    [id, routeSource?.tenantId, t],
+    [id, routeSource?.bindingId, routeSource?.tenantId, t],
+  );
+
+  const refreshDocumentsFromServer = useCallback(
+    async ({
+      showError = false,
+    }: {
+      showError?: boolean;
+    } = {}): Promise<DocumentStatusRow[] | null> => {
+      if (!id) {
+        return [];
+      }
+
+      const requestSeq = documentRefreshSeqRef.current + 1;
+      documentRefreshSeqRef.current = requestSeq;
+
+      try {
+        const client = createScanV2ApiClient();
+        const documentsResponse = await client.listSourceDocuments({
+          sourceId: id,
+          page: 1,
+          pageSize: 200,
+        });
+        const nextDocuments = (documentsResponse.data.items || []).map((item) =>
+          mapScanDocumentToDetail(item, t),
+        );
+        if (documentRefreshSeqRef.current !== requestSeq) {
+          return null;
+        }
+
+        setDocuments(nextDocuments);
+        if (!keywordRef.current.trim()) {
+          setDisplayDocuments(nextDocuments);
+        }
+
+        return nextDocuments;
+      } catch (error) {
+        if (showError && documentRefreshSeqRef.current === requestSeq) {
+          message.error(
+            getLocalizedErrorMessage(error, t("common.requestFailed")) ||
+              t("common.requestFailed"),
+          );
+        }
+        return null;
+      }
+    },
+    [id, t],
+  );
+
+  const startSyncPolling = useCallback(
+    (seedDocuments: DocumentStatusRow[] | null, trackedKeys?: Set<string>) => {
+      if (!seedDocuments || !shouldPollDocumentStatus(seedDocuments, trackedKeys)) {
+        stopSyncPolling();
+        return;
+      }
+
+      stopSyncPolling();
+      syncPollingActiveRef.current = true;
+      const pollSeq = syncPollSeqRef.current + 1;
+      syncPollSeqRef.current = pollSeq;
+      const startedAt = Date.now();
+
+      const pollOnce = async () => {
+        if (!syncPollingActiveRef.current || syncPollSeqRef.current !== pollSeq) {
+          return;
+        }
+
+        if (Date.now() - startedAt >= DETAIL_STATUS_POLL_TIMEOUT_MS) {
+          stopSyncPolling();
+          return;
+        }
+
+        const latestDocuments = await refreshDocumentsFromServer({
+          showError: false,
+        });
+        if (!syncPollingActiveRef.current || syncPollSeqRef.current !== pollSeq) {
+          return;
+        }
+
+        if (latestDocuments && !shouldPollDocumentStatus(latestDocuments, trackedKeys)) {
+          stopSyncPolling();
+          return;
+        }
+
+        syncPollTimerRef.current = setTimeout(
+          pollOnce,
+          DETAIL_STATUS_POLL_INTERVAL_MS,
+        );
+      };
+
+      syncPollTimerRef.current = setTimeout(
+        pollOnce,
+        DETAIL_STATUS_POLL_INTERVAL_MS,
+      );
+    },
+    [refreshDocumentsFromServer, stopSyncPolling],
   );
 
   useEffect(() => {
@@ -761,28 +868,78 @@ export default function DataSourceDetail() {
       if (cancelled || nextDocuments === null) {
         return;
       }
+      startSyncPolling(nextDocuments);
     };
 
     void loadDetail();
 
     return () => {
       cancelled = true;
+      detailRefreshSeqRef.current += 1;
     };
-  }, [refreshDetailFromServer]);
+  }, [refreshDetailFromServer, startSyncPolling]);
 
-  const filteredDocuments = useMemo(() => {
-    const normalized = keyword.trim().toLowerCase();
-    if (!normalized) {
-      return documents;
+  useEffect(() => {
+    keywordRef.current = keyword;
+    const normalizedKeyword = keyword.trim();
+    const requestSeq = documentSearchSeqRef.current + 1;
+    documentSearchSeqRef.current = requestSeq;
+
+    if (!normalizedKeyword) {
+      setDisplayDocuments(documents);
+      setDocumentLoading(false);
+      return;
     }
 
-    return documents.filter(
-      (item) =>
-        item.name.toLowerCase().includes(normalized) ||
-        item.path.toLowerCase().includes(normalized) ||
-        item.syncDetail.toLowerCase().includes(normalized),
-    );
-  }, [documents, keyword]);
+    const timerId = setTimeout(async () => {
+      if (!id) {
+        return;
+      }
+
+      setDocumentLoading(true);
+      try {
+        const client = createScanV2ApiClient();
+        const documentsResponse = await client.listSourceDocuments({
+          sourceId: id,
+          bindingId: detailSource?.bindingId || routeSource?.bindingId,
+          keyword: normalizedKeyword,
+          page: 1,
+          pageSize: 200,
+        });
+        if (documentSearchSeqRef.current !== requestSeq) {
+          return;
+        }
+        setDisplayDocuments(
+          (documentsResponse.data.items || []).map((item) =>
+            mapScanDocumentToDetail(item, t),
+          ),
+        );
+      } catch (error) {
+        if (documentSearchSeqRef.current !== requestSeq) {
+          return;
+        }
+        message.error(
+          getLocalizedErrorMessage(error, t("common.requestFailed")) ||
+            t("common.requestFailed"),
+        );
+      } finally {
+        if (documentSearchSeqRef.current === requestSeq) {
+          setDocumentLoading(false);
+        }
+      }
+    }, DETAIL_SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      clearTimeout(timerId);
+      documentSearchSeqRef.current += 1;
+    };
+  }, [detailSource?.bindingId, id, keyword, routeSource?.bindingId, t]);
+
+  useEffect(() => {
+    if (!keywordRef.current.trim()) {
+      setDisplayDocuments(documents);
+    }
+  }, [documents]);
 
   const sourceNameForPath = detailSource?.name || t("admin.dataSourceFallbackName");
 
@@ -792,7 +949,7 @@ export default function DataSourceDetail() {
       options: { selectAll?: boolean; closeOnError?: boolean } = {},
     ) => {
       if (!detailSource?.id) {
-        message.error("未获取到数据源信息，无法加载目录树。");
+        message.error(t("admin.dataSourceDetailMissingForTree"));
         if (options.closeOnError) {
           setSyncPickerOpen(false);
         }
@@ -967,7 +1124,7 @@ export default function DataSourceDetail() {
 
   const openSyncPicker = () => {
     if (!detailSource?.id) {
-      message.error("未获取到数据源信息，无法加载目录树。");
+      message.error(t("admin.dataSourceDetailMissingForTree"));
       return;
     }
 
@@ -989,7 +1146,7 @@ export default function DataSourceDetail() {
     }
 
     if (!detailSource?.id) {
-      message.error("未获取到数据源信息，无法发起拉取。");
+      message.error(t("admin.dataSourceDetailMissingForSync"));
       return false;
     }
 
@@ -1130,33 +1287,7 @@ export default function DataSourceDetail() {
         showError: true,
         resetSyncState: false,
       });
-      if (refreshedDocuments && shouldPollByParseStatus(refreshedDocuments)) {
-        syncPollingActiveRef.current = true;
-
-        const pollOnce = async () => {
-          if (!syncPollingActiveRef.current) {
-            return;
-          }
-
-          const latestDocuments = await refreshDetailFromServer({
-            setLoading: false,
-            showError: false,
-            resetSyncState: false,
-          });
-          if (!syncPollingActiveRef.current) {
-            return;
-          }
-
-          if (latestDocuments && !shouldPollByParseStatus(latestDocuments)) {
-            stopSyncPolling();
-            return;
-          }
-
-          syncPollTimerRef.current = setTimeout(pollOnce, 3000);
-        };
-
-        syncPollTimerRef.current = setTimeout(pollOnce, 3000);
-      }
+      startSyncPolling(refreshedDocuments, targetSet);
 
       return true;
     } catch (error) {
@@ -1377,12 +1508,13 @@ export default function DataSourceDetail() {
       t={t}
       detailSource={detailSource ?? null}
       detailLoading={detailLoading}
+      documentLoading={documentLoading}
       lastSync={lastSync}
       documents={documents}
       lastOperation={lastOperation}
       keyword={keyword}
       setKeyword={setKeyword}
-      filteredDocuments={filteredDocuments}
+      filteredDocuments={displayDocuments}
       columns={columns}
       onBack={() => navigate("/data-sources")}
       onOpenSyncPicker={() => {

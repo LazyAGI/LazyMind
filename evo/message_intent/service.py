@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 import hashlib
 import re
@@ -29,31 +29,68 @@ from evo.artifact_runtime import (
 )
 from evo.artifact_runtime.utils import canonical_json, normalize_json_value
 
-from .models import PlannerIntent, PlannerOutput, ResolvedIntent
-from .planner import StructuredJSONNextIntentPlanner
-from .store import MessageLease, MessageSessionStore, MessageStoreConflict, PendingApproval, PendingTurnBuffer
+from evo.operations.eval import ANSWER_METRICS, FAILURE_TYPES, answer_score_from_metrics
+from .models import (
+    MUTATING_KINDS,
+    OPERATION_SPECS,
+    PENDING_RESOLUTION_KINDS,
+    READ_ONLY_KINDS,
+    NextOps,
+    ResolvedIntent,
+)
+from .planner import LLMCallable, StructuredJSONNextIntentPlanner
+from .store import MessageLease, MessageSessionStore, MessageStoreConflict, PendingApproval
 from .views import ArtifactViewService, artifact_id_for_key
 
 RUN_ID = 'run_1'
 MIN_PLANNER_CONFIDENCE = 0.65
+DEFAULT_READ_CHARS = 1200
 
 _PATCH_FIELD_TARGETS: dict[str, tuple[str, str]] = {
     'difficulty': ('eval.case_preparation', '/difficulty'),
     'question': ('eval.case', '/question'),
     'reference_answer': ('eval.case', '/reference_answer'),
     'expected_answer': ('eval.case', '/expected_answer'),
+    'answer_correctness': ('eval.judge_result', '/answer_correctness'),
+    'answer_relevance': ('eval.judge_result', '/answer_relevance'),
+    'completeness': ('eval.judge_result', '/completeness'),
+    'format_compliance': ('eval.judge_result', '/format_compliance'),
+    'answer_score': ('eval.judge_result', '/answer_score'),
+    'quality_label': ('eval.judge_result', '/quality_label'),
+    'failure_type': ('eval.judge_result', '/failure_type'),
+    'reason': ('eval.judge_result', '/reason'),
     'target_chat_url': ('eval.target_config', '/target_chat_url'),
-    'evaluation_policy': ('eval.policy', '/evaluation_policy'),
-    'quality_threshold': ('eval.policy', '/quality_threshold'),
+    'answer_good_threshold': ('eval.policy', '/answer_good_threshold'),
     'primary_metric': ('abtest.candidate_config', '/primary_metric'),
     'target_mean_delta': ('abtest.candidate_config', '/target_mean_delta'),
     'goodcase_regression_ratio_limit': ('abtest.candidate_config', '/goodcase_regression_ratio_limit'),
     'regression_epsilon': ('abtest.candidate_config', '/regression_epsilon'),
 }
 _CASE_PATCH_FIELDS = frozenset({'difficulty', 'question', 'reference_answer', 'expected_answer'})
+_CASE_PARTITION_PATCH_ARTIFACTS = frozenset({'eval.case_preparation', 'eval.case', 'eval.judge_result'})
+_NUMERIC_PATCH_FIELDS = frozenset((
+    *ANSWER_METRICS,
+    'answer_score',
+    'answer_good_threshold',
+    'target_mean_delta',
+    'goodcase_regression_ratio_limit',
+    'regression_epsilon',
+))
 _DIFFICULTIES = frozenset({'easy', 'medium', 'hard'})
-_EVALUATION_POLICIES = frozenset({'balanced', 'answer_only', 'retrieval_diagnostic'})
-_METRICS = frozenset({'answer_correctness', 'faithfulness', 'doc_recall', 'context_recall', 'correct_rate'})
+_QUALITY_LABELS = frozenset({'good', 'bad', 'partial', 'infra_failure', 'skipped'})
+_METRICS = frozenset({
+    'answer_score',
+    'answer_correctness',
+    'answer_relevance',
+    'completeness',
+    'format_compliance',
+    'chunk_recall',
+    'chunk_precision',
+    'doc_recall',
+    'doc_precision',
+    'retrieval_score',
+    'correct_rate',
+})
 
 
 @dataclass(frozen=True)
@@ -70,26 +107,7 @@ class MessageHandleResult:
 @dataclass(frozen=True)
 class _ExecutionContext:
     intent_index: int
-    consumed_prefix_start: int
-    consumed_prefix_len: int
     consumed_message_ids: tuple[str, ...]
-    consumed_text: str
-
-
-@dataclass(frozen=True)
-class _BufferSegment:
-    turn_id: str
-    message_id: str
-    content: str
-    processed_cursor: int
-    start: int
-    end: int
-
-
-@dataclass(frozen=True)
-class _PendingBuffer:
-    text: str
-    segments: tuple[_BufferSegment, ...]
 
 
 class MessageIntentService:
@@ -103,25 +121,43 @@ class MessageIntentService:
         artifact_reader: Callable[[str, str], dict | None],
         case_count_getter: Callable[[str], int],
         planner: StructuredJSONNextIntentPlanner,
+        response_llm: LLMCallable | None = None,
     ) -> None:
         self.store = store
         self.planner = planner
+        self.response_llm = response_llm
         self.flow_getter = flow_getter
         self.has_flow = has_flow
         self.flow_status = flow_status
         self.artifact_reader = artifact_reader
         self.case_count_getter = case_count_getter
 
-    def handle(self, thread_id: str, payload: dict[str, Any], *,
-               sync_budget_seconds: float = 3.0) -> MessageHandleResult:
+    def handle(
+        self,
+        thread_id: str,
+        payload: dict[str, Any],
+        *,
+        sync_budget_seconds: float = 3.0,
+        trusted_auto_agent: bool = False,
+    ) -> MessageHandleResult:
         content = str(payload.get('content') or payload.get('message') or '').strip()
         if not content:
             raise ValueError('message content required')
         message_id = str(payload.get('message_id') or f'msg_{uuid.uuid4().hex[:12]}')
         started = time.monotonic()
         with self.store.lease(thread_id) as lease:
-            turn_id, received = self.store.begin_turn(lease, message_id, content)
-            result = self._handle_locked(lease, turn_id, message_id, content)
+            replay = self._replay_duplicate_message(thread_id, message_id)
+            if replay is not None:
+                return replay
+            try:
+                turn_id, received = self.store.begin_turn(lease, message_id, content)
+            except MessageStoreConflict:
+                replay = self._replay_duplicate_message(thread_id, message_id)
+                if replay is not None:
+                    return replay
+                raise
+            result = self._handle_locked(lease, turn_id, message_id, content, payload,
+                                         trusted_auto_agent=trusted_auto_agent)
             if time.monotonic() - started > sync_budget_seconds and result.status == 'done':
                 return MessageHandleResult('accepted', thread_id, turn_id, message_id, result.response, received.seq)
             return result
@@ -129,151 +165,291 @@ class MessageIntentService:
     def subscribe_events(self, thread_id: str, since: int = 0) -> list[dict[str, Any]]:
         return [self._event_payload(event) for event in self.store.scan_events(thread_id, since)]
 
-    def _handle_locked(self, lease: MessageLease, turn_id: str, message_id: str, content: str) -> MessageHandleResult:
-        thread_id = lease.thread_id
-        pending = _pending_buffer(self.store.pending_turn_buffers(thread_id))
-        if not pending.text.strip():
-            response = self._assistant(lease, turn_id, message_id, '没有需要执行的新操作。')
-            self.store.finish_turn(lease, turn_id, status=response.status,
-                                   request_fingerprint='', processed_cursor=len(content))
-            return response
-        cursor = 0
-        intent_index = 0
-        last_response: MessageHandleResult | None = None
-        while cursor < len(pending.text):
-            buffer = pending.text[cursor:]
-            if not buffer.strip():
-                cursor = len(pending.text)
-                break
-            try:
-                plan = self.planner.plan(buffer, message_id=_message_id_at_cursor(
-                    pending, cursor) or message_id, working_set=self._planner_context(thread_id))
-            except ValueError as exc:
-                response = self._clarify(lease, turn_id, message_id, f'planner_failed: {exc}')
-                self._finish_current_turn(lease, turn_id, content, response.status, pending, cursor)
-                return response
-            consumed_len = self._consumed_prefix_len(plan, buffer)
-            if consumed_len < 0:
-                response = self._clarify(lease, turn_id, message_id, '无法可靠确认已消费的消息片段，请重新描述要执行的操作。')
-                self._finish_current_turn(lease, turn_id, content, response.status, pending, cursor)
-                return response
-            consumed_segments = _segments_for_range(pending, cursor, consumed_len)
-            if consumed_len > 0 and not _consumed_message_ids_match(plan, consumed_segments):
-                response = self._clarify(lease, turn_id, message_id, '无法可靠确认已消费的消息归属，请重新描述要执行的操作。')
-                self._finish_current_turn(lease, turn_id, content, response.status, pending, cursor)
-                return response
-            self.store.append_event(
-                lease,
-                'intent_parsed',
-                {'intent': plan.intent.model_dump(mode='json'), 'confidence': plan.confidence, 'status': plan.status},
-                turn_id=turn_id,
-                message_id=message_id,
-            )
-            if plan.status == 'done':
-                if consumed_len > 0 and (cursor + consumed_len) < len(pending.text):
-                    response = self._clarify(lease, turn_id, message_id, 'planner_done 不能只消费消息前缀，请重新描述要执行的操作。')
-                    self._finish_current_turn(lease, turn_id, content, response.status, pending, cursor)
-                    return response
-                cursor = len(pending.text)
-                break
-            if plan.status == 'clarification':
-                response = self._clarify(lease, turn_id, message_id, plan.needs_clarification or '请明确要执行的 evo 操作。')
-                self._finish_current_turn(lease, turn_id, content, response.status, pending, cursor)
-                return response
-            if plan.confidence < MIN_PLANNER_CONFIDENCE:
-                response = self._clarify(lease, turn_id, message_id,
-                                         plan.needs_clarification or '我不够确定要执行哪个 evo 操作，请更明确地描述。')
-                self._finish_current_turn(lease, turn_id, content, response.status, pending, cursor)
-                return response
-            if consumed_len <= 0:
-                response = self._clarify(lease, turn_id, message_id, '无法推进消息消费游标，请更明确地描述。')
-                self._finish_current_turn(lease, turn_id, content, response.status, pending, cursor)
-                return response
-            context = _ExecutionContext(
-                intent_index,
-                cursor,
-                consumed_len,
-                tuple(segment.message_id for segment in consumed_segments) or tuple(
-                    plan.consumed_message_ids or (message_id,)),
-                plan.consumed_text or buffer[:consumed_len],
-            )
-            resolved = self._resolve(thread_id, plan.intent)
-            response = self._execute(lease, turn_id, message_id, resolved, context)
-            cursor += consumed_len
-            self._mark_consumed(lease, pending, cursor)
-            if response.status != 'done':
-                self._finish_current_turn(lease, turn_id, content, response.status, pending, cursor)
-                return response
-            last_response = response
-            intent_index += 1
-        if last_response is not None:
-            self._mark_consumed(lease, pending, cursor)
-            done = self.store.append_event(lease, 'done', {'status': 'done'}, turn_id=turn_id, message_id=message_id)
-            self._finish_current_turn(lease, turn_id, content, last_response.status, pending, cursor)
-            return MessageHandleResult(
-                last_response.status,
-                last_response.thread_id,
-                last_response.turn_id,
-                last_response.message_id,
-                last_response.response,
-                max(last_response.message_event_cursor, done.seq),
-                last_response.pending_approval,
-            )
-        response = self._assistant(lease, turn_id, message_id, '没有需要执行的新操作。')
-        self._finish_current_turn(lease, turn_id, content, response.status, pending, cursor)
-        return response
+    def active_approval(self, thread_id: str) -> PendingApproval | None:
+        return self.store.active_approval(thread_id)
 
-    def _finish_current_turn(
+    def resolve_pending_structured(
+        self,
+        thread_id: str,
+        *,
+        action: str,
+        approval_token: str,
+        command_id: str,
+    ) -> MessageHandleResult:
+        if action not in {'approve', 'reject', 'cancel'}:
+            raise ValueError(f'unsupported approval action: {action}')
+        kind = {'approve': 'approve_pending', 'reject': 'reject_pending', 'cancel': 'cancel_pending'}[action]
+        message_id = f'{command_id}:approval'
+        content = f'structured approval action: {kind}'
+        with self.store.lease(thread_id, owner_id=f'message-intent-structured:{command_id}') as lease:
+            replay = self._replay_structured_approval(thread_id, message_id)
+            if replay is not None:
+                active = self.store.active_approval(thread_id)
+                if replay.status == 'done' or active is None or active.approval_token != approval_token:
+                    return replay
+                attempt = self.store.message_turn_count(thread_id, message_id)
+                message_id = f'{message_id}:repair:{attempt}'
+            try:
+                turn_id, _ = self.store.begin_turn(lease, message_id, content)
+            except MessageStoreConflict:
+                replay = self._replay_duplicate_message(thread_id, message_id)
+                if replay is not None:
+                    return replay
+                raise
+            result = self._resolve_pending(lease, turn_id, message_id, kind, approval_token)
+            self.store.finish_turn(lease, turn_id, status=result.status)
+            return result
+
+    def _replay_structured_approval(self, thread_id: str, message_id: str) -> MessageHandleResult | None:
+        existing = self.store.last_turn_for_message_family(thread_id, message_id)
+        if existing is None:
+            return None
+        return self._message_result_from_turn(thread_id, existing)
+
+    def _replay_duplicate_message(self, thread_id: str, message_id: str) -> MessageHandleResult | None:
+        existing = self.store.last_turn_for_message(thread_id, message_id)
+        if existing is None:
+            return None
+        return self._message_result_from_turn(thread_id, existing)
+
+    def _message_result_from_turn(self, thread_id: str, existing: Mapping[str, Any]) -> MessageHandleResult:
+        turn_id = str(existing['turn_id'])
+        message_id = str(existing['message_id'])
+        assistant = self.store.latest_assistant_for_turn(thread_id, turn_id)
+        response = '' if assistant is None else str(assistant.payload.get('content') or '')
+        cursor = int(existing.get('message_event_cursor') or 0)
+        if assistant is not None:
+            cursor = max(cursor, assistant.seq)
+        confirmation = self.store.confirmation_for_turn(thread_id, turn_id, message_id)
+        pending = confirmation.payload if confirmation is not None else {}
+        approval_token = str(pending.get('approval_token') or '')
+        preview_hash = str(pending.get('preview_hash') or '')
+        return MessageHandleResult(
+            str(existing.get('status') or 'done'),
+            thread_id,
+            turn_id,
+            message_id,
+            response,
+            cursor,
+            None if not approval_token else {'approval_token': approval_token, 'preview_hash': preview_hash},
+        )
+
+    def _handle_locked(
         self,
         lease: MessageLease,
         turn_id: str,
+        message_id: str,
         content: str,
-        status: str,
-        pending: _PendingBuffer,
-        consumed_cursor: int,
-    ) -> None:
-        self._mark_consumed(lease, pending, consumed_cursor)
-        current = next((segment for segment in pending.segments if segment.turn_id == turn_id), None)
-        processed_cursor = len(content) if current is None else min(
-            len(content),
-            max(
-                current.processed_cursor,
-                current.processed_cursor + max(0, min(consumed_cursor, current.end) - current.start),
-            ),
+        payload: dict[str, Any] | None = None,
+        trusted_auto_agent: bool = False,
+    ) -> MessageHandleResult:
+        thread_id = lease.thread_id
+        prior_reminder = self.store.reminder(thread_id)
+        try:
+            plan = self.planner.plan(
+                content,
+                message_id=message_id,
+                working_set=self._planner_context(lease, turn_id, message_id, payload or {}, trusted_auto_agent),
+                reminder=prior_reminder,
+            )
+        except ValueError as exc:
+            self.store.set_reminder(lease, prior_reminder)
+            self._set_blocked_next_ops(lease, content, None, f'planner_failed: {exc}')
+            response = self._clarify(
+                lease,
+                turn_id,
+                message_id,
+                '我没能可靠解析这条消息要执行的 evo 操作，请换个更明确的说法。',
+            )
+            self.store.finish_turn(lease, turn_id, status=response.status)
+            return response
+
+        self.store.append_event(
+            lease,
+            'intent_parsed',
+            {
+                'status': plan.status,
+                'next_ops': None if plan.next_ops is None else plan.next_ops.model_dump(mode='json'),
+                'confidence': plan.confidence,
+                'reminder': plan.reminder,
+                'clarification': plan.clarification,
+            },
+            turn_id=turn_id,
+            message_id=message_id,
         )
-        self.store.finish_turn(lease, turn_id, status=status, request_fingerprint='', processed_cursor=processed_cursor)
 
-    def _mark_consumed(self, lease: MessageLease, pending: _PendingBuffer, consumed_cursor: int) -> None:
-        updates: dict[str, int] = {}
-        for segment in pending.segments:
-            overlap = max(0, min(consumed_cursor, segment.end) - segment.start)
-            if overlap > 0:
-                updates[segment.turn_id] = max(updates.get(
-                    segment.turn_id, segment.processed_cursor), segment.processed_cursor + overlap)
-        for segment in pending.segments:
-            value = updates.get(segment.turn_id)
-            if value is not None:
-                self.store.update_turn_cursor(lease, segment.turn_id, min(len(segment.content), value))
+        if plan.status == 'done':
+            self.store.set_reminder(lease, plan.reminder)
+            self.store.clear_blocked_next_ops(lease)
+            response = self._assistant(lease, turn_id, message_id, '没有需要执行的新操作。')
+            self.store.finish_turn(lease, turn_id, status=response.status)
+            return response
+        if plan.status == 'clarification':
+            self.store.set_reminder(lease, plan.reminder)
+            self._set_blocked_next_ops(lease, content, plan.next_ops, plan.clarification or 'clarification')
+            response = self._clarify(lease, turn_id, message_id, plan.clarification or '请明确要执行的 evo 操作。')
+            self.store.finish_turn(lease, turn_id, status=response.status)
+            return response
+        if plan.next_ops is None:
+            self.store.set_reminder(lease, plan.reminder)
+            self._set_blocked_next_ops(lease, content, None, 'planner did not provide next_ops')
+            response = self._clarify(
+                lease,
+                turn_id,
+                message_id,
+                '我没能可靠解析这条消息要执行的 evo 操作，请换个更明确的说法。',
+            )
+            self.store.finish_turn(lease, turn_id, status=response.status)
+            return response
+        return self._handle_next_ops(
+            lease,
+            turn_id,
+            message_id,
+            content,
+            plan.next_ops,
+            reminder_to_store=plan.reminder,
+            update_reminder=True,
+        )
 
-    def _planner_context(self, thread_id: str) -> dict[str, Any]:
-        return {
-            'conversation_working_set': self.store.working_set(thread_id),
+    def _handle_next_ops(
+        self,
+        lease: MessageLease,
+        turn_id: str,
+        message_id: str,
+        content: str,
+        next_ops: NextOps,
+        *,
+        reminder_to_store: str,
+        update_reminder: bool,
+    ) -> MessageHandleResult:
+        if update_reminder:
+            self.store.set_reminder(lease, reminder_to_store)
+        gate = self._gate_next_ops(lease, turn_id, message_id, next_ops)
+        if gate:
+            self._set_blocked_next_ops(lease, content, next_ops, gate)
+            response = self._clarify(lease, turn_id, message_id, gate)
+            self.store.finish_turn(lease, turn_id, status=response.status)
+            return response
+        resolved = self._resolve_next_ops(lease.thread_id, next_ops)
+        gate = self._gate_next_ops(lease, turn_id, message_id, next_ops, resolved)
+        if gate:
+            self._set_blocked_next_ops(lease, content, next_ops, gate)
+            response = self._clarify(lease, turn_id, message_id, gate)
+            self.store.finish_turn(lease, turn_id, status=response.status)
+            return response
+        context = _ExecutionContext(intent_index=0, consumed_message_ids=(message_id,))
+        response = self._execute(lease, turn_id, message_id, resolved, context)
+        if response.status in {'clarification', 'error'}:
+            self._set_blocked_next_ops(lease, content, next_ops, response.response)
+        else:
+            self.store.clear_blocked_next_ops(lease)
+        self.store.finish_turn(lease, turn_id, status=response.status)
+        return response
+
+    def _planner_context(
+        self,
+        lease: MessageLease,
+        turn_id: str,
+        message_id: str,
+        payload: Mapping[str, Any] | None = None,
+        trusted_auto_agent: bool = False,
+    ) -> dict[str, Any]:
+        thread_id = lease.thread_id
+        working_set = dict(self.store.working_set(thread_id))
+        working_set.pop('reminder', None)
+        approval = self._active_approval(lease, turn_id, message_id)
+        context = {
+            'conversation_working_set': working_set,
             'flow_status': self.flow_status(thread_id),
+            'active_approval': None if approval is None else {
+                'approval_token': approval.approval_token,
+                'intent_kind': approval.intent_kind,
+                'risk_level': approval.risk_level,
+                'expires_at': approval.expires_at,
+            },
         }
+        auto_context = _auto_agent_context(payload or {}, trusted=trusted_auto_agent)
+        if auto_context:
+            context['auto_agent_context'] = auto_context
+        return context
 
-    def _resolve(self, thread_id: str, intent: PlannerIntent) -> ResolvedIntent:
-        case_id = intent.case_id or self._case_id_from_ref(thread_id, intent.case_ref)
-        case_ids = intent.case_ids or self._case_ids_from_ref(thread_id, intent.case_ref)
-        if case_id:
+    def _gate_next_ops(
+        self,
+        lease: MessageLease,
+        turn_id: str,
+        message_id: str,
+        next_ops: NextOps,
+        resolved: ResolvedIntent | None = None,
+    ) -> str:
+        if next_ops.confidence < MIN_PLANNER_CONFIDENCE:
+            return '我不够确定要执行哪个 evo 操作，请更明确地描述。'
+        kind = next_ops.kind
+        spec = OPERATION_SPECS[kind]
+        if not spec.runtime_supported:
+            return spec.unsupported_reason or f'{kind} is not supported by the runtime yet'
+        if self._active_approval(lease, turn_id, message_id) is not None:
+            if kind not in READ_ONLY_KINDS and kind not in PENDING_RESOLUTION_KINDS:
+                return '已有待确认操作，请先确认或取消后再发起新的修改或流程控制。'
+        if kind in MUTATING_KINDS and not self.has_flow(lease.thread_id):
+            return '当前还没有可控制的 evo 流程；请先启动流程，或先查看当前状态。'
+        if resolved is not None and resolved.kind == 'unsupported':
+            return resolved.reason or '暂不支持该 evo 操作。'
+        return ''
+
+    def _set_blocked_next_ops(
+        self,
+        lease: MessageLease,
+        content: str,
+        next_ops: NextOps | None,
+        reason: str,
+    ) -> None:
+        self.store.set_blocked_next_ops(lease, {
+            'source_message': str(content or '').strip(),
+            'next_ops': None if next_ops is None else next_ops.model_dump(mode='json'),
+            'reason': str(reason or '').strip(),
+            'created_at': time.time(),
+        })
+
+    def _active_approval(
+        self,
+        lease: MessageLease,
+        turn_id: str = '',
+        message_id: str = '',
+    ) -> PendingApproval | None:
+        approval = self.store.active_approval(lease.thread_id)
+        if approval is None:
+            return None
+        if approval.expires_at > time.time():
+            return approval
+        self.store.expire_approval(lease, approval.approval_token, turn_id=turn_id, message_id=message_id)
+        return None
+
+    def _resolve_next_ops(self, thread_id: str, next_ops: NextOps) -> ResolvedIntent:
+        args = next_ops.args.model_dump(mode='python') if hasattr(
+            next_ops.args, 'model_dump') else dict(next_ops.args or {})
+        kind = next_ops.kind
+        case_ref = str(args.get('case_ref') or args.get('case') or '')
+        case_id = str(args.get('case_id') or '') or self._case_id_from_ref(thread_id, case_ref)
+        case_ids = _string_tuple(args.get('case_ids')) or self._case_ids_from_ref(thread_id, case_ref)
+        if case_id or case_ids:
             allowed = set(flow_case_ids(self.case_count_getter(thread_id)))
-            if case_id not in allowed:
+            if case_id and case_id not in allowed:
                 return ResolvedIntent(kind='unsupported', reason=f'unknown case id: {case_id}')
-        if case_ids:
-            allowed = set(flow_case_ids(self.case_count_getter(thread_id)))
             unknown = [item for item in case_ids if item not in allowed]
             if unknown:
                 return ResolvedIntent(kind='unsupported', reason=f'unknown case id: {unknown[0]}')
-        return ResolvedIntent(**(intent.model_dump(mode='python') | {'case_id': case_id, 'case_ids': tuple(case_ids)}))
+        return ResolvedIntent(
+            kind=kind,
+            case_id=case_id,
+            case_ref=case_ref,
+            case_ids=tuple(case_ids),
+            artifact_id=str(args.get('artifact_id') or args.get('artifact_ref') or ''),
+            field=_normalize_patch_field(str(args.get('field') or '')),
+            value=args.get('value'),
+            approval_token=str(args.get('approval_token') or ''),
+            reason=str(next_ops.reason or args.get('reason') or ''),
+            raw_args=args,
+        )
 
     def _case_id_from_ref(self, thread_id: str, case_ref: str) -> str:
         del thread_id
@@ -300,34 +476,43 @@ class MessageIntentService:
         if kind == 'unsupported':
             return self._clarify(lease, turn_id, message_id, intent.reason or '暂不支持该 evo 操作。')
         if kind == 'general_chat':
-            return self._assistant(
+            fallback = '我无法在 evo 服务里获取实时外部信息，但可以继续处理你剩下的 evo 请求。'
+            return self._assistant_from_tool_result(
                 lease,
                 turn_id,
                 message_id,
-                '我可以处理 evo 状态、继续/暂停/取消/重试、读取报告、查看 case 或受控修改 case 字段。',
+                kind='general_chat',
+                tool_result={
+                    'topic': str(intent.raw_args.get('topic') or ''),
+                    'reply_intent': str(intent.raw_args.get('reply_intent') or ''),
+                    'message': fallback,
+                    'external_tools_available': False,
+                },
+                fallback=fallback,
                 final=False)
         if kind == 'status_query':
             status = self.flow_status(lease.thread_id)
-            return self._assistant(lease, turn_id, message_id, canonical_json(status), final=False)
+            return self._assistant_from_tool_result(
+                lease,
+                turn_id,
+                message_id,
+                kind='status_query',
+                tool_result=status,
+                fallback=_natural_fallback('status_query', status),
+                final=False,
+            )
         if kind == 'list_failed_cases':
             return self._list_failed_cases(lease, turn_id, message_id)
-        if kind in {'read_report_section', 'explain_current_gate'}:
-            return self._read_report(lease, turn_id, message_id)
+        if kind == 'read_report_section':
+            return self._read_report(lease, turn_id, message_id, intent)
         if kind == 'read_case_result':
             if intent.case_ids:
                 return self._clarify(lease, turn_id, message_id, 'v1 仅支持一次读取单个 case，请指定一个 case。')
             if not intent.case_id:
                 return self._clarify(lease, turn_id, message_id, '请指定要读取的 case。')
-            return self._read_case(lease, turn_id, message_id, intent.case_id)
-        if kind in {
-                'continue_flow',
-                'pause_flow',
-                'cancel_flow',
-                'retry_failed',
-                'rerun_case',
-                'patch_artifact'} and not self.has_flow(
-                lease.thread_id):
-            return self._clarify(lease, turn_id, message_id, 'flow_not_started')
+            return self._read_case(lease, turn_id, message_id, intent.case_id, intent)
+        if kind in MUTATING_KINDS and not self.has_flow(lease.thread_id):
+            return self._clarify(lease, turn_id, message_id, '当前还没有可控制的 evo 流程；请先启动流程，或先查看当前状态。')
         if kind == 'continue_flow':
             return self._continue(lease, turn_id, message_id, context)
         if kind == 'pause_flow':
@@ -352,7 +537,7 @@ class MessageIntentService:
             return self._rerun_case(lease, turn_id, message_id, intent.case_id, context)
         if kind == 'patch_artifact':
             return self._patch_artifact(lease, turn_id, message_id, intent, context)
-        if kind in {'approve_pending', 'reject_pending', 'cancel_pending'}:
+        if kind in PENDING_RESOLUTION_KINDS:
             return self._resolve_pending(lease, turn_id, message_id, kind, intent.approval_token)
         return self._clarify(lease, turn_id, message_id, 'unsupported')
 
@@ -407,7 +592,7 @@ class MessageIntentService:
             message_id: str,
             intent: ResolvedIntent,
             context: _ExecutionContext) -> MessageHandleResult:
-        if self.store.active_approval(lease.thread_id) is not None:
+        if self._active_approval(lease, turn_id, message_id) is not None:
             return self._clarify(lease, turn_id, message_id, '已有待确认操作，请先确认或取消后再发起新的修改。')
         target = _patch_target(intent)
         if target is None:
@@ -421,16 +606,16 @@ class MessageIntentService:
         try:
             validated = _validate_patch_value(intent.field, intent.value)
             patched = _replace_json_value(value, pointer, validated)
+            patched = _normalize_patched_artifact(artifact_key, patched, intent.field)
             _validate_patched_artifact(artifact_key, patched)
+            patch_preview = _patch_preview(artifact_key, ref, value, patched, intent.field, pointer)
         except (TypeError, ValueError, JsonPointerException) as exc:
             return self._clarify(lease, turn_id, message_id, f'patch validation failed: {exc}')
         provenance = {
             'patch_source': f'message_turn:{turn_id}',
             'turn_id': turn_id,
             'message_ids': list(context.consumed_message_ids),
-            'consumed_prefix_start': context.consumed_prefix_start,
-            'consumed_prefix_len': context.consumed_prefix_len,
-            'consumed_text': context.consumed_text,
+            'parsed_next_ops_kind': intent.kind,
             'original_expected_ref': str(ref),
             'field': intent.field,
             'json_pointer': pointer,
@@ -478,6 +663,7 @@ class MessageIntentService:
                                  'preview_hash': approval.preview_hash,
                                  'expected_refs': list(approval.expected_refs),
                                  'risk_level': approval.risk_level,
+                                 'patch_preview': patch_preview,
                                  'preview': preview,
                                  'provenance': {**provenance,
                                                 'request_fingerprint': approval.request_fingerprint,
@@ -486,13 +672,30 @@ class MessageIntentService:
                                 turn_id=turn_id,
                                 message_id=message_id,
                                 )
+        response = self._synthesize_response(
+            lease.thread_id,
+            turn_id,
+            message_id,
+            kind='patch_artifact',
+            tool_result={
+                'message': '需要确认后执行该修改。',
+                'approval_token': approval.approval_token,
+                'preview_hash': approval.preview_hash,
+                'risk_level': approval.risk_level,
+                'expected_refs': list(approval.expected_refs),
+                'patch_preview': patch_preview,
+                'preview': preview,
+                'provenance': provenance,
+            },
+            fallback=_patch_confirmation_fallback(approval.approval_token, patch_preview),
+        )
         return MessageHandleResult(
             'blocked',
             lease.thread_id,
             turn_id,
             message_id,
-            '需要确认后执行该修改。',
-            self._assistant_event(lease, turn_id, message_id, '需要确认后执行该修改。').seq,
+            response,
+            self._assistant_event(lease, turn_id, message_id, response).seq,
             pending_approval={'approval_token': approval.approval_token, 'preview_hash': approval.preview_hash},
         )
 
@@ -503,7 +706,7 @@ class MessageIntentService:
             message_id: str,
             kind: str,
             approval_token: str) -> MessageHandleResult:
-        approval = self.store.active_approval(lease.thread_id)
+        approval = self._active_approval(lease, turn_id, message_id)
         if approval is None:
             return self._clarify(lease, turn_id, message_id, '没有待确认操作。')
         if approval_token and approval.approval_token != approval_token:
@@ -517,6 +720,16 @@ class MessageIntentService:
             self.store.resolve_approval(lease, approval.approval_token, status=status,
                                         event_payload={}, turn_id=turn_id, message_id=message_id)
             return self._assistant(lease, turn_id, message_id, '已取消待确认操作。')
+        request = self._request_from_approval(approval)
+        if intent_request_fingerprint(request) != approval.request_fingerprint:
+            return self._clarify(lease, turn_id, message_id, 'request_fingerprint mismatch')
+        result = self.flow_getter(lease.thread_id).runtime.execute_intent(request)
+        if result.status == 'applied':
+            self.store.resolve_approval(lease, approval.approval_token, status='approved',
+                                        event_payload={'reason': result.reason}, turn_id=turn_id, message_id=message_id)
+            return self._command_response(
+                lease, turn_id, message_id, 'approve_pending', {
+                    'status': result.status, 'reason': result.reason})
         stale = self._stale_expected_ref(lease.thread_id, approval)
         if stale:
             self.store.resolve_approval(
@@ -529,15 +742,11 @@ class MessageIntentService:
                 turn_id=turn_id,
                 message_id=message_id)
             return self._clarify(lease, turn_id, message_id, '待修改 artifact 已变化，请重新发起修改。')
-        request = self._request_from_approval(approval)
-        if intent_request_fingerprint(request) != approval.request_fingerprint:
-            return self._clarify(lease, turn_id, message_id, 'request_fingerprint mismatch')
-        self.store.resolve_approval(lease, approval.approval_token, status='approved',
-                                    event_payload={}, turn_id=turn_id, message_id=message_id)
-        result = self.flow_getter(lease.thread_id).runtime.execute_intent(request)
         return self._command_response(
             lease, turn_id, message_id, 'approve_pending', {
-                'status': result.status, 'reason': result.reason})
+                'status': 'failed',
+                'reason': result.reason or result.status,
+            })
 
     def _request_from_approval(self, approval: PendingApproval) -> IntentCommandRequest:
         return intent_request_from_payload(
@@ -560,22 +769,87 @@ class MessageIntentService:
         view = self._views(lease.thread_id).view('eval.summary')
         self.store.append_event(lease, 'artifact_view', view, turn_id=turn_id, message_id=message_id)
         selected = tuple(view.get('facts', {}).get('failed_cases') or ())
-        self.store.update_working_set(lease, {'selected_cases': selected, 'last_report': 'eval.summary'})
-        return self._assistant(lease, turn_id, message_id, canonical_json(view['facts']), final=False)
+        self.store.update_working_set(lease, {
+            'selected_cases': selected,
+            'last_report': 'eval.summary',
+            'last_artifact_view': _view_state(view, 'eval.summary'),
+        })
+        tool_result = _view_payload(view, facts_only=True)
+        return self._assistant_from_tool_result(
+            lease,
+            turn_id,
+            message_id,
+            kind='list_failed_cases',
+            tool_result=tool_result,
+            fallback=_natural_fallback('list_failed_cases', tool_result),
+            final=False,
+        )
 
-    def _read_report(self, lease: MessageLease, turn_id: str, message_id: str) -> MessageHandleResult:
-        artifact = 'analysis.summary' if self.artifact_reader(lease.thread_id, 'analysis.summary') else 'eval.summary'
-        view = self._views(lease.thread_id).view(artifact)
+    def _read_report(
+        self,
+        lease: MessageLease,
+        turn_id: str,
+        message_id: str,
+        intent: ResolvedIntent,
+    ) -> MessageHandleResult:
+        args = intent.raw_args
+        artifact = intent.artifact_id or (
+            'analysis.summary' if self.artifact_reader(lease.thread_id, 'analysis.summary') else 'eval.summary'
+        )
+        view = self._views(lease.thread_id).view(
+            artifact,
+            selector=str(args.get('section') or args.get('selector') or ''),
+            cursor=str(args.get('cursor') or ''),
+            max_chars=_int_arg(args.get('max_chars'), DEFAULT_READ_CHARS),
+        )
         self.store.append_event(lease, 'artifact_view', view, turn_id=turn_id, message_id=message_id)
-        self.store.update_working_set(lease, {'last_report': artifact})
-        return self._assistant(lease, turn_id, message_id, view['excerpt'], final=False)
+        self.store.update_working_set(lease, {
+            'last_report': artifact,
+            'last_artifact_view': _view_state(view, artifact),
+        })
+        tool_result = _view_payload(view)
+        return self._assistant_from_tool_result(
+            lease,
+            turn_id,
+            message_id,
+            kind='read_report_section',
+            tool_result=tool_result,
+            fallback=_natural_fallback('read_report_section', tool_result),
+            final=False,
+        )
 
-    def _read_case(self, lease: MessageLease, turn_id: str, message_id: str, case_id: str) -> MessageHandleResult:
+    def _read_case(
+        self,
+        lease: MessageLease,
+        turn_id: str,
+        message_id: str,
+        case_id: str,
+        intent: ResolvedIntent,
+    ) -> MessageHandleResult:
+        args = intent.raw_args
         artifact = f'eval.judge_result[{case_id}]'
-        view = self._views(lease.thread_id).view(artifact)
+        view = self._views(lease.thread_id).view(
+            artifact,
+            selector=str(args.get('selector') or ''),
+            cursor=str(args.get('cursor') or ''),
+            max_chars=_int_arg(args.get('max_chars'), DEFAULT_READ_CHARS),
+        )
         self.store.append_event(lease, 'artifact_view', view, turn_id=turn_id, message_id=message_id)
-        self.store.update_working_set(lease, {'selected_cases': (case_id,), 'last_case': case_id})
-        return self._assistant(lease, turn_id, message_id, view['excerpt'], final=False)
+        self.store.update_working_set(lease, {
+            'selected_cases': (case_id,),
+            'last_case': case_id,
+            'last_artifact_view': _view_state(view, artifact),
+        })
+        tool_result = _view_payload(view)
+        return self._assistant_from_tool_result(
+            lease,
+            turn_id,
+            message_id,
+            kind='read_case_result',
+            tool_result=tool_result,
+            fallback=_natural_fallback('read_case_result', tool_result),
+            final=False,
+        )
 
     def _views(self, thread_id: str) -> ArtifactViewService:
         return ArtifactViewService(lambda artifact_id: self.artifact_reader(thread_id, artifact_id))
@@ -584,12 +858,49 @@ class MessageIntentService:
                           payload: dict[str, Any], *, final: bool = False) -> MessageHandleResult:
         event = self.store.append_event(lease, 'command_applied', {
                                         'kind': kind, **payload}, turn_id=turn_id, message_id=message_id)
-        text = canonical_json({'kind': kind, **payload})
+        tool_result = {'kind': kind, **payload}
+        text = self._synthesize_response(lease.thread_id, turn_id, message_id, kind=kind,
+                                         tool_result=tool_result, fallback=_natural_fallback(kind, tool_result))
         assistant = self._assistant_event(lease, turn_id, message_id, text)
         status = 'error' if payload.get('status') == 'failed' else 'done'
         if final and status == 'done':
             self.store.append_event(lease, 'done', {'status': 'done'}, turn_id=turn_id, message_id=message_id)
         return MessageHandleResult(status, lease.thread_id, turn_id, message_id, text, max(event.seq, assistant.seq))
+
+    def _assistant_from_tool_result(
+        self,
+        lease: MessageLease,
+        turn_id: str,
+        message_id: str,
+        *,
+        kind: str,
+        tool_result: Mapping[str, Any],
+        fallback: str,
+        final: bool = True,
+    ) -> MessageHandleResult:
+        text = self._synthesize_response(lease.thread_id, turn_id, message_id, kind=kind,
+                                         tool_result=tool_result, fallback=fallback)
+        return self._assistant(lease, turn_id, message_id, text, final=final)
+
+    def _synthesize_response(
+        self,
+        thread_id: str,
+        turn_id: str,
+        message_id: str,
+        *,
+        kind: str,
+        tool_result: Mapping[str, Any],
+        fallback: str,
+    ) -> str:
+        if self.response_llm is None:
+            return fallback
+        prompt = _response_prompt(thread_id, turn_id, message_id, kind, tool_result)
+        try:
+            raw = self.response_llm(prompt)
+        except Exception:
+            return fallback
+        text = str(raw or '').strip()
+        return text or fallback
 
     def _assistant(
             self,
@@ -627,20 +938,6 @@ class MessageIntentService:
                 'type': event.event_type,
                 **event.payload}}
 
-    @staticmethod
-    def _consumed_prefix_len(plan: PlannerOutput, content: str) -> int:
-        if plan.consumed_prefix_len and plan.consumed_prefix_len > len(content):
-            return -1
-        if plan.consumed_text and not content.startswith(plan.consumed_text):
-            return -1
-        if plan.consumed_text and plan.consumed_prefix_len and len(plan.consumed_text) != plan.consumed_prefix_len:
-            return -1
-        if plan.consumed_prefix_len:
-            return plan.consumed_prefix_len
-        if plan.consumed_text:
-            return len(plan.consumed_text)
-        return 0
-
 
 def _patch_target(intent: ResolvedIntent) -> tuple[ArtifactKey, str] | None:
     field = intent.field
@@ -648,46 +945,155 @@ def _patch_target(intent: ResolvedIntent) -> tuple[ArtifactKey, str] | None:
     if target is None:
         return None
     artifact_id, pointer = target
-    if field in _CASE_PATCH_FIELDS:
+    if field in _CASE_PATCH_FIELDS or artifact_id in _CASE_PARTITION_PATCH_ARTIFACTS:
         if not intent.case_id:
             return None
         return case_key(artifact_id, intent.case_id), pointer
     return ArtifactKey.of(artifact_id), pointer
 
 
-def _pending_buffer(rows: list[PendingTurnBuffer]) -> _PendingBuffer:
-    text_parts: list[str] = []
-    segments: list[_BufferSegment] = []
-    cursor = 0
-    for row in rows:
-        if text_parts:
-            text_parts.append('\n')
-            cursor += 1
-        start = cursor
-        text_parts.append(row.remaining)
-        cursor += len(row.remaining)
-        segments.append(_BufferSegment(row.turn_id, row.message_id, row.content, row.processed_cursor, start, cursor))
-    return _PendingBuffer(''.join(text_parts), tuple(segments))
+def _string_tuple(value: Any) -> tuple[str, ...]:
+    if value is None or value == '':
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, (list, tuple, set)):
+        return tuple(str(item) for item in value if str(item).strip())
+    return (str(value),)
 
 
-def _segments_for_range(pending: _PendingBuffer, start: int, length: int) -> tuple[_BufferSegment, ...]:
-    end = start + length
-    return tuple(segment for segment in pending.segments if segment.start < end and segment.end > start)
+def _normalize_patch_field(value: str) -> str:
+    text = str(value or '').strip()
+    if text in _PATCH_FIELD_TARGETS:
+        return text
+    aliases = {
+        '难度': 'difficulty',
+        '题目': 'question',
+        '问题': 'question',
+        '提问': 'question',
+        '参考答案': 'reference_answer',
+        '标准答案': 'expected_answer',
+        '期望答案': 'expected_answer',
+        '目标地址': 'target_chat_url',
+        '目标url': 'target_chat_url',
+        'target url': 'target_chat_url',
+        '质量阈值': 'answer_good_threshold',
+        '评分': 'answer_score',
+        '答案分': 'answer_score',
+        '正确性': 'answer_correctness',
+        '相关性': 'answer_relevance',
+        '完整性': 'completeness',
+        '格式': 'format_compliance',
+        '评分理由': 'reason',
+        '原因': 'reason',
+        '质量标签': 'quality_label',
+        '失败类型': 'failure_type',
+        '主指标': 'primary_metric',
+        '主要指标': 'primary_metric',
+    }
+    normalized = aliases.get(text.lower()) or aliases.get(text)
+    return normalized or text
 
 
-def _message_id_at_cursor(pending: _PendingBuffer, cursor: int) -> str:
-    for segment in pending.segments:
-        if segment.start <= cursor < segment.end:
-            return segment.message_id
-    return ''
+def _auto_agent_context(payload: Mapping[str, Any], *, trusted: bool = False) -> dict[str, Any]:
+    metadata = payload.get('metadata') if isinstance(payload.get('metadata'), Mapping) else {}
+    if not trusted or metadata.get('source') != 'auto_agent':
+        return {}
+    raw = payload.get('auto_intervention')
+    if raw is None:
+        raw = metadata.get('auto_intervention')
+    return {
+        'metadata': dict(metadata),
+        'auto_intervention': dict(raw) if isinstance(raw, Mapping) else None,
+    }
 
 
-def _consumed_message_ids_match(plan: PlannerOutput, segments: tuple[_BufferSegment, ...]) -> bool:
-    if not plan.consumed_message_ids:
-        return True
-    expected = {segment.message_id for segment in segments}
-    actual = set(plan.consumed_message_ids)
-    return bool(actual) and actual.issubset(expected)
+def _view_state(view: dict[str, Any], artifact_id: str) -> dict[str, Any]:
+    return {
+        'artifact_id': artifact_id,
+        'source_ref': str(view.get('source_ref') or artifact_id),
+        'selector': str(view.get('selector') or ''),
+        'max_chars': int(view.get('max_chars') or DEFAULT_READ_CHARS),
+        'truncated': bool(view.get('truncated')),
+        'next_cursor': str(view.get('next_cursor') or ''),
+        'available_sections': list(view.get('available_sections') or ()),
+    }
+
+
+def _response_prompt(
+    thread_id: str,
+    turn_id: str,
+    message_id: str,
+    kind: str,
+    tool_result: Mapping[str, Any],
+) -> str:
+    return (
+        'You are the user-facing response writer for an Evo message agent. '
+        'The operation has already been parsed and validated; tool_result tells you whether it was executed, '
+        'read-only, or pending approval. '
+        'Write a concise Chinese answer for the user based only on the tool result. '
+        'Do not output raw JSON. Do not invent facts not present in the tool result. '
+        'If the result is truncated or has next_cursor, say that more content can be read. '
+        'For pending approvals, clearly say confirmation is required and mention the approval token. '
+        'For patch approvals, include patch_preview target_artifact, source_ref, field, old_value, and new_value '
+        'so the user can audit the exact change and source version. '
+        'For status, summarize the current state and important completed/current steps. '
+        'For case/report reads, summarize the key facts and cite source_ref when present.\n\n'
+        f'Thread id: {thread_id}\n'
+        f'Turn id: {turn_id}\n'
+        f'Message id: {message_id}\n'
+        f'Operation kind: {kind}\n'
+        f'Tool result JSON:\n{canonical_json(normalize_json_value(dict(tool_result), allow_tuple=True))}'
+    )
+
+
+def _view_payload(view: dict[str, Any], *, facts_only: bool = False) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        'source_ref': str(view.get('source_ref') or ''),
+        'facts': view.get('facts') or {},
+        'truncated': bool(view.get('truncated')),
+        'next_cursor': str(view.get('next_cursor') or ''),
+        'selector': str(view.get('selector') or ''),
+        'available_sections': list(view.get('available_sections') or ()),
+    }
+    if not facts_only:
+        payload['excerpt'] = str(view.get('excerpt') or '')
+    return payload
+
+
+def _natural_fallback(kind: str, payload: Mapping[str, Any]) -> str:
+    if kind == 'status_query':
+        status = str(payload.get('status') or 'unknown')
+        current = str(payload.get('current_step') or '')
+        completed = ', '.join(str(item) for item in payload.get('completed_steps') or ())
+        detail = f'当前步骤：{current}。' if current else ''
+        if completed:
+            detail += f' 已完成步骤：{completed}。'
+        return f'当前 evo 流程状态是 {status}。{detail}'.strip()
+    if kind == 'list_failed_cases':
+        failed = payload.get('facts') if isinstance(payload.get('facts'), Mapping) else {}
+        cases = failed.get('failed_cases') or ()
+        text = ', '.join(str(item) for item in cases) or '未发现失败 case'
+        return f'失败 case：{text}。'
+    if kind in {'read_case_result', 'read_report_section'}:
+        source = str(payload.get('source_ref') or '当前产物')
+        excerpt = str(payload.get('excerpt') or '').strip()
+        truncated = '内容已截断，可以继续读取后续部分。' if payload.get('truncated') or payload.get('next_cursor') else ''
+        return f'{source} 的读取结果：{excerpt or "暂无可展示内容。"} {truncated}'.strip()
+    if kind == 'approve_pending':
+        status = str(payload.get('status') or 'unknown')
+        reason = str(payload.get('reason') or '').strip()
+        return f'待确认操作处理结果：{status}。{reason}'.strip()
+    status = str(payload.get('status') or 'done')
+    current = str(payload.get('current_step') or '')
+    return f'{kind} 已处理，状态：{status}。' + (f' 当前步骤：{current}。' if current else '')
+
+
+def _int_arg(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _validate_patch_value(field: str, value: Any) -> Any:
@@ -705,16 +1111,27 @@ def _validate_patch_value(field: str, value: Any) -> Any:
         return text
     if field == 'target_chat_url':
         return normalize_chat_stream_url(str(value or '').strip(), 'target_chat_url')
-    if field == 'evaluation_policy':
-        text = str(value or '').strip()
-        if text not in _EVALUATION_POLICIES:
-            raise ValueError('evaluation_policy must be balanced, answer_only, or retrieval_diagnostic')
-        return text
-    if field in {'quality_threshold', 'target_mean_delta', 'goodcase_regression_ratio_limit', 'regression_epsilon'}:
+    if field in _NUMERIC_PATCH_FIELDS:
         number = float(value)
         if not 0.0 <= number <= 1.0:
             raise ValueError(f'{field} must be between 0 and 1')
         return round(number, 4)
+    if field == 'quality_label':
+        label = str(value or '').strip()
+        if label not in _QUALITY_LABELS:
+            raise ValueError(f'quality_label must be one of: {", ".join(sorted(_QUALITY_LABELS))}')
+        return label
+    if field == 'failure_type':
+        failure = str(value or '').strip()
+        allowed = FAILURE_TYPES | {'infra_failure', 'candidate_not_run', 'unknown'}
+        if failure not in allowed:
+            raise ValueError(f'failure_type must be one of: {", ".join(sorted(allowed))}')
+        return failure
+    if field == 'reason':
+        text = str(value or '').strip()
+        if not text:
+            raise ValueError('reason must be non-empty')
+        return text[:500]
     if field == 'primary_metric':
         text = str(value or '').strip()
         if text not in _METRICS:
@@ -735,10 +1152,10 @@ def _validate_patched_artifact(artifact: ArtifactKey, value: Any) -> None:
     elif artifact.artifact_id == 'eval.target_config':
         normalize_chat_stream_url(str(value.get('target_chat_url') or ''), 'target_chat_url')
     elif artifact.artifact_id == 'eval.policy':
-        if 'evaluation_policy' in value and str(value.get('evaluation_policy') or '') not in _EVALUATION_POLICIES:
-            raise ValueError('eval.policy evaluation_policy is invalid')
-        if 'quality_threshold' in value:
-            _validate_patch_value('quality_threshold', value.get('quality_threshold'))
+        if 'answer_good_threshold' in value:
+            _validate_patch_value('answer_good_threshold', value.get('answer_good_threshold'))
+    elif artifact.artifact_id == 'eval.judge_result':
+        _validate_judge_result_patch(value)
     elif artifact.artifact_id == 'abtest.candidate_config':
         if 'primary_metric' in value:
             _validate_patch_value('primary_metric', value.get('primary_metric'))
@@ -748,6 +1165,31 @@ def _validate_patched_artifact(artifact: ArtifactKey, value: Any) -> None:
     else:
         raise ValueError(f'artifact is not patchable: {artifact}')
     return None
+
+
+def _normalize_patched_artifact(artifact: ArtifactKey, value: Any, changed_field: str) -> Any:
+    if artifact.artifact_id != 'eval.judge_result' or not isinstance(value, dict):
+        return value
+    out = dict(value)
+    if changed_field in ANSWER_METRICS and any(metric in out for metric in ANSWER_METRICS):
+        out['answer_score'] = answer_score_from_metrics(out)
+        out['is_correct'] = str(out.get('quality_label') or '') == 'good'
+        out['defect'] = '' if str(out.get('failure_type') or '') == 'none' else str(out.get('failure_type') or '')
+    return out
+
+
+def _validate_judge_result_patch(value: dict[str, Any]) -> None:
+    if not str(value.get('case_id') or '').strip():
+        raise ValueError('eval.judge_result case_id is required')
+    for field in (*ANSWER_METRICS, 'answer_score'):
+        if field in value:
+            _validate_patch_value(field, value.get(field))
+    if 'quality_label' in value:
+        _validate_patch_value('quality_label', value.get('quality_label'))
+    if 'failure_type' in value:
+        _validate_patch_value('failure_type', value.get('failure_type'))
+    if 'reason' in value:
+        _validate_patch_value('reason', value.get('reason'))
 
 
 def _replace_json_value(value: Any, pointer: str, replacement: Any) -> Any:
@@ -775,6 +1217,50 @@ def _replace_json_value(value: Any, pointer: str, replacement: Any) -> Any:
     else:
         raise ValueError('patch parent is not mutable')
     return clone
+
+
+def _patch_preview(
+    artifact: ArtifactKey,
+    ref: ArtifactRef,
+    before: Any,
+    after: Any,
+    field: str,
+    pointer: str,
+) -> dict[str, Any]:
+    normalized_before = normalize_json_value(before, allow_tuple=True)
+    normalized_after = normalize_json_value(after, allow_tuple=True)
+    return {
+        'target_artifact': artifact_id_for_key(artifact),
+        'source_ref': str(ref),
+        'field': field,
+        'json_pointer': pointer,
+        'old_value': normalize_json_value(JsonPointer(pointer).resolve(normalized_before), allow_tuple=True),
+        'new_value': normalize_json_value(JsonPointer(pointer).resolve(normalized_after), allow_tuple=True),
+        'effective_changes': _top_level_changes(normalized_before, normalized_after),
+    }
+
+
+def _patch_confirmation_fallback(approval_token: str, patch_preview: Mapping[str, Any]) -> str:
+    return (
+        '需要确认后执行该修改：'
+        f'{patch_preview.get("target_artifact")} '
+        f'基于 {patch_preview.get("source_ref")} '
+        f'{patch_preview.get("field")} '
+        f'{patch_preview.get("old_value")!r} -> {patch_preview.get("new_value")!r}。'
+        f'确认令牌：{approval_token}'
+    )
+
+
+def _top_level_changes(before: Any, after: Any) -> list[dict[str, Any]]:
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return []
+    out: list[dict[str, Any]] = []
+    for key in sorted(set(before) | set(after)):
+        old = before.get(key)
+        new = after.get(key)
+        if old != new:
+            out.append({'json_pointer': f'/{key}', 'old_value': old, 'new_value': new})
+    return out
 
 
 def _deepcopy_json(value: Any) -> Any:

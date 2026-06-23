@@ -461,21 +461,21 @@ func TestOpenAPISpecAssignsMetadataFieldsToUserPreference(t *testing.T) {
 			t.Fatalf("memoryUpsertOpenAPIRequest expected property %q", name)
 		}
 	}
-	for _, name := range []string{"agent_persona", "user_address", "response_style"} {
+	for _, name := range []string{"agent_persona", "preferred_name", "response_style"} {
 		if _, ok := memoryRequestProps[name]; ok {
 			t.Fatalf("memoryUpsertOpenAPIRequest has user_preference-only property %q", name)
 		}
 	}
 
 	preferenceRequestProps := schemaProperties("managedStateUpsertOpenAPIRequest")
-	for _, name := range []string{"content", "agent_persona", "user_address", "response_style", "auto_evo"} {
+	for _, name := range []string{"content", "agent_persona", "preferred_name", "response_style", "auto_evo"} {
 		if _, ok := preferenceRequestProps[name]; !ok {
 			t.Fatalf("managedStateUpsertOpenAPIRequest expected property %q", name)
 		}
 	}
 
 	memoryResponseProps := schemaProperties("managedStateOpenAPIResponse")
-	for _, name := range []string{"agent_persona", "user_address", "response_style"} {
+	for _, name := range []string{"agent_persona", "preferred_name", "response_style"} {
 		if _, ok := memoryResponseProps[name]; !ok {
 			t.Fatalf("managedStateOpenAPIResponse expected property %q", name)
 		}

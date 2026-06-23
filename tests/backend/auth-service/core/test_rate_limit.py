@@ -1,83 +1,63 @@
-import redis
-
 import core.rate_limit as rate_limit
 
 
-class _Pipeline:
-    def __init__(self, result=None, fail=False):
+class _StateStore:
+    def __init__(self, attempts=0, fail=False):
         self.calls = []
-        self.result = result or []
+        self.attempts = attempts
         self.fail = fail
 
     def zremrangebyscore(self, *args):
+        if self.fail:
+            raise RuntimeError('state down')
         self.calls.append(('zremrangebyscore', args))
-        return self
 
     def zcard(self, *args):
-        self.calls.append(('zcard', args))
-        return self
-
-    def zadd(self, *args):
-        self.calls.append(('zadd', args))
-        return self
-
-    def expire(self, *args):
-        self.calls.append(('expire', args))
-        return self
-
-    def execute(self):
         if self.fail:
-            raise redis.RedisError('redis down')
-        return self.result
+            raise RuntimeError('state down')
+        self.calls.append(('zcard', args))
+        return self.attempts
 
-
-class _Redis:
-    def __init__(self, pipeline):
-        self._pipeline = pipeline
-
-    def pipeline(self):
-        return self._pipeline
+    def zadd(self, *args, **kwargs):
+        if self.fail:
+            raise RuntimeError('state down')
+        self.calls.append(('zadd', args, kwargs))
 
 
 def test_is_limited_uses_sliding_window_and_threshold(monkeypatch):
-    pipe = _Pipeline(result=[1, 3])
+    state = _StateStore(attempts=3)
     monkeypatch.setattr(rate_limit.time, 'time', lambda: 100)
-    monkeypatch.setattr(rate_limit, 'redis_client', lambda: _Redis(pipe))
+    monkeypatch.setattr(rate_limit, 'state_store', lambda: state)
     limiter = rate_limit.LoginRateLimiter(max_attempts=3, time_window_seconds=60, key_prefix='login')
 
     assert limiter.is_limited('alice') is True
-    assert pipe.calls == [
-        ('zremrangebyscore', ('login:alice', '-inf', 40)),
+    assert state.calls == [
+        ('zremrangebyscore', ('login:alice', float('-inf'), 40)),
         ('zcard', ('login:alice',)),
     ]
 
 
-def test_is_limited_returns_false_for_bad_counts_or_redis_errors(monkeypatch):
-    pipe = _Pipeline(result=[1, 'bad'])
-    monkeypatch.setattr(rate_limit, 'redis_client', lambda: _Redis(pipe))
+def test_is_limited_returns_false_for_bad_counts_or_state_errors(monkeypatch):
+    state = _StateStore(attempts='bad')
+    monkeypatch.setattr(rate_limit, 'state_store', lambda: state)
     assert rate_limit.LoginRateLimiter().is_limited('alice') is False
 
-    failing = _Pipeline(fail=True)
-    monkeypatch.setattr(rate_limit, 'redis_client', lambda: _Redis(failing))
+    monkeypatch.setattr(rate_limit, 'state_store', lambda: _StateStore(fail=True))
     assert rate_limit.LoginRateLimiter().is_limited('alice') is False
 
 
-def test_record_failure_records_timestamp_and_expiry(monkeypatch):
-    pipe = _Pipeline(result=[True, True])
+def test_record_failure_records_timestamp(monkeypatch):
+    state = _StateStore()
     monkeypatch.setattr(rate_limit.time, 'time', lambda: 123)
-    monkeypatch.setattr(rate_limit, 'redis_client', lambda: _Redis(pipe))
+    monkeypatch.setattr(rate_limit, 'state_store', lambda: state)
     limiter = rate_limit.LoginRateLimiter(time_window_seconds=60, key_prefix='login')
 
     limiter.record_failure('alice')
 
-    assert pipe.calls == [
-        ('zadd', ('login:alice', {123: 123})),
-        ('expire', ('login:alice', 120)),
-    ]
+    assert state.calls == [('zadd', ('login:alice', {'123': 123}), {'ex': 120})]
 
 
-def test_record_failure_ignores_redis_errors(monkeypatch):
-    failing = _Pipeline(fail=True)
-    monkeypatch.setattr(rate_limit, 'redis_client', lambda: _Redis(failing))
+def test_record_failure_ignores_state_errors(monkeypatch):
+    monkeypatch.setattr(rate_limit, 'state_store', lambda: _StateStore(fail=True))
 
     rate_limit.LoginRateLimiter().record_failure('alice')

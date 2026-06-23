@@ -22,6 +22,7 @@ class ReconcileRequest:
     materialize_artifacts: tuple[ArtifactKey, ...] = ()
     reason: str = 'artifact_reconcile'
     include_downstream: bool = True
+    dry_run: bool = False
 
     def __post_init__(self) -> None:
         validate_nonempty(self.run_id, 'run_id')
@@ -63,12 +64,7 @@ class ReconciliationScheduler:
             if not request.materialize_artifacts and not affected:
                 return self._result(request, 'skipped', reason='no_affected_artifacts')
 
-            plan = self.graph.build_recompute_plan_for_keys(
-                self.resolver,
-                changed_keys=set(request.changed_artifacts),
-                materialize_keys=set(request.materialize_artifacts),
-                include_downstream=request.include_downstream,
-            )
+            plan, materialized = self._build_plan(request)
         except UnknownTargetError:
             return self._result(request, 'failed', reason='unknown_target')
         except MissingArtifactVersionError:
@@ -77,6 +73,13 @@ class ReconciliationScheduler:
             return self._result(request, 'failed', reason='plan_build_failed')
 
         targets = _outputs_of(plan)
+        if request.dry_run:
+            return self._result(
+                request,
+                'submitted',
+                materialize_artifacts=materialized,
+                target_artifacts=tuple(sorted(targets)),
+            )
         try:
             instance = self.controller.submit_plan(
                 request.run_id,
@@ -88,13 +91,58 @@ class ReconciliationScheduler:
         except ValueError:
             return self._result(request, 'failed', reason='submit_failed')
 
-        return self._result(request, 'submitted', target_artifacts=instance.target_artifacts, plan_instance=instance)
+        return self._result(
+            request,
+            'submitted',
+            materialize_artifacts=materialized,
+            target_artifacts=instance.target_artifacts,
+            plan_instance=instance,
+        )
+
+    def _build_plan(self, request: ReconcileRequest):
+        materialized = request.materialize_artifacts
+        try:
+            return self.graph.build_recompute_plan_for_keys(
+                self.resolver,
+                changed_keys=set(request.changed_artifacts),
+                materialize_keys=set(request.materialize_artifacts),
+                include_downstream=request.include_downstream,
+            ), materialized
+        except MissingArtifactVersionError:
+            if request.materialize_artifacts:
+                raise
+            materialized = tuple(
+                key
+                for key in sorted(
+                    set().union(*(self.graph.consumer_artifacts_of(key) for key in request.changed_artifacts))
+                )
+                if self._can_materialize(key)
+            )
+            if not materialized:
+                raise
+            return self.graph.build_recompute_plan_for_keys(
+                self.resolver,
+                materialize_keys=set(materialized),
+                include_downstream=False,
+            ), materialized
+
+    def _can_materialize(self, key: ArtifactKey) -> bool:
+        try:
+            self.graph.build_recompute_plan_for_keys(
+                self.resolver,
+                materialize_keys={key},
+                include_downstream=False,
+            )
+            return True
+        except (DAGGraphError, MissingArtifactVersionError, UnknownTargetError):
+            return False
 
     @staticmethod
     def _result(
         request: ReconcileRequest,
         status: ReconcileStatus,
         *,
+        materialize_artifacts: tuple[ArtifactKey, ...] | None = None,
         target_artifacts: tuple[ArtifactKey, ...] = (),
         plan_instance: PlanInstance | None = None,
         reason: str = '',
@@ -102,7 +150,7 @@ class ReconciliationScheduler:
         return ReconcileResult(
             status,
             request.changed_artifacts,
-            request.materialize_artifacts,
+            request.materialize_artifacts if materialize_artifacts is None else materialize_artifacts,
             target_artifacts,
             plan_instance,
             reason,

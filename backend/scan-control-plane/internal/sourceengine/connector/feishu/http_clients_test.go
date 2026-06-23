@@ -343,6 +343,41 @@ func TestDriveObjectMapsShortcutTargetMetadata(t *testing.T) {
 	if obj.DriveType != "shortcut" || obj.ShortcutTargetType != "file" || obj.ShortcutTargetToken != "file-target" {
 		t.Fatalf("shortcut target metadata was not mapped: %+v", obj)
 	}
+	if obj.FileExtension != ".pdf" {
+		t.Fatalf("shortcut upload file should infer extension from display name: %+v", obj)
+	}
+}
+
+func TestDriveObjectTreatsNativeShortcutAsMarkdown(t *testing.T) {
+	t.Parallel()
+
+	obj := driveObject(map[string]any{
+		"type":     "shortcut",
+		"token":    "shortcut-1",
+		"name":     "native-doc",
+		"revision": "rev-1",
+		"shortcut_info": map[string]any{
+			"target_type":  "docx",
+			"target_token": "docx-target",
+		},
+	}, "folder-1")
+
+	if obj.FileExtension != ".md" {
+		t.Fatalf("native shortcut should be exposed as markdown: %+v", obj)
+	}
+}
+
+func TestWikiNodeObjectUsesNameExtensionWhenTypeMissing(t *testing.T) {
+	t.Parallel()
+
+	obj := wikiNodeObject(map[string]any{
+		"node_token": "node-1",
+		"title":      "script.py",
+	}, "space-1", "")
+
+	if obj.FileExtension != ".py" {
+		t.Fatalf("wiki upload with suffix should use display name extension: %+v", obj)
+	}
 }
 
 func TestDriveObjectUsesUpdatedTimeFallbackForVersion(t *testing.T) {

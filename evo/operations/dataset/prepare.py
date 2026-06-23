@@ -1,337 +1,425 @@
+from __future__ import annotations
+
 import json
 import re
 from collections import Counter
-from typing import Any
+from typing import Any, Mapping
 
-from ...artifacts import ArtifactDraft, ArtifactRef
-from ... import validate_id
-from ...runtime import AdapterCall, OperationContext, OperationOutput, evo_llm
-from .utils import QUESTION_TYPES, bounded_int, json_object, progress, strings, validate_case_id
+from evo.operations.common import as_list, clip, norm, text
 
-DIFFICULTIES = {'easy', 'medium', 'hard'}
-MULTI_HOP = {'single_doc_multi_hop', 'multi_doc_multi_hop'}
-# Generation policy: difficulty drives evidence count and reasoning depth, not just a prompt label.
-DIFFICULTY_POLICY = {
-    'easy': {'chunks': (2, 2), 'reasoning': '直接事实型问题，答案可由单个证据片段直接验证。'},
-    'medium': {'chunks': (2, 3), 'reasoning': '需要综合证据片段中的信息，答案不能照抄单句。'},
-    'hard': {'chunks': (3, 3), 'reasoning': '需要跨片段多步推理或处理结构化内容，问题不直接暗示证据位置。'},
+
+QUESTION_TYPES = (
+    'single_hop',
+    'single_doc_multi_hop',
+    'multi_doc_multi_hop',
+    'table_list',
+    'formula',
+)
+DIFFICULTIES = ('easy', 'medium', 'hard')
+TYPE_RULES = {
+    'single_hop': 'Use exactly one chunk. The answer must be directly supported by that chunk alone.',
+    'single_doc_multi_hop': (
+        'Use two or three chunks from one document. The answer must combine evidence across chunks.'
+    ),
+    'multi_doc_multi_hop': 'Use chunks from at least two documents. The answer must combine evidence across documents.',
+    'table_list': (
+        'Use only table or list chunks. Ask a lookup, comparison, count, filter, rank, '
+        'or enumeration question.'
+    ),
+    'formula': 'Use formula chunks. Ask about formula meaning, substitution, calculation, or numeric relationship.',
 }
-FINAL_PROMPT = ('生成 LazyMind 评测样本。只基于证据片段，问题独立完整，答案可验证，不用外部知识。\n'
-                'case_id:{case_id}\nquestion_type:{question_type}\ndifficulty:{difficulty}\n'
-                'instruction:{instruction}\n证据:\n{refs}')
-PLAN_PROMPT = ('只输出 JSON，不生成 question/answer。为 {question_type} 选择 {chunk_range} 个 chunk_id。\n'
-               '要求: single_doc_multi_hop 只能同一 doc_id；multi_doc_multi_hop 至少两个 doc_id；只能选候选。\n'
-               '输出:{{"selected_chunk_ids":["..."],"instruction":"...","prompt_focus":"..."}}\n'
-               'case_id:{case_id}\ndifficulty:{difficulty}\nuser_instruction:{user_instruction}\n'
-               'candidates:{candidates}')
-GEN_PROMPT = ('严格基于生成计划生成一条可验证 LazyMind 评测样本，只输出 JSON。\n'
-              '问题必须独立完整，不能出现“参考内容/证据片段/上述/本文”等来源指代；答案只能来自证据片段。\n'
-              '英文问题涉及论文/文章/框架时必须写出标题、文件名或 arXiv id，不能只写 the paper/this paper。\n'
-              'grading_guidance 写给 judge，说明覆盖哪些核心事实即可。\n\n生成计划:\n{prompt}\n\n'
-              '输出字段: question, answer, grading_guidance, generate_reason')
-SOURCE_PREFIXES = ('根据参考内容，', '根据参考内容', '根据证据片段，', '根据证据片段', '在参考内容中，', '在参考内容中',
-                   '在证据片段中，', '在证据片段中', '参考内容中，', '证据片段中，')
-SOURCE_DEICTICS = ('参考内容', '证据片段', '给定信息', '根据上述', '根据上文', '上述', '上文', '本文', '参考材料',
-                   '给定材料', '参考上下文', '给定上下文',
-                   'according to the paper', 'according to the passage', 'according to the text', 'the paper',
-                   'this paper', 'the passage', 'the text', 'the provided')
+PLAN_RULES = {
+    'single_hop': 'Select exactly one chunk.',
+    'single_doc_multi_hop': 'Select two or three chunks, all from the same doc_id.',
+    'multi_doc_multi_hop': 'Select two or three chunks across at least two doc_id values.',
+    'table_list': 'Select one to three chunks, and every selected chunk must be table or list.',
+    'formula': 'Select one or two chunks, and every selected chunk must be formula.',
+}
+DIFFICULTY_RULES = {
+    'easy': 'Use the minimum evidence required by the question type and ask for an explicit fact.',
+    'medium': 'Use the question type evidence to require comparison, filtering, or a simple calculation.',
+    'hard': 'Use the richest evidence available for the question type and require multi-constraint synthesis.',
+}
 
 
-class PrepareDatasetCaseOperation:
-    def __init__(self, llm: Any | None = None):
-        self.llm = llm
-
-    def execute(self, ctx: OperationContext) -> OperationOutput:
-        raw_ref = str(ctx.params.get('source_snapshot_ref') or '')
-        snapshot_ref = ctx.input_refs[0] if ctx.input_refs else ArtifactRef.parse(raw_ref)
-        snapshot = ctx.artifact_graph.get(snapshot_ref)
-        case_id = validate_case_id(str(ctx.params.get('case_id') or ctx.params.get('output_case_id') or ''))
-        qtype = str(ctx.params.get('question_type') or '').strip()
-        difficulty = str(ctx.params.get('difficulty') or 'medium').strip()
-        if qtype not in QUESTION_TYPES or difficulty not in DIFFICULTIES:
-            raise ValueError('case_id, valid question_type and valid difficulty are required')
-        preview_chars = bounded_int(ctx.params.get('preview_chars'), 200, 20, 2000)
-        user_note = str(ctx.params.get('user_instruction') or '').strip()
-        doc_ids, chunk_ids = set(strings(ctx.params.get('doc_ids'))), set(strings(ctx.params.get('chunk_ids')))
-        units = []
-        for ref in [ArtifactRef.parse(item) for item in snapshot.get('source_unit_page_refs', [])]:
-            ctx.check_interrupt()
-            for unit in ctx.artifact_graph.get(ref).get('source_units', []):
-                g = unit.get
-                n = {'source_unit_ref': str(g('source_unit_ref') or ''), 'doc_ref': str(g('doc_ref') or ''),
-                     'doc_id': str(g('doc_id') or ''), 'filename': str(g('filename') or ''),
-                     'chunk_id': str(g('segment_id') or g('chunk_id') or g('source_unit_ref') or ''),
-                     'unit_type': str(g('unit_type') or 'paragraph'), 'content': str(g('content') or '')}
-                if chunk_ids and n['chunk_id'] not in chunk_ids:
-                    continue
-                if not chunk_ids and doc_ids and n['doc_id'] not in doc_ids:
-                    continue
-                units.append(n)
-        if not units:
-            raise ValueError('no source units matched prepare scope')
-        progress(ctx, 'select_candidates', 'running', 'selected candidate source units', current_item=case_id,
-                 detail={'question_type': qtype, 'candidate_count': len(units),
-                         'requires_llm_plan': qtype in MULTI_HOP})
-        selected, focus = self._select(ctx, case_id, qtype, difficulty, user_note, units)
-        self._validate(qtype, selected, difficulty)
-        parts = [f'生成一个 {qtype}、{difficulty} 难度的问题，答案必须能由证据片段验证。',
-                 f"难度要求：{DIFFICULTY_POLICY[difficulty]['reasoning']}"]
-        parts.extend([f'证据关系：{focus}'] if focus else [])
-        parts.extend([f'用户要求：{user_note}'] if user_note else [])
-        instruction = '\n'.join(parts)
-        refs = '\n\n'.join(f"[{i}] {u['filename']} / {u['chunk_id']} / {u['unit_type']}\n{u['content']}"
-                           for i, u in enumerate(selected, 1))
-        docs = {}
-        for u in selected:
-            docs.setdefault(u['doc_id'], {'doc_id': u['doc_id'], 'filename': u['filename'], 'doc_ref': u['doc_ref']})
-        context_reference = [{'chunk_id': u['chunk_id'], 'filename': u['filename'],
-                              'content_preview': u['content'][:preview_chars], 'doc_id': u['doc_id'],
-                              'unit_type': u['unit_type'], 'source_unit_ref': u['source_unit_ref']}
-                             for u in selected]
-        payload = {'case_id': case_id, 'question_type': qtype, 'difficulty': difficulty,
-                   'doc_reference': list(docs.values()),
-                   'context_reference': context_reference, 'instruction': instruction,
-                   'prompt': FINAL_PROMPT.format(case_id=case_id, question_type=qtype, difficulty=difficulty,
-                                                 instruction=instruction, refs=refs),
-                   'source_snapshot_ref': str(snapshot_ref),
-                   'source_message_id': str(ctx.params.get('source_message_id') or '')}
-        progress(ctx, 'prepare_case', 'success', 'case preparation ready', current_item=case_id,
-                 detail={'artifact_id': f'case_preparation_{case_id}', 'chunk_count': len(selected),
-                         'doc_count': len({u['doc_id'] for u in selected})})
-        return OperationOutput([ArtifactDraft(f'case_preparation_{case_id}', 'CasePreparation', payload,
-                                              ctx.operation_run_id, input_refs=[snapshot_ref])])
-
-    def _select(self, ctx, case_id, qtype, difficulty, user_note, units):
-        if qtype == 'single_hop':
-            candidates = _first(units, lambda u: u['unit_type'] == 'paragraph', 'single_hop requires paragraph')
-            if len(candidates) >= 3:
-                # Single-hop evidence band: easy uses shorter units, hard uses longer/denser units.
-                ranked = sorted(candidates, key=lambda u: len(u['content']))
-                third = len(ranked) // 3
-                bands = {'easy': ranked[:third or 1], 'medium': ranked[third:2 * third] or ranked,
-                         'hard': ranked[2 * third:] or ranked}
-                candidates = bands[difficulty]
-            match = re.search(r'(\d+)$', case_id)
-            index = max(0, int(match.group(1)) - 1) if match else sum(map(ord, case_id))
-            return [candidates[index % len(candidates)]], ''
-        if qtype == 'table_list':
-            return _first(units, lambda u: u['unit_type'] in {'table', 'list', 'mixed'}, 'table/list required')[:2], ''
-        if qtype == 'formula':
-            selected = _first(units, lambda u: u['unit_type'] in {'formula', 'mixed'}, 'formula required')[:1]
-            selected += _first([u for u in units if u not in selected and u['doc_id'] == selected[0]['doc_id']],
-                               lambda u: u['unit_type'] in {'paragraph', 'mixed'}, 'formula context required')[:1]
-            return selected, ''
-        return self._multi(ctx, case_id, qtype, difficulty, user_note, units)
-
-    def _multi(self, ctx, case_id, qtype, difficulty, user_note, units):
-        docs: dict[str, list[dict[str, Any]]] = {}
-        for unit in units:
-            docs.setdefault(unit['doc_id'], []).append(unit)
-        if qtype == 'single_doc_multi_hop':
-            candidates = next((items[:8] for items in docs.values() if len(items) >= 2), None)
-            if not candidates:
-                raise ValueError('single_doc_multi_hop requires at least two chunks from one document')
-        else:
-            if len(docs) < 2:
-                raise ValueError('multi_doc_multi_hop requires chunks from at least two documents')
-            candidates = [items[0] for items in docs.values() if items][:10]
-        by_chunk = {unit['chunk_id']: unit for unit in candidates}
-        candidates_json = json.dumps([{k: u[k] for k in ('doc_id', 'filename', 'chunk_id', 'unit_type', 'content')}
-                                      for u in candidates], ensure_ascii=False)
-        low, high = DIFFICULTY_POLICY[difficulty]['chunks']
-        chunk_range, feedback = str(low) if low == high else f'{low}-{high}', ''
-        for attempt in range(2):
-            request = {'case_id': case_id, 'attempt': attempt + 1, 'prompt': PLAN_PROMPT.format(
-                question_type=qtype, case_id=case_id, difficulty=difficulty, user_instruction=user_note,
-                candidates=candidates_json, chunk_range=chunk_range,
-            ) + feedback}
-            call = AdapterCall(f'llm.prepare_dataset_case.{qtype}', lambda p: _model(self)(p['prompt'], stream=False))
-            result = call.run(ctx, request, phase='prepare_case_plan', item_ref=case_id)
-            plan = json_object(result.response)
-            chunk_ids = strings(plan.get('selected_chunk_ids'))
-            selected = [by_chunk[item] for item in chunk_ids if item in by_chunk]
-            try:
-                bad = [item for item in chunk_ids if item not in by_chunk]
-                if bad:
-                    raise ValueError(f'selected chunk outside candidates: {bad}')
-                if 'question' in plan or 'answer' in plan:
-                    raise ValueError('prepare plan must not include question or answer')
-                self._validate(qtype, selected, difficulty)
-                return selected, '\n'.join(strings([plan.get('instruction'), plan.get('prompt_focus')]))
-            except ValueError as exc:
-                feedback = f'\n上次选择无效：{exc}。只能从候选 chunk_id 选 {chunk_range} 个：{sorted(by_chunk)}。'
-        raise ValueError('prepare plan selected invalid chunks after retry')
-
-    def _validate(self, qtype, units, difficulty) -> None:
-        docs = {unit['doc_id'] for unit in units}
-        if qtype in MULTI_HOP:
-            low, high = DIFFICULTY_POLICY[difficulty]['chunks']
-            if not low <= len(units) <= high:
-                raise ValueError(f'{qtype} {difficulty} plan must select {low}-{high} chunks, got {len(units)}')
-            if qtype == 'single_doc_multi_hop' and len(docs) != 1:
-                raise ValueError('single_doc_multi_hop plan must select chunks from one document')
-            if qtype == 'multi_doc_multi_hop' and len(docs) < 2:
-                raise ValueError('multi_doc_multi_hop plan must select chunks from at least two documents')
-        if not units:
-            raise ValueError(f'{qtype} has no selected source units')
-
-
-class GenerateDatasetCaseOperation:
-    def __init__(self, llm: Any | None = None):
-        self.llm = llm
-
-    def execute(self, ctx: OperationContext) -> OperationOutput:
-        value = str(ctx.params.get('case_preparation_ref') or '').strip()
-        ref = None if not value else ArtifactRef.parse(value) if '@' in value else ctx.artifact_graph.latest_ref(value)
-        if ctx.input_refs and (ref is None or ctx.input_refs[0].artifact_id == ref.artifact_id):
-            ref = ctx.input_refs[0]
-        if ref is None:
-            raise ValueError('case_preparation_ref is required')
-        plan = ctx.artifact_graph.get(ref)
-        progress(ctx, 'generate_case', 'running', 'generating dataset case', current_item=str(plan['case_id']))
-        prompt, feedback, result = GEN_PROMPT.format(prompt=plan['prompt']), '', None
-        for attempt in range(2):
-            ctx.check_interrupt()
-            result = AdapterCall('llm.generate_dataset_case', lambda p: _model(self)(p['prompt'], stream=False)).run(
-                ctx, {'case_id': plan['case_id'], 'attempt': attempt + 1, 'prompt': prompt + feedback},
-                phase='generate_case', item_ref=str(plan['case_id']))
-            try:
-                payload = self._case_payload(plan, json_object(result.response), str(ref))
-                break
-            except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
-                feedback = f'\n\n上次输出无效：{exc}。请只输出合法 JSON，并包含全部必填字段。'
-        else:
-            raise ValueError('generated case remained invalid after retry')
-        progress(ctx, 'generate_case', 'success', 'dataset case generated', current_item=payload['id'],
-                 detail={'artifact_id': payload['id'], 'call_id': result.record.call_id})
-        return OperationOutput([ArtifactDraft(payload['id'], 'DatasetCase', payload, ctx.operation_run_id, [ref])])
-
-    def _case_payload(self, plan, data, preparation_ref) -> dict[str, Any]:
-        contexts = list(plan.get('context_reference') or [])
-        question = self._standalone(str(data.get('question') or '').strip())
-        answer = str(data.get('answer') or data.get('ground_truth') or '').strip()
-        guidance = str(data.get('grading_guidance') or data.get('judge_guidance')
-                       or data.get('grading_judge') or data.get('evaluation_guidance') or '').strip()
-        if not question or not answer or not guidance:
-            raise ValueError('generated case missing question, answer or grading_guidance')
-        return {'id': validate_case_id(str(plan['case_id'])), 'question': question, 'answer': answer,
-                'question_type': str(plan['question_type']), 'difficulty': str(plan['difficulty']),
-                'grading_guidance': guidance,
-                'reference_context': [str(item.get('content_preview') or '') for item in contexts],
-                'reference_doc': [str(item.get('filename') or '') for item in contexts],
-                'reference_doc_ids': [str(item.get('doc_id') or '') for item in contexts],
-                'reference_chunk_ids': [str(item.get('chunk_id') or '') for item in contexts],
-                'generate_reason': str(data.get('generate_reason') or data.get('reason') or '').strip(),
-                'source_preparation_ref': preparation_ref,
-                'source_message_id': str(plan.get('source_message_id') or '')}
-
-    def _standalone(self, question) -> str:
-        for prefix in SOURCE_PREFIXES:
-            if question.startswith(prefix):
-                question = question[len(prefix):].strip()
-        lower = question.lower()
-        named = ("paper '" in lower or 'paper "' in lower or 'paper titled' in lower or 'arxiv' in lower
-                 or '.pdf' in lower)
-        deictic = any(p in question for p in SOURCE_DEICTICS[:12])
-        if deictic or (not named and any(p in lower for p in SOURCE_DEICTICS[12:])):
-            raise ValueError('generated question must name the referenced paper/source instead of using deictic '
-                             'wording')
-        return question
-
-
-class AssembleDatasetOperation:
-    def execute(self, ctx: OperationContext) -> OperationOutput:
-        dataset_id = validate_id(str(ctx.params.get('dataset_id') or 'eval_dataset'), 'dataset_id')
-        case_ids = [validate_case_id(item) for item in strings(ctx.params.get('case_ids'))]
-        if not case_ids or len(case_ids) != len(set(case_ids)):
-            raise ValueError('case_ids must be non-empty and unique')
-        refs = [ctx.artifact_graph.latest_ref(case_id) for case_id in case_ids]
-        refs_by_id = {ref.artifact_id: ref for ref in ctx.input_refs if ref.artifact_id in case_ids}
-        refs = [refs_by_id.get(case_id, ref) for case_id, ref in zip(case_ids, refs)]
-        cases = []
-        for index, (case_id, ref) in enumerate(zip(case_ids, refs), 1):
-            ctx.check_interrupt()
-            if ctx.artifact_graph.schema_name(ref) != 'DatasetCase':
-                raise ValueError(f'artifact is not DatasetCase: {ref}')
-            case = ctx.artifact_graph.get(ref)
-            missing = [key for key in ('id', 'question', 'answer', 'question_type', 'difficulty') if not case.get(key)]
-            if missing:
-                raise ValueError(f'{ref} missing required fields: {", ".join(missing)}')
-            if str(case['id']) != case_id:
-                raise ValueError(f'{ref} payload id mismatch: {case.get("id")} != {case_id}')
-            cases.append(case)
-            progress(ctx, 'assemble_dataset', 'running', f'assembled {index}/{len(case_ids)} cases',
-                     current_item=case_id, done=index, total=len(case_ids))
-        preview_keys = ('id', 'question', 'question_type', 'difficulty')
-        payload = {'id': dataset_id, 'size': len(cases), 'case_ids': case_ids,
-                   'case_refs': [str(ref) for ref in refs], 'stats': self._stats(cases),
-                   'checks': self._checks(ctx, cases), 'diff': self._diff(ctx, dataset_id, case_ids, refs),
-                   'preview': [{key: case[key] for key in preview_keys} for case in cases[:20]],
-                   'source_message_id': str(ctx.params.get('source_message_id') or '')}
-        progress(ctx, 'assemble_dataset', 'success', f'assembled dataset with {len(cases)} cases', done=len(cases),
-                 current_item=dataset_id, total=len(cases), detail={'ready': payload['checks']['ready']})
-        return OperationOutput([ArtifactDraft(dataset_id, 'EvalDataset', payload, ctx.operation_run_id, refs)])
-
-    def _stats(self, cases) -> dict[str, Any]:
-        return {'question_type_counts': dict(Counter(str(case.get('question_type') or '') for case in cases)),
-                'difficulty_counts': dict(Counter(str(case.get('difficulty') or '') for case in cases)),
-                'question_type_x_difficulty': dict(Counter(
-                    f"{case.get('question_type') or ''}:{case.get('difficulty') or ''}" for case in cases
-                )),
-                'doc_counts': dict(Counter(doc for case in cases for doc in strings(case.get('reference_doc_ids'))))}
-
-    def _checks(self, ctx, cases) -> dict[str, Any]:
-        errors, warnings = [], []
-        for text, count in Counter(re.sub(r'\s+', '', str(case.get('question') or '')).lower()
-                                   for case in cases).items():
-            if text and count > 1:
-                errors.append({'code': 'duplicate_question', 'message': f'duplicate question appears {count} times'})
-        # Gate the assembled dataset against a requested difficulty distribution (ratio per label).
-        expected = ctx.params.get('difficulty_distribution')
-        if isinstance(expected, dict) and expected and cases:
-            tolerance = float(ctx.params.get('difficulty_tolerance') or 0.1)
-            counts = Counter(str(case.get('difficulty') or '') for case in cases)
-            for label, ratio in expected.items():
-                actual = counts.get(str(label), 0) / len(cases)
-                if abs(actual - float(ratio)) > tolerance:
-                    errors.append({'code': 'difficulty_distribution',
-                                   'message': f'difficulty {label}: actual {actual:.2f} vs expected '
-                                              f'{float(ratio):.2f} (tolerance {tolerance})'})
-        for case in cases:
-            case_id = str(case.get('id') or '')
-            if not strings(case.get('reference_doc_ids')) or not strings(case.get('reference_chunk_ids')):
-                warnings.append({'code': 'missing_reference', 'case_id': case_id})
-            if not case.get('source_preparation_ref'):
-                warnings.append({'code': 'missing_source_preparation_ref', 'case_id': case_id})
-        return {'ready': not errors, 'errors': errors, 'warnings': warnings}
-
-    def _diff(self, ctx, dataset_id, case_ids, refs) -> dict[str, Any]:
+def prepare_case(config: Mapping[str, Any], snapshot: Mapping[str, Any], case_id: str, services: Any) -> dict[str, Any]:
+    services.raise_if_cancelled()
+    units = [unit for unit in snapshot.get('source_units') or [] if isinstance(unit, Mapping)]
+    if not units:
+        raise ValueError('corpus snapshot has no source units')
+    index = _case_index(case_id)
+    requested_qtype, qtype, candidates, fallback_reason = _select_question_type(config, units, index)
+    difficulty = _choice(config, 'difficulties', 'difficulty', DIFFICULTIES, index)
+    feedback = ''
+    allowed_chunk_ids = [text(unit.get('chunk_id')) for unit in candidates]
+    for attempt in range(2):
         try:
-            base_ref, base = ctx.artifact_graph.latest_ref(dataset_id), None
-            base = ctx.artifact_graph.get(base_ref)
-        except KeyError:
-            return {'base_ref': '', 'added_case_ids': case_ids, 'removed_case_ids': [],
-                    'changed_case_refs': [], 'order_changed': False}
-        old_ids, old_refs = list(map(str, base.get('case_ids', []))), list(map(str, base.get('case_refs', [])))
-        old_by_id, new_by_id = dict(zip(old_ids, old_refs)), dict(zip(case_ids, map(str, refs)))
-        common = set(old_by_id) & set(new_by_id)
-        return {'base_ref': str(base_ref),
-                'added_case_ids': [case_id for case_id in case_ids if case_id not in old_by_id],
-                'removed_case_ids': [case_id for case_id in old_ids if case_id not in new_by_id],
-                'changed_case_refs': [case_id for case_id in case_ids if case_id in common
-                                      and old_by_id[case_id] != new_by_id[case_id]],
-                'order_changed': [case_id for case_id in old_ids if case_id in new_by_id]
-                != [case_id for case_id in case_ids if case_id in old_by_id]}
+            plan = _json_object(services.llm_complete(_planning_prompt(case_id, qtype, difficulty, candidates)
+                                                      + feedback))
+            selected = _selected_units(plan, candidates)
+            _validate_contexts(qtype, selected)
+            instruction = _required_text(plan, 'instruction')
+            plan_rationale = _required_text(plan, 'plan_rationale')
+            break
+        except ValueError as exc:
+            if attempt:
+                raise
+            feedback = (
+                f'\nPrevious plan was invalid: {exc}. '
+                'selected_chunk_ids must copy values exactly from allowed_chunk_ids_json: '
+                f'{json.dumps(allowed_chunk_ids, ensure_ascii=False)}'
+            )
+    refs = [_reference(unit) for unit in selected]
+    payload = {
+        'case_id': case_id,
+        'question_type': qtype,
+        'difficulty': difficulty,
+        'doc_reference': _unique_docs(selected),
+        'context_reference': refs,
+        'instruction': instruction,
+        'type_rule': TYPE_RULES[qtype],
+        'difficulty_rule': DIFFICULTY_RULES[difficulty],
+        'plan_rationale': plan_rationale,
+        'source_snapshot_dataset_id': text(snapshot.get('dataset_id')),
+        'source_message_id': text(config.get('source_message_id')),
+    }
+    if qtype != requested_qtype:
+        payload['requested_question_type'] = requested_qtype
+        payload['question_type_fallback_reason'] = fallback_reason
+    return payload
 
 
-def _model(op):
-    if op.llm is None:
-        op.llm = evo_llm()
-    return op.llm
+def generate_case(preparation: Mapping[str, Any], services: Any) -> dict[str, Any]:
+    services.raise_if_cancelled()
+    raw = services.llm_complete(_generation_prompt(preparation))
+    data = _json_object(raw)
+    return _case_payload_from_llm(preparation, data)
 
 
-def _first(units, predicate, error):
-    selected = [unit for unit in units if predicate(unit)]
-    if not selected:
-        raise ValueError(error)
-    return selected
+def prepare_and_generate_case(
+    config: Mapping[str, Any],
+    snapshot: Mapping[str, Any],
+    case_id: str,
+    services: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    preparation = prepare_case(config, snapshot, case_id, services)
+    return preparation, generate_case(preparation, services)
+
+
+def assemble_dataset(cases: Mapping[str, Any]) -> dict[str, Any]:
+    rows = [_case_payload(case_id, item) for case_id, item in sorted(cases.items())]
+    return {
+        'id': 'eval.dataset',
+        'size': len(rows),
+        'case_ids': [row['id'] for row in rows],
+        'stats': {
+            'question_type_counts': dict(Counter(row['question_type'] for row in rows)),
+            'difficulty_counts': dict(Counter(row['difficulty'] for row in rows)),
+        },
+        'checks': _dataset_checks(rows),
+        'preview': [{key: row[key] for key in ('id', 'question', 'question_type', 'difficulty')} for row in rows],
+        'cases': rows,
+    }
+
+
+def _case_payload_from_llm(preparation: Mapping[str, Any], data: Mapping[str, Any]) -> dict[str, Any]:
+    case_id = text(preparation.get('case_id'))
+    contexts = [item for item in preparation.get('context_reference', []) if isinstance(item, Mapping)]
+    allowed_chunks = {text(item.get('chunk_id')) for item in contexts}
+    allowed_docs = set(_unique_text(item.get('doc_id') for item in contexts))
+    chunks = _texts(data.get('reference_chunk_ids'))
+    docs = _texts(data.get('reference_doc_ids'))
+    if len(chunks) != len(allowed_chunks) or set(chunks) != allowed_chunks:
+        raise ValueError('generated case must cite every selected chunk and no unselected chunks')
+    if len(docs) != len(allowed_docs) or set(docs) != allowed_docs:
+        raise ValueError('generated case must cite every selected document and no unselected documents')
+    row = {
+        'id': case_id,
+        'question': _required_text(data, 'question'),
+        'answer': _required_text(data, 'answer'),
+        'question_type': text(preparation.get('question_type')),
+        'difficulty': text(preparation.get('difficulty')),
+        'grading_guidance': _required_text(data, 'grading_guidance'),
+        'reference_context': [text(item.get('content_preview')) for item in contexts],
+        'reference_doc': [text(item.get('filename')) for item in contexts],
+        'reference_doc_ids': _unique_text(item.get('doc_id') for item in contexts),
+        'reference_chunk_ids': [text(item.get('chunk_id')) for item in contexts],
+        'reasoning_steps': _texts(data.get('reasoning_steps')),
+        'difficulty_rationale': text(data.get('difficulty_rationale')),
+        'type_rationale': text(data.get('type_rationale')),
+        'source_preparation': dict(preparation),
+        'source_message_id': text(preparation.get('source_message_id')),
+    }
+    _validate_case(row, contexts)
+    return row
+
+
+def _case_index(case_id: str) -> int:
+    match = re.search(r'(\d+)$', case_id)
+    return max(0, int(match.group(1)) - 1) if match else sum(map(ord, case_id))
+
+
+def _case_payload(case_id: str, value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f'DatasetCase payload for {case_id} must be an object')
+    row = dict(value)
+    if row.get('id') != case_id:
+        raise ValueError(f"case partition mismatch: {case_id} != {row.get('id')}")
+    return row
+
+
+def _choice(config: Mapping[str, Any], list_key: str, scalar_key: str, allowed: tuple[str, ...], index: int) -> str:
+    raw = config.get(list_key)
+    values = _option_values(raw if raw not in (None, '') else config.get(scalar_key), allowed, list_key)
+    pool = tuple(values) if values else allowed
+    return pool[index % len(pool)]
+
+
+def _select_question_type(
+    config: Mapping[str, Any],
+    units: list[Mapping[str, Any]],
+    index: int,
+) -> tuple[str, str, list[Mapping[str, Any]], str]:
+    pool = _question_type_pool(config)
+    offset = index % len(pool)
+    ordered = list(pool[offset:] + pool[:offset])
+    ordered.extend(qtype for qtype in QUESTION_TYPES if qtype not in ordered)
+    requested = ordered[0]
+    errors = []
+    for qtype in ordered:
+        try:
+            return requested, qtype, _candidate_units(units, qtype, index), (errors[0] if errors else '')
+        except ValueError as exc:
+            errors.append(f'{qtype}: {exc}')
+    raise ValueError(f'no question_type has usable candidate chunks: {"; ".join(errors)}')
+
+
+def _question_type_pool(config: Mapping[str, Any]) -> tuple[str, ...]:
+    raw = config.get('question_types')
+    values = _option_values(raw if raw not in (None, '') else config.get('question_type'),
+                            QUESTION_TYPES, 'question_types')
+    return tuple(values) if values else QUESTION_TYPES
+
+
+def _option_values(raw: Any, allowed: tuple[str, ...], name: str) -> list[str]:
+    values = [text(value) for value in as_list(raw) if text(value)]
+    invalid = [value for value in values if value not in allowed]
+    if invalid:
+        raise ValueError(f'{name} contains unsupported values: {", ".join(invalid)}')
+    return values
+
+
+def _dataset_checks(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+    duplicates = [question for question, count in Counter(norm(row.get('question')) for row in rows).items()
+                  if question and count > 1]
+    errors = [{'code': 'duplicate_question', 'message': question} for question in duplicates]
+    for row in rows:
+        if error := _case_errors(row):
+            errors.append(error)
+    return {
+        'ready': not errors and bool(rows),
+        'errors': errors,
+        'warnings': [{'code': 'missing_reference', 'case_id': row['id']} for row in rows
+                     if not row.get('reference_chunk_ids')],
+    }
+
+
+def _case_errors(row: Mapping[str, Any]) -> dict[str, str]:
+    contexts = [item for item in row.get('source_preparation', {}).get('context_reference', [])
+                if isinstance(item, Mapping)]
+    try:
+        _validate_case(row, contexts)
+    except ValueError as exc:
+        return {'code': 'invalid_case', 'case_id': text(row.get('id')), 'message': str(exc)}
+    return {}
+
+
+def _candidate_units(units: list[Mapping[str, Any]], qtype: str, index: int) -> list[Mapping[str, Any]]:
+    usable = [unit for unit in units if text(unit.get('content')) and text(unit.get('chunk_id'))]
+    if qtype == 'single_hop':
+        out = usable
+    elif qtype in {'single_doc_multi_hop', 'multi_doc_multi_hop'}:
+        out = [unit for unit in usable if text(unit.get('doc_id'))]
+    elif qtype == 'table_list':
+        out = [unit for unit in usable if text(unit.get('unit_type')) in {'table', 'list'}]
+    elif qtype == 'formula':
+        out = [unit for unit in usable if text(unit.get('unit_type')) == 'formula']
+    else:
+        raise ValueError(f'unsupported question_type: {qtype}')
+    if not out:
+        raise ValueError(f'{qtype} has no usable candidate chunks')
+    offset = index % len(out)
+    rotated = out[offset:] + out[:offset]
+    candidates = _candidate_window(qtype, rotated)
+    _validate_candidate_pool(qtype, candidates)
+    return candidates
+
+
+def _candidate_window(qtype: str, units: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    if qtype == 'multi_doc_multi_hop':
+        by_doc: dict[str, list[Mapping[str, Any]]] = {}
+        for unit in units:
+            by_doc.setdefault(text(unit.get('doc_id')), []).append(unit)
+        heads = [items[0] for items in by_doc.values() if items]
+        rest = [unit for unit in units if unit not in heads]
+        return (heads + rest)[:40]
+    if qtype == 'single_doc_multi_hop':
+        by_doc: dict[str, list[Mapping[str, Any]]] = {}
+        for unit in units:
+            by_doc.setdefault(text(unit.get('doc_id')), []).append(unit)
+        pair = next((items[:2] for items in by_doc.values() if len(items) >= 2), [])
+        rest = [unit for unit in units if unit not in pair]
+        return (pair + rest)[:40]
+    return units[:40]
+
+
+def _validate_candidate_pool(qtype: str, units: list[Mapping[str, Any]]) -> None:
+    docs = {text(unit.get('doc_id')) for unit in units if text(unit.get('doc_id'))}
+    if qtype == 'single_doc_multi_hop' and not any(
+        sum(1 for item in units if text(item.get('doc_id')) == doc_id) >= 2 for doc_id in docs
+    ):
+        raise ValueError('single_doc_multi_hop requires at least two usable chunks from one document')
+    if qtype == 'multi_doc_multi_hop' and len(docs) < 2:
+        raise ValueError('multi_doc_multi_hop requires usable chunks from at least two documents')
+
+
+def _selected_units(plan: Mapping[str, Any], candidates: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    if any(key in plan for key in ('question', 'answer', 'reference_chunk_ids', 'reference_doc_ids')):
+        raise ValueError('case plan must not include generated question, answer, or reference fields')
+    by_chunk = {text(unit.get('chunk_id')): unit for unit in candidates}
+    chunk_ids = _texts(plan.get('selected_chunk_ids'))
+    if not chunk_ids:
+        raise ValueError('case plan missing selected_chunk_ids')
+    if len(chunk_ids) != len(set(chunk_ids)):
+        raise ValueError('case plan selected duplicate chunks')
+    unknown = [chunk_id for chunk_id in chunk_ids if chunk_id not in by_chunk]
+    if unknown:
+        raise ValueError(f'case plan selected chunks outside candidates: {", ".join(unknown)}')
+    return [by_chunk[chunk_id] for chunk_id in chunk_ids]
+
+
+def _reference(unit: Mapping[str, Any]) -> dict[str, str]:
+    return {
+        'chunk_id': text(unit.get('chunk_id')),
+        'doc_id': text(unit.get('doc_id')),
+        'filename': text(unit.get('filename')),
+        'content_preview': clip(unit.get('content'), 1200),
+        'unit_type': text(unit.get('unit_type')),
+    }
+
+
+def _unique_docs(units: list[Mapping[str, Any]]) -> list[dict[str, str]]:
+    by_id = {}
+    for unit in units:
+        by_id.setdefault(text(unit.get('doc_id')), {
+            'doc_id': text(unit.get('doc_id')),
+            'filename': text(unit.get('filename')),
+            'doc_ref': text(unit.get('doc_ref')),
+        })
+    return list(by_id.values())
+
+
+def _planning_prompt(case_id: str, qtype: str, difficulty: str, candidates: list[Mapping[str, Any]]) -> str:
+    chunks = [{
+        'chunk_id': text(unit.get('chunk_id')),
+        'doc_id': text(unit.get('doc_id')),
+        'filename': text(unit.get('filename')),
+        'unit_type': text(unit.get('unit_type')),
+        'content': clip(unit.get('content'), 900),
+    } for unit in candidates]
+    return (
+        'You plan one grounded LazyRAG evaluation case. Return exactly one JSON object and no markdown.\n'
+        'Do not generate the final question or answer. Use only candidate chunks.\n'
+        'Required JSON fields: selected_chunk_ids, instruction, plan_rationale.\n'
+        'selected_chunk_ids must copy values exactly from allowed_chunk_ids_json.\n'
+        f'case_id: {case_id}\n'
+        f'question_type: {qtype}\n'
+        f'question_type_rule: {TYPE_RULES[qtype]}\n'
+        f'selection_rule: {PLAN_RULES[qtype]}\n'
+        f'difficulty: {difficulty}\n'
+        f'difficulty_rule: {DIFFICULTY_RULES[difficulty]}\n'
+        f'allowed_chunk_ids_json: {json.dumps([item["chunk_id"] for item in chunks], ensure_ascii=False)}\n'
+        f'candidate_chunks_json: {json.dumps(chunks, ensure_ascii=False, sort_keys=True)}'
+    )
+
+
+def _generation_prompt(preparation: Mapping[str, Any]) -> str:
+    evidence = [{
+        'chunk_id': text(item.get('chunk_id')),
+        'doc_id': text(item.get('doc_id')),
+        'filename': text(item.get('filename')),
+        'unit_type': text(item.get('unit_type')),
+        'content': text(item.get('content_preview')),
+    } for item in preparation.get('context_reference', []) if isinstance(item, Mapping)]
+    expected_chunk_ids = [item['chunk_id'] for item in evidence]
+    expected_doc_ids = list(dict.fromkeys(item['doc_id'] for item in evidence))
+    return (
+        'You generate grounded LazyRAG evaluation cases. Return exactly one JSON object and no markdown.\n'
+        'Use only the evidence below. Do not use outside knowledge. The question must be standalone and must not say '
+        '"the evidence", "the context", "above", "this document", or similar source-deictic wording.\n'
+        'Required JSON fields: question, answer, grading_guidance, reference_chunk_ids, reference_doc_ids, '
+        'reasoning_steps, difficulty_rationale, type_rationale.\n'
+        'reference_chunk_ids must exactly copy expected_reference_chunk_ids_json. '
+        'reference_doc_ids must exactly copy expected_reference_doc_ids_json.\n'
+        f'case_id: {text(preparation.get("case_id"))}\n'
+        f'question_type: {text(preparation.get("question_type"))}\n'
+        f'question_type_rule: {text(preparation.get("type_rule"))}\n'
+        f'difficulty: {text(preparation.get("difficulty"))}\n'
+        f'difficulty_rule: {text(preparation.get("difficulty_rule"))}\n'
+        f'instruction: {text(preparation.get("instruction"))}\n'
+        f'expected_reference_chunk_ids_json: {json.dumps(expected_chunk_ids, ensure_ascii=False)}\n'
+        f'expected_reference_doc_ids_json: {json.dumps(expected_doc_ids, ensure_ascii=False)}\n'
+        f'evidence_json: {json.dumps(evidence, ensure_ascii=False, sort_keys=True)}'
+    )
+
+
+def _json_object(raw: str) -> Mapping[str, Any]:
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError('LLM did not return a JSON object') from exc
+    if not isinstance(data, Mapping):
+        raise ValueError('LLM response must be a JSON object')
+    return data
+
+
+def _required_text(data: Mapping[str, Any], key: str) -> str:
+    value = text(data.get(key))
+    if not value:
+        raise ValueError(f'generated case missing {key}')
+    return value
+
+
+def _texts(value: Any) -> list[str]:
+    return [item for item in (text(item) for item in as_list(value)) if item]
+
+
+def _unique_text(values: Any) -> list[str]:
+    return list(dict.fromkeys(item for item in (text(value) for value in values) if item))
+
+
+def _validate_case(row: Mapping[str, Any], contexts: list[Mapping[str, Any]]) -> None:
+    _validate_contexts(text(row.get('question_type')), contexts)
+    if not text(row.get('question')) or not text(row.get('answer')) or not text(row.get('grading_guidance')):
+        raise ValueError('case must include question, answer, and grading_guidance')
+
+
+def _validate_contexts(qtype: str, contexts: list[Mapping[str, Any]]) -> None:
+    qtype = text(qtype)
+    if qtype not in QUESTION_TYPES:
+        raise ValueError(f'unsupported question_type: {qtype}')
+    chunks = [text(item.get('chunk_id')) for item in contexts]
+    docs = [text(item.get('doc_id')) for item in contexts]
+    unit_types = {text(item.get('unit_type')) for item in contexts}
+    if len(set(chunks)) != len(chunks) or not all(chunks):
+        raise ValueError(f'{qtype} must use non-empty unique chunks')
+    if qtype == 'single_hop' and len(chunks) != 1:
+        raise ValueError('single_hop must use exactly one chunk')
+    if qtype == 'single_doc_multi_hop' and (not 2 <= len(chunks) <= 3 or not all(docs) or len(set(docs)) != 1):
+        raise ValueError('single_doc_multi_hop must use two or three chunks from one document')
+    if qtype == 'multi_doc_multi_hop' and (not 2 <= len(chunks) <= 3 or not all(docs) or len(set(docs)) < 2):
+        raise ValueError('multi_doc_multi_hop must use two or three chunks from multiple documents')
+    if qtype == 'table_list' and (not 1 <= len(chunks) <= 3 or not unit_types <= {'table', 'list'}):
+        raise ValueError('table_list must use one to three table or list chunks')
+    if qtype == 'formula' and (not 1 <= len(chunks) <= 2 or unit_types != {'formula'}):
+        raise ValueError('formula must use one or two formula chunks')

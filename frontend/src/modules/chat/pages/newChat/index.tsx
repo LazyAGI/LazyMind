@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useChatModelProviderGuard } from "@/modules/chat/hooks/useChatModelProviderGuard";
 import { AgentAppsAuth } from "@/components/auth";
+import PreferenceConfigNotice from "@/modules/chat/components/PreferenceConfigNotice";
 
 const NewChatPage = () => {
   const { t } = useTranslation();
@@ -253,6 +254,7 @@ const NewChatPage = () => {
                       </Button>
                     </div>
                   ) : null}
+                  <PreferenceConfigNotice hidden={isChatDisabled} />
                   <ChatInput
                     ref={newChatInputRef}
                     value={inputValue}

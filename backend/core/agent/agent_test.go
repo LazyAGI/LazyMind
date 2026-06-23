@@ -683,32 +683,15 @@ func TestAttachCaseDetailsReportResultAddsSummaryAndCSVFile(t *testing.T) {
 }
 
 func TestAttachEvalReportSummaryResultAddsSummaryFields(t *testing.T) {
-	baseDir := t.TempDir()
-	t.Setenv("LAZYMIND_EVO_BASE_DIR", baseDir)
-	manifestDir := filepath.Join(baseDir, "dev-runs", "thr-1", "store", "runs", "run_1", "artifacts", "manifests")
-	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
-		t.Fatalf("create manifest dir: %v", err)
-	}
-	manifest := `{
-		"artifact_id": "eval_report",
-		"latest_version": 2,
-		"schema_name": "EvalReport",
-		"versions": [
-			{"version": 1, "payload_ref": "artifacts/blobs/eval_report/v0001.json"},
-			{"version": 2, "payload_ref": "artifacts/blobs/eval_report/v0042.json"}
-		]
-	}`
-	if err := os.WriteFile(filepath.Join(manifestDir, "eval_report.json"), []byte(manifest), 0o644); err != nil {
-		t.Fatalf("write manifest: %v", err)
-	}
 	payload := []any{
 		map[string]any{
 			"artifact_id":   "eval_report",
-			"artifact_ref":  "eval_report@v2",
+			"ref":           "eval.summary@v2",
 			"schema":        "EvalReport",
 			"case_count":    float64(0),
 			"unrelated_key": "keep-me",
 			"data": map[string]any{
+				"id":               "eval.summary",
 				"eval_dataset_ref": "eval_dataset@v1",
 				"metrics":          map[string]any{"correct_rate": 0.4},
 				"bad_cases": []any{
@@ -728,8 +711,8 @@ func TestAttachEvalReportSummaryResultAddsSummaryFields(t *testing.T) {
 		t.Fatalf("expected eval report row to be found")
 	}
 	row := payload[0].(map[string]any)
-	if row[evalReportIDField] != "v0042" {
-		t.Fatalf("expected report_id from latest payload_ref, got %#v", row[evalReportIDField])
+	if row[evalReportIDField] != "eval.summary" {
+		t.Fatalf("expected report_id from inline data id, got %#v", row[evalReportIDField])
 	}
 	coverage, ok := row[evalReportTraceCoverageField].(evalReportTraceCoverage)
 	if !ok {
@@ -754,46 +737,29 @@ func TestAttachEvalReportSummaryResultAddsSummaryFields(t *testing.T) {
 	if data["metrics"].(map[string]any)["correct_rate"] != 0.4 {
 		t.Fatalf("expected original metrics to remain in data")
 	}
-	if _, ok := data["bad_cases"]; ok {
-		t.Fatalf("expected bad_cases to be removed from summary response")
+	if badCases, ok := data["bad_cases"].([]any); !ok || len(badCases) != 3 {
+		t.Fatalf("expected inline bad_cases to remain in summary response, got %#v", data["bad_cases"])
 	}
 }
 
 func TestListEvalReportBadCasesFiltersAndPaginates(t *testing.T) {
-	baseDir := t.TempDir()
-	t.Setenv("LAZYMIND_EVO_BASE_DIR", baseDir)
-	manifestDir := filepath.Join(baseDir, "dev-runs", "thr-1", "store", "runs", "run_1", "artifacts", "manifests")
-	blobDir := filepath.Join(baseDir, "dev-runs", "thr-1", "store", "runs", "run_1", "artifacts", "blobs", "eval_report")
-	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
-		t.Fatalf("create manifest dir: %v", err)
-	}
-	if err := os.MkdirAll(blobDir, 0o755); err != nil {
-		t.Fatalf("create blob dir: %v", err)
-	}
-	manifest := `{
-		"artifact_id": "eval_report",
-		"latest_version": 1,
-		"schema_name": "EvalReport",
-		"versions": [
-			{"version": 1, "payload_ref": "artifacts/blobs/eval_report/v0001.json"}
-		]
-	}`
-	if err := os.WriteFile(filepath.Join(manifestDir, "eval_report.json"), []byte(manifest), 0o644); err != nil {
-		t.Fatalf("write manifest: %v", err)
-	}
-	payload := `{
-		"bad_cases": [
-			{"case_id":"case_1","Defect":"答案缺少合同条款","Reason":"没有覆盖退款条款","failure_type":"missing_answer"},
-			{"case_id":"case_2","Defect":"引用错误","Reason":"检索片段错误","failure_type":"wrong_context"},
-			{"case_id":"case_3","defect":"合同金额错误","reason":"金额计算错误","failure_type":"missing_answer"},
-			{"case_id":"case_4","Defect":"格式问题","Reason":"输出冗余","failure_type":"format"}
-		]
-	}`
-	if err := os.WriteFile(filepath.Join(blobDir, "v0001.json"), []byte(payload), 0o644); err != nil {
-		t.Fatalf("write payload: %v", err)
+	payload := []any{
+		map[string]any{
+			"artifact_id": "eval_report",
+			"ref":         "eval.summary@v1",
+			"data": map[string]any{
+				"id": "eval.summary",
+				"bad_cases": []any{
+					map[string]any{"case_id": "case_1", "Defect": "答案缺少合同条款", "Reason": "没有覆盖退款条款", "failure_type": "missing_answer"},
+					map[string]any{"case_id": "case_2", "Defect": "引用错误", "Reason": "检索片段错误", "failure_type": "wrong_context"},
+					map[string]any{"case_id": "case_3", "defect": "合同金额错误", "reason": "金额计算错误", "failure_type": "missing_answer"},
+					map[string]any{"case_id": "case_4", "Defect": "格式问题", "Reason": "输出冗余", "failure_type": "format"},
+				},
+			},
+		},
 	}
 
-	result, err := listEvalReportBadCases("thr-1", "eval_report", "v0001", evalReportBadCaseListQuery{
+	result, err := listEvalReportBadCases(payload, "eval.summary", evalReportBadCaseListQuery{
 		PageSize:    1,
 		Offset:      0,
 		Keyword:     "合同",
@@ -812,7 +778,7 @@ func TestListEvalReportBadCasesFiltersAndPaginates(t *testing.T) {
 		t.Fatalf("unexpected first page items: %#v", result.Items)
 	}
 
-	secondPage, err := listEvalReportBadCases("thr-1", "eval_report", "v0001", evalReportBadCaseListQuery{
+	secondPage, err := listEvalReportBadCases(payload, "eval.summary", evalReportBadCaseListQuery{
 		PageSize:    10,
 		Offset:      1,
 		Keyword:     "合同",
@@ -1423,6 +1389,54 @@ func TestBuildAnalysisMarkdownResultReadsMarkdownPath(t *testing.T) {
 	}
 	if result["markdown_path"] != mdPath {
 		t.Fatalf("unexpected markdown path: %#v", result["markdown_path"])
+	}
+}
+
+func TestFindClassificationReportResultReturnsWholeRow(t *testing.T) {
+	classificationReport := map[string]any{
+		"artifact_id":         "classification_report",
+		"runtime_artifact_id": "analysis.summary",
+		"source_artifact_id":  "analysis.summary",
+		"ref":                 "analysis.summary@v1",
+		"schema":              "analysis.summary",
+		"data": map[string]any{
+			"cases": []any{
+				map[string]any{
+					"case_id":       "case_0002",
+					"question":      "What does sample.md state about # Reader Test Markdown?",
+					"reference_doc": []any{"sample.md"},
+				},
+			},
+		},
+	}
+	payload := []any{
+		map[string]any{"artifact_id": "repair_loop_plan", "data": map[string]any{}},
+		classificationReport,
+	}
+
+	body, found := findClassificationReportResult(payload)
+	if !found {
+		t.Fatalf("expected classification_report to be found")
+	}
+	result := body.(map[string]any)
+	if result["artifact_id"] != "classification_report" {
+		t.Fatalf("unexpected artifact_id: %#v", result["artifact_id"])
+	}
+	data, ok := result["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected classification_report data to be preserved, got %#v", result["data"])
+	}
+	cases, ok := data["cases"].([]any)
+	if !ok || len(cases) != 1 {
+		t.Fatalf("unexpected cases: %#v", data["cases"])
+	}
+	firstCase, ok := cases[0].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected case row: %#v", cases[0])
+	}
+	referenceDocs, ok := firstCase["reference_doc"].([]any)
+	if !ok || len(referenceDocs) != 1 || referenceDocs[0] != "sample.md" {
+		t.Fatalf("unexpected reference_doc: %#v", firstCase["reference_doc"])
 	}
 }
 

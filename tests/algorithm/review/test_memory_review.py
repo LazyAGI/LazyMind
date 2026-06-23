@@ -188,8 +188,11 @@ def test_memory_review_prompt_excludes_preferences_and_workflows():
     assert 'skill_editor' not in prompt
     assert '# User Profile Format' in prompt
     assert 'agent_persona' in prompt
-    assert 'user_address' in prompt
+    assert 'preferred_name' in prompt
     assert 'response_style' in prompt
+    assert '智能体角色' in prompt  # still present in Chinese parenthetical notes
+    assert '用户称谓' in prompt
+    assert '回复风格' in prompt
     assert 'role the user wants the agent to play' in prompt
     assert 'how the user wants the agent to address them' in prompt
     assert 'display/use exactly one of 简洁, 详细, 幽默, 正式' in prompt
@@ -280,9 +283,8 @@ def test_review_memory_runs_agent_with_memory_editor_tool(monkeypatch):
     assert calls['history'] == [{'role': 'user', 'content': 'normalized'}]
     assert fake_lazyllm.globals['agentic_config']['user_id'] == 'user-1'
     assert fake_lazyllm.globals['agentic_config']['memory'] == '旧记忆'
-    assert fake_lazyllm.globals['agentic_config']['user'] == '旧用户画像'
+    assert fake_lazyllm.globals['agentic_config']['user_preference'] == '旧用户画像'
     assert calls['model_config'] == {'llm': {'model': 'test'}}
-    assert 'user_preference' not in fake_lazyllm.globals['agentic_config']
 
 
 def test_review_memory_returns_success_when_no_tool_submission(monkeypatch):

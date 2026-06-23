@@ -44,6 +44,7 @@ async def patch_db(session_factory):
         'lazymind.router.core.ab_router.AsyncSessionLocal',
         'lazymind.router.core.process_manager.AsyncSessionLocal',
         'lazymind.router.core.health_checker.AsyncSessionLocal',
+        'lazymind.router.core.health_checker.HeartbeatSessionLocal',
         'lazymind.router.api.algorithm_routes.AsyncSessionLocal',
         'lazymind.router.api.strategy_routes.AsyncSessionLocal',
     ]

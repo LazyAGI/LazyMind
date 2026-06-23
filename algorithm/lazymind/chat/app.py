@@ -11,6 +11,7 @@ from lazymind.chat.api import (
     plugin_routes,
     subagent_routes,
 )
+from lazymind.chat.service.utils.trace_archive import start_local_trace_maintenance
 from lazymind.rewrite.api import rewrite_routes
 from lazymind.review.api import memory_review_routes, skill_review_routes
 
@@ -45,6 +46,7 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+start_local_trace_maintenance()
 
 if __name__ == '__main__':
     import argparse

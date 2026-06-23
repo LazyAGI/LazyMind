@@ -33,7 +33,7 @@ class EditOperation(TypedDict, total=False):
     content: str
 
 
-MemoryEditorTarget = Literal['memory', 'user']
+MemoryEditorTarget = Literal['memory', 'user_preference']
 
 
 @handle_tool_errors
@@ -52,15 +52,18 @@ def memory_editor(
     Args:
         target: Which buffer the edit operations belong to. ``'memory'`` is the
             agent's own working memory about the user's ongoing context and
-            prior discussions; ``'user'`` is the user profile / preference text.
-            For ``'user'``, the edited full text must start with YAML
+            prior discussions; ``'user_preference'`` is the user profile / preference text.
+            For ``'user_preference'``, the edited full text must start with YAML
             frontmatter delimited by ``---`` containing ``agent_persona``,
-            ``user_address``, and ``response_style``, followed by Markdown body
+            ``preferred_name``, and ``response_style``, followed by Markdown body
             content. ``response_style`` must be empty or exactly one of
             ``简洁``, ``详细``, ``幽默``, ``正式``, ``concise``, ``detailed``,
             ``humorous``, or ``formal``; use the Chinese values for Chinese
             user language and the English values otherwise. Write language,
             formatting, and workflow preferences in the Markdown body.
+            The Markdown body must NOT repeat information already captured
+            in the frontmatter fields (agent_persona, preferred_name,
+            response_style).
         operations: Ordered JSON edit operations. Supported operations:
 
             - ``{"op": "replace_text", "old": "...", "new": "..."}``:
@@ -74,36 +77,35 @@ def memory_editor(
               conflict resolution, or broader reorganization.
     """
     raw_target = str(target).strip()
-    if raw_target not in {'memory', 'user'}:
+    if raw_target not in {'memory', 'user_preference'}:
         return tool_error(
             'memory_editor',
-            f"Unknown target {raw_target!r}; expected one of 'memory', 'user'."
+            f"Unknown target {raw_target!r}; expected one of 'memory', 'user_preference'."
         )
 
     agentic_config = lazyllm.globals['agentic_config']
     user_id = str(agentic_config.get('user_id') or '').strip()
     session_id = str(agentic_config.get('session_id') or '').strip()
-    storage_target = 'user_preference' if raw_target == 'user' else raw_target
     current_content = agentic_config.get(raw_target) or ''
     operation_payload = [dict(op) for op in operations]
     try:
         apply_operations = (
             _apply_user_preference_edit_operations
-            if storage_target == 'user_preference'
+            if raw_target == 'user_preference'
             else _apply_memory_edit_operations
         )
         edited_content = apply_operations(current_content, {'operations': operation_payload})
         if edited_content.strip() == current_content.strip():
             raise UnprocessableContentError(
-                f'Generated {storage_target} content is unchanged from current content. '
+                f'Generated {raw_target} content is unchanged from current content. '
                 'A review row must contain at least one real content change.'
             )
-        edited_content = _validate_generated_content(storage_target, edited_content)
+        edited_content = _validate_generated_content(raw_target, edited_content)
     except UnprocessableContentError as exc:
         return tool_error('memory_editor', str(exc))
 
-    record = insert_memory_review_record(
-        target=storage_target,
+    insert_memory_review_record(
+        target=raw_target,
         user_id=user_id,
         session_id=session_id,
         source_content=current_content,
@@ -112,10 +114,6 @@ def memory_editor(
     )
     return tool_success('memory_editor', {
         'target': raw_target,
-        'storage_target': storage_target,
         'status': 'success',
         'operation_count': len(operation_payload),
-        'persisted': 'memory_review',
-        'record_id': record.get('id'),
-        'review_status': record.get('review_status', 'pending'),
     })

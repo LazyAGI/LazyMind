@@ -44,6 +44,11 @@ type agentFSStatRequest struct {
 	Path    string `json:"path"`
 }
 
+type agentFSRootsRequest struct {
+	AgentID string `json:"agent_id,omitempty"`
+	UserID  string `json:"user_id,omitempty"`
+}
+
 type agentFSExportRequest struct {
 	AgentID         string `json:"agent_id"`
 	Path            string `json:"path"`
@@ -70,6 +75,10 @@ type agentFSListResponse struct {
 	HasMore    bool              `json:"has_more"`
 }
 
+type agentFSRootsResponse struct {
+	Items []agentFSPathInfo `json:"items"`
+}
+
 type agentFSExportResponse struct {
 	ContentURI    string `json:"content_uri"`
 	SizeBytes     int64  `json:"size_bytes"`
@@ -77,6 +86,30 @@ type agentFSExportResponse struct {
 	MimeType      string `json:"mime_type,omitempty"`
 	FileExtension string `json:"file_extension,omitempty"`
 	CleanupToken  string `json:"cleanup_token,omitempty"`
+}
+
+// AgentListRoots POST /api/v1/agents/fs/roots
+func (h *Handler) AgentListRoots(w http.ResponseWriter, r *http.Request) {
+	var req agentFSRootsRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.AgentID) == "" {
+		writeError(w, http.StatusBadRequest, agentErrInvalidArgument, "agent_id is required")
+		return
+	}
+	roots := h.validator.AllowedRoots()
+	items := make([]agentFSPathInfo, 0, len(roots))
+	for _, runtimeRoot := range roots {
+		info, ok := h.agentPathInfo(w, h.mapper.ToPublic(runtimeRoot), agentErrTargetNotFound)
+		if !ok {
+			return
+		}
+		if info.IsDir {
+			items = append(items, info)
+		}
+	}
+	writeJSON(w, http.StatusOK, agentFSRootsResponse{Items: items})
 }
 
 // AgentValidatePath POST /api/v1/agents/fs/validate
