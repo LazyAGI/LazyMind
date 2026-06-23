@@ -153,10 +153,13 @@ make test-hermetic
 | Scenario | Command |
 |----------|---------|
 | Standard | `make up` |
+| Local runtime (SQLite state backend, no Redis) | `make up-build LAZYMIND_RUNTIME_MODE=local` |
 | Deploy MinerU OCR (on-prem) | `make up LAZYMIND_DEPLOY_MINERU=1` |
 | Deploy PaddleOCR (on-prem) | `make up LAZYMIND_DEPLOY_PADDLEOCR=1` |
 | External Milvus/OpenSearch | `make up LAZYMIND_MILVUS_URI=http://your-milvus:19530 LAZYMIND_OPENSEARCH_URI=https://your-opensearch:9200` |
 | Enable store dashboards | `make up LAZYMIND_ENABLE_STORE_DASHBOARDS=1` |
+
+`LAZYMIND_RUNTIME_MODE=local` applies the local compose override, stores short-lived chat/auth/subagent state in SQLite, and scales the Redis service to 0. Omit it, or set `LAZYMIND_RUNTIME_MODE=cloud`, to run the default Redis-backed stack where Redis is required.
 
 ---
 

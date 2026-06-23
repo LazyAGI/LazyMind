@@ -6,16 +6,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	scanstate "github.com/lazymind/scan_control_plane/internal/state"
 )
 
-const targetSearchCacheRedisPrefix = "scan:binding_target_search_cache:"
+const targetSearchCacheStatePrefix = "scan:binding_target_search_cache:"
 
-type redisTargetSearchCacheStore struct {
-	client *redis.Client
+type stateTargetSearchCacheStore struct {
+	store scanstate.Store
 }
 
-type redisTargetSearchCachePayload struct {
+type stateTargetSearchCachePayload struct {
 	Nodes     []TreeNode `json:"nodes"`
 	Status    string     `json:"status,omitempty"`
 	Complete  bool       `json:"complete"`
@@ -24,25 +24,19 @@ type redisTargetSearchCachePayload struct {
 	StaleAt   time.Time  `json:"stale_at,omitempty"`
 }
 
-func NewRedisTargetSearchCacheStore(rawURL string) (TargetSearchCacheStore, error) {
-	rawURL = strings.TrimSpace(rawURL)
-	if rawURL == "" {
-		return nil, nil
+func NewStateTargetSearchCacheStore(store scanstate.Store) TargetSearchCacheStore {
+	if store == nil {
+		return nil
 	}
-	options, err := redis.ParseURL(rawURL)
-	if err != nil {
-		return nil, err
-	}
-	client := redis.NewClient(options)
-	return &redisTargetSearchCacheStore{client: client}, nil
+	return &stateTargetSearchCacheStore{store: store}
 }
 
-func (s *redisTargetSearchCacheStore) Get(ctx context.Context, key string) (targetSearchCacheSnapshot, bool, error) {
-	if s == nil || s.client == nil {
+func (s *stateTargetSearchCacheStore) Get(ctx context.Context, key string) (targetSearchCacheSnapshot, bool, error) {
+	if s == nil || s.store == nil {
 		return targetSearchCacheSnapshot{}, false, nil
 	}
-	data, err := s.client.Get(ctx, s.dataKey(key)).Bytes()
-	if err == redis.Nil {
+	data, err := s.store.Get(ctx, s.dataKey(key))
+	if scanstate.IsMissing(err) {
 		locked, lockErr := s.hasLock(ctx, key)
 		if lockErr != nil {
 			return targetSearchCacheSnapshot{}, false, lockErr
@@ -58,7 +52,7 @@ func (s *redisTargetSearchCacheStore) Get(ctx context.Context, key string) (targ
 	if err != nil {
 		return targetSearchCacheSnapshot{}, false, err
 	}
-	var payload redisTargetSearchCachePayload
+	var payload stateTargetSearchCachePayload
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return targetSearchCacheSnapshot{}, false, err
 	}
@@ -74,8 +68,8 @@ func (s *redisTargetSearchCacheStore) Get(ctx context.Context, key string) (targ
 	}, true, nil
 }
 
-func (s *redisTargetSearchCacheStore) Set(ctx context.Context, key string, snapshot targetSearchCacheSnapshot, staleTTL, expireTTL time.Duration) error {
-	if s == nil || s.client == nil {
+func (s *stateTargetSearchCacheStore) Set(ctx context.Context, key string, snapshot targetSearchCacheSnapshot, staleTTL, expireTTL time.Duration) error {
+	if s == nil || s.store == nil {
 		return nil
 	}
 	if snapshot.staleAt.IsZero() {
@@ -84,7 +78,7 @@ func (s *redisTargetSearchCacheStore) Set(ctx context.Context, key string, snaps
 	if expireTTL <= 0 {
 		expireTTL = targetSearchCacheExpireTTL
 	}
-	payload := redisTargetSearchCachePayload{
+	payload := stateTargetSearchCachePayload{
 		Nodes:     append([]TreeNode(nil), snapshot.nodes...),
 		Status:    snapshot.status,
 		Complete:  snapshot.complete,
@@ -96,35 +90,31 @@ func (s *redisTargetSearchCacheStore) Set(ctx context.Context, key string, snaps
 	if err != nil {
 		return err
 	}
-	pipe := s.client.TxPipeline()
-	pipe.Set(ctx, s.dataKey(key), data, expireTTL)
-	pipe.Del(ctx, s.lockKey(key))
-	_, err = pipe.Exec(ctx)
-	if err != nil {
+	if err := s.store.Set(ctx, s.dataKey(key), data, expireTTL); err != nil {
 		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, _ = s.client.Del(releaseCtx, s.lockKey(key)).Result()
+		_ = s.store.Del(releaseCtx, s.lockKey(key))
+		return err
 	}
-	return err
+	return s.store.Del(ctx, s.lockKey(key))
 }
 
-func (s *redisTargetSearchCacheStore) TryLock(ctx context.Context, key string, ttl time.Duration) (bool, error) {
-	if s == nil || s.client == nil {
+func (s *stateTargetSearchCacheStore) TryLock(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+	if s == nil || s.store == nil {
 		return false, nil
 	}
 	lockTTL := ttl
 	if lockTTL <= 0 {
 		lockTTL = time.Minute
 	}
-	return s.client.SetNX(ctx, s.lockKey(key), "1", lockTTL).Result()
+	return s.store.SetNX(ctx, s.lockKey(key), []byte("1"), lockTTL)
 }
 
-func (s *redisTargetSearchCacheStore) hasLock(ctx context.Context, key string) (bool, error) {
-	n, err := s.client.Exists(ctx, s.lockKey(key)).Result()
-	return n > 0, err
+func (s *stateTargetSearchCacheStore) hasLock(ctx context.Context, key string) (bool, error) {
+	return s.store.Exists(ctx, s.lockKey(key))
 }
 
-func (p redisTargetSearchCachePayload) status() string {
+func (p stateTargetSearchCachePayload) status() string {
 	switch p.Status {
 	case targetSearchCacheStatusMissing, targetSearchCacheStatusBuilding, targetSearchCacheStatusComplete, targetSearchCacheStatusFailed:
 		return p.Status
@@ -138,10 +128,10 @@ func (p redisTargetSearchCachePayload) status() string {
 	return targetSearchCacheStatusMissing
 }
 
-func (s *redisTargetSearchCacheStore) dataKey(key string) string {
-	return targetSearchCacheRedisPrefix + targetSearchCacheRedisKey(key) + ":data"
+func (s *stateTargetSearchCacheStore) dataKey(key string) string {
+	return targetSearchCacheStatePrefix + targetSearchCacheStorageKey(key) + ":data"
 }
 
-func (s *redisTargetSearchCacheStore) lockKey(key string) string {
-	return targetSearchCacheRedisPrefix + targetSearchCacheRedisKey(key) + ":lock"
+func (s *stateTargetSearchCacheStore) lockKey(key string) string {
+	return targetSearchCacheStatePrefix + targetSearchCacheStorageKey(key) + ":lock"
 }

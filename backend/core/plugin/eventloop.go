@@ -13,22 +13,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/state"
 	"lazymind/core/subagent"
 )
 
 // DefaultMode returns the configured plugin advance mode (auto|manual).
-// Defaults to "manual" when unset.
-func DefaultMode() string {
+func DefaultMode() string { return defaultMode() }
+
+func defaultMode() string {
 	v := strings.TrimSpace(os.Getenv("LAZYMIND_PLUGIN_MODE"))
-	if v == "auto" {
-		return "auto"
+	if v == "manual" {
+		return "manual"
 	}
-	return "manual"
+	return "auto"
 }
 
 // PluginStepParams are the task_created.params fields for plugin_step agent type.
@@ -91,7 +92,7 @@ type PluginChatContext struct {
 func HandlePluginStepCreated(
 	ctx context.Context,
 	db *gorm.DB,
-	rdb *redis.Client,
+	stateStore state.Store,
 	convID, historyID, userID string,
 	taskID, title, objective string,
 	params PluginStepParams,
@@ -183,14 +184,14 @@ func HandlePluginStepCreated(
 	}
 
 	// Seed Redis status.
-	_ = subagent.WriteStatus(ctx, rdb, task.ID, map[string]any{
+	_ = subagent.WriteStatus(ctx, stateStore, task.ID, map[string]any{
 		"status": subagent.StatusPending, "progress": 0,
 	})
 
 	// Launch SubAgent goroutine.
 	// input_artifact_keys, output_artifact_keys, and tools are NOT forwarded here:
 	// the Python runner reads them from the DB task record and plugin_loader respectively.
-	go subagent.Run(context.Background(), db, rdb, subagent.RunRequest{
+	go subagent.Run(context.Background(), db, stateStore, subagent.RunRequest{
 		TaskID:        task.ID,
 		AgentType:     "plugin_step",
 		WorkspacePath: task.WorkspacePath,
@@ -213,7 +214,7 @@ func HandlePluginStepCreated(
 func OnSubAgentDone(
 	ctx context.Context,
 	db *gorm.DB,
-	rdb *redis.Client,
+	stateStore state.Store,
 	taskID, status, summary string,
 	onSSE func(eventType string, payload map[string]any),
 	pctx *PluginChatContext,
@@ -251,7 +252,7 @@ func OnSubAgentDone(
 	}
 
 	if DefaultMode() == "auto" {
-		go advanceAutoMode(ctx, db, rdb, summary, onSSE, pctx)
+		go advanceAutoMode(ctx, db, stateStore, summary, onSSE, pctx)
 	} else {
 		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
 		onSSE("step_waiting", map[string]any{
@@ -265,7 +266,7 @@ func OnSubAgentDone(
 func advanceAutoMode(
 	ctx context.Context,
 	db *gorm.DB,
-	rdb *redis.Client,
+	stateStore state.Store,
 	summary string,
 	onSSE func(string, map[string]any),
 	pctx *PluginChatContext,

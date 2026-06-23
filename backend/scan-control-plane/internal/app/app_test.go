@@ -157,6 +157,53 @@ func TestBuildMissingRequiredValueReturnsError(t *testing.T) {
 	}
 }
 
+func TestBuildTargetSearchCacheStoreUsesSQLiteStateBackend(t *testing.T) {
+	t.Setenv("LAZYMIND_STATE_BACKEND", "sqlite")
+	t.Setenv("LAZYMIND_STATE_SQLITE_PATH", t.TempDir()+"/state.db")
+
+	store, err := buildTargetSearchCacheStore(config.Config{})
+	if err != nil {
+		t.Fatalf("build target search cache store: %v", err)
+	}
+	if store == nil {
+		t.Fatalf("target search cache store is nil, want sqlite state-backed store")
+	}
+	locked, err := store.TryLock(context.Background(), "sqlite", time.Minute)
+	if err != nil {
+		t.Fatalf("target search cache store TryLock: %v", err)
+	}
+	if !locked {
+		t.Fatalf("target search cache store TryLock = false, want true")
+	}
+}
+
+func TestBuildTargetSearchCacheStoreRejectsRedisURLInSQLiteStateBackend(t *testing.T) {
+	t.Setenv("LAZYMIND_STATE_BACKEND", "sqlite")
+	t.Setenv("LAZYMIND_STATE_SQLITE_PATH", t.TempDir()+"/state.db")
+
+	store, err := buildTargetSearchCacheStore(config.Config{RedisURL: "redis://127.0.0.1:1/0"})
+	if err == nil || !strings.Contains(err.Error(), "redis url must not be configured") {
+		t.Fatalf("build target search cache store error = %v, want redis/sqlite conflict", err)
+	}
+	if store != nil {
+		t.Fatalf("target search cache store = %T, want nil", store)
+	}
+}
+
+func TestBuildTargetSearchCacheStoreStaysDisabledWithoutBackendOrRedisURL(t *testing.T) {
+	t.Setenv("LAZYMIND_STATE_BACKEND", "")
+	t.Setenv("LAZYMIND_REDIS_URL", "")
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_REDIS_URL", "")
+
+	store, err := buildTargetSearchCacheStore(config.Config{})
+	if err != nil {
+		t.Fatalf("build target search cache store: %v", err)
+	}
+	if store != nil {
+		t.Fatalf("target search cache store = %T, want nil", store)
+	}
+}
+
 func TestEnabledConnectorTypesIncludesLocalFSFeishuAndNotion(t *testing.T) {
 	t.Parallel()
 

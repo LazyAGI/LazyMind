@@ -22,7 +22,7 @@ const (
 	logEventIdleEventRecorded      = "resource_update.idle.event_recorded"
 	logEventIdleEventSkipped       = "resource_update.idle.event_skipped"
 	logEventIdleEventTriggered     = "resource_update.idle.event_triggered"
-	logEventIdleRedisCleanupFailed = "resource_update.idle.redis_cleanup_failed"
+	logEventIdleStateCleanupFailed = "resource_update.idle.state_cleanup_failed"
 	logEventIdleFallbackFailed     = "resource_update.idle.fallback_failed"
 	logEventIdleRedisNotifyFailed  = "resource_update.idle.redis_notify_failed"
 	logEventMemoryReviewCallDone   = "resource_update.memory_review.call_done"

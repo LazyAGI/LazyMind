@@ -539,8 +539,6 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
-      - *lazyllm-src-mount
-      - *algorithm-src-mount
       - sqlite-data:/data/sqlite
     environment:
       LAZYMIND_DOCUMENT_PROCESSOR_PORT: "8000"
@@ -578,8 +576,6 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
-      - *lazyllm-src-mount
-      - *algorithm-src-mount
       - sqlite-data:/data/sqlite
     environment:
       LAZYMIND_DOCUMENT_WORKER_PORT: "8001"
@@ -626,8 +622,6 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
-      - *lazyllm-src-mount
-      - *algorithm-src-mount
       - sqlite-data:/data/sqlite
     healthcheck:
       test: ['CMD-SHELL', 'python -m lazymind.parsing.service.healthcheck']
