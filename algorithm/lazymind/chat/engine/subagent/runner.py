@@ -163,6 +163,66 @@ def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
 _ZH_RE = re.compile('[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]')
 
 
+def _build_partial_sort_order_hints(session_id: str, partial_indices: 'Dict[str, List[int]]',
+                                    plugin_id: str = '') -> str:
+    """Translate partial_indices (0-based list_index) into sort_order guidance for the AI.
+
+    Queries Go core to resolve each list_index to its current 1-based sort_order,
+    then returns a concise instruction block the AI can act on directly.
+    Returns an empty string on any error or when translation is unnecessary.
+    """
+    try:
+        import httpx
+        from lazymind.config import config as _cfg
+        from lazymind.chat.plugin import plugin_loader
+        core_url = str(_cfg['core_api_url']).rstrip('/')
+
+        if not plugin_id:
+            return ''
+        spec = plugin_loader.get_plugin(plugin_id)
+        if not spec:
+            return ''
+
+        hints: List[str] = []
+        for artifact_key, list_indexes in partial_indices.items():
+            slot_def = spec.get_slot_for_artifact_key(artifact_key)
+            if not slot_def:
+                continue
+            slot_id = slot_def.get('id', '')
+            if not slot_id:
+                continue
+            # Fetch order_list for this slot.
+            resp = httpx.get(
+                f'{core_url}/plugin-sessions/{session_id}/slots/{slot_id}/order',
+                timeout=3.0,
+            )
+            if resp.status_code != 200:
+                continue
+            order_list: list = resp.json().get('data', {}).get('order_list', [])
+            if not order_list:
+                continue
+            # Build list_index → sort_order map.
+            li_to_so = {li: (pos + 1) for pos, li in enumerate(order_list)}
+            sort_orders = [li_to_so[li] for li in list_indexes if li in li_to_so]
+            if sort_orders:
+                so_str = ', '.join(str(s) for s in sort_orders)
+                hints.append(
+                    f'For artifact key "{artifact_key}": overwrite the item(s) at '
+                    f'sort_order={so_str} — pass sort_order=N when calling save_artifact '
+                    f'so that only those position(s) are replaced.'
+                )
+        if not hints:
+            return ''
+        return (
+            '## Partial retry instruction (AUTHORITATIVE)\n'
+            'This is a partial re-run. You must overwrite specific items rather than appending new ones.\n'
+            + '\n'.join(hints)
+            + '\nDo NOT omit sort_order for these items, and do NOT overwrite other positions.'
+        )
+    except Exception:
+        return ''
+
+
 def _objective_prompt(ctx: SubAgentContext, db: Optional['SubAgentDB'] = None) -> str:
     # Detect language from the user_input param (primary) or the full objective text.
     user_input = str(ctx.params.get('user_input') or '')
@@ -179,7 +239,10 @@ def _objective_prompt(ctx: SubAgentContext, db: Optional['SubAgentDB'] = None) -
         f'Objective: {ctx.objective}',
     ]
     if ctx.params:
-        lines.append(f'Parameters: {json.dumps(ctx.params, ensure_ascii=False)}')
+        # Filter out partial_indices from params: it contains internal 0-based list_index
+        # values which would confuse the AI (it should use 1-based sort_order instead).
+        display_params = {k: v for k, v in ctx.params.items() if k != 'partial_indices'}
+        lines.append(f'Parameters: {json.dumps(display_params, ensure_ascii=False)}')
     # Inject artifact context: plugin session reads from slot revisions with sort_order;
     # ordinary SubAgent reads from sub_agent_artifacts of prior succeeded steps.
     session_id: str = ctx.params.get('session_id', '')
@@ -189,6 +252,16 @@ def _objective_prompt(ctx: SubAgentContext, db: Optional['SubAgentDB'] = None) -
             lines.extend(artifact_section)
         elif ctx.input_artifact_keys:
             lines.append(f'Input artifact keys you may read: {", ".join(ctx.input_artifact_keys)}')
+    # Translate partial_indices (internal 0-based list_index) into sort_order guidance.
+    # This tells the AI exactly which display position(s) to overwrite instead of append.
+    partial_indices: Dict[str, List[int]] = ctx.params.get('partial_indices') or {}
+    plugin_id_for_hints: str = ctx.params.get('plugin_id', '')
+    if partial_indices and session_id:
+        sort_order_hints = _build_partial_sort_order_hints(
+            session_id, partial_indices, plugin_id=plugin_id_for_hints
+        )
+        if sort_order_hints:
+            lines.append(sort_order_hints)
     lines.append(
         'You MUST call save_artifact for EACH of the following keys before you finish — '
         'do NOT skip this step even if you have already written the results in plain text: '
@@ -344,6 +417,16 @@ async def run_subagent_stream(
         inject_model_config(model_config)
         inject_tool_config(tool_config)
         set_context(ctx)
+
+        # For plugin_step tasks: inject plugin context into agentic_config so that
+        # save_artifact can resolve sort_order → list_index via the Go core API.
+        if effective_agent_type == 'plugin_step':
+            lazyllm.globals['agentic_config'] = {
+                'plugin_id': params.get('plugin_id', ''),
+                'plugin_session_id': params.get('session_id', ''),
+                'plugin_step': params.get('step_id', ''),
+                'query': ctx.objective,
+            }
 
         yield _sse({'type': 'task_start', 'task_id': task_id})
 
