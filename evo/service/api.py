@@ -653,12 +653,6 @@ class EvoMessageHub:
             'data': record.value.payload,
         }
 
-    def _thread_artifact_payload(self, thread_id: str, artifact_id: str) -> Any:
-        row = self._artifact_runtime_row(thread_id, artifact_id)
-        if row is None:
-            raise KeyError(artifact_id)
-        return row.get('data')
-
     def _find_artifact(self, artifact_id: str) -> tuple[str, str]:
         for meta in self.list_threads():
             thread_id = str(meta.get('id') or '')
