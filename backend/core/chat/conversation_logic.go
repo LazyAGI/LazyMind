@@ -569,11 +569,6 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 			}
 		}
 	}
-	if f, ok := body["filters"].(map[string]any); ok {
-		fmt.Printf("[KBToolGroup_DEBUG] buildChatRequestBody filters=%+v\n", f)
-	} else {
-		fmt.Printf("[KBToolGroup_DEBUG] buildChatRequestBody filters=nil\n")
-	}
 	return body
 }
 

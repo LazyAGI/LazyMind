@@ -62,7 +62,7 @@ IMAGE_REFERENCE_MARKDOWN_GUIDANCE = (
     '# Image path formatting (mandatory)\n'
     'When showing images in your answer, you MUST copy the `image_markdown` field from '
     'tool results verbatim:\n'
-    '- Knowledge-base images: from `KBToolGroup` results.\n'
+    '- Knowledge-base images: from knowledge-base search tool results.\n'
     '- Generated images: from `image_generator` results.\n'
     '- Edited images: from `image_editor` results.\n'
     'If `image_markdown` is absent, copy the `image_url` or signed `text` field that '
@@ -78,7 +78,7 @@ IMAGE_REFERENCE_MARKDOWN_GUIDANCE = (
 VISION_EXTRACTOR_GUIDANCE = (
     'When calling vision_extractor on knowledge-base or attached images, pass the '
     'short filename shown in tool results or under Attached Files, or the '
-    '`local_path` field from KBToolGroup results. '
+    '`local_path` field from knowledge-base search tool results. '
     'Do NOT pass `/static-files/` signed URLs to vision_extractor.'
 )
 VISION_EXTRACT_DEFAULT_INSTRUCTION = (
@@ -101,34 +101,36 @@ ATTACHED_FILES_GUIDANCE = (
 
 SEARCH_GUIDANCE = (
     "# Search Tool Rules (CRITICAL — follow strictly)\n"
-    "You MUST call `KBToolGroup` (or another `kb_*` tool) FIRST for every retrieval "
+    "If a knowledge-base tool group is available, you MUST activate it first by calling "
+    "its activation tool (e.g. `get_KBToolGroup_methods`) before using any of its search methods. "
+    "Then use the returned knowledge-base search method FIRST for every retrieval "
     "need — no exceptions. Do not skip it because you think the web might have "
     "better information, or because the topic seems general, popular, or common "
     "knowledge. The knowledge base is your primary evidence source.\n\n"
-    "Only after `KBToolGroup` returns zero results or explicitly irrelevant results "
-    "may you fall back to provider-specific search tools"
-    "You MUST NOT use any non-knowledge-base retrieval tool before trying `kb_*` tools.\n\n"
-    "**kb_keyword_search vs kb_search — which one to use:**\n"
+    "Only after the knowledge-base search returns zero results or explicitly irrelevant results "
+    "may you fall back to provider-specific search tools. "
+    "You MUST NOT use any non-knowledge-base retrieval tool before trying knowledge-base tools.\n\n"
+    "**Keyword search vs semantic search — which one to use:**\n"
     "When the user mentions a specific document name (e.g., 'xxx.pdf', 'report.docx', "
     "'slides.pptx') and asks about particular terms, phrases, or content within that "
-    "document, prefer `kb_keyword_search` with `file_name=<document name>` and "
+    "document, prefer the knowledge-base keyword search tool with `file_name=<document name>` and "
     "`keyword=<specific terms>`. This is faster and more precise for document-scoped "
     "exact matching.\n"
     "For `keyword`, extract the core term(s) the user is asking about (e.g., a single "
     "word or short phrase like 'file1' or 'Redis timeout'), not the entire query "
     "sentence. If the first attempt returns zero results, try a shorter or alternative "
     "keyword before considering fallback.\n"
-    "When `kb_keyword_search` returns results, answer directly from them — do not "
-    "follow up with `kb_search` unless the returned content is clearly irrelevant "
+    "When the keyword search returns results, answer directly from them — do not "
+    "follow up with semantic search unless the returned content is clearly irrelevant "
     "or empty.\n"
-    "Use `kb_search` only for open-ended semantic queries where no specific document "
-    "is named. If `kb_keyword_search` returns zero results after trying alternative "
-    "keywords, fall back to `kb_search`.\n\n"
+    "Use semantic search only for open-ended queries where no specific document "
+    "is named. If keyword search returns zero results after trying alternative "
+    "keywords, fall back to semantic search.\n\n"
     "When the user gives a concrete URL or asks you to inspect a specific page, "
-    "still try `KBToolGroup` first; use `url_fetch` only when the knowledge base has "
+    "still try the knowledge-base search first; use `url_fetch` only when the knowledge base has "
     "no relevant result.\n\n"
     "For papers, research topics, arXiv ids, abstracts, or author-related questions, "
-    "still try `KBToolGroup` first; after knowledge-base evidence is unavailable or "
+    "still try the knowledge-base search first; after knowledge-base evidence is unavailable or "
     "insufficient, prefer `ArxivSearch` over general web search tools. "
     "When answering with knowledge-base evidence, cite with the original `[[document.chunk]]` "
     "markers. When answering with web search tools, `url_fetch`, "
