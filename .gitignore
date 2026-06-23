@@ -65,6 +65,7 @@ docs/superpowers/
 *.mod
 *.smod
 !local/local-runtime-manager/go.mod
+!local/local-proxy/go.mod
 
 # Compiled Static libraries
 *.lai

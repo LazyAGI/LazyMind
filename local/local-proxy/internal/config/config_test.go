@@ -392,7 +392,7 @@ func writeTestConfig(t *testing.T, content string) string {
 func writeTestConfigToDir(t *testing.T, root, name, content string) string {
 	t.Helper()
 
-	cfgDir := filepath.Join(root, "backend", "local-proxy", "configs")
+	cfgDir := filepath.Join(root, "local", "local-proxy", "configs")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}

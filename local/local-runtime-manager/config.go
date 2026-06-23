@@ -43,9 +43,9 @@ const (
 	repoComposeFileName           = "docker-compose.yml"
 	localComposeOverrideName      = "local/docker-compose.local.yml"
 	localProcessComposeBin        = "local/bin/process-compose"
-	localProxyConfigName          = "backend/local-proxy/configs/cloud-replace-kong.yaml"
-	localProxyScriptDirName       = "backend/local-proxy/scripts"
-	localProxySourceDirName       = "backend/local-proxy"
+	localProxyConfigName          = "local/local-proxy/configs/cloud-replace-kong.yaml"
+	localProxyScriptDirName       = "local/local-proxy/scripts"
+	localProxySourceDirName       = "local/local-proxy"
 	processComposeServiceName     = "docker-stack"
 	localProxyProcessName         = "local-proxy"
 )

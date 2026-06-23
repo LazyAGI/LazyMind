@@ -166,7 +166,7 @@ export LAZYMIND_FRONTEND_PORT ?= 8090
 PYTHON_DIRS := algorithm backend evo
 
 # Go dirs to lint
-GO_DIRS := backend/core backend/local-proxy
+GO_DIRS := backend/core local/local-proxy
 
 help:
 	@echo "LazyMind Make targets:"
@@ -241,13 +241,13 @@ test:
 	@./tests/run-all.sh
 
 test-hermetic-setup:
-	@./scripts/test-hermetic-env.sh setup
+	@./tests/test-hermetic-env.sh setup
 
 test-hermetic-check:
-	@./scripts/test-hermetic-env.sh check
+	@./tests/test-hermetic-env.sh check
 
 test-hermetic:
-	@./scripts/test-hermetic-run.sh
+	@./tests/test-hermetic-run.sh
 
 # Only mineru has build:; paddleocr/milvus/opensearch use image: only, so only needed for up.
 _need_mineru := $(filter 1 true TRUE yes YES on ON,$(LAZYMIND_DEPLOY_MINERU))

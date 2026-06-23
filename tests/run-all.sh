@@ -32,9 +32,9 @@ else
 fi
 
 echo ""
-echo "=== backend/local-proxy ==="
+echo "=== local/local-proxy ==="
 if command -v go &>/dev/null; then
-  (cd backend/local-proxy && GOCACHE=/tmp/local-proxy-gocache go test ./... -v 2>&1) || FAILED=1
+  (cd local/local-proxy && GOCACHE=/tmp/local-proxy-gocache go test ./... -v 2>&1) || FAILED=1
 else
   echo "Skip (go not found)"
 fi
