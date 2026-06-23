@@ -41,20 +41,14 @@ class LocalFSToolGroup:
 
     __public_apis__ = ['glob', 'grep', 'read', 'info']
 
-    # ── activation ──────────────────────────────────────────────────────
-
-    def __key_source__(self) -> Any:
-        agentic_config = lazyllm.globals.get('agentic_config') or {}
-        return agentic_config.get('localfs_paths')
-
-    # ── path helpers ────────────────────────────────────────────────────
+    # ── activation / path helpers ───────────────────────────────────────
 
     def _get_allowed_paths(self) -> List[str]:
-        agentic_config = lazyllm.globals.get('agentic_config') or {}
-        paths = agentic_config.get('localfs_paths', [])
-        if isinstance(paths, str):
-            return [paths]
-        return list(paths)
+        paths = lazyllm.globals['agentic_config']['localfs_paths']
+        return [paths] if isinstance(paths, str) else paths
+
+    def __key_source__(self) -> Any:
+        return self._get_allowed_paths()
 
     def _resolve(self, target: str) -> str:
         """Resolve *target* to an absolute path within the whitelist.
@@ -63,8 +57,6 @@ class LocalFSToolGroup:
             PermissionError: if *target* is outside the allowed set.
         """
         allowed = self._get_allowed_paths()
-        if not allowed:
-            raise PermissionError('localfs 未配置可用路径')
         target = os.path.abspath(target)
         for base in allowed:
             base = os.path.abspath(base)
@@ -80,8 +72,6 @@ class LocalFSToolGroup:
         """
         if path is None or str(path).strip() in ('', '.'):
             allowed = self._get_allowed_paths()
-            if not allowed:
-                raise PermissionError('localfs 未配置可用路径')
             for base in allowed:
                 abs_base = os.path.abspath(base)
                 if os.path.isdir(abs_base):
@@ -291,8 +281,6 @@ class LocalFSToolGroup:
         """
         if path is None or str(path).strip() in ('', '.'):
             allowed = self._get_allowed_paths()
-            if not allowed:
-                return tool_error('info', 'localfs 未配置可用路径')
             safe_path = os.path.abspath(allowed[0])
         else:
             safe_path = self._resolve(str(path))
