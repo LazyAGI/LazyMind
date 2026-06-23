@@ -41,6 +41,7 @@ import {
   CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
 } from "@/modules/chat/constants/chat";
+import { runtimeFeatures } from "@/runtime/features";
 import "./index.scss";
 
 const { Content, Sider } = Layout;
@@ -122,12 +123,16 @@ export default function MainLayout() {
   const pathname = location.pathname || "/agent/chat";
 
   const settingsMenuItems = [
-    {
-      key: "/admin",
-      label: t("layout.systemManagement"),
-      icon: <TeamOutlined className="settings-popover-icon" />,
-    },
-    ...(isAdminUser
+    ...(!runtimeFeatures.hideCloudAdmin
+      ? [
+          {
+            key: "/admin",
+            label: t("layout.systemManagement"),
+            icon: <TeamOutlined className="settings-popover-icon" />,
+          },
+        ]
+      : []),
+    ...(isAdminUser && !runtimeFeatures.hideEvo
       ? [
           {
             key: "developer-toggle",
@@ -159,7 +164,7 @@ export default function MainLayout() {
       icon: <ApiOutlined />,
     },
   ];
-  const hideEvo = import.meta.env.VITE_HIDE_EVO === "true";
+  const hideEvo = runtimeFeatures.hideEvo;
   const aiEvolutionNavItems = [
     {
       key: "/memory-management",
