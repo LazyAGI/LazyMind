@@ -254,7 +254,7 @@ def _normalize_candidate_payload(
     skill_name = _repair_skill_name(raw_skill_name, fallback=outline.skill_name or 'skill')
     if skill_name != raw_skill_name:
         LOG.warning(f'repaired candidate skill_name: {raw_skill_name!r} -> {skill_name!r}')
-    content = _repair_candidate_skill_content(content, skill_name)
+    content = _repair_candidate_skill_content_name(content, skill_name)
     repaired_outline = outline.model_copy(update={'skill_name': skill_name})
     return {
         'skill_name': skill_name,
@@ -281,10 +281,15 @@ def _repair_skill_name(raw_name: str, *, fallback: str = 'skill') -> str:
     return slug
 
 
-def _repair_candidate_skill_content(content: str, skill_name: str) -> str:
-    lines = content.lstrip('\ufeff').lstrip().splitlines()
-    if not lines or lines[0].strip() != '---':
-        raise ValueError('candidate content must start with YAML frontmatter')
+def _repair_candidate_skill_content_name(content: str, skill_name: str) -> str:
+    lines = content.splitlines(keepends=True)
+    if not lines:
+        return content
+
+    first_line = lines[0]
+    first_line_body = first_line.lstrip('\ufeff')
+    if first_line_body.strip() != '---':
+        return content
 
     frontmatter_end = None
     for index, line in enumerate(lines[1:], start=1):
@@ -292,59 +297,28 @@ def _repair_candidate_skill_content(content: str, skill_name: str) -> str:
             frontmatter_end = index
             break
     if frontmatter_end is None:
-        raise ValueError('candidate content must close YAML frontmatter')
+        return content
 
-    frontmatter_lines = lines[1:frontmatter_end]
-    frontmatter = _parse_frontmatter_lines(frontmatter_lines)
-    description = str(frontmatter.get('description') or '').strip()
-    if not description:
-        raise ValueError('candidate content frontmatter must contain description')
-
-    repaired_frontmatter, changed = _repair_frontmatter_name(frontmatter_lines, skill_name)
-    if changed:
-        LOG.warning(f'repaired candidate content frontmatter name to {skill_name!r}')
-    repaired = ['---', *repaired_frontmatter, '---', *lines[frontmatter_end + 1:]]
-    return '\n'.join(repaired).strip() + '\n'
-
-
-def _parse_frontmatter_lines(frontmatter_lines: list[str]) -> dict[str, str]:
-    fields: dict[str, str] = {}
-    for line in frontmatter_lines:
-        if not line or line.startswith((' ', '\t', '#')) or ':' not in line:
+    name_line = f'name: {skill_name}'
+    for index in range(1, frontmatter_end):
+        line = lines[index]
+        if line.startswith((' ', '\t', '#')) or ':' not in line:
             continue
-        key, value = line.split(':', 1)
-        key = key.strip()
-        if key:
-            fields[key] = _strip_yaml_scalar(value.strip())
-    return fields
+        key = line.split(':', 1)[0].strip()
+        if key != 'name':
+            continue
+        newline = '\n' if line.endswith('\n') else ''
+        repaired_line = f'{name_line}{newline}'
+        if line != repaired_line:
+            lines[index] = repaired_line
+            LOG.warning(f'repaired candidate content frontmatter name to {skill_name!r}')
+        return ''.join(lines)
 
-
-def _strip_yaml_scalar(value: str) -> str:
-    value = re.sub(r'\s+#.*$', '', value).strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-        return value[1:-1].strip()
-    return value
-
-
-def _repair_frontmatter_name(frontmatter_lines: list[str], skill_name: str) -> tuple[list[str], bool]:
-    repaired: list[str] = []
-    changed = False
-    found = False
-    for line in frontmatter_lines:
-        if not line.startswith((' ', '\t', '#')) and ':' in line:
-            key = line.split(':', 1)[0].strip()
-            if key == 'name':
-                found = True
-                new_line = f'name: {skill_name}'
-                repaired.append(new_line)
-                if line.strip() != new_line:
-                    changed = True
-                continue
-        repaired.append(line)
-    if not found:
-        repaired.insert(0, f'name: {skill_name}')
-        changed = True
-    return repaired, changed
+    closing_line = lines[frontmatter_end]
+    newline = '\n' if closing_line.endswith('\n') else ''
+    lines.insert(frontmatter_end, f'{name_line}{newline}')
+    LOG.warning(f'added candidate content frontmatter name {skill_name!r}')
+    return ''.join(lines)
 
 
 def _collect_source_trajectories(cluster: TaskCluster) -> list[str]:
@@ -363,9 +337,6 @@ def _collect_source_skills(cluster: TaskCluster) -> dict[str, str]:
     result: dict[str, str] = {}
     for draft in cluster.drafts:
         raw_skills = draft.source_skills
-        if not raw_skills:
-            environment = draft.contextual_description.environment or {}
-            raw_skills = environment.get('called_skills') if isinstance(environment, dict) else {}
         if isinstance(raw_skills, dict):
             items = raw_skills.items()
         elif isinstance(raw_skills, list):
@@ -401,9 +372,11 @@ def _cluster_item_id(index: int, cluster: TaskCluster) -> str:
 def _write_candidate_skill_files(artifact_dir: Path, candidates: list[CandidateSkill]) -> None:
     skill_dir = artifact_dir / 'skills'
     skill_dir.mkdir(parents=True, exist_ok=True)
-    for index, candidate in enumerate(candidates, start=1):
-        filename = f'{index:02d}_{_safe_filename(candidate.skill_name)}.md'
-        path = skill_dir / filename
+    used_names: set[str] = set()
+    for candidate in candidates:
+        skill_name = _unique_skill_dir_name(_safe_filename(candidate.skill_name), used_names)
+        path = skill_dir / skill_name / 'SKILL.md'
+        path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + '.tmp')
         tmp.write_text(candidate.content, encoding='utf-8')
         tmp.replace(path)
@@ -412,3 +385,13 @@ def _write_candidate_skill_files(artifact_dir: Path, candidates: list[CandidateS
 def _safe_filename(value: str) -> str:
     safe = ''.join(ch if ch.isalnum() or ch in ('-', '_', '.') else '_' for ch in value.strip())
     return safe or 'skill'
+
+
+def _unique_skill_dir_name(name: str, used_names: set[str]) -> str:
+    candidate = name
+    suffix = 2
+    while candidate in used_names:
+        candidate = f'{name}_{suffix}'
+        suffix += 1
+    used_names.add(candidate)
+    return candidate

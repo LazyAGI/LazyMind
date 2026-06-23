@@ -8,17 +8,8 @@ from typing import Any
 
 def skill_extraction_gate_prompt(trajectory: str) -> str:
     return f"""
-You are an expert Agent Experience Evaluation Engine.
-
-Your task is to determine whether the trajectory contains reusable experience valuable enough for future skill extraction.
-
-# Objective
-
-Evaluate whether this trajectory should enter the skill mining pipeline.
-
-The goal of skill extraction is NOT to preserve conversation history.
-
-The goal is to discover reusable procedural knowledge, reasoning patterns, execution strategies, correction behaviors, or failure patterns that may generalize to future tasks.
+You are an expert Agent Experience Evaluation Engine, your task is to decide whether this trajectory should enter the skill mining pipeline. 
+The goal is NOT to preserve conversation history; it is to find reusable procedural knowledge, reasoning patterns, execution strategies, correction behaviors, or failure patterns that can generalize to future tasks.
 
 # Extraction Threshold (Strict)
 
@@ -42,8 +33,7 @@ Typical high-value signals include:
 - constraint-aware replanning
 - reusable failure diagnosis patterns
 
-# Do NOT extract trajectories that are mainly:
-
+Do NOT extract trajectories that are mainly:
 - casual conversation
 - simple factual Q&A
 - one-shot responses
@@ -56,188 +46,115 @@ Typical high-value signals include:
 
 # Important
 
-Do NOT judge based only on:
-- task success
-- trajectory length
-- number of tool calls
-
-A failed trajectory may still contain valuable reusable experience.
-
-Focus on:
-- procedural reuse potential
-- reasoning value
-- future generalizability
-
-Use a conservative standard:
-If reusable procedural value is weak or ambiguous, return should_extract = false.
+Do not judge by task success, trajectory length, or number of tool calls alone. A failed trajectory can be valuable if it teaches a reusable failure or recovery pattern. Use a conservative standard: if reusable procedural value is weak or ambiguous, return should_extract=false.
 
 # Output Format
 
 Return ONLY valid JSON:
-
 {{
   "should_extract": true,
   "confidence": 0.92,
-  "value_type": [
-    "reasoning_pattern",
-    "retrieval_pattern",
-    "constraint_handling"
-  ],
+  "value_type": ["reasoning_pattern", "retrieval_pattern", "constraint_handling"],
   "reason": "The trajectory contains reusable retrieval refinement and adaptive replanning behaviors that causally contributed to task completion."
 }}
 
-# value_type candidates
-
-- success_pattern
-- failure_pattern
-- reasoning_pattern
-- retrieval_pattern
-- tool_usage_pattern
-- planning_pattern
-- constraint_handling
-- no_value
+value_type candidates: success_pattern, failure_pattern, reasoning_pattern, retrieval_pattern, tool_usage_pattern, planning_pattern, constraint_handling, no_value.
 
 # Trajectory
-
 {trajectory}
 """
 
 
-def contextual_description_prompt(trajectory: str) -> str:
+def cluster_signature_prompt(trajectory: str) -> str:
     return f"""
-You are an expert Agent Memory Abstraction Engine.
+You are an expert Agent Memory Abstraction Engine, your task is to summarize the trajectory into a structured "contextual_description" for future task clustering and skill mining.
 
-Your task is to summarize the trajectory into a structured "contextual_description" for future task clustering and skill mining.
+Your task is to extract a compact "cluster_signature" for future task clustering and skill mining.
 
 # Objective
 
-Extract the high-level task context and execution outcome from the trajectory.
+Extract only the reusable task structure needed to decide whether multiple drafts should become one skill.
 
 The output should describe:
-1. What the agent tried to achieve
-2. In what scenario/environment
-3. What strategy/process it used
-4. What key result/outcome was obtained
-5. What tools/skills/environment were involved
+1. The reusable task intent
+2. The high-level reusable procedure
+3. The applicability boundary for the skill
 
 # Requirements
 
-- Focus on task-level abstraction instead of low-level actions
-- Preserve only reusable and clusterable information
-- Remove noisy operational details
-- Avoid case-specific wording
-- The description should be generic enough to group similar tasks together
-- If the task failed, explicitly explain the failure reason briefly
+- Preserve reusable workflow structure, not case-specific details
+- Describe the broad reusable skill family, not the narrow observed case
+- Keep wording general enough for reusable skill mining, but not vague
+- Remove names, ids, dates, locations, prices, exact quantities, and incidental tool errors
+- Do not mention exact tool names unless they define the reusable task
+- Do not include every observed root cause in the intent; prefer a task-family description
+- Do not include fallback options, alternative resolutions, or customer choice variants in the intent unless they define a materially different workflow
+- Merge adjacent diagnostics into broader steps when they belong to the same troubleshooting workflow
+- Use 3-6 procedure steps
+- Boundaries must be one concise paragraph describing the positive applicability scope and only materially different workflows it should not cover
+- Do not exclude nearby variants that the same reusable procedure can handle
+- Do not exclude alternative remediation options, fallback paths, optional checks, or customer preference variants that belong to the same task family
+- Do not exclude cases based on incidental episode outcomes, such as whether a tool succeeded or failed
+- Avoid vague phrases like "help the user" or "solve the issue"
 - output should be in the same language as the trajectory
 
 # Output Format
 
 Return ONLY valid JSON:
-
 {{
-  "task_goal": "...",
-  "applicable_scenario": "...",
-  "execution_summary": "...",
-  "key_result": "..."
+  "intent": "...",
+  "procedure": ["...", "...", "..."],
+  "boundaries": "..."
 }}
 
 # Trajectory
-
 {trajectory}
 """
 
 
 def refined_trajectory_prompt(trajectory: str) -> str:
     return f"""
-You are an expert Skill-oriented Trajectory Refinement Engine for autonomous agents.
+You are an expert Skill-oriented Trajectory Refinement Engine.
 
-Your task is to extract the MINIMAL EFFECTIVE TRAJECTORY from the raw execution trajectory.
+Extract the MINIMAL EFFECTIVE TRAJECTORY from the raw execution trajectory. The result will be used to generate reusable agent skills, so each step must be an abstract skill-level step, not a raw conversation summary. Use the same language as the trajectory.
 
-The extracted steps will later be used to generate reusable agent skills.
-Therefore, each step must be an ABSTRACT SKILL-LEVEL STEP, not a raw message summary.
-output should be in the same language as the trajectory
+# Core Method: Reverse Causal Chain
 
-# Core Objective
+Reason backward from the final answer/result:
+- What evidence, decision, correction, or constraint made the outcome possible?
+- What earlier step produced that state?
+- Which action changed the agent's understanding or execution direction enough to enable the next critical step?
 
-Identify only the key abstract steps that causally contributed to the final outcome.
-**Reverse Causal Chain**: Refine the trajectory by reasoning backward from the final outcome.
-
-Start from the final answer/result, then ask:
-- What key evidence, decision, or correction made this outcome possible?
-- What previous step produced that evidence, decision, or correction?
-- Which earlier action changed the agent's state enough to enable the next critical step?
-
-Only keep steps that appear on this backward causal chain.
-
-Do NOT preserve a step merely because it happened earlier in the timeline.
-If a step did not causally enable a later critical step, remove it.
-
-This is NOT:
-- a chronological summary
-- a message-by-message compression
-- a replay of messages or tool calls
-
-This IS:
-- a causal path extraction
-- a reusable skill-step abstraction
+Keep only steps on this causal chain. Do not preserve a step merely because it happened in the timeline.
 
 # Step Granularity
 
-A step should:
+A retained step should:
 - represent a reusable reasoning or execution pattern
-- be higher-level than a single message or tool call
-- focus on intent, strategy, state transition, or critical decisions
-- merge multiple low-level actions if they serve the same purpose
+- be higher-level than one message or tool call
+- focus on intent, strategy, state transition, or critical decision
+- merge multiple low-level actions when they serve the same purpose
 
-Do NOT create a step just because:
-- the user sent a message
-- the assistant replied
-- a tool was called
-- information appeared in the conversation
+Keep a step ONLY IF it preserved a task-critical constraint, changed understanding, changed execution strategy, produced critical evidence, corrected an important mistake, directly contributed to success/failure, or introduced a reusable reasoning/action pattern.
 
-# Refinement Principles
+Remove steps that are repetitive, exploratory but useless, operationally trivial, low-information, duplicated retries, pure message restatements, or raw tool calls with no strategic meaning.
 
-Keep a step ONLY IF it:
-- preserves at least one task-critical constraint
-- changed the agent's understanding
-- changed execution strategy or direction
-- retrieved or produced critical evidence
-- corrected an important mistake
-- directly contributed to success or failure
-- introduced a reusable reasoning/action pattern
+BAD:
+- "The user asked a question."
+- "The assistant called search."
 
-Remove steps that are:
-- repetitive
-- exploratory but useless
-- operationally trivial
-- low-information
-- duplicated retries
-- pure message restatements
+GOOD:
+- "Clarify the task boundary before choosing an execution path."
+- "Validate conflicting evidence before committing to the final answer."
 
-# Action Field
+# Field Rules
 
-The "action" field should describe:
-- the abstract operation performed by the agent
-- the reusable reasoning or execution pattern
-
-Do NOT:
-- copy/paraphrase user input
-- describe raw conversation turns
-- describe low-level tool operations unless strategically important
-
-# State Field
-
-The "state" field should describe only the critical state produced by this step.
-When applicable, the state should explicitly capture:
-- why this step mattered and how if affected subsequent execution
-- which required state has or has not been satisfied
-- which destination, filter, or stopping condition remains necessary
-- which similar-looking alternative would be incorrect
+- action: describe the abstract operation and reusable pattern; do not copy/paraphrase user input.
+- state: describe the critical state produced, why it mattered, what remains unsatisfied, and any similar but incorrect alternative when relevant.
 
 # Output Format
 
 Return ONLY valid JSON:
-
 {{
   "steps": [
     {{
@@ -249,29 +166,22 @@ Return ONLY valid JSON:
 }}
 
 # Trajectory
-
 {trajectory}
 """
 
 
 def pending_skill_draft_prompt(skill_name: str, skill_content: str) -> str:
     return f"""
-You are an expert Skill Review Refactoring Engine.
+You are an expert Skill Review Refactoring Engine, your task is to convert an existing pending skill into a reusable skill draft.
+The pending skill is already structured, so extract only the three core parts needed by the skill mining pipeline:
 
-Your task is to convert an existing pending skill into a reusable skill draft.
-
-# Objective
-
-The pending skill is already structured, so extract only the three core parts needed by
-the skill mining pipeline:
-
-1. contextual_description
+1. cluster_signature
 2. refined_trajectory
 3. guidelines
 
 # Requirements
 
-- Use the title to identify the intended scenario, task goal, and capability.
+- Use the title and content to identify the reusable intent, procedure, and applicability boundary.
 - Split the skill content into meaningful operational steps for refined_trajectory.
 - Summarize the guidance embedded in each step into concise guidelines.
 - Keep the output abstract and reusable; do not copy Markdown headings mechanically.
@@ -281,13 +191,11 @@ the skill mining pipeline:
 # Output Format
 
 Return ONLY valid JSON:
-
 {{
-  "contextual_description": {{
-    "task_goal": "...",
-    "applicable_scenario": "...",
-    "execution_summary": "...",
-    "key_result": "..."
+  "cluster_signature": {{
+    "intent": "...",
+    "procedure": ["...", "...", "..."],
+    "boundaries": "..."
   }},
   "refined_trajectory": {{
     "steps": [
@@ -315,11 +223,9 @@ Return ONLY valid JSON:
 }}
 
 # Skill Title
-
 {skill_name}
 
 # Skill Content
-
 {skill_content}
 """
 
@@ -329,10 +235,7 @@ def guidelines_prompt(
     refined_trajectory: dict
 ) -> str:
     return f"""
-You are an expert Skill Experience Extraction Engine.
-
-Your task is to extract reusable strategic guidelines from the trajectory.
-output should be in the same language as the trajectory
+You are an expert Skill Experience Extraction Engine, your task is to extract reusable strategic guidelines from the trajectory, the output should be in the same language as the trajectory
 
 # Objective
 
@@ -344,47 +247,18 @@ The extracted guidelines will later become reusable skill knowledge.
 
 # Important
 
-Guidelines must be:
-- reusable
-- transferable
-- strategy-level
-- not case-specific
-- not tied to concrete entities or data
+Guidelines must be reusable, transferable, strategy-level, and actionable. They must not be tied to concrete entities, raw data, or one specific case.
+Avoid low-level operational instructions, trajectory narration, obvious statements or generic advice without actionable meaning.
 
-Avoid:
-- low-level operational instructions
-- trajectory narration
-- obvious statements
-- generic advice without actionable meaning
+Pattern definitions:
+- success pattern: effective strategy, decision heuristic, retrieval/execution pattern, verification behavior, or planning behavior.
+- failure pattern: reasoning mistake, premature conclusion, ineffective retrieval, missing verification, redundant exploration, tool misuse, or context misunderstanding.
 
-# Success Pattern Definition
-
-A success pattern is:
-- an effective strategy
-- a useful decision heuristic
-- a reliable retrieval/execution pattern
-- an effective verification behavior
-- a useful planning behavior
-
-# Failure Pattern Definition
-
-A failure pattern is:
-- a common reasoning mistake
-- premature conclusions
-- ineffective retrieval behavior
-- missing verification
-- redundant exploration
-- tool misuse
-- context misunderstanding
-
-# related_step
-
-Each guideline should be linked to the MOST relevant refined trajectory step.
+Each guideline should link to the most relevant refined trajectory step.
 
 # Output Format
 
 Return ONLY valid JSON:
-
 {{
   "success_patterns": [
     {{
@@ -401,11 +275,9 @@ Return ONLY valid JSON:
 }}
 
 # Refined Trajectory
-
 {refined_trajectory}
 
 # Raw Trajectory
-
 {trajectory}
 """
 
@@ -413,8 +285,8 @@ Return ONLY valid JSON:
 def draft_prompt(trajectory: dict[str, Any]) -> str:
     return (
         'You extract a reusable skill draft from one agent trajectory.\n'
-        'Return JSON only with keys: contextual_description, refined_trajectory, guidelines.\n'
-        'contextual_description has task_goal, applicable_scenario, execution_summary, key_result, environment.\n'
+        'Return JSON only with keys: cluster_signature, refined_trajectory, guidelines.\n'
+        'cluster_signature has intent, procedure, boundaries.\n'
         'refined_trajectory has steps: step_index, role, action, state, tool_name, skill_name.\n'
         'guidelines has success_patterns and failure_patterns, each item has related_step and guideline.\n\n'
         f'TRAJECTORY:\n{json.dumps(trajectory, ensure_ascii=False, indent=2)}'
@@ -423,8 +295,20 @@ def draft_prompt(trajectory: dict[str, Any]) -> str:
 
 def cluster_prompt(drafts: list[dict[str, Any]]) -> str:
     return (
-        'Cluster skill drafts by task type. Return JSON only: {"clusters":[{"task_scope":"...","draft_indexes":[0]}]}.\n'
-        f'DRAFTS:\n{json.dumps(drafts, ensure_ascii=False, indent=2)}'
+        'Cluster skill draft signatures into reusable skill families.\n'
+        'Return JSON only: {"clusters":[{"task_scope":"...","draft_indexes":[0]}]}.\n\n'
+        'Merge drafts when they share the same reusable task intent, high-level procedure, and applicability scope.\n'
+        'Do not split drafts merely because one case has an extra root cause, a different outcome, a tool failure, '
+        'a different language/style, or a narrower boundary statement.\n'
+        'Do not split drafts merely because one includes an extra fallback option, alternative remediation path, '
+        'plan/customer choice variant, or broader/narrower wording.\n'
+        'Keep drafts separate only when an agent would need a materially different procedure or the combined skill '
+        'would become ambiguous.\n'
+        'A singleton cluster is allowed only when no existing cluster can handle that draft without changing the core procedure.\n'
+        'If a draft differs only by an extra fallback option, broader wording, or an alternative customer choice, '
+        'merge it into the closest broader cluster.\n'
+        'Every draft index must appear exactly once. Use the provided draft_index values.\n\n'
+        f'DRAFT_SIGNATURES:\n{json.dumps(drafts, ensure_ascii=False, indent=2)}'
     )
 
 
@@ -432,150 +316,75 @@ def outline_prompt(task_scope: str, refined_trajectories: list[dict[str, Any]]) 
     return f"""
 You are an expert Skill Abstraction Engine for autonomous agents.
 
-Your task is to synthesize a reusable Skill Outline from multiple refined trajectories belonging to the same task cluster.
-output should be in the same language as the trajectory
+Synthesize one reusable Skill Outline from multiple refined trajectories in the same task cluster. Use the same language as the trajectories, except skill_name must always be an ASCII slug.
 
 # Objective
 
-Extract the COMMON EXECUTION STRUCTURE shared across successful trajectories.
-
-You are NOT summarizing trajectories.
-
-You are abstracting a reusable SOP.
-
-The output should describe:
+Extract the COMMON EXECUTION STRUCTURE shared across trajectories. You are not summarizing individual trajectories; you are abstracting a reusable SOP that describes:
 - what the agent is trying to achieve at each stage
 - how execution progresses
 - where branching decisions occur
 - what state should be achieved before moving forward
 
-# Important Principles
+# Abstraction Rules
 
-## 1. Abstract actions into reusable procedural steps
+- Steps must represent reusable operational intentions, not concrete events.
+- Merge semantically equivalent behaviors even if tools, query wording, or order differ.
+- Preserve causal structure: dependencies, state progression, and key decision points.
+- Keep only stable patterns likely to generalize.
+- Exclude accidental behavior, noisy retries, one-off observations, user-specific details, tool parameters, and concrete file names/entities.
 
 BAD:
 - "Search document A"
-- "Read message from user"
 - "Call tool X with parameter Y"
 
 GOOD:
 - "Retrieve missing evidence"
-- "Validate retrieved information"
-- "Refine retrieval strategy"
-- "Compare candidate solutions"
+- "Validate consistency before finalizing"
 
-Steps should represent reusable operational intentions,
-NOT concrete trajectory events.
+# Skill Name Rules
 
----
+skill_name must:
+- match ^[a-z0-9]+(?:-[a-z0-9]+)*$
+- be <= 64 characters
+- use lowercase ASCII letters, digits, and hyphens only
+- contain no spaces, underscores, dots, slashes, uppercase letters, or non-ASCII characters
 
-## 2. Merge semantically equivalent behaviors
+# Mandatory SOP Constraints
 
-Different trajectories may use:
-- different tools
-- different query wording
-- different execution orders
+Every SOP MUST begin with step_name = "Anchor on Task Goal".
+- action_goal: extract objectives, explicit constraints, and completion criteria so all later work can be checked against them.
+- branch_conditions must include incompatible constraints -> abort and state the conflict.
+- branch_conditions must include task fits SOP -> use extracted criteria as the checklist.
+- expected_state: all objectives, constraints, and completion criteria are explicitly listed and understood.
 
-If they serve the same execution purpose,
-you should merge them into one abstract SOP step.
+Every SOP can end with step_name = "Verify Completion".
+- action_goal: confirm every criterion from the anchoring step has been satisfied before declaring success or failure.
+- branch_conditions must include all criteria satisfied -> report success with evidence.
+- branch_conditions must include any criterion unmet -> report the unmet criterion and do not claim success.
+- expected_state: every anchoring criterion has been independently checked.
 
----
+For every SOP step:
+- include at least one meaningful branch_condition.
+- avoid tautologies such as "continue", "try again", or "if successful proceed".
+- expected_state should describe the completed state and, when useful, when the step can be skipped.
 
-## 3. Preserve causal structure
-
-The SOP should reflect:
-- dependency between stages
-- progression of agent state
-- key decision points
-
-Avoid flat chronological summaries.
-
----
-
-## 4. Keep only stable and reusable patterns
-
-Do NOT include:
-- accidental behaviors
-- noisy retries
-- one-off observations
-- user-specific details
-- tool parameters
-- concrete file names / entities
-
-Only retain patterns likely to generalize.
-
-## 5. Skill name rules
-
-The skill name must satisfy the following:
-- skill_name must match: ^[a-z0-9]+(?:-[a-z0-9]+)*$
-- skill_name must be <= 64 characters
-- skill_name must use lowercase ASCII letters, digits, and hyphens only
-- no spaces, underscores, dots, slashes, uppercase letters, or non-ASCII characters
-
-# Mandatory Terminal Verification
-
-These are hard structural constraints. An SOP that violates any of them is invalid.
-
-## First Step: Goal Anchoring
-
-Every SOP MUST begin with an anchoring step (step_name = "Anchor on Task Goal").
-
-action_goal: "Extract the task's objectives, explicit constraints, and completion criteria
-from the task description, so every subsequent step can be evaluated against them."
-
-branch_conditions MUST include:
-- "The task's constraints are incompatible with this SOP's approach → abort and state which constraint conflicts"
-- "The task fits within this SOP → use the extracted criteria as the checklist for all subsequent steps"
-
-expected_state: "All objectives, constraints, and completion criteria from the task description
-are explicitly listed and understood."
-
-## Last Step: Completion Verification
-
-Every SOP MUST end with a verification step (step_name = "Verify Completion").
-
-action_goal: "Confirm that every constraint and objective identified in the anchoring step
-has been satisfied, before declaring success or failure."
-
-branch_conditions MUST include:
-- "All extracted criteria are satisfied → report success, citing evidence for each"
-- "Any criterion is unmet → report which criterion and why it is not satisfied, do NOT claim success"
-
-expected_state: "Every criterion from the anchoring step has been independently checked."
-
-## Branch Conditions Per Step
-
-For every step in the SOP, at least one branch_condition MUST be present.
-
-Required coverage across the SOP as a whole:
-1. At least one goal-completion gate: "current state already satisfies the task → skip remaining steps"
-2. At least one constraint-boundary gate: "this action would violate a known constraint → take corrective action instead"
-3. At least one information-quality gate: "available information is insufficient for a decision → gather more before proceeding"
+Across the SOP, include all of these gates at least once:
+- goal-completion gate: current state already satisfies the task -> skip remaining work.
+- constraint-boundary gate: this action would violate a known constraint -> take corrective action instead.
+- information-quality gate: available information is insufficient for a decision -> gather more before proceeding.
 
 BAD branch_conditions:
-- "Continue to next step" (no decision)
-- "Try again" (no strategy change)
-- "If successful → proceed" (tautology)
+- "Continue to next step."
+- "If successful, proceed."
 
-## Skip Conditions
-
-For each step, expected_state SHOULD additionally describe when the step can be safely skipped:
-- What observable condition means the step's purpose is already fulfilled?
-  
-# Input
-
-You will receive:
-1. task_scope
-2. multiple refined trajectories
-
-Each refined trajectory already contains:
-- only causally important steps
-- minimal effective execution path
+GOOD branch_conditions:
+- "If available evidence is insufficient for a decision, gather or validate more evidence before choosing."
+- "If a requested action violates an explicit constraint, stop that action and select a compliant alternative."
 
 # Output Schema
 
-Return ONLY valid JSON.
-
+Return ONLY valid JSON:
 {{
   "skill_name": "...",
   "applicable_scenario": "...",
@@ -598,40 +407,10 @@ Return ONLY valid JSON.
 
 # Step Writing Rules
 
-## step_name
-Short procedural stage name.
-
-GOOD:
-- Analyze Task Constraints
-- Retrieve Supporting Evidence
-- Validate Consistency
-- Refine Execution Plan
-
-BAD:
-- Search BM25
-- Read user message
-- Use SQL tool
-
----
-
-## action_goal
-Describe:
-- why this step exists
-- what capability it provides
-- what progress it enables
-
-Focus on operational intent.
-
----
-
-## branch_conditions
-Only include meaningful decision points. For EVERY step, you MUST generate at least ONE branch condition.
-Details of this part are already described in Section **Mandatory Terminal Verification**.
-
----
-
-## expected_state
-Describe the expected agent state after the step succeeds, details of this part are already described in Section **Mandatory Terminal Verification**.
+- step_name: short procedural stage name.
+- action_goal: explain why the step exists, what capability it provides, and what progress it enables.
+- branch_conditions: real decision points with different next actions.
+- expected_state: observable state after successful completion, including skip condition when useful.
 
 # Input Data
 
@@ -645,251 +424,99 @@ REFINED_TRAJECTORIES:
 def candidate_prompt(outline: dict[str, Any], guidelines: dict[str, Any]) -> str:
     return f"""You are an expert Skill Composer for autonomous agents.
 
-Your task is to transform a Skill Outline into a fully executable Candidate Skill.
-output should be in the same language as the trajectory
+Transform a Skill Outline into a complete executable Agent Skill. Use the same language as the trajectories for prose, but skill_name and YAML frontmatter name must always be ASCII slugs.
 
-You will receive an abstract SOP and noisy success/failure guidelines.
-Your job is to synthesize them into a complete Agent Skills `SKILL.md` document that follows the agentskills.io standard used by Anthropic-style skills.
+You receive:
+1. an abstract SOP
+2. noisy success_patterns and failure_patterns
 
-# Objective
+Your job is to synthesize them into a human-authored `SKILL.md` document. The `content` field must contain the full file content, including YAML frontmatter and Markdown instructions.
 
-Convert abstract SOP structure and trajectory-level experiences into reusable operational knowledge.
+# Core Objectives
 
-A valid skill must be specific enough that an agent can decide both when to use it and when NOT to use it.
-The final skill should help an agent:
-- execute more reliably
-- avoid common mistakes
-- make better decisions
-- self-check execution quality
-Do not merge different action spaces into one skill. In particular, do not merge Read-only action space with State-changing action space
+- Preserve the outline's execution order, stage progression, and branching structure.
+- Enrich each SOP step with deduplicated, integrated operational guidance.
+- Make the skill specific enough that an agent can decide when to use it and when NOT to use it.
+- Improve reliability, recovery, decision quality, and self-checking.
+- Do not merge different action spaces into one skill, especially read-only workflows with state-changing workflows.
 
-The final document must read like a human-authored skill, not like a database dump. The `content` field must contain the full `SKILL.md` file content, including YAML frontmatter and Markdown instructions.
+# Guideline Integration
 
-# Important Principles
-
-## 1. Do NOT rewrite the SOP
-
-The Skill Outline already defines:
-- execution stages
-- progression logic
-- branching structure
-
-Your job is to enrich each step,
-NOT regenerate the workflow.
-
----
-
-## 2. Integrate guidelines into prose
-
-You will receive:
-- success_patterns
-- failure_patterns
-
-These are noisy trajectory-level observations.
-
-You must:
-- merge related guidelines by meaning
-- deduplicate them
-- organize them under the relevant SOP step
-- turn them into fluent operational guidance
-- explain the intent and tradeoff when useful
-
-Do NOT copy guideline lists directly into the output.
-Do NOT create separate "Guidelines", "Success patterns", and "Failure patterns" bullet blocks under every step.
-Do NOT preserve every guideline just because it appears in the input.
+Merge related guidelines by meaning, deduplicate them, organize them under relevant SOP steps, and turn them into fluent procedural guidance. Explain intent/tradeoff when useful. Do not copy raw guideline lists or preserve every guideline just because it appears in input.
 
 BAD:
-- Goal: ...
-- Guidelines:
-  - ...
-  - ...
-- Success patterns:
-  - ...
-- Failure patterns:
-  - ...
+- "Guidelines: ..., Success patterns: ..., Failure patterns: ..."
+- "Step 2 says to validate; validate things carefully."
 
 GOOD:
-- Clarify the task goal before acting. Distinguish whether the user wants to test data content, tool behavior, or workflow behavior; this prevents downstream actions from targeting the wrong object. If the goal is already explicit, proceed directly instead of adding unnecessary confirmation.
+- "Before acting on retrieved evidence, compare it against the task constraints; if the evidence cannot support every required criterion, gather more instead of finalizing."
 
----
+# SKILL.md Structure
 
-## 3. Keep guidance procedural and actionable
-
-Every enhancement should help execution.
-
-Avoid:
-- abstract philosophy
-- vague advice
-- trajectory summaries
-- mechanical bullet aggregation
-- raw guideline wording when it can be merged
-
-Prefer:
-- operational heuristics
-- decision criteria
-- failure prevention
-- validation logic
-
----
-
-## 4. Skill Document Structure
-
-Use Markdown in the "content" field. The content is the entire `SKILL.md` file, not a summary and not a JSON representation of the skill.
-
-Required structure:
+The content must be a complete `SKILL.md`-style Markdown document:
 - YAML frontmatter delimited by `---`
-- `name` and `description` fields in frontmatter
+- frontmatter includes `name` and `description`
 - Markdown instructions after the closing `---`
 
-### YAML Frontmatter
+Frontmatter rules:
+- `name` exactly equals JSON skill_name.
+- `name` must match ^[a-z0-9]+(?:-[a-z0-9]+)*$, be <=64 chars, and use lowercase ASCII letters/digits/hyphens only.
+- `description` must follow: "When [ONE specific triggering condition] - [what the agent gains by following this skill] (NOT [most confusable alternative scenario])"
+- The (NOT ...) clause is required and should provide a concrete exclusion test.
 
-- `name`: lowercase letters, numbers, hyphens only; ≤64 chars; no leading/trailing hyphens
-- `description`: must follow this template:
+BAD description:
+- "When you need to process structured data - provides systematic data handling"
 
-  "When [ONE specific triggering condition] — [what the agent gains by following this skill] (NOT [most confusable alternative scenario])"
+GOOD description:
+- "When you need to validate structured data against a known schema - provides systematic constraint checking (NOT for exploratory data browsing or ad-hoc queries)"
 
-  The (NOT ...) clause is REQUIRED. Its purpose is to give the agent a concrete
-  exclusion test: "if my task matches the NOT clause, this skill is the wrong choice."
-
-  BAD (no exclusion):
-  "When you need to process structured data — provides systematic data handling"
-  → Agent cannot distinguish which data tasks require this skill versus a simpler approach.
-
-  GOOD (has exclusion):
-  "When you need to validate structured data against a known schema — provides
-   systematic constraint checking (NOT for exploratory data browsing or ad-hoc queries)"
-  → Agent receives a clear boundary between schema-validation and free-form exploration.
-
-### Markdown Sections (REQUIRED)
-
-The content MUST include these sections in order:
+Required Markdown sections in order:
 1. H1 title
 2. "When To Use"
 3. "Do Not Use When"
-4. "Procedure" (or "Steps")
+4. "Procedure" or "Steps"
 5. Optional "Recovery And Edge Cases"
 6. Optional "Quality Checks"
 
+# Scope Boundary
+
+"When To Use" must describe exactly one observable triggering scenario and what must be true before invoking the skill. Narrow the trigger when possible to avoid false-positive matches.
+
+"Do Not Use When" must include at least two exclusions:
+- nearest-neighbor exclusion: a superficially similar task with a different objective or action space
+- constraint-mismatch exclusion: access, scope, or task constraints make this skill's approach unsuitable
+
+The frontmatter NOT clause should echo the nearest-neighbor exclusion. Scope rejection should appear before substantive action.
+
+# Procedure Quality
+
 Within each step:
 - start with the step purpose
-- include 2-4 integrated bullets or short paragraphs
+- include 2-4 concise bullets or short paragraphs
 - weave success and failure guidance into the same explanation
-- include checks only when they clarify whether the step is complete
+- include checks only when they clarify completion or constraint satisfaction
+- include recovery advice where failure patterns imply a branch
+- if constraints conflict, the constraint that limits action space takes priority
 
-Avoid overly long step sections. Prefer concise, synthesized guidance.
+Avoid abstract philosophy, vague advice, trajectory summaries, mechanical bullet aggregation, source trajectory ids, implementation metadata, and raw input field names as repeated section labels.
 
----
+# Pre-Output Self-Critique
 
-## 5. Content Quality
-
-The skill should improve:
-- robustness
-- recovery ability
-- decision quality
-- execution consistency
-
-## 6. Scope Boundary
-
-This section governs how the agent decides whether to apply this skill.
-
-### When To Use
-
-Describe EXACTLY ONE triggering scenario. It must answer:
-- What observable property of the task makes this skill applicable?
-- What must be true about the task BEFORE the agent invokes this skill?
-
-If the triggering scenario can be stated more narrowly without losing coverage, do so.
-A narrower trigger prevents false-positive matches.
-
-### Do Not Use When
-
-Describe at least TWO exclusion scenarios:
-
-1. Nearest-neighbor exclusion: the task class that shares the most surface-level
-   similarity but has a fundamentally different objective or action space.
-   "Do NOT use when [surface similarity] but [objective difference]."
-
-2. Constraint-mismatch exclusion: a scenario where the task's access level,
-   scope, or constraints make this skill's approach unsuitable.
-   "Do NOT use when [constraint] prevents [action this skill relies on]."
-
-### Relationship between description and scope sections
-
-- The `description` frontmatter is a one-line summary used for skill matching.
-  Its (NOT ...) clause should echo the nearest-neighbor exclusion from "Do Not Use When".
-
-- The "When To Use" and "Do Not Use When" sections are the expanded, operational
-  version that the agent reads before committing to the skill's procedure.
-  They provide enough detail for a binary decision: use this skill, or look elsewhere.
-
-## 7. Pre-Output Self-Critique
-
-Before finalizing the `content` field, silently apply these checks and revise
-the content if needed. Do NOT include the checks in the output.
-
-1. Gate-Position Check:
-  Would an agent following this skill discover that the task is out-of-scope
-  only AFTER completing substantive steps?
-  If YES → move the scope-matching logic earlier, so rejection happens before action.
-
-2. Boundary-Clarity Check:
-  What is the single task class most likely to trigger a false-positive match
-  with this skill? Does "Do Not Use When" explicitly exclude it with enough
-  detail that the agent can distinguish the two?
-  If NO → add the exclusion, using the most relevant failure_pattern as source material.
-
-3. Constraint-Degradation Check:
-  Imagine the task has twice as many explicit constraints as the source trajectories.
-  Would this skill's guidance become misleading because it assumes constraints
-  that are no longer valid?
-  If YES → add a constraint-priority statement at the relevant step:
-  "If constraints conflict, the constraint that limits action space takes priority."
-
-4. Skill Name Check:
-  Do the skill_name and frontmatter name match the rules below?
-  - JSON field skill_name must match: ^[a-z0-9]+(?:-[a-z0-9]+)*$
-  - skill_name must be <= 64 characters
-  - skill_name must use lowercase ASCII letters, digits, and hyphens only
-  - no spaces, underscores, dots, slashes, uppercase letters, or non-ASCII characters
-  - YAML frontmatter name must be exactly identical to JSON skill_name
-  - If invalid, rewrite the name before output.
-  Only prose fields and Markdown body should follow the trajectory language; skill_name/name must always be an ASCII slug.
-
-Revise the content silently based on these checks, then output the final version.
-
-# Input
-
-You will receive:
-1. Skill Outline
-2. candidate success_patterns
-3. candidate failure_patterns
+Silently revise before output:
+- Would the skill reject out-of-scope tasks early enough?
+- Is the most likely false-positive match explicitly excluded?
+- Does the skill still work when the task has more constraints than the source trajectories?
+- Do JSON skill_name and frontmatter name match all slug rules?
+- Is the output a complete SKILL.md file, not a summary?
 
 # Output Schema
 
-Return ONLY valid JSON.
-
+Return ONLY valid JSON:
 {{
   "skill_name": "...",
   "applicable_scenario": "...",
   "content": "..."
 }}
-
-# Field Requirements
-
-## content
-A complete SKILL.md-style Markdown document.
-
-The content must:
-- be the full content of a valid `SKILL.md` file
-- start with YAML frontmatter containing at least `name` and `description`
-- use a portable skill name that follows lowercase hyphenated naming rules
-- preserve the outline's procedure order
-- synthesize guidelines into natural step guidance
-- include recovery advice where failure patterns imply a branch
-- include self-checks as integrated quality criteria
-- keep source trajectory ids and implementation metadata out of the Markdown body
-- avoid copying the input field names as section labels inside every step
-- avoid dumping raw success/failure pattern lists
 
 # Input Data
 
