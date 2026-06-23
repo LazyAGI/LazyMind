@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from concurrent.futures import as_completed
 from pathlib import Path
 from typing import Any
@@ -24,10 +23,6 @@ from lazymind.review.skill_review.schemas import (
 from lazymind.review.skill_review.json_call import call_json
 from lazymind.review.skill_review.reports import finish_stage_report, stage_error, start_stage, write_json_file
 from lazymind.review.skill_review.prompt import candidate_prompt, outline_prompt
-
-
-_SKILL_NAME_PATTERN = re.compile(r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
-_SKILL_NAME_MAX_LENGTH = 64
 
 
 _OUTLINE_RESPONSE_SCHEMA: dict[str, Any] = {
@@ -244,81 +239,24 @@ def _normalize_candidate_payload(
     source_trajectories: list[str],
     source_skills: dict[str, str],
 ) -> dict[str, Any]:
-    raw_skill_name = str(payload.get('skill_name') or outline.skill_name or '').strip()
+    skill_name = str(payload.get('skill_name') or '').strip()
     applicable_scenario = str(payload.get('applicable_scenario') or '').strip()
     content = str(payload.get('content') or '').strip()
+    if not skill_name:
+        raise ValueError('candidate payload must contain skill_name')
     if not applicable_scenario:
         raise ValueError('candidate payload must contain applicable_scenario')
     if not content:
         raise ValueError('candidate payload must contain content')
-    skill_name = _repair_skill_name(raw_skill_name, fallback=outline.skill_name or 'skill')
-    if skill_name != raw_skill_name:
-        LOG.warning(f'repaired candidate skill_name: {raw_skill_name!r} -> {skill_name!r}')
-    content = _repair_candidate_skill_content_name(content, skill_name)
-    repaired_outline = outline.model_copy(update={'skill_name': skill_name})
     return {
         'skill_name': skill_name,
         'category': str(payload.get('category') or 'general'),
         'source_trajectories': source_trajectories,
         'source_skills': source_skills,
         'applicable_scenario': applicable_scenario,
-        'content': content,
-        'outline': repaired_outline.model_dump(),
+        'content': content + '\n',
+        'outline': outline.model_dump(),
     }
-
-
-def _repair_skill_name(raw_name: str, *, fallback: str = 'skill') -> str:
-    source = str(raw_name or fallback or 'skill').strip().lower()
-    slug = re.sub(r'[^a-z0-9]+', '-', source)
-    slug = re.sub(r'-+', '-', slug).strip('-')
-    if not slug:
-        slug = 'skill'
-    if len(slug) > _SKILL_NAME_MAX_LENGTH:
-        slug = slug[:_SKILL_NAME_MAX_LENGTH].rstrip('-')
-    slug = slug or 'skill'
-    if not _SKILL_NAME_PATTERN.fullmatch(slug):
-        raise ValueError(f'failed to repair skill_name from {raw_name!r}')
-    return slug
-
-
-def _repair_candidate_skill_content_name(content: str, skill_name: str) -> str:
-    lines = content.splitlines(keepends=True)
-    if not lines:
-        return content
-
-    first_line = lines[0]
-    first_line_body = first_line.lstrip('\ufeff')
-    if first_line_body.strip() != '---':
-        return content
-
-    frontmatter_end = None
-    for index, line in enumerate(lines[1:], start=1):
-        if line.strip() == '---':
-            frontmatter_end = index
-            break
-    if frontmatter_end is None:
-        return content
-
-    name_line = f'name: {skill_name}'
-    for index in range(1, frontmatter_end):
-        line = lines[index]
-        if line.startswith((' ', '\t', '#')) or ':' not in line:
-            continue
-        key = line.split(':', 1)[0].strip()
-        if key != 'name':
-            continue
-        newline = '\n' if line.endswith('\n') else ''
-        repaired_line = f'{name_line}{newline}'
-        if line != repaired_line:
-            lines[index] = repaired_line
-            LOG.warning(f'repaired candidate content frontmatter name to {skill_name!r}')
-        return ''.join(lines)
-
-    closing_line = lines[frontmatter_end]
-    newline = '\n' if closing_line.endswith('\n') else ''
-    lines.insert(frontmatter_end, f'{name_line}{newline}')
-    LOG.warning(f'added candidate content frontmatter name {skill_name!r}')
-    return ''.join(lines)
 
 
 def _collect_source_trajectories(cluster: TaskCluster) -> list[str]:

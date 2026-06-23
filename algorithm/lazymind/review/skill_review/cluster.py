@@ -378,7 +378,6 @@ def _embedding_cluster_labels(embeddings: np.ndarray) -> tuple[list[int], dict]:
     hdbscan_labels, hdbscan_metadata = _hdbscan_labels(reduced_embeddings)
     hdbscan_stats = _label_stats(hdbscan_labels)
     hdbscan_stats.update(hdbscan_metadata)
-    _raise_if_degenerate_labels(hdbscan_stats)
     return hdbscan_labels, {
         'embedding_clusterer': 'umap_hdbscan',
         'embedding_cluster_stats': hdbscan_stats,
@@ -394,8 +393,8 @@ def _umap_reduce_embeddings(embeddings: np.ndarray) -> tuple[np.ndarray, dict]:
         raise ImportError('umap-learn is required for embedding clustering') from exc
 
     sample_count = len(embeddings)
-    n_neighbors = max(2, min(sample_count - 1, int(round(sample_count ** 0.5 * 2))))
-    n_components = max(2, min(5, sample_count - 2))
+    n_neighbors = min(20, max(8, int(round(sample_count ** 0.5 * 1.5))))
+    n_components = 8
     reducer = UMAP(
         n_neighbors=n_neighbors,
         n_components=n_components,
@@ -467,16 +466,6 @@ def _label_stats(labels: list[int]) -> dict:
         'singleton_ratio': singleton_count / total_count if total_count else 0.0,
         'cluster_ratio': cluster_count / total_count if total_count else 0.0,
     }
-
-
-def _raise_if_degenerate_labels(stats: dict) -> None:
-    total_count = stats['total_count']
-    if total_count < 2:
-        return
-    if stats['noise_count'] == total_count:
-        raise RuntimeError(f'UMAP+HDBSCAN produced only noise labels: {stats}')
-    if stats['cluster_count'] == total_count:
-        raise RuntimeError(f'UMAP+HDBSCAN produced only singleton clusters: {stats}')
 
 
 def _clusters_from_labels(drafts: list[SkillDraft], labels: list[int]) -> list[TaskCluster]:

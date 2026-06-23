@@ -55,7 +55,7 @@ def build_trajectory(
             called_tools.add(tool_name)
         if skill_name and skill_content:
             called_skills[skill_name] = skill_content
-        if not message.get('content').strip():
+        if not (message.get('content') or '').strip():
             continue
         steps.append(
             TrajectoryStep(
