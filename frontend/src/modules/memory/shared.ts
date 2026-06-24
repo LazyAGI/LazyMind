@@ -1,5 +1,5 @@
 import dayjs from "dayjs";
-import { diffLines } from "diff";
+import { diffLines, diffChars } from "diff";
 import type { EvolutionSuggestionRecord } from "./preferenceApi";
 import type { SkillShareStatus } from "./skillApi";
 
@@ -193,9 +193,12 @@ export type ChangeProposal = StructuredChangeProposal | ExperienceChangeProposal
 
 export type DiffLineType = "add" | "remove" | "same";
 
+export type InlineSpan = { text: string; highlight: boolean };
+
 export interface DiffLine {
   type: DiffLineType;
   text: string;
+  inlineSpans?: InlineSpan[];
 }
 
 export type ProposalFieldKey =
@@ -542,6 +545,30 @@ export const buildDiffLines = (beforeText: string, afterText: string): DiffLine[
       lines.push({ type, text: line });
     });
   });
+
+  return lines;
+};
+
+export const buildDiffLinesWithInline = (beforeText: string, afterText: string): DiffLine[] => {
+  const lines = buildDiffLines(beforeText, afterText);
+
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (lines[i].type === 'remove' && lines[i + 1].type === 'add') {
+      const removeLine = lines[i];
+      const addLine = lines[i + 1];
+      const charDiff = diffChars(removeLine.text, addLine.text);
+
+      removeLine.inlineSpans = charDiff
+        .filter((s) => !s.added)
+        .map((s) => ({ text: s.value, highlight: s.removed === true }));
+
+      addLine.inlineSpans = charDiff
+        .filter((s) => !s.removed)
+        .map((s) => ({ text: s.value, highlight: s.added === true }));
+
+      i++;
+    }
+  }
 
   return lines;
 };

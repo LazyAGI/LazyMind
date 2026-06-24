@@ -3,7 +3,8 @@ import ReactDOM from "react-dom";
 import type { SlotRevision, SlotVersionEntry } from "@/modules/chat/store/pluginPanel";
 import { usePluginStore, draftStore } from "@/modules/chat/store/pluginPanel";
 import { resolveCoreAssetUrl, resolveMarkdownImageUrlAsync } from "@/modules/knowledge/utils/imageUrl";
-import { buildDiffLines } from "@/modules/memory/shared";
+import { buildDiffLinesWithInline } from "@/modules/memory/shared";
+import { DiffLineContent } from "@/modules/memory/components/DiffLineContent";
 import { uploadFileInChunks } from "@/modules/chat/utils/chunkUpload";
 import { FilePreviewDrawer } from "./FilePreviewDrawer";
 
@@ -67,8 +68,8 @@ interface TextDiffViewProps {
 function TextDiffView({ currentText, otherText, otherLabel, reversed }: TextDiffViewProps) {
   const diffLines = useMemo(
     () => reversed
-      ? buildDiffLines(currentText, otherText)
-      : buildDiffLines(otherText, currentText),
+      ? buildDiffLinesWithInline(currentText, otherText)
+      : buildDiffLinesWithInline(otherText, currentText),
     [currentText, otherText, reversed],
   );
 
@@ -104,7 +105,7 @@ function TextDiffView({ currentText, otherText, otherLabel, reversed }: TextDiff
             <span className='memory-diff-prefix'>
               {line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '}
             </span>
-            <code>{line.text}</code>
+            <DiffLineContent line={line} />
           </div>
         ))}
         {diffLines.length === 0 && (
