@@ -310,6 +310,11 @@ build:
 
 compose-host-permissions:
 	@echo "🔐 Ensuring compose bind mounts are readable by containers..."
+	@dir="$(CURDIR)"; \
+	while [ "$$dir" != "/" ] && [ "$$dir" != "$(HOME)" ]; do \
+		chmod a+x "$$dir" 2>/dev/null || true; \
+		dir="$$(dirname "$$dir")"; \
+	done
 	@chmod a+rx .
 	@for path in $(_COMPOSE_BIND_CRITICAL_READ_PATHS); do \
 		if [ -e "$$path" ]; then \
@@ -443,6 +448,7 @@ up-build-local:
 	fi
 	@mkdir -p "$(LAZYMIND_LOCAL_GOCACHE)"
 	@cd local/local-runtime-manager && GOCACHE="$(LAZYMIND_LOCAL_GOCACHE)" $(GO) build -buildvcs=false -o lazymind-local .
+	@$(MAKE) --no-print-directory compose-host-permissions
 	@"$(LAZYMIND_LOCAL_BIN)" up --profile "$(LAZYMIND_LOCAL_PROFILE)"
 
 clear:

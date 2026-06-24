@@ -176,6 +176,25 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 		return CommandResult{Stdout: "auth-service\ncore\nweb\n"}, nil
 	}, func(cmd Command) (CommandResult, error) {
 		call++
+		assertCommand(t, cmd, "docker",
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
+			"--profile", "milvus",
+			"--profile", "opensearch",
+			"config", "--format", "json",
+		)
+		return CommandResult{Stdout: composeConfigJSONFixture(repo)}, nil
+	}, func(cmd Command) (CommandResult, error) {
+		call++
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"build",
+			"-t", "core-image",
+			"-f", filepath.Join(repo, "backend", "core/Dockerfile"),
+		})
+		return CommandResult{}, nil
+	}, func(cmd Command) (CommandResult, error) {
+		call++
 		assertCommandContainsInOrder(t, cmd, "docker", []string{
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
@@ -183,7 +202,7 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 			"--profile", "milvus",
 			"--profile", "opensearch",
 			"up",
-			"--build",
+			"--no-build",
 			"auth-service", "core", "web",
 		})
 		return CommandResult{}, nil
@@ -196,8 +215,8 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 	if err := manager.compose.ComposeUp(context.Background(), paths.RepoRoot, cfg.Profile); err != nil {
 		t.Fatalf("compose up: %v", err)
 	}
-	if call != 2 {
-		t.Fatalf("expected 2 compose calls got %d", call)
+	if call != 4 {
+		t.Fatalf("expected 4 compose calls got %d", call)
 	}
 }
 
@@ -220,8 +239,29 @@ func TestComposeUpScalesDisabledServicesToZero(t *testing.T) {
 			"-f", filepath.Join(repo, localComposeOverrideName),
 			"--profile", "milvus",
 			"--profile", "opensearch",
+			"config", "--format", "json",
+		})
+		return CommandResult{Stdout: composeConfigJSONFixture(repo)}, nil
+	}, func(cmd Command) (CommandResult, error) {
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"build",
+			"-t", "core-image",
+		})
+		for _, arg := range cmd.Args {
+			if arg == "redis" {
+				t.Fatalf("disabled service redis should not be built: %v", cmd.Args)
+			}
+		}
+		return CommandResult{}, nil
+	}, func(cmd Command) (CommandResult, error) {
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
+			"--profile", "milvus",
+			"--profile", "opensearch",
 			"up",
-			"--build",
+			"--no-build",
 			"--scale", "redis=0",
 			"auth-service", "core",
 		})
@@ -261,8 +301,29 @@ func TestComposeUpScalesOfficeConvertServiceToZero(t *testing.T) {
 			"-f", filepath.Join(repo, localComposeOverrideName),
 			"--profile", "milvus",
 			"--profile", "opensearch",
+			"config", "--format", "json",
+		})
+		return CommandResult{Stdout: composeConfigJSONFixture(repo)}, nil
+	}, func(cmd Command) (CommandResult, error) {
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"build",
+			"-t", "core-image",
+		})
+		for _, arg := range cmd.Args {
+			if arg == "office-convert-service" {
+				t.Fatalf("disabled service office-convert-service should not be built: %v", cmd.Args)
+			}
+		}
+		return CommandResult{}, nil
+	}, func(cmd Command) (CommandResult, error) {
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
+			"--profile", "milvus",
+			"--profile", "opensearch",
 			"up",
-			"--build",
+			"--no-build",
 			"--scale", "office-convert-service=0",
 			"auth-service", "core",
 		})
@@ -408,8 +469,25 @@ func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 			"config", "--services",
 		)
 		return CommandResult{Stdout: "auth-service\ncore\n"}, nil
+	}, func(cmd Command) (CommandResult, error) {
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
+			"--profile", "milvus",
+			"--profile", "opensearch",
+			"config", "--format", "json",
+		})
+		return CommandResult{Stdout: composeConfigJSONFixture(repo)}, nil
 	})
 	runner.streamHandlers = append(runner.streamHandlers, func(cmd Command) error {
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"build",
+			"-t", "core-image",
+			"-f", filepath.Join(repo, "backend", "core/Dockerfile"),
+		})
+		return nil
+	}, func(cmd Command) error {
 		assertCommandContainsInOrder(t, cmd, "docker", []string{
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
@@ -417,7 +495,7 @@ func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 			"--profile", "milvus",
 			"--profile", "opensearch",
 			"up",
-			"--build",
+			"--no-build",
 			"auth-service",
 			"core",
 		})
@@ -431,8 +509,8 @@ func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 	if err := manager.compose.ComposeUp(context.Background(), paths.RepoRoot, cfg.Profile); err != nil {
 		t.Fatalf("compose up: %v", err)
 	}
-	if len(runner.streamCalls) != 1 {
-		t.Fatalf("expected 1 stream call got %d", len(runner.streamCalls))
+	if len(runner.streamCalls) != 2 {
+		t.Fatalf("expected 2 stream calls got %d", len(runner.streamCalls))
 	}
 }
 
@@ -894,6 +972,31 @@ func writeComposeFixture(t *testing.T, repo string) {
 	if err := os.WriteFile(overlay, []byte("# Local Runtime override file\nx-lazymind-local:\n  mode: local\n  disabled_container_services: []\n"), 0o644); err != nil {
 		t.Fatalf("write overlay: %v", err)
 	}
+}
+
+func composeConfigJSONFixture(repo string) string {
+	return fmt.Sprintf(`{
+  "services": {
+    "auth-service": {"image": "auth-image"},
+    "core": {
+      "image": "core-image",
+      "build": {
+        "context": %q,
+        "dockerfile": "core/Dockerfile",
+        "args": {"GOPROXY": "https://goproxy.cn,direct"}
+      }
+    },
+    "office-convert-service": {
+      "image": "office-image",
+      "build": {
+        "context": %q,
+        "dockerfile": "office-convert-service/Dockerfile"
+      }
+    },
+    "web": {"image": "web-image"},
+    "redis": {"image": "redis-image"}
+  }
+}`, filepath.Join(repo, "backend"), filepath.Join(repo, "backend"))
 }
 
 func readyComposeStatusJSON() string {

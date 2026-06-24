@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -161,7 +162,11 @@ func (m *ComposeManager) ComposeUp(ctx context.Context, repoRoot string, profile
 	if len(remaining) == 0 {
 		_ = profile
 	}
-	args := append(m.composeArgs(repoRoot), "up", "--build")
+	if err := m.BuildEnabledServices(ctx, repoRoot, remaining); err != nil {
+		return err
+	}
+
+	args := append(m.composeArgs(repoRoot), "up", "--no-build")
 	for _, svc := range disabled.DisabledContainerTypes {
 		if svc == "" {
 			continue
@@ -181,6 +186,108 @@ func (m *ComposeManager) ComposeUp(ctx context.Context, repoRoot string, profile
 		return fmt.Errorf("docker compose up failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
 	}
 	return nil
+}
+
+type composeConfigJSON struct {
+	Services map[string]composeConfigService `json:"services"`
+}
+
+type composeConfigService struct {
+	Image string              `json:"image"`
+	Build *composeBuildConfig `json:"build"`
+}
+
+type composeBuildConfig struct {
+	Context    string            `json:"context"`
+	Dockerfile string            `json:"dockerfile"`
+	Args       map[string]string `json:"args"`
+	Network    string            `json:"network"`
+	Target     string            `json:"target"`
+}
+
+func (m *ComposeManager) BuildEnabledServices(ctx context.Context, repoRoot string, services []string) error {
+	if len(services) == 0 {
+		return nil
+	}
+	config, err := m.ComposeConfigJSON(ctx, repoRoot)
+	if err != nil {
+		return err
+	}
+
+	seen := map[string]struct{}{}
+	for _, serviceName := range services {
+		service, ok := config.Services[serviceName]
+		if !ok || service.Build == nil {
+			continue
+		}
+		args, err := dockerBuildArgs(service)
+		if err != nil {
+			return fmt.Errorf("build config for %s: %w", serviceName, err)
+		}
+		key := strings.Join(args, "\x00")
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		cmd := Command{Name: "docker", Args: args, Dir: repoRoot}
+		if streamer, ok := m.runner.(CommandStreamer); ok {
+			if err := streamer.Stream(ctx, cmd, os.Stdout, os.Stderr); err != nil {
+				return fmt.Errorf("docker build %s failed: %w", serviceName, err)
+			}
+			continue
+		}
+		res, err := m.runner.Run(ctx, cmd)
+		if err != nil {
+			return fmt.Errorf("docker build %s failed: %w (%s)", serviceName, err, strings.TrimSpace(res.Stderr))
+		}
+	}
+	return nil
+}
+
+func (m *ComposeManager) ComposeConfigJSON(ctx context.Context, repoRoot string) (composeConfigJSON, error) {
+	args := append(m.composeArgs(repoRoot), "config", "--format", "json")
+	res, err := m.runner.Run(ctx, Command{Name: "docker", Args: args, Dir: repoRoot})
+	if err != nil {
+		return composeConfigJSON{}, fmt.Errorf("docker compose config --format json failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
+	}
+	var config composeConfigJSON
+	if err := json.Unmarshal([]byte(res.Stdout), &config); err != nil {
+		return composeConfigJSON{}, fmt.Errorf("parse docker compose config json: %w", err)
+	}
+	return config, nil
+}
+
+func dockerBuildArgs(service composeConfigService) ([]string, error) {
+	if service.Build == nil {
+		return nil, fmt.Errorf("missing build config")
+	}
+	contextDir := strings.TrimSpace(service.Build.Context)
+	if contextDir == "" {
+		return nil, fmt.Errorf("missing build context")
+	}
+	args := []string{"build"}
+	if image := strings.TrimSpace(service.Image); image != "" {
+		args = append(args, "-t", image)
+	}
+	if dockerfile := strings.TrimSpace(service.Build.Dockerfile); dockerfile != "" {
+		args = append(args, "-f", filepath.Join(contextDir, dockerfile))
+	}
+	if target := strings.TrimSpace(service.Build.Target); target != "" {
+		args = append(args, "--target", target)
+	}
+	if network := strings.TrimSpace(service.Build.Network); network != "" {
+		args = append(args, "--network", network)
+	}
+	keys := make([]string, 0, len(service.Build.Args))
+	for key := range service.Build.Args {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		args = append(args, "--build-arg", key+"="+service.Build.Args[key])
+	}
+	args = append(args, contextDir)
+	return args, nil
 }
 
 func filterRemainingServices(allServices []string, disabled []string) ([]string, error) {
