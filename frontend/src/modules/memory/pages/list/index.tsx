@@ -55,6 +55,7 @@ export default function MemoryManagementListPage() {
     availableGlossarySourceOptions,
     availableCategories,
     availableTags,
+    skillCategoriesLoading,
     skillTagsLoading,
     selectedGlossaryAssets,
     glossaryAssets,
@@ -319,6 +320,7 @@ export default function MemoryManagementListPage() {
                 allowClear
                 value={category}
                 placeholder={t("admin.memoryAllCategories")}
+                loading={skillCategoriesLoading}
                 options={availableCategories.map((item: string) => ({
                   label: item,
                   value: item,

@@ -1474,6 +1474,13 @@ const enUS = {
     dataSourceFileTypeMp4: "MP4 (.mp4)",
     dataSourceFileTypeTxt: "TXT (.txt)",
     dataSourceFileTypeXml: "XML (.xml)",
+    dataSourceFileTypeJson: "JSON (.json)",
+    dataSourceFileTypeJsonl: "JSONL (.jsonl)",
+    dataSourceFileTypeYaml: "YAML (.yaml)",
+    dataSourceFileTypeYml: "YML (.yml)",
+    dataSourceFileTypeHtml: "HTML (.html)",
+    dataSourceFileTypeHtm: "HTM (.htm)",
+    dataSourceFileTypePy: "PY (.py)",
     dataSourceFeishuSpace: "Feishu Space / Wiki ID",
     dataSourceFeishuSpaceRequired: "Please enter target space identifier",
     dataSourceFeishuSetupGuideAction: "Setup Guide",
@@ -1819,6 +1826,8 @@ const enUS = {
     dataSourceLocalScanChatNoSourceHint:
       "No local directories are connected yet. Create a local directory knowledge source first.",
     dataSourceUseCurrentInput: "Use current input: {{value}}",
+    dataSourceUseCurrentFeishuWikiInput: "Wiki: {{value}}",
+    dataSourceUseCurrentFeishuDriveInput: "Drive: {{value}}",
     dataSourceNoLocalDirectories: "No selectable directories found",
     dataSourceLocalDirectoryListFailedManual:
       "Failed to load directory list. You can enter the path manually first.",

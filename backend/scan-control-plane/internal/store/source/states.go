@@ -277,6 +277,13 @@ func (r *SQLRepository) bindingSummary(ctx context.Context, sourceID, bindingID 
 		Select("COALESCE(SUM(size_bytes), 0) AS storage_bytes").
 		Scan(&storage).Error
 	summary.StorageBytes = storage.StorageBytes
+	_ = r.ormDB(ctx).Model(&ormDocument{}).
+		Joins("JOIN source_document_states s ON s.source_id = documents.source_id AND s.binding_id = documents.binding_id AND s.object_key = documents.object_key").
+		Where("documents.source_id = ? AND documents.binding_id = ?", sourceID, bindingID).
+		Where("documents.parse_status = ?", ParseTaskStatusSucceeded).
+		Where("s.document_list_visible = true").
+		Where("s.source_state <> ?", "DELETED").
+		Count(&summary.ParsedDocumentCount).Error
 	r.fillSummaryStateCounts(ctx, &summary)
 	r.fillSummaryTaskCounts(ctx, &summary)
 	checkpoint, err := r.GetSyncCheckpoint(ctx, bindingID)

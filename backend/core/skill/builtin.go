@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -377,21 +376,14 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 }
 
 func createBuiltinSkillCopy(ctx context.Context, db *gorm.DB, userID, userName string, item builtinSkill) (orm.SkillResource, error) {
-	name, err := nextAvailableBuiltinSkillName(ctx, db, userID, item.Category, item.Name)
-	if err != nil {
+	name := strings.TrimSpace(item.Name)
+	if name == "" {
+		return orm.SkillResource{}, errors.New("builtin skill name required")
+	}
+	if err := ensureDBParentSkillIdentityAvailable(ctx, db, userID, item.Category, name, ""); err != nil {
 		return orm.SkillResource{}, err
 	}
 	fullContent := item.Content
-	if name != item.Name {
-		body, err := parentSkillBody(item.Content)
-		if err != nil {
-			return orm.SkillResource{}, err
-		}
-		fullContent, _, err = buildParentSkillContent(name, item.Category, item.Description, body)
-		if err != nil {
-			return orm.SkillResource{}, err
-		}
-	}
 	description, err := validateParentSkillContent(name, "", fullContent)
 	if err != nil {
 		return orm.SkillResource{}, err
@@ -493,36 +485,72 @@ func createBuiltinSkillCopy(ctx context.Context, db *gorm.DB, userID, userName s
 	return parent, nil
 }
 
-func nextAvailableBuiltinSkillName(ctx context.Context, db *gorm.DB, userID, category, baseName string) (string, error) {
-	baseName = strings.TrimSpace(baseName)
-	if baseName == "" {
-		return "", errors.New("builtin skill name required")
+func ensureDBParentSkillIdentityAvailable(ctx context.Context, db *gorm.DB, userID, category, skillName, excludeID string) error {
+	relPath := parentRelativePath(category, skillName)
+	var count int64
+	query := db.WithContext(ctx).
+		Model(&orm.SkillResource{}).
+		Where("owner_user_id = ? AND category = ? AND node_type = ? AND skill_name = ?", userID, category, evolution.SkillNodeTypeParent, skillName)
+	if excludeID != "" {
+		query = query.Where("id <> ?", excludeID)
 	}
-	for index := 0; index < 1000; index++ {
-		candidate := baseName
-		if index > 0 {
-			candidate = baseName + "-" + strconv.Itoa(index)
-		}
-		relPath := parentRelativePath(category, candidate)
-		var count int64
-		query := db.WithContext(ctx).
-			Model(&orm.SkillResource{}).
-			Where("owner_user_id = ? AND node_type = ? AND skill_name = ?", userID, evolution.SkillNodeTypeParent, candidate)
-		if err := query.Count(&count).Error; err != nil {
-			return "", err
-		}
-		if count > 0 {
-			continue
-		}
-		if err := db.WithContext(ctx).
-			Model(&orm.SkillResource{}).
-			Where("owner_user_id = ? AND relative_path = ?", userID, relPath).
-			Count(&count).Error; err != nil {
-			return "", err
-		}
-		if count == 0 {
-			return candidate, nil
+	if err := query.Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return gorm.ErrDuplicatedKey
+	}
+	query = db.WithContext(ctx).
+		Model(&orm.SkillResource{}).
+		Where("owner_user_id = ? AND relative_path = ?", userID, relPath)
+	if excludeID != "" {
+		query = query.Where("id <> ?", excludeID)
+	}
+	if err := query.Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return gorm.ErrDuplicatedKey
+	}
+	return nil
+}
+
+func ensureNoBuiltinParentSkillConflict(category, skillName string) error {
+	relPath := parentRelativePath(category, skillName)
+	if err := ensureNoBuiltinRelativePathConflict(relPath); err != nil {
+		return err
+	}
+	catalog, err := loadBuiltinCatalog()
+	if err != nil {
+		return err
+	}
+	for _, item := range catalog {
+		if strings.TrimSpace(item.Category) == category && strings.TrimSpace(item.Name) == skillName {
+			return gorm.ErrDuplicatedKey
 		}
 	}
-	return "", errors.New("no available builtin skill name")
+	return nil
+}
+
+func ensureNoBuiltinRelativePathConflict(relPath string) error {
+	relPath = filepath.ToSlash(strings.TrimSpace(relPath))
+	if relPath == "" {
+		return nil
+	}
+	catalog, err := loadBuiltinCatalog()
+	if err != nil {
+		return err
+	}
+	for _, item := range catalog {
+		if filepath.ToSlash(parentRelativePath(item.Category, item.Name)) == relPath {
+			return gorm.ErrDuplicatedKey
+		}
+		for _, child := range item.Children {
+			childRelPath := filepath.ToSlash(filepath.Join(item.Category, item.Name, child.RelativePath))
+			if childRelPath == relPath {
+				return gorm.ErrDuplicatedKey
+			}
+		}
+	}
+	return nil
 }

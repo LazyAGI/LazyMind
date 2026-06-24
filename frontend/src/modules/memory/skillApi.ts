@@ -910,6 +910,25 @@ export async function listSkillTags(): Promise<string[]> {
   return [...new Set(tags)].sort((left, right) => left.localeCompare(right));
 }
 
+export async function listSkillCategories(): Promise<string[]> {
+  const response = await axiosInstance.get(`${coreBasePath}/skills/categories`);
+  const payload = unwrapEnvelope<unknown>(response.data);
+  const rawPayload = toRawObject(payload);
+  const rawEnvelope = toRawObject(response.data);
+  const categories = toStringArray(
+    Array.isArray(payload)
+      ? payload
+      : getFirstValue([rawPayload, rawEnvelope], [
+          "categories",
+          "list",
+          "items",
+          "records",
+        ]),
+  );
+
+  return [...new Set(categories)].sort((left, right) => left.localeCompare(right));
+}
+
 export async function listSkillAssetsPage(
   options: ListSkillOptions = {},
 ): Promise<SkillAssetListResult> {

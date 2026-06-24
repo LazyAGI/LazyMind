@@ -517,6 +517,7 @@ func sourceSummaryToResponse(summary store.SourceSummary) SourceSummaryResponse 
 		FailedTaskCount:     summary.FailedTaskCount,
 		SucceededTaskCount:  summary.SucceededTaskCount,
 		SupersededTaskCount: summary.SupersededTaskCount,
+		ParsedDocumentCount: summary.ParsedDocumentCount,
 		StorageBytes:        summary.StorageBytes,
 		LastSuccessAt:       summary.LastSuccessAt,
 		LastError:           store.CloneJSON(summary.LastError),
@@ -545,7 +546,7 @@ func sourceSummaryMap(summary SourceSummaryResponse) map[string]any {
 		"superseded_task_count": summary.SupersededTaskCount,
 		"storage_bytes":         summary.StorageBytes,
 		"total_document_count":  summary.DocumentObjects,
-		"parsed_document_count": summary.SucceededTaskCount,
+		"parsed_document_count": summary.ParsedDocumentCount,
 		"pending_pull_count":    summary.PendingTaskCount + summary.RunningTaskCount + summary.SubmittedTaskCount,
 	}
 	if summary.BindingID != "" {

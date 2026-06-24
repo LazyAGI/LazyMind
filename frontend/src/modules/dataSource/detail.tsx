@@ -38,6 +38,7 @@ import {
   normalizeDataSourceParseStatus,
   normalizeDataSourceStatus,
   normalizePendingAction,
+  resolveParsedDocumentCount,
   resolveStorageUsed,
   resolveSourceState,
   resolveSyncState,
@@ -435,6 +436,7 @@ function buildDetailSummaryFromSource(
     targetType: binding?.target_type,
     sourceType: isFeishuSource ? "feishu" : "local",
     documentCount: summary?.document_objects || summary?.total_objects || documents.length,
+    parsedDocumentCount: resolveParsedDocumentCount(summary),
     status: normalizeDataSourceStatus(
       binding?.status || source.status,
       isFeishuSource ? true : binding?.sync_mode !== "manual",
@@ -1392,9 +1394,9 @@ export default function DataSourceDetail() {
     () => syncKnownSelectableFileKeys,
     [syncKnownSelectableFileKeys],
   );
-  const hasFilteredSelected = filteredSyncNodeKeys.some((id) =>
-    syncSelectedDocIds.includes(id),
-  );
+  const hasFilteredSelected =
+    filteredSyncNodeKeys.length > 0 &&
+    filteredSyncNodeKeys.every((id) => syncSelectedDocIds.includes(id));
 
   const columns: ColumnsType<DocumentStatusRow> = [
     {
@@ -1549,7 +1551,6 @@ export default function DataSourceDetail() {
       detailLoading={detailLoading}
       documentLoading={documentLoading}
       lastSync={lastSync}
-      documents={documents}
       lastOperation={lastOperation}
       keyword={keyword}
       setKeyword={setKeyword}

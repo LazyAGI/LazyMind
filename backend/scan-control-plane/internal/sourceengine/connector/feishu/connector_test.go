@@ -38,6 +38,10 @@ func TestValidateTargetStableFingerprintAndClientOnly(t *testing.T) {
 	if driveRoot.TargetRef != "drive:folder-root" || driveRoot.TargetFingerprint != "feishu:drive:folder-root" || driveRoot.RootObjectKey != "feishu:drive:folder-root" {
 		t.Fatalf("drive virtual root should normalize to the real drive root target, got %+v", driveRoot)
 	}
+	driveURL := validateFeishuTarget(t, ctx, conn, TargetTypeDriveFolder, "https://example.feishu.cn/drive/folder/folder-guides")
+	if driveURL.TargetRef != "drive:folder-guides" || driveURL.TargetFingerprint != "feishu:drive:folder-guides" {
+		t.Fatalf("drive folder URL should normalize to the folder token target, got %+v", driveURL)
+	}
 
 	wiki := validateFeishuTarget(t, ctx, conn, TargetTypeWikiNode, "space-1:node-root")
 	if wiki.TargetFingerprint != "feishu:wiki:space-1:node-root" {
@@ -45,6 +49,14 @@ func TestValidateTargetStableFingerprintAndClientOnly(t *testing.T) {
 	}
 	if wiki.DisplayName != "Wiki Root" {
 		t.Fatalf("wiki target display name should come from metadata, got %+v", wiki)
+	}
+	wikiToken := validateFeishuTarget(t, ctx, conn, TargetTypeWikiNode, "node-root")
+	if wikiToken.TargetRef != "wiki:space-1:node-root" || wikiToken.TargetFingerprint != "feishu:wiki:space-1:node-root" {
+		t.Fatalf("wiki node token should normalize to a scoped wiki target, got %+v", wikiToken)
+	}
+	wikiURL := validateFeishuTarget(t, ctx, conn, TargetTypeWikiNode, "https://example.feishu.cn/wiki/node-child")
+	if wikiURL.TargetRef != "wiki:space-1:node-child" || wikiURL.TargetFingerprint != "feishu:wiki:space-1:node-child" {
+		t.Fatalf("wiki URL should normalize to a scoped wiki target, got %+v", wikiURL)
 	}
 
 	wikiSpace := validateFeishuTarget(t, ctx, conn, TargetTypeWikiNode, "feishu:wiki:space:space-1")
@@ -855,7 +867,17 @@ func (a *feishuAPIStub) ListWikiSpaces(_ context.Context, _ string, cursor strin
 }
 
 func (a *feishuAPIStub) GetWikiNode(_ context.Context, _ string, spaceID, nodeToken string) (Object, error) {
-	return a.wikiObjects[spaceID+":"+nodeToken], nil
+	if spaceID != "" {
+		if object, ok := a.wikiObjects[spaceID+":"+nodeToken]; ok {
+			return object, nil
+		}
+	}
+	for _, object := range a.wikiObjects {
+		if object.Token == nodeToken {
+			return object, nil
+		}
+	}
+	return Object{}, connector.NewError(connector.ErrorCodeNotFound, "wiki node not found")
 }
 
 func (a *feishuAPIStub) ListWikiChildren(_ context.Context, _ string, spaceID, nodeToken, cursor string, pageSize int) (ObjectPage, error) {

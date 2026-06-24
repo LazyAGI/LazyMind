@@ -83,7 +83,10 @@ type threadStatusesResponse struct {
 	Threads []threadFlowStatusResponse `json:"threads,omitempty"`
 }
 
-var threadEventsKeepaliveInterval = time.Second
+var (
+	threadEventsKeepaliveInterval = time.Second
+	errThreadEventsRunCompleted   = errors.New("thread events run completed")
+)
 
 func ListThreads(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
@@ -153,9 +156,14 @@ func CreateThread(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
 		return
 	}
+	delete(requestPayload, "llm_config")
 	applyThreadCreateTitle(r.Context(), db, requestPayload, time.Now())
 	if err := attachThreadModelConfig(r.Context(), db, store.UserID(r), requestPayload); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load llm config failed", err), http.StatusInternalServerError)
+		return
+	}
+	if !hasThreadEvoLLMConfig(requestPayload) {
+		common.ReplyErr(w, "请先配置 evo_llm 模型后再创建任务", http.StatusUnprocessableEntity)
 		return
 	}
 
@@ -536,6 +544,13 @@ func streamThreadEvents(w http.ResponseWriter, r *http.Request, stepID string) {
 		_ = resp.Body.Close()
 		cancelUpstream()
 		<-monitorDone
+		if errors.Is(streamErr, errThreadEventsRunCompleted) {
+			log.Logger.Info().
+				Str("thread_id", threadID).
+				Str("step_id", stepID).
+				Msg("agent thread events stopping after run.completed")
+			return
+		}
 		if streamErr != nil {
 			log.Logger.Warn().Err(streamErr).Str("thread_id", threadID).Msg("consume upstream thread events stream failed")
 		}
@@ -876,6 +891,7 @@ type threadEventStreamChunk struct {
 type threadEventStreamResult struct {
 	Err         error
 	LastEventID string
+	StopReason  string
 }
 
 func openThreadEventsStream(ctx context.Context, r *http.Request, upstreamURL, lastEventID string) (*http.Response, error) {
@@ -956,6 +972,9 @@ func streamUpstreamThreadEvents(
 				result := waitThreadEventStreamResult(done)
 				if result.LastEventID != "" && lastUpstreamEventID != nil {
 					*lastUpstreamEventID = result.LastEventID
+				}
+				if result.StopReason == "run_completed" {
+					return errThreadEventsRunCompleted
 				}
 				return result.Err
 			}
@@ -1224,6 +1243,17 @@ func readUpstreamThreadEvents(
 			case <-ctx.Done():
 				return
 			}
+			if isRunCompletedThreadEvent(event) {
+				result.StopReason = "run_completed"
+				log.Logger.Info().
+					Str("thread_id", threadID).
+					Str("task_id", event.TaskID).
+					Str("event_name", event.EventName).
+					Str("upstream_event_id", frame.ID).
+					Int("frame_index", frameIndex).
+					Msg("agent thread events upstream run.completed received")
+				return
+			}
 		}
 	}()
 
@@ -1304,6 +1334,40 @@ func shouldSkipStreamData(eventName string, payload any, rawData string) bool {
 	default:
 		return false
 	}
+}
+
+func isRunCompletedThreadEvent(event fetchedThreadEvent) bool {
+	if strings.EqualFold(strings.TrimSpace(event.EventName), "run.completed") {
+		return true
+	}
+	payload, ok := parseJSONValue(event.RawFrame).(map[string]any)
+	if !ok {
+		return false
+	}
+	return hasRunCompletedEventType(payload)
+}
+
+func hasRunCompletedEventType(payload map[string]any) bool {
+	if eventTypeMatches(payload["event_type"], "run.completed") {
+		return true
+	}
+	child, ok := payload["payload"].(map[string]any)
+	if !ok {
+		return false
+	}
+	if eventTypeMatches(child["event_type"], "run.completed") {
+		return true
+	}
+	rawEvent, ok := child["raw_event"].(map[string]any)
+	if !ok {
+		return false
+	}
+	return eventTypeMatches(rawEvent["event_type"], "run.completed")
+}
+
+func eventTypeMatches(value any, want string) bool {
+	raw, ok := value.(string)
+	return ok && strings.EqualFold(strings.TrimSpace(raw), want)
 }
 
 func firstNonNil(errs ...error) error {
