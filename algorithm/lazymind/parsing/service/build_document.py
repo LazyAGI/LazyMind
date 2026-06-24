@@ -1,5 +1,3 @@
-import os
-
 import lazyllm
 from lazyllm.tracing import set_trace_context
 from lazyllm import AutoModel
@@ -120,8 +118,11 @@ def _build_pdf_reader():
     )
 
 
-def _is_local_runtime_mode() -> bool:
-    return os.getenv('LAZYMIND_RUNTIME_MODE', '').strip().lower() == 'local'
+def _document_parse_profile() -> str:
+    profile = str(_cfg['document_parse_profile'] or 'cloud').strip().lower()
+    if profile not in ('cloud', 'local'):
+        return 'cloud'
+    return profile
 
 
 def _register_document_readers(docs: Document) -> None:
@@ -143,7 +144,7 @@ def _register_document_readers(docs: Document) -> None:
     docs.add_reader('*.xls', excel_reader)
     docs.add_reader('*.xlsx', excel_reader)
 
-    if _is_local_runtime_mode():
+    if _document_parse_profile() == 'local':
         for pattern in ('*.doc', '*.docx', '*.xls', '*.xlsx', '*.ppt', '*.pptx', '*.pptm'):
             docs.add_reader(pattern, pdf_reader)
 

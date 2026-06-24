@@ -30,7 +30,15 @@ const convertProviderHTTP = "http"
 
 const officeConvertRetryCount = 2
 const defaultOfficeConvertWorkers = 4
-const localRuntimeMode = "local"
+
+const documentParseProfileEnv = "LAZYMIND_DOCUMENT_PARSE_PROFILE"
+
+type documentParseProfile string
+
+const (
+	documentParseProfileCloud documentParseProfile = "cloud"
+	documentParseProfileLocal documentParseProfile = "local"
+)
 
 // env: LAZYMIND_OFFICE_CONVERT_URL — text URL，POST JSON {"source_path":"..."}，text {"pdf_path":"..."} text {"data":{"pdf_path":"..."}}
 // Office text tasks:start text；Failedtext，text。
@@ -145,8 +153,33 @@ func isOfficialMinerU(ocrConfig map[string]any) bool {
 	return url == "" || strings.Contains(url, "mineru.net")
 }
 
-func isLocalRuntimeMode() bool {
-	return strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), localRuntimeMode)
+func resolveDocumentParseProfile() documentParseProfile {
+	raw := strings.TrimSpace(os.Getenv(documentParseProfileEnv))
+	profile, ok := normalizeDocumentParseProfile(raw)
+	if !ok {
+		log.Logger.Warn().Str("profile", raw).Str("fallback", string(documentParseProfileCloud)).Msg("unknown document parse profile, using cloud profile")
+	}
+	return profile
+}
+
+func normalizeDocumentParseProfile(raw string) (documentParseProfile, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", string(documentParseProfileCloud):
+		return documentParseProfileCloud, true
+	case string(documentParseProfileLocal):
+		return documentParseProfileLocal, true
+	default:
+		return documentParseProfileCloud, false
+	}
+}
+
+func documentParseStrategyName(profile documentParseProfile) string {
+	switch profile {
+	case documentParseProfileLocal:
+		return "ocr-first-with-local-office-fallback"
+	default:
+		return "office-preconvert"
+	}
 }
 
 func hasConfiguredOCRService(ocrConfig map[string]any) bool {
@@ -161,7 +194,7 @@ func hasConfiguredOCRService(ocrConfig map[string]any) bool {
 // needsOfficeConvertBeforeParse decides whether office-convert-service runs before parsing.
 // PPT/PPTX/PPTM skip conversion only when official MinerU (mineru.net) is configured so
 // DynamicPDFReader can route them to MineruPPTReader; self-hosted MinerU still converts to PDF.
-func needsOfficeConvertBeforeParse(d documentExt, ocrConfig map[string]any) bool {
+func needsOfficeConvertBeforeParse(d documentExt, ocrConfig map[string]any, profile documentParseProfile) bool {
 	if !d.ConvertRequired {
 		return false
 	}
@@ -169,9 +202,19 @@ func needsOfficeConvertBeforeParse(d documentExt, ocrConfig map[string]any) bool
 	if !isOfficeDocument(src, d.ContentType, d.OriginalFilename) {
 		return false
 	}
-	if isLocalRuntimeMode() {
-		return !hasConfiguredOCRService(ocrConfig)
+	switch profile {
+	case documentParseProfileLocal:
+		return ocrFirstWithLocalOfficeFallbackNeedsConvert(ocrConfig)
+	default:
+		return officePreconvertNeedsConvert(src, d, ocrConfig)
 	}
+}
+
+func ocrFirstWithLocalOfficeFallbackNeedsConvert(ocrConfig map[string]any) bool {
+	return !hasConfiguredOCRService(ocrConfig)
+}
+
+func officePreconvertNeedsConvert(src string, d documentExt, ocrConfig map[string]any) bool {
 	if isPresentationDocument(src, d.ContentType, d.OriginalFilename) && isOfficialMinerU(ocrConfig) {
 		return false
 	}
@@ -179,8 +222,8 @@ func needsOfficeConvertBeforeParse(d documentExt, ocrConfig map[string]any) bool
 }
 
 // parsePathForIngestion returns the file path passed to the parsing service.
-func parsePathForIngestion(d documentExt, ocrConfig map[string]any) string {
-	if needsOfficeConvertBeforeParse(d, ocrConfig) {
+func parsePathForIngestion(d documentExt, ocrConfig map[string]any, profile documentParseProfile) string {
+	if needsOfficeConvertBeforeParse(d, ocrConfig, profile) {
 		return parsePathForAdd(d)
 	}
 	if isOfficeDocument(d.StoredPath, d.ContentType, d.OriginalFilename) {
@@ -224,7 +267,7 @@ func officeConvertWorkers() int {
 }
 
 // applyOfficeConversion text d text StoredPath/StoredName text；Failedtext ConvertStatus=FAILED，text error（UploadtextSuccess）。
-func applyOfficeConversion(ctx context.Context, d *documentExt) {
+func applyOfficeConversion(ctx context.Context, d *documentExt, profile documentParseProfile) {
 	src := strings.TrimSpace(d.StoredPath)
 	if src == "" {
 		return
@@ -257,7 +300,7 @@ func applyOfficeConversion(ctx context.Context, d *documentExt) {
 	url := strings.TrimSpace(os.Getenv("LAZYMIND_OFFICE_CONVERT_URL"))
 	if url == "" {
 		d.ConvertStatus = ConvertStatusFailed
-		d.ConvertError = localOfficeConvertUserError("LAZYMIND_OFFICE_CONVERT_URL is not configured")
+		d.ConvertError = officeConvertUserError(profile, "LAZYMIND_OFFICE_CONVERT_URL is not configured")
 		log.Logger.Warn().Str("source", src).Msg("office convert: service URL missing")
 		return
 	}
@@ -265,7 +308,7 @@ func applyOfficeConversion(ctx context.Context, d *documentExt) {
 	pdfPath, err := callOfficeConvertHTTP(ctx, url, src)
 	if err != nil {
 		d.ConvertStatus = ConvertStatusFailed
-		d.ConvertError = localOfficeConvertUserError(err.Error())
+		d.ConvertError = officeConvertUserError(profile, err.Error())
 		log.Logger.Error().Err(err).Str("source", src).Msg("office convert failed")
 		return
 	}
@@ -276,7 +319,7 @@ func applyOfficeConversion(ctx context.Context, d *documentExt) {
 	st, err := os.Stat(pdfPath)
 	if err != nil || st.IsDir() {
 		d.ConvertStatus = ConvertStatusFailed
-		d.ConvertError = localOfficeConvertUserError(fmt.Sprintf("converted pdf not found: %v", err))
+		d.ConvertError = officeConvertUserError(profile, fmt.Sprintf("converted pdf not found: %v", err))
 		return
 	}
 	fillParseFields(d, pdfPath, st.Size())
@@ -285,9 +328,9 @@ func applyOfficeConversion(ctx context.Context, d *documentExt) {
 	log.Logger.Info().Str("source", src).Str("pdf", pdfPath).Int64("size", st.Size()).Msg("office convert succeeded")
 }
 
-func localOfficeConvertUserError(detail string) string {
+func officeConvertUserError(profile documentParseProfile, detail string) string {
 	detail = strings.TrimSpace(detail)
-	if !isLocalRuntimeMode() {
+	if profile != documentParseProfileLocal {
 		return detail
 	}
 	if detail == "" {
@@ -319,7 +362,7 @@ func reuseExistingPDFIfFresh(sourcePath, pdfPath string) (bool, int64) {
 	return true, pdfSt.Size()
 }
 
-func callOfficeConvertWithRetry(ctx context.Context, d *documentExt) {
+func callOfficeConvertWithRetry(ctx context.Context, d *documentExt, profile documentParseProfile) {
 	if d == nil {
 		return
 	}
@@ -332,7 +375,7 @@ func callOfficeConvertWithRetry(ctx context.Context, d *documentExt) {
 		return
 	}
 	for attempt := 0; attempt < officeConvertRetryCount; attempt++ {
-		applyOfficeConversion(ctx, d)
+		applyOfficeConversion(ctx, d, profile)
 		if strings.TrimSpace(d.ConvertStatus) == ConvertStatusSucceeded {
 			return
 		}

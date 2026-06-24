@@ -48,7 +48,7 @@ func TestNeedsOfficeConvertBeforeParse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := needsOfficeConvertBeforeParse(tt.doc, tt.ocrConfig); got != tt.want {
+			if got := needsOfficeConvertBeforeParse(tt.doc, tt.ocrConfig, documentParseProfileCloud); got != tt.want {
 				t.Fatalf("needsOfficeConvertBeforeParse() = %v, want %v", got, tt.want)
 			}
 		})
@@ -63,7 +63,7 @@ func TestParsePathForIngestionPresentationMineru(t *testing.T) {
 		ConvertRequired:  true,
 	}
 	cfg := map[string]any{"ocr_type": "mineru"}
-	if got := parsePathForIngestion(d, cfg); got != "/data/demo.pptx" {
+	if got := parsePathForIngestion(d, cfg, documentParseProfileCloud); got != "/data/demo.pptx" {
 		t.Fatalf("parsePathForIngestion() = %q, want original pptx path", got)
 	}
 }
@@ -85,7 +85,7 @@ func TestParsePathForIngestionSpreadsheet(t *testing.T) {
 		OriginalFilename: "demo.xlsx",
 		ConvertRequired:  true,
 	}
-	if got := parsePathForIngestion(d, nil); got != "/data/demo.pdf" {
+	if got := parsePathForIngestion(d, nil, documentParseProfileCloud); got != "/data/demo.pdf" {
 		t.Fatalf("parsePathForIngestion() = %q, want converted pdf path", got)
 	}
 }
@@ -98,7 +98,7 @@ func TestParsePathForIngestionPresentationPaddle(t *testing.T) {
 		ConvertRequired:  true,
 	}
 	cfg := map[string]any{"ocr_type": "paddleocr"}
-	if got := parsePathForIngestion(d, cfg); got != "/data/demo.pdf" {
+	if got := parsePathForIngestion(d, cfg, documentParseProfileCloud); got != "/data/demo.pdf" {
 		t.Fatalf("parsePathForIngestion() = %q, want converted pdf path", got)
 	}
 }
@@ -111,13 +111,12 @@ func TestParsePathForIngestionPresentationSelfHostedMineru(t *testing.T) {
 		ConvertRequired:  true,
 	}
 	cfg := map[string]any{"ocr_type": "mineru", "ocr_url": "http://local-mineru:8000/api/v1/pdf_parse"}
-	if got := parsePathForIngestion(d, cfg); got != "/data/demo.pdf" {
+	if got := parsePathForIngestion(d, cfg, documentParseProfileCloud); got != "/data/demo.pdf" {
 		t.Fatalf("parsePathForIngestion() = %q, want converted pdf path", got)
 	}
 }
 
-func TestLocalRuntimeOfficeWithOCRSkipsConvert(t *testing.T) {
-	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+func TestLocalParseProfileOfficeWithOCRSkipsConvert(t *testing.T) {
 	d := documentExt{
 		StoredPath:       "/data/demo.docx",
 		ParseStoredPath:  "/data/demo.pdf",
@@ -129,36 +128,44 @@ func TestLocalRuntimeOfficeWithOCRSkipsConvert(t *testing.T) {
 		{"ocr_type": "mineru", "ocr_url": "http://local-mineru:8000/api/v1/pdf_parse"},
 		{"ocr_type": "paddleocr", "ocr_url": "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"},
 	} {
-		if got := needsOfficeConvertBeforeParse(d, cfg); got {
+		if got := needsOfficeConvertBeforeParse(d, cfg, documentParseProfileLocal); got {
 			t.Fatalf("needsOfficeConvertBeforeParse() = true for cfg %#v, want false", cfg)
 		}
-		if got := parsePathForIngestion(d, cfg); got != "/data/demo.docx" {
+		if got := parsePathForIngestion(d, cfg, documentParseProfileLocal); got != "/data/demo.docx" {
 			t.Fatalf("parsePathForIngestion() = %q, want original office path", got)
 		}
 	}
 }
 
-func TestLocalRuntimeOfficeWithoutOCRUsesFallbackConvert(t *testing.T) {
-	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
+func TestLocalParseProfileOfficeWithoutOCRUsesFallbackConvert(t *testing.T) {
 	d := documentExt{
 		StoredPath:       "/data/demo.xlsx",
 		ParseStoredPath:  "/data/demo.pdf",
 		OriginalFilename: "demo.xlsx",
 		ConvertRequired:  true,
 	}
-	if got := needsOfficeConvertBeforeParse(d, nil); !got {
+	if got := needsOfficeConvertBeforeParse(d, nil, documentParseProfileLocal); !got {
 		t.Fatal("needsOfficeConvertBeforeParse() = false, want local fallback convert")
 	}
-	if got := parsePathForIngestion(d, nil); got != "/data/demo.pdf" {
+	if got := parsePathForIngestion(d, nil, documentParseProfileLocal); got != "/data/demo.pdf" {
 		t.Fatalf("parsePathForIngestion() = %q, want converted pdf path", got)
 	}
 }
 
 func TestLocalOfficeConvertUserErrorRecommendsOnlineParsing(t *testing.T) {
-	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
-	msg := localOfficeConvertUserError("convert failed")
+	msg := officeConvertUserError(documentParseProfileLocal, "convert failed")
 	if !testStringContainsAll(msg, "convert failed", "MinerU/PaddleOCR", "LibreOffice") {
 		t.Fatalf("unexpected message: %q", msg)
+	}
+}
+
+func TestUnknownDocumentParseProfileFallsBackToCloud(t *testing.T) {
+	profile, ok := normalizeDocumentParseProfile("surprise")
+	if ok {
+		t.Fatal("unknown profile should not be accepted")
+	}
+	if profile != documentParseProfileCloud {
+		t.Fatalf("profile = %q, want cloud", profile)
 	}
 }
 
