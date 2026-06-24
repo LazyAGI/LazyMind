@@ -45,7 +45,14 @@ export type DataSourceFileType =
   | "mp3"
   | "mp4"
   | "txt"
-  | "xml";
+  | "xml"
+  | "json"
+  | "jsonl"
+  | "yaml"
+  | "yml"
+  | "html"
+  | "htm"
+  | "py";
 
 // New source state machine fields exposed by the backend.
 export type SourceStateValue = "UNCHANGED" | "NEW" | "MODIFIED" | "DELETED";
@@ -205,6 +212,41 @@ export const DATA_SOURCE_FILE_TYPE_OPTIONS: Array<{
     value: "xml",
     extensions: ["xml"],
     i18nKey: "admin.dataSourceFileTypeXml",
+  },
+  {
+    value: "json",
+    extensions: ["json"],
+    i18nKey: "admin.dataSourceFileTypeJson",
+  },
+  {
+    value: "jsonl",
+    extensions: ["jsonl"],
+    i18nKey: "admin.dataSourceFileTypeJsonl",
+  },
+  {
+    value: "yaml",
+    extensions: ["yaml"],
+    i18nKey: "admin.dataSourceFileTypeYaml",
+  },
+  {
+    value: "yml",
+    extensions: ["yml"],
+    i18nKey: "admin.dataSourceFileTypeYml",
+  },
+  {
+    value: "html",
+    extensions: ["html"],
+    i18nKey: "admin.dataSourceFileTypeHtml",
+  },
+  {
+    value: "htm",
+    extensions: ["htm"],
+    i18nKey: "admin.dataSourceFileTypeHtm",
+  },
+  {
+    value: "py",
+    extensions: ["py"],
+    i18nKey: "admin.dataSourceFileTypePy",
   },
 ];
 export const DEFAULT_DATA_SOURCE_FILE_TYPES: DataSourceFileType[] = [

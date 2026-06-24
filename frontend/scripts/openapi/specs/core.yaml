@@ -478,7 +478,18 @@ components:
                 reason:
                     type: string
                 type:
-                    type: integer
+                    description: Feedback type. 0 or FEED_BACK_TYPE_UNSPECIFIED cancels feedback; 1 or FEED_BACK_TYPE_LIKE likes; 2 or FEED_BACK_TYPE_UNLIKE dislikes. Cancelling or changing away from unlike clears reason and expected_answer.
+                    oneOf:
+                        - enum:
+                            - 0
+                            - 1
+                            - 2
+                          type: integer
+                        - enum:
+                            - FEED_BACK_TYPE_UNSPECIFIED
+                            - FEED_BACK_TYPE_LIKE
+                            - FEED_BACK_TYPE_UNLIKE
+                          type: string
             required:
                 - history_id
                 - type
@@ -1712,6 +1723,17 @@ components:
                     items:
                         $ref: '#/components/schemas/ServerResponse'
                     type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - page
+                - page_size
+                - total
             type: object
         ListTasksResponse:
             properties:
@@ -2290,10 +2312,16 @@ components:
             type: object
         ToolListResponse:
             properties:
+                page:
+                    type: integer
+                page_size:
+                    type: integer
                 tool_groups:
                     items:
                         $ref: '#/components/schemas/ToolGroup'
                     type: array
+                total:
+                    type: integer
             type: object
         ToolMethod:
             properties:
@@ -2594,6 +2622,54 @@ components:
                 - user_model_provider_group_id
                 - user_model_provider_id
             type: object
+        agentABTestCaseDetailListItemOpenAPIResponse:
+            properties:
+                after:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                baseline:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                before:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                candidate:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                case_id:
+                    type: string
+                delta:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                outcome:
+                    type: string
+                query:
+                    type: string
+            type: object
+        agentABTestCaseDetailListOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/agentABTestCaseDetailListItemOpenAPIResponse'
+                    type: array
+                next_page_token:
+                    type: string
+                total_size:
+                    type: integer
+            required:
+                - next_page_token
+                - total_size
+            type: object
         agentEvalReportBadCaseListItemOpenAPIResponse:
             properties:
                 Defect:
@@ -2724,6 +2800,62 @@ components:
                 - thread_id
                 - updated_at
             type: object
+        agentTraceCompareOpenAPIResponse:
+            properties:
+                a:
+                    $ref: '#/components/schemas/agentTraceDetailOpenAPIResponse'
+                b:
+                    $ref: '#/components/schemas/agentTraceDetailOpenAPIResponse'
+                query:
+                    type: string
+            required:
+                - a
+                - b
+                - query
+            type: object
+        agentTraceDetailOpenAPIResponse:
+            properties:
+                query:
+                    type: string
+                summary:
+                    $ref: '#/components/schemas/agentTraceSummaryOpenAPIResponse'
+                trace:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                trace_id:
+                    type: string
+                trace_status:
+                    type: string
+            required:
+                - query
+                - summary
+                - trace_id
+                - trace_status
+            type: object
+        agentTraceSummaryOpenAPIResponse:
+            properties:
+                latency_ms:
+                    format: double
+                    type: number
+                rerank_count:
+                    type: integer
+                retrieval_count:
+                    type: integer
+                round_count:
+                    type: integer
+                status:
+                    type: string
+                tool_call_count:
+                    type: integer
+            required:
+                - rerank_count
+                - retrieval_count
+                - round_count
+                - status
+                - tool_call_count
+            type: object
         checkModelProviderOpenAPIRequest:
             properties:
                 api_key:
@@ -2811,38 +2943,6 @@ components:
                 - content
                 - session_id
                 - skill_name
-            type: object
-        internalSkillRemoveOpenAPIRequest:
-            properties:
-                category:
-                    type: string
-                id:
-                    type: string
-                reason:
-                    type: string
-                session_id:
-                    type: string
-                skill_name:
-                    type: string
-            type: object
-        internalSkillSuggestionOpenAPIRequest:
-            properties:
-                category:
-                    type: string
-                id:
-                    type: string
-                session_id:
-                    type: string
-                skill_id:
-                    type: string
-                skill_name:
-                    type: string
-                suggestions:
-                    items:
-                        $ref: '#/components/schemas/suggestionPayloadOpenAPIRequest'
-                    type: array
-            required:
-                - session_id
             type: object
         latestVersionChangeOpenAPIResponse:
             properties:
@@ -2938,6 +3038,20 @@ components:
                         $ref: '#/components/schemas/userModelProviderOpenAPIItem'
                     type: array
             type: object
+        localFSChatSettingOpenAPIRequest:
+            properties:
+                enabled:
+                    type: boolean
+            required:
+                - enabled
+            type: object
+        localFSChatSettingOpenAPIResponse:
+            properties:
+                enabled:
+                    type: boolean
+            required:
+                - enabled
+            type: object
         managedStateListOpenAPIResponse:
             properties:
                 items:
@@ -2966,6 +3080,8 @@ components:
                     type: boolean
                 latest_version_change:
                     $ref: '#/components/schemas/latestVersionChangeOpenAPIResponse'
+                preferred_name:
+                    type: string
                 resource_id:
                     type: string
                 resource_type:
@@ -2975,8 +3091,6 @@ components:
                 review_status:
                     type: string
                 title:
-                    type: string
-                preferred_name:
                     type: string
                 version:
                     format: int64
@@ -3003,9 +3117,9 @@ components:
                     type: boolean
                 content:
                     type: string
-                response_style:
-                    type: string
                 preferred_name:
+                    type: string
+                response_style:
                     type: string
             type: object
         mcpDeleteServerOpenAPIResponse:
@@ -3093,25 +3207,6 @@ components:
                     type: boolean
             required:
                 - enabled
-            type: object
-        recordedSuggestionListOpenAPIResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/recordedSuggestionOpenAPIResponse'
-                    type: array
-            type: object
-        recordedSuggestionOpenAPIResponse:
-            properties:
-                id:
-                    type: string
-                invalid_reason:
-                    type: string
-                status:
-                    type: string
-            required:
-                - id
-                - status
             type: object
         resourceUpdateTaskListOpenAPIResponse:
             properties:
@@ -3359,6 +3454,13 @@ components:
                         type: string
                     type: array
                 target_user_ids:
+                    items:
+                        type: string
+                    type: array
+            type: object
+        skillCategoriesOpenAPIResponse:
+            properties:
+                categories:
                     items:
                         type: string
                     type: array
@@ -4066,122 +4168,6 @@ components:
                         type: string
                     type: array
             type: object
-        suggestionBatchReviewOpenAPIRequest:
-            properties:
-                ids:
-                    items:
-                        type: string
-                    type: array
-            type: object
-        suggestionBatchReviewOpenAPIResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/suggestionItemOpenAPIResponse'
-                    type: array
-            type: object
-        suggestionItemOpenAPIResponse:
-            properties:
-                action:
-                    type: string
-                category:
-                    type: string
-                content:
-                    type: string
-                created_at:
-                    type: string
-                file_ext:
-                    type: string
-                full_content:
-                    type: string
-                id:
-                    type: string
-                invalid_reason:
-                    type: string
-                outdated:
-                    type: boolean
-                parent_skill_name:
-                    type: string
-                reason:
-                    type: string
-                relative_path:
-                    type: string
-                resource_key:
-                    type: string
-                resource_type:
-                    type: string
-                reviewed_at:
-                    type: string
-                reviewer_id:
-                    type: string
-                reviewer_name:
-                    type: string
-                session_id:
-                    type: string
-                skill_name:
-                    type: string
-                status:
-                    type: string
-                title:
-                    type: string
-                updated_at:
-                    type: string
-                user_id:
-                    type: string
-            required:
-                - action
-                - category
-                - content
-                - created_at
-                - file_ext
-                - full_content
-                - id
-                - invalid_reason
-                - outdated
-                - parent_skill_name
-                - reason
-                - relative_path
-                - resource_key
-                - resource_type
-                - reviewer_id
-                - reviewer_name
-                - session_id
-                - skill_name
-                - status
-                - title
-                - updated_at
-                - user_id
-            type: object
-        suggestionListOpenAPIResponse:
-            properties:
-                items:
-                    items:
-                        $ref: '#/components/schemas/suggestionItemOpenAPIResponse'
-                    type: array
-                page:
-                    type: integer
-                page_size:
-                    type: integer
-                total:
-                    format: int64
-                    type: integer
-            required:
-                - page
-                - page_size
-                - total
-            type: object
-        suggestionPayloadOpenAPIRequest:
-            properties:
-                content:
-                    type: string
-                reason:
-                    type: string
-                title:
-                    type: string
-            required:
-                - content
-                - title
-            type: object
         systemConfirmOpenAPIResponse:
             properties:
                 content:
@@ -4240,17 +4226,6 @@ components:
                 - draft_source_version
                 - draft_status
             type: object
-        systemSuggestionOpenAPIRequest:
-            properties:
-                session_id:
-                    type: string
-                suggestions:
-                    items:
-                        $ref: '#/components/schemas/suggestionPayloadOpenAPIRequest'
-                    type: array
-            required:
-                - session_id
-            type: object
         toolGroupOpenAPIResponse:
             properties:
                 active:
@@ -4277,10 +4252,20 @@ components:
             type: object
         toolListOpenAPIResponse:
             properties:
+                page:
+                    type: integer
+                page_size:
+                    type: integer
                 tool_groups:
                     items:
                         $ref: '#/components/schemas/toolGroupOpenAPIResponse'
                     type: array
+                total:
+                    type: integer
+            required:
+                - page
+                - page_size
+                - total
             type: object
         toolMethodOpenAPIResponse:
             properties:
@@ -4521,6 +4506,52 @@ paths:
                 "200":
                     description: OK
             summary: GET /agent/threads/{thread_id}
+    /api/core/agent/threads/{thread_id}/artifacts/{artifact_id}:
+        get:
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /agent/threads/{thread_id}/artifacts/{artifact_id}
+    /api/core/agent/threads/{thread_id}/events/{step_id}:
+        get:
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: step_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /agent/threads/{thread_id}/events/{step_id}
+    /api/core/agent/threads/{thread_id}/flow-status:
+        get:
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /agent/threads/{thread_id}/flow-status
     /api/core/agent/threads/{thread_id}/history:
         get:
             parameters:
@@ -4557,6 +4588,50 @@ paths:
                 "200":
                     description: OK
             summary: GET /agent/threads/{thread_id}/results/abtests
+    /api/core/agent/threads/{thread_id}/results/abtests/{abtest_id}/case-details:
+        get:
+            description: Returns filtered, paginated case details for an ABTest result. keyword matches case text and identifiers; outcome matches exactly.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: abtest_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: page_token
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: outcome
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agentABTestCaseDetailListOpenAPIResponse'
+                    description: ABTest case detail list
+            summary: GET /agent/threads/{thread_id}/results/abtests/{abtest_id}/case-details
+            tags:
+                - agent
     /api/core/agent/threads/{thread_id}/results/analysis-reports:
         get:
             parameters:
@@ -4658,6 +4733,59 @@ paths:
             summary: GET /agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases
             tags:
                 - agent
+    /api/core/agent/threads/{thread_id}/results/traces-compare:
+        get:
+            description: Compare two trace details in a thread. Query parameters a and b are trace IDs.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: a
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: b
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agentTraceCompareOpenAPIResponse'
+                    description: Agent trace comparison
+            summary: Compare agent traces
+            tags:
+                - agent
+    /api/core/agent/threads/{thread_id}/results/traces/{trace_id}:
+        get:
+            description: Get one trace detail for a thread owned by the current user.
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: trace_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/agentTraceDetailOpenAPIResponse'
+                    description: Agent trace detail
+            summary: Get agent trace detail
+            tags:
+                - agent
     /api/core/agent/threads/{thread_id}/rounds:
         get:
             parameters:
@@ -4670,6 +4798,35 @@ paths:
                 "200":
                     description: OK
             summary: GET /agent/threads/{thread_id}/rounds
+    /api/core/agent/threads/{thread_id}/steps:
+        get:
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /agent/threads/{thread_id}/steps
+    /api/core/agent/threads/{thread_id}/steps/{step_id}/records:
+        get:
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: step_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /agent/threads/{thread_id}/steps/{step_id}/records
     /api/core/agent/threads/{thread_id}:cancel:
         post:
             parameters:
@@ -4682,6 +4839,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /agent/threads/{thread_id}:cancel
+    /api/core/agent/threads/{thread_id}:continue:
+        post:
+            parameters:
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /agent/threads/{thread_id}:continue
     /api/core/agent/threads/{thread_id}:events:
         get:
             parameters:
@@ -4897,6 +5066,66 @@ paths:
                                 $ref: '#/components/schemas/ConversationListResponse'
                     description: Conversation list
             summary: Conversation list
+    /api/core/conversations/{conversation_id}/events:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}/events
+    /api/core/conversations/{conversation_id}/plugin-sessions:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}/plugin-sessions
+    /api/core/conversations/{conversation_id}/plugin-sessions:active:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}/plugin-sessions:active
+    /api/core/conversations/{conversation_id}/plugin-sessions:latest:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}/plugin-sessions:latest
+    /api/core/conversations/{conversation_id}/tasks:
+        get:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /conversations/{conversation_id}/tasks
     /api/core/conversations/{conversation_id}:status:
         get:
             parameters:
@@ -5132,6 +5361,35 @@ paths:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Stopped successfully
             summary: Stop conversation generation
+    /api/core/data-sources/local-fs-chat-setting:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/localFSChatSettingOpenAPIResponse'
+                    description: Local filesystem chat setting
+            summary: Get local filesystem chat setting
+            tags:
+                - data-sources
+        put:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/localFSChatSettingOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/localFSChatSettingOpenAPIResponse'
+                    description: Updated local filesystem chat setting
+            summary: Update local filesystem chat setting
+            tags:
+                - data-sources
     /api/core/dataset/algos:
         get:
             responses:
@@ -6699,142 +6957,6 @@ paths:
             summary: Create eval set by import
             tags:
                 - eval-set-imports
-    /api/core/evolution/suggestions:
-        get:
-            description: Use evolution_id=<resource_type>:<resource_id> for a single-parameter resource filter. resource_type and resource_key remain available as optional compatibility filters.
-            parameters:
-                - in: query
-                  name: page
-                  required: false
-                  schema:
-                    type: integer
-                - in: query
-                  name: page_size
-                  required: false
-                  schema:
-                    type: integer
-                - in: query
-                  name: evolution_id
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: resource_type
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: resource_key
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: keyword
-                  required: false
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/suggestionListOpenAPIResponse'
-                    description: Suggestion list
-            summary: List evolution suggestions
-            tags:
-                - evolution
-    /api/core/evolution/suggestions/{id}:
-        get:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/suggestionItemOpenAPIResponse'
-                    description: Suggestion details
-            summary: Get evolution suggestion
-            tags:
-                - evolution
-    /api/core/evolution/suggestions/{id}:approve:
-        post:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/suggestionItemOpenAPIResponse'
-                    description: Approved suggestion
-            summary: Approve evolution suggestion
-            tags:
-                - evolution
-    /api/core/evolution/suggestions/{id}:reject:
-        post:
-            parameters:
-                - in: path
-                  name: id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/suggestionItemOpenAPIResponse'
-                    description: Rejected suggestion
-            summary: Reject evolution suggestion
-            tags:
-                - evolution
-    /api/core/evolution/suggestions:batchApprove:
-        post:
-            description: Sets every listed suggestion to accepted regardless of its current status, as long as the suggestion exists.
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/suggestionBatchReviewOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/suggestionBatchReviewOpenAPIResponse'
-                    description: Approved suggestions
-            summary: Batch approve evolution suggestions
-            tags:
-                - evolution
-    /api/core/evolution/suggestions:batchReject:
-        post:
-            description: Sets every listed suggestion to rejected regardless of its current status, as long as the suggestion exists.
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/suggestionBatchReviewOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/suggestionBatchReviewOpenAPIResponse'
-                    description: Rejected suggestions
-            summary: Batch reject evolution suggestions
-            tags:
-                - evolution
     /api/core/evolution/tasks:
         get:
             description: Lists background resource update tasks for the current user.
@@ -6923,6 +7045,30 @@ paths:
             summary: 'Internal: apply word-group actions in batch (algorithm → core)'
             tags:
                 - word_group
+    /api/core/internal/subagent/tasks/{task_id}:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /internal/subagent/tasks/{task_id}
+    /api/core/internal/subagent/tasks/{task_id}/events:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /internal/subagent/tasks/{task_id}/events
     /api/core/kb/{kb_id}/acl:
         get:
             parameters:
@@ -7276,6 +7422,22 @@ paths:
             summary: List knowledge base groups
     /api/core/mcp_servers:
         get:
+            parameters:
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
             responses:
                 "200":
                     content:
@@ -7530,24 +7692,6 @@ paths:
             summary: Reject memory review result
             tags:
                 - memory-review-results
-    /api/core/memory/suggestion:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/systemSuggestionOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/recordedSuggestionListOpenAPIResponse'
-                    description: Created memory suggestions
-            summary: Create memory suggestions
-            tags:
-                - memory
     /api/core/memory:confirm:
         post:
             responses:
@@ -8089,6 +8233,77 @@ paths:
             summary: Set personalization setting
             tags:
                 - personalization
+    /api/core/plugin-sessions/{session_id}:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /plugin-sessions/{session_id}
+    /api/core/plugin-sessions/{session_id}/slots:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /plugin-sessions/{session_id}/slots
+    /api/core/plugin-sessions/{session_id}/slots/{slot_id}:
+        patch:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /plugin-sessions/{session_id}/slots/{slot_id}
+    /api/core/plugin-sessions/{session_id}:advance:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /plugin-sessions/{session_id}:advance
+    /api/core/plugins:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /plugins
+    /api/core/plugins/{plugin_id}:
+        get:
+            parameters:
+                - in: path
+                  name: plugin_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /plugins/{plugin_id}
     /api/core/prompts:
         get:
             parameters:
@@ -8238,6 +8453,11 @@ paths:
                 "200":
                     description: OK
             summary: GET /remote-fs/content
+        put:
+            responses:
+                "200":
+                    description: OK
+            summary: PUT /remote-fs/content
     /api/core/remote-fs/exists:
         get:
             responses:
@@ -8256,6 +8476,12 @@ paths:
                 "200":
                     description: OK
             summary: GET /remote-fs/list
+    /api/core/remote-fs/path:
+        delete:
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /remote-fs/path
     /api/core/resource-versions:
         get:
             description: Lists content version history for skills, memory, and user preferences for the current user.
@@ -8528,42 +8754,6 @@ paths:
             summary: Create skill directly from internal request
             tags:
                 - skill-evolution
-    /api/core/skill/remove:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/internalSkillRemoveOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/recordedSuggestionListOpenAPIResponse'
-                    description: Created remove suggestion
-            summary: Delete skill by ID
-            tags:
-                - skill-evolution
-    /api/core/skill/suggestion:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/internalSkillSuggestionOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/recordedSuggestionListOpenAPIResponse'
-                    description: Created skill suggestions
-            summary: Create skill suggestions
-            tags:
-                - skill-evolution
     /api/core/skills:
         get:
             parameters:
@@ -8814,6 +9004,18 @@ paths:
             summary: List latest skill share status by target user
             tags:
                 - skill-shares
+    /api/core/skills/categories:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillCategoriesOpenAPIResponse'
+                    description: Skill category list
+            summary: List skill categories
+            tags:
+                - skills
     /api/core/skills/tags:
         get:
             responses:
@@ -8844,6 +9046,42 @@ paths:
                 "200":
                     description: OK
             summary: POST /static-files:sign
+    /api/core/tasks/{task_id}:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /tasks/{task_id}
+    /api/core/tasks/{task_id}/artifacts:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /tasks/{task_id}/artifacts
+    /api/core/tasks/{task_id}:stream:
+        get:
+            parameters:
+                - in: path
+                  name: task_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /tasks/{task_id}:stream
     /api/core/temp/uploads:
         post:
             requestBody:
@@ -8964,6 +9202,22 @@ paths:
                 - uploads
     /api/core/tools:
         get:
+            parameters:
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
             responses:
                 "200":
                     content:
@@ -9112,24 +9366,6 @@ paths:
                                 $ref: '#/components/schemas/systemGenerateOpenAPIResponse'
                     description: Generated user preference draft
             summary: Generate user preference draft
-            tags:
-                - preferences
-    /api/core/user_preference/suggestion:
-        post:
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/systemSuggestionOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/recordedSuggestionListOpenAPIResponse'
-                    description: Created user preference suggestions
-            summary: Create user preference suggestions
             tags:
                 - preferences
     /api/core/word_group:

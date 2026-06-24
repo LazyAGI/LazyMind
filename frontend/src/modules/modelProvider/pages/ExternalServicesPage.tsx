@@ -534,6 +534,7 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
   const [newKeyValue, setNewKeyValue] = useState("");
   const [newKeyEngineId, setNewKeyEngineId] = useState("");
   const [addingKey, setAddingKey] = useState(false);
+  const [savingServiceConfig, setSavingServiceConfig] = useState(false);
   const [visibleKeys, setVisibleKeys] = useState<Set<number>>(new Set());
   const [groupForActiveService, setGroupForActiveService] = useState<ApiExternalGroup | null>(null);
   const originalBaseUrlRef = useRef("");
@@ -800,9 +801,10 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
   }
 
   async function handleSaveServiceConfig() {
-    if (!activeService || addingKey) {
+    if (!activeService || addingKey || savingServiceConfig) {
       return;
     }
+    setSavingServiceConfig(true);
     try {
       await form.validateFields();
       const baseUrl = form.getFieldValue([activeService.key, "baseUrl"]) || activeService.baseUrl || "";
@@ -838,6 +840,8 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
         return;
       }
       message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
+    } finally {
+      setSavingServiceConfig(false);
     }
   }
 
@@ -854,6 +858,7 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
         withModelProviderJsonOptions({ data: { api_key: targetKey } }),
       );
       setKeyList((prev) => prev.filter((k) => k !== targetKey));
+      void loadExternalServices(normalizedSearchValue);
     } catch (error) {
       message.error(getLocalizedErrorMessage(error, t("modelProvider.external.saveFailed")));
     }
@@ -927,6 +932,14 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
       academic: categorizedServices.academic,
     };
   }, [categorizedServices, categorySearchValues]);
+  const activeServiceDisplayStatus =
+    activeService?.status === "tbd"
+      ? "tbd"
+      : activeService?.fields.includes("apiKey")
+        ? keyList.length > 0
+          ? "configured"
+          : "missing"
+        : activeService?.status;
 
   const renderCategorySearch = (categoryKey: ServiceCategoryKey) => {
     if (categoryKey !== "parsing" && categoryKey !== "search") {
@@ -1083,7 +1096,13 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
             : t("modelProvider.external.configureAction")
         }
         footer={[
-          <Button key="save" loading={addingKey} onClick={handleSaveServiceConfig} type="primary">
+          <Button
+            disabled={addingKey}
+            key="save"
+            loading={savingServiceConfig}
+            onClick={handleSaveServiceConfig}
+            type="primary"
+          >
             {t("modelProvider.external.saveConfig")}
           </Button>,
         ]}
@@ -1097,14 +1116,14 @@ export default function ExternalServicesPage({ section = "parsing" }: ExternalSe
                   <h4>{activeService.name}</h4>
                   <Tag
                     color={
-                      activeService.status === "configured"
+                      activeServiceDisplayStatus === "configured"
                         ? "success"
-                        : activeService.status === "tbd"
+                        : activeServiceDisplayStatus === "tbd"
                           ? "warning"
                           : "default"
                     }
                   >
-                    {t(`modelProvider.external.status.${activeService.status}`)}
+                    {t(`modelProvider.external.status.${activeServiceDisplayStatus}`)}
                   </Tag>
                 </div>
                 <p>{activeService.description}</p>
