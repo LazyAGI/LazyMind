@@ -182,15 +182,6 @@ func documentParseStrategyName(profile documentParseProfile) string {
 	}
 }
 
-func hasConfiguredOCRService(ocrConfig map[string]any) bool {
-	switch ocrTypeFromConfig(ocrConfig) {
-	case "mineru", "paddleocr":
-		return true
-	default:
-		return false
-	}
-}
-
 // needsOfficeConvertBeforeParse decides whether office-convert-service runs before parsing.
 // PPT/PPTX/PPTM skip conversion only when official MinerU (mineru.net) is configured so
 // DynamicPDFReader can route them to MineruPPTReader; self-hosted MinerU still converts to PDF.
@@ -204,14 +195,17 @@ func needsOfficeConvertBeforeParse(d documentExt, ocrConfig map[string]any, prof
 	}
 	switch profile {
 	case documentParseProfileLocal:
-		return ocrFirstWithLocalOfficeFallbackNeedsConvert(ocrConfig)
+		return ocrFirstWithLocalOfficeFallbackNeedsConvert(src, d, ocrConfig)
 	default:
 		return officePreconvertNeedsConvert(src, d, ocrConfig)
 	}
 }
 
-func ocrFirstWithLocalOfficeFallbackNeedsConvert(ocrConfig map[string]any) bool {
-	return !hasConfiguredOCRService(ocrConfig)
+func ocrFirstWithLocalOfficeFallbackNeedsConvert(src string, d documentExt, ocrConfig map[string]any) bool {
+	if isPresentationDocument(src, d.ContentType, d.OriginalFilename) && isOfficialMinerU(ocrConfig) {
+		return false
+	}
+	return true
 }
 
 func officePreconvertNeedsConvert(src string, d documentExt, ocrConfig map[string]any) bool {

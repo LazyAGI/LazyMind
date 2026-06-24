@@ -144,10 +144,6 @@ def _register_document_readers(docs: Document) -> None:
     docs.add_reader('*.xls', excel_reader)
     docs.add_reader('*.xlsx', excel_reader)
 
-    if _document_parse_profile() == 'local':
-        for pattern in ('*.doc', '*.docx', '*.xls', '*.xlsx', '*.ppt', '*.pptx', '*.pptm'):
-            docs.add_reader(pattern, pdf_reader)
-
 
 def reset_stores() -> None:
     '''Drop all Milvus collections and OpenSearch indices for this algo.

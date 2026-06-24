@@ -116,7 +116,7 @@ func TestParsePathForIngestionPresentationSelfHostedMineru(t *testing.T) {
 	}
 }
 
-func TestLocalParseProfileOfficeWithOCRSkipsConvert(t *testing.T) {
+func TestLocalParseProfileOfficeWithOCRUsesFallbackForUnsupportedRawOffice(t *testing.T) {
 	d := documentExt{
 		StoredPath:       "/data/demo.docx",
 		ParseStoredPath:  "/data/demo.pdf",
@@ -128,12 +128,29 @@ func TestLocalParseProfileOfficeWithOCRSkipsConvert(t *testing.T) {
 		{"ocr_type": "mineru", "ocr_url": "http://local-mineru:8000/api/v1/pdf_parse"},
 		{"ocr_type": "paddleocr", "ocr_url": "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"},
 	} {
-		if got := needsOfficeConvertBeforeParse(d, cfg, documentParseProfileLocal); got {
-			t.Fatalf("needsOfficeConvertBeforeParse() = true for cfg %#v, want false", cfg)
+		if got := needsOfficeConvertBeforeParse(d, cfg, documentParseProfileLocal); !got {
+			t.Fatalf("needsOfficeConvertBeforeParse() = false for cfg %#v, want true", cfg)
 		}
-		if got := parsePathForIngestion(d, cfg, documentParseProfileLocal); got != "/data/demo.docx" {
-			t.Fatalf("parsePathForIngestion() = %q, want original office path", got)
+		if got := parsePathForIngestion(d, cfg, documentParseProfileLocal); got != "/data/demo.pdf" {
+			t.Fatalf("parsePathForIngestion() = %q, want converted pdf path", got)
 		}
+	}
+}
+
+func TestLocalParseProfileOfficialMinerUPresentationSkipsConvert(t *testing.T) {
+	d := documentExt{
+		StoredPath:       "/data/demo.pptx",
+		ParseStoredPath:  "/data/demo.pdf",
+		OriginalFilename: "demo.pptx",
+		ContentType:      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+		ConvertRequired:  true,
+	}
+	cfg := map[string]any{"ocr_type": "mineru", "ocr_url": "https://mineru.net/api/v4/"}
+	if got := needsOfficeConvertBeforeParse(d, cfg, documentParseProfileLocal); got {
+		t.Fatal("needsOfficeConvertBeforeParse() = true, want false")
+	}
+	if got := parsePathForIngestion(d, cfg, documentParseProfileLocal); got != "/data/demo.pptx" {
+		t.Fatalf("parsePathForIngestion() = %q, want original pptx path", got)
 	}
 }
 
