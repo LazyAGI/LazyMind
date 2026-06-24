@@ -17,7 +17,7 @@ import (
 )
 
 func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
-	body := buildChatRequestBody("conv-1", "", "hello", nil, map[string]any{}, nil, "")
+	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{}, nil, "")
 	sessionID, ok := body["session_id"].(string)
 	if !ok {
 		t.Fatalf("expected session_id string, got %T", body["session_id"])
@@ -35,7 +35,7 @@ func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyUsesDatasetListFilters(t *testing.T) {
-	body := buildChatRequestBody("conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
 		"conversation": map[string]any{
 			"search_config": map[string]any{
 				"dataset_list": []any{
@@ -80,7 +80,7 @@ func TestBuildChatRequestBodyUsesDatasetListFilters(t *testing.T) {
 
 func TestBuildChatRequestBodyKeepsExistingFilters(t *testing.T) {
 	existing := map[string]any{"kb_id": []string{"manual"}}
-	body := buildChatRequestBody("conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
 		"filters": existing,
 		"conversation": map[string]any{
 			"search_config": map[string]any{
@@ -112,7 +112,7 @@ func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
 		UserPreference:     "preference-content",
 		UsePersonalization: true,
 	}
-	body := buildChatRequestBody("conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "user-1")
+	body := buildChatRequestBody(nil, nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "user-1")
 
 	if got := body["session_id"]; got != "session-1" {
 		t.Fatalf("expected session_id to be preserved, got %#v", got)
@@ -151,7 +151,7 @@ func TestBuildChatRequestBodySkipsMemoryAndPreferenceWhenPersonalizationDisabled
 		UserPreference:     "preference-content",
 		UsePersonalization: false,
 	}
-	body := buildChatRequestBody("conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "")
+	body := buildChatRequestBody(nil, nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "")
 
 	if got, ok := body["use_memory"].(bool); !ok || got {
 		t.Fatalf("expected use_memory false, got %#v", body["use_memory"])
@@ -165,7 +165,7 @@ func TestBuildChatRequestBodySkipsMemoryAndPreferenceWhenPersonalizationDisabled
 }
 
 func TestBuildChatRequestBodyPreservesExplicitReasoningFalse(t *testing.T) {
-	body := buildChatRequestBody("conv-1", "", "hello", nil, map[string]any{
+	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
 		"reasoning": false,
 	}, nil, "")
 
@@ -366,7 +366,7 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyMergesInputURIsIntoFiles(t *testing.T) {
-	body := buildChatRequestBody("conv-1", "sid", "what animal", nil, map[string]any{
+	body := buildChatRequestBody(nil, nil, "conv-1", "sid", "what animal", nil, map[string]any{
 		"input": []any{
 			map[string]any{"input_type": "text", "text": "hello"},
 			map[string]any{"input_type": "image", "uri": "/var/lib/lazymind/uploads/tmp/u1/a.png"},
@@ -384,7 +384,7 @@ func TestBuildChatRequestBodyMergesInputURIsIntoFiles(t *testing.T) {
 }
 
 func TestBuildChatRequestBodyFilesMergeDedupesAndSkipsHTTP(t *testing.T) {
-	body := buildChatRequestBody("conv-1", "sid", "q", nil, map[string]any{
+	body := buildChatRequestBody(nil, nil, "conv-1", "sid", "q", nil, map[string]any{
 		"files": []any{"/data/x.jpg"},
 		"input": []any{
 			map[string]any{"input_type": "image", "uri": "https://cdn.example.com/p.png"},

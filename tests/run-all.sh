@@ -32,6 +32,14 @@ else
 fi
 
 echo ""
+echo "=== local/local-proxy ==="
+if command -v go &>/dev/null; then
+  (cd local/local-proxy && GOCACHE=/tmp/local-proxy-gocache go test ./... -v 2>&1) || FAILED=1
+else
+  echo "Skip (go not found)"
+fi
+
+echo ""
 echo "=== algorithm ==="
 if command -v python3 &>/dev/null; then
   python3 -m pytest tests/algorithm/ -v --tb=short 2>&1 || FAILED=1

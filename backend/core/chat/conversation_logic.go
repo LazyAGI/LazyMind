@@ -414,7 +414,86 @@ func filePathsForUpstreamChat(raw map[string]any) any {
 	return out
 }
 
-func buildChatRequestBody(convID, sessionID, query string, histories []orm.ChatHistory, raw map[string]any, resourceContext *evolution.ChatResourceContext, userID string) map[string]any {
+// historyFilePaths extracts local file URIs from historical chat_histories.ext.input fields.
+// This ensures files uploaded in past turns are still visible to Python on subsequent turns.
+func historyFilePaths(histories []orm.ChatHistory) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, h := range histories {
+		if len(h.Ext) == 0 {
+			continue
+		}
+		var ext struct {
+			Input []map[string]any `json:"input"`
+		}
+		if err := json.Unmarshal(h.Ext, &ext); err != nil {
+			continue
+		}
+		for _, item := range ext.Input {
+			typ, _ := item["input_type"].(string)
+			typ = strings.ToLower(strings.TrimSpace(typ))
+			if typ != "image" && typ != "file" {
+				continue
+			}
+			uri, _ := item["uri"].(string)
+			uri = strings.TrimSpace(uri)
+			if uri == "" {
+				continue
+			}
+			lower := strings.ToLower(uri)
+			if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+				continue
+			}
+			if _, dup := seen[uri]; dup {
+				continue
+			}
+			seen[uri] = struct{}{}
+			out = append(out, uri)
+		}
+	}
+	return out
+}
+
+// mergeFilePaths merges current-turn files with historical file paths, deduplicating.
+// Returns nil when the combined result is empty.
+func mergeFilePaths(current any, historical []string) any {
+	seen := make(map[string]struct{})
+	var out []any
+
+	addStr := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return
+		}
+		if _, dup := seen[s]; dup {
+			return
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+
+	switch xs := current.(type) {
+	case []any:
+		for _, it := range xs {
+			if s, ok := it.(string); ok {
+				addStr(s)
+			}
+		}
+	case []string:
+		for _, s := range xs {
+			addStr(s)
+		}
+	}
+	for _, s := range historical {
+		addStr(s)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, query string, histories []orm.ChatHistory, raw map[string]any, resourceContext *evolution.ChatResourceContext, userID string) map[string]any {
 	if strings.TrimSpace(sessionID) == "" {
 		sessionID = upstreamSessionID(convID)
 	}
@@ -431,7 +510,7 @@ func buildChatRequestBody(convID, sessionID, query string, histories []orm.ChatH
 		"conversation_id": convID,
 		"history":         buildHistoryMessages(histories),
 		"filters":         raw["filters"],
-		"files":           filePathsForUpstreamChat(raw),
+		"files":           mergeFilePaths(filePathsForUpstreamChat(raw), historyFilePaths(histories)),
 		"databases":       raw["databases"],
 		"debug":           raw["debug"],
 		"reasoning":       resolveReasoning(raw),
@@ -445,8 +524,22 @@ func buildChatRequestBody(convID, sessionID, query string, histories []orm.ChatH
 		body["environment_context"] = environmentContext
 	}
 	// Propagate plugin_context so Python ChatAgent receives the active session info.
+	// Merge plugin_ui_state (focused_tab, focused_sort_order) from the request body.
+	// Python reads artifact state directly from the DB via _build_session_artifact_section.
 	if pc, ok := raw["plugin_context"].(map[string]any); ok && len(pc) > 0 {
-		body["plugin_context"] = pc
+		mergedPC := make(map[string]any, len(pc)+4)
+		for k, v := range pc {
+			mergedPC[k] = v
+		}
+		if uis, ok := raw["plugin_ui_state"].(map[string]any); ok {
+			if ft, ok := uis["focused_tab"]; ok {
+				mergedPC["focused_tab"] = ft
+			}
+			if fso, ok := uis["focused_sort_order"]; ok {
+				mergedPC["focused_sort_order"] = fso
+			}
+		}
+		body["plugin_context"] = mergedPC
 	}
 	if resourceContext != nil {
 		body["disabled_tools"] = resourceContext.DisabledTools
@@ -1275,6 +1368,24 @@ func handlePluginStepCreated(
 		}
 		if cold, ok := ev.Params["is_cold_start"].(bool); ok {
 			params.IsColdStart = cold
+		}
+		if rh, ok := ev.Params["retry_hint"].(string); ok {
+			params.RetryHint = rh
+		}
+		if pi, ok := ev.Params["partial_indices"].(map[string]any); ok {
+			parsed := make(map[string][]int, len(pi))
+			for k, v := range pi {
+				if arr, ok2 := v.([]any); ok2 {
+					ints := make([]int, 0, len(arr))
+					for _, elem := range arr {
+						if f, ok3 := elem.(float64); ok3 {
+							ints = append(ints, int(f))
+						}
+					}
+					parsed[k] = ints
+				}
+			}
+			params.PartialIndices = parsed
 		}
 	}
 	if params.PluginID == "" || params.StepID == "" {

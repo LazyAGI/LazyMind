@@ -52,7 +52,12 @@ class StateMachine:
         return [t for t in targets if t not in self._RESERVED]
 
     def is_reachable(self, current_step: str, target_step: str) -> bool:
-        """Return True if target_step is directly reachable from current_step."""
+        """Return True if target_step is directly reachable from current_step.
+
+        A step is always reachable from itself (retry semantics).
+        """
+        if target_step == current_step and target_step not in self._RESERVED:
+            return True
         return target_step in self.get_reachable_steps(current_step)
 
     def get_ancestors(self, step: str) -> set:
@@ -227,6 +232,37 @@ class PluginSpec:
                     return out.get('slot_id')
         return None
 
+    def get_slot_for_artifact_key(self, artifact_key: str) -> Optional[Dict[str, Any]]:
+        """Return the slot definition (id, cardinality, ordered, caption_key …) for an artifact_key."""
+        for tab in (self.yaml.get('ui') or {}).get('tabs', []):
+            for slot in tab.get('slots', []):
+                if slot.get('artifact_key') == artifact_key:
+                    return dict(slot)
+        return None
+
+    def get_i18n_label(self, lang: str, key_path: str, fallback: str = '') -> str:
+        """Return a translated label from plugin.yaml i18n section.
+
+        key_path uses dot-notation: e.g. 'tabs.materials', 'slots.material_images',
+        'steps.generate_image'.
+
+        Args:
+            lang: BCP-47 language tag, e.g. 'zh-CN'.
+            key_path: Dot-separated path into the i18n subtree.
+            fallback: Value to return when the key is missing.
+        """
+        i18n = self.yaml.get('i18n') or {}
+        node: Any = i18n.get(lang) or i18n.get(lang.split('-')[0]) or {}
+        for part in key_path.split('.'):
+            if not isinstance(node, dict):
+                return fallback
+            node = node.get(part)
+            if node is None:
+                return fallback
+        if isinstance(node, dict):
+            return str(node.get('label', fallback))
+        return str(node) if node else fallback
+
 
 def load_all() -> None:
     """Discover and load all plugins from the plugins directory. Called at startup."""
@@ -269,8 +305,62 @@ def list_plugins() -> List[Dict[str, Any]]:
             'description': spec.yaml.get('description', ''),
             'steps': steps,
             'ui': spec.yaml.get('ui', {}),
+            'i18n': spec.yaml.get('i18n', {}),
         })
     return out
+
+
+def get_plugin_with_i18n(plugin_id: str, lang: str = '') -> Optional[Dict[str, Any]]:
+    """Return full plugin spec with labels resolved for lang.
+
+    When lang is supplied (e.g. 'zh-CN'), labels for tabs and slots are
+    overwritten with the i18n values if available.  Falls back to the
+    static labels in plugin.yaml when a translation is absent.
+    """
+    spec = get_plugin(plugin_id)
+    if not spec:
+        return None
+
+    raw: Dict[str, Any] = {
+        'id': spec.plugin_id,
+        'name': spec.yaml.get('name', spec.plugin_id),
+        'description': spec.yaml.get('description', ''),
+        'when_to_use': spec.yaml.get('when_to_use', ''),
+        'steps': list(spec.yaml.get('steps', [])),
+        'ui': spec.yaml.get('ui', {}),
+        'i18n': spec.yaml.get('i18n', {}),
+    }
+
+    if not lang:
+        return raw
+
+    # Apply i18n overrides to a deep copy so the registry cache is untouched.
+    import copy
+    raw = copy.deepcopy(raw)
+
+    name_i18n = spec.get_i18n_label(lang, 'name', '')
+    if name_i18n:
+        raw['name'] = name_i18n
+
+    for step in raw.get('steps', []):
+        step_id = step.get('id', '')
+        label_i18n = spec.get_i18n_label(lang, f'steps.{step_id}', '')
+        if label_i18n:
+            step['label'] = label_i18n
+
+    ui = raw.get('ui') or {}
+    for tab in ui.get('tabs', []):
+        tab_id = tab.get('id', '')
+        label_i18n = spec.get_i18n_label(lang, f'tabs.{tab_id}', '')
+        if label_i18n:
+            tab['label'] = label_i18n
+        for slot in tab.get('slots', []):
+            slot_id = slot.get('id', '')
+            label_i18n = spec.get_i18n_label(lang, f'slots.{slot_id}', '')
+            if label_i18n:
+                slot['label'] = label_i18n
+
+    return raw
 
 
 def get_state_machine(plugin_id: str) -> Optional[StateMachine]:

@@ -38,12 +38,28 @@ type threadListResponse struct {
 type recordResponse struct {
 	ID         string    `json:"id"`
 	ThreadID   string    `json:"thread_id"`
+	StepID     string    `json:"step_id,omitempty"`
 	TaskID     string    `json:"task_id,omitempty"`
 	StreamKind string    `json:"stream_kind"`
 	EventName  string    `json:"event_name,omitempty"`
 	Payload    any       `json:"payload"`
 	RawFrame   string    `json:"raw_frame"`
 	CreatedAt  time.Time `json:"created_at"`
+}
+
+type threadStepResponse struct {
+	ThreadID      string     `json:"thread_id"`
+	StepID        string     `json:"step_id"`
+	Title         string     `json:"title,omitempty"`
+	Status        string     `json:"status"`
+	Active        bool       `json:"active"`
+	OrderIndex    int        `json:"order_index"`
+	EventCount    int64      `json:"event_count"`
+	CurrentTaskID string     `json:"current_task_id,omitempty"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	EndedAt       *time.Time `json:"ended_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 type upstreamProxyResponse struct {
@@ -216,10 +232,11 @@ func ListThreadRecords(w http.ResponseWriter, r *http.Request) {
 	}
 
 	streamKind := strings.TrimSpace(r.URL.Query().Get("stream_kind"))
+	stepID := strings.TrimSpace(r.URL.Query().Get("step_id"))
 	afterID := parseAfterID(r)
 	limit := parseRecordLimit(r.URL.Query().Get("limit"))
 
-	records, err := listRecords(db, threadID, streamKind, "", afterID, limit+1)
+	records, err := listRecordsWithStep(db, threadID, streamKind, "", stepID, afterID, limit+1)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "list thread records failed", err), http.StatusInternalServerError)
 		return
@@ -241,7 +258,95 @@ func ListThreadRecords(w http.ResponseWriter, r *http.Request) {
 
 	common.ReplyOK(w, map[string]any{
 		"thread_id":     threadID,
+		"step_id":       stepID,
 		"stream_kind":   streamKind,
+		"items":         items,
+		"next_after_id": nextAfterID,
+		"has_more":      hasMore,
+	})
+}
+
+func ListThreadSteps(w http.ResponseWriter, r *http.Request) {
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	threadID := strings.TrimSpace(mux.Vars(r)["thread_id"])
+	if _, err := loadUserThread(db, r, threadID); err != nil {
+		replyThreadLoadError(w, err)
+		return
+	}
+
+	var steps []orm.AgentThreadStep
+	if err := db.Where("thread_id = ?", threadID).
+		Order("order_index ASC, created_at ASC, step_id ASC").
+		Find(&steps).Error; err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "list thread steps failed", err), http.StatusInternalServerError)
+		return
+	}
+
+	items := make([]threadStepResponse, 0, len(steps))
+	activeStepID := ""
+	var activeUpdatedAt time.Time
+	for _, step := range steps {
+		items = append(items, toThreadStepResponse(step))
+		if step.Active && (activeStepID == "" || step.UpdatedAt.After(activeUpdatedAt)) {
+			activeStepID = step.StepID
+			activeUpdatedAt = step.UpdatedAt
+		}
+	}
+
+	common.ReplyOK(w, map[string]any{
+		"thread_id":      threadID,
+		"active_step_id": activeStepID,
+		"items":          items,
+		"total_size":     len(items),
+	})
+}
+
+func ListThreadStepRecords(w http.ResponseWriter, r *http.Request) {
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	threadID := strings.TrimSpace(mux.Vars(r)["thread_id"])
+	stepID := strings.TrimSpace(mux.Vars(r)["step_id"])
+	if stepID == "" {
+		common.ReplyErr(w, "step_id required", http.StatusBadRequest)
+		return
+	}
+	if _, err := loadUserThread(db, r, threadID); err != nil {
+		replyThreadLoadError(w, err)
+		return
+	}
+
+	afterID := parseAfterID(r)
+	limit := parseRecordLimit(r.URL.Query().Get("limit"))
+	records, err := listRecordsWithStep(db, threadID, streamKindThreadEvent, "", stepID, afterID, limit+1)
+	if err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "list thread step records failed", err), http.StatusInternalServerError)
+		return
+	}
+
+	hasMore := len(records) > limit
+	if hasMore {
+		records = records[:limit]
+	}
+	nextAfterID := afterID
+	if len(records) > 0 {
+		nextAfterID = records[len(records)-1].ID
+	}
+
+	items := make([]recordResponse, 0, len(records))
+	for _, record := range records {
+		items = append(items, toRecordResponse(record))
+	}
+
+	common.ReplyOK(w, map[string]any{
+		"thread_id":     threadID,
+		"step_id":       stepID,
 		"items":         items,
 		"next_after_id": nextAfterID,
 		"has_more":      hasMore,
@@ -312,6 +417,19 @@ func StreamThreadMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func StreamThreadEvents(w http.ResponseWriter, r *http.Request) {
+	streamThreadEvents(w, r, "")
+}
+
+func StreamThreadStepEvents(w http.ResponseWriter, r *http.Request) {
+	stepID := strings.TrimSpace(mux.Vars(r)["step_id"])
+	if stepID == "" {
+		common.ReplyErr(w, "step_id required", http.StatusBadRequest)
+		return
+	}
+	streamThreadEvents(w, r, stepID)
+}
+
+func streamThreadEvents(w http.ResponseWriter, r *http.Request, stepID string) {
 	requestStarted := time.Now()
 	db := store.DB()
 	if db == nil {
@@ -352,6 +470,12 @@ func StreamThreadEvents(w http.ResponseWriter, r *http.Request) {
 		Msg("agent thread events load thread completed")
 
 	upstreamURL := threadEventsURL(threadID)
+	if stepID != "" {
+		upstreamURL = threadStepEventsURL(threadID, stepID)
+		if err := markThreadStepActive(db, threadID, stepID); err != nil {
+			log.Logger.Warn().Err(err).Str("thread_id", threadID).Str("step_id", stepID).Msg("mark thread step active failed")
+		}
+	}
 	lastUpstreamEventID := strings.TrimSpace(r.URL.Query().Get("since"))
 	for {
 		if r.Context().Err() != nil {
@@ -366,7 +490,7 @@ func StreamThreadEvents(w http.ResponseWriter, r *http.Request) {
 			Dur("request_elapsed", time.Since(requestStarted)).
 			Msg("agent thread events opening upstream sse")
 		upstreamCtx, cancelUpstream := context.WithCancel(r.Context())
-		resp, err := openThreadEventsStream(upstreamCtx, r, threadID, lastUpstreamEventID)
+		resp, err := openThreadEventsStream(upstreamCtx, r, upstreamURL, lastUpstreamEventID)
 		if err != nil {
 			cancelUpstream()
 			log.Logger.Warn().
@@ -402,6 +526,7 @@ func StreamThreadEvents(w http.ResponseWriter, r *http.Request) {
 			flusher,
 			db,
 			threadID,
+			stepID,
 			resp.Body,
 			&lastUpstreamEventID,
 			func(reason string, cause error) bool {
@@ -753,8 +878,8 @@ type threadEventStreamResult struct {
 	LastEventID string
 }
 
-func openThreadEventsStream(ctx context.Context, r *http.Request, threadID, lastEventID string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, threadEventsURL(threadID), nil)
+func openThreadEventsStream(ctx context.Context, r *http.Request, upstreamURL, lastEventID string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -789,6 +914,7 @@ func streamUpstreamThreadEvents(
 	flusher http.Flusher,
 	db *gorm.DB,
 	threadID string,
+	stepID string,
 	body io.Reader,
 	lastUpstreamEventID *string,
 	shouldContinue func(reason string, cause error) bool,
@@ -849,6 +975,7 @@ func streamUpstreamThreadEvents(
 				flusher,
 				db,
 				threadID,
+				stepID,
 				chunk,
 				lastUpstreamEventID,
 			); err != nil {
@@ -888,6 +1015,7 @@ func writeThreadEventStreamChunk(
 	flusher http.Flusher,
 	db *gorm.DB,
 	threadID string,
+	stepID string,
 	chunk threadEventStreamChunk,
 	lastUpstreamEventID *string,
 ) error {
@@ -924,7 +1052,11 @@ func writeThreadEventStreamChunk(
 	}
 
 	saveStarted := time.Now()
-	_, saveCreated, saveErr := saveThreadRecord(
+	recordKey := ""
+	if strings.TrimSpace(stepID) != "" && strings.TrimSpace(chunk.UpstreamEventID) != "" {
+		recordKey = sha256Hex(stepID + "\x00" + chunk.UpstreamEventID)
+	}
+	_, saveCreated, saveErr := saveThreadRecordWithOptions(
 		db,
 		threadID,
 		"",
@@ -933,10 +1065,19 @@ func writeThreadEventStreamChunk(
 		chunk.Event.EventName,
 		chunk.Event.RawFrame,
 		chunk.Event.RawFrame,
+		saveThreadRecordOptions{
+			StepID:    stepID,
+			RecordKey: recordKey,
+		},
 	)
 	saveElapsed := time.Since(saveStarted)
 	if saveErr != nil {
 		log.Logger.Warn().Err(saveErr).Str("thread_id", threadID).Msg("save thread event record failed")
+	}
+	if stepID != "" {
+		if stepErr := updateThreadStepFromEvent(db, threadID, stepID, chunk.Event); stepErr != nil {
+			log.Logger.Warn().Err(stepErr).Str("thread_id", threadID).Str("step_id", stepID).Msg("update thread step from event failed")
+		}
 	}
 
 	updates := map[string]any{
@@ -1757,12 +1898,30 @@ func toRecordResponse(record orm.AgentThreadRecord) recordResponse {
 	return recordResponse{
 		ID:         record.ID,
 		ThreadID:   record.ThreadID,
+		StepID:     record.StepID,
 		TaskID:     record.TaskID,
 		StreamKind: record.StreamKind,
 		EventName:  record.EventName,
 		Payload:    recordPayloadValue(record),
 		RawFrame:   record.RawFrame,
 		CreatedAt:  record.CreatedAt,
+	}
+}
+
+func toThreadStepResponse(step orm.AgentThreadStep) threadStepResponse {
+	return threadStepResponse{
+		ThreadID:      step.ThreadID,
+		StepID:        step.StepID,
+		Title:         step.Title,
+		Status:        step.Status,
+		Active:        step.Active,
+		OrderIndex:    step.OrderIndex,
+		EventCount:    step.EventCount,
+		CurrentTaskID: step.CurrentTaskID,
+		StartedAt:     step.StartedAt,
+		EndedAt:       step.EndedAt,
+		CreatedAt:     step.CreatedAt,
+		UpdatedAt:     step.UpdatedAt,
 	}
 }
 

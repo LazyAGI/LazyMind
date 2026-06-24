@@ -1,108 +1,35 @@
 import { create } from "zustand";
 
-export const MODEL_API_LABELS = {
-  lazyMind: "LazyMind 大模型",
-  deepSeek: "DeepSeek",
-} as const;
+// There is only one model mode now (LazyMind). This store is kept as a
+// thin wrapper so that callsites that reference getModelSelection /
+// setModelSelection don't need to be touched, but the "deepseek" and
+// "both" concepts are completely removed.
 
-export type ModelSelectionType = "value_engineering" | "deepseek" | "both";
-
-export const MODEL_SELECTION_SUMMARY_KEYS: Record<ModelSelectionType, string> = {
-  value_engineering: "chat.modelSelectionTriggerLazyMind",
-  deepseek: "chat.modelSelectionTriggerDeepSeek",
-  both: "chat.dualModeCompare",
-};
-
-export const MODEL_OPTIONS = [
-  {
-    value: "value_engineering" as const,
-    labelKey: "chat.lazyMindModel",
-    descriptionKey: "chat.lazyMindModelDesc",
-  },
-  {
-    value: "deepseek" as const,
-    labelKey: "chat.deepSeekModel",
-    descriptionKey: "chat.deepSeekModelDesc",
-  },
-] as const;
-
-const DEFAULT_MODEL: ModelSelectionType = "value_engineering";
-
-
-export function parseModelSelectionFromModels(
-  models?: string[],
-): ModelSelectionType {
-  if (!models || models.length === 0) {
-    return DEFAULT_MODEL;
-  }
-
-  const hasValueEngineering = models.some(
-    (m) =>
-      m === MODEL_API_LABELS.lazyMind ||
-      m === "LazyMind" ||
-      m === "lazyMind",
-  );
-  const hasDeepSeek = models.some(
-    (m) => m === MODEL_API_LABELS.deepSeek || m === "DeepSeek",
-  );
-
-  if (hasValueEngineering && hasDeepSeek) {
-    return "both";
-  } else if (hasDeepSeek) {
-    return "deepseek";
-  } else {
-    return "value_engineering";
-  }
-}
+export type ModelSelectionType = "value_engineering";
 
 interface ModelSelectionStore {
-
-  conversationModelSelection: Record<string, ModelSelectionType>;
-
   getModelSelection: (conversationId: string) => ModelSelectionType;
-
   setModelSelection: (
     conversationId: string,
     selection: ModelSelectionType,
   ) => void;
-
   resetForNewChat: () => void;
-
   clearModelSelection: (conversationId: string) => void;
 }
 
-export const useModelSelectionStore = create<ModelSelectionStore>()(
-  (set, get) => ({
-    conversationModelSelection: {},
-    getModelSelection: (conversationId: string) => {
-      const selection = get().conversationModelSelection[conversationId];
-      return selection ?? DEFAULT_MODEL;
-    },
-    setModelSelection: (
-      conversationId: string,
-      selection: ModelSelectionType,
-    ) => {
-      set((state) => ({
-        conversationModelSelection: {
-          ...state.conversationModelSelection,
-          [conversationId]: selection,
-        },
-      }));
-    },
-    resetForNewChat: () => {
-      set((state) => ({
-        conversationModelSelection: {
-          ...state.conversationModelSelection,
-          "": DEFAULT_MODEL,
-        },
-      }));
-    },
-    clearModelSelection: (conversationId: string) => {
-      set((state) => {
-        const newMap = { ...state.conversationModelSelection };
-        delete newMap[conversationId];
-        return { conversationModelSelection: newMap };
-      });
-    },
-  }),
-);
+export const useModelSelectionStore = create<ModelSelectionStore>()(() => ({
+  getModelSelection: (_conversationId: string): ModelSelectionType =>
+    "value_engineering",
+  setModelSelection: (
+    _conversationId: string,
+    _selection: ModelSelectionType,
+  ) => {},
+  resetForNewChat: () => {},
+  clearModelSelection: (_conversationId: string) => {},
+}));
+
+export function parseModelSelectionFromModels(
+  _models?: string[],
+): ModelSelectionType {
+  return "value_engineering";
+}

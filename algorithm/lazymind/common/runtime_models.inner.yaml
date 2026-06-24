@@ -42,7 +42,7 @@ vlm:
   - source: openai
     type: vlm
     name: lazyllm
-    url: http://10.119.21.178:36517/v1/
+    url: http://10.119.16.10:36324/v1/
     skip_auth: true
 
 speech_to_text:

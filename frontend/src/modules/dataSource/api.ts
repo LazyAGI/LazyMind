@@ -14,6 +14,10 @@ interface ApiEnvelope<T> {
   data?: T;
 }
 
+export interface LocalFSChatSetting {
+  enabled: boolean;
+}
+
 const baseUrl = BASE_URL || window.location.origin;
 
 const coreConfiguration = new CoreConfiguration({
@@ -48,6 +52,21 @@ export const dataSourceCloudOauthApi = CloudOauthApiFactory(
   baseUrl,
   axiosInstance,
 );
+
+export async function getLocalFSChatSetting() {
+  const response = await axiosInstance.get<ApiEnvelope<LocalFSChatSetting> | LocalFSChatSetting>(
+    `${baseUrl}/api/core/data-sources/local-fs-chat-setting`,
+  );
+  return unwrapDataSourceApiData<LocalFSChatSetting>(response.data);
+}
+
+export async function updateLocalFSChatSetting(enabled: boolean) {
+  const response = await axiosInstance.put<ApiEnvelope<LocalFSChatSetting> | LocalFSChatSetting>(
+    `${baseUrl}/api/core/data-sources/local-fs-chat-setting`,
+    { enabled },
+  );
+  return unwrapDataSourceApiData<LocalFSChatSetting>(response.data);
+}
 
 export function unwrapDataSourceApiData<T>(payload: unknown): T {
   if (payload && typeof payload === "object" && "data" in payload) {

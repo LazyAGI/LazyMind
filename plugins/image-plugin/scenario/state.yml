@@ -13,10 +13,10 @@ transitions:
       condition: "Cold start — always enter subject analysis first."
 
   analyze_subject:
-    - to: collect_material
+    - to: collect_materials
       condition: "Subject analysis complete — collect reference materials."
 
-  collect_material:
+  collect_materials:
     - to: optimize_prompt
       condition: "All materials collected — proceed to prompt optimization."
 
@@ -57,18 +57,19 @@ steps:
       subject_analysis artifact must be saved and contain at least 50 words covering
       subjects/items to collect, artistic style, and mood/lighting hints.
 
-  collect_material:
+  collect_materials:
     label: Collect Reference Materials
     # This step has a list-cardinality slot (material_images).
     #
     # Normal run: collect one image URL per subject item identified in subject_analysis.
-    # Call save_artifact once per item (no list_index needed — each call appends a new entry).
+    # Call save_artifact once per item (no sort_order needed — each call appends a new entry).
     #
-    # Partial retry: if the user says "re-collect item B only", ChatAgent sets:
-    #   runtime_instruction = "Re-collect only item B; leave A, C, D untouched."
-    #   partial_indices = {"material_image": [1]}   ← list_index of B
-    # The SubAgent must call save_artifact with list_index=1 so that only the
-    # revision at index 1 is replaced; other indices are not touched.
+    # Partial retry: if the user says "re-collect item B only", runtime_instruction will say
+    # something like "Re-collect only item B; leave A, C, D untouched."
+    # The system prompt will also contain a "Partial retry instruction" block that tells you
+    # exactly which sort_order value(s) to pass to save_artifact for the affected item(s).
+    # You MUST pass sort_order=N so that only the revision at display position N is replaced;
+    # other positions are not touched.
     prompt: |
       You are a research agent that collects reference images for an art project.
 
@@ -80,11 +81,15 @@ steps:
       Your task:
       - Unless runtime_instruction restricts you to specific items, collect one reference
         image URL for each subject item identified in the analysis.
-      - For each item, call:
+      - For each item, call image_search_tool to obtain image URLs, then immediately call:
           save_artifact(key='material_image', content_type='image', value=<url>)
-        If you are doing a partial retry for item at a specific position, also pass
-          list_index=<position>
-        so that only that slot entry is replaced.
+        using the EXACT URL returned by image_search_tool. Never fabricate, substitute,
+        or look up alternative URLs — always use what image_search_tool returns.
+      - If the system prompt contains a "Partial retry instruction" block, follow it:
+        pass sort_order=N for each item that should be overwritten. The sort_order value
+        is the 1-based display position shown in brackets [N] in the artifact list above.
+        Do NOT derive sort_order from params or any 0-based index — use only the values
+        stated in the "Partial retry instruction" block.
       - Stop after all required items are saved.
     tools:
       - web_search_tool
@@ -147,7 +152,8 @@ steps:
 
       Steps:
       1. Call generate_image_tool(prompt=<optimized_prompt>) to create the image.
-      2. Save the image URL:
+      2. Save the EXACT URL returned by generate_image_tool — do not fabricate or
+         substitute any URL:
            save_artifact(key='generated_image_url', content_type='image', value=<url>)
       3. Stop after saving.
     tools:

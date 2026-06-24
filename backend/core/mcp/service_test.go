@@ -106,6 +106,81 @@ func TestCreateServerIgnoresEnabledAndStartsDisabled(t *testing.T) {
 	}
 }
 
+func TestListServersFiltersByKeywordAndPaginates(t *testing.T) {
+	db := newTestDB(t)
+	for _, item := range []struct {
+		name string
+		url  string
+	}{
+		{name: "网站检索", url: "https://search.example.com/mcp"},
+		{name: "Alpha API", url: "https://alpha.example.com/mcp"},
+		{name: "网站分析", url: "https://analytics.example.com/mcp"},
+	} {
+		if _, err := CreateServer(context.Background(), db.DB, CreateServerRequest{
+			Name:      item.name,
+			Transport: "http",
+			URL:       item.url,
+		}, "u1", "User 1"); err != nil {
+			t.Fatalf("create server %q: %v", item.name, err)
+		}
+	}
+
+	resp, err := ListServers(context.Background(), db.DB, "u1", ListServersRequest{
+		Keyword:  "网站",
+		Page:     1,
+		PageSize: 1,
+	})
+	if err != nil {
+		t.Fatalf("list servers: %v", err)
+	}
+	if resp.Total != 2 || resp.Page != 1 || resp.PageSize != 1 {
+		t.Fatalf("unexpected list metadata: %#v", resp)
+	}
+	if len(resp.MCPServers) != 1 || !strings.Contains(resp.MCPServers[0].Name, "网站") {
+		t.Fatalf("unexpected first page: %#v", resp.MCPServers)
+	}
+
+	resp, err = ListServers(context.Background(), db.DB, "u1", ListServersRequest{
+		Keyword:  "网站",
+		Page:     2,
+		PageSize: 1,
+	})
+	if err != nil {
+		t.Fatalf("list second page: %v", err)
+	}
+	if resp.Total != 2 || len(resp.MCPServers) != 1 || !strings.Contains(resp.MCPServers[0].Name, "网站") {
+		t.Fatalf("unexpected second page: %#v", resp)
+	}
+}
+
+func TestListServersKeywordMatchesURLCaseInsensitively(t *testing.T) {
+	db := newTestDB(t)
+	if _, err := CreateServer(context.Background(), db.DB, CreateServerRequest{
+		Name:      "docs",
+		Transport: "http",
+		URL:       "https://Website.example.com/mcp",
+	}, "u1", "User 1"); err != nil {
+		t.Fatalf("create matching server: %v", err)
+	}
+	if _, err := CreateServer(context.Background(), db.DB, CreateServerRequest{
+		Name:      "alpha",
+		Transport: "http",
+		URL:       "https://alpha.example.com/mcp",
+	}, "u1", "User 1"); err != nil {
+		t.Fatalf("create non-matching server: %v", err)
+	}
+
+	resp, err := ListServers(context.Background(), db.DB, "u1", ListServersRequest{
+		Keyword: "WEBSITE",
+	})
+	if err != nil {
+		t.Fatalf("list servers: %v", err)
+	}
+	if resp.Total != 1 || len(resp.MCPServers) != 1 || resp.MCPServers[0].Name != "docs" {
+		t.Fatalf("unexpected keyword response: %#v", resp)
+	}
+}
+
 func TestUpdateServerRequiresVerificationBeforeEnabling(t *testing.T) {
 	db := newTestDB(t)
 	created, err := CreateServer(context.Background(), db.DB, CreateServerRequest{

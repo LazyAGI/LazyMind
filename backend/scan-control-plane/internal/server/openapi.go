@@ -489,6 +489,7 @@ func sourceDocumentItemSchema() map[string]any {
 		"parse_queue_state", stringSchema(),
 		"parse_status", stringSchema(),
 		"parse_state", stringSchema(),
+		"effective_parse_status", stringSchema(),
 		"has_update", boolSchema(),
 		"update_type", stringSchema(),
 		"update_desc", stringSchema(),

@@ -306,9 +306,11 @@ func TestSourceObjectUpsertAssignmentsPreserveExistingSizeOnZero(t *testing.T) {
 			t.Fatalf("size_bytes update should use expression, got %#v", assignment.Value)
 		}
 		if !strings.Contains(expr.SQL, "excluded.size_bytes > 0") ||
-			!strings.Contains(expr.SQL, "provider_meta_json->>'kind' = 'wiki_node'") ||
+			!strings.Contains(expr.SQL, "provider_meta_json->>'kind' IN") ||
+			!strings.Contains(expr.SQL, "wiki_node") ||
+			!strings.Contains(expr.SQL, "drive_file") ||
 			!strings.Contains(expr.SQL, "source_object_index.size_bytes") {
-			t.Fatalf("size_bytes update should keep existing wiki size when incoming size is zero: %q", expr.SQL)
+			t.Fatalf("size_bytes update should keep existing feishu export size when incoming size is zero: %q", expr.SQL)
 		}
 		return
 	}

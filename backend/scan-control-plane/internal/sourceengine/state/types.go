@@ -37,5 +37,6 @@ type TaskFailureInput struct {
 	Task      store.ParseTask
 	ErrorCode string
 	Message   string
+	Phase     string
 	FailedAt  time.Time
 }

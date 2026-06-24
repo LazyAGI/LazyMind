@@ -41,24 +41,30 @@ ui:
   tabs:
     - id: analysis
       label: Analysis
+      layout: list
       slots:
         - id: subject_analysis
           label: Subject Analysis
           type: text
           cardinality: single
           artifact_key: subject_analysis
+          summary_max_chars: 300
 
     - id: materials
       label: Materials
+      layout: grid
       slots:
         - id: material_images
           label: Reference Materials
           type: image
           cardinality: list
-          artifact_key: material_image   # artifact_key written by save_artifact in collect_material step
+          artifact_key: material_image
+          ordered: true
+          caption_key: material_image_caption
 
     - id: prompt
       label: Prompt
+      layout: list
       slots:
         - id: prompt_used
           label: Optimized Prompt
@@ -68,15 +74,38 @@ ui:
 
     - id: result
       label: Result
+      layout: horizontal
       slots:
         - id: enhanced_image_output
           label: Enhanced Images
           type: image
           cardinality: list
           artifact_key: enhanced_image_url
+          ordered: true
 
         - id: image_output
           label: Raw Image
           type: image
           cardinality: single
           artifact_key: generated_image_url
+
+i18n:
+  zh-CN:
+    name: AI 图片生成
+    steps:
+      analyze_subject: {label: 主体分析}
+      collect_materials: {label: 素材收集}
+      optimize_prompt: {label: 提示词优化}
+      generate_image: {label: 生成图片}
+      enhance_image: {label: 图片增强}
+    tabs:
+      analysis: {label: 分析}
+      materials: {label: 素材}
+      prompt: {label: 提示词}
+      result: {label: 结果}
+    slots:
+      subject_analysis: {label: 主体分析}
+      material_images: {label: 参考素材}
+      prompt_used: {label: 优化后的提示词}
+      enhanced_image_output: {label: 增强图片}
+      image_output: {label: 原始图片}

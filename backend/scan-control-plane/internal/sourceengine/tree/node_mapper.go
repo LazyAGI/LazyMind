@@ -11,6 +11,14 @@ import (
 const (
 	parseStateQueued       = "QUEUED"
 	parseStatePendingParse = "PENDING_PARSE"
+
+	effectiveParseStatusParsed         = "PARSED"
+	effectiveParseStatusParsing        = "PARSING"
+	effectiveParseStatusFailed         = "FAILED"
+	effectiveParseStatusParseFailed    = "PARSE_FAILED"
+	effectiveParseStatusCanceled       = "CANCELED"
+	effectiveParseStatusDownloading    = "DOWNLOADING"
+	effectiveParseStatusDownloadFailed = "DOWNLOAD_FAILED"
 )
 
 func targetNode(connectorType connector.ConnectorType, raw connector.RawObject, normalized connector.NormalizedSourceObject) TreeNode {
@@ -125,7 +133,7 @@ func liveSourceNode(sourceID string, binding store.Binding, raw connector.RawObj
 	}
 }
 
-func documentItem(item DocumentWithState) SourceDocumentItem {
+func documentItem(item DocumentWithState, binding store.Binding) SourceDocumentItem {
 	displayName := documentSourceDisplayName(item)
 	name := documentTypedName(item)
 	fileType := documentFileType(item)
@@ -161,11 +169,18 @@ func documentItem(item DocumentWithState) SourceDocumentItem {
 		out.ParseState = documentEffectiveParseState(parseState, item.Document.ParseStatus)
 		out.CoreDocumentID = item.Document.CoreDocumentID
 	}
+	out.EffectiveParseStatus = documentEffectiveParseStatus(out, binding)
 	return out
 }
 
 func documentEffectiveParseState(queueState, documentStatus string) string {
-	if activeParseState(queueState) || strings.ToUpper(strings.TrimSpace(queueState)) == store.ParseTaskStatusFailed {
+	if activeParseState(queueState) {
+		return queueState
+	}
+	if documentCanceledState(documentStatus) {
+		return effectiveParseStatusCanceled
+	}
+	if strings.ToUpper(strings.TrimSpace(queueState)) == store.ParseTaskStatusFailed {
 		return queueState
 	}
 	if strings.TrimSpace(documentStatus) != "" {
@@ -181,6 +196,149 @@ func activeParseState(value string) bool {
 	default:
 		return false
 	}
+}
+
+func documentEffectiveParseStatus(item SourceDocumentItem, binding store.Binding) string {
+	parseState := strings.ToUpper(strings.TrimSpace(firstNonEmptyString(item.ParseState, item.ParseQueueState, item.ParseStatus)))
+	if parseState == "" {
+		return ""
+	}
+	if documentCanceledState(parseState) || documentCanceledState(item.ParseStatus) || documentCanceledError(item.LastError) {
+		return effectiveParseStatusCanceled
+	}
+	supportsDownloadStatus := supportsDocumentDownloadStatus(binding)
+	if documentFailureState(parseState) {
+		if supportsDownloadStatus && documentDownloadFailure(parseState, item.LastError) {
+			return effectiveParseStatusDownloadFailed
+		}
+		if documentParseFailure(parseState, item.LastError) {
+			return effectiveParseStatusParseFailed
+		}
+		return effectiveParseStatusFailed
+	}
+	if supportsDownloadStatus && documentDownloadInProgressState(parseState) {
+		return effectiveParseStatusDownloading
+	}
+	if documentParsingState(parseState) {
+		return effectiveParseStatusParsing
+	}
+	if parseState == store.ParseTaskStatusSucceeded {
+		return effectiveParseStatusParsed
+	}
+	return parseState
+}
+
+func supportsDocumentDownloadStatus(binding store.Binding) bool {
+	connectorType := strings.ToLower(strings.TrimSpace(binding.ConnectorType))
+	return connectorType != "" && connectorType != "local" && connectorType != "local_fs"
+}
+
+func documentDownloadInProgressState(parseState string) bool {
+	switch parseState {
+	case parseStateQueued, parseStatePendingParse, store.ParseTaskStatusPending, store.ParseTaskStatusRunning:
+		return true
+	default:
+		return false
+	}
+}
+
+func documentParsingState(parseState string) bool {
+	return documentDownloadInProgressState(parseState) || parseState == store.ParseTaskStatusSubmitted
+}
+
+func documentFailureState(parseState string) bool {
+	return strings.Contains(parseState, "FAIL") || strings.Contains(parseState, "ERROR")
+}
+
+func documentCanceledState(value string) bool {
+	return statusTextHasAny(value, "canceled", "cancelled")
+}
+
+func documentCanceledError(lastError map[string]any) bool {
+	for _, key := range []string{"code", "reason", "status", "task_state"} {
+		if documentCanceledState(documentLastErrorField(lastError, key)) {
+			return true
+		}
+	}
+	return false
+}
+
+func documentDownloadFailure(parseState string, lastError map[string]any) bool {
+	phase := documentLastErrorField(lastError, "phase")
+	if statusTextHasAny(phase, "download", "export", "fetch", "source") {
+		return true
+	}
+	text := documentErrorStatusText(parseState, lastError)
+	return statusTextHasAny(
+		text,
+		"download_failed",
+		"download failed",
+		"export_failed",
+		"export failed",
+		"fetch_failed",
+		"fetch failed",
+		"transient_source_error",
+		"unsupported_export",
+		"auth_connection_invalid",
+		"permission_denied",
+		"download",
+		"export",
+	)
+}
+
+func documentParseFailure(parseState string, lastError map[string]any) bool {
+	phase := documentLastErrorField(lastError, "phase")
+	if statusTextHasAny(phase, "parse", "index", "ingest", "core", "knowledge") {
+		return true
+	}
+	text := documentErrorStatusText(parseState, lastError)
+	return statusTextHasAny(
+		text,
+		"parse_failed",
+		"parse failed",
+		"core_task_failed",
+		"core_submit_failed",
+		"core_task_not_found",
+		"index_failed",
+		"index failed",
+		"ingest_failed",
+		"ingest failed",
+	)
+}
+
+func documentErrorStatusText(parseState string, lastError map[string]any) string {
+	parts := []string{parseState}
+	for _, key := range []string{"phase", "stage", "code", "reason", "message", "error"} {
+		if value := documentLastErrorField(lastError, key); value != "" {
+			parts = append(parts, value)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func documentLastErrorField(lastError map[string]any, key string) string {
+	if lastError == nil {
+		return ""
+	}
+	value, ok := lastError[key]
+	if !ok {
+		return ""
+	}
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return text
+}
+
+func statusTextHasAny(value string, candidates ...string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	for _, candidate := range candidates {
+		if strings.Contains(normalized, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func documentPendingParseState(item DocumentWithState, updateType string) string {

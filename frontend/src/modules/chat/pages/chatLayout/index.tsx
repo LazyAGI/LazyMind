@@ -20,12 +20,8 @@ import {
   CHAT_STREAM_URL,
   ChatServiceApi,
 } from "@/modules/chat/utils/request";
+import { draftStore } from "@/modules/chat/store/pluginPanel";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
-import {
-  useModelSelectionStore,
-  MODEL_API_LABELS,
-  parseModelSelectionFromModels,
-} from "@/modules/chat/store/modelSelection";
 import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import {
   CHAT_RESUME_CONVERSATION_KEY,
@@ -38,6 +34,7 @@ import TaskCenter from "@/modules/chat/components/TaskCenter";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
 import { usePluginStore } from "@/modules/chat/store/pluginPanel";
+import { useChatInputStore } from "@/modules/chat/store/chatInput";
 
 // Stable empty reference to avoid returning a fresh array from the zustand
 // selector on every render, which (with useSyncExternalStore) would trigger an
@@ -108,7 +105,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   });
 
   const { pendingMessage, clearPendingMessage } = useChatMessageStore();
-  const { getModelSelection, setModelSelection } = useModelSelectionStore();
 
   const chatRef = useRef<ChatImperativeProps>(null);
 
@@ -248,11 +244,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         setKnowledgeRefreshKey((key) => key + 1);
         setConversationId(resolvedId);
 
-        const modelSelection = parseModelSelectionFromModels(
-          (conversation as any)?.models,
-        );
-        setModelSelection(resolvedId, modelSelection);
-
         const list = buildChatMessageListFromHistory(history, {
           isGenerating,
         });
@@ -270,24 +261,25 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       });
   }, []);
 
-  function onOpenSSE(
+  async function onOpenSSE(
     input: Query[],
     action: ChatConversationsRequestActionEnum,
     callbacks: Record<string, (e: CustomEvent) => void>,
   ) {
-    const modelSelection = getModelSelection(sessionId);
+    // Flush any pending slot drafts before sending so the AI sees the latest content.
+    // Draft keys use the plugin session_id (not the conversation_id), so pass the
+    // plugin session_id when one is active; fall back to conversationId otherwise.
+    const activePluginSession = usePluginStore.getState().sessionByConversation[sessionId];
+    const draftSessionId = activePluginSession?.session_id ?? sessionId;
+    await draftStore.flushAllDrafts(draftSessionId);
 
     const hasUploadedFiles = input?.some(
       (q: Query) => q.input_type === "image" || q.input_type === "file",
     );
-    const useKnowledgeBase =
-      modelSelection === "value_engineering" || modelSelection === "both";
     const datasetList =
-      hasUploadedFiles || !useKnowledgeBase
+      hasUploadedFiles || !chatConfig?.knowledgeBaseId?.length
         ? []
-        : chatConfig?.knowledgeBaseId?.length
-          ? chatConfig.knowledgeBaseId.map((k) => ({ id: k }))
-          : [];
+        : chatConfig.knowledgeBaseId.map((k) => ({ id: k }));
 
     // Attach active plugin session context so Go/Python can inject advance_step
     // instead of cold-start trigger tools on follow-up messages.
@@ -300,6 +292,27 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             current_step: activeSession.current_step_id,
           }
         : undefined;
+
+    // Attach focused_tab and focused_sort_order so the AI knows what the user is looking at.
+    const pluginUIState =
+      activeSession && (activeSession.focusedTab || activeSession.focusedSortOrder !== undefined)
+        ? {
+            focused_tab: activeSession.focusedTab,
+            focused_sort_order: activeSession.focusedSortOrder,
+          }
+        : undefined;
+
+    // Collect pending artifact references from the chat input store.
+    const { getArtifactRefs, clearArtifactRefs } = useChatInputStore.getState();
+    const artifactRefs = getArtifactRefs(sessionId);
+    // Clear after reading so they are not repeated in the next message.
+    if (artifactRefs.length > 0) {
+      clearArtifactRefs(sessionId);
+    }
+    // Clear after reading so they are not repeated in the next message.
+    if (artifactRefs.length > 0) {
+      clearArtifactRefs(sessionId);
+    }
 
     return new SSE(CHAT_STREAM_URL, {
       method: Method.POST,
@@ -320,12 +333,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             tags: chatConfig?.tags,
           },
         },
-        models:
-          modelSelection === "both"
-            ? [MODEL_API_LABELS.lazyMind, MODEL_API_LABELS.deepSeek]
-            : modelSelection === "value_engineering"
-              ? [MODEL_API_LABELS.lazyMind]
-              : [MODEL_API_LABELS.deepSeek],
+        models: ["LazyMind 大模型"],
         // enable_thinking: think ? true : false,
         stream: true,
         input,
@@ -333,6 +341,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         create_time: new Date().toISOString(),
         environment_context: buildEnvironmentContext(),
         ...(pluginContext ? { plugin_context: pluginContext } : {}),
+        ...(pluginUIState ? { plugin_ui_state: pluginUIState } : {}),
+        ...(artifactRefs.length > 0 ? { artifact_refs: artifactRefs } : {}),
       }),
       callbacks,
     });
@@ -396,13 +406,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         setChatConfigFn(tempData);
         setKnowledgeRefreshKey((key) => key + 1);
 
-        const modelSelection = parseModelSelectionFromModels(
-          (conversation as any)?.models,
-        );
-        if (resolvedId) {
-          setModelSelection(resolvedId, modelSelection);
-        }
-
         setConversationId(resolvedId);
 
         const history = historyRes.data.history;
@@ -414,7 +417,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       .finally(() => {
         setIsRestoringConversation(false);
       });
-  }, [setConversationId, setChatConfigFn, setModelSelection]);
+  }, [setConversationId, setChatConfigFn]);
 
   useEffect(() => {
     const handleConversationSelect = (event: Event) => {
@@ -476,6 +479,10 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     e.preventDefault();
     e.stopPropagation();
     if (!canChat) {
+      return;
+    }
+    // Ignore internal DOM drag-and-drop (e.g. plugin panel card sorting).
+    if (!Array.from(e.dataTransfer.types).includes('Files')) {
       return;
     }
     dragCounterRef.current++;

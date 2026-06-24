@@ -18,6 +18,7 @@ const (
 	ResultStatusRunning   = "RUNNING"
 	ResultStatusSucceeded = "SUCCEEDED"
 	ResultStatusFailed    = "FAILED"
+	ResultStatusCanceled  = "CANCELED"
 	ResultStatusNotFound  = "NOT_FOUND"
 )
 
