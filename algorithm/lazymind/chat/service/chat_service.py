@@ -369,12 +369,14 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     # Build user attachment context from files_map and inject before plugin context.
     user_attachment_context = _build_user_attachment_context(files_map)
 
-    # Prepend artifact context to the current user-turn so the LLM sees the
-    # up-to-date plugin session state without polluting conversation history.
+    # Prepend artifact context and user attachment context before the user query.
+    parts = []
     if plugin_artifact_context:
-        agent_query = plugin_artifact_context + '\n\n---\n\n## User Request\n' + agent_query
+        parts.append(plugin_artifact_context)
     if user_attachment_context:
-        agent_query = user_attachment_context + '\n\n---\n\n' + agent_query
+        parts.append(user_attachment_context)
+    if parts:
+        agent_query = '\n\n---\n\n'.join(parts) + '\n\n---\n\n## User Request\n' + agent_query
 
     lazyllm.globals._init_sid(sid=session_id)
     lazyllm.locals._init_sid(sid=session_id)

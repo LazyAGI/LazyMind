@@ -1062,3 +1062,99 @@ def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
         result['url'] = matched  # fallback to local path
         result['message'] = 'Signed URL unavailable; use the local path instead.'
     return tool_success('find_user_attachment', result)
+
+
+@handle_tool_errors
+def find_artifact(artifact_key: str, sort_order: Optional[int] = None) -> Dict[str, Any]:
+    """Return the accessible URL or local path of a plugin artifact.
+
+    Analogous to find_user_attachment but for plugin step outputs.
+    Reads session_id and plugin_id from agentic_config (same as save_artifact / get_artifact).
+
+    Args:
+        artifact_key (str): The artifact key to look up (e.g. 'generated_image_url').
+        sort_order (int): Optional 1-based display position for list-slot artifacts.
+            Omit for single-slot artifacts.
+
+    Returns:
+        A dict with 'url' (signed HTTP URL, preferred) and 'path' (local absolute path,
+        fallback). Pass 'url' to image tools when available.
+    """
+    import lazyllm
+    try:
+        cfg: Dict[str, Any] = lazyllm.globals.get('agentic_config') or {}
+    except Exception:
+        cfg = {}
+
+    session_id: str = cfg.get('plugin_session_id', '')
+    if not session_id:
+        return tool_success('find_artifact', {
+            'status': 'error',
+            'message': 'No active plugin session found in agentic_config.',
+        })
+
+    ctx = require_context()
+
+    if sort_order is not None:
+        result_dict = _get_plugin_artifact_by_sort_order(ctx, artifact_key, session_id, sort_order)
+    else:
+        result_dict = _get_plugin_artifact_all(ctx, artifact_key, session_id)
+
+    # Unwrap inner result to extract the path.
+    inner = result_dict.get('result', result_dict)
+    if inner.get('status') != 'ok':
+        return result_dict
+
+    artifacts = inner.get('artifacts') or []
+    if not artifacts:
+        return tool_success('find_artifact', {
+            'status': 'error',
+            'message': f"No artifact found for key '{artifact_key}'.",
+        })
+
+    # Use the first (or only) artifact to resolve the path.
+    artifact = artifacts[0]
+    value = artifact.get('value') or {}
+    if isinstance(value, str):
+        try:
+            import json as _json
+            value = _json.loads(value)
+        except Exception:
+            value = {}
+
+    path: Optional[str] = value.get('path') or value.get('url') or value.get('text')
+    if not path or not isinstance(path, str):
+        return tool_success('find_artifact', {
+            'status': 'error',
+            'message': f"Artifact '{artifact_key}' has no resolvable path.",
+        })
+
+    # Try to get a signed URL from Go /static-files:sign.
+    signed_url: Optional[str] = None
+    try:
+        import httpx
+        from lazymind.config import config as _cfg
+        core_url = str(_cfg['core_api_url']).rstrip('/')
+        resp = httpx.post(
+            f'{core_url}/static-files:sign',
+            json={'path': path},
+            timeout=3.0,
+        )
+        if resp.status_code == 200:
+            signed_url = resp.json().get('data', {}).get('url') or resp.json().get('url')
+    except Exception:
+        pass
+
+    out: Dict[str, Any] = {
+        'status': 'ok',
+        'artifact_key': artifact_key,
+        'path': path,
+    }
+    if sort_order is not None:
+        out['sort_order'] = sort_order
+    if signed_url:
+        out['url'] = signed_url
+    else:
+        out['url'] = path
+        out['message'] = 'Signed URL unavailable; use the local path instead.'
+    return tool_success('find_artifact', out)

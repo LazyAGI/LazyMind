@@ -1368,6 +1368,21 @@ func handlePluginStepCreated(
 			}
 			params.PartialIndices = parsed
 		}
+		if hfpt, ok := ev.Params["history_files_per_turn"].(map[string]any); ok {
+			parsed := make(map[string][]string, len(hfpt))
+			for k, v := range hfpt {
+				if arr, ok2 := v.([]any); ok2 {
+					strs := make([]string, 0, len(arr))
+					for _, elem := range arr {
+						if s, ok3 := elem.(string); ok3 {
+							strs = append(strs, s)
+						}
+					}
+					parsed[k] = strs
+				}
+			}
+			params.HistoryFilesPerTurn = parsed
+		}
 	}
 	if params.PluginID == "" || params.StepID == "" {
 		fmt.Println("[Core] [PLUGIN_STEP_INVALID_PARAMS] plugin_id or step_id missing")

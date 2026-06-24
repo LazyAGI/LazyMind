@@ -82,7 +82,7 @@ def _resolve_plugin_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
         _FRAMEWORK_TOOLS = [
             'save_artifact', 'get_artifact', 'list_artifacts',
             'list_knowledge_bases', 'read_user_attachment', 'find_user_attachment',
-            'patch_artifact', 'discard_draft',
+            'find_artifact', 'patch_artifact', 'discard_draft',
         ]
         seen: set = set()
         merged: List[str] = []
@@ -112,7 +112,7 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
     """
     _BASE_TOOL_NAMES = {'save_artifact', 'get_artifact', 'list_artifacts',
                         'list_knowledge_bases', 'read_user_attachment', 'find_user_attachment',
-                        'patch_artifact', 'discard_draft'}
+                        'find_artifact', 'patch_artifact', 'discard_draft'}
     if explicit:
         name_list = [str(n).strip() for n in explicit if str(n).strip() and str(n).strip() not in _BASE_TOOL_NAMES]
         # Build lookup from DEFAULT_TOOLS
@@ -157,6 +157,7 @@ def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
         subagent_tools.list_knowledge_bases,
         subagent_tools.read_user_attachment,
         subagent_tools.find_user_attachment,
+        subagent_tools.find_artifact,
         subagent_tools.patch_artifact,
         subagent_tools.discard_draft,
     ]
@@ -228,6 +229,59 @@ def _build_partial_sort_order_hints(session_id: str, partial_indices: 'Dict[str,
         return ''
 
 
+def _build_attachment_context_for_subagent(history_files_per_turn: 'Dict[str, List[str]]') -> str:
+    """Build the '## User Uploaded Files' context block for SubAgent prompts.
+
+    Mirrors _build_user_attachment_context in chat_service without cross-layer import.
+    Returns an empty string when history_files_per_turn is empty.
+    """
+    if not history_files_per_turn:
+        return ''
+    turns: Dict[int, List[str]] = {}
+    for key, paths in history_files_per_turn.items():
+        if not paths:
+            continue
+        try:
+            turns[int(key)] = paths
+        except ValueError:
+            continue
+    if not turns:
+        return ''
+
+    def _describe_file(path: str) -> str:
+        name = os.path.basename(path)
+        try:
+            size_bytes = os.path.getsize(path)
+            if size_bytes < 1024:
+                return f'{name} ({size_bytes} B)'
+            if size_bytes < 1024 * 1024:
+                return f'{name} ({size_bytes / 1024:.1f} KB)'
+            return f'{name} ({size_bytes / (1024 * 1024):.1f} MB)'
+        except OSError:
+            return name
+
+    lines: List[str] = ['## User Uploaded Files [queried at request time]']
+    for seq in sorted(turns.keys()):
+        seen: Dict[str, int] = {}
+        names: List[str] = []
+        for path in turns[seq]:
+            base = os.path.basename(path)
+            if base not in seen:
+                seen[base] = 0
+                names.append(_describe_file(path))
+            else:
+                seen[base] += 1
+                name_no_ext, ext = os.path.splitext(base)
+                names.append(f'{name_no_ext}-{seen[base]}{ext}')
+        lines.append(f'- Turn {seq}: {", ".join(names)}')
+    lines.append('')
+    lines.append('Turn numbers are 1-based integers matching the "Turn N" labels above.')
+    lines.append('Omit the turn parameter to search the current turn first, then historical turns.')
+    lines.append("To read a file's content, call read_user_attachment(filename, turn=N).")
+    lines.append("To get a file's accessible URL/path, call find_user_attachment(filename, turn=N).")
+    return '\n'.join(lines)
+
+
 def _objective_prompt(ctx: SubAgentContext, db: Optional['SubAgentDB'] = None) -> str:
     # Detect language from the user_input param (primary) or the full objective text.
     user_input = str(ctx.params.get('user_input') or '')
@@ -257,6 +311,11 @@ def _objective_prompt(ctx: SubAgentContext, db: Optional['SubAgentDB'] = None) -
             lines.extend(artifact_section)
         elif ctx.input_artifact_keys:
             lines.append(f'Input artifact keys you may read: {", ".join(ctx.input_artifact_keys)}')
+    # Inject user attachment context so the SubAgent knows which files were uploaded.
+    history_files_per_turn: Dict[str, List[str]] = ctx.params.get('history_files_per_turn') or {}
+    attachment_section = _build_attachment_context_for_subagent(history_files_per_turn)
+    if attachment_section:
+        lines.append(attachment_section)
     # Translate partial_indices (internal 0-based list_index) into sort_order guidance.
     # This tells the AI exactly which display position(s) to overwrite instead of append.
     partial_indices: Dict[str, List[int]] = ctx.params.get('partial_indices') or {}
@@ -451,11 +510,15 @@ async def run_subagent_stream(
         # For plugin_step tasks: inject plugin context into agentic_config so that
         # save_artifact can resolve sort_order → list_index via the Go core API.
         if effective_agent_type == 'plugin_step':
+            history_files_per_turn = params.get('history_files_per_turn') or {}
+            all_files = [p for paths in history_files_per_turn.values() for p in paths]
             lazyllm.globals['agentic_config'] = {
                 'plugin_id': params.get('plugin_id', ''),
                 'plugin_session_id': params.get('session_id', ''),
                 'plugin_step': params.get('step_id', ''),
                 'query': ctx.objective,
+                'files': all_files,
+                'history_files_per_turn': history_files_per_turn,
             }
 
         yield _sse({'type': 'task_start', 'task_id': task_id})

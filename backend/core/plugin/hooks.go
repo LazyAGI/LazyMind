@@ -68,10 +68,11 @@ func loadPluginChatContextFromDB(ctx context.Context, db *gorm.DB, taskID string
 	}
 
 	return &PluginChatContext{
-		SessionID: params.SessionID,
-		PluginID:  params.PluginID,
-		StepID:    params.StepID,
-		ConvID:    task.ConversationID,
-		UserID:    task.CreateUserID,
+		SessionID:           params.SessionID,
+		PluginID:            params.PluginID,
+		StepID:              params.StepID,
+		ConvID:              task.ConversationID,
+		UserID:              task.CreateUserID,
+		HistoryFilesPerTurn: params.HistoryFilesPerTurn,
 	}
 }

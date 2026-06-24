@@ -250,6 +250,101 @@ def _resolve_task(task_ref: str, tasks: List[Dict[str, Any]]) -> Optional[Dict[s
 
 
 @handle_tool_errors
+def save_plugin_artifact(
+    artifact_key: str,
+    value: Any,
+    content_type: str = 'text',
+    sort_order: Optional[int] = None,
+    caption: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Save a plugin artifact directly from ChatAgent without launching a SubAgent.
+
+    Use this when ChatAgent can produce the artifact value itself (e.g. copying a user
+    file into a slot, or writing a short text value) without running a full SubAgent.
+
+    Reads session_id and step_id from agentic_config (same as advance_step).
+    Calls Go core POST /plugin-sessions/{session_id}/artifacts to write a slot revision.
+
+    Args:
+        artifact_key (str): The artifact key to write (must have a slot binding in the plugin).
+        value (Any): The artifact value. For text: a string. For json: a dict/list.
+            For image/file: a local absolute path. For file_list: a list of absolute paths.
+        content_type (str): One of text, json, image, file, file_list. Default text.
+        sort_order (int): Optional 1-based display position for list-slot artifacts.
+            Omit (or pass None) to append; pass N to overwrite position N.
+        caption (str): Optional human-readable description for image/file artifacts.
+
+    Returns:
+        A confirmation that the artifact was saved.
+    """
+    cfg = _agentic_config()
+    session_id: str = cfg.get('plugin_session_id', '')
+    if not session_id:
+        return tool_success('save_plugin_artifact', {
+            'status': 'error',
+            'message': 'No active plugin session found in agentic_config.',
+        })
+
+    from lazymind.config import config as _cfg
+    import httpx
+
+    core_url = str(_cfg['core_api_url']).rstrip('/')
+
+    # Build value payload.
+    _CONTENT_TYPES = {'text', 'json', 'image', 'file', 'file_list'}
+    ct = content_type if content_type in _CONTENT_TYPES else 'text'
+    if ct == 'text':
+        value_payload: Any = {'text': str(value)}
+    elif ct == 'json':
+        value_payload = {'data': value}
+    elif ct in ('image', 'file'):
+        value_payload = {'path': str(value)}
+    elif ct == 'file_list':
+        value_payload = {'paths': list(value) if hasattr(value, '__iter__') else [str(value)]}
+    else:
+        value_payload = {'text': str(value)}
+    if caption is not None:
+        value_payload['caption'] = str(caption)
+
+    body: Dict[str, Any] = {
+        'artifact_key': artifact_key,
+        'value': value_payload,
+        'content_type': ct,
+    }
+    if sort_order is not None:
+        body['sort_order'] = sort_order
+    if caption is not None:
+        body['caption'] = caption
+    step_id: str = cfg.get('plugin_step', '')
+    if step_id:
+        body['step_id'] = step_id
+
+    try:
+        resp = httpx.post(
+            f'{core_url}/plugin-sessions/{session_id}/artifacts',
+            json=body,
+            timeout=10.0,
+        )
+        if resp.status_code != 200:
+            return tool_success('save_plugin_artifact', {
+                'status': 'error',
+                'message': f'Go core returned {resp.status_code}: {resp.text[:200]}',
+            })
+        data = resp.json()
+        msg = f"Artifact '{artifact_key}' saved to plugin session {session_id}."
+        return tool_success('save_plugin_artifact', {
+            'status': 'ok',
+            'message': msg,
+            'revision': data.get('data', {}).get('revision'),
+        })
+    except Exception as exc:
+        return tool_success('save_plugin_artifact', {
+            'status': 'error',
+            'message': f'Request failed: {exc}',
+        })
+
+
+@handle_tool_errors
 def list_subagents(status: Optional[str] = None) -> Dict[str, Any]:
     """List SubAgent tasks in the current conversation, optionally filtered by status.
 

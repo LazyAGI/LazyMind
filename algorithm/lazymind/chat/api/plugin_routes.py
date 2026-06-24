@@ -8,7 +8,7 @@ Routes:
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel
@@ -24,6 +24,7 @@ class DriverRequest(BaseModel):
     step_id: str
     step_result: str
     session_id: Optional[str] = None
+    history_files_per_turn: Optional[Dict[str, List[str]]] = None
 
 
 class DriverResponse(BaseModel):
@@ -43,6 +44,7 @@ async def plugin_driver(req: DriverRequest) -> DriverResponse:
         step_id=req.step_id,
         step_result=req.step_result,
         session_id=req.session_id,
+        user_files=[p for paths in (req.history_files_per_turn or {}).values() for p in paths] or None,
     )
     return DriverResponse(
         verdict=result.get('verdict', 'PASS'),

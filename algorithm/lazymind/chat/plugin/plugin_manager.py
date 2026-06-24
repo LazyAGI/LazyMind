@@ -37,6 +37,7 @@ _FRAMEWORK_TOOLS: List[str] = [
     'list_knowledge_bases',
     'read_user_attachment',
     'find_user_attachment',
+    'find_artifact',
 ]
 
 
@@ -223,6 +224,10 @@ def _trigger_plugin_step(
         params['retry_hint'] = runtime_instruction
     if partial_indices:
         params['partial_indices'] = partial_indices
+    # Propagate full per-turn attachment index so SubAgent can access user files.
+    history_files_per_turn: dict = cfg.get('history_files_per_turn') or {}
+    if history_files_per_turn:
+        params['history_files_per_turn'] = history_files_per_turn
 
     # Inject focused_tab (UI context hint) into the objective.
     # focused_sort_order is NOT injected — it is the UI scroll position,
@@ -522,6 +527,12 @@ def resolve_plugin_injection(
                 rewind_steps=rewind_steps,
                 step_labels=step_labels,
             )]
+            # find_artifact lets ChatAgent look up plugin step outputs by key.
+            from lazymind.chat.engine.subagent.tools import find_artifact
+            plugin_tools.append(find_artifact)
+            # save_plugin_artifact lets ChatAgent write an artifact directly.
+            from lazymind.chat.engine.tools.subagent_chat_tools import save_plugin_artifact
+            plugin_tools.append(save_plugin_artifact)
             plugin_stop_tools = ['advance_step']
             plugin_system_prompt = plugin_loader.get_scenario(p_plugin_id)
             plugin_artifact_context = _build_session_artifact_section(p_session_id)
