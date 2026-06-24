@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -23,6 +24,8 @@ import (
 )
 
 const modelProviderCheckTimeout = 5 * time.Minute
+const modelProviderProbeTimeout = 30 * time.Second
+const maxModelProviderProbeModels = 10
 const cloudServiceCheckTimeout = 30 * time.Second
 
 const (
@@ -80,6 +83,7 @@ type modelCheckResponse struct {
 type CheckModelProviderData struct {
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`
+	Model   string `json:"model,omitempty"`
 }
 
 // doCheck calls the appropriate algorithm endpoint based on provider category and returns the result.
@@ -94,6 +98,9 @@ func doCheck(ctx context.Context, category, providerName, baseURL, apiKey string
 		checkEndpoint = "/api/model/check"
 	}
 	upstream := common.JoinURL(common.ChatServiceEndpoint(), checkEndpoint)
+	if strings.TrimSpace(category) == "model" {
+		return doModelProviderCheck(ctx, upstream, providerName, baseURL, apiKey)
+	}
 	body := algoModelCheckBody{
 		Source: providerName,
 		URL:    baseURL,
@@ -104,6 +111,191 @@ func doCheck(ctx context.Context, category, providerName, baseURL, apiKey string
 		return &result, err
 	}
 	return &result, nil
+}
+
+func doModelProviderCheck(ctx context.Context, upstream, providerName, baseURL, apiKey string) (*modelCheckResponse, error) {
+	candidates, err := defaultLLMProbeModels(ctx, providerName, maxModelProviderProbeModels)
+	if err != nil {
+		return &modelCheckResponse{Success: false, Message: err.Error(), Source: providerName, URL: baseURL}, nil
+	}
+	if len(candidates) == 0 {
+		return &modelCheckResponse{
+			Success: false,
+			Message: fmt.Sprintf("no default llm models found for provider %s", providerName),
+			Source:  providerName,
+			URL:     baseURL,
+		}, nil
+	}
+
+	failures := make([]string, 0, len(candidates))
+	for _, model := range candidates {
+		result, err := probeModelProvider(ctx, upstream, providerName, baseURL, apiKey, model)
+		if result == nil {
+			result = &modelCheckResponse{Source: providerName, URL: baseURL, Model: model}
+		}
+		if result.Model == "" {
+			result.Model = model
+		}
+		if err == nil && result.Success {
+			log.Logger.Info().
+				Str("provider_name", providerName).
+				Str("model", model).
+				Msg("model provider check succeeded")
+			return result, nil
+		}
+
+		reason := modelProbeFailureReason(model, result, err, apiKey)
+		failures = append(failures, reason)
+		if isTerminalModelProbeFailure(result, err) {
+			return &modelCheckResponse{
+				Success: false,
+				Message: fmt.Sprintf("model provider check failed after %d/%d model probes: %s", len(failures), len(candidates), reason),
+				Model:   model,
+				Source:  providerName,
+				URL:     baseURL,
+			}, nil
+		}
+	}
+
+	return &modelCheckResponse{
+		Success: false,
+		Message: aggregateModelProbeFailures(len(candidates), failures),
+		Source:  providerName,
+		URL:     baseURL,
+	}, nil
+}
+
+func defaultLLMProbeModels(ctx context.Context, providerName string, limit int) ([]string, error) {
+	db := store.DB()
+	if db == nil {
+		return nil, errors.New("store not initialized")
+	}
+
+	providerName = strings.TrimSpace(providerName)
+	var provider orm.DefaultModelProvider
+	if err := db.WithContext(ctx).
+		Where("name = ? AND category = ? AND deleted_at IS NULL", providerName, "model").
+		Take(&provider).Error; err != nil {
+		return nil, fmt.Errorf("default model provider not found: %s", providerName)
+	}
+
+	var rows []orm.DefaultModel
+	query := db.WithContext(ctx).
+		Where("default_model_provider_id = ? AND model_type = ? AND deleted_at IS NULL", provider.ID, "llm").
+		Order("id ASC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if err := query.Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("query default llm models: %w", err)
+	}
+
+	out := make([]string, 0, len(rows))
+	seen := map[string]struct{}{}
+	for _, row := range rows {
+		name := strings.TrimSpace(row.Name)
+		key := strings.ToLower(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, name)
+	}
+	return out, nil
+}
+
+func probeModelProvider(ctx context.Context, upstream, providerName, baseURL, apiKey, model string) (*modelCheckResponse, error) {
+	body := algoModelCheckBody{
+		Model:  model,
+		Source: providerName,
+		URL:    baseURL,
+		APIKey: apiKey,
+	}
+	var result modelCheckResponse
+	if err := common.ApiPost(ctx, upstream, body, nil, &result, modelProviderProbeTimeout); err != nil {
+		return &result, err
+	}
+	return &result, nil
+}
+
+func modelProbeFailureReason(model string, result *modelCheckResponse, err error, apiKey string) string {
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	if result != nil && strings.TrimSpace(result.Message) != "" {
+		message = result.Message
+	}
+	message = safeCheckMessage(message, apiKey)
+	if message == "" {
+		message = "model check failed"
+	}
+	return fmt.Sprintf("%s: %s", model, message)
+}
+
+func aggregateModelProbeFailures(total int, failures []string) string {
+	if len(failures) == 0 {
+		return fmt.Sprintf("model provider check failed: tried %d llm models", total)
+	}
+	start := 0
+	if len(failures) > 3 {
+		start = len(failures) - 3
+	}
+	return fmt.Sprintf(
+		"model provider check failed: tried %d llm models; recent failures: %s",
+		total,
+		strings.Join(failures[start:], "; "),
+	)
+}
+
+func isTerminalModelProbeFailure(result *modelCheckResponse, err error) bool {
+	if err != nil {
+		var httpErr *common.HTTPError
+		if errors.As(err, &httpErr) {
+			if httpErr.StatusCode == http.StatusUnauthorized || httpErr.StatusCode == http.StatusForbidden {
+				return true
+			}
+			return looksLikeCredentialOrEndpointFailure(httpErr.Message)
+		}
+		return looksLikeCredentialOrEndpointFailure(err.Error())
+	}
+	if result == nil {
+		return false
+	}
+	return looksLikeCredentialOrEndpointFailure(result.Message)
+}
+
+func looksLikeCredentialOrEndpointFailure(message string) bool {
+	text := strings.ToLower(strings.TrimSpace(message))
+	if text == "" {
+		return false
+	}
+	signals := []string{
+		"unauthorized",
+		"forbidden",
+		"invalid token",
+		"invalid api key",
+		"invalid apikey",
+		"api key invalid",
+		"incorrect api key",
+		"token invalid",
+		"authentication",
+		"authorization",
+		"invalid base url",
+		"invalid url",
+		"unsupported protocol scheme",
+		"no such host",
+		"connection refused",
+	}
+	for _, signal := range signals {
+		if strings.Contains(text, signal) {
+			return true
+		}
+	}
+	return false
 }
 
 func doProviderGroupCheck(ctx context.Context, category, providerName, baseURL, apiKey string) (*modelCheckResponse, error) {
@@ -647,7 +839,7 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 			cacheKey := verifyCheckCacheKey(groupID, urlStr, apiKey)
 			recentVerifyCache.Store(cacheKey, time.Now().Add(5*time.Minute))
 		}
-		common.ReplyOK(w, CheckModelProviderData{Success: algo.Success, Message: algo.Message})
+		common.ReplyOK(w, CheckModelProviderData{Success: algo.Success, Message: algo.Message, Model: algo.Model})
 		return
 	}
 
@@ -669,5 +861,5 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	common.ReplyOK(w, CheckModelProviderData{Success: algo.Success, Message: algo.Message})
+	common.ReplyOK(w, CheckModelProviderData{Success: algo.Success, Message: algo.Message, Model: algo.Model})
 }
