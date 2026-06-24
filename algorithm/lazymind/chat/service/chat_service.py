@@ -247,9 +247,14 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
             display_files.append(path)
 
     from lazymind.chat.plugin.plugin_manager import resolve_plugin_injection
-    plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch = \
+    plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context = \
         resolve_plugin_injection(plugin_context, conversation_id=(conversation_id or '').strip())
     agentic_config.update(agentic_config_patch)
+
+    # Prepend artifact context to the current user-turn so the LLM sees the
+    # up-to-date plugin session state without polluting conversation history.
+    if plugin_artifact_context:
+        agent_query = plugin_artifact_context + '\n\n---\n\n## User Request\n' + agent_query
 
     lazyllm.globals._init_sid(sid=session_id)
     lazyllm.locals._init_sid(sid=session_id)

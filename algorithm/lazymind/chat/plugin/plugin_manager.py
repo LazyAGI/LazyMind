@@ -424,7 +424,11 @@ def build_advance_step_tool(
 
 
 def _build_session_artifact_section(session_id: str) -> str:
-    """Build a system-prompt section summarising the current plugin session's artifacts."""
+    """Build the artifact-context block prepended to the current user-turn.
+
+    Returned text is injected before the user's query (not into the system prompt)
+    so the LLM sees up-to-date session state without the snapshot polluting history.
+    """
     if not session_id:
         return ''
     from lazymind.chat.engine.subagent.db import TaskQueryDB
@@ -459,22 +463,24 @@ def resolve_plugin_injection(
     branching so chat_service stays free of plugin-internal details.
 
     Returns:
-        (plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch)
+        (plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context)
 
-        plugin_tools          – list of callables to append to the agent tool list.
-        plugin_system_prompt  – extra system-prompt text to append (may be empty).
-        plugin_stop_tools     – list of tool names that terminate the ReAct loop.
-        agentic_config_patch  – dict to merge into agentic_config (may be empty).
+        plugin_tools             – list of callables to append to the agent tool list.
+        plugin_system_prompt     – extra system-prompt text to append (may be empty).
+        plugin_stop_tools        – list of tool names that terminate the ReAct loop.
+        agentic_config_patch     – dict to merge into agentic_config (may be empty).
+        plugin_artifact_context  – artifact summary to prepend to the current user-turn (not system prompt).
     """
     plugin_tools: List[Any] = []
     plugin_system_prompt: str = ''
     plugin_stop_tools: List[str] = []
     agentic_config_patch: Dict[str, Any] = {}
+    plugin_artifact_context: str = ''
 
     if not plugin_loader._registry:
         # No plugins registered — inject SubAgent task context for pure SubAgent conversations.
         plugin_system_prompt = _build_chat_agent_task_context(conversation_id)
-        return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch
+        return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context
 
     if plugin_context and isinstance(plugin_context, dict):
         p_session_id = plugin_context.get('session_id', '')
@@ -516,9 +522,7 @@ def resolve_plugin_injection(
             )]
             plugin_stop_tools = ['advance_step']
             plugin_system_prompt = plugin_loader.get_scenario(p_plugin_id)
-            artifact_section = _build_session_artifact_section(p_session_id)
-            if artifact_section:
-                plugin_system_prompt = plugin_system_prompt + '\n\n' + artifact_section
+            plugin_artifact_context = _build_session_artifact_section(p_session_id)
         else:
             # Cold start: no active session yet
             plugin_tools = build_cold_start_tools()
@@ -543,4 +547,4 @@ def resolve_plugin_injection(
         if task_context:
             plugin_system_prompt = (plugin_system_prompt + '\n\n' + task_context).strip()
 
-    return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch
+    return plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context
