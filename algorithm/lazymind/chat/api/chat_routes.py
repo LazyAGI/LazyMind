@@ -118,6 +118,11 @@ async def chat(
             )
         ),
     ] = None,
+    current_turn_seq: Annotated[
+        Optional[int],
+        Body(description='The seq number of the current conversation turn, provided by Go core. '
+                         'Used to correctly label the current-turn attachments.'),
+    ] = None,
 ):
     return await handle_chat(
         query=query,
@@ -142,4 +147,5 @@ async def chat(
         mcp_config=mcp_config,
         trace=trace,
         plugin_context=plugin_context,
+        current_turn_seq=current_turn_seq,
     )

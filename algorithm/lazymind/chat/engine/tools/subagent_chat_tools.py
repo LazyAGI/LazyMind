@@ -24,6 +24,52 @@ def _agentic_config() -> Dict[str, Any]:
         return {}
 
 
+def _resolve_file_path_for_artifact(value: str, cfg: Dict[str, Any]) -> str:
+    """Resolve a file value to a local absolute path for artifact storage.
+
+    Handles three input forms:
+    - Local absolute path (e.g. /var/lib/lazymind/uploads/...): returned as-is.
+    - Signed URL (e.g. /static-files/...?expires=...&sig=...): decoded and matched
+      against known attached files by basename.
+    - External HTTP(S) URL: stored as-is in the path field; Go's signArtifactImagePath
+      will move it to the url field on read.
+    - Bare filename (e.g. 图片.jpeg): matched against known attached files by basename.
+
+    Falls back to the original value if no local match is found.
+    """
+    import os as _os
+    from urllib.parse import unquote as _unquote
+
+    # External HTTP(S) URL — store directly; Go handles it on read.
+    lower = value.lower()
+    if lower.startswith('http://') or lower.startswith('https://'):
+        return value
+
+    # Already an absolute local path (not a /static-files/ signed URL) — use as-is.
+    if value.startswith('/') and not value.startswith('/static-files/'):
+        return value
+
+    # Signed /static-files/... URL or bare filename: resolve by basename.
+    # Strip query string, URL-decode percent-encoding, then take basename.
+    path_part = value.split('?')[0]
+    basename = _os.path.basename(_unquote(path_part))
+
+    # Search all known files in agentic_config (current + historical turns).
+    all_paths: List[str] = list(cfg.get('files') or [])
+    hfpt: Dict[str, List[str]] = cfg.get('history_files_per_turn') or {}
+    for turn_paths in hfpt.values():
+        for p in (turn_paths or []):
+            if p not in all_paths:
+                all_paths.append(p)
+
+    for path in all_paths:
+        if _os.path.basename(path) == basename:
+            return path
+
+    # No local match — return the original value and let Go core handle or fail gracefully.
+    return value
+
+
 def _mode() -> str:
     mode = str(_agentic_config().get('mode') or 'auto')
     return mode if mode in ('auto', 'manual') else 'auto'
@@ -267,8 +313,13 @@ def save_plugin_artifact(
 
     Args:
         artifact_key (str): The artifact key to write (must have a slot binding in the plugin).
-        value (Any): The artifact value. For text: a string. For json: a dict/list.
-            For image/file: a local absolute path. For file_list: a list of absolute paths.
+        value (Any): The artifact value.
+            - text: a plain string.
+            - json: a dict or list.
+            - image/file: a local absolute path from find_user_attachment's `path` field.
+              IMPORTANT: pass the `path` field, NOT the `url` field. The `url` field is a
+              signed URL that expires and cannot be used for persistent storage.
+            - file_list: a list of local absolute paths.
         content_type (str): One of text, json, image, file, file_list. Default text.
         sort_order (int): Optional 1-based display position for list-slot artifacts.
             Omit (or pass None) to append; pass N to overwrite position N.
@@ -298,9 +349,14 @@ def save_plugin_artifact(
     elif ct == 'json':
         value_payload = {'data': value}
     elif ct in ('image', 'file'):
-        value_payload = {'path': str(value)}
+        # Resolve signed URLs or relative paths to local absolute paths.
+        # find_user_attachment returns both 'url' (signed /static-files/...) and 'path'
+        # (local absolute). The LLM should pass path, but may pass url by mistake.
+        resolved_path = _resolve_file_path_for_artifact(str(value), cfg)
+        value_payload = {'path': resolved_path}
     elif ct == 'file_list':
-        value_payload = {'paths': list(value) if hasattr(value, '__iter__') else [str(value)]}
+        paths_raw = list(value) if hasattr(value, '__iter__') and not isinstance(value, str) else [str(value)]
+        value_payload = {'paths': [_resolve_file_path_for_artifact(str(p), cfg) for p in paths_raw]}
     else:
         value_payload = {'text': str(value)}
     if caption is not None:

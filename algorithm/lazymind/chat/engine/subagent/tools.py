@@ -41,8 +41,13 @@ def _build_artifact_value(value: Any, content_type: str):
             return {'type': 'json', 'path': rel, 'size': os.path.getsize(abs_path)}, 'file'
         return {'data': value}, 'json'
     if content_type == 'image':
-        rel = ctx.copy_into_workspace(str(value)) if os.path.isabs(str(value)) else str(value)
-        return {'path': rel}, 'image'
+        src = str(value)
+        if os.path.isabs(src):
+            # Copy into workspace; keep absolute path so Go core can sign a URL for it.
+            dst_rel = ctx.copy_into_workspace(src)
+            dst_abs = os.path.join(ctx.workspace_path, dst_rel)
+            return {'path': dst_abs}, 'image'
+        return {'path': src}, 'image'
     if content_type == 'file':
         abs_path = str(value)
         rel = ctx.copy_into_workspace(abs_path) if os.path.isabs(abs_path) else abs_path

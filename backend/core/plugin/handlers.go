@@ -976,8 +976,9 @@ func SaveArtifactByKey(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	rev, err := WriteSlotRevision(ctx, db,
-		sessionID, slotID, body.ArtifactKey, stepID, attempt, cardinality, listIndex)
+	rev, err := WriteSlotRevisionWithHumanArtifact(ctx, db,
+		sessionID, slotID, body.ArtifactKey, stepID, attempt, cardinality, listIndex,
+		body.ContentType, body.Value, body.Caption)
 	if err != nil {
 		common.ReplyErr(w, "write slot revision failed", http.StatusInternalServerError)
 		return

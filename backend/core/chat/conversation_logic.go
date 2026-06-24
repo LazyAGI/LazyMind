@@ -489,20 +489,21 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	currentFilePaths := filePathsForUpstreamChat(raw)
 	filesMap := filesPerTurnMap(histories, currentFilePaths, currentSeq)
 	body := map[string]any{
-		"query":           query,
-		"session_id":      sessionID,
-		"conversation_id": convID,
-		"history":         buildHistoryMessages(histories),
-		"filters":         raw["filters"],
-		"files":           filesMap,
-		"databases":       raw["databases"],
-		"debug":           raw["debug"],
-		"reasoning":       resolveReasoning(raw),
-		"priority":        raw["priority"],
-		"enable_thinking": raw["enable_thinking"],
-		"use_memory":      useMemory,
-		"user_id":         strings.TrimSpace(userID),
-		"mode":            mode,
+		"query":            query,
+		"session_id":       sessionID,
+		"conversation_id":  convID,
+		"history":          buildHistoryMessages(histories),
+		"filters":          raw["filters"],
+		"files":            filesMap,
+		"current_turn_seq": currentSeq,
+		"databases":        raw["databases"],
+		"debug":            raw["debug"],
+		"reasoning":        resolveReasoning(raw),
+		"priority":         raw["priority"],
+		"enable_thinking":  raw["enable_thinking"],
+		"use_memory":       useMemory,
+		"user_id":          strings.TrimSpace(userID),
+		"mode":             mode,
 	}
 	if environmentContext, ok := raw["environment_context"].(map[string]any); ok {
 		body["environment_context"] = environmentContext

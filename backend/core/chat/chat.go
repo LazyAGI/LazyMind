@@ -74,6 +74,7 @@ type LazyChatRequest struct {
 	ConversationID     string              `json:"conversation_id,omitempty"`
 	MCPConfig          []any               `json:"mcp_config,omitempty"`
 	PluginContext      map[string]any      `json:"plugin_context,omitempty"`
+	CurrentTurnSeq     int                 `json:"current_turn_seq,omitempty"`
 }
 
 // LazyChatData text data text。
@@ -359,6 +360,15 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if pluginContext, ok := body["plugin_context"].(map[string]any); ok && len(pluginContext) > 0 {
 		req.PluginContext = pluginContext
+	}
+	// current_turn_seq is an int in the body map. JSON numbers decode as float64.
+	switch v := body["current_turn_seq"].(type) {
+	case int:
+		req.CurrentTurnSeq = v
+	case int64:
+		req.CurrentTurnSeq = int(v)
+	case float64:
+		req.CurrentTurnSeq = int(v)
 	}
 	return req
 }

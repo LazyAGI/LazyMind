@@ -163,6 +163,14 @@ def _build_subagent_chat_tools(has_subagents: bool) -> list:
     return tools
 
 
+def _build_user_attachment_tools(has_files: bool) -> list:
+    """Register find_user_attachment / read_user_attachment when the conversation has uploads."""
+    if not has_files:
+        return []
+    from lazymind.chat.engine.subagent.tools import find_user_attachment, read_user_attachment
+    return [find_user_attachment, read_user_attachment]
+
+
 def _collect_active_tool_names(configs: list) -> set[str]:
     # Build a per-request callable allowlist from filtered tool configs.
     # This is consumed by tool_runtime guard to prevent accidental execution
@@ -185,13 +193,22 @@ def _collect_active_tool_names(configs: list) -> set[str]:
     return names
 
 
-def _build_user_attachment_context(history_files_per_turn: Dict[str, List[str]]) -> str:
+def _build_user_attachment_context(history_files_per_turn: Dict[str, List[str]],
+                                   current_turn_seq: Optional[int] = None) -> str:
     """Build the '## User Uploaded Files' context section from history_files_per_turn.
 
     history_files_per_turn is a map of "<seq>" -> [file_paths...] where seq is a
     1-based integer string matching the conversation turn sequence number.
+    Only turns with actual attachments appear as keys (empty turns are omitted by Go).
+
+    current_turn_seq: the authoritative seq for the current request turn, provided by
+    Go core. When not None it is used as the marker for 当前轮次. If the current turn
+    has no files it will not appear in the map, and no 当前轮次 marker is shown.
+    Falls back to max(keys) only when current_turn_seq is not provided (legacy callers).
 
     Returns an empty string when there are no files.
+    The current turn (if it has files) is listed first with a [当前轮次] marker.
+    Historical turns follow in descending seq order.
     """
     if not history_files_per_turn:
         return ''
@@ -206,7 +223,8 @@ def _build_user_attachment_context(history_files_per_turn: Dict[str, List[str]])
         except ValueError:
             continue
 
-    lines: List[str] = []
+    if not turns:
+        return ''
 
     def _describe_file(path: str) -> str:
         import os as _os
@@ -237,7 +255,7 @@ def _build_user_attachment_context(history_files_per_turn: Dict[str, List[str]])
             else:
                 seen[base] += 1
                 n = seen[base]
-                display = f'{name_no_ext}-{n}{ext}'
+                new_base = f'{name_no_ext}-{n}{ext}'
                 try:
                     import os as _os2
                     size_bytes = _os2.path.getsize(path)
@@ -247,25 +265,51 @@ def _build_user_attachment_context(history_files_per_turn: Dict[str, List[str]])
                         size_str = f'{size_bytes / 1024:.1f} KB'
                     else:
                         size_str = f'{size_bytes / (1024 * 1024):.1f} MB'
-                    display = f'{display} ({size_str})'
+                    display = f'{new_base} ({size_str})'
                 except OSError:
-                    pass
+                    display = new_base
             result.append((display, path))
         return result
 
-    if not turns: return ''
-    lines.append('## User Uploaded Files [queried at request time]')
+    # Determine which seq is the current turn.
+    # Prefer the authoritative value from Go (current_turn_seq); fall back to max(keys)
+    # only when the caller did not provide it (legacy path).
+    # If current_turn_seq is provided but has no attachments this turn, no 当前轮次 marker
+    # is shown — the map simply won't contain that key.
+    if current_turn_seq is not None and current_turn_seq in turns:
+        _cur = current_turn_seq
+    elif current_turn_seq is None:
+        _cur = max(turns.keys())  # legacy fallback
+    else:
+        _cur = None  # current turn exists but has no attachments — no marker
 
-    for seq in sorted(turns.keys()):
+    lines: List[str] = ['## User Uploaded Files [queried at request time]']
+
+    # Descending order: current turn first (if it has files), then historical turns newest-first.
+    for seq in sorted(turns.keys(), reverse=True):
         pairs = _dedupe_names(turns[seq])
         file_list = ', '.join(name for name, _ in pairs)
-        lines.append(f'- Turn {seq}: {file_list}')
+        if seq == _cur:
+            lines.append(f'- [Turn {seq} 当前轮次]: {file_list}')
+        else:
+            lines.append(f'- [Turn {seq}]: {file_list}')
+
+    if _cur is None:
+        lines.append('')
+        lines.append('Note: the current turn has no attachments. All entries above are historical.')
 
     lines.append('')
-    lines.append('Turn numbers are 1-based integers matching the "Turn N" labels above.')
-    lines.append('Omit the turn parameter to search the current turn first, then historical turns.')
-    lines.append("To read a file\'s content, call read_user_attachment(filename, turn=N).")
-    lines.append("To get a file\'s accessible URL/path, call find_user_attachment(filename, turn=N).")
+    lines.append(
+        'Rules: Turn numbers are 1-based integers. '
+        'When the user says "this image / 这张图 / 这个文件" without specifying a turn, '
+        'default to the CURRENT TURN attachment (marked 当前轮次 above). '
+        'Only fall back to historical turns when the user explicitly references a past turn '
+        'or when the current turn has no attachments.'
+    )
+    lines.append("To read a file's content, call read_user_attachment(filename, turn=N).")
+    lines.append("To get a file's accessible path, call find_user_attachment(filename, turn=N).")
+    lines.append('When passing an attachment path to save_plugin_artifact, always use the `path` field '
+                 '(local absolute path) from find_user_attachment, NOT the `url` field.')
 
     return '\n'.join(lines)
 
@@ -287,6 +331,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       mcp_config: Optional[List[Dict[str, Any]]] = None,
                       trace: Optional[bool] = False,
                       plugin_context: Optional[Dict[str, Any]] = None,
+                      current_turn_seq: Optional[int] = None,
                       ) -> Union[Dict[str, Any], StreamingResponse]:
     LOG.info(
         f'[ChatServer] [MODEL_CONFIG_RECEIVED] [sid={session_id}] [user_id={user_id or ""}] '
@@ -294,6 +339,10 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     )
     LOG.info(
         f'[ChatServer] [PLUGIN_CONTEXT] [sid={session_id}] [plugin_context={plugin_context!r}]'
+    )
+    LOG.info(
+        f'[ChatServer] [TURN_SEQ] [sid={session_id}] [current_turn_seq={current_turn_seq!r}] '
+        f'[files_map_keys={sorted(files.keys()) if isinstance(files, dict) else None}]'
     )
     start_time = time.time()
     priority = priority or LAZYMIND_LLM_PRIORITY
@@ -354,12 +403,26 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         'user_preference': user_preference or '',
     }
     display_files: list[str] = []
+    # Use the authoritative current_turn_seq from Go; fall back to max(keys) only as a
+    # last resort (handles callers that do not yet pass the field).
+    _eff_current_seq: int | None = current_turn_seq
+    if _eff_current_seq is None and files_map:
+        int_keys = [int(k) for k in files_map if k.isdigit() and files_map[k]]
+        if int_keys:
+            _eff_current_seq = max(int_keys)
+    current_turn_paths: set[str] = (set(files_map.get(str(_eff_current_seq), []))
+                                    if _eff_current_seq is not None else set())
+
     for path in resolved_files:
         if path.lower().endswith(IMAGE_EXTENSIONS):
             register_image_url(translator.citation_state, path)
-            display_files.append(basename_from_path(path) or path)
+            name = basename_from_path(path) or path
         else:
-            display_files.append(path)
+            name = path
+        if path in current_turn_paths:
+            display_files.append(f'{name} [当前轮次]')
+        else:
+            display_files.append(name)
 
     from lazymind.chat.plugin.plugin_manager import resolve_plugin_injection
     plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context = \
@@ -367,7 +430,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     agentic_config.update(agentic_config_patch)
 
     # Build user attachment context from files_map and inject before plugin context.
-    user_attachment_context = _build_user_attachment_context(files_map)
+    user_attachment_context = _build_user_attachment_context(files_map, _eff_current_seq)
 
     # Prepend artifact context and user attachment context before the user query.
     parts = []
@@ -375,6 +438,17 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         parts.append(plugin_artifact_context)
     if user_attachment_context:
         parts.append(user_attachment_context)
+    # Inject the authoritative current-turn declaration so the model is never misled
+    # by conversation history into thinking an earlier turn is the current one.
+    if _eff_current_seq is not None:
+        parts.append(
+            f'## Current Request Context [AUTHORITATIVE]\n'
+            f'This is conversation turn **{_eff_current_seq}** (the current turn).\n'
+            f'Any turn number mentioned in the chat history that appears to be "current" '
+            f'is outdated. Turn {_eff_current_seq} is the only present moment.\n'
+            f'When the user says "this image / 这张图 / 这个文件 / 现在 / 本次", '
+            f'they are referring to turn {_eff_current_seq} unless they explicitly name another turn.'
+        )
     if parts:
         agent_query = '\n\n---\n\n'.join(parts) + '\n\n---\n\n## User Request\n' + agent_query
 
@@ -390,10 +464,14 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     # Persist the allowlist in session globals so every @handle_tool_errors-wrapped
     # tool can do a cheap runtime check before executing business logic.
     lazyllm.globals['active_tool_names'] = _collect_active_tool_names(active_configs)
-    # Plugin tools are dynamically injected and pre-validated by resolve_plugin_injection;
-    # add their names to the allowlist so the ToolGuard does not block them.
-    if plugin_stop_tools:
-        lazyllm.globals['active_tool_names'] |= set(plugin_stop_tools)
+    # Plugin tools are dynamically injected and pre-validated by resolve_plugin_injection.
+    # Register ALL plugin_tools (advance_step, find_artifact, save_plugin_artifact, …)
+    # into the allowlist so the ToolGuard does not block any of them.
+    # plugin_stop_tools is only used by set_stop_tools below to control loop exit;
+    # it is not the source of the allowlist.
+    lazyllm.globals['active_tool_names'] |= {
+        getattr(fn, '__name__', '') for fn in plugin_tools if callable(fn)
+    }
     agent_tools = build_agent_tools(active_configs)
     subagent_tools = _build_subagent_chat_tools(bool(has_subagents))
     # SubAgent chat tools (create_subagent, list_subagents, …) are always active;
@@ -402,7 +480,13 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         getattr(fn, '__name__', '') for fn in subagent_tools if callable(fn)
     }
     mcp_tools = _build_mcp_tools(mcp_config) if mcp_config else []
-    all_tools = agent_tools + subagent_tools + plugin_tools + mcp_tools
+    # User attachment tools are only meaningful when the user has uploaded files.
+    # Register them (and add to allowlist) whenever files_map is non-empty.
+    attachment_tools = _build_user_attachment_tools(bool(files_map))
+    lazyllm.globals['active_tool_names'] |= {
+        getattr(fn, '__name__', '') for fn in attachment_tools if callable(fn)
+    }
+    all_tools = agent_tools + subagent_tools + attachment_tools + plugin_tools + mcp_tools
     set_trace_context({
         'enabled': bool(trace),
         'trace_id': session_id if trace else None,
