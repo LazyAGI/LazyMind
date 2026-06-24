@@ -152,7 +152,7 @@ func defaultRoutes() []RouteConfig {
 			Prefix:     "/api/evo",
 			Upstream:   "http://127.0.0.1:8047",
 			StripPath:  true,
-			Enabled:    true,
+			Enabled:    false,
 			Optional:   true,
 			HealthPath: "/health",
 		},

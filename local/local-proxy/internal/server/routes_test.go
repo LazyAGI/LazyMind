@@ -57,14 +57,6 @@ func TestMatchRoute_DefaultRoutes(t *testing.T) {
 			targetPath: "/",
 			stripPath:  true,
 		},
-		{
-			name:       "evo strip nested path",
-			path:       "/api/evo/jobs",
-			upstream:   "http://127.0.0.1:8047",
-			targetPath: "/jobs",
-			optional:   true,
-			stripPath:  true,
-		},
 	}
 
 	for _, tc := range tests {
@@ -197,14 +189,7 @@ func TestMatchRoute_DisabledOptionalRoute(t *testing.T) {
 		t.Fatalf("Load(): %v", err)
 	}
 
-	routes := append([]config.RouteConfig{}, cfg.Routes...)
-	for i, route := range routes {
-		if route.Prefix == "/api/evo" {
-			routes[i].Enabled = false
-		}
-	}
-
-	_, err = MatchRoute(routes, "/api/evo/feature")
+	_, err = MatchRoute(cfg.Routes, "/api/evo/feature")
 	var routeErr RouteMatchError
 	if !errors.As(err, &routeErr) {
 		t.Fatalf("expected route error, got %v", err)

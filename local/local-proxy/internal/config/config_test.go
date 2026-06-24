@@ -70,7 +70,7 @@ func TestLoadUsesDefaults(t *testing.T) {
 	wantRoute("chat-route", "/api/chat", "http://127.0.0.1:8046", "/health", false, false, true)
 	wantRoute("scan-route", "/api/scan", "http://127.0.0.1:18080", "/health", false, true, true)
 	wantRoute("core-route", "/api/core", "http://127.0.0.1:8001", "/health", true, false, true)
-	wantRoute("evo-route", "/api/evo", "http://127.0.0.1:8047", "/health", true, true, true)
+	wantRoute("evo-route", "/api/evo", "http://127.0.0.1:8047", "/health", true, true, false)
 }
 
 func TestLoadFromConfigFile(t *testing.T) {
