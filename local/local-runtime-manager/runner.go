@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
 )
 
@@ -12,6 +13,7 @@ type Command struct {
 	Name string
 	Args []string
 	Dir  string
+	Env  []string
 }
 
 type CommandResult struct {
@@ -33,6 +35,9 @@ type ExecRunner struct{}
 func (r *ExecRunner) Run(ctx context.Context, cmd Command) (CommandResult, error) {
 	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
 	c.Dir = cmd.Dir
+	if len(cmd.Env) > 0 {
+		c.Env = append(os.Environ(), cmd.Env...)
+	}
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -60,6 +65,9 @@ func (r *ExecRunner) Run(ctx context.Context, cmd Command) (CommandResult, error
 func (r *ExecRunner) Stream(ctx context.Context, cmd Command, stdout io.Writer, stderr io.Writer) error {
 	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
 	c.Dir = cmd.Dir
+	if len(cmd.Env) > 0 {
+		c.Env = append(os.Environ(), cmd.Env...)
+	}
 	c.Stdout = stdout
 	c.Stderr = stderr
 	return c.Run()

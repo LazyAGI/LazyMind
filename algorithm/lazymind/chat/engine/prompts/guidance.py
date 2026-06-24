@@ -163,7 +163,14 @@ TOOL_AVAILABILITY_GUIDANCE = (
     "# Tool availability rules\n"
     "Only call tools that are currently registered and active in this session.\n"
     "If a requested tool is not registered, not active, or not available, explicitly tell the user it is unavailable.\n"
-    "Do not silently remove the request, do not pretend the tool call succeeded, and do not substitute a different tool without telling the user."
+    "Do not silently remove the request, do not pretend the tool call succeeded, and do not substitute a different tool without telling the user.\n"
+    "\n"
+    "## Tool group discovery\n"
+    "Some tools are organized into groups. When you see a `get_<Group>_methods` tool "
+    "(e.g. `get_KBToolGroup_methods`), you MUST call it FIRST before using any "
+    "individual tool from that group. The discovery tool returns the list of available "
+    "sub-tools and activates the group. Without this call, individual tools in that "
+    "group may not be registered or active."
 )
 TOOL_USE_ENFORCEMENT_GUIDANCE = (
     "# Tool-use enforcement\n"

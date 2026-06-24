@@ -19,6 +19,7 @@ from lazyllm.tools.tools.search import (
 
 from lazymind.chat.engine.tools import (
     KBToolGroup,
+    LocalFSToolGroup,
     TempKBToolGroup,
     calculator,
     image_editor,
@@ -153,6 +154,12 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         label='技能编辑',
         description='创建、修改和删除技能',
         instance=skill_editor,
+    ),
+    ToolGroupConfig(
+        name='local_fs',
+        label='本地文件',
+        description='在配置的本地路径内进行 glob 匹配、grep 搜索、文件读取（只读）',
+        instance=LocalFSToolGroup(),
     ),
     ToolGroupConfig(
         name='feishu',

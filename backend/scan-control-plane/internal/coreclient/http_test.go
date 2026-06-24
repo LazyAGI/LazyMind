@@ -513,6 +513,23 @@ func TestHTTPCoreClientGetCoreTaskResultUsesCoreTaskRoute(t *testing.T) {
 	}
 }
 
+func TestHTTPCoreClientGetCoreTaskResultPreservesCanceledStatus(t *testing.T) {
+	t.Parallel()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/datasets/dataset-1/tasks/core-task-1" || r.Method != http.MethodGet {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		writeJSON(t, w, http.StatusOK, map[string]string{"task_id": "core-task-1", "document_id": "core-doc-1", "task_state": "CANCELLED"})
+	})
+
+	client := newHTTPTestCoreClient(t, handler)
+	result, err := client.GetCoreTaskResult(context.Background(), GetCoreTaskResultRequest{DatasetID: "dataset-1", CoreTaskID: "core-task-1"})
+	if err != nil || result.Status != ResultStatusCanceled || result.ErrorCode != "CANCELED" {
+		t.Fatalf("unexpected result=%+v err=%v", result, err)
+	}
+}
+
 func newHTTPTestCoreClient(t *testing.T, handler http.Handler) *HTTPCoreClient {
 	t.Helper()
 	client, err := NewHTTPCoreClient("http://core.test", &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {

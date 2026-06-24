@@ -26,6 +26,7 @@ type RuntimeManager struct {
 	downTimeout    time.Duration
 	compose        *ComposeManager
 	processCompose *ProcessComposeManager
+	localProxy     *LocalProxyManager
 }
 
 func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
@@ -42,6 +43,7 @@ func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
 		downTimeout:    envDuration(localDownTimeoutEnvVar, time.Duration(defaultLocalDownTimeout)*time.Second),
 		compose:        NewComposeManager(r),
 		processCompose: processCompose,
+		localProxy:     NewLocalProxyManager(r),
 	}
 }
 
@@ -102,7 +104,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err != nil {
 		return err
 	}
-	if err := m.processCompose.WriteGeneratedConfig(generatedFile, paths.RepoRoot, cfg.Profile, paths.LogFilePath, paths.RunDirTokenFile, cfg.ProcessComposePort); err != nil {
+	if err := m.processCompose.WriteGeneratedConfig(generatedFile, paths.RepoRoot, cfg.Profile, paths.LogFilePath, paths.LocalProxyLog, paths.RunDirTokenFile, cfg.ProcessComposePort); err != nil {
 		_ = generatedFile.Close()
 		return err
 	}
@@ -169,7 +171,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
 		return err
 	}
-	m.printReadySummary(cfg.ProcessComposePort)
+	m.printReadySummary(cfg)
 	return nil
 }
 
@@ -334,11 +336,11 @@ func (m *RuntimeManager) waitForRuntimeStopped(ctx context.Context, cfg RuntimeC
 	}
 }
 
-func (m *RuntimeManager) printReadySummary(apiPort int) {
+func (m *RuntimeManager) printReadySummary(cfg RuntimeConfig) {
 	_, _ = fmt.Fprintf(m.out, "local runtime ready\n")
-	_, _ = fmt.Fprintf(m.out, "process-compose: http://127.0.0.1:%d\n", apiPort)
-	_, _ = fmt.Fprintf(m.out, "frontend: http://localhost:8090\n")
-	_, _ = fmt.Fprintf(m.out, "status: make local-runtime-status\n")
+	_, _ = fmt.Fprintf(m.out, "process-compose: http://127.0.0.1:%d\n", cfg.ProcessComposePort)
+	_, _ = fmt.Fprintf(m.out, "frontend: http://localhost:%d\n", cfg.FrontendPort)
+	_, _ = fmt.Fprintf(m.out, "status: local/local-runtime-manager/lazymind-local status --json --profile %s\n", cfg.Profile)
 }
 
 func acquireUpLock(paths RuntimePaths) (func(), error) {
@@ -348,7 +350,7 @@ func acquireUpLock(paths RuntimePaths) (func(), error) {
 			if os.IsExist(err) {
 				alive, readErr := upLockProcessAlive(paths.UpLockFile)
 				if readErr != nil || alive {
-					return nil, fmt.Errorf("local-runtime-up is already in progress (lock: %s)", paths.UpLockFile)
+					return nil, fmt.Errorf("local runtime startup is already in progress (lock: %s)", paths.UpLockFile)
 				}
 				_ = os.Remove(paths.UpLockFile)
 				continue

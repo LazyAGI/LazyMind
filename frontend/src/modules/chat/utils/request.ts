@@ -43,9 +43,6 @@ import {
   type AllDocumentCreatorsResponse,
   type AllDocumentTagsResponse,
   type DatasetServiceApiDatasetServiceListDatasetsRequest,
-  type DatasetServiceApiDatasetServiceResetDefaultDatasetsRequest,
-  type DatasetServiceApiDatasetServiceSetDefaultDatasetRequest,
-  type DatasetServiceApiDatasetServiceUnsetDefaultDatasetRequest,
   type ListDatasetsResponse,
   type UserDatabaseSummary,
 } from "@/api/generated/knowledge-client";
@@ -482,57 +479,6 @@ export function KnowledgeBaseServiceApi() {
           tags: requestParameters.tags,
         },
       });
-    },
-    datasetServiceSetDefaultDataset(
-      requestParameters: DatasetServiceApiDatasetServiceSetDefaultDatasetRequest,
-      options?: RawAxiosRequestConfig,
-    ) {
-      return axiosInstance.post(
-        `${coreApiBaseUrl}/datasets/${encodeURIComponent(requestParameters.dataset)}:setDefault`,
-        requestParameters.setDefaultDatasetRequest,
-        withJsonOptions(options),
-      );
-    },
-    datasetServiceUnsetDefaultDataset(
-      requestParameters: DatasetServiceApiDatasetServiceUnsetDefaultDatasetRequest,
-      options?: RawAxiosRequestConfig,
-    ) {
-      return axiosInstance.post(
-        `${coreApiBaseUrl}/datasets/${encodeURIComponent(requestParameters.dataset)}:unsetDefault`,
-        requestParameters.unsetDefaultDatasetRequest,
-        withJsonOptions(options),
-      );
-    },
-    async datasetServiceResetDefaultDatasets(
-      _requestParameters: DatasetServiceApiDatasetServiceResetDefaultDatasetsRequest,
-      options?: RawAxiosRequestConfig,
-    ): Promise<AxiosResponse<ListDatasetsResponse>> {
-      const listResponse = await axiosInstance.get<ListDatasetsResponse>(
-        `${coreApiBaseUrl}/datasets`,
-        {
-          ...options,
-          params: {
-            ...(options?.params ?? {}),
-            page_size: 1000,
-          },
-        },
-      );
-      const defaultDatasets =
-        listResponse.data.datasets?.filter((item) => item.default_dataset) ?? [];
-
-      await Promise.all(
-        defaultDatasets
-          .filter((item) => item.dataset_id && item.name)
-          .map((item) =>
-            axiosInstance.post(
-              `${coreApiBaseUrl}/datasets/${encodeURIComponent(item.dataset_id!)}:unsetDefault`,
-              { name: item.name },
-              withJsonOptions(options),
-            ),
-          ),
-      );
-
-      return listResponse;
     },
   };
 }

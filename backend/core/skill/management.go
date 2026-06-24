@@ -189,6 +189,55 @@ func ListTags(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{"tags": tags})
 }
 
+func ListCategories(w http.ResponseWriter, r *http.Request) {
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	userID := strings.TrimSpace(store.UserID(r))
+	if userID == "" {
+		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
+		return
+	}
+
+	var rows []orm.SkillResource
+	if err := db.WithContext(r.Context()).
+		Select("category").
+		Where("owner_user_id = ? AND node_type = ?", userID, evolution.SkillNodeTypeParent).
+		Find(&rows).Error; err != nil {
+		common.ReplyErr(w, "query skills failed", http.StatusInternalServerError)
+		return
+	}
+
+	categorySet := make(map[string]struct{})
+	for _, row := range rows {
+		category := strings.TrimSpace(row.Category)
+		if category != "" {
+			categorySet[category] = struct{}{}
+		}
+	}
+
+	catalog, err := loadBuiltinCatalog()
+	if err != nil {
+		common.ReplyErr(w, "load builtin skills failed", http.StatusInternalServerError)
+		return
+	}
+	for _, builtin := range catalog {
+		category := strings.TrimSpace(builtin.Category)
+		if category != "" {
+			categorySet[category] = struct{}{}
+		}
+	}
+
+	categories := make([]string, 0, len(categorySet))
+	for category := range categorySet {
+		categories = append(categories, category)
+	}
+	sort.Strings(categories)
+	common.ReplyOK(w, map[string]any{"categories": categories})
+}
+
 func Get(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	if db == nil {

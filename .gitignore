@@ -61,11 +61,6 @@ docs/superpowers/
 *.dylib
 *.dll
 
-# Fortran module files
-*.mod
-*.smod
-!local/local-runtime-manager/go.mod
-
 # Compiled Static libraries
 *.lai
 *.la

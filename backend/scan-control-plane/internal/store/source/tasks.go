@@ -149,12 +149,12 @@ func (r *SQLRepository) ClaimDueTask(ctx context.Context, workerID string, now t
 		var model ormParseTask
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 			Where(`(
-				(status IN ? AND next_run_at <= ?)
+				(status = ? AND next_run_at <= ?)
 				OR (status = ? AND (
 					(lease_until IS NOT NULL AND lease_until <= ?)
 					OR lease_owner IS NULL OR lease_owner = '' OR lease_until IS NULL
 				))
-			)`, []string{ParseTaskStatusPending, ParseTaskStatusFailed}, now, ParseTaskStatusRunning, now).
+			)`, ParseTaskStatusPending, now, ParseTaskStatusRunning, now).
 			Where("NOT EXISTS (SELECT 1 FROM parse_task_dead_letters dl WHERE dl.task_id = parse_tasks.task_id)").
 			Order("next_run_at, task_id").
 			Limit(1).

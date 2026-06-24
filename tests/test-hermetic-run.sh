@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # shellcheck disable=SC1091
-. "$ROOT/scripts/test-hermetic-env.sh"
+. "$ROOT/tests/test-hermetic-env.sh"
 
 test_hermetic_prepare
 
@@ -42,6 +42,11 @@ run_backend_core() {
   go test ./... -v
 }
 
+run_backend_local_proxy() {
+  cd "$ROOT/local/local-proxy"
+  GOCACHE=/tmp/local-proxy-gocache go test ./... -v
+}
+
 run_algorithm() {
   cd "$ROOT"
   "$LAZYMIND_TEST_PYTHON" -m pytest tests/algorithm/ -v --tb=short
@@ -50,6 +55,7 @@ run_algorithm() {
 run_section "Frontend" run_frontend
 run_section "auth-service" run_auth_service
 run_section "backend/core" run_backend_core
+run_section "local/local-proxy" run_backend_local_proxy
 run_section "algorithm" run_algorithm
 
 if [ "$FAILED" -eq 1 ]; then

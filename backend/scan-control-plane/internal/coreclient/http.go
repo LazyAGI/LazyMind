@@ -265,7 +265,9 @@ func (c *HTTPCoreClient) GetCoreTaskResult(ctx context.Context, req GetCoreTaskR
 		CoreDocumentID: out.DocumentID,
 		ErrorMessage:   firstNonEmpty(out.ErrMsg, out.ConvertError),
 	}
-	if result.Status == ResultStatusFailed {
+	if result.Status == ResultStatusCanceled {
+		result.ErrorCode = "CANCELED"
+	} else if result.Status == ResultStatusFailed {
 		result.ErrorCode = "CORE_TASK_FAILED"
 	}
 	return result, nil
@@ -581,7 +583,9 @@ func mapCoreTaskStatus(status string) string {
 	switch strings.ToUpper(strings.TrimSpace(status)) {
 	case "SUCCEEDED", "SUCCESS":
 		return ResultStatusSucceeded
-	case "FAILED", "CANCELED", "CANCELLED":
+	case "CANCELED", "CANCELLED":
+		return ResultStatusCanceled
+	case "FAILED":
 		return ResultStatusFailed
 	case "RUNNING", "CREATING", "UPLOADING", "UPLOADED", "SUBMITTED", "":
 		return ResultStatusRunning

@@ -43,9 +43,11 @@ type processComposeShutdown struct {
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
 
-func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, profile string, logPath string, tokenPath string, apiPort int) error {
+func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, profile string, logPath string, localProxyLogPath string, tokenPath string, apiPort int) error {
 	commandForComposeUp := quoteShellArg(m.execPath) + " internal compose-up --profile " + profile
 	commandForComposeDown := quoteShellArg(m.execPath) + " internal compose-down --profile " + profile
+	commandForLocalProxyRun := quoteShellArg(m.execPath) + " internal local-proxy-run --profile " + profile
+	commandForLocalProxyDown := quoteShellArg(m.execPath) + " internal local-proxy-down --profile " + profile
 
 	cfg := processComposeConfig{
 		Version:         "0.5",
@@ -61,6 +63,16 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 				},
 				LogLocation: logPath,
 				Namespace:   "container",
+			},
+			localProxyProcessName: {
+				WorkingDir: repoRoot,
+				Command:    commandForLocalProxyRun,
+				Shutdown: processComposeShutdown{
+					Command:        commandForLocalProxyDown,
+					TimeoutSeconds: 15,
+				},
+				LogLocation: localProxyLogPath,
+				Namespace:   "host",
 			},
 		},
 	}

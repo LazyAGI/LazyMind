@@ -1,5 +1,7 @@
 services:
   scan-control-plane:
+    ports:
+      - "127.0.0.1:${LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT:-18080}:18080"
     environment:
       LAZYMIND_REDIS_URL: ""
       LAZYMIND_STATE_BACKEND: sqlite
@@ -10,6 +12,8 @@ services:
         required: false
 
   auth-service:
+    ports:
+      - "127.0.0.1:${LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT:-18000}:8000"
     volumes:
       - sqlite-data:/data/sqlite
     environment:
@@ -22,6 +26,8 @@ services:
         required: false
 
   core:
+    ports:
+      - "127.0.0.1:${LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT:-18001}:8000"
     volumes:
       - sqlite-data:/data/sqlite
     environment:
@@ -52,11 +58,29 @@ services:
   lazyllm-algo:
     volumes:
       - sqlite-data:/data/sqlite
+    environment:
+      LAZYLLM_ALGO_REGISTER_POLICY: force
+
+  chat:
+    ports:
+      - "127.0.0.1:${LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT:-18046}:8046"
+
+  evo-api:
+    ports:
+      - "127.0.0.1:${LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT:-18047}:8047"
+
+  frontend:
+    environment:
+      FRONTEND_API_PROXY_PASS: "http://host.docker.internal:${LAZYMIND_LOCAL_PROXY_PORT:-5024}"
+      FRONTEND_API_DOCS_PROXY_PASS: "http://host.docker.internal:${LAZYMIND_LOCAL_PROXY_PORT:-5024}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 x-lazymind-local:
   mode: local
   disabled_container_services:
     - redis
+    - kong
 
 volumes:
   sqlite-data:

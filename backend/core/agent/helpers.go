@@ -88,6 +88,13 @@ func threadEventsURL(threadID string) string {
 	return common.JoinURL(agentServiceEndpoint(), "/v1/evo/threads/"+url.PathEscape(threadID)+"/events")
 }
 
+func threadStepEventsURL(threadID, stepID string) string {
+	return common.JoinURL(
+		agentServiceEndpoint(),
+		"/v1/evo/threads/"+url.PathEscape(threadID)+"/events/"+url.PathEscape(stepID),
+	)
+}
+
 func threadArtifactURL(threadID, artifactID string) string {
 	return common.JoinURL(
 		agentServiceEndpoint(),
@@ -489,12 +496,23 @@ func listRecords(
 	threadID, streamKind, roundID, afterID string,
 	limit int,
 ) ([]orm.AgentThreadRecord, error) {
+	return listRecordsWithStep(db, threadID, streamKind, roundID, "", afterID, limit)
+}
+
+func listRecordsWithStep(
+	db *gorm.DB,
+	threadID, streamKind, roundID, stepID, afterID string,
+	limit int,
+) ([]orm.AgentThreadRecord, error) {
 	query := db.Model(&orm.AgentThreadRecord{}).Where("thread_id = ?", threadID)
 	if streamKind != "" {
 		query = query.Where("stream_kind = ?", streamKind)
 	}
 	if roundID != "" {
 		query = query.Where("round_id = ?", roundID)
+	}
+	if stepID != "" {
+		query = query.Where("step_id = ?", stepID)
 	}
 	if afterID != "" {
 		query = query.Where("id > ?", afterID)
@@ -525,15 +543,31 @@ func saveThreadRecord(
 	db *gorm.DB,
 	threadID, roundID, taskID, streamKind, eventName, payloadText, rawFrame string,
 ) (*orm.AgentThreadRecord, bool, error) {
+	return saveThreadRecordWithOptions(db, threadID, roundID, taskID, streamKind, eventName, payloadText, rawFrame, saveThreadRecordOptions{})
+}
+
+type saveThreadRecordOptions struct {
+	StepID    string
+	RecordKey string
+}
+
+func saveThreadRecordWithOptions(
+	db *gorm.DB,
+	threadID, roundID, taskID, streamKind, eventName, payloadText, rawFrame string,
+	opts saveThreadRecordOptions,
+) (*orm.AgentThreadRecord, bool, error) {
 	now := time.Now().UTC()
 	recordKey := sha256Hex(rawFrame)
-	if streamKind == streamKindMessage || streamKind == streamKindThreadEvent {
+	if strings.TrimSpace(opts.RecordKey) != "" {
+		recordKey = strings.TrimSpace(opts.RecordKey)
+	} else if streamKind == streamKindMessage || streamKind == streamKindThreadEvent {
 		recordKey = newStreamRecordID()
 	}
 	record := orm.AgentThreadRecord{
 		ID:          newStreamRecordID(),
 		ThreadID:    threadID,
 		RoundID:     roundID,
+		StepID:      strings.TrimSpace(opts.StepID),
 		TaskID:      taskID,
 		StreamKind:  streamKind,
 		RecordKey:   recordKey,
@@ -560,6 +594,180 @@ func saveThreadRecord(
 		return nil, false, result.Error
 	}
 	return nil, false, err
+}
+
+func markThreadStepActive(db *gorm.DB, threadID, stepID string) error {
+	threadID = strings.TrimSpace(threadID)
+	stepID = strings.TrimSpace(stepID)
+	if db == nil || threadID == "" || stepID == "" {
+		return nil
+	}
+	now := time.Now().UTC()
+	step := orm.AgentThreadStep{
+		ThreadID:  threadID,
+		StepID:    stepID,
+		Title:     stepID,
+		Status:    "running",
+		Active:    true,
+		StartedAt: &now,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	return db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "thread_id"}, {Name: "step_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"status":     "running",
+			"active":     true,
+			"ended_at":   nil,
+			"updated_at": now,
+		}),
+	}).Create(&step).Error
+}
+
+func updateThreadStepFromEvent(db *gorm.DB, threadID, stepID string, event fetchedThreadEvent) error {
+	threadID = strings.TrimSpace(threadID)
+	stepID = strings.TrimSpace(stepID)
+	if db == nil || threadID == "" || stepID == "" {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	payload := parseJSONValue(event.RawFrame)
+	title := extractStringByExactKeys(payload, "step_title", "title", "name", "display_name")
+	hasTitle := title != ""
+	if title == "" {
+		title = stepID
+	}
+	status := normalizeThreadStepStatus(extractStringByExactKeys(payload, "step_status", "status", "state"), event.EventName)
+	active := !isTerminalThreadStepStatus(status)
+	var endedAt *time.Time
+	if !active {
+		endedAt = &now
+	}
+	orderIndex, hasOrder := extractIntByExactKeys(payload, "step_order", "order_index", "order", "index", "seq")
+
+	step := orm.AgentThreadStep{
+		ThreadID:      threadID,
+		StepID:        stepID,
+		Title:         title,
+		Status:        status,
+		Active:        active,
+		OrderIndex:    orderIndex,
+		EventCount:    1,
+		CurrentTaskID: event.TaskID,
+		StartedAt:     &now,
+		EndedAt:       endedAt,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	updates := map[string]any{
+		"status":      status,
+		"active":      active,
+		"event_count": gorm.Expr("event_count + ?", 1),
+		"ended_at":    endedAt,
+		"updated_at":  now,
+	}
+	if hasTitle {
+		updates["title"] = title
+	}
+	if strings.TrimSpace(event.TaskID) != "" {
+		updates["current_task_id"] = event.TaskID
+	}
+	if hasOrder {
+		updates["order_index"] = orderIndex
+	}
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "thread_id"}, {Name: "step_id"}},
+		DoUpdates: clause.Assignments(updates),
+	}).Create(&step).Error
+}
+
+func normalizeThreadStepStatus(rawStatus, eventName string) string {
+	status := strings.ToLower(strings.TrimSpace(rawStatus))
+	if status == "" {
+		status = strings.ToLower(strings.TrimSpace(eventName))
+	}
+	switch {
+	case status == "":
+		return "running"
+	case strings.Contains(status, "cancel"):
+		return "cancelled"
+	case strings.Contains(status, "fail") || strings.Contains(status, "error"):
+		return "failed"
+	case strings.Contains(status, "success") || strings.Contains(status, "succeed") ||
+		strings.Contains(status, "complete") || strings.Contains(status, "done") ||
+		strings.Contains(status, "finished"):
+		return "succeeded"
+	case strings.Contains(status, "pause"):
+		return "paused"
+	case strings.Contains(status, "wait"):
+		return "waiting"
+	case strings.Contains(status, "start") || strings.Contains(status, "run") ||
+		strings.Contains(status, "stream"):
+		return "running"
+	default:
+		return status
+	}
+}
+
+func isTerminalThreadStepStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "succeeded", "failed", "cancelled", "canceled":
+		return true
+	default:
+		return false
+	}
+}
+
+func extractIntByExactKeys(root any, keys ...string) (int, bool) {
+	lookup := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		lookup[key] = struct{}{}
+	}
+	return walkIntByExactKeys(root, lookup)
+}
+
+func walkIntByExactKeys(root any, lookup map[string]struct{}) (int, bool) {
+	switch value := root.(type) {
+	case map[string]any:
+		for key, child := range value {
+			if _, ok := lookup[key]; ok {
+				if result, ok := stringifyMatchedInt(child); ok {
+					return result, true
+				}
+			}
+		}
+		for _, child := range value {
+			if result, ok := walkIntByExactKeys(child, lookup); ok {
+				return result, true
+			}
+		}
+	case []any:
+		for _, child := range value {
+			if result, ok := walkIntByExactKeys(child, lookup); ok {
+				return result, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func stringifyMatchedInt(root any) (int, bool) {
+	switch value := root.(type) {
+	case int:
+		return value, true
+	case int64:
+		return int(value), true
+	case uint64:
+		return int(value), true
+	case float64:
+		return int(value), true
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(value))
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func buildReplayFrame(record orm.AgentThreadRecord) string {

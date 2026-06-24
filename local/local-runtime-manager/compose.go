@@ -41,8 +41,65 @@ func (m *ComposeManager) composeBaseArgs(repoRoot string) []string {
 	}
 }
 
+func (m *ComposeManager) composeArgs(repoRoot string) []string {
+	args := m.composeBaseArgs(repoRoot)
+	args = append(args, derivedComposeProfileArgs()...)
+	return args
+}
+
+func derivedComposeProfileArgs() []string {
+	profiles := []string{}
+	if enabledFromEnv("LAZYMIND_DEPLOY_MINERU") {
+		profiles = append(profiles, "mineru")
+	}
+	if isBuiltInServiceURI("LAZYMIND_MILVUS_URI", "http://milvus:19530") {
+		profiles = append(profiles, "milvus")
+	}
+	if isBuiltInServiceURI("LAZYMIND_OPENSEARCH_URI", "https://opensearch:9200") {
+		profiles = append(profiles, "opensearch")
+	}
+	if enabledFromEnv("LAZYMIND_ENABLE_MILVUS_DASHBOARD") && containsProfile(profiles, "milvus") {
+		profiles = append(profiles, "milvus-dashboard")
+	}
+	if enabledFromEnv("LAZYMIND_ENABLE_OPENSEARCH_DASHBOARD") && containsProfile(profiles, "opensearch") {
+		profiles = append(profiles, "opensearch-dashboard")
+	}
+
+	args := make([]string, 0, len(profiles)*2)
+	for _, profile := range profiles {
+		args = append(args, "--profile", profile)
+	}
+	return args
+}
+
+func enabledFromEnv(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func isBuiltInServiceURI(envName, fallback string) bool {
+	v := strings.TrimSpace(os.Getenv(envName))
+	if v == "" {
+		v = fallback
+	}
+	return v == fallback || v == fallback+"/"
+}
+
+func containsProfile(profiles []string, want string) bool {
+	for _, profile := range profiles {
+		if profile == want {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *ComposeManager) ComposeServices(ctx context.Context, repoRoot string) ([]string, error) {
-	args := append(m.composeBaseArgs(repoRoot), "config", "--services")
+	args := append(m.composeArgs(repoRoot), "config", "--services")
 	res, err := m.runner.Run(ctx, Command{Name: "docker", Args: args, Dir: repoRoot})
 	if err != nil {
 		return nil, fmt.Errorf("docker compose config --services failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
@@ -53,7 +110,7 @@ func (m *ComposeManager) ComposeServices(ctx context.Context, repoRoot string) (
 
 func (m *ComposeManager) ComposeDown(ctx context.Context, repoRoot string, profile string) error {
 	_ = profile
-	args := append(m.composeBaseArgs(repoRoot), "down", "--remove-orphans")
+	args := append(m.composeArgs(repoRoot), "down", "--remove-orphans")
 	res, err := m.runner.Run(ctx, Command{Name: "docker", Args: args, Dir: repoRoot})
 	if err != nil {
 		return fmt.Errorf("docker compose down failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
@@ -62,7 +119,7 @@ func (m *ComposeManager) ComposeDown(ctx context.Context, repoRoot string, profi
 }
 
 func (m *ComposeManager) ComposePS(ctx context.Context, repoRoot string) (string, error) {
-	args := append(m.composeBaseArgs(repoRoot), "ps", "-a")
+	args := append(m.composeArgs(repoRoot), "ps", "-a")
 	res, err := m.runner.Run(ctx, Command{Name: "docker", Args: args, Dir: repoRoot})
 	if err != nil {
 		return res.Stdout + res.Stderr, fmt.Errorf("docker compose ps failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
@@ -71,7 +128,7 @@ func (m *ComposeManager) ComposePS(ctx context.Context, repoRoot string) (string
 }
 
 func (m *ComposeManager) ComposeStatus(ctx context.Context, repoRoot string) ([]ComposeServiceStatus, error) {
-	args := append(m.composeBaseArgs(repoRoot), "ps", "-a", "--format", "json")
+	args := append(m.composeArgs(repoRoot), "ps", "-a", "--format", "json")
 	res, err := m.runner.Run(ctx, Command{Name: "docker", Args: args, Dir: repoRoot})
 	if err != nil {
 		return nil, fmt.Errorf("docker compose ps --format json failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
@@ -104,7 +161,7 @@ func (m *ComposeManager) ComposeUp(ctx context.Context, repoRoot string, profile
 	if len(remaining) == 0 {
 		_ = profile
 	}
-	args := append(m.composeBaseArgs(repoRoot), "up", "--build")
+	args := append(m.composeArgs(repoRoot), "up", "--build")
 	for _, svc := range disabled.DisabledContainerTypes {
 		if svc == "" {
 			continue
