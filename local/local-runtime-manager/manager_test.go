@@ -205,14 +205,14 @@ func TestComposeUpScalesDisabledServicesToZero(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	overlay := filepath.Join(repo, localComposeOverrideName)
-	if err := os.WriteFile(overlay, []byte("x-lazymind-local:\n  mode: local\n  disabled_container_services:\n    - redis\n"), 0o644); err != nil {
+	if err := os.WriteFile(overlay, []byte("x-lazymind-local:\n  mode: local\n  disabled_container_services:\n    - redis\n    - evo-api\n"), 0o644); err != nil {
 		t.Fatalf("write overlay: %v", err)
 	}
 
 	runner := &fakeRunner{t: t}
 	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
 	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
-		return CommandResult{Stdout: "redis\nauth-service\ncore\n"}, nil
+		return CommandResult{Stdout: "redis\nevo-api\nauth-service\ncore\n"}, nil
 	}, func(cmd Command) (CommandResult, error) {
 		assertCommandContainsInOrder(t, cmd, "docker", []string{
 			"compose",
@@ -223,11 +223,12 @@ func TestComposeUpScalesDisabledServicesToZero(t *testing.T) {
 			"up",
 			"--build",
 			"--scale", "redis=0",
+			"--scale", "evo-api=0",
 			"auth-service", "core",
 		})
 		for _, arg := range cmd.Args {
-			if arg == "redis" {
-				t.Fatalf("disabled service redis should not be in explicit service list: %v", cmd.Args)
+			if arg == "redis" || arg == "evo-api" {
+				t.Fatalf("disabled service %s should not be in explicit service list: %v", arg, cmd.Args)
 			}
 		}
 		return CommandResult{}, nil

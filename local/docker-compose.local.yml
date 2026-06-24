@@ -81,6 +81,7 @@ x-lazymind-local:
   disabled_container_services:
     - redis
     - kong
+    - evo-api
 
 volumes:
   sqlite-data:

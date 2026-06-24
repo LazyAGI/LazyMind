@@ -41,7 +41,7 @@ func TestLoadUsesDefaults(t *testing.T) {
 		routesByName[route.Name] = route
 	}
 
-	wantRoute := func(name, prefix, upstream, healthPath string, stripPath, optional bool) {
+	wantRoute := func(name, prefix, upstream, healthPath string, stripPath, optional, enabled bool) {
 		route, ok := routesByName[name]
 		if !ok {
 			t.Fatalf("route %q missing", name)
@@ -61,16 +61,16 @@ func TestLoadUsesDefaults(t *testing.T) {
 		if route.HealthPath != healthPath {
 			t.Fatalf("route %q healthPath = %q, want %q", name, route.HealthPath, healthPath)
 		}
-		if !route.Enabled {
-			t.Fatalf("route %q enabled = false, want true", name)
+		if route.Enabled != enabled {
+			t.Fatalf("route %q enabled = %v, want %v", name, route.Enabled, enabled)
 		}
 	}
 
-	wantRoute("authservice-route", "/api/authservice", "http://127.0.0.1:8000", "/health", false, false)
-	wantRoute("chat-route", "/api/chat", "http://127.0.0.1:8046", "/health", false, false)
-	wantRoute("scan-route", "/api/scan", "http://127.0.0.1:18080", "/health", false, true)
-	wantRoute("core-route", "/api/core", "http://127.0.0.1:8001", "/health", true, false)
-	wantRoute("evo-route", "/api/evo", "http://127.0.0.1:8047", "/health", true, true)
+	wantRoute("authservice-route", "/api/authservice", "http://127.0.0.1:8000", "/health", false, false, true)
+	wantRoute("chat-route", "/api/chat", "http://127.0.0.1:8046", "/health", false, false, true)
+	wantRoute("scan-route", "/api/scan", "http://127.0.0.1:18080", "/health", false, true, true)
+	wantRoute("core-route", "/api/core", "http://127.0.0.1:8001", "/health", true, false, true)
+	wantRoute("evo-route", "/api/evo", "http://127.0.0.1:8047", "/health", true, true, true)
 }
 
 func TestLoadFromConfigFile(t *testing.T) {
@@ -216,7 +216,7 @@ func TestLoadCloudReplaceKongConfigFile(t *testing.T) {
 		routesByName[route.Name] = route
 	}
 
-	wantRoute := func(name, prefix, upstream, healthPath string, stripPath, optional bool) {
+	wantRoute := func(name, prefix, upstream, healthPath string, stripPath, optional, enabled bool) {
 		route, ok := routesByName[name]
 		if !ok {
 			t.Fatalf("route %q missing", name)
@@ -236,13 +236,16 @@ func TestLoadCloudReplaceKongConfigFile(t *testing.T) {
 		if route.HealthPath != healthPath {
 			t.Fatalf("route %q healthPath = %q, want %q", name, route.HealthPath, healthPath)
 		}
+		if route.Enabled != enabled {
+			t.Fatalf("route %q enabled = %v, want %v", name, route.Enabled, enabled)
+		}
 	}
 
-	wantRoute("authservice-route", "/api/authservice", "http://127.0.0.1:18000", "/api/authservice/auth/health", false, false)
-	wantRoute("chat-route", "/api/chat", "http://127.0.0.1:18046", "/health", false, false)
-	wantRoute("scan-route", "/api/scan", "http://127.0.0.1:18080", "/healthz", false, true)
-	wantRoute("core-route", "/api/core", "http://127.0.0.1:18001", "/health", true, false)
-	wantRoute("evo-route", "/api/evo", "http://127.0.0.1:18047", "/healthz", true, true)
+	wantRoute("authservice-route", "/api/authservice", "http://127.0.0.1:18000", "/api/authservice/auth/health", false, false, true)
+	wantRoute("chat-route", "/api/chat", "http://127.0.0.1:18046", "/health", false, false, true)
+	wantRoute("scan-route", "/api/scan", "http://127.0.0.1:18080", "/healthz", false, true, true)
+	wantRoute("core-route", "/api/core", "http://127.0.0.1:18001", "/health", true, false, true)
+	wantRoute("evo-route", "/api/evo", "http://127.0.0.1:18047", "/healthz", true, true, false)
 }
 
 func TestLoadUsesCLIConfigPathOverEnv(t *testing.T) {
