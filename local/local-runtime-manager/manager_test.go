@@ -256,6 +256,7 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 		profile,
 		logPath,
 		filepath.Join(repo, "local-proxy.log"),
+		filepath.Join(repo, "auth-service.log"),
 		tokenPath,
 		defaultProcessComposePort,
 	); err != nil {
@@ -303,6 +304,22 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 	}
 	if localProxy.Namespace != "host" {
 		t.Fatalf("unexpected local-proxy namespace %q", localProxy.Namespace)
+	}
+	authService, ok := parsed.Processes[authServiceProcessName]
+	if !ok {
+		t.Fatal("missing auth-service process")
+	}
+	if !strings.Contains(authService.Command, "internal auth-service-run --profile "+profile) {
+		t.Fatalf("missing auth-service-run command: %q", authService.Command)
+	}
+	if !strings.Contains(authService.Shutdown.Command, "internal auth-service-down --profile "+profile) {
+		t.Fatalf("missing auth-service-down command: %q", authService.Shutdown.Command)
+	}
+	if authService.LogLocation != filepath.Join(repo, "auth-service.log") {
+		t.Fatalf("unexpected auth-service log location %q", authService.LogLocation)
+	}
+	if authService.Namespace != "host" {
+		t.Fatalf("unexpected auth-service namespace %q", authService.Namespace)
 	}
 	if strings.Contains(out, "readiness_probe:") {
 		t.Fatal("generated config should not include process-compose readiness_probe")
@@ -381,6 +398,7 @@ func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
 	runner := &fakeRunner{t: t}
 	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
 	manager.probeAPI = func(port int, timeout time.Duration) bool { return true }
+	manager.probeAuth = func(port int, timeout time.Duration) bool { return true }
 	manager.pollInterval = time.Millisecond
 	manager.upTimeout = time.Second
 	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
@@ -479,6 +497,7 @@ func TestRuntimeManagerUpFailsOnExitedService(t *testing.T) {
 	runner := &fakeRunner{t: t}
 	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
 	manager.probeAPI = func(port int, timeout time.Duration) bool { return true }
+	manager.probeAuth = func(port int, timeout time.Duration) bool { return true }
 	manager.pollInterval = time.Millisecond
 	manager.upTimeout = time.Second
 	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
@@ -570,6 +589,7 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 		probeCalls++
 		return probeCalls == 1
 	}
+	manager.probeAuth = func(port int, timeout time.Duration) bool { return false }
 	manager.pollInterval = time.Millisecond
 	manager.downTimeout = time.Second
 	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)

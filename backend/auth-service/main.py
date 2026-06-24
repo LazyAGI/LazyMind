@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -30,6 +31,7 @@ _OPENAPI_JSON_PATH = f'{_API_PREFIX}/openapi.json'
 _SWAGGER_JSON_PATH = f'{_API_PREFIX}/swagger.json'
 _OPENAPI_YAML_PATH = f'{_API_PREFIX}/openapi.yaml'
 _DOCS_PATH = f'{_API_PREFIX}/docs'
+_OPENAPI_EXPORT_ENABLED_ENV = 'LAZYMIND_AUTH_OPENAPI_EXPORT_ENABLED'
 
 app = FastAPI(
     title='Auth Service',
@@ -251,6 +253,10 @@ async def _stop_cloud_oauth_health_check():
 
 
 def _export_openapi_artifacts() -> None:
+    export_enabled = (os.getenv(_OPENAPI_EXPORT_ENABLED_ENV, '1') or '').strip().lower()
+    if export_enabled in {'0', 'false', 'no', 'off'}:
+        return
+
     schema = app.openapi()
     current_dir = Path(__file__).resolve().parent
     repo_root = current_dir.parent.parent
