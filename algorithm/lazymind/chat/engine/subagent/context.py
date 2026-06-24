@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import lazyllm
 
@@ -55,6 +56,88 @@ class SubAgentContext:
 
     def saved_keys(self) -> List[str]:
         return list(self._artifact_counts.keys())
+
+    # ------------------------------------------------------------------
+    # Draft file management
+    # Draft files live under workspace/drafts/ and store the in-progress
+    # text content of an artifact between patch_artifact calls.
+    # A sidecar .meta file holds the original content_type ('text'/'json').
+    # ------------------------------------------------------------------
+
+    def _drafts_dir(self) -> str:
+        return os.path.join(self.workspace_path, 'drafts')
+
+    def draft_path(self, key: str, list_index: Optional[int] = None) -> str:
+        """Return the absolute path of the draft file for *key*."""
+        name = f'{key}_{list_index}.draft' if list_index is not None else f'{key}.draft'
+        return os.path.join(self._drafts_dir(), name)
+
+    def _meta_path(self, key: str, list_index: Optional[int] = None) -> str:
+        name = f'{key}_{list_index}.draft.meta' if list_index is not None else f'{key}.draft.meta'
+        return os.path.join(self._drafts_dir(), name)
+
+    def read_draft(self, key: str, list_index: Optional[int] = None) -> Optional[Tuple[str, str]]:
+        """Return *(content, original_type)* or None if no draft exists."""
+        path = self.draft_path(key, list_index)
+        meta = self._meta_path(key, list_index)
+        if not os.path.exists(path):
+            return None
+        with open(path, 'r', encoding='utf-8') as fh:
+            content = fh.read()
+        original_type = 'text'
+        if os.path.exists(meta):
+            try:
+                original_type = json.loads(open(meta).read()).get('original_type', 'text')
+            except Exception:
+                pass
+        return content, original_type
+
+    def write_draft(self, key: str, original_type: str, content: str,
+                    list_index: Optional[int] = None) -> None:
+        """Write *content* to the draft file and record *original_type* in the sidecar."""
+        os.makedirs(self._drafts_dir(), exist_ok=True)
+        with open(self.draft_path(key, list_index), 'w', encoding='utf-8') as fh:
+            fh.write(content)
+        with open(self._meta_path(key, list_index), 'w', encoding='utf-8') as fh:
+            json.dump({'original_type': original_type}, fh)
+
+    def delete_draft(self, key: str, list_index: Optional[int] = None) -> None:
+        """Delete the draft file and its sidecar (silent if missing)."""
+        for p in (self.draft_path(key, list_index), self._meta_path(key, list_index)):
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
+
+    def list_pending_drafts(self) -> List[Tuple[str, str, str]]:
+        """Return *(key, original_type, content)* for every draft that still exists."""
+        drafts_dir = self._drafts_dir()
+        if not os.path.isdir(drafts_dir):
+            return []
+        results = []
+        for name in os.listdir(drafts_dir):
+            if not name.endswith('.draft'):
+                continue
+            stem = name[:-len('.draft')]
+            # Reconstruct key (and optional list_index) from filename.
+            # Filenames: {key}.draft  or  {key}_{list_index}.draft
+            # We only need key for the flush call; list_index is encoded in the name.
+            key = stem
+            path = os.path.join(drafts_dir, name)
+            meta_path = path + '.meta'
+            original_type = 'text'
+            if os.path.exists(meta_path):
+                try:
+                    original_type = json.loads(open(meta_path).read()).get('original_type', 'text')
+                except Exception:
+                    pass
+            try:
+                with open(path, 'r', encoding='utf-8') as fh:
+                    content = fh.read()
+            except OSError:
+                continue
+            results.append((key, original_type, content))
+        return results
 
     def ensure_workspace(self) -> None:
         if self.workspace_path:
