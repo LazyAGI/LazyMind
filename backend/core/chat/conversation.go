@@ -215,7 +215,11 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	if len(dbDisabledTools) > 0 {
 		resourceContext.DisabledTools = mergeDisabledToolNames(resourceContext.DisabledTools, dbDisabledTools)
 	}
-	reqBody := buildChatRequestBody(convID, sessionID, query, upstreamHistories, raw, resourceContext, userID)
+	reqBody := buildChatRequestBody(r.Context(), db, convID, sessionID, query, upstreamHistories, raw, resourceContext, userID)
+	if err := applyLocalFSPathsForChat(r.Context(), r, db, userID, reqBody); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load local fs chat paths failed", err), http.StatusInternalServerError)
+		return
+	}
 	if cnt, err := subagent.CountByConversation(r.Context(), db, convID); err == nil && cnt > 0 {
 		reqBody["has_subagents"] = true
 	}

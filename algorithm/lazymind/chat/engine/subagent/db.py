@@ -194,7 +194,7 @@ class SubAgentDB:
             return []
 
     def load_artifacts_for_tasks(self, task_ids: List[str]) -> List[Dict[str, Any]]:
-        """Return artifacts for a list of task_ids, ordered by task_id / key / seq ASC.
+        """Return non-hidden artifacts for a list of task_ids, ordered by task_id / key / seq ASC.
 
         Returns empty list on any error or if task_ids is empty.
         """
@@ -206,7 +206,7 @@ class SubAgentDB:
                     text(
                         'SELECT task_id, artifact_key, content_type, value, seq '
                         'FROM sub_agent_artifacts '
-                        'WHERE task_id IN :ids '
+                        'WHERE task_id IN :ids AND hidden = FALSE '
                         'ORDER BY task_id, artifact_key, seq ASC'
                     ).bindparams(bindparam('ids', expanding=True)),
                     {'ids': task_ids},
@@ -229,6 +229,309 @@ class SubAgentDB:
             return out
         except Exception:
             return []
+
+    def load_selected_slot_artifacts_with_order(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return selected slot revisions with sort_order derived from plugin_slot_order.
+
+        sort_order is the 1-based position in the order_list JSON array for the slot.
+        Falls back to list_index + 1 when no order row exists for the slot.
+
+        Returns a list of dicts with keys:
+          artifact_key, list_index, artifact_seq, human_artifact_id,
+          content_snapshot, change_source, task_id, sort_order
+        Returns empty list on any error.
+        """
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    text(
+                        'SELECT '
+                        '  psr.artifact_key, '
+                        '  psr.list_index, '
+                        '  psr.artifact_seq, '
+                        '  psr.human_artifact_id, '
+                        '  psr.content_snapshot, '
+                        '  psr.change_source, '
+                        '  pss.task_id, '
+                        '  COALESCE(pos.sort_order, psr.list_index + 1) AS sort_order '
+                        'FROM plugin_slot_revisions psr '
+                        'LEFT JOIN plugin_session_steps pss '
+                        '  ON pss.session_id = psr.session_id '
+                        '  AND pss.step_id   = psr.step_id '
+                        '  AND pss.attempt   = psr.attempt '
+                        'LEFT JOIN ( '
+                        '  SELECT slot_id, val::int AS list_index, '
+                        '         (ord - 1 + 1) AS sort_order '
+                        '  FROM plugin_slot_order, '
+                        '       jsonb_array_elements_text(order_list) '
+                        '       WITH ORDINALITY AS t(val, ord) '
+                        '  WHERE session_id = :session_id '
+                        ') pos ON pos.slot_id = psr.slot_id '
+                        '      AND pos.list_index = psr.list_index '
+                        'WHERE psr.session_id = :session_id '
+                        '  AND psr.selected = TRUE '
+                        'ORDER BY psr.artifact_key ASC, '
+                        '         COALESCE(pos.sort_order, psr.list_index + 1) ASC'
+                    ),
+                    {'session_id': session_id},
+                ).mappings().all()
+            return [dict(r) for r in rows]
+        except Exception:
+            return []
+
+    def load_slot_artifact_by_sort_order(
+        self, session_id: str, artifact_key: str, sort_order: int
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve sort_order → list_index for a plugin session slot, then return the
+        selected revision metadata (artifact_seq, human_artifact_id, content_snapshot,
+        task_id, list_index).
+
+        Returns None when not found or on any error.
+        """
+        try:
+            with self._conn() as conn:
+                row = conn.execute(
+                    text(
+                        'SELECT '
+                        '  psr.artifact_key, '
+                        '  psr.list_index, '
+                        '  psr.artifact_seq, '
+                        '  psr.human_artifact_id, '
+                        '  psr.content_snapshot, '
+                        '  psr.change_source, '
+                        '  pss.task_id '
+                        'FROM plugin_slot_revisions psr '
+                        'LEFT JOIN plugin_session_steps pss '
+                        '  ON pss.session_id = psr.session_id '
+                        '  AND pss.step_id   = psr.step_id '
+                        '  AND pss.attempt   = psr.attempt '
+                        'INNER JOIN ( '
+                        '  SELECT slot_id, val::int AS list_index '
+                        '  FROM plugin_slot_order, '
+                        '       jsonb_array_elements_text(order_list) '
+                        '       WITH ORDINALITY AS t(val, ord) '
+                        '  WHERE session_id = :session_id '
+                        '    AND (ord - 1 + 1) = :sort_order '
+                        ') pos ON pos.slot_id = psr.slot_id '
+                        '      AND pos.list_index = psr.list_index '
+                        'WHERE psr.session_id = :session_id '
+                        '  AND psr.artifact_key = :artifact_key '
+                        '  AND psr.selected = TRUE '
+                        'ORDER BY psr.list_index ASC '
+                        'LIMIT 1'
+                    ),
+                    {
+                        'session_id': session_id,
+                        'artifact_key': artifact_key,
+                        'sort_order': sort_order,
+                    },
+                ).mappings().first()
+            return dict(row) if row else None
+        except Exception:
+            return None
+
+    def resolve_slot_revision_value(
+        self, row: Dict[str, Any]
+    ) -> tuple:
+        """Resolve value and content_type from a plugin_slot_revisions row dict.
+
+        Returns (value, content_type) where value may be None if unresolvable.
+        """
+        human_artifact_id = row.get('human_artifact_id')
+        artifact_seq = row.get('artifact_seq')
+        task_id = row.get('task_id')
+        content_snapshot = row.get('content_snapshot')
+
+        value: Any = None
+        content_type: Optional[str] = None
+
+        try:
+            if human_artifact_id:
+                with self._conn() as conn:
+                    ha = conn.execute(
+                        text(
+                            'SELECT value, content_type FROM plugin_human_artifacts '
+                            'WHERE id = :id'
+                        ),
+                        {'id': human_artifact_id},
+                    ).mappings().first()
+                if ha is not None:
+                    raw = ha['value']
+                    content_type = ha['content_type']
+                    value = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            elif artifact_seq is not None and task_id:
+                with self._conn() as conn:
+                    ar = conn.execute(
+                        text(
+                            'SELECT value, content_type FROM sub_agent_artifacts '
+                            'WHERE task_id = :tid AND artifact_key = :key AND seq = :seq'
+                        ),
+                        {'tid': task_id, 'key': row.get('artifact_key', ''), 'seq': artifact_seq},
+                    ).mappings().first()
+                if ar is not None:
+                    raw = ar['value']
+                    content_type = ar['content_type']
+                    value = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            elif content_snapshot is not None:
+                if isinstance(content_snapshot, str):
+                    try:
+                        value = json.loads(content_snapshot)
+                    except ValueError:
+                        value = {}
+                else:
+                    value = content_snapshot or {}
+        except Exception:
+            pass
+
+        return value, content_type
+
+    def load_selected_slot_artifacts_resolved_with_order(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return selected slot artifacts with resolved values and sort_order.
+
+        Combines load_selected_slot_artifacts_with_order (raw rows + sort_order) with the
+        value-resolution logic from resolve_slot_revision_value.
+
+        Returns a list of dicts with keys:
+          artifact_key, sort_order, content_type, value, is_human (bool)
+        Returns empty list on any error.
+        """
+        try:
+            raw_rows = self.load_selected_slot_artifacts_with_order(session_id)
+            if not raw_rows:
+                return []
+            out: List[Dict[str, Any]] = []
+            for r in raw_rows:
+                artifact_key = r.get('artifact_key', '')
+                sort_order = r.get('sort_order') or 1
+                is_human = bool(r.get('human_artifact_id'))
+                value, content_type = self.resolve_slot_revision_value(r)
+                if value is None:
+                    continue
+                out.append({
+                    'artifact_key': artifact_key,
+                    'sort_order': sort_order,
+                    'content_type': content_type,
+                    'value': value,
+                    'is_human': is_human,
+                })
+            return out
+        except Exception:
+            return []
+
+    def load_selected_slot_artifacts(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return the currently-selected slot values for a plugin session.
+
+        Value resolution priority (mirrors enrichSlots in Go):
+          1. human_artifact_id IS NOT NULL → read from plugin_human_artifacts.
+          2. artifact_seq IS NOT NULL      → read from sub_agent_artifacts by exact seq.
+          3. content_snapshot IS NOT NULL  → legacy fallback for pre-migration rows.
+
+        Only revisions that resolve to a non-NULL value are returned.
+        Returns empty list on any error.
+        """
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    text(
+                        'SELECT '
+                        '  psr.artifact_key, '
+                        '  psr.list_index, '
+                        '  psr.artifact_seq, '
+                        '  psr.human_artifact_id, '
+                        '  psr.content_snapshot, '
+                        '  pss.task_id '
+                        'FROM plugin_slot_revisions psr '
+                        'LEFT JOIN plugin_session_steps pss '
+                        '  ON pss.session_id = psr.session_id '
+                        '  AND pss.step_id   = psr.step_id '
+                        '  AND pss.attempt   = psr.attempt '
+                        'WHERE psr.session_id = :session_id '
+                        '  AND psr.selected = TRUE '
+                        'ORDER BY psr.artifact_key ASC, COALESCE(psr.list_index, -1) ASC'
+                    ),
+                    {'session_id': session_id},
+                ).mappings().all()
+            out: List[Dict[str, Any]] = []
+            for r in rows:
+                value: Any = None
+                content_type: Optional[str] = None
+
+                human_artifact_id = r['human_artifact_id']
+                artifact_seq = r['artifact_seq']
+                task_id = r['task_id']
+
+                if human_artifact_id:
+                    # Human revision: read from plugin_human_artifacts.
+                    with self._conn() as conn2:
+                        ha_row = conn2.execute(
+                            text(
+                                'SELECT value, content_type FROM plugin_human_artifacts '
+                                'WHERE id = :id'
+                            ),
+                            {'id': human_artifact_id},
+                        ).mappings().first()
+                    if ha_row is not None:
+                        raw = ha_row['value']
+                        content_type = ha_row['content_type']
+                        if isinstance(raw, str):
+                            try:
+                                value = json.loads(raw)
+                            except ValueError:
+                                value = {}
+                        else:
+                            value = raw or {}
+                elif artifact_seq is not None and task_id:
+                    # AI revision: load from sub_agent_artifacts by exact seq.
+                    with self._conn() as conn2:
+                        art_row = conn2.execute(
+                            text(
+                                'SELECT value, content_type FROM sub_agent_artifacts '
+                                'WHERE task_id = :tid AND artifact_key = :key AND seq = :seq'
+                            ),
+                            {'tid': task_id, 'key': r['artifact_key'], 'seq': artifact_seq},
+                        ).mappings().first()
+                    if art_row is not None:
+                        raw = art_row['value']
+                        content_type = art_row['content_type']
+                        if isinstance(raw, str):
+                            try:
+                                value = json.loads(raw)
+                            except ValueError:
+                                value = {}
+                        else:
+                            value = raw or {}
+                else:
+                    # Legacy fallback: content_snapshot for pre-migration rows.
+                    snapshot = r['content_snapshot']
+                    if snapshot is None:
+                        continue
+                    if isinstance(snapshot, str):
+                        try:
+                            value = json.loads(snapshot)
+                        except ValueError:
+                            value = {}
+                    else:
+                        value = snapshot or {}
+
+                if value is None:
+                    continue
+                out.append({
+                    'artifact_key': r['artifact_key'],
+                    'content_type': content_type,
+                    'value': value,
+                    'list_index': r['list_index'],
+                })
+            return out
+        except Exception:
+            return []
+
+    def format_plugin_session_artifacts(self, session_id: str) -> List[str]:
+        rows = self.load_selected_slot_artifacts_resolved_with_order(session_id)
+        return _rows_to_artifact_summary(rows) if rows else []
+
+    def format_task_artifacts(self, task_ids: List[str]) -> List[str]:
+        rows = self.load_artifacts_for_tasks(task_ids)
+        return _rows_to_artifact_summary(rows, order_field='seq', is_human_field=None) if rows else []
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +610,7 @@ class TaskQueryDB:
                 task_rows = conn.execute(
                     text(
                         'SELECT id, title, agent_type, status, progress_pct, current_phase, '
-                        '       summary, seq_in_conversation, output_artifact_keys '
+                        '       summary, seq_in_conversation, output_artifact_keys, params '
                         'FROM sub_agent_tasks '
                         'WHERE conversation_id = :conv_id '
                         'ORDER BY seq_in_conversation ASC'
@@ -370,5 +673,251 @@ class TaskQueryDB:
                 'seq_in_conversation': r['seq_in_conversation'],
                 'output_artifact_keys': out_keys or [],
                 'artifacts': arts_by_task.get(r['id'], []),
+                'params': r['params'],
             })
         return tasks
+
+    def format_plugin_session_artifacts(self, session_id: str) -> List[str]:
+        rows = self.load_plugin_session_slot_summary(session_id)
+        return _rows_to_artifact_summary(rows) if rows else []
+
+    def format_task_artifacts(self, task_ids: List[str]) -> List[str]:
+        rows = self.load_artifacts_for_tasks(task_ids)
+        return _rows_to_artifact_summary(rows, order_field='seq', is_human_field=None) if rows else []
+
+    def build_chat_agent_task_context(self, conv_id: str) -> str:
+        """Build the ## Tasks system-prompt section for ChatAgent.
+
+        For each task in the conversation (plugin_step regardless of status,
+        ordinary tasks only when terminal):
+        - plugin_step → format_plugin_session_artifacts (plugin_slot_revisions)
+        - ordinary    → format_task_artifacts (sub_agent_artifacts)
+        Returns '' on any error or when there is nothing to show.
+        """
+        try:
+            tasks = self.list_tasks_by_conversation(conv_id)
+        except Exception:
+            return ''
+        if not tasks:
+            return ''
+        terminal = {'succeeded', 'failed', 'interrupted'}
+        lines = ['## Tasks (real-time state — user may have added or removed items since earlier '
+                 'in this conversation; treat this list as the single source of truth)']
+        for t in tasks:
+            status = str(t.get('status') or '')
+            agent_type = str(t.get('agent_type') or '')
+            # plugin_step tasks may still be running but have partial artifacts — always include.
+            # Ordinary tasks only matter once they've reached a terminal state.
+            if agent_type != 'plugin_step' and status not in terminal:
+                continue
+            seq = t.get('seq_in_conversation', '')
+            title = str(t.get('title') or '')
+            task_ref = f'{seq}. {title}' if seq else title
+            summary = str(t.get('summary') or '').strip()
+            status_label = {'succeeded': 'done', 'failed': 'failed',
+                            'interrupted': 'interrupted',
+                            'running': 'in progress', 'pending': 'pending'}.get(status, status)
+            header = f'- Task {task_ref} [{status_label}]'
+            if summary:
+                header += f': {summary}'
+            lines.append(header)
+
+            agent_type = str(t.get('agent_type') or '')
+            if agent_type == 'plugin_step':
+                # Plugin step artifacts are already injected via _build_session_artifact_section.
+                # Only show progress summary here to avoid duplicate / misleading context.
+                art_lines = []
+            else:
+                art_lines = self.format_task_artifacts([t['id']])
+            lines.extend(f'  {ln}' for ln in art_lines)
+
+        if len(lines) == 1:
+            return ''
+        return '\n'.join(lines)
+
+    def load_plugin_session_slot_summary(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return selected slot artifacts for a plugin session, resolved with sort_order.
+
+        Returns a list of dicts with keys:
+          artifact_key, sort_order, content_type, value, is_human (bool)
+        Returns empty list on any error or when session has no selected artifacts.
+
+        Uses the same resolution logic as SubAgentDB.load_selected_slot_artifacts_resolved_with_order
+        but runs on the shared TaskQueryDB engine (no per-request DSN needed).
+        """
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    text(
+                        'SELECT '
+                        '  psr.artifact_key, '
+                        '  psr.list_index, '
+                        '  psr.artifact_seq, '
+                        '  psr.human_artifact_id, '
+                        '  psr.content_snapshot, '
+                        '  psr.change_source, '
+                        '  pss.task_id, '
+                        '  COALESCE(pos.sort_order, psr.list_index + 1) AS sort_order '
+                        'FROM plugin_slot_revisions psr '
+                        'LEFT JOIN plugin_session_steps pss '
+                        '  ON pss.session_id = psr.session_id '
+                        '  AND pss.step_id   = psr.step_id '
+                        '  AND pss.attempt   = psr.attempt '
+                        'LEFT JOIN ( '
+                        '  SELECT slot_id, val::int AS list_index, '
+                        '         (ord - 1 + 1) AS sort_order '
+                        '  FROM plugin_slot_order, '
+                        '       jsonb_array_elements_text(order_list) '
+                        '       WITH ORDINALITY AS t(val, ord) '
+                        '  WHERE session_id = :session_id '
+                        ') pos ON pos.slot_id = psr.slot_id '
+                        '      AND pos.list_index = psr.list_index '
+                        'WHERE psr.session_id = :session_id '
+                        '  AND psr.selected = TRUE '
+                        'ORDER BY psr.artifact_key ASC, '
+                        '         COALESCE(pos.sort_order, psr.list_index + 1) ASC'
+                    ),
+                    {'session_id': session_id},
+                ).mappings().all()
+        except Exception:
+            return []
+
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            artifact_key = r.get('artifact_key', '')
+            sort_order = r.get('sort_order') or 1
+            is_human = bool(r.get('human_artifact_id'))
+
+            value: Any = None
+            content_type: Optional[str] = None
+            human_artifact_id = r.get('human_artifact_id')
+            artifact_seq = r.get('artifact_seq')
+            task_id = r.get('task_id')
+
+            try:
+                if human_artifact_id:
+                    with self._conn() as conn2:
+                        ha = conn2.execute(
+                            text(
+                                'SELECT value, content_type FROM plugin_human_artifacts '
+                                'WHERE id = :id'
+                            ),
+                            {'id': human_artifact_id},
+                        ).mappings().first()
+                    if ha is not None:
+                        raw = ha['value']
+                        content_type = ha['content_type']
+                        value = json.loads(raw) if isinstance(raw, str) else (raw or {})
+                elif artifact_seq is not None and task_id:
+                    with self._conn() as conn2:
+                        ar = conn2.execute(
+                            text(
+                                'SELECT value, content_type FROM sub_agent_artifacts '
+                                'WHERE task_id = :tid AND artifact_key = :key AND seq = :seq'
+                            ),
+                            {'tid': task_id, 'key': artifact_key, 'seq': artifact_seq},
+                        ).mappings().first()
+                    if ar is not None:
+                        raw = ar['value']
+                        content_type = ar['content_type']
+                        value = json.loads(raw) if isinstance(raw, str) else (raw or {})
+                elif r.get('content_snapshot') is not None:
+                    snap = r['content_snapshot']
+                    value = json.loads(snap) if isinstance(snap, str) else (snap or {})
+            except Exception:
+                pass
+
+            if value is None:
+                continue
+            out.append({
+                'artifact_key': artifact_key,
+                'sort_order': sort_order,
+                'content_type': content_type,
+                'value': value,
+                'is_human': is_human,
+            })
+        return out
+
+
+# ---------------------------------------------------------------------------
+# Shared artifact formatting utilities
+# Used by both SubAgent (runner.py) and ChatAgent (plugin_manager.py).
+# ---------------------------------------------------------------------------
+
+_ARTIFACT_SUMMARY_LIMIT = 200  # chars for inline text/json preview
+
+
+def artifact_summary_line(value: Any, content_type: Optional[str], is_human: bool) -> str:
+    """Return a one-line summary for a single artifact value."""
+    suffix = ' (by user)' if is_human else ''
+    ct = (content_type or '').lower()
+    if ct in ('image', 'file', 'file_list'):
+        if isinstance(value, dict):
+            name = value.get('filename') or value.get('path', '').split('/')[-1] or '(file)'
+            caption = value.get('caption') or ''
+            label = f'{name} — {caption}' if caption else name
+        else:
+            label = str(value)
+        return f'{label}{suffix}'
+    # text / json — inline preview
+    if isinstance(value, dict):
+        text_val = value.get('text') or ''
+        if not text_val and 'data' in value:
+            text_val = json.dumps(value['data'], ensure_ascii=False)
+        if not text_val:
+            text_val = json.dumps(value, ensure_ascii=False)
+    else:
+        text_val = str(value) if value else ''
+    if len(text_val) <= _ARTIFACT_SUMMARY_LIMIT:
+        return f'{text_val}{suffix}'
+    return f'{text_val[:_ARTIFACT_SUMMARY_LIMIT]}...{suffix} (use get_artifact to read full content)'
+
+
+def format_artifact_summary(
+    key_items: Dict[str, List[tuple]],
+    key_content_type: Dict[str, str],
+) -> List[str]:
+    """Format collected artifact items into summary block lines.
+
+    Each tuple in key_items[key] is (sort_order, content_type, value, is_human).
+    Returns a list of lines starting with an 'Available artifacts' header.
+    """
+    lines = ['Available artifacts (use get_artifact to retrieve content):']
+    for key in sorted(key_items.keys()):
+        items = sorted(key_items[key], key=lambda t: t[0])
+        ct_label = key_content_type.get(key, 'unknown')
+        count = len(items)
+        if count > 1:
+            header = f'- "{key}" [{ct_label}, {count} items]:'
+        else:
+            header = f'- "{key}" [{ct_label}]:'
+        lines.append(header)
+        for sort_order, ct, value, is_human in items:
+            summary = artifact_summary_line(value, ct, is_human)
+            if count > 1:
+                lines.append(f'    [{sort_order}] {summary}')
+            else:
+                lines.append(f'    {summary}')
+    return lines
+
+
+def _rows_to_artifact_summary(
+    rows: List[Dict[str, Any]],
+    order_field: str = 'sort_order',
+    is_human_field: Optional[str] = 'is_human',
+) -> List[str]:
+    from collections import defaultdict
+    key_items: Dict[str, List[tuple]] = defaultdict(list)
+    key_content_type: Dict[str, str] = {}
+    for r in rows:
+        key = r.get('artifact_key', '')
+        if not key:
+            continue
+        ct = r.get('content_type') or ''
+        value = r.get('value') or {}
+        order = r.get(order_field) or 1
+        is_human = bool(r.get(is_human_field)) if is_human_field else False
+        key_items[key].append((order, ct, value, is_human))
+        if ct and key not in key_content_type:
+            key_content_type[key] = ct
+    return format_artifact_summary(key_items, key_content_type)

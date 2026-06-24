@@ -448,6 +448,46 @@ func TestBatchDeleteDocumentRecalculatesParentFolderSize(t *testing.T) {
 	assertFolderHasZeroSize(t, db, "dataset-1", "folder-1")
 }
 
+func TestDeleteFolderDeletesChildrenAndUpdatesDatasetStats(t *testing.T) {
+	db := newDocumentTestDB(t)
+	seedFolderWithSizedDoc(t, db, "dataset-1", "folder-1", "doc-1", 31744)
+	assertDatasetStats(t, "dataset-1", 1, 31744)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/core/datasets/dataset-1/documents/folder-1", nil)
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{"dataset": "dataset-1", "document": "folder-1"})
+	rec := httptest.NewRecorder()
+
+	DeleteDocument(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertDocumentSoftDeleted(t, db, "dataset-1", "folder-1")
+	assertDocumentSoftDeleted(t, db, "dataset-1", "doc-1")
+	assertDatasetStats(t, "dataset-1", 0, 0)
+}
+
+func TestBatchDeleteFolderDeletesChildrenAndUpdatesDatasetStats(t *testing.T) {
+	db := newDocumentTestDB(t)
+	seedFolderWithSizedDoc(t, db, "dataset-1", "folder-1", "doc-1", 31744)
+	assertDatasetStats(t, "dataset-1", 1, 31744)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/datasets/dataset-1:batchDelete", strings.NewReader(`{"parent":"datasets/dataset-1","names":["folder-1"]}`))
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{"dataset": "dataset-1"})
+	rec := httptest.NewRecorder()
+
+	BatchDeleteDocument(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertDocumentSoftDeleted(t, db, "dataset-1", "folder-1")
+	assertDocumentSoftDeleted(t, db, "dataset-1", "doc-1")
+	assertDatasetStats(t, "dataset-1", 0, 0)
+}
+
 func seedFolderWithSizedDoc(t *testing.T, db *orm.DB, datasetID, folderID, docID string, size int64) {
 	t.Helper()
 	now := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
@@ -499,6 +539,25 @@ func seedFolderWithSizedDoc(t *testing.T, db *orm.DB, datasetID, folderID, docID
 		},
 	}).Error; err != nil {
 		t.Fatalf("create child document: %v", err)
+	}
+}
+
+func assertDatasetStats(t *testing.T, datasetID string, wantCount, wantSize int64) {
+	t.Helper()
+	stats := calcDatasetStats(context.Background(), datasetID)
+	if stats.DocumentCount != wantCount || stats.DocumentSize != wantSize {
+		t.Fatalf("expected dataset stats count=%d size=%d, got %+v", wantCount, wantSize, stats)
+	}
+}
+
+func assertDocumentSoftDeleted(t *testing.T, db *orm.DB, datasetID, docID string) {
+	t.Helper()
+	var row orm.Document
+	if err := db.Where("id = ? AND dataset_id = ?", docID, datasetID).Take(&row).Error; err != nil {
+		t.Fatalf("query document %s: %v", docID, err)
+	}
+	if row.DeletedAt == nil {
+		t.Fatalf("expected document %s to be soft deleted", docID)
 	}
 }
 

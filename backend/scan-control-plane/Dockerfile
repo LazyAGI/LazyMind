@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 ARG DOCKER_MIRROR=docker.m.daocloud.io/library/
 FROM ${DOCKER_MIRROR}golang:1.25-bookworm AS build
 

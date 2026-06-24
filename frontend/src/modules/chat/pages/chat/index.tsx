@@ -19,8 +19,6 @@ import InitialCard from "@/modules/chat/components/InitialCard";
 import ChatConfigs, { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import { Method, SSE } from "@/modules/chat/utils/sse";
 import { CHAT_STREAM_URL, ChatServiceApi } from "@/modules/chat/utils/request";
-import { useEffect } from "react";
-import { useConversationSettings } from "@/modules/chat/store/conversationSettings";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
 
@@ -28,16 +26,10 @@ const ChatPage: FC = () => {
   const { t } = useTranslation();
   const [sessionId, setSessionId] = useState("");
   const [chatConfig, setChatConfig] = useState<ChatConfig>();
-  const { enableMultipleAnswers, fetchSwitchStatus } =
-    useConversationSettings();
 
   const chatRef = useRef<ChatImperativeProps>(null);
   const recordListRef = useRef<RecordListImperativeProps>(null);
   const previousSessionIdRef = useRef<string>("");
-
-  useEffect(() => {
-    fetchSwitchStatus();
-  }, [fetchSwitchStatus]);
 
   function onOpenSSE(
     input: Query[],
@@ -70,9 +62,7 @@ const ChatPage: FC = () => {
             tags: chatConfig?.tags,
           },
         },
-        models: enableMultipleAnswers
-          ? ["LazyMind", "DeepSeek"]
-          : ["LazyMind"],
+        models: ["LazyMind"],
         stream: true,
         input,
         environment_context: buildEnvironmentContext(),
@@ -126,7 +116,6 @@ const ChatPage: FC = () => {
         // Reset messages.
         const history = historyRes.data.history;
         const list = buildChatMessageListFromHistory(history, {
-          enableMultipleAnswers,
           fallbackCreateTime: "xxx-xxx-xxx",
           stripCitations: false,
         });

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import json
+import os
 import re
 import time
 from typing import Any, Dict, List, Optional, Union
@@ -84,6 +85,22 @@ def _normalize_kb_id_filter(raw_kb_id: Any) -> str | list[str] | None:
         cleaned = [item.strip() for item in raw_kb_id if isinstance(item, str) and item.strip()]
         return cleaned[0] if len(cleaned) == 1 else (cleaned or None)
     return None
+
+
+def _normalize_localfs_paths(raw_paths: Any) -> list[str]:
+    if raw_paths is None:
+        return []
+    if isinstance(raw_paths, str):
+        items = [raw_paths]
+    elif isinstance(raw_paths, list):
+        items = [item for item in raw_paths if isinstance(item, str)]
+    else:
+        return []
+    return [
+        os.path.realpath(path)
+        for item in items
+        if (path := str(item).strip())
+    ]
 
 
 def check_sensitive_content(
@@ -217,15 +234,23 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     filters = dict(filters or {})
     resolved_files = validate_and_resolve_files(files)
     filters['kb_id'] = _normalize_kb_id_filter(filters.get('kb_id'))
+    LOG.info(f'[KBToolGroup_DEBUG] filters={filters!r} kb_id={filters.get("kb_id")!r}')
 
     raw_history = list(history) if isinstance(history, list) else []
     agent_history = normalize_history_for_agent(raw_history)
     translator = AgentEventFrameTranslator(query=query)
 
+    # localfs_paths is a path whitelist, not a credential. Keep it request-scoped
+    # in agentic_config and remove it before dynamic credential injection.
+    localfs_paths: list[str] = []
+    if tool_config and isinstance(tool_config, dict):
+        localfs_paths = _normalize_localfs_paths(tool_config.pop('localfs_paths', None))
+
     agentic_config = {
         'session_id': session_id,
         'filters': filters if RAG_MODE and filters else {},
         'files': resolved_files,
+        'localfs_paths': localfs_paths,
         'priority': priority,
         'user_id': user_id or '',
         'use_memory': use_memory,
@@ -247,7 +272,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
     from lazymind.chat.plugin.plugin_manager import resolve_plugin_injection
     plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch = \
-        resolve_plugin_injection(plugin_context)
+        resolve_plugin_injection(plugin_context, conversation_id=(conversation_id or '').strip())
     agentic_config.update(agentic_config_patch)
 
     lazyllm.globals._init_sid(sid=session_id)
@@ -268,6 +293,11 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         lazyllm.globals['active_tool_names'] |= set(plugin_stop_tools)
     agent_tools = build_agent_tools(active_configs)
     subagent_tools = _build_subagent_chat_tools(bool(has_subagents))
+    # SubAgent chat tools (create_subagent, list_subagents, …) are always active;
+    # add their names to the allowlist so the ToolGuard does not block them.
+    lazyllm.globals['active_tool_names'] |= {
+        getattr(fn, '__name__', '') for fn in subagent_tools if callable(fn)
+    }
     mcp_tools = _build_mcp_tools(mcp_config) if mcp_config else []
     all_tools = agent_tools + subagent_tools + plugin_tools + mcp_tools
     set_trace_context({

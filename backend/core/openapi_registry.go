@@ -413,6 +413,12 @@ type toolListQueryParams struct {
 	PageSize int32  `query:"page_size"`
 }
 
+type mcpServerListQueryParams struct {
+	Keyword  string `query:"keyword"`
+	Page     int32  `query:"page"`
+	PageSize int32  `query:"page_size"`
+}
+
 type mcpServerPathParams struct {
 	ID string `path:"id"`
 }
@@ -469,13 +475,13 @@ type agentTraceCompareQueryParams struct {
 	B string `query:"b" required:"true"`
 }
 
+type agentThreadPathParams struct {
+	ThreadID string `path:"thread_id"`
+}
+
 type agentThreadListQueryParams struct {
 	PageSize  int32  `query:"page_size"`
 	PageToken string `query:"page_token"`
-}
-
-type agentThreadPathParams struct {
-	ThreadID string `path:"thread_id"`
 }
 
 type agentThreadOpenAPIResponse struct {
@@ -534,6 +540,35 @@ type agentEvalReportBadCaseListOpenAPIResponse struct {
 	Items         []agentEvalReportBadCaseListItemOpenAPIResponse `json:"items"`
 	TotalSize     int                                             `json:"total_size"`
 	NextPageToken string                                          `json:"next_page_token"`
+}
+
+type agentABTestCaseDetailListPathParams struct {
+	ThreadID string `path:"thread_id"`
+	ABTestID string `path:"abtest_id"`
+}
+
+type agentABTestCaseDetailListQueryParams struct {
+	PageToken string `query:"page_token"`
+	PageSize  int32  `query:"page_size"`
+	Keyword   string `query:"keyword"`
+	Outcome   string `query:"outcome"`
+}
+
+type agentABTestCaseDetailListItemOpenAPIResponse struct {
+	CaseID    string         `json:"case_id,omitempty"`
+	Query     string         `json:"query,omitempty"`
+	Outcome   string         `json:"outcome,omitempty"`
+	Before    map[string]any `json:"before,omitempty"`
+	After     map[string]any `json:"after,omitempty"`
+	Delta     map[string]any `json:"delta,omitempty"`
+	Baseline  map[string]any `json:"baseline,omitempty"`
+	Candidate map[string]any `json:"candidate,omitempty"`
+}
+
+type agentABTestCaseDetailListOpenAPIResponse struct {
+	Items         []agentABTestCaseDetailListItemOpenAPIResponse `json:"items"`
+	TotalSize     int                                            `json:"total_size"`
+	NextPageToken string                                         `json:"next_page_token"`
 }
 
 type agentTraceSummaryOpenAPIResponse struct {
@@ -1065,6 +1100,10 @@ type skillTagsOpenAPIResponse struct {
 	Tags []string `json:"tags"`
 }
 
+type skillCategoriesOpenAPIResponse struct {
+	Categories []string `json:"categories"`
+}
+
 type skillDetailChildOpenAPIResponse struct {
 	SkillID                string                              `json:"skill_id"`
 	Name                   string                              `json:"name"`
@@ -1264,6 +1303,14 @@ type personalizationSettingOpenAPIResponse struct {
 	Enabled bool `json:"enabled"`
 }
 
+type localFSChatSettingOpenAPIRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+type localFSChatSettingOpenAPIResponse struct {
+	Enabled bool `json:"enabled"`
+}
+
 type systemGenerateOpenAPIResponse struct {
 	DraftStatus        string `json:"draft_status"`
 	DraftSourceVersion int64  `json:"draft_source_version"`
@@ -1374,6 +1421,21 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  datasetPathParams{},
 			RequestBody: jsonBodyOf(doc.UnsetDefaultDatasetRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: refResp("Unset successfully", "EmptyObject")},
+		},
+		{
+			Method:    "GET",
+			Path:      "/data-sources/local-fs-chat-setting",
+			Summary:   "Get local filesystem chat setting",
+			Tags:      []string{"data-sources"},
+			Responses: map[int]openAPIResponse{200: resp("Local filesystem chat setting", localFSChatSettingOpenAPIResponse{})},
+		},
+		{
+			Method:      "PUT",
+			Path:        "/data-sources/local-fs-chat-setting",
+			Summary:     "Update local filesystem chat setting",
+			Tags:        []string{"data-sources"},
+			RequestBody: jsonBodyOf(localFSChatSettingOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Updated local filesystem chat setting", localFSChatSettingOpenAPIResponse{})},
 		},
 		{
 			Method:      "GET",
@@ -1872,6 +1934,13 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses: map[int]openAPIResponse{200: resp("Skill tag list", skillTagsOpenAPIResponse{})},
 		},
 		{
+			Method:    "GET",
+			Path:      "/skills/categories",
+			Summary:   "List skill categories",
+			Tags:      []string{"skills"},
+			Responses: map[int]openAPIResponse{200: resp("Skill category list", skillCategoriesOpenAPIResponse{})},
+		},
+		{
 			Method:      "POST",
 			Path:        "/skills",
 			Summary:     "Create managed skill",
@@ -2250,11 +2319,12 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:  map[int]openAPIResponse{200: resp("Tool enabled", toolStateOpenAPIResponse{})},
 		},
 		{
-			Method:    "GET",
-			Path:      "/mcp_servers",
-			Summary:   "List MCP servers",
-			Tags:      []string{"mcp_servers"},
-			Responses: map[int]openAPIResponse{200: resp("MCP server list", mcp.ListServersResponse{})},
+			Method:      "GET",
+			Path:        "/mcp_servers",
+			Summary:     "List MCP servers",
+			Tags:        []string{"mcp_servers"},
+			QueryParams: mcpServerListQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("MCP server list", mcp.ListServersResponse{})},
 		},
 		{
 			Method:      "POST",
@@ -2357,6 +2427,16 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  agentEvalReportBadCaseListPathParams{},
 			QueryParams: agentEvalReportBadCaseListQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Eval report bad case list", agentEvalReportBadCaseListOpenAPIResponse{})},
+		},
+		{
+			Method:      "GET",
+			Path:        "/agent/threads/{thread_id}/results/abtests/{abtest_id}/case-details",
+			Summary:     "GET /agent/threads/{thread_id}/results/abtests/{abtest_id}/case-details",
+			Description: "Returns filtered, paginated case details for an ABTest result. keyword matches case text and identifiers; outcome matches exactly.",
+			Tags:        []string{"agent"},
+			PathParams:  agentABTestCaseDetailListPathParams{},
+			QueryParams: agentABTestCaseDetailListQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("ABTest case detail list", agentABTestCaseDetailListOpenAPIResponse{})},
 		},
 		{
 			Method:      "GET",

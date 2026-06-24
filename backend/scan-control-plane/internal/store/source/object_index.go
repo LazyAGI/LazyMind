@@ -38,7 +38,7 @@ func sourceObjectUpsertAssignments() clause.Set {
 		Column: clause.Column{Name: "size_bytes"},
 		Value: gorm.Expr(`CASE
 WHEN excluded.size_bytes > 0 THEN excluded.size_bytes
-WHEN excluded.provider_meta_json->>'kind' = 'wiki_node' AND source_object_index.size_bytes > 0 THEN source_object_index.size_bytes
+WHEN excluded.provider_meta_json->>'kind' IN ('wiki_node', 'drive_file') AND source_object_index.size_bytes > 0 THEN source_object_index.size_bytes
 ELSE excluded.size_bytes
 END`),
 	})

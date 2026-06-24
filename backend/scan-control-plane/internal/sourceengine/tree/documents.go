@@ -37,17 +37,17 @@ func (q *DBSourceDocumentQuery) ListDocuments(ctx context.Context, req SourceDoc
 	}
 	items := make([]SourceDocumentItem, 0, len(rows))
 	removedUnsupported := 0
-	policies := map[string]filefilter.Policy{}
+	documentContexts := map[string]documentRenderContext{}
 	for _, row := range rows {
-		policy, err := q.policyForDocument(ctx, source, row.Object.BindingID, policies)
+		documentContext, err := q.contextForDocument(ctx, source, row.Object.BindingID, documentContexts)
 		if err != nil {
 			return SourceDocumentListResponse{}, err
 		}
-		if !filefilter.AllowsSourceObject(policy, row.Object) {
+		if !filefilter.AllowsSourceObject(documentContext.policy, row.Object) {
 			removedUnsupported++
 			continue
 		}
-		items = append(items, documentItem(row))
+		items = append(items, documentItem(row, documentContext.binding))
 	}
 	items, removed := dedupeDocumentItems(items)
 	removed += removedUnsupported
@@ -61,17 +61,25 @@ func (q *DBSourceDocumentQuery) ListDocuments(ctx context.Context, req SourceDoc
 	return SourceDocumentListResponse{Items: items, Total: total, Page: req.Page, PageSize: req.PageSize, Summary: documentSummaryMap(summary)}, nil
 }
 
-func (q *DBSourceDocumentQuery) policyForDocument(ctx context.Context, source store.Source, bindingID string, policies map[string]filefilter.Policy) (filefilter.Policy, error) {
-	if policy, ok := policies[bindingID]; ok {
-		return policy, nil
+type documentRenderContext struct {
+	binding store.Binding
+	policy  filefilter.Policy
+}
+
+func (q *DBSourceDocumentQuery) contextForDocument(ctx context.Context, source store.Source, bindingID string, contexts map[string]documentRenderContext) (documentRenderContext, error) {
+	if documentContext, ok := contexts[bindingID]; ok {
+		return documentContext, nil
 	}
 	binding, err := q.repo.GetBinding(ctx, source.SourceID, bindingID)
 	if err != nil {
-		return filefilter.Policy{}, mapStoreError(err)
+		return documentRenderContext{}, mapStoreError(err)
 	}
-	policy := filefilter.FromSourceBinding(source, binding)
-	policies[bindingID] = policy
-	return policy, nil
+	documentContext := documentRenderContext{
+		binding: binding,
+		policy:  filefilter.FromSourceBinding(source, binding),
+	}
+	contexts[bindingID] = documentContext
+	return documentContext, nil
 }
 
 func dedupeDocumentItems(items []SourceDocumentItem) ([]SourceDocumentItem, int) {

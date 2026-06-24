@@ -58,6 +58,7 @@ type listSkillsAPITestResponse struct {
 		Items []struct {
 			SkillID                string   `json:"skill_id"`
 			Description            string   `json:"description"`
+			Category               string   `json:"category"`
 			Tags                   []string `json:"tags"`
 			UpdateStatus           string   `json:"update_status"`
 			HasPendingReviewResult bool     `json:"has_pending_review_result"`
@@ -74,6 +75,14 @@ type listSkillsAPITestResponse struct {
 		Page     int `json:"page"`
 		PageSize int `json:"page_size"`
 		Total    int `json:"total"`
+	} `json:"data"`
+}
+
+type listSkillCategoriesAPITestResponse struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    struct {
+		Categories []string `json:"categories"`
 	} `json:"data"`
 }
 
@@ -1304,6 +1313,7 @@ func TestListSkillMarksPendingPatchReviewResult(t *testing.T) {
 	var item struct {
 		SkillID                string   `json:"skill_id"`
 		Description            string   `json:"description"`
+		Category               string   `json:"category"`
 		Tags                   []string `json:"tags"`
 		UpdateStatus           string   `json:"update_status"`
 		HasPendingReviewResult bool     `json:"has_pending_review_result"`
@@ -1508,6 +1518,222 @@ func TestListPaginatesAndCountsParentSkills(t *testing.T) {
 	}
 	if len(resp.Data.Items) != 1 || resp.Data.Items[0].SkillID != "skill-parent-three" {
 		t.Fatalf("expected second page to include third parent, got %#v", resp.Data.Items)
+	}
+}
+
+func TestListFiltersSkillsByCategory(t *testing.T) {
+	db := newSkillTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	parents := []orm.SkillResource{
+		{
+			ID:              "skill-parent-coding",
+			OwnerUserID:     "u1",
+			OwnerUserName:   "User 1",
+			Category:        "coding",
+			ParentSkillName: "workflow",
+			SkillName:       "workflow",
+			NodeType:        evolution.SkillNodeTypeParent,
+			FileExt:         "md",
+			RelativePath:    evolution.ParentSkillRelativePath("coding", "workflow"),
+			ContentHash:     evolution.HashContent("content-1"),
+			Version:         1,
+			IsEnabled:       true,
+			UpdateStatus:    evolution.UpdateStatusUpToDate,
+			CreateUserID:    "u1",
+			CreateUserName:  "User 1",
+			CreatedAt:       now,
+			UpdatedAt:       now.Add(time.Second),
+		},
+		{
+			ID:              "skill-parent-writing",
+			OwnerUserID:     "u1",
+			OwnerUserName:   "User 1",
+			Category:        "writing",
+			ParentSkillName: "drafting",
+			SkillName:       "drafting",
+			NodeType:        evolution.SkillNodeTypeParent,
+			FileExt:         "md",
+			RelativePath:    evolution.ParentSkillRelativePath("writing", "drafting"),
+			ContentHash:     evolution.HashContent("content-2"),
+			Version:         1,
+			IsEnabled:       true,
+			UpdateStatus:    evolution.UpdateStatusUpToDate,
+			CreateUserID:    "u1",
+			CreateUserName:  "User 1",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+	}
+	if err := db.Create(&parents).Error; err != nil {
+		t.Fatalf("create parents: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/skills?category=writing&page=1&page_size=20", nil)
+	req.Header.Set("X-User-Id", "u1")
+	rec := httptest.NewRecorder()
+
+	List(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp listSkillsAPITestResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Code != 0 {
+		t.Fatalf("expected code 0, got %d message=%s", resp.Code, resp.Message)
+	}
+	if resp.Data.Total != 1 {
+		t.Fatalf("expected total 1, got %d", resp.Data.Total)
+	}
+	if len(resp.Data.Items) != 1 || resp.Data.Items[0].SkillID != "skill-parent-writing" || resp.Data.Items[0].Category != "writing" {
+		t.Fatalf("expected only writing skill, got %#v", resp.Data.Items)
+	}
+}
+
+func TestListCategoriesReturnsAllSkillCategoriesForCurrentUser(t *testing.T) {
+	db := newSkillTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	builtinCatalog = []builtinSkill{{UID: "builtin-review", Category: "review"}}
+	builtinCatalogErr = nil
+	t.Cleanup(func() {
+		builtinCatalog = []builtinSkill{}
+		builtinCatalogErr = nil
+	})
+
+	now := time.Now()
+	rows := []orm.SkillResource{
+		{
+			ID:              "skill-parent-one",
+			OwnerUserID:     "u1",
+			OwnerUserName:   "User 1",
+			Category:        "coding",
+			ParentSkillName: "workflow",
+			SkillName:       "workflow",
+			NodeType:        evolution.SkillNodeTypeParent,
+			FileExt:         "md",
+			RelativePath:    evolution.ParentSkillRelativePath("coding", "workflow"),
+			ContentHash:     evolution.HashContent("content-1"),
+			Version:         1,
+			IsEnabled:       true,
+			UpdateStatus:    evolution.UpdateStatusUpToDate,
+			CreateUserID:    "u1",
+			CreateUserName:  "User 1",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+		{
+			ID:              "skill-parent-two",
+			OwnerUserID:     "u1",
+			OwnerUserName:   "User 1",
+			Category:        "writing",
+			ParentSkillName: "drafting",
+			SkillName:       "drafting",
+			NodeType:        evolution.SkillNodeTypeParent,
+			FileExt:         "md",
+			RelativePath:    evolution.ParentSkillRelativePath("writing", "drafting"),
+			ContentHash:     evolution.HashContent("content-2"),
+			Version:         1,
+			IsEnabled:       true,
+			UpdateStatus:    evolution.UpdateStatusUpToDate,
+			CreateUserID:    "u1",
+			CreateUserName:  "User 1",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+		{
+			ID:              "skill-child-one",
+			OwnerUserID:     "u1",
+			OwnerUserName:   "User 1",
+			Category:        "child-only",
+			ParentSkillName: "workflow",
+			SkillName:       "rules",
+			NodeType:        evolution.SkillNodeTypeChild,
+			FileExt:         "md",
+			RelativePath:    "coding/workflow/rules.md",
+			ContentHash:     evolution.HashContent("child-content"),
+			Version:         1,
+			IsEnabled:       true,
+			UpdateStatus:    evolution.UpdateStatusUpToDate,
+			CreateUserID:    "u1",
+			CreateUserName:  "User 1",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+		{
+			ID:              "skill-other-user",
+			OwnerUserID:     "u2",
+			OwnerUserName:   "User 2",
+			Category:        "other-user",
+			ParentSkillName: "other",
+			SkillName:       "other",
+			NodeType:        evolution.SkillNodeTypeParent,
+			FileExt:         "md",
+			RelativePath:    evolution.ParentSkillRelativePath("other-user", "other"),
+			ContentHash:     evolution.HashContent("content-3"),
+			Version:         1,
+			IsEnabled:       true,
+			UpdateStatus:    evolution.UpdateStatusUpToDate,
+			CreateUserID:    "u2",
+			CreateUserName:  "User 2",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("create skills: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/skills/categories", nil)
+	req.Header.Set("X-User-Id", "u1")
+	rec := httptest.NewRecorder()
+
+	ListCategories(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp listSkillCategoriesAPITestResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Code != 0 {
+		t.Fatalf("expected code 0, got %d message=%s", resp.Code, resp.Message)
+	}
+	want := []string{"coding", "review", "writing"}
+	if !reflect.DeepEqual(resp.Data.Categories, want) {
+		t.Fatalf("expected categories %#v, got %#v", want, resp.Data.Categories)
+	}
+}
+
+func TestListCategoriesReturnsEmptyArray(t *testing.T) {
+	db := newSkillTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/core/skills/categories", nil)
+	req.Header.Set("X-User-Id", "u1")
+	rec := httptest.NewRecorder()
+
+	ListCategories(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp listSkillCategoriesAPITestResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data.Categories == nil {
+		t.Fatalf("expected empty categories array, got nil")
+	}
+	if len(resp.Data.Categories) != 0 {
+		t.Fatalf("expected no categories, got %#v", resp.Data.Categories)
 	}
 }
 
@@ -1807,6 +2033,7 @@ func TestListIgnoresNameOnlySkillSuggestionsWithoutResourceKey(t *testing.T) {
 	var item struct {
 		SkillID                string   `json:"skill_id"`
 		Description            string   `json:"description"`
+		Category               string   `json:"category"`
 		Tags                   []string `json:"tags"`
 		UpdateStatus           string   `json:"update_status"`
 		HasPendingReviewResult bool     `json:"has_pending_review_result"`

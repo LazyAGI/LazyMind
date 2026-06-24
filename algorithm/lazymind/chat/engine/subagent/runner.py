@@ -21,52 +21,41 @@ from .db import SubAgentDB
 from . import tools as subagent_tools
 
 
-def _enrich_objective_with_artifacts(objective: str, params: Dict[str, Any], db: 'SubAgentDB') -> str:
-    """Replace {{artifact_id}} placeholders in objective with artifact text/url values.
+_ZH_RE = re.compile(r'[\u4e00-\u9fff]')
 
-    For plugin_step tasks, artifacts produced by prior succeeded steps in the same
-    plugin session are fetched from the DB and substituted into the raw objective
-    template.  Falls back to the original objective on any error.
 
-    This mirrors what Go's injectArtifacts() used to do, but runs on the Python side
-    so that Go does not need to query sub_agent_artifacts before launching the runner.
+def _build_artifact_context_section(
+    ctx: 'SubAgentContext', db: 'SubAgentDB'
+) -> List[str]:
+    """Build a multi-line artifact summary block to inject into the objective prompt.
+
+    Returns an empty list when there are no input artifacts.
+
+    Plugin scenario (params contains session_id):
+      Reads from plugin_slot_revisions with sort_order from plugin_slot_order.
+      Resolves human vs AI revision for each row, then builds per-key ordered summaries.
+
+    Ordinary SubAgent (no session_id, but has input_artifact_keys):
+      Reads from sub_agent_artifacts of succeeded steps in the same session.
+      sort_order = seq within the same artifact_key group.
     """
-    if '{{' not in objective:
-        return objective
-
+    params = ctx.params
     session_id: str = params.get('session_id', '')
-    if not session_id:
-        return objective
 
-    try:
-        steps = db.load_plugin_session_steps(session_id)
-    except Exception:
-        return objective
+    if session_id:
+        return db.format_plugin_session_artifacts(session_id)
 
-    succeeded_task_ids = [s['task_id'] for s in steps if s.get('status') == 'succeeded' and s.get('task_id')]
-    if not succeeded_task_ids:
-        return objective
+    if ctx.input_artifact_keys:
+        steps = db.load_plugin_session_steps(session_id) if session_id else []
+        succeeded_task_ids = [
+            s['task_id'] for s in steps
+            if s.get('status') == 'succeeded' and s.get('task_id')
+        ]
+        if not succeeded_task_ids:
+            return []
+        return db.format_task_artifacts(succeeded_task_ids)
 
-    try:
-        artifacts = db.load_artifacts_for_tasks(succeeded_task_ids)
-    except Exception:
-        return objective
-
-    result = objective
-    for a in artifacts:
-        key = a.get('artifact_key', '')
-        if not key:
-            continue
-        value = a.get('value') or {}
-        if isinstance(value, str):
-            try:
-                value = json.loads(value)
-            except ValueError:
-                continue
-        text_val = value.get('text') or value.get('url') or ''
-        if text_val:
-            result = result.replace('{{' + key + '}}', str(text_val))
-    return result
+    return []
 
 
 def _resolve_plugin_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
@@ -90,7 +79,10 @@ def _resolve_plugin_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
             return None
         declared: List[str] = step_config.get('tools', [])
         # Mirror _merge_tools from plugin_manager: prepend framework tools.
-        _FRAMEWORK_TOOLS = ['save_artifact', 'get_artifact', 'list_artifacts']
+        _FRAMEWORK_TOOLS = [
+            'save_artifact', 'get_artifact', 'list_artifacts',
+            'list_knowledge_bases', 'read_user_attachment',
+        ]
         seen: set = set()
         merged: List[str] = []
         for t in _FRAMEWORK_TOOLS + list(declared):
@@ -117,7 +109,8 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
     of this list — they are injected as mandatory base tools in _build_subagent_tools.
     Names of base tools in the explicit list are silently ignored (already present).
     """
-    _BASE_TOOL_NAMES = {'save_artifact', 'get_artifact', 'list_artifacts'}
+    _BASE_TOOL_NAMES = {'save_artifact', 'get_artifact', 'list_artifacts',
+                        'list_knowledge_bases', 'read_user_attachment'}
     if explicit:
         name_list = [str(n).strip() for n in explicit if str(n).strip() and str(n).strip() not in _BASE_TOOL_NAMES]
         # Build lookup from DEFAULT_TOOLS
@@ -150,14 +143,17 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
 def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
     """Combine mandatory SubAgent infra tools with optional domain tools.
 
-    save_artifact, get_artifact, and list_artifacts are always included regardless
-    of the explicit tools list passed to the SubAgent — they are the SubAgent's
-    write/read interface and must never be stripped by plugin tool configurations.
+    save_artifact, get_artifact, list_artifacts, list_knowledge_bases, and
+    read_user_attachment are always included regardless of the explicit tools list —
+    they are the SubAgent's core interface and must never be stripped by plugin tool
+    configurations.
     """
     base = [
         subagent_tools.save_artifact,
         subagent_tools.get_artifact,
         subagent_tools.list_artifacts,
+        subagent_tools.list_knowledge_bases,
+        subagent_tools.read_user_attachment,
     ]
     if extra_tools:
         base.extend(extra_tools)
@@ -167,7 +163,67 @@ def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
 _ZH_RE = re.compile('[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]')
 
 
-def _objective_prompt(ctx: SubAgentContext) -> str:
+def _build_partial_sort_order_hints(session_id: str, partial_indices: 'Dict[str, List[int]]',
+                                    plugin_id: str = '') -> str:
+    """Translate partial_indices (0-based list_index) into sort_order guidance for the AI.
+
+    Queries Go core to resolve each list_index to its current 1-based sort_order,
+    then returns a concise instruction block the AI can act on directly.
+    Returns an empty string on any error or when translation is unnecessary.
+    """
+    try:
+        import httpx
+        from lazymind.config import config as _cfg
+        from lazymind.chat.plugin import plugin_loader
+        core_url = str(_cfg['core_api_url']).rstrip('/')
+
+        if not plugin_id:
+            return ''
+        spec = plugin_loader.get_plugin(plugin_id)
+        if not spec:
+            return ''
+
+        hints: List[str] = []
+        for artifact_key, list_indexes in partial_indices.items():
+            slot_def = spec.get_slot_for_artifact_key(artifact_key)
+            if not slot_def:
+                continue
+            slot_id = slot_def.get('id', '')
+            if not slot_id:
+                continue
+            # Fetch order_list for this slot.
+            resp = httpx.get(
+                f'{core_url}/plugin-sessions/{session_id}/slots/{slot_id}/order',
+                timeout=3.0,
+            )
+            if resp.status_code != 200:
+                continue
+            order_list: list = resp.json().get('data', {}).get('order_list', [])
+            if not order_list:
+                continue
+            # Build list_index → sort_order map.
+            li_to_so = {li: (pos + 1) for pos, li in enumerate(order_list)}
+            sort_orders = [li_to_so[li] for li in list_indexes if li in li_to_so]
+            if sort_orders:
+                so_str = ', '.join(str(s) for s in sort_orders)
+                hints.append(
+                    f'For artifact key "{artifact_key}": overwrite the item(s) at '
+                    f'sort_order={so_str} — pass sort_order=N when calling save_artifact '
+                    f'so that only those position(s) are replaced.'
+                )
+        if not hints:
+            return ''
+        return (
+            '## Partial retry instruction (AUTHORITATIVE)\n'
+            'This is a partial re-run. You must overwrite specific items rather than appending new ones.\n'
+            + '\n'.join(hints)
+            + '\nDo NOT omit sort_order for these items, and do NOT overwrite other positions.'
+        )
+    except Exception:
+        return ''
+
+
+def _objective_prompt(ctx: SubAgentContext, db: Optional['SubAgentDB'] = None) -> str:
     # Detect language from the user_input param (primary) or the full objective text.
     user_input = str(ctx.params.get('user_input') or '')
     is_zh = bool(_ZH_RE.search(user_input) or _ZH_RE.search(ctx.objective))
@@ -183,9 +239,29 @@ def _objective_prompt(ctx: SubAgentContext) -> str:
         f'Objective: {ctx.objective}',
     ]
     if ctx.params:
-        lines.append(f'Parameters: {json.dumps(ctx.params, ensure_ascii=False)}')
-    if ctx.input_artifact_keys:
-        lines.append(f'Input artifact keys you may read: {", ".join(ctx.input_artifact_keys)}')
+        # Filter out partial_indices from params: it contains internal 0-based list_index
+        # values which would confuse the AI (it should use 1-based sort_order instead).
+        display_params = {k: v for k, v in ctx.params.items() if k != 'partial_indices'}
+        lines.append(f'Parameters: {json.dumps(display_params, ensure_ascii=False)}')
+    # Inject artifact context: plugin session reads from slot revisions with sort_order;
+    # ordinary SubAgent reads from sub_agent_artifacts of prior succeeded steps.
+    session_id: str = ctx.params.get('session_id', '')
+    if session_id or ctx.input_artifact_keys:
+        artifact_section = _build_artifact_context_section(ctx, db) if db else []
+        if artifact_section:
+            lines.extend(artifact_section)
+        elif ctx.input_artifact_keys:
+            lines.append(f'Input artifact keys you may read: {", ".join(ctx.input_artifact_keys)}')
+    # Translate partial_indices (internal 0-based list_index) into sort_order guidance.
+    # This tells the AI exactly which display position(s) to overwrite instead of append.
+    partial_indices: Dict[str, List[int]] = ctx.params.get('partial_indices') or {}
+    plugin_id_for_hints: str = ctx.params.get('plugin_id', '')
+    if partial_indices and session_id:
+        sort_order_hints = _build_partial_sort_order_hints(
+            session_id, partial_indices, plugin_id=plugin_id_for_hints
+        )
+        if sort_order_hints:
+            lines.append(sort_order_hints)
     lines.append(
         'You MUST call save_artifact for EACH of the following keys before you finish — '
         'do NOT skip this step even if you have already written the results in plain text: '
@@ -196,6 +272,15 @@ def _objective_prompt(ctx: SubAgentContext) -> str:
         'You must explicitly call save_artifact(key=..., value=...) for every required key. '
         'The task is considered INCOMPLETE and will be marked as FAILED if any required artifact '
         'key is missing. Do not write a final summary until all save_artifact calls are done.'
+    )
+    lines.append(
+        '## Overwrite vs. Append for list slots\n'
+        'save_artifact has an optional sort_order parameter (1-based):\n'
+        '- Omit sort_order → append a new item at the end of the list.\n'
+        '- Pass sort_order=N → overwrite the item currently at display position N.\n'
+        'If the objective says the user wants to replace a specific item '
+        '(e.g. "重新收集第二张图", "replace item 3", "redo position N"), '
+        'you MUST pass sort_order=N. Omitting it will append a new item instead of replacing.'
     )
     lines.append(
         'After all required artifacts are saved, write a final summary that contains the '
@@ -315,14 +400,14 @@ async def run_subagent_stream(
         )
         ctx.ensure_workspace()
 
-        # For plugin_step tasks: enrich objective by replacing {{artifact_id}} placeholders
-        # with values from prior succeeded steps in the same session. This was previously
-        # done on the Go side (injectArtifacts), but Python owns this data retrieval.
+        # For plugin_step tasks: remove {{artifact_key}} placeholders from the objective
+        # (artifact context is now injected as a summary section in _objective_prompt instead).
+        # Also resolve tools from plugin_loader when no explicit list was provided.
+        # Go no longer forwards the tools list for plugin_step tasks.
         effective_agent_type = str(task.get('agent_type') or agent_type or '')
         if effective_agent_type == 'plugin_step':
-            ctx.objective = _enrich_objective_with_artifacts(ctx.objective, params, db)
-            # Also resolve tools from plugin_loader when no explicit list was provided.
-            # Go no longer forwards the tools list for plugin_step tasks.
+            # Strip any remaining {{artifact_key}} placeholders so they don't confuse the LLM.
+            ctx.objective = re.sub(r'\{\{[^}]+\}\}', '', ctx.objective).strip()
             if not tools:
                 tools = _resolve_plugin_step_tools(params)
 
@@ -332,6 +417,16 @@ async def run_subagent_stream(
         inject_model_config(model_config)
         inject_tool_config(tool_config)
         set_context(ctx)
+
+        # For plugin_step tasks: inject plugin context into agentic_config so that
+        # save_artifact can resolve sort_order → list_index via the Go core API.
+        if effective_agent_type == 'plugin_step':
+            lazyllm.globals['agentic_config'] = {
+                'plugin_id': params.get('plugin_id', ''),
+                'plugin_session_id': params.get('session_id', ''),
+                'plugin_step': params.get('step_id', ''),
+                'query': ctx.objective,
+            }
 
         yield _sse({'type': 'task_start', 'task_id': task_id})
 
@@ -356,7 +451,7 @@ async def run_subagent_stream(
         _pending_text: str = ''
         _pending_think: str = ''
 
-        async for kind, payload in drive_agent(agent, _objective_prompt(ctx), history=resume_history):
+        async for kind, payload in drive_agent(agent, _objective_prompt(ctx, db), history=resume_history):
             if kind == 'event':
                 item = payload
                 tag = item.get('tag')

@@ -43,9 +43,6 @@ import {
   type AllDocumentCreatorsResponse,
   type AllDocumentTagsResponse,
   type DatasetServiceApiDatasetServiceListDatasetsRequest,
-  type DatasetServiceApiDatasetServiceResetDefaultDatasetsRequest,
-  type DatasetServiceApiDatasetServiceSetDefaultDatasetRequest,
-  type DatasetServiceApiDatasetServiceUnsetDefaultDatasetRequest,
   type ListDatasetsResponse,
   type UserDatabaseSummary,
 } from "@/api/generated/knowledge-client";
@@ -157,6 +154,60 @@ export function PluginSessionApi() {
       return axiosInstance.post(
         `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}:advance`,
         { action },
+        options,
+      );
+    },
+    // Phase 3: slot item management — addressed by stable list_index (not sort_order).
+    deleteSlotItem(sessionId: string, slotId: string, listIndex: number, orderVersion?: number, options?: RawAxiosRequestConfig) {
+      return axiosInstance.delete(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}`,
+        { ...options, data: orderVersion !== undefined ? { order_version: orderVersion } : undefined },
+      );
+    },
+    patchSlotItem(sessionId: string, slotId: string, listIndex: number, value: any, contentType?: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.patch(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}`,
+        { value, ...(contentType ? { content_type: contentType } : {}) },
+        options,
+      );
+    },
+    reorderSlotItems(sessionId: string, slotId: string, order: number[], version: number, options?: RawAxiosRequestConfig) {
+      return axiosInstance.patch(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/order`,
+        { order, version },
+        options,
+      );
+    },
+    getSlotOrder(sessionId: string, slotId: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/order`,
+        options,
+      );
+    },
+    getSlotItemVersions(sessionId: string, slotId: string, listIndex: number, options?: RawAxiosRequestConfig) {
+      return axiosInstance.get(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}/versions`,
+        options,
+      );
+    },
+    rollbackSlotItem(sessionId: string, slotId: string, listIndex: number, revision: number, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}/rollback`,
+        { revision },
+        options,
+      );
+    },
+    createSlotItem(sessionId: string, slotId: string, value: any, caption?: string, insertBefore?: number, contentType?: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items`,
+        { value, ...(caption !== undefined ? { caption } : {}), ...(insertBefore !== undefined ? { insert_before: insertBefore } : {}), ...(contentType ? { content_type: contentType } : {}) },
+        options,
+      );
+    },
+    patchSlotCaption(sessionId: string, slotId: string, listIndex: number, caption: string, options?: RawAxiosRequestConfig) {
+      return axiosInstance.patch(
+        `${coreApiBaseUrl}/plugin-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}/caption`,
+        { caption },
         options,
       );
     },
@@ -428,57 +479,6 @@ export function KnowledgeBaseServiceApi() {
           tags: requestParameters.tags,
         },
       });
-    },
-    datasetServiceSetDefaultDataset(
-      requestParameters: DatasetServiceApiDatasetServiceSetDefaultDatasetRequest,
-      options?: RawAxiosRequestConfig,
-    ) {
-      return axiosInstance.post(
-        `${coreApiBaseUrl}/datasets/${encodeURIComponent(requestParameters.dataset)}:setDefault`,
-        requestParameters.setDefaultDatasetRequest,
-        withJsonOptions(options),
-      );
-    },
-    datasetServiceUnsetDefaultDataset(
-      requestParameters: DatasetServiceApiDatasetServiceUnsetDefaultDatasetRequest,
-      options?: RawAxiosRequestConfig,
-    ) {
-      return axiosInstance.post(
-        `${coreApiBaseUrl}/datasets/${encodeURIComponent(requestParameters.dataset)}:unsetDefault`,
-        requestParameters.unsetDefaultDatasetRequest,
-        withJsonOptions(options),
-      );
-    },
-    async datasetServiceResetDefaultDatasets(
-      _requestParameters: DatasetServiceApiDatasetServiceResetDefaultDatasetsRequest,
-      options?: RawAxiosRequestConfig,
-    ): Promise<AxiosResponse<ListDatasetsResponse>> {
-      const listResponse = await axiosInstance.get<ListDatasetsResponse>(
-        `${coreApiBaseUrl}/datasets`,
-        {
-          ...options,
-          params: {
-            ...(options?.params ?? {}),
-            page_size: 1000,
-          },
-        },
-      );
-      const defaultDatasets =
-        listResponse.data.datasets?.filter((item) => item.default_dataset) ?? [];
-
-      await Promise.all(
-        defaultDatasets
-          .filter((item) => item.dataset_id && item.name)
-          .map((item) =>
-            axiosInstance.post(
-              `${coreApiBaseUrl}/datasets/${encodeURIComponent(item.dataset_id!)}:unsetDefault`,
-              { name: item.name },
-              withJsonOptions(options),
-            ),
-          ),
-      );
-
-      return listResponse;
     },
   };
 }

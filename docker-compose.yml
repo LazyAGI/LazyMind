@@ -118,7 +118,7 @@ services:
         condition: service_healthy
 
   db:
-    image: postgres:16
+    image: ${POSTGRES_IMAGE:-postgres:16}
     environment:
       POSTGRES_USER: root
       POSTGRES_PASSWORD: "123456"
@@ -134,7 +134,7 @@ services:
       retries: 20
 
   db-bootstrap:
-    image: postgres:16
+    image: ${POSTGRES_IMAGE:-postgres:16}
     depends_on:
       db:
         condition: service_healthy
@@ -400,6 +400,7 @@ services:
       target: doc
       args:
         <<: *mirror-args
+    restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
     expose:
@@ -776,7 +777,7 @@ services:
   milvus-etcd:
     profiles:
       - milvus
-    image: quay.io/coreos/etcd:v3.5.25
+    image: ${MILVUS_ETCD_IMAGE:-quay.io/coreos/etcd:v3.5.25}
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
       - ETCD_AUTO_COMPACTION_RETENTION=1000
@@ -794,7 +795,7 @@ services:
   milvus-minio:
     profiles:
       - milvus
-    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    image: ${MILVUS_MINIO_IMAGE:-minio/minio:RELEASE.2024-05-28T17-19-04Z}
     environment:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
@@ -806,7 +807,7 @@ services:
   milvus:
     profiles:
       - milvus
-    image: milvusdb/milvus:v2.4.15
+    image: ${MILVUS_IMAGE:-milvusdb/milvus:v2.4.15}
     command: ['sh', '-c', 'sleep 15 && exec milvus run standalone']
     # seccomp:unconfined removed for security; add back if Milvus fails on your platform
     environment:
@@ -834,7 +835,7 @@ services:
   attu:
     profiles:
       - milvus-dashboard
-    image: zilliz/attu:v2.6.3
+    image: ${ATTU_IMAGE:-zilliz/attu:v2.6.3}
     expose:
       - "3000"
     environment:
@@ -847,7 +848,7 @@ services:
   opensearch:
     profiles:
       - opensearch
-    image: opensearchproject/opensearch:2.18.0
+    image: ${OPENSEARCH_IMAGE:-opensearchproject/opensearch:2.18.0}
     environment:
       - cluster.name=opensearch-cluster
       - node.name=opensearch-node1
@@ -876,7 +877,7 @@ services:
   opensearch-dashboards:
     profiles:
       - opensearch-dashboard
-    image: opensearchproject/opensearch-dashboards:2.18.0
+    image: ${OPENSEARCH_DASHBOARDS_IMAGE:-opensearchproject/opensearch-dashboards:2.18.0}
     expose:
       - "5601"
     environment:

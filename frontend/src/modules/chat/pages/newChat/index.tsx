@@ -137,6 +137,10 @@ const NewChatPage = () => {
     if (isChatDisabled) {
       return;
     }
+    // Ignore internal DOM drag-and-drop (e.g. plugin panel card sorting).
+    if (!Array.from(e.dataTransfer.types).includes('Files')) {
+      return;
+    }
     dragCounterRef.current++;
     if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
       setIsDragging(true);

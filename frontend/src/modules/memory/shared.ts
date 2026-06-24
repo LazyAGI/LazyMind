@@ -3,7 +3,7 @@ import { diffLines } from "diff";
 import type { EvolutionSuggestionRecord } from "./preferenceApi";
 import type { SkillShareStatus } from "./skillApi";
 
-export type MemoryTab = "tools" | "skills" | "experience" | "glossary";
+export type MemoryTab = "skills" | "experience" | "glossary";
 export type ModalMode = "add" | "edit" | "view";
 export type ShareableTab = "skills" | "experience";
 export type ChangeProposalTab = Extract<MemoryTab, "skills" | "experience">;
@@ -768,11 +768,11 @@ export const initialGlossaryChangeProposals: GlossaryChangeProposal[] = (() => {
   ];
 })();
 
-export const memoryTabOrder: MemoryTab[] = ["skills", "experience", "glossary", "tools"];
+export const memoryTabOrder: MemoryTab[] = ["skills", "experience", "glossary"];
 export const MEMORY_BASE_PATH = "/memory-management";
 
 export const parseMemoryTab = (value?: string | null): MemoryTab | null => {
-  if (value === "tools" || value === "skills" || value === "experience" || value === "glossary") {
+  if (value === "skills" || value === "experience" || value === "glossary") {
     return value;
   }
 

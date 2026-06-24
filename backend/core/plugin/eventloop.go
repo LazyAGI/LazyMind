@@ -260,6 +260,8 @@ func OnSubAgentDone(
 			"step_id":    pctx.StepID,
 		})
 	}
+	// Write content_snapshot to all selected revisions for this step.
+	go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
 }
 
 // advanceAutoMode calls DriverAgent and either triggers a new ChatAgent turn or ends the session.
@@ -369,6 +371,7 @@ func triggerNextChatTurn(
 
 // OnArtifactEvent is called when a plugin_step SubAgent emits an artifact event.
 // It checks slot binding and writes plugin_slot_revisions if the artifact is bound.
+// Caption embedded in the artifact value is written to sub_agent_artifacts.caption.
 //
 // For list-cardinality slots, the artifact value may carry a "list_index" field
 // (written by save_artifact) that enables partial retry: only the revision at that
@@ -394,15 +397,119 @@ func OnArtifactEvent(
 	}
 
 	// For list slots, extract list_index from the artifact value if present.
-	// A non-nil value triggers partial-retry semantics (replace that index only).
 	var listIndex *int
 	if cardinality == "list" {
 		listIndex = extractListIndex(ctx, db, taskID, artifactKey)
 	}
 
-	if _, err := WriteSlotRevision(ctx, db,
-		pctx.SessionID, slotID, artifactKey, pctx.StepID, attempt, cardinality, listIndex); err != nil {
+	// Extract caption from artifact value and write it to sub_agent_artifacts.caption.
+	// PostgreSQL does not support UPDATE with ORDER BY/LIMIT, so we first fetch the
+	// target row's primary key (task_id + artifact_key + seq), then update by PK.
+	if caption := extractCaption(ctx, db, taskID, artifactKey); caption != "" {
+		var target orm.SubAgentArtifact
+		if db.WithContext(ctx).
+			Where("task_id = ? AND artifact_key = ?", taskID, artifactKey).
+			Order("seq DESC").
+			First(&target).Error == nil {
+			_ = db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).
+				Where("task_id = ? AND artifact_key = ? AND seq = ?", target.TaskID, target.ArtifactKey, target.Seq).
+				Update("caption", caption).Error
+		}
+	}
+
+	rev, err := WriteSlotRevision(ctx, db,
+		pctx.SessionID, slotID, artifactKey, pctx.StepID, attempt, cardinality, listIndex)
+	if err != nil {
 		fmt.Printf("[Plugin] WriteSlotRevision failed: %v\n", err)
+		return
+	}
+
+	// Back-fill list_index into sub_agent_artifacts.value so that HideSlotItem
+	// can match the artifact row by list_index when the user deletes an item.
+	// This is needed for append-mode artifacts where Python does not yet know
+	// the list_index assigned by Go (sort_order was not passed to save_artifact).
+	if cardinality == "list" && rev != nil && rev.ListIndex != nil {
+		backfillArtifactListIndex(ctx, db, taskID, artifactKey, *rev.ListIndex)
+	}
+}
+
+// OnSubAgentDoneSnapshot back-fills artifact_seq on any AI slot revision that was
+// written before the artifact row existed (i.e. artifact_seq is still NULL).
+// This covers the race where WriteSlotRevision ran before save_artifact committed.
+// Human revisions (change_source='human') are never touched.
+func OnSubAgentDoneSnapshot(
+	ctx context.Context,
+	db *gorm.DB,
+	pctx *PluginChatContext,
+) {
+	if pctx == nil {
+		return
+	}
+	revisions, err := LoadSelectedSlots(ctx, db, pctx.SessionID)
+	if err != nil {
+		fmt.Printf("[Plugin] OnSubAgentDoneSnapshot: load slots: %v\n", err)
+		return
+	}
+
+	step, _ := GetLatestStep(ctx, db, pctx.SessionID, pctx.StepID)
+	if step == nil {
+		return
+	}
+
+	for _, rev := range revisions {
+		if rev.StepID != pctx.StepID || rev.Attempt != step.Attempt {
+			continue
+		}
+		// Only fix AI revisions where artifact_seq was not resolved at write time.
+		if rev.ChangeSource != "ai" || rev.ArtifactSeq != nil {
+			continue
+		}
+
+		// Find the matching artifact row.
+		var art orm.SubAgentArtifact
+		if rev.ListIndex != nil {
+			var candidates []orm.SubAgentArtifact
+			db.WithContext(ctx).
+				Where("task_id = ? AND artifact_key = ?", step.TaskID, rev.ArtifactKey).
+				Order("seq DESC").
+				Find(&candidates)
+			for _, c := range candidates {
+				var v map[string]any
+				if json.Unmarshal(c.Value, &v) != nil {
+					continue
+				}
+				var liInt int
+				switch idx := v["list_index"].(type) {
+				case float64:
+					liInt = int(idx)
+				case int:
+					liInt = idx
+				default:
+					continue
+				}
+				if liInt == *rev.ListIndex {
+					art = c
+					break
+				}
+			}
+			if art.TaskID == "" {
+				continue
+			}
+		} else {
+			if err := db.WithContext(ctx).
+				Where("task_id = ? AND artifact_key = ?", step.TaskID, rev.ArtifactKey).
+				Order("seq DESC").
+				First(&art).Error; err != nil {
+				continue
+			}
+		}
+
+		seq := art.Seq
+		if err := db.WithContext(ctx).Model(&orm.PluginSlotRevision{}).
+			Where("id = ?", rev.ID).
+			Update("artifact_seq", seq).Error; err != nil {
+			fmt.Printf("[Plugin] OnSubAgentDoneSnapshot: backfill artifact_seq rev=%s: %v\n", rev.ID, err)
+		}
 	}
 }
 
@@ -433,6 +540,27 @@ func extractListIndex(ctx context.Context, db *gorm.DB, taskID, artifactKey stri
 		return &idx
 	}
 	return nil
+}
+
+// extractCaption reads the most recent artifact value for the given (taskID, artifactKey)
+// and returns the caption string embedded in the JSON value, or "" if absent.
+func extractCaption(ctx context.Context, db *gorm.DB, taskID, artifactKey string) string {
+	var a orm.SubAgentArtifact
+	err := db.WithContext(ctx).
+		Where("task_id = ? AND artifact_key = ?", taskID, artifactKey).
+		Order("seq DESC").
+		First(&a).Error
+	if err != nil {
+		return ""
+	}
+	var v map[string]any
+	if json.Unmarshal(a.Value, &v) != nil {
+		return ""
+	}
+	if cap, ok := v["caption"].(string); ok {
+		return strings.TrimSpace(cap)
+	}
+	return ""
 }
 
 // resolveSlotBinding looks up (slotID, cardinality) for an artifact key from the Python plugin API.
@@ -503,4 +631,44 @@ func callDriverAgent(pluginID, stepID, stepResult, sessionID string) (verdict, r
 // driverEndpoint returns the DriverAgent URL.
 func driverEndpoint() string {
 	return common.ChatServiceEndpoint() + "/api/plugin/driver"
+}
+
+// backfillArtifactListIndex patches the most-recent sub_agent_artifacts row for
+// (taskID, artifactKey) to embed {"list_index": listIndex} inside its value JSON.
+// This ensures HideSlotItem can match artifacts by list_index even when the AI
+// wrote the artifact in append-mode (no sort_order → no list_index in value at write time).
+// Skipped silently if the row already contains the correct list_index.
+func backfillArtifactListIndex(ctx context.Context, db *gorm.DB, taskID, artifactKey string, listIndex int) {
+	var art orm.SubAgentArtifact
+	if err := db.WithContext(ctx).
+		Where("task_id = ? AND artifact_key = ?", taskID, artifactKey).
+		Order("seq DESC").
+		First(&art).Error; err != nil {
+		return
+	}
+	var v map[string]any
+	if json.Unmarshal(art.Value, &v) != nil {
+		return
+	}
+	// Already correct — no update needed.
+	if existing, ok := v["list_index"]; ok {
+		switch idx := existing.(type) {
+		case float64:
+			if int(idx) == listIndex {
+				return
+			}
+		case int:
+			if idx == listIndex {
+				return
+			}
+		}
+	}
+	v["list_index"] = listIndex
+	newVal, err := json.Marshal(v)
+	if err != nil {
+		return
+	}
+	_ = db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).
+		Where("task_id = ? AND artifact_key = ? AND seq = ?", art.TaskID, art.ArtifactKey, art.Seq).
+		Update("value", newVal).Error
 }

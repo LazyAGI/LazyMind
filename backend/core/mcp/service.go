@@ -37,15 +37,22 @@ func newToolID() string {
 	return "mst_" + common.GenerateID()
 }
 
-func ListServers(ctx context.Context, db *gorm.DB, userID string) (*ListServersResponse, error) {
+func ListServers(ctx context.Context, db *gorm.DB, userID string, req ListServersRequest) (*ListServersResponse, error) {
 	if db == nil {
 		return nil, fmt.Errorf("store not initialized")
 	}
 	userID = strings.TrimSpace(userID)
+	req = normalizeListServersRequest(req)
 	var rows []orm.MCPServer
-	if err := visibleServerQuery(db.WithContext(ctx), userID).
-		Order("share ASC, updated_at DESC").
-		Find(&rows).Error; err != nil {
+	query := applyListServersKeyword(visibleServerQuery(db.WithContext(ctx), userID), req.Keyword)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	if req.PageSize > 0 {
+		query = query.Offset((req.Page - 1) * req.PageSize).Limit(req.PageSize)
+	}
+	if err := query.Order("share ASC, updated_at DESC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 
@@ -58,7 +65,7 @@ func ListServers(ctx context.Context, db *gorm.DB, userID string) (*ListServersR
 	for i := range rows {
 		out = append(out, serverResponse(rows[i], counts[rows[i].ID], nil))
 	}
-	return &ListServersResponse{MCPServers: out}, nil
+	return &ListServersResponse{MCPServers: out, Total: total, Page: req.Page, PageSize: req.PageSize}, nil
 }
 
 func CreateServer(ctx context.Context, db *gorm.DB, req CreateServerRequest, userID, userName string) (*ServerResponse, error) {
@@ -502,6 +509,42 @@ func visibleServerQuery(q *gorm.DB, userID string) *gorm.DB {
 		return q.Where("share = ? AND enabled = ?", true, true)
 	}
 	return q.Where("(create_user_id = ? OR (share = ? AND enabled = ?))", userID, true, true)
+}
+
+func normalizeListServersRequest(req ListServersRequest) ListServersRequest {
+	req.Keyword = strings.TrimSpace(req.Keyword)
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.PageSize < 0 {
+		req.PageSize = 0
+	}
+	return req
+}
+
+func applyListServersKeyword(q *gorm.DB, keyword string) *gorm.DB {
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
+	if keyword == "" {
+		return q
+	}
+	pattern := "%" + escapeListServersLikePattern(keyword) + "%"
+	return q.Where(
+		"(LOWER(name) LIKE ? ESCAPE '!' OR LOWER(url) LIKE ? ESCAPE '!' OR LOWER(transport) LIKE ? ESCAPE '!')",
+		pattern,
+		pattern,
+		pattern,
+	)
+}
+
+func escapeListServersLikePattern(keyword string) string {
+	var b strings.Builder
+	for _, r := range keyword {
+		if r == '!' || r == '%' || r == '_' {
+			b.WriteRune('!')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func getVisibleServer(ctx context.Context, db *gorm.DB, userID, id string) (*orm.MCPServer, error) {

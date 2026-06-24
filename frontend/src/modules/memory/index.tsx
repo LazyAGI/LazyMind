@@ -2,14 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Button,
-  Checkbox,
-  Drawer,
-  Form,
   Input,
-  InputNumber,
   Modal,
-  Popconfirm,
-  Select,
   Space,
   Switch,
   Tag,
@@ -22,14 +16,12 @@ import type { ColumnsType } from "antd/es/table";
 import {
   AppstoreOutlined,
   BookOutlined,
-  CloudServerOutlined,
   DeleteOutlined,
   EditOutlined,
   EyeOutlined,
   HistoryOutlined,
   LinkOutlined,
   LockOutlined,
-  ToolOutlined,
 } from "@ant-design/icons";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useTranslation } from "react-i18next";
@@ -40,10 +32,6 @@ import {
   useNavigate,
   useSearchParams,
 } from "react-router-dom";
-import {
-  DEVELOPER_ACTIVE_EVENT,
-  isDeveloperModeActive,
-} from "@/utils/developerMode";
 import type { GroupItem, UserItem } from "@/api/generated/auth-client";
 import { createGroupApi, createUserApi } from "@/modules/signin/utils/request";
 import GlossaryInboxModal from "./components/GlossaryInboxModal";
@@ -169,23 +157,6 @@ import {
   SKILL_TAG_MAX_COUNT,
   skillUploadAccept,
 } from "./shared";
-import {
-  checkMcpServer,
-  createMcpServer,
-  deleteMcpServer,
-  disableTool,
-  discoverMcpServerTools,
-  enableTool,
-  listMcpServersPage,
-  listToolAssetsPage,
-  updateMcpServer,
-  updateMcpServerTools,
-  type McpServerAsset,
-  type McpServerDraft,
-  type McpToolAsset,
-  type ToolListOptions,
-} from "./toolApi";
-
 import "./index.scss";
 
 const backendSuggestionPageSize = 20;
@@ -208,12 +179,21 @@ const normalizeAutoEvoApplyStatus = (status?: string) =>
 const getAutoEvoStatusMeta = (status?: string) => {
   const normalizedStatus = normalizeAutoEvoApplyStatus(status);
   if (normalizedStatus === "running") {
-    return { color: "blue" as const, text: "正在自动进化" };
+    return {
+      color: "blue" as const,
+      textKey: "admin.memoryAutoEvoStatusRunning",
+    };
   }
   if (normalizedStatus === "failed") {
-    return { color: "red" as const, text: "自动进化执行失败" };
+    return {
+      color: "red" as const,
+      textKey: "admin.memoryAutoEvoStatusFailed",
+    };
   }
-  return { color: "blue" as const, text: "等待进化建议" };
+  return {
+    color: "blue" as const,
+    textKey: "admin.memoryAutoEvoStatusWaiting",
+  };
 };
 const hasDraftPreviewStatus = (record: ExperienceAsset) =>
   isPendingReviewStatus(record.reviewStatus);
@@ -249,47 +229,6 @@ const isExperienceProfileAsset = (record: ExperienceAsset) => {
     resourceType.includes("preference") ||
     record.title === "用户画像"
   );
-};
-const getMcpActionKey = (action: string, id: string) => `${action}:${id}`;
-const getMcpToolId = (tool: McpToolAsset) => tool.id || tool.name;
-const normalizeMcpTransportValue = (value?: string) =>
-  value === "streamable_http" ? "http" : value || "sse";
-const getMcpTransportLabel = (value?: string) => {
-  const normalizedValue = normalizeMcpTransportValue(value);
-  if (normalizedValue === "http") {
-    return "Streamable HTTP";
-  }
-  return "SSE";
-};
-const parseMcpEndpoint = (value: string) => {
-  if (!value) {
-    return { scheme: "", host: "-", path: "" };
-  }
-
-  try {
-    const endpointUrl = new URL(value);
-    return {
-      scheme: endpointUrl.protocol.replace(/:$/, ""),
-      host: endpointUrl.host,
-      path:
-        `${endpointUrl.pathname}${endpointUrl.search}${endpointUrl.hash}` ||
-        "/",
-    };
-  } catch {
-    return { scheme: "", host: value, path: "" };
-  }
-};
-const resolveAllowedMcpToolIds = (
-  server: McpServerAsset,
-  tools: McpToolAsset[],
-) => {
-  const toolIds = tools.map(getMcpToolId).filter(Boolean);
-  if (!server.allowedTools) {
-    return toolIds;
-  }
-
-  const allowedToolSet = new Set(server.allowedTools);
-  return toolIds.filter((toolId) => allowedToolSet.has(toolId));
 };
 
 const mergeEvolutionSuggestionRecords = (
@@ -353,26 +292,6 @@ export default function MemoryManagement() {
     )?.id;
   })();
   const [activeTab, setActiveTab] = useState<MemoryTab>(routeMemoryTab);
-  const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
-  const [toolAssets, setToolAssets] = useState<StructuredAsset[]>([]);
-  const [toolLoading, setToolLoading] = useState(false);
-  const [toolListTotal, setToolListTotal] = useState(0);
-  const toolListParamsRef = useRef<ToolListOptions>({});
-  const [toolActionLoading, setToolActionLoading] = useState<Set<string>>(new Set());
-  const [mcpServers, setMcpServers] = useState<McpServerAsset[]>([]);
-  const [mcpLoading, setMcpLoading] = useState(false);
-  const [mcpListTotal, setMcpListTotal] = useState(0);
-  const mcpListParamsRef = useRef<ToolListOptions>({});
-  const [mcpActionLoading, setMcpActionLoading] = useState<Set<string>>(new Set());
-  const [mcpModalOpen, setMcpModalOpen] = useState(false);
-  const [mcpModalMode, setMcpModalMode] = useState<"add" | "edit">("add");
-  const [mcpEditingServer, setMcpEditingServer] = useState<McpServerAsset | null>(null);
-  const [mcpSaving, setMcpSaving] = useState(false);
-  const [mcpToolsDrawerOpen, setMcpToolsDrawerOpen] = useState(false);
-  const [mcpToolTarget, setMcpToolTarget] = useState<McpServerAsset | null>(null);
-  const [mcpToolDraftIds, setMcpToolDraftIds] = useState<string[]>([]);
-  const [mcpToolSaving, setMcpToolSaving] = useState(false);
-  const [mcpForm] = Form.useForm<McpServerDraft>();
   const [skillAssets, setSkillAssets] = useState<StructuredAsset[]>(initialSkills);
   const [skillLoading, setSkillLoading] = useState(false);
   const [skillTags, setSkillTags] = useState<string[]>([]);
@@ -525,12 +444,6 @@ export default function MemoryManagement() {
     MemoryTab,
     { title: string; description: string; unit: string; icon: ReactNode }
   > = {
-    tools: {
-      title: t("admin.memoryTabTools"),
-      description: t("admin.memoryTabToolsDesc"),
-      unit: t("admin.memoryUnitTool"),
-      icon: <ToolOutlined />,
-    },
     skills: {
       title: t("admin.memoryTabSkills"),
       description: t("admin.memoryTabSkillsDesc"),
@@ -552,19 +465,7 @@ export default function MemoryManagement() {
   };
 
   const currentTabMeta = tabMeta[activeTab];
-  const visibleMemoryTabOrder = useMemo(
-    () =>
-      developerActive
-        ? memoryTabOrder
-        : memoryTabOrder.filter((tabKey) => tabKey !== "tools"),
-    [developerActive],
-  );
-  const currentStructuredItems =
-    activeTab === "tools"
-      ? toolAssets
-      : activeTab === "skills"
-        ? skillAssets
-        : [];
+  const currentStructuredItems = activeTab === "skills" ? skillAssets : [];
 
   const topLevelSkills = useMemo(
     () => skillAssets.filter((item) => !item.parentId),
@@ -844,313 +745,6 @@ export default function MemoryManagement() {
       }
     }
   }, [category, skillKeyword, skillListPage, skillListPageSize, tag]);
-
-  const refreshToolAssets = useCallback(async (options: ToolListOptions = {}) => {
-    const requestOptions = { ...toolListParamsRef.current, ...options };
-    toolListParamsRef.current = requestOptions;
-    setToolLoading(true);
-
-    try {
-      const result = await listToolAssetsPage(requestOptions);
-      setToolAssets(result.records);
-      setToolListTotal(result.total);
-    } catch (error) {
-      console.error("Load tool assets failed:", error);
-    } finally {
-      setToolLoading(false);
-    }
-  }, []);
-
-  const handleToggleTool = useCallback(
-    async (record: StructuredAsset, checked: boolean) => {
-      const toolName = record.id;
-      if (!toolName || record.readonly) {
-        return;
-      }
-
-      setToolActionLoading((previous) => new Set(previous).add(toolName));
-
-      try {
-        if (checked) {
-          await enableTool(toolName);
-        } else {
-          await disableTool(toolName);
-        }
-        await refreshToolAssets();
-        message.success(
-          checked
-            ? t("admin.memoryToolEnableSuccess")
-            : t("admin.memoryToolDisableSuccess"),
-        );
-      } catch (error) {
-        console.error("Toggle tool failed:", error);
-      } finally {
-        setToolActionLoading((previous) => {
-          const next = new Set(previous);
-          next.delete(toolName);
-          return next;
-        });
-      }
-    },
-    [refreshToolAssets, t],
-  );
-
-  const refreshMcpServers = useCallback(async (options: ToolListOptions = {}) => {
-    const requestOptions = { ...mcpListParamsRef.current, ...options };
-    mcpListParamsRef.current = requestOptions;
-    setMcpLoading(true);
-
-    try {
-      const result = await listMcpServersPage(requestOptions);
-      setMcpServers(result.records);
-      setMcpListTotal(result.total);
-    } catch (error) {
-      console.error("Load MCP servers failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memoryMcpLoadFailed")) ||
-          t("admin.memoryMcpLoadFailed"),
-      );
-    } finally {
-      setMcpLoading(false);
-    }
-  }, [t]);
-
-  const markMcpActionLoading = useCallback((key: string, loading: boolean) => {
-    setMcpActionLoading((previous) => {
-      const next = new Set(previous);
-      if (loading) {
-        next.add(key);
-      } else {
-        next.delete(key);
-      }
-      return next;
-    });
-  }, []);
-
-  const openMcpToolsDrawer = useCallback((server: McpServerAsset) => {
-    const tools = server.tools || [];
-    setMcpToolTarget(server);
-    setMcpToolDraftIds(resolveAllowedMcpToolIds(server, tools));
-    setMcpToolsDrawerOpen(true);
-  }, []);
-
-  const openMcpCreateModal = useCallback(() => {
-    setMcpModalMode("add");
-    setMcpEditingServer(null);
-    mcpForm.setFieldsValue({
-      apiKey: "",
-      enabled: false,
-      name: "",
-      timeout: 30,
-      transport: "sse",
-      url: "",
-    });
-    setMcpModalOpen(true);
-  }, [mcpForm]);
-
-  const openMcpEditModal = useCallback(
-    (server: McpServerAsset) => {
-      setMcpModalMode("edit");
-      setMcpEditingServer(server);
-      mcpForm.setFieldsValue({
-        apiKey: "",
-        enabled: server.isVerified && server.enabled,
-        name: server.name,
-        timeout: server.timeout || 30,
-        transport: normalizeMcpTransportValue(server.transport),
-        url: server.url,
-      });
-      setMcpModalOpen(true);
-    },
-    [mcpForm],
-  );
-
-  const closeMcpModal = useCallback(() => {
-    if (mcpSaving) {
-      return;
-    }
-    setMcpModalOpen(false);
-  }, [mcpSaving]);
-
-  const saveMcpServer = useCallback(async () => {
-    const values = await mcpForm.validateFields();
-    const draft: McpServerDraft = {
-      apiKey: String(values.apiKey || ""),
-      enabled:
-        mcpModalMode === "edit" && mcpEditingServer?.isVerified
-          ? Boolean(values.enabled)
-          : false,
-      name: String(values.name || ""),
-      timeout: Number(values.timeout) || 30,
-      transport: normalizeMcpTransportValue(String(values.transport || "sse")),
-      url: String(values.url || ""),
-    };
-
-    setMcpSaving(true);
-    try {
-      if (mcpModalMode === "edit" && mcpEditingServer) {
-        await updateMcpServer(mcpEditingServer.id, draft);
-        message.success(t("admin.memoryMcpUpdateSuccess"));
-      } else {
-        await createMcpServer(draft);
-        message.success(t("admin.memoryMcpCreateSuccess"));
-      }
-      setMcpModalOpen(false);
-      await refreshMcpServers();
-    } catch (error) {
-      console.error("Save MCP server failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memoryMcpSaveFailed")) ||
-          t("admin.memoryMcpSaveFailed"),
-      );
-    } finally {
-      setMcpSaving(false);
-    }
-  }, [mcpEditingServer, mcpForm, mcpModalMode, refreshMcpServers, t]);
-
-  const handleToggleMcpServer = useCallback(
-    async (server: McpServerAsset, checked: boolean) => {
-      const actionKey = getMcpActionKey("toggle", server.id);
-      markMcpActionLoading(actionKey, true);
-
-      try {
-        await updateMcpServer(server.id, {
-          apiKey: "",
-          enabled: checked,
-          name: server.name,
-          timeout: server.timeout || 30,
-          transport: normalizeMcpTransportValue(server.transport),
-          url: server.url,
-        });
-        await refreshMcpServers();
-        message.success(
-          checked
-            ? t("admin.memoryMcpEnableSuccess")
-            : t("admin.memoryMcpDisableSuccess"),
-        );
-      } catch (error) {
-        console.error("Toggle MCP server failed:", error);
-        message.error(
-          getLocalizedErrorMessage(error, t("admin.memoryMcpToggleFailed")) ||
-            t("admin.memoryMcpToggleFailed"),
-        );
-      } finally {
-        markMcpActionLoading(actionKey, false);
-      }
-    },
-    [markMcpActionLoading, refreshMcpServers, t],
-  );
-
-  const handleCheckMcpServer = useCallback(
-    async (server: McpServerAsset) => {
-      const actionKey = getMcpActionKey("check", server.id);
-      markMcpActionLoading(actionKey, true);
-
-      try {
-        const result = await checkMcpServer(server.id);
-        const text =
-          result.message ||
-          t("admin.memoryMcpCheckResult", { count: result.toolCount });
-        if (result.success) {
-          message.success(text);
-        } else {
-          message.warning(text);
-        }
-      } catch (error) {
-        console.error("Check MCP server failed:", error);
-        message.error(
-          getLocalizedErrorMessage(error, t("admin.memoryMcpCheckFailed")) ||
-            t("admin.memoryMcpCheckFailed"),
-        );
-      } finally {
-        markMcpActionLoading(actionKey, false);
-      }
-    },
-    [markMcpActionLoading, t],
-  );
-
-  const handleDiscoverMcpTools = useCallback(
-    async (server: McpServerAsset) => {
-      const actionKey = getMcpActionKey("discover", server.id);
-      markMcpActionLoading(actionKey, true);
-
-      try {
-        const result = await discoverMcpServerTools(server.id);
-        const nextServer = {
-          ...server,
-          toolCount: result.tools.length,
-          tools: result.tools,
-        };
-        setMcpServers((previous) =>
-          previous.map((item) => (item.id === server.id ? nextServer : item)),
-        );
-        openMcpToolsDrawer(nextServer);
-        message.success(
-          t("admin.memoryMcpDiscoverSuccess", { count: result.tools.length }),
-        );
-      } catch (error) {
-        console.error("Discover MCP tools failed:", error);
-        message.error(
-          getLocalizedErrorMessage(error, t("admin.memoryMcpDiscoverFailed")) ||
-            t("admin.memoryMcpDiscoverFailed"),
-        );
-      } finally {
-        markMcpActionLoading(actionKey, false);
-      }
-    },
-    [markMcpActionLoading, openMcpToolsDrawer, t],
-  );
-
-  const handleDeleteMcpServer = useCallback(
-    async (server: McpServerAsset) => {
-      const actionKey = getMcpActionKey("delete", server.id);
-      markMcpActionLoading(actionKey, true);
-
-      try {
-        await deleteMcpServer(server.id);
-        await refreshMcpServers();
-        message.success(t("admin.memoryMcpDeleteSuccess"));
-      } catch (error) {
-        console.error("Delete MCP server failed:", error);
-        message.error(
-          getLocalizedErrorMessage(error, t("admin.memoryMcpDeleteFailed")) ||
-            t("admin.memoryMcpDeleteFailed"),
-        );
-      } finally {
-        markMcpActionLoading(actionKey, false);
-      }
-    },
-    [markMcpActionLoading, refreshMcpServers, t],
-  );
-
-  const closeMcpToolsDrawer = useCallback(() => {
-    if (mcpToolSaving) {
-      return;
-    }
-    setMcpToolsDrawerOpen(false);
-  }, [mcpToolSaving]);
-
-  const saveMcpServerTools = useCallback(async () => {
-    if (!mcpToolTarget) {
-      return;
-    }
-
-    setMcpToolSaving(true);
-    try {
-      await updateMcpServerTools(mcpToolTarget.id, mcpToolDraftIds);
-      setMcpToolsDrawerOpen(false);
-      await refreshMcpServers();
-      message.success(t("admin.memoryMcpToolsSaveSuccess"));
-    } catch (error) {
-      console.error("Save MCP tools failed:", error);
-      message.error(
-        getLocalizedErrorMessage(error, t("admin.memoryMcpToolsSaveFailed")) ||
-          t("admin.memoryMcpToolsSaveFailed"),
-      );
-    } finally {
-      setMcpToolSaving(false);
-    }
-  }, [mcpToolDraftIds, mcpToolTarget, refreshMcpServers, t]);
 
   const refreshGlossaryAssets = useCallback(
     async (options?: {
@@ -1650,39 +1244,6 @@ export default function MemoryManagement() {
   }, [glossaryInboxOpen, refreshGlossaryConflicts]);
 
   useEffect(() => {
-    const syncDeveloperActive = () => {
-      setDeveloperActive(isDeveloperModeActive());
-    };
-
-    const handleDeveloperActiveChange = (event: Event) => {
-      const nextActive = (event as CustomEvent<{ active?: boolean }>).detail?.active;
-      setDeveloperActive(
-        typeof nextActive === "boolean" ? nextActive : isDeveloperModeActive(),
-      );
-    };
-
-    window.addEventListener("storage", syncDeveloperActive);
-    window.addEventListener(DEVELOPER_ACTIVE_EVENT, handleDeveloperActiveChange);
-
-    return () => {
-      window.removeEventListener("storage", syncDeveloperActive);
-      window.removeEventListener(DEVELOPER_ACTIVE_EVENT, handleDeveloperActiveChange);
-    };
-  }, []);
-
-  useEffect(() => {
-    const queryTab = parseMemoryTab(searchParams.get("tab"));
-
-    if (
-      !developerActive &&
-      (activeTab === "tools" || routeListTab === "tools" || queryTab === "tools")
-    ) {
-      navigateToMemoryList("skills", { replace: true });
-      setActiveTab("skills");
-    }
-  }, [activeTab, developerActive, navigateToMemoryList, routeListTab, searchParams]);
-
-  useEffect(() => {
     const queryTab = parseMemoryTab(searchParams.get("tab"));
     const nextTab = skillRouteItemId
       ? "skills"
@@ -1692,14 +1253,8 @@ export default function MemoryManagement() {
       ? "glossary"
       : reviewRouteTab || routeListTab || queryTab || "skills";
 
-    if (!developerActive && nextTab === "tools") {
-      setActiveTab("skills");
-      return;
-    }
-
     setActiveTab((previous) => (previous === nextTab ? previous : nextTab));
   }, [
-    developerActive,
     experienceRouteItemId,
     glossaryRouteItemId,
     reviewRouteTab,
@@ -2387,7 +1942,7 @@ export default function MemoryManagement() {
 
   const keyword = query.trim().toLowerCase();
   const hasStructuredFilter = Boolean(keyword || category || tag);
-  const shouldFilterStructuredItemsLocally = activeTab !== "skills" && activeTab !== "tools";
+  const shouldFilterStructuredItemsLocally = activeTab !== "skills";
   const matchesStructuredFilter = useCallback(
     (item: StructuredAsset) => {
       if (!shouldFilterStructuredItemsLocally) {
@@ -2547,7 +2102,6 @@ export default function MemoryManagement() {
   const filteredStructuredItems = currentStructuredItems.filter((item) =>
     matchesStructuredFilter(item),
   );
-  const filteredMcpServers = mcpServers;
 
   const filteredSkillTree = useMemo<SkillTreeNode[]>(() => {
     const skillMap = new Map(skillAssets.map((item) => [item.id, item]));
@@ -2786,7 +2340,7 @@ export default function MemoryManagement() {
   const syncShareParams = (nextTab?: MemoryTab, nextItemId?: string) => {
     const nextSearchParams = new URLSearchParams(searchParams);
 
-    if (!routeListTab && !glossaryRouteItemId && !reviewRouteTab && nextTab && nextTab !== "tools") {
+    if (!routeListTab && !glossaryRouteItemId && !reviewRouteTab && nextTab) {
       nextSearchParams.set("tab", nextTab);
     } else {
       nextSearchParams.delete("tab");
@@ -3626,7 +3180,7 @@ export default function MemoryManagement() {
   const buildBackendDraftUserInstruct = (extraInstruction = "") => {
     const instructions = [
       activeProposal?.tab === "skills"
-        ? "请根据已接受的建议生成技能草稿。"
+        ? t("admin.memorySkillDraftDefaultInstruction")
         : "",
       extraInstruction.trim(),
     ].filter(Boolean);
@@ -4697,7 +4251,7 @@ export default function MemoryManagement() {
       }
 
       const payload: StructuredAsset = {
-        id: draft.id || createId(activeTab === "tools" ? "tool" : "skill"),
+        id: draft.id || createId("skill"),
         name: draft.name.trim(),
         description: draft.description.trim(),
         category: isChildSkill ? "" : draft.category.trim(),
@@ -5103,11 +4657,11 @@ export default function MemoryManagement() {
               .map((item) => item.trim())
               .filter(Boolean);
             if (normalizedNewAliases.some((alias) => alias === newGroupTerm)) {
-              throw new Error("词组归属不允许和其中一个词相同");
+              throw new Error(t("admin.memoryGlossaryGroupAliasDuplicate"));
             }
             const newGroupContent = (resolution?.newGroupContent ?? proposal.after.content).trim();
             if (newGroupTerm && newGroupContent && newGroupTerm === newGroupContent) {
-              throw new Error("内容不可以和词相同");
+              throw new Error(t("admin.memoryGlossaryContentSameAsTerm"));
             }
 
             const writeGroupIds = resolution?.writeGroupIds || [];
@@ -5270,7 +4824,7 @@ export default function MemoryManagement() {
                 <Tag color="blue">{t("admin.memoryBuiltinSkillEnabledTag")}</Tag>
               ) : null}
               {autoEvoStatusMeta ? (
-                <Tag color={autoEvoStatusMeta.color}>{autoEvoStatusMeta.text}</Tag>
+                <Tag color={autoEvoStatusMeta.color}>{t(autoEvoStatusMeta.textKey)}</Tag>
               ) : null}
               {showPendingTag ? (
                 <Tag color="orange">{t("admin.memoryDiffPendingTag")}</Tag>
@@ -5436,7 +4990,7 @@ export default function MemoryManagement() {
                 />
               </Tooltip>
             ) : null}
-            {activeTab !== "tools" && !isBuiltinTemplate ? (
+            {!isBuiltinTemplate ? (
               <>
                 {!isChildSkill ? (
                   <Tooltip title={reviewTooltip}>
@@ -5480,246 +5034,6 @@ export default function MemoryManagement() {
           </Space>
         );
       },
-    },
-  ];
-
-  const renderToolTwoLineText = (value?: string) =>
-    value ? (
-      <Tooltip
-        title={<div className="memory-text-popover-content">{value}</div>}
-        overlayClassName="memory-text-popover"
-        placement="topLeft"
-        trigger="hover"
-      >
-        <div className="memory-tool-two-line-text" title={value}>
-          {value}
-        </div>
-      </Tooltip>
-    ) : (
-      <div className="memory-tool-two-line-text" title={value}>
-        {value}
-      </div>
-    );
-
-  const renderMcpEndpoint = (record: McpServerAsset) => {
-    const endpoint = parseMcpEndpoint(record.url);
-    const transportLabel = getMcpTransportLabel(record.transport);
-
-    return (
-      <div className="memory-mcp-endpoint">
-        <div className="memory-mcp-endpoint-meta">
-          <Tag bordered={false}>{transportLabel}</Tag>
-          {endpoint.scheme ? (
-            <span className="memory-mcp-endpoint-scheme">{endpoint.scheme}</span>
-          ) : null}
-        </div>
-        <Tooltip
-          title={<div className="memory-text-popover-content">{record.url}</div>}
-          overlayClassName="memory-text-popover"
-          placement="topLeft"
-          trigger="hover"
-        >
-          <div className="memory-mcp-endpoint-url" title={record.url}>
-            <span className="memory-mcp-endpoint-host">{endpoint.host}</span>
-            {endpoint.path ? (
-              <span className="memory-mcp-endpoint-path">{endpoint.path}</span>
-            ) : null}
-          </div>
-        </Tooltip>
-      </div>
-    );
-  };
-
-  const toolColumns: ColumnsType<StructuredAsset> = [
-    {
-      title: t("admin.memoryToolName"),
-      dataIndex: "name",
-      key: "name",
-      width: 260,
-      render: (value: string) => (
-        <span className="memory-tool-name">{value}</span>
-      ),
-    },
-    {
-      title: t("admin.memoryDescription"),
-      dataIndex: "description",
-      key: "description",
-      render: (value: string) => renderToolTwoLineText(value),
-    },
-    {
-      title: t("admin.memoryTypicalUsage"),
-      dataIndex: "content",
-      key: "content",
-      render: (value: string) => renderToolTwoLineText(value),
-    },
-    {
-      title: t("admin.memoryToolStatus"),
-      dataIndex: "isEnabled",
-      key: "status",
-      width: 120,
-      render: (value: boolean) => (
-        <Tag color={value ? "success" : "default"}>
-          {value ? t("common.enabled") : t("common.disabled")}
-        </Tag>
-      ),
-    },
-    {
-      title: t("common.actions"),
-      key: "actions",
-      width: 140,
-      render: (_value, record) => (
-        <Switch
-          checked={Boolean(record.isEnabled)}
-          checkedChildren={t("common.enabled")}
-          disabled={Boolean(record.readonly)}
-          loading={toolActionLoading.has(record.id)}
-          unCheckedChildren={t("common.disabled")}
-          onChange={(checked) => {
-            void handleToggleTool(record, checked);
-          }}
-        />
-      ),
-    },
-  ];
-
-  const mcpColumns: ColumnsType<McpServerAsset> = [
-    {
-      title: t("admin.memoryMcpServer"),
-      dataIndex: "name",
-      key: "name",
-      width: 260,
-      render: (_value, record) => (
-        <div className="memory-table-main">
-          <div className="memory-table-main-title">
-            <span className="memory-mcp-server-name">{record.name}</span>
-            <Tag color={record.isVerified ? "blue" : "warning"}>
-              {record.isVerified
-                ? t("admin.memoryMcpVerified")
-                : t("admin.memoryMcpUnverified")}
-            </Tag>
-          </div>
-          <div className="memory-table-main-desc">
-            {record.apiKeyPreview || t("admin.memoryMcpApiKeyHidden")}
-          </div>
-        </div>
-      ),
-    },
-    {
-      title: t("admin.memoryMcpEndpoint"),
-      dataIndex: "url",
-      key: "url",
-      width: 330,
-      render: (_value, record) => renderMcpEndpoint(record),
-    },
-    {
-      title: t("admin.memoryMcpTools"),
-      key: "tools",
-      width: 150,
-      render: (_value, record) => {
-        const allowedCount =
-          record.allowedTools === undefined
-            ? record.toolCount
-            : record.allowedTools.length;
-        return (
-          <div className="memory-mcp-tool-count">
-            <strong>{record.toolCount}</strong>
-            <span>
-              {t("admin.memoryMcpAllowedToolsCount", { count: allowedCount })}
-            </span>
-          </div>
-        );
-      },
-    },
-    {
-      title: t("admin.memoryMcpEnableStatus", { defaultValue: "启用状态" }),
-      dataIndex: "enabled",
-      key: "enabled",
-      width: 120,
-      render: (_value, record) => {
-        const enableDisabled = !record.isVerified && !record.enabled;
-        const switchNode = (
-          <Switch
-            checked={record.enabled}
-            checkedChildren={t("admin.enable")}
-            disabled={enableDisabled}
-            loading={mcpActionLoading.has(getMcpActionKey("toggle", record.id))}
-            size="small"
-            unCheckedChildren={t("admin.disable")}
-            onChange={(checked) => {
-              void handleToggleMcpServer(record, checked);
-            }}
-          />
-        );
-        if (!enableDisabled) {
-          return switchNode;
-        }
-        return (
-          <Tooltip title={t("admin.memoryMcpEnableRequiresVerified")}>
-            <span>{switchNode}</span>
-          </Tooltip>
-        );
-      },
-    },
-    {
-      title: t("admin.memoryMcpTimeout"),
-      dataIndex: "timeout",
-      key: "timeout",
-      width: 110,
-      render: (value: number) => t("admin.memoryMcpTimeoutSeconds", { count: value }),
-    },
-    {
-      title: t("admin.memoryMcpUpdatedAt"),
-      dataIndex: "updateTime",
-      key: "updateTime",
-      width: 170,
-      render: (value: string) => formatDateTime(value) || "-",
-    },
-    {
-      title: t("common.actions"),
-      key: "actions",
-      width: 280,
-      fixed: "right",
-      render: (_value, record) => (
-        <Space className="memory-mcp-actions" size={0} wrap>
-          <Button
-            loading={mcpActionLoading.has(getMcpActionKey("check", record.id))}
-            size="small"
-            type="link"
-            onClick={() => void handleCheckMcpServer(record)}
-          >
-            {t("admin.memoryMcpCheck")}
-          </Button>
-          <Button
-            loading={mcpActionLoading.has(getMcpActionKey("discover", record.id))}
-            size="small"
-            type="link"
-            onClick={() => void handleDiscoverMcpTools(record)}
-          >
-            {t("admin.memoryMcpDiscover")}
-          </Button>
-          <Button
-            size="small"
-            type="link"
-            onClick={() => openMcpEditModal(record)}
-          >
-            {t("common.edit")}
-          </Button>
-          <Popconfirm
-            cancelText={t("common.cancel")}
-            okText={t("common.delete")}
-            okButtonProps={{
-              danger: true,
-              loading: mcpActionLoading.has(getMcpActionKey("delete", record.id)),
-            }}
-            title={t("admin.memoryMcpDeleteConfirm", { name: record.name })}
-            onConfirm={() => void handleDeleteMcpServer(record)}
-          >
-            <Button danger size="small" type="link">
-              {t("common.delete")}
-            </Button>
-          </Popconfirm>
-        </Space>
-      ),
     },
   ];
 
@@ -5875,7 +5189,7 @@ export default function MemoryManagement() {
                 {record.title}
               </button>
               {autoEvoStatusMeta ? (
-                <Tag color={autoEvoStatusMeta.color}>{autoEvoStatusMeta.text}</Tag>
+                <Tag color={autoEvoStatusMeta.color}>{t(autoEvoStatusMeta.textKey)}</Tag>
               ) : null}
               {showPendingTag ? (
                 <Tag color="orange">{t("admin.memoryDiffPendingTag")}</Tag>
@@ -6085,7 +5399,7 @@ export default function MemoryManagement() {
         ? "admin.memoryModalEdit"
         : "admin.memoryModalView",
   )}${currentTabMeta.unit}`;
-  const isReadOnly = modalMode === "view" || activeTab === "tools";
+  const isReadOnly = modalMode === "view";
   const isChildSkillDraft = activeTab === "skills" && Boolean(draft.parentId);
   const tagOptions = [...new Set([...availableTags, ...draft.tags])].map((item) => ({
     label: item,
@@ -6115,14 +5429,6 @@ export default function MemoryManagement() {
     }
     return { color: "processing", text: t("admin.memorySkillShareStatusPending") };
   };
-  const mcpToolIds = (mcpToolTarget?.tools || [])
-    .map(getMcpToolId)
-    .filter(Boolean);
-  const selectedMcpToolSet = new Set(mcpToolDraftIds);
-  const allMcpToolsSelected =
-    mcpToolIds.length > 0 && mcpToolIds.every((toolId) => selectedMcpToolSet.has(toolId));
-  const hasPartialMcpToolsSelected =
-    mcpToolIds.some((toolId) => selectedMcpToolSet.has(toolId)) && !allMcpToolsSelected;
   const activeExperienceProfileDraft = activeExperienceProfileRecord
     ? experienceProfileDrafts[activeExperienceProfileRecord.id] ||
       getExperienceProfileDraft(activeExperienceProfileRecord)
@@ -6151,7 +5457,7 @@ export default function MemoryManagement() {
     setActiveTab,
     currentTabMeta,
     tabMeta,
-    memoryTabOrder: visibleMemoryTabOrder,
+    memoryTabOrder,
     openSkillShareCenter,
     incomingPendingCount,
     glossaryChangeProposals,
@@ -6221,17 +5527,7 @@ export default function MemoryManagement() {
     skillAssets,
     filteredSkillTree,
     filteredStructuredItems,
-    filteredMcpServers,
-    toolListTotal,
-    mcpListTotal,
     genericColumns,
-    toolColumns,
-    toolLoading,
-    refreshToolAssets,
-    mcpColumns,
-    mcpLoading,
-    refreshMcpServers,
-    openMcpCreateModal,
     isReviewRouteRequested,
     isGlossaryRouteRequested,
     reviewRouteTab,
@@ -6448,230 +5744,6 @@ export default function MemoryManagement() {
         ) : null}
       </Modal>
 
-      <Drawer
-        className="memory-mcp-drawer"
-        destroyOnHidden
-        footer={
-          <div className="memory-drawer-footer">
-            <Button onClick={closeMcpModal}>{t("common.cancel")}</Button>
-            <Button
-              loading={mcpSaving}
-              type="primary"
-              onClick={() => void saveMcpServer()}
-            >
-              {t("common.save")}
-            </Button>
-          </div>
-        }
-        open={mcpModalOpen}
-        title={
-          mcpModalMode === "add"
-            ? t("admin.memoryMcpCreateTitle")
-            : t("admin.memoryMcpEditTitle")
-        }
-        width={560}
-        onClose={closeMcpModal}
-      >
-        <Form<McpServerDraft>
-          className="memory-mcp-form"
-          form={mcpForm}
-          layout="vertical"
-        >
-          <Form.Item
-            label={t("admin.memoryMcpName")}
-            name="name"
-            rules={[
-              {
-                required: true,
-                whitespace: true,
-                message: t("admin.memoryMcpNameRequired"),
-              },
-            ]}
-          >
-            <Input maxLength={80} placeholder={t("admin.memoryMcpNamePlaceholder")} />
-          </Form.Item>
-          <Form.Item
-            label={t("admin.memoryMcpUrl")}
-            name="url"
-            rules={[
-              {
-                required: true,
-                whitespace: true,
-                message: t("admin.memoryMcpUrlRequired"),
-              },
-              { type: "url", message: t("admin.memoryMcpUrlInvalid") },
-            ]}
-          >
-            <Input placeholder="https://example.com/mcp" />
-          </Form.Item>
-          <div className="memory-mcp-form-grid">
-            <Form.Item
-              extra={
-                mcpModalMode === "edit"
-                  ? t("admin.memoryMcpTransportEditHint")
-                  : undefined
-              }
-              label={t("admin.memoryMcpTransport")}
-              name="transport"
-              rules={[
-                {
-                  required: true,
-                  message: t("admin.memoryMcpTransportRequired"),
-                },
-              ]}
-            >
-              <Select
-                disabled={mcpModalMode === "edit"}
-                options={[
-                  { label: "SSE", value: "sse" },
-                  { label: "Streamable HTTP", value: "http" },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item
-              label={t("admin.memoryMcpTimeout")}
-              name="timeout"
-              rules={[
-                {
-                  required: true,
-                  message: t("admin.memoryMcpTimeoutRequired"),
-                },
-              ]}
-            >
-              <InputNumber max={600} min={1} placeholder="30" />
-            </Form.Item>
-          </div>
-          <Form.Item
-            extra={
-              mcpModalMode === "edit"
-                ? t("admin.memoryMcpApiKeyEditHint", {
-                    preview:
-                      mcpEditingServer?.apiKeyPreview ||
-                      t("admin.memoryMcpApiKeyHidden"),
-                  })
-                : undefined
-            }
-            label={t("admin.memoryMcpApiKey")}
-            name="apiKey"
-            rules={
-              mcpModalMode === "add"
-                ? [
-                    {
-                      required: true,
-                      whitespace: true,
-                      message: t("admin.memoryMcpApiKeyRequired"),
-                    },
-                  ]
-                : []
-            }
-          >
-            <Input.Password
-              autoComplete="new-password"
-              placeholder={
-                mcpModalMode === "add"
-                  ? t("admin.memoryMcpApiKeyPlaceholder")
-                  : t("admin.memoryMcpApiKeyEditPlaceholder")
-              }
-            />
-          </Form.Item>
-          <Form.Item
-            label={t("admin.memoryMcpEnabled")}
-            name="enabled"
-            tooltip={
-              mcpModalMode === "add" ||
-              (mcpModalMode === "edit" && !mcpEditingServer?.isVerified)
-                ? t("admin.memoryMcpEnableRequiresVerified")
-                : undefined
-            }
-            valuePropName="checked"
-          >
-            <Switch
-              checkedChildren={t("common.enabled")}
-              disabled={
-                mcpModalMode === "add" ||
-                (mcpModalMode === "edit" && !mcpEditingServer?.isVerified)
-              }
-              unCheckedChildren={t("common.disabled")}
-            />
-          </Form.Item>
-        </Form>
-      </Drawer>
-
-      <Drawer
-        className="memory-mcp-drawer"
-        footer={
-          <div className="memory-drawer-footer">
-            <Button onClick={closeMcpToolsDrawer}>{t("common.cancel")}</Button>
-            <Button
-              disabled={!mcpToolTarget?.tools.length}
-              loading={mcpToolSaving}
-              type="primary"
-              onClick={() => void saveMcpServerTools()}
-            >
-              {t("common.save")}
-            </Button>
-          </div>
-        }
-        open={mcpToolsDrawerOpen}
-        title={t("admin.memoryMcpToolsTitle", {
-          name: mcpToolTarget?.name || "",
-        })}
-        width={620}
-        onClose={closeMcpToolsDrawer}
-      >
-        {mcpToolTarget ? (
-          <div className="memory-mcp-tools-panel">
-            <div className="memory-mcp-tools-summary">
-              <div>
-                <strong>{mcpToolTarget.name}</strong>
-                <span>{mcpToolTarget.url}</span>
-              </div>
-              <Tag color={mcpToolTarget.isVerified ? "blue" : "warning"}>
-                {mcpToolTarget.isVerified
-                  ? t("admin.memoryMcpVerified")
-                  : t("admin.memoryMcpUnverified")}
-              </Tag>
-            </div>
-            {mcpToolTarget.tools.length ? (
-              <>
-                <Checkbox
-                  checked={allMcpToolsSelected}
-                  indeterminate={hasPartialMcpToolsSelected}
-                  onChange={(event) =>
-                    setMcpToolDraftIds(event.target.checked ? mcpToolIds : [])
-                  }
-                >
-                  {t("admin.memoryMcpSelectAllTools")}
-                </Checkbox>
-                <Checkbox.Group
-                  className="memory-mcp-tool-group"
-                  value={mcpToolDraftIds}
-                  onChange={(values) => setMcpToolDraftIds(values.map(String))}
-                >
-                  {mcpToolTarget.tools.map((toolItem) => {
-                    const toolId = getMcpToolId(toolItem);
-                    return (
-                      <div className="memory-mcp-tool-option" key={toolId}>
-                        <Checkbox value={toolId} />
-                        <div className="memory-mcp-tool-option-copy">
-                          <strong>{toolItem.name || toolId}</strong>
-                          <span>{toolItem.description || "-"}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </Checkbox.Group>
-              </>
-            ) : (
-              <div className="memory-mcp-empty-tools">
-                <CloudServerOutlined />
-                <strong>{t("admin.memoryMcpNoToolsTitle")}</strong>
-                <span>{t("admin.memoryMcpNoToolsDesc")}</span>
-              </div>
-            )}
-          </div>
-        ) : null}
-      </Drawer>
     </div>
   );
 }

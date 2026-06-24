@@ -33,12 +33,12 @@ test_hermetic_hash_inputs() {
   fi
 
   local files=(
-    "$ROOT/requirements/test-hermetic.txt"
+    "$ROOT/tests/test-hermetic.txt"
     "$ROOT/backend/auth-service/requirements.txt"
     "$ROOT/tests/backend/auth-service/requirements-test.txt"
     "$ROOT/algorithm/requirements.txt"
     "$ROOT/algorithm/lazyllm/pyproject.toml"
-    "$ROOT/scripts/test-hermetic-env.sh"
+    "$ROOT/tests/test-hermetic-env.sh"
   )
 
   local file
@@ -124,7 +124,7 @@ test_hermetic_create_or_sync_python() {
   [ -f "$LOCK_STAMP" ] && actual="$(cat "$LOCK_STAMP")"
 
   if [ "$expected" != "$actual" ]; then
-    uv pip install --python "$PYTHON_BIN" -r "$ROOT/requirements/test-hermetic.txt"
+    uv pip install --python "$PYTHON_BIN" -r "$ROOT/tests/test-hermetic.txt"
     CMAKE_POLICY_VERSION_MINIMUM=3.5 \
       uv pip install --python "$PYTHON_BIN" --no-cache-dir "$ROOT/algorithm/lazyllm"
     "$PYTHON_BIN" - <<'PY'

@@ -30,17 +30,25 @@ const useElapsedTime = (props: IProps) => {
   }, [startTime, endTime]);
 
   const updateTime = () => {
-    if (!startTime) {
+    const start = parseTime(startTime);
+    if (!start) {
+      setResult({
+        days: 0,
+        hours: 0,
+        minutes: 0,
+        seconds: 0,
+      });
       return;
     }
-    const duration = moment.duration(
-      (moment(endTime).unix() - moment(startTime).unix()) * 1000,
+    const end = parseTime(endTime) || moment();
+    const totalSeconds = Math.max(
+      0,
+      Math.floor((end.valueOf() - start.valueOf()) / 1000),
     );
-    const days = duration.days();
-    const hours = duration.hours() + days * 24;
-    const minutes = duration.minutes();
-    const seconds = duration.seconds();
-    setResult(formatTime({ days, hours, minutes, seconds }));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    setResult({ days: 0, hours, minutes, seconds });
 
     if (!endTime) {
       timeoutRef.current = setTimeout(() => {
@@ -49,15 +57,25 @@ const useElapsedTime = (props: IProps) => {
     }
   };
 
-  const formatTime = (obj: IResult) => {
-    const newResult = {} as IResult;
-    Object.entries(obj).map(([key, value]) => {
-      newResult[key as keyof IResult] = value >= 0 ? value : 0;
-    });
-    return newResult;
-  };
-
   return result;
 };
+
+function parseTime(value?: number | string) {
+  if (value === undefined || value === null || value === "" || value === 0 || value === "0") {
+    return null;
+  }
+  const text = String(value).trim();
+  const numeric = Number(text);
+  if (Number.isFinite(numeric) && text !== "") {
+    if (numeric >= 1_000_000_000 && numeric < 1_000_000_000_000) {
+      return moment(numeric * 1000);
+    }
+    if (numeric >= 1_000_000_000_000) {
+      return moment(numeric);
+    }
+  }
+  const parsed = moment(text);
+  return parsed.isValid() ? parsed : null;
+}
 
 export default useElapsedTime;

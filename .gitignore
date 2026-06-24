@@ -61,10 +61,6 @@ docs/superpowers/
 *.dylib
 *.dll
 
-# Fortran module files
-*.mod
-*.smod
-
 # Compiled Static libraries
 *.lai
 *.la
@@ -87,7 +83,10 @@ lazyllm_cpp.egg-info/
 .venv-test/
 data/
 volumes/
+.lazymind-local/
+local/bin/process-compose
 .conda
+local/local-runtime-manager/lazymind-local
 
 # evo runtime artifacts
 evo/output/

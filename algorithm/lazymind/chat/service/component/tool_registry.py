@@ -19,6 +19,7 @@ from lazyllm.tools.tools.search import (
 
 from lazymind.chat.engine.tools import (
     KBToolGroup,
+    LocalFSToolGroup,
     TempKBToolGroup,
     calculator,
     image_editor,
@@ -155,6 +156,12 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         instance=skill_editor,
     ),
     ToolGroupConfig(
+        name='local_fs',
+        label='本地文件',
+        description='在配置的本地路径内进行 glob 匹配、grep 搜索、文件读取（只读）',
+        instance=LocalFSToolGroup(),
+    ),
+    ToolGroupConfig(
         name='feishu',
         label='飞书文件系统',
         description='浏览和管理飞书云文档',
@@ -244,7 +251,11 @@ def group_is_active(cfg: ToolGroupConfig) -> bool:
         return False
     if cfg.instance is None:
         return True
-    return _instance_is_active(cfg.instance)
+    result = _instance_is_active(cfg.instance)
+    if cfg.name == 'kb':
+        from lazyllm import LOG as _LOG
+        _LOG.info(f'[KBToolGroup_DEBUG] group_is_active kb={result!r}')
+    return result
 
 
 def get_all_tool_groups() -> list[dict]:

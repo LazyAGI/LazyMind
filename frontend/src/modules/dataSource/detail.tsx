@@ -263,6 +263,13 @@ function getParseStatusMeta(status: DocumentStatusRow["parseStatus"], t: TFuncti
       icon: <ClockCircleFilled />,
     };
   }
+  if (status === "downloading") {
+    return {
+      color: "#1677ff",
+      text: t("admin.dataSourceParseDownloading"),
+      icon: <SyncOutlined spin />,
+    };
+  }
   if (status === "duplicate") {
     return {
       color: "#f79009",
@@ -275,6 +282,27 @@ function getParseStatusMeta(status: DocumentStatusRow["parseStatus"], t: TFuncti
       color: "#f04438",
       text: t("admin.dataSourceParseDeleted"),
       icon: <DeleteOutlined />,
+    };
+  }
+  if (status === "download_failed") {
+    return {
+      color: "#f04438",
+      text: t("admin.dataSourceParseDownloadFailed"),
+      icon: <ExclamationCircleFilled />,
+    };
+  }
+  if (status === "parse_failed") {
+    return {
+      color: "#f04438",
+      text: t("admin.dataSourceParseParseFailed"),
+      icon: <ExclamationCircleFilled />,
+    };
+  }
+  if (status === "canceled") {
+    return {
+      color: "#f79009",
+      text: t("admin.dataSourceParseCanceled"),
+      icon: <ClockCircleFilled />,
     };
   }
   return {
@@ -336,7 +364,11 @@ function stringifyScanError(value: unknown) {
   return `${value}`;
 }
 
-function mapScanDocumentToDetail(item: ScanV2Document, t: TFunction): DocumentStatusRow {
+function mapScanDocumentToDetail(
+  item: ScanV2Document,
+  t: TFunction,
+  sourceType?: DataSourceSummary["sourceType"],
+): DocumentStatusRow {
   const sourceState = resolveSourceState({
     source_state: item.source_state,
     update_type: item.update_type || item.source_state,
@@ -349,7 +381,8 @@ function mapScanDocumentToDetail(item: ScanV2Document, t: TFunction): DocumentSt
     item.update_type || item.source_state,
     item.has_update ?? item.source_state !== "UNCHANGED",
   );
-  const parseState = [
+  const effectiveParseState = item.effective_parse_status || item.effectiveParseStatus;
+  const fallbackParseState = [
     item.parse_state,
     item.parse_status,
     item.parse_queue_state,
@@ -358,6 +391,7 @@ function mapScanDocumentToDetail(item: ScanV2Document, t: TFunction): DocumentSt
   ]
     .filter(Boolean)
     .join(" ");
+  const parseState = `${effectiveParseState || ""}`.trim() || fallbackParseState;
   const lastSyncedAt = formatDateTime(getDocumentLastUpdatedAt(item));
   return {
     id: `${item.document_id}`,
@@ -367,7 +401,9 @@ function mapScanDocumentToDetail(item: ScanV2Document, t: TFunction): DocumentSt
     tags: item.tags || [],
     updateState,
     syncDetail: item.update_desc || mapScanSyncDetail(updateState, t),
-    parseStatus: normalizeDataSourceParseStatus(parseState),
+    parseStatus: normalizeDataSourceParseStatus(parseState, item.last_error, {
+      sourceType,
+    }),
     sourceUpdatedAt: lastSyncedAt || "-",
     updatedAt: lastSyncedAt || "-",
     sourceState,
@@ -576,10 +612,10 @@ function shouldPollDocumentStatus(
 ) {
   return items.some(
     (item) =>
-      (!trackedKeys || trackedKeys.has(item.id) || trackedKeys.has(item.path)) &&
-      (item.parseStatus === "reindexing" ||
-        item.syncState === "PENDING" ||
-        item.syncState === "RUNNING"),
+      item.parseStatus === "reindexing" ||
+      item.parseStatus === "downloading" ||
+      item.syncState === "PENDING" ||
+      item.syncState === "RUNNING",
   );
 }
 
@@ -711,14 +747,15 @@ export default function DataSourceDetail() {
         const binding = getFirstScanBinding(
           sourceResponse.data.bindings as ScanV2Binding[] | undefined,
         );
+        const sourceType = inferSourceKind(source, binding);
         const documentsResponse = await client.listSourceDocuments({
           sourceId: id,
           page: 1,
           pageSize: 200,
         });
         const summaryResponse = await client.getSourceSummary({ sourceId: id }).catch(() => null);
-        const nextDocuments = (documentsResponse.data.items || []).map((item) =>
-          mapScanDocumentToDetail(item, t),
+        const nextDocuments = (documentsResponse.data.items || []).map(
+          (item) => mapScanDocumentToDetail(item, t, sourceType),
         );
         if (detailRefreshSeqRef.current !== requestSeq) {
           return null;
@@ -1462,15 +1499,17 @@ export default function DataSourceDetail() {
             color={
               parseStatus === "parsed"
                 ? "success"
-                : parseStatus === "reindexing"
+                : parseStatus === "reindexing" || parseStatus === "downloading"
                   ? "processing"
                   : parseStatus === "pending"
                     ? "default"
                   : parseStatus === "duplicate"
                     ? "warning"
+                  : parseStatus === "canceled"
+                    ? "warning"
                     : "error"
             }
-            title={record.syncDetail}
+            title={record.lastError || record.syncDetail}
           >
             {meta.text}
           </Tag>

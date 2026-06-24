@@ -1431,7 +1431,11 @@
   height: 100%;
   min-height: 0;
   min-width: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -5006,108 +5010,6 @@
   color: #6f86a3;
   font-size: 12px;
   line-height: 1.5;
-}
-
-.self-evolution-observation-entry-panel {
-  border: 1px solid #c9def7;
-  border-radius: 10px;
-  background: #ffffff;
-  padding: 8px;
-}
-
-.self-evolution-observation-entry-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 7px;
-
-  .ant-typography {
-    margin: 0;
-    color: #173e70;
-    font-size: 12px;
-    font-weight: 850;
-  }
-
-  span {
-    color: #66819f;
-    font-size: 11px;
-    font-weight: 700;
-  }
-}
-
-.self-evolution-observation-entry-list {
-  display: grid;
-  gap: 6px;
-}
-
-.self-evolution-observation-entry {
-  width: 100%;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid #d8e6f8;
-  border-radius: 8px;
-  background: #f8fbff;
-  color: #284664;
-  cursor: pointer;
-  text-align: left;
-  padding: 8px 9px;
-
-  &:hover,
-  &:focus-visible {
-    border-color: #8ebeff;
-    background: #edf5ff;
-    outline: none;
-  }
-
-  &.is-active {
-    border-color: #6ba8f0;
-    background: #eaf4ff;
-    box-shadow: inset 3px 0 0 #1e6dde;
-  }
-
-  span {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  strong {
-    overflow: hidden;
-    color: #21466f;
-    font-size: 12px;
-    font-weight: 850;
-    line-height: 1.25;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  em {
-    overflow: hidden;
-    color: #6b84a2;
-    font-size: 11px;
-    font-style: normal;
-    line-height: 1.25;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  i {
-    border: 1px solid #cfe0f5;
-    border-radius: 999px;
-    background: #ffffff;
-    color: #315d8d;
-    font-size: 10px;
-    font-style: normal;
-    font-weight: 850;
-    line-height: 1;
-    padding: 4px 6px;
-    white-space: nowrap;
-  }
 }
 
 .self-evolution-artifact-drawer {

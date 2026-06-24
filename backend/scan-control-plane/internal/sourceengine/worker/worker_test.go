@@ -106,6 +106,82 @@ func TestWorkerUsesCoreClientIdempotencyAndSupersede(t *testing.T) {
 		}
 	})
 
+	t.Run("recovers running core task without advancing baseline", func(t *testing.T) {
+		ctx := context.Background()
+		now := time.Date(2026, 5, 27, 11, 30, 0, 0, time.UTC)
+		repo := newWorkerIdempotencyStore(now)
+		conn := &workerSpyConnector{exportVersion: "v2"}
+		registry := mustRegistry(t, conn)
+		core := newWorkerIdempotencyCoreClient()
+		reducer := statepkg.NewDBStateReducer(repo, statepkg.WithClock(func() time.Time { return now }))
+		task := repo.seedPendingTask("doc-running", "v2", statepkg.SourceStateNew, statepkg.PendingActionCreate)
+		task.CoreTaskID = "core-task-running"
+		task.CoreDocumentID = "core-doc-running"
+		repo.tasks[task.TaskID] = task
+		core.Responses[task.IdempotencyKey] = coreclient.SubmitParseTaskResponse{
+			CoreTaskID:     "core-task-running",
+			CoreDocumentID: "core-doc-running",
+			Status:         coreclient.ResultStatusRunning,
+		}
+		parseWorker := worker.NewDefaultParseWorker(repo, registry, core, reducer, &workerIdempotencyTempObjectStore{}, worker.WithClock(func() time.Time { return now }))
+
+		if err := parseWorker.RunOnce(ctx, "worker-1"); err != nil {
+			t.Fatalf("run worker retry: %v", err)
+		}
+		if len(core.Submissions) != 0 || conn.exportCalls != 0 {
+			t.Fatalf("running recovery should not resubmit/export, submissions=%d exports=%d", len(core.Submissions), conn.exportCalls)
+		}
+		if got := repo.tasks[task.TaskID]; got.Status != worker.TaskStatusSubmitted {
+			t.Fatalf("running core task should remain submitted for polling, got %+v", got)
+		}
+		state := repo.states[workerIdempotencyKey("source-1", "binding-1", "doc-running")]
+		if state.BaselineVersion != "" || state.ParseQueueState != statepkg.ParseQueueStateQueued {
+			t.Fatalf("running core task should not advance state: %+v", state)
+		}
+	})
+
+	t.Run("recovers failed core task without marking source parsed", func(t *testing.T) {
+		ctx := context.Background()
+		now := time.Date(2026, 5, 27, 11, 45, 0, 0, time.UTC)
+		repo := newWorkerIdempotencyStore(now)
+		conn := &workerSpyConnector{exportVersion: "v2"}
+		registry := mustRegistry(t, conn)
+		core := newWorkerIdempotencyCoreClient()
+		reducer := statepkg.NewDBStateReducer(repo, statepkg.WithClock(func() time.Time { return now }))
+		task := repo.seedPendingTask("doc-canceled", "v2", statepkg.SourceStateNew, statepkg.PendingActionCreate)
+		task.CoreTaskID = "core-task-canceled"
+		task.CoreDocumentID = "core-doc-canceled"
+		repo.tasks[task.TaskID] = task
+		core.Responses[task.IdempotencyKey] = coreclient.SubmitParseTaskResponse{
+			CoreTaskID:     "core-task-canceled",
+			CoreDocumentID: "core-doc-canceled",
+			Status:         coreclient.ResultStatusFailed,
+		}
+		parseWorker := worker.NewDefaultParseWorker(repo, registry, core, reducer, &workerIdempotencyTempObjectStore{}, worker.WithClock(func() time.Time { return now }))
+
+		if err := parseWorker.RunOnce(ctx, "worker-1"); err != nil {
+			t.Fatalf("run worker retry: %v", err)
+		}
+		if len(core.Submissions) != 0 || conn.exportCalls != 0 {
+			t.Fatalf("failed recovery should not resubmit/export, submissions=%d exports=%d", len(core.Submissions), conn.exportCalls)
+		}
+		saved := repo.tasks[task.TaskID]
+		if saved.Status != worker.TaskStatusFailed || saved.LastError["reason"] != "CORE_TASK_FAILED" {
+			t.Fatalf("failed core task should be recorded as failed: %+v", saved)
+		}
+		state := repo.states[workerIdempotencyKey("source-1", "binding-1", "doc-canceled")]
+		if state.BaselineVersion != "" || state.ParseQueueState != statepkg.ParseQueueStateFailed {
+			t.Fatalf("failed core task should not advance baseline and should mark state failed: %+v", state)
+		}
+		if state.LastError["code"] != "CORE_TASK_FAILED" || state.LastError["phase"] != "parse" {
+			t.Fatalf("state should record core failure: %+v", state.LastError)
+		}
+		document := repo.documents[workerIdempotencyKey("source-1", "binding-1", "doc-canceled")]
+		if document.ParseStatus != "FAILED" {
+			t.Fatalf("source document should remain failed instead of parsed: %+v", document)
+		}
+	})
+
 	t.Run("superseded task does not submit or advance baseline", func(t *testing.T) {
 		ctx := context.Background()
 		now := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
@@ -286,6 +362,9 @@ func TestWorkerRetriesTransientFailureThenDeadLetters(t *testing.T) {
 	state := repo.states[workerIdempotencyKey("source-1", "binding-1", "doc-transient")]
 	if state.ParseQueueState != statepkg.ParseQueueStateFailed {
 		t.Fatalf("dead-lettered task should record state failure: %+v", state)
+	}
+	if state.LastError["phase"] != "download" {
+		t.Fatalf("download failure should record phase: %+v", state.LastError)
 	}
 }
 

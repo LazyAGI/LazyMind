@@ -14,9 +14,13 @@ export type CloudTargetType = FeishuTargetType | NotionTargetType;
 export type DetailParseStatus =
   | "parsed"
   | "pending"
+  | "downloading"
   | "reindexing"
   | "duplicate"
   | "deleted"
+  | "download_failed"
+  | "parse_failed"
+  | "canceled"
   | "failed";
 export type DataSourceKind = "local" | "feishu" | "notion";
 export type DataSourceFileType =
@@ -531,7 +535,116 @@ export function normalizeDataSourceFileUpdateState(
   return hasUpdate ? "changed" : "unchanged";
 }
 
-export function normalizeDataSourceParseStatus(parseState?: string): DetailParseStatus {
+function statusField(value: unknown, key: string) {
+  if (typeof value !== "object" || value === null) {
+    return "";
+  }
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === "string" ? field : "";
+}
+
+function dataSourceFailureText(parseState?: string, lastError?: unknown) {
+  if (!lastError) {
+    return parseState || "";
+  }
+  if (typeof lastError === "string") {
+    return [parseState, lastError].filter(Boolean).join(" ");
+  }
+  if (typeof lastError !== "object") {
+    return [parseState, `${lastError}`].filter(Boolean).join(" ");
+  }
+  return [
+    parseState,
+    statusField(lastError, "phase"),
+    statusField(lastError, "stage"),
+    statusField(lastError, "code"),
+    statusField(lastError, "reason"),
+    statusField(lastError, "message"),
+    statusField(lastError, "error"),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+export interface DataSourceParseStatusOptions {
+  sourceType?: SourceType | DataSourceKind;
+}
+
+function supportsDownloadParseStatus(sourceType?: SourceType | DataSourceKind) {
+  return sourceType !== "local";
+}
+
+function normalizeDataSourceFailureStatus(
+  parseState?: string,
+  lastError?: unknown,
+  options?: DataSourceParseStatusOptions,
+): DetailParseStatus | undefined {
+  const supportsDownloadStatus = supportsDownloadParseStatus(options?.sourceType);
+  const phase = statusField(lastError, "phase");
+  if (
+    supportsDownloadStatus &&
+    hasStatusToken(phase, ["download", "export", "fetch", "source"])
+  ) {
+    return "download_failed";
+  }
+  if (hasStatusToken(phase, ["parse", "index", "ingest", "core", "knowledge"])) {
+    return "parse_failed";
+  }
+
+  const code = statusField(lastError, "code") || statusField(lastError, "reason");
+  const text = dataSourceFailureText(parseState, lastError);
+  if (
+    hasStatusText(text, [
+      "download_failed",
+      "download failed",
+      "export_failed",
+      "export failed",
+      "fetch_failed",
+      "fetch failed",
+      "transient_source_error",
+      "unsupported_export",
+      "auth_connection_invalid",
+      "permission_denied",
+    ]) ||
+    hasStatusToken(text, ["download", "export"])
+  ) {
+    return supportsDownloadStatus ? "download_failed" : undefined;
+  }
+  if (
+    hasStatusText(text, [
+      "parse_failed",
+      "parse failed",
+      "core_task_failed",
+      "core_submit_failed",
+      "core_task_not_found",
+      "index_failed",
+      "index failed",
+      "ingest_failed",
+      "ingest failed",
+    ]) ||
+    hasStatusToken(code, ["parse", "core", "index", "ingest"])
+  ) {
+    return "parse_failed";
+  }
+  return undefined;
+}
+
+export function normalizeDataSourceParseStatus(
+  parseState?: string,
+  lastError?: unknown,
+  options?: DataSourceParseStatusOptions,
+): DetailParseStatus {
+  if (hasStatusToken(parseState, ["cancel", "canceled", "cancelled"])) {
+    return "canceled";
+  }
+  const failureStatus = normalizeDataSourceFailureStatus(
+    parseState,
+    lastError,
+    options,
+  );
+  if (failureStatus) {
+    return failureStatus;
+  }
   if (
     hasStatusText(parseState, [
       "not_parsed",
@@ -560,6 +673,29 @@ export function normalizeDataSourceParseStatus(parseState?: string): DetailParse
     ])
   ) {
     return "failed";
+  }
+  if (
+    supportsDownloadParseStatus(options?.sourceType) &&
+    (hasStatusToken(parseState, ["download", "downloading", "exporting", "fetching"]) ||
+      (hasStatusToken(parseState, [
+        "queued",
+        "running",
+        "pending",
+        "waiting",
+        "working",
+        "processing",
+      ]) &&
+        !hasStatusToken(parseState, [
+          "submitted",
+          "parse",
+          "parsing",
+          "index",
+          "indexing",
+          "reindex",
+          "reindexing",
+        ])))
+  ) {
+    return "downloading";
   }
   if (
     hasStatusToken(parseState, [

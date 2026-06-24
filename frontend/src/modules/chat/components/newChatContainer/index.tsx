@@ -37,8 +37,6 @@ import ChatInput, {
 import { ChatConfig } from "../ChatConfigs";
 import { allowedImageTypes } from "../ImageUpload";
 import { streamManager } from "@/modules/chat/utils/StreamManager";
-import { useModelSelectionStore } from "@/modules/chat/store/modelSelection";
-import type { PreferenceType } from "../MultiAnswerDisplay";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
@@ -193,27 +191,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       disabledDescription,
       disabledAction,
     } = props;
-    const { getModelSelection, setModelSelection, resetForNewChat } =
-      useModelSelectionStore();
-
-    const handlePreferenceSelect = useCallback(
-      (preference: PreferenceType, sessId?: string) => {
-        const sid =
-          sessId ?? sessionId ?? currentConversationIdRef.current ?? "";
-        if (preference === "prefer_first") {
-          setModelSelection(sid, "value_engineering");
-          message.success("后续回答将为 LazyMind 大模型");
-        } else if (preference === "prefer_second") {
-          setModelSelection(sid, "deepseek");
-          message.success("后续回答将为DeepSeek");
-        } else if (preference === "similar") {
-          message.success("感谢您的反馈，后续回答将仍为双模型");
-        } else if (preference === "neither") {
-          message.success("抱歉您的体验不佳，反馈已收到，后续回答将仍为双模型");
-        }
-      },
-      [sessionId, setModelSelection],
-    );
     const { clearPendingMessage: clearStorePendingMessage } =
       useChatMessageStore();
     const isMouseScrollingRef = useRef(false);
@@ -310,7 +287,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       fileRef.current?.clear();
     }
 
-    function sendMessage(params: SendMessageParams) {
+    async function sendMessage(params: SendMessageParams) {
       const {
         text,
         citeMessage: paramsCiteMessage,
@@ -379,9 +356,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
         setContent("");
         clearMultiData();
       }
-      const currentModelSelection = getModelSelection(
-        currentConversationIdRef.current || sessionId,
-      );
 
       const userMessage = {
         delta: normalizedText,
@@ -396,7 +370,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
         finish_reason:
           ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
         create_time,
-        model_mode: currentModelSelection,
+        model_mode: "value_engineering",
       };
       const assistantMessage = {
         role: RoleTypes.ASSISTANT,
@@ -406,7 +380,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
           ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
         answers: [],
         sources: [],
-        model_mode: currentModelSelection,
+        model_mode: "value_engineering",
       };
       const newMessageList = [...messageList, userMessage, assistantMessage];
       messageListRef.current = newMessageList;
@@ -423,7 +397,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       }
     }
 
-    const openSSE = (
+    const openSSE = async (
       input: any[],
       action: ChatConversationsRequestActionEnum,
     ) => {
@@ -444,7 +418,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
         timeout: (e) => onTimeout(e),
       };
 
-      const sse = onOpenSSE(input, action, {});
+      const sseOrPromise = onOpenSSE(input, action, {});
+      const sse = sseOrPromise instanceof Promise ? await sseOrPromise : sseOrPromise;
       sseRef.current = sse;
 
       streamManager.registerStream(conversationId, sse, callbacks);
@@ -571,9 +546,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
 
         const previousConversationId = currentConversationIdRef.current;
         const isPreviousTempId = previousConversationId.startsWith("temp_");
-
-        const newChatModelSelection = getModelSelection("");
-        setModelSelection(result.conversation_id, newChatModelSelection);
 
         if (isPreviousTempId) {
           const currentList = messageListRef.current;
@@ -705,63 +677,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
           newList.push(assistantMessage);
         }
 
-        const convModelSelection =
-          assistantMessage?.model_mode ||
-          getModelSelection(
-            messageConversationId || currentConversationIdAtStart,
-          );
-        const isMultiAnswerMode =
-          convModelSelection === "both" && result.history_id;
-
-        if (isMultiAnswerMode) {
-          if (!assistantMessage.answers) {
-            assistantMessage.answers = [];
-          }
-
-          let targetAnswer = assistantMessage.answers.find(
-            (ans: any) => ans.history_id === result.history_id,
-          );
-
-          if (!targetAnswer) {
-            const answerIndex = assistantMessage.answers.length;
-            targetAnswer = {
-              content: "",
-              index: answerIndex,
-              history_id: result.history_id,
-              raw_content: "",
-              reasoning_content: "",
-              sources: [],
-            };
-            assistantMessage.answers.push(targetAnswer);
-          }
-
-          targetAnswer.raw_content =
-            (targetAnswer.raw_content || targetAnswer.content || "") +
-            (result.delta || "");
-          const answerSplitResult = splitThinkingContent(
-            targetAnswer.raw_content,
-            targetAnswer.reasoning_content || "",
-          );
-          targetAnswer.content = answerSplitResult.content;
-          targetAnswer.reasoning_content = answerSplitResult.reasoning_content;
-
-          if (result.sources && result.sources.length > 0) {
-            targetAnswer.sources = result.sources;
-          }
-
-          if (result.thinking_duration_s) {
-            targetAnswer.thinking_duration_s = result.thinking_duration_s;
-          }
-
-          assistantMessage = {
-            ...assistantMessage,
-            finish_reason:
-              result.finish_reason || assistantMessage.finish_reason,
-            conversation_id:
-              result.conversation_id || assistantMessage.conversation_id,
-            id: result.messageId || assistantMessage.id,
-          };
-        } else {
+        {
           const previousRawDelta =
             assistantMessage.raw_delta || assistantMessage.delta || "";
           const mergedRawDelta = previousRawDelta + (result.delta || "");
@@ -1100,8 +1016,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
 
       currentConversationIdRef.current = "";
 
-      resetForNewChat();
-
       setMessageList([]);
       messageListRef.current = [];
       setEditingUserMessageIndex(null);
@@ -1311,9 +1225,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
         inputs: rebuiltInputs,
       };
 
-      const currentModelSelection = getModelSelection(
-        currentConversationIdRef.current || sessionId,
-      );
       const assistantMessage = {
         role: RoleTypes.ASSISTANT,
         delta: "",
@@ -1322,7 +1233,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
           ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
         answers: [],
         sources: [],
-        model_mode: currentModelSelection,
+        model_mode: "value_engineering",
       };
 
       const truncated = messageListRef.current.slice(0, index);
@@ -1583,7 +1494,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
             onScroll={handleScroll}
             chatContentRef={chatContentRef}
             sessionId={sessionId}
-            onPreferenceSelect={handlePreferenceSelect}
             editingUserMessageIndex={editingUserMessageIndex}
             editingUserMessageText={editingUserMessageText}
             editingUserMessageCites={editingUserMessageCites}

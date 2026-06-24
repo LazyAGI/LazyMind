@@ -52,7 +52,26 @@ type SubAgentArtifact struct {
 	ContentType string          `gorm:"column:content_type;type:varchar(32);not null"`
 	Value       json.RawMessage `gorm:"column:value;type:json;not null"`
 	Seq         int             `gorm:"column:seq;not null;default:1"`
-	CreatedAt   time.Time       `gorm:"column:created_at;not null"`
+	// Hidden marks logically-deleted list items; list_index is never reused.
+	Hidden bool `gorm:"column:hidden;not null;default:false"`
+	// Caption is a human-readable description for image/file artifacts, used in artifact_summary.
+	Caption   *string   `gorm:"column:caption"`
+	CreatedAt time.Time `gorm:"column:created_at;not null"`
 }
 
 func (SubAgentArtifact) TableName() string { return "sub_agent_artifacts" }
+
+// PluginHumanArtifact stores content written by human edits to plugin slots.
+// Structure mirrors SubAgentArtifact but scoped to a session rather than a task.
+// Value format is identical to SubAgentArtifact.Value.
+type PluginHumanArtifact struct {
+	ID          string          `gorm:"column:id;type:varchar(36);primaryKey"`
+	SessionID   string          `gorm:"column:session_id;type:varchar(36);not null"`
+	ArtifactKey string          `gorm:"column:artifact_key;type:varchar(64);not null"`
+	ContentType string          `gorm:"column:content_type;type:varchar(32);not null"`
+	Value       json.RawMessage `gorm:"column:value;type:jsonb;not null"`
+	Caption     *string         `gorm:"column:caption"`
+	CreatedAt   time.Time       `gorm:"column:created_at;not null"`
+}
+
+func (PluginHumanArtifact) TableName() string { return "plugin_human_artifacts" }

@@ -600,19 +600,25 @@ func DeleteDocument(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "document not found", err), http.StatusNotFound)
 		return
 	}
-	if err := deleteExternalDocs(r, datasetID, []orm.Document{row}); err != nil {
+	rowsToDelete, err := expandDocumentsForDelete(r.Context(), datasetID, []orm.Document{row})
+	if err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query documents failed", err), http.StatusInternalServerError)
+		return
+	}
+	if err := deleteExternalDocs(r, datasetID, rowsToDelete); err != nil {
 		common.ReplyErr(w, "external delete failed", http.StatusBadGateway)
 		return
 	}
 	now := time.Now().UTC()
+	docIDs := documentIDsFromRows(rowsToDelete)
 	if err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&orm.Document{}).
-			Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", docID, datasetID).
+			Where("id IN ? AND dataset_id = ? AND deleted_at IS NULL", docIDs, datasetID).
 			Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		if err := tx.Model(&orm.Task{}).
-			Where("doc_id = ? AND dataset_id = ? AND deleted_at IS NULL", docID, datasetID).
+			Where("doc_id IN ? AND dataset_id = ? AND deleted_at IS NULL", docIDs, datasetID).
 			Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
 			return err
 		}
@@ -1106,18 +1112,24 @@ func BatchDeleteDocument(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query documents failed", err), http.StatusInternalServerError)
 		return
 	}
-	if err := deleteExternalDocs(r, datasetID, rows); err != nil {
+	rowsToDelete, err := expandDocumentsForDelete(r.Context(), datasetID, rows)
+	if err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query documents failed", err), http.StatusInternalServerError)
+		return
+	}
+	if len(rowsToDelete) == 0 {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if err := deleteExternalDocs(r, datasetID, rowsToDelete); err != nil {
 		common.ReplyErr(w, "external delete failed", http.StatusBadGateway)
 		return
 	}
 	now := time.Now().UTC()
-	docIDs := make([]string, 0, len(rows))
-	for _, row := range rows {
-		docIDs = append(docIDs, row.ID)
-	}
+	docIDs := documentIDsFromRows(rowsToDelete)
 	if err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&orm.Document{}).
-			Where("dataset_id = ? AND id IN ? AND deleted_at IS NULL", datasetID, req.Names).
+			Where("dataset_id = ? AND id IN ? AND deleted_at IS NULL", datasetID, docIDs).
 			Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
 			return err
 		}
@@ -1138,6 +1150,48 @@ func BatchDeleteDocument(w http.ResponseWriter, r *http.Request) {
 	recalcAffectedFolderStats(r.Context(), datasetID, pids...)
 	w.WriteHeader(http.StatusOK)
 }
+
+func expandDocumentsForDelete(ctx context.Context, datasetID string, roots []orm.Document) ([]orm.Document, error) {
+	rows := make([]orm.Document, 0, len(roots))
+	seen := make(map[string]struct{}, len(roots))
+	appendRow := func(row orm.Document) {
+		id := strings.TrimSpace(row.ID)
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		rows = append(rows, row)
+	}
+	for _, row := range roots {
+		if !isFolderLikeDocument(row) {
+			appendRow(row)
+			continue
+		}
+		subtree, err := loadDocumentSubtree(ctx, datasetID, row.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range subtree {
+			appendRow(item)
+		}
+	}
+	return rows, nil
+}
+
+func documentIDsFromRows(rows []orm.Document) []string {
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		id := strings.TrimSpace(row.ID)
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
 func AllDocumentCreators(w http.ResponseWriter, r *http.Request) {
 	type resp struct {
 		Creators []UserInfo `json:"creators"`
