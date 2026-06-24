@@ -315,6 +315,8 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
 
   loadActiveSession: async (conversationId) => {
     if (!conversationId) return;
+    // Deduplicate concurrent calls for the same conversation.
+    if (get().loadingByConversation[conversationId]) return;
     set((s) => ({
       loadingByConversation: { ...s.loadingByConversation, [conversationId]: true },
     }));
