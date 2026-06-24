@@ -317,17 +317,10 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         ), final_data={'tool_call_turns': 0})
 
     filters = dict(filters or {})
-    # files is now a map {"current": [...], "<seq>": [...]} from Go.
-    # Flatten to a single list for path validation; the map is preserved in agentic_config.
     files_map: Dict[str, List[str]] = files if isinstance(files, dict) else {}
     flat_files: List[str] = []
     if files_map:
-        # current turn first, then historical in ascending seq order
-        if 'current' in files_map:
-            flat_files.extend(files_map['current'])
-        hist_keys = sorted([k for k in files_map if k != 'current' and k.isdigit()],
-                           key=int)
-        for seq_key in hist_keys:
+        for seq_key in sorted((k for k in files_map if k.isdigit()), key=int):
             flat_files.extend(files_map[seq_key])
     resolved_files = validate_and_resolve_files(flat_files)
     filters['kb_id'] = _normalize_kb_id_filter(filters.get('kb_id'))

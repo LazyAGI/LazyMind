@@ -488,7 +488,6 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	}
 	currentFilePaths := filePathsForUpstreamChat(raw)
 	filesMap := filesPerTurnMap(histories, currentFilePaths, currentSeq)
-	fmt.Printf("[FILES_DEBUG] conv=%s currentFilePaths=%v filesMap=%v\n", convID, currentFilePaths, filesMap)
 	body := map[string]any{
 		"query":           query,
 		"session_id":      sessionID,
@@ -634,14 +633,11 @@ func handleNonStreamChat(
 ) {
 	pyBody, _ := json.Marshal(reqBody)
 	upstreamURL := common.JoinURL(baseURL, "/api/chat")
-	fmt.Printf("DEBUG upstream request url=%s params=%s\n", upstreamURL, debugJSON(reqBody))
-	respBytes, statusCode, err := common.HTTPPost(reqCtx, upstreamURL, "application/json", pyBody)
+	respBytes, _, err := common.HTTPPost(reqCtx, upstreamURL, "application/json", pyBody)
 	if err != nil {
-		fmt.Println("DEBUG upstream request failed url=", upstreamURL, " err=", err)
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "chat service unavailable", err), http.StatusBadGateway)
 		return
 	}
-	fmt.Println("DEBUG upstream response url=", upstreamURL, " status=", statusCode)
 	var pyResp struct {
 		Code int             `json:"code"`
 		Msg  string          `json:"msg"`

@@ -38,13 +38,14 @@
 -----
 
 补充：
-用户的意图和约束项（全局，每个step，约束发生变更的识别），约束的展示
-每一次ChatAgent和SubAgent如何知道该取哪些附件
-遇到用户的意图缺失，或者需要向用户问询的，如何产生ask(auto模式不ask，manual模式可能ask)
+1. 用户在对话中，会给出的意图和约束项（分为全局和限制某个step），约束项要整理和被展示。意图和约束会发生变更，需要及时识别和修正
+2. 遇到用户的意图缺失，或者需要向用户问询的，如何产生ask(auto模式不ask，manual模式可能ask)
+3. subagent 需要 auto / never两个模式, default=auto，由ChatAgent自己推进流程，用户不干预；nerver时不开启SubAgent。
+4. plugin 需要 auto / dynamic / manual / never四个模式，default=dynamic
+auto和manual时，每次advance_step时，ChatAgent退出。auto时使用DriverAgent, maunal不启用DriverAgent。
+dynamic由ChatAgent判断是否一次性调用多个step（即step执行完不结束，不启用DriverAgent）
+never时候关闭插件机制(如果作为问答助手，是要关闭插件的)
 
-subagent = auto / never, default=auto
-plugin = auto / dynamic / manual / never, default=dynamic, never时候关闭插件机制(如果作为问答助手，是要关闭插件的)
-
-目前DriverAgent执行失败的时候，默认fallback到pass，我认为不合理。
-1. DriverAgent失败，默认fallback到manual，即让用户进行对话，而不是继续
-2. DriverAgent拿不到key，需要像ChatAgent和SubAgent一样，注入一些配置。此外，看起来DriverAgent目前也没有能力读取附件来判断
+4. 目前DriverAgent执行失败的时候，默认fallback到pass，我认为不合理。
+  4.1. DriverAgent失败，默认fallback到manual，即让用户进行对话，而不是继续
+  4.2. DriverAgent拿不到key，需要像ChatAgent和SubAgent一样，注入一些配置。此外，看起来DriverAgent目前也没有能力读取附件来判断

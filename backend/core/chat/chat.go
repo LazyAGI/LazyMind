@@ -411,6 +411,13 @@ func datasetFiltersFromAny(v any) *DatasetFilters {
 }
 
 func filesMapFromAny(v any) map[string][]string {
+	// Fast path: already the correct type (set by buildChatRequestBody).
+	if m, ok := v.(map[string][]string); ok {
+		if len(m) == 0 {
+			return nil
+		}
+		return m
+	}
 	m, ok := v.(map[string]any)
 	if !ok {
 		return nil
@@ -529,10 +536,7 @@ func summarizeSecretMapForLog(v any) map[string]string {
 // body textRequest JSON text map text，baseURL text endpoint（text /api/...）。
 func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any) (<-chan UpstreamStreamChunk, error) {
 	service := NewChatServiceWithEndpoint(baseURL)
-	fmt.Printf("DEBUG upstream stream request baseURL=%s raw=%s\n", baseURL, debugJSON(body))
-
 	req := buildLazyChatRequest(body)
-	fmt.Printf("DEBUG upstream stream request payload=%s\n", debugJSON(req))
 
 	streamChan, err := service.StreamChat(ctx, req)
 	if err != nil {
