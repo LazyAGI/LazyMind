@@ -421,9 +421,9 @@ func filePathsForUpstreamChat(raw map[string]any) any {
 // filesPerTurnMap builds a map of seq -> []filePath from historical chat_histories,
 // plus an entry for the current turn (seq=0) from the raw input.
 // This is passed to Python as history_files_per_turn so it can rebuild per-turn file context.
-func filesPerTurnMap(histories []orm.ChatHistory, currentFiles any) map[string][]string {
+func filesPerTurnMap(histories []orm.ChatHistory, currentFiles any, currentSeq int) map[string][]string {
 	out := make(map[string][]string)
-	// Current turn files (seq represented as "current").
+	// Current turn files keyed by actual seq number.
 	var currentPaths []string
 	switch xs := currentFiles.(type) {
 	case []any:
@@ -440,7 +440,7 @@ func filesPerTurnMap(histories []orm.ChatHistory, currentFiles any) map[string][
 		}
 	}
 	if len(currentPaths) > 0 {
-		out["current"] = currentPaths
+		out[fmt.Sprintf("%d", currentSeq)] = currentPaths
 	}
 	// Historical turns keyed by seq.
 	for _, h := range histories {
@@ -475,7 +475,7 @@ func filesPerTurnMap(histories []orm.ChatHistory, currentFiles any) map[string][
 	return out
 }
 
-func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, query string, histories []orm.ChatHistory, raw map[string]any, resourceContext *evolution.ChatResourceContext, userID string) map[string]any {
+func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, query string, histories []orm.ChatHistory, raw map[string]any, resourceContext *evolution.ChatResourceContext, userID string, currentSeq int) map[string]any {
 	if strings.TrimSpace(sessionID) == "" {
 		sessionID = upstreamSessionID(convID)
 	}
@@ -486,13 +486,16 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 			mode = m
 		}
 	}
+	currentFilePaths := filePathsForUpstreamChat(raw)
+	filesMap := filesPerTurnMap(histories, currentFilePaths, currentSeq)
+	fmt.Printf("[FILES_DEBUG] conv=%s currentFilePaths=%v filesMap=%v\n", convID, currentFilePaths, filesMap)
 	body := map[string]any{
 		"query":           query,
 		"session_id":      sessionID,
 		"conversation_id": convID,
 		"history":         buildHistoryMessages(histories),
 		"filters":         raw["filters"],
-		"files":           filesPerTurnMap(histories, filePathsForUpstreamChat(raw)),
+		"files":           filesMap,
 		"databases":       raw["databases"],
 		"debug":           raw["debug"],
 		"reasoning":       resolveReasoning(raw),

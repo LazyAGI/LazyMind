@@ -915,7 +915,7 @@ def _resolve_attachment(
         return None
 
     if turn is not None:
-        turn_key = 'current' if turn == 0 else str(turn)
+        turn_key = str(turn)
         turn_paths = history_files_per_turn.get(turn_key) or []
         # Fallback: filter files list by turn position is unreliable; use per-turn map only.
         if not turn_paths:
@@ -929,21 +929,13 @@ def _resolve_attachment(
             f"Available: {', '.join(available)}"
         )
 
-    # Search without turn: current first, then historical (descending seq)
-    search_order: List[tuple[str, List[str]]] = []
-    current_paths = history_files_per_turn.get('current') or []
-    if current_paths:
-        search_order.append(('current', current_paths))
-    historical_seqs = sorted(
-        (int(k) for k in history_files_per_turn if k != 'current' and k.isdigit()),
+    # Search without turn: newest turn first (descending seq).
+    all_seqs = sorted(
+        (int(k) for k in history_files_per_turn if k.isdigit()),
         reverse=True,
     )
-    for seq in historical_seqs:
+    for seq in all_seqs:
         paths = history_files_per_turn.get(str(seq)) or []
-        if paths:
-            search_order.append((str(seq), paths))
-
-    for _, paths in search_order:
         matched = _match_in_turn(paths)
         if matched:
             return matched, None
@@ -972,9 +964,9 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
         filename (str): The filename (basename) or display name of the attachment to read.
             Must match one of the files listed in the system prompt.
             For intra-turn duplicates use the deduplicated name (e.g. report-1.pdf).
-        turn (int): Optional. The conversation turn number (1-based seq for historical turns,
-            or omit to search from newest to oldest). Use the Turn number shown in the
-            system prompt (e.g. Turn 1, Turn 3). Pass 0 for the current turn.
+        turn (int): Optional. The conversation turn number (1-based seq matching the
+            'Turn N' labels in the system prompt, e.g. Turn 1, Turn 3).
+            Omit to search from the current turn first, then historical turns newest-first.
 
     Returns:
         The file content as text, or a confirmation message with the absolute path for
@@ -1026,7 +1018,9 @@ def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
     Args:
         filename (str): The filename (basename) or display name of the attachment to locate.
             For intra-turn duplicates use the deduplicated name (e.g. report-1.pdf).
-        turn (int): Optional. The conversation turn number. Same semantics as read_user_attachment.
+        turn (int): Optional. The conversation turn number. Same semantics as
+            read_user_attachment: 1-based for historical turns, or omit to search
+            current turn first then historical turns newest-first.
 
     Returns:
         A dict with 'url' (signed HTTP URL from Go, preferred) and 'path' (local absolute path,

@@ -420,20 +420,29 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             );
             const alreadyDone = existingTask && TERMINAL.includes(existingTask.status);
 
-            get().upsertTask(conversationId, {
-              task_id: payload.task_id,
-              title: payload.title,
-              agent_type: payload.agent_type,
-              mode: payload.mode,
-              status: payload.status || 'pending',
-            });
-            // Only subscribe to the task SSE stream when the task is not yet in a
-            // terminal state.  convEvents are replayed from the beginning every time
-            // the SSE connection is (re-)established, so without this guard a
-            // task_created replay would re-open the task stream, causing all historic
-            // text/think/tool_calls events to be appended again and the execution log
-            // to appear duplicated.
-            if (!alreadyDone) {
+            if (alreadyDone) {
+              // Task already finished — only upsert non-status fields (title, agent_type, mode)
+              // so we never overwrite a terminal status with a stale 'pending'/'running' from replay.
+              get().upsertTask(conversationId, {
+                task_id: payload.task_id,
+                title: payload.title,
+                agent_type: payload.agent_type,
+                mode: payload.mode,
+              });
+            } else {
+              get().upsertTask(conversationId, {
+                task_id: payload.task_id,
+                title: payload.title,
+                agent_type: payload.agent_type,
+                mode: payload.mode,
+                status: payload.status || 'pending',
+              });
+              // Only subscribe to the task SSE stream when the task is not yet in a
+              // terminal state.  convEvents are replayed from the beginning every time
+              // the SSE connection is (re-)established, so without this guard a
+              // task_created replay would re-open the task stream, causing all historic
+              // text/think/tool_calls events to be appended again and the execution log
+              // to appear duplicated.
               get().subscribeTask(conversationId, payload.task_id);
             }
             if (payload.agent_type === 'plugin_step' && payload.plugin_session_id) {

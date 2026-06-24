@@ -44,3 +44,7 @@
 
 subagent = auto / never, default=auto
 plugin = auto / dynamic / manual / never, default=dynamic, never时候关闭插件机制(如果作为问答助手，是要关闭插件的)
+
+目前DriverAgent执行失败的时候，默认fallback到pass，我认为不合理。
+1. DriverAgent失败，默认fallback到manual，即让用户进行对话，而不是继续
+2. DriverAgent拿不到key，需要像ChatAgent和SubAgent一样，注入一些配置。此外，看起来DriverAgent目前也没有能力读取附件来判断

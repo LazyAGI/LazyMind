@@ -188,24 +188,21 @@ def _collect_active_tool_names(configs: list) -> set[str]:
 def _build_user_attachment_context(history_files_per_turn: Dict[str, List[str]]) -> str:
     """Build the '## User Uploaded Files' context section from history_files_per_turn.
 
-    history_files_per_turn is a map of:
-      - "current" -> [file_paths...] for the current turn
-      - "<seq>" -> [file_paths...] for historical turns (seq is an integer as string)
+    history_files_per_turn is a map of "<seq>" -> [file_paths...] where seq is a
+    1-based integer string matching the conversation turn sequence number.
 
     Returns an empty string when there are no files.
     """
     if not history_files_per_turn:
         return ''
 
-    # Separate current and historical turns; sort historical by seq (ascending).
-    current_files: List[str] = history_files_per_turn.get('current') or []
-    historical: Dict[int, List[str]] = {}
+    # Parse all keys as integers (seq); skip unparseable entries.
+    turns: Dict[int, List[str]] = {}
     for key, paths in history_files_per_turn.items():
-        if key == 'current' or not paths:
+        if not paths:
             continue
         try:
-            seq = int(key)
-            historical[seq] = paths
+            turns[int(key)] = paths
         except ValueError:
             continue
 
@@ -256,26 +253,19 @@ def _build_user_attachment_context(history_files_per_turn: Dict[str, List[str]])
             result.append((display, path))
         return result
 
-    has_any = bool(current_files) or bool(historical)
-    if not has_any:
-        return ''
-
+    if not turns: return ''
     lines.append('## User Uploaded Files [queried at request time]')
 
-    # Historical turns first (ascending seq order), then current.
-    for seq in sorted(historical.keys()):
-        pairs = _dedupe_names(historical[seq])
+    for seq in sorted(turns.keys()):
+        pairs = _dedupe_names(turns[seq])
         file_list = ', '.join(name for name, _ in pairs)
         lines.append(f'- Turn {seq}: {file_list}')
 
-    if current_files:
-        pairs = _dedupe_names(current_files)
-        file_list = ', '.join(name for name, _ in pairs)
-        lines.append(f'- Current turn: {file_list}')
-
     lines.append('')
-    lines.append("To read a file's content, call read_user_attachment(filename, turn=N).")
-    lines.append("To get a file's accessible URL/path, call find_user_attachment(filename, turn=N).")
+    lines.append('Turn numbers are 1-based integers matching the "Turn N" labels above.')
+    lines.append('Omit the turn parameter to search the current turn first, then historical turns.')
+    lines.append("To read a file\'s content, call read_user_attachment(filename, turn=N).")
+    lines.append("To get a file\'s accessible URL/path, call find_user_attachment(filename, turn=N).")
 
     return '\n'.join(lines)
 
