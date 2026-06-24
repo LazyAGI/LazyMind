@@ -61,10 +61,8 @@ SKILLS_GUIDANCE = (
 IMAGE_REFERENCE_MARKDOWN_GUIDANCE = (
     '# Image path formatting (mandatory)\n'
     'When showing images in your answer, you MUST copy the `image_markdown` field from '
-    'tool results verbatim:\n'
-    '- Knowledge-base images: from knowledge-base search tool results.\n'
-    '- Generated images: from `image_generator` results.\n'
-    '- Edited images: from `image_editor` results.\n'
+    'tool results verbatim when it is available. This applies to images returned by '
+    'retrieval, generation, or editing.\n'
     'If `image_markdown` is absent, copy the `image_url` or signed `text` field that '
     'starts with `/static-files/` exactly.\n'
     'Rules:\n'
@@ -72,14 +70,14 @@ IMAGE_REFERENCE_MARKDOWN_GUIDANCE = (
     '- NEVER invent hosts or prefixes (`https://ext.lazymind.ai`, `agent-cdn.minimax.io`, '
     'OCR ports, CDN tool_output URLs, etc.).\n'
     '- NEVER rewrite `/static-files/` paths into `http://` or `https://` URLs.\n'
-    '- Do not use MiniMax/agent CDN links for KB images; they are invalid for this UI.\n'
+    '- Do not use MiniMax/agent CDN links for local images; they are invalid for this UI.\n'
     '- Do not paste bare filesystem paths (`/var/lib/lazymind/uploads/...`) in answers.'
 )
 VISION_EXTRACTOR_GUIDANCE = (
-    'When calling vision_extractor on knowledge-base or attached images, pass the '
-    'short filename shown in tool results or under Attached Files, or the '
-    '`local_path` field from knowledge-base search tool results. '
-    'Do NOT pass `/static-files/` signed URLs to vision_extractor.'
+    'When extracting visual content from knowledge-base or attached images, pass the '
+    'short filename shown in tool results or under Attached Files, or a `local_path` '
+    'field from the source result. Do NOT pass `/static-files/` signed URLs to the '
+    'visual extraction tool.'
 )
 VISION_EXTRACT_DEFAULT_INSTRUCTION = (
     'Describe the image in plain text. Include visible text, objects, charts, and any '
@@ -99,44 +97,6 @@ ATTACHED_FILES_GUIDANCE = (
     'tool is available.'
 )
 
-SEARCH_GUIDANCE = (
-    "# Search Tool Rules (CRITICAL — follow strictly)\n"
-    "If a knowledge-base tool group is available, you MUST activate it first by calling "
-    "its activation tool (e.g. `get_KBToolGroup_methods`) before using any of its search methods. "
-    "Then use the returned knowledge-base search method FIRST for every retrieval "
-    "need — no exceptions. Do not skip it because you think the web might have "
-    "better information, or because the topic seems general, popular, or common "
-    "knowledge. The knowledge base is your primary evidence source.\n\n"
-    "Only after the knowledge-base search returns zero results or explicitly irrelevant results "
-    "may you fall back to provider-specific search tools. "
-    "You MUST NOT use any non-knowledge-base retrieval tool before trying knowledge-base tools.\n\n"
-    "**Keyword search vs semantic search — which one to use:**\n"
-    "When the user mentions a specific document name (e.g., 'xxx.pdf', 'report.docx', "
-    "'slides.pptx') and asks about particular terms, phrases, or content within that "
-    "document, prefer the knowledge-base keyword search tool with `file_name=<document name>` and "
-    "`keyword=<specific terms>`. This is faster and more precise for document-scoped "
-    "exact matching.\n"
-    "For `keyword`, extract the core term(s) the user is asking about (e.g., a single "
-    "word or short phrase like 'file1' or 'Redis timeout'), not the entire query "
-    "sentence. If the first attempt returns zero results, try a shorter or alternative "
-    "keyword before considering fallback.\n"
-    "When the keyword search returns results, answer directly from them — do not "
-    "follow up with semantic search unless the returned content is clearly irrelevant "
-    "or empty.\n"
-    "Use semantic search only for open-ended queries where no specific document "
-    "is named. If keyword search returns zero results after trying alternative "
-    "keywords, fall back to semantic search.\n\n"
-    "When the user gives a concrete URL or asks you to inspect a specific page, "
-    "still try the knowledge-base search first; use `url_fetch` only when the knowledge base has "
-    "no relevant result.\n\n"
-    "For papers, research topics, arXiv ids, abstracts, or author-related questions, "
-    "still try the knowledge-base search first; after knowledge-base evidence is unavailable or "
-    "insufficient, prefer `ArxivSearch` over general web search tools. "
-    "When answering with knowledge-base evidence, cite with the original `[[document.chunk]]` "
-    "markers. When answering with web search tools, `url_fetch`, "
-    "or `ArxivSearch`, do not "
-    "fabricate `[[document.chunk]]`; instead, mention the source title or URL plainly.\n"
-)
 DOCUMENT_LINK_GUIDANCE = (
     "# Cloud document link rules\n"
     "When the user provides a Feishu/Lark document URL, use the Feishu file-system tools "
@@ -147,13 +107,6 @@ DOCUMENT_LINK_GUIDANCE = (
     "linked-page context. Do not fall back to generic URL fetching for private Notion "
     "pages unless Notion tools are unavailable or unauthorized."
 )
-WEB_SEARCH_GUIDANCE = (
-    "# Web Search Tool Rules\n"
-    "When using `web_search`, the `query` must represent one search intent. "
-    "If the user asks to search multiple unrelated keywords or topics, call "
-    "`web_search` separately for each keyword/topic. Do not combine unrelated "
-    "terms into one `query` with spaces, commas, punctuation, or list-like text."
-)
 TOOL_CALL_STATUS_GUIDANCE = (
     "Before calling a tool, write one concise, user-visible sentence explaining "
     "what you are about to do. Keep it action-oriented and do not reveal hidden "
@@ -162,6 +115,9 @@ TOOL_CALL_STATUS_GUIDANCE = (
 TOOL_AVAILABILITY_GUIDANCE = (
     "# Tool availability rules\n"
     "Only call tools that are currently registered and active in this session.\n"
+    "When a visible tool is named like `get_<ToolGroup>_methods`, it is a gateway for a "
+    "lazy tool group. Call it first when you need that group; then use one of the "
+    "specific tools it reveals in the following step.\n"
     "If a requested tool is not registered, not active, or not available, explicitly tell the user it is unavailable.\n"
     "Do not silently remove the request, do not pretend the tool call succeeded, and do not substitute a different tool without telling the user.\n"
     "\n"
@@ -171,12 +127,4 @@ TOOL_AVAILABILITY_GUIDANCE = (
     "individual tool from that group. The discovery tool returns the list of available "
     "sub-tools and activates the group. Without this call, individual tools in that "
     "group may not be registered or active."
-)
-TOOL_USE_ENFORCEMENT_GUIDANCE = (
-    "# Tool-use enforcement\n"
-    "You MUST use your tools to take action. Do not describe what you plan to do "
-    "without actually doing it. When you say you will perform an action, "
-    "immediately make the corresponding tool call in the same response.\n"
-    "Every response should either (a) contain tool calls that make progress, or "
-    "(b) deliver a final result."
 )

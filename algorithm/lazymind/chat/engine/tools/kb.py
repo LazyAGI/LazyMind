@@ -192,7 +192,19 @@ def _annotate_result_citations(result: Any) -> Any:
 
 
 class KBToolGroup:
-    """Knowledge base search and navigation tools."""
+    """Knowledge base search and navigation tools.
+
+    This tool group has the highest retrieval priority. If this tool group is
+    visible, use it before Wikipedia, web search, academic search, URL fetching,
+    or answering from the model's own knowledge for every factual, definition,
+    explanation, or retrieval-style question. Do not skip it because the topic
+    looks general, familiar, popular, or likely available on the web. Use other
+    retrieval sources only after this knowledge-base search returns no useful
+    evidence.
+
+    When answering with knowledge-base evidence, cite with the original
+    [[document.chunk]] markers and do not fabricate citation markers.
+    """
     __public_apis__ = ['kb_search', 'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search']
     _retrievers = None
     _reranker = None
@@ -232,6 +244,10 @@ class KBToolGroup:
         filters: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """Search the knowledge base and return text and image retrieval results.
+
+        Use this semantic search method for open-ended knowledge-base questions.
+        Search with the user's core question, and treat the returned text and
+        image retrieval results as the primary evidence before answering.
 
         IMPORTANT: Each call handles exactly ONE search intent. If the user asks
         about multiple unrelated keywords or topics, you MUST call this tool
@@ -437,6 +453,10 @@ class KBToolGroup:
         You must provide at least one of ``docid`` or ``file_name`` to identify
         the target document. When only ``file_name`` is given the search is
         scoped to all segments belonging to that file.
+
+        Use this method only when the user names a specific document and asks for
+        an exact term or phrase inside that document. For open-ended semantic
+        questions, use kb_search instead.
 
         Args:
             keyword: Keyword or phrase to search in ``content``.
