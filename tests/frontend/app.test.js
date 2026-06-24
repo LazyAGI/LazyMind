@@ -59,6 +59,7 @@ describe('runtime facade contract', () => {
     expect(runtimeApiBaseSource).toContain('export function getApiBaseUrl');
     expect(runtimeDesktopBridgeSource).toContain('export function openLogsDir');
     expect(runtimeDesktopBridgeSource).toContain('export function openDataDir');
+    expect(runtimeDesktopBridgeSource).toContain('handler.call(bridge)');
     expect(runtimeDesktopBridgeSource).not.toContain('diagnostics');
     expect(runtimeDesktopBridgeSource).not.toContain('serviceStatus');
   });

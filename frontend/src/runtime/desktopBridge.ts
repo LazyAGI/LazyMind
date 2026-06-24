@@ -31,7 +31,7 @@ async function callDesktopBridge(
   }
 
   try {
-    await handler();
+    await handler.call(bridge);
     return { ok: true };
   } catch (error) {
     return { ok: false, reason: "failed", error };

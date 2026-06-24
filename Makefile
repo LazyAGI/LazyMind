@@ -441,6 +441,7 @@ up-build-local:
 		mkdir -p "$(dir $(PROCESS_COMPOSE_BIN))"; \
 		GOBIN="$(CURDIR)/local/bin" $(GO) install "$(PROCESS_COMPOSE_PKG)"; \
 	fi
+	@$(MAKE) --no-print-directory compose-host-permissions
 	@mkdir -p "$(LAZYMIND_LOCAL_GOCACHE)"
 	@cd local/local-runtime-manager && GOCACHE="$(LAZYMIND_LOCAL_GOCACHE)" $(GO) build -buildvcs=false -o lazymind-local .
 	@"$(LAZYMIND_LOCAL_BIN)" up --profile "$(LAZYMIND_LOCAL_PROFILE)"
