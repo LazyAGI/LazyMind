@@ -117,6 +117,8 @@ var errorCatalog = map[string]*AppError{
 	"unauthorized": NewAppError(http.StatusUnauthorized, ErrCodeUnauthorized, "unauthorized"),
 	"forbidden":    NewAppError(http.StatusForbidden, ErrCodeForbidden, "forbidden"),
 
+	"feature disabled": NewAppError(http.StatusForbidden, ErrCodeForbidden, "feature disabled"),
+
 	// Additional bad request errors discovered from handlers.
 	"action_list must be a non-empty array":                       NewAppError(http.StatusBadRequest, 2000801, "action_list must be a non-empty array"),
 	"apply_id and filename required":                              NewAppError(http.StatusBadRequest, 2000802, "apply_id and filename required"),

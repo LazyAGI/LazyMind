@@ -34,6 +34,8 @@ services:
       LAZYMIND_REDIS_URL: ""
       LAZYMIND_STATE_BACKEND: sqlite
       LAZYMIND_STATE_SQLITE_DIR: /data/sqlite
+      LAZYMIND_EVO_ENABLED: "false"
+      LAZYMIND_RESOURCE_UPDATE_ENABLED: "false"
     depends_on:
       redis:
         condition: service_healthy
@@ -46,6 +48,8 @@ services:
       LAZYMIND_REDIS_URL: ""
       LAZYMIND_STATE_BACKEND: sqlite
       LAZYMIND_STATE_SQLITE_DIR: /data/sqlite
+      LAZYMIND_EVO_ENABLED: "false"
+      LAZYMIND_RESOURCE_UPDATE_ENABLED: "false"
 
   lazyllm-parse-server:
     volumes:
@@ -70,6 +74,9 @@ services:
       - "127.0.0.1:${LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT:-18047}:8047"
 
   frontend:
+    build:
+      args:
+        VITE_HIDE_EVO: "true"
     environment:
       FRONTEND_API_PROXY_PASS: "http://host.docker.internal:${LAZYMIND_LOCAL_PROXY_PORT:-5024}"
       FRONTEND_API_DOCS_PROXY_PASS: "http://host.docker.internal:${LAZYMIND_LOCAL_PROXY_PORT:-5024}"

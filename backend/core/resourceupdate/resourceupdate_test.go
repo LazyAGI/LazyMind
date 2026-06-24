@@ -22,6 +22,18 @@ import (
 	"lazymind/core/store"
 )
 
+func TestEnabledFromEnvRequiresEvoEnabled(t *testing.T) {
+	t.Setenv("LAZYMIND_RESOURCE_UPDATE_ENABLED", "true")
+	if !EnabledFromEnv() {
+		t.Fatal("expected resource update to follow its own env when Evo is enabled")
+	}
+
+	t.Setenv("LAZYMIND_EVO_ENABLED", "false")
+	if EnabledFromEnv() {
+		t.Fatal("expected resource update to be disabled when Evo is disabled")
+	}
+}
+
 func TestCountSkillReviewHistoryStatsFiltersUserAndHalfOpenWindow(t *testing.T) {
 	db := newResourceUpdateTestDB(t)
 	ctx := context.Background()
@@ -1167,6 +1179,7 @@ func TestAcceptUserPreferenceReviewResultParsesFrontmatter(t *testing.T) {
 	resource.ContentHash = evolution.HashSystemUserPreference(resource)
 	insertPreferenceResource(t, db, resource)
 	reviewContent := "---\nagent_persona: 新角色\npreferred_name: 用户称谓\nresponse_style: 回复风格\n---\n\n新正文"
+	insertMemoryReviewResult(t, db, MemoryReviewResult{
 		ID:           "preference-accept",
 		UserID:       "user-1",
 		Target:       orm.ResourceUpdateResourceTypeUserPreference,

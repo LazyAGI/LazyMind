@@ -167,9 +167,11 @@ func upsertManagedPreferenceContent(r *http.Request, db *gorm.DB, userID, userNa
 	}
 	if req.AutoEvo != nil {
 		update["auto_evo"] = resolvedAutoEvo
-		update["auto_evo_generation"] = gorm.Expr("auto_evo_generation + 1")
 		update["auto_evo_apply_status"] = evolution.AutoEvoApplyStatusIdle
 		update["auto_evo_error"] = ""
+		if common.EvoEnabled() {
+			update["auto_evo_generation"] = gorm.Expr("auto_evo_generation + 1")
+		}
 		if resolvedAutoEvo {
 			update["auto_evo_finished_at"] = nil
 		} else {
@@ -213,7 +215,9 @@ func upsertManagedPreferenceContent(r *http.Request, db *gorm.DB, userID, userNa
 	existing.Version++
 	if req.AutoEvo != nil {
 		existing.AutoEvo = resolvedAutoEvo
-		existing.AutoEvoGeneration++
+		if common.EvoEnabled() {
+			existing.AutoEvoGeneration++
+		}
 		existing.AutoEvoApplyStatus = evolution.AutoEvoApplyStatusIdle
 		existing.AutoEvoError = ""
 	}
@@ -291,6 +295,10 @@ func Upsert(w http.ResponseWriter, r *http.Request) {
 	if !hasPreferenceUpsertField(req) {
 		common.ReplyErr(w, "content, user_preference metadata, or auto_evo required", http.StatusBadRequest)
 		return
+	}
+	if !common.EvoEnabled() {
+		disabled := false
+		req.AutoEvo = &disabled
 	}
 	if req.Content != nil {
 		if err := validateManagedContentLength(*req.Content); err != nil {

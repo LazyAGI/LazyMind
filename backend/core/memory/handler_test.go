@@ -167,6 +167,36 @@ func TestUpsertCreatesThenUpdatesMemory(t *testing.T) {
 	}
 }
 
+func TestUpsertForcesMemoryAutoEvoDisabledWhenEvoFeatureOff(t *testing.T) {
+	t.Setenv("LAZYMIND_EVO_ENABLED", "false")
+
+	db := newMemoryTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	req := httptest.NewRequest(http.MethodPut, "/api/core/memory", strings.NewReader(`{"content":"本地记忆内容","auto_evo":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", "u1")
+	req.Header.Set("X-User-Name", "User 1")
+	rec := httptest.NewRecorder()
+
+	Upsert(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var row orm.SystemMemory
+	if err := db.Where("user_id = ?", "u1").Take(&row).Error; err != nil {
+		t.Fatalf("query created memory: %v", err)
+	}
+	if row.AutoEvo {
+		t.Fatal("expected auto_evo=true request to persist auto_evo=false when Evo is disabled")
+	}
+	if row.AutoEvoGeneration != 0 {
+		t.Fatalf("expected auto_evo_generation to stay 0, got %d", row.AutoEvoGeneration)
+	}
+}
+
 func TestUpsertPreservesMemoryAutoEvoWhenOmitted(t *testing.T) {
 	db := newMemoryTestDB(t)
 	store.Init(db.DB, nil, nil)

@@ -23,3 +23,17 @@ func TestEvoServiceEndpointDoesNotFallBackToAlgoService(t *testing.T) {
 		t.Fatalf("expected evo service endpoint %q, got %q", want, got)
 	}
 }
+
+func TestEvoEnabledDefaultsToTrue(t *testing.T) {
+	if !EvoEnabled() {
+		t.Fatal("expected Evo to be enabled by default")
+	}
+}
+
+func TestEvoEnabledCanBeDisabled(t *testing.T) {
+	t.Setenv("LAZYMIND_EVO_ENABLED", "false")
+
+	if EvoEnabled() {
+		t.Fatal("expected Evo to be disabled")
+	}
+}

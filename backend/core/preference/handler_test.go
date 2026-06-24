@@ -164,6 +164,36 @@ func TestUpsertCreatesThenUpdatesPreference(t *testing.T) {
 	}
 }
 
+func TestUpsertForcesPreferenceAutoEvoDisabledWhenEvoFeatureOff(t *testing.T) {
+	t.Setenv("LAZYMIND_EVO_ENABLED", "false")
+
+	db := newPreferenceTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	req := httptest.NewRequest(http.MethodPut, "/api/core/user-preference", strings.NewReader(`{"content":"本地偏好内容","auto_evo":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", "u1")
+	req.Header.Set("X-User-Name", "User 1")
+	rec := httptest.NewRecorder()
+
+	Upsert(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var row orm.SystemUserPreference
+	if err := db.Where("user_id = ?", "u1").Take(&row).Error; err != nil {
+		t.Fatalf("query created preference: %v", err)
+	}
+	if row.AutoEvo {
+		t.Fatal("expected auto_evo=true request to persist auto_evo=false when Evo is disabled")
+	}
+	if row.AutoEvoGeneration != 0 {
+		t.Fatalf("expected auto_evo_generation to stay 0, got %d", row.AutoEvoGeneration)
+	}
+}
+
 func TestUpsertPreservesPreferenceAutoEvoWhenOmitted(t *testing.T) {
 	db := newPreferenceTestDB(t)
 	store.Init(db.DB, nil, nil)

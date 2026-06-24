@@ -1,9 +1,12 @@
 package main
 
 import (
+	"net/http"
+
 	"lazymind/core/acl"
 	"lazymind/core/agent"
 	"lazymind/core/chat"
+	"lazymind/core/common"
 	"lazymind/core/datasource"
 	"lazymind/core/doc"
 	"lazymind/core/evalset"
@@ -22,6 +25,16 @@ import (
 
 	"github.com/gorilla/mux"
 )
+
+func evoFeatureHandler(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !common.EvoEnabled() {
+			common.ReplyErr(w, "feature disabled", http.StatusForbidden)
+			return
+		}
+		h(w, r)
+	}
+}
 
 // registerAllRoutes text OpenAPI text（text Job），text handleAPI textPermissiontext（text extract_api_permissions.py text Kong RBAC）。
 func registerAllRoutes(r *mux.Router) {
@@ -139,37 +152,37 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PUT", "/mcp_servers/{id}/tools", []string{"qa.write"}, mcp.UpdateTools)
 
 	// ----- Agent thread stream -----
-	handleAPI(r, "GET", "/agent/threads", []string{"qa.read"}, agent.ListThreads)
-	handleAPI(r, "POST", "/agent/threads", []string{"qa.write"}, agent.CreateThread)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}:events", []string{"qa.read"}, agent.StreamThreadEvents)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/events/{step_id}", []string{"qa.read"}, agent.StreamThreadStepEvents)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/steps", []string{"qa.read"}, agent.ListThreadSteps)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/steps/{step_id}/records", []string{"qa.read"}, agent.ListThreadStepRecords)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}", []string{"qa.read"}, agent.GetThread)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/history", []string{"qa.read"}, agent.GetThreadHistory)
-	handleAPI(r, "DELETE", "/agent/threads/{thread_id}:history", []string{"qa.write"}, agent.DeleteThreadHistory)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/rounds", []string{"qa.read"}, agent.ListThreadRounds)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/records", []string{"qa.read"}, agent.ListThreadRecords)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/datasets", []string{"qa.read"}, agent.GetThreadResultDatasets)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/eval-reports", []string{"qa.read"}, agent.GetThreadResultEvalReports)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases", []string{"qa.read"}, agent.GetThreadEvalReportBadCases)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/analysis-reports", []string{"qa.read"}, agent.GetThreadResultAnalysisReports)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/diffs", []string{"qa.read"}, agent.GetThreadResultDiffs)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/abtests", []string{"qa.read"}, agent.GetThreadResultAbtests)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/abtests/{abtest_id}/case-details", []string{"qa.read"}, agent.GetThreadABTestCaseDetails)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/flow-status", []string{"qa.read"}, agent.GetThreadFlowStatus)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/artifacts/{artifact_id}", []string{"qa.read"}, agent.GetThreadArtifact)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/traces/{trace_id}", []string{"qa.read"}, agent.GetThreadResultTrace)
-	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/traces-compare", []string{"qa.read"}, agent.GetThreadResultTraceCompare)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:messages", []string{"qa.write"}, agent.StreamThreadMessages)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:start", []string{"qa.write"}, agent.StartThread)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:pause", []string{"qa.write"}, agent.PauseThread)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:cancel", []string{"qa.write"}, agent.CancelThread)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:retry", []string{"qa.write"}, agent.RetryThread)
-	handleAPI(r, "POST", "/agent/threads/{thread_id}:continue", []string{"qa.write"}, agent.ContinueThread)
-	handleAPI(r, "GET", "/agent/reports/{report_id}:content", []string{"qa.read"}, agent.GetReportContent)
-	handleAPI(r, "GET", "/agent/diffs/{apply_id}/{filename:.*}", []string{"qa.read"}, agent.GetDiffContent)
-	handleAPI(r, "POST", "/agent/files:content", []string{"qa.read"}, agent.GetAgentFileContent)
+	handleAPI(r, "GET", "/agent/threads", []string{"qa.read"}, evoFeatureHandler(agent.ListThreads))
+	handleAPI(r, "POST", "/agent/threads", []string{"qa.write"}, evoFeatureHandler(agent.CreateThread))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}:events", []string{"qa.read"}, evoFeatureHandler(agent.StreamThreadEvents))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/events/{step_id}", []string{"qa.read"}, evoFeatureHandler(agent.StreamThreadStepEvents))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/steps", []string{"qa.read"}, evoFeatureHandler(agent.ListThreadSteps))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/steps/{step_id}/records", []string{"qa.read"}, evoFeatureHandler(agent.ListThreadStepRecords))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}", []string{"qa.read"}, evoFeatureHandler(agent.GetThread))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/history", []string{"qa.read"}, evoFeatureHandler(agent.GetThreadHistory))
+	handleAPI(r, "DELETE", "/agent/threads/{thread_id}:history", []string{"qa.write"}, evoFeatureHandler(agent.DeleteThreadHistory))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/rounds", []string{"qa.read"}, evoFeatureHandler(agent.ListThreadRounds))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/records", []string{"qa.read"}, evoFeatureHandler(agent.ListThreadRecords))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/datasets", []string{"qa.read"}, evoFeatureHandler(agent.GetThreadResultDatasets))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/eval-reports", []string{"qa.read"}, evoFeatureHandler(agent.GetThreadResultEvalReports))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/eval-reports/{report_id}/bad-cases", []string{"qa.read"}, evoFeatureHandler(agent.GetThreadEvalReportBadCases))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/analysis-reports", []string{"qa.read"}, evoFeatureHandler(agent.GetThreadResultAnalysisReports))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/diffs", []string{"qa.read"}, evoFeatureHandler(agent.GetThreadResultDiffs))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/abtests", []string{"qa.read"}, evoFeatureHandler(agent.GetThreadResultAbtests))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/abtests/{abtest_id}/case-details", []string{"qa.read"}, evoFeatureHandler(agent.GetThreadABTestCaseDetails))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/flow-status", []string{"qa.read"}, evoFeatureHandler(agent.GetThreadFlowStatus))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/artifacts/{artifact_id}", []string{"qa.read"}, evoFeatureHandler(agent.GetThreadArtifact))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/traces/{trace_id}", []string{"qa.read"}, evoFeatureHandler(agent.GetThreadResultTrace))
+	handleAPI(r, "GET", "/agent/threads/{thread_id}/results/traces-compare", []string{"qa.read"}, evoFeatureHandler(agent.GetThreadResultTraceCompare))
+	handleAPI(r, "POST", "/agent/threads/{thread_id}:messages", []string{"qa.write"}, evoFeatureHandler(agent.StreamThreadMessages))
+	handleAPI(r, "POST", "/agent/threads/{thread_id}:start", []string{"qa.write"}, evoFeatureHandler(agent.StartThread))
+	handleAPI(r, "POST", "/agent/threads/{thread_id}:pause", []string{"qa.write"}, evoFeatureHandler(agent.PauseThread))
+	handleAPI(r, "POST", "/agent/threads/{thread_id}:cancel", []string{"qa.write"}, evoFeatureHandler(agent.CancelThread))
+	handleAPI(r, "POST", "/agent/threads/{thread_id}:retry", []string{"qa.write"}, evoFeatureHandler(agent.RetryThread))
+	handleAPI(r, "POST", "/agent/threads/{thread_id}:continue", []string{"qa.write"}, evoFeatureHandler(agent.ContinueThread))
+	handleAPI(r, "GET", "/agent/reports/{report_id}:content", []string{"qa.read"}, evoFeatureHandler(agent.GetReportContent))
+	handleAPI(r, "GET", "/agent/diffs/{apply_id}/{filename:.*}", []string{"qa.read"}, evoFeatureHandler(agent.GetDiffContent))
+	handleAPI(r, "POST", "/agent/files:content", []string{"qa.read"}, evoFeatureHandler(agent.GetAgentFileContent))
 
 	// ----- Conversation -----
 	handleAPI(r, "POST", "/conversations:chat", []string{"qa.write"}, chat.ChatConversations)

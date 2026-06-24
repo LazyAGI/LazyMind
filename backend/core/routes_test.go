@@ -32,6 +32,25 @@ func TestAgentThreadEventsRouteWinsOverGenericThreadRoute(t *testing.T) {
 	}
 }
 
+func TestAgentRoutesReturnFeatureDisabledWhenEvoDisabled(t *testing.T) {
+	t.Setenv("LAZYMIND_EVO_ENABLED", "false")
+
+	r := mux.NewRouter()
+	r.UseEncodedPath()
+	registerAllRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/agent/threads", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "feature disabled") {
+		t.Fatalf("expected feature disabled response, got %s", rec.Body.String())
+	}
+}
+
 func TestAgentThreadStepEventsRouteWinsOverGenericThreadRoute(t *testing.T) {
 	r := mux.NewRouter()
 	r.UseEncodedPath()

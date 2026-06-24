@@ -38,6 +38,28 @@ func payloadForLog(v any) string {
 	return string(b)
 }
 
+func localEvoDisabled() bool {
+	return !common.EvoEnabled()
+}
+
+func forceCreateSkillAutoEvoDisabled(req *createSkillRequest) {
+	if req == nil || !localEvoDisabled() {
+		return
+	}
+	req.AutoEvo = false
+	for i := range req.Children {
+		req.Children[i].AutoEvo = false
+	}
+}
+
+func forceUpdateSkillAutoEvoDisabled(req *updateSkillRequest) {
+	if req == nil || !localEvoDisabled() {
+		return
+	}
+	disabled := false
+	req.AutoEvo = &disabled
+}
+
 func normalizedSkillUpdateStatus(status string) string {
 	status = strings.TrimSpace(status)
 	if status == "" || status == "pending_confirm" {
@@ -283,6 +305,7 @@ func CreateManaged(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
+	forceCreateSkillAutoEvoDisabled(&req)
 	req.Name = strings.TrimSpace(req.Name)
 	req.Description = strings.TrimSpace(req.Description)
 	req.Category = strings.TrimSpace(req.Category)
@@ -395,6 +418,7 @@ func UpdateManaged(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
+	forceUpdateSkillAutoEvoDisabled(&req)
 	appLog.Logger.Warn().
 		Str("route", "PATCH /api/core/skills/{skill_id}").
 		Str("user_id", userID).
@@ -919,6 +943,7 @@ func createParentSkill(ctx context.Context, db *gorm.DB, userID, userName string
 }
 
 func createParentSkillWithContent(ctx context.Context, db *gorm.DB, userID, userName string, req createSkillRequest, fullContent, description string, source resourcechange.Source) error {
+	forceCreateSkillAutoEvoDisabled(&req)
 	relPath := parentRelativePath(req.Category, req.Name)
 	var count int64
 	if err := db.WithContext(ctx).
@@ -1064,6 +1089,7 @@ func resolveParentSkill(ctx context.Context, db *gorm.DB, userID, parentSkillID,
 }
 
 func createChildSkill(ctx context.Context, db *gorm.DB, userID, userName string, req createSkillRequest) (orm.SkillResource, error) {
+	forceCreateSkillAutoEvoDisabled(&req)
 	parent, err := resolveParentSkill(ctx, db, userID, req.ParentSkillID, req.Category, req.ParentSkillName)
 	if err != nil {
 		return orm.SkillResource{}, err
@@ -1120,6 +1146,7 @@ func createChildSkill(ctx context.Context, db *gorm.DB, userID, userName string,
 }
 
 func updateSkill(ctx context.Context, db *gorm.DB, userID, userName, skillID string, req updateSkillRequest) error {
+	forceUpdateSkillAutoEvoDisabled(&req)
 	var row orm.SkillResource
 	if err := db.WithContext(ctx).Where("id = ? AND owner_user_id = ?", skillID, userID).Take(&row).Error; err != nil {
 		return err
@@ -1367,7 +1394,9 @@ func updateParentSkill(ctx context.Context, db *gorm.DB, userID, userName string
 	}
 	if req.AutoEvo != nil {
 		update["auto_evo"] = *req.AutoEvo
-		update["auto_evo_generation"] = gorm.Expr("auto_evo_generation + 1")
+		if common.EvoEnabled() {
+			update["auto_evo_generation"] = gorm.Expr("auto_evo_generation + 1")
+		}
 		if *req.AutoEvo {
 			update["auto_evo_apply_status"] = evolution.AutoEvoApplyStatusIdle
 			update["auto_evo_error"] = ""
@@ -1547,7 +1576,9 @@ func updateChildSkill(ctx context.Context, db *gorm.DB, userID string, row *orm.
 	}
 	if req.AutoEvo != nil {
 		update["auto_evo"] = *req.AutoEvo
-		update["auto_evo_generation"] = gorm.Expr("auto_evo_generation + 1")
+		if common.EvoEnabled() {
+			update["auto_evo_generation"] = gorm.Expr("auto_evo_generation + 1")
+		}
 		if *req.AutoEvo {
 			update["auto_evo_apply_status"] = evolution.AutoEvoApplyStatusIdle
 			update["auto_evo_error"] = ""

@@ -2655,6 +2655,67 @@ func TestCreateChildSkillPersistsDescription(t *testing.T) {
 	}
 }
 
+func TestSkillAutoEvoForcedDisabledWhenEvoFeatureOff(t *testing.T) {
+	t.Setenv("LAZYMIND_EVO_ENABLED", "false")
+
+	db := newSkillTestDB(t)
+
+	createReq := createSkillRequest{
+		Name:        "git-workflow",
+		Description: "Git workflow for local mode",
+		Category:    "coding",
+		Content:     "# Git Workflow\n\nKeep commit history clean.",
+		AutoEvo:     true,
+		Children: []childSkillInput{
+			{
+				Name:        "rules",
+				Description: "Branching rules",
+				Content:     "1. Rebase before review.",
+				FileExt:     "md",
+				AutoEvo:     true,
+			},
+		},
+	}
+	if err := createParentSkill(context.Background(), db.DB, "u1", "User 1", createReq); err != nil {
+		t.Fatalf("create parent skill: %v", err)
+	}
+
+	var parent orm.SkillResource
+	if err := db.Where("owner_user_id = ? AND node_type = ?", "u1", evolution.SkillNodeTypeParent).Take(&parent).Error; err != nil {
+		t.Fatalf("query parent skill: %v", err)
+	}
+	if parent.AutoEvo {
+		t.Fatal("expected parent auto_evo=true request to persist auto_evo=false when Evo is disabled")
+	}
+	if parent.AutoEvoGeneration != 0 {
+		t.Fatalf("expected parent auto_evo_generation to stay 0, got %d", parent.AutoEvoGeneration)
+	}
+
+	var child orm.SkillResource
+	if err := db.Where("owner_user_id = ? AND node_type = ?", "u1", evolution.SkillNodeTypeChild).Take(&child).Error; err != nil {
+		t.Fatalf("query child skill: %v", err)
+	}
+	if child.AutoEvo {
+		t.Fatal("expected child auto_evo=true request to persist auto_evo=false when Evo is disabled")
+	}
+
+	enableAutoEvo := true
+	if err := updateSkill(context.Background(), db.DB, "u1", "User 1", parent.ID, updateSkillRequest{AutoEvo: &enableAutoEvo}); err != nil {
+		t.Fatalf("update parent skill: %v", err)
+	}
+
+	var updated orm.SkillResource
+	if err := db.Where("id = ?", parent.ID).Take(&updated).Error; err != nil {
+		t.Fatalf("query updated parent skill: %v", err)
+	}
+	if updated.AutoEvo {
+		t.Fatal("expected update auto_evo=true request to persist auto_evo=false when Evo is disabled")
+	}
+	if updated.AutoEvoGeneration != parent.AutoEvoGeneration {
+		t.Fatalf("expected auto_evo_generation to stay %d, got %d", parent.AutoEvoGeneration, updated.AutoEvoGeneration)
+	}
+}
+
 func TestCreateParentSkillAllowsDuplicateParentNameAcrossCategories(t *testing.T) {
 	db := newSkillTestDB(t)
 

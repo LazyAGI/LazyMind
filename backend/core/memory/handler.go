@@ -144,9 +144,11 @@ func upsertManagedMemoryContent(r *http.Request, db *gorm.DB, userID, userName s
 	}
 	if req.AutoEvo != nil {
 		update["auto_evo"] = resolvedAutoEvo
-		update["auto_evo_generation"] = gorm.Expr("auto_evo_generation + 1")
 		update["auto_evo_apply_status"] = evolution.AutoEvoApplyStatusIdle
 		update["auto_evo_error"] = ""
+		if common.EvoEnabled() {
+			update["auto_evo_generation"] = gorm.Expr("auto_evo_generation + 1")
+		}
 		if resolvedAutoEvo {
 			update["auto_evo_finished_at"] = nil
 		} else {
@@ -187,7 +189,9 @@ func upsertManagedMemoryContent(r *http.Request, db *gorm.DB, userID, userName s
 	existing.Version++
 	if req.AutoEvo != nil {
 		existing.AutoEvo = resolvedAutoEvo
-		existing.AutoEvoGeneration++
+		if common.EvoEnabled() {
+			existing.AutoEvoGeneration++
+		}
 		existing.AutoEvoApplyStatus = evolution.AutoEvoApplyStatusIdle
 		existing.AutoEvoError = ""
 	}
@@ -265,6 +269,10 @@ func Upsert(w http.ResponseWriter, r *http.Request) {
 	if !hasMemoryUpsertField(req) {
 		common.ReplyErr(w, "content or auto_evo required", http.StatusBadRequest)
 		return
+	}
+	if !common.EvoEnabled() {
+		disabled := false
+		req.AutoEvo = &disabled
 	}
 	if req.Content != nil {
 		if err := validateManagedContentLength(*req.Content); err != nil {

@@ -5,6 +5,27 @@ import (
 	"strings"
 )
 
+// EnvFlagEnabled returns the feature flag value for envName.
+// Empty or unrecognized values keep the supplied default.
+func EnvFlagEnabled(envName string, defaultValue bool) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(envName)))
+	switch v {
+	case "":
+		return defaultValue
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return defaultValue
+	}
+}
+
+// EvoEnabled reports whether dedicated Evo features may call evo-api.
+func EvoEnabled() bool {
+	return EnvFlagEnabled("LAZYMIND_EVO_ENABLED", true)
+}
+
 // ChatServiceEndpoint returns the base URL for the chat/generation service.
 func ChatServiceEndpoint() string {
 	if u := strings.TrimSpace(os.Getenv("LAZYMIND_CHAT_SERVICE_URL")); u != "" {

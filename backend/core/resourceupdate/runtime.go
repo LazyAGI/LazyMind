@@ -3,11 +3,10 @@ package resourceupdate
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 	"time"
 
 	"gorm.io/gorm"
+	"lazymind/core/common"
 	"lazymind/core/state"
 )
 
@@ -38,8 +37,10 @@ func Start(ctx context.Context, db *gorm.DB, stateStore state.Store, cfg Config)
 }
 
 func EnabledFromEnv() bool {
-	v := strings.TrimSpace(strings.ToLower(os.Getenv("LAZYMIND_RESOURCE_UPDATE_ENABLED")))
-	return v == "1" || v == "true" || v == "yes"
+	if !common.EvoEnabled() {
+		return false
+	}
+	return common.EnvFlagEnabled("LAZYMIND_RESOURCE_UPDATE_ENABLED", false)
 }
 
 func runSchedulerLoop(ctx context.Context, scheduler *Scheduler, interval time.Duration) {

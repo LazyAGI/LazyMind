@@ -14,6 +14,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY . .
+ARG VITE_HIDE_EVO=false
+ENV VITE_HIDE_EVO=${VITE_HIDE_EVO}
 RUN pnpm build
 
 FROM ${DOCKER_MIRROR}nginx:alpine
