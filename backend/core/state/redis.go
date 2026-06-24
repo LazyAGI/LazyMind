@@ -189,7 +189,11 @@ func (s *RedisStore) SubscribeExpiredKeys(ctx context.Context, onExpired func(ke
 			case msg, ok := <-msgCh:
 				if !ok {
 					_ = pubsub.Close()
-					time.Sleep(time.Second)
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(time.Second):
+					}
 					goto reconnect
 				}
 				_ = onExpired(msg.Payload)
