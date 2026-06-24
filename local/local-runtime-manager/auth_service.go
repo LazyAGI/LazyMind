@@ -142,13 +142,8 @@ func (m *AuthServiceManager) Down(ctx context.Context, cfg RuntimeConfig, paths 
 func (m *AuthServiceManager) preparePythonEnv(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
 	python := authServicePythonPath(paths)
 	if _, err := os.Stat(python); err != nil {
-		res, runErr := m.runner.Run(ctx, Command{
-			Name: cfg.AuthService.Python,
-			Args: []string{"-m", "venv", paths.AuthServiceVenvDir},
-			Dir:  paths.RepoRoot,
-		})
-		if runErr != nil {
-			return fmt.Errorf("create auth-service venv failed: %w (%s)", runErr, strings.TrimSpace(res.Stderr))
+		if err := m.createPythonEnv(ctx, cfg, paths); err != nil {
+			return err
 		}
 	}
 
@@ -165,15 +160,56 @@ func (m *AuthServiceManager) preparePythonEnv(ctx context.Context, cfg RuntimeCo
 		return nil
 	}
 
+	if err := m.installRequirements(ctx, paths, python, requirements); err != nil {
+		return err
+	}
+	return os.WriteFile(marker, []byte(hash+"\n"), 0o644)
+}
+
+func (m *AuthServiceManager) createPythonEnv(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	uv := envText(authServiceUVEnvVar, "uv")
 	res, runErr := m.runner.Run(ctx, Command{
+		Name: uv,
+		Args: []string{"venv", "--python", cfg.AuthService.Python, paths.AuthServiceVenvDir},
+		Dir:  paths.RepoRoot,
+	})
+	if runErr == nil {
+		return nil
+	}
+	uvErr := fmt.Sprintf("%v (%s)", runErr, strings.TrimSpace(res.Stderr))
+
+	res, runErr = m.runner.Run(ctx, Command{
+		Name: cfg.AuthService.Python,
+		Args: []string{"-m", "venv", paths.AuthServiceVenvDir},
+		Dir:  paths.RepoRoot,
+	})
+	if runErr != nil {
+		return fmt.Errorf("create auth-service venv failed: uv: %s; python venv: %w (%s)", uvErr, runErr, strings.TrimSpace(res.Stderr))
+	}
+	return nil
+}
+
+func (m *AuthServiceManager) installRequirements(ctx context.Context, paths RuntimePaths, python string, requirements string) error {
+	uv := envText(authServiceUVEnvVar, "uv")
+	res, runErr := m.runner.Run(ctx, Command{
+		Name: uv,
+		Args: []string{"pip", "install", "--python", python, "-r", requirements},
+		Dir:  paths.RepoRoot,
+	})
+	if runErr == nil {
+		return nil
+	}
+	uvErr := fmt.Sprintf("%v (%s)", runErr, strings.TrimSpace(res.Stderr))
+
+	res, runErr = m.runner.Run(ctx, Command{
 		Name: python,
 		Args: []string{"-m", "pip", "install", "-r", requirements},
 		Dir:  paths.RepoRoot,
 	})
 	if runErr != nil {
-		return fmt.Errorf("install auth-service requirements failed: %w (%s)", runErr, strings.TrimSpace(res.Stderr))
+		return fmt.Errorf("install auth-service requirements failed: uv: %s; pip: %w (%s)", uvErr, runErr, strings.TrimSpace(res.Stderr))
 	}
-	return os.WriteFile(marker, []byte(hash+"\n"), 0o644)
+	return nil
 }
 
 func authServicePythonPath(paths RuntimePaths) string {

@@ -23,6 +23,7 @@ const (
 	frontendPortEnvVar            = "LAZYMIND_FRONTEND_PORT"
 	authServicePortEnvVar         = "LAZYMIND_AUTH_SERVICE_PORT"
 	authServicePythonEnvVar       = "LAZYMIND_AUTH_SERVICE_PYTHON"
+	authServiceUVEnvVar           = "LAZYMIND_AUTH_SERVICE_UV"
 	authServiceDatabaseURLEnvVar  = "LAZYMIND_AUTH_SERVICE_DATABASE_URL"
 	authServiceInstallDepsEnvVar  = "LAZYMIND_AUTH_SERVICE_INSTALL_DEPS"
 	localPostgresPortEnvVar       = "LAZYMIND_LOCAL_POSTGRES_PORT"

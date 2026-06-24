@@ -447,6 +447,61 @@ func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
 	}
 }
 
+func TestWaitForAuthServiceHealthyFailsFastWhenPIDIsDead(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	runner := &fakeRunner{t: t}
+	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
+	manager.probeAuth = func(port int, timeout time.Duration) bool { return false }
+
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("prepare dirs: %v", err)
+	}
+	if err := os.WriteFile(paths.AuthServicePIDFile, []byte("-1\n"), 0o600); err != nil {
+		t.Fatalf("write auth pid: %v", err)
+	}
+
+	start := time.Now()
+	err = manager.waitForAuthServiceHealthy(context.Background(), defaultLocalProxyAuthHostPort, time.Minute, paths.AuthServicePIDFile)
+	if err == nil {
+		t.Fatal("expected auth-service process failure")
+	}
+	if !strings.Contains(err.Error(), "auth-service process exited") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("expected fail-fast, took %s", elapsed)
+	}
+}
+
+func TestWaitForAuthServiceHealthyIgnoresMissingPIDUntilTimeout(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	runner := &fakeRunner{t: t}
+	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
+	manager.probeAuth = func(port int, timeout time.Duration) bool { return false }
+
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("prepare dirs: %v", err)
+	}
+
+	err = manager.waitForAuthServiceHealthy(context.Background(), defaultLocalProxyAuthHostPort, time.Millisecond, paths.AuthServicePIDFile)
+	if err == nil {
+		t.Fatal("expected auth-service health timeout")
+	}
+	if !strings.Contains(err.Error(), "health check timed out") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestRuntimeManagerUpReusesRunningProcessCompose(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)

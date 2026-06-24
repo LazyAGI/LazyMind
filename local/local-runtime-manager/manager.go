@@ -74,6 +74,9 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := paths.EnsureAllDirs(); err != nil {
 		return err
 	}
+	if err := ensureComposeBindPermissions(paths.RepoRoot); err != nil {
+		return err
+	}
 	state, err := readOrNewState(paths, cfg)
 	if err != nil {
 		return err
@@ -177,7 +180,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		}
 		return waitErr
 	}
-	if err := m.waitForAuthServiceHealthy(ctx, cfg.AuthService.Port, m.upTimeout); err != nil {
+	if err := m.waitForAuthServiceHealthy(ctx, cfg.AuthService.Port, m.upTimeout, paths.AuthServicePIDFile); err != nil {
 		state = newStateWithServiceStatus(state, "failed")
 		state.OverallStatus = "failed"
 		_ = writeRuntimeState(paths.StateFile, state)
@@ -194,14 +197,24 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	return nil
 }
 
-func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int, timeout time.Duration) error {
+func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int, timeout time.Duration, pidFile string) error {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+	sawPIDFile := false
 	for {
 		if m.probeAuth(port, time.Second) {
 			return nil
+		}
+		alive, err := upLockProcessAlive(pidFile)
+		if err == nil {
+			sawPIDFile = true
+			if !alive {
+				return fmt.Errorf("auth-service process exited before becoming healthy")
+			}
+		} else if sawPIDFile && os.IsNotExist(err) {
+			return fmt.Errorf("auth-service process exited before becoming healthy")
 		}
 		select {
 		case <-ctx.Done():
