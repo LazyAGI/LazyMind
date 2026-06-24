@@ -10,6 +10,7 @@ import (
 type OverlayConfig struct {
 	Mode                   string   `yaml:"mode"`
 	DisabledContainerTypes []string `yaml:"disabled_container_services"`
+	ScaleDisabledServices  []string `yaml:"scale_disabled_container_services"`
 }
 
 type composeOverlayFile struct {

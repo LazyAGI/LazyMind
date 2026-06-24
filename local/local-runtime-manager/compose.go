@@ -158,11 +158,14 @@ func (m *ComposeManager) ComposeUp(ctx context.Context, repoRoot string, profile
 	if err != nil {
 		return err
 	}
+	if err := validateKnownServices(services, disabled.ScaleDisabledServices); err != nil {
+		return err
+	}
 	if len(remaining) == 0 {
 		_ = profile
 	}
 	args := append(m.composeArgs(repoRoot), "up", "--build")
-	for _, svc := range disabled.DisabledContainerTypes {
+	for _, svc := range disabled.ScaleDisabledServices {
 		if svc == "" {
 			continue
 		}
@@ -206,6 +209,22 @@ func filterRemainingServices(allServices []string, disabled []string) ([]string,
 		remaining = append(remaining, svc)
 	}
 	return remaining, nil
+}
+
+func validateKnownServices(allServices []string, services []string) error {
+	available := make(map[string]struct{}, len(allServices))
+	for _, svc := range allServices {
+		available[svc] = struct{}{}
+	}
+	for _, svc := range services {
+		if svc == "" {
+			continue
+		}
+		if _, ok := available[svc]; !ok {
+			return fmt.Errorf("unknown scale-disabled service: %s", svc)
+		}
+	}
+	return nil
 }
 
 func parseComposeStatusJSON(raw string) ([]ComposeServiceStatus, error) {
