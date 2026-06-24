@@ -81,7 +81,7 @@ def _resolve_plugin_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
         # Mirror _merge_tools from plugin_manager: prepend framework tools.
         _FRAMEWORK_TOOLS = [
             'save_artifact', 'get_artifact', 'list_artifacts',
-            'list_knowledge_bases', 'read_user_attachment',
+            'list_knowledge_bases', 'read_user_attachment', 'find_user_attachment',
         ]
         seen: set = set()
         merged: List[str] = []
@@ -110,7 +110,7 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
     Names of base tools in the explicit list are silently ignored (already present).
     """
     _BASE_TOOL_NAMES = {'save_artifact', 'get_artifact', 'list_artifacts',
-                        'list_knowledge_bases', 'read_user_attachment'}
+                        'list_knowledge_bases', 'read_user_attachment', 'find_user_attachment'}
     if explicit:
         name_list = [str(n).strip() for n in explicit if str(n).strip() and str(n).strip() not in _BASE_TOOL_NAMES]
         # Build lookup from DEFAULT_TOOLS
@@ -143,10 +143,10 @@ def _resolve_runtime_tools(explicit: Optional[List[str]], plugin_id: Optional[st
 def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
     """Combine mandatory SubAgent infra tools with optional domain tools.
 
-    save_artifact, get_artifact, list_artifacts, list_knowledge_bases, and
-    read_user_attachment are always included regardless of the explicit tools list —
-    they are the SubAgent's core interface and must never be stripped by plugin tool
-    configurations.
+    save_artifact, get_artifact, list_artifacts, list_knowledge_bases,
+    read_user_attachment, and find_user_attachment are always included regardless of
+    the explicit tools list — they are the SubAgent's core interface and must never
+    be stripped by plugin tool configurations.
     """
     base = [
         subagent_tools.save_artifact,
@@ -154,6 +154,7 @@ def _build_subagent_tools(extra_tools: Optional[List[Any]]) -> List[Any]:
         subagent_tools.list_artifacts,
         subagent_tools.list_knowledge_bases,
         subagent_tools.read_user_attachment,
+        subagent_tools.find_user_attachment,
     ]
     if extra_tools:
         base.extend(extra_tools)

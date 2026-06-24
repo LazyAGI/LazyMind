@@ -35,6 +35,8 @@ _FRAMEWORK_TOOLS: List[str] = [
     'get_artifact',
     'list_artifacts',
     'list_knowledge_bases',
+    'read_user_attachment',
+    'find_user_attachment',
 ]
 
 

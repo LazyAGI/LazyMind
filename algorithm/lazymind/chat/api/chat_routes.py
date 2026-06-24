@@ -47,7 +47,10 @@ async def chat(
     session_id: Annotated[str, Body(description='Session ID')] = 'session_id',
     conversation_id: Annotated[Optional[str], Body(description='Conversation ID for SubAgent task lookup')] = None,
     filters: Annotated[Optional[Dict[str, Any]], Body(description='Retrieval filter conditions')] = None,
-    files: Annotated[Optional[List[str]], Body(description='Uploaded temporary files')] = None,
+    files: Annotated[
+        Optional[Dict[str, List[str]]],
+        Body(description='Per-turn file paths. Keys: "current" or "<seq>". Values: local paths.'),
+    ] = None,
     debug: Annotated[Optional[bool], Body(description='Enable debug mode')] = False,
     reasoning: Annotated[Optional[bool], Body(description='Enable reasoning mode')] = False,
     databases: Annotated[Optional[List[Dict]], Body(description='Associated databases')] = None,

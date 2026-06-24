@@ -390,21 +390,21 @@ def list_knowledge_bases() -> Dict[str, Any]:
         })
 
 
-@handle_tool_errors
-def read_user_attachment(filename: str) -> Dict[str, Any]:
-    """Read the contents of a file previously uploaded by the user in this conversation.
+def _resolve_attachment(
+    filename: str,
+    turn: Optional[int] = None,
+) -> tuple[Optional[str], Optional[str]]:
+    """Shared file-resolution logic for read_user_attachment and find_user_attachment.
 
-    The list of available files is shown in the system prompt under '## Attached Files'.
-    Use this tool to read a file's content when the user asks about it or when the task
-    requires processing the file.
+    Returns (abs_path, error_message). On success, error_message is None.
+    On failure, abs_path is None.
 
-    Args:
-        filename (str): The filename (basename) or partial path of the attachment to read.
-            Must match one of the files listed in the system prompt.
-
-    Returns:
-        The file content as text, or a confirmation message with the absolute path for
-        binary/image files that should be passed to other tools (e.g. vision_extractor).
+    Matching rules:
+    - If turn is provided, only look in that turn's files.
+    - If turn is omitted, search from newest turn to oldest (current first).
+    - Within a turn, files are deduped: duplicates are addressed as
+      report-1.pdf, report-2.pdf, etc. The display_name must match the
+      deduplicated name shown in the context prompt.
     """
     try:
         import lazyllm
@@ -414,61 +414,189 @@ def read_user_attachment(filename: str) -> Dict[str, Any]:
         except Exception:
             pass
         files: List[str] = cfg.get('files') or []
-        if not files:
-            return tool_success('read_user_attachment', {
-                'status': 'error',
-                'message': 'No attached files found in this conversation.',
-            })
-        # Match by basename or suffix.
-        target = filename.strip()
-        matched: Optional[str] = None
-        for path in files:
-            if os.path.basename(path) == target or path.endswith(target) or target in path:
-                matched = path
-                break
-        if matched is None:
-            available = [os.path.basename(p) for p in files]
-            return tool_success('read_user_attachment', {
-                'status': 'error',
-                'message': (
-                    f"File '{target}' not found in attached files. "
-                    f"Available: {', '.join(available)}"
-                ),
-            })
-        if not os.path.exists(matched):
-            return tool_success('read_user_attachment', {
-                'status': 'error',
-                'message': f"File '{target}' was found in the index but is no longer on disk.",
-            })
-        # Binary / image files: return path only (caller should use vision_extractor etc.).
-        binary_exts = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.pdf', '.zip'}
-        ext = os.path.splitext(matched)[1].lower()
-        if ext in binary_exts:
-            return tool_success('read_user_attachment', {
-                'status': 'ok',
-                'filename': os.path.basename(matched),
-                'path': matched,
-                'message': (
-                    f"Binary file '{os.path.basename(matched)}' is available at the above path. "
-                    'Pass the path to an appropriate tool (e.g. vision_extractor for images).'
-                ),
-            })
-        # Text file: read content.
-        try:
-            with open(matched, 'r', encoding='utf-8', errors='replace') as fh:
-                content = fh.read()
-        except OSError as e:
-            return tool_success('read_user_attachment', {
-                'status': 'error',
-                'message': f"Could not read '{os.path.basename(matched)}': {e}",
-            })
+        history_files_per_turn: Dict[str, List[str]] = cfg.get('history_files_per_turn') or {}
+    except Exception:
+        return None, 'Could not read agentic_config.'
+
+    if not files and not history_files_per_turn:
+        return None, 'No attached files found in this conversation.'
+
+    def _dedupe_turn(paths: List[str]) -> List[tuple[str, str]]:
+        """Return (display_name, abs_path) pairs with intra-turn dedup (no size)."""
+        seen: Dict[str, int] = {}
+        result: List[tuple[str, str]] = []
+        for path in paths:
+            base = os.path.basename(path)
+            name_no_ext, ext = os.path.splitext(base)
+            if base not in seen:
+                seen[base] = 0
+                display = base
+            else:
+                seen[base] += 1
+                display = f'{name_no_ext}-{seen[base]}{ext}'
+            result.append((display, path))
+        return result
+
+    target = filename.strip()
+
+    def _match_in_turn(paths: List[str]) -> Optional[str]:
+        pairs = _dedupe_turn(paths)
+        for display_name, abs_path in pairs:
+            if display_name == target or abs_path.endswith(target) or target in abs_path:
+                return abs_path
+        return None
+
+    if turn is not None:
+        turn_key = 'current' if turn == 0 else str(turn)
+        turn_paths = history_files_per_turn.get(turn_key) or []
+        # Fallback: filter files list by turn position is unreliable; use per-turn map only.
+        if not turn_paths:
+            return None, f'No files found for turn {turn}.'
+        matched = _match_in_turn(turn_paths)
+        if matched:
+            return matched, None
+        available = [os.path.basename(p) for p in turn_paths]
+        return None, (
+            f"File '{target}' not found in turn {turn}. "
+            f"Available: {', '.join(available)}"
+        )
+
+    # Search without turn: current first, then historical (descending seq)
+    search_order: List[tuple[str, List[str]]] = []
+    current_paths = history_files_per_turn.get('current') or []
+    if current_paths:
+        search_order.append(('current', current_paths))
+    historical_seqs = sorted(
+        (int(k) for k in history_files_per_turn if k != 'current' and k.isdigit()),
+        reverse=True,
+    )
+    for seq in historical_seqs:
+        paths = history_files_per_turn.get(str(seq)) or []
+        if paths:
+            search_order.append((str(seq), paths))
+
+    for _, paths in search_order:
+        matched = _match_in_turn(paths)
+        if matched:
+            return matched, None
+
+    # Final fallback: scan the merged files list for partial match
+    for path in files:
+        if os.path.basename(path) == target or path.endswith(target) or target in path:
+            return path, None
+
+    all_names = [os.path.basename(p) for p in files]
+    return None, (
+        f"File '{target}' not found in attached files. "
+        f"Available: {', '.join(all_names)}"
+    )
+
+
+@handle_tool_errors
+def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:
+    """Read the contents of a file previously uploaded by the user in this conversation.
+
+    The list of available files is shown in the system prompt under '## User Uploaded Files'.
+    Use this tool to read a file's content when the user asks about it or when the task
+    requires processing the file.
+
+    Args:
+        filename (str): The filename (basename) or display name of the attachment to read.
+            Must match one of the files listed in the system prompt.
+            For intra-turn duplicates use the deduplicated name (e.g. report-1.pdf).
+        turn (int): Optional. The conversation turn number (1-based seq for historical turns,
+            or omit to search from newest to oldest). Use the Turn number shown in the
+            system prompt (e.g. Turn 1, Turn 3). Pass 0 for the current turn.
+
+    Returns:
+        The file content as text, or a confirmation message with the absolute path for
+        binary/image files that should be passed to other tools (e.g. vision_extractor).
+    """
+    matched, err = _resolve_attachment(filename, turn)
+    if err:
+        return tool_success('read_user_attachment', {'status': 'error', 'message': err})
+    if not os.path.exists(matched):
+        return tool_success('read_user_attachment', {
+            'status': 'error',
+            'message': f"File '{os.path.basename(matched)}' was found in the index but is no longer on disk.",
+        })
+    # Binary / image files: return path only (caller should use vision_extractor etc.).
+    binary_exts = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.pdf', '.zip'}
+    ext = os.path.splitext(matched)[1].lower()
+    if ext in binary_exts:
         return tool_success('read_user_attachment', {
             'status': 'ok',
             'filename': os.path.basename(matched),
-            'content': content,
+            'path': matched,
+            'message': (
+                f"Binary file '{os.path.basename(matched)}' is available at the above path. "
+                'Pass the path to an appropriate tool (e.g. vision_extractor for images).'
+            ),
         })
-    except Exception as e:
+    try:
+        with open(matched, 'r', encoding='utf-8', errors='replace') as fh:
+            content = fh.read()
+    except OSError as e:
         return tool_success('read_user_attachment', {
             'status': 'error',
-            'message': f'read_user_attachment failed: {e}',
+            'message': f"Could not read '{os.path.basename(matched)}': {e}",
         })
+    return tool_success('read_user_attachment', {
+        'status': 'ok',
+        'filename': os.path.basename(matched),
+        'content': content,
+    })
+
+
+@handle_tool_errors
+def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:
+    """Return the accessible URL or local path of a file uploaded by the user.
+
+    Use this when you need to pass a file to another tool (e.g. super_pdf_reader, image tools)
+    but do not need to read its text content directly.
+
+    Args:
+        filename (str): The filename (basename) or display name of the attachment to locate.
+            For intra-turn duplicates use the deduplicated name (e.g. report-1.pdf).
+        turn (int): Optional. The conversation turn number. Same semantics as read_user_attachment.
+
+    Returns:
+        A dict with 'url' (signed HTTP URL from Go, preferred) and 'path' (local absolute path,
+        fallback). Pass 'url' to other tools when available.
+    """
+    matched, err = _resolve_attachment(filename, turn)
+    if err:
+        return tool_success('find_user_attachment', {'status': 'error', 'message': err})
+    if not os.path.exists(matched):
+        return tool_success('find_user_attachment', {
+            'status': 'error',
+            'message': f"File '{os.path.basename(matched)}' was found in the index but is no longer on disk.",
+        })
+
+    # Try to get a signed URL from Go /static-files:sign.
+    signed_url: Optional[str] = None
+    try:
+        import httpx
+        from lazymind.config import config as _cfg
+        core_url = str(_cfg['core_api_url']).rstrip('/')
+        resp = httpx.post(
+            f'{core_url}/static-files:sign',
+            json={'path': matched},
+            timeout=3.0,
+        )
+        if resp.status_code == 200:
+            signed_url = resp.json().get('data', {}).get('url') or resp.json().get('url')
+    except Exception:
+        pass
+
+    result: Dict[str, Any] = {
+        'status': 'ok',
+        'filename': os.path.basename(matched),
+        'path': matched,
+    }
+    if signed_url:
+        result['url'] = signed_url
+    else:
+        result['url'] = matched  # fallback to local path
+        result['message'] = 'Signed URL unavailable; use the local path instead.'
+    return tool_success('find_user_attachment', result)

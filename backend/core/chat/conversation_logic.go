@@ -414,11 +414,35 @@ func filePathsForUpstreamChat(raw map[string]any) any {
 	return out
 }
 
-// historyFilePaths extracts local file URIs from historical chat_histories.ext.input fields.
-// This ensures files uploaded in past turns are still visible to Python on subsequent turns.
-func historyFilePaths(histories []orm.ChatHistory) []string {
-	seen := make(map[string]struct{})
-	var out []string
+// filesPerTurnMap builds a map of turn -> []filePath from historical chat_histories
+// plus the current turn's uploads. Format: {"current": [...], "<seq>": [...]}.
+// Python uses this both for per-turn file context and to reconstruct the merged file list.
+
+// filesPerTurnMap builds a map of seq -> []filePath from historical chat_histories,
+// plus an entry for the current turn (seq=0) from the raw input.
+// This is passed to Python as history_files_per_turn so it can rebuild per-turn file context.
+func filesPerTurnMap(histories []orm.ChatHistory, currentFiles any) map[string][]string {
+	out := make(map[string][]string)
+	// Current turn files (seq represented as "current").
+	var currentPaths []string
+	switch xs := currentFiles.(type) {
+	case []any:
+		for _, it := range xs {
+			if s, ok := it.(string); ok && strings.TrimSpace(s) != "" {
+				currentPaths = append(currentPaths, strings.TrimSpace(s))
+			}
+		}
+	case []string:
+		for _, s := range xs {
+			if strings.TrimSpace(s) != "" {
+				currentPaths = append(currentPaths, strings.TrimSpace(s))
+			}
+		}
+	}
+	if len(currentPaths) > 0 {
+		out["current"] = currentPaths
+	}
+	// Historical turns keyed by seq.
 	for _, h := range histories {
 		if len(h.Ext) == 0 {
 			continue
@@ -429,6 +453,7 @@ func historyFilePaths(histories []orm.ChatHistory) []string {
 		if err := json.Unmarshal(h.Ext, &ext); err != nil {
 			continue
 		}
+		seqKey := fmt.Sprintf("%d", h.Seq)
 		for _, item := range ext.Input {
 			typ, _ := item["input_type"].(string)
 			typ = strings.ToLower(strings.TrimSpace(typ))
@@ -444,51 +469,8 @@ func historyFilePaths(histories []orm.ChatHistory) []string {
 			if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
 				continue
 			}
-			if _, dup := seen[uri]; dup {
-				continue
-			}
-			seen[uri] = struct{}{}
-			out = append(out, uri)
+			out[seqKey] = append(out[seqKey], uri)
 		}
-	}
-	return out
-}
-
-// mergeFilePaths merges current-turn files with historical file paths, deduplicating.
-// Returns nil when the combined result is empty.
-func mergeFilePaths(current any, historical []string) any {
-	seen := make(map[string]struct{})
-	var out []any
-
-	addStr := func(s string) {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			return
-		}
-		if _, dup := seen[s]; dup {
-			return
-		}
-		seen[s] = struct{}{}
-		out = append(out, s)
-	}
-
-	switch xs := current.(type) {
-	case []any:
-		for _, it := range xs {
-			if s, ok := it.(string); ok {
-				addStr(s)
-			}
-		}
-	case []string:
-		for _, s := range xs {
-			addStr(s)
-		}
-	}
-	for _, s := range historical {
-		addStr(s)
-	}
-	if len(out) == 0 {
-		return nil
 	}
 	return out
 }
@@ -510,7 +492,7 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"conversation_id": convID,
 		"history":         buildHistoryMessages(histories),
 		"filters":         raw["filters"],
-		"files":           mergeFilePaths(filePathsForUpstreamChat(raw), historyFilePaths(histories)),
+		"files":           filesPerTurnMap(histories, filePathsForUpstreamChat(raw)),
 		"databases":       raw["databases"],
 		"debug":           raw["debug"],
 		"reasoning":       resolveReasoning(raw),

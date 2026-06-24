@@ -168,9 +168,104 @@ def _collect_active_tool_names(configs: list) -> set[str]:
     return names
 
 
+def _build_user_attachment_context(history_files_per_turn: Dict[str, List[str]]) -> str:
+    """Build the '## User Uploaded Files' context section from history_files_per_turn.
+
+    history_files_per_turn is a map of:
+      - "current" -> [file_paths...] for the current turn
+      - "<seq>" -> [file_paths...] for historical turns (seq is an integer as string)
+
+    Returns an empty string when there are no files.
+    """
+    if not history_files_per_turn:
+        return ''
+
+    # Separate current and historical turns; sort historical by seq (ascending).
+    current_files: List[str] = history_files_per_turn.get('current') or []
+    historical: Dict[int, List[str]] = {}
+    for key, paths in history_files_per_turn.items():
+        if key == 'current' or not paths:
+            continue
+        try:
+            seq = int(key)
+            historical[seq] = paths
+        except ValueError:
+            continue
+
+    lines: List[str] = []
+
+    def _describe_file(path: str) -> str:
+        import os as _os
+        name = _os.path.basename(path)
+        try:
+            size_bytes = _os.path.getsize(path)
+            if size_bytes < 1024:
+                size_str = f'{size_bytes} B'
+            elif size_bytes < 1024 * 1024:
+                size_str = f'{size_bytes / 1024:.1f} KB'
+            else:
+                size_str = f'{size_bytes / (1024 * 1024):.1f} MB'
+            return f'{name} ({size_str})'
+        except OSError:
+            return name
+
+    def _dedupe_names(paths: List[str]) -> List[tuple[str, str]]:
+        """Return (display_name, abs_path) pairs with intra-turn dedup."""
+        seen: Dict[str, int] = {}
+        result: List[tuple[str, str]] = []
+        import os as _os
+        for path in paths:
+            base = _os.path.basename(path)
+            name_no_ext, ext = _os.path.splitext(base)
+            if base not in seen:
+                seen[base] = 0
+                display = _describe_file(path)
+            else:
+                seen[base] += 1
+                n = seen[base]
+                display = f'{name_no_ext}-{n}{ext}'
+                try:
+                    import os as _os2
+                    size_bytes = _os2.path.getsize(path)
+                    if size_bytes < 1024:
+                        size_str = f'{size_bytes} B'
+                    elif size_bytes < 1024 * 1024:
+                        size_str = f'{size_bytes / 1024:.1f} KB'
+                    else:
+                        size_str = f'{size_bytes / (1024 * 1024):.1f} MB'
+                    display = f'{display} ({size_str})'
+                except OSError:
+                    pass
+            result.append((display, path))
+        return result
+
+    has_any = bool(current_files) or bool(historical)
+    if not has_any:
+        return ''
+
+    lines.append('## User Uploaded Files [queried at request time]')
+
+    # Historical turns first (ascending seq order), then current.
+    for seq in sorted(historical.keys()):
+        pairs = _dedupe_names(historical[seq])
+        file_list = ', '.join(name for name, _ in pairs)
+        lines.append(f'- Turn {seq}: {file_list}')
+
+    if current_files:
+        pairs = _dedupe_names(current_files)
+        file_list = ', '.join(name for name, _ in pairs)
+        lines.append(f'- Current turn: {file_list}')
+
+    lines.append('')
+    lines.append("To read a file's content, call read_user_attachment(filename, turn=N).")
+    lines.append("To get a file's accessible URL/path, call find_user_attachment(filename, turn=N).")
+
+    return '\n'.join(lines)
+
+
 async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       session_id: str, filters: Optional[Dict[str, Any]],
-                      files: Optional[List[str]],
+                      files: Optional[Dict[str, List[str]]],
                       databases: Optional[List[Dict[str, Any]]],
                       priority: Optional[int], disabled_tools: Optional[List[str]],
                       available_skills: Optional[List[str]], memory: Optional[str],
@@ -215,7 +310,19 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         ), final_data={'tool_call_turns': 0})
 
     filters = dict(filters or {})
-    resolved_files = validate_and_resolve_files(files)
+    # files is now a map {"current": [...], "<seq>": [...]} from Go.
+    # Flatten to a single list for path validation; the map is preserved in agentic_config.
+    files_map: Dict[str, List[str]] = files if isinstance(files, dict) else {}
+    flat_files: List[str] = []
+    if files_map:
+        # current turn first, then historical in ascending seq order
+        if 'current' in files_map:
+            flat_files.extend(files_map['current'])
+        hist_keys = sorted([k for k in files_map if k != 'current' and k.isdigit()],
+                           key=int)
+        for seq_key in hist_keys:
+            flat_files.extend(files_map[seq_key])
+    resolved_files = validate_and_resolve_files(flat_files)
     filters['kb_id'] = _normalize_kb_id_filter(filters.get('kb_id'))
     LOG.info(f'[KBToolGroup_DEBUG] filters={filters!r} kb_id={filters.get("kb_id")!r}')
 
@@ -227,6 +334,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         'session_id': session_id,
         'filters': filters if RAG_MODE and filters else {},
         'files': resolved_files,
+        'history_files_per_turn': files_map,
         'priority': priority,
         'user_id': user_id or '',
         'use_memory': use_memory,
@@ -251,10 +359,15 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         resolve_plugin_injection(plugin_context, conversation_id=(conversation_id or '').strip())
     agentic_config.update(agentic_config_patch)
 
+    # Build user attachment context from files_map and inject before plugin context.
+    user_attachment_context = _build_user_attachment_context(files_map)
+
     # Prepend artifact context to the current user-turn so the LLM sees the
     # up-to-date plugin session state without polluting conversation history.
     if plugin_artifact_context:
         agent_query = plugin_artifact_context + '\n\n---\n\n## User Request\n' + agent_query
+    if user_attachment_context:
+        agent_query = user_attachment_context + '\n\n---\n\n' + agent_query
 
     lazyllm.globals._init_sid(sid=session_id)
     lazyllm.locals._init_sid(sid=session_id)
