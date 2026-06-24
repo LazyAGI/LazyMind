@@ -30,6 +30,7 @@ const convertProviderHTTP = "http"
 
 const officeConvertRetryCount = 2
 const defaultOfficeConvertWorkers = 4
+const localRuntimeMode = "local"
 
 // env: LAZYMIND_OFFICE_CONVERT_URL — text URL，POST JSON {"source_path":"..."}，text {"pdf_path":"..."} text {"data":{"pdf_path":"..."}}
 // Office text tasks:start text；Failedtext，text。
@@ -144,6 +145,19 @@ func isOfficialMinerU(ocrConfig map[string]any) bool {
 	return url == "" || strings.Contains(url, "mineru.net")
 }
 
+func isLocalRuntimeMode() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), localRuntimeMode)
+}
+
+func hasConfiguredOCRService(ocrConfig map[string]any) bool {
+	switch ocrTypeFromConfig(ocrConfig) {
+	case "mineru", "paddleocr":
+		return true
+	default:
+		return false
+	}
+}
+
 // needsOfficeConvertBeforeParse decides whether office-convert-service runs before parsing.
 // PPT/PPTX/PPTM skip conversion only when official MinerU (mineru.net) is configured so
 // DynamicPDFReader can route them to MineruPPTReader; self-hosted MinerU still converts to PDF.
@@ -154,6 +168,9 @@ func needsOfficeConvertBeforeParse(d documentExt, ocrConfig map[string]any) bool
 	src := strings.TrimSpace(d.StoredPath)
 	if !isOfficeDocument(src, d.ContentType, d.OriginalFilename) {
 		return false
+	}
+	if isLocalRuntimeMode() {
+		return !hasConfiguredOCRService(ocrConfig)
 	}
 	if isPresentationDocument(src, d.ContentType, d.OriginalFilename) && isOfficialMinerU(ocrConfig) {
 		return false
@@ -240,7 +257,7 @@ func applyOfficeConversion(ctx context.Context, d *documentExt) {
 	url := strings.TrimSpace(os.Getenv("LAZYMIND_OFFICE_CONVERT_URL"))
 	if url == "" {
 		d.ConvertStatus = ConvertStatusFailed
-		d.ConvertError = "LAZYMIND_OFFICE_CONVERT_URL is not configured"
+		d.ConvertError = localOfficeConvertUserError("LAZYMIND_OFFICE_CONVERT_URL is not configured")
 		log.Logger.Warn().Str("source", src).Msg("office convert: service URL missing")
 		return
 	}
@@ -248,7 +265,7 @@ func applyOfficeConversion(ctx context.Context, d *documentExt) {
 	pdfPath, err := callOfficeConvertHTTP(ctx, url, src)
 	if err != nil {
 		d.ConvertStatus = ConvertStatusFailed
-		d.ConvertError = err.Error()
+		d.ConvertError = localOfficeConvertUserError(err.Error())
 		log.Logger.Error().Err(err).Str("source", src).Msg("office convert failed")
 		return
 	}
@@ -259,13 +276,24 @@ func applyOfficeConversion(ctx context.Context, d *documentExt) {
 	st, err := os.Stat(pdfPath)
 	if err != nil || st.IsDir() {
 		d.ConvertStatus = ConvertStatusFailed
-		d.ConvertError = fmt.Sprintf("converted pdf not found: %v", err)
+		d.ConvertError = localOfficeConvertUserError(fmt.Sprintf("converted pdf not found: %v", err))
 		return
 	}
 	fillParseFields(d, pdfPath, st.Size())
 	d.ConvertStatus = ConvertStatusSucceeded
 	d.ConvertError = ""
 	log.Logger.Info().Str("source", src).Str("pdf", pdfPath).Int64("size", st.Size()).Msg("office convert succeeded")
+}
+
+func localOfficeConvertUserError(detail string) string {
+	detail = strings.TrimSpace(detail)
+	if !isLocalRuntimeMode() {
+		return detail
+	}
+	if detail == "" {
+		detail = "local Office to PDF fallback failed"
+	}
+	return detail + ". Configure MinerU/PaddleOCR online parsing service or install LibreOffice and set LAZYMIND_LIBREOFFICE_PATH for local fallback."
 }
 
 func fillParseFields(d *documentExt, pdfPath string, size int64) {

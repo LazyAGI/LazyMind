@@ -1440,6 +1440,14 @@ func startParseTasksInternal(r *http.Request, datasetID string, taskIDs []string
 				dExt := cloneDocumentExt(candidate.docExt)
 				callOfficeConvertWithRetry(r.Context(), &dExt)
 				persistDocumentConvertState(r.Context(), datasetID, candidate.doc.ID, dExt)
+				if isLocalRuntimeMode() && strings.TrimSpace(dExt.ConvertStatus) == ConvertStatusFailed {
+					msg := strings.TrimSpace(dExt.ConvertError)
+					if msg == "" {
+						msg = localOfficeConvertUserError("local Office to PDF fallback failed")
+					}
+					outcomes[idx] = officeOutcome{task: candidate.task, doc: candidate.doc, docExt: dExt, result: StartTaskResult{TaskID: candidate.task.ID, DocumentID: candidate.doc.ID, DisplayName: candidate.doc.DisplayName, Status: "FAILED", SubmitStatus: "FAILED", Message: msg}}
+					return
+				}
 				parsePath := parsePathForAdd(dExt)
 				if strings.TrimSpace(parsePath) == "" {
 					outcomes[idx] = officeOutcome{task: candidate.task, doc: candidate.doc, docExt: dExt, result: StartTaskResult{TaskID: candidate.task.ID, DocumentID: candidate.doc.ID, DisplayName: candidate.doc.DisplayName, Status: "FAILED", SubmitStatus: "REJECTED", Message: "parse file path is empty"}}

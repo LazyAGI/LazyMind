@@ -242,6 +242,47 @@ func TestComposeUpScalesDisabledServicesToZero(t *testing.T) {
 	}
 }
 
+func TestComposeUpScalesOfficeConvertServiceToZero(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	overlay := filepath.Join(repo, localComposeOverrideName)
+	if err := os.WriteFile(overlay, []byte("x-lazymind-local:\n  mode: local\n  disabled_container_services:\n    - office-convert-service\n"), 0o644); err != nil {
+		t.Fatalf("write overlay: %v", err)
+	}
+
+	runner := &fakeRunner{t: t}
+	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
+	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
+		return CommandResult{Stdout: "office-convert-service\nauth-service\ncore\n"}, nil
+	}, func(cmd Command) (CommandResult, error) {
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
+			"--profile", "milvus",
+			"--profile", "opensearch",
+			"up",
+			"--build",
+			"--scale", "office-convert-service=0",
+			"auth-service", "core",
+		})
+		for _, arg := range cmd.Args {
+			if arg == "office-convert-service" {
+				t.Fatalf("disabled service office-convert-service should not be in explicit service list: %v", cmd.Args)
+			}
+		}
+		return CommandResult{}, nil
+	})
+
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := manager.compose.ComposeUp(context.Background(), paths.RepoRoot, cfg.Profile); err != nil {
+		t.Fatalf("compose up: %v", err)
+	}
+}
+
 func TestWriteGeneratedComposeConfig(t *testing.T) {
 	runner := &fakeRunner{t: t}
 	m := NewRuntimeManager(runner, filepath.Join("/tmp", "lazymind-local"))
@@ -320,6 +361,9 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 	}
 	if authService.Namespace != "host" {
 		t.Fatalf("unexpected auth-service namespace %q", authService.Namespace)
+	}
+	if _, ok := parsed.Processes["local-office-convert"]; ok {
+		t.Fatal("generated config should not include local-office-convert process")
 	}
 	if strings.Contains(out, "readiness_probe:") {
 		t.Fatal("generated config should not include process-compose readiness_probe")

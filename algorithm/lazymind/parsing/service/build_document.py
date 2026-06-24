@@ -1,3 +1,5 @@
+import os
+
 import lazyllm
 from lazyllm.tracing import set_trace_context
 from lazyllm import AutoModel
@@ -118,6 +120,10 @@ def _build_pdf_reader():
     )
 
 
+def _is_local_runtime_mode() -> bool:
+    return os.getenv('LAZYMIND_RUNTIME_MODE', '').strip().lower() == 'local'
+
+
 def _register_document_readers(docs: Document) -> None:
     pdf_reader = _build_pdf_reader()
     docs.add_reader('*.pdf', pdf_reader)
@@ -136,6 +142,10 @@ def _register_document_readers(docs: Document) -> None:
     excel_reader = PandasExcelReader()
     docs.add_reader('*.xls', excel_reader)
     docs.add_reader('*.xlsx', excel_reader)
+
+    if _is_local_runtime_mode():
+        for pattern in ('*.doc', '*.docx', '*.xls', '*.xlsx', '*.ppt', '*.pptx', '*.pptm'):
+            docs.add_reader(pattern, pdf_reader)
 
 
 def reset_stores() -> None:

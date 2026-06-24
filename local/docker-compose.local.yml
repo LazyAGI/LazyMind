@@ -41,6 +41,7 @@ services:
       - sqlite-data:/data/sqlite
     environment:
       LAZYMIND_AUTH_SERVICE_URL: "http://host.docker.internal:${LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT:-18000}/api/authservice"
+      LAZYMIND_DOCUMENT_PARSE_PROFILE: local
       LAZYMIND_REDIS_URL: ""
       LAZYMIND_STATE_BACKEND: sqlite
       LAZYMIND_STATE_SQLITE_DIR: /data/sqlite
@@ -51,18 +52,30 @@ services:
       redis:
         condition: service_healthy
         required: false
+      office-convert-service:
+        condition: service_healthy
+        required: false
 
   core-dev:
     volumes:
       - sqlite-data:/data/sqlite
     environment:
+      LAZYMIND_DOCUMENT_PARSE_PROFILE: local
       LAZYMIND_REDIS_URL: ""
       LAZYMIND_STATE_BACKEND: sqlite
       LAZYMIND_STATE_SQLITE_DIR: /data/sqlite
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      office-convert-service:
+        condition: service_healthy
+        required: false
 
   lazyllm-parse-server:
     volumes:
       - sqlite-data:/data/sqlite
+    environment:
+      LAZYMIND_DOCUMENT_PARSE_PROFILE: local
 
   lazyllm-parse-worker:
     volumes:
@@ -99,6 +112,7 @@ x-lazymind-local:
     - redis
     - kong
     - auth-service
+    - office-convert-service
 
 volumes:
   sqlite-data:
