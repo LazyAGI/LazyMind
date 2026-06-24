@@ -294,6 +294,11 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
     if (existing) {
       return;
     }
+    // Don't subscribe to tasks that are already in a terminal state.
+    const task = get().getTasks(conversationId).find((t) => t.task_id === taskId);
+    if (task && TERMINAL.includes(task.status)) {
+      return;
+    }
     const sse = new SSE(taskStreamUrl(taskId), {
       method: Method.GET,
       headers: {
@@ -406,6 +411,15 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           if (!event || !event.type) return;
           const { type, payload } = event;
           if (type === 'task_created' && payload?.task_id) {
+            // Check the existing task state BEFORE upsert — the replay payload carries
+            // the creation-time status ('pending'/'running'), not the terminal status.
+            // If we upsert first and then read, we'd always see a non-terminal status
+            // and the alreadyDone guard would never fire.
+            const existingTask = get().getTasks(conversationId).find(
+              (t) => t.task_id === payload.task_id,
+            );
+            const alreadyDone = existingTask && TERMINAL.includes(existingTask.status);
+
             get().upsertTask(conversationId, {
               task_id: payload.task_id,
               title: payload.title,
@@ -419,10 +433,6 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             // task_created replay would re-open the task stream, causing all historic
             // text/think/tool_calls events to be appended again and the execution log
             // to appear duplicated.
-            const existingTask = get().getTasks(conversationId).find(
-              (t) => t.task_id === payload.task_id,
-            );
-            const alreadyDone = existingTask && TERMINAL.includes(existingTask.status);
             if (!alreadyDone) {
               get().subscribeTask(conversationId, payload.task_id);
             }
