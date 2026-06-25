@@ -49,6 +49,39 @@ func TestCoreServiceEnvUsesLocalEndpoints(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_OFFICE_CONVERT_URL=http://127.0.0.1:18082/v1/office/to-pdf")
 }
 
+func TestCoreServiceWaitForDatabaseUsesPgIsReady(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	runner := &fakeRunner{t: t}
+	manager := NewCoreServiceManager(runner)
+	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
+		assertCommand(t, cmd, "docker",
+			"compose",
+			"-f", repoComposeFileName,
+			"-f", localComposeOverrideName,
+			"exec",
+			"-T",
+			"db",
+			"pg_isready",
+			"-U", "root",
+			"-d", "core",
+		)
+		if cmd.Dir != repo {
+			t.Fatalf("unexpected pg_isready dir %q", cmd.Dir)
+		}
+		return CommandResult{Stdout: "db:5432 - accepting connections\n"}, nil
+	})
+
+	if err := manager.waitForCoreDatabase(context.Background(), cfg, paths); err != nil {
+		t.Fatalf("wait database: %v", err)
+	}
+	runner.assertCommandCount(1)
+}
+
 func assertEnvContains(t *testing.T, env []string, want string) {
 	t.Helper()
 	for _, item := range env {
