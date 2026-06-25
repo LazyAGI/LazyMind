@@ -28,8 +28,7 @@ class DriverRequest(BaseModel):
 
 
 class DriverResponse(BaseModel):
-    verdict: str  # PASS | RETRY | DONE | FAIL
-    reason: str
+    message: str  # Natural-language assessment passed verbatim to ChatAgent as user input
 
 
 @router.post('/api/plugin/driver', response_model=DriverResponse, summary='Evaluate plugin step result')
@@ -37,7 +36,9 @@ async def plugin_driver(req: DriverRequest) -> DriverResponse:
     """DriverAgent evaluation endpoint.
 
     Called by the Go EventLoop after a plugin_step SubAgent reaches terminal status.
-    Returns a structured verdict (PASS/RETRY/DONE/FAIL) and optional reason.
+    Returns a natural-language assessment that the Go EventLoop forwards verbatim to
+    the ChatAgent as a synthetic user turn.  The ChatAgent then decides autonomously
+    whether to advance, retry, rewind, or complete the plugin.
     """
     result = evaluate_step(
         plugin_id=req.plugin_id,
@@ -46,10 +47,7 @@ async def plugin_driver(req: DriverRequest) -> DriverResponse:
         session_id=req.session_id,
         user_files=[p for paths in (req.history_files_per_turn or {}).values() for p in paths] or None,
     )
-    return DriverResponse(
-        verdict=result.get('verdict', 'PASS'),
-        reason=result.get('reason', ''),
-    )
+    return DriverResponse(message=result.get('message', ''))
 
 
 @router.get('/api/plugin/slot-binding', summary='Lookup slot binding for artifact key')

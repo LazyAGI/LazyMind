@@ -163,77 +163,64 @@ func TestOnSubAgentDone_Failed_SetsSessionFailed(t *testing.T) {
 // callDriverAgent — mock HTTP server
 // ──────────────────────────────────────────────
 
-func TestCallDriverAgent_ParsesVerdict(t *testing.T) {
+func TestCallDriverAgent_ReturnsMessage(t *testing.T) {
 	cases := []struct {
-		body          string
-		wantVerdict   string
-		wantReasonHas string
+		body       string
+		wantMsgHas string
 	}{
 		{
-			body:          `{"verdict":"PASS","reason":"Prompt looks good."}`,
-			wantVerdict:   "PASS",
-			wantReasonHas: "good",
+			body:       `{"message":"optimized_prompt saved with 65 words."}`,
+			wantMsgHas: "optimized_prompt",
 		},
 		{
-			body:          `{"verdict":"done","reason":"All steps complete."}`,
-			wantVerdict:   "DONE",
-			wantReasonHas: "complete",
+			body:       `{"message":"enhanced_image_url saved. The pipeline is complete."}`,
+			wantMsgHas: "complete",
 		},
 		{
-			body:          `{"verdict":"RETRY","reason":"No artifact found."}`,
-			wantVerdict:   "RETRY",
-			wantReasonHas: "artifact",
-		},
-		{
-			body:          `{"verdict":"FAIL","reason":"Repeated failures."}`,
-			wantVerdict:   "FAIL",
-			wantReasonHas: "failures",
+			body:       `{"message":"No artifact found; prompt generation may have failed."}`,
+			wantMsgHas: "artifact",
 		},
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.wantVerdict, func(t *testing.T) {
+	for i, tc := range cases {
+		t.Run(fmt.Sprintf("case%d", i), func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				fmt.Fprint(w, tc.body)
 			}))
 			defer srv.Close()
 
-			// Point chat service endpoint at the mock server.
 			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
 
-			verdict, reason := callDriverAgent("image-plugin", "optimize_prompt", "step output", "ps-1", nil)
-			if verdict != tc.wantVerdict {
-				t.Fatalf("expected verdict %s, got %s", tc.wantVerdict, verdict)
-			}
-			if tc.wantReasonHas != "" && !strings.Contains(reason, tc.wantReasonHas) {
-				t.Fatalf("expected reason to contain %q, got %q", tc.wantReasonHas, reason)
+			msg := callDriverAgent("image-plugin", "optimize_prompt", "step output", "ps-1", nil)
+			if !strings.Contains(msg, tc.wantMsgHas) {
+				t.Fatalf("expected message to contain %q, got %q", tc.wantMsgHas, msg)
 			}
 		})
 	}
 }
 
-func TestCallDriverAgent_DefaultsToPassOnError(t *testing.T) {
+func TestCallDriverAgent_DefaultsToFallbackOnError(t *testing.T) {
 	// Point to a non-existent server so the HTTP call fails.
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://127.0.0.1:19999")
 
-	verdict, _ := callDriverAgent("image-plugin", "generate_image", "result", "ps-1", nil)
-	if verdict != "PASS" {
-		t.Fatalf("expected PASS fallback, got %s", verdict)
+	msg := callDriverAgent("image-plugin", "generate_image", "result", "ps-1", nil)
+	if !strings.Contains(msg, "generate_image") {
+		t.Fatalf("fallback message should contain step ID, got %q", msg)
 	}
 }
 
-func TestCallDriverAgent_DefaultsToPassOnUnknownVerdict(t *testing.T) {
+func TestCallDriverAgent_DefaultsToFallbackOnEmptyMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"verdict":"UNKNOWN","reason":"weird"}`)
+		fmt.Fprint(w, `{"message":""}`)
 	}))
 	defer srv.Close()
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
 
-	verdict, _ := callDriverAgent("image-plugin", "analyze_subject", "output", "ps-1", nil)
-	if verdict != "PASS" {
-		t.Fatalf("expected PASS for unknown verdict, got %s", verdict)
+	msg := callDriverAgent("image-plugin", "analyze_subject", "output", "ps-1", nil)
+	if !strings.Contains(msg, "analyze_subject") {
+		t.Fatalf("fallback message should contain step ID, got %q", msg)
 	}
 }
 
@@ -275,30 +262,6 @@ func TestResolveSlotBinding_NoBinding_ReturnsEmpty(t *testing.T) {
 	slotID, _ := resolveSlotBinding("image-plugin", "some_internal_artifact")
 	if slotID != "" {
 		t.Fatalf("expected empty slotID, got %q", slotID)
-	}
-}
-
-// ──────────────────────────────────────────────
-// buildSyntheticMessage
-// ──────────────────────────────────────────────
-
-func TestBuildSyntheticMessage(t *testing.T) {
-	cases := []struct {
-		verdict string
-		stepID  string
-		reason  string
-		wantHas []string
-	}{
-		{"PASS", "optimize_prompt", "looks good", []string{"optimize_prompt", "looks good", "Proceed"}},
-		{"RETRY", "generate_image", "no url", []string{"generate_image", "no url", "RETRY"}},
-	}
-	for _, tc := range cases {
-		msg := buildSyntheticMessage(tc.verdict, tc.stepID, tc.reason)
-		for _, want := range tc.wantHas {
-			if !strings.Contains(msg, want) {
-				t.Errorf("verdict=%s: message %q missing %q", tc.verdict, msg, want)
-			}
-		}
 	}
 }
 

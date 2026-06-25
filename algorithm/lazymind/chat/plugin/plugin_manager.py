@@ -256,9 +256,38 @@ def _trigger_plugin_step(
     return f'Step {step_id!r} triggered. Stop here.'
 
 
-# ---------------------------------------------------------------------------
-# Public tool factories
-# ---------------------------------------------------------------------------
+def _trigger_plugin_end(plugin_id: str) -> str:
+    """Emit a task_created event with step_id='__end__' to signal plugin session completion.
+
+    Go's HandlePluginStepCreated intercepts this sentinel and marks the session as completed.
+    """
+    cfg = _agentic_config()
+    session_id: str = cfg.get('plugin_session_id', '')
+    if not session_id:
+        return 'Error: no active plugin session to complete.'
+    task_id = str(uuid.uuid4())
+    _write_agent_data(
+        'task_created',
+        task_id=task_id,
+        title=f'{plugin_id}:__end__',
+        agent_type='plugin_step',
+        mode='manual',
+        objective='',
+        params={
+            'plugin_id': plugin_id,
+            'step_id': '__end__',
+            'session_id': session_id,
+            'user_input': '',
+            'is_cold_start': False,
+        },
+        input_artifact_keys=[],
+        output_artifact_keys=[],
+        tools=[],
+        resume=False,
+    )
+    return 'Plugin session completed. Stop here.'
+
+
 def _build_step_choices_doc(
     forward_steps: List[str],
     rewind_steps: List[str],
@@ -368,6 +397,10 @@ def build_advance_step_tool(
         partial_indices: Optional[Dict[str, List[int]]] = None,
     ) -> str:
         """Advance the active plugin to the next step."""
+        # '__end__' is a special sentinel: signals plugin session completion.
+        # Bypass state-machine validation and emit the completion event directly.
+        if step_id == '__end__':
+            return _trigger_plugin_end(plugin_id)
         if step_id not in all_reachable:
             return (
                 f'Error: step {step_id!r} is not reachable from '
@@ -381,9 +414,14 @@ def build_advance_step_tool(
         )
 
     advance_step.__doc__ = (
-        'Advance the active plugin to the next step.\n\n'
+        'Advance the active plugin to the next step, or signal that the plugin is complete.\n\n'
         'Use this when there is an active plugin session and you need to\n'
         'trigger or re-trigger a specific step based on user intent.\n\n'
+        '## Completing the plugin\n\n'
+        'When the DriverAgent message indicates the pipeline is fully done\n'
+        '(e.g. the final step produced its artifact successfully), call this tool\n'
+        'with step_id="__end__" to mark the session complete.  user_input is\n'
+        'ignored for __end__; pass an empty string or a brief confirmation.\n\n'
         '## IMPORTANT — use the step list below as the single source of truth\n\n'
         'The "Available steps at this moment" section below is computed from the\n'
         'live state machine and reflects what is actually reachable right now.\n'
@@ -395,16 +433,14 @@ def build_advance_step_tool(
         'positions should be replaced rather than appended.\n'
         'Both values are ephemeral and only affect this single execution.\n\n'
         '## Rewind guidance\n\n'
-        'If the user or the DriverAgent indicates that the problem originates\n'
-        'from a prior step (e.g. "the subject analysis was wrong", "please\n'
-        're-collect materials"), you should rewind to that earlier step by\n'
+        'If the DriverAgent message indicates the problem originates from a prior\n'
+        'step (e.g. "consider re-running analyze_subject"), rewind to that step by\n'
         'passing its step_id. The "Rewind" section below lists all previously\n'
-        'completed steps that are eligible for re-triggering. Rewinding clears\n'
-        'the downstream artifacts and lets the pipeline rebuild from that point.\n\n'
+        'completed steps that are eligible for re-triggering.\n\n'
         + choices_doc + '\n\n'
         'Args:\n'
-        '    step_id (str): The step to advance to.  Must be one of the\n'
-        '        currently available steps listed above.\n'
+        '    step_id (str): The step to advance to, one of the available steps above,\n'
+        '        or "__end__" to signal that the plugin pipeline is complete.\n'
         '    user_input (str): A concise goal statement for the SubAgent that\n'
         '        will execute this step.  Synthesise the key intent from the\n'
         '        conversation — do NOT pass vague phrases like "继续", "请继续",\n'
@@ -419,7 +455,7 @@ def build_advance_step_tool(
         '        of 0-based list_index values that should be overwritten rather\n'
         '        than appended.  Only relevant for list-cardinality slots.\n\n'
         'Returns:\n'
-        '    Confirmation that the step was triggered.'
+        '    Confirmation that the step was triggered or the plugin was completed.'
     )
 
     return advance_step

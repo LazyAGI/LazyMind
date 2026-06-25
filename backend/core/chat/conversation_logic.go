@@ -1390,7 +1390,7 @@ func handlePluginStepCreated(
 		return nil
 	}
 
-	sessionID, taskID, err := plugin.HandlePluginStepCreated(
+	sessionID, taskID, pluginCompleted, err := plugin.HandlePluginStepCreated(
 		ctx, db, stateStore, convID, historyID, userID,
 		ev.TaskID, ev.Title, ev.Objective,
 		params,
@@ -1399,6 +1399,19 @@ func handlePluginStepCreated(
 	)
 	if err != nil {
 		fmt.Printf("[Core] [PLUGIN_STEP_FAILED] err=%v\n", err)
+		return nil
+	}
+
+	// When ChatAgent signals plugin completion via __end__, emit plugin_completed
+	// to the conversation event stream so the frontend can close the plugin panel.
+	if pluginCompleted {
+		_ = AppendConvEvent(ctx, stateStore, convID, &ConvEvent{
+			Type: "plugin_completed",
+			Payload: map[string]any{
+				"session_id": sessionID,
+				"plugin_id":  params.PluginID,
+			},
+		})
 		return nil
 	}
 

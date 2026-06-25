@@ -92,7 +92,10 @@ type PluginChatContext struct {
 // It either creates (cold start) or resumes an existing plugin session,
 // persists the sub_agent_task + plugin_session_step records,
 // and launches the SubAgent goroutine.
-// Returns (sessionID, taskID, error).
+// Returns (sessionID, taskID, pluginCompleted, error).
+//
+// pluginCompleted is true when step_id is "__end__", indicating that the ChatAgent
+// has decided the plugin session is finished.  In that case no SubAgent is started.
 //
 // NOTE: objective is stored as-is (raw template with {{...}} placeholders).
 // Artifact injection is handled by the Python runner at execution time via
@@ -108,19 +111,32 @@ func HandlePluginStepCreated(
 	inputKeys, outputKeys []string,
 	llmConfig map[string]any,
 	toolConfig map[string]any,
-) (sessionID string, returnedTaskID string, err error) {
+) (sessionID string, returnedTaskID string, pluginCompleted bool, err error) {
 	pluginID := params.PluginID
 	stepID := params.StepID
 	isCold := params.IsColdStart
 	returnedTaskID = taskID
 
+	// "__end__" is a sentinel emitted by ChatAgent (via advance_step) to signal that the
+	// plugin session is complete.  No SubAgent is started; the session is marked completed.
+	if stepID == "__end__" {
+		sessionID = params.SessionID
+		if sessionID == "" {
+			return "", "", false, fmt.Errorf("plugin: session_id required for __end__ signal")
+		}
+		if uErr := UpdateSessionStatus(ctx, db, sessionID, SessionStatusCompleted); uErr != nil {
+			fmt.Printf("[Plugin] __end__: failed to complete session %s: %v\n", sessionID, uErr)
+		}
+		return sessionID, taskID, true, nil
+	}
+
 	if isCold {
 		existing, gErr := GetActiveSession(ctx, db, convID)
 		if gErr != nil {
-			return "", "", fmt.Errorf("plugin: check active session: %w", gErr)
+			return "", "", false, fmt.Errorf("plugin: check active session: %w", gErr)
 		}
 		if existing != nil {
-			return "", "", fmt.Errorf("plugin: active session already exists (id=%s)", existing.ID)
+			return "", "", false, fmt.Errorf("plugin: active session already exists (id=%s)", existing.ID)
 		}
 		psID := "ps_" + common.GenerateID()
 		_, sErr := CreateSession(ctx, db, CreateSessionInput{
@@ -132,13 +148,13 @@ func HandlePluginStepCreated(
 			CreateUserID:     userID,
 		})
 		if sErr != nil {
-			return "", "", fmt.Errorf("plugin: create session: %w", sErr)
+			return "", "", false, fmt.Errorf("plugin: create session: %w", sErr)
 		}
 		sessionID = psID
 	} else {
 		sessionID = params.SessionID
 		if sessionID == "" {
-			return "", "", fmt.Errorf("plugin: session_id required for non-cold-start step")
+			return "", "", false, fmt.Errorf("plugin: session_id required for non-cold-start step")
 		}
 		if uErr := UpdateSessionCurrentStep(ctx, db, sessionID, stepID); uErr != nil {
 			fmt.Printf("[Plugin] failed to update current_step: %v\n", uErr)
@@ -186,7 +202,7 @@ func HandlePluginStepCreated(
 		CreateUserID:       userID,
 	})
 	if cErr != nil {
-		return "", sessionID, fmt.Errorf("plugin: create sub_agent_task: %w", cErr)
+		return "", sessionID, false, fmt.Errorf("plugin: create sub_agent_task: %w", cErr)
 	}
 
 	// Create plugin_session_steps record.
@@ -222,7 +238,7 @@ func HandlePluginStepCreated(
 		ToolConfig:    toolConfig,
 	})
 
-	return sessionID, task.ID, nil
+	return sessionID, task.ID, false, nil
 }
 
 // OnSubAgentDone is called when a plugin_step task reaches terminal status.
@@ -280,7 +296,9 @@ func OnSubAgentDone(
 	go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
 }
 
-// advanceAutoMode calls DriverAgent and either triggers a new ChatAgent turn or ends the session.
+// advanceAutoMode calls DriverAgent and forwards its natural-language assessment to ChatAgent.
+// ChatAgent then decides autonomously whether to advance, retry, rewind, or complete the plugin
+// by calling advance_step with the appropriate step_id (including "__end__" to finish).
 func advanceAutoMode(
 	ctx context.Context,
 	db *gorm.DB,
@@ -289,56 +307,20 @@ func advanceAutoMode(
 	onSSE func(string, map[string]any),
 	pctx *PluginChatContext,
 ) {
-	verdict, reason := callDriverAgent(pctx.PluginID, pctx.StepID, summary, pctx.SessionID, pctx.HistoryFilesPerTurn)
-	switch verdict {
-	case "DONE":
-		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusCompleted)
-		onSSE("plugin_completed", map[string]any{
-			"session_id": pctx.SessionID,
-			"plugin_id":  pctx.PluginID,
-		})
-	case "FAIL":
-		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusFailed)
-		onSSE("plugin_error", map[string]any{
-			"session_id": pctx.SessionID,
-			"step_id":    pctx.StepID,
-			"message":    reason,
-		})
-	default: // PASS, RETRY
-		syntheticMsg := buildSyntheticMessage(verdict, pctx.StepID, reason)
-		// Emit driver_input so the frontend renders the synthetic user message.
-		onSSE("driver_input", map[string]any{
-			"session_id": pctx.SessionID,
-			"step_id":    pctx.StepID,
-			"verdict":    verdict,
-			"message":    syntheticMsg,
-		})
-		// Notify frontend to open a resume SSE so it can receive the next chat turn.
-		onSSE("auto_chat_started", map[string]any{
-			"session_id":      pctx.SessionID,
-			"conversation_id": pctx.ConvID,
-		})
-		go triggerNextChatTurn(pctx.ConvID, pctx.SessionID, pctx.PluginID, pctx.StepID,
-			pctx.UserID, syntheticMsg)
-	}
-}
-
-// buildSyntheticMessage produces the synthetic user message for ChatAgent on auto-advance.
-// Kept concise: only the verdict decision and actionable instruction.
-func buildSyntheticMessage(verdict, stepID, reason string) string {
-	r := strings.TrimSpace(reason)
-	switch verdict {
-	case "RETRY":
-		if r != "" {
-			return fmt.Sprintf("[DriverAgent] RETRY %s: %s", stepID, r)
-		}
-		return fmt.Sprintf("[DriverAgent] RETRY %s: result unsatisfactory, please retry.", stepID)
-	default:
-		if r != "" {
-			return fmt.Sprintf("[DriverAgent] PASS %s: %s Proceed.", stepID, r)
-		}
-		return fmt.Sprintf("[DriverAgent] PASS %s: Proceed.", stepID)
-	}
+	driverMsg := callDriverAgent(pctx.PluginID, pctx.StepID, summary, pctx.SessionID, pctx.HistoryFilesPerTurn)
+	// Emit driver_input so the frontend can render the DriverAgent assessment.
+	onSSE("driver_input", map[string]any{
+		"session_id": pctx.SessionID,
+		"step_id":    pctx.StepID,
+		"message":    driverMsg,
+	})
+	// Notify frontend to open a resume SSE for the next chat turn.
+	onSSE("auto_chat_started", map[string]any{
+		"session_id":      pctx.SessionID,
+		"conversation_id": pctx.ConvID,
+	})
+	go triggerNextChatTurn(pctx.ConvID, pctx.SessionID, pctx.PluginID, pctx.StepID,
+		pctx.UserID, driverMsg)
 }
 
 // triggerNextChatTurn sends a synthetic POST /conversations:chat to Go core to trigger
@@ -615,9 +597,9 @@ func resolveSlotBinding(pluginID, artifactKey string) (slotID, cardinality strin
 	return result.SlotID, result.Cardinality
 }
 
-// callDriverAgent posts to the Python DriverAgent endpoint and returns (verdict, reason).
-// On any error defaults to ("PASS", "").
-func callDriverAgent(pluginID, stepID, stepResult, sessionID string, historyFilesPerTurn map[string][]string) (verdict, reason string) {
+// callDriverAgent posts to the Python DriverAgent endpoint and returns the natural-language
+// assessment message.  On any error defaults to a generic "step completed" message.
+func callDriverAgent(pluginID, stepID, stepResult, sessionID string, historyFilesPerTurn map[string][]string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	reqBody := map[string]any{
@@ -632,26 +614,24 @@ func callDriverAgent(pluginID, stepID, stepResult, sessionID string, historyFile
 	body, _ := json.Marshal(reqBody)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, driverEndpoint(), bytes.NewReader(body))
 	if err != nil {
-		return "PASS", ""
+		return fmt.Sprintf("Step %q completed.", stepID)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "PASS", ""
+		return fmt.Sprintf("Step %q completed.", stepID)
 	}
 	defer resp.Body.Close()
 	var result struct {
-		Verdict string `json:"verdict"`
-		Reason  string `json:"reason"`
+		Message string `json:"message"`
 	}
 	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&result) != nil {
-		return "PASS", ""
+		return fmt.Sprintf("Step %q completed.", stepID)
 	}
-	v := strings.ToUpper(strings.TrimSpace(result.Verdict))
-	if v != "PASS" && v != "RETRY" && v != "DONE" && v != "FAIL" {
-		return "PASS", result.Reason
+	if strings.TrimSpace(result.Message) == "" {
+		return fmt.Sprintf("Step %q completed.", stepID)
 	}
-	return v, result.Reason
+	return result.Message
 }
 
 // driverEndpoint returns the DriverAgent URL.

@@ -382,6 +382,7 @@ PluginPanel 步骤卡片旁展示当前步骤 `intent_context` 摘要；全局�
 - docstring 动态嵌入可 `rewind` 步骤列表（已有）。
 - 可选参数 `retry_hint`、`rewind: bool`（已有）；**不**新增 Go 侧 `run_range` 批次字段。
 - ChatAgent system 提示（仅 `dynamic` 模式可见 `advance_step` 时）：识别「重跑 N~M 步」时，前 N-1 步用 `advance_step` 同步等结果，最后一步用 `advance_step_and_exit` 退出交由用户决策。`auto` 模式下 ChatAgent 只有 `advance_step_and_exit`，不支持单轮连跑多步。
+- 注意：dynamic模式下，当ChatAgent判断可能为最后一步时，提交同步任务，并且在执行完毕后主动推进到 `__end__` ，避免用户点击继续，发现已经结束。对应的，我们要有机制去发现state.yml中哪些步骤可以直连__end__，给予提示
 
 ---
 
