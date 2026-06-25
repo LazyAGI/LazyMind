@@ -480,6 +480,28 @@ export function KnowledgeBaseServiceApi() {
         },
       });
     },
+    datasetServiceSetDefaultDataset(
+      dataset: string,
+      name: string,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/datasets/${encodeURIComponent(dataset)}:setDefault`,
+        { name },
+        withJsonOptions(options),
+      );
+    },
+    datasetServiceUnsetDefaultDataset(
+      dataset: string,
+      name: string,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post(
+        `${coreApiBaseUrl}/datasets/${encodeURIComponent(dataset)}:unsetDefault`,
+        { name },
+        withJsonOptions(options),
+      );
+    },
   };
 }
 

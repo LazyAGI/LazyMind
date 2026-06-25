@@ -8,7 +8,7 @@ import { getLocalizedErrorMessage } from "@/components/request";
 import ResourceVersionDrawer from "../../components/ResourceVersionDrawer";
 import RouteLoading from "../../components/RouteLoading";
 import { useMemoryManagementOutletContext } from "../../context";
-import { getSkillAssetDetail, patchSkillAsset } from "../../skillApi";
+import { buildSkillUpdatePayload, getSkillAssetDetail, patchSkillAsset } from "../../skillApi";
 import { getSkillBodyContentForDisplay, type StructuredAsset } from "../../shared";
 
 const markdownExtensions = new Set(["md", "markdown"]);
@@ -29,6 +29,9 @@ const isMarkdownSkill = (asset: StructuredAsset) => {
 const stripLeadingMetaLines = (content: string) => {
   return getSkillBodyContentForDisplay(content);
 };
+
+const contentForPatch = (asset: StructuredAsset) =>
+  asset.parentId ? asset.content || "" : stripLeadingMetaLines(asset.content || "");
 
 export default function MemorySkillDetailPage() {
   const { itemId = "" } = useParams();
@@ -65,6 +68,23 @@ export default function MemorySkillDetailPage() {
     () => stripLeadingMetaLines(skill?.content || ""),
     [skill?.content],
   );
+  const resolveParentSkillName = (asset: StructuredAsset) =>
+    asset.parentSkillName ||
+    (asset.parentId
+      ? skillAssets.find((item: StructuredAsset) => item.id === asset.parentId)?.name || ""
+      : "");
+  const buildPatchPayload = (asset: StructuredAsset, overrides: Record<string, unknown> = {}) =>
+    buildSkillUpdatePayload(
+      {
+        ...asset,
+        content: contentForPatch(asset),
+        parentSkillName: resolveParentSkillName(asset),
+      },
+      {
+        is_locked: Boolean(asset.protect),
+        ...overrides,
+      },
+    );
 
   useEffect(() => {
     if (!skill || isInlineEditing) {
@@ -171,19 +191,9 @@ export default function MemorySkillDetailPage() {
       return;
     }
 
-    const patchPayload: Record<string, unknown> = {
-      name: skill.name,
+    const patchPayload = buildPatchPayload(skill, {
       content: inlineContentDraft,
-      description: skill.description,
-      tags: skill.tags,
-      is_locked: Boolean(skill.protect),
-      file_ext: skill.fileExt || "md",
-    };
-
-    if (!skill.parentId) {
-      patchPayload.category = skill.category;
-      patchPayload.is_enabled = skill.isEnabled ?? true;
-    }
+    });
 
     setInlineSaving(true);
     try {
@@ -214,9 +224,6 @@ export default function MemorySkillDetailPage() {
     }
   };
 
-  const contentForPatch = (asset: StructuredAsset) =>
-    asset.parentId ? asset.content || "" : stripLeadingMetaLines(asset.content || "");
-
   const handleStartTitleEdit = () => {
     if (!skill || !canEditSkillDetail) {
       return;
@@ -244,18 +251,9 @@ export default function MemorySkillDetailPage() {
       return;
     }
 
-    const patchPayload: Record<string, unknown> = {
+    const patchPayload = buildPatchPayload(skill, {
       name: nextName,
-      description: skill.description,
-      tags: skill.tags,
-      content: contentForPatch(skill),
-      file_ext: skill.fileExt || "md",
-      is_locked: Boolean(skill.protect),
-    };
-    if (!skill.parentId) {
-      patchPayload.category = skill.category;
-      patchPayload.is_enabled = skill.isEnabled ?? true;
-    }
+    });
 
     setTitleSaving(true);
     try {
@@ -304,18 +302,9 @@ export default function MemorySkillDetailPage() {
       return;
     }
 
-    const patchPayload: Record<string, unknown> = {
-      name: skill.name,
+    const patchPayload = buildPatchPayload(skill, {
       description: nextDescription,
-      tags: skill.tags,
-      content: contentForPatch(skill),
-      file_ext: skill.fileExt || "md",
-      is_locked: Boolean(skill.protect),
-    };
-    if (!skill.parentId) {
-      patchPayload.category = skill.category;
-      patchPayload.is_enabled = skill.isEnabled ?? true;
-    }
+    });
 
     setDescriptionSaving(true);
     try {

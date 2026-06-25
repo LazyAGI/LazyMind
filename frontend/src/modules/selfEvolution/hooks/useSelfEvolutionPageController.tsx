@@ -375,28 +375,21 @@ function getDefaultThreadStep(stepList: ThreadStepListState): ThreadStepSummary 
     (stepList.activeStepId ? { stepId: stepList.activeStepId, active: true, status: "running" } : undefined);
 }
 
-function getRunCompletedStepRunId(event: NormalizedThreadEvent) {
+function getNextStepRunId(event: NormalizedThreadEvent) {
   const payload = event.payload;
   const eventPayload = getNestedRecordField(payload, ["payload"]);
+  const dataPayload = getNestedRecordField(payload, ["data"]);
+  const eventDataPayload = getNestedRecordField(eventPayload, ["data"]);
   const rawEvent = getNestedRecordField(payload, ["raw_event", "rawEvent"]);
-  const eventTypes = [
-    event.type,
-    getStringField(payload, ["event_type", "eventType", "type"]),
-    getStringField(eventPayload, ["event_type", "eventType", "type"]),
-    getStringField(rawEvent, ["event_type", "eventType", "type"]),
-  ].filter(Boolean);
-  const isRunCompleted = eventTypes.some(
-    (eventType) => eventType === "run.completed" || Boolean(eventType && eventType.endsWith(".run.completed")),
-  );
-
-  if (!isRunCompleted) {
-    return undefined;
-  }
+  const rawEventDataPayload = getNestedRecordField(rawEvent, ["data"]);
 
   return (
-    getStringField(payload, ["step_run_id", "stepRunId"]) ||
-    getStringField(eventPayload, ["step_run_id", "stepRunId"]) ||
-    getStringField(rawEvent, ["step_run_id", "stepRunId"])
+    getStringField(payload, ["next_step_run_id", "nextStepRunId"]) ||
+    getStringField(eventPayload, ["next_step_run_id", "nextStepRunId"]) ||
+    getStringField(dataPayload, ["next_step_run_id", "nextStepRunId"]) ||
+    getStringField(eventDataPayload, ["next_step_run_id", "nextStepRunId"]) ||
+    getStringField(rawEvent, ["next_step_run_id", "nextStepRunId"]) ||
+    getStringField(rawEventDataPayload, ["next_step_run_id", "nextStepRunId"])
   );
 }
 
@@ -676,7 +669,7 @@ export function SelfEvolutionPageController({
   const threadEventsAbortRef = useRef<{ threadId: string; stepId: string; controller: AbortController } | null>(null);
   const processedThreadEventIdsRef = useRef<Set<string>>(new Set());
   const processedWorkflowEventKeysRef = useRef<Set<string>>(new Set());
-  const continuedThreadStepIdsRef = useRef<Set<string>>(new Set());
+  const pendingNextStepRunIdRef = useRef<string>();
   const restoreRequestIdRef = useRef(0);
   const [activeDiffFileId, setActiveDiffFileId] = useState("");
   const [collapsedDiffDirs, setCollapsedDiffDirs] = useState<Record<string, boolean>>({});
@@ -2169,35 +2162,39 @@ export function SelfEvolutionPageController({
     }
   };
 
-  const continueThreadEventsFromRunCompleted = (
-    threadId: string | undefined,
-    event: NormalizedThreadEvent,
-    sessionId: string,
-    currentStepId?: string,
-  ) => {
-    const nextStepId = getRunCompletedStepRunId(event);
-    if (!threadId || !nextStepId || nextStepId === currentStepId) {
+  const rememberNextStepRunId = (event: NormalizedThreadEvent) => {
+    const nextStepRunId = getNextStepRunId(event);
+    if (nextStepRunId) {
+      pendingNextStepRunIdRef.current = nextStepRunId;
+    }
+    return nextStepRunId;
+  };
+
+  const subscribePendingNextStepRun = (threadId: string | undefined, sessionId: string) => {
+    const nextStepRunId = pendingNextStepRunIdRef.current;
+    if (!threadId || !nextStepRunId) {
       return false;
     }
 
-    const continuationKey = `${threadId}:${nextStepId}`;
-    if (continuedThreadStepIdsRef.current.has(continuationKey)) {
-      return false;
-    }
-
-    continuedThreadStepIdsRef.current.add(continuationKey);
-    void subscribeThreadEvents(threadId, nextStepId, sessionId);
+    pendingNextStepRunIdRef.current = undefined;
+    void subscribeThreadEvents(threadId, nextStepRunId, sessionId);
     return true;
+  };
+
+  const subscribePendingNextStepRunOrRestoreLatest = (threadId: string, sessionId: string) => {
+    if (subscribePendingNextStepRun(threadId, sessionId)) {
+      return;
+    }
+    void restoreLatestThreadStep(threadId, sessionId);
   };
 
   const consumeThreadMessageStream = async (
     response: Response,
     sessionId: string,
     signal?: AbortSignal,
-    threadId?: string,
-  ): Promise<boolean> => {
+  ): Promise<void> => {
     if (!response.body) {
-      return false;
+      return;
     }
 
     const reader = response.body.getReader();
@@ -2221,6 +2218,7 @@ export function SelfEvolutionPageController({
         }
 
         const event = normalizeThreadEvent(frame);
+        rememberNextStepRunId(event);
         syncPlanningStateFromMessageEvent(event);
         const chatStreamDeltaKind = getChatStreamDeltaKind(event.type);
         if (chatStreamDeltaKind) {
@@ -2235,12 +2233,9 @@ export function SelfEvolutionPageController({
             time: formatThreadTime(event.timestamp),
           }, { dedupeLast: true });
         }
-        if (continueThreadEventsFromRunCompleted(threadId, event, sessionId)) {
-          await reader.cancel().catch(() => undefined);
-          return true;
-        }
         if (isTerminalThreadEvent(event.type) || isFailedThreadEvent(event.type)) {
-          return false;
+          await reader.cancel().catch(() => undefined);
+          return;
         }
       }
     }
@@ -2250,6 +2245,7 @@ export function SelfEvolutionPageController({
       const frame = parseSSEFrame(trailingText);
       if (frame) {
         const event = normalizeThreadEvent(frame);
+        rememberNextStepRunId(event);
         syncPlanningStateFromMessageEvent(event);
         const chatStreamDeltaKind = getChatStreamDeltaKind(event.type);
         if (chatStreamDeltaKind) {
@@ -2264,10 +2260,8 @@ export function SelfEvolutionPageController({
             time: formatThreadTime(event.timestamp),
           }, { dedupeLast: true });
         }
-        return continueThreadEventsFromRunCompleted(threadId, event, sessionId);
       }
     }
-    return false;
   };
 
   const openStepEventsResponse = async (
@@ -2409,13 +2403,12 @@ export function SelfEvolutionPageController({
           }
 
           const event = normalizeThreadEvent(frame);
+          rememberNextStepRunId(event);
           applyWorkflowEvent(event, sessionId, { appendChat: shouldAppendEventChat });
-          if (continueThreadEventsFromRunCompleted(threadId, event, sessionId, stepId)) {
-            return;
-          }
           if (isTerminalThreadEvent(event.type)) {
+            await reader.cancel().catch(() => undefined);
             controller.abort();
-            break;
+            return;
           }
         }
       }
@@ -2425,8 +2418,11 @@ export function SelfEvolutionPageController({
         const frame = parseSSEFrame(trailingText);
         if (frame) {
           const event = normalizeThreadEvent(frame);
+          rememberNextStepRunId(event);
           applyWorkflowEvent(event, sessionId, { appendChat: shouldAppendEventChat });
-          continueThreadEventsFromRunCompleted(threadId, event, sessionId, stepId);
+          if (isTerminalThreadEvent(event.type)) {
+            controller.abort();
+          }
         }
       }
     } catch (error) {
@@ -2450,7 +2446,7 @@ export function SelfEvolutionPageController({
     setWorkflowRuntimeState(createThreadRestoreWorkflowRuntimeState());
     replaceThreadEvents([]);
     processedWorkflowEventKeysRef.current = new Set();
-    continuedThreadStepIdsRef.current = new Set();
+    pendingNextStepRunIdRef.current = undefined;
     setLiveCheckpointWaitPrompt(undefined);
     if (threadEventsAbortRef.current && !threadEventsAbortRef.current.controller.signal.aborted) {
       threadEventsAbortRef.current.controller.abort();
@@ -2701,15 +2697,12 @@ export function SelfEvolutionPageController({
 
         const contentType = response.headers.get("content-type") || "";
         if (contentType.includes("text/event-stream")) {
-          const continuedFromRunCompleted = await consumeThreadMessageStream(
+          await consumeThreadMessageStream(
             response,
             activeSessionId,
             controller.signal,
-            activeThreadId,
           );
-          if (!continuedFromRunCompleted) {
-            void restoreLatestThreadStep(activeThreadId, activeSessionId);
-          }
+          subscribePendingNextStepRunOrRestoreLatest(activeThreadId, activeSessionId);
           return;
         }
 
@@ -2728,7 +2721,7 @@ export function SelfEvolutionPageController({
             { dedupeLast: true },
           );
         }
-        void restoreLatestThreadStep(activeThreadId, activeSessionId);
+        subscribePendingNextStepRunOrRestoreLatest(activeThreadId, activeSessionId);
       } catch (error) {
         appendSystemMessage(
           getLocalizedErrorMessage(error, "消息发送失败，请检查 message 接口。") ||
@@ -2787,7 +2780,7 @@ export function SelfEvolutionPageController({
         },
         { dedupeLast: true },
       );
-      void restoreLatestThreadStep(activeThreadId, activeSessionId);
+      subscribePendingNextStepRunOrRestoreLatest(activeThreadId, activeSessionId);
     } catch (error) {
       appendSystemMessage(
         getLocalizedErrorMessage(error, "继续执行失败，请稍后重试。") ||
@@ -2836,7 +2829,7 @@ export function SelfEvolutionPageController({
       setWorkflowRuntimeState(createWorkflowRuntimeStateForMode(mode));
       replaceThreadEvents([]);
       processedWorkflowEventKeysRef.current = new Set();
-      continuedThreadStepIdsRef.current = new Set();
+      pendingNextStepRunIdRef.current = undefined;
       setIsWorkbenchVisible(true);
       window.localStorage.setItem(SELF_EVOLUTION_LAST_THREAD_STORAGE_KEY, threadId);
       const nowLabel = getTimeLabel();
@@ -2967,7 +2960,7 @@ export function SelfEvolutionPageController({
       setWorkflowRuntimeState(createWorkflowRuntimeStateForMode(nextMode));
       replaceThreadEvents([]);
       processedWorkflowEventKeysRef.current = new Set();
-      continuedThreadStepIdsRef.current = new Set();
+      pendingNextStepRunIdRef.current = undefined;
       setChatSessions((prev) => [...prev, newSession]);
       setActiveSessionId(newSessionId);
       setPrompt("");
@@ -3092,7 +3085,7 @@ export function SelfEvolutionPageController({
     setCaseArtifact(undefined);
     replaceThreadEvents([]);
     processedWorkflowEventKeysRef.current = new Set();
-    continuedThreadStepIdsRef.current = new Set();
+    pendingNextStepRunIdRef.current = undefined;
     setThreadRestoreError("");
     setPrompt("");
     navigate("/self-evolution");
