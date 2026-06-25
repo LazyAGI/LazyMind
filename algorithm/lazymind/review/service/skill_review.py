@@ -223,6 +223,7 @@ def _run_user_skill_review(
         state.clusters, cluster_report = cluster_drafts(
             state.drafts,
             emb,
+            llm=llm,
             artifact_dir=base_work_dir,
         )
         state.stage_reports.append(cluster_report)
@@ -262,6 +263,11 @@ def _run_user_skill_review(
             artifact_dir=base_work_dir,
         )
         state.stage_reports.append(resolution_report)
+        if not state.resolutions:
+            return _fail_user_skill_review(
+                state,
+                _stage_failure_message(resolution_report, 'all candidates failed during resolution'),
+            )
 
         return _complete_user_skill_review(state)
     except Exception as exc:

@@ -407,7 +407,7 @@ def _umap_reduce_embeddings(embeddings: np.ndarray) -> tuple[np.ndarray, dict]:
 
     sample_count = len(embeddings)
     n_neighbors = min(sample_count - 1, min(20, max(10, int(round(sample_count ** 0.5 * 1.5)))))
-    n_components = min(10, sample_count - 1)
+    n_components = min(8, sample_count - 1)
     reducer = UMAP(
         n_neighbors=n_neighbors,
         n_components=n_components,
