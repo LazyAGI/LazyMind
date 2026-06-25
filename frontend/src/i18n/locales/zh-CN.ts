@@ -1693,6 +1693,8 @@ const zhCN = {
     dataSourceLocalScanChatDisabledSuccess: "已关闭：新对话需手动选择本地目录。",
     dataSourceLocalScanChatNoSourceHint: "暂无已接入的本地目录，请先创建本地目录知识源。",
     dataSourceUseCurrentInput: "使用当前输入：{{value}}",
+    dataSourceUseCurrentFeishuWikiInput: "Wiki：{{value}}",
+    dataSourceUseCurrentFeishuDriveInput: "Drive：{{value}}",
     dataSourceNoLocalDirectories: "未获取到可选目录",
     dataSourceLocalDirectoryListFailedManual: "目录列表获取失败，可先手动输入路径",
     dataSourceNoScanAgentManual: "后端未返回可用扫描 Agent，暂时只能手动输入路径",

@@ -134,6 +134,7 @@ type SourceSummary struct {
 	FailedTaskCount     int64
 	SucceededTaskCount  int64
 	SupersededTaskCount int64
+	ParsedDocumentCount int64
 	StorageBytes        int64
 	LastSuccessAt       *time.Time
 	LastError           JSON
@@ -154,6 +155,7 @@ func (s *SourceSummary) Add(item SourceSummary) {
 	s.FailedTaskCount += item.FailedTaskCount
 	s.SucceededTaskCount += item.SucceededTaskCount
 	s.SupersededTaskCount += item.SupersededTaskCount
+	s.ParsedDocumentCount += item.ParsedDocumentCount
 	s.StorageBytes += item.StorageBytes
 	if item.LastSuccessAt != nil && (s.LastSuccessAt == nil || item.LastSuccessAt.After(*s.LastSuccessAt)) {
 		s.LastSuccessAt = item.LastSuccessAt

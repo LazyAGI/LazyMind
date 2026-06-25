@@ -1,0 +1,13 @@
+version: "2"
+
+linters:
+  settings:
+    depguard:
+      rules:
+        state-backend-redis-boundary:
+          files:
+            - "!**/backend/core/state/**"
+            - "!**/backend/scan-control-plane/internal/state/**"
+          deny:
+            - pkg: "github.com/redis/go-redis/v9"
+              desc: "business Go code must use state.Store/state backend instead of direct Redis access"

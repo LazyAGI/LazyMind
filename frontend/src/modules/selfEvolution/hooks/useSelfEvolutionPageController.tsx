@@ -393,6 +393,31 @@ function getNextStepRunId(event: NormalizedThreadEvent) {
   );
 }
 
+function getRunCompletedStepRunId(event: NormalizedThreadEvent) {
+  const payload = event.payload;
+  const eventPayload = getNestedRecordField(payload, ["payload"]);
+  const rawEvent = getNestedRecordField(payload, ["raw_event", "rawEvent"]);
+  const eventTypes = [
+    event.type,
+    getStringField(payload, ["event_type", "eventType", "type"]),
+    getStringField(eventPayload, ["event_type", "eventType", "type"]),
+    getStringField(rawEvent, ["event_type", "eventType", "type"]),
+  ].filter(Boolean);
+  const isRunCompleted = eventTypes.some(
+    (eventType) => eventType === "run.completed" || Boolean(eventType && eventType.endsWith(".run.completed")),
+  );
+
+  if (!isRunCompleted) {
+    return undefined;
+  }
+
+  return (
+    getStringField(payload, ["step_run_id", "stepRunId"]) ||
+    getStringField(eventPayload, ["step_run_id", "stepRunId"]) ||
+    getStringField(rawEvent, ["step_run_id", "stepRunId"])
+  );
+}
+
 function parseThreadRecordFrames(rawData: string, fallbackId?: string, fallbackEventName = "message") {
   const text = rawData.trim();
   if (!text) {
@@ -670,6 +695,7 @@ export function SelfEvolutionPageController({
   const processedThreadEventIdsRef = useRef<Set<string>>(new Set());
   const processedWorkflowEventKeysRef = useRef<Set<string>>(new Set());
   const pendingNextStepRunIdRef = useRef<string>();
+  const continuedThreadStepIdsRef = useRef<Set<string>>(new Set());
   const restoreRequestIdRef = useRef(0);
   const [activeDiffFileId, setActiveDiffFileId] = useState("");
   const [collapsedDiffDirs, setCollapsedDiffDirs] = useState<Record<string, boolean>>({});
@@ -2188,13 +2214,36 @@ export function SelfEvolutionPageController({
     void restoreLatestThreadStep(threadId, sessionId);
   };
 
+  const continueThreadEventsFromRunCompleted = (
+    threadId: string | undefined,
+    event: NormalizedThreadEvent,
+    sessionId: string,
+    currentStepId?: string,
+  ) => {
+    const nextStepId = getRunCompletedStepRunId(event);
+    if (!threadId || !nextStepId || nextStepId === currentStepId) {
+      return false;
+    }
+
+    const continuationKey = `${threadId}:${nextStepId}`;
+    if (continuedThreadStepIdsRef.current.has(continuationKey)) {
+      return false;
+    }
+
+    continuedThreadStepIdsRef.current.add(continuationKey);
+    pendingNextStepRunIdRef.current = undefined;
+    void subscribeThreadEvents(threadId, nextStepId, sessionId);
+    return true;
+  };
+
   const consumeThreadMessageStream = async (
     response: Response,
     sessionId: string,
     signal?: AbortSignal,
-  ): Promise<void> => {
+    threadId?: string,
+  ): Promise<boolean> => {
     if (!response.body) {
-      return;
+      return false;
     }
 
     const reader = response.body.getReader();
@@ -2233,9 +2282,13 @@ export function SelfEvolutionPageController({
             time: formatThreadTime(event.timestamp),
           }, { dedupeLast: true });
         }
+        if (continueThreadEventsFromRunCompleted(threadId, event, sessionId)) {
+          await reader.cancel().catch(() => undefined);
+          return true;
+        }
         if (isTerminalThreadEvent(event.type) || isFailedThreadEvent(event.type)) {
           await reader.cancel().catch(() => undefined);
-          return;
+          return false;
         }
       }
     }
@@ -2260,8 +2313,10 @@ export function SelfEvolutionPageController({
             time: formatThreadTime(event.timestamp),
           }, { dedupeLast: true });
         }
+        return continueThreadEventsFromRunCompleted(threadId, event, sessionId);
       }
     }
+    return false;
   };
 
   const openStepEventsResponse = async (
@@ -2405,6 +2460,9 @@ export function SelfEvolutionPageController({
           const event = normalizeThreadEvent(frame);
           rememberNextStepRunId(event);
           applyWorkflowEvent(event, sessionId, { appendChat: shouldAppendEventChat });
+          if (continueThreadEventsFromRunCompleted(threadId, event, sessionId, stepId)) {
+            return;
+          }
           if (isTerminalThreadEvent(event.type)) {
             await reader.cancel().catch(() => undefined);
             controller.abort();
@@ -2420,6 +2478,9 @@ export function SelfEvolutionPageController({
           const event = normalizeThreadEvent(frame);
           rememberNextStepRunId(event);
           applyWorkflowEvent(event, sessionId, { appendChat: shouldAppendEventChat });
+          if (continueThreadEventsFromRunCompleted(threadId, event, sessionId, stepId)) {
+            return;
+          }
           if (isTerminalThreadEvent(event.type)) {
             controller.abort();
           }
@@ -2447,6 +2508,7 @@ export function SelfEvolutionPageController({
     replaceThreadEvents([]);
     processedWorkflowEventKeysRef.current = new Set();
     pendingNextStepRunIdRef.current = undefined;
+    continuedThreadStepIdsRef.current = new Set();
     setLiveCheckpointWaitPrompt(undefined);
     if (threadEventsAbortRef.current && !threadEventsAbortRef.current.controller.signal.aborted) {
       threadEventsAbortRef.current.controller.abort();
@@ -2697,12 +2759,15 @@ export function SelfEvolutionPageController({
 
         const contentType = response.headers.get("content-type") || "";
         if (contentType.includes("text/event-stream")) {
-          await consumeThreadMessageStream(
+          const continuedFromRunCompleted = await consumeThreadMessageStream(
             response,
             activeSessionId,
             controller.signal,
+            activeThreadId,
           );
-          subscribePendingNextStepRunOrRestoreLatest(activeThreadId, activeSessionId);
+          if (!continuedFromRunCompleted) {
+            subscribePendingNextStepRunOrRestoreLatest(activeThreadId, activeSessionId);
+          }
           return;
         }
 
@@ -2830,6 +2895,7 @@ export function SelfEvolutionPageController({
       replaceThreadEvents([]);
       processedWorkflowEventKeysRef.current = new Set();
       pendingNextStepRunIdRef.current = undefined;
+      continuedThreadStepIdsRef.current = new Set();
       setIsWorkbenchVisible(true);
       window.localStorage.setItem(SELF_EVOLUTION_LAST_THREAD_STORAGE_KEY, threadId);
       const nowLabel = getTimeLabel();
@@ -2961,6 +3027,7 @@ export function SelfEvolutionPageController({
       replaceThreadEvents([]);
       processedWorkflowEventKeysRef.current = new Set();
       pendingNextStepRunIdRef.current = undefined;
+      continuedThreadStepIdsRef.current = new Set();
       setChatSessions((prev) => [...prev, newSession]);
       setActiveSessionId(newSessionId);
       setPrompt("");
@@ -3086,6 +3153,7 @@ export function SelfEvolutionPageController({
     replaceThreadEvents([]);
     processedWorkflowEventKeysRef.current = new Set();
     pendingNextStepRunIdRef.current = undefined;
+    continuedThreadStepIdsRef.current = new Set();
     setThreadRestoreError("");
     setPrompt("");
     navigate("/self-evolution");

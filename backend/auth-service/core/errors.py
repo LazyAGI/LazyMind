@@ -44,8 +44,8 @@ class ErrorCodes:
 
     DEFAULT_ROLE_NOT_FOUND: ErrorTuple = (500, 1000501, "Default role 'user' does not exist")
 
-    REDIS_AUTH_FAILED: ErrorTuple = (500, 1000601, 'Redis authentication failed')
-    REDIS_UNAVAILABLE: ErrorTuple = (500, 1000602, 'Redis is unavailable')
+    STATE_BACKEND_AUTH_FAILED: ErrorTuple = (500, 1000601, 'State backend authentication failed')
+    STATE_BACKEND_UNAVAILABLE: ErrorTuple = (500, 1000602, 'State backend is unavailable')
 
     CLOUD_PROVIDER_UNSUPPORTED: ErrorTuple = (400, 1000701, 'cloud provider is not supported')
     CLOUD_CONNECTION_NOT_FOUND: ErrorTuple = (404, 1000702, 'cloud auth connection not found')

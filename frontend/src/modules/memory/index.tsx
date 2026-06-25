@@ -125,7 +125,7 @@ import {
   GLOSSARY_CONTENT_MAX_LENGTH,
   GLOSSARY_TERM_MAX_LENGTH,
   MEMORY_BASE_PATH,
-  buildDiffLines,
+  buildDiffLinesWithInline,
   buildUnifiedDiffLines,
   canUploadSkillFile,
   cloneExperienceAsset,
@@ -2005,16 +2005,16 @@ export default function MemoryManagement() {
       const afterExp = effectiveProposalMerged as ExperienceAsset;
       const beforeYaml = serializePreferenceYaml(beforeExp);
       const afterYaml = serializePreferenceYaml(afterExp);
-      prefYamlDiffLines = buildDiffLines(beforeYaml, afterYaml);
+      prefYamlDiffLines = buildDiffLinesWithInline(beforeYaml, afterYaml);
       const beforeBody = parsePreferenceYamlAndBody(beforeExp.content).bodyText;
       const afterBody = parsePreferenceYamlAndBody(afterExp.content).bodyText;
-      prefBodyDiffLines = buildDiffLines(beforeBody, afterBody);
+      prefBodyDiffLines = buildDiffLinesWithInline(beforeBody, afterBody);
     }
 
     return {
       beforeText,
       afterText,
-      lines: buildDiffLines(beforeText, afterText),
+      lines: buildDiffLinesWithInline(beforeText, afterText),
       changedFields,
       isPreference,
       prefYamlDiffLines,

@@ -17,7 +17,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 WORKDIR /app
 
-RUN set -eu; \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    set -eu; \
     for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources; do \
       [ -f "$f" ] || continue; \
       sed -i \
@@ -30,9 +32,7 @@ RUN set -eu; \
         libreoffice libreoffice-l10n-zh-cn default-jre-headless tini \
         curl ca-certificates fontconfig \
         fonts-dejavu-core fonts-noto-cjk fonts-wqy-zenhei fonts-wqy-microhei \
-    && fc-cache -f -v \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && fc-cache -f -v
 
 COPY office-convert-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

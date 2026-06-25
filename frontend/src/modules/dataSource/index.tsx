@@ -103,6 +103,7 @@ import {
   getSyncModeLabel,
   normalizeDataSourceConnectionState,
   normalizeDataSourceStatus,
+  resolveParsedDocumentCount,
   resolveStorageUsed,
 } from "./shared";
 import {
@@ -134,6 +135,7 @@ const DEFAULT_SCHEDULE_TIME = "02:00:00";
 const SCHEDULE_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/;
 const LOCAL_PATH_CACHE_ROOT_KEY = "__root__";
 const FEISHU_TARGET_CACHE_ROOT_KEY = "__root__";
+const FEISHU_MANUAL_TARGET_VALUE_PREFIX = "__scan-feishu-manual-target__";
 const DATA_SOURCE_LIST_DEFAULT_PAGE_SIZE = 10;
 const DEFAULT_SCHEDULE_WEEKDAYS = ["1", "2", "3", "4", "5", "6", "7"];
 const SCHEDULE_WEEKDAY_API_MAP: Record<string, string> = {
@@ -149,6 +151,7 @@ type DataSourceView = "assets" | "connectors";
 type FeishuSetupIntent = "create" | "auth" | null;
 type CloudSetupIntent = FeishuSetupIntent;
 type DataSourceSaveMode = "create" | "createAndSync";
+type FeishuManualTargetKind = "current" | "wiki" | "drive";
 type FeishuTargetTreeNode = DataNode & {
   value: string;
   nodeRef?: string;
@@ -510,6 +513,13 @@ function toUiFeishuTargetType(targetType?: string): FeishuTargetType | undefined
   return normalizeFeishuTargetType(targetType);
 }
 
+function buildManualFeishuTargetValue(
+  kind: FeishuManualTargetKind,
+  targetRef: string,
+) {
+  return `${FEISHU_MANUAL_TARGET_VALUE_PREFIX}:${kind}:${encodeURIComponent(targetRef)}`;
+}
+
 function normalizeNotionTargetType(value?: string): NotionTargetType | undefined {
   const normalized = `${value || ""}`.trim().toLowerCase();
   if (normalized === "database" || normalized === "notion_database") {
@@ -527,16 +537,20 @@ function collectFeishuTargetTypes(
   targetTypes = new Map<string, FeishuTargetType>(),
 ) {
   nodes.forEach((node) => {
+    const value = `${node.value || ""}`.trim();
     const targetRef = `${node.targetRef || node.value || ""}`.trim();
     const nodeRef = `${node.nodeRef || ""}`.trim();
     const targetType =
       normalizeFeishuTargetType(
         node.targetType,
-        `${targetRef || nodeRef || node.value || ""}`,
+        `${targetRef || nodeRef || value}`,
       ) || inheritedTargetType;
 
     if (targetType) {
-      [targetRef, nodeRef, `${node.value || ""}`.trim()]
+      const refs = value.startsWith(FEISHU_MANUAL_TARGET_VALUE_PREFIX)
+        ? [value]
+        : [targetRef, nodeRef, value];
+      refs
         .filter(Boolean)
         .forEach((ref) => {
           targetTypes.set(ref, targetType);
@@ -549,6 +563,31 @@ function collectFeishuTargetTypes(
   });
 
   return targetTypes;
+}
+
+function collectFeishuTargetRefs(
+  nodes: FeishuTargetTreeNode[],
+  targetRefs = new Map<string, string>(),
+) {
+  nodes.forEach((node) => {
+    const value = `${node.value || ""}`.trim();
+    const targetRef = `${node.targetRef || node.value || ""}`.trim();
+    const nodeRef = `${node.nodeRef || ""}`.trim();
+
+    if (targetRef) {
+      [targetRef, nodeRef, value]
+        .filter(Boolean)
+        .forEach((ref) => {
+          targetRefs.set(ref, targetRef);
+        });
+    }
+
+    if (node.children) {
+      collectFeishuTargetRefs(node.children, targetRefs);
+    }
+  });
+
+  return targetRefs;
 }
 
 function normalizeFeishuTargetRefs(value?: SourceFormValues["target"]) {
@@ -1345,19 +1384,40 @@ export default function DataSourceManagement() {
 
   const buildManualFeishuTargetNode = (
     targetRef: string,
+    kind: FeishuManualTargetKind,
   ): FeishuTargetTreeNode => {
     const normalizedTargetRef = targetRef.trim();
+    const targetType =
+      kind === "wiki"
+        ? "wiki_space"
+        : kind === "drive"
+          ? "drive_folder"
+          : normalizeFeishuTargetType(undefined, normalizedTargetRef) ||
+            feishuTargetType;
+    const title =
+      kind === "wiki"
+        ? t("admin.dataSourceUseCurrentFeishuWikiInput", { value: normalizedTargetRef })
+        : kind === "drive"
+          ? t("admin.dataSourceUseCurrentFeishuDriveInput", { value: normalizedTargetRef })
+          : t("admin.dataSourceUseCurrentInput", { value: normalizedTargetRef });
+    const value = buildManualFeishuTargetValue(kind, normalizedTargetRef);
+
     return {
-      key: normalizedTargetRef,
-      value: normalizedTargetRef,
-      title: t("admin.dataSourceUseCurrentInput", { value: normalizedTargetRef }),
+      key: value,
+      value,
+      title,
       isLeaf: true,
       targetRef: normalizedTargetRef,
-      targetType:
-        normalizeFeishuTargetType(undefined, normalizedTargetRef) ||
-        feishuTargetType,
+      targetType,
     };
   };
+
+  const buildManualFeishuTargetNodes = (
+    targetRef: string,
+  ): FeishuTargetTreeNode[] =>
+    (["current", "wiki", "drive"] as FeishuManualTargetKind[]).map((kind) =>
+      buildManualFeishuTargetNode(targetRef, kind),
+    );
 
   const hasFeishuTargetRef = (
     nodes: FeishuTargetTreeNode[],
@@ -1381,7 +1441,7 @@ export default function DataSourceManagement() {
     if (!normalizedTargetRef || hasFeishuTargetRef(nodes, normalizedTargetRef)) {
       return nodes;
     }
-    return [buildManualFeishuTargetNode(normalizedTargetRef), ...nodes];
+    return [...buildManualFeishuTargetNodes(normalizedTargetRef), ...nodes];
   };
 
   const mapFeishuTargetNodes = (
@@ -1685,6 +1745,10 @@ export default function DataSourceManagement() {
     const addCount = summary?.new_count ?? fallback?.addCount ?? 0;
     const deleteCount = summary?.deleted_count ?? fallback?.deleteCount ?? 0;
     const changeCount = summary?.modified_count ?? fallback?.changeCount ?? 0;
+    const parsedDocumentCount = resolveParsedDocumentCount(
+      summary,
+      fallback?.parsedDocumentCount ?? 0,
+    );
     const storageUsed = resolveStorageUsed(summary, fallback?.storageUsed);
     const fileTypes = getBindingFileTypes(binding, fallback?.fileTypes);
 
@@ -1708,6 +1772,7 @@ export default function DataSourceManagement() {
         lastSync: currentTime,
         nextSync: buildFeishuNextSyncLabel(binding, t),
         documentCount,
+        parsedDocumentCount,
         addCount,
         deleteCount,
         changeCount,
@@ -1779,6 +1844,7 @@ export default function DataSourceManagement() {
         lastSync: currentTime,
         nextSync: buildScanNextSyncLabel(binding),
         documentCount,
+        parsedDocumentCount,
         addCount,
         deleteCount,
         changeCount,
@@ -1847,6 +1913,7 @@ export default function DataSourceManagement() {
       lastSync: currentTime,
       nextSync: buildScanNextSyncLabel(binding),
       documentCount,
+      parsedDocumentCount,
       addCount,
       deleteCount,
       changeCount,
@@ -2922,6 +2989,7 @@ export default function DataSourceManagement() {
           targetTypes: record.targetTypes,
           sourceType: record.type,
           documentCount: record.documentCount,
+          parsedDocumentCount: record.parsedDocumentCount,
           status: record.status,
           lastSync: record.lastSync,
           addCount: record.addCount,
@@ -3135,7 +3203,7 @@ export default function DataSourceManagement() {
     saveMode: DataSourceSaveMode,
   ) => {
     const sourceName = `${values.knowledgeBase || getSourceTypeTitle("feishu", t)}`.trim();
-    const targetRefs = normalizeFeishuTargetRefs(values.target);
+    const selectedTargetValues = normalizeFeishuTargetRefs(values.target);
     const currentFeishuSource =
       editingId && selectedType === "feishu"
         ? sources.find((item) => item.id === editingId && item.type === "feishu")
@@ -3148,7 +3216,7 @@ export default function DataSourceManagement() {
           ? currentFeishuSource?.authConnectionId
           : "";
 
-    if (targetRefs.length === 0) {
+    if (selectedTargetValues.length === 0) {
       message.warning(t("admin.dataSourceFeishuSpaceRequired"));
       return;
     }
@@ -3159,19 +3227,24 @@ export default function DataSourceManagement() {
       validatedAgentId || currentFeishuSource?.agentId,
     );
     const treeTargetTypeMap = collectFeishuTargetTypes(feishuTargetTreeData);
+    const treeTargetRefMap = collectFeishuTargetRefs(feishuTargetTreeData);
     const fallbackTargetTypes = normalizeFeishuTargetTypeRecord(currentFeishuSource?.targetTypes);
     const defaultTargetType =
       normalizeFeishuTargetType(currentFeishuSource?.targetType) ||
       normalizeFeishuTargetType(values.targetType) ||
       "wiki_space";
-    const targets = targetRefs.map((targetRef) => ({
-      targetRef,
-      targetType:
-        treeTargetTypeMap.get(targetRef) ||
-        fallbackTargetTypes?.[targetRef] ||
-        normalizeFeishuTargetType(undefined, targetRef) ||
-        defaultTargetType,
-    }));
+    const targets = selectedTargetValues.map((targetValue) => {
+      const targetRef = treeTargetRefMap.get(targetValue) || targetValue;
+      return {
+        targetRef,
+        targetType:
+          treeTargetTypeMap.get(targetValue) ||
+          treeTargetTypeMap.get(targetRef) ||
+          fallbackTargetTypes?.[targetRef] ||
+          normalizeFeishuTargetType(undefined, targetRef) ||
+          defaultTargetType,
+      };
+    });
 
     try {
       let sourceId = currentFeishuSource?.id || "";

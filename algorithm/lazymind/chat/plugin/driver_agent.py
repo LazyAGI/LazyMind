@@ -67,6 +67,7 @@ def evaluate_step(
     step_id: str,
     step_result: str,
     session_id: Optional[str] = None,
+    user_files: Optional[list] = None,
 ) -> Dict[str, Any]:
     """Evaluate a completed plugin step and return verdict + reason.
 
@@ -75,6 +76,7 @@ def evaluate_step(
         step_id: The completed step identifier.
         step_result: The step summary / artifact description to evaluate.
         session_id: Optional session ID for contextual evaluation.
+        user_files: Optional list of user-uploaded file paths available for this step.
 
     Returns:
         dict with keys: verdict (PASS/RETRY/DONE/FAIL), reason (str).
@@ -93,6 +95,7 @@ def evaluate_step(
 
     driver_prompt = _build_driver_prompt(plugin_id) + accept_prompt
 
+    import os as _os
     user_msg = (
         f'Plugin: {plugin_id}\n'
         f'Step: {step_id}\n'
@@ -101,6 +104,9 @@ def evaluate_step(
         'Output your verdict in <verdict>PASS|RETRY|DONE|FAIL</verdict> '
         'and optional explanation in <reason>...</reason>.'
     )
+    if user_files:
+        file_list = ', '.join(_os.path.basename(f) for f in user_files)
+        user_msg += f'\n\nUser-uploaded files available for this step: {file_list}'
 
     try:
         llm = lazyllm.AutoModel(model='llm')

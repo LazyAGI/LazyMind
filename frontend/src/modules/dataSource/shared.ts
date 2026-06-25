@@ -336,6 +336,7 @@ export interface DataSourceItem {
   tenantId?: string;
   scanManaged?: boolean;
   storageUsed?: string;
+  parsedDocumentCount?: number;
   detailDocuments?: DetailDocumentItem[];
   rootPath?: string;
   targetRef?: string;
@@ -399,6 +400,7 @@ export interface DataSourceSummary {
   deleteCount: number;
   changeCount: number;
   storageUsed?: string;
+  parsedDocumentCount?: number;
   documents?: DocumentStatusRow[];
   scanManaged?: boolean;
   tenantId?: string;
@@ -925,6 +927,26 @@ export function resolveStorageUsed(
   }
 
   return fallback || "0 B";
+}
+
+export function resolveParsedDocumentCount(
+  summary?: Record<string, any>,
+  fallback = 0,
+) {
+  const value =
+    summary?.parsed_document_count ??
+    summary?.parsedDocumentCount;
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim()
+        ? Number(value)
+        : Number.NaN;
+
+  if (Number.isFinite(parsed)) {
+    return Math.max(0, Math.trunc(parsed));
+  }
+  return fallback;
 }
 
 // Source/sync state helpers below.

@@ -27,7 +27,7 @@ import {
 import ToolManagementSection from "../components/ToolManagementSection";
 
 type ServiceCategoryKey = "parsing" | "search" | "academic";
-type ServiceProviderCategory = "ocr" | "search";
+type ServiceProviderCategory = "ocr" | "search" | "datasource";
 type ServiceTone = "blue" | "cyan" | "green" | "red" | "violet";
 
 interface ExternalServiceConfig {
@@ -262,7 +262,13 @@ function isGoogleCustomSearch(service?: ExternalServiceConfig | null) {
 }
 
 function getServiceProviderCategory(service: ExternalServiceConfig): ServiceProviderCategory {
-  return service.category === "parsing" ? "ocr" : "search";
+  if (service.category === "parsing") {
+    return "ocr";
+  }
+  if (service.category === "academic") {
+    return "datasource";
+  }
+  return "search";
 }
 
 function isCustomServiceBaseUrl(service: ExternalServiceConfig, baseUrl?: string) {

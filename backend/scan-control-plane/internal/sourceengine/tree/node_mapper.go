@@ -77,6 +77,21 @@ func bindingRootNode(binding store.Binding) TreeNode {
 	}
 }
 
+func bindingRootNodeWithObject(node TreeNode, item ObjectWithState) TreeNode {
+	objectNode := sourceObjectNode(item)
+	node.DisplayName = objectNode.DisplayName
+	node.SearchName = objectNode.SearchName
+	node.SourceState = objectNode.SourceState
+	node.SyncState = objectNode.SyncState
+	node.PendingAction = objectNode.PendingAction
+	node.ParseQueueState = objectNode.ParseQueueState
+	node.HasUpdate = objectNode.HasUpdate
+	node.UpdateType = objectNode.UpdateType
+	node.UpdateDesc = objectNode.UpdateDesc
+	node.ProviderMeta = objectNode.ProviderMeta
+	return node
+}
+
 func sourceObjectNode(item ObjectWithState) TreeNode {
 	object := item.Object
 	selectableContainer := object.IsContainer || object.HasChildren

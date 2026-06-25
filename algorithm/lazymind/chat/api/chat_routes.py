@@ -47,7 +47,10 @@ async def chat(
     session_id: Annotated[str, Body(description='Session ID')] = 'session_id',
     conversation_id: Annotated[Optional[str], Body(description='Conversation ID for SubAgent task lookup')] = None,
     filters: Annotated[Optional[Dict[str, Any]], Body(description='Retrieval filter conditions')] = None,
-    files: Annotated[Optional[List[str]], Body(description='Uploaded temporary files')] = None,
+    files: Annotated[
+        Optional[Dict[str, List[str]]],
+        Body(description='Per-turn file paths. Keys: "current" or "<seq>". Values: local paths.'),
+    ] = None,
     debug: Annotated[Optional[bool], Body(description='Enable debug mode')] = False,
     reasoning: Annotated[Optional[bool], Body(description='Enable reasoning mode')] = False,
     databases: Annotated[Optional[List[Dict]], Body(description='Associated databases')] = None,
@@ -115,6 +118,11 @@ async def chat(
             )
         ),
     ] = None,
+    current_turn_seq: Annotated[
+        Optional[int],
+        Body(description='The seq number of the current conversation turn, provided by Go core. '
+                         'Used to correctly label the current-turn attachments.'),
+    ] = None,
 ):
     return await handle_chat(
         query=query,
@@ -139,4 +147,5 @@ async def chat(
         mcp_config=mcp_config,
         trace=trace,
         plugin_context=plugin_context,
+        current_turn_seq=current_turn_seq,
     )

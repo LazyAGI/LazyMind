@@ -168,7 +168,21 @@ func stepToTaskEvent(taskID string, s *orm.SubAgentStep) *TaskEvent {
 // tailRedisStream tails the Redis event LIST from current end until a terminal event arrives.
 func tailRedisStream(ctx context.Context, db *gorm.DB, stateStore state.Store, w http.ResponseWriter, flusher http.Flusher, taskID string) {
 	// Start tailing from the current tail so we only forward new events (snapshot already sent).
+	// But first scan existing events for a terminal (done/error) that arrived between the
+	// initial GetTask snapshot and now — if found, emit it immediately and return.
 	existing, _ := StreamEventsFrom(ctx, stateStore, taskID, 0)
+	for _, raw := range existing {
+		var ev TaskEvent
+		if json.Unmarshal([]byte(raw), &ev) != nil {
+			continue
+		}
+		if ev.Type == "done" || ev.Type == "error" {
+			writeTaskSSE(w, flusher, ev)
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+			flusher.Flush()
+			return
+		}
+	}
 	from := int64(len(existing))
 	for {
 		select {
@@ -195,14 +209,15 @@ func tailRedisStream(ctx context.Context, db *gorm.DB, stateStore state.Store, w
 				return
 			}
 		}
-		// Check DB terminal state in case Redis stream expired mid-flight.
+		// Check DB terminal state in case: (a) Redis stream expired mid-flight, or
+		// (b) the task finished between the initial GetTask snapshot and the moment we
+		// started tailing (race: done event already in LIST but skipped by from=len(existing)).
+		// In both cases, emit terminal and stop regardless of whether the Redis key still exists.
 		if t, err := GetTask(ctx, db, taskID); err == nil && isTerminal(t.Status) {
-			if exists, _ := StreamExists(ctx, stateStore, taskID); !exists {
-				emitTerminal(w, flusher, taskID, t.Status, t.Summary)
-				_, _ = w.Write([]byte("data: [DONE]\n\n"))
-				flusher.Flush()
-				return
-			}
+			emitTerminal(w, flusher, taskID, t.Status, t.Summary)
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+			flusher.Flush()
+			return
 		}
 		time.Sleep(300 * time.Millisecond)
 	}

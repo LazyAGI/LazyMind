@@ -17,7 +17,7 @@ import (
 )
 
 func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
-	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{}, nil, "")
+	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{}, nil, "", 1)
 	sessionID, ok := body["session_id"].(string)
 	if !ok {
 		t.Fatalf("expected session_id string, got %T", body["session_id"])
@@ -46,7 +46,7 @@ func TestBuildChatRequestBodyUsesDatasetListFilters(t *testing.T) {
 				"tags":     []any{"tag_a", "tag_b"},
 			},
 		},
-	}, nil, "")
+	}, nil, "", 1)
 
 	filters, ok := body["filters"].(map[string]any)
 	if !ok {
@@ -87,7 +87,7 @@ func TestBuildChatRequestBodyKeepsExistingFilters(t *testing.T) {
 				"dataset_list": []any{map[string]any{"id": "ds_1"}},
 			},
 		},
-	}, nil, "")
+	}, nil, "", 1)
 
 	filters, ok := body["filters"].(map[string]any)
 	if !ok {
@@ -112,7 +112,7 @@ func TestBuildChatRequestBodyAddsEvolutionContext(t *testing.T) {
 		UserPreference:     "preference-content",
 		UsePersonalization: true,
 	}
-	body := buildChatRequestBody(nil, nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "user-1")
+	body := buildChatRequestBody(nil, nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "user-1", 1)
 
 	if got := body["session_id"]; got != "session-1" {
 		t.Fatalf("expected session_id to be preserved, got %#v", got)
@@ -151,7 +151,7 @@ func TestBuildChatRequestBodySkipsMemoryAndPreferenceWhenPersonalizationDisabled
 		UserPreference:     "preference-content",
 		UsePersonalization: false,
 	}
-	body := buildChatRequestBody(nil, nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "")
+	body := buildChatRequestBody(nil, nil, "conv-1", "session-1", "hello", nil, map[string]any{}, ctx, "", 1)
 
 	if got, ok := body["use_memory"].(bool); !ok || got {
 		t.Fatalf("expected use_memory false, got %#v", body["use_memory"])
@@ -167,7 +167,7 @@ func TestBuildChatRequestBodySkipsMemoryAndPreferenceWhenPersonalizationDisabled
 func TestBuildChatRequestBodyPreservesExplicitReasoningFalse(t *testing.T) {
 	body := buildChatRequestBody(nil, nil, "conv-1", "", "hello", nil, map[string]any{
 		"reasoning": false,
-	}, nil, "")
+	}, nil, "", 1)
 
 	if got, ok := body["reasoning"].(bool); !ok || got {
 		t.Fatalf("expected reasoning false, got %#v", body["reasoning"])
@@ -372,14 +372,18 @@ func TestBuildChatRequestBodyMergesInputURIsIntoFiles(t *testing.T) {
 			map[string]any{"input_type": "image", "uri": "/var/lib/lazymind/uploads/tmp/u1/a.png"},
 			map[string]any{"input_type": "file", "uri": "/var/lib/lazymind/uploads/tmp/u1/b.pdf"},
 		},
-	}, nil, "")
+	}, nil, "", 1)
 
-	files, ok := body["files"].([]any)
-	if !ok || len(files) != 2 {
-		t.Fatalf("expected 2 file paths from input, got %#v", body["files"])
+	files, ok := body["files"].(map[string][]string)
+	if !ok {
+		t.Fatalf("expected files to be map[string][]string, got %#v", body["files"])
 	}
-	if files[0] != "/var/lib/lazymind/uploads/tmp/u1/a.png" || files[1] != "/var/lib/lazymind/uploads/tmp/u1/b.pdf" {
-		t.Fatalf("unexpected files order/content: %#v", files)
+	currentFiles := files["1"]
+	if len(currentFiles) != 2 {
+		t.Fatalf("expected 2 file paths from input, got %#v", currentFiles)
+	}
+	if currentFiles[0] != "/var/lib/lazymind/uploads/tmp/u1/a.png" || currentFiles[1] != "/var/lib/lazymind/uploads/tmp/u1/b.pdf" {
+		t.Fatalf("unexpected files order/content: %#v", currentFiles)
 	}
 }
 
@@ -391,14 +395,18 @@ func TestBuildChatRequestBodyFilesMergeDedupesAndSkipsHTTP(t *testing.T) {
 			map[string]any{"input_type": "image", "uri": "/data/x.jpg"},
 			map[string]any{"input_type": "image", "uri": "/data/y.jpeg"},
 		},
-	}, nil, "")
+	}, nil, "", 1)
 
-	files, ok := body["files"].([]any)
-	if !ok || len(files) != 2 {
-		t.Fatalf("expected 2 paths (dedupe + skip https), got %#v", body["files"])
+	files, ok := body["files"].(map[string][]string)
+	if !ok {
+		t.Fatalf("expected files to be map[string][]string, got %#v", body["files"])
 	}
-	if files[0] != "/data/x.jpg" || files[1] != "/data/y.jpeg" {
-		t.Fatalf("unexpected files: %#v", files)
+	currentFiles := files["1"]
+	if len(currentFiles) != 2 {
+		t.Fatalf("expected 2 paths (dedupe + skip https), got %#v", currentFiles)
+	}
+	if currentFiles[0] != "/data/x.jpg" || currentFiles[1] != "/data/y.jpeg" {
+		t.Fatalf("unexpected files: %#v", currentFiles)
 	}
 }
 
@@ -415,7 +423,7 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 			"creator": []any{"u1"},
 			"tags":    []any{"t1"},
 		},
-		"files":           []any{"f1", "f2"},
+		"files":           map[string]any{"1": []any{"f1", "f2"}},
 		"reasoning":       false,
 		"databases":       []any{map[string]any{"name": "db1"}},
 		"enable_thinking": true,
@@ -461,7 +469,7 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 	if len(req.Filters.Tags) != 1 || req.Filters.Tags[0] != "t1" {
 		t.Fatalf("unexpected tags: %#v", req.Filters.Tags)
 	}
-	if len(req.Files) != 2 || req.Files[0] != "f1" || req.Files[1] != "f2" {
+	if len(req.Files) != 1 || len(req.Files["1"]) != 2 || req.Files["1"][0] != "f1" || req.Files["1"][1] != "f2" {
 		t.Fatalf("unexpected files: %#v", req.Files)
 	}
 	if len(req.Databases) != 1 {

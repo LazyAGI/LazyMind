@@ -131,6 +131,40 @@ func newSkillTestDB(t *testing.T) *orm.DB {
 	return db
 }
 
+func setBuiltinCatalogForTest(t *testing.T, items []builtinSkill) {
+	t.Helper()
+	builtinCatalog = items
+	builtinCatalogErr = nil
+	t.Cleanup(func() {
+		builtinCatalog = []builtinSkill{}
+		builtinCatalogErr = nil
+	})
+}
+
+func testBuiltinSkill(uid, category, name string) builtinSkill {
+	return builtinSkill{
+		UID:         uid,
+		Category:    category,
+		Name:        name,
+		Description: "Builtin skill for tests",
+		Content: fmt.Sprintf(
+			"---\nname: %s\ncategory: %s\ndescription: Builtin skill for tests\n---\n# %s\n\nBuiltin body.",
+			name,
+			category,
+			name,
+		),
+		Children: []builtinSkillFile{
+			{
+				Name:         "guide",
+				Description:  "guide.md",
+				RelativePath: "guide.md",
+				FileExt:      "md",
+				Content:      "Builtin guide.",
+			},
+		},
+	}
+}
+
 func createSkillPatchReviewResult(t *testing.T, db *orm.DB, id, userID, skillName, content string, at time.Time) {
 	t.Helper()
 	if err := db.Create(&orm.SkillReviewResult{
@@ -2687,6 +2721,185 @@ func TestCreateParentSkillAllowsDuplicateParentNameAcrossCategories(t *testing.T
 	}
 }
 
+func TestCreateParentSkillRejectsBuiltinIdentityConflict(t *testing.T) {
+	db := newSkillTestDB(t)
+	setBuiltinCatalogForTest(t, []builtinSkill{
+		testBuiltinSkill("builtin-paper-search", "search", "paper-search"),
+	})
+
+	req := createSkillRequest{
+		Name:        "paper-search",
+		Description: "User paper search",
+		Category:    "search",
+		Content:     "# Paper Search\n\nSearch papers.",
+	}
+	err := createParentSkill(context.Background(), db.DB, "u1", "User 1", req)
+	if !errors.Is(err, gorm.ErrDuplicatedKey) {
+		t.Fatalf("expected builtin duplicate error, got %v", err)
+	}
+}
+
+func TestCreateParentSkillAllowsBuiltinNameInDifferentCategory(t *testing.T) {
+	db := newSkillTestDB(t)
+	setBuiltinCatalogForTest(t, []builtinSkill{
+		testBuiltinSkill("builtin-paper-search", "search", "paper-search"),
+	})
+
+	req := createSkillRequest{
+		Name:        "paper-search",
+		Description: "Review paper search",
+		Category:    "review",
+		Content:     "# Paper Search\n\nReview papers.",
+	}
+	if err := createParentSkill(context.Background(), db.DB, "u1", "User 1", req); err != nil {
+		t.Fatalf("create parent skill with builtin name in another category: %v", err)
+	}
+}
+
+func TestEnableBuiltinSkillRejectsExistingSameCategoryAndName(t *testing.T) {
+	db := newSkillTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	setBuiltinCatalogForTest(t, []builtinSkill{
+		testBuiltinSkill("builtin-paper-search", "search", "paper-search"),
+	})
+
+	now := time.Now()
+	existing := orm.SkillResource{
+		ID:              "skill-existing-paper-search",
+		OwnerUserID:     "u1",
+		OwnerUserName:   "User 1",
+		Category:        "search",
+		ParentSkillName: "",
+		SkillName:       "paper-search",
+		NodeType:        evolution.SkillNodeTypeParent,
+		Description:     "Existing user skill",
+		FileExt:         "md",
+		RelativePath:    evolution.ParentSkillRelativePath("search", "paper-search"),
+		Content:         "---\nname: paper-search\ncategory: search\ndescription: Existing user skill\n---\n# Paper Search\n\nExisting body.",
+		ContentHash:     evolution.HashContent("existing"),
+		Version:         1,
+		IsEnabled:       true,
+		UpdateStatus:    evolution.UpdateStatusUpToDate,
+		CreateUserID:    "u1",
+		CreateUserName:  "User 1",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := db.Create(&existing).Error; err != nil {
+		t.Fatalf("create existing skill: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/builtin-skills/builtin-paper-search:enable", nil)
+	req = mux.SetURLVars(req, map[string]string{"builtin_skill_uid": "builtin-paper-search"})
+	req.Header.Set("X-User-Id", "u1")
+	req.Header.Set("X-User-Name", "User 1")
+	rec := httptest.NewRecorder()
+
+	EnableBuiltinSkill(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected status 409, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var renamedCount int64
+	if err := db.Model(&orm.SkillResource{}).
+		Where("owner_user_id = ? AND skill_name = ?", "u1", "paper-search-1").
+		Count(&renamedCount).Error; err != nil {
+		t.Fatalf("count renamed builtin skill: %v", err)
+	}
+	if renamedCount != 0 {
+		t.Fatalf("expected no suffixed builtin copy, got %d", renamedCount)
+	}
+}
+
+func TestEnableBuiltinSkillAllowsExistingSameNameInDifferentCategory(t *testing.T) {
+	db := newSkillTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	setBuiltinCatalogForTest(t, []builtinSkill{
+		testBuiltinSkill("builtin-paper-search", "search", "paper-search"),
+	})
+
+	now := time.Now()
+	existing := orm.SkillResource{
+		ID:              "skill-existing-review-paper-search",
+		OwnerUserID:     "u1",
+		OwnerUserName:   "User 1",
+		Category:        "review",
+		ParentSkillName: "",
+		SkillName:       "paper-search",
+		NodeType:        evolution.SkillNodeTypeParent,
+		Description:     "Existing user skill",
+		FileExt:         "md",
+		RelativePath:    evolution.ParentSkillRelativePath("review", "paper-search"),
+		Content:         "---\nname: paper-search\ncategory: review\ndescription: Existing user skill\n---\n# Paper Search\n\nExisting body.",
+		ContentHash:     evolution.HashContent("existing"),
+		Version:         1,
+		IsEnabled:       true,
+		UpdateStatus:    evolution.UpdateStatusUpToDate,
+		CreateUserID:    "u1",
+		CreateUserName:  "User 1",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := db.Create(&existing).Error; err != nil {
+		t.Fatalf("create existing skill: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/builtin-skills/builtin-paper-search:enable", nil)
+	req = mux.SetURLVars(req, map[string]string{"builtin_skill_uid": "builtin-paper-search"})
+	req.Header.Set("X-User-Id", "u1")
+	req.Header.Set("X-User-Name", "User 1")
+	rec := httptest.NewRecorder()
+
+	EnableBuiltinSkill(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var enabled orm.SkillResource
+	if err := db.Where("owner_user_id = ? AND category = ? AND skill_name = ? AND origin_builtin_skill_uid = ?",
+		"u1", "search", "paper-search", "builtin-paper-search").Take(&enabled).Error; err != nil {
+		t.Fatalf("query enabled builtin skill: %v", err)
+	}
+	var renamedCount int64
+	if err := db.Model(&orm.SkillResource{}).
+		Where("owner_user_id = ? AND skill_name = ?", "u1", "paper-search-1").
+		Count(&renamedCount).Error; err != nil {
+		t.Fatalf("count renamed builtin skill: %v", err)
+	}
+	if renamedCount != 0 {
+		t.Fatalf("expected no suffixed builtin copy, got %d", renamedCount)
+	}
+}
+
+func TestUpdateParentSkillRejectsBuiltinIdentityConflict(t *testing.T) {
+	db := newSkillTestDB(t)
+	setBuiltinCatalogForTest(t, []builtinSkill{
+		testBuiltinSkill("builtin-paper-search", "search", "paper-search"),
+	})
+
+	createReq := createSkillRequest{
+		Name:        "custom-search",
+		Description: "Custom search",
+		Category:    "search",
+		Content:     "# Custom Search\n\nCustom body.",
+	}
+	if err := createParentSkill(context.Background(), db.DB, "u1", "User 1", createReq); err != nil {
+		t.Fatalf("create parent skill: %v", err)
+	}
+
+	var row orm.SkillResource
+	if err := db.Where("owner_user_id = ? AND category = ? AND skill_name = ?", "u1", "search", "custom-search").Take(&row).Error; err != nil {
+		t.Fatalf("query parent skill: %v", err)
+	}
+	newName := "paper-search"
+	err := updateSkill(context.Background(), db.DB, "u1", "User 1", row.ID, updateSkillRequest{Name: &newName})
+	if !errors.Is(err, gorm.ErrDuplicatedKey) {
+		t.Fatalf("expected builtin duplicate error, got %v", err)
+	}
+}
+
 func TestUpdateParentSkillRebuildsContentFromBodyOnlyPayload(t *testing.T) {
 	db := newSkillTestDB(t)
 
@@ -2889,7 +3102,7 @@ func TestUpdateParentSkillRejectsParentSkillName(t *testing.T) {
 	}
 }
 
-func TestUpdateParentSkillRejectsParentSkillID(t *testing.T) {
+func TestUpdateParentSkillIgnoresParentSkillID(t *testing.T) {
 	db := newSkillTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -2926,7 +3139,7 @@ func TestUpdateParentSkillRejectsParentSkillID(t *testing.T) {
 		httptest.NewRequest(
 			http.MethodPatch,
 			"/api/core/skills/"+parent.ID,
-			strings.NewReader(fmt.Sprintf(`{"parent_skill_id":%q}`, other.ID)),
+			strings.NewReader(fmt.Sprintf(`{"name":"svn-usage","content":"Manual update content.","is_locked":false,"description":"Updated parent description","parent_skill_id":%q,"tags":[],"file_ext":"md"}`, other.ID)),
 		),
 		map[string]string{"skill_id": parent.ID},
 	)
@@ -2937,29 +3150,49 @@ func TestUpdateParentSkillRejectsParentSkillID(t *testing.T) {
 
 	UpdateManaged(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	var resp struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-	}
+	var resp getSkillDetailAPITestResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if !strings.Contains(resp.Message, "parent_skill_id cannot be updated") {
-		t.Fatalf("expected parent_skill_id update error, got code=%d message=%q", resp.Code, resp.Message)
+	if resp.Code != 0 {
+		t.Fatalf("expected code 0, got %d message=%q", resp.Code, resp.Message)
+	}
+	if resp.Data.Description != "Updated parent description" {
+		t.Fatalf("expected description to update, got %q", resp.Data.Description)
 	}
 
-	var unchanged orm.SkillResource
-	if err := db.Where("id = ?", parent.ID).Take(&unchanged).Error; err != nil {
-		t.Fatalf("query unchanged parent skill: %v", err)
+	var updated orm.SkillResource
+	if err := db.Where("id = ?", parent.ID).Take(&updated).Error; err != nil {
+		t.Fatalf("query updated parent skill: %v", err)
 	}
-	if unchanged.NodeType != evolution.SkillNodeTypeParent {
-		t.Fatalf("expected skill to remain parent, got %q", unchanged.NodeType)
+	if updated.NodeType != evolution.SkillNodeTypeParent {
+		t.Fatalf("expected skill to remain parent, got %q", updated.NodeType)
 	}
-	if unchanged.ParentSkillName != "" {
-		t.Fatalf("expected parent_skill_name to remain empty, got %q", unchanged.ParentSkillName)
+	if updated.SkillName != "svn-usage" {
+		t.Fatalf("expected name to update, got %q", updated.SkillName)
+	}
+	if updated.ParentSkillName != "" {
+		t.Fatalf("expected parent_skill_name to remain empty, got %q", updated.ParentSkillName)
+	}
+	if updated.Description != "Updated parent description" {
+		t.Fatalf("expected description to update, got %q", updated.Description)
+	}
+	if !strings.Contains(updated.Content, "Manual update content.") {
+		t.Fatalf("expected content to update, got %q", updated.Content)
+	}
+
+	var otherUnchanged orm.SkillResource
+	if err := db.Where("id = ?", other.ID).Take(&otherUnchanged).Error; err != nil {
+		t.Fatalf("query other parent skill: %v", err)
+	}
+	if otherUnchanged.NodeType != evolution.SkillNodeTypeParent {
+		t.Fatalf("expected other skill to remain parent, got %q", otherUnchanged.NodeType)
+	}
+	if otherUnchanged.SkillName != "release-check" {
+		t.Fatalf("expected other skill name to stay release-check, got %q", otherUnchanged.SkillName)
 	}
 }
 

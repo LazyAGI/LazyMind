@@ -71,6 +71,8 @@ interface TaskCenterStore {
   // tasks keyed by conversation_id, each an ordered list.
   tasksByConversation: Record<string, SubAgentTask[]>;
   activeConversationId: string;
+  // in-flight loadConversationTasks calls keyed by conversation_id.
+  _loadingTasks: Record<string, boolean>;
   // live SSE connections keyed by task_id.
   _streams: Record<string, SSE>;
   // conversation-level events SSE connections keyed by conversation_id.
@@ -125,6 +127,7 @@ function stepsToExecutionLog(steps: any[]): TaskLogEntry[] {
 export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   tasksByConversation: {},
   activeConversationId: '',
+  _loadingTasks: {},
   _streams: {},
   _convStreams: {},
 
@@ -291,6 +294,11 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
     if (existing) {
       return;
     }
+    // Don't subscribe to tasks that are already in a terminal state.
+    const task = get().getTasks(conversationId).find((t) => t.task_id === taskId);
+    if (task && TERMINAL.includes(task.status)) {
+      return;
+    }
     const sse = new SSE(taskStreamUrl(taskId), {
       method: Method.GET,
       headers: {
@@ -341,6 +349,9 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
     if (!conversationId) {
       return;
     }
+    // Deduplicate concurrent calls for the same conversation.
+    if (get()._loadingTasks[conversationId]) return;
+    set((s) => ({ _loadingTasks: { ...s._loadingTasks, [conversationId]: true } }));
     try {
       const res = await TaskServiceApi().listConversationTasks(conversationId);
       const tasks = res?.data?.data?.tasks ?? res?.data?.tasks ?? [];
@@ -365,6 +376,8 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
       });
     } catch {
       // ignore load failures; panel just stays empty.
+    } finally {
+      set((s) => ({ _loadingTasks: { ...s._loadingTasks, [conversationId]: false } }));
     }
   },
 
@@ -398,14 +411,40 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           if (!event || !event.type) return;
           const { type, payload } = event;
           if (type === 'task_created' && payload?.task_id) {
-            get().upsertTask(conversationId, {
-              task_id: payload.task_id,
-              title: payload.title,
-              agent_type: payload.agent_type,
-              mode: payload.mode,
-              status: payload.status || 'pending',
-            });
-            get().subscribeTask(conversationId, payload.task_id);
+            // Check the existing task state BEFORE upsert — the replay payload carries
+            // the creation-time status ('pending'/'running'), not the terminal status.
+            // If we upsert first and then read, we'd always see a non-terminal status
+            // and the alreadyDone guard would never fire.
+            const existingTask = get().getTasks(conversationId).find(
+              (t) => t.task_id === payload.task_id,
+            );
+            const alreadyDone = existingTask && TERMINAL.includes(existingTask.status);
+
+            if (alreadyDone) {
+              // Task already finished — only upsert non-status fields (title, agent_type, mode)
+              // so we never overwrite a terminal status with a stale 'pending'/'running' from replay.
+              get().upsertTask(conversationId, {
+                task_id: payload.task_id,
+                title: payload.title,
+                agent_type: payload.agent_type,
+                mode: payload.mode,
+              });
+            } else {
+              get().upsertTask(conversationId, {
+                task_id: payload.task_id,
+                title: payload.title,
+                agent_type: payload.agent_type,
+                mode: payload.mode,
+                status: payload.status || 'pending',
+              });
+              // Only subscribe to the task SSE stream when the task is not yet in a
+              // terminal state.  convEvents are replayed from the beginning every time
+              // the SSE connection is (re-)established, so without this guard a
+              // task_created replay would re-open the task stream, causing all historic
+              // text/think/tool_calls events to be appended again and the execution log
+              // to appear duplicated.
+              get().subscribeTask(conversationId, payload.task_id);
+            }
             if (payload.agent_type === 'plugin_step' && payload.plugin_session_id) {
               import('@/modules/chat/store/pluginPanel').then(({ usePluginStore }) => {
                 usePluginStore.getState().loadActiveSession(conversationId);

@@ -325,16 +325,14 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
 
       const tempGroup =
         Object.groupBy(params?.fileList ?? [], (item) => {
-          const suffix = item.name
-            .substring(item.name.lastIndexOf("."))
-            .toLowerCase();
+          const name = item.name ?? '';
+          const suffix = name.substring(name.lastIndexOf(".")).toLowerCase();
           return allowedImageTypes.includes(suffix) ? "image" : "file";
         }) ?? {};
       const tempFileGroup =
         Object.groupBy(params?.files ?? [], (item) => {
-          const suffix = item.name
-            .substring(item.name.lastIndexOf("."))
-            .toLowerCase();
+          const name = item.name ?? '';
+          const suffix = name.substring(name.lastIndexOf(".")).toLowerCase();
           return allowedImageTypes.includes(suffix) ? "image" : "file";
         }) ?? {};
 

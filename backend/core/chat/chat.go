@@ -52,28 +52,29 @@ type DatasetFilters struct {
 }
 
 type LazyChatRequest struct {
-	Query              string          `json:"query"`
-	History            []ChatMessage   `json:"history,omitempty"`
-	SessionID          string          `json:"session_id"`
-	Files              []string        `json:"files,omitempty"`
-	Filters            *DatasetFilters `json:"filters"`
-	Reasoning          bool            `json:"reasoning"`
-	Databases          []any           `json:"databases,omitempty"`
-	EnableThinking     bool            `json:"enable_thinking,omitempty"`
-	DisabledTools      []string        `json:"disabled_tools,omitempty"`
-	AvailableSkills    []string        `json:"available_skills,omitempty"`
-	Memory             string          `json:"memory,omitempty"`
-	UserPreference     string          `json:"user_preference,omitempty"`
-	UseMemory          bool            `json:"use_memory"`
-	UserID             string          `json:"user_id"`
-	EnvironmentContext map[string]any  `json:"environment_context,omitempty"`
-	LLMConfig          map[string]any  `json:"llm_config,omitempty"`
-	ToolConfig         map[string]any  `json:"tool_config,omitempty"`
-	Mode               string          `json:"mode,omitempty"`
-	HasSubagents       bool            `json:"has_subagents"`
-	ConversationID     string          `json:"conversation_id,omitempty"`
-	MCPConfig          []any           `json:"mcp_config,omitempty"`
-	PluginContext      map[string]any  `json:"plugin_context,omitempty"`
+	Query              string              `json:"query"`
+	History            []ChatMessage       `json:"history,omitempty"`
+	SessionID          string              `json:"session_id"`
+	Files              map[string][]string `json:"files,omitempty"`
+	Filters            *DatasetFilters     `json:"filters"`
+	Reasoning          bool                `json:"reasoning"`
+	Databases          []any               `json:"databases,omitempty"`
+	EnableThinking     bool                `json:"enable_thinking,omitempty"`
+	DisabledTools      []string            `json:"disabled_tools,omitempty"`
+	AvailableSkills    []string            `json:"available_skills,omitempty"`
+	Memory             string              `json:"memory,omitempty"`
+	UserPreference     string              `json:"user_preference,omitempty"`
+	UseMemory          bool                `json:"use_memory"`
+	UserID             string              `json:"user_id"`
+	EnvironmentContext map[string]any      `json:"environment_context,omitempty"`
+	LLMConfig          map[string]any      `json:"llm_config,omitempty"`
+	ToolConfig         map[string]any      `json:"tool_config,omitempty"`
+	Mode               string              `json:"mode,omitempty"`
+	HasSubagents       bool                `json:"has_subagents"`
+	ConversationID     string              `json:"conversation_id,omitempty"`
+	MCPConfig          []any               `json:"mcp_config,omitempty"`
+	PluginContext      map[string]any      `json:"plugin_context,omitempty"`
+	CurrentTurnSeq     int                 `json:"current_turn_seq,omitempty"`
 }
 
 // LazyChatData text data text。
@@ -279,7 +280,7 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	req.History = chatMessagesFromAny(body["history"])
 	req.Filters = datasetFiltersFromAny(body["filters"])
-	req.Files = stringSlice(body["files"])
+	req.Files = filesMapFromAny(body["files"])
 	if reasoning, ok := body["reasoning"].(bool); ok {
 		req.Reasoning = reasoning
 	}
@@ -360,6 +361,15 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	if pluginContext, ok := body["plugin_context"].(map[string]any); ok && len(pluginContext) > 0 {
 		req.PluginContext = pluginContext
 	}
+	// current_turn_seq is an int in the body map. JSON numbers decode as float64.
+	switch v := body["current_turn_seq"].(type) {
+	case int:
+		req.CurrentTurnSeq = v
+	case int64:
+		req.CurrentTurnSeq = int(v)
+	case float64:
+		req.CurrentTurnSeq = int(v)
+	}
 	return req
 }
 
@@ -408,6 +418,43 @@ func datasetFiltersFromAny(v any) *DatasetFilters {
 		return nil
 	}
 	return filters
+}
+
+func filesMapFromAny(v any) map[string][]string {
+	// Fast path: already the correct type (set by buildChatRequestBody).
+	if m, ok := v.(map[string][]string); ok {
+		if len(m) == 0 {
+			return nil
+		}
+		return m
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make(map[string][]string, len(m))
+	for k, val := range m {
+		switch xs := val.(type) {
+		case []any:
+			paths := make([]string, 0, len(xs))
+			for _, it := range xs {
+				if s, ok := it.(string); ok && strings.TrimSpace(s) != "" {
+					paths = append(paths, s)
+				}
+			}
+			if len(paths) > 0 {
+				out[k] = paths
+			}
+		case []string:
+			if len(xs) > 0 {
+				out[k] = xs
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func stringSlice(v any) []string {
@@ -499,10 +546,7 @@ func summarizeSecretMapForLog(v any) map[string]string {
 // body textRequest JSON text map text，baseURL text endpoint（text /api/...）。
 func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any) (<-chan UpstreamStreamChunk, error) {
 	service := NewChatServiceWithEndpoint(baseURL)
-	fmt.Printf("DEBUG upstream stream request baseURL=%s raw=%s\n", baseURL, debugJSON(body))
-
 	req := buildLazyChatRequest(body)
-	fmt.Printf("DEBUG upstream stream request payload=%s\n", debugJSON(req))
 
 	streamChan, err := service.StreamChat(ctx, req)
 	if err != nil {

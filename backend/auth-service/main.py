@@ -3,7 +3,6 @@ import logging
 import time
 from pathlib import Path
 
-import redis
 import traceback
 import yaml
 from fastapi import FastAPI, Request
@@ -19,6 +18,7 @@ from api.group import router as group_router
 from api.role import router as role_router
 from api.user import router as user_router
 from core.errors import AppException, error_payload_from_exception
+from core.state_errors import StateBackendAuthenticationError, StateBackendError
 from services import cloud_oauth_health
 
 
@@ -69,8 +69,8 @@ async def _log_request(request: Request, call_next):
     except AppException:
         # Business exceptions are formatted by exception_handler and should not all be 500
         raise
-    except redis.exceptions.RedisError:
-        # Handled by Redis-specific handler for clearer error output
+    except StateBackendError:
+        # Handled by state backend handler for clearer error output
         raise
     except StarletteHTTPException:
         raise
@@ -203,18 +203,18 @@ def _handle_app_exception(_, exc: AppException):
     return JSONResponse(status_code=exc.http_code, content=error_payload_from_exception(exc))
 
 
-@app.exception_handler(redis.exceptions.RedisError)
-def _handle_redis_error(_, exc: redis.exceptions.RedisError):
+@app.exception_handler(StateBackendError)
+def _handle_state_backend_error(_, exc: StateBackendError):
     from core.errors import ErrorCodes, raise_error
     # Full stack trace must be printed here; otherwise logs may only show
-    # "Redis authentication failed" and hide the root cause.
+    # "State backend is unavailable" and hide the root cause.
     tb = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-    _logger.error('redis_error type=%s message=%s\n%s', type(exc).__name__, str(exc), tb)
-    print(f'redis_error type={type(exc).__name__} message={exc}\n{tb}', flush=True)
+    _logger.error('state_backend_error type=%s message=%s\n%s', type(exc).__name__, str(exc), tb)
+    print(f'state_backend_error type={type(exc).__name__} message={exc}\n{tb}', flush=True)
     try:
-        if isinstance(exc, redis.exceptions.AuthenticationError):
-            raise_error(ErrorCodes.REDIS_AUTH_FAILED)
-        raise_error(ErrorCodes.REDIS_UNAVAILABLE)
+        if isinstance(exc, StateBackendAuthenticationError):
+            raise_error(ErrorCodes.STATE_BACKEND_AUTH_FAILED)
+        raise_error(ErrorCodes.STATE_BACKEND_UNAVAILABLE)
     except AppException as e:
         return JSONResponse(status_code=e.http_code, content=error_payload_from_exception(e))
 
