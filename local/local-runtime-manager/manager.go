@@ -78,6 +78,7 @@ func randomHexToken() (string, error) {
 }
 
 func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	freshCfg := cfg
 	if err := paths.EnsureAllDirs(); err != nil {
 		return err
 	}
@@ -88,11 +89,11 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err != nil {
 		return err
 	}
-	cfg = applyStateConfig(cfg, state)
-	if m.isExistingRuntimeRunning(ctx, state, cfg, paths) {
+	stateCfg := applyStateConfig(freshCfg, state)
+	if m.isExistingRuntimeRunning(ctx, state, stateCfg, paths) {
 		return m.reportExistingRuntime(ctx, state, paths)
 	}
-	if err := m.stopStaleRuntimeIfNeeded(ctx, state, cfg, paths); err != nil {
+	if err := m.stopStaleRuntimeIfNeeded(ctx, state, stateCfg, paths); err != nil {
 		return err
 	}
 
@@ -106,13 +107,14 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err != nil {
 		return err
 	}
-	cfg = applyStateConfig(cfg, state)
-	if m.isExistingRuntimeRunning(ctx, state, cfg, paths) {
+	stateCfg = applyStateConfig(freshCfg, state)
+	if m.isExistingRuntimeRunning(ctx, state, stateCfg, paths) {
 		return m.reportExistingRuntime(ctx, state, paths)
 	}
-	if err := m.stopStaleRuntimeIfNeeded(ctx, state, cfg, paths); err != nil {
+	if err := m.stopStaleRuntimeIfNeeded(ctx, state, stateCfg, paths); err != nil {
 		return err
 	}
+	cfg = freshCfg
 
 	token, err := randomHexToken()
 	if err != nil {
@@ -126,7 +128,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err != nil {
 		return err
 	}
-	if err := m.processCompose.WriteGeneratedConfig(generatedFile, paths.RepoRoot, cfg.Profile, paths, cfg.Algorithm, paths.RunDirTokenFile, cfg.ProcessComposePort); err != nil {
+	if err := m.processCompose.WriteGeneratedConfig(generatedFile, paths.RepoRoot, cfg.Profile, paths, cfg, paths.RunDirTokenFile, cfg.ProcessComposePort); err != nil {
 		_ = generatedFile.Close()
 		return err
 	}

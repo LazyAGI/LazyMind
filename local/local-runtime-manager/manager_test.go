@@ -97,6 +97,7 @@ func TestRuntimePathsEnsureAllDirsCreatesOnlyV1Directories(t *testing.T) {
 func TestRuntimeConfigAllocatesAvailableLocalPorts(t *testing.T) {
 	for _, envName := range []string{
 		processComposePortEnvVar,
+		frontendPortEnvVar,
 		localProxyPortEnvVar,
 		localProxyAuthHostPortEnvVar,
 		localProxyCoreHostPortEnvVar,
@@ -106,6 +107,7 @@ func TestRuntimeConfigAllocatesAvailableLocalPorts(t *testing.T) {
 	}
 	listeners := occupyLocalPorts(t,
 		defaultProcessComposePort,
+		defaultFrontendPort,
 		defaultLocalProxyPort,
 		defaultLocalProxyAuthHostPort,
 		defaultLocalProxyCoreHostPort,
@@ -126,6 +128,9 @@ func TestRuntimeConfigAllocatesAvailableLocalPorts(t *testing.T) {
 	if cfg.ProcessComposePort == defaultProcessComposePort {
 		t.Fatalf("expected process-compose port to avoid occupied default")
 	}
+	if cfg.FrontendPort == defaultFrontendPort {
+		t.Fatalf("expected frontend port to avoid occupied default")
+	}
 	if cfg.LocalProxy.Port == defaultLocalProxyPort {
 		t.Fatalf("expected local proxy port to avoid occupied default")
 	}
@@ -141,12 +146,36 @@ func TestRuntimeConfigAllocatesAvailableLocalPorts(t *testing.T) {
 	env := strings.Join(localComposeEnv(cfg), "\n")
 	for _, want := range []string{
 		"LAZYMIND_LOCAL_PROXY_PORT=" + strconv.Itoa(cfg.LocalProxy.Port),
+		"LAZYMIND_FRONTEND_PORT=" + strconv.Itoa(cfg.FrontendPort),
 		"LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 		"LAZYMIND_LOCAL_POSTGRES_PORT=" + strconv.Itoa(cfg.Algorithm.PostgresPort),
 	} {
 		if !strings.Contains(env, want) {
 			t.Fatalf("compose env missing %q in %s", want, env)
 		}
+	}
+}
+
+func TestRuntimeConfigMovesDefaultFrontendPortWhenOccupied(t *testing.T) {
+	t.Setenv(frontendPortEnvVar, strconv.Itoa(defaultFrontendPort))
+	ln := occupyLocalPorts(t, defaultFrontendPort)
+	defer func() {
+		for _, existing := range ln {
+			_ = existing.Close()
+		}
+	}()
+
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, _, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if cfg.FrontendPort == defaultFrontendPort {
+		t.Fatalf("expected Makefile default frontend port to move when occupied")
+	}
+	if !strings.Contains(strings.Join(localComposeEnv(cfg), "\n"), "LAZYMIND_FRONTEND_PORT="+strconv.Itoa(cfg.FrontendPort)) {
+		t.Fatalf("compose env missing frontend port")
 	}
 }
 
@@ -379,7 +408,7 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 		repo,
 		profile,
 		paths,
-		cfg.Algorithm,
+		cfg,
 		paths.RunDirTokenFile,
 		cfg.ProcessComposePort,
 	); err != nil {
@@ -403,6 +432,9 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 	if !strings.Contains(proc.Command, "internal compose-up --profile "+profile) {
 		t.Fatalf("missing compose-up command: %q", proc.Command)
 	}
+	if !strings.Contains(proc.Command, "LAZYMIND_FRONTEND_PORT="+strconv.Itoa(cfg.FrontendPort)) {
+		t.Fatalf("compose command missing frontend env: %q", proc.Command)
+	}
 	if !strings.Contains(proc.Shutdown.Command, "internal compose-down --profile "+profile) {
 		t.Fatalf("missing compose-down command: %q", proc.Shutdown.Command)
 	}
@@ -422,6 +454,9 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 	if !strings.Contains(localProxy.Command, "internal local-proxy-run --profile "+profile) {
 		t.Fatalf("missing local-proxy-run command: %q", localProxy.Command)
 	}
+	if !strings.Contains(localProxy.Command, "LAZYMIND_LOCAL_PROXY_PORT="+strconv.Itoa(cfg.LocalProxy.Port)) {
+		t.Fatalf("local-proxy command missing proxy env: %q", localProxy.Command)
+	}
 	if !strings.Contains(localProxy.Shutdown.Command, "internal local-proxy-down --profile "+profile) {
 		t.Fatalf("missing local-proxy-down command: %q", localProxy.Shutdown.Command)
 	}
@@ -434,6 +469,9 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 	}
 	if !strings.Contains(authService.Command, "internal auth-service-run --profile "+profile) {
 		t.Fatalf("missing auth-service-run command: %q", authService.Command)
+	}
+	if !strings.Contains(authService.Command, "LAZYMIND_AUTH_SERVICE_PORT="+strconv.Itoa(cfg.AuthService.Port)) {
+		t.Fatalf("auth-service command missing auth env: %q", authService.Command)
 	}
 	if !strings.Contains(authService.Shutdown.Command, "internal auth-service-down --profile "+profile) {
 		t.Fatalf("missing auth-service-down command: %q", authService.Shutdown.Command)

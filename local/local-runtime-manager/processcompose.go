@@ -43,15 +43,16 @@ type processComposeShutdown struct {
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
 
-func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, profile string, paths RuntimePaths, algorithm AlgorithmConfig, tokenPath string, apiPort int) error {
-	commandForComposeUp := quoteShellArg(m.execPath) + " internal compose-up --profile " + profile
-	commandForComposeDown := quoteShellArg(m.execPath) + " internal compose-down --profile " + profile
-	commandForLocalProxyRun := quoteShellArg(m.execPath) + " internal local-proxy-run --profile " + profile
-	commandForLocalProxyDown := quoteShellArg(m.execPath) + " internal local-proxy-down --profile " + profile
-	commandForAuthServiceRun := quoteShellArg(m.execPath) + " internal auth-service-run --profile " + profile
-	commandForAuthServiceDown := quoteShellArg(m.execPath) + " internal auth-service-down --profile " + profile
+func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, profile string, paths RuntimePaths, cfg RuntimeConfig, tokenPath string, apiPort int) error {
+	commandEnv := runtimeCommandEnv(cfg)
+	commandForComposeUp := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal compose-up --profile "+profile)
+	commandForComposeDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal compose-down --profile "+profile)
+	commandForLocalProxyRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal local-proxy-run --profile "+profile)
+	commandForLocalProxyDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal local-proxy-down --profile "+profile)
+	commandForAuthServiceRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal auth-service-run --profile "+profile)
+	commandForAuthServiceDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal auth-service-down --profile "+profile)
 
-	cfg := processComposeConfig{
+	pcCfg := processComposeConfig{
 		Version:         "0.5",
 		IsStrict:        true,
 		OrderedShutdown: true,
@@ -88,10 +89,10 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 			},
 		},
 	}
-	for _, svc := range algorithmProcessSpecs(algorithm) {
-		run := quoteShellArg(m.execPath) + " internal algorithm-run --service " + svc.Name + " --profile " + profile
-		down := quoteShellArg(m.execPath) + " internal algorithm-down --service " + svc.Name + " --profile " + profile
-		cfg.Processes[svc.Name] = processComposeProcess{
+	for _, svc := range algorithmProcessSpecs(cfg.Algorithm) {
+		run := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal algorithm-run --service "+svc.Name+" --profile "+profile)
+		down := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal algorithm-down --service "+svc.Name+" --profile "+profile)
+		pcCfg.Processes[svc.Name] = processComposeProcess{
 			WorkingDir: repoRoot,
 			Command:    run,
 			Shutdown: processComposeShutdown{
@@ -104,12 +105,34 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 	}
 	_ = tokenPath
 	_ = apiPort
-	out, err := yaml.Marshal(cfg)
+	out, err := yaml.Marshal(pcCfg)
 	if err != nil {
 		return err
 	}
 	_, err = w.Write(out)
 	return err
+}
+
+func commandWithEnv(env []string, command string) string {
+	if len(env) == 0 {
+		return command
+	}
+	parts := make([]string, 0, len(env)+2)
+	parts = append(parts, "env")
+	for _, item := range env {
+		parts = append(parts, quoteShellArg(item))
+	}
+	parts = append(parts, command)
+	return strings.Join(parts, " ")
+}
+
+func runtimeCommandEnv(cfg RuntimeConfig) []string {
+	env := append([]string{}, localComposeEnv(cfg)...)
+	env = append(env,
+		processComposePortEnvVar+"="+strconv.Itoa(cfg.ProcessComposePort),
+		authServicePortEnvVar+"="+strconv.Itoa(cfg.AuthService.Port),
+	)
+	return env
 }
 
 func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {

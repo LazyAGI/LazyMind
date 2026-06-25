@@ -208,6 +208,18 @@ func (a *localPortAllocator) envOrAvailable(envName string, fallback int) int {
 	return a.availableFrom(fallback, 500)
 }
 
+func (a *localPortAllocator) envOrAvailableDefaultCanMove(envName string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(envName))
+	if raw == "" {
+		return a.availableFrom(fallback, 500)
+	}
+	port := envPort(envName, fallback)
+	if port != fallback || localPortAvailable(port) {
+		return a.reserve(port)
+	}
+	return a.availableFrom(fallback, 500)
+}
+
 func (a *localPortAllocator) firstEnvOrAvailable(envNames []string, fallback int) int {
 	for _, envName := range envNames {
 		if strings.TrimSpace(os.Getenv(envName)) != "" {
@@ -369,6 +381,7 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 	}
 	ports := newLocalPortAllocator()
 	processComposePort := ports.envOrAvailable(processComposePortEnvVar, defaultProcessComposePort)
+	frontendPort := ports.envOrAvailableDefaultCanMove(frontendPortEnvVar, defaultFrontendPort)
 	localProxyPort := ports.envOrAvailable(localProxyPortEnvVar, defaultLocalProxyPort)
 	authHostPort := ports.envOrAvailable(localProxyAuthHostPortEnvVar, defaultLocalProxyAuthHostPort)
 	coreHostPort := ports.envOrAvailable(localProxyCoreHostPortEnvVar, defaultLocalProxyCoreHostPort)
@@ -387,7 +400,7 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		RepoRoot:           p.RepoRoot,
 		RuntimeRoot:        runtimeRoot,
 		ProcessComposePort: processComposePort,
-		FrontendPort:       envPort(frontendPortEnvVar, defaultFrontendPort),
+		FrontendPort:       frontendPort,
 		LocalProxy: LocalProxyConfig{
 			Address:      envText(localProxyAddressEnvVar, defaultLocalProxyAddress),
 			Port:         localProxyPort,
