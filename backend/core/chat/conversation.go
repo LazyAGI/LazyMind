@@ -191,7 +191,13 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_, seq, err := ensureConversation(db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName)
+	// Extract initial_plugin_settings from request body (only used on first message of a new conversation).
+	var initialPluginSettings map[string]any
+	if rawPS, ok := raw["initial_plugin_settings"].(map[string]any); ok {
+		initialPluginSettings = rawPS
+	}
+
+	_, seq, err := ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, initialPluginSettings)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "failed to ensure conversation", err), http.StatusInternalServerError)
 		return

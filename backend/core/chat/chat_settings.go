@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -62,7 +63,7 @@ func PatchConversationPluginSettings(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "db unavailable", http.StatusInternalServerError)
 		return
 	}
-	convID := strings.TrimSpace(r.PathValue("conversation_id"))
+	convID := strings.TrimSpace(mux.Vars(r)["conversation_id"])
 	if convID == "" {
 		common.ReplyErr(w, "conversation_id required", http.StatusBadRequest)
 		return

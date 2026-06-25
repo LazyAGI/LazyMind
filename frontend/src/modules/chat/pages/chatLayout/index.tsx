@@ -19,6 +19,7 @@ import {
   CHAT_RESUME_STREAM_URL,
   CHAT_STREAM_URL,
   ChatServiceApi,
+  type ConversationPluginSettings,
 } from "@/modules/chat/utils/request";
 import { draftStore } from "@/modules/chat/store/pluginPanel";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
@@ -72,6 +73,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const [chatConfig, setChatConfig] = useState<ChatConfig>(
     initchatConfig || {},
   );
+  // Pending plugin settings from the chat config popover before a conversation is created.
+  const pendingPluginSettingsRef = useRef<ConversationPluginSettings | null>(null);
   const [knowledgeRefreshKey, setKnowledgeRefreshKey] = useState(0);
   const [isTaskPanelCollapsed, setIsTaskPanelCollapsed] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number>(0); // 0 = use CSS default
@@ -351,6 +354,16 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         ...(pluginContext ? { plugin_context: pluginContext } : {}),
         ...(pluginUIState ? { plugin_ui_state: pluginUIState } : {}),
         ...(artifactRefs.length > 0 ? { artifact_refs: artifactRefs } : {}),
+        // If the user changed plugin settings before a conversation was created,
+        // carry them in the first request so Go can persist them on ensureConversation.
+        ...(() => {
+          const pending = pendingPluginSettingsRef.current;
+          if (!sessionId && pending) {
+            pendingPluginSettingsRef.current = null;
+            return { initial_plugin_settings: pending };
+          }
+          return {};
+        })(),
       }),
       callbacks,
     });
@@ -574,6 +587,14 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         chatConfig={chatConfig}
         setChatConfig={setChatConfig}
         setChatConfigFn={setChatConfigFn}
+        onPluginSettingsChange={(settings) => {
+          // When there is already a conversation, ChatConfigModal calls the API directly.
+          // Here we only need to stash settings for the new-conversation case.
+          if (!sessionId) {
+            pendingPluginSettingsRef.current = settings;
+          }
+        }}
+        hasPluginSession={hasPluginSession}
         knowledgeRefreshKey={knowledgeRefreshKey}
         embeddingReady={embeddingReady}
         multimodalEmbeddingReady={multimodalEmbeddingReady}

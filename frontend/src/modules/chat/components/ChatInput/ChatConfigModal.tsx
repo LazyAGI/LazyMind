@@ -1,76 +1,147 @@
-import { useState } from 'react';
-import { Modal, Form, Radio, Switch, message } from 'antd';
+import { useState, useEffect, useRef } from 'react';
+import { Popover, Radio, Switch, Tooltip, message } from 'antd';
 import { useTranslation } from 'react-i18next';
+import { SettingOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import {
   ConversationSettingsApi,
   type ConversationPluginSettings,
 } from '../../utils/request';
+import './ChatConfigModal.scss';
 
-interface ChatConfigModalProps {
-  open: boolean;
-  onClose: () => void;
-  conversationId: string;
+interface ChatConfigPopoverProps {
+  /** When provided, settings are saved to the server immediately on change. */
+  conversationId?: string;
+  /** Initial settings to display. If not provided, fetched from server on first open. */
   initialSettings?: ConversationPluginSettings;
+  /** Called with the new settings after a successful save. */
+  onSave?: (settings: ConversationPluginSettings) => void;
+  /** When true, the allow-plugin toggle is locked (plugin session is active). */
+  hasPluginSession?: boolean;
 }
 
-export default function ChatConfigModal({
-  open,
-  onClose,
+export default function ChatConfigPopover({
   conversationId,
   initialSettings,
-}: ChatConfigModalProps) {
+  onSave,
+  hasPluginSession = false,
+}: ChatConfigPopoverProps) {
   const { t } = useTranslation();
-  const [form] = Form.useForm<ConversationPluginSettings>();
-  const [saving, setSaving] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [settings, setSettings] = useState<ConversationPluginSettings | null>(
+    initialSettings ?? null,
+  );
+  // Track whether we've already fetched defaults to avoid repeated requests.
+  const fetchedRef = useRef(false);
 
-  async function handleOk() {
-    const values = await form.validateFields();
-    setSaving(true);
+  // Sync external initialSettings into local state.
+  useEffect(() => {
+    if (initialSettings) {
+      setSettings((s) => ({ ...s, ...initialSettings }));
+      fetchedRef.current = true;
+    }
+  }, [initialSettings]);
+
+  // Fetch user-level defaults from server the first time the popover opens.
+  async function ensureSettings() {
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
     try {
-      await ConversationSettingsApi().patchPluginSettings(conversationId, values);
-      message.success(t('chat.conversationConfigSaved'));
-      onClose();
+      const res = await ConversationSettingsApi().getChatSettings();
+      setSettings((s) => ({ ...res.data, ...s }));
     } catch {
-      message.error(t('chat.conversationConfigSaveFailed'));
-    } finally {
-      setSaving(false);
+      // Silently fall back to empty; individual fields will render as undefined.
     }
   }
 
-  return (
-    <Modal
-      title={t('chat.conversationConfigTitle')}
-      open={open}
-      onOk={handleOk}
-      onCancel={onClose}
-      confirmLoading={saving}
-      destroyOnClose
-      width={420}
-    >
-      <Form
-        form={form}
-        layout="vertical"
-        initialValues={{
-          plugin_mode: initialSettings?.plugin_mode ?? 'dynamic',
-          enable_subagent: initialSettings?.enable_subagent ?? true,
-        }}
-        preserve={false}
-      >
-        <Form.Item name="plugin_mode" label={t('chat.conversationConfigPluginMode')}>
-          <Radio.Group>
+  function handleOpenChange(next: boolean) {
+    setOpen(next);
+    if (next) ensureSettings();
+  }
+
+  async function handleChange(patch: Partial<ConversationPluginSettings>) {
+    const next = { ...settings, ...patch };
+    setSettings(next);
+    try {
+      if (conversationId && !conversationId.startsWith('temp_')) {
+        await ConversationSettingsApi().patchPluginSettings(conversationId, next);
+        message.success(t('chat.conversationConfigSaved'));
+      }
+      onSave?.(next);
+    } catch {
+      message.error(t('chat.conversationConfigSaveFailed'));
+      setSettings(settings);
+    }
+  }
+
+  const pluginEnabled = settings?.enable_plugin ?? true;
+
+  const content = (
+    <div className="chat-config-popover-content">
+      {/* Allow Plugin toggle */}
+      <div className="chat-config-section">
+        <div className="chat-config-row">
+          <div className="chat-config-row-label">
+            <span className="chat-config-label">{t('chat.conversationConfigAllowPlugin')}</span>
+            <Tooltip title={t('chat.conversationConfigAllowPluginTooltip')} placement="top">
+              <QuestionCircleOutlined className="chat-config-help-icon" />
+            </Tooltip>
+          </div>
+          <Switch
+            checked={pluginEnabled}
+            disabled={hasPluginSession}
+            onChange={(v) => handleChange({ enable_plugin: v })}
+          />
+        </div>
+      </div>
+
+      {/* Plugin driver mode — only visible when plugin is allowed */}
+      {pluginEnabled && (
+        <div className="chat-config-section">
+          <div className="chat-config-label">{t('chat.conversationConfigPluginMode')}</div>
+          <Radio.Group
+            value={settings?.plugin_mode ?? 'dynamic'}
+            onChange={(e) => handleChange({ plugin_mode: e.target.value })}
+            className="chat-config-radio-group"
+          >
             <Radio value="dynamic">{t('chat.conversationConfigPluginModeDynamic')}</Radio>
             <Radio value="auto">{t('chat.conversationConfigPluginModeAuto')}</Radio>
           </Radio.Group>
-        </Form.Item>
-        <Form.Item
-          name="enable_subagent"
-          label={t('chat.conversationConfigEnableSubagent')}
-          extra={t('chat.conversationConfigEnableSubagentDesc')}
-          valuePropName="checked"
-        >
-          <Switch />
-        </Form.Item>
-      </Form>
-    </Modal>
+        </div>
+      )}
+
+      {/* Allow subtask toggle */}
+      <div className="chat-config-section">
+        <div className="chat-config-row">
+          <div className="chat-config-row-label">
+            <span className="chat-config-label">{t('chat.conversationConfigEnableSubagent')}</span>
+            <Tooltip title={t('chat.conversationConfigEnableSubagentTooltip')} placement="top">
+              <QuestionCircleOutlined className="chat-config-help-icon" />
+            </Tooltip>
+          </div>
+          <Switch
+            checked={settings?.enable_subagent ?? true}
+            onChange={(v) => handleChange({ enable_subagent: v })}
+          />
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <Popover
+      content={content}
+      open={open}
+      onOpenChange={handleOpenChange}
+      trigger="click"
+      placement="topLeft"
+      arrow={false}
+      overlayClassName="chat-config-popover-overlay"
+      destroyTooltipOnHide
+    >
+      <div className="input-bottom-actions-left-item">
+        <SettingOutlined style={{ marginRight: 4 }} />
+        {t('chat.conversationConfig')}
+      </div>
+    </Popover>
   );
 }

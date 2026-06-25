@@ -771,31 +771,35 @@ export function PluginPanel({
     >
       {/* Header */}
       <div className='plugin-panel__header'>
-        <span className='plugin-panel__title'>{session.plugin_id}</span>
-        <span
-          className={`plugin-panel__status plugin-panel__status--${session.status}`}
-          aria-label={`Status: ${t(STATUS_KEY[session.status] ?? session.status)}`}
-        >
-          {t(STATUS_KEY[session.status] ?? session.status)}
-        </span>
-        <button
-          type='button'
-          className='plugin-panel__collapse-btn'
-          onClick={() => setCollapsed((c) => !c)}
-          aria-label={collapsed ? 'Expand panel' : 'Collapse panel'}
-          title={collapsed ? 'Expand' : 'Collapse'}
-        >
-          <svg
-            width='12'
-            height='12'
-            viewBox='0 0 12 12'
-            fill='none'
-            xmlns='http://www.w3.org/2000/svg'
-            className={`plugin-panel__collapse-icon${collapsed ? ' plugin-panel__collapse-icon--up' : ''}`}
+        <div className='plugin-panel__header-left'>
+          <span className='plugin-panel__title'>{session.plugin_id}</span>
+          <span
+            className={`plugin-panel__status plugin-panel__status--${session.status}`}
+            aria-label={`Status: ${t(STATUS_KEY[session.status] ?? session.status)}`}
           >
-            <path d='M2 4L6 8L10 4' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round' />
-          </svg>
-        </button>
+            {t(STATUS_KEY[session.status] ?? session.status)}
+          </span>
+        </div>
+        <div className='plugin-panel__header-right'>
+          <button
+            type='button'
+            className='plugin-panel__collapse-btn'
+            onClick={() => setCollapsed((c) => !c)}
+            aria-label={collapsed ? 'Expand panel' : 'Collapse panel'}
+            title={collapsed ? 'Expand' : 'Collapse'}
+          >
+            <svg
+              width='12'
+              height='12'
+              viewBox='0 0 12 12'
+              fill='none'
+              xmlns='http://www.w3.org/2000/svg'
+              className={`plugin-panel__collapse-icon${collapsed ? ' plugin-panel__collapse-icon--up' : ''}`}
+            >
+              <path d='M2 4L6 8L10 4' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round' />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Tabs — step navigator style */}

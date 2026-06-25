@@ -128,6 +128,9 @@ interface Props {
   disabledReason?: string;
   disabledDescription?: string;
   disabledAction?: ReactNode;
+  onPluginSettingsChange?: (settings: import('@/modules/chat/utils/request').ConversationPluginSettings) => void;
+  initialPluginSettings?: import('@/modules/chat/utils/request').ConversationPluginSettings;
+  hasPluginSession?: boolean;
 }
 
 export interface ChatMessage {
@@ -190,6 +193,9 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
       disabledReason,
       disabledDescription,
       disabledAction,
+      onPluginSettingsChange,
+      initialPluginSettings,
+      hasPluginSession,
     } = props;
     const { clearPendingMessage: clearStorePendingMessage } =
       useChatMessageStore();
@@ -1551,6 +1557,9 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
             citeMessages={citeMessages}
             onRemoveCiteMessage={handleRemoveCiteMessage}
             onClearCiteMessage={() => setCiteMessages([])}
+            onPluginSettingsChange={onPluginSettingsChange}
+            initialPluginSettings={initialPluginSettings}
+            hasPluginSession={hasPluginSession}
           />
         </div>
       </div>

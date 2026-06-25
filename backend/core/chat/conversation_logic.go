@@ -173,7 +173,7 @@ func conversationIDFromName(name string) string {
 }
 
 // ensureConversation textCreatetextUsertextConversation，textConversation、text history text seq、error
-func ensureConversation(db *gorm.DB, convID, displayName string, searchConfig json.RawMessage, models json.RawMessage, userID, userName string) (*orm.Conversation, int, error) {
+func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName string, searchConfig json.RawMessage, models json.RawMessage, userID, userName string, pluginSettings map[string]any) (*orm.Conversation, int, error) {
 	now := time.Now()
 	var c orm.Conversation
 	err := db.Where("id = ? AND create_user_id = ?", convID, userID).First(&c).Error
@@ -214,10 +214,57 @@ func ensureConversation(db *gorm.DB, convID, displayName string, searchConfig js
 			UpdatedAt:      now,
 		},
 	}
+	// Resolve plugin settings for the new conversation.
+	// Priority: caller-supplied pluginSettings > user_chat_settings defaults.
+	// All three fields are always written so conversations.enable_plugin / plugin_mode /
+	// enable_subagent are never NULL — no per-request fallback query needed.
+	resolvedPS := resolveInitialPluginSettings(ctx, db, userID, pluginSettings)
+	c.EnablePlugin = &resolvedPS.enablePlugin
+	c.PluginMode = &resolvedPS.pluginMode
+	c.EnableSubagent = &resolvedPS.enableSubagent
 	if err := db.Create(&c).Error; err != nil {
 		return nil, 0, err
 	}
 	return &c, 1, nil
+}
+
+type resolvedPluginSettings struct {
+	enablePlugin   bool
+	pluginMode     string
+	enableSubagent bool
+}
+
+// resolveInitialPluginSettings merges caller-supplied overrides with the user's
+// global defaults from user_chat_settings. Fields present in pluginSettings take
+// priority; missing fields fall back to the DB defaults (or hardcoded values if
+// the user has no row yet).
+func resolveInitialPluginSettings(ctx context.Context, db *gorm.DB, userID string, pluginSettings map[string]any) resolvedPluginSettings {
+	// Start from hardcoded fallbacks (matches user_chat_settings DB defaults).
+	out := resolvedPluginSettings{
+		enablePlugin:   true,
+		pluginMode:     "dynamic",
+		enableSubagent: true,
+	}
+	// Load user-level defaults.
+	if db != nil {
+		var s orm.UserChatSettings
+		if err := db.WithContext(ctx).Where("user_id = ?", userID).First(&s).Error; err == nil {
+			out.enablePlugin = s.EnablePlugin
+			out.pluginMode = s.PluginMode
+			out.enableSubagent = s.EnableSubagent
+		}
+	}
+	// Apply caller-supplied overrides.
+	if v, ok := pluginSettings["enable_plugin"].(bool); ok {
+		out.enablePlugin = v
+	}
+	if v, ok := pluginSettings["plugin_mode"].(string); ok && (v == "dynamic" || v == "auto") {
+		out.pluginMode = v
+	}
+	if v, ok := pluginSettings["enable_subagent"].(bool); ok {
+		out.enableSubagent = v
+	}
+	return out
 }
 
 func buildHistoryMessages(histories []orm.ChatHistory) []map[string]string {

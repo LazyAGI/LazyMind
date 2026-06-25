@@ -39,6 +39,7 @@ import { ChatConfig } from "../ChatConfigs";
 import ChatSelector from "../ChatSelector";
 import PromptModal, { PromptImperativeProps } from "../PromptModal";
 import ChatConfigModal from "./ChatConfigModal";
+import type { ConversationPluginSettings } from "../../utils/request";
 import BatchChatComponent, { BatchChatImperativeProps } from "../BatchChat";
 import ShowChatFileList from "../ShowChatFileList";
 import { formatFileSize } from "@/modules/chat/utils";
@@ -169,6 +170,12 @@ interface ChatInputProps {
   sessionId?: string;
   isStreaming?: boolean;
   embeddingReady?: boolean | null;
+  /** Called when plugin settings change (e.g. from the chat config popover). */
+  onPluginSettingsChange?: (settings: ConversationPluginSettings) => void;
+  /** Initial plugin settings to pre-populate the config popover. */
+  initialPluginSettings?: ConversationPluginSettings;
+  /** When true, the allow-plugin toggle in config is locked (plugin session is active). */
+  hasPluginSession?: boolean;
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   disabled?: boolean;
@@ -249,6 +256,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       citeMessages,
       onRemoveCiteMessage,
       onClearCiteMessage,
+      onPluginSettingsChange,
+      initialPluginSettings,
+      hasPluginSession,
     } = props;
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
     const promptRef = useRef<PromptImperativeProps>(null);
@@ -258,7 +268,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const isComposingRef = useRef(false);
     const [isUploading, setIsUploading] = useState(false);
     const [polishingSuggestionKey, setPolishingSuggestionKey] = useState<string | null>(null);
-    const [chatConfigOpen, setChatConfigOpen] = useState(false);
     const { setThink } = useChatThinkStore();
     const { setNewMessage } = useChatNewMessageStore();
     const { t } = useTranslation();
@@ -818,15 +827,12 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   >
                     {t("chat.promptTemplate")}
                   </div>
-                  {sessionId && !sessionId.startsWith("temp_") && (
-                    <div
-                      className="input-bottom-actions-left-item"
-                      onClick={() => setChatConfigOpen(true)}
-                    >
-                      <SettingOutlined style={{ marginRight: 4 }} />
-                      {t("chat.conversationConfig")}
-                    </div>
-                  )}
+                  <ChatConfigModal
+                    conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
+                    initialSettings={initialPluginSettings}
+                    hasPluginSession={hasPluginSession}
+                    onSave={onPluginSettingsChange}
+                  />
                 </div>
 
                 <div className="input-bottom-actions-right">
@@ -913,13 +919,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           ref={promptRef}
           onSelectPrompt={(prompt) => onChange(text + " " + prompt)}
         />
-        {sessionId && !sessionId.startsWith("temp_") && (
-          <ChatConfigModal
-            open={chatConfigOpen}
-            onClose={() => setChatConfigOpen(false)}
-            conversationId={sessionId}
-          />
-        )}
         <BatchChatComponent
           ref={batchChatRef}
           cancelFn={() => {

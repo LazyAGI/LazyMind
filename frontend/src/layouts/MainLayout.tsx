@@ -176,11 +176,6 @@ export default function MainLayout() {
           },
         ]
       : []),
-    {
-      key: "/task-center",
-      label: t("layout.taskCenter"),
-      icon: <UnorderedListOutlined />,
-    },
   ];
   const logoSrc =
     (import.meta.env as ImportMetaEnv & { VITE_APP_LOGO?: string })
@@ -691,6 +686,16 @@ export default function MainLayout() {
                     <RightOutlined className="sider-module-arrow" />
                   </button>
                 </Popover>
+                <button
+                  type="button"
+                  className={`sider-module-trigger${pathname.startsWith("/task-center") ? " is-active" : ""}`}
+                  onClick={() => handleModuleNavigate("/task-center")}
+                >
+                  <span className="sider-module-icon">
+                    <UnorderedListOutlined />
+                  </span>
+                  <span className="sider-module-text">{t("layout.taskCenter")}</span>
+                </button>
               </div>
               <div className="sider-history-search">
                 <Input

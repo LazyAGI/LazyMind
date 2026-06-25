@@ -568,10 +568,17 @@ export function TempUploadServiceApi() {
 export interface ConversationPluginSettings {
   plugin_mode?: 'dynamic' | 'auto';
   enable_subagent?: boolean;
+  enable_plugin?: boolean;
 }
 
 export function ConversationSettingsApi() {
   return {
+    getChatSettings(options?: RawAxiosRequestConfig) {
+      return axiosInstance.get<ConversationPluginSettings>(
+        `${coreApiBaseUrl}/user/chat-settings`,
+        options,
+      );
+    },
     patchPluginSettings(
       conversationId: string,
       settings: ConversationPluginSettings,
