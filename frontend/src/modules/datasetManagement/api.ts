@@ -287,15 +287,16 @@ function buildUpdateEvalSetPayload(
     knowledge_base_ids?: string[];
   },
 ): UpdateEvalSetRequest {
-  const fallbackDatasetIds = (current.knowledge_bases || []).map((item) => `${item.id || ""}`.trim());
+  // Use submitted IDs when explicitly provided (even if empty), otherwise keep current ones.
+  // An empty array is valid when the user intentionally clears all KB associations
+  // (e.g. the previously linked KB was deleted).
+  const sourceIds =
+    payload.knowledge_base_ids !== undefined
+      ? payload.knowledge_base_ids
+      : (current.knowledge_bases || []).map((item) => `${item.id || ""}`.trim());
   const datasetIds = Array.from(
-    new Set(
-      (payload.knowledge_base_ids || fallbackDatasetIds).map((item) => `${item || ""}`.trim()),
-    ),
+    new Set(sourceIds.map((item) => `${item || ""}`.trim())),
   ).filter(Boolean);
-  if (datasetIds.length === 0) {
-    throw new Error(i18n.t("datasetManagement.form.validation.knowledgeBaseRequired"));
-  }
   return {
     name: payload.name.trim(),
     description: `${payload.description || ""}`.trim(),

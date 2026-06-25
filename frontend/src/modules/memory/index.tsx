@@ -4247,10 +4247,12 @@ export default function MemoryManagement() {
         }
 
         if (hasPendingMerge) {
-          const merged = await mergeGlossaryAssets([
-            payload.id,
-            ...pendingGlossaryMergeSourceIds,
-          ]);
+          const merged = await mergeGlossaryAssets({
+            group_ids: [payload.id, ...pendingGlossaryMergeSourceIds],
+            term: payload.term,
+            aliases: payload.aliases,
+            description: payload.content,
+          });
           mergeApplied = true;
           savedGlossary = await updateGlossaryAsset({
             ...payload,

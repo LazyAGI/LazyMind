@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { Form, Input, Modal, Select } from "antd";
+import { Alert, Form, Input, Modal, Select } from "antd";
 import { useTranslation } from "react-i18next";
 import type {
   DatasetFormValues,
@@ -31,10 +31,11 @@ export default function DatasetFormModal({
   const [form] = Form.useForm<DatasetFormValues>();
   const { t } = useTranslation();
 
-  const title =
-    mode === "create"
-      ? t("datasetManagement.form.createTitle")
-      : t("datasetManagement.form.editTitle");
+  const isEdit = mode === "edit";
+
+  const title = isEdit
+    ? t("datasetManagement.form.editTitle")
+    : t("datasetManagement.form.createTitle");
 
   const initialValues = useMemo<Partial<DatasetFormValues>>(() => {
     if (!dataset) {
@@ -46,6 +47,28 @@ export default function DatasetFormModal({
       knowledge_base_ids: dataset.knowledge_bases?.map((item) => item.id) || [],
     };
   }, [dataset]);
+
+  // KBs that are linked to the dataset but no longer exist in the available list
+  const orphanedKBs = useMemo<KnowledgeBaseOption[]>(() => {
+    if (!isEdit || !dataset?.knowledge_bases?.length) {
+      return [];
+    }
+    const availableIds = new Set(knowledgeBases.map((kb) => kb.id));
+    return dataset.knowledge_bases.filter((kb) => !availableIds.has(kb.id));
+  }, [isEdit, dataset, knowledgeBases]);
+
+  // Merge available options with orphaned ones so the Select can render them
+  const selectOptions = useMemo(
+    () => [
+      ...knowledgeBases.map((item) => ({ label: item.name, value: item.id })),
+      ...orphanedKBs.map((item) => ({
+        label: `${item.name || item.id} (${t("datasetManagement.form.kbDeleted")})`,
+        value: item.id,
+        disabled: true,
+      })),
+    ],
+    [knowledgeBases, orphanedKBs, t],
+  );
 
   useEffect(() => {
     if (open) {
@@ -60,6 +83,10 @@ export default function DatasetFormModal({
     const values = await form.validateFields();
     onSubmit(values);
   };
+
+  const kbRules = isEdit
+    ? []
+    : [{ required: true, message: t("datasetManagement.form.validation.knowledgeBaseRequired") }];
 
   return (
     <Modal
@@ -105,18 +132,26 @@ export default function DatasetFormModal({
         <Form.Item
           name="knowledge_base_ids"
           label={t("datasetManagement.fields.knowledgeBase")}
-          rules={[{ required: true, message: t("datasetManagement.form.validation.knowledgeBaseRequired") }]}
+          rules={kbRules}
         >
           <Select
             mode="multiple"
             allowClear
+            showSearch
+            optionFilterProp="label"
             placeholder={t("datasetManagement.form.knowledgeBasePlaceholder")}
-            options={knowledgeBases.map((item) => ({
-              label: item.name,
-              value: item.id,
-            }))}
+            options={selectOptions}
           />
         </Form.Item>
+
+        {isEdit && orphanedKBs.length > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            message={t("datasetManagement.form.kbDeletedWarning", { count: orphanedKBs.length })}
+            style={{ marginTop: -8, marginBottom: 8 }}
+          />
+        )}
       </Form>
     </Modal>
   );

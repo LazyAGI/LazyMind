@@ -221,6 +221,7 @@ type ThreadStepSummary = {
   title?: string;
   status?: string;
   active: boolean;
+  orderIndex?: number;
   eventCount?: number;
   currentTaskId?: string;
   startedAt?: string;
@@ -360,7 +361,8 @@ function normalizeThreadStepListPayload(payload: ThreadRestorePayload): ThreadSt
         stepId,
         title: getStringField(item, ["title", "name"]),
         status: getStringField(item, ["status", "state"]),
-        active: getBooleanishField(item, ["active", "is_active", "isActive"]) || activeStepId === stepId,
+        active: activeStepId ? activeStepId === stepId : getBooleanishField(item, ["active", "is_active", "isActive"]),
+        orderIndex: getNumberField(item, ["order_index", "orderIndex"]),
         eventCount: getNumberField(item, ["event_count", "eventCount"]),
         currentTaskId: getStringField(item, ["current_task_id", "currentTaskId", "task_id", "taskId"]),
         startedAt: getStringField(item, ["started_at", "startedAt", "start_time", "startTime"]),
@@ -371,7 +373,11 @@ function normalizeThreadStepListPayload(payload: ThreadRestorePayload): ThreadSt
 }
 
 function getDefaultThreadStep(stepList: ThreadStepListState): ThreadStepSummary | undefined {
-  return stepList.steps[stepList.steps.length - 1] ||
+  const activeStep = stepList.activeStepId
+    ? stepList.steps.find((step) => step.stepId === stepList.activeStepId)
+    : undefined;
+  return activeStep ||
+    stepList.steps[stepList.steps.length - 1] ||
     (stepList.activeStepId ? { stepId: stepList.activeStepId, active: true, status: "running" } : undefined);
 }
 
@@ -677,6 +683,7 @@ export function SelfEvolutionPageController({
     content: "",
   });
   const [threadEvents, setThreadEvents] = useState<NormalizedThreadEvent[]>([]);
+  const [threadStepList, setThreadStepList] = useState<ThreadStepListState>({ steps: [] });
   const threadEventsRef = useRef<NormalizedThreadEvent[]>([]);
   const [remoteThreadHistory, setRemoteThreadHistory] = useState<ThreadHistoryEntry[]>([]);
   const isThreadHistoryListFetchingRef = useRef(false);
@@ -2203,6 +2210,7 @@ export function SelfEvolutionPageController({
     }
 
     pendingNextStepRunIdRef.current = undefined;
+    void refreshThreadStepList(threadId).catch(() => undefined);
     void subscribeThreadEvents(threadId, nextStepRunId, sessionId);
     return true;
   };
@@ -2232,6 +2240,7 @@ export function SelfEvolutionPageController({
 
     continuedThreadStepIdsRef.current.add(continuationKey);
     pendingNextStepRunIdRef.current = undefined;
+    void refreshThreadStepList(threadId).catch(() => undefined);
     void subscribeThreadEvents(threadId, nextStepId, sessionId);
     return true;
   };
@@ -2350,6 +2359,17 @@ export function SelfEvolutionPageController({
     return normalizeThreadStepListPayload(response.data as ThreadRestorePayload);
   };
 
+  const refreshThreadStepList = async (
+    threadId: string,
+    signal?: AbortSignal,
+  ) => {
+    const stepList = await fetchThreadStepList(threadId, signal);
+    if (!signal?.aborted) {
+      setThreadStepList(stepList);
+    }
+    return stepList;
+  };
+
   const restoreThreadStepRecords = async (
     threadId: string,
     stepId: string,
@@ -2382,9 +2402,12 @@ export function SelfEvolutionPageController({
     signal?: AbortSignal,
     preloadedStepList?: ThreadStepListState,
   ) => {
-    const stepList = preloadedStepList || await fetchThreadStepList(threadId, signal);
+    const stepList = preloadedStepList || await refreshThreadStepList(threadId, signal);
     if (signal?.aborted) {
       return;
+    }
+    if (preloadedStepList) {
+      setThreadStepList(preloadedStepList);
     }
 
     const latestStep = getDefaultThreadStep(stepList);
@@ -2506,6 +2529,7 @@ export function SelfEvolutionPageController({
     setIsWorkbenchVisible(true);
     setWorkflowRuntimeState(createThreadRestoreWorkflowRuntimeState());
     replaceThreadEvents([]);
+    setThreadStepList({ steps: [] });
     processedWorkflowEventKeysRef.current = new Set();
     pendingNextStepRunIdRef.current = undefined;
     continuedThreadStepIdsRef.current = new Set();
@@ -2540,6 +2564,7 @@ export function SelfEvolutionPageController({
       if (signal?.aborted || restoreRequestIdRef.current !== requestId) {
         return;
       }
+      setThreadStepList(restoredStepList);
 
       let historyTitle: string | undefined;
       let historyMessages: ChatMessage[] = [];
@@ -2893,6 +2918,7 @@ export function SelfEvolutionPageController({
       const threadId = await createAndStartThread();
       setWorkflowRuntimeState(createWorkflowRuntimeStateForMode(mode));
       replaceThreadEvents([]);
+      setThreadStepList({ steps: [] });
       processedWorkflowEventKeysRef.current = new Set();
       pendingNextStepRunIdRef.current = undefined;
       continuedThreadStepIdsRef.current = new Set();
@@ -3025,6 +3051,7 @@ export function SelfEvolutionPageController({
       setHasLaunchValidationTriggered(false);
       setWorkflowRuntimeState(createWorkflowRuntimeStateForMode(nextMode));
       replaceThreadEvents([]);
+      setThreadStepList({ steps: [] });
       processedWorkflowEventKeysRef.current = new Set();
       pendingNextStepRunIdRef.current = undefined;
       continuedThreadStepIdsRef.current = new Set();
@@ -3151,6 +3178,7 @@ export function SelfEvolutionPageController({
     setWorkflowResults(createInitialWorkflowResultsState());
     setCaseArtifact(undefined);
     replaceThreadEvents([]);
+    setThreadStepList({ steps: [] });
     processedWorkflowEventKeysRef.current = new Set();
     pendingNextStepRunIdRef.current = undefined;
     continuedThreadStepIdsRef.current = new Set();
@@ -4686,11 +4714,32 @@ export function SelfEvolutionPageController({
   const visibleArtifactItems = artifactItems.filter((item) =>
     workflowSteps.some((step) => step.id === item.stepId),
   );
+  const isOpaqueStepTitle = (title: string | undefined, stepId: string) => {
+    const normalizedTitle = title?.trim();
+    if (!normalizedTitle || normalizedTitle === stepId) {
+      return true;
+    }
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(normalizedTitle);
+  };
+  const threadStepNavigationItems = threadStepList.steps.map((step, index) => ({
+    step,
+    index,
+    item: artifactItems[index],
+  }));
   const getArtifactStep = (item: ArtifactPanelItem) =>
     workflowSteps.find((step) => step.id === item.stepId);
-  const getArtifactStatusLabel = (item: ArtifactPanelItem) => {
+  const getNavigationStepStatus = (item?: ArtifactPanelItem, step?: ThreadStepSummary): StepStatus => {
+    const threadStatus = normalizeThreadStepStatus(step?.status);
+    if (threadStatus) {
+      return threadStatus;
+    }
+    if (item) {
+      return getArtifactStep(item)?.status || "pending";
+    }
+    return "pending";
+  };
+  const getArtifactStatusLabel = (item: ArtifactPanelItem, stepSummary?: ThreadStepSummary) => {
     const state = workflowResults[item.kind];
-    const step = getArtifactStep(item);
     if (state.loading) {
       return "加载中";
     }
@@ -4700,18 +4749,68 @@ export function SelfEvolutionPageController({
     if (state.loaded) {
       return isEmptyResultPayload(state.data) ? "暂无结果" : "已加载";
     }
-    return localizedGetStepStatusLabel(step?.status || "pending");
+    return localizedGetStepStatusLabel(getNavigationStepStatus(item, stepSummary));
+  };
+  const getStepNavigationTitle = (item: ArtifactPanelItem | undefined, step: ThreadStepSummary | undefined, index: number) => {
+    if (step && !isOpaqueStepTitle(step.title, step.stepId)) {
+      return step.title;
+    }
+    return item?.sectionTitle || `Step ${index + 1}`;
+  };
+  const getStepNavigationDesc = (item: ArtifactPanelItem | undefined, step: ThreadStepSummary | undefined) => {
+    if (item) {
+      return item.sectionDesc;
+    }
+    return step?.stepId ? `步骤 ID：${getShortLabel(step.stepId)}` : "等待步骤信息";
   };
   const renderArtifactNavigationPanel = () => (
     <>
-      {visibleArtifactItems.length === 0 ? (
+      {threadStepNavigationItems.length > 0 ? (
+        threadStepNavigationItems.map(({ item, step, index }) => {
+          const stepStatus = getNavigationStepStatus(item, step);
+          const isActive = step.active || Boolean(item && item.kind === activeArtifactItem?.kind);
+          const resultState = item ? workflowResults[item.kind] : undefined;
+          const hasLoadedArtifact = Boolean(resultState?.loaded && !isEmptyResultPayload(resultState.data));
+          const canOpenArtifact = Boolean(item && (stepStatus === "done" || hasLoadedArtifact));
+
+          return (
+            <button
+              key={step.stepId}
+              type="button"
+              className={`self-evolution-artifact-item${isActive ? " is-active" : ""}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (!item) {
+                  message.info("该步骤暂无关联产物。", 2);
+                  return;
+                }
+                if (!canOpenArtifact) {
+                  message.info(`${item.title}尚未生成完整产物。`, 2);
+                  return;
+                }
+                openWorkflowArtifact(item.kind);
+              }}
+            >
+              <span className="self-evolution-artifact-item-title">
+                {getStepNavigationTitle(item, step, index)}
+              </span>
+              <span className="self-evolution-artifact-item-desc">
+                {getStepNavigationDesc(item, step)}
+              </span>
+              <span className={`self-evolution-artifact-item-status is-${stepStatus}`}>
+                {item ? getArtifactStatusLabel(item, step) : localizedGetStepStatusLabel(stepStatus)}
+              </span>
+            </button>
+          );
+        })
+      ) : visibleArtifactItems.length === 0 ? (
         <Paragraph className="self-evolution-artifact-empty">
           启动后会按执行进度显示产物。
         </Paragraph>
       ) : (
         visibleArtifactItems.map((item) => {
           const step = getArtifactStep(item);
-          const stepStatus = step?.status || "pending";
+          const stepStatus = getNavigationStepStatus(item);
           const isActive = item.kind === activeArtifactItem?.kind;
           const resultState = workflowResults[item.kind];
           const hasLoadedArtifact = resultState.loaded && !isEmptyResultPayload(resultState.data);

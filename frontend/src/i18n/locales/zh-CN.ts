@@ -519,6 +519,8 @@ const zhCN = {
       namePlaceholder: "请输入数据集名称",
       descriptionPlaceholder: "请输入数据集描述",
       knowledgeBasePlaceholder: "请选择知识库",
+      kbDeleted: "已删除",
+      kbDeletedWarning: "该数据集原关联的 {{count}} 个知识库已被删除，关联关系已清除，可重新选择知识库。",
       validation: {
         nameRequired: "请输入数据集名称",
         nameMax: "数据集名称不能超过 80 个字符",

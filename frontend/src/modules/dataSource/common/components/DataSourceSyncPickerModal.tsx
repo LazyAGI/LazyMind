@@ -40,7 +40,7 @@ export interface DataSourceSyncPickerModalProps {
   setSyncSelectedDocIds: (updater: string[] | ((prev: string[]) => string[])) => void;
   syncTreeLoading: boolean;
   syncTreeData: DataNode[];
-  checkedTreeKeys: TreeProps["checkedKeys"];
+  checkedTreeKeys: string[];
   selectableSyncFileKeys: Set<string>;
   onLoadSyncTreeNode?: TreeProps["loadData"];
   onCancel: () => void;
@@ -180,7 +180,6 @@ export default function DataSourceSyncPickerModal({
           <Tree
             blockNode
             checkable
-            checkStrictly
             checkedKeys={checkedTreeKeys}
             expandedKeys={expandedKeys}
             loadData={onLoadSyncTreeNode}

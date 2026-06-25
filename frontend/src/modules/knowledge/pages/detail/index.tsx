@@ -50,7 +50,7 @@ import ImportTaskManage, {
   IImportTaskManageRef,
 } from "./components/ImportTaskManage";
 import TreeUtils from "@/modules/knowledge/utils/tree";
-import { IMPORT_TASK_POLL_INTERVAL, IMPORT_TASK_RUNNING_STATES } from "@/modules/knowledge/constants/common";
+import { IMPORT_TASK_POLL_INTERVAL } from "@/modules/knowledge/constants/common";
 import ConfirmModal, {
   ConfirmImperativeProps,
 } from "@/modules/knowledge/components/ConfirmModal";
@@ -219,13 +219,11 @@ const Detail = () => {
     pollingRef.current.cancel();
     pollingRef.current.start({
       interval: IMPORT_TASK_POLL_INTERVAL,
-      request: () => TaskServiceApi().listTasks(id),
+      // Filter to running tasks on the backend so total_size is accurate and
+      // we are not limited by the default page size of 20.
+      request: () => TaskServiceApi().listTasks(id, { taskStatus: 'running', pageSize: 1000 }),
       onSuccess: ({ data = {} }) => {
-        const RUNNING_STATES = IMPORT_TASK_RUNNING_STATES;
-        const allTasks = data.tasks || [];
-        const newTaskList = allTasks.filter((t: any) =>
-          RUNNING_STATES.includes(t.task_state),
-        );
+        const newTaskList = data.tasks || [];
         // Tasks in WORKING state are actively being parsed by the algorithm service.
         // Tasks in WAITING state are still uploading / queued before parsing starts.
         const uploadingTasks = newTaskList.filter((t: any) => t.task_state === 'WAITING');
@@ -233,7 +231,9 @@ const Detail = () => {
           pollingRef.current.cancel();
         }
         compareTaskChange(newTaskList, importingTaskListRef.current);
-        setRunningTotal(newTaskList.length);
+        // Use total_size from the backend for an accurate count; fall back to
+        // the length of the current page if total_size is absent.
+        setRunningTotal(data.total_size ?? newTaskList.length);
         // Show notice only while files are still uploading; once upload is done
         // the user can safely close the tab even if parsing continues in the background.
         setUploadingNoticeVisible(uploadingTasks.length > 0);

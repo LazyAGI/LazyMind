@@ -1382,10 +1382,7 @@ export default function DataSourceDetail() {
     return toDataNode(syncTreeNodes);
   }, [syncTreeNodes, t]);
 
-  const checkedTreeKeys = useMemo(
-    () => ({ checked: syncSelectedDocIds, halfChecked: [] }),
-    [syncSelectedDocIds],
-  );
+  const checkedTreeKeys = syncSelectedDocIds;
   const filteredSyncNodeKeys = useMemo(
     () => collectScanTreeFileKeys(syncTreeNodes),
     [syncTreeNodes],

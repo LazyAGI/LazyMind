@@ -544,6 +544,8 @@ const enUS = {
       namePlaceholder: "Enter dataset name",
       descriptionPlaceholder: "Enter dataset description",
       knowledgeBasePlaceholder: "Select knowledge base",
+      kbDeleted: "Deleted",
+      kbDeletedWarning: "{{count}} knowledge base(s) previously linked to this dataset have been deleted. Please re-select if needed.",
       validation: {
         nameRequired: "Enter dataset name",
         nameMax: "Dataset name cannot exceed 80 characters",
