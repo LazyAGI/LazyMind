@@ -2,3 +2,10 @@
 exclude = __pycache__,.git,algorithm/lazyllm,algorithm/config.py
 ignore = Q002,W503,E701
 max-line-length = 121
+banned-modules =
+    redis = use core.state_store / state backend adapters instead of direct Redis access
+    core.redis_client = use core.state_store outside state backend adapters
+per-file-ignores =
+    backend/auth-service/core/redis_client.py:I251
+    backend/auth-service/core/state_store.py:I251
+    tests/backend/auth-service/core/test_redis_client.py:I251

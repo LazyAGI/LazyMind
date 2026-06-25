@@ -920,21 +920,11 @@ func createParentSkill(ctx context.Context, db *gorm.DB, userID, userName string
 
 func createParentSkillWithContent(ctx context.Context, db *gorm.DB, userID, userName string, req createSkillRequest, fullContent, description string, source resourcechange.Source) error {
 	relPath := parentRelativePath(req.Category, req.Name)
-	var count int64
-	if err := db.WithContext(ctx).
-		Model(&orm.SkillResource{}).
-		Where("owner_user_id = ? AND category = ? AND node_type = ? AND skill_name = ?", userID, req.Category, evolution.SkillNodeTypeParent, req.Name).
-		Count(&count).Error; err != nil {
+	if err := ensureDBParentSkillIdentityAvailable(ctx, db, userID, req.Category, req.Name, ""); err != nil {
 		return err
 	}
-	if count > 0 {
-		return gorm.ErrDuplicatedKey
-	}
-	if err := db.WithContext(ctx).Model(&orm.SkillResource{}).Where("owner_user_id = ? AND relative_path = ?", userID, relPath).Count(&count).Error; err != nil {
+	if err := ensureNoBuiltinParentSkillConflict(req.Category, req.Name); err != nil {
 		return err
-	}
-	if count > 0 {
-		return gorm.ErrDuplicatedKey
 	}
 	for _, child := range req.Children {
 		if err := validatePathSegment(child.Name); err != nil {
@@ -1076,6 +1066,9 @@ func createChildSkill(ctx context.Context, db *gorm.DB, userID, userName string,
 	}
 	if count > 0 {
 		return orm.SkillResource{}, gorm.ErrDuplicatedKey
+	}
+	if err := ensureNoBuiltinRelativePathConflict(relPath); err != nil {
+		return orm.SkillResource{}, err
 	}
 	now := time.Now()
 	row := orm.SkillResource{
@@ -1272,9 +1265,6 @@ func updateParentSkill(ctx context.Context, db *gorm.DB, userID, userName string
 	if pendingDraft {
 		return errors.New("parent skill has pending_confirm draft")
 	}
-	if req.ParentSkillID != nil {
-		return errors.New("parent_skill_id cannot be updated")
-	}
 	if req.ParentSkillName != nil {
 		return errors.New("parent_skill_name cannot be updated")
 	}
@@ -1317,27 +1307,11 @@ func updateParentSkill(ctx context.Context, db *gorm.DB, userID, userName string
 	newDescription = resolvedDescription
 	shouldRecordContentChange := req.Content != nil && currentContent != newContent
 	if oldCategory != newCategory || oldName != newName {
-		var count int64
-		if oldName != newName {
-			if err := db.WithContext(ctx).
-				Model(&orm.SkillResource{}).
-				Where("owner_user_id = ? AND category = ? AND node_type = ? AND skill_name = ? AND id <> ?", userID, newCategory, evolution.SkillNodeTypeParent, newName, row.ID).
-				Count(&count).Error; err != nil {
-				return err
-			}
-			if count > 0 {
-				return gorm.ErrDuplicatedKey
-			}
-		}
-		newRelativePath := parentRelativePath(newCategory, newName)
-		if err := db.WithContext(ctx).
-			Model(&orm.SkillResource{}).
-			Where("owner_user_id = ? AND relative_path = ? AND id <> ?", userID, newRelativePath, row.ID).
-			Count(&count).Error; err != nil {
+		if err := ensureDBParentSkillIdentityAvailable(ctx, db, userID, newCategory, newName, row.ID); err != nil {
 			return err
 		}
-		if count > 0 {
-			return gorm.ErrDuplicatedKey
+		if err := ensureNoBuiltinParentSkillConflict(newCategory, newName); err != nil {
+			return err
 		}
 	}
 	row.RelativePath = parentRelativePath(newCategory, newName)
@@ -1518,6 +1492,9 @@ func updateChildSkill(ctx context.Context, db *gorm.DB, userID string, row *orm.
 		}
 		if count > 0 {
 			return gorm.ErrDuplicatedKey
+		}
+		if err := ensureNoBuiltinRelativePathConflict(newRelative); err != nil {
+			return err
 		}
 	}
 	update := map[string]any{

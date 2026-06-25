@@ -159,6 +159,21 @@ func attachThreadModelConfig(ctx context.Context, db *gorm.DB, userID string, pa
 	return nil
 }
 
+func hasThreadEvoLLMConfig(payload map[string]any) bool {
+	llmConfig, ok := payload["llm_config"].(map[string]any)
+	if !ok {
+		return false
+	}
+	for key, value := range llmConfig {
+		if !strings.EqualFold(strings.TrimSpace(key), "evo_llm") {
+			continue
+		}
+		roleConfig, ok := value.(map[string]any)
+		return ok && len(roleConfig) > 0
+	}
+	return false
+}
+
 func parseRecordLimit(raw string) int {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

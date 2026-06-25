@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { RcFile } from "antd/es/upload";
-import { Button, Input, message, Spin, Tooltip } from "antd";
+import { Badge, Button, Input, message, Spin, Tooltip } from "antd";
 import {
   CloseOutlined,
   CommentOutlined,
@@ -460,6 +460,12 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       return normalizedCiteMessage ? [normalizedCiteMessage] : [];
     }, [citeMessage, citeMessages]);
     const isPromptPolishing = Boolean(polishingSuggestionKey);
+    const documentFileCount = fileList.filter(
+      (item) => !allowedImageTypes.includes(item.suffix),
+    ).length;
+    const uploadBadgeCount = isUploading
+      ? Math.max(documentFileCount, 1)
+      : documentFileCount;
     const isSendDisabled =
       disabled || isPromptPolishing || !value?.trim() || isUploading || isStreaming;
     const shouldShowPromptSuggestions =
@@ -827,12 +833,19 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         isPromptPolishing ? t("chat.promptPolishing") : disabledReason
                       }
                       icon={
-                        <Button
-                          aria-label={t("chat.upload")}
-                          icon={<AttachmentIcon />}
-                          type="text"
-                          disabled={disabled || isPromptPolishing}
-                        />
+                        <Badge
+                          count={uploadBadgeCount}
+                          dot={isUploading && !documentFileCount}
+                          size="small"
+                          className="chat-upload-document-badge"
+                        >
+                          <Button
+                            aria-label={t("chat.upload")}
+                            icon={<AttachmentIcon />}
+                            type="text"
+                            disabled={disabled || isPromptPolishing}
+                          />
+                        </Badge>
                       }
                     />
                   </div>

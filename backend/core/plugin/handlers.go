@@ -897,3 +897,97 @@ func CreateSlotItem(w http.ResponseWriter, r *http.Request) {
 		"revision":   newRev.Revision,
 	})
 }
+
+// SaveArtifactByKey handles POST /plugin-sessions/{session_id}/artifacts.
+// Allows ChatAgent to write a plugin artifact directly by artifact_key without
+// going through a SubAgent task. Looks up the slot binding via the Python API,
+// then writes a new AI slot revision for the given artifact_key.
+// Body: { artifact_key: string, value: {...}, content_type?: string,
+//
+//	sort_order?: int, caption?: string, step_id?: string }
+func SaveArtifactByKey(w http.ResponseWriter, r *http.Request) {
+	sessionID := common.PathVar(r, "session_id")
+	if sessionID == "" {
+		common.ReplyErr(w, "session_id required", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		ArtifactKey string          `json:"artifact_key"`
+		Value       json.RawMessage `json:"value"`
+		ContentType string          `json:"content_type,omitempty"`
+		SortOrder   *int            `json:"sort_order,omitempty"`
+		Caption     *string         `json:"caption,omitempty"`
+		StepID      string          `json:"step_id,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ArtifactKey == "" {
+		common.ReplyErr(w, "invalid body: artifact_key and value required", http.StatusBadRequest)
+		return
+	}
+	if len(body.Value) == 0 {
+		common.ReplyErr(w, "value must not be empty", http.StatusBadRequest)
+		return
+	}
+	if body.ContentType == "" {
+		body.ContentType = "text"
+	}
+	db := store.DB()
+	if db == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
+		return
+	}
+	ctx := r.Context()
+
+	// Resolve plugin_id from session.
+	var sess orm.PluginSession
+	if err := db.WithContext(ctx).Where("id = ?", sessionID).First(&sess).Error; err != nil {
+		common.ReplyErr(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	// Resolve slot binding for the artifact_key via Python plugin API.
+	slotID, cardinality := resolveSlotBinding(sess.PluginID, body.ArtifactKey)
+	if slotID == "" {
+		common.ReplyErr(w, fmt.Sprintf("no slot binding for artifact_key %q in plugin %q", body.ArtifactKey, sess.PluginID), http.StatusBadRequest)
+		return
+	}
+
+	// Determine which step_id to attribute this artifact to.
+	stepID := body.StepID
+	attempt := 1
+	if stepID == "" {
+		stepID = sess.CurrentStepID
+	}
+	if latestStep, _ := GetLatestStep(ctx, db, sessionID, stepID); latestStep != nil {
+		attempt = latestStep.Attempt
+	}
+
+	// Resolve list_index from sort_order when provided.
+	var listIndex *int
+	if cardinality == "list" && body.SortOrder != nil {
+		order, _ := GetSlotOrder(ctx, db, sessionID, slotID)
+		if order != nil {
+			var orderList []int
+			_ = json.Unmarshal(order.OrderList, &orderList)
+			idx := *body.SortOrder - 1
+			if idx >= 0 && idx < len(orderList) {
+				li := orderList[idx]
+				listIndex = &li
+			}
+		}
+	}
+
+	rev, err := WriteSlotRevisionWithHumanArtifact(ctx, db,
+		sessionID, slotID, body.ArtifactKey, stepID, attempt, cardinality, listIndex,
+		body.ContentType, body.Value, body.Caption)
+	if err != nil {
+		common.ReplyErr(w, "write slot revision failed", http.StatusInternalServerError)
+		return
+	}
+	common.ReplyJSON(w, map[string]any{
+		"status":       "ok",
+		"session_id":   sessionID,
+		"slot_id":      slotID,
+		"artifact_key": body.ArtifactKey,
+		"revision":     rev.Revision,
+	})
+}

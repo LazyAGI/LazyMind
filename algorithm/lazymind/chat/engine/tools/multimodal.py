@@ -19,6 +19,7 @@ from lazymind.chat.engine.tools.infra.image_generation_support import (
 _SUPPORTED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff', '.tif'}
 
 
+@fc_register('tool', execute_in_sandbox=False)
 @handle_tool_errors
 def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, Any]:
     """Extract a text description from an image reachable at the given URL.

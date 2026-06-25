@@ -4,9 +4,11 @@ import core.redis_client as redis_client_module
 
 
 class _FakeExceptions:
-    ReadOnlyError = type('ReadOnlyError', (Exception,), {})
-    ConnectionError = type('ConnectionError', (Exception,), {})
-    TimeoutError = type('TimeoutError', (Exception,), {})
+    RedisError = type('RedisError', (Exception,), {})
+    AuthenticationError = type('AuthenticationError', (RedisError,), {})
+    ReadOnlyError = type('ReadOnlyError', (RedisError,), {})
+    ConnectionError = type('ConnectionError', (RedisError,), {})
+    TimeoutError = type('TimeoutError', (RedisError,), {})
 
 
 def test_redis_url_requires_env(monkeypatch):

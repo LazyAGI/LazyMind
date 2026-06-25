@@ -1167,6 +1167,7 @@ func TestAcceptUserPreferenceReviewResultParsesFrontmatter(t *testing.T) {
 	resource.ContentHash = evolution.HashSystemUserPreference(resource)
 	insertPreferenceResource(t, db, resource)
 	reviewContent := "---\nagent_persona: 新角色\npreferred_name: 用户称谓\nresponse_style: 回复风格\n---\n\n新正文"
+	insertMemoryReviewResult(t, db, MemoryReviewResult{
 		ID:           "preference-accept",
 		UserID:       "user-1",
 		Target:       orm.ResourceUpdateResourceTypeUserPreference,

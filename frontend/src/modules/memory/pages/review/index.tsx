@@ -15,6 +15,7 @@ import SendIcon from "@/modules/chat/assets/icons/send_icon.svg?react";
 import RouteLoading from "../../components/RouteLoading";
 import { useMemoryManagementOutletContext } from "../../context";
 import { getSkillBodyContentForDisplay } from "../../shared";
+import { DiffLineContent } from "../../components/DiffLineContent";
 
 export default function MemoryReviewPage() {
   const {
@@ -506,7 +507,7 @@ export default function MemoryReviewPage() {
                           <span className="memory-diff-prefix">
                             {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
                           </span>
-                          <span>{line.text}</span>
+                          <DiffLineContent line={line} />
                         </div>
                       ))
                     ) : (
@@ -788,7 +789,7 @@ export default function MemoryReviewPage() {
                                 <span className="memory-diff-prefix">
                                   {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
                                 </span>
-                                <span>{line.text || " "}</span>
+                                <DiffLineContent line={line} />
                               </div>
                             ))}
                           </div>
@@ -806,7 +807,7 @@ export default function MemoryReviewPage() {
                                 <span className="memory-diff-prefix">
                                   {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
                                 </span>
-                                <span>{line.text || " "}</span>
+                                <DiffLineContent line={line} />
                               </div>
                             ))}
                           </div>
@@ -822,7 +823,7 @@ export default function MemoryReviewPage() {
                             <span className="memory-diff-prefix">
                               {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
                             </span>
-                            <span>{line.text || " "}</span>
+                            <DiffLineContent line={line} />
                           </div>
                         ))}
                       </div>

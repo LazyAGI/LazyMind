@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 lint-python lint-go test test-hermetic test-hermetic-setup test-hermetic-check build up up-build up-build-local down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-stop-if-present
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary test test-hermetic test-hermetic-setup test-hermetic-check build up up-build up-build-local down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-stop-if-present
 .DEFAULT_GOAL := help
 
 # Use legacy Docker builder by default to avoid pulling moby/buildkit:buildx-stable-1 from Docker Hub
@@ -169,6 +169,9 @@ PYTHON_DIRS := algorithm backend evo
 
 # Go dirs to lint
 GO_DIRS := backend/core local/local-proxy
+GO_MODULE_DIRS := backend/core backend/scan-control-plane backend/file-watcher local/local-proxy local/local-runtime-manager tests/backend/core
+GOLANGCI_LINT_VERSION ?= v2.12.2
+GOLANGCI_LINT ?= $(shell command -v golangci-lint 2>/dev/null || printf '%s/bin/golangci-lint' "$$($(GO) env GOPATH)")
 
 help:
 	@echo "LazyMind Make targets:"
@@ -207,15 +210,23 @@ help:
 
 # Require flake8 to be installed (e.g. in a venv). Do not auto pip-install to avoid PEP 668 errors.
 install-flake8:
-	@for pkg in flake8 flake8-quotes flake8-bugbear; do \
+	@for pkg in flake8 flake8-quotes flake8-bugbear flake8-tidy-imports; do \
 		case $$pkg in \
 			flake8) mod="flake8" ;; \
 			flake8-quotes) mod="flake8_quotes" ;; \
 			flake8-bugbear) mod="bugbear" ;; \
+			flake8-tidy-imports) mod="flake8_tidy_imports" ;; \
 		esac; \
 		$(PYTHON) -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('$$mod') else 1)" \
 			|| $(PIP) install $$pkg; \
 	done
+
+install-golangci-lint:
+	@if [ ! -x "$(GOLANGCI_LINT)" ]; then \
+		echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION) to $(GOLANGCI_LINT)..."; \
+		mkdir -p "$$(dirname "$(GOLANGCI_LINT)")"; \
+		GOBIN="$$(dirname "$(GOLANGCI_LINT)")" $(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
+	fi
 
 lint-python: install-flake8
 	@echo "🐍 Linting Python ($(PYTHON_DIRS))..."
@@ -231,7 +242,16 @@ lint-go:
 	fi
 	@echo "✅ Go fmt OK."
 
-lint: lint-python lint-go
+lint-state-backend-boundary: install-golangci-lint
+	@echo "🔒 Checking state backend Redis boundary..."
+	@set -e; for dir in $(GO_MODULE_DIRS); do \
+		if [ -f "$$dir/go.mod" ]; then \
+			(cd "$$dir" && "$(GOLANGCI_LINT)" run --config "$(CURDIR)/.golangci.yml" --enable-only depguard --tests=false ./...); \
+		fi; \
+	done
+	@echo "✅ State backend boundary OK."
+
+lint: lint-python lint-go lint-state-backend-boundary
 
 test:
 	@./tests/run-all.sh

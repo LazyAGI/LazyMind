@@ -327,8 +327,44 @@
           }
         }
 
-        &.vlm-warning-banner {
+        .preference-config-dismiss {
+          height: 32px;
+          padding: 0 8px;
+          border-radius: 8px;
+          color: #3e78ef;
+          font-size: 12px;
+          font-weight: 500;
+          line-height: 32px;
+          white-space: nowrap;
+
+          &:hover {
+            color: #1b62e8;
+            background: rgba(33, 111, 255, 0.08);
+          }
+        }
+
+        &.vlm-warning-banner,
+        &.preference-config-notice {
           grid-template-columns: minmax(0, 1fr) auto;
+        }
+
+        &.preference-config-notice {
+          grid-template-columns: minmax(0, 1fr) auto auto;
+        }
+
+        @media (max-width: 768px) {
+          width: 100%;
+
+          &.vlm-warning-banner,
+          &.preference-config-notice {
+            grid-template-columns: minmax(0, 1fr);
+          }
+
+          .model-provider-warning-action,
+          .preference-config-dismiss {
+            width: 100%;
+            justify-content: center;
+          }
         }
       }
     }

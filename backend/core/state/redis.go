@@ -173,7 +173,36 @@ func (s *RedisStore) ZCard(ctx context.Context, key string) (int64, error) {
 	return s.client.ZCard(ctx, key).Result()
 }
 
-func (s *RedisStore) RedisClient() *redis.Client { return s.client }
+func (s *RedisStore) SubscribeExpiredKeys(ctx context.Context, onExpired func(key string) error) {
+	if s == nil || s.client == nil || onExpired == nil {
+		return
+	}
+	channel := fmt.Sprintf("__keyevent@%d__:expired", s.client.Options().DB)
+	for ctx.Err() == nil {
+		pubsub := s.client.Subscribe(ctx, channel)
+		msgCh := pubsub.Channel()
+		for {
+			select {
+			case <-ctx.Done():
+				_ = pubsub.Close()
+				return
+			case msg, ok := <-msgCh:
+				if !ok {
+					_ = pubsub.Close()
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(time.Second):
+					}
+					goto reconnect
+				}
+				_ = onExpired(msg.Payload)
+			}
+		}
+	reconnect:
+		continue
+	}
+}
 
 func (s *RedisStore) Close() error {
 	return s.client.Close()

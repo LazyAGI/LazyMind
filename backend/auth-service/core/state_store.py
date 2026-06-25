@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import Protocol
 
-from core.redis_client import redis_client
+from core.redis_client import redis_client, state_backend_error
 
 STATE_BACKEND_ENV = 'LAZYMIND_STATE_BACKEND'
 SQLITE_DIR_ENV = 'LAZYMIND_STATE_SQLITE_DIR'
@@ -46,26 +46,37 @@ class StateStore(Protocol):
 
 
 class RedisStateStore:
+    def _run(self, fn):
+        try:
+            return fn(redis_client())
+        except Exception as exc:
+            mapped = state_backend_error(exc)
+            if mapped is exc:
+                raise
+            raise mapped from exc
+
     def set(self, key: str, value: str, ex: int | None = None) -> None:
-        redis_client().set(key, value, ex=ex)
+        self._run(lambda r: r.set(key, value, ex=ex))
 
     def get(self, key: str) -> str | None:
-        return redis_client().get(key)
+        return self._run(lambda r: r.get(key))
 
     def delete(self, key: str) -> None:
-        redis_client().delete(key)
+        self._run(lambda r: r.delete(key))
 
     def zadd(self, key: str, mapping: dict[str, float], ex: int | None = None) -> None:
-        r = redis_client()
-        r.zadd(key, mapping)
-        if ex and ex > 0:
-            r.expire(key, ex)
+        def _zadd(r):
+            r.zadd(key, mapping)
+            if ex and ex > 0:
+                r.expire(key, ex)
+
+        self._run(_zadd)
 
     def zremrangebyscore(self, key: str, min_score: float, max_score: float) -> None:
-        redis_client().zremrangebyscore(key, min_score, max_score)
+        self._run(lambda r: r.zremrangebyscore(key, min_score, max_score))
 
     def zcard(self, key: str) -> int:
-        return int(redis_client().zcard(key))
+        return int(self._run(lambda r: r.zcard(key)))
 
 
 class SQLiteStateStore:

@@ -1,5 +1,5 @@
 import dayjs from "dayjs";
-import { diffLines } from "diff";
+import { diffLines, diffChars } from "diff";
 import type { EvolutionSuggestionRecord } from "./preferenceApi";
 import type { SkillShareStatus } from "./skillApi";
 
@@ -193,9 +193,12 @@ export type ChangeProposal = StructuredChangeProposal | ExperienceChangeProposal
 
 export type DiffLineType = "add" | "remove" | "same";
 
+export type InlineSpan = { text: string; highlight: boolean };
+
 export interface DiffLine {
   type: DiffLineType;
   text: string;
+  inlineSpans?: InlineSpan[];
 }
 
 export type ProposalFieldKey =
@@ -542,6 +545,108 @@ export const buildDiffLines = (beforeText: string, afterText: string): DiffLine[
       lines.push({ type, text: line });
     });
   });
+
+  return lines;
+};
+
+/**
+ * Compute a similarity score [0, 1] between two strings based on shared characters.
+ * Uses the ratio of common-character length to the longer string length.
+ */
+function _lineSimilarity(a: string, b: string): number {
+  if (a === b) return 1;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 1;
+  const spans = diffChars(a, b);
+  const sameLen = spans
+    .filter((s) => !s.added && !s.removed)
+    .reduce((sum, s) => sum + s.value.length, 0);
+  return sameLen / maxLen;
+}
+
+/**
+ * Given a block of remove lines and a block of add lines, compute the best
+ * 1-to-1 pairing by similarity using a greedy approach on the similarity matrix.
+ * Pairs with similarity below INLINE_THRESHOLD are left unpaired (no inline spans).
+ */
+const INLINE_THRESHOLD = 0.3;
+
+function _pairBlocks(
+  removeLines: DiffLine[],
+  addLines: DiffLine[],
+): void {
+  const R = removeLines.length;
+  const A = addLines.length;
+
+  // Build similarity matrix.
+  const sim: number[][] = Array.from({ length: R }, (_, ri) =>
+    Array.from({ length: A }, (_, ai) =>
+      _lineSimilarity(removeLines[ri].text, addLines[ai].text),
+    ),
+  );
+
+  const usedRemove = new Set<number>();
+  const usedAdd = new Set<number>();
+
+  // Collect all (similarity, ri, ai) entries and sort descending.
+  const candidates: Array<[number, number, number]> = [];
+  for (let ri = 0; ri < R; ri++) {
+    for (let ai = 0; ai < A; ai++) {
+      candidates.push([sim[ri][ai], ri, ai]);
+    }
+  }
+  candidates.sort((a, b) => b[0] - a[0]);
+
+  for (const [score, ri, ai] of candidates) {
+    if (score < INLINE_THRESHOLD) break;
+    if (usedRemove.has(ri) || usedAdd.has(ai)) continue;
+
+    usedRemove.add(ri);
+    usedAdd.add(ai);
+
+    const charDiff = diffChars(removeLines[ri].text, addLines[ai].text);
+    removeLines[ri].inlineSpans = charDiff
+      .filter((s) => !s.added)
+      .map((s) => ({ text: s.value, highlight: s.removed === true }));
+    addLines[ai].inlineSpans = charDiff
+      .filter((s) => !s.removed)
+      .map((s) => ({ text: s.value, highlight: s.added === true }));
+  }
+}
+
+export const buildDiffLinesWithInline = (beforeText: string, afterText: string): DiffLine[] => {
+  const lines = buildDiffLines(beforeText, afterText);
+
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].type !== 'remove') {
+      i++;
+      continue;
+    }
+
+    // Collect a contiguous block of remove lines starting at i.
+    let removeEnd = i;
+    while (removeEnd + 1 < lines.length && lines[removeEnd + 1].type === 'remove') {
+      removeEnd++;
+    }
+
+    // Collect the contiguous block of add lines immediately following.
+    const addStart = removeEnd + 1;
+    let addEnd = addStart - 1;
+    if (addStart < lines.length && lines[addStart].type === 'add') {
+      addEnd = addStart;
+      while (addEnd + 1 < lines.length && lines[addEnd + 1].type === 'add') {
+        addEnd++;
+      }
+    }
+
+    if (addEnd >= addStart) {
+      _pairBlocks(lines.slice(i, removeEnd + 1), lines.slice(addStart, addEnd + 1));
+      i = addEnd + 1;
+    } else {
+      i = removeEnd + 1;
+    }
+  }
 
   return lines;
 };

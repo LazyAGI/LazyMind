@@ -30,14 +30,14 @@ type Config struct {
 
 	ScannerInterval time.Duration
 
-	ConversationIdleSeconds                 time.Duration
-	ConversationIdleHistoryTTL              time.Duration
-	ConversationIdleHistoryMaxMessages      int
-	ConversationIdleFallbackScanInterval    time.Duration
-	ConversationIdleFallbackBatchSize       int
-	ConversationIdleEnableRedisExpireNotify bool
+	ConversationIdleSeconds                time.Duration
+	ConversationIdleHistoryTTL             time.Duration
+	ConversationIdleHistoryMaxMessages     int
+	ConversationIdleFallbackScanInterval   time.Duration
+	ConversationIdleFallbackBatchSize      int
+	ConversationIdleEnableExpiredKeyNotify bool
 
-	conversationIdleEnableRedisExpireNotifySet bool
+	conversationIdleEnableExpiredKeyNotifySet bool
 }
 
 func DefaultConfig() Config {
@@ -67,12 +67,12 @@ func DefaultConfig() Config {
 
 		ScannerInterval: 5 * time.Second,
 
-		ConversationIdleSeconds:                 5 * time.Minute,
-		ConversationIdleHistoryTTL:              30 * time.Minute,
-		ConversationIdleHistoryMaxMessages:      100,
-		ConversationIdleFallbackScanInterval:    5 * time.Minute,
-		ConversationIdleFallbackBatchSize:       100,
-		ConversationIdleEnableRedisExpireNotify: true,
+		ConversationIdleSeconds:                5 * time.Minute,
+		ConversationIdleHistoryTTL:             30 * time.Minute,
+		ConversationIdleHistoryMaxMessages:     100,
+		ConversationIdleFallbackScanInterval:   5 * time.Minute,
+		ConversationIdleFallbackBatchSize:      100,
+		ConversationIdleEnableExpiredKeyNotify: true,
 	}
 }
 
@@ -144,14 +144,14 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.ConversationIdleFallbackBatchSize <= 0 {
 		cfg.ConversationIdleFallbackBatchSize = def.ConversationIdleFallbackBatchSize
 	}
-	if !cfg.conversationIdleEnableRedisExpireNotifySet {
-		cfg.ConversationIdleEnableRedisExpireNotify = def.ConversationIdleEnableRedisExpireNotify
+	if !cfg.conversationIdleEnableExpiredKeyNotifySet {
+		cfg.ConversationIdleEnableExpiredKeyNotify = def.ConversationIdleEnableExpiredKeyNotify
 	}
 	return cfg
 }
 
-func (cfg Config) WithConversationIdleRedisExpireNotify(enabled bool) Config {
-	cfg.ConversationIdleEnableRedisExpireNotify = enabled
-	cfg.conversationIdleEnableRedisExpireNotifySet = true
+func (cfg Config) WithConversationIdleExpiredKeyNotify(enabled bool) Config {
+	cfg.ConversationIdleEnableExpiredKeyNotify = enabled
+	cfg.conversationIdleEnableExpiredKeyNotifySet = true
 	return cfg
 }

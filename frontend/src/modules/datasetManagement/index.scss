@@ -39,7 +39,6 @@
   border-radius: 8px;
   border: 1px solid #edf1f5;
   box-shadow: none;
-
   .ant-card-body {
     height: 100%;
     min-height: 0;
@@ -132,6 +131,21 @@
   .ant-table {
     flex: 1;
     min-height: 0;
+    overflow: hidden;
+  }
+
+  .ant-pagination {
+    flex: 0 0 auto;
+    margin-bottom: 0;
+  }
+
+  .ant-table-container,
+  .ant-table-body {
+    min-height: 0;
+  }
+
+  .ant-table-body {
+    scrollbar-width: thin;
   }
 
   .ant-table-cell {
@@ -172,8 +186,15 @@
   color: #667085;
 }
 
+.dataset-kb-column {
+  min-width: 0;
+  overflow: hidden;
+}
+
 .dataset-kb-scroll-list {
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
   display: flex;
   flex-wrap: nowrap;
   gap: 4px;

@@ -206,11 +206,12 @@ const AssistantMessage = (props: any) => {
 
   const loadActiveSession = usePluginStore((s) => s.loadActiveSession);
   // Eagerly load the plugin session so the panel appears without waiting for component mount.
+  const isLast = index === length - 1;
   useEffect(() => {
-    if (index === length - 1 && sessionId) {
+    if (isLast && sessionId) {
       loadActiveSession(sessionId);
     }
-  }, [index, length, sessionId, loadActiveSession]);
+  }, [isLast, sessionId, loadActiveSession]);
 
   const pluginSession = usePluginStore((s) =>
     sessionId ? s.sessionByConversation[sessionId] ?? null : null,

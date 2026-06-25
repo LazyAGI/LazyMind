@@ -7,6 +7,9 @@ ARG GOSUMDB=sum.golang.google.cn
 ENV GOPROXY=${GOPROXY} \
     GOSUMDB=${GOSUMDB}
 
+COPY core/go.mod core/go.sum ./
+RUN go mod download
+
 COPY core/ ./
 RUN CGO_ENABLED=0 go build -o /core .
 

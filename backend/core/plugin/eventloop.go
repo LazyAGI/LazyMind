@@ -50,6 +50,11 @@ type PluginStepParams struct {
 	// Nil / empty means full write (append for list, overwrite for single).
 	// Example: {"material_images": [1]} — only slot entry at list_index=1 is replaced.
 	PartialIndices map[string][]int `json:"partial_indices,omitempty"`
+
+	// HistoryFilesPerTurn carries the full per-turn user attachment index so the
+	// SubAgent can access uploaded files via read_user_attachment / find_user_attachment.
+	// Key = conversation turn sequence (string), value = list of absolute file paths.
+	HistoryFilesPerTurn map[string][]string `json:"history_files_per_turn,omitempty"`
 }
 
 // asMap serialises the params into the generic map expected by subagent.RunRequest.Params.
@@ -67,16 +72,20 @@ func (p PluginStepParams) asMap() map[string]any {
 	if len(p.PartialIndices) > 0 {
 		m["partial_indices"] = p.PartialIndices
 	}
+	if len(p.HistoryFilesPerTurn) > 0 {
+		m["history_files_per_turn"] = p.HistoryFilesPerTurn
+	}
 	return m
 }
 
 // PluginChatContext carries plugin identifiers threaded through the SubAgent event loop.
 type PluginChatContext struct {
-	SessionID string
-	PluginID  string
-	StepID    string
-	ConvID    string
-	UserID    string
+	SessionID           string
+	PluginID            string
+	StepID              string
+	ConvID              string
+	UserID              string
+	HistoryFilesPerTurn map[string][]string
 }
 
 // HandlePluginStepCreated processes a task_created event for agent_type='plugin_step'.
@@ -156,6 +165,9 @@ func HandlePluginStepCreated(
 	if len(params.PartialIndices) > 0 {
 		rawParamsMap["partial_indices"] = params.PartialIndices
 	}
+	if len(params.HistoryFilesPerTurn) > 0 {
+		rawParamsMap["history_files_per_turn"] = params.HistoryFilesPerTurn
+	}
 	rawParams, _ := json.Marshal(rawParamsMap)
 	inputJSON, _ := json.Marshal(inputKeys)
 	outputJSON, _ := json.Marshal(outputKeys)
@@ -191,19 +203,23 @@ func HandlePluginStepCreated(
 	// Launch SubAgent goroutine.
 	// input_artifact_keys, output_artifact_keys, and tools are NOT forwarded here:
 	// the Python runner reads them from the DB task record and plugin_loader respectively.
+	runParams := map[string]any{
+		"plugin_id":  pluginID,
+		"step_id":    stepID,
+		"session_id": sessionID,
+	}
+	if len(params.HistoryFilesPerTurn) > 0 {
+		runParams["history_files_per_turn"] = params.HistoryFilesPerTurn
+	}
 	go subagent.Run(context.Background(), db, stateStore, subagent.RunRequest{
 		TaskID:        task.ID,
 		AgentType:     "plugin_step",
 		WorkspacePath: task.WorkspacePath,
-		Params: map[string]any{
-			"plugin_id":  pluginID,
-			"step_id":    stepID,
-			"session_id": sessionID,
-		},
-		DBDSN:      subagent.DBDSN(),
-		Resume:     false,
-		LLMConfig:  llmConfig,
-		ToolConfig: toolConfig,
+		Params:        runParams,
+		DBDSN:         subagent.DBDSN(),
+		Resume:        false,
+		LLMConfig:     llmConfig,
+		ToolConfig:    toolConfig,
 	})
 
 	return sessionID, task.ID, nil
@@ -273,7 +289,7 @@ func advanceAutoMode(
 	onSSE func(string, map[string]any),
 	pctx *PluginChatContext,
 ) {
-	verdict, reason := callDriverAgent(pctx.PluginID, pctx.StepID, summary, pctx.SessionID)
+	verdict, reason := callDriverAgent(pctx.PluginID, pctx.StepID, summary, pctx.SessionID, pctx.HistoryFilesPerTurn)
 	switch verdict {
 	case "DONE":
 		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusCompleted)
@@ -594,7 +610,7 @@ func resolveSlotBinding(pluginID, artifactKey string) (slotID, cardinality strin
 
 // callDriverAgent posts to the Python DriverAgent endpoint and returns (verdict, reason).
 // On any error defaults to ("PASS", "").
-func callDriverAgent(pluginID, stepID, stepResult, sessionID string) (verdict, reason string) {
+func callDriverAgent(pluginID, stepID, stepResult, sessionID string, historyFilesPerTurn map[string][]string) (verdict, reason string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	reqBody := map[string]any{
@@ -602,6 +618,9 @@ func callDriverAgent(pluginID, stepID, stepResult, sessionID string) (verdict, r
 		"step_id":     stepID,
 		"step_result": stepResult,
 		"session_id":  sessionID,
+	}
+	if len(historyFilesPerTurn) > 0 {
+		reqBody["history_files_per_turn"] = historyFilesPerTurn
 	}
 	body, _ := json.Marshal(reqBody)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, driverEndpoint(), bytes.NewReader(body))
