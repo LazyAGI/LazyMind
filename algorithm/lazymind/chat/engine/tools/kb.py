@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import lazyllm
 from lazyllm import AutoModel, LOG
@@ -305,8 +305,6 @@ class KBToolGroup:
         """
         agentic_config = lazyllm.globals['agentic_config']
         retrievers, reranker, image_retriever = _ensure_kb_search_runtime()
-        if not isinstance(query, str) or not query.strip():
-            raise ValueError('query is required and must be a non-empty string')
 
         payload = {
             'query': query.strip(),
@@ -346,9 +344,6 @@ class KBToolGroup:
             The matched parent node, if the current node has a parent and the
             parent can be found.
         """
-        if not node_id:
-            raise ValueError('node_id is required')
-
         config = lazyllm.globals['agentic_config']
         doc = DOCUMENT
 
@@ -420,11 +415,6 @@ class KBToolGroup:
         Returns:
             A compact dict with node numbers and contents only.
         """
-        if not docid:
-            raise ValueError('docid is required')
-        if number is None:
-            raise ValueError('number is required')
-
         start, end = parse_number_range(number)
 
         numbers = set(range(start, end + 1))
@@ -469,23 +459,24 @@ class KBToolGroup:
     def kb_keyword_search(
         self,
         keyword: str,
-        docid: str = '',
+        target: str,
+        target_type: Literal['file_name', 'docid'] = 'file_name',
         group: str = 'block',
         phrase: bool = True,
         size: int = 10,
         sort_by: str = 'score',
-        file_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Search for exact keyword or phrase matches within a specific document.
 
-        Use when the user names a document file — pass it as ``file_name``.
+        Use when the user names a document file -- pass it as ``target`` with
+        ``target_type='file_name'``.
         Performs full-text keyword matching inside one target document,
         useful for finding all occurrences of a term or checking whether a
         document mentions something specific.
 
-        You must provide at least one of ``docid`` or ``file_name`` to identify
-        the target document. When only ``file_name`` is given the search is
-        scoped to all segments belonging to that file.
+        You must provide ``target`` to identify the document. By default
+        ``target`` is treated as a file name. Use ``target_type='docid'`` only
+        when a document id is already known.
 
         Use this method only when the user names a specific document and asks for
         an exact term or phrase inside that document. For open-ended semantic
@@ -493,27 +484,24 @@ class KBToolGroup:
 
         Args:
             keyword: Keyword or phrase to search in ``content``.
-            docid: Target document id (optional if ``file_name`` is given).
+            target: Target file name or document id.
+            target_type: How to interpret ``target``; either ``file_name`` or
+                ``docid``. Defaults to ``file_name``.
             group: Search granularity, either ``block`` or ``line``.
             phrase: Use ``match_phrase`` when true, otherwise ``match``.
             size: Maximum number of hits.
             sort_by: score for relevance first, or number for document
                 order.
-            file_name: Target file name, e.g. ``report.pdf`` (optional if
-                ``docid`` is given).
 
         Returns:
             Matching nodes with content snippets.
         """
-        if not keyword:
-            raise ValueError('keyword is required')
-        if not docid and not file_name:
-            raise ValueError('docid or file_name is required')
-
         config = lazyllm.globals['agentic_config']
         index_name = resolve_index(group)
         size = max(1, min(int(size), _MAX_RESULT_ITEMS))
         doc = DOCUMENT
+        docid = target if target_type == 'docid' else ''
+        file_name = target if target_type == 'file_name' else None
         LOG.info(f'[kb_keyword_search] store={_cfg["segment_store_type"]!r} keyword={keyword!r} docid={docid!r} '
                  f'file_name={file_name!r} group={group!r} phrase={phrase} sort_by={sort_by!r} size={size}')
 
@@ -581,8 +569,6 @@ def kb_tmp_search(
     """
     agentic_config = lazyllm.globals['agentic_config']
     tmp_retriever, reranker = _ensure_temp_search_runtime()
-    if not isinstance(query, str) or not query.strip():
-        raise ValueError('query is required and must be a non-empty string')
     payload = {
         'query': query.strip(),
         'filters': {},
