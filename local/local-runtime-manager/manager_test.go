@@ -210,7 +210,7 @@ func TestComposeUpScalesDisabledServicesToZero(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	overlay := filepath.Join(repo, localComposeOverrideName)
-	if err := os.WriteFile(overlay, []byte("x-lazymind-local:\n  mode: local\n  disabled_container_services:\n    - redis\n    - evo-api\n  scale_disabled_container_services:\n    - redis\n"), 0o644); err != nil {
+	if err := os.WriteFile(overlay, []byte("x-lazymind-local:\n  mode: local\n  disabled_container_services:\n    - redis\n    - auth-service\n    - evo-api\n  scale_disabled_container_services:\n    - redis\n    - auth-service\n"), 0o644); err != nil {
 		t.Fatalf("write overlay: %v", err)
 	}
 
@@ -228,7 +228,8 @@ func TestComposeUpScalesDisabledServicesToZero(t *testing.T) {
 			"up",
 			"--build",
 			"--scale", "redis=0",
-			"auth-service", "core",
+			"--scale", "auth-service=0",
+			"core",
 		})
 		for i, arg := range cmd.Args {
 			if arg == "--scale" && i+1 < len(cmd.Args) && cmd.Args[i+1] == "evo-api=0" {
@@ -236,7 +237,7 @@ func TestComposeUpScalesDisabledServicesToZero(t *testing.T) {
 			}
 		}
 		for _, arg := range cmd.Args {
-			if arg == "redis" || arg == "evo-api" {
+			if arg == "redis" || arg == "auth-service" || arg == "evo-api" {
 				t.Fatalf("disabled service %s should not be in explicit service list: %v", arg, cmd.Args)
 			}
 		}

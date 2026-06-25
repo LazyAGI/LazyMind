@@ -103,6 +103,7 @@ x-lazymind-local:
   scale_disabled_container_services:
     - redis
     - kong
+    - auth-service
 
 volumes:
   sqlite-data:
