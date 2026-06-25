@@ -824,6 +824,7 @@ func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
 	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
 	manager.probeAPI = func(port int, timeout time.Duration) bool { return true }
 	manager.probeAuth = func(port int, timeout time.Duration) bool { return true }
+	manager.probeCore = func(port int, timeout time.Duration) bool { return true }
 	manager.waitHostReady = func(context.Context, RuntimeConfig) error { return nil }
 	manager.pollInterval = time.Millisecond
 	manager.upTimeout = time.Second

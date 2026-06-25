@@ -23,6 +23,7 @@ const (
 	localProxyScanHostPortEnvVar  = "LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT"
 	localProxyEvoHostPortEnvVar   = "LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT"
 	localPostgresPortEnvVar       = "LAZYMIND_LOCAL_POSTGRES_PORT"
+	localCorePortEnvVar           = "LAZYMIND_LOCAL_CORE_PORT"
 	localDocPortEnvVar            = "LAZYMIND_LOCAL_DOC_PORT"
 	localProcessorPortEnvVar      = "LAZYMIND_LOCAL_PROCESSOR_PORT"
 	localAlgoPortEnvVar           = "LAZYMIND_LOCAL_ALGO_PORT"
@@ -63,11 +64,14 @@ const (
 	defaultLocalOpenSearchPort    = 19200
 	stateFileName                 = "runtime-state.json"
 	composeGeneratedFileName      = "process-compose.generated.yaml"
+	serviceEndpointsJSONName      = "service-endpoints.json"
+	serviceEndpointsEnvName       = "service-endpoints.env"
 	tokenFileName                 = "pc-token"
 	upLockFileName                = "up.lock"
 	logFileName                   = "docker-stack.log"
 	localProxyLogFileName         = "local-proxy.log"
 	authServiceLogFileName        = "auth-service.log"
+	coreLogFileName               = "core.log"
 	frontendLogFileName           = "frontend.log"
 	repoComposeFileName           = "docker-compose.yml"
 	localComposeOverrideName      = "local/docker-compose.local.yml"
@@ -76,9 +80,11 @@ const (
 	localProxyScriptDirName       = "local/local-proxy/scripts"
 	localProxySourceDirName       = "local/local-proxy"
 	authServiceSourceDirName      = "backend/auth-service"
+	coreSourceDirName             = "backend/core"
 	processComposeServiceName     = "docker-stack"
 	localProxyProcessName         = "local-proxy"
 	authServiceProcessName        = "auth-service"
+	coreProcessName               = "core"
 	frontendProcessName           = "frontend"
 	docServerProcessName          = "lazyllm-doc-server"
 	processorServerProcessName    = "lazyllm-parse-server"
@@ -105,6 +111,10 @@ type RuntimePaths struct {
 	AuthServicePIDFile   string
 	AuthServiceVenvDir   string
 	AuthServiceStateDir  string
+	CoreLog              string
+	CorePIDFile          string
+	CoreBin              string
+	CoreStateDir         string
 	FrontendLog          string
 	DocServerLog         string
 	ProcessorServerLog   string
@@ -118,6 +128,8 @@ type RuntimePaths struct {
 	LocalProxyStopScript string
 	CaddyConfig          string
 	GeneratedConfig      string
+	ServiceEndpointsJSON string
+	ServiceEndpointsEnv  string
 	AlgorithmVenv        string
 	AlgorithmPython      string
 	AlgorithmHome        string
@@ -164,6 +176,22 @@ type AlgorithmConfig struct {
 	MilvusPort     int
 	OpenSearchPort int
 	EnableEvo      bool
+}
+
+type ServiceEndpoints struct {
+	Host      ServiceEndpointURLs `json:"host"`
+	Container ServiceEndpointURLs `json:"container"`
+}
+
+type ServiceEndpointURLs struct {
+	AuthServiceBaseURL     string `json:"authServiceBaseUrl"`
+	CoreBaseURL            string `json:"coreBaseUrl"`
+	DocumentServiceBaseURL string `json:"documentServiceBaseUrl"`
+	ProcessorBaseURL       string `json:"processorBaseUrl"`
+	ChatBaseURL            string `json:"chatBaseUrl"`
+	EvoBaseURL             string `json:"evoBaseUrl"`
+	OfficeConvertURL       string `json:"officeConvertUrl"`
+	PostgresAddress        string `json:"postgresAddress"`
 }
 
 func defaultProfileValue() string {
@@ -274,6 +302,16 @@ func envPort(name string, fallback int) int {
 	return fallback
 }
 
+func envPortCompat(name, legacyName string, fallback int) int {
+	if strings.TrimSpace(os.Getenv(name)) != "" {
+		return envPort(name, fallback)
+	}
+	if legacyName != "" && strings.TrimSpace(os.Getenv(legacyName)) != "" {
+		return envPort(legacyName, fallback)
+	}
+	return fallback
+}
+
 func envText(name, fallback string) string {
 	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 		return v
@@ -324,6 +362,34 @@ func authServiceDatabaseURL(postgresPort int) string {
 		postgresPort = defaultLocalPostgresPort
 	}
 	return "postgresql+psycopg://root:123456@127.0.0.1:" + strconv.Itoa(postgresPort) + "/authservice"
+}
+
+func serviceEndpointsFromConfig(cfg RuntimeConfig) ServiceEndpoints {
+	host := ServiceEndpointURLs{
+		AuthServiceBaseURL:     "http://127.0.0.1:" + strconv.Itoa(cfg.AuthService.Port),
+		CoreBaseURL:            "http://127.0.0.1:" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
+		DocumentServiceBaseURL: "http://127.0.0.1:" + strconv.Itoa(cfg.Algorithm.DocPort),
+		ProcessorBaseURL:       "http://127.0.0.1:" + strconv.Itoa(cfg.Algorithm.ProcessorPort),
+		ChatBaseURL:            "http://127.0.0.1:" + strconv.Itoa(cfg.Algorithm.ChatPort),
+		EvoBaseURL:             "http://127.0.0.1:" + strconv.Itoa(cfg.Algorithm.EvoPort),
+		OfficeConvertURL:       "http://127.0.0.1:18082/v1/office/to-pdf",
+		PostgresAddress:        "127.0.0.1:" + strconv.Itoa(cfg.Algorithm.PostgresPort),
+	}
+	container := ServiceEndpointURLs{
+		AuthServiceBaseURL:     "http://host.docker.internal:" + strconv.Itoa(cfg.AuthService.Port),
+		CoreBaseURL:            "http://host.docker.internal:" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
+		DocumentServiceBaseURL: "http://host.docker.internal:" + strconv.Itoa(cfg.Algorithm.DocPort),
+		ProcessorBaseURL:       "http://host.docker.internal:" + strconv.Itoa(cfg.Algorithm.ProcessorPort),
+		ChatBaseURL:            "http://host.docker.internal:" + strconv.Itoa(cfg.Algorithm.ChatPort),
+		EvoBaseURL:             "http://host.docker.internal:" + strconv.Itoa(cfg.Algorithm.EvoPort),
+		OfficeConvertURL:       "http://host.docker.internal:18082/v1/office/to-pdf",
+		PostgresAddress:        "host.docker.internal:" + strconv.Itoa(cfg.Algorithm.PostgresPort),
+	}
+	return ServiceEndpoints{Host: host, Container: container}
+}
+
+func coreDatabaseDSN(port int, database, user, password string) string {
+	return "host=127.0.0.1 user=" + user + " password=" + password + " dbname=" + database + " port=" + strconv.Itoa(port) + " sslmode=disable TimeZone=UTC"
 }
 
 func resolveRepoRoot(start string) (string, error) {
@@ -377,6 +443,10 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		AuthServicePIDFile:   filepath.Join(runtimeRoot, "run", "auth-service.pid"),
 		AuthServiceVenvDir:   filepath.Join(runtimeRoot, "venvs", "auth-service"),
 		AuthServiceStateDir:  filepath.Join(runtimeRoot, "stores", "sqlite", "auth-state"),
+		CoreLog:              filepath.Join(runtimeRoot, "logs", coreLogFileName),
+		CorePIDFile:          filepath.Join(runtimeRoot, "run", "core.pid"),
+		CoreBin:              filepath.Join(runtimeRoot, "bin", "core"),
+		CoreStateDir:         filepath.Join(runtimeRoot, "stores", "sqlite", "core-state"),
 		FrontendLog:          filepath.Join(runtimeRoot, "logs", frontendLogFileName),
 		DocServerLog:         filepath.Join(runtimeRoot, "logs", docServerProcessName+".log"),
 		ProcessorServerLog:   filepath.Join(runtimeRoot, "logs", processorServerProcessName+".log"),
@@ -390,6 +460,8 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		LocalProxyStopScript: filepath.Join(root, localProxyScriptDirName, "stop.sh"),
 		CaddyConfig:          filepath.Join(runtimeRoot, "generated", "Caddyfile"),
 		GeneratedConfig:      filepath.Join(runtimeRoot, "generated", composeGeneratedFileName),
+		ServiceEndpointsJSON: filepath.Join(runtimeRoot, "generated", serviceEndpointsJSONName),
+		ServiceEndpointsEnv:  filepath.Join(runtimeRoot, "generated", serviceEndpointsEnvName),
 		AlgorithmVenv:        filepath.Join(runtimeRoot, "python", ".venv"),
 		AlgorithmPython:      filepath.Join(runtimeRoot, "python", ".venv", "bin", "python"),
 		AlgorithmHome:        filepath.Join(runtimeRoot, "home"),
@@ -400,7 +472,7 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 	frontendPort := ports.envOrAvailableDefaultCanMove(frontendPortEnvVar, defaultFrontendPort)
 	localProxyPort := ports.envOrAvailable(localProxyPortEnvVar, defaultLocalProxyPort)
 	authHostPort := ports.envOrAvailable(localProxyAuthHostPortEnvVar, defaultLocalProxyAuthHostPort)
-	coreHostPort := ports.envOrAvailable(localProxyCoreHostPortEnvVar, defaultLocalProxyCoreHostPort)
+	coreHostPort := ports.firstEnvOrAvailable([]string{localCorePortEnvVar, localProxyCoreHostPortEnvVar}, defaultLocalProxyCoreHostPort)
 	scanHostPort := ports.envOrAvailable(localProxyScanHostPortEnvVar, defaultLocalProxyScanHostPort)
 	postgresPort := ports.envOrAvailable(localPostgresPortEnvVar, defaultLocalPostgresPort)
 	docPort := ports.envOrAvailable(localDocPortEnvVar, defaultLocalDocPort)
@@ -457,6 +529,7 @@ func (p RuntimePaths) EnsureAllDirs() error {
 		p.BinDir,
 		filepath.Dir(p.AuthServicePIDFile),
 		p.AuthServiceStateDir,
+		p.CoreStateDir,
 		p.AuthServiceVenvDir,
 		filepath.Dir(p.AlgorithmVenv),
 		p.AlgorithmHome,

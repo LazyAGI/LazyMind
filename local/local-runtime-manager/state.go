@@ -102,6 +102,10 @@ func defaultRuntimeState(cfg RuntimeConfig, apiPort int, tokenPath string) Runti
 				Kind:   "host-process",
 				Status: "stopped",
 			},
+			coreProcessName: {
+				Kind:   "host-process",
+				Status: "stopped",
+			},
 			docServerProcessName: {
 				Kind:   "host-process",
 				Status: "stopped",
@@ -179,6 +183,10 @@ func newStateWithServiceStatus(state RuntimeState, serviceStatus string) Runtime
 	fe.Kind = "host-process"
 	fe.Status = serviceStatus
 	state.Services[frontendProcessName] = fe
+	core := state.Services[coreProcessName]
+	core.Kind = "host-process"
+	core.Status = serviceStatus
+	state.Services[coreProcessName] = core
 	for _, name := range []string{
 		docServerProcessName,
 		processorServerProcessName,
@@ -254,6 +262,16 @@ func normalizeRuntimeServices(services map[string]RuntimeServiceState) map[strin
 		svc := services[frontendProcessName]
 		svc.Kind = "host-process"
 		normalized[frontendProcessName] = svc
+	}
+	if _, ok := services[coreProcessName]; !ok {
+		normalized[coreProcessName] = RuntimeServiceState{
+			Kind:   "host-process",
+			Status: "unknown",
+		}
+	} else {
+		svc := services[coreProcessName]
+		svc.Kind = "host-process"
+		normalized[coreProcessName] = svc
 	}
 	for _, name := range []string{
 		docServerProcessName,

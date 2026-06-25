@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -91,6 +92,18 @@ func registerCoreRoutes(r *mux.Router) {
 		common.ReplyJSON(w, map[string]string{"message": "Admin only area"})
 	})
 	registerAllRoutes(r)
+}
+
+func coreListenAddr() string {
+	host := strings.TrimSpace(os.Getenv("LAZYMIND_CORE_HOST"))
+	port := strings.TrimSpace(os.Getenv("LAZYMIND_CORE_PORT"))
+	if port == "" {
+		port = "8000"
+	}
+	if host == "" {
+		return ":" + port
+	}
+	return net.JoinHostPort(host, port)
 }
 
 func exportRegisteredOpenAPIArtifacts() error {
@@ -255,8 +268,9 @@ func main() {
 		w.Write(swaggerUIHTML)
 	}).Methods(http.MethodGet)
 
-	log.Logger.Info().Msg("Core listening on :8000")
-	if err := http.ListenAndServe(":8000", r); err != nil {
+	listenAddr := coreListenAddr()
+	log.Logger.Info().Str("addr", listenAddr).Msg("Core listening")
+	if err := http.ListenAndServe(listenAddr, r); err != nil {
 		log.Logger.Fatal().Err(err).Msg("http listen failed")
 	}
 }

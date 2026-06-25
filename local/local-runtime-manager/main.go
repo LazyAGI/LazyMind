@@ -142,6 +142,10 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 		return manager.authService.Run(ctx, cfg, paths)
 	case "auth-service-down":
 		return manager.authService.Down(ctx, cfg, paths)
+	case "core-run":
+		return manager.coreService.Run(ctx, cfg, paths)
+	case "core-down":
+		return manager.coreService.Down(ctx, cfg, paths)
 	case "frontend-run":
 		return manager.frontend.Run(ctx, cfg, paths)
 	case "frontend-down":
@@ -203,5 +207,5 @@ func (c *CLI) usage() {
 	_, _ = io.WriteString(c.out, "  lazymind-local up --profile <profile>\n")
 	_, _ = io.WriteString(c.out, "  lazymind-local down --profile <profile>\n")
 	_, _ = io.WriteString(c.out, "  lazymind-local status --json\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local internal compose-up|compose-down|compose-services|local-proxy-run|local-proxy-down|auth-service-run|auth-service-down|frontend-run|frontend-down|algorithm-run|algorithm-down --profile <profile>\n")
+	_, _ = io.WriteString(c.out, "  lazymind-local internal compose-up|compose-down|compose-services|local-proxy-run|local-proxy-down|auth-service-run|auth-service-down|core-run|core-down|frontend-run|frontend-down|algorithm-run|algorithm-down --profile <profile>\n")
 }

@@ -255,6 +255,7 @@ func localComposeEnv(cfg RuntimeConfig) []string {
 		"LAZYMIND_LOCAL_PROXY_PORT=" + strconv.Itoa(cfg.LocalProxy.Port),
 		"LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.AuthHostPort),
 		"LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
+		"LAZYMIND_LOCAL_CORE_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 		"LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.ChatHostPort),
 		"LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.ScanHostPort),
 		"LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.EvoHostPort),

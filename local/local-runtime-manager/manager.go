@@ -23,6 +23,7 @@ type RuntimeManager struct {
 	errOut         io.Writer
 	probeAPI       func(port int, timeout time.Duration) bool
 	probeAuth      func(port int, timeout time.Duration) bool
+	probeCore      func(port int, timeout time.Duration) bool
 	waitHostReady  func(context.Context, RuntimeConfig) error
 	runtimeReady   func(context.Context, RuntimeConfig, RuntimePaths) bool
 	pollInterval   time.Duration
@@ -32,6 +33,7 @@ type RuntimeManager struct {
 	processCompose *ProcessComposeManager
 	localProxy     *LocalProxyManager
 	authService    *AuthServiceManager
+	coreService    *CoreServiceManager
 	frontend       *FrontendManager
 	algorithm      *AlgorithmServiceManager
 }
@@ -46,6 +48,7 @@ func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
 		errOut:         io.Discard,
 		probeAPI:       processCompose.ProbeAPI,
 		probeAuth:      authServiceHealthAlive,
+		probeCore:      coreServiceHealthAlive,
 		waitHostReady:  waitForHostAlgorithmReadiness,
 		runtimeReady:   nil,
 		pollInterval:   2 * time.Second,
@@ -55,6 +58,7 @@ func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
 		processCompose: processCompose,
 		localProxy:     NewLocalProxyManager(r),
 		authService:    NewAuthServiceManager(r),
+		coreService:    NewCoreServiceManager(r),
 		frontend:       NewFrontendManager(r),
 		algorithm:      NewAlgorithmServiceManager(r),
 	}
@@ -82,6 +86,9 @@ func randomHexToken() (string, error) {
 func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
 	freshCfg := cfg
 	if err := paths.EnsureAllDirs(); err != nil {
+		return err
+	}
+	if err := writeServiceEndpointFiles(paths, serviceEndpointsFromConfig(cfg)); err != nil {
 		return err
 	}
 	if err := ensureComposeBindPermissions(paths.RepoRoot); err != nil {
@@ -197,6 +204,12 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		_ = writeRuntimeState(paths.StateFile, state)
 		return err
 	}
+	if err := m.waitForCoreHealthy(ctx, cfg.LocalProxy.CoreHostPort, m.upTimeout); err != nil {
+		state = newStateWithServiceStatus(state, "failed")
+		state.OverallStatus = "failed"
+		_ = writeRuntimeState(paths.StateFile, state)
+		return err
+	}
 	if waitErr := m.waitHostReady(ctx, cfg); waitErr != nil {
 		state = newStateWithServiceStatus(state, "failed")
 		state.OverallStatus = "failed"
@@ -238,6 +251,25 @@ func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int
 			return ctx.Err()
 		case <-deadline.C:
 			return fmt.Errorf("auth-service health check timed out on port %d", port)
+		case <-ticker.C:
+		}
+	}
+}
+
+func (m *RuntimeManager) waitForCoreHealthy(ctx context.Context, port int, timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if m.probeCore(port, time.Second) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("core health check timed out on port %d", port)
 		case <-ticker.C:
 		}
 	}
@@ -287,6 +319,9 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 		if err := m.algorithm.Down(ctx, paths, spec.Name); err != nil && downErr == nil {
 			downErr = err
 		}
+	}
+	if err := m.coreService.Down(ctx, cfg, paths); err != nil && downErr == nil {
+		downErr = err
 	}
 	if downErr != nil {
 		state = newStateWithServiceStatus(state, "failed")
@@ -372,6 +407,9 @@ func (m *RuntimeManager) checkRuntimeReady(ctx context.Context, cfg RuntimeConfi
 		return false
 	}
 	if !m.probeAuth(cfg.AuthService.Port, 500*time.Millisecond) {
+		return false
+	}
+	if !m.probeCore(cfg.LocalProxy.CoreHostPort, 500*time.Millisecond) {
 		return false
 	}
 	for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
@@ -633,6 +671,12 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 			Status: "unknown",
 		}
 	}
+	if _, ok := resp.Services[coreProcessName]; !ok {
+		resp.Services[coreProcessName] = RuntimeServiceState{
+			Kind:   "host-process",
+			Status: "unknown",
+		}
+	}
 	for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
 		if _, ok := resp.Services[spec.Name]; !ok {
 			resp.Services[spec.Name] = RuntimeServiceState{
@@ -672,6 +716,14 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 			hostHealthy = false
 		}
 		resp.Services[frontendProcessName] = frontend
+		core := resp.Services[coreProcessName]
+		core.Kind = "host-process"
+		if m.probeCore(cfg.LocalProxy.CoreHostPort, 500*time.Millisecond) {
+			core.Status = "running"
+		} else {
+			hostHealthy = false
+		}
+		resp.Services[coreProcessName] = core
 		for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
 			svc := resp.Services[spec.Name]
 			svc.Kind = "host-process"

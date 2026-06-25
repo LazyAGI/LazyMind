@@ -51,6 +51,8 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 	commandForLocalProxyDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal local-proxy-down --profile "+profile)
 	commandForAuthServiceRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal auth-service-run --profile "+profile)
 	commandForAuthServiceDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal auth-service-down --profile "+profile)
+	commandForCoreRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal core-run --profile "+profile)
+	commandForCoreDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal core-down --profile "+profile)
 	commandForFrontendRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-run --profile "+profile)
 	commandForFrontendDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-down --profile "+profile)
 
@@ -87,6 +89,16 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 					TimeoutSeconds: 15,
 				},
 				LogLocation: paths.AuthServiceLog,
+				Namespace:   "host",
+			},
+			coreProcessName: {
+				WorkingDir: repoRoot,
+				Command:    commandForCoreRun,
+				Shutdown: processComposeShutdown{
+					Command:        commandForCoreDown,
+					TimeoutSeconds: 15,
+				},
+				LogLocation: paths.CoreLog,
 				Namespace:   "host",
 			},
 			frontendProcessName: {
