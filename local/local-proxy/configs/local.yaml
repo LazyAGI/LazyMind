@@ -54,6 +54,6 @@ routes:
     prefix: "/api/evo"
     upstream: "http://127.0.0.1:8047"
     stripPath: true
-    enabled: false
+    enabled: true
     optional: true
     healthPath: "/health"

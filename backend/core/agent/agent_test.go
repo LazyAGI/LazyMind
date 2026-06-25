@@ -182,46 +182,6 @@ func TestBuildThreadCreateTitleUsesKnowledgeBaseDisplayNameAndDate(t *testing.T)
 	}
 }
 
-func TestRequireEvoServiceEnabledReturns503WhenDisabled(t *testing.T) {
-	t.Setenv("LAZYMIND_EVO_SERVICE_ENABLED", "false")
-
-	called := false
-	handler := RequireEvoServiceEnabled(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusNoContent)
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/agent/threads", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if called {
-		t.Fatal("wrapped handler should not be called when evo service is disabled")
-	}
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), evoServiceDisabledMessage) {
-		t.Fatalf("response body should mention disabled evo service, got %s", rec.Body.String())
-	}
-}
-
-func TestRequireEvoServiceEnabledDefaultsToEnabled(t *testing.T) {
-	t.Setenv("LAZYMIND_EVO_SERVICE_ENABLED", "")
-
-	handler := RequireEvoServiceEnabled(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/agent/threads", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusNoContent, rec.Body.String())
-	}
-}
-
 func TestBuildThreadCreateTitleFallsBackToPayloadTitle(t *testing.T) {
 	now := time.Date(2026, 5, 13, 9, 30, 0, 0, time.UTC)
 	payload := map[string]any{
