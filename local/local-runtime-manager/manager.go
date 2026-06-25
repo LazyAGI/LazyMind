@@ -255,8 +255,8 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 	apiAlive := m.probeAPI(cfg.ProcessComposePort, 500*time.Millisecond)
 	if apiAlive {
 		downCtx, cancel := context.WithTimeout(ctx, m.downTimeout)
+		defer cancel()
 		downErr = m.processCompose.Down(downCtx, cfg, paths)
-		cancel()
 	}
 	if downErr != nil || !apiAlive {
 		if downErr != nil {
@@ -325,8 +325,8 @@ func (m *RuntimeManager) stopStaleRuntimeIfNeeded(ctx context.Context, state Run
 	staleCfg := cfg
 	staleCfg.ProcessComposePort = state.ProcessCompose.APIPort
 	downCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
 	err := m.processCompose.Down(downCtx, staleCfg, paths)
-	cancel()
 	if err != nil {
 		_ = m.killStaleRuntimeProcesses(context.Background(), paths.RepoRoot)
 	}
@@ -355,14 +355,14 @@ func (m *RuntimeManager) checkRuntimeReady(ctx context.Context, cfg RuntimeConfi
 	if state != composeReadinessReady {
 		return false
 	}
-	if !httpOK(context.Background(), fmt.Sprintf("http://127.0.0.1:%d/_local/healthz", cfg.LocalProxy.Port), 500*time.Millisecond) {
+	if !httpOK(ctx, fmt.Sprintf("http://127.0.0.1:%d/_local/healthz", cfg.LocalProxy.Port), 500*time.Millisecond) {
 		return false
 	}
 	if !m.probeAuth(cfg.AuthService.Port, 500*time.Millisecond) {
 		return false
 	}
 	for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
-		if !httpOK(context.Background(), fmt.Sprintf("http://127.0.0.1:%d%s", spec.Port, spec.HealthPath), 500*time.Millisecond) {
+		if !httpOK(ctx, fmt.Sprintf("http://127.0.0.1:%d%s", spec.Port, spec.HealthPath), 500*time.Millisecond) {
 			return false
 		}
 	}
@@ -625,7 +625,7 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 		hostHealthy := true
 		lp := resp.Services[localProxyProcessName]
 		lp.Kind = "host-process"
-		if httpOK(context.Background(), fmt.Sprintf("http://127.0.0.1:%d/_local/healthz", cfg.LocalProxy.Port), 500*time.Millisecond) {
+		if httpOK(ctx, fmt.Sprintf("http://127.0.0.1:%d/_local/healthz", cfg.LocalProxy.Port), 500*time.Millisecond) {
 			lp.Status = "running"
 		} else {
 			hostHealthy = false
@@ -634,7 +634,7 @@ func (m *RuntimeManager) Status(ctx context.Context, cfg RuntimeConfig, paths Ru
 		for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {
 			svc := resp.Services[spec.Name]
 			svc.Kind = "host-process"
-			if httpOK(context.Background(), fmt.Sprintf("http://127.0.0.1:%d%s", spec.Port, spec.HealthPath), 500*time.Millisecond) {
+			if httpOK(ctx, fmt.Sprintf("http://127.0.0.1:%d%s", spec.Port, spec.HealthPath), 500*time.Millisecond) {
 				svc.Status = "running"
 			} else if svc.Status == "running" || svc.Status == "starting" {
 				svc.Status = "stale"

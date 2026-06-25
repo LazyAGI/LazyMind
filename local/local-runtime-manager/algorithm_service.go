@@ -110,7 +110,7 @@ func (m *AlgorithmServiceManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 	}
 	pidFile := algorithmPIDFile(paths, service)
 	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
-		_ = cmd.Process.Kill()
+		_ = killAlgorithmProcess(cmd.Process)
 		return err
 	}
 
@@ -119,13 +119,13 @@ func (m *AlgorithmServiceManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 		waitErr <- cmd.Wait()
 	}()
 	if err := waitForHTTPHealth(ctx, spec.Port, spec.HealthPath, service, algorithmHealthTimeout, waitErr); err != nil {
-		_ = cmd.Process.Kill()
+		_ = killAlgorithmProcess(cmd.Process)
 		_ = os.Remove(pidFile)
 		return err
 	}
 	if service == algoProcessName {
 		if err := waitForAlgorithmRegistration(ctx, cfg.Algorithm.ProcessorPort, algorithmHealthTimeout); err != nil {
-			_ = cmd.Process.Kill()
+			_ = killAlgorithmProcess(cmd.Process)
 			_ = os.Remove(pidFile)
 			return err
 		}
@@ -164,8 +164,9 @@ func (m *AlgorithmServiceManager) Down(ctx context.Context, paths RuntimePaths, 
 	if err := signalProcessGroup(pid, syscall.SIGINT); err != nil {
 		_ = proc.Signal(os.Interrupt)
 	}
-	if err := proc.Signal(syscall.Signal(0)); err != nil {
-		_ = proc.Kill()
+	if !processAlive(pid) {
+		_ = os.Remove(pidFile)
+		return nil
 	}
 	deadline := time.NewTimer(10 * time.Second)
 	defer deadline.Stop()
@@ -196,6 +197,14 @@ func signalProcessGroup(pid int, signal syscall.Signal) error {
 		return nil
 	}
 	return syscall.Kill(-pid, signal)
+}
+
+func killAlgorithmProcess(proc *os.Process) error {
+	if proc == nil {
+		return nil
+	}
+	_ = signalProcessGroup(proc.Pid, syscall.SIGKILL)
+	return proc.Kill()
 }
 
 func (m *AlgorithmServiceManager) preparePython(ctx context.Context, paths RuntimePaths, includeEvo bool) error {
@@ -312,6 +321,11 @@ func acquireAlgorithmPythonLock(ctx context.Context, paths RuntimePaths) (func()
 		}
 		if !os.IsExist(err) {
 			return nil, err
+		}
+		alive, readErr := upLockProcessAlive(lockFile)
+		if readErr == nil && !alive {
+			_ = os.Remove(lockFile)
+			continue
 		}
 		select {
 		case <-ctx.Done():
@@ -571,8 +585,9 @@ func waitForTCP(ctx context.Context, host string, port int, label string, timeou
 	defer deadline.Stop()
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+	dialer := net.Dialer{Timeout: time.Second}
 	for {
-		conn, err := net.DialTimeout("tcp", address, time.Second)
+		conn, err := dialer.DialContext(ctx, "tcp", address)
 		if err == nil {
 			_ = conn.Close()
 			return nil

@@ -193,6 +193,53 @@ func TestAcquireUpLockKeepsLiveLock(t *testing.T) {
 	}
 }
 
+func TestAcquireAlgorithmPythonLockRemovesStaleLock(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure dirs: %v", err)
+	}
+	lockFile := filepath.Join(paths.RunDir, "algorithm-python.lock")
+	if err := os.WriteFile(lockFile, []byte("-1\n"), 0o600); err != nil {
+		t.Fatalf("write stale lock: %v", err)
+	}
+
+	release, err := acquireAlgorithmPythonLock(context.Background(), paths)
+	if err != nil {
+		t.Fatalf("acquire stale algorithm lock: %v", err)
+	}
+	release()
+	if _, err := os.Stat(lockFile); !os.IsNotExist(err) {
+		t.Fatalf("expected algorithm lock to be released, err=%v", err)
+	}
+}
+
+func TestAcquireAlgorithmPythonLockWaitsForLiveLock(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatalf("ensure dirs: %v", err)
+	}
+	lockFile := filepath.Join(paths.RunDir, "algorithm-python.lock")
+	if err := os.WriteFile(lockFile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
+		t.Fatalf("write live lock: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	if _, err := acquireAlgorithmPythonLock(ctx, paths); err == nil {
+		t.Fatal("expected live algorithm lock to block until context cancellation")
+	}
+}
+
 func TestFilterRemainingServices(t *testing.T) {
 	services := []string{"auth-service", "core", "web"}
 	remaining, err := filterRemainingServices(services, []string{"core"})
