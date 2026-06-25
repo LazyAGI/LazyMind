@@ -1,6 +1,9 @@
 package doc
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -169,10 +172,94 @@ func TestLocalParseProfileOfficeWithoutOCRUsesFallbackConvert(t *testing.T) {
 	}
 }
 
-func TestLocalOfficeConvertUserErrorRecommendsOnlineParsing(t *testing.T) {
+func TestLocalLibreOfficeFallbackUserErrorRecommendsOnlineParsing(t *testing.T) {
 	msg := officeConvertUserError(documentParseProfileLocal, "convert failed")
 	if !testStringContainsAll(msg, "convert failed", "MinerU/PaddleOCR", "LibreOffice") {
 		t.Fatalf("unexpected message: %q", msg)
+	}
+}
+
+func TestLocalConvertMissingLibreOfficeDoesNotRequireHTTPURL(t *testing.T) {
+	t.Setenv("LAZYMIND_LIBREOFFICE_PATH", filepath.Join(t.TempDir(), "missing-soffice"))
+	t.Setenv("LAZYMIND_OFFICE_CONVERT_URL", "")
+
+	_, provider, err := convertOfficeToPDF(context.Background(), documentParseProfileLocal, "/data/demo.docx", "/data/demo.pdf")
+	if err == nil {
+		t.Fatal("expected missing LibreOffice error")
+	}
+	if provider != convertProviderLibreOffice {
+		t.Fatalf("provider = %q, want %q", provider, convertProviderLibreOffice)
+	}
+	if !strings.Contains(err.Error(), "LAZYMIND_LIBREOFFICE_PATH") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCloudConvertStillRequiresHTTPURL(t *testing.T) {
+	t.Setenv("LAZYMIND_OFFICE_CONVERT_URL", "")
+
+	_, provider, err := convertOfficeToPDF(context.Background(), documentParseProfileCloud, "/data/demo.docx", "/data/demo.pdf")
+	if err == nil {
+		t.Fatal("expected missing office convert URL error")
+	}
+	if provider != convertProviderHTTP {
+		t.Fatalf("provider = %q, want %q", provider, convertProviderHTTP)
+	}
+	if !strings.Contains(err.Error(), "LAZYMIND_OFFICE_CONVERT_URL") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDetectLibreOfficeUsesEnvOverride(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "soffice")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write fake soffice: %v", err)
+	}
+	t.Setenv("LAZYMIND_LIBREOFFICE_PATH", bin)
+
+	detected := detectLibreOffice()
+	if !detected.Found || detected.Path != bin || detected.Source != "LAZYMIND_LIBREOFFICE_PATH" {
+		t.Fatalf("unexpected detection: %#v", detected)
+	}
+}
+
+func TestLibreOfficePathCandidatesCoverMacOSAndWindows(t *testing.T) {
+	mac := libreOfficePathCandidates("darwin", func(string) string { return "" })
+	if len(mac) != 1 || mac[0] != "/Applications/LibreOffice.app/Contents/MacOS/soffice" {
+		t.Fatalf("unexpected mac candidates: %v", mac)
+	}
+	win := libreOfficePathCandidates("windows", func(key string) string {
+		switch key {
+		case "ProgramFiles":
+			return `C:\Program Files`
+		case "ProgramFiles(x86)":
+			return `C:\Program Files (x86)`
+		default:
+			return ""
+		}
+	})
+	joined := strings.Join(win, "\n")
+	if !strings.Contains(joined, `C:\Program Files`) || !strings.Contains(joined, "soffice.exe") {
+		t.Fatalf("unexpected windows candidates: %v", win)
+	}
+}
+
+func TestLibreOfficeProfileURI(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "unix absolute", path: "/tmp/lo-profile-123", want: "file:///tmp/lo-profile-123"},
+		{name: "windows drive", path: `C:\Users\me\AppData\Local\Temp\lo-profile-123`, want: "file:///C:/Users/me/AppData/Local/Temp/lo-profile-123"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := libreOfficeProfileURI(tt.path); got != tt.want {
+				t.Fatalf("libreOfficeProfileURI() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

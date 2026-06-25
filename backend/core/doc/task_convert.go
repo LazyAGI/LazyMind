@@ -3,9 +3,12 @@ package doc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +30,7 @@ const (
 )
 
 const convertProviderHTTP = "http"
+const convertProviderLibreOffice = "libreoffice"
 
 const officeConvertRetryCount = 2
 const defaultOfficeConvertWorkers = 4
@@ -40,8 +44,7 @@ const (
 	documentParseProfileLocal documentParseProfile = "local"
 )
 
-// env: LAZYMIND_OFFICE_CONVERT_URL — text URL，POST JSON {"source_path":"..."}，text {"pdf_path":"..."} text {"data":{"pdf_path":"..."}}
-// Office text tasks:start text；Failedtext，text。
+// Cloud profile uses LAZYMIND_OFFICE_CONVERT_URL. Local profile runs LibreOffice in the core process.
 
 func newDocumentExt(storedPath, storedName, originalFilename string, fileSize int64, contentType, relativePath string, tags []string) documentExt {
 	d := documentExt{StoredPath: storedPath, StoredName: storedName, OriginalFilename: originalFilename, FileSize: fileSize, ContentType: contentType, RelativePath: relativePath, Tags: append([]string(nil), tags...)}
@@ -182,7 +185,7 @@ func documentParseStrategyName(profile documentParseProfile) string {
 	}
 }
 
-// needsOfficeConvertBeforeParse decides whether office-convert-service runs before parsing.
+// needsOfficeConvertBeforeParse decides whether Office-to-PDF conversion runs before parsing.
 // PPT/PPTX/PPTM skip conversion only when official MinerU (mineru.net) is configured so
 // DynamicPDFReader can route them to MineruPPTReader; self-hosted MinerU still converts to PDF.
 func needsOfficeConvertBeforeParse(d documentExt, ocrConfig map[string]any, profile documentParseProfile) bool {
@@ -280,7 +283,6 @@ func applyOfficeConversion(ctx context.Context, d *documentExt, profile document
 	outPath := expectedParseOutputPathByStoredName(src, d.StoredName)
 	d.ConvertStatus = ConvertStatusProcessing
 	d.ConvertError = ""
-	d.ConvertProvider = convertProviderHTTP
 
 	// text：text PDF text
 	if ok, sz := reuseExistingPDFIfFresh(src, outPath); ok {
@@ -291,15 +293,8 @@ func applyOfficeConversion(ctx context.Context, d *documentExt, profile document
 		return
 	}
 
-	url := strings.TrimSpace(os.Getenv("LAZYMIND_OFFICE_CONVERT_URL"))
-	if url == "" {
-		d.ConvertStatus = ConvertStatusFailed
-		d.ConvertError = officeConvertUserError(profile, "LAZYMIND_OFFICE_CONVERT_URL is not configured")
-		log.Logger.Warn().Str("source", src).Msg("office convert: service URL missing")
-		return
-	}
-
-	pdfPath, err := callOfficeConvertHTTP(ctx, url, src)
+	pdfPath, provider, err := convertOfficeToPDF(ctx, profile, src, outPath)
+	d.ConvertProvider = provider
 	if err != nil {
 		d.ConvertStatus = ConvertStatusFailed
 		d.ConvertError = officeConvertUserError(profile, err.Error())
@@ -322,6 +317,138 @@ func applyOfficeConversion(ctx context.Context, d *documentExt, profile document
 	log.Logger.Info().Str("source", src).Str("pdf", pdfPath).Int64("size", st.Size()).Msg("office convert succeeded")
 }
 
+func convertOfficeToPDF(ctx context.Context, profile documentParseProfile, sourcePath, targetPath string) (string, string, error) {
+	if profile == documentParseProfileLocal {
+		detected := detectLibreOffice()
+		if !detected.Found {
+			return "", convertProviderLibreOffice, errors.New(detected.Message)
+		}
+		if err := runLibreOfficeConvert(ctx, detected.Path, sourcePath, targetPath); err != nil {
+			return "", convertProviderLibreOffice, err
+		}
+		return targetPath, convertProviderLibreOffice, nil
+	}
+
+	url := strings.TrimSpace(os.Getenv("LAZYMIND_OFFICE_CONVERT_URL"))
+	if url == "" {
+		log.Logger.Warn().Str("source", sourcePath).Msg("office convert: service URL missing")
+		return "", convertProviderHTTP, fmt.Errorf("LAZYMIND_OFFICE_CONVERT_URL is not configured")
+	}
+	pdfPath, err := callOfficeConvertHTTP(ctx, url, sourcePath)
+	return pdfPath, convertProviderHTTP, err
+}
+
+type libreOfficeDetection struct {
+	Path    string
+	Found   bool
+	Message string
+	Source  string
+	OS      string
+}
+
+func detectLibreOffice() libreOfficeDetection {
+	if p := strings.TrimSpace(os.Getenv("LAZYMIND_LIBREOFFICE_PATH")); p != "" {
+		if executableFile(p) {
+			return libreOfficeDetection{Path: p, Found: true, Source: "LAZYMIND_LIBREOFFICE_PATH", OS: runtime.GOOS}
+		}
+		return libreOfficeDetection{Found: false, Source: "LAZYMIND_LIBREOFFICE_PATH", OS: runtime.GOOS, Message: "LAZYMIND_LIBREOFFICE_PATH does not point to an executable file"}
+	}
+
+	for _, candidate := range libreOfficePathCandidates(runtime.GOOS, os.Getenv) {
+		if executableFile(candidate) {
+			return libreOfficeDetection{Path: candidate, Found: true, Source: "default-path", OS: runtime.GOOS}
+		}
+	}
+	for _, name := range []string{"libreoffice", "soffice"} {
+		if p, err := exec.LookPath(name); err == nil && executableFile(p) {
+			return libreOfficeDetection{Path: p, Found: true, Source: "PATH", OS: runtime.GOOS}
+		}
+	}
+	return libreOfficeDetection{Found: false, OS: runtime.GOOS, Message: "LibreOffice was not found in the core runtime environment"}
+}
+
+func libreOfficePathCandidates(goos string, getenv func(string) string) []string {
+	switch goos {
+	case "darwin":
+		return []string{"/Applications/LibreOffice.app/Contents/MacOS/soffice"}
+	case "windows":
+		candidates := []string{}
+		for _, key := range []string{"ProgramFiles", "ProgramFiles(x86)"} {
+			if root := strings.TrimSpace(getenv(key)); root != "" {
+				candidates = append(candidates, filepath.Join(root, "LibreOffice", "program", "soffice.exe"))
+			}
+		}
+		return candidates
+	default:
+		return nil
+	}
+}
+
+func executableFile(p string) bool {
+	info, err := os.Stat(p)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return info.Mode()&0o111 != 0
+}
+
+func libreOfficeProfileURI(profileDir string) string {
+	uriPath := strings.ReplaceAll(filepath.ToSlash(profileDir), `\`, `/`)
+	if strings.HasPrefix(uriPath, "/") {
+		return "file://" + uriPath
+	}
+	return "file:///" + uriPath
+}
+
+func runLibreOfficeConvert(ctx context.Context, libreOfficePath, sourcePath, targetPath string) error {
+	outputDir := filepath.Dir(targetPath)
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return err
+	}
+	tmpOutputDir, err := os.MkdirTemp(outputDir, ".lo-out-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpOutputDir)
+	profileDir, err := os.MkdirTemp("", "lo-profile-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(profileDir)
+
+	runCtx, cancel := context.WithTimeout(ctx, officeConvertTimeout())
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, libreOfficePath,
+		"-env:UserInstallation="+libreOfficeProfileURI(profileDir),
+		"--headless",
+		"--nologo",
+		"--nofirststartwizard",
+		"--nolockcheck",
+		"--nodefault",
+		"--convert-to",
+		"pdf",
+		sourcePath,
+		"--outdir",
+		tmpOutputDir,
+	)
+	out, err := cmd.CombinedOutput()
+	if runCtx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("libreoffice convert timeout")
+	}
+	if err != nil {
+		return fmt.Errorf("libreoffice convert failed: %s", strings.TrimSpace(string(out)))
+	}
+	tmpPDF := filepath.Join(tmpOutputDir, strings.TrimSuffix(filepath.Base(sourcePath), filepath.Ext(sourcePath))+".pdf")
+	if st, err := os.Stat(tmpPDF); err != nil || st.IsDir() || st.Size() <= 0 {
+		return fmt.Errorf("converted pdf not found after libreoffice run: %s", strings.TrimSpace(string(out)))
+	}
+	_ = os.Remove(targetPath)
+	return os.Rename(tmpPDF, targetPath)
+}
+
 func officeConvertUserError(profile documentParseProfile, detail string) string {
 	detail = strings.TrimSpace(detail)
 	if profile != documentParseProfileLocal {
@@ -330,7 +457,7 @@ func officeConvertUserError(profile documentParseProfile, detail string) string 
 	if detail == "" {
 		detail = "local Office to PDF fallback failed"
 	}
-	return detail + ". Configure MinerU/PaddleOCR online parsing service or install LibreOffice and set LAZYMIND_LIBREOFFICE_PATH for local fallback."
+	return detail + ". Configure MinerU/PaddleOCR online parsing service or install LibreOffice in the core runtime environment and set LAZYMIND_LIBREOFFICE_PATH for local fallback."
 }
 
 func fillParseFields(d *documentExt, pdfPath string, size int64) {

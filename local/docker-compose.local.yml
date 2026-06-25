@@ -52,9 +52,6 @@ services:
       redis:
         condition: service_healthy
         required: false
-      office-convert-service:
-        condition: service_healthy
-        required: false
 
   core-dev:
     volumes:
@@ -64,12 +61,6 @@ services:
       LAZYMIND_REDIS_URL: ""
       LAZYMIND_STATE_BACKEND: sqlite
       LAZYMIND_STATE_SQLITE_DIR: /data/sqlite
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      office-convert-service:
-        condition: service_healthy
-        required: false
 
   lazyllm-parse-server:
     volumes:
