@@ -22,6 +22,12 @@ IMAGE_REFERENCE_MARKDOWN_GUIDANCE = (
     '- Do not use MiniMax/agent CDN links for local images; they are invalid for this UI.\n'
     '- Do not paste bare filesystem paths (`/var/lib/lazymind/uploads/...`) in answers.'
 )
+KNOWLEDGE_EVIDENCE_CITATION_GUIDANCE = (
+    '# Knowledge evidence citation rules\n'
+    'When answering with evidence retrieved from a knowledge base or uploaded '
+    'document index, cite using the original `[[document.chunk]]` markers present '
+    'in the retrieved evidence. Do not invent, rewrite, or fabricate citation markers.'
+)
 ATTACHED_FILES_GUIDANCE = (
     '# Attached file rules\n'
     'The user may provide attached files in this conversation. Treat the attached file '
@@ -31,7 +37,6 @@ ATTACHED_FILES_GUIDANCE = (
     'Do not ignore attached files or ask the user to paste their contents when a '
     'suitable capability is available. If no suitable capability is available, say so clearly.'
 )
-
 TOOL_CALL_STATUS_GUIDANCE = (
     "Before calling a tool, write one concise, user-visible sentence explaining "
     "what you are about to do. Keep it action-oriented and do not reveal hidden "

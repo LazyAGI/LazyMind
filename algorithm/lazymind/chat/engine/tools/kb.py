@@ -256,9 +256,6 @@ class KBToolGroup:
     looks general, familiar, popular, or likely available on the web. Use other
     retrieval sources only after this knowledge-base search returns no useful
     evidence.
-
-    When answering with knowledge-base evidence, cite with the original
-    [[document.chunk]] markers and do not fabricate citation markers.
     """
     __public_apis__ = ['kb_search', 'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search']
 
