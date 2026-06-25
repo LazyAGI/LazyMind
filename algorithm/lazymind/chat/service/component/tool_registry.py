@@ -16,6 +16,7 @@ from lazyllm.tools.tools.search import (
     TavilySearch,
     WikipediaSearch,
 )
+from lazyllm.tools.tools.search.base import SearchBase
 
 from lazymind.chat.engine.tools import (
     KBToolGroup,
@@ -32,6 +33,76 @@ from lazymind.chat.engine.tools import (
     vocab_learn,
 )
 from lazymind.model_config import is_model_role_available
+
+
+_SEARCH_PUBLIC_DOCSTRINGS = {
+    'search': """Search an external information source.
+
+Args:
+    query: Natural language search query.
+    kwargs: Provider-specific search options.
+
+Returns:
+    Search results with title, URL, snippet, source, and optional provider metadata.
+""",
+    'get_content': """Fetch readable text content for a search result.
+
+Args:
+    item: Search result containing a url or link field.
+
+Returns:
+    Plain text extracted from the target page, or an empty string when the page cannot be fetched.
+""",
+    'get_contents': """Fetch readable text content for multiple search results.
+
+Args:
+    items: Search results containing url or link fields.
+
+Returns:
+    A list of extracted plain-text page contents.
+""",
+    'meta_search': """Search academic paper metadata.
+
+Args:
+    query: Optional natural language search query.
+    filters: Optional metadata filters.
+    sort: Optional metadata sort expressions.
+    fields: Optional metadata fields to return.
+    page: Page number for paginated results.
+    page_size: Number of results per page.
+    cursor: Optional cursor for cursor-based pagination.
+    freshness_boost: Freshness ranking preference.
+    include_content: Whether to include content snippets.
+    year_from: Optional lower publication year bound.
+    year_to: Optional upper publication year bound.
+
+Returns:
+    Academic metadata search results and pagination metadata.
+""",
+    'meta_catalog': """Return the academic metadata catalog.
+
+Args:
+    include_sample_values: Whether to include sample values for catalog fields.
+
+Returns:
+    Available academic metadata fields and optional sample values.
+""",
+}
+
+
+def _ensure_search_tool_docstrings(instance: Any) -> Any:
+    """Ensure LazyLLM can wrap search providers as MethodModuleTool instances."""
+    if not isinstance(instance, SearchBase):
+        return instance
+    for method_name in getattr(instance, '__public_apis__', []):
+        method = getattr(type(instance), method_name, None)
+        if method is None or getattr(method, '__doc__', None):
+            continue
+        fallback = getattr(SearchBase, method_name, None)
+        doc = getattr(fallback, '__doc__', None) or _SEARCH_PUBLIC_DOCSTRINGS.get(method_name)
+        if doc:
+            method.__doc__ = doc
+    return instance
 
 
 @dataclass
@@ -54,6 +125,9 @@ _ACADEMIC_SEARCH_ENGINE_INSTANCES: list = [
     SciverseSearch(),
     ArxivSearch(skip_auth=True),
 ]
+
+for _search_instance in [*_WEB_SEARCH_ENGINE_INSTANCES, *_ACADEMIC_SEARCH_ENGINE_INSTANCES]:
+    _ensure_search_tool_docstrings(_search_instance)
 
 _PICK_FIRST_VALID_GROUPS = {
     'web_search': ('Search the web for current information', _WEB_SEARCH_ENGINE_INSTANCES),
@@ -90,7 +164,7 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         name='wikipedia',
         label='Wikipedia 搜索',
         description='从 Wikipedia 搜索知识条目',
-        instance=WikipediaSearch(skip_auth=True),
+        instance=_ensure_search_tool_docstrings(WikipediaSearch(skip_auth=True)),
     ),
     ToolGroupConfig(
         name='web_search',
@@ -312,5 +386,5 @@ def build_agent_tools(configs: list[ToolGroupConfig]) -> list:
                 tools=list(instances),
             ))
         else:
-            result.append(cfg.instance)
+            result.append(_ensure_search_tool_docstrings(cfg.instance))
     return result

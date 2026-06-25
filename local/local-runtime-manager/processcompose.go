@@ -43,7 +43,7 @@ type processComposeShutdown struct {
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
 
-func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, profile string, logPath string, localProxyLogPath string, authServiceLogPath string, tokenPath string, apiPort int) error {
+func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, profile string, paths RuntimePaths, algorithm AlgorithmConfig, tokenPath string, apiPort int) error {
 	commandForComposeUp := quoteShellArg(m.execPath) + " internal compose-up --profile " + profile
 	commandForComposeDown := quoteShellArg(m.execPath) + " internal compose-down --profile " + profile
 	commandForLocalProxyRun := quoteShellArg(m.execPath) + " internal local-proxy-run --profile " + profile
@@ -63,7 +63,7 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 					Command:        commandForComposeDown,
 					TimeoutSeconds: 60,
 				},
-				LogLocation: logPath,
+				LogLocation: paths.LogFilePath,
 				Namespace:   "container",
 			},
 			localProxyProcessName: {
@@ -73,7 +73,7 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 					Command:        commandForLocalProxyDown,
 					TimeoutSeconds: 15,
 				},
-				LogLocation: localProxyLogPath,
+				LogLocation: paths.LocalProxyLog,
 				Namespace:   "host",
 			},
 			authServiceProcessName: {
@@ -83,10 +83,24 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 					Command:        commandForAuthServiceDown,
 					TimeoutSeconds: 15,
 				},
-				LogLocation: authServiceLogPath,
+				LogLocation: paths.AuthServiceLog,
 				Namespace:   "host",
 			},
 		},
+	}
+	for _, svc := range algorithmProcessSpecs(algorithm) {
+		run := quoteShellArg(m.execPath) + " internal algorithm-run --service " + svc.Name + " --profile " + profile
+		down := quoteShellArg(m.execPath) + " internal algorithm-down --service " + svc.Name + " --profile " + profile
+		cfg.Processes[svc.Name] = processComposeProcess{
+			WorkingDir: repoRoot,
+			Command:    run,
+			Shutdown: processComposeShutdown{
+				Command:        down,
+				TimeoutSeconds: 20,
+			},
+			LogLocation: algorithmLogPath(paths, svc.Name),
+			Namespace:   "host",
+		}
 	}
 	_ = tokenPath
 	_ = apiPort
@@ -141,12 +155,11 @@ func (m *ProcessComposeManager) FollowLogs(ctx context.Context, cfg RuntimeConfi
 }
 
 func (m *ProcessComposeManager) Down(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
-	args := []string{"--config", filepath.ToSlash(paths.GeneratedConfig)}
-	args = append(args,
+	args := []string{
 		"-p", strconv.Itoa(cfg.ProcessComposePort),
 		"--token-file", paths.RunDirTokenFile,
 		"down",
-	)
+	}
 	res, err := m.runner.Run(ctx, Command{Name: processComposeCommand(paths.RepoRoot), Args: args, Dir: paths.RepoRoot})
 	if err != nil {
 		return fmt.Errorf("process-compose down failed: %w (%s)", err, strings.TrimSpace(res.Stderr))

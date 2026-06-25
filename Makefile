@@ -437,6 +437,7 @@ up-build:
 	fi
 
 up-build-local:
+	@$(MAKE) --no-print-directory compose-host-permissions
 	@if [ ! -x "$(PROCESS_COMPOSE_BIN)" ]; then \
 		mkdir -p "$(dir $(PROCESS_COMPOSE_BIN))"; \
 		GOBIN="$(CURDIR)/local/bin" $(GO) install "$(PROCESS_COMPOSE_PKG)"; \
