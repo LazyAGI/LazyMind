@@ -118,13 +118,6 @@ def _build_pdf_reader():
     )
 
 
-def _document_parse_profile() -> str:
-    profile = str(_cfg['document_parse_profile'] or 'cloud').strip().lower()
-    if profile not in ('cloud', 'local'):
-        return 'cloud'
-    return profile
-
-
 def _register_document_readers(docs: Document) -> None:
     pdf_reader = _build_pdf_reader()
     docs.add_reader('*.pdf', pdf_reader)
