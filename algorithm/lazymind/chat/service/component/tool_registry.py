@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import docstring_parser
+import lazyllm
 from lazyllm.tools.fs.supplier.feishu import FeishuFS
 from lazyllm.tools.fs.supplier.notion import NotionFS
 from lazyllm.tools.tools.search import (
@@ -20,10 +21,10 @@ from lazyllm.tools.tools.search import (
 from lazymind.chat.engine.tools import (
     KBToolGroup,
     LocalFSToolGroup,
-    TempKBToolGroup,
     calculator,
     image_editor,
     image_generator,
+    kb_tmp_search,
     memory_editor,
     read_memory,
     skill_editor,
@@ -41,6 +42,7 @@ class ToolGroupConfig:
     description: str
     instance: Any
     model_role: str | None = None
+    key_source: Callable[[], Any] | None = None
     pick_first_valid: bool = False
 
     def __post_init__(self) -> None:
@@ -63,6 +65,12 @@ _ACADEMIC_SEARCH_ENGINE_INSTANCES: list = [
     ArxivSearch(skip_auth=True),
 ]
 
+
+def _temp_kb_key_source() -> Any:
+    agentic_config = lazyllm.globals.get('agentic_config') or {}
+    return agentic_config.get('files')
+
+
 SKILL_TOOL_GROUP = ToolGroupConfig(
     name='skill',
     label='技能工具',
@@ -81,7 +89,8 @@ DEFAULT_TOOLS: list[ToolGroupConfig] = [
         name='temp_kb',
         label='临时文件检索',
         description='从用户上传的临时文件中搜索相关内容',
-        instance=TempKBToolGroup(),
+        instance=kb_tmp_search,
+        key_source=_temp_kb_key_source,
     ),
     ToolGroupConfig(
         name='calculator',
@@ -245,6 +254,10 @@ def _instance_is_active(instance: Any) -> bool:
     key_source = getattr(instance, '__key_source__', None)
     if key_source is None:
         return True
+    return _key_source_is_active(key_source)
+
+
+def _key_source_is_active(key_source: Callable[[], Any]) -> bool:
     try:
         return bool(key_source())
     except Exception:
@@ -253,6 +266,8 @@ def _instance_is_active(instance: Any) -> bool:
 
 def group_is_active(cfg: ToolGroupConfig) -> bool:
     if cfg.model_role and not is_model_role_available(cfg.model_role):
+        return False
+    if cfg.key_source and not _key_source_is_active(cfg.key_source):
         return False
     if cfg.pick_first_valid:
         return any(_instance_is_active(inst) for inst in cfg.instance)
@@ -309,12 +324,17 @@ def build_agent_tools(configs: list[ToolGroupConfig]) -> list:
     result = []
     for cfg in configs:
         if cfg.pick_first_valid:
-            result.append(dict(
+            group = dict(
                 name=cfg.name,
                 desc=cfg.description,
                 pick_first_valid=True,
                 tools=list(cfg.instance),
-            ))
+            )
+            if cfg.key_source:
+                group['key_source'] = cfg.key_source
+            result.append(group)
+        elif cfg.key_source:
+            result.append((cfg.instance, cfg.key_source))
         else:
             result.append(cfg.instance)
     return result

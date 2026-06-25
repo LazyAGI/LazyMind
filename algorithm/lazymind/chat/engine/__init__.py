@@ -1,7 +1,7 @@
 from .tools import (
     KBToolGroup,
-    TempKBToolGroup,
     calculator,
+    kb_tmp_search,
     memory_editor,
     skill_editor,
     url_fetch,
@@ -11,8 +11,8 @@ from .tools import (
 
 __all__ = [
     'KBToolGroup',
-    'TempKBToolGroup',
     'calculator',
+    'kb_tmp_search',
     'memory_editor',
     'skill_editor',
     'url_fetch',

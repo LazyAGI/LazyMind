@@ -28,13 +28,30 @@ from lazymind.model_config import get_dynamic_role_slot_map
 
 _MAX_TEXT_LEN = 1200
 _MAX_RESULT_ITEMS = 50
+_DEFAULT_RETRIEVER_TOPK = 20
+_DEFAULT_RERANK_TOPK = 20
+_DEFAULT_K_MAX = 10
+_DEFAULT_IMAGE_TOPK = 3
+_RERANKER_MODULE = 'ModuleReranker'
+_RERANKER_MODEL = 'reranker'
+_KB_RETRIEVER_CONFIGS = [
+    {'group_name': 'line', 'embed_keys': [EMBED_MAIN], 'target': 'block'},
+    {'group_name': 'block', 'embed_keys': [EMBED_MAIN]},
+]
+_KB_IMAGE_RETRIEVER_CONFIG = {
+    'group_name': 'image',
+    'embed_keys': [EMBED_IMAGE],
+}
+_TEMP_NODE_GROUP_NAME = 'block'
+_TEMP_NODE_GROUP_DISPLAY_NAME = 'paragraph slice'
+_TEMP_NODE_GROUP_MAX_LENGTH = 2048
+_TEMP_NODE_GROUP_SPLIT_BY = '\n'
 
-
-def build_default_retriever_configs() -> List[dict]:
-    return [
-        {'group_name': 'line', 'embed_keys': [EMBED_MAIN], 'target': 'block'},
-        {'group_name': 'block', 'embed_keys': [EMBED_MAIN]},
-    ]
+_kb_retrievers = None
+_kb_reranker = None
+_kb_image_retriever = None
+_tmp_retriever = None
+_tmp_reranker = None
 
 
 def _is_reranker_enabled() -> bool:
@@ -48,6 +65,44 @@ def _is_reranker_enabled() -> bool:
         cfg = None
     role_cfg = cfg.get('reranker') if isinstance(cfg, dict) else None
     return isinstance(role_cfg, dict) and bool(role_cfg.get(role_slots['reranker']))
+
+
+def _build_reranker() -> Optional[Reranker]:
+    return (
+        Reranker(_RERANKER_MODULE, model=AutoModel(model=_RERANKER_MODEL))
+        if _is_reranker_enabled()
+        else None
+    )
+
+
+def _ensure_kb_search_runtime() -> tuple[List[Retriever], Optional[Reranker], Retriever]:
+    global _kb_retrievers, _kb_reranker, _kb_image_retriever
+    if _kb_retrievers is None:
+        _kb_retrievers = [
+            Retriever(DOCUMENT, **cfg)
+            for cfg in _KB_RETRIEVER_CONFIGS
+        ]
+        _kb_reranker = _build_reranker()
+        _kb_image_retriever = Retriever(DOCUMENT, **_KB_IMAGE_RETRIEVER_CONFIG)
+    return _kb_retrievers, _kb_reranker, _kb_image_retriever
+
+
+def _ensure_temp_search_runtime() -> tuple[TempDocRetriever, Optional[Reranker]]:
+    global _tmp_retriever, _tmp_reranker
+    if _tmp_retriever is None:
+        _tmp_retriever = TempDocRetriever(embed=AutoModel(model=EMBED_MAIN))
+        _tmp_retriever.create_node_group(
+            name=_TEMP_NODE_GROUP_NAME,
+            display_name=_TEMP_NODE_GROUP_DISPLAY_NAME,
+            group_type=NodeGroupType.CHUNK,
+            transform=GeneralParser(
+                max_length=_TEMP_NODE_GROUP_MAX_LENGTH,
+                split_by=_TEMP_NODE_GROUP_SPLIT_BY,
+            ),
+        )
+        _tmp_retriever.add_subretriever(_TEMP_NODE_GROUP_NAME)
+        _tmp_reranker = _build_reranker()
+    return _tmp_retriever, _tmp_reranker
 
 
 def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
@@ -206,32 +261,10 @@ class KBToolGroup:
     [[document.chunk]] markers and do not fabricate citation markers.
     """
     __public_apis__ = ['kb_search', 'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search']
-    _retrievers = None
-    _reranker = None
-    _image_retriever = None
 
     def __key_source__(self) -> Any:
         agentic_config = lazyllm.globals.get('agentic_config') or {}
         return (agentic_config.get('filters') or {}).get('kb_id')
-
-    def _ensure_search_runtime(self) -> None:
-        cls = type(self)
-        if cls._retrievers is not None:
-            return
-        cls._retrievers = [
-            Retriever(DOCUMENT, **cfg)
-            for cfg in build_default_retriever_configs()
-        ]
-        cls._reranker = (
-            Reranker('ModuleReranker', model=AutoModel(model='reranker'))
-            if _is_reranker_enabled()
-            else None
-        )
-        cls._image_retriever = Retriever(
-            DOCUMENT,
-            group_name='image',
-            embed_keys=[EMBED_IMAGE],
-        )
 
     @handle_tool_errors
     def kb_search(
@@ -271,7 +304,7 @@ class KBToolGroup:
                 {'file_name': 'report.pdf'}.
         """
         agentic_config = lazyllm.globals['agentic_config']
-        self._ensure_search_runtime()
+        retrievers, reranker, image_retriever = _ensure_kb_search_runtime()
         if not isinstance(query, str) or not query.strip():
             raise ValueError('query is required and must be a non-empty string')
 
@@ -283,13 +316,13 @@ class KBToolGroup:
 
         result = search_kb(
             payload,
-            retrievers=type(self)._retrievers,
-            reranker=type(self)._reranker,
-            image_retriever=type(self)._image_retriever,
-            retriever_topk=retriever_topk or 20,
-            rerank_topk=rerank_topk or 20,
-            k_max=k_max or 10,
-            image_topk=image_topk or 3,
+            retrievers=retrievers,
+            reranker=reranker,
+            image_retriever=image_retriever,
+            retriever_topk=retriever_topk or _DEFAULT_RETRIEVER_TOPK,
+            rerank_topk=rerank_topk or _DEFAULT_RERANK_TOPK,
+            k_max=k_max or _DEFAULT_K_MAX,
+            image_topk=image_topk or _DEFAULT_IMAGE_TOPK,
         )
         serialized = _serialize_kb_result(result)
         _annotate_result_citations(serialized)
@@ -515,94 +548,58 @@ class KBToolGroup:
         })
 
 
-class TempKBToolGroup:
-    """Temporary file search tools.
+@handle_tool_errors
+def kb_tmp_search(
+    query: str,
+    retriever_topk: Optional[int] = None,
+    rerank_topk: Optional[int] = None,
+    k_max: Optional[int] = None,
+    files: Optional[List[str]] = None,
+) -> Any:
+    """Search attached temporary uploaded files with the temporary document retriever.
 
-    Use this tool group for user-attached temporary files that need text or
-    document retrieval, such as PDFs, text files, office documents, and data
-    files. Treat attached temporary files as available evidence, and search
-    them with this tool group before answering questions that depend on their
-    contents.
+    Use this tool before answering questions that depend on attached temporary
+    uploaded files that require text or document retrieval, such as PDFs, text
+    files, office documents, and data files. Scope retrieval to the current
+    uploaded files by default, or pass explicit temporary file IDs in ``files``
+    when needed.
+
+    Each call handles exactly one search intent. If the user asks about
+    multiple unrelated keywords or topics, call this tool separately for each
+    keyword/topic. Do not combine unrelated terms into one query with spaces,
+    commas, or list-like text.
+
+    Args:
+        query: A single natural language query for retrieval.
+        retriever_topk: Candidate count used by the temporary retriever before
+            reranking. Defaults to 20.
+        rerank_topk: Number of nodes the reranker keeps before adaptive-k
+            trimming. Defaults to 20.
+        k_max: Hard upper bound on the adaptive-k stage. Defaults to 10.
+        files: Optional list of temporary file IDs. Defaults to the current
+            request's agentic_config.files.
     """
-    __public_apis__ = ['kb_tmp_search']
-    _tmp_retriever = None
-    _reranker = None
-
-    def __key_source__(self) -> Any:
-        agentic_config = lazyllm.globals.get('agentic_config') or {}
-        return agentic_config.get('files')
-
-    def _ensure_search_runtime(self) -> None:
-        cls = type(self)
-        if cls._tmp_retriever is not None:
-            return
-        cls._tmp_retriever = TempDocRetriever(embed=AutoModel(model=EMBED_MAIN))
-        cls._tmp_retriever.create_node_group(
-            name='block',
-            display_name='paragraph slice',
-            group_type=NodeGroupType.CHUNK,
-            transform=GeneralParser(max_length=2048, split_by='\n'),
-        )
-        cls._tmp_retriever.add_subretriever('block')
-        cls._reranker = (
-            Reranker('ModuleReranker', model=AutoModel(model='reranker'))
-            if _is_reranker_enabled()
-            else None
-        )
-
-    @handle_tool_errors
-    def kb_tmp_search(
-        self,
-        query: str,
-        retriever_topk: Optional[int] = None,
-        rerank_topk: Optional[int] = None,
-        k_max: Optional[int] = None,
-        files: Optional[List[str]] = None,
-    ) -> Any:
-        """Search temporary uploaded files with the temporary document retriever.
-
-        Use this tool before answering questions that depend on temporary
-        uploaded files that require text or document retrieval, such as PDFs,
-        text files, office documents, and data files. Scope retrieval to the
-        current uploaded files by default, or pass explicit temporary file IDs
-        in ``files`` when needed.
-
-        Each call handles exactly one search intent. If the user asks about
-        multiple unrelated keywords or topics, call this tool separately for
-        each keyword/topic. Do not combine unrelated terms into one query
-        with spaces, commas, or list-like text.
-
-        Args:
-            query: A single natural language query for retrieval.
-            retriever_topk: Candidate count used by the temporary retriever
-                before reranking. Defaults to 20.
-            rerank_topk: Number of nodes the reranker keeps before adaptive-k
-                trimming. Defaults to 20.
-            k_max: Hard upper bound on the adaptive-k stage. Defaults to 10.
-            files: Optional list of temporary file IDs. Defaults to the current
-                request's agentic_config.files.
-        """
-        agentic_config = lazyllm.globals['agentic_config']
-        self._ensure_search_runtime()
-        if not isinstance(query, str) or not query.strip():
-            raise ValueError('query is required and must be a non-empty string')
-        payload = {
-            'query': query.strip(),
-            'filters': {},
-            'files': files,
-            'user_id': agentic_config.get('user_id', ''),
-        }
-        result = search_temp_files(
-            payload,
-            tmp_retriever=type(self)._tmp_retriever,
-            reranker=type(self)._reranker,
-            retriever_topk=retriever_topk or 20,
-            rerank_topk=rerank_topk or 20,
-            k_max=k_max or 10,
-        )
-        serialized = _serialize_kb_result(result)
-        _annotate_result_citations(serialized)
-        return tool_success(
-            'kb_tmp_search',
-            serialized,
-        )
+    agentic_config = lazyllm.globals['agentic_config']
+    tmp_retriever, reranker = _ensure_temp_search_runtime()
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError('query is required and must be a non-empty string')
+    payload = {
+        'query': query.strip(),
+        'filters': {},
+        'files': files,
+        'user_id': agentic_config.get('user_id', ''),
+    }
+    result = search_temp_files(
+        payload,
+        tmp_retriever=tmp_retriever,
+        reranker=reranker,
+        retriever_topk=retriever_topk or _DEFAULT_RETRIEVER_TOPK,
+        rerank_topk=rerank_topk or _DEFAULT_RERANK_TOPK,
+        k_max=k_max or _DEFAULT_K_MAX,
+    )
+    serialized = _serialize_kb_result(result)
+    _annotate_result_citations(serialized)
+    return tool_success(
+        'kb_tmp_search',
+        serialized,
+    )

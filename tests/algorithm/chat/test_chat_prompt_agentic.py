@@ -92,7 +92,7 @@ def test_image_guidance_uses_capability_descriptions():
 
 
 def test_tool_specific_guidance_lives_with_tool_docstrings():
-    from lazymind.chat.engine.tools.kb import TempKBToolGroup
+    from lazymind.chat.engine.tools.kb import kb_tmp_search
     from lazymind.chat.engine.tools.memory_editor import memory_editor
     from lazymind.chat.engine.tools.multimodal import vision_extractor
     from lazymind.chat.engine.tools.skill_editor import skill_editor
@@ -117,9 +117,9 @@ def test_tool_specific_guidance_lives_with_tool_docstrings():
     assert 'source=remote' in skill_editor.__doc__
     assert 'replace_text' in skill_editor.__doc__
 
-    assert 'Attached' in TempKBToolGroup.__doc__ or 'attached' in TempKBToolGroup.__doc__
-    assert 'temporary uploaded files' in TempKBToolGroup.kb_tmp_search.__doc__
-    assert 'exactly one search intent' in TempKBToolGroup.kb_tmp_search.__doc__
+    assert 'attached' in kb_tmp_search.__doc__
+    assert 'temporary uploaded files' in kb_tmp_search.__doc__
+    assert 'exactly one search intent' in kb_tmp_search.__doc__
 
     vision_doc = ' '.join(vision_extractor.__doc__.split())
     assert 'Attached Files' in vision_doc
