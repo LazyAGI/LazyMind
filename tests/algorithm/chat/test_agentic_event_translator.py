@@ -50,6 +50,34 @@ def test_translator_rewrites_citations_registered_by_tools():
     assert final_frames[-1]['sources'][0]['index'] == '1.1'
 
 
+def test_final_answer_citation_display_starts_from_first_cited_document():
+    translator = AgentEventFrameTranslator(query='q')
+    for idx in range(1, 4):
+        annotate_citations({
+            'uid': f'node-{idx}',
+            'text': f'source text {idx}',
+            'docid': f'doc-{idx}',
+            'kb_id': 'kb-1',
+            'group': 'block',
+            'number': idx,
+            'metadata': {'file_name': f'doc-{idx}.md'},
+            'global_metadata': {
+                'docid': f'doc-{idx}',
+                'kb_id': 'kb-1',
+                'file_name': f'doc-{idx}.md',
+            },
+        }, translator.citation_state)
+
+    frames = translator.finish('Use [[3.1]] and [3](#source-3.1 "doc-3.md").')
+    text = ''.join(frame.get('text') or '' for frame in frames)
+    sources = frames[-1]['sources']
+
+    assert '[1](#source-3.1 "doc-3.md")' in text
+    assert '[3](#source-3.1 "doc-3.md")' not in text
+    assert sources[0]['index'] == '3.1'
+    assert sources[0]['display_index'] == 1
+
+
 def test_translator_counts_tool_call_turns_not_individual_calls():
     translator = AgentEventFrameTranslator(query='q')
 

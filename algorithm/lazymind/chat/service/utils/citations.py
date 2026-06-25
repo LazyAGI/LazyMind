@@ -211,31 +211,62 @@ def citation_source(config: dict[str, Any], index: str) -> Optional[dict[str, An
     return source if isinstance(source, dict) else None
 
 
-def citation_link(index: str, source: dict[str, Any]) -> str:
+class CitationDisplayMapper:
+    def __init__(self) -> None:
+        self._doc_display_map: dict[str, int] = {}
+        self._next_display_index = 1
+
+    def display_index_for(self, index: str) -> int:
+        document_index, _ = split_citation_index(index)
+        key = str(document_index or index)
+        display_index = self._doc_display_map.get(key)
+        if display_index is None:
+            display_index = self._next_display_index
+            self._next_display_index += 1
+            self._doc_display_map[key] = display_index
+        return display_index
+
+    def source_with_display_index(self, index: str, source: dict[str, Any]) -> dict[str, Any]:
+        mapped_source = dict(source)
+        mapped_source['display_index'] = self.display_index_for(index)
+        return mapped_source
+
+
+def citation_link(index: str, source: dict[str, Any], display_index: Any = None) -> str:
     document_index, _ = split_citation_index(index)
-    display_index = source.get('display_index') or source.get('document_index') or document_index
+    display_index = display_index or source.get('display_index') or source.get('document_index') or document_index
     title = escape(str(source.get('file_name') or 'title'), quote=True)
     return f'[{display_index}](#source-{index} "{title}")'
 
 
 def rewrite_citations(text: str, config: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
     collected: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    display_mapper = CitationDisplayMapper()
+
+    def _collect(index: str, source: dict[str, Any]) -> dict[str, Any]:
+        mapped_source = display_mapper.source_with_display_index(index, source)
+        collected.setdefault(index, mapped_source)
+        return mapped_source
 
     def _replace(match: re.Match) -> str:
         index = match.group(1)
         source = citation_source(config, index)
         if not source:
             return ''
-        collected.setdefault(index, source)
-        return citation_link(index, source)
+        mapped_source = _collect(index, source)
+        return citation_link(index, source, display_index=mapped_source['display_index'])
 
     rewritten = CITATION_PATTERN.sub(_replace, text)
 
-    for match in SOURCE_LINK_PATTERN.finditer(rewritten):
+    def _replace_link(match: re.Match) -> str:
         index = match.group(2)
         source = citation_source(config, index)
-        if source:
-            collected.setdefault(index, source)
+        if not source:
+            return match.group(0)
+        mapped_source = _collect(index, source)
+        return citation_link(index, source, display_index=mapped_source['display_index'])
+
+    rewritten = SOURCE_LINK_PATTERN.sub(_replace_link, rewritten)
 
     return rewritten, list(collected.values())
 
@@ -248,6 +279,12 @@ class ConfigCitationPlugin(BasePlugin):
     def __init__(self, config: dict[str, Any]):
         self._config = config
         self._collected: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._display_mapper = CitationDisplayMapper()
+
+    def _collect(self, index: str, source: dict[str, Any]) -> dict[str, Any]:
+        mapped_source = self._display_mapper.source_with_display_index(index, source)
+        self._collected.setdefault(index, mapped_source)
+        return mapped_source
 
     def match(self, src: str, pos: int):
         link_match = self._link_pat.match(src, pos)
@@ -255,7 +292,11 @@ class ConfigCitationPlugin(BasePlugin):
             index = link_match.group(2)
             source = citation_source(self._config, index)
             if source:
-                self._collected.setdefault(index, source)
+                mapped_source = self._collect(index, source)
+                return (
+                    link_match.end(),
+                    citation_link(index, source, display_index=mapped_source['display_index']),
+                )
             return (link_match.end(), link_match.group(0))
 
         match = self._pat.match(src, pos)
@@ -265,8 +306,8 @@ class ConfigCitationPlugin(BasePlugin):
         source = citation_source(self._config, index)
         if not source:
             return (match.end(), '')
-        self._collected.setdefault(index, source)
-        return (match.end(), citation_link(index, source))
+        mapped_source = self._collect(index, source)
+        return (match.end(), citation_link(index, source, display_index=mapped_source['display_index']))
 
     def collect(self) -> list[dict[str, Any]]:
         return list(self._collected.values())
