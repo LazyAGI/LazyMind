@@ -162,7 +162,7 @@ func (m *ComposeManager) ComposeUp(ctx context.Context, repoRoot string, profile
 		_ = profile
 	}
 	args := append(m.composeArgs(repoRoot), "up", "--build")
-	for _, svc := range disabled.DisabledContainerTypes {
+	for _, svc := range disabledServicesToScale(disabled.DisabledContainerTypes) {
 		if svc == "" {
 			continue
 		}
@@ -181,6 +181,16 @@ func (m *ComposeManager) ComposeUp(ctx context.Context, repoRoot string, profile
 		return fmt.Errorf("docker compose up failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
 	}
 	return nil
+}
+
+func disabledServicesToScale(disabled []string) []string {
+	scaled := make([]string, 0, len(disabled))
+	for _, svc := range disabled {
+		if svc == "redis" {
+			scaled = append(scaled, svc)
+		}
+	}
+	return scaled
 }
 
 func filterRemainingServices(allServices []string, disabled []string) ([]string, error) {

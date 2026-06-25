@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   formRulesSource,
+  frontendDockerfileSource,
   indexHtml,
+  localComposeSource,
   loginSource,
   mainLayoutSource,
   mainEntry,
@@ -73,6 +75,14 @@ describe('runtime facade contract', () => {
     expect(mainLayoutSource).not.toContain('VITE_HIDE_EVO');
     expect(routerSource).not.toContain('VITE_HIDE_EVO');
     expect(loginSource).not.toContain('VITE_HIDE_EVO');
+  });
+
+  it('keeps frontend Docker build args available while local mode disables the frontend container', () => {
+    expect(frontendDockerfileSource).toContain('ARG VITE_API_BASE_URL');
+    expect(frontendDockerfileSource).toContain('ARG VITE_LAZYMIND_MODE');
+    expect(frontendDockerfileSource).toContain('ARG VITE_HIDE_EVO');
+    expect(localComposeSource).toMatch(/disabled_container_services:[\s\S]*-\s*frontend/);
+    expect(localComposeSource).not.toMatch(/frontend:[\s\S]*VITE_LAZYMIND_MODE:\s*local/);
   });
 });
 

@@ -27,8 +27,11 @@ const (
 	authServiceDatabaseURLEnvVar  = "LAZYMIND_AUTH_SERVICE_DATABASE_URL"
 	authServiceInstallDepsEnvVar  = "LAZYMIND_AUTH_SERVICE_INSTALL_DEPS"
 	localPostgresPortEnvVar       = "LAZYMIND_LOCAL_POSTGRES_PORT"
+	caddyBinEnvVar                = "LAZYMIND_CADDY_BIN"
+	caddyVersionEnvVar            = "LAZYMIND_CADDY_VERSION"
 	defaultProfile                = "linux-browser"
-	processComposeVersion         = 1
+	processComposeVersion         = 2
+	defaultCaddyVersion           = "2.10.2"
 	defaultProcessComposePort     = 19080
 	defaultLocalUpTimeout         = 30 * 60
 	defaultLocalDownTimeout       = 2 * 60
@@ -48,6 +51,7 @@ const (
 	logFileName                   = "docker-stack.log"
 	localProxyLogFileName         = "local-proxy.log"
 	authServiceLogFileName        = "auth-service.log"
+	frontendLogFileName           = "frontend.log"
 	repoComposeFileName           = "docker-compose.yml"
 	localComposeOverrideName      = "local/docker-compose.local.yml"
 	localProcessComposeBin        = "local/bin/process-compose"
@@ -58,6 +62,7 @@ const (
 	processComposeServiceName     = "docker-stack"
 	localProxyProcessName         = "local-proxy"
 	authServiceProcessName        = "auth-service"
+	frontendProcessName           = "frontend"
 )
 
 type RuntimePaths struct {
@@ -77,9 +82,12 @@ type RuntimePaths struct {
 	AuthServicePIDFile   string
 	AuthServiceVenvDir   string
 	AuthServiceStateDir  string
+	FrontendLog          string
 	LocalProxyBin        string
+	CaddyBin             string
 	LocalProxyConfig     string
 	LocalProxyStopScript string
+	CaddyConfig          string
 	GeneratedConfig      string
 }
 
@@ -91,6 +99,7 @@ type RuntimeConfig struct {
 	FrontendPort       int
 	LocalProxy         LocalProxyConfig
 	AuthService        AuthServiceConfig
+	CaddyVersion       string
 }
 
 type LocalProxyConfig struct {
@@ -232,9 +241,12 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		AuthServicePIDFile:   filepath.Join(runtimeRoot, "run", "auth-service.pid"),
 		AuthServiceVenvDir:   filepath.Join(runtimeRoot, "venvs", "auth-service"),
 		AuthServiceStateDir:  filepath.Join(runtimeRoot, "stores", "sqlite", "auth-state"),
+		FrontendLog:          filepath.Join(runtimeRoot, "logs", frontendLogFileName),
 		LocalProxyBin:        filepath.Join(runtimeRoot, "bin", "local-proxy"),
+		CaddyBin:             filepath.Join(runtimeRoot, "bin", "caddy"),
 		LocalProxyConfig:     filepath.Join(root, localProxyConfigName),
 		LocalProxyStopScript: filepath.Join(root, localProxyScriptDirName, "stop.sh"),
+		CaddyConfig:          filepath.Join(runtimeRoot, "generated", "Caddyfile"),
 		GeneratedConfig:      filepath.Join(runtimeRoot, "generated", composeGeneratedFileName),
 	}
 	return RuntimeConfig{
@@ -243,6 +255,7 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		RuntimeRoot:        runtimeRoot,
 		ProcessComposePort: defaultProcessComposePortValue(),
 		FrontendPort:       envPort(frontendPortEnvVar, defaultFrontendPort),
+		CaddyVersion:       envText(caddyVersionEnvVar, defaultCaddyVersion),
 		LocalProxy: LocalProxyConfig{
 			Address:      envText(localProxyAddressEnvVar, defaultLocalProxyAddress),
 			Port:         envPort(localProxyPortEnvVar, defaultLocalProxyPort),

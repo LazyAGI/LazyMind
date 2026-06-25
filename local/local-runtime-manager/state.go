@@ -88,6 +88,10 @@ func defaultRuntimeState(cfg RuntimeConfig, apiPort int, tokenPath string) Runti
 				Kind:   "host-process",
 				Status: "stopped",
 			},
+			frontendProcessName: {
+				Kind:   "host-process",
+				Status: "stopped",
+			},
 		},
 		OverallStatus: "unknown",
 		UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
@@ -114,6 +118,10 @@ func newStateWithServiceStatus(state RuntimeState, serviceStatus string) Runtime
 	auth.Kind = "host-process"
 	auth.Status = serviceStatus
 	state.Services[authServiceProcessName] = auth
+	fe := state.Services[frontendProcessName]
+	fe.Kind = "host-process"
+	fe.Status = serviceStatus
+	state.Services[frontendProcessName] = fe
 	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	return state
 }
@@ -146,6 +154,12 @@ func readOrNewState(paths RuntimePaths, cfg RuntimeConfig) (RuntimeState, error)
 	}
 	if _, ok := st.Services[authServiceProcessName]; !ok {
 		st.Services[authServiceProcessName] = RuntimeServiceState{
+			Kind:   "host-process",
+			Status: "unknown",
+		}
+	}
+	if _, ok := st.Services[frontendProcessName]; !ok {
+		st.Services[frontendProcessName] = RuntimeServiceState{
 			Kind:   "host-process",
 			Status: "unknown",
 		}
