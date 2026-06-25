@@ -243,6 +243,27 @@ func TestLoadCloudReplaceKongConfigFile(t *testing.T) {
 	wantRoute("scan-route", "/api/scan", "http://127.0.0.1:18080", "/healthz", false, true)
 	wantRoute("core-route", "/api/core", "http://127.0.0.1:18001", "/health", true, false)
 	wantRoute("evo-route", "/api/evo", "http://127.0.0.1:18047", "/healthz", true, true)
+	if routesByName["evo-route"].Enabled {
+		t.Fatalf("evo-route enabled = true, want false for local cloud-replace-kong config")
+	}
+}
+
+func TestLoadLocalConfigDisablesEvoRoute(t *testing.T) {
+	cfg, err := Load(filepath.Join("..", "..", "configs", "local.yaml"))
+	if err != nil {
+		t.Fatalf("Load local.yaml: %v", err)
+	}
+
+	for _, route := range cfg.Routes {
+		if route.Name != "evo-route" {
+			continue
+		}
+		if route.Enabled {
+			t.Fatal("evo-route enabled = true, want false for local config")
+		}
+		return
+	}
+	t.Fatal("evo-route missing")
 }
 
 func TestLoadUsesCLIConfigPathOverEnv(t *testing.T) {

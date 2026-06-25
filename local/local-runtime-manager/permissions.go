@@ -21,7 +21,6 @@ var composeBindCriticalReadPaths = []string{
 }
 
 var composeBindBestEffortReadPaths = []string{
-	"algorithm",
 	"api/backend",
 	"evo",
 }

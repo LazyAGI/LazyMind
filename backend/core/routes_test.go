@@ -221,6 +221,59 @@ func TestReviewResultActionRoutesRegistered(t *testing.T) {
 	}
 }
 
+func TestSkillSelfEvolutionRoutesRemainRegisteredWithEvoServiceDisabled(t *testing.T) {
+	t.Setenv("LAZYMIND_EVO_SERVICE_ENABLED", "false")
+
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+
+	cases := []struct {
+		method string
+		path   string
+		want   string
+	}{
+		{http.MethodGet, "/evolution/tasks", "/evolution/tasks"},
+		{http.MethodGet, "/skill-review-results", "/skill-review-results"},
+		{http.MethodGet, "/skills", "/skills"},
+		{http.MethodPost, "/skills/skill-1:generate", "/skills/{skill_id}:generate"},
+		{http.MethodPost, "/memory:generate", "/memory:generate"},
+		{http.MethodPost, "/user-preference:generate", "/user-preference:generate"},
+	}
+
+	for _, tc := range cases {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		var match mux.RouteMatch
+		if !r.Match(req, &match) {
+			t.Fatalf("expected route to match %s %s", tc.method, tc.path)
+		}
+		gotTemplate, err := match.Route.GetPathTemplate()
+		if err != nil {
+			t.Fatalf("get matched route template: %v", err)
+		}
+		if gotTemplate != tc.want {
+			t.Fatalf("expected template %q, got %q", tc.want, gotTemplate)
+		}
+	}
+}
+
+func TestAgentRoutesReturnUnavailableWithEvoServiceDisabled(t *testing.T) {
+	t.Setenv("LAZYMIND_EVO_SERVICE_ENABLED", "false")
+
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/agent/threads", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "algorithm leap service is not started in this runtime") {
+		t.Fatalf("response body should mention disabled algorithm leap service, got %s", rec.Body.String())
+	}
+}
+
 func TestListDocumentsByDatasetsRouteRegistered(t *testing.T) {
 	r := mux.NewRouter()
 	registerAllRoutes(r)

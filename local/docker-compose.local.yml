@@ -27,6 +27,7 @@ services:
       LAZYMIND_REDIS_URL: ""
       LAZYMIND_STATE_BACKEND: sqlite
       LAZYMIND_STATE_SQLITE_DIR: /data/sqlite
+      LAZYMIND_EVO_SERVICE_ENABLED: "false"
     depends_on:
       redis:
         condition: service_healthy
@@ -44,6 +45,7 @@ services:
       LAZYMIND_REDIS_URL: ""
       LAZYMIND_STATE_BACKEND: sqlite
       LAZYMIND_STATE_SQLITE_DIR: /data/sqlite
+      LAZYMIND_EVO_SERVICE_ENABLED: "false"
     depends_on:
       auth-service:
         condition: service_started
@@ -99,6 +101,10 @@ x-lazymind-local:
     - redis
     - kong
     - auth-service
+    - evo-api
+  scale_disabled_container_services:
+    - redis
+    - kong
 
 volumes:
   sqlite-data:

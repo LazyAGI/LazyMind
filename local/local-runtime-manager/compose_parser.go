@@ -8,8 +8,9 @@ import (
 )
 
 type OverlayConfig struct {
-	Mode                   string   `yaml:"mode"`
-	DisabledContainerTypes []string `yaml:"disabled_container_services"`
+	Mode                        string   `yaml:"mode"`
+	DisabledContainerTypes      []string `yaml:"disabled_container_services"`
+	ScaleDisabledContainerTypes []string `yaml:"scale_disabled_container_services"`
 }
 
 type composeOverlayFile struct {
