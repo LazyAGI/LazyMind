@@ -48,16 +48,27 @@ def skill_editor(
     - action='create': after completing a complex task (5+ tool calls),
       fixing a tricky error, or discovering a non-trivial workflow, save the
       approach as a new skill by passing the full SKILL.md body in
-      content.
+      content. The SKILL.md YAML frontmatter must include name, category, and
+      description.
     - action='modify': when finding a skill outdated, incomplete, or
-      wrong, submit targeted edit proposals via suggestions
-      (natural-language, max 5 per call).
+      wrong, submit operations that edit the current SKILL.md content.
     - action='remove': when a skill is superseded or no longer correct,
       request its deletion.
 
     Only skills with source=remote are writable. Skills with
     source=file or any other source are read-only; do not use this tool
     to modify or remove them.
+
+    Both name and category are used as on-disk directory names, so they must
+    not contain whitespace or slashes. The category argument must be a single
+    path segment such as "engineering" or "coding"; do not nest categories like
+    "engineering/railway". The layout is always category/name/SKILL.md.
+
+    For modify and remove, derive category from the directory immediately above
+    the skill_name directory in the skill path. For example, in
+    ".../skills/testing/test-full-flow", name is "test-full-flow" and category
+    is "testing". Preserve or update the SKILL.md frontmatter category;
+    pending review checks use both category and name.
 
     Args:
         name: Skill name.

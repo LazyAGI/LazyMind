@@ -516,7 +516,14 @@ class KBToolGroup:
 
 
 class TempKBToolGroup:
-    """Temporary file search tools."""
+    """Temporary file search tools.
+
+    Use this tool group for user-attached temporary files that need text or
+    document retrieval, such as PDFs, text files, office documents, and data
+    files. Treat attached temporary files as available evidence, and search
+    them with this tool group before answering questions that depend on their
+    contents.
+    """
     __public_apis__ = ['kb_tmp_search']
     _tmp_retriever = None
     _reranker = None
@@ -553,6 +560,12 @@ class TempKBToolGroup:
         files: Optional[List[str]] = None,
     ) -> Any:
         """Search temporary uploaded files with the temporary document retriever.
+
+        Use this tool before answering questions that depend on temporary
+        uploaded files that require text or document retrieval, such as PDFs,
+        text files, office documents, and data files. Scope retrieval to the
+        current uploaded files by default, or pass explicit temporary file IDs
+        in ``files`` when needed.
 
         Each call handles exactly one search intent. If the user asks about
         multiple unrelated keywords or topics, call this tool separately for
