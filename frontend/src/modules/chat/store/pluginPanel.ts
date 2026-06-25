@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { PluginInfoApi, PluginSessionApi } from "@/modules/chat/utils/request";
+import { PluginInfoApi, PluginSessionApi, TempUploadServiceApi } from "@/modules/chat/utils/request";
 
 // ---------------------------------------------------------------------------
 // DraftStore — two-layer draft management for slot text editing
@@ -44,10 +44,13 @@ export const draftStore = {
   /** Clear timer and call patchSlotItemValue to produce a human revision. Does NOT clear localStorage.
    *  apiListIndex: when provided, used for the backend PATCH call (e.g. -1 for single slots);
    *  otherwise falls back to the stored entry's apiListIndex, then listIndex.
+   *
+   *  When the original artifact value contained a `path` field (large content was offloaded),
+   *  the draft text is first uploaded via POST /temp/uploads, then the PATCH carries the new
+   *  stored_path instead of the raw text — preserving the large-content offload contract.
    */
   async flushDraft(sessionId: string, slotId: string, listIndex: number, apiListIndex?: number): Promise<void> {
     const key = _draftKey(sessionId, slotId, listIndex);
-    // Try in-memory entry first; fall back to localStorage so page-reload still works.
     let value: Record<string, unknown> | null = null;
     let targetIndex = apiListIndex ?? listIndex;
     const entry = _drafts.get(key);
@@ -60,8 +63,31 @@ export const draftStore = {
       value = draftStore.getLocalDraft(sessionId, slotId, listIndex);
     }
     if (!value) return;
+
+    // Detect large-content (offloaded) draft: value carries {text: string, _isOffloaded: true}
+    // When the original artifact had a `path` field the SlotText component sets _isOffloaded=true
+    // so we know to re-upload the edited text instead of writing it inline to the DB.
+    let patchValue = value;
+    if (value._isOffloaded && typeof value.text === 'string') {
+      try {
+        const text = value.text as string;
+        const blob = new Blob([text], { type: 'text/plain' });
+        const filename = (value._originalFilename as string | undefined) ?? 'artifact.txt';
+        const api = TempUploadServiceApi();
+        const initRes = await api.initUpload({ filename, size: blob.size, content_type: 'text/plain' });
+        const uploadId: string = initRes.data?.data?.upload_id ?? initRes.data?.upload_id;
+        await api.uploadPart(uploadId, 1, blob);
+        const completeRes = await api.completeUpload(uploadId, { parts: [{ part_number: 1, size: blob.size }] });
+        const storedPath: string = completeRes.data?.data?.stored_path ?? completeRes.data?.stored_path;
+        patchValue = { type: 'text', path: storedPath, size: blob.size };
+      } catch {
+        // Upload failed — fall back to inline patch so user doesn't lose their edit
+        patchValue = { text: value.text as string };
+      }
+    }
+
     try {
-      await PluginSessionApi().patchSlotItem(sessionId, slotId, targetIndex, value);
+      await PluginSessionApi().patchSlotItem(sessionId, slotId, targetIndex, patchValue);
     } catch { /* best-effort — ignore */ }
     _drafts.delete(key);
     try { localStorage.removeItem(DRAFT_LS_PREFIX + key); } catch { /* ignore */ }
@@ -289,6 +315,8 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
 
   loadActiveSession: async (conversationId) => {
     if (!conversationId) return;
+    // Deduplicate concurrent calls for the same conversation.
+    if (get().loadingByConversation[conversationId]) return;
     set((s) => ({
       loadingByConversation: { ...s.loadingByConversation, [conversationId]: true },
     }));

@@ -1204,6 +1204,61 @@ func TestSourceTreeBindingRootRequestReturnsAllBindingRootsForMultiBindingSource
 	}
 }
 
+func TestSourceTreeBindingRootsUseIndexedRootDisplayNames(t *testing.T) {
+	t.Parallel()
+
+	base := newTreeReadRepo()
+	base.sources["source-1"] = store.Source{SourceID: "source-1"}
+	base.bindings["source-1"] = []store.Binding{
+		{
+			BindingID:              "binding-1",
+			SourceID:               "source-1",
+			TreeKey:                "wiki-root-1",
+			CoreParentDocumentName: "source name",
+			ConnectorType:          "feishu",
+			TargetType:             "wiki_node",
+			TargetRef:              "wiki:space-1:node-1",
+			Status:                 "ACTIVE",
+		},
+		{
+			BindingID:              "binding-2",
+			SourceID:               "source-1",
+			TreeKey:                "wiki-root-2",
+			CoreParentDocumentName: "source name",
+			ConnectorType:          "feishu",
+			TargetType:             "wiki_node",
+			TargetRef:              "wiki:space-1:node-2",
+			Status:                 "ACTIVE",
+		},
+	}
+	base.objects = []ObjectWithState{
+		indexedObject("source-1", "binding-1", "wiki-root-1", "wiki-root-1", "", "三体1.pdf", true, false),
+		indexedObject("source-1", "binding-2", "wiki-root-2", "wiki-root-2", "", "ADBE_2009_page_98.pdf", true, false),
+	}
+	repo := &treeReadRepoWithObject{treeReadRepo: base}
+	engine := NewDBSourceTreeQueryEngine(repo, TreeQueryLimits{DefaultPageSize: 10, MaxPageSize: 10, MaxAllCurrentLevelItems: 10})
+
+	page, err := engine.ListChildren(context.Background(), SourceTreeChildrenRequest{
+		SourceID:  "source-1",
+		BindingID: "binding-1",
+		TreeKey:   "wiki-root-1",
+		UseCache:  boolPtr(true),
+		PageSize:  10,
+	})
+	if err != nil {
+		t.Fatalf("list binding roots: %v", err)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("expected both binding roots, got %+v", page.Items)
+	}
+	if page.Items[0].DisplayName != "三体1.pdf" || page.Items[1].DisplayName != "ADBE_2009_page_98.pdf" {
+		t.Fatalf("binding roots should use indexed root display names: %+v", page.Items)
+	}
+	if page.Items[0].Key != "binding-1" || page.Items[0].ObjectKey != "wiki-root-1" {
+		t.Fatalf("binding root identity should stay compatible: %+v", page.Items[0])
+	}
+}
+
 func TestSourceTreeParentKeyCanSelectSiblingBindingRoot(t *testing.T) {
 	t.Parallel()
 

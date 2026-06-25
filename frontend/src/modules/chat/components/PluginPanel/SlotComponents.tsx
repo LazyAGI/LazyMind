@@ -3,8 +3,10 @@ import ReactDOM from "react-dom";
 import type { SlotRevision, SlotVersionEntry } from "@/modules/chat/store/pluginPanel";
 import { usePluginStore, draftStore } from "@/modules/chat/store/pluginPanel";
 import { resolveCoreAssetUrl, resolveMarkdownImageUrlAsync } from "@/modules/knowledge/utils/imageUrl";
-import { buildDiffLines } from "@/modules/memory/shared";
+import { buildDiffLinesWithInline } from "@/modules/memory/shared";
+import { DiffLineContent } from "@/modules/memory/components/DiffLineContent";
 import { uploadFileInChunks } from "@/modules/chat/utils/chunkUpload";
+import { FilePreviewDrawer } from "./FilePreviewDrawer";
 
 /**
  * Context for notifying the parent PluginPanel when any text slot enters/exits editing mode.
@@ -66,8 +68,8 @@ interface TextDiffViewProps {
 function TextDiffView({ currentText, otherText, otherLabel, reversed }: TextDiffViewProps) {
   const diffLines = useMemo(
     () => reversed
-      ? buildDiffLines(currentText, otherText)
-      : buildDiffLines(otherText, currentText),
+      ? buildDiffLinesWithInline(currentText, otherText)
+      : buildDiffLinesWithInline(otherText, currentText),
     [currentText, otherText, reversed],
   );
 
@@ -103,7 +105,7 @@ function TextDiffView({ currentText, otherText, otherLabel, reversed }: TextDiff
             <span className='memory-diff-prefix'>
               {line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '}
             </span>
-            <code>{line.text}</code>
+            <DiffLineContent line={line} />
           </div>
         ))}
         {diffLines.length === 0 && (
@@ -980,7 +982,14 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
     const val = e.target.value;
     setDraft(val);
     if (sessionId && slotId) {
-      draftStore.setDraft(sessionId, slotId, effectiveListIndex, { text: val }, apiListIndex);
+      const draftPayload: Record<string, unknown> = { text: val };
+      if (isOffloaded) {
+        draftPayload._isOffloaded = true;
+        draftPayload._originalFilename = (raw as any)?.path
+          ? (raw as any).path.split('/').pop() ?? 'artifact.txt'
+          : 'artifact.txt';
+      }
+      draftStore.setDraft(sessionId, slotId, effectiveListIndex, draftPayload, apiListIndex);
     }
   };
 
@@ -991,7 +1000,14 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
     }
     if (sessionId && slotId) {
       if (draft !== text) {
-        draftStore.setDraft(sessionId, slotId, effectiveListIndex, { text: draft }, apiListIndex);
+        const draftPayload: Record<string, unknown> = { text: draft };
+        if (isOffloaded) {
+          draftPayload._isOffloaded = true;
+          draftPayload._originalFilename = (raw as any)?.path
+            ? (raw as any).path.split('/').pop() ?? 'artifact.txt'
+            : 'artifact.txt';
+        }
+        draftStore.setDraft(sessionId, slotId, effectiveListIndex, draftPayload, apiListIndex);
         setHasPendingDraft(true);
       } else {
         draftStore.cancelDraft(sessionId, slotId, effectiveListIndex);
@@ -1139,30 +1155,175 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh }: 
   );
 }
 
-export function SlotFile({ slot }: { slot: SlotRevision }) {
+// --------------------------------------------------------------------------
+// getFileIcon — maps filename extension to an emoji icon
+// --------------------------------------------------------------------------
+
+function getFileIcon(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  if (ext === 'pdf') return '📕';
+  if (ext === 'doc' || ext === 'docx') return '📝';
+  if (ext === 'xls' || ext === 'xlsx') return '📊';
+  if (ext === 'ppt' || ext === 'pptx') return '📑';
+  if (ext === 'txt' || ext === 'md') return '📄';
+  if (ext === 'json' || ext === 'csv') return '📋';
+  if (ext === 'zip' || ext === 'tar' || ext === 'gz' || ext === 'rar') return '🗜️';
+  if (ext === 'jpg' || ext === 'jpeg' || ext === 'png' || ext === 'gif' || ext === 'webp') return '🖼️';
+  return '📎';
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+interface SlotFileProps {
+  slot: SlotRevision;
+  sessionId?: string;
+  slotId?: string;
+  onRefresh?: () => void;
+}
+
+export function SlotFile({ slot, sessionId, slotId, onRefresh }: SlotFileProps) {
   const raw = slot.artifact_value;
-  const url: string = raw?.url ? resolveCoreAssetUrl(raw.url) : (raw?.path ? resolveCoreAssetUrl(raw.path) : '');
+  const rawPath: string = raw?.url ?? raw?.path ?? '';
+  const url: string = rawPath ? resolveCoreAssetUrl(rawPath) : '';
   const name: string = raw?.filename ?? raw?.name ?? slot.artifact_key;
   const size: number | undefined = raw?.size;
+  const { deleteSlotItem, patchSlotCaption } = usePluginStore();
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [captionEditing, setCaptionEditing] = useState(false);
+  const [captionDraft, setCaptionDraft] = useState('');
+
+  const canEdit = Boolean(sessionId && slotId && slot.list_index !== undefined);
+
+  const handlePreview = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setPreviewOpen(true);
+  }, []);
+
+  const handleDeleteClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setConfirmDelete(true);
+  }, []);
+
+  const handleDeleteConfirm = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!sessionId || !slotId || slot.list_index === undefined) return;
+    await deleteSlotItem(sessionId, slotId, slot.list_index);
+    setConfirmDelete(false);
+    onRefresh?.();
+  }, [sessionId, slotId, slot.list_index, deleteSlotItem, onRefresh]);
+
+  const handleDeleteCancel = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setConfirmDelete(false);
+  }, []);
+
+  const handleCaptionEdit = useCallback(() => {
+    setCaptionDraft(slot.caption ?? '');
+    setCaptionEditing(true);
+  }, [slot.caption]);
+
+  const handleCaptionSave = useCallback(async () => {
+    if (!sessionId || !slotId || slot.list_index === undefined) return;
+    setCaptionEditing(false);
+    await patchSlotCaption(sessionId, slotId, slot.list_index, captionDraft);
+    onRefresh?.();
+  }, [sessionId, slotId, slot.list_index, captionDraft, patchSlotCaption, onRefresh]);
+
+  const handleCaptionKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') handleCaptionSave();
+    if (e.key === 'Escape') setCaptionEditing(false);
+  }, [handleCaptionSave]);
 
   if (!url) return <SlotPending type='file' />;
 
   return (
-    <div className='plugin-slot plugin-slot--file'>
-      <a
-        href={url}
-        download={name}
-        target='_blank'
-        rel='noopener noreferrer'
-        className='plugin-slot__file-link'
-        aria-label={`Download ${name}`}
-      >
-        <span className='plugin-slot__file-icon' aria-hidden='true'>📄</span>
-        <span className='plugin-slot__file-name'>{name}</span>
-        {size !== undefined && (
-          <span className='plugin-slot__file-size'>({(size / 1024).toFixed(1)} KB)</span>
-        )}
-      </a>
+    <div className='plugin-slot plugin-slot--file plugin-slot--file-enhanced'>
+      <div className='plugin-slot__file-card'>
+        <div className='plugin-slot__file-card-header'>
+          <span className='plugin-slot__file-icon' aria-hidden='true'>{getFileIcon(name)}</span>
+          <div className='plugin-slot__file-card-info'>
+            <span className='plugin-slot__file-name' title={name}>{name}</span>
+            {size !== undefined && (
+              <span className='plugin-slot__file-size'>{formatFileSize(size)}</span>
+            )}
+          </div>
+        </div>
+        <div className='plugin-slot__file-card-actions'>
+          <button
+            className='plugin-slot__file-action-btn'
+            onClick={handlePreview}
+            title='预览'
+            aria-label={`预览 ${name}`}
+            type='button'
+          >
+            预览
+          </button>
+          <a
+            href={url}
+            download={name}
+            className='plugin-slot__file-action-btn'
+            aria-label={`下载 ${name}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            下载
+          </a>
+          {canEdit && !confirmDelete && (
+            <button
+              className='plugin-slot__file-action-btn plugin-slot__file-action-btn--danger'
+              onClick={handleDeleteClick}
+              title='删除'
+              aria-label={`删除 ${name}`}
+              type='button'
+            >
+              ×
+            </button>
+          )}
+          {canEdit && confirmDelete && (
+            <span className='plugin-slot__delete-confirm'>
+              <button className='plugin-slot__delete-confirm-yes' onClick={handleDeleteConfirm} aria-label='确认删除'>删除</button>
+              <button className='plugin-slot__delete-confirm-no' onClick={handleDeleteCancel} aria-label='取消删除'>取消</button>
+            </span>
+          )}
+        </div>
+      </div>
+      {canEdit && (
+        <div className='plugin-slot__caption'>
+          {captionEditing ? (
+            <input
+              className='plugin-slot__caption-input'
+              value={captionDraft}
+              onChange={(e) => setCaptionDraft(e.target.value)}
+              onBlur={handleCaptionSave}
+              onKeyDown={handleCaptionKeyDown}
+              autoFocus
+              aria-label='编辑描述'
+              placeholder='添加描述…'
+            />
+          ) : (
+            <span
+              className='plugin-slot__caption-text'
+              onClick={handleCaptionEdit}
+              title='点击编辑描述'
+              role='button'
+              tabIndex={0}
+              onKeyDown={(e) => e.key === 'Enter' && handleCaptionEdit()}
+            >
+              {slot.caption || <span className='plugin-slot__caption-placeholder'>添加描述…</span>}
+            </span>
+          )}
+        </div>
+      )}
+      <FilePreviewDrawer
+        open={previewOpen}
+        filename={name}
+        url={rawPath}
+        onClose={() => setPreviewOpen(false)}
+      />
     </div>
   );
 }
@@ -1213,7 +1374,7 @@ export function SlotRenderer({
       />
     );
   }
-  if (normalized === 'file') return <SlotFile slot={slot} />;
+  if (normalized === 'file') return <SlotFile slot={slot} sessionId={sessionId} slotId={slotId} onRefresh={onRefresh} />;
   return (
     <SlotText
       slot={slot}

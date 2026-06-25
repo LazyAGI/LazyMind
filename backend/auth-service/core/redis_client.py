@@ -4,6 +4,7 @@ import time
 
 import redis
 
+from core.state_errors import StateBackendAuthenticationError, StateBackendError
 
 _CLIENT: redis.Redis | None = None
 _CLIENT_LOCK = threading.Lock()
@@ -15,8 +16,16 @@ REDIS_CONNECT_RETRY_INTERVAL_SECONDS = 1.0
 def redis_url() -> str:
     url = (os.environ.get(REDIS_URL_ENV) or '').strip()
     if not url:
-        raise RuntimeError(f'{REDIS_URL_ENV} is required for auth-service Redis features')
+        raise StateBackendError(f'{REDIS_URL_ENV} is required for auth-service state backend')
     return url
+
+
+def state_backend_error(exc: Exception) -> Exception:
+    if isinstance(exc, redis.exceptions.AuthenticationError):
+        return StateBackendAuthenticationError('state backend authentication failed')
+    if isinstance(exc, redis.exceptions.RedisError):
+        return StateBackendError('state backend is unavailable')
+    return exc
 
 
 def _build_redis_client(url: str) -> redis.Redis:
@@ -55,9 +64,11 @@ def redis_client() -> redis.Redis:
                 if attempt < REDIS_CONNECT_RETRIES - 1:
                     time.sleep(REDIS_CONNECT_RETRY_INTERVAL_SECONDS)
                     continue
-                raise
+                raise state_backend_error(exc) from exc
+            except redis.exceptions.RedisError as exc:
+                raise state_backend_error(exc) from exc
             _CLIENT = client
             return _CLIENT
 
         assert last_error is not None
-        raise last_error
+        raise state_backend_error(last_error) from last_error

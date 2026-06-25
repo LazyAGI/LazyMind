@@ -177,19 +177,20 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
           uploadFile(
             rcFile,
             (uri) => {
-              setFiles((prevFiles) =>
-                prevFiles.map((f) => {
-                  if (f.uid === rcFile.uid) {
-                    f.uri = uri;
-                  }
-                  return f;
-                }),
-              );
+              setFiles((prevFiles) => {
+                const nextFiles = prevFiles.map((f) =>
+                  f.uid === rcFile.uid ? { ...f, uri } : f,
+                );
+                updateFiles?.(nextFiles);
+                return nextFiles;
+              });
             },
             () => {
-              setFiles((prevFiles) =>
-                prevFiles.filter((f) => f.uid !== rcFile.uid),
-              );
+              setFiles((prevFiles) => {
+                const nextFiles = prevFiles.filter((f) => f.uid !== rcFile.uid);
+                updateFiles?.(nextFiles);
+                return nextFiles;
+              });
             },
           );
           return newFiles;
@@ -289,14 +290,13 @@ const ImageUpload = forwardRef<ImageUploadImperativeProps, Props>(
         return newFiles;
       });
       uploadFile(file, (uri) => {
-        setFiles((prev) =>
-          prev.map((f) => {
-            if (f.uid === file?.uid) {
-              f.uri = uri;
-            }
-            return f;
-          }),
-        );
+        setFiles((prev) => {
+          const nextFiles = prev.map((f) =>
+            f.uid === file?.uid ? { ...f, uri } : f,
+          );
+          updateFiles?.(nextFiles);
+          return nextFiles;
+        });
       });
     }
 

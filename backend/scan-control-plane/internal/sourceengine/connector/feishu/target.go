@@ -50,6 +50,9 @@ func (c *FeishuConnector) probeTarget(ctx context.Context, token string, req con
 				Revision:    "virtual-wiki",
 			}, nil
 		}
+		if nodeToken := looseWikiNodeToken(req.TargetRef); nodeToken != "" {
+			return c.api.GetWikiNode(ctx, token, "", nodeToken)
+		}
 		spaceID, nodeToken, isSpace, err := parseWikiTarget(req.TargetRef)
 		if err != nil {
 			return Object{}, err

@@ -21,6 +21,12 @@ const (
 	localProxyScanHostPortEnvVar  = "LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT"
 	localProxyEvoHostPortEnvVar   = "LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT"
 	frontendPortEnvVar            = "LAZYMIND_FRONTEND_PORT"
+	authServicePortEnvVar         = "LAZYMIND_AUTH_SERVICE_PORT"
+	authServicePythonEnvVar       = "LAZYMIND_AUTH_SERVICE_PYTHON"
+	authServiceUVEnvVar           = "LAZYMIND_AUTH_SERVICE_UV"
+	authServiceDatabaseURLEnvVar  = "LAZYMIND_AUTH_SERVICE_DATABASE_URL"
+	authServiceInstallDepsEnvVar  = "LAZYMIND_AUTH_SERVICE_INSTALL_DEPS"
+	localPostgresPortEnvVar       = "LAZYMIND_LOCAL_POSTGRES_PORT"
 	defaultProfile                = "linux-browser"
 	processComposeVersion         = 1
 	defaultProcessComposePort     = 19080
@@ -34,20 +40,24 @@ const (
 	defaultLocalProxyChatHostPort = 18046
 	defaultLocalProxyScanHostPort = 18080
 	defaultLocalProxyEvoHostPort  = 18047
+	defaultLocalPostgresPort      = 15432
 	stateFileName                 = "runtime-state.json"
 	composeGeneratedFileName      = "process-compose.generated.yaml"
 	tokenFileName                 = "pc-token"
 	upLockFileName                = "up.lock"
 	logFileName                   = "docker-stack.log"
 	localProxyLogFileName         = "local-proxy.log"
+	authServiceLogFileName        = "auth-service.log"
 	repoComposeFileName           = "docker-compose.yml"
 	localComposeOverrideName      = "local/docker-compose.local.yml"
 	localProcessComposeBin        = "local/bin/process-compose"
 	localProxyConfigName          = "local/local-proxy/configs/cloud-replace-kong.yaml"
 	localProxyScriptDirName       = "local/local-proxy/scripts"
 	localProxySourceDirName       = "local/local-proxy"
+	authServiceSourceDirName      = "backend/auth-service"
 	processComposeServiceName     = "docker-stack"
 	localProxyProcessName         = "local-proxy"
+	authServiceProcessName        = "auth-service"
 )
 
 type RuntimePaths struct {
@@ -63,6 +73,10 @@ type RuntimePaths struct {
 	UpLockFile           string
 	LogFilePath          string
 	LocalProxyLog        string
+	AuthServiceLog       string
+	AuthServicePIDFile   string
+	AuthServiceVenvDir   string
+	AuthServiceStateDir  string
 	LocalProxyBin        string
 	LocalProxyConfig     string
 	LocalProxyStopScript string
@@ -76,6 +90,7 @@ type RuntimeConfig struct {
 	ProcessComposePort int
 	FrontendPort       int
 	LocalProxy         LocalProxyConfig
+	AuthService        AuthServiceConfig
 }
 
 type LocalProxyConfig struct {
@@ -86,6 +101,13 @@ type LocalProxyConfig struct {
 	ChatHostPort int
 	ScanHostPort int
 	EvoHostPort  int
+}
+
+type AuthServiceConfig struct {
+	Port        int
+	Python      string
+	DatabaseURL string
+	InstallDeps bool
 }
 
 func defaultProfileValue() string {
@@ -114,6 +136,49 @@ func envText(name, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envBool(name string, fallback bool) bool {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return fallback
+	}
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
+}
+
+func defaultAuthServicePortValue() int {
+	if v := os.Getenv(localProxyAuthHostPortEnvVar); v != "" {
+		return envPort(localProxyAuthHostPortEnvVar, defaultLocalProxyAuthHostPort)
+	}
+	if v := os.Getenv(authServicePortEnvVar); v != "" {
+		return envPort(authServicePortEnvVar, defaultLocalProxyAuthHostPort)
+	}
+	return defaultLocalProxyAuthHostPort
+}
+
+func defaultLocalProxyAuthHostPortValue() int {
+	if v := os.Getenv(localProxyAuthHostPortEnvVar); v != "" {
+		return envPort(localProxyAuthHostPortEnvVar, defaultLocalProxyAuthHostPort)
+	}
+	if v := os.Getenv(authServicePortEnvVar); v != "" {
+		return envPort(authServicePortEnvVar, defaultLocalProxyAuthHostPort)
+	}
+	return defaultLocalProxyAuthHostPort
+}
+
+func defaultAuthServiceDatabaseURL() string {
+	if v := strings.TrimSpace(os.Getenv(authServiceDatabaseURLEnvVar)); v != "" {
+		return v
+	}
+	port := envPort(localPostgresPortEnvVar, defaultLocalPostgresPort)
+	return "postgresql+psycopg://root:123456@127.0.0.1:" + strconv.Itoa(port) + "/authservice"
 }
 
 func resolveRepoRoot(start string) (string, error) {
@@ -163,6 +228,10 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		UpLockFile:           filepath.Join(runtimeRoot, "run", upLockFileName),
 		LogFilePath:          filepath.Join(runtimeRoot, "logs", logFileName),
 		LocalProxyLog:        filepath.Join(runtimeRoot, "logs", localProxyLogFileName),
+		AuthServiceLog:       filepath.Join(runtimeRoot, "logs", authServiceLogFileName),
+		AuthServicePIDFile:   filepath.Join(runtimeRoot, "run", "auth-service.pid"),
+		AuthServiceVenvDir:   filepath.Join(runtimeRoot, "venvs", "auth-service"),
+		AuthServiceStateDir:  filepath.Join(runtimeRoot, "stores", "sqlite", "auth-state"),
 		LocalProxyBin:        filepath.Join(runtimeRoot, "bin", "local-proxy"),
 		LocalProxyConfig:     filepath.Join(root, localProxyConfigName),
 		LocalProxyStopScript: filepath.Join(root, localProxyScriptDirName, "stop.sh"),
@@ -177,11 +246,17 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		LocalProxy: LocalProxyConfig{
 			Address:      envText(localProxyAddressEnvVar, defaultLocalProxyAddress),
 			Port:         envPort(localProxyPortEnvVar, defaultLocalProxyPort),
-			AuthHostPort: envPort(localProxyAuthHostPortEnvVar, defaultLocalProxyAuthHostPort),
+			AuthHostPort: defaultLocalProxyAuthHostPortValue(),
 			CoreHostPort: envPort(localProxyCoreHostPortEnvVar, defaultLocalProxyCoreHostPort),
 			ChatHostPort: envPort(localProxyChatHostPortEnvVar, defaultLocalProxyChatHostPort),
 			ScanHostPort: envPort(localProxyScanHostPortEnvVar, defaultLocalProxyScanHostPort),
 			EvoHostPort:  envPort(localProxyEvoHostPortEnvVar, defaultLocalProxyEvoHostPort),
+		},
+		AuthService: AuthServiceConfig{
+			Port:        defaultAuthServicePortValue(),
+			Python:      envText(authServicePythonEnvVar, "python3"),
+			DatabaseURL: defaultAuthServiceDatabaseURL(),
+			InstallDeps: envBool(authServiceInstallDepsEnvVar, true),
 		},
 	}, p, nil
 }
@@ -193,6 +268,9 @@ func (p RuntimePaths) EnsureAllDirs() error {
 		p.RunDir,
 		p.GeneratedDir,
 		p.BinDir,
+		filepath.Dir(p.AuthServicePIDFile),
+		p.AuthServiceStateDir,
+		p.AuthServiceVenvDir,
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o755); err != nil {

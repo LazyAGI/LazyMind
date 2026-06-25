@@ -24,6 +24,7 @@ interface MemoryDraftModalProps {
   modalMode: string;
   isChildSkillDraft: boolean;
   parentSkillOptions: Array<{ label: string; value: string }>;
+  parentSkillOptionsLoading: boolean;
   tagOptions: Array<{ label: string; value: string }>;
   normalizeTagValues: (values: string[]) => string[];
   createSkillUploadProps: (childTempId?: string) => any;
@@ -52,6 +53,7 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
     modalMode,
     isChildSkillDraft,
     parentSkillOptions,
+    parentSkillOptionsLoading,
     tagOptions,
     normalizeTagValues,
     createSkillUploadProps,
@@ -161,6 +163,7 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
               value={draft.aliases}
               disabled={isReadOnly}
               open={false}
+              suffixIcon={null}
               placeholder={t("admin.memoryGlossaryAliasesPlaceholder")}
               onChange={handleGlossaryAliasesChange}
               onSearch={(value) =>
@@ -245,6 +248,7 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
                 optionFilterProp="label"
                 value={draft.parentId || undefined}
                 disabled={isReadOnly}
+                loading={parentSkillOptionsLoading}
                 placeholder={t("admin.memoryParentSkillPlaceholder")}
                 options={parentSkillOptions}
                 onChange={(value) =>

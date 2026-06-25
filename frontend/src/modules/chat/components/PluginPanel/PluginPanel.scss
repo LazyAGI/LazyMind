@@ -1638,3 +1638,168 @@
 .plugin-panel__image-list-item--dragging {
   opacity: 0.4;
 }
+
+// ---------------------------------------------------------------------------
+// SlotFile enhanced — file card with icon, preview, download, delete, caption
+// ---------------------------------------------------------------------------
+
+.plugin-slot--file-enhanced {
+  .plugin-slot__file-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    transition: border-color 0.15s;
+
+    &:hover {
+      border-color: #a5b4fc;
+    }
+  }
+
+  .plugin-slot__file-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .plugin-slot__file-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+
+  .plugin-slot__file-card-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .plugin-slot__file-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: #1f2937;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .plugin-slot__file-size {
+    font-size: 11px;
+    color: #6b7280;
+  }
+
+  .plugin-slot__file-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .plugin-slot__file-action-btn {
+    padding: 3px 10px;
+    font-size: 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    background: #fff;
+    color: #374151;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.1s, border-color 0.1s;
+
+    &:hover {
+      background: #f3f4f6;
+      border-color: #9ca3af;
+    }
+
+    &--danger {
+      color: #dc2626;
+      border-color: #fca5a5;
+
+      &:hover {
+        background: #fef2f2;
+        border-color: #dc2626;
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// FilePreviewDrawer — full-screen modal for file preview
+// ---------------------------------------------------------------------------
+
+.file-preview-drawer__overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.file-preview-drawer {
+  background: #fff;
+  border-radius: 10px;
+  width: 80vw;
+  max-width: 960px;
+  height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+
+  &__header {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid #e5e7eb;
+    flex-shrink: 0;
+  }
+
+  &__title {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 600;
+    color: #1f2937;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__close {
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    font-size: 18px;
+    color: #6b7280;
+    cursor: pointer;
+    border-radius: 4px;
+    flex-shrink: 0;
+
+    &:hover {
+      background: #f3f4f6;
+      color: #1f2937;
+    }
+  }
+
+  &__body {
+    flex: 1;
+    overflow: auto;
+    padding: 12px;
+  }
+
+  &__loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #6b7280;
+    font-size: 14px;
+  }
+}
+

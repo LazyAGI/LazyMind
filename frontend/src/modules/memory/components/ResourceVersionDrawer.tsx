@@ -17,7 +17,8 @@ import {
   type ResourceVersionRecord,
   type ResourceVersionType,
 } from "../resourceVersionApi";
-import { buildDiffLines, buildUnifiedDiffLines, formatDateTime } from "../shared";
+import { buildDiffLinesWithInline, buildUnifiedDiffLines, formatDateTime } from "../shared";
+import { DiffLineContent } from "./DiffLineContent";
 
 interface ResourceVersionDrawerProps {
   open: boolean;
@@ -116,7 +117,7 @@ function ResourceVersionDetail({
     }
     return detail.diff
       ? buildUnifiedDiffLines(detail.diff)
-      : buildDiffLines(detail.beforeContent, detail.afterContent);
+      : buildDiffLinesWithInline(detail.beforeContent, detail.afterContent);
   }, [detail]);
 
   if (loading) {
@@ -189,7 +190,7 @@ function ResourceVersionDetail({
                       <span className="memory-diff-prefix">
                         {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
                       </span>
-                      <code>{line.text}</code>
+                      <DiffLineContent line={line} />
                     </div>
                   ))
                 ) : (

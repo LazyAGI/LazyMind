@@ -125,14 +125,22 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const unsubscribeConvEvents = useTaskCenterStore((s) => s.unsubscribeConvEvents);
 
   useEffect(() => {
-    if (sessionId) {
-      loadConversationTasks(sessionId);
-      subscribeConvEvents(sessionId);
-    }
-    return () => {
-      if (sessionId) {
-        unsubscribeConvEvents(sessionId);
+    if (!sessionId) return;
+    // Load the persisted task list first, then subscribe to conv-level events.
+    // convEvents are replayed from the start on every new SSE connection, so we
+    // must have the authoritative task states in the store before the replay
+    // delivers task_created events — otherwise a replayed task_created for an
+    // already-finished task would look "new" and we would re-subscribe to its
+    // task stream, causing the full execution log to be appended again.
+    let cancelled = false;
+    loadConversationTasks(sessionId).then(() => {
+      if (!cancelled) {
+        subscribeConvEvents(sessionId);
       }
+    });
+    return () => {
+      cancelled = true;
+      unsubscribeConvEvents(sessionId);
     };
   }, [sessionId, loadConversationTasks, subscribeConvEvents, unsubscribeConvEvents]);
 

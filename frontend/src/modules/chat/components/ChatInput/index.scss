@@ -360,6 +360,17 @@
                 background: rgba(0, 0, 0, 0.06);
               }
             }
+
+            .chat-upload-document-badge {
+              display: inline-flex;
+              line-height: 1;
+
+              .ant-btn {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+              }
+            }
           }
         }
       }

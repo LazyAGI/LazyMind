@@ -3737,6 +3737,16 @@
   }
 }
 
+.memory-diff-inline-add {
+  background: #a6f4c5;
+  border-radius: 2px;
+}
+
+.memory-diff-inline-remove {
+  background: #fda29b;
+  border-radius: 2px;
+}
+
 .memory-diff-prefix {
   text-align: center;
   user-select: none;

@@ -84,6 +84,10 @@ func defaultRuntimeState(cfg RuntimeConfig, apiPort int, tokenPath string) Runti
 				Kind:   "host-process",
 				Status: "stopped",
 			},
+			authServiceProcessName: {
+				Kind:   "host-process",
+				Status: "stopped",
+			},
 		},
 		OverallStatus: "unknown",
 		UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
@@ -106,6 +110,10 @@ func newStateWithServiceStatus(state RuntimeState, serviceStatus string) Runtime
 	lp.Kind = "host-process"
 	lp.Status = serviceStatus
 	state.Services[localProxyProcessName] = lp
+	auth := state.Services[authServiceProcessName]
+	auth.Kind = "host-process"
+	auth.Status = serviceStatus
+	state.Services[authServiceProcessName] = auth
 	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	return state
 }
@@ -132,6 +140,12 @@ func readOrNewState(paths RuntimePaths, cfg RuntimeConfig) (RuntimeState, error)
 	}
 	if _, ok := st.Services[localProxyProcessName]; !ok {
 		st.Services[localProxyProcessName] = RuntimeServiceState{
+			Kind:   "host-process",
+			Status: "unknown",
+		}
+	}
+	if _, ok := st.Services[authServiceProcessName]; !ok {
+		st.Services[authServiceProcessName] = RuntimeServiceState{
 			Kind:   "host-process",
 			Status: "unknown",
 		}

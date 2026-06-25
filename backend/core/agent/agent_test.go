@@ -89,6 +89,59 @@ func newAgentTestDB(t *testing.T) *orm.DB {
 	return db
 }
 
+func seedAgentRuntimeModelConfig(t *testing.T, db *orm.DB, userID, role string) {
+	t.Helper()
+
+	now := time.Now().UTC()
+	suffix := strings.ReplaceAll(role, "_", "-")
+	group := orm.UserModelProviderGroup{
+		ID:                  "group-" + suffix,
+		UserModelProviderID: "provider-" + suffix,
+		Name:                "Provider " + role,
+		BaseURL:             "https://api.example.test/v1",
+		APIKey:              "sk-" + suffix,
+		IsVerified:          true,
+		BaseModel: orm.BaseModel{
+			CreateUserID:   userID,
+			CreateUserName: userID,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}
+	model := orm.UserModelProviderGroupModel{
+		ID:                       "model-" + suffix,
+		UserModelProviderID:      group.UserModelProviderID,
+		UserModelProviderGroupID: group.ID,
+		ProviderName:             "OpenAI",
+		Name:                     "gpt-" + suffix,
+		ModelType:                "llm",
+		BaseModel: orm.BaseModel{
+			CreateUserID:   userID,
+			CreateUserName: userID,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}
+	selected := orm.UserSelectedModel{
+		UserID:                        userID,
+		UserName:                      userID,
+		ModelKey:                      role,
+		UserModelProviderGroupModelID: model.ID,
+		Share:                         false,
+		CreatedAt:                     now,
+		UpdatedAt:                     now,
+	}
+	if err := db.DB.Create(&group).Error; err != nil {
+		t.Fatalf("create provider group: %v", err)
+	}
+	if err := db.DB.Create(&model).Error; err != nil {
+		t.Fatalf("create provider group model: %v", err)
+	}
+	if err := db.DB.Create(&selected).Error; err != nil {
+		t.Fatalf("create selected model: %v", err)
+	}
+}
+
 func TestBuildThreadCreateTitleUsesKnowledgeBaseDisplayNameAndDate(t *testing.T) {
 	db := newAgentTestDB(t)
 	if err := db.DB.AutoMigrate(&orm.Dataset{}); err != nil {
@@ -141,6 +194,66 @@ func TestBuildThreadCreateTitleFallsBackToPayloadTitle(t *testing.T) {
 	got := buildThreadCreateTitle(context.Background(), nil, payload, now)
 	if got != "前端传入名称-2026-05-13" {
 		t.Fatalf("unexpected fallback thread title: %q", got)
+	}
+}
+
+func TestCreateThreadRequiresConfiguredEvoLLM(t *testing.T) {
+	db := newAgentTestDB(t)
+	if err := db.DB.AutoMigrate(&orm.Dataset{}); err != nil {
+		t.Fatalf("auto migrate dataset: %v", err)
+	}
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	t.Setenv("LAZYMIND_EVO_SERVICE_URL", "http://127.0.0.1:1")
+
+	body := []byte(`{
+		"mode": "interactive",
+		"title": "eval",
+		"llm_config": {
+			"evo_llm": {"source": "client", "model": "client-supplied"}
+		},
+		"inputs": {"kb_id": "kb-1", "num_cases": 1}
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/core/agent/threads", bytes.NewReader(body))
+	req.Header.Set("X-User-Id", "user-1")
+	req.Header.Set("X-User-Name", "User One")
+	rec := httptest.NewRecorder()
+
+	CreateThread(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected missing evo_llm to return 422, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "evo_llm") {
+		t.Fatalf("expected response to mention evo_llm, body=%s", rec.Body.String())
+	}
+	var activeCount int64
+	if err := db.DB.Model(&orm.AgentUserActiveThread{}).Count(&activeCount).Error; err != nil {
+		t.Fatalf("count active threads: %v", err)
+	}
+	if activeCount != 0 {
+		t.Fatalf("expected validation to happen before active thread reservation, got %d rows", activeCount)
+	}
+}
+
+func TestAttachThreadModelConfigProvidesEvoLLM(t *testing.T) {
+	db := newAgentTestDB(t)
+	seedAgentRuntimeModelConfig(t, db, "user-1", "evo_llm")
+
+	payload := map[string]any{}
+	if err := attachThreadModelConfig(context.Background(), db.DB, "user-1", payload); err != nil {
+		t.Fatalf("attach thread model config: %v", err)
+	}
+	if !hasThreadEvoLLMConfig(payload) {
+		t.Fatalf("expected attached payload to satisfy evo_llm requirement: %#v", payload)
+	}
+	llmConfig, ok := payload["llm_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected llm_config, got %#v", payload["llm_config"])
+	}
+	evoConfig, ok := llmConfig["evo_llm"].(map[string]any)
+	if !ok || evoConfig["model"] != "gpt-evo-llm" {
+		t.Fatalf("expected evo_llm config, got %#v", llmConfig["evo_llm"])
 	}
 }
 
@@ -1356,6 +1469,35 @@ func TestStreamUpstreamThreadEventsTracksUpstreamIDWithoutForwarding(t *testing.
 		t.Fatalf("unexpected forwarded stream:\nwant: %q\ngot:  %q", want, got)
 	}
 	if lastUpstreamEventID != "339" {
+		t.Fatalf("unexpected last upstream event id: %q", lastUpstreamEventID)
+	}
+}
+
+func TestStreamUpstreamThreadEventsStopsAfterRunCompleted(t *testing.T) {
+	db := newAgentTestDB(t)
+	rec := httptest.NewRecorder()
+	completed := `{"type":"artifact.run.completed","event_type":"run.completed","payload":{"event_type":"run.completed","raw_event":{"event_type":"run.completed"}}}`
+	body := strings.NewReader(strings.Join([]string{
+		"id: 41\nevent: message\ndata: {\"kind\":\"task.running\",\"task_id\":\"task_1\"}\n\n",
+		"id: 43\nevent: message\ndata: " + completed + "\n\n",
+		"id: 44\nevent: message\ndata: {\"kind\":\"task.after\",\"task_id\":\"task_1\"}\n\n",
+	}, ""))
+
+	var lastUpstreamEventID string
+	err := streamUpstreamThreadEvents(context.Background(), rec, rec, db.DB, "thr_1", "step_1", body, &lastUpstreamEventID, nil)
+	if !errors.Is(err, errThreadEventsRunCompleted) {
+		t.Fatalf("expected run completed stop error, got %v", err)
+	}
+
+	want := "data: {\"kind\":\"task.running\",\"task_id\":\"task_1\"}\n\n" +
+		"data: " + completed + "\n\n"
+	if got := rec.Body.String(); got != want {
+		t.Fatalf("unexpected forwarded stream:\nwant: %q\ngot:  %q", want, got)
+	}
+	if strings.Contains(rec.Body.String(), "task.after") {
+		t.Fatalf("expected stream to stop before later frames, got %q", rec.Body.String())
+	}
+	if lastUpstreamEventID != "43" {
 		t.Fatalf("unexpected last upstream event id: %q", lastUpstreamEventID)
 	}
 }

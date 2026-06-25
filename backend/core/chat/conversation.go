@@ -215,7 +215,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	if len(dbDisabledTools) > 0 {
 		resourceContext.DisabledTools = mergeDisabledToolNames(resourceContext.DisabledTools, dbDisabledTools)
 	}
-	reqBody := buildChatRequestBody(r.Context(), db, convID, sessionID, query, upstreamHistories, raw, resourceContext, userID)
+	reqBody := buildChatRequestBody(r.Context(), db, convID, sessionID, query, upstreamHistories, raw, resourceContext, userID, target.Seq)
 	if err := applyLocalFSPathsForChat(r.Context(), r, db, userID, reqBody); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load local fs chat paths failed", err), http.StatusInternalServerError)
 		return

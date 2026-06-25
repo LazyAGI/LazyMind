@@ -19,9 +19,8 @@ function ShowChatFileList(props: ShowChatFileListProps) {
   const { fileList, onRemove } = props;
 
   const tempGroup = Object.groupBy(fileList, (item) => {
-    const suffix = item.name
-      .substring(item.name.lastIndexOf("."))
-      .toLowerCase();
+    const name = item.name ?? '';
+    const suffix = name.substring(name.lastIndexOf(".")).toLowerCase();
     return allowedImageTypes.includes(suffix) ? "image" : "file";
   });
 
