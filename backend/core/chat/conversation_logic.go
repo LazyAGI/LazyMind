@@ -526,6 +526,11 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		}
 		body["plugin_context"] = mergedPC
 	}
+	// Propagate ask_response so Python ChatAgent can resolve ask_pending state.
+	// Format: {"ask_id": "...", "selected": [...]}
+	if ar, ok := raw["ask_response"].(map[string]any); ok && len(ar) > 0 {
+		body["ask_response"] = ar
+	}
 	if resourceContext != nil {
 		body["disabled_tools"] = resourceContext.DisabledTools
 		body["available_skills"] = resourceContext.AvailableSkills
@@ -555,6 +560,45 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		}
 	}
 	return body
+}
+
+// resolvePluginMode determines the effective plugin_mode for this request.
+// Priority: request body > "dynamic" default.
+// Valid values: "auto", "dynamic". Anything else is normalised to "dynamic".
+func resolvePluginMode(raw map[string]any) string {
+	if v, ok := raw["plugin_mode"].(string); ok {
+		v = strings.TrimSpace(v)
+		if v == "auto" || v == "dynamic" {
+			return v
+		}
+	}
+	return "dynamic"
+}
+
+// resolvePluginModeWithFallback determines the effective plugin_mode with full priority chain:
+//
+//	request body > DB-resolved agentic_config (loaded via applyChatRuntimeConfigs) > "dynamic"
+//
+// reqBody must have already been populated by applyChatRuntimeConfigs so that
+// reqBody["agentic_config"]["plugin_mode"] reflects the DB value.
+func resolvePluginModeWithFallback(raw map[string]any, reqBody map[string]any) string {
+	// Highest priority: explicit value in the original request body.
+	if v, ok := raw["plugin_mode"].(string); ok {
+		v = strings.TrimSpace(v)
+		if v == "auto" || v == "dynamic" {
+			return v
+		}
+	}
+	// Second priority: DB-resolved value injected by applyChatRuntimeConfigs into agentic_config.
+	if ac, ok := reqBody["agentic_config"].(map[string]any); ok {
+		if v, ok := ac["plugin_mode"].(string); ok {
+			v = strings.TrimSpace(v)
+			if v == "auto" || v == "dynamic" {
+				return v
+			}
+		}
+	}
+	return "dynamic"
 }
 
 func resolveUseMemory(raw map[string]any, resourceContext *evolution.ChatResourceContext) bool {
@@ -834,6 +878,7 @@ func streamSingleAnswer(
 	var fullResult string
 	var toolCallTurns int
 	var sources []any
+	var pendingAskPending any
 	thinkStart := time.Now()
 	// text：textConversation/text，finish_reason text UNSPECIFIED
 	writeSSEChunk(w, flusher, &ChatChunkResponse{
@@ -851,7 +896,8 @@ func streamSingleAnswer(
 	for d := range ch {
 		if d.TaskCreated != nil {
 			userIDForTask, _ := reqBody["user_id"].(string)
-			notice := handleTaskCreated(chatCtx, db, stateStore, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody), toolConfigFromBody(reqBody))
+			pluginModeForTask, _ := reqBody["plugin_mode"].(string)
+			notice := handleTaskCreated(chatCtx, db, stateStore, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody), toolConfigFromBody(reqBody), pluginModeForTask)
 			if notice != nil {
 				taskChunk := &ChatChunkResponse{
 					ConversationID: convID,
@@ -873,6 +919,27 @@ func streamSingleAnswer(
 						Payload: notice,
 					})
 				}
+			}
+			continue
+		}
+		if d.AskPending != nil {
+			pendingAskPending = d.AskPending
+			askChunk := &ChatChunkResponse{
+				ConversationID: convID,
+				Seq:            int32(seq),
+				HistoryID:      historyID,
+				FinishReason:   "FINISH_REASON_UNSPECIFIED",
+				AskPending:     d.AskPending,
+			}
+			if reqCtx.Err() == nil {
+				writeSSEChunk(w, flusher, askChunk)
+			}
+			if stateStore != nil {
+				_ = appendChatChunk(chatCtx, stateStore, convID, historyID, askChunk)
+				_ = AppendConvEvent(chatCtx, stateStore, convID, &ConvEvent{
+					Type:    "ask_pending",
+					Payload: d.AskPending,
+				})
 			}
 			continue
 		}
@@ -922,6 +989,10 @@ func streamSingleAnswer(
 	retrievalResult := marshalRetrievalResult(sources)
 	if pendingThink != "" {
 		fullResult += "<think>" + pendingThink + "</think>"
+	}
+	// Persist ask_pending into ext so the ask card survives page reload.
+	if pendingAskPending != nil {
+		historyExt = mergeAskPendingIntoExt(historyExt, pendingAskPending)
 	}
 	persisted := false
 	if target.IsRegeneration && target.Existing != nil {
@@ -1230,6 +1301,7 @@ func handleTaskCreated(
 	ev *TaskCreatedEvent,
 	llmConfig map[string]any,
 	toolConfig map[string]any,
+	pluginMode string,
 ) *TaskCreatedNotice {
 	if ev == nil || strings.TrimSpace(ev.TaskID) == "" {
 		return nil
@@ -1237,7 +1309,7 @@ func handleTaskCreated(
 
 	// Plugin Step path — handled separately.
 	if ev.AgentType == "plugin_step" {
-		return handlePluginStepCreated(chatCtx, db, stateStore, convID, historyID, userID, ev, llmConfig, toolConfig)
+		return handlePluginStepCreated(chatCtx, db, stateStore, convID, historyID, userID, ev, llmConfig, toolConfig, pluginMode)
 	}
 	mode := ev.Mode
 	if mode != "auto" && mode != "manual" {
@@ -1332,6 +1404,7 @@ func handlePluginStepCreated(
 	ev *TaskCreatedEvent,
 	llmConfig map[string]any,
 	toolConfig map[string]any,
+	pluginMode string,
 ) *TaskCreatedNotice {
 	// Parse PluginStepParams from ev.Params.
 	var params plugin.PluginStepParams
@@ -1385,6 +1458,13 @@ func handlePluginStepCreated(
 			params.HistoryFilesPerTurn = parsed
 		}
 	}
+	// Carry the resolved plugin_mode into params so it is persisted with the task
+	// and available when OnSubAgentDone reconstructs PluginChatContext from DB.
+	if pluginMode == "auto" || pluginMode == "dynamic" {
+		params.PluginMode = pluginMode
+	} else {
+		params.PluginMode = "dynamic"
+	}
 	if params.PluginID == "" || params.StepID == "" {
 		fmt.Println("[Core] [PLUGIN_STEP_INVALID_PARAMS] plugin_id or step_id missing")
 		return nil
@@ -1430,4 +1510,19 @@ func handlePluginStepCreated(
 		SeqInConversation: task.SeqInConversation,
 		PluginSessionID:   sessionID,
 	}
+}
+
+// mergeAskPendingIntoExt merges ask_pending data into the ext JSON field so that
+// the ask card is persisted and can be restored on page reload.
+func mergeAskPendingIntoExt(ext json.RawMessage, askPending any) json.RawMessage {
+	m := make(map[string]any)
+	if len(ext) > 0 {
+		_ = json.Unmarshal(ext, &m)
+	}
+	m["ask_pending"] = askPending
+	b, err := json.Marshal(m)
+	if err != nil {
+		return ext
+	}
+	return b
 }

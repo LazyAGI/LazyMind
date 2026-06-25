@@ -113,6 +113,10 @@ type Conversation struct {
 	Model         string          `gorm:"column:model;type:varchar(64);default:''"`
 	Models        json.RawMessage `gorm:"column:models;type:json"`
 	ChatTimes     int32           `gorm:"column:chat_times;not null;default:0"`
+	// Plugin/subagent mode overrides at conversation level (NULL falls back to user_chat_settings).
+	EnablePlugin   *bool   `gorm:"column:enable_plugin"`
+	PluginMode     *string `gorm:"column:plugin_mode;type:varchar(16)"`
+	EnableSubagent *bool   `gorm:"column:enable_subagent"`
 
 	BaseModel
 }

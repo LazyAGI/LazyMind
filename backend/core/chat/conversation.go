@@ -228,6 +228,20 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	//   1. No plugin_context from frontend → inject from DB if an active session exists.
 	//   2. Frontend sent plugin_context → cross-check with DB; overwrite any stale fields
 	//      so Python always receives the ground-truth session_id / current_step.
+	//
+	// Resolve plugin_mode with correct priority:
+	//   request body > conversation DB (loaded via applyChatRuntimeConfigs) > global default
+	// applyChatRuntimeConfigs is called later, so we first apply it to get DB-resolved values,
+	// then override with any explicit body value.
+	if err := applyChatRuntimeConfigs(r.Context(), db, userID, reqBody); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat runtime config failed", err), http.StatusInternalServerError)
+		return
+	}
+	applyMCPRuntimeConfig(r.Context(), db, userID, reqBody)
+	// Override with explicit body value if present (body takes highest priority).
+	pluginMode := resolvePluginModeWithFallback(raw, reqBody)
+	reqBody["plugin_mode"] = pluginMode
+
 	if activeSess, err := plugin.GetLatestSession(r.Context(), db, convID); err == nil && activeSess != nil {
 		existing, hasPC := reqBody["plugin_context"].(map[string]any)
 		if !hasPC || existing == nil {
@@ -236,10 +250,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 				"session_id":   activeSess.ID,
 				"plugin_id":    activeSess.PluginID,
 				"current_step": activeSess.CurrentStepID,
-				"advance_mode": plugin.DefaultMode(),
+				"plugin_mode":  pluginMode,
 			}
-			fmt.Printf("[PLUGIN_CONTEXT_INJECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s\n",
-				convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID)
+			fmt.Printf("[PLUGIN_CONTEXT_INJECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s plugin_mode=%s\n",
+				convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID, pluginMode)
 		} else {
 			// Case 2: validate/correct stale fields from frontend.
 			stale := false
@@ -255,7 +269,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 				existing["current_step"] = activeSess.CurrentStepID
 				stale = true
 			}
-			existing["advance_mode"] = plugin.DefaultMode()
+			existing["plugin_mode"] = pluginMode
 			if stale {
 				fmt.Printf("[PLUGIN_CONTEXT_CORRECTED] conversation_id=%s session_id=%s plugin_id=%s current_step=%s\n",
 					convID, activeSess.ID, activeSess.PluginID, activeSess.CurrentStepID)
@@ -268,11 +282,6 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("[PLUGIN_CONTEXT_CLEARED] conversation_id=%s no active session in DB\n", convID)
 	}
 	historyExt := buildChatHistoryExt(raw, query)
-	if err := applyChatRuntimeConfigs(r.Context(), db, userID, reqBody); err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "load chat runtime config failed", err), http.StatusInternalServerError)
-		return
-	}
-	applyMCPRuntimeConfig(r.Context(), db, userID, reqBody)
 	baseURL := chatServiceURL()
 	reqCtx := r.Context()
 	stateStore := store.State()
@@ -653,6 +662,12 @@ func StopChatGeneration(w http.ResponseWriter, r *http.Request) {
 			_ = setChatCancelSignal(r.Context(), stateStore, convID, hid)
 		}
 	}
+
+	// Interrupt any active plugin session steps.
+	if db := store.DB(); db != nil {
+		plugin.StopActivePluginSession(r.Context(), db, stateStore, convID)
+	}
+
 	common.ReplyOK(w, nil)
 }
 

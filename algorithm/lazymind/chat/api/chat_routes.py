@@ -118,6 +118,16 @@ async def chat(
             )
         ),
     ] = None,
+    ask_response: Annotated[
+        Optional[Dict[str, Any]],
+        Body(
+            description=(
+                'User response to a pending ask_user request. '
+                'Fields: ask_id (str), selected (list of str). '
+                'Injected by Go when the user replies to an ask_pending card.'
+            )
+        ),
+    ] = None,
     current_turn_seq: Annotated[
         Optional[int],
         Body(description='The seq number of the current conversation turn, provided by Go core. '
@@ -147,5 +157,6 @@ async def chat(
         mcp_config=mcp_config,
         trace=trace,
         plugin_context=plugin_context,
+        ask_response=ask_response,
         current_turn_seq=current_turn_seq,
     )

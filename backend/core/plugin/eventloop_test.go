@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"lazymind/core/subagent"
 )
@@ -46,8 +46,6 @@ func seedSessionAndTask(t *testing.T, ctx context.Context, gdb interface {
 // ──────────────────────────────────────────────
 
 func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
-	t.Setenv("LAZYMIND_PLUGIN_MODE", "manual")
-
 	db := newTestDB(t)
 	ctx := context.Background()
 
@@ -60,9 +58,14 @@ func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 		t.Fatalf("step: %v", err)
 	}
 
+	// plugin_mode=dynamic in pctx → step_waiting with reason=dynamic_pause
 	pctx := &PluginChatContext{
-		SessionID: "ps-1", PluginID: "image-plugin", StepID: "analyze_subject",
-		ConvID: "conv-1", UserID: "user-1",
+		SessionID:  "ps-1",
+		PluginID:   "image-plugin",
+		StepID:     "analyze_subject",
+		ConvID:     "conv-1",
+		UserID:     "user-1",
+		PluginMode: "dynamic",
 	}
 
 	var gotEvent string
@@ -79,6 +82,9 @@ func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 	}
 	if gotPayload["session_id"] != "ps-1" {
 		t.Fatalf("unexpected payload: %v", gotPayload)
+	}
+	if gotPayload["reason"] != "dynamic_pause" {
+		t.Fatalf("expected reason=dynamic_pause, got %v", gotPayload["reason"])
 	}
 	interrupted, _ := gotPayload["interrupted"].(bool)
 	if interrupted {
@@ -192,7 +198,10 @@ func TestCallDriverAgent_ReturnsMessage(t *testing.T) {
 
 			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
 
-			msg := callDriverAgent("image-plugin", "optimize_prompt", "step output", "ps-1", nil)
+			msg, fallback := callDriverAgent("image-plugin", "optimize_prompt", "step output", "ps-1", nil, nil, "")
+			if fallback {
+				t.Fatalf("unexpected fallback")
+			}
 			if !strings.Contains(msg, tc.wantMsgHas) {
 				t.Fatalf("expected message to contain %q, got %q", tc.wantMsgHas, msg)
 			}
@@ -204,7 +213,10 @@ func TestCallDriverAgent_DefaultsToFallbackOnError(t *testing.T) {
 	// Point to a non-existent server so the HTTP call fails.
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://127.0.0.1:19999")
 
-	msg := callDriverAgent("image-plugin", "generate_image", "result", "ps-1", nil)
+	msg, fallback := callDriverAgent("image-plugin", "generate_image", "result", "ps-1", nil, nil, "")
+	if !fallback {
+		t.Fatal("expected fallback=true on connection error")
+	}
 	if !strings.Contains(msg, "generate_image") {
 		t.Fatalf("fallback message should contain step ID, got %q", msg)
 	}
@@ -218,7 +230,10 @@ func TestCallDriverAgent_DefaultsToFallbackOnEmptyMessage(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
 
-	msg := callDriverAgent("image-plugin", "analyze_subject", "output", "ps-1", nil)
+	msg, fallback := callDriverAgent("image-plugin", "analyze_subject", "output", "ps-1", nil, nil, "")
+	if fallback {
+		t.Fatal("empty message should not trigger fallback; got fallback=true")
+	}
 	if !strings.Contains(msg, "analyze_subject") {
 		t.Fatalf("fallback message should contain step ID, got %q", msg)
 	}
@@ -266,20 +281,118 @@ func TestResolveSlotBinding_NoBinding_ReturnsEmpty(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────
-// defaultMode
+// defaultMode — deprecated, always returns "dynamic"
 // ──────────────────────────────────────────────
 
 func TestDefaultMode(t *testing.T) {
-	os.Unsetenv("LAZYMIND_PLUGIN_MODE")
-	if defaultMode() != "auto" {
-		t.Fatal("expected auto when env unset")
+	// defaultMode is deprecated and always returns "dynamic" regardless of env var.
+	if defaultMode() != "dynamic" {
+		t.Fatal("expected dynamic (defaultMode is deprecated)")
 	}
-	t.Setenv("LAZYMIND_PLUGIN_MODE", "manual")
-	if defaultMode() != "manual" {
-		t.Fatal("expected manual")
+}
+
+// ──────────────────────────────────────────────
+// StopActivePluginSession — sends task-cancel to Python
+// ──────────────────────────────────────────────
+
+func TestStopActivePluginSession_SendsTaskCancel(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
+		SessionID: "stop-sess-1", ConversationID: "stop-conv-1", PluginID: "image-plugin",
+	}); err != nil {
+		t.Fatalf("CreateSession: %v", err)
 	}
-	t.Setenv("LAZYMIND_PLUGIN_MODE", "invalid")
-	if defaultMode() != "auto" {
-		t.Fatal("expected auto for invalid value")
+	if _, err := CreateSessionStep(ctx, db.DB, "stop-sess-1", "analyze_subject", "stop-task-1", 1); err != nil {
+		t.Fatalf("CreateSessionStep: %v", err)
 	}
+	// Mark the step as running so StopActivePluginSession picks it up.
+	if err := UpdateStepStatus(ctx, db.DB, "stop-task-1", StepStatusRunning); err != nil {
+		t.Fatalf("UpdateStepStatus: %v", err)
+	}
+
+	taskCancelCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "task-cancel") {
+			taskCancelCalls++
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
+
+	StopActivePluginSession(ctx, db.DB, nil, "stop-conv-1")
+
+	// notifyTaskCancel runs in a goroutine; give it a moment to complete.
+	time.Sleep(100 * time.Millisecond)
+
+	if taskCancelCalls == 0 {
+		t.Fatal("expected at least one /api/plugin/task-cancel call")
+	}
+}
+
+// ──────────────────────────────────────────────
+// OnSubAgentDone — parallel step completion
+// ──────────────────────────────────────────────
+
+func TestOnSubAgentDone_ParallelStepsAllDone(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
+		SessionID: "par-sess-1", ConversationID: "par-conv-1", PluginID: "image-plugin",
+	}); err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	// Two parallel steps: complete step-A first, then step-B.
+	if _, err := CreateSessionStep(ctx, db.DB, "par-sess-1", "step_a", "par-task-a", 1); err != nil {
+		t.Fatalf("step_a: %v", err)
+	}
+	if _, err := CreateSessionStep(ctx, db.DB, "par-sess-1", "step_b", "par-task-b", 1); err != nil {
+		t.Fatalf("step_b: %v", err)
+	}
+
+	// Mark step_a succeeded; step_b is still running — should NOT trigger DriverAgent.
+	driverCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		driverCalls++
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"next_step":null}`)
+	}))
+	defer srv.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
+
+	onSSE := func(_ string, _ map[string]any) {}
+
+	OnSubAgentDone(ctx, db.DB, nil, "par-task-a", "succeeded", "", onSSE, nil)
+	if driverCalls != 0 {
+		t.Fatalf("expected 0 driver calls while step_b still running, got %d", driverCalls)
+	}
+}
+
+func TestOnSubAgentDone_ParallelStepsPartialDone(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
+		SessionID: "par-sess-2", ConversationID: "par-conv-2", PluginID: "image-plugin",
+	}); err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	if _, err := CreateSessionStep(ctx, db.DB, "par-sess-2", "only_step", "par-task-only", 1); err != nil {
+		t.Fatalf("step: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"next_step":null}`)
+	}))
+	defer srv.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
+
+	onSSE := func(_ string, _ map[string]any) {}
+
+	// Only step completes — should not panic.
+	OnSubAgentDone(ctx, db.DB, nil, "par-task-only", "succeeded", "", onSSE, nil)
 }

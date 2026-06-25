@@ -60,6 +60,7 @@ type ChatChunkResponse struct {
 	ReasoningContent  string             `json:"reasoning_content,omitempty"`
 	ThinkingDurationS int64              `json:"thinking_duration_s,omitempty"`
 	TaskCreated       *TaskCreatedNotice `json:"task_created,omitempty"`
+	AskPending        *AskPendingEvent   `json:"ask_pending,omitempty"`
 }
 
 // TaskCreatedNotice notifies the frontend (main SSE) that a SubAgent task was created,
@@ -258,7 +259,7 @@ func getMultiAnswerInfo(ctx context.Context, stateStore state.Store, conversatio
 // ConvEvent is a conversation-level notification pushed to the frontend via the
 // /conversations/{id}/events SSE endpoint. It is independent of any chat turn.
 type ConvEvent struct {
-	Type    string `json:"type"`    // task_created | step_waiting | plugin_completed | plugin_error | driver_input | auto_chat_started
+	Type    string `json:"type"`    // task_created | step_waiting | plugin_completed | plugin_error | driver_input | auto_chat_started | ask_pending
 	Payload any    `json:"payload"` // *TaskCreatedNotice or plugin lifecycle payload map
 }
 

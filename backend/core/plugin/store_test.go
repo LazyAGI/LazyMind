@@ -22,6 +22,7 @@ func newTestDB(t *testing.T) *orm.DB {
 		&orm.PluginSession{},
 		&orm.PluginSessionStep{},
 		&orm.PluginSlotRevision{},
+		&orm.PluginStepIntent{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}

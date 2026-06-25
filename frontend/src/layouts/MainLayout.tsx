@@ -17,6 +17,7 @@ import {
   PlusOutlined,
   RightOutlined,
   FolderOpenOutlined,
+  UnorderedListOutlined,
 } from "@ant-design/icons";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { UserDetailResponse } from "@/api/generated/auth-client";
@@ -175,6 +176,11 @@ export default function MainLayout() {
           },
         ]
       : []),
+    {
+      key: "/task-center",
+      label: t("layout.taskCenter"),
+      icon: <UnorderedListOutlined />,
+    },
   ];
   const logoSrc =
     (import.meta.env as ImportMetaEnv & { VITE_APP_LOGO?: string })

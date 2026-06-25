@@ -10,7 +10,8 @@ the plugin by calling advance_step with step_id='__end__').
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+import re
+from typing import Any, Dict, List, Optional
 
 import lazyllm
 from lazyllm import LOG
@@ -52,12 +53,25 @@ def _build_driver_prompt(plugin_id: str) -> str:
     return base + _OUTPUT_CONSTRAINT
 
 
+def _build_llm(llm_config: Optional[Dict[str, Any]]) -> Any:
+    """Build an LLM instance from the provided config, or fall back to the default model."""
+    if llm_config and isinstance(llm_config, dict):
+        try:
+            # lazyllm supports dict-based LLM construction for API-backed models.
+            return lazyllm.AutoModel(model='llm', llm_config=llm_config)
+        except Exception:
+            pass
+    return lazyllm.AutoModel(model='llm')
+
+
 def evaluate_step(
     plugin_id: str,
     step_id: str,
     step_result: str,
     session_id: Optional[str] = None,
-    user_files: Optional[list] = None,
+    user_files: Optional[List[str]] = None,
+    llm_config: Optional[Dict[str, Any]] = None,
+    plugin_artifacts_summary: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Evaluate a completed plugin step and return a natural-language assessment message.
 
@@ -67,6 +81,10 @@ def evaluate_step(
         step_result: The step summary / artifact description to evaluate.
         session_id: Optional session ID for contextual evaluation.
         user_files: Optional list of user-uploaded file paths available for this step.
+        llm_config: Optional LLM configuration dict (API key, model name, etc.) aligned
+            with ChatAgent/SubAgent configs.
+        plugin_artifacts_summary: Optional text summary of all artifacts produced so far
+            in this plugin session, for richer quality assessment.
 
     Returns:
         dict with key: message (str) — a concise natural-language assessment.
@@ -90,15 +108,29 @@ def evaluate_step(
         f'Plugin: {plugin_id}\n'
         f'Step: {step_id}\n'
         f'Step result:\n{step_result}\n\n'
-        'Describe whether the step result is complete and acceptable.'
     )
+    if plugin_artifacts_summary:
+        user_msg += f'Session artifacts produced so far:\n{plugin_artifacts_summary}\n\n'
+    user_msg += 'Describe whether the step result is complete and acceptable.'
+
     if user_files:
         file_list = ', '.join(_os.path.basename(f) for f in user_files)
         user_msg += f'\n\nUser-uploaded files available for this step: {file_list}'
 
+    # Inject artifact read tools so DriverAgent can inspect produced artifacts.
+    tools = []
     try:
-        llm = lazyllm.AutoModel(model='llm')
-        response = llm(user_msg, system_prompt=driver_prompt)
+        from lazymind.chat.engine.subagent.tools import find_artifact, read_artifact
+        tools = [find_artifact, read_artifact]
+    except Exception:
+        pass
+
+    try:
+        llm = _build_llm(llm_config)
+        if tools:
+            response = llm(user_msg, system_prompt=driver_prompt, tools=tools)
+        else:
+            response = llm(user_msg, system_prompt=driver_prompt)
         cleaned = _clean_message(str(response or ''))
         if cleaned:
             return {'message': cleaned}
@@ -110,7 +142,6 @@ def evaluate_step(
 
 def _clean_message(text: str) -> str:
     """Strip thinking tokens, tags, and excess whitespace from the LLM output."""
-    import re
     # Remove <think>...</think> blocks
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
     # Remove any stray XML-style tags

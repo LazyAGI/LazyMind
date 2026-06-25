@@ -13,11 +13,16 @@ type PluginSession struct {
 	PluginID         string `gorm:"column:plugin_id;type:varchar(64);not null"`
 	TriggerHistoryID string `gorm:"column:trigger_history_id;type:varchar(36)"`
 	// Status: active | completed | failed | waiting
-	Status        string    `gorm:"column:status;type:varchar(16);not null;default:active"`
-	CurrentStepID string    `gorm:"column:current_step_id;type:varchar(64)"`
-	CreateUserID  string    `gorm:"column:create_user_id;type:varchar(255);not null;default:''"`
-	CreatedAt     time.Time `gorm:"column:created_at;not null"`
-	UpdatedAt     time.Time `gorm:"column:updated_at;not null"`
+	Status        string `gorm:"column:status;type:varchar(16);not null;default:active"`
+	CurrentStepID string `gorm:"column:current_step_id;type:varchar(64)"`
+	// IntentContext stores the global constraint/intent for this session (JSON string).
+	IntentContext string `gorm:"column:intent_context;type:text;not null;default:'{}'"`
+	// ParallelStepIDs is the set of step_ids currently running in parallel (JSON array string).
+	// When non-empty, OnSubAgentDone waits for all steps in the batch before advancing.
+	ParallelStepIDs string    `gorm:"column:parallel_step_ids;type:text;not null;default:'[]'"`
+	CreateUserID    string    `gorm:"column:create_user_id;type:varchar(255);not null;default:''"`
+	CreatedAt       time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;not null"`
 }
 
 func (PluginSession) TableName() string { return "plugin_sessions" }
@@ -85,3 +90,15 @@ type PluginSlotOrder struct {
 }
 
 func (PluginSlotOrder) TableName() string { return "plugin_slot_order" }
+
+// PluginStepIntent stores step-level intent/constraints set by the user during a session.
+// There is at most one row per (session_id, step_id) pair; upserted on each update_intent call.
+type PluginStepIntent struct {
+	ID            string    `gorm:"column:id;type:varchar(36);primaryKey"`
+	SessionID     string    `gorm:"column:session_id;type:varchar(36);not null;uniqueIndex:uk_plugin_step_intent,priority:1"`
+	StepID        string    `gorm:"column:step_id;type:varchar(64);not null;uniqueIndex:uk_plugin_step_intent,priority:2"`
+	IntentContext string    `gorm:"column:intent_context;type:text;not null;default:'{}'"`
+	UpdatedAt     time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (PluginStepIntent) TableName() string { return "plugin_step_intents" }

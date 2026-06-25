@@ -25,6 +25,7 @@ import (
 	"lazymind/core/modelprovider"
 	"lazymind/core/plugin"
 	"lazymind/core/resourceupdate"
+	"lazymind/core/scheduler"
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
@@ -216,6 +217,9 @@ func main() {
 		},
 	)
 	log.Logger.Info().Msg("plugin subagent hooks registered")
+
+	// Start the schedule ticker.
+	scheduler.RunScheduler(context.Background(), store.DB(), "")
 
 	r := mux.NewRouter()
 	r.UseEncodedPath()

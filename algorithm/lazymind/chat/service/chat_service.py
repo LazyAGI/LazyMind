@@ -331,6 +331,7 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
                       mcp_config: Optional[List[Dict[str, Any]]] = None,
                       trace: Optional[bool] = False,
                       plugin_context: Optional[Dict[str, Any]] = None,
+                      ask_response: Optional[Dict[str, Any]] = None,
                       current_turn_seq: Optional[int] = None,
                       ) -> Union[Dict[str, Any], StreamingResponse]:
     LOG.info(
@@ -426,7 +427,8 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
 
     from lazymind.chat.plugin.plugin_manager import resolve_plugin_injection
     plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context = \
-        resolve_plugin_injection(plugin_context, conversation_id=(conversation_id or '').strip())
+        resolve_plugin_injection(plugin_context, conversation_id=(conversation_id or '').strip(),
+                                 ask_response=ask_response)
     agentic_config.update(agentic_config_patch)
 
     # Build user attachment context from files_map and inject before plugin context.

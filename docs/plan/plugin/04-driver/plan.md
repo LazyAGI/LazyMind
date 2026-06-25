@@ -137,11 +137,13 @@ ALTER TABLE conversations
 
 > 代码示例见 [`code.md` · C2](./code.md#c2)。
 
-### 3.2 DriverAgent 失败降级
+### 3.2 DriverAgent 输出格式与失败降级
 
+**DriverAgent 输出自然语言评估（非 verdict codes）**：DriverAgent 输出 1-2 句纯自然语言，描述步骤结果是否合格及原因，**不输出** PASS/RETRY/FAIL/DONE 等结构化指令码。该评估作为 synthetic user turn 注入下一轮 ChatAgent，由 ChatAgent 自主决策（调用 `advance_step_and_exit` 推进下一步、传 `retry_hint` 重试当前步、或传 `__end__` 完成插件）。
+
+降级策略：
 1. HTTP 超时或 500 → 降级：推送 `driver_fallback` + `step_waiting`，不自动推进（即 fallback 到 `dynamic` 让用户介入，而非静默 PASS）。
-2. `FAIL` verdict → `plugin_sessions.status=failed`，发 `plugin_error` 事件。
-3. `callDriverAgent` 重试 1 次（退避 5s），仍失败才降级。
+2. `callDriverAgent` 重试 1 次（退避 5s），仍失败才降级。
 
 ### 3.3 `advance_step` / `advance_step_and_exit` 与 ChatAgent 退出
 
@@ -599,14 +601,11 @@ CREATE TABLE user_schedules (
 - `history_files_per_turn`：用户上传附件（已有）
 - `plugin_artifacts_summary`：当前步骤及相关 slot 的 artifact 摘要（Go 从 `sub_agent_artifacts` + `plugin_slot_order` 组装）
 
-Python `evaluate_step` 工具集：
+Python `evaluate_step` 注入工具集：
 
-- `find_user_attachment` / `read_user_attachment`
 - `find_artifact` / `read_artifact`（读插件产出，与 ChatAgent 侧一致）
 
-DriverAgent 据此判断生成物质量是否符合用户要求，作为裁决是否推进下一步的依据。
-
-> 代码示例见 [`code.md` · C3](./code.md#c3)。
+DriverAgent 据此生成自然语言评估，由 ChatAgent 判断是否推进下一步。
 
 ### 11.3 `verdict=RETRY` 全局次数上限
 

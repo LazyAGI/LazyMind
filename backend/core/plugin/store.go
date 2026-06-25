@@ -152,6 +152,59 @@ func UpdateSessionCurrentStep(ctx context.Context, db *gorm.DB, sessionID, stepI
 		}).Error
 }
 
+// SetParallelStepIDs writes the set of concurrently-running step_ids to plugin_sessions.
+// Pass nil or empty slice to clear the parallel batch.
+func SetParallelStepIDs(ctx context.Context, db *gorm.DB, sessionID string, stepIDs []string) error {
+	if stepIDs == nil {
+		stepIDs = []string{}
+	}
+	raw, err := json.Marshal(stepIDs)
+	if err != nil {
+		return err
+	}
+	return db.WithContext(ctx).Model(&orm.PluginSession{}).
+		Where("id = ?", sessionID).
+		Updates(map[string]any{
+			"parallel_step_ids": string(raw),
+			"updated_at":        time.Now().UTC(),
+		}).Error
+}
+
+// GetParallelStepIDs reads the current parallel_step_ids list for a session.
+func GetParallelStepIDs(ctx context.Context, db *gorm.DB, sessionID string) ([]string, error) {
+	var s orm.PluginSession
+	if err := db.WithContext(ctx).Select("id", "parallel_step_ids").Where("id = ?", sessionID).First(&s).Error; err != nil {
+		return nil, err
+	}
+	var ids []string
+	if s.ParallelStepIDs == "" || s.ParallelStepIDs == "[]" {
+		return ids, nil
+	}
+	if err := json.Unmarshal([]byte(s.ParallelStepIDs), &ids); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+// RemoveParallelStepID removes a single step_id from the parallel_step_ids list.
+// Returns the updated list (empty when all steps are done).
+func RemoveParallelStepID(ctx context.Context, db *gorm.DB, sessionID, stepID string) ([]string, error) {
+	ids, err := GetParallelStepIDs(ctx, db, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	updated := ids[:0]
+	for _, id := range ids {
+		if id != stepID {
+			updated = append(updated, id)
+		}
+	}
+	if err := SetParallelStepIDs(ctx, db, sessionID, updated); err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
 // CreateSessionStep inserts a new plugin_session_steps record.
 func CreateSessionStep(ctx context.Context, db *gorm.DB, sessionID, stepID, taskID string, attempt int) (*orm.PluginSessionStep, error) {
 	now := time.Now().UTC()

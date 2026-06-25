@@ -84,6 +84,7 @@ type LazyChatData struct {
 	Status        string            `json:"status"`
 	ReasoningText string            `json:"think"`
 	TaskCreated   *TaskCreatedEvent `json:"task_created,omitempty"`
+	AskPending    *AskPendingEvent  `json:"ask_pending,omitempty"`
 	Heartbeat     bool              `json:"heartbeat,omitempty"`
 	ToolCallTurns int64             `json:"tool_call_turns"`
 }
@@ -101,6 +102,14 @@ type TaskCreatedEvent struct {
 	OutputArtifactKeys []string       `json:"output_artifact_keys"`
 	Tools              []string       `json:"tools,omitempty"`
 	Resume             bool           `json:"resume,omitempty"`
+}
+
+// AskPendingEvent is emitted by ask_user (via _write_agent_data) on the main SSE stream.
+// The frontend renders a clarification UI and submits the user's reply as the next chat turn.
+type AskPendingEvent struct {
+	AskID    string   `json:"ask_id"`
+	Question string   `json:"question"`
+	Choices  []string `json:"choices,omitempty"`
 }
 
 // LazyChatResponse text /api/chat textResponse。
@@ -258,6 +267,7 @@ type UpstreamStreamChunk struct {
 	Sources       []any             `json:"sources"`
 	ReasoningText string            `json:"reasoning_text"` // text think
 	TaskCreated   *TaskCreatedEvent `json:"task_created,omitempty"`
+	AskPending    *AskPendingEvent  `json:"ask_pending,omitempty"`
 	Heartbeat     bool              `json:"heartbeat,omitempty"`
 	ToolCallTurns int64             `json:"tool_call_turns"`
 }
@@ -571,6 +581,7 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 				Sources:       d.Resp.Data.Sources,
 				ReasoningText: d.Resp.Data.ReasoningText,
 				TaskCreated:   d.Resp.Data.TaskCreated,
+				AskPending:    d.Resp.Data.AskPending,
 				Heartbeat:     d.Resp.Data.Heartbeat,
 				ToolCallTurns: d.Resp.Data.ToolCallTurns,
 			}
