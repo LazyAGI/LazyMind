@@ -78,7 +78,7 @@ def static_file_url_from_full_path(full_path: str) -> str:
 def basename_from_path(path: str) -> str:
     without_query = (path or '').split('?')[0]
     parts = without_query.split('/')
-    return parts[-1] if parts else without_query
+    return unquote(parts[-1] if parts else without_query)
 
 
 def local_path_from_static_file_url(path_or_url: str) -> str:
