@@ -28,8 +28,11 @@ from lazymind.chat.engine.tools.infra.skill_review_store import (
 from lazymind.config import config as _cfg
 
 
-_PENDING_CHANGE_MESSAGE = '存在未处理的变更，请先处理'
-_SUCCESS_MESSAGE = '已写入变更，等待确认'
+_PENDING_CHANGE_MESSAGE = 'There is an unresolved pending change; handle it before submitting another edit.'
+_SUCCESS_RESULT = {
+    'status': 'pending_review',
+    'message': 'Skill changes were submitted and are pending review.',
+}
 
 
 @handle_tool_errors
@@ -69,6 +72,11 @@ def skill_editor(
     ".../skills/testing/test-full-flow", name is "test-full-flow" and category
     is "testing". Preserve or update the SKILL.md frontmatter category;
     pending review checks use both category and name.
+
+    If this tool returns a pending-change error such as "There is an unresolved
+    pending change; handle it before submitting another edit.", do not call
+    skill_editor again for the same skill. The pending review must be handled
+    first.
 
     Args:
         name: Skill name.
@@ -148,7 +156,7 @@ def skill_editor(
             return tool_error('skill_editor', _PENDING_CHANGE_MESSAGE)
 
         create_remote_skill(content_category, content_name, content or '')
-        return tool_success('skill_editor', _SUCCESS_MESSAGE)
+        return tool_success('skill_editor', _SUCCESS_RESULT)
 
     if action == 'modify':
         if content is not None:
@@ -201,7 +209,7 @@ def skill_editor(
             requestid=session_id,
             summary=reason or f'skill_editor operations: {len(operation_payload)}',
         )
-        return tool_success('skill_editor', _SUCCESS_MESSAGE)
+        return tool_success('skill_editor', _SUCCESS_RESULT)
 
     if action == 'remove':
         if content is not None or operations:
@@ -225,7 +233,7 @@ def skill_editor(
             return tool_error('skill_editor', _PENDING_CHANGE_MESSAGE)
 
         remove_remote_skill(normalized_category, name)
-        return tool_success('skill_editor', _SUCCESS_MESSAGE)
+        return tool_success('skill_editor', _SUCCESS_RESULT)
 
     return tool_error(
         'skill_editor',

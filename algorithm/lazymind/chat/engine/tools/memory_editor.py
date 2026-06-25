@@ -135,6 +135,7 @@ def memory_editor(
     )
     return tool_success('memory_editor', {
         'target': raw_target,
-        'status': 'success',
+        'status': 'pending_review',
+        'message': '记忆修改已提交，等待审核',
         'operation_count': len(operation_payload),
     })
