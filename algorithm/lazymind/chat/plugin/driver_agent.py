@@ -36,30 +36,41 @@ _DEFAULT_DRIVER_PROMPT = (
     '  RETRY  — not acceptable, retry\n'
     '  DONE   — workflow complete, no more steps\n'
     '  FAIL   — unrecoverable error\n\n'
-    'Always wrap verdict in <verdict>...</verdict> and optional reason in <reason>...</reason>.'
+    'Always wrap verdict in <verdict>...</verdict> and reason in <reason>...</reason>.\n\n'
+    '## Output rules (STRICT)\n\n'
+    '- Output ONLY the <verdict> and <reason> tags. No preamble, no analysis, no thinking process.\n'
+    '- <reason> must be a single concise sentence (max 50 words) expressing ONLY the decision rationale.\n'
+    '- Good reason examples:\n'
+    '  - "Result looks correct, proceed."\n'
+    '  - "Step optimize_prompt produced a prompt missing style descriptors, please regenerate."\n'
+    '  - "Step generate_image failed because analyze_subject misidentified the subject."\n'
+    '  - "enhanced_image_url saved successfully, pipeline complete."\n'
+    '- Bad reason (DO NOT): long paragraphs, bullet lists, step-by-step analysis, repeated context.\n'
 )
 
 # Appended to every driver prompt regardless of whether the plugin supplies driver.md.
 _ROLLBACK_HINT = (
     '\n\n## Rollback decision guidance\n\n'
-    'When evaluating a step result, if the root cause of the problem lies not in the\n'
-    'current step but in the output of a prior step (e.g. the subject analysis is too\n'
-    'vague, the collected materials are irrelevant, or the optimized prompt is\n'
-    'misleading), you should reflect this in your reason so that the ChatAgent can\n'
-    'decide to rewind to the responsible upstream step rather than retrying the\n'
-    'current one in vain.\n\n'
-    'In your <reason>, explicitly name the upstream step that should be re-run when\n'
-    'applicable, for example: "The generated image is off-topic because the subject\n'
-    'analysis misidentified the main subject. Recommend rewinding to analyze_subject."\n\n'
-    'The ChatAgent has the ability to call advance_step with any previously completed\n'
-    'step as step_id — your reason will guide that decision.'
+    'When the root cause lies in a prior step rather than the current one, name that\n'
+    'upstream step in your <reason> so the ChatAgent can rewind to it.\n\n'
+    'Example: "Step generate_image produced off-topic result because analyze_subject '
+    'misidentified the subject. Recommend rewinding to analyze_subject."\n'
+)
+
+# Appended after _ROLLBACK_HINT to enforce concise output format.
+_OUTPUT_CONSTRAINT = (
+    '\n\n## Output format constraint (MANDATORY)\n\n'
+    'Your entire response must be ONLY:\n'
+    '<verdict>VERDICT</verdict><reason>one concise sentence</reason>\n\n'
+    'Do NOT output any other text before or after the tags. No thinking, no analysis,\n'
+    'no explanation outside the tags. The <reason> must be actionable and under 50 words.'
 )
 
 
 def _build_driver_prompt(plugin_id: str) -> str:
     driver_md = plugin_loader.get_driver(plugin_id)
     base = driver_md or _DEFAULT_DRIVER_PROMPT
-    return base + _ROLLBACK_HINT
+    return base + _ROLLBACK_HINT + _OUTPUT_CONSTRAINT
 
 
 def evaluate_step(
@@ -118,7 +129,10 @@ def evaluate_step(
 
 
 def _parse_verdict(text: str) -> Dict[str, Any]:
-    """Extract verdict and reason from model output."""
+    """Extract verdict and reason from model output.
+
+    Strips any thinking/analysis outside the tags and truncates overly long reasons.
+    """
     verdict = 'PASS'
     reason = ''
     m = _VERDICT_RE.search(text)
@@ -127,4 +141,21 @@ def _parse_verdict(text: str) -> Dict[str, Any]:
     r = _REASON_RE.search(text)
     if r:
         reason = r.group(1).strip()
+    # Truncate reason to keep it concise (max ~100 chars as a safety net).
+    reason = _truncate_reason(reason)
     return {'verdict': verdict, 'reason': reason}
+
+
+def _truncate_reason(reason: str, max_chars: int = 150) -> str:
+    """Ensure reason is a concise single sentence, not a wall of text."""
+    if not reason:
+        return reason
+    # Take only the first sentence if multiple sentences present.
+    for sep in ('。', '. ', '.\n', '\n\n'):
+        idx = reason.find(sep)
+        if 0 < idx < max_chars:
+            reason = reason[:idx + len(sep)].rstrip()
+            break
+    if len(reason) > max_chars:
+        reason = reason[:max_chars].rstrip() + '...'
+    return reason

@@ -324,13 +324,20 @@ func advanceAutoMode(
 }
 
 // buildSyntheticMessage produces the synthetic user message for ChatAgent on auto-advance.
+// Kept concise: only the verdict decision and actionable instruction.
 func buildSyntheticMessage(verdict, stepID, reason string) string {
 	r := strings.TrimSpace(reason)
 	switch verdict {
 	case "RETRY":
-		return fmt.Sprintf("Step %s result unsatisfactory. %s Retry.", stepID, r)
+		if r != "" {
+			return fmt.Sprintf("[DriverAgent] RETRY %s: %s", stepID, r)
+		}
+		return fmt.Sprintf("[DriverAgent] RETRY %s: result unsatisfactory, please retry.", stepID)
 	default:
-		return fmt.Sprintf("Step %s completed. %s Proceed.", stepID, r)
+		if r != "" {
+			return fmt.Sprintf("[DriverAgent] PASS %s: %s Proceed.", stepID, r)
+		}
+		return fmt.Sprintf("[DriverAgent] PASS %s: Proceed.", stepID)
 	}
 }
 

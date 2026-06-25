@@ -202,7 +202,7 @@ func TestCallDriverAgent_ParsesVerdict(t *testing.T) {
 			// Point chat service endpoint at the mock server.
 			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
 
-			verdict, reason := callDriverAgent("image-plugin", "optimize_prompt", "step output", "ps-1")
+			verdict, reason := callDriverAgent("image-plugin", "optimize_prompt", "step output", "ps-1", nil)
 			if verdict != tc.wantVerdict {
 				t.Fatalf("expected verdict %s, got %s", tc.wantVerdict, verdict)
 			}
@@ -217,7 +217,7 @@ func TestCallDriverAgent_DefaultsToPassOnError(t *testing.T) {
 	// Point to a non-existent server so the HTTP call fails.
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", "http://127.0.0.1:19999")
 
-	verdict, _ := callDriverAgent("image-plugin", "generate_image", "result", "ps-1")
+	verdict, _ := callDriverAgent("image-plugin", "generate_image", "result", "ps-1", nil)
 	if verdict != "PASS" {
 		t.Fatalf("expected PASS fallback, got %s", verdict)
 	}
@@ -231,7 +231,7 @@ func TestCallDriverAgent_DefaultsToPassOnUnknownVerdict(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", srv.URL)
 
-	verdict, _ := callDriverAgent("image-plugin", "analyze_subject", "output", "ps-1")
+	verdict, _ := callDriverAgent("image-plugin", "analyze_subject", "output", "ps-1", nil)
 	if verdict != "PASS" {
 		t.Fatalf("expected PASS for unknown verdict, got %s", verdict)
 	}
@@ -290,7 +290,7 @@ func TestBuildSyntheticMessage(t *testing.T) {
 		wantHas []string
 	}{
 		{"PASS", "optimize_prompt", "looks good", []string{"optimize_prompt", "looks good", "Proceed"}},
-		{"RETRY", "generate_image", "no url", []string{"generate_image", "no url", "Retry"}},
+		{"RETRY", "generate_image", "no url", []string{"generate_image", "no url", "RETRY"}},
 	}
 	for _, tc := range cases {
 		msg := buildSyntheticMessage(tc.verdict, tc.stepID, tc.reason)

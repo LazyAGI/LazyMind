@@ -187,14 +187,15 @@ def test_build_driver_prompt_falls_back_to_default(tmp_path):
         plugin_loader.load_all()
     try:
         prompt = _build_driver_prompt('test-plugin')
-        assert prompt == _DEFAULT_DRIVER_PROMPT
+        assert _DEFAULT_DRIVER_PROMPT in prompt
     finally:
         plugin_loader.load_all()
 
 
 def test_build_driver_prompt_unknown_plugin_returns_default():
     from lazymind.chat.plugin.driver_agent import _build_driver_prompt, _DEFAULT_DRIVER_PROMPT
-    assert _build_driver_prompt('ghost-plugin') == _DEFAULT_DRIVER_PROMPT
+    prompt = _build_driver_prompt('ghost-plugin')
+    assert _DEFAULT_DRIVER_PROMPT in prompt
 
 
 # ---------------------------------------------------------------------------
