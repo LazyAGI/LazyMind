@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestCoreServiceBuildUsesBackendCore(t *testing.T) {
@@ -80,6 +83,31 @@ func TestCoreServiceWaitForDatabaseUsesPgIsReady(t *testing.T) {
 		t.Fatalf("wait database: %v", err)
 	}
 	runner.assertCommandCount(1)
+}
+
+func TestCoreServiceWaitForDatabaseReportsLastError(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	runner := &fakeRunner{t: t}
+	manager := NewCoreServiceManager(runner)
+	previousTimeout := coreServiceDBWaitTimeout
+	coreServiceDBWaitTimeout = time.Nanosecond
+	t.Cleanup(func() { coreServiceDBWaitTimeout = previousTimeout })
+	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
+		return CommandResult{Stderr: "database system is starting up"}, errors.New("pg_isready failed")
+	})
+
+	err = manager.waitForCoreDatabase(context.Background(), cfg, paths)
+	if err == nil {
+		t.Fatal("expected wait database error")
+	}
+	if !strings.Contains(err.Error(), "pg_isready failed") {
+		t.Fatalf("expected last runner error in message, got %v", err)
+	}
 }
 
 func assertEnvContains(t *testing.T, env []string, want string) {
