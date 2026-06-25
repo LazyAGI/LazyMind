@@ -198,11 +198,10 @@ AI 重新生成同一 slot：
   → revision=1/2 保留，支持再次回退
 ```
 
-**逻辑删除接口**（对外用 `sort_order` 定位）：
+**逻辑删除接口**（用 `list_index` 定位，前端从 `/slots` 响应直接取得）：
 
 ```
-DELETE /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}
-  → 根据 sort_order 从 plugin_slot_order 查出对应 list_index
+DELETE /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
   → sub_agent_artifacts WHERE session_id=? AND slot_id=? AND list_index=? → hidden=TRUE
   → plugin_slot_revisions 对应 list_index 的所有 revision → selected=FALSE（历史保留，仅取消选中）
   → plugin_slot_order.order_list 中移除该 list_index，order_version+1
@@ -221,15 +220,14 @@ DELETE /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}
 ```
 PATCH /api/core/plugin-sessions/{session_id}/slots/{slot_id}/order
   body: { "order": [3, 1, 2], "version": 5 }
-    ← order：新的 sort_order 排列（传入当前可见项的 sort_order 值按新顺序排列）
-    ← version：前端从上次 GET /slots 拿到的 order_version，用于乐观锁
+    ← order：新的 list_index 排列（前端直接传 list_index 序列，无需经 sort_order 翻译）
+    ← version：前端从上次 GET /slots 或 GET /order 拿到的 order_version，用于乐观锁
 
   → Go 在事务内：
       1. SELECT ... FOR UPDATE plugin_slot_order WHERE session_id=? AND slot_id=?
       2. 校验 order_version == req.version，不匹配 → 409 Conflict
-      3. 将 req.order（sort_order 序列）翻译回 list_index 序列
-      4. 校验所有 list_index 均为 hidden=FALSE，否则 400
-      5. UPDATE order_list=?, order_version=order_version+1
+      3. 校验所有 list_index 均为 hidden=FALSE，否则 400
+      4. UPDATE order_list=?, order_version=order_version+1
 ```
 
 **并发安全性**：
@@ -268,6 +266,14 @@ def save_artifact(key, value, content_type='text',
 
 当 `caption` 非空时，工具层将 `caption` 写入 `sub_agent_artifacts` 的同一行（`caption` 字段，见 §2.1）；Go 的 `OnArtifactEvent` 从 artifact value 中读取 `caption` 字段并写入 DB 行。
 
+> **新增工具（已落地）**：除 `save_artifact` 外，工具层还新增了以下工具供 SubAgent 使用：
+> - `patch_artifact(key, patch, ...)` — 局部编辑 artifact 草稿（不直接提交），支持 str_replace / json_merge / json_patch；配合 `save_artifact` 两步提交
+> - `discard_draft(key, sort_order?)` — 丢弃 `patch_artifact` 写入的草稿
+> - `find_artifact(artifact_key, sort_order?)` — 按 key 和 sort_order 查找当前选中版本的 URL/path
+> - `find_user_attachment(filename, turn?)` — 查找用户上传附件，返回 url 和 path
+>
+> Python 工具层内部做 `sort_order → list_index` 查找（通过 `GET /order` 接口），`list_index` 仍不对外暴露给 AI。
+
 ---
 
 ## 四、富媒体输入
@@ -297,7 +303,7 @@ SubAgent 调用 `web_search_tool` / `image_search_tool` 后，通过现有 `save
 
 ### 5.1 Artifact 摘要注入 ChatAgent
 
-Go 在每次构造 `/api/chat/stream` 请求体时，将当前 Plugin Session 的 artifact 摘要附加到 `plugin_context` 字段：
+`artifact_summary` 和 `visible_sort_order_map` 由 **Python 层**在处理请求时直接读 DB 生成（`db.py` 的 `format_artifact_summary`），不经 Go 层构造。Go 层的职责是：将前端携带的 `plugin_ui_state`（`focused_tab` / `focused_sort_order`）合并进 `plugin_context` 后转发给 Python。Python 侧汇总完整的 `plugin_context`：
 
 ```json
 "plugin_context": {
@@ -359,20 +365,19 @@ Go 在 `applyChatRuntimeConfigs` 阶段读取 `plugin_ui_state`，合并进 `plu
 | 场景 | 触发时机 | `change_source` |
 | --- | --- | --- |
 | AI 步骤完成（`done` 事件） | Go 在 `routeToTaskSSE` 的 `done` 分支收到 done 信号后，**异步（goroutine）**读取该步骤所有 artifact，对每个 `(slot_id, list_index)` 写一条新 `plugin_slot_revisions`（`content_snapshot` = artifact value，`selected=TRUE`，旧行 `selected=FALSE`）。**注意**：快照为异步写入，前端在极短时间窗口内通过 `/versions` 接口可能拿到 `content_snapshot=null` 的最新版本，应展示 loading 状态直到有值。 | `'ai'` |
-| 用户在 Panel 内人工编辑文字 | 前端不再直接调 `PATCH /items/{sort_order}`——改为**两层草稿机制**：编辑期间写 localStorage，60s 无新输入或 Chat 发送前自动 flush 为后端 revision（详见 [manual.md § 能力二](./manual.md)）。✅ 已落地 | `'human'` |
-| 用户替换图片/文件 | 上传完成直接调 `PATCH /items/{sort_order}`，立即产生新版本，不经过 draftStore。✅ 已落地 | `'human'` |
+| 用户在 Panel 内人工编辑文字 | 前端不再直接调 `PATCH /items/idx/{list_index}`——改为**两层草稿机制**：编辑期间写 localStorage，60s 无新输入或 Chat 发送前自动 flush 为后端 revision（详见 [manual.md § 能力二](./manual.md)）。✅ 已落地 | `'human'` |
+| 用户替换图片/文件 | 上传完成直接调 `PATCH /items/idx/{list_index}`，立即产生新版本，不经过 draftStore。✅ 已落地 | `'human'` |
 
 ### 6.2 版本回退
 
 ```
-POST /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}/rollback
+POST /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
   body: { "revision": 3 }
-  → 根据 sort_order 查出 list_index
   → 读 plugin_slot_revisions WHERE session_id=? AND slot_id=? AND list_index=? AND revision=3
   → content_snapshot 作为新 revision 写入（revision = MAX+1, change_source='human', selected=TRUE）
   → 旧 selected=TRUE 的行置 FALSE
   → 更新 sub_agent_artifacts 对应行的 value（保证 /slots 接口返回值与版本一致）
-  → SSE: {type: 'slot_updated', slot_id, sort_order, revision: MAX+1}
+  → SSE: {type: 'slot_updated', slot_id, list_index, revision: MAX+1}
 ```
 
 回退不删除历史，只追加新 revision，保持线性。
@@ -380,8 +385,7 @@ POST /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}/r
 ### 6.3 版本历史接口
 
 ```
-GET /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}/versions
-  → 根据 sort_order 查出 list_index
+GET /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
   → plugin_slot_revisions WHERE session_id=? AND slot_id=? AND list_index=?
     ORDER BY revision ASC
   → [{revision, change_source, created_at, content_snapshot (truncated for image)}]
@@ -395,7 +399,7 @@ GET /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}/ve
 
 | 组件 | 新增能力 | 状态 |
 | --- | --- | --- |
-| `SlotImage` | 右上角 `×` 按钮（二次确认后删除该 sort_order 下所有 artifact）；左下角版本角标（多版本时显示，含快速切换箭头）；版本角标点击弹出 `SlotVersionPopover`；引用按钮（携带 artifact 元数据，见 §7.2）；caption inline 编辑；`ordered=true` 时渲染拖拽手柄 | ✅ 已落地（除拖拽手柄） |
+| `SlotImage` | 右上角 `×` 按钮（二次确认后删除该 list_index 下所有 artifact）；左下角版本角标（多版本时显示，含快速切换箭头）；版本角标点击弹出 `SlotVersionPopover`；引用按钮（携带 artifact 元数据，见 §7.2）；caption inline 编辑；`ordered=true` 时渲染拖拽手柄 | ✅ 已落地 |
 | `SlotText` | **两层草稿机制**（onChange→localStorage，60s/发送时 flush 为版本，详见 [manual.md](./manual.md)）；版本角标点击弹出 `SlotVersionPopover`；caption inline 编辑；`SlotEditingContext` 通知父组件禁用 Continue/Retry 按钮 | ✅ 已落地 |
 | `SlotFile` | 版本角标；caption inline 编辑 | ❌ caption 编辑未实现 |
 | `SlotVersionPopover` | 图片模式（缩略图条 + 上传新版）+ 文本模式（版本列表 + diff 对比）+ 「应用此版本」回退 | ✅ 已落地 |
@@ -567,37 +571,41 @@ i18n:
 
 ## 八、对外接口（新增/变更汇总）
 
+> **路由设计说明**：所有 slot item 级接口均使用 `items/idx/{list_index}` 定位，而非原设计的 `items/{sort_order}`。`sort_order` 是展示顺序，会随删除/调序动态变化；`list_index` 是稳定身份，前端从 `GET /slots` 响应中已拿到每项的 `list_index`，直接用于接口参数，避免服务端一次 sort_order→list_index 翻译，也消除并发下的歧义。
+
 ```
 # Artifact 管理（✅ 已实现）
-DELETE /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}
+DELETE /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
   → 逻辑删除（hidden=TRUE），同步从 order_list 移除；前端调用后通过本地刷新更新 UI
 
-PATCH  /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}
+PATCH  /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
   → 人工编辑写版本，change_source='human'（由 draftStore.flushDraft 触发，不再由 Save 按钮直接触发）
 
 PATCH  /api/core/plugin-sessions/{session_id}/slots/{slot_id}/order
-  body: {order: [3,1,2], version: N}  → 乐观锁调序（version 不匹配返回 409）
+  body: {order: [list_index, ...], version: N}  → 乐观锁调序（version 不匹配返回 409）
+  注意：order 数组传入 list_index 序列（已调整后的顺序），前端从本地排序结果直接映射
 
 GET /api/core/plugin-sessions/{session_id}/slots/{slot_id}/order
-  → 返回当前 {order_list: [...], order_version: N}（内部接口，供工具层 sort_order→list_index 查询）
+  → 返回当前 {order_list: [...], order_version: N}（供工具层 sort_order→list_index 查询）
 
 # 人工编辑附件（✅ 已实现，详见 manual.md）
 POST /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items
   body: {value, caption?, insert_before?}  → 创建新 slot item，change_source='human'
 
-PATCH /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}/caption
+PATCH /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
   body: {caption}  → 只更新 caption，不写 revision，不触碰 plugin_slot_revisions
 
 # 版本历史（✅ 已实现）
-GET  /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}/versions
-  → 线性版本列表（revision / change_source / created_at / content_snapshot）
+GET  /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
+  → plugin_slot_revisions WHERE list_index=? ORDER BY revision ASC
+  → [{revision, change_source, created_at, content_snapshot}]
 
-POST /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/{sort_order}/rollback
+POST /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
   body: {revision: N}  → 追加回退版本，selected 指向新 revision
 
 # 已有接口变更
 GET /api/core/plugin-sessions/{session_id}/slots
-  → 每条记录新增 content_snapshot / change_source / caption / sort_order / revision_count 字段
+  → 每条记录新增 content_snapshot / change_source / caption / sort_order / revision_count / list_index 字段
   → slot 级别新增 order_version 字段（用于前端乐观锁）
 
 POST /api/core/conversations:chat（前端新增字段）
@@ -622,31 +630,36 @@ GET /api/core/plugins/{plugin_id}
 2. ✅ **Go 层**：
    - `routeToTaskSSE` 的 `done` 分支：读 artifact 写 `content_snapshot` 到 `plugin_slot_revisions`。
    - `OnArtifactEvent`：从 artifact value 中读取 `caption` 字段写入 DB。
-   - 逻辑删除、调序、人工编辑版本、回退四个接口；新增 POST items、PATCH caption 接口（→ manual.md 能力一/三）。
-   - `plugin_context` 构造：增加 `artifact_summary` + `visible_sort_order_map` + `focused_tab` / `focused_sort_order`（从 `plugin_ui_state` 读取）。
+   - 逻辑删除、调序、人工编辑版本、回退四个接口（均以 `list_index` 定位）；新增 POST items、PATCH caption 接口（→ manual.md 能力一/三）。
+   - `plugin_context` 构造：`focused_tab` / `focused_sort_order` 从 `plugin_ui_state` 读取并合并。
+   - `current_turn_seq` 字段：Go `filesPerTurnMap` 函数新增 `currentSeq` 参数，通过 `current_turn_seq` 字段透传给 Python，确保当前轮次附件标注准确。
+   - `history_files_per_turn` 字段：从 `conversation_logic` 透传到 SubAgent runner 和 driver agent，供 `find_user_attachment` / `read_user_attachment` 使用。
+   - **注意**：`artifact_summary` 和 `visible_sort_order_map` 的构造在 Go 层**尚未实现**——目前 `plugin_context` 只转发前端传入的字段，不包含 Go 主动汇总的 artifact 摘要。artifact 摘要能力由 Python 层的 `db.py`（`format_artifact_summary`）提供，直接在 Python 侧读 DB 生成，不经 Go 层构造。
 
 3. ✅ **Python 层**：
    - `save_artifact` 工具新增 `caption` / `sort_order` 参数，内部做 `sort_order → list_index` 查找。
-   - `list_knowledge_bases()` 工具注册到 SubAgent 工具集。
-   - `read_user_attachment(filename)` 工具注册到 SubAgent 工具集（当前读临时 files，待 §3e 对齐）。
+   - `patch_artifact` 工具：局部编辑 artifact 草稿（str_replace / json_merge / json_patch），配合 `save_artifact` 两步提交。已注册到 SubAgent 工具集。
+   - `discard_draft` / `find_artifact` / `find_user_attachment` 工具：已实现并注册。
+   - `list_knowledge_bases()` 工具：已注册到 SubAgent 工具集。
+   - `read_user_attachment(filename)` 工具：已注册，当前绑定请求临时 files（待 §TODO 对齐 DB 查询）。
+   - `chat_service.py` ToolGuard 修复：所有 `plugin_tools` 中的可调用对象统一注册到 allowlist；`plugin_stop_tools` 仅用于 `set_stop_tools`，两件事分离。
    - `plugin_manager.py`：`plugin_context` 中的 `visible_sort_order_map` 解析"第N个"→ `target_sort_order`；读取 `focused_tab` / `focused_sort_order` 注入 prompt。
    - `plugin.yaml` i18n 解析，`GET /plugins/{id}` 接口返回多语言 label。
 
 4. ✅ **前端（已落地部分）**：
-   - ✅ `SlotImage`：`×` 删除按钮（二次确认）；版本角标（含 `‹/›` 快切箭头）；`SlotVersionPopover`；引用按钮；caption 编辑；绝对路径异步 sign 渲染修复。
+   - ✅ `SlotImage`：`×` 删除按钮（二次确认）；版本角标（含 `‹/›` 快切箭头）；`SlotVersionPopover`；引用按钮；caption 编辑；绝对路径异步 sign 渲染修复；`ordered=true` 时渲染拖拽手柄（`isDraggable` 条件渲染）。
    - ✅ `SlotText`：两层草稿机制（→ manual.md 能力二）；版本角标；`SlotVersionPopover`；caption 编辑；`SlotEditingContext`。
-   - ✅ `SlotVersionPopover`：版本列表 + 图片/diff 对比 + 「应用此版本」。
+   - ✅ `SlotVersionPopover`：版本列表 + 图片/diff 对比（LCS 相似度矩阵算法，支持行数不等的块对齐）+ 「应用此版本」。
    - ✅ `AddSlotItemButton`：list slot 底部 `+` 按钮 + Modal（→ manual.md 能力一）。
    - ✅ `ChatInput` / `chatLayout`：引用注入 `artifact_refs`；`plugin_ui_state` 携带；发送前 `flushAllDrafts`。
-   - ❌ `SlotFile`：caption inline 编辑未实现。
-   - ❌ `PluginPanel`：`composite` 布局未实现；拖拽手柄未实现。
+   - ✅ `PluginPanel`：拖拽手柄及 drag-and-drop 调序已实现（`onDragStart/onDrop/onDragEnd`，调序后调 `reorderSlotItems`）。
+   - ✅ `SlotFile`：caption inline 编辑已实现（与 SlotText/SlotImage 对齐）。
+   - ✅ `PluginPanel`：`composite` 布局已实现（`CompositeSlotGrid`，支持 `composite_layout` 声明式解析，含嵌套 tabs）。
 
-5. ❌ **TODO（人工编辑附件剩余）**（详见 manual.md）：
-   - 大文件 flushDraft 完整路径（先上传文件再 PATCH value.path）。
-   - `SlotFile` caption 编辑 UI。
-   - `__user_attachments__` slot 完整机制（Go core 聚合注入 + Python 消费 + 前端写入 + `read_user_attachment` 对齐 DB 查询）。
+5. user_attachments（详见 manual.md）：
+   - ✅ 注入逻辑已通过 `history_files_per_turn` 复用实现（Go → Python system prompt，ChatAgent + SubAgent 均生效）。
 
-6. ❌ **端到端验证**（image-plugin 扩展）：
+6. ✅ **端到端验证**（image-plugin 扩展）：
    - 验证图片删除后"第N个"正确映射。
    - 验证用户上传参考图 → SubAgent 读取并 save_artifact 入库。
    - 验证 AI 完成步骤后 `content_snapshot` 写入，版本列表可查，回退后 Panel 正确刷新。
