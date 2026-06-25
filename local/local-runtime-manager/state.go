@@ -99,9 +99,7 @@ func itoa(v int) string {
 }
 
 func newStateWithServiceStatus(state RuntimeState, serviceStatus string) RuntimeState {
-	if state.Services == nil {
-		state.Services = map[string]RuntimeServiceState{}
-	}
+	state.Services = normalizeRuntimeServices(state.Services)
 	ds := state.Services[processComposeServiceName]
 	ds.Kind = "docker-compose"
 	ds.Status = serviceStatus
@@ -132,23 +130,44 @@ func readOrNewState(paths RuntimePaths, cfg RuntimeConfig) (RuntimeState, error)
 	if st.Services == nil {
 		st.Services = map[string]RuntimeServiceState{}
 	}
-	if _, ok := st.Services[processComposeServiceName]; !ok {
-		st.Services[processComposeServiceName] = RuntimeServiceState{
+	st.Services = normalizeRuntimeServices(st.Services)
+	return st, nil
+}
+
+func normalizeRuntimeServices(services map[string]RuntimeServiceState) map[string]RuntimeServiceState {
+	if services == nil {
+		services = map[string]RuntimeServiceState{}
+	}
+	normalized := map[string]RuntimeServiceState{}
+	if _, ok := services[processComposeServiceName]; !ok {
+		normalized[processComposeServiceName] = RuntimeServiceState{
 			Kind:   "docker-compose",
 			Status: "unknown",
 		}
+	} else {
+		svc := services[processComposeServiceName]
+		svc.Kind = "docker-compose"
+		normalized[processComposeServiceName] = svc
 	}
-	if _, ok := st.Services[localProxyProcessName]; !ok {
-		st.Services[localProxyProcessName] = RuntimeServiceState{
+	if _, ok := services[localProxyProcessName]; !ok {
+		normalized[localProxyProcessName] = RuntimeServiceState{
 			Kind:   "host-process",
 			Status: "unknown",
 		}
+	} else {
+		svc := services[localProxyProcessName]
+		svc.Kind = "host-process"
+		normalized[localProxyProcessName] = svc
 	}
-	if _, ok := st.Services[authServiceProcessName]; !ok {
-		st.Services[authServiceProcessName] = RuntimeServiceState{
+	if _, ok := services[authServiceProcessName]; !ok {
+		normalized[authServiceProcessName] = RuntimeServiceState{
 			Kind:   "host-process",
 			Status: "unknown",
 		}
+	} else {
+		svc := services[authServiceProcessName]
+		svc.Kind = "host-process"
+		normalized[authServiceProcessName] = svc
 	}
-	return st, nil
+	return normalized
 }

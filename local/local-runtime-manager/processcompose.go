@@ -43,13 +43,14 @@ type processComposeShutdown struct {
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
 
-func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, profile string, logPath string, localProxyLogPath string, authServiceLogPath string, tokenPath string, apiPort int) error {
-	commandForComposeUp := quoteShellArg(m.execPath) + " internal compose-up --profile " + profile
-	commandForComposeDown := quoteShellArg(m.execPath) + " internal compose-down --profile " + profile
-	commandForLocalProxyRun := quoteShellArg(m.execPath) + " internal local-proxy-run --profile " + profile
-	commandForLocalProxyDown := quoteShellArg(m.execPath) + " internal local-proxy-down --profile " + profile
-	commandForAuthServiceRun := quoteShellArg(m.execPath) + " internal auth-service-run --profile " + profile
-	commandForAuthServiceDown := quoteShellArg(m.execPath) + " internal auth-service-down --profile " + profile
+func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, profile string, logPath string, localProxyLogPath string, authServiceLogPath string, tokenPath string, apiPort int, runtimeEnv []string) error {
+	envPrefix := shellEnvPrefix(runtimeEnv)
+	commandForComposeUp := envPrefix + quoteShellArg(m.execPath) + " internal compose-up --profile " + profile
+	commandForComposeDown := envPrefix + quoteShellArg(m.execPath) + " internal compose-down --profile " + profile
+	commandForLocalProxyRun := envPrefix + quoteShellArg(m.execPath) + " internal local-proxy-run --profile " + profile
+	commandForLocalProxyDown := envPrefix + quoteShellArg(m.execPath) + " internal local-proxy-down --profile " + profile
+	commandForAuthServiceRun := envPrefix + quoteShellArg(m.execPath) + " internal auth-service-run --profile " + profile
+	commandForAuthServiceDown := envPrefix + quoteShellArg(m.execPath) + " internal auth-service-down --profile " + profile
 
 	cfg := processComposeConfig{
 		Version:         "0.5",
@@ -108,7 +109,7 @@ func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths
 		"--ordered-shutdown",
 		"up",
 	}
-	res, err := m.runner.Run(ctx, Command{Name: processComposeCommand(paths.RepoRoot), Args: args, Dir: paths.RepoRoot})
+	res, err := m.runner.Run(ctx, Command{Name: processComposeCommand(paths.RepoRoot), Args: args, Dir: paths.RepoRoot, Env: localRuntimeEnv(cfg)})
 	if err != nil {
 		return fmt.Errorf("process-compose up failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
 	}
@@ -169,6 +170,24 @@ func (m *ProcessComposeManager) ProbeAPI(port int, timeout time.Duration) bool {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode < 500
+}
+
+func shellEnvPrefix(env []string) string {
+	if len(env) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(env))
+	for _, item := range env {
+		key, value, ok := strings.Cut(item, "=")
+		if !ok || key == "" {
+			continue
+		}
+		parts = append(parts, key+"="+quoteShellArg(value))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " ") + " "
 }
 
 func quoteShellArg(value string) string {
