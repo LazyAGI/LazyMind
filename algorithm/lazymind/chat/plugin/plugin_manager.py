@@ -992,7 +992,14 @@ def resolve_plugin_injection(
                     plugin_artifact_context = (plugin_artifact_context + ask_section).strip()
 
             # Append mode-specific system prompt guidance.
-            plugin_system_prompt = (plugin_system_prompt or '') + _build_mode_guidance(plugin_mode)
+            sm_for_mode = plugin_loader.get_state_machine(p_plugin_id)
+            terminal_steps = (
+                sm_for_mode.get_terminal_steps(from_step=p_current_step)
+                if sm_for_mode else []
+            )
+            plugin_system_prompt = (
+                (plugin_system_prompt or '') + _build_mode_guidance(plugin_mode, terminal_steps, step_labels)
+            )
         else:
             # Cold start: no active session yet
             plugin_tools = build_cold_start_tools()
@@ -1053,7 +1060,10 @@ def _build_intent_section(session_id: str, step_id: Optional[str] = None) -> str
         return ''
 
 
-def _build_mode_guidance(plugin_mode: str) -> str:
+def _build_mode_guidance(
+        plugin_mode: str,
+        terminal_steps: Optional[List[str]] = None,
+        step_labels: Optional[Dict[str, str]] = None) -> str:
     """Return mode-specific system prompt instructions appended to the scenario."""
     common = (
         '\n\n## Plugin execution guidance\n\n'
@@ -1062,6 +1072,26 @@ def _build_mode_guidance(plugin_mode: str) -> str:
         'Use for single-step advancement.\n'
     )
     if plugin_mode == 'dynamic':
+        labels = step_labels or {}
+        terminal_hint = ''
+        if terminal_steps:
+            names = ', '.join(
+                f'`{s}`' + (f' ({labels[s]})' if s in labels else '')
+                for s in terminal_steps
+            )
+            terminal_hint = (
+                f'\n\n## Terminal steps (last steps before pipeline completion)\n\n'
+                f'The following steps lead directly to the end of the pipeline: {names}.\n'
+                'After one of these steps **succeeds**, immediately call '
+                '`advance_step_and_exit(step_id="__end__")` in the same turn '
+                'using `advance_step` (synchronous) so the pipeline completes without '
+                'requiring the user to click "继续" after the final step.\n\n'
+                'Concretely: use `advance_step(step_id=<terminal_step>, ...)` to run the '
+                'terminal step and wait for its result, then call '
+                '`advance_step_and_exit(step_id="__end__")` to close the session.\n'
+                'Only do this when the terminal step is the **last** planned step — '
+                'if the user wants to review results first, revert to `advance_step_and_exit`.'
+            )
         common += (
             '- `advance_step`: Queue a step and WAIT for result (dynamic mode only). '
             'Use only when running multiple steps in one turn '
@@ -1073,6 +1103,7 @@ def _build_mode_guidance(plugin_mode: str) -> str:
             'runtime_instruction="Previous attempt was interrupted. Check existing artifacts '
             'and only produce missing outputs."\n'
             'When user says "重试": call advance_step_and_exit (no special runtime_instruction).'
+            + terminal_hint
         )
     else:  # auto
         common += (

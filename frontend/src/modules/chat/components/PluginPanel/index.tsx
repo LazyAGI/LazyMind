@@ -662,6 +662,7 @@ const STATUS_KEY: Record<string, string> = {
   completed: 'chat.pluginStatusDone',
   failed: 'chat.pluginStatusFailed',
   waiting: 'chat.pluginStatusWaiting',
+  interrupted: 'chat.pluginStatusInterrupted',
 };
 
 export function PluginPanel({
@@ -699,6 +700,14 @@ export function PluginPanel({
     fetchPluginUI(session.plugin_id).then(setUI);
   }, [session?.plugin_id, fetchPluginUI, pluginUIByPlugin]);
 
+  // Restore the previously focused tab when UI loads or session changes.
+  useEffect(() => {
+    const tabs: TabDef[] = ui.tabs ?? [];
+    if (!tabs.length || !session?.focusedTab) return;
+    const idx = tabs.findIndex((t) => t.id === session.focusedTab);
+    if (idx !== -1) setActiveTabIdx(idx);
+  }, [ui.tabs, session?.focusedTab]);
+
   useEffect(() => {
     if (!session || session.status !== 'active') return;
     const id = setInterval(refresh, pollIntervalMs);
@@ -735,10 +744,13 @@ export function PluginPanel({
     session.status === 'waiting' ||
     session.status === 'active' ||
     session.status === 'completed' ||
-    session.status === 'failed';
+    session.status === 'failed' ||
+    session.status === 'interrupted';
   const buttonsDisabled = session.status === 'active' || anySlotEditing;
   const showContinue =
-    session.status === 'waiting' || session.status === 'active';
+    session.status === 'waiting' ||
+    session.status === 'active' ||
+    session.status === 'interrupted';
 
   function handleContinue() {
     if (buttonsDisabled) return;

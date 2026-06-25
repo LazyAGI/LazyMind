@@ -281,17 +281,6 @@ func TestResolveSlotBinding_NoBinding_ReturnsEmpty(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────
-// defaultMode — deprecated, always returns "dynamic"
-// ──────────────────────────────────────────────
-
-func TestDefaultMode(t *testing.T) {
-	// defaultMode is deprecated and always returns "dynamic" regardless of env var.
-	if defaultMode() != "dynamic" {
-		t.Fatal("expected dynamic (defaultMode is deprecated)")
-	}
-}
-
-// ──────────────────────────────────────────────
 // StopActivePluginSession — sends task-cancel to Python
 // ──────────────────────────────────────────────
 

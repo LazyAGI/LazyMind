@@ -22,14 +22,6 @@ import (
 	"lazymind/core/taskcenter"
 )
 
-// DefaultMode is deprecated. Plugin mode is now determined per-request from the
-// conversation's plugin_mode field, not from the LAZYMIND_PLUGIN_MODE env variable.
-// Retained for backward compatibility; always returns "dynamic".
-func DefaultMode() string { return "dynamic" }
-
-// defaultMode is retained for legacy call-sites only; no longer reads env var.
-func defaultMode() string { return "dynamic" }
-
 // PluginStepParams are the task_created.params fields for plugin_step agent type.
 type PluginStepParams struct {
 	PluginID    string `json:"plugin_id"`

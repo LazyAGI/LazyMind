@@ -564,3 +564,24 @@ export function TempUploadServiceApi() {
     },
   };
 }
+
+export interface ConversationPluginSettings {
+  plugin_mode?: 'dynamic' | 'auto';
+  enable_subagent?: boolean;
+}
+
+export function ConversationSettingsApi() {
+  return {
+    patchPluginSettings(
+      conversationId: string,
+      settings: ConversationPluginSettings,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.patch(
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/plugin-settings`,
+        settings,
+        options,
+      );
+    },
+  };
+}

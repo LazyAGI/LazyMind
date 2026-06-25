@@ -38,6 +38,7 @@ import "./index.scss";
 import { ChatConfig } from "../ChatConfigs";
 import ChatSelector from "../ChatSelector";
 import PromptModal, { PromptImperativeProps } from "../PromptModal";
+import ChatConfigModal from "./ChatConfigModal";
 import BatchChatComponent, { BatchChatImperativeProps } from "../BatchChat";
 import ShowChatFileList from "../ShowChatFileList";
 import { formatFileSize } from "@/modules/chat/utils";
@@ -257,6 +258,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const isComposingRef = useRef(false);
     const [isUploading, setIsUploading] = useState(false);
     const [polishingSuggestionKey, setPolishingSuggestionKey] = useState<string | null>(null);
+    const [chatConfigOpen, setChatConfigOpen] = useState(false);
     const { setThink } = useChatThinkStore();
     const { setNewMessage } = useChatNewMessageStore();
     const { t } = useTranslation();
@@ -816,6 +818,15 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   >
                     {t("chat.promptTemplate")}
                   </div>
+                  {sessionId && !sessionId.startsWith("temp_") && (
+                    <div
+                      className="input-bottom-actions-left-item"
+                      onClick={() => setChatConfigOpen(true)}
+                    >
+                      <SettingOutlined style={{ marginRight: 4 }} />
+                      {t("chat.conversationConfig")}
+                    </div>
+                  )}
                 </div>
 
                 <div className="input-bottom-actions-right">
@@ -902,6 +913,13 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           ref={promptRef}
           onSelectPrompt={(prompt) => onChange(text + " " + prompt)}
         />
+        {sessionId && !sessionId.startsWith("temp_") && (
+          <ChatConfigModal
+            open={chatConfigOpen}
+            onClose={() => setChatConfigOpen(false)}
+            conversationId={sessionId}
+          />
+        )}
         <BatchChatComponent
           ref={batchChatRef}
           cancelFn={() => {

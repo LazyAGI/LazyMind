@@ -475,7 +475,9 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         getattr(fn, '__name__', '') for fn in plugin_tools if callable(fn)
     }
     agent_tools = build_agent_tools(active_configs)
-    subagent_tools = _build_subagent_chat_tools(bool(has_subagents))
+    # Respect enable_subagent flag: when false, suppress create_subagent and related tools.
+    enable_subagent = agentic_config.get('enable_subagent', True)
+    subagent_tools = _build_subagent_chat_tools(bool(has_subagents)) if enable_subagent else []
     # SubAgent chat tools (create_subagent, list_subagents, …) are always active;
     # add their names to the allowlist so the ToolGuard does not block them.
     lazyllm.globals['active_tool_names'] |= {
