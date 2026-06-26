@@ -354,7 +354,7 @@ func (m *AlgorithmServiceManager) waitForDependencies(ctx context.Context, cfg R
 				return err
 			}
 		}
-		if isBuiltInServiceURI("LAZYMIND_OPENSEARCH_URI", "https://opensearch:9200") {
+		if localSegmentStoreUsesBuiltInOpenSearch() {
 			if err := waitForTCP(ctx, "127.0.0.1", cfg.Algorithm.OpenSearchPort, "OpenSearch", 5*time.Minute); err != nil {
 				return err
 			}
@@ -373,6 +373,17 @@ func (m *AlgorithmServiceManager) waitForDependencies(ctx context.Context, cfg R
 		return waitForHTTPOnly(ctx, cfg.Algorithm.ChatPort, "/health", "chat", 5*time.Minute)
 	}
 	return nil
+}
+
+func localSegmentStorePath(paths RuntimePaths) string {
+	return filepath.Join(paths.AlgorithmHome, "sqlite", "segment-store.db")
+}
+
+func localSegmentStoreURIOrPath(cfg RuntimeConfig, paths RuntimePaths) string {
+	if strings.EqualFold(localSegmentStoreType(), "opensearch") {
+		return envText("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", fmt.Sprintf("https://127.0.0.1:%d", cfg.Algorithm.OpenSearchPort))
+	}
+	return envText("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", localSegmentStorePath(paths))
 }
 
 func ensureAlgorithmDataDirs(paths RuntimePaths) error {
@@ -482,8 +493,8 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_OPENSEARCH_URI=" + envText("LAZYMIND_OPENSEARCH_URI", fmt.Sprintf("https://127.0.0.1:%d", cfg.Algorithm.OpenSearchPort)),
 		"LAZYMIND_OPENSEARCH_USER=" + envText("LAZYMIND_OPENSEARCH_USER", "admin"),
 		"LAZYMIND_OPENSEARCH_PASSWORD=" + envText("LAZYMIND_OPENSEARCH_PASSWORD", "LazyRAG_OpenSearch123!"),
-		"LAZYMIND_SEGMENT_STORE_TYPE=" + envText("LAZYMIND_SEGMENT_STORE_TYPE", "opensearch"),
-		"LAZYMIND_SEGMENT_STORE_URI_OR_PATH=" + envText("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", fmt.Sprintf("https://127.0.0.1:%d", cfg.Algorithm.OpenSearchPort)),
+		"LAZYMIND_SEGMENT_STORE_TYPE=" + localSegmentStoreType(),
+		"LAZYMIND_SEGMENT_STORE_URI_OR_PATH=" + localSegmentStoreURIOrPath(cfg, paths),
 		"LAZYMIND_SEGMENT_STORE_USER=" + envText("LAZYMIND_SEGMENT_STORE_USER", "admin"),
 		"LAZYMIND_SEGMENT_STORE_PASSWORD=" + envText("LAZYMIND_SEGMENT_STORE_PASSWORD", "LazyRAG_OpenSearch123!"),
 		"LAZYMIND_DOCUMENT_SERVER_URL=" + fmt.Sprintf("http://127.0.0.1:%d,general_algo", cfg.Algorithm.AlgoPort),

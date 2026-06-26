@@ -260,6 +260,10 @@ func TestAlgorithmServiceEnvIncludesCloudParityDefaults(t *testing.T) {
 		"LAZYMIND_OPENSEARCH_URI",
 		"LAZYMIND_OPENSEARCH_USER",
 		"LAZYMIND_OPENSEARCH_PASSWORD",
+		"LAZYMIND_SEGMENT_STORE_TYPE",
+		"LAZYMIND_SEGMENT_STORE_URI_OR_PATH",
+		"LAZYMIND_SEGMENT_STORE_USER",
+		"LAZYMIND_SEGMENT_STORE_PASSWORD",
 		"LAZYMIND_EVO_CODE_TIMEOUT_S",
 		"LAZYMIND_EVO_LLM_ROLE",
 	} {
@@ -319,9 +323,34 @@ func TestAlgorithmServiceEnvIncludesCloudParityDefaults(t *testing.T) {
 		"LAZYMIND_OPENSEARCH_URI=https://127.0.0.1:" + strconv.Itoa(cfg.Algorithm.OpenSearchPort),
 		"LAZYMIND_OPENSEARCH_USER=admin",
 		"LAZYMIND_OPENSEARCH_PASSWORD=LazyRAG_OpenSearch123!",
+		"LAZYMIND_SEGMENT_STORE_TYPE=SQLiteStore",
+		"LAZYMIND_SEGMENT_STORE_URI_OR_PATH=" + filepath.Join(paths.AlgorithmHome, "sqlite", "segment-store.db"),
+		"LAZYMIND_SEGMENT_STORE_USER=admin",
+		"LAZYMIND_SEGMENT_STORE_PASSWORD=LazyRAG_OpenSearch123!",
 		"LAZYMIND_EVO_CODE_TIMEOUT_S=900",
 		"LAZYMIND_EVO_LLM_ROLE=evo_llm",
 		"LAZYMIND_WORD_GROUP_APPLY_URL=",
+	} {
+		if !containsString(env, want) {
+			t.Fatalf("algorithm env missing %q in %v", want, env)
+		}
+	}
+}
+
+func TestAlgorithmServiceEnvUsesOpenSearchSegmentStoreWhenRequested(t *testing.T) {
+	t.Setenv("LAZYMIND_SEGMENT_STORE_TYPE", "opensearch")
+	t.Setenv("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", "")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+
+	env := algorithmServiceEnv(cfg, paths, algoProcessName)
+	for _, want := range []string{
+		"LAZYMIND_SEGMENT_STORE_TYPE=opensearch",
+		"LAZYMIND_SEGMENT_STORE_URI_OR_PATH=https://127.0.0.1:" + strconv.Itoa(cfg.Algorithm.OpenSearchPort),
 	} {
 		if !containsString(env, want) {
 			t.Fatalf("algorithm env missing %q in %v", want, env)
@@ -467,7 +496,6 @@ func TestBuildEnabledServicesUsesDockerComposeBuild(t *testing.T) {
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
 			"--profile", "milvus",
-			"--profile", "opensearch",
 			"config", "--format", "json",
 		)
 		return CommandResult{Stdout: `{
@@ -483,7 +511,6 @@ func TestBuildEnabledServicesUsesDockerComposeBuild(t *testing.T) {
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
 			"--profile", "milvus",
-			"--profile", "opensearch",
 			"build",
 			"auth-service",
 			"web",
@@ -521,7 +548,6 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
 			"--profile", "milvus",
-			"--profile", "opensearch",
 			"config", "--services",
 		}
 		assertCommand(t, cmd, "docker", expected...)
@@ -533,7 +559,6 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
 			"--profile", "milvus",
-			"--profile", "opensearch",
 			"config", "--format", "json",
 		)
 		return CommandResult{Stdout: composeConfigJSONNoBuildFixture()}, nil
@@ -544,7 +569,6 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
 			"--profile", "milvus",
-			"--profile", "opensearch",
 			"up",
 			"--no-build",
 			"--detach",
@@ -584,7 +608,6 @@ func TestComposeUpOmitsDisabledServices(t *testing.T) {
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
 			"--profile", "milvus",
-			"--profile", "opensearch",
 			"config", "--format", "json",
 		})
 		return CommandResult{Stdout: composeConfigJSONNoBuildFixture()}, nil
@@ -594,7 +617,6 @@ func TestComposeUpOmitsDisabledServices(t *testing.T) {
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
 			"--profile", "milvus",
-			"--profile", "opensearch",
 			"up",
 			"--no-build",
 			"--detach",
@@ -777,7 +799,21 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 func TestDerivedComposeProfilesUseBuiltInStoresByDefault(t *testing.T) {
 	t.Setenv("LAZYMIND_DEPLOY_MINERU", "")
 	t.Setenv("LAZYMIND_MILVUS_URI", "")
-	t.Setenv("LAZYMIND_OPENSEARCH_URI", "")
+	t.Setenv("LAZYMIND_SEGMENT_STORE_TYPE", "")
+	t.Setenv("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", "")
+	t.Setenv("LAZYMIND_ENABLE_MILVUS_DASHBOARD", "")
+	t.Setenv("LAZYMIND_ENABLE_OPENSEARCH_DASHBOARD", "")
+
+	assertStringSlicesEqual(t, derivedComposeProfileArgs(), []string{
+		"--profile", "milvus",
+	})
+}
+
+func TestDerivedComposeProfilesUseOpenSearchWhenSegmentStoreRequiresBuiltInOpenSearch(t *testing.T) {
+	t.Setenv("LAZYMIND_DEPLOY_MINERU", "")
+	t.Setenv("LAZYMIND_MILVUS_URI", "")
+	t.Setenv("LAZYMIND_SEGMENT_STORE_TYPE", "opensearch")
+	t.Setenv("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", "")
 	t.Setenv("LAZYMIND_ENABLE_MILVUS_DASHBOARD", "")
 	t.Setenv("LAZYMIND_ENABLE_OPENSEARCH_DASHBOARD", "")
 
@@ -790,7 +826,8 @@ func TestDerivedComposeProfilesUseBuiltInStoresByDefault(t *testing.T) {
 func TestDerivedComposeProfilesSkipExternalStores(t *testing.T) {
 	t.Setenv("LAZYMIND_DEPLOY_MINERU", "")
 	t.Setenv("LAZYMIND_MILVUS_URI", "http://127.0.0.1:19530")
-	t.Setenv("LAZYMIND_OPENSEARCH_URI", "https://search.example.test:9200")
+	t.Setenv("LAZYMIND_SEGMENT_STORE_TYPE", "opensearch")
+	t.Setenv("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", "https://search.example.test:9200")
 	t.Setenv("LAZYMIND_ENABLE_MILVUS_DASHBOARD", "")
 	t.Setenv("LAZYMIND_ENABLE_OPENSEARCH_DASHBOARD", "")
 
@@ -808,7 +845,6 @@ func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
 			"--profile", "milvus",
-			"--profile", "opensearch",
 			"config", "--services",
 		)
 		return CommandResult{Stdout: "auth-service\ncore\n"}, nil
@@ -818,7 +854,6 @@ func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
 			"--profile", "milvus",
-			"--profile", "opensearch",
 			"config", "--format", "json",
 		)
 		return CommandResult{Stdout: composeConfigJSONNoBuildFixture()}, nil
@@ -829,7 +864,6 @@ func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
 			"--profile", "milvus",
-			"--profile", "opensearch",
 			"up",
 			"--no-build",
 			"--detach",
@@ -884,7 +918,6 @@ func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
 			"--profile", "milvus",
-			"--profile", "opensearch",
 			"ps",
 			"-a",
 			"--format",
@@ -1029,7 +1062,6 @@ func TestRuntimeManagerUpReusesRunningProcessCompose(t *testing.T) {
 			"-f", filepath.Join(repo, repoComposeFileName),
 			"-f", filepath.Join(repo, localComposeOverrideName),
 			"--profile", "milvus",
-			"--profile", "opensearch",
 			"ps",
 			"-a",
 		})
@@ -1068,7 +1100,6 @@ func TestRuntimeManagerUpFailsOnExitedService(t *testing.T) {
 				"-f", filepath.Join(repo, repoComposeFileName),
 				"-f", filepath.Join(repo, localComposeOverrideName),
 				"--profile", "milvus",
-				"--profile", "opensearch",
 				"ps",
 				"-a",
 				"--format",
@@ -1082,7 +1113,6 @@ func TestRuntimeManagerUpFailsOnExitedService(t *testing.T) {
 				"-f", filepath.Join(repo, repoComposeFileName),
 				"-f", filepath.Join(repo, localComposeOverrideName),
 				"--profile", "milvus",
-				"--profile", "opensearch",
 				"ps",
 				"-a",
 			})
@@ -1187,7 +1217,6 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 				"-f", filepath.Join(repo, repoComposeFileName),
 				"-f", filepath.Join(repo, localComposeOverrideName),
 				"--profile", "milvus",
-				"--profile", "opensearch",
 				"down",
 				"--remove-orphans",
 			})
@@ -1199,7 +1228,6 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 				"-f", filepath.Join(repo, repoComposeFileName),
 				"-f", filepath.Join(repo, localComposeOverrideName),
 				"--profile", "milvus",
-				"--profile", "opensearch",
 				"ps",
 				"-a",
 				"--format",

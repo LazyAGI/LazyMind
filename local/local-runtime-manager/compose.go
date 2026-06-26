@@ -56,7 +56,7 @@ func derivedComposeProfileArgs() []string {
 	if isBuiltInServiceURI("LAZYMIND_MILVUS_URI", "http://milvus:19530") {
 		profiles = append(profiles, "milvus")
 	}
-	if isBuiltInServiceURI("LAZYMIND_OPENSEARCH_URI", "https://opensearch:9200") {
+	if localSegmentStoreUsesBuiltInOpenSearch() {
 		profiles = append(profiles, "opensearch")
 	}
 	if enabledFromEnv("LAZYMIND_ENABLE_MILVUS_DASHBOARD") && containsProfile(profiles, "milvus") {
@@ -88,6 +88,15 @@ func isBuiltInServiceURI(envName, fallback string) bool {
 		v = fallback
 	}
 	return v == fallback || v == fallback+"/"
+}
+
+func localSegmentStoreType() string {
+	return strings.TrimSpace(envText("LAZYMIND_SEGMENT_STORE_TYPE", "SQLiteStore"))
+}
+
+func localSegmentStoreUsesBuiltInOpenSearch() bool {
+	return strings.EqualFold(localSegmentStoreType(), "opensearch") &&
+		isBuiltInServiceURI("LAZYMIND_SEGMENT_STORE_URI_OR_PATH", "https://opensearch:9200")
 }
 
 func containsProfile(profiles []string, want string) bool {

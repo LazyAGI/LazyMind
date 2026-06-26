@@ -16,9 +16,9 @@ def test_get_algo_server_port_prefers_algo_port(monkeypatch):
 
 def test_build_store_config_reads_required_and_optional_env(monkeypatch):
     monkeypatch.setenv('LAZYMIND_MILVUS_URI', 'http://milvus.test')
-    monkeypatch.setenv('LAZYMIND_OPENSEARCH_URI', 'https://opensearch.test')
-    monkeypatch.setenv('LAZYMIND_OPENSEARCH_USER', 'user')
-    monkeypatch.setenv('LAZYMIND_OPENSEARCH_PASSWORD', 'pass')
+    monkeypatch.setenv('LAZYMIND_SEGMENT_STORE_URI_OR_PATH', 'https://opensearch.test')
+    monkeypatch.setenv('LAZYMIND_SEGMENT_STORE_USER', 'user')
+    monkeypatch.setenv('LAZYMIND_SEGMENT_STORE_PASSWORD', 'pass')
 
     config = build_document._build_store_config({'index': 'flat'})
 
@@ -27,6 +27,21 @@ def test_build_store_config_reads_required_and_optional_env(monkeypatch):
     assert config['segment_store']['kwargs']['uris'] == 'https://opensearch.test'
     assert config['segment_store']['kwargs']['client_kwargs']['user'] == 'user'
     assert config['segment_store']['kwargs']['client_kwargs']['password'] == 'pass'
+
+
+def test_build_store_config_supports_sqlite_segment_store(monkeypatch, tmp_path):
+    db_path = tmp_path / 'segment-store.db'
+    monkeypatch.setitem(build_document._cfg._impl, 'milvus_uri', 'http://milvus.test')
+    monkeypatch.setitem(build_document._cfg._impl, 'segment_store_type', 'SQLiteStore')
+    monkeypatch.setitem(build_document._cfg._impl, 'segment_store_uri_or_path', str(db_path))
+
+    config = build_document._build_store_config({'index': 'flat'})
+
+    assert config['vector_store']['kwargs']['uri'] == 'http://milvus.test'
+    assert config['segment_store'] == {
+        'type': 'SQLiteStore',
+        'kwargs': {'db_path': str(db_path)},
+    }
 
 
 def test_build_store_config_raises_for_missing_milvus_uri(monkeypatch):
@@ -84,6 +99,7 @@ def test_build_document_wires_readers_groups_and_embeddings(monkeypatch):
     monkeypatch.setattr(build_document, 'DocumentProcessor', FakeDocumentProcessor)
     monkeypatch.setattr(build_document, 'get_dynamic_role_slot_map', lambda: {})
     monkeypatch.setattr(build_document, 'AutoModel', lambda model, config=False: f'emb-{model}')
+    monkeypatch.setattr(build_document, 'LLMParser', lambda *args, **kwargs: ('llm-parser', args, kwargs))
     monkeypatch.setattr(build_document, '_build_store_config', lambda index_kwargs: {'index_kwargs': index_kwargs})
     monkeypatch.setattr(build_document, '_build_pdf_reader', lambda: 'pdf-reader')
     monkeypatch.setitem(build_document._cfg._impl, 'document_processor_url', 'http://processor.test')
@@ -100,11 +116,13 @@ def test_build_document_wires_readers_groups_and_embeddings(monkeypatch):
     assert docs.kwargs['manager'].kwargs['store_conf'] == {'index_kwargs': build_document.EMBED_INDEX_KWARGS}
     assert docs.kwargs['manager'].kwargs['url'] == 'http://processor.test'
     assert ('*.pdf', 'pdf-reader') in docs.readers
-    assert [group['name'] for group in docs.node_groups] == ['block', 'line']
+    assert [group['name'] for group in docs.node_groups] == ['block', 'line', 'code', 'doc-summary']
     assert 'parent' not in docs.node_groups[0]
     assert docs.node_groups[1]['parent'] == 'block'
     assert docs.activated == [
         ('image', build_document.EMBED_IMAGE),
         ('block', [build_document.EMBED_MAIN]),
         ('line', [build_document.EMBED_MAIN]),
+        ('code', [build_document.EMBED_MAIN]),
+        ('doc-summary', [build_document.EMBED_MAIN]),
     ]
