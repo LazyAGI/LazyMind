@@ -719,6 +719,41 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 	if authService.Namespace != "host" {
 		t.Fatalf("unexpected auth-service namespace %q", authService.Namespace)
 	}
+	scanControl, ok := parsed.Processes[scanControlPlaneProcessName]
+	if !ok {
+		t.Fatal("missing scan-control-plane process")
+	}
+	if !strings.Contains(scanControl.Command, "internal scan-control-plane-run --profile "+profile) {
+		t.Fatalf("missing scan-control-plane-run command: %q", scanControl.Command)
+	}
+	if !strings.Contains(scanControl.Shutdown.Command, "internal scan-control-plane-down --profile "+profile) {
+		t.Fatalf("missing scan-control-plane-down command: %q", scanControl.Shutdown.Command)
+	}
+	if scanControl.LogLocation != paths.ScanControlPlaneLog {
+		t.Fatalf("unexpected scan-control-plane log location %q", scanControl.LogLocation)
+	}
+	if scanControl.Namespace != "host" {
+		t.Fatalf("unexpected scan-control-plane namespace %q", scanControl.Namespace)
+	}
+	fileWatcher, ok := parsed.Processes[fileWatcherProcessName]
+	if !ok {
+		t.Fatal("missing file-watcher process")
+	}
+	if !strings.Contains(fileWatcher.Command, "internal file-watcher-run --profile "+profile) {
+		t.Fatalf("missing file-watcher-run command: %q", fileWatcher.Command)
+	}
+	if !strings.Contains(fileWatcher.Command, "LAZYMIND_LOCAL_FILE_WATCHER_PORT="+strconv.Itoa(cfg.FileWatcher.Port)) {
+		t.Fatalf("file-watcher command missing port env: %q", fileWatcher.Command)
+	}
+	if !strings.Contains(fileWatcher.Shutdown.Command, "internal file-watcher-down --profile "+profile) {
+		t.Fatalf("missing file-watcher-down command: %q", fileWatcher.Shutdown.Command)
+	}
+	if fileWatcher.LogLocation != paths.FileWatcherLog {
+		t.Fatalf("unexpected file-watcher log location %q", fileWatcher.LogLocation)
+	}
+	if fileWatcher.Namespace != "host" {
+		t.Fatalf("unexpected file-watcher namespace %q", fileWatcher.Namespace)
+	}
 	for _, service := range []string{docServerProcessName, processorServerProcessName, processorWorkerProcessName, algoProcessName, chatProcessName} {
 		proc, ok := parsed.Processes[service]
 		if !ok {
@@ -825,6 +860,8 @@ func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
 	manager.probeAPI = func(port int, timeout time.Duration) bool { return true }
 	manager.probeAuth = func(port int, timeout time.Duration) bool { return true }
 	manager.probeCore = func(port int, timeout time.Duration) bool { return true }
+	manager.probeScan = func(port int, timeout time.Duration) bool { return true }
+	manager.probeFileWatch = func(port int, timeout time.Duration) bool { return true }
 	manager.waitHostReady = func(context.Context, RuntimeConfig) error { return nil }
 	manager.pollInterval = time.Millisecond
 	manager.upTimeout = time.Second
@@ -1131,7 +1168,7 @@ func TestRuntimeManagerDownFallsBackToComposeDownOnProcessComposeFailure(t *test
 			return CommandResult{}, fmt.Errorf("process-compose failure")
 		},
 		func(cmd Command) (CommandResult, error) {
-			assertCommand(t, cmd, "pkill", "-f", regexp.QuoteMeta(repo)+"/(local/bin/process-compose|\\.lazymind-local/bin/local-proxy|\\.lazymind-local/python/\\.venv/bin/python|\\.lazymind-local/venvs/auth-service/bin/python|local/local-runtime-manager/lazymind-local internal)")
+			assertCommand(t, cmd, "pkill", "-f", regexp.QuoteMeta(repo)+"/(local/bin/process-compose|\\.lazymind-local/bin/local-proxy|\\.lazymind-local/bin/scan-control-plane|\\.lazymind-local/bin/file-watcher|\\.lazymind-local/python/\\.venv/bin/python|\\.lazymind-local/venvs/auth-service/bin/python|local/local-runtime-manager/lazymind-local internal)")
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {

@@ -109,6 +109,8 @@ x-lazymind-local:
     - auth-service
     - core
     - core-dev
+    - scan-control-plane
+    - file-watcher
     - lazyllm-doc-server
     - lazyllm-parse-server
     - lazyllm-parse-worker

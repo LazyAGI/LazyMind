@@ -53,6 +53,10 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 	commandForAuthServiceDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal auth-service-down --profile "+profile)
 	commandForCoreRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal core-run --profile "+profile)
 	commandForCoreDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal core-down --profile "+profile)
+	commandForScanControlPlaneRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal scan-control-plane-run --profile "+profile)
+	commandForScanControlPlaneDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal scan-control-plane-down --profile "+profile)
+	commandForFileWatcherRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal file-watcher-run --profile "+profile)
+	commandForFileWatcherDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal file-watcher-down --profile "+profile)
 	commandForFrontendRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-run --profile "+profile)
 	commandForFrontendDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-down --profile "+profile)
 
@@ -99,6 +103,26 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 					TimeoutSeconds: 15,
 				},
 				LogLocation: paths.CoreLog,
+				Namespace:   "host",
+			},
+			scanControlPlaneProcessName: {
+				WorkingDir: repoRoot,
+				Command:    commandForScanControlPlaneRun,
+				Shutdown: processComposeShutdown{
+					Command:        commandForScanControlPlaneDown,
+					TimeoutSeconds: 15,
+				},
+				LogLocation: paths.ScanControlPlaneLog,
+				Namespace:   "host",
+			},
+			fileWatcherProcessName: {
+				WorkingDir: repoRoot,
+				Command:    commandForFileWatcherRun,
+				Shutdown: processComposeShutdown{
+					Command:        commandForFileWatcherDown,
+					TimeoutSeconds: 15,
+				},
+				LogLocation: paths.FileWatcherLog,
 				Namespace:   "host",
 			},
 			frontendProcessName: {
@@ -156,6 +180,7 @@ func runtimeCommandEnv(cfg RuntimeConfig) []string {
 		localPortsPinnedEnvVar+"=1",
 		processComposePortEnvVar+"="+strconv.Itoa(cfg.ProcessComposePort),
 		authServicePortEnvVar+"="+strconv.Itoa(cfg.AuthService.Port),
+		localFileWatcherPortEnvVar+"="+strconv.Itoa(cfg.FileWatcher.Port),
 	)
 	return env
 }

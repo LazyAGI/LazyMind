@@ -24,6 +24,8 @@ type RuntimeManager struct {
 	probeAPI       func(port int, timeout time.Duration) bool
 	probeAuth      func(port int, timeout time.Duration) bool
 	probeCore      func(port int, timeout time.Duration) bool
+	probeScan      func(port int, timeout time.Duration) bool
+	probeFileWatch func(port int, timeout time.Duration) bool
 	waitHostReady  func(context.Context, RuntimeConfig) error
 	runtimeReady   func(context.Context, RuntimeConfig, RuntimePaths) bool
 	pollInterval   time.Duration
@@ -34,6 +36,8 @@ type RuntimeManager struct {
 	localProxy     *LocalProxyManager
 	authService    *AuthServiceManager
 	coreService    *CoreServiceManager
+	scanControl    *ScanControlPlaneManager
+	fileWatcher    *FileWatcherManager
 	frontend       *FrontendManager
 	algorithm      *AlgorithmServiceManager
 }
@@ -49,6 +53,8 @@ func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
 		probeAPI:       processCompose.ProbeAPI,
 		probeAuth:      authServiceHealthAlive,
 		probeCore:      coreServiceHealthAlive,
+		probeScan:      scanControlPlaneHealthAlive,
+		probeFileWatch: fileWatcherHealthAlive,
 		waitHostReady:  waitForHostAlgorithmReadiness,
 		runtimeReady:   nil,
 		pollInterval:   2 * time.Second,
@@ -59,6 +65,8 @@ func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
 		localProxy:     NewLocalProxyManager(r),
 		authService:    NewAuthServiceManager(r),
 		coreService:    NewCoreServiceManager(r),
+		scanControl:    NewScanControlPlaneManager(r),
+		fileWatcher:    NewFileWatcherManager(r),
 		frontend:       NewFrontendManager(r),
 		algorithm:      NewAlgorithmServiceManager(r),
 	}
@@ -210,6 +218,18 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		_ = writeRuntimeState(paths.StateFile, state)
 		return err
 	}
+	if err := m.waitForScanControlPlaneHealthy(ctx, cfg.LocalProxy.ScanHostPort, m.upTimeout); err != nil {
+		state = newStateWithServiceStatus(state, "failed")
+		state.OverallStatus = "failed"
+		_ = writeRuntimeState(paths.StateFile, state)
+		return err
+	}
+	if err := m.waitForFileWatcherHealthy(ctx, cfg.FileWatcher.Port, m.upTimeout); err != nil {
+		state = newStateWithServiceStatus(state, "failed")
+		state.OverallStatus = "failed"
+		_ = writeRuntimeState(paths.StateFile, state)
+		return err
+	}
 	if waitErr := m.waitHostReady(ctx, cfg); waitErr != nil {
 		state = newStateWithServiceStatus(state, "failed")
 		state.OverallStatus = "failed"
@@ -275,6 +295,33 @@ func (m *RuntimeManager) waitForCoreHealthy(ctx context.Context, port int, timeo
 	}
 }
 
+func (m *RuntimeManager) waitForScanControlPlaneHealthy(ctx context.Context, port int, timeout time.Duration) error {
+	return waitForServiceProbeReady(ctx, m.probeScan, port, scanControlPlaneProcessName, timeout)
+}
+
+func (m *RuntimeManager) waitForFileWatcherHealthy(ctx context.Context, port int, timeout time.Duration) error {
+	return waitForServiceProbeReady(ctx, m.probeFileWatch, port, fileWatcherProcessName, timeout)
+}
+
+func waitForServiceProbeReady(ctx context.Context, probe func(int, time.Duration) bool, port int, service string, timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if probe(port, time.Second) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("%s health check timed out on port %d", service, port)
+		case <-ticker.C:
+		}
+	}
+}
+
 func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
 	if err := paths.EnsureAllDirs(); err != nil {
 		return err
@@ -321,6 +368,12 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 		}
 	}
 	if err := m.coreService.Down(ctx, cfg, paths); err != nil && downErr == nil {
+		downErr = err
+	}
+	if err := m.scanControl.Down(ctx, paths); err != nil && downErr == nil {
+		downErr = err
+	}
+	if err := m.fileWatcher.Down(ctx, paths); err != nil && downErr == nil {
 		downErr = err
 	}
 	if downErr != nil {
@@ -379,7 +432,7 @@ func (m *RuntimeManager) stopStaleRuntimeIfNeeded(ctx context.Context, state Run
 }
 
 func (m *RuntimeManager) killStaleRuntimeProcesses(ctx context.Context, repoRoot string) error {
-	pattern := regexp.QuoteMeta(repoRoot) + "/(local/bin/process-compose|\\.lazymind-local/bin/local-proxy|\\.lazymind-local/python/\\.venv/bin/python|\\.lazymind-local/venvs/auth-service/bin/python|local/local-runtime-manager/lazymind-local internal)"
+	pattern := regexp.QuoteMeta(repoRoot) + "/(local/bin/process-compose|\\.lazymind-local/bin/local-proxy|\\.lazymind-local/bin/scan-control-plane|\\.lazymind-local/bin/file-watcher|\\.lazymind-local/python/\\.venv/bin/python|\\.lazymind-local/venvs/auth-service/bin/python|local/local-runtime-manager/lazymind-local internal)"
 	_, err := m.runner.Run(ctx, Command{Name: "pkill", Args: []string{"-f", pattern}, Dir: repoRoot})
 	if err != nil {
 		return nil
@@ -410,6 +463,12 @@ func (m *RuntimeManager) checkRuntimeReady(ctx context.Context, cfg RuntimeConfi
 		return false
 	}
 	if !m.probeCore(cfg.LocalProxy.CoreHostPort, 500*time.Millisecond) {
+		return false
+	}
+	if !m.probeScan(cfg.LocalProxy.ScanHostPort, 500*time.Millisecond) {
+		return false
+	}
+	if !m.probeFileWatch(cfg.FileWatcher.Port, 500*time.Millisecond) {
 		return false
 	}
 	for _, spec := range algorithmProcessSpecs(cfg.Algorithm) {

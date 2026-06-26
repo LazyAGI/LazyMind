@@ -22,6 +22,7 @@ const (
 	localProxyChatHostPortEnvVar  = "LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT"
 	localProxyScanHostPortEnvVar  = "LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT"
 	localProxyEvoHostPortEnvVar   = "LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT"
+	localFileWatcherPortEnvVar    = "LAZYMIND_LOCAL_FILE_WATCHER_PORT"
 	localPostgresPortEnvVar       = "LAZYMIND_LOCAL_POSTGRES_PORT"
 	localCorePortEnvVar           = "LAZYMIND_LOCAL_CORE_PORT"
 	localDocPortEnvVar            = "LAZYMIND_LOCAL_DOC_PORT"
@@ -55,6 +56,7 @@ const (
 	defaultLocalProxyChatHostPort = 18046
 	defaultLocalProxyScanHostPort = 18080
 	defaultLocalProxyEvoHostPort  = 18047
+	defaultLocalFileWatcherPort   = 19090
 	defaultLocalPostgresPort      = 15432
 	defaultLocalDocPort           = 18002
 	defaultLocalProcessorPort     = 18003
@@ -85,6 +87,8 @@ const (
 	localProxyProcessName         = "local-proxy"
 	authServiceProcessName        = "auth-service"
 	coreProcessName               = "core"
+	scanControlPlaneProcessName   = "scan-control-plane"
+	fileWatcherProcessName        = "file-watcher"
 	frontendProcessName           = "frontend"
 	docServerProcessName          = "lazyllm-doc-server"
 	processorServerProcessName    = "lazyllm-parse-server"
@@ -95,45 +99,54 @@ const (
 )
 
 type RuntimePaths struct {
-	RepoRoot             string
-	RuntimeRoot          string
-	StateDir             string
-	LogsDir              string
-	RunDir               string
-	GeneratedDir         string
-	BinDir               string
-	StateFile            string
-	RunDirTokenFile      string
-	UpLockFile           string
-	LogFilePath          string
-	LocalProxyLog        string
-	AuthServiceLog       string
-	AuthServicePIDFile   string
-	AuthServiceVenvDir   string
-	AuthServiceStateDir  string
-	CoreLog              string
-	CorePIDFile          string
-	CoreBin              string
-	CoreStateDir         string
-	FrontendLog          string
-	DocServerLog         string
-	ProcessorServerLog   string
-	ProcessorWorkerLog   string
-	AlgoLog              string
-	ChatLog              string
-	EvoLog               string
-	LocalProxyBin        string
-	CaddyBin             string
-	LocalProxyConfig     string
-	LocalProxyStopScript string
-	CaddyConfig          string
-	GeneratedConfig      string
-	ServiceEndpointsJSON string
-	ServiceEndpointsEnv  string
-	AlgorithmVenv        string
-	AlgorithmPython      string
-	AlgorithmHome        string
-	AlgorithmPIDDir      string
+	RepoRoot                 string
+	RuntimeRoot              string
+	StateDir                 string
+	LogsDir                  string
+	RunDir                   string
+	GeneratedDir             string
+	BinDir                   string
+	StateFile                string
+	RunDirTokenFile          string
+	UpLockFile               string
+	LogFilePath              string
+	LocalProxyLog            string
+	AuthServiceLog           string
+	AuthServicePIDFile       string
+	AuthServiceVenvDir       string
+	AuthServiceStateDir      string
+	CoreLog                  string
+	CorePIDFile              string
+	CoreBin                  string
+	CoreStateDir             string
+	ScanControlPlaneLog      string
+	ScanControlPlanePIDFile  string
+	ScanControlPlaneBin      string
+	ScanControlPlaneStateDir string
+	ScanControlPlaneTempDir  string
+	FileWatcherLog           string
+	FileWatcherPIDFile       string
+	FileWatcherBin           string
+	FileWatcherBaseRoot      string
+	FrontendLog              string
+	DocServerLog             string
+	ProcessorServerLog       string
+	ProcessorWorkerLog       string
+	AlgoLog                  string
+	ChatLog                  string
+	EvoLog                   string
+	LocalProxyBin            string
+	CaddyBin                 string
+	LocalProxyConfig         string
+	LocalProxyStopScript     string
+	CaddyConfig              string
+	GeneratedConfig          string
+	ServiceEndpointsJSON     string
+	ServiceEndpointsEnv      string
+	AlgorithmVenv            string
+	AlgorithmPython          string
+	AlgorithmHome            string
+	AlgorithmPIDDir          string
 }
 
 type RuntimeConfig struct {
@@ -146,6 +159,7 @@ type RuntimeConfig struct {
 	AuthService        AuthServiceConfig
 	CaddyVersion       string
 	Algorithm          AlgorithmConfig
+	FileWatcher        FileWatcherConfig
 }
 
 type LocalProxyConfig struct {
@@ -163,6 +177,14 @@ type AuthServiceConfig struct {
 	Python      string
 	DatabaseURL string
 	InstallDeps bool
+}
+
+type FileWatcherConfig struct {
+	Port          int
+	AgentID       string
+	AgentToken    string
+	WatchHostDir  string
+	HostPathStyle string
 }
 
 type AlgorithmConfig struct {
@@ -334,6 +356,34 @@ func envBool(name string, fallback bool) bool {
 	}
 }
 
+func defaultFileWatcherWatchHostDir(repoRoot string) string {
+	raw := strings.TrimSpace(os.Getenv("LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR"))
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv("HOME"))
+	}
+	if raw == "" {
+		raw = repoRoot
+	}
+	if filepath.IsAbs(raw) {
+		return filepath.Clean(raw)
+	}
+	if abs, err := filepath.Abs(raw); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(raw)
+}
+
+func defaultFileWatcherBaseRoot(repoRoot string) string {
+	raw := strings.TrimSpace(os.Getenv("LAZYMIND_FILE_WATCHER_BASE_ROOT"))
+	if raw == "" {
+		raw = filepath.Join(repoRoot, "data", "scan")
+	}
+	if filepath.IsAbs(raw) {
+		return filepath.Clean(raw)
+	}
+	return filepath.Clean(filepath.Join(repoRoot, raw))
+}
+
 func defaultAuthServicePortValue() int {
 	if v := os.Getenv(localProxyAuthHostPortEnvVar); v != "" {
 		return envPort(localProxyAuthHostPortEnvVar, defaultLocalProxyAuthHostPort)
@@ -427,45 +477,54 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 	root := filepath.Clean(resolved)
 	runtimeRoot := filepath.Join(root, ".lazymind-local")
 	p := RuntimePaths{
-		RepoRoot:             root,
-		RuntimeRoot:          runtimeRoot,
-		StateDir:             filepath.Join(runtimeRoot, "state"),
-		LogsDir:              filepath.Join(runtimeRoot, "logs"),
-		RunDir:               filepath.Join(runtimeRoot, "run"),
-		GeneratedDir:         filepath.Join(runtimeRoot, "generated"),
-		BinDir:               filepath.Join(runtimeRoot, "bin"),
-		StateFile:            filepath.Join(runtimeRoot, "state", stateFileName),
-		RunDirTokenFile:      filepath.Join(runtimeRoot, "run", tokenFileName),
-		UpLockFile:           filepath.Join(runtimeRoot, "run", upLockFileName),
-		LogFilePath:          filepath.Join(runtimeRoot, "logs", logFileName),
-		LocalProxyLog:        filepath.Join(runtimeRoot, "logs", localProxyLogFileName),
-		AuthServiceLog:       filepath.Join(runtimeRoot, "logs", authServiceLogFileName),
-		AuthServicePIDFile:   filepath.Join(runtimeRoot, "run", "auth-service.pid"),
-		AuthServiceVenvDir:   filepath.Join(runtimeRoot, "venvs", "auth-service"),
-		AuthServiceStateDir:  filepath.Join(runtimeRoot, "stores", "sqlite", "auth-state"),
-		CoreLog:              filepath.Join(runtimeRoot, "logs", coreLogFileName),
-		CorePIDFile:          filepath.Join(runtimeRoot, "run", "core.pid"),
-		CoreBin:              filepath.Join(runtimeRoot, "bin", "core"),
-		CoreStateDir:         filepath.Join(runtimeRoot, "stores", "sqlite", "core-state"),
-		FrontendLog:          filepath.Join(runtimeRoot, "logs", frontendLogFileName),
-		DocServerLog:         filepath.Join(runtimeRoot, "logs", docServerProcessName+".log"),
-		ProcessorServerLog:   filepath.Join(runtimeRoot, "logs", processorServerProcessName+".log"),
-		ProcessorWorkerLog:   filepath.Join(runtimeRoot, "logs", processorWorkerProcessName+".log"),
-		AlgoLog:              filepath.Join(runtimeRoot, "logs", algoProcessName+".log"),
-		ChatLog:              filepath.Join(runtimeRoot, "logs", chatProcessName+".log"),
-		EvoLog:               filepath.Join(runtimeRoot, "logs", evoProcessName+".log"),
-		LocalProxyBin:        filepath.Join(runtimeRoot, "bin", "local-proxy"),
-		CaddyBin:             filepath.Join(runtimeRoot, "bin", "caddy"),
-		LocalProxyConfig:     filepath.Join(root, localProxyConfigName),
-		LocalProxyStopScript: filepath.Join(root, localProxyScriptDirName, "stop.sh"),
-		CaddyConfig:          filepath.Join(runtimeRoot, "generated", "Caddyfile"),
-		GeneratedConfig:      filepath.Join(runtimeRoot, "generated", composeGeneratedFileName),
-		ServiceEndpointsJSON: filepath.Join(runtimeRoot, "generated", serviceEndpointsJSONName),
-		ServiceEndpointsEnv:  filepath.Join(runtimeRoot, "generated", serviceEndpointsEnvName),
-		AlgorithmVenv:        filepath.Join(runtimeRoot, "python", ".venv"),
-		AlgorithmPython:      filepath.Join(runtimeRoot, "python", ".venv", "bin", "python"),
-		AlgorithmHome:        filepath.Join(runtimeRoot, "home"),
-		AlgorithmPIDDir:      filepath.Join(runtimeRoot, "run", "algorithm"),
+		RepoRoot:                 root,
+		RuntimeRoot:              runtimeRoot,
+		StateDir:                 filepath.Join(runtimeRoot, "state"),
+		LogsDir:                  filepath.Join(runtimeRoot, "logs"),
+		RunDir:                   filepath.Join(runtimeRoot, "run"),
+		GeneratedDir:             filepath.Join(runtimeRoot, "generated"),
+		BinDir:                   filepath.Join(runtimeRoot, "bin"),
+		StateFile:                filepath.Join(runtimeRoot, "state", stateFileName),
+		RunDirTokenFile:          filepath.Join(runtimeRoot, "run", tokenFileName),
+		UpLockFile:               filepath.Join(runtimeRoot, "run", upLockFileName),
+		LogFilePath:              filepath.Join(runtimeRoot, "logs", logFileName),
+		LocalProxyLog:            filepath.Join(runtimeRoot, "logs", localProxyLogFileName),
+		AuthServiceLog:           filepath.Join(runtimeRoot, "logs", authServiceLogFileName),
+		AuthServicePIDFile:       filepath.Join(runtimeRoot, "run", "auth-service.pid"),
+		AuthServiceVenvDir:       filepath.Join(runtimeRoot, "venvs", "auth-service"),
+		AuthServiceStateDir:      filepath.Join(runtimeRoot, "stores", "sqlite", "auth-state"),
+		CoreLog:                  filepath.Join(runtimeRoot, "logs", coreLogFileName),
+		CorePIDFile:              filepath.Join(runtimeRoot, "run", "core.pid"),
+		CoreBin:                  filepath.Join(runtimeRoot, "bin", "core"),
+		CoreStateDir:             filepath.Join(runtimeRoot, "stores", "sqlite", "core-state"),
+		ScanControlPlaneLog:      filepath.Join(runtimeRoot, "logs", scanControlPlaneProcessName+".log"),
+		ScanControlPlanePIDFile:  filepath.Join(runtimeRoot, "run", scanControlPlaneProcessName+".pid"),
+		ScanControlPlaneBin:      filepath.Join(runtimeRoot, "bin", scanControlPlaneProcessName),
+		ScanControlPlaneStateDir: filepath.Join(runtimeRoot, "stores", "sqlite", "scan-state"),
+		ScanControlPlaneTempDir:  filepath.Join(runtimeRoot, "tmp", scanControlPlaneProcessName, "sourceengine"),
+		FileWatcherLog:           filepath.Join(runtimeRoot, "logs", fileWatcherProcessName+".log"),
+		FileWatcherPIDFile:       filepath.Join(runtimeRoot, "run", fileWatcherProcessName+".pid"),
+		FileWatcherBin:           filepath.Join(runtimeRoot, "bin", fileWatcherProcessName),
+		FileWatcherBaseRoot:      defaultFileWatcherBaseRoot(root),
+		FrontendLog:              filepath.Join(runtimeRoot, "logs", frontendLogFileName),
+		DocServerLog:             filepath.Join(runtimeRoot, "logs", docServerProcessName+".log"),
+		ProcessorServerLog:       filepath.Join(runtimeRoot, "logs", processorServerProcessName+".log"),
+		ProcessorWorkerLog:       filepath.Join(runtimeRoot, "logs", processorWorkerProcessName+".log"),
+		AlgoLog:                  filepath.Join(runtimeRoot, "logs", algoProcessName+".log"),
+		ChatLog:                  filepath.Join(runtimeRoot, "logs", chatProcessName+".log"),
+		EvoLog:                   filepath.Join(runtimeRoot, "logs", evoProcessName+".log"),
+		LocalProxyBin:            filepath.Join(runtimeRoot, "bin", "local-proxy"),
+		CaddyBin:                 filepath.Join(runtimeRoot, "bin", "caddy"),
+		LocalProxyConfig:         filepath.Join(root, localProxyConfigName),
+		LocalProxyStopScript:     filepath.Join(root, localProxyScriptDirName, "stop.sh"),
+		CaddyConfig:              filepath.Join(runtimeRoot, "generated", "Caddyfile"),
+		GeneratedConfig:          filepath.Join(runtimeRoot, "generated", composeGeneratedFileName),
+		ServiceEndpointsJSON:     filepath.Join(runtimeRoot, "generated", serviceEndpointsJSONName),
+		ServiceEndpointsEnv:      filepath.Join(runtimeRoot, "generated", serviceEndpointsEnvName),
+		AlgorithmVenv:            filepath.Join(runtimeRoot, "python", ".venv"),
+		AlgorithmPython:          filepath.Join(runtimeRoot, "python", ".venv", "bin", "python"),
+		AlgorithmHome:            filepath.Join(runtimeRoot, "home"),
+		AlgorithmPIDDir:          filepath.Join(runtimeRoot, "run", "algorithm"),
 	}
 	ports := newLocalPortAllocator()
 	processComposePort := ports.envOrAvailable(processComposePortEnvVar, defaultProcessComposePort)
@@ -474,6 +533,7 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 	authHostPort := ports.envOrAvailable(localProxyAuthHostPortEnvVar, defaultLocalProxyAuthHostPort)
 	coreHostPort := ports.firstEnvOrAvailable([]string{localCorePortEnvVar, localProxyCoreHostPortEnvVar}, defaultLocalProxyCoreHostPort)
 	scanHostPort := ports.envOrAvailable(localProxyScanHostPortEnvVar, defaultLocalProxyScanHostPort)
+	fileWatcherPort := ports.envOrAvailable(localFileWatcherPortEnvVar, defaultLocalFileWatcherPort)
 	postgresPort := ports.envOrAvailable(localPostgresPortEnvVar, defaultLocalPostgresPort)
 	docPort := ports.envOrAvailable(localDocPortEnvVar, defaultLocalDocPort)
 	processorPort := ports.envOrAvailable(localProcessorPortEnvVar, defaultLocalProcessorPort)
@@ -517,6 +577,13 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 			DatabaseURL: authServiceDatabaseURL(postgresPort),
 			InstallDeps: envBool(authServiceInstallDepsEnvVar, true),
 		},
+		FileWatcher: FileWatcherConfig{
+			Port:          fileWatcherPort,
+			AgentID:       envText("LAZYMIND_FILE_WATCHER_AGENT_ID", envText("LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_DEFAULT_AGENT_ID", "file-watcher-local-001")),
+			AgentToken:    envText("LAZYMIND_FILE_WATCHER_AGENT_TOKEN", envText("LAZYMIND_SCAN_CONTROL_PLANE_AGENT_TOKEN", "my-secret-token")),
+			WatchHostDir:  defaultFileWatcherWatchHostDir(root),
+			HostPathStyle: envText("LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE", "posix"),
+		},
 	}, p, nil
 }
 
@@ -530,6 +597,9 @@ func (p RuntimePaths) EnsureAllDirs() error {
 		filepath.Dir(p.AuthServicePIDFile),
 		p.AuthServiceStateDir,
 		p.CoreStateDir,
+		p.ScanControlPlaneStateDir,
+		p.ScanControlPlaneTempDir,
+		p.FileWatcherBaseRoot,
 		p.AuthServiceVenvDir,
 		filepath.Dir(p.AlgorithmVenv),
 		p.AlgorithmHome,

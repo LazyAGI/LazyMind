@@ -146,6 +146,14 @@ func (c *CLI) runInternal(ctx context.Context, manager *RuntimeManager, args []s
 		return manager.coreService.Run(ctx, cfg, paths)
 	case "core-down":
 		return manager.coreService.Down(ctx, cfg, paths)
+	case "scan-control-plane-run":
+		return manager.scanControl.Run(ctx, cfg, paths)
+	case "scan-control-plane-down":
+		return manager.scanControl.Down(ctx, paths)
+	case "file-watcher-run":
+		return manager.fileWatcher.Run(ctx, cfg, paths)
+	case "file-watcher-down":
+		return manager.fileWatcher.Down(ctx, paths)
 	case "frontend-run":
 		return manager.frontend.Run(ctx, cfg, paths)
 	case "frontend-down":
@@ -207,5 +215,5 @@ func (c *CLI) usage() {
 	_, _ = io.WriteString(c.out, "  lazymind-local up --profile <profile>\n")
 	_, _ = io.WriteString(c.out, "  lazymind-local down --profile <profile>\n")
 	_, _ = io.WriteString(c.out, "  lazymind-local status --json\n")
-	_, _ = io.WriteString(c.out, "  lazymind-local internal compose-up|compose-down|compose-services|local-proxy-run|local-proxy-down|auth-service-run|auth-service-down|core-run|core-down|frontend-run|frontend-down|algorithm-run|algorithm-down --profile <profile>\n")
+	_, _ = io.WriteString(c.out, "  lazymind-local internal compose-up|compose-down|compose-services|local-proxy-run|local-proxy-down|auth-service-run|auth-service-down|core-run|core-down|scan-control-plane-run|scan-control-plane-down|file-watcher-run|file-watcher-down|frontend-run|frontend-down|algorithm-run|algorithm-down --profile <profile>\n")
 }
