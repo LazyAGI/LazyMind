@@ -164,7 +164,8 @@ class LocalFSToolGroup:
             max_entries: Maximum entries to return, default 200.
 
         Returns:
-            dict with ``path``, ``entry_count``, ``truncated`` and ``entries``.
+            A directory listing with entry paths, types, sizes, update times,
+            and pagination metadata.
         """
         entries: List[Dict[str, Any]] = []
         limit = max(1, max_entries)
@@ -214,7 +215,7 @@ class LocalFSToolGroup:
             path: Directory to search. When omitted, searches all available local directories.
 
         Returns:
-            dict with ``pattern``, ``path``, ``match_count``, ``matches``.
+            A list of matching local file paths.
         """
         matches: List[str] = []
         for safe_dir, _scope in self._iter_roots(path):
@@ -256,7 +257,7 @@ class LocalFSToolGroup:
             max_results: Maximum results to return, default 50.
 
         Returns:
-            dict with ``pattern``, ``path``, ``match_count``, ``matches``.
+            Matching lines with file path, line number, and text snippet.
         """
         matches: List[Dict[str, Any]] = []
         for safe_dir, scope in self._iter_roots(path):
@@ -389,8 +390,7 @@ class LocalFSToolGroup:
             max_lines: Maximum lines to read, default 500.
 
         Returns:
-            dict with ``filepath``, ``total_lines``, ``start_line``,
-            ``end_line``, ``content``.
+            File content plus line range and total line count metadata.
         """
         safe_path, scope = self._resolve_with_scope(filepath)
         if not os.path.isfile(safe_path):
@@ -426,7 +426,7 @@ class LocalFSToolGroup:
                 available local root directories.
 
         Returns:
-            dict with ``path``, ``type``, ``size``, ``mtime``.
+            File or directory metadata such as path, type, size, and update time.
         """
         if path is None or str(path).strip() in ('', '.'):
             entries = [self._entry(root, scope) for root, scope in self._iter_roots(None)]
