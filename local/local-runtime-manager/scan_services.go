@@ -44,7 +44,7 @@ func (m *ScanControlPlaneManager) Run(ctx context.Context, cfg RuntimeConfig, pa
 	if err := m.build(ctx, paths); err != nil {
 		return err
 	}
-	if err := waitForTCP(ctx, "127.0.0.1", cfg.Algorithm.PostgresPort, "scan-control-plane database", scanControlPlaneDBWaitTimeout); err != nil {
+	if err := m.waitForDatabase(ctx, cfg, paths); err != nil {
 		return err
 	}
 
@@ -96,6 +96,49 @@ func (m *ScanControlPlaneManager) build(ctx context.Context, paths RuntimePaths)
 		return fmt.Errorf("build scan-control-plane failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
 	}
 	return nil
+}
+
+func (m *ScanControlPlaneManager) waitForDatabase(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	deadline := time.NewTimer(scanControlPlaneDBWaitTimeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	var lastErr error
+	for {
+		res, err := m.runner.Run(ctx, Command{
+			Name: "docker",
+			Args: []string{
+				"compose",
+				"-f", repoComposeFileName,
+				"-f", localComposeOverrideName,
+				"exec",
+				"-T",
+				"db",
+				"pg_isready",
+				"-U", "root",
+				"-d", "scan_control_plane",
+			},
+			Dir: paths.RepoRoot,
+		})
+		if err == nil && strings.Contains(res.Stdout+res.Stderr, "accepting connections") {
+			return nil
+		}
+		if err != nil {
+			lastErr = err
+		} else if stderr := strings.TrimSpace(res.Stderr); stderr != "" {
+			lastErr = fmt.Errorf("%s", stderr)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			if lastErr != nil {
+				return fmt.Errorf("scan-control-plane database did not become ready: %w", lastErr)
+			}
+			return fmt.Errorf("scan-control-plane database did not become ready at %s", serviceEndpointsFromConfig(cfg).Host.PostgresAddress)
+		case <-ticker.C:
+		}
+	}
 }
 
 func (m *ScanControlPlaneManager) Down(ctx context.Context, paths RuntimePaths) error {

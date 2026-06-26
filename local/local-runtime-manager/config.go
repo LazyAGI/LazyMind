@@ -376,7 +376,7 @@ func defaultFileWatcherWatchHostDir(repoRoot string) string {
 func defaultFileWatcherBaseRoot(repoRoot string) string {
 	raw := strings.TrimSpace(os.Getenv("LAZYMIND_FILE_WATCHER_BASE_ROOT"))
 	if raw == "" {
-		raw = filepath.Join(repoRoot, "data", "scan")
+		raw = filepath.Join(repoRoot, ".lazymind-local", "stores", "scan", "file-watcher")
 	}
 	if filepath.IsAbs(raw) {
 		return filepath.Clean(raw)

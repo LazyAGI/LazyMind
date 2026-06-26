@@ -94,6 +94,34 @@ func TestRuntimePathsEnsureAllDirsCreatesOnlyV1Directories(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigDefaultsFileWatcherBaseRootUnderRuntimeRoot(t *testing.T) {
+	t.Setenv("LAZYMIND_FILE_WATCHER_BASE_ROOT", "")
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	want := filepath.Join(repo, ".lazymind-local", "stores", "scan", "file-watcher")
+	if paths.FileWatcherBaseRoot != want {
+		t.Fatalf("file watcher base root = %q, want %q", paths.FileWatcherBaseRoot, want)
+	}
+}
+
+func TestRuntimeConfigAllowsFileWatcherBaseRootOverride(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	override := filepath.Join(repo, "data", "scan")
+	t.Setenv("LAZYMIND_FILE_WATCHER_BASE_ROOT", override)
+	_, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if paths.FileWatcherBaseRoot != override {
+		t.Fatalf("file watcher base root = %q, want %q", paths.FileWatcherBaseRoot, override)
+	}
+}
+
 func TestRuntimeConfigAllocatesAvailableLocalPorts(t *testing.T) {
 	for _, envName := range []string{
 		processComposePortEnvVar,

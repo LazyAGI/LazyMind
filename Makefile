@@ -64,7 +64,7 @@ _COMPOSE := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(_COMPOSE_PROJECT
 # Keep its writable roots under the compose volume root by default.
 # LAZYMIND_FILE_WATCHER_BASE_ROOT is exported as a compose-friendly path;
 # internal Makefile bookkeeping uses the resolved absolute path below.
-export LAZYMIND_FILE_WATCHER_BASE_ROOT ?= ./data/scan
+export LAZYMIND_FILE_WATCHER_BASE_ROOT ?= ./.lazymind-local/stores/scan/file-watcher
 LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS := $(abspath $(LAZYMIND_FILE_WATCHER_BASE_ROOT))
 export LAZYMIND_FILE_WATCHER_MODE ?= container
 
