@@ -92,34 +92,36 @@ func isTerminal(status string) bool {
 // ── API handlers ─────────────────────────────────────────────────────────────
 
 type taskResponse struct {
-	ID              string          `json:"id"`
-	UserID          string          `json:"user_id"`
-	ConversationID  string          `json:"conversation_id"`
-	PluginSessionID *string         `json:"plugin_session_id,omitempty"`
-	TaskType        string          `json:"task_type"`
-	Title           *string         `json:"title,omitempty"`
-	Status          string          `json:"status"`
-	ScheduleID      *string         `json:"schedule_id,omitempty"`
-	ProgressJSON    json.RawMessage `json:"progress,omitempty"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
-	FinishedAt      *time.Time      `json:"finished_at,omitempty"`
+	ID                string          `json:"id"`
+	UserID            string          `json:"user_id"`
+	ConversationID    string          `json:"conversation_id"`
+	ConversationTitle string          `json:"conversation_title,omitempty"`
+	PluginSessionID   *string         `json:"plugin_session_id,omitempty"`
+	TaskType          string          `json:"task_type"`
+	Title             *string         `json:"title,omitempty"`
+	Status            string          `json:"status"`
+	ScheduleID        *string         `json:"schedule_id,omitempty"`
+	ProgressJSON      json.RawMessage `json:"progress,omitempty"`
+	CreatedAt         time.Time       `json:"created_at"`
+	UpdatedAt         time.Time       `json:"updated_at"`
+	FinishedAt        *time.Time      `json:"finished_at,omitempty"`
 }
 
-func toResponse(t orm.TaskCenterTask) taskResponse {
+func toResponse(t orm.TaskCenterTask, conversationTitle string) taskResponse {
 	return taskResponse{
-		ID:              t.ID,
-		UserID:          t.UserID,
-		ConversationID:  t.ConversationID,
-		PluginSessionID: t.PluginSessionID,
-		TaskType:        t.TaskType,
-		Title:           t.Title,
-		Status:          t.Status,
-		ScheduleID:      t.ScheduleID,
-		ProgressJSON:    t.ProgressJSON,
-		CreatedAt:       t.CreatedAt,
-		UpdatedAt:       t.UpdatedAt,
-		FinishedAt:      t.FinishedAt,
+		ID:                t.ID,
+		UserID:            t.UserID,
+		ConversationID:    t.ConversationID,
+		ConversationTitle: conversationTitle,
+		PluginSessionID:   t.PluginSessionID,
+		TaskType:          t.TaskType,
+		Title:             t.Title,
+		Status:            t.Status,
+		ScheduleID:        t.ScheduleID,
+		ProgressJSON:      t.ProgressJSON,
+		CreatedAt:         t.CreatedAt,
+		UpdatedAt:         t.UpdatedAt,
+		FinishedAt:        t.FinishedAt,
 	}
 }
 
@@ -167,9 +169,32 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Batch-load conversation display_names for the result set.
+	convIDs := make([]string, 0, len(rows))
+	for _, t := range rows {
+		convIDs = append(convIDs, t.ConversationID)
+	}
+	convTitles := map[string]string{}
+	if len(convIDs) > 0 {
+		type convRow struct {
+			ID          string `gorm:"column:id"`
+			DisplayName string `gorm:"column:display_name"`
+		}
+		var convRows []convRow
+		if err := db.WithContext(r.Context()).
+			Table("conversations").
+			Select("id, display_name").
+			Where("id IN ?", convIDs).
+			Find(&convRows).Error; err == nil {
+			for _, c := range convRows {
+				convTitles[c.ID] = c.DisplayName
+			}
+		}
+	}
+
 	items := make([]taskResponse, 0, len(rows))
 	for _, t := range rows {
-		items = append(items, toResponse(t))
+		items = append(items, toResponse(t, convTitles[t.ConversationID]))
 	}
 	common.ReplyJSON(w, map[string]any{
 		"items":     items,
@@ -195,7 +220,24 @@ func GetTaskByID(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "task not found", http.StatusNotFound)
 		return
 	}
-	common.ReplyJSON(w, toResponse(t))
+
+	// Load conversation display_name for this task.
+	convTitle := ""
+	if t.ConversationID != "" {
+		type convRow struct {
+			DisplayName string `gorm:"column:display_name"`
+		}
+		var c convRow
+		if err := db.WithContext(r.Context()).
+			Table("conversations").
+			Select("display_name").
+			Where("id = ?", t.ConversationID).
+			First(&c).Error; err == nil {
+			convTitle = c.DisplayName
+		}
+	}
+
+	common.ReplyJSON(w, toResponse(t, convTitle))
 }
 
 // CancelTaskByID handles POST /tasks/{task_id}:cancel

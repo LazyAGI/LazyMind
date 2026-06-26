@@ -6,6 +6,7 @@ export interface Task {
   id: string;
   user_id: string;
   conversation_id: string;
+  conversation_title?: string;
   plugin_session_id?: string;
   task_type: string;
   title?: string;
@@ -20,10 +21,11 @@ export interface Task {
 export interface Schedule {
   id: string;
   user_id: string;
-  conversation_id?: string;
   cron_expr: string;
   timezone: string;
   prompt_template: string;
+  kb_ids?: string[];
+  file_ids?: string[];
   enabled: boolean;
   last_run_at?: string;
   next_run_at: string;
@@ -46,7 +48,8 @@ export interface CreateScheduleRequest {
   cron_expr: string;
   prompt_template: string;
   timezone: string;
-  conversation_id?: string;
+  kb_ids?: string[];
+  file_ids?: string[];
 }
 
 export async function listTasks(params: {

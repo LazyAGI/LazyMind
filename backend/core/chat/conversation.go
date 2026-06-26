@@ -1081,6 +1081,17 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 	if keyword != "" {
 		q = q.Where("display_name LIKE ?", "%"+keyword+"%")
 	}
+	// Filter by is_task_conv when the caller passes the query param.
+	// Accepted values: "true" → only task conversations, "false" → only regular conversations.
+	// When absent, default to "false" (hide task conversations from the normal history list).
+	isTaskConvParam := strings.TrimSpace(r.URL.Query().Get("is_task_conv"))
+	switch isTaskConvParam {
+	case "true":
+		q = q.Where("is_task_conv = ?", true)
+	default:
+		// Default: show only regular (non-task) conversations.
+		q = q.Where("is_task_conv = ? OR is_task_conv IS NULL", false)
+	}
 	var total int64
 	q.Count(&total)
 	var list []orm.Conversation
@@ -1117,6 +1128,7 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 			"create_time":           c.CreatedAt.UTC().Format(time.RFC3339),
 			"update_time":           c.UpdatedAt.UTC().Format(time.RFC3339),
 			"models":                models,
+			"is_task_conv":          c.IsTaskConv,
 		})
 	}
 	nextToken := ""

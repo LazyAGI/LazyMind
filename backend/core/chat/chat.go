@@ -75,6 +75,8 @@ type LazyChatRequest struct {
 	MCPConfig          []any               `json:"mcp_config,omitempty"`
 	PluginContext      map[string]any      `json:"plugin_context,omitempty"`
 	CurrentTurnSeq     int                 `json:"current_turn_seq,omitempty"`
+	EnablePlugin       *bool               `json:"enable_plugin,omitempty"`
+	EnableSubagent     *bool               `json:"enable_subagent,omitempty"`
 }
 
 // LazyChatData text data text。
@@ -379,6 +381,12 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 		req.CurrentTurnSeq = int(v)
 	case float64:
 		req.CurrentTurnSeq = int(v)
+	}
+	if v, ok := body["enable_plugin"].(bool); ok {
+		req.EnablePlugin = &v
+	}
+	if v, ok := body["enable_subagent"].(bool); ok {
+		req.EnableSubagent = &v
 	}
 	return req
 }

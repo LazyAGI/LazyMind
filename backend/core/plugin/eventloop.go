@@ -163,9 +163,20 @@ func HandlePluginStepCreated(
 		}
 		sessionID = psID
 		// Register a TaskCenter record for this plugin run so the user can track it.
+		// Prefer conversation display_name as the task title so the task center shows
+		// a human-readable conversation title instead of a raw plugin/step identifier.
 		tcTitle := pluginID
 		if title != "" {
 			tcTitle = title
+		}
+		if db != nil {
+			var conv orm.Conversation
+			if err := db.WithContext(ctx).
+				Select("display_name").
+				Where("id = ?", convID).
+				First(&conv).Error; err == nil && conv.DisplayName != "" {
+				tcTitle = conv.DisplayName
+			}
 		}
 		_ = taskcenter.CreateTask(ctx, db, &orm.TaskCenterTask{
 			UserID:          userID,
@@ -271,16 +282,6 @@ func HandlePluginStepCreated(
 		ToolConfig:    toolConfig,
 	})
 
-	// Register stepID into parallel_step_ids so OnSubAgentDone can track sibling steps.
-	// For single-step turns this is a no-op: RemoveParallelStepID will find an empty
-	// list after removal and fall through to advance logic normally.
-	// For parallel turns (multiple plugin_steps in the same history turn) each
-	// HandlePluginStepCreated call appends its stepID so the last sibling to complete
-	// triggers advance while earlier siblings emit step_parallel_done and return.
-	existing, _ := GetParallelStepIDs(ctx, db, sessionID)
-	merged := appendUnique(existing, stepID)
-	_ = SetParallelStepIDs(ctx, db, sessionID, merged)
-
 	return sessionID, task.ID, false, nil
 }
 
@@ -318,21 +319,23 @@ func OnSubAgentDone(
 		return
 	}
 
-	// If this step is part of a parallel batch, check whether all siblings have finished.
-	// Only the last sibling to complete triggers the mode advance logic.
-	if pctx.SessionID != "" && pctx.StepID != "" {
-		remaining, _ := RemoveParallelStepID(ctx, db, pctx.SessionID, pctx.StepID)
-		if len(remaining) > 0 {
-			// Siblings still running — emit step_parallel_done for UI progress, then wait.
+	// Check whether sibling steps in the same session are still running.
+	// If any step is still running, emit step_parallel_done for UI progress and wait.
+	// Only the last step to complete triggers the advance logic.
+	// Note: UpdateStepStatus above has already set this step to a terminal status,
+	// so the running count will not include the current step.
+	if pctx.SessionID != "" {
+		var runningCount int64
+		db.WithContext(ctx).Model(&orm.PluginSessionStep{}).
+			Where("session_id = ? AND status = ?", pctx.SessionID, StepStatusRunning).
+			Count(&runningCount)
+		if runningCount > 0 {
 			onSSE("step_parallel_done", map[string]any{
-				"session_id":      pctx.SessionID,
-				"step_id":         pctx.StepID,
-				"remaining_steps": remaining,
+				"session_id": pctx.SessionID,
+				"step_id":    pctx.StepID,
 			})
 			return
 		}
-		// All parallel steps done — clear the batch and fall through to advance logic.
-		_ = SetParallelStepIDs(ctx, db, pctx.SessionID, nil)
 	}
 
 	// Determine mode: use context-level PluginMode (set from request body during HandlePluginStepCreated).
@@ -898,14 +901,4 @@ func backfillArtifactListIndex(ctx context.Context, db *gorm.DB, taskID, artifac
 	_ = db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).
 		Where("task_id = ? AND artifact_key = ? AND seq = ?", art.TaskID, art.ArtifactKey, art.Seq).
 		Update("value", newVal).Error
-}
-
-// appendUnique appends s to slice if it is not already present.
-func appendUnique(slice []string, s string) []string {
-	for _, v := range slice {
-		if v == s {
-			return slice
-		}
-	}
-	return append(slice, s)
 }

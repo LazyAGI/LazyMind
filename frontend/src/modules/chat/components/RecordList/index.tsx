@@ -1,4 +1,4 @@
-import { CloseOutlined, CloudDownloadOutlined } from "@ant-design/icons";
+import { CloseOutlined, CloudDownloadOutlined, FilterOutlined } from "@ant-design/icons";
 import classnames from "classnames";
 import {
   Button,
@@ -6,6 +6,7 @@ import {
   Col,
   Input,
   message,
+  Popover,
   Row,
   Spin,
   Tooltip,
@@ -114,6 +115,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const [checkedList, setCheckedList] = useState<string[]>([]);
     const [showBatchExport, setShowBatchExport] = useState(false);
     const [isHistoryLoading, setIsHistoryLoading] = useState(true);
+    // convTypeFilter: which conversation types to show. Default = normal only (no task convs).
+    // Values: 'normal' = non-task, 'task' = task. Multiple values allowed.
+    const [convTypeFilter, setConvTypeFilter] = useState<string[]>(['normal']);
+    const [filterPopoverOpen, setFilterPopoverOpen] = useState(false);
     const scrollableTargetId = compact
       ? "sidebarConversationScrollableDiv"
       : "scrollableDiv";
@@ -179,15 +184,34 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       isMore?: boolean;
       isFirst?: boolean;
       searchText?: string;
+      filterOverride?: string[];
     }) {
-      const { isMore = false, isFirst = false, searchText } = params ?? {};
+      const { isMore = false, isFirst = false, searchText, filterOverride } = params ?? {};
+      const activeFilter = filterOverride ?? convTypeFilter;
       setIsHistoryLoading(true);
+
+      // Determine is_task_conv query param based on active filter selection.
+      // 'normal' only → is_task_conv=false, 'task' only → is_task_conv=true, both → no filter.
+      const hasNormal = activeFilter.includes('normal');
+      const hasTask = activeFilter.includes('task');
+      let isTaskConvParam: string | undefined;
+      if (hasNormal && !hasTask) {
+        isTaskConvParam = 'false';
+      } else if (hasTask && !hasNormal) {
+        isTaskConvParam = 'true';
+      }
+
       ChatServiceApi()
-        .conversationServiceListConversations({
-          keyword: searchText ?? keyword,
-          pageToken: isFirst ? "" : pageToken,
-          pageSize: 50,
-        })
+        .conversationServiceListConversations(
+          {
+            keyword: searchText ?? keyword,
+            pageToken: isFirst ? "" : pageToken,
+            pageSize: 50,
+          },
+          isTaskConvParam !== undefined
+            ? { params: { is_task_conv: isTaskConvParam } }
+            : undefined,
+        )
         .then((res) => {
           const conversations: Conversation[] = res?.data?.conversations ?? [];
           setHistoryList(
@@ -385,14 +409,47 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                         </Button>
                       </>
                     ) : (
-                      <Button
-                        size="small"
-                        type="link"
-                        style={{ padding: 0 }}
-                        onClick={() => setShowBatchExport(true)}
-                      >
-                        {t("chat.batch")}
-                      </Button>
+                      <>
+                        <Popover
+                          open={filterPopoverOpen}
+                          onOpenChange={setFilterPopoverOpen}
+                          trigger="click"
+                          placement="bottomRight"
+                          content={
+                            <div style={{ minWidth: 140 }}>
+                              <div style={{ marginBottom: 6, fontWeight: 500, fontSize: 12, color: '#666' }}>筛选对话类型</div>
+                              <Checkbox.Group
+                                value={convTypeFilter}
+                                onChange={(vals) => {
+                                  const next = vals as string[];
+                                  setConvTypeFilter(next);
+                                  getHistory({ isFirst: true, filterOverride: next });
+                                  setFilterPopoverOpen(false);
+                                }}
+                                style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+                              >
+                                <Checkbox value="normal">普通对话</Checkbox>
+                                <Checkbox value="task">Task 对话</Checkbox>
+                              </Checkbox.Group>
+                            </div>
+                          }
+                        >
+                          <Button
+                            size="small"
+                            type={convTypeFilter.length !== 1 || !convTypeFilter.includes('normal') ? 'primary' : 'link'}
+                            icon={<FilterOutlined />}
+                            style={{ padding: '0 4px' }}
+                          />
+                        </Popover>
+                        <Button
+                          size="small"
+                          type="link"
+                          style={{ padding: 0 }}
+                          onClick={() => setShowBatchExport(true)}
+                        >
+                          {t("chat.batch")}
+                        </Button>
+                      </>
                     )}
                   </div>
                 )}

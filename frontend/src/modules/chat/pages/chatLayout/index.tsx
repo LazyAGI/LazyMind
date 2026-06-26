@@ -53,6 +53,8 @@ interface IChatLayoutProps {
   chatDisabledReason?: string;
   chatDisabledDescription?: string;
   chatDisabledAction?: ReactNode;
+  /** Plugin settings selected on the welcome screen before the first message is sent. */
+  initPendingPluginSettings?: ConversationPluginSettings | null;
 }
 
 const ChatLayout: FC<IChatLayoutProps> = (props) => {
@@ -68,18 +70,30 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     chatDisabledReason,
     chatDisabledDescription,
     chatDisabledAction,
+    initPendingPluginSettings,
   } = props;
   const [sessionId, setSessionId] = useState("");
   const [chatConfig, setChatConfig] = useState<ChatConfig>(
     initchatConfig || {},
   );
   // Pending plugin settings from the chat config popover before a conversation is created.
-  const pendingPluginSettingsRef = useRef<ConversationPluginSettings | null>(null);
+  // Initialised from the welcome-screen selection (initPendingPluginSettings) when provided.
+  const pendingPluginSettingsRef = useRef<ConversationPluginSettings | null>(
+    initPendingPluginSettings ?? null,
+  );
   // Plugin settings loaded from conversation detail (for existing conversations).
   const [conversationPluginSettings, setConversationPluginSettings] = useState<ConversationPluginSettings | undefined>(undefined);
   const [knowledgeRefreshKey, setKnowledgeRefreshKey] = useState(0);
   const [isTaskPanelCollapsed, setIsTaskPanelCollapsed] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number>(0); // 0 = use CSS default
+
+  // Keep pendingPluginSettingsRef in sync with initPendingPluginSettings coming from the welcome screen.
+  // Only update when sessionId is empty (no conversation started yet) to avoid overwriting in-flight state.
+  useEffect(() => {
+    if (!sessionId && initPendingPluginSettings != null) {
+      pendingPluginSettingsRef.current = initPendingPluginSettings;
+    }
+  }, [initPendingPluginSettings, sessionId]);
   const panelDragRef = useRef<{ startX: number; startW: number } | null>(null);
 
   const onPanelResizeStart = useCallback((e: React.MouseEvent) => {
@@ -358,11 +372,16 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         ...(artifactRefs.length > 0 ? { artifact_refs: artifactRefs } : {}),
         // If the user changed plugin settings before a conversation was created,
         // carry them in the first request so Go can persist them on ensureConversation.
+        // Only send the three known fields to avoid polluting the payload with API response leftovers.
         ...(() => {
           const pending = pendingPluginSettingsRef.current;
           if (!sessionId && pending) {
             pendingPluginSettingsRef.current = null;
-            return { initial_plugin_settings: pending };
+            const clean: Record<string, unknown> = {};
+            if (pending.enable_plugin != null) clean.enable_plugin = pending.enable_plugin;
+            if (pending.enable_subagent != null) clean.enable_subagent = pending.enable_subagent;
+            if (pending.plugin_mode != null) clean.plugin_mode = pending.plugin_mode;
+            return { initial_plugin_settings: clean };
           }
           return {};
         })(),
@@ -599,8 +618,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         setChatConfig={setChatConfig}
         setChatConfigFn={setChatConfigFn}
         onPluginSettingsChange={(settings) => {
-          // When there is already a conversation, ChatConfigModal calls the API directly.
-          // Here we only need to stash settings for the new-conversation case.
           if (!sessionId) {
             pendingPluginSettingsRef.current = settings;
           }

@@ -35,7 +35,7 @@ export default function ChatConfigPopover({
 
   // Sync external initialSettings into local state.
   useEffect(() => {
-    if (initialSettings) {
+    if (initialSettings && Object.keys(initialSettings).length > 0) {
       setSettings((s) => ({ ...s, ...initialSettings }));
       fetchedRef.current = true;
     }
@@ -47,7 +47,9 @@ export default function ChatConfigPopover({
     fetchedRef.current = true;
     try {
       const res = await ConversationSettingsApi().getChatSettings();
-      setSettings((s) => ({ ...res.data, ...s }));
+      // Go wraps responses as {code, message, data: {...}}; extract the inner data.
+      const payload = (res.data as any)?.data ?? res.data;
+      setSettings((s) => ({ ...payload, ...s }));
     } catch {
       // Silently fall back to empty; individual fields will render as undefined.
     }

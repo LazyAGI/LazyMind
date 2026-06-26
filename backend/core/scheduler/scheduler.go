@@ -1,6 +1,6 @@
 // Package scheduler manages recurring user-defined chat triggers (UserSchedule).
-// On each cron tick, it creates a TaskCenterTask (task_type=scheduled) and posts
-// a chat request to the conversation via the internal chat service URL.
+// On each cron tick, it creates a fresh conversation (is_task_conv=true), a TaskCenterTask
+// (task_type=scheduled), and posts a chat request to the internal chat service URL.
 package scheduler
 
 import (
@@ -29,6 +29,12 @@ func CreateSchedule(ctx context.Context, db *gorm.DB, s *orm.UserSchedule) error
 		s.ID = "sched_" + common.GenerateID()
 	}
 	s.CreatedAt = time.Now().UTC()
+	if s.KbIDs == "" {
+		s.KbIDs = "[]"
+	}
+	if s.FileIDs == "" {
+		s.FileIDs = "[]"
+	}
 	if s.NextRunAt.IsZero() {
 		next, err := nextCronTime(s.CronExpr, s.Timezone)
 		if err != nil {
@@ -165,13 +171,12 @@ func fireSchedules(ctx context.Context, db *gorm.DB, _ string) {
 }
 
 func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.Time) {
+	// Create a fresh task-conversation for every scheduled trigger.
+	convID := createTaskConversation(ctx, db, s.UserID, s.PromptTemplate)
+
 	title := "Scheduled: " + s.PromptTemplate
 	if len(title) > 120 {
 		title = title[:120] + "..."
-	}
-	convID := ""
-	if s.ConversationID != nil {
-		convID = *s.ConversationID
 	}
 	task := &orm.TaskCenterTask{
 		UserID:         s.UserID,
@@ -204,7 +209,7 @@ func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.
 		return
 	}
 
-	// Build chat request. Inject plugin_context if there is an active plugin session.
+	// Build chat request with kb_ids and file_ids from the schedule definition.
 	query := renderPromptTemplate(s.PromptTemplate, firedAt)
 	reqBody := map[string]any{
 		"query":           query,
@@ -213,10 +218,44 @@ func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.
 		"mode":            "auto",
 		"input":           []map[string]any{{"input_type": "text", "text": query}},
 	}
-	if pc := activePluginContext(ctx, db, convID); pc != nil {
-		reqBody["plugin_context"] = pc
+	// Attach knowledge base IDs if configured.
+	var kbIDs []string
+	if json.Unmarshal([]byte(s.KbIDs), &kbIDs) == nil && len(kbIDs) > 0 {
+		reqBody["kb_ids"] = kbIDs
+	}
+	// Attach pre-uploaded file IDs if configured.
+	var fileIDs []string
+	if json.Unmarshal([]byte(s.FileIDs), &fileIDs) == nil && len(fileIDs) > 0 {
+		reqBody["file_ids"] = fileIDs
 	}
 	go sendScheduledChatRequest(s.UserID, convID, task.ID, db, reqBody)
+}
+
+// createTaskConversation creates a new conversation flagged as is_task_conv=true.
+// The display_name is set to a short excerpt of the prompt template.
+// Returns the new conversation ID, or "" on failure.
+func createTaskConversation(ctx context.Context, db *gorm.DB, userID, promptTemplate string) string {
+	displayName := promptTemplate
+	if len(displayName) > 80 {
+		displayName = displayName[:80] + "..."
+	}
+	now := time.Now().UTC()
+	conv := orm.Conversation{
+		ID:          "conv_" + common.GenerateID(),
+		DisplayName: displayName,
+		ChannelID:   "default",
+		IsTaskConv:  true,
+		BaseModel: orm.BaseModel{
+			CreateUserID: userID,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		},
+	}
+	if err := db.WithContext(ctx).Create(&conv).Error; err != nil {
+		fmt.Printf("[Scheduler] createTaskConversation: %v\n", err)
+		return ""
+	}
+	return conv.ID
 }
 
 // renderPromptTemplate substitutes basic placeholders in the prompt template.
@@ -227,23 +266,6 @@ func renderPromptTemplate(tpl string, t time.Time) string {
 		"{{datetime}}", t.Format("2006-01-02 15:04:05"),
 	)
 	return r.Replace(tpl)
-}
-
-// activePluginContext returns a plugin_context map if the conversation has an active session.
-func activePluginContext(ctx context.Context, db *gorm.DB, convID string) map[string]any {
-	var session orm.PluginSession
-	if err := db.WithContext(ctx).
-		Where("conversation_id = ? AND status = 'active'", convID).
-		Order("created_at DESC").
-		First(&session).Error; err != nil {
-		return nil
-	}
-	return map[string]any{
-		"session_id":   session.ID,
-		"plugin_id":    session.PluginID,
-		"current_step": session.CurrentStepID,
-		"advance":      false,
-	}
 }
 
 // sendScheduledChatRequest posts the scheduled trigger to Go core and updates TaskCenter status.
@@ -285,10 +307,11 @@ func sendScheduledChatRequest(userID, convID, taskID string, db *gorm.DB, reqBod
 type scheduleResponse struct {
 	ID             string     `json:"id"`
 	UserID         string     `json:"user_id"`
-	ConversationID *string    `json:"conversation_id,omitempty"`
 	CronExpr       string     `json:"cron_expr"`
 	Timezone       string     `json:"timezone"`
 	PromptTemplate string     `json:"prompt_template"`
+	KbIDs          []string   `json:"kb_ids"`
+	FileIDs        []string   `json:"file_ids"`
 	Enabled        bool       `json:"enabled"`
 	LastRunAt      *time.Time `json:"last_run_at,omitempty"`
 	NextRunAt      time.Time  `json:"next_run_at"`
@@ -296,13 +319,24 @@ type scheduleResponse struct {
 }
 
 func toScheduleResponse(s orm.UserSchedule) scheduleResponse {
+	var kbIDs []string
+	_ = json.Unmarshal([]byte(s.KbIDs), &kbIDs)
+	if kbIDs == nil {
+		kbIDs = []string{}
+	}
+	var fileIDs []string
+	_ = json.Unmarshal([]byte(s.FileIDs), &fileIDs)
+	if fileIDs == nil {
+		fileIDs = []string{}
+	}
 	return scheduleResponse{
 		ID:             s.ID,
 		UserID:         s.UserID,
-		ConversationID: s.ConversationID,
 		CronExpr:       s.CronExpr,
 		Timezone:       s.Timezone,
 		PromptTemplate: s.PromptTemplate,
+		KbIDs:          kbIDs,
+		FileIDs:        fileIDs,
 		Enabled:        s.Enabled,
 		LastRunAt:      s.LastRunAt,
 		NextRunAt:      s.NextRunAt,
@@ -330,10 +364,11 @@ func ListSchedulesHandler(w http.ResponseWriter, r *http.Request) {
 func CreateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserID(r)
 	var body struct {
-		ConversationID *string `json:"conversation_id"`
-		CronExpr       string  `json:"cron_expr"`
-		Timezone       string  `json:"timezone"`
-		PromptTemplate string  `json:"prompt_template"`
+		CronExpr       string   `json:"cron_expr"`
+		Timezone       string   `json:"timezone"`
+		PromptTemplate string   `json:"prompt_template"`
+		KbIDs          []string `json:"kb_ids"`
+		FileIDs        []string `json:"file_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body: "+err.Error(), http.StatusBadRequest)
@@ -347,12 +382,25 @@ func CreateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	if tz == "" {
 		tz = "Asia/Shanghai"
 	}
+	kbIDsJSON := "[]"
+	if len(body.KbIDs) > 0 {
+		if b, err := json.Marshal(body.KbIDs); err == nil {
+			kbIDsJSON = string(b)
+		}
+	}
+	fileIDsJSON := "[]"
+	if len(body.FileIDs) > 0 {
+		if b, err := json.Marshal(body.FileIDs); err == nil {
+			fileIDsJSON = string(b)
+		}
+	}
 	s := &orm.UserSchedule{
 		UserID:         userID,
-		ConversationID: body.ConversationID,
 		CronExpr:       body.CronExpr,
 		Timezone:       tz,
 		PromptTemplate: body.PromptTemplate,
+		KbIDs:          kbIDsJSON,
+		FileIDs:        fileIDsJSON,
 		Enabled:        true,
 	}
 	db := store.DB()

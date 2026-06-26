@@ -28,13 +28,15 @@ func (TaskCenterTask) TableName() string { return "task_center_tasks" }
 
 // UserSchedule stores a recurring trigger rule defined by the user in chat.
 // Each cron tick creates a new TaskCenterTask row (task_type=scheduled, schedule_id=this.ID).
+// Each trigger creates a fresh conversation (is_task_conv=true); no conversation_id binding.
 type UserSchedule struct {
 	ID             string     `gorm:"column:id;type:varchar(36);primaryKey"`
 	UserID         string     `gorm:"column:user_id;type:varchar(255);not null"`
-	ConversationID *string    `gorm:"column:conversation_id;type:varchar(36)"` // optional binding
 	CronExpr       string     `gorm:"column:cron_expr;type:varchar(64);not null"`
 	Timezone       string     `gorm:"column:timezone;type:varchar(64);not null;default:'Asia/Shanghai'"`
-	PromptTemplate string     `gorm:"column:prompt_template;type:text;not null"` // query sent to chat on each trigger
+	PromptTemplate string     `gorm:"column:prompt_template;type:text;not null"` // task description sent to chat on each trigger
+	KbIDs          string     `gorm:"column:kb_ids;type:text;not null;default:'[]'"`
+	FileIDs        string     `gorm:"column:file_ids;type:text;not null;default:'[]'"`
 	Enabled        bool       `gorm:"column:enabled;not null;default:true"`
 	LastRunAt      *time.Time `gorm:"column:last_run_at"`
 	NextRunAt      time.Time  `gorm:"column:next_run_at;not null"`

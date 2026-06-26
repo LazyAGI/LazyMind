@@ -16,13 +16,10 @@ type PluginSession struct {
 	Status        string `gorm:"column:status;type:varchar(16);not null;default:active"`
 	CurrentStepID string `gorm:"column:current_step_id;type:varchar(64)"`
 	// IntentContext stores the global constraint/intent for this session (JSON string).
-	IntentContext string `gorm:"column:intent_context;type:text;not null;default:'{}'"`
-	// ParallelStepIDs is the set of step_ids currently running in parallel (JSON array string).
-	// When non-empty, OnSubAgentDone waits for all steps in the batch before advancing.
-	ParallelStepIDs string    `gorm:"column:parallel_step_ids;type:text;not null;default:'[]'"`
-	CreateUserID    string    `gorm:"column:create_user_id;type:varchar(255);not null;default:''"`
-	CreatedAt       time.Time `gorm:"column:created_at;not null"`
-	UpdatedAt       time.Time `gorm:"column:updated_at;not null"`
+	IntentContext string    `gorm:"column:intent_context;type:text;not null;default:'{}'"`
+	CreateUserID  string    `gorm:"column:create_user_id;type:varchar(255);not null;default:''"`
+	CreatedAt     time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt     time.Time `gorm:"column:updated_at;not null"`
 }
 
 func (PluginSession) TableName() string { return "plugin_sessions" }

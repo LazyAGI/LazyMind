@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Badge, Button, Select, Space, Table, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
 import { cancelTask, listTasks } from './api';
 import type { Task } from './api';
+import { CHAT_RESUME_CONVERSATION_KEY } from '@/modules/chat/constants/chat';
 
 const PAGE_SIZE = 20;
 
@@ -17,6 +19,7 @@ const STATUS_BADGE: Record<string, 'processing' | 'success' | 'error' | 'default
 
 export default function TaskList() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -54,12 +57,27 @@ export default function TaskList() {
     }
   };
 
+  const handleOpenConversation = (conversationId: string) => {
+    sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
+    navigate('/agent/chat/home');
+  };
+
   const columns: ColumnsType<Task> = [
     {
       title: t('taskCenter.tasks'),
-      dataIndex: 'title',
-      render: (v: string) => v || t('taskCenter.noTitle'),
-      ellipsis: true,
+      dataIndex: 'conversation_title',
+      render: (v: string, record: Task) => {
+        const displayTitle = v || record.title || t('taskCenter.noTitle');
+        return (
+          <Button
+            type='link'
+            style={{ padding: 0, textAlign: 'left', height: 'auto', whiteSpace: 'normal' }}
+            onClick={() => handleOpenConversation(record.conversation_id)}
+          >
+            {displayTitle}
+          </Button>
+        );
+      },
     },
     {
       title: t('taskCenter.taskType'),

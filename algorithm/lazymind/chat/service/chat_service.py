@@ -452,6 +452,12 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
         resolve_plugin_injection,
         _build_chat_agent_task_context,
     )
+    lazyllm.globals._init_sid(sid=session_id)
+    lazyllm.locals._init_sid(sid=session_id)
+    inject_model_config(model_config)
+    inject_tool_config(tool_config)
+    lazyllm.globals['agentic_config'] = agentic_config
+
     plugin_tools, plugin_system_prompt, plugin_stop_tools, agentic_config_patch, plugin_artifact_context = \
         resolve_plugin_injection(plugin_context, conversation_id=(conversation_id or '').strip(),
                                  ask_response=ask_response)
@@ -462,6 +468,11 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     # When both are disabled, the task context is suppressed (pure QA mode).
     _enable_plugin = agentic_config.get('enable_plugin', True)
     _enable_subagent = agentic_config.get('enable_subagent', True)
+    LOG.info(
+        f'[ChatServer] [PLUGIN_FLAGS] [sid={session_id}] '
+        f'[enable_plugin={_enable_plugin!r}] [enable_subagent={_enable_subagent!r}] '
+        f'[plugin_tools={[getattr(t, "__name__", str(t)) for t in plugin_tools]!r}]'
+    )
     if _enable_plugin or _enable_subagent:
         task_ctx = _build_chat_agent_task_context((conversation_id or '').strip())
         if task_ctx:
@@ -490,11 +501,6 @@ async def handle_chat(query: str, history: Optional[List[Dict[str, Any]]],
     if parts:
         agent_query = '\n\n---\n\n'.join(parts) + '\n\n---\n\n## User Request\n' + agent_query
 
-    lazyllm.globals._init_sid(sid=session_id)
-    lazyllm.locals._init_sid(sid=session_id)
-    inject_model_config(model_config)
-    inject_tool_config(tool_config)
-    lazyllm.globals['agentic_config'] = agentic_config
     disabled = set(disabled_tools or [])
     active_configs = filter_tools(
         [cfg for cfg in DEFAULT_TOOLS if cfg.name not in disabled],
