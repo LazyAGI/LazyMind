@@ -179,6 +179,119 @@ func TestRuntimeConfigMovesDefaultFrontendPortWhenOccupied(t *testing.T) {
 	}
 }
 
+func TestAlgorithmServiceEnvIncludesCloudParityDefaults(t *testing.T) {
+	for _, name := range []string{
+		"TZ",
+		"LANGFUSE_HOST",
+		"LANGFUSE_BASE_URL",
+		"LANGFUSE_PUBLIC_KEY",
+		"LANGFUSE_SECRET_KEY",
+		"LAZYLLM_TRACE_ENABLED",
+		"OTEL_EXPORTER_OTLP_TIMEOUT",
+		"OTEL_EXPORTER_OTLP_TRACES_TIMEOUT",
+		"LAZYMIND_LANGFUSE_FORCE_FLUSH_TIMEOUT_MS",
+		"LAZYMIND_OCR_SERVER_URL",
+		"LAZYMIND_MINERU_BACKEND",
+		"LAZYMIND_MINERU_SERVER_PORT",
+		"LAZYLLM_MINERU_BACKEND",
+		"LAZYLLM_MINERU_API_KEY",
+		"LAZYLLM_PADDLE_API_KEY",
+		"LAZYMIND_RESET_ALGO_ON_STARTUP",
+		"LAZYMIND_RESET_ALL_ON_STARTUP",
+		"LAZYMIND_MAX_RETRIES",
+		"LAZYMIND_REVIEW_MAX_RETRIES",
+		"LAZYMIND_SKILL_REVIEW_DEBUG",
+		"LAZYMIND_WORD_GROUP_APPLY_URL",
+		"http_proxy",
+		"https_proxy",
+		"HTTP_PROXY",
+		"HTTPS_PROXY",
+		"no_proxy",
+		"NO_PROXY",
+		"LAZYLLM_OPENAI_API_KEY",
+		"LAZYLLM_GLM_API_KEY",
+		"LAZYLLM_QWEN_API_KEY",
+		"LAZYLLM_SENSENOVA_API_KEY",
+		"LAZYLLM_SENSENOVA_SECRET_KEY",
+		"LAZYLLM_KIMI_API_KEY",
+		"LAZYLLM_DEEPSEEK_API_KEY",
+		"LAZYLLM_DOUBAO_API_KEY",
+		"LAZYLLM_SILICONFLOW_API_KEY",
+		"LAZYLLM_MINIMAX_API_KEY",
+		"LAZYLLM_AIPING_API_KEY",
+		"LAZYMIND_MAAS_API_KEY",
+		"LAZYMIND_OPENSEARCH_URI",
+		"LAZYMIND_OPENSEARCH_USER",
+		"LAZYMIND_OPENSEARCH_PASSWORD",
+		"LAZYMIND_EVO_CODE_TIMEOUT_S",
+		"LAZYMIND_EVO_LLM_ROLE",
+	} {
+		t.Setenv(name, "")
+	}
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+
+	env := algorithmServiceEnv(cfg, paths, algoProcessName)
+	uploads := filepath.Join(paths.RepoRoot, "data", "core", "uploads")
+	noProxy := "127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+	for _, want := range []string{
+		"LAZYLLM_INIT_DOC=True",
+		"LAZYMIND_MOUNT_BASE_DIR=" + uploads,
+		"http_proxy=",
+		"https_proxy=",
+		"HTTP_PROXY=",
+		"HTTPS_PROXY=",
+		"no_proxy=" + noProxy,
+		"NO_PROXY=" + noProxy,
+		"LAZYLLM_OPENAI_API_KEY=",
+		"LAZYLLM_GLM_API_KEY=",
+		"LAZYLLM_QWEN_API_KEY=",
+		"LAZYLLM_SENSENOVA_API_KEY=",
+		"LAZYLLM_SENSENOVA_SECRET_KEY=",
+		"LAZYLLM_KIMI_API_KEY=",
+		"LAZYLLM_DEEPSEEK_API_KEY=",
+		"LAZYLLM_DOUBAO_API_KEY=",
+		"LAZYLLM_SILICONFLOW_API_KEY=",
+		"LAZYLLM_MINIMAX_API_KEY=",
+		"LAZYLLM_AIPING_API_KEY=",
+		"LAZYMIND_MAAS_API_KEY=",
+		"TZ=Asia/Shanghai",
+		"LANGFUSE_HOST=",
+		"LANGFUSE_BASE_URL=",
+		"LANGFUSE_PUBLIC_KEY=",
+		"LANGFUSE_SECRET_KEY=",
+		"LAZYLLM_TRACE_ENABLED=1",
+		"OTEL_EXPORTER_OTLP_TIMEOUT=60",
+		"OTEL_EXPORTER_OTLP_TRACES_TIMEOUT=60",
+		"LAZYMIND_LANGFUSE_FORCE_FLUSH_TIMEOUT_MS=70000",
+		"LAZYMIND_OCR_SERVER_URL=",
+		"LAZYMIND_MINERU_BACKEND=pipeline",
+		"LAZYMIND_MINERU_SERVER_PORT=8000",
+		"LAZYLLM_MINERU_BACKEND=pipeline",
+		"LAZYLLM_MINERU_API_KEY=",
+		"LAZYLLM_PADDLE_API_KEY=",
+		"LAZYMIND_RESET_ALGO_ON_STARTUP=false",
+		"LAZYMIND_RESET_ALL_ON_STARTUP=false",
+		"LAZYMIND_MAX_RETRIES=20",
+		"LAZYMIND_REVIEW_MAX_RETRIES=5",
+		"LAZYMIND_SKILL_REVIEW_DEBUG=false",
+		"LAZYMIND_OPENSEARCH_URI=https://127.0.0.1:" + strconv.Itoa(cfg.Algorithm.OpenSearchPort),
+		"LAZYMIND_OPENSEARCH_USER=admin",
+		"LAZYMIND_OPENSEARCH_PASSWORD=LazyRAG_OpenSearch123!",
+		"LAZYMIND_EVO_CODE_TIMEOUT_S=900",
+		"LAZYMIND_EVO_LLM_ROLE=evo_llm",
+		"LAZYMIND_WORD_GROUP_APPLY_URL=",
+	} {
+		if !containsString(env, want) {
+			t.Fatalf("algorithm env missing %q in %v", want, env)
+		}
+	}
+}
+
 func TestAcquireUpLockRemovesStaleLock(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
@@ -1134,6 +1247,15 @@ func assertContains(t *testing.T, args []string, want string) {
 		}
 	}
 	t.Fatalf("missing arg %s in %v", want, args)
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func assertStringArgAfter(t *testing.T, args []string, flag string, want string) {
