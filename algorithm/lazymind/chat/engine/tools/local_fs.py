@@ -1,9 +1,8 @@
 # Copyright (c) 2026 LazyAGI. All rights reserved.
-"""Read-only local filesystem tool group.
+"""Read-only tools for working with local files.
 
-Activated only when the request's ``agentic_config`` includes
-``local_fs_sources``. All operations are constrained to the configured source
-roots and each source's allowed file extensions.
+Provides local directory listing, filename search, text search, file reading,
+and file metadata lookup for local files made available to the current request.
 
 Backend: prefers ripgrep_ (``rg``) for ``grep`` and ``glob`` when available;
 falls back to Python stdlib otherwise.  The two backends differ in edge-case
@@ -41,10 +40,10 @@ class LocalFSScope:
 
 
 class LocalFSToolGroup:
-    """Read-only local filesystem tools.
+    """Read-only tools for listing, searching, and reading local files.
 
-    Activated when ``agentic_config['local_fs_sources']`` contains source
-    scopes. Every operation validates the target path against those scopes.
+    The tools can access only the local files and directories made available
+    for the current request.
     """
 
     __public_apis__ = ['ls', 'glob', 'grep', 'read', 'info']
@@ -158,10 +157,10 @@ class LocalFSToolGroup:
 
     @handle_tool_errors
     def ls(self, path: Optional[str] = None, max_entries: int = 200) -> Dict[str, Any]:
-        """List local filesystem sources or one directory level.
+        """List available local directories or one directory level.
 
         Args:
-            path: Directory path; when omitted, lists configured source roots.
+            path: Directory path. When omitted, lists available local root directories.
             max_entries: Maximum entries to return, default 200.
 
         Returns:
@@ -208,11 +207,11 @@ class LocalFSToolGroup:
 
     @handle_tool_errors
     def glob(self, pattern: str, path: Optional[str] = None) -> Dict[str, Any]:
-        """Match files by glob pattern within configured local sources.
+        """Find local files whose names match a glob pattern.
 
         Args:
-            pattern: Glob pattern, e.g. ``**/*.py``, ``*.md``.
-            path: Search root directory; defaults to all configured roots.
+            pattern: Glob pattern, e.g. ``**/*.pdf`` or ``*.csv``.
+            path: Directory to search. When omitted, searches all available local directories.
 
         Returns:
             dict with ``pattern``, ``path``, ``match_count``, ``matches``.
@@ -248,12 +247,11 @@ class LocalFSToolGroup:
         glob: str = '*',
         max_results: int = 50,
     ) -> Dict[str, Any]:
-        """Recursively search file contents within allowed paths.
+        """Search text within available local files.
 
         Args:
-            pattern: Regex search pattern (ripgrep dialect by default; Python
-                fallback also supported).
-            path: Search root directory; defaults to all configured roots.
+            pattern: Regex search pattern.
+            path: Directory to search. When omitted, searches all available local directories.
             glob: Filename filter (only search matching files), default ``*``.
             max_results: Maximum results to return, default 50.
 
@@ -383,10 +381,10 @@ class LocalFSToolGroup:
         start_line: int = 0,
         max_lines: int = 500,
     ) -> Dict[str, Any]:
-        """Read text file contents within allowed paths.
+        """Read text content from an available local file.
 
         Args:
-            filepath: File path (must be within the whitelist).
+            filepath: Local file path to read.
             start_line: Starting line number (0-based), default 0.
             max_lines: Maximum lines to read, default 500.
 
@@ -421,11 +419,11 @@ class LocalFSToolGroup:
 
     @handle_tool_errors
     def info(self, path: Optional[str] = None) -> Dict[str, Any]:
-        """Get metadata for a file or directory.
+        """Get metadata for an available local file or directory.
 
         Args:
-            path: Path (must be within the whitelist); defaults to the first
-                allowed path.
+            path: Local file or directory path. When omitted, returns metadata for
+                available local root directories.
 
         Returns:
             dict with ``path``, ``type``, ``size``, ``mtime``.
