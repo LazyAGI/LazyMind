@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -44,18 +43,18 @@ type processComposeShutdown struct {
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
 
-func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, profile string, logPath string, localProxyLogPath string, authServiceLogPath string, frontendLogPath string, tokenPath string, apiPort int, runtimeEnv []string) error {
-	envPrefix := shellEnvPrefix(runtimeEnv)
-	commandForComposeUp := envPrefix + quoteShellArg(m.execPath) + " internal compose-up --profile " + profile
-	commandForComposeDown := envPrefix + quoteShellArg(m.execPath) + " internal compose-down --profile " + profile
-	commandForLocalProxyRun := envPrefix + quoteShellArg(m.execPath) + " internal local-proxy-run --profile " + profile
-	commandForLocalProxyDown := envPrefix + quoteShellArg(m.execPath) + " internal local-proxy-down --profile " + profile
-	commandForAuthServiceRun := envPrefix + quoteShellArg(m.execPath) + " internal auth-service-run --profile " + profile
-	commandForAuthServiceDown := envPrefix + quoteShellArg(m.execPath) + " internal auth-service-down --profile " + profile
-	commandForFrontendRun := envPrefix + quoteShellArg(m.execPath) + " internal frontend-run --profile " + profile
-	commandForFrontendDown := envPrefix + quoteShellArg(m.execPath) + " internal frontend-down --profile " + profile
+func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, profile string, paths RuntimePaths, cfg RuntimeConfig, tokenPath string, apiPort int) error {
+	commandEnv := runtimeCommandEnv(cfg)
+	commandForComposeUp := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal compose-up --profile "+profile)
+	commandForComposeDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal compose-down --profile "+profile)
+	commandForLocalProxyRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal local-proxy-run --profile "+profile)
+	commandForLocalProxyDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal local-proxy-down --profile "+profile)
+	commandForAuthServiceRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal auth-service-run --profile "+profile)
+	commandForAuthServiceDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal auth-service-down --profile "+profile)
+	commandForFrontendRun := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-run --profile "+profile)
+	commandForFrontendDown := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal frontend-down --profile "+profile)
 
-	cfg := processComposeConfig{
+	pcCfg := processComposeConfig{
 		Version:         "0.5",
 		IsStrict:        true,
 		OrderedShutdown: true,
@@ -67,7 +66,7 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 					Command:        commandForComposeDown,
 					TimeoutSeconds: 60,
 				},
-				LogLocation: logPath,
+				LogLocation: paths.LogFilePath,
 				Namespace:   "container",
 			},
 			localProxyProcessName: {
@@ -77,7 +76,7 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 					Command:        commandForLocalProxyDown,
 					TimeoutSeconds: 15,
 				},
-				LogLocation: localProxyLogPath,
+				LogLocation: paths.LocalProxyLog,
 				Namespace:   "host",
 			},
 			authServiceProcessName: {
@@ -87,7 +86,7 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 					Command:        commandForAuthServiceDown,
 					TimeoutSeconds: 15,
 				},
-				LogLocation: authServiceLogPath,
+				LogLocation: paths.AuthServiceLog,
 				Namespace:   "host",
 			},
 			frontendProcessName: {
@@ -97,14 +96,28 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 					Command:        commandForFrontendDown,
 					TimeoutSeconds: 15,
 				},
-				LogLocation: frontendLogPath,
+				LogLocation: paths.FrontendLog,
 				Namespace:   "host",
 			},
 		},
 	}
+	for _, svc := range algorithmProcessSpecs(cfg.Algorithm) {
+		run := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal algorithm-run --service "+svc.Name+" --profile "+profile)
+		down := commandWithEnv(commandEnv, quoteShellArg(m.execPath)+" internal algorithm-down --service "+svc.Name+" --profile "+profile)
+		pcCfg.Processes[svc.Name] = processComposeProcess{
+			WorkingDir: repoRoot,
+			Command:    run,
+			Shutdown: processComposeShutdown{
+				Command:        down,
+				TimeoutSeconds: 20,
+			},
+			LogLocation: algorithmLogPath(paths, svc.Name),
+			Namespace:   "host",
+		}
+	}
 	_ = tokenPath
 	_ = apiPort
-	out, err := yaml.Marshal(cfg)
+	out, err := yaml.Marshal(pcCfg)
 	if err != nil {
 		return err
 	}
@@ -112,11 +125,26 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 	return err
 }
 
-type ProcessComposeProcessStatus struct {
-	Name      string
-	Status    string
-	IsRunning bool
-	ExitCode  int
+func commandWithEnv(env []string, command string) string {
+	if len(env) == 0 {
+		return command
+	}
+	parts := make([]string, 0, len(env)+2)
+	parts = append(parts, "env")
+	for _, item := range env {
+		parts = append(parts, quoteShellArg(item))
+	}
+	parts = append(parts, command)
+	return strings.Join(parts, " ")
+}
+
+func runtimeCommandEnv(cfg RuntimeConfig) []string {
+	env := append([]string{}, localComposeEnv(cfg)...)
+	env = append(env,
+		processComposePortEnvVar+"="+strconv.Itoa(cfg.ProcessComposePort),
+		authServicePortEnvVar+"="+strconv.Itoa(cfg.AuthService.Port),
+	)
+	return env
 }
 
 func (m *ProcessComposeManager) Up(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
@@ -174,46 +202,6 @@ func (m *ProcessComposeManager) Down(ctx context.Context, cfg RuntimeConfig, pat
 	return nil
 }
 
-func (m *ProcessComposeManager) List(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) ([]ProcessComposeProcessStatus, error) {
-	args := []string{
-		"-p", strconv.Itoa(cfg.ProcessComposePort),
-		"--token-file", paths.RunDirTokenFile,
-		"list",
-		"-o", "json",
-	}
-	res, err := m.runner.Run(ctx, Command{Name: processComposeCommand(paths.RepoRoot), Args: args, Dir: paths.RepoRoot})
-	if err != nil {
-		return nil, fmt.Errorf("process-compose list failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
-	}
-	return parseProcessComposeListJSON(res.Stdout)
-}
-
-func parseProcessComposeListJSON(raw string) ([]ProcessComposeProcessStatus, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, nil
-	}
-	var rows []struct {
-		Name      string `json:"name"`
-		Status    string `json:"status"`
-		IsRunning bool   `json:"is_running"`
-		ExitCode  int    `json:"exit_code"`
-	}
-	if err := json.Unmarshal([]byte(raw), &rows); err != nil {
-		return nil, err
-	}
-	statuses := make([]ProcessComposeProcessStatus, 0, len(rows))
-	for _, row := range rows {
-		statuses = append(statuses, ProcessComposeProcessStatus{
-			Name:      row.Name,
-			Status:    strings.ToLower(row.Status),
-			IsRunning: row.IsRunning,
-			ExitCode:  row.ExitCode,
-		})
-	}
-	return statuses, nil
-}
-
 func (m *ProcessComposeManager) ProbeAPI(port int, timeout time.Duration) bool {
 	url := "http://127.0.0.1:" + strconv.Itoa(port) + "/api/v1/processes"
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -249,22 +237,4 @@ func processComposeCommand(repoRoot string) string {
 		return candidate
 	}
 	return "process-compose"
-}
-
-func shellEnvPrefix(env []string) string {
-	if len(env) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(env))
-	for _, item := range env {
-		key, value, ok := strings.Cut(item, "=")
-		if !ok || key == "" {
-			continue
-		}
-		parts = append(parts, key+"="+quoteShellArg(value))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return strings.Join(parts, " ") + " "
 }

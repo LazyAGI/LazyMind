@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,13 +21,22 @@ const (
 	localProxyChatHostPortEnvVar  = "LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT"
 	localProxyScanHostPortEnvVar  = "LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT"
 	localProxyEvoHostPortEnvVar   = "LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT"
+	localPostgresPortEnvVar       = "LAZYMIND_LOCAL_POSTGRES_PORT"
+	localDocPortEnvVar            = "LAZYMIND_LOCAL_DOC_PORT"
+	localProcessorPortEnvVar      = "LAZYMIND_LOCAL_PROCESSOR_PORT"
+	localAlgoPortEnvVar           = "LAZYMIND_LOCAL_ALGO_PORT"
+	localWorkerPortEnvVar         = "LAZYMIND_LOCAL_WORKER_PORT"
+	localChatPortEnvVar           = "LAZYMIND_LOCAL_CHAT_PORT"
+	localEvoPortEnvVar            = "LAZYMIND_LOCAL_EVO_PORT"
+	localMilvusPortEnvVar         = "LAZYMIND_LOCAL_MILVUS_PORT"
+	localOpenSearchPortEnvVar     = "LAZYMIND_LOCAL_OPENSEARCH_PORT"
+	localEnableEvoEnvVar          = "LAZYMIND_LOCAL_ENABLE_EVO"
 	frontendPortEnvVar            = "LAZYMIND_FRONTEND_PORT"
 	authServicePortEnvVar         = "LAZYMIND_AUTH_SERVICE_PORT"
 	authServicePythonEnvVar       = "LAZYMIND_AUTH_SERVICE_PYTHON"
 	authServiceUVEnvVar           = "LAZYMIND_AUTH_SERVICE_UV"
 	authServiceDatabaseURLEnvVar  = "LAZYMIND_AUTH_SERVICE_DATABASE_URL"
 	authServiceInstallDepsEnvVar  = "LAZYMIND_AUTH_SERVICE_INSTALL_DEPS"
-	localPostgresPortEnvVar       = "LAZYMIND_LOCAL_POSTGRES_PORT"
 	caddyBinEnvVar                = "LAZYMIND_CADDY_BIN"
 	caddyVersionEnvVar            = "LAZYMIND_CADDY_VERSION"
 	defaultProfile                = "linux-browser"
@@ -44,6 +54,12 @@ const (
 	defaultLocalProxyScanHostPort = 18080
 	defaultLocalProxyEvoHostPort  = 18047
 	defaultLocalPostgresPort      = 15432
+	defaultLocalDocPort           = 18002
+	defaultLocalProcessorPort     = 18003
+	defaultLocalAlgoPort          = 18004
+	defaultLocalWorkerPort        = 18005
+	defaultLocalMilvusPort        = 19530
+	defaultLocalOpenSearchPort    = 19200
 	stateFileName                 = "runtime-state.json"
 	composeGeneratedFileName      = "process-compose.generated.yaml"
 	tokenFileName                 = "pc-token"
@@ -63,6 +79,12 @@ const (
 	localProxyProcessName         = "local-proxy"
 	authServiceProcessName        = "auth-service"
 	frontendProcessName           = "frontend"
+	docServerProcessName          = "lazyllm-doc-server"
+	processorServerProcessName    = "lazyllm-parse-server"
+	processorWorkerProcessName    = "lazyllm-parse-worker"
+	algoProcessName               = "lazyllm-algo"
+	chatProcessName               = "chat"
+	evoProcessName                = "evo-api"
 )
 
 type RuntimePaths struct {
@@ -83,12 +105,22 @@ type RuntimePaths struct {
 	AuthServiceVenvDir   string
 	AuthServiceStateDir  string
 	FrontendLog          string
+	DocServerLog         string
+	ProcessorServerLog   string
+	ProcessorWorkerLog   string
+	AlgoLog              string
+	ChatLog              string
+	EvoLog               string
 	LocalProxyBin        string
 	CaddyBin             string
 	LocalProxyConfig     string
 	LocalProxyStopScript string
 	CaddyConfig          string
 	GeneratedConfig      string
+	AlgorithmVenv        string
+	AlgorithmPython      string
+	AlgorithmHome        string
+	AlgorithmPIDDir      string
 }
 
 type RuntimeConfig struct {
@@ -100,6 +132,7 @@ type RuntimeConfig struct {
 	LocalProxy         LocalProxyConfig
 	AuthService        AuthServiceConfig
 	CaddyVersion       string
+	Algorithm          AlgorithmConfig
 }
 
 type LocalProxyConfig struct {
@@ -119,6 +152,19 @@ type AuthServiceConfig struct {
 	InstallDeps bool
 }
 
+type AlgorithmConfig struct {
+	PostgresPort   int
+	DocPort        int
+	ProcessorPort  int
+	AlgoPort       int
+	WorkerPort     int
+	ChatPort       int
+	EvoPort        int
+	MilvusPort     int
+	OpenSearchPort int
+	EnableEvo      bool
+}
+
 func defaultProfileValue() string {
 	if v := os.Getenv(defaultProfileEnvVar); v != "" {
 		return v
@@ -127,7 +173,91 @@ func defaultProfileValue() string {
 }
 
 func defaultProcessComposePortValue() int {
-	return envPort(processComposePortEnvVar, defaultProcessComposePort)
+	if strings.TrimSpace(os.Getenv(processComposePortEnvVar)) != "" {
+		return envPort(processComposePortEnvVar, defaultProcessComposePort)
+	}
+	return firstAvailableLocalPort(defaultProcessComposePort, 100)
+}
+
+func defaultLocalProxyPortValue() int {
+	if strings.TrimSpace(os.Getenv(localProxyPortEnvVar)) != "" {
+		return envPort(localProxyPortEnvVar, defaultLocalProxyPort)
+	}
+	return firstAvailableLocalPort(defaultLocalProxyPort, 100)
+}
+
+func firstAvailableLocalPort(start int, attempts int) int {
+	for port := start; port < start+attempts && port < 65536; port++ {
+		if localPortAvailable(port) {
+			return port
+		}
+	}
+	return start
+}
+
+type localPortAllocator struct {
+	used map[int]struct{}
+}
+
+func newLocalPortAllocator() *localPortAllocator {
+	return &localPortAllocator{used: map[int]struct{}{}}
+}
+
+func (a *localPortAllocator) reserve(port int) int {
+	if port > 0 && port < 65536 {
+		a.used[port] = struct{}{}
+	}
+	return port
+}
+
+func (a *localPortAllocator) envOrAvailable(envName string, fallback int) int {
+	if strings.TrimSpace(os.Getenv(envName)) != "" {
+		return a.reserve(envPort(envName, fallback))
+	}
+	return a.availableFrom(fallback, 500)
+}
+
+func (a *localPortAllocator) envOrAvailableDefaultCanMove(envName string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(envName))
+	if raw == "" {
+		return a.availableFrom(fallback, 500)
+	}
+	port := envPort(envName, fallback)
+	if port != fallback || localPortAvailable(port) {
+		return a.reserve(port)
+	}
+	return a.availableFrom(fallback, 500)
+}
+
+func (a *localPortAllocator) firstEnvOrAvailable(envNames []string, fallback int) int {
+	for _, envName := range envNames {
+		if strings.TrimSpace(os.Getenv(envName)) != "" {
+			return a.reserve(envPort(envName, fallback))
+		}
+	}
+	return a.availableFrom(fallback, 500)
+}
+
+func (a *localPortAllocator) availableFrom(start int, attempts int) int {
+	for port := start; port < start+attempts && port < 65536; port++ {
+		if _, ok := a.used[port]; ok {
+			continue
+		}
+		if !localPortAvailable(port) {
+			continue
+		}
+		return a.reserve(port)
+	}
+	return a.reserve(start)
+}
+
+func localPortAvailable(port int) bool {
+	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		return false
+	}
+	_ = ln.Close()
+	return true
 }
 
 func envPort(name string, fallback int) int {
@@ -182,12 +312,14 @@ func defaultLocalProxyAuthHostPortValue() int {
 	return defaultLocalProxyAuthHostPort
 }
 
-func defaultAuthServiceDatabaseURL() string {
+func authServiceDatabaseURL(postgresPort int) string {
 	if v := strings.TrimSpace(os.Getenv(authServiceDatabaseURLEnvVar)); v != "" {
 		return v
 	}
-	port := envPort(localPostgresPortEnvVar, defaultLocalPostgresPort)
-	return "postgresql+psycopg://root:123456@127.0.0.1:" + strconv.Itoa(port) + "/authservice"
+	if postgresPort <= 0 {
+		postgresPort = defaultLocalPostgresPort
+	}
+	return "postgresql+psycopg://root:123456@127.0.0.1:" + strconv.Itoa(postgresPort) + "/authservice"
 }
 
 func resolveRepoRoot(start string) (string, error) {
@@ -242,33 +374,71 @@ func NewRuntimeConfig(profile, repoRootHint string) (RuntimeConfig, RuntimePaths
 		AuthServiceVenvDir:   filepath.Join(runtimeRoot, "venvs", "auth-service"),
 		AuthServiceStateDir:  filepath.Join(runtimeRoot, "stores", "sqlite", "auth-state"),
 		FrontendLog:          filepath.Join(runtimeRoot, "logs", frontendLogFileName),
+		DocServerLog:         filepath.Join(runtimeRoot, "logs", docServerProcessName+".log"),
+		ProcessorServerLog:   filepath.Join(runtimeRoot, "logs", processorServerProcessName+".log"),
+		ProcessorWorkerLog:   filepath.Join(runtimeRoot, "logs", processorWorkerProcessName+".log"),
+		AlgoLog:              filepath.Join(runtimeRoot, "logs", algoProcessName+".log"),
+		ChatLog:              filepath.Join(runtimeRoot, "logs", chatProcessName+".log"),
+		EvoLog:               filepath.Join(runtimeRoot, "logs", evoProcessName+".log"),
 		LocalProxyBin:        filepath.Join(runtimeRoot, "bin", "local-proxy"),
 		CaddyBin:             filepath.Join(runtimeRoot, "bin", "caddy"),
 		LocalProxyConfig:     filepath.Join(root, localProxyConfigName),
 		LocalProxyStopScript: filepath.Join(root, localProxyScriptDirName, "stop.sh"),
 		CaddyConfig:          filepath.Join(runtimeRoot, "generated", "Caddyfile"),
 		GeneratedConfig:      filepath.Join(runtimeRoot, "generated", composeGeneratedFileName),
+		AlgorithmVenv:        filepath.Join(runtimeRoot, "python", ".venv"),
+		AlgorithmPython:      filepath.Join(runtimeRoot, "python", ".venv", "bin", "python"),
+		AlgorithmHome:        filepath.Join(runtimeRoot, "home"),
+		AlgorithmPIDDir:      filepath.Join(runtimeRoot, "run", "algorithm"),
 	}
+	ports := newLocalPortAllocator()
+	processComposePort := ports.envOrAvailable(processComposePortEnvVar, defaultProcessComposePort)
+	frontendPort := ports.envOrAvailableDefaultCanMove(frontendPortEnvVar, defaultFrontendPort)
+	localProxyPort := ports.envOrAvailable(localProxyPortEnvVar, defaultLocalProxyPort)
+	authHostPort := ports.envOrAvailable(localProxyAuthHostPortEnvVar, defaultLocalProxyAuthHostPort)
+	coreHostPort := ports.envOrAvailable(localProxyCoreHostPortEnvVar, defaultLocalProxyCoreHostPort)
+	scanHostPort := ports.envOrAvailable(localProxyScanHostPortEnvVar, defaultLocalProxyScanHostPort)
+	postgresPort := ports.envOrAvailable(localPostgresPortEnvVar, defaultLocalPostgresPort)
+	docPort := ports.envOrAvailable(localDocPortEnvVar, defaultLocalDocPort)
+	processorPort := ports.envOrAvailable(localProcessorPortEnvVar, defaultLocalProcessorPort)
+	algoPort := ports.envOrAvailable(localAlgoPortEnvVar, defaultLocalAlgoPort)
+	workerPort := ports.envOrAvailable(localWorkerPortEnvVar, defaultLocalWorkerPort)
+	milvusPort := ports.envOrAvailable(localMilvusPortEnvVar, defaultLocalMilvusPort)
+	openSearchPort := ports.envOrAvailable(localOpenSearchPortEnvVar, defaultLocalOpenSearchPort)
+	chatPort := ports.firstEnvOrAvailable([]string{localChatPortEnvVar, localProxyChatHostPortEnvVar}, defaultLocalProxyChatHostPort)
+	evoPort := ports.firstEnvOrAvailable([]string{localEvoPortEnvVar, localProxyEvoHostPortEnvVar}, defaultLocalProxyEvoHostPort)
 	return RuntimeConfig{
 		Profile:            profile,
 		RepoRoot:           p.RepoRoot,
 		RuntimeRoot:        runtimeRoot,
-		ProcessComposePort: defaultProcessComposePortValue(),
-		FrontendPort:       envPort(frontendPortEnvVar, defaultFrontendPort),
+		ProcessComposePort: processComposePort,
+		FrontendPort:       frontendPort,
 		CaddyVersion:       envText(caddyVersionEnvVar, defaultCaddyVersion),
 		LocalProxy: LocalProxyConfig{
 			Address:      envText(localProxyAddressEnvVar, defaultLocalProxyAddress),
-			Port:         envPort(localProxyPortEnvVar, defaultLocalProxyPort),
-			AuthHostPort: defaultLocalProxyAuthHostPortValue(),
-			CoreHostPort: envPort(localProxyCoreHostPortEnvVar, defaultLocalProxyCoreHostPort),
-			ChatHostPort: envPort(localProxyChatHostPortEnvVar, defaultLocalProxyChatHostPort),
-			ScanHostPort: envPort(localProxyScanHostPortEnvVar, defaultLocalProxyScanHostPort),
-			EvoHostPort:  envPort(localProxyEvoHostPortEnvVar, defaultLocalProxyEvoHostPort),
+			Port:         localProxyPort,
+			AuthHostPort: authHostPort,
+			CoreHostPort: coreHostPort,
+			ChatHostPort: chatPort,
+			ScanHostPort: scanHostPort,
+			EvoHostPort:  evoPort,
+		},
+		Algorithm: AlgorithmConfig{
+			PostgresPort:   postgresPort,
+			DocPort:        docPort,
+			ProcessorPort:  processorPort,
+			AlgoPort:       algoPort,
+			WorkerPort:     workerPort,
+			ChatPort:       chatPort,
+			EvoPort:        evoPort,
+			MilvusPort:     milvusPort,
+			OpenSearchPort: openSearchPort,
+			EnableEvo:      envBool(localEnableEvoEnvVar, false),
 		},
 		AuthService: AuthServiceConfig{
-			Port:        defaultAuthServicePortValue(),
+			Port:        authHostPort,
 			Python:      envText(authServicePythonEnvVar, "python3"),
-			DatabaseURL: defaultAuthServiceDatabaseURL(),
+			DatabaseURL: authServiceDatabaseURL(postgresPort),
 			InstallDeps: envBool(authServiceInstallDepsEnvVar, true),
 		},
 	}, p, nil
@@ -284,6 +454,9 @@ func (p RuntimePaths) EnsureAllDirs() error {
 		filepath.Dir(p.AuthServicePIDFile),
 		p.AuthServiceStateDir,
 		p.AuthServiceVenvDir,
+		filepath.Dir(p.AlgorithmVenv),
+		p.AlgorithmHome,
+		p.AlgorithmPIDDir,
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o755); err != nil {

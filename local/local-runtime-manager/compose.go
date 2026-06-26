@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -145,7 +146,8 @@ func (m *ComposeManager) ComposeHasContainers(ctx context.Context, repoRoot stri
 	return len(statuses) > 0, nil
 }
 
-func (m *ComposeManager) ComposeUp(ctx context.Context, repoRoot string, profile string) error {
+func (m *ComposeManager) ComposeUp(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
+	repoRoot := paths.RepoRoot
 	services, err := m.ComposeServices(ctx, repoRoot)
 	if err != nil {
 		return err
@@ -160,35 +162,23 @@ func (m *ComposeManager) ComposeUp(ctx context.Context, repoRoot string, profile
 		return err
 	}
 	if len(remaining) == 0 {
-		_ = profile
+		_ = cfg.Profile
 	}
 	if err := m.BuildEnabledServices(ctx, repoRoot, remaining); err != nil {
 		return err
 	}
 
-	args := append(m.composeArgs(repoRoot), "up", "--no-build")
-	scaleDisabled := disabled.ScaleDisabledContainerTypes
-	if len(scaleDisabled) == 0 {
-		scaleDisabled = disabled.DisabledContainerTypes
-	}
-	if _, err := validateKnownServices(services, scaleDisabled, "scale disabled service"); err != nil {
-		return err
-	}
-	for _, svc := range scaleDisabled {
-		if svc == "" {
-			continue
-		}
-		args = append(args, "--scale", svc+"=0")
-	}
+	args := append(m.composeArgs(repoRoot), "up", "--no-build", "--detach", "--no-deps")
 	args = append(args, remaining...)
+	env := localComposeEnv(cfg)
 	if streamer, ok := m.runner.(CommandStreamer); ok {
-		err := streamer.Stream(ctx, Command{Name: "docker", Args: args, Dir: repoRoot}, os.Stdout, os.Stderr)
+		err := streamer.Stream(ctx, Command{Name: "docker", Args: args, Dir: repoRoot, Env: env}, os.Stdout, os.Stderr)
 		if err != nil {
 			return fmt.Errorf("docker compose up failed: %w", err)
 		}
 		return nil
 	}
-	res, err := m.runner.Run(ctx, Command{Name: "docker", Args: args, Dir: repoRoot})
+	res, err := m.runner.Run(ctx, Command{Name: "docker", Args: args, Dir: repoRoot, Env: env})
 	if err != nil {
 		return fmt.Errorf("docker compose up failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
 	}
@@ -295,6 +285,27 @@ func dockerBuildArgs(service composeConfigService) ([]string, error) {
 	}
 	args = append(args, contextDir)
 	return args, nil
+}
+
+func localComposeEnv(cfg RuntimeConfig) []string {
+	return []string{
+		"LAZYMIND_FRONTEND_PORT=" + strconv.Itoa(cfg.FrontendPort),
+		"LAZYMIND_LOCAL_PROXY_PORT=" + strconv.Itoa(cfg.LocalProxy.Port),
+		"LAZYMIND_LOCAL_PROXY_AUTH_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.AuthHostPort),
+		"LAZYMIND_LOCAL_PROXY_CORE_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
+		"LAZYMIND_LOCAL_PROXY_CHAT_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.ChatHostPort),
+		"LAZYMIND_LOCAL_PROXY_SCAN_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.ScanHostPort),
+		"LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT=" + strconv.Itoa(cfg.LocalProxy.EvoHostPort),
+		"LAZYMIND_LOCAL_POSTGRES_PORT=" + strconv.Itoa(cfg.Algorithm.PostgresPort),
+		"LAZYMIND_LOCAL_DOC_PORT=" + strconv.Itoa(cfg.Algorithm.DocPort),
+		"LAZYMIND_LOCAL_PROCESSOR_PORT=" + strconv.Itoa(cfg.Algorithm.ProcessorPort),
+		"LAZYMIND_LOCAL_ALGO_PORT=" + strconv.Itoa(cfg.Algorithm.AlgoPort),
+		"LAZYMIND_LOCAL_WORKER_PORT=" + strconv.Itoa(cfg.Algorithm.WorkerPort),
+		"LAZYMIND_LOCAL_CHAT_PORT=" + strconv.Itoa(cfg.Algorithm.ChatPort),
+		"LAZYMIND_LOCAL_EVO_PORT=" + strconv.Itoa(cfg.Algorithm.EvoPort),
+		"LAZYMIND_LOCAL_MILVUS_PORT=" + strconv.Itoa(cfg.Algorithm.MilvusPort),
+		"LAZYMIND_LOCAL_OPENSEARCH_PORT=" + strconv.Itoa(cfg.Algorithm.OpenSearchPort),
+	}
 }
 
 func filterRemainingServices(allServices []string, disabled []string) ([]string, error) {
