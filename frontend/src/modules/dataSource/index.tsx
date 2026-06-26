@@ -871,6 +871,9 @@ function mapScanSyncDetail(updateState: FileUpdateState, t: TFunction) {
   if (updateState === "deleted") {
     return t("admin.dataSourceFileUpdateDeletedDetail");
   }
+  if (updateState === "cleanup") {
+    return t("admin.dataSourceFileUpdateCleanupDetail");
+  }
   return t("admin.dataSourceFileUpdateUnchangedDetail");
 }
 

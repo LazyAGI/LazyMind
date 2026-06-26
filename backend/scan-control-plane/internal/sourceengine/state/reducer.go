@@ -235,6 +235,20 @@ func applySupportDecision(state store.DocumentState, object store.SourceObject, 
 		state.Selectable = true
 		return state
 	}
+	if object.DeletedAtSource != nil && hasSyncedDocument(state) {
+		state.DocumentListVisible = true
+		state.Selectable = true
+		return state
+	}
+	if hasSyncedDocument(state) {
+		state.SourceState = SourceStateOutOfScope
+		state.PendingAction = PendingActionDelete
+		state.DocumentListVisible = true
+		state.Selectable = true
+		state.ParseQueueState = ParseQueueStateNone
+		state.ActiveTaskID = ""
+		return state
+	}
 	navigationContainer := object.IsContainer || object.HasChildren
 	state.SourceState = SourceStateUnchanged
 	state.PendingAction = ""
@@ -243,6 +257,10 @@ func applySupportDecision(state store.DocumentState, object store.SourceObject, 
 	state.ParseQueueState = ParseQueueStateNone
 	state.ActiveTaskID = ""
 	return state
+}
+
+func hasSyncedDocument(state store.DocumentState) bool {
+	return strings.TrimSpace(state.BaselineVersion) != ""
 }
 
 func (r *DBStateReducer) ReduceMissingObjects(ctx context.Context, input crawl.ReduceMissingInput) (crawl.ReduceMissingResult, error) {
@@ -343,10 +361,12 @@ func (r *DBStateReducer) ApplyTaskSuccess(ctx context.Context, input TaskSuccess
 		now = r.clock()
 	}
 	if input.Task.TaskAction == PendingActionDelete {
+		current.BaselineVersion = ""
 		current.DocumentListVisible = false
 		current.Selectable = false
 		current.PendingAction = ""
 		current.ParseQueueState = ParseQueueStateNone
+		current.DocumentID = ""
 		current.ActiveTaskID = ""
 		current.LastSyncedAt = &now
 		current.LastError = store.JSON{}

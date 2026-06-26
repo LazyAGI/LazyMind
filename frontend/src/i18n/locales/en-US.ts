@@ -1825,6 +1825,7 @@ const enUS = {
     dataSourceFileUpdateNew: "New",
     dataSourceFileUpdateChanged: "Updated",
     dataSourceFileUpdateDeleted: "Deleted",
+    dataSourceFileUpdateCleanup: "Pending cleanup",
     dataSourceFileUpdateUnchanged: "No update",
     dataSourceWizardType: "Type Selection",
     dataSourceWizardConnection: "Connection Config",
@@ -1847,6 +1848,7 @@ const enUS = {
     dataSourceFileUpdateChangedDetail: "Content changed and pending reparse",
     dataSourceFileUpdateDeletedDetailTitle: "Deleted at source",
     dataSourceFileUpdateDeletedDetail: "Deleted at source and pending index cleanup",
+    dataSourceFileUpdateCleanupDetail: "Pending cleanup",
     dataSourceFileUpdateUnchangedDetail: "File is already up to date",
     dataSourceFileUpdateDeletedPendingDetail:
       "Deleted at source. Still kept in the knowledge base until next sync removes it.",
@@ -1855,6 +1857,7 @@ const enUS = {
     dataSourceSourceStateNew: "Added at source",
     dataSourceSourceStateModified: "Updated at source",
     dataSourceSourceStateDeleted: "Deleted at source",
+    dataSourceSourceStateOutOfScope: "Pending cleanup",
     dataSourceSourceStateUnchanged: "In sync",
     dataSourceSyncStateIdle: "Up to date",
     dataSourceSyncStatePending: "Pending sync",

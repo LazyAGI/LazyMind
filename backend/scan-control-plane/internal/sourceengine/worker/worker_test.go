@@ -286,6 +286,39 @@ func TestWorkerDispatchesReparseAndDeleteCoreActions(t *testing.T) {
 			t.Fatalf("delete should not export source content, got %d exports", conn.exportCalls)
 		}
 	})
+
+	t.Run("out-of-scope document skips export and deletes existing core document", func(t *testing.T) {
+		ctx := context.Background()
+		now := time.Date(2026, 5, 27, 14, 0, 0, 0, time.UTC)
+		repo := newWorkerIdempotencyStore(now)
+		conn := &workerSpyConnector{exportVersion: "v1"}
+		core := newWorkerIdempotencyCoreClient()
+		reducer := statepkg.NewDBStateReducer(repo, statepkg.WithClock(func() time.Time { return now }))
+		task := repo.seedPendingTask("doc-cleanup", "v1", statepkg.SourceStateOutOfScope, statepkg.PendingActionDelete)
+		task.TaskAction = taskpkg.TaskActionDelete
+		task.TargetVersionID = "v1"
+		task.IdempotencyKey = taskpkg.IdempotencyKey(task)
+		repo.tasks[task.TaskID] = task
+		doc := repo.documents[workerIdempotencyKey("source-1", "binding-1", "doc-cleanup")]
+		doc.CoreDocumentID = "core-doc-cleanup"
+		doc.CurrentVersionID = "v1"
+		repo.documents[workerIdempotencyKey("source-1", "binding-1", "doc-cleanup")] = doc
+		parseWorker := worker.NewDefaultParseWorker(repo, mustRegistry(t, conn), core, reducer, &workerIdempotencyTempObjectStore{}, worker.WithClock(func() time.Time { return now }))
+
+		if err := parseWorker.RunOnce(ctx, "worker-1"); err != nil {
+			t.Fatalf("run cleanup worker: %v", err)
+		}
+		if len(core.Submissions) != 1 {
+			t.Fatalf("expected one core delete submission, got %d", len(core.Submissions))
+		}
+		got := core.Submissions[0]
+		if got.Action != coreclient.ActionDelete || got.SourceDocumentID != "core-doc-cleanup" || got.Content != nil {
+			t.Fatalf("cleanup task should call core document delete without export: %+v", got)
+		}
+		if conn.exportCalls != 0 {
+			t.Fatalf("cleanup should not export source content, got %d exports", conn.exportCalls)
+		}
+	})
 }
 
 func TestRunnerRequeuesDeferredSameSourceTasks(t *testing.T) {

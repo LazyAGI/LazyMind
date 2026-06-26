@@ -43,7 +43,7 @@ func (q *DBSourceDocumentQuery) ListDocuments(ctx context.Context, req SourceDoc
 		if err != nil {
 			return SourceDocumentListResponse{}, err
 		}
-		if !filefilter.AllowsSourceObject(documentContext.policy, row.Object) {
+		if !filefilter.AllowsSourceObject(documentContext.policy, row.Object) && !treeAllowsUnsupportedDocumentState(&row.State) {
 			removedUnsupported++
 			continue
 		}

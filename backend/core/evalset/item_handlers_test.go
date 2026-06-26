@@ -52,6 +52,14 @@ func seedEvalSetItem(t *testing.T, db *orm.DB, item orm.EvalSetItem) orm.EvalSet
 	return item
 }
 
+func itemIDs(items []EvalSetItemResponse) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, item.ID)
+	}
+	return out
+}
+
 func TestCreateEvalSetItemManualSource(t *testing.T) {
 	db := newEvalSetTestDB(t)
 	seedEvalSet(t, db, "eval_set_items_create", "user_1", "", "", time.Now().UTC())
@@ -298,6 +306,22 @@ func TestListEvalSetItemsMarksKnowledgeBaseReferenceDocAndChunkSelection(t *test
 		EvalSetID:       "eval_set_items_reference",
 		ReferenceDocIDs: "doc_external",
 	})
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:                "eval_item_external_doc_with_chunk",
+		EvalSetID:         "eval_set_items_reference",
+		ReferenceDocIDs:   "doc_external",
+		ReferenceChunkIDs: "chunk_external",
+	})
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:                "eval_item_partial_doc",
+		EvalSetID:         "eval_set_items_reference",
+		ReferenceDocIDs:   "doc_kb, doc_missing",
+		ReferenceChunkIDs: "chunk_1",
+	})
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:        "eval_item_empty_doc",
+		EvalSetID: "eval_set_items_reference",
+	})
 
 	rec, req := requestWithUser(http.MethodGet, "/api/core/eval-sets/eval_set_items_reference/items", "", "user_1")
 	req = mux.SetURLVars(req, map[string]string{"eval_set_id": "eval_set_items_reference"})
@@ -313,16 +337,129 @@ func TestListEvalSetItemsMarksKnowledgeBaseReferenceDocAndChunkSelection(t *test
 	}
 
 	withChunk := itemsByID["eval_item_with_chunk"]
-	if !withChunk.ReferenceDocFromKnowledgeBase || !withChunk.ReferenceChunkSelected {
+	if !withChunk.ReferenceDocFromKnowledgeBase || withChunk.ReferenceDocInvalid ||
+		!withChunk.ReferenceChunkSelected || withChunk.ReferenceChunkInvalid {
 		t.Fatalf("expected kb doc with selected chunk flags, got %#v", withChunk)
 	}
 	withoutChunk := itemsByID["eval_item_without_chunk"]
-	if !withoutChunk.ReferenceDocFromKnowledgeBase || withoutChunk.ReferenceChunkSelected {
+	if !withoutChunk.ReferenceDocFromKnowledgeBase || withoutChunk.ReferenceDocInvalid ||
+		withoutChunk.ReferenceChunkSelected || withoutChunk.ReferenceChunkInvalid {
 		t.Fatalf("expected kb doc without selected chunk flags, got %#v", withoutChunk)
 	}
 	externalDoc := itemsByID["eval_item_external_doc"]
-	if externalDoc.ReferenceDocFromKnowledgeBase || externalDoc.ReferenceChunkSelected {
-		t.Fatalf("expected external doc flags false, got %#v", externalDoc)
+	if externalDoc.ReferenceDocFromKnowledgeBase || !externalDoc.ReferenceDocInvalid ||
+		externalDoc.ReferenceChunkSelected || externalDoc.ReferenceChunkInvalid {
+		t.Fatalf("expected external doc invalid without chunk invalid, got %#v", externalDoc)
+	}
+	externalDocWithChunk := itemsByID["eval_item_external_doc_with_chunk"]
+	if externalDocWithChunk.ReferenceDocFromKnowledgeBase || !externalDocWithChunk.ReferenceDocInvalid ||
+		!externalDocWithChunk.ReferenceChunkSelected || !externalDocWithChunk.ReferenceChunkInvalid {
+		t.Fatalf("expected external doc with chunk invalid flags, got %#v", externalDocWithChunk)
+	}
+	partialDoc := itemsByID["eval_item_partial_doc"]
+	if !partialDoc.ReferenceDocFromKnowledgeBase || !partialDoc.ReferenceDocInvalid ||
+		!partialDoc.ReferenceChunkSelected || !partialDoc.ReferenceChunkInvalid {
+		t.Fatalf("expected partially missing doc to be marked invalid, got %#v", partialDoc)
+	}
+	emptyDoc := itemsByID["eval_item_empty_doc"]
+	if emptyDoc.ReferenceDocFromKnowledgeBase || emptyDoc.ReferenceDocInvalid ||
+		emptyDoc.ReferenceChunkSelected || emptyDoc.ReferenceChunkInvalid {
+		t.Fatalf("expected empty reference doc flags false, got %#v", emptyDoc)
+	}
+}
+
+func TestListInvalidReferenceEvalSetItemsReturnsOnlyInvalidRows(t *testing.T) {
+	db := newEvalSetTestDB(t)
+	now := time.Now().UTC()
+	seedEvalSet(t, db, "eval_set_invalid_reference_items", "user_1", "", "kb_1", now)
+	if err := db.Create(&orm.Document{
+		ID:          "doc_valid",
+		DatasetID:   "kb_1",
+		DisplayName: "valid doc",
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "user_1",
+			CreateUserName: "user_1 name",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}).Error; err != nil {
+		t.Fatalf("seed document: %v", err)
+	}
+
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:              "eval_item_valid_latest",
+		EvalSetID:       "eval_set_invalid_reference_items",
+		ReferenceDocIDs: "doc_valid",
+		CreatedAt:       now.Add(6 * time.Minute),
+	})
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:                "eval_item_invalid_3",
+		EvalSetID:         "eval_set_invalid_reference_items",
+		ReferenceDocIDs:   "doc_missing_3",
+		ReferenceChunkIDs: "chunk_3",
+		CreatedAt:         now.Add(5 * time.Minute),
+	})
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:              "eval_item_valid_middle",
+		EvalSetID:       "eval_set_invalid_reference_items",
+		ReferenceDocIDs: "doc_valid",
+		CreatedAt:       now.Add(4 * time.Minute),
+	})
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:                "eval_item_invalid_2",
+		EvalSetID:         "eval_set_invalid_reference_items",
+		ReferenceDocIDs:   "doc_missing_2",
+		ReferenceChunkIDs: "chunk_2",
+		CreatedAt:         now.Add(3 * time.Minute),
+	})
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:        "eval_item_empty_reference",
+		EvalSetID: "eval_set_invalid_reference_items",
+		CreatedAt: now.Add(2 * time.Minute),
+	})
+	seedEvalSetItem(t, db, orm.EvalSetItem{
+		ID:              "eval_item_invalid_1",
+		EvalSetID:       "eval_set_invalid_reference_items",
+		ReferenceDocIDs: "doc_missing_1",
+		CreatedAt:       now.Add(time.Minute),
+	})
+
+	rec, req := requestWithUser(http.MethodGet, "/api/core/eval-sets/eval_set_invalid_reference_items/items:invalidReferences?page=1&page_size=2", "", "user_1")
+	req = mux.SetURLVars(req, map[string]string{"eval_set_id": "eval_set_invalid_reference_items"})
+	ListInvalidReferenceEvalSetItems(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	firstPage := decodeOKData[ListEvalSetItemsResponse](t, rec)
+	if firstPage.Page != 1 || firstPage.PageSize != 2 || firstPage.Total != 3 || !firstPage.HasMore {
+		t.Fatalf("unexpected first page metadata: %#v", firstPage)
+	}
+	if got := itemIDs(firstPage.Items); strings.Join(got, ",") != "eval_item_invalid_3,eval_item_invalid_2" {
+		t.Fatalf("unexpected first page ids: %v", got)
+	}
+	for _, item := range firstPage.Items {
+		if !item.ReferenceDocInvalid || !item.ReferenceChunkInvalid {
+			t.Fatalf("expected invalid reference flags, got %#v", item)
+		}
+	}
+
+	rec, req = requestWithUser(http.MethodGet, "/api/core/eval-sets/eval_set_invalid_reference_items/items:invalidReferences?page=2&page_size=2", "", "user_1")
+	req = mux.SetURLVars(req, map[string]string{"eval_set_id": "eval_set_invalid_reference_items"})
+	ListInvalidReferenceEvalSetItems(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	secondPage := decodeOKData[ListEvalSetItemsResponse](t, rec)
+	if secondPage.Page != 2 || secondPage.PageSize != 2 || secondPage.Total != 3 || secondPage.HasMore {
+		t.Fatalf("unexpected second page metadata: %#v", secondPage)
+	}
+	if got := itemIDs(secondPage.Items); strings.Join(got, ",") != "eval_item_invalid_1" {
+		t.Fatalf("unexpected second page ids: %v", got)
+	}
+	if !secondPage.Items[0].ReferenceDocInvalid || secondPage.Items[0].ReferenceChunkInvalid {
+		t.Fatalf("expected invalid doc without chunk invalid, got %#v", secondPage.Items[0])
 	}
 }
 

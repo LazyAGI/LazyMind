@@ -1745,6 +1745,7 @@ const zhCN = {
     dataSourceFileUpdateNew: "新增",
     dataSourceFileUpdateChanged: "有更新",
     dataSourceFileUpdateDeleted: "已删除",
+    dataSourceFileUpdateCleanup: "待清理",
     dataSourceFileUpdateUnchanged: "无更新",
     dataSourceWizardType: "类型选择",
     dataSourceWizardConnection: "连接配置",
@@ -1767,6 +1768,7 @@ const zhCN = {
     dataSourceFileUpdateChangedDetail: "内容变化待重解析",
     dataSourceFileUpdateDeletedDetailTitle: "源端删除",
     dataSourceFileUpdateDeletedDetail: "源端删除待清理",
+    dataSourceFileUpdateCleanupDetail: "待清理",
     dataSourceFileUpdateUnchangedDetail: "当前文件已是最新",
     dataSourceFileUpdateDeletedPendingDetail:
       "源端删除，知识库中仍保留，等待同步删除",
@@ -1774,6 +1776,7 @@ const zhCN = {
     dataSourceSourceStateNew: "源端新增",
     dataSourceSourceStateModified: "源端更新",
     dataSourceSourceStateDeleted: "源端删除",
+    dataSourceSourceStateOutOfScope: "待清理",
     dataSourceSourceStateUnchanged: "已同步",
     dataSourceSyncStateIdle: "已是最新",
     dataSourceSyncStatePending: "待同步",

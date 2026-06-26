@@ -391,7 +391,7 @@ func (p *DBTaskPlanner) generateTasks(ctx context.Context, req GenerateRequest, 
 			result.SkippedCount++
 			continue
 		}
-		if !object.IsDocument || !docState.Selectable || !filefilter.AllowsSourceObject(policy, object) {
+		if !canGenerateTaskForObject(policy, object, docState, action) {
 			result.SkippedCount++
 			continue
 		}
@@ -786,9 +786,28 @@ func actionForState(docState store.DocumentState) string {
 		return TaskActionReparse
 	case statepkg.SourceStateDeleted:
 		return TaskActionDelete
+	case statepkg.SourceStateOutOfScope:
+		return TaskActionDelete
 	default:
 		return ""
 	}
+}
+
+func canGenerateTaskForObject(policy filefilter.Policy, object store.SourceObject, docState store.DocumentState, action string) bool {
+	if !object.IsDocument || !docState.Selectable {
+		return false
+	}
+	if filefilter.AllowsSourceObject(policy, object) {
+		return true
+	}
+	return action == TaskActionDelete && cleanupDeleteState(docState)
+}
+
+func cleanupDeleteState(docState store.DocumentState) bool {
+	if docState.PendingAction != statepkg.PendingActionDelete {
+		return false
+	}
+	return docState.SourceState == statepkg.SourceStateDeleted || docState.SourceState == statepkg.SourceStateOutOfScope
 }
 
 func parseBatchLimitError(limit, actual int, countBy string) *ServiceError {
