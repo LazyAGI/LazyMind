@@ -148,6 +148,8 @@ export interface SendMessageParams {
   fileListRef?: React.RefObject<ImageUploadImperativeProps | null>;
   files?: (RcFile & { uri: string })[];
   create_time?: string;
+  /** When true, the payload will include run_in_background=true and the task center badge will increment. */
+  run_in_background?: boolean;
 }
 
 interface ChatInputProps {
@@ -865,6 +867,44 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         </Badge>
                       }
                     />
+                  </div>
+                  <div className="input-bottom-actions-right-item">
+                    <Tooltip title="以异步任务方式执行，可在任务中心查看进度和结果">
+                      <Button
+                        size="small"
+                        type="text"
+                        style={{ fontSize: 12, color: '#888', padding: '0 4px' }}
+                        disabled={isSendDisabled}
+                        onClick={() => {
+                          if (isSendDisabled) return;
+                          const normalizedText = value.trim();
+                          setNewMessage(false);
+                          const sendParams: SendMessageParams = {
+                            text: normalizedText,
+                            citeMessage: normalizedCiteMessages.join("\n\n"),
+                            citeMessages: normalizedCiteMessages,
+                            fileList,
+                            fileListRef,
+                            files: fileListRef.current?.getFiles(),
+                            create_time: new Date().toISOString(),
+                            run_in_background: true,
+                          };
+                          if (!isChatContent) {
+                            setPendingMessage(sendParams);
+                            setIsChatContent?.(true);
+                          } else {
+                            onSend?.(sendParams);
+                            clearMultiData();
+                          }
+                          onChange("");
+                          setText("");
+                          onClearCiteMessage?.();
+                        }}
+                        aria-label="后台运行"
+                      >
+                        后台运行
+                      </Button>
+                    </Tooltip>
                   </div>
                   <div className="input-bottom-actions-right-item">
                     <SendButton

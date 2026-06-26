@@ -9,6 +9,7 @@ import {
   Table,
   Tag,
   TimePicker,
+  Tooltip,
   Upload,
   message,
 } from 'antd';
@@ -17,15 +18,14 @@ import type { UploadFile } from 'antd/es/upload/interface';
 import { PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
-import { cancelSchedule, createSchedule, listSchedules } from './api';
-import type { Schedule } from './api';
+import { cancelSchedule, createSchedule, listSchedules, listScheduleTasks } from './api';
+import type { Schedule, Task, TaskListResponse } from './api';
 import { KnowledgeBaseServiceApi } from '@/modules/chat/utils/request';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 
 /* ────────────────────────────────────────────────
    Helper: build cron expression from picker state
 ──────────────────────────────────────────────── */
-// weekdays: 0=Sun,1=Mon,...,6=Sat (standard cron weekday)
 const WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
 const WEEKDAY_VALUES = [0, 1, 2, 3, 4, 5, 6];
 
@@ -38,7 +38,6 @@ function buildCronExpr(weekdays: number[], time: dayjs.Dayjs): string {
   return `${minute} ${hour} * * ${dowPart}`;
 }
 
-/* Parse cron back to { weekdays, time } for display in the picker */
 function parseCronExpr(cron: string): { weekdays: number[]; time: dayjs.Dayjs } {
   const parts = cron.trim().split(/\s+/);
   const minute = parseInt(parts[0] ?? '0', 10) || 0;
@@ -51,8 +50,16 @@ function parseCronExpr(cron: string): { weekdays: number[]; time: dayjs.Dayjs } 
   return { weekdays, time: dayjs().hour(hour).minute(minute).second(0) };
 }
 
+function describeCron(cron: string): string {
+  const { weekdays, time } = parseCronExpr(cron);
+  const timeStr = time.format('HH:mm');
+  if (weekdays.length === 0) return `每天 ${timeStr}`;
+  const labels = weekdays.map((d) => `周${WEEKDAY_LABELS[d]}`).join('、');
+  return `${labels} ${timeStr}`;
+}
+
 /* ────────────────────────────────────────────────
-   VisualScheduler sub-component
+   VisualScheduler sub-component (compact single-line)
 ──────────────────────────────────────────────── */
 interface VisualSchedulerProps {
   value?: string;
@@ -64,7 +71,6 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
   const [weekdays, setWeekdays] = useState<number[]>(parsed.weekdays);
   const [time, setTime] = useState<dayjs.Dayjs>(parsed.time);
 
-  // Sync outward when value changes externally (e.g. form reset).
   useEffect(() => {
     if (value) {
       const p = parseCronExpr(value);
@@ -92,8 +98,7 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
   };
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-      <span style={{ fontSize: 13, color: '#555' }}>系统将在</span>
+    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
       <span style={{ fontSize: 13, color: '#555' }}>每周</span>
       {WEEKDAY_VALUES.map((d) => (
         <Button
@@ -101,22 +106,97 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
           size='small'
           type={weekdays.includes(d) ? 'primary' : 'default'}
           onClick={() => toggleDay(d)}
-          style={{ minWidth: 36, borderRadius: 6 }}
+          style={{ minWidth: 32, borderRadius: 6, padding: '0 6px' }}
         >
           {WEEKDAY_LABELS[d]}
         </Button>
       ))}
-      <span style={{ fontSize: 13, color: '#555' }}>的</span>
       <TimePicker
         value={time}
         onChange={handleTimeChange}
         format='HH:mm'
         allowClear={false}
         size='small'
-        style={{ width: 90 }}
+        style={{ width: 80 }}
       />
-      <span style={{ fontSize: 13, color: '#555' }}>自动执行</span>
+      <span style={{ fontSize: 12, color: '#888' }}>
+        {`(${Intl.DateTimeFormat().resolvedOptions().timeZone})`}
+      </span>
     </div>
+  );
+}
+
+/* ────────────────────────────────────────────────
+   ExpandedScheduleTasks: sub-table for a schedule
+──────────────────────────────────────────────── */
+function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
+  const [data, setData] = useState<Task[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+
+  const fetch = useCallback(async (p: number) => {
+    setLoading(true);
+    try {
+      const resp: TaskListResponse = await listScheduleTasks(scheduleId, p, 10);
+      setData(resp.items ?? []);
+      setTotal(resp.total ?? 0);
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
+  }, [scheduleId]);
+
+  useEffect(() => { void fetch(page); }, [fetch, page]);
+
+  const columns: ColumnsType<Task> = [
+    {
+      title: '任务名称',
+      dataIndex: 'conversation_title',
+      render: (v: string, r: Task) => v || r.title || r.conversation_id,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 90,
+      render: (v: string) => <Tag color={v === 'completed' ? 'green' : v === 'failed' ? 'red' : 'blue'}>{v}</Tag>,
+    },
+    {
+      title: '步骤',
+      dataIndex: 'steps',
+      width: 70,
+      render: (steps: Task['steps']) => {
+        if (!steps?.length) return '—';
+        const done = steps.filter((s) => s.status === 'completed' || s.status === 'succeeded').length;
+        return `${done}/${steps.length}`;
+      },
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'created_at',
+      width: 160,
+      render: (v: string) => new Date(v).toLocaleString(),
+    },
+  ];
+
+  return (
+    <Table<Task>
+      rowKey='id'
+      size='small'
+      loading={loading}
+      dataSource={data}
+      columns={columns}
+      pagination={{
+        current: page,
+        pageSize: 10,
+        total,
+        onChange: (p) => setPage(p),
+        size: 'small',
+        showTotal: (n) => `共 ${n} 次`,
+      }}
+      style={{ margin: '8px 0' }}
+    />
   );
 }
 
@@ -134,8 +214,8 @@ export default function ScheduleList() {
   const [uploadedPaths, setUploadedPaths] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [kbOptions, setKbOptions] = useState<{ value: string; label: string }[]>([]);
+  const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
 
-  // Detect user's local timezone once.
   const localTimezone = useRef(Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai');
 
   const fetchSchedules = useCallback(async () => {
@@ -150,17 +230,14 @@ export default function ScheduleList() {
     }
   }, [t]);
 
-  useEffect(() => {
-    void fetchSchedules();
-  }, [fetchSchedules]);
+  useEffect(() => { void fetchSchedules(); }, [fetchSchedules]);
 
-  // Load knowledge base list for the selector.
   useEffect(() => {
     KnowledgeBaseServiceApi()
       .datasetServiceListDatasets({ pageSize: 100 })
       .then((res) => {
         const datasets = res?.data?.datasets ?? [];
-        setKbOptions(datasets.map((d) => ({ value: d.id ?? '', label: d.display_name ?? d.id ?? '' })));
+        setKbOptions(datasets.map((d) => ({ value: d.dataset_id ?? '', label: d.display_name ?? d.dataset_id ?? '' })));
       })
       .catch(() => {});
   }, []);
@@ -175,15 +252,13 @@ export default function ScheduleList() {
     }
   };
 
-  const handleFileUpload = async (file: File): Promise<string> => {
-    return uploadFileInChunks(file);
-  };
-
   const handleCreate = async () => {
     try {
       const values = await form.validateFields();
       setSubmitting(true);
       await createSchedule({
+        name: values.name ?? '',
+        remark: values.remark ?? '',
         cron_expr: values.cron_expr || buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)),
         prompt_template: values.prompt_template,
         timezone: localTimezone.current,
@@ -197,8 +272,7 @@ export default function ScheduleList() {
       setUploadedPaths([]);
       void fetchSchedules();
     } catch (err: unknown) {
-      const isValidation =
-        err != null && typeof err === 'object' && 'errorFields' in err;
+      const isValidation = err != null && typeof err === 'object' && 'errorFields' in err;
       if (!isValidation) {
         message.error(t('taskCenter.createError'));
       }
@@ -217,26 +291,68 @@ export default function ScheduleList() {
 
   const columns: ColumnsType<Schedule> = [
     {
-      title: t('taskCenter.promptTemplate'),
-      dataIndex: 'prompt_template',
-      ellipsis: true,
-      render: (v: string) => (v?.length > 60 ? `${v.slice(0, 60)}…` : v),
+      title: '任务名称',
+      dataIndex: 'name',
+      render: (v: string, record: Schedule) => {
+        const display = v || record.prompt_template?.slice(0, 20) + (record.prompt_template?.length > 20 ? '…' : '');
+        return record.remark ? (
+          <Tooltip title={record.remark}>
+            <span style={{ borderBottom: '1px dashed #aaa', cursor: 'help' }}>{display}</span>
+          </Tooltip>
+        ) : display;
+      },
     },
     {
-      title: t('taskCenter.cronExpr'),
+      title: '任务描述',
+      dataIndex: 'prompt_template',
+      ellipsis: true,
+      render: (v: string) => (
+        <Tooltip title={v}>
+          <span>{v?.length > 30 ? `${v.slice(0, 30)}…` : v}</span>
+        </Tooltip>
+      ),
+    },
+    {
+      title: '附件',
+      dataIndex: 'file_ids',
+      width: 60,
+      render: (v: string[]) => (v?.length ? `${v.length}` : '—'),
+    },
+    {
+      title: '触发周期',
       dataIndex: 'cron_expr',
       width: 180,
+      render: (v: string) => describeCron(v),
+    },
+    {
+      title: '执行次数',
+      dataIndex: 'run_count',
+      width: 90,
+      render: (v: number, record: Schedule) => (
+        <Button
+          type='link'
+          size='small'
+          style={{ padding: 0 }}
+          onClick={() => {
+            setExpandedKeys((prev) =>
+              prev.includes(record.id) ? prev.filter((k) => k !== record.id) : [...prev, record.id],
+            );
+          }}
+        >
+          {v ?? 0}
+        </Button>
+      ),
     },
     {
       title: 'Next Run',
       dataIndex: 'next_run_at',
-      width: 180,
+      width: 160,
       render: (v: string) => (v ? new Date(v).toLocaleString() : '—'),
     },
     {
       title: 'Enabled',
       dataIndex: 'enabled',
-      width: 80,
+      width: 70,
       render: (v: boolean) =>
         v ? <Tag color='green'>On</Tag> : <Tag color='default'>Off</Tag>,
     },
@@ -256,11 +372,7 @@ export default function ScheduleList() {
   return (
     <div>
       <Space style={{ marginBottom: 12 }}>
-        <Button
-          type='primary'
-          icon={<PlusOutlined />}
-          onClick={handleOpenModal}
-        >
+        <Button type='primary' icon={<PlusOutlined />} onClick={handleOpenModal}>
           {t('taskCenter.newSchedule')}
         </Button>
       </Space>
@@ -270,45 +382,45 @@ export default function ScheduleList() {
         dataSource={schedules}
         columns={columns}
         pagination={false}
+        expandable={{
+          expandedRowKeys: expandedKeys,
+          onExpandedRowsChange: (keys) => setExpandedKeys(keys as string[]),
+          expandedRowRender: (record) => <ExpandedScheduleTasks scheduleId={record.id} />,
+          rowExpandable: () => false,
+          showExpandColumn: false,
+        }}
       />
       <Modal
         title={t('taskCenter.newSchedule')}
         open={modalOpen}
         onOk={handleCreate}
-        onCancel={() => { setModalOpen(false); form.resetFields(); setFileList([]); setUploadedPaths([]); }}
+        onCancel={() => {
+          setModalOpen(false);
+          form.resetFields();
+          setFileList([]);
+          setUploadedPaths([]);
+        }}
         confirmLoading={submitting || uploading}
         destroyOnHidden
         width={600}
       >
-        <Form form={form} layout='vertical'>
-          {/* Task description */}
-          <Form.Item
-            name='prompt_template'
-            label='任务描述'
-            rules={[{ required: true, message: '请输入任务描述' }]}
-          >
-            <Input.TextArea
-              rows={4}
-              placeholder='描述你希望系统定期执行的任务，例如：每周一早上9点帮我收集GitHub上最新的AI项目动态并总结'
-            />
+        <Form form={form} layout='vertical' size='small'>
+          <Form.Item name='name' label='任务名称（选填）'>
+            <Input placeholder='用于列表展示和检索，留空则显示描述前20字' />
           </Form.Item>
-
-          {/* Attachments (0–3) */}
-          <Form.Item label={`附件（最多3张）`}>
+          <Form.Item name='prompt_template' label='任务描述' rules={[{ required: true, message: '请输入任务描述' }]}>
+            <Input.TextArea rows={3} placeholder='描述你希望系统定期执行的任务' />
+          </Form.Item>
+          <Form.Item name='remark' label='备注（选填）'>
+            <Input placeholder='内部备注，不影响执行' />
+          </Form.Item>
+          <Form.Item label='附件（最多3个）'>
             <Upload
               fileList={fileList}
               maxCount={3}
               accept='.png,.jpg,.jpeg,.pdf,.docx,.doc,.pptx'
-              beforeUpload={(file) => {
-                if (fileList.length >= 3) {
-                  message.warning('最多上传3个附件');
-                  return Upload.LIST_IGNORE;
-                }
-                return false; // prevent auto-upload; we handle manually
-              }}
-              onChange={({ fileList: newList }) => {
-                setFileList(newList);
-              }}
+              beforeUpload={() => false}
+              onChange={({ fileList: newList }) => setFileList(newList)}
               customRequest={async ({ file, onSuccess, onError, onProgress }) => {
                 setUploading(true);
                 try {
@@ -325,9 +437,8 @@ export default function ScheduleList() {
                 }
               }}
               onRemove={(file) => {
-                setFileList((prev) => prev.filter((f) => f.uid !== file.uid));
-                // Remove corresponding uploaded path by index (best effort).
                 const idx = fileList.findIndex((f) => f.uid === file.uid);
+                setFileList((prev) => prev.filter((f) => f.uid !== file.uid));
                 if (idx >= 0) {
                   setUploadedPaths((prev) => {
                     const next = [...prev];
@@ -337,34 +448,16 @@ export default function ScheduleList() {
                 }
               }}
             >
-              <Button icon={<UploadOutlined />}>上传文件</Button>
+              <Button size='small' icon={<UploadOutlined />}>上传文件</Button>
             </Upload>
           </Form.Item>
-
-          {/* Knowledge base selector */}
           {kbOptions.length > 0 && (
-            <Form.Item name='kb_ids' label='关联知识库（可选）'>
-              <Select
-                mode='multiple'
-                allowClear
-                placeholder='选择知识库'
-                options={kbOptions}
-              />
+            <Form.Item name='kb_ids' label='关联知识库（选填）'>
+              <Select mode='multiple' allowClear placeholder='选择知识库' options={kbOptions} />
             </Form.Item>
           )}
-
-          {/* Visual cron picker */}
-          <Form.Item
-            name='cron_expr'
-            label='执行时间'
-            rules={[{ required: true }]}
-          >
+          <Form.Item name='cron_expr' label='执行时间' rules={[{ required: true }]}>
             <VisualScheduler />
-          </Form.Item>
-
-          {/* Show detected timezone (read-only) */}
-          <Form.Item label='时区'>
-            <span style={{ color: '#888', fontSize: 13 }}>{localTimezone.current}（自动检测）</span>
           </Form.Item>
         </Form>
       </Modal>

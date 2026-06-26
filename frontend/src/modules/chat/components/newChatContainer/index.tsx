@@ -107,6 +107,7 @@ interface Props {
     input: any[],
     action: ChatConversationsRequestActionEnum,
     callbacks: Record<string, (e: CustomEvent) => void>,
+    extras?: Record<string, unknown>,
   ) => any; // Return new SSE.
   onOpenResumeSSE?: (
     conversationId: string,
@@ -392,7 +393,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
 
       isMouseScrollingRef.current = true;
       scrollToEnd();
-      openSSE(inputs, ChatConversationsRequestActionEnum.ChatActionNext);
+      openSSE(inputs, ChatConversationsRequestActionEnum.ChatActionNext, params.run_in_background ? { run_in_background: true } : undefined);
 
       const currentId = currentConversationIdRef.current;
       if (currentId) {
@@ -404,6 +405,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
     const openSSE = async (
       input: any[],
       action: ChatConversationsRequestActionEnum,
+      extras?: Record<string, unknown>,
     ) => {
       activeStreamRef.current = true;
       setLoading(true);
@@ -422,7 +424,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, Props>(
         timeout: (e) => onTimeout(e),
       };
 
-      const sseOrPromise = onOpenSSE(input, action, {});
+      const sseOrPromise = onOpenSSE(input, action, {}, extras);
       const sse = sseOrPromise instanceof Promise ? await sseOrPromise : sseOrPromise;
       sseRef.current = sse;
 

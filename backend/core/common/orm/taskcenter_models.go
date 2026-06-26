@@ -32,12 +32,15 @@ func (TaskCenterTask) TableName() string { return "task_center_tasks" }
 type UserSchedule struct {
 	ID             string     `gorm:"column:id;type:varchar(36);primaryKey"`
 	UserID         string     `gorm:"column:user_id;type:varchar(255);not null"`
+	Name           string     `gorm:"column:name;type:varchar(128);not null;default:''"`
+	Remark         string     `gorm:"column:remark;type:text;not null;default:''"`
 	CronExpr       string     `gorm:"column:cron_expr;type:varchar(64);not null"`
 	Timezone       string     `gorm:"column:timezone;type:varchar(64);not null;default:'Asia/Shanghai'"`
 	PromptTemplate string     `gorm:"column:prompt_template;type:text;not null"` // task description sent to chat on each trigger
 	KbIDs          string     `gorm:"column:kb_ids;type:text;not null;default:'[]'"`
 	FileIDs        string     `gorm:"column:file_ids;type:text;not null;default:'[]'"`
 	Enabled        bool       `gorm:"column:enabled;not null;default:true"`
+	RunCount       int        `gorm:"column:run_count;not null;default:0"`
 	LastRunAt      *time.Time `gorm:"column:last_run_at"`
 	NextRunAt      time.Time  `gorm:"column:next_run_at;not null"`
 	CreatedAt      time.Time  `gorm:"column:created_at;not null"`

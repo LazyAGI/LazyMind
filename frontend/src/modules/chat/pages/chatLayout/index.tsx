@@ -292,6 +292,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     input: Query[],
     action: ChatConversationsRequestActionEnum,
     callbacks: Record<string, (e: CustomEvent) => void>,
+    extras?: Record<string, unknown>,
   ) {
     // Flush any pending slot drafts before sending so the AI sees the latest content.
     // Draft keys use the plugin session_id (not the conversation_id), so pass the
@@ -370,6 +371,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         ...(pluginContext ? { plugin_context: pluginContext } : {}),
         ...(pluginUIState ? { plugin_ui_state: pluginUIState } : {}),
         ...(artifactRefs.length > 0 ? { artifact_refs: artifactRefs } : {}),
+        ...(extras?.run_in_background ? { run_in_background: true } : {}),
         // If the user changed plugin settings before a conversation was created,
         // carry them in the first request so Go can persist them on ensureConversation.
         // Only send the three known fields to avoid polluting the payload with API response leftovers.

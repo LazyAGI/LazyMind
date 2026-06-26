@@ -174,16 +174,19 @@ func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.
 	// Create a fresh task-conversation for every scheduled trigger.
 	convID := createTaskConversation(ctx, db, s.UserID, s.PromptTemplate)
 
-	title := "Scheduled: " + s.PromptTemplate
-	if len(title) > 120 {
-		title = title[:120] + "..."
+	taskTitle := s.Name
+	if taskTitle == "" {
+		taskTitle = "Scheduled: " + s.PromptTemplate
+	}
+	if len(taskTitle) > 120 {
+		taskTitle = taskTitle[:120] + "..."
 	}
 	task := &orm.TaskCenterTask{
 		UserID:         s.UserID,
 		ConversationID: convID,
 		TaskType:       "scheduled",
-		Title:          &title,
-		Status:         "pending",
+		Title:          &taskTitle,
+		Status:         "running",
 		ScheduleID:     &s.ID,
 	}
 	_ = taskcenter.CreateTask(ctx, db, task)
@@ -199,6 +202,7 @@ func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.
 		Updates(map[string]any{
 			"last_run_at": firedAt,
 			"next_run_at": next,
+			"run_count":   gorm.Expr("run_count + 1"),
 		})
 	if result.RowsAffected == 0 {
 		// Another instance already fired this schedule; skip to avoid duplicate execution.
@@ -232,7 +236,8 @@ func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.
 }
 
 // createTaskConversation creates a new conversation flagged as is_task_conv=true.
-// The display_name is set to a short excerpt of the prompt template.
+// Plugin and subagent are explicitly enabled so scheduled tasks always run regardless
+// of the user's global chat settings.
 // Returns the new conversation ID, or "" on failure.
 func createTaskConversation(ctx context.Context, db *gorm.DB, userID, promptTemplate string) string {
 	displayName := promptTemplate
@@ -240,11 +245,17 @@ func createTaskConversation(ctx context.Context, db *gorm.DB, userID, promptTemp
 		displayName = displayName[:80] + "..."
 	}
 	now := time.Now().UTC()
+	enablePlugin := true
+	pluginMode := "dynamic"
+	enableSubagent := true
 	conv := orm.Conversation{
-		ID:          "conv_" + common.GenerateID(),
-		DisplayName: displayName,
-		ChannelID:   "default",
-		IsTaskConv:  true,
+		ID:             "conv_" + common.GenerateID(),
+		DisplayName:    displayName,
+		ChannelID:      "default",
+		IsTaskConv:     true,
+		EnablePlugin:   &enablePlugin,
+		PluginMode:     &pluginMode,
+		EnableSubagent: &enableSubagent,
 		BaseModel: orm.BaseModel{
 			CreateUserID: userID,
 			CreatedAt:    now,
@@ -298,7 +309,7 @@ func sendScheduledChatRequest(userID, convID, taskID string, db *gorm.DB, reqBod
 	if resp.StatusCode >= 400 {
 		_ = taskcenter.UpdateTaskStatus(ctx, db, taskID, "failed")
 	} else {
-		_ = taskcenter.UpdateTaskStatus(ctx, db, taskID, "succeeded")
+		_ = taskcenter.UpdateTaskStatus(ctx, db, taskID, "completed")
 	}
 }
 
@@ -307,12 +318,15 @@ func sendScheduledChatRequest(userID, convID, taskID string, db *gorm.DB, reqBod
 type scheduleResponse struct {
 	ID             string     `json:"id"`
 	UserID         string     `json:"user_id"`
+	Name           string     `json:"name"`
+	Remark         string     `json:"remark"`
 	CronExpr       string     `json:"cron_expr"`
 	Timezone       string     `json:"timezone"`
 	PromptTemplate string     `json:"prompt_template"`
 	KbIDs          []string   `json:"kb_ids"`
 	FileIDs        []string   `json:"file_ids"`
 	Enabled        bool       `json:"enabled"`
+	RunCount       int        `json:"run_count"`
 	LastRunAt      *time.Time `json:"last_run_at,omitempty"`
 	NextRunAt      time.Time  `json:"next_run_at"`
 	CreatedAt      time.Time  `json:"created_at"`
@@ -332,12 +346,15 @@ func toScheduleResponse(s orm.UserSchedule) scheduleResponse {
 	return scheduleResponse{
 		ID:             s.ID,
 		UserID:         s.UserID,
+		Name:           s.Name,
+		Remark:         s.Remark,
 		CronExpr:       s.CronExpr,
 		Timezone:       s.Timezone,
 		PromptTemplate: s.PromptTemplate,
 		KbIDs:          kbIDs,
 		FileIDs:        fileIDs,
 		Enabled:        s.Enabled,
+		RunCount:       s.RunCount,
 		LastRunAt:      s.LastRunAt,
 		NextRunAt:      s.NextRunAt,
 		CreatedAt:      s.CreatedAt,
@@ -364,6 +381,8 @@ func ListSchedulesHandler(w http.ResponseWriter, r *http.Request) {
 func CreateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserID(r)
 	var body struct {
+		Name           string   `json:"name"`
+		Remark         string   `json:"remark"`
 		CronExpr       string   `json:"cron_expr"`
 		Timezone       string   `json:"timezone"`
 		PromptTemplate string   `json:"prompt_template"`
@@ -396,6 +415,8 @@ func CreateScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	s := &orm.UserSchedule{
 		UserID:         userID,
+		Name:           body.Name,
+		Remark:         body.Remark,
 		CronExpr:       body.CronExpr,
 		Timezone:       tz,
 		PromptTemplate: body.PromptTemplate,

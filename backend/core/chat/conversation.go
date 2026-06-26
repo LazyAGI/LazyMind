@@ -25,6 +25,7 @@ import (
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/taskcenter"
 )
 
 func writeConversationJSON(w http.ResponseWriter, status int, v any) {
@@ -309,7 +310,32 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// run_in_background: create a background_chat task record; update status after SSE drains.
+	runInBackground, _ := raw["run_in_background"].(bool)
+	var bgTaskID string
+	if runInBackground {
+		taskTitle := query
+		if len(taskTitle) > 120 {
+			taskTitle = taskTitle[:120] + "..."
+		}
+		bgTask := &orm.TaskCenterTask{
+			UserID:         userID,
+			ConversationID: convID,
+			TaskType:       "background_chat",
+			Title:          &taskTitle,
+			Status:         "running",
+		}
+		if err := taskcenter.CreateTask(reqCtx, db, bgTask); err == nil {
+			bgTaskID = bgTask.ID
+		}
+	}
+
 	handleStreamChat(w, r, db, stateStore, baseURL, reqBody, convID, query, target, dualReply, historyExt)
+
+	// After handleStreamChat returns (SSE fully drained), mark background task completed.
+	if bgTaskID != "" {
+		_ = taskcenter.UpdateTaskStatus(context.Background(), db, bgTaskID, "completed")
+	}
 }
 
 // ResumeChat text POST /api/v1/conversations:resumeChat

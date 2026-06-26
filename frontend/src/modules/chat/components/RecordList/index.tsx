@@ -1,4 +1,4 @@
-import { CloseOutlined, CloudDownloadOutlined, FilterOutlined } from "@ant-design/icons";
+import { CloseOutlined, CloudDownloadOutlined, FilterOutlined, PlusCircleOutlined } from "@ant-design/icons";
 import classnames from "classnames";
 import {
   Button,
@@ -29,6 +29,7 @@ import InfiniteScroll from "react-infinite-scroll-component";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
+import { addTask } from "@/modules/taskCenter/api";
 
 import dayjs from "dayjs";
 
@@ -315,6 +316,22 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               deleteHistory(item);
             }}
           />
+          <Tooltip title="加入任务中心">
+            <PlusCircleOutlined
+              className="add-to-task"
+              style={{ marginLeft: 4, fontSize: 12, color: '#888', cursor: 'pointer' }}
+              onClick={async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                try {
+                  await addTask(item.conversation_id ?? '', item.display_name ?? '');
+                  message.success('已加入任务中心');
+                } catch {
+                  message.error('加入任务中心失败');
+                }
+              }}
+            />
+          </Tooltip>
         </div>
       );
     }
