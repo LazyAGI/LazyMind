@@ -133,6 +133,15 @@ class LocalFSToolGroup:
             return None
         return None
 
+    def _resolve_visible_file_for_scope(self, path: str, scope: LocalFSScope) -> Optional[str]:
+        visible = self._resolve_visible_file(path)
+        if not visible:
+            return None
+        resolved, resolved_scope = visible
+        if resolved_scope != scope:
+            return None
+        return resolved
+
     def _entry(self, path: str, scope: LocalFSScope) -> Dict[str, Any]:
         st = os.stat(path)
         return {
@@ -218,9 +227,9 @@ class LocalFSToolGroup:
             A list of matching local file paths.
         """
         matches: List[str] = []
-        for safe_dir, _scope in self._iter_roots(path):
+        for safe_dir, scope in self._iter_roots(path):
             if self._has_rg():
-                proc = self._run_rg(['--files', '--glob', pattern], cwd=safe_dir)
+                proc = self._run_rg(['--files', '--no-ignore', '--hidden', '--glob', pattern], cwd=safe_dir)
                 if proc.returncode > 1:
                     return tool_error('glob', f'ripgrep glob failed: {proc.stderr.strip() or "unknown error"}')
                 raw = [os.path.join(safe_dir, p) for p in proc.stdout.splitlines() if p.strip()]
@@ -228,9 +237,8 @@ class LocalFSToolGroup:
                 py_pattern = pattern if '**' in pattern else f'**/{pattern}'
                 raw = [os.path.join(safe_dir, p) for p in _glob.glob(py_pattern, root_dir=safe_dir, recursive=True)]
             for fpath in raw:
-                visible = self._resolve_visible_file(fpath)
-                if visible:
-                    resolved, _resolved_scope = visible
+                resolved = self._resolve_visible_file_for_scope(fpath, scope)
+                if resolved:
                     matches.append(resolved)
         matches.sort()
         return tool_success('glob', {
@@ -282,7 +290,7 @@ class LocalFSToolGroup:
     ) -> Dict[str, Any]:
         if max_results <= 0:
             return tool_success('grep', {'matches': []})
-        args = ['--json', '--no-heading', '-g', glob_filter, '--', pattern]
+        args = ['--json', '--no-heading', '--no-ignore', '--hidden', '-g', glob_filter, '--', pattern]
         try:
             proc = self._run_rg(args, cwd=safe_dir)
         except subprocess.TimeoutExpired:
@@ -303,11 +311,8 @@ class LocalFSToolGroup:
                 continue
             data = entry.get('data', {})
             fpath = os.path.join(safe_dir, data.get('path', {}).get('text', ''))
-            visible = self._resolve_visible_file(fpath)
-            if not visible:
-                continue
-            resolved, resolved_scope = visible
-            if resolved_scope != scope or not self._is_visible_file(scope, resolved):
+            resolved = self._resolve_visible_file_for_scope(fpath, scope)
+            if not resolved:
                 continue
             content = data.get('lines', {}).get('text', '').rstrip()
             lineno = data.get('line_number', 0)
@@ -343,11 +348,8 @@ class LocalFSToolGroup:
                 if not fnmatch.fnmatch(fn, glob_filter):
                     continue
                 fpath = os.path.join(root, fn)
-                visible = self._resolve_visible_file(fpath)
-                if not visible:
-                    continue
-                resolved, resolved_scope = visible
-                if resolved_scope != scope or not self._is_visible_file(scope, resolved):
+                resolved = self._resolve_visible_file_for_scope(fpath, scope)
+                if not resolved:
                     continue
                 try:
                     with open(resolved, 'r', encoding='utf-8', errors='replace') as fh:

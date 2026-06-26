@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+
 import lazymind.chat.engine.tools.local_fs as local_fs_mod
 from lazymind.chat.engine.tools.local_fs import LocalFSToolGroup
 
@@ -110,3 +112,34 @@ def test_local_fs_glob_and_grep_search_multiple_sources_with_extensions(monkeypa
         ('source-a', 'a.pdf'),
         ('source-b', 'b.csv'),
     ]
+
+
+def test_local_fs_rg_includes_hidden_and_no_ignore_flags(monkeypatch, tmp_path):
+    source = tmp_path / 'source'
+    source.mkdir()
+    visible = source / '.hidden.pdf'
+    visible.write_text('needle', encoding='utf-8')
+    _set_local_fs_sources(monkeypatch, [_source('source-a', [source], ['pdf'])])
+
+    calls = []
+
+    def fake_run_rg(args, cwd):
+        calls.append(args)
+        if '--files' in args:
+            return subprocess.CompletedProcess(args, 0, stdout='.hidden.pdf\n', stderr='')
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=(
+                '{"type":"match","data":{"path":{"text":".hidden.pdf"},'
+                '"line_number":1,"lines":{"text":"needle\\n"}}}\n'
+            ),
+            stderr='',
+        )
+
+    monkeypatch.setattr(LocalFSToolGroup, '_has_rg', staticmethod(lambda: True))
+    monkeypatch.setattr(LocalFSToolGroup, '_run_rg', staticmethod(fake_run_rg))
+
+    assert LocalFSToolGroup().glob('*.pdf')['success'] is True
+    assert LocalFSToolGroup().grep('needle')['success'] is True
+    assert all('--no-ignore' in args and '--hidden' in args for args in calls)
