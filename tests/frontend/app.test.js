@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   formRulesSource,
+  frontendDockerfileSource,
   indexHtml,
+  localComposeSource,
+  loginSource,
+  mainLayoutSource,
   mainEntry,
   routePaths,
+  runtimeApiBaseSource,
+  runtimeDesktopBridgeSource,
+  runtimeFeaturesSource,
+  runtimeModeSource,
   routerSource,
 } from './setup.js';
 
@@ -43,6 +51,38 @@ describe('router contract', () => {
 
   it('keeps fallback navigation wired to the app root', () => {
     expect(routerSource).toContain('<Route path="*" element={<Navigate to="/" replace />} />');
+  });
+});
+
+describe('runtime facade contract', () => {
+  it('keeps runtime facade modules present', () => {
+    expect(runtimeModeSource).toContain('export type RuntimeMode');
+    expect(runtimeFeaturesSource).toContain('export const runtimeFeatures');
+    expect(runtimeApiBaseSource).toContain('export function getApiBaseUrl');
+    expect(runtimeDesktopBridgeSource).toContain('export function openLogsDir');
+    expect(runtimeDesktopBridgeSource).toContain('export function openDataDir');
+    expect(runtimeDesktopBridgeSource).toContain('handler.call(bridge)');
+    expect(runtimeDesktopBridgeSource).not.toContain('diagnostics');
+    expect(runtimeDesktopBridgeSource).not.toContain('serviceStatus');
+  });
+
+  it('routes runtime mode checks through the facade', () => {
+    expect(routerSource).toContain('runtimeFeatures.hideRegister');
+    expect(routerSource).toContain('runtimeFeatures.hideCloudAdmin');
+    expect(routerSource).toContain('runtimeFeatures.hideEvo');
+    expect(mainLayoutSource).toContain('runtimeFeatures.hideEvo');
+    expect(loginSource).toContain('runtimeFeatures.hideRegister');
+    expect(mainLayoutSource).not.toContain('VITE_HIDE_EVO');
+    expect(routerSource).not.toContain('VITE_HIDE_EVO');
+    expect(loginSource).not.toContain('VITE_HIDE_EVO');
+  });
+
+  it('keeps frontend Docker build args available while local mode disables the frontend container', () => {
+    expect(frontendDockerfileSource).toContain('ARG VITE_API_BASE_URL');
+    expect(frontendDockerfileSource).toContain('ARG VITE_LAZYMIND_MODE');
+    expect(frontendDockerfileSource).toContain('ARG VITE_HIDE_EVO');
+    expect(localComposeSource).toMatch(/disabled_container_services:[\s\S]*-\s*frontend/);
+    expect(localComposeSource).not.toMatch(/frontend:[\s\S]*VITE_LAZYMIND_MODE:\s*local/);
   });
 });
 

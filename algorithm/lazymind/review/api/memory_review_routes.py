@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -28,9 +28,12 @@ class MemoryReviewPayload(BaseModel):
         default='',
         description='Current full user profile text to edit',
     )
-    llm_config: Dict[str, Any] = Field(
-        ...,
-        description='Required per-request model configuration loaded by core for the current user',
+    llm_config: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            'Optional per-request model configuration loaded by core for the current user. '
+            'When omitted, the active runtime_models configuration is used.'
+        ),
     )
 
     @model_validator(mode='after')
@@ -44,8 +47,6 @@ class MemoryReviewPayload(BaseModel):
             for message in self.history
         ):
             raise ValueError("'history' must contain at least one user message.")
-        if not self.llm_config:
-            raise ValueError("'llm_config' must be a non-empty object.")
         return self
 
 

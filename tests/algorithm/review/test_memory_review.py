@@ -53,6 +53,8 @@ def _load_review_modules():
         'lazymind.config',
         'lazymind.model_config',
         'lazymind.review',
+        'lazymind.review.api',
+        'lazymind.review.api.memory_review_routes',
         'lazymind.review.memory_review',
         'lazymind.review.memory_review.prompts',
         'lazymind.review.service',
@@ -63,11 +65,16 @@ def _load_review_modules():
     fake_modules = {
         'lazymind': _package('lazymind'),
         'lazymind.review': _package('lazymind.review'),
+        'lazymind.review.api': _package('lazymind.review.api'),
         'lazymind.review.memory_review': _package('lazymind.review.memory_review'),
         'lazymind.review.service': _package('lazymind.review.service'),
     }
     fake_lazyllm = ModuleType('lazyllm')
     fake_lazyllm.AutoModel = object
+    fake_lazyllm.LOG = SimpleNamespace(
+        exception=lambda *_args, **_kwargs: None,
+        info=lambda *_args, **_kwargs: None,
+    )
     fake_lazyllm.globals = _SidDict()
     fake_lazyllm.locals = _SidDict()
     fake_fs_client = ModuleType('lazyllm.tools.fs.client')
@@ -79,7 +86,6 @@ def _load_review_modules():
     fake_config = ModuleType('lazymind.config')
     fake_config.config = {'core_api_url': 'http://core', 'review_max_retries': 2}
     fake_model_config = ModuleType('lazymind.model_config')
-    fake_model_config.get_config_path = lambda: '/tmp/config.yaml'
     fake_model_config.inject_model_config = lambda _config: None
     fake_modules['lazyllm'] = fake_lazyllm
     fake_modules['lazyllm.tools'] = _package('lazyllm.tools')
@@ -104,9 +110,14 @@ def _load_review_modules():
             'lazymind.review.service.memory_review',
             Path(_ALGO) / 'lazymind/review/service/memory_review.py',
         )
+        memory_review_routes = _load_module(
+            'lazymind.review.api.memory_review_routes',
+            Path(_ALGO) / 'lazymind/review/api/memory_review_routes.py',
+        )
         return SimpleNamespace(
             memory_prompts=memory_prompts,
             memory_review=memory_review,
+            memory_review_routes=memory_review_routes,
         )
     finally:
         for name, original in original_modules.items():
@@ -120,6 +131,10 @@ def _load_memory_review_module():
     return _load_review_modules().memory_review
 
 
+def _load_memory_review_routes_module():
+    return _load_review_modules().memory_review_routes
+
+
 def _patch_runtime_bindings(
     monkeypatch,
     memory_review,
@@ -129,12 +144,9 @@ def _patch_runtime_bindings(
     fs,
     memory_editor,
     config: dict[str, Any],
-    get_config_path=None,
     inject_model_config=None,
     normalize_history_for_agent=None,
 ) -> None:
-    if get_config_path is None:
-        get_config_path = lambda: '/tmp/config.yaml'
     if inject_model_config is None:
         inject_model_config = lambda _config: None
     if normalize_history_for_agent is None:
@@ -146,7 +158,6 @@ def _patch_runtime_bindings(
     monkeypatch.setattr(memory_review, 'FS', fs)
     monkeypatch.setattr(memory_review, 'memory_editor', memory_editor)
     monkeypatch.setattr(memory_review, '_cfg', config)
-    monkeypatch.setattr(memory_review, 'get_config_path', get_config_path)
     monkeypatch.setattr(memory_review, 'inject_model_config', inject_model_config)
     monkeypatch.setattr(
         memory_review,
@@ -164,7 +175,7 @@ def test_memory_review_prompt_excludes_preferences_and_workflows():
     )
 
     assert "memory_editor(target='memory'" in prompt
-    assert "memory_editor(target='user'" in prompt
+    assert "memory_editor(target='user_preference'" in prompt
     assert 'operations' in prompt
     assert '# Task' in prompt
     assert '# Available Targets' in prompt
@@ -219,8 +230,26 @@ def test_user_review_prompt_excludes_session_history():
     assert '旧记忆' in prompt
     assert '旧用户画像' in prompt
     assert 'Choose the single most appropriate target' in prompt
-    assert "memory_editor(target='user'" in prompt
+    assert "memory_editor(target='user_preference'" in prompt
     assert "Do not call memory_editor with target='memory'" not in prompt
+
+
+def test_memory_review_payload_allows_missing_or_null_llm_config():
+    memory_review_routes = _load_memory_review_routes_module()
+
+    missing = memory_review_routes.MemoryReviewPayload(
+        user_id=' user-1 ',
+        history=[{'role': 'user', 'content': '你好'}],
+    )
+    explicit_null = memory_review_routes.MemoryReviewPayload(
+        user_id='user-1',
+        history=[{'role': 'user', 'content': '你好'}],
+        llm_config=None,
+    )
+
+    assert missing.user_id == 'user-1'
+    assert missing.llm_config is None
+    assert explicit_null.llm_config is None
 
 
 def test_review_memory_runs_agent_with_memory_editor_tool(monkeypatch):
@@ -285,10 +314,12 @@ def test_review_memory_runs_agent_with_memory_editor_tool(monkeypatch):
     assert fake_lazyllm.globals['agentic_config']['memory'] == '旧记忆'
     assert fake_lazyllm.globals['agentic_config']['user_preference'] == '旧用户画像'
     assert calls['model_config'] == {'llm': {'model': 'test'}}
+    assert calls['model_args'] == ((), {'model': 'llm'})
 
 
 def test_review_memory_returns_success_when_no_tool_submission(monkeypatch):
     memory_review = _load_memory_review_module()
+    calls = {}
 
     class FakeModel:
         def __init__(self, *args, **kwargs):
@@ -310,6 +341,9 @@ def test_review_memory_returns_success_when_no_tool_submission(monkeypatch):
     def memory_editor(*args, **kwargs):
         return None
 
+    def inject_model_config(config):
+        calls['model_config'] = config
+
     _patch_runtime_bindings(
         monkeypatch,
         memory_review,
@@ -318,6 +352,7 @@ def test_review_memory_returns_success_when_no_tool_submission(monkeypatch):
         fs=object,
         memory_editor=memory_editor,
         config={'core_api_url': 'http://core', 'review_max_retries': 2},
+        inject_model_config=inject_model_config,
     )
 
     result = memory_review.review_memory(
@@ -325,7 +360,7 @@ def test_review_memory_returns_success_when_no_tool_submission(monkeypatch):
         history=[{'role': 'user', 'content': '你好'}],
         memory='',
         user='',
-        llm_config={'llm': {'model': 'test'}},
     )
 
     assert result.model_dump() == {'status': 'success'}
+    assert calls['model_config'] is None

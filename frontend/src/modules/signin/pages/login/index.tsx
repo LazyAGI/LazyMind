@@ -8,6 +8,7 @@ import {
 } from "@/modules/signin/utils/request";
 import { AgentAppsAuth } from "@/components/auth";
 import { useTranslation } from "react-i18next";
+import { runtimeFeatures } from "@/runtime/features";
 
 interface LoginForm {
   username: string;
@@ -143,9 +144,11 @@ const Login = () => {
           >
             {t("auth.login")}
           </Button>
-          <div style={{ textAlign: "center", marginTop: "16px", color: '#86909c' }}>
-            {t("auth.noAccount")} <a style={{ color: '#1677ff', fontWeight: 500 }} onClick={() => navigate("/register")}>{t("auth.registerNow")}</a>
-          </div>
+          {!runtimeFeatures.hideRegister && (
+            <div style={{ textAlign: "center", marginTop: "16px", color: '#86909c' }}>
+              {t("auth.noAccount")} <a style={{ color: '#1677ff', fontWeight: 500 }} onClick={() => navigate("/register")}>{t("auth.registerNow")}</a>
+            </div>
+          )}
         </Form.Item>
       </Form>
     </div>

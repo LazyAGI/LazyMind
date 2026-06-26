@@ -10,6 +10,34 @@ _TOOL_RESULT_PREVIEW_TAG = 'trp'
 _TOOL_CALL_TAG = 'tool_call'
 _TOOL_RESULT_TAG = 'tool_result'
 
+_SEARCH_TOOL_RE = re.compile(
+    r'^(?P<class_name>[A-Za-z0-9]+Search)_(?P<method>search|get_content|get_contents|meta_search|meta_catalog)$'
+)
+
+
+def _humanize_search_brand(class_name: str) -> str:
+    stem = class_name[:-len('Search')] if class_name.endswith('Search') else class_name
+    stem = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1 \2', stem)
+    return re.sub(r'([a-z0-9])([A-Z])', r'\1 \2', stem)
+
+
+def _search_tool_match(tool_name: str) -> re.Match | None:
+    for candidate in _tool_name_suffixes(tool_name):
+        match = _SEARCH_TOOL_RE.fullmatch(candidate)
+        if match:
+            return match
+    return None
+
+
+def _render_tool_context(tool_name: str) -> tuple[str, dict[str, str]]:
+    match = _search_tool_match(tool_name)
+    if not match:
+        return tool_name, {}
+    brand = _humanize_search_brand(match.group('class_name'))
+    method = match.group('method')
+    return f'search_provider_{method}', {'brand': brand, 'method': method.replace('_', ' ')}
+
+
 _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'kb_search': 'query',
     'kb_tmp_search': 'query',
@@ -17,16 +45,12 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'kb_get_window_nodes': 'number',
     'kb_keyword_search': 'keyword',
     'calculator': 'expression',
-    'WikipediaSearch_search': 'query',
-    'GoogleSearch_search': 'query',
-    'BingSearch_search': 'query',
-    'BochaSearch_search': 'query',
+    'search_provider_search': 'query',
+    'search_provider_get_content': 'item.title / item.url',
+    'search_provider_get_contents': 'items.title / items.url',
+    'search_provider_meta_search': 'query',
+    'search_provider_meta_catalog': 'include_sample_values',
     'url_fetch': 'url',
-    'SciverseSearch_search': 'query',
-    'SciverseSearch_get_content': 'item.extra.doc_id',
-    'SciverseSearch_meta_search': 'query',
-    'SciverseSearch_meta_catalog': 'include_sample_values',
-    'ArxivSearch_search': 'query',
     'memory_editor': 'target',
     'read_memory': 'target',
     'vocab_learn': 'suggestions.word <-> suggestions.synonym',
@@ -62,16 +86,12 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
 }
 
 _REPRESENTATIVE_TOOL_RESULTS: dict[str, str] = {
-    'WikipediaSearch_search': 'title',
-    'GoogleSearch_search': 'title',
-    'BingSearch_search': 'title',
-    'BochaSearch_search': 'title',
+    'search_provider_search': 'title',
+    'search_provider_get_content': 'text',
+    'search_provider_get_contents': 'text',
+    'search_provider_meta_search': 'total_count',
+    'search_provider_meta_catalog': 'fields',
     'url_fetch': 'final_url',
-    'SciverseSearch_search': 'title',
-    'SciverseSearch_get_content': 'text',
-    'SciverseSearch_meta_search': 'total_count',
-    'SciverseSearch_meta_catalog': 'fields',
-    'ArxivSearch_search': 'query',
     'calculator': 'result',
     'vision_extractor': 'description',
     'skill_editor': 'reason',
@@ -108,16 +128,12 @@ _TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'kb_get_window_nodes': 'Expanding nearby related segments around {value} for review.',
     'kb_keyword_search': 'Searching target documents with {value} as the keyword.',
     'calculator': 'Evaluating the expression {value}.',
-    'WikipediaSearch_search': 'Searching Wikipedia for {value}.',
-    'GoogleSearch_search': 'Searching Google for {value}.',
-    'BingSearch_search': 'Searching Bing for {value}.',
-    'BochaSearch_search': 'Searching Bocha for {value}.',
+    'search_provider_search': 'Searching {brand} for {value}.',
+    'search_provider_get_content': 'Reading a {brand} search result for {value}.',
+    'search_provider_get_contents': 'Reading selected {brand} search results for {value}.',
+    'search_provider_meta_search': 'Searching {brand} metadata for {value}.',
+    'search_provider_meta_catalog': 'Loading {brand} metadata fields.',
     'url_fetch': 'Reading page content from {value}.',
-    'SciverseSearch_search': 'Searching Sciverse papers for {value}.',
-    'SciverseSearch_get_content': 'Reading Sciverse full text for {value}.',
-    'SciverseSearch_meta_search': 'Searching Sciverse metadata for {value}.',
-    'SciverseSearch_meta_catalog': 'Loading Sciverse metadata fields.',
-    'ArxivSearch_search': 'Searching arXiv papers for {value}.',
     'vision_extractor': 'Extracting information from the image.',
     'memory_editor': 'Saving long-term memory to {value} now.',
     'read_memory': 'Reading {value} now.',
@@ -162,16 +178,12 @@ _ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'kb_get_window_nodes': '正在扩展 {value} 附近的相关片段。',
     'kb_keyword_search': '正在目标文档中搜索关键词 {value}。',
     'calculator': '正在计算表达式 {value}。',
-    'WikipediaSearch_search': '正在维基百科中搜索 {value}。',
-    'GoogleSearch_search': '正在 Google 中搜索 {value}。',
-    'BingSearch_search': '正在 Bing 中搜索 {value}。',
-    'BochaSearch_search': '正在博查中搜索 {value}。',
+    'search_provider_search': '正在使用 {brand} 搜索 {value}。',
+    'search_provider_get_content': '正在读取 {brand} 搜索结果 {value}。',
+    'search_provider_get_contents': '正在批量读取 {brand} 搜索结果 {value}。',
+    'search_provider_meta_search': '正在检索 {brand} 元数据 {value}。',
+    'search_provider_meta_catalog': '正在加载 {brand} 元数据字段目录。',
     'url_fetch': '正在读取网页 {value} 。',
-    'SciverseSearch_search': '正在 Sciverse 中搜索论文 {value}。',
-    'SciverseSearch_get_content': '正在读取 Sciverse 文献 {value} 的全文。',
-    'SciverseSearch_meta_search': '正在 Sciverse 中检索论文元数据 {value}。',
-    'SciverseSearch_meta_catalog': '正在加载 Sciverse 元数据字段目录。',
-    'ArxivSearch_search': '正在 arXiv 中搜索论文 {value}。',
     'vision_extractor': '正在提取图像信息。',
     'memory_editor': '正在将长期记忆保存到 {value}。',
     'read_memory': '正在读取{value}。',
@@ -216,21 +228,17 @@ _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'kb_get_window_nodes': 'Nearby related segments around {value} were expanded successfully.',
     'kb_keyword_search': 'Document results for keyword {value} were found successfully.',
     'calculator': 'Expression was evaluated successfully, result is {value}',
-    'WikipediaSearch_search': 'Wikipedia results for {value} are ready now.',
-    'GoogleSearch_search': 'Google results for {value} are ready now.',
-    'BingSearch_search': 'Bing results for {value} are ready now.',
-    'BochaSearch_search': 'Bocha results for {value} are ready now.',
+    'search_provider_search': '{brand} search results for {value} are ready now.',
+    'search_provider_get_content': '{brand} search result content for {value} was loaded successfully.',
+    'search_provider_get_contents': 'Selected {brand} search result content for {value} was loaded successfully.',
+    'search_provider_meta_search': '{brand} metadata search found {value} matching records.',
+    'search_provider_meta_catalog': '{brand} metadata fields were loaded successfully.',
     'url_fetch': 'Page content from {value} was loaded successfully.',
-    'SciverseSearch_search': 'Sciverse results for {value} are ready now.',
-    'SciverseSearch_get_content': 'Sciverse full text for {value} was loaded successfully.',
-    'SciverseSearch_meta_search': 'Sciverse metadata search found {value} matching records.',
-    'SciverseSearch_meta_catalog': 'Sciverse metadata fields were loaded successfully.',
-    'ArxivSearch_search': 'arXiv results for {value} are ready now.',
     'vision_extractor': 'Image information has been extracted.',
-    'memory_editor': 'Long-term memory was saved to {value}.',
+    'memory_editor': 'Memory changes for {value} were submitted and are pending review.',
     'read_memory': '{value} was read successfully.',
     'vocab_learn': 'Vocabulary entries for {value} were updated successfully.',
-    'skill_editor': 'Reusable skill notes for {value} were updated successfully.',
+    'skill_editor': 'Skill changes for {value} were submitted and are pending review.',
     'get_skill': 'Skill details for {value} were loaded successfully now.',
     'read_reference': 'Skill reference material from {value} was loaded successfully.',
     'run_script': 'Skill helper script at {value} finished running successfully.',
@@ -271,21 +279,17 @@ _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'kb_get_window_nodes': '已成功扩展 {value} 附近的相关片段。',
     'kb_keyword_search': '已找到关键词 {value} 的文档结果。',
     'calculator': '已计算完成，结果为 {value}',
-    'WikipediaSearch_search': '已找到 {value} 的维基百科结果。',
-    'GoogleSearch_search': '已找到 {value} 的 Google 结果。',
-    'BingSearch_search': '已找到 {value} 的 Bing 结果。',
-    'BochaSearch_search': '已找到 {value} 的博查结果。',
+    'search_provider_search': '已找到 {value} 的 {brand} 搜索结果。',
+    'search_provider_get_content': '已成功读取 {brand} 搜索结果 {value} 的内容。',
+    'search_provider_get_contents': '已成功批量读取 {brand} 搜索结果 {value} 的内容。',
+    'search_provider_meta_search': '已找到 {value} 条 {brand} 元数据结果。',
+    'search_provider_meta_catalog': '已成功加载 {brand} 元数据字段目录。',
     'url_fetch': '已成功加载 {value} 的网页内容。',
-    'SciverseSearch_search': '已找到 {value} 的 Sciverse 结果。',
-    'SciverseSearch_get_content': '已成功读取 Sciverse 文献 {value} 的全文。',
-    'SciverseSearch_meta_search': '已找到 {value} 条 Sciverse 元数据结果。',
-    'SciverseSearch_meta_catalog': '已成功加载 Sciverse 元数据字段目录。',
-    'ArxivSearch_search': '已找到 {value} 的 arXiv 结果。',
     'vision_extractor': '已成功提取图像信息。',
-    'memory_editor': '已成功将长期记忆保存到 {value}。',
+    'memory_editor': '{value} 的记忆修改已提交，等待审核。',
     'read_memory': '{value}已成功读取。',
     'vocab_learn': '已成功更新 {value} 的词汇表。',
-    'skill_editor': '已成功更新 {value} 的技能。',
+    'skill_editor': '{value} 技能修改已提交，等待审核。',
     'get_skill': '已成功加载 {value} 的技能详情。',
     'read_reference': '已成功加载 {value} 技能的参考资料。',
     'run_script': '技能 {value} 的预定义脚本已成功运行。',
@@ -324,16 +328,12 @@ _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'kb_get_window_nodes': 'Nearby related segments around {value} could not be expanded.',
     'kb_keyword_search': 'Document results for keyword {value} could not be found.',
     'calculator': 'Expression {value} could not be evaluated.',
-    'WikipediaSearch_search': 'Wikipedia results for {value} could not be retrieved.',
-    'GoogleSearch_search': 'Google results for {value} could not be retrieved.',
-    'BingSearch_search': 'Bing results for {value} could not be retrieved.',
-    'BochaSearch_search': 'Bocha results for {value} could not be retrieved.',
+    'search_provider_search': '{brand} search results for {value} could not be retrieved.',
+    'search_provider_get_content': '{brand} search result content for {value} could not be loaded.',
+    'search_provider_get_contents': 'Selected {brand} search result content for {value} could not be loaded.',
+    'search_provider_meta_search': '{brand} metadata results for {value} could not be retrieved.',
+    'search_provider_meta_catalog': '{brand} metadata fields could not be loaded.',
     'url_fetch': 'Page content from {value} could not be loaded.',
-    'SciverseSearch_search': 'Sciverse results for {value} could not be retrieved.',
-    'SciverseSearch_get_content': 'Sciverse full text for {value} could not be loaded.',
-    'SciverseSearch_meta_search': 'Sciverse metadata results for {value} could not be retrieved.',
-    'SciverseSearch_meta_catalog': 'Sciverse metadata fields could not be loaded.',
-    'ArxivSearch_search': 'arXiv results for {value} could not be retrieved.',
     'vision_extractor': 'Vision extraction for {value} could not be completed.',
     'memory_editor': 'Long-term memory could not be saved to {value}.',
     'read_memory': '{value} could not be read.',
@@ -377,16 +377,12 @@ _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'kb_get_window_nodes': '未能扩展 {value} 附近的相关片段。',
     'kb_keyword_search': '未能找到关键词 {value} 的文档结果。',
     'calculator': '未能计算表达式 {value}。',
-    'WikipediaSearch_search': '未能获取 {value} 的维基百科结果。',
-    'GoogleSearch_search': '未能获取 {value} 的 Google 结果。',
-    'BingSearch_search': '未能获取 {value} 的 Bing 结果。',
-    'BochaSearch_search': '未能获取 {value} 的博查结果。',
+    'search_provider_search': '未能获取 {value} 的 {brand} 搜索结果。',
+    'search_provider_get_content': '未能读取 {brand} 搜索结果 {value} 的内容。',
+    'search_provider_get_contents': '未能批量读取 {brand} 搜索结果 {value} 的内容。',
+    'search_provider_meta_search': '未能获取 {value} 的 {brand} 元数据结果。',
+    'search_provider_meta_catalog': '未能加载 {brand} 元数据字段目录。',
     'url_fetch': '未能加载网页 {value} 的内容。',
-    'SciverseSearch_search': '未能获取 {value} 的 Sciverse 结果。',
-    'SciverseSearch_get_content': '未能读取 Sciverse 文献 {value} 的全文。',
-    'SciverseSearch_meta_search': '未能获取 {value} 的 Sciverse 元数据结果。',
-    'SciverseSearch_meta_catalog': '未能加载 Sciverse 元数据字段目录。',
-    'ArxivSearch_search': '未能获取 {value} 的 arXiv 结果。',
     'vision_extractor': '未能完成 {value} 的图像信息提取。',
     'memory_editor': '未能将长期记忆保存到 {value}。',
     'read_memory': '{value}未能读取。',
@@ -673,16 +669,19 @@ _TOOL_NOT_AVAILABLE_RE = re.compile(
 )
 
 
+def _tool_name_suffixes(tool_name: str) -> list[str]:
+    if not tool_name:
+        return []
+    parts = tool_name.split('_')
+    return ['_'.join(parts[i:]) for i in range(len(parts))]
+
+
 def _resolve_tool_key(tool_name: str, mapping: dict[str, Any]) -> Any:
     """Look up *tool_name* in *mapping*, falling back to suffix match for
     class-registered tools prefixed like ``KBToolGroup_kb_search``."""
     if not tool_name or not mapping:
         return None
-    if tool_name in mapping:
-        return mapping[tool_name]
-    parts = tool_name.split('_')
-    for i in range(1, len(parts)):
-        suffix = '_'.join(parts[i:])
+    for suffix in _tool_name_suffixes(tool_name):
         if suffix in mapping:
             return mapping[suffix]
     return None
@@ -742,7 +741,8 @@ def _language_fallback(language: str, en_fallback: str, zh_fallback: str) -> str
 
 
 def _representative_tool_argument(tool_name: str, arguments: Any) -> Any:
-    expression = _resolve_tool_key(tool_name, _REPRESENTATIVE_TOOL_ARGUMENTS)
+    render_name, _ = _render_tool_context(tool_name)
+    expression = _resolve_tool_key(render_name, _REPRESENTATIVE_TOOL_ARGUMENTS)
     if not isinstance(arguments, dict):
         return arguments
     if expression:
@@ -883,9 +883,10 @@ def _friendly_preview_text(value: Any) -> str:
 
 
 def _representative_tool_result(tool_name: str, result: Any) -> Any:
+    render_name, _ = _render_tool_context(tool_name)
     if isinstance(result, dict):
         payload = result.get('result') if isinstance(result.get('result'), dict) else result
-        key = _resolve_tool_key(tool_name, _REPRESENTATIVE_TOOL_RESULTS)
+        key = _resolve_tool_key(render_name, _REPRESENTATIVE_TOOL_RESULTS)
         if key and payload.get(key) is not None:
             return payload.get(key)
         for fallback_key in _FALLBACK_REPRESENTATIVE_RESULT_KEYS:
@@ -961,28 +962,34 @@ def _ensure_trailing_newline(text: str) -> str:
     return text if text.endswith('\n') else f'{text}\n'
 
 
+class _SafeFormatContext(dict):
+    def __missing__(self, key: str) -> str:
+        return '{' + key + '}'
+
+
 def _render_preview_template(
     tool_name: str,
     value: str,
     template_map: dict[str, str],
     fallback_template: str,
 ) -> str:
-    template = _resolve_tool_key(tool_name, template_map)
+    render_name, render_context = _render_tool_context(tool_name)
+    template = _resolve_tool_key(render_name, template_map)
     match_group = None
     if template is None:
-        template, m = _resolve_tool_key_regex(tool_name, template_map)
+        template, m = _resolve_tool_key_regex(render_name, template_map)
         if m:
             match_group = m.group(1) if m.lastindex else m.group(0)
     template = template or fallback_template
-    if '{match}' in template:
-        label = match_group or tool_name
-        return _ensure_trailing_newline(template.replace('{match}', f'**{label}**'))
-    if '{tool_name}' in template:
-        return _ensure_trailing_newline(template.replace('{tool_name}', f'**{tool_name}**'))
-    if '{value}' not in template:
-        return _ensure_trailing_newline(template)
     preview_value = value or 'the current item'
-    return _ensure_trailing_newline(template.format(value=f'**{preview_value}**'))
+    context = {
+        key: f'**{item}**'
+        for key, item in render_context.items()
+    }
+    context['value'] = f'**{preview_value}**'
+    context['tool_name'] = f'**{tool_name}**'
+    context['match'] = f'**{match_group or render_name}**'
+    return _ensure_trailing_newline(template.format_map(_SafeFormatContext(context)))
 
 
 def _tool_call_preview(tool_name: str, preview_value: str, language: str = 'en') -> str:
