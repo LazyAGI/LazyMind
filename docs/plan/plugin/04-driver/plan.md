@@ -125,14 +125,17 @@ ALTER TABLE conversations
 1. 读 `conversations.enable_plugin` / `plugin_mode` / `enable_subagent`；非空则用对话值。
 2. 否则读 `user_chat_settings`；无记录则 `enable_plugin=true`、`plugin_mode=dynamic`、`enable_subagent=true`。
 3. 写入 `buildChatRequestBody`，透传 Python `agentic_config`。
-4. 若请求 body 显式携带这些字段（对话 UI 刚修改），以 body 为准并**回写** `conversations` 列。
+4. **首次发消息**（`ensureConversation` 新建会话时）若请求 body 携带 `initial_plugin_settings`，以其为准写入 `conversations` 列；**已有会话**时完全忽略请求 body 中的配置字段，`loadUserAgentConfig` 始终从 DB 读取。
 
 > 代码示例见 [`code.md` · C1](./code.md#c1)。
 
 ### 2.3 前端
 
-- **设置页**：读写 `GET/PATCH /api/core/user/chat-settings`。
-- **对话界面**：顶栏或 PluginPanel 展示当前 `enable_plugin` / `plugin_mode` / `enable_subagent`；修改时 PATCH 对话配置并影响后续轮次。
+前端配置流转路径：
+
+- **新建对话**：弹窗首次打开时调用 `GET /api/core/user/chat-settings` 拉取用户全局默认；用户在弹窗修改后暂存到 `pendingPluginSettingsRef`（不调接口）；**第一次发消息**时将暂存值作为 `initial_plugin_settings` 放入请求 body，由 Go `ensureConversation` 写入 `conversations` 表。
+- **已有对话**：配置来自 `GET /conversations/{id}:detail` 返回的 `enable_plugin` 等字段（conversation detail 回填），**不**再调用 `getChatSettings`；用户在弹窗修改后直接调用 `PATCH /conversations/{id}/plugin-settings` 更新 DB，后续轮次生效。
+- 前端**不需要**独立的 `GET /conversations/{id}/plugin-settings` 接口；后续消息 body 无需携带配置字段（Go 始终从 DB 读）。
 - 移除对 `LAZYMIND_PLUGIN_MODE` 的依赖；`eventloop.go` 的 `defaultMode()` **废弃**，改从 `plugin_context.plugin_mode`（由 Go 在创建 / 推进步骤时注入）读取。
 
 ---
@@ -600,6 +603,8 @@ CREATE TABLE user_schedules (
 | `create_schedule` | 解析自然语言时间 → cron + prompt_template |
 | `list_schedules` / `cancel_schedule` | 管理用户定时任务 |
 
+**注入原则**：这三个工具与 `enable_plugin` 无关，在 `chat_service.py` 中**无条件注入**（独立于 `resolve_plugin_injection`），即使 `enable_plugin=false` 也可用。
+
 ---
 
 ## 十一、DriverAgent 能力补全
@@ -772,9 +777,10 @@ ChatAgent 通过用户消息语义 + 步骤状态决策（由 system prompt 指�
    - 按 `plugin_mode` 动态注册工具（§3.3）。
    - `driver_agent.py`：llm_config、附件 + **plugin artifact** 读取。
    - `plugin_manager.py`：`update_intent`、`ask_user`、查询工具；框架内置意图管理提示词。
+   - 工具注入规则拆分：`resolve_plugin_injection` 只负责插件相关工具和提示词；`_build_chat_agent_task_context` 移到 `chat_service.py`，条件改为 `enable_plugin or enable_subagent`（非仅 `enable_plugin`）；`create_schedule` / `list_schedules` / `cancel_schedule` 在 `chat_service.py` 无条件注入，不经 `resolve_plugin_injection`。
+   - `_FRAMEWORK_TOOLS` 列表补全 `patch_artifact` 和 `discard_draft`（与 `runner.py` 保持一致）。
    - ChatAgent system prompt 注入中断恢复指引：识别「继续」时构造 checkpoint 语义的 `retry_hint`（§14.2）。
    - 范围重跑提示词（§7.2）。
-   - `create_schedule` 等定时工具。
 
 4. **前端**
    - 设置页 + 对话级 `enable_plugin` / `plugin_mode` / `enable_subagent` UI。
