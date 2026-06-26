@@ -179,6 +179,27 @@ func TestRuntimeConfigMovesDefaultFrontendPortWhenOccupied(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigKeepsPinnedFrontendPortWhenOccupied(t *testing.T) {
+	t.Setenv(frontendPortEnvVar, strconv.Itoa(defaultFrontendPort))
+	t.Setenv(localPortsPinnedEnvVar, "1")
+	ln := occupyLocalPorts(t, defaultFrontendPort)
+	defer func() {
+		for _, existing := range ln {
+			_ = existing.Close()
+		}
+	}()
+
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, _, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if cfg.FrontendPort != defaultFrontendPort {
+		t.Fatalf("expected pinned frontend port %d got %d", defaultFrontendPort, cfg.FrontendPort)
+	}
+}
+
 func TestFrontendBuildEnvIncludesLocalViteOverrides(t *testing.T) {
 	t.Setenv("VITE_LAZYMIND_MODE", "")
 	t.Setenv("VITE_HIDE_EVO", "true")
@@ -647,6 +668,9 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 	}
 	if !strings.Contains(proc.Command, "LAZYMIND_FRONTEND_PORT="+strconv.Itoa(cfg.FrontendPort)) {
 		t.Fatalf("compose command missing frontend env: %q", proc.Command)
+	}
+	if !strings.Contains(proc.Command, localPortsPinnedEnvVar+"=1") {
+		t.Fatalf("compose command missing pinned port env: %q", proc.Command)
 	}
 	if !strings.Contains(proc.Shutdown.Command, "internal compose-down --profile "+profile) {
 		t.Fatalf("missing compose-down command: %q", proc.Shutdown.Command)

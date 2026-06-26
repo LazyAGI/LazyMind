@@ -141,6 +141,7 @@ func commandWithEnv(env []string, command string) string {
 func runtimeCommandEnv(cfg RuntimeConfig) []string {
 	env := append([]string{}, localComposeEnv(cfg)...)
 	env = append(env,
+		localPortsPinnedEnvVar+"=1",
 		processComposePortEnvVar+"="+strconv.Itoa(cfg.ProcessComposePort),
 		authServicePortEnvVar+"="+strconv.Itoa(cfg.AuthService.Port),
 	)

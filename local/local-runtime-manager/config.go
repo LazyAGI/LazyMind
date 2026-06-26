@@ -11,6 +11,7 @@ import (
 
 const (
 	defaultProfileEnvVar          = "LAZYMIND_LOCAL_PROFILE"
+	localPortsPinnedEnvVar        = "LAZYMIND_LOCAL_PORTS_PINNED"
 	processComposePortEnvVar      = "LAZYMIND_PROCESS_COMPOSE_PORT"
 	localUpTimeoutEnvVar          = "LAZYMIND_LOCAL_UP_TIMEOUT"
 	localDownTimeoutEnvVar        = "LAZYMIND_LOCAL_DOWN_TIMEOUT"
@@ -223,6 +224,9 @@ func (a *localPortAllocator) envOrAvailableDefaultCanMove(envName string, fallba
 		return a.availableFrom(fallback, 500)
 	}
 	port := envPort(envName, fallback)
+	if envBool(localPortsPinnedEnvVar, false) {
+		return a.reserve(port)
+	}
 	if port != fallback || localPortAvailable(port) {
 		return a.reserve(port)
 	}
