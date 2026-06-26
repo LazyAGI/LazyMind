@@ -179,6 +179,22 @@ func TestRuntimeConfigMovesDefaultFrontendPortWhenOccupied(t *testing.T) {
 	}
 }
 
+func TestFrontendBuildEnvIncludesLocalViteOverrides(t *testing.T) {
+	t.Setenv("VITE_LAZYMIND_MODE", "")
+	t.Setenv("VITE_HIDE_EVO", "true")
+	t.Setenv("VITE_API_BASE_URL", "http://127.0.0.1:5024")
+	t.Setenv("VITE_APP_LOGO", "/logo.svg")
+	t.Setenv("VITE_APP_CHAT_TITLE", "Local Chat")
+
+	assertStringSlicesEqual(t, frontendBuildEnv(), []string{
+		"VITE_LAZYMIND_MODE=local",
+		"VITE_HIDE_EVO=true",
+		"VITE_API_BASE_URL=http://127.0.0.1:5024",
+		"VITE_APP_LOGO=/logo.svg",
+		"VITE_APP_CHAT_TITLE=Local Chat",
+	})
+}
+
 func TestAlgorithmServiceEnvIncludesCloudParityDefaults(t *testing.T) {
 	for _, name := range []string{
 		"TZ",
@@ -382,6 +398,29 @@ func TestAcquireAlgorithmPythonLockWaitsForLiveLock(t *testing.T) {
 	}
 }
 
+func TestUVCommandFindsUserLocalInstall(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("UV", "")
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("HOME", home)
+
+	uv := filepath.Join(home, ".local", "bin", "uv")
+	if err := os.MkdirAll(filepath.Dir(uv), 0o755); err != nil {
+		t.Fatalf("mkdir uv dir: %v", err)
+	}
+	if err := os.WriteFile(uv, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write uv: %v", err)
+	}
+
+	got, ok := uvCommand()
+	if !ok {
+		t.Fatal("expected uv command from user local install")
+	}
+	if got != uv {
+		t.Fatalf("expected %s got %s", uv, got)
+	}
+}
+
 func TestFilterRemainingServices(t *testing.T) {
 	services := []string{"auth-service", "core", "web"}
 	remaining, err := filterRemainingServices(services, []string{"core"})
@@ -394,6 +433,46 @@ func TestFilterRemainingServices(t *testing.T) {
 	if _, err := filterRemainingServices(services, []string{"does-not-exist"}); err == nil {
 		t.Fatalf("expected error for unknown disabled service")
 	}
+}
+
+func TestBuildEnabledServicesUsesDockerComposeBuild(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	runner := &fakeRunner{t: t}
+	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
+	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
+		assertCommand(t, cmd, "docker",
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
+			"--profile", "milvus",
+			"--profile", "opensearch",
+			"config", "--format", "json",
+		)
+		return CommandResult{Stdout: `{
+  "services": {
+    "auth-service": {"build": {"context": "./backend/auth"}},
+    "core": {"image": "core-image"},
+    "web": {"build": {"context": "./frontend"}}
+  }
+}`}, nil
+	}, func(cmd Command) (CommandResult, error) {
+		assertCommand(t, cmd, "docker",
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
+			"--profile", "milvus",
+			"--profile", "opensearch",
+			"build",
+			"auth-service",
+			"web",
+		)
+		return CommandResult{}, nil
+	})
+	if err := manager.compose.BuildEnabledServices(context.Background(), repo, []string{"auth-service", "core", "web"}); err != nil {
+		t.Fatalf("build enabled services: %v", err)
+	}
+	runner.assertCommandCount(2)
 }
 
 func TestClassifyComposeReadinessReportsFatalBeforePending(t *testing.T) {

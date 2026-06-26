@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -190,17 +189,10 @@ type composeConfigJSON struct {
 }
 
 type composeConfigService struct {
-	Image string              `json:"image"`
 	Build *composeBuildConfig `json:"build"`
 }
 
-type composeBuildConfig struct {
-	Context    string            `json:"context"`
-	Dockerfile string            `json:"dockerfile"`
-	Args       map[string]string `json:"args"`
-	Network    string            `json:"network"`
-	Target     string            `json:"target"`
-}
+type composeBuildConfig struct{}
 
 func (m *ComposeManager) BuildEnabledServices(ctx context.Context, repoRoot string, services []string) error {
 	if len(services) == 0 {
@@ -212,31 +204,34 @@ func (m *ComposeManager) BuildEnabledServices(ctx context.Context, repoRoot stri
 	}
 
 	seen := map[string]struct{}{}
+	buildServices := []string{}
 	for _, serviceName := range services {
 		service, ok := config.Services[serviceName]
 		if !ok || service.Build == nil {
 			continue
 		}
-		args, err := dockerBuildArgs(service)
-		if err != nil {
-			return fmt.Errorf("build config for %s: %w", serviceName, err)
-		}
-		key := strings.Join(args, "\x00")
-		if _, ok := seen[key]; ok {
+		if _, ok := seen[serviceName]; ok {
 			continue
 		}
-		seen[key] = struct{}{}
-		cmd := Command{Name: "docker", Args: args, Dir: repoRoot}
-		if streamer, ok := m.runner.(CommandStreamer); ok {
-			if err := streamer.Stream(ctx, cmd, os.Stdout, os.Stderr); err != nil {
-				return fmt.Errorf("docker build %s failed: %w", serviceName, err)
-			}
-			continue
+		seen[serviceName] = struct{}{}
+		buildServices = append(buildServices, serviceName)
+	}
+	if len(buildServices) == 0 {
+		return nil
+	}
+
+	args := append(m.composeArgs(repoRoot), "build")
+	args = append(args, buildServices...)
+	cmd := Command{Name: "docker", Args: args, Dir: repoRoot}
+	if streamer, ok := m.runner.(CommandStreamer); ok {
+		if err := streamer.Stream(ctx, cmd, os.Stdout, os.Stderr); err != nil {
+			return fmt.Errorf("docker compose build failed: %w", err)
 		}
-		res, err := m.runner.Run(ctx, cmd)
-		if err != nil {
-			return fmt.Errorf("docker build %s failed: %w (%s)", serviceName, err, strings.TrimSpace(res.Stderr))
-		}
+		return nil
+	}
+	res, err := m.runner.Run(ctx, cmd)
+	if err != nil {
+		return fmt.Errorf("docker compose build failed: %w (%s)", err, strings.TrimSpace(res.Stderr))
 	}
 	return nil
 }
@@ -252,39 +247,6 @@ func (m *ComposeManager) ComposeConfigJSON(ctx context.Context, repoRoot string)
 		return composeConfigJSON{}, fmt.Errorf("parse docker compose config json: %w", err)
 	}
 	return config, nil
-}
-
-func dockerBuildArgs(service composeConfigService) ([]string, error) {
-	if service.Build == nil {
-		return nil, fmt.Errorf("missing build config")
-	}
-	contextDir := strings.TrimSpace(service.Build.Context)
-	if contextDir == "" {
-		return nil, fmt.Errorf("missing build context")
-	}
-	args := []string{"build"}
-	if image := strings.TrimSpace(service.Image); image != "" {
-		args = append(args, "-t", image)
-	}
-	if dockerfile := strings.TrimSpace(service.Build.Dockerfile); dockerfile != "" {
-		args = append(args, "-f", filepath.Join(contextDir, dockerfile))
-	}
-	if target := strings.TrimSpace(service.Build.Target); target != "" {
-		args = append(args, "--target", target)
-	}
-	if network := strings.TrimSpace(service.Build.Network); network != "" {
-		args = append(args, "--network", network)
-	}
-	keys := make([]string, 0, len(service.Build.Args))
-	for key := range service.Build.Args {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		args = append(args, "--build-arg", key+"="+service.Build.Args[key])
-	}
-	args = append(args, contextDir)
-	return args, nil
 }
 
 func localComposeEnv(cfg RuntimeConfig) []string {

@@ -101,11 +101,17 @@ func frontendBuildEnv() []string {
 	if mode == "" {
 		mode = "local"
 	}
-	return []string{"VITE_LAZYMIND_MODE=" + mode}
+	env := []string{"VITE_LAZYMIND_MODE=" + mode}
+	for _, key := range []string{"VITE_HIDE_EVO", "VITE_API_BASE_URL", "VITE_APP_LOGO", "VITE_APP_CHAT_TITLE"} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			env = append(env, key+"="+value)
+		}
+	}
+	return env
 }
 
 func writeCaddyfile(paths RuntimePaths, cfg RuntimeConfig) error {
-	distRoot := filepath.Join(paths.RepoRoot, "frontend", "dist")
+	distRoot := filepath.ToSlash(filepath.Join(paths.RepoRoot, "frontend", "dist"))
 	proxy := "http://127.0.0.1:" + strconv.Itoa(cfg.LocalProxy.Port)
 	content := fmt.Sprintf(`{
 	admin off

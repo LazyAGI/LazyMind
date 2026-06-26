@@ -303,7 +303,11 @@ func uvCommand() (string, bool) {
 	if uv, err := exec.LookPath("uv"); err == nil {
 		return uv, true
 	}
-	const userUV = "/home/panyang/.local/bin/uv"
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", false
+	}
+	userUV := filepath.Join(home, ".local", "bin", "uv")
 	if info, err := os.Stat(userUV); err == nil && !info.IsDir() {
 		return userUV, true
 	}
