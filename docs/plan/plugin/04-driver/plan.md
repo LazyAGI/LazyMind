@@ -10,7 +10,7 @@
 
 ## 阅读顺序
 
-1. 先读「一、核心概念与设计原则」，掌握模式语义与配置层级。
+1. 先读「一、核心概念与设计原则」，掌握模式语义、配置层级与状态机原则（§1.5）。
 2. 「二」用户配置体系；「三」驱动模式控制；「四」步骤级执行控制（停止 / 继续 / 重试）。
 3. 「五」并行执行；「六」意图与约束；「七」范围重跑。
 4. 「八」Ask 机制；「九」TaskCenter；「十」定时任务；「十一」DriverAgent 能力补全。
@@ -87,6 +87,18 @@ Go / Python 运行时
 
 并行执行、停止中断、DriverAgent 裁决、定时触发，均由 Go 侧 `eventloop.go` / TaskCenter 控制。Python 的 `_trigger_plugin_step` / `advance_step` 只负责发射信号；多路并行由 Go 并发启动多个 `go subagent.Run(...)`。
 
+### 1.5 Session 状态机简化原则
+
+Session 只维护三种语义状态：`active`（有任务在跑）、`waiting`（等用户决策）、`completed`（明确结束）。
+
+**不再使用** `failed` / `interrupted` 作为 Session 终态——失败和中断是 SubAgent task 的属性，不是 Session 的属性。步骤失败后 Session 统一进入 `waiting`，由用户决策下一步。
+
+`completed` 的唯一判据：`plugin_session_steps` 中最新一条记录的 `step_id == "__end__"`（持久化写入，可追溯）。`__end__` 到达时先写步骤记录，再更新 Session 状态。
+
+**auto 模式兜底**：`triggerNextChatTurn` 完成后，若 Session 仍是 `active`（ChatAgent 未调用 `advance_step`），自动降级为 `waiting`（`reason: chat_agent_no_advance`），避免永久卡住。
+
+**completed 回退**：`completed` 状态下用户可选择回退到某个已成功步骤，ChatAgent 调用 `advance_step` 重新启动，Session 回到 `active`；`__end__` 步骤记录保留，但不再是最新步骤，`IsEndStepLatest` 返回 false。
+
 ---
 
 ## 二、用户配置体系
@@ -132,8 +144,10 @@ ALTER TABLE conversations
 步骤 SubAgent 完成时，先看 `enable_plugin`，再按 `plugin_mode` 决策：
 
 - `enable_plugin=false` → 忽略插件事件（纯问答，根本不会进入插件流水线）
-- `enable_plugin=true` 且 `plugin_mode=auto` → `go advanceAutoMode(...)` → `callDriverAgent` → 按 verdict 决策
+- `enable_plugin=true` 且 `plugin_mode=auto` → `go advanceAutoMode(...)` → `callDriverAgent` → 按 verdict 决策；`triggerNextChatTurn` 完成后若 Session 仍是 `active`，`checkAndFallbackIfStuck` 降级为 `waiting`
 - `enable_plugin=true` 且 `plugin_mode=dynamic` → 发 `step_waiting`（`reason: dynamic_pause`），等用户下轮消息或按钮模拟消息
+
+SubAgent 以任何终态（`succeeded` / `failed` / `interrupted`）结束时，均按同一逻辑判断 Session 下一状态（§1.5）：有并行 sibling 未完成则保持 `active`；全部完成后看 `IsEndStepLatest` 决定 `completed` 或 `waiting`。**步骤 `failed` 不会使 Session 进入 `failed` 终态**。
 
 > 代码示例见 [`code.md` · C2](./code.md#c2)。
 
@@ -179,9 +193,9 @@ ChatAgent 有**两个**步骤推进工具，语义不同：
 Go 处理：
 
 1. 向 Python chat 进程发送**取消信号**（见下）。
-2. 将当前 `running` 的 `plugin_session_steps.status` 置为 `interrupted`。
+2. 将当前 `running` 的 `plugin_session_steps.status` 置为 `interrupted`（步骤级属性）。
 3. `subagent.MarkTaskInterrupted` 中止对应 `sub_agent_tasks`。
-4. `plugin_sessions.status=waiting`。
+4. `plugin_sessions.status=waiting`（Session 不进入 `interrupted` 终态，保持可恢复）。
 5. 推送 `step_waiting` + `user_stopped: true`。
 
 **算法侧中断（新增）**：当前无「后端 → 算法」反向中断通道，方案如下。
@@ -747,6 +761,8 @@ ChatAgent 通过用户消息语义 + 步骤状态决策（由 system prompt 指�
 
 2. **Go**
    - 配置加载与透传；`eventloop.go` 按 `enable_plugin` + `plugin_mode` 分叉。
+   - Session 状态机简化：`OnSubAgentDone` 的 `failed` 分支改为 `waiting`；移除 `SessionStatusFailed` 写入路径；`__end__` 分支先写 `plugin_session_steps` 再更新 Session 状态（`IsEndStepLatest` 判据）。
+   - `advanceAutoMode` 新增 `checkAndFallbackIfStuck` 兜底（ChatAgent 未推进时降级为 `waiting`）。
    - `:stop` 扩展 + cancel 信号；`advanceAutoMode` 降级 + 全局 max_retries。
    - 并行编排（`get_parallel_steps` → 多路 `go subagent.Run`）。
    - TaskCenter repository + scheduler；**不**注册 `plugin_step_run` 到 asyncjob。

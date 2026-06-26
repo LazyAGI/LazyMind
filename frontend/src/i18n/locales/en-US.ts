@@ -798,10 +798,10 @@ const enUS = {
     pluginPanelTitle: "Plugin Panel",
     pluginStatusRunning: "Running",
     pluginStatusDone: "Done",
-    pluginStatusFailed: "Failed",
     pluginStatusWaiting: "Waiting",
-    pluginStatusInterrupted: "Interrupted",
     pluginBtnDisabledHint: "Step is running, please wait…",
+    pluginRollbackLabel: "Rollback to step:",
+    pluginRollbackPrefix: "Please re-run step ",
     // Greeting
     greetingMorning: "Good morning",
     greetingAfternoon: "Good afternoon",

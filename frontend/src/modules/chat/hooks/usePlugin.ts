@@ -9,7 +9,6 @@ export function usePluginSession(conversationId: string) {
   const session = usePluginStore((s) => s.sessionByConversation[conversationId] ?? null);
   const loading = usePluginStore((s) => s.loadingByConversation[conversationId] ?? false);
   const loadActiveSession = usePluginStore((s) => s.loadActiveSession);
-  const refreshSlots = usePluginStore((s) => s.refreshSlots);
   const patchSlot = usePluginStore((s) => s.patchSlot);
   const advanceSession = usePluginStore((s) => s.advanceSession);
   const retrySession = usePluginStore((s) => s.retrySession);
@@ -18,11 +17,12 @@ export function usePluginSession(conversationId: string) {
     loadActiveSession(conversationId);
   }, [conversationId, loadActiveSession]);
 
+  // Use loadActiveSession so we always get the latest session status (not just slots).
+  // This is important for detecting when the session transitions from 'active' to
+  // 'waiting'/'completed' even if the SSE push event was missed.
   const refresh = useCallback(() => {
-    if (session?.session_id) {
-      refreshSlots(conversationId, session.session_id);
-    }
-  }, [conversationId, session?.session_id, refreshSlots]);
+    loadActiveSession(conversationId);
+  }, [conversationId, loadActiveSession]);
 
   const selectRevision = useCallback(
     (slotId: string, revision: number) => {

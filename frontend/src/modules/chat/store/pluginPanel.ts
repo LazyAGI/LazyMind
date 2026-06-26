@@ -160,15 +160,29 @@ export interface PluginSession {
   session_id: string;
   conversation_id: string;
   plugin_id: string;
-  status: "active" | "completed" | "failed" | "waiting";
+  status: "active" | "waiting" | "completed";
   current_step_id: string;
   created_at: string;
   updated_at: string;
   slots?: SlotRevision[];
+  /** Steps for this session, used in completed state to render rollback step list. */
+  steps?: PluginSessionStep[];
   /** The tab currently focused by the user — forwarded to the AI in plugin_context. */
   focusedTab?: string;
   /** The sort_order item currently focused by the user — forwarded to the AI. */
   focusedSortOrder?: number;
+}
+
+/** A single step execution record from plugin_session_steps. */
+export interface PluginSessionStep {
+  id: string;
+  session_id: string;
+  step_id: string;
+  attempt: number;
+  task_id: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // Slot value resolved from a TaskArtifact's value field.
@@ -323,6 +337,17 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
     try {
       const res = await PluginSessionApi().getLatestSession(conversationId);
       const session: PluginSession | null = res?.data?.data?.session ?? null;
+      // For completed sessions, load step records so the Panel can render the rollback list.
+      if (session && session.status === 'completed' && session.session_id) {
+        try {
+          const stepsRes = await PluginSessionApi().getSteps(session.session_id);
+          const rawSteps = stepsRes?.data?.data?.steps ?? [];
+          // Exclude the __end__ sentinel — only expose real steps to the UI.
+          session.steps = rawSteps.filter((s: any) => s.step_id !== '__end__');
+        } catch {
+          session.steps = [];
+        }
+      }
       get().setSession(conversationId, session);
     } catch {
       // ignore

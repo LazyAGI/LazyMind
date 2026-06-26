@@ -660,9 +660,7 @@ function TabSlotGrid({
 const STATUS_KEY: Record<string, string> = {
   active: 'chat.pluginStatusRunning',
   completed: 'chat.pluginStatusDone',
-  failed: 'chat.pluginStatusFailed',
   waiting: 'chat.pluginStatusWaiting',
-  interrupted: 'chat.pluginStatusInterrupted',
 };
 
 export function PluginPanel({
@@ -743,14 +741,10 @@ export function PluginPanel({
   const showActions =
     session.status === 'waiting' ||
     session.status === 'active' ||
-    session.status === 'completed' ||
-    session.status === 'failed' ||
-    session.status === 'interrupted';
+    session.status === 'completed';
   const buttonsDisabled = session.status === 'active' || anySlotEditing;
-  const showContinue =
-    session.status === 'waiting' ||
-    session.status === 'active' ||
-    session.status === 'interrupted';
+  // "继续" is only shown in waiting/active; completed shows rollback step picker instead.
+  const showContinue = session.status === 'waiting' || session.status === 'active';
 
   function handleContinue() {
     if (buttonsDisabled) return;
@@ -760,6 +754,11 @@ export function PluginPanel({
   function handleRetry() {
     if (buttonsDisabled) return;
     onSendMessage?.(t('chat.pluginRetry'));
+  }
+
+  function handleRollback(stepId: string) {
+    if (buttonsDisabled) return;
+    onSendMessage?.(`${t('chat.pluginRollbackPrefix')}${stepId}`);
   }
 
   return (
@@ -880,6 +879,24 @@ export function PluginPanel({
             >
               {t('chat.pluginContinue')}
             </button>
+          )}
+          {session.status === 'completed' && session.steps && session.steps.length > 0 && (
+            <div className='plugin-panel__rollback'>
+              <span className='plugin-panel__rollback-label'>{t('chat.pluginRollbackLabel')}</span>
+              <div className='plugin-panel__rollback-steps'>
+                {session.steps.map((step) => (
+                  <button
+                    key={`${step.step_id}-${step.attempt}`}
+                    type='button'
+                    className='plugin-panel__rollback-step-btn'
+                    onClick={() => handleRollback(step.step_id)}
+                    title={`${t('chat.pluginRollbackPrefix')}${step.step_id}`}
+                  >
+                    {step.step_id}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       )}

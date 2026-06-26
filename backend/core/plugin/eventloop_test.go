@@ -133,7 +133,7 @@ func TestOnSubAgentDone_Interrupted_SetsWaiting(t *testing.T) {
 	}
 }
 
-func TestOnSubAgentDone_Failed_SetsSessionFailed(t *testing.T) {
+func TestOnSubAgentDone_Failed_SetsSessionWaiting(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 
@@ -159,9 +159,10 @@ func TestOnSubAgentDone_Failed_SetsSessionFailed(t *testing.T) {
 	if gotEvent != "plugin_error" {
 		t.Fatalf("expected plugin_error, got %q", gotEvent)
 	}
+	// Failed steps demote the session to waiting (not failed) so the user can retry.
 	s, _ := GetSession(ctx, db.DB, "ps-3")
-	if s.Status != SessionStatusFailed {
-		t.Fatalf("expected session failed, got %s", s.Status)
+	if s.Status != SessionStatusWaiting {
+		t.Fatalf("expected session waiting, got %s", s.Status)
 	}
 }
 

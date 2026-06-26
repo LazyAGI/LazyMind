@@ -281,6 +281,22 @@ func ListSteps(ctx context.Context, db *gorm.DB, sessionID string) ([]orm.Plugin
 	return rows, nil
 }
 
+// IsEndStepLatest reports whether the most recently created step in the session has
+// step_id == "__end__". This is the canonical way to decide whether a session should be
+// considered completed vs. waiting: if the user rolls back by triggering a new step after
+// __end__, the __end__ record remains but is no longer the latest, so this returns false.
+func IsEndStepLatest(ctx context.Context, db *gorm.DB, sessionID string) (bool, error) {
+	var step orm.PluginSessionStep
+	err := db.WithContext(ctx).
+		Where("session_id = ?", sessionID).
+		Order("created_at DESC").
+		First(&step).Error
+	if err != nil {
+		return false, err
+	}
+	return step.StepID == "__end__", nil
+}
+
 // WriteSlotRevision inserts a new AI slot revision and manages the selected flag.
 // It resolves artifact_seq by querying the most-recent sub_agent_artifacts row for
 // (taskID, artifactKey) and storing its seq as a pointer — the value is never copied

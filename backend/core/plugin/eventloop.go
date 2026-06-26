@@ -117,11 +117,21 @@ func HandlePluginStepCreated(
 	returnedTaskID = taskID
 
 	// "__end__" is a sentinel emitted by ChatAgent (via advance_step) to signal that the
-	// plugin session is complete.  No SubAgent is started; the session is marked completed.
+	// plugin session is complete.  No SubAgent is started; a step record is written for
+	// state tracking (IsEndStepLatest uses it to distinguish completed from waiting),
+	// then the session is marked completed.
 	if stepID == "__end__" {
 		sessionID = params.SessionID
 		if sessionID == "" {
 			return "", "", false, fmt.Errorf("plugin: session_id required for __end__ signal")
+		}
+		// Persist __end__ step so IsEndStepLatest can detect rollback later.
+		// task_id is set to "__end__" as a sentinel; plugin_session_steps.task_id has no
+		// foreign-key constraint so this requires no migration.
+		if _, sErr := CreateSessionStep(ctx, db, sessionID, "__end__", "__end__", 1); sErr != nil {
+			fmt.Printf("[Plugin] __end__: failed to create end step record: %v\n", sErr)
+		} else {
+			_ = UpdateStepStatus(ctx, db, "__end__", StepStatusSucceeded)
 		}
 		if uErr := UpdateSessionStatus(ctx, db, sessionID, SessionStatusCompleted); uErr != nil {
 			fmt.Printf("[Plugin] __end__: failed to complete session %s: %v\n", sessionID, uErr)
@@ -172,6 +182,12 @@ func HandlePluginStepCreated(
 		}
 		if uErr := UpdateSessionCurrentStep(ctx, db, sessionID, stepID); uErr != nil {
 			fmt.Printf("[Plugin] failed to update current_step: %v\n", uErr)
+		}
+		// Ensure session is marked active when a new step starts. This covers the
+		// auto-advance path where advanceAutoMode triggers ChatAgent directly without
+		// going through /plugin-sessions/{id}:advance (which would set active explicitly).
+		if uErr := UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive); uErr != nil {
+			fmt.Printf("[Plugin] failed to reset session status to active: %v\n", uErr)
 		}
 	}
 
@@ -298,13 +314,10 @@ func OnSubAgentDone(
 
 	if status != subagent.StatusSucceeded {
 		if pctx != nil {
-			_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusFailed)
-			// Sync TaskCenter status to failed.
-			_ = taskcenter.UpdateTaskStatusBySession(ctx, db, pctx.SessionID, "failed")
-			onSSE("task_status_changed", map[string]any{
-				"session_id": pctx.SessionID,
-				"status":     "failed",
-			})
+			// Failed steps are not terminal for the session: put it into waiting so the
+			// user can decide to retry or continue. The subtask card in TaskCenter will
+			// show the failure detail; the Panel status should not reflect failure.
+			_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
 			onSSE("plugin_error", map[string]any{
 				"session_id": pctx.SessionID,
 				"step_id":    pctx.StepID,
@@ -384,8 +397,12 @@ func advanceAutoMode(
 			"session_id":      pctx.SessionID,
 			"conversation_id": pctx.ConvID,
 		})
-		go triggerNextChatTurn(pctx.ConvID, pctx.SessionID, pctx.PluginID, pctx.StepID,
-			pctx.UserID, summary)
+		pctxCopy := *pctx
+		go func() {
+			triggerNextChatTurn(pctxCopy.ConvID, pctxCopy.SessionID, pctxCopy.PluginID, pctxCopy.StepID,
+				pctxCopy.UserID, summary)
+			checkAndFallbackIfStuck(ctx, db, stateStore, onSSE, &pctxCopy)
+		}()
 		return
 	}
 
@@ -430,8 +447,12 @@ func advanceAutoMode(
 		"session_id":      pctx.SessionID,
 		"conversation_id": pctx.ConvID,
 	})
-	go triggerNextChatTurn(pctx.ConvID, pctx.SessionID, pctx.PluginID, pctx.StepID,
-		pctx.UserID, driverMsg)
+	pctxCopy := *pctx
+	go func() {
+		triggerNextChatTurn(pctxCopy.ConvID, pctxCopy.SessionID, pctxCopy.PluginID, pctxCopy.StepID,
+			pctxCopy.UserID, driverMsg)
+		checkAndFallbackIfStuck(ctx, db, stateStore, onSSE, &pctxCopy)
+	}()
 }
 
 // triggerNextChatTurn sends a synthetic POST /conversations:chat to Go core to trigger
@@ -483,6 +504,36 @@ func triggerNextChatTurn(
 			break
 		}
 	}
+}
+
+// checkAndFallbackIfStuck is called after triggerNextChatTurn returns (stream drained).
+// If ChatAgent did not call advance_step the session remains active even though no
+// SubAgent is running. This function detects that condition and demotes the session to
+// waiting so the frontend can prompt the user for input.
+func checkAndFallbackIfStuck(
+	ctx context.Context,
+	db *gorm.DB,
+	_ state.Store,
+	onSSE func(string, map[string]any),
+	pctx *PluginChatContext,
+) {
+	// Brief pause to let any in-flight HandlePluginStepCreated DB writes settle.
+	time.Sleep(500 * time.Millisecond)
+	session, err := GetSession(ctx, db, pctx.SessionID)
+	if err != nil || session == nil {
+		return
+	}
+	if session.Status != SessionStatusActive {
+		// Session was already advanced or completed — nothing to do.
+		return
+	}
+	// Session is still active but no SubAgent is running: ChatAgent did not push a new step.
+	_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+	onSSE("step_waiting", map[string]any{
+		"session_id": pctx.SessionID,
+		"step_id":    pctx.StepID,
+		"reason":     "chat_agent_no_advance",
+	})
 }
 
 // OnArtifactEvent is called when a plugin_step SubAgent emits an artifact event.
