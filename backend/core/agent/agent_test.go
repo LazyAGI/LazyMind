@@ -351,11 +351,11 @@ func TestThreadEventsURLDoesNotForceSince(t *testing.T) {
 	}
 }
 
-func TestThreadStepEventsURLUsesThreadEventsEndpoint(t *testing.T) {
+func TestThreadStepEventsURLUsesStepEventsEndpoint(t *testing.T) {
 	t.Setenv("LAZYMIND_EVO_SERVICE_URL", "http://evo-service:8048/")
 
 	got := threadStepEventsURL("thr/1", "step/collect")
-	want := "http://evo-service:8048/v1/evo/threads/thr%2F1/events"
+	want := "http://evo-service:8048/v1/evo/threads/thr%2F1/events/step%2Fcollect"
 	if got != want {
 		t.Fatalf("unexpected thread step events URL:\nwant: %q\ngot:  %q", want, got)
 	}
@@ -1264,6 +1264,21 @@ func TestUpdateThreadStepFromEventDoneCompletesRunningStep(t *testing.T) {
 	if step.EventCount != 2 {
 		t.Fatalf("expected event_count=2, got %d", step.EventCount)
 	}
+	if step.NextStepRunID != "step_2" {
+		t.Fatalf("expected next_step_run_id step_2, got %q", step.NextStepRunID)
+	}
+	if err := updateThreadStepFromEvent(db.DB, "thr_1", "step_1", fetchedThreadEvent{
+		EventName: "done",
+		RawFrame:  `{"type":"done","status":"running","step_run_id":"step_1","next_step_run_id":"step_3"}`,
+	}); err != nil {
+		t.Fatalf("update duplicate done step returned error: %v", err)
+	}
+	if err := db.DB.Where("thread_id = ? AND step_id = ?", "thr_1", "step_1").First(&step).Error; err != nil {
+		t.Fatalf("reload step: %v", err)
+	}
+	if step.NextStepRunID != "step_2" {
+		t.Fatalf("expected first next_step_run_id to be preserved, got %q", step.NextStepRunID)
+	}
 }
 
 func TestUpdateThreadStepFromEventKeepsOnlyLatestRunningStepActive(t *testing.T) {
@@ -1313,7 +1328,7 @@ func TestListThreadStepsReturnsActiveStep(t *testing.T) {
 		t.Fatalf("create thread: %v", err)
 	}
 	if err := db.DB.Create(&[]orm.AgentThreadStep{
-		{ThreadID: "thr_1", StepID: "collect_material", Title: "Collect", Status: "succeeded", Active: false, OrderIndex: 1, EventCount: 2, CreatedAt: now, UpdatedAt: now},
+		{ThreadID: "thr_1", StepID: "collect_material", Title: "Collect", Status: "succeeded", Active: false, OrderIndex: 1, EventCount: 2, NextStepRunID: "generate_image", CreatedAt: now, UpdatedAt: now},
 		{ThreadID: "thr_1", StepID: "generate_image", Title: "Generate", Status: "running", Active: true, OrderIndex: 2, EventCount: 3, CreatedAt: now, UpdatedAt: now.Add(time.Second)},
 	}).Error; err != nil {
 		t.Fatalf("create steps: %v", err)
@@ -1346,6 +1361,9 @@ func TestListThreadStepsReturnsActiveStep(t *testing.T) {
 	}
 	if response.Data.TotalSize != 2 || len(response.Data.Items) != 2 {
 		t.Fatalf("unexpected step list response: %#v", response.Data)
+	}
+	if response.Data.Items[0].NextStepRunID != "generate_image" {
+		t.Fatalf("expected first step next_step_run_id generate_image, got %q", response.Data.Items[0].NextStepRunID)
 	}
 }
 
@@ -1587,6 +1605,9 @@ func TestStreamUpstreamThreadEventsFiltersRequestedStep(t *testing.T) {
 	if step.Status != "succeeded" || step.Active || step.EventCount != 2 {
 		t.Fatalf("expected step_2 to be completed from filtered stream, got %#v", step)
 	}
+	if step.NextStepRunID != "step_3" {
+		t.Fatalf("expected step_2 next_step_run_id step_3, got %q", step.NextStepRunID)
+	}
 }
 
 func TestStreamThreadStepEventsDoesNotCreateStepBeforeEvents(t *testing.T) {
@@ -1613,7 +1634,7 @@ func TestStreamThreadStepEventsDoesNotCreateStepBeforeEvents(t *testing.T) {
 		mu.Unlock()
 
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/evo/threads/thr_1/events":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/evo/threads/thr_1/events/step_1":
 			http.Error(w, `{"detail":"closed"}`, http.StatusNotFound)
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/evo/threads/thr_1/flow-status":
 			_ = json.NewEncoder(w).Encode(threadFlowStatusResponse{ThreadID: "thr_1", Status: "ended"})
@@ -1645,7 +1666,7 @@ func TestStreamThreadStepEventsDoesNotCreateStepBeforeEvents(t *testing.T) {
 	gotCalls := append([]string(nil), calls...)
 	mu.Unlock()
 	wantCalls := []string{
-		"GET /v1/evo/threads/thr_1/events",
+		"GET /v1/evo/threads/thr_1/events/step_1",
 		"GET /v1/evo/threads/thr_1/flow-status",
 	}
 	if fmt.Sprint(gotCalls) != fmt.Sprint(wantCalls) {

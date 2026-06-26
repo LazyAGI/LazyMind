@@ -56,6 +56,7 @@ type threadStepResponse struct {
 	OrderIndex    int        `json:"order_index"`
 	EventCount    int64      `json:"event_count"`
 	CurrentTaskID string     `json:"current_task_id,omitempty"`
+	NextStepRunID string     `json:"next_step_run_id"`
 	StartedAt     *time.Time `json:"started_at,omitempty"`
 	EndedAt       *time.Time `json:"ended_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
@@ -1975,6 +1976,7 @@ func toThreadStepResponse(step orm.AgentThreadStep) threadStepResponse {
 		OrderIndex:    step.OrderIndex,
 		EventCount:    step.EventCount,
 		CurrentTaskID: step.CurrentTaskID,
+		NextStepRunID: step.NextStepRunID,
 		StartedAt:     step.StartedAt,
 		EndedAt:       step.EndedAt,
 		CreatedAt:     step.CreatedAt,

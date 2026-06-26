@@ -54,6 +54,7 @@ type AgentThreadStep struct {
 	OrderIndex    int        `gorm:"column:order_index;not null;default:0;index:idx_agent_thread_steps_thread_order,priority:2"`
 	EventCount    int64      `gorm:"column:event_count;not null;default:0"`
 	CurrentTaskID string     `gorm:"column:current_task_id;type:varchar(128);not null;default:''"`
+	NextStepRunID string     `gorm:"column:next_step_run_id;type:varchar(128);not null;default:''"`
 	StartedAt     *time.Time `gorm:"column:started_at"`
 	EndedAt       *time.Time `gorm:"column:ended_at"`
 	CreatedAt     time.Time  `gorm:"column:created_at;not null"`
