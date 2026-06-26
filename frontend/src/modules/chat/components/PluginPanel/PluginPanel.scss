@@ -9,7 +9,6 @@
   transition: border-color 0.2s;
 
   &--active  { border-color: #d0e4ff; }
-  &--failed  { border-color: #ffd6d6; }
   &--completed { border-color: #d0f0e0; }
   &--waiting { border-color: #ffe8c0; }
 
@@ -71,7 +70,6 @@
 
     &--active    { background: #e6f0ff; color: #2563eb; }
     &--completed { background: #e6f7ee; color: #16a34a; }
-    &--failed    { background: #fff0f0; color: #dc2626; }
     &--waiting   { background: #fff4e0; color: #d97706; }
   }
 

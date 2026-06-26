@@ -286,6 +286,11 @@ func HandlePluginStepCreated(
 
 // OnSubAgentDone is called when a plugin_step task reaches terminal status.
 // It mirrors the step status and handles auto/dynamic advance logic.
+//
+// State machine:
+//   - active SubAgents remain → session stays active
+//   - last SubAgent done AND __end__ is latest step → session → completed
+//   - last SubAgent done AND no __end__ → session → waiting (covers succeeded/failed/interrupted)
 func OnSubAgentDone(
 	ctx context.Context,
 	db *gorm.DB,
@@ -296,35 +301,17 @@ func OnSubAgentDone(
 ) {
 	_ = UpdateStepStatus(ctx, db, taskID, status)
 
-	if status == subagent.StatusInterrupted {
-		// Interrupted steps are recoverable: put the session into waiting so
-		// the frontend can resume via POST /plugin-sessions/{id}:advance.
+	if status != subagent.StatusSucceeded && status != subagent.StatusInterrupted {
+		// Non-succeeded, non-interrupted (i.e. truly failed) steps: notify the frontend
+		// so it can show an error detail on the subtask card, then fall through to the
+		// unified waiting logic below.
 		if pctx != nil {
-			_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
-			onSSE("step_waiting", map[string]any{
-				"session_id":   pctx.SessionID,
-				"step_id":      pctx.StepID,
-				"interrupted":  true,
-				"user_stopped": true,
-				"reason":       "user_stopped",
-			})
-		}
-		return
-	}
-
-	if status != subagent.StatusSucceeded {
-		if pctx != nil {
-			// Failed steps are not terminal for the session: put it into waiting so the
-			// user can decide to retry or continue. The subtask card in TaskCenter will
-			// show the failure detail; the Panel status should not reflect failure.
-			_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
 			onSSE("plugin_error", map[string]any{
 				"session_id": pctx.SessionID,
 				"step_id":    pctx.StepID,
 				"message":    summary,
 			})
 		}
-		return
 	}
 
 	if pctx == nil {

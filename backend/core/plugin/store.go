@@ -17,11 +17,13 @@ import (
 	"lazymind/core/common/orm"
 )
 
-// Session status constants.
+// Session status constants. Only three states are valid in the new state machine:
+// active (SubAgent running), waiting (awaiting user input), completed (session ended).
+// The "failed" and "interrupted" statuses are retired — they are now attributes of
+// individual sub_agent_tasks, not of the session itself.
 const (
 	SessionStatusActive    = "active"
 	SessionStatusCompleted = "completed"
-	SessionStatusFailed    = "failed"
 	SessionStatusWaiting   = "waiting"
 )
 

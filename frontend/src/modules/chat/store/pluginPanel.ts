@@ -270,8 +270,6 @@ interface PluginStore {
   loadActiveSession: (conversationId: string) => Promise<void>;
   refreshSlots: (conversationId: string, sessionId: string) => Promise<void>;
   patchSlot: (conversationId: string, sessionId: string, slotId: string, revision: number) => Promise<void>;
-  advanceSession: (conversationId: string, sessionId: string) => Promise<void>;
-  retrySession: (conversationId: string, sessionId: string) => Promise<void>;
   clearSession: (conversationId: string) => void;
   setAutoRunning: (conversationId: string, running: boolean) => void;
   fetchPluginUI: (pluginId: string) => Promise<PluginUI>;
@@ -389,24 +387,6 @@ export const usePluginStore = create<PluginStore>()((set, get) => ({
     try {
       await PluginSessionApi().patchSlot(sessionId, slotId, revision);
       get().refreshSlots(conversationId, sessionId);
-    } catch {
-      // ignore
-    }
-  },
-
-  advanceSession: async (conversationId, sessionId) => {
-    try {
-      await PluginSessionApi().advanceSession(sessionId, 'continue');
-      get().loadActiveSession(conversationId);
-    } catch {
-      // ignore
-    }
-  },
-
-  retrySession: async (conversationId, sessionId) => {
-    try {
-      await PluginSessionApi().advanceSession(sessionId, 'retry');
-      get().loadActiveSession(conversationId);
     } catch {
       // ignore
     }

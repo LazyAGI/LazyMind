@@ -732,10 +732,6 @@ func AdvanceSession(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserID(r)
 
 	switch step.Status {
-	case StepStatusRunning:
-		// Step is still running (heartbeat not timed out); nothing to do.
-		common.ReplyOK(w, map[string]any{"action": "waiting", "message": "step is still running"})
-
 	case StepStatusInterrupted:
 		// Resume the interrupted SubAgent directly, bypassing ChatAgent.
 		_ = UpdateSessionStatus(ctx, db, sessionID, SessionStatusActive)

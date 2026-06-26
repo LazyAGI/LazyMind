@@ -111,22 +111,19 @@ func TestOnSubAgentDone_Interrupted_SetsWaiting(t *testing.T) {
 	}
 
 	var gotEvent string
-	var gotPayload map[string]any
-	onSSE := func(et string, pl map[string]any) {
+	onSSE := func(et string, _ map[string]any) {
 		gotEvent = et
-		gotPayload = pl
 	}
 
 	OnSubAgentDone(ctx, db.DB, nil, "task-2", subagent.StatusInterrupted, "heartbeat timeout", onSSE, pctx)
 
+	// Interrupted steps now follow the unified path: session → waiting, event = step_waiting.
+	// The interrupted=true payload field is no longer emitted; the subtask card carries that detail.
 	if gotEvent != "step_waiting" {
 		t.Fatalf("expected step_waiting for interrupted, got %q", gotEvent)
 	}
-	if gotPayload["interrupted"] != true {
-		t.Fatalf("expected interrupted=true in payload, got %v", gotPayload)
-	}
 
-	// Session status must be 'waiting' not 'failed'.
+	// Session status must be 'waiting'.
 	s, _ := GetSession(ctx, db.DB, "ps-2")
 	if s.Status != SessionStatusWaiting {
 		t.Fatalf("expected session waiting, got %s", s.Status)
@@ -151,15 +148,17 @@ func TestOnSubAgentDone_Failed_SetsSessionWaiting(t *testing.T) {
 		ConvID: "conv-3",
 	}
 
-	var gotEvent string
-	onSSE := func(et string, _ map[string]any) { gotEvent = et }
+	var gotEvents []string
+	onSSE := func(et string, _ map[string]any) { gotEvents = append(gotEvents, et) }
 
 	OnSubAgentDone(ctx, db.DB, nil, "task-3", subagent.StatusFailed, "step error", onSSE, pctx)
 
-	if gotEvent != "plugin_error" {
-		t.Fatalf("expected plugin_error, got %q", gotEvent)
+	// Failed path: first plugin_error (frontend can show error detail on subtask card),
+	// then step_waiting (session is demoted to waiting, not failed).
+	if len(gotEvents) < 2 || gotEvents[0] != "plugin_error" || gotEvents[len(gotEvents)-1] != "step_waiting" {
+		t.Fatalf("expected [plugin_error ... step_waiting], got %v", gotEvents)
 	}
-	// Failed steps demote the session to waiting (not failed) so the user can retry.
+	// Session must be waiting so the user can retry.
 	s, _ := GetSession(ctx, db.DB, "ps-3")
 	if s.Status != SessionStatusWaiting {
 		t.Fatalf("expected session waiting, got %s", s.Status)
