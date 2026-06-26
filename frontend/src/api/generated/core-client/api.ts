@@ -6868,6 +6868,322 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          * 
+         * @summary PATCH /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
+         * @param {string} sessionId 
+         * @param {string} slotId 
+         * @param {string} listIndex 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch: async (sessionId: string, slotId: string, listIndex: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch', 'slotId', slotId)
+            // verify required parameter 'listIndex' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch', 'listIndex', listIndex)
+            const localVarPath = `/api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary DELETE /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+         * @param {string} sessionId 
+         * @param {string} slotId 
+         * @param {string} listIndex 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete: async (sessionId: string, slotId: string, listIndex: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete', 'slotId', slotId)
+            // verify required parameter 'listIndex' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete', 'listIndex', listIndex)
+            const localVarPath = `/api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary PATCH /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+         * @param {string} sessionId 
+         * @param {string} slotId 
+         * @param {string} listIndex 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch: async (sessionId: string, slotId: string, listIndex: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch', 'slotId', slotId)
+            // verify required parameter 'listIndex' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch', 'listIndex', listIndex)
+            const localVarPath = `/api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary POST /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
+         * @param {string} sessionId 
+         * @param {string} slotId 
+         * @param {string} listIndex 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost: async (sessionId: string, slotId: string, listIndex: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost', 'slotId', slotId)
+            // verify required parameter 'listIndex' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost', 'listIndex', listIndex)
+            const localVarPath = `/api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary GET /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
+         * @param {string} sessionId 
+         * @param {string} slotId 
+         * @param {string} listIndex 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet: async (sessionId: string, slotId: string, listIndex: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet', 'slotId', slotId)
+            // verify required parameter 'listIndex' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet', 'listIndex', listIndex)
+            const localVarPath = `/api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary POST /plugin-sessions/{session_id}/slots/{slot_id}/items
+         * @param {string} sessionId 
+         * @param {string} slotId 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginSessionsSessionIdSlotsSlotIdItemsPost: async (sessionId: string, slotId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdItemsPost', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdItemsPost', 'slotId', slotId)
+            const localVarPath = `/api/core/plugin-sessions/{session_id}/slots/{slot_id}/items`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary GET /plugin-sessions/{session_id}/slots/{slot_id}/order
+         * @param {string} sessionId 
+         * @param {string} slotId 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginSessionsSessionIdSlotsSlotIdOrderGet: async (sessionId: string, slotId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdOrderGet', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdOrderGet', 'slotId', slotId)
+            const localVarPath = `/api/core/plugin-sessions/{session_id}/slots/{slot_id}/order`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary PATCH /plugin-sessions/{session_id}/slots/{slot_id}/order
+         * @param {string} sessionId 
+         * @param {string} slotId 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginSessionsSessionIdSlotsSlotIdOrderPatch: async (sessionId: string, slotId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdOrderPatch', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCorePluginSessionsSessionIdSlotsSlotIdOrderPatch', 'slotId', slotId)
+            const localVarPath = `/api/core/plugin-sessions/{session_id}/slots/{slot_id}/order`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @summary PATCH /plugin-sessions/{session_id}/slots/{slot_id}
          * @param {string} sessionId 
          * @param {string} slotId 
@@ -8984,6 +9300,123 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @summary PATCH /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
+         * @param {string} sessionId 
+         * @param {string} slotId 
+         * @param {string} listIndex 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(sessionId: string, slotId: string, listIndex: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(sessionId, slotId, listIndex, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary DELETE /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+         * @param {string} sessionId 
+         * @param {string} slotId 
+         * @param {string} listIndex 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(sessionId: string, slotId: string, listIndex: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(sessionId, slotId, listIndex, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary PATCH /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+         * @param {string} sessionId 
+         * @param {string} slotId 
+         * @param {string} listIndex 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(sessionId: string, slotId: string, listIndex: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(sessionId, slotId, listIndex, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary POST /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
+         * @param {string} sessionId 
+         * @param {string} slotId 
+         * @param {string} listIndex 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(sessionId: string, slotId: string, listIndex: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(sessionId, slotId, listIndex, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary GET /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
+         * @param {string} sessionId 
+         * @param {string} slotId 
+         * @param {string} listIndex 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(sessionId: string, slotId: string, listIndex: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(sessionId, slotId, listIndex, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary POST /plugin-sessions/{session_id}/slots/{slot_id}/items
+         * @param {string} sessionId 
+         * @param {string} slotId 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePluginSessionsSessionIdSlotsSlotIdItemsPost(sessionId: string, slotId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePluginSessionsSessionIdSlotsSlotIdItemsPost(sessionId, slotId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePluginSessionsSessionIdSlotsSlotIdItemsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary GET /plugin-sessions/{session_id}/slots/{slot_id}/order
+         * @param {string} sessionId 
+         * @param {string} slotId 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePluginSessionsSessionIdSlotsSlotIdOrderGet(sessionId: string, slotId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePluginSessionsSessionIdSlotsSlotIdOrderGet(sessionId, slotId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePluginSessionsSessionIdSlotsSlotIdOrderGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary PATCH /plugin-sessions/{session_id}/slots/{slot_id}/order
+         * @param {string} sessionId 
+         * @param {string} slotId 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePluginSessionsSessionIdSlotsSlotIdOrderPatch(sessionId: string, slotId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePluginSessionsSessionIdSlotsSlotIdOrderPatch(sessionId, slotId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePluginSessionsSessionIdSlotsSlotIdOrderPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
          * @summary PATCH /plugin-sessions/{session_id}/slots/{slot_id}
          * @param {string} sessionId 
          * @param {string} slotId 
@@ -10252,6 +10685,86 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          * 
+         * @summary PATCH /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
+         * @param {DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(requestParameters: DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary DELETE /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+         * @param {DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(requestParameters: DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary PATCH /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+         * @param {DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(requestParameters: DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary POST /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
+         * @param {DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(requestParameters: DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary GET /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
+         * @param {DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(requestParameters: DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary POST /plugin-sessions/{session_id}/slots/{slot_id}/items
+         * @param {DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginSessionsSessionIdSlotsSlotIdItemsPost(requestParameters: DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCorePluginSessionsSessionIdSlotsSlotIdItemsPost(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary GET /plugin-sessions/{session_id}/slots/{slot_id}/order
+         * @param {DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdOrderGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginSessionsSessionIdSlotsSlotIdOrderGet(requestParameters: DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdOrderGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCorePluginSessionsSessionIdSlotsSlotIdOrderGet(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary PATCH /plugin-sessions/{session_id}/slots/{slot_id}/order
+         * @param {DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdOrderPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePluginSessionsSessionIdSlotsSlotIdOrderPatch(requestParameters: DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdOrderPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCorePluginSessionsSessionIdSlotsSlotIdOrderPatch(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
          * @summary PATCH /plugin-sessions/{session_id}/slots/{slot_id}
          * @param {DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -11177,6 +11690,88 @@ export interface DefaultApiApiCorePluginSessionsSessionIdGetRequest {
  */
 export interface DefaultApiApiCorePluginSessionsSessionIdSlotsGetRequest {
     readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+
+    readonly listIndex: string
+}
+
+/**
+ * Request parameters for apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexDeleteRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+
+    readonly listIndex: string
+}
+
+/**
+ * Request parameters for apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatchRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+
+    readonly listIndex: string
+}
+
+/**
+ * Request parameters for apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPostRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+
+    readonly listIndex: string
+}
+
+/**
+ * Request parameters for apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGetRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+
+    readonly listIndex: string
+}
+
+/**
+ * Request parameters for apiCorePluginSessionsSessionIdSlotsSlotIdItemsPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsPostRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+}
+
+/**
+ * Request parameters for apiCorePluginSessionsSessionIdSlotsSlotIdOrderGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdOrderGetRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+}
+
+/**
+ * Request parameters for apiCorePluginSessionsSessionIdSlotsSlotIdOrderPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdOrderPatchRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
 }
 
 /**
@@ -12351,6 +12946,94 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCorePluginSessionsSessionIdSlotsGet(requestParameters: DefaultApiApiCorePluginSessionsSessionIdSlotsGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCorePluginSessionsSessionIdSlotsGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary PATCH /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
+     * @param {DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(requestParameters: DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary DELETE /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+     * @param {DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(requestParameters: DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary PATCH /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+     * @param {DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(requestParameters: DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary POST /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
+     * @param {DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(requestParameters: DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary GET /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
+     * @param {DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(requestParameters: DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCorePluginSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary POST /plugin-sessions/{session_id}/slots/{slot_id}/items
+     * @param {DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePluginSessionsSessionIdSlotsSlotIdItemsPost(requestParameters: DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdItemsPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCorePluginSessionsSessionIdSlotsSlotIdItemsPost(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary GET /plugin-sessions/{session_id}/slots/{slot_id}/order
+     * @param {DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdOrderGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePluginSessionsSessionIdSlotsSlotIdOrderGet(requestParameters: DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdOrderGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCorePluginSessionsSessionIdSlotsSlotIdOrderGet(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary PATCH /plugin-sessions/{session_id}/slots/{slot_id}/order
+     * @param {DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdOrderPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePluginSessionsSessionIdSlotsSlotIdOrderPatch(requestParameters: DefaultApiApiCorePluginSessionsSessionIdSlotsSlotIdOrderPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCorePluginSessionsSessionIdSlotsSlotIdOrderPatch(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

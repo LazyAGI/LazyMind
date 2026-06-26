@@ -31,6 +31,7 @@ export interface StructuredAsset extends BaseAsset {
   category: string;
   tags: string[];
   parentId?: string;
+  parentSkillName?: string;
   fileExt?: string;
   isEnabled?: boolean;
   builtinSkillUid?: string;

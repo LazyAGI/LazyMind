@@ -34,6 +34,7 @@ type Config struct {
 	TargetSearchCachePrewarmStagger   time.Duration
 	WorkerLeaseTTL                    time.Duration
 	WorkerMaxBackoff                  time.Duration
+	CrawlListRequestInterval          time.Duration
 	ParseDeadLetterAfter              int64
 	GenerateTasksMaxObjectsPerRequest int
 	ParseWorkerGlobalConcurrency      int
@@ -65,6 +66,7 @@ func defaultConfig() Config {
 		TargetSearchCachePrewarmStagger:   10 * time.Second,
 		WorkerLeaseTTL:                    60 * time.Second,
 		WorkerMaxBackoff:                  10 * time.Minute,
+		CrawlListRequestInterval:          500 * time.Millisecond,
 		ParseDeadLetterAfter:              3,
 		GenerateTasksMaxObjectsPerRequest: 20,
 		ParseWorkerGlobalConcurrency:      20,
@@ -136,6 +138,7 @@ func (c *Config) applyEnv() {
 	c.TargetSearchCachePrewarmStagger = durationEnv("SOURCEENGINE_TARGET_SEARCH_CACHE_PREWARM_STAGGER", c.TargetSearchCachePrewarmStagger)
 	c.WorkerLeaseTTL = durationEnv("SOURCEENGINE_WORKER_LEASE_TTL", c.WorkerLeaseTTL)
 	c.WorkerMaxBackoff = durationEnv("SOURCEENGINE_WORKER_MAX_BACKOFF", c.WorkerMaxBackoff)
+	c.CrawlListRequestInterval = durationEnv("SOURCEENGINE_CRAWL_LIST_REQUEST_INTERVAL", c.CrawlListRequestInterval)
 	c.ParseDeadLetterAfter = int64Env("SOURCEENGINE_PARSE_DEAD_LETTER_AFTER", c.ParseDeadLetterAfter)
 	c.GenerateTasksMaxObjectsPerRequest = intEnv("SOURCEENGINE_GENERATE_TASKS_MAX_OBJECTS_PER_REQUEST", c.GenerateTasksMaxObjectsPerRequest)
 	c.ParseWorkerGlobalConcurrency = intEnv("SOURCEENGINE_PARSE_WORKER_GLOBAL_CONCURRENCY", c.ParseWorkerGlobalConcurrency)
@@ -199,6 +202,9 @@ func (c Config) Validate() error {
 	}
 	if c.WorkerMaxBackoff <= 0 {
 		return fmt.Errorf("worker max backoff must be positive")
+	}
+	if c.CrawlListRequestInterval < 0 {
+		return fmt.Errorf("crawl list request interval must be non-negative")
 	}
 	if c.ParseDeadLetterAfter <= 0 {
 		return fmt.Errorf("parse dead letter after must be positive")

@@ -43,11 +43,13 @@ type processComposeShutdown struct {
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
 
-func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, profile string, logPath string, localProxyLogPath string, tokenPath string, apiPort int) error {
+func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, profile string, logPath string, localProxyLogPath string, authServiceLogPath string, tokenPath string, apiPort int) error {
 	commandForComposeUp := quoteShellArg(m.execPath) + " internal compose-up --profile " + profile
 	commandForComposeDown := quoteShellArg(m.execPath) + " internal compose-down --profile " + profile
 	commandForLocalProxyRun := quoteShellArg(m.execPath) + " internal local-proxy-run --profile " + profile
 	commandForLocalProxyDown := quoteShellArg(m.execPath) + " internal local-proxy-down --profile " + profile
+	commandForAuthServiceRun := quoteShellArg(m.execPath) + " internal auth-service-run --profile " + profile
+	commandForAuthServiceDown := quoteShellArg(m.execPath) + " internal auth-service-down --profile " + profile
 
 	cfg := processComposeConfig{
 		Version:         "0.5",
@@ -72,6 +74,16 @@ func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot strin
 					TimeoutSeconds: 15,
 				},
 				LogLocation: localProxyLogPath,
+				Namespace:   "host",
+			},
+			authServiceProcessName: {
+				WorkingDir: repoRoot,
+				Command:    commandForAuthServiceRun,
+				Shutdown: processComposeShutdown{
+					Command:        commandForAuthServiceDown,
+					TimeoutSeconds: 15,
+				},
+				LogLocation: authServiceLogPath,
 				Namespace:   "host",
 			},
 		},

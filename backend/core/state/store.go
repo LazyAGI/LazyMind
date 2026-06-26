@@ -31,3 +31,9 @@ type Store interface {
 
 	Close() error
 }
+
+// ExpiredKeyNotifier is an optional capability for backends that can push
+// key-expiry events. Callers must keep fallback scans for backends without it.
+type ExpiredKeyNotifier interface {
+	SubscribeExpiredKeys(ctx context.Context, onExpired func(key string) error)
+}

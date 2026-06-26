@@ -21,12 +21,14 @@ type RuntimeManager struct {
 	out            io.Writer
 	errOut         io.Writer
 	probeAPI       func(port int, timeout time.Duration) bool
+	probeAuth      func(port int, timeout time.Duration) bool
 	pollInterval   time.Duration
 	upTimeout      time.Duration
 	downTimeout    time.Duration
 	compose        *ComposeManager
 	processCompose *ProcessComposeManager
 	localProxy     *LocalProxyManager
+	authService    *AuthServiceManager
 }
 
 func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
@@ -38,12 +40,14 @@ func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
 		out:            io.Discard,
 		errOut:         io.Discard,
 		probeAPI:       processCompose.ProbeAPI,
+		probeAuth:      authServiceHealthAlive,
 		pollInterval:   2 * time.Second,
 		upTimeout:      envDuration(localUpTimeoutEnvVar, time.Duration(defaultLocalUpTimeout)*time.Second),
 		downTimeout:    envDuration(localDownTimeoutEnvVar, time.Duration(defaultLocalDownTimeout)*time.Second),
 		compose:        NewComposeManager(r),
 		processCompose: processCompose,
 		localProxy:     NewLocalProxyManager(r),
+		authService:    NewAuthServiceManager(r),
 	}
 }
 
@@ -68,6 +72,9 @@ func randomHexToken() (string, error) {
 
 func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
 	if err := paths.EnsureAllDirs(); err != nil {
+		return err
+	}
+	if err := ensureComposeBindPermissions(paths.RepoRoot); err != nil {
 		return err
 	}
 	state, err := readOrNewState(paths, cfg)
@@ -104,7 +111,16 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err != nil {
 		return err
 	}
-	if err := m.processCompose.WriteGeneratedConfig(generatedFile, paths.RepoRoot, cfg.Profile, paths.LogFilePath, paths.LocalProxyLog, paths.RunDirTokenFile, cfg.ProcessComposePort); err != nil {
+	if err := m.processCompose.WriteGeneratedConfig(
+		generatedFile,
+		paths.RepoRoot,
+		cfg.Profile,
+		paths.LogFilePath,
+		paths.LocalProxyLog,
+		paths.AuthServiceLog,
+		paths.RunDirTokenFile,
+		cfg.ProcessComposePort,
+	); err != nil {
 		_ = generatedFile.Close()
 		return err
 	}
@@ -164,6 +180,12 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		}
 		return waitErr
 	}
+	if err := m.waitForAuthServiceHealthy(ctx, cfg.AuthService.Port, m.upTimeout, paths.AuthServicePIDFile); err != nil {
+		state = newStateWithServiceStatus(state, "failed")
+		state.OverallStatus = "failed"
+		_ = writeRuntimeState(paths.StateFile, state)
+		return err
+	}
 
 	state = newStateWithServiceStatus(state, "running")
 	state.OverallStatus = "ready"
@@ -173,6 +195,35 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	}
 	m.printReadySummary(cfg)
 	return nil
+}
+
+func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int, timeout time.Duration, pidFile string) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	sawPIDFile := false
+	for {
+		if m.probeAuth(port, time.Second) {
+			return nil
+		}
+		alive, err := upLockProcessAlive(pidFile)
+		if err == nil {
+			sawPIDFile = true
+			if !alive {
+				return fmt.Errorf("auth-service process exited before becoming healthy")
+			}
+		} else if sawPIDFile && os.IsNotExist(err) {
+			return fmt.Errorf("auth-service process exited before becoming healthy")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("auth-service health check timed out on port %d", port)
+		case <-ticker.C:
+		}
+	}
 }
 
 func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {
@@ -201,6 +252,9 @@ func (m *RuntimeManager) Down(ctx context.Context, cfg RuntimeConfig, paths Runt
 			}
 			return fallbackErr
 		}
+	}
+	if err := m.authService.Down(ctx, cfg, paths); err != nil {
+		return err
 	}
 	if err := m.waitForRuntimeStopped(ctx, cfg, paths); err != nil {
 		if ps, psErr := m.compose.ComposePS(context.Background(), paths.RepoRoot); psErr == nil && strings.TrimSpace(ps) != "" {
@@ -320,7 +374,11 @@ func (m *RuntimeManager) waitForRuntimeStopped(ctx context.Context, cfg RuntimeC
 	for {
 		apiAlive := cfg.ProcessComposePort > 0 && m.probeAPI(cfg.ProcessComposePort, 500*time.Millisecond)
 		hasContainers, err := m.compose.ComposeHasContainers(ctx, paths.RepoRoot)
-		if err == nil && !apiAlive && !hasContainers {
+		authAlive := false
+		if _, statErr := os.Stat(paths.AuthServicePIDFile); statErr == nil && cfg.AuthService.Port > 0 {
+			authAlive = m.probeAuth(cfg.AuthService.Port, 500*time.Millisecond)
+		}
+		if err == nil && !apiAlive && !hasContainers && !authAlive {
 			return nil
 		}
 		select {

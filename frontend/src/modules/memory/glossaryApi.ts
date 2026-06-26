@@ -397,9 +397,21 @@ export async function batchRemoveGlossaryAssets(groupIds: string[]): Promise<voi
   });
 }
 
-export async function mergeGlossaryAssets(groupIds: string[]): Promise<GlossaryAsset | null> {
+export interface GlossaryMergeGroupRequest {
+  group_ids: string[];
+  term: string;
+  aliases?: string[];
+  description?: string;
+}
+
+export async function mergeGlossaryAssets(
+  payload: GlossaryMergeGroupRequest,
+): Promise<GlossaryAsset | null> {
   const response = await axiosInstance.post(`${coreBasePath}/word_group:merge`, {
-    group_ids: groupIds,
+    group_ids: payload.group_ids,
+    term: payload.term.trim(),
+    aliases: payload.aliases || [],
+    description: `${payload.description || ""}`.trim(),
   });
   return normalizeGlossaryAsset(response.data);
 }

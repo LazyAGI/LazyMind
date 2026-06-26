@@ -162,7 +162,14 @@ func (m *ComposeManager) ComposeUp(ctx context.Context, repoRoot string, profile
 		_ = profile
 	}
 	args := append(m.composeArgs(repoRoot), "up", "--build")
-	for _, svc := range disabled.DisabledContainerTypes {
+	scaleDisabled := disabled.ScaleDisabledContainerTypes
+	if len(scaleDisabled) == 0 {
+		scaleDisabled = disabled.DisabledContainerTypes
+	}
+	if _, err := validateKnownServices(services, scaleDisabled, "scale disabled service"); err != nil {
+		return err
+	}
+	for _, svc := range scaleDisabled {
 		if svc == "" {
 			continue
 		}
@@ -184,19 +191,9 @@ func (m *ComposeManager) ComposeUp(ctx context.Context, repoRoot string, profile
 }
 
 func filterRemainingServices(allServices []string, disabled []string) ([]string, error) {
-	available := make(map[string]struct{}, len(allServices))
-	for _, svc := range allServices {
-		available[svc] = struct{}{}
-	}
-	disabledSet := map[string]struct{}{}
-	for _, d := range disabled {
-		if d == "" {
-			continue
-		}
-		if _, ok := available[d]; !ok {
-			return nil, fmt.Errorf("unknown disabled service: %s", d)
-		}
-		disabledSet[d] = struct{}{}
+	disabledSet, err := validateKnownServices(allServices, disabled, "disabled service")
+	if err != nil {
+		return nil, err
 	}
 	remaining := make([]string, 0, len(allServices))
 	for _, svc := range allServices {
@@ -206,6 +203,24 @@ func filterRemainingServices(allServices []string, disabled []string) ([]string,
 		remaining = append(remaining, svc)
 	}
 	return remaining, nil
+}
+
+func validateKnownServices(allServices []string, services []string, label string) (map[string]struct{}, error) {
+	available := make(map[string]struct{}, len(allServices))
+	for _, svc := range allServices {
+		available[svc] = struct{}{}
+	}
+	serviceSet := map[string]struct{}{}
+	for _, d := range services {
+		if d == "" {
+			continue
+		}
+		if _, ok := available[d]; !ok {
+			return nil, fmt.Errorf("unknown %s: %s", label, d)
+		}
+		serviceSet[d] = struct{}{}
+	}
+	return serviceSet, nil
 }
 
 func parseComposeStatusJSON(raw string) ([]ComposeServiceStatus, error) {

@@ -242,7 +242,9 @@ func buildImportItems(rows []ImportNormalizedRow, evalSet *orm.EvalSet, job asyn
 	now := time.Now().UTC()
 	items := make([]*orm.EvalSetItem, 0, len(rows))
 	var estimatedBytes int64
-	for _, row := range rows {
+	for i, row := range rows {
+		// 微调时间偏移，使同批数据按文件原始顺序展示（文件中靠前的行获得更大的时间戳）
+		t := now.Add(time.Duration(len(rows)-1-i) * time.Millisecond)
 		item := &orm.EvalSetItem{
 			ShardID:                   evalSet.ShardID,
 			ID:                        newEvalSetItemID(),
@@ -262,8 +264,8 @@ func buildImportItems(rows []ImportNormalizedRow, evalSet *orm.EvalSet, job asyn
 			Source:                    SourceUpload,
 			CreateUserID:              job.CreateUserID,
 			CreateUserName:            job.CreateUserName,
-			CreatedAt:                 now,
-			UpdatedAt:                 now,
+			CreatedAt:                 t,
+			UpdatedAt:                 t,
 		}
 		if item.CaseID == "" {
 			item.CaseID = "case_" + common.GenerateID()

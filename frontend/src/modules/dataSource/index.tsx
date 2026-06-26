@@ -3555,8 +3555,10 @@ export default function DataSourceManagement() {
       title: t("admin.dataSourceTableType"),
       dataIndex: "type",
       key: "type",
-      width: 90,
-      render: (type: SourceType) => <Tag>{getSourceTypeTitle(type, t)}</Tag>,
+      width: 180,
+      render: (type: SourceType) => (
+        <Tag className="data-source-type-tag">{getSourceTypeTitle(type, t)}</Tag>
+      ),
     },
     {
       title: t("admin.dataSourceTableKnowledgeBase"),
@@ -3724,7 +3726,7 @@ export default function DataSourceManagement() {
                   },
                 }}
                 tableLayout="fixed"
-                scroll={{ x: 1280, y: "calc(100vh - 300px)" }}
+                scroll={{ x: 1480, y: "calc(100vh - 300px)" }}
                 locale={{
                   emptyText: (
                     <div className="data-source-asset-empty">

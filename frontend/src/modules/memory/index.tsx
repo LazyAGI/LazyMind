@@ -40,6 +40,7 @@ import ShareModal from "./components/ShareModal";
 import SkillShareCenterModal from "./components/SkillShareCenterModal";
 import {
   acceptSkillShare,
+  buildSkillUpdatePayload,
   confirmSkillDraft,
   createSkillAsset,
   discardSkillDraft,
@@ -209,6 +210,7 @@ const mapSkillAssetRecordToStructuredAsset = (
   tags: item.tags,
   content: item.content,
   parentId: item.parentId,
+  parentSkillName: item.parentSkillName,
   protect: item.protect,
   autoEvo: item.autoEvo,
   autoEvoApplyStatus: item.autoEvoApplyStatus,
@@ -523,6 +525,29 @@ export default function MemoryManagement() {
           value: item.id,
         })),
     [draft.id, topLevelSkills],
+  );
+  const resolveSkillParentName = useCallback(
+    (item: StructuredAsset) =>
+      item.parentSkillName ||
+      (item.parentId
+        ? parentSkillCandidateAssets.find((candidate) => candidate.id === item.parentId)?.name || ""
+        : ""),
+    [parentSkillCandidateAssets],
+  );
+  const buildSkillPatchPayload = useCallback(
+    (item: StructuredAsset, overrides: Record<string, unknown> = {}) =>
+      buildSkillUpdatePayload(
+        {
+          ...item,
+          content: item.parentId ? item.content : getSkillBodyContentForDisplay(item.content || ""),
+          parentSkillName: resolveSkillParentName(item),
+        },
+        {
+          is_locked: Boolean(item.protect),
+          ...overrides,
+        },
+      ),
+    [resolveSkillParentName],
   );
 
   const localAvailableCategories = [...new Set(currentStructuredItems.map((item) => item.category))]
@@ -4222,10 +4247,12 @@ export default function MemoryManagement() {
         }
 
         if (hasPendingMerge) {
-          const merged = await mergeGlossaryAssets([
-            payload.id,
-            ...pendingGlossaryMergeSourceIds,
-          ]);
+          const merged = await mergeGlossaryAssets({
+            group_ids: [payload.id, ...pendingGlossaryMergeSourceIds],
+            term: payload.term,
+            aliases: payload.aliases,
+            description: payload.content,
+          });
           mergeApplied = true;
           savedGlossary = await updateGlossaryAsset({
             ...payload,
@@ -4405,24 +4432,36 @@ export default function MemoryManagement() {
               return;
             }
 
-            const patchPayload: Record<string, unknown> = {
-              name: payload.name,
-              content: payload.content,
-              is_locked: Boolean(payload.protect),
+            const existingSkill = skillAssets.find((item) => item.id === payload.id);
+            const patchFileExt = payload.parentId
+              ? payload.fileExt || existingSkill?.fileExt || inferSkillFileExt(undefined, payload.content)
+              : "md";
+            const patchCategory = payload.parentId
+              ? existingSkill?.category || payload.category
+              : payload.category;
+            const patchParentSkillName = payload.parentId
+              ? parentSkill?.name || existingSkill?.parentSkillName || ""
+              : "";
+            const patchSource: StructuredAsset = {
+              ...(existingSkill || payload),
+              ...payload,
+              category: patchCategory,
+              parentSkillName: patchParentSkillName,
+              autoEvo: existingSkill?.autoEvo ?? payload.autoEvo,
+              isEnabled: existingSkill?.isEnabled ?? payload.isEnabled ?? true,
+              fileExt: patchFileExt,
             };
-
-            if (payload.parentId) {
-              patchPayload.description = payload.description;
-              patchPayload.parent_skill_id = payload.parentId;
-              patchPayload.tags = payload.tags;
-              patchPayload.file_ext = payload.fileExt || inferSkillFileExt(undefined, payload.content);
-            } else {
-              patchPayload.description = payload.description;
-              patchPayload.category = payload.category;
-              patchPayload.tags = payload.tags;
-              patchPayload.is_enabled = true;
-              patchPayload.file_ext = "md";
-            }
+            const patchPayload = buildSkillPatchPayload(patchSource, {
+              name: payload.name,
+              description: payload.description,
+              tags: payload.tags,
+              content: payload.content,
+              category: patchCategory,
+              parent_skill_id: payload.parentId || "",
+              parent_skill_name: patchParentSkillName,
+              file_ext: patchFileExt,
+              is_locked: Boolean(payload.protect),
+            });
 
             await patchSkillAsset(payload.id, patchPayload);
             setChangeProposals((previous) =>
@@ -5033,7 +5072,7 @@ export default function MemoryManagement() {
               void (async () => {
                 setSkillAutoEvoLoading((prev) => new Set(prev).add(record.id));
                 try {
-                  await patchSkillAsset(record.id, { auto_evo: checked });
+                  await patchSkillAsset(record.id, buildSkillPatchPayload(record, { auto_evo: checked }));
                   await refreshSkillAssets({ preserveChangeProposals: true });
                 } catch (error) {
                   console.error("Toggle auto_evo failed:", error);

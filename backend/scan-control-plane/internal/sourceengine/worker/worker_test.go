@@ -316,15 +316,15 @@ func TestRunnerRequeuesDeferredSameSourceTasks(t *testing.T) {
 	}
 }
 
-func TestWorkerRetriesTransientFailureThenDeadLetters(t *testing.T) {
+func TestWorkerRetriesParseFailureThenDeadLetters(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 5, 27, 15, 0, 0, 0, time.UTC)
 	repo := newWorkerIdempotencyStore(now)
-	conn := &workerSpyConnector{exportVersion: "v1", exportErr: connector.NewError(connector.ErrorCodeTransient, "temporary export failure")}
+	conn := &workerSpyConnector{exportVersion: "v1"}
 	core := newWorkerIdempotencyCoreClient()
 	reducer := statepkg.NewDBStateReducer(repo, statepkg.WithClock(func() time.Time { return now }))
 	temp := &workerIdempotencyTempObjectStore{}
-	task := repo.seedPendingTask("doc-transient", "v1", statepkg.SourceStateNew, statepkg.PendingActionCreate)
+	task := repo.seedPendingTask("doc-parse-transient", "v1", statepkg.SourceStateNew, statepkg.PendingActionCreate)
 	parseWorker := worker.NewDefaultParseWorker(
 		repo,
 		mustRegistry(t, conn),
@@ -337,11 +337,11 @@ func TestWorkerRetriesTransientFailureThenDeadLetters(t *testing.T) {
 	)
 
 	if err := parseWorker.RunOnce(ctx, "worker-1"); err != nil {
-		t.Fatalf("first transient run: %v", err)
+		t.Fatalf("first parse failure run: %v", err)
 	}
 	saved := repo.tasks[task.TaskID]
 	if saved.Status != worker.TaskStatusPending || saved.RetryCount != 1 || !saved.NextRunAt.Equal(now.Add(time.Second)) {
-		t.Fatalf("transient failure should retry with backoff: %+v", saved)
+		t.Fatalf("parse failure should retry with backoff: %+v", saved)
 	}
 	if _, ok := repo.deadLetters[task.TaskID]; ok {
 		t.Fatalf("first retry should not dead-letter")
@@ -350,21 +350,66 @@ func TestWorkerRetriesTransientFailureThenDeadLetters(t *testing.T) {
 	saved.NextRunAt = now
 	repo.tasks[task.TaskID] = saved
 	if err := parseWorker.RunOnce(ctx, "worker-2"); err != nil {
-		t.Fatalf("second transient run: %v", err)
+		t.Fatalf("second parse failure run: %v", err)
 	}
 	saved = repo.tasks[task.TaskID]
 	if saved.Status != worker.TaskStatusFailed || saved.RetryCount != 2 {
-		t.Fatalf("second transient failure should fail task: %+v", saved)
+		t.Fatalf("second parse failure should fail task: %+v", saved)
 	}
 	if _, ok := repo.deadLetters[task.TaskID]; !ok {
 		t.Fatalf("expected task to be dead-lettered")
 	}
-	state := repo.states[workerIdempotencyKey("source-1", "binding-1", "doc-transient")]
+	state := repo.states[workerIdempotencyKey("source-1", "binding-1", "doc-parse-transient")]
 	if state.ParseQueueState != statepkg.ParseQueueStateFailed {
 		t.Fatalf("dead-lettered task should record state failure: %+v", state)
 	}
-	if state.LastError["phase"] != "download" {
-		t.Fatalf("download failure should record phase: %+v", state.LastError)
+	if state.LastError["phase"] != "parse" {
+		t.Fatalf("parse failure should record phase: %+v", state.LastError)
+	}
+}
+
+func TestWorkerFailsDownloadWithoutRetry(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 5, 27, 15, 0, 0, 0, time.UTC)
+	repo := newWorkerIdempotencyStore(now)
+	conn := &workerSpyConnector{
+		exportVersion: "v1",
+		exportErr:     connector.NewError(connector.ErrorCodePermissionDenied, "download permission denied"),
+	}
+	core := newWorkerIdempotencyCoreClient()
+	reducer := statepkg.NewDBStateReducer(repo, statepkg.WithClock(func() time.Time { return now }))
+	temp := &workerIdempotencyTempObjectStore{}
+	task := repo.seedPendingTask("doc-download-denied", "v1", statepkg.SourceStateNew, statepkg.PendingActionCreate)
+	parseWorker := worker.NewDefaultParseWorker(
+		repo,
+		mustRegistry(t, conn),
+		core,
+		reducer,
+		temp,
+		worker.WithClock(func() time.Time { return now }),
+		worker.WithDeadLetterAfter(2),
+		worker.WithMaxBackoff(time.Minute),
+	)
+
+	if err := parseWorker.RunOnce(ctx, "worker-1"); err != nil {
+		t.Fatalf("download failure run: %v", err)
+	}
+	saved := repo.tasks[task.TaskID]
+	if saved.Status != worker.TaskStatusFailed || saved.RetryCount != 0 {
+		t.Fatalf("download failure should fail without retry: %+v", saved)
+	}
+	if saved.LeaseOwner != "" || saved.LeaseUntil != nil {
+		t.Fatalf("download failure should clear task lease: %+v", saved)
+	}
+	if _, ok := repo.deadLetters[task.TaskID]; ok {
+		t.Fatalf("download failure should not be dead-lettered")
+	}
+	if len(core.Submissions) != 0 {
+		t.Fatalf("download failure should not submit parse task, got %d submissions", len(core.Submissions))
+	}
+	state := repo.states[workerIdempotencyKey("source-1", "binding-1", "doc-download-denied")]
+	if state.ParseQueueState != statepkg.ParseQueueStateFailed || state.LastError["phase"] != "download" {
+		t.Fatalf("download failure should record state failure: %+v", state)
 	}
 }
 

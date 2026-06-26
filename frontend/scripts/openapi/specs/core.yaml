@@ -8274,6 +8274,165 @@ paths:
                 "200":
                     description: OK
             summary: PATCH /plugin-sessions/{session_id}/slots/{slot_id}
+    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /plugin-sessions/{session_id}/slots/{slot_id}/items
+    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:
+        delete:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+        patch:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption:
+        patch:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
+    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
+    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /plugin-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
+    /api/core/plugin-sessions/{session_id}/slots/{slot_id}/order:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /plugin-sessions/{session_id}/slots/{slot_id}/order
+        patch:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /plugin-sessions/{session_id}/slots/{slot_id}/order
     /api/core/plugin-sessions/{session_id}:advance:
         post:
             parameters:

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
 	"lazymind/core/state"
@@ -606,42 +605,22 @@ func runIdleFallbackLoop(ctx context.Context, processor *IdleProcessor, interval
 	}
 }
 
-func runIdleRedisExpireNotifyLoop(ctx context.Context, store state.Store, processor *IdleProcessor) {
-	redisStore, ok := store.(interface{ RedisClient() *redis.Client })
+func runIdleExpiredKeyNotifyLoop(ctx context.Context, store state.Store, processor *IdleProcessor) {
+	notifier, ok := store.(state.ExpiredKeyNotifier)
 	if !ok || processor == nil {
 		return
 	}
-	rdb := redisStore.RedisClient()
-	if rdb == nil {
-		return
-	}
-	channel := fmt.Sprintf("__keyevent@%d__:expired", rdb.Options().DB)
-	for ctx.Err() == nil {
-		pubsub := rdb.Subscribe(ctx, channel)
-		msgCh := pubsub.Channel()
-		for {
-			select {
-			case <-ctx.Done():
-				_ = pubsub.Close()
-				return
-			case msg, ok := <-msgCh:
-				if !ok {
-					_ = pubsub.Close()
-					time.Sleep(time.Second)
-					goto reconnect
-				}
-				sessionID, ok := parseConversationIdleTTLKey(msg.Payload)
-				if !ok {
-					continue
-				}
-				if err := processor.ProcessLatestWaitingSession(ctx, sessionID); err != nil {
-					resourceUpdateWarn(logEventIdleRedisNotifyFailed, err).
-						Str("session_id", sessionID).
-						Msg(logEventIdleRedisNotifyFailed)
-				}
-			}
+	notifier.SubscribeExpiredKeys(ctx, func(key string) error {
+		sessionID, ok := parseConversationIdleTTLKey(key)
+		if !ok {
+			return nil
 		}
-	reconnect:
-		continue
-	}
+		if err := processor.ProcessLatestWaitingSession(ctx, sessionID); err != nil {
+			resourceUpdateWarn(logEventIdleExpiredKeyNotifyFailed, err).
+				Str("session_id", sessionID).
+				Msg(logEventIdleExpiredKeyNotifyFailed)
+			return err
+		}
+		return nil
+	})
 }

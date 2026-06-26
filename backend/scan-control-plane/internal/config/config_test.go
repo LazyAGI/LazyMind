@@ -32,6 +32,7 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	t.Setenv("SOURCEENGINE_TEMP_TTL", "2h")
 	t.Setenv("SOURCEENGINE_WORKER_LEASE_TTL", "45s")
 	t.Setenv("SOURCEENGINE_WORKER_MAX_BACKOFF", "3m")
+	t.Setenv("SOURCEENGINE_CRAWL_LIST_REQUEST_INTERVAL", "750ms")
 	t.Setenv("SOURCEENGINE_PARSE_DEAD_LETTER_AFTER", "4")
 	t.Setenv("SOURCEENGINE_GENERATE_TASKS_MAX_OBJECTS_PER_REQUEST", "7")
 	t.Setenv("SOURCEENGINE_PARSE_WORKER_GLOBAL_CONCURRENCY", "9")
@@ -62,7 +63,7 @@ func TestLoadConfigFromEnv(t *testing.T) {
 	if cfg.GenerateTasksMaxObjectsPerRequest != 7 || cfg.ParseWorkerGlobalConcurrency != 9 || cfg.ParseWorkerSourceConcurrency != 3 {
 		t.Fatalf("config did not read limits: %+v", cfg)
 	}
-	if cfg.TempTTL != 2*time.Hour || cfg.WorkerLeaseTTL != 45*time.Second || cfg.WorkerMaxBackoff != 3*time.Minute || cfg.ParseDeadLetterAfter != 4 {
+	if cfg.TempTTL != 2*time.Hour || cfg.WorkerLeaseTTL != 45*time.Second || cfg.WorkerMaxBackoff != 3*time.Minute || cfg.CrawlListRequestInterval != 750*time.Millisecond || cfg.ParseDeadLetterAfter != 4 {
 		t.Fatalf("config did not read worker ttl/backoff/deadletter: %+v", cfg)
 	}
 	if cfg.WorkerPollInterval != 6*time.Second || cfg.CoreResultPollInterval != 11*time.Second || cfg.CompensationPollInterval != 31*time.Second {

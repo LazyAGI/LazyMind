@@ -31,8 +31,8 @@ func Start(ctx context.Context, db *gorm.DB, stateStore state.Store, cfg Config)
 	if stateStore != nil {
 		idleProcessor := NewIdleProcessor(db, stateStore, cfg, workerID+"-idle")
 		go runIdleFallbackLoop(ctx, idleProcessor, cfg.ConversationIdleFallbackScanInterval)
-		if cfg.ConversationIdleEnableRedisExpireNotify && !state.IsSQLiteMode() {
-			go runIdleRedisExpireNotifyLoop(ctx, stateStore, idleProcessor)
+		if cfg.ConversationIdleEnableExpiredKeyNotify {
+			go runIdleExpiredKeyNotifyLoop(ctx, stateStore, idleProcessor)
 		}
 	}
 }

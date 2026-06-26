@@ -128,11 +128,11 @@ func TestConversationIdleDefaultsMatchPlan2(t *testing.T) {
 		cfg.ConversationIdleHistoryMaxMessages != 100 ||
 		cfg.ConversationIdleFallbackScanInterval != 5*time.Minute ||
 		cfg.ConversationIdleFallbackBatchSize != 100 ||
-		!cfg.ConversationIdleEnableRedisExpireNotify {
+		!cfg.ConversationIdleEnableExpiredKeyNotify {
 		t.Fatalf("unexpected idle defaults: %#v", cfg)
 	}
-	if cfg := normalizeConfig(Config{}.WithConversationIdleRedisExpireNotify(false)); cfg.ConversationIdleEnableRedisExpireNotify {
-		t.Fatalf("explicit redis notify disable was not preserved: %#v", cfg)
+	if cfg := normalizeConfig(Config{}.WithConversationIdleExpiredKeyNotify(false)); cfg.ConversationIdleEnableExpiredKeyNotify {
+		t.Fatalf("explicit expired-key notify disable was not preserved: %#v", cfg)
 	}
 }
 

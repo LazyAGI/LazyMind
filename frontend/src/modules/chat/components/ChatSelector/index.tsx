@@ -1,7 +1,9 @@
-import { Button, Input, Popover, Tooltip } from "antd";
+import { Button, Input, Popover, Tooltip, message } from "antd";
 import {
   SearchOutlined,
   CheckOutlined,
+  PushpinFilled,
+  PushpinOutlined,
 } from "@ant-design/icons";
 import {
   useEffect,
@@ -85,6 +87,7 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
     const [knowledgeLoading, setKnowledgeLoading] = useState(false);
     const [defaultKnowledgeId, setDefaultKnowledgeId] = useState<string[]>([]);
     const [searchValue, setSearchValue] = useState<string>("");
+    const [defaultUpdatingId, setDefaultUpdatingId] = useState("");
     const isResettingSelectionRef = useRef(false);
     const previousRefreshKeyRef = useRef(refreshKey);
 
@@ -247,6 +250,80 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
       );
     }
 
+    async function setDefaultDatasetFn(item: Dataset) {
+      const datasetId = item.dataset_id;
+      const datasetName = item.display_name || "";
+      if (!datasetId || defaultUpdatingId) {
+        return;
+      }
+
+      const nextDefault = !item.default_dataset;
+      setDefaultUpdatingId(datasetId);
+      try {
+        if (nextDefault) {
+          await KnowledgeBaseServiceApi().datasetServiceSetDefaultDataset(
+            datasetId,
+            datasetName,
+          );
+        } else {
+          await KnowledgeBaseServiceApi().datasetServiceUnsetDefaultDataset(
+            datasetId,
+            datasetName,
+          );
+        }
+
+        setKnowledgeBaseList((previous) =>
+          previous.map((knowledgeBase) =>
+            knowledgeBase.dataset_id === datasetId
+              ? { ...knowledgeBase, default_dataset: nextDefault }
+              : knowledgeBase,
+          ),
+        );
+        setDefaultKnowledgeId((previous) =>
+          nextDefault
+            ? mergeSelectedIds(previous, [datasetId])
+            : previous.filter((id) => id !== datasetId),
+        );
+
+        if (nextDefault && !selectedIds.includes(datasetId)) {
+          const nextSelectedIds = mergeSelectedIds(selectedIds, [datasetId]);
+          setSelectedIds(nextSelectedIds);
+          onChange?.(
+            nextSelectedIds,
+            [],
+            [],
+          );
+        }
+      } catch (error) {
+        console.error("Set default dataset failed:", error);
+        message.error(t("chat.pinKnowledgeBaseFailed"));
+      } finally {
+        setDefaultUpdatingId("");
+      }
+    }
+
+    function renderDefaultItem(item: Dataset, isSelected: boolean) {
+      if (!isSelected) {
+        return null;
+      }
+
+      const isDefault = Boolean(item.default_dataset);
+      const Icon = isDefault ? PushpinFilled : PushpinOutlined;
+      return (
+        <Tooltip
+          title={isDefault ? t("chat.unpinKnowledgeBase") : t("chat.pinKnowledgeBase")}
+        >
+          <Icon
+            className={`chat-selector-pin-icon ${isDefault ? "is-pinned" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              void setDefaultDatasetFn(item);
+            }}
+          />
+        </Tooltip>
+      );
+    }
+
     function renderContent() {
       return (
         <div className="chat-selector-container">
@@ -320,15 +397,20 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
               return (
                 <div
                   key={item.dataset_id}
-                  className={`chat-selector-list-item ${isSelected ? "selected" : ""}`}
+                  className={`chat-selector-list-item ${isSelected ? "selected" : ""} ${
+                    item.default_dataset ? "defaultDataset" : ""
+                  }`}
                   onClick={() => handleItemClick(item)}
                 >
                   <span className="chat-selector-item-label">
                     {item.display_name}
                   </span>
-                  {isSelected && (
-                    <CheckOutlined className="chat-selector-check-icon" />
-                  )}
+                  <span className="chat-selector-item-actions">
+                    {renderDefaultItem(item, isSelected)}
+                    {isSelected && (
+                      <CheckOutlined className="chat-selector-check-icon" />
+                    )}
+                  </span>
                 </div>
               );
             })}

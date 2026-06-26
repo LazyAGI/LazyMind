@@ -148,7 +148,7 @@ func (w *DefaultParseWorker) runClaimed(ctx context.Context, task store.ParseTas
 		if isSupersedeError(err) {
 			return w.supersede(ctx, task, err.Error())
 		}
-		return w.handleFailureWithPhase(ctx, task, err, "download")
+		return w.handleNonRetryableFailureWithPhase(ctx, task, err, "download")
 	}
 	if exported.CleanupToken != "" {
 		defer func() {
@@ -381,6 +381,26 @@ func (w *DefaultParseWorker) handleFailureWithPhase(ctx context.Context, task st
 	}
 	return w.reducer.ApplyTaskFailure(ctx, statepkg.TaskFailureInput{
 		Task:      failed,
+		ErrorCode: reason,
+		Message:   err.Error(),
+		Phase:     phase,
+		FailedAt:  now,
+	})
+}
+
+func (w *DefaultParseWorker) handleNonRetryableFailureWithPhase(ctx context.Context, task store.ParseTask, err error, phase string) error {
+	reason := errorCode(err)
+	now := w.clock().UTC()
+	task.Status = TaskStatusFailed
+	task.LastError = store.JSON{"reason": reason}
+	task.LeaseOwner = ""
+	task.LeaseUntil = nil
+	task.UpdatedAt = now
+	if err := w.store.SaveParseTask(ctx, task); err != nil {
+		return err
+	}
+	return w.reducer.ApplyTaskFailure(ctx, statepkg.TaskFailureInput{
+		Task:      task,
 		ErrorCode: reason,
 		Message:   err.Error(),
 		Phase:     phase,
