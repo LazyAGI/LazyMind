@@ -318,6 +318,14 @@
   white-space: nowrap;
 }
 
+.data-source-type-tag.ant-tag {
+  max-width: 100%;
+  margin-inline-end: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .data-source-table-actions {
   width: 100%;
   justify-content: center;

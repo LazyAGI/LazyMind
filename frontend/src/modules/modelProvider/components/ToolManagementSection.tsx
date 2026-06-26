@@ -492,6 +492,8 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
         <div className="model-provider-service-card-copy">
           <div className="model-provider-service-title-row">
             <h4>{server.name}</h4>
+          </div>
+          <div className="model-provider-managed-tool-status-row">
             <Tag className="model-provider-service-status" color={server.isVerified ? "blue" : "warning"}>
               {server.isVerified ? t("admin.memoryMcpVerified") : t("admin.memoryMcpUnverified")}
             </Tag>

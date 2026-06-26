@@ -544,6 +544,8 @@ const enUS = {
       namePlaceholder: "Enter dataset name",
       descriptionPlaceholder: "Enter dataset description",
       knowledgeBasePlaceholder: "Select knowledge base",
+      kbDeleted: "Deleted",
+      kbDeletedWarning: "{{count}} knowledge base(s) previously linked to this dataset have been deleted. Please re-select if needed.",
       validation: {
         nameRequired: "Enter dataset name",
         nameMax: "Dataset name cannot exceed 80 characters",
@@ -815,6 +817,9 @@ const enUS = {
     vlmNotReadyWarning: "Vision-Language Model (VLM) is not configured. Image content cannot be processed. Please configure a VLM in the model provider settings.",
     vlmNotReadyWarningAdmin: "Vision-Language Model (VLM) is not configured. Image content cannot be processed. Please configure a VLM.",
     searchKnowledge: "Search knowledge bases",
+    pinKnowledgeBase: "Pin",
+    unpinKnowledgeBase: "Unpin",
+    pinKnowledgeBaseFailed: "Failed to update pinned knowledge base",
     reset: "Reset",
     selectAll: "Select All",
     cancelSelectAll: "Deselect All",
@@ -1541,68 +1546,6 @@ const enUS = {
           "For manual entry, paste the Wiki space ID or Drive folder ID into the target path selector, for example 7354xxxxxxxxxxxx or fldxxxxxxxxxxxx, then check Use current input.",
         finishManualAlt: "Drive folder ID in the Feishu Docs address bar",
         finishAlt: "Select or enter a Feishu target path and finish authorization in the system",
-      },
-    },
-    dataSourceNotionSetupGuide: {
-      backCreateSource: "Back to New Data Source",
-      backManagement: "Back to Data Source Management",
-      title: "Data Source Management - New Data Source - Notion",
-      subtitle:
-        "Create a Public Integration in Notion Developers, get OAuth credentials, configure the Redirect URI, then complete Notion data source authorization in LazyMind.",
-      summaryAria: "Notion setup process overview",
-      summaryTitle: "Setup Flow",
-      openDevelopers: "Open Notion Developers",
-      callbackUrl: "Callback URL: {{uri}}",
-      steps: {
-        openDevelopersTitle: "Open Notion Developers",
-        openDevelopersDesc:
-          "Open Notion Developers and sign in to your Notion account. This is where OAuth credentials for Notion public integrations are managed.",
-        createIntegrationTitle: "Create a Public Integration",
-        createIntegrationDesc:
-          "On My connections, click New integration to create a new integration app. Choose Public integration, not Internal integration, so OAuth authorization is supported.",
-        createIntegrationExisting:
-          "If you already have a suitable Public integration, you can reuse it.",
-        createIntegrationNaming:
-          "Include LazyMind or the data source purpose in the integration name so it is easy to identify later.",
-        basicInfoTitle: "Enter basic integration information",
-        basicInfoDesc:
-          "Enter the integration name and description, and optionally upload a logo. These details appear on the user authorization page, so use a clear name and description.",
-        credentialsTitle: "Get OAuth Client ID and Client Secret",
-        credentialsDesc:
-          "After creation, find the OAuth Client ID and Client Secret on the integration detail page under OAuth Domain and URIs or Secrets. Enter both credentials in LazyMind.",
-        credentialsClientId:
-          "Client ID: the public unique identifier for the integration.",
-        credentialsClientSecret:
-          "Client Secret: the integration secret. Keep it private; it can only be fully viewed when created.",
-        redirectTitle: "Configure Redirect URI",
-        redirectDesc:
-          "In the Redirect URIs section of integration settings, add LazyMind's OAuth callback URL. It must match the callback URL used by the system, otherwise authorization fails after redirect.",
-        redirectProductionHint:
-          "For production deployments, replace 127.0.0.1 with the actual domain or IP address.",
-        capabilitiesTitle: "Configure Integration Capabilities",
-        capabilitiesDesc:
-          "In integration settings, select the required capabilities such as Read content and Read comments. LazyMind needs at least Read content to read Notion content.",
-        capabilitiesRequired:
-          "Recommended minimum: select Read content and Read user information.",
-        capabilitiesWrite:
-          "If writing or updating Notion content is needed, also select Insert content and Update content.",
-        enterCredentialsTitle: "Enter Notion credentials in the system",
-        enterCredentialsDesc:
-          "Return to LazyMind Data Source Management, choose the Notion data source type, open the credentials dialog, enter the Client ID and Client Secret, then save.",
-        enterCredentialsClientId:
-          "Client ID maps to the App ID field in the system dialog.",
-        enterCredentialsClientSecret:
-          "Client Secret maps to the App Secret field in the system dialog.",
-        finishTitle: "Paste a Notion Page/Database link and finish authorization",
-        finishDesc:
-          "After credentials are saved, the system starts Notion OAuth authorization automatically. Once authorized, paste the Notion page or database link in the data source configuration, then save and sync.",
-        finishPageLink: "Notion page link format: https://www.notion.so/...",
-        finishDatabaseLink:
-          "Notion database link format: https://www.notion.so/...",
-        finishCopyLink:
-          "You can also right-click the page in Notion and choose Copy link.",
-        finishConnectionNote:
-          "Note: connect the page or database to this integration in Notion first (page menu ... -> Connections -> choose your integration).",
       },
     },
     dataSourceNotionSetupGuide: {

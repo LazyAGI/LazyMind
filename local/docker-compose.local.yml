@@ -99,6 +99,11 @@ x-lazymind-local:
     - redis
     - kong
     - auth-service
+    - evo-api
+  scale_disabled_container_services:
+    - redis
+    - kong
+    - auth-service
 
 volumes:
   sqlite-data:

@@ -47,6 +47,8 @@ x-lazymind-local:
   disabled_container_services:
     - "auth-service"
     - core
+  scale_disabled_container_services:
+    - auth-service
 `), 0o644); err != nil {
 		t.Fatalf("write overlay: %v", err)
 	}
@@ -62,6 +64,9 @@ x-lazymind-local:
 	}
 	if cfg.DisabledContainerTypes[0] != "auth-service" || cfg.DisabledContainerTypes[1] != "core" {
 		t.Fatalf("unexpected disabled services: %#v", cfg.DisabledContainerTypes)
+	}
+	if len(cfg.ScaleDisabledContainerTypes) != 1 || cfg.ScaleDisabledContainerTypes[0] != "auth-service" {
+		t.Fatalf("unexpected scale disabled services: %#v", cfg.ScaleDisabledContainerTypes)
 	}
 }
 
@@ -205,14 +210,14 @@ func TestComposeUpScalesDisabledServicesToZero(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	overlay := filepath.Join(repo, localComposeOverrideName)
-	if err := os.WriteFile(overlay, []byte("x-lazymind-local:\n  mode: local\n  disabled_container_services:\n    - redis\n"), 0o644); err != nil {
+	if err := os.WriteFile(overlay, []byte("x-lazymind-local:\n  mode: local\n  disabled_container_services:\n    - redis\n    - auth-service\n    - evo-api\n  scale_disabled_container_services:\n    - redis\n    - auth-service\n"), 0o644); err != nil {
 		t.Fatalf("write overlay: %v", err)
 	}
 
 	runner := &fakeRunner{t: t}
 	manager := NewRuntimeManager(runner, filepath.Join(repo, "lazymind-local"))
 	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
-		return CommandResult{Stdout: "redis\nauth-service\ncore\n"}, nil
+		return CommandResult{Stdout: "redis\nevo-api\nauth-service\ncore\n"}, nil
 	}, func(cmd Command) (CommandResult, error) {
 		assertCommandContainsInOrder(t, cmd, "docker", []string{
 			"compose",
@@ -223,11 +228,17 @@ func TestComposeUpScalesDisabledServicesToZero(t *testing.T) {
 			"up",
 			"--build",
 			"--scale", "redis=0",
-			"auth-service", "core",
+			"--scale", "auth-service=0",
+			"core",
 		})
+		for i, arg := range cmd.Args {
+			if arg == "--scale" && i+1 < len(cmd.Args) && cmd.Args[i+1] == "evo-api=0" {
+				t.Fatalf("evo-api should not be scale guarded when omitted from scale_disabled_container_services: %v", cmd.Args)
+			}
+		}
 		for _, arg := range cmd.Args {
-			if arg == "redis" {
-				t.Fatalf("disabled service redis should not be in explicit service list: %v", cmd.Args)
+			if arg == "redis" || arg == "auth-service" || arg == "evo-api" {
+				t.Fatalf("disabled service %s should not be in explicit service list: %v", arg, cmd.Args)
 			}
 		}
 		return CommandResult{}, nil

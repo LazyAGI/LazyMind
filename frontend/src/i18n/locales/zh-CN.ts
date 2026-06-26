@@ -519,6 +519,8 @@ const zhCN = {
       namePlaceholder: "请输入数据集名称",
       descriptionPlaceholder: "请输入数据集描述",
       knowledgeBasePlaceholder: "请选择知识库",
+      kbDeleted: "已删除",
+      kbDeletedWarning: "该数据集原关联的 {{count}} 个知识库已被删除，关联关系已清除，可重新选择知识库。",
       validation: {
         nameRequired: "请输入数据集名称",
         nameMax: "数据集名称不能超过 80 个字符",
@@ -784,6 +786,9 @@ const zhCN = {
     vlmNotReadyWarning: "图文模型（VLM）未配置，当前无法处理图片内容，如需图片理解请前往模型供应商配置图文模型。",
     vlmNotReadyWarningAdmin: "图文模型（VLM）未配置，当前无法处理图片内容，请先配置图文模型。",
     searchKnowledge: "搜索知识库",
+    pinKnowledgeBase: "置顶",
+    unpinKnowledgeBase: "取消置顶",
+    pinKnowledgeBaseFailed: "知识库置顶操作失败",
     reset: "重置",
     selectAll: "全选",
     cancelSelectAll: "取消全选",
@@ -1486,65 +1491,6 @@ const zhCN = {
         finishManualDetail: "手动输入时，在目标路径选择框中粘贴 Wiki 空间 ID 或 Drive 文件夹 ID（例如 7354xxxxxxxxxxxx、fldxxxxxxxxxxxx），然后勾选“使用当前输入”。",
         finishManualAlt: "飞书云文档地址栏中的 Drive 文件夹 ID",
         finishAlt: "系统内选择或输入飞书目标路径并完成授权",
-      },
-    },
-    dataSourceNotionSetupGuide: {
-      backCreateSource: "返回新建数据源",
-      backManagement: "返回数据源管理",
-      title: "数据源管理-新建数据源-Notion",
-      subtitle:
-        "在 Notion Developers 创建 Public Integration，获取 OAuth 凭证并配置 Redirect URI，然后在 LazyMind 中完成 Notion 数据源授权。",
-      summaryAria: "Notion 接入流程概览",
-      summaryTitle: "准备流程",
-      openDevelopers: "打开 Notion Developers",
-      callbackUrl: "回调地址：{{uri}}",
-      steps: {
-        openDevelopersTitle: "进入 Notion 开发者网站",
-        openDevelopersDesc:
-          "打开 Notion Developers 页面，登录你的 Notion 账号。这里会管理所有 Notion public integration 的 OAuth 凭证。",
-        createIntegrationTitle: "创建 Public Integration",
-        createIntegrationDesc:
-          "在 My connections 页面点击「New integration」创建新的集成应用。注意选择 Public integration 类型（而非 Internal integration），才能支持 OAuth 授权流程。",
-        createIntegrationExisting:
-          "如果已有合适的 Public integration，可以直接使用现有应用。",
-        createIntegrationNaming:
-          "Integration 名称建议带上 LazyMind 或数据源用途，方便后续识别。",
-        basicInfoTitle: "填写 Integration 基本信息",
-        basicInfoDesc:
-          "填写 Integration 名称、描述，并可上传 Logo。这些信息会在用户授权页面展示，建议填写清晰易懂的名称和说明。",
-        credentialsTitle: "获取 OAuth Client ID 和 Client Secret",
-        credentialsDesc:
-          "创建完成后，在 Integration 详情页的「OAuth Domain and URIs」或「Secrets」区域，可以找到 OAuth Client ID 和 Client Secret。这两个凭证将在 LazyMind 中填写。",
-        credentialsClientId: "Client ID：Integration 的唯一标识，公开可见。",
-        credentialsClientSecret:
-          "Client Secret：Integration 的密钥，需要保密，仅在创建时可完整查看。",
-        redirectTitle: "配置 Redirect URI",
-        redirectDesc:
-          "在 Integration 设置的「Redirect URIs」区域，添加 LazyMind 的 OAuth 回调地址。这个地址必须是系统实际使用的回调 URL，否则授权完成后会报错。",
-        redirectProductionHint:
-          "如果是生产环境部署，请将 127.0.0.1 替换为实际的域名或 IP 地址。",
-        capabilitiesTitle: "配置 Integration 权限 (Capabilities)",
-        capabilitiesDesc:
-          "在 Integration 设置中，根据需要勾选以下能力：Read content（读取页面/数据库内容）、Read comments（读取评论）等。LazyMind 至少需要 Read content 权限才能读取 Notion 内容。",
-        capabilitiesRequired:
-          "建议至少勾选 Read content 和 Read user information。",
-        capabilitiesWrite:
-          "如需写入或更新 Notion 内容，可额外勾选 Insert content 和 Update content。",
-        enterCredentialsTitle: "回到系统填写 Notion 凭据",
-        enterCredentialsDesc:
-          "回到 LazyMind 数据源管理页面，选择 Notion 数据源类型，弹出凭据配置窗口，填入上一步获取的 Client ID 和 Client Secret，然后保存。",
-        enterCredentialsClientId: "Client ID 对应系统弹窗中的 App ID 字段。",
-        enterCredentialsClientSecret:
-          "Client Secret 对应系统弹窗中的 App Secret 字段。",
-        finishTitle: "粘贴 Notion Page/Database 链接并完成授权",
-        finishDesc:
-          "凭据保存后，系统会自动发起 Notion OAuth 授权。授权通过后，在数据源配置中粘贴需要接入的 Notion page 或 database 链接，保存并同步即可。",
-        finishPageLink: "Notion page 链接格式：https://www.notion.so/...",
-        finishDatabaseLink: "Notion database 链接格式：https://www.notion.so/...",
-        finishCopyLink:
-          "也可以在 Notion 中右键点击页面，选择 Copy link 获取链接。",
-        finishConnectionNote:
-          "注意：需要先在 Notion 中将对应页面或数据库连接到该 Integration（在页面右上角 ··· → Connections → 选择你的 Integration）。",
       },
     },
     dataSourceNotionSetupGuide: {

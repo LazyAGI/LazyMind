@@ -207,11 +207,13 @@ export function SelfEvolutionHomeView({
       <section className="self-evolution-welcome-container" aria-label={t("selfEvolutionRun.welcomeConfigAria")}>
         <div className="self-evolution-welcome-shell">
           <figure className="self-evolution-welcome-visual">
-            <img
-              className="self-evolution-welcome-visual-image"
-              src={workflowImageSrc}
-              alt={t("selfEvolutionRun.workflowImageAlt")}
-            />
+            <div className="self-evolution-welcome-visual-frame">
+              <img
+                className="self-evolution-welcome-visual-image"
+                src={workflowImageSrc}
+                alt={t("selfEvolutionRun.workflowImageAlt")}
+              />
+            </div>
             <figcaption className="self-evolution-welcome-visual-meta">
               <Text className="self-evolution-welcome-visual-title">{t("selfEvolutionRun.executionPath")}</Text>
               <div className="self-evolution-welcome-visual-badges" role="list" aria-label={t("selfEvolutionRun.workflowStatusAria")}>
