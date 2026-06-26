@@ -44,15 +44,16 @@ type processComposeShutdown struct {
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
 
-func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, profile string, logPath string, localProxyLogPath string, authServiceLogPath string, frontendLogPath string, tokenPath string, apiPort int) error {
-	commandForComposeUp := quoteShellArg(m.execPath) + " internal compose-up --profile " + profile
-	commandForComposeDown := quoteShellArg(m.execPath) + " internal compose-down --profile " + profile
-	commandForLocalProxyRun := quoteShellArg(m.execPath) + " internal local-proxy-run --profile " + profile
-	commandForLocalProxyDown := quoteShellArg(m.execPath) + " internal local-proxy-down --profile " + profile
-	commandForAuthServiceRun := quoteShellArg(m.execPath) + " internal auth-service-run --profile " + profile
-	commandForAuthServiceDown := quoteShellArg(m.execPath) + " internal auth-service-down --profile " + profile
-	commandForFrontendRun := quoteShellArg(m.execPath) + " internal frontend-run --profile " + profile
-	commandForFrontendDown := quoteShellArg(m.execPath) + " internal frontend-down --profile " + profile
+func (m *ProcessComposeManager) WriteGeneratedConfig(w io.Writer, repoRoot string, profile string, logPath string, localProxyLogPath string, authServiceLogPath string, frontendLogPath string, tokenPath string, apiPort int, runtimeEnv []string) error {
+	envPrefix := shellEnvPrefix(runtimeEnv)
+	commandForComposeUp := envPrefix + quoteShellArg(m.execPath) + " internal compose-up --profile " + profile
+	commandForComposeDown := envPrefix + quoteShellArg(m.execPath) + " internal compose-down --profile " + profile
+	commandForLocalProxyRun := envPrefix + quoteShellArg(m.execPath) + " internal local-proxy-run --profile " + profile
+	commandForLocalProxyDown := envPrefix + quoteShellArg(m.execPath) + " internal local-proxy-down --profile " + profile
+	commandForAuthServiceRun := envPrefix + quoteShellArg(m.execPath) + " internal auth-service-run --profile " + profile
+	commandForAuthServiceDown := envPrefix + quoteShellArg(m.execPath) + " internal auth-service-down --profile " + profile
+	commandForFrontendRun := envPrefix + quoteShellArg(m.execPath) + " internal frontend-run --profile " + profile
+	commandForFrontendDown := envPrefix + quoteShellArg(m.execPath) + " internal frontend-down --profile " + profile
 
 	cfg := processComposeConfig{
 		Version:         "0.5",
@@ -248,4 +249,22 @@ func processComposeCommand(repoRoot string) string {
 		return candidate
 	}
 	return "process-compose"
+}
+
+func shellEnvPrefix(env []string) string {
+	if len(env) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(env))
+	for _, item := range env {
+		key, value, ok := strings.Cut(item, "=")
+		if !ok || key == "" {
+			continue
+		}
+		parts = append(parts, key+"="+quoteShellArg(value))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " ") + " "
 }

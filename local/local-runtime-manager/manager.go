@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -23,6 +24,7 @@ type RuntimeManager struct {
 	errOut         io.Writer
 	probeAPI       func(port int, timeout time.Duration) bool
 	probeAuth      func(port int, timeout time.Duration) bool
+	portAvailable  func(port int) bool
 	pollInterval   time.Duration
 	upTimeout      time.Duration
 	downTimeout    time.Duration
@@ -44,6 +46,7 @@ func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
 		errOut:         io.Discard,
 		probeAPI:       processCompose.ProbeAPI,
 		probeAuth:      authServiceHealthAlive,
+		portAvailable:  isLoopbackPortAvailable,
 		pollInterval:   2 * time.Second,
 		upTimeout:      envDuration(localUpTimeoutEnvVar, time.Duration(defaultLocalUpTimeout)*time.Second),
 		downTimeout:    envDuration(localDownTimeoutEnvVar, time.Duration(defaultLocalDownTimeout)*time.Second),
@@ -79,6 +82,9 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := paths.EnsureAllDirs(); err != nil {
 		return err
 	}
+	if err := ensureComposeBindPermissions(paths.RepoRoot); err != nil {
+		return err
+	}
 	state, err := readOrNewState(paths, cfg)
 	if err != nil {
 		return err
@@ -103,6 +109,16 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := m.stopStaleRuntimeIfNeeded(ctx, cfg, paths, state); err != nil {
 		return err
 	}
+	if os.Getenv(processComposePortEnvVar) == "" {
+		port, err := m.selectAvailableProcessComposePort(cfg.ProcessComposePort)
+		if err != nil {
+			return err
+		}
+		cfg.ProcessComposePort = port
+	}
+	if err := m.selectAvailableLocalPorts(&cfg); err != nil {
+		return err
+	}
 
 	token, err := randomHexToken()
 	if err != nil {
@@ -116,7 +132,18 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err != nil {
 		return err
 	}
-	if err := m.processCompose.WriteGeneratedConfig(generatedFile, paths.RepoRoot, cfg.Profile, paths.LogFilePath, paths.LocalProxyLog, paths.AuthServiceLog, paths.FrontendLog, paths.RunDirTokenFile, cfg.ProcessComposePort); err != nil {
+	if err := m.processCompose.WriteGeneratedConfig(
+		generatedFile,
+		paths.RepoRoot,
+		cfg.Profile,
+		paths.LogFilePath,
+		paths.LocalProxyLog,
+		paths.AuthServiceLog,
+		paths.FrontendLog,
+		paths.RunDirTokenFile,
+		cfg.ProcessComposePort,
+		localRuntimeEnv(cfg),
+	); err != nil {
 		_ = generatedFile.Close()
 		return err
 	}
@@ -339,6 +366,92 @@ func (m *RuntimeManager) waitForProcessComposeAPI(ctx context.Context, port int,
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
+}
+
+func (m *RuntimeManager) selectAvailableProcessComposePort(preferred int) (int, error) {
+	if preferred <= 0 {
+		preferred = defaultProcessComposePort
+	}
+	return m.selectAvailablePort(preferred, map[int]struct{}{})
+}
+
+func (m *RuntimeManager) selectAvailableLocalPorts(cfg *RuntimeConfig) error {
+	reserved := map[int]struct{}{cfg.ProcessComposePort: {}}
+	var err error
+	if os.Getenv(frontendPortEnvVar) == "" {
+		cfg.FrontendPort, err = m.selectAvailablePort(cfg.FrontendPort, reserved)
+		if err != nil {
+			return fmt.Errorf("select frontend port: %w", err)
+		}
+		reserved[cfg.FrontendPort] = struct{}{}
+	}
+	if os.Getenv(localProxyPortEnvVar) == "" {
+		cfg.LocalProxy.Port, err = m.selectAvailablePort(cfg.LocalProxy.Port, reserved)
+		if err != nil {
+			return fmt.Errorf("select local proxy port: %w", err)
+		}
+		reserved[cfg.LocalProxy.Port] = struct{}{}
+	}
+	if os.Getenv(localProxyAuthHostPortEnvVar) == "" {
+		cfg.LocalProxy.AuthHostPort, err = m.selectAvailablePort(cfg.LocalProxy.AuthHostPort, reserved)
+		if err != nil {
+			return fmt.Errorf("select auth host port: %w", err)
+		}
+		reserved[cfg.LocalProxy.AuthHostPort] = struct{}{}
+	}
+	if os.Getenv(localProxyCoreHostPortEnvVar) == "" {
+		cfg.LocalProxy.CoreHostPort, err = m.selectAvailablePort(cfg.LocalProxy.CoreHostPort, reserved)
+		if err != nil {
+			return fmt.Errorf("select core host port: %w", err)
+		}
+		reserved[cfg.LocalProxy.CoreHostPort] = struct{}{}
+	}
+	if os.Getenv(localProxyChatHostPortEnvVar) == "" {
+		cfg.LocalProxy.ChatHostPort, err = m.selectAvailablePort(cfg.LocalProxy.ChatHostPort, reserved)
+		if err != nil {
+			return fmt.Errorf("select chat host port: %w", err)
+		}
+		reserved[cfg.LocalProxy.ChatHostPort] = struct{}{}
+	}
+	if os.Getenv(localProxyScanHostPortEnvVar) == "" {
+		cfg.LocalProxy.ScanHostPort, err = m.selectAvailablePort(cfg.LocalProxy.ScanHostPort, reserved)
+		if err != nil {
+			return fmt.Errorf("select scan host port: %w", err)
+		}
+		reserved[cfg.LocalProxy.ScanHostPort] = struct{}{}
+	}
+	if os.Getenv(localProxyEvoHostPortEnvVar) == "" {
+		cfg.LocalProxy.EvoHostPort, err = m.selectAvailablePort(cfg.LocalProxy.EvoHostPort, reserved)
+		if err != nil {
+			return fmt.Errorf("select evo host port: %w", err)
+		}
+		reserved[cfg.LocalProxy.EvoHostPort] = struct{}{}
+	}
+	return nil
+}
+
+func (m *RuntimeManager) selectAvailablePort(preferred int, reserved map[int]struct{}) (int, error) {
+	if preferred <= 0 {
+		return 0, fmt.Errorf("invalid preferred port %d", preferred)
+	}
+	for port := preferred; port < preferred+100 && port < 65536; port++ {
+		if _, ok := reserved[port]; ok {
+			continue
+		}
+		if m.portAvailable(port) {
+			return port, nil
+		}
+	}
+	return 0, fmt.Errorf("no available port found starting at %d", preferred)
+}
+
+func isLoopbackPortAvailable(port int) bool {
+	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		return false
+	}
+	_ = ln.Close()
+	return true
 }
 
 func (m *RuntimeManager) waitForComposeTerminalState(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {

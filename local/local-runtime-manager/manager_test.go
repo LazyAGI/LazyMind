@@ -181,6 +181,25 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 		return CommandResult{Stdout: "auth-service\ncore\nweb\n"}, nil
 	}, func(cmd Command) (CommandResult, error) {
 		call++
+		assertCommand(t, cmd, "docker",
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
+			"--profile", "milvus",
+			"--profile", "opensearch",
+			"config", "--format", "json",
+		)
+		return CommandResult{Stdout: composeConfigJSONFixture(repo)}, nil
+	}, func(cmd Command) (CommandResult, error) {
+		call++
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"build",
+			"-t", "core-image",
+			"-f", filepath.Join(repo, "backend", "core/Dockerfile"),
+		})
+		return CommandResult{}, nil
+	}, func(cmd Command) (CommandResult, error) {
+		call++
 		assertCommandContainsInOrder(t, cmd, "docker", []string{
 			"compose",
 			"-f", filepath.Join(repo, repoComposeFileName),
@@ -188,7 +207,7 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 			"--profile", "milvus",
 			"--profile", "opensearch",
 			"up",
-			"--build",
+			"--no-build",
 			"auth-service", "core", "web",
 		})
 		return CommandResult{}, nil
@@ -201,8 +220,8 @@ func TestComposeUpCommandIsCanonical(t *testing.T) {
 	if err := manager.compose.ComposeUp(context.Background(), paths.RepoRoot, cfg.Profile); err != nil {
 		t.Fatalf("compose up: %v", err)
 	}
-	if call != 2 {
-		t.Fatalf("expected 2 compose calls got %d", call)
+	if call != 4 {
+		t.Fatalf("expected 4 compose calls got %d", call)
 	}
 }
 
@@ -225,8 +244,18 @@ func TestComposeUpExcludesDisabledServicesAndScalesDependencyServices(t *testing
 			"-f", filepath.Join(repo, localComposeOverrideName),
 			"--profile", "milvus",
 			"--profile", "opensearch",
+			"config", "--format", "json",
+		})
+		return CommandResult{Stdout: composeConfigJSONNoBuildFixture()}, nil
+	}, func(cmd Command) (CommandResult, error) {
+		assertCommandContainsInOrder(t, cmd, "docker", []string{
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
+			"--profile", "milvus",
+			"--profile", "opensearch",
 			"up",
-			"--build",
+			"--no-build",
 			"--scale", "redis=0",
 			"--scale", "auth-service=0",
 			"core",
@@ -274,6 +303,7 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 		filepath.Join(repo, "frontend.log"),
 		tokenPath,
 		defaultProcessComposePort,
+		[]string{localProxyPortEnvVar + "=5028"},
 	); err != nil {
 		t.Fatalf("write generated config: %v", err)
 	}
@@ -313,6 +343,9 @@ func TestWriteGeneratedComposeConfig(t *testing.T) {
 	}
 	if !strings.Contains(localProxy.Command, "internal local-proxy-run --profile "+profile) {
 		t.Fatalf("missing local-proxy-run command: %q", localProxy.Command)
+	}
+	if !strings.Contains(localProxy.Command, localProxyPortEnvVar+"=5028") {
+		t.Fatalf("missing selected local proxy port env: %q", localProxy.Command)
 	}
 	if !strings.Contains(localProxy.Shutdown.Command, "internal local-proxy-down --profile "+profile) {
 		t.Fatalf("missing local-proxy-down command: %q", localProxy.Shutdown.Command)
@@ -439,6 +472,16 @@ func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 			"config", "--services",
 		)
 		return CommandResult{Stdout: "auth-service\ncore\n"}, nil
+	}, func(cmd Command) (CommandResult, error) {
+		assertCommand(t, cmd, "docker",
+			"compose",
+			"-f", filepath.Join(repo, repoComposeFileName),
+			"-f", filepath.Join(repo, localComposeOverrideName),
+			"--profile", "milvus",
+			"--profile", "opensearch",
+			"config", "--format", "json",
+		)
+		return CommandResult{Stdout: composeConfigJSONNoBuildFixture()}, nil
 	})
 	runner.streamHandlers = append(runner.streamHandlers, func(cmd Command) error {
 		assertCommandContainsInOrder(t, cmd, "docker", []string{
@@ -448,7 +491,7 @@ func TestComposeUpStreamsDockerComposeLogsWhenSupported(t *testing.T) {
 			"--profile", "milvus",
 			"--profile", "opensearch",
 			"up",
-			"--build",
+			"--no-build",
 			"auth-service",
 			"core",
 		})
@@ -475,6 +518,7 @@ func TestManagerUpWritesStateAndStartsProcessCompose(t *testing.T) {
 	manager.probeAPI = func(port int, timeout time.Duration) bool { return true }
 	manager.probeAuth = func(port int, timeout time.Duration) bool { return true }
 	manager.probeURL = func(url string, timeout time.Duration) bool { return true }
+	manager.portAvailable = func(port int) bool { return true }
 	manager.pollInterval = time.Millisecond
 	manager.upTimeout = time.Second
 	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
@@ -929,6 +973,37 @@ func writeComposeFixture(t *testing.T, repo string) {
 	if err := os.WriteFile(overlay, []byte("# Local Runtime override file\nx-lazymind-local:\n  mode: local\n  disabled_container_services: []\n"), 0o644); err != nil {
 		t.Fatalf("write overlay: %v", err)
 	}
+}
+
+func composeConfigJSONFixture(repo string) string {
+	return fmt.Sprintf(`{
+  "services": {
+    "auth-service": {"image": "auth-image"},
+    "core": {
+      "image": "core-image",
+      "build": {
+        "context": %q,
+        "dockerfile": "core/Dockerfile",
+        "args": {"GOPROXY": "https://goproxy.cn,direct"}
+      }
+    },
+    "web": {"image": "web-image"},
+    "redis": {"image": "redis-image"}
+  }
+}`, filepath.Join(repo, "backend"))
+}
+
+func composeConfigJSONNoBuildFixture() string {
+	return `{
+  "services": {
+    "auth-service": {"image": "auth-image"},
+    "core": {"image": "core-image"},
+    "web": {"image": "web-image"},
+    "redis": {"image": "redis-image"},
+    "evo-api": {"image": "evo-image"},
+    "frontend": {"image": "frontend-image"}
+  }
+}`
 }
 
 func readyComposeStatusJSON() string {
