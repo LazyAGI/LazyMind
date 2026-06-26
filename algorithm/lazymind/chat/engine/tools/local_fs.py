@@ -125,6 +125,15 @@ class LocalFSToolGroup:
         if not self._is_visible_file(scope, path):
             raise PermissionError(f'File extension is not allowed: {path}')
 
+    def _resolve_visible_file(self, path: str) -> Optional[tuple[str, LocalFSScope]]:
+        try:
+            resolved, scope = self._resolve_with_scope(path)
+            if os.path.isfile(resolved) and self._is_visible_file(scope, resolved):
+                return resolved, scope
+        except OSError:
+            return None
+        return None
+
     def _entry(self, path: str, scope: LocalFSScope) -> Dict[str, Any]:
         st = os.stat(path)
         return {
@@ -177,11 +186,14 @@ class LocalFSToolGroup:
         safe_dir, scope = self._resolve_dir(str(path))
         with os.scandir(safe_dir) as iterator:
             for entry in sorted(iterator, key=lambda item: item.name):
-                entry_path, entry_scope = self._resolve_with_scope(entry.path)
-                if entry.is_dir(follow_symlinks=True):
-                    entries.append(self._entry(entry_path, entry_scope))
-                elif entry.is_file(follow_symlinks=True) and self._is_visible_file(entry_scope, entry_path):
-                    entries.append(self._entry(entry_path, entry_scope))
+                try:
+                    entry_path, entry_scope = self._resolve_with_scope(entry.path)
+                    if entry.is_dir(follow_symlinks=True):
+                        entries.append(self._entry(entry_path, entry_scope))
+                    elif entry.is_file(follow_symlinks=True) and self._is_visible_file(entry_scope, entry_path):
+                        entries.append(self._entry(entry_path, entry_scope))
+                except OSError:
+                    continue
                 if len(entries) >= limit:
                     break
 
@@ -206,7 +218,7 @@ class LocalFSToolGroup:
             dict with ``pattern``, ``path``, ``match_count``, ``matches``.
         """
         matches: List[str] = []
-        for safe_dir, scope in self._iter_roots(path):
+        for safe_dir, _scope in self._iter_roots(path):
             if self._has_rg():
                 proc = self._run_rg(['--files', '--glob', pattern], cwd=safe_dir)
                 if proc.returncode > 1:
@@ -216,8 +228,9 @@ class LocalFSToolGroup:
                 py_pattern = pattern if '**' in pattern else f'**/{pattern}'
                 raw = [os.path.join(safe_dir, p) for p in _glob.glob(py_pattern, root_dir=safe_dir, recursive=True)]
             for fpath in raw:
-                resolved, resolved_scope = self._resolve_with_scope(fpath)
-                if os.path.isfile(resolved) and self._is_visible_file(resolved_scope, resolved):
+                visible = self._resolve_visible_file(fpath)
+                if visible:
+                    resolved, _resolved_scope = visible
                     matches.append(resolved)
         matches.sort()
         return tool_success('glob', {
@@ -291,7 +304,10 @@ class LocalFSToolGroup:
                 continue
             data = entry.get('data', {})
             fpath = os.path.join(safe_dir, data.get('path', {}).get('text', ''))
-            resolved, resolved_scope = self._resolve_with_scope(fpath)
+            visible = self._resolve_visible_file(fpath)
+            if not visible:
+                continue
+            resolved, resolved_scope = visible
             if resolved_scope != scope or not self._is_visible_file(scope, resolved):
                 continue
             content = data.get('lines', {}).get('text', '').rstrip()
@@ -328,7 +344,10 @@ class LocalFSToolGroup:
                 if not fnmatch.fnmatch(fn, glob_filter):
                     continue
                 fpath = os.path.join(root, fn)
-                resolved, resolved_scope = self._resolve_with_scope(fpath)
+                visible = self._resolve_visible_file(fpath)
+                if not visible:
+                    continue
+                resolved, resolved_scope = visible
                 if resolved_scope != scope or not self._is_visible_file(scope, resolved):
                     continue
                 try:

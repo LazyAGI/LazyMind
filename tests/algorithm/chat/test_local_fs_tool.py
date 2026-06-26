@@ -77,10 +77,13 @@ def test_local_fs_rejects_symlink_escape(monkeypatch, tmp_path):
     _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['pdf'])])
 
     result = LocalFSToolGroup().read(str(link))
+    listing = LocalFSToolGroup().ls(str(allowed))
 
     assert result['success'] is False
     assert result['tool'] == 'read'
     assert result['error']['type'] == 'PermissionError'
+    assert listing['success'] is True
+    assert listing['result']['entries'] == []
 
 
 def test_local_fs_glob_and_grep_search_multiple_sources_with_extensions(monkeypatch, tmp_path):
