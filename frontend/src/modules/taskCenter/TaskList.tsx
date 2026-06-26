@@ -28,18 +28,25 @@ const STEP_STATUS_COLOR: Record<string, string> = {
 };
 
 function StepsCell({ steps }: { steps: StepInfo[] }) {
-  if (!steps || steps.length === 0) return <span>—</span>;
-  const done = steps.filter((s) => s.status === 'completed' || s.status === 'succeeded').length;
+  if (!steps || steps.length === 0) return <span style={{ color: '#bbb' }}>—</span>;
+
+  // Show up to 2 step tags inline; rest in tooltip.
+  const visibleSteps = steps.slice(0, 2);
+  const hasMore = steps.length > 2;
+
   const tooltipContent = (
-    <div style={{ maxWidth: 320 }}>
+    <div style={{ maxWidth: 340 }}>
       {steps.map((s, i) => (
-        <div key={i} style={{ marginBottom: 4 }}>
-          <Tag color={STEP_STATUS_COLOR[s.status] ?? 'default'} style={{ marginRight: 4 }}>
+        <div key={i} style={{ marginBottom: 6, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+          <Tag
+            color={STEP_STATUS_COLOR[s.status] ?? 'default'}
+            style={{ marginRight: 0, flexShrink: 0, fontSize: 11 }}
+          >
             {s.status}
           </Tag>
-          <span style={{ fontSize: 12 }}>{s.step_id}</span>
+          <span style={{ fontSize: 12, wordBreak: 'break-all' }}>{s.step_id}</span>
           {s.artifact && (
-            <span style={{ fontSize: 11, color: '#888', marginLeft: 4 }}>
+            <span style={{ fontSize: 11, color: '#aaa', marginLeft: 2, flexShrink: 0 }}>
               [{s.artifact}]
             </span>
           )}
@@ -47,11 +54,24 @@ function StepsCell({ steps }: { steps: StepInfo[] }) {
       ))}
     </div>
   );
+
   return (
-    <Tooltip title={tooltipContent}>
-      <span style={{ cursor: 'default' }}>
-        {done}/{steps.length}
-      </span>
+    <Tooltip title={tooltipContent} overlayStyle={{ maxWidth: 380 }}>
+      <div style={{ cursor: 'default', display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+        {visibleSteps.map((s, i) => (
+          <Tag
+            key={i}
+            color={STEP_STATUS_COLOR[s.status] ?? 'default'}
+            style={{ fontSize: 11, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            title={s.step_id}
+          >
+            {s.step_id || s.status}
+          </Tag>
+        ))}
+        {hasMore && (
+          <Tag style={{ fontSize: 11 }}>+{steps.length - 2}</Tag>
+        )}
+      </div>
     </Tooltip>
   );
 }
@@ -164,13 +184,13 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
         },
       },
       {
-        title: t('taskCenter.steps') || '步骤',
+        title: t('taskCenter.steps'),
         dataIndex: 'steps',
-        width: 80,
+        width: 160,
         render: (steps: StepInfo[]) => <StepsCell steps={steps} />,
       },
       {
-        title: 'Status',
+        title: t('taskCenter.statusCol') || '状态',
         dataIndex: 'status',
         width: 110,
         render: (v: string) => (
@@ -209,7 +229,7 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
     <div>
       <Space style={{ marginBottom: 12 }}>
         <Input.Search
-          placeholder={t('taskCenter.searchPlaceholder') || '搜索任务名称'}
+          placeholder={t('taskCenter.searchPlaceholder')}
           value={inputKeyword}
           onChange={(e) => handleInputChange(e.target.value)}
           onSearch={(v) => { setKeyword(v); setPage(1); }}
@@ -223,7 +243,7 @@ export default function TaskList({ scheduleId }: TaskListProps = {}) {
           options={[
             { value: '', label: t('taskCenter.statusAll') },
             { value: 'running', label: t('taskCenter.statusRunning') },
-            { value: 'completed', label: t('taskCenter.statusCompleted') || '已完成' },
+            { value: 'completed', label: t('taskCenter.statusCompleted') },
             { value: 'failed', label: t('taskCenter.statusFailed') },
             { value: 'canceled', label: t('taskCenter.statusCanceled') },
           ]}

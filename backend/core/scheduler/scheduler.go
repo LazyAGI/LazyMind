@@ -246,7 +246,7 @@ func createTaskConversation(ctx context.Context, db *gorm.DB, userID, promptTemp
 	}
 	now := time.Now().UTC()
 	enablePlugin := true
-	pluginMode := "dynamic"
+	pluginMode := "auto"
 	enableSubagent := true
 	conv := orm.Conversation{
 		ID:             "conv_" + common.GenerateID(),

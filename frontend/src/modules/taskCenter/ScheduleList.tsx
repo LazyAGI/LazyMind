@@ -50,6 +50,11 @@ function parseCronExpr(cron: string): { weekdays: number[]; time: dayjs.Dayjs } 
   return { weekdays, time: dayjs().hour(hour).minute(minute).second(0) };
 }
 
+function capitalize(s: string) {
+  if (!s) return '';
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 function describeCron(cron: string): string {
   const { weekdays, time } = parseCronExpr(cron);
   const timeStr = time.format('HH:mm');
@@ -130,6 +135,7 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
    ExpandedScheduleTasks: sub-table for a schedule
 ──────────────────────────────────────────────── */
 function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
+  const { t } = useTranslation();
   const [data, setData] = useState<Task[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -152,20 +158,20 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
 
   const columns: ColumnsType<Task> = [
     {
-      title: '任务名称',
+      title: t('taskCenter.tasks'),
       dataIndex: 'conversation_title',
       render: (v: string, r: Task) => v || r.title || r.conversation_id,
     },
     {
-      title: '状态',
+      title: t('taskCenter.statusCol'),
       dataIndex: 'status',
       width: 90,
-      render: (v: string) => <Tag color={v === 'completed' ? 'green' : v === 'failed' ? 'red' : 'blue'}>{v}</Tag>,
+      render: (v: string) => <Tag color={v === 'completed' ? 'green' : v === 'failed' ? 'red' : 'blue'}>{t(`taskCenter.status${capitalize(v)}`) || v}</Tag>,
     },
     {
-      title: '步骤',
+      title: t('taskCenter.steps'),
       dataIndex: 'steps',
-      width: 70,
+      width: 80,
       render: (steps: Task['steps']) => {
         if (!steps?.length) return '—';
         const done = steps.filter((s) => s.status === 'completed' || s.status === 'succeeded').length;
@@ -173,7 +179,7 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
       },
     },
     {
-      title: '创建时间',
+      title: t('taskCenter.createdAt'),
       dataIndex: 'created_at',
       width: 160,
       render: (v: string) => new Date(v).toLocaleString(),
@@ -291,7 +297,7 @@ export default function ScheduleList() {
 
   const columns: ColumnsType<Schedule> = [
     {
-      title: '任务名称',
+      title: t('taskCenter.scheduleName'),
       dataIndex: 'name',
       render: (v: string, record: Schedule) => {
         const display = v || record.prompt_template?.slice(0, 20) + (record.prompt_template?.length > 20 ? '…' : '');
@@ -303,7 +309,7 @@ export default function ScheduleList() {
       },
     },
     {
-      title: '任务描述',
+      title: t('taskCenter.scheduleDescription'),
       dataIndex: 'prompt_template',
       ellipsis: true,
       render: (v: string) => (
@@ -313,19 +319,19 @@ export default function ScheduleList() {
       ),
     },
     {
-      title: '附件',
+      title: t('taskCenter.scheduleAttachments'),
       dataIndex: 'file_ids',
       width: 60,
       render: (v: string[]) => (v?.length ? `${v.length}` : '—'),
     },
     {
-      title: '触发周期',
+      title: t('taskCenter.scheduleTriggerPeriod'),
       dataIndex: 'cron_expr',
       width: 180,
       render: (v: string) => describeCron(v),
     },
     {
-      title: '执行次数',
+      title: t('taskCenter.scheduleTaskCount'),
       dataIndex: 'run_count',
       width: 90,
       render: (v: number, record: Schedule) => (
@@ -344,13 +350,13 @@ export default function ScheduleList() {
       ),
     },
     {
-      title: 'Next Run',
+      title: t('taskCenter.nextRunAt'),
       dataIndex: 'next_run_at',
       width: 160,
       render: (v: string) => (v ? new Date(v).toLocaleString() : '—'),
     },
     {
-      title: 'Enabled',
+      title: t('taskCenter.enabled'),
       dataIndex: 'enabled',
       width: 70,
       render: (v: boolean) =>
