@@ -82,17 +82,6 @@ services:
     ports:
       - "127.0.0.1:${LAZYMIND_LOCAL_PROXY_EVO_HOST_PORT:-18047}:8047"
 
-  frontend:
-    environment:
-      FRONTEND_API_PROXY_PASS: "http://host.docker.internal:${LAZYMIND_LOCAL_PROXY_PORT:-5024}"
-      FRONTEND_API_DOCS_PROXY_PASS: "http://host.docker.internal:${LAZYMIND_LOCAL_PROXY_PORT:-5024}"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      kong:
-        condition: service_started
-        required: false
-
 x-lazymind-local:
   mode: local
   disabled_container_services:
@@ -100,6 +89,7 @@ x-lazymind-local:
     - kong
     - auth-service
     - evo-api
+    - frontend
   scale_disabled_container_services:
     - redis
     - kong

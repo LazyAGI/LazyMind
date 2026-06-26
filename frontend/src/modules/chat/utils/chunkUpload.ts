@@ -1,5 +1,6 @@
 import { axiosInstance } from "@/components/request";
 import i18n from "@/i18n";
+import { coreApiUrl } from "@/runtime/apiBase";
 import {
   InitUploadRequest,
   InitUploadResponse,
@@ -7,9 +8,6 @@ import {
   CompleteUploadResponse,
   UploadPartResponse,
 } from "@/api/generated/core-client";
-
-const BASE_URL = import.meta.env.VITE_BASE_URL || "";
-const coreApiBaseUrl = `${BASE_URL}/api/core`;
 
 const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024;
 
@@ -47,7 +45,7 @@ export async function uploadFileInChunks(
     };
 
     const initResponse = await axiosInstance.post<InitUploadResponse>(
-      `${coreApiBaseUrl}/temp/uploads:initUpload`,
+      coreApiUrl("temp/uploads:initUpload"),
       initRequest,
       { timeout },
     );
@@ -68,7 +66,7 @@ export async function uploadFileInChunks(
       const chunk = file.slice(start, end);
 
       await axiosInstance.put<UploadPartResponse>(
-        `${coreApiBaseUrl}/temp/uploads/${encodeURIComponent(upload_id)}/parts/${partNumber}`,
+        coreApiUrl(`temp/uploads/${encodeURIComponent(upload_id)}/parts/${partNumber}`),
         chunk,
         {
           headers: {
@@ -96,7 +94,7 @@ export async function uploadFileInChunks(
     };
 
     const completeResponse = await axiosInstance.post<CompleteUploadResponse>(
-      `${coreApiBaseUrl}/temp/uploads/${encodeURIComponent(upload_id)}:complete`,
+      coreApiUrl(`temp/uploads/${encodeURIComponent(upload_id)}:complete`),
       completeRequest,
       { timeout },
     );
@@ -117,7 +115,7 @@ export async function uploadFileInChunks(
 export async function abortUpload(uploadId: string): Promise<void> {
   try {
     await axiosInstance.post(
-      `${coreApiBaseUrl}/temp/uploads/${encodeURIComponent(uploadId)}:abort`,
+      coreApiUrl(`temp/uploads/${encodeURIComponent(uploadId)}:abort`),
       {},
     );
   } catch (error) {

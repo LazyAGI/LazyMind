@@ -3,15 +3,10 @@
  * Compatible with AuthServiceApi login (token stored after username/password login).
  */
 import axios from "axios";
+import { authServiceApiUrl } from "@/runtime/apiBase";
 
 const STORAGE_KEY = "lazymind:user";
 export const AUTH_USER_CHANGE_EVENT = "lazymind:user-change";
-
-const BASE_URL =
-  (typeof import.meta !== "undefined" &&
-    (import.meta as any).env?.VITE_API_BASE_URL) ||
-  (typeof window !== "undefined" && window.location.origin) ||
-  "";
 
 function decodeBase64Url(value: string) {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
@@ -178,7 +173,7 @@ export const AgentAppsAuth = {
       throw new Error("No refresh token available");
     }
 
-    const refreshUrl = `${BASE_URL}/api/authservice/auth/refresh`;
+    const refreshUrl = authServiceApiUrl("auth/refresh");
     
     const refreshAxios = axios.create({
       timeout: 10000,
